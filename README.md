@@ -30,8 +30,8 @@ npm run db:generate   # después de cambiar db/schema.ts
 npm run db:migrate    # aplica las migraciones pendientes contra DATABASE_URL
 ```
 
-**Pendiente (una sola vez):** `db/migrations/` todavía no tiene ninguna migración generada — hace falta correr `npm run db:generate` una vez desde una máquina con Node/npm instalado (este entorno de Claude Code no tiene Node disponible) para crear la primera migración de la tabla `chequeos`.
+Para conectarte a la base real sin exponerla a internet: `railway connect Postgres --tunnel-only --environment production --port 55432` abre un túnel privado (necesita `railway login` y una llave SSH registrada con `railway ssh keys add`) — ahí mismo imprime la URL completa para usar en `DATABASE_URL`.
 
 ## Estado
 
-Fase 1 del plan técnico — repositorio recién creado, en construcción.
+Fase 1 del plan técnico — tarea 1.2 completa (modelo de datos: empresas, usuarios, roles, membresías, permisos_rol, invitaciones, auditoría — las 7 tablas ya están creadas en la base real de staging). Siguiente: tarea 1.3, seguridad por fila (RLS).
