@@ -39,5 +39,5 @@ Para conectarte a la base real sin exponerla a internet: `railway connect Postgr
 
 ## Estado
 
-Fase 1 del plan técnico — tarea 1.3 en construcción (seguridad por fila: el mecanismo ya está escrito — `db/rls-setup.sql`, `db/empresa-context.ts` — falta correrlo contra la base real, ver `docs/rls.md`). Tarea 1.2 completa.
+Fase 1 del plan técnico — tareas 1.1 a 1.4 completas (repo, modelo de datos, seguridad por fila ya corrida contra la base real, prueba automática de aislamiento corriendo en cada PR). Siguiente: tarea 1.5, login con Clerk.
 

@@ -9,6 +9,28 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Tarea 1.4: la prueba de aislamiento (db/rls.test.ts) necesita un
+    # Postgres de verdad con RLS activa — no se puede probar con un
+    # mock, la protección vive en la base misma. Este Postgres es
+    # efímero (vive solo durante esta corrida de CI) y vacío, así que
+    # usar una contraseña fija acá adentro no es un secreto real.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci
+          POSTGRES_DB: railway
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres_ci@localhost:5432/railway
+      DATABASE_URL_APP: postgresql://app_user:app_user_ci@localhost:5432/railway
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,12 +38,11 @@ jobs:
           node-version: "20"
       - run: npm install
       - run: npm run typecheck
+      - name: Aplicar migraciones (db/migrations/)
+        run: npm run db:migrate
+      - name: Activar seguridad por fila (RLS) — contraseña de prueba solo para este Postgres efímero
+        run: |
+          sed 's/PONE_ACA_UNA_CONTRASEÑA_REAL/app_user_ci/' db/rls-setup.sql > /tmp/rls-ci.sql
+          PGPASSWORD=postgres_ci psql -h localhost -U postgres -d railway -f /tmp/rls-ci.sql
       - run: npm test
       - run: npm run build
-        env:
-          # Variables ficticias solo para que el build compile (no se
-          # conecta a nada real en CI) — las reales viven en Railway.
-          # Tarea 1.3: DATABASE_URL_APP es la que usa db/index.ts de
-          # verdad; DATABASE_URL queda solo para db/migrate.ts.
-          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
-          DATABASE_URL_APP: "postgresql://ci:ci@localhost:5432/ci"
