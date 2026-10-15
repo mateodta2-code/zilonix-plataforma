@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { dbComoEmpresa, dbComoInvitacion } from "@/db/empresa-context";
 import { invitaciones, membresias } from "@/db/schema";
 import { asegurarRolDeEmpresa, type NombrePlantilla } from "@/lib/roles";
+import { registrarAuditoria } from "@/lib/auditoria";
 
 const DIAS_VALIDEZ = 7;
 
@@ -36,6 +37,14 @@ export async function crearInvitacion(params: {
       invitadoPor: params.invitadoPor,
       expiraTs,
     });
+    await registrarAuditoria(tx, {
+      empresaId: params.empresaId,
+      usuarioId: params.invitadoPor,
+      actorTipo: "persona",
+      accion: "invitar",
+      entidad: "invitacion",
+      detalle: `Invitó a ${params.email} como ${params.rolNombre}.`,
+    });
   });
 
   return { token };
@@ -68,12 +77,13 @@ export async function obtenerInvitacionPorToken(token: string): Promise<Invitaci
 }
 
 export async function aceptarInvitacion(token: string, usuarioId: string): Promise<{ empresaId: string }> {
-  return dbComoInvitacion(token, usuarioId, async (tx) => {
+  const { empresaId, yaEraMiembro } = await dbComoInvitacion(token, usuarioId, async (tx) => {
     const filas = await tx.select().from(invitaciones).where(eq(invitaciones.token, token));
     if (filas.length === 0) throw new Error("Invitación no encontrada.");
     const inv = filas[0];
     if (inv.expiraTs.getTime() < Date.now()) throw new Error("Esta invitación ya venció.");
 
+    let yaEraMiembro = Boolean(inv.aceptadaTs);
     if (!inv.aceptadaTs) {
       try {
         await tx.insert(membresias).values({ id: randomUUID(), usuarioId, empresaId: inv.empresaId, rolId: inv.rolId });
@@ -82,10 +92,35 @@ export async function aceptarInvitacion(token: string, usuarioId: string): Promi
         // ya era miembro, por ejemplo si volvió a abrir el mismo link.
         // No es un error real, solo no hay nada nuevo que crear.
         if (!(error && typeof error === "object" && "code" in error && error.code === "23505")) throw error;
+        yaEraMiembro = true;
       }
       await tx.update(invitaciones).set({ aceptadaTs: new Date() }).where(eq(invitaciones.id, inv.id));
     }
 
-    return { empresaId: inv.empresaId };
+    return { empresaId: inv.empresaId, yaEraMiembro };
   });
+
+  // Tarea 1.9 — el registro de auditoría se escribe aparte, ya con la
+  // empresa activa de verdad (dbComoEmpresa), no dentro de
+  // dbComoInvitacion(): esa transacción fija empresa_actual a un
+  // UUID centinela (ver db/empresa-context.ts) porque todavía no hay
+  // membresía — escribir ahí obligaría a abrir una política de RLS
+  // nueva en `auditoria` solo para este caso. Acá, inmediatamente
+  // después, quien acaba de aceptar YA es miembro real, así que el
+  // camino normal alcanza. Solo se registra la primera vez que se
+  // acepta, nunca si alguien vuelve a abrir el mismo link.
+  if (!yaEraMiembro) {
+    await dbComoEmpresa(empresaId, (tx) =>
+      registrarAuditoria(tx, {
+        empresaId,
+        usuarioId,
+        actorTipo: "persona",
+        accion: "aceptar_invitacion",
+        entidad: "membresia",
+        detalle: "Se unió a la empresa aceptando una invitación.",
+      })
+    );
+  }
+
+  return { empresaId };
 }

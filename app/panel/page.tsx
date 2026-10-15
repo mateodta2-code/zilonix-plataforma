@@ -14,9 +14,13 @@ import { cambiarEmpresaActiva } from "./actions";
 //
 // Tarea 1.7 — los módulos del nav se filtran por lo que el rol de esta
 // persona puede consultar (ej. el Operador no ve "finanzas"). Solo
-// "finanzas" tiene una pantalla real detrás (app/panel/finanzas) para
-// poder probar esto de verdad; el resto es a propósito un link que
-// todavía no lleva a ningún lado (llegan en Fases 2 y 3).
+// "finanzas" (1.7) y "configuracion" (1.9, la Actividad) tienen una
+// pantalla real detrás; el resto es a propósito un link que todavía
+// no lleva a ningún lado (llegan en Fases 2 y 3).
+const PANTALLA_POR_MODULO: Record<string, string> = {
+  finanzas: "/panel/finanzas",
+  configuracion: "/panel/actividad",
+};
 export default async function PanelPage() {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -48,10 +52,10 @@ export default async function PanelPage() {
       {modulosVisibles.length > 0 && (
         <nav style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
           {modulosVisibles.map((modulo) =>
-            modulo === "finanzas" ? (
+            PANTALLA_POR_MODULO[modulo] ? (
               <Link
                 key={modulo}
-                href="/panel/finanzas"
+                href={PANTALLA_POR_MODULO[modulo]}
                 style={{ padding: "6px 12px", border: "1px solid currentColor", borderRadius: 6, fontSize: 13, textTransform: "capitalize" }}
               >
                 {modulo}

@@ -45,7 +45,7 @@ async function empresaYPermisoDeQuienLlama(formData: FormData) {
   const rolId = String(formData.get("rolId") ?? "");
   if (!rolId) throw new Error("Falta el rol.");
 
-  return { empresa, rolId };
+  return { empresa, rolId, usuarioId: usuario.id };
 }
 
 // Tarea 1.8 — si el formulario agrega un permiso PELIGROSO que el rol
@@ -54,7 +54,7 @@ async function empresaYPermisoDeQuienLlama(formData: FormData) {
 // concedido sin aviso le dio a una "Vendedora" el poder de cambiar la
 // numeración DIAN). Si no hay nada nuevo peligroso, se guarda de una.
 export async function guardarPermisosAction(formData: FormData) {
-  const { empresa, rolId } = await empresaYPermisoDeQuienLlama(formData);
+  const { empresa, rolId, usuarioId } = await empresaYPermisoDeQuienLlama(formData);
 
   const rolActual = await obtenerRolDeEmpresa(empresa.id, rolId);
   if (!rolActual) throw new Error("Rol no encontrado en esta empresa.");
@@ -70,7 +70,7 @@ export async function guardarPermisosAction(formData: FormData) {
     redirect(`/panel/roles/${rolId}/confirmar?pendiente=${encodeURIComponent(codificarPermisos(propuestos))}`);
   }
 
-  await reemplazarPermisosDeRol(empresa.id, rolId, propuestos);
+  await reemplazarPermisosDeRol(empresa.id, rolId, propuestos, usuarioId);
   revalidatePath(`/panel/roles/${rolId}`);
   redirect("/panel/roles");
 }
@@ -79,12 +79,12 @@ export async function guardarPermisosAction(formData: FormData) {
 // permiso (nunca confía en que "ya se mostró la pantalla antes" como
 // si fuera el permiso real) y guarda tal cual lo que venía pendiente.
 export async function confirmarPermisosAction(formData: FormData) {
-  const { empresa, rolId } = await empresaYPermisoDeQuienLlama(formData);
+  const { empresa, rolId, usuarioId } = await empresaYPermisoDeQuienLlama(formData);
 
   const pendiente = String(formData.get("pendiente") ?? "");
   const permisos = decodificarPermisos(pendiente);
 
-  await reemplazarPermisosDeRol(empresa.id, rolId, permisos);
+  await reemplazarPermisosDeRol(empresa.id, rolId, permisos, usuarioId);
   revalidatePath(`/panel/roles/${rolId}`);
   redirect("/panel/roles");
 }
