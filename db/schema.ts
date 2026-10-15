@@ -93,6 +93,14 @@ export const invitaciones = pgTable("invitaciones", {
   empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
   email: text("email").notNull(),
   rolId: uuid("rol_id").notNull().references(() => roles.id, { onDelete: "restrict" }),
+  // Copia del nombre al momento de invitar (tarea 1.7) — a propósito NO
+  // se leen empresas.nombre/roles.nombre en vivo en la pantalla de
+  // "aceptar invitación": quien todavía no es miembro de esa empresa no
+  // tiene (ni debe tener) forma de leer esas tablas por RLS. Evita
+  // abrir una política nueva solo para mostrar un nombre; el token ya
+  // es el único permiso real que hace falta para aceptar.
+  empresaNombre: text("empresa_nombre").notNull(),
+  rolNombre: text("rol_nombre").notNull(),
   token: text("token").notNull().unique(),
   invitadoPor: uuid("invitado_por").notNull().references(() => usuarios.id),
   expiraTs: timestamp("expira_ts", { withTimezone: true }).notNull(),

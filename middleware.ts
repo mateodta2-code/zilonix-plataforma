@@ -8,6 +8,11 @@ const esRutaPublica = createRouteMatcher([
   "/api/version",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  // Tarea 1.7 — quien recibe una invitación por correo todavía no
+  // tiene sesión (puede ni tener cuenta). La propia página valida el
+  // token contra la base (lib/invitaciones.ts) — el permiso real es
+  // ese token, no el middleware.
+  "/invitacion(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

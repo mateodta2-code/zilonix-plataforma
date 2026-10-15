@@ -116,7 +116,17 @@ CREATE POLICY aislamiento_permisos_rol ON permisos_rol
 
 DROP POLICY IF EXISTS aislamiento_invitaciones ON invitaciones;
 CREATE POLICY aislamiento_invitaciones ON invitaciones
-  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+  USING (
+    empresa_id = current_setting('app.empresa_actual', true)::uuid
+    -- Tarea 1.7: quien tiene el token de una invitación puede ver y
+    -- aceptar esa fila puntual, sin ser todavía miembro de la empresa
+    -- (dbComoInvitacion(), db/empresa-context.ts). `token` es texto, no
+    -- uuid — a diferencia de la mitad "usuario_actual" de empresas/
+    -- membresias (tarea 1.6), acá NO hace falta NULLIF: comparar contra
+    -- '' (lo que devuelve current_setting cuando nadie fijó el token)
+    -- nunca revienta, solo da falso, porque nunca es un cast a uuid.
+    OR token = current_setting('app.invitacion_token_actual', true)
+  );
 
 DROP POLICY IF EXISTS aislamiento_auditoria ON auditoria;
 CREATE POLICY aislamiento_auditoria ON auditoria
