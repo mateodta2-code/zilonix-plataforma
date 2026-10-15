@@ -2,11 +2,17 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
-import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { NOMBRES_PLANTILLA } from "@/lib/roles";
+import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { crearInvitacionAction } from "./actions";
 
+// Tarea 1.8 — invitar a alguien es "crear" en el módulo "personas":
+// reemplaza el candado "solo el Dueño puede invitar" de la tarea 1.7
+// por la función única de permisos. El rol "Dueño" sigue siendo el
+// único que lo cumple por defecto (nace con todo sobre todo), pero
+// ahora es porque tiene el permiso, no porque el código lo compara con
+// el texto "Dueño" a mano.
 export default async function InvitarPage() {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -16,11 +22,13 @@ export default async function InvitarPage() {
   const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) redirect("/crear-empresa");
 
-  const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
-  if (miMembresia?.rolNombre !== "Dueño") {
+  try {
+    await requierePermiso(usuario.id, empresa.id, "personas", "crear");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
     return (
       <main style={{ maxWidth: 420, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Solo el Dueño de {empresa.nombre} puede invitar personas.</p>
+        <p>Tu rol no puede invitar personas a {empresa.nombre}.</p>
         <Link href="/panel">Volver al panel</Link>
       </main>
     );
