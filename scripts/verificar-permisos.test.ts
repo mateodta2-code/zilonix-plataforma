@@ -29,7 +29,15 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/roles/[rolId]/page.tsx",
   "app/panel/roles/[rolId]/actions.ts",
   "app/panel/roles/[rolId]/confirmar/page.tsx",
+  "app/panel/soporte/page.tsx",
+  "app/panel/soporte/actions.ts",
 ]);
+
+// Tarea 1.11 — eje de autorización APARTE: "¿esta cuenta es
+// superadmin?" (plataforma entera, no un módulo de una empresa). Toda
+// ruta bajo /superadmin tiene que llamar requiereSuperadmin(), nunca
+// requierePermiso() — son preguntas distintas.
+const RUTAS_SUPERADMIN = new Set(["app/superadmin/page.tsx", "app/superadmin/[empresaId]/page.tsx"]);
 
 // Rutas exentas, cada una con el motivo real por el que no necesita
 // preguntar "¿puede [acción] en [módulo]?".
@@ -63,14 +71,13 @@ function listarArchivosDeRuta(dir: string): string[] {
 
 const archivos = listarArchivosDeRuta(APP_DIR).map((a) => relative(RAIZ, a).replace(/\\/g, "/"));
 
-describe("tarea 1.8 — toda ruta de app/ está clasificada y la protegida de verdad usa requierePermiso()", () => {
+describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candado que dice usar", () => {
   for (const relPath of archivos) {
-    it(`${relPath} está en RUTAS_PROTEGIDAS o en RUTAS_EXENTAS`, () => {
-      const protegida = RUTAS_PROTEGIDAS.has(relPath);
-      const exenta = relPath in RUTAS_EXENTAS;
+    it(`${relPath} está en RUTAS_PROTEGIDAS, RUTAS_SUPERADMIN o RUTAS_EXENTAS`, () => {
+      const clasificada = RUTAS_PROTEGIDAS.has(relPath) || RUTAS_SUPERADMIN.has(relPath) || relPath in RUTAS_EXENTAS;
       expect(
-        protegida || exenta,
-        `${relPath} no está clasificada en scripts/verificar-permisos.test.ts — agrégala a RUTAS_PROTEGIDAS (y que llame requierePermiso()) o a RUTAS_EXENTAS con el motivo real.`
+        clasificada,
+        `${relPath} no está clasificada en scripts/verificar-permisos.test.ts — agrégala a RUTAS_PROTEGIDAS (requierePermiso), RUTAS_SUPERADMIN (requiereSuperadmin) o RUTAS_EXENTAS con el motivo real.`
       ).toBe(true);
     });
   }
@@ -82,9 +89,16 @@ describe("tarea 1.8 — toda ruta de app/ está clasificada y la protegida de ve
     });
   }
 
-  it("ninguna ruta listada (protegida o exenta) quedó de un archivo que ya no existe", () => {
+  for (const relPath of RUTAS_SUPERADMIN) {
+    it(`${relPath} (superadmin) llama requiereSuperadmin() de verdad`, () => {
+      const contenido = readFileSync(join(RAIZ, relPath), "utf8");
+      expect(/requiereSuperadmin\(/.test(contenido), `${relPath} está en RUTAS_SUPERADMIN pero no llama requiereSuperadmin()`).toBe(true);
+    });
+  }
+
+  it("ninguna ruta listada (protegida, superadmin o exenta) quedó de un archivo que ya no existe", () => {
     const vigentes = new Set(archivos);
-    for (const ruta of [...RUTAS_PROTEGIDAS, ...Object.keys(RUTAS_EXENTAS)]) {
+    for (const ruta of [...RUTAS_PROTEGIDAS, ...RUTAS_SUPERADMIN, ...Object.keys(RUTAS_EXENTAS)]) {
       expect(vigentes.has(ruta), `${ruta} está listada pero el archivo ya no existe — bórrala de scripts/verificar-permisos.test.ts`).toBe(true);
     }
   });

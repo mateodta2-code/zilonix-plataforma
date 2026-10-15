@@ -97,6 +97,7 @@ export default async function PanelPage() {
         <div style={{ display: "flex", gap: 16, marginTop: 28, fontSize: 13 }}>
           <Link href="/panel/invitar">+ Invitar persona</Link>
           <Link href="/panel/roles">Ajustar roles</Link>
+          <Link href="/panel/soporte">Acceso de soporte</Link>
         </div>
       )}
 

@@ -34,7 +34,29 @@ export const usuarios = pgTable("usuarios", {
   // Vínculo con Clerk (D3) — el login en sí lo maneja Clerk, acá solo se
   // guarda la referencia. Queda vacío hasta la tarea 1.5.
   clerkUserId: text("clerk_user_id").unique(),
+  // Tarea 1.11 — nadie nace superadmin. Se activa a mano (una fila a
+  // la vez, decisión de Mateo, nunca de Claude Code) directo en la
+  // base, igual que se eligió la contraseña de app_user en la tarea
+  // 1.3 — no hay ninguna pantalla para "hacerse superadmin" solo.
+  esSuperadmin: boolean("es_superadmin").notNull().default(false),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Tarea 1.11 (decisión D8) — el permiso explícito y temporal que una
+// empresa le da al superadmin para ver más que las cifras agregadas.
+// Evidencia real (Olist Tiny, docs/investigacion/olist-tiny.md,
+// sección D): el cliente mismo habilita un "usuário de suporte" que
+// se apaga solo a los 15 días. A Olist le falta decir QUÉ ve ese
+// acceso — por eso `alcance` es texto obligatorio, no un booleano
+// "sí/no" genérico.
+export const accesosTemporales = pgTable("accesos_temporales", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  concedidoPor: uuid("concedido_por").notNull().references(() => usuarios.id),
+  alcance: text("alcance").notNull(),
+  creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  expiraTs: timestamp("expira_ts", { withTimezone: true }).notNull(),
+  revocadoTs: timestamp("revocado_ts", { withTimezone: true }),
 });
 
 // empresaId vacío = plantilla de fábrica, compartida por todas las
