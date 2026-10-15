@@ -1,0 +1,90 @@
+import { readdirSync, readFileSync, statSync } from "fs";
+import { join, relative } from "path";
+import { describe, expect, it } from "vitest";
+
+// Tarea 1.8 — "ruta sin [requierePermiso()] = el CI falla", literal.
+//
+// Primer diseño de esta prueba (descartado): adivinar si un archivo
+// "toca negocio" buscando patrones de texto como `dbComoEmpresa(` o
+// imports de `@/db/schema` EN EL PROPIO ARCHIVO. No sirve: las
+// pantallas de negocio de verdad llaman a lib/roles.ts o
+// lib/invitaciones.ts, que son las que tocan la base por debajo — el
+// propio archivo de la ruta nunca menciona esos patrones, así que la
+// prueba no detectaba nada.
+//
+// Diseño real: TODA ruta de app/ (page.tsx, route.ts, actions.ts)
+// tiene que estar clasificada a mano en una de dos listas — no hay
+// tercera opción, y una ruta nueva sin clasificar hace fallar el CI
+// hasta que alguien la ponga en una de las dos, a propósito.
+const RAIZ = process.cwd();
+const APP_DIR = join(RAIZ, "app");
+
+// Rutas que SÍ deben llamar requierePermiso() en su propio código.
+const RUTAS_PROTEGIDAS = new Set([
+  "app/panel/finanzas/page.tsx",
+  "app/panel/invitar/page.tsx",
+  "app/panel/invitar/actions.ts",
+  "app/panel/roles/page.tsx",
+  "app/panel/roles/[rolId]/page.tsx",
+  "app/panel/roles/[rolId]/actions.ts",
+  "app/panel/roles/[rolId]/confirmar/page.tsx",
+]);
+
+// Rutas exentas, cada una con el motivo real por el que no necesita
+// preguntar "¿puede [acción] en [módulo]?".
+const RUTAS_EXENTAS: Record<string, string> = {
+  "app/page.tsx": "solo lista las empresas propias del usuario para decidir a dónde mandarlo, no lee datos de negocio de ninguna empresa",
+  "app/panel/page.tsx": "solo filtra qué módulos mostrar en el nav (consultar); el módulo de destino exige su propio permiso al entrar",
+  "app/panel/actions.ts": "cambiar la empresa activa ya se revalida contra las membresías reales del usuario, no es un permiso por módulo",
+  "app/crear-empresa/page.tsx": "cualquier usuario con cuenta puede crear su propia empresa — no hay membresía previa que comprobar",
+  "app/crear-empresa/actions.ts": "idem",
+  "app/panel/invitar/listo/page.tsx": "solo muestra un token que crearInvitacionAction ya generó, no vuelve a tocar la base",
+  "app/invitacion/[token]/page.tsx": "el token en la URL es el permiso real (db/empresa-context.ts) — todavía no hay membresía que comprobar",
+  "app/invitacion/[token]/actions.ts": "idem",
+  "app/cuenta/[[...cuenta]]/page.tsx": "solo monta <UserProfile/> de Clerk; no lee ninguna tabla propia",
+  "app/sign-in/[[...sign-in]]/page.tsx": "solo monta <SignIn/> de Clerk",
+  "app/sign-up/[[...sign-up]]/page.tsx": "solo monta <SignUp/> de Clerk",
+  "app/api/version/route.ts": "expone solo el número de versión, nunca datos de ninguna empresa",
+};
+
+function listarArchivosDeRuta(dir: string): string[] {
+  let resultado: string[] = [];
+  for (const nombre of readdirSync(dir)) {
+    const ruta = join(dir, nombre);
+    if (statSync(ruta).isDirectory()) {
+      resultado = resultado.concat(listarArchivosDeRuta(ruta));
+    } else if (/^(page|route|actions)\.tsx?$/.test(nombre)) {
+      resultado.push(ruta);
+    }
+  }
+  return resultado;
+}
+
+const archivos = listarArchivosDeRuta(APP_DIR).map((a) => relative(RAIZ, a).replace(/\\/g, "/"));
+
+describe("tarea 1.8 — toda ruta de app/ está clasificada y la protegida de verdad usa requierePermiso()", () => {
+  for (const relPath of archivos) {
+    it(`${relPath} está en RUTAS_PROTEGIDAS o en RUTAS_EXENTAS`, () => {
+      const protegida = RUTAS_PROTEGIDAS.has(relPath);
+      const exenta = relPath in RUTAS_EXENTAS;
+      expect(
+        protegida || exenta,
+        `${relPath} no está clasificada en scripts/verificar-permisos.test.ts — agrégala a RUTAS_PROTEGIDAS (y que llame requierePermiso()) o a RUTAS_EXENTAS con el motivo real.`
+      ).toBe(true);
+    });
+  }
+
+  for (const relPath of RUTAS_PROTEGIDAS) {
+    it(`${relPath} (protegida) llama requierePermiso() de verdad`, () => {
+      const contenido = readFileSync(join(RAIZ, relPath), "utf8");
+      expect(/requierePermiso\(/.test(contenido), `${relPath} está en RUTAS_PROTEGIDAS pero no llama requierePermiso()`).toBe(true);
+    });
+  }
+
+  it("ninguna ruta listada (protegida o exenta) quedó de un archivo que ya no existe", () => {
+    const vigentes = new Set(archivos);
+    for (const ruta of [...RUTAS_PROTEGIDAS, ...Object.keys(RUTAS_EXENTAS)]) {
+      expect(vigentes.has(ruta), `${ruta} está listada pero el archivo ya no existe — bórrala de scripts/verificar-permisos.test.ts`).toBe(true);
+    }
+  });
+});

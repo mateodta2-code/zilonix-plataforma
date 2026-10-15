@@ -2,10 +2,13 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
-import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { listarRolesDeEmpresa } from "@/lib/roles";
+import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 
+// Tarea 1.8 — ajustar roles es "autorizar" en "configuracion" (dar o
+// quitar permisos es, por definición, un acto de autorización).
+// Reemplaza el candado "solo el Dueño" de la tarea 1.7.
 export default async function RolesPage() {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -15,11 +18,13 @@ export default async function RolesPage() {
   const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) redirect("/crear-empresa");
 
-  const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
-  if (miMembresia?.rolNombre !== "Dueño") {
+  try {
+    await requierePermiso(usuario.id, empresa.id, "configuracion", "autorizar");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
     return (
       <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Solo el Dueño de {empresa.nombre} puede ajustar los roles.</p>
+        <p>Tu rol no puede ajustar los roles de {empresa.nombre}.</p>
         <Link href="/panel">Volver al panel</Link>
       </main>
     );
