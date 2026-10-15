@@ -53,11 +53,16 @@ describe("aislamiento entre empresas (RLS)", () => {
     expect(sigueViva).toHaveLength(1);
   });
 
-  it("sin empresa activa (contexto vacío) no se ve ninguna fila — cerrado por defecto", async () => {
-    // Consulta directa, sin pasar por dbComoEmpresa(): nunca se fijó
-    // app.empresa_actual, así que la política no deja ver nada.
-    const nada = await db.select().from(empresas).where(eq(empresas.id, empresaAId));
-    expect(nada).toHaveLength(0);
+  it("sin empresa activa (contexto vacío), la consulta falla en vez de mostrar algo — cerrado por defecto", async () => {
+    // Confirmado en vivo (CI, 14/10/2026): sin dbComoEmpresa(), Postgres
+    // no devuelve "cero filas" en silencio — current_setting(...)::uuid
+    // revienta con "invalid input syntax for type uuid" porque la
+    // variable queda vacía, no nula. Es un fallo MÁS estricto que un
+    // simple "no hay filas": un error ruidoso y visible, no uno
+    // silencioso que alguien podría no notar nunca. Eso es lo que se
+    // prueba acá — que de verdad truene, no que "parezca que no hay
+    // nada" por otra razón.
+    await expect(db.select().from(empresas).where(eq(empresas.id, empresaAId))).rejects.toThrow();
   });
 
   describe("mismo aislamiento en una tabla con empresa_id (no solo en empresas)", () => {

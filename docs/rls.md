@@ -10,11 +10,15 @@ Explicado simple: aunque un pedazo de código se olvide de filtrar "solo lo de e
 
 3. **La app le dice a Postgres cuál es "la empresa activa" al empezar cada operación**, y esa marca se borra sola al terminar — nunca se queda pegada por accidente a la siguiente petición (eso sería un error gravísimo, es justo lo que se evitó a propósito).
 
-## Qué falta para que quede activo de verdad
+## Qué pasa si alguien se olvida de fijar la empresa activa
 
-Este mecanismo ya está escrito en el código (`db/rls-setup.sql`, `db/empresa-context.ts`, `db/index.ts`), pero **todavía no se corrió contra la base real** — necesita una contraseña nueva que Claude Code nunca debe ver ni generar.
+Confirmado en vivo (prueba de aislamiento, tarea 1.4): si una consulta pasa por la conexión segura **sin** pasar por `dbComoEmpresa()`, Postgres no dice "no hay nada" en silencio — la consulta directamente **falla con un error**. Es a propósito más estricto que "cero resultados": un error se nota de inmediato (se cae la pantalla, salta en los logs); "cero resultados" se puede confundir con "esta empresa no tiene datos todavía" y pasar desapercibido mucho tiempo. Un error ruidoso es la forma más segura de fallar acá.
 
-### Instrucciones para Cowork
+## Estado — ya corrido contra la base real
+
+Este mecanismo ya está escrito en el código (`db/rls-setup.sql`, `db/empresa-context.ts`, `db/index.ts`) y ya se corrió contra la base real de Railway (Cowork, 14/10/2026) — `app_user` creado, RLS activa y forzada en las 6 tablas, `DATABASE_URL_APP` configurada. La prueba automática (`db/rls.test.ts`, tarea 1.4) confirma el aislamiento real en cada Pull Request.
+
+### Instrucciones para Cowork (referencia — ya se corrieron una vez; sirven de nuevo si se rearma la base desde cero)
 
 1. Abrir el túnel privado a la base (ver `README.md`, sección de migraciones).
 2. Conectarse con `psql` a la URL que imprime el túnel.
