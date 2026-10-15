@@ -76,3 +76,39 @@ export async function dbComoUsuario<T>(usuarioId: string, fn: (tx: typeof db) =>
     return fn(tx as unknown as typeof db);
   });
 }
+
+// Tarea 1.7 — quien recibe una invitación por correo todavía NO es
+// miembro de esa empresa (es justo lo que está por decidir). No hay
+// forma de leer su fila de `invitaciones` con dbComoEmpresa() (no tiene
+// empresa activa) ni con dbComoUsuario() (la invitación puede ser para
+// alguien que ni siquiera tiene cuenta todavía, antes de aceptar).
+//
+// La política nueva de `invitaciones` (ver db/rls-setup.sql) agrega una
+// tercera vía, totalmente aparte de empresa_actual/usuario_actual:
+// quien tiene el TOKEN (un secreto largo e imposible de adivinar,
+// generado al invitar) puede ver y aceptar esa fila puntual — ni una
+// más. Es el mismo principio que un link mágico de recuperación de
+// acceso: el secreto en la URL ES el permiso, no hace falta ser ya
+// miembro de nada para demostrarlo.
+//
+// usuarioId es opcional: la vista previa de la invitación (antes de
+// iniciar sesión) solo necesita leer la fila por token; aceptarla sí
+// necesita además `usuario_actual` fijado, porque crea una membresía
+// para ESE usuario (política de membresias de la tarea 1.6).
+export async function dbComoInvitacion<T>(
+  token: string,
+  usuarioId: string | null,
+  fn: (tx: typeof db) => Promise<T>
+): Promise<T> {
+  if (usuarioId && !UUID_RE.test(usuarioId)) {
+    throw new Error(`usuarioId inválido: "${usuarioId}" no es un UUID.`);
+  }
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.empresa_actual', ${EMPRESA_SENTINEL}, true)`);
+    await tx.execute(sql`SELECT set_config('app.invitacion_token_actual', ${token}, true)`);
+    if (usuarioId) {
+      await tx.execute(sql`SELECT set_config('app.usuario_actual', ${usuarioId}, true)`);
+    }
+    return fn(tx as unknown as typeof db);
+  });
+}
