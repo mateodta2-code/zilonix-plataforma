@@ -39,5 +39,5 @@ Para conectarte a la base real sin exponerla a internet: `railway connect Postgr
 
 ## Estado
 
-Fase 1 del plan técnico — tareas 1.1 a 1.4 completas (repo, modelo de datos, seguridad por fila ya corrida contra la base real, prueba automática de aislamiento corriendo en cada PR). Siguiente: tarea 1.5, login con Clerk.
+Fase 1 del plan técnico — tareas 1.1 a 1.5 (repo, modelo de datos, seguridad por fila, prueba de aislamiento, login con Clerk). Siguiente: tarea 1.6, empresas y cambio de empresa (ahí se conecta el usuario de Clerk con nuestras tablas).
 

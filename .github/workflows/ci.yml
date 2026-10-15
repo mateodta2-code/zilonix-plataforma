@@ -31,6 +31,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres_ci@localhost:5432/railway
       DATABASE_URL_APP: postgresql://app_user:app_user_ci@localhost:5432/railway
+      # Tarea 1.5: llaves de Clerk ficticias, solo para que el build
+      # compile en CI — no son cuentas reales, no sirven para nada fuera
+      # de esta corrida. Las reales viven en Railway.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZmFrZS1jaS1rZXkuY2xlcmsuYWNjb3VudHMuZGV2JA"
+      CLERK_SECRET_KEY: "sk_test_fakecikeyfakecikeyfakecikeyfakecikey00"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
