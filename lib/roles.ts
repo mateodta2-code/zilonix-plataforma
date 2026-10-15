@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { permisosRol, roles } from "@/db/schema";
+import { registrarAuditoria } from "@/lib/auditoria";
 
 // Tarea 1.8 — los datos puros (módulos, acciones, plantillas, permisos
 // peligrosos) viven en lib/roles-plantillas.ts, sin ningún import de
@@ -75,7 +76,12 @@ export async function obtenerRolDeEmpresa(empresaId: string, rolId: string): Pro
 // formulario — más simple y menos propenso a error que calcular un
 // diff casilla por casilla. "Dueño" nunca se puede editar desde acá:
 // siempre tiene TODO sobre TODO por definición.
-export async function reemplazarPermisosDeRol(empresaId: string, rolId: string, permisos: Permiso[]): Promise<void> {
+export async function reemplazarPermisosDeRol(
+  empresaId: string,
+  rolId: string,
+  permisos: Permiso[],
+  usuarioId: string
+): Promise<void> {
   await dbComoEmpresa(empresaId, async (tx) => {
     const [rol] = await tx.select().from(roles).where(and(eq(roles.id, rolId), eq(roles.empresaId, empresaId)));
     if (!rol) throw new Error("Rol no encontrado en esta empresa.");
@@ -85,5 +91,14 @@ export async function reemplazarPermisosDeRol(empresaId: string, rolId: string, 
     if (permisos.length > 0) {
       await tx.insert(permisosRol).values(permisos.map((p) => ({ id: randomUUID(), rolId, ...p })));
     }
+
+    await registrarAuditoria(tx, {
+      empresaId,
+      usuarioId,
+      actorTipo: "persona",
+      accion: "cambiar_permisos",
+      entidad: "rol",
+      detalle: `Permisos de "${rol.nombre}" actualizados (${permisos.length} permiso${permisos.length === 1 ? "" : "s"} activos).`,
+    });
   });
 }

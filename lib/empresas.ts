@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { dbComoEmpresa, dbComoUsuario } from "@/db/empresa-context";
 import { empresas, membresias, permisosRol, roles } from "@/db/schema";
 import { permisosDeDueno } from "@/lib/roles";
+import { registrarAuditoria } from "@/lib/auditoria";
 
 export type EmpresaDeUsuario = { id: string; nombre: string; nit: string };
 
@@ -39,6 +40,14 @@ export async function crearEmpresaConDueno(usuarioId: string, nombre: string, ni
       .insert(permisosRol)
       .values(permisosDeDueno().map((p) => ({ id: randomUUID(), rolId: rolDuenoId, ...p })));
     await tx.insert(membresias).values({ id: randomUUID(), usuarioId, empresaId, rolId: rolDuenoId });
+    await registrarAuditoria(tx, {
+      empresaId,
+      usuarioId,
+      actorTipo: "persona",
+      accion: "crear",
+      entidad: "empresa",
+      detalle: `Empresa "${nombre}" (NIT ${nit}) creada.`,
+    });
   });
 
   return empresaId;

@@ -22,6 +22,7 @@ const APP_DIR = join(RAIZ, "app");
 // Rutas que SÍ deben llamar requierePermiso() en su propio código.
 const RUTAS_PROTEGIDAS = new Set([
   "app/panel/finanzas/page.tsx",
+  "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
   "app/panel/invitar/actions.ts",
   "app/panel/roles/page.tsx",
