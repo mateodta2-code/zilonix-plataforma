@@ -16,6 +16,11 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(e);
+  // Tarea 1.10 — "logs que tachan tokens y datos personales": nunca
+  // se imprime el error completo. Algunos drivers de Postgres pueden
+  // meter la query o datos de conexión dentro del objeto de error
+  // completo; `.message` es lo único que de verdad hace falta para
+  // diagnosticar una migración fallida.
+  console.error(e instanceof Error ? e.message : "Error desconocido al migrar.");
   process.exit(1);
 });
