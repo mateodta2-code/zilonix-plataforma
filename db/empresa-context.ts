@@ -39,3 +39,40 @@ export async function dbComoEmpresa<T>(empresaId: string, fn: (tx: typeof db) =>
 //
 //   const nuevaId = crypto.randomUUID();
 //   await dbComoEmpresa(nuevaId, (tx) => tx.insert(empresas).values({ id: nuevaId, ... }));
+
+// Tarea 1.6 — el selector de cambio de empresa necesita, antes de que
+// el usuario elija ninguna, la lista de TODAS las empresas donde tiene
+// membresía. dbComoEmpresa() no sirve para esto: su política solo deja
+// ver UNA empresa a la vez (la que esté activa), y la lista es
+// justamente "en cuáles estoy" — todavía no hay ninguna activa.
+//
+// La solución (ver db/rls-setup.sql, políticas aislamiento_empresas y
+// aislamiento_membresias) es una regla aparte, independiente de
+// app.empresa_actual: un usuario siempre puede ver SUS PROPIAS filas de
+// membresía (en cualquier empresa) y las empresas a las que esas
+// membresías apuntan — nunca las membresías de otra persona. No es una
+// fuga entre empresas: lo único que se expone es "a qué empresas
+// pertenezco yo", que es exactamente el dato que el selector necesita
+// mostrar.
+//
+// EMPRESA_SENTINEL: la mitad "empresa_actual" de esas políticas sigue
+// con el cast directo `current_setting(...)::uuid` que ya prueba 1.4
+// (revienta fuerte si nadie fijó ninguna empresa — eso NO cambia). Para
+// que esa mitad no reviente cuando lo único que se fijó es el usuario
+// (no una empresa activa todavía), se fija un UUID que ninguna empresa
+// real puede tener — empresas.id usa defaultRandom() (gen_random_uuid),
+// que nunca genera el UUID de puros ceros — así esa mitad de la política
+// evalúa a "ninguna fila" en vez de tronar, y la mitad "usuario_actual"
+// es la que de verdad filtra.
+const EMPRESA_SENTINEL = "00000000-0000-0000-0000-000000000000";
+
+export async function dbComoUsuario<T>(usuarioId: string, fn: (tx: typeof db) => Promise<T>): Promise<T> {
+  if (!UUID_RE.test(usuarioId)) {
+    throw new Error(`usuarioId inválido: "${usuarioId}" no es un UUID.`);
+  }
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.empresa_actual', ${EMPRESA_SENTINEL}, true)`);
+    await tx.execute(sql`SELECT set_config('app.usuario_actual', ${usuarioId}, true)`);
+    return fn(tx as unknown as typeof db);
+  });
+}
