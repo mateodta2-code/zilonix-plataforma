@@ -9,8 +9,9 @@
 -- Cómo correrlo: con el túnel privado abierto (railway connect Postgres
 -- --tunnel-only), conectarse con psql a la URL que imprime el túnel y
 -- pegar este script completo, DESPUÉS de reemplazar
--- 'PONE_ACA_UNA_CONTRASEÑA_REAL' por una contraseña real, elegida por
--- quien lo corre (nunca por Claude Code). Si app_user ya existe (porque
+-- 'PONE_ACA_UNA_CONTRASEÑA_REAL' y 'PONE_ACA_OTRA_CONTRASEÑA_REAL' (tarea
+-- 1.11, abajo) por contraseñas reales, DISTINTAS entre sí, elegidas por
+-- quien lo corre (nunca por Claude Code). Si el usuario ya existe (porque
 -- ya se corrió antes), esa contraseña nueva no se usa para nada — se
 -- salta la creación y sigue derecho con los permisos y las políticas.
 
@@ -26,11 +27,28 @@ END $$;
 GRANT CONNECT ON DATABASE railway TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-  empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria
+  empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria, accesos_temporales
   TO app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
 -- "serial" en el esquema — no existe ninguna secuencia que otorgar.
+
+-- 1b) Tarea 1.11 (decisión D8) — segundo usuario de base, aparte y más
+-- limitado: el panel superadmin NUNCA se conecta con app_user. Solo
+-- lectura de lo agregado (nunca INSERT/UPDATE/DELETE de datos de una
+-- empresa) + permiso de ESCRIBIR su propio rastro en auditoria (nunca
+-- de leerlo de vuelta — ver detalle con permiso queda registrado, pero
+-- el superadmin no puede revisar ni borrar ese registro él mismo).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'superadmin_user') THEN
+    CREATE ROLE superadmin_user WITH LOGIN PASSWORD 'PONE_ACA_OTRA_CONTRASEÑA_REAL';
+  END IF;
+END $$;
+GRANT CONNECT ON DATABASE railway TO superadmin_user;
+GRANT USAGE ON SCHEMA public TO superadmin_user;
+GRANT SELECT ON empresas, membresias, roles, usuarios, accesos_temporales TO superadmin_user;
+GRANT INSERT ON auditoria TO superadmin_user;
 
 -- 2) Seguridad por fila — se activa por tabla, y se FUERZA también para
 -- el dueño de la tabla (sin el FORCE, el dueño de la tabla se salta la
@@ -48,6 +66,8 @@ ALTER TABLE invitaciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invitaciones FORCE ROW LEVEL SECURITY;
 ALTER TABLE auditoria ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auditoria FORCE ROW LEVEL SECURITY;
+ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 
 -- La tabla "usuarios" NO lleva RLS por empresa: una persona puede estar
 -- en varias empresas (decisión D2), así que no tiene una sola
@@ -132,10 +152,45 @@ DROP POLICY IF EXISTS aislamiento_auditoria ON auditoria;
 CREATE POLICY aislamiento_auditoria ON auditoria
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
--- Nota real (decisión D8, 14/10/2026): el acceso del superadmin a las
--- cifras agregadas de negocio (facturación, zona de venta) de CUALQUIER
--- empresa NO se resuelve acá — esta tarea (1.3) solo aísla una empresa
--- de otra para el tráfico normal de la app. El acceso de superadmin usa
--- su propio rol de base de datos, separado, con sus propias políticas
--- más permisivas sobre tablas agregadas — eso es la tarea 1.11, todavía
--- no construida.
+DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;
+CREATE POLICY aislamiento_accesos_temporales ON accesos_temporales
+  -- Tráfico normal (app_user, Dueño gestionando sus propios accesos
+  -- concedidos): mismo patrón que toda tabla de negocio.
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- 4) Tarea 1.11 (decisión D8) — políticas de superadmin_user. Son
+-- políticas APARTE, con TO superadmin_user: no reemplazan ni debilitan
+-- ninguna de arriba (esas siguen aplicando igual a app_user, que nunca
+-- las cumple si se conecta como superadmin_user por error, porque
+-- jamás fija app.empresa_actual). Con RLS, dos políticas permisivas se
+-- combinan con OR — por eso alcanza con agregar la de superadmin_user
+-- sin tocar la de app_user.
+--
+-- A propósito, solo SELECT y solo sobre lo que ya es agregado o es
+-- metadato de permiso (no hay ninguna tabla de "comprador final"
+-- todavía — llega en Fase 2; cuando llegue, esa tabla NO entra en esta
+-- lista hasta que se decida cómo aplica el acceso temporal sobre ella).
+DROP POLICY IF EXISTS superadmin_ve_empresas ON empresas;
+CREATE POLICY superadmin_ve_empresas ON empresas FOR SELECT TO superadmin_user USING (true);
+
+DROP POLICY IF EXISTS superadmin_ve_membresias ON membresias;
+CREATE POLICY superadmin_ve_membresias ON membresias FOR SELECT TO superadmin_user USING (true);
+
+DROP POLICY IF EXISTS superadmin_ve_roles ON roles;
+CREATE POLICY superadmin_ve_roles ON roles FOR SELECT TO superadmin_user USING (true);
+
+DROP POLICY IF EXISTS superadmin_ve_accesos_temporales ON accesos_temporales;
+CREATE POLICY superadmin_ve_accesos_temporales ON accesos_temporales FOR SELECT TO superadmin_user USING (true);
+
+-- El detalle de quién trabaja en una empresa (usuarios.nombre/email)
+-- SÍ exige el acceso temporal de la empresa — pero ese candado vive en
+-- la aplicación (lib/superadmin.ts, requiereAccesoTemporal()), no
+-- acá: `usuarios` nunca tuvo RLS (tarea 1.3, puede estar en varias
+-- empresas) y no le vamos a agregar ahora solo para esto. El límite
+-- real que SÍ pone la base es que superadmin_user nunca puede
+-- escribir nada de negocio (solo tiene SELECT, nunca INSERT/UPDATE/
+-- DELETE en ninguna tabla de empresas) y que cada vista de detalle
+-- queda escrita en auditoria sin que superadmin_user pueda editarla
+-- ni borrarla después.
+DROP POLICY IF EXISTS superadmin_escribe_auditoria ON auditoria;
+CREATE POLICY superadmin_escribe_auditoria ON auditoria FOR INSERT TO superadmin_user WITH CHECK (true);

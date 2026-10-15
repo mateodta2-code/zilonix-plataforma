@@ -31,6 +31,10 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres_ci@localhost:5432/railway
       DATABASE_URL_APP: postgresql://app_user:app_user_ci@localhost:5432/railway
+      # Tarea 1.11: segundo usuario de base, aparte, solo lectura de lo
+      # agregado — mismo criterio que arriba, contraseña fija solo
+      # porque este Postgres muere al terminar la corrida.
+      DATABASE_URL_SUPERADMIN: postgresql://superadmin_user:superadmin_user_ci@localhost:5432/railway
       # Tarea 1.5: llaves de Clerk ficticias, solo para que el build
       # compile en CI — no son cuentas reales, no sirven para nada fuera
       # de esta corrida. Las reales viven en Railway.
@@ -45,9 +49,9 @@ jobs:
       - run: npm run typecheck
       - name: Aplicar migraciones (db/migrations/)
         run: npm run db:migrate
-      - name: Activar seguridad por fila (RLS) — contraseña de prueba solo para este Postgres efímero
+      - name: Activar seguridad por fila (RLS) — contraseñas de prueba solo para este Postgres efímero
         run: |
-          sed 's/PONE_ACA_UNA_CONTRASEÑA_REAL/app_user_ci/' db/rls-setup.sql > /tmp/rls-ci.sql
+          sed -e 's/PONE_ACA_UNA_CONTRASEÑA_REAL/app_user_ci/' -e 's/PONE_ACA_OTRA_CONTRASEÑA_REAL/superadmin_user_ci/' db/rls-setup.sql > /tmp/rls-ci.sql
           PGPASSWORD=postgres_ci psql -h localhost -U postgres -d railway -f /tmp/rls-ci.sql
       - run: npm test
       - run: npm run build
