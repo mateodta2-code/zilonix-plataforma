@@ -32,6 +32,11 @@ npm run db:migrate    # aplica las migraciones pendientes contra DATABASE_URL
 
 Para conectarte a la base real sin exponerla a internet: `railway connect Postgres --tunnel-only --environment production --port 55432` abre un túnel privado (necesita `railway login` y una llave SSH registrada con `railway ssh keys add`) — ahí mismo imprime la URL completa para usar en `DATABASE_URL`.
 
+## Dos conexiones a la base, a propósito (tarea 1.3)
+
+- `DATABASE_URL` — el usuario con privilegios totales que da Railway. **Solo** para `npm run db:migrate`. La app nunca lo usa para consultas de negocio.
+- `DATABASE_URL_APP` — un usuario restringido (`app_user`) que sí respeta la seguridad por fila (RLS). Es el que usa `db/index.ts`, el único que el resto del código debe importar. Ver `docs/rls.md` para cómo se crea (necesita una contraseña real, se hace a mano, nunca en un archivo de git).
+
 ## Estado
 
-Fase 1 del plan técnico — tarea 1.2 completa (modelo de datos: empresas, usuarios, roles, membresías, permisos_rol, invitaciones, auditoría — las 7 tablas ya están creadas en la base real de staging). Siguiente: tarea 1.3, seguridad por fila (RLS).
+Fase 1 del plan técnico — tarea 1.3 en construcción (seguridad por fila: el mecanismo ya está escrito — `db/rls-setup.sql`, `db/empresa-context.ts` — falta correrlo contra la base real, ver `docs/rls.md`). Tarea 1.2 completa.

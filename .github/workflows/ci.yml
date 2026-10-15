@@ -21,4 +21,7 @@ jobs:
         env:
           # Variables ficticias solo para que el build compile (no se
           # conecta a nada real en CI) — las reales viven en Railway.
+          # Tarea 1.3: DATABASE_URL_APP es la que usa db/index.ts de
+          # verdad; DATABASE_URL queda solo para db/migrate.ts.
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+          DATABASE_URL_APP: "postgresql://ci:ci@localhost:5432/ci"

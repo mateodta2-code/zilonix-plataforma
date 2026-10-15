@@ -105,6 +105,7 @@ empresas ──┬── membresias ──── usuarios
 
 ## Lo que falta para que esto funcione seguro (próximas tareas, no esta)
 
-- **Seguridad por fila (RLS)** en Postgres, para que aunque el código se equivoque, la base misma nunca entregue datos de otra empresa — tarea 1.3.
+- ~~**Seguridad por fila (RLS)** en Postgres~~ — tarea 1.3, mecanismo construido (ver `docs/rls.md`); falta correr `db/rls-setup.sql` a mano contra la base real y la tarea 1.4 confirmándolo con una prueba automática.
 - **Prueba automática de aislamiento** (empresa A nunca puede ver empresa B) — tarea 1.4.
 - **Login de verdad con Clerk** (hoy `clerk_user_id` es solo un campo vacío, esperando la integración) — tarea 1.5.
+- **Decisión D8 (14/10/2026)**: el acceso del superadmin a cifras agregadas de negocio (no al detalle del comprador) de cualquier empresa es un mecanismo APARTE del de esta tabla — usa su propio rol de base de datos con sus propias políticas, más permisivo solo sobre las tablas agregadas. Se construye en la tarea 1.11, no acá.
