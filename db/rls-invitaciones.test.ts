@@ -79,6 +79,37 @@ describe("invitaciones por token (RLS, tarea 1.7)", () => {
     expect(membresia).toHaveLength(1);
   });
 
+  it("una SEGUNDA invitación distinta a la misma empresa, para quien ya es miembro, no revienta la transacción", async () => {
+    // Tarea 1.12 — bug real encontrado en vivo en staging: esto es
+    // distinto al test de "aceptarla de nuevo" de arriba. Ahí
+    // aceptadaTs YA estaba puesto en la MISMA fila, así que el insert
+    // ni se intentaba. Acá es una invitación NUEVA (token distinto,
+    // aceptadaTs todavía null) a la MISMA empresa para alguien que ya
+    // es miembro por otro camino — el insert SÍ se intenta, choca con
+    // la restricción única, y ahí es donde un try/catch sin savepoint
+    // dejaba la transacción envenenada y el UPDATE de después también
+    // fallaba.
+    const { token: tokenSegunda } = await crearInvitacion({
+      empresaId: empresaAId,
+      empresaNombre: "Empresa A (prueba 1.7)",
+      email: "invitado-1.7-otra-vez@zilonix.test",
+      rolNombre: "Contador",
+      invitadoPor: usuarioInvitadoId,
+    });
+
+    await expect(aceptarInvitacion(tokenSegunda, usuarioInvitadoId)).resolves.toEqual({ empresaId: empresaAId });
+
+    const membresia = await dbComoEmpresa(empresaAId, (tx) =>
+      tx.select().from(membresias).where(eq(membresias.usuarioId, usuarioInvitadoId))
+    );
+    expect(membresia).toHaveLength(1); // sigue siendo una sola, no duplicada
+
+    const invitacionSegunda = await dbComoInvitacion(tokenSegunda, null, (tx) =>
+      tx.select().from(invitaciones).where(eq(invitaciones.token, tokenSegunda))
+    );
+    expect(invitacionSegunda[0].aceptadaTs).not.toBeNull(); // el UPDATE sí corrió
+  });
+
   it("una invitación ya vencida no se puede aceptar", async () => {
     const { token: tokenVencido } = await crearInvitacion({
       empresaId: empresaAId,
