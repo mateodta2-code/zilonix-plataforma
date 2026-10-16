@@ -17,10 +17,19 @@ export default function InvitacionListaPage({ searchParams }: { searchParams: { 
       <h1 style={{ fontSize: 24, fontWeight: 700 }}>Invitación generada</h1>
       <p style={{ opacity: 0.7, fontSize: 14 }}>Comparte este link con la persona — solo funciona una vez y vence en 7 días.</p>
       {link ? (
+        // Tarea 1.12 — bug real encontrado en vivo en staging: esto es
+        // un Server Component (sin "use client"), y un <input> con
+        // onFocus ahí reventaba en producción ("Event handlers cannot
+        // be passed to Client Component props") justo al generar una
+        // invitación — ni el build ni el typecheck lo atraparon,
+        // porque esta ruta es dinámica y nunca se renderizó de verdad
+        // hasta que alguien hizo clic en "Generar invitación". Se
+        // quita el onFocus (era solo una comodidad de selección
+        // automática al hacer clic, no hacía falta una pantalla
+        // cliente aparte solo para esto).
         <input
           readOnly
           value={link}
-          onFocus={(e) => e.currentTarget.select()}
           style={{ display: "block", width: "100%", padding: 10, marginTop: 16, fontFamily: "monospace", fontSize: 13 }}
         />
       ) : (
