@@ -86,7 +86,19 @@ export async function aceptarInvitacion(token: string, usuarioId: string): Promi
     let yaEraMiembro = Boolean(inv.aceptadaTs);
     if (!inv.aceptadaTs) {
       try {
-        await tx.insert(membresias).values({ id: randomUUID(), usuarioId, empresaId: inv.empresaId, rolId: inv.rolId });
+        // Tarea 1.12 — bug real encontrado en vivo en staging: un
+        // try/catch de JavaScript alrededor de este insert NO alcanza
+        // a "perdonar" el choque con la restricción única — Postgres
+        // deja TODA la transacción envenenada en cuanto una sentencia
+        // falla (hay que hacer ROLLBACK o ROLLBACK TO SAVEPOINT, un
+        // catch de JS no lo deshace solo), así que el UPDATE de abajo
+        // también reventaba. tx.transaction(...) anidado SÍ crea un
+        // SAVEPOINT real en Drizzle (node_modules/drizzle-orm/
+        // postgres-js/session.js) — si este insert falla, solo se
+        // deshace él, la transacción de afuera sigue sana.
+        await tx.transaction(async (tx2) => {
+          await tx2.insert(membresias).values({ id: randomUUID(), usuarioId, empresaId: inv.empresaId, rolId: inv.rolId });
+        });
       } catch (error) {
         // 23505 = unique_violation (membresias_usuario_empresa_unica) —
         // ya era miembro, por ejemplo si volvió a abrir el mismo link.
