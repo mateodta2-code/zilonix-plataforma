@@ -31,6 +31,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/roles/[rolId]/confirmar/page.tsx",
   "app/panel/soporte/page.tsx",
   "app/panel/soporte/actions.ts",
+  "app/panel/conectar-ml/page.tsx",
+  "app/panel/conectar-ml/[cuentaId]/desconectar/page.tsx",
+  "app/panel/conectar-ml/[cuentaId]/desconectar/actions.ts",
+  "app/api/ml/callback/route.ts",
 ]);
 
 // Tarea 1.11 — eje de autorización APARTE: "¿esta cuenta es

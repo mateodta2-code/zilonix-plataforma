@@ -1,5 +1,5 @@
-import { headers } from "next/headers";
 import Link from "next/link";
+import { urlPublicaBase } from "@/lib/url-publica";
 
 // Tarea 1.7 — todavía no hay proveedor de correo decidido (D pendiente,
 // fuera de esta tarea), así que el link se muestra en pantalla para
@@ -7,19 +7,7 @@ import Link from "next/link";
 // en ningún lado fuera de la base ni se expone por otra ruta.
 export default function InvitacionListaPage({ searchParams }: { searchParams: { token?: string } }) {
   const token = searchParams.token ?? "";
-  // Tarea 1.12 — bug real encontrado en vivo en staging: la cabecera
-  // "host" que llega a Next.js detrás del proxy de Railway resultó
-  // ser "localhost" (el proxy no la pasa igual que el dominio
-  // público real), así que el link generado era inválido
-  // ("localhost rechazó la conexión"). RAILWAY_PUBLIC_DOMAIN es una
-  // variable que Railway ya inyecta sola con el dominio público real
-  // — no depende de cómo el proxy arme esa cabecera. x-forwarded-host
-  // queda como respaldo solo para correrlo local (`npm run dev`),
-  // donde esa variable no existe.
-  const encabezados = headers();
-  const dominio = process.env.RAILWAY_PUBLIC_DOMAIN ?? encabezados.get("x-forwarded-host") ?? encabezados.get("host");
-  const proto = process.env.RAILWAY_PUBLIC_DOMAIN ? "https" : encabezados.get("x-forwarded-proto") ?? "http";
-  const link = token ? `${proto}://${dominio}/invitacion/${token}` : null;
+  const link = token ? `${urlPublicaBase()}/invitacion/${token}` : null;
 
   return (
     <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
