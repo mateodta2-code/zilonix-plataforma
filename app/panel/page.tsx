@@ -94,10 +94,14 @@ export default async function PanelPage() {
       )}
 
       {miMembresia?.rolNombre === "Dueño" && (
-        <div style={{ display: "flex", gap: 16, marginTop: 28, fontSize: 13 }}>
+        <div style={{ display: "flex", gap: 16, marginTop: 28, fontSize: 13, flexWrap: "wrap" }}>
           <Link href="/panel/invitar">+ Invitar persona</Link>
           <Link href="/panel/roles">Ajustar roles</Link>
           <Link href="/panel/soporte">Acceso de soporte</Link>
+          {/* Tarea 2.3 — bug real encontrado en vivo: la pantalla ya
+              existía pero nunca quedó enlazada desde acá, solo se podía
+              llegar escribiendo la URL a mano. */}
+          <Link href="/panel/conectar-ml">Conectar Mercado Libre</Link>
         </div>
       )}
 
