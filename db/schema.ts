@@ -181,3 +181,32 @@ export const cuentasMl = pgTable(
     cuentaUnica: uniqueIndex("cuentas_ml_cuenta_externa_unica").on(t.cuentaIdExterna),
   })
 );
+
+// Tarea 2.4 — adelanto parcial (pedido real de Mateo, 20/10: terminar
+// de configurar la app de Mercado Libre de una vez, sin volver después
+// a esa pantalla). Acá solo se guarda el aviso tal cual llega — el
+// trabajador que lo PROCESA de verdad (traer el pedido real de la API,
+// nunca confiar en los datos del aviso) es el resto de la tarea 2.4,
+// todavía sin construir. `procesadoTs` queda vacío a propósito: es el
+// marcador que el trabajador va a usar para saber qué le falta.
+export const avisosMl = pgTable(
+  "avisos_ml",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaIdExterna: text("cuenta_id_externa").notNull(),
+    topic: text("topic").notNull(),
+    resource: text("resource").notNull(),
+    enviadoTs: timestamp("enviado_ts", { withTimezone: true }).notNull(),
+    recibidoTs: timestamp("recibido_ts", { withTimezone: true }).notNull().defaultNow(),
+    procesadoTs: timestamp("procesado_ts", { withTimezone: true }),
+  },
+  (t) => ({
+    // Mercado Libre reintenta si no le llega un 200 a tiempo — este
+    // índice es el "sin duplicados" de la tarea 2.4 para la parte de
+    // RECIBIR: el mismo aviso exacto (misma cuenta, tema, recurso y
+    // momento de envío) nunca se guarda dos veces, sin importar
+    // cuántas veces ML lo reintente.
+    avisoUnico: uniqueIndex("avisos_ml_unico").on(t.cuentaIdExterna, t.topic, t.resource, t.enviadoTs),
+  })
+);
