@@ -1,4 +1,5 @@
-import { boolean, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import type { TokenCifrado } from "@/lib/cifrado";
 
 // Tarea 1.2 del plan técnico — diseño aprobado por Mateo (14/10/2026)
 // antes de construir. Diagrama en palabras simples en docs/modelo-datos.md.
@@ -143,3 +144,40 @@ export const auditoria = pgTable("auditoria", {
   detalle: text("detalle"),
   ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Tarea 2.3 — una cuenta de Mercado Libre conectada a una empresa.
+// Tokens cifrados (lib/cifrado.ts, AES-256-GCM con versión de clave —
+// regla de CLAUDE.md "tokens de marketplaces siempre cifrados"), nunca
+// en texto plano ni en esta tabla ni en ningún log.
+export const cuentasMl = pgTable(
+  "cuentas_ml",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaIdExterna: text("cuenta_id_externa").notNull(),
+    nickname: text("nickname").notNull(),
+    accessTokenCifrado: jsonb("access_token_cifrado").$type<TokenCifrado>().notNull(),
+    refreshTokenCifrado: jsonb("refresh_token_cifrado").$type<TokenCifrado>().notNull(),
+    tokenExpiraTs: timestamp("token_expira_ts", { withTimezone: true }).notNull(),
+    // Candado contra renovaciones dobles — el refresh token de Mercado
+    // Libre sirve una sola vez, dos procesos renovando a la vez
+    // desconectan la cuenta (regla explícita de la tarea 2.3). Se fija
+    // con un UPDATE atómico antes de llamar a Mercado Libre y se limpia
+    // apenas termina, con o sin éxito; un candado de más de 30s se
+    // considera abandonado (un proceso que se cayó a mitad de camino) y
+    // se puede volver a tomar.
+    renovandoTs: timestamp("renovando_ts", { withTimezone: true }),
+    // Desconectar nunca borra la fila ni su historial (evidencia real de
+    // UpSeller, tarea 2.3: al desconectar, sus pedidos dejaban de verse
+    // sin aviso ni forma de recuperar el histórico) — queda marcada,
+    // nunca eliminada.
+    desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Una cuenta real de Mercado Libre no puede estar conectada a dos
+    // empresas de Zilonix a la vez — evita ambigüedad de a quién le
+    // pertenecen sus avisos y sus pedidos.
+    cuentaUnica: uniqueIndex("cuentas_ml_cuenta_externa_unica").on(t.cuentaIdExterna),
+  })
+);

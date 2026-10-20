@@ -27,7 +27,7 @@ END $$;
 GRANT CONNECT ON DATABASE railway TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-  empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria, accesos_temporales
+  empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria, accesos_temporales, cuentas_ml
   TO app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
@@ -68,6 +68,8 @@ ALTER TABLE auditoria ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auditoria FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
+ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cuentas_ml FORCE ROW LEVEL SECURITY;
 
 -- La tabla "usuarios" NO lleva RLS por empresa: una persona puede estar
 -- en varias empresas (decisión D2), así que no tiene una sola
@@ -156,6 +158,12 @@ DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;
 CREATE POLICY aislamiento_accesos_temporales ON accesos_temporales
   -- Tráfico normal (app_user, Dueño gestionando sus propios accesos
   -- concedidos): mismo patrón que toda tabla de negocio.
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_cuentas_ml ON cuentas_ml;
+CREATE POLICY aislamiento_cuentas_ml ON cuentas_ml
+  -- Tarea 2.3 — mismo patrón de siempre, nada especial: una empresa
+  -- nunca ve ni toca la cuenta de Mercado Libre de otra.
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- 4) Tarea 1.11 (decisión D8) — políticas de superadmin_user. Son
