@@ -112,3 +112,19 @@ export async function dbComoInvitacion<T>(
     return fn(tx as unknown as typeof db);
   });
 }
+
+// Tarea 2.4 — un aviso de Mercado Libre llega SOLO con `user_id` (el id
+// de la cuenta de ML), sin decir a qué empresa de Zilonix pertenece —
+// eso es justo lo que hay que averiguar. Mismo patrón que
+// dbComoInvitacion(): un secreto puntual (acá, el user_id que mandó
+// Mercado Libre) da acceso a UNA fila de `cuentas_ml`, nunca a las de
+// las demás empresas — ver la política `cuentas_ml_por_aviso_webhook`
+// en db/rls-setup.sql. No hay sesión de usuario en un webhook: no hace
+// falta (ni existe) ningún usuario_actual acá.
+export async function dbComoAvisoWebhook<T>(cuentaIdExterna: string, fn: (tx: typeof db) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.empresa_actual', ${EMPRESA_SENTINEL}, true)`);
+    await tx.execute(sql`SELECT set_config('app.cuenta_ml_externa_actual', ${cuentaIdExterna}, true)`);
+    return fn(tx as unknown as typeof db);
+  });
+}
