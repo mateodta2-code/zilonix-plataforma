@@ -6,6 +6,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { obtenerUltimaImportacion } from "@/lib/ml/importacion";
 
 // Tarea 2.3 — "Conectar ML en 1 clic". Regla de UX #1 del plan técnico
 // ("si el canal no está habilitado para ese plan/cuenta, avisarlo ANTES
@@ -49,8 +50,17 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
   // esta misma carga de la página.
   const urlConectar = "/api/ml/conectar";
 
+  // Tarea 2.5 — importación inicial corriendo en segundo plano, una
+  // por cada cuenta conectada (sin cliente de JS aparte: un refresco
+  // automático de la página alcanza mientras haya alguna sin terminar).
+  const importaciones = await Promise.all(
+    cuentas.filter((c) => !c.desconectadaTs).map(async (c) => ({ cuenta: c, importacion: await obtenerUltimaImportacion(empresa.id, c.id) }))
+  );
+  const hayImportacionEnCurso = importaciones.some((i) => i.importacion && !i.importacion.completadoTs);
+
   return (
     <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
+      {hayImportacionEnCurso && <meta httpEquiv="refresh" content="5" />}
       <h1 style={{ fontSize: 24, fontWeight: 700 }}>Conectar Mercado Libre</h1>
 
       {searchParams.conectado && (
@@ -72,22 +82,42 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
 
       {cuentas.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, marginTop: 20 }}>
-          {cuentas.map((cuenta) => (
-            <li
-              key={cuenta.id}
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #eee" }}
-            >
-              <span>
-                Conectado como <strong>{cuenta.nickname}</strong>
-                {cuenta.desconectadaTs && <span style={{ opacity: 0.6 }}> (desconectada)</span>}
-              </span>
-              {!cuenta.desconectadaTs && (
-                <Link href={`/panel/conectar-ml/${cuenta.id}/desconectar`} style={{ fontSize: 13, opacity: 0.7 }}>
-                  Desconectar
-                </Link>
-              )}
-            </li>
-          ))}
+          {cuentas.map((cuenta) => {
+            const importacion = importaciones.find((i) => i.cuenta.id === cuenta.id)?.importacion;
+            return (
+              <li key={cuenta.id} style={{ padding: "10px 0", borderBottom: "1px solid #eee" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>
+                    Conectado como <strong>{cuenta.nickname}</strong>
+                    {cuenta.desconectadaTs && <span style={{ opacity: 0.6 }}> (desconectada)</span>}
+                  </span>
+                  {!cuenta.desconectadaTs && (
+                    <Link href={`/panel/conectar-ml/${cuenta.id}/desconectar`} style={{ fontSize: 13, opacity: 0.7 }}>
+                      Desconectar
+                    </Link>
+                  )}
+                </div>
+                {importacion && !importacion.error && (
+                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+                    {importacion.completadoTs ? (
+                      <span>
+                        Importación lista: {importacion.pedidosImportados} pedidos, {importacion.publicacionesImportadas} publicaciones (últimos
+                        60 días).
+                      </span>
+                    ) : (
+                      <span>
+                        Importando pedidos y publicaciones de los últimos 60 días… {importacion.pedidosImportados}
+                        {importacion.pedidosEncontrados ? `/${importacion.pedidosEncontrados}` : ""} pedidos.
+                      </span>
+                    )}
+                  </div>
+                )}
+                {importacion?.error && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#b00020" }}>No se pudo completar la importación: {importacion.error}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

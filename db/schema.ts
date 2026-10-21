@@ -1,4 +1,4 @@
-import { boolean, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
 
 // Tarea 1.2 del plan técnico — diseño aprobado por Mateo (14/10/2026)
@@ -210,3 +210,60 @@ export const avisosMl = pgTable(
     avisoUnico: uniqueIndex("avisos_ml_unico").on(t.cuentaIdExterna, t.topic, t.resource, t.enviadoTs),
   })
 );
+
+// Tarea 2.5 — importación inicial. Guarda solo lo mínimo real para
+// cumplir el criterio de "listo" (ver el primer pedido en menos de 10
+// minutos) — el detalle completo (línea de tiempo de 8 pasos, enlace
+// con SKU propio) es de las tareas 2.6/2.7, no de esta.
+export const pedidos = pgTable(
+  "pedidos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    pedidoIdExterno: text("pedido_id_externo").notNull(),
+    fecha: timestamp("fecha", { withTimezone: true }).notNull(),
+    total: numeric("total", { precision: 14, scale: 2 }).notNull(),
+    moneda: text("moneda").notNull(),
+    estado: text("estado").notNull(),
+    importadoTs: timestamp("importado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pedidoUnico: uniqueIndex("pedidos_empresa_pedido_externo_unico").on(t.empresaId, t.pedidoIdExterno),
+  })
+);
+
+export const publicaciones = pgTable(
+  "publicaciones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    publicacionIdExterno: text("publicacion_id_externo").notNull(),
+    titulo: text("titulo").notNull(),
+    precio: numeric("precio", { precision: 14, scale: 2 }).notNull(),
+    stock: integer("stock").notNull(),
+    // Enlace con SKU propio: tarea 2.6, todavía no — queda vacío a
+    // propósito hasta que esa tarea lo use.
+    skuId: uuid("sku_id"),
+    importadoTs: timestamp("importado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    publicacionUnica: uniqueIndex("publicaciones_empresa_publicacion_externa_unica").on(t.empresaId, t.publicacionIdExterno),
+  })
+);
+
+// Progreso de la importación inicial, uno por cuenta conectada — lo que
+// lee la barra de progreso de /panel/conectar-ml.
+export const importacionesMl = pgTable("importaciones_ml", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  pedidosEncontrados: integer("pedidos_encontrados").notNull().default(0),
+  pedidosImportados: integer("pedidos_importados").notNull().default(0),
+  publicacionesEncontradas: integer("publicaciones_encontradas").notNull().default(0),
+  publicacionesImportadas: integer("publicaciones_importadas").notNull().default(0),
+  error: text("error"),
+  iniciadoTs: timestamp("iniciado_ts", { withTimezone: true }).notNull().defaultNow(),
+  completadoTs: timestamp("completado_ts", { withTimezone: true }),
+});

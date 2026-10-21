@@ -36,6 +36,13 @@
       "when": 1792508827911,
       "tag": "0004_adorable_genesis",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792551306421,
+      "tag": "0005_even_multiple_man",
+      "breakpoints": true
     }
   ]
 }
