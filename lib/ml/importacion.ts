@@ -3,6 +3,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { importacionesMl, pedidos, publicaciones } from "@/db/schema";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { registrarEventoPedido } from "@/lib/ml/pedidos";
+import { sincronizarDespacho } from "@/lib/ml/despachos";
 
 const DIAS_HACIA_ATRAS = 60;
 const TAMAÑO_PAGINA = 50;
@@ -136,6 +137,13 @@ export async function ejecutarImportacionInicial(empresaId: string, cuentaId: st
         if (envio?.status_history?.date_delivered) {
           await registrarEventoPedido(empresaId, filaPedido.id, "entrega", new Date(envio.status_history.date_delivered));
         }
+        // Tarea 2.10 — misma cuenta, misma empresa: también se
+        // sincroniza la fila de despachos_ml (imprimible, logistic_type)
+        // para que /panel/despachos la encuentre lista desde la
+        // importación inicial, sin esperar un aviso aparte.
+        await sincronizarDespacho(empresaId, cuentaId, filaPedido.id, String(pedido.shipping.id)).catch((error) => {
+          console.error("No se pudo sincronizar el despacho durante la importación:", error instanceof Error ? error.message : error);
+        });
       }
 
       pedidosImportados += 1;

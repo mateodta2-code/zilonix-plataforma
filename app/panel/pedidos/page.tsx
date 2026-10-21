@@ -36,7 +36,12 @@ export default async function PedidosPage() {
 
   return (
     <main style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px" }}>
-      <h1 style={{ fontSize: 20, fontWeight: 700, padding: "0 8px" }}>Pedidos</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px" }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Pedidos</h1>
+        <Link href="/panel/despachos" style={{ fontSize: 13 }}>
+          Despachos
+        </Link>
+      </div>
 
       {pedidos.length === 0 ? (
         <p style={{ opacity: 0.7, fontSize: 14, padding: "0 8px" }}>

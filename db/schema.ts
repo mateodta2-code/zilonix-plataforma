@@ -17,6 +17,12 @@ export const alcanceEnum = pgEnum("alcance", ["todo", "propio"]);
 // del sistema (evidencia real de Effi: le atribuía a una persona ventas
 // que en realidad sincronizó la integración con Mercado Libre sola).
 export const actorTipoEnum = pgEnum("actor_tipo", ["persona", "sistema"]);
+// Tarea 2.10 — valores reales confirmados contra el código ya en
+// producción del Zilonix OS actual (lib/mercadolibre-despachos.js):
+// self_service = Flex, xd_drop_off = Places (agencia), cross_docking =
+// Colecta, fulfillment = Full (nunca imprime guía física — ML la
+// rechaza con "INVALID_SHIPMENT_FF_PUBLIC", no aplica despacho).
+export const logisticTypeEnum = pgEnum("logistic_type", ["self_service", "xd_drop_off", "cross_docking", "fulfillment", "otro"]);
 // Tarea 2.7 — los 8 pasos de trazabilidad del plan maestro
 // (docs/plan-maestro.md, sección 5, zilonix-os-web): "venta → pago →
 // factura → empaque → despacho → entrega → novedades → dinero
@@ -347,5 +353,31 @@ export const pedidoEventos = pgTable(
   },
   (t) => ({
     pasoUnico: uniqueIndex("pedido_eventos_pedido_paso_unico").on(t.pedidoId, t.paso),
+  })
+);
+
+// Tarea 2.10 — Despachos. `imprimible` se calcula al sincronizar (ver
+// lib/ml/despachos.ts) con la misma regla real ya confirmada en el
+// sistema actual: solo en pending/handling/ready_to_ship Mercado Libre
+// deja imprimir/reimprimir — una vez el transportador recoge el
+// paquete, el bloqueo es real y permanente de Mercado Libre, no algo
+// que se pueda evitar por API.
+export const despachosMl = pgTable(
+  "despachos_ml",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    pedidoId: uuid("pedido_id").notNull().references(() => pedidos.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    shipmentIdExterno: text("shipment_id_externo").notNull(),
+    logisticType: logisticTypeEnum("logistic_type"),
+    status: text("status"),
+    substatus: text("substatus"),
+    imprimible: boolean("imprimible").notNull().default(false),
+    etiquetaImpresaTs: timestamp("etiqueta_impresa_ts", { withTimezone: true }),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    shipmentUnico: uniqueIndex("despachos_ml_empresa_shipment_unico").on(t.empresaId, t.shipmentIdExterno),
   })
 );
