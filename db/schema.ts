@@ -17,6 +17,21 @@ export const alcanceEnum = pgEnum("alcance", ["todo", "propio"]);
 // del sistema (evidencia real de Effi: le atribuía a una persona ventas
 // que en realidad sincronizó la integración con Mercado Libre sola).
 export const actorTipoEnum = pgEnum("actor_tipo", ["persona", "sistema"]);
+// Tarea 2.7 — los 8 pasos de trazabilidad del plan maestro
+// (docs/plan-maestro.md, sección 5, zilonix-os-web): "venta → pago →
+// factura → empaque → despacho → entrega → novedades → dinero
+// conciliado". Orden fijo, siempre estos 8 — nunca se agregan pasos
+// sueltos por fuera de esta lista.
+export const pasoPedidoEnum = pgEnum("paso_pedido", [
+  "venta",
+  "pago",
+  "factura",
+  "empaque",
+  "despacho",
+  "entrega",
+  "novedades",
+  "dinero_conciliado",
+]);
 
 export const empresas = pgTable("empresas", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -310,5 +325,27 @@ export const kitComponentes = pgTable(
   },
   (t) => ({
     componenteUnico: uniqueIndex("kit_componentes_unico").on(t.skuKitId, t.skuComponenteId),
+  })
+);
+
+// Tarea 2.7 — un pedido puede tener como máximo un evento por paso (no
+// tiene sentido "venta" dos veces para el mismo pedido). actorTipo
+// "sistema" para todo lo que confirma la API de Mercado Libire sola —
+// nunca se le atribuye a una persona lo que hizo la integración (mismo
+// criterio ya probado en la tarea 1.9).
+export const pedidoEventos = pgTable(
+  "pedido_eventos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    pedidoId: uuid("pedido_id").notNull().references(() => pedidos.id, { onDelete: "cascade" }),
+    paso: pasoPedidoEnum("paso").notNull(),
+    ts: timestamp("ts", { withTimezone: true }).notNull(),
+    actorTipo: actorTipoEnum("actor_tipo").notNull(),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    detalle: text("detalle"),
+  },
+  (t) => ({
+    pasoUnico: uniqueIndex("pedido_eventos_pedido_paso_unico").on(t.pedidoId, t.paso),
   })
 );
