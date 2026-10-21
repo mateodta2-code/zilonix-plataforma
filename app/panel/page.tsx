@@ -23,6 +23,7 @@ const PANTALLA_POR_MODULO: Record<string, string> = {
   finanzas: "/panel/finanzas",
   configuracion: "/panel/actividad",
   inventario: "/panel/sku",
+  atencion: "/panel/bandeja",
 };
 export default async function PanelPage() {
   const usuario = await obtenerOCrearUsuarioActual();

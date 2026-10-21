@@ -17,6 +17,11 @@ export const alcanceEnum = pgEnum("alcance", ["todo", "propio"]);
 // del sistema (evidencia real de Effi: le atribuía a una persona ventas
 // que en realidad sincronizó la integración con Mercado Libre sola).
 export const actorTipoEnum = pgEnum("actor_tipo", ["persona", "sistema"]);
+// Tarea 2.9 — las tres clases reales de la bandeja de atención,
+// confirmadas contra el código ya en producción del Zilonix OS actual
+// (lib/mercadolibre-mensajes.js): preguntas (pre-venta), mensajes
+// (hilo de post-venta, "messages") y reclamos ("claims").
+export const tipoMensajeMlEnum = pgEnum("tipo_mensaje_ml", ["pregunta", "mensaje", "reclamo"]);
 // Tarea 2.7 — los 8 pasos de trazabilidad del plan maestro
 // (docs/plan-maestro.md, sección 5, zilonix-os-web): "venta → pago →
 // factura → empaque → despacho → entrega → novedades → dinero
@@ -347,5 +352,66 @@ export const pedidoEventos = pgTable(
   },
   (t) => ({
     pasoUnico: uniqueIndex("pedido_eventos_pedido_paso_unico").on(t.pedidoId, t.paso),
+  })
+);
+
+// Tarea 2.9 — Bandeja de atención. A propósito NO es una copia del
+// Zilonix OS actual (`ml_preguntas_reclamos`, una sola tabla ancha que
+// solo guardaba el ÚLTIMO texto de un hilo de mensajes de venta — el
+// resto de la conversación quedaba enterrado dentro de un JSON crudo,
+// sin poder mostrarse). Acá esta tabla es la CABECERA del ítem
+// (pregunta, reclamo, o el hilo completo de un mensaje de venta);
+// `mensajesMlHilo`, más abajo, guarda cada mensaje individual de un
+// hilo real. Para "pregunta" y "reclamo" (que sí son un solo texto,
+// sin ida y vuelta) `texto` alcanza; para "mensaje" queda vacío a
+// propósito — la conversación real vive en `mensajesMlHilo`.
+export const mensajesMl = pgTable(
+  "mensajes_ml",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    tipo: tipoMensajeMlEnum("tipo").notNull(),
+    externalId: text("external_id").notNull(), // question_id, pack_id o claim_id real de Mercado Libre
+    itemId: text("item_id"),
+    itemTitulo: text("item_titulo"),
+    itemPermalink: text("item_permalink"),
+    compradorId: text("comprador_id"),
+    compradorNickname: text("comprador_nickname"),
+    texto: text("texto"), // solo pregunta/reclamo — ver nota arriba
+    estado: text("estado"), // status/stage real de ML, tal cual — nunca traducido a un enum propio
+    respondida: boolean("respondida").notNull().default(false),
+    // Tarea 2.9 — funcionalidad nueva, no existía en el sistema viejo.
+    asignadoA: uuid("asignado_a").references(() => usuarios.id, { onDelete: "set null" }),
+    // "Alertas por tiempo" — plazo calculado al llegar el ítem (ver
+    // lib/ml/bandeja.ts), no un número mágico pegado en la pantalla.
+    // El sistema viejo solo avisaba por Telegram una vez; esto queda
+    // como dato real para poder ordenar/resaltar lo vencido.
+    vencePorResponderTs: timestamp("vence_por_responder_ts", { withTimezone: true }),
+    detalle: jsonb("detalle"),
+    ocurridoTs: timestamp("ocurrido_ts", { withTimezone: true }),
+    recibidoTs: timestamp("recibido_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    externoUnico: uniqueIndex("mensajes_ml_empresa_tipo_externo_unico").on(t.empresaId, t.tipo, t.externalId),
+  })
+);
+
+// Tarea 2.9 — un mensaje individual dentro de un hilo de post-venta.
+// Solo existe para tipo="mensaje"; preguntas y reclamos no tienen
+// filas acá.
+export const mensajesMlHilo = pgTable(
+  "mensajes_ml_hilo",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    mensajeMlId: uuid("mensaje_ml_id").notNull().references(() => mensajesMl.id, { onDelete: "cascade" }),
+    externalId: text("external_id").notNull(), // message_id real de Mercado Libre
+    deComprador: boolean("de_comprador").notNull(),
+    texto: text("texto"),
+    ts: timestamp("ts", { withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    mensajeUnico: uniqueIndex("mensajes_ml_hilo_unico").on(t.mensajeMlId, t.externalId),
   })
 );

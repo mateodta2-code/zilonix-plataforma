@@ -3,6 +3,7 @@ import { dbTrabajador } from "@/db/trabajador-context";
 import { avisosMl, cuentasMl } from "@/db/schema";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { guardarPregunta, guardarReclamo, guardarMensajeVenta, resolverPackIdDeMensaje } from "@/lib/ml/bandeja";
 
 const TAMAÑO_LOTE = 50;
 
@@ -58,6 +59,32 @@ async function procesarUnAviso(aviso: typeof avisosMl.$inferSelect): Promise<voi
     return cuenta?.id ?? null;
   });
   if (!cuentaId) throw new Error("La cuenta de Mercado Libre ya no está conectada a esta empresa.");
+
+  // Tarea 2.9 — preguntas, mensajes y reclamos se procesan de verdad
+  // (guardan en la bandeja de atención), no solo se confirman. El resto
+  // de los tópicos (ej. orders_v2) sigue con el chequeo genérico de
+  // abajo — procesarlos de verdad es trabajo de otras tareas.
+  if (aviso.topic === "questions") {
+    const match = aviso.resource.match(/\/questions\/(\d+)/);
+    if (!match) throw new Error(`No se pudo leer el id de pregunta del recurso "${aviso.resource}".`);
+    await guardarPregunta(aviso.empresaId, cuentaId, match[1]);
+    return;
+  }
+  if (aviso.topic === "claims") {
+    const match = aviso.resource.match(/\/claims\/([\w-]+)/);
+    if (!match) throw new Error(`No se pudo leer el id de reclamo del recurso "${aviso.resource}".`);
+    await guardarReclamo(aviso.empresaId, cuentaId, match[1]);
+    return;
+  }
+  if (aviso.topic === "messages") {
+    // Bug real confirmado en el sistema actual: acá "resource" no es un
+    // path, es el message_id crudo — hay que resolver a qué venta
+    // pertenece antes de poder guardar el hilo.
+    const accessTokenMensaje = await obtenerAccessTokenVigente(aviso.empresaId, cuentaId);
+    const packId = await resolverPackIdDeMensaje(accessTokenMensaje, aviso.resource);
+    await guardarMensajeVenta(aviso.empresaId, cuentaId, aviso.cuentaIdExterna, packId);
+    return;
+  }
 
   const accessToken = await obtenerAccessTokenVigente(aviso.empresaId, cuentaId);
 

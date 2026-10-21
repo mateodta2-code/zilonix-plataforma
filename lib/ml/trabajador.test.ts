@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { and, eq, isNull, like } from "drizzle-orm";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { avisosMl, cuentasMl, empresas } from "@/db/schema";
+import { avisosMl, cuentasMl, empresas, mensajesMl } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import { procesarAvisosPendientes } from "./trabajador";
 
@@ -154,4 +154,47 @@ describe("trabajador de avisos de Mercado Libre (tarea 2.4)", () => {
     );
     expect(procesadosDeEstaCarga).toHaveLength(1000); // los 1.000 están, ninguno se perdió en el camino
   }, 120_000);
+
+  it("tarea 2.9 — un aviso de tópico 'questions' guarda la pregunta real en la bandeja", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/questions/4321")) {
+          return respuestaOk({ id: 4321, item_id: "MCOX", text: "¿hay stock?", status: "UNANSWERED", from: { id: 1 }, date_created: "2026-10-01T10:00:00.000Z" });
+        }
+        return respuestaOk({});
+      })
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "questions", resource: "/questions/4321", enviadoTs: new Date() })
+    );
+
+    const resultado = await procesarAvisosPendientes();
+    expect(resultado.fallidos).toBe(0);
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(mensajesMl).where(eq(mensajesMl.externalId, "4321")));
+    expect(fila?.tipo).toBe("pregunta");
+  });
+
+  it("tarea 2.9 — un aviso de tópico 'messages' resuelve el pack_id del message_id crudo y guarda el hilo", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/messages/hex999")) return respuestaOk({ pack_id: 7777 });
+        if (url.includes("/messages/packs/7777/sellers/")) {
+          return respuestaOk({ conversation: {}, messages: [{ id: "a", text: "hola", from: { user_id: 1 }, message_date: { created: "2026-10-01T10:00:00.000Z" } }] });
+        }
+        return respuestaOk({});
+      })
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "messages", resource: "hex999", enviadoTs: new Date() })
+    );
+
+    const resultado = await procesarAvisosPendientes();
+    expect(resultado.fallidos).toBe(0);
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(mensajesMl).where(eq(mensajesMl.externalId, "7777")));
+    expect(fila?.tipo).toBe("mensaje");
+  });
 });

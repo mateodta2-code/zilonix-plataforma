@@ -12,7 +12,7 @@
 // sirve de demo para el criterio de "listo" de la tarea 1.7 ("el
 // operador no ve Finanzas"). La lista es a propósito la misma que ya
 // anticipaba el comentario de `auditoria` en db/schema.ts.
-export const MODULOS = ["ventas", "inventario", "finanzas", "personas", "configuracion"] as const;
+export const MODULOS = ["ventas", "inventario", "finanzas", "personas", "configuracion", "atencion"] as const;
 export type Modulo = (typeof MODULOS)[number];
 
 export const ACCIONES = ["consultar", "crear", "modificar", "anular", "autorizar"] as const;
@@ -42,6 +42,8 @@ export const PLANTILLAS: Record<NombrePlantilla, Permiso[]> = {
     { modulo: "ventas", accion: "modificar", alcance: "todo" },
     { modulo: "inventario", accion: "consultar", alcance: "todo" },
     { modulo: "inventario", accion: "modificar", alcance: "todo" },
+    { modulo: "atencion", accion: "consultar", alcance: "todo" },
+    { modulo: "atencion", accion: "modificar", alcance: "todo" },
   ],
   Contador: [
     { modulo: "finanzas", accion: "consultar", alcance: "todo" },

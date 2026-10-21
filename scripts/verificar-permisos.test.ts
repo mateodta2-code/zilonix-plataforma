@@ -41,6 +41,9 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/sku/sin-vincular/actions.ts",
   "app/panel/pedidos/page.tsx",
   "app/panel/pedidos/[id]/page.tsx",
+  "app/panel/bandeja/page.tsx",
+  "app/panel/bandeja/[id]/page.tsx",
+  "app/panel/bandeja/[id]/actions.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
 ]);
