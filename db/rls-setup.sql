@@ -50,6 +50,20 @@ GRANT USAGE ON SCHEMA public TO superadmin_user;
 GRANT SELECT ON empresas, membresias, roles, usuarios, accesos_temporales TO superadmin_user;
 GRANT INSERT ON auditoria TO superadmin_user;
 
+-- 1c) Tarea 2.4 — tercer usuario de base, el más limitado de los tres:
+-- el trabajador de cola necesita ver avisos de CUALQUIER empresa (no
+-- sabe de antemano cuál hasta leer la fila) y marcarlos procesados,
+-- pero nunca tiene que tocar ninguna otra tabla de negocio.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'trabajador_user') THEN
+    CREATE ROLE trabajador_user WITH LOGIN PASSWORD 'PONE_ACA_UNA_TERCERA_CONTRASEÑA_REAL';
+  END IF;
+END $$;
+GRANT CONNECT ON DATABASE railway TO trabajador_user;
+GRANT USAGE ON SCHEMA public TO trabajador_user;
+GRANT SELECT, UPDATE ON avisos_ml TO trabajador_user;
+
 -- 2) Seguridad por fila — se activa por tabla, y se FUERZA también para
 -- el dueño de la tabla (sin el FORCE, el dueño de la tabla se salta la
 -- política igual que un superusuario, que es justo el agujero que
@@ -183,6 +197,16 @@ CREATE POLICY cuentas_ml_por_aviso_webhook ON cuentas_ml FOR SELECT
 DROP POLICY IF EXISTS aislamiento_avisos_ml ON avisos_ml;
 CREATE POLICY aislamiento_avisos_ml ON avisos_ml
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Tarea 2.4 — política APARTE, con TO trabajador_user: el trabajador de
+-- cola ve y marca procesado cualquier aviso pendiente, de cualquier
+-- empresa — nunca ninguna otra tabla (ver GRANT más arriba, solo
+-- avisos_ml). No reemplaza la política de arriba, que sigue aplicando
+-- igual al tráfico normal de app_user.
+DROP POLICY IF EXISTS trabajador_procesa_avisos_ml ON avisos_ml;
+CREATE POLICY trabajador_procesa_avisos_ml ON avisos_ml FOR SELECT TO trabajador_user USING (true);
+DROP POLICY IF EXISTS trabajador_marca_procesado_avisos_ml ON avisos_ml;
+CREATE POLICY trabajador_marca_procesado_avisos_ml ON avisos_ml FOR UPDATE TO trabajador_user USING (true);
 
 -- 4) Tarea 1.11 (decisión D8) — políticas de superadmin_user. Son
 -- políticas APARTE, con TO superadmin_user: no reemplazan ni debilitan
