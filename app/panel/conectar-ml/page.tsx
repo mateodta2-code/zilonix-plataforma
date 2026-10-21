@@ -6,8 +6,6 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
-import { construirUrlAutorizacion } from "@/lib/ml/oauth";
-import { urlPublicaBase } from "@/lib/url-publica";
 
 // Tarea 2.3 — "Conectar ML en 1 clic". Regla de UX #1 del plan técnico
 // ("si el canal no está habilitado para ese plan/cuenta, avisarlo ANTES
@@ -45,8 +43,11 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
   }
 
   const cuentas = await listarCuentasConectadas(empresa.id);
-  const redirectUri = `${urlPublicaBase()}/api/ml/callback`;
-  const urlAutorizacion = construirUrlAutorizacion(redirectUri);
+  // Bug real (PKCE): el link de autorización ya no se arma acá — cada
+  // intento necesita un code_verifier NUEVO (de un solo uso), así que
+  // /api/ml/conectar lo genera recién al hacer clic, no de antemano en
+  // esta misma carga de la página.
+  const urlConectar = "/api/ml/conectar";
 
   return (
     <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
@@ -63,7 +64,7 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
         // silencio.
         <div style={{ padding: 10, background: "#fdecea", borderRadius: 6, fontSize: 14 }}>
           <p style={{ margin: 0 }}>No se pudo conectar la cuenta: {searchParams.error}</p>
-          <a href={urlAutorizacion} style={{ fontSize: 13, fontWeight: 600 }}>
+          <a href={urlConectar} style={{ fontSize: 13, fontWeight: 600 }}>
             Reintentar
           </a>
         </div>
@@ -91,7 +92,7 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
       )}
 
       <a
-        href={urlAutorizacion}
+        href={urlConectar}
         style={{ display: "inline-block", marginTop: 20, padding: "10px 16px", background: "#000", color: "#fff", borderRadius: 6, fontSize: 14, textDecoration: "none" }}
       >
         Conectar Mercado Libre
