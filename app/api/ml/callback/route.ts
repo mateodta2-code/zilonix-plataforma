@@ -7,6 +7,7 @@ import { guardarCuentaConectada } from "@/lib/ml/cuentas";
 import { intercambiarCodigo, obtenerNickname } from "@/lib/ml/oauth";
 import { urlPublicaBase } from "@/lib/url-publica";
 import { NOMBRE_COOKIE_VERIFIER } from "@/lib/ml/pkce-cookie";
+import { ejecutarImportacionInicial } from "@/lib/ml/importacion";
 
 // Tarea 2.3 — a dónde vuelve Mercado Libre después de que el vendedor
 // autoriza (o cancela). Mismo redirect_uri que se le pasó al armar el
@@ -51,7 +52,18 @@ export async function GET(request: NextRequest) {
     const redirectUri = `${base}/api/ml/callback`;
     const tokens = await intercambiarCodigo(code, redirectUri, codeVerifier);
     const nickname = await obtenerNickname(tokens.accessToken);
-    await guardarCuentaConectada(empresa.id, { cuentaIdExterna: tokens.cuentaIdExterna, nickname, tokens });
+    const cuenta = await guardarCuentaConectada(empresa.id, { cuentaIdExterna: tokens.cuentaIdExterna, nickname, tokens });
+
+    // Tarea 2.5 — "en segundo plano": a propósito NO se espera (sin
+    // await) para que la respuesta vuelva ya mismo; Railway corre un
+    // proceso persistente (no serverless), así que el trabajo sigue
+    // corriendo después de responder. Errores quedan guardados en la
+    // propia fila de importaciones_ml (lib/ml/importacion.ts), nunca
+    // tumban esta petición.
+    ejecutarImportacionInicial(empresa.id, cuenta.id, tokens.cuentaIdExterna).catch((error) => {
+      console.error("Error en la importación inicial:", error instanceof Error ? error.message : error);
+    });
+
     const respuesta = volver("conectado=1");
     respuesta.cookies.delete(NOMBRE_COOKIE_VERIFIER);
     return respuesta;
