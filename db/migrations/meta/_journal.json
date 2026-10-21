@@ -50,6 +50,13 @@
       "when": 1792552720854,
       "tag": "0006_certain_payback",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792554397066,
+      "tag": "0007_striped_marvel_apes",
+      "breakpoints": true
     }
   ]
 }

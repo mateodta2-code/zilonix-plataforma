@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { importacionesMl, pedidos, publicaciones } from "@/db/schema";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { registrarEventoPedido } from "@/lib/ml/pedidos";
 
 const DIAS_HACIA_ATRAS = 60;
 const TAMAÑO_PAGINA = 50;
@@ -10,7 +11,31 @@ const TAMAÑO_PAGINA = 50;
 // en producción del Zilonix OS actual (zilonix-os-web/lib/
 // mercadolibre-despachos.js, lib/fullylemon.js) — no inventado.
 
-type PedidoMl = { id: number | string; date_created: string; status: string; total_amount: number; currency_id: string };
+type PedidoMl = {
+  id: number | string;
+  date_created: string;
+  status: string;
+  total_amount: number;
+  currency_id: string;
+  payments?: { status: string; date_approved: string | null }[];
+  shipping?: { id: number | string | null };
+};
+
+// Tarea 2.7 — campo usado SOLO acá abajo (status_history.date_shipped/
+// date_delivered). A diferencia del resto de los campos de este
+// archivo (todos confirmados grep-eando el código real que ya corre
+// en producción del Zilonix OS actual), este NO quedó confirmado así
+// — el sistema actual nunca necesitó leer el historial de fechas de
+// un envío, solo su estado actual. Viene de la documentación pública
+// de la API de Mercado Libre. Pendiente real: verificar con Mateo
+// contra un pedido real despachado en staging apenas haya uno.
+type EnvioMl = { status: string; status_history?: { date_shipped?: string | null; date_delivered?: string | null } };
+
+async function traerEnvioReal(accessToken: string, shipmentId: number | string): Promise<EnvioMl | null> {
+  const res = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) return null; // un envío que no se puede leer no debe tumbar el resto de la importación
+  return res.json();
+}
 
 async function traerPedidosReales(accessToken: string, cuentaIdExterna: string, desdeIso: string): Promise<PedidoMl[]> {
   const resultado: PedidoMl[] = [];
@@ -77,7 +102,7 @@ export async function ejecutarImportacionInicial(empresaId: string, cuentaId: st
     );
     let pedidosImportados = 0;
     for (const pedido of pedidosReales) {
-      await dbComoEmpresa(empresaId, (tx) =>
+      const [filaPedido] = await dbComoEmpresa(empresaId, (tx) =>
         tx
           .insert(pedidos)
           .values({
@@ -89,8 +114,30 @@ export async function ejecutarImportacionInicial(empresaId: string, cuentaId: st
             moneda: pedido.currency_id,
             estado: pedido.status,
           })
-          .onConflictDoNothing({ target: [pedidos.empresaId, pedidos.pedidoIdExterno] })
+          .onConflictDoUpdate({ target: [pedidos.empresaId, pedidos.pedidoIdExterno], set: { estado: pedido.status } })
+          .returning({ id: pedidos.id })
       );
+
+      // Tarea 2.7 — venta y pago, confirmados contra el código real ya
+      // en producción (campo payments[].date_approved).
+      await registrarEventoPedido(empresaId, filaPedido.id, "venta", new Date(pedido.date_created));
+      const pagoAprobado = (pedido.payments ?? []).find((p) => p.status === "approved" && p.date_approved);
+      if (pagoAprobado?.date_approved) {
+        await registrarEventoPedido(empresaId, filaPedido.id, "pago", new Date(pagoAprobado.date_approved));
+      }
+
+      // Despacho/entrega — ver nota sobre traerEnvioReal() más arriba:
+      // campo sin confirmar contra este proyecto todavía.
+      if (pedido.shipping?.id) {
+        const envio = await traerEnvioReal(accessToken, pedido.shipping.id);
+        if (envio?.status_history?.date_shipped) {
+          await registrarEventoPedido(empresaId, filaPedido.id, "despacho", new Date(envio.status_history.date_shipped));
+        }
+        if (envio?.status_history?.date_delivered) {
+          await registrarEventoPedido(empresaId, filaPedido.id, "entrega", new Date(envio.status_history.date_delivered));
+        }
+      }
+
       pedidosImportados += 1;
       await dbComoEmpresa(empresaId, (tx) =>
         tx.update(importacionesMl).set({ pedidosImportados }).where(eq(importacionesMl.id, importacion.id))

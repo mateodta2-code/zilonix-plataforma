@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl, empresas, importacionesMl, pedidos, publicaciones } from "@/db/schema";
+import { cuentasMl, empresas, importacionesMl, pedidoEventos, pedidos, publicaciones } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import { ejecutarImportacionInicial, obtenerUltimaImportacion } from "./importacion";
 
@@ -97,6 +97,67 @@ describe("importación inicial de Mercado Libre (tarea 2.5)", () => {
     expect(progreso?.publicacionesImportadas).toBe(2);
     expect(progreso?.completadoTs).not.toBeNull();
     expect(progreso?.error).toBeNull();
+  });
+
+  it("tarea 2.7 — registra los eventos venta/pago/despacho/entrega con datos reales de la orden y el envío", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/orders/search")) {
+        const offset = Number(new URL(url).searchParams.get("offset"));
+        if (offset > 0) return respuestaJson({ results: [] });
+        return respuestaJson({
+          results: [
+            {
+              id: 999,
+              date_created: "2026-09-05T10:00:00.000-04:00",
+              status: "paid",
+              total_amount: 30000,
+              currency_id: "COP",
+              payments: [{ status: "approved", date_approved: "2026-09-05T10:05:00.000-04:00" }],
+              shipping: { id: 77777 },
+            },
+          ],
+        });
+      }
+      if (url.includes("/items/search")) return respuestaJson({ results: [] });
+      if (url === "https://api.mercadolibre.com/shipments/77777") {
+        return respuestaJson({
+          status: "delivered",
+          status_history: { date_shipped: "2026-09-06T09:00:00.000-04:00", date_delivered: "2026-09-08T14:00:00.000-04:00" },
+        });
+      }
+      throw new Error(`fetch no esperado: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ejecutarImportacionInicial(empresaId, cuentaId, cuentaExterna);
+
+    const [pedido] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, "999")));
+    const eventos = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidoEventos).where(eq(pedidoEventos.pedidoId, pedido.id)));
+
+    expect(eventos.map((e) => e.paso).sort()).toEqual(["despacho", "entrega", "pago", "venta"]);
+    expect(eventos.every((e) => e.actorTipo === "sistema")).toBe(true);
+  });
+
+  it("un pedido sin pago aprobado ni envío solo registra el evento de venta", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/orders/search")) {
+        const offset = Number(new URL(url).searchParams.get("offset"));
+        if (offset > 0) return respuestaJson({ results: [] });
+        return respuestaJson({
+          results: [{ id: 888, date_created: "2026-09-05T10:00:00.000-04:00", status: "pending", total_amount: 30000, currency_id: "COP" }],
+        });
+      }
+      if (url.includes("/items/search")) return respuestaJson({ results: [] });
+      throw new Error(`fetch no esperado: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ejecutarImportacionInicial(empresaId, cuentaId, cuentaExterna);
+
+    const [pedido] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, "888")));
+    const eventos = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidoEventos).where(eq(pedidoEventos.pedidoId, pedido.id)));
+
+    expect(eventos.map((e) => e.paso)).toEqual(["venta"]);
   });
 
   it("importar dos veces la misma cuenta no duplica pedidos (índice único)", async () => {
