@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { intercambiarCodigo, obtenerNickname, renovarToken } from "./oauth";
+import {
+  calcularCodeChallenge,
+  construirUrlAutorizacion,
+  generarCodeVerifier,
+  intercambiarCodigo,
+  obtenerNickname,
+  renovarToken,
+} from "./oauth";
 
 function respuestaOk(data: unknown) {
   return { ok: true, status: 200, json: async () => data, text: async () => JSON.stringify(data) } as Response;
@@ -21,13 +28,17 @@ describe("OAuth de Mercado Libre (tarea 2.3)", () => {
     vi.restoreAllMocks();
   });
 
-  it("intercambiarCodigo manda grant_type=authorization_code con el code y el redirect_uri", async () => {
+  it("intercambiarCodigo manda grant_type=authorization_code con el code, el redirect_uri y el code_verifier (PKCE)", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue(
       respuestaOk({ access_token: "APP_USR-abc", refresh_token: "TG-xyz", expires_in: 21600, user_id: 123456 })
     );
 
-    const tokens = await intercambiarCodigo("un-code", "https://web-staging-d979.up.railway.app/api/ml/callback");
+    const tokens = await intercambiarCodigo(
+      "un-code",
+      "https://web-staging-d979.up.railway.app/api/ml/callback",
+      "un-code-verifier"
+    );
 
     expect(tokens).toEqual({
       accessToken: "APP_USR-abc",
@@ -41,6 +52,7 @@ describe("OAuth de Mercado Libre (tarea 2.3)", () => {
     expect(body.get("grant_type")).toBe("authorization_code");
     expect(body.get("code")).toBe("un-code");
     expect(body.get("redirect_uri")).toBe("https://web-staging-d979.up.railway.app/api/ml/callback");
+    expect(body.get("code_verifier")).toBe("un-code-verifier");
     expect(body.get("client_id")).toBe("id-de-prueba");
     expect(body.get("client_secret")).toBe("secret-de-prueba");
   });
@@ -63,21 +75,21 @@ describe("OAuth de Mercado Libre (tarea 2.3)", () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue(respuestaOk({ access_token: "APP_USR-abc", expires_in: 21600, user_id: 123456 }));
 
-    await expect(intercambiarCodigo("code", "https://x/callback")).rejects.toThrow(/refresh_token/);
+    await expect(intercambiarCodigo("code", "https://x/callback", "verifier")).rejects.toThrow(/refresh_token/);
   });
 
   it("si Mercado Libre responde con error, se ve el status y el cuerpo del error", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue(respuestaError(400, "invalid_grant: code ya usado o vencido"));
 
-    await expect(intercambiarCodigo("code-vencido", "https://x/callback")).rejects.toThrow(/400/);
+    await expect(intercambiarCodigo("code-vencido", "https://x/callback", "verifier")).rejects.toThrow(/400/);
   });
 
   it("sin ML_CLIENT_ID/SECRET en el entorno, falla antes de llamar a Mercado Libre", async () => {
     delete process.env.ML_CLIENT_ID;
     const fetchMock = vi.mocked(fetch);
 
-    await expect(intercambiarCodigo("code", "https://x/callback")).rejects.toThrow(/ML_CLIENT_ID/);
+    await expect(intercambiarCodigo("code", "https://x/callback", "verifier")).rejects.toThrow(/ML_CLIENT_ID/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -91,5 +103,27 @@ describe("OAuth de Mercado Libre (tarea 2.3)", () => {
     const [url, opciones] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.mercadolibre.com/users/me");
     expect((opciones!.headers as Record<string, string>).Authorization).toBe("Bearer APP_USR-abc");
+  });
+
+  it("generarCodeVerifier da un string distinto cada vez, de al menos 43 caracteres (mínimo de RFC 7636)", () => {
+    const a = generarCodeVerifier();
+    const b = generarCodeVerifier();
+    expect(a).not.toBe(b);
+    expect(a.length).toBeGreaterThanOrEqual(43);
+  });
+
+  it("calcularCodeChallenge es determinista (mismo verifier siempre da el mismo challenge)", () => {
+    const verifier = generarCodeVerifier();
+    expect(calcularCodeChallenge(verifier)).toBe(calcularCodeChallenge(verifier));
+    expect(calcularCodeChallenge(verifier)).not.toBe(verifier); // es un hash, no el mismo texto
+  });
+
+  it("construirUrlAutorizacion incluye code_challenge y code_challenge_method=S256", () => {
+    const url = construirUrlAutorizacion("https://x/callback", "un-challenge");
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("code_challenge")).toBe("un-challenge");
+    expect(parsed.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(parsed.searchParams.get("response_type")).toBe("code");
+    expect(parsed.searchParams.get("redirect_uri")).toBe("https://x/callback");
   });
 });

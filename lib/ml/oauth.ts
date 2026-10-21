@@ -1,3 +1,5 @@
+import { createHash, randomBytes } from "crypto";
+
 // Tarea 2.3 — habla directo con el endpoint OAuth de Mercado Libre. Sin
 // nada de base de datos acá (eso es lib/ml/cuentas.ts) para poder probar
 // esta parte sola, con fetch simulado.
@@ -5,7 +7,10 @@
 // Formato de petición confirmado contra el código real ya en producción
 // del Zilonix OS actual (zilonix-os-web/lib/mercadolibre.js y
 // lib/mercadolibre-promo.js) — no inventado, copiado del mismo que ya
-// funciona hoy con cuentas reales.
+// funciona hoy con cuentas reales. Esa app vieja ("Zilonix OS") no
+// exige PKCE; la app nueva ("Zilonix Plataforma"), sí — bug real
+// encontrado en vivo (ML respondió "code_verifier is a required
+// parameter" al primer intento de conectar un TESTUSER).
 
 export type TokensMl = {
   accessToken: string;
@@ -42,8 +47,10 @@ async function pedirTokens(body: URLSearchParams): Promise<TokensMl> {
 }
 
 // Primera conexión: cambia el "code" que ML pone en la URL de vuelta por
-// un par de tokens reales.
-export async function intercambiarCodigo(code: string, redirectUri: string): Promise<TokensMl> {
+// un par de tokens reales. code_verifier tiene que ser EXACTAMENTE el
+// mismo string (sin cifrar, en texto plano) que se usó para calcular el
+// code_challenge al armar el link de autorización — ML lo compara.
+export async function intercambiarCodigo(code: string, redirectUri: string, codeVerifier: string): Promise<TokensMl> {
   return pedirTokens(
     new URLSearchParams({
       grant_type: "authorization_code",
@@ -51,6 +58,7 @@ export async function intercambiarCodigo(code: string, redirectUri: string): Pro
       client_secret: requerirVariable("ML_CLIENT_SECRET"),
       code,
       redirect_uri: redirectUri,
+      code_verifier: codeVerifier,
     })
   );
 }
@@ -77,13 +85,28 @@ export async function renovarToken(refreshToken: string): Promise<TokensMl> {
 // del site_id de la empresa, no antes.
 const DOMINIO_AUTORIZACION = "https://auth.mercadolibre.com.co/authorization";
 
-export function construirUrlAutorizacion(redirectUri: string): string {
+export function construirUrlAutorizacion(redirectUri: string, codeChallenge: string): string {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: requerirVariable("ML_CLIENT_ID"),
     redirect_uri: redirectUri,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
   });
   return `${DOMINIO_AUTORIZACION}?${params.toString()}`;
+}
+
+// PKCE (RFC 7636) — el verifier es un secreto de un solo uso que nunca
+// sale del servidor hasta el intercambio final; lo que viaja en la URL
+// de autorización es solo su hash (code_challenge), para que nadie que
+// intercepte el "code" en el camino de vuelta pueda canjearlo solo sin
+// también tener el verifier original.
+export function generarCodeVerifier(): string {
+  return randomBytes(32).toString("base64url"); // 43 caracteres, cumple el mínimo de RFC 7636
+}
+
+export function calcularCodeChallenge(codeVerifier: string): string {
+  return createHash("sha256").update(codeVerifier).digest("base64url");
 }
 
 export async function obtenerNickname(accessToken: string): Promise<string> {
