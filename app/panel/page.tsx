@@ -102,6 +102,7 @@ export default async function PanelPage() {
               existía pero nunca quedó enlazada desde acá, solo se podía
               llegar escribiendo la URL a mano. */}
           <Link href="/panel/conectar-ml">Conectar Mercado Libre</Link>
+          <Link href="/panel/avisos-ml">Avisos de Mercado Libre</Link>
         </div>
       )}
 

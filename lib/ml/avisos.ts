@@ -1,6 +1,6 @@
 import { dbComoAvisoWebhook, dbComoEmpresa } from "@/db/empresa-context";
 import { avisosMl, cuentasMl } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, isNull, sql } from "drizzle-orm";
 
 export type AvisoMl = {
   resource: string;
@@ -11,12 +11,11 @@ export type AvisoMl = {
 
 export type ResultadoRecibirAviso = "guardado" | "duplicado" | "cuenta_desconocida";
 
-// Tarea 2.4 — adelanto parcial: solo RECIBE y GUARDA el aviso tal cual
-// llega. El trabajador que lo procesa de verdad (volver a pedirle el
-// dato real a la API de Mercado Libre, nunca confiar en lo que trae el
-// aviso) es el resto de la tarea 2.4, todavía sin construir — queda
-// marcado con `procesadoTs` vacío para que ese trabajador sepa qué le
-// falta.
+// Tarea 2.4 — RECIBE y GUARDA el aviso tal cual llega, rápido (un solo
+// INSERT), para poder responderle 200 a Mercado Libre sin demora. El
+// trabajador que lo procesa de verdad (lib/ml/trabajador.ts) corre
+// aparte, disparado por un cron — marca procesado_ts cuando confirma el
+// dato real contra la API.
 export async function recibirAviso(aviso: AvisoMl): Promise<ResultadoRecibirAviso> {
   const cuentaIdExterna = String(aviso.user_id);
 
@@ -44,4 +43,22 @@ export async function recibirAviso(aviso: AvisoMl): Promise<ResultadoRecibirAvis
   );
 
   return guardadas.length > 0 ? "guardado" : "duplicado";
+}
+
+export type ConteoAvisos = { recibidos: number; procesados: number; pendientes: number };
+
+// Tarea 2.4 — el criterio de "listo" pide un panel que muestre
+// "recibidos, procesados, 0 perdidos" (perdidos = pendientes que
+// llevan mucho tiempo sin procesar, algo que el trabajador en marcha
+// va bajando solo).
+export async function contarAvisos(empresaId: string): Promise<ConteoAvisos> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [fila] = await tx
+      .select({
+        recibidos: sql<number>`count(*)`.mapWith(Number),
+        pendientes: sql<number>`count(*) filter (where ${isNull(avisosMl.procesadoTs)})`.mapWith(Number),
+      })
+      .from(avisosMl);
+    return { recibidos: fila.recibidos, pendientes: fila.pendientes, procesados: fila.recibidos - fila.pendientes };
+  });
 }

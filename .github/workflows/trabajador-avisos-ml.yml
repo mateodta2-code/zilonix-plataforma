@@ -1,0 +1,22 @@
+name: Procesar avisos pendientes de Mercado Libre (staging)
+
+# Tarea 2.4 — apunta a STAGING a propósito: todavía no hay ninguna
+# cuenta real conectada en producción (solo se probó con un TESTUSER y
+# una cuenta real de Mateo en staging). Antes de conectar cuentas reales
+# en producción, agregar un workflow gemelo apuntando a
+# https://web-production-af270.up.railway.app (o al dominio real que
+# corresponda si ya se ejecutó la mudanza de la decisión D7).
+on:
+  schedule:
+    - cron: "* * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  procesar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Procesar lote de avisos pendientes
+        run: |
+          curl -sf -X POST "https://web-staging-d979.up.railway.app/api/ml/trabajador" \
+            -H "x-trabajador-secret: ${{ secrets.TRABAJADOR_SECRET_STAGING }}" \
+            --max-time 60

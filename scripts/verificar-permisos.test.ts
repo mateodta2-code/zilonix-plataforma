@@ -34,6 +34,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/conectar-ml/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/actions.ts",
+  "app/panel/avisos-ml/page.tsx",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
 ]);
@@ -61,6 +62,8 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/api/version/route.ts": "expone solo el número de versión, nunca datos de ninguna empresa",
   "app/api/ml/webhooks/route.ts":
     "Mercado Libre llama esta ruta directo, sin sesión de usuario — el permiso real es dbComoAvisoWebhook() (db/empresa-context.ts), que solo deja ver la fila de cuentas_ml cuyo user_id coincide con el del aviso, nunca las de otra empresa",
+  "app/api/ml/trabajador/route.ts":
+    "la llama un cron, sin sesión de usuario — el permiso real es el secreto compartido x-trabajador-secret, y la conexión trabajador_user (db/trabajador-context.ts) solo puede tocar avisos_ml, ninguna otra tabla",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {
