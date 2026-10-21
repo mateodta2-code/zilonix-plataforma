@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, like } from "drizzle-orm";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { avisosMl, cuentasMl, empresas } from "@/db/schema";
@@ -115,11 +115,12 @@ describe("trabajador de avisos de Mercado Libre (tarea 2.4)", () => {
   });
 
   it("carga real: 1.000 avisos pendientes se procesan todos en lotes, 0 perdidos", async () => {
+    const PREFIJO = `carga-${randomUUID()}-`; // única por corrida, para distinguir estos 1.000 de cualquier otro aviso pendiente que deje otra prueba en la misma base compartida de CI
     const valores = Array.from({ length: 1000 }, (_, i) => ({
       empresaId,
       cuentaIdExterna: cuentaExterna,
       topic: "orders_v2",
-      resource: `/orders/carga-${i}`,
+      resource: `/orders/${PREFIJO}${i}`,
       enviadoTs: new Date(Date.now() - i), // cada uno con un momento de envío distinto, por el índice único
     }));
     // Insertar de a 100 — un solo INSERT de 1.000 filas es más lento de
@@ -128,19 +129,29 @@ describe("trabajador de avisos de Mercado Libre (tarea 2.4)", () => {
       await dbComoEmpresa(empresaId, (tx) => tx.insert(avisosMl).values(valores.slice(i, i + 100)));
     }
 
-    let totalProcesados = 0;
-    let totalFallidos = 0;
     // El trabajador real corre en lotes (TAMAÑO_LOTE=50) disparado por
     // un cron cada minuto — acá se simula esa secuencia de pasadas
     // hasta vaciar la cola, en vez de esperar 20 minutos de verdad.
+    // OJO: procesarAvisosPendientes() barre avisos de CUALQUIER empresa
+    // a propósito (ver lib/ml/trabajador.ts) — en esta base compartida
+    // de CI, otra prueba (ej. "un error real" de arriba, que deja un
+    // aviso pendiente a propósito) puede sumar a los contadores de cada
+    // pasada. Por eso la prueba real no es el conteo global, sino
+    // confirmar puntualmente que ESTOS 1.000 (por el prefijo único)
+    // quedaron todos procesados.
     for (let pasada = 0; pasada < 25; pasada++) {
       const resultado = await procesarAvisosPendientes();
-      totalProcesados += resultado.procesados;
-      totalFallidos += resultado.fallidos;
       if (resultado.recibidosPendientes === 0) break;
     }
 
-    expect(totalProcesados).toBe(1000);
-    expect(totalFallidos).toBe(0);
+    const pendientesDeEstaCarga = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select({ id: avisosMl.id }).from(avisosMl).where(and(isNull(avisosMl.procesadoTs), like(avisosMl.resource, `/orders/${PREFIJO}%`)))
+    );
+    expect(pendientesDeEstaCarga).toHaveLength(0); // 0 perdidos, de los 1.000 propios
+
+    const procesadosDeEstaCarga = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select({ id: avisosMl.id }).from(avisosMl).where(like(avisosMl.resource, `/orders/${PREFIJO}%`))
+    );
+    expect(procesadosDeEstaCarga).toHaveLength(1000); // los 1.000 están, ninguno se perdió en el camino
   }, 120_000);
 });
