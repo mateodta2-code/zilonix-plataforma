@@ -1,21 +1,12 @@
 import { NextResponse } from "next/server";
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 import { creaContador, limpiarVencidos, superaLimite } from "@/lib/limite-peticiones";
+import { esRutaPublica } from "@/lib/rutas-publicas";
 
 // Tarea 1.5 — toda ruta cerrada por defecto (regla de CLAUDE.md), salvo
-// las que se listan acá explícitamente. Mismo criterio que ya usa
-// Zilonix OS: la excepción se justifica, nunca por omisión.
-const esRutaPublica = createRouteMatcher([
-  "/",
-  "/api/version",
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  // Tarea 1.7 — quien recibe una invitación por correo todavía no
-  // tiene sesión (puede ni tener cuenta). La propia página valida el
-  // token contra la base (lib/invitaciones.ts) — el permiso real es
-  // ese token, no el middleware.
-  "/invitacion(.*)",
-]);
+// las que se listan explícitamente en lib/rutas-publicas.ts (se saca a
+// su propio archivo en el fix de 2026-10-21 — ver ese archivo para el
+// motivo real y la lista completa).
 
 // Tarea 1.10 — "límite de peticiones por usuario y por IP". La lógica
 // en sí vive en lib/limite-peticiones.ts (probada sola, sin Next ni
@@ -51,16 +42,33 @@ export default clerkMiddleware(async (auth, req) => {
     limpiarVencidos(contadorPorUsuario, VENTANA_MS);
   }
 
+  // El límite por IP corre ANTES que cualquier chequeo de sesión —
+  // igual que antes del fix de 2026-10-21, a propósito: un 429 nunca
+  // debe depender de si Clerk pudo o no resolver la sesión.
   if (superaLimite(contadorPorIp, ipDeLaPeticion(req), LIMITE_POR_IP, VENTANA_MS)) {
     return new NextResponse("Demasiadas peticiones desde esta red — espera un minuto.", { status: 429 });
   }
 
-  if (!esRutaPublica(req)) {
-    await auth.protect();
+  const sesion = await auth();
+
+  // Fix real (2026-10-21) — acá antes había `await auth.protect()`.
+  // Nunca más: para una ruta no pública sin sesión, `auth.protect()`
+  // intenta un rewrite al handshake de Clerk que, detrás del proxy de
+  // Railway, se cuelga ~30s y termina en 500 (ver
+  // lib/rutas-publicas.ts para el diagnóstico completo, con el issue
+  // real de Clerk). Se reemplaza por el chequeo explícito de abajo,
+  // que nunca depende de ese mecanismo: un 401 inmediato para `/api/*`
+  // (una API nunca necesita el handshake de navegador), o un redirect
+  // directo a `/sign-in` para una página — ambos caminos responden en
+  // milisegundos, con o sin `Accept: text/html`.
+  if (!sesion.userId && !esRutaPublica(req)) {
+    if (req.nextUrl.pathname.startsWith("/api/")) {
+      return NextResponse.json({ ok: false, error: "no_autenticado" }, { status: 401 });
+    }
+    return sesion.redirectToSignIn({ returnBackUrl: req.url });
   }
 
-  const { userId } = await auth();
-  if (userId && superaLimite(contadorPorUsuario, userId, LIMITE_POR_USUARIO, VENTANA_MS)) {
+  if (sesion.userId && superaLimite(contadorPorUsuario, sesion.userId, LIMITE_POR_USUARIO, VENTANA_MS)) {
     return new NextResponse("Demasiadas peticiones de tu cuenta — espera un minuto.", { status: 429 });
   }
 });

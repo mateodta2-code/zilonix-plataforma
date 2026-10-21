@@ -59,6 +59,20 @@ const nextConfig = {
     NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: "/",
     NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: "/",
   },
+  // Fix middleware (2026-10-21) — "/login" no existe como página (la
+  // real es "/sign-in"), pero cualquiera que le pegue de todos modos
+  // (un link viejo, un bookmark) antes caía en el mismo bug del
+  // middleware (ver lib/rutas-publicas.ts): sin sesión y sin
+  // `Accept: text/html`, se colgaba 30s y terminaba en 500. Los
+  // redirects de next.config.js corren ANTES que el middleware
+  // (orden real documentado por Next.js: headers → redirects →
+  // middleware → rutas), así que esto nunca llega a pasar por ahí.
+  // "/registro" no se agrega: no se usa en ningún lado del código hoy
+  // (confirmado con `git grep`), agregar un redirect sin uso real
+  // sería adivinar.
+  async redirects() {
+    return [{ source: "/login", destination: "/sign-in", permanent: false }];
+  },
   // Tarea 1.10 — blindaje web. Pendiente real antes de dar esto por
   // cerrado del todo: probar en vivo registro, login, 2FA y /cuenta
   // con esta CSP activa — una CSP mal armada no rompe el build, rompe

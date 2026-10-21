@@ -26,7 +26,7 @@ Es la reconstrucción, desde cero y con estos estándares, de lo que hoy hace el
 ### Cómo se separan las empresas (léelo antes de tocar cualquier tabla nueva)
 
 1. **Toda tabla con datos de una empresa tiene una columna `empresa_id`** y una política de RLS (`db/rls-setup.sql`) que compara esa columna contra `current_setting('app.empresa_actual')`.
-2. **La aplicación nunca se conecta a Postgres con el superusuario.** Hay tres usuarios de base, cada uno más limitado que el anterior:
+2. **La aplicación nunca se conecta a Postgres con el superusuario.** Hay tres usuarios de base RESTRINGIDOS, cada uno más limitado que el anterior, más el superusuario que da Railway (que solo se usa para migraciones, nunca para una consulta de negocio):
    - `app_user` (`DATABASE_URL_APP`) — el único que usa el tráfico normal de la app. Respeta RLS siempre.
    - `superadmin_user` (`DATABASE_URL_SUPERADMIN`) — solo lectura de cifras agregadas para el panel `/superadmin`, nunca datos de negocio de una empresa sin acceso temporal explícito.
    - `trabajador_user` (`DATABASE_URL_TRABAJADOR`) — solo puede tocar `avisos_ml`, para el proceso que procesa notificaciones de Mercado Libre.
@@ -65,7 +65,8 @@ docs/
   ESTADO.md       Foto actual del proyecto (ver arriba)
   modelo-datos.md, rls.md, conectores.md, matriz-permisos.md   Documentación de diseño específica
 scripts/          Scripts de mantenimiento (generar/verificar la matriz de permisos)
-middleware.ts     Toda ruta cerrada por defecto salvo las listadas explícitamente (Clerk + límite de peticiones)
+middleware.ts     Toda ruta cerrada por defecto salvo las listadas en lib/rutas-publicas.ts (Clerk + límite de peticiones)
+lib/rutas-publicas.ts   Las únicas rutas sin sesión de Clerk — ver la regla de "rutas de máquina" en Seguridad, abajo
 ```
 
 ## Comandos
@@ -101,6 +102,7 @@ Estas reglas aplican tanto a este repo (`zilonix-plataforma`) como al Zilonix OS
 
 - **Ningún secreto en texto plano en un chat, un commit o un comando.** Claves, tokens, contraseñas: se manejan directo en Railway (o el gestor de secretos que corresponda), nunca pegados en una conversación ni materializados en un comando de terminal.
 - **Toda ruta cerrada por defecto.** Si una ruta nueva necesita quedar pública o sin sesión, eso se justifica explícitamente (en el PR, en este documento) — nunca por omisión.
+- **Una ruta que llama una MÁQUINA (un webhook, un cron, el callback de un OAuth) se declara pública en `lib/rutas-publicas.ts` y se autentica con su propio mecanismo — nunca con la sesión de Clerk del middleware.** Regla real, no teórica: `auth.protect()` en una ruta sin sesión y sin `Accept: text/html` (el perfil exacto de una máquina) se cuelga ~30s detrás del proxy de Railway y termina en 500 — bug real encontrado en vivo el 2026-10-21, corregido en el PR `fix-middleware-rutas-maquina` (detalle completo en `docs/ESTADO.md`, "Problemas conocidos §1"). **Toda ruta exenta de permisos en `scripts/verificar-permisos.test.ts` por ser "sin sesión de usuario" tiene que estar también en `lib/rutas-publicas.ts`** — ese mismo archivo de pruebas lo comprueba solo. Rutas públicas hoy: `/`, `/sign-in`, `/sign-up`, `/invitacion/:token`, `/api/version`, `/api/ml/webhooks` (valida forma + `application_id` contra `ML_CLIENT_ID`), `/api/ml/trabajador` (secreto compartido con `crypto.timingSafeEqual`), `/api/ml/callback` (state + PKCE, y el propio handler vuelve a exigir sesión y permiso real — ver `lib/rutas-publicas.ts` para por qué esta es pública en el middleware pero sigue protegida en `scripts/verificar-permisos.test.ts`).
 - **Nada de rutas de diagnóstico ni de setup en producción sin sesión de admin + auditoría.** Los `ver-*`, `test-*`, `poc-*` y reparaciones corren una vez y se apagan o quedan detrás de `SETUP_HABILITADO`.
 - **Tokens de marketplaces y credenciales de DIAN siempre cifrados**, con versión de clave para poder rotarla sin perder acceso.
 - **Nunca confiar en el contenido de un webhook o aviso externo** (ML, pasarela de pagos, etc.) — se usa solo como señal para ir a consultar el dato real con la API y el token correspondiente.
@@ -110,10 +112,10 @@ Estas reglas aplican tanto a este repo (`zilonix-plataforma`) como al Zilonix OS
 
 ### Proceso — lo que siempre se respeta
 
-- **Nada pasa a producción sin pasar antes por staging.** Cada entrega sube el número de versión (visible en el pie de página y en `/api/version`) y queda en `docs/CHANGELOG.md`.
+- **Nada pasa a producción sin pasar antes por staging.** Cada entrega con código sube el número de versión (visible en el pie de página y en `/api/version`) y queda en `docs/CHANGELOG.md` — un PR que solo toca documentación (sin ningún cambio de código) queda exento de subir la versión, pero igual se registra en el CHANGELOG.
 - **Nunca `railway up`.** Deploy solo vía `git push` (auto-deploy) o `railway redeploy`. Siempre verificar el deploy uno mismo (ej. consultando `/api/version` o el endpoint correspondiente) antes de dar algo por terminado.
 - **Cada cambio de tablas va en una migración versionada** (Drizzle, en la plataforma nueva) — nunca `CREATE TABLE IF NOT EXISTS` suelto dentro de una ruta.
-- **Nunca commits directos a `main` sin pasar por Pull Request.** Toda rama se fusiona por PR, con CI en verde.
+- **Nunca commits directos a `main` sin pasar por Pull Request, con CI en verde antes de fusionar.** `main` todavía no tiene protección de rama activada en GitHub (eso lo hace Mateo a mano, no Claude Code) — mientras no la tenga, esta regla depende de que quien fusiona la respete, no de que GitHub la fuerce. Un PR fusionado sin esperar el CI es una señal real de que falta esa protección, no una excepción válida.
 - **Todo cambio a la extensión de Chrome exige reinstalación completa** del lado del usuario (nunca alcanza con "Recargar") — bajar el ZIP solo después de confirmar que `version.json` ya muestra la versión nueva.
 
 ### Cómo se trabaja con Claude Code en este proyecto

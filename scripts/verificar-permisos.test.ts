@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative } from "path";
+import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
+import { esRutaPublica } from "@/lib/rutas-publicas";
 
 // Tarea 1.8 — "ruta sin [requierePermiso()] = el CI falla", literal.
 //
@@ -118,6 +120,49 @@ describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candad
     const vigentes = new Set(archivos);
     for (const ruta of [...RUTAS_PROTEGIDAS, ...RUTAS_SUPERADMIN, ...Object.keys(RUTAS_EXENTAS)]) {
       expect(vigentes.has(ruta), `${ruta} está listada pero el archivo ya no existe — bórrala de scripts/verificar-permisos.test.ts`).toBe(true);
+    }
+  });
+});
+
+// Fix real (2026-10-21) — RUTAS_EXENTAS (exenta del permiso de MÓDULO,
+// requierePermiso) y esRutaPublica de lib/rutas-publicas.ts (exenta de
+// la SESIÓN de Clerk en el middleware) responden preguntas distintas:
+// "/panel" está exenta de permiso de módulo pero sí exige sesión real
+// (lo exige el propio código de la página), así que forzar que las dos
+// listas coincidan completas estaría mal. La incoherencia real que
+// causó el bug del 21/10 fue más angosta: una ruta de MÁQUINA (nadie
+// navega ahí con sesión — un webhook, un cron) exenta de permiso de
+// módulo tiene que estar TAMBIÉN en esRutaPublica sin excepción; si no,
+// el middleware la protege con auth.protect() igual, y una máquina sin
+// sesión se cuelga 30s contra el handshake de Clerk (ver
+// lib/rutas-publicas.ts para el diagnóstico completo). Se identifican
+// por su propio motivo en RUTAS_EXENTAS, que ya dice literalmente "sin
+// sesión de usuario" cuando aplica — no es un patrón nuevo, ya estaba
+// en el texto real desde que se escribieron esos dos motivos.
+const RUTAS_EXENTAS_DE_MAQUINA_A_URL: Record<string, string> = {
+  "app/api/ml/webhooks/route.ts": "/api/ml/webhooks",
+  "app/api/ml/trabajador/route.ts": "/api/ml/trabajador",
+};
+
+describe("fix middleware (2026-10-21) — una ruta de máquina exenta de permiso de módulo también tiene que ser pública en el middleware", () => {
+  for (const [relPath, motivo] of Object.entries(RUTAS_EXENTAS)) {
+    if (!motivo.includes("sin sesión de usuario")) continue;
+    it(`${relPath} está documentada como ruta de máquina y por eso debe ser pública en lib/rutas-publicas.ts`, () => {
+      const url = RUTAS_EXENTAS_DE_MAQUINA_A_URL[relPath];
+      expect(
+        url,
+        `${relPath} dice "sin sesión de usuario" en su motivo (RUTAS_EXENTAS) pero no está mapeada en RUTAS_EXENTAS_DE_MAQUINA_A_URL de esta prueba — agrégala para poder comprobar que también es pública.`
+      ).toBeDefined();
+      expect(
+        esRutaPublica(new NextRequest(`https://verificar-permisos.test${url}`)),
+        `${relPath} (${url}) está exenta de permiso de módulo por ser una ruta de máquina sin sesión, pero NO está en lib/rutas-publicas.ts — el middleware la protegería con auth.protect() igual, que fue justo el bug real del 21/10 (se cuelga 30s y responde 500).`
+      ).toBe(true);
+    });
+  }
+
+  it("toda ruta de máquina de este mapa sigue existiendo en RUTAS_EXENTAS", () => {
+    for (const relPath of Object.keys(RUTAS_EXENTAS_DE_MAQUINA_A_URL)) {
+      expect(relPath in RUTAS_EXENTAS, `${relPath} ya no está en RUTAS_EXENTAS — bórrala de RUTAS_EXENTAS_DE_MAQUINA_A_URL en esta prueba.`).toBe(true);
     }
   });
 });
