@@ -243,9 +243,11 @@ export const publicaciones = pgTable(
     titulo: text("titulo").notNull(),
     precio: numeric("precio", { precision: 14, scale: 2 }).notNull(),
     stock: integer("stock").notNull(),
-    // Enlace con SKU propio: tarea 2.6, todavía no — queda vacío a
-    // propósito hasta que esa tarea lo use.
-    skuId: uuid("sku_id"),
+    // Enlace con SKU propio (tarea 2.6). Cambiar a qué SKU apunta una
+    // publicación nunca debe poder romper un pedido ya hecho — por
+    // eso un pedido (tarea 2.7) va a guardar su propio SKU en el
+    // momento de la venta, nunca va a leerlo en vivo desde acá.
+    skuId: uuid("sku_id").references(() => skus.id, { onDelete: "set null" }),
     importadoTs: timestamp("importado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -267,3 +269,46 @@ export const importacionesMl = pgTable("importaciones_ml", {
   iniciadoTs: timestamp("iniciado_ts", { withTimezone: true }).notNull().defaultNow(),
   completadoTs: timestamp("completado_ts", { withTimezone: true }),
 });
+
+// Tarea 2.6 — SKU maestro. "Variantes" (ej. CAMISETA-AZUL-M,
+// CAMISETA-AZUL-L) se resuelven con SKUs propios de cada una,
+// agrupados solo por `nombreBase` para mostrarlos juntos en la lista —
+// no hace falta una tabla de variantes aparte, cada variante YA es un
+// SKU completo con su propio código, su propio stock real (el de la
+// publicación enlazada) y su propio historial.
+export const skus = pgTable(
+  "skus",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    codigo: text("codigo").notNull(),
+    nombre: text("nombre").notNull(),
+    nombreBase: text("nombre_base"), // agrupa variantes del mismo producto en la lista; vacío si no aplica
+    esKit: boolean("es_kit").notNull().default(false),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Un código de SKU tiene que ser único DENTRO de una empresa —
+    // nunca entre empresas distintas, cada una arma su propio catálogo.
+    codigoUnico: uniqueIndex("skus_empresa_codigo_unico").on(t.empresaId, t.codigo),
+  })
+);
+
+// Solo tiene filas cuando skus.es_kit = true — qué otros SKUs (y
+// cuántos de cada uno) componen ese kit. Un kit nunca puede estar
+// compuesto de sí mismo (chequeado en lib/ml/sku.ts, no acá — una
+// restricción CHECK no puede comparar contra otra fila de la misma
+// tabla).
+export const kitComponentes = pgTable(
+  "kit_componentes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    skuKitId: uuid("sku_kit_id").notNull().references(() => skus.id, { onDelete: "cascade" }),
+    skuComponenteId: uuid("sku_componente_id").notNull().references(() => skus.id, { onDelete: "restrict" }),
+    cantidad: integer("cantidad").notNull(),
+  },
+  (t) => ({
+    componenteUnico: uniqueIndex("kit_componentes_unico").on(t.skuKitId, t.skuComponenteId),
+  })
+);
