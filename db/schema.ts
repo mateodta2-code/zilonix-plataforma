@@ -1,5 +1,12 @@
 import { boolean, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
+import type {
+  DatosPorCuenta,
+  DimensionesProducto,
+  ImagenProducto,
+  ResultadoPublicacionCuenta,
+  VariantesProducto,
+} from "@/lib/ml/publicar-tipos";
 
 // Tarea 1.2 del plan técnico — diseño aprobado por Mateo (14/10/2026)
 // antes de construir. Diagrama en palabras simples en docs/modelo-datos.md.
@@ -23,6 +30,10 @@ export const actorTipoEnum = pgEnum("actor_tipo", ["persona", "sistema"]);
 // Colecta, fulfillment = Full (nunca imprime guía física — ML la
 // rechaza con "INVALID_SHIPMENT_FF_PUBLIC", no aplica despacho).
 export const logisticTypeEnum = pgEnum("logistic_type", ["self_service", "xd_drop_off", "cross_docking", "fulfillment", "otro"]);
+// Tarea 2.11 — estado de un intento de publicación. "con_errores" cubre
+// tanto "ninguna cuenta funcionó" como "algunas sí, otras no" (mismo
+// criterio ya usado en el sistema actual — ver lib/ml/publicar.ts).
+export const estadoProductoMlEnum = pgEnum("estado_producto_ml", ["borrador", "publicando", "publicado", "con_errores"]);
 // Tarea 2.7 — los 8 pasos de trazabilidad del plan maestro
 // (docs/plan-maestro.md, sección 5, zilonix-os-web): "venta → pago →
 // factura → empaque → despacho → entrega → novedades → dinero
@@ -381,3 +392,44 @@ export const despachosMl = pgTable(
     shipmentUnico: uniqueIndex("despachos_ml_empresa_shipment_unico").on(t.empresaId, t.shipmentIdExterno),
   })
 );
+
+// Tarea 2.11 ("Publicar producto y clip") — el formulario SIEMPRE
+// persiste antes de tocar Mercado Libre (mismo diseño confirmado en el
+// sistema actual: el publicador real nunca recibe un objeto en
+// memoria, siempre relee esta fila) — así un reintento o un diagnóstico
+// posterior tiene de dónde partir. `porCuenta`/`cuentasSeleccionadas`
+// usan el `id` interno de cuentas_ml como clave (no un alias de texto
+// como en el sistema actual): es el identificador real y único que ya
+// tenemos en la plataforma nueva, sin inventar uno nuevo.
+export const productosMl = pgTable("productos_ml", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  // Nombre interno — se llena DESPUÉS de publicar con el título de la
+  // primera cuenta (mismo criterio real del sistema actual), nunca
+  // antes. Antes de eso queda vacío.
+  titulo: text("titulo"),
+  condicion: text("condicion").notNull().default("new"),
+  precio: numeric("precio", { precision: 14, scale: 2 }).notNull(),
+  stock: integer("stock").notNull().default(1),
+  envioGratis: boolean("envio_gratis").notNull().default(false),
+  sku: text("sku"),
+  dimensiones: jsonb("dimensiones").$type<DimensionesProducto>().notNull().default({}),
+  imagenes: jsonb("imagenes").$type<ImagenProducto[]>().notNull().default([]),
+  // { [ATTR_ID]: "valor texto" } — lo que la persona llenó a mano,
+  // obligatorio o no (ver lib/ml/publicar-reglas.ts).
+  atributosExtra: jsonb("atributos_extra").$type<Record<string, string>>().notNull().default({}),
+  // Clave compuesta "${siteId}::${titulo}" → categoryId — override manual
+  // cuando la detección automática se equivocó, nunca se vuelve a
+  // adivinar por título una vez elegida a mano.
+  categoriasOverride: jsonb("categorias_override").$type<Record<string, string>>().notNull().default({}),
+  variantes: jsonb("variantes").$type<VariantesProducto | null>(),
+  // { [cuentaMlId]: { titulo, descripcion, portadaUrl, portadasPorVariante } }
+  porCuenta: jsonb("por_cuenta").$type<Record<string, DatosPorCuenta>>().notNull().default({}),
+  cuentasSeleccionadas: jsonb("cuentas_seleccionadas").$type<string[]>().notNull().default([]),
+  modoPrueba: boolean("modo_prueba").notNull().default(false),
+  estado: estadoProductoMlEnum("estado").notNull().default("borrador"),
+  resultado: jsonb("resultado").$type<ResultadoPublicacionCuenta[] | null>(),
+  publicadoTs: timestamp("publicado_ts", { withTimezone: true }),
+  creadoPorUsuarioId: uuid("creado_por_usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+  creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+});

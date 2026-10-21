@@ -36,7 +36,12 @@ export default async function SkuPage() {
 
   return (
     <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>SKU</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700 }}>SKU</h1>
+        <Link href="/panel/publicar" style={{ fontSize: 13 }}>
+          Publicar en Mercado Libre
+        </Link>
+      </div>
 
       {publicacionesSinSku.length > 0 && (
         <div style={{ padding: 10, background: "#fff8e1", borderRadius: 6, fontSize: 14, marginTop: 16 }}>
