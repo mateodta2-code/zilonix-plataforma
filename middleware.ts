@@ -20,9 +20,16 @@ const esRutaPublica = createRouteMatcher([
 // Tarea 1.10 — "límite de peticiones por usuario y por IP". La lógica
 // en sí vive en lib/limite-peticiones.ts (probada sola, sin Next ni
 // Clerk); acá solo se decide CUÁNDO y con QUÉ clave llamarla.
+//
+// Configurable por variable de entorno (pedido real de Mateo, 21/10:
+// en plena construcción, probando a mano y con curls repetidos contra
+// staging, el límite pensado para tráfico real de producción frena el
+// trabajo sin que haya ningún abuso real que proteger todavía). En
+// producción, sin la variable puesta, se queda en el valor estricto de
+// siempre — este cambio nunca afloja nada ahí por accidente.
 const VENTANA_MS = 60_000;
-const LIMITE_POR_IP = 180; // ~3 peticiones por segundo sostenidas
-const LIMITE_POR_USUARIO = 300; // más alto: varias pestañas/pestaña activa cuentan como el mismo usuario
+const LIMITE_POR_IP = Number(process.env.LIMITE_PETICIONES_POR_IP) || 180; // ~3 peticiones por segundo sostenidas
+const LIMITE_POR_USUARIO = Number(process.env.LIMITE_PETICIONES_POR_USUARIO) || 300; // más alto: varias pestañas/pestaña activa cuentan como el mismo usuario
 const contadorPorIp = creaContador();
 const contadorPorUsuario = creaContador();
 let peticionesDesdeLimpieza = 0;
