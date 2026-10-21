@@ -35,6 +35,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/conectar-ml/[cuentaId]/desconectar/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/actions.ts",
   "app/panel/avisos-ml/page.tsx",
+  "app/panel/sku/page.tsx",
+  "app/panel/sku/actions.ts",
+  "app/panel/sku/sin-vincular/page.tsx",
+  "app/panel/sku/sin-vincular/actions.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
 ]);

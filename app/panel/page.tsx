@@ -13,13 +13,14 @@ import { cambiarEmpresaActiva } from "./actions";
 // negocio de verdad (ventas, inventario) llegan en la Fase 2.
 //
 // Tarea 1.7 — los módulos del nav se filtran por lo que el rol de esta
-// persona puede consultar (ej. el Operador no ve "finanzas"). Solo
-// "finanzas" (1.7) y "configuracion" (1.9, la Actividad) tienen una
-// pantalla real detrás; el resto es a propósito un link que todavía
-// no lleva a ningún lado (llegan en Fases 2 y 3).
+// persona puede consultar (ej. el Operador no ve "finanzas"). "finanzas"
+// (1.7), "configuracion" (1.9, la Actividad) e "inventario" (2.6, SKU)
+// tienen una pantalla real detrás; el resto es a propósito un link que
+// todavía no lleva a ningún lado (llegan en Fase 3).
 const PANTALLA_POR_MODULO: Record<string, string> = {
   finanzas: "/panel/finanzas",
   configuracion: "/panel/actividad",
+  inventario: "/panel/sku",
 };
 export default async function PanelPage() {
   const usuario = await obtenerOCrearUsuarioActual();

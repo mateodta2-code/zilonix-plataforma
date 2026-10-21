@@ -28,7 +28,7 @@ GRANT CONNECT ON DATABASE railway TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria, accesos_temporales, cuentas_ml, avisos_ml,
-  pedidos, publicaciones, importaciones_ml
+  pedidos, publicaciones, importaciones_ml, skus, kit_componentes
   TO app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
@@ -93,6 +93,10 @@ ALTER TABLE publicaciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE publicaciones FORCE ROW LEVEL SECURITY;
 ALTER TABLE importaciones_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE importaciones_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE skus ENABLE ROW LEVEL SECURITY;
+ALTER TABLE skus FORCE ROW LEVEL SECURITY;
+ALTER TABLE kit_componentes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kit_componentes FORCE ROW LEVEL SECURITY;
 
 -- La tabla "usuarios" NO lleva RLS por empresa: una persona puede estar
 -- en varias empresas (decisión D2), así que no tiene una sola
@@ -215,6 +219,14 @@ CREATE POLICY aislamiento_publicaciones ON publicaciones
 
 DROP POLICY IF EXISTS aislamiento_importaciones_ml ON importaciones_ml;
 CREATE POLICY aislamiento_importaciones_ml ON importaciones_ml
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_skus ON skus;
+CREATE POLICY aislamiento_skus ON skus
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_kit_componentes ON kit_componentes;
+CREATE POLICY aislamiento_kit_componentes ON kit_componentes
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- Tarea 2.4 — política APARTE, con TO trabajador_user: el trabajador de
