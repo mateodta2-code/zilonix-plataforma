@@ -34,6 +34,7 @@ Foto del proyecto al **2026-10-22**. Esto cambia después de cada tarea — la f
 - **DIAN / facturación (Fase 3)**: sin empezar, y sin proveedor elegido todavía — rondas de investigación citadas en el plan técnico comparan Factus, Alanube y Plemsi, pero no hay decisión. `/panel/finanzas` que existe hoy es solo una pantalla de demostración de permisos (tarea 1.7), no factura nada real.
 - **2FA obligatorio (Dueño/Contador) y Clerk en modo Production**: ver matiz en "Qué está terminado" — ambos pendientes, con un costo real de Clerk por confirmar antes de pasar a Production.
 - **Fases 4 (Piloto pagado) y 5 (Escalar)**: sin empezar.
+- **Z-MT-11 (issue #63) — backups de Postgres:** el runbook (`docs/runbook-backups.md`) y el script de conteos (`npx tsx scripts/comparar-conteos.ts`, que además se detiene si la conexión no salta RLS) están escritos. Falta que Mateo confirme en Railway que los backups de volumen están activos en staging y en producción (frecuencia y retención anotadas en la tabla del runbook) y que restaure en una base temporal. Ninguna cadena de conexión se pega en el issue.
 - **Aviso automático a FullyLemon cuando cambia el estado de una guía de Mercado Libre**: se le pidió a FullyLemon el detalle real de su endpoint — esperando su respuesta antes de construir nada (no se adivinó el contrato).
 
 ## Decisiones que tomamos y por qué
@@ -90,6 +91,8 @@ Solo los nombres — ningún valor real vive ni debe vivir en este repositorio. 
 **Deuda conocida del límite de peticiones (tarea 1.10)**, documentada acá para no perderla: la IP se toma del primer valor de `x-forwarded-for`, que un cliente puede falsificar; y el contador vive en memoria del proceso, así que se reinicia en cada deploy. Suficiente para hoy (un solo servicio `web`, sin abuso real que proteger todavía), no para cuando haya más de una instancia.
 
 ## Próximos pasos pensados (en orden)
+
+Antes del piloto (P0, issue #63): Mateo ejecuta `docs/runbook-backups.md` en staging y en producción. El ensayo restaura en un Postgres temporal y compara conteos con `npx tsx scripts/comparar-conteos.ts`.
 
 1. **Arreglar el middleware** (este PR, `fix-middleware-rutas-maquina`): rutas de máquina públicas con su propia autenticación, `/api/*` sin sesión → 401 inmediato, `/login` → `/sign-in`, sin depender del rewrite de Clerk que se cuelga. Es la prioridad real — bloquea la tarea 2.4 y cualquier prueba real con Mercado Libre, y no depende de que Railway se recupere.
 2. Confirmar que el túnel privado a Postgres de staging ya responde; comprobar `drizzle.__drizzle_migrations` ahí; aplicar la migración y `db/rls-setup.sql` de las tareas 2.9 y 2.10 contra staging y producción (resolviendo antes la colisión de numeración, ver "Problemas conocidos §3"), correr sus pruebas contra una base real, y recién ahí abrir y fusionar sus Pull Requests.
