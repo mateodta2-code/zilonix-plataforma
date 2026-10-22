@@ -67,12 +67,22 @@ describe("POST /api/ml/webhooks (fix middleware, 2026-10-21)", () => {
     expect(body).toEqual({ ok: true, resultado: "guardado" });
   });
 
-  it("cuerpo demasiado grande (Content-Length) → 200 sin leer ni guardar", async () => {
+  it("cuerpo real de 20KB, SIN Content-Length → 200 {ok:false, motivo:'cuerpo demasiado grande'}, nunca llama recibirAviso", async () => {
     process.env.ML_CLIENT_ID = ML_CLIENT_ID_REAL;
-    const res = await POST(peticion({ resource: "/orders/1" }, { "content-length": String(20 * 1024) }));
+    // Mentir con un Content-Length chico no alcanzaría para engañar el
+    // tope real (ya no se usa ese header) — el cuerpo de verdad pesa
+    // 20KB y la petición no manda Content-Length en absoluto (simula
+    // chunked, el caso que el header no cubre).
+    const cuerpoGrande = JSON.stringify({ resource: "/orders/1", relleno: "x".repeat(20 * 1024) });
+    const req = new NextRequest("https://x.test/api/ml/webhooks", {
+      method: "POST",
+      body: cuerpoGrande,
+      headers: { "content-type": "application/json" },
+    });
+    const res = await POST(req);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.motivo).toBe("cuerpo demasiado grande");
+    expect(body).toEqual({ ok: false, motivo: "cuerpo demasiado grande" });
     expect(recibirAviso).not.toHaveBeenCalled();
   });
 });

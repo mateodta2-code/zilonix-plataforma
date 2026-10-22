@@ -34,4 +34,12 @@ describe("esRutaPublica (fix middleware, 2026-10-21)", () => {
     expect(esRutaPublica(peticion("/api/ml/conectar"))).toBe(false);
     expect(esRutaPublica(peticion("/api/ml/despachos/etiquetas"))).toBe(false);
   });
+
+  it("los patrones de rutas de máquina son EXACTOS — un path parecido pero distinto nunca cuela", () => {
+    // Confirma que "/api/ml/webhooks" y "/api/ml/callback" en
+    // PATRONES_RUTAS_PUBLICAS no son, por accidente, un prefijo que
+    // además dejaría pública cualquier ruta que empiece igual.
+    expect(esRutaPublica(peticion("/api/ml/webhooks/x"))).toBe(false);
+    expect(esRutaPublica(peticion("/api/ml/callbackx"))).toBe(false);
+  });
 });

@@ -25,6 +25,17 @@ const contadorPorIp = creaContador();
 const contadorPorUsuario = creaContador();
 let peticionesDesdeLimpieza = 0;
 
+// Mismo criterio real que lib/url-publica.ts (tarea 1.12: el header
+// "host" detrás del proxy de Railway puede no ser el dominio público
+// real) — reescrito acá sin next/headers porque el middleware corre en
+// una etapa previa a los Route Handlers/Server Components, donde esa
+// función no tiene su almacenamiento interno disponible.
+function urlPublicaBaseDesdeMiddleware(req: Request): string {
+  const dominio = process.env.RAILWAY_PUBLIC_DOMAIN ?? req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  const proto = process.env.RAILWAY_PUBLIC_DOMAIN ? "https" : req.headers.get("x-forwarded-proto") ?? "http";
+  return `${proto}://${dominio}`;
+}
+
 function ipDeLaPeticion(req: Request): string {
   // Railway (como la mayoría de PaaS) llega detrás de un proxy — la IP
   // real del visitante viene en x-forwarded-for, nunca en la conexión
@@ -34,18 +45,37 @@ function ipDeLaPeticion(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "sin-ip";
 }
 
+// Fix real (2026-10-21) — el webhook de Mercado Libre (ver
+// lib/rutas-publicas.ts) recibe avisos de TODAS las cuentas conectadas
+// de TODAS las empresas, probablemente desde un puñado de IPs
+// compartidas del lado de Mercado Libre — el límite por IP pensado
+// para una persona (180/min) podría frenar tráfico real sin que haya
+// ningún abuso, justo cuando más cuentas haya conectadas. Cuenta
+// aparte, bastante más generosa — nunca se le exime del límite por
+// completo (sigue siendo una URL pública en internet).
+const RUTA_WEBHOOKS_ML = "/api/ml/webhooks";
+const LIMITE_WEBHOOKS_ML = 1200;
+const contadorWebhooksMl = creaContador();
+
 export default clerkMiddleware(async (auth, req) => {
   peticionesDesdeLimpieza += 1;
   if (peticionesDesdeLimpieza >= 500) {
     peticionesDesdeLimpieza = 0;
     limpiarVencidos(contadorPorIp, VENTANA_MS);
     limpiarVencidos(contadorPorUsuario, VENTANA_MS);
+    limpiarVencidos(contadorWebhooksMl, VENTANA_MS);
   }
 
   // El límite por IP corre ANTES que cualquier chequeo de sesión —
   // igual que antes del fix de 2026-10-21, a propósito: un 429 nunca
-  // debe depender de si Clerk pudo o no resolver la sesión.
-  if (superaLimite(contadorPorIp, ipDeLaPeticion(req), LIMITE_POR_IP, VENTANA_MS)) {
+  // debe depender de si Clerk pudo o no resolver la sesión. El webhook
+  // de Mercado Libre usa su propia cuenta, más generosa (ver arriba) —
+  // nunca la de un usuario normal.
+  if (req.nextUrl.pathname === RUTA_WEBHOOKS_ML) {
+    if (superaLimite(contadorWebhooksMl, ipDeLaPeticion(req), LIMITE_WEBHOOKS_ML, VENTANA_MS)) {
+      return new NextResponse("Demasiadas peticiones — espera un minuto.", { status: 429 });
+    }
+  } else if (superaLimite(contadorPorIp, ipDeLaPeticion(req), LIMITE_POR_IP, VENTANA_MS)) {
     return new NextResponse("Demasiadas peticiones desde esta red — espera un minuto.", { status: 429 });
   }
 
@@ -65,7 +95,15 @@ export default clerkMiddleware(async (auth, req) => {
     if (req.nextUrl.pathname.startsWith("/api/")) {
       return NextResponse.json({ ok: false, error: "no_autenticado" }, { status: 401 });
     }
-    return sesion.redirectToSignIn({ returnBackUrl: req.url });
+    // req.url (en vez de la base pública real) ya dio el mismo bug que
+    // forzó RAILWAY_PUBLIC_DOMAIN en lib/url-publica.ts (tarea 1.12):
+    // detrás del proxy de Railway, el host que arma Next puede no ser
+    // el dominio público real. No se reusa urlPublicaBase() tal cual
+    // (depende de next/headers, que no funciona en el runtime del
+    // middleware, otra etapa previa a los Route Handlers/Server
+    // Components) — se recalcula el mismo criterio acá, directo contra
+    // el request del middleware, que ya trae sus propias cabeceras.
+    return sesion.redirectToSignIn({ returnBackUrl: `${urlPublicaBaseDesdeMiddleware(req)}${req.nextUrl.pathname}${req.nextUrl.search}` });
   }
 
   if (sesion.userId && superaLimite(contadorPorUsuario, sesion.userId, LIMITE_POR_USUARIO, VENTANA_MS)) {

@@ -9,8 +9,7 @@ Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la f
 **Fase 2 (Mercado Libre), cerradas y en `main`:**
 - **2.1** App de Zilonix en Mercado Libre Developers (credenciales en Railway, staging y producción).
 - **2.2** Contrato único de conector (`lib/conectores/`), probado con un conector falso en memoria.
-- **2.3** Conectar una cuenta de Mercado Libre en 1 clic — OAuth con PKCE, tokens cifrados con versión de clave, candado contra renovaciones dobles del refresh token.
-- **2.4** Avisos de Mercado Libre (webhooks) y el trabajador que los procesa de verdad contra la API. **El código está en `main`, pero hasta este PR (`fix-middleware-rutas-maquina`) estuvo roto en ejecución** — ver "Problemas conocidos §1". Se da por corregida solo después de verificarla contra staging con el workflow real en verde (no antes).
+- **2.3** Conectar una cuenta de Mercado Libre en 1 clic — OAuth con PKCE y, desde este PR, `state` (RFC 6749 §10.12, protección CSRF), tokens cifrados con versión de clave, candado contra renovaciones dobles del refresh token.
 - **2.5** Importación inicial (pedidos de 60 días + publicaciones activas) al conectar una cuenta.
 - **2.6** SKU maestro propio, con kits.
 - **2.7** Pedidos con línea de tiempo de 8 pasos (venta → pago → factura → empaque → despacho → entrega → novedades → dinero conciliado). **Alcance real, no un bug**: la tabla `pedidos` hoy solo guarda `total` — ni comisión de Mercado Libre (`sale_fee`), ni costo de envío, ni neto. Eso es lo primero que necesita la Fase 3 (ver "Qué falta").
@@ -18,6 +17,7 @@ Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la f
 
 ## Qué está a medias
 
+- **2.4** Avisos de Mercado Libre (webhooks) y el trabajador que los procesa de verdad contra la API. El código está en `main`, pero hasta este PR (`fix-middleware-rutas-maquina`) estuvo roto en ejecución — ver "Problemas conocidos §1". Se mueve de "terminado" a esta sección a propósito: el fix ya está escrito y probado localmente, pero **todavía no se verificó contra staging real** (ni con el workflow `trabajador-avisos-ml.yml` en verde) — no se da por cerrada hasta tener esa evidencia.
 - **2.9 — Bandeja de atención** (preguntas, mensajes de venta, reclamos): código completo, con sus pruebas, en la rama [`tarea-2.9-bandeja-atencion`](https://github.com/mateodta2-code/zilonix-plataforma/tree/tarea-2.9-bandeja-atencion) — **sin ningún Pull Request abierto todavía** (no es que esté esperando revisión; nadie lo abrió aún).
 - **2.11, sub-tarea "Publicar producto y clip"**: las reglas reales de publicación en Mercado Libre portadas por completo (con pruebas), en la rama [`tarea-2.11-publicar-producto-clip`](https://github.com/mateodta2-code/zilonix-plataforma/tree/tarea-2.11-publicar-producto-clip) — tampoco tiene Pull Request abierto. Las otras tres sub-tareas de 2.11 (Promociones, Programar Full, Alertas sanitarias) **no se empezaron**.
 - Ninguna de las dos ramas de arriba se probó todavía contra una base de datos real de staging/producción ni, en el caso de "Publicar producto", contra una cuenta real de Mercado Libre — bloqueado por la caída de Railway (ver "Problemas conocidos §2"), sin relación con el bug del middleware.

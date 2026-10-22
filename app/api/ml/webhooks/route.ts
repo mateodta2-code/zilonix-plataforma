@@ -24,16 +24,51 @@ import { recibirAviso, type AvisoMl } from "@/lib/ml/avisos";
 // siquiera es suyo).
 const TAMANO_MAXIMO_BYTES = 16 * 1024; // un aviso real de ML son unas pocas líneas de JSON
 
+type LecturaCuerpo = { ok: true; texto: string } | { ok: false };
+
+// Corregido (2026-10-21): el tope anterior solo miraba el header
+// Content-Length — un valor que quien llama controla por completo (se
+// puede mentir, o simplemente omitir con un cuerpo en chunked, donde
+// Content-Length no existe). Se lee el stream real byte a byte y se
+// corta apenas se pasa del tope, sin importar qué diga (o no diga) ese
+// header — un cuerpo real de 20KB sin Content-Length también se frena
+// acá, antes de llegar a JSON.parse.
+async function leerCuerpoConTope(request: NextRequest, topeBytes: number): Promise<LecturaCuerpo> {
+  const reader = request.body?.getReader();
+  if (!reader) {
+    // Sin stream disponible (caso raro) — se cae al camino normal, sin
+    // tope real, pero nunca revienta la petición.
+    const texto = await request.text().catch(() => "");
+    return { ok: true, texto };
+  }
+
+  const trozos: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > topeBytes) {
+      await reader.cancel().catch(() => {});
+      return { ok: false };
+    }
+    trozos.push(value);
+  }
+  return { ok: true, texto: Buffer.concat(trozos.map((t) => Buffer.from(t))).toString("utf8") };
+}
+
 export async function POST(request: NextRequest) {
-  // 1) Tamaño del cuerpo, por Content-Length — Mercado Libre siempre
-  // lo manda; si no viene (caso raro, chunked) se sigue de largo y lo
-  // filtra igual la validación de forma de abajo.
-  const tamanoDeclarado = Number(request.headers.get("content-length") ?? 0);
-  if (tamanoDeclarado > TAMANO_MAXIMO_BYTES) {
+  const lectura = await leerCuerpoConTope(request, TAMANO_MAXIMO_BYTES);
+  if (!lectura.ok) {
     return NextResponse.json({ ok: false, motivo: "cuerpo demasiado grande" }, { status: 200 });
   }
 
-  const body = (await request.json().catch(() => null)) as (AvisoMl & { application_id?: string | number }) | null;
+  let body: (AvisoMl & { application_id?: string | number }) | null;
+  try {
+    body = JSON.parse(lectura.texto);
+  } catch {
+    body = null;
+  }
 
   // Se responde 200 siempre que el cuerpo venga bien formado, aunque la
   // cuenta no sea nuestra o el aviso ya se hubiera recibido — un
