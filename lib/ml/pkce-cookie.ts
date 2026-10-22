@@ -1,5 +1,8 @@
-// Nombre de la cookie httpOnly que guarda el code_verifier de PKCE
-// entre /api/ml/conectar (lo genera) y /api/ml/callback (lo usa) —
-// aparte en su propio archivo (no en un route.ts) porque un archivo de
-// ruta de Next.js solo debe exportar los métodos HTTP.
+// Nombres de las cookies httpOnly que viajan entre /api/ml/conectar
+// (las genera) y /api/ml/callback (las usa y las borra) — aparte en su
+// propio archivo (no en un route.ts) porque un archivo de ruta de
+// Next.js solo debe exportar los métodos HTTP.
 export const NOMBRE_COOKIE_VERIFIER = "ml_code_verifier";
+// state de OAuth (RFC 6749 §10.12, protección CSRF) — ver generarState()
+// en lib/ml/oauth.ts para el motivo real.
+export const NOMBRE_COOKIE_STATE = "ml_oauth_state";

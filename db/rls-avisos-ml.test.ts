@@ -2,7 +2,8 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa } from "./empresa-context";
-import { cuentasMl, empresas, avisosMl } from "./schema";
+import { cuentasMl, avisosMl } from "./schema";
+import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { cifrarToken } from "../lib/cifrado";
 import { recibirAviso } from "../lib/ml/avisos";
 
@@ -10,18 +11,21 @@ import { recibirAviso } from "../lib/ml/avisos";
 // de una cuenta conectada se guarda en la empresa correcta; uno de una
 // cuenta desconocida se descarta; el mismo aviso repetido (ML reintenta)
 // no se duplica; y el aislamiento normal entre empresas sigue intacto.
+//
+// Issue #39 — empresaA/empresaB ahora salen de la plantilla
+// crearDosEmpresas() (db/test-utils/aislamiento.ts) en vez de armarse
+// a mano acá.
 describe("recepción de avisos de Mercado Libre (tarea 2.4)", () => {
-  const empresaAId = randomUUID();
-  const empresaBId = randomUUID();
+  let contexto: ContextoDosEmpresas;
+  let empresaAId: string;
+  let empresaBId: string;
   const cuentaExternaA = `ml-user-${randomUUID()}`;
 
   beforeAll(async () => {
-    await dbComoEmpresa(empresaAId, (tx) =>
-      tx.insert(empresas).values({ id: empresaAId, nombre: "Empresa A (prueba 2.4)", nit: `TEST-A24-${empresaAId.slice(0, 8)}` })
-    );
-    await dbComoEmpresa(empresaBId, (tx) =>
-      tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B (prueba 2.4)", nit: `TEST-B24-${empresaBId.slice(0, 8)}` })
-    );
+    contexto = await crearDosEmpresas();
+    empresaAId = contexto.empresaAId;
+    empresaBId = contexto.empresaBId;
+
     await dbComoEmpresa(empresaAId, (tx) =>
       tx.insert(cuentasMl).values({
         empresaId: empresaAId,
@@ -74,5 +78,24 @@ describe("recepción de avisos de Mercado Libre (tarea 2.4)", () => {
       sent: "2026-10-20T10:05:00.000Z",
     });
     expect(resultado).toBe("cuenta_desconocida");
+  });
+
+  // Issue #39 — plantilla genérica (db/test-utils/aislamiento.ts) sobre
+  // avisos_ml, independiente de la lógica propia de recibirAviso() que
+  // ya prueban los "it" de arriba: inserta un aviso directo como
+  // empresa A y confirma SELECT/UPDATE/DELETE cruzados con empresa B.
+  it("plantilla de aislamiento genérica (issue #39): empresa B nunca ve, edita ni borra un aviso de empresa A", async () => {
+    await afirmarAislamiento(contexto, avisosMl, (tx, empresaId) =>
+      tx
+        .insert(avisosMl)
+        .values({
+          empresaId,
+          cuentaIdExterna: `ml-user-${randomUUID()}`,
+          topic: "orders_v2",
+          resource: `/orders/aislamiento-${randomUUID()}`,
+          enviadoTs: new Date(),
+        })
+        .returning({ id: avisosMl.id })
+    );
   });
 });
