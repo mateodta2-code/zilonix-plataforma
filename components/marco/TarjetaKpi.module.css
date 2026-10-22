@@ -21,7 +21,8 @@
 .valor {
   margin: 0;
   font-family: var(--fuente-titulos);
-  font-weight: 700;
+  /* Manual de marca: ExtraBold (800) para cifras grandes. */
+  font-weight: 800;
   font-size: 28px;
   line-height: 1.15;
 }
