@@ -4,12 +4,22 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { listarDespachosPendientes } from "@/lib/ml/despachos";
-import { Boton, BotonLink } from "@/components/marco/Boton";
+import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
+import { ESTADOS_DESPACHO_FILTRO, listarDespachosFiltrados, TAMANO_PAGINA_DESPACHOS } from "@/lib/ml/despachos";
+import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
+import { Campo } from "@/components/marco/Campo";
+import { Chip, type EstadoChip } from "@/components/marco/Chip";
+import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "./page.module.css";
+
+// Next entrega string[] cuando la misma clave viene repetida
+// (?q=a&q=b) — sin pasar cada valor por normalizarParametro ANTES de
+// usarlo (como defaultValue o como filtro), un arreglo donde se espera
+// un string tumba la página con un error 500.
+type FiltrosNormalizados = { q?: string; estado?: string; desde?: string; hasta?: string; orden?: string };
 
 const ETIQUETA_LOGISTIC_TYPE: Record<string, string> = {
   self_service: "Flex",
@@ -19,12 +29,45 @@ const ETIQUETA_LOGISTIC_TYPE: Record<string, string> = {
   otro: "Otro",
 };
 
-// Tarea 2.10 — lista de despachos listos para imprimir (celular
-// primero), con selección múltiple para la impresión masiva. Full
-// nunca aparece acá (ver lib/ml/despachos.ts: nunca queda marcado
-// imprimible — Mercado Libre rechaza esa guía, no aplica despacho
-// físico).
-export default async function DespachosPage() {
+function colorEstadoDespacho(estado: string | null): EstadoChip {
+  if (estado === "ready_to_ship") return "exito";
+  if (estado === "handling" || estado === "pending") return "aviso";
+  return "neutro";
+}
+
+function formatoFechaColombia(fecha: Date | string): string {
+  return new Date(fecha).toLocaleString("es-CO", { timeZone: "America/Bogota" });
+}
+
+// "Anterior"/"Siguiente" preservan el resto de los filtros de la URL y
+// solo cambian ?pagina= — mismo criterio que /panel/pedidos.
+function hrefConPagina(filtros: FiltrosNormalizados, pagina: number): string {
+  const params = new URLSearchParams();
+  if (filtros.q) params.set("q", filtros.q);
+  if (filtros.estado) params.set("estado", filtros.estado);
+  if (filtros.desde) params.set("desde", filtros.desde);
+  if (filtros.hasta) params.set("hasta", filtros.hasta);
+  if (filtros.orden) params.set("orden", filtros.orden);
+  if (pagina > 1) params.set("pagina", String(pagina));
+  const qs = params.toString();
+  return qs ? `/panel/despachos?${qs}` : "/panel/despachos";
+}
+
+// Tarea 2.10 / issue "tabla completa de despachos" — mismo alcance de
+// siempre (imprimible=true y sin etiqueta impresa — Full nunca aparece
+// acá, ver lib/ml/despachos.ts), ahora con búsqueda por número de
+// envío, filtro de estado, rango de fechas (por actualizado_ts — este
+// despacho no guarda una fecha propia, ver el comentario de
+// listarDespachosFiltrados), orden y paginación de 25. Toda la
+// validación real (lista blanca de estado/orden, página entera segura,
+// fechas, escape de la búsqueda) vive en listarDespachosFiltrados()
+// (lib/ml/despachos.ts) y en lib/filtros-listado.ts (compartido con
+// Pedidos, PR #107 ya fusionado) — esta página solo lee la URL y pinta
+// el resultado. El form de impresión masiva sigue trabajando solo con
+// lo que se ve en la página actual — el Route Handler
+// (/api/ml/despachos/etiquetas) revalida igual contra TODO lo
+// pendiente real, nunca confía en lo que mande el formulario.
+export default async function DespachosPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
 
@@ -41,33 +84,139 @@ export default async function DespachosPage() {
     return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
-  const pendientes = await listarDespachosPendientes(empresa.id);
+  const filtros: FiltrosNormalizados = {
+    q: normalizarParametro(searchParams.q),
+    estado: normalizarParametro(searchParams.estado),
+    desde: normalizarParametro(searchParams.desde),
+    hasta: normalizarParametro(searchParams.hasta),
+    orden: normalizarParametro(searchParams.orden),
+  };
+  const resultado = await listarDespachosFiltrados(empresa.id, {
+    busqueda: filtros.q,
+    estado: filtros.estado,
+    desde: filtros.desde,
+    hasta: filtros.hasta,
+    orden: filtros.orden,
+    pagina: normalizarParametro(searchParams.pagina),
+  });
+
+  // Un ?q= que queda vacío después de trim no cuenta como filtro: si
+  // no, con cero despachos pendientes la pantalla diría "ninguno
+  // coincide" en vez de "no hay despachos pendientes".
+  const hayFiltrosActivos = Boolean(normalizarTextoBusqueda(filtros.q) || filtros.estado || filtros.desde || filtros.hasta || filtros.orden);
+  const desdeFila = (resultado.pagina - 1) * TAMANO_PAGINA_DESPACHOS + 1;
+  const hastaFila = Math.min(resultado.pagina * TAMANO_PAGINA_DESPACHOS, resultado.total);
 
   return (
     <>
       <EncabezadoPagina titulo="Despachos pendientes" />
 
-      {pendientes.length === 0 ? (
-        <EstadoVacio>No hay despachos pendientes de imprimir.</EstadoVacio>
+      <form method="get" className={styles.filtros}>
+        <Campo etiqueta="Buscar">
+          {/* Único texto libre real en despachos_ml: el número de
+              envío (shipmentIdExterno). No hay comprador ni pedido
+              buscable acá — ver el comentario del mismo nombre en
+              lib/ml/pedidos.ts para el caso análogo. */}
+          <input type="search" name="q" defaultValue={filtros.q ?? ""} placeholder="Número de envío" className={`zx-control ${styles.campoBusqueda}`} />
+        </Campo>
+        <Campo etiqueta="Estado">
+          <select name="estado" defaultValue={filtros.estado ?? ""} className="zx-control">
+            <option value="">Todos</option>
+            {ESTADOS_DESPACHO_FILTRO.map((e) => (
+              <option key={e.valor} value={e.valor}>
+                {e.etiqueta}
+              </option>
+            ))}
+          </select>
+        </Campo>
+        <Campo etiqueta="Desde">
+          <input type="date" name="desde" defaultValue={filtros.desde ?? ""} className="zx-control" />
+        </Campo>
+        <Campo etiqueta="Hasta">
+          <input type="date" name="hasta" defaultValue={filtros.hasta ?? ""} className="zx-control" />
+        </Campo>
+        <Campo etiqueta="Ordenar por">
+          <select name="orden" defaultValue={filtros.orden ?? "actualizado_desc"} className="zx-control">
+            <option value="actualizado_desc">Más recientes primero</option>
+            <option value="actualizado_asc">Más antiguos primero</option>
+          </select>
+        </Campo>
+        <div className={styles.accionesFiltro}>
+          <Boton type="submit" chico>
+            Filtrar
+          </Boton>
+          {hayFiltrosActivos && (
+            <BotonLink href="/panel/despachos" variante="fantasma" chico>
+              Limpiar filtros
+            </BotonLink>
+          )}
+        </div>
+      </form>
+
+      {resultado.total === 0 ? (
+        <EstadoVacio>
+          {hayFiltrosActivos ? (
+            <span className={styles.vacioConAccion}>
+              Ningún despacho pendiente coincide con esos filtros.
+              <BotonLink href="/panel/despachos" variante="secundario" chico>
+                Limpiar filtros
+              </BotonLink>
+            </span>
+          ) : (
+            "No hay despachos pendientes de imprimir."
+          )}
+        </EstadoVacio>
       ) : (
         <form action="/api/ml/despachos/etiquetas" method="POST" target="_blank" className={styles.form}>
-          <ul className={styles.lista}>
-            {pendientes.map((d) => (
-              <li key={d.id} className={styles.fila}>
-                <label className={styles.etiquetaCheckbox}>
-                  <input type="checkbox" name="shipmentId" value={d.shipmentIdExterno} defaultChecked />
-                  <span className={styles.textoFila}>
-                    Envío #{d.shipmentIdExterno}
-                    <span className={styles.logisticType}>{ETIQUETA_LOGISTIC_TYPE[d.logisticType ?? "otro"] ?? d.logisticType}</span>
-                  </span>
-                </label>
-              </li>
+          <Tabla encabezados={["", "Envío", "Tipo", "Estado", "Actualizado"]}>
+            {resultado.despachos.map((d) => (
+              <FilaTabla key={d.id}>
+                <CeldaTabla>
+                  <input type="checkbox" name="shipmentId" value={d.shipmentIdExterno} defaultChecked aria-label={`Seleccionar envío ${d.shipmentIdExterno}`} />
+                </CeldaTabla>
+                <CeldaTabla>#{d.shipmentIdExterno}</CeldaTabla>
+                <CeldaTabla>{ETIQUETA_LOGISTIC_TYPE[d.logisticType ?? "otro"] ?? d.logisticType}</CeldaTabla>
+                <CeldaTabla>
+                  <Chip estado={colorEstadoDespacho(d.status)}>{d.status ?? "—"}</Chip>
+                </CeldaTabla>
+                <CeldaTabla className={styles.celdaFecha}>{formatoFechaColombia(d.actualizadoTs)}</CeldaTabla>
+              </FilaTabla>
             ))}
-          </ul>
+          </Tabla>
+
+          <div className={styles.paginacion}>
+            <p className={styles.resumenPaginacion}>
+              Mostrando {desdeFila}–{hastaFila} de {resultado.total}
+            </p>
+            <div className={styles.botonesPaginacion}>
+              {resultado.pagina > 1 ? (
+                <BotonLink href={hrefConPagina(filtros, resultado.pagina - 1)} variante="secundario" chico>
+                  Anterior
+                </BotonLink>
+              ) : (
+                <span className={clasesBoton("secundario", true)} aria-disabled="true">
+                  Anterior
+                </span>
+              )}
+              {resultado.pagina < resultado.totalPaginas ? (
+                <BotonLink href={hrefConPagina(filtros, resultado.pagina + 1)} variante="secundario" chico>
+                  Siguiente
+                </BotonLink>
+              ) : (
+                <span className={clasesBoton("secundario", true)} aria-disabled="true">
+                  Siguiente
+                </span>
+              )}
+            </div>
+          </div>
+
           <Boton type="submit" className={styles.botonImprimir}>
             Imprimir etiquetas seleccionadas
           </Boton>
-          <p className={styles.nota}>Si hay despachos de varias cuentas de Mercado Libre, selecciona primero los de una sola cuenta.</p>
+          <p className={styles.nota}>
+            Solo imprime lo seleccionado de esta página. Si hay despachos de varias cuentas de Mercado Libre, selecciona primero los de una sola
+            cuenta.
+          </p>
         </form>
       )}
 
