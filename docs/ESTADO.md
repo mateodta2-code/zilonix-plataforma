@@ -2,6 +2,8 @@
 
 Foto del proyecto al **2026-10-22**. Esto cambia después de cada tarea — la fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
 
+**Dependencias (2026-10-22).** `@clerk/nextjs` está en **6.39.8** (CVE-2026-41248, bypass de `createRouteMatcher`; antes 6.9.6) y el repo versiona `package-lock.json`. El CI instala con `npm ci`. Railway con Railpack no pasa a `npm ci` solo por existir el lock: hace falta `RAILPACK_NODE_NPM_INSTALL=npm ci` en el servicio (no se cambió la configuración de Railway en este cambio). `/_next/image` queda apagado con `images.unoptimized` — la app no usa `next/image`. El middleware no se tocó: las rutas de máquina (`/api/ml/webhooks`, `/api/ml/trabajador`, `/api/ml/callback`) siguen sin estar en la lista pública; hacerlas pasar, y dejar de usar `auth.protect()` porque se cuelga en Railway, es el PR #27.
+
 ## Qué está terminado y funcionando
 
 **Fase 1 (Multiempresa y seguridad) — 12/12 tareas cerradas.** Repositorio base, modelo de datos, seguridad por fila (RLS) con tres usuarios de base distintos, login con Clerk, empresas y cambio de empresa en 1 clic, invitaciones por correo, permisos por rol/módulo/acción con pantalla de confirmación para los peligrosos, registro de auditoría, cabeceras de seguridad + límite de peticiones, panel superadmin con acceso temporal auditado. Confirmado de punta a punta con una cuenta y una empresa reales en staging.
