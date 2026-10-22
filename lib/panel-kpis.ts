@@ -122,7 +122,11 @@ function formatearMontoPorTexto(monto: string): string {
   return cuerpo;
 }
 
-function formatearMonto(monto: string): string {
+// Exportada para la tabla de pedidos: el numeric de Postgres llega
+// como string y no puede pasar por Number() (un monto por encima del
+// entero seguro pierde centavos). Mismo formateador que las ventas
+// del mes, para que "COP 150.000" se vea igual en las dos pantallas.
+export function formatearMonto(monto: string): string {
   if (NODO_FORMATEA_MONTO_STRING && esMontoDecimal(monto)) {
     return formatoMontoEsCo.format(monto);
   }
