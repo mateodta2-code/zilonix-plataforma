@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, or } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl } from "@/db/schema";
 import { cifrarToken, descifrarToken } from "@/lib/cifrado";
@@ -94,6 +94,23 @@ export async function desconectarCuenta(empresaId: string, cuentaId: string): Pr
   await dbComoEmpresa(empresaId, (tx) =>
     tx.update(cuentasMl).set({ desconectadaTs: new Date() }).where(eq(cuentasMl.id, cuentaId))
   );
+}
+
+// Tarea "Investigación ML" — a diferencia de pedidos/despachos, esta
+// consulta no depende de los datos propios de NINGUNA cuenta puntual
+// (busca en el catálogo público de Mercado Libre): cualquier cuenta
+// conectada y vigente de la empresa sirve. Se usa la primera conectada
+// (la más antigua), para que el resultado no cambie de una búsqueda a
+// otra sin ninguna razón real.
+export async function obtenerCuentaMlActiva(empresaId: string): Promise<{ id: string } | null> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [cuenta] = await tx
+      .select({ id: cuentasMl.id })
+      .from(cuentasMl)
+      .where(and(eq(cuentasMl.empresaId, empresaId), isNull(cuentasMl.desconectadaTs)))
+      .orderBy(asc(cuentasMl.creadoTs));
+    return cuenta ?? null;
+  });
 }
 
 export async function listarCuentasConectadas(empresaId: string) {

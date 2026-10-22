@@ -1,0 +1,56 @@
+.formulario {
+  margin-bottom: 20px;
+}
+
+.filaFormulario {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.ayuda {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.alcance {
+  margin: 0;
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.resultado {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.tituloSeccion {
+  margin: 0 0 10px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.listaEstrategia {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.volver {
+  align-self: flex-start;
+  margin-top: 16px;
+}
