@@ -23,6 +23,7 @@ const APP_DIR = join(RAIZ, "app");
 
 // Rutas que SÍ deben llamar requierePermiso() en su propio código.
 const RUTAS_PROTEGIDAS = new Set([
+  "app/panel/page.tsx",
   "app/panel/finanzas/page.tsx",
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
@@ -59,7 +60,6 @@ const RUTAS_SUPERADMIN = new Set(["app/superadmin/page.tsx", "app/superadmin/[em
 // preguntar "¿puede [acción] en [módulo]?".
 const RUTAS_EXENTAS: Record<string, string> = {
   "app/page.tsx": "solo lista las empresas propias del usuario para decidir a dónde mandarlo, no lee datos de negocio de ninguna empresa",
-  "app/panel/page.tsx": "solo filtra qué módulos mostrar en el nav (consultar); el módulo de destino exige su propio permiso al entrar",
   "app/panel/actions.ts": "cambiar la empresa activa ya se revalida contra las membresías reales del usuario, no es un permiso por módulo",
   "app/crear-empresa/page.tsx": "cualquier usuario con cuenta puede crear su propia empresa — no hay membresía previa que comprobar",
   "app/crear-empresa/actions.ts": "idem",
@@ -129,9 +129,11 @@ describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candad
 // Fix real (2026-10-21) — RUTAS_EXENTAS (exenta del permiso de MÓDULO,
 // requierePermiso) y esRutaPublica de lib/rutas-publicas.ts (exenta de
 // la SESIÓN de Clerk en el middleware) responden preguntas distintas:
-// "/panel" está exenta de permiso de módulo pero sí exige sesión real
-// (lo exige el propio código de la página), así que forzar que las dos
-// listas coincidan completas estaría mal. La incoherencia real que
+// app/panel/actions.ts está exenta de permiso de módulo (cambiar de
+// empresa se revalida contra las membresías reales) pero sí exige
+// sesión, así que forzar que las dos listas coincidan completas estaría
+// mal. /panel en sí ya no es el ejemplo: app/panel/page.tsx está en
+// RUTAS_PROTEGIDAS y llama requierePermiso. La incoherencia real que
 // causó el bug del 21/10 fue más angosta: una ruta de MÁQUINA (nadie
 // navega ahí con sesión — un webhook, un cron) exenta de permiso de
 // módulo tiene que estar TAMBIÉN en esRutaPublica sin excepción; si no,
