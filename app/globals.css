@@ -97,11 +97,13 @@
      (--fondo); estas capas se le suman y se vuelven transparentes, así
      que afinar el alfa no cambia el negro de abajo. Fijo al viewport
      (pseudo-elemento en body) para que no se repita al hacer scroll.
-     data-fondo en <html>: suave | medio | intenso. Sin atributo, o con
-     "medio", gana el del medio. La barra y las tarjetas no usan esto:
-     siguen en --superficie, opacas, para que cifras y tablas no se
-     midan contra el azul. */
-  --fondo-app: var(--fondo-app-medio);
+     data-fondo en <html>: suave | medio | intenso. Mateo eligió el
+     suave — sin atributo (o con cualquier valor que no sea "medio" ni
+     "intenso") gana ese. Las otras dos variantes se dejan igual, por
+     si después pide subirle la intensidad. La barra y las tarjetas no
+     usan esto: siguen en --superficie, opacas, para que cifras y
+     tablas no se midan contra el azul. */
+  --fondo-app: var(--fondo-app-suave);
   --fondo-app-suave:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
     linear-gradient(180deg, rgba(37, 99, 235, 0.5) 0%, rgba(59, 130, 246, 0.22) 10%, rgba(37, 99, 235, 0.08) 18%, rgba(37, 99, 235, 0) 25%);
@@ -232,7 +234,9 @@
     linear-gradient(180deg, rgba(192, 192, 192, 0.05) 0%, rgba(192, 192, 192, 0) 8%, rgba(110, 110, 110, 0.045) 20%, rgba(110, 110, 110, 0) 32%),
     radial-gradient(80% 22% at 50% 0%, rgba(37, 99, 235, 0.09) 0%, transparent 70%),
     linear-gradient(180deg, rgba(37, 99, 235, 0.09) 0%, rgba(37, 99, 235, 0.045) 22%, rgba(37, 99, 235, 0.016) 45%, rgba(37, 99, 235, 0) 58%);
-  --fondo-app: var(--fondo-app-medio);
+  /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
+     arriba: sin atributo data-fondo, gana el suave. */
+  --fondo-app: var(--fondo-app-suave);
 }
 
 :root[data-tema="claro"][data-fondo="suave"] {
