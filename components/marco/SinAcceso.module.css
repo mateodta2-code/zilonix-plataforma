@@ -1,8 +1,10 @@
 .contenedor {
   padding: 32px;
-  border: 1px solid var(--borde);
+  border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
-  background: var(--superficie);
+  background:
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
   max-width: 480px;
 }
 
@@ -28,4 +30,5 @@
 .volver:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }

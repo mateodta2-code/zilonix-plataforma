@@ -7,14 +7,15 @@
   border-radius: var(--radio-boton);
   border: 1px solid var(--borde);
   background: var(--superficie-2);
-  color: var(--texto-suave);
+  color: var(--icono);
   cursor: pointer;
   transition: var(--transicion-color), var(--transicion-transform);
 }
 
 .botonIcono:hover {
-  border-color: var(--plata);
-  color: var(--texto);
+  border-color: var(--borde-hover);
+  color: var(--icono-hover);
+  transform: translateY(-1px);
 }
 
 .botonIcono:active {
@@ -24,6 +25,7 @@
 .botonIcono:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }
 
 .botonCuadrado {
@@ -37,15 +39,16 @@
   border-radius: var(--radio-boton);
   border: 1px solid var(--borde);
   background: var(--superficie-2);
-  color: var(--texto-suave);
+  color: var(--icono);
   cursor: pointer;
   transition: var(--transicion-color), var(--transicion-transform);
   padding: 0;
 }
 
 .botonCuadrado:hover {
-  border-color: var(--plata);
-  color: var(--texto);
+  border-color: var(--borde-hover);
+  color: var(--icono-hover);
+  transform: translateY(-1px);
 }
 
 .botonCuadrado:active {
@@ -55,6 +58,7 @@
 .botonCuadrado:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }
 
 .etiquetaCuadrado {

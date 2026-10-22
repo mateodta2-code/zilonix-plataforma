@@ -19,9 +19,14 @@
   transform: scale(0.97);
 }
 
+.boton:hover:not(:disabled):not([aria-disabled="true"]):not(:active) {
+  transform: translateY(-1px);
+}
+
 .boton:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }
 
 .boton:disabled,
@@ -37,12 +42,13 @@
 }
 
 .primario {
-  background: var(--acento);
+  background: var(--acento-boton);
   color: #fff;
 }
 
 .primario:hover:not(:disabled) {
-  background: var(--acento-fuerte);
+  background: var(--acento-boton-hover);
+  box-shadow: var(--sombra-boton);
 }
 
 .secundario {
@@ -52,7 +58,8 @@
 }
 
 .secundario:hover:not(:disabled) {
-  border-color: var(--plata);
+  border-color: var(--borde-hover);
+  color: var(--icono-hover);
 }
 
 .fantasma {
@@ -62,4 +69,5 @@
 
 .fantasma:hover:not(:disabled) {
   background: var(--acento-suave);
+  box-shadow: var(--sombra-boton);
 }
