@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa, dbComoInvitacion } from "./empresa-context";
 import { db } from "./index";
-import { empresas, invitaciones, membresias, usuarios } from "./schema";
+import { invitaciones, membresias, roles, usuarios } from "./schema";
+import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { crearInvitacion, aceptarInvitacion } from "../lib/invitaciones";
 
 async function insertarUsuarioDePrueba(id: string) {
@@ -16,20 +17,20 @@ async function insertarUsuarioDePrueba(id: string) {
 // empresa, pero nunca puede verla sin el token, ni ver la de otra
 // empresa adivinando uno. Corre contra el mismo Postgres real que las
 // pruebas de las tareas 1.4 y 1.6 — RLS no se simula con un mock.
-
+//
+// Issue #39 — empresaA/empresaB salen ahora de crearDosEmpresas()
+// (db/test-utils/aislamiento.ts) en vez de armarse a mano acá.
 describe("invitaciones por token (RLS, tarea 1.7)", () => {
-  const empresaAId = randomUUID();
-  const empresaBId = randomUUID();
+  let contexto: ContextoDosEmpresas;
+  let empresaAId: string;
+  let empresaBId: string;
   const usuarioInvitadoId = randomUUID();
   let tokenA: string;
 
   beforeAll(async () => {
-    await dbComoEmpresa(empresaAId, (tx) =>
-      tx.insert(empresas).values({ id: empresaAId, nombre: "Empresa A (prueba 1.7)", nit: `TEST-A17-${empresaAId.slice(0, 8)}` })
-    );
-    await dbComoEmpresa(empresaBId, (tx) =>
-      tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B (prueba 1.7)", nit: `TEST-B17-${empresaBId.slice(0, 8)}` })
-    );
+    contexto = await crearDosEmpresas();
+    empresaAId = contexto.empresaAId;
+    empresaBId = contexto.empresaBId;
     await insertarUsuarioDePrueba(usuarioInvitadoId);
 
     const { token } = await crearInvitacion({
@@ -127,5 +128,32 @@ describe("invitaciones por token (RLS, tarea 1.7)", () => {
     const otroUsuarioId = randomUUID();
     await insertarUsuarioDePrueba(otroUsuarioId);
     await expect(aceptarInvitacion(tokenVencido, otroUsuarioId)).rejects.toThrow();
+  });
+
+  // Issue #39 — plantilla genérica sobre invitaciones, independiente de
+  // la política especial "por token" que prueban los "it" de arriba:
+  // confirma que, por el camino normal (empresa_actual), el aislamiento
+  // de siempre también sigue intacto en esta tabla.
+  it("plantilla de aislamiento genérica (issue #39): empresa B nunca ve, edita ni borra una invitación de empresa A", async () => {
+    const rolDePrueba = randomUUID();
+    await dbComoEmpresa(empresaAId, (tx) =>
+      tx.insert(roles).values({ id: rolDePrueba, nombre: "Rol de prueba (aislamiento)", empresaId: empresaAId })
+    );
+
+    await afirmarAislamiento(contexto, invitaciones, (tx, empresaId) =>
+      tx
+        .insert(invitaciones)
+        .values({
+          empresaId,
+          email: `aislamiento-${randomUUID()}@zilonix.test`,
+          rolId: rolDePrueba,
+          empresaNombre: "Empresa de prueba (aislamiento)",
+          rolNombre: "Rol de prueba",
+          token: randomUUID(),
+          invitadoPor: usuarioInvitadoId,
+          expiraTs: new Date(Date.now() + 7 * 24 * 3600 * 1000),
+        })
+        .returning({ id: invitaciones.id })
+    );
   });
 });
