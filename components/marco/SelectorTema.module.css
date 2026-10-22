@@ -1,0 +1,65 @@
+.botonIcono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radio-boton);
+  border: 1px solid var(--borde);
+  background: var(--superficie-2);
+  color: var(--texto-suave);
+  cursor: pointer;
+  transition: var(--transicion-color), var(--transicion-transform);
+}
+
+.botonIcono:hover {
+  border-color: var(--plata);
+  color: var(--texto);
+}
+
+.botonIcono:active {
+  transform: scale(0.97);
+}
+
+.botonIcono:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.botonCuadrado {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radio-boton);
+  border: 1px solid var(--borde);
+  background: var(--superficie-2);
+  color: var(--texto-suave);
+  cursor: pointer;
+  transition: var(--transicion-color), var(--transicion-transform);
+  padding: 0;
+}
+
+.botonCuadrado:hover {
+  border-color: var(--plata);
+  color: var(--texto);
+}
+
+.botonCuadrado:active {
+  transform: scale(0.97);
+}
+
+.botonCuadrado:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.etiquetaCuadrado {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

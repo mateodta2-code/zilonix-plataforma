@@ -1,4 +1,5 @@
 import { ClerkProvider } from "@clerk/nextjs";
+import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { VERSION } from "@/lib/version";
 
@@ -7,10 +8,49 @@ export const metadata = {
   description: "Plataforma multiempresa de Zilonix",
 };
 
+// Marco visual (negro/plateado/azul) — Space Grotesk para títulos y
+// cifras grandes, Inter para texto e interfaz. next/font/google las
+// autohospeda en el build (sin llamar a Google en cada visita) y las
+// expone como variables CSS, que app/globals.css usa en
+// --fuente-titulos/--fuente-texto — ninguna dependencia nueva.
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["500", "700"],
+  variable: "--fuente-space-grotesk",
+  display: "swap",
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--fuente-inter",
+  display: "swap",
+});
+
+// Selector de tema (components/marco/SelectorTema.tsx) — sin este
+// script, el tema real (guardado en localStorage) solo se aplicaría
+// después de hidratar React, y entre el HTML del servidor (siempre
+// oscuro por defecto) y ese momento se vería un parpadeo si alguien
+// eligió "claro". Corre ANTES de pintar porque es un script normal en
+// <head>, no un componente — por eso va a mano acá y no en un
+// componente cliente. suppressHydrationWarning en <html> es porque
+// este mismo script cambia el atributo data-tema antes de que React
+// hidrate, así que el HTML que React esperaba (sin el atributo) y el
+// real (con él) difieren a propósito.
+const SCRIPT_TEMA = `
+  try {
+    var tema = localStorage.getItem("zilonix-tema");
+    document.documentElement.setAttribute("data-tema", tema === "claro" ? "claro" : "oscuro");
+  } catch (e) {}
+`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <ClerkProvider>
-      <html lang="es">
+      <html lang="es" suppressHydrationWarning className={`${spaceGrotesk.variable} ${inter.variable}`}>
+        <head>
+          <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA }} />
+        </head>
         <body>
           {children}
           {/* Pedido del plan técnico: la versión se ve en el pie de página de

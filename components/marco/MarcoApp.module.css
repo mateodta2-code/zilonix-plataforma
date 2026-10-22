@@ -1,0 +1,49 @@
+.marco {
+  display: flex;
+  min-height: 100vh;
+  background: var(--fondo);
+}
+
+.areaDerecha {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.contenido {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Horizonte azul muy tenue detrás del encabezado del contenido —
+   nunca neón fuerte, por eso la opacidad se queda baja y el radio es
+   grande y difuso. */
+.brillo {
+  position: absolute;
+  top: -220px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 900px;
+  height: 420px;
+  background: radial-gradient(ellipse at center, var(--acento) 0%, transparent 70%);
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.contenidoInterior {
+  position: relative;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 28px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+@media (max-width: 860px) {
+  .contenidoInterior {
+    padding: 24px 16px 40px;
+  }
+}
