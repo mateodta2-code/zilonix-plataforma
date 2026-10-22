@@ -46,6 +46,22 @@ const csp = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Issue #58 (Z-ML-09) — /panel/sku/importar sube un CSV de hasta 5 MB
+  // (lib/importar-csv-skus.ts, TAMANO_MAXIMO_BYTES) a través de un
+  // Server Action. El límite real de Next para el body de un Server
+  // Action, si no se toca esto, es 1 MB (confirmado en
+  // node_modules/next/dist/server/app-render/action-handler.js) — por
+  // debajo del tope que pide el propio parser, así que un archivo
+  // válido de 2-5 MB se rechazaría ANTES de llegar a nuestra
+  // validación real, con un error genérico de Next en vez del mensaje
+  // real del parser. 6 MB deja margen sobre el tope de 5 MB (el campo
+  // oculto que reenvía el texto ya leído al confirmar agrega algo de
+  // overhead de multipart/form-data).
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "6mb",
+    },
+  },
   // La app no usa next/image, no tiene carpeta public/ ni sharp. Igual
   // Next 14.2.35 registra /_next/image y, si la petición pasa la
   // validación de parámetros, entra a imageOptimizer (DoS del

@@ -1,8 +1,9 @@
 import { randomUUID } from "crypto";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { kitComponentes, publicaciones, skus } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { acotarPagina, parsearPagina, patronBusquedaLike } from "@/lib/filtros-listado";
 
 export class SkuCodigoDuplicadoError extends Error {
   constructor(codigo: string) {
@@ -44,12 +45,21 @@ export async function crearSku(
   });
 }
 
+// Lista completa, sin paginar — la usa el <select> de "Elegir SKU…" en
+// /panel/sku/sin-vincular (necesita TODO el catálogo para elegir, no
+// una página de 25) y lib/panel-kpis.ts. listarSkusFiltrados() (abajo)
+// es la versión con búsqueda/filtro/orden/paginación para la tabla de
+// /panel/sku — nunca se reemplazó esta por esa, son dos usos distintos.
 export async function listarSkus(empresaId: string) {
   return dbComoEmpresa(empresaId, (tx) => tx.select().from(skus).where(eq(skus.empresaId, empresaId)).orderBy(asc(skus.codigo)));
 }
 
 // Tarea 2.6 — "pantalla publicaciones sin SKU" y el criterio de
-// "listo" ("ninguna publicación queda sin SKU") leen de acá.
+// "listo" ("ninguna publicación queda sin SKU") leen de acá. Lista
+// completa, sin paginar — la usa el KPI del panel (lib/panel-kpis.ts)
+// y el aviso de /panel/sku ("3 publicación(es) sin SKU todavía").
+// listarPublicacionesSinSkuFiltradas() (abajo) es la versión paginada
+// para la tabla de /panel/sku/sin-vincular.
 export async function listarPublicacionesSinSku(empresaId: string) {
   return dbComoEmpresa(empresaId, (tx) =>
     tx
@@ -72,6 +82,164 @@ export async function contarPublicacionesSinSku(empresaId: string): Promise<numb
       .where(and(eq(publicaciones.empresaId, empresaId), isNull(publicaciones.skuId)))
   );
   return total;
+}
+
+// Issue "tabla completa de SKU" — mismo criterio de lib/filtros-listado.ts
+// que ya usan Pedidos/Despachos (búsqueda recortada y con % _ \
+// escapados, página entera segura y acotada al total real). Búsqueda
+// por código O nombre — los dos únicos campos de texto libre real en
+// skus (nunca se inventa un campo que no existe). "Estado" acá es el
+// único categórico real de la tabla: esKit (Kit/Simple), no un status
+// de Mercado Libre — se expone con el mismo nombre de parámetro
+// (?estado=) que las demás tablas por consistencia de URL.
+export const TIPOS_SKU_FILTRO = [
+  { valor: "kit", etiqueta: "Kit" },
+  { valor: "simple", etiqueta: "Simple" },
+] as const;
+
+export const ORDENES_SKU_FILTRO = ["codigo_asc", "codigo_desc", "nombre_asc", "nombre_desc"] as const;
+export type OrdenSkus = (typeof ORDENES_SKU_FILTRO)[number];
+
+export type FiltroSkus = {
+  busqueda?: string; // código o nombre
+  estado?: string; // "kit" | "simple"
+  orden?: string;
+  pagina?: number | string;
+};
+
+export type ResultadoSkus = {
+  skus: (typeof skus.$inferSelect)[];
+  total: number;
+  pagina: number;
+  totalPaginas: number;
+};
+
+const TAMANO_PAGINA_SKU = 25;
+
+export async function listarSkusFiltrados(empresaId: string, filtro: FiltroSkus = {}): Promise<ResultadoSkus> {
+  const condiciones = [eq(skus.empresaId, empresaId)];
+
+  const patron = patronBusquedaLike(filtro.busqueda);
+  const condicionBusqueda = patron ? or(ilike(skus.codigo, patron), ilike(skus.nombre, patron)) : undefined;
+  if (condicionBusqueda) condiciones.push(condicionBusqueda);
+
+  if (filtro.estado === "kit") condiciones.push(eq(skus.esKit, true));
+  if (filtro.estado === "simple") condiciones.push(eq(skus.esKit, false));
+
+  const ordenValido: OrdenSkus =
+    filtro.orden && (ORDENES_SKU_FILTRO as readonly string[]).includes(filtro.orden) ? (filtro.orden as OrdenSkus) : "codigo_asc";
+  // Desempate por id en la MISMA dirección que la columna principal —
+  // mismo criterio que lib/ml/pedidos.ts y lib/ml/despachos.ts.
+  const descendente = ordenValido.endsWith("_desc");
+  const ordenId = descendente ? desc(skus.id) : asc(skus.id);
+  const columnaOrden = ordenValido.startsWith("nombre")
+    ? descendente
+      ? desc(skus.nombre)
+      : asc(skus.nombre)
+    : descendente
+      ? desc(skus.codigo)
+      : asc(skus.codigo);
+
+  const paginaPedida = parsearPagina(filtro.pagina);
+
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const condicion = and(...condiciones);
+
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)`.mapWith(Number) })
+      .from(skus)
+      .where(condicion);
+    const totalPaginas = Math.max(1, Math.ceil(total / TAMANO_PAGINA_SKU));
+    const pagina = acotarPagina(paginaPedida, totalPaginas);
+
+    const filas = await tx
+      .select()
+      .from(skus)
+      .where(condicion)
+      .orderBy(columnaOrden, ordenId)
+      .limit(TAMANO_PAGINA_SKU)
+      .offset((pagina - 1) * TAMANO_PAGINA_SKU);
+
+    return { skus: filas, total, pagina, totalPaginas };
+  });
+}
+
+// Issue "tabla completa de SKU" — misma validación compartida, ahora
+// sobre publicaciones sin SKU (el alcance de siempre: empresaId +
+// skuId IS NULL, igual que listarPublicacionesSinSku). Búsqueda por
+// título O por el id de publicación de Mercado Libre
+// (publicacionIdExterno) — "comprador" no existe en esta tabla, igual
+// que en pedidos. Sin filtro de "estado": no hay ningún campo
+// categórico real en publicaciones aparte de skuId (que acá siempre es
+// null por definición de la pantalla) — se documenta la ausencia en
+// vez de inventar uno.
+export const ORDENES_SIN_VINCULAR_FILTRO = ["importado_desc", "importado_asc", "titulo_asc", "titulo_desc"] as const;
+export type OrdenSinVincular = (typeof ORDENES_SIN_VINCULAR_FILTRO)[number];
+
+export type FiltroSinVincular = {
+  busqueda?: string; // título o id de publicación de ML
+  orden?: string;
+  pagina?: number | string;
+};
+
+export type PublicacionSinSku = { id: string; titulo: string; precio: string; stock: number; publicacionIdExterno: string };
+
+export type ResultadoSinVincular = {
+  publicaciones: PublicacionSinSku[];
+  total: number;
+  pagina: number;
+  totalPaginas: number;
+};
+
+const TAMANO_PAGINA_SIN_VINCULAR = 25;
+
+export async function listarPublicacionesSinSkuFiltradas(empresaId: string, filtro: FiltroSinVincular = {}): Promise<ResultadoSinVincular> {
+  const condiciones = [eq(publicaciones.empresaId, empresaId), isNull(publicaciones.skuId)];
+
+  const patron = patronBusquedaLike(filtro.busqueda);
+  const condicionBusqueda = patron ? or(ilike(publicaciones.titulo, patron), ilike(publicaciones.publicacionIdExterno, patron)) : undefined;
+  if (condicionBusqueda) condiciones.push(condicionBusqueda);
+
+  const ordenValido: OrdenSinVincular =
+    filtro.orden && (ORDENES_SIN_VINCULAR_FILTRO as readonly string[]).includes(filtro.orden) ? (filtro.orden as OrdenSinVincular) : "importado_desc";
+  const descendente = ordenValido.endsWith("_desc");
+  const ordenId = descendente ? desc(publicaciones.id) : asc(publicaciones.id);
+  const columnaOrden = ordenValido.startsWith("titulo")
+    ? descendente
+      ? desc(publicaciones.titulo)
+      : asc(publicaciones.titulo)
+    : descendente
+      ? desc(publicaciones.importadoTs)
+      : asc(publicaciones.importadoTs);
+
+  const paginaPedida = parsearPagina(filtro.pagina);
+
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const condicion = and(...condiciones);
+
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)`.mapWith(Number) })
+      .from(publicaciones)
+      .where(condicion);
+    const totalPaginas = Math.max(1, Math.ceil(total / TAMANO_PAGINA_SIN_VINCULAR));
+    const pagina = acotarPagina(paginaPedida, totalPaginas);
+
+    const filas = await tx
+      .select({
+        id: publicaciones.id,
+        titulo: publicaciones.titulo,
+        precio: publicaciones.precio,
+        stock: publicaciones.stock,
+        publicacionIdExterno: publicaciones.publicacionIdExterno,
+      })
+      .from(publicaciones)
+      .where(condicion)
+      .orderBy(columnaOrden, ordenId)
+      .limit(TAMANO_PAGINA_SIN_VINCULAR)
+      .offset((pagina - 1) * TAMANO_PAGINA_SIN_VINCULAR);
+
+    return { publicaciones: filas, total, pagina, totalPaginas };
+  });
 }
 
 // Enlaza una publicación a un SKU ya existente de esta empresa (RLS
