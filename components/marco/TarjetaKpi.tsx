@@ -1,9 +1,8 @@
 import styles from "./TarjetaKpi.module.css";
 
-// Sin datos reales todavía (ninguna pantalla de reportes existe) —
-// nunca se inventa un valor ni una curva. Cuando exista la consulta
-// real, esta misma tarjeta recibe valor/variacion/puntos reales; hasta
-// entonces, el único estado posible es "Pendiente de conectar".
+// Sin `valor` dice "Pendiente de conectar" — no inventa una cifra ni
+// una curva. Quien ya tiene el dato lo pasa (en /panel, incluso "COP 0"
+// o 0): eso no es este estado vacío.
 export function TarjetaKpi({
   titulo,
   valor,

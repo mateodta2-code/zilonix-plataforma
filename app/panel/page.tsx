@@ -1,11 +1,7 @@
-import { cookies } from "next/headers";
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { currentUser } from "@clerk/nextjs/server";
-import { listarEmpresasDeUsuario } from "@/lib/empresas";
-import { obtenerMiMembresia } from "@/lib/membresias";
-import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { tienePermiso } from "@/lib/roles";
+import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { obtenerContextoPanel } from "@/lib/panel-contexto";
+import { formatearVentasDelMes, obtenerKpisPanel } from "@/lib/panel-kpis";
 import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { iconoDeClave } from "@/components/marco/iconos";
@@ -22,27 +18,40 @@ import styles from "./page.module.css";
 // Marco visual (issue de las subpáginas) — el marco (barra lateral +
 // barra superior) ya no se pinta acá: lo pone app/panel/layout.tsx,
 // que envuelve TODA la sección /panel. Esta página queda solo con su
-// propio contenido (saludo, tarjeta de identidad, pestañas, KPIs
-// vacíos) — vuelve a pedir usuario/empresa/membresía porque Next.js
-// no comparte variables entre un layout y lo que tiene adentro (mismo
-// criterio documentado en el layout).
+// propio contenido (saludo, tarjeta de identidad, pestañas, KPIs).
+//
+// obtenerContextoPanel() (lib/panel-contexto.ts) es la misma consulta
+// que ya pidió app/panel/layout.tsx para pintar el marco — cache() de
+// React hace que, dentro de esta misma petición, solo se consulte la
+// base una vez entre los dos.
+
+// scripts/verificar-permisos.test.ts lee el TEXTO de este archivo y
+// exige `requierePermiso(` — no sigue el import hasta lib/panel-kpis.ts,
+// donde obtenerKpisPanel vuelve a hacer la misma pregunta (y es lo que
+// cubre la prueba contra Postgres). Las dos tienen que atrapar solo
+// SinPermisoError: /panel es el resumen, un rol sin "ventas" igual
+// entra y simplemente no ve esas pestañas ni esas cifras. Un error de
+// verdad (la base no responde, un id mal formado) sí tiene que subir.
+async function puedeConsultarModulo(
+  usuarioId: string,
+  empresaId: string,
+  modulo: "ventas" | "inventario"
+): Promise<boolean> {
+  try {
+    await requierePermiso(usuarioId, empresaId, modulo, "consultar");
+    return true;
+  } catch (error) {
+    if (error instanceof SinPermisoError) return false;
+    throw error;
+  }
+}
+
 export default async function PanelPage() {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
+  const { usuario, activa, rolNombre, clerkUser } = await obtenerContextoPanel();
 
-  const propias = await listarEmpresasDeUsuario(usuario.id);
-  if (propias.length === 0) redirect("/crear-empresa");
-
-  const cookieEmpresa = cookies().get("empresa_actual")?.value;
-  const activa = propias.find((e) => e.id === cookieEmpresa) ?? propias[0];
-  const miMembresia = await obtenerMiMembresia(usuario.id, activa.id);
-  const permisos = miMembresia?.permisos ?? [];
-  const rolNombre = miMembresia?.rolNombre ?? "sin rol";
-
-  const clerkUser = await currentUser();
-
-  const vePedidosYDespachos = tienePermiso(permisos, "ventas", "consultar");
-  const veSku = tienePermiso(permisos, "inventario", "consultar");
+  const vePedidosYDespachos = await puedeConsultarModulo(usuario.id, activa.id, "ventas");
+  const veSku = await puedeConsultarModulo(usuario.id, activa.id, "inventario");
+  const kpis = await obtenerKpisPanel(usuario.id, activa.id);
 
   const pestanas: Pestana[] = [
     { etiqueta: "Resumen", href: "/panel", activa: true },
@@ -83,10 +92,14 @@ export default async function PanelPage() {
       <Pestanas pestanas={pestanas} />
 
       <div className={styles.gridKpi}>
-        <TarjetaKpi titulo="Ventas del mes" />
-        <TarjetaKpi titulo="Pedidos" />
-        <TarjetaKpi titulo="Despachos pendientes" />
-        <TarjetaKpi titulo="SKU sin vincular" />
+        {vePedidosYDespachos && kpis.ventasDelMes !== null && (
+          <TarjetaKpi titulo="Ventas del mes" valor={formatearVentasDelMes(kpis.ventasDelMes)} />
+        )}
+        {vePedidosYDespachos && kpis.pedidos !== null && <TarjetaKpi titulo="Pedidos" valor={kpis.pedidos} />}
+        {vePedidosYDespachos && kpis.despachosPendientes !== null && (
+          <TarjetaKpi titulo="Despachos pendientes" valor={kpis.despachosPendientes} />
+        )}
+        {veSku && kpis.skuSinVincular !== null && <TarjetaKpi titulo="SKU sin vincular" valor={kpis.skuSinVincular} />}
       </div>
 
       <Link href="/crear-empresa" className={styles.crearEmpresa}>

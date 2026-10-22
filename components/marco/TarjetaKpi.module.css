@@ -25,6 +25,8 @@
   font-weight: 800;
   font-size: 28px;
   line-height: 1.15;
+  /* "COP 1.234.000 · USD 50" no cabe en una columna del grid a 28px. */
+  overflow-wrap: anywhere;
 }
 
 .variacion {
