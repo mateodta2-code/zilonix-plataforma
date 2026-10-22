@@ -1,9 +1,35 @@
+/* Tarea "marca unificada": mismo borde azul/plata y línea azul
+   superior que <Tarjeta> (components/marco/Tarjeta.module.css) — este
+   formulario de filtros no usa ese componente (es solo un <form>,
+   para no forzar el padding/gap fijo de Tarjeta sobre una fila de
+   campos), pero sí comparte exactamente el mismo fondo y los mismos
+   tokens, para que no se vea "gris plano" al lado de las tarjetas. */
 .filtros {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 12px;
   margin-bottom: 20px;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+}
+
+.filtros::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
 }
 
 .campoBusqueda {
@@ -23,7 +49,7 @@
 }
 
 .enlacePedido:hover {
-  color: var(--acento-fuerte);
+  color: var(--azul-metal-3);
   text-decoration: underline;
 }
 

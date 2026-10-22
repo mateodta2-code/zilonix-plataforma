@@ -1,9 +1,29 @@
+/* Tarea "marca unificada": mismo borde azul/plata y misma línea azul
+   superior que ya usa TarjetaKpi (components/marco/TarjetaKpi.module.css)
+   — formularios (ej. /panel/invitar), filtros y cualquier otro bloque
+   envuelto en <Tarjeta> dejan de verse "gris plano" en el tema claro.
+   isolation/position relative: la línea de arriba es un ::before
+   absoluto, necesita que esta caja sea su contenedor de referencia. */
 .tarjeta {
-  /* Borde plata de 1px. Sin hover: esta tarjeta no es clicable. */
+  position: relative;
+  isolation: isolate;
+  /* Borde plata de 1px. Sin :hover: esta tarjeta no es clicable. */
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
     linear-gradient(var(--superficie), var(--superficie)) padding-box,
     var(--degradado-plata-borde) border-box;
   padding: 20px;
+  overflow: hidden;
+}
+
+.tarjeta::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
 }

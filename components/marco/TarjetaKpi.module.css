@@ -26,13 +26,16 @@
   left: 14%;
   right: 14%;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--acento), transparent);
+  /* Azul metálico de marca — antes era --acento liso; ahora sale de la
+     misma fuente que el resto de la app (Tarjeta.module.css, el
+     fondo de la página, el brillo de hover). */
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
   pointer-events: none;
 }
 
 .tarjeta:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28), 0 0 22px var(--acento-brillo);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28), var(--sombra-marca-hover);
 }
 
 .titulo {

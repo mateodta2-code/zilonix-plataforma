@@ -113,12 +113,15 @@
 .item:hover {
   background: var(--superficie-2);
   color: var(--icono-hover);
+  border-left-color: var(--azul-metal-3);
+  box-shadow: var(--sombra-marca-hover);
 }
 
 .item:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
   box-shadow: var(--sombra-foco);
+  border-left-color: var(--azul-metal-3);
 }
 
 .item[data-activo="true"],
@@ -166,10 +169,14 @@
   transition: var(--transicion-color), var(--transicion-transform);
 }
 
+/* Pedido explícito: estos 3 botones (Mi cuenta / Tema / Contraer) hoy
+   solo tenían borde plata — se suman al mismo brillo de marca que ya
+   tiene el resto de lo interactivo (azul metálico + plata). */
 .botonCuadrado:hover {
-  border-color: var(--plata);
+  border-color: var(--azul-metal-3);
   color: var(--icono-hover);
   transform: translateY(-1px);
+  box-shadow: var(--sombra-marca-hover);
 }
 
 .botonCuadrado:active {
@@ -180,6 +187,7 @@
   outline: 2px solid var(--acento);
   outline-offset: 2px;
   box-shadow: var(--sombra-foco);
+  border-color: var(--azul-metal-3);
 }
 
 .etiquetaCuadrado {

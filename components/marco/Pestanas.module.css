@@ -12,11 +12,18 @@
   color: var(--texto-suave);
   text-decoration: none;
   cursor: pointer;
-  transition: var(--transicion-color);
+  transition: var(--transicion-color), border-color 0.2s ease;
+  border-bottom: 2px solid transparent;
 }
 
+/* A propósito SIN composes: una pestaña es texto en una fila, no una
+   caja — el anillo rectangular de .zx-brillo-marca se vería raro acá.
+   El brillo real de marca en hover es esta línea de abajo (azul-metal-3
+   en vez de transparent), con el mismo resplandor que ya usa la
+   pestaña activa (::after, más abajo). */
 .pestana:hover {
   color: var(--texto);
+  border-bottom-color: var(--azul-metal-3);
 }
 
 .pestana:focus-visible {

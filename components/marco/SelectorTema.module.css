@@ -13,9 +13,10 @@
 }
 
 .botonIcono:hover {
-  border-color: var(--borde-hover);
+  border-color: var(--azul-metal-3);
   color: var(--icono-hover);
   transform: translateY(-1px);
+  box-shadow: var(--sombra-marca-hover);
 }
 
 .botonIcono:active {
@@ -26,6 +27,7 @@
   outline: 2px solid var(--acento);
   outline-offset: 2px;
   box-shadow: var(--sombra-foco);
+  border-color: var(--azul-metal-3);
 }
 
 .botonCuadrado {
@@ -46,9 +48,10 @@
 }
 
 .botonCuadrado:hover {
-  border-color: var(--borde-hover);
+  border-color: var(--azul-metal-3);
   color: var(--icono-hover);
   transform: translateY(-1px);
+  box-shadow: var(--sombra-marca-hover);
 }
 
 .botonCuadrado:active {
@@ -59,6 +62,7 @@
   outline: 2px solid var(--acento);
   outline-offset: 2px;
   box-shadow: var(--sombra-foco);
+  border-color: var(--azul-metal-3);
 }
 
 .etiquetaCuadrado {
