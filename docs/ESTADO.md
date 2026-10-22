@@ -1,6 +1,6 @@
 # Estado real de Zilonix Seller
 
-Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
+Foto del proyecto al **2026-10-22**. Esto cambia después de cada tarea — la fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
 
 ## Qué está terminado y funcionando
 
@@ -15,6 +15,7 @@ Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la f
 - **2.6** SKU maestro propio, con kits.
 - **2.7** Pedidos con línea de tiempo de 8 pasos (venta → pago → factura → empaque → despacho → entrega → novedades → dinero conciliado).
 - **2.10** Despachos (Full/Flex/Colecta, impresión masiva de etiquetas) — código en `main`, pero su migración y la base de seguridad (RLS) **todavía no se aplicaron contra staging ni producción** (ver "Problemas conocidos").
+- **Z-MT-08** Selector compartido de cuenta de Mercado Libre (`components/SelectorCuentaMl.tsx`, `lib/ml/selector-cuenta.ts`): elige "Todas" o una cuenta y lo deja en `?cuenta=`. La lectura pasa por `dbComoEmpresa` y al cliente solo salen `id` y apodo. Un `?cuenta=` de otra empresa se trata como "Todas". Bandeja, publicar, inventario y despachos todavía no lo montan — cada pantalla lo adopta en su propio issue.
 
 ## Qué está a medias
 

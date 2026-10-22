@@ -2,6 +2,10 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
+## Sin publicar
+
+- **2026-10-22** — Z-MT-08 (Selector de cuenta ML compartido, issue #54): `components/SelectorCuentaMl.tsx` elige "Todas" o una cuenta de Mercado Libre y guarda la elección en `?cuenta=` (formulario GET). La lista la lee `leerCuentaMlDeQuery` (`lib/ml/selector-cuenta.ts`) con `dbComoEmpresa` — la política de RLS de `cuentas_ml`, no la conexión de migraciones — y al navegador solo salen `id` y `apodo` (el nickname). Un `?cuenta=` que no es de la empresa activa queda en "Todas", sin error y sin devolver datos de la otra. Bandeja, publicar, inventario y despachos lo adoptan en sus propios issues; este cambio no las toca. La versión no sube.
+
 ## v0.1.0
 
 - **2026-10-14** — Tarea 1.1 (Repositorio nuevo): Next.js 14 + TypeScript, Drizzle ORM + Postgres, GitHub Actions (compila, tipos, pruebas, build en cada PR), página `/api/version`, desplegado en Railway. Sentry se deja fuera del alcance por ahora, para no sumar una integración a medias.
