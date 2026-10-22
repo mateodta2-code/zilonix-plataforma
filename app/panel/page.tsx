@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { tienePermiso } from "@/lib/roles";
+import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
-import { calcularVentasDelMes, contarDespachosPendientes, contarPedidos, contarSkuSinVincular, type VentasDelMes } from "@/lib/panel-kpis";
+import { formatearVentasDelMes, obtenerKpisPanel } from "@/lib/panel-kpis";
 import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { iconoDeClave } from "@/components/marco/iconos";
@@ -24,25 +24,34 @@ import styles from "./page.module.css";
 // que ya pidió app/panel/layout.tsx para pintar el marco — cache() de
 // React hace que, dentro de esta misma petición, solo se consulte la
 // base una vez entre los dos.
+
+// scripts/verificar-permisos.test.ts lee el TEXTO de este archivo y
+// exige `requierePermiso(` — no sigue el import hasta lib/panel-kpis.ts,
+// donde obtenerKpisPanel vuelve a hacer la misma pregunta (y es lo que
+// cubre la prueba contra Postgres). Las dos tienen que atrapar solo
+// SinPermisoError: /panel es el resumen, un rol sin "ventas" igual
+// entra y simplemente no ve esas pestañas ni esas cifras. Un error de
+// verdad (la base no responde, un id mal formado) sí tiene que subir.
+async function puedeConsultarModulo(
+  usuarioId: string,
+  empresaId: string,
+  modulo: "ventas" | "inventario"
+): Promise<boolean> {
+  try {
+    await requierePermiso(usuarioId, empresaId, modulo, "consultar");
+    return true;
+  } catch (error) {
+    if (error instanceof SinPermisoError) return false;
+    throw error;
+  }
+}
+
 export default async function PanelPage() {
-  const { usuario, activa, permisos, rolNombre, clerkUser } = await obtenerContextoPanel();
+  const { usuario, activa, rolNombre, clerkUser } = await obtenerContextoPanel();
 
-  const vePedidosYDespachos = tienePermiso(permisos, "ventas", "consultar");
-  const veSku = tienePermiso(permisos, "inventario", "consultar");
-
-  // Mismo criterio que las pestañas de abajo (tienePermiso, "consultar"):
-  // los KPIs de ventas/pedidos/despachos solo se calculan y se muestran
-  // si el rol puede consultar "ventas"; SKU sin vincular, si puede
-  // consultar "inventario". app/panel/page.tsx sigue exento en
-  // scripts/verificar-permisos.test.ts porque esto es la misma pregunta
-  // "¿puede consultar [módulo]?" que ya decide qué llevarlo a ver, no
-  // una autorización nueva.
-  const [ventasDelMes, pedidosTotal, despachosPendientes, skuSinVincular] = await Promise.all([
-    vePedidosYDespachos ? calcularVentasDelMes(activa.id) : Promise.resolve(null),
-    vePedidosYDespachos ? contarPedidos(activa.id) : Promise.resolve(null),
-    vePedidosYDespachos ? contarDespachosPendientes(activa.id) : Promise.resolve(null),
-    veSku ? contarSkuSinVincular(activa.id) : Promise.resolve(null),
-  ]);
+  const vePedidosYDespachos = await puedeConsultarModulo(usuario.id, activa.id, "ventas");
+  const veSku = await puedeConsultarModulo(usuario.id, activa.id, "inventario");
+  const kpis = await obtenerKpisPanel(usuario.id, activa.id);
 
   const pestanas: Pestana[] = [
     { etiqueta: "Resumen", href: "/panel", activa: true },
@@ -83,14 +92,14 @@ export default async function PanelPage() {
       <Pestanas pestanas={pestanas} />
 
       <div className={styles.gridKpi}>
-        {vePedidosYDespachos && (
-          <>
-            <TarjetaKpi titulo="Ventas del mes" valor={ventasDelMes ? formatoVentas(ventasDelMes) : 0} />
-            <TarjetaKpi titulo="Pedidos" valor={pedidosTotal ?? 0} />
-            <TarjetaKpi titulo="Despachos pendientes" valor={despachosPendientes ?? 0} />
-          </>
+        {vePedidosYDespachos && kpis.ventasDelMes !== null && (
+          <TarjetaKpi titulo="Ventas del mes" valor={formatearVentasDelMes(kpis.ventasDelMes)} />
         )}
-        {veSku && <TarjetaKpi titulo="SKU sin vincular" valor={skuSinVincular ?? 0} />}
+        {vePedidosYDespachos && kpis.pedidos !== null && <TarjetaKpi titulo="Pedidos" valor={kpis.pedidos} />}
+        {vePedidosYDespachos && kpis.despachosPendientes !== null && (
+          <TarjetaKpi titulo="Despachos pendientes" valor={kpis.despachosPendientes} />
+        )}
+        {veSku && kpis.skuSinVincular !== null && <TarjetaKpi titulo="SKU sin vincular" valor={kpis.skuSinVincular} />}
       </div>
 
       <Link href="/crear-empresa" className={styles.crearEmpresa}>
@@ -99,8 +108,4 @@ export default async function PanelPage() {
       </Link>
     </>
   );
-}
-
-function formatoVentas(ventas: VentasDelMes): string {
-  return `${ventas.moneda} ${ventas.total.toLocaleString("es-CO", { maximumFractionDigits: 2 })}`;
 }

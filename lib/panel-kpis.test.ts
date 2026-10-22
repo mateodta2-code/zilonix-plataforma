@@ -1,9 +1,25 @@
 import { randomUUID } from "crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl, despachosMl, empresas, pedidos, publicaciones, skus } from "@/db/schema";
+import { cuentasMl, despachosMl, empresas, membresias, pedidos, permisosRol, publicaciones, roles, skus, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { calcularVentasDelMes, contarDespachosPendientes, contarPedidos, contarSkuSinVincular } from "./panel-kpis";
+import {
+  calcularVentasDelMes,
+  contarDespachosPendientes,
+  contarPedidos,
+  contarSkuSinVincular,
+  formatearVentasDelMes,
+  obtenerKpisPanel,
+} from "./panel-kpis";
+
+// 15 de junio 2026, 15:00 UTC = 10:00 en Bogotá. Lejos del cambio de
+// mes en las dos zonas: si la prueba usara `new Date()`, un CI que
+// corriera entre las 00:00 y las 05:00 UTC del día 1 contaría el
+// "mes actual" en el mes anterior de Bogotá y el fixture se correría
+// de mes.
+const AHORA = new Date("2026-06-15T15:00:00.000Z");
+const MES_ANTERIOR = new Date("2026-05-15T15:00:00.000Z");
 
 // KPIs reales del panel — prueba real contra Postgres (RLS, no un
 // mock: la tabla pedidos/despachos_ml/publicaciones son tablas de
@@ -52,32 +68,40 @@ describe("KPIs del panel (empresa_id, aislamiento A/B)", () => {
         .returning({ id: cuentasMl.id })
     );
 
-    const ahora = new Date();
-    // Mismo día del mes anterior — el constructor de Date normaliza
-    // solo el rollunder de año cuando el mes actual es enero (mes -1),
-    // así que es seguro sin importar en qué mes se corra la prueba.
-    const mesAnterior = new Date(ahora.getFullYear(), ahora.getMonth() - 1, 15);
-
-    // Empresa A: dos pedidos de este mes (100000 + 50000 = 150000) y uno
-    // del mes pasado (999999, para probar que "Ventas del mes" lo deja
-    // afuera pero "Pedidos" sí lo cuenta).
+    // Empresa A: dos pedidos COP de este mes (100000.00 + 50000.00 =
+    // 150000.00), uno USD de este mes más grande a propósito (500000.00,
+    // para que un "quédate con el monto mayor" se note) y uno COP del
+    // mes pasado (999999, para probar que "Ventas del mes" lo deja
+    // afuera pero "Pedidos" sí lo cuenta). Las fechas son las de AHORA,
+    // no `new Date()`: el rango del KPI también recibe AHORA.
     const [pedidoA1] = await dbComoEmpresa(empresaAId, (tx) =>
       tx
         .insert(pedidos)
-        .values({ empresaId: empresaAId, cuentaMlId: cuentaA.id, pedidoIdExterno: `ORD-A1-${randomUUID()}`, fecha: ahora, total: "100000", moneda: "COP", estado: "paid" })
+        .values({ empresaId: empresaAId, cuentaMlId: cuentaA.id, pedidoIdExterno: `ORD-A1-${randomUUID()}`, fecha: AHORA, total: "100000", moneda: "COP", estado: "paid" })
         .returning({ id: pedidos.id })
     );
     const [pedidoA2] = await dbComoEmpresa(empresaAId, (tx) =>
       tx
         .insert(pedidos)
-        .values({ empresaId: empresaAId, cuentaMlId: cuentaA.id, pedidoIdExterno: `ORD-A2-${randomUUID()}`, fecha: ahora, total: "50000", moneda: "COP", estado: "paid" })
+        .values({ empresaId: empresaAId, cuentaMlId: cuentaA.id, pedidoIdExterno: `ORD-A2-${randomUUID()}`, fecha: AHORA, total: "50000", moneda: "COP", estado: "paid" })
         .returning({ id: pedidos.id })
     );
     const [pedidoA3] = await dbComoEmpresa(empresaAId, (tx) =>
       tx
         .insert(pedidos)
-        .values({ empresaId: empresaAId, cuentaMlId: cuentaA.id, pedidoIdExterno: `ORD-A3-${randomUUID()}`, fecha: mesAnterior, total: "999999", moneda: "COP", estado: "paid" })
+        .values({ empresaId: empresaAId, cuentaMlId: cuentaA.id, pedidoIdExterno: `ORD-A3-${randomUUID()}`, fecha: MES_ANTERIOR, total: "999999", moneda: "COP", estado: "paid" })
         .returning({ id: pedidos.id })
+    );
+    await dbComoEmpresa(empresaAId, (tx) =>
+      tx.insert(pedidos).values({
+        empresaId: empresaAId,
+        cuentaMlId: cuentaA.id,
+        pedidoIdExterno: `ORD-A4-${randomUUID()}`,
+        fecha: AHORA,
+        total: "500000",
+        moneda: "USD",
+        estado: "paid",
+      })
     );
 
     // despachoA1: imprimible y sin etiqueta todavía -> pendiente.
@@ -147,7 +171,7 @@ describe("KPIs del panel (empresa_id, aislamiento A/B)", () => {
     const [pedidoB1] = await dbComoEmpresa(empresaBId, (tx) =>
       tx
         .insert(pedidos)
-        .values({ empresaId: empresaBId, cuentaMlId: cuentaB.id, pedidoIdExterno: `ORD-B1-${randomUUID()}`, fecha: ahora, total: "999999", moneda: "COP", estado: "paid" })
+        .values({ empresaId: empresaBId, cuentaMlId: cuentaB.id, pedidoIdExterno: `ORD-B1-${randomUUID()}`, fecha: AHORA, total: "999999", moneda: "COP", estado: "paid" })
         .returning({ id: pedidos.id })
     );
     await dbComoEmpresa(empresaBId, (tx) =>
@@ -172,14 +196,18 @@ describe("KPIs del panel (empresa_id, aislamiento A/B)", () => {
     );
   });
 
-  it("calcularVentasDelMes suma solo los pedidos de este mes de esa empresa", async () => {
-    const ventasA = await calcularVentasDelMes(empresaAId);
-    expect(ventasA).toEqual({ moneda: "COP", total: 150000 });
+  const ventasA = [
+    { moneda: "COP", total: "150000.00" },
+    { moneda: "USD", total: "500000.00" },
+  ];
+
+  it("calcularVentasDelMes suma en Postgres, por moneda, solo los pedidos de este mes de esa empresa", async () => {
+    expect(await calcularVentasDelMes(empresaAId, AHORA)).toEqual(ventasA);
   });
 
   it("contarPedidos cuenta TODO el histórico, incluido el pedido del mes pasado", async () => {
     const totalA = await contarPedidos(empresaAId);
-    expect(totalA).toBe(3);
+    expect(totalA).toBe(4);
   });
 
   it("contarDespachosPendientes solo cuenta lo imprimible sin etiqueta impresa", async () => {
@@ -193,31 +221,159 @@ describe("KPIs del panel (empresa_id, aislamiento A/B)", () => {
   });
 
   it("aislamiento A/B: la empresa A nunca ve ni mezcla los números de la empresa B, ni al revés", async () => {
-    const [ventasA, ventasB] = await Promise.all([calcularVentasDelMes(empresaAId), calcularVentasDelMes(empresaBId)]);
-    expect(ventasA).toEqual({ moneda: "COP", total: 150000 });
-    expect(ventasB).toEqual({ moneda: "COP", total: 999999 });
+    const [ventasDeA, ventasDeB] = await Promise.all([
+      calcularVentasDelMes(empresaAId, AHORA),
+      calcularVentasDelMes(empresaBId, AHORA),
+    ]);
+    expect(ventasDeA).toEqual(ventasA);
+    expect(ventasDeB).toEqual([{ moneda: "COP", total: "999999.00" }]);
 
     const [pedidosA, pedidosB] = await Promise.all([contarPedidos(empresaAId), contarPedidos(empresaBId)]);
-    expect(pedidosA).toBe(3);
+    expect(pedidosA).toBe(4);
     expect(pedidosB).toBe(1);
 
     const [despachosA, despachosB] = await Promise.all([contarDespachosPendientes(empresaAId), contarDespachosPendientes(empresaBId)]);
     expect(despachosA).toBe(1);
     expect(despachosB).toBe(1);
 
-    const [skuA, skuB] = await Promise.all([contarSkuSinVincular(empresaAId), contarSkuSinVincular(empresaBId)]);
-    expect(skuA).toBe(1);
-    expect(skuB).toBe(1);
+    const [skuDeA, skuDeB] = await Promise.all([contarSkuSinVincular(empresaAId), contarSkuSinVincular(empresaBId)]);
+    expect(skuDeA).toBe(1);
+    expect(skuDeB).toBe(1);
   });
 
-  it("empresa sin ningún pedido todavía: Ventas del mes es null (nunca un número inventado)", async () => {
+  it("RLS: un select de pedidos sin WHERE, con la empresa A activa, no devuelve filas de la empresa B", async () => {
+    const filas = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(pedidos));
+    expect(filas.length).toBeGreaterThan(0);
+    expect(filas.some((fila) => fila.empresaId === empresaBId)).toBe(false);
+  });
+
+  it("empresa sin ningún pedido todavía: Ventas del mes es lista vacía (nunca un número inventado) y los conteos son 0", async () => {
     const empresaVaciaId = randomUUID();
     await dbComoEmpresa(empresaVaciaId, (tx) =>
       tx.insert(empresas).values({ id: empresaVaciaId, nombre: "Empresa vacía KPIs", nit: `TEST-KPIV-${empresaVaciaId.slice(0, 8)}` })
     );
-    expect(await calcularVentasDelMes(empresaVaciaId)).toBeNull();
+    expect(await calcularVentasDelMes(empresaVaciaId, AHORA)).toEqual([]);
     expect(await contarPedidos(empresaVaciaId)).toBe(0);
     expect(await contarDespachosPendientes(empresaVaciaId)).toBe(0);
     expect(await contarSkuSinVincular(empresaVaciaId)).toBe(0);
   });
+
+  it("un pedido a las 20:00 de Bogotá del último día del mes cuenta en ese mes", async () => {
+    // 2026-04-01 01:00 UTC = 2026-03-31 20:00 America/Bogota (UTC-5,
+    // sin horario de verano). El mes de calendario en Colombia sigue
+    // siendo marzo; en UTC ya es 1 de abril.
+    const enElBorde = new Date("2026-04-01T01:00:00.000Z");
+    const empresaId = randomUUID();
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(empresas).values({ id: empresaId, nombre: "Empresa borde mes", nit: `TEST-KPIE-${empresaId.slice(0, 8)}` })
+    );
+    const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(cuentasMl)
+        .values({
+          empresaId,
+          cuentaIdExterna: `ml-user-kpie-${randomUUID()}`,
+          nickname: "VENDEDOR_KPI_BORDE",
+          accessTokenCifrado: cifrarToken("access-borde"),
+          refreshTokenCifrado: cifrarToken("refresh-borde"),
+          tokenExpiraTs: new Date(Date.now() + 3600_000),
+        })
+        .returning({ id: cuentasMl.id })
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(pedidos).values({
+        empresaId,
+        cuentaMlId: cuenta.id,
+        pedidoIdExterno: `ORD-BORDE-${randomUUID()}`,
+        fecha: enElBorde,
+        total: "12345.67",
+        moneda: "COP",
+        estado: "paid",
+      })
+    );
+
+    expect(await calcularVentasDelMes(empresaId, enElBorde)).toEqual([{ moneda: "COP", total: "12345.67" }]);
+    // 2026-04-01 05:00 UTC = 2026-04-01 00:00 Bogotá: fin exclusivo de
+    // marzo. El mismo pedido ya no entra.
+    expect(await calcularVentasDelMes(empresaId, new Date("2026-04-01T05:00:00.000Z"))).toEqual([]);
+  });
+
+  it("un rol sin ventas ni inventario recibe los cuatro KPIs en null aunque la empresa tenga datos", async () => {
+    const usuarioId = await membresiaCon(empresaAId, "Solo finanzas KPIs", [{ modulo: "finanzas", accion: "consultar" }]);
+    expect(await obtenerKpisPanel(usuarioId, empresaAId, AHORA)).toEqual({
+      ventasDelMes: null,
+      pedidos: null,
+      despachosPendientes: null,
+      skuSinVincular: null,
+    });
+  });
+
+  it("un rol con ventas e inventario ve los KPIs; uno solo con ventas no ve el de SKU", async () => {
+    const conAmbos = await membresiaCon(empresaAId, "Ventas e inventario KPIs", [
+      { modulo: "ventas", accion: "consultar" },
+      { modulo: "inventario", accion: "consultar" },
+    ]);
+    expect(await obtenerKpisPanel(conAmbos, empresaAId, AHORA)).toEqual({
+      ventasDelMes: ventasA,
+      pedidos: 4,
+      despachosPendientes: 1,
+      skuSinVincular: 1,
+    });
+
+    const soloVentas = await membresiaCon(empresaAId, "Solo ventas KPIs", [{ modulo: "ventas", accion: "consultar" }]);
+    expect(await obtenerKpisPanel(soloVentas, empresaAId, AHORA)).toEqual({
+      ventasDelMes: ventasA,
+      pedidos: 4,
+      despachosPendientes: 1,
+      skuSinVincular: null,
+    });
+  });
+
+  it("un error que no es falta de permiso se propaga", async () => {
+    await expect(obtenerKpisPanel(randomUUID(), "no-es-uuid", AHORA)).rejects.toThrow(/empresaId inválido/);
+  });
 });
+
+describe("formatearVentasDelMes", () => {
+  it("lista cada moneda y, sin ventas, muestra COP 0", () => {
+    expect(
+      formatearVentasDelMes([
+        { moneda: "COP", total: "1234000" },
+        { moneda: "USD", total: "50" },
+      ])
+    ).toBe("COP 1.234.000 · USD 50");
+    expect(formatearVentasDelMes([])).toBe("COP 0");
+    expect(formatearVentasDelMes([{ moneda: "COP", total: "150000.00" }])).toBe("COP 150.000");
+    expect(formatearVentasDelMes([{ moneda: "COP", total: "12345.67" }])).toBe("COP 12.345,67");
+  });
+});
+
+async function membresiaCon(
+  empresaId: string,
+  nombreRol: string,
+  permisos: { modulo: "ventas" | "inventario" | "finanzas"; accion: "consultar" }[]
+): Promise<string> {
+  const usuarioId = randomUUID();
+  const rolId = randomUUID();
+  await db.insert(usuarios).values({
+    id: usuarioId,
+    email: `kpi-${usuarioId.slice(0, 8)}@zilonix.test`,
+    nombre: nombreRol,
+  });
+  await dbComoEmpresa(empresaId, async (tx) => {
+    await tx.insert(roles).values({ id: rolId, nombre: nombreRol, empresaId });
+    if (permisos.length > 0) {
+      await tx.insert(permisosRol).values(
+        permisos.map((permiso) => ({
+          id: randomUUID(),
+          rolId,
+          modulo: permiso.modulo,
+          accion: permiso.accion,
+          alcance: "todo" as const,
+        }))
+      );
+    }
+    await tx.insert(membresias).values({ id: randomUUID(), usuarioId, empresaId, rolId });
+  });
+  return usuarioId;
+}
