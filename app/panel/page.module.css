@@ -38,7 +38,7 @@
   background:
     repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.06) 0px, rgba(255, 255, 255, 0.06) 1px, transparent 1px, transparent 7px) padding-box,
     linear-gradient(145deg, var(--superficie-2) 0%, var(--superficie) 100%) padding-box,
-    var(--degradado-plata) border-box;
+    var(--degradado-plata-borde) border-box;
   box-shadow: 0 0 0 1px rgba(192, 198, 208, 0.08) inset;
 }
 
@@ -110,8 +110,10 @@
 }
 
 .crearEmpresa:hover {
-  background: var(--acento);
+  background: var(--acento-boton);
   color: #fff;
+  box-shadow: var(--sombra-boton);
+  transform: translateY(-1px);
 }
 
 .crearEmpresa:active {
@@ -121,4 +123,5 @@
 .crearEmpresa:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }

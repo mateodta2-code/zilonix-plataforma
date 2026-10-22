@@ -4,6 +4,7 @@
   text-align: center;
   font-size: 13.5px;
   color: var(--texto-suave);
-  border: 1px dashed var(--borde);
+  border: 1px dashed var(--borde-plata);
+  background: color-mix(in srgb, var(--plata) 6%, var(--superficie));
   border-radius: var(--radio-tarjeta);
 }

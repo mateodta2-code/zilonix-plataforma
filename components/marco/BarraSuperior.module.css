@@ -8,10 +8,13 @@
   gap: 16px;
   height: 64px;
   padding: 0 20px;
-  background: color-mix(in srgb, var(--superficie) 72%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /* Casi opaca: el azul del fondo se asoma, pero el texto se mide
+     contra la superficie, no contra el degradado. */
+  background: color-mix(in srgb, var(--superficie) 88%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--borde);
+  box-shadow: inset 0 -1px 0 rgba(192, 192, 192, 0.08);
 }
 
 .izquierda {
@@ -59,6 +62,7 @@
 .select:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 1px;
+  box-shadow: var(--sombra-foco);
 }
 
 .botonCambiar {
@@ -67,14 +71,15 @@
   padding: 5px 10px;
   border-radius: var(--radio-boton);
   border: none;
-  background: var(--acento);
+  background: var(--acento-boton);
   color: #fff;
   cursor: pointer;
   transition: var(--transicion-color), var(--transicion-transform);
 }
 
 .botonCambiar:hover {
-  background: var(--acento-fuerte);
+  background: var(--acento-boton-hover);
+  box-shadow: var(--sombra-boton);
 }
 
 .botonCambiar:active {
@@ -82,8 +87,9 @@
 }
 
 .botonCambiar:focus-visible {
-  outline: 2px solid var(--acento);
+  outline: 2px solid var(--acento-fuerte);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }
 
 .centro {
@@ -131,15 +137,16 @@
   border-radius: var(--radio-boton);
   border: 1px solid var(--borde);
   background: var(--superficie-2);
-  color: var(--texto-suave);
+  color: var(--icono);
   text-decoration: none;
   cursor: pointer;
   transition: var(--transicion-color), var(--transicion-transform);
 }
 
 .botonIcono:hover {
-  border-color: var(--plata);
-  color: var(--texto);
+  border-color: var(--borde-hover);
+  color: var(--icono-hover);
+  transform: translateY(-1px);
 }
 
 .botonIcono:active {
@@ -149,6 +156,7 @@
 .botonIcono:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }
 
 .usuario {
@@ -165,13 +173,14 @@
 }
 
 .usuario:hover {
-  border-color: var(--borde);
+  border-color: var(--plata);
   background: var(--superficie-2);
 }
 
 .usuario:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }
 
 .avatar {

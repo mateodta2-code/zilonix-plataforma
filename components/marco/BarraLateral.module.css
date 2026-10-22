@@ -100,9 +100,11 @@
   gap: 10px;
   padding: 9px 10px;
   border-radius: var(--radio-boton);
-  color: var(--texto-suave);
+  /* currentColor pinta el ícono (SVG stroke) y la etiqueta juntos:
+     inactivo plata, hover plata clara, activo azul. */
+  color: var(--icono);
   text-decoration: none;
-  border-left: 2px solid transparent;
+  border-left: 3px solid transparent;
   cursor: pointer;
   transition: var(--transicion-color);
   white-space: nowrap;
@@ -110,18 +112,21 @@
 
 .item:hover {
   background: var(--superficie-2);
-  color: var(--texto);
+  color: var(--icono-hover);
 }
 
 .item:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }
 
-.item[data-activo="true"] {
-  background: var(--acento-suave);
+.item[data-activo="true"],
+.item[data-activo="true"]:hover {
+  background: linear-gradient(90deg, var(--acento-suave), transparent 78%);
   border-left-color: var(--acento);
-  color: var(--texto);
+  color: var(--icono-activo);
+  box-shadow: inset 0 0 18px var(--acento-resplandor);
 }
 
 .item[data-deshabilitado="true"] {
@@ -154,7 +159,7 @@
   border-radius: var(--radio-boton);
   border: 1px solid var(--borde);
   background: var(--superficie-2);
-  color: var(--texto-suave);
+  color: var(--icono);
   text-decoration: none;
   cursor: pointer;
   padding: 0;
@@ -163,7 +168,8 @@
 
 .botonCuadrado:hover {
   border-color: var(--plata);
-  color: var(--texto);
+  color: var(--icono-hover);
+  transform: translateY(-1px);
 }
 
 .botonCuadrado:active {
@@ -173,6 +179,7 @@
 .botonCuadrado:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }
 
 .etiquetaCuadrado {

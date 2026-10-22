@@ -1,17 +1,38 @@
 .tarjeta {
-  background: var(--superficie);
-  border: 1px solid var(--borde);
+  position: relative;
+  isolation: isolate;
+  /* Misma técnica que la tarjeta de identidad: el borde de 1px no
+     acepta un degradado, así que el relleno sólido va a padding-box
+     y --degradado-plata-borde al anillo transparente. El radial azul
+     es solo la esquina; la cifra queda sobre --superficie. */
+  border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor), transparent 72%) padding-box,
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  overflow: hidden;
   transition: var(--transicion-color), var(--transicion-transform);
 }
 
+.tarjeta::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--acento), transparent);
+  pointer-events: none;
+}
+
 .tarjeta:hover {
-  border-color: var(--plata-2);
   transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28), 0 0 22px var(--acento-brillo);
 }
 
 .titulo {
@@ -36,11 +57,11 @@
 }
 
 .variacion[data-positiva="true"] {
-  color: var(--exito);
+  color: var(--exito-texto);
 }
 
 .variacion[data-positiva="false"] {
-  color: var(--peligro);
+  color: var(--peligro-texto);
 }
 
 .vacio {

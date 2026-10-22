@@ -15,7 +15,7 @@ export function EncabezadoPagina({
   return (
     <div className={styles.encabezado}>
       <div>
-        <h1 className={styles.titulo}>{titulo}</h1>
+        <h1 className={`${styles.titulo} zx-texto-plata`}>{titulo}</h1>
         {descripcion && <p className={styles.descripcion}>{descripcion}</p>}
       </div>
       {accion && <div className={styles.accion}>{accion}</div>}

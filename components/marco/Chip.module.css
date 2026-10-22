@@ -8,17 +8,18 @@
 }
 
 .chip[data-estado="neutro"] {
-  color: var(--texto-suave);
+  color: var(--plata-etiqueta);
+  border-color: var(--borde-plata);
 }
 
 .chip[data-estado="exito"] {
-  color: var(--exito);
-  border-color: var(--exito);
+  color: var(--exito-texto);
+  border-color: var(--exito-texto);
 }
 
 .chip[data-estado="peligro"] {
-  color: var(--peligro);
-  border-color: var(--peligro);
+  color: var(--peligro-texto);
+  border-color: var(--peligro-texto);
 }
 
 .chip[data-estado="aviso"] {
