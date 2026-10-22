@@ -1,0 +1,81 @@
+/* Portada pública (tarea feat-ui-acceso) — compartida entre "/" y las
+   pantallas de Clerk (sign-in/sign-up la usan como el <main> que
+   envuelve la tarjeta de Clerk). */
+.portada {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+/* Logo oficial, mínimo 260px — mismo criterio que la barra lateral
+   (feat-ui-marca): nunca estirado, rotado, recoloreado ni con sombra o
+   brillo. Plata sobre blanco en los dos temas: el manual lo permite
+   explícitamente para el logo completo (a diferencia del ícono
+   contraído de la barra, que sí cambia por tema). */
+.logo {
+  width: 260px;
+  height: auto;
+  display: block;
+}
+
+.lema {
+  margin: 0;
+  max-width: 440px;
+  font-size: 17px;
+  color: var(--texto-suave);
+}
+
+.botones,
+.sesionActiva {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.botonPrimario,
+.botonSecundario,
+.enlaceSesion {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 22px;
+  border-radius: var(--radio-boton);
+  font-weight: 600;
+  text-decoration: none;
+  transition: var(--transicion-color), var(--transicion-transform);
+}
+
+.botonPrimario {
+  background: var(--acento);
+  color: #ffffff;
+}
+.botonPrimario:hover {
+  background: var(--acento-fuerte);
+  transform: translateY(-1px);
+}
+
+.botonSecundario,
+.enlaceSesion {
+  border: 1px solid var(--borde);
+  background: var(--superficie-2);
+  color: var(--texto);
+}
+.botonSecundario:hover,
+.enlaceSesion:hover {
+  border-color: var(--plata-2);
+  transform: translateY(-1px);
+}
+
+.botonPrimario:focus-visible,
+.botonSecundario:focus-visible,
+.enlaceSesion:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
