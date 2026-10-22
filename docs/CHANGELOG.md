@@ -2,6 +2,10 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
+## Sin publicar
+
+- **2026-10-22** — Z-MT-15 (borrador legal, issue #52): páginas `/terminos`, `/privacidad` y `/que-ve-zilonix`, en español de Colombia, con aviso visible de «Borrador pendiente de revisión legal» y versión `2026-10-borrador`. Casilla desmarcada al crear empresa: sin marcarla no se crea. La versión de los tres textos queda en `auditoria.detalle` y la fecha en `auditoria.ts`, en la misma transacción que crea la empresa — sin migración ni columna nueva. Las tres páginas quedan exentas en `scripts/verificar-permisos.test.ts`. Siguen sin ser públicas en el middleware: la línea la agrega Mateo en `lib/rutas-publicas.ts` (ese archivo lo introduce el PR #27; este cambio no lo toca). No se sube el número de versión de la app. Falta la revisión del abogado (`docs/legal-pendientes.md`) antes de quitar el aviso de borrador.
+
 ## v0.1.0
 
 - **2026-10-14** — Tarea 1.1 (Repositorio nuevo): Next.js 14 + TypeScript, Drizzle ORM + Postgres, GitHub Actions (compila, tipos, pruebas, build en cada PR), página `/api/version`, desplegado en Railway. Sentry se deja fuera del alcance por ahora, para no sumar una integración a medias.

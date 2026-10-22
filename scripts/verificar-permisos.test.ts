@@ -67,6 +67,16 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/cuenta/[[...cuenta]]/page.tsx": "solo monta <UserProfile/> de Clerk; no lee ninguna tabla propia",
   "app/sign-in/[[...sign-in]]/page.tsx": "solo monta <SignIn/> de Clerk",
   "app/sign-up/[[...sign-up]]/page.tsx": "solo monta <SignUp/> de Clerk",
+  // Z-MT-15 — textos legales estáticos. Exentos del permiso de módulo
+  // porque no leen ni escriben datos de una empresa. Hacerlos públicos
+  // en el middleware es otra lista (lib/rutas-publicas.ts); la línea la
+  // agrega Mateo, este archivo no la toca.
+  "app/(legal)/terminos/page.tsx":
+    "texto legal estático (términos); no consulta ni escribe datos de ninguna empresa, así que no hay un permiso de módulo que pedir",
+  "app/(legal)/privacidad/page.tsx":
+    "texto legal estático (política de datos, Ley 1581); no consulta ni escribe datos de ninguna empresa",
+  "app/(legal)/que-ve-zilonix/page.tsx":
+    "texto legal estático (qué ve el personal de Zilonix); no consulta ni escribe datos de ninguna empresa",
   "app/api/version/route.ts": "expone solo el número de versión, nunca datos de ninguna empresa",
   "app/api/ml/webhooks/route.ts":
     "Mercado Libre llama esta ruta directo, sin sesión de usuario — el permiso real es dbComoAvisoWebhook() (db/empresa-context.ts), que solo deja ver la fila de cuentas_ml cuyo user_id coincide con el del aviso, nunca las de otra empresa",
