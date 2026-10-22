@@ -7,6 +7,29 @@ on:
     branches: [main, produccion]
 
 jobs:
+  # Issue #43 (Z-P0-04b) — job aparte de build-and-test a propósito:
+  # un secreto filtrado es un problema de seguridad del repositorio
+  # completo (historial incluido), no algo que dependa de que el
+  # build compile o las pruebas pasen. fetch-depth: 0 trae todo el
+  # historial (gitleaks escanea commit por commit, no solo el último).
+  #
+  # Binario oficial en vez de gitleaks/gitleaks-action@v2: esa acción
+  # exige GITLEAKS_LICENSE para repos privados de una organización —
+  # no vale la pena ese riesgo (y la demora de confirmarlo) cuando el
+  # binario hace exactamente lo mismo, verificado en local con el
+  # mismo comando antes de este PR.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Instalar gitleaks
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+      - run: gitleaks detect --redact --config .gitleaks.toml
+
   build-and-test:
     runs-on: ubuntu-latest
     # Tarea 1.4: la prueba de aislamiento (db/rls.test.ts) necesita un

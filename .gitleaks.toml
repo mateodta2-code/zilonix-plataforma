@@ -1,0 +1,28 @@
+# Issue #43 (Z-P0-04b) — gitleaks en CI con las reglas por defecto
+# (useDefault = true, el set completo que mantiene el proyecto
+# gitleaks). El único allowlist de abajo es para los 3 valores
+# FALSOS de .github/workflows/ci.yml que existen solo para que el
+# build compile contra el Postgres efímero de CI — nunca secretos
+# reales (las credenciales reales viven en Railway, nunca en este
+# repositorio). Cada entrada es el valor exacto, no un patrón ancho,
+# para no abrir la puerta a un secreto real que algún día tenga una
+# forma parecida.
+
+title = "Zilonix Plataforma"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fichas ficticias de .github/workflows/ci.yml (CI), nunca secretos reales"
+regexes = [
+  # ML_TOKEN_KEY_V1 ficticia (job build-and-test) — detectada por la
+  # regla "generic-api-key".
+  '''DJLURtqf9klRrWnnPtWUqOgDqgqJ/K8aqMdatfdtzhk=''',
+  # NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ficticia — detectada por
+  # "generic-api-key".
+  '''pk_test_ZmFrZS1jaS1rZXkuY2xlcmsuYWNjb3VudHMuZGV2JA''',
+  # CLERK_SECRET_KEY ficticia — detectada por "stripe-access-token"
+  # (el prefijo sk_ coincide por casualidad con el patrón de Stripe).
+  '''sk_test_fakecikeyfakecikeyfakecikeyfakecikey00''',
+]

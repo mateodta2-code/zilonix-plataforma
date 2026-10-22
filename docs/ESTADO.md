@@ -16,23 +16,25 @@ Foto del proyecto al **2026-10-22**. Esto cambia después de cada tarea — la f
 - **2.6** SKU maestro propio, con kits.
 - **2.7** Pedidos con línea de tiempo de 8 pasos (venta → pago → factura → empaque → despacho → entrega → novedades → dinero conciliado). **Alcance real, no un bug**: la tabla `pedidos` hoy solo guarda `total` — ni comisión de Mercado Libre (`sale_fee`), ni costo de envío, ni neto. Eso es lo primero que necesita la Fase 3 (ver "Qué falta").
 - **2.10** Despachos (Full/Flex/Colecta, impresión masiva de etiquetas) — código en `main`, pero su migración y la base de seguridad (RLS) **todavía no se aplicaron contra staging ni producción** (bloqueado por la caída de Railway, ver "Problemas conocidos §2" — nunca por el bug del middleware).
+- **Z-MT-08** Selector compartido de cuenta de Mercado Libre (`components/SelectorCuentaMl.tsx`, `lib/ml/selector-cuenta.ts`): elige "Todas" o una cuenta y lo deja en `?cuenta=`. La lectura pasa por `dbComoEmpresa` y al cliente solo salen `id` y apodo. Un `?cuenta=` de otra empresa se trata como "Todas". Bandeja, publicar, inventario y despachos todavía no lo montan — cada pantalla lo adopta en su propio issue.
 
 ## Qué está a medias
 
 - **2.4** Avisos de Mercado Libre (webhooks) y el trabajador que los procesa de verdad contra la API. El código está en `main`, pero hasta este PR (`fix-middleware-rutas-maquina`) estuvo roto en ejecución — ver "Problemas conocidos §1". Se mueve de "terminado" a esta sección a propósito: el fix ya está escrito y probado localmente, pero **todavía no se verificó contra staging real** (ni con el workflow `trabajador-avisos-ml.yml` en verde) — no se da por cerrada hasta tener esa evidencia.
 - **2.9 — Bandeja de atención** (preguntas, mensajes de venta, reclamos): código completo, con sus pruebas, en la rama [`tarea-2.9-bandeja-atencion`](https://github.com/mateodta2-code/zilonix-plataforma/tree/tarea-2.9-bandeja-atencion) — **sin ningún Pull Request abierto todavía** (no es que esté esperando revisión; nadie lo abrió aún).
-- **2.11, sub-tarea "Publicar producto y clip"**: las reglas reales de publicación en Mercado Libre portadas por completo (con pruebas), en la rama [`tarea-2.11-publicar-producto-clip`](https://github.com/mateodta2-code/zilonix-plataforma/tree/tarea-2.11-publicar-producto-clip) — tampoco tiene Pull Request abierto. Las otras tres sub-tareas de 2.11 (Promociones, Programar Full, Alertas sanitarias) **no se empezaron**.
+- **2.11, sub-tarea "Publicar producto y clip"**: las reglas reales de publicación en Mercado Libre portadas por completo (con pruebas), en la rama [`tarea-2.11-publicar-producto-clip`](https://github.com/mateodta2-code/zilonix-plataforma/tree/tarea-2.11-publicar-producto-clip) — tampoco tiene Pull Request abierto. Promociones y Programar Full **no se empezaron**. Alertas sanitarias (Z-NV-03a, issue #61): las funciones puras están en un Pull Request en borrador (`lib/sanitarias/`); faltan los 5 casos reales de Frankie y toda la parte de tablas, red y pantalla (Z-NV-03b).
 - Ninguna de las dos ramas de arriba se probó todavía contra una base de datos real de staging/producción ni, en el caso de "Publicar producto", contra una cuenta real de Mercado Libre — bloqueado por la caída de Railway (ver "Problemas conocidos §2"), sin relación con el bug del middleware.
 
 ## Qué falta
 
 - **2.8 — Inventario por bodega**: pausada a propósito. El concepto de "bodega en tránsito" (traslados entre bodegas) que pide la tarea no existe en el Zilonix OS actual — se decidió no inventarlo y esperar a que Mateo lo hable con Franky antes de construir nada.
-- **2.11b/c/d** (Promociones, Programar Full, Alertas sanitarias): sin empezar.
+- **2.11b/c** (Promociones, Programar Full): sin empezar. **2.11d / Z-NV-03a** (Alertas sanitarias): en borrador, solo las funciones puras; la parte con tablas y pantalla es Z-NV-03b y no se empezó.
 - **Panel de urgencias (tarea 2.13)**: sin empezar — hoy `/panel` es solo una lista de enlaces a módulos, no tiene ninguna vista de "lo que necesita atención ya".
 - **Comisión, envío y neto por pedido**: `pedidos` solo guarda `total` (ver nota en 2.7, arriba) — es de lo primero que pide un piloto real de Fase 3.
 - **DIAN / facturación (Fase 3)**: sin empezar, y sin proveedor elegido todavía — rondas de investigación citadas en el plan técnico comparan Factus, Alanube y Plemsi, pero no hay decisión. `/panel/finanzas` que existe hoy es solo una pantalla de demostración de permisos (tarea 1.7), no factura nada real.
 - **2FA obligatorio (Dueño/Contador) y Clerk en modo Production**: ver matiz en "Qué está terminado" — ambos pendientes, con un costo real de Clerk por confirmar antes de pasar a Production.
 - **Fases 4 (Piloto pagado) y 5 (Escalar)**: sin empezar.
+- **Z-MT-11 (issue #63) — backups de Postgres:** el runbook (`docs/runbook-backups.md`) y el script de conteos (`npx tsx scripts/comparar-conteos.ts`, que además se detiene si la conexión no salta RLS) están escritos. Falta que Mateo confirme en Railway que los backups de volumen están activos en staging y en producción (frecuencia y retención anotadas en la tabla del runbook) y que restaure en una base temporal. Ninguna cadena de conexión se pega en el issue.
 - **Aviso automático a FullyLemon cuando cambia el estado de una guía de Mercado Libre**: se le pidió a FullyLemon el detalle real de su endpoint — esperando su respuesta antes de construir nada (no se adivinó el contrato).
 
 ## Decisiones que tomamos y por qué
@@ -89,6 +91,8 @@ Solo los nombres — ningún valor real vive ni debe vivir en este repositorio. 
 **Deuda conocida del límite de peticiones (tarea 1.10)**, documentada acá para no perderla: la IP se toma del primer valor de `x-forwarded-for`, que un cliente puede falsificar; y el contador vive en memoria del proceso, así que se reinicia en cada deploy. Suficiente para hoy (un solo servicio `web`, sin abuso real que proteger todavía), no para cuando haya más de una instancia.
 
 ## Próximos pasos pensados (en orden)
+
+Antes del piloto (P0, issue #63): Mateo ejecuta `docs/runbook-backups.md` en staging y en producción. El ensayo restaura en un Postgres temporal y compara conteos con `npx tsx scripts/comparar-conteos.ts`.
 
 1. **Arreglar el middleware** (este PR, `fix-middleware-rutas-maquina`): rutas de máquina públicas con su propia autenticación, `/api/*` sin sesión → 401 inmediato, `/login` → `/sign-in`, sin depender del rewrite de Clerk que se cuelga. Es la prioridad real — bloquea la tarea 2.4 y cualquier prueba real con Mercado Libre, y no depende de que Railway se recupere.
 2. Confirmar que el túnel privado a Postgres de staging ya responde; comprobar `drizzle.__drizzle_migrations` ahí; aplicar la migración y `db/rls-setup.sql` de las tareas 2.9 y 2.10 contra staging y producción (resolviendo antes la colisión de numeración, ver "Problemas conocidos §3"), correr sus pruebas contra una base real, y recién ahí abrir y fusionar sus Pull Requests.
