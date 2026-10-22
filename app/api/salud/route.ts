@@ -12,7 +12,7 @@ import { db } from "@/db";
 // campos salen null para que el cliente distinga "todavía no hay cola"
 // de "la base no contestó" (eso es el 503, con los mismos campos en
 // null y base=caida).
-export const TIMEOUT_SALUD_MS = 2_000;
+const TIMEOUT_SALUD_MS = 2_000;
 
 // Next.js 14 prerenderiza un GET que no lee la petición y dejaría
 // congelado el JSON del build. Un 200 viejo, con la base ya caída, le

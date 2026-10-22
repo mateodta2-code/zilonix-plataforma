@@ -1,3 +1,4 @@
+import { readFileSync } from "fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.mock se iza por encima de los import. Sin hoisted, la fábrica
@@ -10,7 +11,16 @@ vi.mock("@/db", () => ({
   },
 }));
 
-import { GET, TIMEOUT_SALUD_MS, dynamic, revalidate } from "./route";
+import { GET, dynamic, revalidate } from "./route";
+
+// Next no deja exportar constantes desde route.ts. El tope se lee del
+// fuente para que la prueba de los 2 s use el mismo número que el handler.
+function timeoutDelFuente(): number {
+  const fuente = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+  const encontrado = fuente.match(/const TIMEOUT_SALUD_MS = ([\d_]+)/);
+  if (!encontrado) throw new Error("route.ts no declara TIMEOUT_SALUD_MS");
+  return Number(encontrado[1].replaceAll("_", ""));
+}
 
 const ERROR_DEL_DRIVER =
   'connect ECONNREFUSED postgresql://app_user:no-imprimir@db.interno:5432/railway password authentication failed role "app_user"';
@@ -31,7 +41,7 @@ describe("GET /api/salud", () => {
   it("no se cachea: Next no debe prerenderizar el GET", () => {
     expect(dynamic).toBe("force-dynamic");
     expect(revalidate).toBe(0);
-    expect(TIMEOUT_SALUD_MS).toBe(2_000);
+    expect(timeoutDelFuente()).toBe(2_000);
   });
 
   it("responde 200 solo con números y estados cuando la base contesta", async () => {
@@ -77,6 +87,7 @@ describe("GET /api/salud", () => {
   it("corta a los 2 s si la base no contesta, sin decir por qué", async () => {
     vi.useFakeTimers();
     try {
+      const timeoutMs = timeoutDelFuente();
       execute.mockReturnValue(new Promise(() => {}));
       let asentada = false;
       const pendiente = GET().then((res) => {
@@ -84,7 +95,7 @@ describe("GET /api/salud", () => {
         return res;
       });
 
-      await vi.advanceTimersByTimeAsync(TIMEOUT_SALUD_MS - 1);
+      await vi.advanceTimersByTimeAsync(timeoutMs - 1);
       expect(asentada).toBe(false);
 
       await vi.advanceTimersByTimeAsync(1);
