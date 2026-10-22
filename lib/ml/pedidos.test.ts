@@ -183,10 +183,35 @@ describe("listarPedidosFiltrados — búsqueda, filtro, orden y paginación", ()
     }
   });
 
+  it("pagina 1e20 no es un entero seguro: vuelve a la página 1, sin error", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { pagina: 1e20 });
+    expect(resultado.pagina).toBe(1);
+    expect(resultado.pedidos).toHaveLength(25);
+    expect(resultado.total).toBe(TOTAL_PEDIDOS);
+  });
+
+  it("pagina 99 con 30 pedidos se acota a la última (2) y trae los 5 que faltan", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { pagina: 99 });
+    expect(resultado.pagina).toBe(2);
+    expect(resultado.pedidos).toHaveLength(5);
+    expect(resultado.total).toBe(TOTAL_PEDIDOS);
+  });
+
   it("búsqueda por número de pedido usa ilike (parcial, sin importar mayúsculas)", async () => {
     const resultado = await listarPedidosFiltrados(empresaId, { busqueda: "buscame" });
     expect(resultado.total).toBe(1);
     expect(resultado.pedidos[0].pedidoIdExterno).toBe("BUSCAME-ESPECIAL");
+  });
+
+  it("un % suelto no es un comodín: no matchea ningún pedido", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { busqueda: "%" });
+    expect(resultado.total).toBe(0);
+    expect(resultado.pedidos).toHaveLength(0);
+  });
+
+  it("una búsqueda de 5000 caracteres se recorta y no revienta", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { busqueda: "a".repeat(5000) });
+    expect(resultado.total).toBe(0);
   });
 
   it("filtro por estado de la lista permitida", async () => {
@@ -220,6 +245,13 @@ describe("listarPedidosFiltrados — búsqueda, filtro, orden y paginación", ()
     expect(resultado.total).toBe(3); // días 10, 11 y 12 de enero (i=9,10,11)
   });
 
+  it("una fecha imposible o incompleta se ignora (2026-02-30, 2026, 2026-1-5)", async () => {
+    for (const fecha of ["2026-02-30", "2026", "2026-1-5"]) {
+      const resultado = await listarPedidosFiltrados(empresaId, { desde: fecha, hasta: fecha });
+      expect(resultado.total).toBe(TOTAL_PEDIDOS);
+    }
+  });
+
   it("aislamiento A/B: buscar el mismo texto nunca mezcla los pedidos de la otra empresa", async () => {
     const [deA, deB] = await Promise.all([
       listarPedidosFiltrados(empresaId, { busqueda: "BUSCAME" }),
@@ -229,5 +261,139 @@ describe("listarPedidosFiltrados — búsqueda, filtro, orden y paginación", ()
     expect(deA.pedidos[0].empresaId).toBe(empresaId);
     expect(deB.total).toBe(1);
     expect(deB.pedidos[0].empresaId).toBe(empresaBId);
+  });
+
+  it("RLS: un select de pedidos sin filtrar por empresaId, dentro de A, no devuelve filas de B", async () => {
+    const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos));
+    expect(filas.length).toBeGreaterThan(0);
+    expect(filas.every((fila) => fila.empresaId === empresaId)).toBe(true);
+    expect(filas.some((fila) => fila.pedidoIdExterno === "BUSCAME-ESPECIAL")).toBe(true);
+  });
+});
+
+// Bordes de desde/hasta y desempate por id. Empresa aparte para no
+// mover el total de 30 del describe de arriba: esos pedidos están a
+// las 12:00 UTC, lejos de las 05:00, y no cubren el corte del día.
+describe("listarPedidosFiltrados — bordes de día en Bogotá y desempate por id", () => {
+  vi.setConfig({ testTimeout: 20_000 });
+
+  const empresaId = randomUUID();
+  const idBajo = "10000000-0000-4000-8000-000000000001";
+  const idAlto = "20000000-0000-4000-8000-000000000002";
+  const fechaEmpate = new Date("2026-08-01T12:00:00.000Z");
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(empresas).values({ id: empresaId, nombre: "Empresa bordes pedidos", nit: `TEST-PEDB-${empresaId.slice(0, 8)}` })
+    );
+    const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(cuentasMl)
+        .values({
+          empresaId,
+          cuentaIdExterna: `ml-user-pedb-${randomUUID()}`,
+          nickname: "VENDEDOR_PEDB",
+          accessTokenCifrado: cifrarToken("access"),
+          refreshTokenCifrado: cifrarToken("refresh"),
+          tokenExpiraTs: new Date(Date.now() + 3600_000),
+        })
+        .returning({ id: cuentasMl.id })
+    );
+
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(pedidos).values([
+        // 2026-06-01 04:59:59 UTC = 2026-05-31 23:59:59 en Bogotá.
+        // Queda afuera de desde=2026-06-01.
+        {
+          empresaId,
+          cuentaMlId: cuenta.id,
+          pedidoIdExterno: "DESDE-ANTES",
+          fecha: new Date("2026-06-01T04:59:59.000Z"),
+          total: "10.00",
+          moneda: "COP",
+          estado: "paid",
+        },
+        // 2026-06-01 05:00:00 UTC = 2026-06-01 00:00:00 en Bogotá.
+        // Entra en desde=2026-06-01.
+        {
+          empresaId,
+          cuentaMlId: cuenta.id,
+          pedidoIdExterno: "DESDE-INICIO",
+          fecha: new Date("2026-06-01T05:00:00.000Z"),
+          total: "20.00",
+          moneda: "COP",
+          estado: "paid",
+        },
+        // 2026-06-02 04:59:59 UTC = 2026-06-01 23:59:59 en Bogotá.
+        // Entra en hasta=2026-06-01 (el fin es exclusivo a las 05:00).
+        {
+          empresaId,
+          cuentaMlId: cuenta.id,
+          pedidoIdExterno: "HASTA-INCLUIDO",
+          fecha: new Date("2026-06-02T04:59:59.000Z"),
+          total: "30.00",
+          moneda: "COP",
+          estado: "paid",
+        },
+        // 2026-06-02 05:00:00 UTC = 2026-06-02 00:00:00 en Bogotá.
+        // Queda afuera de hasta=2026-06-01.
+        {
+          empresaId,
+          cuentaMlId: cuenta.id,
+          pedidoIdExterno: "HASTA-EXCLUIDO",
+          fecha: new Date("2026-06-02T05:00:00.000Z"),
+          total: "40.00",
+          moneda: "COP",
+          estado: "paid",
+        },
+        // Misma fecha y el mismo total: el orden lo define el id, en
+        // la misma dirección que la columna principal.
+        {
+          id: idBajo,
+          empresaId,
+          cuentaMlId: cuenta.id,
+          pedidoIdExterno: "EMPATE-BAJO",
+          fecha: fechaEmpate,
+          total: "777.00",
+          moneda: "COP",
+          estado: "paid",
+        },
+        {
+          id: idAlto,
+          empresaId,
+          cuentaMlId: cuenta.id,
+          pedidoIdExterno: "EMPATE-ALTO",
+          fecha: fechaEmpate,
+          total: "777.00",
+          moneda: "COP",
+          estado: "paid",
+        },
+      ])
+    );
+  });
+
+  it("hasta incluye las 04:59:59 UTC del día siguiente y excluye las 05:00 UTC", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { hasta: "2026-06-01" });
+    const ids = resultado.pedidos.map((p) => p.pedidoIdExterno);
+    expect(ids).toContain("HASTA-INCLUIDO");
+    expect(ids).not.toContain("HASTA-EXCLUIDO");
+  });
+
+  it("desde excluye las 04:59:59 UTC de ese día e incluye las 05:00 UTC", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { desde: "2026-06-01" });
+    const ids = resultado.pedidos.map((p) => p.pedidoIdExterno);
+    expect(ids).not.toContain("DESDE-ANTES");
+    expect(ids).toContain("DESDE-INICIO");
+  });
+
+  it("el id desempata en la misma dirección que la columna de orden", async () => {
+    for (const orden of ["fecha_desc", "total_desc"] as const) {
+      const ids = (await listarPedidosFiltrados(empresaId, { orden })).pedidos.map((p) => p.id);
+      expect(ids.indexOf(idAlto)).toBeLessThan(ids.indexOf(idBajo));
+    }
+    for (const orden of ["fecha_asc", "total_asc"] as const) {
+      const ids = (await listarPedidosFiltrados(empresaId, { orden })).pedidos.map((p) => p.id);
+      expect(ids.indexOf(idBajo)).toBeLessThan(ids.indexOf(idAlto));
+    }
   });
 });

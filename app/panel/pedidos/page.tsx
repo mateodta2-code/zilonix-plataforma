@@ -5,7 +5,9 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
 import { ESTADOS_PEDIDO_FILTRO, listarPedidosFiltrados, TAMANO_PAGINA_PEDIDOS } from "@/lib/ml/pedidos";
+import { formatearMonto } from "@/lib/panel-kpis";
 import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
@@ -15,7 +17,18 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "./page.module.css";
 
-type FiltrosUrl = { q?: string; estado?: string; desde?: string; hasta?: string; orden?: string; pagina?: string };
+// Next entrega string[] cuando la misma clave viene repetida
+// (?q=a&q=b). normalizarParametro se queda con el primero.
+type ParametroUrl = string | string[] | undefined;
+type FiltrosUrl = {
+  q?: ParametroUrl;
+  estado?: ParametroUrl;
+  desde?: ParametroUrl;
+  hasta?: ParametroUrl;
+  orden?: ParametroUrl;
+  pagina?: ParametroUrl;
+};
+type FiltrosNormalizados = { q?: string; estado?: string; desde?: string; hasta?: string; orden?: string };
 
 // Mapeo de color del Chip — "paid" es el único que sabemos con certeza
 // que SÍ corre en pedidos reales hoy (ver el comentario de
@@ -31,13 +44,14 @@ function colorEstadoPedido(estado: string): EstadoChip {
   return "neutro";
 }
 
-// numeric de Postgres llega como string — Number() UNA vez, solo para
-// formatear (nunca para sumar ni comparar), es seguro para un monto de
-// venta real. "con su moneda": se antepone el código tal cual viene de
-// Mercado Libre (COP, ARS...), no un símbolo de Intl que podría no
-// calzar con el código real guardado.
+// numeric de Postgres llega como string. Se formatea con el mismo
+// formatearMonto de los KPIs (lib/panel-kpis.ts), que nunca pasa el
+// monto por Number() — un numeric(14,2) grande se sale del entero
+// seguro y pierde centavos. "con su moneda": se antepone el código tal
+// cual viene de Mercado Libre (COP, ARS...), no un símbolo de Intl que
+// podría no calzar con el código real guardado.
 function formatoMonto(moneda: string, total: string): string {
-  return `${moneda} ${Number(total).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${moneda} ${formatearMonto(total)}`;
 }
 
 function formatoFechaColombia(fecha: Date | string): string {
@@ -47,7 +61,7 @@ function formatoFechaColombia(fecha: Date | string): string {
 // "Anterior"/"Siguiente" tienen que preservar el resto de los filtros
 // de la URL y solo cambiar ?pagina= — arma el href a mano en vez de
 // mutar searchParams (que Next.js entrega como objeto de solo lectura).
-function hrefConPagina(filtros: FiltrosUrl, pagina: number): string {
+function hrefConPagina(filtros: FiltrosNormalizados, pagina: number): string {
   const params = new URLSearchParams();
   if (filtros.q) params.set("q", filtros.q);
   if (filtros.estado) params.set("estado", filtros.estado);
@@ -63,9 +77,12 @@ function hrefConPagina(filtros: FiltrosUrl, pagina: number): string {
 // estado y fecha, orden y paginación, todo en la URL (?q=, ?estado=,
 // ?desde=, ?hasta=, ?orden=, ?pagina=) para que se pueda compartir o
 // recargar el link con los mismos filtros. Toda la validación real
-// (lista blanca de estado/orden, página entera positiva) vive en
-// listarPedidosFiltrados() (lib/ml/pedidos.ts) — esta página solo lee
-// la URL y pinta el resultado.
+// (lista blanca de estado/orden, página entera segura, fechas,
+// escape de la búsqueda) vive en listarPedidosFiltrados()
+// (lib/ml/pedidos.ts) y en lib/filtros-listado.ts — esta página solo
+// lee la URL y pinta el resultado. El aviso "todavía no hay pedidos"
+// sale únicamente cuando el total es 0: una página fuera de rango
+// se acota a la última y no puede vaciar la tabla si sí hay filas.
 export default async function PedidosPage({ searchParams }: { searchParams: FiltrosUrl }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -83,17 +100,26 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
     return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
-  const paginaPedida = Number(searchParams.pagina);
+  const filtros: FiltrosNormalizados = {
+    q: normalizarParametro(searchParams.q),
+    estado: normalizarParametro(searchParams.estado),
+    desde: normalizarParametro(searchParams.desde),
+    hasta: normalizarParametro(searchParams.hasta),
+    orden: normalizarParametro(searchParams.orden),
+  };
   const resultado = await listarPedidosFiltrados(empresa.id, {
-    busqueda: searchParams.q,
-    estado: searchParams.estado,
-    desde: searchParams.desde,
-    hasta: searchParams.hasta,
-    orden: searchParams.orden,
-    pagina: Number.isFinite(paginaPedida) ? paginaPedida : undefined,
+    busqueda: filtros.q,
+    estado: filtros.estado,
+    desde: filtros.desde,
+    hasta: filtros.hasta,
+    orden: filtros.orden,
+    pagina: normalizarParametro(searchParams.pagina),
   });
 
-  const hayFiltrosActivos = Boolean(searchParams.q || searchParams.estado || searchParams.desde || searchParams.hasta || searchParams.orden);
+  // Un ?q= que queda vacío después de trim no cuenta como filtro: si
+  // no, con cero pedidos reales la pantalla diría "ningún pedido
+  // coincide" en vez de "todavía no hay pedidos".
+  const hayFiltrosActivos = Boolean(normalizarTextoBusqueda(filtros.q) || filtros.estado || filtros.desde || filtros.hasta || filtros.orden);
   const desdeFila = (resultado.pagina - 1) * TAMANO_PAGINA_PEDIDOS + 1;
   const hastaFila = Math.min(resultado.pagina * TAMANO_PAGINA_PEDIDOS, resultado.total);
 
@@ -115,10 +141,10 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
               (ver el comentario de ESTADOS_PEDIDO_FILTRO/búsqueda en
               lib/ml/pedidos.ts) — nunca se inventa una columna que no
               existe. */}
-          <input type="search" name="q" defaultValue={searchParams.q ?? ""} placeholder="Número de pedido" className={`zx-control ${styles.campoBusqueda}`} />
+          <input type="search" name="q" defaultValue={filtros.q ?? ""} placeholder="Número de pedido" className={`zx-control ${styles.campoBusqueda}`} />
         </Campo>
         <Campo etiqueta="Estado">
-          <select name="estado" defaultValue={searchParams.estado ?? ""} className="zx-control">
+          <select name="estado" defaultValue={filtros.estado ?? ""} className="zx-control">
             <option value="">Todos</option>
             {ESTADOS_PEDIDO_FILTRO.map((e) => (
               <option key={e.valor} value={e.valor}>
@@ -128,13 +154,13 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
           </select>
         </Campo>
         <Campo etiqueta="Desde">
-          <input type="date" name="desde" defaultValue={searchParams.desde ?? ""} className="zx-control" />
+          <input type="date" name="desde" defaultValue={filtros.desde ?? ""} className="zx-control" />
         </Campo>
         <Campo etiqueta="Hasta">
-          <input type="date" name="hasta" defaultValue={searchParams.hasta ?? ""} className="zx-control" />
+          <input type="date" name="hasta" defaultValue={filtros.hasta ?? ""} className="zx-control" />
         </Campo>
         <Campo etiqueta="Ordenar por">
-          <select name="orden" defaultValue={searchParams.orden ?? "fecha_desc"} className="zx-control">
+          <select name="orden" defaultValue={filtros.orden ?? "fecha_desc"} className="zx-control">
             <option value="fecha_desc">Más recientes primero</option>
             <option value="fecha_asc">Más antiguos primero</option>
             <option value="total_desc">Total: mayor a menor</option>
@@ -153,7 +179,7 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
         </div>
       </form>
 
-      {resultado.pedidos.length === 0 ? (
+      {resultado.total === 0 ? (
         <EstadoVacio>
           {hayFiltrosActivos ? (
             <span className={styles.vacioConAccion}>
@@ -194,7 +220,7 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
             </p>
             <div className={styles.botonesPaginacion}>
               {resultado.pagina > 1 ? (
-                <BotonLink href={hrefConPagina(searchParams, resultado.pagina - 1)} variante="secundario" chico>
+                <BotonLink href={hrefConPagina(filtros, resultado.pagina - 1)} variante="secundario" chico>
                   Anterior
                 </BotonLink>
               ) : (
@@ -203,7 +229,7 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
                 </span>
               )}
               {resultado.pagina < resultado.totalPaginas ? (
-                <BotonLink href={hrefConPagina(searchParams, resultado.pagina + 1)} variante="secundario" chico>
+                <BotonLink href={hrefConPagina(filtros, resultado.pagina + 1)} variante="secundario" chico>
                   Siguiente
                 </BotonLink>
               ) : (

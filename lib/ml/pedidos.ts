@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, gte, ilike, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lt, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { pedidoEventos, pedidos } from "@/db/schema";
+import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike } from "@/lib/filtros-listado";
 
 export type PasoPedido = (typeof pedidoEventos.$inferInsert)["paso"];
 
@@ -63,26 +64,12 @@ export type FiltroPedidos = {
   desde?: string; // "YYYY-MM-DD", hora de Colombia
   hasta?: string; // "YYYY-MM-DD", hora de Colombia
   orden?: string;
-  pagina?: number;
+  // La página lo recibe como string (o el primer valor de un string[]);
+  // las pruebas lo pasan como número. parsearPagina acepta los dos.
+  pagina?: number | string;
 };
 
 export const TAMANO_PAGINA_PEDIDOS = 25;
-
-// Colombia no tiene horario de verano — el offset contra UTC es fijo
-// todo el año, así que no hace falta ninguna librería de zonas
-// horarias para calcular "el día completo en Bogotá" (sin dependencia
-// nueva, como pide la tarea).
-const OFFSET_COLOMBIA = "-05:00";
-
-function inicioDiaColombia(fecha: string): Date | null {
-  const d = new Date(`${fecha}T00:00:00${OFFSET_COLOMBIA}`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function finDiaColombia(fecha: string): Date | null {
-  const d = new Date(`${fecha}T23:59:59.999${OFFSET_COLOMBIA}`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
 
 export type ResultadoPedidos = {
   pedidos: (typeof pedidos.$inferSelect)[];
@@ -96,23 +83,30 @@ export type ResultadoPedidos = {
 // que no esté en las listas de arriba se ignora en silencio (nunca un
 // error 500 por un ?estado= raro en la URL), y la búsqueda de texto usa
 // ilike() de Drizzle (parámetro real, nunca texto del usuario pegado a
-// mano en el SQL). "Comprador" y "SKU" NO se pueden buscar todavía: la
-// tabla pedidos no guarda comprador, y el enlace con SKU es tarea
-// futura (ver el comentario de publicaciones.skuId en db/schema.ts) —
-// buscar solo filtra por número de pedido hasta que esos datos existan.
+// mano en el SQL). El patrón escapa \, % y _ con la barra invertida,
+// que es el escape por defecto de LIKE/ILIKE en Postgres — ilike() no
+// manda cláusula ESCAPE, así que hay que usar esa barra y no otra.
+// "Comprador" y "SKU" NO se pueden buscar todavía: la tabla pedidos no
+// guarda comprador, y el enlace con SKU es tarea futura (ver el
+// comentario de publicaciones.skuId en db/schema.ts) — buscar solo
+// filtra por número de pedido hasta que esos datos existan.
 export async function listarPedidosFiltrados(empresaId: string, filtro: FiltroPedidos = {}): Promise<ResultadoPedidos> {
   const condiciones = [eq(pedidos.empresaId, empresaId)];
 
-  if (filtro.busqueda) {
-    condiciones.push(ilike(pedidos.pedidoIdExterno, `%${filtro.busqueda}%`));
+  const patron = patronBusquedaLike(filtro.busqueda);
+  if (patron) {
+    condiciones.push(ilike(pedidos.pedidoIdExterno, patron));
   }
   if (filtro.estado && ESTADOS_PEDIDO_FILTRO.some((e) => e.valor === filtro.estado)) {
     condiciones.push(eq(pedidos.estado, filtro.estado));
   }
-  const desde = filtro.desde ? inicioDiaColombia(filtro.desde) : null;
-  if (desde) condiciones.push(gte(pedidos.fecha, desde));
-  const hasta = filtro.hasta ? finDiaColombia(filtro.hasta) : null;
-  if (hasta) condiciones.push(lte(pedidos.fecha, hasta));
+  const desde = limitesDiaBogota(filtro.desde);
+  if (desde) condiciones.push(gte(pedidos.fecha, desde.inicio));
+  // hasta es exclusivo: < 00:00 del día siguiente en Bogotá (05:00 UTC),
+  // no <= 23:59:59.999. Así entra un pedido de las 23:59:59.500 y queda
+  // afuera uno de las 00:00:00 del día siguiente.
+  const hasta = limitesDiaBogota(filtro.hasta);
+  if (hasta) condiciones.push(lt(pedidos.fecha, hasta.finExclusivo));
 
   const ordenValido = (ORDENES_PEDIDO_FILTRO as readonly string[]).includes(filtro.orden ?? "") ? (filtro.orden as OrdenPedidos) : "fecha_desc";
   const columnaOrden = {
@@ -121,8 +115,14 @@ export async function listarPedidosFiltrados(empresaId: string, filtro: FiltroPe
     total_desc: desc(pedidos.total),
     total_asc: asc(pedidos.total),
   }[ordenValido];
+  // Sin un desempate, dos pedidos con la misma fecha (o el mismo total)
+  // pueden salir en distinto orden en cada página y un mismo id aparece
+  // dos veces o se pierde entre el límite y el offset. El id va en la
+  // misma dirección que la columna principal.
+  const descendente = ordenValido.endsWith("_desc");
+  const ordenId = descendente ? desc(pedidos.id) : asc(pedidos.id);
 
-  const pagina = Number.isInteger(filtro.pagina) && (filtro.pagina as number) > 0 ? (filtro.pagina as number) : 1;
+  const paginaPedida = parsearPagina(filtro.pagina);
 
   return dbComoEmpresa(empresaId, async (tx) => {
     const condicion = and(...condiciones);
@@ -132,15 +132,21 @@ export async function listarPedidosFiltrados(empresaId: string, filtro: FiltroPe
       .from(pedidos)
       .where(condicion);
 
+    const totalPaginas = Math.max(1, Math.ceil(total / TAMANO_PAGINA_PEDIDOS));
+    // El offset se calcula con la página ya acotada. Si se usara
+    // paginaPedida, ?pagina=99 con 30 pedidos devolvería 0 filas y la
+    // pantalla diría que no hay pedidos.
+    const pagina = acotarPagina(paginaPedida, totalPaginas);
+
     const filas = await tx
       .select()
       .from(pedidos)
       .where(condicion)
-      .orderBy(columnaOrden)
+      .orderBy(columnaOrden, ordenId)
       .limit(TAMANO_PAGINA_PEDIDOS)
       .offset((pagina - 1) * TAMANO_PAGINA_PEDIDOS);
 
-    return { pedidos: filas, total, pagina, totalPaginas: Math.max(1, Math.ceil(total / TAMANO_PAGINA_PEDIDOS)) };
+    return { pedidos: filas, total, pagina, totalPaginas };
   });
 }
 
