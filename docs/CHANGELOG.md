@@ -2,6 +2,10 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
+## Sin publicar
+
+- **2026-10-22** — Issue #39 (Z-MT-09, plantilla de prueba de aislamiento): `db/test-utils/aislamiento.ts` saca a un archivo aparte, reutilizable, lo que cada `db/rls-*.test.ts` repetía a mano — `crearDosEmpresas()` crea empresa A y B (cada una con su usuario), siempre con `dbComoEmpresa()` (nunca el superusuario); `afirmarAislamiento(contexto, tabla, insertarFilaComoA)` inserta una fila como A y confirma que B nunca la ve (SELECT), ni la edita (UPDATE, reasignándosela a sí misma — el único ataque genérico posible sin conocer las columnas de negocio de cada tabla), ni la borra (DELETE), y que A sigue viéndola. `db/rls-cuentas-ml.test.ts` (tarea 2.3) ya la usa en su `beforeAll`, sin cambiar lo que esa prueba demuestra ni sus 4 `it` originales.
+
 ## v0.1.0
 
 - **2026-10-14** — Tarea 1.1 (Repositorio nuevo): Next.js 14 + TypeScript, Drizzle ORM + Postgres, GitHub Actions (compila, tipos, pruebas, build en cada PR), página `/api/version`, desplegado en Railway. Sentry se deja fuera del alcance por ahora, para no sumar una integración a medias.
