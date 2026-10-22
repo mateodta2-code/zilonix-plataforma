@@ -27,6 +27,7 @@ Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la f
 - **2.8 — Inventario por bodega**: pausada a propósito. El concepto de "bodega en tránsito" (traslados entre bodegas) que pide la tarea no existe en el Zilonix OS actual — se decidió no inventarlo y esperar a que Mateo lo hable con Franky antes de construir nada.
 - **2.11b/c/d** (Promociones, Programar Full, Alertas sanitarias): sin empezar.
 - **Fases 3 (Finanzas/DIAN), 4 (Piloto pagado) y 5 (Escalar)**: sin empezar.
+- **Z-MT-11 (issue #63) — backups de Postgres:** el runbook (`docs/runbook-backups.md`) y el script de conteos (`npx tsx scripts/comparar-conteos.ts`) están escritos. Falta que Mateo confirme en Railway que los backups de volumen están activos en staging y en producción (frecuencia y retención anotadas en la tabla del runbook) y que restaure en una base temporal. Ninguna cadena de conexión se pega en el issue.
 - **Aviso automático a FullyLemon cuando cambia el estado de una guía de Mercado Libre**: se le pidió a FullyLemon el detalle real de su endpoint — esperando su respuesta antes de construir nada (no se adivinó el contrato).
 
 ## Decisiones que tomamos y por qué
@@ -74,6 +75,8 @@ Solo los nombres — ningún valor real vive ni debe vivir en este repositorio. 
 | `RAILWAY_PUBLIC_DOMAIN` | La pone Railway sola — dominio público real, para armar links (ej. invitaciones) sin depender del header `host` |
 
 ## Próximos pasos pensados (en orden)
+
+Antes del piloto (P0, issue #63): Mateo ejecuta `docs/runbook-backups.md` en staging y en producción. El ensayo restaura en un Postgres temporal y compara conteos con `npx tsx scripts/comparar-conteos.ts`.
 
 1. Confirmar que el túnel privado a Postgres de staging ya responde; aplicar la migración y `db/rls-setup.sql` de las tareas 2.9 y 2.10 contra staging y producción, correr sus pruebas contra una base real, y fusionar ambos Pull Requests (resolviendo antes la colisión de numeración de migraciones).
 2. Diagnosticar con un log real el 500 de `/panel` en staging y confirmar si era solo la caída de Railway o algo más.
