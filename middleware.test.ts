@@ -50,17 +50,30 @@ describe("middleware — límite de peticiones y returnBackUrl (fix, 2026-10-21)
     process.env = { ...envOriginal };
   });
 
-  it("el webhook de Mercado Libre tiene su propio límite (1200), no el general (180) — 200 peticiones de la misma IP no dan 429", async () => {
-    const middleware = await cargarMiddleware();
-    const { auth } = authFalso("u1");
-    const req = () => peticion("https://x.test/api/ml/webhooks", { "x-forwarded-for": "203.0.113.5" });
+  it(
+    "el webhook de Mercado Libre tiene su propio límite (1200), no el general (180) — 181 peticiones de la misma IP no dan 429",
+    async () => {
+      const middleware = await cargarMiddleware();
+      const { auth } = authFalso("u1");
+      const req = () => peticion("https://x.test/api/ml/webhooks", { "x-forwarded-for": "203.0.113.5" });
 
-    let ultimaRespuesta;
-    for (let i = 0; i < 200; i++) {
-      ultimaRespuesta = await middleware(auth, req());
-    }
-    expect(ultimaRespuesta?.status).not.toBe(429);
-  });
+      // Estabilidad de CI (sin issue de producto): 181 es el mínimo real
+      // que prueba la regla — uno más que el límite general (180,
+      // LIMITE_POR_IP en middleware.ts), para demostrar que esta ruta NO
+      // usa ese contador. Nunca hace falta llegar a los 1200 del límite
+      // propio del webhook para probarlo. Antes eran 200 iteraciones, que
+      // a veces daban timeout de 5s corriendo en paralelo con el resto de
+      // la suite — se bajan las iteraciones y, además, se le da un
+      // timeout explícito más holgado (acá sí puede importar cuánto tarde
+      // el resto de la suite, nunca la lógica que se está probando).
+      let ultimaRespuesta;
+      for (let i = 0; i < 181; i++) {
+        ultimaRespuesta = await middleware(auth, req());
+      }
+      expect(ultimaRespuesta?.status).not.toBe(429);
+    },
+    15000
+  );
 
   it("una ruta normal SÍ respeta el límite general (180) con la misma IP", async () => {
     const middleware = await cargarMiddleware();
