@@ -68,6 +68,8 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/sign-in/[[...sign-in]]/page.tsx": "solo monta <SignIn/> de Clerk",
   "app/sign-up/[[...sign-up]]/page.tsx": "solo monta <SignUp/> de Clerk",
   "app/api/version/route.ts": "expone solo el número de versión, nunca datos de ninguna empresa",
+  "app/api/salud/route.ts":
+    "monitoreo público: solo un select 1 y, cuando exista la cola, números de trabajos — nunca datos de negocio, nombres de empresa, cadenas de conexión ni el error del driver",
   "app/api/ml/webhooks/route.ts":
     "Mercado Libre llama esta ruta directo, sin sesión de usuario — el permiso real es dbComoAvisoWebhook() (db/empresa-context.ts), que solo deja ver la fila de cuentas_ml cuyo user_id coincide con el del aviso, nunca las de otra empresa",
   "app/api/ml/trabajador/route.ts":

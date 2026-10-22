@@ -1,0 +1,35 @@
+# Z-MT-10 — comprobación de humo. Se dispara a mano con la URL del
+# ambiente (staging o producción): el mismo script sirve para los dos
+# (Z-RL-02). No usa secretos ni credenciales.
+#
+# "Después del deploy de staging" no está enganchado acá. Hace falta un
+# evento que Railway emita hacia GitHub (repository_dispatch o un
+# Deployment) y este repositorio todavía no lo tiene; no se puede
+# probar desde la corrida de CI de un PR. El siguiente paso es agregar
+# ese `on:` cuando el evento exista, sin cambiar scripts/humo.sh.
+#
+# Si el script sale distinto de 0, el workflow falla. GitHub avisa por
+# correo a quien mira el repositorio: eso cubre una ruta fuera de la
+# tabla y también trabajos muertos o un último trabajo con más de 10 min.
+
+name: Humo
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Origen a comprobar (https://…, sin ruta y sin credenciales)"
+        required: true
+        type: string
+
+jobs:
+  humo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Comprobar la tabla de rutas
+        env:
+          # Por env, no interpolado en el script: el input lo escribe
+          # quien dispara el workflow y no tiene que poder romper el YAML.
+          HUMO_URL: ${{ inputs.url }}
+        run: bash scripts/humo.sh "$HUMO_URL"

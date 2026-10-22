@@ -2,6 +2,10 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
+## Sin publicar
+
+- **2026-10-22** — Z-MT-10 (issue #45, parcial): `GET /api/salud` hace `select 1` con tope de 2 s y responde 200 si la base contesta o 503 si no, sin caché y sin el error del driver. La edad del último trabajo procesado y el número de trabajos muertos salen `null`: la cola (issue #49) todavía no existe en `main`. `scripts/humo.sh` codifica la tabla de rutas del issue más `/api/salud` = 200 y `/api/version` = 200; `.github/workflows/humo.yml` lo corre a mano (`workflow_dispatch`). No sube la versión. **Pendiente de este issue:** la línea que hace pública `/api/salud` en `lib/rutas-publicas.ts` (la agrega Mateo después del PR #27), enganchar el mismo workflow al deploy de staging, y el monitor externo y Sentry (fuera de este cambio).
+
 ## v0.1.0
 
 - **2026-10-14** — Tarea 1.1 (Repositorio nuevo): Next.js 14 + TypeScript, Drizzle ORM + Postgres, GitHub Actions (compila, tipos, pruebas, build en cada PR), página `/api/version`, desplegado en Railway. Sentry se deja fuera del alcance por ahora, para no sumar una integración a medias.
