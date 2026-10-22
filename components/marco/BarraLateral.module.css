@@ -16,7 +16,16 @@
   height: 100vh;
   position: sticky;
   top: 0;
-  background: var(--superficie);
+  /* Corrección: antes era --superficie opaco (bloque plano arriba).
+     Transparente a propósito — igual que BarraSuperior.module.css —
+     para que se vea el MISMO degradado de body::before (--fondo-app),
+     que es fixed al viewport: esta barra también mide 100vh y está
+     sticky top:0, así que coincide pixel a pixel con el degradado del
+     área principal, sin duplicar la receta en ningún lado. El logo y
+     los íconos (plata) siguen leyéndose bien encima — el azul de la
+     zona de arriba sigue siendo oscuro en los dos temas (ver el punto
+     3 del fix para el detalle de claro). */
+  background: transparent;
   border-right: 1px solid var(--borde);
   padding: 18px 12px;
   gap: 18px;
