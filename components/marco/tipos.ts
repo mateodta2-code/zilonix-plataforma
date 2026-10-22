@@ -1,6 +1,6 @@
 // Marco visual del panel — tipos compartidos entre MarcoApp,
 // BarraLateral y BarraSuperior. Los ítems de navegación llegan ya
-// filtrados por permiso desde app/panel/page.tsx (misma regla de
+// filtrados por permiso desde app/panel/layout.tsx (misma regla de
 // siempre, tienePermiso(...)) — estos componentes solo los pintan,
 // nunca deciden quién ve qué.
 export type ClaveIcono =
@@ -19,11 +19,14 @@ export type ClaveIcono =
   | "cuenta"
   | "crearEmpresa";
 
+// "activa" no es un campo acá: el layout de servidor que construye
+// estos ítems no conoce la ruta real (se repiten en todas las
+// subpáginas de /panel) — ItemNavLink.tsx la calcula en el cliente
+// con usePathname().
 export type ItemNav = {
   etiqueta: string;
   href: string;
   icono: ClaveIcono;
-  activa: boolean;
   deshabilitada?: boolean;
   titulo?: string;
 };

@@ -1,5 +1,7 @@
-import Link from "next/link";
 import { urlPublicaBase } from "@/lib/url-publica";
+import { BotonLink } from "@/components/marco/Boton";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import styles from "./page.module.css";
 
 // Tarea 1.7 — todavía no hay proveedor de correo decidido (D pendiente,
 // fuera de esta tarea), así que el link se muestra en pantalla para
@@ -10,9 +12,8 @@ export default function InvitacionListaPage({ searchParams }: { searchParams: { 
   const link = token ? `${urlPublicaBase()}/invitacion/${token}` : null;
 
   return (
-    <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>Invitación generada</h1>
-      <p style={{ opacity: 0.7, fontSize: 14 }}>Comparte este link con la persona — solo funciona una vez y vence en 7 días.</p>
+    <>
+      <EncabezadoPagina titulo="Invitación generada" descripcion="Comparte este link con la persona — solo funciona una vez y vence en 7 días." />
       {link ? (
         // Tarea 1.12 — bug real encontrado en vivo en staging: esto es
         // un Server Component (sin "use client"), y un <input> con
@@ -24,17 +25,13 @@ export default function InvitacionListaPage({ searchParams }: { searchParams: { 
         // quita el onFocus (era solo una comodidad de selección
         // automática al hacer clic, no hacía falta una pantalla
         // cliente aparte solo para esto).
-        <input
-          readOnly
-          value={link}
-          style={{ display: "block", width: "100%", padding: 10, marginTop: 16, fontFamily: "monospace", fontSize: 13 }}
-        />
+        <input readOnly value={link} className={`zx-control ${styles.link}`} />
       ) : (
         <p>No se encontró el token.</p>
       )}
-      <Link href="/panel" style={{ display: "inline-block", marginTop: 24, fontSize: 13 }}>
+      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
         Volver al panel
-      </Link>
-    </main>
+      </BotonLink>
+    </>
   );
 }

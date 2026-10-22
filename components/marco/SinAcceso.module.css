@@ -1,0 +1,31 @@
+.contenedor {
+  padding: 32px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie);
+  max-width: 480px;
+}
+
+.mensaje {
+  margin: 0 0 12px 0;
+  font-size: 13.5px;
+  color: var(--texto-suave);
+}
+
+.volver {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+  transition: var(--transicion-color);
+}
+
+.volver:hover {
+  color: var(--acento);
+  text-decoration: underline;
+}
+
+.volver:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}

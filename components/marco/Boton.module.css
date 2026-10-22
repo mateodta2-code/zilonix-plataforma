@@ -1,0 +1,65 @@
+.boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start; /* el contenido de cada página es una columna flex (MarcoApp) que estira a sus hijos por defecto — un botón nunca debe estirarse a lo ancho solo */
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  font-weight: 500;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: var(--transicion-color), var(--transicion-transform);
+  border: 1px solid transparent;
+}
+
+.boton:active {
+  transform: scale(0.97);
+}
+
+.boton:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.boton:disabled,
+.boton[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.chico {
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
+.primario {
+  background: var(--acento);
+  color: #fff;
+}
+
+.primario:hover:not(:disabled) {
+  background: var(--acento-fuerte);
+}
+
+.secundario {
+  background: var(--superficie-2);
+  border-color: var(--borde);
+  color: var(--texto);
+}
+
+.secundario:hover:not(:disabled) {
+  border-color: var(--plata);
+}
+
+.fantasma {
+  background: transparent;
+  color: var(--acento);
+}
+
+.fantasma:hover:not(:disabled) {
+  background: var(--acento-suave);
+}

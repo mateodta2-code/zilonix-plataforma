@@ -7,6 +7,12 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { obtenerUltimaImportacion } from "@/lib/ml/importacion";
+import { BotonLink, clasesBoton } from "@/components/marco/Boton";
+import { Chip } from "@/components/marco/Chip";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import styles from "./page.module.css";
 
 // Tarea 2.3 — "Conectar ML en 1 clic". Regla de UX #1 del plan técnico
 // ("si el canal no está habilitado para ese plan/cuenta, avisarlo ANTES
@@ -33,13 +39,10 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
     if (!(error instanceof SinPermisoError)) throw error;
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
     return (
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Conectar Mercado Libre</h1>
-        <p style={{ opacity: 0.7, fontSize: 14 }}>
-          Tu rol ({miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.
-        </p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
+      <>
+        <EncabezadoPagina titulo="Conectar Mercado Libre" />
+        <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />
+      </>
     );
   }
 
@@ -59,50 +62,51 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
   const hayImportacionEnCurso = importaciones.some((i) => i.importacion && !i.importacion.completadoTs);
 
   return (
-    <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
+    <>
       {hayImportacionEnCurso && <meta httpEquiv="refresh" content="5" />}
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>Conectar Mercado Libre</h1>
+      <EncabezadoPagina titulo="Conectar Mercado Libre" />
 
-      {searchParams.conectado && (
-        <p style={{ padding: 10, background: "#e6f4ea", borderRadius: 6, fontSize: 14 }}>Cuenta conectada.</p>
-      )}
+      {searchParams.conectado && <div className={styles.avisoExito}>Cuenta conectada.</div>}
       {searchParams.error && (
         // Regla de UX #2 del plan técnico (evidencia real contra
         // Multivende: si el canje del code por el token falla, se
         // queda en spinner infinito, sin ningún mensaje) — acá se ve
         // el error real y un botón para reintentar, nunca un
         // silencio.
-        <div style={{ padding: 10, background: "#fdecea", borderRadius: 6, fontSize: 14 }}>
-          <p style={{ margin: 0 }}>No se pudo conectar la cuenta: {searchParams.error}</p>
-          <a href={urlConectar} style={{ fontSize: 13, fontWeight: 600 }}>
+        <div className={styles.avisoError}>
+          <p className={styles.avisoErrorTexto}>No se pudo conectar la cuenta: {searchParams.error}</p>
+          {/* <a> normal, no next/link: /api/ml/conectar es un Route
+              Handler que arranca el OAuth real, necesita una
+              navegación de verdad del navegador. */}
+          <a href={urlConectar} className={styles.reintentar}>
             Reintentar
           </a>
         </div>
       )}
 
       {cuentas.length > 0 && (
-        <ul style={{ listStyle: "none", padding: 0, marginTop: 20 }}>
+        <ListaFilas>
           {cuentas.map((cuenta) => {
             const importacion = importaciones.find((i) => i.cuenta.id === cuenta.id)?.importacion;
             return (
-              <li key={cuenta.id} style={{ padding: "10px 0", borderBottom: "1px solid #eee" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <FilaLista key={cuenta.id}>
+                <div className={styles.filaCuenta}>
                   <span>
                     Conectado como <strong>{cuenta.nickname}</strong>
-                    {cuenta.desconectadaTs && <span style={{ opacity: 0.6 }}> (desconectada)</span>}
+                    {cuenta.desconectadaTs && <Chip>Desconectada</Chip>}
                   </span>
                   {!cuenta.desconectadaTs && (
-                    <Link href={`/panel/conectar-ml/${cuenta.id}/desconectar`} style={{ fontSize: 13, opacity: 0.7 }}>
+                    <Link href={`/panel/conectar-ml/${cuenta.id}/desconectar`} className={styles.desconectar}>
                       Desconectar
                     </Link>
                   )}
                 </div>
                 {importacion && !importacion.error && (
-                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+                  <div className={styles.detalleImportacion}>
                     {importacion.completadoTs ? (
                       <span>
-                        Importación lista: {importacion.pedidosImportados} pedidos, {importacion.publicacionesImportadas} publicaciones (últimos
-                        60 días).
+                        Importación lista: {importacion.pedidosImportados} pedidos, {importacion.publicacionesImportadas} publicaciones
+                        (últimos 60 días).
                       </span>
                     ) : (
                       <span>
@@ -112,27 +116,21 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
                     )}
                   </div>
                 )}
-                {importacion?.error && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: "#b00020" }}>No se pudo completar la importación: {importacion.error}</div>
-                )}
-              </li>
+                {importacion?.error && <div className={styles.errorImportacion}>No se pudo completar la importación: {importacion.error}</div>}
+              </FilaLista>
             );
           })}
-        </ul>
+        </ListaFilas>
       )}
 
-      <a
-        href={urlConectar}
-        style={{ display: "inline-block", marginTop: 20, padding: "10px 16px", background: "#000", color: "#fff", borderRadius: 6, fontSize: 14, textDecoration: "none" }}
-      >
+      {/* <a> normal, no next/link — ver nota de "Reintentar" arriba. */}
+      <a href={urlConectar} className={clasesBoton("primario")}>
         Conectar Mercado Libre
       </a>
 
-      <p style={{ marginTop: 24 }}>
-        <Link href="/panel" style={{ fontSize: 13 }}>
-          Volver al panel
-        </Link>
-      </p>
-    </main>
+      <BotonLink href="/panel" variante="fantasma" chico>
+        Volver al panel
+      </BotonLink>
+    </>
   );
 }

@@ -1,0 +1,27 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radio-chip);
+  border: 1px solid var(--borde);
+  white-space: nowrap;
+}
+
+.chip[data-estado="neutro"] {
+  color: var(--texto-suave);
+}
+
+.chip[data-estado="exito"] {
+  color: var(--exito);
+  border-color: var(--exito);
+}
+
+.chip[data-estado="peligro"] {
+  color: var(--peligro);
+  border-color: var(--peligro);
+}
+
+.chip[data-estado="aviso"] {
+  color: var(--acento-fuerte);
+  border-color: var(--acento);
+}

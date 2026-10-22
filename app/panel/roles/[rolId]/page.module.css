@@ -1,0 +1,31 @@
+.rojo {
+  color: var(--peligro);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.celdaModulo {
+  text-transform: capitalize;
+  font-weight: 500;
+}
+
+.select {
+  min-width: 90px;
+}
+
+.selectPeligroso {
+  border-color: var(--peligro);
+  color: var(--peligro);
+}
+
+.botonGuardar {
+  align-self: flex-start;
+}
+
+.volver {
+  align-self: flex-start;
+}
