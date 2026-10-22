@@ -278,8 +278,11 @@ describe("listarPedidosFiltrados — bordes de día en Bogotá y desempate por i
   vi.setConfig({ testTimeout: 20_000 });
 
   const empresaId = randomUUID();
-  const idBajo = "10000000-0000-4000-8000-000000000001";
-  const idAlto = "20000000-0000-4000-8000-000000000002";
+  // UUID en texto canónico (minúsculas, hex): el orden lexicográfico
+  // coincide con la comparación por bytes de Postgres, que es la que
+  // usa el ORDER BY de pedidos.id. Ids nuevos en cada corrida para no
+  // chocar con la llave primaria si la base de prueba se reutiliza.
+  const [idBajo, idAlto] = [randomUUID(), randomUUID()].sort();
   const fechaEmpate = new Date("2026-08-01T12:00:00.000Z");
 
   beforeAll(async () => {
