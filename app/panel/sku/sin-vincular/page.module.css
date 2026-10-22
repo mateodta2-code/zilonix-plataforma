@@ -1,6 +1,30 @@
-.titulo {
-  font-size: 14px;
-  margin-bottom: 8px;
+.filtros {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.campoBusqueda {
+  min-width: 200px;
+}
+
+.accionesFiltro {
+  display: flex;
+  gap: 8px;
+}
+
+.vacioConAccion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.idExterno {
+  color: var(--texto-suave);
+  font-size: 12.5px;
 }
 
 .form {
@@ -10,8 +34,30 @@
 
 .select {
   flex: 1;
+  min-width: 160px;
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.resumenPaginacion {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.botonesPaginacion {
+  display: flex;
+  gap: 8px;
 }
 
 .volver {
   align-self: flex-start;
+  margin-top: 16px;
 }
