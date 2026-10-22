@@ -2,6 +2,10 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
+## Sin publicar
+
+- **2026-10-22** — Issue #58 (Z-ML-09), solo el parser puro (la pantalla y la escritura en base esperan al #57): `lib/importar-csv-skus.ts` lee el CSV de la plantilla propia de Zilonix (encabezados fijos `sku`, `nombre`, `bodega`, `cantidad_inicial`) y devuelve filas válidas normalizadas, errores por fila (`{ numeroFila, columna, mensaje }`, fila 1 = encabezado) y un resumen (válidas, con error, SKUs repetidos, columnas de más ignoradas). Acepta coma o punto y coma (detectado por la fila de encabezado), BOM de Excel, comillas (con comilla doblada como escape real de CSV), filas vacías en cualquier posición y saltos de línea Windows. SKU obligatorio y sin espacios a los lados; un SKU repetido en el archivo es error en las dos filas (o más), incluso si una de ellas además tiene otro error propio; `cantidad_inicial` solo acepta un entero no negativo (decimales, negativos o texto son error); columnas de más se ignoran con un aviso en el resumen, nunca hacen fallar el archivo; si falta `sku` o `cantidad_inicial` en el encabezado, error general y ninguna fila válida. Nunca devuelve ningún concepto de "borrar" — el tipo de fila válida no tiene campo `accion`; decidir crear vs. actualizar necesita mirar la base, eso es trabajo del #57. También exporta `generarPlantillaCsvSkus()` (encabezados + 2 filas de ejemplo con datos inventados) para que la pantalla del #57 la ofrezca para descargar. 22 pruebas con fixtures en memoria, ningún dato real de clientes. No toca `db/**`, `app/**`, `middleware.ts`, `lib/rutas-publicas.ts` ni dependencias nuevas — el parser es propio, sin librería de CSV externa.
+
 ## v0.1.0
 
 - **2026-10-14** — Tarea 1.1 (Repositorio nuevo): Next.js 14 + TypeScript, Drizzle ORM + Postgres, GitHub Actions (compila, tipos, pruebas, build en cada PR), página `/api/version`, desplegado en Railway. Sentry se deja fuera del alcance por ahora, para no sumar una integración a medias.
