@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
-import { calcularCodeChallenge, construirUrlAutorizacion, generarCodeVerifier } from "@/lib/ml/oauth";
+import { calcularCodeChallenge, construirUrlAutorizacion, generarCodeVerifier, generarState } from "@/lib/ml/oauth";
 import { urlPublicaBase } from "@/lib/url-publica";
-import { NOMBRE_COOKIE_VERIFIER } from "@/lib/ml/pkce-cookie";
+import { NOMBRE_COOKIE_STATE, NOMBRE_COOKIE_VERIFIER } from "@/lib/ml/pkce-cookie";
 
 // Tarea 2.3 — bug real encontrado en vivo: Mercado Libre exige PKCE
 // para esta app ("code_verifier is a required parameter"). El verifier
@@ -26,16 +26,19 @@ export async function GET() {
 
   const codeVerifier = generarCodeVerifier();
   const codeChallenge = calcularCodeChallenge(codeVerifier);
+  const state = generarState();
   const redirectUri = `${urlPublicaBase()}/api/ml/callback`;
-  const urlAutorizacion = construirUrlAutorizacion(redirectUri, codeChallenge);
+  const urlAutorizacion = construirUrlAutorizacion(redirectUri, codeChallenge, state);
 
   const respuesta = NextResponse.redirect(urlAutorizacion);
-  respuesta.cookies.set(NOMBRE_COOKIE_VERIFIER, codeVerifier, {
+  const opcionesCookie = {
     httpOnly: true,
     secure: true,
-    sameSite: "lax",
+    sameSite: "lax" as const,
     maxAge: 600, // 10 minutos — de sobra para autorizar en Mercado Libre, corto si nadie vuelve
     path: "/api/ml",
-  });
+  };
+  respuesta.cookies.set(NOMBRE_COOKIE_VERIFIER, codeVerifier, opcionesCookie);
+  respuesta.cookies.set(NOMBRE_COOKIE_STATE, state, opcionesCookie);
   return respuesta;
 }

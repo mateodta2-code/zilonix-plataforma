@@ -46,6 +46,12 @@ jobs:
       # de esta corrida. Las reales viven en Railway.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZmFrZS1jaS1rZXkuY2xlcmsuYWNjb3VudHMuZGV2JA"
       CLERK_SECRET_KEY: "sk_test_fakecikeyfakecikeyfakecikeyfakecikey00"
+      # Fix middleware (2026-10-21): fichas ficticias para que las
+      # pruebas nuevas del webhook y del trabajador corran en CI — no
+      # son credenciales reales, no sirven para nada fuera de esta
+      # corrida. Las reales viven en Railway.
+      ML_CLIENT_ID: "ml-client-id-fake-ci"
+      TRABAJADOR_SECRET: "trabajador-secret-fake-ci-0123456789"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
