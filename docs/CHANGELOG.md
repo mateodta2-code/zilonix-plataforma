@@ -2,6 +2,10 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
+## Sin publicar
+
+- **2026-10-22** — Z-P0-09 (#37): `/api/version` también devuelve el commit desplegado. Responde `{"version":"0.1.0","commit":"abc1234"}` — la versión sigue saliendo de `package.json` (no se sube en este cambio) y `commit` son los primeros 7 caracteres de `RAILWAY_GIT_COMMIT_SHA`. Railway inyecta esa variable sola, en el build y en el runtime, cuando el deploy sale de GitHub; no hay que crearla en el dashboard. Si falta (local, CI, o un deploy que no vino de GitHub) responde `"desconocido"`. No se publica rama, autor, mensaje ni ninguna otra variable. La ruta queda `force-dynamic`: Next.js 14 prerenderiza los GET y congelaría el JSON del build.
+
 ## v0.1.0
 
 - **2026-10-14** — Tarea 1.1 (Repositorio nuevo): Next.js 14 + TypeScript, Drizzle ORM + Postgres, GitHub Actions (compila, tipos, pruebas, build en cada PR), página `/api/version`, desplegado en Railway. Sentry se deja fuera del alcance por ahora, para no sumar una integración a medias.

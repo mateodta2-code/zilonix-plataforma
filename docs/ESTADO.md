@@ -72,6 +72,7 @@ Solo los nombres — ningún valor real vive ni debe vivir en este repositorio. 
 | `TRABAJADOR_SECRET` | Secreto compartido que valida al cron que llama a `/api/ml/trabajador` |
 | `LIMITE_PETICIONES_POR_IP` / `LIMITE_PETICIONES_POR_USUARIO` | Opcionales — suben el límite de peticiones del middleware (pensado para pruebas manuales en staging, nunca para producción) |
 | `RAILWAY_PUBLIC_DOMAIN` | La pone Railway sola — dominio público real, para armar links (ej. invitaciones) sin depender del header `host` |
+| `RAILWAY_GIT_COMMIT_SHA` | La pone Railway sola, en el build y en el runtime, cuando el deploy sale de GitHub (SHA completo). `/api/version` publica los primeros 7 caracteres. No hay que crearla en el dashboard. En local y en CI no existe y la ruta responde `"desconocido"` |
 
 ## Próximos pasos pensados (en orden)
 
