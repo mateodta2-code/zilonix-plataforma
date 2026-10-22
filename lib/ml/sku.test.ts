@@ -6,6 +6,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, empresas, publicaciones, skus, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import {
+  contarPublicacionesSinSku,
   crearSku,
   definirKit,
   KitSeContieneASiMismoError,
@@ -125,5 +126,10 @@ describe("SKU maestro (tarea 2.6)", () => {
     await expect(definirKit(empresaAId, usuarioId, kitId, [{ skuComponenteId: kitId, cantidad: 1 }])).rejects.toThrow(
       KitSeContieneASiMismoError
     );
+  });
+
+  it("contarPublicacionesSinSku() da el mismo número que listarPublicacionesSinSku(...).length", async () => {
+    const [lista, total] = await Promise.all([listarPublicacionesSinSku(empresaAId), contarPublicacionesSinSku(empresaAId)]);
+    expect(total).toBe(lista.length);
   });
 });
