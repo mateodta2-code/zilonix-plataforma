@@ -2,9 +2,9 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
-## Sin publicar
+## v0.1.1
 
-- **2026-10-22** — Z-DOC-02: `docs/plan-tecnico-resumen.md` resume las tareas de Mercado Libre del plan técnico (estado en esta plataforma e issue abierto que las cubre) y las reglas que aplican aquí. Enlazado desde `CLAUDE.md`. Sin cambio de versión.
+- **2026-10-22** — Seguridad, CVE-2026-41248 (GHSA-vqx2-fgx2-5wq9): `@clerk/nextjs` **6.9.6 → 6.39.8**. Es la última 6.x; el arreglo del matcher entra en 6.39.2 y el peer sigue admitiendo Next `^14.2.25` (no se sube Next a la 15). `createRouteMatcher` en 6.9.6 clasifica mal un path armado y un request puede saltarse `auth.protect()`. El middleware de esta rama ya usa el patrón que el advisory marca como el que falla cerrado (`if (!esRutaPublica) auth.protect()`), pero el matcher viejo igual puede no reconocer una ruta pública codificada o, al revés, dejar pasar algo que no debería — por eso se sube igual. 6.39.8 arrastra `@clerk/shared` 3.48.0, `@clerk/backend` 2.33.8 y `js-cookie` 3.0.7. Se versiona `package-lock.json` (antes cada `npm install` de CI y de Railway resolvía versiones distintas, y Dependabot no veía las transitivas) y el check `build-and-test` instala con `npm ci`. `images.unoptimized: true` en `next.config.mjs`: la app no usa `next/image` ni tiene `public/` ni `sharp`, pero Next 14.2.35 igual registra `/_next/image`; con esa opción `handleNextImageRequest` responde 404 antes de entrar a `imageOptimizer`. **No se tocó `middleware.ts`.** Hacer públicas `/api/ml/webhooks`, `/api/ml/trabajador` y `/api/ml/callback`, y dejar de llamar `auth.protect()` (el rewrite se cuelga ~30s detrás del proxy de Railway, y eso persiste en versiones nuevas de Clerk), es el PR #27. **Pendiente de Railway, sin cambiar su configuración en este PR:** Railpack sigue corriendo `npm install` aunque exista el lock; para que el build use el lock tal cual hay que poner `RAILPACK_NODE_NPM_INSTALL=npm ci` en el servicio. **Pendiente de staging**, cuando vuelvan los builds: login, registro, 2FA, `/cuenta` y que la CSP no rompa el navegador. El nonce automático de Clerk (posible desde 6.39.x) no se activó: no está probado en vivo.
 
 ## v0.1.0
 
