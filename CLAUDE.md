@@ -8,7 +8,7 @@ Para el estado real del proyecto (qué está hecho, qué falta, problemas conoci
 
 Zilonix Seller es un SaaS multiempresa para vendedores que operan en Mercado Libre (Colombia, con la idea de sumar otros países/marketplaces más adelante). Cada negocio que se registra es una **empresa** aislada: conecta sus propias cuentas de Mercado Libre, administra su propio equipo con roles y permisos, y nunca ve ni toca un dato de otra empresa — ni por accidente ni por un bug, porque el aislamiento se fuerza a nivel de base de datos (RLS), no solo en el código de la aplicación.
 
-Es la reconstrucción, desde cero y con estos estándares, de lo que hoy hace el **Zilonix OS actual** (repo aparte, `zilonix-os-web`) para un solo negocio (el de Mateo) — ese sistema sigue en producción con datos reales mientras este se construye; no se apaga ni se migra de golpe. El plan completo de migración y el mapa del sistema actual viven en `zilonix-os-web/docs/plan-tecnico.md` — ese documento es la fuente de verdad de *qué construir y en qué orden*; este repo es donde eso se construye.
+Es la reconstrucción, desde cero y con estos estándares, de lo que hoy hace el **Zilonix OS actual** (repo aparte, `zilonix-os-web`) para un solo negocio (el de Mateo) — ese sistema sigue en producción con datos reales mientras este se construye; no se apaga ni se migra de golpe. El plan completo de migración y el mapa del sistema actual viven en `zilonix-os-web/docs/plan-tecnico.md` — ese documento es la fuente de verdad de *qué construir y en qué orden*; este repo es donde eso se construye. El resumen de las tareas de Mercado Libre de ese plan, con el estado en esta plataforma, está en `docs/plan-tecnico-resumen.md`.
 
 **Para quién es**: hoy, un solo equipo de prueba (Mateo/Débora) mientras se construye la Fase 2. La idea de producto es llegar a vendedores de Mercado Libre en Colombia que hoy usan Excel, el panel nativo de Mercado Libre, o herramientas como Bling/Effi/UpSeller — con mejor seguridad por empresa, permisos reales por rol y una integración más profunda y confiable con Mercado Libre que la de esos competidores (investigación real en `zilonix-os-web/docs/investigacion/`).
 
@@ -26,7 +26,7 @@ Es la reconstrucción, desde cero y con estos estándares, de lo que hoy hace el
 ### Cómo se separan las empresas (léelo antes de tocar cualquier tabla nueva)
 
 1. **Toda tabla con datos de una empresa tiene una columna `empresa_id`** y una política de RLS (`db/rls-setup.sql`) que compara esa columna contra `current_setting('app.empresa_actual')`.
-2. **La aplicación nunca se conecta a Postgres con el superusuario.** Hay tres usuarios de base, cada uno más limitado que el anterior:
+2. **La aplicación nunca se conecta a Postgres con el superusuario.** Hay tres usuarios de base RESTRINGIDOS, cada uno más limitado que el anterior, más el superusuario que da Railway (que solo se usa para migraciones, nunca para una consulta de negocio):
    - `app_user` (`DATABASE_URL_APP`) — el único que usa el tráfico normal de la app. Respeta RLS siempre.
    - `superadmin_user` (`DATABASE_URL_SUPERADMIN`) — solo lectura de cifras agregadas para el panel `/superadmin`, nunca datos de negocio de una empresa sin acceso temporal explícito.
    - `trabajador_user` (`DATABASE_URL_TRABAJADOR`) — solo puede tocar `avisos_ml`, para el proceso que procesa notificaciones de Mercado Libre.
@@ -63,9 +63,11 @@ lib/
 docs/
   CHANGELOG.md    Registro de cada entrega real — qué tarea, qué se construyó, qué quedó pendiente
   ESTADO.md       Foto actual del proyecto (ver arriba)
+  plan-tecnico-resumen.md   Tareas de Mercado Libre del plan técnico y su estado en esta plataforma
   modelo-datos.md, rls.md, conectores.md, matriz-permisos.md   Documentación de diseño específica
 scripts/          Scripts de mantenimiento (generar/verificar la matriz de permisos)
-middleware.ts     Toda ruta cerrada por defecto salvo las listadas explícitamente (Clerk + límite de peticiones)
+middleware.ts     Toda ruta cerrada por defecto salvo las listadas en lib/rutas-publicas.ts (Clerk + límite de peticiones)
+lib/rutas-publicas.ts   Las únicas rutas sin sesión de Clerk — ver la regla de "rutas de máquina" en Seguridad, abajo
 ```
 
 ## Comandos
@@ -92,6 +94,7 @@ npm run docs:permisos     # regenera docs/matriz-permisos.md desde lib/roles.ts
 - **Toda ruta nueva de `app/` se clasifica en `scripts/verificar-permisos.test.ts`** — protegida (llama `requierePermiso`), de superadmin (llama `requiereSuperadmin`), o exenta (con el motivo escrito al lado). El CI falla si no.
 - **Nunca se adivina el comportamiento de la API de Mercado Libre.** Antes de portar o construir algo que la toque, se confirma contra el código real que ya corre en producción en `zilonix-os-web` (o, si no existe precedente, se pregunta en vez de inventar) — así quedó documentado cada módulo de `lib/ml/`.
 - **Las pruebas de aislamiento corren contra Postgres real**, nunca contra un mock de la base — RLS no se puede simular de forma confiable.
+- **Toda llamada a la API de Mercado Libre pasa por `lib/ml/cliente.ts`** (en cuanto exista) **y toda tarea en segundo plano vive en `lib/trabajos/`** — nunca un `fetch` a Mercado Libre o un cron suelto en otro archivo.
 
 ## Reglas no negociables
 
@@ -101,19 +104,26 @@ Estas reglas aplican tanto a este repo (`zilonix-plataforma`) como al Zilonix OS
 
 - **Ningún secreto en texto plano en un chat, un commit o un comando.** Claves, tokens, contraseñas: se manejan directo en Railway (o el gestor de secretos que corresponda), nunca pegados en una conversación ni materializados en un comando de terminal.
 - **Toda ruta cerrada por defecto.** Si una ruta nueva necesita quedar pública o sin sesión, eso se justifica explícitamente (en el PR, en este documento) — nunca por omisión.
+- **Una ruta que llama una MÁQUINA (un webhook, un cron, el callback de un OAuth) se declara pública en `lib/rutas-publicas.ts` y se autentica con su propio mecanismo — nunca con la sesión de Clerk del middleware.** Regla real, no teórica: `auth.protect()` en una ruta sin sesión y sin `Accept: text/html` (el perfil exacto de una máquina) se cuelga ~30s detrás del proxy de Railway y termina en 500 — bug real encontrado en vivo el 2026-10-21, corregido en el PR `fix-middleware-rutas-maquina` (detalle completo en `docs/ESTADO.md`, "Problemas conocidos §1"). **La coherencia se comprueba en `scripts/verificar-permisos.test.ts` con dos mapas explícitos** (no adivinando por texto): toda ruta de `RUTAS_DE_MAQUINA` (archivo → URL) tiene que estar en `RUTAS_EXENTAS` Y ser pública en `lib/rutas-publicas.ts`; y, en la dirección inversa, toda URL pública bajo `/api` tiene que corresponder a una ruta en `RUTAS_EXENTAS` o en `PUBLICAS_CON_AUTENTICACION_PROPIA` (con su motivo real escrito), nunca a un patrón con comodín. Rutas públicas hoy: `/`, `/sign-in`, `/sign-up`, `/invitacion/:token`, `/api/version`, `/api/ml/webhooks` (valida forma + `application_id` contra `ML_CLIENT_ID`, con un tope real de 16KB leyendo el stream — nunca solo `Content-Length`), `/api/ml/trabajador` (secreto compartido con `crypto.timingSafeEqual`, y su propio límite de peticiones separado del de una persona), `/api/ml/callback` (`state`, RFC 6749 §10.12, + PKCE contra CSRF — comparados con `crypto.timingSafeEqual` antes de canjear el `code` — y el propio handler vuelve a exigir sesión real y `requierePermiso`, por eso sigue en `RUTAS_PROTEGIDAS`, no en `RUTAS_EXENTAS`; ver `lib/rutas-publicas.ts` para la decisión completa).
 - **Nada de rutas de diagnóstico ni de setup en producción sin sesión de admin + auditoría.** Los `ver-*`, `test-*`, `poc-*` y reparaciones corren una vez y se apagan o quedan detrás de `SETUP_HABILITADO`.
 - **Tokens de marketplaces y credenciales de DIAN siempre cifrados**, con versión de clave para poder rotarla sin perder acceso.
 - **Nunca confiar en el contenido de un webhook o aviso externo** (ML, pasarela de pagos, etc.) — se usa solo como señal para ir a consultar el dato real con la API y el token correspondiente.
 - **La IA solo sugiere, nunca ejecuta una acción a partir de texto escrito por un tercero** (un comprador, un mensaje, una reseña) sin que una persona lo confirme.
 - **En la plataforma multiempresa: seguridad por fila (RLS) en toda tabla con `empresa_id`**, y la app se conecta a Postgres con un usuario sin privilegios para saltarse esa política. La prueba de aislamiento (empresa A nunca ve datos de empresa B) corre en cada PR, no es opcional.
 - **Superadmin nunca ve datos de negocio de un cliente** salvo acceso temporal concedido explícitamente por ese cliente, y queda registrado en auditoría.
+- **Nunca pasar un dato que venga del usuario a `sql.identifier`, `sql.raw` ni `.as()`.** Para ordenar o filtrar de forma dinámica (ej. "ordenar por esta columna") se usa una lista blanca de columnas permitidas, nunca el nombre que manda la petición.
+- **Tras un incidente del proveedor (ej. una caída de Railway), los secretos se rotan con un checklist por NOMBRE de variable** (qué cambió, dónde se usa, que el servicio sigue arriba después) — nunca pegando el valor en ningún lado, ni en el checklist mismo.
 
 ### Proceso — lo que siempre se respeta
 
-- **Nada pasa a producción sin pasar antes por staging.** Cada entrega sube el número de versión (visible en el pie de página y en `/api/version`) y queda en `docs/CHANGELOG.md`.
+- **Nada pasa a producción sin pasar antes por staging.** La versión de `package.json` (visible en el pie de página y en `/api/version`) sube SOLO en el release a la rama `produccion`, nunca en un PR normal a `main`.
+- **Changelog: cada PR deja su propio fragmento en `docs/changelog/pendientes/<rama>.md`** (plantilla en esa misma carpeta) — nunca editar `docs/CHANGELOG.md` directamente en un PR normal; los fragmentos se juntan ahí recién en el release y se borran, para que no choquen entre PRs abiertos a la vez.
+- **Turno de migraciones: un solo PR con migración pendiente de fusionar a la vez.** Antes de abrir uno nuevo con su propia migración, rebase sobre `main` y volver a correr `npm run db:generate` sobre esa base — nunca renumerar ni editar a mano un archivo de migración ya generado (bug real: colisión de numeración entre dos ramas, documentada en `docs/ESTADO.md`).
+- **Nombre de rama según el frente que toca** (`seguridad-`, `docs-`, `test-`, `feat-`, `fix-`, `ci-`…) **y fusión siempre por squash** — un commit por PR en `main`, sin importar cuántos haya en la rama.
+- **Toda rama lista para revisar se abre como Pull Request (borrador) el mismo día.** Una rama sin PR abierto nunca corre CI — el check `build-and-test` solo se dispara con `push`/`pull_request` a `main`/`produccion`.
 - **Nunca `railway up`.** Deploy solo vía `git push` (auto-deploy) o `railway redeploy`. Siempre verificar el deploy uno mismo (ej. consultando `/api/version` o el endpoint correspondiente) antes de dar algo por terminado.
 - **Cada cambio de tablas va en una migración versionada** (Drizzle, en la plataforma nueva) — nunca `CREATE TABLE IF NOT EXISTS` suelto dentro de una ruta.
-- **Nunca commits directos a `main` sin pasar por Pull Request.** Toda rama se fusiona por PR, con CI en verde.
+- **Nunca commits directos a `main` sin pasar por Pull Request, con CI en verde antes de fusionar.** `main` tiene un ruleset real en GitHub que lo fuerza (nunca se puede borrar ni forzar push; exige Pull Request y el check `build-and-test` en verde antes de fusionar) — no depende solo de que quien fusiona lo respete.
 - **Todo cambio a la extensión de Chrome exige reinstalación completa** del lado del usuario (nunca alcanza con "Recargar") — bajar el ZIP solo después de confirmar que `version.json` ya muestra la versión nueva.
 
 ### Cómo se trabaja con Claude Code en este proyecto
