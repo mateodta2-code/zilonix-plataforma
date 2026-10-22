@@ -1,20 +1,46 @@
+import { timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { requierePermiso } from "@/lib/permisos";
+import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { guardarCuentaConectada } from "@/lib/ml/cuentas";
 import { intercambiarCodigo, obtenerNickname } from "@/lib/ml/oauth";
 import { urlPublicaBase } from "@/lib/url-publica";
-import { NOMBRE_COOKIE_VERIFIER } from "@/lib/ml/pkce-cookie";
+import { NOMBRE_COOKIE_STATE, NOMBRE_COOKIE_VERIFIER } from "@/lib/ml/pkce-cookie";
 import { ejecutarImportacionInicial } from "@/lib/ml/importacion";
+
+// Mismo criterio que el secreto del trabajador (app/api/ml/trabajador/
+// route.ts): comparar con crypto.timingSafeEqual, no con "===" — y
+// timingSafeEqual exige buffers de IGUAL longitud (lanza si no), así
+// que primero se comparan las longitudes.
+function coincideState(recibido: string, esperado: string): boolean {
+  const bufferRecibido = Buffer.from(recibido);
+  const bufferEsperado = Buffer.from(esperado);
+  if (bufferRecibido.length !== bufferEsperado.length) return false;
+  return timingSafeEqual(bufferRecibido, bufferEsperado);
+}
 
 // Tarea 2.3 — a dónde vuelve Mercado Libre después de que el vendedor
 // autoriza (o cancela). Mismo redirect_uri que se le pasó al armar el
 // link de autorización — Mercado Libre exige que coincidan EXACTO.
 export async function GET(request: NextRequest) {
   const base = urlPublicaBase();
-  const volver = (query: string) => NextResponse.redirect(`${base}/panel/conectar-ml?${query}`);
+  const volver = (query: string) => {
+    const respuesta = NextResponse.redirect(`${base}/panel/conectar-ml?${query}`);
+    // El verifier y el state son de un solo uso — se borran en TODO
+    // camino de salida de esta ruta, no solo en el de éxito.
+    //
+    // Bug real: `.cookies.delete(nombre)` sin más manda un Set-Cookie
+    // con Path=/ por defecto — como la cookie original se puso con
+    // Path=/api/ml (/api/ml/conectar/route.ts), el navegador lo trata
+    // como una cookie DISTINTA: nunca borra la original, que se queda
+    // viva hasta sus 600s. Hay que borrarla con el MISMO path con el
+    // que se puso, o no se borra de verdad.
+    respuesta.cookies.set(NOMBRE_COOKIE_VERIFIER, "", { path: "/api/ml", maxAge: 0 });
+    respuesta.cookies.set(NOMBRE_COOKIE_STATE, "", { path: "/api/ml", maxAge: 0 });
+    return respuesta;
+  };
 
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) return NextResponse.redirect(`${base}/sign-in`);
@@ -24,7 +50,18 @@ export async function GET(request: NextRequest) {
   const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) return NextResponse.redirect(`${base}/crear-empresa`);
 
-  await requierePermiso(usuario.id, empresa.id, "configuracion", "crear");
+  try {
+    await requierePermiso(usuario.id, empresa.id, "configuracion", "crear");
+  } catch (error) {
+    // Antes esto no se atrapaba acá — un usuario sin permiso (ej. el
+    // rol cambió entre que abrió el link y que Mercado Libre lo trajo
+    // de vuelta) veía la página de error genérica de Next.js en vez de
+    // volver a /panel/conectar-ml con un mensaje legible.
+    if (error instanceof SinPermisoError) {
+      return volver(`error=${encodeURIComponent(error.message)}`);
+    }
+    throw error;
+  }
 
   const errorMl = request.nextUrl.searchParams.get("error");
   if (errorMl) {
@@ -36,6 +73,18 @@ export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   if (!code) {
     return volver(`error=${encodeURIComponent("Mercado Libre no envió un código de autorización.")}`);
+  }
+
+  // state (RFC 6749 §10.12, protección CSRF — ver generarState() en
+  // lib/ml/oauth.ts): se compara ANTES de canjear el code, nunca
+  // después — canjear el code primero y revisar el state después ya
+  // habría gastado el code de un posible atacante sin ninguna ganancia.
+  const stateRecibido = request.nextUrl.searchParams.get("state");
+  const stateEsperado = cookies().get(NOMBRE_COOKIE_STATE)?.value;
+  if (!stateRecibido || !stateEsperado || !coincideState(stateRecibido, stateEsperado)) {
+    return volver(
+      `error=${encodeURIComponent("La conexión no se pudo validar (state inválido o vencido) — empieza de nuevo con 'Conectar Mercado Libre'.")}`
+    );
   }
 
   // PKCE (bug real encontrado en vivo: "code_verifier is a required
@@ -64,16 +113,12 @@ export async function GET(request: NextRequest) {
       console.error("Error en la importación inicial:", error instanceof Error ? error.message : error);
     });
 
-    const respuesta = volver("conectado=1");
-    respuesta.cookies.delete(NOMBRE_COOKIE_VERIFIER);
-    return respuesta;
+    return volver("conectado=1");
   } catch (error) {
     // Regla de UX #2 (evidencia real contra Multivende): nunca un
     // spinner infinito ni un "no hay conexiones" silencioso — se ve el
     // error real y la pantalla ofrece "Reintentar".
     const mensaje = error instanceof Error ? error.message : "Error desconocido.";
-    const respuesta = volver(`error=${encodeURIComponent(mensaje)}`);
-    respuesta.cookies.delete(NOMBRE_COOKIE_VERIFIER); // un code_verifier solo sirve una vez
-    return respuesta;
+    return volver(`error=${encodeURIComponent(mensaje)}`);
   }
 }
