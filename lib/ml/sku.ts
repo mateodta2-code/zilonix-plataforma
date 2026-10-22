@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { kitComponentes, publicaciones, skus } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
@@ -57,6 +57,21 @@ export async function listarPublicacionesSinSku(empresaId: string) {
       .from(publicaciones)
       .where(and(eq(publicaciones.empresaId, empresaId), isNull(publicaciones.skuId)))
   );
+}
+
+// Issue "tabla completa de despachos" — count(*) con EXACTAMENTE el
+// mismo WHERE que listarPublicacionesSinSku(), para el KPI del panel
+// (lib/panel-kpis.ts): ese solo necesita el número, nunca las filas
+// completas. lib/ml/sku.test.ts prueba que da el mismo resultado que
+// listarPublicacionesSinSku(...).length con los mismos datos.
+export async function contarPublicacionesSinSku(empresaId: string): Promise<number> {
+  const [{ total }] = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ total: sql<number>`count(*)`.mapWith(Number) })
+      .from(publicaciones)
+      .where(and(eq(publicaciones.empresaId, empresaId), isNull(publicaciones.skuId)))
+  );
+  return total;
 }
 
 // Enlaza una publicación a un SKU ya existente de esta empresa (RLS

@@ -1,49 +1,55 @@
+.filtros {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.campoBusqueda {
+  min-width: 200px;
+}
+
+.accionesFiltro {
+  display: flex;
+  gap: 8px;
+}
+
+.vacioConAccion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .form {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.lista {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  border: 1px solid var(--borde);
-  border-radius: var(--radio-tarjeta);
-  overflow: hidden;
-}
-
-.fila {
-  border-bottom: 1px solid var(--borde);
-  padding: 2px 16px;
-  transition: var(--transicion-color);
-}
-
-.fila:last-child {
-  border-bottom: none;
-}
-
-.fila:hover {
-  background: var(--superficie-2);
-}
-
-.etiquetaCheckbox {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  padding: 10px 0;
-  cursor: pointer;
-}
-
-.textoFila {
-  flex: 1;
-}
-
-.logisticType {
+.celdaFecha {
+  white-space: nowrap;
   color: var(--texto-suave);
-  margin-left: 8px;
-  font-size: 12px;
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resumenPaginacion {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.botonesPaginacion {
+  display: flex;
+  gap: 8px;
 }
 
 .botonImprimir {
@@ -58,4 +64,5 @@
 
 .volver {
   align-self: flex-start;
+  margin-top: 16px;
 }
