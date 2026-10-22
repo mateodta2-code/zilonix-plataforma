@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { creaContador, limpiarVencidos, superaLimite } from "@/lib/limite-peticiones";
 import { esRutaPublica } from "@/lib/rutas-publicas";
@@ -30,10 +30,17 @@ let peticionesDesdeLimpieza = 0;
 // real) — reescrito acá sin next/headers porque el middleware corre en
 // una etapa previa a los Route Handlers/Server Components, donde esa
 // función no tiene su almacenamiento interno disponible.
-function urlPublicaBaseDesdeMiddleware(req: Request): string {
-  const dominio = process.env.RAILWAY_PUBLIC_DOMAIN ?? req.headers.get("x-forwarded-host") ?? req.headers.get("host");
-  const proto = process.env.RAILWAY_PUBLIC_DOMAIN ? "https" : req.headers.get("x-forwarded-proto") ?? "http";
-  return `${proto}://${dominio}`;
+//
+// Corregido: el respaldo sin RAILWAY_PUBLIC_DOMAIN ya no lee
+// x-forwarded-host a mano — cualquiera puede mandar esa cabecera, y
+// Next.js no la valida por su cuenta. req.nextUrl.origin es el que
+// Next.js ya resolvió para este request (protocolo + host juntos),
+// nunca un valor que llegue sin pasar por su propio parseo.
+function urlPublicaBaseDesdeMiddleware(req: NextRequest): string {
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  }
+  return req.nextUrl.origin;
 }
 
 function ipDeLaPeticion(req: Request): string {

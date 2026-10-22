@@ -30,8 +30,15 @@ export async function GET(request: NextRequest) {
     const respuesta = NextResponse.redirect(`${base}/panel/conectar-ml?${query}`);
     // El verifier y el state son de un solo uso — se borran en TODO
     // camino de salida de esta ruta, no solo en el de éxito.
-    respuesta.cookies.delete(NOMBRE_COOKIE_VERIFIER);
-    respuesta.cookies.delete(NOMBRE_COOKIE_STATE);
+    //
+    // Bug real: `.cookies.delete(nombre)` sin más manda un Set-Cookie
+    // con Path=/ por defecto — como la cookie original se puso con
+    // Path=/api/ml (/api/ml/conectar/route.ts), el navegador lo trata
+    // como una cookie DISTINTA: nunca borra la original, que se queda
+    // viva hasta sus 600s. Hay que borrarla con el MISMO path con el
+    // que se puso, o no se borra de verdad.
+    respuesta.cookies.set(NOMBRE_COOKIE_VERIFIER, "", { path: "/api/ml", maxAge: 0 });
+    respuesta.cookies.set(NOMBRE_COOKIE_STATE, "", { path: "/api/ml", maxAge: 0 });
     return respuesta;
   };
 

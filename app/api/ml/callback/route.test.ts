@@ -102,4 +102,18 @@ describe("GET /api/ml/callback — validación de state (fix middleware, 2026-10
     expect(decodeURIComponent(location)).toContain("No tienes permiso");
     expect(intercambiarCodigo).not.toHaveBeenCalled();
   });
+
+  it("borra el verifier y el state con el MISMO path con el que se pusieron (Path=/api/ml, Max-Age=0) — si no, el navegador nunca los borra de verdad", async () => {
+    mockearCookies({}); // cualquier salida por volver() alcanza para probar esto
+    const res = await GET(peticion("code=un-code&state=algo"));
+    const setCookies = res.headers.getSetCookie();
+    const cookieVerifier = setCookies.find((c) => c.startsWith(`${NOMBRE_COOKIE_VERIFIER}=`));
+    const cookieState = setCookies.find((c) => c.startsWith(`${NOMBRE_COOKIE_STATE}=`));
+    expect(cookieVerifier, "no se mandó ningún Set-Cookie para el verifier").toBeDefined();
+    expect(cookieState, "no se mandó ningún Set-Cookie para el state").toBeDefined();
+    for (const cookie of [cookieVerifier!, cookieState!]) {
+      expect(cookie).toContain("Path=/api/ml");
+      expect(cookie).toContain("Max-Age=0");
+    }
+  });
 });

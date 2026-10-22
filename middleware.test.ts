@@ -81,6 +81,27 @@ describe("middleware — límite de peticiones y returnBackUrl (fix, 2026-10-21)
     expect(redirectToSignIn).toHaveBeenCalledWith({ returnBackUrl: "https://web-staging-d979.up.railway.app/panel/conectar-ml?foo=bar" });
   });
 
+  it("sin RAILWAY_PUBLIC_DOMAIN, returnBackUrl usa req.nextUrl.origin — nunca x-forwarded-host a mano", async () => {
+    delete process.env.RAILWAY_PUBLIC_DOMAIN;
+    const middleware = await cargarMiddleware();
+    const { auth, redirectToSignIn } = authFalso(null);
+
+    // x-forwarded-host dice una cosa distinta a propósito — si el
+    // fallback todavía la leyera, el returnBackUrl saldría con ese
+    // valor en vez del origin real del request.
+    await middleware(
+      auth,
+      peticion("https://web-staging-d979.up.railway.app/panel/conectar-ml?foo=bar", {
+        "x-forwarded-for": "203.0.113.70",
+        "x-forwarded-host": "un-host-cualquiera-que-no-deberia-usarse.test",
+      })
+    );
+
+    expect(redirectToSignIn).toHaveBeenCalledWith({
+      returnBackUrl: "https://web-staging-d979.up.railway.app/panel/conectar-ml?foo=bar",
+    });
+  });
+
   it("sin sesión en una ruta de API no pública -> 401 JSON inmediato, nunca redirectToSignIn", async () => {
     const middleware = await cargarMiddleware();
     const { auth, redirectToSignIn } = authFalso(null);
