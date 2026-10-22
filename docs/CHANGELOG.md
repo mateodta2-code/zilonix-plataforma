@@ -2,6 +2,10 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
+## Sin publicar
+
+- **2026-10-22** — Z-RL-04 (runbook de lanzamiento y guardia de diciembre): `docs/runbook-lanzamiento.md` — rollback con revert en la rama `produccion` y `railway redeploy` del servicio `web`, confirmación por `/api/version`, qué hacer si Mercado Libre desactiva los tópicos o desconecta la app, rotación de `TRABAJADOR_SECRET` (Railway `web` + secreto de Actions `TRABAJADOR_SECRET_STAGING`), enlace a `docs/rotacion-claves.md` (PR #80, sin fusionar) y a `docs/runbook-backups.md` (PR #85, sin fusionar), lista por nombre de las variables del incidente de Railway del 21-oct-2026, contactos y guardia del 21 al 31 de diciembre con campos por completar. Sin cambio de versión. Enlazado desde `docs/ESTADO.md`.
+
 ## v0.1.0
 
 - **2026-10-14** — Tarea 1.1 (Repositorio nuevo): Next.js 14 + TypeScript, Drizzle ORM + Postgres, GitHub Actions (compila, tipos, pruebas, build en cada PR), página `/api/version`, desplegado en Railway. Sentry se deja fuera del alcance por ahora, para no sumar una integración a medias.
