@@ -1,19 +1,70 @@
-.filaSuperior {
+.filtros {
   display: flex;
-  justify-content: space-between;
-  font-size: 14px;
-  font-weight: 500;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
-.filaInferior {
+.campoBusqueda {
+  min-width: 200px;
+}
+
+.accionesFiltro {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
+  gap: 8px;
+}
+
+.enlacePedido {
+  color: var(--acento);
+  font-weight: 600;
+  text-decoration: none;
+  transition: var(--transicion-color);
+}
+
+.enlacePedido:hover {
+  color: var(--acento-fuerte);
+  text-decoration: underline;
+}
+
+.celdaFecha {
+  white-space: nowrap;
   color: var(--texto-suave);
-  margin-top: 4px;
+}
+
+.celdaTotal {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vacioConAccion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.resumenPaginacion {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.botonesPaginacion {
+  display: flex;
+  gap: 8px;
 }
 
 .volver {
   align-self: flex-start;
+  margin-top: 16px;
 }
