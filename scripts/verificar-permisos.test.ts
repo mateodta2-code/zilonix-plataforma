@@ -59,7 +59,8 @@ const RUTAS_SUPERADMIN = new Set(["app/superadmin/page.tsx", "app/superadmin/[em
 // preguntar "¿puede [acción] en [módulo]?".
 const RUTAS_EXENTAS: Record<string, string> = {
   "app/page.tsx": "solo lista las empresas propias del usuario para decidir a dónde mandarlo, no lee datos de negocio de ninguna empresa",
-  "app/panel/page.tsx": "solo filtra qué módulos mostrar en el nav (consultar); el módulo de destino exige su propio permiso al entrar",
+  "app/panel/page.tsx":
+    "solo filtra qué módulos mostrar en el nav y qué KPIs calcular/mostrar con tienePermiso(..., 'consultar') — la misma pregunta que ya decide los links; el módulo de destino exige su propio permiso al entrar",
   "app/panel/actions.ts": "cambiar la empresa activa ya se revalida contra las membresías reales del usuario, no es un permiso por módulo",
   "app/crear-empresa/page.tsx": "cualquier usuario con cuenta puede crear su propia empresa — no hay membresía previa que comprobar",
   "app/crear-empresa/actions.ts": "idem",

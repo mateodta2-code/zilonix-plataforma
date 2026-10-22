@@ -1,11 +1,7 @@
-import { cookies } from "next/headers";
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { currentUser } from "@clerk/nextjs/server";
-import { listarEmpresasDeUsuario } from "@/lib/empresas";
-import { obtenerMiMembresia } from "@/lib/membresias";
-import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { tienePermiso } from "@/lib/roles";
+import { obtenerContextoPanel } from "@/lib/panel-contexto";
+import { calcularVentasDelMes, contarDespachosPendientes, contarPedidos, contarSkuSinVincular, type VentasDelMes } from "@/lib/panel-kpis";
 import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { iconoDeClave } from "@/components/marco/iconos";
@@ -22,27 +18,31 @@ import styles from "./page.module.css";
 // Marco visual (issue de las subpáginas) — el marco (barra lateral +
 // barra superior) ya no se pinta acá: lo pone app/panel/layout.tsx,
 // que envuelve TODA la sección /panel. Esta página queda solo con su
-// propio contenido (saludo, tarjeta de identidad, pestañas, KPIs
-// vacíos) — vuelve a pedir usuario/empresa/membresía porque Next.js
-// no comparte variables entre un layout y lo que tiene adentro (mismo
-// criterio documentado en el layout).
+// propio contenido (saludo, tarjeta de identidad, pestañas, KPIs).
+//
+// obtenerContextoPanel() (lib/panel-contexto.ts) es la misma consulta
+// que ya pidió app/panel/layout.tsx para pintar el marco — cache() de
+// React hace que, dentro de esta misma petición, solo se consulte la
+// base una vez entre los dos.
 export default async function PanelPage() {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
-
-  const propias = await listarEmpresasDeUsuario(usuario.id);
-  if (propias.length === 0) redirect("/crear-empresa");
-
-  const cookieEmpresa = cookies().get("empresa_actual")?.value;
-  const activa = propias.find((e) => e.id === cookieEmpresa) ?? propias[0];
-  const miMembresia = await obtenerMiMembresia(usuario.id, activa.id);
-  const permisos = miMembresia?.permisos ?? [];
-  const rolNombre = miMembresia?.rolNombre ?? "sin rol";
-
-  const clerkUser = await currentUser();
+  const { usuario, activa, permisos, rolNombre, clerkUser } = await obtenerContextoPanel();
 
   const vePedidosYDespachos = tienePermiso(permisos, "ventas", "consultar");
   const veSku = tienePermiso(permisos, "inventario", "consultar");
+
+  // Mismo criterio que las pestañas de abajo (tienePermiso, "consultar"):
+  // los KPIs de ventas/pedidos/despachos solo se calculan y se muestran
+  // si el rol puede consultar "ventas"; SKU sin vincular, si puede
+  // consultar "inventario". app/panel/page.tsx sigue exento en
+  // scripts/verificar-permisos.test.ts porque esto es la misma pregunta
+  // "¿puede consultar [módulo]?" que ya decide qué llevarlo a ver, no
+  // una autorización nueva.
+  const [ventasDelMes, pedidosTotal, despachosPendientes, skuSinVincular] = await Promise.all([
+    vePedidosYDespachos ? calcularVentasDelMes(activa.id) : Promise.resolve(null),
+    vePedidosYDespachos ? contarPedidos(activa.id) : Promise.resolve(null),
+    vePedidosYDespachos ? contarDespachosPendientes(activa.id) : Promise.resolve(null),
+    veSku ? contarSkuSinVincular(activa.id) : Promise.resolve(null),
+  ]);
 
   const pestanas: Pestana[] = [
     { etiqueta: "Resumen", href: "/panel", activa: true },
@@ -83,10 +83,14 @@ export default async function PanelPage() {
       <Pestanas pestanas={pestanas} />
 
       <div className={styles.gridKpi}>
-        <TarjetaKpi titulo="Ventas del mes" />
-        <TarjetaKpi titulo="Pedidos" />
-        <TarjetaKpi titulo="Despachos pendientes" />
-        <TarjetaKpi titulo="SKU sin vincular" />
+        {vePedidosYDespachos && (
+          <>
+            <TarjetaKpi titulo="Ventas del mes" valor={ventasDelMes ? formatoVentas(ventasDelMes) : 0} />
+            <TarjetaKpi titulo="Pedidos" valor={pedidosTotal ?? 0} />
+            <TarjetaKpi titulo="Despachos pendientes" valor={despachosPendientes ?? 0} />
+          </>
+        )}
+        {veSku && <TarjetaKpi titulo="SKU sin vincular" valor={skuSinVincular ?? 0} />}
       </div>
 
       <Link href="/crear-empresa" className={styles.crearEmpresa}>
@@ -95,4 +99,8 @@ export default async function PanelPage() {
       </Link>
     </>
   );
+}
+
+function formatoVentas(ventas: VentasDelMes): string {
+  return `${ventas.moneda} ${ventas.total.toLocaleString("es-CO", { maximumFractionDigits: 2 })}`;
 }

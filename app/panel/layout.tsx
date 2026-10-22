@@ -1,10 +1,5 @@
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import { currentUser } from "@clerk/nextjs/server";
-import { listarEmpresasDeUsuario } from "@/lib/empresas";
-import { obtenerMiMembresia } from "@/lib/membresias";
-import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { tienePermiso } from "@/lib/roles";
+import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { MarcoApp } from "@/components/marco/MarcoApp";
 import type { GrupoNav } from "@/components/marco/tipos";
 
@@ -21,26 +16,14 @@ import type { GrupoNav } from "@/components/marco/tipos";
 // qué mostrar en el menú — la misma regla tienePermiso(..., "consultar")
 // de siempre, nunca una pregunta de autorización nueva.
 //
-// Next.js no comparte variables entre un layout y lo que tiene
-// adentro: app/panel/page.tsx necesita estos mismos datos para SU
-// propio contenido (el saludo, la tarjeta de identidad) y los vuelve
-// a pedir — a propósito, son lecturas de una sola fila cada una, no
-// una consulta pesada que valga la pena memoizar para esta tarea.
+// app/panel/page.tsx necesita estos mismos datos para SU propio
+// contenido (el saludo, la tarjeta de identidad, los KPIs) —
+// obtenerContextoPanel() (lib/panel-contexto.ts) usa cache() de React
+// para que layout y page, pintándose juntos en la misma petición, hagan
+// esta consulta UNA sola vez en vez de dos.
 export default async function PanelLayout({ children }: { children: React.ReactNode }) {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
-
-  const propias = await listarEmpresasDeUsuario(usuario.id);
-  if (propias.length === 0) redirect("/crear-empresa");
-
-  const cookieEmpresa = cookies().get("empresa_actual")?.value;
-  const activa = propias.find((e) => e.id === cookieEmpresa) ?? propias[0];
-  const miMembresia = await obtenerMiMembresia(usuario.id, activa.id);
-  const permisos = miMembresia?.permisos ?? [];
-  const rolNombre = miMembresia?.rolNombre ?? "sin rol";
+  const { usuario, propias, activa, permisos, rolNombre, clerkUser } = await obtenerContextoPanel();
   const esDueno = rolNombre === "Dueño";
-
-  const clerkUser = await currentUser();
 
   const vePedidosYDespachos = tienePermiso(permisos, "ventas", "consultar");
   const veSku = tienePermiso(permisos, "inventario", "consultar");
