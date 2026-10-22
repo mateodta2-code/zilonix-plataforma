@@ -1,5 +1,5 @@
 import { ClerkProvider } from "@clerk/nextjs";
-import { Montserrat } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { VERSION } from "@/lib/version";
 
@@ -10,16 +10,23 @@ export const metadata = {
 
 // Tipografía del manual de marca: pide Creato Display, que no está en
 // Google Fonts — para medios electrónicos el manual permite
-// Montserrat. Un solo next/font/google con los 5 pesos que usa el
-// marco (300/400/500/700/800: Light/Regular en texto, Medium/Bold
-// para destacar, ExtraBold en títulos grandes) — nunca Cinzel, esa
-// vive solo dentro del logo. next/font/google la autohospeda en el
-// build (sin llamar a Google en cada visita) y la expone como
-// variable CSS, que app/globals.css usa en
-// --fuente-titulos/--fuente-texto — ninguna dependencia nueva.
-const montserrat = Montserrat({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "700", "800"],
+// Montserrat. next/font/google la descarga en el build y en CI (el
+// de #102) el loader revienta: TypeError: Cannot read properties of
+// null (reading '1'). Los woff2 latin de los pesos que el CSS usa de
+// verdad (400/500/600/700/800 — hay `font-weight: 600` y no hay 300)
+// están en app/fonts/montserrat/, tomados de @fontsource/montserrat
+// (subset del fuente oficial, licencia OFL al lado) sin agregar la
+// dependencia. next/font/local los sirve en el build y los expone en
+// la misma variable que app/globals.css ya usa (--fuente-montserrat).
+// Nunca Cinzel: esa vive solo dentro del logo.
+const montserrat = localFont({
+  src: [
+    { path: "./fonts/montserrat/montserrat-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/montserrat/montserrat-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/montserrat/montserrat-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "./fonts/montserrat/montserrat-latin-700-normal.woff2", weight: "700", style: "normal" },
+    { path: "./fonts/montserrat/montserrat-latin-800-normal.woff2", weight: "800", style: "normal" },
+  ],
   variable: "--fuente-montserrat",
   display: "swap",
 });

@@ -1,11 +1,17 @@
 .barra {
   display: flex;
   flex-direction: column;
-  /* Manual de marca: el logo completo necesita 260px de ancho mínimo
-     más un área de protección de ~24px a cada lado (2x el ancho de la
-     "I" del logotipo a ese tamaño) — 260 + 24 + 24 + el padding de
-     12px de la barra a cada lado = 332px; 340px deja un poco de aire. */
-  width: 340px;
+  /* Logo a 260px exactos (mínimo digital; viewBox 933×335, proporción
+     intacta). El SVG ya trae margen: el trazo va de x 223.16 a 1075.63
+     y el viewBox de 183 a 1116, o sea 40.16u / 40.37u ≈ 4.30% / 4.33%
+     = 11.19px / 11.25px a 260px. La "I" de ZILONIX mide 42.67u de ancho
+     (11.89px); la protección es 2× eso, 23.78px desde el trazo. 340px
+     lo contaba dos veces: sumaba ~24px de más encima de ese margen, y
+     también el padding, aunque con border-box el width ya incluye los
+     12px de cada lado y el borde derecho de 1px. Falta 23.78−11.19−12
+     = 0.59px a la izquierda y 0.53px a la derecha; centrado, 2×0.59px.
+     260 + 1.18 + 24 + 1 = 286.18 → 287px. */
+  width: 287px;
   flex-shrink: 0;
   height: 100vh;
   position: sticky;
@@ -25,9 +31,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Área de protección del logo completo — ver el comentario de
-     .barra arriba para el cálculo real (medido en el SVG). */
-  padding: 8px 24px;
+  /* Sin padding horizontal: ese margen ya está en el SVG y en el
+     padding de .barra. Sumarlo acá repetía el error de los 340px. */
+  padding: 8px 0;
 }
 
 .barra[data-colapsada="true"] .logo {
@@ -38,6 +44,8 @@
   width: 260px;
   height: auto;
   display: block;
+  /* El mínimo digital es 260px de ancho: el flex no puede encogerlo. */
+  flex-shrink: 0;
 }
 
 .iconoColapsado {

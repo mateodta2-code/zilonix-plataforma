@@ -46,13 +46,13 @@ export function BarraLateral({ grupos }: { grupos: GrupoNav[] }) {
             abajo: nunca una condición de JS decide qué tan ancho cabe
             en la pantalla real.
 
-            SVG oficial del manual de marca, nunca redibujado — mínimo
-            260px de ancho (tamaño mínimo digital) y un margen de
-            protección alrededor equivalente a 2x el ancho de la "I"
-            del logotipo (medido en el propio SVG: la "I" mide 42.67
-            de 933 unidades de ancho total ≈ 4.57% — a 260px eso es
-            ~11.9px, así que el margen es ~24px). Nunca se estira, se
-            rota, se recolorea ni se le agrega sombra/brillo/filtro.
+            SVG oficial del manual de marca, nunca redibujado — 260px
+            de ancho exactos (tamaño mínimo digital, proporción del
+            viewBox). El área de protección (2× el ancho de la "I") y
+            el ancho de la barra están medidos en .barra, en el CSS:
+            el margen que el SVG ya trae no se vuelve a sumar. Nunca
+            se estira, se rota, se recolorea ni se le agrega
+            sombra/brillo/filtro.
 
             Ícono colapsado: recorte del propio logotipo (no un ícono
             genérico), mínimo 32px. En tema claro se cambia a la
