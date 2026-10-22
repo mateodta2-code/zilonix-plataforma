@@ -69,6 +69,21 @@ export async function listarPublicacionesSinSku(empresaId: string) {
   );
 }
 
+// Issue "tabla completa de despachos" — count(*) con EXACTAMENTE el
+// mismo WHERE que listarPublicacionesSinSku(), para el KPI del panel
+// (lib/panel-kpis.ts): ese solo necesita el número, nunca las filas
+// completas. lib/ml/sku.test.ts prueba que da el mismo resultado que
+// listarPublicacionesSinSku(...).length con los mismos datos.
+export async function contarPublicacionesSinSku(empresaId: string): Promise<number> {
+  const [{ total }] = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ total: sql<number>`count(*)`.mapWith(Number) })
+      .from(publicaciones)
+      .where(and(eq(publicaciones.empresaId, empresaId), isNull(publicaciones.skuId)))
+  );
+  return total;
+}
+
 // Issue "tabla completa de SKU" — mismo criterio de lib/filtros-listado.ts
 // que ya usan Pedidos/Despachos (búsqueda recortada y con % _ \
 // escapados, página entera segura y acotada al total real). Búsqueda

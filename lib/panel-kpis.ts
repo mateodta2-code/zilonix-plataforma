@@ -1,8 +1,8 @@
 import { and, asc, eq, gte, lt, sql, sum } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { pedidos } from "@/db/schema";
-import { listarDespachosPendientes } from "@/lib/ml/despachos";
-import { listarPublicacionesSinSku } from "@/lib/ml/sku";
+import { contarDespachosPendientes } from "@/lib/ml/despachos";
+import { contarPublicacionesSinSku as contarSkuSinVincular } from "@/lib/ml/sku";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 
 // Tarea de KPIs reales — cada tarjeta de app/panel/page.tsx calcula su
@@ -154,21 +154,14 @@ export async function contarPedidos(empresaId: string): Promise<number> {
   return fila.total;
 }
 
-// "Despachos pendientes" y "SKU sin vincular" reutilizan la MISMA
-// consulta que ya usan sus propias pantallas (lib/ml/despachos.ts,
-// lib/ml/sku.ts) — nunca una segunda definición de qué es "pendiente" o
-// "sin vincular" que se pueda desalinear de la pantalla real con el
-// tiempo. Hoy cuentan con list().length (traen la lista completa); una
-// variante count(*) queda anotada como seguimiento, no entra acá.
-export async function contarDespachosPendientes(empresaId: string): Promise<number> {
-  const pendientes = await listarDespachosPendientes(empresaId);
-  return pendientes.length;
-}
-
-export async function contarSkuSinVincular(empresaId: string): Promise<number> {
-  const sinVincular = await listarPublicacionesSinSku(empresaId);
-  return sinVincular.length;
-}
+// "Despachos pendientes" y "SKU sin vincular" — count(*) real
+// (lib/ml/despachos.ts, lib/ml/sku.ts), EXACTAMENTE con el mismo WHERE
+// que sus propias pantallas de listado, así que nunca se desalinean
+// con lo que esas pantallas muestran. Antes traían la lista completa
+// solo para medir su .length; contarDespachosPendientes/
+// contarSkuSinVincular quedan re-exportadas acá con el mismo nombre de
+// siempre para no tocar a quien ya las importaba de este archivo.
+export { contarDespachosPendientes, contarSkuSinVincular };
 
 // Misma pregunta que el resto de las rutas de negocio
 // (requierePermiso), no un tienePermiso suelto sobre la lista que ya
