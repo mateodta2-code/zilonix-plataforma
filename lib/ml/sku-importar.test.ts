@@ -141,14 +141,42 @@ describe("importación de SKUs desde CSV (issue #58, Z-ML-09)", () => {
     expect(filas[0].nombre).toBe("Nombre nuevo");
   });
 
-  it("código existente sin nombre en el CSV: se deja el nombre como estaba (no se actualiza a vacío)", async () => {
+  it("código existente sin nombre en el CSV: se deja el nombre como estaba (no se actualiza a vacío) y cuenta como 'sinCambios', no 'actualizados'", async () => {
     await dbComoEmpresa(empresaAId, (tx) => tx.insert(skus).values({ empresaId: empresaAId, codigo: "YA-EXISTE-2", nombre: "Nombre que se queda" }));
 
     const csv = csvDe(["YA-EXISTE-2,,,0"]);
-    await confirmarImportacionSkus(empresaAId, usuarioAId, csv);
+    const resultado = await confirmarImportacionSkus(empresaAId, usuarioAId, csv);
+    expect(resultado.creados).toBe(0);
+    expect(resultado.actualizados).toBe(0);
+    expect(resultado.sinCambios).toBe(1);
 
     const [fila] = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(skus).where(eq(skus.codigo, "YA-EXISTE-2")));
     expect(fila.nombre).toBe("Nombre que se queda");
+  });
+
+  it("un archivo de 1200 filas (más de 2 lotes de 500) entra completo", async () => {
+    const TOTAL = 1200;
+    const filas = Array.from({ length: TOTAL }, (_, i) => `LOTE-${String(i).padStart(4, "0")},Producto ${i},,${i % 50}`);
+    const csv = csvDe(filas);
+
+    const vista = await previsualizarImportacionSkus(empresaAId, usuarioAId, csv);
+    expect(vista.resumen.validas).toBe(TOTAL);
+
+    const resultado = await confirmarImportacionSkus(empresaAId, usuarioAId, csv);
+    expect(resultado.creados).toBe(TOTAL);
+    expect(resultado.actualizados + resultado.sinCambios + resultado.omitidosPorError).toBe(0);
+
+    const guardadas = await dbComoEmpresa(empresaAId, (tx) =>
+      tx.select({ codigo: skus.codigo }).from(skus).where(eq(skus.empresaId, empresaAId))
+    );
+    const codigosGuardados = new Set(guardadas.map((f) => f.codigo));
+    // Puntos justo en el borde de un lote de 500 (índices 0, 499, 500,
+    // 999, 1000 y el último) — si la división en lotes tuviera un
+    // error de "uno de más/uno de menos", se notaría acá primero.
+    for (const i of [0, 499, 500, 999, 1000, TOTAL - 1]) {
+      expect(codigosGuardados.has(`LOTE-${String(i).padStart(4, "0")}`)).toBe(true);
+    }
+    expect(codigosGuardados.size).toBeGreaterThanOrEqual(TOTAL); // puede haber más de corridas previas en la misma empresa
   });
 
   it("un fallo real a mitad de la importación no deja nada a medias (todo o nada)", async () => {

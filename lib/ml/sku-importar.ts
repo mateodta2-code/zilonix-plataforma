@@ -12,7 +12,7 @@
 // vista previa (son datos reales del archivo, útiles para revisar),
 // pero no se escriben en ningún lado todavía — quedan documentados
 // como pendientes de #57 en el changelog de esta tarea.
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { skus } from "@/db/schema";
 import { requierePermiso } from "@/lib/permisos";
@@ -74,15 +74,32 @@ export async function previsualizarImportacionSkus(empresaId: string, usuarioId:
 export type ResultadoConfirmarImportacion = {
   creados: number;
   actualizados: number;
+  // Existente, pero la fila del CSV no traía nombre — onConflictDoNothing
+  // no tocó ninguna columna. Aparte de "actualizados" (que sí trajeron
+  // nombre nuevo) para que el resumen no diga "actualizado" de algo que
+  // en los hechos se dejó exactamente igual.
+  sinCambios: number;
   omitidosPorError: number;
 };
+
+const TAMANO_LOTE_INSERT = 500;
+const TAMANO_LOTE_CONSULTA = 1000;
+
+function enLotes<T>(elementos: T[], tamano: number): T[][] {
+  const lotes: T[][] = [];
+  for (let i = 0; i < elementos.length; i += tamano) lotes.push(elementos.slice(i, i + tamano));
+  return lotes;
+}
 
 // Confirmar — vuelve a parsear el MISMO texto desde cero (nunca
 // recibe "la lista de filas válidas" de la vista previa: eso sería
 // confiar en el navegador) y escribe todas las filas válidas en UNA
 // sola transacción (dbComoEmpresa) — si algo falla a mitad de camino,
 // Postgres deshace la transacción entera, nunca queda una importación
-// a medias.
+// a medias. Un insert por fila no escala con archivos grandes (hasta
+// 20.000 filas, el tope de importarCsvSkus) — se agrupa en lotes de
+// 500 por INSERT, y la consulta de "cuáles ya existen" en lotes de
+// 1000 por IN(...).
 //
 // "Si un código ya existe": el issue #58 dice "crea O ACTUALIZA" —
 // así que un código repetido actualiza el nombre del SKU existente
@@ -99,34 +116,62 @@ export async function confirmarImportacionSkus(empresaId: string, usuarioId: str
     throw new SinFilasValidasError();
   }
 
-  return dbComoEmpresa(empresaId, async (tx) => {
-    const codigos = resultado.filas.map((f) => f.sku);
-    const existentesAntes = await tx
-      .select({ codigo: skus.codigo })
-      .from(skus)
-      .where(and(eq(skus.empresaId, empresaId), inArray(skus.codigo, codigos)));
-    const codigosExistentes = new Set(existentesAntes.map((e) => e.codigo));
+  // importarCsvSkus() ya descarta como ERROR cualquier sku repetido
+  // dentro del mismo archivo (nunca llega acá dos veces) — esto es
+  // una segunda red de seguridad, no el camino real hoy: un INSERT de
+  // Postgres no deja que el mismo conflicto se resuelva dos veces en
+  // una sola instrucción ("ON CONFLICT DO UPDATE command cannot
+  // affect row a second time"), y antes (un insert por fila) cada
+  // repetido iba en su PROPIA instrucción, así que nunca chocaba. Si
+  // alguna vez se repite, se queda con la ÚLTIMA aparición — Map.set
+  // sobrescribe el valor pero no cambia la posición de la clave.
+  const filasPorCodigo = new Map<string, FilaSkuValida>();
+  for (const fila of resultado.filas) filasPorCodigo.set(fila.sku, fila);
+  const filasUnicas = [...filasPorCodigo.values()];
 
-    for (const fila of resultado.filas) {
-      const nombre = fila.nombre?.trim();
-      if (nombre) {
-        await tx
-          .insert(skus)
-          .values({ empresaId, codigo: fila.sku, nombre })
-          .onConflictDoUpdate({ target: [skus.empresaId, skus.codigo], set: { nombre } });
-      } else {
-        // Sin nombre en el CSV: un SKU nuevo nace con el código como
-        // nombre (nunca uno inventado); uno que ya existe se deja
-        // intacto — onConflictDoNothing no toca ninguna columna.
-        await tx
-          .insert(skus)
-          .values({ empresaId, codigo: fila.sku, nombre: fila.sku })
-          .onConflictDoNothing({ target: [skus.empresaId, skus.codigo] });
-      }
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const codigos = filasUnicas.map((f) => f.sku);
+    const codigosExistentes = new Set<string>();
+    for (const loteCodigos of enLotes(codigos, TAMANO_LOTE_CONSULTA)) {
+      const existentes = await tx
+        .select({ codigo: skus.codigo })
+        .from(skus)
+        .where(and(eq(skus.empresaId, empresaId), inArray(skus.codigo, loteCodigos)));
+      existentes.forEach((e) => codigosExistentes.add(e.codigo));
     }
 
-    const creados = resultado.filas.filter((f) => !codigosExistentes.has(f.sku)).length;
-    const actualizados = resultado.filas.length - creados;
+    const conNombre = filasUnicas.filter((f) => f.nombre?.trim());
+    const sinNombre = filasUnicas.filter((f) => !f.nombre?.trim());
+
+    for (const lote of enLotes(conNombre, TAMANO_LOTE_INSERT)) {
+      await tx
+        .insert(skus)
+        .values(lote.map((f) => ({ empresaId, codigo: f.sku, nombre: f.nombre!.trim() })))
+        // excluded.nombre: el valor que traía CADA fila del lote, no un
+        // solo nombre fijo compartido por todo el INSERT.
+        .onConflictDoUpdate({ target: [skus.empresaId, skus.codigo], set: { nombre: sql`excluded.nombre` } });
+    }
+
+    for (const lote of enLotes(sinNombre, TAMANO_LOTE_INSERT)) {
+      // Sin nombre en el CSV: un SKU nuevo nace con el código como
+      // nombre (nunca uno inventado); uno que ya existe se deja
+      // intacto — onConflictDoNothing no toca ninguna columna.
+      await tx
+        .insert(skus)
+        .values(lote.map((f) => ({ empresaId, codigo: f.sku, nombre: f.sku })))
+        .onConflictDoNothing({ target: [skus.empresaId, skus.codigo] });
+    }
+
+    let creados = 0;
+    let actualizados = 0;
+    let sinCambios = 0;
+    for (const fila of filasUnicas) {
+      const existia = codigosExistentes.has(fila.sku);
+      const tieneNombre = Boolean(fila.nombre?.trim());
+      if (!existia) creados++;
+      else if (tieneNombre) actualizados++;
+      else sinCambios++;
+    }
     const omitidosPorError = resultado.errores.length;
 
     await registrarAuditoria(tx, {
@@ -136,9 +181,9 @@ export async function confirmarImportacionSkus(empresaId: string, usuarioId: str
       accion: "importar_csv_skus",
       entidad: "sku",
       // Nunca el contenido del archivo — solo el resumen numérico.
-      detalle: `Importó un CSV de SKUs: ${creados} creado(s), ${actualizados} actualizado(s), ${omitidosPorError} fila(s) con error omitida(s).`,
+      detalle: `Importó un CSV de SKUs: ${creados} creado(s), ${actualizados} actualizado(s), ${sinCambios} sin cambios, ${omitidosPorError} fila(s) con error omitida(s).`,
     });
 
-    return { creados, actualizados, omitidosPorError };
+    return { creados, actualizados, sinCambios, omitidosPorError };
   });
 }

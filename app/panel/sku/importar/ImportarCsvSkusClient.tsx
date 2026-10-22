@@ -41,11 +41,16 @@ export function ImportarCsvSkusClient() {
   }
 
   if (estado.paso === "confirmado") {
-    const { creados, actualizados, omitidosPorError } = estado.resultado;
+    const { creados, actualizados, sinCambios, omitidosPorError } = estado.resultado;
     return (
       <div className={styles.resultadoFinal}>
         <p className={styles.resumenFinal}>
           Listo: <strong>{creados}</strong> SKU creado(s), <strong>{actualizados}</strong> actualizado(s)
+          {sinCambios > 0 && (
+            <>
+              , <strong>{sinCambios}</strong> sin cambios (ya existían y la fila no traía nombre)
+            </>
+          )}
           {omitidosPorError > 0 && (
             <>
               , <strong>{omitidosPorError}</strong> fila(s) con error omitida(s)
