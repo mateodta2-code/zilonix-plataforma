@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { empresas, membresias, permisosRol, roles, skus, usuarios } from "@/db/schema";
+import * as auditoriaModule from "@/lib/auditoria";
 import { SinPermisoError } from "@/lib/permisos";
 import { confirmarImportacionSkus, previsualizarImportacionSkus, SinFilasValidasError } from "./sku-importar";
 
@@ -120,9 +121,10 @@ describe("importación de SKUs desde CSV (issue #58, Z-ML-09)", () => {
     expect(vista.resumen.skusRepetidos).toEqual(["DUP-1"]);
     expect(vista.filas).toHaveLength(0);
 
-    const resultado = await confirmarImportacionSkus(empresaAId, usuarioAId, csv);
-    expect(resultado.creados).toBe(0);
-    expect(resultado.actualizados).toBe(0);
+    // Las dos únicas filas del archivo quedan con error (sku repetido)
+    // — no hay NINGUNA fila válida, así que confirmar tira
+    // SinFilasValidasError (nada que confirmar), nunca crea algo.
+    await expect(confirmarImportacionSkus(empresaAId, usuarioAId, csv)).rejects.toThrow(SinFilasValidasError);
 
     const fila = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(skus).where(eq(skus.codigo, "DUP-1")));
     expect(fila).toHaveLength(0);
@@ -180,19 +182,34 @@ describe("importación de SKUs desde CSV (issue #58, Z-ML-09)", () => {
   });
 
   it("un fallo real a mitad de la importación no deja nada a medias (todo o nada)", async () => {
-    // ATOM-OK-1 pasa la validación del parser y SÍ cabría en la base
-    // sola; un código de 3000 caracteres también pasa el parser (no
-    // valida longitud), pero revienta de verdad en Postgres al
-    // insertarlo (excede el tamaño máximo de una fila de índice
-    // btree) — un error real de la base, no simulado. Si la
-    // transacción no fuera atómica, ATOM-OK-1 quedaría creado solo.
-    const codigoEnorme = "X".repeat(3000);
-    const csv = csvDe(["ATOM-OK-1,Primero,,1", `${codigoEnorme},Segundo,,1`]);
+    // Un código de 3000 caracteres (lo que probaba antes el caso de
+    // "tamaño máximo de una fila de índice btree") no siempre hace
+    // fallar a Postgres — confirmado contra Postgres real en CI, la
+    // promesa resolvía igual. registrarAuditoria() corre al final,
+    // DENTRO de la misma transacción que los inserts — forzar que
+    // falle ahí adentro es un error real y determinístico (no depende
+    // de ningún límite interno de Postgres) y prueba lo mismo: si la
+    // transacción no fuera atómica, las dos filas de abajo quedarían
+    // creadas igual, aunque el resto de confirmarImportacionSkus()
+    // reviente después.
+    const csv = csvDe(["ATOM-OK-1,Primero,,1", "ATOM-OK-2,Segundo,,1"]);
+    const spy = vi.spyOn(auditoriaModule, "registrarAuditoria").mockRejectedValueOnce(new Error("Fallo simulado de auditoría"));
+    try {
+      await expect(confirmarImportacionSkus(empresaAId, usuarioAId, csv)).rejects.toThrow("Fallo simulado de auditoría");
+    } finally {
+      spy.mockRestore();
+    }
 
-    await expect(confirmarImportacionSkus(empresaAId, usuarioAId, csv)).rejects.toThrow();
+    const fila1 = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(skus).where(eq(skus.codigo, "ATOM-OK-1")));
+    const fila2 = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(skus).where(eq(skus.codigo, "ATOM-OK-2")));
+    expect(fila1).toHaveLength(0);
+    expect(fila2).toHaveLength(0);
 
-    const fila = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(skus).where(eq(skus.codigo, "ATOM-OK-1")));
-    expect(fila).toHaveLength(0); // nunca quedó creado, aunque su insert haya ido primero
+    // El spy se restauró — una importación normal después sigue
+    // funcionando (confirma que no quedó "roto" para el resto de la
+    // corrida de pruebas).
+    const resultado = await confirmarImportacionSkus(empresaAId, usuarioAId, csv);
+    expect(resultado.creados).toBe(2);
   });
 
   it("sin permiso: ni la vista previa ni la confirmación dejan pasar a quien no tiene membresía en la empresa", async () => {
