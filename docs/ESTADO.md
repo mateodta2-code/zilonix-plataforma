@@ -61,17 +61,20 @@ Solo los nombres — ningún valor real vive ni debe vivir en este repositorio. 
 
 | Variable | Para qué |
 |---|---|
-| `DATABASE_URL` | Superusuario de Postgres que da Railway — **solo** para correr migraciones (`npm run db:migrate`) |
+| `DATABASE_URL` | Superusuario de Postgres que da Railway — migraciones (`npm run db:migrate`) y la rotación manual de tokens (`npm run tokens:recifrar`). La app en tiempo real no lo usa |
 | `DATABASE_URL_APP` | Usuario `app_user` (respeta RLS) — el que usa la app en tiempo real |
 | `DATABASE_URL_SUPERADMIN` | Usuario `superadmin_user` — solo lectura agregada, panel `/superadmin` |
 | `DATABASE_URL_TRABAJADOR` | Usuario `trabajador_user` — solo puede tocar `avisos_ml` |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk, lado del navegador |
 | `CLERK_SECRET_KEY` | Clerk, lado del servidor |
 | `ML_CLIENT_ID` / `ML_CLIENT_SECRET` | App de Mercado Libre (OAuth) |
-| `ML_TOKEN_KEY_V1` / `ML_TOKEN_KEY_V2` | Claves de cifrado de los tokens de Mercado Libre (versión de clave, para poder rotarla) — V2 todavía no existe, se usa cuando toque rotar |
+| `ML_TOKEN_KEY_V1` / `ML_TOKEN_KEY_V2` | Claves de cifrado de los tokens de Mercado Libre (32 bytes en base64). V2 la crea Mateo cuando rote; no vive en el repo |
+| `ML_TOKEN_KEY_ACTUAL` | Número de versión con la que se cifran los tokens nuevos. Si no está, vale 1. El re-cifrado de las filas viejas es `npm run tokens:recifrar` (`docs/rotacion-claves.md`) — correrlo en cada ambiente es un paso operativo, no queda hecho por el deploy |
 | `TRABAJADOR_SECRET` | Secreto compartido que valida al cron que llama a `/api/ml/trabajador` |
 | `LIMITE_PETICIONES_POR_IP` / `LIMITE_PETICIONES_POR_USUARIO` | Opcionales — suben el límite de peticiones del middleware (pensado para pruebas manuales en staging, nunca para producción) |
 | `RAILWAY_PUBLIC_DOMAIN` | La pone Railway sola — dominio público real, para armar links (ej. invitaciones) sin depender del header `host` |
+
+**Rotación de claves (issue #29, pendiente de Mateo):** el código ya cifra los tokens nuevos con la versión de `ML_TOKEN_KEY_ACTUAL` y puede re-cifrar las filas viejas (`docs/rotacion-claves.md`). Crear `ML_TOKEN_KEY_V2`, correr el script y borrar `ML_TOKEN_KEY_V1` es un paso manual en cada ambiente, staging primero. Este repositorio no guarda ninguna de esas claves.
 
 ## Próximos pasos pensados (en orden)
 

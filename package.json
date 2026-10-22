@@ -10,7 +10,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx db/migrate.ts",
-    "docs:permisos": "tsx scripts/generar-matriz-permisos.ts"
+    "docs:permisos": "tsx scripts/generar-matriz-permisos.ts",
+    "tokens:recifrar": "tsx scripts/recifrar-tokens-ml.ts"
   },
   "dependencies": {
     "next": "14.2.35",

@@ -2,6 +2,10 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
+## Sin publicar
+
+- **2026-10-22** — Z-SEC-01 (rotación de la clave de tokens de Mercado Libre, issue #30): `lib/cifrado.ts` deja de tener la versión actual fija en el código. La lee de `ML_TOKEN_KEY_ACTUAL` y, si esa variable no está, sigue en 1 — así pasar a V2 es configuración, no un deploy aparte. Lo cifrado con V1 se sigue descifrando mientras `ML_TOKEN_KEY_V1` exista. Script `npm run tokens:recifrar` (`scripts/recifrar-tokens-ml.ts`): recorre `cuentas_ml`, descifra cada token con la versión guardada en la fila, lo vuelve a cifrar con la actual y lo escribe en una transacción por fila. Es idempotente, `--dry-run` solo cuenta, y no imprime tokens, ids de Mercado Libre ni claves. Corre con el superusuario de `DATABASE_URL` (el de las migraciones), no con `superadmin_user`: ese rol no puede leer ni escribir `cuentas_ml`, y un token es dato de negocio. No hubo migración — el turno 0008–0010 está ocupado y con los roles que ya existen alcanza. Runbook en `docs/rotacion-claves.md`. La rotación en Railway (crear V2, fijar la variable, correr el script, borrar V1) la hace Mateo; este cambio no la ejecuta.
+
 ## v0.1.0
 
 - **2026-10-14** — Tarea 1.1 (Repositorio nuevo): Next.js 14 + TypeScript, Drizzle ORM + Postgres, GitHub Actions (compila, tipos, pruebas, build en cada PR), página `/api/version`, desplegado en Railway. Sentry se deja fuera del alcance por ahora, para no sumar una integración a medias.
