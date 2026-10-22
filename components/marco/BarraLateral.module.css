@@ -1,7 +1,11 @@
 .barra {
   display: flex;
   flex-direction: column;
-  width: 220px;
+  /* Manual de marca: el logo completo necesita 260px de ancho mínimo
+     más un área de protección de ~24px a cada lado (2x el ancho de la
+     "I" del logotipo a ese tamaño) — 260 + 24 + 24 + el padding de
+     12px de la barra a cada lado = 332px; 340px deja un poco de aire. */
+  width: 340px;
   flex-shrink: 0;
   height: 100vh;
   position: sticky;
@@ -20,17 +24,47 @@
 .logo {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 8px;
-  color: var(--acento-fuerte);
+  justify-content: center;
+  /* Área de protección del logo completo — ver el comentario de
+     .barra arriba para el cálculo real (medido en el SVG). */
+  padding: 8px 24px;
 }
 
-.nombreLogo {
-  font-family: var(--fuente-titulos);
-  font-weight: 700;
-  font-size: 16px;
-  color: var(--texto);
-  white-space: nowrap;
+.barra[data-colapsada="true"] .logo {
+  padding: 8px 0;
+}
+
+.logoCompleto {
+  width: 260px;
+  height: auto;
+  display: block;
+}
+
+.iconoColapsado {
+  width: 32px;
+  height: auto;
+  display: none;
+}
+
+/* Barra contraída (JS, botón "Contraer"): logo completo se oculta,
+   entra el ícono. Plata por defecto (tema oscuro); en claro se
+   cambia a la versión gris oscuro porque la plata pierde contraste
+   sobre un fondo casi blanco — nunca un filtro CSS sobre la plata,
+   eso sería recolorear el archivo oficial. */
+.barra[data-colapsada="true"] .logoCompleto {
+  display: none;
+}
+
+.barra[data-colapsada="true"] .iconoColapsado[data-variante="plata"] {
+  display: block;
+}
+
+:root[data-tema="claro"] .barra[data-colapsada="true"] .iconoColapsado[data-variante="plata"] {
+  display: none;
+}
+
+:root[data-tema="claro"] .barra[data-colapsada="true"] .iconoColapsado[data-variante="oscuro"] {
+  display: block;
 }
 
 .nav {
@@ -146,7 +180,6 @@
     padding: 18px 8px;
   }
 
-  .nombreLogo,
   .etiquetaItem,
   .etiquetaGrupo {
     display: none;
@@ -158,5 +191,30 @@
 
   .etiquetaCuadrado {
     display: none;
+  }
+
+  /* Pantalla angosta: el ícono reemplaza al logo completo sin
+     importar el estado de "Contraer" (ese botón es para pantallas
+     anchas) — mismo criterio que el resto de las reglas de acá
+     arriba, todo por CSS, nunca por una condición de JS que no sabe
+     el ancho real de la pantalla. */
+  .logo {
+    padding: 8px 0;
+  }
+
+  .logoCompleto {
+    display: none;
+  }
+
+  .iconoColapsado[data-variante="plata"] {
+    display: block;
+  }
+
+  :root[data-tema="claro"] .iconoColapsado[data-variante="plata"] {
+    display: none;
+  }
+
+  :root[data-tema="claro"] .iconoColapsado[data-variante="oscuro"] {
+    display: block;
   }
 }

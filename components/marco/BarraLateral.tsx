@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { iconoDeClave, IconoContraer, IconoLogo } from "./iconos";
+import { iconoDeClave, IconoContraer } from "./iconos";
 import { SelectorTema } from "./SelectorTema";
 import styles from "./BarraLateral.module.css";
 import type { GrupoNav } from "./tipos";
@@ -38,8 +38,31 @@ export function BarraLateral({ grupos }: { grupos: GrupoNav[] }) {
   return (
     <aside className={styles.barra} data-colapsada={colapsada ? "true" : "false"}>
       <div className={styles.logo}>
-        <IconoLogo size={22} />
-        {!colapsada && <span className={styles.nombreLogo}>Zilonix</span>}
+        {/* Las tres imágenes siempre están en el DOM — cuál se ve es
+            puro CSS (data-colapsada de .barra, más el media query de
+            pantallas angostas que fuerza el ícono sin depender del
+            estado de React). Mismo criterio que .etiquetaItem de
+            abajo: nunca una condición de JS decide qué tan ancho cabe
+            en la pantalla real.
+
+            SVG oficial del manual de marca, nunca redibujado — mínimo
+            260px de ancho (tamaño mínimo digital) y un margen de
+            protección alrededor equivalente a 2x el ancho de la "I"
+            del logotipo (medido en el propio SVG: la "I" mide 42.67
+            de 933 unidades de ancho total ≈ 4.57% — a 260px eso es
+            ~11.9px, así que el margen es ~24px). Nunca se estira, se
+            rota, se recolorea ni se le agrega sombra/brillo/filtro.
+
+            Ícono colapsado: recorte del propio logotipo (no un ícono
+            genérico), mínimo 32px. En tema claro se cambia a la
+            versión gris oscuro (icono-gris-oscuro.png) porque la
+            plata pierde contraste sobre un fondo casi blanco — el
+            logo completo SÍ se queda en plata sobre blanco en los dos
+            temas, eso el manual lo permite explícitamente, el ícono
+            solo no. */}
+        <img src="/marca/zilonix-seller-logo.svg" alt="Zilonix Seller" className={styles.logoCompleto} width={260} height={94} />
+        <img src="/marca/icono-plata.png" alt="Zilonix Seller" className={styles.iconoColapsado} data-variante="plata" />
+        <img src="/marca/icono-gris-oscuro.png" alt="Zilonix Seller" className={styles.iconoColapsado} data-variante="oscuro" />
       </div>
 
       <nav className={styles.nav}>

@@ -1,5 +1,5 @@
 import { ClerkProvider } from "@clerk/nextjs";
-import { Inter, Space_Grotesk } from "next/font/google";
+import { Montserrat } from "next/font/google";
 import "./globals.css";
 import { VERSION } from "@/lib/version";
 
@@ -8,22 +8,19 @@ export const metadata = {
   description: "Plataforma multiempresa de Zilonix",
 };
 
-// Marco visual (negro/plateado/azul) — Space Grotesk para títulos y
-// cifras grandes, Inter para texto e interfaz. next/font/google las
-// autohospeda en el build (sin llamar a Google en cada visita) y las
-// expone como variables CSS, que app/globals.css usa en
+// Tipografía del manual de marca: pide Creato Display, que no está en
+// Google Fonts — para medios electrónicos el manual permite
+// Montserrat. Un solo next/font/google con los 5 pesos que usa el
+// marco (300/400/500/700/800: Light/Regular en texto, Medium/Bold
+// para destacar, ExtraBold en títulos grandes) — nunca Cinzel, esa
+// vive solo dentro del logo. next/font/google la autohospeda en el
+// build (sin llamar a Google en cada visita) y la expone como
+// variable CSS, que app/globals.css usa en
 // --fuente-titulos/--fuente-texto — ninguna dependencia nueva.
-const spaceGrotesk = Space_Grotesk({
+const montserrat = Montserrat({
   subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--fuente-space-grotesk",
-  display: "swap",
-});
-
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--fuente-inter",
+  weight: ["300", "400", "500", "700", "800"],
+  variable: "--fuente-montserrat",
   display: "swap",
 });
 
@@ -47,7 +44,7 @@ const SCRIPT_TEMA = `
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <ClerkProvider>
-      <html lang="es" suppressHydrationWarning className={`${spaceGrotesk.variable} ${inter.variable}`}>
+      <html lang="es" suppressHydrationWarning className={montserrat.variable}>
         <head>
           <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA }} />
         </head>
