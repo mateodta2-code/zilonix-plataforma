@@ -5,3 +5,14 @@ node_modules
 .DS_Store
 *.log
 tsconfig.tsbuildinfo
+
+# Issue #43 (Z-P0-04b) — nunca un secreto real en el repositorio
+# (regla de CLAUDE.md). .env.example sí se versiona: solo tiene
+# nombres de variables, ningún valor real.
+.env*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+certificados/
