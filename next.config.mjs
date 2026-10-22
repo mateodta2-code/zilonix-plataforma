@@ -17,12 +17,13 @@ function dominioClerkDesdeLlavePublica(llave) {
 const dominioClerk = dominioClerkDesdeLlavePublica(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
 // Lista exacta que pide la documentación de Clerk para CSP propia
-// (self-hosted, sin el nonce automático — eso exige una versión de
-// @clerk/nextjs más nueva que la 6.9.6 de este repo). 'unsafe-inline'
-// en script-src y style-src es lo que Clerk pide como mínimo hoy, no
-// un atajo nuestro — y style-src además lo necesita toda la app, por
-// los style={{...}} de React, que compilan a atributos style=""
-// inline.
+// (self-hosted, sin el nonce automático). @clerk/nextjs 6.39.x ya
+// puede poner el nonce, pero no se activa en este cambio: una CSP mal
+// armada no rompe el build, rompe el navegador, y login, 2FA y /cuenta
+// con nonce todavía no se probaron en vivo. 'unsafe-inline' en
+// script-src y style-src es lo que Clerk pide como mínimo hoy, no un
+// atajo nuestro — y style-src además lo necesita toda la app, por los
+// style={{...}} de React, que compilan a atributos style="" inline.
 const cspClerk = dominioClerk
   ? [
       `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""} https://${dominioClerk} https://challenges.cloudflare.com https://*.protect.clerk.com`,
@@ -45,6 +46,14 @@ const csp = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // La app no usa next/image, no tiene carpeta public/ ni sharp. Igual
+  // Next 14.2.35 registra /_next/image y, si la petición pasa la
+  // validación de parámetros, entra a imageOptimizer (DoS del
+  // optimizador y, si algún día se instala sharp, el RCE por AVIF).
+  // Con unoptimized, handleNextImageRequest responde 404 antes de
+  // llamar al optimizador — ver next/dist/server/next-server.js en
+  // 14.2.35: `if (imagesConfig.loader !== 'default' || imagesConfig.unoptimized) render404`.
+  images: { unoptimized: true },
   // Tarea 1.5 — le dicen a Clerk que use NUESTRAS páginas de login/
   // registro (app/sign-in, app/sign-up), no su pantalla genérica
   // alojada en accounts.dev. Bug real encontrado en vivo (14/10/2026):
