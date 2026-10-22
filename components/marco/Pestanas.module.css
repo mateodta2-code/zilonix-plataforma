@@ -1,0 +1,45 @@
+.contenedor {
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid var(--borde);
+}
+
+.pestana {
+  position: relative;
+  padding: 10px 2px 12px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--texto-suave);
+  text-decoration: none;
+  cursor: pointer;
+  transition: var(--transicion-color);
+}
+
+.pestana:hover {
+  color: var(--texto);
+}
+
+.pestana:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.pestana[data-activa="true"] {
+  color: var(--texto);
+}
+
+.pestana[data-activa="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--acento);
+  border-radius: 2px;
+}
+
+.pestana[data-deshabilitada="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

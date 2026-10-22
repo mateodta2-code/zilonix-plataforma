@@ -1,10 +1,122 @@
 :root {
   color-scheme: light dark;
+
+  /* Identidad visual de Zilonix Seller (issue del marco del panel) —
+     negro/plateado/azul, oscuro por defecto. Inspirado en el patrón de
+     dash.lucidtrading.com (fondo casi negro, bordes finísimos,
+     tarjetas planas), nunca su marca ni su acento verde — acá el
+     acento es azul y el secundario plateado. */
+  --fondo: #050506;
+  --superficie: #0e0f12;
+  --superficie-2: #15171c;
+  --borde: #262a33;
+  --texto: #f2f4f8;
+  --texto-suave: #8a909c;
+  --plata: #c0c6d0;
+  --plata-2: #8d949f;
+  --acento: #3b82f6;
+  --acento-fuerte: #60a5fa;
+  --acento-suave: rgba(59, 130, 246, 0.12);
+  --peligro: #ef4444;
+  --exito: #22c55e;
+
+  --degradado-plata: linear-gradient(180deg, #ffffff 0%, #c0c6d0 55%, #8d949f 100%);
+
+  --radio-boton: 6px;
+  --radio-tarjeta: 12px;
+  --radio-chip: 4px;
+
+  --fuente-titulos: var(--fuente-space-grotesk), "Segoe UI", sans-serif;
+  --fuente-texto: var(--fuente-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --transicion-color: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  --transicion-transform: transform 0.1s ease;
+}
+
+/* Mismos valores que :root, explícitos — el selector de tema pone
+   data-tema a mano (en vez de confiar solo en prefers-color-scheme),
+   así que "oscuro" necesita su propio bloque para que elegirlo a
+   propósito gane siempre, incluso si el sistema está en claro. */
+:root[data-tema="oscuro"] {
+  --fondo: #050506;
+  --superficie: #0e0f12;
+  --superficie-2: #15171c;
+  --borde: #262a33;
+  --texto: #f2f4f8;
+  --texto-suave: #8a909c;
+  --plata: #c0c6d0;
+  --plata-2: #8d949f;
+  --acento: #3b82f6;
+  --acento-fuerte: #60a5fa;
+  --acento-suave: rgba(59, 130, 246, 0.12);
+  --degradado-plata: linear-gradient(180deg, #ffffff 0%, #c0c6d0 55%, #8d949f 100%);
+}
+
+:root[data-tema="claro"] {
+  --fondo: #f6f7f9;
+  --superficie: #ffffff;
+  --superficie-2: #eef0f3;
+  --borde: #d9dde3;
+  --texto: #0b0d12;
+  --texto-suave: #5b6270;
+  --plata: #6b7280;
+  --plata-2: #9aa1ad;
+  --acento: #2563eb;
+  --acento-fuerte: #1d4ed8;
+  --acento-suave: rgba(37, 99, 235, 0.1);
+  /* Versión oscura del degradado plateado: en fondo claro, una cinta
+     metálica blanca de punta a punta no contrasta con nada — se
+     invierte hacia los grises oscuros de --plata-2. */
+  --degradado-plata: linear-gradient(180deg, #4b5160 0%, #6b7280 55%, #9aa1ad 100%);
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #0b0d12;
-  color: #e7e9ee;
+  font-family: var(--fuente-texto);
+  background: var(--fondo);
+  color: var(--texto);
+  transition: var(--transicion-color);
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Etiquetas pequeñas en mayúsculas (cifras, chips, encabezados de
+   grupo) — una sola regla compartida en vez de repetirla en cada
+   *.module.css. */
+.zx-etiqueta {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--texto-suave);
+}
+
+/* Degradado plateado SOLO para títulos/cifras grandes — background-
+   clip: text necesita el relleno transparente del propio texto, nunca
+   se usa en un bloque con más contenido adentro. */
+.zx-texto-plata {
+  background: var(--degradado-plata);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
 }

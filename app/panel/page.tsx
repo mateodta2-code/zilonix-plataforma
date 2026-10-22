@@ -1,11 +1,17 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { currentUser } from "@clerk/nextjs/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { MODULOS, tienePermiso } from "@/lib/roles";
-import { cambiarEmpresaActiva } from "./actions";
+import { tienePermiso } from "@/lib/roles";
+import { MarcoApp } from "@/components/marco/MarcoApp";
+import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
+import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { iconoDeClave } from "@/components/marco/iconos";
+import type { GrupoNav } from "@/components/marco/tipos";
+import styles from "./page.module.css";
 
 // Tarea 1.6 — pantalla mínima que prueba el criterio de "listo": con un
 // usuario en 2 empresas, al cambiar ves datos distintos (acá, el nombre
@@ -13,17 +19,17 @@ import { cambiarEmpresaActiva } from "./actions";
 // negocio de verdad (ventas, inventario) llegan en la Fase 2.
 //
 // Tarea 1.7 — los módulos del nav se filtran por lo que el rol de esta
-// persona puede consultar (ej. el Operador no ve "finanzas"). "ventas"
-// (2.7, Pedidos), "finanzas" (1.7), "configuracion" (1.9, la Actividad)
-// e "inventario" (2.6, SKU) tienen una pantalla real detrás; el resto
-// es a propósito un link que todavía no lleva a ningún lado (llegan en
-// Fase 3).
-const PANTALLA_POR_MODULO: Record<string, string> = {
-  ventas: "/panel/pedidos",
-  finanzas: "/panel/finanzas",
-  configuracion: "/panel/actividad",
-  inventario: "/panel/sku",
-};
+// persona puede consultar (ej. el Operador no ve "finanzas").
+//
+// Marco visual (issue del marco del panel) — MISMA lógica de servidor
+// de siempre; lo único que cambia es que ahora se pinta con
+// components/marco/ (MarcoApp + barra lateral/superior con identidad
+// propia negro/plateado/azul) en vez del <main> suelto de antes. Todos
+// los links que ya existían siguen existiendo, solo que algunos se
+// movieron a la barra lateral (Administración) o a la barra superior
+// (cambiar de empresa) — ver el fragmento de changelog para el detalle
+// completo de qué se movió y qué queda para otro PR (subrutas,
+// app/panel/layout.tsx).
 export default async function PanelPage() {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -34,84 +40,112 @@ export default async function PanelPage() {
   const cookieEmpresa = cookies().get("empresa_actual")?.value;
   const activa = propias.find((e) => e.id === cookieEmpresa) ?? propias[0];
   const miMembresia = await obtenerMiMembresia(usuario.id, activa.id);
-  const modulosVisibles = miMembresia
-    ? MODULOS.filter((modulo) => tienePermiso(miMembresia.permisos, modulo, "consultar"))
-    : [];
+  const permisos = miMembresia?.permisos ?? [];
+  const rolNombre = miMembresia?.rolNombre ?? "sin rol";
+  const esDueno = rolNombre === "Dueño";
+
+  // Solo para el avatar (imagenUrl) — obtenerOCrearUsuarioActual() ya
+  // guarda el nombre en NUESTRA tabla usuarios, así que el nombre que
+  // se muestra sale de ahí, no de Clerk otra vez.
+  const clerkUser = await currentUser();
+
+  const vePedidosYDespachos = tienePermiso(permisos, "ventas", "consultar");
+  const veSku = tienePermiso(permisos, "inventario", "consultar");
+  const veFinanzas = tienePermiso(permisos, "finanzas", "consultar");
+  const veActividad = tienePermiso(permisos, "configuracion", "consultar");
+
+  const grupoPrincipal: GrupoNav = {
+    items: [
+      { etiqueta: "Inicio", href: "/panel", icono: "inicio", activa: true },
+      ...(vePedidosYDespachos
+        ? [
+            { etiqueta: "Pedidos", href: "/panel/pedidos", icono: "pedidos" as const, activa: false },
+            { etiqueta: "Despachos", href: "/panel/despachos", icono: "despachos" as const, activa: false },
+          ]
+        : []),
+      ...(veSku ? [{ etiqueta: "SKU", href: "/panel/sku", icono: "sku" as const, activa: false }] : []),
+      ...(veFinanzas ? [{ etiqueta: "Finanzas", href: "/panel/finanzas", icono: "finanzas" as const, activa: false }] : []),
+      ...(veActividad ? [{ etiqueta: "Actividad", href: "/panel/actividad", icono: "actividad" as const, activa: false }] : []),
+      { etiqueta: "Personas", href: "#", icono: "personas", activa: false, deshabilitada: true, titulo: "Próximamente" },
+    ],
+  };
+
+  // Tarea 2.3/1.7 — mismos 5 links que antes vivían sueltos abajo de
+  // la página, solo para el Dueño. Acá se agrupan como "Administración"
+  // en la barra lateral, en vez de una fila de texto.
+  const grupos: GrupoNav[] = esDueno
+    ? [
+        grupoPrincipal,
+        {
+          etiqueta: "Administración",
+          items: [
+            { etiqueta: "Invitar persona", href: "/panel/invitar", icono: "invitar", activa: false },
+            { etiqueta: "Ajustar roles", href: "/panel/roles", icono: "roles", activa: false },
+            { etiqueta: "Acceso de soporte", href: "/panel/soporte", icono: "soporte", activa: false },
+            { etiqueta: "Conectar Mercado Libre", href: "/panel/conectar-ml", icono: "conectarMl", activa: false },
+            { etiqueta: "Avisos de Mercado Libre", href: "/panel/avisos-ml", icono: "avisosMl", activa: false },
+          ],
+        },
+      ]
+    : [grupoPrincipal];
+
+  const pestanas: Pestana[] = [
+    { etiqueta: "Resumen", href: "/panel", activa: true },
+    ...(vePedidosYDespachos
+      ? [
+          { etiqueta: "Pedidos", href: "/panel/pedidos", activa: false },
+          { etiqueta: "Despachos", href: "/panel/despachos", activa: false },
+        ]
+      : []),
+    ...(veSku ? [{ etiqueta: "SKU", href: "/panel/sku", activa: false }] : []),
+  ];
 
   return (
-    <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+    <MarcoApp
+      empresa={{ nombre: activa.nombre, nit: activa.nit }}
+      empresaActivaId={activa.id}
+      empresasPropias={propias}
+      rol={rolNombre}
+      grupos={grupos}
+      usuario={{ nombre: usuario.nombre, imagenUrl: clerkUser?.imageUrl ?? null }}
+      mostrarCampana={esDueno}
+    >
+      <div className={styles.encabezado}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>{activa.nombre}</h1>
-          <p style={{ opacity: 0.6, fontSize: 13, margin: "4px 0 0 0" }}>
-            NIT {activa.nit} · {miMembresia?.rolNombre ?? "sin rol"}
-          </p>
+          <h1 className={styles.saludo}>Hola, {usuario.nombre}</h1>
+          <p className={styles.subtitulo}>Este es el resumen de {activa.nombre}</p>
         </div>
-        <Link href="/cuenta" style={{ fontSize: 13 }}>
-          Mi cuenta
-        </Link>
+
+        <div className={styles.tarjetaIdentidad}>
+          {clerkUser?.imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- la
+            // app no usa next/image a propósito, ver BarraSuperior.tsx.
+            <img src={clerkUser.imageUrl} alt="" width={44} height={44} className={styles.avatarIdentidad} />
+          ) : (
+            <span className={styles.avatarIdentidadRespaldo}>{usuario.nombre.slice(0, 1).toUpperCase()}</span>
+          )}
+          <div>
+            <p className={styles.nombreIdentidad}>{usuario.nombre}</p>
+            <p className={styles.empresaRolIdentidad}>
+              {activa.nombre} · {rolNombre}
+            </p>
+          </div>
+        </div>
       </div>
 
-      {modulosVisibles.length > 0 && (
-        <nav style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
-          {modulosVisibles.map((modulo) =>
-            PANTALLA_POR_MODULO[modulo] ? (
-              <Link
-                key={modulo}
-                href={PANTALLA_POR_MODULO[modulo]}
-                style={{ padding: "6px 12px", border: "1px solid currentColor", borderRadius: 6, fontSize: 13, textTransform: "capitalize" }}
-              >
-                {modulo}
-              </Link>
-            ) : (
-              <span
-                key={modulo}
-                title="Llega en una fase siguiente del plan técnico"
-                style={{ padding: "6px 12px", border: "1px dashed currentColor", borderRadius: 6, fontSize: 13, opacity: 0.5, textTransform: "capitalize" }}
-              >
-                {modulo}
-              </span>
-            )
-          )}
-        </nav>
-      )}
+      <Pestanas pestanas={pestanas} />
 
-      {propias.length > 1 && (
-        <form action={cambiarEmpresaActiva} style={{ marginTop: 28 }}>
-          <label htmlFor="empresaId" style={{ fontSize: 13, opacity: 0.7 }}>
-            Cambiar de empresa
-          </label>
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <select id="empresaId" name="empresaId" defaultValue={activa.id} style={{ flex: 1, padding: 8 }}>
-              {propias.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.nombre}
-                </option>
-              ))}
-            </select>
-            <button type="submit" style={{ padding: "8px 16px" }}>
-              Cambiar
-            </button>
-          </div>
-        </form>
-      )}
+      <div className={styles.gridKpi}>
+        <TarjetaKpi titulo="Ventas del mes" />
+        <TarjetaKpi titulo="Pedidos" />
+        <TarjetaKpi titulo="Despachos pendientes" />
+        <TarjetaKpi titulo="SKU sin vincular" />
+      </div>
 
-      {miMembresia?.rolNombre === "Dueño" && (
-        <div style={{ display: "flex", gap: 16, marginTop: 28, fontSize: 13, flexWrap: "wrap" }}>
-          <Link href="/panel/invitar">+ Invitar persona</Link>
-          <Link href="/panel/roles">Ajustar roles</Link>
-          <Link href="/panel/soporte">Acceso de soporte</Link>
-          {/* Tarea 2.3 — bug real encontrado en vivo: la pantalla ya
-              existía pero nunca quedó enlazada desde acá, solo se podía
-              llegar escribiendo la URL a mano. */}
-          <Link href="/panel/conectar-ml">Conectar Mercado Libre</Link>
-          <Link href="/panel/avisos-ml">Avisos de Mercado Libre</Link>
-        </div>
-      )}
-
-      <Link href="/crear-empresa" style={{ display: "inline-block", marginTop: 16, fontSize: 13 }}>
+      <Link href="/crear-empresa" className={styles.crearEmpresa}>
+        {iconoDeClave("crearEmpresa", { size: 16 })}
         + Crear otra empresa
       </Link>
-    </main>
+    </MarcoApp>
   );
 }
