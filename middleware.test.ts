@@ -8,10 +8,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // prueba: los contadores de lib/limite-peticiones.ts son estado a
 // nivel de módulo (a propósito, ver ese archivo) — sin esto, una
 // prueba dejaría el contador "caliente" para la siguiente.
+//
+// Merge con main (Clerk 6.39.8, CVE-2026-41248) — @clerk/nextjs/server
+// importa "server-only" desde esta versión; sin mockearlo, vitest
+// (Node, no un Server Component real) revienta al importar el módulo.
+vi.mock("server-only", () => ({}));
+
 vi.mock("@clerk/nextjs/server", async (importOriginal) => {
   // createRouteMatcher tiene que seguir siendo el real: lib/rutas-
   // publicas.ts (que importa de este mismo módulo) lo necesita de
-  // verdad para construir esRutaPublica.
+  // verdad para construir esRutaPublica — y es justo el que trae el
+  // parche del CVE (decodeURI + colapso de barras repetidas).
   const real = await importOriginal<typeof import("@clerk/nextjs/server")>();
   return { ...real, clerkMiddleware: (handler: unknown) => handler };
 });
@@ -110,5 +117,116 @@ describe("middleware — límite de peticiones y returnBackUrl (fix, 2026-10-21)
 
     expect(res?.status).toBe(401);
     expect(redirectToSignIn).not.toHaveBeenCalled();
+  });
+});
+
+// Merge con main (Clerk 6.39.8, CVE-2026-41248: createRouteMatcher se
+// podía saltar con un path armado). Adaptado del test que trajo ese
+// upgrade (PR #78) al mismo arnés de arriba (authFalso/cargarMiddleware)
+// en vez del mock propio de auth.protect() que traía: esta rama ya no
+// llama auth.protect() en ningún caso (ver middleware.ts), así que
+// detectar "bloqueada" por esa llamada ya no sirve — acá se detecta por
+// redirectToSignIn() (páginas) o por el status de la respuesta (APIs,
+// 401 json), que es como de verdad bloquea esta rama.
+describe("middleware — coincidencia de rutas tras @clerk/nextjs 6.39.8 (CVE-2026-41248)", () => {
+  let ip = 0;
+
+  async function decidir(path: string): Promise<"pasa" | "bloqueada" | "malformada"> {
+    try {
+      ip += 1;
+      const req = peticion(`https://staging.zilonix.test${path}`, { "x-forwarded-for": `203.0.113.${ip}` });
+      const middleware = await cargarMiddleware();
+      const { auth, redirectToSignIn } = authFalso(null);
+      const respuesta = await middleware(auth, req);
+      if (redirectToSignIn.mock.calls.length > 0) return "bloqueada";
+      if (respuesta && respuesta.status >= 400) return "bloqueada";
+      return "pasa";
+    } catch (error) {
+      // No solo new NextRequest(...) puede tirar esto: el matcher
+      // parcheado de Clerk (createRouteMatcher, llamado dentro de
+      // middleware.ts vía esRutaPublica) también revienta con
+      // MalformedURLError al decodificar un path como /%zz — hay que
+      // envolver la llamada al middleware completa, no solo la
+      // construcción del request.
+      if (error instanceof Error && error.name === "MalformedURLError") return "malformada";
+      throw error;
+    }
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("deja pasar las rutas públicas sin sesión, incluidas sus variantes codificadas/con barras repetidas", async () => {
+    const publicas = [
+      "/",
+      "/api/version",
+      "/sign-in",
+      "/sign-up",
+      "/sign-up/continue",
+      "/invitacion/un-token",
+      // Sin el parche, /%73ign-in no coincide con /sign-in(.*) y el gate
+      // la trataría como privada. Con 6.39.2+ decodeURI la reconoce y
+      // sigue siendo pública.
+      "/%73ign-in",
+      "//sign-in",
+      "///sign-in/factor-one",
+      "/%69nvitacion/abc",
+      // Hallazgo real al fusionar main (Clerk 6.39.8): el matcher
+      // parcheado compara sin distinguir mayúsculas/minúsculas, así
+      // que una variante en mayúsculas de una ruta pública también
+      // coincide ahora — antes (6.9.6) no lo hacía.
+      "/API/ml/webhooks",
+    ];
+    for (const ruta of publicas) {
+      expect(await decidir(ruta), ruta).toBe("pasa");
+    }
+  });
+
+  it("bloquea rutas privadas sin sesión, incluidas variantes armadas (mismo patrón que el CVE, sin reproducir el exploit)", async () => {
+    const privadas = [
+      "/panel",
+      "/panel/pedidos",
+      "/cuenta",
+      "/crear-empresa",
+      "/superadmin",
+      "/api/ml/conectar",
+      "/api/ml/despachos/etiquetas",
+      "/PANEL",
+      "//panel",
+      "///panel",
+      "/panel;",
+      "/panel.",
+      "/%70anel",
+      "/panel%2Fsecret",
+      "/%2Fpanel",
+      "/panel%2e",
+      "/api%2Fversion",
+      // Nota real: /API/ml/webhooks (mayúsculas) NO va acá — a
+      // diferencia de 6.9.6, el matcher parcheado compara sin
+      // distinguir mayúsculas/minúsculas, así que esa variante SÍ
+      // coincide con el patrón público "/api/ml/webhooks" (ver el
+      // "it" de rutas públicas, más abajo). Acá se prueba el mismo
+      // caso contra una ruta que de verdad es privada en cualquier
+      // mayúscula/minúscula.
+      "/API/ml/conectar",
+    ];
+    for (const ruta of privadas) {
+      expect(await decidir(ruta), ruta).toBe("bloqueada");
+    }
+  });
+
+  it("un path mal codificado no sigue de largo", async () => {
+    expect(await decidir("/%zz")).toBe("malformada");
+  });
+
+  it("webhooks, trabajador y callback son públicos en esta rama — su propio mecanismo de autenticación, no la sesión de Clerk del middleware", async () => {
+    // En main (antes de fusionar este PR) estas tres seguían detrás del
+    // gate de sesión — hacerlas públicas es justo el cambio de
+    // middleware que trae el PR #27 (ver lib/rutas-publicas.ts).
+    const maquina = ["/api/ml/webhooks", "/api/ml/trabajador", "/api/ml/callback"];
+    for (const ruta of maquina) {
+      expect(await decidir(ruta), ruta).toBe("pasa");
+    }
   });
 });

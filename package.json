@@ -18,7 +18,7 @@
     "react-dom": "18.3.1",
     "drizzle-orm": "0.36.4",
     "postgres": "3.4.5",
-    "@clerk/nextjs": "6.9.6"
+    "@clerk/nextjs": "6.39.8"
   },
   "devDependencies": {
     "typescript": "5.7.2",

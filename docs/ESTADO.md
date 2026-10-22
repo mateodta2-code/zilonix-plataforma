@@ -1,6 +1,8 @@
 # Estado real de Zilonix Seller
 
-Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
+Foto del proyecto al **2026-10-22**. Esto cambia después de cada tarea — la fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
+
+**Dependencias (2026-10-22).** `@clerk/nextjs` está en **6.39.8** (CVE-2026-41248, bypass de `createRouteMatcher`; antes 6.9.6) y el repo versiona `package-lock.json`. El CI instala con `npm ci`. Railway con Railpack no pasa a `npm ci` solo por existir el lock: hace falta `RAILPACK_NODE_NPM_INSTALL=npm ci` en el servicio (no se cambió la configuración de Railway en este cambio). `/_next/image` queda apagado con `images.unoptimized` — la app no usa `next/image`. El upgrade de Clerk en sí no tocó `middleware.ts` — eso es justo este PR (`fix-middleware-rutas-maquina`, #27), ya fusionado con esta actualización: las rutas de máquina (`/api/ml/webhooks`, `/api/ml/trabajador`, `/api/ml/callback`) ya están en la lista pública (`lib/rutas-publicas.ts`) y el middleware ya no usa `auth.protect()` — ver "Problemas conocidos §1" abajo.
 
 ## Qué está terminado y funcionando
 
