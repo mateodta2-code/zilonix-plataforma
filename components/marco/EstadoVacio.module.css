@@ -1,0 +1,9 @@
+.vacio {
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--texto-suave);
+  border: 1px dashed var(--borde);
+  border-radius: var(--radio-tarjeta);
+}

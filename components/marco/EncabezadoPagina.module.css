@@ -1,0 +1,25 @@
+.encabezado {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.titulo {
+  margin: 0;
+  font-family: var(--fuente-titulos);
+  font-weight: 700;
+  font-size: 22px;
+}
+
+.descripcion {
+  margin: 6px 0 0 0;
+  font-size: 13.5px;
+  color: var(--texto-suave);
+  max-width: 640px;
+}
+
+.accion {
+  flex-shrink: 0;
+}

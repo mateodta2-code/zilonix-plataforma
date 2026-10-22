@@ -1,0 +1,17 @@
+.titulo {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.form {
+  display: flex;
+  gap: 8px;
+}
+
+.select {
+  flex: 1;
+}
+
+.volver {
+  align-self: flex-start;
+}

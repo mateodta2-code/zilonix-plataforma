@@ -1,10 +1,13 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { BotonLink } from "@/components/marco/Boton";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { SinAcceso } from "@/components/marco/SinAcceso";
 
 // Tarea 1.7/1.8 — pantalla de demostración para el criterio de "listo"
 // de la 1.7 ("el operador no ve Finanzas"), ahora usando la función
@@ -24,26 +27,24 @@ export default async function FinanzasPage() {
   try {
     const miMembresia = await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
     return (
-      <main style={{ maxWidth: 420, margin: "0 auto", padding: "48px 24px" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Finanzas</h1>
-        <p style={{ opacity: 0.7, fontSize: 14 }}>
-          Sin datos reales todavía (llegan en la Fase 3) — esta pantalla solo demuestra que tu rol (
-          {miMembresia.rolNombre}) sí puede verla.
-        </p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
+      <>
+        <EncabezadoPagina titulo="Finanzas" />
+        <EstadoVacio>
+          Sin datos reales todavía (llegan en la Fase 3) — esta pantalla solo demuestra que tu rol ({miMembresia.rolNombre}) sí puede verla.
+        </EstadoVacio>
+        <BotonLink href="/panel" variante="fantasma" chico>
+          Volver al panel
+        </BotonLink>
+      </>
     );
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
     return (
-      <main style={{ maxWidth: 420, margin: "0 auto", padding: "48px 24px" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Finanzas</h1>
-        <p style={{ opacity: 0.7, fontSize: 14 }}>
-          Tu rol ({miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a este módulo.
-        </p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
+      <>
+        <EncabezadoPagina titulo="Finanzas" />
+        <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a este módulo.`} />
+      </>
     );
   }
 }

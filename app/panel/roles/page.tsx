@@ -5,6 +5,11 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { listarRolesDeEmpresa } from "@/lib/roles";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { BotonLink } from "@/components/marco/Boton";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import styles from "./page.module.css";
 
 // Tarea 1.8 — ajustar roles es "autorizar" en "configuracion" (dar o
 // quitar permisos es, por definición, un acto de autorización).
@@ -22,51 +27,40 @@ export default async function RolesPage() {
     await requierePermiso(usuario.id, empresa.id, "configuracion", "autorizar");
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
-    return (
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol no puede ajustar los roles de {empresa.nombre}.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje={`Tu rol no puede ajustar los roles de ${empresa.nombre}.`} />;
   }
 
   const roles = await listarRolesDeEmpresa(empresa.id);
 
   return (
-    <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>Roles de {empresa.nombre}</h1>
-      <ul style={{ listStyle: "none", padding: 0, marginTop: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+    <>
+      <EncabezadoPagina titulo={`Roles de ${empresa.nombre}`} />
+
+      <ListaFilas>
         {roles.map((rol) => (
-          <li
-            key={rol.id}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "10px 14px",
-              border: "1px solid currentColor",
-              borderRadius: 6,
-            }}
-          >
-            <span>
-              {rol.nombre}
-              <span style={{ opacity: 0.6, fontSize: 12.5, marginLeft: 8 }}>
-                {rol.permisos.length} permiso{rol.permisos.length === 1 ? "" : "s"}
+          <FilaLista key={rol.id}>
+            <div className={styles.fila}>
+              <span>
+                {rol.nombre}
+                <span className={styles.conteoPermisos}>
+                  {rol.permisos.length} permiso{rol.permisos.length === 1 ? "" : "s"}
+                </span>
               </span>
-            </span>
-            {rol.nombre === "Dueño" ? (
-              <span style={{ opacity: 0.5, fontSize: 12.5 }}>Siempre todo</span>
-            ) : (
-              <Link href={`/panel/roles/${rol.id}`} style={{ fontSize: 13 }}>
-                Ajustar →
-              </Link>
-            )}
-          </li>
+              {rol.nombre === "Dueño" ? (
+                <span className={styles.siempreTodo}>Siempre todo</span>
+              ) : (
+                <Link href={`/panel/roles/${rol.id}`} className={styles.ajustar}>
+                  Ajustar →
+                </Link>
+              )}
+            </div>
+          </FilaLista>
         ))}
-      </ul>
-      <Link href="/panel/invitar" style={{ display: "inline-block", marginTop: 24, fontSize: 13 }}>
+      </ListaFilas>
+
+      <BotonLink href="/panel/invitar" variante="fantasma" chico className={styles.volver}>
         ← Invitar persona
-      </Link>
-    </main>
+      </BotonLink>
+    </>
   );
 }

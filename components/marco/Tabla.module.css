@@ -1,0 +1,32 @@
+.envoltura {
+  overflow-x: auto;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-tarjeta);
+}
+
+.tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.th {
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--superficie-2);
+  white-space: nowrap;
+}
+
+.tr {
+  border-top: 1px solid var(--borde);
+  transition: var(--transicion-color);
+}
+
+.tr:hover {
+  background: var(--superficie-2);
+}
+
+.td {
+  padding: 10px 12px;
+  vertical-align: middle;
+}

@@ -1,0 +1,50 @@
+.avisoSinVincular {
+  padding: 10px 14px;
+  background: var(--acento-suave);
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto);
+}
+
+.enlaceAviso {
+  font-weight: 600;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+  transition: var(--transicion-color);
+}
+
+.enlaceAviso:hover {
+  text-decoration: underline;
+}
+
+.enlaceAviso:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.botonCrear {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.filaSku {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.detalleSku {
+  color: var(--texto-suave);
+}
+
+.volver {
+  align-self: flex-start;
+}

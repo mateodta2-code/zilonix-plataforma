@@ -1,11 +1,19 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarAccesosDeEmpresa } from "@/lib/acceso-temporal";
 import { concederAccesoAction, revocarAccesoAction } from "./actions";
+import { Boton, BotonLink } from "@/components/marco/Boton";
+import { Campo } from "@/components/marco/Campo";
+import { Chip } from "@/components/marco/Chip";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import { Tarjeta } from "@/components/marco/Tarjeta";
+import styles from "./page.module.css";
 
 // Tarea 1.11 (decisión D8) — el lado de la empresa: "El personal de
 // Zilonix no ve tus ventas ni tus clientes sin tu permiso." Esta
@@ -26,96 +34,72 @@ export default async function SoportePage() {
     await requierePermiso(usuario.id, empresa.id, "configuracion", "autorizar");
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
-    return (
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol no puede gestionar el acceso de soporte.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje="Tu rol no puede gestionar el acceso de soporte." />;
   }
 
   const accesos = await listarAccesosDeEmpresa(empresa.id);
   const ahora = Date.now();
 
   return (
-    <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>Acceso de soporte — {empresa.nombre}</h1>
-      <p style={{ opacity: 0.7, fontSize: 13 }}>
-        Por defecto, el equipo de Zilonix solo ve cuántos miembros tiene tu empresa — nunca quiénes son, ni ningún otro
-        dato, sin que tú concedas un acceso temporal acá.
-      </p>
+    <>
+      <EncabezadoPagina
+        titulo={`Acceso de soporte — ${empresa.nombre}`}
+        descripcion="Por defecto, el equipo de Zilonix solo ve cuántos miembros tiene tu empresa — nunca quiénes son, ni ningún otro dato, sin que tú concedas un acceso temporal acá."
+      />
 
-      <form action={concederAccesoAction} style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
-        <label style={{ fontSize: 13 }}>
-          ¿Qué puede ver soporte? (sé específico)
-          <input
-            name="alcance"
-            required
-            placeholder='ej. "Ver quién trabaja en la empresa, para resolver un ticket"'
-            style={{ display: "block", width: "100%", padding: 8, marginTop: 4, boxSizing: "border-box" }}
-          />
-        </label>
-        <label style={{ fontSize: 13 }}>
-          Vence en (horas, máximo 360 = 15 días)
-          <input
-            type="number"
-            name="horas"
-            defaultValue={48}
-            min={1}
-            max={360}
-            required
-            style={{ display: "block", width: "100%", padding: 8, marginTop: 4, boxSizing: "border-box" }}
-          />
-        </label>
-        <button type="submit" style={{ padding: "10px 16px", marginTop: 4 }}>
-          Conceder acceso temporal
-        </button>
-      </form>
+      <Tarjeta>
+        <form action={concederAccesoAction} className={styles.form}>
+          <Campo etiqueta="¿Qué puede ver soporte? (sé específico)">
+            <input name="alcance" required placeholder='ej. "Ver quién trabaja en la empresa, para resolver un ticket"' className="zx-control" />
+          </Campo>
+          <Campo etiqueta="Vence en (horas, máximo 360 = 15 días)">
+            <input type="number" name="horas" defaultValue={48} min={1} max={360} required className="zx-control" />
+          </Campo>
+          <Boton type="submit" className={styles.botonConceder}>
+            Conceder acceso temporal
+          </Boton>
+        </form>
+      </Tarjeta>
 
-      <h2 style={{ fontSize: 16, fontWeight: 600, marginTop: 28 }}>Historial</h2>
-      {accesos.length === 0 ? (
-        <p style={{ opacity: 0.6, fontSize: 13 }}>Nunca se ha concedido ningún acceso.</p>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-          {accesos.map((a) => {
-            const vencido = a.expiraTs.getTime() <= ahora;
-            const activo = !a.revocadoTs && !vencido;
-            return (
-              <li
-                key={a.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "10px 14px",
-                  border: "1px solid currentColor",
-                  borderRadius: 6,
-                  fontSize: 13,
-                }}
-              >
-                <span>
-                  {a.alcance}
-                  <span style={{ opacity: 0.6, marginLeft: 8 }}>
-                    {activo ? "activo" : a.revocadoTs ? "revocado" : "vencido"} · vence {a.expiraTs.toLocaleString("es-CO")}
-                  </span>
-                </span>
-                {activo && (
-                  <form action={revocarAccesoAction}>
-                    <input type="hidden" name="accesoId" value={a.id} />
-                    <button type="submit" style={{ fontSize: 12 }}>
-                      Revocar
-                    </button>
-                  </form>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <div>
+        <h2 className={styles.subtitulo}>Historial</h2>
+        {accesos.length === 0 ? (
+          <EstadoVacio>Nunca se ha concedido ningún acceso.</EstadoVacio>
+        ) : (
+          <ListaFilas>
+            {accesos.map((a) => {
+              const vencido = a.expiraTs.getTime() <= ahora;
+              const activo = !a.revocadoTs && !vencido;
+              const estadoChip = activo ? "exito" : a.revocadoTs ? "neutro" : "peligro";
+              const textoEstado = activo ? "activo" : a.revocadoTs ? "revocado" : "vencido";
+              return (
+                <FilaLista key={a.id}>
+                  <div className={styles.fila}>
+                    <span className={styles.descripcionAcceso}>
+                      {a.alcance}
+                      <span className={styles.detalleAcceso}>
+                        <Chip estado={estadoChip}>{textoEstado}</Chip> vence {a.expiraTs.toLocaleString("es-CO")}
+                      </span>
+                    </span>
+                    {activo && (
+                      <form action={revocarAccesoAction}>
+                        <input type="hidden" name="accesoId" value={a.id} />
+                        <Boton type="submit" variante="secundario" chico>
+                          Revocar
+                        </Boton>
+                      </form>
+                    )}
+                  </div>
+                </FilaLista>
+              );
+            })}
+          </ListaFilas>
+        )}
+      </div>
 
-      <Link href="/panel" style={{ display: "inline-block", marginTop: 24, fontSize: 13 }}>
+      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
         Volver al panel
-      </Link>
-    </main>
+      </BotonLink>
+    </>
   );
 }

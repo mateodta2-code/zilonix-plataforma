@@ -1,0 +1,11 @@
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.etiqueta {
+  color: var(--texto-suave);
+  font-weight: 500;
+}
