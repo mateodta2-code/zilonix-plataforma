@@ -40,6 +40,16 @@ const CONCURRENCIA = 5;
 const TOPE_PUBLICACIONES = 10; // "las 10 publicaciones más vendidas" del pedido — ver nota de ordenPublicaciones más abajo
 const MAX_PAGINAS_TEXTO = 2; // 2×20 = 40 candidatos de texto, de sobra para un Top 10 con margen
 
+// Corrección de Pablo (PR #112): tope de candidatos relevantes ANTES
+// de pedir ofertas y vendedores (las dos llamadas caras, una por
+// candidato) — sin esto, un término con muchísimos resultados reales
+// podía disparar cientos de llamadas a Mercado Libre por una sola
+// búsqueda. candidatosPorId ya guarda primero los de texto y recién
+// después completa con los de categoría (ver el bucle de abajo), así
+// que recortar la lista YA ordenada así prioriza texto > categoría sin
+// necesitar ningún criterio nuevo.
+const TOPE_CANDIDATOS_RELEVANTES = 40;
+
 // Mismos umbrales de ticket que ya confirmó Cowork leyendo el código
 // real de Selltrix (zilonix-os-web/lib/busqueda-productos.js) — para
 // que "ticket alto/bajo" signifique lo mismo en los dos sistemas.
@@ -359,7 +369,9 @@ export async function buscarInvestigacionProducto(empresaId: string, terminoCrud
   }
 
   const palabrasBusqueda = palabrasDistintivas(termino);
-  const relevantes = [...candidatosPorId.values()].filter((c) => c.nombre && compartePalabra(palabrasDistintivas(c.nombre), palabrasBusqueda));
+  const relevantes = [...candidatosPorId.values()]
+    .filter((c) => c.nombre && compartePalabra(palabrasDistintivas(c.nombre), palabrasBusqueda))
+    .slice(0, TOPE_CANDIDATOS_RELEVANTES);
 
   if (!relevantes.length) {
     return avisoVacio(termino, `"${termino}" no coincide con ningún producto real del catálogo de Mercado Libre — probá con otro término.`);

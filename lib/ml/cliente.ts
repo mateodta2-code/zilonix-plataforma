@@ -17,8 +17,41 @@ const BASE_URL = "https://api.mercadolibre.com";
 // empresa, no antes — igual que DOMINIO_AUTORIZACION en lib/ml/oauth.ts.
 export const SITE_ID = "MCO";
 
+// Corrección de Pablo (PR #112): los id de producto/ítem y de
+// categoría de Mercado Libre Colombia siempre son "MCO" + dígitos; el
+// id de vendedor (user_id) es solo dígitos. Cualquier otra cosa no
+// puede venir de verdad de la API — se descarta ANTES de armar la URL,
+// nunca se pega texto sin validar a un fetch.
+const PATRON_ID_PRODUCTO_O_ITEM = /^MCO\d+$/;
+const PATRON_ID_CATEGORIA = /^MCO\d+$/;
+const PATRON_ID_VENDEDOR = /^\d+$/;
+
+// Tiempo máximo real por llamada — sin esto, una llamada colgada a
+// Mercado Libre (red lenta, el proveedor caído) dejaba la búsqueda
+// cargando para siempre; con el AbortSignal, a los 8s se corta y se
+// trata como una respuesta no-ok (nunca una excepción no capturada).
+const TIMEOUT_MS = 8_000;
+
+export class LimiteMercadoLibreError extends Error {
+  constructor() {
+    super("Mercado Libre está limitando las consultas, intenta en un minuto.");
+    this.name = "LimiteMercadoLibreError";
+  }
+}
+
 async function pedir<T>(url: string, token: string): Promise<{ ok: true; data: T } | { ok: false; status: number }> {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch {
+    // Tiempo agotado (AbortError) o falla de red — se trata igual que
+    // una respuesta no-ok, nunca se deja sin resolver.
+    return { ok: false, status: 0 };
+  }
+  // 429 corta TODA la búsqueda, no solo esta llamada puntual — se
+  // lanza en vez de devolver {ok:false}, para que ninguna de las
+  // funciones de abajo lo trague en silencio como "sin datos".
+  if (res.status === 429) throw new LimiteMercadoLibreError();
   if (!res.ok) return { ok: false, status: res.status };
   return { ok: true, data: (await res.json()) as T };
 }
@@ -45,17 +78,20 @@ export async function buscarProductosCatalogo(termino: string, token: string, of
   const resp = await pedir<{ results?: unknown[] }>(url, token);
   if (!resp.ok) {
     if (resp.status === 404) return [];
+    if (resp.status === 0) throw new Error(`Mercado Libre no respondió a tiempo al buscar "${termino}" en el catálogo.`);
     throw new Error(`Mercado Libre respondió ${resp.status} al buscar "${termino}" en el catálogo.`);
   }
   const resultados = Array.isArray(resp.data.results) ? resp.data.results : [];
-  return resultados.map((r) => {
-    const item = r as { id?: unknown; name?: unknown; pictures?: unknown };
-    return {
-      id: String(item.id ?? ""),
-      nombre: typeof item.name === "string" ? item.name : null,
-      foto: fotoDe(item.pictures),
-    };
-  }).filter((p) => p.id);
+  return resultados
+    .map((r) => {
+      const item = r as { id?: unknown; name?: unknown; pictures?: unknown };
+      return {
+        id: typeof item.id === "string" ? item.id : "",
+        nombre: typeof item.name === "string" ? item.name : null,
+        foto: fotoDe(item.pictures),
+      };
+    })
+    .filter((p) => PATRON_ID_PRODUCTO_O_ITEM.test(p.id));
 }
 
 export type CategoriaMl = { categoryId: string };
@@ -71,7 +107,7 @@ export async function resolverCategoria(termino: string, token: string): Promise
   if (!resp.ok) return null;
   const primero = Array.isArray(resp.data) ? (resp.data[0] as { category_id?: unknown } | undefined) : undefined;
   const categoryId = primero && typeof primero.category_id === "string" ? primero.category_id : null;
-  return categoryId ? { categoryId } : null;
+  return categoryId && PATRON_ID_CATEGORIA.test(categoryId) ? { categoryId } : null;
 }
 
 // Los más vendidos REALES de una categoría (highlights BEST_SELLER) —
@@ -79,11 +115,14 @@ export async function resolverCategoria(termino: string, token: string): Promise
 // encuentra (confirmado en producción con el caso real documentado en
 // zilonix-os-web/lib/busqueda-productos.js). Solo da ids.
 export async function obtenerMejoresProductosCategoria(categoryId: string, token: string): Promise<string[]> {
-  const url = `${BASE_URL}/highlights/${SITE_ID}/category/${categoryId}`;
+  if (!PATRON_ID_CATEGORIA.test(categoryId)) return [];
+  const url = `${BASE_URL}/highlights/${SITE_ID}/category/${encodeURIComponent(categoryId)}`;
   const resp = await pedir<{ content?: unknown[] }>(url, token);
   if (!resp.ok) return [];
   const contenido = Array.isArray(resp.data.content) ? resp.data.content : [];
-  return contenido.map((c) => (c as { id?: unknown }).id).filter((id): id is string => typeof id === "string");
+  return contenido
+    .map((c) => (c as { id?: unknown }).id)
+    .filter((id): id is string => typeof id === "string" && PATRON_ID_PRODUCTO_O_ITEM.test(id));
 }
 
 // Nombre + foto de un product_id de catálogo — solo se usa para
@@ -91,7 +130,8 @@ export async function obtenerMejoresProductosCategoria(categoryId: string, token
 // (que no trae esos datos), nunca para los que ya vinieron de
 // buscarProductosCatalogo.
 export async function obtenerProducto(productId: string, token: string): Promise<ProductoCatalogoMl | null> {
-  const url = `${BASE_URL}/products/${productId}`;
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(productId)) return null;
+  const url = `${BASE_URL}/products/${encodeURIComponent(productId)}`;
   const resp = await pedir<{ name?: unknown; pictures?: unknown }>(url, token);
   if (!resp.ok) return null;
   return { id: productId, nombre: typeof resp.data.name === "string" ? resp.data.name : null, foto: fotoDe(resp.data.pictures) };
@@ -119,7 +159,8 @@ export type OfertaMl = {
 // devuelve [] en vez de lanzar: la lógica de negocio decide qué hacer
 // con "sin ofertas", no este cliente.
 export async function obtenerOfertasProducto(productId: string, token: string): Promise<OfertaMl[]> {
-  const url = `${BASE_URL}/products/${productId}/items`;
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(productId)) return [];
+  const url = `${BASE_URL}/products/${encodeURIComponent(productId)}/items`;
   const resp = await pedir<unknown>(url, token);
   if (!resp.ok) return [];
   const data = resp.data as { results?: unknown[] } | unknown[];
@@ -127,16 +168,18 @@ export async function obtenerOfertasProducto(productId: string, token: string): 
   return lista
     .map((raw) => {
       const item = raw as { item_id?: unknown; id?: unknown; price?: unknown; currency_id?: unknown; seller_id?: unknown; shipping?: { logistic_type?: unknown; free_shipping?: unknown } };
-      const itemId = item.item_id ?? item.id;
-      if (typeof itemId !== "string" && typeof itemId !== "number") return null;
+      const itemIdCrudo = item.item_id ?? item.id;
+      const itemId = typeof itemIdCrudo === "string" || typeof itemIdCrudo === "number" ? String(itemIdCrudo) : "";
+      if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
       const precio = Number(item.price);
       if (!Number.isFinite(precio) || precio <= 0) return null;
+      const sellerIdCrudo = item.seller_id != null ? String(item.seller_id) : null;
       const envioGratis = typeof item.shipping?.free_shipping === "boolean" ? item.shipping.free_shipping : null;
       return {
-        itemId: String(itemId),
+        itemId,
         precio,
         monedaId: typeof item.currency_id === "string" ? item.currency_id : "COP",
-        sellerId: item.seller_id != null ? String(item.seller_id) : null,
+        sellerId: sellerIdCrudo && PATRON_ID_VENDEDOR.test(sellerIdCrudo) ? sellerIdCrudo : null,
         esFull: item.shipping?.logistic_type === "fulfillment",
         esEnvioGratis: envioGratis,
       };
@@ -147,7 +190,8 @@ export async function obtenerOfertasProducto(productId: string, token: string): 
 export type VendedorMl = { nickname: string | null; esPlatinum: boolean };
 
 export async function obtenerVendedor(sellerId: string, token: string): Promise<VendedorMl | null> {
-  const url = `${BASE_URL}/users/${sellerId}`;
+  if (!PATRON_ID_VENDEDOR.test(sellerId)) return null;
+  const url = `${BASE_URL}/users/${encodeURIComponent(sellerId)}`;
   const resp = await pedir<{ nickname?: unknown; seller_reputation?: { power_seller_status?: unknown } }>(url, token);
   if (!resp.ok) return null;
   return {
@@ -160,6 +204,6 @@ export async function obtenerVendedor(sellerId: string, token: string): Promise<
 // articulo.mercadolibre.com.co/MCO-{numero} redirige a la ficha exacta,
 // sin pasar por /items/{id} (que da 403 para publicaciones ajenas).
 export function linkPublicacion(itemId: string): string | null {
-  const conGuion = itemId.replace(/^([A-Z]+)(\d+)$/, "$1-$2");
-  return conGuion ? `https://articulo.mercadolibre.com.co/${conGuion}` : null;
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  return `https://articulo.mercadolibre.com.co/${itemId.replace(/^MCO(\d+)$/, "MCO-$1")}`;
 }

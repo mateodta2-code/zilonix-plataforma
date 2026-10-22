@@ -11,6 +11,16 @@ import {
   type PublicacionInvestigacion,
 } from "./investigacion";
 
+const { LimiteMercadoLibreErrorFalso } = vi.hoisted(() => {
+  class LimiteMercadoLibreErrorFalso extends Error {
+    constructor() {
+      super("Mercado Libre está limitando las consultas, intenta en un minuto.");
+      this.name = "LimiteMercadoLibreError";
+    }
+  }
+  return { LimiteMercadoLibreErrorFalso };
+});
+
 vi.mock("@/lib/ml/cliente", () => ({
   buscarProductosCatalogo: vi.fn(),
   resolverCategoria: vi.fn(),
@@ -19,6 +29,7 @@ vi.mock("@/lib/ml/cliente", () => ({
   obtenerOfertasProducto: vi.fn(),
   obtenerVendedor: vi.fn(),
   linkPublicacion: (itemId: string) => `https://articulo.mercadolibre.com.co/${itemId}`,
+  LimiteMercadoLibreError: LimiteMercadoLibreErrorFalso,
 }));
 vi.mock("@/lib/ml/cuentas", () => ({
   obtenerCuentaMlActiva: vi.fn(),
@@ -183,6 +194,40 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
     expect(obtenerOfertasProducto).not.toHaveBeenCalled();
     expect(resultado.aviso).toMatch(/no coincide con ningún producto real/i);
+  });
+
+  it("corrección PR #112 — tope de 40 candidatos relevantes, priorizando texto y completando con categoría", async () => {
+    // 20 candidatos de TEXTO + 30 de CATEGORÍA (más de los 40 permitidos
+    // entre los dos) — el tope tiene que incluir los 20 de texto COMPLETOS
+    // y llenar los 20 cupos restantes con los primeros de categoría,
+    // nunca al revés ni mezclado al azar.
+    const textoC = Array.from({ length: 20 }, (_, i) => ({ id: `T${i}`, nombre: `Reloj digital texto ${i}`, foto: null }));
+    const categoriaIds = Array.from({ length: 30 }, (_, i) => `C${i}`);
+    vi.mocked(buscarProductosCatalogo).mockResolvedValueOnce(textoC).mockResolvedValue([]);
+    vi.mocked(resolverCategoria).mockResolvedValue({ categoryId: "CAT1" });
+    vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue(categoriaIds);
+    vi.mocked(obtenerProducto).mockImplementation(async (id: string) => ({ id, nombre: `Reloj digital categoria ${id}`, foto: null }));
+    vi.mocked(obtenerOfertasProducto).mockImplementation(async (productId: string) => [
+      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null },
+    ]);
+    vi.mocked(obtenerVendedor).mockResolvedValue({ nickname: "Vendedor", esPlatinum: false });
+
+    const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
+
+    expect(obtenerOfertasProducto).toHaveBeenCalledTimes(40);
+    expect(resultado.publicacionesEncontradas).toBe(40);
+    const idsLlamados = new Set(vi.mocked(obtenerOfertasProducto).mock.calls.map((c) => c[0]));
+    const esperados = new Set([...textoC.map((c) => c.id), ...categoriaIds.slice(0, 20)]);
+    expect(idsLlamados).toEqual(esperados);
+    // Ninguno de los últimos 10 de categoría (los que no entraron en el tope).
+    for (const sobrante of categoriaIds.slice(20)) {
+      expect(idsLlamados.has(sobrante)).toBe(false);
+    }
+  });
+
+  it("HTTP 429 de Mercado Libre corta toda la búsqueda con el aviso específico (no un 500 genérico)", async () => {
+    vi.mocked(buscarProductosCatalogo).mockRejectedValue(new LimiteMercadoLibreErrorFalso());
+    await expect(buscarInvestigacionProducto("empresa-1", "reloj digital")).rejects.toThrow(/limitando las consultas/i);
   });
 
   it("límite de búsquedas por minuto por empresa: la búsqueda número 11 en la misma ventana se bloquea", async () => {

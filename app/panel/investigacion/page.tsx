@@ -5,6 +5,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
+import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
 import {
   buscarInvestigacionProducto,
   LimiteBusquedasError,
@@ -68,7 +69,12 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
     try {
       resultado = await buscarInvestigacionProducto(empresa.id, termino);
     } catch (error) {
-      if (error instanceof TerminoInvalidoError || error instanceof LimiteBusquedasError || error instanceof SinCuentaMlError) {
+      if (
+        error instanceof TerminoInvalidoError ||
+        error instanceof LimiteBusquedasError ||
+        error instanceof SinCuentaMlError ||
+        error instanceof LimiteMercadoLibreError
+      ) {
         errorBusqueda = error.message;
       } else {
         throw error;
