@@ -8,6 +8,7 @@ export type ClaveIcono =
   | "pedidos"
   | "despachos"
   | "sku"
+  | "investigacion"
   | "finanzas"
   | "actividad"
   | "personas"

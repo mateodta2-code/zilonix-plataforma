@@ -186,6 +186,21 @@ export function IconoContraer(props: IconoProps) {
   );
 }
 
+// Pedido de Pablo (tarea Investigación ML): lupa + barritas ascendentes
+// adentro, para distinguirla de IconoBuscar (lupa sola, ya usada en la
+// barra superior para el buscador de texto) y de IconoFinanzas (barras
+// solas, sin lupa) — esta representa "investigar con datos", no un
+// buscador de texto genérico ni las finanzas de la empresa.
+export function IconoInvestigacion(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="10" cy="10" r="6.5" />
+      <path d="M7.3 11.5v-2.3M10 11.5V6.8M12.7 11.5V9" />
+      <path d="M19 19l-4.3-4.3" />
+    </Svg>
+  );
+}
+
 export function IconoBuscar(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -217,6 +232,7 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   pedidos: IconoPedidos,
   despachos: IconoDespachos,
   sku: IconoSku,
+  investigacion: IconoInvestigacion,
   finanzas: IconoFinanzas,
   actividad: IconoActividad,
   personas: IconoPersonas,

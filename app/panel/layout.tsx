@@ -40,6 +40,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
           ]
         : []),
       ...(veSku ? [{ etiqueta: "SKU", href: "/panel/sku", icono: "sku" as const }] : []),
+      // Mismo permiso que SKU ("inventario","consultar") — Investigación
+      // también decide qué traer/revender, no vende ni despacha nada.
+      ...(veSku ? [{ etiqueta: "Investigación", href: "/panel/investigacion", icono: "investigacion" as const }] : []),
       ...(veFinanzas ? [{ etiqueta: "Finanzas", href: "/panel/finanzas", icono: "finanzas" as const }] : []),
       ...(veActividad ? [{ etiqueta: "Actividad", href: "/panel/actividad", icono: "actividad" as const }] : []),
       { etiqueta: "Personas", href: "#", icono: "personas", deshabilitada: true, titulo: "Próximamente" },
