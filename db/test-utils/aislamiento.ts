@@ -9,7 +9,9 @@ import { empresas } from "../schema";
 // en cada tabla (db/rls.test.ts, db/rls-cuentas-ml.test.ts, …). En
 // cuentas_ml, por ejemplo, quedó cubierto "no ve" y "no edita", pero
 // no "no borra": es justo el hueco que aparece cuando cada test arma
-// las tres comprobaciones por su cuenta. RLS no se puede simular con
+// las tres comprobaciones por su cuenta. El insert con empresa_id de A
+// es otro modo de fallar: WITH CHECK rechaza la fila (tira error), no
+// devuelve 0 filas como el update o el delete. RLS no se puede simular con
 // un mock — esto corre contra Postgres real, con app_user, y solo
 // entra por dbComoEmpresa (SET LOCAL de app.empresa_actual), el mismo
 // camino que el tráfico de la app.
@@ -24,6 +26,14 @@ export type EmpresasDePrueba = {
 // runtime (la pasa el test, o se toma una text que no sea la clave).
 export type TablaConId = PgTable & { id: AnyPgColumn };
 
+// Arma el resto de la fila que B intentará insertar. La plantilla pisa
+// `empresaId` con el de A y ejecuta el insert como B: el callback no
+// corre el insert, solo describe la fila. Así un NOT NULL o un índice
+// único no se pueden confundir con el rechazo de la política.
+export type ArmarInsercionAjena = (
+  ctx: EmpresasDePrueba & { filaId: string }
+) => Record<string, unknown> | Promise<Record<string, unknown>>;
+
 export type FilaInsertada = {
   id: string;
   // Columna que la empresa B va a intentar cambiar. Si no se pasa, se
@@ -32,6 +42,10 @@ export type FilaInsertada = {
   // Valor distinto del que quedó guardado. Si no se pasa y la columna
   // es texto, se arma un centinela que no puede coincidir con el real.
   valorAjeno?: unknown;
+  // Si la tabla no se puede insertar solo con `empresaId` (hay columnas
+  // obligatorias sin default), este callback es obligatorio: sin una
+  // fila completa, el error sería NOT NULL y no demostraría el WITH CHECK.
+  insertarFilaAjena?: ArmarInsercionAjena;
 };
 
 const TIPOS_TEXTO = new Set(["PgText", "PgVarchar"]);
@@ -94,6 +108,36 @@ async function intentarBorrar(empresaId: string, tabla: TablaConId, filaId: stri
   return dbComoEmpresa(empresaId, (tx) => tx.delete(tabla).where(dondeId(tabla, filaId)).returning({ id: tabla.id }));
 }
 
+async function contarFilas(empresaId: string, tabla: TablaConId): Promise<number> {
+  const filas = await dbComoEmpresa(empresaId, (tx) => tx.select({ id: tabla.id }).from(tabla));
+  return filas.length;
+}
+
+// Solo es genérico cuando todas las columnas salvo empresaId (y el id,
+// que tiene default) se pueden omitir. Si falta un NOT NULL sin default,
+// un insert "{ empresaId }" revienta por la columna, no por RLS — y un
+// rejects.toThrow() cualquiera daría un falso positivo.
+function exigirInsertGenerico(tabla: TablaConId): void {
+  const nombreTabla = getTableName(tabla);
+  const columnas = getTableColumns(tabla);
+  if (!("empresaId" in columnas)) {
+    throw new Error(
+      `afirmarAislamiento: ${nombreTabla} no tiene empresaId. Pasá insertarFilaAjena para armar la fila que B intenta insertar con el id de A.`
+    );
+  }
+  const faltan = Object.entries(columnas)
+    .filter(([clave, columna]) => {
+      if (clave === "empresaId" || clave === "id") return false;
+      return columna.notNull && !columna.hasDefault;
+    })
+    .map(([clave]) => clave);
+  if (faltan.length > 0) {
+    throw new Error(
+      `afirmarAislamiento: ${nombreTabla} no admite el insert ajeno genérico (columnas obligatorias sin default: ${faltan.join(", ")}). Pasá insertarFilaAjena para armar esa fila.`
+    );
+  }
+}
+
 function claveDe(tabla: TablaConId, columna: AnyPgColumn): string {
   for (const [clave, candidata] of Object.entries(getTableColumns(tabla))) {
     if (candidata === columna || candidata.name === columna.name) return clave;
@@ -135,13 +179,16 @@ function normalizarInsercion(valor: string | FilaInsertada): FilaInsertada {
 }
 
 /**
- * Crea dos empresas y comprueba que B no ve, no edita ni borra la fila
- * que `insertarFila` insertó como A.
+ * Crea dos empresas y comprueba que B no ve, no edita, no borra la fila
+ * de A, y tampoco puede insertar una fila con el empresa_id de A (WITH
+ * CHECK: Postgres rechaza la fila nueva, no la esconde).
  *
  * `insertarFila` recibe las dos empresas (creadas con crearDosEmpresas)
- * y devuelve el id de la fila, o `{ id, columna, valorAjeno }` si la
- * edición tiene que pisar una columna concreta. La fila tiene que
- * quedar visible para A: si no, "B no ve nada" no demostraría nada.
+ * y devuelve el id de la fila, o `{ id, columna, valorAjeno,
+ * insertarFilaAjena }`. `insertarFilaAjena` (ahí, o como tercer
+ * argumento) arma la fila que B intenta insertar; si no está y la tabla
+ * no se puede insertar solo con empresaId, esta función falla pidiendo
+ * el callback en vez de aceptar un error de NOT NULL como si fuera RLS.
  *
  * Ejemplo:
  *   const { empresaAId, filaId } = await afirmarAislamiento(pedidos, async ({ empresaAId }) => {
@@ -153,7 +200,8 @@ function normalizarInsercion(valor: string | FilaInsertada): FilaInsertada {
  */
 export async function afirmarAislamiento(
   tabla: TablaConId,
-  insertarFila: (ctx: EmpresasDePrueba) => Promise<string | FilaInsertada>
+  insertarFila: (ctx: EmpresasDePrueba) => Promise<string | FilaInsertada>,
+  insertarFilaAjena?: ArmarInsercionAjena
 ): Promise<EmpresasDePrueba & { filaId: string }> {
   const nombreTabla = getTableName(tabla);
   const ctx = await crearDosEmpresas(nombreTabla);
@@ -187,5 +235,21 @@ export async function afirmarAislamiento(
   const trasBorrar = await leerFila(ctx.empresaAId, tabla, insercion.id);
   expect(trasBorrar, `${nombreTabla}: la fila de A no sigue después de que B intentó borrarla`).toHaveLength(1);
 
-  return { ...ctx, filaId: insercion.id };
+  const ctxConFila = { ...ctx, filaId: insercion.id };
+  const armarAjena = insertarFilaAjena ?? insercion.insertarFilaAjena;
+  if (!armarAjena) exigirInsertGenerico(tabla);
+  const valoresAjenos = armarAjena ? await armarAjena(ctxConFila) : {};
+  const antesA = await contarFilas(ctx.empresaAId, tabla);
+  const antesB = await contarFilas(ctx.empresaBId, tabla);
+  // empresaId se pisa siempre con el de A, aunque el callback mande otro:
+  // el caso que hay que rechazar es "B escribe una fila de A", no "B
+  // escribe una fila propia" (eso la política lo deja pasar).
+  await expect(
+    dbComoEmpresa(ctx.empresaBId, (tx) => tx.insert(tabla).values({ ...valoresAjenos, empresaId: ctx.empresaAId } as never)),
+    `${nombreTabla}: la empresa B insertó una fila con empresa_id de A`
+  ).rejects.toThrow(/row-level security policy/);
+  expect(await contarFilas(ctx.empresaAId, tabla), `${nombreTabla}: tras el insert rechazado, A ve otra cantidad de filas`).toBe(antesA);
+  expect(await contarFilas(ctx.empresaBId, tabla), `${nombreTabla}: tras el insert rechazado, B ve otra cantidad de filas`).toBe(antesB);
+
+  return ctxConFila;
 }

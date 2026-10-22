@@ -9,33 +9,47 @@ import { afirmarAislamiento } from "./test-utils/aislamiento";
 // Tarea 2.3 — misma prueba de siempre, contra Postgres real: una
 // empresa nunca ve ni toca la cuenta de Mercado Libre de otra.
 // Z-MT-09: el alta de las dos empresas y el "B no ve / no edita / no
-// borra" pasan por db/test-utils/aislamiento.ts. Las comprobaciones de
-// abajo quedan iguales (y se suma el borrado, que esta tabla no tenía).
+// borra / no inserta con empresa_id de A" pasan por
+// db/test-utils/aislamiento.ts. Las comprobaciones de abajo quedan
+// iguales. El insert ajeno no es genérico: nickname, tokens y
+// cuenta_id_externa son obligatorios, y un NOT NULL no demostraría el
+// WITH CHECK — por eso el test arma esa fila explícita, con otra
+// cuenta externa (si no, la rechazaría el índice único).
 describe("cuentas_ml (RLS, tarea 2.3)", () => {
   let empresaAId: string;
   let empresaBId: string;
   let cuentaAId: string;
 
   beforeAll(async () => {
-    const ctx = await afirmarAislamiento(cuentasMl, async ({ empresaAId: idA }) => {
-      const [cuenta] = await dbComoEmpresa(idA, (tx) =>
-        tx
-          .insert(cuentasMl)
-          .values({
-            empresaId: idA,
-            cuentaIdExterna: `ml-user-${randomUUID()}`,
-            nickname: "VENDEDOR_A",
-            accessTokenCifrado: cifrarToken("access-de-prueba"),
-            refreshTokenCifrado: cifrarToken("refresh-de-prueba"),
-            tokenExpiraTs: new Date(Date.now() + 3600_000),
-          })
-          .returning({ id: cuentasMl.id })
-      );
-      // Misma columna que el test de "no puede actualizar" de abajo
-      // (nickname → "HACKEADO"): la plantilla y ese it pisan el mismo
-      // campo, así el resultado de la tarea 2.3 no cambia.
-      return { id: cuenta.id, columna: cuentasMl.nickname, valorAjeno: "HACKEADO" };
-    });
+    const ctx = await afirmarAislamiento(
+      cuentasMl,
+      async ({ empresaAId: idA }) => {
+        const [cuenta] = await dbComoEmpresa(idA, (tx) =>
+          tx
+            .insert(cuentasMl)
+            .values({
+              empresaId: idA,
+              cuentaIdExterna: `ml-user-${randomUUID()}`,
+              nickname: "VENDEDOR_A",
+              accessTokenCifrado: cifrarToken("access-de-prueba"),
+              refreshTokenCifrado: cifrarToken("refresh-de-prueba"),
+              tokenExpiraTs: new Date(Date.now() + 3600_000),
+            })
+            .returning({ id: cuentasMl.id })
+        );
+        // Misma columna que el test de "no puede actualizar" de abajo
+        // (nickname → "HACKEADO"): la plantilla y ese it pisan el mismo
+        // campo, así el resultado de la tarea 2.3 no cambia.
+        return { id: cuenta.id, columna: cuentasMl.nickname, valorAjeno: "HACKEADO" };
+      },
+      () => ({
+        cuentaIdExterna: `ml-user-ajeno-${randomUUID()}`,
+        nickname: "INTENTO_B_SOBRE_A",
+        accessTokenCifrado: cifrarToken("access-ajeno"),
+        refreshTokenCifrado: cifrarToken("refresh-ajeno"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
     empresaAId = ctx.empresaAId;
     empresaBId = ctx.empresaBId;
     cuentaAId = ctx.filaId;
