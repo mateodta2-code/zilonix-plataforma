@@ -44,8 +44,8 @@ function responder(modo: Modo, req: IncomingMessage, res: ServerResponse) {
     res.end();
     return;
   }
-  if (ruta === "/api/ml/etiquetas" || ruta === "/api/ml/conectar") {
-    res.writeHead(modo === "codigo" && ruta === "/api/ml/etiquetas" ? 500 : 401);
+  if (ruta === "/api/ml/despachos/etiquetas" || ruta === "/api/ml/conectar") {
+    res.writeHead(modo === "codigo" && ruta === "/api/ml/despachos/etiquetas" ? 500 : 401);
     res.end();
     return;
   }
@@ -143,7 +143,7 @@ describe("scripts/humo.sh", () => {
     for (const ruta of [
       "/login",
       "/panel",
-      "/api/ml/etiquetas",
+      "/api/ml/despachos/etiquetas",
       "/api/ml/conectar",
       "/api/ml/webhooks",
       "/api/ml/trabajador",
@@ -166,7 +166,7 @@ describe("scripts/humo.sh", () => {
     const url = await escuchar("codigo");
     const { code, stdout } = await correr(url);
     expect(code).toBe(1);
-    expect(stdout).toMatch(/\/api\/ml\/etiquetas.*FALLO/);
+    expect(stdout).toMatch(/\/api\/ml\/despachos\/etiquetas.*FALLO/);
   });
 
   it("falla si /panel responde 307 pero no hacia el login", async () => {

@@ -178,7 +178,7 @@ printf '%-28s %-6s %-7s %-7s %6s %6s  %s\n' "RUTA" "METODO" "ESPERA" "REAL" "MS"
 # navegador; el resto no manda sesión, cookie ni encabezado de trabajador.
 comprobar "/login" GET 307 1000 html
 comprobar "/panel" GET 307 1000 html login
-comprobar "/api/ml/etiquetas" GET 401 1000 json
+comprobar "/api/ml/despachos/etiquetas" GET 401 1000 json
 comprobar "/api/ml/conectar" GET 401 1000 json
 comprobar "/api/ml/webhooks" POST 200 500 json
 comprobar "/api/ml/trabajador" POST 401 1000 json
