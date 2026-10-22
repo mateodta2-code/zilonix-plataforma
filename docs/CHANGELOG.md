@@ -2,6 +2,10 @@
 
 Registro de cada entrega a producción, con la versión y qué tarea del plan técnico (`zilonix-os-web/docs/plan-tecnico.md`) la generó. Nada pasa a producción sin pasar por staging primero.
 
+## Sin publicar
+
+- **Z-NV-03a** (issue #61) — Funciones puras de alertas sanitarias portadas de `lib/alertas-sanitarias.js` del Zilonix OS a `lib/sanitarias/`: normalizar, registros, parsers del HTML del INVIMA, consumibles, coincidencias y `calcularHallazgos`. Sin base de datos, sin red y sin tokens. Los prefijos de SKU `UNM` y `VITAL` ya no están fijos: cada empresa los pasa como parámetro. Falta correr los 5 casos reales que pase Frankie (el PR queda en borrador y no cierra el issue). No sube la versión.
+
 ## v0.1.0
 
 - **2026-10-14** — Tarea 1.1 (Repositorio nuevo): Next.js 14 + TypeScript, Drizzle ORM + Postgres, GitHub Actions (compila, tipos, pruebas, build en cada PR), página `/api/version`, desplegado en Railway. Sentry se deja fuera del alcance por ahora, para no sumar una integración a medias.

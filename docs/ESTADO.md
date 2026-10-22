@@ -1,6 +1,6 @@
 # Estado real de Zilonix Seller
 
-Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
+Foto del proyecto al **2026-10-22**. Esto cambia después de cada tarea — la fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
 
 ## Qué está terminado y funcionando
 
@@ -19,13 +19,13 @@ Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la f
 ## Qué está a medias
 
 - **2.9 — Bandeja de atención** (preguntas, mensajes de venta, reclamos): código completo, con sus pruebas, en un Pull Request abierto (`tarea-2.9-bandeja-atencion`) que **todavía no se fusionó a `main`**.
-- **2.11, sub-tarea "Publicar producto y clip"**: las reglas reales de publicación en Mercado Libre portadas por completo (con pruebas), en un Pull Request abierto (`tarea-2.11-publicar-producto-clip`) — tampoco fusionado. Las otras tres sub-tareas de 2.11 (Promociones, Programar Full, Alertas sanitarias) **no se empezaron**.
+- **2.11, sub-tarea "Publicar producto y clip"**: las reglas reales de publicación en Mercado Libre portadas por completo (con pruebas), en un Pull Request abierto (`tarea-2.11-publicar-producto-clip`) — tampoco fusionado. Promociones y Programar Full **no se empezaron**. Alertas sanitarias (Z-NV-03a, issue #61): las funciones puras están en un Pull Request en borrador (`lib/sanitarias/`); faltan los 5 casos reales de Frankie y toda la parte de tablas, red y pantalla (Z-NV-03b).
 - Ninguna de las tres cosas de arriba se probó todavía contra una base de datos real de staging/producción ni, en el caso de "Publicar producto", contra una cuenta real de Mercado Libre — ver el bloqueo de Railway abajo.
 
 ## Qué falta
 
 - **2.8 — Inventario por bodega**: pausada a propósito. El concepto de "bodega en tránsito" (traslados entre bodegas) que pide la tarea no existe en el Zilonix OS actual — se decidió no inventarlo y esperar a que Mateo lo hable con Franky antes de construir nada.
-- **2.11b/c/d** (Promociones, Programar Full, Alertas sanitarias): sin empezar.
+- **2.11b/c** (Promociones, Programar Full): sin empezar. **2.11d / Z-NV-03a** (Alertas sanitarias): en borrador, solo las funciones puras; la parte con tablas y pantalla es Z-NV-03b y no se empezó.
 - **Fases 3 (Finanzas/DIAN), 4 (Piloto pagado) y 5 (Escalar)**: sin empezar.
 - **Aviso automático a FullyLemon cuando cambia el estado de una guía de Mercado Libre**: se le pidió a FullyLemon el detalle real de su endpoint — esperando su respuesta antes de construir nada (no se adivinó el contrato).
 
