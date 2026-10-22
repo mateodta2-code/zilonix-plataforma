@@ -4,6 +4,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
 import { ESTADOS_DESPACHO_FILTRO, listarDespachosFiltrados, TAMANO_PAGINA_DESPACHOS } from "@/lib/ml/despachos";
 import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -14,7 +15,11 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "./page.module.css";
 
-type FiltrosUrl = { q?: string; estado?: string; desde?: string; hasta?: string; orden?: string; pagina?: string };
+// Next entrega string[] cuando la misma clave viene repetida
+// (?q=a&q=b) — sin pasar cada valor por normalizarParametro ANTES de
+// usarlo (como defaultValue o como filtro), un arreglo donde se espera
+// un string tumba la página con un error 500.
+type FiltrosNormalizados = { q?: string; estado?: string; desde?: string; hasta?: string; orden?: string };
 
 const ETIQUETA_LOGISTIC_TYPE: Record<string, string> = {
   self_service: "Flex",
@@ -36,7 +41,7 @@ function formatoFechaColombia(fecha: Date | string): string {
 
 // "Anterior"/"Siguiente" preservan el resto de los filtros de la URL y
 // solo cambian ?pagina= — mismo criterio que /panel/pedidos.
-function hrefConPagina(filtros: FiltrosUrl, pagina: number): string {
+function hrefConPagina(filtros: FiltrosNormalizados, pagina: number): string {
   const params = new URLSearchParams();
   if (filtros.q) params.set("q", filtros.q);
   if (filtros.estado) params.set("estado", filtros.estado);
@@ -53,14 +58,16 @@ function hrefConPagina(filtros: FiltrosUrl, pagina: number): string {
 // acá, ver lib/ml/despachos.ts), ahora con búsqueda por número de
 // envío, filtro de estado, rango de fechas (por actualizado_ts — este
 // despacho no guarda una fecha propia, ver el comentario de
-// listarDespachosFiltrados), orden y paginación de 25, todo validado
-// en lib/ml/despachos.ts (temporal, local a ese archivo hasta que el
-// helper compartido de Pedidos, PR #107, esté fusionado). El form de
-// impresión masiva sigue trabajando solo con lo que se ve en la página
-// actual — el Route Handler (/api/ml/despachos/etiquetas) revalida
-// igual contra TODO lo pendiente real, nunca confía en lo que mande el
-// formulario.
-export default async function DespachosPage({ searchParams }: { searchParams: FiltrosUrl }) {
+// listarDespachosFiltrados), orden y paginación de 25. Toda la
+// validación real (lista blanca de estado/orden, página entera segura,
+// fechas, escape de la búsqueda) vive en listarDespachosFiltrados()
+// (lib/ml/despachos.ts) y en lib/filtros-listado.ts (compartido con
+// Pedidos, PR #107 ya fusionado) — esta página solo lee la URL y pinta
+// el resultado. El form de impresión masiva sigue trabajando solo con
+// lo que se ve en la página actual — el Route Handler
+// (/api/ml/despachos/etiquetas) revalida igual contra TODO lo
+// pendiente real, nunca confía en lo que mande el formulario.
+export default async function DespachosPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
 
@@ -77,17 +84,26 @@ export default async function DespachosPage({ searchParams }: { searchParams: Fi
     return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
-  const paginaPedida = Number(searchParams.pagina);
+  const filtros: FiltrosNormalizados = {
+    q: normalizarParametro(searchParams.q),
+    estado: normalizarParametro(searchParams.estado),
+    desde: normalizarParametro(searchParams.desde),
+    hasta: normalizarParametro(searchParams.hasta),
+    orden: normalizarParametro(searchParams.orden),
+  };
   const resultado = await listarDespachosFiltrados(empresa.id, {
-    busqueda: searchParams.q,
-    estado: searchParams.estado,
-    desde: searchParams.desde,
-    hasta: searchParams.hasta,
-    orden: searchParams.orden,
-    pagina: Number.isFinite(paginaPedida) ? paginaPedida : undefined,
+    busqueda: filtros.q,
+    estado: filtros.estado,
+    desde: filtros.desde,
+    hasta: filtros.hasta,
+    orden: filtros.orden,
+    pagina: normalizarParametro(searchParams.pagina),
   });
 
-  const hayFiltrosActivos = Boolean(searchParams.q || searchParams.estado || searchParams.desde || searchParams.hasta || searchParams.orden);
+  // Un ?q= que queda vacío después de trim no cuenta como filtro: si
+  // no, con cero despachos pendientes la pantalla diría "ninguno
+  // coincide" en vez de "no hay despachos pendientes".
+  const hayFiltrosActivos = Boolean(normalizarTextoBusqueda(filtros.q) || filtros.estado || filtros.desde || filtros.hasta || filtros.orden);
   const desdeFila = (resultado.pagina - 1) * TAMANO_PAGINA_DESPACHOS + 1;
   const hastaFila = Math.min(resultado.pagina * TAMANO_PAGINA_DESPACHOS, resultado.total);
 
@@ -101,10 +117,10 @@ export default async function DespachosPage({ searchParams }: { searchParams: Fi
               envío (shipmentIdExterno). No hay comprador ni pedido
               buscable acá — ver el comentario del mismo nombre en
               lib/ml/pedidos.ts para el caso análogo. */}
-          <input type="search" name="q" defaultValue={searchParams.q ?? ""} placeholder="Número de envío" className={`zx-control ${styles.campoBusqueda}`} />
+          <input type="search" name="q" defaultValue={filtros.q ?? ""} placeholder="Número de envío" className={`zx-control ${styles.campoBusqueda}`} />
         </Campo>
         <Campo etiqueta="Estado">
-          <select name="estado" defaultValue={searchParams.estado ?? ""} className="zx-control">
+          <select name="estado" defaultValue={filtros.estado ?? ""} className="zx-control">
             <option value="">Todos</option>
             {ESTADOS_DESPACHO_FILTRO.map((e) => (
               <option key={e.valor} value={e.valor}>
@@ -114,13 +130,13 @@ export default async function DespachosPage({ searchParams }: { searchParams: Fi
           </select>
         </Campo>
         <Campo etiqueta="Desde">
-          <input type="date" name="desde" defaultValue={searchParams.desde ?? ""} className="zx-control" />
+          <input type="date" name="desde" defaultValue={filtros.desde ?? ""} className="zx-control" />
         </Campo>
         <Campo etiqueta="Hasta">
-          <input type="date" name="hasta" defaultValue={searchParams.hasta ?? ""} className="zx-control" />
+          <input type="date" name="hasta" defaultValue={filtros.hasta ?? ""} className="zx-control" />
         </Campo>
         <Campo etiqueta="Ordenar por">
-          <select name="orden" defaultValue={searchParams.orden ?? "actualizado_desc"} className="zx-control">
+          <select name="orden" defaultValue={filtros.orden ?? "actualizado_desc"} className="zx-control">
             <option value="actualizado_desc">Más recientes primero</option>
             <option value="actualizado_asc">Más antiguos primero</option>
           </select>
@@ -137,7 +153,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Fi
         </div>
       </form>
 
-      {resultado.despachos.length === 0 ? (
+      {resultado.total === 0 ? (
         <EstadoVacio>
           {hayFiltrosActivos ? (
             <span className={styles.vacioConAccion}>
@@ -174,7 +190,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Fi
             </p>
             <div className={styles.botonesPaginacion}>
               {resultado.pagina > 1 ? (
-                <BotonLink href={hrefConPagina(searchParams, resultado.pagina - 1)} variante="secundario" chico>
+                <BotonLink href={hrefConPagina(filtros, resultado.pagina - 1)} variante="secundario" chico>
                   Anterior
                 </BotonLink>
               ) : (
@@ -183,7 +199,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Fi
                 </span>
               )}
               {resultado.pagina < resultado.totalPaginas ? (
-                <BotonLink href={hrefConPagina(searchParams, resultado.pagina + 1)} variante="secundario" chico>
+                <BotonLink href={hrefConPagina(filtros, resultado.pagina + 1)} variante="secundario" chico>
                   Siguiente
                 </BotonLink>
               ) : (

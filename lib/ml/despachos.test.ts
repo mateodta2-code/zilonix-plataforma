@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, despachosMl, empresas, pedidos } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
+import { LARGO_MAXIMO_BUSQUEDA, normalizarParametro, PAGINA_MAXIMA } from "@/lib/filtros-listado";
 import {
   contarDespachosPendientes,
   EtiquetaNoImprimibleError,
@@ -304,14 +305,19 @@ describe("listarDespachosFiltrados / contarDespachosPendientes — búsqueda, fi
     expect(idsP1.filter((id) => idsP2.includes(id))).toHaveLength(0); // ninguno falta ni se duplica
   });
 
-  it("página fuera de [1, 10000] (0, negativa, decimal, > 10000) se trata como 1", async () => {
-    for (const paginaInvalida of [0, -5, 1.5, 10_001]) {
+  it(`página fuera de [1, ${PAGINA_MAXIMA}] (0, negativa, decimal, > ${PAGINA_MAXIMA}) se trata como 1`, async () => {
+    for (const paginaInvalida of [0, -5, 1.5, PAGINA_MAXIMA + 1]) {
       const resultado = await listarDespachosFiltrados(empresaId, { pagina: paginaInvalida });
       expect(resultado.pagina).toBe(1);
     }
   });
 
-  it("una página dentro de [1, 10000] pero mayor que el total real se recorta al total de páginas (nunca una página vacía)", async () => {
+  it("1e20 no es un entero seguro: vuelve a la página 1, sin tirar", async () => {
+    const resultado = await listarDespachosFiltrados(empresaId, { pagina: 1e20 });
+    expect(resultado.pagina).toBe(1);
+  });
+
+  it(`una página dentro de [1, ${PAGINA_MAXIMA}] pero mayor que el total real se recorta al total de páginas (nunca una página vacía)`, async () => {
     const resultado = await listarDespachosFiltrados(empresaId, { pagina: 9999 });
     expect(resultado.pagina).toBe(resultado.totalPaginas);
     expect(resultado.despachos.length).toBeGreaterThan(0);
@@ -319,6 +325,32 @@ describe("listarDespachosFiltrados / contarDespachosPendientes — búsqueda, fi
 
   it("búsqueda por número de envío usa ilike (parcial, sin importar mayúsculas)", async () => {
     const resultado = await listarDespachosFiltrados(empresaId, { busqueda: "buscame" });
+    expect(resultado.total).toBe(1);
+    expect(resultado.despachos[0].shipmentIdExterno).toBe("BUSCAME-ESPECIAL");
+  });
+
+  it("un % suelto no es un comodín: no matchea ningún envío", async () => {
+    const resultado = await listarDespachosFiltrados(empresaId, { busqueda: "%" });
+    expect(resultado.total).toBe(0);
+  });
+
+  it("un _ suelto no es un comodín de un solo carácter: 'DESP_1' no encuentra 'DESP-1'", async () => {
+    const resultado = await listarDespachosFiltrados(empresaId, { busqueda: "DESP_1" });
+    expect(resultado.total).toBe(0);
+  });
+
+  it(`una búsqueda de 5000 caracteres se recorta a ${LARGO_MAXIMO_BUSQUEDA} y no revienta`, async () => {
+    const resultado = await listarDespachosFiltrados(empresaId, { busqueda: "a".repeat(5000) });
+    expect(resultado.total).toBe(0);
+  });
+
+  it("un parámetro repetido en la URL (?q=a&q=b, arreglo) nunca revienta: se normaliza al primer valor antes de filtrar", async () => {
+    // Simula lo que hace app/panel/despachos/page.tsx con searchParams
+    // cuando Next entrega string[] — normalizarParametro() se queda con
+    // el primer valor antes de que llegue a listarDespachosFiltrados,
+    // que solo acepta string | undefined.
+    const valorCrudo = ["BUSCAME-ESPECIAL", "otro-valor-que-nunca-se-usa"];
+    const resultado = await listarDespachosFiltrados(empresaId, { busqueda: normalizarParametro(valorCrudo) });
     expect(resultado.total).toBe(1);
     expect(resultado.despachos[0].shipmentIdExterno).toBe("BUSCAME-ESPECIAL");
   });
@@ -354,9 +386,14 @@ describe("listarDespachosFiltrados / contarDespachosPendientes — búsqueda, fi
     }
   });
 
-  it("rango de fechas (desde/hasta, hora de Colombia) solo trae los despachos de esos días", async () => {
+  it("rango de fechas (desde/hasta, hora de Colombia) solo trae los despachos de ese día completo en Bogotá", async () => {
+    // El día de Bogotá del 10 de enero va de 05:00Z del 10 (inclusive) a
+    // 05:00Z del 11 (exclusivo) — entran DESP-9 (mediodía UTC del 10) Y
+    // BORDE-A (04:59:59.999Z del 11, todavía antes de esa medianoche de
+    // Bogotá), nunca solo el primero.
     const resultado = await listarDespachosFiltrados(empresaId, { desde: "2026-01-10", hasta: "2026-01-10" });
-    expect(resultado.total).toBe(1); // solo el día 10 (i=9)
+    expect(resultado.total).toBe(2);
+    expect(resultado.despachos.map((d) => d.shipmentIdExterno).sort()).toEqual(["BORDE-A", "DESP-9"]);
   });
 
   it("'hasta' es un límite EXCLUSIVO: incluye hasta 1ms antes de la medianoche de Bogotá del día siguiente, nunca esa medianoche", async () => {

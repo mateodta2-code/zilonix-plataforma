@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, ilike, isNull, lt, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, despachosMl } from "@/db/schema";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike } from "@/lib/filtros-listado";
 
 // Tarea 2.10 — formato de petición y reglas de negocio confirmados
 // contra el código real ya en producción del Zilonix OS actual
@@ -100,10 +101,12 @@ export type OrdenDespachos = (typeof ORDENES_DESPACHO_FILTRO)[number];
 export type FiltroDespachos = {
   busqueda?: string; // número de envío (shipmentIdExterno) — el único texto libre real en esta tabla
   estado?: string;
-  desde?: string; // "AAAA-MM-DD", hora de Colombia
-  hasta?: string; // "AAAA-MM-DD", hora de Colombia
+  desde?: string; // "YYYY-MM-DD", hora de Colombia
+  hasta?: string; // "YYYY-MM-DD", hora de Colombia
   orden?: string;
-  pagina?: number;
+  // La página llega como string (o el primer valor de un string[]);
+  // las pruebas la pasan como número. parsearPagina acepta los dos.
+  pagina?: number | string;
 };
 
 export type ResultadoDespachos = {
@@ -114,59 +117,6 @@ export type ResultadoDespachos = {
 };
 
 export const TAMANO_PAGINA_DESPACHOS = 25;
-const PAGINA_MAXIMA = 10_000;
-const LARGO_MAXIMO_BUSQUEDA = 100;
-
-// 2026-10-22 (Pablo) — esta validación es TEMPORAL y local a este
-// archivo. lib/filtros-listado.ts (compartido con pedidos: página,
-// fechas, búsqueda, hora de Colombia) llega con la corrección del PR
-// #107 (Pedidos) — mientras ese PR no esté fusionado, no se toca
-// lib/ml/pedidos.ts ni se crea el helper compartido desde acá, para no
-// pisar lo que ya está en revisión. Cuando #107 se fusione: git fetch
-// && git merge origin/main en esta rama, y Despachos pasa a usar
-// lib/filtros-listado.ts — estas funciones de acá abajo se borran.
-
-// AAAA-MM-DD con calendario real: Date normaliza un día que no existe
-// (30 de febrero -> 2 de marzo) en vez de fallar, así que se compara
-// contra lo que de verdad se pidió para descartar esos casos.
-function fechaValida(fecha: string): { anio: number; mes: number; dia: number } | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fecha);
-  if (!m) return null;
-  const anio = Number(m[1]);
-  const mes = Number(m[2]);
-  const dia = Number(m[3]);
-  const d = new Date(Date.UTC(anio, mes - 1, dia));
-  if (d.getUTCFullYear() !== anio || d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) return null;
-  return { anio, mes, dia };
-}
-
-// Colombia no tiene horario de verano — 00:00 en Bogotá es siempre las
-// 05:00 UTC, todo el año.
-function inicioDiaColombia(fecha: string): Date | null {
-  const f = fechaValida(fecha);
-  return f ? new Date(Date.UTC(f.anio, f.mes - 1, f.dia, 5, 0, 0, 0)) : null;
-}
-
-// "hasta" llega hasta ANTES de las 00:00 del día siguiente en Bogotá —
-// límite exclusivo (lt, no lte), nunca 23:59:59.999: evita perder el
-// último milisegundo real de ese día.
-function finDiaColombiaExclusivo(fecha: string): Date | null {
-  const f = fechaValida(fecha);
-  return f ? new Date(Date.UTC(f.anio, f.mes - 1, f.dia + 1, 5, 0, 0, 0)) : null;
-}
-
-// ilike() de Drizzle ya parametriza el valor (nunca SQL armado a
-// mano), pero LIKE/ILIKE interpreta % y _ como comodines AUNQUE
-// lleguen dentro de un parámetro — sin escaparlos, buscar "100%"
-// encontraría cualquier envío que EMPIECE con "100". El backslash se
-// escapa primero (carácter de escape por defecto de Postgres) para que
-// uno real en el texto no se mezcle con los que se agregan después.
-function prepararBusqueda(texto: string | undefined): string | null {
-  if (!texto) return null;
-  const recortado = texto.slice(0, LARGO_MAXIMO_BUSQUEDA);
-  const escapado = recortado.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-  return escapado.length > 0 ? escapado : null;
-}
 
 // Issue "tabla completa de despachos" — MISMO alcance de siempre
 // (imprimible=true y sin etiqueta impresa, igual que
@@ -175,33 +125,42 @@ function prepararBusqueda(texto: string | undefined): string | null {
 // sincronizados" — el form de impresión masiva de la página depende de
 // que acá solo aparezca lo realmente imprimible.
 //
-// Página: entera, entre 1 y 10000, y además nunca mayor que el total
-// real de páginas (si alguien pide la página 500 y solo hay 3, se
-// devuelve la 3 — nunca una página vacía por un número inventado).
-// Orden con desempate por id: sin eso, varias filas con el mismo
-// actualizado_ts podrían repartirse distinto entre una página y la
-// siguiente según decida Postgres, no según un orden real y estable.
+// Página, fechas y búsqueda: validados con lib/filtros-listado.ts
+// (compartido con lib/ml/pedidos.ts, PR #107) — mismo criterio en los
+// dos listados, un solo lugar para corregir si hace falta. ilike() de
+// Drizzle ya parametriza el valor (nunca SQL armado a mano);
+// patronBusquedaLike() además escapa \, % y _ (el escape por defecto de
+// LIKE/ILIKE en Postgres), para que un comodín que venga en el texto
+// nunca cambie lo que se busca.
+//
+// Orden con desempate por id EN LA MISMA DIRECCIÓN que la columna
+// principal: sin eso, varias filas con el mismo actualizado_ts podrían
+// repartirse distinto entre una página y la siguiente según decida
+// Postgres, no según un orden real y estable.
 export async function listarDespachosFiltrados(empresaId: string, filtro: FiltroDespachos = {}): Promise<ResultadoDespachos> {
   const condiciones = [eq(despachosMl.empresaId, empresaId), eq(despachosMl.imprimible, true), isNull(despachosMl.etiquetaImpresaTs)];
 
-  const busqueda = prepararBusqueda(filtro.busqueda);
-  if (busqueda) {
-    condiciones.push(ilike(despachosMl.shipmentIdExterno, `%${busqueda}%`));
+  const patron = patronBusquedaLike(filtro.busqueda);
+  if (patron) {
+    condiciones.push(ilike(despachosMl.shipmentIdExterno, patron));
   }
   if (filtro.estado && ESTADOS_DESPACHO_FILTRO.some((e) => e.valor === filtro.estado)) {
     condiciones.push(eq(despachosMl.status, filtro.estado));
   }
-  const desde = filtro.desde ? inicioDiaColombia(filtro.desde) : null;
-  if (desde) condiciones.push(gte(despachosMl.actualizadoTs, desde));
-  const hasta = filtro.hasta ? finDiaColombiaExclusivo(filtro.hasta) : null;
-  if (hasta) condiciones.push(lt(despachosMl.actualizadoTs, hasta));
+  const desde = limitesDiaBogota(filtro.desde);
+  if (desde) condiciones.push(gte(despachosMl.actualizadoTs, desde.inicio));
+  // hasta es exclusivo: < 00:00 del día siguiente en Bogotá (05:00 UTC),
+  // no <= 23:59:59.999 — mismo criterio que lib/ml/pedidos.ts.
+  const hasta = limitesDiaBogota(filtro.hasta);
+  if (hasta) condiciones.push(lt(despachosMl.actualizadoTs, hasta.finExclusivo));
 
   const ordenValido: OrdenDespachos =
     filtro.orden && (ORDENES_DESPACHO_FILTRO as readonly string[]).includes(filtro.orden) ? (filtro.orden as OrdenDespachos) : "actualizado_desc";
-  const columnasOrden =
-    ordenValido === "actualizado_asc"
-      ? [asc(despachosMl.actualizadoTs), asc(despachosMl.id)]
-      : [desc(despachosMl.actualizadoTs), asc(despachosMl.id)];
+  const descendente = ordenValido.endsWith("_desc");
+  const ordenId = descendente ? desc(despachosMl.id) : asc(despachosMl.id);
+  const columnaOrden = descendente ? desc(despachosMl.actualizadoTs) : asc(despachosMl.actualizadoTs);
+
+  const paginaPedida = parsearPagina(filtro.pagina);
 
   return dbComoEmpresa(empresaId, async (tx) => {
     const condicion = and(...condiciones);
@@ -211,16 +170,16 @@ export async function listarDespachosFiltrados(empresaId: string, filtro: Filtro
       .from(despachosMl)
       .where(condicion);
     const totalPaginas = Math.max(1, Math.ceil(total / TAMANO_PAGINA_DESPACHOS));
-
-    const pedida = filtro.pagina;
-    const paginaEnRango = Number.isInteger(pedida) && (pedida as number) >= 1 && (pedida as number) <= PAGINA_MAXIMA ? (pedida as number) : 1;
-    const pagina = Math.min(paginaEnRango, totalPaginas);
+    // El offset se calcula con la página ya acotada: con paginaPedida a
+    // secas, ?pagina=9999 con solo 2 páginas reales devolvería 0 filas y
+    // la pantalla diría que no hay despachos.
+    const pagina = acotarPagina(paginaPedida, totalPaginas);
 
     const filas = await tx
       .select()
       .from(despachosMl)
       .where(condicion)
-      .orderBy(...columnasOrden)
+      .orderBy(columnaOrden, ordenId)
       .limit(TAMANO_PAGINA_DESPACHOS)
       .offset((pagina - 1) * TAMANO_PAGINA_DESPACHOS);
 
