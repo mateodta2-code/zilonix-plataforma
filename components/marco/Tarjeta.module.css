@@ -1,6 +1,9 @@
 .tarjeta {
-  background: var(--superficie);
-  border: 1px solid var(--borde);
+  /* Borde plata de 1px. Sin hover: esta tarjeta no es clicable. */
+  border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
   padding: 20px;
 }

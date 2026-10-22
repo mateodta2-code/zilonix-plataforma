@@ -68,7 +68,7 @@ export default async function PanelPage() {
     <>
       <div className={styles.encabezado}>
         <div>
-          <h1 className={styles.saludo}>Hola, {usuario.nombre}</h1>
+          <h1 className={`${styles.saludo} zx-texto-plata`}>Hola, {usuario.nombre}</h1>
           <p className={styles.subtitulo}>Este es el resumen de {activa.nombre}</p>
         </div>
 

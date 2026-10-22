@@ -1,7 +1,10 @@
 .marco {
   display: flex;
   min-height: 100vh;
-  background: var(--fondo);
+  /* Transparente a propósito: el degradado es el de body::before
+     (--fondo-app), fijo al viewport. Si esto volviera a pintar
+     --fondo, taparía el azul de arriba. */
+  background: transparent;
 }
 
 .areaDerecha {
@@ -17,19 +20,12 @@
   overflow: hidden;
 }
 
-/* Horizonte azul muy tenue detrás del encabezado del contenido —
-   nunca neón fuerte, por eso la opacidad se queda baja y el radio es
-   grande y difuso. */
+/* El azul del encabezado ya no vive acá. Este bloque se desplazaba
+   con el contenido y se sumaba al fondo; Mateo pidió el degradado
+   fijo en el viewport (--fondo-app). Se deja el nodo por si el marco
+   lo sigue renderizando, sin pintar. */
 .brillo {
-  position: absolute;
-  top: -220px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 900px;
-  height: 420px;
-  background: radial-gradient(ellipse at center, var(--acento) 0%, transparent 70%);
-  opacity: 0.18;
-  pointer-events: none;
+  display: none;
 }
 
 .contenidoInterior {

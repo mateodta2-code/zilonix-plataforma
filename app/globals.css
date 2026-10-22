@@ -2,17 +2,21 @@
   color-scheme: light dark;
 
   /* Identidad visual de Zilonix Seller — manual de marca oficial:
-     negro/plateado, azul SOLO para estados interactivos (botón
-     primario, ítem activo, foco, enlaces) — nunca en el logo ni en
-     texto decorativo. Inspirado en el patrón de dash.lucidtrading.com
-     (fondo casi negro, bordes finísimos, tarjetas planas) — nunca su
-     marca ni su acento verde. */
+     negro de base, plata del manual y azul en lo interactivo y en el
+     fondo. Mateo pidió que el panel deje de verse casi todo negro:
+     el azul y la plata tienen que convivir con el negro, con el
+     criterio de dash.lucidtrading.com (acentos que brillan, nunca su
+     marca ni su verde). El logo (public/marca) no se recolorea, no
+     se filtra y no lleva sombra ni brillo. */
   --fondo: #000000;
   --superficie: #0b0b0c;
   --superficie-2: #121214;
   --borde: #222225;
   --texto: #f2f4f8;
-  --texto-suave: #8a909c;
+  /* Plata, no gris azulado: sobre el azul del fondo #8a909c bajaba de
+     4.5:1. #C0C0C0 mide 11.54:1 sobre negro y 5.26:1 sobre el azul más
+     vivo de la variante intenso. */
+  --texto-suave: #c0c0c0;
 
   /* Paleta plata oficial del manual (las 4 paradas reales del
      degradado de marca, de más clara a más oscura). --plata/--plata-2
@@ -28,15 +32,43 @@
   --acento: #3b82f6;
   --acento-fuerte: #60a5fa;
   --acento-suave: rgba(59, 130, 246, 0.12);
+  /* Relleno de botón con texto blanco. #3b82f6 contra #fff mide 3.68:1
+     y #60a5fa mide 2.54:1 — los dos fallan AA. #2563eb mide 5.17:1 y
+     el hover #1d4ed8 mide 6.70:1. El azul de íconos y enlaces se queda
+     en --acento / --acento-fuerte, que sí pasan sobre negro. */
+  --acento-boton: #2563eb;
+  --acento-boton-hover: #1d4ed8;
+  --acento-brillo: rgba(59, 130, 246, 0.45);
+  --acento-resplandor: rgba(59, 130, 246, 0.2);
+  --fila-hover: rgba(59, 130, 246, 0.1);
+  --sombra-foco: 0 0 0 3px rgba(59, 130, 246, 0.4);
+  --sombra-boton: 0 0 20px rgba(59, 130, 246, 0.48);
   --peligro: #ef4444;
   --exito: #22c55e;
+  /* Texto de estado (chip, variación de KPI). En oscuro el verde y el
+     rojo vivos pasan sobre la superficie; en claro no, y el bloque
+     [data-tema="claro"] los oscurece. */
+  --exito-texto: #22c55e;
+  --peligro-texto: #ef4444;
+
+  /* Íconos de la barra: inactivo #939393 (6.40:1 sobre #0b0b0c),
+     hover #E6E6E6 (15.76:1), activo = --acento-fuerte. En claro el
+     hover no puede ser #E6E6E6 (se pierde sobre blanco): baja al
+     grafito, que es el equivalente con contraste. */
+  --icono: #939393;
+  --icono-hover: #e6e6e6;
+  --icono-activo: var(--acento-fuerte);
+  /* Etiquetas de sección ("ADMINISTRACIÓN") y encabezados de tabla.
+     #C0C0C0 sobre #121214 mide 10.28:1. */
+  --plata-etiqueta: #c0c0c0;
+  --borde-plata: #939393;
+  --borde-hover: #e6e6e6;
 
   /* Degradado plata oficial del manual de marca — el mismo que trae
      el SVG del logo (public/marca/zilonix-seller-logo.svg, gradiente
-     "silver"): mismos 7 colores y los mismos % exactos. Un solo
-     degradado para los dos temas (el manual no define uno aparte para
-     fondo claro) — títulos/cifras grandes y el borde de la tarjeta de
-     identidad lo usan igual en oscuro y en claro. */
+     "silver"): mismos 7 colores y los mismos % exactos. Sirve para
+     BORDES. No sirve para texto en claro: #E6E6E6 sobre blanco mide
+     1.25:1. */
   --degradado-plata: linear-gradient(
     90deg,
     #6e6e6e 0%,
@@ -47,6 +79,41 @@
     #939393 82%,
     #767676 100%
   );
+  --degradado-plata-borde: var(--degradado-plata);
+  /* Texto plateado. La parada más oscura es #C0C0C0: #939393 sobre el
+     azul vivo del fondo intenso (#214288) mide 3.3:1. #C0C0C0 mide
+     5.26:1 ahí y 10.81:1 sobre la tarjeta #0b0b0c. En claro el bloque
+     de tema lo reemplaza por el lado #6E6E6E. */
+  --degradado-plata-texto: linear-gradient(
+    100deg,
+    #c0c0c0 0%,
+    #e6e6e6 46%,
+    #d0d0d0 72%,
+    #c0c0c0 100%
+  );
+
+  /* Fondo de la página: azul arriba, negro abajo, con una banda de
+     plata donde se encuentran. Negro puro (#000) sigue siendo la base
+     (--fondo); estas capas se le suman y se vuelven transparentes, así
+     que afinar el alfa no cambia el negro de abajo. Fijo al viewport
+     (pseudo-elemento en body) para que no se repita al hacer scroll.
+     data-fondo en <html>: suave | medio | intenso. Mateo eligió el
+     suave — sin atributo (o con cualquier valor que no sea "medio" ni
+     "intenso") gana ese. Las otras dos variantes se dejan igual, por
+     si después pide subirle la intensidad. La barra y las tarjetas no
+     usan esto: siguen en --superficie, opacas, para que cifras y
+     tablas no se midan contra el azul. */
+  --fondo-app: var(--fondo-app-suave);
+  --fondo-app-suave:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.5) 0%, rgba(59, 130, 246, 0.22) 10%, rgba(37, 99, 235, 0.08) 18%, rgba(37, 99, 235, 0) 25%);
+  --fondo-app-medio:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.58) 0%, rgba(37, 99, 235, 0.42) 14%, rgba(37, 99, 235, 0.22) 28%, rgba(30, 64, 175, 0.1) 40%, rgba(37, 99, 235, 0) 50%);
+  --fondo-app-intenso:
+    linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
+    radial-gradient(72% 9% at 50% 0%, rgba(191, 219, 254, 0.22) 0%, transparent 70%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.58) 0%, rgba(37, 99, 235, 0.46) 18%, rgba(37, 99, 235, 0.3) 34%, rgba(30, 64, 175, 0.18) 48%, rgba(37, 99, 235, 0.08) 58%, rgba(37, 99, 235, 0) 70%);
 
   --radio-boton: 6px;
   --radio-tarjeta: 12px;
@@ -69,12 +136,48 @@
   --superficie-2: #121214;
   --borde: #222225;
   --texto: #f2f4f8;
-  --texto-suave: #8a909c;
+  --texto-suave: #c0c0c0;
   --plata: #c0c0c0;
   --plata-2: var(--plata-medio);
   --acento: #3b82f6;
   --acento-fuerte: #60a5fa;
   --acento-suave: rgba(59, 130, 246, 0.12);
+  --acento-brillo: rgba(59, 130, 246, 0.45);
+  --acento-resplandor: rgba(59, 130, 246, 0.2);
+  --fila-hover: rgba(59, 130, 246, 0.1);
+  --icono: #939393;
+  --icono-hover: #e6e6e6;
+  --plata-etiqueta: #c0c0c0;
+  --borde-plata: #939393;
+  --borde-hover: #e6e6e6;
+  --exito-texto: #22c55e;
+  --peligro-texto: #ef4444;
+  --degradado-plata-borde: var(--degradado-plata);
+  --degradado-plata-texto: linear-gradient(100deg, #c0c0c0 0%, #e6e6e6 46%, #d0d0d0 72%, #c0c0c0 100%);
+  --fondo-app-suave:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.5) 0%, rgba(59, 130, 246, 0.22) 10%, rgba(37, 99, 235, 0.08) 18%, rgba(37, 99, 235, 0) 25%);
+  --fondo-app-medio:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.58) 0%, rgba(37, 99, 235, 0.42) 14%, rgba(37, 99, 235, 0.22) 28%, rgba(30, 64, 175, 0.1) 40%, rgba(37, 99, 235, 0) 50%);
+  --fondo-app-intenso:
+    linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
+    radial-gradient(72% 9% at 50% 0%, rgba(191, 219, 254, 0.22) 0%, transparent 70%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.58) 0%, rgba(37, 99, 235, 0.46) 18%, rgba(37, 99, 235, 0.3) 34%, rgba(30, 64, 175, 0.18) 48%, rgba(37, 99, 235, 0.08) 58%, rgba(37, 99, 235, 0) 70%);
+}
+
+/* data-fondo se declara después del bloque de tema oscuro para que
+   elegir "suave" o "intenso" no lo pise ese bloque al repetir tokens. */
+:root[data-fondo="suave"] {
+  --fondo-app: var(--fondo-app-suave);
+}
+
+:root[data-fondo="medio"] {
+  --fondo-app: var(--fondo-app-medio);
+}
+
+:root[data-fondo="intenso"] {
+  --fondo-app: var(--fondo-app-intenso);
 }
 
 :root[data-tema="claro"] {
@@ -89,18 +192,96 @@
   --acento: #2563eb;
   --acento-fuerte: #1d4ed8;
   --acento-suave: rgba(37, 99, 235, 0.1);
+  --acento-brillo: rgba(37, 99, 235, 0.35);
+  --acento-resplandor: rgba(37, 99, 235, 0.12);
+  --fila-hover: rgba(37, 99, 235, 0.08);
+  --sombra-foco: 0 0 0 3px rgba(37, 99, 235, 0.28);
+  --sombra-boton: 0 0 16px rgba(37, 99, 235, 0.32);
+  /* Inactivo: #6E6E6E sobre la barra #f5f5f6 mide 4.68:1, pero los
+     botones cuadrados usan #ececee y ahí #6E6E6E baja a 4.32:1.
+     #686868 sostiene 4.72:1 sobre #ececee y 5.11:1 sobre #f5f5f6
+     (sigue siendo el lado oscuro de la plata). Hover #242424:
+     #E6E6E6 sobre #ececee mide 1.06:1. */
+  --icono: #686868;
+  --icono-hover: #242424;
+  /* #6E6E6E sobre el encabezado de tabla #ececee mide 4.32:1. #686868
+     mide 4.72:1 ahí, 5.11:1 sobre la tarjeta y 5.57:1 sobre blanco. */
+  --plata-etiqueta: #686868;
+  --borde-plata: #6e6e6e;
+  --borde-hover: #6e6e6e;
+  /* #22c55e sobre blanco mide 2.28:1; #166534 mide 6.04:1 sobre
+     #ececee. #ef4444 sobre blanco mide 3.76:1; #991b1b mide 7.04:1
+     sobre #ececee. */
+  --exito-texto: #166534;
+  --peligro-texto: #991b1b;
+  /* El degradado oficial se apaga sobre blanco (la mitad clara no se
+     distingue). El borde en claro usa el lado oscuro de la misma
+     paleta para que el filo se vea. */
+  --degradado-plata-borde: linear-gradient(90deg, #6e6e6e 0%, #939393 28%, #c0c0c0 50%, #939393 72%, #6e6e6e 100%);
+  /* Lado #6E6E6E. La parada más clara del texto es #686868, no
+     #E6E6E6: sobre la tarjeta clara tiene que seguir ≥ 4.5:1. */
+  --degradado-plata-texto: linear-gradient(100deg, #6e6e6e 0%, #5a5a5a 30%, #3f3f3f 50%, #686868 74%, #4e4e4e 100%);
+  /* Blanco de base, azul y plata apenas teñidos. El alfa se queda
+     bajo para que #5b6270 (cuerpo secundario, 6.13:1 sobre blanco) y
+     #686868 (títulos) no caigan de 4.5:1. */
+  --fondo-app-suave:
+    linear-gradient(180deg, rgba(110, 110, 110, 0) 8%, rgba(110, 110, 110, 0.035) 16%, rgba(110, 110, 110, 0) 24%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.045) 0%, rgba(37, 99, 235, 0.02) 14%, rgba(37, 99, 235, 0) 25%);
+  --fondo-app-medio:
+    linear-gradient(180deg, rgba(110, 110, 110, 0) 12%, rgba(110, 110, 110, 0.04) 22%, rgba(110, 110, 110, 0) 32%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.07) 0%, rgba(37, 99, 235, 0.035) 18%, rgba(37, 99, 235, 0.012) 36%, rgba(37, 99, 235, 0) 48%);
+  --fondo-app-intenso:
+    linear-gradient(180deg, rgba(192, 192, 192, 0.05) 0%, rgba(192, 192, 192, 0) 8%, rgba(110, 110, 110, 0.045) 20%, rgba(110, 110, 110, 0) 32%),
+    radial-gradient(80% 22% at 50% 0%, rgba(37, 99, 235, 0.09) 0%, transparent 70%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.09) 0%, rgba(37, 99, 235, 0.045) 22%, rgba(37, 99, 235, 0.016) 45%, rgba(37, 99, 235, 0) 58%);
+  /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
+     arriba: sin atributo data-fondo, gana el suave. */
+  --fondo-app: var(--fondo-app-suave);
+}
+
+:root[data-tema="claro"][data-fondo="suave"] {
+  --fondo-app: var(--fondo-app-suave);
+}
+
+:root[data-tema="claro"][data-fondo="medio"] {
+  --fondo-app: var(--fondo-app-medio);
+}
+
+:root[data-tema="claro"][data-fondo="intenso"] {
+  --fondo-app: var(--fondo-app-intenso);
 }
 
 * {
   box-sizing: border-box;
 }
 
+/* El overscroll muestra --fondo (negro o blanco puro). El degradado
+   vive en un pseudo fijo, detrás del contenido: la barra lateral y
+   las tarjetas opacas lo tapan; el hueco del panel lo deja ver. */
+html {
+  background-color: var(--fondo);
+}
+
 body {
   margin: 0;
+  position: relative;
+  z-index: 0;
   font-family: var(--fuente-texto);
-  background: var(--fondo);
+  background: transparent;
   color: var(--texto);
   transition: var(--transicion-color);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: var(--fondo);
+  background-image: var(--fondo-app);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  pointer-events: none;
 }
 
 a {
@@ -119,14 +300,14 @@ button {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--texto-suave);
+  color: var(--plata-etiqueta);
 }
 
 /* Degradado plateado SOLO para títulos/cifras grandes — background-
    clip: text necesita el relleno transparente del propio texto, nunca
    se usa en un bloque con más contenido adentro. */
 .zx-texto-plata {
-  background: var(--degradado-plata);
+  background: var(--degradado-plata-texto);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -160,6 +341,7 @@ button {
   outline: 2px solid var(--acento);
   outline-offset: 1px;
   border-color: var(--acento);
+  box-shadow: var(--sombra-foco);
 }
 
 .zx-control:disabled {

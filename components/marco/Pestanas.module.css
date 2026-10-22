@@ -22,6 +22,7 @@
 .pestana:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
 }
 
 .pestana[data-activa="true"] {
@@ -37,6 +38,7 @@
   height: 2px;
   background: var(--acento);
   border-radius: 2px;
+  box-shadow: 0 0 8px var(--acento-brillo);
 }
 
 .pestana[data-deshabilitada="true"] {

@@ -31,20 +31,26 @@ const montserrat = localFont({
   display: "swap",
 });
 
-// Selector de tema (components/marco/SelectorTema.tsx) — sin este
-// script, el tema real (guardado en localStorage) solo se aplicaría
-// después de hidratar React, y entre el HTML del servidor (siempre
-// oscuro por defecto) y ese momento se vería un parpadeo si alguien
-// eligió "claro". Corre ANTES de pintar porque es un script normal en
-// <head>, no un componente — por eso va a mano acá y no en un
-// componente cliente. suppressHydrationWarning en <html> es porque
-// este mismo script cambia el atributo data-tema antes de que React
-// hidrate, así que el HTML que React esperaba (sin el atributo) y el
-// real (con él) difieren a propósito.
+// Selector de tema (components/marco/SelectorTema.tsx) y variante del
+// fondo (data-fondo, localStorage "zilonix-fondo": suave | medio |
+// intenso — Mateo eligió el suave como por defecto). Sin este script,
+// el tema real solo se aplicaría después de hidratar React, y entre
+// el HTML del servidor (siempre oscuro y fondo suave) y ese momento
+// se vería un parpadeo si alguien eligió otra cosa. Corre ANTES de
+// pintar porque es un script normal en <head>, no un componente.
+// suppressHydrationWarning en <html> es porque este mismo script
+// cambia data-tema y data-fondo antes de que React hidrate, así que
+// el HTML que React esperaba (sin los atributos) y el real (con
+// ellos) difieren a propósito.
 const SCRIPT_TEMA = `
   try {
     var tema = localStorage.getItem("zilonix-tema");
     document.documentElement.setAttribute("data-tema", tema === "claro" ? "claro" : "oscuro");
+    var fondo = localStorage.getItem("zilonix-fondo");
+    document.documentElement.setAttribute(
+      "data-fondo",
+      fondo === "medio" || fondo === "intenso" ? fondo : "suave"
+    );
   } catch (e) {}
 `;
 
