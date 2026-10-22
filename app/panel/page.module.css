@@ -112,7 +112,7 @@
 .crearEmpresa:hover {
   background: var(--acento-boton);
   color: #fff;
-  box-shadow: var(--sombra-boton);
+  box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
   transform: translateY(-1px);
 }
 

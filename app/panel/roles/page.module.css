@@ -24,6 +24,7 @@
 
 .ajustar:hover {
   text-decoration: underline;
+  color: var(--azul-metal-3);
 }
 
 .ajustar:focus-visible {

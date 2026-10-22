@@ -1,4 +1,5 @@
 .boton {
+  composes: zx-brillo-marca from global;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -48,7 +49,10 @@
 
 .primario:hover:not(:disabled) {
   background: var(--acento-boton-hover);
-  box-shadow: var(--sombra-boton);
+  /* Brillo del relleno (azul puro, ya tuneado) + el anillo de marca
+     (azul metálico + plata) encima — box-shadow acepta varias capas,
+     nunca se reemplaza una por la otra. */
+  box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
 }
 
 .secundario {
@@ -58,8 +62,9 @@
 }
 
 .secundario:hover:not(:disabled) {
-  border-color: var(--borde-hover);
+  border-color: var(--azul-metal-3);
   color: var(--icono-hover);
+  box-shadow: var(--sombra-marca-hover);
 }
 
 .fantasma {
@@ -69,5 +74,5 @@
 
 .fantasma:hover:not(:disabled) {
   background: var(--acento-suave);
-  box-shadow: var(--sombra-boton);
+  box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
 }
