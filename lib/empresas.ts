@@ -2,8 +2,9 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { dbComoEmpresa, dbComoUsuario } from "@/db/empresa-context";
 import { empresas, membresias, permisosRol, roles } from "@/db/schema";
-import { permisosDeDueno } from "@/lib/roles";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { detalleDeAceptacion, versionesAceptadasCompletas, type VersionesAceptadas } from "@/lib/legal";
+import { permisosDeDueno } from "@/lib/roles";
 
 export type EmpresaDeUsuario = { id: string; nombre: string; nit: string };
 
@@ -29,7 +30,19 @@ export async function listarEmpresasDeUsuario(usuarioId: string): Promise<Empres
 // función única que de verdad hace cumplir esto en cada ruta ("¿puede
 // [acción] en [módulo]?", con aviso aparte para permisos peligrosos) es
 // la tarea 1.8, todavía no construida.
-export async function crearEmpresaConDueno(usuarioId: string, nombre: string, nit: string): Promise<string> {
+export async function crearEmpresaConDueno(
+  usuarioId: string,
+  nombre: string,
+  nit: string,
+  consentimiento: VersionesAceptadas
+): Promise<string> {
+  // Z-MT-15 — sin versiones no hay fila de aceptación que guardar, y
+  // crear la empresa igual dejaría una autorización muda. La acción de
+  // la pantalla ya exige la casilla; esto cubre cualquier otro llamado.
+  if (!versionesAceptadasCompletas(consentimiento)) {
+    throw new Error("Falta la versión de los textos legales aceptados.");
+  }
+
   const empresaId = randomUUID();
   const rolDuenoId = randomUUID();
 
@@ -47,6 +60,18 @@ export async function crearEmpresaConDueno(usuarioId: string, nombre: string, ni
       accion: "crear",
       entidad: "empresa",
       detalle: `Empresa "${nombre}" (NIT ${nit}) creada.`,
+    });
+    // La versión va en `detalle` y la fecha en `ts` (la pone la base al
+    // insertar). La tabla de auditoría ya tenía esas dos columnas: no
+    // hace falta una tabla ni una columna nueva. Misma transacción que
+    // crear la empresa: si esto falla, la empresa tampoco queda.
+    await registrarAuditoria(tx, {
+      empresaId,
+      usuarioId,
+      actorTipo: "persona",
+      accion: "aceptar_terminos_y_datos",
+      entidad: "consentimiento",
+      detalle: detalleDeAceptacion(consentimiento),
     });
   });
 

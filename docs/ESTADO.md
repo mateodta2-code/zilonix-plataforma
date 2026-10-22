@@ -1,6 +1,6 @@
 # Estado real de Zilonix Seller
 
-Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
+Foto del proyecto al **2026-10-21**, con un agregado el **2026-10-22** (borrador legal Z-MT-15, más abajo). El resto de esta foto no se revalidó ese día. La fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
 
 ## Qué está terminado y funcionando
 
@@ -21,6 +21,7 @@ Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la f
 - **2.9 — Bandeja de atención** (preguntas, mensajes de venta, reclamos): código completo, con sus pruebas, en un Pull Request abierto (`tarea-2.9-bandeja-atencion`) que **todavía no se fusionó a `main`**.
 - **2.11, sub-tarea "Publicar producto y clip"**: las reglas reales de publicación en Mercado Libre portadas por completo (con pruebas), en un Pull Request abierto (`tarea-2.11-publicar-producto-clip`) — tampoco fusionado. Las otras tres sub-tareas de 2.11 (Promociones, Programar Full, Alertas sanitarias) **no se empezaron**.
 - Ninguna de las tres cosas de arriba se probó todavía contra una base de datos real de staging/producción ni, en el caso de "Publicar producto", contra una cuenta real de Mercado Libre — ver el bloqueo de Railway abajo.
+- **Z-MT-15 — Legal mínimo** (issue #52): borrador de `/terminos`, `/privacidad` y `/que-ve-zilonix`, más la casilla al crear empresa. Pendiente de revisión de un abogado (`docs/legal-pendientes.md`). Las páginas todavía no están en la lista de rutas públicas: la línea la pone Mateo en `lib/rutas-publicas.ts` (PR #27). La versión de la app no subió.
 
 ## Qué falta
 
