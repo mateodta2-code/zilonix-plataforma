@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative } from "path";
+import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
+import { esRutaPublica, PATRONES_RUTAS_PUBLICAS } from "@/lib/rutas-publicas";
 
 // Tarea 1.8 — "ruta sin [requierePermiso()] = el CI falla", literal.
 //
@@ -118,6 +120,87 @@ describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candad
     const vigentes = new Set(archivos);
     for (const ruta of [...RUTAS_PROTEGIDAS, ...RUTAS_SUPERADMIN, ...Object.keys(RUTAS_EXENTAS)]) {
       expect(vigentes.has(ruta), `${ruta} está listada pero el archivo ya no existe — bórrala de scripts/verificar-permisos.test.ts`).toBe(true);
+    }
+  });
+});
+
+// Fix real (2026-10-21) — RUTAS_EXENTAS (exenta del permiso de MÓDULO,
+// requierePermiso) y esRutaPublica de lib/rutas-publicas.ts (exenta de
+// la SESIÓN de Clerk en el middleware) responden preguntas distintas:
+// "/panel" está exenta de permiso de módulo pero sí exige sesión real
+// (lo exige el propio código de la página), así que forzar que las dos
+// listas coincidan completas estaría mal. La incoherencia real que
+// causó el bug del 21/10 fue más angosta: una ruta de MÁQUINA (nadie
+// navega ahí con sesión — un webhook, un cron) exenta de permiso de
+// módulo tiene que estar TAMBIÉN en esRutaPublica sin excepción; si no,
+// el middleware la protege con auth.protect() igual, y una máquina sin
+// sesión se cuelga 30s contra el handshake de Clerk (ver
+// lib/rutas-publicas.ts para el diagnóstico completo).
+//
+// Set EXPLÍCITO, no adivinado por texto — antes esto buscaba la
+// substring "sin sesión de usuario" dentro del motivo de RUTAS_EXENTAS,
+// que funcionaba solo porque esos dos motivos ya decían esa frase por
+// casualidad. Un motivo nuevo redactado distinto (ej. "sin sesión,
+// llamada por un cron") habría dejado una ruta de máquina real sin
+// detectar, en silencio.
+const RUTAS_DE_MAQUINA: Record<string, string> = {
+  "app/api/ml/webhooks/route.ts": "/api/ml/webhooks",
+  "app/api/ml/trabajador/route.ts": "/api/ml/trabajador",
+};
+
+// La única ruta pública en el middleware que NO está exenta de
+// permisos de módulo: sigue en RUTAS_PROTEGIDAS (sí llama
+// requierePermiso dentro de su propio handler) porque sí hay una
+// persona real detrás con sesión de Clerk — solo deja de depender del
+// auth.protect() del middleware para evitar el mismo bug de rewrite
+// colgado. Ver lib/rutas-publicas.ts para la decisión completa.
+const PUBLICAS_CON_AUTENTICACION_PROPIA: Record<string, string> = {
+  "app/api/ml/callback/route.ts":
+    'pública en el middleware (la abre el navegador al volver del OAuth de Mercado Libre, con o sin las cabeceras que dispararían el bug del rewrite) pero sigue protegida de verdad dentro de su propio handler: state+PKCE (lib/ml/pkce-cookie.ts) contra CSRF, sesión real de Clerk (redirige a /sign-in si falta) y requierePermiso("configuracion","crear") antes de guardar nada — por eso además sigue en RUTAS_PROTEGIDAS, no en RUTAS_EXENTAS.',
+};
+
+describe("fix middleware (2026-10-21) — coherencia entre RUTAS_EXENTAS, RUTAS_DE_MAQUINA y lib/rutas-publicas.ts", () => {
+  for (const [relPath, url] of Object.entries(RUTAS_DE_MAQUINA)) {
+    it(`${relPath} (ruta de máquina) está exenta de permiso de módulo y es pública en el middleware`, () => {
+      expect(relPath in RUTAS_EXENTAS, `${relPath} está en RUTAS_DE_MAQUINA pero no en RUTAS_EXENTAS — una ruta de máquina real sigue sin necesitar requierePermiso().`).toBe(true);
+      expect(
+        esRutaPublica(new NextRequest(`https://verificar-permisos.test${url}`)),
+        `${relPath} (${url}) está en RUTAS_DE_MAQUINA pero NO es pública en lib/rutas-publicas.ts — el middleware la protegería con auth.protect() igual, que fue justo el bug real del 21/10 (se cuelga 30s y responde 500).`
+      ).toBe(true);
+    });
+  }
+
+  it("toda ruta de RUTAS_DE_MAQUINA sigue existiendo en RUTAS_EXENTAS", () => {
+    for (const relPath of Object.keys(RUTAS_DE_MAQUINA)) {
+      expect(relPath in RUTAS_EXENTAS, `${relPath} ya no está en RUTAS_EXENTAS — bórrala de RUTAS_DE_MAQUINA en esta prueba.`).toBe(true);
+    }
+  });
+
+  // Dirección inversa: toda URL pública bajo /api tiene que
+  // corresponder a una ruta ya clasificada (RUTAS_EXENTAS o
+  // PUBLICAS_CON_AUTENTICACION_PROPIA) — nunca a un patrón abierto. Las
+  // rutas públicas de páginas (/, /sign-in(.*), /invitacion(.*)...) no
+  // entran acá a propósito: esas sí pueden traer comodines reales
+  // (ej. "/sign-in(.*)" cubre las subrutas de Clerk), es solo bajo
+  // /api donde un comodín sería peligroso (dejaría pública cualquier
+  // ruta de negocio que empiece con ese prefijo).
+  for (const patron of PATRONES_RUTAS_PUBLICAS) {
+    if (!patron.startsWith("/api")) continue;
+    it(`"${patron}" (pública bajo /api) es una URL exacta y corresponde a una ruta clasificada`, () => {
+      expect(/[()*+?]/.test(patron), `"${patron}" es pública bajo /api y contiene un comodín — una ruta de máquina tiene que declararse como una URL exacta, nunca como un patrón abierto.`).toBe(false);
+
+      const relPath = `app${patron}/route.ts`;
+      const clasificada = relPath in RUTAS_EXENTAS || relPath in PUBLICAS_CON_AUTENTICACION_PROPIA;
+      expect(
+        clasificada,
+        `"${patron}" es pública bajo /api pero "${relPath}" no está en RUTAS_EXENTAS ni en PUBLICAS_CON_AUTENTICACION_PROPIA — toda ruta pública de /api tiene que decir con qué se autentica de verdad.`
+      ).toBe(true);
+    });
+  }
+
+  it("toda ruta de PUBLICAS_CON_AUTENTICACION_PROPIA sigue existiendo como archivo real", () => {
+    for (const relPath of Object.keys(PUBLICAS_CON_AUTENTICACION_PROPIA)) {
+      expect(archivos.includes(relPath), `${relPath} está en PUBLICAS_CON_AUTENTICACION_PROPIA pero el archivo ya no existe — bórrala de esta prueba.`).toBe(true);
     }
   });
 });

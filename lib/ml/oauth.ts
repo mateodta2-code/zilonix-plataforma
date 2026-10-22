@@ -85,13 +85,14 @@ export async function renovarToken(refreshToken: string): Promise<TokensMl> {
 // del site_id de la empresa, no antes.
 const DOMINIO_AUTORIZACION = "https://auth.mercadolibre.com.co/authorization";
 
-export function construirUrlAutorizacion(redirectUri: string, codeChallenge: string): string {
+export function construirUrlAutorizacion(redirectUri: string, codeChallenge: string, state: string): string {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: requerirVariable("ML_CLIENT_ID"),
     redirect_uri: redirectUri,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
+    state,
   });
   return `${DOMINIO_AUTORIZACION}?${params.toString()}`;
 }
@@ -103,6 +104,17 @@ export function construirUrlAutorizacion(redirectUri: string, codeChallenge: str
 // también tener el verifier original.
 export function generarCodeVerifier(): string {
   return randomBytes(32).toString("base64url"); // 43 caracteres, cumple el mínimo de RFC 7636
+}
+
+// state (RFC 6749, sección 10.12) — protege contra CSRF en el flujo de
+// OAuth: sin esto, alguien podría armar su propio link de autorización
+// con SU code_challenge y hacer que la víctima lo abra, conectando sin
+// saberlo la cuenta de Mercado Libre del atacante a la empresa de la
+// víctima. Mismo mecanismo que el code_verifier (32 bytes aleatorios,
+// base64url) pero es un concepto distinto — nunca se reutiliza
+// generarCodeVerifier() para esto, aunque la generación sea idéntica.
+export function generarState(): string {
+  return randomBytes(32).toString("base64url");
 }
 
 export function calcularCodeChallenge(codeVerifier: string): string {
