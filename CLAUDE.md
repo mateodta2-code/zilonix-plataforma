@@ -8,7 +8,7 @@ Para el estado real del proyecto (qué está hecho, qué falta, problemas conoci
 
 Zilonix Seller es un SaaS multiempresa para vendedores que operan en Mercado Libre (Colombia, con la idea de sumar otros países/marketplaces más adelante). Cada negocio que se registra es una **empresa** aislada: conecta sus propias cuentas de Mercado Libre, administra su propio equipo con roles y permisos, y nunca ve ni toca un dato de otra empresa — ni por accidente ni por un bug, porque el aislamiento se fuerza a nivel de base de datos (RLS), no solo en el código de la aplicación.
 
-Es la reconstrucción, desde cero y con estos estándares, de lo que hoy hace el **Zilonix OS actual** (repo aparte, `zilonix-os-web`) para un solo negocio (el de Mateo) — ese sistema sigue en producción con datos reales mientras este se construye; no se apaga ni se migra de golpe. El plan completo de migración y el mapa del sistema actual viven en `zilonix-os-web/docs/plan-tecnico.md` — ese documento es la fuente de verdad de *qué construir y en qué orden*; este repo es donde eso se construye.
+Es la reconstrucción, desde cero y con estos estándares, de lo que hoy hace el **Zilonix OS actual** (repo aparte, `zilonix-os-web`) para un solo negocio (el de Mateo) — ese sistema sigue en producción con datos reales mientras este se construye; no se apaga ni se migra de golpe. El plan completo de migración y el mapa del sistema actual viven en `zilonix-os-web/docs/plan-tecnico.md` — ese documento es la fuente de verdad de *qué construir y en qué orden*; este repo es donde eso se construye. El resumen de las tareas de Mercado Libre de ese plan, con el estado en esta plataforma, está en `docs/plan-tecnico-resumen.md`.
 
 **Para quién es**: hoy, un solo equipo de prueba (Mateo/Débora) mientras se construye la Fase 2. La idea de producto es llegar a vendedores de Mercado Libre en Colombia que hoy usan Excel, el panel nativo de Mercado Libre, o herramientas como Bling/Effi/UpSeller — con mejor seguridad por empresa, permisos reales por rol y una integración más profunda y confiable con Mercado Libre que la de esos competidores (investigación real en `zilonix-os-web/docs/investigacion/`).
 
@@ -63,6 +63,7 @@ lib/
 docs/
   CHANGELOG.md    Registro de cada entrega real — qué tarea, qué se construyó, qué quedó pendiente
   ESTADO.md       Foto actual del proyecto (ver arriba)
+  plan-tecnico-resumen.md   Tareas de Mercado Libre del plan técnico y su estado en esta plataforma
   modelo-datos.md, rls.md, conectores.md, matriz-permisos.md   Documentación de diseño específica
 scripts/          Scripts de mantenimiento (generar/verificar la matriz de permisos)
 middleware.ts     Toda ruta cerrada por defecto salvo las listadas en lib/rutas-publicas.ts (Clerk + límite de peticiones)
