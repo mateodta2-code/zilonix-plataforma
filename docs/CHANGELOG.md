@@ -4,7 +4,7 @@ Registro de cada entrega a producción, con la versión y qué tarea del plan t�
 
 ## Sin publicar
 
-- **2026-10-22** — Z-MT-11 (issue #63), documentación y script, sin subir versión. `docs/runbook-backups.md` deja el procedimiento para verificar los backups de volumen de Railway en el Postgres de staging y de producción, y para probar la restauración en una base temporal. `scripts/comparar-conteos.ts` (`npx tsx scripts/comparar-conteos.ts`) compara en solo lectura el conteo de filas por tabla entre el origen y esa base. Activar los backups y correr la restauración queda para Mateo; este cambio no lo hace y no cierra el issue.
+- **2026-10-22** — Z-MT-11 (issue #63), documentación y script, sin subir versión. `docs/runbook-backups.md` deja el procedimiento para verificar los backups de volumen de Railway en el Postgres de staging y de producción, y para probar la restauración en una base temporal. `scripts/comparar-conteos.ts` (`npx tsx scripts/comparar-conteos.ts`) compara en solo lectura el conteo de filas por tabla entre el origen y esa base, y se detiene si la conexión no salta RLS (`rolsuper` o `rolbypassrls`). Activar los backups y correr la restauración queda para Mateo; este cambio no lo hace y no cierra el issue.
 
 ## v0.1.0
 

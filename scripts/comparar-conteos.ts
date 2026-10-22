@@ -9,7 +9,7 @@
 //
 // Código 0 si cada tabla tiene el mismo conteo en los dos lados.
 // Código 1 si falta una variable, si las dos URLs son la misma base,
-// si no se puede leer, o si algún conteo difiere.
+// si el rol no salta RLS, si no se puede leer, o si algún conteo difiere.
 
 import postgres from "postgres";
 import {
@@ -19,6 +19,7 @@ import {
   compararConteos,
   consultaConteos,
   conteoDesdeTexto,
+  decisionSaltoRls,
   esLaMismaBase,
   formatearComparacion,
   hayDiferencias,
@@ -28,6 +29,7 @@ import {
   variablesFaltantes,
   type ConteoTabla,
   type IdentidadBase,
+  type LadoConexion,
 } from "./comparar-conteos-logica";
 
 type FilaIdentidad = { base: string; dir: string; puerto: string };
@@ -56,16 +58,16 @@ async function main() {
   let origen: { identidad: IdentidadBase; conteos: ConteoTabla[] };
   let restaurada: { identidad: IdentidadBase; conteos: ConteoTabla[] };
   try {
-    origen = await leerLado(urlOrigen);
+    origen = await leerLado("origen", urlOrigen);
   } catch (error) {
-    console.error(`No se pudo leer el origen. ${mensajeErrorSeguro(error)}`);
+    informarFalloDeLectura("origen", error);
     process.exitCode = 1;
     return;
   }
   try {
-    restaurada = await leerLado(urlRestaurada);
+    restaurada = await leerLado("restaurada", urlRestaurada);
   } catch (error) {
-    console.error(`No se pudo leer la base restaurada. ${mensajeErrorSeguro(error)}`);
+    informarFalloDeLectura("restaurada", error);
     process.exitCode = 1;
     return;
   }
@@ -88,10 +90,25 @@ async function main() {
   process.exitCode = hayDiferencias(filas) ? 1 : 0;
 }
 
+function informarFalloDeLectura(lado: LadoConexion, error: unknown) {
+  if (error instanceof Error && error.name === "ConexionNoSaltaRls") {
+    console.error(error.message);
+    return;
+  }
+  const donde = lado === "origen" ? "el origen" : "la base restaurada";
+  console.error(`No se pudo leer ${donde}. ${mensajeErrorSeguro(error)}`);
+}
+
 // `begin read only` hace que Postgres rechace cualquier escritura de
-// esta conexión. El conteo va calificado con public."tabla" y el nombre
-// sale de pg_tables, citado solo si es un identificador simple.
-async function leerLado(url: string): Promise<{ identidad: IdentidadBase; conteos: ConteoTabla[] }> {
+// esta conexión. Antes de contar se mira si el rol salta RLS: con
+// FORCE ROW LEVEL SECURITY, el dueño de la tabla también queda filtrado,
+// y un conteo de app_user no se puede comparar con el del superusuario.
+// El conteo va calificado con public."tabla" y el nombre sale de
+// pg_tables, citado solo si es un identificador simple.
+async function leerLado(
+  lado: LadoConexion,
+  url: string,
+): Promise<{ identidad: IdentidadBase; conteos: ConteoTabla[] }> {
   const sql = postgres(url, {
     max: 1,
     connect_timeout: 20,
@@ -100,6 +117,18 @@ async function leerLado(url: string): Promise<{ identidad: IdentidadBase; conteo
   });
   try {
     return await sql.begin("read only", async (tx) => {
+      const [privilegio] = await tx<{ salta_rls: boolean | null }[]>`
+        SELECT rolsuper OR rolbypassrls AS salta_rls
+        FROM pg_roles
+        WHERE rolname = current_user
+      `;
+      const decision = decisionSaltoRls(lado, privilegio?.salta_rls ?? null);
+      if (!decision.ok) {
+        const error = new Error(decision.mensaje);
+        error.name = "ConexionNoSaltaRls";
+        throw error;
+      }
+
       const [id] = await tx<FilaIdentidad[]>`
         SELECT current_database()::text AS base,
                coalesce(inet_server_addr()::text, '') AS dir,

@@ -34,7 +34,7 @@ Borrar el volumen (wipe) borra todos sus backups. Un backup protege de un dato m
 4. Los backups de volumen solo se restauran dentro del mismo proyecto y el mismo ambiente. Eso no cambia la regla anterior: aunque sea el mismo ambiente, el destino del ensayo es un servicio nuevo.
 5. **Ninguna cadena de conexión se pega en un issue, un chat, un log, el changelog ni este archivo.** Tampoco un volcado de `railway variables`, ni la salida cruda del túnel, ni el archivo `.dump`. Si un comando falla, no se copia el mensaje completo: se anota el código de salida y, si hace falta, la frase del script de conteos (solo nombres de tabla y conteos).
 
-El usuario de las dos conexiones del ensayo es el `postgres` que imprime el túnel (superusuario de ese servicio). `app_user` respeta RLS y vería solo una empresa: los conteos no coincidirían aunque la restauración estuviera bien.
+El usuario de las dos conexiones del ensayo es el `postgres` que imprime el túnel (superusuario de ese servicio). `app_user` respeta RLS y vería solo una empresa: los conteos no coincidirían aunque la restauración estuviera bien. El script lo comprueba en la misma lectura (`rolsuper OR rolbypassrls` del rol de la conexión). Si en el origen o en la restaurada eso es falso, sale con código 1 y pide usar el usuario `postgres` del túnel. No imprime la URL ni el nombre del rol que se rechazó.
 
 ## 1. Verificar que los backups están activos
 
@@ -154,6 +154,7 @@ El Postgres vivo no se "arregla" con Restore para salvar el ensayo. El origen de
 | `pg_restore` sale distinto de 0 | El temporal puede haber quedado a medias. Borrar ese servicio, crear otro `restore-drill-...` y repetir solo contra ese. No correr `pg_restore` contra el Postgres de staging ni el de producción. |
 | El script sale 1 y los conteos difieren | Anotar las líneas. Revisar que el túnel de origen y el del temporal no estén cruzados, y que el `.dump` sea el de este ensayo (ambiente y fecha en el nombre). No tocar filas. |
 | El script dice que las dos conexiones son la misma base | La URL restaurada apunta al origen. Apuntarla al servicio temporal y repetir. |
+| El script dice que la conexión no salta RLS | Esa URL no es el usuario `postgres` del túnel (por ejemplo quedó `app_user`). Repetir ese lado con el `postgres` que imprimió el túnel. El mensaje no trae la URL ni el nombre del rol; se puede pegar tal cual. |
 | El backup manual lo rechaza Railway | Tope oficial: 50% del tamaño del volumen. Agrandar el volumen y repetir el manual. No borrar el volumen. |
 | No aparece ninguna programación | Seguir el paso 5 de la sección 1. Un manual suelto no deja los backups activos. |
 | Se apretó Restore en el servicio vivo | **No apretar Deploy.** Railway deja el cambio staged (Details, arriba del canvas). Descartar ese cambio. El volumen anterior sigue en el proyecto, desmontado, hasta que se despliegue la restauración. Anotar en la tabla `abortado: Restore staged, sin Deploy`. En el issue #63, esa frase y nada más: sin URLs, sin salida del túnel. |

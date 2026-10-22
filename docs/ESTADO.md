@@ -27,7 +27,7 @@ Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la f
 - **2.8 — Inventario por bodega**: pausada a propósito. El concepto de "bodega en tránsito" (traslados entre bodegas) que pide la tarea no existe en el Zilonix OS actual — se decidió no inventarlo y esperar a que Mateo lo hable con Franky antes de construir nada.
 - **2.11b/c/d** (Promociones, Programar Full, Alertas sanitarias): sin empezar.
 - **Fases 3 (Finanzas/DIAN), 4 (Piloto pagado) y 5 (Escalar)**: sin empezar.
-- **Z-MT-11 (issue #63) — backups de Postgres:** el runbook (`docs/runbook-backups.md`) y el script de conteos (`npx tsx scripts/comparar-conteos.ts`) están escritos. Falta que Mateo confirme en Railway que los backups de volumen están activos en staging y en producción (frecuencia y retención anotadas en la tabla del runbook) y que restaure en una base temporal. Ninguna cadena de conexión se pega en el issue.
+- **Z-MT-11 (issue #63) — backups de Postgres:** el runbook (`docs/runbook-backups.md`) y el script de conteos (`npx tsx scripts/comparar-conteos.ts`, que además se detiene si la conexión no salta RLS) están escritos. Falta que Mateo confirme en Railway que los backups de volumen están activos en staging y en producción (frecuencia y retención anotadas en la tabla del runbook) y que restaure en una base temporal. Ninguna cadena de conexión se pega en el issue.
 - **Aviso automático a FullyLemon cuando cambia el estado de una guía de Mercado Libre**: se le pidió a FullyLemon el detalle real de su endpoint — esperando su respuesta antes de construir nada (no se adivinó el contrato).
 
 ## Decisiones que tomamos y por qué

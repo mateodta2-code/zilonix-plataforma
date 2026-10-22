@@ -4,6 +4,7 @@ import {
   compararConteos,
   consultaConteos,
   conteoDesdeTexto,
+  decisionSaltoRls,
   esLaMismaBase,
   formatearComparacion,
   hayDiferencias,
@@ -121,6 +122,36 @@ describe("variables y la misma base", () => {
     expect(esLaMismaBase(origen, { ...origen, base: "restore_drill" })).toBe(false);
     expect(esLaMismaBase(origen, { ...origen, dir: "10.0.0.9" })).toBe(false);
     expect(esLaMismaBase({ ...origen, dir: "" }, { ...origen, dir: "" })).toBe(false);
+  });
+});
+
+describe("decisionSaltoRls", () => {
+  it("acepta la conexión solo cuando rolsuper OR rolbypassrls es true", () => {
+    expect(decisionSaltoRls("origen", true)).toEqual({ ok: true });
+    expect(decisionSaltoRls("restaurada", true)).toEqual({ ok: true });
+  });
+
+  it("rechaza origen y restaurada con el mismo texto, sin URL ni nombre de rol", () => {
+    for (const lado of ["origen", "restaurada"] as const) {
+      const decision = decisionSaltoRls(lado, false);
+      expect(decision.ok).toBe(false);
+      if (!decision.ok) {
+        expect(decision.mensaje).toBe(
+          `La conexión de ${lado} no salta RLS; los conteos saldrían filtrados por empresa. Usa el usuario postgres del túnel.`,
+        );
+        expect(decision.mensaje).not.toContain("postgresql://");
+        expect(decision.mensaje).not.toContain("app_user");
+        expect(decision.mensaje).not.toContain("@");
+      }
+    }
+  });
+
+  it("si Postgres no devolvió la fila del rol, también rechaza", () => {
+    const decision = decisionSaltoRls("origen", null);
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) {
+      expect(decision.mensaje).toContain("La conexión de origen no salta RLS");
+    }
   });
 });
 

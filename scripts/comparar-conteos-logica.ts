@@ -22,6 +22,26 @@ export type IdentidadBase = {
 export const VARIABLE_ORIGEN = "DATABASE_URL_ORIGEN";
 export const VARIABLE_RESTAURADA = "DATABASE_URL_RESTAURADA";
 
+export type LadoConexion = "origen" | "restaurada";
+
+// `rolsuper OR rolbypassrls` ya viene calculado desde Postgres. Solo
+// `true` cuenta: un null (el rol no apareció en pg_roles) o cualquier
+// otro valor se trata como "no salta", porque si no los conteos de
+// app_user quedarían filtrados por empresa y parecerían una
+// restauración mala. El mensaje no lleva la URL ni el nombre del rol.
+export function decisionSaltoRls(
+  lado: LadoConexion,
+  rolsuperOBypass: boolean | null,
+): { ok: true } | { ok: false; mensaje: string } {
+  if (rolsuperOBypass === true) return { ok: true };
+  return {
+    ok: false,
+    mensaje:
+      `La conexión de ${lado} no salta RLS; los conteos saldrían filtrados por empresa. ` +
+      "Usa el usuario postgres del túnel.",
+  };
+}
+
 const NOMBRE_TABLA = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function variablesFaltantes(env: Record<string, string | undefined>): string[] {
