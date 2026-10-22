@@ -2,38 +2,43 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa } from "./empresa-context";
-import { cuentasMl, empresas } from "./schema";
+import { cuentasMl } from "./schema";
 import { cifrarToken } from "../lib/cifrado";
+import { afirmarAislamiento } from "./test-utils/aislamiento";
 
 // Tarea 2.3 — misma prueba de siempre, contra Postgres real: una
 // empresa nunca ve ni toca la cuenta de Mercado Libre de otra.
+// Z-MT-09: el alta de las dos empresas y el "B no ve / no edita / no
+// borra" pasan por db/test-utils/aislamiento.ts. Las comprobaciones de
+// abajo quedan iguales (y se suma el borrado, que esta tabla no tenía).
 describe("cuentas_ml (RLS, tarea 2.3)", () => {
-  const empresaAId = randomUUID();
-  const empresaBId = randomUUID();
+  let empresaAId: string;
+  let empresaBId: string;
   let cuentaAId: string;
 
   beforeAll(async () => {
-    await dbComoEmpresa(empresaAId, (tx) =>
-      tx.insert(empresas).values({ id: empresaAId, nombre: "Empresa A (prueba 2.3)", nit: `TEST-A23-${empresaAId.slice(0, 8)}` })
-    );
-    await dbComoEmpresa(empresaBId, (tx) =>
-      tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B (prueba 2.3)", nit: `TEST-B23-${empresaBId.slice(0, 8)}` })
-    );
-
-    const [cuenta] = await dbComoEmpresa(empresaAId, (tx) =>
-      tx
-        .insert(cuentasMl)
-        .values({
-          empresaId: empresaAId,
-          cuentaIdExterna: `ml-user-${randomUUID()}`,
-          nickname: "VENDEDOR_A",
-          accessTokenCifrado: cifrarToken("access-de-prueba"),
-          refreshTokenCifrado: cifrarToken("refresh-de-prueba"),
-          tokenExpiraTs: new Date(Date.now() + 3600_000),
-        })
-        .returning({ id: cuentasMl.id })
-    );
-    cuentaAId = cuenta.id;
+    const ctx = await afirmarAislamiento(cuentasMl, async ({ empresaAId: idA }) => {
+      const [cuenta] = await dbComoEmpresa(idA, (tx) =>
+        tx
+          .insert(cuentasMl)
+          .values({
+            empresaId: idA,
+            cuentaIdExterna: `ml-user-${randomUUID()}`,
+            nickname: "VENDEDOR_A",
+            accessTokenCifrado: cifrarToken("access-de-prueba"),
+            refreshTokenCifrado: cifrarToken("refresh-de-prueba"),
+            tokenExpiraTs: new Date(Date.now() + 3600_000),
+          })
+          .returning({ id: cuentasMl.id })
+      );
+      // Misma columna que el test de "no puede actualizar" de abajo
+      // (nickname → "HACKEADO"): la plantilla y ese it pisan el mismo
+      // campo, así el resultado de la tarea 2.3 no cambia.
+      return { id: cuenta.id, columna: cuentasMl.nickname, valorAjeno: "HACKEADO" };
+    });
+    empresaAId = ctx.empresaAId;
+    empresaBId = ctx.empresaBId;
+    cuentaAId = ctx.filaId;
   });
 
   it("empresa A ve su propia cuenta conectada", async () => {
