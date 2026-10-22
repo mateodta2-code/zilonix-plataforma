@@ -7,9 +7,10 @@ import * as schema from "./schema";
 // seguridad por fila (RLS). A propósito este archivo nunca expone la
 // conexión con privilegios de superusuario que da Railway en
 // DATABASE_URL (esa es la que podría saltarse el aislamiento entre
-// empresas) — esa otra conexión vive aislada en db/migrate.ts, que
-// nadie más importa, para que sea imposible usarla por error en una
-// consulta de negocio.
+// empresas) — esa otra conexión solo se abre en dos lugares, y el
+// tráfico de la app no importa ninguno de los dos: db/migrate.ts
+// (migraciones) y scripts/recifrar-tokens-ml.ts (rotación manual de
+// la clave de los tokens; ver docs/rotacion-claves.md).
 //
 // Toda consulta que toque empresas/roles/membresias/permisos_rol/
 // invitaciones/auditoria tiene que pasar por dbComoEmpresa()
