@@ -133,6 +133,48 @@ button {
   color: transparent;
 }
 
+/* Issue de las subpáginas del panel — clase compartida para los
+   <input>/<select>/<textarea> reales de cada formulario (el elemento
+   en sí, con su name/type/required de siempre, lo sigue poniendo cada
+   página; esto solo lo viste). Nunca un componente propio de Input:
+   los campos de un formulario real tienen demasiadas variantes (type,
+   min/max, defaultValue, hidden...) para que valga la pena envolverlos. */
+.zx-control {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: var(--radio-boton);
+  border: 1px solid var(--borde);
+  background: var(--superficie-2);
+  color: var(--texto);
+  font-size: 13.5px;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: var(--transicion-color);
+}
+
+.zx-control:hover {
+  border-color: var(--plata-2);
+}
+
+.zx-control:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 1px;
+  border-color: var(--acento);
+}
+
+.zx-control:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Checkboxes/radios reales (ej. selección múltiple de despachos) —
+   solo el color de acento, nunca el tamaño/posición por defecto del
+   navegador. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--acento);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

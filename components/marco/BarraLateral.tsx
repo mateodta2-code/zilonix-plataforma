@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { iconoDeClave, IconoContraer } from "./iconos";
+import { ItemNavLink } from "./ItemNavLink";
 import { SelectorTema } from "./SelectorTema";
 import styles from "./BarraLateral.module.css";
 import type { GrupoNav } from "./tipos";
@@ -69,25 +70,9 @@ export function BarraLateral({ grupos }: { grupos: GrupoNav[] }) {
         {grupos.map((grupo, indice) => (
           <div key={grupo.etiqueta ?? `grupo-${indice}`} className={styles.grupo}>
             {grupo.etiqueta && !colapsada && <p className={`zx-etiqueta ${styles.etiquetaGrupo}`}>{grupo.etiqueta}</p>}
-            {grupo.items.map((item) =>
-              item.deshabilitada ? (
-                <span key={item.href} className={styles.item} data-deshabilitado="true" title={item.titulo}>
-                  {iconoDeClave(item.icono, { size: 18 })}
-                  {!colapsada && <span className={styles.etiquetaItem}>{item.etiqueta}</span>}
-                </span>
-              ) : (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={styles.item}
-                  data-activo={item.activa ? "true" : "false"}
-                  title={colapsada ? item.etiqueta : undefined}
-                >
-                  {iconoDeClave(item.icono, { size: 18 })}
-                  {!colapsada && <span className={styles.etiquetaItem}>{item.etiqueta}</span>}
-                </Link>
-              )
-            )}
+            {grupo.items.map((item) => (
+              <ItemNavLink key={item.href} item={item} colapsada={colapsada} />
+            ))}
           </div>
         ))}
       </nav>

@@ -6,6 +6,13 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarPedidos } from "@/lib/ml/pedidos";
+import { BotonLink } from "@/components/marco/Boton";
+import { Chip } from "@/components/marco/Chip";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import styles from "./page.module.css";
 
 // Tarea 2.7 — "lista de pedidos (celular primero)": una sola columna,
 // cada pedido como una fila completa (nunca una tabla ancha que obliga
@@ -24,59 +31,42 @@ export default async function PedidosPage() {
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
-    return (
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol ({miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
   const pedidos = await listarPedidos(empresa.id);
 
   return (
-    <main style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Pedidos</h1>
-        <Link href="/panel/despachos" style={{ fontSize: 13 }}>
-          Despachos
-        </Link>
-      </div>
+    <>
+      <EncabezadoPagina titulo="Pedidos" accion={<BotonLink href="/panel/despachos" variante="secundario" chico>Despachos</BotonLink>} />
 
       {pedidos.length === 0 ? (
-        <p style={{ opacity: 0.7, fontSize: 14, padding: "0 8px" }}>
+        <EstadoVacio>
           Todavía no hay pedidos importados — conecta una cuenta de Mercado Libre en{" "}
           <Link href="/panel/conectar-ml">Conectar Mercado Libre</Link>.
-        </p>
+        </EstadoVacio>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, marginTop: 12 }}>
+        <ListaFilas>
           {pedidos.map((pedido) => (
-            <li key={pedido.id} style={{ borderBottom: "1px solid #eee" }}>
-              <Link
-                href={`/panel/pedidos/${pedido.id}`}
-                style={{ display: "block", padding: "14px 8px", color: "inherit", textDecoration: "none" }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                  <span>#{pedido.pedidoIdExterno}</span>
-                  <span>
-                    {pedido.moneda} {pedido.total}
-                  </span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, opacity: 0.6, marginTop: 2 }}>
-                  <span>{new Date(pedido.fecha).toLocaleString("es-CO")}</span>
-                  <span style={{ textTransform: "capitalize" }}>{pedido.estado}</span>
-                </div>
-              </Link>
-            </li>
+            <FilaLista key={pedido.id} href={`/panel/pedidos/${pedido.id}`}>
+              <div className={styles.filaSuperior}>
+                <span>#{pedido.pedidoIdExterno}</span>
+                <span>
+                  {pedido.moneda} {pedido.total}
+                </span>
+              </div>
+              <div className={styles.filaInferior}>
+                <span>{new Date(pedido.fecha).toLocaleString("es-CO")}</span>
+                <Chip>{pedido.estado}</Chip>
+              </div>
+            </FilaLista>
           ))}
-        </ul>
+        </ListaFilas>
       )}
 
-      <p style={{ marginTop: 24, padding: "0 8px" }}>
-        <Link href="/panel" style={{ fontSize: 13 }}>
-          Volver al panel
-        </Link>
-      </p>
-    </main>
+      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
+        Volver al panel
+      </BotonLink>
+    </>
   );
 }

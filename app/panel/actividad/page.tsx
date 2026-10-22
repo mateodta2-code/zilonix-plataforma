@@ -1,10 +1,15 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarAuditoriaDeEmpresa } from "@/lib/auditoria";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { BotonLink } from "@/components/marco/Boton";
+import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import styles from "./page.module.css";
 
 // Tarea 1.9 — "Ves en Actividad las 5 acciones con tu nombre y hora;
 // una venta sincronizada automáticamente aparece con actor
@@ -27,55 +32,38 @@ export default async function ActividadPage() {
     await requierePermiso(usuario.id, empresa.id, "configuracion", "consultar");
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
-    return (
-      <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol no puede ver la actividad de {empresa.nombre}.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje={`Tu rol no puede ver la actividad de ${empresa.nombre}.`} />;
   }
 
   const filas = await listarAuditoriaDeEmpresa(empresa.id);
 
   return (
-    <main style={{ maxWidth: 640, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>Actividad de {empresa.nombre}</h1>
-      <p style={{ opacity: 0.7, fontSize: 13 }}>Quién hizo qué, cuándo — nunca se le atribuye a una persona lo que hizo una integración.</p>
+    <>
+      <EncabezadoPagina
+        titulo={`Actividad de ${empresa.nombre}`}
+        descripcion="Quién hizo qué, cuándo — nunca se le atribuye a una persona lo que hizo una integración."
+      />
 
       {filas.length === 0 ? (
-        <p style={{ opacity: 0.6, fontSize: 13, marginTop: 24 }}>Todavía no hay actividad registrada.</p>
+        <EstadoVacio>Todavía no hay actividad registrada.</EstadoVacio>
       ) : (
-        <div style={{ overflowX: "auto", marginTop: 20 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ textAlign: "left" }}>
-                <th style={{ padding: 6 }}>Cuándo</th>
-                <th style={{ padding: 6 }}>Quién</th>
-                <th style={{ padding: 6 }}>Acción</th>
-                <th style={{ padding: 6 }}>Detalle</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filas.map((f) => (
-                <tr key={f.id} style={{ borderTop: "1px solid currentColor" }}>
-                  <td style={{ padding: 6, whiteSpace: "nowrap" }}>{new Date(f.ts).toLocaleString("es-CO")}</td>
-                  <td style={{ padding: 6, opacity: f.actorTipo === "sistema" ? 0.7 : 1, fontStyle: f.actorTipo === "sistema" ? "italic" : "normal" }}>
-                    {f.actorNombre}
-                  </td>
-                  <td style={{ padding: 6 }}>
-                    {f.accion} · {f.entidad}
-                  </td>
-                  <td style={{ padding: 6 }}>{f.detalle ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Tabla encabezados={["Cuándo", "Quién", "Acción", "Detalle"]}>
+          {filas.map((f) => (
+            <FilaTabla key={f.id}>
+              <CeldaTabla className={styles.celdaFecha}>{new Date(f.ts).toLocaleString("es-CO")}</CeldaTabla>
+              <CeldaTabla className={f.actorTipo === "sistema" ? styles.actorSistema : undefined}>{f.actorNombre}</CeldaTabla>
+              <CeldaTabla>
+                {f.accion} · {f.entidad}
+              </CeldaTabla>
+              <CeldaTabla>{f.detalle ?? "—"}</CeldaTabla>
+            </FilaTabla>
+          ))}
+        </Tabla>
       )}
 
-      <Link href="/panel" style={{ display: "inline-block", marginTop: 24, fontSize: 13 }}>
+      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
         Volver al panel
-      </Link>
-    </main>
+      </BotonLink>
+    </>
   );
 }

@@ -1,11 +1,15 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { contarAvisos } from "@/lib/ml/avisos";
+import { BotonLink } from "@/components/marco/Boton";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import styles from "./page.module.css";
 
 // Tarea 2.4 — "panel interno" que pide el criterio de "listo": cuántos
 // avisos de Mercado Libre llegaron y cuántos ya confirmó el trabajador
@@ -24,38 +28,24 @@ export default async function AvisosMlPage() {
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
-    return (
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol ({miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
   const conteo = await contarAvisos(empresa.id);
 
   return (
-    <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 20, fontWeight: 700 }}>Avisos de Mercado Libre</h1>
-      <div style={{ display: "flex", gap: 20, marginTop: 20 }}>
-        <div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{conteo.recibidos}</div>
-          <div style={{ fontSize: 12, opacity: 0.6 }}>Recibidos</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{conteo.procesados}</div>
-          <div style={{ fontSize: 12, opacity: 0.6 }}>Procesados</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{conteo.pendientes}</div>
-          <div style={{ fontSize: 12, opacity: 0.6 }}>Pendientes</div>
-        </div>
+    <>
+      <EncabezadoPagina titulo="Avisos de Mercado Libre" />
+
+      <div className={styles.grid}>
+        <TarjetaKpi titulo="Recibidos" valor={conteo.recibidos} />
+        <TarjetaKpi titulo="Procesados" valor={conteo.procesados} />
+        <TarjetaKpi titulo="Pendientes" valor={conteo.pendientes} />
       </div>
-      <p style={{ marginTop: 24 }}>
-        <Link href="/panel" style={{ fontSize: 13 }}>
-          Volver al panel
-        </Link>
-      </p>
-    </main>
+
+      <BotonLink href="/panel" variante="fantasma" chico>
+        Volver al panel
+      </BotonLink>
+    </>
   );
 }

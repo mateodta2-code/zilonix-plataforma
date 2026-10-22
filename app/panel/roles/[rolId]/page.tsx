@@ -1,11 +1,15 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { ACCIONES, esPeligroso, MODULOS, obtenerRolDeEmpresa } from "@/lib/roles";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { guardarPermisosAction } from "./actions";
+import { Boton, BotonLink } from "@/components/marco/Boton";
+import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import styles from "./page.module.css";
 
 // Tarea 1.7 — "puede ajustar permisos por acción": una celda por
 // módulo × acción, con el alcance (todo/propio) elegido en la misma
@@ -26,12 +30,7 @@ export default async function EditarRolPage({ params }: { params: { rolId: strin
     await requierePermiso(usuario.id, empresa.id, "configuracion", "autorizar");
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
-    return (
-      <main style={{ maxWidth: 600, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol no puede ajustar permisos.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje="Tu rol no puede ajustar permisos." />;
   }
 
   const rol = await obtenerRolDeEmpresa(empresa.id, params.rolId);
@@ -42,60 +41,50 @@ export default async function EditarRolPage({ params }: { params: { rolId: strin
     rol.permisos.find((p) => p.modulo === modulo && p.accion === accion)?.alcance ?? "no";
 
   return (
-    <main style={{ maxWidth: 640, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>Permisos de {rol.nombre}</h1>
-      <p style={{ opacity: 0.7, fontSize: 13 }}>
-        "Propio" limita la acción a lo que esa misma persona creó — nunca a lo de todos. Las celdas en{" "}
-        <span style={{ color: "#a8432f" }}>rojo</span> piden confirmación aparte antes de activarse.
-      </p>
+    <>
+      <EncabezadoPagina
+        titulo={`Permisos de ${rol.nombre}`}
+        descripcion={
+          <>
+            "Propio" limita la acción a lo que esa misma persona creó — nunca a lo de todos. Las celdas en{" "}
+            <span className={styles.rojo}>rojo</span> piden confirmación aparte antes de activarse.
+          </>
+        }
+      />
 
-      <form action={guardarPermisosAction} style={{ marginTop: 20 }}>
+      <form action={guardarPermisosAction} className={styles.form}>
         <input type="hidden" name="rolId" value={rol.id} />
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left", padding: 6 }}>Módulo</th>
-                {ACCIONES.map((accion) => (
-                  <th key={accion} style={{ textAlign: "left", padding: 6, textTransform: "capitalize" }}>
-                    {accion}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {MODULOS.map((modulo) => (
-                <tr key={modulo} style={{ borderTop: "1px solid currentColor" }}>
-                  <td style={{ padding: 6, textTransform: "capitalize" }}>{modulo}</td>
-                  {ACCIONES.map((accion) => {
-                    const peligroso = esPeligroso(modulo, accion);
-                    return (
-                      <td key={accion} style={{ padding: 6 }}>
-                        <select
-                          name={`permiso__${modulo}__${accion}`}
-                          defaultValue={valorActual(modulo, accion)}
-                          style={peligroso ? { borderColor: "#a8432f", color: "#a8432f" } : undefined}
-                        >
-                          <option value="no">No</option>
-                          <option value="todo">Todo</option>
-                          <option value="propio">Propio</option>
-                        </select>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <button type="submit" style={{ padding: "10px 16px", marginTop: 20 }}>
+        <Tabla encabezados={["Módulo", ...ACCIONES]}>
+          {MODULOS.map((modulo) => (
+            <FilaTabla key={modulo}>
+              <CeldaTabla className={styles.celdaModulo}>{modulo}</CeldaTabla>
+              {ACCIONES.map((accion) => {
+                const peligroso = esPeligroso(modulo, accion);
+                return (
+                  <CeldaTabla key={accion}>
+                    <select
+                      name={`permiso__${modulo}__${accion}`}
+                      defaultValue={valorActual(modulo, accion)}
+                      className={`zx-control ${styles.select} ${peligroso ? styles.selectPeligroso : ""}`}
+                    >
+                      <option value="no">No</option>
+                      <option value="todo">Todo</option>
+                      <option value="propio">Propio</option>
+                    </select>
+                  </CeldaTabla>
+                );
+              })}
+            </FilaTabla>
+          ))}
+        </Tabla>
+        <Boton type="submit" className={styles.botonGuardar}>
           Guardar permisos
-        </button>
+        </Boton>
       </form>
 
-      <Link href="/panel/roles" style={{ display: "inline-block", marginTop: 20, fontSize: 13 }}>
+      <BotonLink href="/panel/roles" variante="fantasma" chico className={styles.volver}>
         ← Volver a roles
-      </Link>
-    </main>
+      </BotonLink>
+    </>
   );
 }

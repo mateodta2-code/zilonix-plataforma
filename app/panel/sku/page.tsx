@@ -7,6 +7,15 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarSkus, listarPublicacionesSinSku } from "@/lib/ml/sku";
 import { crearSkuAction } from "./actions";
+import { Boton, BotonLink } from "@/components/marco/Boton";
+import { Campo } from "@/components/marco/Campo";
+import { Chip } from "@/components/marco/Chip";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import { Tarjeta } from "@/components/marco/Tarjeta";
+import styles from "./page.module.css";
 
 // Tarea 2.6 — SKU maestro. "Variantes" son SKUs propios agrupados por
 // nombreBase, no una tabla aparte (ver db/schema.ts).
@@ -24,62 +33,60 @@ export default async function SkuPage() {
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
-    return (
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol ({miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
   const [skus, publicacionesSinSku] = await Promise.all([listarSkus(empresa.id), listarPublicacionesSinSku(empresa.id)]);
 
   return (
-    <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>SKU</h1>
+    <>
+      <EncabezadoPagina titulo="SKU" />
 
       {publicacionesSinSku.length > 0 && (
-        <div style={{ padding: 10, background: "#fff8e1", borderRadius: 6, fontSize: 14, marginTop: 16 }}>
+        <div className={styles.avisoSinVincular}>
           {publicacionesSinSku.length} publicación(es) sin SKU todavía.{" "}
-          <Link href="/panel/sku/sin-vincular" style={{ fontWeight: 600 }}>
+          <Link href="/panel/sku/sin-vincular" className={styles.enlaceAviso}>
             Enlazarlas
           </Link>
         </div>
       )}
 
-      <form action={crearSkuAction} style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 24 }}>
-        <label style={{ fontSize: 13 }}>
-          Código
-          <input name="codigo" id="sku-codigo" required style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }} />
-        </label>
-        <label style={{ fontSize: 13 }}>
-          Nombre
-          <input name="nombre" id="sku-nombre" required style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }} />
-        </label>
-        <label style={{ fontSize: 13 }}>
-          Producto base (opcional — agrupa variantes, ej. "Camiseta")
-          <input name="nombreBase" id="sku-nombre-base" style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }} />
-        </label>
-        <button type="submit" style={{ padding: "8px 14px", alignSelf: "flex-start" }}>
-          Crear SKU
-        </button>
-      </form>
+      <Tarjeta>
+        <form action={crearSkuAction} className={styles.form}>
+          <Campo etiqueta="Código">
+            <input name="codigo" id="sku-codigo" required className="zx-control" />
+          </Campo>
+          <Campo etiqueta="Nombre">
+            <input name="nombre" id="sku-nombre" required className="zx-control" />
+          </Campo>
+          <Campo etiqueta='Producto base (opcional — agrupa variantes, ej. "Camiseta")'>
+            <input name="nombreBase" id="sku-nombre-base" className="zx-control" />
+          </Campo>
+          <Boton type="submit" className={styles.botonCrear}>
+            Crear SKU
+          </Boton>
+        </form>
+      </Tarjeta>
 
-      <ul style={{ listStyle: "none", padding: 0, marginTop: 24 }}>
-        {skus.map((sku) => (
-          <li key={sku.id} style={{ padding: "8px 0", borderBottom: "1px solid #eee", fontSize: 14 }}>
-            <strong>{sku.codigo}</strong> — {sku.nombre}
-            {sku.nombreBase && <span style={{ opacity: 0.6 }}> ({sku.nombreBase})</span>}
-            {sku.esKit && <span style={{ opacity: 0.6 }}> · kit</span>}
-          </li>
-        ))}
-      </ul>
+      {skus.length === 0 ? (
+        <EstadoVacio>Todavía no has creado ningún SKU.</EstadoVacio>
+      ) : (
+        <ListaFilas>
+          {skus.map((sku) => (
+            <FilaLista key={sku.id}>
+              <span className={styles.filaSku}>
+                <strong>{sku.codigo}</strong> — {sku.nombre}
+                {sku.nombreBase && <span className={styles.detalleSku}> ({sku.nombreBase})</span>}
+                {sku.esKit && <Chip>Kit</Chip>}
+              </span>
+            </FilaLista>
+          ))}
+        </ListaFilas>
+      )}
 
-      <p style={{ marginTop: 24 }}>
-        <Link href="/panel" style={{ fontSize: 13 }}>
-          Volver al panel
-        </Link>
-      </p>
-    </main>
+      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
+        Volver al panel
+      </BotonLink>
+    </>
   );
 }
