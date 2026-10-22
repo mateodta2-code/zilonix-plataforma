@@ -3,6 +3,7 @@ import {
   calcularCodeChallenge,
   construirUrlAutorizacion,
   generarCodeVerifier,
+  generarState,
   intercambiarCodigo,
   obtenerNickname,
   renovarToken,
@@ -118,12 +119,20 @@ describe("OAuth de Mercado Libre (tarea 2.3)", () => {
     expect(calcularCodeChallenge(verifier)).not.toBe(verifier); // es un hash, no el mismo texto
   });
 
-  it("construirUrlAutorizacion incluye code_challenge y code_challenge_method=S256", () => {
-    const url = construirUrlAutorizacion("https://x/callback", "un-challenge");
+  it("construirUrlAutorizacion incluye code_challenge, code_challenge_method=S256 y state", () => {
+    const url = construirUrlAutorizacion("https://x/callback", "un-challenge", "un-state");
     const parsed = new URL(url);
     expect(parsed.searchParams.get("code_challenge")).toBe("un-challenge");
     expect(parsed.searchParams.get("code_challenge_method")).toBe("S256");
     expect(parsed.searchParams.get("response_type")).toBe("code");
     expect(parsed.searchParams.get("redirect_uri")).toBe("https://x/callback");
+    expect(parsed.searchParams.get("state")).toBe("un-state");
+  });
+
+  it("generarState da un string distinto cada vez, de al menos 43 caracteres (32 bytes en base64url)", () => {
+    const a = generarState();
+    const b = generarState();
+    expect(a).not.toBe(b);
+    expect(a.length).toBeGreaterThanOrEqual(43);
   });
 });
