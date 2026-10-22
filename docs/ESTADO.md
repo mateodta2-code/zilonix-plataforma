@@ -2,6 +2,8 @@
 
 Foto del proyecto al **2026-10-21**. Esto cambia después de cada tarea — la fuente de verdad detallada, tarea por tarea, es `docs/CHANGELOG.md`; el plan completo (todas las fases, criterios de "listo") vive en `zilonix-os-web/docs/plan-tecnico.md`. Esta página es el resumen para que alguien nuevo entienda dónde estamos sin leer los dos documentos enteros.
 
+Runbook de lanzamiento, rollback y guardia de diciembre: [docs/runbook-lanzamiento.md](runbook-lanzamiento.md).
+
 ## Qué está terminado y funcionando
 
 **Fase 1 (Multiempresa y seguridad) — 12/12 tareas cerradas.** Repositorio base, modelo de datos, seguridad por fila (RLS) con tres usuarios de base distintos, login con Clerk, empresas y cambio de empresa en 1 clic, invitaciones por correo, permisos por rol/módulo/acción con pantalla de confirmación para los peligrosos, registro de auditoría, cabeceras de seguridad + límite de peticiones, panel superadmin con acceso temporal auditado. Confirmado de punta a punta con una cuenta y una empresa reales en staging.
