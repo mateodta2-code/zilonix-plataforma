@@ -1,0 +1,18 @@
+[
+  {
+    "rsynso": "RSA0012345-2024",
+    "producto": "PRODUCTO DE PRUEBA X EN CAPSULAS",
+    "estadoregistro": "Vigente",
+    "fechavencimiento": "2029-04-30T00:00:00.000",
+    "titular": "COMERCIALIZADORA DE PRUEBA SAS",
+    "grupo": "Suplementos dietarios"
+  },
+  {
+    "rsynso": "RSA0099999-2021",
+    "producto": "PRODUCTO DE PRUEBA Y EN POLVO",
+    "estadoregistro": "Vencido",
+    "fechavencimiento": "2024-01-15T00:00:00.000",
+    "titular": "OTRA COMERCIALIZADORA DE PRUEBA SAS",
+    "grupo": "Suplementos dietarios"
+  }
+]

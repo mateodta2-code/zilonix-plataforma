@@ -1,0 +1,32 @@
+<!--
+  Issue #61 (Z-NV-03a) — fixture mínimo que reproduce la estructura real
+  del listado público de alertas sanitarias del INVIMA
+  (invima.gov.co/alertas-sanitarias), para probar leerTarjetasListado()
+  sin red. Contenido inventado a propósito (ningún dato real ni personal):
+  dos tarjetas, una completa y una sin slug (para probar que esta última
+  se descarta).
+-->
+<div class="inv-lst-contenedor">
+  <article class="inv-lst-tarjeta ejemplo">
+    <span class="fecha_publicacion">15-03-2026</span>
+    <div class="inv-lst-numero">Alerta Nº 123-2026</div>
+    <div class="inv-lst-direccion">Dirección de <span>Medicamentos y Productos Biológicos</span></div>
+    <div class="tarjeta-titulo">
+      <a href="/alertas-sanitarias/987/producto-de-prueba-x">PRODUCTO DE PRUEBA X</a>
+    </div>
+    <div class="inv-lst-tag ejemplo">Alerta sanitaria</div>
+    <span class="inv-lst-fecha">15-03-2026 - Se alerta sobre la comercialización ilegal de Producto de Prueba X</span>
+    <a href="/alertas-sanitarias/987/pdf">Ver PDF</a>
+  </article>
+  <article class="inv-lst-tarjeta ejemplo">
+    <span class="fecha_publicacion">10-02-2026</span>
+    <div class="inv-lst-numero">Alerta Nº 100-2026</div>
+    <div class="inv-lst-direccion">Dirección de <span>Dispositivos Médicos</span></div>
+    <div class="tarjeta-titulo">
+      <!-- sin <a href>: esta tarjeta no trae slug y debe descartarse -->
+    </div>
+    <div class="inv-lst-tag ejemplo">Alerta sanitaria</div>
+    <span class="inv-lst-fecha">10-02-2026 - Sin slug, no debe aparecer en el resultado</span>
+    <a href="/alertas-sanitarias/900/pdf">Ver PDF</a>
+  </article>
+</div>

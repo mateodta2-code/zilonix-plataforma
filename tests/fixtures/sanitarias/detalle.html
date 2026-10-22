@@ -1,0 +1,28 @@
+<!--
+  Issue #61 (Z-NV-03a) — fixture mínimo que reproduce la estructura real
+  de la página de detalle de una alerta sanitaria del INVIMA (la que se
+  abre desde el slug de una tarjeta del listado), para probar
+  leerDetalleAlerta() sin red. Contenido inventado a propósito (ningún
+  dato real ni personal): dos productos de la misma alerta, mismo
+  registro sanitario, dos presentaciones.
+-->
+<main>
+  <table class="inv-alerta-tabla">
+    <tr>
+      <td data-etiqueta="Producto">PRODUCTO DE PRUEBA X 60 CAPSULAS</td>
+      <td data-etiqueta="Registro sanitario">RSA-0012345-2024</td>
+      <td data-etiqueta="Titular">COMERCIALIZADORA DE PRUEBA SAS</td>
+      <td data-etiqueta="Lote / Serial">LOTE-0001</td>
+    </tr>
+    <tr>
+      <td data-etiqueta="Producto">PRODUCTO DE PRUEBA X 120 CAPSULAS</td>
+      <td data-etiqueta="Registro sanitario">RSA-0012345-2024</td>
+      <td data-etiqueta="Titular">COMERCIALIZADORA DE PRUEBA SAS</td>
+      <td data-etiqueta="Lote / Serial">LOTE-0002</td>
+    </tr>
+  </table>
+  <h3>Descripción del problema</h3>
+  <div class="inv-alerta-bloque">
+    Se evidenció la comercialización de este producto sin contar con el registro sanitario vigente ante el INVIMA.
+  </div>
+</main>
