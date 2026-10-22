@@ -129,11 +129,16 @@
      ver el PR de esta tarea): suave a ~10%/~12% de viewport pasa
      14.49–14.94:1 (texto) y 8.77–9.04:1 (texto-suave) — el original
      medía 15.35–16.11 / 9.29–9.75, baja menos de un punto, de sobra
-     por encima del mínimo AA de 4.5:1. La barra lateral sigue opaca
-     (--superficie) para que cifras y tablas no se midan contra el
-     azul — la barra SUPERIOR ya no (ver BarraSuperior.module.css):
-     ahí es a propósito donde este degradado tiene que asomar desde el
-     borde de arriba. */
+     por encima del mínimo AA de 4.5:1.
+
+     Corrección (fix-ui-marca-ajustes, punto 2): la barra LATERAL
+     también es transparente ahora (BarraLateral.module.css) — mide
+     100vh y está sticky top:0, igual que este pseudo-elemento fixed,
+     así que el MISMO degradado asoma ahí también, alineado pixel a
+     pixel con el del área principal, sin duplicar la receta. Las
+     tarjetas y tablas de ADENTRO del panel siguen opacas
+     (--superficie): esto nunca afecta esas cifras, solo el fondo de
+     la página detrás de las dos barras. */
   --fondo-app: var(--fondo-app-suave);
   --fondo-app-suave:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
@@ -314,41 +319,50 @@
      (esta clase NUNCA se usa en texto chico, ver .zx-texto-plata). Los
      dos extremos sí son los pedidos tal cual (9–12:1, de sobra). */
   --degradado-plata-texto: linear-gradient(100deg, #3f4651 0%, #656c77 46%, #2e343d 100%);
-  /* Blanco de base, azul y plata apenas teñidos. El alfa se queda
-     bajo para que #5b6270 (cuerpo secundario, 6.13:1 sobre blanco) y
-     #686868 (títulos) no caigan de 4.5:1.
+  /* Corrección (fix-ui-marca-ajustes, punto 3): azul metálico arriba,
+     pasando por plateado/gris metalizado, blanco abajo — antes era
+     "apenas teñido" (un solo matiz de azul, alfa casi invisible). Un
+     solo degradado por variante (nunca dos capas separadas: azul y
+     plata son colores DISTINTOS en el mismo linear-gradient, cada
+     punto del eje tiene un único color — dos capas sumadas hubieran
+     compuesto el alfa de más en la zona donde se solapan).
 
-     Tarea "marca unificada": mismo color-mix con --azul-metal-2 que el
-     resto de la app (antes era el literal rgb(37,99,235), suelto) —
-     se mantiene la MISMA estructura de paradas y los MISMOS alfas que
-     ya estaban verificados, solo cambia el matiz, nunca azul-metal-3
-     (el más claro): con un alfa tan bajo, el margen ya es el más
-     ajustado de los tres fondos (4.5:1 justo), y verificado con script
-     el único punto que de verdad importaba (suave, ~10% de viewport,
-     #6e6e6e el caso límite) bajó de 4.86 a 4.84 — prácticamente
-     idéntico, nunca cerca de 4.5. */
-  --fondo-app-suave:
-    linear-gradient(180deg, rgba(110, 110, 110, 0) 8%, rgba(110, 110, 110, 0.035) 16%, rgba(110, 110, 110, 0) 24%),
-    linear-gradient(180deg, color-mix(in srgb, var(--azul-metal-2) 4.5%, transparent) 0%, color-mix(in srgb, var(--azul-metal-2) 2%, transparent) 14%, transparent 25%);
-  --fondo-app-medio:
-    linear-gradient(180deg, rgba(110, 110, 110, 0) 12%, rgba(110, 110, 110, 0.04) 22%, rgba(110, 110, 110, 0) 32%),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--azul-metal-2) 7%, transparent) 0%,
-      color-mix(in srgb, var(--azul-metal-2) 3.5%, transparent) 18%,
-      color-mix(in srgb, var(--azul-metal-2) 1.2%, transparent) 36%,
-      transparent 48%
-    );
-  --fondo-app-intenso:
-    linear-gradient(180deg, rgba(192, 192, 192, 0.05) 0%, rgba(192, 192, 192, 0) 8%, rgba(110, 110, 110, 0.045) 20%, rgba(110, 110, 110, 0) 32%),
-    radial-gradient(80% 22% at 50% 0%, color-mix(in srgb, var(--azul-metal-2) 9%, transparent) 0%, transparent 70%),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--azul-metal-2) 9%, transparent) 0%,
-      color-mix(in srgb, var(--azul-metal-2) 4.5%, transparent) 22%,
-      color-mix(in srgb, var(--azul-metal-2) 1.6%, transparent) 45%,
-      transparent 58%
-    );
+     El techo real NO es estético, es WCAG: a diferencia de oscuro
+     (donde el texto casi blanco tiene muchísimo margen contra el
+     azul), en claro el texto chico (--icono/--plata-etiqueta, #686868,
+     13.5-15px — nunca "texto grande" bajo WCAG) se mide contra ESTE
+     MISMO fondo en el sidebar (ítems del menú) y en la barra superior
+     (nombre de empresa, NIT·rol) en TODA la altura donde aparezcan,
+     no solo en un punto de muestra. Se buscó con script el alfa
+     máximo de cada color que mantiene a #686868 en 4.5:1 (el mínimo
+     AA real): azul-metal-2 solo ~0.13, plata-medio solo ~0.22 — acá se
+     usan valores por debajo de esos techos, con margen. Verificado
+     con script en todo el tramo de 0% a 32% (suave): el peor punto
+     mide 4.77:1 (texto-suave y texto #000 quedan muy por encima, 5.25+
+     y 18+). Medio/intenso llegan más abajo y un poco más saturados
+     (hasta 12%/20%/10%, el peor caso ahí mide 4.61-4.62:1) — reverificado
+     igual, nunca por debajo de 4.5. */
+  --fondo-app-suave: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--azul-metal-2) 10%, transparent) 0%,
+    color-mix(in srgb, var(--plata-medio) 16%, transparent) 14%,
+    color-mix(in srgb, var(--plata) 6%, transparent) 24%,
+    transparent 32%
+  );
+  --fondo-app-medio: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--azul-metal-2) 12%, transparent) 0%,
+    color-mix(in srgb, var(--plata-medio) 20%, transparent) 20%,
+    color-mix(in srgb, var(--plata) 8%, transparent) 36%,
+    transparent 48%
+  );
+  --fondo-app-intenso: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--azul-metal-2) 12%, transparent) 0%,
+    color-mix(in srgb, var(--plata-medio) 20%, transparent) 26%,
+    color-mix(in srgb, var(--plata) 10%, transparent) 46%,
+    transparent 62%
+  );
   /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
      arriba: sin atributo data-fondo, gana el suave. */
   --fondo-app: var(--fondo-app-suave);

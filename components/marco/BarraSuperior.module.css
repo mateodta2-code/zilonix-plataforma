@@ -96,19 +96,16 @@
   box-shadow: var(--sombra-foco);
 }
 
-.centro {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  min-width: 0;
-}
-
+/* Corrección: antes era .centro (flex:1, justify-content:center),
+   centrado en TODA la barra. Ahora el buscador vive dentro de
+   .derecha, pegado a la izquierda de avisos/tema/usuario — más
+   angosto que antes (240px en vez de 360px), ya no necesita crecer. */
 .buscar {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  max-width: 360px;
+  width: 240px;
+  flex-shrink: 0;
   padding: 7px 12px;
   border-radius: var(--radio-boton);
   border: 1px solid var(--borde);
@@ -219,7 +216,10 @@
 }
 
 @media (max-width: 860px) {
-  .centro {
+  /* Mismo patrón de siempre: se oculta en vez de apilar (no hay
+     espacio real para un buscador angosto + avisos + tema + usuario
+     en una sola fila de 68px de barra lateral contraída). */
+  .buscar {
     display: none;
   }
 

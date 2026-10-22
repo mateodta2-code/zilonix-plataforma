@@ -48,17 +48,18 @@ export function BarraSuperior({
         )}
       </div>
 
-      <div className={styles.centro}>
-        {/* Deshabilitada a propósito — no hay índice de búsqueda
-            todavía, y un campo que no busca nada es peor que no
-            tener campo. */}
+      <div className={styles.derecha}>
+        {/* Corrección: antes vivía centrado en TODA la barra (su
+            propio bloque flex:1); ahora queda pegado a la izquierda
+            del grupo avisos/tema/usuario, dentro de ese mismo grupo
+            de la derecha. Deshabilitada a propósito — no hay índice
+            de búsqueda todavía, y un campo que no busca nada es peor
+            que no tener campo. */}
         <button type="button" disabled className={styles.buscar} title="Pendiente de conectar">
           <IconoBuscar size={16} />
-          <span className={styles.buscarTexto}>Buscar… (pendiente de conectar)</span>
+          <span className={styles.buscarTexto}>Buscar…</span>
         </button>
-      </div>
 
-      <div className={styles.derecha}>
         {mostrarCampana && (
           <Link href="/panel/avisos-ml" className={styles.botonIcono} title="Avisos de Mercado Libre">
             {iconoDeClave("avisosMl", { size: 18 })}
