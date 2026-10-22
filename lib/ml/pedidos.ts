@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lte, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { pedidoEventos, pedidos } from "@/db/schema";
 
@@ -36,8 +36,112 @@ export async function registrarEventoPedido(
   );
 }
 
-export async function listarPedidos(empresaId: string) {
-  return dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.empresaId, empresaId)).orderBy(desc(pedidos.fecha)));
+// Issue "tabla completa de pedidos" — valores reales de order.status de
+// la API de Mercado Libre (documentados públicamente por ML). OJO: a
+// diferencia del resto de lib/ml/ (confirmado contra el código real que
+// ya corre en producción en zilonix-os-web), esta lista NO tiene
+// precedente ahí — ese sistema solo revisa el status del PAGO
+// ("approved"), nunca el status de la ORDEN. Si algún pedido real trae
+// un valor fuera de esta lista, el filtro de "Estado" simplemente no lo
+// va a poder elegir (no rompe nada, pero tampoco sirve) — confirmar y
+// ajustar esta lista con un pedido real apenas haya uno en staging.
+export const ESTADOS_PEDIDO_FILTRO = [
+  { valor: "confirmed", etiqueta: "Confirmado" },
+  { valor: "payment_required", etiqueta: "Pago pendiente" },
+  { valor: "payment_in_process", etiqueta: "Pago en proceso" },
+  { valor: "paid", etiqueta: "Pagado" },
+  { valor: "cancelled", etiqueta: "Cancelado" },
+  { valor: "invalid", etiqueta: "Inválido" },
+] as const;
+
+export const ORDENES_PEDIDO_FILTRO = ["fecha_desc", "fecha_asc", "total_desc", "total_asc"] as const;
+export type OrdenPedidos = (typeof ORDENES_PEDIDO_FILTRO)[number];
+
+export type FiltroPedidos = {
+  busqueda?: string;
+  estado?: string;
+  desde?: string; // "YYYY-MM-DD", hora de Colombia
+  hasta?: string; // "YYYY-MM-DD", hora de Colombia
+  orden?: string;
+  pagina?: number;
+};
+
+export const TAMANO_PAGINA_PEDIDOS = 25;
+
+// Colombia no tiene horario de verano — el offset contra UTC es fijo
+// todo el año, así que no hace falta ninguna librería de zonas
+// horarias para calcular "el día completo en Bogotá" (sin dependencia
+// nueva, como pide la tarea).
+const OFFSET_COLOMBIA = "-05:00";
+
+function inicioDiaColombia(fecha: string): Date | null {
+  const d = new Date(`${fecha}T00:00:00${OFFSET_COLOMBIA}`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function finDiaColombia(fecha: string): Date | null {
+  const d = new Date(`${fecha}T23:59:59.999${OFFSET_COLOMBIA}`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export type ResultadoPedidos = {
+  pedidos: (typeof pedidos.$inferSelect)[];
+  total: number;
+  pagina: number;
+  totalPaginas: number;
+};
+
+// Issue "tabla completa de pedidos" — búsqueda, filtro y orden, todo
+// validado ACÁ (no solo en la página): cualquier valor de estado/orden
+// que no esté en las listas de arriba se ignora en silencio (nunca un
+// error 500 por un ?estado= raro en la URL), y la búsqueda de texto usa
+// ilike() de Drizzle (parámetro real, nunca texto del usuario pegado a
+// mano en el SQL). "Comprador" y "SKU" NO se pueden buscar todavía: la
+// tabla pedidos no guarda comprador, y el enlace con SKU es tarea
+// futura (ver el comentario de publicaciones.skuId en db/schema.ts) —
+// buscar solo filtra por número de pedido hasta que esos datos existan.
+export async function listarPedidosFiltrados(empresaId: string, filtro: FiltroPedidos = {}): Promise<ResultadoPedidos> {
+  const condiciones = [eq(pedidos.empresaId, empresaId)];
+
+  if (filtro.busqueda) {
+    condiciones.push(ilike(pedidos.pedidoIdExterno, `%${filtro.busqueda}%`));
+  }
+  if (filtro.estado && ESTADOS_PEDIDO_FILTRO.some((e) => e.valor === filtro.estado)) {
+    condiciones.push(eq(pedidos.estado, filtro.estado));
+  }
+  const desde = filtro.desde ? inicioDiaColombia(filtro.desde) : null;
+  if (desde) condiciones.push(gte(pedidos.fecha, desde));
+  const hasta = filtro.hasta ? finDiaColombia(filtro.hasta) : null;
+  if (hasta) condiciones.push(lte(pedidos.fecha, hasta));
+
+  const ordenValido = (ORDENES_PEDIDO_FILTRO as readonly string[]).includes(filtro.orden ?? "") ? (filtro.orden as OrdenPedidos) : "fecha_desc";
+  const columnaOrden = {
+    fecha_desc: desc(pedidos.fecha),
+    fecha_asc: asc(pedidos.fecha),
+    total_desc: desc(pedidos.total),
+    total_asc: asc(pedidos.total),
+  }[ordenValido];
+
+  const pagina = Number.isInteger(filtro.pagina) && (filtro.pagina as number) > 0 ? (filtro.pagina as number) : 1;
+
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const condicion = and(...condiciones);
+
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)`.mapWith(Number) })
+      .from(pedidos)
+      .where(condicion);
+
+    const filas = await tx
+      .select()
+      .from(pedidos)
+      .where(condicion)
+      .orderBy(columnaOrden)
+      .limit(TAMANO_PAGINA_PEDIDOS)
+      .offset((pagina - 1) * TAMANO_PAGINA_PEDIDOS);
+
+    return { pedidos: filas, total, pagina, totalPaginas: Math.max(1, Math.ceil(total / TAMANO_PAGINA_PEDIDOS)) };
+  });
 }
 
 export type EventoPedido = { paso: PasoPedido; ts: Date; actorTipo: "persona" | "sistema"; detalle: string | null };

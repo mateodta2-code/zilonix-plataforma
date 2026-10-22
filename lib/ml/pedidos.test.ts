@@ -1,9 +1,9 @@
 import { randomUUID } from "crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, empresas, pedidos } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { listarPedidos, obtenerPedidoConEventos, PASOS_PEDIDO, registrarEventoPedido } from "./pedidos";
+import { listarPedidosFiltrados, obtenerPedidoConEventos, PASOS_PEDIDO, registrarEventoPedido } from "./pedidos";
 
 // Tarea 2.7 — prueba real contra Postgres: los eventos de un pedido
 // respetan el aislamiento de siempre, nunca se duplica un paso, y la
@@ -71,10 +71,163 @@ describe("pedidos y línea de tiempo (tarea 2.7)", () => {
   });
 
   it("empresa B nunca ve los pedidos ni los eventos de empresa A", async () => {
-    const lista = await listarPedidos(empresaBId);
-    expect(lista).toHaveLength(0);
+    const lista = await listarPedidosFiltrados(empresaBId);
+    expect(lista.pedidos).toHaveLength(0);
+    expect(lista.total).toBe(0);
 
     const resultado = await obtenerPedidoConEventos(empresaBId, pedidoId);
     expect(resultado).toBeNull(); // RLS: el pedido de A ni existe bajo el contexto de B
+  });
+});
+
+// Issue "tabla completa de pedidos" — prueba real contra Postgres de
+// búsqueda, filtro por estado/fecha, orden y paginación, todo en
+// listarPedidosFiltrados(). 30 pedidos con fecha y total relacionados
+// EN SENTIDO INVERSO (fecha sube con i, total baja con i) a propósito:
+// así "orden=fecha_desc" y "orden=total_desc" dan resultados distintos
+// y la prueba demuestra de verdad qué columna ordena, no una
+// coincidencia.
+describe("listarPedidosFiltrados — búsqueda, filtro, orden y paginación", () => {
+  vi.setConfig({ testTimeout: 20_000 });
+
+  const empresaId = randomUUID();
+  const empresaBId = randomUUID();
+  const TOTAL_PEDIDOS = 30;
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(empresas).values({ id: empresaId, nombre: "Empresa filtros pedidos", nit: `TEST-PEDF-${empresaId.slice(0, 8)}` })
+    );
+    await dbComoEmpresa(empresaBId, (tx) =>
+      tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B filtros pedidos", nit: `TEST-PEDFB-${empresaBId.slice(0, 8)}` })
+    );
+
+    const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(cuentasMl)
+        .values({
+          empresaId,
+          cuentaIdExterna: `ml-user-pedf-${randomUUID()}`,
+          nickname: "VENDEDOR_PEDF",
+          accessTokenCifrado: cifrarToken("access"),
+          refreshTokenCifrado: cifrarToken("refresh"),
+          tokenExpiraTs: new Date(Date.now() + 3600_000),
+        })
+        .returning({ id: cuentasMl.id })
+    );
+    const [cuentaB] = await dbComoEmpresa(empresaBId, (tx) =>
+      tx
+        .insert(cuentasMl)
+        .values({
+          empresaId: empresaBId,
+          cuentaIdExterna: `ml-user-pedfb-${randomUUID()}`,
+          nickname: "VENDEDOR_PEDFB",
+          accessTokenCifrado: cifrarToken("access-b"),
+          refreshTokenCifrado: cifrarToken("refresh-b"),
+          tokenExpiraTs: new Date(Date.now() + 3600_000),
+        })
+        .returning({ id: cuentasMl.id })
+    );
+
+    // i=0..29: fecha = 1..30 de enero de 2026 (sube con i); total =
+    // 1030..1001 (baja con i). i=15 tiene un pedidoIdExterno único para
+    // la prueba de búsqueda; i=20 tiene un estado único ("cancelled")
+    // para la prueba de filtro de estado — el resto queda en "paid".
+    const filasPedidos = Array.from({ length: TOTAL_PEDIDOS }, (_, i) => ({
+      empresaId,
+      cuentaMlId: cuenta.id,
+      pedidoIdExterno: i === 15 ? "BUSCAME-ESPECIAL" : `FILTRO-${i}`,
+      fecha: new Date(Date.UTC(2026, 0, i + 1, 12, 0, 0)),
+      total: String(1030 - i),
+      moneda: "COP",
+      estado: i === 20 ? "cancelled" : "paid",
+    }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidos).values(filasPedidos));
+
+    // Empresa B: un pedido con el MISMO texto de búsqueda que el de A
+    // ("BUSCAME-ESPECIAL") — la prueba de aislamiento de abajo confirma
+    // que buscar ese texto bajo el contexto de A nunca trae el de B, ni
+    // al revés, aunque el texto coincida.
+    await dbComoEmpresa(empresaBId, (tx) =>
+      tx.insert(pedidos).values({
+        empresaId: empresaBId,
+        cuentaMlId: cuentaB.id,
+        pedidoIdExterno: "BUSCAME-ESPECIAL",
+        fecha: new Date("2026-02-01T12:00:00.000Z"),
+        total: "999999",
+        moneda: "COP",
+        estado: "paid",
+      })
+    );
+  });
+
+  it("sin filtros: trae la primera página (25) ordenada por fecha descendente por defecto", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId);
+    expect(resultado.total).toBe(TOTAL_PEDIDOS);
+    expect(resultado.totalPaginas).toBe(2);
+    expect(resultado.pagina).toBe(1);
+    expect(resultado.pedidos).toHaveLength(25);
+    expect(resultado.pedidos[0].pedidoIdExterno).toBe("FILTRO-29"); // el más reciente
+  });
+
+  it("página 2 trae el resto (5) — \"Mostrando 26–30 de 30\"", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { pagina: 2 });
+    expect(resultado.pedidos).toHaveLength(5);
+    expect(resultado.pagina).toBe(2);
+  });
+
+  it("pagina inválida (0, negativa o no entera) se trata como 1, nunca revienta", async () => {
+    for (const paginaInvalida of [0, -5, 1.5]) {
+      const resultado = await listarPedidosFiltrados(empresaId, { pagina: paginaInvalida });
+      expect(resultado.pagina).toBe(1);
+    }
+  });
+
+  it("búsqueda por número de pedido usa ilike (parcial, sin importar mayúsculas)", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { busqueda: "buscame" });
+    expect(resultado.total).toBe(1);
+    expect(resultado.pedidos[0].pedidoIdExterno).toBe("BUSCAME-ESPECIAL");
+  });
+
+  it("filtro por estado de la lista permitida", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { estado: "cancelled" });
+    expect(resultado.total).toBe(1);
+    expect(resultado.pedidos[0].estado).toBe("cancelled");
+  });
+
+  it("un ?estado= fuera de la lista permitida se ignora (nunca un error, nunca 0 resultados por un valor raro)", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { estado: "estado-que-no-existe" });
+    expect(resultado.total).toBe(TOTAL_PEDIDOS);
+  });
+
+  it("un ?orden= fuera de la lista permitida se ignora y usa fecha_desc por defecto", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { orden: "orden-que-no-existe" });
+    expect(resultado.pedidos[0].pedidoIdExterno).toBe("FILTRO-29");
+  });
+
+  it("orden=total_desc ordena por total, no por fecha (son inversos en esta prueba)", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { orden: "total_desc" });
+    expect(resultado.pedidos[0].pedidoIdExterno).toBe("FILTRO-0"); // total más alto (1030), fecha más vieja
+  });
+
+  it("orden=fecha_asc trae primero el pedido más viejo", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { orden: "fecha_asc" });
+    expect(resultado.pedidos[0].pedidoIdExterno).toBe("FILTRO-0");
+  });
+
+  it("rango de fechas (desde/hasta, hora de Colombia) solo trae los pedidos de esos días", async () => {
+    const resultado = await listarPedidosFiltrados(empresaId, { desde: "2026-01-10", hasta: "2026-01-12" });
+    expect(resultado.total).toBe(3); // días 10, 11 y 12 de enero (i=9,10,11)
+  });
+
+  it("aislamiento A/B: buscar el mismo texto nunca mezcla los pedidos de la otra empresa", async () => {
+    const [deA, deB] = await Promise.all([
+      listarPedidosFiltrados(empresaId, { busqueda: "BUSCAME" }),
+      listarPedidosFiltrados(empresaBId, { busqueda: "BUSCAME" }),
+    ]);
+    expect(deA.total).toBe(1);
+    expect(deA.pedidos[0].empresaId).toBe(empresaId);
+    expect(deB.total).toBe(1);
+    expect(deB.pedidos[0].empresaId).toBe(empresaBId);
   });
 });
