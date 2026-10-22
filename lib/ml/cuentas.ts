@@ -96,6 +96,16 @@ export async function desconectarCuenta(empresaId: string, cuentaId: string): Pr
   );
 }
 
+// Issue #54 (Z-MT-08) — lo único que necesita <SelectorCuentaMl/>
+// (components/SelectorCuentaMl.tsx): id y apodo de las cuentas
+// conectadas de la empresa activa, nunca tokens ni otro dato sensible.
+// Misma conexión que respeta RLS (dbComoEmpresa) que ya usa
+// listarCuentasConectadas() — nunca el superusuario.
+export async function listarCuentasMlParaSelector(empresaId: string): Promise<{ id: string; apodo: string }[]> {
+  const cuentas = await listarCuentasConectadas(empresaId);
+  return cuentas.filter((c) => !c.desconectadaTs).map((c) => ({ id: c.id, apodo: c.nickname }));
+}
+
 export async function listarCuentasConectadas(empresaId: string) {
   return dbComoEmpresa(empresaId, (tx) =>
     tx
