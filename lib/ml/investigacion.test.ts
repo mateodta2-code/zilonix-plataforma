@@ -225,6 +225,30 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     }
   });
 
+  it("corrección Pablo — tope de 20 ids de categoría antes de pedirles nombre/foto (obtenerProducto)", async () => {
+    // Pocos candidatos de TEXTO (5) + muchos ids de CATEGORÍA (30, todos
+    // nuevos) — sin este tope, obtenerProducto se llamaría 30 veces
+    // (ninguno de los 35 resultantes chocaría con el tope de 40 total);
+    // con el tope, se llama como máximo 20 veces, así que el resultado
+    // final queda en 5+20=25 publicaciones, nunca 30 ni 35.
+    const texto = Array.from({ length: 5 }, (_, i) => ({ id: `T${i}`, nombre: "Reloj digital texto", foto: null }));
+    const categoriaIds = Array.from({ length: 30 }, (_, i) => `C${i}`);
+    vi.mocked(buscarProductosCatalogo).mockResolvedValueOnce(texto).mockResolvedValue([]);
+    vi.mocked(resolverCategoria).mockResolvedValue({ categoryId: "CAT1" });
+    vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue(categoriaIds);
+    vi.mocked(obtenerProducto).mockImplementation(async (id: string) => ({ id, nombre: "Reloj digital categoria", foto: null }));
+    vi.mocked(obtenerOfertasProducto).mockImplementation(async (productId: string) => [
+      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null },
+    ]);
+    vi.mocked(obtenerVendedor).mockResolvedValue({ nickname: "Vendedor", esPlatinum: false });
+
+    const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
+
+    expect(obtenerProducto).toHaveBeenCalledTimes(20);
+    expect(obtenerOfertasProducto).toHaveBeenCalledTimes(25);
+    expect(resultado.publicacionesEncontradas).toBe(25);
+  });
+
   it("HTTP 429 de Mercado Libre corta toda la búsqueda con el aviso específico (no un 500 genérico)", async () => {
     vi.mocked(buscarProductosCatalogo).mockRejectedValue(new LimiteMercadoLibreErrorFalso());
     await expect(buscarInvestigacionProducto("empresa-1", "reloj digital")).rejects.toThrow(/limitando las consultas/i);

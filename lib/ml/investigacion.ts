@@ -50,6 +50,16 @@ const MAX_PAGINAS_TEXTO = 2; // 2×20 = 40 candidatos de texto, de sobra para un
 // necesitar ningún criterio nuevo.
 const TOPE_CANDIDATOS_RELEVANTES = 40;
 
+// Corrección de Pablo — tope de ids de highlights (categoría) a los
+// que se les pide nombre/foto (obtenerProducto) por búsqueda: ese paso
+// corría ANTES del tope de arriba (hace falta el nombre para poder
+// filtrar por relevancia) y no tenía límite propio, así que en teoría
+// podía hacer tantas llamadas como ids mandara el highlights de
+// Mercado Libre. Con este tope, el peor caso de una búsqueda queda en
+// 2 (texto) + 1 (categoría) + 1 (highlights) + 20 (completar nombre) +
+// 40 (ofertas) + 40 (vendedores) = 104 llamadas reales a Mercado Libre.
+const TOPE_IDS_CATEGORIA_A_COMPLETAR = 20;
+
 // Mismos umbrales de ticket que ya confirmó Cowork leyendo el código
 // real de Selltrix (zilonix-os-web/lib/busqueda-productos.js) — para
 // que "ticket alto/bajo" signifique lo mismo en los dos sistemas.
@@ -354,7 +364,7 @@ export async function buscarInvestigacionProducto(empresaId: string, terminoCrud
   const categoria = await resolverCategoria(termino, token);
   if (categoria) {
     const idsCategoria = await obtenerMejoresProductosCategoria(categoria.categoryId, token);
-    const idsPorCompletar = idsCategoria.filter((id) => !candidatosPorId.has(id));
+    const idsPorCompletar = idsCategoria.filter((id) => !candidatosPorId.has(id)).slice(0, TOPE_IDS_CATEGORIA_A_COMPLETAR);
     await enLotes(idsPorCompletar, CONCURRENCIA, async (id) => {
       const info = await obtenerProducto(id, token);
       if (info) candidatosPorId.set(id, info);
