@@ -13,7 +13,10 @@
   --superficie-2: #121214;
   --borde: #222225;
   --texto: #f2f4f8;
-  --texto-suave: #8a909c;
+  /* Plata, no gris azulado: sobre el azul del fondo #8a909c bajaba de
+     4.5:1. #C0C0C0 mide 11.54:1 sobre negro y 5.26:1 sobre el azul más
+     vivo de la variante intenso. */
+  --texto-suave: #c0c0c0;
 
   /* Paleta plata oficial del manual (las 4 paradas reales del
      degradado de marca, de más clara a más oscura). --plata/--plata-2
@@ -77,18 +80,16 @@
     #767676 100%
   );
   --degradado-plata-borde: var(--degradado-plata);
-  /* Texto plateado. La parada más oscura en oscuro es #939393 (6.40:1
-     sobre la tarjeta #0b0b0c, 5.18:1 sobre el azul del fondo "intenso"
-     a la altura del título). #6E6E6E quedó afuera del texto porque
-     sobre #0b0b0c mide 3.86:1 (pasa texto grande, no cuerpo). En claro
-     el bloque de tema lo reemplaza por el lado #6E6E6E. */
+  /* Texto plateado. La parada más oscura es #C0C0C0: #939393 sobre el
+     azul vivo del fondo intenso (#214288) mide 3.3:1. #C0C0C0 mide
+     5.26:1 ahí y 10.81:1 sobre la tarjeta #0b0b0c. En claro el bloque
+     de tema lo reemplaza por el lado #6E6E6E. */
   --degradado-plata-texto: linear-gradient(
     100deg,
-    #9a9a9a 0%,
-    #c9c9c9 28%,
-    #e6e6e6 50%,
-    #c0c0c0 72%,
-    #939393 100%
+    #c0c0c0 0%,
+    #e6e6e6 46%,
+    #d0d0d0 72%,
+    #c0c0c0 100%
   );
 
   /* Fondo de la página: azul arriba, negro abajo, con una banda de
@@ -102,16 +103,15 @@
      midan contra el azul. */
   --fondo-app: var(--fondo-app-medio);
   --fondo-app-suave:
-    linear-gradient(180deg, rgba(230, 230, 230, 0) 14%, rgba(230, 230, 230, 0.055) 22%, rgba(230, 230, 230, 0) 30%),
-    linear-gradient(180deg, rgba(37, 99, 235, 0.34) 0%, rgba(59, 130, 246, 0.14) 8%, rgba(59, 130, 246, 0.06) 18%, rgba(59, 130, 246, 0) 25%);
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.5) 0%, rgba(59, 130, 246, 0.22) 10%, rgba(37, 99, 235, 0.08) 18%, rgba(37, 99, 235, 0) 25%);
   --fondo-app-medio:
-    linear-gradient(180deg, rgba(230, 230, 230, 0) 16%, rgba(230, 230, 230, 0.075) 26%, rgba(230, 230, 230, 0) 36%),
-    radial-gradient(90% 18% at 50% 0%, rgba(96, 165, 250, 0.28) 0%, rgba(37, 99, 235, 0.08) 55%, transparent 100%),
-    linear-gradient(180deg, rgba(29, 78, 216, 0.78) 0%, rgba(37, 99, 235, 0.42) 6%, rgba(30, 64, 175, 0.26) 14%, rgba(37, 99, 235, 0.14) 28%, rgba(37, 99, 235, 0.05) 40%, rgba(37, 99, 235, 0) 52%);
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.58) 0%, rgba(37, 99, 235, 0.42) 14%, rgba(37, 99, 235, 0.22) 28%, rgba(30, 64, 175, 0.1) 40%, rgba(37, 99, 235, 0) 50%);
   --fondo-app-intenso:
-    linear-gradient(180deg, rgba(230, 230, 230, 0.14) 0%, rgba(230, 230, 230, 0.05) 4%, rgba(230, 230, 230, 0) 9%, rgba(220, 220, 220, 0.08) 20%, rgba(220, 220, 220, 0) 32%),
-    radial-gradient(78% 14% at 50% 0%, rgba(147, 197, 253, 0.5) 0%, rgba(59, 130, 246, 0.16) 46%, transparent 100%),
-    linear-gradient(180deg, rgba(59, 130, 246, 0.72) 0%, rgba(37, 99, 235, 0.4) 6%, rgba(30, 64, 175, 0.28) 16%, rgba(37, 99, 235, 0.16) 32%, rgba(37, 99, 235, 0.07) 48%, rgba(37, 99, 235, 0.03) 55%, rgba(37, 99, 235, 0) 66%);
+    linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
+    radial-gradient(72% 9% at 50% 0%, rgba(191, 219, 254, 0.22) 0%, transparent 70%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.58) 0%, rgba(37, 99, 235, 0.46) 18%, rgba(37, 99, 235, 0.3) 34%, rgba(30, 64, 175, 0.18) 48%, rgba(37, 99, 235, 0.08) 58%, rgba(37, 99, 235, 0) 70%);
 
   --radio-boton: 6px;
   --radio-tarjeta: 12px;
@@ -134,7 +134,7 @@
   --superficie-2: #121214;
   --borde: #222225;
   --texto: #f2f4f8;
-  --texto-suave: #8a909c;
+  --texto-suave: #c0c0c0;
   --plata: #c0c0c0;
   --plata-2: var(--plata-medio);
   --acento: #3b82f6;
@@ -151,18 +151,17 @@
   --exito-texto: #22c55e;
   --peligro-texto: #ef4444;
   --degradado-plata-borde: var(--degradado-plata);
-  --degradado-plata-texto: linear-gradient(100deg, #9a9a9a 0%, #c9c9c9 28%, #e6e6e6 50%, #c0c0c0 72%, #939393 100%);
+  --degradado-plata-texto: linear-gradient(100deg, #c0c0c0 0%, #e6e6e6 46%, #d0d0d0 72%, #c0c0c0 100%);
   --fondo-app-suave:
-    linear-gradient(180deg, rgba(230, 230, 230, 0) 14%, rgba(230, 230, 230, 0.055) 22%, rgba(230, 230, 230, 0) 30%),
-    linear-gradient(180deg, rgba(37, 99, 235, 0.34) 0%, rgba(59, 130, 246, 0.14) 8%, rgba(59, 130, 246, 0.06) 18%, rgba(59, 130, 246, 0) 25%);
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.5) 0%, rgba(59, 130, 246, 0.22) 10%, rgba(37, 99, 235, 0.08) 18%, rgba(37, 99, 235, 0) 25%);
   --fondo-app-medio:
-    linear-gradient(180deg, rgba(230, 230, 230, 0) 16%, rgba(230, 230, 230, 0.075) 26%, rgba(230, 230, 230, 0) 36%),
-    radial-gradient(90% 18% at 50% 0%, rgba(96, 165, 250, 0.28) 0%, rgba(37, 99, 235, 0.08) 55%, transparent 100%),
-    linear-gradient(180deg, rgba(29, 78, 216, 0.78) 0%, rgba(37, 99, 235, 0.42) 6%, rgba(30, 64, 175, 0.26) 14%, rgba(37, 99, 235, 0.14) 28%, rgba(37, 99, 235, 0.05) 40%, rgba(37, 99, 235, 0) 52%);
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.58) 0%, rgba(37, 99, 235, 0.42) 14%, rgba(37, 99, 235, 0.22) 28%, rgba(30, 64, 175, 0.1) 40%, rgba(37, 99, 235, 0) 50%);
   --fondo-app-intenso:
-    linear-gradient(180deg, rgba(230, 230, 230, 0.14) 0%, rgba(230, 230, 230, 0.05) 4%, rgba(230, 230, 230, 0) 9%, rgba(220, 220, 220, 0.08) 20%, rgba(220, 220, 220, 0) 32%),
-    radial-gradient(78% 14% at 50% 0%, rgba(147, 197, 253, 0.5) 0%, rgba(59, 130, 246, 0.16) 46%, transparent 100%),
-    linear-gradient(180deg, rgba(59, 130, 246, 0.72) 0%, rgba(37, 99, 235, 0.4) 6%, rgba(30, 64, 175, 0.28) 16%, rgba(37, 99, 235, 0.16) 32%, rgba(37, 99, 235, 0.07) 48%, rgba(37, 99, 235, 0.03) 55%, rgba(37, 99, 235, 0) 66%);
+    linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
+    radial-gradient(72% 9% at 50% 0%, rgba(191, 219, 254, 0.22) 0%, transparent 70%),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.58) 0%, rgba(37, 99, 235, 0.46) 18%, rgba(37, 99, 235, 0.3) 34%, rgba(30, 64, 175, 0.18) 48%, rgba(37, 99, 235, 0.08) 58%, rgba(37, 99, 235, 0) 70%);
 }
 
 /* data-fondo se declara después del bloque de tema oscuro para que
