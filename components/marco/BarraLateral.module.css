@@ -99,33 +99,38 @@
   gap: 2px;
 }
 
-/* html antepuesto: le gana en especificidad a la regla de una sola
-   clase de .zx-etiqueta en globals.css, sin depender del orden real
-   en que el bundle cargue los dos archivos (mismo criterio que
-   BarraSuperior.module.css). */
+/* Corrección (fix-ui-claro-cruce-alto): "ADMINISTRACIÓN" cae bien
+   abajo en el sidebar (después de Personas) — con el cruce a blanco
+   ahora mucho más arriba (ver --fondo-app-* en globals.css), esta
+   etiqueta SIEMPRE está sobre blanco. Vuelve a --plata-etiqueta
+   normal (antes zona-oscura, fix-ui-claro-como-oscuro). html
+   antepuesto: le gana en especificidad a la regla de una sola clase
+   de .zx-etiqueta en globals.css, sin depender del orden real en que
+   el bundle cargue los dos archivos. */
 html .etiquetaGrupo {
   padding: 0 10px;
   margin: 0 0 6px 0;
-  color: var(--plata-etiqueta-zona-oscura);
+  color: var(--plata-etiqueta);
 }
 
-/* Corrección (fix-ui-claro-como-oscuro): el sidebar entero cae sobre
-   la franja oscura del degradado (hereda --fondo-app por
-   transparencia) — los ítems del menú van en los tokens de "zona
-   oscura" (mismos valores que ya usa oscuro) sin condicionar por
-   tema. .item[data-activo] usa --icono-activo-zona-oscura en vez de
-   --icono-activo: ese último sale de --acento-fuerte, que en claro es
-   azul-metal-2 (#1d4ed8, pensado para verse sobre BLANCO) — oscuro de
-   más contra un fondo casi negro, casi no se vería. */
+/* Corrección (fix-ui-claro-cruce-alto): con el cruce a blanco mucho
+   más arriba, YA NO es cierto que "el sidebar entero cae sobre la
+   franja oscura" (eso era fix-ui-claro-como-oscuro, con el cruce en
+   60-78%). Ahora el DEFAULT de .item es el color normal de claro
+   (para SKU en adelante, que cae sobre blanco) y SOLO Inicio/Pedidos/
+   Despachos — los únicos ítems que, verificado con un modelo de
+   posiciones reales del layout, quedan de verdad sobre la franja
+   oscura en un viewport típico (~900px) — se sobreescriben a zona
+   oscura más abajo, por `href` (siempre son esas 3 rutas exactas,
+   sin importar el rol: /panel, /panel/pedidos, /panel/despachos). */
 html .item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 9px 10px;
   border-radius: var(--radio-boton);
-  /* currentColor pinta el ícono (SVG stroke) y la etiqueta juntos:
-     inactivo plata, hover plata clara, activo azul. */
-  color: var(--icono-zona-oscura);
+  /* currentColor pinta el ícono (SVG stroke) y la etiqueta juntos. */
+  color: var(--icono);
   text-decoration: none;
   border-left: 3px solid transparent;
   cursor: pointer;
@@ -133,12 +138,6 @@ html .item {
   white-space: nowrap;
 }
 
-/* OJO: el hover (no activo) SÍ pone un fondo opaco claro propio
-   (--superficie-2) — ahí el texto vuelve a --icono-hover normal
-   (oscuro), no al de zona oscura, igual que .usuario:hover en
-   BarraSuperior.module.css. El activo (arriba) es distinto: su fondo
-   es un degradado casi transparente (12% de alfa), nunca tapa la
-   franja oscura de verdad, por eso ese sí se queda en zona oscura. */
 .item:hover {
   background: var(--superficie-2);
   color: var(--icono-hover);
@@ -153,12 +152,15 @@ html .item {
   border-left-color: var(--azul-metal-3);
 }
 
+/* Normal de claro por defecto (corrección fix-ui-claro-cruce-alto) —
+   ver el bloque de abajo para Inicio/Pedidos/Despachos, que sí caen
+   sobre la franja oscura y necesitan la versión zona-oscura. */
 .item[data-activo="true"],
 .item[data-activo="true"]:hover {
-  background: linear-gradient(90deg, var(--acento-suave-zona-oscura), transparent 78%);
+  background: linear-gradient(90deg, var(--acento-suave), transparent 78%);
   border-left-color: var(--acento);
-  color: var(--icono-activo-zona-oscura);
-  box-shadow: inset 0 0 18px var(--acento-resplandor-zona-oscura);
+  color: var(--icono-activo);
+  box-shadow: inset 0 0 18px var(--acento-resplandor);
 }
 
 .item[data-deshabilitado="true"] {
@@ -169,6 +171,42 @@ html .item {
 .etiquetaItem {
   font-size: 13.5px;
   font-weight: 500;
+}
+
+/* Corrección (fix-ui-claro-cruce-alto) — Inicio, Pedidos y Despachos:
+   verificado con un modelo de posiciones reales del layout (header
+   64px + logo ~110px + ~41px por ítem) en un viewport típico de
+   ~900px, son los únicos 3 ítems que de verdad quedan sobre la franja
+   oscura del degradado (SKU en adelante ya cae sobre blanco, incluido
+   "ADMINISTRACIÓN" más abajo). Se identifican por `href` — son
+   siempre esas 3 rutas exactas para cualquier rol, a diferencia de
+   "son los primeros 3 ítems", que SÍ cambia según permisos (un rol
+   sin "ventas" no ve Pedidos/Despachos, y el orden del resto se
+   corre). El hover NO se repite acá a propósito: en los dos casos
+   (zona oscura o no) el hover pone su propio fondo opaco claro
+   (--superficie-2) y usa --icono-hover normal — ver la regla de
+   arriba, ya cubre estos 3 ítems también.
+
+   Límite real documentado en el changelog: en un viewport corto
+   (~650px, fuera de lo típico para un panel de escritorio), estos 3
+   ítems pueden terminar más abajo, ya sobre blanco o la banda de
+   cruce — ahí el contraste de este bloque se degrada. No se resuelve
+   acá (necesitaría JS de posición de scroll), queda anotado. */
+.item[href="/panel"],
+.item[href="/panel/pedidos"],
+.item[href="/panel/despachos"] {
+  color: var(--icono-zona-oscura);
+}
+
+.item[href="/panel"][data-activo="true"],
+.item[href="/panel"][data-activo="true"]:hover,
+.item[href="/panel/pedidos"][data-activo="true"],
+.item[href="/panel/pedidos"][data-activo="true"]:hover,
+.item[href="/panel/despachos"][data-activo="true"],
+.item[href="/panel/despachos"][data-activo="true"]:hover {
+  background: linear-gradient(90deg, var(--acento-suave-zona-oscura), transparent 78%);
+  color: var(--icono-activo-zona-oscura);
+  box-shadow: inset 0 0 18px var(--acento-resplandor-zona-oscura);
 }
 
 .piePrincipal {
