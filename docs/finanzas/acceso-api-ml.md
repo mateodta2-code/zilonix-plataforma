@@ -29,7 +29,7 @@ La (g) retenciones (retefuente, reteICA) queda **fuera de la Fase 1**.
 |---|---|---|---|---|---|
 | a | Token vigente o reconectable | `POST /oauth/token`; comprobación con `GET /users/me` | `access_token`, `refresh_token`, `expires_in`, `user_id`, `scope` | **Confirmado por Zilonix OS** (y ya en uso en Seller). Por verificar en staging: que las 16 + 5 cuentas estén conectadas a la app de Seller | [Autenticación y Autorización](https://developers.mercadolibre.com.co/es_ar/autenticacion-y-autorizacion) |
 | b | Detalle de orden, SKU y comisión | `GET /orders/search?seller={id}`; `GET /orders/{id}`; si el SKU viene vacío, `GET /items/{id}` | `order_items[].item.id`, `order_items[].item.seller_sku`, `order_items[].sale_fee`, `payments[].status`, `payments[].date_approved`, `payments[].marketplace_fee`. Comisión = suma de `marketplace_fee` de los pagos aprobados **del detalle** (el listado la trae vacía). `seller_custom_field` no se usa | **Confirmado por Zilonix OS**; ratificar en staging. ⚠️ Qué campo de `/items/{id}` usa el OS como respaldo del SKU no está escrito en el issue: **por verificar** | [Órdenes](https://developers.mercadolibre.com.co/es_ar/gestiona-ventas) |
-| c | Forma de entrega y costo de envío | `GET /shipments/{id}`; `GET /shipments/{id}/costs`; `GET /shipments/{id}/sla` | `logistic_type` (`fulfillment`, `self_service`, `cross_docking`, `xd_drop_off`, `drop_off`); costo real = suma de `cost` de `/costs` (nunca el campo del pago, que da 0). Flex: costo ML = $0 (ML lo revierte) | **Confirmado por Zilonix OS**; ratificar en staging. ⚠️ Las rutas exactas de `cost` dentro de `/costs` (`senders[].cost`, `receiver.cost`) son **por verificar**: el script imprime los nombres de las llaves que llegan | [Envíos](https://developers.mercadolibre.com.co/es_ar/envios) · [Costos de envío](https://developers.mercadolibre.com.co/es_ar/costos-de-envios) |
+| c | Forma de entrega y costo de envío | `GET /shipments/{id}`; `GET /shipments/{id}/costs`; `GET /shipments/{id}/sla` | `logistic_type` (`fulfillment`, `self_service`, `cross_docking`, `xd_drop_off`, `drop_off`); costo real = suma de `cost` de `/costs` (nunca el campo del pago, que da 0). Flex: costo ML = $0 (ML lo revierte) | **Confirmado por Zilonix OS**; ratificar en staging. ⚠️ Las rutas exactas de `cost` dentro de `/costs` (`senders[].cost`, `receiver.cost`) son **por verificar**: el script nombra las llaves conocidas que llegan y cuenta las demás | [Envíos](https://developers.mercadolibre.com.co/es_ar/envios) · [Costos de envío](https://developers.mercadolibre.com.co/es_ar/costos-de-envios) |
 | d | 🔴 Fecha y estado de liberación del pago | `GET /billing/integration/group/ML/order/details?order_ids={id}` (hasta 60 órdenes por llamada) | `results[].payment_info[].money_release_date`, `money_release_status` (`released` en el ejemplo oficial), `money_release_days`, `date_approved`, `payment_id` | **Por verificar en staging — punto crítico**. No existe en el OS. La documentación oficial (sección "Reportes de Facturación → Provisiones") muestra estos campos, pero hay que confirmar con una cuenta real de Colombia que la app de Seller tiene permiso de facturación y que el campo llega | [Provisiones](https://developers.mercadolibre.com.co/es_ar/provisiones) |
 | e | Reembolsos, reclamos y devoluciones | Reembolsos: detalle de la orden (`GET /orders/{id}`). Reclamos: `GET /post-purchase/v1/claims/search?players.user_id={id}&players.role=respondent`, `GET /post-purchase/v1/claims/{id}`. Devoluciones: `GET /post-purchase/v2/claims/{id}/returns` | Orden: `status` (incluye `partially_refunded`), `payments[]`. Reclamo: `id`, `resource_id`, `status`, `type`, `stage`. Devolución: `id`, `shipments[]`, estado | Reembolsos: **confirmado por Zilonix OS** (los descuenta del monto). ⚠️ El campo exacto del monto reembolsado por pago (`payments[].transaction_amount_refunded`) no aparece en la página oficial de Órdenes: **por verificar**. Reclamos y devoluciones **como ajuste financiero**: **por verificar** (el OS los tiene en un buzón aparte, sin efecto en cálculos) | [Órdenes](https://developers.mercadolibre.com.co/es_ar/gestiona-ventas) · [Reclamos](https://developers.mercadolibre.com.co/es_ar/que-es-un-reclamo) · [Devoluciones](https://developers.mercadolibre.com.co/es_ar/gestionar-devoluciones) |
 | f | Publicidad (Product Ads) por cuenta y día | `GET /advertising/advertisers?product_id=PADS` (encabezado `Api-Version: 1`); `GET /advertising/MCO/advertisers/{advertiser_id}/product_ads/campaigns/search?date_from=D&date_to=D&metrics=cost` (encabezado `api-version: 2`) | `advertisers[].advertiser_id`, `advertisers[].site_id`; `results[].metrics.cost`. Se pide **día por día** (el OS lo hace así). La doc permite hasta 90 días hacia atrás y dice que las métricas se actualizan a las 10:00 GMT-3 | **Confirmado por Zilonix OS**; ratificar en staging. ⚠️ **IVA**: según el OS la API trae el costo **sin IVA** (el OS suma 19 % al resumen mensual); la documentación oficial no lo dice en ningún lado — **por verificar** comparando un día contra la factura de ML | [Product Ads (lectura)](https://developers.mercadolibre.com.co/es_ar/product-ads-para-catalogo-y-user-products-lectura) |
@@ -49,7 +49,9 @@ Script: `scripts/finanzas/verificar-acceso-ml.ts`. Es **de solo lectura**:
 - Solo lee `cuentas_ml` con `dbComoEmpresa()`. **No renueva tokens** (renovar escribe en la base y gasta el `refresh_token`, que ML deja usar una vez): si un token está vencido, la celda dice "token vencido".
 - Imprime estados, códigos HTTP, tiempos y **nombres** de campos con sí/no. Nunca tokens, montos, ids de órdenes ni datos de compradores. `logistic_type` y `money_release_status` solo salen si están en una lista conocida; si no, salen como "(valor nuevo)".
 - Mide por cuenta: número de llamadas, respuestas 429, tiempo total y la llamada más lenta. Ante un 429 reintenta con backoff (1 s, 2 s, 4 s).
-- No corre sin `CONFIRMO_SOLO_LECTURA=si`.
+- Cada cuenta sale solo como **"Cuenta N"** (por fecha de conexión, de la más antigua a la más nueva), nunca con el nickname de la tienda: este repo es público y la tabla se pega acá.
+- De `/shipments/{id}/costs` solo nombra las llaves de una lista cerrada (`senders`, `receiver`, `gross_amount`, `save`); las demás se cuentan ("+N no conocida(s)") sin imprimir su nombre.
+- No corre sin `CONFIRMO_SOLO_LECTURA=si` ni sin `AMBIENTE_CONFIRMADO=staging`. Al arrancar muestra solo el **host** de `DATABASE_URL_APP` (nunca usuario ni clave), para confirmar contra qué base corre antes de leer nada.
 
 Antes de correrlo:
 
@@ -60,7 +62,7 @@ Antes de correrlo:
 Comando:
 
 ```bash
-CONFIRMO_SOLO_LECTURA=si EMPRESA_ID=<uuid-de-la-empresa> npx tsx scripts/finanzas/verificar-acceso-ml.ts
+CONFIRMO_SOLO_LECTURA=si AMBIENTE_CONFIRMADO=staging EMPRESA_ID=<uuid-de-la-empresa> npx tsx scripts/finanzas/verificar-acceso-ml.ts
 ```
 
 `MUESTRA_PEDIDOS` (1–10, por defecto 3) cambia cuántas órdenes recientes por cuenta se miran para juntar valores de `logistic_type`.
@@ -72,13 +74,13 @@ Qué hacer con cada resultado:
 | OK | — | Anotar los campos que llegaron |
 | falta permiso (401/403) | La app de Seller no tiene ese permiso funcional, o la cuenta no autorizó | Revisar permisos de la app en ML Developers y reautorizar la cuenta |
 | no disponible (404, o 200 sin el campo clave) | El recurso no existe para esa cuenta/país o el campo no llega | Anotar; si es la (d), avisar a Sharel antes de #132/#133 |
-| sin muestra | La cuenta no tiene órdenes, reclamos o anunciante para probar | Repetir con una cuenta que sí tenga |
+| sin muestra | La cuenta no tiene órdenes (ventas), reclamos o anunciante para probar — en la (e), sin ventas de muestra el estado es este, no "error" | Repetir con una cuenta que sí tenga |
 | token vencido / desconectada | El token pasó sus 6 horas, o la cuenta se desconectó | Abrir la cuenta en el panel o reconectarla en `/panel/conectar-ml` |
 | limitado (429) | Límite por aplicación | Anotar cuántos y cuándo; insumo para el backoff de #123/#130/#133/#135 |
 
 ## 4. Resultado en staging (lo completa Mateo)
 
-Pegar acá la tabla "Cuenta × capacidad" que imprime el script (16 cuentas de Zilonix; luego las 5 de Pachamama), más:
+Pegar acá la tabla "Cuenta × capacidad" que imprime el script (16 cuentas de Zilonix; luego las 5 de Pachamama). Solo "Cuenta N": la correspondencia N → tienda queda fuera del repo, más:
 
 - [ ] De dónde sale la fecha de liberación y cómo se sabe que un pago ya se liberó (d).
 - [ ] Tiempos y 429 con la carga de 21 cuentas.

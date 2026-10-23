@@ -41,6 +41,11 @@ export function validarEntorno(env: Record<string, string | undefined>): string[
   if (env.CONFIRMO_SOLO_LECTURA !== "si") {
     errores.push("Falta CONFIRMO_SOLO_LECTURA=si (confirmación de que se corre solo para leer).");
   }
+  // Revisión del PR #146: el diagnóstico es para staging. Sin esta
+  // confirmación explícita no corre, aunque las demás variables estén.
+  if (env.AMBIENTE_CONFIRMADO !== "staging") {
+    errores.push("Falta AMBIENTE_CONFIRMADO=staging (confirmación de contra qué ambiente se corre).");
+  }
   if (!env.EMPRESA_ID || !UUID_RE.test(env.EMPRESA_ID)) {
     errores.push("Falta EMPRESA_ID (UUID de la empresa cuyas cuentas ML se revisan).");
   }
@@ -48,6 +53,19 @@ export function validarEntorno(env: Record<string, string | undefined>): string[
     if (!env[nombre]) errores.push(`Falta la variable ${nombre} (no se imprime su valor).`);
   }
   return errores;
+}
+
+// Para que quien corre el script vea contra qué base está conectado
+// antes de leer nada: solo el host, nunca usuario, clave, puerto ni
+// nombre de base. Una cadena que no se puede leer como URL no se
+// imprime ni en parte.
+export function hostDeConexion(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname || null;
+  } catch {
+    return null;
+  }
 }
 
 export function clasificarStatus(status: number): Estado {
@@ -93,6 +111,23 @@ export function camposPresentes(dato: unknown, rutas: string[]): Record<string, 
 // nunca sale tal cual por consola.
 export const LOGISTIC_TYPES_CONOCIDOS = ["fulfillment", "self_service", "cross_docking", "xd_drop_off", "drop_off"] as const;
 export const ESTADOS_LIBERACION_CONOCIDOS = ["released", "pending"] as const;
+
+// Llaves de primer nivel de /shipments/{id}/costs que se pueden nombrar
+// en la salida (revisión del PR #146): las que esperamos según el OS y
+// la documentación oficial ("Costos del envío": senders, receiver,
+// save). Cualquier otra se cuenta, pero no se imprime su nombre — igual
+// criterio que logistic_type.
+export const LLAVES_COSTOS_CONOCIDAS = ["senders", "receiver", "gross_amount", "save"] as const;
+
+export function llavesDeListaBlanca(dato: unknown, permitidas: readonly string[]): string {
+  if (!dato || typeof dato !== "object" || Array.isArray(dato)) return "-";
+  const llaves = Object.keys(dato);
+  const conocidas = llaves.filter((l) => permitidas.includes(l));
+  const otras = llaves.length - conocidas.length;
+  const partes = [conocidas.join("/") || "ninguna conocida"];
+  if (otras > 0) partes.push(`+${otras} no conocida(s)`);
+  return partes.join(", ");
+}
 
 export function valorDeListaBlanca(valor: unknown, permitidos: readonly string[]): string | null {
   if (valor === undefined || valor === null || valor === "") return null;

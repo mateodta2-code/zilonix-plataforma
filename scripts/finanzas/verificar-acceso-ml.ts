@@ -15,10 +15,12 @@
 // Uso (Mateo, en staging, con el túnel privado y las variables ya
 // cargadas en su terminal — nunca pegadas en un chat ni en el comando):
 //
-//   CONFIRMO_SOLO_LECTURA=si EMPRESA_ID=<uuid> npx tsx scripts/finanzas/verificar-acceso-ml.ts
+//   CONFIRMO_SOLO_LECTURA=si AMBIENTE_CONFIRMADO=staging EMPRESA_ID=<uuid> npx tsx scripts/finanzas/verificar-acceso-ml.ts
 //
 // Variables: DATABASE_URL_APP, ML_TOKEN_KEY_V1, EMPRESA_ID,
-// CONFIRMO_SOLO_LECTURA=si. Opcional: MUESTRA_PEDIDOS (1–10, por
+// CONFIRMO_SOLO_LECTURA=si, AMBIENTE_CONFIRMADO=staging. Al arrancar
+// imprime solo el host de DATABASE_URL_APP (nunca usuario ni clave)
+// para que se vea contra qué base corre. Opcional: MUESTRA_PEDIDOS (1–10, por
 // defecto 3) = cuántas órdenes recientes por cuenta se miran para
 // juntar valores de logistic_type.
 //
@@ -28,6 +30,7 @@
 
 import {
   ESTADOS_LIBERACION_CONOCIDOS,
+  LLAVES_COSTOS_CONOCIDAS,
   LOGISTIC_TYPES_CONOCIDOS,
   camposPresentes,
   clasificarStatus,
@@ -35,8 +38,10 @@ import {
   esperaBackoffMs,
   formatearDetalle,
   formatearTablaResumen,
+  hostDeConexion,
   idItem,
   idNumerico,
+  llavesDeListaBlanca,
   validarEntorno,
   valorDeListaBlanca,
   type Capacidad,
@@ -65,6 +70,13 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  const host = hostDeConexion(process.env.DATABASE_URL_APP);
+  if (!host) {
+    console.error("DATABASE_URL_APP no se puede leer como URL. No se imprime su valor.");
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`Ambiente confirmado: staging. Base (solo host): ${host}`);
   const empresaId = process.env.EMPRESA_ID as string;
   const muestra = Math.min(10, Math.max(1, Number(process.env.MUESTRA_PEDIDOS) || 3));
 
@@ -82,14 +94,19 @@ async function main() {
     return;
   }
 
+  // Orden estable para que "Cuenta N" sea la misma cuenta en cada corrida.
+  cuentas.sort((x, y) => x.creadoTs.getTime() - y.creadoTs.getTime());
   console.log(`Cuentas ML de la empresa: ${cuentas.length}. Muestra de órdenes por cuenta: ${muestra}.`);
   const resultados: ResultadoCuenta[] = [];
   const logisticTypesVistos = new Set<string>();
 
   for (const [indice, cuenta] of cuentas.entries()) {
-    // El nickname es el nombre de la tienda propia (ya visible en el
-    // panel), no un dato de comprador.
-    const etiqueta = `Cuenta ${indice + 1} (${cuenta.nickname})`;
+    // Solo "Cuenta N", nunca el nickname (revisión del PR #146: la
+    // salida se pega en un documento de un repo público). N sigue el
+    // orden de conexión (creadoTs, ver el sort de arriba), así que quien
+    // corre el script puede cruzar N con la cuenta en el panel sin que
+    // el nombre quede escrito.
+    const etiqueta = `Cuenta ${indice + 1}`;
     const medidor: Medidor = { llamadas: 0, respuestas429: 0, msTotal: 0, msMaximo: 0 };
     const caps = {} as Record<Capacidad, ResultadoCapacidad>;
     const poner = (cap: Capacidad, estado: Estado, detalle: string) => (caps[cap] = { estado, detalle });
@@ -192,7 +209,7 @@ async function main() {
             const costos = await leer(`/shipments/${envioId}/costs`);
             const sla = await leer(`/shipments/${envioId}/sla`);
             const camposCostos = camposPresentes(costos.data, ["senders[].cost", "receiver.cost"]);
-            const llaves = costos.data && typeof costos.data === "object" ? Object.keys(costos.data).join("/") : "-";
+            const llaves = llavesDeListaBlanca(costos.data, LLAVES_COSTOS_CONOCIDAS);
             detalleC = `GET /shipments/{id} HTTP ${envio.status}; /costs HTTP ${costos.status} (llaves: ${llaves}; ${describirCampos(camposCostos)}); /sla HTTP ${sla.status}`;
             poner("c", envio.status !== 200 ? clasificarStatus(envio.status) : clasificarStatus(costos.status), detalleC);
           }
@@ -231,9 +248,11 @@ async function main() {
         const ret = await leer(`/post-purchase/v2/claims/${reclamoId}/returns`);
         devol = `GET /post-purchase/v2/claims/{id}/returns HTTP ${ret.status} (404 = ese reclamo no tiene devolución)`;
       }
+      // Sin ventas de muestra no hay reembolsos que mirar: "sin muestra",
+      // no "error" (revisión del PR #146).
       poner(
         "e",
-        reclamos ? clasificarStatus(reclamos.status) : "error",
+        ordenes.length === 0 || !reclamos ? "sin muestra" : clasificarStatus(reclamos.status),
         `orden: ${describirCampos(camposReembolso)}; GET /post-purchase/v1/claims/search HTTP ${reclamos?.status ?? "-"}; ${devol}`
       );
 
