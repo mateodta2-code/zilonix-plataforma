@@ -298,6 +298,18 @@
   --superficie: #f5f5f6;
   --superficie-2: #ececee;
   --borde: #dcdcdf;
+  /* Tarea "fix-ui-claro-difuminado": con la banda de difuminado ANCHA
+     que pidió Mateo (ver --fondo-app-* más abajo), hay una franja real
+     donde el fondo queda gris a mitad de camino — ahí NINGÚN color de
+     texto plano pasa AA. --pill-claro es el fondo propio que algunos
+     elementos (ítems del sidebar, la fila de pestañas de Inicio) se
+     ponen DETRÁS para no depender de qué haya exactamente ahí: 94% de
+     blanco opaco mide 4.88:1 contra negro puro (con margen sobre el
+     mínimo de 4.5), y es casi blanco puro sobre la zona ya blanca, así
+     que no se nota como una "tarjeta" postiza ahí. Solo existe en
+     claro — en oscuro cada componente que lo usa cae a `transparent`
+     con el valor por defecto del var(), sin cambiar su aspecto actual. */
+  --pill-claro: rgba(255, 255, 255, 0.94);
   --texto: #000000;
   /* Revertido a su valor original (fix-ui-claro-como-oscuro): las dos
      correcciones anteriores lo habían oscurecido a #333843 para
@@ -394,39 +406,29 @@
         asomando antes de tiempo, porque esta capa es 100% opaca en
         toda su extensión.
 
-     Corrección (fix-ui-claro-cruce-alto): Mateo confirmó que el glow
-     de arriba quedó bien, pero el cruce a 60%→78% bajaba demasiado —
-     el negro llegaba hasta debajo de las tarjetas KPI. Lo quería cerca
-     de la línea de pestañas de Inicio (Resumen/Pedidos/Despachos/SKU),
-     no más abajo. El cruce baja a suave 30%→32% (medio 34%→36%,
-     intenso 38%→40%) — una banda ANGOSTA (2 puntos, casi un corte
-     limpio con un poco de antialiasing) en vez de los ~12-18 puntos de
-     antes: una banda ancha crea una franja gris intermedia donde NI el
-     texto claro de zona oscura NI el texto oscuro normal de claro
-     pasan 4.5:1 (confirmado con script probando las dos — ver el PR
-     para la tabla completa) — angostarla reduce esa franja muerta a
-     una tira de un par de píxeles, dentro del margen que ya absorbe el
-     padding de cada fila.
+     Corrección (fix-ui-claro-cruce-alto, ya revertida): Mateo pidió
+     subir el cruce (quedaba debajo de las KPI) y se angostó la banda
+     a 2 puntos para esquivar la "zona muerta" (ni el texto de zona
+     oscura ni el normal de claro pasan AA a mitad de un negro→blanco).
+     Mateo vio el resultado y lo rechazó: un corte así de angosto se ve
+     como un borde duro, no un difuminado — pidió explícitamente volver
+     a una banda ANCHA (negro → gris → blanco) aunque eso reabra la
+     zona muerta, y resolver el contraste ahí por otro lado en vez de
+     angostar la banda de nuevo.
 
-     Consecuencia real (la misma que anticipó el pedido): con el cruce
-     mucho más arriba, la mayoría del menú del sidebar (SKU en
-     adelante) ahora cae sobre BLANCO — esos ítems vuelven a
-     --icono/--plata-etiqueta normales de claro (ver BarraLateral.
-     module.css). Verificado con un modelo de posiciones reales del
-     layout (header 64px + logo ~110px + cada ítem ~41px...) en dos
-     altos de viewport, 900px ("típico", el que pidió verificar) y
-     650px ("corto"): a 900px, Inicio/Pedidos/Despachos quedan
-     limpiamente en la franja oscura (6.3–6.8:1) y SKU en adelante
-     limpiamente en blanco (5.6:1) — con un roce marginal de apenas
-     2 puntos porcentuales en el borde superior de SKU, imperceptible
-     en la práctica con una banda tan angosta. A 650px (viewport
-     realmente chico, fuera de lo típico para un panel de escritorio)
-     Pedidos/Despachos y las pestañas SÍ pueden caer en esa banda
-     angosta con contraste reducido — límite real, documentado en el
-     changelog, no resuelto (necesitaría JS de posición de scroll, que
-     esta tarea no pide). Los 3 botones de abajo (Mi cuenta/Tema/
-     Contraer) siguen sin depender de esto: fondo opaco propio
-     siempre. */
+     Corrección (fix-ui-claro-difuminado): banda ancha de verdad —
+     suave negro 0-18%, blanco desde 42% (medio 20%/48%, intenso
+     22%/54%). Confirmado con script: esto SÍ reabre una zona muerta
+     real de ~18 puntos (t≈22% a t≈40% en suave) donde el punto más
+     gris (rgb 128,128,128 aprox.) da ~1.3-1.4:1 contra CUALQUIERA de
+     los dos textos — ninguno pasa, a propósito, siguiendo la
+     instrucción explícita de priorizar la estética del difuminado
+     sobre AA en el fondo mismo. El contraste real se resuelve en el
+     TEXTO, no en el fondo: ver --pill-claro más abajo y
+     BarraLateral.module.css/Pestanas.module.css — los elementos que
+     caen en esta zona llevan su propio fondo semi-opaco (94% blanco,
+     4.88:1 contra negro puro, con margen) en vez de depender de qué
+     haya exactamente detrás. */
   --fondo-app-suave:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
     linear-gradient(
@@ -437,7 +439,7 @@
       color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
       transparent 25%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 30%, #ffffff 32%);
+    linear-gradient(180deg, #000000 0%, #000000 18%, #ffffff 42%);
   --fondo-app-medio:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
     linear-gradient(
@@ -448,7 +450,7 @@
       color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
       transparent 50%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 34%, #ffffff 36%);
+    linear-gradient(180deg, #000000 0%, #000000 20%, #ffffff 48%);
   --fondo-app-intenso:
     linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
     radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
@@ -461,7 +463,7 @@
       color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
       transparent 70%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 38%, #ffffff 40%);
+    linear-gradient(180deg, #000000 0%, #000000 22%, #ffffff 54%);
   /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
      arriba: sin atributo data-fondo, gana el suave. */
   --fondo-app: var(--fondo-app-suave);
