@@ -200,6 +200,39 @@ export async function obtenerVendedor(sellerId: string, token: string): Promise<
   };
 }
 
+// Z-FIN-00 (issue #122) — lectura cruda para el diagnóstico de acceso
+// de scripts/finanzas/verificar-acceso-ml.ts. A diferencia de pedir():
+// (1) solo GET, nunca otro método — el script es de solo lectura y
+// esto lo garantiza en la puerta misma, no en quien la llama; (2) un
+// 429 NO lanza: se devuelve como status, porque lo que se quiere es
+// justamente contarlos y medir cuánto aguanta la app con 21 cuentas;
+// (3) mide el tiempo de cada llamada. La ruta tiene que ser relativa a
+// BASE_URL y sin caracteres raros — nunca una URL completa ni texto sin
+// validar, igual que los ids de arriba.
+const PATRON_RUTA_LECTURA = /^\/[A-Za-z0-9_\-/]+(\?[A-Za-z0-9_\-.,=&%:[\]]*)?$/;
+
+export type LecturaMedida = { status: number; ms: number; data: unknown };
+
+export async function leerParaDiagnostico(ruta: string, token: string, apiVersion?: "1" | "2"): Promise<LecturaMedida> {
+  if (!PATRON_RUTA_LECTURA.test(ruta) || ruta.includes("..")) {
+    throw new Error("Ruta de diagnóstico inválida (no se llama a Mercado Libre).");
+  }
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  // Product Ads exige este encabezado (1 para /advertising/advertisers,
+  // 2 para campañas) — documentación oficial "Product Ads para Catálogo
+  // y User Products (lectura)".
+  if (apiVersion) headers["Api-Version"] = apiVersion;
+  const inicio = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${ruta}`, { method: "GET", headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch {
+    return { status: 0, ms: Date.now() - inicio, data: null };
+  }
+  const data = res.ok ? await res.json().catch(() => null) : null;
+  return { status: res.status, ms: Date.now() - inicio, data };
+}
+
 // Link real de la publicación — confirmado en producción (zilonix-os-web):
 // articulo.mercadolibre.com.co/MCO-{numero} redirige a la ficha exacta,
 // sin pasar por /items/{id} (que da 403 para publicaciones ajenas).

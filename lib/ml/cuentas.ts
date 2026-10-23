@@ -88,6 +88,24 @@ export async function obtenerAccessTokenVigente(empresaId: string, cuentaId: str
   });
 }
 
+// Z-FIN-00 (issue #122) — igual que obtenerAccessTokenVigente() pero
+// SIN renovar: el diagnóstico de scripts/finanzas/ es de solo lectura y
+// renovar escribe en cuentas_ml (y quema el refresh_token, que ML deja
+// usar una sola vez). Si el token ya venció, se informa como "vencido"
+// y la renovación queda en manos del flujo normal de la app.
+export async function obtenerAccessTokenSinRenovar(
+  empresaId: string,
+  cuentaId: string
+): Promise<{ estado: "vigente"; token: string } | { estado: "vencido" | "desconectada" | "no encontrada" }> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [cuenta] = await tx.select().from(cuentasMl).where(eq(cuentasMl.id, cuentaId));
+    if (!cuenta) return { estado: "no encontrada" as const };
+    if (cuenta.desconectadaTs) return { estado: "desconectada" as const };
+    if (cuenta.tokenExpiraTs.getTime() <= Date.now()) return { estado: "vencido" as const };
+    return { estado: "vigente" as const, token: descifrarToken(cuenta.accessTokenCifrado) };
+  });
+}
+
 // Desconectar nunca borra la fila ni el histórico que ya se importó
 // (evidencia real de UpSeller, tarea 2.3) — solo marca `desconectadaTs`.
 export async function desconectarCuenta(empresaId: string, cuentaId: string): Promise<void> {

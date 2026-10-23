@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LimiteMercadoLibreError,
+  leerParaDiagnostico,
   linkPublicacion,
   obtenerMejoresProductosCategoria,
   obtenerOfertasProducto,
@@ -79,5 +80,49 @@ describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)"
   it("HTTP 429: corta con LimiteMercadoLibreError en vez de devolver {ok:false} en silencio", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 429)));
     await expect(obtenerVendedor("123456", "token")).rejects.toThrow(LimiteMercadoLibreError);
+  });
+});
+
+// Z-FIN-00 (issue #122) — la puerta de lectura del diagnóstico de
+// scripts/finanzas/verificar-acceso-ml.ts.
+describe("lib/ml/cliente — leerParaDiagnostico (Z-FIN-00)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("solo hace GET, con Api-Version cuando se pide", async () => {
+    const fetchMock = vi.fn(async () => respuestaJson({ advertisers: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await leerParaDiagnostico("/advertising/advertisers?product_id=PADS", "token", "1");
+    expect(r.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.mercadolibre.com/advertising/advertisers?product_id=PADS",
+      expect.objectContaining({ method: "GET", headers: expect.objectContaining({ "Api-Version": "1" }) })
+    );
+  });
+
+  it("un 429 se devuelve como status (para contarlo), no se lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 429)));
+    const r = await leerParaDiagnostico("/users/me", "token");
+    expect(r.status).toBe(429);
+    expect(r.data).toBeNull();
+  });
+
+  it("una URL completa o una ruta con .. nunca llega a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(leerParaDiagnostico("https://otro.host/x", "token")).rejects.toThrow();
+    await expect(leerParaDiagnostico("/orders/../oauth/token", "token")).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("tiempo agotado devuelve status 0", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      })
+    );
+    expect((await leerParaDiagnostico("/users/me", "token")).status).toBe(0);
   });
 });
