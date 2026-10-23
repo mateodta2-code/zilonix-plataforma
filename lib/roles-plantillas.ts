@@ -32,10 +32,57 @@ export type Permiso = { modulo: Modulo; accion: Accion; alcance: "todo" | "propi
 // nacen sin ningún permiso: sus pantallas reales (portal del
 // proveedor, app Flex) son las tareas 3.10 y 3.11 — inventar permisos
 // para pantallas que no existen todavía sería adivinar, no construir.
-export const NOMBRES_PLANTILLA = ["Operador", "Contador", "Proveedor", "Domiciliario"] as const;
+//
+// Issue #124 (Z-FIN-02) — Mateo confirmó 5 roles para Zilonix Seller:
+// Gerente, Auxiliar (comodín), Tecnología, Contador (el de arriba, sin
+// cambios) y Operaciones. Operaciones cubre también despachos y
+// promociones, pero esos módulos todavía no existen en MODULOS — por
+// ahora vive en ventas + inventario, y se le suman cuando lleguen sus
+// pantallas. Operador/Proveedor/Domiciliario se quedan tal cual: hay
+// empresas que ya los tienen copiados y cambiarlos acá no los tocaría
+// igual (la plantilla solo se copia al crear el rol).
+//
+// Fase 1 sin aprobación de segundo actor (decisión de Sharel): el
+// Gerente puede anular y autorizar en finanzas él solo. Esos dos, y
+// "modificar" en configuracion (Gerente y Tecnología), están en
+// PERMISOS_PELIGROSOS — al crear el rol desde la plantilla se copian
+// directo; la confirmación aparte solo aplica al ajustarlos a mano
+// desde /panel/roles.
+export const NOMBRES_PLANTILLA = [
+  "Gerente",
+  "Auxiliar",
+  "Tecnología",
+  "Contador",
+  "Operaciones",
+  "Operador",
+  "Proveedor",
+  "Domiciliario",
+] as const;
 export type NombrePlantilla = (typeof NOMBRES_PLANTILLA)[number];
 
+// Arma la lista de una vez para varios módulos con las mismas acciones
+// — los roles nuevos repiten el mismo bloque de acciones en 2-3
+// módulos, y escribirlo fila por fila es donde se cuela un olvido.
+function permisosTodo(modulos: Modulo[], acciones: Accion[]): Permiso[] {
+  return modulos.flatMap((modulo) => acciones.map((accion) => ({ modulo, accion, alcance: "todo" as const })));
+}
+
 export const PLANTILLAS: Record<NombrePlantilla, Permiso[]> = {
+  Gerente: [
+    ...permisosTodo(["ventas", "inventario", "finanzas"], ["consultar", "crear", "modificar", "anular", "autorizar"]),
+    ...permisosTodo(["personas"], ["consultar", "crear", "modificar"]),
+    ...permisosTodo(["configuracion"], ["consultar", "modificar"]),
+  ],
+  Auxiliar: permisosTodo(["ventas", "inventario", "finanzas"], ["consultar", "crear", "modificar"]),
+  Tecnología: [
+    ...permisosTodo(["configuracion"], ["consultar", "modificar"]),
+    ...permisosTodo(["personas"], ["consultar", "crear", "modificar"]),
+    ...permisosTodo(["ventas", "inventario"], ["consultar"]),
+  ],
+  Operaciones: [
+    ...permisosTodo(["ventas"], ["consultar", "crear", "modificar"]),
+    ...permisosTodo(["inventario"], ["consultar", "crear", "modificar", "anular"]),
+  ],
   Operador: [
     { modulo: "ventas", accion: "consultar", alcance: "todo" },
     { modulo: "ventas", accion: "crear", alcance: "todo" },

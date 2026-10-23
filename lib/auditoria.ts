@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { auditoria, usuarios } from "@/db/schema";
@@ -49,7 +49,26 @@ export type FilaAuditoria = {
 // "persona" siempre busca el nombre real en `usuarios` (join, sin
 // RLS); "sistema" nunca se mezcla con un nombre de persona, por
 // diseño — no hay ninguna columna de la que "robarle" un nombre.
-export async function listarAuditoriaDeEmpresa(empresaId: string, limite = 50): Promise<FilaAuditoria[]> {
+//
+// Issue #124 (Z-FIN-02) — la bitácora se filtra por entidad y por
+// quién. `usuarioId: "sistema"` filtra las acciones de integraciones
+// (que no tienen usuario_id). Ningún filtro se arma como SQL a mano:
+// van como parámetros de eq(), y la pantalla además solo los acepta
+// si salen de opcionesFiltroAuditoria() (lista blanca).
+export type FiltrosAuditoria = { entidad?: string; usuarioId?: string };
+
+export const FILTRO_ACTOR_SISTEMA = "sistema";
+
+export async function listarAuditoriaDeEmpresa(
+  empresaId: string,
+  limite = 50,
+  filtros: FiltrosAuditoria = {}
+): Promise<FilaAuditoria[]> {
+  const condiciones = [eq(auditoria.empresaId, empresaId)];
+  if (filtros.entidad) condiciones.push(eq(auditoria.entidad, filtros.entidad));
+  if (filtros.usuarioId === FILTRO_ACTOR_SISTEMA) condiciones.push(eq(auditoria.actorTipo, "sistema"));
+  else if (filtros.usuarioId) condiciones.push(eq(auditoria.usuarioId, filtros.usuarioId));
+
   return dbComoEmpresa(empresaId, async (tx) => {
     const filas = await tx
       .select({
@@ -63,7 +82,7 @@ export async function listarAuditoriaDeEmpresa(empresaId: string, limite = 50): 
       })
       .from(auditoria)
       .leftJoin(usuarios, eq(auditoria.usuarioId, usuarios.id))
-      .where(eq(auditoria.empresaId, empresaId))
+      .where(and(...condiciones))
       .orderBy(desc(auditoria.ts))
       .limit(limite);
 
@@ -71,5 +90,44 @@ export async function listarAuditoriaDeEmpresa(empresaId: string, limite = 50): 
       ...f,
       actorNombre: f.actorTipo === "sistema" ? "Sistema / integración" : f.actorNombre ?? "Usuario eliminado",
     }));
+  });
+}
+
+export type OpcionesFiltroAuditoria = {
+  entidades: string[];
+  actores: { valor: string; nombre: string }[];
+};
+
+// Las opciones de los <select> salen de lo que de verdad hay en la
+// bitácora de ESTA empresa (dentro de dbComoEmpresa, así RLS nunca deja
+// colar una entidad o una persona de otra empresa en la lista). La
+// pantalla descarta cualquier valor de la URL que no esté acá.
+export async function opcionesFiltroAuditoria(empresaId: string): Promise<OpcionesFiltroAuditoria> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const entidades = await tx
+      .selectDistinct({ entidad: auditoria.entidad })
+      .from(auditoria)
+      .where(eq(auditoria.empresaId, empresaId))
+      .orderBy(asc(auditoria.entidad));
+
+    const personas = await tx
+      .selectDistinct({ usuarioId: auditoria.usuarioId, nombre: usuarios.nombre })
+      .from(auditoria)
+      .innerJoin(usuarios, eq(auditoria.usuarioId, usuarios.id))
+      .where(and(eq(auditoria.empresaId, empresaId), eq(auditoria.actorTipo, "persona")))
+      .orderBy(asc(usuarios.nombre));
+
+    const haySistema = await tx
+      .select({ id: auditoria.id })
+      .from(auditoria)
+      .where(and(eq(auditoria.empresaId, empresaId), eq(auditoria.actorTipo, "sistema")))
+      .limit(1);
+
+    const actores = personas
+      .filter((p): p is { usuarioId: string; nombre: string } => p.usuarioId !== null)
+      .map((p) => ({ valor: p.usuarioId, nombre: p.nombre }));
+    if (haySistema.length > 0) actores.push({ valor: FILTRO_ACTOR_SISTEMA, nombre: "Sistema / integración" });
+
+    return { entidades: entidades.map((e) => e.entidad), actores };
   });
 }
