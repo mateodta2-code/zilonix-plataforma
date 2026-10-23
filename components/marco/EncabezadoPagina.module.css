@@ -6,17 +6,25 @@
   flex-wrap: wrap;
 }
 
+/* Degradado plata propio (zona oscura, mismo valor en los dos temas)
+   en vez de la clase global zx-texto-plata — ver EncabezadoPagina.tsx
+   para el motivo real. */
 .titulo {
   margin: 0;
   font-family: var(--fuente-titulos);
   font-weight: 700;
   font-size: 22px;
+  background: var(--degradado-plata-texto-zona-oscura);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .descripcion {
   margin: 6px 0 0 0;
   font-size: 13.5px;
-  color: var(--texto-suave);
+  color: var(--texto-suave-zona-oscura);
   max-width: 640px;
 }
 
