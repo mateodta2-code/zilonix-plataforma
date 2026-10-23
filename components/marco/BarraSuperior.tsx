@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cambiarEmpresaActiva } from "@/app/panel/actions";
 import { IconoBuscar, iconoDeClave } from "./iconos";
+import { SaludoHeader } from "./SaludoHeader";
 import { SelectorTema } from "./SelectorTema";
 import styles from "./BarraSuperior.module.css";
 import type { DatosUsuario, EmpresaSelector } from "./tipos";
@@ -19,12 +20,12 @@ export function BarraSuperior({
   return (
     <header className={styles.barra}>
       <div className={styles.izquierda}>
-        {/* Corrección (fix-ui-claro-fade-abajo, punto 5): acá vivía
-            empresa.nombre + "NIT ... · rol" — Mateo lo tachó en su
-            feedback. En su lugar, el saludo que antes solo estaba en
-            Inicio (app/panel/page.tsx): ahora vive en el header, visible
-            en TODA la sección /panel, no solo en /panel mismo. */}
-        <h1 className={styles.saludo}>Hola, {usuario.nombre}</h1>
+        {/* Corrección (fix-ui-claro-sidebar-marca, punto 1): el
+            saludo vive acá (header) pero solo se pinta en /panel
+            exacto — SaludoHeader decide con usePathname(), ver ese
+            archivo. En cualquier otra subruta no ocupa espacio
+            (return null), el selector de empresa sigue solo acá. */}
+        <SaludoHeader nombre={usuario.nombre} />
 
         {empresasPropias.length > 1 && (
           // Mismo form y misma server action de siempre
