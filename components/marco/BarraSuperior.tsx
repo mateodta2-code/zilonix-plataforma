@@ -6,15 +6,11 @@ import styles from "./BarraSuperior.module.css";
 import type { DatosUsuario, EmpresaSelector } from "./tipos";
 
 export function BarraSuperior({
-  empresa,
-  rol,
   empresaActivaId,
   empresasPropias,
   usuario,
   mostrarCampana,
 }: {
-  empresa: { nombre: string; nit: string };
-  rol: string;
   empresaActivaId: string;
   empresasPropias: EmpresaSelector[];
   usuario: DatosUsuario;
@@ -23,12 +19,12 @@ export function BarraSuperior({
   return (
     <header className={styles.barra}>
       <div className={styles.izquierda}>
-        <div>
-          <p className={styles.nombreEmpresa}>{empresa.nombre}</p>
-          <p className={`zx-etiqueta ${styles.nitRol}`}>
-            NIT {empresa.nit} · {rol}
-          </p>
-        </div>
+        {/* Corrección (fix-ui-claro-fade-abajo, punto 5): acá vivía
+            empresa.nombre + "NIT ... · rol" — Mateo lo tachó en su
+            feedback. En su lugar, el saludo que antes solo estaba en
+            Inicio (app/panel/page.tsx): ahora vive en el header, visible
+            en TODA la sección /panel, no solo en /panel mismo. */}
+        <h1 className={styles.saludo}>Hola, {usuario.nombre}</h1>
 
         {empresasPropias.length > 1 && (
           // Mismo form y misma server action de siempre
