@@ -319,48 +319,57 @@
      (esta clase NUNCA se usa en texto chico, ver .zx-texto-plata). Los
      dos extremos sí son los pedidos tal cual (9–12:1, de sobra). */
   --degradado-plata-texto: linear-gradient(100deg, #3f4651 0%, #656c77 46%, #2e343d 100%);
-  /* Corrección (fix-ui-marca-ajustes, punto 3): azul metálico arriba,
-     pasando por plateado/gris metalizado, blanco abajo — antes era
-     "apenas teñido" (un solo matiz de azul, alfa casi invisible). Un
-     solo degradado por variante (nunca dos capas separadas: azul y
-     plata son colores DISTINTOS en el mismo linear-gradient, cada
-     punto del eje tiene un único color — dos capas sumadas hubieran
-     compuesto el alfa de más en la zona donde se solapan).
+  /* Corrección (fix-ui-claro-azul): el azul de arriba se veía casi
+     plateado/blanco — se refuerza. Lo contraintuitivo, confirmado con
+     script (nunca a mano): --azul-metal-1 y --azul-metal-2 (los más
+     oscuros/saturados) tienen el techo de alfa MÁS BAJO antes de
+     romper 4.5:1 contra #686868 (el texto chico real: --icono/
+     --plata-etiqueta, en los ítems del sidebar y en "NIT·rol" de la
+     barra superior, en TODA la altura donde aparezcan — nunca "texto
+     grande" bajo WCAG, nunca un punto de muestra suelto): azul-metal-1
+     solo ~0.105, azul-metal-2 solo ~0.135, azul-metal-3 (el más CLARO)
+     ~0.205 — casi el doble de margen, porque empieza más cerca del
+     blanco. Separación de color real (R menos B, qué tan "azul" se
+     ve) con cada uno llevado a su propio techo: azul-metal-1 apenas
+     -7, azul-metal-2 -26, azul-metal-3 -31 — el más brillante es
+     también el que de verdad se ve más azul dentro de lo que WCAG
+     deja. Por eso el pico ahora es azul-metal-3 (18%, bien por debajo
+     de su techo de ~20.5%) con un toque de azul-metal-2 justo después
+     (13%, bien por debajo de su propio techo de ~13.5%) para que no
+     se vea plano — exactamente la profundidad que se pidió, solo que
+     repartida entre los dos colores que sí la pueden sostener cada
+     uno en su propio alfa seguro.
 
-     El techo real NO es estético, es WCAG: a diferencia de oscuro
-     (donde el texto casi blanco tiene muchísimo margen contra el
-     azul), en claro el texto chico (--icono/--plata-etiqueta, #686868,
-     13.5-15px — nunca "texto grande" bajo WCAG) se mide contra ESTE
-     MISMO fondo en el sidebar (ítems del menú) y en la barra superior
-     (nombre de empresa, NIT·rol) en TODA la altura donde aparezcan,
-     no solo en un punto de muestra. Se buscó con script el alfa
-     máximo de cada color que mantiene a #686868 en 4.5:1 (el mínimo
-     AA real): azul-metal-2 solo ~0.13, plata-medio solo ~0.22 — acá se
-     usan valores por debajo de esos techos, con margen. Verificado
-     con script en todo el tramo de 0% a 32% (suave): el peor punto
-     mide 4.77:1 (texto-suave y texto #000 quedan muy por encima, 5.25+
-     y 18+). Medio/intenso llegan más abajo y un poco más saturados
-     (hasta 12%/20%/10%, el peor caso ahí mide 4.61-4.62:1) — reverificado
-     igual, nunca por debajo de 4.5. */
+     Verificado con script en TODO el tramo (paso de 1%, no un punto
+     suelto) de las 3 variantes — el peor caso de las tres es 4.55:1
+     (texto-suave y texto #000 quedan muy por encima, 5.00+ y 17+):
+     suave, 0-36%, peor en t=8%. medio, 0-48% (llega más abajo), peor
+     en t=10%. intenso, 0-62% (el más alto), peor en t=12%. Ningún
+     punto del tramo completo de ninguna variante bajó de 4.5:1 — no
+     hizo falta oscurecer #686868 (la salida de respaldo que ofreció
+     Pablo si el azul no entraba). */
   --fondo-app-suave: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--azul-metal-2) 10%, transparent) 0%,
-    color-mix(in srgb, var(--plata-medio) 16%, transparent) 14%,
-    color-mix(in srgb, var(--plata) 6%, transparent) 24%,
-    transparent 32%
+    color-mix(in srgb, var(--azul-metal-3) 18%, transparent) 0%,
+    color-mix(in srgb, var(--azul-metal-2) 13%, transparent) 8%,
+    color-mix(in srgb, var(--plata-medio) 18%, transparent) 18%,
+    color-mix(in srgb, var(--plata) 8%, transparent) 28%,
+    transparent 36%
   );
   --fondo-app-medio: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--azul-metal-2) 12%, transparent) 0%,
-    color-mix(in srgb, var(--plata-medio) 20%, transparent) 20%,
-    color-mix(in srgb, var(--plata) 8%, transparent) 36%,
+    color-mix(in srgb, var(--azul-metal-3) 19%, transparent) 0%,
+    color-mix(in srgb, var(--azul-metal-2) 13%, transparent) 10%,
+    color-mix(in srgb, var(--plata-medio) 20%, transparent) 24%,
+    color-mix(in srgb, var(--plata) 10%, transparent) 38%,
     transparent 48%
   );
   --fondo-app-intenso: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--azul-metal-2) 12%, transparent) 0%,
-    color-mix(in srgb, var(--plata-medio) 20%, transparent) 26%,
-    color-mix(in srgb, var(--plata) 10%, transparent) 46%,
+    color-mix(in srgb, var(--azul-metal-3) 19%, transparent) 0%,
+    color-mix(in srgb, var(--azul-metal-2) 13%, transparent) 12%,
+    color-mix(in srgb, var(--plata-medio) 20%, transparent) 30%,
+    color-mix(in srgb, var(--plata) 12%, transparent) 48%,
     transparent 62%
   );
   /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
