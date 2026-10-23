@@ -99,41 +99,41 @@
   gap: 2px;
 }
 
-/* "ADMINISTRACIÓN" está en el mismo <nav> con scroll propio que los
-   ítems de abajo — su posición real no es fija (depende de cuántos
-   módulos vea el rol). Mismo criterio y mismo velo que .item (ver
-   abajo): tokens de zona oscura + --velo-item-claro detrás, en vez de
-   asumir en qué tramo del difuminado cae. html antepuesto: le gana en
-   especificidad a la regla de una sola clase de .zx-etiqueta en
+/* "ADMINISTRACIÓN" cae siempre en el grupo de ABAJO (ver el bloque
+   claro más abajo: solo el primer grupo, sin importar cuántos módulos
+   vea el rol, va con tokens de zona oscura). html antepuesto: le gana
+   en especificidad a la regla de una sola clase de .zx-etiqueta en
    globals.css, sin depender del orden real en que el bundle cargue
    los dos archivos. */
 html .etiquetaGrupo {
-  padding: 2px 10px;
+  padding: 0 10px;
   margin: 0 0 6px 0;
-  border-radius: var(--radio-boton);
-  color: var(--plata-etiqueta-zona-oscura);
-  background: var(--velo-item-claro, transparent);
+  color: var(--plata-etiqueta);
 }
 
-/* Corrección (fix-ui-claro-fade-abajo, punto 2): Mateo rechazó el
-   pill blanco opaco de fix-ui-claro-difuminado — "tapa el fade y se
-   ve postizo". El problema de fondo que ese pill resolvía sigue
-   ahí (el <nav> de acá tiene SU PROPIO scroll — overflow-y:auto en
-   .nav — así que un ítem puede terminar sobre CUALQUIER punto del
-   difuminado, no solo donde cae en reposo; no alcanza con "zona
-   oscura donde corresponda" porque no hay un "donde corresponda" fijo
-   para un ítem que se puede scrollear). La salida: un VELO oscuro
-   TRANSLÚCIDO (--velo-item-claro, ver globals.css) en vez de una
-   tarjeta opaca — oscurece el difuminado que asoma detrás sin
-   taparlo, y el texto pasa a --icono-hover-zona-oscura (el lado más
-   claro de la plata; --icono-zona-oscura por sí solo no tiene margen
-   para pasar AA ni con el fondo lo más oscuro posible, confirmado con
-   script). Con eso, CUALQUIER punto del difuminado pasa AA — ya no
-   hace falta ningún `href` especial ni adivinar en qué tramo cae cada
-   ítem. Color y velo van en el bloque de abajo, condicionados a
-   [data-tema="claro"] a propósito: oscuro no toca --icono (se queda
-   en #939393 de reposo / #e6e6e6 en :hover, igual que siempre) ni
-   gana ningún velo (--velo-item-claro no existe ahí). */
+/* Corrección (fix-ui-claro-sidebar-marca, punto 2): Mateo y Pablo
+   rechazaron --velo-item-claro ("se ve sucio, tapa el fade") — se
+   borra, el menú vuelve a ser transparente de verdad. Sin fondo
+   propio, el texto SÍ depende de qué haya detrás (zona oscura arriba,
+   claro abajo), y el <nav> de acá tiene su propio scroll — no hay
+   forma 100% exacta en CSS puro de saber dónde cae cada ítem en todo
+   momento. Se acepta una aproximación por GRUPO en vez de por ítem:
+   el grupo principal (Inicio...Personas) va con zona oscura — con el
+   difuminado de fix-ui-claro-fade-abajo, ese grupo cae casi siempre
+   dentro del tramo negro/gris oscuro en un viewport típico (900px);
+   "Administración" (siempre el grupo de más abajo, cuando existe) va
+   con texto claro normal — ya cae cerca de donde el difuminado cruza
+   a blanco. Confirmado con script contra la rampa cruda (sin ningún
+   velo): #e6e6e6 (zona oscura) mide 4.60:1 en el punto más
+   comprometido de SU tramo (t≈42%) y #000000 (claro) mide 7.37:1 en
+   el punto más comprometido del suyo (t≈54%) — con un margen real
+   pero angosto entre los dos (t≈42-54%) donde, si un ítem cae justo
+   ahí, ninguno de los dos pasa 4.5:1 del todo. Límite conocido y
+   aceptado (mismo criterio que toda esta cadena de tareas): en un
+   viewport corto o con muchos módulos habilitados, el grupo principal
+   puede estirarse hasta ese tramo — no hay forma de resolverlo del
+   todo sin rastrear la posición real con JavaScript, que esta tarea
+   no pidió. */
 html .item {
   display: flex;
   align-items: center;
@@ -150,9 +150,13 @@ html .item {
   white-space: nowrap;
 }
 
-:root[data-tema="claro"] .item {
+:root[data-tema="claro"] .grupo:first-of-type .item {
   color: var(--icono-hover-zona-oscura);
-  background: var(--velo-item-claro);
+}
+
+:root[data-tema="claro"] .grupo + .grupo .item,
+:root[data-tema="claro"] .grupo + .grupo .etiquetaGrupo {
+  color: var(--texto);
 }
 
 .item:hover {
@@ -169,10 +173,13 @@ html .item {
   border-left-color: var(--azul-metal-3);
 }
 
-/* Activo: oscuro NO se toca (regla de esta tarea) — se queda con el
-   mismo degradado sutil de --acento-suave que ya tenía (antes se
-   componía sobre --pill-claro, que en oscuro siempre caía a
-   transparent; quitarlo de acá no cambia nada ahí). */
+/* Activo (fix-ui-claro-sidebar-marca, punto 2: "acento azul limpio,
+   sin caja sucia"): la tarea anterior le había dado al activo de
+   claro una caja opaca navy — Mateo/Pablo la rechazan junto con el
+   velo. Vuelve a ser un degradado MUY sutil de --acento-suave
+   (~10-12% de alfa — transparente, nunca una caja) + el filo
+   izquierdo azul + un glow interior leve, igual en los dos temas, sin
+   condicionar por tema. */
 .item[data-activo="true"],
 .item[data-activo="true"]:hover {
   background: linear-gradient(90deg, var(--acento-suave), transparent 78%);
@@ -181,25 +188,15 @@ html .item {
   box-shadow: inset 0 0 18px var(--acento-resplandor);
 }
 
-/* Corrección (fix-ui-claro-fade-abajo, punto 2): en claro sí cambia —
-   a diferencia del reposo (un velo translúcido en CADA ítem se
-   sentiría igual de postizo que el pill que acaba de rechazarse), el
-   activo es un único resaltado deliberado — un patrón de UI normal,
-   no "una tarjeta blanca tapando todo el menú". Por eso se permite
-   que sea opaco: un degradado azul-metal sobre negro (color-mix con
-   black, nunca transparent) que es identidad de marca
-   (plateado+azul, punto 4) y queda oscuro sin importar qué haya
-   detrás, así que el texto siempre puede ser el azul CLARO de zona
-   oscura (--icono-activo-zona-oscura, pensado para fondos oscuros) en
-   vez del azul oscuro de siempre (que se perdía sobre un fondo
-   oscuro). */
-:root[data-tema="claro"] .item[data-activo="true"],
-:root[data-tema="claro"] .item[data-activo="true"]:hover {
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--azul-metal-2) 45%, black) 0%,
-    color-mix(in srgb, var(--azul-metal-1) 70%, black) 100%
-  );
+/* El texto SÍ se ajusta por grupo en claro, mismo criterio que el
+   reposo: --icono-activo (azul oscuro, --azul-metal-2) lee bien sobre
+   claro/blanco pero se pierde sobre la franja oscura de arriba — el
+   grupo principal necesita el azul CLARO de zona oscura en su lugar.
+   El grupo de abajo ("Administración") no necesita override: ya cae
+   en zona clara, donde --icono-activo (heredado de la regla de
+   arriba) es el correcto. */
+:root[data-tema="claro"] .grupo:first-of-type .item[data-activo="true"],
+:root[data-tema="claro"] .grupo:first-of-type .item[data-activo="true"]:hover {
   color: var(--icono-activo-zona-oscura);
 }
 
@@ -223,6 +220,14 @@ html .item {
   grid-template-columns: 1fr;
 }
 
+/* Corrección (fix-ui-claro-sidebar-marca, punto 5): "no se lee como
+   botón plateado de marca" — tenía --borde gris plano en reposo (el
+   comentario de abajo decía "plata" pero el código nunca lo fue).
+   Esta zona del sidebar siempre cae pegada al borde de ABAJO del
+   degradado (100vh, el pie queda fijo ahí) — en claro eso es zona
+   clara, nunca la franja oscura — así que, a diferencia de .item, no
+   hace falta ningún ajuste por tema: la misma técnica de borde con
+   degradado de Tarjeta/.zx-control funciona igual en los dos temas. */
 .botonCuadrado {
   display: flex;
   flex-direction: column;
@@ -231,8 +236,10 @@ html .item {
   gap: 4px;
   aspect-ratio: 1;
   border-radius: var(--radio-boton);
-  border: 1px solid var(--borde);
-  background: var(--superficie-2);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
   color: var(--icono);
   text-decoration: none;
   cursor: pointer;
@@ -240,11 +247,11 @@ html .item {
   transition: var(--transicion-color), var(--transicion-transform);
 }
 
-/* Pedido explícito: estos 3 botones (Mi cuenta / Tema / Contraer) hoy
-   solo tenían borde plata — se suman al mismo brillo de marca que ya
-   tiene el resto de lo interactivo (azul metálico + plata). */
+/* Pedido explícito: estos 3 botones (Mi cuenta / Tema / Contraer) se
+   suman al mismo brillo de marca que ya tiene el resto de lo
+   interactivo (azul metálico + plata) — el plateado de arriba se ve
+   siempre, el azul resalta ENCIMA al pasar el mouse. */
 .botonCuadrado:hover {
-  border-color: var(--azul-metal-3);
   color: var(--icono-hover);
   transform: translateY(-1px);
   box-shadow: var(--sombra-marca-hover);
@@ -258,7 +265,6 @@ html .item {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
   box-shadow: var(--sombra-foco);
-  border-color: var(--azul-metal-3);
 }
 
 .etiquetaCuadrado {

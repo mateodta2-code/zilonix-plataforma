@@ -42,13 +42,27 @@
   font-size: 12.5px;
 }
 
+/* Corrección (fix-ui-claro-sidebar-marca, punto 4): "en reposo, borde
+   plateado — no borde gris apagado/invisible". Mismo truco de doble
+   background-clip que ya usa Tarjeta/.zx-control: el relleno real
+   (sólido en primario, --superficie-2 en secundario) va a padding-box
+   y --degradado-plata-borde al anillo transparente de border-box — un
+   botón de marca lleva su anillo plateado SIEMPRE, lo pinte el fondo
+   que lo pinte detrás. El azul en hover sigue siendo el glow
+   (--sombra-marca-hover) ENCIMA del plateado, nunca lo reemplaza. */
 .primario {
-  background: var(--acento-boton);
+  background: linear-gradient(var(--acento-boton), var(--acento-boton)) padding-box, var(--degradado-plata-borde) border-box;
   color: #fff;
 }
 
 .primario:hover:not(:disabled) {
-  background: var(--acento-boton-hover);
+  /* border-color: transparent de vuelta — .boton compone
+     zx-brillo-marca (globals.css), cuyo :hover pone border-color:
+     azul-metal-3; sin cancelarlo acá, esa línea SÓLIDA tapa el
+     degradado de border-box de arriba (el borde ya no sería
+     transparente). El azul "encima" es el glow, no el borde. */
+  border-color: transparent;
+  background: linear-gradient(var(--acento-boton-hover), var(--acento-boton-hover)) padding-box, var(--degradado-plata-borde) border-box;
   /* Brillo del relleno (azul puro, ya tuneado) + el anillo de marca
      (azul metálico + plata) encima — box-shadow acepta varias capas,
      nunca se reemplaza una por la otra. */
@@ -56,13 +70,14 @@
 }
 
 .secundario {
-  background: var(--superficie-2);
-  border-color: var(--borde);
+  background: linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box, var(--degradado-plata-borde) border-box;
   color: var(--texto);
 }
 
 .secundario:hover:not(:disabled) {
-  border-color: var(--azul-metal-3);
+  /* Mismo motivo que .primario:hover — cancela el border-color sólido
+     que pone zx-brillo-marca:hover para no tapar el degradado. */
+  border-color: transparent;
   color: var(--icono-hover);
   box-shadow: var(--sombra-marca-hover);
 }

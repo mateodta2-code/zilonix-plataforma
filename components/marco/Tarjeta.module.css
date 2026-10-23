@@ -27,3 +27,16 @@
   background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
   pointer-events: none;
 }
+
+/* Corrección (fix-ui-claro-sidebar-marca, punto 3): "azul arriba Y
+   abajo" — antes solo el filete de arriba. Mismo filete, espejado. */
+.tarjeta::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}

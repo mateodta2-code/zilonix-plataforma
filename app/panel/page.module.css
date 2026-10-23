@@ -29,6 +29,11 @@
   }
 }
 
+/* Corrección (fix-ui-claro-sidebar-marca, punto 4): "+ Crear otra
+   empresa" es justo el botón que Mateo señaló sin el azul de marca —
+   tenía borde azul SOLO, sin plateado, el único botón de la app así.
+   Mismo truco de doble background-clip que el resto: plateado
+   siempre, el azul llega encima en hover (ya lo tenía). */
 .crearEmpresa {
   display: inline-flex;
   align-items: center;
@@ -36,8 +41,8 @@
   align-self: flex-start;
   padding: 9px 16px;
   border-radius: var(--radio-boton);
-  background: var(--acento-suave);
-  border: 1px solid var(--acento);
+  background: linear-gradient(var(--acento-suave), var(--acento-suave)) padding-box, var(--degradado-plata-borde) border-box;
+  border: 1px solid transparent;
   color: var(--acento-fuerte);
   text-decoration: none;
   font-size: 13.5px;
@@ -47,7 +52,7 @@
 }
 
 .crearEmpresa:hover {
-  background: var(--acento-boton);
+  background: linear-gradient(var(--acento-boton), var(--acento-boton)) padding-box, var(--degradado-plata-borde) border-box;
   color: #fff;
   box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
   transform: translateY(-1px);

@@ -62,6 +62,16 @@
      Nunca se repite este box-shadow a mano por componente. */
   --sombra-marca-hover: 0 0 0 1px var(--azul-metal-3), 0 0 16px color-mix(in srgb, var(--azul-metal-3) 55%, transparent),
     0 0 5px color-mix(in srgb, var(--plata-brillo) 65%, transparent);
+  /* Corrección (fix-ui-claro-sidebar-marca, punto 3): "plateado en
+     reposo + azul arriba/abajo del borde" para elementos reales de
+     formulario (<input>/<select>/<textarea>) — ahí un ::before/::after
+     (la técnica que ya usan Tarjeta/TarjetaKpi/EstadoVacio/.filtros
+     para su filete azul de arriba) no se renderiza de forma confiable
+     en navegadores reales. box-shadow sí funciona siempre sobre un
+     control nativo: dos inset, uno pegado arriba y otro abajo del
+     borde de 1px. Se usa en .zx-control (más abajo). */
+  --filete-marca-arriba-abajo: inset 0 1px 0 0 color-mix(in srgb, var(--azul-metal-3) 70%, transparent),
+    inset 0 -1px 0 0 color-mix(in srgb, var(--azul-metal-3) 70%, transparent);
   /* Tarea "fix-ui-claro-como-oscuro" — "zona oscura": el header, el
      logo + menú del sidebar, y el saludo/pestañas de Inicio SIEMPRE
      caen sobre la franja oscura del degradado (azul metálico -> negro
@@ -298,30 +308,13 @@
   --superficie: #f5f5f6;
   --superficie-2: #ececee;
   --borde: #dcdcdf;
-  /* Corrección (fix-ui-claro-fade-abajo, punto 2): Mateo rechazó
-     --pill-claro (94% de blanco opaco) — "tapa el difuminado y se ve
-     postizo". Reemplazado por --velo-item-claro: un VELO oscuro
-     TRANSLÚCIDO (nunca una tarjeta opaca), pensado para ítems del
-     sidebar/Pestañas que pueden terminar sobre cualquier punto del
-     difuminado (el sidebar tiene su propio scroll — la posición real
-     de un ítem no es fija, ver BarraLateral.module.css). Oscurece lo
-     que haya detrás en vez de tapar su color: deja ver el matiz del
-     difuminado (azul/gris/blanco) oscurecido, no lo reemplaza por un
-     bloque plano.
-
-     Alfa elegido con script, contra el peor caso real (blanco puro,
-     t=100%) y el texto que lo acompaña (--icono-hover-zona-oscura,
-     #e6e6e6 — más claro que --icono-zona-oscura #939393, que por sí
-     solo nunca pasa AA ni oscureciendo el fondo al máximo razonable):
-     con alfa 0.6, blanco puro compuesto da 4.60:1 contra #e6e6e6 —
-     pasa, por el margen más chico de todo el rango. Como el resultado
-     de la mezcla (fondo × (1−alfa)) es monótono en el brillo del
-     fondo, blanco puro ya es el peor caso: TODO punto intermedio del
-     difuminado (negro, cualquier gris) da un contraste igual o mejor
-     — 16.83:1 sobre negro puro, 8.68:1 en la zona muerta del punto 1.
-     Solo existe en claro — en oscuro cada var(--velo-item-claro,
-     transparent) cae a transparent, sin cambiar nada ahí. */
-  --velo-item-claro: rgba(0, 0, 0, 0.6);
+  /* Corrección (fix-ui-claro-sidebar-marca): Mateo Y Pablo rechazaron
+     --velo-item-claro — "se ve sucio, tapa el fade" (mismo motivo por
+     el que la tarea anterior ya había rechazado --pill-claro, blanco
+     opaco). Se borra por completo: el menú del sidebar vuelve a ser
+     100% transparente, sin ningún fondo propio por ítem. Ver
+     BarraLateral.module.css para cómo se resuelve ahora el contraste
+     (texto zona-oscura arriba / claro abajo, por grupo, sin fondo). */
   --texto: #000000;
   /* Revertido a su valor original (fix-ui-claro-como-oscuro): las dos
      correcciones anteriores lo habían oscurecido a #333843 para
@@ -609,7 +602,12 @@ button {
    siendo el glow de --sombra-marca-hover en hover/foco, igual que en
    esas mismas tarjetas (ahí tampoco cambia el borde en hover, solo se
    suma el brillo) — una sola fuente de "borde con identidad" para
-   todo lo bordeado, cards e inputs por igual. */
+   todo lo bordeado, cards e inputs por igual.
+
+   Corrección (fix-ui-claro-sidebar-marca, punto 3): el plateado por
+   sí solo medía como "un gris plano" — se suma --filete-marca-
+   arriba-abajo (ver :root), un azul sutil pegado al borde de arriba
+   Y al de abajo (no solo arriba, como las tarjetas). */
 .zx-control {
   width: 100%;
   padding: 9px 11px;
@@ -618,6 +616,7 @@ button {
   background:
     linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
     var(--degradado-plata-borde) border-box;
+  box-shadow: var(--filete-marca-arriba-abajo);
   color: var(--texto);
   font-size: 13.5px;
   font-family: inherit;
@@ -631,7 +630,7 @@ button {
    suma el selector directo en vez de "componer". */
 .zx-control:hover,
 .zx-control:focus-visible {
-  box-shadow: var(--sombra-marca-hover);
+  box-shadow: var(--filete-marca-arriba-abajo), var(--sombra-marca-hover);
 }
 
 .zx-control:focus-visible {
