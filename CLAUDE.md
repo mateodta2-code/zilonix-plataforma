@@ -94,6 +94,7 @@ npm run docs:permisos     # regenera docs/matriz-permisos.md desde lib/roles.ts
 - **Toda ruta nueva de `app/` se clasifica en `scripts/verificar-permisos.test.ts`** — protegida (llama `requierePermiso`), de superadmin (llama `requiereSuperadmin`), o exenta (con el motivo escrito al lado). El CI falla si no.
 - **Nunca se adivina el comportamiento de la API de Mercado Libre.** Antes de portar o construir algo que la toque, se confirma contra el código real que ya corre en producción en `zilonix-os-web` (o, si no existe precedente, se pregunta en vez de inventar) — así quedó documentado cada módulo de `lib/ml/`.
 - **Las pruebas de aislamiento corren contra Postgres real**, nunca contra un mock de la base — RLS no se puede simular de forma confiable.
+- **Toda llamada a la API de Mercado Libre pasa por `lib/ml/cliente.ts`** (en cuanto exista) **y toda tarea en segundo plano vive en `lib/trabajos/`** — nunca un `fetch` a Mercado Libre o un cron suelto en otro archivo.
 
 ## Reglas no negociables
 
@@ -110,10 +111,16 @@ Estas reglas aplican tanto a este repo (`zilonix-plataforma`) como al Zilonix OS
 - **La IA solo sugiere, nunca ejecuta una acción a partir de texto escrito por un tercero** (un comprador, un mensaje, una reseña) sin que una persona lo confirme.
 - **En la plataforma multiempresa: seguridad por fila (RLS) en toda tabla con `empresa_id`**, y la app se conecta a Postgres con un usuario sin privilegios para saltarse esa política. La prueba de aislamiento (empresa A nunca ve datos de empresa B) corre en cada PR, no es opcional.
 - **Superadmin nunca ve datos de negocio de un cliente** salvo acceso temporal concedido explícitamente por ese cliente, y queda registrado en auditoría.
+- **Nunca pasar un dato que venga del usuario a `sql.identifier`, `sql.raw` ni `.as()`.** Para ordenar o filtrar de forma dinámica (ej. "ordenar por esta columna") se usa una lista blanca de columnas permitidas, nunca el nombre que manda la petición.
+- **Tras un incidente del proveedor (ej. una caída de Railway), los secretos se rotan con un checklist por NOMBRE de variable** (qué cambió, dónde se usa, que el servicio sigue arriba después) — nunca pegando el valor en ningún lado, ni en el checklist mismo.
 
 ### Proceso — lo que siempre se respeta
 
-- **Nada pasa a producción sin pasar antes por staging.** Cada entrega con código sube el número de versión (visible en el pie de página y en `/api/version`) y queda en `docs/CHANGELOG.md` — un PR que solo toca documentación (sin ningún cambio de código) queda exento de subir la versión, pero igual se registra en el CHANGELOG.
+- **Nada pasa a producción sin pasar antes por staging.** La versión de `package.json` (visible en el pie de página y en `/api/version`) sube SOLO en el release a la rama `produccion`, nunca en un PR normal a `main`.
+- **Changelog: cada PR deja su propio fragmento en `docs/changelog/pendientes/<rama>.md`** (plantilla en esa misma carpeta) — nunca editar `docs/CHANGELOG.md` directamente en un PR normal; los fragmentos se juntan ahí recién en el release y se borran, para que no choquen entre PRs abiertos a la vez.
+- **Turno de migraciones: un solo PR con migración pendiente de fusionar a la vez.** Antes de abrir uno nuevo con su propia migración, rebase sobre `main` y volver a correr `npm run db:generate` sobre esa base — nunca renumerar ni editar a mano un archivo de migración ya generado (bug real: colisión de numeración entre dos ramas, documentada en `docs/ESTADO.md`).
+- **Nombre de rama según el frente que toca** (`seguridad-`, `docs-`, `test-`, `feat-`, `fix-`, `ci-`…) **y fusión siempre por squash** — un commit por PR en `main`, sin importar cuántos haya en la rama.
+- **Toda rama lista para revisar se abre como Pull Request (borrador) el mismo día.** Una rama sin PR abierto nunca corre CI — el check `build-and-test` solo se dispara con `push`/`pull_request` a `main`/`produccion`.
 - **Nunca `railway up`.** Deploy solo vía `git push` (auto-deploy) o `railway redeploy`. Siempre verificar el deploy uno mismo (ej. consultando `/api/version` o el endpoint correspondiente) antes de dar algo por terminado.
 - **Cada cambio de tablas va en una migración versionada** (Drizzle, en la plataforma nueva) — nunca `CREATE TABLE IF NOT EXISTS` suelto dentro de una ruta.
 - **Nunca commits directos a `main` sin pasar por Pull Request, con CI en verde antes de fusionar.** `main` tiene un ruleset real en GitHub que lo fuerza (nunca se puede borrar ni forzar push; exige Pull Request y el check `build-and-test` en verde antes de fusionar) — no depende solo de que quien fusiona lo respete.

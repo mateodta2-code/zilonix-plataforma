@@ -1,0 +1,42 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.botonConceder {
+  margin-top: 4px;
+}
+
+.subtitulo {
+  margin: 0 0 12px 0;
+  font-family: var(--fuente-titulos);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+}
+
+.descripcionAcceso {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detalleAcceso {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--texto-suave);
+  font-size: 12px;
+}
+
+.volver {
+  align-self: flex-start;
+}

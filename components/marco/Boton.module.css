@@ -1,0 +1,93 @@
+.boton {
+  composes: zx-brillo-marca from global;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start; /* el contenido de cada página es una columna flex (MarcoApp) que estira a sus hijos por defecto — un botón nunca debe estirarse a lo ancho solo */
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  font-weight: 500;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: var(--transicion-color), var(--transicion-transform);
+  border: 1px solid transparent;
+}
+
+.boton:active {
+  transform: scale(0.97);
+}
+
+.boton:hover:not(:disabled):not([aria-disabled="true"]):not(:active) {
+  transform: translateY(-1px);
+}
+
+.boton:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+}
+
+.boton:disabled,
+.boton[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.chico {
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
+/* Corrección (fix-ui-claro-sidebar-marca, punto 4): "en reposo, borde
+   plateado — no borde gris apagado/invisible". Mismo truco de doble
+   background-clip que ya usa Tarjeta/.zx-control: el relleno real
+   (sólido en primario, --superficie-2 en secundario) va a padding-box
+   y --degradado-plata-borde al anillo transparente de border-box — un
+   botón de marca lleva su anillo plateado SIEMPRE, lo pinte el fondo
+   que lo pinte detrás. El azul en hover sigue siendo el glow
+   (--sombra-marca-hover) ENCIMA del plateado, nunca lo reemplaza. */
+.primario {
+  background: linear-gradient(var(--acento-boton), var(--acento-boton)) padding-box, var(--degradado-plata-borde) border-box;
+  color: #fff;
+}
+
+.primario:hover:not(:disabled) {
+  /* border-color: transparent de vuelta — .boton compone
+     zx-brillo-marca (globals.css), cuyo :hover pone border-color:
+     azul-metal-3; sin cancelarlo acá, esa línea SÓLIDA tapa el
+     degradado de border-box de arriba (el borde ya no sería
+     transparente). El azul "encima" es el glow, no el borde. */
+  border-color: transparent;
+  background: linear-gradient(var(--acento-boton-hover), var(--acento-boton-hover)) padding-box, var(--degradado-plata-borde) border-box;
+  /* Brillo del relleno (azul puro, ya tuneado) + el anillo de marca
+     (azul metálico + plata) encima — box-shadow acepta varias capas,
+     nunca se reemplaza una por la otra. */
+  box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
+}
+
+.secundario {
+  background: linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box, var(--degradado-plata-borde) border-box;
+  color: var(--texto);
+}
+
+.secundario:hover:not(:disabled) {
+  /* Mismo motivo que .primario:hover — cancela el border-color sólido
+     que pone zx-brillo-marca:hover para no tapar el degradado. */
+  border-color: transparent;
+  color: var(--icono-hover);
+  box-shadow: var(--sombra-marca-hover);
+}
+
+.fantasma {
+  background: transparent;
+  color: var(--acento);
+}
+
+.fantasma:hover:not(:disabled) {
+  background: var(--acento-suave);
+  box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
+}

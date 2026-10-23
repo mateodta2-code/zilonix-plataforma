@@ -1,0 +1,14 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.botonEnviar {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.volver {
+  align-self: flex-start;
+}

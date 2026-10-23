@@ -1,0 +1,312 @@
+.barra {
+  display: flex;
+  flex-direction: column;
+  /* Logo a 260px exactos (mínimo digital; viewBox 933×335, proporción
+     intacta). El SVG ya trae margen: el trazo va de x 223.16 a 1075.63
+     y el viewBox de 183 a 1116, o sea 40.16u / 40.37u ≈ 4.30% / 4.33%
+     = 11.19px / 11.25px a 260px. La "I" de ZILONIX mide 42.67u de ancho
+     (11.89px); la protección es 2× eso, 23.78px desde el trazo. 340px
+     lo contaba dos veces: sumaba ~24px de más encima de ese margen, y
+     también el padding, aunque con border-box el width ya incluye los
+     12px de cada lado y el borde derecho de 1px. Falta 23.78−11.19−12
+     = 0.59px a la izquierda y 0.53px a la derecha; centrado, 2×0.59px.
+     260 + 1.18 + 24 + 1 = 286.18 → 287px. */
+  width: 287px;
+  flex-shrink: 0;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  /* Corrección: antes era --superficie opaco (bloque plano arriba).
+     Transparente a propósito — igual que BarraSuperior.module.css —
+     para que se vea el MISMO degradado de body::before (--fondo-app),
+     que es fixed al viewport: esta barra también mide 100vh y está
+     sticky top:0, así que coincide pixel a pixel con el degradado del
+     área principal, sin duplicar la receta en ningún lado. El logo y
+     los íconos (plata) siguen leyéndose bien encima — el azul de la
+     zona de arriba sigue siendo oscuro en los dos temas (ver el punto
+     3 del fix para el detalle de claro). */
+  background: transparent;
+  /* Corrección (fix-ui-claro-como-oscuro): borde de la zona oscura
+     (mismo valor que --borde de oscuro) sin condicionar por tema —
+     esta barra siempre está sobre la franja oscura del degradado,
+     en los dos temas. */
+  border-right: 1px solid var(--borde-zona-oscura);
+  padding: 18px 12px;
+  gap: 18px;
+  transition: width 0.2s ease;
+}
+
+.barra[data-colapsada="true"] {
+  width: 68px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Sin padding horizontal: ese margen ya está en el SVG y en el
+     padding de .barra. Sumarlo acá repetía el error de los 340px. */
+  padding: 8px 0;
+}
+
+.barra[data-colapsada="true"] .logo {
+  padding: 8px 0;
+}
+
+.logoCompleto {
+  width: 260px;
+  height: auto;
+  display: block;
+  /* El mínimo digital es 260px de ancho: el flex no puede encogerlo. */
+  flex-shrink: 0;
+}
+
+.iconoColapsado {
+  width: 32px;
+  height: auto;
+  display: none;
+}
+
+/* Barra contraída (JS, botón "Contraer"): logo completo se oculta,
+   entra el ícono. Corrección (fix-ui-claro-como-oscuro): SIEMPRE la
+   variante plata, en los dos temas — antes claro cambiaba a la
+   versión gris oscuro porque esta zona del sidebar tenía fondo casi
+   blanco; ahora esta zona es siempre la franja oscura del degradado
+   (igual que oscuro), así que la plata es la que de verdad lee bien
+   ahí en los dos temas. icono-gris-oscuro.png queda sin usarse (el
+   <img> sigue en el DOM por si hace falta más adelante, nunca se
+   borra el archivo). Nunca un filtro CSS sobre la plata, eso sería
+   recolorear el archivo oficial. */
+.barra[data-colapsada="true"] .logoCompleto {
+  display: none;
+}
+
+.barra[data-colapsada="true"] .iconoColapsado[data-variante="plata"] {
+  display: block;
+}
+
+.nav {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.grupo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* "ADMINISTRACIÓN" cae siempre en el grupo de ABAJO (ver el bloque
+   claro más abajo: solo el primer grupo, sin importar cuántos módulos
+   vea el rol, va con tokens de zona oscura). html antepuesto: le gana
+   en especificidad a la regla de una sola clase de .zx-etiqueta en
+   globals.css, sin depender del orden real en que el bundle cargue
+   los dos archivos. */
+html .etiquetaGrupo {
+  padding: 0 10px;
+  margin: 0 0 6px 0;
+  color: var(--plata-etiqueta);
+}
+
+/* Corrección (fix-ui-claro-sidebar-marca, punto 2): Mateo y Pablo
+   rechazaron --velo-item-claro ("se ve sucio, tapa el fade") — se
+   borra, el menú vuelve a ser transparente de verdad. Sin fondo
+   propio, el texto SÍ depende de qué haya detrás (zona oscura arriba,
+   claro abajo), y el <nav> de acá tiene su propio scroll — no hay
+   forma 100% exacta en CSS puro de saber dónde cae cada ítem en todo
+   momento. Se acepta una aproximación por GRUPO en vez de por ítem:
+   el grupo principal (Inicio...Personas) va con zona oscura — con el
+   difuminado de fix-ui-claro-fade-abajo, ese grupo cae casi siempre
+   dentro del tramo negro/gris oscuro en un viewport típico (900px);
+   "Administración" (siempre el grupo de más abajo, cuando existe) va
+   con texto claro normal — ya cae cerca de donde el difuminado cruza
+   a blanco. Confirmado con script contra la rampa cruda (sin ningún
+   velo): #e6e6e6 (zona oscura) mide 4.60:1 en el punto más
+   comprometido de SU tramo (t≈42%) y #000000 (claro) mide 7.37:1 en
+   el punto más comprometido del suyo (t≈54%) — con un margen real
+   pero angosto entre los dos (t≈42-54%) donde, si un ítem cae justo
+   ahí, ninguno de los dos pasa 4.5:1 del todo. Límite conocido y
+   aceptado (mismo criterio que toda esta cadena de tareas): en un
+   viewport corto o con muchos módulos habilitados, el grupo principal
+   puede estirarse hasta ese tramo — no hay forma de resolverlo del
+   todo sin rastrear la posición real con JavaScript, que esta tarea
+   no pidió. */
+html .item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radio-boton);
+  /* currentColor pinta el ícono (SVG stroke) y la etiqueta juntos. */
+  color: var(--icono);
+  background: transparent;
+  text-decoration: none;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: var(--transicion-color);
+  white-space: nowrap;
+}
+
+:root[data-tema="claro"] .grupo:first-of-type .item {
+  color: var(--icono-hover-zona-oscura);
+}
+
+:root[data-tema="claro"] .grupo + .grupo .item,
+:root[data-tema="claro"] .grupo + .grupo .etiquetaGrupo {
+  color: var(--texto);
+}
+
+.item:hover {
+  background: var(--superficie-2);
+  color: var(--icono-hover);
+  border-left-color: var(--azul-metal-3);
+  box-shadow: var(--sombra-marca-hover);
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+  border-left-color: var(--azul-metal-3);
+}
+
+/* Activo (fix-ui-claro-sidebar-marca, punto 2: "acento azul limpio,
+   sin caja sucia"): la tarea anterior le había dado al activo de
+   claro una caja opaca navy — Mateo/Pablo la rechazan junto con el
+   velo. Vuelve a ser un degradado MUY sutil de --acento-suave
+   (~10-12% de alfa — transparente, nunca una caja) + el filo
+   izquierdo azul + un glow interior leve, igual en los dos temas, sin
+   condicionar por tema. */
+.item[data-activo="true"],
+.item[data-activo="true"]:hover {
+  background: linear-gradient(90deg, var(--acento-suave), transparent 78%);
+  border-left-color: var(--acento);
+  color: var(--icono-activo);
+  box-shadow: inset 0 0 18px var(--acento-resplandor);
+}
+
+/* El texto SÍ se ajusta por grupo en claro, mismo criterio que el
+   reposo: --icono-activo (azul oscuro, --azul-metal-2) lee bien sobre
+   claro/blanco pero se pierde sobre la franja oscura de arriba — el
+   grupo principal necesita el azul CLARO de zona oscura en su lugar.
+   El grupo de abajo ("Administración") no necesita override: ya cae
+   en zona clara, donde --icono-activo (heredado de la regla de
+   arriba) es el correcto. */
+:root[data-tema="claro"] .grupo:first-of-type .item[data-activo="true"],
+:root[data-tema="claro"] .grupo:first-of-type .item[data-activo="true"]:hover {
+  color: var(--icono-activo-zona-oscura);
+}
+
+.item[data-deshabilitado="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.etiquetaItem {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.piePrincipal {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.piePrincipal[data-colapsada="true"] {
+  grid-template-columns: 1fr;
+}
+
+/* Corrección (fix-ui-claro-sidebar-marca, punto 5): "no se lee como
+   botón plateado de marca" — tenía --borde gris plano en reposo (el
+   comentario de abajo decía "plata" pero el código nunca lo fue).
+   Esta zona del sidebar siempre cae pegada al borde de ABAJO del
+   degradado (100vh, el pie queda fijo ahí) — en claro eso es zona
+   clara, nunca la franja oscura — así que, a diferencia de .item, no
+   hace falta ningún ajuste por tema: la misma técnica de borde con
+   degradado de Tarjeta/.zx-control funciona igual en los dos temas. */
+.botonCuadrado {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  aspect-ratio: 1;
+  border-radius: var(--radio-boton);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  color: var(--icono);
+  text-decoration: none;
+  cursor: pointer;
+  padding: 0;
+  transition: var(--transicion-color), var(--transicion-transform);
+}
+
+/* Pedido explícito: estos 3 botones (Mi cuenta / Tema / Contraer) se
+   suman al mismo brillo de marca que ya tiene el resto de lo
+   interactivo (azul metálico + plata) — el plateado de arriba se ve
+   siempre, el azul resalta ENCIMA al pasar el mouse. */
+.botonCuadrado:hover {
+  color: var(--icono-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--sombra-marca-hover);
+}
+
+.botonCuadrado:active {
+  transform: scale(0.97);
+}
+
+.botonCuadrado:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+}
+
+.etiquetaCuadrado {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 860px) {
+  .barra {
+    width: 68px;
+    padding: 18px 8px;
+  }
+
+  .etiquetaItem,
+  .etiquetaGrupo {
+    display: none;
+  }
+
+  .piePrincipal {
+    grid-template-columns: 1fr;
+  }
+
+  .etiquetaCuadrado {
+    display: none;
+  }
+
+  /* Pantalla angosta: el ícono reemplaza al logo completo sin
+     importar el estado de "Contraer" (ese botón es para pantallas
+     anchas) — mismo criterio que el resto de las reglas de acá
+     arriba, todo por CSS, nunca por una condición de JS que no sabe
+     el ancho real de la pantalla. */
+  .logo {
+    padding: 8px 0;
+  }
+
+  .logoCompleto {
+    display: none;
+  }
+
+  .iconoColapsado[data-variante="plata"] {
+    display: block;
+  }
+}

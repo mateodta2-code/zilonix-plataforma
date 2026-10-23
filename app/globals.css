@@ -1,10 +1,661 @@
 :root {
   color-scheme: light dark;
+
+  /* Identidad visual de Zilonix Seller — manual de marca oficial:
+     negro de base, plata del manual y azul en lo interactivo y en el
+     fondo. Mateo pidió que el panel deje de verse casi todo negro:
+     el azul y la plata tienen que convivir con el negro, con el
+     criterio de dash.lucidtrading.com (acentos que brillan, nunca su
+     marca ni su verde). El logo (public/marca) no se recolorea, no
+     se filtra y no lleva sombra ni brillo. */
+  --fondo: #000000;
+  --superficie: #0b0b0c;
+  --superficie-2: #121214;
+  --borde: #222225;
+  --texto: #f2f4f8;
+  /* Plata, no gris azulado: sobre el azul del fondo #8a909c bajaba de
+     4.5:1. #C0C0C0 mide 11.54:1 sobre negro y 5.26:1 sobre el azul más
+     vivo de la variante intenso. */
+  --texto-suave: #c0c0c0;
+
+  /* Paleta plata oficial del manual (las 4 paradas reales del
+     degradado de marca, de más clara a más oscura). --plata/--plata-2
+     son los nombres que ya usan los componentes del marco (hover,
+     bordes) — se ajustan a los valores oficiales en vez de
+     renombrarlos en cada archivo. */
+  --plata-brillo: #e6e6e6;
+  --plata: #c0c0c0;
+  --plata-medio: #939393;
+  --plata-oscuro: #6e6e6e;
+  --plata-2: var(--plata-medio);
+
+  /* Azul metálico de marca (tarea "un solo estilo de marca") — 3
+     paradas reales, de más profundo a más brillante, con la MISMA
+     sangre que ya usan --acento-boton-hover (1d4ed8 ya era este
+     valor exacto, ahora sale de acá) y --acento-fuerte. Un solo lugar
+     de verdad para el azul: --fondo-app-* (el degradado de la página)
+     y el brillo de hover/foco (.zx-brillo-marca, más abajo) salen de
+     estas 3 paradas, no de hex sueltos repetidos. */
+  --azul-metal-1: #0b1e4d;
+  --azul-metal-2: #1d4ed8;
+  --azul-metal-3: #5b8def;
+  --gradiente-azul-metal: linear-gradient(135deg, var(--azul-metal-1) 0%, var(--azul-metal-2) 55%, var(--azul-metal-3) 100%);
+
+  --acento: #3b82f6;
+  --acento-fuerte: #60a5fa;
+  --acento-suave: rgba(59, 130, 246, 0.12);
+  /* Relleno de botón con texto blanco. #3b82f6 contra #fff mide 3.68:1
+     y #60a5fa mide 2.54:1 — los dos fallan AA. #2563eb mide 5.17:1 y
+     el hover #1d4ed8 mide 6.70:1. El azul de íconos y enlaces se queda
+     en --acento / --acento-fuerte, que sí pasan sobre negro.
+     --acento-boton-hover es --azul-metal-2 (mismo valor exacto, 1d4ed8
+     — una sola fuente, no dos hex iguales por casualidad). */
+  --acento-boton: #2563eb;
+  --acento-boton-hover: var(--azul-metal-2);
+  --acento-brillo: rgba(59, 130, 246, 0.45);
+  --acento-resplandor: rgba(59, 130, 246, 0.2);
+  --fila-hover: rgba(59, 130, 246, 0.1);
+  --sombra-foco: 0 0 0 3px rgba(59, 130, 246, 0.4);
+  --sombra-boton: 0 0 20px rgba(59, 130, 246, 0.48);
+  /* Brillo de marca reutilizable (azul metálico + plata) — una sola
+     definición para TODO lo interactivo (.zx-brillo-marca, más abajo).
+     Nunca se repite este box-shadow a mano por componente. */
+  --sombra-marca-hover: 0 0 0 1px var(--azul-metal-3), 0 0 16px color-mix(in srgb, var(--azul-metal-3) 55%, transparent),
+    0 0 5px color-mix(in srgb, var(--plata-brillo) 65%, transparent);
+  /* Corrección (fix-ui-claro-sidebar-marca, punto 3): "plateado en
+     reposo + azul arriba/abajo del borde" para elementos reales de
+     formulario (<input>/<select>/<textarea>) — ahí un ::before/::after
+     (la técnica que ya usan Tarjeta/TarjetaKpi/EstadoVacio/.filtros
+     para su filete azul de arriba) no se renderiza de forma confiable
+     en navegadores reales. box-shadow sí funciona siempre sobre un
+     control nativo: dos inset, uno pegado arriba y otro abajo del
+     borde de 1px. Se usa en .zx-control (más abajo). */
+  --filete-marca-arriba-abajo: inset 0 1px 0 0 color-mix(in srgb, var(--azul-metal-3) 70%, transparent),
+    inset 0 -1px 0 0 color-mix(in srgb, var(--azul-metal-3) 70%, transparent);
+  /* Tarea "fix-ui-claro-como-oscuro" — "zona oscura": el header, el
+     logo + menú del sidebar, y el saludo/pestañas de Inicio SIEMPRE
+     caen sobre la franja oscura del degradado (azul metálico -> negro
+     -> recién después blanco, ver --fondo-app-* del bloque claro),
+     en LOS DOS TEMAS — en oscuro, toda la página ya era así. Estos
+     valores son el MISMO número en los dos temas a propósito: son
+     justo los valores reales que ya usa oscuro (--texto, --icono,
+     etc.) — "zona oscura" no depende de qué tema eligió la persona,
+     depende de qué hay detrás del texto. Se usan sin condicionar por
+     [data-tema="claro"]: en oscuro no cambia nada (ya eran estos
+     números), en claro resuelve el texto negro-sobre-azul-oscuro
+     ilegible que dejaba el intento anterior. */
+  --texto-zona-oscura: #f2f4f8;
+  --texto-suave-zona-oscura: #c0c0c0;
+  --icono-zona-oscura: #939393;
+  --icono-hover-zona-oscura: #e6e6e6;
+  --icono-activo-zona-oscura: #60a5fa;
+  --plata-etiqueta-zona-oscura: #c0c0c0;
+  --acento-suave-zona-oscura: rgba(59, 130, 246, 0.12);
+  --acento-resplandor-zona-oscura: rgba(59, 130, 246, 0.2);
+  --borde-zona-oscura: #222225;
+  --degradado-plata-texto-zona-oscura: linear-gradient(100deg, #c0c0c0 0%, #e6e6e6 46%, #d0d0d0 72%, #c0c0c0 100%);
+
+  --peligro: #ef4444;
+  --exito: #22c55e;
+  /* Texto de estado (chip, variación de KPI). En oscuro el verde y el
+     rojo vivos pasan sobre la superficie; en claro no, y el bloque
+     [data-tema="claro"] los oscurece. */
+  --exito-texto: #22c55e;
+  --peligro-texto: #ef4444;
+
+  /* Íconos de la barra: inactivo #939393 (6.40:1 sobre #0b0b0c),
+     hover #E6E6E6 (15.76:1), activo = --acento-fuerte. En claro el
+     hover no puede ser #E6E6E6 (se pierde sobre blanco): baja al
+     grafito, que es el equivalente con contraste. */
+  --icono: #939393;
+  --icono-hover: #e6e6e6;
+  --icono-activo: var(--acento-fuerte);
+  /* Etiquetas de sección ("ADMINISTRACIÓN") y encabezados de tabla.
+     #C0C0C0 sobre #121214 mide 10.28:1. */
+  --plata-etiqueta: #c0c0c0;
+  --borde-plata: #939393;
+  --borde-hover: #e6e6e6;
+
+  /* Degradado plata oficial del manual de marca — el mismo que trae
+     el SVG del logo (public/marca/zilonix-seller-logo.svg, gradiente
+     "silver"): mismos 7 colores y los mismos % exactos. Sirve para
+     BORDES. No sirve para texto en claro: #E6E6E6 sobre blanco mide
+     1.25:1. */
+  --degradado-plata: linear-gradient(
+    90deg,
+    #6e6e6e 0%,
+    #9a9a9a 18%,
+    #c9c9c9 36%,
+    #e6e6e6 50%,
+    #c0c0c0 62%,
+    #939393 82%,
+    #767676 100%
+  );
+  --degradado-plata-borde: var(--degradado-plata);
+  /* Texto plateado. La parada más oscura es #C0C0C0: #939393 sobre el
+     azul vivo del fondo intenso (#214288) mide 3.3:1. #C0C0C0 mide
+     5.26:1 ahí y 10.81:1 sobre la tarjeta #0b0b0c. En claro el bloque
+     de tema lo reemplaza por el lado #6E6E6E. */
+  --degradado-plata-texto: linear-gradient(
+    100deg,
+    #c0c0c0 0%,
+    #e6e6e6 46%,
+    #d0d0d0 72%,
+    #c0c0c0 100%
+  );
+
+  /* Fondo de la página: azul metálico arriba, negro abajo, con una
+     banda de plata donde se encuentran. Negro puro (#000) sigue siendo
+     la base (--fondo); estas capas se le suman y se vuelven
+     transparentes, así que afinar el alfa no cambia el negro de abajo.
+     Fijo al viewport (pseudo-elemento en body) para que no se repita
+     al hacer scroll. data-fondo en <html>: suave | medio | intenso.
+     Mateo eligió el suave — sin atributo (o con cualquier valor que no
+     sea "medio" ni "intenso") gana ese. Las otras dos variantes se
+     dejan igual, por si después pide subirle la intensidad.
+
+     Tarea "marca unificada": las 3 variantes ahora salen de
+     --azul-metal-1/2/3 (color-mix, nunca un rgb(37,99,235) suelto) —
+     profundo en el filo superior, un reflejo sutil más brillante un
+     poco más abajo (azul-metal-3), de vuelta a profundo antes de
+     fundirse a negro. Contraste reverificado con script (no a mano,
+     ver el PR de esta tarea): suave a ~10%/~12% de viewport pasa
+     14.49–14.94:1 (texto) y 8.77–9.04:1 (texto-suave) — el original
+     medía 15.35–16.11 / 9.29–9.75, baja menos de un punto, de sobra
+     por encima del mínimo AA de 4.5:1.
+
+     Corrección (fix-ui-marca-ajustes, punto 2): la barra LATERAL
+     también es transparente ahora (BarraLateral.module.css) — mide
+     100vh y está sticky top:0, igual que este pseudo-elemento fixed,
+     así que el MISMO degradado asoma ahí también, alineado pixel a
+     pixel con el del área principal, sin duplicar la receta. Las
+     tarjetas y tablas de ADENTRO del panel siguen opacas
+     (--superficie): esto nunca afecta esas cifras, solo el fondo de
+     la página detrás de las dos barras. */
+  --fondo-app: var(--fondo-app-suave);
+  --fondo-app-suave:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-1) 55%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 38%, transparent) 6%,
+      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 12%,
+      color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
+      transparent 25%
+    );
+  --fondo-app-medio:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 42%, transparent) 14%,
+      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 28%,
+      color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
+      transparent 50%
+    );
+  /* Intenso se queda deliberadamente sin la parada más brillante
+     (azul-metal-3) en el cuerpo del degradado — a diferencia de suave
+     y medio, acá el margen AA original ya era el más ajustado de los
+     tres (5.63:1 con el bloom, el caso límite documentado en #109);
+     empujar hacia el tono más claro ahí lo bajaba a ~4.74:1 (seguía
+     pasando, pero con mucho menos margen que las otras dos variantes)
+     — se prefiere quedarse más cerca del tono medio para no erosionar
+     ese margen en la variante que ya venía más al límite. */
+  --fondo-app-intenso:
+    linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
+    radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 46%, transparent) 18%,
+      color-mix(in srgb, var(--azul-metal-2) 30%, transparent) 34%,
+      color-mix(in srgb, var(--azul-metal-1) 18%, transparent) 48%,
+      color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
+      transparent 70%
+    );
+
+  --radio-boton: 6px;
+  --radio-tarjeta: 12px;
+  --radio-chip: 4px;
+
+  --fuente-titulos: var(--fuente-montserrat), "Segoe UI", sans-serif;
+  --fuente-texto: var(--fuente-montserrat), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --transicion-color: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  --transicion-transform: transform 0.1s ease;
+}
+
+/* Mismos valores que :root, explícitos — el selector de tema pone
+   data-tema a mano (en vez de confiar solo en prefers-color-scheme),
+   así que "oscuro" necesita su propio bloque para que elegirlo a
+   propósito gane siempre, incluso si el sistema está en claro. */
+:root[data-tema="oscuro"] {
+  --fondo: #000000;
+  --superficie: #0b0b0c;
+  --superficie-2: #121214;
+  --borde: #222225;
+  --texto: #f2f4f8;
+  --texto-suave: #c0c0c0;
+  --plata: #c0c0c0;
+  --plata-2: var(--plata-medio);
+  --acento: #3b82f6;
+  --acento-fuerte: #60a5fa;
+  --acento-suave: rgba(59, 130, 246, 0.12);
+  --acento-brillo: rgba(59, 130, 246, 0.45);
+  --acento-resplandor: rgba(59, 130, 246, 0.2);
+  --fila-hover: rgba(59, 130, 246, 0.1);
+  --icono: #939393;
+  --icono-hover: #e6e6e6;
+  --plata-etiqueta: #c0c0c0;
+  --borde-plata: #939393;
+  --borde-hover: #e6e6e6;
+  --exito-texto: #22c55e;
+  --peligro-texto: #ef4444;
+  --degradado-plata-borde: var(--degradado-plata);
+  --degradado-plata-texto: linear-gradient(100deg, #c0c0c0 0%, #e6e6e6 46%, #d0d0d0 72%, #c0c0c0 100%);
+  /* Mismos valores que :root (azul-metal-1/2/3) — duplicados a
+     propósito acá, mismo criterio que el resto de este bloque. */
+  --fondo-app-suave:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-1) 55%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 38%, transparent) 6%,
+      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 12%,
+      color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
+      transparent 25%
+    );
+  --fondo-app-medio:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 42%, transparent) 14%,
+      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 28%,
+      color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
+      transparent 50%
+    );
+  --fondo-app-intenso:
+    linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
+    radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 46%, transparent) 18%,
+      color-mix(in srgb, var(--azul-metal-2) 30%, transparent) 34%,
+      color-mix(in srgb, var(--azul-metal-1) 18%, transparent) 48%,
+      color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
+      transparent 70%
+    );
+}
+
+/* data-fondo se declara después del bloque de tema oscuro para que
+   elegir "suave" o "intenso" no lo pise ese bloque al repetir tokens. */
+:root[data-fondo="suave"] {
+  --fondo-app: var(--fondo-app-suave);
+}
+
+:root[data-fondo="medio"] {
+  --fondo-app: var(--fondo-app-medio);
+}
+
+:root[data-fondo="intenso"] {
+  --fondo-app: var(--fondo-app-intenso);
+}
+
+:root[data-tema="claro"] {
+  --fondo: #ffffff;
+  --superficie: #f5f5f6;
+  --superficie-2: #ececee;
+  --borde: #dcdcdf;
+  /* Corrección (fix-ui-claro-sidebar-marca): Mateo Y Pablo rechazaron
+     --velo-item-claro — "se ve sucio, tapa el fade" (mismo motivo por
+     el que la tarea anterior ya había rechazado --pill-claro, blanco
+     opaco). Se borra por completo: el menú del sidebar vuelve a ser
+     100% transparente, sin ningún fondo propio por ítem. Ver
+     BarraLateral.module.css para cómo se resuelve ahora el contraste
+     (texto zona-oscura arriba / claro abajo, por grupo, sin fondo). */
+  --texto: #000000;
+  /* Revertido a su valor original (fix-ui-claro-como-oscuro): las dos
+     correcciones anteriores lo habían oscurecido a #333843 para
+     "desbloquear" cuánto azul podía llevar el degradado, porque en
+     ese diseño el fondo era semitransparente y el texto se medía
+     DIRECTO contra esa mezcla. Ahora el degradado tiene una capa
+     opaca propia (negro sólido arriba, blanco abajo — ver
+     --fondo-app-* más abajo) y los pocos elementos que de verdad caen
+     sobre la franja oscura (header, sidebar, saludo/pestañas de
+     Inicio) usan los tokens --texto-zona-oscura/--icono-zona-oscura/
+     etc. (definidos arriba, los mismos valores que ya usa oscuro) en
+     vez de este. Ya no hace falta oscurecer --texto-suave para nadie:
+     vuelve a #5b6270, su valor de siempre. */
+  --texto-suave: #5b6270;
+  --plata: #939393;
+  --plata-2: var(--plata-oscuro);
+  --acento: #2563eb;
+  /* #1d4ed8 era un literal repetido — mismo valor exacto que
+     --azul-metal-2, ahora sale de ahí (una sola fuente). */
+  --acento-fuerte: var(--azul-metal-2);
+  --acento-suave: rgba(37, 99, 235, 0.1);
+  --acento-brillo: rgba(37, 99, 235, 0.35);
+  --acento-resplandor: rgba(37, 99, 235, 0.12);
+  --fila-hover: rgba(37, 99, 235, 0.08);
+  --sombra-foco: 0 0 0 3px rgba(37, 99, 235, 0.28);
+  --sombra-boton: 0 0 16px rgba(37, 99, 235, 0.32);
+  /* Inactivo: #6E6E6E sobre la barra #f5f5f6 mide 4.68:1, pero los
+     botones cuadrados usan #ececee y ahí #6E6E6E baja a 4.32:1.
+     #686868 sostiene 4.72:1 sobre #ececee y 5.11:1 sobre #f5f5f6
+     (sigue siendo el lado oscuro de la plata). Hover #242424:
+     #E6E6E6 sobre #ececee mide 1.06:1.
+
+     Revertido a #686868 (fix-ui-claro-como-oscuro): las correcciones
+     anteriores lo habían bajado a #333333 para destrabar el alfa del
+     degradado semitransparente de ese diseño. Los únicos lugares
+     donde --icono se pintaba DIRECTO contra ese degradado (ítems del
+     sidebar, "NIT·rol") ahora usan --icono-zona-oscura/
+     --plata-etiqueta-zona-oscura en vez de este — el resto de usos de
+     --icono (botones cuadrados, SelectorTema) siempre tuvo su propio
+     fondo opaco (--superficie-2) detrás, nunca necesitó el oscurecido
+     en primer lugar. */
+  --icono: #686868;
+  --icono-hover: #242424;
+  /* #6E6E6E sobre el encabezado de tabla #ececee mide 4.32:1. #686868
+     mide 4.72:1 ahí, 5.11:1 sobre la tarjeta y 5.57:1 sobre blanco.
+     Mismo motivo y mismo valor que --icono: revertido a #686868
+     (fix-ui-claro-como-oscuro) — "NIT·rol" y "ADMINISTRACIÓN" del
+     sidebar, los dos usos reales contra el degradado, pasan a
+     --plata-etiqueta-zona-oscura. */
+  --plata-etiqueta: #686868;
+  --borde-plata: #6e6e6e;
+  --borde-hover: #6e6e6e;
+  /* #22c55e sobre blanco mide 2.28:1; #166534 mide 6.04:1 sobre
+     #ececee. #ef4444 sobre blanco mide 3.76:1; #991b1b mide 7.04:1
+     sobre #ececee. */
+  --exito-texto: #166534;
+  --peligro-texto: #991b1b;
+  /* El degradado oficial se apaga sobre blanco (la mitad clara no se
+     distingue). El borde en claro usa el lado oscuro de la misma
+     paleta para que el filo se vea. */
+  --degradado-plata-borde: linear-gradient(90deg, #6e6e6e 0%, #939393 28%, #c0c0c0 50%, #939393 72%, #6e6e6e 100%);
+  /* Tarea "marca unificada": títulos en gris metalizado (pedido:
+     #3F4651 -> #8A93A0 -> #2E343D). El punto medio pedido (#8A93A0)
+     se cambia a #656C77: contra --superficie-2 (#ececee, la tarjeta
+     más común) #8A93A0 mide apenas 2.63:1 — ni el mínimo de texto
+     GRANDE (3:1) lo pasa. #656C77 mide 4.49:1 ahí, 4.86:1 sobre
+     --superficie y 5.30:1 sobre blanco — de sobra para texto grande
+     (esta clase NUNCA se usa en texto chico, ver .zx-texto-plata). Los
+     dos extremos sí son los pedidos tal cual (9–12:1, de sobra). */
+  --degradado-plata-texto: linear-gradient(100deg, #3f4651 0%, #656c77 46%, #2e343d 100%);
+  /* Corrección (fix-ui-claro-como-oscuro): los dos intentos anteriores
+     (fix-ui-claro-azul, fix-ui-claro-tono-oscuro) seguían siendo un
+     tinte azul sobre blanco — Mateo pidió, con capturas, que la franja
+     de arriba sea PRÁCTICAMENTE EL MISMO degradado que oscuro (azul
+     metálico -> negro, misma intensidad) y que SOLO abajo pase a
+     blanco. No se puede lograr eso con más alfa (la base siempre
+     termina siendo --fondo, blanco en claro) — hace falta una capa
+     opaca propia que vaya de negro a blanco, y encima, exactamente
+     la MISMA capa de azul-metal (con los MISMOS alfas, copiados tal
+     cual) que ya usa oscuro arriba en este archivo.
+
+     3 capas, de arriba hacia abajo (la primera listada es la que se
+     ve más arriba en el stack):
+     1) el mismo "sheen" gris que ya tenía oscuro (sin cambios).
+     2) la MISMA capa azul-metal-1/2/3 que usa oscuro, copiada literal
+        — mismos % de mezcla, mismas paradas. Donde esta capa es
+        transparente (desde 25%), se ve la capa 3 de abajo.
+     3) NUEVA: negro sólido de 0% a donde empieza a pedir Mateo
+        (~55-70%), después cruza a blanco. Mientras la capa 2 todavía
+        tiene algo de alfa (0-25%), el resultado es IDÉNTICO al de
+        oscuro (azul-metal sobre negro, mismo cálculo). De 25% en
+        adelante, sin capa 2, se ve esta capa 3 sola: negro liso hasta
+        el cruce, blanco limpio después — ni rastro de --fondo (blanco)
+        asomando antes de tiempo, porque esta capa es 100% opaca en
+        toda su extensión.
+
+     Corrección (fix-ui-claro-cruce-alto, ya revertida): Mateo pidió
+     subir el cruce (quedaba debajo de las KPI) y se angostó la banda
+     a 2 puntos para esquivar la "zona muerta" (ni el texto de zona
+     oscura ni el normal de claro pasan AA a mitad de un negro→blanco).
+     Mateo vio el resultado y lo rechazó: un corte así de angosto se ve
+     como un borde duro, no un difuminado — pidió explícitamente volver
+     a una banda ANCHA (negro → gris → blanco) aunque eso reabra la
+     zona muerta, y resolver el contraste ahí por otro lado en vez de
+     angostar la banda de nuevo.
+
+     Corrección (fix-ui-claro-fade-abajo, punto 1): Mateo vio #119 y
+     seguía viendo un "corte" gris→blanco — pidió alargar la banda
+     TODAVÍA más, con paradas de gris EXPLÍCITAS (no un blend de 2
+     puntos) y blanco limpio mucho más abajo (zona de KPIs/tablas). La
+     capa de azul-metal de arriba (la del medio, sin cambios) y el
+     punto donde esta 3ª capa empieza en negro sólido (18%/20%/22%)
+     tampoco se tocan — a propósito, para que el glow de arriba siga
+     exactamente igual. Lo único que cambia es qué pasa DESPUÉS de ese
+     punto: antes cruzaba a blanco en 24 puntos (18→42) con un blend de
+     2 paradas; ahora son 6 paradas, una rampa de gris LINEAL de verdad
+     (0, 51, 102, 153, 204, 255 — osea #000/#333/#666/#999/#ccc/#fff,
+     el mismo salto de 51 entre cada una) en una banda de 60 puntos
+     (18→78 en suave). Medio/intenso en la misma proporción (64/70
+     puntos de banda).
+
+     Zona muerta, confirmada con script (igual que #119, por el mismo
+     motivo: en el punto medio del gris, #999999, ningún texto plano
+     pasa AA — 2.59:1 contra el texto de zona oscura, 7.37:1 contra el
+     texto negro normal... pero ESE sí pasa de sobra, así que la "zona
+     muerta" real empieza más tarde). A propósito: "estética > AA en
+     el fondo; contraste en superficies/texto" — ver --velo-item-claro
+     arriba y BarraLateral.module.css/Pestanas.module.css, donde se
+     resuelve de verdad. */
+  --fondo-app-suave:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-1) 55%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 38%, transparent) 6%,
+      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 12%,
+      color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
+      transparent 25%
+    ),
+    linear-gradient(180deg, #000000 0%, #000000 18%, #333333 30%, #666666 42%, #999999 54%, #cccccc 66%, #ffffff 78%);
+  --fondo-app-medio:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 42%, transparent) 14%,
+      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 28%,
+      color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
+      transparent 50%
+    ),
+    linear-gradient(180deg, #000000 0%, #000000 20%, #333333 33%, #666666 46%, #999999 58%, #cccccc 71%, #ffffff 84%);
+  --fondo-app-intenso:
+    linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
+    radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 46%, transparent) 18%,
+      color-mix(in srgb, var(--azul-metal-2) 30%, transparent) 34%,
+      color-mix(in srgb, var(--azul-metal-1) 18%, transparent) 48%,
+      color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
+      transparent 70%
+    ),
+    linear-gradient(180deg, #000000 0%, #000000 22%, #333333 36%, #666666 50%, #999999 64%, #cccccc 78%, #ffffff 92%);
+  /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
+     arriba: sin atributo data-fondo, gana el suave. */
+  --fondo-app: var(--fondo-app-suave);
+}
+
+:root[data-tema="claro"][data-fondo="suave"] {
+  --fondo-app: var(--fondo-app-suave);
+}
+
+:root[data-tema="claro"][data-fondo="medio"] {
+  --fondo-app: var(--fondo-app-medio);
+}
+
+:root[data-tema="claro"][data-fondo="intenso"] {
+  --fondo-app: var(--fondo-app-intenso);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* El overscroll muestra --fondo (negro o blanco puro). El degradado
+   vive en un pseudo fijo, detrás del contenido: la barra lateral y
+   las tarjetas opacas lo tapan; el hueco del panel lo deja ver. */
+html {
+  background-color: var(--fondo);
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #0b0d12;
-  color: #e7e9ee;
+  position: relative;
+  z-index: 0;
+  font-family: var(--fuente-texto);
+  background: transparent;
+  color: var(--texto);
+  transition: var(--transicion-color);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: var(--fondo);
+  background-image: var(--fondo-app);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  pointer-events: none;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Etiquetas pequeñas en mayúsculas (cifras, chips, encabezados de
+   grupo) — una sola regla compartida en vez de repetirla en cada
+   *.module.css. */
+.zx-etiqueta {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--plata-etiqueta);
+}
+
+/* Degradado plateado SOLO para títulos/cifras grandes — background-
+   clip: text necesita el relleno transparente del propio texto, nunca
+   se usa en un bloque con más contenido adentro. */
+.zx-texto-plata {
+  background: var(--degradado-plata-texto);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Tarea "marca unificada" — hover/foco de marca (azul metálico +
+   plata), UNA sola definición para TODO lo interactivo: botones,
+   links, pestañas, ítems del sidebar, los 3 botones de abajo
+   (Mi cuenta/Tema/Contraer — hoy sin esto), tarjetas e inputs/selects.
+   Cada *.module.css que lo necesita hace
+   `composes: zx-brillo-marca from global;` sobre su propia clase —
+   nunca se repite este box-shadow a mano por componente. El brillo
+   vive en --sombra-marca-hover (definida en :root, azul-metal-3 +
+   plata-brillo) para que cambiarlo un día sea un solo lugar. */
+.zx-brillo-marca {
+  transition: var(--transicion-color), var(--transicion-transform), box-shadow 0.2s ease;
+}
+
+.zx-brillo-marca:hover {
+  border-color: var(--azul-metal-3);
+  box-shadow: var(--sombra-marca-hover);
+}
+
+/* Solo el borde en foco, nunca el box-shadow: cada componente ya trae
+   su propio anillo de foco accesible (--sombra-foco, probado) — acá
+   no se compite por esa misma propiedad, solo se suma el toque de
+   marca al borde. */
+.zx-brillo-marca:focus-visible {
+  border-color: var(--azul-metal-3);
+}
+
+/* Issue de las subpáginas del panel — clase compartida para los
+   <input>/<select>/<textarea> reales de cada formulario (el elemento
+   en sí, con su name/type/required de siempre, lo sigue poniendo cada
+   página; esto solo lo viste). Nunca un componente propio de Input:
+   los campos de un formulario real tienen demasiadas variantes (type,
+   min/max, defaultValue, hidden...) para que valga la pena envolverlos.
+
+   Corrección (fix-ui-claro-fade-abajo, punto 4): antes el borde en
+   reposo era --borde gris plano — Mateo pidió que NINGÚN elemento
+   bordeado se quede en ese look "final". Misma técnica de dos
+   background-clip que ya usa Tarjeta/TarjetaKpi/EstadoVacio/.filtros
+   (border:1px solid transparent + el relleno real a padding-box +
+   --degradado-plata-borde a border-box): el borde pasa a ser el
+   plateado de marca SIEMPRE, no solo en hover. El toque azul sigue
+   siendo el glow de --sombra-marca-hover en hover/foco, igual que en
+   esas mismas tarjetas (ahí tampoco cambia el borde en hover, solo se
+   suma el brillo) — una sola fuente de "borde con identidad" para
+   todo lo bordeado, cards e inputs por igual.
+
+   Corrección (fix-ui-claro-sidebar-marca, punto 3): el plateado por
+   sí solo medía como "un gris plano" — se suma --filete-marca-
+   arriba-abajo (ver :root), un azul sutil pegado al borde de arriba
+   Y al de abajo (no solo arriba, como las tarjetas). */
+.zx-control {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: var(--radio-boton);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  box-shadow: var(--filete-marca-arriba-abajo);
+  color: var(--texto);
+  font-size: 13.5px;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: var(--transicion-color), box-shadow 0.2s ease;
+}
+
+/* app/globals.css es CSS plano (no .module.css) — `composes` solo
+   funciona DESDE un CSS module HACIA una clase global, nunca al
+   revés. Acá, en el mismo archivo que define .zx-brillo-marca, se
+   suma el selector directo en vez de "componer". */
+.zx-control:hover,
+.zx-control:focus-visible {
+  box-shadow: var(--filete-marca-arriba-abajo), var(--sombra-marca-hover);
+}
+
+.zx-control:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 1px;
+}
+
+.zx-control:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Checkboxes/radios reales (ej. selección múltiple de despachos) —
+   solo el color de acento, nunca el tamaño/posición por defecto del
+   navegador. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--acento);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
 }

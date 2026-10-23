@@ -1,0 +1,11 @@
+.listaPeligrosos {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--peligro);
+  font-size: 14px;
+}
+
+.form {
+  display: flex;
+  gap: 12px;
+}

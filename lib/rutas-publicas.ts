@@ -76,6 +76,15 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // de depender del middleware para la sesión no significa dejar de
   // exigirla, solo deja de exigirla con un mecanismo que se cuelga.
   "/api/ml/callback",
+
+  // Z-MT-10 (issue #45) — sonda de salud para el monitor externo y
+  // scripts/humo.sh, llamada sin sesión cada minuto. Pública a
+  // propósito: solo devuelve números (select 1, edad del último
+  // trabajo, trabajos muertos), nunca datos de negocio ni el error
+  // crudo del driver (ver app/api/salud/route.ts) — no hay nada que
+  // proteger con sesión acá, al revés de las demás rutas de esta
+  // lista, que sí tienen su propio mecanismo de autenticación.
+  "/api/salud",
 ];
 
 export const esRutaPublica = createRouteMatcher(PATRONES_RUTAS_PUBLICAS);

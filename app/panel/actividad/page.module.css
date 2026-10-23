@@ -1,0 +1,13 @@
+.celdaFecha {
+  white-space: nowrap;
+  color: var(--texto-suave);
+}
+
+.actorSistema {
+  font-style: italic;
+  color: var(--texto-suave);
+}
+
+.volver {
+  align-self: flex-start;
+}

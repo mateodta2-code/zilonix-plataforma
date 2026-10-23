@@ -1,0 +1,67 @@
+/* Corrección (fix-ui-claro-fade-abajo, punto 2): Mateo rechazó el
+   pill blanco opaco (igual que en BarraLateral.module.css — "tapa el
+   fade y se ve postizo"). A diferencia del sidebar, Pestanas no tiene
+   scroll propio: siempre está justo debajo del saludo/header, en una
+   posición predecible. Con el difuminado más largo de este mismo PR
+   (ver --fondo-app-* en globals.css: negro sólido hasta 18-22%, recién
+   gris desde ahí), Pestanas (~21-27% de un viewport típico de 900px,
+   ~29-37% en uno corto de 650px) sigue cayendo en el tramo negro o
+   muy oscuro del difuminado en los dos casos — confirmado con script
+   (incluso en el punto más comprometido, ~#333333, el texto de zona
+   oscura mide 11.47:1). Ya no hace falta ningún fondo propio: mismo
+   criterio que BarraSuperior/el logo del sidebar (zona oscura fija,
+   sin pill). */
+.contenedor {
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid var(--borde);
+}
+
+.pestana {
+  position: relative;
+  padding: 10px 2px 12px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--texto-suave-zona-oscura);
+  text-decoration: none;
+  cursor: pointer;
+  transition: var(--transicion-color), border-color 0.2s ease;
+  border-bottom: 2px solid transparent;
+}
+
+/* A propósito SIN composes: una pestaña es texto en una fila, no una
+   caja — el anillo rectangular de .zx-brillo-marca se vería raro acá.
+   El brillo real de marca en hover es esta línea de abajo (azul-metal-3
+   en vez de transparent), con el mismo resplandor que ya usa la
+   pestaña activa (::after, más abajo). */
+.pestana:hover {
+  color: var(--texto-zona-oscura);
+  border-bottom-color: var(--azul-metal-3);
+}
+
+.pestana:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+}
+
+.pestana[data-activa="true"] {
+  color: var(--texto-zona-oscura);
+}
+
+.pestana[data-activa="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--acento);
+  border-radius: 2px;
+  box-shadow: 0 0 8px var(--acento-brillo);
+}
+
+.pestana[data-deshabilitada="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

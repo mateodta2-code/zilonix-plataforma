@@ -23,6 +23,7 @@ const APP_DIR = join(RAIZ, "app");
 
 // Rutas que SÍ deben llamar requierePermiso() en su propio código.
 const RUTAS_PROTEGIDAS = new Set([
+  "app/panel/page.tsx",
   "app/panel/finanzas/page.tsx",
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
@@ -41,9 +42,11 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/sku/actions.ts",
   "app/panel/sku/sin-vincular/page.tsx",
   "app/panel/sku/sin-vincular/actions.ts",
+  "app/panel/sku/importar/page.tsx",
   "app/panel/pedidos/page.tsx",
   "app/panel/pedidos/[id]/page.tsx",
   "app/panel/despachos/page.tsx",
+  "app/panel/investigacion/page.tsx",
   "app/api/ml/despachos/etiquetas/route.ts",
   "app/panel/publicar/page.tsx",
   "app/panel/publicar/nuevo/page.tsx",
@@ -65,7 +68,6 @@ const RUTAS_SUPERADMIN = new Set(["app/superadmin/page.tsx", "app/superadmin/[em
 // preguntar "¿puede [acción] en [módulo]?".
 const RUTAS_EXENTAS: Record<string, string> = {
   "app/page.tsx": "solo lista las empresas propias del usuario para decidir a dónde mandarlo, no lee datos de negocio de ninguna empresa",
-  "app/panel/page.tsx": "solo filtra qué módulos mostrar en el nav (consultar); el módulo de destino exige su propio permiso al entrar",
   "app/panel/actions.ts": "cambiar la empresa activa ya se revalida contra las membresías reales del usuario, no es un permiso por módulo",
   "app/crear-empresa/page.tsx": "cualquier usuario con cuenta puede crear su propia empresa — no hay membresía previa que comprobar",
   "app/crear-empresa/actions.ts": "idem",
@@ -76,10 +78,14 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/sign-in/[[...sign-in]]/page.tsx": "solo monta <SignIn/> de Clerk",
   "app/sign-up/[[...sign-up]]/page.tsx": "solo monta <SignUp/> de Clerk",
   "app/api/version/route.ts": "expone solo el número de versión, nunca datos de ninguna empresa",
+  "app/api/salud/route.ts":
+    "monitoreo público: solo un select 1 y, cuando exista la cola, números de trabajos — nunca datos de negocio, nombres de empresa, cadenas de conexión ni el error del driver",
   "app/api/ml/webhooks/route.ts":
     "Mercado Libre llama esta ruta directo, sin sesión de usuario — el permiso real es dbComoAvisoWebhook() (db/empresa-context.ts), que solo deja ver la fila de cuentas_ml cuyo user_id coincide con el del aviso, nunca las de otra empresa",
   "app/api/ml/trabajador/route.ts":
     "la llama un cron, sin sesión de usuario — el permiso real es el secreto compartido x-trabajador-secret, y la conexión trabajador_user (db/trabajador-context.ts) solo puede tocar avisos_ml, ninguna otra tabla",
+  "app/panel/sku/importar/actions.ts":
+    "el permiso real (requierePermiso('inventario','modificar')) vive en lib/ml/sku-importar.ts (previsualizarImportacionSkus/confirmarImportacionSkus), llamado ANTES de leer o escribir — este archivo solo adapta el formulario a esas dos funciones, nunca toca la base por su cuenta",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {
@@ -133,9 +139,11 @@ describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candad
 // Fix real (2026-10-21) — RUTAS_EXENTAS (exenta del permiso de MÓDULO,
 // requierePermiso) y esRutaPublica de lib/rutas-publicas.ts (exenta de
 // la SESIÓN de Clerk en el middleware) responden preguntas distintas:
-// "/panel" está exenta de permiso de módulo pero sí exige sesión real
-// (lo exige el propio código de la página), así que forzar que las dos
-// listas coincidan completas estaría mal. La incoherencia real que
+// app/panel/actions.ts está exenta de permiso de módulo (cambiar de
+// empresa se revalida contra las membresías reales) pero sí exige
+// sesión, así que forzar que las dos listas coincidan completas estaría
+// mal. /panel en sí ya no es el ejemplo: app/panel/page.tsx está en
+// RUTAS_PROTEGIDAS y llama requierePermiso. La incoherencia real que
 // causó el bug del 21/10 fue más angosta: una ruta de MÁQUINA (nadie
 // navega ahí con sesión — un webhook, un cron) exenta de permiso de
 // módulo tiene que estar TAMBIÉN en esRutaPublica sin excepción; si no,
@@ -152,6 +160,7 @@ describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candad
 const RUTAS_DE_MAQUINA: Record<string, string> = {
   "app/api/ml/webhooks/route.ts": "/api/ml/webhooks",
   "app/api/ml/trabajador/route.ts": "/api/ml/trabajador",
+  "app/api/salud/route.ts": "/api/salud",
 };
 
 // La única ruta pública en el middleware que NO está exenta de
