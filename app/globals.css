@@ -276,7 +276,17 @@
   --superficie-2: #ececee;
   --borde: #dcdcdf;
   --texto: #000000;
-  --texto-suave: #5b6270;
+  /* Corrección (fix-ui-claro-tono-oscuro): oscurecido de #5b6270 a
+     #333843 — "desbloquea el techo" del degradado (punto 2 del
+     pedido). Se mide directo contra --fondo-app en el buscador
+     deshabilitado de la barra superior y en la descripción de
+     EncabezadoPagina cuando cae dentro de la franja azul (páginas
+     cortas/viewports altos) — con el valor viejo, el degradado nuevo
+     y más fuerte lo hacía caer a 4.31:1 en el peor punto. Mismo matiz
+     azul-grisáceo de siempre, solo más oscuro: ver el bloque de
+     --fondo-app-* más abajo para los números exactos verificados con
+     script. */
+  --texto-suave: #333843;
   --plata: #939393;
   --plata-2: var(--plata-oscuro);
   --acento: #2563eb;
@@ -293,12 +303,28 @@
      botones cuadrados usan #ececee y ahí #6E6E6E baja a 4.32:1.
      #686868 sostiene 4.72:1 sobre #ececee y 5.11:1 sobre #f5f5f6
      (sigue siendo el lado oscuro de la plata). Hover #242424:
-     #E6E6E6 sobre #ececee mide 1.06:1. */
-  --icono: #686868;
+     #E6E6E6 sobre #ececee mide 1.06:1.
+
+     Corrección (fix-ui-claro-tono-oscuro): #686868 -> #333333. Este es
+     el color que de verdad frena cuánto azul/plata puede llevar
+     --fondo-app: los ítems del sidebar y "NIT·rol" de la barra
+     superior lo pintan directo contra ese fondo (sin ningún fondo
+     propio detrás, a diferencia de los botones cuadrados), en TODA
+     la altura donde aparezcan — no en un punto de muestra. #333333
+     sigue siendo "secundario" (más claro que --texto, #000, nunca se
+     confunden) pero deja un techo de alfa mucho más alto en el azul:
+     ver --fondo-app-* más abajo para los números reales, verificados
+     con script en todo el tramo (nunca a mano). Sigue pasando AA de
+     sobra contra las superficies opacas de siempre (10.44:1 sobre
+     #ececee, 12.63:1 sobre blanco) — nunca fue un problema ahí, el
+     problema era solo contra el degradado. */
+  --icono: #333333;
   --icono-hover: #242424;
   /* #6E6E6E sobre el encabezado de tabla #ececee mide 4.32:1. #686868
-     mide 4.72:1 ahí, 5.11:1 sobre la tarjeta y 5.57:1 sobre blanco. */
-  --plata-etiqueta: #686868;
+     mide 4.72:1 ahí, 5.11:1 sobre la tarjeta y 5.57:1 sobre blanco.
+     Mismo motivo y mismo valor que --icono (fix-ui-claro-tono-oscuro):
+     #333333. */
+  --plata-etiqueta: #333333;
   --borde-plata: #6e6e6e;
   --borde-hover: #6e6e6e;
   /* #22c55e sobre blanco mide 2.28:1; #166534 mide 6.04:1 sobre
@@ -319,58 +345,61 @@
      (esta clase NUNCA se usa en texto chico, ver .zx-texto-plata). Los
      dos extremos sí son los pedidos tal cual (9–12:1, de sobra). */
   --degradado-plata-texto: linear-gradient(100deg, #3f4651 0%, #656c77 46%, #2e343d 100%);
-  /* Corrección (fix-ui-claro-azul): el azul de arriba se veía casi
-     plateado/blanco — se refuerza. Lo contraintuitivo, confirmado con
-     script (nunca a mano): --azul-metal-1 y --azul-metal-2 (los más
-     oscuros/saturados) tienen el techo de alfa MÁS BAJO antes de
-     romper 4.5:1 contra #686868 (el texto chico real: --icono/
-     --plata-etiqueta, en los ítems del sidebar y en "NIT·rol" de la
-     barra superior, en TODA la altura donde aparezcan — nunca "texto
-     grande" bajo WCAG, nunca un punto de muestra suelto): azul-metal-1
-     solo ~0.105, azul-metal-2 solo ~0.135, azul-metal-3 (el más CLARO)
-     ~0.205 — casi el doble de margen, porque empieza más cerca del
-     blanco. Separación de color real (R menos B, qué tan "azul" se
-     ve) con cada uno llevado a su propio techo: azul-metal-1 apenas
-     -7, azul-metal-2 -26, azul-metal-3 -31 — el más brillante es
-     también el que de verdad se ve más azul dentro de lo que WCAG
-     deja. Por eso el pico ahora es azul-metal-3 (18%, bien por debajo
-     de su techo de ~20.5%) con un toque de azul-metal-2 justo después
-     (13%, bien por debajo de su propio techo de ~13.5%) para que no
-     se vea plano — exactamente la profundidad que se pidió, solo que
-     repartida entre los dos colores que sí la pueden sostener cada
-     uno en su propio alfa seguro.
+  /* Corrección (fix-ui-claro-tono-oscuro): el intento anterior
+     (fix-ui-claro-azul) seguía "lavado" — Mateo pidió el mismo PESO
+     de marca que oscuro, no otro matiz más de casi-blanco. La única
+     forma real de subir la intensidad sin romper AA es la que pidió
+     el punto 2: oscurecer el texto chico que se mide contra este
+     degradado (--icono, --plata-etiqueta: #686868 -> #333333;
+     --texto-suave: #5b6270 -> #333843 — ver esas variables más
+     arriba, con el motivo real de cada una). Con el techo nuevo,
+     --azul-metal-3 aguanta hasta ~0.835 de alfa contra el más débil
+     de los tres (#333843, el que menos margen deja) — antes del
+     cambio de texto, el mismo azul-metal-3 se topaba en ~0.205. Se
+     usa 80% (bajo ese techo nuevo, con margen) como pico — resuelve
+     a rgb(124,164,242), un azul metálico CLARAMENTE visible, no un
+     tinte. --azul-metal-2 al 48% justo después (su propio techo
+     contra #333843 es ~0.547) le da la profundidad que pidió el
+     punto 3, sin repetir los rgb negros del oscuro (eso sería copiar
+     el fondo oscuro, no traducir la intensidad al claro). Plata-medio
+     y plata (ya sin ese problema — contra el texto nuevo, su techo es
+     ~0.93-0.88) hacen la transición "plateada" antes de fundir a
+     blanco limpio.
 
-     Verificado con script en TODO el tramo (paso de 1%, no un punto
-     suelto) de las 3 variantes — el peor caso de las tres es 4.55:1
-     (texto-suave y texto #000 quedan muy por encima, 5.00+ y 17+):
-     suave, 0-36%, peor en t=8%. medio, 0-48% (llega más abajo), peor
-     en t=10%. intenso, 0-62% (el más alto), peor en t=12%. Ningún
-     punto del tramo completo de ninguna variante bajó de 4.5:1 — no
-     hizo falta oscurecer #686868 (la salida de respaldo que ofreció
-     Pablo si el azul no entraba). */
+     Verificado con script en TODO el tramo (paso de 1%, nunca un
+     punto suelto) de las 3 variantes, contra los TRES textos
+     relevantes (--icono/--plata-etiqueta #333333, --texto-suave
+     #333843, --texto #000): el peor caso de las tres es idéntico,
+     4.719:1, siempre en --texto-suave en t=0% (el punto de más azul
+     puro) — --icono ahí mide 5.07, --texto 8.43. Ninguna de las 3
+     variantes, en ningún punto de su tramo completo, bajó de 4.5:1.
+     Antes de este cambio (fix-ui-claro-azul, con el texto viejo), el
+     peor caso real con esta misma intensidad de azul hubiera sido
+     4.31:1 — confirmado reproduciendo la falla antes de decidir
+     oscurecer el texto, no a ciegas. */
   --fondo-app-suave: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--azul-metal-3) 18%, transparent) 0%,
-    color-mix(in srgb, var(--azul-metal-2) 13%, transparent) 8%,
-    color-mix(in srgb, var(--plata-medio) 18%, transparent) 18%,
-    color-mix(in srgb, var(--plata) 8%, transparent) 28%,
-    transparent 36%
+    color-mix(in srgb, var(--azul-metal-3) 80%, transparent) 0%,
+    color-mix(in srgb, var(--azul-metal-2) 48%, transparent) 10%,
+    color-mix(in srgb, var(--plata-medio) 55%, transparent) 22%,
+    color-mix(in srgb, var(--plata) 20%, transparent) 32%,
+    transparent 42%
   );
   --fondo-app-medio: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--azul-metal-3) 19%, transparent) 0%,
-    color-mix(in srgb, var(--azul-metal-2) 13%, transparent) 10%,
-    color-mix(in srgb, var(--plata-medio) 20%, transparent) 24%,
-    color-mix(in srgb, var(--plata) 10%, transparent) 38%,
-    transparent 48%
+    color-mix(in srgb, var(--azul-metal-3) 80%, transparent) 0%,
+    color-mix(in srgb, var(--azul-metal-2) 48%, transparent) 12%,
+    color-mix(in srgb, var(--plata-medio) 58%, transparent) 28%,
+    color-mix(in srgb, var(--plata) 24%, transparent) 42%,
+    transparent 54%
   );
   --fondo-app-intenso: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--azul-metal-3) 19%, transparent) 0%,
-    color-mix(in srgb, var(--azul-metal-2) 13%, transparent) 12%,
-    color-mix(in srgb, var(--plata-medio) 20%, transparent) 30%,
-    color-mix(in srgb, var(--plata) 12%, transparent) 48%,
-    transparent 62%
+    color-mix(in srgb, var(--azul-metal-3) 80%, transparent) 0%,
+    color-mix(in srgb, var(--azul-metal-2) 48%, transparent) 14%,
+    color-mix(in srgb, var(--plata-medio) 60%, transparent) 34%,
+    color-mix(in srgb, var(--plata) 28%, transparent) 52%,
+    transparent 66%
   );
   /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
      arriba: sin atributo data-fondo, gana el suave. */
