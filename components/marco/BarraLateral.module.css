@@ -26,7 +26,11 @@
      zona de arriba sigue siendo oscuro en los dos temas (ver el punto
      3 del fix para el detalle de claro). */
   background: transparent;
-  border-right: 1px solid var(--borde);
+  /* Corrección (fix-ui-claro-como-oscuro): borde de la zona oscura
+     (mismo valor que --borde de oscuro) sin condicionar por tema —
+     esta barra siempre está sobre la franja oscura del degradado,
+     en los dos temas. */
+  border-right: 1px solid var(--borde-zona-oscura);
   padding: 18px 12px;
   gap: 18px;
   transition: width 0.2s ease;
@@ -64,23 +68,20 @@
 }
 
 /* Barra contraída (JS, botón "Contraer"): logo completo se oculta,
-   entra el ícono. Plata por defecto (tema oscuro); en claro se
-   cambia a la versión gris oscuro porque la plata pierde contraste
-   sobre un fondo casi blanco — nunca un filtro CSS sobre la plata,
-   eso sería recolorear el archivo oficial. */
+   entra el ícono. Corrección (fix-ui-claro-como-oscuro): SIEMPRE la
+   variante plata, en los dos temas — antes claro cambiaba a la
+   versión gris oscuro porque esta zona del sidebar tenía fondo casi
+   blanco; ahora esta zona es siempre la franja oscura del degradado
+   (igual que oscuro), así que la plata es la que de verdad lee bien
+   ahí en los dos temas. icono-gris-oscuro.png queda sin usarse (el
+   <img> sigue en el DOM por si hace falta más adelante, nunca se
+   borra el archivo). Nunca un filtro CSS sobre la plata, eso sería
+   recolorear el archivo oficial. */
 .barra[data-colapsada="true"] .logoCompleto {
   display: none;
 }
 
 .barra[data-colapsada="true"] .iconoColapsado[data-variante="plata"] {
-  display: block;
-}
-
-:root[data-tema="claro"] .barra[data-colapsada="true"] .iconoColapsado[data-variante="plata"] {
-  display: none;
-}
-
-:root[data-tema="claro"] .barra[data-colapsada="true"] .iconoColapsado[data-variante="oscuro"] {
   display: block;
 }
 
@@ -98,12 +99,25 @@
   gap: 2px;
 }
 
-.etiquetaGrupo {
+/* html antepuesto: le gana en especificidad a la regla de una sola
+   clase de .zx-etiqueta en globals.css, sin depender del orden real
+   en que el bundle cargue los dos archivos (mismo criterio que
+   BarraSuperior.module.css). */
+html .etiquetaGrupo {
   padding: 0 10px;
   margin: 0 0 6px 0;
+  color: var(--plata-etiqueta-zona-oscura);
 }
 
-.item {
+/* Corrección (fix-ui-claro-como-oscuro): el sidebar entero cae sobre
+   la franja oscura del degradado (hereda --fondo-app por
+   transparencia) — los ítems del menú van en los tokens de "zona
+   oscura" (mismos valores que ya usa oscuro) sin condicionar por
+   tema. .item[data-activo] usa --icono-activo-zona-oscura en vez de
+   --icono-activo: ese último sale de --acento-fuerte, que en claro es
+   azul-metal-2 (#1d4ed8, pensado para verse sobre BLANCO) — oscuro de
+   más contra un fondo casi negro, casi no se vería. */
+html .item {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -111,7 +125,7 @@
   border-radius: var(--radio-boton);
   /* currentColor pinta el ícono (SVG stroke) y la etiqueta juntos:
      inactivo plata, hover plata clara, activo azul. */
-  color: var(--icono);
+  color: var(--icono-zona-oscura);
   text-decoration: none;
   border-left: 3px solid transparent;
   cursor: pointer;
@@ -119,6 +133,12 @@
   white-space: nowrap;
 }
 
+/* OJO: el hover (no activo) SÍ pone un fondo opaco claro propio
+   (--superficie-2) — ahí el texto vuelve a --icono-hover normal
+   (oscuro), no al de zona oscura, igual que .usuario:hover en
+   BarraSuperior.module.css. El activo (arriba) es distinto: su fondo
+   es un degradado casi transparente (12% de alfa), nunca tapa la
+   franja oscura de verdad, por eso ese sí se queda en zona oscura. */
 .item:hover {
   background: var(--superficie-2);
   color: var(--icono-hover);
@@ -135,10 +155,10 @@
 
 .item[data-activo="true"],
 .item[data-activo="true"]:hover {
-  background: linear-gradient(90deg, var(--acento-suave), transparent 78%);
+  background: linear-gradient(90deg, var(--acento-suave-zona-oscura), transparent 78%);
   border-left-color: var(--acento);
-  color: var(--icono-activo);
-  box-shadow: inset 0 0 18px var(--acento-resplandor);
+  color: var(--icono-activo-zona-oscura);
+  box-shadow: inset 0 0 18px var(--acento-resplandor-zona-oscura);
 }
 
 .item[data-deshabilitado="true"] {
@@ -239,14 +259,6 @@
   }
 
   .iconoColapsado[data-variante="plata"] {
-    display: block;
-  }
-
-  :root[data-tema="claro"] .iconoColapsado[data-variante="plata"] {
-    display: none;
-  }
-
-  :root[data-tema="claro"] .iconoColapsado[data-variante="oscuro"] {
     display: block;
   }
 }

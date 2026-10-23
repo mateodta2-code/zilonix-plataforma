@@ -62,6 +62,29 @@
      Nunca se repite este box-shadow a mano por componente. */
   --sombra-marca-hover: 0 0 0 1px var(--azul-metal-3), 0 0 16px color-mix(in srgb, var(--azul-metal-3) 55%, transparent),
     0 0 5px color-mix(in srgb, var(--plata-brillo) 65%, transparent);
+  /* Tarea "fix-ui-claro-como-oscuro" — "zona oscura": el header, el
+     logo + menú del sidebar, y el saludo/pestañas de Inicio SIEMPRE
+     caen sobre la franja oscura del degradado (azul metálico -> negro
+     -> recién después blanco, ver --fondo-app-* del bloque claro),
+     en LOS DOS TEMAS — en oscuro, toda la página ya era así. Estos
+     valores son el MISMO número en los dos temas a propósito: son
+     justo los valores reales que ya usa oscuro (--texto, --icono,
+     etc.) — "zona oscura" no depende de qué tema eligió la persona,
+     depende de qué hay detrás del texto. Se usan sin condicionar por
+     [data-tema="claro"]: en oscuro no cambia nada (ya eran estos
+     números), en claro resuelve el texto negro-sobre-azul-oscuro
+     ilegible que dejaba el intento anterior. */
+  --texto-zona-oscura: #f2f4f8;
+  --texto-suave-zona-oscura: #c0c0c0;
+  --icono-zona-oscura: #939393;
+  --icono-hover-zona-oscura: #e6e6e6;
+  --icono-activo-zona-oscura: #60a5fa;
+  --plata-etiqueta-zona-oscura: #c0c0c0;
+  --acento-suave-zona-oscura: rgba(59, 130, 246, 0.12);
+  --acento-resplandor-zona-oscura: rgba(59, 130, 246, 0.2);
+  --borde-zona-oscura: #222225;
+  --degradado-plata-texto-zona-oscura: linear-gradient(100deg, #c0c0c0 0%, #e6e6e6 46%, #d0d0d0 72%, #c0c0c0 100%);
+
   --peligro: #ef4444;
   --exito: #22c55e;
   /* Texto de estado (chip, variación de KPI). En oscuro el verde y el
@@ -276,17 +299,19 @@
   --superficie-2: #ececee;
   --borde: #dcdcdf;
   --texto: #000000;
-  /* Corrección (fix-ui-claro-tono-oscuro): oscurecido de #5b6270 a
-     #333843 — "desbloquea el techo" del degradado (punto 2 del
-     pedido). Se mide directo contra --fondo-app en el buscador
-     deshabilitado de la barra superior y en la descripción de
-     EncabezadoPagina cuando cae dentro de la franja azul (páginas
-     cortas/viewports altos) — con el valor viejo, el degradado nuevo
-     y más fuerte lo hacía caer a 4.31:1 en el peor punto. Mismo matiz
-     azul-grisáceo de siempre, solo más oscuro: ver el bloque de
-     --fondo-app-* más abajo para los números exactos verificados con
-     script. */
-  --texto-suave: #333843;
+  /* Revertido a su valor original (fix-ui-claro-como-oscuro): las dos
+     correcciones anteriores lo habían oscurecido a #333843 para
+     "desbloquear" cuánto azul podía llevar el degradado, porque en
+     ese diseño el fondo era semitransparente y el texto se medía
+     DIRECTO contra esa mezcla. Ahora el degradado tiene una capa
+     opaca propia (negro sólido arriba, blanco abajo — ver
+     --fondo-app-* más abajo) y los pocos elementos que de verdad caen
+     sobre la franja oscura (header, sidebar, saludo/pestañas de
+     Inicio) usan los tokens --texto-zona-oscura/--icono-zona-oscura/
+     etc. (definidos arriba, los mismos valores que ya usa oscuro) en
+     vez de este. Ya no hace falta oscurecer --texto-suave para nadie:
+     vuelve a #5b6270, su valor de siempre. */
+  --texto-suave: #5b6270;
   --plata: #939393;
   --plata-2: var(--plata-oscuro);
   --acento: #2563eb;
@@ -305,26 +330,24 @@
      (sigue siendo el lado oscuro de la plata). Hover #242424:
      #E6E6E6 sobre #ececee mide 1.06:1.
 
-     Corrección (fix-ui-claro-tono-oscuro): #686868 -> #333333. Este es
-     el color que de verdad frena cuánto azul/plata puede llevar
-     --fondo-app: los ítems del sidebar y "NIT·rol" de la barra
-     superior lo pintan directo contra ese fondo (sin ningún fondo
-     propio detrás, a diferencia de los botones cuadrados), en TODA
-     la altura donde aparezcan — no en un punto de muestra. #333333
-     sigue siendo "secundario" (más claro que --texto, #000, nunca se
-     confunden) pero deja un techo de alfa mucho más alto en el azul:
-     ver --fondo-app-* más abajo para los números reales, verificados
-     con script en todo el tramo (nunca a mano). Sigue pasando AA de
-     sobra contra las superficies opacas de siempre (10.44:1 sobre
-     #ececee, 12.63:1 sobre blanco) — nunca fue un problema ahí, el
-     problema era solo contra el degradado. */
-  --icono: #333333;
+     Revertido a #686868 (fix-ui-claro-como-oscuro): las correcciones
+     anteriores lo habían bajado a #333333 para destrabar el alfa del
+     degradado semitransparente de ese diseño. Los únicos lugares
+     donde --icono se pintaba DIRECTO contra ese degradado (ítems del
+     sidebar, "NIT·rol") ahora usan --icono-zona-oscura/
+     --plata-etiqueta-zona-oscura en vez de este — el resto de usos de
+     --icono (botones cuadrados, SelectorTema) siempre tuvo su propio
+     fondo opaco (--superficie-2) detrás, nunca necesitó el oscurecido
+     en primer lugar. */
+  --icono: #686868;
   --icono-hover: #242424;
   /* #6E6E6E sobre el encabezado de tabla #ececee mide 4.32:1. #686868
      mide 4.72:1 ahí, 5.11:1 sobre la tarjeta y 5.57:1 sobre blanco.
-     Mismo motivo y mismo valor que --icono (fix-ui-claro-tono-oscuro):
-     #333333. */
-  --plata-etiqueta: #333333;
+     Mismo motivo y mismo valor que --icono: revertido a #686868
+     (fix-ui-claro-como-oscuro) — "NIT·rol" y "ADMINISTRACIÓN" del
+     sidebar, los dos usos reales contra el degradado, pasan a
+     --plata-etiqueta-zona-oscura. */
+  --plata-etiqueta: #686868;
   --borde-plata: #6e6e6e;
   --borde-hover: #6e6e6e;
   /* #22c55e sobre blanco mide 2.28:1; #166534 mide 6.04:1 sobre
@@ -345,62 +368,90 @@
      (esta clase NUNCA se usa en texto chico, ver .zx-texto-plata). Los
      dos extremos sí son los pedidos tal cual (9–12:1, de sobra). */
   --degradado-plata-texto: linear-gradient(100deg, #3f4651 0%, #656c77 46%, #2e343d 100%);
-  /* Corrección (fix-ui-claro-tono-oscuro): el intento anterior
-     (fix-ui-claro-azul) seguía "lavado" — Mateo pidió el mismo PESO
-     de marca que oscuro, no otro matiz más de casi-blanco. La única
-     forma real de subir la intensidad sin romper AA es la que pidió
-     el punto 2: oscurecer el texto chico que se mide contra este
-     degradado (--icono, --plata-etiqueta: #686868 -> #333333;
-     --texto-suave: #5b6270 -> #333843 — ver esas variables más
-     arriba, con el motivo real de cada una). Con el techo nuevo,
-     --azul-metal-3 aguanta hasta ~0.835 de alfa contra el más débil
-     de los tres (#333843, el que menos margen deja) — antes del
-     cambio de texto, el mismo azul-metal-3 se topaba en ~0.205. Se
-     usa 80% (bajo ese techo nuevo, con margen) como pico — resuelve
-     a rgb(124,164,242), un azul metálico CLARAMENTE visible, no un
-     tinte. --azul-metal-2 al 48% justo después (su propio techo
-     contra #333843 es ~0.547) le da la profundidad que pidió el
-     punto 3, sin repetir los rgb negros del oscuro (eso sería copiar
-     el fondo oscuro, no traducir la intensidad al claro). Plata-medio
-     y plata (ya sin ese problema — contra el texto nuevo, su techo es
-     ~0.93-0.88) hacen la transición "plateada" antes de fundir a
-     blanco limpio.
+  /* Corrección (fix-ui-claro-como-oscuro): los dos intentos anteriores
+     (fix-ui-claro-azul, fix-ui-claro-tono-oscuro) seguían siendo un
+     tinte azul sobre blanco — Mateo pidió, con capturas, que la franja
+     de arriba sea PRÁCTICAMENTE EL MISMO degradado que oscuro (azul
+     metálico -> negro, misma intensidad) y que SOLO abajo pase a
+     blanco. No se puede lograr eso con más alfa (la base siempre
+     termina siendo --fondo, blanco en claro) — hace falta una capa
+     opaca propia que vaya de negro a blanco, y encima, exactamente
+     la MISMA capa de azul-metal (con los MISMOS alfas, copiados tal
+     cual) que ya usa oscuro arriba en este archivo.
 
-     Verificado con script en TODO el tramo (paso de 1%, nunca un
-     punto suelto) de las 3 variantes, contra los TRES textos
-     relevantes (--icono/--plata-etiqueta #333333, --texto-suave
-     #333843, --texto #000): el peor caso de las tres es idéntico,
-     4.719:1, siempre en --texto-suave en t=0% (el punto de más azul
-     puro) — --icono ahí mide 5.07, --texto 8.43. Ninguna de las 3
-     variantes, en ningún punto de su tramo completo, bajó de 4.5:1.
-     Antes de este cambio (fix-ui-claro-azul, con el texto viejo), el
-     peor caso real con esta misma intensidad de azul hubiera sido
-     4.31:1 — confirmado reproduciendo la falla antes de decidir
-     oscurecer el texto, no a ciegas. */
-  --fondo-app-suave: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--azul-metal-3) 80%, transparent) 0%,
-    color-mix(in srgb, var(--azul-metal-2) 48%, transparent) 10%,
-    color-mix(in srgb, var(--plata-medio) 55%, transparent) 22%,
-    color-mix(in srgb, var(--plata) 20%, transparent) 32%,
-    transparent 42%
-  );
-  --fondo-app-medio: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--azul-metal-3) 80%, transparent) 0%,
-    color-mix(in srgb, var(--azul-metal-2) 48%, transparent) 12%,
-    color-mix(in srgb, var(--plata-medio) 58%, transparent) 28%,
-    color-mix(in srgb, var(--plata) 24%, transparent) 42%,
-    transparent 54%
-  );
-  --fondo-app-intenso: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--azul-metal-3) 80%, transparent) 0%,
-    color-mix(in srgb, var(--azul-metal-2) 48%, transparent) 14%,
-    color-mix(in srgb, var(--plata-medio) 60%, transparent) 34%,
-    color-mix(in srgb, var(--plata) 28%, transparent) 52%,
-    transparent 66%
-  );
+     3 capas, de arriba hacia abajo (la primera listada es la que se
+     ve más arriba en el stack):
+     1) el mismo "sheen" gris que ya tenía oscuro (sin cambios).
+     2) la MISMA capa azul-metal-1/2/3 que usa oscuro, copiada literal
+        — mismos % de mezcla, mismas paradas. Donde esta capa es
+        transparente (desde 25%), se ve la capa 3 de abajo.
+     3) NUEVA: negro sólido de 0% a donde empieza a pedir Mateo
+        (~55-70%), después cruza a blanco. Mientras la capa 2 todavía
+        tiene algo de alfa (0-25%), el resultado es IDÉNTICO al de
+        oscuro (azul-metal sobre negro, mismo cálculo). De 25% en
+        adelante, sin capa 2, se ve esta capa 3 sola: negro liso hasta
+        el cruce, blanco limpio después — ni rastro de --fondo (blanco)
+        asomando antes de tiempo, porque esta capa es 100% opaca en
+        toda su extensión.
+
+     El cruce se puso en 60%->78% (dentro del rango pedido, ~55-70%,
+     pero estirado un poco hacia abajo): el sidebar comparte este
+     MISMO degradado (herencia por transparencia, ver más abajo), y
+     con una lista de navegación típica (logo + 8-10 ítems) el último
+     ítem puede caer bastante más abajo que el 55-70% literal en una
+     pantalla no muy alta — se prefirió dejar margen real para que
+     NINGÚN ítem del menú quede a mitad de un cruce gris, en vez de
+     cortar justo en el número pedido y arriesgar un ítem ilegible.
+     Los 3 botones de abajo (Mi cuenta/Tema/Contraer) no dependen de
+     esto de todos modos: tienen su propio fondo opaco (--superficie-2)
+     siempre, sin importar qué haya detrás.
+
+     Texto: con capa 3 OPACA (nunca semitransparente), ya no hace
+     falta que --texto-suave/--icono/--plata-etiqueta de claro frenen
+     el alfa del azul (esa pelea de las dos correcciones anteriores
+     desaparece) — en la franja oscura el texto usa los tokens nuevos
+     --texto-zona-oscura/--icono-zona-oscura/etc. (mismos valores que
+     ya usa oscuro, ver más arriba), aplicados en BarraSuperior,
+     BarraLateral, EncabezadoPagina, Pestanas y el saludo de /panel —
+     nunca el texto oscuro normal de claro, que sería ilegible ahí.
+     Contraste real verificado con script: ver el PR de esta tarea
+     para los números exactos (texto claro sobre el pico/negro, texto
+     oscuro de claro sobre el blanco de abajo). */
+  --fondo-app-suave:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-1) 55%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 38%, transparent) 6%,
+      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 12%,
+      color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
+      transparent 25%
+    ),
+    linear-gradient(180deg, #000000 0%, #000000 60%, #ffffff 78%);
+  --fondo-app-medio:
+    linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 42%, transparent) 14%,
+      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 28%,
+      color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
+      transparent 50%
+    ),
+    linear-gradient(180deg, #000000 0%, #000000 68%, #ffffff 84%);
+  --fondo-app-intenso:
+    linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
+    radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
+      color-mix(in srgb, var(--azul-metal-2) 46%, transparent) 18%,
+      color-mix(in srgb, var(--azul-metal-2) 30%, transparent) 34%,
+      color-mix(in srgb, var(--azul-metal-1) 18%, transparent) 48%,
+      color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
+      transparent 70%
+    ),
+    linear-gradient(180deg, #000000 0%, #000000 76%, #ffffff 90%);
   /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
      arriba: sin atributo data-fondo, gana el suave. */
   --fondo-app: var(--fondo-app-suave);

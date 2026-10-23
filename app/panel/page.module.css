@@ -6,18 +6,25 @@
   flex-wrap: wrap;
 }
 
+/* Degradado plata propio (zona oscura) en vez de zx-texto-plata — ver
+   page.tsx para el motivo real. */
 .saludo {
   margin: 0;
   font-family: var(--fuente-titulos);
   /* Manual de marca: ExtraBold (800) para títulos grandes. */
   font-weight: 800;
   font-size: 28px;
+  background: var(--degradado-plata-texto-zona-oscura);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .subtitulo {
   margin: 6px 0 0 0;
   font-size: 14px;
-  color: var(--texto-suave);
+  color: var(--texto-suave-zona-oscura);
 }
 
 /* Tarjeta de identidad "metal cepillado" — dos fondos superpuestos:

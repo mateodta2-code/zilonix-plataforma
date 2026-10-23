@@ -1,7 +1,12 @@
+/* Corrección (fix-ui-claro-como-oscuro): Pestanas solo se usa en
+   /panel (confirmado — ningún otro archivo la importa), justo debajo
+   del saludo, siempre en la franja oscura del degradado en los dos
+   temas — tokens de zona oscura sin condicionar por tema, mismo
+   criterio que el resto de este fix. */
 .contenedor {
   display: flex;
   gap: 22px;
-  border-bottom: 1px solid var(--borde);
+  border-bottom: 1px solid var(--borde-zona-oscura);
 }
 
 .pestana {
@@ -9,7 +14,7 @@
   padding: 10px 2px 12px;
   font-size: 13.5px;
   font-weight: 500;
-  color: var(--texto-suave);
+  color: var(--texto-suave-zona-oscura);
   text-decoration: none;
   cursor: pointer;
   transition: var(--transicion-color), border-color 0.2s ease;
@@ -22,7 +27,7 @@
    en vez de transparent), con el mismo resplandor que ya usa la
    pestaña activa (::after, más abajo). */
 .pestana:hover {
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
   border-bottom-color: var(--azul-metal-3);
 }
 
@@ -33,7 +38,7 @@
 }
 
 .pestana[data-activa="true"] {
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
 }
 
 .pestana[data-activa="true"]::after {

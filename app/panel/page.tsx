@@ -68,7 +68,12 @@ export default async function PanelPage() {
     <>
       <div className={styles.encabezado}>
         <div>
-          <h1 className={`${styles.saludo} zx-texto-plata`}>Hola, {usuario.nombre}</h1>
+          {/* Corrección (fix-ui-claro-como-oscuro): sin zx-texto-plata,
+              mismo motivo que EncabezadoPagina.tsx — este saludo cae
+              siempre en la franja oscura del degradado, en los dos
+              temas; .saludo trae su propio degradado plata de zona
+              oscura directo en page.module.css. */}
+          <h1 className={styles.saludo}>Hola, {usuario.nombre}</h1>
           <p className={styles.subtitulo}>Este es el resumen de {activa.nombre}</p>
         </div>
 
