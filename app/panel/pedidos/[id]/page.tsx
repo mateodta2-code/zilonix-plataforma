@@ -5,6 +5,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerPedidoConEventos, PASOS_PEDIDO, type EventoPedido, type PasoPedido } from "@/lib/ml/pedidos";
+import { esUuid } from "@/lib/validacion";
 import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -26,6 +27,18 @@ const NOMBRE_PASO: Record<PasoPedido, string> = {
 // (evidencia real de Effi, docs/investigacion/effi.md sección H) —
 // cada paso es una frase legible con fecha, hora y quién.
 export default async function PedidoDetallePage({ params }: { params: { id: string } }) {
+  // Bug real en vivo (digest 960283135, staging): Clerk deja
+  // /sso-callback colgado relativo a la ruta donde estaba la persona al
+  // iniciar sesión (returnBackUrl del middleware) — bajo esta ruta
+  // dinámica, "sso-callback" se cuela como si fuera el id del pedido, y
+  // pedidos.id es una columna uuid: eq(pedidos.id, "sso-callback")
+  // revienta Postgres con 22P02 en vez de un redirect normal. Se corta
+  // ANTES de tocar la base de datos (ni siquiera obtenerOCrearUsuarioActual) —
+  // un id con forma inválida nunca puede ser un pedido real, así que no
+  // hace falta averiguar nada más para saber que corresponde volver al
+  // listado.
+  if (!esUuid(params.id)) redirect("/panel/pedidos");
+
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
 
