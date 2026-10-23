@@ -394,29 +394,39 @@
         asomando antes de tiempo, porque esta capa es 100% opaca en
         toda su extensión.
 
-     El cruce se puso en 60%->78% (dentro del rango pedido, ~55-70%,
-     pero estirado un poco hacia abajo): el sidebar comparte este
-     MISMO degradado (herencia por transparencia, ver más abajo), y
-     con una lista de navegación típica (logo + 8-10 ítems) el último
-     ítem puede caer bastante más abajo que el 55-70% literal en una
-     pantalla no muy alta — se prefirió dejar margen real para que
-     NINGÚN ítem del menú quede a mitad de un cruce gris, en vez de
-     cortar justo en el número pedido y arriesgar un ítem ilegible.
-     Los 3 botones de abajo (Mi cuenta/Tema/Contraer) no dependen de
-     esto de todos modos: tienen su propio fondo opaco (--superficie-2)
-     siempre, sin importar qué haya detrás.
+     Corrección (fix-ui-claro-cruce-alto): Mateo confirmó que el glow
+     de arriba quedó bien, pero el cruce a 60%→78% bajaba demasiado —
+     el negro llegaba hasta debajo de las tarjetas KPI. Lo quería cerca
+     de la línea de pestañas de Inicio (Resumen/Pedidos/Despachos/SKU),
+     no más abajo. El cruce baja a suave 30%→32% (medio 34%→36%,
+     intenso 38%→40%) — una banda ANGOSTA (2 puntos, casi un corte
+     limpio con un poco de antialiasing) en vez de los ~12-18 puntos de
+     antes: una banda ancha crea una franja gris intermedia donde NI el
+     texto claro de zona oscura NI el texto oscuro normal de claro
+     pasan 4.5:1 (confirmado con script probando las dos — ver el PR
+     para la tabla completa) — angostarla reduce esa franja muerta a
+     una tira de un par de píxeles, dentro del margen que ya absorbe el
+     padding de cada fila.
 
-     Texto: con capa 3 OPACA (nunca semitransparente), ya no hace
-     falta que --texto-suave/--icono/--plata-etiqueta de claro frenen
-     el alfa del azul (esa pelea de las dos correcciones anteriores
-     desaparece) — en la franja oscura el texto usa los tokens nuevos
-     --texto-zona-oscura/--icono-zona-oscura/etc. (mismos valores que
-     ya usa oscuro, ver más arriba), aplicados en BarraSuperior,
-     BarraLateral, EncabezadoPagina, Pestanas y el saludo de /panel —
-     nunca el texto oscuro normal de claro, que sería ilegible ahí.
-     Contraste real verificado con script: ver el PR de esta tarea
-     para los números exactos (texto claro sobre el pico/negro, texto
-     oscuro de claro sobre el blanco de abajo). */
+     Consecuencia real (la misma que anticipó el pedido): con el cruce
+     mucho más arriba, la mayoría del menú del sidebar (SKU en
+     adelante) ahora cae sobre BLANCO — esos ítems vuelven a
+     --icono/--plata-etiqueta normales de claro (ver BarraLateral.
+     module.css). Verificado con un modelo de posiciones reales del
+     layout (header 64px + logo ~110px + cada ítem ~41px...) en dos
+     altos de viewport, 900px ("típico", el que pidió verificar) y
+     650px ("corto"): a 900px, Inicio/Pedidos/Despachos quedan
+     limpiamente en la franja oscura (6.3–6.8:1) y SKU en adelante
+     limpiamente en blanco (5.6:1) — con un roce marginal de apenas
+     2 puntos porcentuales en el borde superior de SKU, imperceptible
+     en la práctica con una banda tan angosta. A 650px (viewport
+     realmente chico, fuera de lo típico para un panel de escritorio)
+     Pedidos/Despachos y las pestañas SÍ pueden caer en esa banda
+     angosta con contraste reducido — límite real, documentado en el
+     changelog, no resuelto (necesitaría JS de posición de scroll, que
+     esta tarea no pide). Los 3 botones de abajo (Mi cuenta/Tema/
+     Contraer) siguen sin depender de esto: fondo opaco propio
+     siempre. */
   --fondo-app-suave:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
     linear-gradient(
@@ -427,7 +437,7 @@
       color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
       transparent 25%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 60%, #ffffff 78%);
+    linear-gradient(180deg, #000000 0%, #000000 30%, #ffffff 32%);
   --fondo-app-medio:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
     linear-gradient(
@@ -438,7 +448,7 @@
       color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
       transparent 50%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 68%, #ffffff 84%);
+    linear-gradient(180deg, #000000 0%, #000000 34%, #ffffff 36%);
   --fondo-app-intenso:
     linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
     radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
@@ -451,7 +461,7 @@
       color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
       transparent 70%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 76%, #ffffff 90%);
+    linear-gradient(180deg, #000000 0%, #000000 38%, #ffffff 40%);
   /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
      arriba: sin atributo data-fondo, gana el suave. */
   --fondo-app: var(--fondo-app-suave);
