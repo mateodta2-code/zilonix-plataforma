@@ -27,8 +27,6 @@ export function MarcoApp({
       <BarraLateral grupos={grupos} />
       <div className={styles.areaDerecha}>
         <BarraSuperior
-          empresa={empresa}
-          rol={rol}
           empresaActivaId={empresaActivaId}
           empresasPropias={empresasPropias}
           usuario={usuario}

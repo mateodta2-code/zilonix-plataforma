@@ -27,29 +27,31 @@
   min-width: 0;
 }
 
-/* Corrección (fix-ui-claro-como-oscuro): esta barra siempre cae sobre
-   la franja oscura del degradado (sticky, mide lo mismo que el pseudo
-   fijo del fondo) — nombreEmpresa y nitRol van en los tokens de "zona
-   oscura" (--texto-zona-oscura/--plata-etiqueta-zona-oscura, los
-   mismos valores que ya usa oscuro) SIN condicionar por tema: en
-   oscuro ya eran justo estos números, en claro deja de ser negro
-   sobre azul oscuro ilegible. html antepuesto le gana en especificidad
-   a la regla de una sola clase de .zx-etiqueta en globals.css, sin
-   depender del orden real en que el bundle cargue los dos archivos. */
-.nombreEmpresa {
+/* Corrección (fix-ui-claro-fade-abajo, punto 5): el saludo "Hola, …"
+   que antes vivía suelto en app/panel/page.tsx ahora vive acá — visible
+   en toda la sección /panel, no solo en Inicio. Esta barra siempre cae
+   sobre la franja oscura del degradado (sticky, mide lo mismo que el
+   pseudo fijo del fondo): degradado plata de zona oscura
+   (--degradado-plata-texto-zona-oscura, el mismo que usaba el saludo
+   grande de Inicio), legible en los dos temas sin condicionar por
+   [data-tema="claro"] — en oscuro ya era ese degradado. Tamaño menor
+   que el de Inicio (18px vs 28px): acá comparte una fila de 64px con
+   el selector de empresa y, a la derecha, buscar/avisos/tema/cuenta. */
+.saludo {
   margin: 0;
+  min-width: 0;
+  flex-shrink: 1;
   font-family: var(--fuente-titulos);
-  font-weight: 700;
-  font-size: 15px;
+  font-weight: 800;
+  font-size: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--texto-zona-oscura);
-}
-
-html .nitRol {
-  margin: 2px 0 0 0;
-  color: var(--plata-etiqueta-zona-oscura);
+  background: var(--degradado-plata-texto-zona-oscura);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .formEmpresa {

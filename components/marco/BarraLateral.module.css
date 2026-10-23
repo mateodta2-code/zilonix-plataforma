@@ -99,39 +99,41 @@
   gap: 2px;
 }
 
-/* "ADMINISTRACIÓN" cae bien abajo en el sidebar (después de Personas)
-   — con el difuminado ancho de fix-ui-claro-difuminado, blanco limpio
-   empieza mucho antes de ahí en los dos temas (en claro desde 42%,
-   ver --fondo-app-* en globals.css). Color normal de claro, sin nada
-   especial. html antepuesto: le gana en especificidad a la regla de
-   una sola clase de .zx-etiqueta en globals.css, sin depender del
-   orden real en que el bundle cargue los dos archivos. */
+/* "ADMINISTRACIÓN" está en el mismo <nav> con scroll propio que los
+   ítems de abajo — su posición real no es fija (depende de cuántos
+   módulos vea el rol). Mismo criterio y mismo velo que .item (ver
+   abajo): tokens de zona oscura + --velo-item-claro detrás, en vez de
+   asumir en qué tramo del difuminado cae. html antepuesto: le gana en
+   especificidad a la regla de una sola clase de .zx-etiqueta en
+   globals.css, sin depender del orden real en que el bundle cargue
+   los dos archivos. */
 html .etiquetaGrupo {
-  padding: 0 10px;
+  padding: 2px 10px;
   margin: 0 0 6px 0;
-  color: var(--plata-etiqueta);
+  border-radius: var(--radio-boton);
+  color: var(--plata-etiqueta-zona-oscura);
+  background: var(--velo-item-claro, transparent);
 }
 
-/* Corrección (fix-ui-claro-difuminado): el intento anterior
-   (fix-ui-claro-cruce-alto) identificaba a mano cuáles ítems caían
-   sobre la franja oscura y cuáles sobre blanco — funcionaba con una
-   banda de cruce angosta (2 puntos), pero Mateo pidió volver a una
-   banda ANCHA (negro → gris → blanco, difuminado real, no un corte) y
-   aceptar que eso reabre una "zona muerta" de verdad (~18 puntos) a
-   mitad del difuminado donde NINGÚN color de texto plano pasa AA —
-   confirmado con script, ver globals.css. Ya no alcanza con elegir
-   zona-oscura o normal según dónde caiga cada ítem: hace falta que
-   cada ítem traiga su PROPIO fondo, para no depender de qué haya
-   exactamente detrás (la salida que pidió explícitamente el punto 2
-   del pedido). --pill-claro (94% de blanco opaco, definida solo en
-   claro — en oscuro el var() cae a transparent y no cambia nada) va
-   SIEMPRE, sin importar si el ítem termina sobre negro, gris o blanco
-   — por eso ya no hace falta ningún `href` especial: Inicio, Pedidos,
-   Despachos, SKU, todos iguales. Color de texto: normal de claro
-   siempre (--icono), porque ahora SIEMPRE hay un fondo casi blanco
-   detrás, en los dos temas no — en oscuro --pill-claro no existe, así
-   que el ítem se queda transparente como siempre y --icono (ahí sí
-   el de oscuro, plata) sigue siendo el correcto. */
+/* Corrección (fix-ui-claro-fade-abajo, punto 2): Mateo rechazó el
+   pill blanco opaco de fix-ui-claro-difuminado — "tapa el fade y se
+   ve postizo". El problema de fondo que ese pill resolvía sigue
+   ahí (el <nav> de acá tiene SU PROPIO scroll — overflow-y:auto en
+   .nav — así que un ítem puede terminar sobre CUALQUIER punto del
+   difuminado, no solo donde cae en reposo; no alcanza con "zona
+   oscura donde corresponda" porque no hay un "donde corresponda" fijo
+   para un ítem que se puede scrollear). La salida: un VELO oscuro
+   TRANSLÚCIDO (--velo-item-claro, ver globals.css) en vez de una
+   tarjeta opaca — oscurece el difuminado que asoma detrás sin
+   taparlo, y el texto pasa a --icono-hover-zona-oscura (el lado más
+   claro de la plata; --icono-zona-oscura por sí solo no tiene margen
+   para pasar AA ni con el fondo lo más oscuro posible, confirmado con
+   script). Con eso, CUALQUIER punto del difuminado pasa AA — ya no
+   hace falta ningún `href` especial ni adivinar en qué tramo cae cada
+   ítem. Color y velo van en el bloque de abajo, condicionados a
+   [data-tema="claro"] a propósito: oscuro no toca --icono (se queda
+   en #939393 de reposo / #e6e6e6 en :hover, igual que siempre) ni
+   gana ningún velo (--velo-item-claro no existe ahí). */
 html .item {
   display: flex;
   align-items: center;
@@ -140,12 +142,17 @@ html .item {
   border-radius: var(--radio-boton);
   /* currentColor pinta el ícono (SVG stroke) y la etiqueta juntos. */
   color: var(--icono);
-  background: var(--pill-claro, transparent);
+  background: transparent;
   text-decoration: none;
   border-left: 3px solid transparent;
   cursor: pointer;
   transition: var(--transicion-color);
   white-space: nowrap;
+}
+
+:root[data-tema="claro"] .item {
+  color: var(--icono-hover-zona-oscura);
+  background: var(--velo-item-claro);
 }
 
 .item:hover {
@@ -162,18 +169,38 @@ html .item {
   border-left-color: var(--azul-metal-3);
 }
 
-/* Activo: el degradado azul (--acento-suave) solo tiene ~10-12% de
-   alfa — no alcanza solo para garantizar AA sobre lo que sea que haya
-   detrás. Se compone SOBRE --pill-claro (capa de abajo en el
-   background, separada por coma) en vez de reemplazarla: el pill
-   sigue dando el piso de contraste real, el degradado azul encima es
-   solo el acento visual de "este es el ítem activo", igual que antes. */
+/* Activo: oscuro NO se toca (regla de esta tarea) — se queda con el
+   mismo degradado sutil de --acento-suave que ya tenía (antes se
+   componía sobre --pill-claro, que en oscuro siempre caía a
+   transparent; quitarlo de acá no cambia nada ahí). */
 .item[data-activo="true"],
 .item[data-activo="true"]:hover {
-  background: linear-gradient(90deg, var(--acento-suave), transparent 78%), var(--pill-claro, transparent);
+  background: linear-gradient(90deg, var(--acento-suave), transparent 78%);
   border-left-color: var(--acento);
   color: var(--icono-activo);
   box-shadow: inset 0 0 18px var(--acento-resplandor);
+}
+
+/* Corrección (fix-ui-claro-fade-abajo, punto 2): en claro sí cambia —
+   a diferencia del reposo (un velo translúcido en CADA ítem se
+   sentiría igual de postizo que el pill que acaba de rechazarse), el
+   activo es un único resaltado deliberado — un patrón de UI normal,
+   no "una tarjeta blanca tapando todo el menú". Por eso se permite
+   que sea opaco: un degradado azul-metal sobre negro (color-mix con
+   black, nunca transparent) que es identidad de marca
+   (plateado+azul, punto 4) y queda oscuro sin importar qué haya
+   detrás, así que el texto siempre puede ser el azul CLARO de zona
+   oscura (--icono-activo-zona-oscura, pensado para fondos oscuros) en
+   vez del azul oscuro de siempre (que se perdía sobre un fondo
+   oscuro). */
+:root[data-tema="claro"] .item[data-activo="true"],
+:root[data-tema="claro"] .item[data-activo="true"]:hover {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--azul-metal-2) 45%, black) 0%,
+    color-mix(in srgb, var(--azul-metal-1) 70%, black) 100%
+  );
+  color: var(--icono-activo-zona-oscura);
 }
 
 .item[data-deshabilitado="true"] {

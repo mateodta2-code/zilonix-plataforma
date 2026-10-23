@@ -1,28 +1,20 @@
-/* Corrección (fix-ui-claro-difuminado): Pestanas solo se usa en
-   /panel (confirmado — ningún otro archivo la importa), justo debajo
-   del saludo. Con la banda de cruce ANGOSTA de fix-ui-claro-cruce-alto
-   caía limpio en zona oscura; con la banda ANCHA que pidió Mateo
-   ahora (negro → gris → blanco, ver globals.css) cae de lleno en la
-   zona muerta de en medio — ni el texto de zona oscura ni el normal
-   de claro pasan AA ahí (confirmado con script). Mismo criterio que
-   BarraLateral.module.css: .contenedor lleva su propio fondo
-   (--pill-claro, 94% de blanco opaco — en oscuro el var() cae a
-   transparent, sin cambios ahí) y .pestana vuelve a los colores
-   normales de claro — ya no depende de qué haya detrás. */
+/* Corrección (fix-ui-claro-fade-abajo, punto 2): Mateo rechazó el
+   pill blanco opaco (igual que en BarraLateral.module.css — "tapa el
+   fade y se ve postizo"). A diferencia del sidebar, Pestanas no tiene
+   scroll propio: siempre está justo debajo del saludo/header, en una
+   posición predecible. Con el difuminado más largo de este mismo PR
+   (ver --fondo-app-* en globals.css: negro sólido hasta 18-22%, recién
+   gris desde ahí), Pestanas (~21-27% de un viewport típico de 900px,
+   ~29-37% en uno corto de 650px) sigue cayendo en el tramo negro o
+   muy oscuro del difuminado en los dos casos — confirmado con script
+   (incluso en el punto más comprometido, ~#333333, el texto de zona
+   oscura mide 11.47:1). Ya no hace falta ningún fondo propio: mismo
+   criterio que BarraSuperior/el logo del sidebar (zona oscura fija,
+   sin pill). */
 .contenedor {
   display: flex;
   gap: 22px;
   border-bottom: 1px solid var(--borde);
-}
-
-/* El padding/border-radius del pill son SOLO de claro — tocarlos sin
-   condicionar por tema movería la fila de pestañas también en oscuro,
-   que no usa --pill-claro (no está definida ahí) y no necesita nada
-   de esto. */
-:root[data-tema="claro"] .contenedor {
-  padding: 4px 10px 0;
-  border-radius: var(--radio-tarjeta) var(--radio-tarjeta) 0 0;
-  background: var(--pill-claro);
 }
 
 .pestana {
@@ -30,7 +22,7 @@
   padding: 10px 2px 12px;
   font-size: 13.5px;
   font-weight: 500;
-  color: var(--texto-suave);
+  color: var(--texto-suave-zona-oscura);
   text-decoration: none;
   cursor: pointer;
   transition: var(--transicion-color), border-color 0.2s ease;
@@ -43,7 +35,7 @@
    en vez de transparent), con el mismo resplandor que ya usa la
    pestaña activa (::after, más abajo). */
 .pestana:hover {
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
   border-bottom-color: var(--azul-metal-3);
 }
 
@@ -54,7 +46,7 @@
 }
 
 .pestana[data-activa="true"] {
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
 }
 
 .pestana[data-activa="true"]::after {

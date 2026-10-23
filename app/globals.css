@@ -298,18 +298,30 @@
   --superficie: #f5f5f6;
   --superficie-2: #ececee;
   --borde: #dcdcdf;
-  /* Tarea "fix-ui-claro-difuminado": con la banda de difuminado ANCHA
-     que pidió Mateo (ver --fondo-app-* más abajo), hay una franja real
-     donde el fondo queda gris a mitad de camino — ahí NINGÚN color de
-     texto plano pasa AA. --pill-claro es el fondo propio que algunos
-     elementos (ítems del sidebar, la fila de pestañas de Inicio) se
-     ponen DETRÁS para no depender de qué haya exactamente ahí: 94% de
-     blanco opaco mide 4.88:1 contra negro puro (con margen sobre el
-     mínimo de 4.5), y es casi blanco puro sobre la zona ya blanca, así
-     que no se nota como una "tarjeta" postiza ahí. Solo existe en
-     claro — en oscuro cada componente que lo usa cae a `transparent`
-     con el valor por defecto del var(), sin cambiar su aspecto actual. */
-  --pill-claro: rgba(255, 255, 255, 0.94);
+  /* Corrección (fix-ui-claro-fade-abajo, punto 2): Mateo rechazó
+     --pill-claro (94% de blanco opaco) — "tapa el difuminado y se ve
+     postizo". Reemplazado por --velo-item-claro: un VELO oscuro
+     TRANSLÚCIDO (nunca una tarjeta opaca), pensado para ítems del
+     sidebar/Pestañas que pueden terminar sobre cualquier punto del
+     difuminado (el sidebar tiene su propio scroll — la posición real
+     de un ítem no es fija, ver BarraLateral.module.css). Oscurece lo
+     que haya detrás en vez de tapar su color: deja ver el matiz del
+     difuminado (azul/gris/blanco) oscurecido, no lo reemplaza por un
+     bloque plano.
+
+     Alfa elegido con script, contra el peor caso real (blanco puro,
+     t=100%) y el texto que lo acompaña (--icono-hover-zona-oscura,
+     #e6e6e6 — más claro que --icono-zona-oscura #939393, que por sí
+     solo nunca pasa AA ni oscureciendo el fondo al máximo razonable):
+     con alfa 0.6, blanco puro compuesto da 4.60:1 contra #e6e6e6 —
+     pasa, por el margen más chico de todo el rango. Como el resultado
+     de la mezcla (fondo × (1−alfa)) es monótono en el brillo del
+     fondo, blanco puro ya es el peor caso: TODO punto intermedio del
+     difuminado (negro, cualquier gris) da un contraste igual o mejor
+     — 16.83:1 sobre negro puro, 8.68:1 en la zona muerta del punto 1.
+     Solo existe en claro — en oscuro cada var(--velo-item-claro,
+     transparent) cae a transparent, sin cambiar nada ahí. */
+  --velo-item-claro: rgba(0, 0, 0, 0.6);
   --texto: #000000;
   /* Revertido a su valor original (fix-ui-claro-como-oscuro): las dos
      correcciones anteriores lo habían oscurecido a #333843 para
@@ -416,19 +428,29 @@
      zona muerta, y resolver el contraste ahí por otro lado en vez de
      angostar la banda de nuevo.
 
-     Corrección (fix-ui-claro-difuminado): banda ancha de verdad —
-     suave negro 0-18%, blanco desde 42% (medio 20%/48%, intenso
-     22%/54%). Confirmado con script: esto SÍ reabre una zona muerta
-     real de ~18 puntos (t≈22% a t≈40% en suave) donde el punto más
-     gris (rgb 128,128,128 aprox.) da ~1.3-1.4:1 contra CUALQUIERA de
-     los dos textos — ninguno pasa, a propósito, siguiendo la
-     instrucción explícita de priorizar la estética del difuminado
-     sobre AA en el fondo mismo. El contraste real se resuelve en el
-     TEXTO, no en el fondo: ver --pill-claro más abajo y
-     BarraLateral.module.css/Pestanas.module.css — los elementos que
-     caen en esta zona llevan su propio fondo semi-opaco (94% blanco,
-     4.88:1 contra negro puro, con margen) en vez de depender de qué
-     haya exactamente detrás. */
+     Corrección (fix-ui-claro-fade-abajo, punto 1): Mateo vio #119 y
+     seguía viendo un "corte" gris→blanco — pidió alargar la banda
+     TODAVÍA más, con paradas de gris EXPLÍCITAS (no un blend de 2
+     puntos) y blanco limpio mucho más abajo (zona de KPIs/tablas). La
+     capa de azul-metal de arriba (la del medio, sin cambios) y el
+     punto donde esta 3ª capa empieza en negro sólido (18%/20%/22%)
+     tampoco se tocan — a propósito, para que el glow de arriba siga
+     exactamente igual. Lo único que cambia es qué pasa DESPUÉS de ese
+     punto: antes cruzaba a blanco en 24 puntos (18→42) con un blend de
+     2 paradas; ahora son 6 paradas, una rampa de gris LINEAL de verdad
+     (0, 51, 102, 153, 204, 255 — osea #000/#333/#666/#999/#ccc/#fff,
+     el mismo salto de 51 entre cada una) en una banda de 60 puntos
+     (18→78 en suave). Medio/intenso en la misma proporción (64/70
+     puntos de banda).
+
+     Zona muerta, confirmada con script (igual que #119, por el mismo
+     motivo: en el punto medio del gris, #999999, ningún texto plano
+     pasa AA — 2.59:1 contra el texto de zona oscura, 7.37:1 contra el
+     texto negro normal... pero ESE sí pasa de sobra, así que la "zona
+     muerta" real empieza más tarde). A propósito: "estética > AA en
+     el fondo; contraste en superficies/texto" — ver --velo-item-claro
+     arriba y BarraLateral.module.css/Pestanas.module.css, donde se
+     resuelve de verdad. */
   --fondo-app-suave:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
     linear-gradient(
@@ -439,7 +461,7 @@
       color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
       transparent 25%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 18%, #ffffff 42%);
+    linear-gradient(180deg, #000000 0%, #000000 18%, #333333 30%, #666666 42%, #999999 54%, #cccccc 66%, #ffffff 78%);
   --fondo-app-medio:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
     linear-gradient(
@@ -450,7 +472,7 @@
       color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
       transparent 50%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 20%, #ffffff 48%);
+    linear-gradient(180deg, #000000 0%, #000000 20%, #333333 33%, #666666 46%, #999999 58%, #cccccc 71%, #ffffff 84%);
   --fondo-app-intenso:
     linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
     radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
@@ -463,7 +485,7 @@
       color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
       transparent 70%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 22%, #ffffff 54%);
+    linear-gradient(180deg, #000000 0%, #000000 22%, #333333 36%, #666666 50%, #999999 64%, #cccccc 78%, #ffffff 92%);
   /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
      arriba: sin atributo data-fondo, gana el suave. */
   --fondo-app: var(--fondo-app-suave);
@@ -575,13 +597,27 @@ button {
    en sí, con su name/type/required de siempre, lo sigue poniendo cada
    página; esto solo lo viste). Nunca un componente propio de Input:
    los campos de un formulario real tienen demasiadas variantes (type,
-   min/max, defaultValue, hidden...) para que valga la pena envolverlos. */
+   min/max, defaultValue, hidden...) para que valga la pena envolverlos.
+
+   Corrección (fix-ui-claro-fade-abajo, punto 4): antes el borde en
+   reposo era --borde gris plano — Mateo pidió que NINGÚN elemento
+   bordeado se quede en ese look "final". Misma técnica de dos
+   background-clip que ya usa Tarjeta/TarjetaKpi/EstadoVacio/.filtros
+   (border:1px solid transparent + el relleno real a padding-box +
+   --degradado-plata-borde a border-box): el borde pasa a ser el
+   plateado de marca SIEMPRE, no solo en hover. El toque azul sigue
+   siendo el glow de --sombra-marca-hover en hover/foco, igual que en
+   esas mismas tarjetas (ahí tampoco cambia el borde en hover, solo se
+   suma el brillo) — una sola fuente de "borde con identidad" para
+   todo lo bordeado, cards e inputs por igual. */
 .zx-control {
   width: 100%;
   padding: 9px 11px;
   border-radius: var(--radio-boton);
-  border: 1px solid var(--borde);
-  background: var(--superficie-2);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
   color: var(--texto);
   font-size: 13.5px;
   font-family: inherit;
@@ -595,7 +631,6 @@ button {
    suma el selector directo en vez de "componer". */
 .zx-control:hover,
 .zx-control:focus-visible {
-  border-color: var(--azul-metal-3);
   box-shadow: var(--sombra-marca-hover);
 }
 

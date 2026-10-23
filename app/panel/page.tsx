@@ -47,7 +47,7 @@ async function puedeConsultarModulo(
 }
 
 export default async function PanelPage() {
-  const { usuario, activa, rolNombre, clerkUser } = await obtenerContextoPanel();
+  const { usuario, activa } = await obtenerContextoPanel();
 
   const vePedidosYDespachos = await puedeConsultarModulo(usuario.id, activa.id, "ventas");
   const veSku = await puedeConsultarModulo(usuario.id, activa.id, "inventario");
@@ -66,33 +66,14 @@ export default async function PanelPage() {
 
   return (
     <>
-      <div className={styles.encabezado}>
-        <div>
-          {/* Corrección (fix-ui-claro-como-oscuro): sin zx-texto-plata,
-              mismo motivo que EncabezadoPagina.tsx — este saludo cae
-              siempre en la franja oscura del degradado, en los dos
-              temas; .saludo trae su propio degradado plata de zona
-              oscura directo en page.module.css. */}
-          <h1 className={styles.saludo}>Hola, {usuario.nombre}</h1>
-          <p className={styles.subtitulo}>Este es el resumen de {activa.nombre}</p>
-        </div>
-
-        <div className={styles.tarjetaIdentidad}>
-          {clerkUser?.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- la
-            // app no usa next/image a propósito, ver BarraSuperior.tsx.
-            <img src={clerkUser.imageUrl} alt="" width={44} height={44} className={styles.avatarIdentidad} />
-          ) : (
-            <span className={styles.avatarIdentidadRespaldo}>{usuario.nombre.slice(0, 1).toUpperCase()}</span>
-          )}
-          <div>
-            <p className={styles.nombreIdentidad}>{usuario.nombre}</p>
-            <p className={styles.empresaRolIdentidad}>
-              {activa.nombre} · {rolNombre}
-            </p>
-          </div>
-        </div>
-      </div>
+      {/* Corrección (fix-ui-claro-fade-abajo, punto 5): el saludo
+          grande y la tarjetaIdentidad (avatar + nombre + empresa·rol)
+          se quitaron de acá — el saludo ahora vive en BarraSuperior
+          (visible en toda la sección /panel, no solo en Inicio) y
+          tarjetaIdentidad se borró por completo, sin reubicarla: "Mi
+          cuenta" sigue en el link del header y en el botón del
+          sidebar. Sin dos saludos. */}
+      <p className={styles.subtitulo}>Este es el resumen de {activa.nombre}</p>
 
       <Pestanas pestanas={pestanas} />
 
