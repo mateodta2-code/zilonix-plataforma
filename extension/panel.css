@@ -160,6 +160,9 @@
 .zx-panel__pie {
   padding: 10px 12px;
   border-top: 1px solid #222225;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .zx-boton-copiar {
@@ -185,6 +188,31 @@
 
 .zx-boton-copiar[data-copiado="true"] {
   background: linear-gradient(180deg, #22c55e, #16a34a);
+}
+
+/* Issue #174 — "Seguir en Zilonix": plateado, distinto del azul de
+   "Copiar datos" para separar las dos acciones a simple vista, con
+   los mismos colores de marca (oscuro + plateado). */
+.zx-boton-seguir {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #6e6e6e;
+  background: transparent;
+  color: #e6e6e6;
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.zx-boton-seguir:hover {
+  border-color: #c0c0c0;
+  box-shadow: 0 0 0 1px #c0c0c0;
+}
+
+.zx-boton-seguir:active {
+  transform: scale(0.98);
 }
 
 .zx-vacio {

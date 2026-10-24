@@ -6,6 +6,7 @@ Lee, en la página que ya tenés abierta (Mercado Libre Colombia, Amazon, Temu, 
 
 - En una página de **producto**: un panel flotante con esos datos y un botón "Copiar datos (CSV)".
 - En una página de **búsqueda o listado**: un resumen (cuántos productos se ven, precio mínimo/promedio/máximo, suma de vendidos visibles) y el top 10 por vendidos, con el mismo botón para copiar.
+- En Mercado Libre, además, **"Seguir en Zilonix"**: en una página de producto o de tienda/vendedor, un botón que abre (solo con ese clic, nunca solo) una pestaña nueva hacia Zilonix Seller para agregar ese producto o vendedor al seguimiento. La URL de Zilonix Seller sale de `extension/config.js` (producción por defecto, staging comentado ahí mismo).
 
 **Qué NO hace, a propósito**: no navega por su cuenta, no inicia sesión, no abre pestañas, no evade bloqueos ni captchas, y no manda nada a Zilonix Seller ni a ninguna base de datos — solo copia al portapapeles cuando vos apretás el botón. Un dato que el sitio no muestra sale como "No disponible", nunca inventado.
 

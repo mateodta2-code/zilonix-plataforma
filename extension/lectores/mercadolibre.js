@@ -15,11 +15,48 @@
   // require(); en el navegador (content script real) `window` sí
   // existe y nunca se llega a pedir `require`.
   const U = typeof window !== "undefined" ? window.ZilonixUtilidades : require("../utilidades.js");
+  // Issue #174 — URL_APP para el botón "Seguir en Zilonix", ver
+  // extension/config.js. Mismo patrón de acceso dual que U, arriba.
+  const CONFIG = typeof window !== "undefined" ? window.ZilonixConfig : require("../config.js");
 
   function tipoDePagina(url) {
     if (/\/(p\/)?MCO-?\d+/i.test(url) || /articulo\.mercadolibre/i.test(url)) return "producto";
     if (/listado\.mercadolibre|\/search|[?&]q=/i.test(url)) return "listado";
+    // Página de UN vendedor/tienda (perfil público o tienda oficial) —
+    // nunca confundir con /listado (que es una búsqueda, no un perfil).
+    if (/\/perfil\/|tienda\.mercadolibre|[?&]CustId=/i.test(url)) return "tienda";
     return null;
+  }
+
+  // Issue #174 — "Seguir en Zilonix": el panel de producto/tienda abre,
+  // SOLO por clic real de la persona (nunca solo), una pestaña nueva
+  // hacia Zilonix Seller con el id a agregar al seguimiento. El id
+  // SIEMPRE se valida y se encodea antes de armar el link — nunca se
+  // pega un id (de la URL o del HTML) directo a una URL.
+  const PATRON_ID_ITEM = /^MCO\d+$/;
+  const PATRON_ID_VENDEDOR = /^\d+$/;
+
+  function construirLinkSeguirProducto(itemId) {
+    if (typeof itemId !== "string" || !PATRON_ID_ITEM.test(itemId)) return null;
+    return `${CONFIG.URL_APP}/panel/investigacion/seguimiento?agregar=${encodeURIComponent(itemId)}`;
+  }
+
+  function construirLinkSeguirTienda(sellerId) {
+    if (typeof sellerId !== "string" || !PATRON_ID_VENDEDOR.test(sellerId)) return null;
+    return `${CONFIG.URL_APP}/panel/investigacion/seguimiento?agregar_tienda=${encodeURIComponent(sellerId)}`;
+  }
+
+  // Página de UN solo vendedor — a diferencia del producto (que
+  // comparte el JSON con recomendados de OTROS productos), acá no hay
+  // riesgo real de mezclar con otro vendedor: alcanza con el primer
+  // seller_id/user_id que aparezca en el texto del HTML. Best-effort a
+  // propósito ("si se puede leer del JSON incrustado", pidió la
+  // tarea) — si no aparece, se devuelve null y el panel no ofrece el
+  // botón, nunca inventa un id.
+  function leerSellerIdDeTienda(html) {
+    if (typeof html !== "string" || !html) return null;
+    const m = html.match(/"seller_id"\s*:\s*"?(\d+)"?/) || html.match(/"user_id"\s*:\s*"?(\d+)"?/);
+    return m ? m[1] : null;
   }
 
   // Issue #174, mejora de "vendidos exacto" — Mercado Libre ya NO
@@ -244,6 +281,20 @@
       esCatalogo: tieneBuybox,
       esFull: /\bfull\b/i.test(textoEnvio),
       envioGratis: /envío\s*gratis|envio\s*gratis/i.test(textoEnvio),
+      // itemIdActual ya viene validado por extraerIdDeUrl (patrón
+      // MCO\d+) — construirLinkSeguirProducto lo vuelve a validar
+      // igual, nunca confía en que ya se validó antes.
+      linkSeguir: construirLinkSeguirProducto(itemIdActual),
+    };
+  }
+
+  function leerTienda(doc) {
+    const htmlCompleto = doc && doc.documentElement ? doc.documentElement.outerHTML : "";
+    const sellerId = leerSellerIdDeTienda(htmlCompleto);
+    return {
+      nombreTienda: U.textoDe(["h1", ".ui-seller-info__title", ".store-header__title"], doc),
+      sellerId,
+      linkSeguir: construirLinkSeguirTienda(sellerId),
     };
   }
 
@@ -263,7 +314,18 @@
     return { productos };
   }
 
-  const api = { tipoDePagina, leerProducto, leerListado, leerDatosIncrustados, calcularVentasPromedioMes, extraerIdDeUrl };
+  const api = {
+    tipoDePagina,
+    leerProducto,
+    leerListado,
+    leerTienda,
+    leerDatosIncrustados,
+    calcularVentasPromedioMes,
+    extraerIdDeUrl,
+    construirLinkSeguirProducto,
+    construirLinkSeguirTienda,
+    leerSellerIdDeTienda,
+  };
 
   // Igual que extension/seguridad.js: en el navegador real no existe
   // `module` — este bloque solo corre cuando vitest hace require()/
@@ -272,6 +334,6 @@
     module.exports = api;
   }
   if (typeof window !== "undefined") {
-    window.ZilonixLectorActivo = { sitio: "Mercado Libre Colombia", tipoDePagina, leerProducto, leerListado };
+    window.ZilonixLectorActivo = { sitio: "Mercado Libre Colombia", tipoDePagina, leerProducto, leerListado, leerTienda };
   }
 })();

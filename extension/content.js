@@ -133,6 +133,27 @@
     botonCerrar.onclick = () => panel.closest ? (panel.getRootNode().host || panel).remove() : panel.remove();
   }
 
+  // Issue #174 — "Seguir en Zilonix": construida por completo con
+  // createElement/textContent (nunca innerHTML) y la URL nunca se
+  // escribe en el DOM como atributo/texto — solo vive en esta clausura
+  // de JS, pasada directo a window.open. No hay ninguna superficie de
+  // HTML/atributo que escapar acá, a propósito.
+  function agregarBotonSeguir(panel, url, etiqueta) {
+    if (!url) return; // mercadolibre.js ya devuelve null si no pudo confirmar el id/seller_id — nunca se inventa un link
+    const pie = panel.querySelector(".zx-panel__pie");
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.className = "zx-boton-seguir";
+    boton.textContent = etiqueta;
+    boton.onclick = () => {
+      // SOLO por este clic real de la persona — nunca se abre nada al
+      // leer la página. noopener: la pestaña nueva no recibe ningún
+      // acceso de vuelta a esta página.
+      window.open(url, "_blank", "noopener,noreferrer");
+    };
+    pie.appendChild(boton);
+  }
+
   function renderizarEsqueleto(panel, tituloPanel, subtituloSitio) {
     panel.innerHTML = `
       <div class="zx-panel__encabezado">
@@ -185,6 +206,23 @@
 
     const boton = panel.querySelector(".zx-boton-copiar");
     boton.onclick = () => copiarAlPortapapeles(csvDeProducto(datos), boton);
+    // Issue #174 — solo Mercado Libre manda linkSeguir (undefined en
+    // los otros 5 sitios); null cuando no se pudo confirmar el id.
+    agregarBotonSeguir(panel, datos.linkSeguir, "Seguir en Zilonix");
+  }
+
+  // Issue #174 — página de un vendedor/tienda: panel mínimo, solo el
+  // nombre (si se puede leer) y el botón de seguir — nunca inventa un
+  // seller_id que no se pudo confirmar en el HTML.
+  function renderizarTienda(panel, datos) {
+    const cuerpo = renderizarEsqueleto(panel, "Zilonix · Investigación", lector.sitio);
+    cuerpo.innerHTML = `<p class="zx-titulo-producto">${textoCampo(datos.nombreTienda)}</p>`;
+    const botonCopiar = panel.querySelector(".zx-boton-copiar");
+    botonCopiar.remove(); // nada que copiar en una página de tienda — nunca un CSV vacío
+    agregarBotonSeguir(panel, datos.linkSeguir, "Seguir tienda en Zilonix");
+    if (!datos.linkSeguir) {
+      panel.querySelector(".zx-panel__pie").insertAdjacentHTML("afterbegin", '<p class="zx-vacio">No se pudo confirmar el vendedor de esta página.</p>');
+    }
   }
 
   function renderizarListado(panel, productos) {
@@ -239,6 +277,7 @@
     try {
       if (tipo === "producto") renderizarProducto(panel, lector.leerProducto(document));
       else if (tipo === "listado") renderizarListado(panel, lector.leerListado(document).productos);
+      else if (tipo === "tienda" && lector.leerTienda) renderizarTienda(panel, lector.leerTienda(document));
     } catch (error) {
       // Un selector roto en vivo nunca deja la página del usuario rota
       // — solo el panel se queda sin mostrar nada, con el error en la
