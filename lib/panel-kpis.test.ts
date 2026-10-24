@@ -300,6 +300,41 @@ describe("KPIs del panel (empresa_id, aislamiento A/B)", () => {
     expect(await calcularVentasDelMes(empresaId, new Date("2026-04-01T05:00:00.000Z"))).toEqual([]);
   });
 
+  it("Ventas del mes no suma cancelled ni invalid (#160), y cada empresa ve solo lo suyo", async () => {
+    // Dos empresas propias, para no mover los números de la A/B de
+    // arriba (contarPedidos espera 4, Ventas del mes COP 150000.00 /
+    // USD 500000.00). Cancelled e invalid con montos enormes: si se
+    // cuelan, el total cambia de orden de magnitud.
+    const empresaXId = randomUUID();
+    const empresaYId = randomUUID();
+    await dbComoEmpresa(empresaXId, (tx) =>
+      tx.insert(empresas).values({ id: empresaXId, nombre: "Empresa X estados mes", nit: `TEST-KPIX-${empresaXId.slice(0, 8)}` })
+    );
+    await dbComoEmpresa(empresaYId, (tx) =>
+      tx.insert(empresas).values({ id: empresaYId, nombre: "Empresa Y estados mes", nit: `TEST-KPIY-${empresaYId.slice(0, 8)}` })
+    );
+    const cuentaX = await crearCuenta(empresaXId, "ESTADOS_MES_X");
+    const cuentaY = await crearCuenta(empresaYId, "ESTADOS_MES_Y");
+    const enElMes = AHORA.toISOString();
+
+    await insertarPedido(empresaXId, cuentaX, enElMes, "10000.10", "COP", "paid");
+    await insertarPedido(empresaXId, cuentaX, enElMes, "2000.20", "COP", "confirmed");
+    await insertarPedido(empresaXId, cuentaX, enElMes, "333.37", "COP", "payment_required");
+    await insertarPedido(empresaXId, cuentaX, enElMes, "12345.67", "USD", "payment_in_process");
+    await insertarPedido(empresaXId, cuentaX, enElMes, "90000000", "COP", "cancelled");
+    await insertarPedido(empresaXId, cuentaX, enElMes, "80000000", "USD", "invalid");
+
+    await insertarPedido(empresaYId, cuentaY, enElMes, "7777777", "COP", "paid");
+    await insertarPedido(empresaYId, cuentaY, enElMes, "5", "COP", "cancelled");
+
+    const [deX, deY] = await Promise.all([calcularVentasDelMes(empresaXId, AHORA), calcularVentasDelMes(empresaYId, AHORA)]);
+    expect(deX).toEqual([
+      { moneda: "COP", total: "12333.67" },
+      { moneda: "USD", total: "12345.67" },
+    ]);
+    expect(deY).toEqual([{ moneda: "COP", total: "7777777.00" }]);
+  });
+
   it("un rol sin ventas ni inventario recibe todos los KPIs en null aunque la empresa tenga datos", async () => {
     const usuarioId = await membresiaCon(empresaAId, "Solo finanzas KPIs", [{ modulo: "finanzas", accion: "consultar" }]);
     expect(await obtenerKpisPanel(usuarioId, empresaAId, AHORA)).toEqual({
@@ -410,6 +445,15 @@ describe("Ventas de hoy (empresa_id, aislamiento A/B)", () => {
 
   it("cuenta las ventas del día de Bogotá de todas las cuentas, sin cancelled ni invalid, ni ayer 23:59 ni mañana 00:00", async () => {
     expect(await calcularVentasDeHoy(empresaAId, HOY)).toEqual(ventasDeHoyA);
+  });
+
+  it("Ventas del mes tampoco suma el cancelled ni el invalid de hoy: las dos tarjetas cuadran", async () => {
+    // Julio en Bogotá: los 4 de hoy + ayer 23:59 (3000000) + mañana
+    // 00:00 (4000000), sin el cancelled (1000000) ni el invalid (2000000).
+    expect(await calcularVentasDelMes(empresaAId, HOY)).toEqual([
+      { moneda: "COP", total: "7019500.50" },
+      { moneda: "USD", total: "20.00" },
+    ]);
   });
 
   it("el monto llega como string, nunca como Number", async () => {

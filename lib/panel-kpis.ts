@@ -38,11 +38,21 @@ export function rangoMesActual(ahora: Date = new Date()): { inicio: Date; finExc
   };
 }
 
+// Estados de Mercado Libre que NO son una venta: todo lo demás —
+// paid, confirmed, payment_required, payment_in_process — cuenta. La
+// misma lista para "Ventas de hoy" (#153) y "Ventas del mes" (#160),
+// para que las dos tarjetas cuadren: un pedido cancelado hoy no puede
+// faltar en una y sumar en la otra. Lista fija del código, nunca un
+// valor de la petición. "Pedidos" (contarPedidos) no la usa: cuenta
+// pedidos, no ventas.
+const ESTADOS_QUE_NO_SON_VENTA = ["cancelled", "invalid"];
+
 export type TotalPorMoneda = { moneda: string; total: string };
 
 // "Ventas del mes" — sum(pedidos.total) en Postgres, agrupado por
-// moneda. numeric llega como string (drizzle sum() hace mapWith(String),
-// no Number): sumar montos en JS con float pierde centavos en cuanto
+// moneda, sin sumar los pedidos cancelled ni invalid
+// (ESTADOS_QUE_NO_SON_VENTA). numeric llega como string (drizzle
+// sum() hace mapWith(String), no Number): sumar montos en JS con float pierde centavos en cuanto
 // el agregado pasa el entero seguro, y además no se pueden comparar
 // ni mezclar monedas distintas. Se devuelven TODOS los grupos, en
 // orden del código de moneda (texto, no monto).
@@ -52,17 +62,19 @@ export async function calcularVentasDelMes(empresaId: string, ahora: Date = new 
     tx
       .select({ moneda: pedidos.moneda, total: sum(pedidos.total) })
       .from(pedidos)
-      .where(and(eq(pedidos.empresaId, empresaId), gte(pedidos.fecha, inicio), lt(pedidos.fecha, finExclusivo)))
+      .where(
+        and(
+          eq(pedidos.empresaId, empresaId),
+          gte(pedidos.fecha, inicio),
+          lt(pedidos.fecha, finExclusivo),
+          notInArray(pedidos.estado, ESTADOS_QUE_NO_SON_VENTA)
+        )
+      )
       .groupBy(pedidos.moneda)
       .orderBy(asc(pedidos.moneda))
   );
   return filas.flatMap((fila) => (fila.total == null ? [] : [{ moneda: fila.moneda, total: fila.total }]));
 }
-
-// Estados de Mercado Libre que NO son una venta (issue #153): todo lo
-// demás — paid, confirmed, payment_required, payment_in_process —
-// cuenta. Lista fija del código, nunca un valor de la petición.
-const ESTADOS_QUE_NO_SON_VENTA = ["cancelled", "invalid"];
 
 export type VentasPorCuenta = { nickname: string; cantidad: number };
 
