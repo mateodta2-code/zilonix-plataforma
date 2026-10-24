@@ -87,6 +87,23 @@ async function resolverNombre(tipo: "producto" | "tienda", recursoMl: "item" | "
   }
 }
 
+// Issue #182 — la extensión ("Seguir en Zilonix") puede abrir el mismo
+// link más de una vez (clic repetido, F5 sobre la URL con ?agregar=
+// antes del redirect, o la pestaña que ya quedó abierta) — antes de
+// llamar a agregarSeguimiento() de nuevo (que revive un seguimiento
+// eliminado, pero también reescribe nombre/link de uno YA activo sin
+// necesidad), se chequea si ya hay uno activo con ese mismo
+// ml_id_externo para poder avisar "ya existía" en vez de reinsertar.
+export async function buscarSeguimientoActivoPorMlId(empresaId: string, mlIdExterno: string) {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [fila] = await tx
+      .select()
+      .from(seguimientosMl)
+      .where(and(eq(seguimientosMl.empresaId, empresaId), eq(seguimientosMl.mlIdExterno, mlIdExterno), isNull(seguimientosMl.eliminadoTs)));
+    return fila ?? null;
+  });
+}
+
 export type DatosNuevoSeguimiento = { tipo: "producto" | "tienda"; link: string; esCompetidor: boolean };
 
 // Issue #175, punto 5 — "agregar producto, tienda o competidor (máx. 5
