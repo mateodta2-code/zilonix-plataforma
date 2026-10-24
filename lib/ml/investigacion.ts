@@ -114,16 +114,17 @@ export function _reiniciarLimiteBusquedasParaPruebas(): void {
   contadorBusquedas.clear();
 }
 
-// "de 2 a 3 palabras" — pedido explícito. Recorta y valida el texto
-// con normalizarTextoBusqueda (lib/filtros-listado.ts, compartido con
-// el resto de los listados del panel) y agrega el conteo de palabras,
-// que es específico de este buscador.
+// Issue #174 — "de 1 a 3 palabras" (antes exigía 2-3: una búsqueda real
+// de una sola palabra, ej. "licuadora", no hacía nada). Recorta y
+// valida el texto con normalizarTextoBusqueda (lib/filtros-listado.ts,
+// compartido con el resto de los listados del panel) y agrega el
+// conteo de palabras, que es específico de este buscador.
 export function validarTermino(crudo: string): string {
   const recortado = normalizarTextoBusqueda(crudo);
   if (!recortado) throw new TerminoInvalidoError("Escribe un producto o nicho para analizar.");
   const palabras = recortado.split(/\s+/).filter(Boolean);
-  if (palabras.length < 2 || palabras.length > 3) {
-    throw new TerminoInvalidoError('Escribe entre 2 y 3 palabras (ej: "reloj digital").');
+  if (palabras.length < 1 || palabras.length > 3) {
+    throw new TerminoInvalidoError('Escribe hasta 3 palabras (ej: "reloj digital").');
   }
   return recortado;
 }
