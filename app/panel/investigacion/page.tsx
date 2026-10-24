@@ -107,6 +107,11 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
       <EncabezadoPagina
         titulo="Investigación"
         descripcion="Analiza un producto o nicho con datos reales de Mercado Libre Colombia antes de invertir en él."
+        accion={
+          <BotonLink href="/panel/investigacion/seguimiento" variante="secundario" chico>
+            Seguimiento diario
+          </BotonLink>
+        }
       />
 
       <Tarjeta className={styles.formulario}>
