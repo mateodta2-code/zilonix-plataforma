@@ -1,7 +1,9 @@
-/* Tarea "marca unificada": mismo borde azul/plata y misma línea azul
-   superior que Tarjeta/TarjetaKpi — antes era un borde plata punteado
-   plano, sin nada de azul (se veía gris liso en claro, el motivo
-   exacto que pidió corregirse). */
+/* Tarea "marca unificada" + issue #186 (Sharel, Refs): mismo borde
+   azul/plata, misma línea azul superior y la MISMA superficie oscura
+   de TarjetaKpi/Tarjeta (--tarjeta-fondo, issue #156) — antes era
+   --superficie casi blanco, la caja que rompía la línea del resto del
+   panel. Texto en zona-oscura por el mismo motivo: el fondo ya es
+   oscuro en los dos temas. */
 .vacio {
   position: relative;
   isolation: isolate;
@@ -9,11 +11,11 @@
   padding: 24px;
   text-align: center;
   font-size: 13.5px;
-  color: var(--texto-suave);
+  color: var(--texto-suave-zona-oscura);
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
-    linear-gradient(color-mix(in srgb, var(--plata) 6%, var(--superficie)), color-mix(in srgb, var(--plata) 6%, var(--superficie))) padding-box,
+    var(--tarjeta-fondo) padding-box,
     var(--degradado-plata-borde) border-box;
   overflow: hidden;
 }
