@@ -19,7 +19,9 @@ export {
   NOMBRES_PLANTILLA,
   PERMISOS_PELIGROSOS,
   permisosDeDueno,
+  permisosQueNoPuedeDar,
   PLANTILLAS,
+  plantillasQuePuedeDar,
   tienePermiso,
 } from "@/lib/roles-plantillas";
 export type { Accion, Modulo, NombrePlantilla, Permiso } from "@/lib/roles-plantillas";
@@ -65,6 +67,15 @@ export async function listarRolesDeEmpresa(empresaId: string): Promise<RolConPer
     }
     return resultado;
   });
+}
+
+// Issue #124 — permisos reales de cada rol que ya existe en la empresa,
+// por nombre: lo que necesita plantillasQuePuedeDar() para no comparar
+// contra la plantilla cuando la invitación va a reutilizar un rol ya
+// ajustado a mano en /panel/roles.
+export async function permisosDeRolesPorNombre(empresaId: string): Promise<Record<string, Permiso[]>> {
+  const roles_ = await listarRolesDeEmpresa(empresaId);
+  return Object.fromEntries(roles_.map((r) => [r.nombre, r.permisos]));
 }
 
 export async function obtenerRolDeEmpresa(empresaId: string, rolId: string): Promise<RolConPermisos | null> {

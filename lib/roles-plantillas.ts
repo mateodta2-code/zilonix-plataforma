@@ -113,6 +113,34 @@ export function tienePermiso(permisos: { modulo: string; accion: string }[], mod
   return permisos.some((p) => p.modulo === modulo && p.accion === accion);
 }
 
+// Issue #124 (Z-FIN-02) — candado contra escalada al invitar: con
+// "personas.crear" alguien podía invitar con CUALQUIER rol. Tecnología
+// (sin finanzas) podía invitar a un Gerente, con finanzas.anular y
+// finanzas.autorizar. Regla: solo se puede dar un rol si quien invita
+// ya tiene cada uno de sus permisos (mismo módulo y acción; su alcance
+// tiene que ser el mismo o "todo", que cubre a "propio").
+type PermisoComparable = { modulo: string; accion: string; alcance: string };
+
+export function permisosQueNoPuedeDar(propios: PermisoComparable[], aConceder: PermisoComparable[]): PermisoComparable[] {
+  return aConceder.filter(
+    (p) => !propios.some((q) => q.modulo === p.modulo && q.accion === p.accion && (q.alcance === p.alcance || q.alcance === "todo"))
+  );
+}
+
+// `permisosDeRolesExistentes` (por nombre): si la empresa ya tiene un
+// rol con ese nombre, la invitación lo reutiliza tal cual
+// (asegurarRolDeEmpresa en lib/roles.ts) — y ese rol pudo ajustarse
+// en /panel/roles con más permisos que la plantilla. En ese caso se
+// compara contra los permisos reales del rol, no contra la plantilla.
+export function plantillasQuePuedeDar(
+  propios: PermisoComparable[],
+  permisosDeRolesExistentes: Partial<Record<string, PermisoComparable[]>> = {}
+): NombrePlantilla[] {
+  return NOMBRES_PLANTILLA.filter(
+    (nombre) => permisosQueNoPuedeDar(propios, permisosDeRolesExistentes[nombre] ?? PLANTILLAS[nombre]).length === 0
+  );
+}
+
 // Tarea 1.8 — evidencia real (Effi, docs/investigacion/effi.md, sección
 // H): el rol "Vendedora" de la cuenta de Mateo podía crear perfiles de
 // usuario y cambiar la numeración DIAN sin ningún aviso. Esta lista es

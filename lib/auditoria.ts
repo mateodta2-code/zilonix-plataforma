@@ -67,7 +67,10 @@ export async function listarAuditoriaDeEmpresa(
   const condiciones = [eq(auditoria.empresaId, empresaId)];
   if (filtros.entidad) condiciones.push(eq(auditoria.entidad, filtros.entidad));
   if (filtros.usuarioId === FILTRO_ACTOR_SISTEMA) condiciones.push(eq(auditoria.actorTipo, "sistema"));
-  else if (filtros.usuarioId) condiciones.push(eq(auditoria.usuarioId, filtros.usuarioId));
+  else if (filtros.usuarioId) {
+    condiciones.push(eq(auditoria.actorTipo, "persona"));
+    condiciones.push(eq(auditoria.usuarioId, filtros.usuarioId));
+  }
 
   return dbComoEmpresa(empresaId, async (tx) => {
     const filas = await tx

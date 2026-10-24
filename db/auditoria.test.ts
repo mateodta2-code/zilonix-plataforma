@@ -143,6 +143,27 @@ describe("registro de auditoría (tarea 1.9)", () => {
   });
 
   it("los filtros de la bitácora por entidad y por quién devuelven solo lo pedido", async () => {
+    // Datos propios de esta prueba (una fila de sistema y una de
+    // "producto" con Ana), para no depender del orden de las de arriba.
+    await dbComoEmpresa(empresaAId, async (tx) => {
+      await registrarAuditoria(tx, {
+        empresaId: empresaAId,
+        usuarioId: null,
+        actorTipo: "sistema",
+        accion: "sincronizar",
+        entidad: "venta",
+        detalle: "Fila de sistema de la prueba de filtros (#124).",
+      });
+      await registrarAuditoria(tx, {
+        empresaId: empresaAId,
+        usuarioId: usuario1Id,
+        actorTipo: "persona",
+        accion: "modificar",
+        entidad: "producto",
+        detalle: "Fila de producto de la prueba de filtros (#124).",
+      });
+    });
+
     const porPersona = await listarAuditoriaDeEmpresa(empresaAId, 50, { usuarioId: usuario1Id });
     expect(porPersona.length).toBeGreaterThan(0);
     expect(porPersona.every((f) => f.actorNombre === "Ana (prueba 1.9)")).toBe(true);
@@ -150,10 +171,12 @@ describe("registro de auditoría (tarea 1.9)", () => {
     const deSistema = await listarAuditoriaDeEmpresa(empresaAId, 50, { usuarioId: "sistema" });
     expect(deSistema.length).toBeGreaterThan(0);
     expect(deSistema.every((f) => f.actorTipo === "sistema")).toBe(true);
+    expect(deSistema.map((f) => f.detalle)).toContain("Fila de sistema de la prueba de filtros (#124).");
 
     const porEntidad = await listarAuditoriaDeEmpresa(empresaAId, 50, { entidad: "producto" });
     expect(porEntidad.length).toBeGreaterThan(0);
     expect(porEntidad.every((f) => f.entidad === "producto")).toBe(true);
+    expect(porEntidad.map((f) => f.detalle)).toContain("Fila de producto de la prueba de filtros (#124).");
 
     const opcionesA = await opcionesFiltroAuditoria(empresaAId);
     expect(opcionesA.entidades).toContain("producto");

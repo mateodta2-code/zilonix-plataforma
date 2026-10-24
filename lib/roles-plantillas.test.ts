@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { ACCIONES, MODULOS, NOMBRES_PLANTILLA, PLANTILLAS, permisosDeDueno, type Permiso } from "./roles-plantillas";
+import {
+  ACCIONES,
+  MODULOS,
+  NOMBRES_PLANTILLA,
+  PLANTILLAS,
+  permisosDeDueno,
+  permisosQueNoPuedeDar,
+  plantillasQuePuedeDar,
+  type Permiso,
+} from "./roles-plantillas";
 
 // Issue #124 (Z-FIN-02) — los permisos de cada plantilla se escriben
 // acá a mano, uno por uno, a propósito: si alguien toca la plantilla
@@ -137,5 +146,40 @@ describe("los roles que ya existían no cambiaron (issue #124)", () => {
 
   it("toda plantilla tiene su nombre en NOMBRES_PLANTILLA y viceversa", () => {
     expect(Object.keys(PLANTILLAS).sort()).toEqual([...NOMBRES_PLANTILLA].sort());
+  });
+});
+
+// Issue #124 — candado contra escalada al invitar: solo se puede dar
+// un rol si quien invita ya tiene cada uno de sus permisos.
+describe("qué roles puede dar quien invita (issue #124)", () => {
+  it("Tecnología NO puede invitar a un Gerente, un Contador ni un Auxiliar", () => {
+    const puede = plantillasQuePuedeDar(PLANTILLAS.Tecnología);
+    expect(puede).not.toContain("Gerente");
+    expect(puede).not.toContain("Contador");
+    expect(puede).not.toContain("Auxiliar");
+    expect(permisosQueNoPuedeDar(PLANTILLAS.Tecnología, PLANTILLAS.Gerente)).toContainEqual({ modulo: "finanzas", accion: "anular", alcance: "todo" });
+  });
+
+  it("Gerente sí puede invitar a un Auxiliar y a Operaciones", () => {
+    const puede = plantillasQuePuedeDar(PLANTILLAS.Gerente);
+    expect(puede).toContain("Auxiliar");
+    expect(puede).toContain("Operaciones");
+  });
+
+  it("Dueño puede invitar con cualquier rol", () => {
+    expect(plantillasQuePuedeDar(permisosDeDueno())).toEqual([...NOMBRES_PLANTILLA]);
+  });
+
+  it("si el rol ya existe en la empresa con más permisos que la plantilla, se compara contra el rol real", () => {
+    const operacionesAjustado = [...PLANTILLAS.Operaciones, { modulo: "finanzas" as const, accion: "anular" as const, alcance: "todo" as const }];
+    expect(plantillasQuePuedeDar(PLANTILLAS.Gerente)).toContain("Operaciones");
+    expect(plantillasQuePuedeDar(PLANTILLAS.Auxiliar, { Operaciones: operacionesAjustado })).not.toContain("Operaciones");
+  });
+
+  it("alcance: \"todo\" cubre a \"propio\", pero \"propio\" no cubre a \"todo\"", () => {
+    const todo = [{ modulo: "ventas", accion: "crear", alcance: "todo" }];
+    const propio = [{ modulo: "ventas", accion: "crear", alcance: "propio" }];
+    expect(permisosQueNoPuedeDar(todo, propio)).toEqual([]);
+    expect(permisosQueNoPuedeDar(propio, todo)).toEqual(todo);
   });
 });
