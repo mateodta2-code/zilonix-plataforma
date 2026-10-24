@@ -46,9 +46,10 @@ export interface LineaVentaEntrada {
   // informativa para el detalle.
   // null = sin costo (vacío o SKU sin fila en la maestra). "0.00" = costo
   // real de $0 puesto a propósito (decisión de Sharel, 22-oct-2026).
+  // No hay "costo provisional" (decisión de Sharel en #131): si un producto
+  // está publicado tiene costo y la utilidad es real; un costo mal cargado se
+  // arregla con una corrección de costo_producto.
   costo_congelado: string | null;
-  // El costo congelado venía de un SKU con costo_por_confirmar (amarillo).
-  costo_provisional: boolean;
 }
 
 export interface CorreccionEntrada {
@@ -107,7 +108,6 @@ export interface ResultadoLinea {
   comision_ml: ValorConcepto;
   flete_ml: ValorConcepto;
   costo_producto: ValorConcepto | null;
-  usa_costo_provisional: boolean;
 }
 
 export interface ResultadoVenta {
@@ -117,7 +117,6 @@ export interface ResultadoVenta {
   dia_bogota: string;
   mes_bogota: string;
   con_costo: boolean;
-  usa_costo_provisional: boolean;
   valor_venta: string;
   comision_ml: ValorConcepto;
   flete_ml: ValorConcepto;
@@ -352,7 +351,6 @@ function repartirConcepto(
 interface CostoLinea {
   valor: bigint;
   origen: OrigenValor;
-  provisional: boolean;
 }
 
 export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
@@ -375,10 +373,11 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
   const pesos = venta.lineas.map((linea) => aCentavos(linea.valor_linea));
 
   // [SUPUESTO] en una devolución parcial valor_venta ya llega neto de
-  // reembolsos y comisión/flete se actualizan con la API; el costo del
-  // producto queda el congelado completo (el motor no sabe si la unidad
-  // volvió a inventario). Si hay que ajustarlo, se usa una corrección de
-  // costo_producto.
+  // reembolsos y comisión/flete se actualizan con la API; el motor deja el
+  // costo congelado completo. Si el producto devuelto está en buen estado se
+  // vuelve a vender, así que su costo no debería cobrarse: en Fase 1 se
+  // ajusta a mano con una corrección de costo_producto, y más adelante se
+  // automatiza con inventario.
   const valorVenta = aCentavos(venta.valor_venta);
   const valorPorLinea = repartirProporcional(valorVenta, pesos);
 
@@ -386,27 +385,25 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
   const flete = repartirConcepto("flete_ml", aCentavos(venta.flete_ml), venta.lineas, pesos, activas);
   if (comision.lineaIgnorada || flete.lineaIgnorada) avisos.push("correccion_linea_ignorada");
 
-  // Costo del producto. [SUPUESTO] una corrección de costo corregida a mano
-  // ya no es provisional: la puso una persona. Una corrección de toda la
-  // orden fija el costo total (y gana sobre las de línea, igual que en
-  // comisión y flete); para el detalle se reparte por peso.
+  // Costo del producto. Una corrección de toda la orden fija el costo total
+  // (y gana sobre las de línea, igual que en comisión y flete); para el
+  // detalle se reparte por peso.
   let costoLineas: (CostoLinea | null)[];
   const costoOrden = activas.get(claveCorreccion(null, "costo_producto"));
   if (costoOrden !== undefined) {
     const partes = repartirProporcional(costoOrden, pesos);
-    costoLineas = partes.map((valor) => ({ valor, origen: "corregido", provisional: false }));
+    costoLineas = partes.map((valor) => ({ valor, origen: "corregido" }));
     if (venta.lineas.some((linea) => activas.has(claveCorreccion(linea.linea, "costo_producto")))) {
       if (!avisos.includes("correccion_linea_ignorada")) avisos.push("correccion_linea_ignorada");
     }
   } else {
     costoLineas = venta.lineas.map((linea): CostoLinea | null => {
       const corregido = activas.get(claveCorreccion(linea.linea, "costo_producto"));
-      if (corregido !== undefined) return { valor: corregido, origen: "corregido", provisional: false };
+      if (corregido !== undefined) return { valor: corregido, origen: "corregido" };
       if (linea.costo_congelado === null) return null;
       return {
         valor: aCentavosNoNegativo(linea.costo_congelado, `costo_congelado de la línea ${linea.linea}`),
         origen: "congelado",
-        provisional: linea.costo_provisional,
       };
     });
   }
@@ -414,10 +411,6 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
   // (estado_costeo "parcial" de #129): sumar solo las líneas con costo
   // inventaría utilidad para la parte sin costo.
   const conCosto = costoLineas.every((costo) => costo !== null);
-  // La marca "usa costo provisional" avisa que la UTILIDAD depende de un
-  // costo por confirmar; una venta sin costo completo no tiene utilidad, así
-  // que nunca lleva la marca (ni la venta ni sus líneas).
-  const usaCostoProvisional = conCosto && costoLineas.some((costo) => costo !== null && costo.provisional);
   if (!conCosto) avisos.push("sin_costo");
 
   // Empaque: una vez por paquete.
@@ -477,7 +470,6 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
     dia_bogota: diaBogota(venta.fecha_pago_aprobado),
     mes_bogota: mesBogota(venta.fecha_pago_aprobado),
     con_costo: conCosto,
-    usa_costo_provisional: usaCostoProvisional,
     valor_venta: desdeCentavos(valorVenta),
     comision_ml: { valor: desdeCentavos(comision.total), origen: comision.origenTotal },
     flete_ml: { valor: desdeCentavos(flete.total), origen: flete.origenTotal },
@@ -495,7 +487,6 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
         comision_ml: { valor: desdeCentavos(comision.partes[i]), origen: comision.origenPartes[i] },
         flete_ml: { valor: desdeCentavos(flete.partes[i]), origen: flete.origenPartes[i] },
         costo_producto: costo === null ? null : { valor: desdeCentavos(costo.valor), origen: costo.origen },
-        usa_costo_provisional: conCosto && costo !== null && costo.provisional,
       };
     }),
     avisos,
@@ -512,9 +503,6 @@ export interface TotalUtilidad {
   ventas_sin_costo: number;
   // "66.67" = 66,67 % de las ventas tienen costo completo.
   porcentaje_ventas_con_costo: string | null;
-  // Ventas con costo completo que usan algún costo provisional (una venta
-  // sin costo nunca lleva la marca).
-  ventas_con_costo_provisional: number;
   // Calidad de la foto congelada: se cuentan TODAS las ventas del grupo,
   // con o sin costo, para que la pantalla avise cuántas hay que revisar.
   ventas_empaque_sin_dato: number;
@@ -530,9 +518,6 @@ export interface TotalUtilidad {
   empaque: string;
   envio: string;
   utilidad: string;
-  // [SUPUESTO] "cuánto de la utilidad depende de costos provisionales" =
-  // suma de la utilidad de las ventas marcadas con costo provisional.
-  utilidad_con_costo_provisional: string;
   // Lo que se vendió pero quedó fuera del cálculo por no tener costo.
   valor_venta_sin_costo: string;
   margen_porcentaje: string | null;
@@ -546,7 +531,6 @@ export interface TotalCuentaMes extends TotalUtilidad {
 interface Acumulador {
   ventas: number;
   ventasConCosto: number;
-  ventasConCostoProvisional: number;
   ventasEmpaqueSinDato: number;
   ventasEnvioSinDato: number;
   ventasFormaDesconocida: number;
@@ -557,7 +541,6 @@ interface Acumulador {
   empaque: bigint;
   envio: bigint;
   utilidad: bigint;
-  utilidadProvisional: bigint;
   valorSinCosto: bigint;
 }
 
@@ -565,7 +548,6 @@ function acumuladorVacio(): Acumulador {
   return {
     ventas: 0,
     ventasConCosto: 0,
-    ventasConCostoProvisional: 0,
     ventasEmpaqueSinDato: 0,
     ventasEnvioSinDato: 0,
     ventasFormaDesconocida: 0,
@@ -576,7 +558,6 @@ function acumuladorVacio(): Acumulador {
     empaque: CERO,
     envio: CERO,
     utilidad: CERO,
-    utilidadProvisional: CERO,
     valorSinCosto: CERO,
   };
 }
@@ -590,7 +571,6 @@ function acumular(acumulador: Acumulador, resultado: ResultadoVenta): void {
     acumulador.valorSinCosto += aCentavos(resultado.valor_venta);
     return;
   }
-  const utilidad = aCentavos(resultado.utilidad);
   acumulador.ventasConCosto += 1;
   acumulador.valorVenta += aCentavos(resultado.valor_venta);
   acumulador.comision += aCentavos(resultado.comision_ml.valor);
@@ -598,11 +578,7 @@ function acumular(acumulador: Acumulador, resultado: ResultadoVenta): void {
   acumulador.costo += aCentavos(resultado.costo_producto.valor);
   acumulador.empaque += aCentavos(resultado.empaque.valor);
   acumulador.envio += aCentavos(resultado.envio.valor);
-  acumulador.utilidad += utilidad;
-  if (resultado.usa_costo_provisional) {
-    acumulador.ventasConCostoProvisional += 1;
-    acumulador.utilidadProvisional += utilidad;
-  }
+  acumulador.utilidad += aCentavos(resultado.utilidad);
 }
 
 function cerrarAcumulador(acumulador: Acumulador): TotalUtilidad {
@@ -611,7 +587,6 @@ function cerrarAcumulador(acumulador: Acumulador): TotalUtilidad {
     ventas_con_costo: acumulador.ventasConCosto,
     ventas_sin_costo: acumulador.ventas - acumulador.ventasConCosto,
     porcentaje_ventas_con_costo: porcentaje(BigInt(acumulador.ventasConCosto), BigInt(acumulador.ventas)),
-    ventas_con_costo_provisional: acumulador.ventasConCostoProvisional,
     ventas_empaque_sin_dato: acumulador.ventasEmpaqueSinDato,
     ventas_envio_sin_dato: acumulador.ventasEnvioSinDato,
     ventas_forma_desconocida: acumulador.ventasFormaDesconocida,
@@ -622,7 +597,6 @@ function cerrarAcumulador(acumulador: Acumulador): TotalUtilidad {
     empaque: desdeCentavos(acumulador.empaque),
     envio: desdeCentavos(acumulador.envio),
     utilidad: desdeCentavos(acumulador.utilidad),
-    utilidad_con_costo_provisional: desdeCentavos(acumulador.utilidadProvisional),
     valor_venta_sin_costo: desdeCentavos(acumulador.valorSinCosto),
     margen_porcentaje: porcentaje(acumulador.utilidad, acumulador.valorVenta),
   };

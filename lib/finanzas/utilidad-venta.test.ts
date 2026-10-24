@@ -22,7 +22,6 @@ function linea(parcial: Partial<LineaVentaEntrada> = {}): LineaVentaEntrada {
     cantidad: 1,
     valor_linea: "100000.00",
     costo_congelado: "40000.00",
-    costo_provisional: false,
     ...parcial,
   };
 }
@@ -99,7 +98,6 @@ describe("calcularUtilidadVenta", () => {
     expect(r.utilidad).toBe("35500.00");
     expect(r.margen_porcentaje).toBe("35.50");
     expect(r.con_costo).toBe(true);
-    expect(r.usa_costo_provisional).toBe(false);
     expect(r.comision_ml).toEqual({ valor: "13000.00", origen: "congelado" });
     expect(r.flete_ml).toEqual({ valor: "8000.00", origen: "congelado" });
     expect(r.costo_producto).toEqual({ valor: "40000.00", origen: "congelado" });
@@ -141,23 +139,6 @@ describe("calcularUtilidadVenta", () => {
     expect(r.utilidad).toBeNull();
     expect(r.lineas[0].costo_producto).toEqual({ valor: "20000.00", origen: "congelado" });
     expect(r.lineas[1].costo_producto).toBeNull();
-  });
-
-  it("una línea provisional y otra sin costo: sin costo y sin marca de provisional", () => {
-    const r = calcularUtilidadVenta(
-      venta({
-        lineas: [
-          linea({ linea: 1, valor_linea: "60000.00", costo_congelado: "20000.00", costo_provisional: true }),
-          linea({ linea: 2, valor_linea: "40000.00", costo_congelado: null }),
-        ],
-      }),
-    );
-    expect(r.con_costo).toBe(false);
-    expect(r.usa_costo_provisional).toBe(false);
-    expect(r.lineas.map((l) => l.usa_costo_provisional)).toEqual([false, false]);
-    const total = totalizarUtilidad([r]);
-    expect(total.ventas_con_costo_provisional).toBe(0);
-    expect(total.utilidad_con_costo_provisional).toBe("0.00");
   });
 
   it("costo 0 puesto a propósito: cuenta como con costo y no genera alerta", () => {
@@ -249,29 +230,6 @@ describe("calcularUtilidadVenta", () => {
     expect(r.utilidad).toBe("39000.00");
   });
 
-  it("costo provisional: la venta lleva la marca y los totales lo muestran aparte", () => {
-    const provisional = calcularUtilidadVenta(
-      venta({ pedido_id: "p-prov", lineas: [linea({ costo_provisional: true })] }),
-    );
-    expect(provisional.usa_costo_provisional).toBe(true);
-    expect(provisional.lineas[0].usa_costo_provisional).toBe(true);
-    expect(provisional.utilidad).toBe("35500.00");
-
-    const firme = calcularUtilidadVenta(venta({ pedido_id: "p-firme", valor_venta: "50000.00" }));
-    expect(firme.usa_costo_provisional).toBe(false);
-    expect(firme.lineas[0].usa_costo_provisional).toBe(false);
-
-    const total = totalizarUtilidad([provisional, firme]);
-    expect(total.ventas_con_costo_provisional).toBe(1);
-    expect(total.utilidad_con_costo_provisional).toBe("35500.00");
-    // La utilidad provisional se suma igual al total.
-    expect(total.utilidad).toBe(desdeCentavos(aCentavos("35500.00") + aCentavos(firme.utilidad as string)));
-
-    const sinProvisional = totalizarUtilidad([firme]);
-    expect(sinProvisional.ventas_con_costo_provisional).toBe(0);
-    expect(sinProvisional.utilidad_con_costo_provisional).toBe("0.00");
-  });
-
   describe("correcciones manuales", () => {
     it("la corrección activa gana; al anularla vuelve el congelado", () => {
       const corregida = calcularUtilidadVenta(
@@ -307,18 +265,17 @@ describe("calcularUtilidadVenta", () => {
       expect(r.utilidad).toBe("40000.00");
     });
 
-    it("una corrección de costo saca la marca de provisional y le da costo a una línea que no tenía", () => {
+    it("una corrección de costo le da costo a una línea que no tenía", () => {
       const r = calcularUtilidadVenta(
         venta({
           lineas: [
-            linea({ linea: 1, valor_linea: "50000.00", costo_congelado: "20000.00", costo_provisional: true }),
+            linea({ linea: 1, valor_linea: "50000.00", costo_congelado: "20000.00" }),
             linea({ linea: 2, valor_linea: "50000.00", costo_congelado: null }),
           ],
           correcciones: [correccion("costo_producto", "15000.00", 1), correccion("costo_producto", "18000.00", 2)],
         }),
       );
       expect(r.con_costo).toBe(true);
-      expect(r.usa_costo_provisional).toBe(false);
       expect(r.costo_producto).toEqual({ valor: "33000.00", origen: "corregido" });
     });
 
@@ -498,7 +455,7 @@ describe("totales por cuenta y mes", () => {
       venta({ pedido_id: "a2", cuenta_ml_id: "cuenta-a", fecha_pago_aprobado: new Date("2026-10-01T04:59:00Z"), valor_venta: "33333.33" }),
       venta({ pedido_id: "a3", cuenta_ml_id: "cuenta-a", fecha_pago_aprobado: new Date("2026-10-01T05:00:00Z"), forma_entrega: "full_ml" }),
       venta({ pedido_id: "a4", cuenta_ml_id: "cuenta-a", fecha_pago_aprobado: new Date("2026-10-10T12:00:00Z"), lineas: [linea({ costo_congelado: null })] }),
-      venta({ pedido_id: "b1", cuenta_ml_id: "cuenta-b", fecha_pago_aprobado: new Date("2026-10-05T12:00:00Z"), lineas: [linea({ costo_provisional: true })] }),
+      venta({ pedido_id: "b1", cuenta_ml_id: "cuenta-b", fecha_pago_aprobado: new Date("2026-10-05T12:00:00Z") }),
       venta({
         pedido_id: "b2",
         cuenta_ml_id: "cuenta-b",
@@ -543,8 +500,7 @@ describe("totales por cuenta y mes", () => {
     expect(aOctubre.ventas_con_costo).toBe(1);
     expect(aOctubre.porcentaje_ventas_con_costo).toBe("50.00");
     const bOctubre = grupos[2];
-    expect(bOctubre.ventas_con_costo_provisional).toBe(1);
-    expect(bOctubre.utilidad_con_costo_provisional).toBe(resultados[4].utilidad);
+    expect(bOctubre.ventas_con_costo).toBe(2);
     expect(total.porcentaje_ventas_con_costo).toBe("83.33");
   });
 
