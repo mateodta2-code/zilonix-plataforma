@@ -79,6 +79,27 @@ export class MlNoDisponibleError extends Error {
   }
 }
 
+// Issue #174 — bug real encontrado al diagnosticar "Investigación no
+// devuelve resultados" en staging: buscarProductosCatalogo (la
+// búsqueda PRINCIPAL, /products/search) lanzaba un Error genérico para
+// cualquier 4xx que no fuera 404 (ej. un 400 real si Mercado Libre
+// rechaza algún parámetro, o cambia su contrato) — page.tsx solo
+// atrapa los 4 tipos de arriba por nombre, así que ese Error genérico
+// se le escapaba hasta app/panel/investigacion/error.tsx, que a
+// propósito muestra un mensaje GENÉRICO ("no se sabe qué fue") sin
+// error.message — el status real de Mercado Libre quedaba invisible
+// tanto para quien busca como para quien lee el reporte del bug. Con
+// esto, cualquier 4xx inesperado llega a page.tsx con su status real
+// adentro del mensaje, nunca a la pantalla genérica.
+export class MlRespuestaInesperadaError extends Error {
+  readonly status: number;
+  constructor(status: number, contexto: string) {
+    super(`Mercado Libre respondió ${status} al ${contexto} — puede ser un cambio reciente de su API, revisar con el equipo de Mercado Libre.`);
+    this.name = "MlRespuestaInesperadaError";
+    this.status = status;
+  }
+}
+
 // Solo para el log — nunca el término/query completo (puede llevar lo
 // que la persona escribió) ni el token, que NUNCA se imprime acá.
 function endpointSinQuery(url: string): string {
@@ -151,7 +172,7 @@ export async function buscarProductosCatalogo(termino: string, token: string, of
     if (resp.status === 404) return [];
     // Sin el término acá — igual que endpointSinQuery(), nunca lo que la
     // persona escribió adentro de un mensaje de error/log.
-    throw new Error(`Mercado Libre respondió ${resp.status} al buscar en el catálogo.`);
+    throw new MlRespuestaInesperadaError(resp.status, "buscar en el catálogo");
   }
   const resultados = Array.isArray(resp.data.results) ? resp.data.results : [];
   return resultados

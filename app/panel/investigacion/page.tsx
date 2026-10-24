@@ -5,7 +5,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
-import { LimiteMercadoLibreError, MlNoAutorizadoError, MlNoDisponibleError, MlSinPermisoAppError } from "@/lib/ml/cliente";
+import { LimiteMercadoLibreError, MlNoAutorizadoError, MlNoDisponibleError, MlRespuestaInesperadaError, MlSinPermisoAppError } from "@/lib/ml/cliente";
 import { CandadoDeRenovacionError, CuentaDesconectadaError, CuentaMlNoEncontradaError, RenovacionTokenFallidaError } from "@/lib/ml/cuentas";
 import {
   buscarInvestigacionProducto,
@@ -26,7 +26,7 @@ import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import styles from "./page.module.css";
 
 // Nueva tarea: módulo "Investigación" de Zilonix OS, PARTE 1 (solo
-// Mercado Libre Colombia) — buscador de producto/nicho (2-3 palabras)
+// Mercado Libre Colombia) — buscador de producto/nicho (1-3 palabras)
 // con datos reales de la API oficial de Mercado Libre, antes de
 // invertir en él. Todo el cálculo real vive en lib/ml/investigacion.ts;
 // esta página solo lee el término de la URL (?termino=, mismo patrón
@@ -85,7 +85,8 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
         error instanceof SinCuentaMlError ||
         error instanceof LimiteMercadoLibreError ||
         error instanceof MlSinPermisoAppError ||
-        error instanceof MlNoDisponibleError
+        error instanceof MlNoDisponibleError ||
+        error instanceof MlRespuestaInesperadaError
       ) {
         errorBusqueda = error.message;
       } else if (error instanceof MlNoAutorizadoError || error instanceof CuentaDesconectadaError || error instanceof RenovacionTokenFallidaError) {
@@ -110,7 +111,7 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
 
       <Tarjeta className={styles.formulario}>
         <form method="get" className={styles.filaFormulario}>
-          <Campo etiqueta="Producto o nicho (2-3 palabras)">
+          <Campo etiqueta="Producto o nicho (hasta 3 palabras)">
             <input
               type="search"
               name="termino"

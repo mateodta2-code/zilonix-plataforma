@@ -1,0 +1,17 @@
+- **2026-10-24** — issue #174: la extensión de Chrome ahora lee el número **exacto** de vendidos de un producto de Mercado Libre, no solo la etiqueta redondeada "+N vendidos" que muestra la interfaz.
+
+  **`extension/lectores/mercadolibre.js` — nuevas `leerDatosIncrustados(html)`/`calcularVentasPromedioMes(vendidos, dateCreated, ahoraMs)`:** Mercado Libre ya no muestra el número exacto en pantalla, pero sigue viajando en el JSON que la propia página incrusta para su renderizado (`window.__NORDIC_RENDERING_CTX__`) — se extrae ese objeto con un parser de llaves balanceado (no un regex "greedy", que cortaría mal un JSON con objetos/strings anidados) y se busca `sold_quantity`/`item_id`/`date_created` en cualquier profundidad (la ruta exacta puede cambiar de versión a versión). Si la variable no está, cambió de nombre, o el JSON no trae esas 3 claves, cae a un respaldo de texto plano (buscar `"sold_quantity"` directo en el HTML) — nunca revienta, nunca inventa un dato. Con eso se calcula "Ventas promedio al mes" = vendidos × 30 ÷ días desde `date_created` (mínimo 1 día, para no dividir por cero con una publicación de hoy mismo) — siempre marcado como **estimado**, incluso con el número de vendidos exacto.
+
+  **`app` del panel (`extension/content.js`):** la fila de vendidos dice "Vendidos (exacto)" cuando viene del JSON/HTML incrustado, "Vendidos (aproximado)" cuando solo hay la etiqueta redondeada, y queda igual que antes ("Vendidos") en los otros 5 sitios. Nueva fila "Ventas promedio al mes (estimado)", solo en Mercado Libre. Los dos campos nuevos se agregan también al CSV que copia el botón.
+
+  **Sigue sin pedir nada por red**: todo sale del `outerHTML` que el navegador ya cargó — ninguna pestaña nueva, ninguna petición extra.
+
+  **Bug de infraestructura encontrado y corregido de paso**: `extension/utilidades.js` (compartido por los 6 lectores) todavía no tenía el patrón dual `module.exports`/`window.X` que sí tiene `extension/seguridad.js` — intentar `require()`lo desde una prueba de vitest reventaba con `ReferenceError: window is not defined`, antes de llegar a probar nada. Se corrige con el mismo patrón ya usado en `seguridad.js`.
+
+  **Pruebas nuevas** (`extension/lectores/mercadolibre.test.ts`, con HTML de ejemplo, sin navegador): lee `sold_quantity`/`item_id`/`date_created` desde `__NORDIC_RENDERING_CTX__` (incluido un caso con llaves y comillas escapadas DENTRO de un string, para confirmar que el parser balanceado no corta el JSON a mitad de camino); cae al respaldo de texto plano si la variable no está; nunca revienta con un JSON cortado a mitad de carga; devuelve los 3 campos en `null` sin inventar nada si no hay ningún dato. `calcularVentasPromedioMes`: cálculo real, redondeo a 1 decimal, mínimo 1 día (nunca divide por cero), `null` sin vendidos/fecha/fecha inválida.
+
+  **Versión**: `extension/version.json` y `extension/manifest.json` 0.1.1 → 0.2.0.
+
+  **No se tocó**: `db/`, ninguna migración, `docs/CHANGELOG.md`, la versión de `package.json`.
+
+  Verificado: `npm run typecheck` en verde (los `.js`/`.test.ts` de `extension/` entran al proyecto de TypeScript solo cuando un `.ts` los importa — `allowJs` los deja pasar sin anotaciones). `npm test`: 401 pruebas en verde (392 + 9 nuevas), mismos archivos fallando solo por `DATABASE_URL_APP`/`DATABASE_URL_TRABAJADOR` ausentes en este entorno, sin regresión. `npm run extension:zip` corrido en local con la versión nueva.
