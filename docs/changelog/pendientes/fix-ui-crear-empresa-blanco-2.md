@@ -1,0 +1,1 @@
+- **2026-10-24**: "+ Crear otra empresa" vuelve a letras e ícono blancos, a pedido de Sharel (Refs #167).

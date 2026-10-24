@@ -93,7 +93,7 @@ export default async function PanelPage() {
 
       <Link href="/crear-empresa" className={styles.crearEmpresa}>
         {iconoDeClave("crearEmpresa", { size: 16 })}
-        <span className={styles.crearEmpresaTexto}>+ Crear otra empresa</span>
+        + Crear otra empresa
       </Link>
     </>
   );
