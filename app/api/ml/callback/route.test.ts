@@ -1,6 +1,8 @@
+import { randomBytes } from "crypto";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NOMBRE_COOKIE_STATE, NOMBRE_COOKIE_VERIFIER } from "@/lib/ml/pkce-cookie";
+import { NOMBRE_COOKIE_TRANSFERENCIA } from "@/lib/ml/transferencia-cookie";
 
 // Fix real (2026-10-21) — state (RFC 6749 §10.12, protección CSRF):
 // sin esto, alguien podía armar su propio link de autorización con SU
@@ -63,6 +65,9 @@ describe("GET /api/ml/callback — validación de state (fix middleware, 2026-10
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(requierePermiso).mockResolvedValue({} as never);
+    // @/lib/ml/transferencia-cookie (issue #181) no se mockea — usa el
+    // cifrado real (lib/cifrado.ts), que necesita esta variable.
+    process.env.ML_TOKEN_KEY_V1 = randomBytes(32).toString("base64");
   });
 
   it("state ausente en la cookie -> redirige con error, nunca canjea el code", async () => {
@@ -116,20 +121,27 @@ describe("GET /api/ml/callback — validación de state (fix middleware, 2026-10
     expect(intercambiarCodigo).not.toHaveBeenCalled();
   });
 
-  // Bug real en vivo en staging: reconectar una cuenta de ML que ya
-  // tenía fila en otra empresa reventaba — guardarCuentaConectada
-  // (lib/ml/cuentas.ts) ahora lanza CuentaMlDeOtraEmpresaError, y esta
-  // ruta tiene que distinguirlo del resto de las fallas (código
-  // propio, nunca "error_desconocido" genérico para este caso puntual,
-  // y nunca revela a qué empresa pertenece la cuenta).
-  it("guardarCuentaConectada lanza CuentaMlDeOtraEmpresaError -> redirige con error=cuenta_en_otra_empresa", async () => {
+  // Issue #181 — en vez de solo avisar "ya está conectada a otra
+  // empresa", ahora se ofrece transferirla: redirige a la pantalla de
+  // confirmación, con los tokens nuevos viajando SOLO en una cookie
+  // httpOnly cifrada — nunca en la URL ni en texto plano en ningún Set-Cookie.
+  it("guardarCuentaConectada lanza CuentaMlDeOtraEmpresaError -> redirige a confirmar-transferencia, con los tokens en una cookie httpOnly cifrada", async () => {
     const stateReal = "el-state-que-de-verdad-coincide";
     mockearCookies({ [NOMBRE_COOKIE_VERIFIER]: "un-verifier-real", [NOMBRE_COOKIE_STATE]: stateReal });
     vi.mocked(guardarCuentaConectada).mockRejectedValue(new CuentaMlDeOtraEmpresaError());
     const res = await GET(peticion(`code=un-code&state=${stateReal}`));
     const location = res.headers.get("location") ?? "";
-    expect(location).toContain("/panel/conectar-ml");
-    expect(location).toContain("error=cuenta_en_otra_empresa");
+    expect(location).toBe("https://staging.test/panel/conectar-ml/confirmar-transferencia");
+
+    const setCookies = res.headers.getSetCookie();
+    const cookiePendiente = setCookies.find((c) => c.startsWith(`${NOMBRE_COOKIE_TRANSFERENCIA}=`));
+    expect(cookiePendiente, "no se mandó ningún Set-Cookie con el pendiente de transferencia").toBeDefined();
+    expect(cookiePendiente).toContain("HttpOnly");
+    expect(cookiePendiente).toContain("Path=/panel/conectar-ml");
+    // Nunca el nickname real tal cual (ver el mock de obtenerNickname
+    // arriba) en ningún header de la respuesta — tiene que viajar
+    // cifrado, no en texto plano.
+    expect([...res.headers.values()].join(" ")).not.toContain("VENDEDOR_TEST");
   });
 
   // Cualquier OTRA falla (ML rechazó el canje, Postgres, lo que sea) —
