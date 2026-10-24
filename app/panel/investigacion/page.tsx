@@ -94,7 +94,7 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
       } else if (error instanceof CuentaMlNoEncontradaError) {
         errorBusqueda = error.message;
       } else if (error instanceof CandadoDeRenovacionError) {
-        errorBusqueda = `${error.message} Volvé a intentar la búsqueda en unos segundos.`;
+        errorBusqueda = error.message; // el mensaje ya incluye "reintentar en unos segundos" — no se duplica
       } else {
         throw error;
       }

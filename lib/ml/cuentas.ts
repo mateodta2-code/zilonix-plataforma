@@ -122,10 +122,11 @@ export async function obtenerAccessTokenVigente(empresaId: string, cuentaId: str
       // Libera el candado aunque falle — si no, nadie puede volver a
       // intentar hasta que pasen los 30s de "candado caído" de arriba.
       await tx.update(cuentasMl).set({ renovandoTs: null }).where(eq(cuentasMl.id, cuentaId));
-      // Nunca se traga el error real (log sin el token, que acá ni
-      // siquiera está en texto plano — ver lib/ml/oauth.ts) antes de
-      // reemplazarlo por el tipado que sí puede atrapar una pantalla.
-      console.warn(`[lib/ml/cuentas] no se pudo renovar el token de la cuenta ${cuentaId}:`, error instanceof Error ? error.message : String(error));
+      // Nunca se traga el error real antes de reemplazarlo por el tipado
+      // que sí puede atrapar una pantalla — pero solo se loguea el
+      // nombre, nunca error.message completo: oauth.ts mete hasta 300
+      // caracteres del cuerpo de la respuesta de Mercado Libre ahí.
+      console.warn(`[lib/ml/cuentas] no se pudo renovar el token de la cuenta ${cuentaId}:`, error instanceof Error ? error.name : String(error));
       throw new RenovacionTokenFallidaError();
     }
   });
