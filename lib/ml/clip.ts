@@ -34,6 +34,19 @@ export async function buscarItemPorSku(empresaId: string, cuenta: { id: string; 
 
 export type ResultadoClip = { status: string; clipUuid: string | null; siteIds: string[] };
 
+// Tarea 2.11, punto CSRF/error-codes — app/api/ml/clip/route.ts nunca
+// manda texto libre a la URL del redirect (issue real: un mensaje con
+// el detalle crudo de Mercado Libre terminaba visible en la barra de
+// direcciones, y encima pisado en el historial del navegador). Clases
+// propias para que la ruta mapee por `instanceof` a un código fijo de
+// una lista cerrada, en vez de adivinar por el texto del mensaje —
+// el mensaje completo (hasta 800 caracteres del cuerpo real de ML, ver
+// más abajo) sigue existiendo para el log del servidor, nunca para la
+// URL.
+export class ClipReputacionRequeridaError extends Error {}
+export class ClipSinRespuestaError extends Error {}
+export class ClipRechazadoError extends Error {}
+
 // §10 — contrato real confirmado por la documentación oficial de
 // Mercado Libre ("Working with Clips"): POST .../clips/upload,
 // multipart/form-data, solo "file" + header Authorization (el boundary
@@ -65,22 +78,22 @@ export async function subirClipItem(token: string, itemId: string, buffer: Buffe
     // asignado, y Mercado Libre bloquea Clips para esa cuenta sin
     // importar el token. No es cuestión de reintentar.
     if (clipRequiereReputacion(textoCrudo)) {
-      throw new Error(
+      throw new ClipReputacionRequeridaError(
         "Mercado Libre no deja subir Clips en esta cuenta todavía — necesita tener un color de reputación asignado (se gana con ventas reales), y una cuenta recién conectada sin historial de ventas no lo tiene. No es un error nuestro; hay que esperar a que la cuenta tenga reputación."
       );
     }
     // status === 0 = tiempo agotado o falla de red subiendo el video —
     // textoCrudo queda vacío, nunca un HTTP real que mostrar.
     if (status === 0) {
-      throw new Error("Mercado Libre no respondió a tiempo subiendo el video; revisá en Mercado Libre si el clip se subió antes de reintentar.");
+      throw new ClipSinRespuestaError("Mercado Libre no respondió a tiempo subiendo el video; revisá en Mercado Libre si el clip se subió antes de reintentar.");
     }
-    throw new Error(`Mercado Libre rechazó el video (HTTP ${status}): ${textoCrudo.slice(0, 800)}`);
+    throw new ClipRechazadoError(`Mercado Libre rechazó el video (HTTP ${status}): ${textoCrudo.slice(0, 800)}`);
   }
   let data: { status?: string; clip_uuid?: string; site_ids?: string[] };
   try {
     data = JSON.parse(textoCrudo);
   } catch {
-    throw new Error(`Mercado Libre devolvió una respuesta inesperada: ${textoCrudo.slice(0, 400)}`);
+    throw new ClipRechazadoError(`Mercado Libre devolvió una respuesta inesperada: ${textoCrudo.slice(0, 400)}`);
   }
   // status: "accepted" = recibido, no publicado — Mercado Libre lo
   // modera (24-48h) antes de que quede visible.
@@ -100,12 +113,17 @@ const TIPOS_VIDEO_VALIDOS = new Set(["video/mp4", "video/quicktime", "video/mpeg
 export const TAMANO_MAXIMO_CLIP_BYTES = 280 * 1024 * 1024;
 
 export class ClipInvalidoError extends Error {}
+// Subclase, no una clase aparte: así un `toThrow(ClipInvalidoError)` ya
+// escrito sigue pasando, y app/api/ml/clip/route.ts puede seguir
+// distinguiendo "tamaño" de "tipo" por `instanceof` (revisando esta
+// clase, más específica, ANTES que ClipInvalidoError genérica).
+export class ClipDemasiadoGrandeError extends ClipInvalidoError {}
 
 export function validarArchivoClip(contentType: string, tamanoBytes: number): void {
   if (!TIPOS_VIDEO_VALIDOS.has(contentType)) {
     throw new ClipInvalidoError("El video tiene que ser MP4, MOV, MPEG o AVI.");
   }
   if (tamanoBytes > TAMANO_MAXIMO_CLIP_BYTES) {
-    throw new ClipInvalidoError("El video no puede superar 280MB — es el límite real de Mercado Libre para Clips.");
+    throw new ClipDemasiadoGrandeError("El video no puede superar 280MB — es el límite real de Mercado Libre para Clips.");
   }
 }

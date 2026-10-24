@@ -7,6 +7,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { buscarItemAction, buscarItemConDatos, cambiarEstadoAction } from "./actions";
+import { mensajeErrorClip } from "./mensajes-error";
 
 // Tarea 2.11 ("Publicar producto y clip") — el Clip es un sub-flujo
 // APARTE de publicar (decisión de diseño explícita del sistema actual:
@@ -81,8 +82,10 @@ export default async function PublicarClipPage({
       {/* Fuera del bloque de abajo a propósito: app/api/ml/clip/
       route.ts vuelve con ?error= en varios casos (sin permiso, datos
       faltantes) donde cuentaId/itemId podrían no resolver a un item
-      real — el aviso tiene que verse igual, no depender de eso. */}
-      {searchParams.error && <p style={{ marginTop: 16, color: "#b00020", fontSize: 14 }}>{searchParams.error}</p>}
+      real — el aviso tiene que verse igual, no depender de eso.
+      mensajeErrorClip() nunca devuelve el valor crudo de la URL: solo
+      el texto fijo del código, o el genérico si no lo reconoce. */}
+      {mensajeErrorClip(searchParams.error) && <p style={{ marginTop: 16, color: "#b00020", fontSize: 14 }}>{mensajeErrorClip(searchParams.error)}</p>}
 
       {item && cuentaElegida && (
         <div style={{ marginTop: 24, borderTop: "1px solid #eee", paddingTop: 16 }}>
