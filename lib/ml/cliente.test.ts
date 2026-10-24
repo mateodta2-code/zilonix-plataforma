@@ -233,10 +233,41 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
     expect(r2).toEqual({ ok: true, status: 200, resultados: [{ categoryId: "MCO1", categoryName: "Relojes", domainName: "MCO-RELOJES" }] });
   });
 
-  it("domainDiscoveryMl: no-ok devuelve {ok:false}, nunca lanza (publicar.ts decide si reintenta)", async () => {
+  // Bug real encontrado al fusionar con main (issue #147 agregó
+  // errores tipados a pedir() para 401/403/5xx): domainDiscoveryMl y
+  // buscarEnSitioMl necesitan el contrato ORIGINAL de "nunca lanza" —
+  // sus llamadores en lib/ml/publicar.ts (resolverCategoria) deciden
+  // ellos mismos el reintento mirando resp.status en un bucle, nunca
+  // con un catch. Un 403/401/5xx que ahora LANZARA en vez de devolver
+  // {ok:false} tumbaría ese reintento entero en el primer intento.
+  it("domainDiscoveryMl: 401/403/5xx nunca lanza, siempre {ok:false,status} (publicar.ts decide si reintenta)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    const r = await domainDiscoveryMl("MCO", "reloj digital", "token");
-    expect(r).toEqual({ ok: false, status: 403, resultados: [] });
+    const r403 = await domainDiscoveryMl("MCO", "reloj digital", "token");
+    expect(r403).toEqual({ ok: false, status: 403, resultados: [] });
+
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    const r401 = await domainDiscoveryMl("MCO", "reloj digital", "token");
+    expect(r401).toEqual({ ok: false, status: 401, resultados: [] });
+
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 503)));
+    const r5xx = await domainDiscoveryMl("MCO", "reloj digital", "token");
+    expect(r5xx).toEqual({ ok: false, status: 503, resultados: [] });
+  });
+
+  it("domainDiscoveryMl: 429 SÍ sigue lanzando LimiteMercadoLibreError (nunca se traduce, corta toda la búsqueda)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 429)));
+    await expect(domainDiscoveryMl("MCO", "reloj digital", "token")).rejects.toThrow(LimiteMercadoLibreError);
+  });
+
+  it("buscarEnSitioMl: 401/403/5xx nunca lanza, devuelve [] (mismo bug real que domainDiscoveryMl)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(buscarEnSitioMl("MCO", "reloj digital", "token")).resolves.toEqual([]);
+
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    await expect(buscarEnSitioMl("MCO", "reloj digital", "token")).resolves.toEqual([]);
   });
 
   // Bug real: escribir() usaba el TIMEOUT_MS de 8s de LECTURA para toda

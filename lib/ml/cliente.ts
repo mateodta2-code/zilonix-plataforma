@@ -175,6 +175,27 @@ async function pedir<T>(url: string, token?: string): Promise<{ ok: true; data: 
   return { ok: true, data: (await res.json()) as T };
 }
 
+// Issue #147 agregó errores tipados a pedir() para 401/403/5xx — pero
+// buscarEnSitioMl/domainDiscoveryMl (tarea 2.11) necesitan el contrato
+// ORIGINAL de "nunca lanza, status real en la respuesta": sus
+// llamadores en lib/ml/publicar.ts deciden ELLOS MISMOS el
+// reintento/respaldo mirando resp.status en un bucle, nunca con un
+// catch (bug real encontrado al fusionar: un 403 puntual escapaba sin
+// capturar y tumbaba resolverCategoria entero en el primer intento, en
+// vez de reintentar). Se traduce de vuelta acá, una sola vez. 429
+// (LimiteMercadoLibreError) nunca se traduce — sigue propagando tal
+// cual, mismo criterio de siempre ("corta TODA la búsqueda").
+async function pedirTolerante<T>(url: string, token?: string): Promise<{ ok: true; data: T } | { ok: false; status: number }> {
+  try {
+    return await pedir<T>(url, token);
+  } catch (e) {
+    if (e instanceof MlNoAutorizadoError) return { ok: false, status: 401 };
+    if (e instanceof MlSinPermisoAppError) return { ok: false, status: 403 };
+    if (e instanceof MlNoDisponibleError) return { ok: false, status: 503 };
+    throw e;
+  }
+}
+
 // Tarea 2.11, punto 2 — helper de ESCRITURA (POST/PUT), JSON o
 // multipart (FormData), mismo AbortSignal.timeout/LimiteMercadoLibreError/
 // BASE_URL que pedir() — una sola fuente de verdad para TODA llamada a
@@ -555,7 +576,7 @@ export async function leerAtributosCategoriaMl(categoryId: string): Promise<unkn
 // resolverCategoria cuando domain_discovery no encuentra nada.
 export async function buscarEnSitioMl(siteId: string, query: string, token: string, limite = 10): Promise<{ categoryId: string }[]> {
   const url = `${BASE_URL}/sites/${encodeURIComponent(siteId)}/search?q=${encodeURIComponent(query)}&limit=${limite}`;
-  const resp = await pedir<{ results?: unknown[] }>(url, token);
+  const resp = await pedirTolerante<{ results?: unknown[] }>(url, token);
   if (!resp.ok) return [];
   const resultados = Array.isArray(resp.data.results) ? resp.data.results : [];
   return resultados
@@ -579,7 +600,7 @@ export async function domainDiscoveryMl(
   limite = 1
 ): Promise<{ ok: boolean; status: number; resultados: ResultadoDomainDiscoveryMl[] }> {
   const url = `${BASE_URL}/sites/${encodeURIComponent(siteId)}/domain_discovery/search?q=${encodeURIComponent(query)}&limit=${limite}`;
-  const resp = await pedir<unknown>(url, token);
+  const resp = await pedirTolerante<unknown>(url, token);
   if (!resp.ok) return { ok: false, status: resp.status, resultados: [] };
   const lista = Array.isArray(resp.data) ? resp.data : [];
   const resultados = lista
