@@ -4,7 +4,19 @@ import { describe, expect, it } from "vitest";
 // `module.exports` cuando `module` existe (mismo patrón que
 // extension/seguridad.js) — alcanza para probarlas con un HTML de
 // ejemplo, sin navegador ni DOM real.
-import { calcularVentasPromedioMes, extraerIdDeUrl, leerDatosIncrustados } from "./mercadolibre.js";
+import {
+  calcularVentasPromedioMes,
+  construirLinkSeguirProducto,
+  construirLinkSeguirTienda,
+  extraerIdDeUrl,
+  leerDatosIncrustados,
+  leerSellerIdDeTienda,
+} from "./mercadolibre.js";
+
+// URL_APP real de extension/config.js (producción) — se repite el
+// literal acá a propósito: si alguien cambia config.js sin querer,
+// esta prueba lo nota.
+const URL_APP = "https://web-production-af270.up.railway.app";
 
 // Issue #174, corrección real: la página de UN producto trae en el
 // mismo JSON los datos de OTROS productos (recomendados). Este HTML
@@ -127,5 +139,53 @@ describe("calcularVentasPromedioMes — issue #174, siempre marcado como estimad
     expect(calcularVentasPromedioMes(null, "2024-01-01T00:00:00.000Z")).toBeNull();
     expect(calcularVentasPromedioMes(10, null)).toBeNull();
     expect(calcularVentasPromedioMes(10, "esto no es una fecha")).toBeNull();
+  });
+});
+
+describe("construirLinkSeguirProducto — issue #174, botón \"Seguir en Zilonix\"", () => {
+  it("un itemId real arma el link con agregar=, encodeURIComponent incluido", () => {
+    expect(construirLinkSeguirProducto("MCO123456789")).toBe(`${URL_APP}/panel/investigacion/seguimiento?agregar=MCO123456789`);
+  });
+
+  it("rechaza cualquier cosa que no sea MCO + dígitos — nunca arma un link con un id sin validar", () => {
+    expect(construirLinkSeguirProducto("MCO-123456789")).toBeNull(); // con guión no pasa el patrón /^MCO\d+$/
+    expect(construirLinkSeguirProducto("MCOABC")).toBeNull();
+    expect(construirLinkSeguirProducto("")).toBeNull();
+    expect(construirLinkSeguirProducto("MCO123; DROP TABLE x")).toBeNull();
+    expect(construirLinkSeguirProducto(null)).toBeNull();
+    expect(construirLinkSeguirProducto(undefined)).toBeNull();
+  });
+});
+
+describe("construirLinkSeguirTienda — issue #174, botón \"Seguir tienda en Zilonix\"", () => {
+  it("un seller_id real arma el link con agregar_tienda=", () => {
+    expect(construirLinkSeguirTienda("123456")).toBe(`${URL_APP}/panel/investigacion/seguimiento?agregar_tienda=123456`);
+  });
+
+  it("rechaza cualquier cosa que no sean solo dígitos — nunca arma un link con un id sin validar", () => {
+    expect(construirLinkSeguirTienda("123abc")).toBeNull();
+    expect(construirLinkSeguirTienda("-123")).toBeNull();
+    expect(construirLinkSeguirTienda("")).toBeNull();
+    expect(construirLinkSeguirTienda("javascript:alert(1)")).toBeNull();
+    expect(construirLinkSeguirTienda(null)).toBeNull();
+    expect(construirLinkSeguirTienda(undefined)).toBeNull();
+  });
+});
+
+describe("leerSellerIdDeTienda — issue #174, best-effort (\"si se puede leer del JSON incrustado\")", () => {
+  it("lee seller_id como string entre comillas", () => {
+    const html = `<script>window.__ALGO__ = {"vendedor":{"seller_id":"555666777"}};</script>`;
+    expect(leerSellerIdDeTienda(html)).toBe("555666777");
+  });
+
+  it("lee user_id numérico sin comillas cuando no hay seller_id", () => {
+    const html = `<script>window.__ALGO__ = {"perfil":{"user_id":888999000}};</script>`;
+    expect(leerSellerIdDeTienda(html)).toBe("888999000");
+  });
+
+  it("sin ningún dato -> null, nunca inventado", () => {
+    expect(leerSellerIdDeTienda("<html><body>sin nada</body></html>")).toBeNull();
+    expect(leerSellerIdDeTienda("")).toBeNull();
+    expect(leerSellerIdDeTienda(null)).toBeNull();
   });
 });
