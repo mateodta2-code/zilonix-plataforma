@@ -312,12 +312,44 @@ export function calcularResultadoInvestigacion(termino: string, publicaciones: P
 
 type ResultadoOfertaCandidato = { publicacion: PublicacionInvestigacion | null; sinPermiso: boolean };
 
+// Candidato de catálogo (PRODUCT, vía buscarProductosCatalogo/obtenerProducto)
+// o de una publicación real (ITEM, vía obtenerItemMl) — ver la nota de
+// Issue #147 más abajo sobre por qué un ITEM no puede tratarse como un
+// PRODUCT. `oferta` solo viene resuelta para ITEM (obtenerItemMl ya la
+// trae del mismo /items/{id}); para PRODUCT se resuelve más adelante con
+// obtenerOfertasProducto, nunca acá.
+type CandidatoInvestigacion = { producto: ProductoCatalogoMl; tipo: "PRODUCT" | "ITEM"; oferta: OfertaMl | null };
+
+async function construirPublicacion(candidato: ProductoCatalogoMl, oferta: OfertaMl, token: string, cacheVendedores: Map<string, ReturnType<typeof obtenerVendedor>>): Promise<PublicacionInvestigacion> {
+  let vendedor: Awaited<ReturnType<typeof obtenerVendedor>> = null;
+  if (oferta.sellerId) {
+    if (!cacheVendedores.has(oferta.sellerId)) cacheVendedores.set(oferta.sellerId, obtenerVendedor(oferta.sellerId, token));
+    vendedor = await cacheVendedores.get(oferta.sellerId)!;
+  }
+
+  return {
+    productId: candidato.id,
+    itemId: oferta.itemId,
+    titulo: candidato.nombre || `Publicación ${oferta.itemId}`,
+    foto: candidato.foto,
+    precio: oferta.precio,
+    moneda: oferta.monedaId,
+    esFull: oferta.esFull,
+    esEnvioGratis: oferta.esEnvioGratis,
+    vendedor: vendedor?.nickname ?? null,
+    esPlatinum: vendedor?.esPlatinum ?? false,
+    link: linkPublicacion(oferta.itemId),
+  };
+}
+
 // Issue #147 — distingue "este candidato no tiene ofertas reales"
 // (publicacion: null, sinPermiso: false — legítimo, pasa seguido) de
 // "Mercado Libre no deja ver las ofertas de este candidato"
 // (sinPermiso: true, MlSinPermisoAppError) — el llamador necesita la
 // diferencia para poder avisar "falta permiso" en vez de "no se
 // encontró nada" cuando TODOS los candidatos caen en el segundo caso.
+// Solo para candidatos PRODUCT — un ITEM ya trae su oferta resuelta
+// desde obtenerItemMl, nunca pasa por acá (ver buscarInvestigacionProducto).
 async function resolverOfertaDeUnCandidato(candidato: ProductoCatalogoMl, token: string, cacheVendedores: Map<string, ReturnType<typeof obtenerVendedor>>): Promise<ResultadoOfertaCandidato> {
   let ofertas: OfertaMl[];
   try {
@@ -328,29 +360,7 @@ async function resolverOfertaDeUnCandidato(candidato: ProductoCatalogoMl, token:
   }
   const oferta = ofertas[0];
   if (!oferta) return { publicacion: null, sinPermiso: false };
-
-  let vendedor: Awaited<ReturnType<typeof obtenerVendedor>> = null;
-  if (oferta.sellerId) {
-    if (!cacheVendedores.has(oferta.sellerId)) cacheVendedores.set(oferta.sellerId, obtenerVendedor(oferta.sellerId, token));
-    vendedor = await cacheVendedores.get(oferta.sellerId)!;
-  }
-
-  return {
-    publicacion: {
-      productId: candidato.id,
-      itemId: oferta.itemId,
-      titulo: candidato.nombre || `Publicación ${oferta.itemId}`,
-      foto: candidato.foto,
-      precio: oferta.precio,
-      moneda: oferta.monedaId,
-      esFull: oferta.esFull,
-      esEnvioGratis: oferta.esEnvioGratis,
-      vendedor: vendedor?.nickname ?? null,
-      esPlatinum: vendedor?.esPlatinum ?? false,
-      link: linkPublicacion(oferta.itemId),
-    },
-    sinPermiso: false,
-  };
+  return { publicacion: await construirPublicacion(candidato, oferta, token, cacheVendedores), sinPermiso: false };
 }
 
 // Orquesta la búsqueda real contra Mercado Libre: valida el término,
@@ -375,11 +385,11 @@ export async function buscarInvestigacionProducto(empresaId: string, terminoCrud
   // Paginación secuencial (cada offset depende de cuántos resultados
   // trajo la página anterior) — enLotes no aplica acá, se deja el
   // bucle simple y directo.
-  const candidatosPorId = new Map<string, ProductoCatalogoMl>();
+  const candidatosPorId = new Map<string, CandidatoInvestigacion>();
   for (let pagina = 0; pagina < MAX_PAGINAS_TEXTO; pagina++) {
     const candidatos = await buscarProductosCatalogo(termino, token, pagina * 20);
     candidatos.forEach((c) => {
-      if (!candidatosPorId.has(c.id)) candidatosPorId.set(c.id, c);
+      if (!candidatosPorId.has(c.id)) candidatosPorId.set(c.id, { producto: c, tipo: "PRODUCT", oferta: null });
     });
     if (candidatos.length < 20) break;
   }
@@ -390,22 +400,35 @@ export async function buscarInvestigacionProducto(empresaId: string, terminoCrud
   // daba 404 siempre) y USER_PRODUCT (id "MCOU...", no es ni catálogo
   // ni una publicación consultable igual — se ignora a propósito, se
   // cuenta solo para no perder de vista cuántos se descartaron).
+  // USER_PRODUCT se filtra (y cuenta) ANTES del tope de
+  // TOPE_IDS_CATEGORIA_A_COMPLETAR — si se filtrara después, un
+  // USER_PRODUCT ocuparía en el slice un cupo que le correspondía a un
+  // PRODUCT/ITEM de verdad consultable.
   let destacadosIgnorados = 0;
   const categoria = await resolverCategoria(termino, token);
   if (categoria) {
     const destacados = await obtenerMejoresProductosCategoria(categoria.categoryId, token);
-    const porCompletar = destacados.filter((d) => !candidatosPorId.has(d.id)).slice(0, TOPE_IDS_CATEGORIA_A_COMPLETAR);
-    await enLotes(porCompletar, CONCURRENCIA, async (destacado) => {
-      if (destacado.tipo === "USER_PRODUCT") {
+    const consultables = destacados.filter((d) => {
+      if (candidatosPorId.has(d.id)) return false;
+      if (d.tipo === "USER_PRODUCT") {
         destacadosIgnorados++;
+        return false;
+      }
+      return true;
+    });
+    const porCompletar = consultables.slice(0, TOPE_IDS_CATEGORIA_A_COMPLETAR);
+    await enLotes(porCompletar, CONCURRENCIA, async (destacado) => {
+      if (destacado.tipo === "ITEM") {
+        const item = await obtenerItemMl(destacado.id, token);
+        if (item) candidatosPorId.set(destacado.id, { producto: item.producto, tipo: "ITEM", oferta: item.oferta });
         return;
       }
-      const info = destacado.tipo === "ITEM" ? await obtenerItemMl(destacado.id, token) : await obtenerProducto(destacado.id, token);
-      if (info) candidatosPorId.set(destacado.id, info);
+      const producto = await obtenerProducto(destacado.id, token);
+      if (producto) candidatosPorId.set(destacado.id, { producto, tipo: "PRODUCT", oferta: null });
     });
   }
   if (destacadosIgnorados > 0) {
-    console.warn(`[lib/ml/investigacion] "${termino}": ${destacadosIgnorados} destacado(s) USER_PRODUCT ignorado(s) (no son catálogo ni publicación consultable igual).`);
+    console.warn(`[lib/ml/investigacion] ${destacadosIgnorados} destacado(s) USER_PRODUCT ignorado(s)`);
   }
 
   if (!candidatosPorId.size) {
@@ -417,7 +440,7 @@ export async function buscarInvestigacionProducto(empresaId: string, terminoCrud
 
   const palabrasBusqueda = palabrasDistintivas(termino);
   const relevantes = [...candidatosPorId.values()]
-    .filter((c) => c.nombre && compartePalabra(palabrasDistintivas(c.nombre), palabrasBusqueda))
+    .filter((c) => c.producto.nombre && compartePalabra(palabrasDistintivas(c.producto.nombre), palabrasBusqueda))
     .slice(0, TOPE_CANDIDATOS_RELEVANTES);
 
   if (!relevantes.length) {
@@ -429,7 +452,18 @@ export async function buscarInvestigacionProducto(empresaId: string, terminoCrud
   let sinOfertas = 0;
   let sinPermisoOfertas = 0;
   await enLotes(relevantes, CONCURRENCIA, async (candidato) => {
-    const { publicacion, sinPermiso } = await resolverOfertaDeUnCandidato(candidato, token, cacheVendedores);
+    // Un ITEM ya trae su oferta resuelta desde obtenerItemMl (mismo
+    // /items/{id}) — nunca pasa por obtenerOfertasProducto, que espera
+    // un id de PRODUCTO de catálogo y le daría 404 siempre.
+    if (candidato.tipo === "ITEM") {
+      if (!candidato.oferta) {
+        sinOfertas++;
+        return;
+      }
+      publicaciones.push(await construirPublicacion(candidato.producto, candidato.oferta, token, cacheVendedores));
+      return;
+    }
+    const { publicacion, sinPermiso } = await resolverOfertaDeUnCandidato(candidato.producto, token, cacheVendedores);
     if (publicacion) publicaciones.push(publicacion);
     else if (sinPermiso) sinPermisoOfertas++;
     else sinOfertas++;

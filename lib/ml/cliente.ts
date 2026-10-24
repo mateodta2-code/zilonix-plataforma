@@ -149,7 +149,9 @@ export async function buscarProductosCatalogo(termino: string, token: string, of
   const resp = await pedir<{ results?: unknown[] }>(url, token);
   if (!resp.ok) {
     if (resp.status === 404) return [];
-    throw new Error(`Mercado Libre respondió ${resp.status} al buscar "${termino}" en el catálogo.`);
+    // Sin el término acá — igual que endpointSinQuery(), nunca lo que la
+    // persona escribió adentro de un mensaje de error/log.
+    throw new Error(`Mercado Libre respondió ${resp.status} al buscar en el catálogo.`);
   }
   const resultados = Array.isArray(resp.data.results) ? resp.data.results : [];
   return resultados
@@ -267,22 +269,55 @@ export async function obtenerProducto(productId: string, token: string): Promise
   }
 }
 
+export type ItemMl = { producto: ProductoCatalogoMl; oferta: OfertaMl | null };
+
 // Issue #147 — hermana de obtenerProducto, pero para un id de tipo
 // ITEM (una publicación real, GET /items/{id}) en vez de un id de
 // PRODUCTO de catálogo (GET /products/{id}) — los dos endpoints NO son
 // intercambiables (confirmado en vivo: /products/{idDeItem} da 404).
 // Mismo criterio de tolerancia que obtenerProducto.
-export async function obtenerItemMl(itemId: string, token: string): Promise<ProductoCatalogoMl | null> {
+//
+// Issue #147, bug real: un destacado ITEM se mandaba a
+// obtenerOfertasProducto() (GET /products/{id}/items), que espera un id
+// de PRODUCTO de catálogo — un ITEM nunca tiene esa ruta, 404 siempre,
+// así que el highlight nunca producía ninguna publicación. Un ITEM es
+// la publicación en sí: la oferta sale de este mismo /items/{id}, nunca
+// de obtenerOfertasProducto — por eso esta función ya devuelve la
+// OfertaMl armada (misma validación de seller_id que obtenerOfertasProducto),
+// y el llamador (investigacion.ts) nunca llama a obtenerOfertasProducto
+// para un candidato de tipo ITEM.
+export async function obtenerItemMl(itemId: string, token: string): Promise<ItemMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail`;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping`;
   try {
-    const resp = await pedir<{ title?: unknown; thumbnail?: unknown }>(url, token);
+    const resp = await pedir<{
+      title?: unknown;
+      thumbnail?: unknown;
+      price?: unknown;
+      currency_id?: unknown;
+      seller_id?: unknown;
+      shipping?: { logistic_type?: unknown; free_shipping?: unknown };
+    }>(url, token);
     if (!resp.ok) return null;
-    return {
+    const producto: ProductoCatalogoMl = {
       id: itemId,
       nombre: typeof resp.data.title === "string" ? resp.data.title : null,
       foto: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
     };
+    const precio = Number(resp.data.price);
+    let oferta: OfertaMl | null = null;
+    if (Number.isFinite(precio) && precio > 0) {
+      const sellerIdCrudo = resp.data.seller_id != null ? String(resp.data.seller_id) : null;
+      oferta = {
+        itemId,
+        precio,
+        monedaId: typeof resp.data.currency_id === "string" ? resp.data.currency_id : "COP",
+        sellerId: sellerIdCrudo && PATRON_ID_VENDEDOR.test(sellerIdCrudo) ? sellerIdCrudo : null,
+        esFull: resp.data.shipping?.logistic_type === "fulfillment",
+        esEnvioGratis: typeof resp.data.shipping?.free_shipping === "boolean" ? resp.data.shipping.free_shipping : null,
+      };
+    }
+    return { producto, oferta };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
     throw e;

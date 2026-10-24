@@ -324,8 +324,13 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
   // Issue #147, punto 4 — highlights trae PRODUCT (catálogo, vía
   // obtenerProducto), ITEM (publicación real, vía obtenerItemMl —
   // endpoint DISTINTO) y USER_PRODUCT (se ignora, nunca se manda a
-  // ningún endpoint). Antes TODOS se trataban como PRODUCT.
-  it("highlights con los 3 tipos: PRODUCT va a obtenerProducto, ITEM a obtenerItemMl, USER_PRODUCT se ignora", async () => {
+  // ningún endpoint). Antes TODOS se trataban como PRODUCT, y un ITEM
+  // se mandaba a obtenerOfertasProducto (GET /products/{id}/items),
+  // que le da 404 siempre — un ITEM nunca producía ninguna
+  // publicación. Ahora obtenerItemMl ya trae la oferta armada desde el
+  // mismo /items/{id}: obtenerOfertasProducto se llama SOLO para el
+  // PRODUCT, y el ITEM igual aparece en el resultado.
+  it("highlights con los 3 tipos: PRODUCT va a obtenerProducto+obtenerOfertasProducto, ITEM a obtenerItemMl (con su propia oferta), USER_PRODUCT se ignora", async () => {
     vi.mocked(buscarProductosCatalogo).mockResolvedValue([]); // sin candidatos de texto, solo los de categoría
     vi.mocked(resolverCategoria).mockResolvedValue({ categoryId: "CAT1" });
     vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue([
@@ -334,7 +339,10 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
       { id: "MCOU3", tipo: "USER_PRODUCT" },
     ]);
     vi.mocked(obtenerProducto).mockResolvedValue({ id: "MCO1", nombre: "Reloj digital de catálogo", foto: null });
-    vi.mocked(obtenerItemMl).mockResolvedValue({ id: "MCO2", nombre: "Reloj digital publicación", foto: null });
+    vi.mocked(obtenerItemMl).mockResolvedValue({
+      producto: { id: "MCO2", nombre: "Reloj digital publicación", foto: null },
+      oferta: { itemId: "MCO222", precio: 35_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null },
+    });
     vi.mocked(obtenerOfertasProducto).mockResolvedValue([
       { itemId: "MCO111", precio: 20_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null },
     ]);
@@ -345,8 +353,14 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     expect(obtenerItemMl).toHaveBeenCalledWith("MCO2", "token-falso");
     expect(obtenerProducto).not.toHaveBeenCalledWith("MCOU3", expect.anything());
     expect(obtenerItemMl).not.toHaveBeenCalledWith("MCOU3", expect.anything());
-    // Los 2 candidatos resueltos (PRODUCT e ITEM) sí entran a pedir ofertas.
-    expect(obtenerOfertasProducto).toHaveBeenCalledTimes(2);
+    // obtenerOfertasProducto SOLO para el PRODUCT (MCO1) — el ITEM (MCO2)
+    // nunca pasa por ahí, ya trae su oferta resuelta.
+    expect(obtenerOfertasProducto).toHaveBeenCalledTimes(1);
+    expect(obtenerOfertasProducto).toHaveBeenCalledWith("MCO1", "token-falso");
+    // El ITEM igual aparece en el resultado final, construido directo
+    // de la oferta que trajo obtenerItemMl.
+    expect(resultado.publicacionesEncontradas).toBe(2);
+    expect(resultado.publicaciones.map((p) => p.itemId).sort()).toEqual(["MCO111", "MCO222"]);
   });
 
   it("límite de búsquedas por minuto por empresa: la búsqueda número 11 en la misma ventana se bloquea", async () => {
