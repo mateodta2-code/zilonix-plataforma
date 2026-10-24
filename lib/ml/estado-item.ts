@@ -18,6 +18,11 @@ export async function cambiarEstadoItemMl(empresaId: string, cuentaId: string, i
         "Mercado Libre todavía está revisando esta publicación (recién creada) y no deja apagarla ni encenderla hasta que termine esa revisión. Intenta de nuevo en un rato."
       );
     }
+    // status === 0 = tiempo agotado o falla de red — textoCrudo queda
+    // vacío, nunca un HTTP real que mostrar.
+    if (status === 0) {
+      throw new Error("Mercado Libre no respondió a tiempo; revisá en Mercado Libre si el cambio se aplicó antes de reintentar.");
+    }
     throw new Error(`Mercado Libre rechazó el cambio (HTTP ${status}): ${textoCrudo.slice(0, 400)}`);
   }
   return { status: data?.status as string };

@@ -9,6 +9,13 @@ function jsonRes(status: number, data: unknown): Response {
   return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(data) } as Response;
 }
 
+// Tarea 2.11, punto 3 — mismo helper que clip.test.ts/publicar.test.ts
+// (cuentaIdExterna tiene que cumplir /^\d+$/, el patrón real de
+// cliente.ts — un randomUUID() nunca lo pasa).
+function cuentaIdExternaDePrueba(): string {
+  return `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+}
+
 describe("cambiarEstadoItemMl (tarea 2.11, §11)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -20,10 +27,7 @@ describe("cambiarEstadoItemMl (tarea 2.11, §11)", () => {
         .insert(cuentasMl)
         .values({
           empresaId,
-          // Tarea 2.11, punto 5 — aleatorio en vez del literal fijo
-          // "ml-user-ei" (que además nunca pasaría /^\d+$/, el patrón
-          // real de cuentaIdExterna en cliente.ts).
-          cuentaIdExterna: randomUUID(),
+          cuentaIdExterna: cuentaIdExternaDePrueba(),
           nickname: "VENDEDOR",
           accessTokenCifrado: cifrarToken("access"),
           refreshTokenCifrado: cifrarToken("refresh"),
@@ -44,7 +48,7 @@ describe("cambiarEstadoItemMl (tarea 2.11, §11)", () => {
         .insert(cuentasMl)
         .values({
           empresaId,
-          cuentaIdExterna: randomUUID(),
+          cuentaIdExterna: cuentaIdExternaDePrueba(),
           nickname: "VENDEDOR",
           accessTokenCifrado: cifrarToken("access"),
           refreshTokenCifrado: cifrarToken("refresh"),
@@ -67,7 +71,7 @@ describe("cambiarEstadoItemMl (tarea 2.11, §11)", () => {
         .insert(cuentasMl)
         .values({
           empresaId,
-          cuentaIdExterna: randomUUID(),
+          cuentaIdExterna: cuentaIdExternaDePrueba(),
           nickname: "VENDEDOR",
           accessTokenCifrado: cifrarToken("access"),
           refreshTokenCifrado: cifrarToken("refresh"),

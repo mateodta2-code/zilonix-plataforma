@@ -229,4 +229,38 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
     const r = await domainDiscoveryMl("MCO", "reloj digital", "token");
     expect(r).toEqual({ ok: false, status: 403, resultados: [] });
   });
+
+  // Bug real: escribir() usaba el TIMEOUT_MS de 8s de LECTURA para toda
+  // escritura — corta un POST /items (o una subida de clip) antes de
+  // que Mercado Libre termine, con riesgo real de ítem duplicado al
+  // reintentar. crearItemMl usa TIMEOUT_ESCRITURA_MS (30s); subirClipMl
+  // (video de hasta 280MB) usa TIMEOUT_SUBIDA_CLIP_MS (300s) — ninguno
+  // de los dos usa el de 8s de pedir().
+  it("crearItemMl: usa el timeout de escritura (30s), no el de lectura (8s)", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "MCOITEM1" }, 201)));
+    await crearItemMl("token", { category_id: "MCO1234" });
+    expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+    timeoutSpy.mockRestore();
+  });
+
+  it("subirClipMl: usa el timeout de subida de clip (300s), bien más largo que el de escritura normal", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ status: "accepted" })));
+    await subirClipMl("MCO111", "token", new FormData());
+    expect(timeoutSpy).toHaveBeenCalledWith(300_000);
+    timeoutSpy.mockRestore();
+  });
+
+  it("subirClipMl: tiempo agotado / falla de red devuelve status:0 (nunca una excepción sin capturar), igual que crearItemMl", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      })
+    );
+    const r = await subirClipMl("MCO111", "token", new FormData());
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(0);
+  });
 });

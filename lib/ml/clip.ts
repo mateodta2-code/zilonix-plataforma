@@ -69,6 +69,11 @@ export async function subirClipItem(token: string, itemId: string, buffer: Buffe
         "Mercado Libre no deja subir Clips en esta cuenta todavía — necesita tener un color de reputación asignado (se gana con ventas reales), y una cuenta recién conectada sin historial de ventas no lo tiene. No es un error nuestro; hay que esperar a que la cuenta tenga reputación."
       );
     }
+    // status === 0 = tiempo agotado o falla de red subiendo el video —
+    // textoCrudo queda vacío, nunca un HTTP real que mostrar.
+    if (status === 0) {
+      throw new Error("Mercado Libre no respondió a tiempo subiendo el video; revisá en Mercado Libre si el clip se subió antes de reintentar.");
+    }
     throw new Error(`Mercado Libre rechazó el video (HTTP ${status}): ${textoCrudo.slice(0, 800)}`);
   }
   let data: { status?: string; clip_uuid?: string; site_ids?: string[] };

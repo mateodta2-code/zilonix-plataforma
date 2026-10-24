@@ -36,7 +36,20 @@ export const PATRON_ID_VENDEDOR = /^\d+$/;
 // Mercado Libre (red lenta, el proveedor caído) dejaba la búsqueda
 // cargando para siempre; con el AbortSignal, a los 8s se corta y se
 // trata como una respuesta no-ok (nunca una excepción no capturada).
+// Solo para LECTURA (pedir()) — una escritura necesita más tiempo, ver
+// TIMEOUT_ESCRITURA_MS/TIMEOUT_SUBIDA_CLIP_MS más abajo.
 const TIMEOUT_MS = 8_000;
+
+// Bug real: escribir() usaba el mismo TIMEOUT_MS de 8s de pedir() para
+// TODA escritura — eso corta un POST /items (crear publicación) antes
+// de que Mercado Libre termine de procesarlo, y la llamada se trata
+// como fallida aunque el ítem SÍ se haya creado del otro lado (riesgo
+// real de publicación duplicada al reintentar). crearItemMl/
+// actualizarItemMl/agregarDescripcionItemMl usan este tiempo más
+// generoso; subirClipMl (video de hasta 280MB) usa
+// TIMEOUT_SUBIDA_CLIP_MS, bastante más largo todavía.
+const TIMEOUT_ESCRITURA_MS = 30_000;
+const TIMEOUT_SUBIDA_CLIP_MS = 300_000;
 
 export class LimiteMercadoLibreError extends Error {
   constructor() {
@@ -87,7 +100,8 @@ async function escribir<T>(
   url: string,
   token: string,
   method: "POST" | "PUT",
-  body: Record<string, unknown> | FormData
+  body: Record<string, unknown> | FormData,
+  timeoutMs: number = TIMEOUT_ESCRITURA_MS
 ): Promise<{ ok: boolean; status: number; data: T | null; textoCrudo: string }> {
   const esFormData = body instanceof FormData;
   let res: Response;
@@ -96,7 +110,7 @@ async function escribir<T>(
       method,
       headers: esFormData ? { Authorization: `Bearer ${token}` } : { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: esFormData ? body : JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     return { ok: false, status: 0, data: null, textoCrudo: "" };
@@ -366,10 +380,12 @@ export async function leerCuentaMl(cuentaIdExterna: string, token: string): Prom
 export type RespuestaEscrituraMl = { ok: boolean; status: number; data: Record<string, unknown> | null; textoCrudo: string };
 
 // POST /items — crear una publicación. Sin id que validar (todavía no
-// existe ninguno — el category_id del body ya se validó en
-// leerCategoriaMl/domainDiscoveryMl, antes de llegar hasta acá).
+// existe ninguno — el category_id del body ya se validó antes de
+// llegar hasta acá, en leerAtributosCategoriaMl, que publicar.ts llama
+// justo antes de armar este body — domainDiscoveryMl solo descubre un
+// category_id candidato, no lo valida).
 export async function crearItemMl(token: string, body: Record<string, unknown>): Promise<RespuestaEscrituraMl> {
-  return escribir<Record<string, unknown>>(`${BASE_URL}/items`, token, "POST", body);
+  return escribir<Record<string, unknown>>(`${BASE_URL}/items`, token, "POST", body, TIMEOUT_ESCRITURA_MS);
 }
 
 // PUT /items/{id} — el mismo endpoint sirve para pausar/activar
@@ -378,14 +394,14 @@ export async function crearItemMl(token: string, body: Record<string, unknown>):
 // llama.
 export async function actualizarItemMl(itemId: string, token: string, cambios: Record<string, unknown>): Promise<RespuestaEscrituraMl> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
-  return escribir<Record<string, unknown>>(`${BASE_URL}/items/${encodeURIComponent(itemId)}`, token, "PUT", cambios);
+  return escribir<Record<string, unknown>>(`${BASE_URL}/items/${encodeURIComponent(itemId)}`, token, "PUT", cambios, TIMEOUT_ESCRITURA_MS);
 }
 
 // POST /items/{id}/description — endpoint SEPARADO del body de /items
 // (confirmado: la descripción nunca va en el POST de creación).
 export async function agregarDescripcionItemMl(itemId: string, token: string, texto: string): Promise<{ ok: boolean; status: number }> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
-  const r = await escribir(`${BASE_URL}/items/${encodeURIComponent(itemId)}/description`, token, "POST", { plain_text: texto });
+  const r = await escribir(`${BASE_URL}/items/${encodeURIComponent(itemId)}/description`, token, "POST", { plain_text: texto }, TIMEOUT_ESCRITURA_MS);
   return { ok: r.ok, status: r.status };
 }
 
@@ -418,8 +434,10 @@ export async function leerItemBasicoMl(itemId: string, token: string): Promise<{
 
 // POST /marketplace/items/{id}/clips/upload — multipart/form-data,
 // contrato real documentado por Mercado Libre ("Working with Clips").
+// Video de hasta 280MB — usa TIMEOUT_SUBIDA_CLIP_MS, no el de
+// escritura normal.
 export async function subirClipMl(itemId: string, token: string, form: FormData): Promise<{ ok: boolean; status: number; textoCrudo: string }> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
-  const r = await escribir(`${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips/upload`, token, "POST", form);
+  const r = await escribir(`${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips/upload`, token, "POST", form, TIMEOUT_SUBIDA_CLIP_MS);
   return { ok: r.ok, status: r.status, textoCrudo: r.textoCrudo };
 }

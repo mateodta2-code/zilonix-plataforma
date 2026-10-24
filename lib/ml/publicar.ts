@@ -383,7 +383,15 @@ async function publicarFamiliaUserProducts(
 
     const r = await crearItemMl(token, body);
     if (!r.ok) {
-      items.push({ valores: c.valores, sku: c.sku, ok: false, error: r.textoCrudo.slice(0, 2000) });
+      // r.status === 0 = tiempo agotado o falla de red en escribir() —
+      // r.textoCrudo queda vacío (nunca llegó respuesta), y el ítem
+      // puede haberse creado del otro lado aunque el POST se haya
+      // cortado de este — reintentar a ciegas arriesga duplicarlo.
+      const error =
+        r.status === 0
+          ? "Mercado Libre no respondió a tiempo; revisá en Mercado Libre si la publicación se creó antes de reintentar."
+          : r.textoCrudo.slice(0, 2000);
+      items.push({ valores: c.valores, sku: c.sku, ok: false, error });
       continue;
     }
     const data = r.data!;
@@ -553,7 +561,9 @@ export async function publicarProductoEnCuenta(
     }
     const errorFinal = faltanDimensionesPaquete(r.textoCrudo)
       ? "Faltan las dimensiones del paquete (peso, largo, ancho y/o alto) — Mercado Libre las exige para calcular el envío. Complétalas en el formulario y vuelve a intentar."
-      : r.textoCrudo.slice(0, 2000);
+      : r.status === 0
+        ? "Mercado Libre no respondió a tiempo; revisá en Mercado Libre si la publicación se creó antes de reintentar."
+        : r.textoCrudo.slice(0, 2000);
     return { cuentaMlId: cuenta.id, ok: false, categoria: categoryName, error: errorFinal, bodyEnviado: body };
   }
 
