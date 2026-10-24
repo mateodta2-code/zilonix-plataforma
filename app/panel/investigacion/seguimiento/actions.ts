@@ -2,6 +2,7 @@
 
 import { redirect, RedirectType } from "next/navigation";
 import { cookies } from "next/headers";
+import type { seguimientosMl } from "@/db/schema";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
@@ -13,6 +14,24 @@ async function empresaActivaDe(usuarioId: string) {
   const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) throw new Error("No se encontró tu empresa activa.");
   return empresa;
+}
+
+// Issue #204 — bug real en staging: la fila quedaba en guiones hasta
+// que corría el cron (cada hora) — se dispara la primera revisión en
+// el MISMO request que agrega, para que la fila ya tenga datos reales
+// cuando esta acción redirige a la lista. Import DINÁMICO: igual que
+// app/api/trabajos/seguimiento/route.ts, lib/trabajos/revisionDiariaSeguimiento.ts
+// importa (transitivo) db/trabajador-seguimiento-context.ts, que
+// revienta al cargarse sin DATABASE_URL_SEGUIMIENTO — un import
+// estático acá arriba haría que page.tsx (que importa este archivo)
+// reviente el build de Next.js si esa variable todavía no existe en el
+// ambiente. Nunca lanza (ver revisarAhoraUnSeguimiento) — si falla, se
+// devuelve el mensaje para avisar, pero el seguimiento ya agregado
+// nunca se deshace.
+async function dispararPrimeraRevision(seguimiento: typeof seguimientosMl.$inferSelect): Promise<string | null> {
+  const { revisarAhoraUnSeguimiento } = await import("@/lib/trabajos/revisionDiariaSeguimiento");
+  const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+  return resultado.ok ? null : resultado.error;
 }
 
 // Issue #175 — mismo permiso que "Investigación" para ver (inventario,
@@ -32,8 +51,9 @@ export async function agregarSeguimientoAction(formData: FormData): Promise<void
     throw new Error("Elegí el tipo y pegá un link o id de Mercado Libre.");
   }
 
+  let seguimiento: typeof seguimientosMl.$inferSelect;
   try {
-    await agregarSeguimiento(empresa.id, usuario.id, { tipo, link, esCompetidor });
+    seguimiento = await agregarSeguimiento(empresa.id, usuario.id, { tipo, link, esCompetidor });
   } catch (error) {
     // Mensaje legible en vez de la pantalla de error genérica de
     // Next.js — los 3 tipos reales que agregarSeguimiento puede
@@ -42,7 +62,12 @@ export async function agregarSeguimientoAction(formData: FormData): Promise<void
     redirect(`/panel/investigacion/seguimiento?error=${encodeURIComponent(mensaje)}`);
   }
 
-  redirect("/panel/investigacion/seguimiento?agregado=1");
+  const errorPrimeraRevision = await dispararPrimeraRevision(seguimiento);
+  redirect(
+    errorPrimeraRevision
+      ? `/panel/investigacion/seguimiento?agregado=1&primeraRevisionError=${encodeURIComponent(errorPrimeraRevision)}`
+      : "/panel/investigacion/seguimiento?agregado=1"
+  );
 }
 
 // Issue #182 — la extensión (0.3.0, "Seguir en Zilonix") abre esta
@@ -69,14 +94,21 @@ export async function procesarAgregarPorQuery(empresaId: string, usuarioId: stri
     redirect("/panel/investigacion/seguimiento?yaExistia=1", RedirectType.replace);
   }
 
+  let seguimiento: typeof seguimientosMl.$inferSelect;
   try {
-    await agregarSeguimiento(empresaId, usuarioId, { tipo: datos.tipo, link: datos.mlIdExterno, esCompetidor: false });
+    seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: datos.tipo, link: datos.mlIdExterno, esCompetidor: false });
   } catch (error) {
     const mensaje = error instanceof Error ? error.message : "No se pudo agregar el seguimiento.";
     redirect(`/panel/investigacion/seguimiento?error=${encodeURIComponent(mensaje)}`, RedirectType.replace);
   }
 
-  redirect("/panel/investigacion/seguimiento?agregado=1", RedirectType.replace);
+  const errorPrimeraRevision = await dispararPrimeraRevision(seguimiento);
+  redirect(
+    errorPrimeraRevision
+      ? `/panel/investigacion/seguimiento?agregado=1&primeraRevisionError=${encodeURIComponent(errorPrimeraRevision)}`
+      : "/panel/investigacion/seguimiento?agregado=1",
+    RedirectType.replace
+  );
 }
 
 export async function eliminarSeguimientoAction(formData: FormData): Promise<void> {
