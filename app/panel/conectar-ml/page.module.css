@@ -1,10 +1,19 @@
+/* Bug real en staging (tema claro): este aviso cae justo debajo del
+   encabezado, directo sobre la franja oscura del degradado de fondo
+   (--fondo-app-*, globals.css) — su fondo (--acento-suave) es un azul
+   10% de opacidad, se ve el degradado de atrás igual. --texto normal
+   es negro en claro (pensado para fondo blanco) — ilegible ahí. Mismo
+   token -zona-oscura que EncabezadoPagina.module.css (valor fijo,
+   igual en los dos temas). .avisoError NO lleva este cambio: su fondo
+   (color-mix con --superficie, un color OPACO) tapa el degradado
+   entero, igual que una tarjeta — --texto normal ahí es correcto. */
 .avisoExito {
   padding: 10px 14px;
   background: var(--acento-suave);
   border: 1px solid var(--exito);
   border-radius: var(--radio-boton);
   font-size: 13.5px;
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
 }
 
 .avisoError {
