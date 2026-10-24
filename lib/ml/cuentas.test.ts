@@ -1,9 +1,19 @@
 import { randomUUID } from "crypto";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, empresas } from "@/db/schema";
-import { cifrarToken } from "@/lib/cifrado";
-import { CandadoDeRenovacionError, CuentaDesconectadaError, CuentaMlNoEncontradaError, obtenerAccessTokenVigente, RenovacionTokenFallidaError } from "./cuentas";
+import { cifrarToken, descifrarToken } from "@/lib/cifrado";
+import type { TokensMl } from "@/lib/ml/oauth";
+import {
+  CandadoDeRenovacionError,
+  CuentaDesconectadaError,
+  CuentaMlEnOtraEmpresaError,
+  CuentaMlNoEncontradaError,
+  guardarCuentaConectada,
+  obtenerAccessTokenVigente,
+  RenovacionTokenFallidaError,
+} from "./cuentas";
 
 async function crearEmpresa(prefijo: string) {
   const empresaId = randomUUID();
@@ -11,14 +21,23 @@ async function crearEmpresa(prefijo: string) {
   return empresaId;
 }
 
-async function crearCuenta(empresaId: string, datos: Partial<{ desconectadaTs: Date | null; tokenExpiraTs: Date; renovandoTs: Date | null }> = {}) {
+// Mismo helper numérico que clip.test.ts/publicar.test.ts/estado-item.test.ts
+// (lib/ml/) — cuenta_id_externa real de Mercado Libre es solo dígitos.
+function cuentaIdExternaDePrueba(): string {
+  return `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+}
+
+async function crearCuenta(
+  empresaId: string,
+  datos: Partial<{ cuentaIdExterna: string; nickname: string; desconectadaTs: Date | null; tokenExpiraTs: Date; renovandoTs: Date | null }> = {}
+) {
   const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
     tx
       .insert(cuentasMl)
       .values({
         empresaId,
-        cuentaIdExterna: `ml-user-${randomUUID().slice(0, 8)}`,
-        nickname: "VENDEDOR",
+        cuentaIdExterna: datos.cuentaIdExterna ?? `ml-user-${randomUUID().slice(0, 8)}`,
+        nickname: datos.nickname ?? "VENDEDOR",
         accessTokenCifrado: cifrarToken("access"),
         refreshTokenCifrado: cifrarToken("refresh"),
         tokenExpiraTs: datos.tokenExpiraTs ?? new Date(Date.now() + 3600_000),
@@ -28,6 +47,10 @@ async function crearCuenta(empresaId: string, datos: Partial<{ desconectadaTs: D
       .returning({ id: cuentasMl.id })
   );
   return cuenta.id;
+}
+
+function tokensDePrueba(cuentaIdExterna: string, sufijo: string): TokensMl {
+  return { accessToken: `access-${sufijo}`, refreshToken: `refresh-${sufijo}`, expiraEnSegundos: 21_600, cuentaIdExterna };
 }
 
 // Issue #147, punto 2 — cuentas.ts L51/L52/L66/L86 lanzaban Error
@@ -95,5 +118,86 @@ describe("obtenerAccessTokenVigente — errores tipados (issue #147)", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(obtenerAccessTokenVigente(empresaId, cuentaId)).rejects.toThrow(CandadoDeRenovacionError);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// Issue #151, bug real en vivo (23-oct, cuenta ZILONIX en staging):
+// guardarCuentaConectada hacía un INSERT simple y chocaba con el
+// índice único global sobre cuenta_id_externa en cuanto esa cuenta ya
+// tenía una fila (desconectada, o de otra empresa) — el error llegaba
+// crudo a /panel/conectar-ml, y para entonces app/api/ml/callback/
+// route.ts ya había quemado un refresh token nuevo en Mercado Libre
+// que se perdía sin guardar.
+describe("guardarCuentaConectada — reconectar sin chocar con el índice único (issue #151)", () => {
+  it("cuenta_id_externa nunca vista: inserta una fila nueva", async () => {
+    const empresaId = await crearEmpresa("GUARDAR-NUEVA");
+    const cuentaIdExterna = cuentaIdExternaDePrueba();
+
+    const resultado = await guardarCuentaConectada(empresaId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_NUEVO",
+      tokens: tokensDePrueba(cuentaIdExterna, "nueva"),
+    });
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, resultado.id)));
+    expect(fila.cuentaIdExterna).toBe(cuentaIdExterna);
+    expect(fila.empresaId).toBe(empresaId);
+    expect(fila.desconectadaTs).toBeNull();
+  });
+
+  it("reconectar una cuenta desconectada de la MISMA empresa: reactiva la misma fila (mismo id), tokens nuevos, desconectada_ts null", async () => {
+    const empresaId = await crearEmpresa("RECONECTAR-MISMA");
+    const cuentaIdExterna = cuentaIdExternaDePrueba();
+    const cuentaIdOriginal = await crearCuenta(empresaId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_VIEJO",
+      desconectadaTs: new Date(),
+      renovandoTs: new Date(), // candado colgado de una renovación vieja — tiene que quedar limpio
+    });
+
+    const resultado = await guardarCuentaConectada(empresaId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_RECONECTADO",
+      tokens: tokensDePrueba(cuentaIdExterna, "reconectado"),
+    });
+
+    // Misma fila, nunca una nueva — es justo lo que el INSERT simple
+    // de antes no podía hacer (chocaba con el índice único).
+    expect(resultado.id).toBe(cuentaIdOriginal);
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, cuentaIdOriginal)));
+    expect(fila.desconectadaTs).toBeNull();
+    expect(fila.renovandoTs).toBeNull();
+    expect(fila.nickname).toBe("VENDEDOR_RECONECTADO");
+    expect(descifrarToken(fila.accessTokenCifrado)).toBe("access-reconectado");
+    expect(descifrarToken(fila.refreshTokenCifrado)).toBe("refresh-reconectado");
+
+    // Ninguna fila extra quedó para ese cuenta_id_externa.
+    const todas = await dbComoEmpresa(empresaId, (tx) => tx.select({ id: cuentasMl.id }).from(cuentasMl).where(eq(cuentasMl.cuentaIdExterna, cuentaIdExterna)));
+    expect(todas).toHaveLength(1);
+  });
+
+  it("cuenta_id_externa ya conectada a OTRA empresa: CuentaMlEnOtraEmpresaError, no escribe nada", async () => {
+    const empresaAId = await crearEmpresa("OTRA-A");
+    const empresaBId = await crearEmpresa("OTRA-B");
+    const cuentaIdExterna = cuentaIdExternaDePrueba();
+    const cuentaIdOriginal = await crearCuenta(empresaAId, { cuentaIdExterna, nickname: "VENDEDOR_A" });
+
+    await expect(
+      guardarCuentaConectada(empresaBId, {
+        cuentaIdExterna,
+        nickname: "INTENTO_DESDE_B",
+        tokens: tokensDePrueba(cuentaIdExterna, "robo"),
+      })
+    ).rejects.toThrow(CuentaMlEnOtraEmpresaError);
+
+    // La fila real de la empresa A no cambió nada.
+    const [filaA] = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, cuentaIdOriginal)));
+    expect(filaA.nickname).toBe("VENDEDOR_A");
+    expect(descifrarToken(filaA.accessTokenCifrado)).toBe("access");
+
+    // Y la empresa B nunca llegó a insertar ninguna fila con ese cuenta_id_externa.
+    const filasB = await dbComoEmpresa(empresaBId, (tx) => tx.select({ id: cuentasMl.id }).from(cuentasMl).where(eq(cuentasMl.cuentaIdExterna, cuentaIdExterna)));
+    expect(filasB).toHaveLength(0);
   });
 });

@@ -14,6 +14,22 @@ import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "./page.module.css";
 
+// Issue #151 — bug real: antes esta pantalla mostraba `searchParams.error`
+// tal cual, y /api/ml/callback le pasaba ahí el `error.message` crudo de
+// cualquier falla (texto de Mercado Libre o de Postgres, hasta 300
+// caracteres según lib/ml/oauth.ts). Ahora el Route Handler solo manda
+// uno de estos códigos fijos — un mapa cerrado, nunca el valor de la
+// URL: cualquier código que no esté en esta lista (incluido texto
+// arbitrario armado a mano) cae en el mensaje genérico de abajo.
+const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
+  cuenta_en_otra_empresa: "Esta cuenta de Mercado Libre ya está conectada a otra empresa — no se puede conectar dos veces.",
+  estado_vencido: "La conexión tardó demasiado o se perdió el estado — empezá de nuevo con \"Conectar Mercado Libre\".",
+  ml_rechazo: "Mercado Libre no autorizó la conexión.",
+  sin_permiso: "No tenés permiso para conectar una cuenta de Mercado Libre.",
+  error_desconocido: "No se pudo conectar la cuenta — intentá de nuevo en un momento.",
+};
+const MENSAJE_ERROR_POR_DEFECTO = "No se pudo conectar la cuenta — intentá de nuevo en un momento.";
+
 // Tarea 2.3 — "Conectar ML en 1 clic". Regla de UX #1 del plan técnico
 // ("si el canal no está habilitado para ese plan/cuenta, avisarlo ANTES
 // de mandar a la pantalla de autorización de ML", evidencia real contra
@@ -74,7 +90,7 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
         // el error real y un botón para reintentar, nunca un
         // silencio.
         <div className={styles.avisoError}>
-          <p className={styles.avisoErrorTexto}>No se pudo conectar la cuenta: {searchParams.error}</p>
+          <p className={styles.avisoErrorTexto}>{MENSAJES_ERROR_CONECTAR[searchParams.error] ?? MENSAJE_ERROR_POR_DEFECTO}</p>
           {/* <a> normal, no next/link: /api/ml/conectar es un Route
               Handler que arranca el OAuth real, necesita una
               navegación de verdad del navegador. */}

@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull, lt, or } from "drizzle-orm";
-import { dbComoEmpresa } from "@/db/empresa-context";
+import { dbComoAvisoWebhook, dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl } from "@/db/schema";
 import { cifrarToken, descifrarToken } from "@/lib/cifrado";
 import { renovarToken, type TokensMl } from "@/lib/ml/oauth";
@@ -11,24 +11,96 @@ function expiraTsDesdeAhora(tokens: TokensMl): Date {
   return new Date(Date.now() + (tokens.expiraEnSegundos - SEGUNDOS_DE_MARGEN) * 1000);
 }
 
+// Issue #151 — una cuenta real de Mercado Libre no puede estar
+// conectada a dos empresas de Zilonix a la vez (índice único global
+// sobre cuenta_id_externa, db/schema.ts). Antes de esto no había forma
+// de distinguir, desde el mensaje de error, "ya está en otra empresa"
+// de un bug cualquiera.
+export class CuentaMlEnOtraEmpresaError extends Error {
+  constructor() {
+    super("Esta cuenta de Mercado Libre ya está conectada a otra empresa.");
+    this.name = "CuentaMlEnOtraEmpresaError";
+  }
+}
+
+function esViolacionDeUnicidad(error: unknown): boolean {
+  // 23505 = unique_violation de Postgres — mismo chequeo que ya usan
+  // lib/invitaciones.ts, lib/ml/sku.ts y app/crear-empresa/actions.ts,
+  // no se inventa un helper nuevo para esto.
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "23505");
+}
+
+// Issue #151, bug real en vivo (23-oct, cuenta ZILONIX en staging):
+// reconectar una cuenta que YA tenía una fila (desconectada, o
+// recién vuelta a autorizar sin haberse desconectado antes) hacía un
+// INSERT simple y chocaba con el índice único global sobre
+// cuenta_id_externa — el error llegaba crudo a /panel/conectar-ml.
+// Peor: para cuando este INSERT falla, app/api/ml/callback/route.ts ya
+// canjeó el `code` por tokens NUEVOS en Mercado Libre — ese refresh
+// token se pierde si no se guarda, y Mercado Libre solo acepta el
+// último refresh token por usuario+app (un reintento puede dejar sin
+// token válido una conexión que SÍ estaba funcionando).
+//
+// Por RLS, dbComoEmpresa(empresaId, ...) nunca puede ver una fila de
+// OTRA empresa — así que antes de decidir INSERT vs UPDATE hay que
+// mirar sin ese filtro. Se resuelve con dbComoAvisoWebhook() (db/
+// empresa-context.ts): el mismo patrón ya establecido en
+// lib/ml/avisos.ts para "sé el cuenta_id_externa real, confirmado por
+// Mercado Libre — eso solo ya me deja ver esa fila puntual, sea de
+// quien sea". Dos transacciones separadas (una por contexto RLS
+// distinto) dejan en teoría una ventana de carrera mínima entre el
+// chequeo y el INSERT/UPDATE — el índice único de Postgres (23505) es
+// el backstop real si esa carrera llega a pasar de verdad.
 export async function guardarCuentaConectada(
   empresaId: string,
   datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl }
 ): Promise<{ id: string }> {
-  return dbComoEmpresa(empresaId, async (tx) => {
-    const [fila] = await tx
-      .insert(cuentasMl)
-      .values({
-        empresaId,
-        cuentaIdExterna: datos.cuentaIdExterna,
-        nickname: datos.nickname,
-        accessTokenCifrado: cifrarToken(datos.tokens.accessToken),
-        refreshTokenCifrado: cifrarToken(datos.tokens.refreshToken),
-        tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
-      })
-      .returning({ id: cuentasMl.id });
-    return fila;
-  });
+  const filas = await dbComoAvisoWebhook(datos.cuentaIdExterna, (tx) =>
+    tx.select({ id: cuentasMl.id, empresaId: cuentasMl.empresaId }).from(cuentasMl).where(eq(cuentasMl.cuentaIdExterna, datos.cuentaIdExterna))
+  );
+  const existente = filas[0] ?? null;
+
+  if (existente && existente.empresaId !== empresaId) {
+    throw new CuentaMlEnOtraEmpresaError();
+  }
+
+  try {
+    return await dbComoEmpresa(empresaId, async (tx) => {
+      if (existente) {
+        // Reconectar: la MISMA fila (mismo id), nunca una nueva — tokens
+        // nuevos, nickname al día, se limpia desconectadaTs y cualquier
+        // candado de renovación que hubiera quedado colgado.
+        const [fila] = await tx
+          .update(cuentasMl)
+          .set({
+            nickname: datos.nickname,
+            accessTokenCifrado: cifrarToken(datos.tokens.accessToken),
+            refreshTokenCifrado: cifrarToken(datos.tokens.refreshToken),
+            tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
+            desconectadaTs: null,
+            renovandoTs: null,
+          })
+          .where(eq(cuentasMl.id, existente.id))
+          .returning({ id: cuentasMl.id });
+        return fila;
+      }
+      const [fila] = await tx
+        .insert(cuentasMl)
+        .values({
+          empresaId,
+          cuentaIdExterna: datos.cuentaIdExterna,
+          nickname: datos.nickname,
+          accessTokenCifrado: cifrarToken(datos.tokens.accessToken),
+          refreshTokenCifrado: cifrarToken(datos.tokens.refreshToken),
+          tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
+        })
+        .returning({ id: cuentasMl.id });
+      return fila;
+    });
+  } catch (error) {
+    if (esViolacionDeUnicidad(error)) throw new CuentaMlEnOtraEmpresaError();
+    throw error;
+  }
 }
 
 export class CandadoDeRenovacionError extends Error {
