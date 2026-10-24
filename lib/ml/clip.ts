@@ -1,4 +1,5 @@
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { buscarItemsPorSkuMl, leerItemBasicoMl, subirClipMl } from "@/lib/ml/cliente";
 import { clipRequiereReputacion } from "@/lib/ml/publicar-reglas";
 
 // Tarea 2.11 ("Publicar producto y clip") — el clip es un SUB-FLUJO
@@ -16,17 +17,18 @@ export type ItemEncontradoPorSku = { itemId: string; titulo: string; thumbnail: 
 // endpoint real GET /users/{id}/items/search?seller_sku= directamente.
 export async function buscarItemPorSku(empresaId: string, cuenta: { id: string; cuentaIdExterna: string }, sku: string): Promise<ItemEncontradoPorSku | null> {
   const token = await obtenerAccessTokenVigente(empresaId, cuenta.id);
-  const res = await fetch(`https://api.mercadolibre.com/users/${cuenta.cuentaIdExterna}/items/search?seller_sku=${encodeURIComponent(sku)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`No se pudo buscar el SKU en Mercado Libre (HTTP ${res.status}).`);
-  const data = await res.json();
-  const itemId: string | undefined = data.results?.[0];
+  // Tarea 2.11, punto 2/3: fetch directo movido a lib/ml/cliente.ts —
+  // buscarItemsPorSkuMl valida cuenta.cuentaIdExterna (/^\d+$/) antes
+  // de armar la URL. El itemId que vuelve DE Mercado Libre (nunca de
+  // nuestro propio formulario) también se valida — leerItemBasicoMl lo
+  // exige antes de armar la segunda URL, no se confía en que el
+  // primer endpoint haya devuelto algo bien formado.
+  const resultados = await buscarItemsPorSkuMl(cuenta.cuentaIdExterna, sku, token);
+  const itemId = resultados[0];
   if (!itemId) return null;
 
-  const detalleRes = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,title,thumbnail`, { headers: { Authorization: `Bearer ${token}` } });
-  if (!detalleRes.ok) return { itemId, titulo: itemId, thumbnail: null };
-  const detalle = await detalleRes.json();
+  const detalle = await leerItemBasicoMl(itemId, token);
+  if (!detalle) return { itemId, titulo: itemId, thumbnail: null };
   return { itemId, titulo: detalle.title ?? itemId, thumbnail: detalle.thumbnail ?? null };
 }
 
@@ -47,33 +49,33 @@ export type ResultadoClip = { status: string; clipUuid: string | null; siteIds: 
 // código nunca mandaba. Acá se omite explícitamente (equivalente
 // documentado a "todos los sitios disponibles"), igual que el
 // comportamiento real que ya corrió en producción.
+// Tarea 2.11, punto 2/3: fetch directo movido a subirClipMl
+// (lib/ml/cliente.ts) — valida itemId (el que llega de
+// app/panel/publicar/clip/actions.ts, de un <input type="hidden"> del
+// formulario, nunca confiado sin validar) con el mismo patrón de
+// siempre, ANTES de armar la URL.
 export async function subirClipItem(token: string, itemId: string, buffer: Buffer | ArrayBuffer, filename: string, contentType: string): Promise<ResultadoClip> {
   const form = new FormData();
   form.append("file", new Blob([buffer], { type: contentType || "video/mp4" }), filename || "clip.mp4");
 
-  const res = await fetch(`https://api.mercadolibre.com/marketplace/items/${itemId}/clips/upload`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: form,
-  });
-  const texto = await res.text().catch(() => "");
-  if (!res.ok) {
+  const { ok, status, textoCrudo } = await subirClipMl(itemId, token, form);
+  if (!ok) {
     // BUG real (Mateo, 28/9, comercio FullyLemon): una cuenta recién
     // conectada sin ventas todavía no tiene "color de reputación"
     // asignado, y Mercado Libre bloquea Clips para esa cuenta sin
     // importar el token. No es cuestión de reintentar.
-    if (clipRequiereReputacion(texto)) {
+    if (clipRequiereReputacion(textoCrudo)) {
       throw new Error(
         "Mercado Libre no deja subir Clips en esta cuenta todavía — necesita tener un color de reputación asignado (se gana con ventas reales), y una cuenta recién conectada sin historial de ventas no lo tiene. No es un error nuestro; hay que esperar a que la cuenta tenga reputación."
       );
     }
-    throw new Error(`Mercado Libre rechazó el video (HTTP ${res.status}): ${texto.slice(0, 800)}`);
+    throw new Error(`Mercado Libre rechazó el video (HTTP ${status}): ${textoCrudo.slice(0, 800)}`);
   }
   let data: { status?: string; clip_uuid?: string; site_ids?: string[] };
   try {
-    data = JSON.parse(texto);
+    data = JSON.parse(textoCrudo);
   } catch {
-    throw new Error(`Mercado Libre devolvió una respuesta inesperada: ${texto.slice(0, 400)}`);
+    throw new Error(`Mercado Libre devolvió una respuesta inesperada: ${textoCrudo.slice(0, 400)}`);
   }
   // status: "accepted" = recibido, no publicado — Mercado Libre lo
   // modera (24-48h) antes de que quede visible.

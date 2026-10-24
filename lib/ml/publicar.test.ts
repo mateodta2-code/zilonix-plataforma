@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { auditoria, cuentasMl, empresas, productosMl, publicaciones } from "@/db/schema";
+import { afirmarAislamiento, crearDosEmpresas } from "@/db/test-utils/aislamiento";
 import { cifrarToken } from "@/lib/cifrado";
 import { publicarProductoEnCuentas } from "./publicar";
 
@@ -39,7 +40,11 @@ const ATRIBUTOS_CATEGORIA_BASICA = [
 function reglasBase(opts?: { atributosCategoria?: unknown[]; onCrearItem?: (body: Record<string, unknown>) => Response | null }): [RegExp, Handler][] {
   let llamadasCrearItem = 0;
   return [
-    [/\/users\/ml-user-/, () => jsonRes(200, { site_id: "MCO" })],
+    // Tarea 2.11, punto 3: cuentaIdExterna ahora tiene que cumplir
+    // /^\d+$/ (leerCuentaMl, lib/ml/cliente.ts, valida ANTES de armar
+    // la URL) — el patrón de abajo matchea esa forma real, no el
+    // literal "ml-user-" que usaban las cuentas de prueba viejas.
+    [/\/users\/\d+$/, () => jsonRes(200, { site_id: "MCO" })],
     [/\/sites\/MCO\/domain_discovery\/search/, () => jsonRes(200, [{ category_id: "MCO1234", category_name: "Categoría de prueba", domain_name: "MCO-TEST" }])],
     [/\/categories\/MCO1234\/attributes/, () => jsonRes(200, opts?.atributosCategoria ?? ATRIBUTOS_CATEGORIA_BASICA)],
     [/\/categories\/MCO1234$/, () => jsonRes(200, { max_pictures_per_item: 10 })],
@@ -58,6 +63,15 @@ function reglasBase(opts?: { atributosCategoria?: unknown[]; onCrearItem?: (body
   ];
 }
 
+// Tarea 2.11, punto 3: cuentaIdExterna tiene que cumplir /^\d+$/
+// (mismo patrón que cliente.ts) — leerCuentaMl valida ANTES de armar
+// la URL, así que el literal viejo "ml-user-{sufijo}" nunca llegaría a
+// mockearse, rompería la prueba con "cuentaIdExterna inválido" antes
+// de tocar fetch.
+function cuentaIdExternaDePrueba(): string {
+  return `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+}
+
 async function crearEmpresaYCuenta(sufijo: string) {
   const empresaId = randomUUID();
   await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: `Empresa publicar ${sufijo}`, nit: `TEST-PUB-${sufijo}` }));
@@ -66,7 +80,7 @@ async function crearEmpresaYCuenta(sufijo: string) {
       .insert(cuentasMl)
       .values({
         empresaId,
-        cuentaIdExterna: `ml-user-${sufijo}`,
+        cuentaIdExterna: cuentaIdExternaDePrueba(),
         nickname: `VENDEDOR_${sufijo}`,
         accessTokenCifrado: cifrarToken("access"),
         refreshTokenCifrado: cifrarToken("refresh"),
@@ -118,12 +132,55 @@ describe("publicarProductoEnCuentas (tarea 2.11) — camino clásico", () => {
     expect(rastro.some((a) => a.entidad === "Mercado Libre")).toBe(true);
   });
 
-  it("empresa B nunca ve los productos de empresa A (aislamiento RLS)", async () => {
+  // Tarea 2.11, punto 4 — reemplaza la prueba anterior (solo SELECT)
+  // por la plantilla real de aislamiento (issue #39,
+  // db/test-utils/aislamiento.ts): confirma que empresa B nunca VE,
+  // EDITA ni BORRA una fila de productos_ml de empresa A — no solo que
+  // no la ve.
+  it("empresa B nunca ve, edita ni borra un producto de empresa A (plantilla de aislamiento, issue #39)", async () => {
+    const contexto = await crearDosEmpresas();
+    const [cuentaA] = await dbComoEmpresa(contexto.empresaAId, (tx) =>
+      tx
+        .insert(cuentasMl)
+        .values({
+          empresaId: contexto.empresaAId,
+          cuentaIdExterna: cuentaIdExternaDePrueba(),
+          nickname: "VENDEDOR_AISLA_A",
+          accessTokenCifrado: cifrarToken("access"),
+          refreshTokenCifrado: cifrarToken("refresh"),
+          tokenExpiraTs: new Date(Date.now() + 3600_000),
+        })
+        .returning({ id: cuentasMl.id })
+    );
+
+    await afirmarAislamiento(contexto, productosMl, (tx, empresaId) =>
+      tx
+        .insert(productosMl)
+        .values({
+          empresaId,
+          precio: "50000",
+          stock: 10,
+          cuentasSeleccionadas: [cuentaA.id],
+          porCuenta: { [cuentaA.id]: { titulo: "Producto de prueba (aislamiento)" } },
+        })
+        .returning({ id: productosMl.id })
+    );
+  });
+
+  // Tarea 2.11, punto 3 — "si no cumple, error claro y nunca se llama
+  // a ML". Una categoría manual (producto.categoriasOverride, la que
+  // la persona puede escribir a mano en el formulario) se valida igual
+  // que cualquier otro id antes de armar la URL de leerCategoriaMl.
+  it("categoryId manual con forma inválida: la cuenta queda 'con_errores', nunca llama a Mercado Libre con esa URL", async () => {
     const { empresaId, cuentaId } = await crearEmpresaYCuenta(randomUUID().slice(0, 8));
-    const { empresaId: empresaB } = await crearEmpresaYCuenta(randomUUID().slice(0, 8));
-    await crearProducto(empresaId, cuentaId);
-    const vistosDesdeB = await dbComoEmpresa(empresaB, (tx) => tx.select().from(productosMl));
-    expect(vistosDesdeB).toHaveLength(0);
+    const producto = await crearProducto(empresaId, cuentaId, {
+      categoriasOverride: { "MCO::Producto de prueba": "MCO1/../users/me" },
+    });
+    const fetchMock = enrutarFetch(reglasBase());
+    vi.stubGlobal("fetch", fetchMock);
+    const resultados = await publicarProductoEnCuentas(empresaId, producto.id);
+    expect(resultados[0].ok).toBe(false);
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/categories/MCO1"))).toBe(false);
   });
 
   it("cero cuentas elegibles ⇒ 'con_errores', nunca 'publicado' (bug real corregido del sistema actual)", async () => {
@@ -224,7 +281,7 @@ describe("publicarProductoEnCuentas (tarea 2.11) — camino clásico", () => {
         .insert(cuentasMl)
         .values({
           empresaId,
-          cuentaIdExterna: `ml-user-${randomUUID().slice(0, 8)}`,
+          cuentaIdExterna: cuentaIdExternaDePrueba(),
           nickname: "VENDEDOR_B",
           accessTokenCifrado: cifrarToken("access"),
           refreshTokenCifrado: cifrarToken("refresh"),
@@ -251,7 +308,7 @@ describe("publicarProductoEnCuentas (tarea 2.11) — camino clásico", () => {
         .insert(cuentasMl)
         .values({
           empresaId,
-          cuentaIdExterna: `ml-user-${randomUUID().slice(0, 8)}`,
+          cuentaIdExterna: cuentaIdExternaDePrueba(),
           nickname: "VENDEDOR_SIN_TITULO",
           accessTokenCifrado: cifrarToken("access"),
           refreshTokenCifrado: cifrarToken("refresh"),

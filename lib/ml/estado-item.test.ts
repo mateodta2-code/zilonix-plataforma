@@ -20,7 +20,10 @@ describe("cambiarEstadoItemMl (tarea 2.11, §11)", () => {
         .insert(cuentasMl)
         .values({
           empresaId,
-          cuentaIdExterna: "ml-user-ei",
+          // Tarea 2.11, punto 5 — aleatorio en vez del literal fijo
+          // "ml-user-ei" (que además nunca pasaría /^\d+$/, el patrón
+          // real de cuentaIdExterna en cliente.ts).
+          cuentaIdExterna: randomUUID(),
           nickname: "VENDEDOR",
           accessTokenCifrado: cifrarToken("access"),
           refreshTokenCifrado: cifrarToken("refresh"),
@@ -41,7 +44,7 @@ describe("cambiarEstadoItemMl (tarea 2.11, §11)", () => {
         .insert(cuentasMl)
         .values({
           empresaId,
-          cuentaIdExterna: "ml-user-ei2",
+          cuentaIdExterna: randomUUID(),
           nickname: "VENDEDOR",
           accessTokenCifrado: cifrarToken("access"),
           refreshTokenCifrado: cifrarToken("refresh"),
@@ -51,5 +54,30 @@ describe("cambiarEstadoItemMl (tarea 2.11, §11)", () => {
     );
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 400, text: async () => "item.status.not_modifiable" }) as Response));
     await expect(cambiarEstadoItemMl(empresaId, cuenta.id, "MCO111", true)).rejects.toThrow(/todavía está revisando/);
+  });
+
+  // Tarea 2.11, punto 3 — itemId viene de formData (app/panel/publicar/
+  // clip/actions.ts, cambiarEstadoAction, línea 63) — se valida ANTES
+  // de armar la URL, nunca se llama a Mercado Libre con algo así.
+  it("itemId inválido nunca llama a fetch", async () => {
+    const empresaId = randomUUID();
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa estado-item 3", nit: `TEST-EI3-${empresaId.slice(0, 8)}` }));
+    const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(cuentasMl)
+        .values({
+          empresaId,
+          cuentaIdExterna: randomUUID(),
+          nickname: "VENDEDOR",
+          accessTokenCifrado: cifrarToken("access"),
+          refreshTokenCifrado: cifrarToken("refresh"),
+          tokenExpiraTs: new Date(Date.now() + 3600_000),
+        })
+        .returning({ id: cuentasMl.id })
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(cambiarEstadoItemMl(empresaId, cuenta.id, "MCO1/../users/me", true)).rejects.toThrow(/inválido/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

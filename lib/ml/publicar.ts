@@ -4,6 +4,16 @@ import { cuentasMl, productosMl, publicaciones } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import {
+  actualizarItemMl,
+  agregarDescripcionItemMl,
+  buscarEnSitioMl,
+  crearItemMl,
+  domainDiscoveryMl,
+  leerAtributosCategoriaMl,
+  leerCategoriaMl,
+  leerCuentaMl,
+} from "@/lib/ml/cliente";
+import {
   aplicarReglaSaleFormat,
   aplicarRespaldoDimensionesProducto,
   CAMPOS_NUMERICOS,
@@ -61,12 +71,13 @@ function esperar(ms: number): Promise<void> {
 
 type CategoriaResuelta = { categoryId: string; categoryName: string; domainName: string | null };
 
-// §4 — GET /categories/{id} — sin token, endpoint público.
+// §4 — GET /categories/{id} — sin token, endpoint público. Tarea 2.11,
+// punto 2: el fetch directo se movió a lib/ml/cliente.ts
+// (leerCategoriaMl) — valida categoryId con el mismo patrón de
+// siempre antes de armar la URL.
 export async function leerCategoriaPorId(categoryId: string): Promise<CategoriaResuelta> {
-  const res = await fetch(`https://api.mercadolibre.com/categories/${categoryId}`);
-  if (!res.ok) throw new Error(`No se pudo leer la categoría ${categoryId}.`);
-  const data = await res.json();
-  return { categoryId: data.id, categoryName: data.name, domainName: null };
+  const cat = await leerCategoriaMl(categoryId);
+  return { categoryId: cat.categoryId, categoryName: cat.categoryName, domainName: null };
 }
 
 // §4, respaldo — cuando domain_discovery no encuentra nada (confirmado
@@ -77,16 +88,11 @@ export async function leerCategoriaPorId(categoryId: string): Promise<CategoriaR
 // (la más repetida) entre los primeros 10 resultados — nunca se
 // inventa una categoría si esto también falla.
 export async function resolverCategoriaPorBusqueda(siteId: string, titulo: string, token: string): Promise<CategoriaResuelta | null> {
-  const res = await fetch(`https://api.mercadolibre.com/sites/${siteId}/search?q=${encodeURIComponent(titulo)}&limit=10`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  const resultados: { category_id: string }[] = data.results ?? [];
+  const resultados = await buscarEnSitioMl(siteId, titulo, token, 10);
   if (!resultados.length) return null;
   const conteo: Record<string, number> = {};
   resultados.forEach((r) => {
-    conteo[r.category_id] = (conteo[r.category_id] ?? 0) + 1;
+    conteo[r.categoryId] = (conteo[r.categoryId] ?? 0) + 1;
   });
   const [categoriaId] = Object.entries(conteo).sort((a, b) => b[1] - a[1])[0];
   const cat = await leerCategoriaPorId(categoriaId);
@@ -99,18 +105,19 @@ export async function resolverCategoriaPorBusqueda(siteId: string, titulo: strin
 // "domain_discovery". Reintenta 3 veces con backoff (800*intento ms)
 // por un 403 puntual visto en vivo al encadenar muchas cuentas
 // seguidas; una respuesta OK pero VACÍA no se reintenta (no serviría
-// de nada) — se cae directo al respaldo por búsqueda.
+// de nada) — se cae directo al respaldo por búsqueda. Tarea 2.11,
+// punto 2: el fetch directo se movió a domainDiscoveryMl
+// (lib/ml/cliente.ts) — la lógica de reintento/respaldo se queda acá
+// tal cual, solo cambia de dónde sale la respuesta HTTP.
 export async function resolverCategoria(siteId: string, titulo: string, token: string): Promise<CategoriaResuelta> {
-  const url = `https://api.mercadolibre.com/sites/${siteId}/domain_discovery/search?q=${encodeURIComponent(titulo)}&limit=1`;
   let ultimoError = "";
   for (let intento = 0; intento < 3; intento++) {
     if (intento > 0) await esperar(800 * intento);
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (res.ok) {
-      const data = await res.json();
-      const primero = Array.isArray(data) ? data[0] : null;
-      if (primero?.category_id) {
-        return { categoryId: primero.category_id, categoryName: primero.category_name, domainName: primero.domain_name ?? null };
+    const r = await domainDiscoveryMl(siteId, titulo, token, 1);
+    if (r.ok) {
+      const primero = r.resultados[0];
+      if (primero?.categoryId) {
+        return { categoryId: primero.categoryId, categoryName: primero.categoryName, domainName: primero.domainName };
       }
       const catRespaldo = await resolverCategoriaPorBusqueda(siteId, titulo, token);
       if (catRespaldo) return catRespaldo;
@@ -118,7 +125,7 @@ export async function resolverCategoria(siteId: string, titulo: string, token: s
         `Mercado Libre no encontró categoría para "${titulo}" en ${siteId} — probá acortar el título (ej. quitar números al inicio) o elegí la categoría a mano.`
       );
     }
-    ultimoError = `No se pudo predecir la categoría en ${siteId} (HTTP ${res.status}).`;
+    ultimoError = `No se pudo predecir la categoría en ${siteId} (HTTP ${r.status}).`;
   }
   throw new Error(ultimoError);
 }
@@ -128,16 +135,9 @@ export async function resolverCategoria(siteId: string, titulo: string, token: s
 // familia de producto cayó en categorías distintas solo por cómo
 // estaba redactado el título).
 export async function buscarCategorias(siteId: string, texto: string, token: string, limite = 8): Promise<CategoriaResuelta[]> {
-  const res = await fetch(`https://api.mercadolibre.com/sites/${siteId}/domain_discovery/search?q=${encodeURIComponent(texto)}&limit=${limite}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`No se pudo buscar categorías (HTTP ${res.status}).`);
-  const data = await res.json();
-  return (Array.isArray(data) ? data : []).map((c: { category_id: string; category_name: string; domain_name?: string }) => ({
-    categoryId: c.category_id,
-    categoryName: c.category_name,
-    domainName: c.domain_name ?? null,
-  }));
+  const r = await domainDiscoveryMl(siteId, texto, token, limite);
+  if (!r.ok) throw new Error(`No se pudo buscar categorías (HTTP ${r.status}).`);
+  return r.resultados.map((c) => ({ categoryId: c.categoryId, categoryName: c.categoryName, domainName: c.domainName }));
 }
 
 // §6 — GET /categories/{id}, max_pictures_per_item. Error real evitado:
@@ -148,10 +148,8 @@ export async function buscarCategorias(siteId: string, texto: string, token: str
 // mismo error en vivo.
 export async function obtenerLimiteFotos(categoryId: string): Promise<number> {
   try {
-    const res = await fetch(`https://api.mercadolibre.com/categories/${categoryId}`);
-    if (!res.ok) return 12;
-    const data = await res.json();
-    return Number(data.max_pictures_per_item) || 12;
+    const cat = await leerCategoriaMl(categoryId);
+    return cat.maxPicturesPerItem || 12;
   } catch {
     return 12;
   }
@@ -174,9 +172,7 @@ export async function resolverAtributosObligatorios(
   atributosExtraEntrada: Record<string, string>,
   titulo: string
 ): Promise<AtributosObligatoriosResueltos> {
-  const res = await fetch(`https://api.mercadolibre.com/categories/${categoryId}/attributes`);
-  if (!res.ok) throw new Error(`No se pudieron leer los atributos de la categoría ${categoryId}.`);
-  const todos: DefinicionAtributoMl[] = await res.json();
+  const todos = (await leerAtributosCategoriaMl(categoryId)) as DefinicionAtributoMl[];
   const obligatorios = todos.filter((a) => a.tags?.required);
 
   const finales: { id: string; value_name: string }[] = [];
@@ -274,9 +270,7 @@ export async function obtenerCaracteristicasCategoria(
   categoriaIdManual?: string
 ): Promise<{ categoryId: string; categoryName: string; siteId: string; principales: CaracteristicaCategoria[]; secundarias: CaracteristicaCategoria[] }> {
   const cat = categoriaIdManual ? await leerCategoriaPorId(categoriaIdManual) : await resolverCategoria(siteId, titulo, token);
-  const res = await fetch(`https://api.mercadolibre.com/categories/${cat.categoryId}/attributes`);
-  if (!res.ok) throw new Error(`No se pudieron leer los atributos de la categoría ${cat.categoryId}.`);
-  const todos: DefinicionAtributoMl[] = await res.json();
+  const todos = (await leerAtributosCategoriaMl(cat.categoryId)) as DefinicionAtributoMl[];
   const relevantes = todos.filter((a) => !YA_CUBIERTOS.has(a.id) && !a.tags?.hidden && !a.tags?.read_only);
   const esPrincipal = (a: DefinicionAtributoMl) => Boolean(a.tags?.required || a.tags?.catalog_required || a.tags?.allow_variations || a.tags?.defines_picture);
   const armar = (a: DefinicionAtributoMl): CaracteristicaCategoria => ({
@@ -387,34 +381,22 @@ async function publicarFamiliaUserProducts(
     // negocio) — se aplica igual que en el camino clásico.
     if (producto.envioGratis) body.shipping = { free_shipping: true };
 
-    const res = await fetch("https://api.mercadolibre.com/items", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const texto = await res.text().catch(() => "");
-    if (!res.ok) {
-      items.push({ valores: c.valores, sku: c.sku, ok: false, error: texto.slice(0, 2000) });
+    const r = await crearItemMl(token, body);
+    if (!r.ok) {
+      items.push({ valores: c.valores, sku: c.sku, ok: false, error: r.textoCrudo.slice(0, 2000) });
       continue;
     }
-    const data = JSON.parse(texto);
+    const data = r.data!;
+    const itemId = data.id as string;
     if (descripcion) {
-      await fetch(`https://api.mercadolibre.com/items/${data.id}/description`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ plain_text: descripcion }),
-      }).catch(() => null);
+      await agregarDescripcionItemMl(itemId, token, descripcion).catch(() => null);
     }
-    let estadoFinal: string = data.status;
+    let estadoFinal = data.status as string;
     if (producto.modoPrueba) {
-      const pausaRes = await fetch(`https://api.mercadolibre.com/items/${data.id}`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ status: "paused" }),
-      }).catch(() => null);
-      if (pausaRes?.ok) estadoFinal = "paused";
+      const pausaR = await actualizarItemMl(itemId, token, { status: "paused" }).catch(() => null);
+      if (pausaR?.ok) estadoFinal = "paused";
     }
-    items.push({ valores: c.valores, sku: c.sku, ok: true, itemId: data.id, permalink: data.permalink, status: estadoFinal });
+    items.push({ valores: c.valores, sku: c.sku, ok: true, itemId, permalink: data.permalink as string, status: estadoFinal });
   }
 
   const exitosos = items.filter((i) => i.ok);
@@ -437,10 +419,7 @@ export async function publicarProductoEnCuenta(
 ): Promise<ResultadoPublicacionCuenta> {
   // 3.1 — token + site_id en vivo, nunca asumido.
   const token = await obtenerAccessTokenVigente(empresaId, cuenta.id);
-  const userRes = await fetch(`https://api.mercadolibre.com/users/${cuenta.cuentaIdExterna}`, { headers: { Authorization: `Bearer ${token}` } });
-  if (!userRes.ok) throw new Error(`No se pudo leer la cuenta en Mercado Libre (HTTP ${userRes.status}).`);
-  const userData = await userRes.json();
-  const siteId: string = userData.site_id;
+  const { siteId } = await leerCuentaMl(cuenta.cuentaIdExterna, token);
 
   // 3.2 — título/descripción/portada por cuenta, cae al primer registro si falta.
   const porCuenta = producto.porCuenta ?? {};
@@ -540,61 +519,61 @@ export async function publicarProductoEnCuenta(
   if (producto.envioGratis) bodyBase.shipping = { free_shipping: true };
 
   // 3.16 — crear, con reintento family_name→title (nunca los dos juntos).
+  // Tarea 2.11, punto 2: el fetch directo se movió a crearItemMl
+  // (lib/ml/cliente.ts) — acá solo queda la lógica de reintento, igual
+  // que antes.
   async function intentarCrear(campoTitulo: "family_name" | "title") {
     const b = { ...bodyBase, [campoTitulo]: truncarTitulo(titulo) };
-    const r = await fetch("https://api.mercadolibre.com/items", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(b),
-    });
-    const t = await r.text().catch(() => "");
-    return { r, t, b };
+    const r = await crearItemMl(token, b);
+    return { r, b };
   }
 
   let campoTituloUsado: "family_name" | "title" = "family_name";
-  let { r: res, t: texto, b: body } = await intentarCrear(campoTituloUsado);
-  if (!usaVariantes && !res.ok && esErrorDeFamilyName(texto)) {
+  let { r, b: body } = await intentarCrear(campoTituloUsado);
+  if (!usaVariantes && !r.ok && esErrorDeFamilyName(r.textoCrudo)) {
     campoTituloUsado = "title";
-    ({ r: res, t: texto, b: body } = await intentarCrear(campoTituloUsado));
+    ({ r, b: body } = await intentarCrear(campoTituloUsado));
   }
 
   // 3.17 — reintento automático con marca genérica (solo si la categoría ofrece una opción real).
   let seCambioMarcaAGenerica = false;
-  if (!res.ok && exigeGtinPorMarca(texto)) {
+  if (!r.ok && exigeGtinPorMarca(r.textoCrudo)) {
     const generica = marcaGenerica(brandDef);
     if (generica) {
       bodyBase.attributes = [...(bodyBase.attributes as { id: string; value_name: string }[]).filter((a) => a.id !== "BRAND"), { id: "BRAND", value_name: generica.name }];
-      ({ r: res, t: texto, b: body } = await intentarCrear(campoTituloUsado));
+      ({ r, b: body } = await intentarCrear(campoTituloUsado));
       seCambioMarcaAGenerica = true;
     }
   }
 
   // 3.18 — manejo de fallo: User Products / dimensiones faltantes / genérico.
-  if (!res.ok) {
-    if (usaVariantes && esRechazoDeVariantesPorCategoria(texto)) {
+  if (!r.ok) {
+    if (usaVariantes && esRechazoDeVariantesPorCategoria(r.textoCrudo)) {
       return publicarFamiliaUserProducts(cuenta, producto, token, siteId, categoryId, categoryName, titulo, descripcion, portadaUrl, atributosFinal, limiteFotos);
     }
-    const errorFinal = faltanDimensionesPaquete(texto)
+    const errorFinal = faltanDimensionesPaquete(r.textoCrudo)
       ? "Faltan las dimensiones del paquete (peso, largo, ancho y/o alto) — Mercado Libre las exige para calcular el envío. Complétalas en el formulario y vuelve a intentar."
-      : texto.slice(0, 2000);
+      : r.textoCrudo.slice(0, 2000);
     return { cuentaMlId: cuenta.id, ok: false, categoria: categoryName, error: errorFinal, bodyEnviado: body };
   }
 
-  const data = JSON.parse(texto);
+  const data = r.data!;
 
   // 3.19 — picture_ids por variante, segundo PUT. Doble supuesto declarado
   // y sin confirmar en vivo (orden pictures↔picture_ids, variations[i]↔
   // body.variations[i]) — nunca hace fallar la publicación si no calza.
   let avisoFotosVariante: string | null = null;
-  if (usaVariantes && ejeFoto && urlsPortadasVariante.length && Array.isArray(data.pictures) && Array.isArray(data.variations)) {
+  const picturesData = data.pictures as { id?: string }[] | undefined;
+  const variationsData = data.variations as { id: string }[] | undefined;
+  if (usaVariantes && ejeFoto && urlsPortadasVariante.length && Array.isArray(picturesData) && Array.isArray(variationsData)) {
     try {
       const urlsEnviadas = pictures.map((p) => p.source);
       const idPorUrl: Record<string, string> = {};
       urlsEnviadas.forEach((url, i) => {
-        if (data.pictures[i]?.id) idPorUrl[url] = data.pictures[i].id;
+        if (picturesData[i]?.id) idPorUrl[url] = picturesData[i].id!;
       });
       const bodyVariations = (body as { variations?: { attribute_combinations?: { id: string; value_name: string }[] }[] }).variations;
-      const variationsConFoto = (data.variations as { id: string }[])
+      const variationsConFoto = variationsData
         .map((v, i) => {
           const valorEjeFoto = bodyVariations?.[i]?.attribute_combinations?.find((a) => a.id === ejeFoto)?.value_name;
           const urlFoto = valorEjeFoto ? portadasPorVariante[valorEjeFoto] : null;
@@ -604,13 +583,9 @@ export async function publicarProductoEnCuenta(
         .filter((v): v is { id: string; picture_ids: string[] } => Boolean(v));
 
       if (variationsConFoto.length) {
-        const putRes = await fetch(`https://api.mercadolibre.com/items/${data.id}`, {
-          method: "PUT",
-          headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-          body: JSON.stringify({ variations: variationsConFoto }),
-        });
-        if (!putRes.ok) {
-          avisoFotosVariante = `Se publicó bien, pero no se pudieron asignar las portadas por variante (Mercado Libre respondió ${putRes.status}).`;
+        const putR = await actualizarItemMl(data.id as string, token, { variations: variationsConFoto });
+        if (!putR.ok) {
+          avisoFotosVariante = `Se publicó bien, pero no se pudieron asignar las portadas por variante (Mercado Libre respondió ${putR.status}).`;
         }
       }
     } catch (e) {
@@ -624,12 +599,8 @@ export async function publicarProductoEnCuenta(
   let avisoDescripcion: string | null = null;
   if (descripcion) {
     try {
-      const descRes = await fetch(`https://api.mercadolibre.com/items/${data.id}/description`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ plain_text: descripcion }),
-      });
-      if (!descRes.ok) avisoDescripcion = `Se publicó bien, pero la descripción no se pudo guardar (Mercado Libre respondió ${descRes.status}).`;
+      const descR = await agregarDescripcionItemMl(data.id as string, token, descripcion);
+      if (!descR.ok) avisoDescripcion = `Se publicó bien, pero la descripción no se pudo guardar (Mercado Libre respondió ${descR.status}).`;
     } catch {
       avisoDescripcion = "Se publicó bien, pero la descripción no se pudo guardar.";
     }
@@ -641,15 +612,11 @@ export async function publicarProductoEnCuenta(
   // producto queda visible — se tolera igual que el original, pero
   // queda honestamente reflejado en `status` (nunca se informa "paused"
   // si en realidad no se logró pausar).
-  let estadoFinal: string = data.status;
+  let estadoFinal = data.status as string;
   if (producto.modoPrueba) {
     try {
-      const pausaRes = await fetch(`https://api.mercadolibre.com/items/${data.id}`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ status: "paused" }),
-      });
-      if (pausaRes.ok) estadoFinal = "paused";
+      const pausaR = await actualizarItemMl(data.id as string, token, { status: "paused" });
+      if (pausaR.ok) estadoFinal = "paused";
     } catch {
       // se tolera — el estado real queda reflejado tal cual en `estadoFinal`
     }
@@ -661,8 +628,8 @@ export async function publicarProductoEnCuenta(
   return {
     cuentaMlId: cuenta.id,
     ok: true,
-    itemId: data.id,
-    permalink: data.permalink,
+    itemId: data.id as string,
+    permalink: data.permalink as string,
     categoria: categoryName,
     atributosAsumidos: asumidos,
     status: estadoFinal,
