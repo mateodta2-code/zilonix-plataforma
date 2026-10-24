@@ -28,7 +28,7 @@ GRANT CONNECT ON DATABASE railway TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria, accesos_temporales, cuentas_ml, avisos_ml,
-  pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml,
+  pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml, productos_ml,
   seguimientos_ml, seguimiento_fotos, seguimiento_alertas
   TO app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
@@ -128,6 +128,8 @@ ALTER TABLE pedido_eventos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedido_eventos FORCE ROW LEVEL SECURITY;
 ALTER TABLE despachos_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE despachos_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE productos_ml ENABLE ROW LEVEL SECURITY;
+ALTER TABLE productos_ml FORCE ROW LEVEL SECURITY;
 ALTER TABLE seguimientos_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE seguimientos_ml FORCE ROW LEVEL SECURITY;
 ALTER TABLE seguimiento_fotos ENABLE ROW LEVEL SECURITY;
@@ -308,6 +310,10 @@ CREATE POLICY aislamiento_pedido_eventos ON pedido_eventos
 
 DROP POLICY IF EXISTS aislamiento_despachos_ml ON despachos_ml;
 CREATE POLICY aislamiento_despachos_ml ON despachos_ml
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_productos_ml ON productos_ml;
+CREATE POLICY aislamiento_productos_ml ON productos_ml
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- Issue #175 — mismo patrón de siempre: tráfico normal de app_user,
