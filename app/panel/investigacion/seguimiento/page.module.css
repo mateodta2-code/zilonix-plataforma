@@ -8,6 +8,20 @@
   font-size: 14px;
 }
 
+/* Issue #200 — título de la sección + el botón "Ver guía" (PanelLateral)
+   en la misma fila, sin que el botón empuje el margen del título. */
+.encabezadoSeccion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.encabezadoSeccion .tituloSeccion {
+  margin-bottom: 0;
+}
+
 .filaFormulario {
   display: flex;
   flex-wrap: wrap;
