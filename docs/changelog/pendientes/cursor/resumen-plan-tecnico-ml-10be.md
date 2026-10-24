@@ -1,1 +1,0 @@
-- **2026-10-22** — Z-DOC-02: `docs/plan-tecnico-resumen.md` resume las tareas de Mercado Libre del plan técnico (estado en esta plataforma e issue abierto que las cubre) y las reglas que aplican aquí. Enlazado desde `CLAUDE.md`. Sin cambio de versión.
