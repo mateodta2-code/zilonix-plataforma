@@ -7,6 +7,7 @@ import {
   desdeCentavos,
   diaBogota,
   mesBogota,
+  porcentaje,
   repartirProporcional,
   totalizarPorCuentaYMes,
   totalizarUtilidad,
@@ -557,5 +558,175 @@ describe("totales por cuenta y mes", () => {
     expect(total.utilidad).toBe("999999999999970.00");
     expect(total.valor_venta).toBe("999999999999990.00");
     expect(total.comision_ml).toBe("10.00");
+  });
+});
+
+// #162 — empaque, envío y utilidad por línea, para la vista de detalle.
+describe("empaque, envío y utilidad por línea", () => {
+  const sumaTexto = (valores: (string | null | undefined)[]) =>
+    desdeCentavos(valores.reduce((a, v) => a + aCentavos(v as string), BigInt(0)));
+
+  it("venta de una línea: empaque, envío y utilidad de la línea son los de la venta", () => {
+    const r = calcularUtilidadVenta(venta());
+    expect(r.lineas[0].empaque).toEqual({ valor: "1500.00", origen: "congelado" });
+    expect(r.lineas[0].envio).toEqual({ valor: "2000.00", origen: "congelado" });
+    expect(r.lineas[0].utilidad).toBe("35500.00");
+    expect(r.lineas[0].utilidad).toBe(r.utilidad);
+    expect(r.lineas[0].margen_porcentaje).toBe("35.50");
+  });
+
+  it("dos líneas sin valores por línea: empaque y envío por peso, con centavos que no dividen parejo y suma exacta", () => {
+    const r = calcularUtilidadVenta(
+      venta({
+        valor_venta: "30.00",
+        comision_ml: "0.00",
+        flete_ml: "0.00",
+        empaque_congelado: "1.00",
+        envio_agencia_congelado: "0.05",
+        lineas: [
+          linea({ linea: 1, valor_linea: "10.00", costo_congelado: "1.00" }),
+          linea({ linea: 2, valor_linea: "20.00", costo_congelado: "1.00" }),
+        ],
+      }),
+    );
+    expect(r.lineas.map((l) => l.empaque.valor)).toEqual(["0.33", "0.67"]);
+    expect(r.lineas.map((l) => l.envio.valor)).toEqual(["0.02", "0.03"]);
+    expect(sumaTexto(r.lineas.map((l) => l.empaque.valor))).toBe(r.empaque.valor);
+    expect(sumaTexto(r.lineas.map((l) => l.envio.valor))).toBe(r.envio.valor);
+    expect(r.lineas.map((l) => l.utilidad)).toEqual(["8.65", "18.30"]);
+    expect(r.utilidad).toBe("26.95");
+    expect(r.lineas.map((l) => l.margen_porcentaje)).toEqual(["86.50", "91.50"]);
+  });
+
+  it("valores por línea que cuadran con el paquete: cada línea usa el suyo", () => {
+    const r = calcularUtilidadVenta(
+      venta({
+        valor_venta: "200000.00",
+        lineas: [
+          linea({ linea: 1, empaque_congelado: "500.00", envio_congelado: "1200.00" }),
+          linea({ linea: 2, empaque_congelado: "1000.00", envio_congelado: "800.00" }),
+        ],
+      }),
+    );
+    expect(r.lineas.map((l) => l.empaque)).toEqual([
+      { valor: "500.00", origen: "congelado" },
+      { valor: "1000.00", origen: "congelado" },
+    ]);
+    expect(r.lineas.map((l) => l.envio.valor)).toEqual(["1200.00", "800.00"]);
+    // Los totales de la venta son los de siempre.
+    expect(r.empaque).toEqual({ valor: "1500.00", origen: "congelado" });
+    expect(r.envio).toEqual({ valor: "2000.00", origen: "congelado" });
+    expect(sumaTexto(r.lineas.map((l) => l.utilidad))).toBe(r.utilidad);
+  });
+
+  it("valores por línea que no cuadran, o que solo trae una línea: error", () => {
+    const dosLineas = (a: Partial<LineaVentaEntrada>, b: Partial<LineaVentaEntrada>) =>
+      venta({ valor_venta: "200000.00", lineas: [linea({ linea: 1, ...a }), linea({ linea: 2, ...b })] });
+    expect(() => calcularUtilidadVenta(dosLineas({ empaque_congelado: "500.00" }, { empaque_congelado: "900.00" }))).toThrow(
+      EntradaUtilidadInvalidaError,
+    );
+    expect(() => calcularUtilidadVenta(dosLineas({ envio_congelado: "2000.01" }, { envio_congelado: "0.00" }))).toThrow(
+      EntradaUtilidadInvalidaError,
+    );
+    expect(() => calcularUtilidadVenta(dosLineas({ empaque_congelado: "1500.00" }, {}))).toThrow(EntradaUtilidadInvalidaError);
+    expect(() => calcularUtilidadVenta(dosLineas({}, { envio_congelado: "2000.00" }))).toThrow(EntradaUtilidadInvalidaError);
+    expect(() => calcularUtilidadVenta(dosLineas({ empaque_congelado: "-1.00" }, { empaque_congelado: "1501.00" }))).toThrow(
+      EntradaUtilidadInvalidaError,
+    );
+  });
+
+  it("una línea con null en su valor cuenta $0 y la venta lleva el aviso", () => {
+    const r = calcularUtilidadVenta(
+      venta({
+        valor_venta: "200000.00",
+        lineas: [linea({ linea: 1, empaque_congelado: "1500.00" }), linea({ linea: 2, empaque_congelado: null })],
+      }),
+    );
+    expect(r.lineas.map((l) => l.empaque.valor)).toEqual(["1500.00", "0.00"]);
+    expect(r.avisos).toContain("empaque_sin_dato");
+  });
+
+  it("Full de ML: el envío de cada línea es $0 (full_ml); Flex usa el valor congelado", () => {
+    const full = calcularUtilidadVenta(
+      venta({ forma_entrega: "full_ml", valor_venta: "200000.00", lineas: [linea({ linea: 1 }), linea({ linea: 2 })] }),
+    );
+    expect(full.lineas.map((l) => l.envio)).toEqual([
+      { valor: "0.00", origen: "full_ml" },
+      { valor: "0.00", origen: "full_ml" },
+    ]);
+    expect(sumaTexto(full.lineas.map((l) => l.utilidad))).toBe(full.utilidad);
+
+    const flex = calcularUtilidadVenta(
+      venta({ forma_entrega: "flex", envio_agencia_congelado: "7000.00", lineas: [linea({ envio_congelado: "7000.00" })] }),
+    );
+    expect(flex.lineas[0].envio).toEqual({ valor: "7000.00", origen: "congelado" });
+    expect(flex.lineas[0].utilidad).toBe(flex.utilidad);
+  });
+
+  it("una corrección de orden de empaque o envío se reparte por peso entre las líneas; la de línea sigue rechazada", () => {
+    const r = calcularUtilidadVenta(
+      venta({
+        valor_venta: "200000.00",
+        lineas: [linea({ linea: 1, empaque_congelado: "500.00" }), linea({ linea: 2, empaque_congelado: "1000.00" })],
+        correcciones: [correccion("empaque", "1000.00"), correccion("envio_agencia", "300.01")],
+      }),
+    );
+    expect(r.lineas.map((l) => l.empaque)).toEqual([
+      { valor: "500.00", origen: "corregido" },
+      { valor: "500.00", origen: "corregido" },
+    ]);
+    expect(r.lineas.map((l) => l.envio)).toEqual([
+      { valor: "150.01", origen: "corregido" },
+      { valor: "150.00", origen: "corregido" },
+    ]);
+    expect(sumaTexto(r.lineas.map((l) => l.utilidad))).toBe(r.utilidad);
+    expect(() => calcularUtilidadVenta(venta({ correcciones: [correccion("envio_agencia", "1.00", 1)] }))).toThrow(
+      EntradaUtilidadInvalidaError,
+    );
+  });
+
+  it("venta sin costo: la utilidad y el margen de todas sus líneas son null", () => {
+    const r = calcularUtilidadVenta(
+      venta({ valor_venta: "200000.00", lineas: [linea({ linea: 1 }), linea({ linea: 2, costo_congelado: null })] }),
+    );
+    expect(r.lineas.map((l) => [l.utilidad, l.margen_porcentaje])).toEqual([
+      [null, null],
+      [null, null],
+    ]);
+    expect(sumaTexto(r.lineas.map((l) => l.empaque.valor))).toBe(r.empaque.valor);
+  });
+
+  it("la suma de las líneas da exacto la venta en cada concepto y en la utilidad", () => {
+    const formas = ["agencia", "flex", "full_ml", "desconocida"] as const;
+    const valores = ["0.01", "33.33", "1000.00", "99999.99", "7.77"];
+    for (const forma of formas) {
+      for (let n = 1; n <= valores.length; n++) {
+        const lineas = valores.slice(0, n).map((valor, i) => linea({ linea: i + 1, valor_linea: valor, costo_congelado: "0.07" }));
+        const r = calcularUtilidadVenta(
+          venta({
+            forma_entrega: forma,
+            valor_venta: "101040.97",
+            comision_ml: "-13.01",
+            flete_ml: "8000.03",
+            empaque_congelado: "1500.07",
+            envio_agencia_congelado: "2000.11",
+            lineas,
+          }),
+        );
+        expect(sumaTexto(r.lineas.map((l) => l.valor_venta))).toBe(r.valor_venta);
+        expect(sumaTexto(r.lineas.map((l) => l.comision_ml.valor))).toBe(r.comision_ml.valor);
+        expect(sumaTexto(r.lineas.map((l) => l.flete_ml.valor))).toBe(r.flete_ml.valor);
+        expect(sumaTexto(r.lineas.map((l) => l.costo_producto?.valor))).toBe(r.costo_producto?.valor);
+        expect(sumaTexto(r.lineas.map((l) => l.empaque.valor))).toBe(r.empaque.valor);
+        expect(sumaTexto(r.lineas.map((l) => l.envio.valor))).toBe(r.envio.valor);
+        expect(sumaTexto(r.lineas.map((l) => l.utilidad))).toBe(r.utilidad);
+      }
+    }
+  });
+
+  it("porcentaje queda exportado y redondea igual que el margen", () => {
+    expect(porcentaje(BigInt(1), BigInt(3))).toBe("33.33");
+    expect(porcentaje(BigInt(2), BigInt(3))).toBe("66.67");
+    expect(porcentaje(BigInt(1), BigInt(0))).toBeNull();
   });
 });
