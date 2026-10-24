@@ -151,23 +151,34 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
 });
 
 describe("resolverCategoria — 3 intentos con 800ms*intento ante 403/5xx (issue #147, mismo criterio que zilonix-os-web)", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
 
+  // vi.useFakeTimers() + vi.runAllTimersAsync() en vez de esperar los
+  // 800ms/2400ms reales entre reintentos — misma lógica, prueba instantánea.
   it("403 en el primer intento, OK en el segundo: devuelve la categoría, sin agotar los 3 intentos", async () => {
+    vi.useFakeTimers();
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(respuestaJson({}, 403))
       .mockResolvedValueOnce(respuestaJson([{ category_id: "MCO1234" }]));
     vi.stubGlobal("fetch", fetchMock);
-    const resultado = await resolverCategoria("reloj digital", "token");
+    const promesa = resolverCategoria("reloj digital", "token");
+    await vi.runAllTimersAsync();
+    const resultado = await promesa;
     expect(resultado).toEqual({ categoryId: "MCO1234" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-  }, 10_000);
+  });
 
   it("403 los 3 intentos: devuelve null (enriquecimiento opcional), nunca lanza", async () => {
+    vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    await expect(resolverCategoria("reloj digital", "token")).resolves.toBeNull();
-  }, 10_000);
+    const promesa = resolverCategoria("reloj digital", "token");
+    await vi.runAllTimersAsync();
+    await expect(promesa).resolves.toBeNull();
+  });
 
   it("401: nunca reintenta — propaga de una (el token no va a cambiar en el segundo intento)", async () => {
     const fetchMock = vi.fn(async () => respuestaJson({}, 401));
