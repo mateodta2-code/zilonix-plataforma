@@ -94,7 +94,10 @@ export async function subirClipItem(token: string, itemId: string, buffer: Buffe
 // el video (tipo y tamaño) — duración/resolución exigirían decodificarlo,
 // fuera de alcance de esta validación previa.
 const TIPOS_VIDEO_VALIDOS = new Set(["video/mp4", "video/quicktime", "video/mpeg", "video/x-msvideo"]);
-const TAMANO_MAXIMO_CLIP_BYTES = 280 * 1024 * 1024;
+// Exportado: app/api/ml/clip/route.ts lo usa para el rechazo temprano
+// por content-length (con margen por el overhead de multipart), antes
+// de leer el cuerpo entero.
+export const TAMANO_MAXIMO_CLIP_BYTES = 280 * 1024 * 1024;
 
 export class ClipInvalidoError extends Error {}
 

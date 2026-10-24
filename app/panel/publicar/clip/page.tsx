@@ -6,14 +6,18 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
-import { buscarItemAction, buscarItemConDatos, cambiarEstadoAction, subirClipAction } from "./actions";
+import { buscarItemAction, buscarItemConDatos, cambiarEstadoAction } from "./actions";
 
 // Tarea 2.11 ("Publicar producto y clip") — el Clip es un sub-flujo
 // APARTE de publicar (decisión de diseño explícita del sistema actual:
 // siempre se aplica a un ítem que YA existe, nunca al crearlo). Se
 // aprovecha el mismo lugar para pausar/activar esa publicación — ambas
 // acciones parten de tener resuelto el item_id real.
-export default async function PublicarClipPage({ searchParams }: { searchParams: { cuentaId?: string; sku?: string; itemId?: string; clipSubido?: string } }) {
+export default async function PublicarClipPage({
+  searchParams,
+}: {
+  searchParams: { cuentaId?: string; sku?: string; itemId?: string; clipSubido?: string; error?: string };
+}) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
 
@@ -74,6 +78,12 @@ export default async function PublicarClipPage({ searchParams }: { searchParams:
 
       {searchParams.sku && !item && <p style={{ marginTop: 16, color: "#b00020", fontSize: 14 }}>No se encontró ninguna publicación con ese SKU en esa cuenta.</p>}
 
+      {/* Fuera del bloque de abajo a propósito: app/api/ml/clip/
+      route.ts vuelve con ?error= en varios casos (sin permiso, datos
+      faltantes) donde cuentaId/itemId podrían no resolver a un item
+      real — el aviso tiene que verse igual, no depender de eso. */}
+      {searchParams.error && <p style={{ marginTop: 16, color: "#b00020", fontSize: 14 }}>{searchParams.error}</p>}
+
       {item && cuentaElegida && (
         <div style={{ marginTop: 24, borderTop: "1px solid #eee", paddingTop: 16 }}>
           <p style={{ fontSize: 14 }}>
@@ -81,7 +91,12 @@ export default async function PublicarClipPage({ searchParams }: { searchParams:
           </p>
           {searchParams.clipSubido && <p style={{ color: "#1a7f37", fontSize: 13 }}>Clip subido — queda en moderación 24-48h.</p>}
 
-          <form action={subirClipAction} encType="multipart/form-data" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Tarea 2.11 — issue real: next.config.mjs limita el body de
+          toda Server Action a 6MB (pensado para el CSV de SKU), y un
+          Clip real llega hasta 280MB. Por eso esto NO es una Server
+          Action: es un <form> normal que postea directo a un Route
+          Handler (app/api/ml/clip/route.ts), que no tiene ese tope. */}
+          <form action="/api/ml/clip" method="post" encType="multipart/form-data" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
             <input type="hidden" name="cuentaId" value={cuentaElegida.id} />
             <input type="hidden" name="itemId" value={item.itemId} />
             <label style={{ fontSize: 13 }}>

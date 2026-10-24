@@ -5,8 +5,7 @@ import { cookies } from "next/headers";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
-import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
-import { buscarItemPorSku, subirClipItem, validarArchivoClip } from "@/lib/ml/clip";
+import { buscarItemPorSku } from "@/lib/ml/clip";
 import { cambiarEstadoItemMl } from "@/lib/ml/estado-item";
 
 async function empresaActivaDe(usuarioId: string) {
@@ -31,27 +30,11 @@ export async function buscarItemAction(formData: FormData): Promise<void> {
   redirect(`/panel/publicar/clip?${params.toString()}`);
 }
 
-export async function subirClipAction(formData: FormData): Promise<void> {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
-  const empresa = await empresaActivaDe(usuario.id);
-  await requierePermiso(usuario.id, empresa.id, "inventario", "modificar");
-
-  const cuentaId = String(formData.get("cuentaId") ?? "");
-  const itemId = String(formData.get("itemId") ?? "");
-  const archivo = formData.get("archivo");
-  if (!cuentaId || !itemId || !(archivo instanceof File) || archivo.size === 0) {
-    throw new Error("Faltan datos para subir el Clip.");
-  }
-
-  validarArchivoClip(archivo.type, archivo.size);
-  const token = await obtenerAccessTokenVigente(empresa.id, cuentaId);
-  const buffer = await archivo.arrayBuffer();
-  await subirClipItem(token, itemId, buffer, archivo.name, archivo.type);
-
-  const params = new URLSearchParams({ cuentaId, itemId, clipSubido: "1" });
-  redirect(`/panel/publicar/clip?${params.toString()}`);
-}
+// Tarea 2.11 — subirClipAction (Server Action) se eliminó de acá: el
+// límite global de next.config.mjs (bodySizeLimit: "6mb") rechazaba
+// cualquier video real (Mercado Libre permite hasta 280MB) antes de
+// llegar a validarArchivoClip. La subida ahora es un <form> normal que
+// postea a app/api/ml/clip/route.ts (Route Handler, sin ese tope).
 
 export async function cambiarEstadoAction(formData: FormData): Promise<void> {
   const usuario = await obtenerOCrearUsuarioActual();

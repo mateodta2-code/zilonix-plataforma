@@ -103,10 +103,9 @@ describe("subirClipItem (tarea 2.11, §10) — único endpoint del flujo nunca c
     await expect(subirClipItem("token", "MCO111", Buffer.from("video"), "clip.mp4", "video/mp4")).rejects.toThrow(/color de reputación/);
   });
 
-  // Tarea 2.11, punto 3 — itemId viene de formData (app/panel/publicar/
-  // clip/actions.ts, subirClipAction, línea 41) — nunca confiado sin
-  // validar, aunque venga de un <input type="hidden"> de nuestro propio
-  // formulario.
+  // Tarea 2.11, punto 3 — itemId viene de formData (app/api/ml/clip/
+  // route.ts) — nunca confiado sin validar, aunque venga de un
+  // <input type="hidden"> de nuestro propio formulario.
   it("itemId inválido nunca llama a fetch", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
