@@ -232,3 +232,42 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
 
   return { saltado: false, alertasCreadas: alertas.length };
 }
+
+export type ResultadoRevisionInmediata = { ok: true; saltado: boolean; alertasCreadas: number } | { ok: false; error: string };
+
+// Issue #204 — bug real en staging: una fila recién agregada se
+// quedaba en guiones hasta que corría el cron, hasta una hora después
+// (el workflow corre cada hora, nunca al instante). Mismo
+// revisarUnSeguimiento() de siempre (lector + comparación + foto +
+// alertas) para UN seguimiento puntual, llamado en el mismo request
+// del Server Action de agregar (app/panel/investigacion/seguimiento/actions.ts)
+// — nunca dbTrabajadorSeguimiento, que es solo para el lote cross-
+// empresa del cron: acá ya se sabe la empresa, el "marcar revisado"
+// pasa por dbComoEmpresa()/app_user, igual que el resto del flujo de
+// agregar.
+//
+// Nunca lanza: un error de Mercado Libre en este paso no debe tumbar
+// el "seguimiento agregado" que YA se guardó en la base — se informa
+// aparte (ver actions.ts) y nunca se marca ultima_revision_ts en ese
+// caso, para que el cron de hoy mismo lo reintente solo (al revés del
+// fallido del LOTE, que sí se marca para no ahogar los 50 cupos —
+// acá no hay ningún lote que ahogar, es un solo seguimiento puntual).
+// Si Mercado Libre YA tenía una foto de hoy para este seguimiento
+// (ej. revivir uno eliminado que el cron ya alcanzó a procesar hoy
+// mismo), el índice único + onConflictDoNothing de revisarUnSeguimiento
+// lo deja como "saltado", nunca duplicado.
+export async function revisarAhoraUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoRevisionInmediata> {
+  try {
+    const resultado = await revisarUnSeguimiento(seguimiento);
+    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id))
+    );
+    return { ok: true, saltado: resultado.saltado, alertasCreadas: resultado.alertasCreadas };
+  } catch (error) {
+    console.error(
+      `[lib/trabajos/revisionDiariaSeguimiento] revisión inmediata de ${seguimiento.id} (${seguimiento.tipo}) falló:`,
+      error instanceof Error ? error.message : error
+    );
+    return { ok: false, error: error instanceof Error ? error.message : "No se pudo revisar con Mercado Libre." };
+  }
+}
