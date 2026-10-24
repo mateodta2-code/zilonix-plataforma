@@ -65,26 +65,39 @@ async function tokenPropio(empresaId: string): Promise<string> {
   return obtenerAccessTokenVigente(empresaId, cuenta.id);
 }
 
-// Nombre para mostrar en la lista, resuelto una sola vez al agregar
-// (igual que invitaciones.empresa_nombre/rol_nombre) con las funciones
-// YA existentes de lib/ml/cliente.ts — nunca una llamada nueva. Si
-// Mercado Libre no deja ver el nombre (enriquecimiento opcional, igual
-// que en investigacion.ts), se usa el id tal cual en vez de fallar
-// toda la operación de agregar.
-async function resolverNombre(tipo: "producto" | "tienda", recursoMl: "item" | "product" | "seller", mlIdExterno: string, token: string): Promise<string> {
+// Issue #201 — bug real en staging: antes, si Mercado Libre no dejaba
+// ver el nombre (token vencido ese instante, 403/5xx puntual, etc.),
+// el fallback era el id tal cual (`MCO123456789`) — la tabla se
+// llenaba de ids indistinguibles entre sí, el cliente no identificaba
+// ninguna fila. Ahora el fallback es este placeholder explícito, nunca
+// el id: `revisarUnSeguimiento` (lib/trabajos/revisionDiariaSeguimiento.ts)
+// reintenta la resolución en cada revisión diaria mientras el nombre
+// siga siendo este placeholder — así un fallo transitorio al agregar
+// se corrige solo en la próxima corrida, en vez de quedar pegado para
+// siempre con el id.
+export const NOMBRE_PENDIENTE_PRIMERA_REVISION = "Pendiente de primera revisión";
+
+// Nombre para mostrar en la lista — se intenta al agregar (igual que
+// invitaciones.empresa_nombre/rol_nombre) con las funciones YA
+// existentes de lib/ml/cliente.ts, nunca una llamada nueva; y se
+// reintenta en la primera revisión diaria que encuentre el placeholder
+// de arriba (ver revisarUnSeguimiento). Si Mercado Libre no deja ver el
+// nombre (enriquecimiento opcional, igual que en investigacion.ts), se
+// usa el placeholder en vez de fallar toda la operación — nunca el id.
+export async function resolverNombre(tipo: "producto" | "tienda", recursoMl: "item" | "product" | "seller", mlIdExterno: string, token: string): Promise<string> {
   try {
     if (tipo === "tienda") {
       const vendedor = await obtenerVendedor(mlIdExterno, token);
-      return vendedor?.nickname ?? mlIdExterno;
+      return vendedor?.nickname ?? NOMBRE_PENDIENTE_PRIMERA_REVISION;
     }
     if (recursoMl === "item") {
       const item = await obtenerItemMl(mlIdExterno, token);
-      return item?.producto.nombre ?? mlIdExterno;
+      return item?.producto.nombre ?? NOMBRE_PENDIENTE_PRIMERA_REVISION;
     }
     const producto = await obtenerProducto(mlIdExterno, token);
-    return producto?.nombre ?? mlIdExterno;
+    return producto?.nombre ?? NOMBRE_PENDIENTE_PRIMERA_REVISION;
   } catch {
-    return mlIdExterno;
+    return NOMBRE_PENDIENTE_PRIMERA_REVISION;
   }
 }
 

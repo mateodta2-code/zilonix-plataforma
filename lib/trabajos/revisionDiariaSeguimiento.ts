@@ -6,6 +6,7 @@ import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuent
 import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
 import { compararFotos, type FotoComparable } from "@/lib/seguimiento/alertas";
+import { NOMBRE_PENDIENTE_PRIMERA_REVISION, resolverNombre } from "@/lib/seguimiento/seguimientos";
 
 // Issue #175 — regla de CLAUDE.md: "toda tarea en segundo plano vive
 // en lib/trabajos/". Mismo patrón que lib/ml/trabajador.ts (tarea
@@ -172,6 +173,20 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
     tx.select({ cuentaIdExterna: cuentasMl.cuentaIdExterna }).from(cuentasMl).where(eq(cuentasMl.id, cuenta.id))
   );
   const token = await obtenerAccessTokenVigente(seguimiento.empresaId, cuenta.id);
+
+  // Issue #201 — "al agregar o en la primera revisión, guardar el
+  // nombre real": si agregarSeguimiento() no pudo resolverlo ese
+  // instante (token recién emitido, un 403/5xx puntual de Mercado
+  // Libre), queda el placeholder — se reintenta ACÁ, con un token ya
+  // confirmado vigente, en cada revisión diaria mientras siga
+  // pendiente. Nunca se reintenta si ya hay un nombre real, para no
+  // gastar una llamada a ML de más todos los días.
+  if (seguimiento.nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION) {
+    const nombreResuelto = await resolverNombre(seguimiento.tipo, seguimiento.recursoMl, seguimiento.mlIdExterno, token);
+    if (nombreResuelto !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
+      await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: nombreResuelto }).where(eq(seguimientosMl.id, seguimiento.id)));
+    }
+  }
 
   const datos = await leerConReintento429(seguimiento, token, cuentaFila.cuentaIdExterna);
 

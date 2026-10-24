@@ -238,6 +238,11 @@ export default async function SeguimientoPage({
                 <FilaTabla key={seguimiento.id}>
                   <CeldaTabla>
                     <Link href={`/panel/investigacion/seguimiento/${seguimiento.id}`}>{seguimiento.nombre}</Link>
+                    {/* Issue #201 — antes la tabla solo mostraba el id
+                    (MCOxxxxx/seller_id), indistinguible entre filas; el
+                    id sigue visible, pero como dato secundario, nunca
+                    como el nombre principal. */}
+                    <div className={styles.subdato}>{seguimiento.mlIdExterno}</div>
                     {seguimiento.esCompetidor ? <Chip estado="aviso">Competidor</Chip> : null}
                     {altasHoy.has(seguimiento.id) ? <Chip estado="exito">Alta hoy</Chip> : null}
                     {bajasHoy.has(seguimiento.id) ? <Chip estado="peligro">Baja hoy</Chip> : null}
