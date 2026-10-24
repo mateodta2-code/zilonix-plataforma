@@ -4,7 +4,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa } from "./empresa-context";
 import { cuentasMl } from "./schema";
 import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
-import { cifrarToken } from "../lib/cifrado";
+import { cifrarToken, descifrarToken } from "../lib/cifrado";
+import { CuentaMlDeOtraEmpresaError, desconectarCuenta, guardarCuentaConectada } from "../lib/ml/cuentas";
+import type { TokensMl } from "../lib/ml/oauth";
 
 // Tarea 2.3 — misma prueba de siempre, contra Postgres real: una
 // empresa nunca ve ni toca la cuenta de Mercado Libre de otra.
@@ -74,5 +76,76 @@ describe("cuentas_ml (RLS, tarea 2.3)", () => {
         })
       )
     ).rejects.toThrow();
+  });
+});
+
+function tokensDePrueba(cuentaIdExterna: string, sufijo: string): TokensMl {
+  return { accessToken: `access-${sufijo}`, refreshToken: `refresh-${sufijo}`, expiraEnSegundos: 21_600, cuentaIdExterna };
+}
+
+// Bug real en vivo en staging: reconectar una cuenta de Mercado Libre
+// reventaba con "duplicate key value violates unique constraint
+// cuentas_ml_cuenta_externa_unica". A diferencia de las pruebas de
+// arriba (que insertan directo con tx.insert para probar el índice en
+// sí), estas pasan por guardarCuentaConectada de verdad — el
+// comportamiento real bajo RLS a FORCE (ver db/rls-setup.sql) solo se
+// puede confirmar contra Postgres real, nunca con un mock.
+describe("guardarCuentaConectada — RLS real (issue reconectar, tarea 2.3)", () => {
+  it("reconectar la MISMA cuenta de la MISMA empresa (conectada o desconectada) reactiva la misma fila, nunca una nueva", async () => {
+    const { empresaAId } = await crearDosEmpresas();
+    const cuentaIdExterna = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+
+    const primera = await guardarCuentaConectada(empresaAId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_INICIAL",
+      tokens: tokensDePrueba(cuentaIdExterna, "inicial"),
+    });
+    await desconectarCuenta(empresaAId, primera.id);
+
+    const reconectada = await guardarCuentaConectada(empresaAId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_RECONECTADO",
+      tokens: tokensDePrueba(cuentaIdExterna, "reconectado"),
+    });
+
+    expect(reconectada.id).toBe(primera.id);
+    const [fila] = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, primera.id)));
+    expect(fila.desconectadaTs).toBeNull();
+    expect(fila.nickname).toBe("VENDEDOR_RECONECTADO");
+    expect(descifrarToken(fila.accessTokenCifrado)).toBe("access-reconectado");
+
+    const todas = await dbComoEmpresa(empresaAId, (tx) => tx.select({ id: cuentasMl.id }).from(cuentasMl).where(eq(cuentasMl.cuentaIdExterna, cuentaIdExterna)));
+    expect(todas).toHaveLength(1);
+  });
+
+  it("una cuenta ya conectada a OTRA empresa: CuentaMlDeOtraEmpresaError de verdad bajo RLS a FORCE, y la fila ajena no se toca", async () => {
+    const { empresaAId, empresaBId } = await crearDosEmpresas();
+    const cuentaIdExterna = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+
+    const deEmpresaA = await guardarCuentaConectada(empresaAId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_A",
+      tokens: tokensDePrueba(cuentaIdExterna, "a"),
+    });
+
+    await expect(
+      guardarCuentaConectada(empresaBId, {
+        cuentaIdExterna,
+        nickname: "INTENTO_DESDE_B",
+        tokens: tokensDePrueba(cuentaIdExterna, "robo"),
+      })
+    ).rejects.toThrow(CuentaMlDeOtraEmpresaError);
+
+    // La fila real de la empresa A no cambió nada — ni el intento
+    // falló a medias, ni "robó" la fila ajena.
+    const [filaA] = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, deEmpresaA.id)));
+    expect(filaA.nickname).toBe("VENDEDOR_A");
+    expect(descifrarToken(filaA.accessTokenCifrado)).toBe("access-a");
+
+    // Y nunca quedó una fila nueva (ni siquiera a medio insertar) del
+    // lado de empresa B.
+    const todas = await dbComoEmpresa(empresaAId, (tx) => tx.select({ id: cuentasMl.id }).from(cuentasMl).where(eq(cuentasMl.cuentaIdExterna, cuentaIdExterna)));
+    expect(todas).toHaveLength(1);
+    expect(todas[0].id).toBe(deEmpresaA.id);
   });
 });

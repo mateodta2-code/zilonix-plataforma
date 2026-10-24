@@ -95,6 +95,24 @@
   --borde-zona-oscura: #222225;
   --degradado-plata-texto-zona-oscura: linear-gradient(100deg, #c0c0c0 0%, #e6e6e6 46%, #d0d0d0 72%, #c0c0c0 100%);
 
+  /* Issue #156 — TarjetaKpi (inicio, Avisos ML, Investigación): fondo
+     siempre gris oscuro, en LOS DOS TEMAS (mismo criterio que los
+     --*-zona-oscura de arriba) — nunca condicionado por [data-tema],
+     porque el degradado de abajo YA es oscuro en los dos. Contraste
+     medido con script (fórmula WCAG de luminancia relativa) contra las
+     3 paradas del degradado, de la más clara (peor caso) a la más
+     oscura: #2b2f36 / #1f2228 / #16171a:
+       --texto-zona-oscura        #f2f4f8 -> 12.20 / 14.47 / 16.28 : 1
+       --texto-suave-zona-oscura  #c0c0c0 ->  7.39 /  8.76 /  9.85 : 1
+       parada clara del degradado
+       de plata (texto de la cifra) #e6e6e6 -> 10.77 / 12.77 / 14.36 : 1
+       --kpi-exito-texto          #4ade80 ->  7.71 /  9.15 / 10.29 : 1
+       --kpi-peligro-texto        #f87171 ->  4.86 /  5.76 /  6.48 : 1
+     Todos pasan AA (4.5:1) con margen real, incluso en el peor caso. */
+  --kpi-fondo: linear-gradient(180deg, #2b2f36 0%, #1f2228 55%, #16171a 100%);
+  --kpi-exito-texto: #4ade80;
+  --kpi-peligro-texto: #f87171;
+
   --peligro: #ef4444;
   --exito: #22c55e;
   /* Texto de estado (chip, variación de KPI). En oscuro el verde y el

@@ -27,7 +27,15 @@ vi.mock("@/lib/permisos", () => {
   }
   return { requierePermiso: vi.fn(async () => ({})), SinPermisoError };
 });
-vi.mock("@/lib/ml/cuentas", () => ({ guardarCuentaConectada: vi.fn(async () => ({ id: "cuenta-1" })) }));
+vi.mock("@/lib/ml/cuentas", () => {
+  class CuentaMlDeOtraEmpresaError extends Error {
+    constructor() {
+      super("Esta cuenta de Mercado Libre ya está conectada a otra empresa en Zilonix. Desconéctala allá primero o escríbenos a soporte.");
+      this.name = "CuentaMlDeOtraEmpresaError";
+    }
+  }
+  return { guardarCuentaConectada: vi.fn(async () => ({ id: "cuenta-1" })), CuentaMlDeOtraEmpresaError };
+});
 vi.mock("@/lib/ml/oauth", () => ({
   intercambiarCodigo: vi.fn(async () => ({ accessToken: "tok", refreshToken: "ref", expiraEnSegundos: 21600, cuentaIdExterna: "123" })),
   obtenerNickname: vi.fn(async () => "VENDEDOR_TEST"),
@@ -37,6 +45,7 @@ vi.mock("@/lib/ml/importacion", () => ({ ejecutarImportacionInicial: vi.fn(async
 
 import { cookies } from "next/headers";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { CuentaMlDeOtraEmpresaError, guardarCuentaConectada } from "@/lib/ml/cuentas";
 import { intercambiarCodigo } from "@/lib/ml/oauth";
 import { GET } from "./route";
 
@@ -93,14 +102,60 @@ describe("GET /api/ml/callback — validación de state (fix middleware, 2026-10
     expect(intercambiarCodigo).toHaveBeenCalledWith("un-code", "https://staging.test/api/ml/callback", "un-verifier-real");
   });
 
-  it("sin permiso (SinPermisoError) -> redirige a /panel/conectar-ml con el mensaje, nunca revienta", async () => {
+  // Bug real: antes iba error.message tal cual a la URL — mismo molde
+  // que para CUALQUIER otro error de esta ruta terminaba mandando a la
+  // pantalla texto crudo de Mercado Libre o de Postgres. Ahora todo es
+  // uno de 5 códigos fijos — page.tsx traduce el código, nunca texto libre.
+  it("sin permiso (SinPermisoError) -> redirige a /panel/conectar-ml con el código fijo sin_permiso, nunca revienta", async () => {
     mockearCookies({});
     vi.mocked(requierePermiso).mockRejectedValue(new SinPermisoError("configuracion", "crear"));
     const res = await GET(peticion("code=un-code&state=algo"));
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("/panel/conectar-ml");
-    expect(decodeURIComponent(location)).toContain("No tienes permiso");
+    expect(location).toContain("error=sin_permiso");
     expect(intercambiarCodigo).not.toHaveBeenCalled();
+  });
+
+  // Bug real en vivo en staging: reconectar una cuenta de ML que ya
+  // tenía fila en otra empresa reventaba — guardarCuentaConectada
+  // (lib/ml/cuentas.ts) ahora lanza CuentaMlDeOtraEmpresaError, y esta
+  // ruta tiene que distinguirlo del resto de las fallas (código
+  // propio, nunca "error_desconocido" genérico para este caso puntual,
+  // y nunca revela a qué empresa pertenece la cuenta).
+  it("guardarCuentaConectada lanza CuentaMlDeOtraEmpresaError -> redirige con error=cuenta_en_otra_empresa", async () => {
+    const stateReal = "el-state-que-de-verdad-coincide";
+    mockearCookies({ [NOMBRE_COOKIE_VERIFIER]: "un-verifier-real", [NOMBRE_COOKIE_STATE]: stateReal });
+    vi.mocked(guardarCuentaConectada).mockRejectedValue(new CuentaMlDeOtraEmpresaError());
+    const res = await GET(peticion(`code=un-code&state=${stateReal}`));
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/panel/conectar-ml");
+    expect(location).toContain("error=cuenta_en_otra_empresa");
+  });
+
+  // Cualquier OTRA falla (ML rechazó el canje, Postgres, lo que sea) —
+  // nunca el texto crudo de esa falla en la URL, cae en el código
+  // genérico. oauth.ts documenta que ese texto puede traer hasta 300
+  // caracteres de la respuesta cruda de Mercado Libre.
+  it("guardarCuentaConectada lanza cualquier otro error -> redirige con error=error_desconocido, nunca el mensaje crudo", async () => {
+    const stateReal = "el-state-que-de-verdad-coincide";
+    mockearCookies({ [NOMBRE_COOKIE_VERIFIER]: "un-verifier-real", [NOMBRE_COOKIE_STATE]: stateReal });
+    vi.mocked(guardarCuentaConectada).mockRejectedValue(new Error("Mercado Libre respondió 500 al pedir el token: <cuerpo crudo secreto>"));
+    const res = await GET(peticion(`code=un-code&state=${stateReal}`));
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("error=error_desconocido");
+    expect(decodeURIComponent(location)).not.toContain("cuerpo crudo secreto");
+  });
+
+  // El vendedor cancela o Mercado Libre rechaza en su propia pantalla —
+  // ?error= llega como query param de la URL (texto que no controlamos
+  // nosotros): nunca se refleja tal cual, siempre el código fijo.
+  it("Mercado Libre vuelve con su propio ?error= -> redirige con error=ml_rechazo, nunca refleja el valor de la URL", async () => {
+    mockearCookies({});
+    const res = await GET(peticion("error=access_denied%20%3Cscript%3E"));
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("error=ml_rechazo");
+    expect(decodeURIComponent(location)).not.toContain("access_denied");
+    expect(decodeURIComponent(location)).not.toContain("<script>");
   });
 
   it("borra el verifier y el state con el MISMO path con el que se pusieron (Path=/api/ml, Max-Age=0) — si no, el navegador nunca los borra de verdad", async () => {

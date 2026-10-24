@@ -2,17 +2,21 @@ import styles from "./TarjetaKpi.module.css";
 
 // Sin `valor` dice "Pendiente de conectar" — no inventa una cifra ni
 // una curva. Quien ya tiene el dato lo pasa (en /panel, incluso "COP 0"
-// o 0): eso no es este estado vacío.
+// o 0): eso no es este estado vacío. `detalle` son líneas en letra
+// pequeña bajo la cifra (ej. el monto de "Ventas de hoy"); sin
+// `detalle`, la tarjeta se ve igual que siempre.
 export function TarjetaKpi({
   titulo,
   valor,
   variacionPorcentaje,
   puntos,
+  detalle,
 }: {
   titulo: string;
   valor?: string | number;
   variacionPorcentaje?: number;
   puntos?: number[];
+  detalle?: string[];
 }) {
   const tieneValor = valor !== undefined;
 
@@ -23,6 +27,11 @@ export function TarjetaKpi({
       {tieneValor ? (
         <>
           <p className={`${styles.valor} zx-texto-plata`}>{valor}</p>
+          {detalle?.map((linea, i) => (
+            <p key={i} className={styles.detalle}>
+              {linea}
+            </p>
+          ))}
           {variacionPorcentaje !== undefined && (
             <p className={styles.variacion} data-positiva={variacionPorcentaje >= 0 ? "true" : "false"}>
               {variacionPorcentaje >= 0 ? "+" : ""}

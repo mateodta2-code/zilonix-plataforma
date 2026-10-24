@@ -5,7 +5,8 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
-import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
+import { LimiteMercadoLibreError, MlNoAutorizadoError, MlNoDisponibleError, MlRespuestaInesperadaError, MlSinPermisoAppError } from "@/lib/ml/cliente";
+import { CandadoDeRenovacionError, CuentaDesconectadaError, CuentaMlNoEncontradaError, RenovacionTokenFallidaError } from "@/lib/ml/cuentas";
 import {
   buscarInvestigacionProducto,
   LimiteBusquedasError,
@@ -25,7 +26,7 @@ import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import styles from "./page.module.css";
 
 // Nueva tarea: módulo "Investigación" de Zilonix OS, PARTE 1 (solo
-// Mercado Libre Colombia) — buscador de producto/nicho (2-3 palabras)
+// Mercado Libre Colombia) — buscador de producto/nicho (1-3 palabras)
 // con datos reales de la API oficial de Mercado Libre, antes de
 // invertir en él. Todo el cálculo real vive en lib/ml/investigacion.ts;
 // esta página solo lee el término de la URL (?termino=, mismo patrón
@@ -64,6 +65,15 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
 
   let resultado: ResultadoInvestigacion | null = null;
   let errorBusqueda: string | null = null;
+  // Issue #147 — bug real: cualquier error que no fuera uno de los 4
+  // tipos de arriba (ej. un 401/403 real de Mercado Libre, la cuenta
+  // desconectada, el candado de renovación, invalid_grant) se
+  // relanzaba tal cual y, sin app/panel/investigacion/error.tsx,
+  // Next.js mostraba "Application error" sin mensaje — justo lo que
+  // reportó Mateo. Ahora se atrapan todos los tipos conocidos con un
+  // mensaje en español claro; lo único que de verdad sigue subiendo
+  // (a error.tsx) es un error que de verdad no se esperaba.
+  let mostrarEnlaceReconectar = false;
 
   if (termino) {
     try {
@@ -73,9 +83,19 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
         error instanceof TerminoInvalidoError ||
         error instanceof LimiteBusquedasError ||
         error instanceof SinCuentaMlError ||
-        error instanceof LimiteMercadoLibreError
+        error instanceof LimiteMercadoLibreError ||
+        error instanceof MlSinPermisoAppError ||
+        error instanceof MlNoDisponibleError ||
+        error instanceof MlRespuestaInesperadaError
       ) {
         errorBusqueda = error.message;
+      } else if (error instanceof MlNoAutorizadoError || error instanceof CuentaDesconectadaError || error instanceof RenovacionTokenFallidaError) {
+        errorBusqueda = error.message;
+        mostrarEnlaceReconectar = true;
+      } else if (error instanceof CuentaMlNoEncontradaError) {
+        errorBusqueda = error.message;
+      } else if (error instanceof CandadoDeRenovacionError) {
+        errorBusqueda = error.message; // el mensaje ya incluye "reintentar en unos segundos" — no se duplica
       } else {
         throw error;
       }
@@ -87,11 +107,16 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
       <EncabezadoPagina
         titulo="Investigación"
         descripcion="Analiza un producto o nicho con datos reales de Mercado Libre Colombia antes de invertir en él."
+        accion={
+          <BotonLink href="/panel/investigacion/seguimiento" variante="secundario" chico>
+            Seguimiento diario
+          </BotonLink>
+        }
       />
 
       <Tarjeta className={styles.formulario}>
         <form method="get" className={styles.filaFormulario}>
-          <Campo etiqueta="Producto o nicho (2-3 palabras)">
+          <Campo etiqueta="Producto o nicho (hasta 3 palabras)">
             <input
               type="search"
               name="termino"
@@ -108,7 +133,19 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
         </p>
       </Tarjeta>
 
-      {errorBusqueda ? <EstadoVacio>{errorBusqueda}</EstadoVacio> : null}
+      {errorBusqueda ? (
+        <EstadoVacio>
+          {errorBusqueda}
+          {mostrarEnlaceReconectar ? (
+            <>
+              {" "}
+              <BotonLink href="/panel/conectar-ml" variante="secundario" chico>
+                Reconectar cuenta
+              </BotonLink>
+            </>
+          ) : null}
+        </EstadoVacio>
+      ) : null}
 
       {!termino && !errorBusqueda ? (
         <EstadoVacio>Escribe un producto o nicho para analizar demanda, competencia y oportunidades.</EstadoVacio>

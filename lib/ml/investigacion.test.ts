@@ -11,14 +11,26 @@ import {
   type PublicacionInvestigacion,
 } from "./investigacion";
 
-const { LimiteMercadoLibreErrorFalso } = vi.hoisted(() => {
+const { LimiteMercadoLibreErrorFalso, MlSinPermisoAppErrorFalso } = vi.hoisted(() => {
   class LimiteMercadoLibreErrorFalso extends Error {
     constructor() {
       super("Mercado Libre está limitando las consultas, intenta en un minuto.");
       this.name = "LimiteMercadoLibreError";
     }
   }
-  return { LimiteMercadoLibreErrorFalso };
+  // Issue #147 — falso idéntico al real (lib/ml/cliente.ts) para poder
+  // simular, sin tocar fetch, que una función auxiliar devolvió un
+  // 403 de la APP (no de la cuenta) — investigacion.ts lo cuenta
+  // distinto de "sin ofertas reales".
+  class MlSinPermisoAppErrorFalso extends Error {
+    readonly endpoint: string;
+    constructor(endpoint: string) {
+      super("Mercado Libre no le da permiso a esta aplicación para esta consulta.");
+      this.name = "MlSinPermisoAppError";
+      this.endpoint = endpoint;
+    }
+  }
+  return { LimiteMercadoLibreErrorFalso, MlSinPermisoAppErrorFalso };
 });
 
 vi.mock("@/lib/ml/cliente", () => ({
@@ -26,17 +38,19 @@ vi.mock("@/lib/ml/cliente", () => ({
   resolverCategoria: vi.fn(),
   obtenerMejoresProductosCategoria: vi.fn(),
   obtenerProducto: vi.fn(),
+  obtenerItemMl: vi.fn(),
   obtenerOfertasProducto: vi.fn(),
   obtenerVendedor: vi.fn(),
   linkPublicacion: (itemId: string) => `https://articulo.mercadolibre.com.co/${itemId}`,
   LimiteMercadoLibreError: LimiteMercadoLibreErrorFalso,
+  MlSinPermisoAppError: MlSinPermisoAppErrorFalso,
 }));
 vi.mock("@/lib/ml/cuentas", () => ({
   obtenerCuentaMlActiva: vi.fn(),
   obtenerAccessTokenVigente: vi.fn(),
 }));
 
-import { buscarProductosCatalogo, obtenerMejoresProductosCategoria, obtenerOfertasProducto, obtenerProducto, obtenerVendedor, resolverCategoria } from "@/lib/ml/cliente";
+import { buscarProductosCatalogo, obtenerItemMl, obtenerMejoresProductosCategoria, obtenerOfertasProducto, obtenerProducto, obtenerVendedor, resolverCategoria } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 
 function publicacion(parcial: Partial<PublicacionInvestigacion> = {}): PublicacionInvestigacion {
@@ -48,14 +62,16 @@ function publicacion(parcial: Partial<PublicacionInvestigacion> = {}): Publicaci
   };
 }
 
-describe("validarTermino — 2 a 3 palabras (tarea Investigación ML, Parte 1)", () => {
-  it("acepta 2 y 3 palabras, recortadas", () => {
-    expect(validarTermino("  reloj digital  ")).toBe("reloj digital");
+// Issue #174 — antes exigía 2-3 palabras: una búsqueda real de una
+// sola palabra ("licuadora") no hacía nada, bug reportado por Sharel.
+describe("validarTermino — 1 a 3 palabras (issue #174)", () => {
+  it("acepta 1, 2 y 3 palabras, recortadas", () => {
+    expect(validarTermino("  reloj  ")).toBe("reloj");
+    expect(validarTermino("reloj digital")).toBe("reloj digital");
     expect(validarTermino("reloj digital casio")).toBe("reloj digital casio");
   });
 
-  it("rechaza una sola palabra, 4+, vacío y solo espacios", () => {
-    expect(() => validarTermino("reloj")).toThrow(TerminoInvalidoError);
+  it("rechaza 4+ palabras, vacío y solo espacios", () => {
     expect(() => validarTermino("reloj digital casio nuevo")).toThrow(TerminoInvalidoError);
     expect(() => validarTermino("")).toThrow(TerminoInvalidoError);
     expect(() => validarTermino("   ")).toThrow(TerminoInvalidoError);
@@ -146,6 +162,7 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     vi.mocked(resolverCategoria).mockResolvedValue(null);
     vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue([]);
     vi.mocked(obtenerProducto).mockResolvedValue(null);
+    vi.mocked(obtenerItemMl).mockResolvedValue(null);
   });
 
   it("exige una cuenta de Mercado Libre conectada antes de llamar a la API", async () => {
@@ -202,7 +219,7 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     // y llenar los 20 cupos restantes con los primeros de categoría,
     // nunca al revés ni mezclado al azar.
     const textoC = Array.from({ length: 20 }, (_, i) => ({ id: `T${i}`, nombre: `Reloj digital texto ${i}`, foto: null }));
-    const categoriaIds = Array.from({ length: 30 }, (_, i) => `C${i}`);
+    const categoriaIds = Array.from({ length: 30 }, (_, i) => ({ id: `C${i}`, tipo: "PRODUCT" }));
     vi.mocked(buscarProductosCatalogo).mockResolvedValueOnce(textoC).mockResolvedValue([]);
     vi.mocked(resolverCategoria).mockResolvedValue({ categoryId: "CAT1" });
     vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue(categoriaIds);
@@ -217,11 +234,11 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     expect(obtenerOfertasProducto).toHaveBeenCalledTimes(40);
     expect(resultado.publicacionesEncontradas).toBe(40);
     const idsLlamados = new Set(vi.mocked(obtenerOfertasProducto).mock.calls.map((c) => c[0]));
-    const esperados = new Set([...textoC.map((c) => c.id), ...categoriaIds.slice(0, 20)]);
+    const esperados = new Set([...textoC.map((c) => c.id), ...categoriaIds.slice(0, 20).map((c) => c.id)]);
     expect(idsLlamados).toEqual(esperados);
     // Ninguno de los últimos 10 de categoría (los que no entraron en el tope).
     for (const sobrante of categoriaIds.slice(20)) {
-      expect(idsLlamados.has(sobrante)).toBe(false);
+      expect(idsLlamados.has(sobrante.id)).toBe(false);
     }
   });
 
@@ -232,7 +249,7 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     // con el tope, se llama como máximo 20 veces, así que el resultado
     // final queda en 5+20=25 publicaciones, nunca 30 ni 35.
     const texto = Array.from({ length: 5 }, (_, i) => ({ id: `T${i}`, nombre: "Reloj digital texto", foto: null }));
-    const categoriaIds = Array.from({ length: 30 }, (_, i) => `C${i}`);
+    const categoriaIds = Array.from({ length: 30 }, (_, i) => ({ id: `C${i}`, tipo: "PRODUCT" }));
     vi.mocked(buscarProductosCatalogo).mockResolvedValueOnce(texto).mockResolvedValue([]);
     vi.mocked(resolverCategoria).mockResolvedValue({ categoryId: "CAT1" });
     vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue(categoriaIds);
@@ -252,6 +269,124 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
   it("HTTP 429 de Mercado Libre corta toda la búsqueda con el aviso específico (no un 500 genérico)", async () => {
     vi.mocked(buscarProductosCatalogo).mockRejectedValue(new LimiteMercadoLibreErrorFalso());
     await expect(buscarInvestigacionProducto("empresa-1", "reloj digital")).rejects.toThrow(/limitando las consultas/i);
+  });
+
+  // Issue #147, punto 5 — registrarBusqueda() descuenta cupo del límite
+  // de 10/minuto; antes corría ANTES de validarTermino(), así que un
+  // término inválido ya gastaba cupo real sin haber buscado nada.
+  // Issue #174: "reloj" (1 palabra) ya es válido — el término inválido
+  // de esta prueba pasa a ser 4+ palabras.
+  it("término inválido (4+ palabras) nunca descuenta cupo del límite de búsquedas", async () => {
+    await expect(buscarInvestigacionProducto("empresa-cupo", "reloj digital casio nuevo")).rejects.toThrow(TerminoInvalidoError);
+    expect(buscarProductosCatalogo).not.toHaveBeenCalled();
+    // Si hubiera descontado cupo, agotar las 10 búsquedas válidas de
+    // abajo bloquearía la búsqueda 10 (no la 11) — confirma que el
+    // intento inválido de arriba no contó para nada.
+    vi.mocked(buscarProductosCatalogo).mockResolvedValue([]);
+    for (let i = 0; i < LIMITE_BUSQUEDAS_POR_MINUTO; i++) {
+      await expect(buscarInvestigacionProducto("empresa-cupo", "reloj digital")).resolves.toBeDefined();
+    }
+    await expect(buscarInvestigacionProducto("empresa-cupo", "reloj digital")).rejects.toThrow(LimiteBusquedasError);
+  });
+
+  // Issue #147, punto 3 — "si todas las ofertas fallaron por 403, el
+  // aviso lo dice" (nunca se confunde con "sin ofertas reales", que es
+  // un caso legítimo y distinto — ver la otra prueba de 404 arriba).
+  it("si TODAS las ofertas fallan por falta de permiso de la app (403), el aviso lo dice explícitamente", async () => {
+    vi.mocked(buscarProductosCatalogo)
+      .mockResolvedValueOnce([
+        { id: "MCO1", nombre: "Reloj digital casio", foto: null },
+        { id: "MCO2", nombre: "Reloj digital negro", foto: null },
+      ])
+      .mockResolvedValue([]);
+    vi.mocked(obtenerOfertasProducto).mockRejectedValue(new MlSinPermisoAppErrorFalso("/products/MCO1/items"));
+
+    const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
+    expect(resultado.aviso).toMatch(/no le da permiso a la app para ver ofertas/i);
+  });
+
+  // Mezcla real: algunas ofertas fallan por 403 y otras simplemente no
+  // tienen ninguna oferta real — el aviso de "falta permiso" es
+  // específico SOLO cuando el 403 explica el 100% de los fallos.
+  it("ofertas con 403 mezcladas con candidatos sin ofertas reales: no se confunde con el aviso de falta de permiso", async () => {
+    vi.mocked(buscarProductosCatalogo)
+      .mockResolvedValueOnce([
+        { id: "MCO1", nombre: "Reloj digital casio", foto: null },
+        { id: "MCO2", nombre: "Reloj digital negro", foto: null },
+      ])
+      .mockResolvedValue([]);
+    vi.mocked(obtenerOfertasProducto).mockImplementation(async (productId: string) => {
+      if (productId === "MCO1") throw new MlSinPermisoAppErrorFalso("/products/MCO1/items");
+      return []; // MCO2: sin ofertas reales, no es un 403
+    });
+
+    const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
+    expect(resultado.aviso).toMatch(/ninguno de sus productos tiene publicaciones activas/i);
+    expect(resultado.aviso).not.toMatch(/permiso/i);
+  });
+
+  // Issue #147, punto 4 — highlights trae PRODUCT (catálogo, vía
+  // obtenerProducto), ITEM (publicación real, vía obtenerItemMl —
+  // endpoint DISTINTO) y USER_PRODUCT (se ignora, nunca se manda a
+  // ningún endpoint). Antes TODOS se trataban como PRODUCT, y un ITEM
+  // se mandaba a obtenerOfertasProducto (GET /products/{id}/items),
+  // que le da 404 siempre — un ITEM nunca producía ninguna
+  // publicación. Ahora obtenerItemMl ya trae la oferta armada desde el
+  // mismo /items/{id}: obtenerOfertasProducto se llama SOLO para el
+  // PRODUCT, y el ITEM igual aparece en el resultado.
+  it("highlights con los 3 tipos: PRODUCT va a obtenerProducto+obtenerOfertasProducto, ITEM a obtenerItemMl (con su propia oferta), USER_PRODUCT se ignora", async () => {
+    vi.mocked(buscarProductosCatalogo).mockResolvedValue([]); // sin candidatos de texto, solo los de categoría
+    vi.mocked(resolverCategoria).mockResolvedValue({ categoryId: "CAT1" });
+    vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue([
+      { id: "MCO1", tipo: "PRODUCT" },
+      { id: "MCO2", tipo: "ITEM" },
+      { id: "MCOU3", tipo: "USER_PRODUCT" },
+    ]);
+    vi.mocked(obtenerProducto).mockResolvedValue({ id: "MCO1", nombre: "Reloj digital de catálogo", foto: null });
+    vi.mocked(obtenerItemMl).mockResolvedValue({
+      producto: { id: "MCO2", nombre: "Reloj digital publicación", foto: null },
+      oferta: { itemId: "MCO222", precio: 35_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null },
+    });
+    vi.mocked(obtenerOfertasProducto).mockResolvedValue([
+      { itemId: "MCO111", precio: 20_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null },
+    ]);
+
+    const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
+
+    expect(obtenerProducto).toHaveBeenCalledWith("MCO1", "token-falso");
+    expect(obtenerItemMl).toHaveBeenCalledWith("MCO2", "token-falso");
+    expect(obtenerProducto).not.toHaveBeenCalledWith("MCOU3", expect.anything());
+    expect(obtenerItemMl).not.toHaveBeenCalledWith("MCOU3", expect.anything());
+    // obtenerOfertasProducto SOLO para el PRODUCT (MCO1) — el ITEM (MCO2)
+    // nunca pasa por ahí, ya trae su oferta resuelta.
+    expect(obtenerOfertasProducto).toHaveBeenCalledTimes(1);
+    expect(obtenerOfertasProducto).toHaveBeenCalledWith("MCO1", "token-falso");
+    // El ITEM igual aparece en el resultado final, construido directo
+    // de la oferta que trajo obtenerItemMl.
+    expect(resultado.publicacionesEncontradas).toBe(2);
+    expect(resultado.publicaciones.map((p) => p.itemId).sort()).toEqual(["MCO111", "MCO222"]);
+    // Issue #147, corrección adicional: el id de un ITEM es el de la
+    // publicación (itemId), nunca un productId de catálogo real — solo
+    // el PRODUCT (MCO1) trae un productId de verdad.
+    const publicacionItem = resultado.publicaciones.find((p) => p.itemId === "MCO222");
+    const publicacionProduct = resultado.publicaciones.find((p) => p.itemId === "MCO111");
+    expect(publicacionItem?.productId).toBeNull();
+    expect(publicacionProduct?.productId).toBe("MCO1");
+  });
+
+  // Issue #147, corrección adicional: obtenerItemMl ya descarta (null)
+  // una publicación pausada/cerrada (cliente.ts, status !== "active")
+  // — un ITEM así nunca debe producir ninguna publicación acá.
+  it("highlights ITEM pausado (obtenerItemMl devuelve null): no aparece en resultado.publicaciones", async () => {
+    vi.mocked(buscarProductosCatalogo).mockResolvedValue([]);
+    vi.mocked(resolverCategoria).mockResolvedValue({ categoryId: "CAT1" });
+    vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue([{ id: "MCO2", tipo: "ITEM" }]);
+    vi.mocked(obtenerItemMl).mockResolvedValue(null);
+
+    const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
+
+    expect(resultado.publicaciones).toEqual([]);
+    expect(resultado.publicacionesEncontradas).toBe(0);
   });
 
   it("límite de búsquedas por minuto por empresa: la búsqueda número 11 en la misma ventana se bloquea", async () => {

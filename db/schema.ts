@@ -49,6 +49,36 @@ export const pasoPedidoEnum = pgEnum("paso_pedido", [
   "novedades",
   "dinero_conciliado",
 ]);
+// Issue #175 — qué se sigue: un producto puntual (publicación o
+// catálogo) o una tienda/vendedor completo.
+export const seguimientoTipoEnum = pgEnum("seguimiento_tipo", ["producto", "tienda"]);
+// Solo tiene sentido cuando seguimiento_tipo = "producto": un link de
+// Mercado Libre puede apuntar a una PUBLICACIÓN real (GET /items/{id})
+// o a un PRODUCTO de catálogo (GET /products/{id}) — endpoints
+// distintos, nunca intercambiables (mismo hallazgo real que
+// obtenerItemMl ya documenta en lib/ml/cliente.ts). "seller" es el
+// único valor real cuando el tipo es "tienda".
+export const seguimientoRecursoMlEnum = pgEnum("seguimiento_recurso_ml", ["item", "product", "seller"]);
+// Issue #175 — comparación contra la foto del día anterior. Cada valor
+// es un hecho objetivo observado, nunca una opinión ("posible venta" se
+// explica en el mensaje que arma lib/seguimiento/alertas.ts a partir de
+// "inventario_bajo" + las unidades, no es un tipo de alerta aparte).
+// "vendio_unidades" SÍ es aparte de "inventario_bajo": usa sold_quantity,
+// el contador real de Mercado Libre, nunca una estimación por inventario.
+export const alertaSeguimientoTipoEnum = pgEnum("alerta_seguimiento_tipo", [
+  "precio_bajo",
+  "precio_subio",
+  "entro_catalogo",
+  "salio_catalogo",
+  "gano_boton_compra",
+  "perdio_boton_compra",
+  "inventario_bajo",
+  "vendio_unidades",
+  "pausada",
+  "finalizada",
+  "publicacion_nueva",
+  "publicacion_eliminada",
+]);
 
 export const empresas = pgTable("empresas", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -431,5 +461,126 @@ export const productosMl = pgTable("productos_ml", {
   resultado: jsonb("resultado").$type<ResultadoPublicacionCuenta[] | null>(),
   publicadoTs: timestamp("publicado_ts", { withTimezone: true }),
   creadoPorUsuarioId: uuid("creado_por_usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+  creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Issue #175 — qué se sigue: un producto (publicación o catálogo) o
+// una tienda/vendedor, por empresa. "Competidor" es solo una marca
+// (es_competidor) sobre el mismo seguimiento, no una tabla aparte — el
+// tope real de 5 competidores por empresa se valida en el servidor
+// (lib/seguimiento/seguimientos.ts), nunca acá con una constraint: un
+// trigger de conteo agregaría complejidad en SQL a mano por algo que
+// la aplicación ya puede chequear antes de insertar, dentro de la
+// misma transacción de dbComoEmpresa.
+//
+// Nunca se borra de verdad (mismo criterio que cuentas_ml.desconectada_ts):
+// quitar un seguimiento marca eliminado_ts, para no perder su
+// historial de fotos/alertas si se vuelve a agregar después — agregar
+// el MISMO ml_id_externo que ya estaba eliminado revive esa fila en
+// vez de insertar una nueva (ver agregarSeguimiento()).
+export const seguimientosMl = pgTable(
+  "seguimientos_ml",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    tipo: seguimientoTipoEnum("tipo").notNull(),
+    recursoMl: seguimientoRecursoMlEnum("recurso_ml").notNull(),
+    // item/product id (formato MCOxxxx) o seller id (solo dígitos) —
+    // el mismo valor que ya usan los patrones reales de lib/ml/cliente.ts.
+    mlIdExterno: text("ml_id_externo").notNull(),
+    // Título del producto o nickname de la tienda, al momento de
+    // agregar el seguimiento — igual que invitaciones.empresa_nombre/
+    // rol_nombre: una copia liviana para no tener que volver a pedirle
+    // el nombre a Mercado Libre solo para pintar la lista.
+    nombre: text("nombre").notNull(),
+    linkOriginal: text("link_original").notNull(),
+    esCompetidor: boolean("es_competidor").notNull().default(false),
+    creadoPor: uuid("creado_por").notNull().references(() => usuarios.id),
+    eliminadoTs: timestamp("eliminado_ts", { withTimezone: true }),
+    // Lo fija el trabajador diario (lib/trabajos/revisionDiariaSeguimiento.ts)
+    // después de guardar la foto del día — sirve para el panel ("hace
+    // cuánto se revisó por última vez") y para que una corrida manual
+    // no reprocese dos veces el mismo día.
+    ultimaRevisionTs: timestamp("ultima_revision_ts", { withTimezone: true }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Issue #175 — no tiene sentido seguir el mismo producto/tienda dos
+    // veces en la misma empresa. Revivir uno eliminado reusa esta misma
+    // fila (ver arriba), así que el índice solo mira el valor, nunca si
+    // está eliminado o no.
+    seguimientoUnico: uniqueIndex("seguimientos_ml_empresa_recurso_unico").on(t.empresaId, t.mlIdExterno),
+  })
+);
+
+// Issue #175 — una foto por seguimiento por día (índice único de
+// abajo). Todo lo numérico/booleano queda NULL cuando Mercado Libre no
+// lo deja ver para ese recurso puntual (regla explícita del issue:
+// "lo que ML no deje ver queda como no disponible, nunca inventado") —
+// nunca un 0/false adivinado en su lugar.
+export const seguimientoFotos = pgTable(
+  "seguimiento_fotos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    seguimientoId: uuid("seguimiento_id").notNull().references(() => seguimientosMl.id, { onDelete: "cascade" }),
+    // DATE, no timestamp: la revisión diaria es una vez al día — "misma
+    // fecha" es la clave real de "misma foto", no un instante exacto.
+    fecha: timestamp("fecha", { withTimezone: false, mode: "date" }).notNull(),
+    precio: numeric("precio", { precision: 14, scale: 2 }),
+    // El campo original_price real de Mercado Libre (precio de
+    // referencia tachado cuando hay descuento) — nunca una resta contra
+    // la foto de ayer, que es una cuenta distinta y ya la hace la
+    // comparación de alertas (lib/seguimiento/alertas.ts) con las dos
+    // fotos completas.
+    precioAnterior: numeric("precio_anterior", { precision: 14, scale: 2 }),
+    inventarioDisponible: integer("inventario_disponible"),
+    // Issue #175 — "el inventario de publicaciones ajenas puede venir
+    // aproximado y así se aclara en pantalla": lo fija el lector
+    // cuando el número que devuelve Mercado Libre para un recurso
+    // AJENO no es el disponible real exacto (confirmado en vivo con
+    // el diagnóstico de /panel/investigacion/diagnostico).
+    inventarioAproximado: boolean("inventario_aproximado").notNull().default(false),
+    // sold_quantity real de Mercado Libre — acumulado histórico de la
+    // publicación, nunca "vendido desde ayer" (esa resta la hace la
+    // comparación de alertas, lib/seguimiento/alertas.ts, con las dos
+    // fotos completas, y solo si las dos trajeron un número real).
+    vendidos: integer("vendidos"),
+    estado: text("estado"), // status real de ML (active/paused/closed/...), null = no disponible
+    enCatalogo: boolean("en_catalogo"),
+    ganaBotonCompra: boolean("gana_boton_compra"),
+    esFull: boolean("es_full"),
+    esEnvioGratis: boolean("es_envio_gratis"),
+    // Solo para tipo = "tienda": snapshot liviano de sus publicaciones
+    // ({ itemId, titulo, precio }[]) — lo necesita la comparación de
+    // alertas para detectar publicaciones nuevas/eliminadas entre un
+    // día y el siguiente. null para tipo = "producto".
+    publicaciones: jsonb("publicaciones").$type<{ itemId: string; titulo: string; precio: number | null }[]>(),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    fotoUnicaPorDia: uniqueIndex("seguimiento_fotos_seguimiento_fecha_unica").on(t.seguimientoId, t.fecha),
+  })
+);
+
+// Issue #175 — una alerta siempre nace de comparar la foto de hoy
+// contra la de ayer (fotoId = la de HOY, la que disparó la alerta;
+// la de ayer se busca por fecha, nunca se duplica acá). `detalle`
+// guarda los números crudos de la comparación (ej. precioAnterior/
+// precioNuevo/porcentaje, o unidadesVendidas) — el texto en español
+// que lee una persona se arma en lib/seguimiento/alertas.ts a partir
+// de tipo+detalle, nunca se guarda ya armado (así una mejora de
+// redacción futura aplica también a las alertas viejas).
+export const seguimientoAlertas = pgTable("seguimiento_alertas", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  seguimientoId: uuid("seguimiento_id").notNull().references(() => seguimientosMl.id, { onDelete: "cascade" }),
+  fotoId: uuid("foto_id").notNull().references(() => seguimientoFotos.id, { onDelete: "cascade" }),
+  tipo: alertaSeguimientoTipoEnum("tipo").notNull(),
+  detalle: jsonb("detalle").$type<Record<string, unknown>>().notNull(),
+  // "Marcar como leída" (pantalla /panel/investigacion/seguimiento) —
+  // nunca se borra una alerta leída, solo se marca, para que el
+  // historial de alertas siga completo.
+  leidaTs: timestamp("leida_ts", { withTimezone: true }),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
 });
