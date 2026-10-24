@@ -59,3 +59,29 @@
   align-self: flex-start;
   margin-top: 16px;
 }
+
+/* Issue #195 — "valor + delta" en la tabla de seguimientos activos.
+   --exito-texto/--peligro-texto ya quedan redefinidos a su
+   equivalente de zona oscura dentro de <Tarjeta> (issue #186/#191) —
+   acá se usan tal cual, sin --superficie ni --texto directo, para que
+   sigan legibles en los dos temas. */
+.delta {
+  font-size: 11.5px;
+}
+
+.delta[data-signo="positivo"] {
+  color: var(--exito-texto);
+}
+
+.delta[data-signo="negativo"] {
+  color: var(--peligro-texto);
+}
+
+.delta[data-signo="neutro"] {
+  color: var(--texto-suave);
+}
+
+.subdato {
+  font-size: 11.5px;
+  color: var(--texto-suave);
+}

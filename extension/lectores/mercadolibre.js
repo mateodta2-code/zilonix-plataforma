@@ -21,10 +21,24 @@
 
   function tipoDePagina(url) {
     if (/\/(p\/)?MCO-?\d+/i.test(url) || /articulo\.mercadolibre/i.test(url)) return "producto";
-    if (/listado\.mercadolibre|\/search|[?&]q=/i.test(url)) return "listado";
     // Página de UN vendedor/tienda (perfil público o tienda oficial) —
-    // nunca confundir con /listado (que es una búsqueda, no un perfil).
-    if (/\/perfil\/|tienda\.mercadolibre|[?&]CustId=/i.test(url)) return "tienda";
+    // nunca confundir con /listado (que es una búsqueda, no un
+    // perfil). Se prueba ANTES del check de /listado de abajo:
+    // "confirmado en producción" (ver lib/seguimiento/link.ts) el link
+    // real con _CustId_/?CustId= vive bajo el dominio
+    // listado.mercadolibre.com.co — si el check de /listado fuera
+    // primero, ESE link (una tienda real) se clasificaría mal como
+    // "listado" antes de llegar nunca a este if.
+    //
+    // Issue #192, bug real: una tienda oficial real
+    // (www.mercadolibre.com.co/tienda/colchones-relax?item_id=...) no
+    // tenía ningún patrón que la reconociera — ninguno de los tres de
+    // abajo matcheaba (no es /perfil/, no es el subdominio
+    // tienda.mercadolibre.*, y no trae ?CustId=) — el panel ni
+    // siquiera se dibujaba, silencio total. /tienda/ (el path real de
+    // una tienda oficial) se suma como cuarto patrón.
+    if (/\/perfil\/|tienda\.mercadolibre|\/tienda\/|[?&]CustId=/i.test(url)) return "tienda";
+    if (/listado\.mercadolibre|\/search|[?&]q=/i.test(url)) return "listado";
     return null;
   }
 
@@ -64,6 +78,17 @@
   // respaldo: solo `seller_id` (siempre el vendedor real), y antes que
   // nada, si la URL trae `?CustId=<dígitos>` se usa ese — viene
   // directo de la URL, nada que adivinar del HTML.
+  //
+  // Issue #192 — a propósito NUNCA se lee `official_store_id` de la
+  // URL (ej. `?official_store_id=53573` de una tienda oficial) como
+  // id del vendedor: es el id de la TIENDA OFICIAL, un concepto
+  // distinto de `seller_id` en el modelo de Mercado Libre — pueden
+  // coincidir o no, y no hay una forma segura de confirmarlo sin
+  // pedirle más datos a Mercado Libre (que esta extensión nunca hace,
+  // solo lee lo que la página ya cargó). Mismo criterio que el
+  // propio link.ts del panel (lib/seguimiento/link.ts,
+  // interpretarEnlaceTienda): sin CustId y sin seller_id confirmado en
+  // el HTML, es null — nunca se adivina.
   function leerSellerIdDeTienda(html, url) {
     const deLaUrl = extraerCustIdDeUrl(url);
     if (deLaUrl) return deLaUrl;
