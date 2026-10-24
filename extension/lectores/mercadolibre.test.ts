@@ -8,6 +8,7 @@ import {
   calcularVentasPromedioMes,
   construirLinkSeguirProducto,
   construirLinkSeguirTienda,
+  extraerCustIdDeUrl,
   extraerIdDeUrl,
   leerDatosIncrustados,
   leerSellerIdDeTienda,
@@ -172,20 +173,41 @@ describe("construirLinkSeguirTienda — issue #174, botón \"Seguir tienda en Zi
   });
 });
 
-describe("leerSellerIdDeTienda — issue #174, best-effort (\"si se puede leer del JSON incrustado\")", () => {
-  it("lee seller_id como string entre comillas", () => {
+describe("extraerCustIdDeUrl — issue #174, corrección: la forma clásica de \"visitar vendedor\" de Mercado Libre", () => {
+  it("?CustId=<dígitos> en la URL, solo o junto con otros parámetros", () => {
+    expect(extraerCustIdDeUrl("https://listado.mercadolibre.com.co/vendedor?CustId=123456789")).toBe("123456789");
+    expect(extraerCustIdDeUrl("https://listado.mercadolibre.com.co/vendedor?algo=x&CustId=123456789")).toBe("123456789");
+  });
+
+  it("sin CustId, o entrada inválida -> null", () => {
+    expect(extraerCustIdDeUrl("https://www.mercadolibre.com.co/perfil/una-tienda")).toBeNull();
+    expect(extraerCustIdDeUrl(null)).toBeNull();
+  });
+});
+
+describe("leerSellerIdDeTienda — issue #174, corrección real: nunca el user_id de quien mira la página", () => {
+  it("lee seller_id del HTML cuando la URL no trae CustId", () => {
     const html = `<script>window.__ALGO__ = {"vendedor":{"seller_id":"555666777"}};</script>`;
-    expect(leerSellerIdDeTienda(html)).toBe("555666777");
+    expect(leerSellerIdDeTienda(html, "https://www.mercadolibre.com.co/perfil/una-tienda")).toBe("555666777");
   });
 
-  it("lee user_id numérico sin comillas cuando no hay seller_id", () => {
+  // Bug real corregido: user_id en el JSON incrustado de una página de
+  // tienda suele ser el de la PERSONA con sesión iniciada en el
+  // navegador — no el del vendedor. Antes se usaba como respaldo;
+  // ahora, sin seller_id ni CustId, nunca se inventa con user_id.
+  it("un HTML con SOLO user_id (sin seller_id) nunca da un id — ya no hay respaldo con user_id", () => {
     const html = `<script>window.__ALGO__ = {"perfil":{"user_id":888999000}};</script>`;
-    expect(leerSellerIdDeTienda(html)).toBe("888999000");
+    expect(leerSellerIdDeTienda(html, "https://www.mercadolibre.com.co/perfil/una-tienda")).toBeNull();
   });
 
-  it("sin ningún dato -> null, nunca inventado", () => {
-    expect(leerSellerIdDeTienda("<html><body>sin nada</body></html>")).toBeNull();
-    expect(leerSellerIdDeTienda("")).toBeNull();
-    expect(leerSellerIdDeTienda(null)).toBeNull();
+  it("si la URL trae ?CustId=, se usa ESE id antes que nada, aunque el HTML tenga otro seller_id distinto", () => {
+    const html = `<script>window.__ALGO__ = {"vendedor":{"seller_id":"111111111"}};</script>`;
+    expect(leerSellerIdDeTienda(html, "https://listado.mercadolibre.com.co/vendedor?CustId=222222222")).toBe("222222222");
+  });
+
+  it("sin seller_id en el HTML y sin CustId en la URL -> null, nunca inventado", () => {
+    expect(leerSellerIdDeTienda("<html><body>sin nada</body></html>", "https://www.mercadolibre.com.co/perfil/una-tienda")).toBeNull();
+    expect(leerSellerIdDeTienda("", "https://www.mercadolibre.com.co/perfil/una-tienda")).toBeNull();
+    expect(leerSellerIdDeTienda(null, null)).toBeNull();
   });
 });
