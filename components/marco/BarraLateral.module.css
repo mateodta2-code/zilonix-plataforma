@@ -166,6 +166,13 @@ html .item {
   box-shadow: var(--sombra-marca-hover);
 }
 
+/* En claro, el grupo principal cae sobre la franja oscura — el hover
+   normal (--superficie-2, blanco en claro) deja el texto invisible. */
+:root[data-tema="claro"] .grupo:first-of-type .item:hover {
+  background: var(--acento-suave-zona-oscura);
+  color: var(--texto-zona-oscura);
+}
+
 .item:focus-visible {
   outline: 2px solid var(--acento);
   outline-offset: 2px;
