@@ -1,0 +1,1 @@
+- **2026-10-24**: Texto e ícono blancos en el botón "+ Crear otra empresa" de /panel para que se lea en tema oscuro (Refs #167).
