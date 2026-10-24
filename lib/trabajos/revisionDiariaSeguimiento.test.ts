@@ -26,8 +26,17 @@ async function crearEmpresaConUsuario(prefijo: string) {
   return { empresaId, usuarioId: usuario.id };
 }
 
+// Issue real, encontrado en CI: obtenerFotoItemMl exige /^MCO\d+$/ —
+// un id armado con randomUUID() puede traer letras (a-f) y entonces
+// NUNCA matchea, leerFotoSeguimiento cae a fotoVacia() (vendidos/precio
+// null) sin que el trabajo lo marque como fallido (no es un error, es
+// un ítem "sin datos"). Solo dígitos después de MCO, nunca un hex —
+// Date.now() + un contador incremental (nunca aleatorio) para que dos
+// llamadas en el mismo milisegundo tampoco choquen.
+let contadorMlId = 0;
 function nuevoMlId() {
-  return `MCO${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+  contadorMlId += 1;
+  return `MCO${Date.now()}${contadorMlId.toString().padStart(4, "0")}`;
 }
 
 // Issue real, encontrado en CI: obtenerSeguimientosPendientesDeHoy() es
@@ -135,7 +144,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     const resultado = await revisarSeguimientosDelDia();
 
     expect(resultado.fallidos).toBe(0);
-    expect(resultado.procesados).toBeGreaterThanOrEqual(1);
+    expect(resultado.procesados).toBe(1);
 
     const hoy = new Date();
     hoy.setUTCHours(0, 0, 0, 0);
@@ -144,6 +153,11 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     );
     expect(fotoHoy).toBeDefined();
     expect(fotoHoy.vendidos).toBe(15);
+    // Issue real (CI): con un ml_id_externo que matcheaba /^MCO\d+$/
+    // con letras por accidente, obtenerFotoItemMl devolvía null y esta
+    // foto quedaba con precio/vendidos null sin que fallidos lo
+    // delatara — precio es numeric, drizzle lo devuelve como string.
+    expect(Number(fotoHoy.precio)).toBe(80);
 
     const alertas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimientoId)));
     expect(alertas.map((a) => a.tipo).sort()).toEqual(["precio_bajo", "vendio_unidades"]);
