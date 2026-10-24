@@ -22,21 +22,50 @@ export const SITE_ID = "MCO";
 // id de vendedor (user_id) es solo dígitos. Cualquier otra cosa no
 // puede venir de verdad de la API — se descarta ANTES de armar la URL,
 // nunca se pega texto sin validar a un fetch.
-const PATRON_ID_PRODUCTO_O_ITEM = /^MCO\d+$/;
-const PATRON_ID_CATEGORIA = /^MCO\d+$/;
-const PATRON_ID_VENDEDOR = /^\d+$/;
+//
+// Tarea 2.11, punto 3 — mismos patrones, reusados tal cual (nunca
+// reinventados) para validar itemId/categoryId (publicar.ts, clip.ts,
+// estado-item.ts) y cuentaIdExterna (clip.ts) antes de que lleguen a
+// las funciones de ESCRITURA de abajo — ej. "MCO1/../users/me" no
+// cumple ninguno de los dos y nunca llega a armar una URL.
+export const PATRON_ID_PRODUCTO_O_ITEM = /^MCO\d+$/;
+export const PATRON_ID_CATEGORIA = /^MCO\d+$/;
+export const PATRON_ID_VENDEDOR = /^\d+$/;
 
 // Tiempo máximo real por llamada — sin esto, una llamada colgada a
 // Mercado Libre (red lenta, el proveedor caído) dejaba la búsqueda
 // cargando para siempre; con el AbortSignal, a los 8s se corta y se
 // trata como una respuesta no-ok (nunca una excepción no capturada).
+// Solo para LECTURA (pedir()) — una escritura necesita más tiempo, ver
+// TIMEOUT_ESCRITURA_MS/TIMEOUT_SUBIDA_CLIP_MS más abajo.
 const TIMEOUT_MS = 8_000;
+
+// Bug real: escribir() usaba el mismo TIMEOUT_MS de 8s de pedir() para
+// TODA escritura — eso corta un POST /items (crear publicación) antes
+// de que Mercado Libre termine de procesarlo, y la llamada se trata
+// como fallida aunque el ítem SÍ se haya creado del otro lado (riesgo
+// real de publicación duplicada al reintentar). crearItemMl/
+// actualizarItemMl/agregarDescripcionItemMl usan este tiempo más
+// generoso; subirClipMl (video de hasta 280MB) usa
+// TIMEOUT_SUBIDA_CLIP_MS, bastante más largo todavía.
+const TIMEOUT_ESCRITURA_MS = 30_000;
+const TIMEOUT_SUBIDA_CLIP_MS = 300_000;
 
 export class LimiteMercadoLibreError extends Error {
   constructor() {
     super("Mercado Libre está limitando las consultas, intenta en un minuto.");
     this.name = "LimiteMercadoLibreError";
   }
+}
+
+// Tarea 2.11, punto 3 — "si no cumple, error claro y nunca se llama a
+// ML". Una sola función para los 3 patrones de arriba: lanza ANTES de
+// que el llamador arme ninguna URL, nunca deja pasar el id a fetch.
+function exigirId(valor: string, patron: RegExp, etiqueta: string): string {
+  if (!patron.test(valor)) {
+    throw new Error(`${etiqueta} inválido — no se llamó a Mercado Libre.`);
+  }
+  return valor;
 }
 
 // Issue #147 — bug real en vivo: un 401/403/5xx de Mercado Libre caía
@@ -110,11 +139,15 @@ function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function pedir<T>(url: string, token: string): Promise<{ ok: true; data: T } | { ok: false; status: number }> {
+// token opcional: GET /categories/{id} y GET /categories/{id}/attributes
+// son endpoints PÚBLICOS de Mercado Libre (sin Authorization) — antes
+// de esta tarea vivían como fetch sueltos en lib/ml/publicar.ts; ahora
+// pasan por acá también, sin forzar un token que no existe para ellos.
+async function pedir<T>(url: string, token?: string): Promise<{ ok: true; data: T } | { ok: false; status: number }> {
   const endpoint = endpointSinQuery(url);
   let res: Response;
   try {
-    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch {
     // Tiempo agotado (AbortError) o falla de red.
     console.warn(`[lib/ml/cliente] ${endpoint} — tiempo agotado o falla de red`);
@@ -140,6 +173,64 @@ async function pedir<T>(url: string, token: string): Promise<{ ok: true; data: T
   // respuesta legítima (ej. un producto sin ofertas), no un fallo.
   if (!res.ok) return { ok: false, status: res.status };
   return { ok: true, data: (await res.json()) as T };
+}
+
+// Issue #147 agregó errores tipados a pedir() para 401/403/5xx — pero
+// buscarEnSitioMl/domainDiscoveryMl (tarea 2.11) necesitan el contrato
+// ORIGINAL de "nunca lanza, status real en la respuesta": sus
+// llamadores en lib/ml/publicar.ts deciden ELLOS MISMOS el
+// reintento/respaldo mirando resp.status en un bucle, nunca con un
+// catch (bug real encontrado al fusionar: un 403 puntual escapaba sin
+// capturar y tumbaba resolverCategoria entero en el primer intento, en
+// vez de reintentar). Se traduce de vuelta acá, una sola vez. 429
+// (LimiteMercadoLibreError) nunca se traduce — sigue propagando tal
+// cual, mismo criterio de siempre ("corta TODA la búsqueda").
+async function pedirTolerante<T>(url: string, token?: string): Promise<{ ok: true; data: T } | { ok: false; status: number }> {
+  try {
+    return await pedir<T>(url, token);
+  } catch (e) {
+    if (e instanceof MlNoAutorizadoError) return { ok: false, status: 401 };
+    if (e instanceof MlSinPermisoAppError) return { ok: false, status: 403 };
+    if (e instanceof MlNoDisponibleError) return { ok: false, status: 503 };
+    throw e;
+  }
+}
+
+// Tarea 2.11, punto 2 — helper de ESCRITURA (POST/PUT), JSON o
+// multipart (FormData), mismo AbortSignal.timeout/LimiteMercadoLibreError/
+// BASE_URL que pedir() — una sola fuente de verdad para TODA llamada a
+// Mercado Libre, de lectura o de escritura. Devuelve el texto crudo
+// además del JSON ya parseado (cuando se puede) porque varios
+// llamadores necesitan el texto crudo tal cual para armar su propio
+// mensaje de error con el detalle real que mandó Mercado Libre.
+async function escribir<T>(
+  url: string,
+  token: string,
+  method: "POST" | "PUT",
+  body: Record<string, unknown> | FormData,
+  timeoutMs: number = TIMEOUT_ESCRITURA_MS
+): Promise<{ ok: boolean; status: number; data: T | null; textoCrudo: string }> {
+  const esFormData = body instanceof FormData;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: esFormData ? { Authorization: `Bearer ${token}` } : { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: esFormData ? body : JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    return { ok: false, status: 0, data: null, textoCrudo: "" };
+  }
+  if (res.status === 429) throw new LimiteMercadoLibreError();
+  const textoCrudo = await res.text().catch(() => "");
+  let data: T | null = null;
+  try {
+    data = JSON.parse(textoCrudo) as T;
+  } catch {
+    // Respuesta no-JSON — textoCrudo ya queda disponible para el llamador.
+  }
+  return { ok: res.ok, status: res.status, data, textoCrudo };
 }
 
 function fotoDe(pictures: unknown): string | null {
@@ -438,4 +529,294 @@ export async function obtenerVendedor(sellerId: string, token: string): Promise<
 export function linkPublicacion(itemId: string): string | null {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
   return `https://articulo.mercadolibre.com.co/${itemId.replace(/^MCO(\d+)$/, "MCO-$1")}`;
+}
+
+// ---------- Tarea 2.11 ("Publicar producto y clip") ----------
+//
+// Hasta esta tarea, lib/ml/publicar.ts, lib/ml/clip.ts y
+// lib/ml/estado-item.ts tenían su propio fetch suelto contra
+// api.mercadolibre.com — regla de CLAUDE.md incumplida desde antes de
+// que cliente.ts existiera. Se centralizan acá, con el mismo
+// AbortSignal.timeout/LimiteMercadoLibreError/BASE_URL que ya usaba
+// pedir() para lectura, y el nuevo escribir() (arriba) para POST/PUT —
+// cada función de abajo valida su propio id con exigirId() ANTES de
+// construir la URL.
+
+export type CategoriaDetalleMl = { categoryId: string; categoryName: string; maxPicturesPerItem: number | null };
+
+// GET /categories/{id} — público (sin token). Usado por
+// leerCategoriaPorId (lanza si falla) y obtenerLimiteFotos (tolera
+// cualquier falla, 12 de respaldo) — cada uno decide su propio manejo
+// de error, acá solo se trae el dato.
+export async function leerCategoriaMl(categoryId: string): Promise<CategoriaDetalleMl> {
+  exigirId(categoryId, PATRON_ID_CATEGORIA, "categoryId");
+  const url = `${BASE_URL}/categories/${encodeURIComponent(categoryId)}`;
+  const resp = await pedir<{ id?: unknown; name?: unknown; max_pictures_per_item?: unknown }>(url);
+  if (!resp.ok) throw new Error(`No se pudo leer la categoría ${categoryId} (HTTP ${resp.status}).`);
+  return {
+    categoryId: typeof resp.data.id === "string" ? resp.data.id : categoryId,
+    categoryName: typeof resp.data.name === "string" ? resp.data.name : categoryId,
+    maxPicturesPerItem: typeof resp.data.max_pictures_per_item === "number" ? resp.data.max_pictures_per_item : null,
+  };
+}
+
+// GET /categories/{id}/attributes — público (sin token). Devuelve la
+// lista cruda (publicar.ts la castea a su propio DefinicionAtributoMl
+// — ese tipo vive en lib/ml/publicar-tipos.ts, cliente.ts no depende
+// de tipos específicos de un módulo que lo importa a él).
+export async function leerAtributosCategoriaMl(categoryId: string): Promise<unknown[]> {
+  exigirId(categoryId, PATRON_ID_CATEGORIA, "categoryId");
+  const url = `${BASE_URL}/categories/${encodeURIComponent(categoryId)}/attributes`;
+  const resp = await pedir<unknown[]>(url);
+  if (!resp.ok) throw new Error(`No se pudieron leer los atributos de la categoría ${categoryId}.`);
+  return Array.isArray(resp.data) ? resp.data : [];
+}
+
+// GET /sites/{siteId}/search — búsqueda pública de texto, respaldo de
+// resolverCategoria cuando domain_discovery no encuentra nada.
+export async function buscarEnSitioMl(siteId: string, query: string, token: string, limite = 10): Promise<{ categoryId: string }[]> {
+  const url = `${BASE_URL}/sites/${encodeURIComponent(siteId)}/search?q=${encodeURIComponent(query)}&limit=${limite}`;
+  const resp = await pedirTolerante<{ results?: unknown[] }>(url, token);
+  if (!resp.ok) return [];
+  const resultados = Array.isArray(resp.data.results) ? resp.data.results : [];
+  return resultados
+    .map((r) => (r as { category_id?: unknown }).category_id)
+    .filter((id): id is string => typeof id === "string")
+    .map((categoryId) => ({ categoryId }));
+}
+
+export type ResultadoDomainDiscoveryMl = { categoryId: string; categoryName: string; domainName: string | null };
+
+// GET /sites/{siteId}/domain_discovery/search — devuelve {ok,status,
+// resultados} en vez de lanzar/null: publicar.ts (resolverCategoria)
+// necesita distinguir "no-ok (reintentable)" de "ok pero sin
+// resultados (cae al respaldo por búsqueda, SIN reintentar)" — esa
+// lógica de reintento/respaldo se queda en publicar.ts tal cual ya
+// estaba, esto solo reemplaza su fetch directo.
+export async function domainDiscoveryMl(
+  siteId: string,
+  query: string,
+  token: string,
+  limite = 1
+): Promise<{ ok: boolean; status: number; resultados: ResultadoDomainDiscoveryMl[] }> {
+  const url = `${BASE_URL}/sites/${encodeURIComponent(siteId)}/domain_discovery/search?q=${encodeURIComponent(query)}&limit=${limite}`;
+  const resp = await pedirTolerante<unknown>(url, token);
+  if (!resp.ok) return { ok: false, status: resp.status, resultados: [] };
+  const lista = Array.isArray(resp.data) ? resp.data : [];
+  const resultados = lista
+    .map((c) => {
+      const item = c as { category_id?: unknown; category_name?: unknown; domain_name?: unknown };
+      return {
+        categoryId: typeof item.category_id === "string" ? item.category_id : "",
+        categoryName: typeof item.category_name === "string" ? item.category_name : "",
+        domainName: typeof item.domain_name === "string" ? item.domain_name : null,
+      };
+    })
+    .filter((c) => c.categoryId);
+  return { ok: true, status: 200, resultados };
+}
+
+// GET /users/{cuentaIdExterna} — datos de la CUENTA conectada (el
+// site_id que publicar.ts necesita para armar la publicación).
+// Distinto de obtenerVendedor (mismo endpoint, pero esa función es de
+// Investigación: busca a un VENDEDOR ajeno por su seller_id y no
+// necesita site_id — se mantienen separadas, cada una con su propia
+// forma de respuesta y semántica de tolerancia a fallos).
+export async function leerCuentaMl(cuentaIdExterna: string, token: string): Promise<{ siteId: string }> {
+  exigirId(cuentaIdExterna, PATRON_ID_VENDEDOR, "cuentaIdExterna");
+  const url = `${BASE_URL}/users/${encodeURIComponent(cuentaIdExterna)}`;
+  const resp = await pedir<{ site_id?: unknown }>(url, token);
+  if (!resp.ok) throw new Error(`No se pudo leer la cuenta en Mercado Libre (HTTP ${resp.status}).`);
+  return { siteId: typeof resp.data.site_id === "string" ? resp.data.site_id : "" };
+}
+
+export type RespuestaEscrituraMl = { ok: boolean; status: number; data: Record<string, unknown> | null; textoCrudo: string };
+
+// POST /items — crear una publicación. Sin id que validar (todavía no
+// existe ninguno — el category_id del body ya se validó antes de
+// llegar hasta acá, en leerAtributosCategoriaMl, que publicar.ts llama
+// justo antes de armar este body — domainDiscoveryMl solo descubre un
+// category_id candidato, no lo valida).
+export async function crearItemMl(token: string, body: Record<string, unknown>): Promise<RespuestaEscrituraMl> {
+  return escribir<Record<string, unknown>>(`${BASE_URL}/items`, token, "POST", body, TIMEOUT_ESCRITURA_MS);
+}
+
+// PUT /items/{id} — el mismo endpoint sirve para pausar/activar
+// (estado-item.ts), asignar picture_ids por variante y pausar en modo
+// prueba (publicar.ts) — una sola función, el body cambia según quién
+// llama.
+export async function actualizarItemMl(itemId: string, token: string, cambios: Record<string, unknown>): Promise<RespuestaEscrituraMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  return escribir<Record<string, unknown>>(`${BASE_URL}/items/${encodeURIComponent(itemId)}`, token, "PUT", cambios, TIMEOUT_ESCRITURA_MS);
+}
+
+// POST /items/{id}/description — endpoint SEPARADO del body de /items
+// (confirmado: la descripción nunca va en el POST de creación).
+export async function agregarDescripcionItemMl(itemId: string, token: string, texto: string): Promise<{ ok: boolean; status: number }> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const r = await escribir(`${BASE_URL}/items/${encodeURIComponent(itemId)}/description`, token, "POST", { plain_text: texto }, TIMEOUT_ESCRITURA_MS);
+  return { ok: r.ok, status: r.status };
+}
+
+// GET /users/{cuentaIdExterna}/items/search?seller_sku= — búsqueda
+// real por SKU (hallazgo §16.4 del reporte de investigación: el
+// sistema actual descarga el catálogo COMPLETO de la cuenta para
+// encontrar un SKU — acá se usa el endpoint real de búsqueda).
+export async function buscarItemsPorSkuMl(cuentaIdExterna: string, sku: string, token: string): Promise<string[]> {
+  exigirId(cuentaIdExterna, PATRON_ID_VENDEDOR, "cuentaIdExterna");
+  const url = `${BASE_URL}/users/${encodeURIComponent(cuentaIdExterna)}/items/search?seller_sku=${encodeURIComponent(sku)}`;
+  const resp = await pedir<{ results?: unknown[] }>(url, token);
+  if (!resp.ok) throw new Error(`No se pudo buscar el SKU en Mercado Libre (HTTP ${resp.status}).`);
+  return Array.isArray(resp.data.results) ? resp.data.results.filter((r): r is string => typeof r === "string") : [];
+}
+
+// GET /items/{id}?attributes=id,title,thumbnail — detalle mínimo de
+// una publicación ya encontrada (por sku o por itemId directo). null
+// si Mercado Libre no puede traerlo — el llamador decide el respaldo
+// (ej. clip.ts cae al propio itemId como título).
+export async function leerItemBasicoMl(itemId: string, token: string): Promise<{ title: string | null; thumbnail: string | null } | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail`;
+  const resp = await pedir<{ title?: unknown; thumbnail?: unknown }>(url, token);
+  if (!resp.ok) return null;
+  return {
+    title: typeof resp.data.title === "string" ? resp.data.title : null,
+    thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
+  };
+}
+
+// POST /marketplace/items/{id}/clips/upload — multipart/form-data,
+// contrato real documentado por Mercado Libre ("Working with Clips").
+// Video de hasta 280MB — usa TIMEOUT_SUBIDA_CLIP_MS, no el de
+// escritura normal.
+export async function subirClipMl(itemId: string, token: string, form: FormData): Promise<{ ok: boolean; status: number; textoCrudo: string }> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const r = await escribir(`${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips/upload`, token, "POST", form, TIMEOUT_SUBIDA_CLIP_MS);
+  return { ok: r.ok, status: r.status, textoCrudo: r.textoCrudo };
+}
+
+// Issue #175 — lector real del seguimiento diario. Confirmado en vivo
+// antes de escribirse con /panel/investigacion/diagnostico (ver
+// docs/changelog/pendientes/feat-investigacion-diagnostico.md): un
+// campo que Mercado Libre no deja ver para un recurso AJENO queda
+// null, nunca un 0/false inventado. Tolera 403/5xx (una publicación
+// ajena puede no dejar ver todos los campos — "no disponible", nunca
+// un fallo que tire abajo la foto del día entera); 401 propaga, mismo
+// criterio que el resto de este archivo.
+export type FotoItemMl = {
+  precio: number | null;
+  // original_price real de Mercado Libre — nunca una resta contra la
+  // foto de ayer, esa cuenta la hace lib/seguimiento/alertas.ts.
+  precioAnterior: number | null;
+  inventarioDisponible: number | null;
+  vendidos: number | null;
+  estado: string | null;
+  enCatalogo: boolean | null;
+  catalogProductId: string | null;
+  esFull: boolean | null;
+  esEnvioGratis: boolean | null;
+};
+
+function numeroONull(valor: unknown): number | null {
+  if (valor == null) return null;
+  const n = Number(valor);
+  return Number.isFinite(n) ? n : null;
+}
+
+export async function obtenerFotoItemMl(itemId: string, token: string): Promise<FotoItemMl | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping`;
+  try {
+    const resp = await pedir<{
+      price?: unknown;
+      original_price?: unknown;
+      available_quantity?: unknown;
+      sold_quantity?: unknown;
+      status?: unknown;
+      catalog_listing?: unknown;
+      catalog_product_id?: unknown;
+      shipping?: { logistic_type?: unknown; free_shipping?: unknown };
+    }>(url, token);
+    if (!resp.ok) return null;
+    const d = resp.data;
+    return {
+      precio: numeroONull(d.price),
+      precioAnterior: numeroONull(d.original_price),
+      inventarioDisponible: numeroONull(d.available_quantity),
+      vendidos: numeroONull(d.sold_quantity),
+      estado: typeof d.status === "string" ? d.status : null,
+      enCatalogo: typeof d.catalog_listing === "boolean" ? d.catalog_listing : null,
+      catalogProductId: typeof d.catalog_product_id === "string" ? d.catalog_product_id : null,
+      esFull: d.shipping ? d.shipping.logistic_type === "fulfillment" : null,
+      esEnvioGratis: typeof d.shipping?.free_shipping === "boolean" ? d.shipping.free_shipping : null,
+    };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+export type PublicacionTiendaMl = { itemId: string; titulo: string; precio: number | null };
+
+const TOPE_PUBLICACIONES_TIENDA = 50; // suficiente para detectar nuevas/eliminadas sin paginar sin límite
+const TAMAÑO_LOTE_DETALLE_ITEMS = 20; // mismo tamaño de lote ya confirmado en producción, lib/ml/importacion.ts
+// Issue #175 — "respeta los límites de ML: pausa entre llamadas":
+// entre cada lote de /items?ids= (hasta 20 ids cada uno), nunca entre
+// la primera llamada y el resto (esa no tiene con qué competir todavía).
+const PAUSA_ENTRE_LOTES_MS = 300;
+
+function idsDeResultadosBusqueda(resultados: unknown): string[] {
+  if (!Array.isArray(resultados)) return [];
+  return resultados
+    .map((r) => (typeof r === "string" ? r : typeof r === "object" && r && typeof (r as { id?: unknown }).id === "string" ? (r as { id: string }).id : null))
+    .filter((id): id is string => id !== null && PATRON_ID_PRODUCTO_O_ITEM.test(id));
+}
+
+// Issue #175 — dos caminos confirmados en vivo para las publicaciones
+// de un vendedor/tienda AJENO: GET /users/{seller_id}/items/search
+// (mismo endpoint que buscarItemsPorSkuMl ya usa para la cuenta
+// PROPIA, acá con un seller_id de otra cuenta) devuelve 403 real para
+// un vendedor ajeno — se cae entonces a la búsqueda pública del sitio
+// (/sites/MCO/search?seller_id=), que sí deja ver publicaciones
+// ajenas (con menos detalle por resultado, por eso el paso siguiente
+// completa título/precio con el mismo endpoint masivo /items?ids= que
+// ya usa lib/ml/importacion.ts). 401 (token inválido de verdad)
+// propaga tal cual, nunca tiene sentido probar el camino público con
+// el mismo token roto.
+async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Promise<string[]> {
+  if (!PATRON_ID_VENDEDOR.test(sellerId)) return [];
+  const urlPropio = `${BASE_URL}/users/${encodeURIComponent(sellerId)}/items/search?limit=${TOPE_PUBLICACIONES_TIENDA}`;
+  try {
+    const resp = await pedir<{ results?: unknown[] }>(urlPropio, token);
+    if (resp.ok) return idsDeResultadosBusqueda(resp.data.results);
+  } catch (e) {
+    if (!(e instanceof MlSinPermisoAppError)) throw e;
+  }
+  const urlPublico = `${BASE_URL}/sites/${SITE_ID}/search?seller_id=${encodeURIComponent(sellerId)}&limit=${TOPE_PUBLICACIONES_TIENDA}`;
+  const respPublico = await pedir<{ results?: unknown[] }>(urlPublico, token);
+  if (!respPublico.ok) return [];
+  return idsDeResultadosBusqueda(respPublico.data.results);
+}
+
+export async function obtenerPublicacionesVendedorAjenoMl(sellerId: string, token: string): Promise<PublicacionTiendaMl[]> {
+  const ids = await idsDePublicacionesDeVendedor(sellerId, token);
+  const publicaciones: PublicacionTiendaMl[] = [];
+  for (let i = 0; i < ids.length; i += TAMAÑO_LOTE_DETALLE_ITEMS) {
+    if (i > 0) await esperar(PAUSA_ENTRE_LOTES_MS);
+    const lote = ids.slice(i, i + TAMAÑO_LOTE_DETALLE_ITEMS);
+    const resp = await pedir<{ code?: unknown; body?: { id?: unknown; title?: unknown; price?: unknown } }[]>(
+      `${BASE_URL}/items?ids=${lote.join(",")}&attributes=id,title,price`,
+      token
+    );
+    if (!resp.ok) continue; // un lote puntual que falla no tira abajo los demás
+    for (const fila of resp.data) {
+      if (fila.code !== 200 || !fila.body || typeof fila.body.id !== "string") continue;
+      publicaciones.push({
+        itemId: fila.body.id,
+        titulo: typeof fila.body.title === "string" ? fila.body.title : fila.body.id,
+        precio: numeroONull(fila.body.price),
+      });
+    }
+  }
+  return publicaciones;
 }

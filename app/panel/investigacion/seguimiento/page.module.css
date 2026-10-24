@@ -1,0 +1,61 @@
+.seccion {
+  margin-bottom: 20px;
+}
+
+.tituloSeccion {
+  margin: 0 0 10px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.filaFormulario {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.casillaCompetidor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding-bottom: 8px;
+}
+
+.ayuda {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.aviso {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--superficie-2);
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.listaAlertas {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.filaAlerta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13.5px;
+}
+
+.volver {
+  align-self: flex-start;
+  margin-top: 16px;
+}

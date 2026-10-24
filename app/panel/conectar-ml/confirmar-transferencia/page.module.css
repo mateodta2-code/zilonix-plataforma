@@ -1,0 +1,25 @@
+/* Bug real en staging (tema claro): esta pantalla no tiene ninguna
+   tarjeta opaca debajo — .mensaje/.aclaracion caen directo sobre la
+   franja oscura del degradado de fondo (ver --fondo-app-* en
+   globals.css), que en claro sigue siendo azul metálico -> negro ahí
+   arriba, igual que en oscuro. --texto/--texto-suave normales son
+   negros en claro (pensados para fondo BLANCO) — ilegibles ahí. Mismo
+   patrón que EncabezadoPagina.module.css: los tokens -zona-oscura
+   tienen el MISMO valor en los dos temas (nunca condicionados por
+   [data-tema]), hechos a propósito para esta franja. */
+.mensaje {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--texto-zona-oscura);
+}
+
+.aclaracion {
+  color: var(--texto-suave-zona-oscura);
+  font-size: 13px;
+}
+
+.acciones {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
