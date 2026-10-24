@@ -63,9 +63,18 @@ describe("interpretarEnlaceTienda", () => {
     expect(interpretarEnlaceTienda("no es nada")).toBeNull();
   });
 
-  // Issue #192 — misma forma clásica que ya reconoce la extensión
-  // (extraerCustIdDeUrl, extension/lectores/mercadolibre.js, #188):
-  // "?CustId=" como parámetro de query, no solo "_CustId_" en el path.
+  // Issue #193 — un link de nickname SÍ puede traer el seller_id real
+  // como parámetro de query (ej. al llegar desde la ficha de un
+  // producto de esa tienda) — caso real reportado.
+  it("link de nickname con ?seller_id= en el query", () => {
+    expect(interpretarEnlaceTienda("https://www.mercadolibre.com.co/pagina/tiendamercadomax?seller_id=456866397&item_id=MCO3981213688")).toBe(
+      "456866397"
+    );
+  });
+
+  // Issue #192/#193 — "?CustId=" como parámetro de query, no solo
+  // "_CustId_" en el path (misma forma que ya reconoce la extensión,
+  // extraerCustIdDeUrl en extension/lectores/mercadolibre.js, #188).
   it("link con ?CustId= como parámetro de query", () => {
     expect(interpretarEnlaceTienda("https://listado.mercadolibre.com.co/vendedor?CustId=123456789")).toBe("123456789");
     expect(interpretarEnlaceTienda("https://listado.mercadolibre.com.co/vendedor?algo=x&CustId=123456789")).toBe("123456789");
@@ -109,5 +118,14 @@ describe("esLinkTiendaOficialSinIdDeVendedor (issue #192)", () => {
 
   it("un link que no es de tienda -> false", () => {
     expect(esLinkTiendaOficialSinIdDeVendedor("esto no es un link de Mercado Libre")).toBe(false);
+  });
+
+  // Issue #193 — seller_id= también cuenta como "es tienda" para
+  // PATRON_LINK_TIENDA (ver link.ts), pero ACÁ ya resuelve un id real
+  // -> false, nunca el mensaje de "official_store_id sin resolver".
+  it("un link con ?seller_id= resuelto -> false (no es el caso de official_store_id sin id)", () => {
+    expect(esLinkTiendaOficialSinIdDeVendedor("https://www.mercadolibre.com.co/pagina/tiendamercadomax?seller_id=456866397&item_id=MCO3981213688")).toBe(
+      false
+    );
   });
 });
