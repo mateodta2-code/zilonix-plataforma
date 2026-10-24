@@ -7,6 +7,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarAlertasDelDia, listarSeguimientosConUltimaFoto, LIMITE_COMPETIDORES_POR_EMPRESA } from "@/lib/seguimiento/seguimientos";
 import { mensajeAlerta } from "@/lib/seguimiento/alertas";
+import { Ayuda } from "@/components/marco/Ayuda";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
@@ -136,7 +137,27 @@ export default async function SeguimientoPage({
               <option value="tienda">Tienda / vendedor</option>
             </select>
           </Campo>
-          <Campo etiqueta="Link o id de Mercado Libre">
+          <Campo
+            etiqueta={
+              <>
+                Link o id de Mercado Libre
+                <Ayuda id="ayuda-link-seguimiento">
+                  <p>
+                    <strong>Producto:</strong> el link de la publicación (articulo.mercadolibre.com.co/MCO-...) o del catálogo (.../p/MCO...), o el
+                    id MCOxxxxxxxx directo.
+                  </p>
+                  <p>
+                    <strong>Tienda:</strong> el número de seller_id, o un link que lo traiga — seller_id=, CustId= o _CustId_.
+                  </p>
+                  <p>
+                    No sirven solos los links tipo /pagina/nombre o /tienda/nombre sin esos parámetros — abrí un producto de esa tienda y copiá el
+                    seller_id, o usá el botón &quot;Seguir&quot; de la extensión de Zilonix.
+                  </p>
+                  <p>Marcar &quot;Es competidor&quot; cuenta en el cupo de 5.</p>
+                </Ayuda>
+              </>
+            }
+          >
             <input type="text" name="link" required placeholder="https://articulo.mercadolibre.com.co/MCO-..." className="zx-control" />
           </Campo>
           <label className={styles.casillaCompetidor}>

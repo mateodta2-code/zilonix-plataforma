@@ -25,18 +25,25 @@ export function interpretarEnlaceProducto(texto: string): EnlaceProductoInterpre
 }
 
 // Para una tienda: el seller_id numérico directo, o extraído de un
-// link con "_CustId_{numero}" (confirmado en producción,
-// listado.mercadolibre.com.co/_CustId_123456...). Un link con nickname
-// en vez de _CustId_ (ej. mercadolibre.com.co/pagina/unatienda) no se
-// soporta todavía — resolver un nickname a seller_id real necesitaría
-// una llamada a Mercado Libre que todavía no está confirmada, nunca se
+// link con alguna de estas formas (todas confirmadas en producción o
+// en links reales de Mercado Libre):
+//   - "_CustId_{numero}" (listado.mercadolibre.com.co/_CustId_123456...)
+//   - "?CustId={numero}" o "&CustId={numero}" como parámetro de query
+//   - "?seller_id={numero}" o "&seller_id={numero}" (issue #193 — un
+//     link de nickname, mercadolibre.com.co/pagina/unatienda, SÍ trae
+//     el seller_id real como parámetro de query cuando se llega ahí
+//     desde la ficha de un producto de esa tienda)
+// Un link de nickname SIN ninguno de estos parámetros (solo
+// mercadolibre.com.co/pagina/unatienda, sin más) no se soporta
+// todavía — resolver un nickname a seller_id real necesitaría una
+// llamada a Mercado Libre que todavía no está confirmada, nunca se
 // adivina.
-const PATRON_CUST_ID = /_CustId_(\d+)/i;
+const PATRON_ID_VENDEDOR_EN_LINK = /_CustId_(\d+)|[?&]CustId=(\d+)|[?&]seller_id=(\d+)/i;
 const PATRON_SOLO_DIGITOS = /^\d+$/;
 
 export function interpretarEnlaceTienda(texto: string): string | null {
   const limpio = texto.trim();
   if (PATRON_SOLO_DIGITOS.test(limpio)) return limpio;
-  const custId = limpio.match(PATRON_CUST_ID);
-  return custId ? custId[1] : null;
+  const m = limpio.match(PATRON_ID_VENDEDOR_EN_LINK);
+  return m ? m[1] ?? m[2] ?? m[3] : null;
 }

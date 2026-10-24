@@ -51,4 +51,21 @@ describe("interpretarEnlaceTienda", () => {
     expect(interpretarEnlaceTienda("")).toBeNull();
     expect(interpretarEnlaceTienda("no es nada")).toBeNull();
   });
+
+  // Issue #193 — un link de nickname SÍ puede traer el seller_id real
+  // como parámetro de query (ej. al llegar desde la ficha de un
+  // producto de esa tienda) — caso real reportado.
+  it("link de nickname con ?seller_id= en el query", () => {
+    expect(interpretarEnlaceTienda("https://www.mercadolibre.com.co/pagina/tiendamercadomax?seller_id=456866397&item_id=MCO3981213688")).toBe(
+      "456866397"
+    );
+  });
+
+  // Issue #193 — "?CustId=" como parámetro de query, no solo
+  // "_CustId_" en el path (misma forma que ya reconoce la extensión,
+  // extraerCustIdDeUrl en extension/lectores/mercadolibre.js, #188).
+  it("link con ?CustId= como parámetro de query", () => {
+    expect(interpretarEnlaceTienda("https://listado.mercadolibre.com.co/vendedor?CustId=123456789")).toBe("123456789");
+    expect(interpretarEnlaceTienda("https://listado.mercadolibre.com.co/vendedor?algo=x&CustId=123456789")).toBe("123456789");
+  });
 });
