@@ -148,6 +148,28 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
     await expect(obtenerVendedor("123456", "token")).rejects.toThrow(MlNoAutorizadoError);
     await expect(obtenerItemMl("MCO1", "token")).rejects.toThrow(MlNoAutorizadoError);
   });
+
+  // Bug real: una publicación pausada/cerrada (status !== "active")
+  // igual aparecía en la tabla de Investigación — su precio/oferta ya
+  // no sirve para analizar el mercado (no se puede comprar). Se
+  // descarta igual que cualquier otro candidato sin datos reales
+  // (null), nunca se distingue del caso "Mercado Libre no pudo
+  // traerla".
+  it("obtenerItemMl: pide también 'status' y descarta (null) una publicación que no está activa", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      expect(String(url)).toContain("status");
+      return respuestaJson({ title: "Reloj", price: 35_000, currency_id: "COP", seller_id: "123456", status: "paused" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(obtenerItemMl("MCO111", "token")).resolves.toBeNull();
+  });
+
+  it("obtenerItemMl: una publicación activa sí se devuelve, con su oferta armada", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Reloj", thumbnail: "https://x", price: 35_000, currency_id: "COP", seller_id: "123456", status: "active" })));
+    const r = await obtenerItemMl("MCO111", "token");
+    expect(r?.producto).toEqual({ id: "MCO111", nombre: "Reloj", foto: "https://x" });
+    expect(r?.oferta?.precio).toBe(35_000);
+  });
 });
 
 describe("resolverCategoria — 3 intentos con 800ms*intento ante 403/5xx (issue #147, mismo criterio que zilonix-os-web)", () => {

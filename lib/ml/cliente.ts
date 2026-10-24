@@ -288,7 +288,7 @@ export type ItemMl = { producto: ProductoCatalogoMl; oferta: OfertaMl | null };
 // para un candidato de tipo ITEM.
 export async function obtenerItemMl(itemId: string, token: string): Promise<ItemMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping`;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping,status`;
   try {
     const resp = await pedir<{
       title?: unknown;
@@ -297,8 +297,15 @@ export async function obtenerItemMl(itemId: string, token: string): Promise<Item
       currency_id?: unknown;
       seller_id?: unknown;
       shipping?: { logistic_type?: unknown; free_shipping?: unknown };
+      status?: unknown;
     }>(url, token);
     if (!resp.ok) return null;
+    // Bug real: una publicación pausada/cerrada seguía apareciendo en
+    // la tabla de Investigación (el precio/oferta de una publicación
+    // que ya no se puede comprar no sirve para nada ahí) — se descarta
+    // igual que cualquier otro candidato sin oferta real, nunca se
+    // distingue del caso "Mercado Libre no pudo traerla".
+    if (resp.data.status !== "active") return null;
     const producto: ProductoCatalogoMl = {
       id: itemId,
       nombre: typeof resp.data.title === "string" ? resp.data.title : null,

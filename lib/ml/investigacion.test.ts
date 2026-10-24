@@ -361,6 +361,28 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     // de la oferta que trajo obtenerItemMl.
     expect(resultado.publicacionesEncontradas).toBe(2);
     expect(resultado.publicaciones.map((p) => p.itemId).sort()).toEqual(["MCO111", "MCO222"]);
+    // Issue #147, corrección adicional: el id de un ITEM es el de la
+    // publicación (itemId), nunca un productId de catálogo real — solo
+    // el PRODUCT (MCO1) trae un productId de verdad.
+    const publicacionItem = resultado.publicaciones.find((p) => p.itemId === "MCO222");
+    const publicacionProduct = resultado.publicaciones.find((p) => p.itemId === "MCO111");
+    expect(publicacionItem?.productId).toBeNull();
+    expect(publicacionProduct?.productId).toBe("MCO1");
+  });
+
+  // Issue #147, corrección adicional: obtenerItemMl ya descarta (null)
+  // una publicación pausada/cerrada (cliente.ts, status !== "active")
+  // — un ITEM así nunca debe producir ninguna publicación acá.
+  it("highlights ITEM pausado (obtenerItemMl devuelve null): no aparece en resultado.publicaciones", async () => {
+    vi.mocked(buscarProductosCatalogo).mockResolvedValue([]);
+    vi.mocked(resolverCategoria).mockResolvedValue({ categoryId: "CAT1" });
+    vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue([{ id: "MCO2", tipo: "ITEM" }]);
+    vi.mocked(obtenerItemMl).mockResolvedValue(null);
+
+    const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
+
+    expect(resultado.publicaciones).toEqual([]);
+    expect(resultado.publicacionesEncontradas).toBe(0);
   });
 
   it("límite de búsquedas por minuto por empresa: la búsqueda número 11 en la misma ventana se bloquea", async () => {

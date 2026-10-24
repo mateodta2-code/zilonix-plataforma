@@ -154,7 +154,12 @@ async function enLotes<T>(items: T[], concurrencia: number, fn: (item: T) => Pro
 }
 
 export type PublicacionInvestigacion = {
-  productId: string;
+  // null para un candidato ITEM (una publicación real, vía
+  // obtenerItemMl) — ese id es el de la publicación (itemId), nunca el
+  // de un producto de catálogo; solo un candidato PRODUCT trae un
+  // productId real (el id con el que Mercado Libre identifica ESE
+  // producto de catálogo, distinto del itemId de su oferta).
+  productId: string | null;
   itemId: string;
   titulo: string;
   foto: string | null;
@@ -320,7 +325,13 @@ type ResultadoOfertaCandidato = { publicacion: PublicacionInvestigacion | null; 
 // obtenerOfertasProducto, nunca acá.
 type CandidatoInvestigacion = { producto: ProductoCatalogoMl; tipo: "PRODUCT" | "ITEM"; oferta: OfertaMl | null };
 
-async function construirPublicacion(candidato: ProductoCatalogoMl, oferta: OfertaMl, token: string, cacheVendedores: Map<string, ReturnType<typeof obtenerVendedor>>): Promise<PublicacionInvestigacion> {
+async function construirPublicacion(
+  candidato: ProductoCatalogoMl,
+  oferta: OfertaMl,
+  token: string,
+  cacheVendedores: Map<string, ReturnType<typeof obtenerVendedor>>,
+  productId: string | null
+): Promise<PublicacionInvestigacion> {
   let vendedor: Awaited<ReturnType<typeof obtenerVendedor>> = null;
   if (oferta.sellerId) {
     if (!cacheVendedores.has(oferta.sellerId)) cacheVendedores.set(oferta.sellerId, obtenerVendedor(oferta.sellerId, token));
@@ -328,7 +339,7 @@ async function construirPublicacion(candidato: ProductoCatalogoMl, oferta: Ofert
   }
 
   return {
-    productId: candidato.id,
+    productId,
     itemId: oferta.itemId,
     titulo: candidato.nombre || `Publicación ${oferta.itemId}`,
     foto: candidato.foto,
@@ -360,7 +371,7 @@ async function resolverOfertaDeUnCandidato(candidato: ProductoCatalogoMl, token:
   }
   const oferta = ofertas[0];
   if (!oferta) return { publicacion: null, sinPermiso: false };
-  return { publicacion: await construirPublicacion(candidato, oferta, token, cacheVendedores), sinPermiso: false };
+  return { publicacion: await construirPublicacion(candidato, oferta, token, cacheVendedores, candidato.id), sinPermiso: false };
 }
 
 // Orquesta la búsqueda real contra Mercado Libre: valida el término,
@@ -460,7 +471,9 @@ export async function buscarInvestigacionProducto(empresaId: string, terminoCrud
         sinOfertas++;
         return;
       }
-      publicaciones.push(await construirPublicacion(candidato.producto, candidato.oferta, token, cacheVendedores));
+      // Candidato ITEM: el id es el de la publicación (itemId), nunca
+      // un productId de catálogo real — ver la nota de PublicacionInvestigacion.
+      publicaciones.push(await construirPublicacion(candidato.producto, candidato.oferta, token, cacheVendedores, null));
       return;
     }
     const { publicacion, sinPermiso } = await resolverOfertaDeUnCandidato(candidato.producto, token, cacheVendedores);
