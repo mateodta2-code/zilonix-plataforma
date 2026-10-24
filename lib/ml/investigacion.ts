@@ -1,6 +1,8 @@
 import {
   buscarProductosCatalogo,
   linkPublicacion,
+  MlSinPermisoAppError,
+  obtenerItemMl,
   obtenerMejoresProductosCategoria,
   obtenerOfertasProducto,
   obtenerProducto,
@@ -308,10 +310,24 @@ export function calcularResultadoInvestigacion(termino: string, publicaciones: P
   };
 }
 
-async function resolverOfertaDeUnCandidato(candidato: ProductoCatalogoMl, token: string, cacheVendedores: Map<string, ReturnType<typeof obtenerVendedor>>): Promise<PublicacionInvestigacion | null> {
-  const ofertas: OfertaMl[] = await obtenerOfertasProducto(candidato.id, token);
+type ResultadoOfertaCandidato = { publicacion: PublicacionInvestigacion | null; sinPermiso: boolean };
+
+// Issue #147 — distingue "este candidato no tiene ofertas reales"
+// (publicacion: null, sinPermiso: false — legítimo, pasa seguido) de
+// "Mercado Libre no deja ver las ofertas de este candidato"
+// (sinPermiso: true, MlSinPermisoAppError) — el llamador necesita la
+// diferencia para poder avisar "falta permiso" en vez de "no se
+// encontró nada" cuando TODOS los candidatos caen en el segundo caso.
+async function resolverOfertaDeUnCandidato(candidato: ProductoCatalogoMl, token: string, cacheVendedores: Map<string, ReturnType<typeof obtenerVendedor>>): Promise<ResultadoOfertaCandidato> {
+  let ofertas: OfertaMl[];
+  try {
+    ofertas = await obtenerOfertasProducto(candidato.id, token);
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError) return { publicacion: null, sinPermiso: true };
+    throw e; // 401/5xx/timeout — no es "este candidato puntual", sube.
+  }
   const oferta = ofertas[0];
-  if (!oferta) return null;
+  if (!oferta) return { publicacion: null, sinPermiso: false };
 
   let vendedor: Awaited<ReturnType<typeof obtenerVendedor>> = null;
   if (oferta.sellerId) {
@@ -320,17 +336,20 @@ async function resolverOfertaDeUnCandidato(candidato: ProductoCatalogoMl, token:
   }
 
   return {
-    productId: candidato.id,
-    itemId: oferta.itemId,
-    titulo: candidato.nombre || `Publicación ${oferta.itemId}`,
-    foto: candidato.foto,
-    precio: oferta.precio,
-    moneda: oferta.monedaId,
-    esFull: oferta.esFull,
-    esEnvioGratis: oferta.esEnvioGratis,
-    vendedor: vendedor?.nickname ?? null,
-    esPlatinum: vendedor?.esPlatinum ?? false,
-    link: linkPublicacion(oferta.itemId),
+    publicacion: {
+      productId: candidato.id,
+      itemId: oferta.itemId,
+      titulo: candidato.nombre || `Publicación ${oferta.itemId}`,
+      foto: candidato.foto,
+      precio: oferta.precio,
+      moneda: oferta.monedaId,
+      esFull: oferta.esFull,
+      esEnvioGratis: oferta.esEnvioGratis,
+      vendedor: vendedor?.nickname ?? null,
+      esPlatinum: vendedor?.esPlatinum ?? false,
+      link: linkPublicacion(oferta.itemId),
+    },
+    sinPermiso: false,
   };
 }
 
@@ -342,8 +361,12 @@ async function resolverOfertaDeUnCandidato(candidato: ProductoCatalogoMl, token:
 // estrategia vive aparte (calcularResultadoInvestigacion), para poder
 // probarlo sin repetir toda esta cadena.
 export async function buscarInvestigacionProducto(empresaId: string, terminoCrudo: string, ahoraMs: number = Date.now()): Promise<ResultadoInvestigacion> {
-  registrarBusqueda(empresaId, ahoraMs);
+  // Issue #147 — orden invertido: antes registrarBusqueda() (que
+  // descuenta cupo del límite de 10/minuto) corría ANTES de validar el
+  // término — un término inválido ("a", 4+ palabras) gastaba cupo real
+  // sin haber hecho ninguna búsqueda de verdad.
   const termino = validarTermino(terminoCrudo);
+  registrarBusqueda(empresaId, ahoraMs);
 
   const cuenta = await obtenerCuentaMlActiva(empresaId);
   if (!cuenta) throw new SinCuentaMlError();
@@ -361,14 +384,28 @@ export async function buscarInvestigacionProducto(empresaId: string, terminoCrud
     if (candidatos.length < 20) break;
   }
 
+  // Issue #147, bug real: highlights devuelve PRODUCT (catálogo, va a
+  // obtenerProducto/GET /products/{id}), ITEM (una publicación real,
+  // necesita GET /items/{id} — endpoint DISTINTO, obtenerProducto le
+  // daba 404 siempre) y USER_PRODUCT (id "MCOU...", no es ni catálogo
+  // ni una publicación consultable igual — se ignora a propósito, se
+  // cuenta solo para no perder de vista cuántos se descartaron).
+  let destacadosIgnorados = 0;
   const categoria = await resolverCategoria(termino, token);
   if (categoria) {
-    const idsCategoria = await obtenerMejoresProductosCategoria(categoria.categoryId, token);
-    const idsPorCompletar = idsCategoria.filter((id) => !candidatosPorId.has(id)).slice(0, TOPE_IDS_CATEGORIA_A_COMPLETAR);
-    await enLotes(idsPorCompletar, CONCURRENCIA, async (id) => {
-      const info = await obtenerProducto(id, token);
-      if (info) candidatosPorId.set(id, info);
+    const destacados = await obtenerMejoresProductosCategoria(categoria.categoryId, token);
+    const porCompletar = destacados.filter((d) => !candidatosPorId.has(d.id)).slice(0, TOPE_IDS_CATEGORIA_A_COMPLETAR);
+    await enLotes(porCompletar, CONCURRENCIA, async (destacado) => {
+      if (destacado.tipo === "USER_PRODUCT") {
+        destacadosIgnorados++;
+        return;
+      }
+      const info = destacado.tipo === "ITEM" ? await obtenerItemMl(destacado.id, token) : await obtenerProducto(destacado.id, token);
+      if (info) candidatosPorId.set(destacado.id, info);
     });
+  }
+  if (destacadosIgnorados > 0) {
+    console.warn(`[lib/ml/investigacion] "${termino}": ${destacadosIgnorados} destacado(s) USER_PRODUCT ignorado(s) (no son catálogo ni publicación consultable igual).`);
   }
 
   if (!candidatosPorId.size) {
@@ -390,13 +427,24 @@ export async function buscarInvestigacionProducto(empresaId: string, terminoCrud
   const cacheVendedores = new Map<string, ReturnType<typeof obtenerVendedor>>();
   const publicaciones: PublicacionInvestigacion[] = [];
   let sinOfertas = 0;
+  let sinPermisoOfertas = 0;
   await enLotes(relevantes, CONCURRENCIA, async (candidato) => {
-    const publicacion = await resolverOfertaDeUnCandidato(candidato, token, cacheVendedores);
+    const { publicacion, sinPermiso } = await resolverOfertaDeUnCandidato(candidato, token, cacheVendedores);
     if (publicacion) publicaciones.push(publicacion);
+    else if (sinPermiso) sinPermisoOfertas++;
     else sinOfertas++;
   });
 
-  if (!publicaciones.length && sinOfertas === relevantes.length) {
+  // Issue #147 — si TODAS las ofertas fallaron por falta de permiso de
+  // la app (nunca mezclado con "sin ofertas reales", que es un caso
+  // legítimo y distinto), el aviso lo dice tal cual en vez de "no se
+  // encontró nada" — pedido explícito, para que quede claro que hay
+  // que avisarle al administrador, no que el nicho esté vacío.
+  if (!publicaciones.length && sinPermisoOfertas === relevantes.length) {
+    return avisoVacio(termino, "Mercado Libre no le da permiso a la app para ver ofertas; avisale al administrador.");
+  }
+
+  if (!publicaciones.length && sinOfertas + sinPermisoOfertas === relevantes.length) {
     return avisoVacio(
       termino,
       `"${termino}" existe en el catálogo de Mercado Libre, pero ninguno de sus productos tiene publicaciones activas enlazadas — pasa en nichos donde los vendedores publican sin usar el catálogo.`

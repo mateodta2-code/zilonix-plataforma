@@ -5,7 +5,8 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
-import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
+import { LimiteMercadoLibreError, MlNoAutorizadoError, MlNoDisponibleError, MlSinPermisoAppError } from "@/lib/ml/cliente";
+import { CandadoDeRenovacionError, CuentaDesconectadaError, CuentaMlNoEncontradaError, RenovacionTokenFallidaError } from "@/lib/ml/cuentas";
 import {
   buscarInvestigacionProducto,
   LimiteBusquedasError,
@@ -64,6 +65,15 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
 
   let resultado: ResultadoInvestigacion | null = null;
   let errorBusqueda: string | null = null;
+  // Issue #147 — bug real: cualquier error que no fuera uno de los 4
+  // tipos de arriba (ej. un 401/403 real de Mercado Libre, la cuenta
+  // desconectada, el candado de renovación, invalid_grant) se
+  // relanzaba tal cual y, sin app/panel/investigacion/error.tsx,
+  // Next.js mostraba "Application error" sin mensaje — justo lo que
+  // reportó Mateo. Ahora se atrapan todos los tipos conocidos con un
+  // mensaje en español claro; lo único que de verdad sigue subiendo
+  // (a error.tsx) es un error que de verdad no se esperaba.
+  let mostrarEnlaceReconectar = false;
 
   if (termino) {
     try {
@@ -73,9 +83,18 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
         error instanceof TerminoInvalidoError ||
         error instanceof LimiteBusquedasError ||
         error instanceof SinCuentaMlError ||
-        error instanceof LimiteMercadoLibreError
+        error instanceof LimiteMercadoLibreError ||
+        error instanceof MlSinPermisoAppError ||
+        error instanceof MlNoDisponibleError
       ) {
         errorBusqueda = error.message;
+      } else if (error instanceof MlNoAutorizadoError || error instanceof CuentaDesconectadaError || error instanceof RenovacionTokenFallidaError) {
+        errorBusqueda = error.message;
+        mostrarEnlaceReconectar = true;
+      } else if (error instanceof CuentaMlNoEncontradaError) {
+        errorBusqueda = error.message;
+      } else if (error instanceof CandadoDeRenovacionError) {
+        errorBusqueda = `${error.message} Volvé a intentar la búsqueda en unos segundos.`;
       } else {
         throw error;
       }
@@ -108,7 +127,19 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
         </p>
       </Tarjeta>
 
-      {errorBusqueda ? <EstadoVacio>{errorBusqueda}</EstadoVacio> : null}
+      {errorBusqueda ? (
+        <EstadoVacio>
+          {errorBusqueda}
+          {mostrarEnlaceReconectar ? (
+            <>
+              {" "}
+              <BotonLink href="/panel/conectar-ml" variante="secundario" chico>
+                Reconectar cuenta
+              </BotonLink>
+            </>
+          ) : null}
+        </EstadoVacio>
+      ) : null}
 
       {!termino && !errorBusqueda ? (
         <EstadoVacio>Escribe un producto o nicho para analizar demanda, competencia y oportunidades.</EstadoVacio>
