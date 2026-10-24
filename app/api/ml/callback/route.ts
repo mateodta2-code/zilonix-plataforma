@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { guardarCuentaConectada } from "@/lib/ml/cuentas";
+import { CuentaMlDeOtraEmpresaError, guardarCuentaConectada } from "@/lib/ml/cuentas";
 import { intercambiarCodigo, obtenerNickname } from "@/lib/ml/oauth";
 import { urlPublicaBase } from "@/lib/url-publica";
 import { NOMBRE_COOKIE_STATE, NOMBRE_COOKIE_VERIFIER } from "@/lib/ml/pkce-cookie";
@@ -58,21 +58,27 @@ export async function GET(request: NextRequest) {
     // de vuelta) veía la página de error genérica de Next.js en vez de
     // volver a /panel/conectar-ml con un mensaje legible.
     if (error instanceof SinPermisoError) {
-      return volver(`error=${encodeURIComponent(error.message)}`);
+      return volver("error=sin_permiso");
     }
     throw error;
   }
 
+  // Bug real: antes se mandaba error.message (o el ?error= crudo de
+  // Mercado Libre) tal cual a la URL, y app/panel/conectar-ml/page.tsx
+  // lo mostraba tal cual en pantalla — el texto crudo de Postgres o de
+  // Mercado Libre nunca tiene que llegar ahí. Ahora un código fijo
+  // nada más; page.tsx traduce cada uno a su propio mensaje en
+  // español desde un mapa cerrado.
   const errorMl = request.nextUrl.searchParams.get("error");
   if (errorMl) {
     // El vendedor canceló en la pantalla de Mercado Libre, o ML
     // rechazó la autorización — no es un fallo técnico nuestro.
-    return volver(`error=${encodeURIComponent("Mercado Libre no autorizó la conexión (" + errorMl + ").")}`);
+    return volver("error=ml_rechazo");
   }
 
   const code = request.nextUrl.searchParams.get("code");
   if (!code) {
-    return volver(`error=${encodeURIComponent("Mercado Libre no envió un código de autorización.")}`);
+    return volver("error=ml_rechazo");
   }
 
   // state (RFC 6749 §10.12, protección CSRF — ver generarState() en
@@ -82,9 +88,7 @@ export async function GET(request: NextRequest) {
   const stateRecibido = request.nextUrl.searchParams.get("state");
   const stateEsperado = cookies().get(NOMBRE_COOKIE_STATE)?.value;
   if (!stateRecibido || !stateEsperado || !coincideState(stateRecibido, stateEsperado)) {
-    return volver(
-      `error=${encodeURIComponent("La conexión no se pudo validar (state inválido o vencido) — empieza de nuevo con 'Conectar Mercado Libre'.")}`
-    );
+    return volver("error=estado_vencido");
   }
 
   // PKCE (bug real encontrado en vivo: "code_verifier is a required
@@ -92,9 +96,7 @@ export async function GET(request: NextRequest) {
   // cookie httpOnly al armar el link de autorización.
   const codeVerifier = cookies().get(NOMBRE_COOKIE_VERIFIER)?.value;
   if (!codeVerifier) {
-    return volver(
-      `error=${encodeURIComponent("La conexión tardó demasiado o se perdió el estado — empieza de nuevo con 'Conectar Mercado Libre'.")}`
-    );
+    return volver("error=estado_vencido");
   }
 
   try {
@@ -116,9 +118,16 @@ export async function GET(request: NextRequest) {
     return volver("conectado=1");
   } catch (error) {
     // Regla de UX #2 (evidencia real contra Multivende): nunca un
-    // spinner infinito ni un "no hay conexiones" silencioso — se ve el
-    // error real y la pantalla ofrece "Reintentar".
-    const mensaje = error instanceof Error ? error.message : "Error desconocido.";
-    return volver(`error=${encodeURIComponent(mensaje)}`);
+    // spinner infinito ni un "no hay conexiones" silencioso — pero
+    // tampoco el error real tal cual: para este punto ya se canjeó el
+    // code por tokens nuevos en Mercado Libre, y oauth.ts puede meter
+    // hasta 300 caracteres de la respuesta cruda de ML en
+    // error.message — nunca se logea completo, solo error.name (mismo
+    // criterio que lib/ml/cuentas.ts ya usa para la renovación).
+    console.error("[api/ml/callback] no se pudo completar la conexión:", error instanceof Error ? error.name : String(error));
+    if (error instanceof CuentaMlDeOtraEmpresaError) {
+      return volver("error=cuenta_en_otra_empresa");
+    }
+    return volver("error=error_desconocido");
   }
 }
