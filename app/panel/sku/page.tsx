@@ -77,7 +77,14 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
 
   return (
     <>
-      <EncabezadoPagina titulo="SKU" />
+      <EncabezadoPagina
+        titulo="SKU"
+        accion={
+          <BotonLink href="/panel/publicar" variante="secundario" chico>
+            Publicar en Mercado Libre
+          </BotonLink>
+        }
+      />
 
       {publicacionesSinSku.length > 0 && (
         <div className={styles.avisoSinVincular}>
