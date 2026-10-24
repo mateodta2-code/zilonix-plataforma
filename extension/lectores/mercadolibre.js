@@ -82,27 +82,75 @@
     return null; // nunca se cerró — HTML cortado a mitad de carga, u otra forma inesperada
   }
 
-  // Busca `clave` en cualquier nivel de profundidad de `obj` (objetos
-  // y arreglos) — el JSON real de ML anida sold_quantity/item_id/
-  // date_created bajo una ruta que puede cambiar de versión a
-  // versión; buscar por clave en profundidad es más resistente a eso
-  // que adivinar una ruta fija (ej. "components.price.item.id").
-  function buscarClaveProfundo(obj, clave, visitados) {
+  // Issue #174, corrección real: la página de un producto trae en el
+  // mismo JSON los datos de OTROS productos (recomendados, "quienes
+  // vieron esto también vieron"...) — buscar sold_quantity en
+  // cualquier profundidad, sin más, podía devolver el de un producto
+  // DISTINTO si el actual no traía el campo pero algún recomendado sí.
+  // Todo lo de abajo amarra sold_quantity/date_created al producto que
+  // el usuario está viendo de verdad, nunca al primero que aparezca.
+
+  // "MCO-123456789" o "MCO123456789" (con o sin guión) -> "MCO123456789".
+  function extraerIdDeUrl(url) {
+    if (typeof url !== "string") return null;
+    const m = url.match(/MCO-?(\d+)/i);
+    return m ? `MCO${m[1]}` : null;
+  }
+
+  function normalizarId(valor) {
+    if (typeof valor !== "string" && typeof valor !== "number") return null;
+    return String(valor).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  // Busca, en cualquier nivel de profundidad de `obj`, el objeto cuyo
+  // `id`/`item_id` coincide con `itemIdActual` — y devuelve ESE
+  // objeto completo (de donde el llamador saca sold_quantity/
+  // date_created), nunca el primero que tenga sold_quantity sin
+  // importar de qué producto sea.
+  function buscarObjetoConId(obj, itemIdActual, visitados) {
     visitados = visitados || new Set();
     if (!obj || typeof obj !== "object" || visitados.has(obj)) return undefined;
     visitados.add(obj);
-    if (!Array.isArray(obj) && Object.prototype.hasOwnProperty.call(obj, clave)) return obj[clave];
+    if (!Array.isArray(obj)) {
+      const idCandidato = normalizarId(obj.item_id ?? obj.id);
+      if (idCandidato && idCandidato === itemIdActual) return obj;
+    }
     const valores = Array.isArray(obj) ? obj : Object.values(obj);
     for (const valor of valores) {
-      const resultado = buscarClaveProfundo(valor, clave, visitados);
+      const resultado = buscarObjetoConId(valor, itemIdActual, visitados);
       if (resultado !== undefined) return resultado;
     }
     return undefined;
   }
 
-  function leerDatosIncrustados(html) {
+  // Respaldo de texto plano (sin JSON.parse) — mismo criterio de
+  // amarre: solo cuenta un "sold_quantity"/"date_created" si aparece
+  // dentro de los ~500 caracteres alrededor de un "id"/"item_id" que
+  // sea el producto actual. Un "sold_quantity" de otro producto más
+  // lejos en el HTML nunca entra.
+  const VENTANA_CARACTERES = 500;
+  function buscarDatosCercaDelId(html, itemIdActual) {
+    const vacio = { soldQuantity: null, dateCreated: null };
+    if (!itemIdActual) return vacio;
+    const patronId = new RegExp(`"(?:id|item_id)"\\s*:\\s*"${itemIdActual}"`, "gi");
+    for (const coincidencia of html.matchAll(patronId)) {
+      const indice = coincidencia.index ?? 0;
+      const ventana = html.slice(Math.max(0, indice - VENTANA_CARACTERES), indice + VENTANA_CARACTERES);
+      const coincidenciaSold = ventana.match(/"sold_quantity"\s*:\s*(\d+)/);
+      if (!coincidenciaSold) continue; // esta aparición del id no tiene sold_quantity cerca — puede haber otra más abajo
+      const coincidenciaFecha = ventana.match(/"date_created"\s*:\s*"([^"]+)"/);
+      return { soldQuantity: Number(coincidenciaSold[1]), dateCreated: coincidenciaFecha ? coincidenciaFecha[1] : null };
+    }
+    return vacio;
+  }
+
+  // `itemIdActual` ya viene normalizado (extraerIdDeUrl) — sin él no
+  // hay con qué confirmar que un sold_quantity es del producto
+  // correcto, así que se devuelve todo en null (el llamador cae al
+  // aproximado de "+N vendidos", marcado "(aproximado)").
+  function leerDatosIncrustados(html, itemIdActual) {
     const vacio = { soldQuantity: null, itemId: null, dateCreated: null };
-    if (typeof html !== "string" || !html) return vacio;
+    if (typeof html !== "string" || !html || !itemIdActual) return vacio;
 
     let soldQuantity = null;
     let itemId = null;
@@ -112,32 +160,27 @@
     if (jsonCrudo) {
       try {
         const datos = JSON.parse(jsonCrudo);
-        const valorSold = buscarClaveProfundo(datos, "sold_quantity");
-        const valorItem = buscarClaveProfundo(datos, "item_id") ?? buscarClaveProfundo(datos, "id");
-        const valorFecha = buscarClaveProfundo(datos, "date_created");
-        if (typeof valorSold === "number" && Number.isFinite(valorSold)) soldQuantity = valorSold;
-        if (typeof valorItem === "string") itemId = valorItem;
-        if (typeof valorFecha === "string") dateCreated = valorFecha;
+        const objetoDelItem = buscarObjetoConId(datos, itemIdActual);
+        if (objetoDelItem) {
+          if (typeof objetoDelItem.sold_quantity === "number" && Number.isFinite(objetoDelItem.sold_quantity)) {
+            soldQuantity = objetoDelItem.sold_quantity;
+          }
+          if (typeof objetoDelItem.date_created === "string") dateCreated = objetoDelItem.date_created;
+          const valorId = objetoDelItem.item_id ?? objetoDelItem.id;
+          if (typeof valorId === "string") itemId = valorId;
+        }
       } catch {
         // JSON cortado, o cambió de forma — se cae al respaldo de texto de abajo, nunca revienta.
       }
     }
 
-    // Respaldo pedido explícito por la tarea: directo en el texto del
-    // HTML, sin parsear nada — cubre tanto que la variable haya
-    // cambiado de nombre como que el JSON de arriba no trajera alguna
-    // de las 3 claves.
+    // Respaldo de texto plano — mismo amarre al item actual, nunca el
+    // "id":"MCO..." genérico de cualquier producto de la página.
     if (soldQuantity === null) {
-      const m = html.match(/"sold_quantity"\s*:\s*(\d+)/);
-      if (m) soldQuantity = Number(m[1]);
-    }
-    if (itemId === null) {
-      const m = html.match(/"item_id"\s*:\s*"([A-Z]{2,4}\d+)"/i) || html.match(/"id"\s*:\s*"(MCO\d+)"/i);
-      if (m) itemId = m[1];
-    }
-    if (dateCreated === null) {
-      const m = html.match(/"date_created"\s*:\s*"([^"]+)"/);
-      if (m) dateCreated = m[1];
+      const resultado = buscarDatosCercaDelId(html, itemIdActual);
+      soldQuantity = resultado.soldQuantity;
+      if (dateCreated === null) dateCreated = resultado.dateCreated;
+      if (soldQuantity !== null && itemId === null) itemId = itemIdActual;
     }
 
     return { soldQuantity, itemId, dateCreated };
@@ -172,7 +215,11 @@
 
     const vendidosAproximado = U.enteroDesdeTexto((textoSubtitulo.match(/[\d.,]+\s*vendid/i) || [])[0] || null);
     const htmlCompleto = doc && doc.documentElement ? doc.documentElement.outerHTML : "";
-    const incrustado = leerDatosIncrustados(htmlCompleto);
+    // doc.URL es la URL real de la página (mismo valor que location.href
+    // para el documento que el navegador ya cargó) — de ahí sale el id
+    // del producto actual, para no confundirlo con otro de la misma página.
+    const itemIdActual = extraerIdDeUrl(doc && doc.URL);
+    const incrustado = leerDatosIncrustados(htmlCompleto, itemIdActual);
     const vendidos = incrustado.soldQuantity !== null ? incrustado.soldQuantity : vendidosAproximado;
     // true = exacto (sold_quantity real, del JSON/HTML incrustado);
     // false = solo la etiqueta redondeada "+N vendidos"; null = nada.
@@ -216,7 +263,7 @@
     return { productos };
   }
 
-  const api = { tipoDePagina, leerProducto, leerListado, leerDatosIncrustados, calcularVentasPromedioMes };
+  const api = { tipoDePagina, leerProducto, leerListado, leerDatosIncrustados, calcularVentasPromedioMes, extraerIdDeUrl };
 
   // Igual que extension/seguridad.js: en el navegador real no existe
   // `module` — este bloque solo corre cuando vitest hace require()/
