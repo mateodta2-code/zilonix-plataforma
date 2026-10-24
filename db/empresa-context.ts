@@ -128,3 +128,23 @@ export async function dbComoAvisoWebhook<T>(cuentaIdExterna: string, fn: (tx: ty
     return fn(tx as unknown as typeof db);
   });
 }
+
+// Issue #181 — transferir una cuenta de Mercado Libre de OTRA empresa a
+// la empresa actual exige dos cosas que `dbComoEmpresa` no puede dar:
+// LEER el nombre de la empresa dueña actual (para el mensaje de
+// confirmación) y ACTUALIZAR una fila de `cuentas_ml` que hoy pertenece
+// a esa otra empresa. Nunca con el superusuario (DATABASE_URL vive
+// solo en db/migrate.ts) — mismo principio exacto que
+// dbComoAvisoWebhook/dbComoInvitacion: una variable de sesión aparte
+// (acá, el cuenta_id_externa que el propio OAuth de Mercado Libre ya
+// confirmó que es real) da acceso puntual a ESA fila nada más, nunca a
+// las demás de otra empresa. Ver las políticas
+// cuentas_ml_por_transferencia_leer/actualizar y
+// empresas_por_transferencia_cuenta_ml en db/rls-setup.sql.
+export async function dbComoTransferenciaCuentaMl<T>(cuentaIdExterna: string, fn: (tx: typeof db) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.empresa_actual', ${EMPRESA_SENTINEL}, true)`);
+    await tx.execute(sql`SELECT set_config('app.cuenta_ml_transferencia_actual', ${cuentaIdExterna}, true)`);
+    return fn(tx as unknown as typeof db);
+  });
+}

@@ -37,6 +37,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/conectar-ml/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/actions.ts",
+  "app/panel/conectar-ml/confirmar-transferencia/page.tsx",
   "app/panel/avisos-ml/page.tsx",
   "app/panel/sku/page.tsx",
   "app/panel/sku/actions.ts",
@@ -92,6 +93,8 @@ const RUTAS_EXENTAS: Record<string, string> = {
     "la llama un cron, sin sesión de usuario (issue #175) — el permiso real es el secreto compartido x-seguimiento-trabajador-secret, y la conexión seguimiento_trabajador_user (db/trabajador-seguimiento-context.ts) solo puede tocar seguimientos_ml, ninguna otra tabla",
   "app/panel/sku/importar/actions.ts":
     "el permiso real (requierePermiso('inventario','modificar')) vive en lib/ml/sku-importar.ts (previsualizarImportacionSkus/confirmarImportacionSkus), llamado ANTES de leer o escribir — este archivo solo adapta el formulario a esas dos funciones, nunca toca la base por su cuenta",
+  "app/panel/conectar-ml/confirmar-transferencia/actions.ts":
+    "el permiso real (requierePermiso('configuracion','crear')) vive en confirmarTransferenciaCuentaMl (lib/ml/transferencia.ts), llamado ANTES de transferir — este archivo solo resuelve usuario/empresa desde las cookies y borra el pendiente, nunca toca cuentas_ml por su cuenta",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {

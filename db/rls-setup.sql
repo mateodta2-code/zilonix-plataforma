@@ -173,6 +173,22 @@ CREATE POLICY aislamiento_empresas ON empresas
     )
   );
 
+-- Issue #181 — la pantalla de confirmación de transferencia necesita
+-- mostrar el NOMBRE de la empresa que hoy tiene la cuenta de Mercado
+-- Libre ("ya está conectada a la empresa «sawii»"), antes de que quien
+-- confirma sea parte de esa empresa. El subselect sobre cuentas_ml
+-- queda sujeto, a su vez, a la política cuentas_ml_por_transferencia_leer
+-- de arriba (misma variable de sesión) — nunca expone más que la fila
+-- puntual que el propio OAuth ya confirmó.
+DROP POLICY IF EXISTS empresas_por_transferencia_cuenta_ml ON empresas;
+CREATE POLICY empresas_por_transferencia_cuenta_ml ON empresas FOR SELECT
+  USING (
+    id IN (
+      SELECT empresa_id FROM cuentas_ml
+      WHERE cuenta_id_externa = current_setting('app.cuenta_ml_transferencia_actual', true)
+    )
+  );
+
 DROP POLICY IF EXISTS aislamiento_roles ON roles;
 CREATE POLICY aislamiento_roles ON roles
   -- empresa_id vacío = plantilla de fábrica, visible para cualquier
@@ -243,6 +259,26 @@ CREATE POLICY aislamiento_cuentas_ml ON cuentas_ml
 DROP POLICY IF EXISTS cuentas_ml_por_aviso_webhook ON cuentas_ml;
 CREATE POLICY cuentas_ml_por_aviso_webhook ON cuentas_ml FOR SELECT
   USING (cuenta_id_externa = current_setting('app.cuenta_ml_externa_actual', true));
+
+-- Issue #181 — transferir una cuenta ya conectada en OTRA empresa:
+-- política APARTE de la de aviso_webhook (trust boundary distinto —
+-- este camino sí exige sesión real + requierePermiso('configuracion',
+-- 'crear'), un webhook no tiene ninguno de los dos), con su propia
+-- variable de sesión (dbComoTransferenciaCuentaMl, db/empresa-context.ts).
+-- Mismo principio que siempre: el cuenta_id_externa puntual (que
+-- Mercado Libre ya confirmó real en el propio OAuth) ES el permiso
+-- para ver/actualizar esa fila nada más, nunca las de otra cuenta.
+-- FOR UPDATE sin WITH CHECK explícito: cuenta_id_externa nunca cambia
+-- en la transferencia (solo empresa_id, tokens, nickname), así que la
+-- fila nueva sigue cumpliendo el mismo USING — comportamiento estándar
+-- de Postgres (sin WITH CHECK, se reusa el USING también para la fila
+-- resultante).
+DROP POLICY IF EXISTS cuentas_ml_por_transferencia_leer ON cuentas_ml;
+CREATE POLICY cuentas_ml_por_transferencia_leer ON cuentas_ml FOR SELECT
+  USING (cuenta_id_externa = current_setting('app.cuenta_ml_transferencia_actual', true));
+DROP POLICY IF EXISTS cuentas_ml_por_transferencia_actualizar ON cuentas_ml;
+CREATE POLICY cuentas_ml_por_transferencia_actualizar ON cuentas_ml FOR UPDATE
+  USING (cuenta_id_externa = current_setting('app.cuenta_ml_transferencia_actual', true));
 
 DROP POLICY IF EXISTS aislamiento_avisos_ml ON avisos_ml;
 CREATE POLICY aislamiento_avisos_ml ON avisos_ml

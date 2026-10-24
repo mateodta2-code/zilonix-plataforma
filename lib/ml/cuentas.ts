@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, lt, or } from "drizzle-orm";
-import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl } from "@/db/schema";
+import { dbComoEmpresa, dbComoTransferenciaCuentaMl } from "@/db/empresa-context";
+import { cuentasMl, empresas } from "@/db/schema";
 import { cifrarToken, descifrarToken } from "@/lib/cifrado";
 import { renovarToken, type TokensMl } from "@/lib/ml/oauth";
 
@@ -226,4 +226,58 @@ export async function listarCuentasConectadas(empresaId: string) {
       })
       .from(cuentasMl)
   );
+}
+
+// Issue #181 — en vez de solo avisar "ya está conectada a otra
+// empresa" (CuentaMlDeOtraEmpresaError, arriba), la pantalla de
+// confirmación necesita saber a CUÁL — dato que esa clase de error a
+// propósito nunca revela. Solo lectura, nunca modifica nada: corre
+// bajo dbComoTransferenciaCuentaMl (db/empresa-context.ts), el camino
+// acotado que ve ESA fila puntual sin importar la empresa, nunca el
+// superusuario ni app.empresa_actual.
+export async function obtenerEmpresaDueñaDeCuentaMl(cuentaIdExterna: string): Promise<{ empresaId: string; empresaNombre: string } | null> {
+  return dbComoTransferenciaCuentaMl(cuentaIdExterna, async (tx) => {
+    const [fila] = await tx
+      .select({ empresaId: cuentasMl.empresaId, empresaNombre: empresas.nombre })
+      .from(cuentasMl)
+      .innerJoin(empresas, eq(empresas.id, cuentasMl.empresaId))
+      .where(eq(cuentasMl.cuentaIdExterna, cuentaIdExterna));
+    return fila ?? null;
+  });
+}
+
+// Issue #181 — confirmada la transferencia, mueve la ÚNICA fila de
+// cuentas_ml (índice único sobre cuenta_id_externa) de la empresa
+// anterior a la actual: nuevo empresa_id, tokens y nickname nuevos
+// (los que se acaban de autorizar), se reactiva si estaba desconectada
+// allá. A propósito NUNCA toca pedidos/publicaciones/importaciones_ml
+// de la empresa anterior — solo la conexión cambia de dueño, el
+// histórico se queda donde está (mismo principio que desconectarCuenta,
+// arriba, nunca borra nada).
+export async function transferirCuentaMlAOtraEmpresa(
+  empresaDestinoId: string,
+  datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl }
+): Promise<{ id: string }> {
+  return dbComoTransferenciaCuentaMl(datos.cuentaIdExterna, async (tx) => {
+    const [fila] = await tx
+      .update(cuentasMl)
+      .set({
+        empresaId: empresaDestinoId,
+        nickname: datos.nickname,
+        accessTokenCifrado: cifrarToken(datos.tokens.accessToken),
+        refreshTokenCifrado: cifrarToken(datos.tokens.refreshToken),
+        tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
+        desconectadaTs: null,
+        renovandoTs: null,
+      })
+      .where(eq(cuentasMl.cuentaIdExterna, datos.cuentaIdExterna))
+      .returning({ id: cuentasMl.id });
+
+    // Caso raro (carrera): entre que se armó la pantalla de
+    // confirmación y que se envió, la fila desapareció (la empresa
+    // dueña se borró, con el cascade de empresas.id). Nunca se asume
+    // éxito sin fila devuelta.
+    if (!fila) throw new CuentaMlNoEncontradaError();
+    return fila;
+  });
 }

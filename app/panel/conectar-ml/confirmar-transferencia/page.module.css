@@ -1,0 +1,16 @@
+.mensaje {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--texto);
+}
+
+.aclaracion {
+  color: var(--texto-suave);
+  font-size: 13px;
+}
+
+.acciones {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
