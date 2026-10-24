@@ -3,7 +3,8 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { obtenerItemMl, obtenerProducto, obtenerVendedor } from "@/lib/ml/cliente";
-import { interpretarEnlaceProducto, interpretarEnlaceTienda } from "@/lib/seguimiento/link";
+import { buscarFotoDeHaceUnMes } from "@/lib/seguimiento/comparativa";
+import { esLinkDeTienda, esLinkTiendaOficialSinIdDeVendedor, interpretarEnlaceProducto, interpretarEnlaceTienda } from "@/lib/seguimiento/link";
 
 // Issue #175 — "máximo 5 competidores por empresa, validado en el
 // servidor": literal, acá vive el candado. No es una constraint de
@@ -122,6 +123,16 @@ export async function agregarSeguimiento(empresaId: string, usuarioId: string, d
     interpretado = interpretarEnlaceProducto(datos.link);
   }
   if (!interpretado) {
+    // Issue #192 — dos casos puntuales con un mensaje más claro que el
+    // genérico de abajo, antes de caer en él:
+    if (datos.tipo === "tienda" && esLinkTiendaOficialSinIdDeVendedor(datos.link)) {
+      throw new LinkMlInvalidoError(
+        "Este link de tienda oficial no trae el id del vendedor; abrí la tienda en ML y usá Seguir en Zilonix, o pegá el seller_id / un link con CustId."
+      );
+    }
+    if (datos.tipo === "producto" && esLinkDeTienda(datos.link)) {
+      throw new LinkMlInvalidoError('Ese link es de una tienda, no de un producto — elegí "Tienda" como tipo, o pegá el link de la publicación/catálogo.');
+    }
     throw new LinkMlInvalidoError(
       datos.tipo === "tienda"
         ? "No reconocemos ese link o id de tienda — pegá el seller_id numérico, o un link con _CustId_ en la URL."
@@ -175,6 +186,14 @@ export async function eliminarSeguimiento(empresaId: string, seguimientoId: stri
 export type SeguimientoConUltimaFoto = {
   seguimiento: typeof seguimientosMl.$inferSelect;
   ultimaFoto: typeof seguimientoFotos.$inferSelect | null;
+  // Issue #195 — "comparativa": la foto justo antes de la última
+  // (para precio/inventario/vendidos "valor + delta", y "ventas hoy")
+  // y, si hay historial suficiente, la más cercana a 30 días atrás
+  // (para "ventas ~30d") — ver lib/seguimiento/comparativa.ts. null en
+  // los dos si no hay (o no hay suficiente) historial — nunca se
+  // inventa una comparación con menos datos de los que pide el issue.
+  fotoAnterior: typeof seguimientoFotos.$inferSelect | null;
+  fotoHaceUnMes: typeof seguimientoFotos.$inferSelect | null;
 };
 
 // Lista para /panel/investigacion/seguimiento — precio, inventario,
@@ -183,20 +202,24 @@ export type SeguimientoConUltimaFoto = {
 // guardó la revisión diaria). N+1 a propósito: el volumen esperado por
 // empresa es bajo (máx. 5 competidores + algunos productos/tiendas
 // propios), nunca cientos de filas que justifiquen una consulta más
-// compleja.
+// compleja. Issue #195 — ahora trae TODAS las fotos de cada
+// seguimiento (no solo la última) para poder armar la comparativa;
+// mismo criterio de volumen bajo, una fila por día desde que se agregó.
 export async function listarSeguimientosConUltimaFoto(empresaId: string): Promise<SeguimientoConUltimaFoto[]> {
   return dbComoEmpresa(empresaId, async (tx) => {
     const activos = await tx.select().from(seguimientosMl).where(and(eq(seguimientosMl.empresaId, empresaId), isNull(seguimientosMl.eliminadoTs))).orderBy(desc(seguimientosMl.creadoTs));
 
     const resultado: SeguimientoConUltimaFoto[] = [];
     for (const seguimiento of activos) {
-      const [ultimaFoto] = await tx
+      const fotos = await tx
         .select()
         .from(seguimientoFotos)
         .where(eq(seguimientoFotos.seguimientoId, seguimiento.id))
-        .orderBy(desc(seguimientoFotos.fecha))
-        .limit(1);
-      resultado.push({ seguimiento, ultimaFoto: ultimaFoto ?? null });
+        .orderBy(desc(seguimientoFotos.fecha));
+      const ultimaFoto = fotos[0] ?? null;
+      const fotoAnterior = fotos[1] ?? null;
+      const fotoHaceUnMes = ultimaFoto ? buscarFotoDeHaceUnMes(fotos.slice(1), ultimaFoto.fecha) : null;
+      resultado.push({ seguimiento, ultimaFoto, fotoAnterior, fotoHaceUnMes });
     }
     return resultado;
   });

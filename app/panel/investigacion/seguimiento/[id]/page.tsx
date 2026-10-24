@@ -6,6 +6,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerDetalleSeguimiento } from "@/lib/seguimiento/seguimientos";
 import { mensajeAlerta } from "@/lib/seguimiento/alertas";
+import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
 import { BotonLink } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
@@ -68,8 +69,13 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
         descripcion={`${seguimiento.tipo === "tienda" ? "Tienda" : "Producto"} seguido desde ${fecha(seguimiento.creadoTs)}${seguimiento.esCompetidor ? " — marcado como competidor" : ""}.`}
       />
 
+      {/* Issue #195 — nunca seguimiento.linkOriginal: es el texto CRUDO
+          que la persona pegó al agregar (puede ser un id suelto sin
+          forma de URL, ej. solo "123456789" si agregó por seller_id
+          directo) — el link real siempre se arma desde recursoMl +
+          mlIdExterno, ya validados. */}
       <p className={styles.link}>
-        <a href={seguimiento.linkOriginal} target="_blank" rel="noreferrer">
+        <a href={construirLinkMlDeSeguimiento(seguimiento.recursoMl, seguimiento.mlIdExterno)} target="_blank" rel="noopener noreferrer">
           Ver en Mercado Libre
         </a>
       </p>

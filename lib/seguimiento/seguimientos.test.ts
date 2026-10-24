@@ -242,6 +242,55 @@ describe("listarSeguimientosConUltimaFoto / obtenerDetalleSeguimiento (issue #17
     expect(Number(lista[0].ultimaFoto?.precio)).toBe(90); // la más reciente, no la primera
   });
 
+  // Issue #195 — "comparativa": fotoAnterior (para precio/inventario/
+  // vendidos "valor + delta" y "ventas hoy") y fotoHaceUnMes (para
+  // "ventas ~30 días"), ambas relativas a la fecha de la ÚLTIMA foto —
+  // nunca a la fecha real de hoy, para que esto no dependa de cuándo
+  // corre la prueba.
+  it("trae fotoAnterior (la foto justo antes de la última) y fotoHaceUnMes (la más cercana a 30 días antes, si hay alguna de al menos 25)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values([
+        { empresaId, seguimientoId: seguimiento.id, fecha: new Date("2026-09-20"), vendidos: 50 }, // 31 días antes de la última
+        { empresaId, seguimientoId: seguimiento.id, fecha: new Date("2026-10-20"), vendidos: 90 }, // la anterior (ayer)
+        { empresaId, seguimientoId: seguimiento.id, fecha: new Date("2026-10-21"), vendidos: 99 }, // la última (hoy)
+      ])
+    );
+
+    const lista = await listarSeguimientosConUltimaFoto(empresaId);
+    const fila = lista.find((f) => f.seguimiento.id === seguimiento.id);
+
+    expect(fila?.ultimaFoto?.vendidos).toBe(99);
+    expect(fila?.fotoAnterior?.vendidos).toBe(90);
+    expect(fila?.fotoHaceUnMes?.vendidos).toBe(50);
+  });
+
+  it("sin suficiente historial (todo más reciente que 25 días) -> fotoHaceUnMes null, nunca la más vieja que haya", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO222", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values([
+        { empresaId, seguimientoId: seguimiento.id, fecha: new Date("2026-10-15"), vendidos: 10 }, // 6 días antes
+        { empresaId, seguimientoId: seguimiento.id, fecha: new Date("2026-10-21"), vendidos: 15 },
+      ])
+    );
+
+    const lista = await listarSeguimientosConUltimaFoto(empresaId);
+    const fila = lista.find((f) => f.seguimiento.id === seguimiento.id);
+
+    expect(fila?.fotoAnterior?.vendidos).toBe(10);
+    expect(fila?.fotoHaceUnMes).toBeNull();
+  });
+
   it("obtenerDetalleSeguimiento trae el historial completo de fotos y las alertas, ordenadas", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
     await conectarCuentaMl(empresaId);

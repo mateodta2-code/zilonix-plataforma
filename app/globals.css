@@ -105,8 +105,25 @@
   --plata-etiqueta-zona-oscura: #c0c0c0;
   --acento-suave-zona-oscura: rgba(59, 130, 246, 0.12);
   --acento-resplandor-zona-oscura: rgba(59, 130, 246, 0.2);
+  /* Issue #191 — Chip estado="aviso" (Chip.module.css) usa
+     --acento/--acento-fuerte para su texto y su borde. En claro esos
+     dos son #2563eb/#1d4ed8 (pensados para fondo BLANCO) — contra la
+     parada más clara de --kpi-fondo (#2b2f36) miden 2.60:1/2.01:1,
+     bajo el mínimo AA (4.5:1 texto). Mismos valores que ya usa oscuro
+     para estos dos tokens — pasan de sobra (3.65–4.87:1 / 5.29–7.05:1
+     contra las 3 paradas, medido igual que el resto de esta sección). */
+  --acento-zona-oscura: #3b82f6;
+  --acento-fuerte-zona-oscura: #60a5fa;
   --borde-zona-oscura: #222225;
   --degradado-plata-texto-zona-oscura: linear-gradient(100deg, #c0c0c0 0%, #e6e6e6 46%, #d0d0d0 72%, #c0c0c0 100%);
+  /* Issue #191 — encabezado de <Tabla> dentro de una <Tarjeta>: mismo
+     valor que la parada MÁS OSCURA de --kpi-fondo (#16171a, ya medida
+     en el comentario de #156 de abajo — 9.85:1 contra
+     --texto-suave-zona-oscura, el peor caso ahí era la parada más
+     CLARA, así que acá sobra margen), un solo tono fijo (no un
+     degradado) para distinguir el encabezado del cuerpo de la tabla
+     igual que ya hace --superficie-2 en claro/oscuro normal. */
+  --superficie-2-zona-oscura: #16171a;
 
   /* Issue #156 — TarjetaKpi (inicio, Avisos ML, Investigación): fondo
      siempre gris oscuro, en LOS DOS TEMAS (mismo criterio que los
@@ -131,6 +148,24 @@
      filtros no son "KPI"), nunca un segundo degradado con los mismos
      números copiados a mano. */
   --tarjeta-fondo: var(--kpi-fondo);
+
+  /* Issue #191 — bug real en staging (tema claro): <Tabla> (components/
+     marco/Tabla.module.css) pintaba su fondo con --superficie/
+     --superficie-2 directo, SIEMPRE claro-en-claro — correcto cuando
+     la tabla vive sola en la página (issue #186 la dejó así a
+     propósito, "tablas... se quedan en la zona clara del fade"), pero
+     ilegible cuando vive DENTRO de una <Tarjeta> (ahora oscura, #186):
+     la tarjeta redefine --texto a zona-oscura (claro) para todo lo de
+     adentro, y la tabla seguía con su fondo claro de siempre — texto
+     claro sobre fondo claro.
+
+     Mismo truco que --texto-superficie-2 (issue #186): valor por
+     defecto = el de siempre (--superficie/--superficie-2, tabla
+     sola), y SOLO .tarjeta (Tarjeta.module.css) los redefine a
+     oscuro — Tabla.module.css nunca vuelve a leer --superficie/
+     --superficie-2 directo, lee estos dos en su lugar. */
+  --tabla-fondo: var(--superficie);
+  --tabla-encabezado-fondo: var(--superficie-2);
 
   --peligro: #ef4444;
   --exito: #22c55e;
