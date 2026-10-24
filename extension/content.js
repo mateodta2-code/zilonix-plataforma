@@ -6,31 +6,41 @@
 (function () {
   "use strict";
   const U = window.ZilonixUtilidades;
+  const ZS = window.ZilonixSeguridad;
   const lector = window.ZilonixLectorActivo;
-  if (!U || !lector) return; // sitio sin lector cargado — nada que hacer acá
+  if (!U || !ZS || !lector) return; // sitio sin lector/seguridad cargados — nada que hacer acá
 
   const SIN_DATO = "No disponible";
   const PANEL_ID = "zilonix-panel-investigacion-174";
   const RETARDO_REESCANEO_MS = 900; // sitios SPA (ML, Amazon) cambian el DOM sin recargar la página
 
+  // Issue #174, revisión de Pablo — textoCampo es la ÚNICA puerta por
+  // la que pasa texto de la página (título, vendedor, nombre de un
+  // producto del Top 10...) antes de entrar a un template de HTML más
+  // abajo: siempre devuelve el texto YA escapado (extension/seguridad.js),
+  // nunca el crudo. El resultado se usa con innerHTML — nunca con
+  // .textContent, que mostraría las entidades escapadas tal cual en
+  // vez de interpretarlas.
   function textoCampo(valor) {
-    return valor === null || valor === undefined || valor === "" ? SIN_DATO : String(valor);
+    const texto = valor === null || valor === undefined || valor === "" ? SIN_DATO : String(valor);
+    return ZS.escaparHtml(texto);
   }
 
   function formatoPrecio(valor, moneda) {
     if (valor === null || valor === undefined) return SIN_DATO;
     const numero = valor.toLocaleString("es-CO", { maximumFractionDigits: 2 });
+    // moneda siempre es un literal fijo nuestro ("COP") o null, nunca
+    // texto de la página — no hace falta escaparlo.
     return moneda ? `${moneda} ${numero}` : numero;
   }
 
+  // etiqueta siempre es un string fijo nuestro (ej. "Precio",
+  // "Vendedor / tienda") — nunca de la página, no hace falta
+  // escaparlo. valorHtml SÍ puede venir de la página: quien llama a
+  // filaHtml() tiene que pasarlo ya escapado (por textoCampo(), o ser
+  // HTML fijo nuestro como el chip de "Full").
   function filaHtml(etiqueta, valorHtml, sinDato) {
     return `<div class="zx-fila"><span class="zx-fila__etiqueta">${etiqueta}</span><span class="zx-fila__valor" data-sin-dato="${sinDato ? "true" : "false"}">${valorHtml}</span></div>`;
-  }
-
-  // --- CSV (siempre al portapapeles, nunca a un archivo ni a un servidor) ---
-  function celdaCsv(valor) {
-    const texto = valor === null || valor === undefined ? "" : String(valor);
-    return `"${texto.replace(/"/g, '""')}"`;
   }
 
   function csvDeProducto(datos) {
@@ -49,13 +59,13 @@
       ["numeroOpiniones", datos.numeroOpiniones],
     ];
     if (datos.esCatalogo !== undefined) filas.push(["esCatalogo", datos.esCatalogo], ["esFull", datos.esFull], ["envioGratis", datos.envioGratis]);
-    return filas.map((fila) => fila.map(celdaCsv).join(",")).join("\n");
+    return filas.map((fila) => fila.map(ZS.celdaCsv).join(",")).join("\n");
   }
 
   function csvDeListado(productos) {
     const encabezado = ["titulo", "precio", "vendidos", "link"];
     const filas = [encabezado, ...productos.map((p) => [p.titulo, p.precio, p.vendidos, p.link])];
-    return filas.map((fila) => fila.map(celdaCsv).join(",")).join("\n");
+    return filas.map((fila) => fila.map(ZS.celdaCsv).join(",")).join("\n");
   }
 
   async function copiarAlPortapapeles(texto, boton) {
@@ -180,11 +190,17 @@
     if (resumen.top10.length) {
       html += `<p class="zx-titulo-producto" style="margin-top:10px">Top ${resumen.top10.length} por vendidos</p><ul class="zx-top10">`;
       html += resumen.top10
-        .map((p) =>
-          p.link
-            ? `<li><a href="${p.link}" target="_blank" rel="noreferrer">${textoCampo(p.titulo)}</a><span class="zx-top10__vendidos">${p.vendidos}</span></li>`
-            : `<li><span>${textoCampo(p.titulo)}</span><span class="zx-top10__vendidos">${p.vendidos}</span></li>`
-        )
+        .map((p) => {
+          // Issue #174, revisión de Pablo — el link del Top 10 solo se
+          // usa si es de verdad http(s) (ZilonixSeguridad.linkSeguro,
+          // con new URL real) — nunca un javascript:/data: disfrazado.
+          // Si no es seguro, el producto igual aparece, solo que como
+          // texto suelto, sin link.
+          const urlSegura = ZS.linkSeguro(p.link);
+          return urlSegura
+            ? `<li><a href="${ZS.escaparHtml(urlSegura)}" target="_blank" rel="noreferrer">${textoCampo(p.titulo)}</a><span class="zx-top10__vendidos">${p.vendidos}</span></li>`
+            : `<li><span>${textoCampo(p.titulo)}</span><span class="zx-top10__vendidos">${p.vendidos}</span></li>`;
+        })
         .join("");
       html += "</ul>";
     } else {

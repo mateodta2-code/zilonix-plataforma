@@ -42,8 +42,10 @@ function empaquetar() {
   // -r: recursivo. Se corre DESDE la carpeta extension/ para que el
   // ZIP contenga los archivos sueltos (manifest.json en la raíz del
   // ZIP), no una carpeta "extension/" adentro — así "Cargar
-  // descomprimida" apunta directo a la carpeta correcta.
-  execFileSync("zip", ["-r", "-X", rutaZip, "."], { cwd: CARPETA_EXTENSION, stdio: "inherit" });
+  // descomprimida" apunta directo a la carpeta correcta. Los *.test.ts
+  // (extension/seguridad.test.ts) son para `npm test`, nunca para la
+  // extensión real — se excluyen del ZIP.
+  execFileSync("zip", ["-r", "-X", rutaZip, ".", "-x", "*.test.ts", "-x", "*.test.js"], { cwd: CARPETA_EXTENSION, stdio: "inherit" });
 
   console.log(`\nListo: ${path.relative(RAIZ, rutaZip)}`);
 }
