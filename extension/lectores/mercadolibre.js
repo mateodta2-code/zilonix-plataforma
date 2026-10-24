@@ -46,15 +46,10 @@
     return `${CONFIG.URL_APP}/panel/investigacion/seguimiento?agregar_tienda=${encodeURIComponent(sellerId)}`;
   }
 
-  // Página de UN solo vendedor — a diferencia del producto (que
-  // comparte el JSON con recomendados de OTROS productos), acá no hay
-  // riesgo real de mezclar con otro vendedor: alcanza con el primer
-  // seller_id/user_id que aparezca en el texto del HTML. Best-effort a
-  // propósito ("si se puede leer del JSON incrustado", pidió la
-  // tarea) — si no aparece, se devuelve null y el panel no ofrece el
-  // botón, nunca inventa un id.
-  // "CustId=123456" (la forma clásica de "visitar vendedor" de
-  // Mercado Libre) -> "123456".
+  // Issue #188 — "CustId=123456" en la URL (la forma clásica de
+  // "visitar vendedor" de Mercado Libre) -> "123456". Viene directo
+  // de la URL, nada que adivinar del HTML — por eso leerSellerIdDeTienda
+  // (abajo) la prueba primero, antes que cualquier cosa del HTML.
   function extraerCustIdDeUrl(url) {
     if (typeof url !== "string") return null;
     const m = url.match(/[?&]CustId=(\d+)/i);
