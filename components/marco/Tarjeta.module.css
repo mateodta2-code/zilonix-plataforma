@@ -45,6 +45,21 @@
      <Tarjeta> (ej. un filtro con un chip de estado). */
   --exito-texto: var(--kpi-exito-texto);
   --peligro-texto: var(--kpi-peligro-texto);
+  /* Issue #191 — Chip estado="aviso" (ej. "Competidor" en la tabla de
+     seguimiento) usa --acento/--acento-fuerte para texto y borde —
+     los normales se oscurecen en claro (pensados para fondo blanco),
+     ilegibles acá. Mismos equivalentes AA que ya usa oscuro para
+     estos dos (ver el comentario en app/globals.css). */
+  --acento: var(--acento-zona-oscura);
+  --acento-fuerte: var(--acento-fuerte-zona-oscura);
+  /* Issue #191 — una <Tabla> (components/marco/Tabla.module.css) de
+     adentro tiene que dejar de pintar su PROPIO fondo claro de
+     siempre (--superficie/--superficie-2) — ya no combina con el
+     --texto de zona oscura que esta tarjeta le impone (bug real en
+     staging: /panel/investigacion/seguimiento, texto claro sobre
+     fondo claro, parecía vacía). */
+  --tabla-fondo: var(--tarjeta-fondo);
+  --tabla-encabezado-fondo: var(--superficie-2-zona-oscura);
 }
 
 .tarjeta::before {
