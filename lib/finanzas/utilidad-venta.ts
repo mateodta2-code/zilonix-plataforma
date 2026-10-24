@@ -160,6 +160,19 @@ export function aCentavos(monto: string): bigint {
   return negativo ? -centavos : centavos;
 }
 
+// Costo, empaque y envío son plata que sale: un negativo sumaría utilidad
+// inventada. Comisión y flete sí pueden llegar negativos de la API de ML
+// (una bonificación o un reintegro), por eso no pasan por acá.
+function aCentavosNoNegativo(monto: string, concepto: string): bigint {
+  const centavos = aCentavos(monto);
+  if (centavos < CERO) {
+    throw new EntradaUtilidadInvalidaError(`${concepto} no puede ser negativo: ${JSON.stringify(monto)}`);
+  }
+  return centavos;
+}
+
+const CAMPOS_NO_NEGATIVOS: ReadonlySet<CampoCorregible> = new Set<CampoCorregible>(["costo_producto", "empaque", "envio_agencia"]);
+
 export function desdeCentavos(centavos: bigint): string {
   const negativo = centavos < CERO;
   const absoluto = negativo ? -centavos : centavos;
@@ -278,7 +291,12 @@ function correccionesActivas(venta: VentaEntrada, lineasValidas: Set<number>): M
     if (activas.has(clave)) {
       throw new EntradaUtilidadInvalidaError(`Dos correcciones activas para ${clave}`);
     }
-    activas.set(clave, aCentavos(correccion.valor_nuevo));
+    activas.set(
+      clave,
+      CAMPOS_NO_NEGATIVOS.has(correccion.campo)
+        ? aCentavosNoNegativo(correccion.valor_nuevo, `Corrección de ${correccion.campo}`)
+        : aCentavos(correccion.valor_nuevo),
+    );
   }
   return activas;
 }
@@ -385,14 +403,21 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
       const corregido = activas.get(claveCorreccion(linea.linea, "costo_producto"));
       if (corregido !== undefined) return { valor: corregido, origen: "corregido", provisional: false };
       if (linea.costo_congelado === null) return null;
-      return { valor: aCentavos(linea.costo_congelado), origen: "congelado", provisional: linea.costo_provisional };
+      return {
+        valor: aCentavosNoNegativo(linea.costo_congelado, `costo_congelado de la línea ${linea.linea}`),
+        origen: "congelado",
+        provisional: linea.costo_provisional,
+      };
     });
   }
   // [SUPUESTO] si UNA línea no tiene costo, la orden entera queda fuera
   // (estado_costeo "parcial" de #129): sumar solo las líneas con costo
   // inventaría utilidad para la parte sin costo.
   const conCosto = costoLineas.every((costo) => costo !== null);
-  const usaCostoProvisional = costoLineas.some((costo) => costo !== null && costo.provisional);
+  // La marca "usa costo provisional" avisa que la UTILIDAD depende de un
+  // costo por confirmar; una venta sin costo completo no tiene utilidad, así
+  // que nunca lleva la marca (ni la venta ni sus líneas).
+  const usaCostoProvisional = conCosto && costoLineas.some((costo) => costo !== null && costo.provisional);
   if (!conCosto) avisos.push("sin_costo");
 
   // Empaque: una vez por paquete.
@@ -402,7 +427,10 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
     empaque = { valor: empaqueCorregido, origen: "corregido" };
   } else {
     if (venta.empaque_congelado === null) avisos.push("empaque_sin_dato");
-    empaque = { valor: venta.empaque_congelado === null ? CERO : aCentavos(venta.empaque_congelado), origen: "congelado" };
+    empaque = {
+      valor: venta.empaque_congelado === null ? CERO : aCentavosNoNegativo(venta.empaque_congelado, "empaque_congelado"),
+      origen: "congelado",
+    };
   }
 
   // Envío: una vez por paquete. Full de ML = $0 por regla; Flex, Agencia y
@@ -415,11 +443,19 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
   if (envioCorregido !== undefined) {
     envio = { valor: envioCorregido, origen: "corregido" };
   } else if (venta.forma_entrega === "full_ml") {
+    // En Full el envío congelado no se usa, pero un negativo sigue siendo
+    // un dato roto de la foto y se rechaza igual.
+    if (venta.envio_agencia_congelado !== null) {
+      aCentavosNoNegativo(venta.envio_agencia_congelado, "envio_agencia_congelado");
+    }
     envio = { valor: CERO, origen: "full_ml" };
   } else {
     if (venta.envio_agencia_congelado === null) avisos.push("envio_sin_dato");
     envio = {
-      valor: venta.envio_agencia_congelado === null ? CERO : aCentavos(venta.envio_agencia_congelado),
+      valor:
+        venta.envio_agencia_congelado === null
+          ? CERO
+          : aCentavosNoNegativo(venta.envio_agencia_congelado, "envio_agencia_congelado"),
       origen: "congelado",
     };
   }
@@ -459,7 +495,7 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
         comision_ml: { valor: desdeCentavos(comision.partes[i]), origen: comision.origenPartes[i] },
         flete_ml: { valor: desdeCentavos(flete.partes[i]), origen: flete.origenPartes[i] },
         costo_producto: costo === null ? null : { valor: desdeCentavos(costo.valor), origen: costo.origen },
-        usa_costo_provisional: costo !== null && costo.provisional,
+        usa_costo_provisional: conCosto && costo !== null && costo.provisional,
       };
     }),
     avisos,
@@ -476,9 +512,14 @@ export interface TotalUtilidad {
   ventas_sin_costo: number;
   // "66.67" = 66,67 % de las ventas tienen costo completo.
   porcentaje_ventas_con_costo: string | null;
-  // [SUPUESTO] solo se cuentan las ventas CON costo que usan algún costo
-  // provisional: una venta sin costo no aporta utilidad que dependa de él.
+  // Ventas con costo completo que usan algún costo provisional (una venta
+  // sin costo nunca lleva la marca).
   ventas_con_costo_provisional: number;
+  // Calidad de la foto congelada: se cuentan TODAS las ventas del grupo,
+  // con o sin costo, para que la pantalla avise cuántas hay que revisar.
+  ventas_empaque_sin_dato: number;
+  ventas_envio_sin_dato: number;
+  ventas_forma_desconocida: number;
   // Los conceptos suman solo las ventas con costo, para que
   // utilidad = valor_venta − comisión − flete − costo − empaque − envío
   // se cumpla también en el total.
@@ -506,6 +547,9 @@ interface Acumulador {
   ventas: number;
   ventasConCosto: number;
   ventasConCostoProvisional: number;
+  ventasEmpaqueSinDato: number;
+  ventasEnvioSinDato: number;
+  ventasFormaDesconocida: number;
   valorVenta: bigint;
   comision: bigint;
   flete: bigint;
@@ -522,6 +566,9 @@ function acumuladorVacio(): Acumulador {
     ventas: 0,
     ventasConCosto: 0,
     ventasConCostoProvisional: 0,
+    ventasEmpaqueSinDato: 0,
+    ventasEnvioSinDato: 0,
+    ventasFormaDesconocida: 0,
     valorVenta: CERO,
     comision: CERO,
     flete: CERO,
@@ -536,6 +583,9 @@ function acumuladorVacio(): Acumulador {
 
 function acumular(acumulador: Acumulador, resultado: ResultadoVenta): void {
   acumulador.ventas += 1;
+  if (resultado.avisos.includes("empaque_sin_dato")) acumulador.ventasEmpaqueSinDato += 1;
+  if (resultado.avisos.includes("envio_sin_dato")) acumulador.ventasEnvioSinDato += 1;
+  if (resultado.avisos.includes("forma_entrega_desconocida")) acumulador.ventasFormaDesconocida += 1;
   if (!resultado.con_costo || resultado.utilidad === null || resultado.costo_producto === null) {
     acumulador.valorSinCosto += aCentavos(resultado.valor_venta);
     return;
@@ -562,6 +612,9 @@ function cerrarAcumulador(acumulador: Acumulador): TotalUtilidad {
     ventas_sin_costo: acumulador.ventas - acumulador.ventasConCosto,
     porcentaje_ventas_con_costo: porcentaje(BigInt(acumulador.ventasConCosto), BigInt(acumulador.ventas)),
     ventas_con_costo_provisional: acumulador.ventasConCostoProvisional,
+    ventas_empaque_sin_dato: acumulador.ventasEmpaqueSinDato,
+    ventas_envio_sin_dato: acumulador.ventasEnvioSinDato,
+    ventas_forma_desconocida: acumulador.ventasFormaDesconocida,
     valor_venta: desdeCentavos(acumulador.valorVenta),
     comision_ml: desdeCentavos(acumulador.comision),
     flete_ml: desdeCentavos(acumulador.flete),

@@ -8,13 +8,17 @@
 
   **Costo.** Vacío (nulo) = "sin costo": la venta queda fuera de la utilidad, pero cuenta para el % de ventas con costo. Costo 0 puesto a propósito = costo real de $0, cuenta como "con costo" y sin alerta. Costo provisional: la venta lleva la marca "usa costo provisional", su utilidad se suma igual y los totales muestran aparte cuántas ventas lo usan y cuánta utilidad depende de ellas.
 
+  La marca "usa costo provisional" solo aparece si la venta tiene costo completo: una venta con una línea provisional y otra sin costo queda sin costo y sin marca (ni la venta ni sus líneas).
+
+  **Montos negativos.** El costo, el empaque y el envío no pueden ser negativos, ni congelados ni corregidos a mano (un negativo inventaría utilidad): el motor los rechaza con `EntradaUtilidadInvalidaError`. Esto vale también para el envío congelado de una venta Full, aunque no se use. Comisión y flete sí pueden ser negativos (bonificaciones o reintegros de ML).
+
   **Correcciones manuales.** Solo los campos de la lista cerrada (`costo_producto`, `empaque`, `envio_agencia`, `comision_ml`, `flete_ml`), validados también en tiempo de ejecución. La corrección activa gana sobre el congelado; anulada, vuelve el congelado. Cada concepto dice si es "congelado", "corregido" o "full_ml".
 
   **Fecha.** El día y el mes son los de Bogotá (UTC-5 fijo) de `fecha_pago_aprobado`, con prueba de 23:59 / 00:00 y de cambio de mes.
 
-  **Totales.** `totalizarUtilidad` y `totalizarPorCuentaYMes` suman por cuenta y mes de Bogotá, con % de ventas con costo, ventas con costo provisional y utilidad que depende de provisional. La suma de las utilidades por venta da exactamente los totales (prueba).
+  **Totales.** `totalizarUtilidad` y `totalizarPorCuentaYMes` suman por cuenta y mes de Bogotá, con % de ventas con costo, ventas con costo provisional y utilidad que depende de provisional. También cuentan cuántas ventas tienen empaque sin dato (`ventas_empaque_sin_dato`), envío sin dato (`ventas_envio_sin_dato`) y forma de entrega desconocida (`ventas_forma_desconocida`); esos contadores incluyen las ventas sin costo, porque muestran qué hay que revisar en la foto congelada. En Full, un envío vacío no cuenta como "sin dato" porque no se usa. La suma de las utilidades por venta da exactamente los totales (prueba).
 
-  Pruebas en `lib/finanzas/utilidad-venta.test.ts` (vitest, sin Postgres, datos inventados): venta completa, sin costo, costo 0, dos y tres líneas con reparto exacto, Full, Flex, Agencia con SKU FUL, costo provisional con y sin marca, corrección activa y anulada, devolución parcial, día de Bogotá, totales por cuenta y mes, montos grandes.
+  Pruebas en `lib/finanzas/utilidad-venta.test.ts` (vitest, sin Postgres, datos inventados): venta completa, sin costo, costo 0, dos y tres líneas con reparto exacto, Full, Flex, Agencia con SKU FUL, costo provisional con y sin marca (incluida una línea provisional junto a otra sin costo), contadores de empaque/envío sin dato y forma desconocida, montos negativos rechazados (y comisión/flete negativos aceptados), corrección activa y anulada, devolución parcial, día de Bogotá, totales por cuenta y mes, montos grandes.
 
   **Supuestos tomados (a confirmar con Mateo o Sharel):**
   - [SUPUESTO] El costo de cada línea (`costo_congelado`) es el costo total de la línea, ya multiplicado por la cantidad, no el unitario.
@@ -26,7 +30,7 @@
   - [SUPUESTO] Empaque o envío congelado vacío cuenta como $0 y la venta lleva un aviso; solo el costo vacío saca la venta del cálculo.
   - [SUPUESTO] Forma de entrega `desconocida` usa el envío congelado, como Agencia, y avisa.
   - [SUPUESTO] Una corrección de envío gana también sobre la regla de Full ($0).
-  - [SUPUESTO] "Utilidad que depende de costos provisionales" = suma de la utilidad de las ventas con costo provisional; solo cuentan las ventas con costo.
+  - [SUPUESTO] "Utilidad que depende de costos provisionales" = suma de la utilidad de las ventas con costo provisional (que siempre tienen costo completo).
   - [SUPUESTO] Si todas las líneas valen $0, el reparto se hace en partes iguales.
   - El motor no recibe ventas canceladas: filtrarlas es tarea de quien lo llama.
 

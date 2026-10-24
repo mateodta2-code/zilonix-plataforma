@@ -143,6 +143,23 @@ describe("calcularUtilidadVenta", () => {
     expect(r.lineas[1].costo_producto).toBeNull();
   });
 
+  it("una línea provisional y otra sin costo: sin costo y sin marca de provisional", () => {
+    const r = calcularUtilidadVenta(
+      venta({
+        lineas: [
+          linea({ linea: 1, valor_linea: "60000.00", costo_congelado: "20000.00", costo_provisional: true }),
+          linea({ linea: 2, valor_linea: "40000.00", costo_congelado: null }),
+        ],
+      }),
+    );
+    expect(r.con_costo).toBe(false);
+    expect(r.usa_costo_provisional).toBe(false);
+    expect(r.lineas.map((l) => l.usa_costo_provisional)).toEqual([false, false]);
+    const total = totalizarUtilidad([r]);
+    expect(total.ventas_con_costo_provisional).toBe(0);
+    expect(total.utilidad_con_costo_provisional).toBe("0.00");
+  });
+
   it("costo 0 puesto a propósito: cuenta como con costo y no genera alerta", () => {
     const r = calcularUtilidadVenta(venta({ lineas: [linea({ costo_congelado: "0.00" })] }));
     expect(r.con_costo).toBe(true);
@@ -392,6 +409,55 @@ describe("calcularUtilidadVenta", () => {
     expect(r.margen_porcentaje).toBeNull();
   });
 
+  describe("montos negativos", () => {
+    it("rechaza costo, empaque y envío congelados negativos", () => {
+      expect(() => calcularUtilidadVenta(venta({ lineas: [linea({ costo_congelado: "-1.00" })] }))).toThrow(
+        EntradaUtilidadInvalidaError,
+      );
+      expect(() => calcularUtilidadVenta(venta({ empaque_congelado: "-0.01" }))).toThrow(EntradaUtilidadInvalidaError);
+      expect(() => calcularUtilidadVenta(venta({ envio_agencia_congelado: "-2000.00" }))).toThrow(
+        EntradaUtilidadInvalidaError,
+      );
+      // En Full no se usa, pero un negativo sigue siendo un dato roto.
+      expect(() =>
+        calcularUtilidadVenta(venta({ forma_entrega: "full_ml", envio_agencia_congelado: "-2000.00" })),
+      ).toThrow(EntradaUtilidadInvalidaError);
+    });
+
+    it("rechaza correcciones negativas de costo_producto, empaque y envio_agencia", () => {
+      expect(() =>
+        calcularUtilidadVenta(venta({ correcciones: [correccion("costo_producto", "-5.00", 1)] })),
+      ).toThrow(EntradaUtilidadInvalidaError);
+      expect(() => calcularUtilidadVenta(venta({ correcciones: [correccion("costo_producto", "-5.00")] }))).toThrow(
+        EntradaUtilidadInvalidaError,
+      );
+      expect(() => calcularUtilidadVenta(venta({ correcciones: [correccion("empaque", "-5.00")] }))).toThrow(
+        EntradaUtilidadInvalidaError,
+      );
+      expect(() => calcularUtilidadVenta(venta({ correcciones: [correccion("envio_agencia", "-5.00")] }))).toThrow(
+        EntradaUtilidadInvalidaError,
+      );
+      // Una corrección negativa ya anulada no se usa y no rompe la venta.
+      expect(() =>
+        calcularUtilidadVenta(
+          venta({ correcciones: [correccion("empaque", "-5.00", null, new Date("2026-10-20T00:00:00Z"))] }),
+        ),
+      ).not.toThrow();
+    });
+
+    it("comisión y flete sí pueden ser negativos, congelados o corregidos", () => {
+      const congelados = calcularUtilidadVenta(venta({ comision_ml: "-500.00", flete_ml: "-100.00" }));
+      // 100.000 + 500 + 100 − 40.000 − 1.500 − 2.000
+      expect(congelados.utilidad).toBe("57100.00");
+      const corregidos = calcularUtilidadVenta(
+        venta({ correcciones: [correccion("comision_ml", "-500.00"), correccion("flete_ml", "-100.00", 1)] }),
+      );
+      expect(corregidos.comision_ml).toEqual({ valor: "-500.00", origen: "corregido" });
+      expect(corregidos.flete_ml).toEqual({ valor: "-100.00", origen: "corregido" });
+      expect(corregidos.utilidad).toBe("57100.00");
+    });
+  });
+
   it("rechaza ventas sin líneas, líneas repetidas o cantidades inválidas", () => {
     expect(() => calcularUtilidadVenta(venta({ lineas: [] }))).toThrow(EntradaUtilidadInvalidaError);
     expect(() => calcularUtilidadVenta(venta({ lineas: [linea(), linea()] }))).toThrow(EntradaUtilidadInvalidaError);
@@ -480,6 +546,32 @@ describe("totales por cuenta y mes", () => {
     expect(bOctubre.ventas_con_costo_provisional).toBe(1);
     expect(bOctubre.utilidad_con_costo_provisional).toBe(resultados[4].utilidad);
     expect(total.porcentaje_ventas_con_costo).toBe("83.33");
+  });
+
+  it("cuenta las ventas con empaque sin dato, envío sin dato y forma desconocida", () => {
+    const resultados = [
+      venta({ pedido_id: "c1", empaque_congelado: null }),
+      // Sin costo: igual cuenta, es un problema de la foto congelada.
+      venta({ pedido_id: "c2", empaque_congelado: null, lineas: [linea({ costo_congelado: null })] }),
+      venta({ pedido_id: "c3", envio_agencia_congelado: null }),
+      // En Full el envío congelado no se usa: vacío no es "sin dato".
+      venta({ pedido_id: "c4", forma_entrega: "full_ml", envio_agencia_congelado: null }),
+      venta({ pedido_id: "c5", forma_entrega: "desconocida" }),
+      venta({ pedido_id: "c6", cuenta_ml_id: "cuenta-b", forma_entrega: "desconocida", envio_agencia_congelado: null }),
+      venta({ pedido_id: "c7" }),
+    ].map(calcularUtilidadVenta);
+
+    const total = totalizarUtilidad(resultados);
+    expect(total.ventas_empaque_sin_dato).toBe(2);
+    expect(total.ventas_envio_sin_dato).toBe(2);
+    expect(total.ventas_forma_desconocida).toBe(2);
+
+    const [cuentaA, cuentaB] = totalizarPorCuentaYMes(resultados);
+    expect([cuentaA.ventas_empaque_sin_dato, cuentaA.ventas_envio_sin_dato, cuentaA.ventas_forma_desconocida]).toEqual([2, 1, 1]);
+    expect([cuentaB.ventas_empaque_sin_dato, cuentaB.ventas_envio_sin_dato, cuentaB.ventas_forma_desconocida]).toEqual([0, 1, 1]);
+
+    const limpio = totalizarUtilidad([resultados[6]]);
+    expect([limpio.ventas_empaque_sin_dato, limpio.ventas_envio_sin_dato, limpio.ventas_forma_desconocida]).toEqual([0, 0, 0]);
   });
 
   it("montos grandes: sumas por encima de Number.MAX_SAFE_INTEGER centavos sin perder centavos", () => {
