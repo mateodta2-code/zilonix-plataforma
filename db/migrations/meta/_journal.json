@@ -64,6 +64,13 @@
       "when": 1792594237912,
       "tag": "0008_married_thunderbird",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792865461721,
+      "tag": "0010_same_silverclaw",
+      "breakpoints": true
     }
   ]
 }

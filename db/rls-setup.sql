@@ -28,7 +28,8 @@ GRANT CONNECT ON DATABASE railway TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria, accesos_temporales, cuentas_ml, avisos_ml,
-  pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml
+  pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml,
+  seguimientos_ml, seguimiento_fotos, seguimiento_alertas
   TO app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
@@ -64,6 +65,25 @@ END $$;
 GRANT CONNECT ON DATABASE railway TO trabajador_user;
 GRANT USAGE ON SCHEMA public TO trabajador_user;
 GRANT SELECT, UPDATE ON avisos_ml TO trabajador_user;
+
+-- 1d) Issue #175 — cuarto usuario de base, mismo criterio que
+-- trabajador_user (1c): la revisión diaria de seguimientos necesita
+-- ver seguimientos_ml de CUALQUIER empresa (no sabe de antemano cuál
+-- hasta leer la fila), pero nunca tiene que tocar cuentas_ml,
+-- seguimiento_fotos ni seguimiento_alertas directamente — esas
+-- escrituras de negocio pasan por dbComoEmpresa()/app_user una vez que
+-- ya se sabe a qué empresa pertenece el seguimiento (mismo patrón
+-- exacto que procesarUnAviso() en lib/ml/trabajador.ts, que tampoco usa
+-- trabajador_user para nada más que avisos_ml).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'seguimiento_trabajador_user') THEN
+    CREATE ROLE seguimiento_trabajador_user WITH LOGIN PASSWORD 'PONE_ACA_UNA_CUARTA_CONTRASEÑA_REAL';
+  END IF;
+END $$;
+GRANT CONNECT ON DATABASE railway TO seguimiento_trabajador_user;
+GRANT USAGE ON SCHEMA public TO seguimiento_trabajador_user;
+GRANT SELECT, UPDATE ON seguimientos_ml TO seguimiento_trabajador_user;
 
 -- 2) Seguridad por fila — se activa por tabla, y se FUERZA también para
 -- el dueño de la tabla (sin el FORCE, el dueño de la tabla se salta la
@@ -101,6 +121,12 @@ ALTER TABLE pedido_eventos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedido_eventos FORCE ROW LEVEL SECURITY;
 ALTER TABLE despachos_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE despachos_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE seguimientos_ml ENABLE ROW LEVEL SECURITY;
+ALTER TABLE seguimientos_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE seguimiento_fotos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE seguimiento_fotos FORCE ROW LEVEL SECURITY;
+ALTER TABLE seguimiento_alertas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE seguimiento_alertas FORCE ROW LEVEL SECURITY;
 
 -- La tabla "usuarios" NO lleva RLS por empresa: una persona puede estar
 -- en varias empresas (decisión D2), así que no tiene una sola
@@ -240,6 +266,31 @@ CREATE POLICY aislamiento_pedido_eventos ON pedido_eventos
 DROP POLICY IF EXISTS aislamiento_despachos_ml ON despachos_ml;
 CREATE POLICY aislamiento_despachos_ml ON despachos_ml
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #175 — mismo patrón de siempre: tráfico normal de app_user,
+-- nunca ve ni toca el seguimiento/foto/alerta de otra empresa.
+DROP POLICY IF EXISTS aislamiento_seguimientos_ml ON seguimientos_ml;
+CREATE POLICY aislamiento_seguimientos_ml ON seguimientos_ml
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_seguimiento_fotos ON seguimiento_fotos;
+CREATE POLICY aislamiento_seguimiento_fotos ON seguimiento_fotos
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_seguimiento_alertas ON seguimiento_alertas;
+CREATE POLICY aislamiento_seguimiento_alertas ON seguimiento_alertas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #175 — política APARTE, con TO seguimiento_trabajador_user:
+-- la revisión diaria ve y marca ultima_revision_ts de CUALQUIER
+-- seguimiento, de cualquier empresa (mismo criterio que
+-- trabajador_procesa_avisos_ml más arriba) — nunca ninguna otra
+-- tabla (ver GRANT, solo seguimientos_ml). No reemplaza la política de
+-- arriba, que sigue aplicando igual al tráfico normal de app_user.
+DROP POLICY IF EXISTS seguimiento_trabajador_lee_seguimientos_ml ON seguimientos_ml;
+CREATE POLICY seguimiento_trabajador_lee_seguimientos_ml ON seguimientos_ml FOR SELECT TO seguimiento_trabajador_user USING (true);
+DROP POLICY IF EXISTS seguimiento_trabajador_marca_revision_seguimientos_ml ON seguimientos_ml;
+CREATE POLICY seguimiento_trabajador_marca_revision_seguimientos_ml ON seguimientos_ml FOR UPDATE TO seguimiento_trabajador_user USING (true);
 
 -- Tarea 2.4 — política APARTE, con TO trabajador_user: el trabajador de
 -- cola ve y marca procesado cualquier aviso pendiente, de cualquier
