@@ -92,6 +92,15 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
       // criterio que procesarAvisosPendientes (lib/ml/trabajador.ts).
       fallidos += 1;
       console.error(`Seguimiento ${seguimiento.id} (${seguimiento.tipo}) no se pudo revisar:`, error instanceof Error ? error.message : error);
+      // Bug real (issue #175): si un fallido NUNCA marca
+      // ultima_revision_ts, el orden ASC NULLS FIRST lo deja al frente
+      // del lote para siempre — ahoga los cupos en cada corrida
+      // siguiente (encontrado en CI: seguimientos viejos sin cuenta ML
+      // conectada, ahogando el lote de 50 y haciendo timeout). Marcarlo
+      // igual que un éxito lo rota al final; el filtro "ya revisado
+      // hoy" evita que la MISMA corrida (o una corrida posterior el
+      // mismo día) lo vuelva a tomar, pero mañana sí se reintenta.
+      await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id));
     }
   }
 

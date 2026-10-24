@@ -1,8 +1,9 @@
 import { randomUUID } from "crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, lt, ne, or } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { db } from "@/db/index";
+import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import { obtenerSeguimientosPendientesDeHoy, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
@@ -27,6 +28,29 @@ async function crearEmpresaConUsuario(prefijo: string) {
 
 function nuevoMlId() {
   return `MCO${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+}
+
+// Issue real, encontrado en CI: obtenerSeguimientosPendientesDeHoy() es
+// cross-empresa (TAMAÑO_LOTE=50, sin filtro por empresa) — en una base
+// de CI con muchos seguimientos viejos de otras suites sin
+// ultima_revision_ts, esos ahogaban el lote de cualquier prueba que
+// llamara revisarSeguimientosDelDia() y causaban timeout. Antes de
+// probar el lote de una suite puntual, se marca como revisado HOY a
+// todo lo demás pendiente — deja el lote con solo lo que la suite
+// insertó.
+async function aislarLotePara(seguimientoId: string) {
+  const hoy = new Date();
+  hoy.setUTCHours(0, 0, 0, 0);
+  await dbTrabajadorSeguimiento
+    .update(seguimientosMl)
+    .set({ ultimaRevisionTs: new Date() })
+    .where(
+      and(
+        isNull(seguimientosMl.eliminadoTs),
+        ne(seguimientosMl.id, seguimientoId),
+        or(isNull(seguimientosMl.ultimaRevisionTs), lt(seguimientosMl.ultimaRevisionTs, hoy))
+      )
+    );
 }
 
 describe("revisarSeguimientosDelDia (issue #175)", () => {
@@ -71,6 +95,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
         .returning({ id: seguimientosMl.id })
     );
     seguimientoId = seguimiento.id;
+    await aislarLotePara(seguimientoId);
 
     // Foto de "ayer" insertada directo (nunca a través del trabajo):
     // precio 100, vendidos 10 — la de "hoy" (simulada con fetch abajo)
@@ -145,6 +170,56 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     );
     expect(fotosDeHoy).toHaveLength(1);
     expect(Number(fotosDeHoy[0].precio)).toBe(80); // la de la corrida anterior, nunca 999
+  });
+});
+
+// Issue real, encontrado en CI (segunda vuelta del fix de orden/filtro):
+// si un seguimiento fallido (ej. empresa sin cuenta ML conectada) NUNCA
+// marca ultima_revision_ts, el orden ASC NULLS FIRST lo deja al frente
+// del lote para siempre — ahoga los 50 cupos en cada corrida siguiente
+// (en CI, con varios seguimientos viejos sin cuenta, esto hacía
+// timeout: cada uno paga PAUSA_ENTRE_SEGUIMIENTOS_MS). La corrección
+// real está en revisionDiariaSeguimiento.ts: también marca
+// ultima_revision_ts en el catch.
+describe("revisarSeguimientosDelDia — un fallido no ahoga el lote para siempre (issue #175)", () => {
+  let empresaId: string;
+  let seguimientoId: string;
+
+  beforeAll(async () => {
+    const creado = await crearEmpresaConUsuario("SIN-CUENTA");
+    empresaId = creado.empresaId;
+
+    // A propósito: ninguna cuenta ML conectada para esta empresa —
+    // revisarUnSeguimiento debe lanzar "La empresa no tiene ninguna
+    // cuenta de Mercado Libre conectada.".
+    const [seguimiento] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: nuevoMlId(),
+          nombre: "Sin cuenta ML",
+          linkOriginal: "https://x",
+          creadoPor: creado.usuarioId,
+        })
+        .returning({ id: seguimientosMl.id })
+    );
+    seguimientoId = seguimiento.id;
+    await aislarLotePara(seguimientoId);
+  });
+
+  it("cuenta como fallido Y queda con ultima_revision_ts no null, y no vuelve a aparecer en el lote de hoy", async () => {
+    const resultado = await revisarSeguimientosDelDia();
+
+    expect(resultado.fallidos).toBe(1);
+
+    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
+    expect(actualizado.ultimaRevisionTs).not.toBeNull();
+
+    const pendientes = await obtenerSeguimientosPendientesDeHoy();
+    expect(pendientes.some((p) => p.id === seguimientoId)).toBe(false);
   });
 });
 
