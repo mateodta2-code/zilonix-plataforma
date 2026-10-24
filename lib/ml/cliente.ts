@@ -39,19 +39,84 @@ export class LimiteMercadoLibreError extends Error {
   }
 }
 
+// Issue #147 — bug real en vivo: un 401/403/5xx de Mercado Libre caía
+// en el "throw new Error(...)" genérico de cada función auxiliar, que
+// la página nunca atrapaba (solo atrapaba TerminoInvalidoError/
+// LimiteBusquedasError/SinCuentaMlError/LimiteMercadoLibreError) — salía
+// "Application error" sin ningún mensaje útil, en vez de un aviso claro
+// o un link para reconectar la cuenta. 3 errores tipados, una sola
+// fuente de verdad acá (pedir()), para que page.tsx los pueda atrapar
+// sin adivinar por el texto del mensaje:
+// - 401: el token ya no es válido (venció de verdad, no solo "está por
+//   vencer" — eso ya lo resuelve obtenerAccessTokenVigente antes de
+//   llegar acá) — hay que reconectar la cuenta.
+// - 403: la APP (no la cuenta) no tiene permiso para ESTE endpoint —
+//   pasa real en producción con /products/{id}/items (ofertas) en
+//   cuentas sin cierto scope. No es "reconectar", es un permiso de la
+//   integración.
+// - 5xx o tiempo agotado: Mercado Libre no está disponible ahora mismo
+//   — transitorio, nada que el usuario pueda arreglar.
+export class MlNoAutorizadoError extends Error {
+  constructor() {
+    super("La conexión con esta cuenta de Mercado Libre ya no es válida — hay que reconectarla.");
+    this.name = "MlNoAutorizadoError";
+  }
+}
+
+export class MlSinPermisoAppError extends Error {
+  readonly endpoint: string;
+  constructor(endpoint: string) {
+    super("Mercado Libre no le da permiso a esta aplicación para esta consulta.");
+    this.name = "MlSinPermisoAppError";
+    this.endpoint = endpoint;
+  }
+}
+
+export class MlNoDisponibleError extends Error {
+  constructor() {
+    super("Mercado Libre no respondió a tiempo — intenta de nuevo en un momento.");
+    this.name = "MlNoDisponibleError";
+  }
+}
+
+// Solo para el log — nunca el término/query completo (puede llevar lo
+// que la persona escribió) ni el token, que NUNCA se imprime acá.
+function endpointSinQuery(url: string): string {
+  return url.split("?")[0].replace(BASE_URL, "");
+}
+
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function pedir<T>(url: string, token: string): Promise<{ ok: true; data: T } | { ok: false; status: number }> {
+  const endpoint = endpointSinQuery(url);
   let res: Response;
   try {
     res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch {
-    // Tiempo agotado (AbortError) o falla de red — se trata igual que
-    // una respuesta no-ok, nunca se deja sin resolver.
-    return { ok: false, status: 0 };
+    // Tiempo agotado (AbortError) o falla de red.
+    console.warn(`[lib/ml/cliente] ${endpoint} — tiempo agotado o falla de red`);
+    throw new MlNoDisponibleError();
   }
   // 429 corta TODA la búsqueda, no solo esta llamada puntual — se
   // lanza en vez de devolver {ok:false}, para que ninguna de las
   // funciones de abajo lo trague en silencio como "sin datos".
   if (res.status === 429) throw new LimiteMercadoLibreError();
+  if (res.status === 401) {
+    console.warn(`[lib/ml/cliente] ${endpoint} — 401`);
+    throw new MlNoAutorizadoError();
+  }
+  if (res.status === 403) {
+    console.warn(`[lib/ml/cliente] ${endpoint} — 403`);
+    throw new MlSinPermisoAppError(endpoint);
+  }
+  if (res.status >= 500) {
+    console.warn(`[lib/ml/cliente] ${endpoint} — ${res.status}`);
+    throw new MlNoDisponibleError();
+  }
+  // 404 y cualquier otro 4xx siguen como {ok:false} — "vacío" es una
+  // respuesta legítima (ej. un producto sin ofertas), no un fallo.
   if (!res.ok) return { ok: false, status: res.status };
   return { ok: true, data: (await res.json()) as T };
 }
@@ -73,13 +138,20 @@ export type ProductoCatalogoMl = { id: string; nombre: string | null; foto: stri
 // nombre — por eso se combina con obtenerMejoresProductosCategoria.
 // status=active filtra en el servidor los productos con al menos una
 // oferta vigente.
+// Fuente 1, la búsqueda PRINCIPAL — a propósito NO atrapa
+// MlNoAutorizadoError/MlSinPermisoAppError/MlNoDisponibleError: un
+// 401/403/5xx acá significa que la búsqueda entera no tiene cómo
+// avanzar (es la primera llamada real de toda la cadena), así que sube
+// tal cual hasta la página — nunca "no se encontró nada", que sería
+// engañoso.
 export async function buscarProductosCatalogo(termino: string, token: string, offset = 0, limite = 20): Promise<ProductoCatalogoMl[]> {
   const url = `${BASE_URL}/products/search?site_id=${SITE_ID}&q=${encodeURIComponent(termino)}&status=active&limit=${limite}&offset=${offset}`;
   const resp = await pedir<{ results?: unknown[] }>(url, token);
   if (!resp.ok) {
     if (resp.status === 404) return [];
-    if (resp.status === 0) throw new Error(`Mercado Libre no respondió a tiempo al buscar "${termino}" en el catálogo.`);
-    throw new Error(`Mercado Libre respondió ${resp.status} al buscar "${termino}" en el catálogo.`);
+    // Sin el término acá — igual que endpointSinQuery(), nunca lo que la
+    // persona escribió adentro de un mensaje de error/log.
+    throw new Error(`Mercado Libre respondió ${resp.status} al buscar en el catálogo.`);
   }
   const resultados = Array.isArray(resp.data.results) ? resp.data.results : [];
   return resultados
@@ -101,40 +173,162 @@ export type CategoriaMl = { categoryId: string };
 // Devuelve null (nunca lanza) cuando Mercado Libre no encuentra
 // ninguna categoría: en Investigación esto es solo un enriquecimiento
 // — la fuente 1 (texto) ya alcanza para mostrar algo.
+//
+// Issue #147 — 3 intentos con 800ms*intento de espera ante 403/5xx
+// (mismo criterio ya confirmado en producción en zilonix-os-web,
+// lib/mercadolibre-publicar.js, resolverCategoria): un 403/5xx puntual
+// en ESTE endpoint no debería tirar abajo todo el enriquecimiento por
+// categoría si el segundo o tercer intento sí responde. 401 (token
+// inválido de verdad) nunca se reintenta — no tiene sentido, el
+// siguiente intento fallaría igual.
 export async function resolverCategoria(termino: string, token: string): Promise<CategoriaMl | null> {
   const url = `${BASE_URL}/sites/${SITE_ID}/domain_discovery/search?q=${encodeURIComponent(termino)}&limit=1`;
-  const resp = await pedir<unknown>(url, token);
-  if (!resp.ok) return null;
-  const primero = Array.isArray(resp.data) ? (resp.data[0] as { category_id?: unknown } | undefined) : undefined;
-  const categoryId = primero && typeof primero.category_id === "string" ? primero.category_id : null;
-  return categoryId && PATRON_ID_CATEGORIA.test(categoryId) ? { categoryId } : null;
+  for (let intento = 0; intento < 3; intento++) {
+    if (intento > 0) await esperar(800 * intento);
+    try {
+      const resp = await pedir<unknown>(url, token);
+      if (!resp.ok) return null;
+      const primero = Array.isArray(resp.data) ? (resp.data[0] as { category_id?: unknown } | undefined) : undefined;
+      const categoryId = primero && typeof primero.category_id === "string" ? primero.category_id : null;
+      return categoryId && PATRON_ID_CATEGORIA.test(categoryId) ? { categoryId } : null;
+    } catch (e) {
+      if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) continue; // reintentable
+      throw e; // 401 — no tiene sentido reintentar
+    }
+  }
+  return null; // 3 intentos agotados — enriquecimiento opcional, se tolera
 }
+
+export type ItemDestacadoMl = { id: string; tipo: string };
 
 // Los más vendidos REALES de una categoría (highlights BEST_SELLER) —
 // complementa la búsqueda por texto con productos que el texto solo no
 // encuentra (confirmado en producción con el caso real documentado en
-// zilonix-os-web/lib/busqueda-productos.js). Solo da ids.
-export async function obtenerMejoresProductosCategoria(categoryId: string, token: string): Promise<string[]> {
+// zilonix-os-web/lib/busqueda-productos.js).
+//
+// Issue #147, bug real: Mercado Libre devuelve content[] con "type"
+// ITEM | PRODUCT | USER_PRODUCT — antes se descartaba el "type" por
+// completo y se filtraba solo por el FORMATO del id (/^MCO\d+$/), que
+// ITEM también cumple (USER_PRODUCT es "MCOU...", ese sí se descartaba
+// solo). El resultado real: un id de tipo ITEM (una publicación) se
+// mandaba a obtenerProducto() → GET /products/{id}, que espera un id
+// de PRODUCTO de catálogo, no de publicación — fallaba siempre. Ahora
+// se devuelve el tipo tal cual junto al id; el llamador (investigacion.ts)
+// decide qué hacer con cada uno (PRODUCT → obtenerProducto, ITEM →
+// obtenerItemMl, USER_PRODUCT → se ignora, nunca se inventa un mapeo).
+// Tolera 403/5xx (enriquecimiento, nunca tira abajo la búsqueda por
+// texto); 401 propaga — ver resolverCategoria, mismo criterio.
+// Issue #147 — a propósito NO se filtra acá por PATRON_ID_PRODUCTO_O_ITEM
+// (/^MCO\d+$/): un USER_PRODUCT real viene como "MCOU..." (con la U),
+// que esa regex estricta rechaza — si se filtrara acá, USER_PRODUCT
+// desaparecería en silencio ANTES de que investigacion.ts pudiera
+// siquiera contarlo (pedido explícito: "se ignora Y SE CUENTA", no
+// "se pierde sin que nadie se entere"). El filtro de formato real
+// (estricto, el que de verdad protege la URL) sigue en obtenerProducto/
+// obtenerItemMl — cada id pasa por esa validación recién cuando se usa
+// de verdad, nunca antes. Acá solo se exige el mínimo sensato (un
+// string que empiece por "MCO" — nunca basura que ni eso cumple).
+const PATRON_ID_DESTACADO = /^MCO[A-Z0-9]+$/i;
+
+export async function obtenerMejoresProductosCategoria(categoryId: string, token: string): Promise<ItemDestacadoMl[]> {
   if (!PATRON_ID_CATEGORIA.test(categoryId)) return [];
   const url = `${BASE_URL}/highlights/${SITE_ID}/category/${encodeURIComponent(categoryId)}`;
-  const resp = await pedir<{ content?: unknown[] }>(url, token);
-  if (!resp.ok) return [];
-  const contenido = Array.isArray(resp.data.content) ? resp.data.content : [];
-  return contenido
-    .map((c) => (c as { id?: unknown }).id)
-    .filter((id): id is string => typeof id === "string" && PATRON_ID_PRODUCTO_O_ITEM.test(id));
+  try {
+    const resp = await pedir<{ content?: unknown[] }>(url, token);
+    if (!resp.ok) return [];
+    const contenido = Array.isArray(resp.data.content) ? resp.data.content : [];
+    return contenido
+      .map((c) => {
+        const item = c as { id?: unknown; type?: unknown };
+        return typeof item.id === "string" && PATRON_ID_DESTACADO.test(item.id)
+          ? { id: item.id, tipo: typeof item.type === "string" ? item.type : "" }
+          : null;
+      })
+      .filter((i): i is ItemDestacadoMl => i !== null);
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return [];
+    throw e;
+  }
 }
 
 // Nombre + foto de un product_id de catálogo — solo se usa para
-// completar los candidatos que vinieron de obtenerMejoresProductosCategoria
-// (que no trae esos datos), nunca para los que ya vinieron de
-// buscarProductosCatalogo.
+// completar los candidatos de tipo PRODUCT que vinieron de
+// obtenerMejoresProductosCategoria (que no trae esos datos), nunca
+// para los que ya vinieron de buscarProductosCatalogo. Tolera 403/5xx
+// (enriquecimiento); 401 propaga.
 export async function obtenerProducto(productId: string, token: string): Promise<ProductoCatalogoMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(productId)) return null;
   const url = `${BASE_URL}/products/${encodeURIComponent(productId)}`;
-  const resp = await pedir<{ name?: unknown; pictures?: unknown }>(url, token);
-  if (!resp.ok) return null;
-  return { id: productId, nombre: typeof resp.data.name === "string" ? resp.data.name : null, foto: fotoDe(resp.data.pictures) };
+  try {
+    const resp = await pedir<{ name?: unknown; pictures?: unknown }>(url, token);
+    if (!resp.ok) return null;
+    return { id: productId, nombre: typeof resp.data.name === "string" ? resp.data.name : null, foto: fotoDe(resp.data.pictures) };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+export type ItemMl = { producto: ProductoCatalogoMl; oferta: OfertaMl | null };
+
+// Issue #147 — hermana de obtenerProducto, pero para un id de tipo
+// ITEM (una publicación real, GET /items/{id}) en vez de un id de
+// PRODUCTO de catálogo (GET /products/{id}) — los dos endpoints NO son
+// intercambiables (confirmado en vivo: /products/{idDeItem} da 404).
+// Mismo criterio de tolerancia que obtenerProducto.
+//
+// Issue #147, bug real: un destacado ITEM se mandaba a
+// obtenerOfertasProducto() (GET /products/{id}/items), que espera un id
+// de PRODUCTO de catálogo — un ITEM nunca tiene esa ruta, 404 siempre,
+// así que el highlight nunca producía ninguna publicación. Un ITEM es
+// la publicación en sí: la oferta sale de este mismo /items/{id}, nunca
+// de obtenerOfertasProducto — por eso esta función ya devuelve la
+// OfertaMl armada (misma validación de seller_id que obtenerOfertasProducto),
+// y el llamador (investigacion.ts) nunca llama a obtenerOfertasProducto
+// para un candidato de tipo ITEM.
+export async function obtenerItemMl(itemId: string, token: string): Promise<ItemMl | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping,status`;
+  try {
+    const resp = await pedir<{
+      title?: unknown;
+      thumbnail?: unknown;
+      price?: unknown;
+      currency_id?: unknown;
+      seller_id?: unknown;
+      shipping?: { logistic_type?: unknown; free_shipping?: unknown };
+      status?: unknown;
+    }>(url, token);
+    if (!resp.ok) return null;
+    // Bug real: una publicación pausada/cerrada seguía apareciendo en
+    // la tabla de Investigación (el precio/oferta de una publicación
+    // que ya no se puede comprar no sirve para nada ahí) — se descarta
+    // igual que cualquier otro candidato sin oferta real, nunca se
+    // distingue del caso "Mercado Libre no pudo traerla".
+    if (resp.data.status !== "active") return null;
+    const producto: ProductoCatalogoMl = {
+      id: itemId,
+      nombre: typeof resp.data.title === "string" ? resp.data.title : null,
+      foto: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
+    };
+    const precio = Number(resp.data.price);
+    let oferta: OfertaMl | null = null;
+    if (Number.isFinite(precio) && precio > 0) {
+      const sellerIdCrudo = resp.data.seller_id != null ? String(resp.data.seller_id) : null;
+      oferta = {
+        itemId,
+        precio,
+        monedaId: typeof resp.data.currency_id === "string" ? resp.data.currency_id : "COP",
+        sellerId: sellerIdCrudo && PATRON_ID_VENDEDOR.test(sellerIdCrudo) ? sellerIdCrudo : null,
+        esFull: resp.data.shipping?.logistic_type === "fulfillment",
+        esEnvioGratis: typeof resp.data.shipping?.free_shipping === "boolean" ? resp.data.shipping.free_shipping : null,
+      };
+    }
+    return { producto, oferta };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
 }
 
 export type OfertaMl = {
@@ -156,8 +350,16 @@ export type OfertaMl = {
 // Confirmado en producción: muchos productos de catálogo dan 404 acá —
 // no es un bloqueo, es que ese producto puntual no tiene NINGUNA oferta
 // real asociada (el vendedor publicó sin enlazarlo al catálogo). Se
-// devuelve [] en vez de lanzar: la lógica de negocio decide qué hacer
-// con "sin ofertas", no este cliente.
+// devuelve [] en vez de lanzar para un 404 — la lógica de negocio
+// decide qué hacer con "sin ofertas", no este cliente.
+//
+// Issue #147 — a propósito SIN try/catch alrededor de pedir(): un
+// 401/403/5xx acá SÍ propaga (nunca se traga como "sin ofertas", que
+// sería engañoso — "sin ofertas reales" y "Mercado Libre no deja ver
+// las ofertas" son avisos distintos). investigacion.ts cuenta estos
+// fallos por candidato para poder avisar "todas las ofertas fallaron
+// por falta de permiso" en vez de "no se encontró nada", cuando
+// corresponda.
 export async function obtenerOfertasProducto(productId: string, token: string): Promise<OfertaMl[]> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(productId)) return [];
   const url = `${BASE_URL}/products/${encodeURIComponent(productId)}/items`;
@@ -189,15 +391,24 @@ export async function obtenerOfertasProducto(productId: string, token: string): 
 
 export type VendedorMl = { nickname: string | null; esPlatinum: boolean };
 
+// Issue #147 — enriquecimiento secundario (solo cambia el nombre del
+// vendedor/insignia Platinum que se muestra, nunca si una publicación
+// cuenta como encontrada): tolera 403/5xx igual que obtenerProducto,
+// nunca tira abajo el candidato completo por esto. 401 propaga.
 export async function obtenerVendedor(sellerId: string, token: string): Promise<VendedorMl | null> {
   if (!PATRON_ID_VENDEDOR.test(sellerId)) return null;
   const url = `${BASE_URL}/users/${encodeURIComponent(sellerId)}`;
-  const resp = await pedir<{ nickname?: unknown; seller_reputation?: { power_seller_status?: unknown } }>(url, token);
-  if (!resp.ok) return null;
-  return {
-    nickname: typeof resp.data.nickname === "string" ? resp.data.nickname : null,
-    esPlatinum: resp.data.seller_reputation?.power_seller_status === "platinum",
-  };
+  try {
+    const resp = await pedir<{ nickname?: unknown; seller_reputation?: { power_seller_status?: unknown } }>(url, token);
+    if (!resp.ok) return null;
+    return {
+      nickname: typeof resp.data.nickname === "string" ? resp.data.nickname : null,
+      esPlatinum: resp.data.seller_reputation?.power_seller_status === "platinum",
+    };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
 }
 
 // Link real de la publicación — confirmado en producción (zilonix-os-web):
