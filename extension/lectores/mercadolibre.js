@@ -53,9 +53,27 @@
   // propósito ("si se puede leer del JSON incrustado", pidió la
   // tarea) — si no aparece, se devuelve null y el panel no ofrece el
   // botón, nunca inventa un id.
-  function leerSellerIdDeTienda(html) {
+  // "CustId=123456" (la forma clásica de "visitar vendedor" de
+  // Mercado Libre) -> "123456".
+  function extraerCustIdDeUrl(url) {
+    if (typeof url !== "string") return null;
+    const m = url.match(/[?&]CustId=(\d+)/i);
+    return m ? m[1] : null;
+  }
+
+  // Issue #174, corrección real: `user_id` en el JSON incrustado de
+  // una página de tienda suele ser el de la PERSONA con sesión
+  // iniciada en el navegador (si hay una) — no el del vendedor de esa
+  // tienda. Usarlo como respaldo podía mandar a "seguir" al usuario
+  // que está mirando la página, no al vendedor. Se quita ese
+  // respaldo: solo `seller_id` (siempre el vendedor real), y antes que
+  // nada, si la URL trae `?CustId=<dígitos>` se usa ese — viene
+  // directo de la URL, nada que adivinar del HTML.
+  function leerSellerIdDeTienda(html, url) {
+    const deLaUrl = extraerCustIdDeUrl(url);
+    if (deLaUrl) return deLaUrl;
     if (typeof html !== "string" || !html) return null;
-    const m = html.match(/"seller_id"\s*:\s*"?(\d+)"?/) || html.match(/"user_id"\s*:\s*"?(\d+)"?/);
+    const m = html.match(/"seller_id"\s*:\s*"?(\d+)"?/);
     return m ? m[1] : null;
   }
 
@@ -290,7 +308,7 @@
 
   function leerTienda(doc) {
     const htmlCompleto = doc && doc.documentElement ? doc.documentElement.outerHTML : "";
-    const sellerId = leerSellerIdDeTienda(htmlCompleto);
+    const sellerId = leerSellerIdDeTienda(htmlCompleto, doc && doc.URL);
     return {
       nombreTienda: U.textoDe(["h1", ".ui-seller-info__title", ".store-header__title"], doc),
       sellerId,
@@ -325,6 +343,7 @@
     construirLinkSeguirProducto,
     construirLinkSeguirTienda,
     leerSellerIdDeTienda,
+    extraerCustIdDeUrl,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe
