@@ -48,8 +48,15 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/despachos/page.tsx",
   "app/panel/investigacion/page.tsx",
   "app/api/ml/despachos/etiquetas/route.ts",
+  "app/panel/publicar/page.tsx",
+  "app/panel/publicar/nuevo/page.tsx",
+  "app/panel/publicar/nuevo/actions.ts",
+  "app/panel/publicar/[id]/page.tsx",
+  "app/panel/publicar/clip/page.tsx",
+  "app/panel/publicar/clip/actions.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
+  "app/api/ml/clip/route.ts",
 ]);
 
 // Tarea 1.11 — eje de autorización APARTE: "¿esta cuenta es
