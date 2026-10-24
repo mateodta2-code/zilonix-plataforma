@@ -1,0 +1,61 @@
+{
+  "manifest_version": 3,
+  "name": "Zilonix Seller — Investigación",
+  "short_name": "Zilonix Investigación",
+  "version": "0.1.0",
+  "description": "Lee precio, vendidos, vendedor y calificación de la página que estás viendo en Mercado Libre, Amazon, Temu, AliExpress, Shein y Alibaba — para analizar antes de invertir. Solo lee lo que ya tenés abierto; nunca navega sola ni inicia sesión.",
+  "content_scripts": [
+    {
+      "matches": ["*://*.mercadolibre.com.co/*"],
+      "js": ["utilidades.js", "lectores/mercadolibre.js", "content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.amazon.com/*", "*://*.amazon.com.mx/*"],
+      "js": ["utilidades.js", "lectores/amazon.js", "content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.temu.com/*"],
+      "js": ["utilidades.js", "lectores/temu.js", "content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.aliexpress.com/*", "*://*.aliexpress.us/*"],
+      "js": ["utilidades.js", "lectores/aliexpress.js", "content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.shein.com/*", "*://*.shein.com.co/*"],
+      "js": ["utilidades.js", "lectores/shein.js", "content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.alibaba.com/*"],
+      "js": ["utilidades.js", "lectores/alibaba.js", "content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["panel.css"],
+      "matches": [
+        "*://*.mercadolibre.com.co/*",
+        "*://*.amazon.com/*",
+        "*://*.amazon.com.mx/*",
+        "*://*.temu.com/*",
+        "*://*.aliexpress.com/*",
+        "*://*.aliexpress.us/*",
+        "*://*.shein.com/*",
+        "*://*.shein.com.co/*",
+        "*://*.alibaba.com/*"
+      ]
+    }
+  ]
+}

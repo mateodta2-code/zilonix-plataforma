@@ -5,6 +5,7 @@ import {
   linkPublicacion,
   MlNoAutorizadoError,
   MlNoDisponibleError,
+  MlRespuestaInesperadaError,
   MlSinPermisoAppError,
   obtenerItemMl,
   obtenerMejoresProductosCategoria,
@@ -128,6 +129,19 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
   it("404 sigue siendo 'vacío' (array vacío), no un error — una respuesta legítima", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
     await expect(buscarProductosCatalogo("reloj digital", "token")).resolves.toEqual([]);
+  });
+
+  // Issue #174 — bug real: antes esto era un Error genérico que
+  // page.tsx no sabía atrapar por nombre y terminaba en la pantalla
+  // genérica de error.tsx, sin mostrar el status real de Mercado
+  // Libre — justo "qué error real se traga la pantalla" al
+  // diagnosticar por qué Investigación no devolvía resultados.
+  it("un 4xx que no es 404 (ej. 400): MlRespuestaInesperadaError con el status real adentro, nunca un Error genérico", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 400)));
+    const error = await buscarProductosCatalogo("reloj digital", "token").catch((e) => e);
+    expect(error).toBeInstanceOf(MlRespuestaInesperadaError);
+    expect(error.status).toBe(400);
+    expect(error.message).toContain("400");
   });
 
   it("obtenerOfertasProducto propaga 403 tal cual (nunca lo traga como 'sin ofertas') — investigacion.ts necesita distinguirlo", async () => {
