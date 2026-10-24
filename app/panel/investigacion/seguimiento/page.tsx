@@ -7,6 +7,8 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarAlertasDelDia, listarSeguimientosConUltimaFoto, LIMITE_COMPETIDORES_POR_EMPRESA } from "@/lib/seguimiento/seguimientos";
 import { mensajeAlerta } from "@/lib/seguimiento/alertas";
+import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
+import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
 import { Ayuda } from "@/components/marco/Ayuda";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -37,6 +39,36 @@ function siNoODesconocido(valor: boolean | null, textoSi: string, textoNo: strin
   if (valor == null) return <Chip>No disponible</Chip>;
   return valor ? <Chip estado="exito">{textoSi}</Chip> : <Chip estado="peligro">{textoNo}</Chip>;
 }
+
+// Issue #195 — "valor + delta" (ej. 9 (−1)) cuando hay foto anterior
+// con la que comparar; solo el valor cuando no hay. `formatearValor`
+// decide cómo se ve el número entero (dinero() para precio, tal cual
+// para inventario/vendidos); el delta usa el mismo formateador, con
+// signo explícito agregado acá (nunca "+"/"-" adivinados adentro del
+// formateador, que solo sabe mostrar valores absolutos).
+function conSigno(n: number, formatearValor: (n: number) => string): string {
+  if (n === 0) return formatearValor(0);
+  return n > 0 ? `+${formatearValor(n)}` : `-${formatearValor(Math.abs(n))}`;
+}
+
+function celdaConDelta(
+  actual: number | string | null,
+  anterior: number | string | null,
+  formatearValor: (n: number) => string
+): React.ReactNode {
+  if (actual == null) return "—";
+  const texto = formatearValor(Number(actual));
+  const delta = calcularDelta(actual, anterior);
+  if (delta == null) return texto;
+  const signo = delta > 0 ? "positivo" : delta < 0 ? "negativo" : "neutro";
+  return (
+    <>
+      {texto} <span className={styles.delta} data-signo={signo}>({conSigno(delta, formatearValor)})</span>
+    </>
+  );
+}
+
+const numeroPlano = (n: number) => n.toLocaleString("es-CO");
 
 // Issue #175 — pantalla de seguimiento diario de productos, tiendas y
 // competidores de Mercado Libre. Mismo permiso que Investigación
@@ -87,6 +119,13 @@ export default async function SeguimientoPage({
 
   const [alertasDelDia, seguimientos] = await Promise.all([listarAlertasDelDia(empresa.id), listarSeguimientosConUltimaFoto(empresa.id)]);
   const competidoresActivos = seguimientos.filter((s) => s.seguimiento.esCompetidor).length;
+
+  // Issue #195 — chip "Alta/Baja hoy" en la fila de una tienda cuando
+  // la revisión diaria ya generó la alerta correspondiente HOY (las
+  // alertas en sí ya se ven arriba, en "Alertas de hoy" — esto es solo
+  // un aviso rápido en la propia fila, para no tener que buscarla).
+  const altasHoy = new Set(alertasDelDia.filter((a) => a.alerta.tipo === "publicacion_nueva").map((a) => a.alerta.seguimientoId));
+  const bajasHoy = new Set(alertasDelDia.filter((a) => a.alerta.tipo === "publicacion_eliminada").map((a) => a.alerta.seguimientoId));
 
   return (
     <>
@@ -176,33 +215,66 @@ export default async function SeguimientoPage({
         {seguimientos.length === 0 ? (
           <EstadoVacio>Todavía no agregaste ningún producto, tienda o competidor.</EstadoVacio>
         ) : (
-          <Tabla encabezados={["Nombre", "Tipo", "Precio", "Inventario", "Vendidos", "Catálogo", "Gana botón", "Última revisión", ""]}>
-            {seguimientos.map(({ seguimiento, ultimaFoto }) => (
-              <FilaTabla key={seguimiento.id}>
-                <CeldaTabla>
-                  <Link href={`/panel/investigacion/seguimiento/${seguimiento.id}`}>{seguimiento.nombre}</Link>
-                  {seguimiento.esCompetidor ? <Chip estado="aviso">Competidor</Chip> : null}
-                </CeldaTabla>
-                <CeldaTabla>{seguimiento.tipo === "tienda" ? "Tienda" : "Producto"}</CeldaTabla>
-                <CeldaTabla>{dinero(ultimaFoto?.precio ?? null)}</CeldaTabla>
-                <CeldaTabla>
-                  {ultimaFoto?.inventarioDisponible ?? "—"}
-                  {ultimaFoto?.inventarioAproximado ? <Chip>Aproximado</Chip> : null}
-                </CeldaTabla>
-                <CeldaTabla>{ultimaFoto?.vendidos ?? "—"}</CeldaTabla>
-                <CeldaTabla>{siNoODesconocido(ultimaFoto?.enCatalogo ?? null, "Sí", "No")}</CeldaTabla>
-                <CeldaTabla>{siNoODesconocido(ultimaFoto?.ganaBotonCompra ?? null, "Gana", "Pierde")}</CeldaTabla>
-                <CeldaTabla>{seguimiento.ultimaRevisionTs ? new Date(seguimiento.ultimaRevisionTs).toLocaleDateString("es-CO") : "Todavía sin revisar"}</CeldaTabla>
-                <CeldaTabla>
-                  <form action={eliminarSeguimientoAction}>
-                    <input type="hidden" name="seguimientoId" value={seguimiento.id} />
-                    <Boton type="submit" variante="fantasma" chico>
-                      Quitar
-                    </Boton>
-                  </form>
-                </CeldaTabla>
-              </FilaTabla>
-            ))}
+          <Tabla
+            encabezados={[
+              "Nombre",
+              "Tipo",
+              "Full",
+              "Precio",
+              "Inventario",
+              "Vendidos",
+              "Ventas ~30d",
+              "Catálogo",
+              "Gana botón",
+              "Última revisión",
+              "Link ML",
+              "",
+            ]}
+          >
+            {seguimientos.map(({ seguimiento, ultimaFoto, fotoAnterior, fotoHaceUnMes }) => {
+              const ventasHoy = calcularVentasHoy(ultimaFoto?.vendidos ?? null, fotoAnterior?.vendidos ?? null);
+              const deltaUnMes = fotoHaceUnMes ? calcularDelta(ultimaFoto?.vendidos ?? null, fotoHaceUnMes.vendidos) : null;
+              return (
+                <FilaTabla key={seguimiento.id}>
+                  <CeldaTabla>
+                    <Link href={`/panel/investigacion/seguimiento/${seguimiento.id}`}>{seguimiento.nombre}</Link>
+                    {seguimiento.esCompetidor ? <Chip estado="aviso">Competidor</Chip> : null}
+                    {altasHoy.has(seguimiento.id) ? <Chip estado="exito">Alta hoy</Chip> : null}
+                    {bajasHoy.has(seguimiento.id) ? <Chip estado="peligro">Baja hoy</Chip> : null}
+                  </CeldaTabla>
+                  <CeldaTabla>{seguimiento.tipo === "tienda" ? "Tienda" : "Producto"}</CeldaTabla>
+                  <CeldaTabla>{siNoODesconocido(ultimaFoto?.esFull ?? null, "Full", "No full")}</CeldaTabla>
+                  <CeldaTabla>{celdaConDelta(ultimaFoto?.precio ?? null, fotoAnterior?.precio ?? null, dinero)}</CeldaTabla>
+                  <CeldaTabla>
+                    {celdaConDelta(ultimaFoto?.inventarioDisponible ?? null, fotoAnterior?.inventarioDisponible ?? null, numeroPlano)}
+                    {ultimaFoto?.inventarioAproximado ? <Chip>Aproximado</Chip> : null}
+                  </CeldaTabla>
+                  <CeldaTabla>
+                    {ultimaFoto?.vendidos ?? "—"}
+                    {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
+                  </CeldaTabla>
+                  <CeldaTabla>
+                    {!fotoHaceUnMes ? "Aún sin 30 días" : deltaUnMes == null ? "—" : conSigno(deltaUnMes, numeroPlano)}
+                  </CeldaTabla>
+                  <CeldaTabla>{siNoODesconocido(ultimaFoto?.enCatalogo ?? null, "Sí", "No")}</CeldaTabla>
+                  <CeldaTabla>{siNoODesconocido(ultimaFoto?.ganaBotonCompra ?? null, "Gana", "Pierde")}</CeldaTabla>
+                  <CeldaTabla>{seguimiento.ultimaRevisionTs ? new Date(seguimiento.ultimaRevisionTs).toLocaleDateString("es-CO") : "Todavía sin revisar"}</CeldaTabla>
+                  <CeldaTabla>
+                    <a href={construirLinkMlDeSeguimiento(seguimiento.recursoMl, seguimiento.mlIdExterno)} target="_blank" rel="noopener noreferrer">
+                      Ver en ML
+                    </a>
+                  </CeldaTabla>
+                  <CeldaTabla>
+                    <form action={eliminarSeguimientoAction}>
+                      <input type="hidden" name="seguimientoId" value={seguimiento.id} />
+                      <Boton type="submit" variante="fantasma" chico>
+                        Quitar
+                      </Boton>
+                    </form>
+                  </CeldaTabla>
+                </FilaTabla>
+              );
+            })}
           </Tabla>
         )}
       </Tarjeta>

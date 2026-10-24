@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { esLinkDeTienda, esLinkTiendaOficialSinIdDeVendedor, interpretarEnlaceProducto, interpretarEnlaceTienda } from "./link";
+import {
+  construirLinkMlDeSeguimiento,
+  esLinkDeTienda,
+  esLinkTiendaOficialSinIdDeVendedor,
+  interpretarEnlaceProducto,
+  interpretarEnlaceTienda,
+} from "./link";
 
 // Issue #192 — bug real: una tienda oficial real de Mercado Libre.
 const LINK_TIENDA_OFICIAL_SIN_SELLER =
@@ -127,5 +133,19 @@ describe("esLinkTiendaOficialSinIdDeVendedor (issue #192)", () => {
     expect(esLinkTiendaOficialSinIdDeVendedor("https://www.mercadolibre.com.co/pagina/tiendamercadomax?seller_id=456866397&item_id=MCO3981213688")).toBe(
       false
     );
+  });
+});
+
+describe("construirLinkMlDeSeguimiento (issue #195)", () => {
+  it("item -> articulo.mercadolibre.com.co/<id>", () => {
+    expect(construirLinkMlDeSeguimiento("item", "MCO123456789")).toBe("https://articulo.mercadolibre.com.co/MCO123456789");
+  });
+
+  it("product (catálogo) -> www.mercadolibre.com.co/p/<id>", () => {
+    expect(construirLinkMlDeSeguimiento("product", "MCO123456789")).toBe("https://www.mercadolibre.com.co/p/MCO123456789");
+  });
+
+  it("seller -> listado.mercadolibre.com.co/_CustId_<id> (misma forma confirmada que interpretarEnlaceTienda)", () => {
+    expect(construirLinkMlDeSeguimiento("seller", "456866397")).toBe("https://listado.mercadolibre.com.co/_CustId_456866397");
   });
 });

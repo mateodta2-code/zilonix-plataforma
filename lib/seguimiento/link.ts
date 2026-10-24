@@ -90,3 +90,19 @@ export function esLinkTiendaOficialSinIdDeVendedor(texto: string): boolean {
   if (interpretarEnlaceTienda(limpio)) return false; // ya se pudo resolver un id real, no es este caso
   return PATRON_LINK_TIENDA.test(limpio) && PATRON_OFFICIAL_STORE_ID.test(limpio);
 }
+
+// Issue #195 — link externo real a Mercado Libre para cada fila de
+// /panel/investigacion/seguimiento (y su detalle) — nunca el texto
+// crudo que la persona pegó al agregar (seguimientosMl.linkOriginal
+// puede ser un id suelto sin forma de URL, ej. solo "123456789"):
+// siempre se arma desde recursoMl + mlIdExterno, que ya quedaron
+// validados al agregar el seguimiento (interpretarEnlaceProducto/
+// interpretarEnlaceTienda, arriba).
+export function construirLinkMlDeSeguimiento(recursoMl: "item" | "product" | "seller", mlIdExterno: string): string {
+  if (recursoMl === "item") return `https://articulo.mercadolibre.com.co/${mlIdExterno}`;
+  if (recursoMl === "product") return `https://www.mercadolibre.com.co/p/${mlIdExterno}`;
+  // "seller" — misma forma "confirmada en producción" que ya usa
+  // interpretarEnlaceTienda (_CustId_, arriba) para ver todas las
+  // publicaciones de un vendedor, en vez de inventar un formato nuevo.
+  return `https://listado.mercadolibre.com.co/_CustId_${mlIdExterno}`;
+}
