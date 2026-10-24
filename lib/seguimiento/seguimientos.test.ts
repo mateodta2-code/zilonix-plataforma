@@ -13,6 +13,7 @@ import {
   LimiteCompetidoresError,
   LinkMlInvalidoError,
   listarAlertasDelDia,
+  listarSeguimientosConFotosParaVentas,
   listarSeguimientosConUltimaFoto,
   marcarAlertaLeida,
   obtenerDetalleSeguimiento,
@@ -317,6 +318,90 @@ describe("listarSeguimientosConUltimaFoto / obtenerDetalleSeguimiento (issue #17
   it("obtenerDetalleSeguimiento devuelve null si el seguimiento no existe o es de otra empresa", async () => {
     const { empresaId } = await crearEmpresaConUsuario();
     expect(await obtenerDetalleSeguimiento(empresaId, randomUUID())).toBeNull();
+  });
+});
+
+function diasAtras(dias: number): Date {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - dias);
+  return d;
+}
+
+// Issue #196 (apoya #195/#175) — capa de datos que Code 1 usa para las
+// tarjetas "Hoy"/"~30 días" del panel.
+describe("listarSeguimientosConFotosParaVentas (issue #196)", () => {
+  it("trae ultimaFoto/fotoAnterior (las 2 más recientes) y fotoCerca30d (exacto a 30 días, dentro de la ventana)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    const [fotoHace30] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(30), vendidos: 100 }).returning()
+    );
+    const [fotoAyer] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(1), vendidos: 210 }).returning()
+    );
+    const [fotoHoy] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(0), vendidos: 220 }).returning()
+    );
+
+    const lista = await listarSeguimientosConFotosParaVentas(empresaId);
+    const fila = lista.find((f) => f.seguimiento.id === seguimiento.id);
+
+    expect(fila?.ultimaFoto?.id).toBe(fotoHoy.id);
+    expect(fila?.fotoAnterior?.id).toBe(fotoAyer.id);
+    expect(fila?.fotoCerca30d?.id).toBe(fotoHace30.id);
+  });
+
+  it("fotoCerca30d: null si ninguna foto cae en la ventana de 25-35 días (nunca aproxima con la más vieja disponible)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(0), vendidos: 10 }));
+    // La única foto vieja queda FUERA de la ventana (40 días, no 25-35).
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(40), vendidos: 1 }));
+
+    const lista = await listarSeguimientosConFotosParaVentas(empresaId);
+    const fila = lista.find((f) => f.seguimiento.id === seguimiento.id);
+
+    expect(fila?.fotoCerca30d).toBeNull();
+  });
+
+  it("fotoCerca30d: con varias candidatas en la ventana, elige la más cercana a 30 días exactos", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    const [masCerca] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(28), vendidos: 50 }).returning()
+    ); // distancia 2
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(33), vendidos: 1 })); // distancia 3
+
+    const lista = await listarSeguimientosConFotosParaVentas(empresaId);
+    const fila = lista.find((f) => f.seguimiento.id === seguimiento.id);
+
+    expect(fila?.fotoCerca30d?.id).toBe(masCerca.id);
+  });
+
+  it("nunca lista un seguimiento eliminado", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+    await eliminarSeguimiento(empresaId, seguimiento.id);
+
+    const lista = await listarSeguimientosConFotosParaVentas(empresaId);
+
+    expect(lista.some((f) => f.seguimiento.id === seguimiento.id)).toBe(false);
   });
 });
 

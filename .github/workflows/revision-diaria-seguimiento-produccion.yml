@@ -1,0 +1,25 @@
+name: Revisión diaria de seguimientos de Mercado Libre (producción)
+
+# Issue #196 (apoya #195/#175) — gemelo de revision-diaria-seguimiento.yml
+# (staging), apuntando a producción. SOLO manual por ahora
+# (workflow_dispatch) — el cron de abajo queda comentado a propósito:
+# falta correr el SQL de producción (rol seguimiento_trabajador_user +
+# RLS, ver docs/release-seguimiento-prod.md) y confirmar con una
+# corrida manual que trae fotos reales ANTES de dejarlo en automático.
+# Descomentar el bloque `schedule` recién en el paso 4 del checklist,
+# después del go-live — mismo horario que staging (6 corridas, 08:00 a
+# 13:00 UTC — 03:00 a 08:00 en Colombia).
+on:
+  # schedule:
+  #   - cron: "0 8-13 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Revisar un lote de seguimientos pendientes
+        run: |
+          curl -sf -X POST "https://web-production-af270.up.railway.app/api/trabajos/seguimiento" \
+            -H "x-seguimiento-trabajador-secret: ${{ secrets.SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION }}" \
+            --max-time 300

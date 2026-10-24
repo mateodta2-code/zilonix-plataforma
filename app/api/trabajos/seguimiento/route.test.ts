@@ -66,13 +66,13 @@ describe("POST /api/trabajos/seguimiento (issue #175)", () => {
   it("secreto correcto y variables presentes: corre la revisión y devuelve el resultado", async () => {
     process.env.SEGUIMIENTO_TRABAJADOR_SECRET = "secreto-real";
     process.env.DATABASE_URL_SEGUIMIENTO = "postgres://lo-que-sea";
-    vi.mocked(revisarSeguimientosDelDia).mockResolvedValue({ activos: 3, procesados: 3, fallidos: 0, alertasCreadas: 2 });
+    vi.mocked(revisarSeguimientosDelDia).mockResolvedValue({ activos: 3, procesados: 3, saltados: 0, fallidos: 0, alertasCreadas: 2 });
 
     const res = await POST(peticion({ "x-seguimiento-trabajador-secret": "secreto-real" }));
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: true, activos: 3, procesados: 3, fallidos: 0, alertasCreadas: 2 });
+    expect(body).toEqual({ ok: true, activos: 3, procesados: 3, saltados: 0, fallidos: 0, alertasCreadas: 2 });
   });
 
   it("un fallo real al correr la revisión: 503 con mensaje genérico, nunca el detalle crudo del error", async () => {

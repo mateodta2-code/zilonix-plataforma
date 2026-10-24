@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
@@ -220,6 +220,82 @@ export async function listarSeguimientosConUltimaFoto(empresaId: string): Promis
       const fotoAnterior = fotos[1] ?? null;
       const fotoHaceUnMes = ultimaFoto ? buscarFotoDeHaceUnMes(fotos.slice(1), ultimaFoto.fecha) : null;
       resultado.push({ seguimiento, ultimaFoto, fotoAnterior, fotoHaceUnMes });
+    }
+    return resultado;
+  });
+}
+
+export type SeguimientoConFotosParaVentas = {
+  seguimiento: typeof seguimientosMl.$inferSelect;
+  ultimaFoto: typeof seguimientoFotos.$inferSelect | null;
+  // 2ª foto más reciente — "ayer" en la práctica, salvo que el trabajo
+  // diario se haya saltado algún día (seguimiento recién agregado,
+  // falla puntual de Mercado Libre, etc.): nunca se asume "ayer
+  // calendario", se toma la fila real que sigue a la última.
+  fotoAnterior: typeof seguimientoFotos.$inferSelect | null;
+  // Issue #196 — "~30 días": la foto más CERCANA a hace 30 días,
+  // dentro de una ventana de 25-35 (una revisión diaria puede faltar
+  // algún día puntual — nunca se exige el día 30 exacto). null si
+  // ningún día de esa ventana tiene foto (seguimiento con menos de ~25
+  // días de antigüedad, por ejemplo) — nunca se aproxima con la más
+  // vieja o la más nueva disponible, eso sería inventar el período.
+  fotoCerca30d: typeof seguimientoFotos.$inferSelect | null;
+};
+
+// Días desde hoy (medianoche UTC) hacia atrás — mismo criterio de
+// "solo la FECHA" que fechaDeHoy() en lib/trabajos/revisionDiariaSeguimiento.ts.
+function diasAtras(desde: Date, dias: number): Date {
+  const d = new Date(desde);
+  d.setUTCDate(d.getUTCDate() - dias);
+  return d;
+}
+
+// La de menor distancia absoluta al objetivo — con como mucho ~11
+// fotos candidatas (una por día, ventana de 11 días), un reduce() en
+// memoria alcanza de sobra, sin necesitar ORDER BY ABS(...) en SQL.
+function fotoMasCercaDe(fotos: (typeof seguimientoFotos.$inferSelect)[], objetivo: Date): typeof seguimientoFotos.$inferSelect | null {
+  if (fotos.length === 0) return null;
+  return fotos.reduce((mejor, actual) =>
+    Math.abs(actual.fecha.getTime() - objetivo.getTime()) < Math.abs(mejor.fecha.getTime() - objetivo.getTime()) ? actual : mejor
+  );
+}
+
+// Issue #196 (apoya #195/#175) — capa de datos para las tarjetas
+// "Hoy"/"~30 días" del panel: por cada seguimiento activo, las dos
+// fotos más recientes (para ventasDelPeriodo() de "hoy") y la foto más
+// cercana a hace 30 días (para ventasDelPeriodo() de "~30 días").
+// Mismo criterio de volumen que listarSeguimientosConUltimaFoto (N+1 a
+// propósito, nunca cientos de seguimientos por empresa).
+export async function listarSeguimientosConFotosParaVentas(empresaId: string): Promise<SeguimientoConFotosParaVentas[]> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const activos = await tx.select().from(seguimientosMl).where(and(eq(seguimientosMl.empresaId, empresaId), isNull(seguimientosMl.eliminadoTs))).orderBy(desc(seguimientosMl.creadoTs));
+
+    const hoy = new Date();
+    hoy.setUTCHours(0, 0, 0, 0);
+    const objetivo30d = diasAtras(hoy, 30);
+    const desdeVentana30d = diasAtras(hoy, 35);
+    const hastaVentana30d = diasAtras(hoy, 25);
+
+    const resultado: SeguimientoConFotosParaVentas[] = [];
+    for (const seguimiento of activos) {
+      const recientes = await tx
+        .select()
+        .from(seguimientoFotos)
+        .where(eq(seguimientoFotos.seguimientoId, seguimiento.id))
+        .orderBy(desc(seguimientoFotos.fecha))
+        .limit(2);
+
+      const candidatas30d = await tx
+        .select()
+        .from(seguimientoFotos)
+        .where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), gte(seguimientoFotos.fecha, desdeVentana30d), lte(seguimientoFotos.fecha, hastaVentana30d)));
+
+      resultado.push({
+        seguimiento,
+        ultimaFoto: recientes[0] ?? null,
+        fotoAnterior: recientes[1] ?? null,
+        fotoCerca30d: fotoMasCercaDe(candidatas30d, objetivo30d),
+      });
     }
     return resultado;
   });

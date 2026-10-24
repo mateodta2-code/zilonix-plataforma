@@ -35,6 +35,12 @@ function esperar(ms: number): Promise<void> {
 export type ResultadoRevisionDiaria = {
   activos: number;
   procesados: number;
+  // Issue #196 — distinto de "procesados": el índice único
+  // seguimiento_id+fecha bloqueó el insert porque YA había una foto de
+  // hoy para este seguimiento (corrida manual repetida, o una carrera
+  // entre dos corridas del cron a la vez) — nunca se escribió nada
+  // nuevo, pero tampoco fue un error real (ver revisarUnSeguimiento).
+  saltados: number;
   fallidos: number;
   alertasCreadas: number;
 };
@@ -76,6 +82,7 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
   const activos = await obtenerSeguimientosPendientesDeHoy();
 
   let procesados = 0;
+  let saltados = 0;
   let fallidos = 0;
   let alertasCreadas = 0;
 
@@ -83,9 +90,11 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
     if (i > 0) await esperar(PAUSA_ENTRE_SEGUIMIENTOS_MS);
     const seguimiento = activos[i];
     try {
-      alertasCreadas += await revisarUnSeguimiento(seguimiento);
+      const resultado = await revisarUnSeguimiento(seguimiento);
+      if (resultado.saltado) saltados += 1;
+      else procesados += 1;
+      alertasCreadas += resultado.alertasCreadas;
       await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id));
-      procesados += 1;
     } catch (error) {
       // Un seguimiento que falla (cuenta sin token vigente, Mercado
       // Libre caído, etc.) no debe tumbar el lote entero — mismo
@@ -104,7 +113,17 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
     }
   }
 
-  return { activos: activos.length, procesados, fallidos, alertasCreadas };
+  // Issue #196 — un solo log por LOTE (nunca por seguimiento, eso ya
+  // lo hace el console.error de arriba), con los conteos nada más —
+  // nunca un id de seguimiento, un token ni el cuerpo de una respuesta
+  // de Mercado Libre. Sirve para confirmar en los logs del cron (acá y
+  // en producción) que el lote corrió y qué tan ocupado estaba, sin
+  // tener que sumar a mano las líneas de error de arriba.
+  console.log(
+    `[lib/trabajos/revisionDiariaSeguimiento] lote del día: ${activos.length} activos, ${procesados} procesados, ${saltados} saltados, ${fallidos} con error, ${alertasCreadas} alertas creadas.`
+  );
+
+  return { activos: activos.length, procesados, saltados, fallidos, alertasCreadas };
 }
 
 // Exportada para poder probar el reintento con espera en 429 sola,
@@ -136,10 +155,16 @@ function aFotoComparable(fila: typeof seguimientoFotos.$inferSelect): FotoCompar
   };
 }
 
-// Devuelve cuántas alertas creó — 0 si ya se había revisado hoy (no
-// duplica foto, índice único seguimiento_id+fecha) o si es la primera
-// foto de este seguimiento (nada con qué comparar todavía).
-async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<number> {
+type ResultadoUnSeguimiento = { saltado: boolean; alertasCreadas: number };
+
+// `saltado: true` SOLO cuando el índice único seguimiento_id+fecha
+// bloqueó el insert porque ya había una foto de hoy (ver el
+// onConflictDoNothing más abajo) — nunca se escribió nada nuevo.
+// `saltado: false` con `alertasCreadas: 0` es un caso DISTINTO: la
+// foto de hoy SÍ se escribió (sí fue "procesado"), simplemente no hay
+// foto de ayer con qué compararla todavía (primera foto de este
+// seguimiento) — no hay alertas que generar, pero no es un salto.
+async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoUnSeguimiento> {
   const cuenta = await obtenerCuentaMlActiva(seguimiento.empresaId);
   if (!cuenta) throw new Error("La empresa no tiene ninguna cuenta de Mercado Libre conectada.");
 
@@ -187,11 +212,11 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
       .onConflictDoNothing()
       .returning()
   );
-  if (!fotoNueva) return 0;
-  if (!fotoAnterior) return 0;
+  if (!fotoNueva) return { saltado: true, alertasCreadas: 0 };
+  if (!fotoAnterior) return { saltado: false, alertasCreadas: 0 };
 
   const alertas = compararFotos(seguimiento.tipo, aFotoComparable(fotoAnterior), aFotoComparable(fotoNueva));
-  if (alertas.length === 0) return 0;
+  if (alertas.length === 0) return { saltado: false, alertasCreadas: 0 };
 
   await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx.insert(seguimientoAlertas).values(
@@ -205,5 +230,5 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
     )
   );
 
-  return alertas.length;
+  return { saltado: false, alertasCreadas: alertas.length };
 }

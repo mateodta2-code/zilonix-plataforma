@@ -265,6 +265,101 @@ describe("revisarSeguimientosDelDia — un fallido no ahoga el lote para siempre
   });
 });
 
+// Issue #196 — "saltado" es un resultado DISTINTO de "procesado": el
+// índice único seguimiento_id+fecha bloqueó el insert porque ya había
+// una foto de hoy (ej. una carrera entre dos corridas del cron a la
+// vez), nunca se escribió nada nuevo, pero tampoco fue un error real.
+describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
+  let empresaId: string;
+  let seguimientoId: string;
+
+  beforeAll(async () => {
+    const creado = await crearEmpresaConUsuario("SALTADO");
+    empresaId = creado.empresaId;
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId,
+        cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+        nickname: "VENDEDOR_SALTADO",
+        accessTokenCifrado: cifrarToken("access-vigente"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
+
+    const [seguimiento] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: nuevoMlId(),
+          nombre: "Ya tiene foto de hoy",
+          linkOriginal: "https://x",
+          creadoPor: creado.usuarioId,
+        })
+        .returning({ id: seguimientosMl.id })
+    );
+    seguimientoId = seguimiento.id;
+
+    // A propósito: una foto de HOY insertada directo (nunca a través
+    // del trabajo) — simula la carrera real que onConflictDoNothing
+    // cubre. ultima_revision_ts queda en null a propósito, para que
+    // el seguimiento SÍ entre al lote (si ya estuviera marcado, el
+    // filtro de obtenerSeguimientosPendientesDeHoy lo excluiría antes
+    // de llegar a revisarUnSeguimiento).
+    const hoy = new Date();
+    hoy.setUTCHours(0, 0, 0, 0);
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: hoy, precio: "100", estado: "active" })
+    );
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("el lote lo cuenta como saltado (no procesado), le marca ultima_revision_ts, y nunca duplica/sobreescribe la foto de hoy", async () => {
+    await aislarLotePara(seguimientoId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" }))); // si no saltara, este precio lo delataría
+
+    const resultado = await revisarSeguimientosDelDia();
+
+    expect(resultado.saltados).toBeGreaterThanOrEqual(1);
+
+    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
+    expect(actualizado.ultimaRevisionTs).not.toBeNull();
+
+    const hoy = new Date();
+    hoy.setUTCHours(0, 0, 0, 0);
+    const fotosDeHoy = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
+    );
+    expect(fotosDeHoy).toHaveLength(1);
+    expect(Number(fotosDeHoy[0].precio)).toBe(100); // la que ya estaba, nunca 999
+  });
+
+  it("logea UN resumen de lote con los conteos reales (procesados/saltados/con error), sin ids ni tokens", async () => {
+    await aislarLotePara(seguimientoId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" })));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const resultado = await revisarSeguimientosDelDia();
+
+    const lineaDeLote = logSpy.mock.calls.find(([linea]) => typeof linea === "string" && linea.includes("lote del día"));
+    expect(lineaDeLote).toBeDefined();
+    const [linea] = lineaDeLote as [string];
+    expect(linea).toContain(`${resultado.activos} activos`);
+    expect(linea).toContain(`${resultado.procesados} procesados`);
+    expect(linea).toContain(`${resultado.saltados} saltados`);
+    expect(linea).toContain(`${resultado.fallidos} con error`);
+    // Nunca el id del seguimiento ni ningún token/respuesta cruda de ML.
+    expect(linea).not.toContain(seguimientoId);
+    expect(linea).not.toContain("access-vigente");
+
+    logSpy.mockRestore();
+  });
+});
+
 // Issue #175, punto 2 — "hoy toma siempre los mismos 50 sin orden, así
 // que el seguimiento 51 nunca se revisa": estas pruebas confirman el
 // orden (ASC NULLS FIRST por ultima_revision_ts) y el filtro (nunca
