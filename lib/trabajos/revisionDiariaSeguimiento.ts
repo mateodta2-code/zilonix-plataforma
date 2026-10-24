@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
@@ -39,12 +39,41 @@ export type ResultadoRevisionDiaria = {
   alertasCreadas: number;
 };
 
-export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiaria> {
-  const activos = await dbTrabajadorSeguimiento
+// Solo la FECHA (medianoche UTC) — "misma fecha" es la clave real de
+// "misma foto del día", nunca el instante exacto en que corrió el
+// trabajo (ver el comentario de seguimiento_fotos.fecha en db/schema.ts).
+function fechaDeHoy(): Date {
+  const hoy = new Date();
+  hoy.setUTCHours(0, 0, 0, 0);
+  return hoy;
+}
+
+// Issue real: el lote tomaba siempre los mismos 50 sin ningún orden —
+// un seguimiento 51 nunca llegaba a revisarse si la empresa tenía más
+// de un lote. Dos correcciones, exportada aparte para poder probar el
+// orden y el filtro solos:
+// - Filtro: nunca un seguimiento ya eliminado, y solo los que NO se
+//   revisaron hoy (ultima_revision_ts < medianoche UTC, o null — nunca
+//   revisado) — uno ya revisado hoy no vuelve a entrar en la cola
+//   aunque el cron corra varias veces (ver docs/cron-seguimiento.md,
+//   corre cada hora).
+// - Orden: ASC NULLS FIRST por ultima_revision_ts — el que nunca se
+//   revisó, o el que hace más tiempo que no se revisa, entra primero
+//   al lote. Así, entre varias corridas del mismo día, el lote
+//   siguiente SÍ llega a los que quedaron afuera del anterior, nunca
+//   repite los mismos primeros 50 una y otra vez.
+export async function obtenerSeguimientosPendientesDeHoy(): Promise<(typeof seguimientosMl.$inferSelect)[]> {
+  const hoy = fechaDeHoy();
+  return dbTrabajadorSeguimiento
     .select()
     .from(seguimientosMl)
-    .where(isNull(seguimientosMl.eliminadoTs))
+    .where(and(isNull(seguimientosMl.eliminadoTs), or(isNull(seguimientosMl.ultimaRevisionTs), lt(seguimientosMl.ultimaRevisionTs, hoy))))
+    .orderBy(sql`${seguimientosMl.ultimaRevisionTs} ASC NULLS FIRST`)
     .limit(TAMAÑO_LOTE);
+}
+
+export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiaria> {
+  const activos = await obtenerSeguimientosPendientesDeHoy();
 
   let procesados = 0;
   let fallidos = 0;
@@ -84,15 +113,6 @@ export async function leerConReintento429(seguimiento: SeguimientoParaLeer, toke
       throw error;
     }
   }
-}
-
-// Solo la FECHA (medianoche UTC) — "misma fecha" es la clave real de
-// "misma foto del día", nunca el instante exacto en que corrió el
-// trabajo (ver el comentario de seguimiento_fotos.fecha en db/schema.ts).
-function fechaDeHoy(): Date {
-  const hoy = new Date();
-  hoy.setUTCHours(0, 0, 0, 0);
-  return hoy;
 }
 
 function aFotoComparable(fila: typeof seguimientoFotos.$inferSelect): FotoComparable {

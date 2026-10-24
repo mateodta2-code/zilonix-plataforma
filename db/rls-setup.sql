@@ -83,7 +83,14 @@ BEGIN
 END $$;
 GRANT CONNECT ON DATABASE railway TO seguimiento_trabajador_user;
 GRANT USAGE ON SCHEMA public TO seguimiento_trabajador_user;
-GRANT SELECT, UPDATE ON seguimientos_ml TO seguimiento_trabajador_user;
+-- Mínimo privilegio real: SELECT de la fila completa (necesita ver
+-- tipo/recurso_ml/ml_id_externo para saber qué revisar), pero el único
+-- UPDATE que de verdad hace falta es marcar ultima_revision_ts — un
+-- GRANT de columna, no de la fila completa, para que ni un bug ni una
+-- consulta armada a mano con esta conexión pueda tocar nombre,
+-- es_competidor, eliminado_ts ni ninguna otra columna de negocio.
+GRANT SELECT ON seguimientos_ml TO seguimiento_trabajador_user;
+GRANT UPDATE (ultima_revision_ts) ON seguimientos_ml TO seguimiento_trabajador_user;
 
 -- 2) Seguridad por fila — se activa por tabla, y se FUERZA también para
 -- el dueño de la tabla (sin el FORCE, el dueño de la tabla se salta la

@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa } from "./empresa-context";
+import { dbTrabajadorSeguimiento } from "./trabajador-seguimiento-context";
 import { seguimientoAlertas, seguimientoFotos, seguimientosMl } from "./schema";
 import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 
@@ -123,5 +125,32 @@ describe("aislamiento por empresa — seguimientos_ml / seguimiento_fotos / segu
         tx.insert(seguimientosMl).values({ ...datosSeguimiento(contexto.empresaBId), mlIdExterno, creadoPor: contexto.usuarioBId })
       )
     ).resolves.toBeDefined();
+  });
+
+  // Issue #175 — mínimo privilegio real: seguimiento_trabajador_user
+  // (db/trabajador-seguimiento-context.ts, usado por la revisión
+  // diaria para enumerar seguimientos de CUALQUIER empresa) solo tiene
+  // GRANT UPDATE de la columna ultima_revision_ts, nunca de la fila
+  // completa — Postgres rechaza el UPDATE si se intenta tocar
+  // cualquier otra columna, aunque la fila sí sea visible por la
+  // política FOR SELECT de este rol.
+  it("seguimiento_trabajador_user puede marcar ultima_revision_ts pero NUNCA cambiar otra columna (ej. nombre)", async () => {
+    const [seguimiento] = await dbComoEmpresa(contexto.empresaAId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({ ...datosSeguimiento(contexto.empresaAId), creadoPor: contexto.usuarioAId })
+        .returning({ id: seguimientosMl.id })
+    );
+
+    await expect(
+      dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id))
+    ).resolves.toBeDefined();
+
+    await expect(
+      dbTrabajadorSeguimiento.update(seguimientosMl).set({ nombre: "Nombre robado" }).where(eq(seguimientosMl.id, seguimiento.id))
+    ).rejects.toThrow();
+
+    const [sigueIgual] = await dbComoEmpresa(contexto.empresaAId, (tx) => tx.select({ nombre: seguimientosMl.nombre }).from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(sigueIgual.nombre).not.toBe("Nombre robado");
   });
 });

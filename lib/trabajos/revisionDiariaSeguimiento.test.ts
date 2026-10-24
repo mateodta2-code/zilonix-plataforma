@@ -5,73 +5,34 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { db } from "@/db/index";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
-import { leerConReintento429, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
+import { obtenerSeguimientosPendientesDeHoy, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
 
-// Issue #175 — el reintento con espera en 429 se prueba SOLO (mockea
-// lib/seguimiento/lector.ts, vi.useFakeTimers()): no tiene nada que ver
-// con Postgres, probarlo contra la base real solo lo haría lento sin
-// agregar ninguna garantía más.
-vi.mock("@/lib/seguimiento/lector", () => ({ leerFotoSeguimiento: vi.fn() }));
-
-describe("leerConReintento429 — reintento con espera creciente en 429 (issue #175)", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-  });
-
-  it("429 dos veces y OK a la tercera: reintenta con espera creciente, sin fallar", async () => {
-    const { leerFotoSeguimiento } = await import("@/lib/seguimiento/lector");
-    const datosFinal = { precio: 100, precioAnterior: null, inventarioDisponible: null, inventarioAproximado: false, vendidos: null, estado: null, enCatalogo: null, ganaBotonCompra: null, esFull: null, esEnvioGratis: null, publicaciones: null };
-    vi.mocked(leerFotoSeguimiento)
-      .mockRejectedValueOnce(new LimiteMercadoLibreError())
-      .mockRejectedValueOnce(new LimiteMercadoLibreError())
-      .mockResolvedValueOnce(datosFinal);
-
-    vi.useFakeTimers();
-    const promesa = leerConReintento429({ tipo: "producto", recursoMl: "item", mlIdExterno: "MCO111" }, "token", "123");
-    await vi.runAllTimersAsync();
-    const resultado = await promesa;
-
-    expect(resultado).toEqual(datosFinal);
-    expect(leerFotoSeguimiento).toHaveBeenCalledTimes(3);
-  });
-
-  it("429 todas las veces (más de lo que se reintenta): termina lanzando LimiteMercadoLibreError", async () => {
-    const { leerFotoSeguimiento } = await import("@/lib/seguimiento/lector");
-    vi.mocked(leerFotoSeguimiento).mockRejectedValue(new LimiteMercadoLibreError());
-
-    vi.useFakeTimers();
-    const promesa = leerConReintento429({ tipo: "producto", recursoMl: "item", mlIdExterno: "MCO111" }, "token", "123").catch((e) => e);
-    await vi.runAllTimersAsync();
-    const resultado = await promesa;
-
-    expect(resultado).toBeInstanceOf(LimiteMercadoLibreError);
-  });
-
-  it("un error que no es 429 nunca se reintenta — sube de una", async () => {
-    const { leerFotoSeguimiento } = await import("@/lib/seguimiento/lector");
-    const otroError = new Error("otra cosa");
-    vi.mocked(leerFotoSeguimiento).mockRejectedValue(otroError);
-
-    await expect(leerConReintento429({ tipo: "producto", recursoMl: "item", mlIdExterno: "MCO111" }, "token", "123")).rejects.toBe(otroError);
-    expect(leerFotoSeguimiento).toHaveBeenCalledTimes(1);
-  });
-});
-
+// Issue #175 — prueba real contra Postgres (mismo criterio que
+// lib/ml/trabajador.test.ts): dbTrabajadorSeguimiento (DATABASE_URL_SEGUIMIENTO)
+// lee seguimientos de CUALQUIER empresa (cross-empresa, a propósito —
+// por eso esta prueba SÍ necesita la conexión real, al revés de
+// lib/trabajos/leerConReintento429.test.ts, que la mockea porque nunca
+// la toca). dbComoEmpresa/app_user hace el resto una vez resuelta la
+// empresa. Solo el fetch a Mercado Libre se simula.
 function respuestaJson(data: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => JSON.stringify(data) } as Response;
 }
 
-// Issue #175 — prueba real contra Postgres (mismo criterio que
-// lib/ml/trabajador.test.ts): dbTrabajadorSeguimiento lee seguimientos
-// de CUALQUIER empresa (cross-empresa, a propósito), dbComoEmpresa/
-// app_user hace el resto una vez resuelta la empresa. Solo el fetch a
-// Mercado Libre se simula.
+async function crearEmpresaConUsuario(prefijo: string) {
+  const empresaId = randomUUID();
+  await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: `Empresa ${prefijo}`, nit: `TEST-${prefijo}-${empresaId.slice(0, 8)}` }));
+  const [usuario] = await db.insert(usuarios).values({ email: `prueba-${prefijo}-${empresaId}@zilonix.test`, nombre: "Usuario de prueba" }).returning({ id: usuarios.id });
+  return { empresaId, usuarioId: usuario.id };
+}
+
+function nuevoMlId() {
+  return `MCO${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+}
+
 describe("revisarSeguimientosDelDia (issue #175)", () => {
   const empresaId = randomUUID();
   let seguimientoId: string;
-  const itemId = `MCO${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+  const itemId = nuevoMlId();
 
   beforeAll(async () => {
     await dbComoEmpresa(empresaId, (tx) =>
@@ -166,7 +127,13 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     expect(seguimientoActualizado.ultimaRevisionTs).not.toBeNull();
   });
 
-  it("corrida repetida el mismo día: no duplica la foto ni crea alertas de más (índice único por día)", async () => {
+  // Issue #175 — con el filtro nuevo (punto 2), un seguimiento ya
+  // revisado hoy ni siquiera entra al lote de la segunda corrida — la
+  // protección contra duplicar la foto del día pasa a ser, en la
+  // práctica, el filtro mismo; el índice único seguimiento_id+fecha
+  // (ver db/rls-seguimiento.test.ts) sigue de respaldo por si algún
+  // día el filtro se rompe.
+  it("corrida repetida el mismo día: el seguimiento ya no entra al lote, nunca duplica la foto", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" }))); // si duplicara, este precio lo delataría
 
     await revisarSeguimientosDelDia();
@@ -178,5 +145,65 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     );
     expect(fotosDeHoy).toHaveLength(1);
     expect(Number(fotosDeHoy[0].precio)).toBe(80); // la de la corrida anterior, nunca 999
+  });
+});
+
+// Issue #175, punto 2 — "hoy toma siempre los mismos 50 sin orden, así
+// que el seguimiento 51 nunca se revisa": estas pruebas confirman el
+// orden (ASC NULLS FIRST por ultima_revision_ts) y el filtro (nunca
+// eliminado, nunca uno ya revisado hoy) contra Postgres real, sin
+// pasar por toda la cadena de leer/comparar/alertar.
+describe("obtenerSeguimientosPendientesDeHoy — orden y filtro del lote (issue #175)", () => {
+  it("nunca trae un seguimiento ya eliminado", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario("LOTE-ELIM");
+    const [eliminado] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: nuevoMlId(),
+          nombre: "Eliminado",
+          linkOriginal: "https://x",
+          creadoPor: usuarioId,
+          eliminadoTs: new Date(),
+        })
+        .returning({ id: seguimientosMl.id })
+    );
+
+    const pendientes = await obtenerSeguimientosPendientesDeHoy();
+    expect(pendientes.some((p) => p.id === eliminado.id)).toBe(false);
+  });
+
+  it("excluye el ya revisado HOY, incluye los de ayer/hace 2 días/nunca, y ordena ASC NULLS FIRST", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario("LOTE-ORDEN");
+    const base = { empresaId, tipo: "producto" as const, recursoMl: "item" as const, linkOriginal: "https://x", creadoPor: usuarioId };
+
+    const dosDiasAtras = new Date();
+    dosDiasAtras.setUTCHours(0, 0, 0, 0);
+    dosDiasAtras.setUTCDate(dosDiasAtras.getUTCDate() - 2);
+    const unDiaAtras = new Date();
+    unDiaAtras.setUTCHours(0, 0, 0, 0);
+    unDiaAtras.setUTCDate(unDiaAtras.getUTCDate() - 1);
+
+    const [nuncaRevisado] = await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Nunca" }).returning());
+    const [revisadoHaceDosDias] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hace 2 días", ultimaRevisionTs: dosDiasAtras }).returning()
+    );
+    const [revisadoAyer] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Ayer", ultimaRevisionTs: unDiaAtras }).returning()
+    );
+    const [revisadoHoy] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hoy", ultimaRevisionTs: new Date() }).returning()
+    );
+
+    const pendientes = await obtenerSeguimientosPendientesDeHoy();
+    const idsDeEstaEmpresa = pendientes.filter((p) => p.empresaId === empresaId).map((p) => p.id);
+
+    // El de "hoy" nunca aparece; el resto, del que hace más tiempo que
+    // no se revisa (o nunca) al más reciente.
+    expect(idsDeEstaEmpresa).toEqual([nuncaRevisado.id, revisadoHaceDosDias.id, revisadoAyer.id]);
+    expect(idsDeEstaEmpresa).not.toContain(revisadoHoy.id);
   });
 });
