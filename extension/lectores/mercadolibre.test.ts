@@ -1,78 +1,105 @@
 import { describe, expect, it } from "vitest";
 // extension/lectores/mercadolibre.js es JS plano (corre como content
-// script de la extensión) pero exporta estas dos funciones con
+// script de la extensión) pero exporta estas funciones con
 // `module.exports` cuando `module` existe (mismo patrón que
 // extension/seguridad.js) — alcanza para probarlas con un HTML de
 // ejemplo, sin navegador ni DOM real.
-import { calcularVentasPromedioMes, leerDatosIncrustados } from "./mercadolibre.js";
+import { calcularVentasPromedioMes, extraerIdDeUrl, leerDatosIncrustados } from "./mercadolibre.js";
 
-// HTML de ejemplo real-ista: dos <script> — uno con otra variable
-// cualquiera (para confirmar que no se confunde), y el que de verdad
-// importa, __NORDIC_RENDERING_CTX__, con sold_quantity/item_id/
-// date_created anidados varios niveles adentro (como en la página
-// real) y, a propósito, una comilla escapada y llaves "{ }" sueltas
-// DENTRO de un string (el título) — para probar que el extractor de
-// JSON balanceado no corta el objeto a mitad de camino ahí.
-const HTML_CON_VARIABLE_INCRUSTADA = `<!doctype html><html><head></head><body>
+// Issue #174, corrección real: la página de UN producto trae en el
+// mismo JSON los datos de OTROS productos (recomendados). Este HTML
+// de ejemplo tiene DOS productos — el actual (MCO111111111) y uno
+// recomendado (MCO222222222) con un sold_quantity bien distinto — para
+// confirmar que leerDatosIncrustados() agarra el del producto correcto
+// según el id que viene de la URL, nunca "el primer sold_quantity que
+// encuentre". La fecha de "title" con llaves/comillas adentro sigue
+// probando que el extractor de JSON balanceado no corta el objeto a
+// mitad de camino.
+const HTML_DOS_PRODUCTOS = `<!doctype html><html><head></head><body>
 <script>window.__PRELOADED_STATE__ = {"otraCosa": true};</script>
 <script>
-window.__NORDIC_RENDERING_CTX__ = {"page":{"components":{"item":{"id":"MCO123456789","sold_quantity":537,"date_created":"2023-05-10T14:23:00.000Z","title":"Reloj con \\"comillas\\" y { llaves } adentro"}}}};
+window.__NORDIC_RENDERING_CTX__ = {"page":{"components":{
+  "item":{"id":"MCO111111111","sold_quantity":537,"date_created":"2023-05-10T14:23:00.000Z","title":"Reloj con \\"comillas\\" y { llaves } adentro"},
+  "recomendados":[{"id":"MCO222222222","sold_quantity":9999,"date_created":"2020-01-01T00:00:00.000Z"}]
+}}};
 </script>
 </body></html>`;
 
-// Mismos 3 datos, pero SIN la variable __NORDIC_RENDERING_CTX__ —
-// simula que Mercado Libre cambió el nombre de la variable o la
-// movió: el respaldo de texto plano que pide la tarea tiene que
-// encontrarlos igual, buscando directo "sold_quantity" en el HTML.
-const HTML_SOLO_CON_TEXTO_PLANO = `<!doctype html><html><body>
-<script>window.__OTRA_VARIABLE_FUTURA__ = {"resultado":{"id":"MCO987654321","sold_quantity":892,"date_created":"2024-01-01T00:00:00.000Z"}};</script>
-</body></html>`;
-
-// La variable existe pero el JSON viene CORTADO a mitad de carga
-// (nunca cierra la llave) — el extractor balanceado tiene que
-// devolver null sin reventar, y caer al mismo respaldo de texto.
-const HTML_CON_JSON_CORTADO = `<!doctype html><html><body>
-<script>window.__NORDIC_RENDERING_CTX__ = {"item": {"sold_quantity": 42, "date_crea</script>
+// Mismos dos productos, pero SIN __NORDIC_RENDERING_CTX__ — simula que
+// Mercado Libre cambió el nombre de la variable o la movió: el
+// respaldo de texto plano tiene que agarrar el sold_quantity que está
+// CERCA del id correcto (separados por bastante relleno, a propósito,
+// para que agarrar "el primero que aparezca en el HTML" sin amarre
+// hubiera dado el resultado equivocado).
+const RELLENO_LARGO = "<!-- relleno -->".repeat(60); // bien más de 500 caracteres
+const HTML_TEXTO_DOS_PRODUCTOS = `<!doctype html><html><body>
+<script>window.__OTRA_VARIABLE_FUTURA__ = {"recomendado":{"id":"MCO222222222","sold_quantity":9999,"date_created":"2020-01-01T00:00:00.000Z"}};</script>
+${RELLENO_LARGO}
+<script>window.__OTRA_MAS__ = {"item":{"id":"MCO111111111","sold_quantity":50,"date_created":"2024-01-01T00:00:00.000Z"}};</script>
 </body></html>`;
 
 const HTML_SIN_NADA = `<!doctype html><html><body><p>Página sin ningún dato incrustado</p></body></html>`;
 
-describe("leerDatosIncrustados — issue #174, vendidos exacto desde el JSON que ML incrusta en el HTML", () => {
-  it("lee sold_quantity/item_id/date_created desde __NORDIC_RENDERING_CTX__ (JSON balanceado, con llaves/comillas dentro de un string)", () => {
-    const resultado = leerDatosIncrustados(HTML_CON_VARIABLE_INCRUSTADA);
-    expect(resultado).toEqual({
+describe("extraerIdDeUrl — issue #174, el producto actual lo manda la URL, nunca el HTML", () => {
+  it("MCO-123456789 (con guión, como en la URL real) -> MCO123456789", () => {
+    expect(extraerIdDeUrl("https://articulo.mercadolibre.com.co/MCO-123456789-reloj-digital-_JM")).toBe("MCO123456789");
+  });
+
+  it("MCO123456789 (sin guión) también funciona", () => {
+    expect(extraerIdDeUrl("https://www.mercadolibre.com.co/p/MCO123456789")).toBe("MCO123456789");
+  });
+
+  it("una URL sin ningún id de Mercado Libre -> null", () => {
+    expect(extraerIdDeUrl("https://www.mercadolibre.com.co/ofertas")).toBeNull();
+    expect(extraerIdDeUrl(null)).toBeNull();
+  });
+});
+
+describe("leerDatosIncrustados — issue #174, amarrado al producto actual (nunca el de otro producto de la misma página)", () => {
+  it("con dos productos en el JSON incrustado, agarra el sold_quantity/date_created del que coincide con el id actual", () => {
+    expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, "MCO111111111")).toEqual({
       soldQuantity: 537,
-      itemId: "MCO123456789",
+      itemId: "MCO111111111",
       dateCreated: "2023-05-10T14:23:00.000Z",
     });
   });
 
-  it("si no está __NORDIC_RENDERING_CTX__, cae al respaldo de texto plano (buscar \"sold_quantity\" directo en el HTML)", () => {
-    const resultado = leerDatosIncrustados(HTML_SOLO_CON_TEXTO_PLANO);
-    expect(resultado).toEqual({
-      soldQuantity: 892,
-      itemId: "MCO987654321",
-      dateCreated: "2024-01-01T00:00:00.000Z",
+  it("pidiendo el OTRO id de la misma página, trae los datos del otro producto — confirma que de verdad distingue cuál es cuál", () => {
+    expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, "MCO222222222")).toEqual({
+      soldQuantity: 9999,
+      itemId: "MCO222222222",
+      dateCreated: "2020-01-01T00:00:00.000Z",
     });
   });
 
-  it("JSON cortado a mitad de carga: nunca revienta, cae al mismo respaldo de texto plano para lo que sí se pueda leer", () => {
-    const resultado = leerDatosIncrustados(HTML_CON_JSON_CORTADO);
-    expect(resultado.soldQuantity).toBe(42);
-    expect(resultado.dateCreated).toBeNull(); // date_created quedó cortado antes de cerrar la comilla — nunca se inventa
+  it("si el id actual no aparece en ningún lado del JSON, nunca devuelve el de otro producto — todo null", () => {
+    expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, "MCO333333333")).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
+  });
+
+  it("respaldo de texto plano (sin __NORDIC_RENDERING_CTX__): agarra el sold_quantity cercano al id correcto, no el de otro producto más lejos en el HTML", () => {
+    expect(leerDatosIncrustados(HTML_TEXTO_DOS_PRODUCTOS, "MCO111111111")).toEqual({
+      soldQuantity: 50,
+      itemId: "MCO111111111",
+      dateCreated: "2024-01-01T00:00:00.000Z",
+    });
+    expect(leerDatosIncrustados(HTML_TEXTO_DOS_PRODUCTOS, "MCO222222222")).toEqual({
+      soldQuantity: 9999,
+      itemId: "MCO222222222",
+      dateCreated: "2020-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("sin itemIdActual (la URL no trajo ningún id) -> todo null, nunca adivina", () => {
+    expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, null)).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
   });
 
   it("sin ningún dato incrustado ni en texto plano: los 3 campos en null, nunca inventados", () => {
-    expect(leerDatosIncrustados(HTML_SIN_NADA)).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
+    expect(leerDatosIncrustados(HTML_SIN_NADA, "MCO111111111")).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
   });
 
   it("entrada vacía o inválida no revienta", () => {
-    expect(leerDatosIncrustados("")).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
-    // leerDatosIncrustados() revisa `typeof html !== "string"` antes de
-    // tocar nada — null/undefined en vivo (ej. outerHTML inesperado)
-    // nunca revienta. La firma TS de un .js con allowJs no obliga a
-    // pasar un string, así que esto no necesita @ts-expect-error.
-    expect(leerDatosIncrustados(null)).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
+    expect(leerDatosIncrustados("", "MCO111111111")).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
+    expect(leerDatosIncrustados(null, "MCO111111111")).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
   });
 });
 
