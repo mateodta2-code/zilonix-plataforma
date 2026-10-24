@@ -12,7 +12,12 @@ import {
   extraerIdDeUrl,
   leerDatosIncrustados,
   leerSellerIdDeTienda,
+  tipoDePagina,
 } from "./mercadolibre.js";
+
+// Issue #192 — bug real: una tienda oficial real de Mercado Libre.
+const LINK_TIENDA_OFICIAL_SIN_SELLER =
+  "https://www.mercadolibre.com.co/tienda/colchones-relax?item_id=MCO1657640131&category_id=MCO1574&official_store_id=53573&client=recoview-selleritems&recos_listing=true";
 
 // URL_APP real de extension/config.js (producción) — se repite el
 // literal acá a propósito: si alguien cambia config.js sin querer,
@@ -173,6 +178,23 @@ describe("construirLinkSeguirTienda — issue #174, botón \"Seguir tienda en Zi
   });
 });
 
+describe("tipoDePagina — issue #192, bug real: una tienda oficial real no se reconocía", () => {
+  it('path /tienda/ (www.mercadolibre.../tienda/...) -> "tienda"', () => {
+    expect(tipoDePagina(LINK_TIENDA_OFICIAL_SIN_SELLER)).toBe("tienda");
+    expect(tipoDePagina("https://www.mercadolibre.com.co/tienda/una-tienda-cualquiera")).toBe("tienda");
+  });
+
+  it('sigue reconociendo /perfil/, tienda.mercadolibre y ?CustId= como "tienda"', () => {
+    expect(tipoDePagina("https://www.mercadolibre.com.co/perfil/una-tienda")).toBe("tienda");
+    expect(tipoDePagina("https://tienda.mercadolibre.com.co/alguna-tienda")).toBe("tienda");
+    expect(tipoDePagina("https://listado.mercadolibre.com.co/vendedor?CustId=123456789")).toBe("tienda");
+  });
+
+  it('un producto real sigue dando "producto", nunca "tienda"', () => {
+    expect(tipoDePagina("https://articulo.mercadolibre.com.co/MCO-1234567890-reloj-_JM")).toBe("producto");
+  });
+});
+
 describe("extraerCustIdDeUrl — issue #174, corrección: la forma clásica de \"visitar vendedor\" de Mercado Libre", () => {
   it("?CustId=<dígitos> en la URL, solo o junto con otros parámetros", () => {
     expect(extraerCustIdDeUrl("https://listado.mercadolibre.com.co/vendedor?CustId=123456789")).toBe("123456789");
@@ -209,5 +231,16 @@ describe("leerSellerIdDeTienda — issue #174, corrección real: nunca el user_i
     expect(leerSellerIdDeTienda("<html><body>sin nada</body></html>", "https://www.mercadolibre.com.co/perfil/una-tienda")).toBeNull();
     expect(leerSellerIdDeTienda("", "https://www.mercadolibre.com.co/perfil/una-tienda")).toBeNull();
     expect(leerSellerIdDeTienda(null, null)).toBeNull();
+  });
+
+  // Issue #192, bug real: una tienda oficial trae official_store_id en
+  // la URL, nunca CustId ni seller_id en el HTML — nunca se adivina
+  // que official_store_id es el seller_id (son conceptos distintos en
+  // Mercado Libre, pueden no coincidir). null, igual que cualquier otro
+  // caso sin id confiable — el panel (extension/content.js,
+  // renderizarTienda) ya avisa "No se pudo confirmar el vendedor de
+  // esta página" en vez de quedarse en silencio.
+  it("tienda oficial con official_store_id en la URL pero sin seller_id en el HTML -> null, nunca official_store_id", () => {
+    expect(leerSellerIdDeTienda("<html><body>sin seller_id</body></html>", LINK_TIENDA_OFICIAL_SIN_SELLER)).toBeNull();
   });
 });
