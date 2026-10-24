@@ -1,0 +1,56 @@
+.celdaFecha {
+  white-space: nowrap;
+  color: var(--texto-suave);
+}
+
+.actorSistema {
+  font-style: italic;
+  color: var(--texto-suave);
+}
+
+.volver {
+  align-self: flex-start;
+}
+
+/* Issue #124 — mismo bloque de filtros que /panel/sku y /panel/pedidos
+   (borde azul/plata y filetes arriba y abajo). */
+.filtros {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 20px 0;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+}
+
+.filtros::before,
+.filtros::after {
+  content: "";
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}
+
+.filtros::before {
+  top: 0;
+}
+
+.filtros::after {
+  bottom: 0;
+}
+
+.accionesFiltro {
+  display: flex;
+  gap: 8px;
+}

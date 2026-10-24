@@ -7,6 +7,10 @@ Un rol de una empresa real nace copiando su plantilla y se puede ajustar despué
 | Rol | ventas | inventario | finanzas | personas | configuracion |
 |---|---|---|---|---|---|
 | Dueño | consultar (todo), crear (todo), modificar (todo), anular (todo), autorizar (todo) | consultar (todo), crear (todo), modificar (todo), anular (todo), autorizar (todo) | consultar (todo), crear (todo), modificar (todo), anular (todo), autorizar (todo) | consultar (todo), crear (todo), modificar (todo), anular (todo), autorizar (todo) | consultar (todo), crear (todo), modificar (todo), anular (todo), autorizar (todo) |
+| Gerente | consultar (todo), crear (todo), modificar (todo), anular (todo), autorizar (todo) | consultar (todo), crear (todo), modificar (todo), anular (todo), autorizar (todo) | consultar (todo), crear (todo), modificar (todo), anular (todo), autorizar (todo) | consultar (todo), crear (todo), modificar (todo) | consultar (todo), modificar (todo) |
+| Auxiliar | consultar (todo), crear (todo), modificar (todo) | consultar (todo), crear (todo), modificar (todo) | consultar (todo), crear (todo), modificar (todo) | — | — |
+| Tecnología | consultar (todo) | consultar (todo) | — | consultar (todo), crear (todo), modificar (todo) | consultar (todo), modificar (todo) |
+| Operaciones | consultar (todo), crear (todo), modificar (todo) | consultar (todo), crear (todo), modificar (todo), anular (todo) | — | — | — |
 | Operador | consultar (todo), crear (todo), modificar (todo) | consultar (todo), modificar (todo) | — | — | — |
 | Contador | consultar (todo) | consultar (todo) | consultar (todo), crear (todo), modificar (todo), autorizar (todo) | — | — |
 | Proveedor | — | — | — | — | — |

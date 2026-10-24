@@ -1,0 +1,104 @@
+/* Tarea "marca unificada": mismo borde azul/plata y línea azul
+   superior que <Tarjeta> (ver app/panel/pedidos/page.module.css, el
+   mismo bloque .filtros exacto) — nunca más "gris plano" en claro. */
+.filtros {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+}
+
+.filtros::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}
+
+/* Corrección (fix-ui-claro-sidebar-marca, punto 3): "azul arriba Y
+   abajo" — antes solo el filete de arriba. Mismo filete, espejado. */
+.filtros::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}
+
+.campoBusqueda {
+  min-width: 200px;
+}
+
+.accionesFiltro {
+  display: flex;
+  gap: 8px;
+}
+
+.vacioConAccion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.celdaFecha {
+  white-space: nowrap;
+  color: var(--texto-suave);
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resumenPaginacion {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.botonesPaginacion {
+  display: flex;
+  gap: 8px;
+}
+
+.botonImprimir {
+  align-self: flex-start;
+}
+
+.nota {
+  margin: 0;
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.volver {
+  align-self: flex-start;
+  margin-top: 16px;
+}

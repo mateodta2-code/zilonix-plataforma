@@ -1,0 +1,43 @@
+/* Tarea "marca unificada": mismo borde azul/plata y misma línea azul
+   superior que Tarjeta/TarjetaKpi — antes era un borde plata punteado
+   plano, sin nada de azul (se veía gris liso en claro, el motivo
+   exacto que pidió corregirse). */
+.vacio {
+  position: relative;
+  isolation: isolate;
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--texto-suave);
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(color-mix(in srgb, var(--plata) 6%, var(--superficie)), color-mix(in srgb, var(--plata) 6%, var(--superficie))) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+}
+
+.vacio::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}
+
+/* Corrección (fix-ui-claro-sidebar-marca, punto 3): "azul arriba Y
+   abajo" — antes solo el filete de arriba. Mismo filete, espejado. */
+.vacio::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}

@@ -1,0 +1,37 @@
+.fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.conteoPermisos {
+  color: var(--texto-suave);
+  font-size: 12.5px;
+  margin-left: 8px;
+}
+
+.siempreTodo {
+  color: var(--texto-suave);
+  font-size: 12.5px;
+}
+
+.ajustar {
+  font-size: 13px;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.ajustar:hover {
+  text-decoration: underline;
+  color: var(--azul-metal-3);
+}
+
+.ajustar:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.volver {
+  align-self: flex-start;
+}

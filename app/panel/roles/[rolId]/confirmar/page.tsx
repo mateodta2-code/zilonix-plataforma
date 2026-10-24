@@ -1,11 +1,14 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { decodificarPermisos, esPeligroso, obtenerRolDeEmpresa } from "@/lib/roles";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { confirmarPermisosAction } from "../actions";
+import { Boton, BotonLink } from "@/components/marco/Boton";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import styles from "./page.module.css";
 
 // Tarea 1.8 — "intentar dar un permiso peligroso desde una plantilla
 // pide confirmación aparte": esta es esa pantalla aparte. Nunca se
@@ -31,12 +34,7 @@ export default async function ConfirmarPermisosPage({
     await requierePermiso(usuario.id, empresa.id, "configuracion", "autorizar");
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
-    return (
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol no puede ajustar permisos.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje="Tu rol no puede ajustar permisos." />;
   }
 
   const rol = await obtenerRolDeEmpresa(empresa.id, params.rolId);
@@ -49,12 +47,17 @@ export default async function ConfirmarPermisosPage({
   if (peligrosos.length === 0) redirect(`/panel/roles/${rol.id}`);
 
   return (
-    <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>Confirma estos permisos</h1>
-      <p style={{ opacity: 0.7, fontSize: 14 }}>
-        Le vas a dar a <b>{rol.nombre}</b> permisos que pueden cambiar cosas sensibles de la empresa:
-      </p>
-      <ul style={{ color: "#a8432f", fontSize: 14 }}>
+    <>
+      <EncabezadoPagina
+        titulo="Confirma estos permisos"
+        descripcion={
+          <>
+            Le vas a dar a <b>{rol.nombre}</b> permisos que pueden cambiar cosas sensibles de la empresa:
+          </>
+        }
+      />
+
+      <ul className={styles.listaPeligrosos}>
         {peligrosos.map((p, i) => (
           <li key={i}>
             {p.accion} en {p.modulo} ({p.alcance})
@@ -62,19 +65,14 @@ export default async function ConfirmarPermisosPage({
         ))}
       </ul>
 
-      <form action={confirmarPermisosAction} style={{ marginTop: 20, display: "flex", gap: 12 }}>
+      <form action={confirmarPermisosAction} className={styles.form}>
         <input type="hidden" name="rolId" value={rol.id} />
         <input type="hidden" name="pendiente" value={pendiente} />
-        <button type="submit" style={{ padding: "10px 16px" }}>
-          Sí, confirmo estos permisos
-        </button>
-        <Link
-          href={`/panel/roles/${rol.id}`}
-          style={{ padding: "10px 16px", border: "1px solid currentColor", borderRadius: 6 }}
-        >
+        <Boton type="submit">Sí, confirmo estos permisos</Boton>
+        <BotonLink href={`/panel/roles/${rol.id}`} variante="secundario">
           Cancelar
-        </Link>
+        </BotonLink>
       </form>
-    </main>
+    </>
   );
 }

@@ -1,0 +1,42 @@
+.lista {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  overflow: hidden;
+  background:
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
+}
+
+.fila {
+  border-bottom: 1px solid var(--borde);
+}
+
+.fila:last-child {
+  border-bottom: none;
+}
+
+.filaEnlace {
+  display: block;
+  padding: 14px 16px;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: var(--transicion-color);
+}
+
+.filaEnlace:hover {
+  background: var(--fila-hover);
+}
+
+.filaEnlace:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: -2px;
+  box-shadow: var(--sombra-foco);
+}
+
+.filaContenido {
+  padding: 14px 16px;
+}

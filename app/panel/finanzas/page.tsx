@@ -1,10 +1,13 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { BotonLink } from "@/components/marco/Boton";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { SinAcceso } from "@/components/marco/SinAcceso";
 
 // Tarea 1.7/1.8 — pantalla de demostración para el criterio de "listo"
 // de la 1.7 ("el operador no ve Finanzas"), ahora usando la función
@@ -12,6 +15,14 @@ import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 // antes. No hay todavía ningún dato real de finanzas que mostrar (eso
 // es Fase 3) — lo que importa es que el candado funciona de verdad,
 // contra la base.
+//
+// Issue #124 (Z-FIN-02) — "ver" y "editar" van separados: esta
+// pantalla solo lee, así que exige "consultar" y nada más. Cuando
+// llegue la primera acción que cambie algo de finanzas (Fase 3), su
+// actions.ts tiene que pedir "crear" o "modificar" con requierePermiso
+// en el servidor — el Auxiliar y el Contador pueden ver Y editar, pero
+// un rol con solo "consultar" nunca debe poder guardar nada, aunque
+// arme el formulario a mano.
 export default async function FinanzasPage() {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -24,26 +35,24 @@ export default async function FinanzasPage() {
   try {
     const miMembresia = await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
     return (
-      <main style={{ maxWidth: 420, margin: "0 auto", padding: "48px 24px" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Finanzas</h1>
-        <p style={{ opacity: 0.7, fontSize: 14 }}>
-          Sin datos reales todavía (llegan en la Fase 3) — esta pantalla solo demuestra que tu rol (
-          {miMembresia.rolNombre}) sí puede verla.
-        </p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
+      <>
+        <EncabezadoPagina titulo="Finanzas" />
+        <EstadoVacio>
+          Sin datos reales todavía (llegan en la Fase 3) — esta pantalla solo demuestra que tu rol ({miMembresia.rolNombre}) sí puede verla.
+        </EstadoVacio>
+        <BotonLink href="/panel" variante="fantasma" chico>
+          Volver al panel
+        </BotonLink>
+      </>
     );
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
     return (
-      <main style={{ maxWidth: 420, margin: "0 auto", padding: "48px 24px" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Finanzas</h1>
-        <p style={{ opacity: 0.7, fontSize: 14 }}>
-          Tu rol ({miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a este módulo.
-        </p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
+      <>
+        <EncabezadoPagina titulo="Finanzas" />
+        <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a este módulo.`} />
+      </>
     );
   }
 }

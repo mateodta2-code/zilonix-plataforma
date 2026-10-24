@@ -1,0 +1,81 @@
+/* Corrección (fix-ui-claro-sidebar-marca, punto 5): mismo borde con
+   degradado que el resto de los controles del marco — plateado
+   siempre visible en reposo, el azul llega ENCIMA en hover vía el
+   glow (ya estaba), no reemplazando el plateado. Este botón aparece
+   dos veces (BarraSuperior, variante "icono"; pie del sidebar,
+   variante "cuadrado") y las dos caen siempre sobre zona clara en
+   claro (la de arriba, header; la de abajo, pie del sidebar) — sin
+   necesidad de ningún ajuste por tema. */
+.botonIcono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radio-boton);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  color: var(--icono);
+  cursor: pointer;
+  transition: var(--transicion-color), var(--transicion-transform);
+}
+
+.botonIcono:hover {
+  color: var(--icono-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--sombra-marca-hover);
+}
+
+.botonIcono:active {
+  transform: scale(0.97);
+}
+
+.botonIcono:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+}
+
+.botonCuadrado {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radio-boton);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  color: var(--icono);
+  cursor: pointer;
+  transition: var(--transicion-color), var(--transicion-transform);
+  padding: 0;
+}
+
+.botonCuadrado:hover {
+  color: var(--icono-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--sombra-marca-hover);
+}
+
+.botonCuadrado:active {
+  transform: scale(0.97);
+}
+
+.botonCuadrado:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+}
+
+.etiquetaCuadrado {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

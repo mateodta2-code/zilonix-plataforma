@@ -17,12 +17,13 @@ function dominioClerkDesdeLlavePublica(llave) {
 const dominioClerk = dominioClerkDesdeLlavePublica(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
 // Lista exacta que pide la documentación de Clerk para CSP propia
-// (self-hosted, sin el nonce automático — eso exige una versión de
-// @clerk/nextjs más nueva que la 6.9.6 de este repo). 'unsafe-inline'
-// en script-src y style-src es lo que Clerk pide como mínimo hoy, no
-// un atajo nuestro — y style-src además lo necesita toda la app, por
-// los style={{...}} de React, que compilan a atributos style=""
-// inline.
+// (self-hosted, sin el nonce automático). @clerk/nextjs 6.39.x ya
+// puede poner el nonce, pero no se activa en este cambio: una CSP mal
+// armada no rompe el build, rompe el navegador, y login, 2FA y /cuenta
+// con nonce todavía no se probaron en vivo. 'unsafe-inline' en
+// script-src y style-src es lo que Clerk pide como mínimo hoy, no un
+// atajo nuestro — y style-src además lo necesita toda la app, por los
+// style={{...}} de React, que compilan a atributos style="" inline.
 const cspClerk = dominioClerk
   ? [
       `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""} https://${dominioClerk} https://challenges.cloudflare.com https://*.protect.clerk.com`,
@@ -45,6 +46,30 @@ const csp = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Issue #58 (Z-ML-09) — /panel/sku/importar sube un CSV de hasta 5 MB
+  // (lib/importar-csv-skus.ts, TAMANO_MAXIMO_BYTES) a través de un
+  // Server Action. El límite real de Next para el body de un Server
+  // Action, si no se toca esto, es 1 MB (confirmado en
+  // node_modules/next/dist/server/app-render/action-handler.js) — por
+  // debajo del tope que pide el propio parser, así que un archivo
+  // válido de 2-5 MB se rechazaría ANTES de llegar a nuestra
+  // validación real, con un error genérico de Next en vez del mensaje
+  // real del parser. 6 MB deja margen sobre el tope de 5 MB (el campo
+  // oculto que reenvía el texto ya leído al confirmar agrega algo de
+  // overhead de multipart/form-data).
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "6mb",
+    },
+  },
+  // La app no usa next/image, no tiene carpeta public/ ni sharp. Igual
+  // Next 14.2.35 registra /_next/image y, si la petición pasa la
+  // validación de parámetros, entra a imageOptimizer (DoS del
+  // optimizador y, si algún día se instala sharp, el RCE por AVIF).
+  // Con unoptimized, handleNextImageRequest responde 404 antes de
+  // llamar al optimizador — ver next/dist/server/next-server.js en
+  // 14.2.35: `if (imagesConfig.loader !== 'default' || imagesConfig.unoptimized) render404`.
+  images: { unoptimized: true },
   // Tarea 1.5 — le dicen a Clerk que use NUESTRAS páginas de login/
   // registro (app/sign-in, app/sign-up), no su pantalla genérica
   // alojada en accounts.dev. Bug real encontrado en vivo (14/10/2026):
@@ -58,6 +83,20 @@ const nextConfig = {
     NEXT_PUBLIC_CLERK_SIGN_UP_URL: "/sign-up",
     NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: "/",
     NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: "/",
+  },
+  // Fix middleware (2026-10-21) — "/login" no existe como página (la
+  // real es "/sign-in"), pero cualquiera que le pegue de todos modos
+  // (un link viejo, un bookmark) antes caía en el mismo bug del
+  // middleware (ver lib/rutas-publicas.ts): sin sesión y sin
+  // `Accept: text/html`, se colgaba 30s y terminaba en 500. Los
+  // redirects de next.config.js corren ANTES que el middleware
+  // (orden real documentado por Next.js: headers → redirects →
+  // middleware → rutas), así que esto nunca llega a pasar por ahí.
+  // "/registro" no se agrega: no se usa en ningún lado del código hoy
+  // (confirmado con `git grep`), agregar un redirect sin uso real
+  // sería adivinar.
+  async redirects() {
+    return [{ source: "/login", destination: "/sign-in", permanent: false }];
   },
   // Tarea 1.10 — blindaje web. Pendiente real antes de dar esto por
   // cerrado del todo: probar en vivo registro, login, 2FA y /cuenta

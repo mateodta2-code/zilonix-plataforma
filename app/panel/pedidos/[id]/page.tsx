@@ -1,11 +1,14 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerPedidoConEventos, PASOS_PEDIDO, type EventoPedido, type PasoPedido } from "@/lib/ml/pedidos";
+import { BotonLink } from "@/components/marco/Boton";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import styles from "./page.module.css";
 
 const NOMBRE_PASO: Record<PasoPedido, string> = {
   venta: "Venta",
@@ -37,10 +40,11 @@ export default async function PedidoDetallePage({ params }: { params: { id: stri
     if (!(error instanceof SinPermisoError)) throw error;
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
     return (
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol ({miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.</p>
-        <Link href="/panel/pedidos">Volver</Link>
-      </main>
+      <SinAcceso
+        mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`}
+        volverHref="/panel/pedidos"
+        volverTexto="Volver"
+      />
     );
   }
 
@@ -50,36 +54,28 @@ export default async function PedidoDetallePage({ params }: { params: { id: stri
   const eventoPorPaso = new Map<PasoPedido, EventoPedido>(eventos.map((e) => [e.paso, e]));
 
   return (
-    <main style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px" }}>
-      <h1 style={{ fontSize: 20, fontWeight: 700 }}>Pedido #{pedido.pedidoIdExterno}</h1>
-      <p style={{ fontSize: 14, opacity: 0.7, marginTop: 4 }}>
-        {pedido.moneda} {pedido.total} · {pedido.estado}
-      </p>
+    <>
+      <EncabezadoPagina
+        titulo={`Pedido #${pedido.pedidoIdExterno}`}
+        descripcion={`${pedido.moneda} ${pedido.total} · ${pedido.estado}`}
+      />
 
-      <ol style={{ listStyle: "none", padding: 0, marginTop: 24 }}>
+      <ol className={styles.linea}>
         {PASOS_PEDIDO.map((paso) => {
           const evento = eventoPorPaso.get(paso);
           return (
-            <li key={paso} style={{ display: "flex", gap: 12, paddingBottom: 16 }}>
-              <div
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  marginTop: 5,
-                  flexShrink: 0,
-                  background: evento ? "#2e7d32" : "transparent",
-                  border: evento ? "none" : "2px solid #ccc",
-                }}
-              />
+            <li key={paso} className={styles.paso}>
+              <div className={styles.punto} data-cumplido={evento ? "true" : "false"} />
               <div>
-                <div style={{ fontSize: 14, fontWeight: evento ? 600 : 400, opacity: evento ? 1 : 0.5 }}>{NOMBRE_PASO[paso]}</div>
+                <div className={styles.nombrePaso} data-cumplido={evento ? "true" : "false"}>
+                  {NOMBRE_PASO[paso]}
+                </div>
                 {evento ? (
-                  <div style={{ fontSize: 12, opacity: 0.6 }}>
+                  <div className={styles.detallePaso}>
                     {new Date(evento.ts).toLocaleString("es-CO")} · {evento.actorTipo === "sistema" ? "Sistema / integración ML" : "Persona"}
                   </div>
                 ) : (
-                  <div style={{ fontSize: 12, opacity: 0.5 }}>Pendiente</div>
+                  <div className={styles.detallePaso}>Pendiente</div>
                 )}
               </div>
             </li>
@@ -87,11 +83,9 @@ export default async function PedidoDetallePage({ params }: { params: { id: stri
         })}
       </ol>
 
-      <p style={{ marginTop: 16 }}>
-        <Link href="/panel/pedidos" style={{ fontSize: 13 }}>
-          Volver a pedidos
-        </Link>
-      </p>
-    </main>
+      <BotonLink href="/panel/pedidos" variante="fantasma" chico className={styles.volver}>
+        Volver a pedidos
+      </BotonLink>
+    </>
   );
 }

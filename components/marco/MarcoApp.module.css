@@ -1,0 +1,45 @@
+.marco {
+  display: flex;
+  min-height: 100vh;
+  /* Transparente a propósito: el degradado es el de body::before
+     (--fondo-app), fijo al viewport. Si esto volviera a pintar
+     --fondo, taparía el azul de arriba. */
+  background: transparent;
+}
+
+.areaDerecha {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.contenido {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* El azul del encabezado ya no vive acá. Este bloque se desplazaba
+   con el contenido y se sumaba al fondo; Mateo pidió el degradado
+   fijo en el viewport (--fondo-app). Se deja el nodo por si el marco
+   lo sigue renderizando, sin pintar. */
+.brillo {
+  display: none;
+}
+
+.contenidoInterior {
+  position: relative;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 28px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+@media (max-width: 860px) {
+  .contenidoInterior {
+    padding: 24px 16px 40px;
+  }
+}

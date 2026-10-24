@@ -1,0 +1,73 @@
+.avisoExito {
+  padding: 10px 14px;
+  background: var(--acento-suave);
+  border: 1px solid var(--exito);
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto);
+}
+
+.avisoError {
+  padding: 10px 14px;
+  border: 1px solid var(--peligro);
+  border-radius: var(--radio-boton);
+  background: color-mix(in srgb, var(--peligro) 10%, var(--superficie));
+}
+
+.avisoErrorTexto {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.reintentar {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--peligro);
+  text-decoration: none;
+}
+
+.reintentar:hover {
+  text-decoration: underline;
+}
+
+.reintentar:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.filaCuenta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.desconectar {
+  font-size: 13px;
+  color: var(--texto-suave);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.desconectar:hover {
+  color: var(--texto);
+  text-decoration: underline;
+}
+
+.desconectar:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.detalleImportacion {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.errorImportacion {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--peligro);
+}

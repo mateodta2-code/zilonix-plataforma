@@ -1,0 +1,69 @@
+/* Corrección (fix-ui-claro-fade-abajo, punto 5): el saludo grande
+   (.saludo) se movió a BarraSuperior.module.css — visible en toda la
+   sección /panel, no solo acá. tarjetaIdentidad (avatar + nombre +
+   empresa·rol) se borró por completo, sin reubicarla ("Mi cuenta"
+   sigue en el header y en el sidebar). Queda solo el subtítulo, ahora
+   como la única línea de encabezado de esta página, justo encima de
+   las pestañas. */
+.subtitulo {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  color: var(--texto-suave-zona-oscura);
+}
+
+.gridKpi {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 760px) {
+  .gridKpi {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .gridKpi {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Corrección (fix-ui-claro-sidebar-marca, punto 4): "+ Crear otra
+   empresa" es justo el botón que Mateo señaló sin el azul de marca —
+   tenía borde azul SOLO, sin plateado, el único botón de la app así.
+   Mismo truco de doble background-clip que el resto: plateado
+   siempre, el azul llega encima en hover (ya lo tenía). */
+.crearEmpresa {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 9px 16px;
+  border-radius: var(--radio-boton);
+  background: linear-gradient(var(--acento-suave), var(--acento-suave)) padding-box, var(--degradado-plata-borde) border-box;
+  border: 1px solid transparent;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transicion-color), var(--transicion-transform);
+}
+
+.crearEmpresa:hover {
+  background: linear-gradient(var(--acento-boton), var(--acento-boton)) padding-box, var(--degradado-plata-borde) border-box;
+  color: #fff;
+  box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
+  transform: translateY(-1px);
+}
+
+.crearEmpresa:active {
+  transform: scale(0.97);
+}
+
+.crearEmpresa:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+}

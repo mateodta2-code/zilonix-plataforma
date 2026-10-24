@@ -1,7 +1,8 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, isNull, lt, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, despachosMl } from "@/db/schema";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike } from "@/lib/filtros-listado";
 
 // Tarea 2.10 — formato de petición y reglas de negocio confirmados
 // contra el código real ya en producción del Zilonix OS actual
@@ -61,6 +62,129 @@ export async function listarDespachosPendientes(empresaId: string) {
   return dbComoEmpresa(empresaId, (tx) =>
     tx.select().from(despachosMl).where(and(eq(despachosMl.empresaId, empresaId), eq(despachosMl.imprimible, true), isNull(despachosMl.etiquetaImpresaTs)))
   );
+}
+
+// Issue "tabla completa de despachos" — count(*) con EXACTAMENTE el
+// mismo WHERE que listarDespachosPendientes(), para el KPI del panel
+// (lib/panel-kpis.ts): ese solo necesita el número, nunca las filas
+// completas. lib/ml/despachos.test.ts prueba que da el mismo resultado
+// que listarDespachosPendientes(...).length con los mismos datos.
+export async function contarDespachosPendientes(empresaId: string): Promise<number> {
+  const [{ total }] = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ total: sql<number>`count(*)`.mapWith(Number) })
+      .from(despachosMl)
+      .where(and(eq(despachosMl.empresaId, empresaId), eq(despachosMl.imprimible, true), isNull(despachosMl.etiquetaImpresaTs)))
+  );
+  return total;
+}
+
+// Issue "tabla completa de despachos" — valores reales de
+// despachos_ml.status: son justo los 3 de ESTADOS_IMPRIMIBLES (arriba),
+// los únicos que puede tener un despacho que aparece en esta pantalla
+// ("pendientes de imprimir") — el filtro de Estado nunca deja elegir
+// uno que no podría aparecer.
+export const ESTADOS_DESPACHO_FILTRO = [
+  { valor: "pending", etiqueta: "Pendiente" },
+  { valor: "handling", etiqueta: "En preparación" },
+  { valor: "ready_to_ship", etiqueta: "Listo para despachar" },
+] as const;
+
+// despachos_ml no tiene una "fecha del despacho" propia (Mercado Libre
+// no la manda en el shipment) — actualizado_ts es lo único real que
+// hay: el momento en que ESTA fila se sincronizó o actualizó por
+// última vez. Se ordena/filtra por eso — documentado acá y en el
+// changelog, nunca inventando una columna de fecha que no existe.
+export const ORDENES_DESPACHO_FILTRO = ["actualizado_desc", "actualizado_asc"] as const;
+export type OrdenDespachos = (typeof ORDENES_DESPACHO_FILTRO)[number];
+
+export type FiltroDespachos = {
+  busqueda?: string; // número de envío (shipmentIdExterno) — el único texto libre real en esta tabla
+  estado?: string;
+  desde?: string; // "YYYY-MM-DD", hora de Colombia
+  hasta?: string; // "YYYY-MM-DD", hora de Colombia
+  orden?: string;
+  // La página llega como string (o el primer valor de un string[]);
+  // las pruebas la pasan como número. parsearPagina acepta los dos.
+  pagina?: number | string;
+};
+
+export type ResultadoDespachos = {
+  despachos: (typeof despachosMl.$inferSelect)[];
+  total: number;
+  pagina: number;
+  totalPaginas: number;
+};
+
+export const TAMANO_PAGINA_DESPACHOS = 25;
+
+// Issue "tabla completa de despachos" — MISMO alcance de siempre
+// (imprimible=true y sin etiqueta impresa, igual que
+// listarDespachosPendientes): esta pantalla sigue siendo "qué hay para
+// imprimir ahora", nunca "todos los despachos alguna vez
+// sincronizados" — el form de impresión masiva de la página depende de
+// que acá solo aparezca lo realmente imprimible.
+//
+// Página, fechas y búsqueda: validados con lib/filtros-listado.ts
+// (compartido con lib/ml/pedidos.ts, PR #107) — mismo criterio en los
+// dos listados, un solo lugar para corregir si hace falta. ilike() de
+// Drizzle ya parametriza el valor (nunca SQL armado a mano);
+// patronBusquedaLike() además escapa \, % y _ (el escape por defecto de
+// LIKE/ILIKE en Postgres), para que un comodín que venga en el texto
+// nunca cambie lo que se busca.
+//
+// Orden con desempate por id EN LA MISMA DIRECCIÓN que la columna
+// principal: sin eso, varias filas con el mismo actualizado_ts podrían
+// repartirse distinto entre una página y la siguiente según decida
+// Postgres, no según un orden real y estable.
+export async function listarDespachosFiltrados(empresaId: string, filtro: FiltroDespachos = {}): Promise<ResultadoDespachos> {
+  const condiciones = [eq(despachosMl.empresaId, empresaId), eq(despachosMl.imprimible, true), isNull(despachosMl.etiquetaImpresaTs)];
+
+  const patron = patronBusquedaLike(filtro.busqueda);
+  if (patron) {
+    condiciones.push(ilike(despachosMl.shipmentIdExterno, patron));
+  }
+  if (filtro.estado && ESTADOS_DESPACHO_FILTRO.some((e) => e.valor === filtro.estado)) {
+    condiciones.push(eq(despachosMl.status, filtro.estado));
+  }
+  const desde = limitesDiaBogota(filtro.desde);
+  if (desde) condiciones.push(gte(despachosMl.actualizadoTs, desde.inicio));
+  // hasta es exclusivo: < 00:00 del día siguiente en Bogotá (05:00 UTC),
+  // no <= 23:59:59.999 — mismo criterio que lib/ml/pedidos.ts.
+  const hasta = limitesDiaBogota(filtro.hasta);
+  if (hasta) condiciones.push(lt(despachosMl.actualizadoTs, hasta.finExclusivo));
+
+  const ordenValido: OrdenDespachos =
+    filtro.orden && (ORDENES_DESPACHO_FILTRO as readonly string[]).includes(filtro.orden) ? (filtro.orden as OrdenDespachos) : "actualizado_desc";
+  const descendente = ordenValido.endsWith("_desc");
+  const ordenId = descendente ? desc(despachosMl.id) : asc(despachosMl.id);
+  const columnaOrden = descendente ? desc(despachosMl.actualizadoTs) : asc(despachosMl.actualizadoTs);
+
+  const paginaPedida = parsearPagina(filtro.pagina);
+
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const condicion = and(...condiciones);
+
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)`.mapWith(Number) })
+      .from(despachosMl)
+      .where(condicion);
+    const totalPaginas = Math.max(1, Math.ceil(total / TAMANO_PAGINA_DESPACHOS));
+    // El offset se calcula con la página ya acotada: con paginaPedida a
+    // secas, ?pagina=9999 con solo 2 páginas reales devolvería 0 filas y
+    // la pantalla diría que no hay despachos.
+    const pagina = acotarPagina(paginaPedida, totalPaginas);
+
+    const filas = await tx
+      .select()
+      .from(despachosMl)
+      .where(condicion)
+      .orderBy(columnaOrden, ordenId)
+      .limit(TAMANO_PAGINA_DESPACHOS)
+      .offset((pagina - 1) * TAMANO_PAGINA_DESPACHOS);
+
+    return { despachos: filas, total, pagina, totalPaginas };
+  });
 }
 
 export class EtiquetaNoImprimibleError extends Error {

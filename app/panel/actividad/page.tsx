@@ -1,10 +1,17 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
-import { listarAuditoriaDeEmpresa } from "@/lib/auditoria";
+import { listarAuditoriaDeEmpresa, opcionesFiltroAuditoria } from "@/lib/auditoria";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { normalizarParametro } from "@/lib/filtros-listado";
+import { Boton, BotonLink } from "@/components/marco/Boton";
+import { Campo } from "@/components/marco/Campo";
+import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import styles from "./page.module.css";
 
 // Tarea 1.9 — "Ves en Actividad las 5 acciones con tu nombre y hora;
 // una venta sincronizada automáticamente aparece con actor
@@ -14,7 +21,15 @@ import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 // db/auditoria.test.ts contra Postgres real, no en esta pantalla con
 // un dato inventado — una fila falsa de "Integración ML" acá se vería
 // como un dato real de la empresa y no lo es.
-export default async function ActividadPage() {
+//
+// Issue #124 (Z-FIN-02) — bitácora: filtros por entidad y por quién.
+// Los valores de la URL solo se aceptan si están en las opciones que
+// salen de la propia bitácora de esta empresa (lista blanca); uno que
+// no está — o un usuario de otra empresa — se ignora como si no
+// hubiera filtro, nunca llega a la consulta. "Qué cambió" es hoy la
+// columna `detalle`: auditoria todavía no guarda valor anterior/nuevo
+// por separado (eso llega con el issue #125, con su migración).
+export default async function ActividadPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
 
@@ -27,55 +42,78 @@ export default async function ActividadPage() {
     await requierePermiso(usuario.id, empresa.id, "configuracion", "consultar");
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
-    return (
-      <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol no puede ver la actividad de {empresa.nombre}.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje={`Tu rol no puede ver la actividad de ${empresa.nombre}.`} />;
   }
 
-  const filas = await listarAuditoriaDeEmpresa(empresa.id);
+  const opciones = await opcionesFiltroAuditoria(empresa.id);
+  const entidadPedida = normalizarParametro(searchParams.entidad);
+  const usuarioPedido = normalizarParametro(searchParams.usuario);
+  const entidad = entidadPedida && opciones.entidades.includes(entidadPedida) ? entidadPedida : undefined;
+  const usuarioId = usuarioPedido && opciones.actores.some((a) => a.valor === usuarioPedido) ? usuarioPedido : undefined;
+  const hayFiltrosActivos = Boolean(entidad || usuarioId);
+
+  const filas = await listarAuditoriaDeEmpresa(empresa.id, 50, { entidad, usuarioId });
 
   return (
-    <main style={{ maxWidth: 640, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>Actividad de {empresa.nombre}</h1>
-      <p style={{ opacity: 0.7, fontSize: 13 }}>Quién hizo qué, cuándo — nunca se le atribuye a una persona lo que hizo una integración.</p>
+    <>
+      <EncabezadoPagina
+        titulo={`Actividad de ${empresa.nombre}`}
+        descripcion="Quién hizo qué, cuándo — nunca se le atribuye a una persona lo que hizo una integración."
+      />
+
+      <form method="get" className={styles.filtros}>
+        <Campo etiqueta="Entidad">
+          <select name="entidad" defaultValue={entidad ?? ""} className="zx-control">
+            <option value="">Todas</option>
+            {opciones.entidades.map((e) => (
+              <option key={e} value={e}>
+                {e}
+              </option>
+            ))}
+          </select>
+        </Campo>
+        <Campo etiqueta="Quién">
+          <select name="usuario" defaultValue={usuarioId ?? ""} className="zx-control">
+            <option value="">Todos</option>
+            {opciones.actores.map((a) => (
+              <option key={a.valor} value={a.valor}>
+                {a.nombre}
+              </option>
+            ))}
+          </select>
+        </Campo>
+        <div className={styles.accionesFiltro}>
+          <Boton type="submit" chico>
+            Filtrar
+          </Boton>
+          {hayFiltrosActivos && (
+            <BotonLink href="/panel/actividad" variante="fantasma" chico>
+              Limpiar filtros
+            </BotonLink>
+          )}
+        </div>
+      </form>
 
       {filas.length === 0 ? (
-        <p style={{ opacity: 0.6, fontSize: 13, marginTop: 24 }}>Todavía no hay actividad registrada.</p>
+        <EstadoVacio>{hayFiltrosActivos ? "Ningún evento coincide con esos filtros." : "Todavía no hay actividad registrada."}</EstadoVacio>
       ) : (
-        <div style={{ overflowX: "auto", marginTop: 20 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ textAlign: "left" }}>
-                <th style={{ padding: 6 }}>Cuándo</th>
-                <th style={{ padding: 6 }}>Quién</th>
-                <th style={{ padding: 6 }}>Acción</th>
-                <th style={{ padding: 6 }}>Detalle</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filas.map((f) => (
-                <tr key={f.id} style={{ borderTop: "1px solid currentColor" }}>
-                  <td style={{ padding: 6, whiteSpace: "nowrap" }}>{new Date(f.ts).toLocaleString("es-CO")}</td>
-                  <td style={{ padding: 6, opacity: f.actorTipo === "sistema" ? 0.7 : 1, fontStyle: f.actorTipo === "sistema" ? "italic" : "normal" }}>
-                    {f.actorNombre}
-                  </td>
-                  <td style={{ padding: 6 }}>
-                    {f.accion} · {f.entidad}
-                  </td>
-                  <td style={{ padding: 6 }}>{f.detalle ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Tabla encabezados={["Cuándo", "Quién", "Acción · entidad", "Qué cambió"]}>
+          {filas.map((f) => (
+            <FilaTabla key={f.id}>
+              <CeldaTabla className={styles.celdaFecha}>{new Date(f.ts).toLocaleString("es-CO")}</CeldaTabla>
+              <CeldaTabla className={f.actorTipo === "sistema" ? styles.actorSistema : undefined}>{f.actorNombre}</CeldaTabla>
+              <CeldaTabla>
+                {f.accion} · {f.entidad}
+              </CeldaTabla>
+              <CeldaTabla>{f.detalle ?? "—"}</CeldaTabla>
+            </FilaTabla>
+          ))}
+        </Tabla>
       )}
 
-      <Link href="/panel" style={{ display: "inline-block", marginTop: 24, fontSize: 13 }}>
+      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
         Volver al panel
-      </Link>
-    </main>
+      </BotonLink>
+    </>
   );
 }

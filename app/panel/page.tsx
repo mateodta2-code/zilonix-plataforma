@@ -1,117 +1,100 @@
-import { cookies } from "next/headers";
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { listarEmpresasDeUsuario } from "@/lib/empresas";
-import { obtenerMiMembresia } from "@/lib/membresias";
-import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { MODULOS, tienePermiso } from "@/lib/roles";
-import { cambiarEmpresaActiva } from "./actions";
+import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { obtenerContextoPanel } from "@/lib/panel-contexto";
+import { detalleVentasDeHoy, formatearVentasDelMes, obtenerKpisPanel } from "@/lib/panel-kpis";
+import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
+import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { iconoDeClave } from "@/components/marco/iconos";
+import styles from "./page.module.css";
 
 // Tarea 1.6 — pantalla mínima que prueba el criterio de "listo": con un
 // usuario en 2 empresas, al cambiar ves datos distintos (acá, el nombre
 // y el NIT de la empresa activa) y nunca mezclados. Las pantallas de
 // negocio de verdad (ventas, inventario) llegan en la Fase 2.
 //
-// Tarea 1.7 — los módulos del nav se filtran por lo que el rol de esta
-// persona puede consultar (ej. el Operador no ve "finanzas"). "ventas"
-// (2.7, Pedidos), "finanzas" (1.7), "configuracion" (1.9, la Actividad)
-// e "inventario" (2.6, SKU) tienen una pantalla real detrás; el resto
-// es a propósito un link que todavía no lleva a ningún lado (llegan en
-// Fase 3).
-const PANTALLA_POR_MODULO: Record<string, string> = {
-  ventas: "/panel/pedidos",
-  finanzas: "/panel/finanzas",
-  configuracion: "/panel/actividad",
-  inventario: "/panel/sku",
-};
+// Tarea 1.7 — las pestañas se filtran por lo que el rol de esta
+// persona puede consultar (ej. el Operador no ve "Finanzas").
+//
+// Marco visual (issue de las subpáginas) — el marco (barra lateral +
+// barra superior) ya no se pinta acá: lo pone app/panel/layout.tsx,
+// que envuelve TODA la sección /panel. Esta página queda solo con su
+// propio contenido (saludo, tarjeta de identidad, pestañas, KPIs).
+//
+// obtenerContextoPanel() (lib/panel-contexto.ts) es la misma consulta
+// que ya pidió app/panel/layout.tsx para pintar el marco — cache() de
+// React hace que, dentro de esta misma petición, solo se consulte la
+// base una vez entre los dos.
+
+// scripts/verificar-permisos.test.ts lee el TEXTO de este archivo y
+// exige `requierePermiso(` — no sigue el import hasta lib/panel-kpis.ts,
+// donde obtenerKpisPanel vuelve a hacer la misma pregunta (y es lo que
+// cubre la prueba contra Postgres). Las dos tienen que atrapar solo
+// SinPermisoError: /panel es el resumen, un rol sin "ventas" igual
+// entra y simplemente no ve esas pestañas ni esas cifras. Un error de
+// verdad (la base no responde, un id mal formado) sí tiene que subir.
+async function puedeConsultarModulo(
+  usuarioId: string,
+  empresaId: string,
+  modulo: "ventas" | "inventario"
+): Promise<boolean> {
+  try {
+    await requierePermiso(usuarioId, empresaId, modulo, "consultar");
+    return true;
+  } catch (error) {
+    if (error instanceof SinPermisoError) return false;
+    throw error;
+  }
+}
+
 export default async function PanelPage() {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
+  const { usuario, activa } = await obtenerContextoPanel();
 
-  const propias = await listarEmpresasDeUsuario(usuario.id);
-  if (propias.length === 0) redirect("/crear-empresa");
+  const vePedidosYDespachos = await puedeConsultarModulo(usuario.id, activa.id, "ventas");
+  const veSku = await puedeConsultarModulo(usuario.id, activa.id, "inventario");
+  const kpis = await obtenerKpisPanel(usuario.id, activa.id);
 
-  const cookieEmpresa = cookies().get("empresa_actual")?.value;
-  const activa = propias.find((e) => e.id === cookieEmpresa) ?? propias[0];
-  const miMembresia = await obtenerMiMembresia(usuario.id, activa.id);
-  const modulosVisibles = miMembresia
-    ? MODULOS.filter((modulo) => tienePermiso(miMembresia.permisos, modulo, "consultar"))
-    : [];
+  const pestanas: Pestana[] = [
+    { etiqueta: "Resumen", href: "/panel", activa: true },
+    ...(vePedidosYDespachos
+      ? [
+          { etiqueta: "Pedidos", href: "/panel/pedidos", activa: false },
+          { etiqueta: "Despachos", href: "/panel/despachos", activa: false },
+        ]
+      : []),
+    ...(veSku ? [{ etiqueta: "SKU", href: "/panel/sku", activa: false }] : []),
+  ];
 
   return (
-    <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>{activa.nombre}</h1>
-          <p style={{ opacity: 0.6, fontSize: 13, margin: "4px 0 0 0" }}>
-            NIT {activa.nit} · {miMembresia?.rolNombre ?? "sin rol"}
-          </p>
-        </div>
-        <Link href="/cuenta" style={{ fontSize: 13 }}>
-          Mi cuenta
-        </Link>
+    <>
+      {/* Corrección (fix-ui-claro-fade-abajo, punto 5): el saludo
+          grande y la tarjetaIdentidad (avatar + nombre + empresa·rol)
+          se quitaron de acá — el saludo ahora vive en BarraSuperior
+          (visible en toda la sección /panel, no solo en Inicio) y
+          tarjetaIdentidad se borró por completo, sin reubicarla: "Mi
+          cuenta" sigue en el link del header y en el botón del
+          sidebar. Sin dos saludos. */}
+      <p className={styles.subtitulo}>Este es el resumen de {activa.nombre}</p>
+
+      <Pestanas pestanas={pestanas} />
+
+      <div className={styles.gridKpi}>
+        {vePedidosYDespachos && kpis.ventasDeHoy !== null && (
+          <TarjetaKpi titulo="Ventas de hoy" valor={kpis.ventasDeHoy.cantidad} detalle={detalleVentasDeHoy(kpis.ventasDeHoy)} />
+        )}
+        {vePedidosYDespachos && kpis.ventasDelMes !== null && (
+          <TarjetaKpi titulo="Ventas del mes" valor={formatearVentasDelMes(kpis.ventasDelMes)} />
+        )}
+        {vePedidosYDespachos && kpis.pedidos !== null && <TarjetaKpi titulo="Pedidos" valor={kpis.pedidos} />}
+        {vePedidosYDespachos && kpis.despachosPendientes !== null && (
+          <TarjetaKpi titulo="Despachos pendientes" valor={kpis.despachosPendientes} />
+        )}
+        {veSku && kpis.skuSinVincular !== null && <TarjetaKpi titulo="SKU sin vincular" valor={kpis.skuSinVincular} />}
       </div>
 
-      {modulosVisibles.length > 0 && (
-        <nav style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
-          {modulosVisibles.map((modulo) =>
-            PANTALLA_POR_MODULO[modulo] ? (
-              <Link
-                key={modulo}
-                href={PANTALLA_POR_MODULO[modulo]}
-                style={{ padding: "6px 12px", border: "1px solid currentColor", borderRadius: 6, fontSize: 13, textTransform: "capitalize" }}
-              >
-                {modulo}
-              </Link>
-            ) : (
-              <span
-                key={modulo}
-                title="Llega en una fase siguiente del plan técnico"
-                style={{ padding: "6px 12px", border: "1px dashed currentColor", borderRadius: 6, fontSize: 13, opacity: 0.5, textTransform: "capitalize" }}
-              >
-                {modulo}
-              </span>
-            )
-          )}
-        </nav>
-      )}
-
-      {propias.length > 1 && (
-        <form action={cambiarEmpresaActiva} style={{ marginTop: 28 }}>
-          <label htmlFor="empresaId" style={{ fontSize: 13, opacity: 0.7 }}>
-            Cambiar de empresa
-          </label>
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <select id="empresaId" name="empresaId" defaultValue={activa.id} style={{ flex: 1, padding: 8 }}>
-              {propias.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.nombre}
-                </option>
-              ))}
-            </select>
-            <button type="submit" style={{ padding: "8px 16px" }}>
-              Cambiar
-            </button>
-          </div>
-        </form>
-      )}
-
-      {miMembresia?.rolNombre === "Dueño" && (
-        <div style={{ display: "flex", gap: 16, marginTop: 28, fontSize: 13, flexWrap: "wrap" }}>
-          <Link href="/panel/invitar">+ Invitar persona</Link>
-          <Link href="/panel/roles">Ajustar roles</Link>
-          <Link href="/panel/soporte">Acceso de soporte</Link>
-          {/* Tarea 2.3 — bug real encontrado en vivo: la pantalla ya
-              existía pero nunca quedó enlazada desde acá, solo se podía
-              llegar escribiendo la URL a mano. */}
-          <Link href="/panel/conectar-ml">Conectar Mercado Libre</Link>
-          <Link href="/panel/avisos-ml">Avisos de Mercado Libre</Link>
-        </div>
-      )}
-
-      <Link href="/crear-empresa" style={{ display: "inline-block", marginTop: 16, fontSize: 13 }}>
+      <Link href="/crear-empresa" className={styles.crearEmpresa}>
+        {iconoDeClave("crearEmpresa", { size: 16 })}
         + Crear otra empresa
       </Link>
-    </main>
+    </>
   );
 }

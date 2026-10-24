@@ -39,5 +39,5 @@ Para conectarte a la base real sin exponerla a internet: `railway connect Postgr
 
 ## Estado
 
-Fase 1 del plan técnico — tareas 1.1 a 1.5 (repo, modelo de datos, seguridad por fila, prueba de aislamiento, login con Clerk). Siguiente: tarea 1.6, empresas y cambio de empresa (ahí se conecta el usuario de Clerk con nuestras tablas).
+Para el estado real y actualizado del proyecto (qué está terminado, qué está a medias, qué falta y los problemas conocidos) ver `docs/ESTADO.md` — esta sección no se mantiene al día, ese archivo sí.
 
