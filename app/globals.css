@@ -13,6 +13,19 @@
   --superficie-2: #121214;
   --borde: #222225;
   --texto: #f2f4f8;
+  /* Issue #186 — .zx-control y .secundario (Boton.module.css) pintan
+     su PROPIO fondo opaco (--superficie-2), nunca el de lo que los
+     rodea — por eso nunca necesitaron el tratamiento de zona oscura
+     (mismo motivo que ya explica el comentario de --icono en el
+     bloque claro, más abajo). Pero Tarjeta/.filtros SÍ redefinen
+     --texto LOCALMENTE a zona-oscura (issue #186) — un <input>/
+     <select>/botón secundario de adentro heredaría ese --texto nuevo
+     sobre su MISMO --superficie-2 de siempre (sin cambios) y quedaría
+     ilegible. --texto-superficie-2 es una copia fija del valor de
+     --texto de ESTE tema, declarada acá arriba de la cascada — nunca
+     se redefine adentro de ninguna tarjeta, así que .zx-control/
+     .secundario siguen leyendo bien sin importar qué los envuelva. */
+  --texto-superficie-2: #f2f4f8;
   /* Plata, no gris azulado: sobre el azul del fondo #8a909c bajaba de
      4.5:1. #C0C0C0 mide 11.54:1 sobre negro y 5.26:1 sobre el azul más
      vivo de la variante intenso. */
@@ -112,6 +125,12 @@
   --kpi-fondo: linear-gradient(180deg, #2b2f36 0%, #1f2228 55%, #16171a 100%);
   --kpi-exito-texto: #4ade80;
   --kpi-peligro-texto: #f87171;
+  /* Issue #186 — Sharel: "Inicio se ve bien (TarjetaKpi, #156), el
+     resto del panel tiene cajas blancas que rompen la línea" — MISMA
+     superficie oscura, con nombre genérico (Tarjeta/EstadoVacio/
+     filtros no son "KPI"), nunca un segundo degradado con los mismos
+     números copiados a mano. */
+  --tarjeta-fondo: var(--kpi-fondo);
 
   --peligro: #ef4444;
   --exito: #22c55e;
@@ -253,6 +272,8 @@
   --superficie-2: #121214;
   --borde: #222225;
   --texto: #f2f4f8;
+  /* Issue #186 — mismo motivo que el bloque :root de arriba. */
+  --texto-superficie-2: #f2f4f8;
   --texto-suave: #c0c0c0;
   --plata: #c0c0c0;
   --plata-2: var(--plata-medio);
@@ -334,6 +355,12 @@
      BarraLateral.module.css para cómo se resuelve ahora el contraste
      (texto zona-oscura arriba / claro abajo, por grupo, sin fondo). */
   --texto: #000000;
+  /* Issue #186 — mismo motivo que --texto-superficie-2 del bloque
+     :root (arriba): copia fija del --texto de ESTE tema, para que
+     .zx-control/.secundario (siempre sobre --superficie-2 propio)
+     nunca hereden el --texto de zona oscura que Tarjeta/.filtros
+     redefinen localmente. */
+  --texto-superficie-2: #000000;
   /* Revertido a su valor original (fix-ui-claro-como-oscuro): las dos
      correcciones anteriores lo habían oscurecido a #333843 para
      "desbloquear" cuánto azul podía llevar el degradado, porque en
@@ -635,7 +662,10 @@ button {
     linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
     var(--degradado-plata-borde) border-box;
   box-shadow: var(--filete-marca-arriba-abajo);
-  color: var(--texto);
+  /* Issue #186 — --texto-superficie-2, no --texto: este control pinta
+     su PROPIO --superficie-2, nunca el de lo que lo rodea (ver el
+     comentario de --texto-superficie-2 en :root, arriba). */
+  color: var(--texto-superficie-2);
   font-size: 13.5px;
   font-family: inherit;
   box-sizing: border-box;

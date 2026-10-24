@@ -1,3 +1,10 @@
+/* Issue #186 (Sharel, Refs): en sus 3 usos reales (soporte, roles,
+   conectar-ml) esta lista cae siempre justo debajo del encabezado —
+   la misma "caja blanca" que rompía la línea del resto del panel, no
+   una tabla de datos larga (esa excepción es de <Tabla>,
+   components/marco/Tabla.tsx, que se queda en la zona clara a
+   propósito). Misma superficie oscura que Tarjeta/TarjetaKpi (issue
+   #156). */
 .lista {
   list-style: none;
   padding: 0;
@@ -6,8 +13,21 @@
   border-radius: var(--radio-tarjeta);
   overflow: hidden;
   background:
-    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--tarjeta-fondo) padding-box,
     var(--degradado-plata-borde) border-box;
+
+  /* color explícito, no solo la variable — el bug real que motivó
+     esto: <span>Conectado como... en /panel/conectar-ml no tiene
+     ninguna regla de color propia, hereda el COLOR YA CALCULADO del
+     ancestro más cercano que lo fije (antes, negro de body) — ver el
+     mismo comentario en Tarjeta.module.css. */
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
 }
 
 .fila {
