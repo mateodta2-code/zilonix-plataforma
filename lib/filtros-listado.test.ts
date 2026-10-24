@@ -9,6 +9,7 @@ import {
   normalizarTextoBusqueda,
   parsearPagina,
   patronBusquedaLike,
+  rangoDiaBogota,
 } from "./filtros-listado";
 
 describe("parsearPagina", () => {
@@ -63,6 +64,32 @@ describe("limitesDiaBogota", () => {
   it("cruza el fin de mes con el fin exclusivo (28 de febrero de 2026 → 1 de marzo 05:00 UTC)", () => {
     const limites = limitesDiaBogota("2026-02-28");
     expect(limites?.finExclusivo.toISOString()).toBe("2026-03-01T05:00:00.000Z");
+  });
+});
+
+describe("rangoDiaBogota", () => {
+  it("23:59:59.999 de Bogotá (04:59:59.999 UTC del día siguiente) sigue en el mismo día", () => {
+    const rango = rangoDiaBogota(new Date("2026-07-21T04:59:59.999Z"));
+    expect(rango.inicio.toISOString()).toBe("2026-07-20T05:00:00.000Z");
+    expect(rango.finExclusivo.toISOString()).toBe("2026-07-21T05:00:00.000Z");
+  });
+
+  it("00:00 de Bogotá (05:00 UTC) abre el día nuevo", () => {
+    const rango = rangoDiaBogota(new Date("2026-07-21T05:00:00.000Z"));
+    expect(rango.inicio.toISOString()).toBe("2026-07-21T05:00:00.000Z");
+    expect(rango.finExclusivo.toISOString()).toBe("2026-07-22T05:00:00.000Z");
+  });
+
+  it("cambio de mes: las 20:00 del 31 de marzo en Bogotá (1 de abril en UTC) siguen en marzo", () => {
+    const rango = rangoDiaBogota(new Date("2026-04-01T01:00:00.000Z"));
+    expect(rango.inicio.toISOString()).toBe("2026-03-31T05:00:00.000Z");
+    expect(rango.finExclusivo.toISOString()).toBe("2026-04-01T05:00:00.000Z");
+  });
+
+  it("29 de febrero de un año bisiesto cierra en el 1 de marzo", () => {
+    const rango = rangoDiaBogota(new Date("2028-02-29T12:00:00.000Z"));
+    expect(rango.inicio.toISOString()).toBe("2028-02-29T05:00:00.000Z");
+    expect(rango.finExclusivo.toISOString()).toBe("2028-03-01T05:00:00.000Z");
   });
 });
 

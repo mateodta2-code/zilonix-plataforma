@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
-import { formatearVentasDelMes, obtenerKpisPanel } from "@/lib/panel-kpis";
+import { detalleVentasDeHoy, formatearVentasDelMes, obtenerKpisPanel } from "@/lib/panel-kpis";
 import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { iconoDeClave } from "@/components/marco/iconos";
@@ -78,6 +78,9 @@ export default async function PanelPage() {
       <Pestanas pestanas={pestanas} />
 
       <div className={styles.gridKpi}>
+        {vePedidosYDespachos && kpis.ventasDeHoy !== null && (
+          <TarjetaKpi titulo="Ventas de hoy" valor={kpis.ventasDeHoy.cantidad} detalle={detalleVentasDeHoy(kpis.ventasDeHoy)} />
+        )}
         {vePedidosYDespachos && kpis.ventasDelMes !== null && (
           <TarjetaKpi titulo="Ventas del mes" valor={formatearVentasDelMes(kpis.ventasDelMes)} />
         )}

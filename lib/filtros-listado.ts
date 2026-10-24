@@ -56,6 +56,22 @@ export function limitesDiaBogota(fecha: string | undefined | null): { inicio: Da
   return { inicio, finExclusivo };
 }
 
+// "Hoy" para la tarjeta de ventas del día de /panel: el día de Bogotá
+// en que cae `ahora`, no el del servidor (Railway corre en UTC — entre
+// las 19:00 y las 24:00 de Bogotá, el servidor ya está en el día
+// siguiente). El reloj de Bogotá se lee restando 5h y usando getters
+// UTC, y los límites salen de limitesDiaBogota para que el borde sea
+// exactamente el mismo que el filtro de fecha de los listados.
+export function rangoDiaBogota(ahora: Date): { inicio: Date; finExclusivo: Date } {
+  const relojBogota = new Date(ahora.getTime() - 5 * 60 * 60 * 1000);
+  const fecha = relojBogota.toISOString().slice(0, 10);
+  const limites = limitesDiaBogota(fecha);
+  // Solo pasa con un Date inválido (toISOString ya habría tirado) o un
+  // año fuera de 0000–9999: nunca se inventa un rango.
+  if (!limites) throw new Error(`rangoDiaBogota: fecha fuera de rango (${fecha})`);
+  return limites;
+}
+
 export function normalizarTextoBusqueda(valor: string | undefined | null): string | null {
   if (typeof valor !== "string") return null;
   const recortado = valor.trim().slice(0, LARGO_MAXIMO_BUSQUEDA);

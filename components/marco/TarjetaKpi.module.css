@@ -66,6 +66,13 @@
   overflow-wrap: anywhere;
 }
 
+.detalle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--texto-suave);
+  overflow-wrap: anywhere;
+}
+
 .variacion {
   margin: 0;
   font-size: 12px;
