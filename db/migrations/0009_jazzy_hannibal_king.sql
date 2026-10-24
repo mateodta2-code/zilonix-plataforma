@@ -1,4 +1,4 @@
-CREATE TYPE "public"."alerta_seguimiento_tipo" AS ENUM('precio_bajo', 'precio_subio', 'entro_catalogo', 'salio_catalogo', 'gano_boton_compra', 'perdio_boton_compra', 'inventario_bajo', 'pausada', 'finalizada', 'publicacion_nueva', 'publicacion_eliminada');--> statement-breakpoint
+CREATE TYPE "public"."alerta_seguimiento_tipo" AS ENUM('precio_bajo', 'precio_subio', 'entro_catalogo', 'salio_catalogo', 'gano_boton_compra', 'perdio_boton_compra', 'inventario_bajo', 'vendio_unidades', 'pausada', 'finalizada', 'publicacion_nueva', 'publicacion_eliminada');--> statement-breakpoint
 CREATE TYPE "public"."seguimiento_recurso_ml" AS ENUM('item', 'product', 'seller');--> statement-breakpoint
 CREATE TYPE "public"."seguimiento_tipo" AS ENUM('producto', 'tienda');--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "seguimiento_alertas" (
@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS "seguimiento_alertas" (
 	"foto_id" uuid NOT NULL,
 	"tipo" "alerta_seguimiento_tipo" NOT NULL,
 	"detalle" jsonb NOT NULL,
+	"leida_ts" timestamp with time zone,
 	"creado_ts" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS "seguimiento_fotos" (
 	"precio_anterior" numeric(14, 2),
 	"inventario_disponible" integer,
 	"inventario_aproximado" boolean DEFAULT false NOT NULL,
+	"vendidos" integer,
 	"estado" text,
 	"en_catalogo" boolean,
 	"gana_boton_compra" boolean,

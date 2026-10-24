@@ -52,6 +52,8 @@ export const seguimientoRecursoMlEnum = pgEnum("seguimiento_recurso_ml", ["item"
 // es un hecho objetivo observado, nunca una opinión ("posible venta" se
 // explica en el mensaje que arma lib/seguimiento/alertas.ts a partir de
 // "inventario_bajo" + las unidades, no es un tipo de alerta aparte).
+// "vendio_unidades" SÍ es aparte de "inventario_bajo": usa sold_quantity,
+// el contador real de Mercado Libre, nunca una estimación por inventario.
 export const alertaSeguimientoTipoEnum = pgEnum("alerta_seguimiento_tipo", [
   "precio_bajo",
   "precio_subio",
@@ -60,6 +62,7 @@ export const alertaSeguimientoTipoEnum = pgEnum("alerta_seguimiento_tipo", [
   "gano_boton_compra",
   "perdio_boton_compra",
   "inventario_bajo",
+  "vendio_unidades",
   "pausada",
   "finalizada",
   "publicacion_nueva",
@@ -482,10 +485,15 @@ export const seguimientoFotos = pgTable(
     inventarioDisponible: integer("inventario_disponible"),
     // Issue #175 — "el inventario de publicaciones ajenas puede venir
     // aproximado y así se aclara en pantalla": lo fija el lector
-    // (pendiente de confirmar en vivo, ver docs/changelog) cuando el
-    // número que devuelve Mercado Libre para un recurso AJENO no es el
-    // disponible real exacto.
+    // cuando el número que devuelve Mercado Libre para un recurso
+    // AJENO no es el disponible real exacto (confirmado en vivo con
+    // el diagnóstico de /panel/investigacion/diagnostico).
     inventarioAproximado: boolean("inventario_aproximado").notNull().default(false),
+    // sold_quantity real de Mercado Libre — acumulado histórico de la
+    // publicación, nunca "vendido desde ayer" (esa resta la hace la
+    // comparación de alertas, lib/seguimiento/alertas.ts, con las dos
+    // fotos completas, y solo si las dos trajeron un número real).
+    vendidos: integer("vendidos"),
     estado: text("estado"), // status real de ML (active/paused/closed/...), null = no disponible
     enCatalogo: boolean("en_catalogo"),
     ganaBotonCompra: boolean("gana_boton_compra"),
@@ -518,5 +526,9 @@ export const seguimientoAlertas = pgTable("seguimiento_alertas", {
   fotoId: uuid("foto_id").notNull().references(() => seguimientoFotos.id, { onDelete: "cascade" }),
   tipo: alertaSeguimientoTipoEnum("tipo").notNull(),
   detalle: jsonb("detalle").$type<Record<string, unknown>>().notNull(),
+  // "Marcar como leída" (pantalla /panel/investigacion/seguimiento) —
+  // nunca se borra una alerta leída, solo se marca, para que el
+  // historial de alertas siga completo.
+  leidaTs: timestamp("leida_ts", { withTimezone: true }),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
 });

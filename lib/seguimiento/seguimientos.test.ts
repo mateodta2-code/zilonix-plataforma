@@ -1,15 +1,46 @@
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { empresas, seguimientosMl, usuarios } from "@/db/schema";
-import { contarCompetidoresActivos, LIMITE_COMPETIDORES_POR_EMPRESA, LimiteCompetidoresError, verificarCupoCompetidor } from "./seguimientos";
+import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
+import { cifrarToken } from "@/lib/cifrado";
+import {
+  agregarSeguimiento,
+  contarCompetidoresActivos,
+  eliminarSeguimiento,
+  LIMITE_COMPETIDORES_POR_EMPRESA,
+  LimiteCompetidoresError,
+  LinkMlInvalidoError,
+  listarAlertasDelDia,
+  listarSeguimientosConUltimaFoto,
+  marcarAlertaLeida,
+  obtenerDetalleSeguimiento,
+  SinCuentaMlParaSeguimientoError,
+  verificarCupoCompetidor,
+} from "./seguimientos";
 
 async function crearEmpresaConUsuario() {
   const empresaId = randomUUID();
   await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa de prueba", nit: `TEST-SEG-${empresaId.slice(0, 8)}` }));
   const [usuario] = await dbComoEmpresa(empresaId, (tx) => tx.insert(usuarios).values({ email: `prueba-seguimiento-${empresaId}@zilonix.test`, nombre: "Usuario de prueba" }).returning({ id: usuarios.id }));
   return { empresaId, usuarioId: usuario.id };
+}
+
+async function conectarCuentaMl(empresaId: string) {
+  await dbComoEmpresa(empresaId, (tx) =>
+    tx.insert(cuentasMl).values({
+      empresaId,
+      cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+      nickname: "VENDEDOR_SEGUIMIENTO",
+      accessTokenCifrado: cifrarToken("access-vigente"),
+      refreshTokenCifrado: cifrarToken("refresh"),
+      tokenExpiraTs: new Date(Date.now() + 3600_000),
+    })
+  );
+}
+
+function respuestaJson(data: unknown, status = 200) {
+  return { ok: status >= 200 && status < 300, status, json: async () => data } as Response;
 }
 
 async function crearSeguimiento(empresaId: string, usuarioId: string, esCompetidor: boolean) {
@@ -69,5 +100,188 @@ describe("verificarCupoCompetidor / contarCompetidoresActivos (issue #175)", () 
     const { empresaId } = await crearEmpresaConUsuario();
     expect(await contarCompetidoresActivos(empresaId)).toBe(0);
     await expect(verificarCupoCompetidor(empresaId)).resolves.toBeUndefined();
+  });
+});
+
+describe("agregarSeguimiento (issue #175)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sin ninguna cuenta ML conectada: SinCuentaMlParaSeguimientoError, nunca llega a tocar la tabla", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await expect(agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false })).rejects.toThrow(
+      SinCuentaMlParaSeguimientoError
+    );
+  });
+
+  it("link irreconocible: LinkMlInvalidoError, nunca pide el token ni toca Mercado Libre", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "esto no es nada", esCompetidor: false })).rejects.toThrow(
+      LinkMlInvalidoError
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("producto por link de publicación: queda como recurso item, con el nombre real de Mercado Libre", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "MCO111", title: "Reloj digital", thumbnail: "foto.jpg", status: "active" })));
+
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, {
+      tipo: "producto",
+      link: "https://articulo.mercadolibre.com.co/MCO-111-reloj",
+      esCompetidor: false,
+    });
+
+    expect(seguimiento.recursoMl).toBe("item");
+    expect(seguimiento.mlIdExterno).toBe("MCO111");
+    expect(seguimiento.nombre).toBe("Reloj digital");
+  });
+
+  it("tienda por seller_id: si Mercado Libre no deja ver el nickname, usa el id tal cual (nunca revienta)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "tienda", link: "123456789", esCompetidor: false });
+
+    expect(seguimiento.recursoMl).toBe("seller");
+    expect(seguimiento.mlIdExterno).toBe("123456789");
+    expect(seguimiento.nombre).toBe("123456789");
+  });
+
+  it("competidor que supera el cupo de 5: LimiteCompetidoresError, nunca inserta un sexto", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    for (let i = 0; i < LIMITE_COMPETIDORES_POR_EMPRESA; i++) {
+      await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: `MCO${i}`, esCompetidor: true });
+    }
+    await expect(agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO999", esCompetidor: true })).rejects.toThrow(
+      LimiteCompetidoresError
+    );
+  });
+
+  it("agregar el MISMO ml_id_externo que ya estaba eliminado revive la fila, nunca la duplica", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "MCO111", title: "Reloj", status: "active" })));
+
+    const primero = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    await eliminarSeguimiento(empresaId, primero.id);
+    const revivido = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+
+    expect(revivido.id).toBe(primero.id);
+    expect(revivido.eliminadoTs).toBeNull();
+    expect(revivido.esCompetidor).toBe(true);
+
+    const activos = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.empresaId, empresaId)));
+    expect(activos).toHaveLength(1);
+  });
+});
+
+describe("listarSeguimientosConUltimaFoto / obtenerDetalleSeguimiento (issue #175)", () => {
+  it("lista solo los activos (nunca los eliminados), con la foto más reciente de cada uno", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+
+    const activo = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    const eliminado = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO222", esCompetidor: false });
+    await eliminarSeguimiento(empresaId, eliminado.id);
+
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values([
+        { empresaId, seguimientoId: activo.id, fecha: new Date("2026-10-20"), precio: "100" },
+        { empresaId, seguimientoId: activo.id, fecha: new Date("2026-10-21"), precio: "90" },
+      ])
+    );
+    vi.unstubAllGlobals();
+
+    const lista = await listarSeguimientosConUltimaFoto(empresaId);
+
+    expect(lista).toHaveLength(1);
+    expect(lista[0].seguimiento.id).toBe(activo.id);
+    expect(Number(lista[0].ultimaFoto?.precio)).toBe(90); // la más reciente, no la primera
+  });
+
+  it("obtenerDetalleSeguimiento trae el historial completo de fotos y las alertas, ordenadas", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    const [fotoAyer] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: new Date("2026-10-20"), precio: "100" }).returning()
+    );
+    const [fotoHoy] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: new Date("2026-10-21"), precio: "90" }).returning()
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoAlertas).values({ empresaId, seguimientoId: seguimiento.id, fotoId: fotoHoy.id, tipo: "precio_bajo", detalle: { precioAnterior: 100, precioNuevo: 90, porcentaje: -10 } })
+    );
+
+    const detalle = await obtenerDetalleSeguimiento(empresaId, seguimiento.id);
+
+    expect(detalle?.fotos.map((f) => f.id)).toEqual([fotoAyer.id, fotoHoy.id]); // más viejo primero
+    expect(detalle?.alertas).toHaveLength(1);
+    expect(detalle?.alertas[0].tipo).toBe("precio_bajo");
+  });
+
+  it("obtenerDetalleSeguimiento devuelve null si el seguimiento no existe o es de otra empresa", async () => {
+    const { empresaId } = await crearEmpresaConUsuario();
+    expect(await obtenerDetalleSeguimiento(empresaId, randomUUID())).toBeNull();
+  });
+});
+
+describe("listarAlertasDelDia / marcarAlertaLeida (issue #175)", () => {
+  it("solo trae alertas de HOY, nunca de días anteriores", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "Producto de prueba", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    const [fotoVieja] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: new Date("2020-01-01"), precio: "100" }).returning()
+    );
+    const [fotoHoy] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: new Date(), precio: "90" }).returning()
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoAlertas).values([
+        { empresaId, seguimientoId: seguimiento.id, fotoId: fotoVieja.id, tipo: "precio_bajo", detalle: {}, creadoTs: new Date("2020-01-01") },
+        { empresaId, seguimientoId: seguimiento.id, fotoId: fotoHoy.id, tipo: "precio_bajo", detalle: {} },
+      ])
+    );
+
+    const alertasDeHoy = await listarAlertasDelDia(empresaId);
+
+    expect(alertasDeHoy).toHaveLength(1);
+    expect(alertasDeHoy[0].alerta.fotoId).toBe(fotoHoy.id);
+    expect(alertasDeHoy[0].nombreSeguimiento).toBe("Producto de prueba");
+  });
+
+  it("marcarAlertaLeida fija leida_ts, nunca borra la alerta", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: new Date(), precio: "90" }).returning()
+    );
+    const [alerta] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoAlertas).values({ empresaId, seguimientoId: seguimiento.id, fotoId: foto.id, tipo: "precio_bajo", detalle: {} }).returning()
+    );
+
+    await marcarAlertaLeida(empresaId, alerta.id);
+
+    const [actualizada] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.id, alerta.id)));
+    expect(actualizada.leidaTs).not.toBeNull();
   });
 });

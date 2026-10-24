@@ -7,6 +7,7 @@ function foto(parcial: Partial<FotoComparable> = {}): FotoComparable {
   return {
     precio: 50_000,
     inventarioDisponible: 10,
+    vendidos: 100,
     estado: "active",
     enCatalogo: true,
     ganaBotonCompra: true,
@@ -79,6 +80,31 @@ describe("compararFotos — inventario", () => {
   it("inventario no disponible en cualquiera de las dos fotos: nunca inventa una alerta", () => {
     expect(compararFotos("producto", foto({ inventarioDisponible: null }), foto({ inventarioDisponible: 5 }))).toEqual([]);
     expect(compararFotos("producto", foto({ inventarioDisponible: 5 }), foto({ inventarioDisponible: null }))).toEqual([]);
+  });
+});
+
+describe("compararFotos — vendidos (sold_quantity real, confirmado por Mercado Libre)", () => {
+  it("subió sold_quantity: alerta vendio_unidades con las unidades exactas", () => {
+    const alertas = compararFotos("producto", foto({ vendidos: 100 }), foto({ vendidos: 103 }));
+    expect(alertas).toEqual([{ tipo: "vendio_unidades", detalle: { vendidosAnterior: 100, vendidosActual: 103, unidades: 3 } }]);
+  });
+
+  it("sold_quantity igual: ninguna alerta", () => {
+    expect(compararFotos("producto", foto({ vendidos: 100 }), foto({ vendidos: 100 }))).toEqual([]);
+  });
+
+  it("sold_quantity bajó (no debería pasar nunca en ML, pero por si acaso): nunca es una alerta negativa", () => {
+    expect(compararFotos("producto", foto({ vendidos: 100 }), foto({ vendidos: 95 }))).toEqual([]);
+  });
+
+  it("vendidos no disponible (estimado/null) en cualquiera de las dos fotos: nunca inventa una alerta", () => {
+    expect(compararFotos("producto", foto({ vendidos: null }), foto({ vendidos: 103 }))).toEqual([]);
+    expect(compararFotos("producto", foto({ vendidos: 100 }), foto({ vendidos: null }))).toEqual([]);
+  });
+
+  it("vendio_unidades e inventario_bajo pueden coexistir el mismo día (son señales independientes)", () => {
+    const alertas = compararFotos("producto", foto({ vendidos: 100, inventarioDisponible: 10 }), foto({ vendidos: 103, inventarioDisponible: 7 }));
+    expect(alertas.map((a) => a.tipo).sort()).toEqual(["inventario_bajo", "vendio_unidades"]);
   });
 });
 
@@ -170,6 +196,12 @@ describe("mensajeAlerta — texto en español, nunca afirma una venta que ML no 
     const mensaje = mensajeAlerta({ tipo: "inventario_bajo", detalle: { inventarioAnterior: 10, inventarioActual: 7, unidades: 3 } });
     expect(mensaje).toMatch(/posible venta/i);
     expect(mensaje).not.toMatch(/vendió/i);
+    expect(mensaje).toContain("3");
+  });
+
+  it("vendio_unidades SÍ puede decir 'vendió' (contador real de ML, nunca estimado)", () => {
+    const mensaje = mensajeAlerta({ tipo: "vendio_unidades", detalle: { vendidosAnterior: 100, vendidosActual: 103, unidades: 3 } });
+    expect(mensaje).toMatch(/vendió/i);
     expect(mensaje).toContain("3");
   });
 

@@ -6,10 +6,12 @@ import {
   MlNoAutorizadoError,
   MlNoDisponibleError,
   MlSinPermisoAppError,
+  obtenerFotoItemMl,
   obtenerItemMl,
   obtenerMejoresProductosCategoria,
   obtenerOfertasProducto,
   obtenerProducto,
+  obtenerPublicacionesVendedorAjenoMl,
   obtenerVendedor,
   resolverCategoria,
 } from "./cliente";
@@ -240,5 +242,147 @@ describe("obtenerMejoresProductosCategoria — highlights con type ITEM | PRODUC
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
     await expect(obtenerMejoresProductosCategoria("MCO1234", "token")).rejects.toThrow(MlNoAutorizadoError);
+  });
+});
+
+// Issue #175 — lector real del seguimiento diario, confirmado en vivo
+// con /panel/investigacion/diagnostico antes de escribirse.
+describe("obtenerFotoItemMl — lector de item ajeno (issue #175)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("pide los campos exactos pedidos y arma la foto completa", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      expect(String(url)).toBe(
+        "https://api.mercadolibre.com/items/MCO111?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping"
+      );
+      return respuestaJson({
+        price: 100,
+        original_price: 120,
+        available_quantity: 5,
+        sold_quantity: 230,
+        status: "active",
+        catalog_listing: true,
+        catalog_product_id: "MCO999",
+        shipping: { logistic_type: "fulfillment", free_shipping: true },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await obtenerFotoItemMl("MCO111", "token");
+
+    expect(resultado).toEqual({
+      precio: 100,
+      precioAnterior: 120,
+      inventarioDisponible: 5,
+      vendidos: 230,
+      estado: "active",
+      enCatalogo: true,
+      catalogProductId: "MCO999",
+      esFull: true,
+      esEnvioGratis: true,
+    });
+  });
+
+  it("campo ausente (ej. sin original_price, sin descuento) queda null, nunca un 0 inventado", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 100, status: "active" })));
+    const resultado = await obtenerFotoItemMl("MCO111", "token");
+    expect(resultado?.precioAnterior).toBeNull();
+    expect(resultado?.inventarioDisponible).toBeNull();
+    expect(resultado?.vendidos).toBeNull();
+    expect(resultado?.catalogProductId).toBeNull();
+    expect(resultado?.esFull).toBeNull();
+    expect(resultado?.esEnvioGratis).toBeNull();
+  });
+
+  it("itemId inválido nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(obtenerFotoItemMl("MCO1/../users/me", "token")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("tolera 403/5xx (publicación ajena sin ciertos permisos): null, nunca lanza; propaga 401", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(obtenerFotoItemMl("MCO111", "token")).resolves.toBeNull();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    await expect(obtenerFotoItemMl("MCO111", "token")).rejects.toThrow(MlNoAutorizadoError);
+  });
+});
+
+describe("obtenerPublicacionesVendedorAjenoMl — dos caminos (items/search -> sites/search) + detalle masivo (issue #175)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("camino propio (items/search) funciona: completa título/precio con /items?ids=", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/items/search")) return respuestaJson({ results: ["MCO1", "MCO2"] });
+      if (urlStr.includes("/items?ids=")) {
+        return respuestaJson([
+          { code: 200, body: { id: "MCO1", title: "Reloj", price: 50_000 } },
+          { code: 200, body: { id: "MCO2", title: "Pulsera", price: 20_000 } },
+        ]);
+      }
+      throw new Error(`URL inesperada: ${urlStr}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await obtenerPublicacionesVendedorAjenoMl("123456789", "token");
+
+    expect(resultado).toEqual([
+      { itemId: "MCO1", titulo: "Reloj", precio: 50_000 },
+      { itemId: "MCO2", titulo: "Pulsera", precio: 20_000 },
+    ]);
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/sites/MCO/search"))).toBe(false);
+  });
+
+  it("items/search da 403 (vendedor ajeno): cae al buscador público del sitio", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/users/") && urlStr.includes("/items/search")) return respuestaJson({}, 403);
+      if (urlStr.includes("/sites/MCO/search")) return respuestaJson({ results: [{ id: "MCO1" }] });
+      if (urlStr.includes("/items?ids=")) return respuestaJson([{ code: 200, body: { id: "MCO1", title: "Reloj", price: 50_000 } }]);
+      throw new Error(`URL inesperada: ${urlStr}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await obtenerPublicacionesVendedorAjenoMl("123456789", "token");
+
+    expect(resultado).toEqual([{ itemId: "MCO1", titulo: "Reloj", precio: 50_000 }]);
+  });
+
+  it("401 de verdad (token inválido) propaga tal cual, nunca prueba el camino público con el mismo token roto", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    await expect(obtenerPublicacionesVendedorAjenoMl("123456789", "token")).rejects.toThrow(MlNoAutorizadoError);
+  });
+
+  it("sellerId inválido nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(obtenerPublicacionesVendedorAjenoMl("no-es-numerico", "token")).resolves.toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sin ninguna publicación: lista vacía, nunca llama al endpoint masivo de detalle", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/items/search")) return respuestaJson({ results: [] });
+      throw new Error(`no debería llamar a ${urlStr}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(obtenerPublicacionesVendedorAjenoMl("123456789", "token")).resolves.toEqual([]);
+  });
+
+  it("un item que falla en el lote (code != 200) se descarta sin tumbar a los demás", async () => {
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/items/search")) return respuestaJson({ results: ["MCO1", "MCO2"] });
+      return respuestaJson([
+        { code: 404, body: null },
+        { code: 200, body: { id: "MCO2", title: "Pulsera", price: 20_000 } },
+      ]);
+    });
+    const resultado = await obtenerPublicacionesVendedorAjenoMl("123456789", "token");
+    expect(resultado).toEqual([{ itemId: "MCO2", titulo: "Pulsera", precio: 20_000 }]);
   });
 });

@@ -7,11 +7,14 @@
 // simulados, nunca contra la API real (pedido explícito del issue).
 //
 // Cada alerta es un hecho objetivo observado entre las dos fotos —
-// nunca una opinión. "Posible venta" no es un tipo de alerta aparte:
-// es el texto que arma mensajeAlerta() a partir de "inventario_bajo" +
-// las unidades, porque Mercado Libre nunca confirma que esa baja de
-// stock fue una venta real (podría ser el vendedor ajustando stock a
-// mano) — se dice "posible", nunca "vendió".
+// nunca una opinión. "Posible venta" (inventario_bajo) no es una
+// confirmación de venta real: Mercado Libre nunca dice que una baja de
+// stock fue una venta (podría ser el vendedor ajustando stock a mano),
+// por eso el mensaje dice "posible", nunca "vendió". "vendio_unidades"
+// es la alerta aparte, más confiable, que sí usa el contador real de
+// Mercado Libre (sold_quantity, acumulado histórico de la publicación)
+// — la resta entre dos sold_quantity reales SÍ son ventas reales
+// confirmadas por Mercado Libre, a diferencia del inventario.
 
 export type AlertaSeguimientoTipo =
   | "precio_bajo"
@@ -21,6 +24,7 @@ export type AlertaSeguimientoTipo =
   | "gano_boton_compra"
   | "perdio_boton_compra"
   | "inventario_bajo"
+  | "vendio_unidades"
   | "pausada"
   | "finalizada"
   | "publicacion_nueva"
@@ -36,6 +40,7 @@ export type PublicacionTienda = { itemId: string; titulo: string; precio: number
 export type FotoComparable = {
   precio: number | null;
   inventarioDisponible: number | null;
+  vendidos: number | null;
   estado: string | null;
   enCatalogo: boolean | null;
   ganaBotonCompra: boolean | null;
@@ -76,6 +81,19 @@ function alertasDeInventario(anterior: FotoComparable, actual: FotoComparable): 
   if (actual.inventarioDisponible >= anterior.inventarioDisponible) return [];
   const unidades = anterior.inventarioDisponible - actual.inventarioDisponible;
   return [{ tipo: "inventario_bajo", detalle: { inventarioAnterior: anterior.inventarioDisponible, inventarioActual: actual.inventarioDisponible, unidades } }];
+}
+
+// Pedido explícito: "vendió N unidades desde la última revisión" =
+// sold_quantity de hoy − el de ayer, SOLO si los dos son números
+// reales (nunca estimados) — sold_quantity es un contador acumulado
+// histórico que Mercado Libre nunca hace bajar (a diferencia del
+// inventario, que puede subir por un reabasto) — por eso alcanza con
+// "aumentó" sin necesitar un chequeo de dirección como en inventario.
+function alertasDeVendidos(anterior: FotoComparable, actual: FotoComparable): AlertaGenerada[] {
+  if (anterior.vendidos == null || actual.vendidos == null) return [];
+  const unidades = actual.vendidos - anterior.vendidos;
+  if (unidades <= 0) return [];
+  return [{ tipo: "vendio_unidades", detalle: { vendidosAnterior: anterior.vendidos, vendidosActual: actual.vendidos, unidades } }];
 }
 
 // Vocabulario real de Mercado Libre para `status` (confirmado contra
@@ -125,6 +143,7 @@ export function compararFotos(tipo: "producto" | "tienda", anterior: FotoCompara
     ...alertasDeCatalogo(anterior, actual),
     ...alertasDeBotonCompra(anterior, actual),
     ...alertasDeInventario(anterior, actual),
+    ...alertasDeVendidos(anterior, actual),
     ...alertasDeEstado(anterior, actual),
   ];
   if (tipo === "tienda") alertas.push(...alertasDePublicaciones(anterior, actual));
@@ -153,6 +172,8 @@ export function mensajeAlerta(alerta: AlertaGenerada): string {
       return "Perdió el botón de compra (catálogo).";
     case "inventario_bajo":
       return `Bajó el inventario disponible: ${d.inventarioAnterior} → ${d.inventarioActual} (posible venta de ${d.unidades} unidad${Number(d.unidades) === 1 ? "" : "es"} — Mercado Libre no confirma que fue una venta real).`;
+    case "vendio_unidades":
+      return `Vendió ${d.unidades} unidad${Number(d.unidades) === 1 ? "" : "es"} desde la última revisión (contador real de Mercado Libre: ${d.vendidosAnterior} → ${d.vendidosActual}).`;
     case "pausada":
       return "La publicación quedó pausada.";
     case "finalizada":

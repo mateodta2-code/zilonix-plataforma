@@ -1,5 +1,5 @@
 {
-  "id": "89c10ecb-18ea-465b-a3c7-30db27a5a6e2",
+  "id": "980ad89e-64ab-41c9-8d9f-153cf8dceb2c",
   "prevId": "a93a48c1-3fc4-4060-9deb-1e54b6d58911",
   "version": "7",
   "dialect": "postgresql",
@@ -1601,6 +1601,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "leida_ts": {
+          "name": "leida_ts",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "creado_ts": {
           "name": "creado_ts",
           "type": "timestamp with time zone",
@@ -1710,6 +1716,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "vendidos": {
+          "name": "vendidos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "estado": {
           "name": "estado",
@@ -2152,6 +2164,7 @@
         "gano_boton_compra",
         "perdio_boton_compra",
         "inventario_bajo",
+        "vendio_unidades",
         "pausada",
         "finalizada",
         "publicacion_nueva",

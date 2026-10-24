@@ -418,3 +418,129 @@ export function linkPublicacion(itemId: string): string | null {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
   return `https://articulo.mercadolibre.com.co/${itemId.replace(/^MCO(\d+)$/, "MCO-$1")}`;
 }
+
+// Issue #175 — lector real del seguimiento diario. Confirmado en vivo
+// antes de escribirse con /panel/investigacion/diagnostico (ver
+// docs/changelog/pendientes/feat-investigacion-diagnostico.md): un
+// campo que Mercado Libre no deja ver para un recurso AJENO queda
+// null, nunca un 0/false inventado. Tolera 403/5xx (una publicación
+// ajena puede no dejar ver todos los campos — "no disponible", nunca
+// un fallo que tire abajo la foto del día entera); 401 propaga, mismo
+// criterio que el resto de este archivo.
+export type FotoItemMl = {
+  precio: number | null;
+  // original_price real de Mercado Libre — nunca una resta contra la
+  // foto de ayer, esa cuenta la hace lib/seguimiento/alertas.ts.
+  precioAnterior: number | null;
+  inventarioDisponible: number | null;
+  vendidos: number | null;
+  estado: string | null;
+  enCatalogo: boolean | null;
+  catalogProductId: string | null;
+  esFull: boolean | null;
+  esEnvioGratis: boolean | null;
+};
+
+function numeroONull(valor: unknown): number | null {
+  if (valor == null) return null;
+  const n = Number(valor);
+  return Number.isFinite(n) ? n : null;
+}
+
+export async function obtenerFotoItemMl(itemId: string, token: string): Promise<FotoItemMl | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping`;
+  try {
+    const resp = await pedir<{
+      price?: unknown;
+      original_price?: unknown;
+      available_quantity?: unknown;
+      sold_quantity?: unknown;
+      status?: unknown;
+      catalog_listing?: unknown;
+      catalog_product_id?: unknown;
+      shipping?: { logistic_type?: unknown; free_shipping?: unknown };
+    }>(url, token);
+    if (!resp.ok) return null;
+    const d = resp.data;
+    return {
+      precio: numeroONull(d.price),
+      precioAnterior: numeroONull(d.original_price),
+      inventarioDisponible: numeroONull(d.available_quantity),
+      vendidos: numeroONull(d.sold_quantity),
+      estado: typeof d.status === "string" ? d.status : null,
+      enCatalogo: typeof d.catalog_listing === "boolean" ? d.catalog_listing : null,
+      catalogProductId: typeof d.catalog_product_id === "string" ? d.catalog_product_id : null,
+      esFull: d.shipping ? d.shipping.logistic_type === "fulfillment" : null,
+      esEnvioGratis: typeof d.shipping?.free_shipping === "boolean" ? d.shipping.free_shipping : null,
+    };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+export type PublicacionTiendaMl = { itemId: string; titulo: string; precio: number | null };
+
+const TOPE_PUBLICACIONES_TIENDA = 50; // suficiente para detectar nuevas/eliminadas sin paginar sin límite
+const TAMAÑO_LOTE_DETALLE_ITEMS = 20; // mismo tamaño de lote ya confirmado en producción, lib/ml/importacion.ts
+// Issue #175 — "respeta los límites de ML: pausa entre llamadas":
+// entre cada lote de /items?ids= (hasta 20 ids cada uno), nunca entre
+// la primera llamada y el resto (esa no tiene con qué competir todavía).
+const PAUSA_ENTRE_LOTES_MS = 300;
+
+function idsDeResultadosBusqueda(resultados: unknown): string[] {
+  if (!Array.isArray(resultados)) return [];
+  return resultados
+    .map((r) => (typeof r === "string" ? r : typeof r === "object" && r && typeof (r as { id?: unknown }).id === "string" ? (r as { id: string }).id : null))
+    .filter((id): id is string => id !== null && PATRON_ID_PRODUCTO_O_ITEM.test(id));
+}
+
+// Issue #175 — dos caminos confirmados en vivo para las publicaciones
+// de un vendedor/tienda AJENO: GET /users/{seller_id}/items/search
+// (mismo endpoint que buscarItemsPorSkuMl ya usa para la cuenta
+// PROPIA, acá con un seller_id de otra cuenta) devuelve 403 real para
+// un vendedor ajeno — se cae entonces a la búsqueda pública del sitio
+// (/sites/MCO/search?seller_id=), que sí deja ver publicaciones
+// ajenas (con menos detalle por resultado, por eso el paso siguiente
+// completa título/precio con el mismo endpoint masivo /items?ids= que
+// ya usa lib/ml/importacion.ts). 401 (token inválido de verdad)
+// propaga tal cual, nunca tiene sentido probar el camino público con
+// el mismo token roto.
+async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Promise<string[]> {
+  if (!PATRON_ID_VENDEDOR.test(sellerId)) return [];
+  const urlPropio = `${BASE_URL}/users/${encodeURIComponent(sellerId)}/items/search?limit=${TOPE_PUBLICACIONES_TIENDA}`;
+  try {
+    const resp = await pedir<{ results?: unknown[] }>(urlPropio, token);
+    if (resp.ok) return idsDeResultadosBusqueda(resp.data.results);
+  } catch (e) {
+    if (!(e instanceof MlSinPermisoAppError)) throw e;
+  }
+  const urlPublico = `${BASE_URL}/sites/${SITE_ID}/search?seller_id=${encodeURIComponent(sellerId)}&limit=${TOPE_PUBLICACIONES_TIENDA}`;
+  const respPublico = await pedir<{ results?: unknown[] }>(urlPublico, token);
+  if (!respPublico.ok) return [];
+  return idsDeResultadosBusqueda(respPublico.data.results);
+}
+
+export async function obtenerPublicacionesVendedorAjenoMl(sellerId: string, token: string): Promise<PublicacionTiendaMl[]> {
+  const ids = await idsDePublicacionesDeVendedor(sellerId, token);
+  const publicaciones: PublicacionTiendaMl[] = [];
+  for (let i = 0; i < ids.length; i += TAMAÑO_LOTE_DETALLE_ITEMS) {
+    if (i > 0) await esperar(PAUSA_ENTRE_LOTES_MS);
+    const lote = ids.slice(i, i + TAMAÑO_LOTE_DETALLE_ITEMS);
+    const resp = await pedir<{ code?: unknown; body?: { id?: unknown; title?: unknown; price?: unknown } }[]>(
+      `${BASE_URL}/items?ids=${lote.join(",")}&attributes=id,title,price`,
+      token
+    );
+    if (!resp.ok) continue; // un lote puntual que falla no tira abajo los demás
+    for (const fila of resp.data) {
+      if (fila.code !== 200 || !fila.body || typeof fila.body.id !== "string") continue;
+      publicaciones.push({
+        itemId: fila.body.id,
+        titulo: typeof fila.body.title === "string" ? fila.body.title : fila.body.id,
+        precio: numeroONull(fila.body.price),
+      });
+    }
+  }
+  return publicaciones;
+}

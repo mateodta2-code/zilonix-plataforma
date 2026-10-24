@@ -1,0 +1,26 @@
+name: Revisión diaria de seguimientos de Mercado Libre (staging)
+
+# Issue #175 — apunta a STAGING a propósito, mismo criterio que
+# .github/workflows/trabajador-avisos-ml.yml: todavía no hay ninguna
+# cuenta real conectada en producción. Antes de conectar cuentas reales
+# en producción, agregar un workflow gemelo apuntando al dominio de
+# producción real (ver docs/cron-seguimiento.md para las alternativas
+# de dónde programar este cron, incluida esta misma, una vez que
+# corresponda moverlo).
+#
+# 09:00 UTC = 04:00 en Colombia (UTC-5) — corre temprano, antes de que
+# alguien abra la pantalla de seguimiento en la mañana.
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Revisar seguimientos del día
+        run: |
+          curl -sf -X POST "https://web-staging-d979.up.railway.app/api/trabajos/seguimiento" \
+            -H "x-seguimiento-trabajador-secret: ${{ secrets.SEGUIMIENTO_TRABAJADOR_SECRET_STAGING }}" \
+            --max-time 120
