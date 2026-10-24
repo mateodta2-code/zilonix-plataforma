@@ -15,6 +15,14 @@ import { SinAcceso } from "@/components/marco/SinAcceso";
 // antes. No hay todavía ningún dato real de finanzas que mostrar (eso
 // es Fase 3) — lo que importa es que el candado funciona de verdad,
 // contra la base.
+//
+// Issue #124 (Z-FIN-02) — "ver" y "editar" van separados: esta
+// pantalla solo lee, así que exige "consultar" y nada más. Cuando
+// llegue la primera acción que cambie algo de finanzas (Fase 3), su
+// actions.ts tiene que pedir "crear" o "modificar" con requierePermiso
+// en el servidor — el Auxiliar y el Contador pueden ver Y editar, pero
+// un rol con solo "consultar" nunca debe poder guardar nada, aunque
+// arme el formulario a mano.
 export default async function FinanzasPage() {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
