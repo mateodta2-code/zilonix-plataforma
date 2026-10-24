@@ -3,7 +3,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { obtenerItemMl, obtenerProducto, obtenerVendedor } from "@/lib/ml/cliente";
-import { interpretarEnlaceProducto, interpretarEnlaceTienda } from "@/lib/seguimiento/link";
+import { esLinkDeTienda, esLinkTiendaOficialSinIdDeVendedor, interpretarEnlaceProducto, interpretarEnlaceTienda } from "@/lib/seguimiento/link";
 
 // Issue #175 — "máximo 5 competidores por empresa, validado en el
 // servidor": literal, acá vive el candado. No es una constraint de
@@ -122,6 +122,16 @@ export async function agregarSeguimiento(empresaId: string, usuarioId: string, d
     interpretado = interpretarEnlaceProducto(datos.link);
   }
   if (!interpretado) {
+    // Issue #192 — dos casos puntuales con un mensaje más claro que el
+    // genérico de abajo, antes de caer en él:
+    if (datos.tipo === "tienda" && esLinkTiendaOficialSinIdDeVendedor(datos.link)) {
+      throw new LinkMlInvalidoError(
+        "Este link de tienda oficial no trae el id del vendedor; abrí la tienda en ML y usá Seguir en Zilonix, o pegá el seller_id / un link con CustId."
+      );
+    }
+    if (datos.tipo === "producto" && esLinkDeTienda(datos.link)) {
+      throw new LinkMlInvalidoError('Ese link es de una tienda, no de un producto — elegí "Tienda" como tipo, o pegá el link de la publicación/catálogo.');
+    }
     throw new LinkMlInvalidoError(
       datos.tipo === "tienda"
         ? "No reconocemos ese link o id de tienda — pegá el seller_id numérico, o un link con _CustId_ en la URL."
