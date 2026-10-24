@@ -11,7 +11,7 @@ async function crearEmpresa(prefijo: string) {
   return empresaId;
 }
 
-async function crearCuenta(empresaId: string, datos: Partial<{ desconectadaTs: Date | null; tokenExpiraTs: Date }> = {}) {
+async function crearCuenta(empresaId: string, datos: Partial<{ desconectadaTs: Date | null; tokenExpiraTs: Date; renovandoTs: Date | null }> = {}) {
   const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
     tx
       .insert(cuentasMl)
@@ -23,6 +23,7 @@ async function crearCuenta(empresaId: string, datos: Partial<{ desconectadaTs: D
         refreshTokenCifrado: cifrarToken("refresh"),
         tokenExpiraTs: datos.tokenExpiraTs ?? new Date(Date.now() + 3600_000),
         desconectadaTs: datos.desconectadaTs ?? null,
+        renovandoTs: datos.renovandoTs ?? null,
       })
       .returning({ id: cuentasMl.id })
   );
@@ -34,7 +35,10 @@ async function crearCuenta(empresaId: string, datos: Partial<{ desconectadaTs: D
 // cuatro clases distintas, para que una página las pueda distinguir
 // sin adivinar por el texto del mensaje.
 describe("obtenerAccessTokenVigente — errores tipados (issue #147)", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
 
   it("cuenta inexistente: CuentaMlNoEncontradaError", async () => {
     const empresaId = await crearEmpresa("CUENTA-NO-EXISTE");
@@ -57,25 +61,39 @@ describe("obtenerAccessTokenVigente — errores tipados (issue #147)", () => {
   });
 
   it("token vencido y Mercado Libre rechaza la renovación (invalid_grant real): RenovacionTokenFallidaError, nunca el Error crudo de oauth.ts", async () => {
+    // ML_CLIENT_ID/ML_CLIENT_SECRET real (nunca vacíos en CI) para que la
+    // llamada llegue de verdad a fetch y pase por el invalid_grant real de
+    // oauth.ts — sin esto, a renovarToken() le faltaría la variable de
+    // entorno y fallaría ANTES de llamar a fetch, dando el mismo
+    // RenovacionTokenFallidaError pero por la razón equivocada.
+    vi.stubEnv("ML_CLIENT_ID", "client-id-de-prueba");
+    vi.stubEnv("ML_CLIENT_SECRET", "client-secret-de-prueba");
     const empresaId = await crearEmpresa("RENOVACION-FALLA");
     const cuentaId = await crearCuenta(empresaId, { tokenExpiraTs: new Date(Date.now() - 1000) }); // ya vencido
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({ ok: false, status: 400, text: async () => '{"error":"invalid_grant"}' }) as Response)
-    );
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 400, text: async () => '{"error":"invalid_grant"}' }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
     await expect(obtenerAccessTokenVigente(empresaId, cuentaId)).rejects.toThrow(RenovacionTokenFallidaError);
+    expect(fetchMock).toHaveBeenCalled();
   });
 
-  it("candado: una segunda renovación concurrente de la MISMA cuenta se niega en vez de pisar la primera", async () => {
+  // No se prueba la concurrencia real (dos llamadas en paralelo): en CI
+  // falta ML_CLIENT_SECRET, así que la primera llamada falla (y libera el
+  // candado) en vez de quedarse "en curso", y además el UPDATE que toma el
+  // candado vive en la transacción NO CONFIRMADA de la primera llamada —
+  // una segunda transacción (dbComoEmpresa abre una por llamada) no puede
+  // ver esa fila tomada hasta que la primera haga commit. Se prueba en
+  // cambio el resultado que ese candado tiene que producir: una cuenta que
+  // YA tiene el candado tomado (renovandoTs reciente, <30s) rechaza la
+  // renovación sin llegar a tocar la red.
+  it("candado: si ya hay una renovación en curso (renovandoTs reciente), se niega sin llamar a Mercado Libre", async () => {
     const empresaId = await crearEmpresa("CANDADO");
-    const cuentaId = await crearCuenta(empresaId, { tokenExpiraTs: new Date(Date.now() - 1000) });
-    // Primera renovación: fetch que nunca resuelve (simula "en curso") — se
-    // dispara sin esperar, para que el candado quede tomado cuando la
-    // segunda llamada intente tomarlo también.
-    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
-    const primera = obtenerAccessTokenVigente(empresaId, cuentaId).catch(() => null);
-    await new Promise((r) => setTimeout(r, 50)); // deja que la primera alcance a tomar el candado
+    const cuentaId = await crearCuenta(empresaId, {
+      tokenExpiraTs: new Date(Date.now() - 1000), // vencido, entraría a renovar si no fuera por el candado
+      renovandoTs: new Date(), // candado tomado hace instantes — bien por debajo de los 30s de "caído"
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
     await expect(obtenerAccessTokenVigente(empresaId, cuentaId)).rejects.toThrow(CandadoDeRenovacionError);
-    await primera; // no deja la promesa colgada entre pruebas
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
