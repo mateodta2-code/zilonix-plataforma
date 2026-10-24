@@ -50,6 +50,15 @@ export interface LineaVentaEntrada {
   // está publicado tiene costo y la utilidad es real; un costo mal cargado se
   // arregla con una corrección de costo_producto.
   costo_congelado: string | null;
+  // Opcionales (#162): empaque y envío de la línea completa, ya congelados
+  // por #130 (packing del SKU en la maestra; envío agencia del SKU o el
+  // valor Flex). Sin el campo, el motor reparte el empaque y el envío del
+  // paquete por peso, como el costo. Con el campo: lo traen todas las
+  // líneas o ninguna, y la suma tiene que ser el valor del paquete
+  // (empaque_congelado / envio_agencia_congelado de la venta). null = sin
+  // dato, cuenta $0 y la venta lleva el aviso, igual que en la venta.
+  empaque_congelado?: string | null;
+  envio_congelado?: string | null;
 }
 
 export interface CorreccionEntrada {
@@ -108,12 +117,23 @@ export interface ResultadoLinea {
   comision_ml: ValorConcepto;
   flete_ml: ValorConcepto;
   costo_producto: ValorConcepto | null;
+  empaque: ValorConcepto;
+  envio: ValorConcepto;
+  // Valor de la línea − comisión − flete − costo − empaque − envío de la
+  // línea. null si la venta no tiene costo completo (misma regla de la
+  // venta). La suma de las líneas da exactamente la utilidad de la venta.
+  utilidad: string | null;
+  margen_porcentaje: string | null;
 }
 
 export interface ResultadoVenta {
   pedido_id: string;
   cuenta_ml_id: string;
   forma_entrega: FormaEntrega;
+  // Día y mes de Bogotá de fecha_pago_aprobado. Para la vista "Detalle día
+  // a día · cuenta · producto" este día es solo un dato: esa vista agrupa
+  // por el día de creación del pedido (decisión de Sharel en #131), ver
+  // lib/finanzas/detalle-ventas.ts.
   dia_bogota: string;
   mes_bogota: string;
   con_costo: boolean;
@@ -192,7 +212,7 @@ function dividirRedondeando(dividendo: bigint, divisor: bigint): bigint {
 }
 
 // Porcentaje con 2 decimales, como string: 1/3 → "33.33".
-function porcentaje(parte: bigint, total: bigint): string | null {
+export function porcentaje(parte: bigint, total: bigint): string | null {
   if (total === CERO) return null;
   const negativo = total < CERO;
   const puntosBasicos = dividirRedondeando(parte * DIEZ_MIL, negativo ? -total : total);
@@ -246,7 +266,7 @@ const DESFASE_BOGOTA_MS = 5 * 60 * 60 * 1000;
 
 export function diaBogota(instante: Date): string {
   if (!(instante instanceof Date) || Number.isNaN(instante.getTime())) {
-    throw new EntradaUtilidadInvalidaError("fecha_pago_aprobado inválida");
+    throw new EntradaUtilidadInvalidaError("fecha inválida");
   }
   return new Date(instante.getTime() - DESFASE_BOGOTA_MS).toISOString().slice(0, 10);
 }
@@ -353,6 +373,46 @@ interface CostoLinea {
   origen: OrigenValor;
 }
 
+// Valores por línea de empaque o envío (#162). undefined = ninguna línea
+// trae el campo; si solo algunas lo traen la entrada está rota (no se
+// adivina el valor de las otras). Cada valor se valida no negativo.
+function valoresPorLinea(
+  lineas: LineaVentaEntrada[],
+  campo: "empaque_congelado" | "envio_congelado",
+): { valores: bigint[]; algunoNulo: boolean } | undefined {
+  const conCampo = lineas.filter((linea) => linea[campo] !== undefined).length;
+  if (conCampo === 0) return undefined;
+  if (conCampo !== lineas.length) {
+    throw new EntradaUtilidadInvalidaError(`${campo}: lo traen algunas líneas y otras no`);
+  }
+  let algunoNulo = false;
+  const valores = lineas.map((linea) => {
+    const valor = linea[campo];
+    if (valor === null || valor === undefined) {
+      algunoNulo = true;
+      return CERO;
+    }
+    return aCentavosNoNegativo(valor, `${campo} de la línea ${linea.linea}`);
+  });
+  return { valores, algunoNulo };
+}
+
+// Reparte el empaque o el envío del paquete entre las líneas. Con valores
+// por línea se usan tal cual, salvo que el total venga de una corrección de
+// toda la orden o de la regla de Full: ahí el total manda y se reparte por
+// peso. La suma de las partes es siempre el total de la venta.
+function partesDelPaquete(
+  total: { valor: bigint; origen: OrigenValor },
+  porLinea: { valores: bigint[] } | undefined,
+  pesos: bigint[],
+): { valor: bigint; origen: OrigenValor }[] {
+  if (total.origen === "full_ml") return pesos.map(() => ({ valor: CERO, origen: "full_ml" }));
+  if (porLinea !== undefined && total.origen === "congelado") {
+    return porLinea.valores.map((valor) => ({ valor, origen: "congelado" }));
+  }
+  return repartirProporcional(total.valor, pesos).map((valor) => ({ valor, origen: total.origen }));
+}
+
 export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
   if (venta.lineas.length === 0) {
     throw new EntradaUtilidadInvalidaError(`La venta ${venta.pedido_id} no tiene líneas`);
@@ -413,13 +473,30 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
   const conCosto = costoLineas.every((costo) => costo !== null);
   if (!conCosto) avisos.push("sin_costo");
 
+  // Valores por línea de empaque y envío, si llegan: la suma tiene que
+  // cuadrar con el valor del paquete congelado (null = $0), aunque después
+  // gane una corrección de orden o la regla de Full — es la misma foto.
+  const empaquePorLinea = valoresPorLinea(venta.lineas, "empaque_congelado");
+  const envioPorLinea = valoresPorLinea(venta.lineas, "envio_congelado");
+  const cuadra = (porLinea: { valores: bigint[] } | undefined, paquete: string | null, nombre: string) => {
+    if (porLinea === undefined) return;
+    const delPaquete = paquete === null ? CERO : aCentavos(paquete);
+    if (sumar(porLinea.valores) !== delPaquete) {
+      throw new EntradaUtilidadInvalidaError(
+        `La suma de ${nombre} por línea (${desdeCentavos(sumar(porLinea.valores))}) no cuadra con el paquete (${desdeCentavos(delPaquete)})`,
+      );
+    }
+  };
+  cuadra(empaquePorLinea, venta.empaque_congelado, "empaque_congelado");
+  cuadra(envioPorLinea, venta.envio_agencia_congelado, "envio_congelado");
+
   // Empaque: una vez por paquete.
   const empaqueCorregido = activas.get(claveCorreccion(null, "empaque"));
   let empaque: { valor: bigint; origen: OrigenValor };
   if (empaqueCorregido !== undefined) {
     empaque = { valor: empaqueCorregido, origen: "corregido" };
   } else {
-    if (venta.empaque_congelado === null) avisos.push("empaque_sin_dato");
+    if (venta.empaque_congelado === null || empaquePorLinea?.algunoNulo) avisos.push("empaque_sin_dato");
     empaque = {
       valor: venta.empaque_congelado === null ? CERO : aCentavosNoNegativo(venta.empaque_congelado, "empaque_congelado"),
       origen: "congelado",
@@ -443,7 +520,7 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
     }
     envio = { valor: CERO, origen: "full_ml" };
   } else {
-    if (venta.envio_agencia_congelado === null) avisos.push("envio_sin_dato");
+    if (venta.envio_agencia_congelado === null || envioPorLinea?.algunoNulo) avisos.push("envio_sin_dato");
     envio = {
       valor:
         venta.envio_agencia_congelado === null
@@ -463,6 +540,22 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
 
   const origenCosto: OrigenValor = costoLineas.some((costo) => costo?.origen === "corregido") ? "corregido" : "congelado";
 
+  const empaqueLineas = partesDelPaquete(empaque, empaquePorLinea, pesos);
+  const envioLineas = partesDelPaquete(envio, envioPorLinea, pesos);
+  // Cada concepto por línea suma exacto el de la venta, así que la suma de
+  // las utilidades de las líneas también da exacto la utilidad de la venta.
+  const utilidadLineas = venta.lineas.map((_, i) => {
+    if (!conCosto) return null;
+    return (
+      valorPorLinea[i] -
+      comision.partes[i] -
+      flete.partes[i] -
+      (costoLineas[i] as CostoLinea).valor -
+      empaqueLineas[i].valor -
+      envioLineas[i].valor
+    );
+  });
+
   return {
     pedido_id: venta.pedido_id,
     cuenta_ml_id: venta.cuenta_ml_id,
@@ -480,6 +573,7 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
     margen_porcentaje: utilidad === null ? null : porcentaje(utilidad, valorVenta),
     lineas: venta.lineas.map((linea, i) => {
       const costo = costoLineas[i];
+      const utilidadLinea = utilidadLineas[i];
       return {
         linea: linea.linea,
         cantidad: linea.cantidad,
@@ -487,6 +581,10 @@ export function calcularUtilidadVenta(venta: VentaEntrada): ResultadoVenta {
         comision_ml: { valor: desdeCentavos(comision.partes[i]), origen: comision.origenPartes[i] },
         flete_ml: { valor: desdeCentavos(flete.partes[i]), origen: flete.origenPartes[i] },
         costo_producto: costo === null ? null : { valor: desdeCentavos(costo.valor), origen: costo.origen },
+        empaque: { valor: desdeCentavos(empaqueLineas[i].valor), origen: empaqueLineas[i].origen },
+        envio: { valor: desdeCentavos(envioLineas[i].valor), origen: envioLineas[i].origen },
+        utilidad: utilidadLinea === null ? null : desdeCentavos(utilidadLinea),
+        margen_porcentaje: utilidadLinea === null ? null : porcentaje(utilidadLinea, valorPorLinea[i]),
       };
     }),
     avisos,
