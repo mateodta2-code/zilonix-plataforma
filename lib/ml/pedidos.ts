@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, gte, ilike, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lt, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { pedidoEventos, pedidos } from "@/db/schema";
+import { cuentasMl, despachosMl, pedidoEventos, pedidos } from "@/db/schema";
 import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike } from "@/lib/filtros-listado";
 
 export type PasoPedido = (typeof pedidoEventos.$inferInsert)["paso"];
@@ -46,13 +46,15 @@ export async function registrarEventoPedido(
 // un valor fuera de esta lista, el filtro de "Estado" simplemente no lo
 // va a poder elegir (no rompe nada, pero tampoco sirve) — confirmar y
 // ajustar esta lista con un pedido real apenas haya uno en staging.
+// Etiquetas en femenino (la venta), las mismas que pinta
+// estadoVisiblePedido en la lista (#166); los valores no cambian.
 export const ESTADOS_PEDIDO_FILTRO = [
-  { valor: "confirmed", etiqueta: "Confirmado" },
+  { valor: "confirmed", etiqueta: "Confirmada" },
   { valor: "payment_required", etiqueta: "Pago pendiente" },
   { valor: "payment_in_process", etiqueta: "Pago en proceso" },
-  { valor: "paid", etiqueta: "Pagado" },
-  { valor: "cancelled", etiqueta: "Cancelado" },
-  { valor: "invalid", etiqueta: "Inválido" },
+  { valor: "paid", etiqueta: "Pagada" },
+  { valor: "cancelled", etiqueta: "Cancelada" },
+  { valor: "invalid", etiqueta: "Inválida" },
 ] as const;
 
 export const ORDENES_PEDIDO_FILTRO = ["fecha_desc", "fecha_asc", "total_desc", "total_asc"] as const;
@@ -64,6 +66,11 @@ export type FiltroPedidos = {
   desde?: string; // "YYYY-MM-DD", hora de Colombia
   hasta?: string; // "YYYY-MM-DD", hora de Colombia
   orden?: string;
+  // Id de cuentas_ml ya validado por la página con leerCuentaMlDeQuery
+  // (lib/ml/selector-cuenta.ts): null o ausente = Todas. Igual va dentro
+  // de dbComoEmpresa y con empresaId en el WHERE: un id de otra empresa
+  // da 0 filas, nunca las de esa empresa.
+  cuentaId?: string | null;
   // La página lo recibe como string (o el primer valor de un string[]);
   // las pruebas lo pasan como número. parsearPagina acepta los dos.
   pagina?: number | string;
@@ -71,8 +78,17 @@ export type FiltroPedidos = {
 
 export const TAMANO_PAGINA_PEDIDOS = 25;
 
+// Fila de la lista (#166): el pedido, el apodo de su cuenta de ML
+// (cuentas_ml.nickname — ninguna otra columna de cuentas_ml, ni tokens
+// ni ids externos) y el status de su despacho más reciente (null = sin
+// despacho guardado).
+export type PedidoListado = typeof pedidos.$inferSelect & {
+  apodoCuenta: string;
+  estadoEnvio: string | null;
+};
+
 export type ResultadoPedidos = {
-  pedidos: (typeof pedidos.$inferSelect)[];
+  pedidos: PedidoListado[];
   total: number;
   pagina: number;
   totalPaginas: number;
@@ -107,6 +123,7 @@ export async function listarPedidosFiltrados(empresaId: string, filtro: FiltroPe
   // afuera uno de las 00:00:00 del día siguiente.
   const hasta = limitesDiaBogota(filtro.hasta);
   if (hasta) condiciones.push(lt(pedidos.fecha, hasta.finExclusivo));
+  if (filtro.cuentaId) condiciones.push(eq(pedidos.cuentaMlId, filtro.cuentaId));
 
   const ordenValido = (ORDENES_PEDIDO_FILTRO as readonly string[]).includes(filtro.orden ?? "") ? (filtro.orden as OrdenPedidos) : "fecha_desc";
   const columnaOrden = {
@@ -124,12 +141,18 @@ export async function listarPedidosFiltrados(empresaId: string, filtro: FiltroPe
 
   const paginaPedida = parsearPagina(filtro.pagina);
 
+  // Inner join: cuenta_ml_id es notNull, así que ningún pedido se pierde.
+  // El mismo join en el conteo y en la página, para que "Mostrando X–Y
+  // de Z" nunca se desalinee con las filas.
+  const unionCuenta = and(eq(cuentasMl.id, pedidos.cuentaMlId), eq(cuentasMl.empresaId, empresaId));
+
   return dbComoEmpresa(empresaId, async (tx) => {
     const condicion = and(...condiciones);
 
     const [{ total }] = await tx
       .select({ total: sql<number>`count(*)`.mapWith(Number) })
       .from(pedidos)
+      .innerJoin(cuentasMl, unionCuenta)
       .where(condicion);
 
     const totalPaginas = Math.max(1, Math.ceil(total / TAMANO_PAGINA_PEDIDOS));
@@ -139,14 +162,38 @@ export async function listarPedidosFiltrados(empresaId: string, filtro: FiltroPe
     const pagina = acotarPagina(paginaPedida, totalPaginas);
 
     const filas = await tx
-      .select()
+      .select({ ...getTableColumns(pedidos), apodoCuenta: cuentasMl.nickname })
       .from(pedidos)
+      .innerJoin(cuentasMl, unionCuenta)
       .where(condicion)
       .orderBy(columnaOrden, ordenId)
       .limit(TAMANO_PAGINA_PEDIDOS)
       .offset((pagina - 1) * TAMANO_PAGINA_PEDIDOS);
 
-    return { pedidos: filas, total, pagina, totalPaginas };
+    // Estado del envío en una segunda consulta, solo para los pedidos de
+    // esta página. Un left join a despachos_ml en la consulta de arriba
+    // duplicaría la fila del pedido que tiene dos despachos y correría el
+    // conteo y la paginación. Con más de uno se queda el de
+    // actualizado_ts más reciente (el id desempata, para que no cambie
+    // entre cargas).
+    const estadoEnvioPorPedido = new Map<string, string | null>();
+    if (filas.length > 0) {
+      const despachos = await tx
+        .select({ pedidoId: despachosMl.pedidoId, status: despachosMl.status, actualizadoTs: despachosMl.actualizadoTs })
+        .from(despachosMl)
+        .where(and(eq(despachosMl.empresaId, empresaId), inArray(despachosMl.pedidoId, filas.map((fila) => fila.id))))
+        .orderBy(desc(despachosMl.actualizadoTs), desc(despachosMl.id));
+      for (const despacho of despachos) {
+        if (!estadoEnvioPorPedido.has(despacho.pedidoId)) estadoEnvioPorPedido.set(despacho.pedidoId, despacho.status);
+      }
+    }
+
+    return {
+      pedidos: filas.map((fila) => ({ ...fila, estadoEnvio: estadoEnvioPorPedido.get(fila.id) ?? null })),
+      total,
+      pagina,
+      totalPaginas,
+    };
   });
 }
 

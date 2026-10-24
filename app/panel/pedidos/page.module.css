@@ -54,26 +54,134 @@
   gap: 8px;
 }
 
-.enlacePedido {
-  color: var(--acento);
-  font-weight: 600;
+/* #166 — filas tipo tarjeta. Solo variables del tema (app/globals.css),
+   para que se vean igual de bien en oscuro y en claro. */
+.lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fila {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-areas: "foto cuerpo estado";
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie);
+  color: var(--texto);
   text-decoration: none;
   transition: var(--transicion-color);
 }
 
-.enlacePedido:hover {
-  color: var(--azul-metal-3);
-  text-decoration: underline;
+.fila:hover {
+  background: var(--fila-hover);
+  border-color: var(--borde-hover);
 }
 
-.celdaFecha {
+.fila:focus-visible {
+  outline: none;
+  box-shadow: var(--sombra-foco);
+}
+
+/* Lugar de la foto del producto: cuadro neutro, vacío, igual en todas
+   las filas hasta que llegue la foto real (#129/#130 + CSP). */
+.foto {
+  grid-area: foto;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-chip);
+  background: var(--superficie-2);
+}
+
+.cuerpo {
+  grid-area: cuerpo;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.encabezadoFila {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cuenta {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--borde-plata);
+  border-radius: var(--radio-chip);
+  background: var(--superficie-2);
+  color: var(--plata-etiqueta);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.numeroPedido {
+  color: var(--acento);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.datosFila {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+}
+
+.fecha {
+  font-size: 13px;
   color: var(--texto-suave);
 }
 
-.celdaTotal {
+.total {
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* El estado más grande que el resto de la fila, sin tocar
+   components/marco/Chip.tsx: se agranda el Chip desde afuera. */
+.estado {
+  grid-area: estado;
+  justify-self: end;
+}
+
+.estado > span {
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+/* Celular: la fila pasa a dos líneas (foto + datos arriba, estado
+   abajo) sin scroll horizontal. */
+@media (max-width: 560px) {
+  .fila {
+    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-areas:
+      "foto cuerpo"
+      "estado estado";
+    gap: 10px 12px;
+  }
+
+  .estado {
+    justify-self: start;
+  }
 }
 
 .vacioConAccion {

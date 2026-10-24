@@ -6,12 +6,13 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
+import { estadoVisiblePedido } from "@/lib/ml/estado-visible-pedido";
 import { ESTADOS_PEDIDO_FILTRO, listarPedidosFiltrados, TAMANO_PAGINA_PEDIDOS } from "@/lib/ml/pedidos";
+import { CUENTA_TODAS, leerCuentaMlDeQuery, PARAM_CUENTA } from "@/lib/ml/selector-cuenta";
 import { formatearMonto } from "@/lib/panel-kpis";
 import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
-import { Chip, type EstadoChip } from "@/components/marco/Chip";
-import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
+import { Chip } from "@/components/marco/Chip";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -27,22 +28,11 @@ type FiltrosUrl = {
   hasta?: ParametroUrl;
   orden?: ParametroUrl;
   pagina?: ParametroUrl;
+  [PARAM_CUENTA]?: ParametroUrl;
 };
-type FiltrosNormalizados = { q?: string; estado?: string; desde?: string; hasta?: string; orden?: string };
-
-// Mapeo de color del Chip — "paid" es el único que sabemos con certeza
-// que SÍ corre en pedidos reales hoy (ver el comentario de
-// ESTADOS_PEDIDO_FILTRO en lib/ml/pedidos.ts); el resto es la
-// clasificación razonable de la API pública de Mercado Libre. Un
-// estado real que no esté acá (porque esta lista no tiene precedente
-// confirmado contra producción) simplemente se pinta neutro — nunca
-// rompe la pantalla.
-function colorEstadoPedido(estado: string): EstadoChip {
-  if (estado === "paid") return "exito";
-  if (estado === "cancelled" || estado === "invalid") return "peligro";
-  if (estado === "confirmed" || estado === "payment_required" || estado === "payment_in_process") return "aviso";
-  return "neutro";
-}
+// `cuenta` es el id ya validado contra las cuentas de esta empresa
+// (leerCuentaMlDeQuery), nunca el texto crudo de la URL.
+type FiltrosNormalizados = { q?: string; estado?: string; desde?: string; hasta?: string; orden?: string; cuenta?: string };
 
 // numeric de Postgres llega como string. Se formatea con el mismo
 // formatearMonto de los KPIs (lib/panel-kpis.ts), que nunca pasa el
@@ -68,14 +58,15 @@ function hrefConPagina(filtros: FiltrosNormalizados, pagina: number): string {
   if (filtros.desde) params.set("desde", filtros.desde);
   if (filtros.hasta) params.set("hasta", filtros.hasta);
   if (filtros.orden) params.set("orden", filtros.orden);
+  if (filtros.cuenta) params.set(PARAM_CUENTA, filtros.cuenta);
   if (pagina > 1) params.set("pagina", String(pagina));
   const qs = params.toString();
   return qs ? `/panel/pedidos?${qs}` : "/panel/pedidos";
 }
 
 // Tarea 2.7 / issue "tabla completa de pedidos" — búsqueda, filtro por
-// estado y fecha, orden y paginación, todo en la URL (?q=, ?estado=,
-// ?desde=, ?hasta=, ?orden=, ?pagina=) para que se pueda compartir o
+// estado, fecha y cuenta de ML (#166), orden y paginación, todo en la URL
+// (?q=, ?estado=, ?desde=, ?hasta=, ?cuenta=, ?orden=, ?pagina=) para que se pueda compartir o
 // recargar el link con los mismos filtros. Toda la validación real
 // (lista blanca de estado/orden, página entera segura, fechas,
 // escape de la búsqueda) vive en listarPedidosFiltrados()
@@ -100,12 +91,19 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
     return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
+  // Las 2 cuentas (o las que tenga la empresa) en una sola lista; el
+  // filtro elige una. Un id que no es de esta empresa queda en Todas,
+  // sin error. Las cuentas desconectadas también salen: su histórico
+  // sigue siendo de la empresa.
+  const { cuentas, cuentaId } = await leerCuentaMlDeQuery(empresa.id, searchParams[PARAM_CUENTA]);
+
   const filtros: FiltrosNormalizados = {
     q: normalizarParametro(searchParams.q),
     estado: normalizarParametro(searchParams.estado),
     desde: normalizarParametro(searchParams.desde),
     hasta: normalizarParametro(searchParams.hasta),
     orden: normalizarParametro(searchParams.orden),
+    cuenta: cuentaId ?? undefined,
   };
   const resultado = await listarPedidosFiltrados(empresa.id, {
     busqueda: filtros.q,
@@ -113,13 +111,16 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
     desde: filtros.desde,
     hasta: filtros.hasta,
     orden: filtros.orden,
+    cuentaId,
     pagina: normalizarParametro(searchParams.pagina),
   });
 
   // Un ?q= que queda vacío después de trim no cuenta como filtro: si
   // no, con cero pedidos reales la pantalla diría "ningún pedido
   // coincide" en vez de "todavía no hay pedidos".
-  const hayFiltrosActivos = Boolean(normalizarTextoBusqueda(filtros.q) || filtros.estado || filtros.desde || filtros.hasta || filtros.orden);
+  const hayFiltrosActivos = Boolean(
+    normalizarTextoBusqueda(filtros.q) || filtros.estado || filtros.desde || filtros.hasta || filtros.orden || filtros.cuenta
+  );
   const desdeFila = (resultado.pagina - 1) * TAMANO_PAGINA_PEDIDOS + 1;
   const hastaFila = Math.min(resultado.pagina * TAMANO_PAGINA_PEDIDOS, resultado.total);
 
@@ -149,6 +150,19 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
             {ESTADOS_PEDIDO_FILTRO.map((e) => (
               <option key={e.valor} value={e.valor}>
                 {e.etiqueta}
+              </option>
+            ))}
+          </select>
+        </Campo>
+        {/* Un <select> más del mismo formulario, no SelectorCuentaMl:
+            ese componente arma su propio formulario aparte. Se aplica
+            con el botón Filtrar (Server Component, sin onChange). */}
+        <Campo etiqueta="Cuenta de Mercado Libre">
+          <select name={PARAM_CUENTA} defaultValue={cuentaId ?? CUENTA_TODAS} className="zx-control">
+            <option value={CUENTA_TODAS}>Todas</option>
+            {cuentas.map((cuenta) => (
+              <option key={cuenta.id} value={cuenta.id}>
+                {cuenta.apodo}
               </option>
             ))}
           </select>
@@ -197,22 +211,37 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
         </EstadoVacio>
       ) : (
         <>
-          <Tabla encabezados={["Pedido", "Fecha", "Total", "Estado"]}>
-            {resultado.pedidos.map((pedido) => (
-              <FilaTabla key={pedido.id}>
-                <CeldaTabla>
-                  <Link href={`/panel/pedidos/${pedido.id}`} className={styles.enlacePedido}>
-                    #{pedido.pedidoIdExterno}
+          {/* #166 — filas tipo tarjeta en vez de la tabla. Cada fila es
+              un link al detalle, como antes. El cuadro de la izquierda
+              es el lugar de la foto del producto: hoy no se guarda (llega
+              con #129/#130 y el cambio de CSP img-src), así que va vacío
+              y igual en todas las filas — nunca una imagen externa ni un
+              texto inventado. */}
+          <ul className={styles.lista}>
+            {resultado.pedidos.map((pedido) => {
+              const estado = estadoVisiblePedido(pedido.estado, pedido.estadoEnvio);
+              return (
+                <li key={pedido.id}>
+                  <Link href={`/panel/pedidos/${pedido.id}`} className={styles.fila}>
+                    <div className={styles.foto} aria-hidden="true" />
+                    <div className={styles.cuerpo}>
+                      <div className={styles.encabezadoFila}>
+                        <span className={styles.cuenta}>{pedido.apodoCuenta}</span>
+                        <span className={styles.numeroPedido}>#{pedido.pedidoIdExterno}</span>
+                      </div>
+                      <div className={styles.datosFila}>
+                        <span className={styles.fecha}>{formatoFechaColombia(pedido.fecha)}</span>
+                        <span className={styles.total}>{formatoMonto(pedido.moneda, pedido.total)}</span>
+                      </div>
+                    </div>
+                    <span className={styles.estado}>
+                      <Chip estado={estado.color}>{estado.etiqueta}</Chip>
+                    </span>
                   </Link>
-                </CeldaTabla>
-                <CeldaTabla className={styles.celdaFecha}>{formatoFechaColombia(pedido.fecha)}</CeldaTabla>
-                <CeldaTabla className={styles.celdaTotal}>{formatoMonto(pedido.moneda, pedido.total)}</CeldaTabla>
-                <CeldaTabla>
-                  <Chip estado={colorEstadoPedido(pedido.estado)}>{pedido.estado}</Chip>
-                </CeldaTabla>
-              </FilaTabla>
-            ))}
-          </Tabla>
+                </li>
+              );
+            })}
+          </ul>
 
           <div className={styles.paginacion}>
             <p className={styles.resumenPaginacion}>

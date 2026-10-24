@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl, empresas, pedidos } from "@/db/schema";
+import { cuentasMl, despachosMl, empresas, pedidos } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import { listarPedidosFiltrados, obtenerPedidoConEventos, PASOS_PEDIDO, registrarEventoPedido } from "./pedidos";
 
@@ -398,5 +398,153 @@ describe("listarPedidosFiltrados — bordes de día en Bogotá y desempate por i
       const ids = (await listarPedidosFiltrados(empresaId, { orden })).pedidos.map((p) => p.id);
       expect(ids.indexOf(idBajo)).toBeLessThan(ids.indexOf(idAlto));
     }
+  });
+});
+
+// #166 — apodo de la cuenta, filtro por cuenta y estado del envío en la
+// lista. Empresas propias para no mover los números de los describe de
+// arriba (30 pedidos, páginas de 25 y 5).
+describe("listarPedidosFiltrados — cuenta de ML y estado del envío (#166)", () => {
+  vi.setConfig({ testTimeout: 20_000 });
+
+  const empresaAId = randomUUID();
+  const empresaBId = randomUUID();
+  const sufijo = randomUUID().slice(0, 8);
+  const externo = (nombre: string) => `${nombre}-166-${sufijo}`;
+  let cuentaUnoId: string;
+  let cuentaDosId: string;
+
+  async function crearCuenta(empresaId: string, nickname: string): Promise<string> {
+    const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(cuentasMl)
+        .values({
+          empresaId,
+          cuentaIdExterna: `ml-user-166-${randomUUID()}`,
+          nickname,
+          accessTokenCifrado: cifrarToken("access"),
+          refreshTokenCifrado: cifrarToken("refresh"),
+          tokenExpiraTs: new Date(Date.now() + 3600_000),
+        })
+        .returning({ id: cuentasMl.id })
+    );
+    return cuenta.id;
+  }
+
+  async function crearPedido(empresaId: string, cuentaMlId: string, nombre: string, estado: string, dia: number): Promise<string> {
+    const [pedido] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(pedidos)
+        .values({
+          empresaId,
+          cuentaMlId,
+          pedidoIdExterno: externo(nombre),
+          fecha: new Date(Date.UTC(2026, 9, dia, 15)),
+          total: "10000",
+          moneda: "COP",
+          estado,
+        })
+        .returning({ id: pedidos.id })
+    );
+    return pedido.id;
+  }
+
+  async function crearDespacho(empresaId: string, cuentaMlId: string, pedidoId: string, status: string, actualizadoTs: Date) {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(despachosMl).values({
+        empresaId,
+        pedidoId,
+        cuentaMlId,
+        shipmentIdExterno: `SHIP-166-${randomUUID()}`,
+        status,
+        actualizadoTs,
+      })
+    );
+  }
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaAId, (tx) =>
+      tx.insert(empresas).values({ id: empresaAId, nombre: "Empresa A (#166)", nit: `TEST-P166A-${empresaAId.slice(0, 8)}` })
+    );
+    await dbComoEmpresa(empresaBId, (tx) =>
+      tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B (#166)", nit: `TEST-P166B-${empresaBId.slice(0, 8)}` })
+    );
+    cuentaUnoId = await crearCuenta(empresaAId, "CUENTA_UNO_166");
+    cuentaDosId = await crearCuenta(empresaAId, "CUENTA_DOS_166");
+    const cuentaBId = await crearCuenta(empresaBId, "CUENTA_B_166");
+
+    // Cuenta uno: un pedido con DOS despachos (el más reciente es
+    // "delivered"), uno sin despacho y uno cancelado ya enviado.
+    const p1 = await crearPedido(empresaAId, cuentaUnoId, "P1", "paid", 1);
+    await crearDespacho(empresaAId, cuentaUnoId, p1, "ready_to_ship", new Date("2026-10-01T16:00:00Z"));
+    await crearDespacho(empresaAId, cuentaUnoId, p1, "delivered", new Date("2026-10-03T16:00:00Z"));
+    await crearPedido(empresaAId, cuentaUnoId, "P2", "paid", 2);
+    const p3 = await crearPedido(empresaAId, cuentaUnoId, "P3", "cancelled", 3);
+    await crearDespacho(empresaAId, cuentaUnoId, p3, "shipped", new Date("2026-10-04T16:00:00Z"));
+    // Cuenta dos: uno enviado y uno sin despacho.
+    const p4 = await crearPedido(empresaAId, cuentaDosId, "P4", "paid", 4);
+    await crearDespacho(empresaAId, cuentaDosId, p4, "shipped", new Date("2026-10-05T16:00:00Z"));
+    await crearPedido(empresaAId, cuentaDosId, "P5", "paid", 5);
+
+    // Empresa B: un pedido con despacho, mismo día que los de A.
+    const pb = await crearPedido(empresaBId, cuentaBId, "PB", "paid", 1);
+    await crearDespacho(empresaBId, cuentaBId, pb, "delivered", new Date("2026-10-02T16:00:00Z"));
+  });
+
+  const porExterno = (resultado: Awaited<ReturnType<typeof listarPedidosFiltrados>>) =>
+    Object.fromEntries(resultado.pedidos.map((p) => [p.pedidoIdExterno, { apodo: p.apodoCuenta, envio: p.estadoEnvio }]));
+
+  it("sin cuentaId trae los pedidos de las dos cuentas, cada uno con su apodo", async () => {
+    const resultado = await listarPedidosFiltrados(empresaAId);
+    expect(resultado.total).toBe(5);
+    expect(resultado.pedidos).toHaveLength(5);
+    expect(porExterno(resultado)).toEqual({
+      [externo("P1")]: { apodo: "CUENTA_UNO_166", envio: "delivered" },
+      [externo("P2")]: { apodo: "CUENTA_UNO_166", envio: null },
+      [externo("P3")]: { apodo: "CUENTA_UNO_166", envio: "shipped" },
+      [externo("P4")]: { apodo: "CUENTA_DOS_166", envio: "shipped" },
+      [externo("P5")]: { apodo: "CUENTA_DOS_166", envio: null },
+    });
+  });
+
+  it("con cuentaId trae solo los de esa cuenta, y el conteo coincide", async () => {
+    const uno = await listarPedidosFiltrados(empresaAId, { cuentaId: cuentaUnoId });
+    expect(uno.total).toBe(3);
+    expect(uno.pedidos.map((p) => p.pedidoIdExterno).sort()).toEqual([externo("P1"), externo("P2"), externo("P3")]);
+    expect(uno.pedidos.every((p) => p.cuentaMlId === cuentaUnoId && p.apodoCuenta === "CUENTA_UNO_166")).toBe(true);
+
+    const dos = await listarPedidosFiltrados(empresaAId, { cuentaId: cuentaDosId, estado: "paid" });
+    expect(dos.total).toBe(2);
+    expect(dos.pedidos.map((p) => p.pedidoIdExterno).sort()).toEqual([externo("P4"), externo("P5")]);
+
+    const todas = await listarPedidosFiltrados(empresaAId, { cuentaId: null });
+    expect(todas.total).toBe(5);
+  });
+
+  it("estadoEnvio sale del despacho más reciente y es null sin despacho", async () => {
+    const mapa = porExterno(await listarPedidosFiltrados(empresaAId, { cuentaId: cuentaUnoId }));
+    expect(mapa[externo("P1")].envio).toBe("delivered");
+    expect(mapa[externo("P2")].envio).toBeNull();
+  });
+
+  it("un pedido con 2 despachos no sale duplicado y el conteo no cambia", async () => {
+    const resultado = await listarPedidosFiltrados(empresaAId, { busqueda: externo("P1") });
+    expect(resultado.total).toBe(1);
+    expect(resultado.pedidos).toHaveLength(1);
+    const ids = (await listarPedidosFiltrados(empresaAId)).pedidos.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("aislamiento A/B: B con el cuentaId de A recibe 0 filas, y A no ve pedidos ni apodos de B", async () => {
+    const deBConCuentaDeA = await listarPedidosFiltrados(empresaBId, { cuentaId: cuentaUnoId });
+    expect(deBConCuentaDeA.total).toBe(0);
+    expect(deBConCuentaDeA.pedidos).toHaveLength(0);
+
+    const deA = await listarPedidosFiltrados(empresaAId);
+    expect(deA.pedidos.some((p) => p.pedidoIdExterno === externo("PB"))).toBe(false);
+    expect(deA.pedidos.some((p) => p.apodoCuenta === "CUENTA_B_166")).toBe(false);
+
+    const deB = await listarPedidosFiltrados(empresaBId);
+    expect(porExterno(deB)).toEqual({ [externo("PB")]: { apodo: "CUENTA_B_166", envio: "delivered" } });
   });
 });
