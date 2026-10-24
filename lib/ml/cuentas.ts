@@ -11,24 +11,81 @@ function expiraTsDesdeAhora(tokens: TokensMl): Date {
   return new Date(Date.now() + (tokens.expiraEnSegundos - SEGUNDOS_DE_MARGEN) * 1000);
 }
 
+// Bug real en vivo en staging: reconectar una cuenta de Mercado Libre
+// que YA tenía una fila (conectada o desconectada) reventaba con
+// "duplicate key value violates unique constraint
+// cuentas_ml_cuenta_externa_unica" — guardarCuentaConectada hacía un
+// INSERT simple y desconectarCuenta solo marca desconectadaTs (nunca
+// borra la fila, a propósito, para no perder el histórico importado),
+// así que la misma cuenta de ML nunca se podía volver a conectar.
+//
+// INSERT ... ON CONFLICT (cuenta_id_externa) DO UPDATE ... WHERE
+// empresa_id = la empresa actual: si la fila que choca es de la MISMA
+// empresa (conectada o desconectada), se reactiva esa misma fila
+// (mismo id — se conserva el histórico) con los tokens nuevos. Si la
+// fila que choca es de OTRA empresa, el WHERE no matchea: ni el
+// INSERT ni el UPDATE se aplican, así que no hay ninguna fila que
+// RETURNING pueda devolver.
+export class CuentaMlDeOtraEmpresaError extends Error {
+  constructor() {
+    // Nunca revela A QUÉ empresa pertenece — pedido explícito.
+    super("Esta cuenta de Mercado Libre ya está conectada a otra empresa en Zilonix. Desconéctala allá primero o escríbenos a soporte.");
+    this.name = "CuentaMlDeOtraEmpresaError";
+  }
+}
+
+function esViolacionDeUnicidad(error: unknown): boolean {
+  // 23505 = unique_violation de Postgres — mismo chequeo que ya usan
+  // lib/invitaciones.ts, lib/ml/sku.ts y app/crear-empresa/actions.ts.
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "23505");
+}
+
 export async function guardarCuentaConectada(
   empresaId: string,
   datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl }
 ): Promise<{ id: string }> {
-  return dbComoEmpresa(empresaId, async (tx) => {
-    const [fila] = await tx
-      .insert(cuentasMl)
-      .values({
-        empresaId,
-        cuentaIdExterna: datos.cuentaIdExterna,
-        nickname: datos.nickname,
-        accessTokenCifrado: cifrarToken(datos.tokens.accessToken),
-        refreshTokenCifrado: cifrarToken(datos.tokens.refreshToken),
-        tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
-      })
-      .returning({ id: cuentasMl.id });
-    return fila;
-  });
+  try {
+    return await dbComoEmpresa(empresaId, async (tx) => {
+      const [fila] = await tx
+        .insert(cuentasMl)
+        .values({
+          empresaId,
+          cuentaIdExterna: datos.cuentaIdExterna,
+          nickname: datos.nickname,
+          accessTokenCifrado: cifrarToken(datos.tokens.accessToken),
+          refreshTokenCifrado: cifrarToken(datos.tokens.refreshToken),
+          tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
+        })
+        .onConflictDoUpdate({
+          target: cuentasMl.cuentaIdExterna,
+          set: {
+            nickname: datos.nickname,
+            accessTokenCifrado: cifrarToken(datos.tokens.accessToken),
+            refreshTokenCifrado: cifrarToken(datos.tokens.refreshToken),
+            tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
+            desconectadaTs: null,
+            renovandoTs: null,
+          },
+          // Referencia a la fila YA existente (la que choca), no a los
+          // valores nuevos — por eso compara contra `empresaId`
+          // (variable de JS), nunca contra `excluded`.
+          setWhere: eq(cuentasMl.empresaId, empresaId),
+        })
+        .returning({ id: cuentasMl.id });
+
+      if (!fila) throw new CuentaMlDeOtraEmpresaError();
+      return fila;
+    });
+  } catch (error) {
+    if (error instanceof CuentaMlDeOtraEmpresaError) throw error;
+    // Caso real esperado con RLS a FORCE (ver db/rls-setup.sql): si la
+    // fila que choca es de otra empresa, ni siquiera es visible para
+    // decidir el UPDATE — Postgres corta con el 23505 de siempre en
+    // vez de dejar que el RETURNING vuelva vacío. Mismo resultado para
+    // quien llama: nunca el error crudo de Postgres en pantalla.
+    if (esViolacionDeUnicidad(error)) throw new CuentaMlDeOtraEmpresaError();
+    throw error;
+  }
 }
 
 export class CandadoDeRenovacionError extends Error {
