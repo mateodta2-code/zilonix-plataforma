@@ -5,10 +5,12 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, despachosMl, empresas, membresias, pedidos, permisosRol, publicaciones, roles, skus, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import {
+  calcularVentasDeHoy,
   calcularVentasDelMes,
   contarDespachosPendientes,
   contarPedidos,
   contarSkuSinVincular,
+  detalleVentasDeHoy,
   formatearVentasDelMes,
   obtenerKpisPanel,
 } from "./panel-kpis";
@@ -298,9 +300,10 @@ describe("KPIs del panel (empresa_id, aislamiento A/B)", () => {
     expect(await calcularVentasDelMes(empresaId, new Date("2026-04-01T05:00:00.000Z"))).toEqual([]);
   });
 
-  it("un rol sin ventas ni inventario recibe los cuatro KPIs en null aunque la empresa tenga datos", async () => {
+  it("un rol sin ventas ni inventario recibe todos los KPIs en null aunque la empresa tenga datos", async () => {
     const usuarioId = await membresiaCon(empresaAId, "Solo finanzas KPIs", [{ modulo: "finanzas", accion: "consultar" }]);
     expect(await obtenerKpisPanel(usuarioId, empresaAId, AHORA)).toEqual({
+      ventasDeHoy: null,
       ventasDelMes: null,
       pedidos: null,
       despachosPendientes: null,
@@ -313,7 +316,10 @@ describe("KPIs del panel (empresa_id, aislamiento A/B)", () => {
       { modulo: "ventas", accion: "consultar" },
       { modulo: "inventario", accion: "consultar" },
     ]);
+    // Los tres pedidos de A con fecha AHORA son de hoy (15 de junio en
+    // Bogotá) y no cancelados: Ventas de hoy los cuenta igual que el mes.
     expect(await obtenerKpisPanel(conAmbos, empresaAId, AHORA)).toEqual({
+      ventasDeHoy: { cantidad: 3, montos: ventasA, porCuenta: [{ nickname: "VENDEDOR_KPI_A", cantidad: 3 }] },
       ventasDelMes: ventasA,
       pedidos: 4,
       despachosPendientes: 1,
@@ -322,6 +328,7 @@ describe("KPIs del panel (empresa_id, aislamiento A/B)", () => {
 
     const soloVentas = await membresiaCon(empresaAId, "Solo ventas KPIs", [{ modulo: "ventas", accion: "consultar" }]);
     expect(await obtenerKpisPanel(soloVentas, empresaAId, AHORA)).toEqual({
+      ventasDeHoy: { cantidad: 3, montos: ventasA, porCuenta: [{ nickname: "VENDEDOR_KPI_A", cantidad: 3 }] },
       ventasDelMes: ventasA,
       pedidos: 4,
       despachosPendientes: 1,
@@ -347,6 +354,160 @@ describe("formatearVentasDelMes", () => {
     expect(formatearVentasDelMes([{ moneda: "COP", total: "12345.67" }])).toBe("COP 12.345,67");
   });
 });
+
+// "Ventas de hoy" (issue #153) — su propio par de empresas, con un
+// `ahora` fijo (20 de julio 2026, 12:00 en Bogotá) que no se cruza con
+// el AHORA de arriba: así los pedidos de borde de este bloque (ayer a
+// las 23:59, mañana a las 00:00) no tocan las cifras del mes.
+const HOY = new Date("2026-07-20T17:00:00.000Z");
+
+describe("Ventas de hoy (empresa_id, aislamiento A/B)", () => {
+  vi.setConfig({ testTimeout: 15_000 });
+
+  const empresaAId = randomUUID();
+  const empresaBId = randomUUID();
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaAId, (tx) =>
+      tx.insert(empresas).values({ id: empresaAId, nombre: "Empresa A hoy", nit: `TEST-HOYA-${empresaAId.slice(0, 8)}` })
+    );
+    await dbComoEmpresa(empresaBId, (tx) =>
+      tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B hoy", nit: `TEST-HOYB-${empresaBId.slice(0, 8)}` })
+    );
+    const cuentaA1 = await crearCuenta(empresaAId, "HOY_A_1");
+    const cuentaA2 = await crearCuenta(empresaAId, "HOY_A_2");
+    const cuentaB = await crearCuenta(empresaBId, "HOY_B");
+
+    // Empresa A, cuenta 1: hoy a las 00:00 de Bogotá (05:00 UTC, el
+    // primer instante del día), uno confirmed y uno USD a mediodía — 3
+    // ventas. Cancelled e invalid hoy, con montos enormes para que se
+    // noten si se cuelan. Ayer a las 23:59 de Bogotá y mañana a las
+    // 00:00 (fin exclusivo): afuera.
+    await insertarPedido(empresaAId, cuentaA1, "2026-07-20T05:00:00.000Z", "10000", "COP", "paid");
+    await insertarPedido(empresaAId, cuentaA1, "2026-07-20T17:00:00.000Z", "2500.50", "COP", "confirmed");
+    await insertarPedido(empresaAId, cuentaA1, "2026-07-20T17:00:00.000Z", "20", "USD", "payment_required");
+    await insertarPedido(empresaAId, cuentaA1, "2026-07-20T17:00:00.000Z", "1000000", "COP", "cancelled");
+    await insertarPedido(empresaAId, cuentaA1, "2026-07-20T17:00:00.000Z", "2000000", "COP", "invalid");
+    await insertarPedido(empresaAId, cuentaA1, "2026-07-20T04:59:00.000Z", "3000000", "COP", "paid");
+    await insertarPedido(empresaAId, cuentaA1, "2026-07-21T05:00:00.000Z", "4000000", "COP", "paid");
+    // Empresa A, cuenta 2: una venta hoy.
+    await insertarPedido(empresaAId, cuentaA2, "2026-07-20T22:00:00.000Z", "7000", "COP", "payment_in_process");
+    // Empresa B: una venta hoy, con un monto que se nota si se mezcla.
+    await insertarPedido(empresaBId, cuentaB, "2026-07-20T17:00:00.000Z", "999999", "COP", "paid");
+  });
+
+  const ventasDeHoyA = {
+    cantidad: 4,
+    montos: [
+      { moneda: "COP", total: "19500.50" },
+      { moneda: "USD", total: "20.00" },
+    ],
+    porCuenta: [
+      { nickname: "HOY_A_1", cantidad: 3 },
+      { nickname: "HOY_A_2", cantidad: 1 },
+    ],
+  };
+
+  it("cuenta las ventas del día de Bogotá de todas las cuentas, sin cancelled ni invalid, ni ayer 23:59 ni mañana 00:00", async () => {
+    expect(await calcularVentasDeHoy(empresaAId, HOY)).toEqual(ventasDeHoyA);
+  });
+
+  it("el monto llega como string, nunca como Number", async () => {
+    const { montos } = await calcularVentasDeHoy(empresaAId, HOY);
+    for (const grupo of montos) expect(typeof grupo.total).toBe("string");
+    expect(montos[0].total).toBe("19500.50");
+  });
+
+  it("el conteo por cuenta suma el total", async () => {
+    const ventas = await calcularVentasDeHoy(empresaAId, HOY);
+    expect(ventas.porCuenta.reduce((total, cuenta) => total + cuenta.cantidad, 0)).toBe(ventas.cantidad);
+  });
+
+  it("aislamiento A/B: la empresa A no ve los pedidos de la B, ni al revés", async () => {
+    const [deA, deB] = await Promise.all([calcularVentasDeHoy(empresaAId, HOY), calcularVentasDeHoy(empresaBId, HOY)]);
+    expect(deA).toEqual(ventasDeHoyA);
+    expect(deB).toEqual({
+      cantidad: 1,
+      montos: [{ moneda: "COP", total: "999999.00" }],
+      porCuenta: [{ nickname: "HOY_B", cantidad: 1 }],
+    });
+  });
+
+  it("el pedido de ayer a las 23:59 de Bogotá cuenta en su propio día, y el de mañana a las 00:00 en el suyo", async () => {
+    expect((await calcularVentasDeHoy(empresaAId, new Date("2026-07-20T04:59:00.000Z"))).montos).toEqual([
+      { moneda: "COP", total: "3000000.00" },
+    ]);
+    expect((await calcularVentasDeHoy(empresaAId, new Date("2026-07-21T05:00:00.000Z"))).montos).toEqual([
+      { moneda: "COP", total: "4000000.00" },
+    ]);
+  });
+
+  it("sin ventas hoy: 0, sin montos ni cuentas, y la tarjeta dice COP 0", async () => {
+    const vacia = await calcularVentasDeHoy(empresaAId, new Date("2026-07-25T17:00:00.000Z"));
+    expect(vacia).toEqual({ cantidad: 0, montos: [], porCuenta: [] });
+    expect(detalleVentasDeHoy(vacia)).toEqual(["COP 0"]);
+  });
+
+  it("obtenerKpisPanel la incluye con ventas/consultar y la deja en null sin ese permiso", async () => {
+    const conVentas = await membresiaCon(empresaAId, "Ventas hoy KPIs", [{ modulo: "ventas", accion: "consultar" }]);
+    expect((await obtenerKpisPanel(conVentas, empresaAId, HOY)).ventasDeHoy).toEqual(ventasDeHoyA);
+
+    const sinVentas = await membresiaCon(empresaAId, "Sin ventas hoy KPIs", [{ modulo: "inventario", accion: "consultar" }]);
+    expect((await obtenerKpisPanel(sinVentas, empresaAId, HOY)).ventasDeHoy).toBeNull();
+  });
+});
+
+describe("detalleVentasDeHoy", () => {
+  it("monto por moneda y, solo con más de una cuenta, el conteo por cuenta", () => {
+    expect(
+      detalleVentasDeHoy({
+        cantidad: 4,
+        montos: [
+          { moneda: "COP", total: "19500.50" },
+          { moneda: "USD", total: "20.00" },
+        ],
+        porCuenta: [
+          { nickname: "HOY_A_1", cantidad: 3 },
+          { nickname: "HOY_A_2", cantidad: 1 },
+        ],
+      })
+    ).toEqual(["COP 19.500,5 · USD 20", "HOY_A_1: 3 · HOY_A_2: 1"]);
+    expect(
+      detalleVentasDeHoy({ cantidad: 2, montos: [{ moneda: "COP", total: "150000.00" }], porCuenta: [{ nickname: "UNA", cantidad: 2 }] })
+    ).toEqual(["COP 150.000"]);
+  });
+});
+
+async function crearCuenta(empresaId: string, nickname: string): Promise<string> {
+  const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .insert(cuentasMl)
+      .values({
+        empresaId,
+        cuentaIdExterna: `ml-user-hoy-${randomUUID()}`,
+        nickname,
+        accessTokenCifrado: cifrarToken("access-hoy"),
+        refreshTokenCifrado: cifrarToken("refresh-hoy"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+      .returning({ id: cuentasMl.id })
+  );
+  return cuenta.id;
+}
+
+async function insertarPedido(empresaId: string, cuentaMlId: string, fecha: string, total: string, moneda: string, estado: string) {
+  await dbComoEmpresa(empresaId, (tx) =>
+    tx.insert(pedidos).values({
+      empresaId,
+      cuentaMlId,
+      pedidoIdExterno: `ORD-HOY-${randomUUID()}`,
+      fecha: new Date(fecha),
+      total,
+      moneda,
+      estado,
+    })
+  );
+}
 
 async function membresiaCon(
   empresaId: string,
