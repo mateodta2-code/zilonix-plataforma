@@ -5,7 +5,13 @@ import { dbComoEmpresa } from "./empresa-context";
 import { cuentasMl } from "./schema";
 import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { cifrarToken, descifrarToken } from "../lib/cifrado";
-import { CuentaMlDeOtraEmpresaError, desconectarCuenta, guardarCuentaConectada } from "../lib/ml/cuentas";
+import {
+  CuentaMlDeOtraEmpresaError,
+  desconectarCuenta,
+  guardarCuentaConectada,
+  obtenerEmpresaDueñaDeCuentaMl,
+  transferirCuentaMlAOtraEmpresa,
+} from "../lib/ml/cuentas";
 import type { TokensMl } from "../lib/ml/oauth";
 
 // Tarea 2.3 — misma prueba de siempre, contra Postgres real: una
@@ -147,5 +153,122 @@ describe("guardarCuentaConectada — RLS real (issue reconectar, tarea 2.3)", ()
     const todas = await dbComoEmpresa(empresaAId, (tx) => tx.select({ id: cuentasMl.id }).from(cuentasMl).where(eq(cuentasMl.cuentaIdExterna, cuentaIdExterna)));
     expect(todas).toHaveLength(1);
     expect(todas[0].id).toBe(deEmpresaA.id);
+  });
+});
+
+// Issue #181 — en vez de solo avisar, se ofrece transferir la cuenta
+// de la empresa dueña actual a la que la está conectando. El camino
+// privilegiado (dbComoTransferenciaCuentaMl, db/empresa-context.ts) es
+// justo lo que estas pruebas confirman que SOLO alcanza para la fila
+// puntual del cuenta_id_externa correcto — nunca con el superusuario,
+// nunca filtrando a otras filas.
+describe("transferir una cuenta de Mercado Libre a otra empresa (issue #181) — RLS real", () => {
+  it("obtenerEmpresaDueñaDeCuentaMl: lee el nombre de la empresa dueña actual, de solo lectura (nunca modifica la fila)", async () => {
+    const { empresaAId } = await crearDosEmpresas();
+    const cuentaIdExterna = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+
+    const deEmpresaA = await guardarCuentaConectada(empresaAId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_A",
+      tokens: tokensDePrueba(cuentaIdExterna, "a"),
+    });
+
+    const dueña = await obtenerEmpresaDueñaDeCuentaMl(cuentaIdExterna);
+    expect(dueña?.empresaId).toBe(empresaAId);
+    expect(dueña?.empresaNombre).toBe("Empresa A (prueba de aislamiento)");
+
+    // "Cancelar" (issue #181) es justamente NO llamar a
+    // transferirCuentaMlAOtraEmpresa — confirmar que la sola lectura de
+    // arriba (lo que corre la pantalla de confirmación antes de que
+    // nadie decida nada) nunca movió la fila.
+    const [filaSinTocar] = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, deEmpresaA.id)));
+    expect(filaSinTocar.empresaId).toBe(empresaAId);
+    expect(filaSinTocar.nickname).toBe("VENDEDOR_A");
+  });
+
+  it("obtenerEmpresaDueñaDeCuentaMl: cuenta_id_externa desconocido -> null", async () => {
+    const dueña = await obtenerEmpresaDueñaDeCuentaMl(`inexistente-${Date.now()}`);
+    expect(dueña).toBeNull();
+  });
+
+  it("transferirCuentaMlAOtraEmpresa: mueve la ÚNICA fila de empresa A a empresa B con tokens/nickname nuevos, sin tocar su histórico", async () => {
+    const { empresaAId, empresaBId } = await crearDosEmpresas();
+    const cuentaIdExterna = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+
+    const deEmpresaA = await guardarCuentaConectada(empresaAId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_A",
+      tokens: tokensDePrueba(cuentaIdExterna, "a"),
+    });
+
+    const transferida = await transferirCuentaMlAOtraEmpresa(empresaBId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_TRANSFERIDO",
+      tokens: tokensDePrueba(cuentaIdExterna, "transferida"),
+    });
+
+    // Mismo id — es la MISMA fila, nunca una nueva.
+    expect(transferida.id).toBe(deEmpresaA.id);
+
+    // Empresa A, con su contexto normal (dbComoEmpresa), ya no ve la
+    // cuenta — RLS a FORCE de siempre, nada especial para ella.
+    const veA = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, deEmpresaA.id)));
+    expect(veA).toHaveLength(0);
+
+    // Empresa B ya la ve, con los datos nuevos y reactivada.
+    const [filaB] = await dbComoEmpresa(empresaBId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, deEmpresaA.id)));
+    expect(filaB.empresaId).toBe(empresaBId);
+    expect(filaB.nickname).toBe("VENDEDOR_TRANSFERIDO");
+    expect(descifrarToken(filaB.accessTokenCifrado)).toBe("access-transferida");
+    expect(filaB.desconectadaTs).toBeNull();
+    expect(filaB.renovandoTs).toBeNull();
+
+    // Nunca una segunda fila para el mismo cuenta_id_externa.
+    const todas = await dbComoEmpresa(empresaBId, (tx) => tx.select({ id: cuentasMl.id }).from(cuentasMl).where(eq(cuentasMl.cuentaIdExterna, cuentaIdExterna)));
+    expect(todas).toHaveLength(1);
+  });
+
+  it("transferirCuentaMlAOtraEmpresa: funciona igual si la cuenta estaba desconectada en la empresa anterior", async () => {
+    const { empresaAId, empresaBId } = await crearDosEmpresas();
+    const cuentaIdExterna = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+
+    const deEmpresaA = await guardarCuentaConectada(empresaAId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_A",
+      tokens: tokensDePrueba(cuentaIdExterna, "a"),
+    });
+    await desconectarCuenta(empresaAId, deEmpresaA.id);
+
+    const transferida = await transferirCuentaMlAOtraEmpresa(empresaBId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_TRANSFERIDO",
+      tokens: tokensDePrueba(cuentaIdExterna, "transferida"),
+    });
+
+    const [filaB] = await dbComoEmpresa(empresaBId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, transferida.id)));
+    expect(filaB.desconectadaTs).toBeNull();
+  });
+
+  it("empresa B, con su contexto normal (dbComoEmpresa), nunca puede transferirse la cuenta a sí misma sin el camino privilegiado", async () => {
+    const { empresaAId, empresaBId } = await crearDosEmpresas();
+    const cuentaIdExterna = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+
+    const deEmpresaA = await guardarCuentaConectada(empresaAId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_A",
+      tokens: tokensDePrueba(cuentaIdExterna, "a"),
+    });
+
+    // Mismo UPDATE que transferirCuentaMlAOtraEmpresa hace de verdad,
+    // pero con el contexto de empresa de siempre — RLS a FORCE tiene
+    // que bloquearlo igual que bloquea cualquier otro intento de tocar
+    // la fila de otra empresa.
+    const actualizadas = await dbComoEmpresa(empresaBId, (tx) =>
+      tx.update(cuentasMl).set({ empresaId: empresaBId }).where(eq(cuentasMl.id, deEmpresaA.id)).returning({ id: cuentasMl.id })
+    );
+    expect(actualizadas).toHaveLength(0);
+
+    const [filaIntacta] = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, deEmpresaA.id)));
+    expect(filaIntacta.empresaId).toBe(empresaAId);
   });
 });

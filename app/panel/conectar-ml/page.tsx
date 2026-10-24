@@ -20,6 +20,11 @@ import styles from "./page.module.css";
 // Route Handler solo manda uno de estos códigos fijos — un mapa
 // cerrado, nunca el valor de la URL: cualquier código que no esté en
 // esta lista (incluido texto arbitrario) cae en el mensaje genérico.
+// Issue #181 — "cuenta_en_otra_empresa" ya no lo manda
+// /api/ml/callback (ahora redirige a /confirmar-transferencia en vez
+// de mostrar este error), pero el código fijo se mantiene para no
+// confundir un link viejo guardado (favorito, historial del
+// navegador) con el genérico.
 const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
   cuenta_en_otra_empresa: "Esta cuenta de Mercado Libre ya está conectada a otra empresa en Zilonix. Desconéctala allá primero o escríbenos a soporte.",
   estado_vencido: "La conexión tardó demasiado o se perdió el estado — empezá de nuevo con \"Conectar Mercado Libre\".",

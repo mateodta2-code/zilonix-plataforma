@@ -9,6 +9,12 @@ import { intercambiarCodigo, obtenerNickname } from "@/lib/ml/oauth";
 import { urlPublicaBase } from "@/lib/url-publica";
 import { NOMBRE_COOKIE_STATE, NOMBRE_COOKIE_VERIFIER } from "@/lib/ml/pkce-cookie";
 import { ejecutarImportacionInicial } from "@/lib/ml/importacion";
+import {
+  cifrarTransferenciaPendiente,
+  NOMBRE_COOKIE_TRANSFERENCIA,
+  OPCIONES_COOKIE_TRANSFERENCIA,
+  type TransferenciaPendiente,
+} from "@/lib/ml/transferencia-cookie";
 
 // Mismo criterio que el secreto del trabajador (app/api/ml/trabajador/
 // route.ts): comparar con crypto.timingSafeEqual, no con "===" — y
@@ -39,6 +45,20 @@ export async function GET(request: NextRequest) {
     // que se puso, o no se borra de verdad.
     respuesta.cookies.set(NOMBRE_COOKIE_VERIFIER, "", { path: "/api/ml", maxAge: 0 });
     respuesta.cookies.set(NOMBRE_COOKIE_STATE, "", { path: "/api/ml", maxAge: 0 });
+    return respuesta;
+  };
+
+  // Issue #181 — en vez de solo avisar "ya está conectada a otra
+  // empresa" y cortar ahí, se ofrece transferirla: los tokens nuevos
+  // (recién autorizados en Mercado Libre, todavía no se guardaron en
+  // ningún lado) viajan cifrados en una cookie httpOnly de corta vida
+  // — NUNCA en la URL ni en un log — hasta que se confirme o se
+  // cancele en /panel/conectar-ml/confirmar-transferencia.
+  const volverATransferencia = (pendiente: TransferenciaPendiente) => {
+    const respuesta = NextResponse.redirect(`${base}/panel/conectar-ml/confirmar-transferencia`);
+    respuesta.cookies.set(NOMBRE_COOKIE_VERIFIER, "", { path: "/api/ml", maxAge: 0 });
+    respuesta.cookies.set(NOMBRE_COOKIE_STATE, "", { path: "/api/ml", maxAge: 0 });
+    respuesta.cookies.set(NOMBRE_COOKIE_TRANSFERENCIA, cifrarTransferenciaPendiente(pendiente), OPCIONES_COOKIE_TRANSFERENCIA);
     return respuesta;
   };
 
@@ -103,7 +123,21 @@ export async function GET(request: NextRequest) {
     const redirectUri = `${base}/api/ml/callback`;
     const tokens = await intercambiarCodigo(code, redirectUri, codeVerifier);
     const nickname = await obtenerNickname(tokens.accessToken);
-    const cuenta = await guardarCuentaConectada(empresa.id, { cuentaIdExterna: tokens.cuentaIdExterna, nickname, tokens });
+
+    let cuenta: { id: string };
+    try {
+      cuenta = await guardarCuentaConectada(empresa.id, { cuentaIdExterna: tokens.cuentaIdExterna, nickname, tokens });
+    } catch (error) {
+      // Issue #181 — ya no se corta con un error genérico: se ofrece
+      // transferir. tokens/nickname recién se obtuvieron de Mercado
+      // Libre acá mismo, dentro de este try — por eso este catch
+      // interno, en vez de uno externo que no podría verlos todavía
+      // asignados con certeza.
+      if (error instanceof CuentaMlDeOtraEmpresaError) {
+        return volverATransferencia({ cuentaIdExterna: tokens.cuentaIdExterna, nickname, tokens });
+      }
+      throw error;
+    }
 
     // Tarea 2.5 — "en segundo plano": a propósito NO se espera (sin
     // await) para que la respuesta vuelva ya mismo; Railway corre un
@@ -125,9 +159,6 @@ export async function GET(request: NextRequest) {
     // error.message — nunca se logea completo, solo error.name (mismo
     // criterio que lib/ml/cuentas.ts ya usa para la renovación).
     console.error("[api/ml/callback] no se pudo completar la conexión:", error instanceof Error ? error.name : String(error));
-    if (error instanceof CuentaMlDeOtraEmpresaError) {
-      return volver("error=cuenta_en_otra_empresa");
-    }
     return volver("error=error_desconocido");
   }
 }
