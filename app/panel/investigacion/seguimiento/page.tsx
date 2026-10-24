@@ -16,6 +16,7 @@ import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { PanelLateral } from "@/components/marco/PanelLateral";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { agregarSeguimientoAction, eliminarSeguimientoAction, marcarAlertaLeidaAction, procesarAgregarPorQuery } from "./actions";
@@ -69,6 +70,88 @@ function celdaConDelta(
 }
 
 const numeroPlano = (n: number) => n.toLocaleString("es-CO");
+
+// Issue #200 (Sharel) — la tarjeta de abajo solo tenía el "?" chico
+// (Ayuda.tsx) y a un cliente no le alcanzaba. Guía más larga, en un
+// panel lateral (PanelLateral.tsx, no un tooltip), con las 5 secciones
+// que pidió el issue.
+function GuiaAgregarSeguimiento() {
+  return (
+    <>
+      <div>
+        <h3>1. Elegí el tipo primero</h3>
+        <p>
+          <strong>Producto:</strong> seguís UNA publicación o un producto de catálogo puntual (precio, inventario, ventas).
+        </p>
+        <p>
+          <strong>Tienda / vendedor:</strong> seguís TODAS las publicaciones de un vendedor — te avisamos cuando sube o baja una.
+        </p>
+      </div>
+
+      <div>
+        <h3>2. Producto: qué pegar</h3>
+        <ul>
+          <li>
+            El link completo de la publicación — se ve así: <code>articulo.mercadolibre.com.co/MCO-123456789-...</code>
+          </li>
+          <li>
+            O el id solo: <code>MCO123456789</code>.
+          </li>
+        </ul>
+        <p>
+          <strong>Cómo copiar el link:</strong> con la publicación abierta en Mercado Libre, hacé clic en la barra de direcciones del navegador
+          (arriba de todo, donde dice la URL) para seleccionarla completa, copiala (Ctrl+C o Cmd+C) y pegala en el campo de acá.
+        </p>
+      </div>
+
+      <div>
+        <h3>3. Tienda / vendedor: qué pegar</h3>
+        <p>Lo más seguro es el número de seller_id solo (nada de letras), pegalo directo. También funcionan links que TRAEN ese número:</p>
+        <ul>
+          <li>
+            <code>...?seller_id=123456...</code>
+          </li>
+          <li>
+            <code>...?CustId=123456...</code>
+          </li>
+          <li>
+            <code>..._CustId_123456...</code>
+          </li>
+        </ul>
+        <p>
+          <strong>Aviso:</strong> un link de tienda oficial (<code>mercadolibre.com.co/tienda/nombre</code>) o una página con nickname (
+          <code>mercadolibre.com.co/pagina/nombre</code>) SOLOS, sin ninguno de esos parámetros, no alcanzan — Mercado Libre no deja ver el
+          seller_id real desde ahí. Seguí el paso 4 para conseguirlo.
+        </p>
+      </div>
+
+      <div>
+        <h3>4. Cómo conseguir el id de un competidor</h3>
+        <ol>
+          <li>Abrí cualquier publicación de ese vendedor en Mercado Libre.</li>
+          <li>Hacé clic en su nombre o en su foto, donde dice &quot;Vendido por...&quot; — se abre la página de esa tienda.</li>
+          <li>Copiá el link de la barra de direcciones de ESA página (ahí sí suele traer seller_id= o CustId=) y pegalo acá con tipo &quot;Tienda / vendedor&quot;.</li>
+        </ol>
+        <p>
+          También podés usar la extensión de Chrome de Zilonix: abrí la publicación o la tienda del competidor y hacé clic en &quot;Seguir en
+          Zilonix&quot; — agrega el seguimiento sola, sin tener que copiar ni pegar nada.
+        </p>
+      </div>
+
+      <div>
+        <h3>5. &quot;Es competidor&quot;</h3>
+        <p>Marcá esta casilla cuando el producto o la tienda es de la competencia, no propio — así lo vas a distinguir en la lista.</p>
+        <p>
+          <strong>Cupo:</strong> hasta 5 competidores a la vez por empresa. Para agregar un sexto, primero quitá uno de la lista.
+        </p>
+        <p>
+          <strong>Cambiar si es competidor:</strong> no hay un botón de editar — pegá otra vez el MISMO link o id con la casilla en el estado que
+          quieras: se actualiza el que ya tenías, nunca se duplica.
+        </p>
+      </div>
+    </>
+  );
+}
 
 // Issue #175 — pantalla de seguimiento diario de productos, tiendas y
 // competidores de Mercado Libre. Mismo permiso que Investigación
@@ -168,7 +251,12 @@ export default async function SeguimientoPage({
       </Tarjeta>
 
       <Tarjeta className={styles.seccion}>
-        <p className={styles.tituloSeccion}>Agregar producto, tienda o competidor</p>
+        <div className={styles.encabezadoSeccion}>
+          <p className={styles.tituloSeccion}>Agregar producto, tienda o competidor</p>
+          <PanelLateral textoBoton="Cómo encontrar el id / Ver guía" titulo="Cómo agregar un producto, tienda o competidor">
+            <GuiaAgregarSeguimiento />
+          </PanelLateral>
+        </div>
         <form action={agregarSeguimientoAction} className={styles.filaFormulario}>
           <Campo etiqueta="Tipo">
             <select name="tipo" className="zx-control" defaultValue="producto">
