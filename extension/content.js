@@ -58,6 +58,8 @@
       ["calificacion", datos.calificacion],
       ["numeroOpiniones", datos.numeroOpiniones],
     ];
+    if (datos.vendidosExacto !== undefined) filas.push(["vendidosExacto", datos.vendidosExacto]);
+    if (datos.ventasPromedioMes !== undefined) filas.push(["ventasPromedioMesEstimado", datos.ventasPromedioMes]);
     if (datos.esCatalogo !== undefined) filas.push(["esCatalogo", datos.esCatalogo], ["esFull", datos.esFull], ["envioGratis", datos.envioGratis]);
     return filas.map((fila) => fila.map(ZS.celdaCsv).join(",")).join("\n");
   }
@@ -158,7 +160,12 @@
     html += filaHtml("Precio", formatoPrecio(datos.precio, datos.moneda), datos.precio == null);
     html += filaHtml("Precio anterior", formatoPrecio(datos.precioAnterior, datos.moneda), datos.precioAnterior == null);
     html += filaHtml("Descuento", datos.descuentoPorcentaje != null ? `${datos.descuentoPorcentaje}%` : SIN_DATO, datos.descuentoPorcentaje == null);
-    html += filaHtml("Vendidos", textoCampo(datos.vendidos), datos.vendidos == null);
+    // Issue #174, mejora ML — vendidosExacto viene del JSON que la
+    // propia página incrusta (sold_quantity real, ver
+    // lectores/mercadolibre.js); undefined en los otros 5 sitios
+    // (siguen con la etiqueta genérica "Vendidos" de siempre).
+    const etiquetaVendidos = datos.vendidosExacto === true ? "Vendidos (exacto)" : datos.vendidosExacto === false ? "Vendidos (aproximado)" : "Vendidos";
+    html += filaHtml(etiquetaVendidos, textoCampo(datos.vendidos), datos.vendidos == null);
     html += filaHtml("Vendedor / tienda", textoCampo(datos.vendedor), datos.vendedor == null);
     html += filaHtml("Calificación", datos.calificacion != null ? `${datos.calificacion} / 5` : SIN_DATO, datos.calificacion == null);
     html += filaHtml("N° de opiniones", textoCampo(datos.numeroOpiniones), datos.numeroOpiniones == null);
@@ -166,6 +173,13 @@
       html += filaHtml("Catálogo (varios vendedores)", datos.esCatalogo ? "Sí" : "No", false);
       html += filaHtml("Full", datos.esFull ? '<span class="zx-fila__valor--chip">FULL</span>' : "No", false);
       html += filaHtml("Envío gratis", datos.envioGratis ? "Sí" : "No", false);
+    }
+    // Issue #174, mejora ML — siempre "estimado": multiplicar/dividir
+    // nunca es una cifra que Mercado Libre confirme directamente,
+    // aunque "vendidos" sea el exacto. Solo existe en ML (ventasPromedioMes
+    // viene undefined en los otros 5 sitios).
+    if (datos.ventasPromedioMes !== undefined) {
+      html += filaHtml("Ventas promedio al mes (estimado)", textoCampo(datos.ventasPromedioMes), datos.ventasPromedioMes == null);
     }
     cuerpo.innerHTML = html;
 

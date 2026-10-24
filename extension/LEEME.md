@@ -2,6 +2,8 @@
 
 Lee, en la página que ya tenés abierta (Mercado Libre Colombia, Amazon, Temu, AliExpress, Shein o Alibaba), los mismos datos que ves en pantalla: título, precio, precio anterior, descuento, vendidos (cuando el sitio los muestra), vendedor o tienda, calificación y número de opiniones — y en Mercado Libre, además, si es catálogo, Full y envío gratis.
 
+**Mercado Libre, "vendidos" exacto**: la interfaz solo muestra una etiqueta redondeada ("+500 vendidos"), pero el número real sigue viajando en el JSON que la propia página incrusta para pintarse — se lee ese JSON (o, si cambió de forma, se lo busca directo en el HTML como texto) y se muestra "Vendidos (exacto)" cuando se encuentra, o "Vendidos (aproximado)" cuando solo queda la etiqueta redondeada. Con eso y la fecha de publicación (también incrustada) se calcula "Ventas promedio al mes (estimado)" — siempre estimado, nunca una cifra que Mercado Libre confirme directamente. Nada de esto pide nada por red: todo sale del HTML que el navegador ya cargó.
+
 - En una página de **producto**: un panel flotante con esos datos y un botón "Copiar datos (CSV)".
 - En una página de **búsqueda o listado**: un resumen (cuántos productos se ven, precio mínimo/promedio/máximo, suma de vendidos visibles) y el top 10 por vendidos, con el mismo botón para copiar.
 
@@ -33,8 +35,10 @@ Deja el archivo en `dist/extension/zilonix-investigacion-v<version>.zip` (usa la
 
 ## Pruebas
 
-Los selectores de cada sitio (`extension/lectores/*.js`) y el panel (`extension/content.js`) corren dentro del navegador — no se pueden probar con vitest sin un navegador real. Las funciones de seguridad (`extension/seguridad.js` — escapar HTML, validar que un link sea http(s) real, neutralizar una fórmula de Excel/Sheets en el CSV) sí están separadas justo para poder probarse: `extension/seguridad.test.ts` corre con el resto de `npm test`, igual que cualquier prueba de `lib/`.
+Los selectores de cada sitio (`extension/lectores/*.js`) y el panel (`extension/content.js`) corren dentro del navegador — no se pueden probar con vitest sin un navegador real. Las funciones que SÍ son texto puro, sin DOM, están separadas justo para poder probarse con un HTML/texto de ejemplo: `extension/seguridad.js` (escapar HTML, validar que un link sea http(s) real, neutralizar una fórmula de Excel/Sheets en el CSV) y, en Mercado Libre, `leerDatosIncrustados`/`calcularVentasPromedioMes` (`extension/lectores/mercadolibre.js`). `extension/seguridad.test.ts` y `extension/lectores/mercadolibre.test.ts` corren con el resto de `npm test`, igual que cualquier prueba de `lib/`.
 
 ## Si un sitio cambió y algún dato dejó de aparecer
 
 Cada sitio tiene su propio archivo en `extension/lectores/<sitio>.js`, con una lista corta de selectores por campo (el primero que encuentra en la página, de arriba hacia abajo). Si un campo empieza a salir "No disponible" en un sitio donde antes sí aparecía, lo más probable es que ese sitio haya cambiado su HTML — hay que abrir la página real, inspeccionar el elemento (clic derecho → Inspeccionar) y agregar el selector nuevo a la lista de ese campo, sin tocar nada de `content.js` ni de los otros lectores.
+
+Si "Vendidos (exacto)" de Mercado Libre empieza a salir siempre como "(aproximado)": lo más probable es que Mercado Libre haya renombrado `window.__NORDIC_RENDERING_CTX__` — buscar en el código fuente de una página de producto real (clic derecho → "Ver código fuente") qué variable global trae ahora `sold_quantity`, y actualizar `NOMBRE_VARIABLE_INCRUSTADA` en `extension/lectores/mercadolibre.js`. El respaldo de buscar `"sold_quantity"` directo en el texto del HTML sigue funcionando aunque cambie el nombre de la variable — solo se pierde si Mercado Libre deja de incrustar ese dato por completo.

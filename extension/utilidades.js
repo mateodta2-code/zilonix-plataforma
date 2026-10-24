@@ -115,7 +115,7 @@
     return null;
   }
 
-  window.ZilonixUtilidades = {
+  const api = {
     primerElemento,
     textoDe,
     atributoDe,
@@ -125,4 +125,16 @@
     textoPorPatron,
     metaContenido,
   };
+
+  // Issue #174 — mismo patrón dual que extension/seguridad.js: en el
+  // navegador real no existe `module` (este bloque nunca corre ahí);
+  // en Node (vitest, o un require() de otro lector para sus propias
+  // pruebas) sí existe `module` pero NO existe `window` — por eso
+  // también se guarda ese caso acá, no solo en quien hace el require.
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = api;
+  }
+  if (typeof window !== "undefined") {
+    window.ZilonixUtilidades = api;
+  }
 })();
