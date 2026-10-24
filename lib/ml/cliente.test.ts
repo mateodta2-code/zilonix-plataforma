@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buscarProductosCatalogo,
+  diagnosticoCatalogoMl,
+  diagnosticoItemMl,
+  diagnosticoVendedorMl,
   LimiteMercadoLibreError,
   linkPublicacion,
   MlNoAutorizadoError,
@@ -16,6 +19,14 @@ import {
 
 function respuestaJson(data: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => data } as Response;
+}
+
+// Las 3 funciones de diagnóstico (issue #175) leen con res.text() +
+// JSON.parse a mano (pedirCrudo no reusa pedir(), ver el comentario
+// real en cliente.ts) — nunca con res.json() como el resto de este
+// archivo, para no perder el status real de un 401/403/429/5xx.
+function respuestaConTexto(data: unknown, status = 200) {
+  return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(data) } as Response;
 }
 
 // Corrección de Pablo (PR #112) — este archivo prueba exactamente lo
@@ -240,5 +251,134 @@ describe("obtenerMejoresProductosCategoria — highlights con type ITEM | PRODUC
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
     await expect(obtenerMejoresProductosCategoria("MCO1234", "token")).rejects.toThrow(MlNoAutorizadoError);
+  });
+});
+
+// Issue #175 — diagnóstico real (/panel/investigacion/diagnostico,
+// solo Dueño): a diferencia del resto de este archivo, estas 3
+// funciones NUNCA lanzan un error tipado por el status — devuelven el
+// status HTTP real tal cual (incluido 401/403/429/5xx), porque todo el
+// propósito es VER la respuesta real de Mercado Libre para publicaciones
+// y tiendas ajenas, no interpretarla.
+describe("diagnosticoItemMl / diagnosticoVendedorMl / diagnosticoCatalogoMl (issue #175, diagnóstico)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("diagnosticoItemMl: pide los campos exactos pedidos y devuelve el status + los datos crudos tal cual", async () => {
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+      expect(String(url)).toBe(
+        "https://api.mercadolibre.com/items/MCO111?attributes=id,available_quantity,sold_quantity,price,original_price,status,catalog_listing,catalog_product_id,shipping"
+      );
+      expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer token-secreto");
+      return respuestaConTexto({ id: "MCO111", available_quantity: 5, sold_quantity: 2, price: 100, original_price: 120, status: "active" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await diagnosticoItemMl("MCO111", "token-secreto");
+
+    expect(resultado.status).toBe(200);
+    expect(resultado.data).toEqual({ id: "MCO111", available_quantity: 5, sold_quantity: 2, price: 100, original_price: 120, status: "active" });
+    // El diagnóstico nunca repite el token en lo que devuelve — solo en
+    // el header Authorization que de verdad hay que mandar.
+    expect(JSON.stringify(resultado)).not.toContain("token-secreto");
+  });
+
+  it("diagnosticoItemMl: un 401/403/429/5xx real NUNCA se convierte en un error tipado — el status real queda visible", async () => {
+    for (const status of [401, 403, 429, 500, 503]) {
+      vi.stubGlobal("fetch", vi.fn(async () => respuestaConTexto({ message: "lo que sea" }, status)));
+      const resultado = await diagnosticoItemMl("MCO111", "token");
+      expect(resultado.status).toBe(status);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("diagnosticoItemMl: tiempo agotado / falla de red -> status 0, nunca una excepción sin capturar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      })
+    );
+    const resultado = await diagnosticoItemMl("MCO111", "token");
+    expect(resultado.status).toBe(0);
+    expect(resultado.data).toBeNull();
+  });
+
+  it("diagnosticoItemMl: respuesta no-JSON -> data null, el status real sigue visible", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, text: async () => "<html>no soy json</html>" }) as Response));
+    const resultado = await diagnosticoItemMl("MCO111", "token");
+    expect(resultado.status).toBe(200);
+    expect(resultado.data).toBeNull();
+  });
+
+  it("diagnosticoVendedorMl: pide los dos caminos (items/search y sites/MCO/search) y cuenta los resultados de cada uno por separado", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (String(url) === "https://api.mercadolibre.com/users/987654321/items/search") {
+        return respuestaConTexto({ results: ["MCO1", "MCO2"] });
+      }
+      if (String(url) === "https://api.mercadolibre.com/sites/MCO/search?seller_id=987654321") {
+        return respuestaConTexto({ results: ["MCO1", "MCO2", "MCO3"] }, 200);
+      }
+      throw new Error(`URL inesperada en la prueba: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await diagnosticoVendedorMl("987654321", "token");
+
+    expect(resultado).toEqual({
+      itemsSearch: { status: 200, cantidadResultados: 2 },
+      sitesSearch: { status: 200, cantidadResultados: 3 },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("diagnosticoVendedorMl: un 401 en uno de los dos caminos no afecta al otro (son independientes)", async () => {
+    vi.stubGlobal("fetch", async (url: unknown) =>
+      String(url).includes("/items/search") ? respuestaConTexto({}, 401) : respuestaConTexto({ results: [] }, 200)
+    );
+    const resultado = await diagnosticoVendedorMl("987654321", "token");
+    expect(resultado.itemsSearch.status).toBe(401);
+    expect(resultado.sitesSearch.status).toBe(200);
+  });
+
+  it("diagnosticoVendedorMl: sin campo results (forma inesperada) -> cantidadResultados null, nunca 0 inventado", async () => {
+    vi.stubGlobal("fetch", async () => respuestaConTexto({ algo: "distinto" }, 200));
+    const resultado = await diagnosticoVendedorMl("987654321", "token");
+    expect(resultado.itemsSearch.cantidadResultados).toBeNull();
+    expect(resultado.sitesSearch.cantidadResultados).toBeNull();
+  });
+
+  it("diagnosticoCatalogoMl: cuenta las ofertas y busca un campo de botón de compra en la primera (array plano)", async () => {
+    vi.stubGlobal("fetch", async () =>
+      respuestaConTexto([
+        { item_id: "MCO1", price: 100, buy_box_winner: true },
+        { item_id: "MCO2", price: 90 },
+      ])
+    );
+    const resultado = await diagnosticoCatalogoMl("MCO999", "token");
+
+    expect(resultado.status).toBe(200);
+    expect(resultado.totalOfertas).toBe(2);
+    expect(resultado.primeraOferta).toEqual({ item_id: "MCO1", price: 100, buy_box_winner: true });
+    expect(resultado.camposGanadorEncontrados).toEqual([{ clave: "buy_box_winner", valor: true }]);
+  });
+
+  it("diagnosticoCatalogoMl: también funciona si ML envuelve la lista en { results: [...] }", async () => {
+    vi.stubGlobal("fetch", async () => respuestaConTexto({ results: [{ item_id: "MCO1", price: 100 }] }));
+    const resultado = await diagnosticoCatalogoMl("MCO999", "token");
+    expect(resultado.totalOfertas).toBe(1);
+    expect(resultado.primeraOferta).toEqual({ item_id: "MCO1", price: 100 });
+  });
+
+  it("diagnosticoCatalogoMl: ningún campo que suene a botón de compra -> lista vacía, nunca inventa uno", async () => {
+    vi.stubGlobal("fetch", async () => respuestaConTexto([{ item_id: "MCO1", price: 100, seller_id: "123" }]));
+    const resultado = await diagnosticoCatalogoMl("MCO999", "token");
+    expect(resultado.camposGanadorEncontrados).toEqual([]);
+  });
+
+  it("diagnosticoCatalogoMl: 404 (sin ofertas reales) -> status real, totalOfertas null (no hay lista que contar)", async () => {
+    vi.stubGlobal("fetch", async () => respuestaConTexto({ message: "not found" }, 404));
+    const resultado = await diagnosticoCatalogoMl("MCO999", "token");
+    expect(resultado.status).toBe(404);
+    expect(resultado.totalOfertas).toBeNull();
   });
 });

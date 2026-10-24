@@ -418,3 +418,120 @@ export function linkPublicacion(itemId: string): string | null {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
   return `https://articulo.mercadolibre.com.co/${itemId.replace(/^MCO(\d+)$/, "MCO-$1")}`;
 }
+
+// Issue #175 — "antes de escribir el lector, confirma qué endpoints de
+// ML responden de verdad para publicaciones y tiendas AJENAS": estas 3
+// funciones son ese diagnóstico en sí (/panel/investigacion/diagnostico,
+// solo Dueño), no el lector real. A propósito NO reusan pedir(): pedir()
+// interpreta 401/403/429/5xx en errores tipados y colapsa el status
+// real (ej. cualquier 5xx queda igual que un timeout) — el único
+// propósito de este diagnóstico es ver la respuesta REAL de Mercado
+// Libre tal cual (status HTTP + campos crudos), para decidir qué
+// endpoints sirven antes de construir algo sobre un supuesto sin
+// confirmar. Mismo timeout (TIMEOUT_MS) que pedir(); el token nunca
+// forma parte de lo que devuelven, ni se loguea.
+async function pedirCrudo(url: string, token: string): Promise<{ status: number; data: unknown }> {
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch {
+    return { status: 0, data: null }; // tiempo agotado o falla de red — igual que pedir(), nunca una excepción sin capturar
+  }
+  const texto = await res.text().catch(() => "");
+  let data: unknown = null;
+  try {
+    data = JSON.parse(texto);
+  } catch {
+    // Respuesta no-JSON — se deja data en null, el status real sigue siendo útil.
+  }
+  return { status: res.status, data };
+}
+
+export type DiagnosticoItemMl = { status: number; data: unknown };
+
+// Punto 1 del diagnóstico — GET /items/{id} de una publicación AJENA,
+// con los campos exactos que pidió Pablo: available_quantity,
+// sold_quantity, price, original_price, status, catalog_listing,
+// catalog_product_id, shipping (logistic_type/free_shipping vienen
+// adentro de shipping, se pide el objeto completo en vez de desarmarlo
+// a mano — así se ve tal cual lo manda Mercado Libre, sin adivinar su
+// forma real).
+export async function diagnosticoItemMl(itemId: string, token: string): Promise<DiagnosticoItemMl> {
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,available_quantity,sold_quantity,price,original_price,status,catalog_listing,catalog_product_id,shipping`;
+  return pedirCrudo(url, token);
+}
+
+function cantidadResultados(data: unknown): number | null {
+  if (!data || typeof data !== "object") return null;
+  const resultados = (data as { results?: unknown }).results;
+  return Array.isArray(resultados) ? resultados.length : null;
+}
+
+export type DiagnosticoVendedorMl = {
+  itemsSearch: { status: number; cantidadResultados: number | null };
+  sitesSearch: { status: number; cantidadResultados: number | null };
+};
+
+// Punto 2 del diagnóstico — dos caminos distintos para "publicaciones
+// de un vendedor AJENO" (ninguno de los dos confirmado todavía contra
+// uno real): GET /users/{seller_id}/items/search (el mismo endpoint
+// que buscarItemsPorSkuMl ya usa, pero siempre con la cuentaIdExterna
+// PROPIA — acá se prueba con un seller_id ajeno) y GET
+// /sites/MCO/search?seller_id={seller_id} (la búsqueda pública del
+// sitio, filtrada por vendedor). Las dos en paralelo — son
+// independientes, un fallo de una no debería demorar la otra.
+export async function diagnosticoVendedorMl(sellerId: string, token: string): Promise<DiagnosticoVendedorMl> {
+  const [itemsSearch, sitesSearch] = await Promise.all([
+    pedirCrudo(`${BASE_URL}/users/${encodeURIComponent(sellerId)}/items/search`, token),
+    pedirCrudo(`${BASE_URL}/sites/${SITE_ID}/search?seller_id=${encodeURIComponent(sellerId)}`, token),
+  ]);
+  return {
+    itemsSearch: { status: itemsSearch.status, cantidadResultados: cantidadResultados(itemsSearch.data) },
+    sitesSearch: { status: sitesSearch.status, cantidadResultados: cantidadResultados(sitesSearch.data) },
+  };
+}
+
+export type DiagnosticoCatalogoMl = {
+  status: number;
+  totalOfertas: number | null;
+  primeraOferta: unknown;
+  camposGanadorEncontrados: { clave: string; valor: unknown }[];
+};
+
+// Nunca se afirma el nombre real del campo sin verlo: se busca en las
+// claves de la primera oferta cualquiera que suene a "quién gana el
+// botón de compra" (buy_box_winner o similar, pedido textual de
+// Pablo) — lo que encuentre queda en camposGanadorEncontrados para que
+// una persona lo confirme mirando el valor real, nunca se asume cuál
+// es ni se inventa un campo que no está.
+const PATRON_CAMPO_GANADOR_BOTON_COMPRA = /buy.?box|winner|gana/i;
+
+function buscarCamposGanadorBotonCompra(oferta: unknown): { clave: string; valor: unknown }[] {
+  if (!oferta || typeof oferta !== "object") return [];
+  return Object.entries(oferta as Record<string, unknown>)
+    .filter(([clave]) => PATRON_CAMPO_GANADOR_BOTON_COMPRA.test(clave))
+    .map(([clave, valor]) => ({ clave, valor }));
+}
+
+// Punto 3 del diagnóstico — GET /products/{product_id}/items, el
+// mismo endpoint real que ya usa obtenerOfertasProducto() (confirmado
+// en producción para catálogo), pero acá SIN pasar por su parser
+// angosto (que solo se queda con itemId/precio/moneda/sellerId/Full/
+// envío gratis): el diagnóstico necesita ver TODAS las claves
+// crudas de la primera oferta para poder encontrar un campo de botón
+// de compra que todavía no está mapeado a ningún lado.
+export async function diagnosticoCatalogoMl(productId: string, token: string): Promise<DiagnosticoCatalogoMl> {
+  const { status, data } = await pedirCrudo(`${BASE_URL}/products/${encodeURIComponent(productId)}/items`, token);
+  // null (no [], que inventaría "0 ofertas") cuando la respuesta ni
+  // siquiera trae una lista reconocible (ej. el cuerpo de un 404) —
+  // "0 ofertas reales" y "no se pudo saber cuántas hay" son datos
+  // distintos, nunca se confunden.
+  const lista = Array.isArray(data) ? data : Array.isArray((data as { results?: unknown } | null)?.results) ? (data as { results: unknown[] }).results : null;
+  const primeraOferta = lista?.[0] ?? null;
+  return {
+    status,
+    totalOfertas: lista ? lista.length : null,
+    primeraOferta,
+    camposGanadorEncontrados: buscarCamposGanadorBotonCompra(primeraOferta),
+  };
+}

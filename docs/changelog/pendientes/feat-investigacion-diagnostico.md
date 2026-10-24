@@ -1,0 +1,18 @@
+- **2026-10-24** — Issue #175, tarea chica pedida por Pablo: pantalla de diagnóstico para confirmar en vivo (con un token real) qué endpoints de Mercado Libre responden de verdad para publicaciones y tiendas AJENAS, antes de construir el lector real del seguimiento diario. Sin base de datos ni migración — nada de esto persiste.
+
+  **`/panel/investigacion/diagnostico`** (`app/panel/investigacion/diagnostico/page.tsx`) — 3 formularios independientes (GET normal, cada uno con su propio campo):
+  1. `itemId` → `GET /items/{id}` con los campos exactos pedidos (`available_quantity`, `sold_quantity`, `price`, `original_price`, `status`, `catalog_listing`, `catalog_product_id`, `shipping`) — muestra el status HTTP y los datos crudos tal cual vienen.
+  2. `seller_id` → `GET /users/{seller_id}/items/search` y `GET /sites/MCO/search?seller_id={seller_id}` en paralelo — status HTTP y cantidad de resultados de cada uno por separado.
+  3. `product_id` de catálogo → `GET /products/{id}/items` — status HTTP, total de ofertas, la primera oferta cruda, y una búsqueda automática (regex `buy.?box|winner|gana` sobre las claves de esa primera oferta) de algún campo que indique quién gana el botón de compra — nunca afirma cuál es si no aparece ninguno.
+
+  Solo para el **Dueño** de la empresa: mismo candado que `/panel/roles` (`requierePermiso("configuracion","autorizar")` — ninguna plantilla de rol lo concede, solo el rol que nace con la empresa). Usa el token de la cuenta ML **propia** ya conectada (`obtenerCuentaMlActiva` + `obtenerAccessTokenVigente`, mismo camino que `investigacion.ts`) — el token nunca sale de `lib/ml/diagnostico.ts` hacia la página, ni aparece en ningún resultado mostrado o logueado.
+
+  **`lib/ml/cliente.ts`** — 3 funciones nuevas agregadas AL FINAL del archivo, sin tocar ninguna existente (otra rama trabaja ahí): `diagnosticoItemMl`, `diagnosticoVendedorMl`, `diagnosticoCatalogoMl`. A propósito NO reusan `pedir()`: `pedir()` interpreta 401/403/429/5xx en errores tipados y colapsa el status real (ej. cualquier 5xx queda igual que un timeout) — el único propósito de este diagnóstico es ver la respuesta REAL de Mercado Libre tal cual, así que usan un `pedirCrudo()` nuevo (mismo `TIMEOUT_MS`, nunca el token en lo que devuelve) que deja pasar cualquier status sin lanzar nada.
+
+  **`lib/ml/diagnostico.ts`** (nuevo) — resuelve el token de la cuenta propia y llama a las 3 funciones de `cliente.ts`; capa aparte para poder probarla con mocks, sin repetir la resolución de cuenta/token en la página.
+
+  **Herramienta temporal** — pendiente de borrar una vez confirmados los 3 puntos y construido el lector real de la tarea grande (`feat-investigacion-seguimiento`, issue #175, todavía sin PR — el turno de migración es del PR #100).
+
+  Tests nuevos: `lib/ml/cliente.test.ts` (+13, fetch simulado: status real pasa igual en 200/401/403/429/5xx/timeout, conteo de resultados por los dos caminos de vendedor, detección del campo de botón de compra, nunca inventa un 0/null donde no corresponde); `lib/ml/diagnostico.test.ts` (5, mockeando cuentas.ts/cliente.ts: sin cuenta conectada nunca llama a Mercado Libre, el token nunca aparece en el resultado); `app/panel/investigacion/diagnostico/page.test.ts` (2, sin Postgres: la página llama el candado real de "solo Dueño", y ese permiso es hoy exclusivo del Dueño en `lib/roles-plantillas.ts`).
+
+  Verificado: `npm run typecheck` en verde. `npm test` en verde, mismo baseline conocido (solo los archivos que ya fallaban por `DATABASE_URL_APP`/`DATABASE_URL_TRABAJADOR` en este entorno, sin regresión) — todas las pruebas nuevas de esta tarea corren sin Postgres real. `npm run build` compila y tipa en verde.
