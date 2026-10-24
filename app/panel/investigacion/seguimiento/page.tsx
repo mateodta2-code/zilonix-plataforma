@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect, RedirectType } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
@@ -15,8 +15,17 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { agregarSeguimientoAction, eliminarSeguimientoAction, marcarAlertaLeidaAction } from "./actions";
+import { agregarSeguimientoAction, eliminarSeguimientoAction, marcarAlertaLeidaAction, procesarAgregarPorQuery } from "./actions";
 import styles from "./page.module.css";
+
+// Issue #182 — mismo patrón /^MCO\d+$/ y /^\d+$/ que la extensión usa
+// del lado del content script (extension/lectores/mercadolibre.js,
+// PATRON_ID_ITEM/PATRON_ID_VENDEDOR) antes de armar el link — se vuelve
+// a validar ACÁ porque el query param que llega a esta pantalla nunca
+// es confiable solo porque la extensión lo armó bien: cualquiera puede
+// pegar la URL a mano con basura.
+const PATRON_ID_ITEM = /^MCO\d+$/;
+const PATRON_ID_VENDEDOR = /^\d+$/;
 
 function dinero(n: number | string | null): string {
   if (n == null) return "—";
@@ -38,7 +47,7 @@ function siNoODesconocido(valor: boolean | null, textoSi: string, textoNo: strin
 export default async function SeguimientoPage({
   searchParams,
 }: {
-  searchParams: { error?: string; agregado?: string; eliminado?: string; leida?: string };
+  searchParams: { error?: string; agregado?: string; eliminado?: string; leida?: string; yaExistia?: string; agregar?: string; agregar_tienda?: string };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -56,6 +65,25 @@ export default async function SeguimientoPage({
     return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
+  // Issue #182 — la extensión (0.3.0, "Seguir en Zilonix") abre esta
+  // pantalla con ?agregar=<itemId MCO> o ?agregar_tienda=<sellerId
+  // numérico>. Se procesa ANTES de listar y siempre termina en un
+  // redirect REPLACE a la misma ruta sin ese query (nunca push — si
+  // quedara en el historial, volver atrás y F5 lo dispararía otra
+  // vez). El formato se valida acá mismo: un id que no matchea nunca
+  // llega a procesarAgregarPorQuery, se avisa "inválido" directo.
+  if (typeof searchParams.agregar === "string") {
+    if (!PATRON_ID_ITEM.test(searchParams.agregar)) {
+      redirect(`/panel/investigacion/seguimiento?error=${encodeURIComponent("El link de producto que llegó no es válido.")}`, RedirectType.replace);
+    }
+    await procesarAgregarPorQuery(empresa.id, usuario.id, { tipo: "producto", mlIdExterno: searchParams.agregar });
+  } else if (typeof searchParams.agregar_tienda === "string") {
+    if (!PATRON_ID_VENDEDOR.test(searchParams.agregar_tienda)) {
+      redirect(`/panel/investigacion/seguimiento?error=${encodeURIComponent("El link de tienda que llegó no es válido.")}`, RedirectType.replace);
+    }
+    await procesarAgregarPorQuery(empresa.id, usuario.id, { tipo: "tienda", mlIdExterno: searchParams.agregar_tienda });
+  }
+
   const [alertasDelDia, seguimientos] = await Promise.all([listarAlertasDelDia(empresa.id), listarSeguimientosConUltimaFoto(empresa.id)]);
   const competidoresActivos = seguimientos.filter((s) => s.seguimiento.esCompetidor).length;
 
@@ -68,6 +96,7 @@ export default async function SeguimientoPage({
 
       {searchParams.error ? <EstadoVacio>{searchParams.error}</EstadoVacio> : null}
       {searchParams.agregado ? <p className={styles.aviso}>Seguimiento agregado — la primera foto llega con la próxima revisión diaria.</p> : null}
+      {searchParams.yaExistia ? <p className={styles.aviso}>Ese producto o tienda ya estaba en seguimiento.</p> : null}
       {searchParams.eliminado ? <p className={styles.aviso}>Seguimiento quitado.</p> : null}
       {searchParams.leida ? <p className={styles.aviso}>Alerta marcada como leída.</p> : null}
 

@@ -6,6 +6,7 @@ import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientos
 import { cifrarToken } from "@/lib/cifrado";
 import {
   agregarSeguimiento,
+  buscarSeguimientoActivoPorMlId,
   contarCompetidoresActivos,
   eliminarSeguimiento,
   LIMITE_COMPETIDORES_POR_EMPRESA,
@@ -179,6 +180,39 @@ describe("agregarSeguimiento (issue #175)", () => {
 
     const activos = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.empresaId, empresaId)));
     expect(activos).toHaveLength(1);
+  });
+});
+
+// Issue #182 — la extensión ("Seguir en Zilonix") puede abrir el mismo
+// link más de una vez; antes de agregar de nuevo (actions.ts), se usa
+// esta función para avisar "ya existía" en vez de reinsertar/revivir
+// sin necesidad.
+describe("buscarSeguimientoActivoPorMlId (issue #182)", () => {
+  it("encuentra el seguimiento activo con ese ml_id_externo", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "MCO111", title: "Reloj", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    const encontrado = await buscarSeguimientoActivoPorMlId(empresaId, "MCO111");
+    expect(encontrado?.id).toBe(seguimiento.id);
+  });
+
+  it("nunca encuentra uno ya eliminado", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "MCO111", title: "Reloj", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+    await eliminarSeguimiento(empresaId, seguimiento.id);
+
+    expect(await buscarSeguimientoActivoPorMlId(empresaId, "MCO111")).toBeNull();
+  });
+
+  it("devuelve null si no existe ningún seguimiento con ese id en esta empresa", async () => {
+    const { empresaId } = await crearEmpresaConUsuario();
+    expect(await buscarSeguimientoActivoPorMlId(empresaId, "MCO999999")).toBeNull();
   });
 });
 
