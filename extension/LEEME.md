@@ -280,6 +280,19 @@ Extensión 0.3.18 → 0.3.19.
 
 Extensión 0.3.19 → 0.3.20.
 
+## Hotfix de smoke #13 — Full del listado sigue en 0/48 con 0.3.20: señal de URL + espera más larga (issue #248, vuelta 2)
+
+Smoke de Sharel sobre 0.3.20 seguía en 0/48 con el filtro FULL puesto. La consola mostró el diagnóstico temporal de la vuelta 1 (`[Zilonix][diagnóstico temporal #248] 0 de 48…`) pero las 3 muestras pegadas solo traían el HEAD de la tarjeta (`poly-card__portada` + la foto) — `slice(0, 600)` desde el inicio nunca llegaba al bloque real de envío/Full, que vive más adelante en el HTML. El wrapper sigue siendo `li.ui-search-layout__item` + `poly-card`. Sharel planteó una hipótesis de timing: 1.8s de espera de hidratación podía no alcanzar.
+
+**Dos cambios, no uno** (ambos por instrucción directa del issue, sin adivinar HTML nuevo):
+
+1. **Señal fuerte de la URL del filtro** (`filtroFullActivoEnUrl`, `lectores/mercadolibre.js`): si la URL del listado ya tiene el filtro "Full" de Mercado Libre puesto (`_Envio_FULL`, confirmada en #247; `shipping_highlighted_fulfillment`, confirmada ahora), TODOS los productos orgánicos de ese listado SON Full por definición del filtro — `leerListado` ya ni llama al detector de DOM en ese caso, la URL nunca puede contradecir su propio filtro.
+2. **Espera de hidratación más larga** (`content.js`, `esperarListadoEstable`): 1.8s subió a 6.5s (rango pedido: 5-8s) — y, en vez de una búsqueda de marcador propia y más floja (`hayMarcadorEnvioVisible`, sacada), ahora chequea directamente si `lector.leerListado` ya trae al menos un producto con `esFull: true` — pasa por el detector real completo (capas + señal de URL), no por una aproximación paralela. El tope externo de 14s sigue sin cambios.
+
+**Diagnóstico temporal, versión 2** (`extraerDiagnosticoFullDeTarjeta`): en vez de `slice(0, 600)` ciego desde el inicio, ahora saca tres cosas por tarjeta sin Full: (a) la COLA del outerHTML (últimos ~1500 caracteres — el bloque de envío suele estar cerca del cierre de la tarjeta), (b) outerHTML recortado de los nodos cuyo texto PROPIO (nunca heredado de hijos) contiene "Llega"/"Envío"/"shipp"/"full", hasta 3, y (c) la lista de todo atributo `aria-label`/`class` de la tarjeta que contenga "full"/"shipp"/"fulfill". Sigue temporal — se saca una vez confirmado el fix real.
+
+Extensión 0.3.20 → 0.3.21.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).

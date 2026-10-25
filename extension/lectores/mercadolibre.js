@@ -608,6 +608,23 @@
   // nunca se traduce (confirmado en capturas reales de los dos
   // países, issue #239) — se asume el mismo texto para Brasil sin
   // inventar una variante distinta sin evidencia.
+  // Issue #248 (vuelta 2) — señal fuerte y barata, previa a cualquier
+  // detector de DOM: si la URL del listado ya tiene el filtro "Full"
+  // de Mercado Libre puesto, TODOS los productos orgánicos de ese
+  // listado SON Full por DEFINICIÓN del filtro — no hace falta que
+  // ningún selector de DOM lo confirme. Útil mientras el detector de
+  // badge (ensanchado en capas, abajo) sigue sin una confirmación al
+  // 100% contra HTML real — el follow-up del smoke de Pablo/Sharel
+  // (0.3.20, listado "tetero" con el filtro puesto) seguía en 0/48
+  // pese a esas capas. Formas reales conocidas del filtro en la URL:
+  // "_Envio_FULL" (confirmada en el propio issue #247) y
+  // "shipping_highlighted_fulfillment" (confirmada en el follow-up de
+  // #248) — nunca se inventa una tercera sin evidencia.
+  const REGEX_FILTRO_FULL_EN_URL = /envio[-_]?full\b|shipping[-_]?highlighted[-_]?fulfillment|full[-_]?fulfillment/i;
+  function filtroFullActivoEnUrl(url) {
+    return typeof url === "string" && REGEX_FILTRO_FULL_EN_URL.test(url);
+  }
+
   // Issue #248 — SEXTO intento: smoke real de Pablo sobre listado CO
   // "tetero" con 0.3.19 mostró 0/48 Full — INCLUSO con el filtro FULL
   // de Mercado Libre puesto (todas esas 48 tarjetas, por definición
@@ -714,18 +731,66 @@
     return false;
   }
 
-  // Issue #248 — diagnóstico TEMPORAL: #248 pide explícitamente no
-  // seguir adivinando desde Wayback/un comentario viejo de OS — si
-  // ensanchar el detector (arriba) tampoco alcanza, hace falta HTML
-  // real de una tarjeta Full para seguir. Si un listado tiene
-  // productos pero NINGUNO salió Full, se vuelca a la consola una
-  // muestra de hasta 3 outerHTML recortados (600 caracteres, bastante
-  // para ver el bloque de envío sin inundar la consola) — así Pablo/
-  // Sharel lo puede copiar directo de DevTools sin tener que armar el
-  // outerHTML a mano. Una sola vez por carga de página (el flag nunca
-  // se resetea solo) — se saca este bloque entero una vez que el
-  // smoke confirme el fix real (ver docs/changelog/pendientes/
-  // *-248.md).
+  // Issue #248 (vuelta 2) — diagnóstico TEMPORAL, versión 2: las 3
+  // muestras que pegó Sharel con la versión 1 (`slice(0, 600)` del
+  // outerHTML COMPLETO) solo mostraban el HEAD de la tarjeta
+  // (poly-card__portada + la foto) — el bloque real de envío/Full
+  // vive más adelante en el HTML, nunca llegaba a aparecer. Esta
+  // versión saca TRES cosas por tarjeta en vez de un recorte ciego
+  // desde el inicio:
+  //   (a) la COLA del outerHTML (últimos ~1500 caracteres) — el
+  //       bloque de envío suele estar cerca del cierre de la tarjeta,
+  //       no de la apertura.
+  //   (b) outerHTML (recortado) de los nodos cuyo texto PROPIO (nunca
+  //       heredado de hijos — si no, cualquier ancestro grande
+  //       calificaría) contiene "Llega"/"Envío"/"shipp"/"full", hasta 3.
+  //   (c) la lista de todo atributo aria-label/class de la tarjeta
+  //       que contenga "full"/"shipp"/"fulfill" — el resumen más
+  //       barato de leer de un vistazo, sin tener que buscar en (a)/(b).
+  function textoPropioDe(nodo) {
+    let texto = "";
+    const hijos = nodo.childNodes || [];
+    for (let i = 0; i < hijos.length; i++) {
+      if (hijos[i].nodeType === 3) texto += hijos[i].textContent || ""; // Node.TEXT_NODE
+    }
+    return texto;
+  }
+
+  function extraerDiagnosticoFullDeTarjeta(tarjeta) {
+    const outerHtml = tarjeta.outerHTML || "";
+    const colaHtml = outerHtml.length > 1500 ? outerHtml.slice(-1500) : outerHtml;
+
+    const nodosCercanos = [];
+    const atributosSospechosos = [];
+    try {
+      const todos = tarjeta.querySelectorAll("*");
+      for (let i = 0; i < todos.length; i++) {
+        const nodo = todos[i];
+        const clasePropia = nodo.getAttribute ? nodo.getAttribute("class") || "" : "";
+        if (nodosCercanos.length < 3 && /llega|env[íi]o|shipp|full/i.test(textoPropioDe(nodo) + " " + clasePropia)) {
+          nodosCercanos.push((nodo.outerHTML || "").slice(0, 300));
+        }
+        const ariaLabel = nodo.getAttribute ? nodo.getAttribute("aria-label") : null;
+        if (ariaLabel && /full|shipp|fulfill/i.test(ariaLabel)) atributosSospechosos.push(`aria-label="${ariaLabel}"`);
+        if (clasePropia && /full|shipp|fulfill/i.test(clasePropia)) atributosSospechosos.push(`class="${clasePropia}"`);
+        if (nodosCercanos.length >= 3 && atributosSospechosos.length >= 10) break;
+      }
+    } catch {
+      // Diagnóstico temporal — nunca puede romper la lectura real del
+      // listado, con lo que se haya juntado hasta acá alcanza.
+    }
+    return { colaHtml, nodosCercanos, atributosSospechosos };
+  }
+
+  // #248 pide explícitamente no seguir adivinando desde Wayback/un
+  // comentario viejo de OS — si ensanchar el detector (arriba) y la
+  // señal de URL del filtro tampoco alcanzan, hace falta HTML real de
+  // una tarjeta Full para seguir. Si un listado tiene productos pero
+  // NINGUNO salió Full, se vuelca la muestra de arriba a la consola —
+  // así Pablo/Sharel lo puede copiar directo de DevTools. Una sola vez
+  // por carga de página (el flag nunca se resetea solo) — se saca este
+  // bloque entero una vez que el smoke confirme el fix real (ver
+  // docs/changelog/pendientes/*-248.md).
   let diagnosticoFullYaLogueado = false;
   function volcarDiagnosticoFullSiHaceFalta(productos, muestraTarjetas) {
     if (diagnosticoFullYaLogueado || !productos.length) return;
@@ -733,14 +798,18 @@
     diagnosticoFullYaLogueado = true;
     // eslint-disable-next-line no-console
     console.info(
-      "[Zilonix][diagnóstico temporal #248] 0 de " +
+      "[Zilonix][diagnóstico temporal #248 v2] 0 de " +
         productos.length +
-        " tarjetas detectadas como Full — muestra real de hasta 3 tarjetas (outerHTML recortado a 600 caracteres):",
+        " tarjetas detectadas como Full — muestra real de hasta 3 tarjetas (cola del outerHTML, nodos cerca de Llega/Envío/shipp/full, y atributos sospechosos):",
       muestraTarjetas
     );
   }
 
   function leerListado(doc) {
+    // Issue #248 (vuelta 2) — ver filtroFullActivoEnUrl arriba: si el
+    // filtro Full de la URL está puesto, se calcula UNA vez por
+    // listado, nunca por tarjeta.
+    const filtroFullActivo = filtroFullActivoEnUrl(doc && doc.URL);
     const tarjetas = doc.querySelectorAll("li.ui-search-layout__item");
     const productos = [];
     const muestraDiagnosticoFull = []; // issue #248, ver volcarDiagnosticoFullSiHaceFalta
@@ -753,12 +822,15 @@
       const esAnuncio = Boolean(U.primerElemento(['a.poly-component__ads-promotions', 'a[aria-label="Promocionado"]'], tarjeta));
       if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico
 
-      // Issue #242/#248 — ver `detectarFullEnTarjeta` arriba para el
-      // historial completo (6 intentos: #229, #236, #239, #241, #242,
-      // #248) y el detector real, ensanchado en capas, confirmado hoy.
-      const esFull = detectarFullEnTarjeta(tarjeta);
-      if (muestraDiagnosticoFull.length < 3) {
-        muestraDiagnosticoFull.push((tarjeta.outerHTML || "").slice(0, 600));
+      // Issue #242/#248 — ver `detectarFullEnTarjeta`/
+      // `filtroFullActivoEnUrl` arriba para el historial completo (6
+      // intentos + la señal de URL) y el detector real, ensanchado en
+      // capas, confirmado hoy. Si el filtro de la URL ya confirma Full
+      // para TODO el listado, ni se llama al detector de DOM — la URL
+      // nunca puede contradecir su propio filtro.
+      const esFull = filtroFullActivo || detectarFullEnTarjeta(tarjeta);
+      if (!esFull && muestraDiagnosticoFull.length < 3) {
+        muestraDiagnosticoFull.push(extraerDiagnosticoFullDeTarjeta(tarjeta));
       }
       const { estrellas, vendidos } = leerCalificacionYVendidosListado(tarjeta);
       const fotoEl = U.primerElemento(["img.poly-component__picture"], tarjeta);
@@ -924,6 +996,10 @@
     // envío ya resuelto -> boolean), calco exacto del selector real de
     // Zilonix OS para Full, probado con fixture real.
     detectarFullEnHtmlFicha,
+    // Issue #248 (vuelta 2) — puro (string de URL -> boolean), señal
+    // fuerte del filtro Full de Mercado Libre, probado con casos
+    // reales de la URL.
+    filtroFullActivoEnUrl,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe

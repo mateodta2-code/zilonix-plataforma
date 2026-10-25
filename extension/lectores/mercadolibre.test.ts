@@ -13,6 +13,7 @@ import {
   detectarFullEnHtmlTarjeta,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
+  filtroFullActivoEnUrl,
   leerDatosIncrustados,
   leerResenasDesdeScript,
   leerSellerIdDeTienda,
@@ -487,6 +488,40 @@ describe("detectarFullEnHtmlTarjeta — issue #241/#242, respaldo de texto del d
     expect(detectarFullEnHtmlTarjeta("")).toBe(false);
     expect(detectarFullEnHtmlTarjeta(null as unknown as string)).toBe(false);
     expect(detectarFullEnHtmlTarjeta(undefined as unknown as string)).toBe(false);
+  });
+});
+
+describe("filtroFullActivoEnUrl — issue #248 (vuelta 2), señal fuerte del filtro Full de la URL", () => {
+  // Issue #248, follow-up — el detector de DOM en capas seguía en
+  // 0/48 aunque la persona ya tenía el filtro "Full" de Mercado Libre
+  // puesto en la URL. Por DEFINICIÓN del filtro, todo lo que aparece
+  // ahí ya es Full — no hace falta ningún selector de DOM para
+  // confirmarlo. Formas reales conocidas: "_Envio_FULL" (#247) y
+  // "shipping_highlighted_fulfillment" (follow-up de #248).
+  it('URL real con el filtro "_Envio_FULL" (confirmada en #247) -> true', () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/tetero_Envio_FULL")).toBe(true);
+  });
+
+  it('URL real con "shipping_highlighted_fulfillment" (confirmada en el follow-up de #248) -> true', () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/tetero?shipping_highlighted_fulfillment=true")).toBe(true);
+  });
+
+  it("insensible a mayúsculas/minúsculas y a guion vs guion bajo", () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/tetero_envio-full")).toBe(true);
+  });
+
+  it("URL de un listado normal, sin el filtro Full puesto -> false", () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/tetero")).toBe(false);
+  });
+
+  it('URL con "full" suelto en otro contexto (nunca el filtro real) -> false', () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/pantalla-full-hd")).toBe(false);
+  });
+
+  it("entradas vacías o inválidas -> false, nunca revienta", () => {
+    expect(filtroFullActivoEnUrl("")).toBe(false);
+    expect(filtroFullActivoEnUrl(null as unknown as string)).toBe(false);
+    expect(filtroFullActivoEnUrl(undefined as unknown as string)).toBe(false);
   });
 });
 

@@ -486,20 +486,25 @@
   //
   // Mismo criterio de "nunca colgarse": no se espera infinito a que
   // aparezca un Full que tal vez ese listado nunca tiene — se
-  // resuelve apenas aparece el primer marcador real de envío en
-  // cualquier tarjeta, o a los ESPERA_HIDRATACION_ENVIO_MS si nunca
+  // resuelve apenas `lector.leerListado` ya trae al menos un producto
+  // con `esFull: true`, o a los ESPERA_HIDRATACION_ENVIO_MS si nunca
   // aparece ninguno. El límite externo sigue siendo `maxEsperaMs`
   // (14s, sin cambios) — bien por debajo del timeout fijo de 15s que
   // ya tiene background.js (TIMEOUT_POR_VARIANTE_MS/
   // TIEMPO_MAX_POR_TERMINO_MS).
-  const ESPERA_HIDRATACION_ENVIO_MS = 1800;
-  function hayMarcadorEnvioVisible() {
-    try {
-      return Boolean(document.querySelector('svg[aria-label="Enviado por FULL"], [class*="poly-component__shipp"]'));
-    } catch {
-      return false;
-    }
-  }
+  //
+  // Issue #248, follow-up — el smoke de Sharel/Pablo con 0.3.20 (1.8s
+  // de margen) seguía en 0/48, incluso con el filtro Full puesto en
+  // la URL. Dos cambios, no uno: (1) `lector.leerListado` ya resuelve
+  // `esFull` con el detector real en capas + la señal de URL del
+  // filtro (ver `filtroFullActivoEnUrl`/`detectarFullEnTarjeta`,
+  // `lectores/mercadolibre.js`) — chequear ESO directamente en vez de
+  // una búsqueda de marcador propia y más floja acá (`hayMarcadorEnvioVisible`,
+  // ya sacada: duplicaba lógica y no pasaba por el detector real); (2)
+  // 1.8s puede no alcanzar para que Mercado Libre termine de hidratar
+  // el badge en TODAS las tarjetas — el margen sube a un rango de
+  // 5-8s (antes "no solo 1.8s", por instrucción directa del issue).
+  const ESPERA_HIDRATACION_ENVIO_MS = 6500;
 
   function esperarListadoEstable(maxEsperaMs, esperaEstabilidadMs, intervaloMs) {
     maxEsperaMs = typeof maxEsperaMs === "number" ? maxEsperaMs : 14000;
@@ -535,7 +540,7 @@
           momentoCuentaEstable = ahora;
         }
         const hidratacionEnvioLista =
-          cuentaEstable && (hayMarcadorEnvioVisible() || ahora - momentoCuentaEstable >= ESPERA_HIDRATACION_ENVIO_MS);
+          cuentaEstable && (productos.some((p) => p.esFull === true) || ahora - momentoCuentaEstable >= ESPERA_HIDRATACION_ENVIO_MS);
         const seAgotoElTiempo = ahora - inicio > maxEsperaMs;
         if (hidratacionEnvioLista || seAgotoElTiempo) {
           clearInterval(intervalo);
