@@ -11,6 +11,7 @@ import {
   aplicarVendidosConfirmados,
   calcularKpisMercado,
   calcularResumenBloque,
+  calcularResumenLocalBloque,
   cargarBloques,
   clasificarSenalVentas,
   facturacionEstimadaListado,
@@ -18,6 +19,7 @@ import {
   generarVeredictoListado,
   guardarBloques,
   linkHttpSeguro,
+  mejorOpcionParaImportar,
   ordenarProductos,
   type Bloque,
   type CriterioOrden,
@@ -90,6 +92,7 @@ type ProductoWire = {
   foto?: string | null;
   calificacion?: number | null;
   esFull?: boolean | null;
+  esPrime?: boolean | null;
   esEnvioGratis?: boolean | null;
   vendedor?: string | null;
   itemId?: string | null;
@@ -111,6 +114,7 @@ function construirProductoListado(plataforma: string, p: ProductoWire): Producto
     foto: linkHttpSeguro(p.foto ?? null),
     senalVentas: clasificarSenalVentas(plataforma, typeof p.vendidos === "number" && Number.isFinite(p.vendidos) ? p.vendidos : null),
     esFull: typeof p.esFull === "boolean" ? p.esFull : null,
+    esPrime: typeof p.esPrime === "boolean" ? p.esPrime : null,
     esEnvioGratis: typeof p.esEnvioGratis === "boolean" ? p.esEnvioGratis : null,
     calificacion: typeof p.calificacion === "number" && Number.isFinite(p.calificacion) ? p.calificacion : null,
     vendedor: typeof p.vendedor === "string" && p.vendedor ? p.vendedor : null,
@@ -669,6 +673,15 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
         // muestra "N/A" (ver celda de abajo), así que ordenar por ese
         // criterio ahí no cambiaría nada — se saca de la lista.
         const criteriosBloque = esMl ? CRITERIOS_ORDEN : CRITERIOS_ORDEN.filter((c) => c.clave !== "full");
+        // Issue #235, punto 8 — "Resumen OS por bloque/desplegable":
+        // KPIs locales + Mejor opción, calculados por bloque (nunca un
+        // solo resumen global) — referencia visual del pedido: el
+        // banner de Amazon de Zilonix OS (PRODUCTOS ANALIZADOS, PRECIO
+        // PROM, RANGO, ESTRELLAS, COMPRADOS/MES, % PRIME, DEMANDA
+        // VALIDADA, Mejor opción).
+        const esAmazon = bloque.plataforma === "Amazon";
+        const resumenLocal = calcularResumenLocalBloque(bloque.productos);
+        const mejorOpcion = mejorOpcionParaImportar(bloque.productos, termino);
         return (
           <div key={bloque.id} className={styles.bloque}>
             <div className={styles.encabezadoBloque}>
@@ -700,7 +713,57 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
               </Boton>
             </div>
             {!colapsado ? (
-              <Tabla encabezados={["Foto", "Producto", "Vendidos", "Precio", "Fact. est.", "Full", "Calif.", "Enlace", ""]}>
+              <>
+                {/* Issue #235, punto 8 — KPIs locales del bloque (nunca el
+                    resumen combinado de todos los bloques de arriba —
+                    ese sigue siendo solo para Mercado Libre, ver el
+                    banner de Demanda más arriba). Genérico: el % que se
+                    muestra (Full o Prime) depende de la plataforma de
+                    ESTE bloque puntual. */}
+                <div className={styles.kpis}>
+                  <TarjetaKpi titulo="PRODUCTOS ANALIZADOS" valor={resumenLocal.productosAnalizados || undefined} textoVacio="Sin dato" />
+                  <TarjetaKpi titulo="PRECIO PROM." valor={resumenLocal.precioPromedio != null ? money(resumenLocal.precioPromedio) : undefined} textoVacio="Sin dato" />
+                  <TarjetaKpi
+                    titulo="RANGO"
+                    valor={resumenLocal.precioMinimo != null && resumenLocal.precioMaximo != null ? `${money(resumenLocal.precioMinimo)} – ${money(resumenLocal.precioMaximo)}` : undefined}
+                    textoVacio="Sin dato"
+                  />
+                  <TarjetaKpi titulo="ESTRELLAS PROM." valor={resumenLocal.estrellasPromedio != null ? `${resumenLocal.estrellasPromedio.toFixed(1)}★` : undefined} textoVacio="Sin dato" />
+                  <TarjetaKpi titulo={resumenLocal.volumenEtiqueta.toUpperCase()} valor={resumenLocal.volumenValor != null ? numero(resumenLocal.volumenValor) : undefined} textoVacio="Sin dato" />
+                  {esMl ? (
+                    <TarjetaKpi titulo="% FULL" valor={resumenLocal.porcentajeFull != null ? `${resumenLocal.porcentajeFull}%` : undefined} textoVacio="Sin dato" />
+                  ) : esAmazon ? (
+                    <TarjetaKpi titulo="% PRIME" valor={resumenLocal.porcentajePrime != null ? `${resumenLocal.porcentajePrime}%` : undefined} textoVacio="Sin dato" />
+                  ) : null}
+                </div>
+                {/* "Demanda validada" — solo cuando hay evidencia real
+                    (>=5 productos + un volumen de compras confirmado,
+                    ver calcularResumenLocalBloque) — nunca una visita
+                    inventada ni un histórico tratado como "/mes". */}
+                {resumenLocal.demandaValidada ? (
+                  <div className={styles.insignia}>
+                    <Chip estado="exito">Demanda validada</Chip>
+                    <span className={styles.notaInsignia}>
+                      {resumenLocal.productosAnalizados} publicaciones reales analizadas, con {resumenLocal.volumenEtiqueta.toLowerCase()} confirmado en al menos una.
+                    </span>
+                  </div>
+                ) : null}
+                {mejorOpcion ? (
+                  <div className={styles.insignia}>
+                    <Chip estado="exito">Mejor opción para importar</Chip>
+                    {mejorOpcion.producto.link ? (
+                      <a href={mejorOpcion.producto.link} target="_blank" rel="noreferrer" className={styles.enlaceSeguir}>
+                        {mejorOpcion.producto.titulo}
+                      </a>
+                    ) : (
+                      <span>{mejorOpcion.producto.titulo}</span>
+                    )}
+                    <span className={styles.notaInsignia}>{money(mejorOpcion.producto.precio)} — {mejorOpcion.razon}</span>
+                  </div>
+                ) : null}
+                <Tabla
+                  encabezados={["Foto", "Producto", "Vendidos", "Precio", "Fact. est.", esMl ? "Full" : "Comprados/mes", "Calif.", "Enlace", ""]}
+                >
                 {ordenados.map((p, i) => (
                   <FilaTabla key={`${bloque.id}-${p.link ?? p.titulo}-${i}`}>
                     <CeldaTabla>
@@ -738,12 +801,42 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
                     <CeldaTabla>{money(p.precio)}</CeldaTabla>
                     <CeldaTabla>{facturacionEstimadaListado(p) != null ? money(facturacionEstimadaListado(p) as number) : "—"}</CeldaTabla>
                     {/* Issue #231, punto B — "Full aparece en Amazon (Amazon
-                        no tiene Full)": la columna solo tiene sentido en
-                        Mercado Libre — en cualquier otra plataforma se
-                        muestra "N/A" siempre, sin importar `p.esFull`
-                        (que además ahora siempre es null fuera de ML, ver
-                        extension/lectores/amazon.js). */}
-                    <CeldaTabla>{!esMl ? "N/A" : p.esFull == null ? "—" : p.esFull ? <Chip estado="exito">Full</Chip> : <Chip>No</Chip>}</CeldaTabla>
+                        no tiene Full)": "Full" solo tiene sentido en
+                        Mercado Libre. Issue #235, punto 4 — fuera de ML
+                        esta misma columna se reaprovecha como
+                        "Comprados/mes" (mismo valor que ya se ve en
+                        Vendidos cuando senalVentas.tipo === "mensual_piso",
+                        acá en su propia columna): el número real para
+                        Amazon cuando lo confirma, "N/A" para cualquier
+                        plataforma que nunca expone una tasa mensual real
+                        (Temu/AliExpress/Shein/Alibaba — senalVentas nunca
+                        las clasifica como mensual_piso, issue #227), y
+                        "—" para Amazon puntual sin ese dato en esta fila
+                        (el sitio no siempre lo muestra). Nunca se
+                        confunde con el acumulado — ese sigue solo en
+                        Vendidos, con su propio label "acumulado — nunca
+                        /mes". */}
+                    <CeldaTabla>
+                      {esMl ? (
+                        p.esFull == null ? (
+                          "—"
+                        ) : p.esFull ? (
+                          <Chip estado="exito">Full</Chip>
+                        ) : (
+                          <Chip>No</Chip>
+                        )
+                      ) : p.senalVentas.tipo === "mensual_piso" ? (
+                        p.senalVentas.valor != null ? (
+                          numero(p.senalVentas.valor)
+                        ) : (
+                          "—"
+                        )
+                      ) : bloque.plataforma === "Amazon" ? (
+                        "—"
+                      ) : (
+                        "N/A"
+                      )}
+                    </CeldaTabla>
                     <CeldaTabla>{p.calificacion != null ? `${p.calificacion.toFixed(1)}★` : "—"}</CeldaTabla>
                     <CeldaTabla>
                       {p.link ? (
@@ -766,7 +859,8 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
                     </CeldaTabla>
                   </FilaTabla>
                 ))}
-              </Tabla>
+                </Tabla>
+              </>
             ) : null}
           </div>
         );

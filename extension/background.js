@@ -68,14 +68,32 @@ const escaneosActivos = new Map(); // tabIdPanel -> { terminos, indice, resultad
 // Brasil es "mercadolivre" (marca en portugués), nunca "mercadolibre" —
 // y Chile es "mercadolibre.cl" (sin "com." en el medio), los dos
 // confirmados como dominios reales públicos de Mercado Libre.
+// Issue #235 — bug real de Brasil, confirmado con evidencia real (no
+// adivinado): listado.mercadolibre.com.co SÍ se puede confirmar en
+// vivo desde este sandbox (bloqueado) pero la Wayback Machine de
+// archive.org sí deja ver una captura real reciente de CADA sitio sin
+// disparar el bloqueo de Mercado Libre — se usó esa vía para
+// confirmar el subdominio real de cada país antes de tocar nada acá.
+// `listado.mercadolibre.com.ar/zapatillas` tiene una captura real
+// (confirma que el resto de países hispanohablantes SÍ usan
+// "listado") — pero `listado.mercadolivre.com.br/...` NUNCA tuvo
+// ninguna captura, mientras que `lista.mercadolivre.com.br/tenis` SÍ
+// tiene una real, con tarjetas `li.ui-search-layout__item` reales e
+// ids `MLB...` reales adentro. Brasil usa "lista" (portugués),
+// nunca "listado" (español) — consistente con que el dominio en sí ya
+// es "mercadolivre", no "mercadolibre". Hasta esta tarea, `urlListadoMl`
+// armaba SIEMPRE `listado.${dominio}` para los 7 países por igual —
+// para Brasil eso arma una URL que no es una página de listado real,
+// así que nunca podía haber bloque ahí, sin importar qué tan bien
+// funcionaran clasificarLinkListadoMl/tipoDePagina (#233).
 const DOMINIOS_ML_PAIS = {
-  CO: { dominio: "mercadolibre.com.co", nombre: "Mercado Libre Colombia" },
-  AR: { dominio: "mercadolibre.com.ar", nombre: "Mercado Libre Argentina" },
-  BR: { dominio: "mercadolivre.com.br", nombre: "Mercado Libre Brasil" },
-  MX: { dominio: "mercadolibre.com.mx", nombre: "Mercado Libre México" },
-  CL: { dominio: "mercadolibre.cl", nombre: "Mercado Libre Chile" },
-  UY: { dominio: "mercadolibre.com.uy", nombre: "Mercado Libre Uruguay" },
-  PE: { dominio: "mercadolibre.com.pe", nombre: "Mercado Libre Perú" },
+  CO: { dominio: "mercadolibre.com.co", nombre: "Mercado Libre Colombia", subdominioListado: "listado" },
+  AR: { dominio: "mercadolibre.com.ar", nombre: "Mercado Libre Argentina", subdominioListado: "listado" },
+  BR: { dominio: "mercadolivre.com.br", nombre: "Mercado Libre Brasil", subdominioListado: "lista" },
+  MX: { dominio: "mercadolibre.com.mx", nombre: "Mercado Libre México", subdominioListado: "listado" },
+  CL: { dominio: "mercadolibre.cl", nombre: "Mercado Libre Chile", subdominioListado: "listado" },
+  UY: { dominio: "mercadolibre.com.uy", nombre: "Mercado Libre Uruguay", subdominioListado: "listado" },
+  PE: { dominio: "mercadolibre.com.pe", nombre: "Mercado Libre Perú", subdominioListado: "listado" },
 };
 
 function urlListadoMl(termino, pais) {
@@ -86,7 +104,7 @@ function urlListadoMl(termino, pais) {
   // escaneo automático — nunca una persona a mano.
   const config = DOMINIOS_ML_PAIS[pais] || DOMINIOS_ML_PAIS.CO;
   const limpio = termino.trim().toLowerCase().replace(/\s+/g, "-");
-  return `https://listado.${config.dominio}/${encodeURIComponent(limpio)}?_zilonix_escaneo=1`;
+  return `https://${config.subdominioListado}.${config.dominio}/${encodeURIComponent(limpio)}?_zilonix_escaneo=1`;
 }
 
 function iniciarEscaneo(tabIdPanel, terminosCrudos, pais) {

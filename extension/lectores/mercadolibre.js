@@ -19,8 +19,25 @@
   // extension/config.js. Mismo patrón de acceso dual que U, arriba.
   const CONFIG = typeof window !== "undefined" ? window.ZilonixConfig : require("../config.js");
 
+  // Issue #233 — bug real confirmado en el smoke de Sharel: "panel
+  // sigue sin bloques, escaneo → 0 productos" en Argentina/Brasil/etc.
+  // Causa real: todo este archivo asumía el site-id de Mercado Libre
+  // COLOMBIA (MCO) a mano, en 4 lugares distintos — un id real de
+  // cualquier otro país (MLA=Argentina, MLB=Brasil, MLM=México,
+  // MLC=Chile, MLU=Uruguay, MPE=Perú — site-ids públicos y reales de
+  // Mercado Libre, no un detalle interno de scraping, mismo criterio
+  // que ya usan los dominios de DOMINIOS_ML_PAIS en background.js,
+  // issue #227) nunca matcheaba "MCO", así que `clasificarLinkListadoMl`
+  // descartaba la tarjeta ENTERA (`if (!idInfo) return;`, más abajo) —
+  // para Argentina/Brasil/México/Chile/Uruguay/Perú, TODAS las
+  // tarjetas de un listado se perdían así, sin importar si la lectura
+  // en sí funcionaba bien. Una sola constante compartida para los 4
+  // lugares, para no repetir el patrón ni arriesgar que uno quede
+  // desactualizado si se agrega un país nuevo el día de mañana.
+  const PREFIJO_ITEM_ML = "MCO|MLA|MLB|MLM|MLC|MLU|MPE";
+
   function tipoDePagina(url) {
-    if (/\/(p\/)?MCO-?\d+/i.test(url) || /articulo\.mercadolibre/i.test(url)) return "producto";
+    if (new RegExp(`/(p/)?(?:${PREFIJO_ITEM_ML})-?\\d+`, "i").test(url) || /articulo\.(mercadolibre|mercadolivre)/i.test(url)) return "producto";
     // Página de UN vendedor/tienda (perfil público o tienda oficial) —
     // nunca confundir con /listado (que es una búsqueda, no un
     // perfil). Se prueba ANTES del check de /listado de abajo:
@@ -37,8 +54,32 @@
     // tienda.mercadolibre.*, y no trae ?CustId=) — el panel ni
     // siquiera se dibujaba, silencio total. /tienda/ (el path real de
     // una tienda oficial) se suma como cuarto patrón.
-    if (/\/perfil\/|tienda\.mercadolibre|\/tienda\/|[?&]CustId=/i.test(url)) return "tienda";
-    if (/listado\.mercadolibre|\/search|[?&]q=/i.test(url)) return "listado";
+    if (/\/perfil\/|tienda\.(mercadolibre|mercadolivre)|\/tienda\/|[?&]CustId=/i.test(url)) return "tienda";
+    // Issue #233, punto B — bug real confirmado por Sharel: Brasil usa
+    // el dominio "mercadolivre" (marca real en portugués — mismo
+    // dominio que ya arma `urlListadoMl` en background.js desde #227),
+    // nunca "mercadolibre". Esta función solo reconocía "mercadolibre"
+    // acá, así que una URL real de listado de Brasil devolvía `null` —
+    // ni siquiera llegaba a intentar `leerListado`, 0 productos
+    // garantizado, independiente de si clasificarLinkListadoMl
+    // funcionaba o no.
+    //
+    // Issue #235 — bug real APARTE, encontrado después de #233 (el
+    // panel seguía sin bloque de Brasil aunque #233 ya reconocía el
+    // dominio): el SUBDOMINIO también es distinto en portugués.
+    // Confirmado con evidencia real (Wayback Machine, nunca adivinado
+    // — listado.mercadolibre.com.co bloquea el acceso directo desde
+    // este sandbox, pero archive.org no dispara ese bloqueo):
+    // `listado.mercadolibre.com.ar` SÍ existe (confirma que el resto
+    // de países hispanohablantes usan "listado"), `listado.mercadolivre.com.br`
+    // JAMÁS tuvo una captura real, pero `lista.mercadolivre.com.br`
+    // SÍ tiene una captura real con tarjetas reales adentro — Brasil
+    // usa "lista" (portugués), nunca "listado" (español). `urlListadoMl`
+    // (background.js) ya arma la URL real con el subdominio correcto
+    // por país (`DOMINIOS_ML_PAIS[pais].subdominioListado`) — acá se
+    // suma el reconocimiento de "lista." (solo para mercadolivre,
+    // nunca para mercadolibre: esa combinación no existe).
+    if (/listado\.mercadolibre|lista\.mercadolivre|\/search|[?&]q=/i.test(url)) return "listado";
     return null;
   }
 
@@ -47,7 +88,10 @@
   // hacia Zilonix Seller con el id a agregar al seguimiento. El id
   // SIEMPRE se valida y se encodea antes de armar el link — nunca se
   // pega un id (de la URL o del HTML) directo a una URL.
-  const PATRON_ID_ITEM = /^MCO\d+$/;
+  // Issue #233 — antes solo validaba MCO (Colombia); "Seguir en
+  // Zilonix" en un producto de cualquier otro país nunca construía un
+  // link real (`construirLinkSeguirProducto` devolvía `null` siempre).
+  const PATRON_ID_ITEM = new RegExp(`^(?:${PREFIJO_ITEM_ML})\\d+$`);
   const PATRON_ID_VENDEDOR = /^\d+$/;
 
   function construirLinkSeguirProducto(itemId) {
@@ -165,11 +209,17 @@
   // Todo lo de abajo amarra sold_quantity/date_created al producto que
   // el usuario está viendo de verdad, nunca al primero que aparezca.
 
-  // "MCO-123456789" o "MCO123456789" (con o sin guión) -> "MCO123456789".
+  // "MCO-123456789"/"MLA-123456789"/etc (con o sin guión) ->
+  // "MCO123456789"/"MLA123456789". Issue #233 — antes solo reconocía
+  // MCO: en una página de producto de Argentina/Brasil/etc, `itemIdActual`
+  // quedaba siempre `null`, lo que rompía `leerDatosIncrustados`
+  // (nunca podía amarrar sold_quantity al producto real),
+  // "Completar vendidos" (nunca mandaba nada) y "Seguir en Zilonix"
+  // (`construirLinkSeguirProducto` también necesitaba un id real).
   function extraerIdDeUrl(url) {
     if (typeof url !== "string") return null;
-    const m = url.match(/MCO-?(\d+)/i);
-    return m ? `MCO${m[1]}` : null;
+    const m = url.match(new RegExp(`(${PREFIJO_ITEM_ML})-?(\\d+)`, "i"));
+    return m ? `${m[1].toUpperCase()}${m[2]}` : null;
   }
 
   function normalizarId(valor) {
@@ -388,14 +438,23 @@
   // issue #227 punto 9 "Seguir solo ML"): catálogo (/p/MCO...) y "user
   // product" (/up/MCOU...) NO son itemId de publicación real, quedan
   // sin itemId (nunca se inventa uno).
+  //
+  // Issue #233 — bug real confirmado por el smoke de Sharel: los 3
+  // patrones de acá solo reconocían el prefijo MCO (Colombia) — un id
+  // real de cualquier otro país (MLA/MLB/MLM/MLC/MLU/MPE, ver
+  // PREFIJO_ITEM_ML arriba) nunca matcheaba NINGUNO de los 3, así que
+  // `idInfo` daba `null` y la tarjeta se descartaba ENTERA (`if
+  // (!idInfo) return;`, en leerListado) — para Argentina/Brasil/etc,
+  // TODAS las tarjetas de un listado real se perdían así, sin importar
+  // que la lectura del resto de la tarjeta funcionara bien.
   function clasificarLinkListadoMl(href) {
     if (!href) return null;
-    let m = href.match(/\/p\/(MCO\d+)/);
-    if (m) return { tipo: "producto", id: m[1] };
-    m = href.match(/\/up\/(MCOU\d+)/);
-    if (m) return { tipo: "user_product", id: m[1] };
-    m = href.match(/MCO-?(\d{9,})/);
-    if (m) return { tipo: "item", id: `MCO${m[1]}` };
+    let m = href.match(new RegExp(`/p/((?:${PREFIJO_ITEM_ML})\\d+)`, "i"));
+    if (m) return { tipo: "producto", id: m[1].toUpperCase() };
+    m = href.match(new RegExp(`/up/((?:${PREFIJO_ITEM_ML})U\\d+)`, "i"));
+    if (m) return { tipo: "user_product", id: m[1].toUpperCase() };
+    m = href.match(new RegExp(`(${PREFIJO_ITEM_ML})-?(\\d{9,})`, "i"));
+    if (m) return { tipo: "item", id: `${m[1].toUpperCase()}${m[2]}` };
     return null;
   }
 
@@ -409,18 +468,47 @@
   // Calificación + vendidos vienen JUNTOS en un solo span de
   // accesibilidad (oculto visualmente) — confirmado por Cowork como
   // más confiable que los spans visibles sueltos.
+  // Issue #235, punto 6 — bug real confirmado por Sharel ("filtro
+  // 'Mejor calificado' no ordena"): hasta esta tarea, calificación y
+  // vendidos se buscaban juntos en el MISMO span oculto, asumiendo que
+  // Mercado Libre siempre los pone en un solo texto ("Calificación X
+  // de 5. Más de N productos vendidos."). Confirmado contra una
+  // captura real de hoy (Wayback Machine, listado.mercadolibre.com.co
+  // sigue bloqueando el acceso directo desde este sandbox — mismo
+  // criterio que el resto de esta tarea): el texto real de
+  // accesibilidad hoy es SOLO "Calificación X de 5 (N calificaciones)"
+  // — sin ninguna mención de vendidos en esa misma span; en esa
+  // categoría puntual, Mercado Libre ya no muestra ningún número de
+  // vendidos en la tarjeta, solo a veces una etiqueta cualitativa
+  // "MÁS VENDIDO" (sin cifra — nunca se inventa un número a partir de
+  // eso). Acoplar los dos campos a una sola span es frágil ante este
+  // tipo de cambio — se separan: cada campo se busca en TODAS las
+  // spans ocultas de la tarjeta, de forma independiente, así que un
+  // cambio en cómo Mercado Libre arma el texto de vendidos nunca
+  // vuelve a arrastrar la calificación con él (ni viceversa).
   function leerCalificacionYVendidosListado(tarjeta) {
     const candidatos = tarjeta.querySelectorAll("span.andes-visually-hidden");
+    let estrellas = null;
+    let vendidos = null;
     for (const s of candidatos) {
       const texto = (s.textContent || "").trim();
-      const mEst = texto.match(/Calificaci[oó]n\s+([\d.,]+)\s+de\s+5/i);
-      if (!mEst) continue; // este span oculto es de otra cosa (precio, badge, etc.) — se sigue buscando
-      const estrellas = parseFloat(mEst[1].replace(",", "."));
-      const mVend = texto.match(/(?:[Mm]ás de\s+)?([\d.,]+)\+?\s*productos?\s+vendid/i);
-      const vendidos = mVend ? Number(mVend[1].replace(/\./g, "").replace(",", "")) : null;
-      return { estrellas: Number.isFinite(estrellas) ? estrellas : null, vendidos };
+      if (estrellas === null) {
+        const mEst = texto.match(/Calificaci[oó]n\s+([\d.,]+)\s+de\s+5/i);
+        if (mEst) {
+          const valor = parseFloat(mEst[1].replace(",", "."));
+          if (Number.isFinite(valor)) estrellas = valor;
+        }
+      }
+      if (vendidos === null) {
+        const mVend = texto.match(/(?:[Mm]ás de\s+)?([\d.,]+)\+?\s*productos?\s+vendid/i);
+        if (mVend) {
+          const valor = Number(mVend[1].replace(/\./g, "").replace(",", ""));
+          if (Number.isFinite(valor)) vendidos = valor;
+        }
+      }
+      if (estrellas !== null && vendidos !== null) break; // ya se encontraron los dos — no hace falta seguir mirando el resto de spans
     }
-    return { estrellas: null, vendidos: null };
+    return { estrellas, vendidos };
   }
 
   function leerListado(doc) {
@@ -437,23 +525,41 @@
 
       // Issue #229 — hotfix de smoke: Sharel reportó TODO marcado "No"
       // (nunca "Full") a pesar de publicaciones Full reales visibles.
-      // El selector original (exact-match, case-sensitive) seguía
-      // siendo el confirmado por Cowork en zilonix-os-web — la mejora
-      // acá es puramente defensiva, no una reescritura a ciegas: se
-      // suma la bandera CSS "i" (case-insensitive, soportada en Chrome,
-      // el único navegador que corre esta extensión) para no perder el
-      // match si el aria-label real viene con otra capitalización
-      // ("Enviado por Full"), más un respaldo por substring (cualquier
-      // elemento cuyo aria-label contenga a la vez "envi" y "full" —
-      // nunca solo "full" suelto, para no confundir con un título de
-      // producto tipo "Full HD"). Esta sesión no pudo confirmar en vivo
-      // el HTML real de hoy (listado.mercadolibre.com.co bloqueó el
-      // fetch directo con una verificación de cuenta, y el fetch con
-      // IA también dio 403) — si Sharel sigue viendo "No" en el próximo
-      // smoke, hace falta inspeccionar el HTML real a mano y ajustar
-      // este selector con ese dato confirmado, nunca adivinar de nuevo.
+      // El selector `svg[aria-label="Enviado por FULL"]` (el que
+      // confirmó Cowork en zilonix-os-web hace tiempo) ya no existe en
+      // el HTML real — esta tarea (issue #235) confirmó, leyendo una
+      // captura real de hoy de listado.mercadolibre.com.co vía la
+      // Wayback Machine (el acceso directo sigue bloqueado por una
+      // verificación de cuenta, igual que en #229/#231/#233 — esa fue
+      // la forma de conseguir HTML real sin inventar nada), que
+      // Mercado Libre rediseñó el ícono de Full: ya NO es un
+      // aria-label de texto, es un ícono del sistema de diseño
+      // Polycard con `data-testid="icon-poly_full"` y clase
+      // `ui-search-icon--full` (confirmado en el filtro "Envío · Full"
+      // de esa misma página — el mismo ícono reusable que el propio
+      // JSON incrustado de la página nombra "vpp_full_icon"/"icon-poly_full"
+      // en su plantilla "Enviado por {vpp_full_icon}"). Esta sesión NO
+      // pudo confirmar ese mismo marcador DENTRO de una tarjeta de
+      // producto puntual en la captura disponible (ninguna de las
+      // tarjetas visibles en esa búsqueda concreta tenía el badge
+      // renderizado, aunque el filtro decía "17 resultados" con Full)
+      // — se prioriza igual como selector principal por ser la
+      // confirmación más real disponible, con los selectores viejos
+      // como respaldo por si alguna variante de tarjeta todavía los
+      // usa. Si sigue en "No" en el próximo smoke, hace falta
+      // confirmar el marcador real DENTRO de una tarjeta Full visible
+      // (clic derecho → inspeccionar sobre una publicación Full real),
+      // nunca adivinar de nuevo.
       const esFull = Boolean(
-        U.primerElemento(['svg[aria-label="Enviado por FULL" i]', '[aria-label*="envi" i][aria-label*="full" i]'], tarjeta)
+        U.primerElemento(
+          [
+            'svg[data-testid="icon-poly_full"]',
+            "svg.ui-search-icon--full",
+            'svg[aria-label="Enviado por FULL" i]',
+            '[aria-label*="envi" i][aria-label*="full" i]',
+          ],
+          tarjeta
+        )
       );
       const { estrellas, vendidos } = leerCalificacionYVendidosListado(tarjeta);
       const fotoEl = U.primerElemento(["img.poly-component__picture"], tarjeta);
@@ -602,6 +708,13 @@
     extraerCustIdDeUrl,
     leerResenas,
     leerResenasDesdeScript,
+    // Issue #233 — puro (string -> objeto, sin DOM), nunca necesitó
+    // estar afuera de leerListado salvo que hasta esta tarea nadie la
+    // había probado con vitest — justo la función con el bug real del
+    // smoke (descartaba toda tarjeta no-MCO). Se suma al export para
+    // poder probarla de verdad, mismo criterio que el resto de este
+    // archivo.
+    clasificarLinkListadoMl,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe
