@@ -343,8 +343,58 @@
     return Math.round(((vendidos * factor * 30) / diasTranscurridos) * 10) / 10;
   }
 
+  // Issue #243 — bug real confirmado por Sharel en una ficha Full
+  // real (Anker 70W, CO): la página mostraba el badge verde
+  // "Almacenado y enviado por FULL" visible, pero el panel flotante
+  // decía "Full: No" Y "Envío gratis: No" al mismo tiempo — los dos
+  // "No" juntos son la pista real de que `textoEnvio` llegaba VACÍO
+  // (`""`), no de que el regex de Full estuviera mal (`/\bfull\b/i`
+  // matchea bien esa frase si alguna vez le llega texto real).
+  // Confirmado contra una captura real y reciente de una ficha de
+  // Mercado Libre Colombia (CDX de archive.org, mayo/2026 — el acceso
+  // directo sigue bloqueado desde este sandbox): `.ui-pdp-shipping` y
+  // `.ui-pdp-container__col--shipping` tienen CERO ocurrencias en el
+  // HTML real de hoy — Mercado Libre renombró el bloque. El
+  // contenedor real del resumen de envío del producto principal
+  // (`id="shipping_summary"`, confirmado con contenido real: "Llega
+  // gratis hoy sábado por ser tu primera compra" en la ficha
+  // revisada) es `.ui-pdp-container__row--shipping-summary` /
+  // `.ui-vpp-shipping_summary`. Esta sesión no encontró, dentro del
+  // tiempo disponible, una ficha archivada que fuera Full en su
+  // resumen principal (la que se revisó mostraba una promo distinta,
+  // "primera compra") — pero el ícono real `svg[aria-label="Enviado
+  // por FULL"]` se confirmó DOS veces en contextos reales de hoy: en
+  // el listado (issue #242, selector real de Zilonix OS) y dentro del
+  // carrusel de "productos relacionados" de esta misma ficha — mismo
+  // componente de ícono reusado en todo el sitio, razonable asumir
+  // que el resumen principal lo usa igual, documentado así en vez de
+  // afirmado como 100% confirmado.
+  function detectarFullEnHtmlEnvio(htmlBloqueEnvio) {
+    if (typeof htmlBloqueEnvio !== "string" || !htmlBloqueEnvio) return false;
+    // Mismo ícono real confirmado en el listado (issue #242) — acá no
+    // hace falta anclar una clase primero: el caller ya resolvió el
+    // bloque de envío correcto antes de llamar a esto.
+    if (/aria-label\s*=\s*["'][^"']*full[^"']*["']/i.test(htmlBloqueEnvio)) return true;
+    const soloTexto = htmlBloqueEnvio.replace(/<[^>]+>/g, " ");
+    return /\bfull\b/i.test(soloTexto);
+  }
+
   function leerProducto(doc) {
-    const bloqueEnvio = U.primerElemento([".ui-pdp-shipping", ".ui-pdp-container__col--shipping"], doc);
+    const bloqueEnvio = U.primerElemento(
+      [
+        // Issue #243 — selectores reales confirmados hoy, primero
+        // (ver detectarFullEnHtmlEnvio arriba para la evidencia completa).
+        ".ui-pdp-container__row--shipping-summary",
+        ".ui-vpp-shipping_summary",
+        "#shipping_summary",
+        // Selectores viejos, de respaldo — nunca confirmados como
+        // vigentes hoy, pero tampoco se descartan por si alguna
+        // variante de categoría/país todavía los usa.
+        ".ui-pdp-shipping",
+        ".ui-pdp-container__col--shipping",
+      ],
+      doc
+    );
     const textoEnvio = bloqueEnvio ? bloqueEnvio.textContent || "" : "";
     const textoSubtitulo = U.textoDe([".ui-pdp-subtitle", "span.ui-pdp-subtitle"], doc) || "";
 
@@ -367,7 +417,16 @@
     // Issue #197 — calculado ACÁ (no más abajo, donde antes vivía
     // inline en el objeto de retorno) para poder pasarlo al ajuste
     // "estilo Selltrix" de calcularVentasPromedioMes.
-    const esFull = /\bfull\b/i.test(textoEnvio);
+    // Issue #243 — antes era /\bfull\b/i.test(textoEnvio) (solo texto
+    // visible); el badge real "Almacenado y enviado por FULL" SÍ es
+    // texto plano, así que ese regex en el texto seguía siendo
+    // correcto — el bug real era que bloqueeEnvio nunca se resolvía
+    // (selectores viejos, ver comentario arriba de leerProducto), por
+    // lo que textoEnvio llegaba "" y el regex nunca tenía nada para
+    // matchear. detectarFullEnHtmlEnvio se usa igual (sobre el HTML,
+    // no solo el texto) para también agarrar el caso de un ícono SVG
+    // sin texto visible acompañante (aria-label solo).
+    const esFull = bloqueEnvio ? detectarFullEnHtmlEnvio(bloqueEnvio.outerHTML) : false;
 
     return {
       titulo: U.textoDe(["h1.ui-pdp-title", "h1[data-testid='product-title']"], doc),
@@ -774,6 +833,10 @@
     // puede probar con un fixture real sin depender de un selector CSS
     // que solo se confirma (o no) en vivo.
     detectarFullEnHtmlTarjeta,
+    // Issue #243 — puro (string de HTML del bloque de envío ya
+    // resuelto -> boolean), misma lógica de probarlo con fixture real
+    // sin depender de que el selector CSS siga vigente.
+    detectarFullEnHtmlEnvio,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe

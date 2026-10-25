@@ -9,6 +9,7 @@ import {
   clasificarLinkListadoMl,
   construirLinkSeguirProducto,
   construirLinkSeguirTienda,
+  detectarFullEnHtmlEnvio,
   detectarFullEnHtmlTarjeta,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
@@ -486,5 +487,50 @@ describe("detectarFullEnHtmlTarjeta — issue #241/#242, respaldo de texto del d
     expect(detectarFullEnHtmlTarjeta("")).toBe(false);
     expect(detectarFullEnHtmlTarjeta(null as unknown as string)).toBe(false);
     expect(detectarFullEnHtmlTarjeta(undefined as unknown as string)).toBe(false);
+  });
+});
+
+describe("detectarFullEnHtmlEnvio — issue #243, ficha de producto (leerProducto)", () => {
+  // Issue #243 — smoke de Sharel: ficha real de Mercado Libre Colombia
+  // (Anker 70W) con el badge verde "Almacenado y enviado por FULL"
+  // visible, pero el panel flotante marcaba "Full: No" y "Envío
+  // gratis: No" al mismo tiempo. Causa real confirmada contra una
+  // captura real y reciente (Wayback/CDX, mayo/2026): el bloque de
+  // envío de leerProducto usaba selectores viejos
+  // (.ui-pdp-shipping/.ui-pdp-container__col--shipping) que ya no
+  // existen en el HTML de hoy, así que bloqueEnvio nunca se resolvía y
+  // textoEnvio llegaba siempre "". A diferencia de
+  // detectarFullEnHtmlTarjeta (listado), esta función no necesita
+  // anclar una clase — el caller (leerProducto) ya resuelve el bloque
+  // correcto con el selector real nuevo antes de llamarla.
+  it('texto real del badge, "Almacenado y enviado por FULL" -> true', () => {
+    const htmlBloqueEnvio = `<div class="ui-pdp-container__row--shipping-summary" id="shipping_summary"><p class="ui-pdp-color--GREEN ui-pdp-family--REGULAR">Almacenado y enviado por FULL</p></div>`;
+    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(true);
+  });
+
+  it('texto real corto, "Enviado por FULL" -> true', () => {
+    const htmlBloqueEnvio = `<div class="ui-vpp-shipping_summary"><span>Enviado por FULL</span></div>`;
+    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(true);
+  });
+
+  it('mismo ícono real confirmado en el listado (aria-label="Enviado por FULL" en un svg) también cuenta en la ficha', () => {
+    const htmlBloqueEnvio = `<div id="shipping_summary"><svg aria-label="Enviado por FULL"><use href="#poly_full"></use></svg></div>`;
+    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(true);
+  });
+
+  it("ficha sin Full (solo envío gratis normal) -> false", () => {
+    const htmlBloqueEnvio = `<div class="ui-pdp-container__row--shipping-summary"><p>Llega gratis hoy sábado por ser tu primera compra</p></div>`;
+    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(false);
+  });
+
+  it('"Full HD" en el título del producto nunca cuenta: leerProducto solo le pasa a esta función el outerHTML del bloque de envío YA resuelto por su propio selector, nunca el h1.ui-pdp-title ni la ficha completa — a diferencia de detectarFullEnHtmlTarjeta (listado), esta función no necesita su propia lógica de acotamiento por clase', () => {
+    const htmlBloqueEnvio = `<div class="ui-pdp-container__row--shipping-summary"><p>Llega gratis hoy</p></div>`;
+    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(false);
+  });
+
+  it("entradas vacías o inválidas -> false, nunca revienta", () => {
+    expect(detectarFullEnHtmlEnvio("")).toBe(false);
+    expect(detectarFullEnHtmlEnvio(null as unknown as string)).toBe(false);
+    expect(detectarFullEnHtmlEnvio(undefined as unknown as string)).toBe(false);
   });
 });
