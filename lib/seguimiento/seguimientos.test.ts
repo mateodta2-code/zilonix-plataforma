@@ -6,6 +6,7 @@ import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientos
 import { cifrarToken } from "@/lib/cifrado";
 import {
   agregarSeguimiento,
+  buscarMedicionSiExiste,
   buscarSeguimientoActivoPorMlId,
   contarCompetidoresActivos,
   eliminarSeguimiento,
@@ -451,6 +452,92 @@ describe("listarSeguimientosConFotosParaVentas (issue #196)", () => {
     const lista = await listarSeguimientosConFotosParaVentas(empresaId);
 
     expect(lista.some((f) => f.seguimiento.id === seguimiento.id)).toBe(false);
+  });
+});
+
+// Issue #222 — el puente real entre Seguimiento e Investigación:
+// Investigación pasa el mismo `itemId` que usa como `mlIdExterno` acá.
+describe("buscarMedicionSiExiste (issue #222)", () => {
+  it("producto no seguido: null, nunca una medición inventada", async () => {
+    const { empresaId } = await crearEmpresaConUsuario();
+    expect(await buscarMedicionSiExiste(empresaId, "MCO111")).toBeNull();
+  });
+
+  it("seguido pero sin ninguna foto todavía: null", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    expect(await buscarMedicionSiExiste(empresaId, "MCO111")).toBeNull();
+  });
+
+  it("seguido, pero sin ninguna foto en la ventana de 5-9 días: null (nunca aproxima con una más vieja/nueva)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(0), vendidos: 50 }));
+    // La única foto vieja queda FUERA de la ventana (15 días, no 5-9).
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(15), vendidos: 10 }));
+
+    expect(await buscarMedicionSiExiste(empresaId, "MCO111")).toBeNull();
+  });
+
+  it("seguido con una foto real dentro de la ventana de 5-9 días: resta medida real (ventasDelPeriodo)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(7), vendidos: 100 }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(0), vendidos: 130 }));
+
+    expect(await buscarMedicionSiExiste(empresaId, "MCO111")).toBe(30);
+  });
+
+  it("con varias candidatas en la ventana, elige la más cercana a 7 días exactos (mismo criterio que fotoCerca30d)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(6), vendidos: 90 })); // distancia 1, la más cerca
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(9), vendidos: 10 })); // distancia 2
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(0), vendidos: 120 }));
+
+    expect(await buscarMedicionSiExiste(empresaId, "MCO111")).toBe(30); // 120 - 90, nunca 120 - 10
+  });
+
+  it("resultado negativo (vendidos nunca debería bajar): null, nunca un negativo fabricado", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(7), vendidos: 200 }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(0), vendidos: 100 }));
+
+    expect(await buscarMedicionSiExiste(empresaId, "MCO111")).toBeNull();
+  });
+
+  it("nunca mide contra un seguimiento eliminado (mismo criterio que buscarSeguimientoActivoPorMlId)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(7), vendidos: 100 }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: diasAtras(0), vendidos: 130 }));
+    await eliminarSeguimiento(empresaId, seguimiento.id);
+
+    expect(await buscarMedicionSiExiste(empresaId, "MCO111")).toBeNull();
   });
 });
 

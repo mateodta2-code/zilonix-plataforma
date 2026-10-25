@@ -5,6 +5,7 @@ import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuent
 import { obtenerItemMl, obtenerProducto, obtenerVendedor } from "@/lib/ml/cliente";
 import { buscarFotoDeHaceUnMes } from "@/lib/seguimiento/comparativa";
 import { esLinkDeTienda, esLinkTiendaOficialSinIdDeVendedor, interpretarEnlaceProducto, interpretarEnlaceTienda } from "@/lib/seguimiento/link";
+import { ventasDelPeriodo } from "@/lib/seguimiento/ventas";
 
 // Issue #175 — "máximo 5 competidores por empresa, validado en el
 // servidor": literal, acá vive el candado. No es una constraint de
@@ -311,6 +312,58 @@ export async function listarSeguimientosConFotosParaVentas(empresaId: string): P
       });
     }
     return resultado;
+  });
+}
+
+// Issue #222 — "estimado → medido": ventana de ~7 días (5-9, mismo
+// margen relativo que la de 30 días de arriba) para considerar que un
+// seguimiento ya tiene suficiente historial real como para medir en
+// vez de estimar. Nunca se exige el día 7 exacto ni se aproxima con la
+// foto más vieja/nueva disponible fuera de la ventana — si no hay
+// ninguna foto real ahí, todavía no hay medición, se sigue mostrando
+// el estimado (ver elegirVentasMes, lib/seguimiento/ventas.ts).
+const DIAS_VENTANA_MEDICION = 7;
+const MARGEN_VENTANA_MEDICION = 2;
+
+// Issue #222 — el puente real entre Seguimiento e Investigación: `mlIdExterno`
+// es el mismo `itemId` que ya usa Investigación (lib/ml/investigacion.ts)
+// para cada publicación. Si ese id no está en seguimiento activo, o
+// está pero todavía no tiene una foto real a ~7 días de la última, no
+// hay medición posible todavía — null, nunca un número inventado ni
+// una ventana más corta "para no dejarlo en null". Quien llame a esto
+// decide qué mostrar (ver elegirVentasMes) — acá solo se resuelve el
+// dato real si existe.
+export async function buscarMedicionSiExiste(empresaId: string, mlIdExterno: string): Promise<number | null> {
+  const seguimiento = await buscarSeguimientoActivoPorMlId(empresaId, mlIdExterno);
+  if (!seguimiento) return null;
+
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [ultimaFoto] = await tx
+      .select()
+      .from(seguimientoFotos)
+      .where(eq(seguimientoFotos.seguimientoId, seguimiento.id))
+      .orderBy(desc(seguimientoFotos.fecha))
+      .limit(1);
+    if (!ultimaFoto) return null;
+
+    const hoy = new Date();
+    hoy.setUTCHours(0, 0, 0, 0);
+    const objetivo7d = diasAtras(hoy, DIAS_VENTANA_MEDICION);
+    const desdeVentana7d = diasAtras(hoy, DIAS_VENTANA_MEDICION + MARGEN_VENTANA_MEDICION);
+    const hastaVentana7d = diasAtras(hoy, DIAS_VENTANA_MEDICION - MARGEN_VENTANA_MEDICION);
+
+    const candidatas7d = await tx
+      .select()
+      .from(seguimientoFotos)
+      .where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), gte(seguimientoFotos.fecha, desdeVentana7d), lte(seguimientoFotos.fecha, hastaVentana7d)));
+
+    // Nunca la misma foto de los dos lados de la resta — necesita DOS
+    // fotos reales distintas separadas ~7 días, igual que ventasDelPeriodo
+    // ya exige para "hoy"/"~30 días".
+    const foto7d = fotoMasCercaDe(candidatas7d.filter((f) => f.id !== ultimaFoto.id), objetivo7d);
+    if (!foto7d) return null;
+
+    return ventasDelPeriodo(ultimaFoto.vendidos, foto7d.vendidos);
   });
 }
 
