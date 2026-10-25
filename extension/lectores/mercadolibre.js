@@ -627,6 +627,25 @@
     return typeof url === "string" && REGEX_FILTRO_FULL_EN_URL.test(url);
   }
 
+  // Issue #248 (vuelta 5) — evidencia real de Pablo (listado "tetero"
+  // CO, filtro apagado): ~60 `li` reales, 39 con Full visible (7
+  // anuncios + 32 orgánicos) — y el panel seguía en 0/48. Hipótesis
+  // confirmada: `esperarListadoEstable` (content.js) medía la
+  // cantidad YA FILTRADA (`leerListado(...).productos.length`, sin
+  // anuncios/inválidas) para decidir "estable" — ese número puede
+  // quedar quieto ANTES de que Mercado Libre termine de hidratar el
+  // badge Full DENTRO de cada `li`, aunque la cantidad de tarjetas en
+  // sí todavía esté cambiando. Zilonix OS (`esperarTarjetas`) nunca
+  // tuvo este problema porque mide la cantidad CRUDA de `li` en el
+  // DOM, antes de cualquier filtro — se expone esa misma cuenta cruda
+  // acá para que `content.js` pueda usarla igual, sin que
+  // `esperarListadoEstable` deje de ser genérico para las otras 5
+  // plataformas (si el lector activo no expone esta función, cae de
+  // vuelta a `productos.length`, el criterio de siempre).
+  function contarTarjetasListado(doc) {
+    return doc.querySelectorAll("li.ui-search-layout__item").length;
+  }
+
   function leerListado(doc) {
     // Issue #248 (vuelta 2) — ver filtroFullActivoEnUrl arriba: si el
     // filtro Full de la URL está puesto, se calcula UNA vez por
@@ -785,6 +804,7 @@
     tipoDePagina,
     leerProducto,
     leerListado,
+    contarTarjetasListado,
     leerTienda,
     leerDatosIncrustados,
     calcularVentasPromedioMes,
@@ -824,6 +844,18 @@
     module.exports = api;
   }
   if (typeof window !== "undefined") {
-    window.ZilonixLectorActivo = { sitio: "Mercado Libre Colombia", tipoDePagina, leerProducto, leerListado, leerTienda, leerResenas };
+    window.ZilonixLectorActivo = {
+      sitio: "Mercado Libre Colombia",
+      tipoDePagina,
+      leerProducto,
+      leerListado,
+      leerTienda,
+      leerResenas,
+      // Issue #248 (vuelta 5) — ver el comentario completo arriba de
+      // `contarTarjetasListado`. Opcional a propósito: las otras 5
+      // plataformas no la exponen, `esperarListadoEstable`
+      // (content.js) cae a `productos.length` si no está.
+      contarTarjetasListado,
+    };
   }
 })();

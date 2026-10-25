@@ -337,6 +337,20 @@ const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
 
 Extensión 0.3.22 → 0.3.23.
 
+## Hotfix de smoke #16 — Full seguía en 0/48: la cuenta de "estable" era la equivocada (issue #248, vuelta 5)
+
+Con 0.3.23 (criterio simplificado de la vuelta 4), el smoke de Pablo seguía fallando: listado "tetero" CO sin filtro, ~60 `li` reales, 39 con Full visible (7 anuncios + 32 orgánicos) — panel en 0/48 igual.
+
+**Dos causas reales, no una**:
+
+1. **`esperarListadoEstable` medía la cantidad EQUIVOCADA**: usaba `lector.leerListado(document).productos.length` — la cantidad YA FILTRADA (sin anuncios, sin tarjetas inválidas) — para decidir "estable". Ese número puede quedar quieto ANTES de que Mercado Libre termine de hidratar el badge Full dentro de cada tarjeta, aunque la cantidad de tarjetas en el DOM siga cambiando. `esperarTarjetas()` de Zilonix OS nunca tiene este problema porque mide la cantidad CRUDA de `li` (`document.querySelectorAll('li.ui-search-layout__item').length`), antes de cualquier filtro — se agrega `contarTarjetasListado` (`lectores/mercadolibre.js`) con esa misma cuenta cruda, y `esperarListadoEstable` la usa cuando el lector activo la expone; si no (las otras 5 plataformas, sin este bug reportado), cae a `productos.length`, el criterio genérico de siempre.
+
+2. **El panel FLOTANTE de listado nunca pasaba por esa espera**: `reescanear()` (disparado en cada carga y en cada cambio del DOM vía `MutationObserver`) llamaba `lector.leerListado(document)` EN CALIENTE, directo, para pintar el panel — la espera de estabilidad solo corría del lado del escaneo automático (`manejarEscaneoAutomatico`). El chip "Full detectados" de ese panel, que es justo lo que Pablo estaba mirando en el smoke, podía mostrar 0/Y aunque los badges ya estuvieran visibles en pantalla, por la misma razón de siempre: una lectura tomada antes de tiempo. Se agrega `manejarListadoFlotante` (con el mismo guard de "nunca dos esperas en paralelo" que ya usa `manejarEscaneoAutomatico`) — ahora el panel flotante también espera a `esperarListadoEstable` antes de pintar, nunca lee en caliente.
+
+**Detector sin cambios**: sigue siendo el único `querySelector('svg[aria-label="Enviado por FULL"]')` de la vuelta 4 — nunca se reintrodujeron las capas de #241/#242/#248 (vueltas 1-3). `filtroFullActivoEnUrl` sigue como OR opcional. `poly-bookmark__icon-full` (favorito) sigue sin contar como Full.
+
+Extensión 0.3.23 → 0.3.24.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).

@@ -482,6 +482,21 @@
   // estable) + el selector directo. Se saca esa fase entera y se
   // vuelve al mismo criterio simple de OS: esperar solo la cantidad
   // de tarjetas estable, nada específico de Full.
+  //
+  // Issue #248 (vuelta 5) — con eso solo, el smoke de Pablo (listado
+  // "tetero" sin filtro) seguía en 0/48 con badges Full visibles.
+  // Causa real: esta función medía "estable" con
+  // `lector.leerListado(document).productos.length` — la cantidad YA
+  // FILTRADA (sin anuncios, sin tarjetas inválidas) — que puede quedar
+  // quieta ANTES de que Mercado Libre termine de hidratar el badge
+  // Full DENTRO de cada tarjeta, aunque la cantidad de tarjetas en sí
+  // siga cambiando. `esperarTarjetas()` de Zilonix OS mide la cantidad
+  // CRUDA de `li` (`document.querySelectorAll('li.ui-search-layout__item').length`)
+  // — nunca tiene este problema. Se usa esa misma cuenta cruda cuando
+  // el lector activo la expone (`lector.contarTarjetasListado`, hoy
+  // solo Mercado Libre, ver `lectores/mercadolibre.js`) — si no la
+  // expone (las otras 5 plataformas, sin este bug reportado), se cae
+  // a `productos.length`, el criterio genérico de siempre.
   function esperarListadoEstable(maxEsperaMs, esperaEstabilidadMs, intervaloMs) {
     maxEsperaMs = typeof maxEsperaMs === "number" ? maxEsperaMs : 14000;
     esperaEstabilidadMs = typeof esperaEstabilidadMs === "number" ? esperaEstabilidadMs : 1000;
@@ -503,7 +518,12 @@
           return;
         }
         const productos = (resultado && resultado.productos) || [];
-        const cantidad = productos.length;
+        let cantidad;
+        try {
+          cantidad = typeof lector.contarTarjetasListado === "function" ? lector.contarTarjetasListado(document) : productos.length;
+        } catch {
+          cantidad = productos.length;
+        }
         const ahora = Date.now();
         if (cantidad !== ultimaCantidad) {
           ultimaCantidad = cantidad;
@@ -517,6 +537,39 @@
         }
       }, intervaloMs);
     });
+  }
+
+  // Issue #248 (vuelta 5) — Pablo confirmó que el panel FLOTANTE de un
+  // listado (el que se ve al navegar normal, sin "Analizar"
+  // automático) llamaba `lector.leerListado(document)` EN CALIENTE,
+  // directo desde `reescanear()`, sin pasar nunca por
+  // `esperarListadoEstable` — esa espera solo corría del lado del
+  // escaneo automático (`manejarEscaneoAutomatico`, abajo). El chip
+  // "Full detectados" de ese panel podía mostrar 0/Y con badges reales
+  // visibles en la página por la misma razón de siempre: una lectura
+  // tomada antes de que el sitio termine de hidratar. Se agrega el
+  // mismo guard de "nunca dos esperas en paralelo" que ya usa
+  // `manejarEscaneoAutomatico` (ver `esperandoEscaneoAutomatico`,
+  // abajo) — si el MutationObserver dispara `reescanear()` de nuevo
+  // mientras esta espera sigue en curso, ese reescaneo se ignora acá
+  // (no hace falta: cuando la espera en curso resuelva, pinta con lo
+  // que haya en ese momento, que ya va a incluir cualquier cambio
+  // reciente del DOM).
+  let esperandoListadoFlotante = false;
+  async function manejarListadoFlotante(panel) {
+    if (esperandoListadoFlotante) return;
+    esperandoListadoFlotante = true;
+    try {
+      const resultado = await esperarListadoEstable();
+      // Nunca se pinta un captcha como si fuera un listado real — el
+      // aviso de captcha para el escaneo automático ya lo maneja
+      // manejarEscaneoAutomatico por su cuenta; acá, sin nada confiable
+      // que mostrar, se deja el panel como esté.
+      if (resultado.captcha) return;
+      renderizarListado(panel, resultado.productos);
+    } finally {
+      esperandoListadoFlotante = false;
+    }
   }
   // Evita arrancar dos esperas en paralelo si el MutationObserver
   // dispara varios reescaneos mientras la primera espera todavía no
@@ -708,9 +761,13 @@
           if (resena && resena.resenasTotales != null) enviarResenaAZilonix(datos.itemId, resena);
         }
       } else if (tipo === "listado") {
-        const resultadoListado = lector.leerListado(document);
-        const productos = resultadoListado.productos;
-        renderizarListado(panel, productos);
+        // Issue #248 (vuelta 5) — ya no se pinta con una lectura en
+        // caliente: `manejarListadoFlotante` espera a que el listado
+        // se estabilice (mismo criterio que el escaneo automático,
+        // abajo) antes de pintar el panel — ver el comentario completo
+        // junto a `esperarListadoEstable`/`manejarListadoFlotante`,
+        // arriba.
+        void manejarListadoFlotante(panel);
         // Issue #231 — ya no se decide acá mismo con esta UNA lectura
         // sincrónica (ver manejarEscaneoAutomatico/esperarListadoEstable
         // arriba: el bug real era mandar 0 candidatos antes de que el
