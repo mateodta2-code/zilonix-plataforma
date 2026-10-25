@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 // ejemplo, sin navegador ni DOM real.
 import {
   calcularVentasPromedioMes,
+  clasificarLinkListadoMl,
   construirLinkSeguirProducto,
   construirLinkSeguirTienda,
   extraerCustIdDeUrl,
@@ -71,6 +72,16 @@ describe("extraerIdDeUrl — issue #174, el producto actual lo manda la URL, nun
   it("una URL sin ningún id de Mercado Libre -> null", () => {
     expect(extraerIdDeUrl("https://www.mercadolibre.com.co/ofertas")).toBeNull();
     expect(extraerIdDeUrl(null)).toBeNull();
+  });
+
+  // Issue #233 — bug real del smoke: antes de esta tarea, acá SOLO se
+  // reconocía MCO (Colombia) — una página de producto de cualquier
+  // otro país siempre devolvía null, rompiendo "Completar vendidos" y
+  // "Seguir en Zilonix" para esos países.
+  it("site-ids reales de otros países de Mercado Libre (MLA=Argentina, MLB=Brasil, etc) también funcionan", () => {
+    expect(extraerIdDeUrl("https://articulo.mercadolibre.com.ar/MLA-987654321-auriculares-_JM")).toBe("MLA987654321");
+    expect(extraerIdDeUrl("https://www.mercadolivre.com.br/p/MLB111222333")).toBe("MLB111222333");
+    expect(extraerIdDeUrl("https://articulo.mercadolibre.com.pe/MPE-555666777-mochila-_JM")).toBe("MPE555666777");
   });
 });
 
@@ -177,13 +188,21 @@ describe("construirLinkSeguirProducto — issue #174, botón \"Seguir en Zilonix
     expect(construirLinkSeguirProducto("MCO123456789")).toBe(`${URL_APP}/panel/investigacion/seguimiento?agregar=MCO123456789`);
   });
 
-  it("rechaza cualquier cosa que no sea MCO + dígitos — nunca arma un link con un id sin validar", () => {
-    expect(construirLinkSeguirProducto("MCO-123456789")).toBeNull(); // con guión no pasa el patrón /^MCO\d+$/
+  it("rechaza cualquier cosa que no sea un site-id real de ML + dígitos — nunca arma un link con un id sin validar", () => {
+    expect(construirLinkSeguirProducto("MCO-123456789")).toBeNull(); // con guión no pasa el patrón
     expect(construirLinkSeguirProducto("MCOABC")).toBeNull();
     expect(construirLinkSeguirProducto("")).toBeNull();
     expect(construirLinkSeguirProducto("MCO123; DROP TABLE x")).toBeNull();
+    expect(construirLinkSeguirProducto("XYZ123456789")).toBeNull(); // site-id inventado, no uno real de ML
     expect(construirLinkSeguirProducto(null)).toBeNull();
     expect(construirLinkSeguirProducto(undefined)).toBeNull();
+  });
+
+  // Issue #233 — antes de esta tarea, el patrón solo aceptaba MCO: un
+  // itemId real de otro país (ej. Argentina) nunca armaba un link.
+  it("acepta site-ids reales de otros países de Mercado Libre", () => {
+    expect(construirLinkSeguirProducto("MLA987654321")).toBe(`${URL_APP}/panel/investigacion/seguimiento?agregar=MLA987654321`);
+    expect(construirLinkSeguirProducto("MLB111222333")).toBe(`${URL_APP}/panel/investigacion/seguimiento?agregar=MLB111222333`);
   });
 });
 
@@ -216,6 +235,49 @@ describe("tipoDePagina — issue #192, bug real: una tienda oficial real no se r
 
   it('un producto real sigue dando "producto", nunca "tienda"', () => {
     expect(tipoDePagina("https://articulo.mercadolibre.com.co/MCO-1234567890-reloj-_JM")).toBe("producto");
+  });
+
+  // Issue #233, punto B — bug real del smoke: Brasil usa el dominio
+  // "mercadolivre" (marca real en portugués, mismo dominio que ya usa
+  // urlListadoMl en background.js desde #227) — hasta esta tarea, acá
+  // solo se reconocía "mercadolibre", así que una URL real de listado
+  // de Brasil devolvía null (ni "listado" ni nada) y leerListado NUNCA
+  // se llegaba a llamar — 0 productos garantizado, aparte de cualquier
+  // otro bug.
+  it('listado.mercadolivre.com.br (Brasil) -> "listado", no null', () => {
+    expect(tipoDePagina("https://listado.mercadolivre.com.br/cargadores?_zilonix_escaneo=1")).toBe("listado");
+  });
+
+  it("un producto real de otro país (site-id distinto de MCO) también da \"producto\"", () => {
+    expect(tipoDePagina("https://articulo.mercadolibre.com.ar/MLA-987654321-auriculares-_JM")).toBe("producto");
+    expect(tipoDePagina("https://www.mercadolivre.com.br/p/MLB111222333")).toBe("producto");
+  });
+});
+
+describe("clasificarLinkListadoMl — issue #233, bug real del smoke: solo reconocía MCO", () => {
+  it("un link de catálogo (/p/) con site-id Colombia sigue funcionando (regresión)", () => {
+    expect(clasificarLinkListadoMl("https://www.mercadolibre.com.co/p/MCO123456789")).toEqual({ tipo: "producto", id: "MCO123456789" });
+  });
+
+  it("un link \"user product\" (/up/MxxU) con site-id Colombia sigue funcionando (regresión)", () => {
+    expect(clasificarLinkListadoMl("https://www.mercadolibre.com.co/up/MCOU123456")).toEqual({ tipo: "user_product", id: "MCOU123456" });
+  });
+
+  it("un link de publicación real (Mxx-dígitos) con site-id Colombia sigue dando itemId (regresión)", () => {
+    expect(clasificarLinkListadoMl("https://articulo.mercadolibre.com.co/MCO-123456789-reloj-_JM")).toEqual({ tipo: "item", id: "MCO123456789" });
+  });
+
+  it("los mismos 3 formatos, con site-ids reales de otros países, ya NO se descartan", () => {
+    expect(clasificarLinkListadoMl("https://www.mercadolibre.com.ar/p/MLA987654321")).toEqual({ tipo: "producto", id: "MLA987654321" });
+    expect(clasificarLinkListadoMl("https://www.mercadolivre.com.br/up/MLBU654321")).toEqual({ tipo: "user_product", id: "MLBU654321" });
+    expect(clasificarLinkListadoMl("https://articulo.mercadolivre.com.br/MLB-111222333-fone-_JM")).toEqual({ tipo: "item", id: "MLB111222333" });
+  });
+
+  it("un href sin ningún site-id real de Mercado Libre -> null (nunca se inventa un id)", () => {
+    expect(clasificarLinkListadoMl("https://www.mercadolibre.com.co/categorias/tecnologia")).toBeNull();
+    expect(clasificarLinkListadoMl("https://www.mercadolibre.com.co/XYZ-123456789-algo")).toBeNull(); // site-id inventado, no uno real
+    expect(clasificarLinkListadoMl(null)).toBeNull();
+    expect(clasificarLinkListadoMl("")).toBeNull();
   });
 });
 

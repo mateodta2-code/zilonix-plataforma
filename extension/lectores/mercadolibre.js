@@ -19,8 +19,25 @@
   // extension/config.js. Mismo patrón de acceso dual que U, arriba.
   const CONFIG = typeof window !== "undefined" ? window.ZilonixConfig : require("../config.js");
 
+  // Issue #233 — bug real confirmado en el smoke de Sharel: "panel
+  // sigue sin bloques, escaneo → 0 productos" en Argentina/Brasil/etc.
+  // Causa real: todo este archivo asumía el site-id de Mercado Libre
+  // COLOMBIA (MCO) a mano, en 4 lugares distintos — un id real de
+  // cualquier otro país (MLA=Argentina, MLB=Brasil, MLM=México,
+  // MLC=Chile, MLU=Uruguay, MPE=Perú — site-ids públicos y reales de
+  // Mercado Libre, no un detalle interno de scraping, mismo criterio
+  // que ya usan los dominios de DOMINIOS_ML_PAIS en background.js,
+  // issue #227) nunca matcheaba "MCO", así que `clasificarLinkListadoMl`
+  // descartaba la tarjeta ENTERA (`if (!idInfo) return;`, más abajo) —
+  // para Argentina/Brasil/México/Chile/Uruguay/Perú, TODAS las
+  // tarjetas de un listado se perdían así, sin importar si la lectura
+  // en sí funcionaba bien. Una sola constante compartida para los 4
+  // lugares, para no repetir el patrón ni arriesgar que uno quede
+  // desactualizado si se agrega un país nuevo el día de mañana.
+  const PREFIJO_ITEM_ML = "MCO|MLA|MLB|MLM|MLC|MLU|MPE";
+
   function tipoDePagina(url) {
-    if (/\/(p\/)?MCO-?\d+/i.test(url) || /articulo\.mercadolibre/i.test(url)) return "producto";
+    if (new RegExp(`/(p/)?(?:${PREFIJO_ITEM_ML})-?\\d+`, "i").test(url) || /articulo\.(mercadolibre|mercadolivre)/i.test(url)) return "producto";
     // Página de UN vendedor/tienda (perfil público o tienda oficial) —
     // nunca confundir con /listado (que es una búsqueda, no un
     // perfil). Se prueba ANTES del check de /listado de abajo:
@@ -37,8 +54,16 @@
     // tienda.mercadolibre.*, y no trae ?CustId=) — el panel ni
     // siquiera se dibujaba, silencio total. /tienda/ (el path real de
     // una tienda oficial) se suma como cuarto patrón.
-    if (/\/perfil\/|tienda\.mercadolibre|\/tienda\/|[?&]CustId=/i.test(url)) return "tienda";
-    if (/listado\.mercadolibre|\/search|[?&]q=/i.test(url)) return "listado";
+    if (/\/perfil\/|tienda\.(mercadolibre|mercadolivre)|\/tienda\/|[?&]CustId=/i.test(url)) return "tienda";
+    // Issue #233, punto B — bug real confirmado por Sharel: Brasil usa
+    // el dominio "mercadolivre" (marca real en portugués — mismo
+    // dominio que ya arma `urlListadoMl` en background.js desde #227),
+    // nunca "mercadolibre". Esta función solo reconocía "mercadolibre"
+    // acá, así que una URL real de listado de Brasil
+    // (listado.mercadolivre.com.br/…) devolvía `null` — ni siquiera
+    // llegaba a intentar `leerListado`, 0 productos garantizado,
+    // independiente de si clasificarLinkListadoMl funcionaba o no.
+    if (/listado\.(mercadolibre|mercadolivre)|\/search|[?&]q=/i.test(url)) return "listado";
     return null;
   }
 
@@ -47,7 +72,10 @@
   // hacia Zilonix Seller con el id a agregar al seguimiento. El id
   // SIEMPRE se valida y se encodea antes de armar el link — nunca se
   // pega un id (de la URL o del HTML) directo a una URL.
-  const PATRON_ID_ITEM = /^MCO\d+$/;
+  // Issue #233 — antes solo validaba MCO (Colombia); "Seguir en
+  // Zilonix" en un producto de cualquier otro país nunca construía un
+  // link real (`construirLinkSeguirProducto` devolvía `null` siempre).
+  const PATRON_ID_ITEM = new RegExp(`^(?:${PREFIJO_ITEM_ML})\\d+$`);
   const PATRON_ID_VENDEDOR = /^\d+$/;
 
   function construirLinkSeguirProducto(itemId) {
@@ -165,11 +193,17 @@
   // Todo lo de abajo amarra sold_quantity/date_created al producto que
   // el usuario está viendo de verdad, nunca al primero que aparezca.
 
-  // "MCO-123456789" o "MCO123456789" (con o sin guión) -> "MCO123456789".
+  // "MCO-123456789"/"MLA-123456789"/etc (con o sin guión) ->
+  // "MCO123456789"/"MLA123456789". Issue #233 — antes solo reconocía
+  // MCO: en una página de producto de Argentina/Brasil/etc, `itemIdActual`
+  // quedaba siempre `null`, lo que rompía `leerDatosIncrustados`
+  // (nunca podía amarrar sold_quantity al producto real),
+  // "Completar vendidos" (nunca mandaba nada) y "Seguir en Zilonix"
+  // (`construirLinkSeguirProducto` también necesitaba un id real).
   function extraerIdDeUrl(url) {
     if (typeof url !== "string") return null;
-    const m = url.match(/MCO-?(\d+)/i);
-    return m ? `MCO${m[1]}` : null;
+    const m = url.match(new RegExp(`(${PREFIJO_ITEM_ML})-?(\\d+)`, "i"));
+    return m ? `${m[1].toUpperCase()}${m[2]}` : null;
   }
 
   function normalizarId(valor) {
@@ -388,14 +422,23 @@
   // issue #227 punto 9 "Seguir solo ML"): catálogo (/p/MCO...) y "user
   // product" (/up/MCOU...) NO son itemId de publicación real, quedan
   // sin itemId (nunca se inventa uno).
+  //
+  // Issue #233 — bug real confirmado por el smoke de Sharel: los 3
+  // patrones de acá solo reconocían el prefijo MCO (Colombia) — un id
+  // real de cualquier otro país (MLA/MLB/MLM/MLC/MLU/MPE, ver
+  // PREFIJO_ITEM_ML arriba) nunca matcheaba NINGUNO de los 3, así que
+  // `idInfo` daba `null` y la tarjeta se descartaba ENTERA (`if
+  // (!idInfo) return;`, en leerListado) — para Argentina/Brasil/etc,
+  // TODAS las tarjetas de un listado real se perdían así, sin importar
+  // que la lectura del resto de la tarjeta funcionara bien.
   function clasificarLinkListadoMl(href) {
     if (!href) return null;
-    let m = href.match(/\/p\/(MCO\d+)/);
-    if (m) return { tipo: "producto", id: m[1] };
-    m = href.match(/\/up\/(MCOU\d+)/);
-    if (m) return { tipo: "user_product", id: m[1] };
-    m = href.match(/MCO-?(\d{9,})/);
-    if (m) return { tipo: "item", id: `MCO${m[1]}` };
+    let m = href.match(new RegExp(`/p/((?:${PREFIJO_ITEM_ML})\\d+)`, "i"));
+    if (m) return { tipo: "producto", id: m[1].toUpperCase() };
+    m = href.match(new RegExp(`/up/((?:${PREFIJO_ITEM_ML})U\\d+)`, "i"));
+    if (m) return { tipo: "user_product", id: m[1].toUpperCase() };
+    m = href.match(new RegExp(`(${PREFIJO_ITEM_ML})-?(\\d{9,})`, "i"));
+    if (m) return { tipo: "item", id: `${m[1].toUpperCase()}${m[2]}` };
     return null;
   }
 
@@ -602,6 +645,13 @@
     extraerCustIdDeUrl,
     leerResenas,
     leerResenasDesdeScript,
+    // Issue #233 — puro (string -> objeto, sin DOM), nunca necesitó
+    // estar afuera de leerListado salvo que hasta esta tarea nadie la
+    // había probado con vitest — justo la función con el bug real del
+    // smoke (descartaba toda tarjeta no-MCO). Se suma al export para
+    // poder probarla de verdad, mismo criterio que el resto de este
+    // archivo.
+    clasificarLinkListadoMl,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe

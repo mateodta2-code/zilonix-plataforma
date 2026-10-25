@@ -442,15 +442,16 @@
   // existe para los 6 sitios, así que esta espera también ayuda al
   // volumen de las otras 5 plataformas si son lentas en renderizar.
   //
-  // `maxEsperaMs` queda en 10s (no 15s): esto corre DENTRO del
-  // timeout fijo de 15s que ya tiene background.js
+  // `maxEsperaMs` queda en 14s (issue #233 — antes 10s), bien cerca
+  // del timeout fijo de 15s que ya tiene background.js
   // (TIMEOUT_POR_VARIANTE_MS/TIEMPO_MAX_POR_TERMINO_MS, sin cambios
-  // por esta tarea) para toda la operación de abrir la pestaña, leer y
-  // cerrarla — 10s de espera acá deja margen real para el tiempo que
-  // ya se gasta antes de que este content script arranque
-  // (document_idle) y para el mensaje de vuelta.
+  // por esta tarea): el margen de 1s que queda es solo para el
+  // mensaje de vuelta — background.js es quien de verdad corta la
+  // espera si hace falta (ver manejarEscaneoAutomatico, abajo: si
+  // esto termina sin ver nada, NUNCA se manda un resultado vacío por
+  // cuenta propia, se deja que el timeout externo decida).
   function esperarListadoEstable(maxEsperaMs, esperaEstabilidadMs, intervaloMs) {
-    maxEsperaMs = typeof maxEsperaMs === "number" ? maxEsperaMs : 10000;
+    maxEsperaMs = typeof maxEsperaMs === "number" ? maxEsperaMs : 14000;
     esperaEstabilidadMs = typeof esperaEstabilidadMs === "number" ? esperaEstabilidadMs : 1000;
     intervaloMs = typeof intervaloMs === "number" ? intervaloMs : 400;
     return new Promise((resolve) => {
@@ -505,6 +506,23 @@
           yaAvisadoCaptcha = true;
           enviarListadoAZilonix([], true, true);
         }
+        return;
+      }
+      if (!resultado.productos.length) {
+        // Issue #233, punto C — bug real: hasta esta tarea, si
+        // esperarListadoEstable agotaba maxEsperaMs sin ver NINGÚN
+        // candidato, igual se mandaba ese resultado vacío y se
+        // marcaba yaEnviadoEscaneoAutomatico — cerrando la puerta a
+        // cualquier intento posterior (el MutationObserver podía
+        // seguir viendo la página seguir cargando después). Nunca se
+        // adelanta esa decisión desde acá con menos información que
+        // la que tiene background.js: se deja sin marcar nada, para
+        // que (a) el timeout EXTERNO fijo de 15s
+        // (TIMEOUT_POR_VARIANTE_MS/TIEMPO_MAX_POR_TERMINO_MS) sea
+        // quien de verdad cierre esta variante si nunca hubo nada
+        // real, o (b) si el MutationObserver dispara otro reescaneo
+        // antes de que ese timeout externo llegue, se intente de
+        // nuevo con lo que haya en ese momento.
         return;
       }
       yaEnviadoEscaneoAutomatico = true;
