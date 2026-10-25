@@ -341,7 +341,11 @@
   // "Enviar a Zilonix" — background.js los trata distinto: el manual
   // se reenvía tal cual al panel; este otro cierra la pestaña y
   // sigue el escaneo).
-  function enviarListadoAZilonix(productos, auto) {
+  // Issue #225 — `captcha` (true SOLO para Alibaba, ver
+  // extension/lectores/alibaba.js) avisa a background.js que esta
+  // variante quedó bloqueada — nunca se evade, se espera a que la
+  // persona la resuelva a mano (ver la nota en reescanear(), abajo).
+  function enviarListadoAZilonix(productos, auto, captcha) {
     if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
     const candidatos = ordenarProductosListado(productos)
       .filter((p) => p.titulo && typeof p.precio === "number" && Number.isFinite(p.precio))
@@ -352,9 +356,9 @@
         vendidos: typeof p.vendidos === "number" ? p.vendidos : null,
         link: resolverLinkListadoSeguro(p.link),
       }));
-    if (!candidatos.length && !auto) return; // manual: nada confiable para mandar, nunca un mensaje vacío
+    if (!candidatos.length && !auto && !captcha) return; // manual: nada confiable para mandar, nunca un mensaje vacío
     const mensaje = auto
-      ? { tipo: "zilonix:escaneo-resultado", payload: { productos: candidatos } }
+      ? { tipo: "zilonix:escaneo-resultado", payload: { productos: candidatos, captcha: Boolean(captcha) } }
       : { tipo: "zilonix:listado", payload: { plataforma: lector.sitio, url: location.href, productos: candidatos } };
     try {
       chrome.runtime.sendMessage(mensaje, () => {
@@ -380,6 +384,11 @@
     }
   }
   let yaEnviadoEscaneoAutomatico = false;
+  // Issue #225 — aviso de captcha, UN solo uso por carga de página —
+  // a propósito NUNCA bloquea que, más adelante en la MISMA carga, se
+  // mande el resultado real una vez que el captcha se resuelva (ese
+  // es yaEnviadoEscaneoAutomatico, arriba, un flag INDEPENDIENTE).
+  let yaAvisadoCaptcha = false;
 
   // Issue #210 — "Completar vendidos": cuando la persona abre un
   // candidato de Mercado Libre (por el botón "Completar vendidos
@@ -414,6 +423,32 @@
     }
   }
 
+  // Issue #225 — "Top 8 reseñas": cuando background.js está leyendo
+  // reseñas (una sola pestaña reutilizada, navegada con
+  // chrome.tabs.update — ver extension/LEEME.md), cada navegación
+  // reinyecta este content script de cero, así que esta marca de "un
+  // solo envío" siempre arranca en false para esa página — nunca se
+  // manda dos veces la reseña de la MISMA PDP (si se mandara dos
+  // veces, la segunda podría llegarle a background.js después de que
+  // ya avanzó al siguiente item y quedaría mal atribuida). Mismo
+  // criterio que lector.leerResenas: solo Mercado Libre lo implementa,
+  // en los otros 5 sitios esto simplemente nunca encuentra nada que
+  // mandar.
+  let yaEnviadaResenaEstaPagina = false;
+  function enviarResenaAZilonix(itemId, resena) {
+    if (yaEnviadaResenaEstaPagina) return;
+    if (typeof itemId !== "string" || !resena) return;
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    yaEnviadaResenaEstaPagina = true;
+    try {
+      chrome.runtime.sendMessage({ tipo: "zilonix:resena", payload: { itemId, resena } }, () => {
+        void chrome.runtime.lastError; // sin "Ver reseñas" en curso en ningún panel — nunca un error real
+      });
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe el panel.
+    }
+  }
+
   function reescanear() {
     let tipo;
     try {
@@ -429,12 +464,38 @@
         const datos = lector.leerProducto(document);
         renderizarProducto(panel, datos);
         enviarVendidosAZilonix(datos);
+        // Issue #225 — se intenta SIEMPRE que haya un itemId confirmado
+        // (igual que enviarVendidosAZilonix), no solo durante un "Ver
+        // reseñas" activo — background.js es quien decide si le
+        // importa (solo si esta pestaña es la que está leyendo
+        // reseñas en este momento, ver avanzarLecturaResena).
+        if (lector.leerResenas && datos && typeof datos.itemId === "string") {
+          const resena = lector.leerResenas(document);
+          if (resena && resena.resenasTotales != null) enviarResenaAZilonix(datos.itemId, resena);
+        }
       } else if (tipo === "listado") {
-        const productos = lector.leerListado(document).productos;
+        const resultadoListado = lector.leerListado(document);
+        const productos = resultadoListado.productos;
         renderizarListado(panel, productos);
         if (esPaginaDeEscaneoAutomatico() && !yaEnviadoEscaneoAutomatico) {
-          yaEnviadoEscaneoAutomatico = true;
-          enviarListadoAZilonix(productos, true);
+          // Issue #225 — Alibaba puede interceptar con un CAPTCHA
+          // (resultadoListado.captcha === true, ver
+          // extension/lectores/alibaba.js) — a propósito NO se marca
+          // yaEnviadoEscaneoAutomatico en ese caso: la persona resuelve
+          // el captcha a mano en esta misma pestaña (que sigue activa/
+          // visible) y, cuando la página real cargue, este mismo
+          // reescaneo (disparado solo por el MutationObserver/cambio
+          // de URL de siempre) vuelve a intentar — nunca hace falta
+          // que la persona "reintente" nada desde el panel.
+          if (resultadoListado.captcha) {
+            if (!yaAvisadoCaptcha) {
+              yaAvisadoCaptcha = true;
+              enviarListadoAZilonix([], true, true);
+            }
+          } else {
+            yaEnviadoEscaneoAutomatico = true;
+            enviarListadoAZilonix(productos, true, false);
+          }
         }
       } else if (tipo === "tienda" && lector.leerTienda) renderizarTienda(panel, lector.leerTienda(document));
     } catch (error) {

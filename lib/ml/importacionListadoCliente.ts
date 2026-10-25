@@ -20,14 +20,35 @@
 // están confirmados contra datos reales de Mercado Libre — aplicarlos
 // a un vendidos aproximado de otro sitio sería inventar, no estimar.
 
+// Issue #225 (parte B) — bug real de Zilonix OS que esto existe para
+// NUNCA repetir: mostrar un acumulado histórico (ej. "1.234 vendidos"
+// de toda la vida de la publicación en AliExpress/Shein/Alibaba/Temu)
+// con una etiqueta de "/mes", como si fuera una tasa mensual real.
+// Cada plataforma expone un tipo de señal DISTINTO:
+//   - "mensual_piso": SOLO Amazon ("10 K+ comprados el mes pasado" —
+//     un piso real, confirmado por Amazon mismo, de hace un mes).
+//   - "acumulado_sin_periodo": Mercado Libre ("+N vendidos"),
+//     Temu/AliExpress/Shein/Alibaba ("vendidos"/"ventas"/"soldOrder")
+//     — un acumulado histórico SIN que la plataforma diga de qué
+//     período, nunca se divide entre nada ni se le pone "/mes".
+//   - "ausente": la plataforma no mostró ningún número de ventas.
+// clasificarSenalVentas (abajo) es el ÚNICO lugar que decide esto —
+// la UI (PanelDemanda.tsx) nunca vuelve a adivinar el tipo por su
+// cuenta, siempre lee senalVentas.tipo ya resuelto.
+export type TipoSenalVentas = "mensual_piso" | "acumulado_sin_periodo" | "ausente";
+export type SenalVentas = { valor: number | null; tipo: TipoSenalVentas };
+
+export function clasificarSenalVentas(plataforma: string, vendidos: number | null): SenalVentas {
+  if (vendidos == null || !Number.isFinite(vendidos)) return { valor: null, tipo: "ausente" };
+  // Único caso real confirmado de "piso mensual" — ver nota arriba.
+  return { valor: vendidos, tipo: plataforma === "Amazon" ? "mensual_piso" : "acumulado_sin_periodo" };
+}
+
 export type ProductoImportado = {
   plataforma: string;
   titulo: string;
   precio: number;
-  // Lo que el sitio mostró (exacto o aproximado, según el lector de
-  // ese sitio) — null si el sitio no lo muestra. Nunca una visita ni
-  // un vendidos inventado en su lugar.
-  vendidos: number | null;
+  senalVentas: SenalVentas;
   link: string | null;
 };
 
@@ -36,7 +57,11 @@ export type ResumenImportado = {
   precioMinimo: number | null;
   precioPromedio: number | null;
   precioMaximo: number | null;
-  sumaVendidos: number | null;
+  // Separados a propósito — nunca se suman entre sí (sumar un piso
+  // mensual con un acumulado histórico sin período sería inventar un
+  // número sin sentido real).
+  sumaAcumuladaSinPeriodo: number | null;
+  sumaMensualPiso: number | null;
 };
 
 // Mismo criterio que linkSeguro (extension/seguridad.js) del lado del
@@ -77,12 +102,14 @@ export function reemplazarProductosImportados(nuevos: ProductoImportado[]): Prod
 // recalcularlo: el total cambia con cada fusión.
 export function calcularResumenImportado(productos: ProductoImportado[]): ResumenImportado {
   const precios = productos.map((p) => p.precio).filter((p) => typeof p === "number" && Number.isFinite(p) && p > 0);
-  const conVendidos = productos.filter((p): p is ProductoImportado & { vendidos: number } => p.vendidos != null);
+  const acumulados = productos.filter((p) => p.senalVentas.tipo === "acumulado_sin_periodo" && p.senalVentas.valor != null);
+  const mensuales = productos.filter((p) => p.senalVentas.tipo === "mensual_piso" && p.senalVentas.valor != null);
   return {
     total: productos.length,
     precioMinimo: precios.length ? Math.min(...precios) : null,
     precioPromedio: precios.length ? Math.round((precios.reduce((a, b) => a + b, 0) / precios.length) * 100) / 100 : null,
     precioMaximo: precios.length ? Math.max(...precios) : null,
-    sumaVendidos: conVendidos.length ? conVendidos.reduce((s, p) => s + p.vendidos, 0) : null,
+    sumaAcumuladaSinPeriodo: acumulados.length ? acumulados.reduce((s, p) => s + (p.senalVentas.valor as number), 0) : null,
+    sumaMensualPiso: mensuales.length ? mensuales.reduce((s, p) => s + (p.senalVentas.valor as number), 0) : null,
   };
 }

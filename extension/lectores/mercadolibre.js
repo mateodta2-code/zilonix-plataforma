@@ -380,6 +380,113 @@
     return { productos };
   }
 
+  // Issue #225 — "Top 8 reseñas": fuente real confirmada en vivo por
+  // Cowork (zilonix-os-web, chrome-extension-busqueda/scraper-pdp-resenas.js,
+  // PDP de ejemplo /cargador-reparador-de-baterias-de-12v-para-carros-y-motos/p/MCO52860384):
+  //   <script id="__NORDIC_RENDERING_CTX__">_n.ctx.r={...428KB...},styles:new Set([])};</script>
+  // Marcador DISTINTO del que usa leerDatosIncrustados (arriba): ese
+  // busca "window.__NORDIC_RENDERING_CTX__ = {...}" como asignación de
+  // variable dentro del HTML completo; este es un <script id="..."> con
+  // "_n.ctx.r=" adentro — nunca se asume que son el mismo blob sin
+  // haberlo confirmado así, puntual, en producción (de ahí el extractor
+  // de llaves balanceadas aparte, aunque la lógica sea la misma idea).
+  // Rutas confirmadas (o = objeto parseado):
+  //   base = o.appProps.pageProps.initialState
+  //   R = base.components.reviews_capability_v3
+  //     R.rating.amount   -> total exacto de opiniones
+  //     R.rating.average  -> promedio
+  //     R.rating.levels[] -> index 0 = 5★ … index 4 = 1★ ({value, percentage, index})
+  //     R.reviews[]       -> SOLO las primeras (no todas): .rating, .comment.date ("Hace 3 meses"), .comment.country, .comment.content.text
+  // API ML de reseñas (/reviews/item/{id}) da 403 para publicaciones
+  // ajenas (confirmado en vivo) — por eso se lee del HTML, nunca de esa
+  // API.
+  function extraerObjetoJsonDesde(texto, inicio) {
+    let profundidad = 0;
+    let dentroDeString = false;
+    let escapando = false;
+    for (let i = inicio; i < texto.length; i++) {
+      const c = texto[i];
+      if (dentroDeString) {
+        if (escapando) escapando = false;
+        else if (c === "\\") escapando = true;
+        else if (c === '"') dentroDeString = false;
+        continue;
+      }
+      if (c === '"') {
+        dentroDeString = true;
+        continue;
+      }
+      if (c === "{") profundidad++;
+      else if (c === "}") {
+        profundidad--;
+        if (profundidad === 0) return texto.slice(inicio, i + 1);
+      }
+    }
+    return null; // nunca se cerró — script cortado a mitad de carga, u otra forma inesperada
+  }
+
+  // "Hace 3 meses"/"Hace una semana"/"Hace 11 meses" -> días aprox. —
+  // Mercado Libre solo da fecha RELATIVA en las reseñas visibles, nunca
+  // una fecha exacta — a propósito una aproximación (mismo criterio y
+  // mismo regex que zilonix-os-web), se avisa en el panel.
+  function diasDesdeTextoRelativo(texto) {
+    if (!texto) return null;
+    const m = String(texto).match(/Hace\s+(\d+|un|una)\s+(día|dias|días|semana|semanas|mes|meses|año|anos|años)/i);
+    if (!m) return null;
+    const n = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : 1;
+    const unidad = m[2].toLowerCase();
+    if (unidad.startsWith("d")) return n;
+    if (unidad.startsWith("sem")) return n * 7;
+    if (unidad.startsWith("mes")) return n * 30;
+    return n * 365; // año/años/anos
+  }
+
+  const RESENAS_VACIAS = { resenasTotales: null, promedio: null, positivas: 0, negativas: 0, resenasVisibles: 0, recientes30: 0, recientes90: 0 };
+
+  // Puro — recibe el textContent del <script id="__NORDIC_RENDERING_CTX__">
+  // ya leído (nunca el DOM acá, para poder probarlo con vitest sin
+  // navegador, mismo criterio que leerDatosIncrustados).
+  function leerResenasDesdeScript(textoScript) {
+    if (typeof textoScript !== "string" || !textoScript) return RESENAS_VACIAS;
+    const marcador = "_n.ctx.r=";
+    const idxMarcador = textoScript.indexOf(marcador);
+    if (idxMarcador === -1) return RESENAS_VACIAS;
+    const idxLlave = textoScript.indexOf("{", idxMarcador + marcador.length);
+    if (idxLlave === -1) return RESENAS_VACIAS;
+    const jsonTexto = extraerObjetoJsonDesde(textoScript, idxLlave);
+    if (!jsonTexto) return RESENAS_VACIAS;
+    try {
+      const datos = JSON.parse(jsonTexto);
+      const R = datos?.appProps?.pageProps?.initialState?.components?.reviews_capability_v3;
+      if (!R) return RESENAS_VACIAS;
+      const levels = R.rating?.levels || [];
+      const porIndex = (i) => levels.find((l) => l.index === i)?.value || 0;
+      const positivas = porIndex(0) + porIndex(1); // 5★+4★ (confirmado por Cowork)
+      const negativas = porIndex(3) + porIndex(4); // 2★+1★
+      const reviews = R.reviews || [];
+      const diasPorResena = reviews.map((r) => diasDesdeTextoRelativo(r?.comment?.date)).filter((d) => d != null);
+      return {
+        resenasTotales: typeof R.rating?.amount === "number" ? R.rating.amount : null,
+        promedio: typeof R.rating?.average === "number" ? R.rating.average : null,
+        positivas,
+        negativas,
+        // Solo de las reseñas VISIBLES en la PDP (R.reviews, no todas las
+        // que existen) — si el total real es mayor, esto es un piso,
+        // nunca el dato completo. Se avisa en el panel.
+        resenasVisibles: reviews.length,
+        recientes30: diasPorResena.filter((d) => d <= 30).length,
+        recientes90: diasPorResena.filter((d) => d <= 90).length,
+      };
+    } catch {
+      return RESENAS_VACIAS; // JSON cortado o forma inesperada — nunca revienta, nunca inventa
+    }
+  }
+
+  function leerResenas(doc) {
+    const script = doc && doc.querySelector ? doc.querySelector("script#__NORDIC_RENDERING_CTX__") : null;
+    return leerResenasDesdeScript(script ? script.textContent : "");
+  }
+
   const api = {
     tipoDePagina,
     leerProducto,
@@ -392,6 +499,8 @@
     construirLinkSeguirTienda,
     leerSellerIdDeTienda,
     extraerCustIdDeUrl,
+    leerResenas,
+    leerResenasDesdeScript,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe
@@ -401,6 +510,6 @@
     module.exports = api;
   }
   if (typeof window !== "undefined") {
-    window.ZilonixLectorActivo = { sitio: "Mercado Libre Colombia", tipoDePagina, leerProducto, leerListado, leerTienda };
+    window.ZilonixLectorActivo = { sitio: "Mercado Libre Colombia", tipoDePagina, leerProducto, leerListado, leerTienda, leerResenas };
   }
 })();

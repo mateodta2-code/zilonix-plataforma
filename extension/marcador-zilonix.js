@@ -25,14 +25,18 @@
   // escucharlo aunque lo intente. El panel vuelve a validar todo el
   // payload igual (nunca confía ciegamente en un mensaje).
   //
-  // Issue #213 — TIPOS_REENVIADOS suma "zilonix:listado" ("Importar
-  // listado") al único tipo que existía ("zilonix:vendidos",
+  // Issue #213/#225 — TIPOS_REENVIADOS suma "zilonix:listado"
+  // ("Importar listado"/"Analizar estilo OS") y "zilonix:resenas-resultado"
+  // ("Top 8 reseñas") al único tipo que existía ("zilonix:vendidos",
   // "Completar vendidos") — mismo relevo genérico de
   // extension/background.js, solo se traduce el nombre interno al
   // nombre que ya espera el postMessage en la página.
   const TIPOS_REENVIADOS = {
     "zilonix:vendidos": "vendidos-completados",
     "zilonix:listado": "listado-importado",
+    "zilonix:resenas-resultado": "resenas-leidas",
+    "zilonix:escaneo-plataforma-resultado": "escaneo-plataforma-importado",
+    "zilonix:escaneo-plataforma-captcha": "escaneo-plataforma-captcha",
   };
 
   chrome.runtime.onMessage.addListener((mensaje) => {
@@ -42,19 +46,28 @@
     window.postMessage({ fuente: "zilonix-extension", tipo, payload: mensaje.payload }, window.location.origin);
   });
 
-  // Issue #221 — "Analizar estilo OS": dirección inversa, PÁGINA ->
-  // extensión. Hasta ahora este archivo solo escuchaba a background.js
-  // (arriba); "Analizar" necesita lo opuesto: avisarle a la extensión
-  // que el clic real de la persona ya autorizó un escaneo acotado de
-  // listados de Mercado Libre (ver app/panel/investigacion/PanelDemanda.tsx,
-  // que manda este postMessage SOLO después de consumir la marca de
-  // analizarClic.ts). Mismo chequeo de origin que la otra dirección —
-  // nunca se reenvía un mensaje que no sea realmente de esta página.
+  // Issue #221/#225 — dirección inversa, PÁGINA -> extensión. Hasta
+  // #221 este archivo solo escuchaba a background.js (arriba);
+  // "Analizar" necesita lo opuesto: avisarle a la extensión que el
+  // clic real de la persona ya autorizó un escaneo acotado de listados
+  // de Mercado Libre, o (issue #225) que el clic en "Ver reseñas"
+  // autorizó leer el Top 8 con una sola pestaña reutilizada (ver
+  // app/panel/investigacion/PanelDemanda.tsx). Mismo chequeo de origin
+  // que la otra dirección — nunca se reenvía un mensaje que no sea
+  // realmente de esta página.
+  const TIPOS_HACIA_EXTENSION = {
+    "iniciar-escaneo": "zilonix:iniciar-escaneo",
+    "iniciar-resenas": "zilonix:iniciar-resenas",
+    "iniciar-escaneo-plataforma": "zilonix:iniciar-escaneo-plataforma",
+  };
+
   window.addEventListener("message", (evento) => {
     if (evento.source !== window || evento.origin !== window.location.origin) return;
     const datos = evento.data;
-    if (!datos || datos.fuente !== "zilonix-panel" || datos.tipo !== "iniciar-escaneo") return;
-    chrome.runtime.sendMessage({ tipo: "zilonix:iniciar-escaneo", payload: datos.payload }, () => {
+    if (!datos || datos.fuente !== "zilonix-panel") return;
+    const tipo = TIPOS_HACIA_EXTENSION[datos.tipo];
+    if (!tipo) return;
+    chrome.runtime.sendMessage({ tipo, payload: datos.payload }, () => {
       void chrome.runtime.lastError;
     });
   });

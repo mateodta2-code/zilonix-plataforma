@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calcularResumenImportado,
+  clasificarSenalVentas,
   fusionarProductosImportados,
   linkHttpSeguro,
   reemplazarProductosImportados,
@@ -8,7 +9,7 @@ import {
 } from "./importacionListadoCliente";
 
 function producto(parciales: Partial<ProductoImportado> & { plataforma: string; titulo: string }): ProductoImportado {
-  return { precio: 10_000, vendidos: null, link: null, ...parciales };
+  return { precio: 10_000, senalVentas: { valor: null, tipo: "ausente" }, link: null, ...parciales };
 }
 
 describe("linkHttpSeguro — issue #213", () => {
@@ -25,6 +26,27 @@ describe("linkHttpSeguro — issue #213", () => {
     expect(linkHttpSeguro(null)).toBeNull();
     expect(linkHttpSeguro("")).toBeNull();
     expect(linkHttpSeguro("no es una url")).toBeNull();
+  });
+});
+
+// Issue #225 (parte B) — nunca repetir el bug real de Zilonix OS de
+// tratar un acumulado histórico como si fuera una tasa mensual.
+describe("clasificarSenalVentas — issue #225", () => {
+  it("sin número -> ausente", () => {
+    expect(clasificarSenalVentas("Amazon", null)).toEqual({ valor: null, tipo: "ausente" });
+    expect(clasificarSenalVentas("Temu", NaN)).toEqual({ valor: null, tipo: "ausente" });
+  });
+
+  it("Amazon -> mensual_piso (único caso real confirmado, 'comprados el mes pasado')", () => {
+    expect(clasificarSenalVentas("Amazon", 10_000)).toEqual({ valor: 10_000, tipo: "mensual_piso" });
+  });
+
+  it("cualquier otra plataforma con un número -> acumulado_sin_periodo, NUNCA mensual", () => {
+    expect(clasificarSenalVentas("Temu", 500)).toEqual({ valor: 500, tipo: "acumulado_sin_periodo" });
+    expect(clasificarSenalVentas("AliExpress", 500)).toEqual({ valor: 500, tipo: "acumulado_sin_periodo" });
+    expect(clasificarSenalVentas("Shein", 500)).toEqual({ valor: 500, tipo: "acumulado_sin_periodo" });
+    expect(clasificarSenalVentas("Alibaba", 500)).toEqual({ valor: 500, tipo: "acumulado_sin_periodo" });
+    expect(clasificarSenalVentas("Mercado Libre Colombia", 500)).toEqual({ valor: 500, tipo: "acumulado_sin_periodo" });
   });
 });
 
@@ -64,22 +86,33 @@ describe("reemplazarProductosImportados — issue #213", () => {
   });
 });
 
-describe("calcularResumenImportado — issue #213", () => {
-  it("null (nunca 0) cuando ningún producto trae vendidos", () => {
+describe("calcularResumenImportado — issue #213/#225", () => {
+  it("null (nunca 0) cuando ningún producto trae señal de ventas", () => {
     const resumen = calcularResumenImportado([producto({ plataforma: "Amazon", titulo: "A" }), producto({ plataforma: "Amazon", titulo: "B" })]);
-    expect(resumen.sumaVendidos).toBeNull();
+    expect(resumen.sumaAcumuladaSinPeriodo).toBeNull();
+    expect(resumen.sumaMensualPiso).toBeNull();
     expect(resumen.total).toBe(2);
   });
 
-  it("precio mínimo/promedio/máximo y suma de vendidos solo sobre los que sí traen dato", () => {
+  it("precio mínimo/promedio/máximo solo sobre los que sí traen dato", () => {
     const resumen = calcularResumenImportado([
-      producto({ plataforma: "Amazon", titulo: "A", precio: 10_000, vendidos: 5 }),
-      producto({ plataforma: "Amazon", titulo: "B", precio: 30_000, vendidos: 15 }),
-      producto({ plataforma: "Amazon", titulo: "C", precio: 20_000, vendidos: null }),
+      producto({ plataforma: "Temu", titulo: "A", precio: 10_000 }),
+      producto({ plataforma: "Temu", titulo: "B", precio: 30_000 }),
+      producto({ plataforma: "Temu", titulo: "C", precio: 20_000 }),
     ]);
     expect(resumen.precioMinimo).toBe(10_000);
     expect(resumen.precioMaximo).toBe(30_000);
     expect(resumen.precioPromedio).toBe(20_000);
-    expect(resumen.sumaVendidos).toBe(20);
+  });
+
+  it("suma acumulado_sin_periodo y mensual_piso por separado, nunca mezclados", () => {
+    const resumen = calcularResumenImportado([
+      producto({ plataforma: "Temu", titulo: "A", senalVentas: { valor: 5, tipo: "acumulado_sin_periodo" } }),
+      producto({ plataforma: "AliExpress", titulo: "B", senalVentas: { valor: 15, tipo: "acumulado_sin_periodo" } }),
+      producto({ plataforma: "Amazon", titulo: "C", senalVentas: { valor: 100, tipo: "mensual_piso" } }),
+      producto({ plataforma: "Amazon", titulo: "D", senalVentas: { valor: 200, tipo: "mensual_piso" } }),
+    ]);
+    expect(resumen.sumaAcumuladaSinPeriodo).toBe(20); // 5 + 15, nunca con los 100/200 de Amazon mezclados
+    expect(resumen.sumaMensualPiso).toBe(300); // 100 + 200, nunca con el acumulado de Temu/AliExpress mezclado
   });
 });

@@ -27,16 +27,120 @@
     };
   }
 
-  function leerListado(doc) {
-    const tarjetas = doc.querySelectorAll("a[href*='-g-'], [class*='goods-item'], [class*='GoodsCard']");
-    const productos = [];
-    tarjetas.forEach((tarjeta) => {
-      const titulo = U.textoDe(["[class*='title']"], tarjeta) || tarjeta.getAttribute("title");
-      const precio = U.numeroDesdeTexto(U.textoDe(["[class*='price']"], tarjeta));
-      const textoVendidos = tarjeta.textContent?.match(/\d[\d.,]*\+?\s*(sold|vendidos)/i)?.[0] || null;
-      const link = tarjeta.tagName === "A" ? tarjeta.getAttribute("href") : U.atributoDe(["a"], "href", tarjeta);
-      if (titulo || precio != null) productos.push({ titulo, precio, vendidos: U.enteroDesdeTexto(textoVendidos), link });
+  // Issue #225 — "parity Zilonix OS": estructura real confirmada en
+  // vivo (Cowork, zilonix-os-web, chrome-extension-busqueda/scraper-temu-search.js,
+  // temu.com/co, "auriculares bluetooth"/"organizador de gorras") — NO
+  // adivinada. Las clases CSS de Temu están hasheadas/ofuscadas y
+  // cambian — nunca se usan. Dos fuentes reales en su lugar:
+  //   1) JSON-LD (script[type="application/ld+json"]) — url, image,
+  //      name, offers.price, aggregateRating. Siempre presente.
+  //   2) window.rawData.store.goodsList[i].data — el más completo
+  //      (vendidos, precio tachado), vive en un <script> inline
+  //      ("window.rawData=...") — se lee como TEXTO, nunca ejecutando
+  //      la página.
+  // Se cruzan por goodsId (de la URL: "...-g-{id}.html"). Sin rawData,
+  // igual queda el JSON-LD (precio, título) — se pierde solo ventas.
+  function extraerObjetoJsonDesde(texto, inicio) {
+    let profundidad = 0;
+    let dentroDeString = false;
+    let escapando = false;
+    for (let i = inicio; i < texto.length; i++) {
+      const c = texto[i];
+      if (dentroDeString) {
+        if (escapando) escapando = false;
+        else if (c === "\\") escapando = true;
+        else if (c === '"') dentroDeString = false;
+        continue;
+      }
+      if (c === '"') {
+        dentroDeString = true;
+        continue;
+      }
+      if (c === "{") profundidad++;
+      else if (c === "}") {
+        profundidad--;
+        if (profundidad === 0) return texto.slice(inicio, i + 1);
+      }
+    }
+    return null; // nunca cerró — el script sigue con más código después del objeto (confirmado por Cowork), cortar "hasta el final" rompe el JSON
+  }
+
+  // "47K+"/"47K+ ventas"/"22K+" -> 47000 (piso). Temu NUNCA dice sobre
+  // qué período es esta cifra — puede ser acumulado histórico, nunca
+  // se asume mensual (se etiqueta del lado del panel, clasificarSenalVentas).
+  function parseVentasTemu(texto) {
+    if (!texto) return null;
+    const m = String(texto).match(/([\d.,]+)\s*(K|M)?\+?/i);
+    if (!m) return null;
+    const base = parseFloat(m[1].replace(/\./g, "").replace(",", "."));
+    if (!Number.isFinite(base)) return null;
+    if (/M/i.test(m[2] || "")) return Math.round(base * 1000000);
+    if (/K/i.test(m[2] || "")) return Math.round(base * 1000);
+    return Math.round(base);
+  }
+
+  function idTemuDesdeUrl(url) {
+    const m = String(url || "").match(/-g-(\d+)\.html/);
+    return m ? m[1] : null;
+  }
+
+  function leerJsonLdTemu(doc) {
+    const items = [];
+    doc.querySelectorAll('script[type="application/ld+json"]').forEach((s) => {
+      try {
+        const data = JSON.parse(s.textContent || "");
+        const candidatos = Array.isArray(data) ? data : Array.isArray(data.itemListElement) ? data.itemListElement.map((x) => x.item || x) : [data];
+        candidatos.forEach((c) => {
+          if (c && c.url && c.offers) items.push(c);
+        });
+      } catch {
+        // bloque no parseable — se ignora, queda lo que sí sirvió
+      }
     });
+    return items;
+  }
+
+  function leerRawDataTemu(doc) {
+    const marcador = "window.rawData=";
+    const scripts = doc.querySelectorAll("script");
+    for (const s of scripts) {
+      const texto = s.textContent || "";
+      const idxMarcador = texto.indexOf(marcador);
+      if (idxMarcador === -1) continue;
+      const idxLlave = texto.indexOf("{", idxMarcador + marcador.length);
+      if (idxLlave === -1) continue;
+      const jsonTexto = extraerObjetoJsonDesde(texto, idxLlave);
+      if (!jsonTexto) continue;
+      try {
+        return JSON.parse(jsonTexto);
+      } catch {
+        // sigue probando otros scripts
+      }
+    }
+    return null;
+  }
+
+  function leerListado(doc) {
+    const itemsJsonLd = leerJsonLdTemu(doc);
+    const rawData = leerRawDataTemu(doc);
+    const porId = new Map();
+    if (rawData && rawData.store && rawData.store.goodsList) {
+      for (const g of rawData.store.goodsList) {
+        const d = g && g.data;
+        if (d && d.goodsId) porId.set(String(d.goodsId), d);
+      }
+    }
+
+    const productos = itemsJsonLd
+      .map((it) => {
+        const goodsId = idTemuDesdeUrl(it.url);
+        if (!goodsId) return null;
+        const extra = porId.get(goodsId);
+        const precio = U.numeroDesdeTexto(it.offers && it.offers.price != null ? String(it.offers.price) : null) ?? (extra && extra.priceInfo && extra.priceInfo.price != null ? Math.round(extra.priceInfo.price / 100) : null);
+        const vendidos = parseVentasTemu((extra && (extra.salesNum || extra.salesTip)) || "");
+        return { titulo: it.name || (extra && extra.title) || null, precio, vendidos, link: it.url || null };
+      })
+      .filter(Boolean);
     return { productos };
   }
 
