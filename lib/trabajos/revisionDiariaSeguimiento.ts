@@ -109,7 +109,12 @@ export async function revisarSeguimientosDelDia(ahora: Date = new Date()): Promi
       if (resultado.saltado) saltados += 1;
       else procesados += 1;
       alertasCreadas += resultado.alertasCreadas;
-      await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id));
+      // Issue #244 — bug real de CI: acá tenía que ir el MISMO `ahora`
+      // que ya se usó arriba para decidir la franja y escribir la
+      // foto, nunca un `new Date()` aparte (el reloj real del runner,
+      // en un test con un `ahora` fijo, puede caer en otra franja y
+      // romper el filtro de "pendiente" de la próxima corrida).
+      await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: ahora }).where(eq(seguimientosMl.id, seguimiento.id));
     } catch (error) {
       // Un seguimiento que falla (cuenta sin token vigente, Mercado
       // Libre caído, etc.) no debe tumbar el lote entero — mismo
@@ -121,10 +126,12 @@ export async function revisarSeguimientosDelDia(ahora: Date = new Date()): Promi
       // del lote para siempre — ahoga los cupos en cada corrida
       // siguiente (encontrado en CI: seguimientos viejos sin cuenta ML
       // conectada, ahogando el lote de 50 y haciendo timeout). Marcarlo
-      // igual que un éxito lo rota al final; el filtro "ya revisado
-      // hoy" evita que la MISMA corrida (o una corrida posterior el
-      // mismo día) lo vuelva a tomar, pero mañana sí se reintenta.
-      await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id));
+      // igual que un éxito lo rota al final; el filtro "ya revisado en
+      // esta franja" evita que la MISMA corrida (o una corrida
+      // posterior de la misma franja) lo vuelva a tomar, pero en la
+      // próxima franja sí se reintenta. Mismo `ahora` que arriba, nunca
+      // un `new Date()` aparte (ver el comentario del caso feliz).
+      await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: ahora }).where(eq(seguimientosMl.id, seguimiento.id));
     }
   }
 
@@ -308,8 +315,13 @@ export async function revisarAhoraUnSeguimiento(
 ): Promise<ResultadoRevisionInmediata> {
   try {
     const resultado = await revisarUnSeguimiento(seguimiento, ahora);
+    // Issue #244 — mismo `ahora` que ya decidió la franja y la foto
+    // arriba, nunca un `new Date()` aparte (bug real de CI: con un
+    // `ahora` de prueba fijo en la mañana, esto marcaba la hora REAL
+    // del runner — típicamente ya tarde en Bogotá — y la siguiente
+    // consulta de "pendiente en franja tarde" lo daba por ya revisado).
     await dbComoEmpresa(seguimiento.empresaId, (tx) =>
-      tx.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id))
+      tx.update(seguimientosMl).set({ ultimaRevisionTs: ahora }).where(eq(seguimientosMl.id, seguimiento.id))
     );
     return { ok: true, saltado: resultado.saltado, alertasCreadas: resultado.alertasCreadas };
   } catch (error) {

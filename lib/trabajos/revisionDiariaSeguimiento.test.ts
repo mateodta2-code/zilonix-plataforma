@@ -717,6 +717,17 @@ describe("obtenerSeguimientosPendientesDeHoy — orden y filtro del lote (issue 
       tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hoy", ultimaRevisionTs: new Date() }).returning()
     );
 
+    // Issue #244 — revisado esta prueba con las 2 franjas en mente:
+    // `revisadoHoy` usa el reloj REAL (`new Date()`), igual que esta
+    // misma llamada (sin `ahora` explícito, default = reloj real) unos
+    // milisegundos después — las dos caen siempre en la MISMA franja
+    // actual (lo que sea que esa franja sea en el momento real en que
+    // corra CI), así que el límite usado (medianoche de hoy en
+    // "manana", el corte de hoy en "tarde") siempre lo excluye por
+    // igual. Nunca depende de a qué hora del día corra esta prueba —
+    // al revés del bug real de #244 (ultima_revision_ts escrito con el
+    // reloj real en vez del `ahora` de prueba), que SÍ dependía de la
+    // hora real del runner.
     const pendientes = await obtenerSeguimientosPendientesDeHoy();
     const idsDeEstaEmpresa = pendientes.filter((p) => p.empresaId === empresaId).map((p) => p.id);
 
