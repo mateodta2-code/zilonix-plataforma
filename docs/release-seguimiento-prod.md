@@ -19,19 +19,19 @@ railway connect <servicio-postgres-de-produccion> --environment production --tun
 ```
 Con la URL que imprime el túnel, conectarse con **`psql` real** — nunca con la pestaña "Data" del dashboard de Railway (esa trae un `LIMIT` implícito que puede hacer pensar que algo salió mal cuando no salió mal).
 
-### 2.1 Migración `0009` (seguimientos_ml/seguimiento_fotos/seguimiento_alertas), si falta
+### 2.1 Migraciones `0008`–`0010`, si faltan
 
-Primero confirmar si ya está aplicada:
+Primero confirmar si la de seguimiento ya está aplicada:
 ```sql
 SELECT to_regclass('public.seguimientos_ml');
 ```
-Si devuelve `NULL`, falta — correr la migración:
+Si devuelve `NULL`, falta — correr las migraciones:
 ```
 DATABASE_URL="<la-url-del-túnel>" npm run db:migrate
 ```
-(Drizzle aplica solo lo que falte — si `0009` ya corrió antes, no hace nada y no rompe nada.)
+**Importante (lección real de este release, ver 2.5)**: `db:migrate` aplica TODAS las migraciones pendientes de una, en orden — nunca correrlo pensando solo en la `0009`. En producción, al momento de este release, faltaban la `0008` (despachos_ml), la `0009` (seguimiento) Y la `0010` (productos_ml/publicar) — las tres de una, no solo la última que se tenía en mente. Si `to_regclass` ya da algo distinto de `NULL` para `seguimientos_ml`, igual vale la pena correr `db:migrate` una vez para confirmar que no quedó ninguna otra pendiente suelta (es idempotente, nunca rompe nada si ya todo está aplicado).
 
-Si devuelve algo distinto de `NULL` (la tabla ya existe), seguir directo al punto 2.2.
+Si devuelve algo distinto de `NULL` (la tabla ya existe) Y `db:migrate` confirma que no hay nada pendiente, seguir directo al punto 2.2.
 
 ### 2.2 Rol `seguimiento_trabajador_user` + GRANTs + 5 políticas RLS
 
@@ -91,6 +91,26 @@ ALTER TABLE seguimiento_alertas FORCE ROW LEVEL SECURITY;
 SELECT polname FROM pg_policies WHERE tablename LIKE 'seguimiento%';
 ```
 El primero: el rol existe, con `Login`, sin `Superuser`/`Createrole`. El segundo: 5 filas — `aislamiento_seguimientos_ml`, `aislamiento_seguimiento_fotos`, `aislamiento_seguimiento_alertas`, `seguimiento_trabajador_lee_seguimientos_ml`, `seguimiento_trabajador_marca_revision_seguimientos_ml`.
+
+## 2.5 Postmortem real: "Application error" en producción al agregar — RESUELTO (issue #207)
+
+Síntoma observado: agregar un seguimiento en producción (desde la extensión o desde el formulario) terminaba en la pantalla genérica de Next.js ("Application error", digest `2846050239`) en vez del aviso normal.
+
+**Diagnóstico inicial (incompleto)**: se sospechó solo un password mismatch del rol `seguimiento_trabajador_user` contra `DATABASE_URL_SEGUIMIENTO`. Real, pero no era la causa completa — ni la más grave.
+
+**Causa real confirmada, de más grave a menos**:
+1. **`DATABASE_URL_APP` (la variable que usa TODO el tráfico normal de la app — no solo Seguimiento) estaba apuntando al rol `seguimiento_trabajador_user` en vez de a `app_user`.** `seguimiento_trabajador_user` solo tiene `SELECT`/`UPDATE` acotado sobre `seguimientos_ml` (ver 2.2) — con esa variable mal apuntada, prácticamente ninguna consulta de negocio real podía funcionar, mucho más allá de Seguimiento. Esta es la que de verdad importa para cualquier incidente futuro: **`DATABASE_URL_APP` SIEMPRE tiene que apuntar a `app_user`, nunca a ningún rol restringido** (regla ya en `CLAUDE.md`, pero el valor real en Railway producción no la cumplía).
+2. Las migraciones `0008`/`0009`/`0010` nunca se habían corrido contra el Postgres de producción (ver 2.1 actualizado) — ni las tablas de seguimiento ni `productos_ml` existían todavía.
+3. El rol `seguimiento_trabajador_user` tampoco existía (ni sus 5 políticas RLS).
+
+**Ya resuelto por Pablo en producción (NO rehacer estos pasos — son ops reales ya aplicadas)**:
+- Migraciones `0008`–`0010` aplicadas contra el Postgres de producción.
+- Rol `seguimiento_trabajador_user` creado + las 5 políticas RLS de la sección 2.2.
+- `DATABASE_URL_APP` corregida en Railway (producción) para apuntar a `app_user` con `APP_USER_PASSWORD_TEMPORAL` — mismo criterio que ya usa staging.
+- Empresa de prueba creada en producción, sin "Application error".
+- Smoke test real de "Seguir en Zilonix" en verde: `?agregado=1` real en `web-production-af270.up.railway.app`.
+
+**Qué queda** (nada de SQL/RLS — eso ya está): el secreto de GitHub `SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION` y una corrida de `workflow_dispatch` para confirmar el batch diario de verdad — ver secciones 3 y 4 de este documento, sin cambios. **El `schedule` del workflow sigue sin activarse.**
 
 ## 3. Variables y secretos
 
