@@ -15,16 +15,30 @@
   "use strict";
   document.documentElement.setAttribute("data-zilonix-extension", "1");
 
-  // Issue #210 — "Completar vendidos": reenvía a la página (el React
-  // de app/panel/investigacion/PanelDemanda.tsx, que escucha
+  // Issue #210/#213 — reenvía a la página (el React de
+  // app/panel/investigacion/PanelDemanda.tsx, que escucha
   // window.addEventListener("message", ...)) lo que extension/
-  // background.js mandó desde la pestaña de Mercado Libre donde se
-  // abrió el candidato. postMessage con un origin explícito (el de
+  // background.js mandó desde la pestaña de Mercado Libre/Amazon/Temu/
+  // AliExpress/Shein/Alibaba donde se abrió el candidato o se apretó
+  // "Enviar a Zilonix". postMessage con un origin explícito (el de
   // esta misma página, nunca "*") para que ningún otro sitio pueda
   // escucharlo aunque lo intente. El panel vuelve a validar todo el
   // payload igual (nunca confía ciegamente en un mensaje).
+  //
+  // Issue #213 — TIPOS_REENVIADOS suma "zilonix:listado" ("Importar
+  // listado") al único tipo que existía ("zilonix:vendidos",
+  // "Completar vendidos") — mismo relevo genérico de
+  // extension/background.js, solo se traduce el nombre interno al
+  // nombre que ya espera el postMessage en la página.
+  const TIPOS_REENVIADOS = {
+    "zilonix:vendidos": "vendidos-completados",
+    "zilonix:listado": "listado-importado",
+  };
+
   chrome.runtime.onMessage.addListener((mensaje) => {
-    if (!mensaje || mensaje.tipo !== "zilonix:vendidos" || !mensaje.payload) return;
-    window.postMessage({ fuente: "zilonix-extension", tipo: "vendidos-completados", payload: mensaje.payload }, window.location.origin);
+    if (!mensaje || !mensaje.payload) return;
+    const tipo = TIPOS_REENVIADOS[mensaje.tipo];
+    if (!tipo) return;
+    window.postMessage({ fuente: "zilonix-extension", tipo, payload: mensaje.payload }, window.location.origin);
   });
 })();

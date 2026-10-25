@@ -8,6 +8,13 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { InsigniaExtension } from "@/components/marco/InsigniaExtension";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { aplicarVendidosExtension, combinarKpisConCompletados, ordenarPorVendidos, type KpisDemanda } from "@/lib/ml/investigacionCliente";
+import {
+  calcularResumenImportado,
+  fusionarProductosImportados,
+  linkHttpSeguro,
+  reemplazarProductosImportados,
+  type ProductoImportado,
+} from "@/lib/ml/importacionListadoCliente";
 import type { PublicacionInvestigacion } from "@/lib/ml/investigacion";
 import styles from "./page.module.css";
 
@@ -49,6 +56,28 @@ function esMensajeVendidosValido(valor: unknown): valor is MensajeVendidosExtens
   return typeof m.itemId === "string" && typeof m.sold_quantity === "number" && Number.isFinite(m.sold_quantity);
 }
 
+// Issue #213 — "Importar listado": payload que manda extension/content.js
+// (botón "Enviar a Zilonix" en una página de búsqueda/listado de
+// cualquiera de los 6 sitios), reenviado por extension/background.js
+// y extension/marcador-zilonix.js. Nunca se confía en la forma del
+// mensaje sin revisarla acá — mismo criterio que esMensajeVendidosValido.
+type MensajeListadoExtension = {
+  plataforma: string;
+  url: string;
+  productos: { titulo: string; precio: number; vendidos: number | null; link: string | null }[];
+};
+
+function esMensajeListadoValido(valor: unknown): valor is MensajeListadoExtension {
+  if (!valor || typeof valor !== "object") return false;
+  const m = valor as Record<string, unknown>;
+  if (typeof m.plataforma !== "string" || typeof m.url !== "string" || !Array.isArray(m.productos)) return false;
+  return m.productos.every((p) => {
+    if (!p || typeof p !== "object") return false;
+    const prod = p as Record<string, unknown>;
+    return typeof prod.titulo === "string" && typeof prod.precio === "number" && Number.isFinite(prod.precio);
+  });
+}
+
 export function PanelDemanda({
   publicacionesIniciales,
   kpisBase,
@@ -66,43 +95,93 @@ export function PanelDemanda({
   const [yaAbrioCompletar, setYaAbrioCompletar] = useState(false);
   const [avisoBloqueado, setAvisoBloqueado] = useState(false);
 
+  // Issue #213 — "Importar listado": `importado` es la sesión ya
+  // confirmada (nunca se mezcla con `estado.publicaciones`, la tabla
+  // de arriba con datos reales de la API de Mercado Libre — son
+  // candidatos de OTRAS plataformas, o de un listado leído a mano).
+  // `pendiente` es un listado recién recibido que todavía espera que
+  // la persona elija "Importar"/"Fusionar"/"Reemplazar" o "Descartar"
+  // — nunca se importa solo con recibir el mensaje.
+  const [listado, setListado] = useState<{ importado: ProductoImportado[]; pendiente: { plataforma: string; productos: ProductoImportado[] } | null }>({
+    importado: [],
+    pendiente: null,
+  });
+
   // Issue #197/#210 — mismo atributo que lee InsigniaExtension, puesto
   // por extension/marcador-zilonix.js SOLO cuando corre sobre esta app.
   useEffect(() => {
     setConExtension(document.documentElement.hasAttribute("data-zilonix-extension"));
   }, []);
 
-  // Issue #210 — puente extensión → panel. El mensaje real llega por
-  // extension/marcador-zilonix.js (window.postMessage con origin =
+  // Issue #210/#213 — puente extensión → panel. El mensaje real llega
+  // por extension/marcador-zilonix.js (window.postMessage con origin =
   // esta misma página) — nunca se confía en un mensaje de otro origin
   // ni de otra window, y nunca se completa una fila que ya tenía
-  // vendidos real de la API (aplicarVendidosExtension lo revisa).
+  // vendidos real de la API (aplicarVendidosExtension lo revisa). Un
+  // solo listener para los dos tipos de mensaje (#210 "vendidos-completados"
+  // y #213 "listado-importado") — mismo origin/fuente a validar.
   useEffect(() => {
     function alRecibirMensaje(evento: MessageEvent) {
       if (evento.origin !== window.location.origin || evento.source !== window) return;
       const datos = evento.data as { fuente?: string; tipo?: string; payload?: unknown } | null;
-      if (!datos || datos.fuente !== "zilonix-extension" || datos.tipo !== "vendidos-completados") return;
-      if (!esMensajeVendidosValido(datos.payload)) return;
-      const payload = datos.payload;
+      if (!datos || datos.fuente !== "zilonix-extension") return;
 
-      setEstado((actual) => {
-        const fila = actual.publicaciones.find((p) => p.itemId === payload.itemId);
-        if (!fila || fila.vendidos != null) return actual; // no es un candidato nuestro, o ya tenía dato real — nada que completar
-        const publicaciones = aplicarVendidosExtension(actual.publicaciones, {
-          itemId: payload.itemId,
-          sold_quantity: payload.sold_quantity,
-          date_created: payload.date_created ?? null,
-          esFull: payload.esFull === true,
-          etiquetaMasN: payload.etiquetaMasN === true,
+      if (datos.tipo === "vendidos-completados") {
+        if (!esMensajeVendidosValido(datos.payload)) return;
+        const payload = datos.payload;
+
+        setEstado((actual) => {
+          const fila = actual.publicaciones.find((p) => p.itemId === payload.itemId);
+          if (!fila || fila.vendidos != null) return actual; // no es un candidato nuestro, o ya tenía dato real — nada que completar
+          const publicaciones = aplicarVendidosExtension(actual.publicaciones, {
+            itemId: payload.itemId,
+            sold_quantity: payload.sold_quantity,
+            date_created: payload.date_created ?? null,
+            esFull: payload.esFull === true,
+            etiquetaMasN: payload.etiquetaMasN === true,
+          });
+          const filaCompletada = publicaciones.find((p) => p.itemId === payload.itemId);
+          return { publicaciones, completadasPorExtension: filaCompletada ? [...actual.completadasPorExtension, filaCompletada] : actual.completadasPorExtension };
         });
-        const filaCompletada = publicaciones.find((p) => p.itemId === payload.itemId);
-        return { publicaciones, completadasPorExtension: filaCompletada ? [...actual.completadasPorExtension, filaCompletada] : actual.completadasPorExtension };
-      });
+        return;
+      }
+
+      if (datos.tipo === "listado-importado") {
+        if (!esMensajeListadoValido(datos.payload)) return;
+        const payload = datos.payload;
+        const productos: ProductoImportado[] = payload.productos.map((p) => ({
+          plataforma: payload.plataforma,
+          titulo: p.titulo,
+          precio: p.precio,
+          vendidos: typeof p.vendidos === "number" && Number.isFinite(p.vendidos) ? p.vendidos : null,
+          link: linkHttpSeguro(p.link),
+        }));
+        if (!productos.length) return; // mensaje vacío — nada que ofrecer importar
+        setListado((actual) => ({ ...actual, pendiente: { plataforma: payload.plataforma, productos } }));
+      }
     }
 
     window.addEventListener("message", alRecibirMensaje);
     return () => window.removeEventListener("message", alRecibirMensaje);
   }, []);
+
+  // Issue #213 — "Fusionar" agrega al listado ya importado (sin
+  // duplicar); "Reemplazar" descarta la sesión anterior. Las dos
+  // únicas formas de confirmar un `pendiente` — nunca se importa solo
+  // con recibirlo.
+  function importarPendiente(modo: "fusionar" | "reemplazar") {
+    setListado((actual) => {
+      if (!actual.pendiente) return actual;
+      const importado = modo === "fusionar" ? fusionarProductosImportados(actual.importado, actual.pendiente.productos) : reemplazarProductosImportados(actual.pendiente.productos);
+      return { importado, pendiente: null };
+    });
+  }
+
+  function descartarPendiente() {
+    setListado((actual) => ({ ...actual, pendiente: null }));
+  }
+
+  const resumenImportado = useMemo(() => calcularResumenImportado(listado.importado), [listado.importado]);
 
   const publicacionesOrdenadas = useMemo(() => ordenarPorVendidos(estado.publicaciones), [estado.publicaciones]);
   const kpis = useMemo(() => combinarKpisConCompletados(kpisBase, estado.completadasPorExtension), [kpisBase, estado.completadasPorExtension]);
@@ -146,7 +225,8 @@ export function PanelDemanda({
         <InsigniaExtension />
         <span className={styles.notaInsignia}>
           Con la extensión podés abrir cada candidato en Mercado Libre para ver datos reales actualizados al momento, y analizar Amazon, Temu y
-          otras plataformas.
+          otras plataformas — desde una página de búsqueda/listado, el botón &quot;Enviar a Zilonix&quot; del panel flotante importa esos
+          candidatos acá abajo.
         </span>
       </div>
 
@@ -179,6 +259,31 @@ export function PanelDemanda({
           El navegador bloqueó alguna pestaña — permití ventanas emergentes para este sitio e intentá de nuevo. Chrome suele dejar pasar solo UNA
           pestaña por clic salvo que el sitio esté permitido explícitamente.
         </p>
+      ) : null}
+
+      {listado.pendiente ? (
+        <div className={styles.insignia}>
+          <Chip estado="aviso">
+            {listado.pendiente.plataforma}: {listado.pendiente.productos.length} candidatos recibidos
+          </Chip>
+          {listado.importado.length > 0 ? (
+            <>
+              <Boton type="button" variante="secundario" chico onClick={() => importarPendiente("fusionar")}>
+                Fusionar con lo importado
+              </Boton>
+              <Boton type="button" variante="secundario" chico onClick={() => importarPendiente("reemplazar")}>
+                Reemplazar lo importado
+              </Boton>
+            </>
+          ) : (
+            <Boton type="button" variante="secundario" chico onClick={() => importarPendiente("reemplazar")}>
+              Importar listado
+            </Boton>
+          )}
+          <Boton type="button" variante="fantasma" chico onClick={descartarPendiente}>
+            Descartar
+          </Boton>
+        </div>
       ) : null}
 
       <div className={styles.kpis}>
@@ -242,6 +347,42 @@ export function PanelDemanda({
           ))}
         </Tabla>
       </div>
+
+      {listado.importado.length > 0 ? (
+        <div>
+          <p className={styles.tituloSeccion}>
+            Listados importados de la extensión ({listado.importado.length}) — Amazon/Temu/AliExpress/Shein/Alibaba y otros listados de Mercado
+            Libre leídos a mano; cobertura solo extensión, nunca mezclado con los datos reales de la API de Mercado Libre de arriba.
+          </p>
+          <p className={styles.notaInsignia}>
+            Precio {resumenImportado.precioMinimo != null ? money(resumenImportado.precioMinimo) : "—"} a{" "}
+            {resumenImportado.precioMaximo != null ? money(resumenImportado.precioMaximo) : "—"} (promedio{" "}
+            {resumenImportado.precioPromedio != null ? money(resumenImportado.precioPromedio) : "—"}) — suma de vendidos visibles:{" "}
+            {resumenImportado.sumaVendidos != null ? numero(resumenImportado.sumaVendidos) : "Sin dato"}.
+          </p>
+          <Tabla encabezados={["Plataforma", "Producto", "Vendidos", "Precio", "Enlace"]}>
+            {listado.importado.map((p, i) => (
+              <FilaTabla key={`${p.plataforma}-${p.link ?? p.titulo}-${i}`}>
+                <CeldaTabla>
+                  <Chip>{p.plataforma}</Chip>
+                </CeldaTabla>
+                <CeldaTabla>{p.titulo}</CeldaTabla>
+                <CeldaTabla>{p.vendidos != null ? numero(p.vendidos) : <Chip>Sin dato</Chip>}</CeldaTabla>
+                <CeldaTabla>{money(p.precio)}</CeldaTabla>
+                <CeldaTabla>
+                  {p.link ? (
+                    <a href={p.link} target="_blank" rel="noreferrer">
+                      Ver publicación
+                    </a>
+                  ) : (
+                    "—"
+                  )}
+                </CeldaTabla>
+              </FilaTabla>
+            ))}
+          </Tabla>
+        </div>
+      ) : null}
     </>
   );
 }
