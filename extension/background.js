@@ -41,7 +41,7 @@ const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado"]);
 // terminó" — el panel tiene su propio timeout del lado del cliente
 // (PanelDemanda.tsx) para no quedarse mostrando "Escaneando..." para
 // siempre.
-const TOPE_TERMINOS_ESCANEO = 4; // "~término + 3-4" del pedido — nunca más
+const TOPE_TERMINOS_ESCANEO = 5; // issue #225 — término + hasta 4 variantes (IA + respaldo de reglas) = 5 queries, nunca más
 const TOPE_PRODUCTOS_POR_VARIANTE = 20; // "lee ~20" — el tope real vive en content.js (TOPE_PRODUCTOS_ENVIO_LISTADO), este es solo documentación
 const TIMEOUT_POR_VARIANTE_MS = 15000; // si una pestaña nunca contesta (bloqueo, captcha, red lenta), no se cuelga para siempre
 void TOPE_PRODUCTOS_POR_VARIANTE;
@@ -147,6 +147,94 @@ function finalizarEscaneo(tabIdPanel) {
   chrome.tabs.update(tabIdPanel, { active: true }, () => void chrome.runtime.lastError);
 }
 
+// Issue #225 — "Top 8 reseñas": mismo patrón confirmado en producción
+// en zilonix-os-web (chrome-extension-busqueda/background.js,
+// leerResenasTop/leerResenaDeUnaPdp) — UNA SOLA pestaña de fondo
+// reutilizada (chrome.tabs.update con una url nueva cada vez, nunca
+// chrome.tabs.create por cada publicación: son hasta 8 navegaciones,
+// no 8 pestañas), con una pausa chica entre cada una. El timeout de
+// AFUERA (TIEMPO_MAX_RESENA_MS) siempre tiene que ganarle con margen
+// al que content.js espera adentro (ver lector.leerResenas +
+// reescanearConRetardo en content.js) — nunca ir pegados, mismo
+// comentario que ya dejó Cowork en el código real de OS.
+const TIEMPO_MAX_RESENA_MS = 14000;
+const PAUSA_ENTRE_PDPS_MS = 500;
+const TOPE_ITEMS_RESENAS = 8; // "Top 8" del pedido — nunca más
+
+// Una lectura de reseñas activa por pestaña del PANEL que la pidió —
+// mismo criterio que escaneosActivos arriba.
+const resenasActivas = new Map(); // tabIdPanel -> { tabId, items, indice, resultado, timeoutId }
+
+function iniciarLecturaResenas(tabIdPanel, itemsCrudos) {
+  const anterior = resenasActivas.get(tabIdPanel);
+  if (anterior) {
+    clearTimeout(anterior.timeoutId);
+    if (anterior.tabId != null) chrome.tabs.remove(anterior.tabId, () => void chrome.runtime.lastError);
+    resenasActivas.delete(tabIdPanel);
+  }
+
+  const items = (itemsCrudos || [])
+    .filter((it) => it && typeof it.itemId === "string" && typeof it.link === "string")
+    .slice(0, TOPE_ITEMS_RESENAS);
+  if (!items.length) return;
+
+  // Pestaña de FONDO (active:false) a propósito — a diferencia del
+  // escaneo de listados (issue #221, que sí pide "activa"), el pedido
+  // de "Top 8 reseñas" no lo exige y OS tampoco lo hace así: 8
+  // navegaciones seguidas en una pestaña visible parpadearían sin
+  // ningún beneficio real para la persona.
+  chrome.tabs.create({ url: "about:blank", active: false }, (tab) => {
+    if (chrome.runtime.lastError || !tab?.id) return;
+    resenasActivas.set(tabIdPanel, { tabId: tab.id, items, indice: 0, resultado: {}, timeoutId: null });
+    leerSiguienteResena(tabIdPanel);
+  });
+}
+
+function leerSiguienteResena(tabIdPanel) {
+  const estado = resenasActivas.get(tabIdPanel);
+  if (!estado) return;
+
+  if (estado.indice >= estado.items.length) {
+    finalizarLecturaResenas(tabIdPanel);
+    return;
+  }
+
+  const item = estado.items[estado.indice];
+  chrome.tabs.update(estado.tabId, { url: item.link }, () => {
+    if (chrome.runtime.lastError) {
+      avanzarLecturaResena(tabIdPanel, null);
+      return;
+    }
+    estado.timeoutId = setTimeout(() => avanzarLecturaResena(tabIdPanel, null), TIEMPO_MAX_RESENA_MS);
+  });
+}
+
+function avanzarLecturaResena(tabIdPanel, resena) {
+  const estado = resenasActivas.get(tabIdPanel);
+  if (!estado) return;
+  clearTimeout(estado.timeoutId);
+  const item = estado.items[estado.indice];
+  // resena == null es un resultado válido (timeout, o la PDP no trajo
+  // reviews_capability_v3) — nunca se inventa una reseña en su lugar,
+  // simplemente ese itemId no entra al resultado final.
+  if (resena && item) estado.resultado[item.itemId] = resena;
+  estado.indice++;
+  setTimeout(() => leerSiguienteResena(tabIdPanel), PAUSA_ENTRE_PDPS_MS);
+}
+
+function finalizarLecturaResenas(tabIdPanel) {
+  const estado = resenasActivas.get(tabIdPanel);
+  resenasActivas.delete(tabIdPanel);
+  if (!estado) return;
+
+  chrome.tabs.remove(estado.tabId, () => void chrome.runtime.lastError);
+  chrome.tabs.sendMessage(
+    tabIdPanel,
+    { tipo: "zilonix:resenas-resultado", payload: { resenasPorItemId: estado.resultado } },
+    () => void chrome.runtime.lastError
+  );
+}
+
 chrome.runtime.onMessage.addListener((mensaje, remitente) => {
   if (!mensaje) return;
 
@@ -169,6 +257,29 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
       }
     }
     return; // ninguna variante activa esperaba esto (ej. llegó tarde, después del timeout) — nunca rompe nada
+  }
+
+  if (mensaje.tipo === "zilonix:iniciar-resenas") {
+    if (!remitente.tab?.id) return;
+    iniciarLecturaResenas(remitente.tab.id, mensaje.payload?.items);
+    return;
+  }
+
+  if (mensaje.tipo === "zilonix:resena") {
+    // Mismo criterio que "zilonix:escaneo-resultado" — content.js
+    // manda esto SIEMPRE que confirma una reseña en cualquier PDP
+    // (igual que ya hace con "zilonix:vendidos"), nunca solo durante
+    // una lectura activa. Solo importa si esta pestaña es justo la
+    // que una lectura de reseñas está conduciendo ahora mismo —
+    // cualquier otra (ej. una pestaña de "Completar vendidos") se
+    // ignora sin romper nada.
+    for (const [tabIdPanel, estado] of resenasActivas) {
+      if (estado.tabId === remitente.tab?.id) {
+        avanzarLecturaResena(tabIdPanel, mensaje.payload?.resena || null);
+        return;
+      }
+    }
+    return;
   }
 
   if (!TIPOS_RELEVADOS.has(mensaje.tipo) || !mensaje.payload) return;

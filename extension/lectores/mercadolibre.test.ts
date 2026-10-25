@@ -11,6 +11,7 @@ import {
   extraerCustIdDeUrl,
   extraerIdDeUrl,
   leerDatosIncrustados,
+  leerResenasDesdeScript,
   leerSellerIdDeTienda,
   tipoDePagina,
 } from "./mercadolibre.js";
@@ -265,5 +266,93 @@ describe("leerSellerIdDeTienda — issue #174, corrección real: nunca el user_i
   // esta página" en vez de quedarse en silencio.
   it("tienda oficial con official_store_id en la URL pero sin seller_id en el HTML -> null, nunca official_store_id", () => {
     expect(leerSellerIdDeTienda("<html><body>sin seller_id</body></html>", LINK_TIENDA_OFICIAL_SIN_SELLER)).toBeNull();
+  });
+});
+
+// Issue #225 — "Top 8 reseñas": fuente real confirmada en vivo por
+// Cowork (zilonix-os-web, chrome-extension-busqueda/scraper-pdp-resenas.js).
+// Fixture sintético pero con la misma forma documentada ahí: el script
+// real sigue con ",styles:new Set([])};" DESPUÉS del objeto — el
+// extractor de llaves balanceadas tiene que cortar justo al cerrar el
+// objeto, nunca "hasta el final del script".
+function scriptResenas(reviewsCapability: unknown): string {
+  const objeto = { appProps: { pageProps: { initialState: { components: { reviews_capability_v3: reviewsCapability } } } } };
+  return `_n.ctx.r=${JSON.stringify(objeto)},styles:new Set([])};`;
+}
+
+describe("leerResenasDesdeScript — issue #225 (Top 8 reseñas)", () => {
+  it("texto vacío/sin el marcador _n.ctx.r= -> vacío, nunca lanza", () => {
+    const vacio = { resenasTotales: null, promedio: null, positivas: 0, negativas: 0, resenasVisibles: 0, recientes30: 0, recientes90: 0 };
+    expect(leerResenasDesdeScript("")).toEqual(vacio);
+    expect(leerResenasDesdeScript("algo sin el marcador real")).toEqual(vacio);
+  });
+
+  it("lee total/promedio, positivas (5★+4★) y negativas (2★+1★) — índices confirmados por Cowork", () => {
+    const texto = scriptResenas({
+      rating: {
+        amount: 123,
+        average: 4.6,
+        levels: [
+          { index: 0, value: 80, percentage: 65 }, // 5★
+          { index: 1, value: 20, percentage: 16 }, // 4★
+          { index: 2, value: 10, percentage: 8 }, // 3★
+          { index: 3, value: 8, percentage: 6 }, // 2★
+          { index: 4, value: 5, percentage: 4 }, // 1★
+        ],
+      },
+      reviews: [],
+    });
+
+    const resultado = leerResenasDesdeScript(texto);
+    expect(resultado.resenasTotales).toBe(123);
+    expect(resultado.promedio).toBe(4.6);
+    expect(resultado.positivas).toBe(100); // 80 + 20
+    expect(resultado.negativas).toBe(13); // 8 + 5
+  });
+
+  it("resenasVisibles = solo las reseñas que de verdad trae reviews[] (nunca el total real)", () => {
+    const texto = scriptResenas({
+      rating: { amount: 500, average: 4.2, levels: [] },
+      reviews: [
+        { rating: 5, comment: { date: "Hace 3 meses", country: "CO", content: { text: "A" } } },
+        { rating: 4, comment: { date: "Hace 10 días", country: "CO", content: { text: "B" } } },
+      ],
+    });
+
+    const resultado = leerResenasDesdeScript(texto);
+    expect(resultado.resenasTotales).toBe(500);
+    expect(resultado.resenasVisibles).toBe(2); // nunca 500 — eso sería inventar que se leyeron todas
+  });
+
+  it("recientes30/recientes90 a partir de la fecha relativa de cada reseña visible", () => {
+    const texto = scriptResenas({
+      rating: { amount: 3, average: 4, levels: [] },
+      reviews: [
+        { comment: { date: "Hace 10 días" } }, // <=30 y <=90
+        { comment: { date: "Hace 2 meses" } }, // <=90, no <=30
+        { comment: { date: "Hace 1 año" } }, // ni 30 ni 90
+      ],
+    });
+
+    const resultado = leerResenasDesdeScript(texto);
+    expect(resultado.recientes30).toBe(1);
+    expect(resultado.recientes90).toBe(2);
+  });
+
+  it("sin reviews_capability_v3 en el objeto (otra forma de página) -> vacío, nunca inventa", () => {
+    const texto = `_n.ctx.r=${JSON.stringify({ appProps: { pageProps: { initialState: { components: {} } } } })},styles:new Set([])};`;
+    expect(leerResenasDesdeScript(texto).resenasTotales).toBeNull();
+  });
+
+  it("JSON cortado a mitad de carga -> vacío, nunca revienta", () => {
+    expect(leerResenasDesdeScript('_n.ctx.r={"appProps":{"pageProps":')).toEqual({
+      resenasTotales: null,
+      promedio: null,
+      positivas: 0,
+      negativas: 0,
+      resenasVisibles: 0,
+      recientes30: 0,
+      recientes90: 0,
+    });
   });
 });

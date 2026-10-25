@@ -18,6 +18,7 @@ import {
 import { generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
 import type { PublicacionInvestigacion } from "@/lib/ml/investigacion";
 import { consumirClicAnalizarReciente } from "./analizarClic";
+import { generarQueriesAnalizarAction } from "./actions";
 import styles from "./page.module.css";
 
 // Issue #210 (Sharel, staging) — "Analizar" trae candidatos reales de
@@ -88,6 +89,45 @@ function esMensajeListadoValido(valor: unknown): valor is MensajeListadoExtensio
   });
 }
 
+// Issue #225 — "Top 8 reseñas": payload que manda extension/background.js
+// al terminar de leer el Top 8 (una sola pestaña reutilizada, igual
+// que zilonix-os-web). `resena` sigue EXACTAMENTE la forma de
+// extension/lectores/mercadolibre.js (leerResenasDesdeScript) — nunca
+// se confía en el mensaje sin revisar la forma, mismo criterio que los
+// otros dos puentes.
+type ResenaProducto = {
+  resenasTotales: number | null;
+  promedio: number | null;
+  positivas: number;
+  negativas: number;
+  resenasVisibles: number;
+  recientes30: number;
+  recientes90: number;
+};
+
+type MensajeResenasExtension = { resenasPorItemId: Record<string, ResenaProducto> };
+
+function esResenaValida(valor: unknown): valor is ResenaProducto {
+  if (!valor || typeof valor !== "object") return false;
+  const r = valor as Record<string, unknown>;
+  return (
+    (r.resenasTotales === null || typeof r.resenasTotales === "number") &&
+    (r.promedio === null || typeof r.promedio === "number") &&
+    typeof r.positivas === "number" &&
+    typeof r.negativas === "number" &&
+    typeof r.resenasVisibles === "number"
+  );
+}
+
+function esMensajeResenasValido(valor: unknown): valor is MensajeResenasExtension {
+  if (!valor || typeof valor !== "object") return false;
+  const m = valor as Record<string, unknown>;
+  if (!m.resenasPorItemId || typeof m.resenasPorItemId !== "object") return false;
+  return Object.values(m.resenasPorItemId).every(esResenaValida);
+}
+
+const TOPE_ITEMS_RESENAS = 8;
+
 export function PanelDemanda({
   termino,
   publicacionesIniciales,
@@ -109,6 +149,14 @@ export function PanelDemanda({
   // Issue #221 — "Analizar estilo OS": true mientras la extensión está
   // abriendo/leyendo/cerrando las variantes del listado real de ML.
   const [escaneoEnCurso, setEscaneoEnCurso] = useState(false);
+  // Issue #225 — las hasta 5 queries que de verdad se usaron en el
+  // escaneo (término + variantes de IA y/o de reglas) — para mostrar
+  // los chips. [] mientras no corrió ningún escaneo todavía.
+  const [queriesUsadas, setQueriesUsadas] = useState<string[]>([]);
+  // Issue #225 — "Top 8 reseñas": resenas ya leídas por itemId, y si
+  // la lectura (una sola pestaña reutilizada) está en curso.
+  const [resenas, setResenas] = useState<Record<string, ResenaProducto>>({});
+  const [resenasEnCurso, setResenasEnCurso] = useState(false);
 
   // Issue #213 — "Importar listado": `importado` es la sesión ya
   // confirmada (nunca se mezcla con `estado.publicaciones`, la tabla
@@ -128,29 +176,49 @@ export function PanelDemanda({
     setConExtension(document.documentElement.hasAttribute("data-zilonix-extension"));
   }, []);
 
-  // Issue #221 — "Analizar estilo OS": si este montaje viene de un
-  // clic real y reciente en "Analizar" (consumirClicAnalizarReciente,
+  // Issue #221/#225 — "Analizar estilo OS": si este montaje viene de
+  // un clic real y reciente en "Analizar" (consumirClicAnalizarReciente,
   // ver FormularioAnalizar.tsx/analizarClic.ts) Y hay extensión, se le
-  // pide a la extensión escanear el listado real de Mercado Libre para
-  // el término y sus variantes — UN solo postMessage página->extensión,
-  // nunca abierto directo por esta página (la extensión es quien abre/
-  // lee/cierra las pestañas, ver extension/background.js). Sin
-  // extensión, o sin la marca reciente (ej. solo cambiaste de pestaña
+  // pide al Server Action (generarQueriesAnalizarAction) hasta 5
+  // queries (término + 4 variantes de IA, completadas con la
+  // heurística de reglas si la IA falla/viene vacía/repite — ver
+  // lib/ml/variantesBusqueda.ts) y se le pide a la extensión escanear
+  // esas queries — UN solo postMessage página->extensión, nunca
+  // abierto directo por esta página (la extensión es quien abre/lee/
+  // cierra las pestañas, ver extension/background.js). Sin extensión,
+  // o sin la marca reciente (ej. solo cambiaste de pestaña
   // Mercado->Demanda), nunca se dispara nada — Analizar sigue
   // funcionando 100% igual que siempre, solo por API.
   useEffect(() => {
     if (conExtension !== true) return;
     if (!consumirClicAnalizarReciente()) return;
-    const variantes = generarVariantesBusqueda(termino);
-    if (!variantes.length) return;
-    window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo", payload: { terminos: variantes } }, window.location.origin);
-    setEscaneoEnCurso(true);
+    let cancelado = false;
+
+    (async () => {
+      let queries: string[];
+      try {
+        // La Server Action ya intenta IA + respaldo de reglas — este
+        // catch es solo por si la ACCIÓN MISMA falla (sin sesión, red
+        // caída), para que Analizar nunca se quede sin escanear nada.
+        queries = await generarQueriesAnalizarAction(termino);
+      } catch {
+        queries = generarVariantesBusqueda(termino);
+      }
+      if (cancelado || !queries.length) return;
+      setQueriesUsadas(queries);
+      window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo", payload: { terminos: queries } }, window.location.origin);
+      setEscaneoEnCurso(true);
+    })();
+
     // Red de seguridad del lado del cliente: si la extensión nunca
     // contesta (ej. el Service Worker se recicló a mitad de camino,
     // ver la nota en extension/background.js), esto nunca deja
     // "Escaneando..." para siempre en pantalla.
     const limite = setTimeout(() => setEscaneoEnCurso(false), 90_000);
-    return () => clearTimeout(limite);
+    return () => {
+      cancelado = true;
+      clearTimeout(limite);
+    };
   }, [conExtension, termino]);
 
   // Issue #210/#213 — puente extensión → panel. El mensaje real llega
@@ -212,6 +280,14 @@ export function PanelDemanda({
 
         if (!productos.length) return; // mensaje vacío — nada que ofrecer importar
         setListado((actual) => ({ ...actual, pendiente: { plataforma: payload.plataforma, productos } }));
+        return;
+      }
+
+      if (datos.tipo === "resenas-leidas") {
+        setResenasEnCurso(false);
+        if (!esMensajeResenasValido(datos.payload)) return;
+        const payload = datos.payload;
+        setResenas((actual) => ({ ...actual, ...payload.resenasPorItemId }));
       }
     }
 
@@ -241,6 +317,19 @@ export function PanelDemanda({
   const kpis = useMemo(() => combinarKpisConCompletados(kpisBase, estado.completadasPorExtension), [kpisBase, estado.completadasPorExtension]);
 
   const candidatosPendientes = useMemo(() => estado.publicaciones.filter((p) => p.vendidos == null && p.link), [estado.publicaciones]);
+
+  // Issue #225 — "Top 8 reseñas": automático a partir de lo que YA
+  // está ordenado por vendidos real (publicacionesOrdenadas, más
+  // abajo) — nunca una llamada aparte. Solo entran candidatos con
+  // link real (sin eso no hay página que leer).
+  const top8ParaResenas = useMemo(() => publicacionesOrdenadas.filter((p) => p.link).slice(0, TOPE_ITEMS_RESENAS), [publicacionesOrdenadas]);
+
+  function verResenas() {
+    const items = top8ParaResenas.map((p) => ({ itemId: p.itemId, link: p.link as string }));
+    if (!items.length) return;
+    window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-resenas", payload: { items } }, window.location.origin);
+    setResenasEnCurso(true);
+  }
 
   function completarVendidos() {
     const candidatos = candidatosPendientes.slice(0, MAX_CANDIDATOS_COMPLETAR);
@@ -290,6 +379,17 @@ export function PanelDemanda({
           <span className={styles.notaInsignia}>
             La extensión está abriendo y cerrando el listado real para tu término y sus variantes — no cierres esta pestaña, ya vuelve sola.
           </span>
+        </div>
+      ) : null}
+
+      {queriesUsadas.length > 1 ? (
+        <div className={styles.insignia}>
+          <span className={styles.notaInsignia}>Búsquedas usadas en el escaneo:</span>
+          {queriesUsadas.map((q, i) => (
+            <Chip key={`${q}-${i}`} estado={i === 0 ? "exito" : "neutro"}>
+              {q}
+            </Chip>
+          ))}
         </div>
       ) : null}
 
@@ -410,6 +510,51 @@ export function PanelDemanda({
           ))}
         </Tabla>
       </div>
+
+      {conExtension && top8ParaResenas.length > 0 ? (
+        <div>
+          <p className={styles.tituloSeccion}>
+            Reseñas — Top {top8ParaResenas.length} por vendidos real (issue #225). La API de Mercado Libre no deja ver reseñas de publicaciones
+            ajenas (403) — se leen abriendo cada PDP con la extensión, en una sola pestaña reutilizada.
+          </p>
+          <div className={styles.insignia}>
+            <Boton type="button" variante="secundario" chico onClick={verResenas} disabled={resenasEnCurso}>
+              {resenasEnCurso ? "Leyendo reseñas…" : "Ver reseñas"}
+            </Boton>
+            {resenasEnCurso ? (
+              <span className={styles.notaInsignia}>
+                La extensión está navegando una pestaña de fondo por cada publicación — no la cierres, vuelve sola.
+              </span>
+            ) : null}
+          </div>
+          {Object.keys(resenas).length > 0 ? (
+            <>
+              <p className={styles.notaInsignia}>
+                Total y promedio son los que confirma Mercado Libre; positivas/negativas y recientes solo cuentan las reseñas VISIBLES en la
+                página (nunca el histórico completo si hay más).
+              </p>
+              <Tabla encabezados={["Producto", "Total", "Promedio", "+", "-", "Visibles", "Recientes (30d)"]}>
+                {top8ParaResenas
+                  .filter((p) => resenas[p.itemId])
+                  .map((p) => {
+                    const r = resenas[p.itemId];
+                    return (
+                      <FilaTabla key={p.itemId}>
+                        <CeldaTabla>{p.titulo}</CeldaTabla>
+                        <CeldaTabla>{r.resenasTotales != null ? numero(r.resenasTotales) : "Sin dato"}</CeldaTabla>
+                        <CeldaTabla>{r.promedio != null ? r.promedio.toFixed(1) : "Sin dato"}</CeldaTabla>
+                        <CeldaTabla>{numero(r.positivas)}</CeldaTabla>
+                        <CeldaTabla>{numero(r.negativas)}</CeldaTabla>
+                        <CeldaTabla>{numero(r.resenasVisibles)}</CeldaTabla>
+                        <CeldaTabla>{numero(r.recientes30)}</CeldaTabla>
+                      </FilaTabla>
+                    );
+                  })}
+              </Tabla>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {listado.importado.length > 0 ? (
         <div>

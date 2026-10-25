@@ -60,3 +60,57 @@ export function generarVariantesBusqueda(termino: string, tope = 4): string[] {
 
   return variantes.slice(0, Math.max(1, tope));
 }
+
+// Issue #225 — "5 búsquedas = término + 4 variantes de IA, con
+// respaldo de reglas si la IA falla/viene vacía/repite": combina el
+// término + las variantes que trajo generarVariantesIA (lib/ml/variantesIA.ts,
+// server-only, nunca importado acá) + esta misma heurística mecánica
+// como respaldo, hasta completar TOPE_QUERIES_ANALIZAR únicas. Puro —
+// nunca llama a la IA directamente (eso vive en lib/ml/variantesIA.ts
+// y en el Server Action que llama a los dos), así que se puede probar
+// con vitest simulando cualquier resultado de la IA (vacío, repetido,
+// con tildes de más) sin red ni mock de fetch.
+export const TOPE_QUERIES_ANALIZAR = 5; // término + hasta 4 variantes
+
+// Normaliza para COMPARAR, nunca para mostrar: minúsculas + sin
+// tildes + espacios colapsados. Dos variantes que solo difieren en
+// mayúsculas, un acento o espacios de más cuentan como LA MISMA —
+// nunca se abren dos pestañas casi idénticas por una diferencia así.
+function normalizarParaComparar(texto: string): string {
+  return texto
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+export function completarQueriesAnalizar(termino: string, variantesIA: string[]): string[] {
+  const base = termino.trim();
+  if (!base) return [];
+
+  const queries: string[] = [];
+  const vistos = new Set<string>();
+  function agregar(candidato: string) {
+    const limpio = candidato.trim();
+    if (!limpio) return;
+    const clave = normalizarParaComparar(limpio);
+    if (vistos.has(clave)) return; // ya está (exacto, o solo distinto en may/min, tilde o espacios) — nunca una query repetida
+    vistos.add(clave);
+    queries.push(limpio);
+  }
+
+  agregar(base);
+  for (const variante of variantesIA) agregar(variante);
+
+  // Respaldo de reglas — corre SIEMPRE que todavía falten queries,
+  // nunca solo cuando variantesIA viene vacío: si la IA repitió el
+  // término o trajo menos de 4, el respaldo completa lo que falte
+  // hasta llegar a TOPE_QUERIES_ANALIZAR (o hasta que la heurística
+  // misma se quede sin variantes nuevas que ofrecer).
+  if (queries.length < TOPE_QUERIES_ANALIZAR) {
+    for (const variante of generarVariantesBusqueda(base, TOPE_QUERIES_ANALIZAR)) agregar(variante);
+  }
+
+  return queries.slice(0, TOPE_QUERIES_ANALIZAR);
+}

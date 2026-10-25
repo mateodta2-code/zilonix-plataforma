@@ -414,6 +414,32 @@
     }
   }
 
+  // Issue #225 — "Top 8 reseñas": cuando background.js está leyendo
+  // reseñas (una sola pestaña reutilizada, navegada con
+  // chrome.tabs.update — ver extension/LEEME.md), cada navegación
+  // reinyecta este content script de cero, así que esta marca de "un
+  // solo envío" siempre arranca en false para esa página — nunca se
+  // manda dos veces la reseña de la MISMA PDP (si se mandara dos
+  // veces, la segunda podría llegarle a background.js después de que
+  // ya avanzó al siguiente item y quedaría mal atribuida). Mismo
+  // criterio que lector.leerResenas: solo Mercado Libre lo implementa,
+  // en los otros 5 sitios esto simplemente nunca encuentra nada que
+  // mandar.
+  let yaEnviadaResenaEstaPagina = false;
+  function enviarResenaAZilonix(itemId, resena) {
+    if (yaEnviadaResenaEstaPagina) return;
+    if (typeof itemId !== "string" || !resena) return;
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    yaEnviadaResenaEstaPagina = true;
+    try {
+      chrome.runtime.sendMessage({ tipo: "zilonix:resena", payload: { itemId, resena } }, () => {
+        void chrome.runtime.lastError; // sin "Ver reseñas" en curso en ningún panel — nunca un error real
+      });
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe el panel.
+    }
+  }
+
   function reescanear() {
     let tipo;
     try {
@@ -429,6 +455,15 @@
         const datos = lector.leerProducto(document);
         renderizarProducto(panel, datos);
         enviarVendidosAZilonix(datos);
+        // Issue #225 — se intenta SIEMPRE que haya un itemId confirmado
+        // (igual que enviarVendidosAZilonix), no solo durante un "Ver
+        // reseñas" activo — background.js es quien decide si le
+        // importa (solo si esta pestaña es la que está leyendo
+        // reseñas en este momento, ver avanzarLecturaResena).
+        if (lector.leerResenas && datos && typeof datos.itemId === "string") {
+          const resena = lector.leerResenas(document);
+          if (resena && resena.resenasTotales != null) enviarResenaAZilonix(datos.itemId, resena);
+        }
       } else if (tipo === "listado") {
         const productos = lector.leerListado(document).productos;
         renderizarListado(panel, productos);

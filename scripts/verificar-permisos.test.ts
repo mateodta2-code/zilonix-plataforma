@@ -48,6 +48,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/pedidos/[id]/page.tsx",
   "app/panel/despachos/page.tsx",
   "app/panel/investigacion/page.tsx",
+  "app/panel/investigacion/actions.ts",
   "app/panel/investigacion/seguimiento/page.tsx",
   "app/panel/investigacion/seguimiento/actions.ts",
   "app/panel/investigacion/seguimiento/[id]/page.tsx",
