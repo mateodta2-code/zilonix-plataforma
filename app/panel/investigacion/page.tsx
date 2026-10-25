@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
@@ -17,15 +16,13 @@ import {
 } from "@/lib/ml/investigacion";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
-import { Chip } from "@/components/marco/Chip";
-import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
-import { InsigniaExtension } from "@/components/marco/InsigniaExtension";
 import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { PanelDemanda } from "./PanelDemanda";
 import styles from "./page.module.css";
 
 // Issue #174 (Parte 1) + #197 (Refs, "Investigación Selltrix
@@ -63,10 +60,6 @@ function money(n: number): string {
   // conteo entero) — se redondea solo acá, al mostrarlo, nunca en el
   // dato guardado.
   return `$${Math.round(n).toLocaleString("es-CO")}`;
-}
-
-function numero(n: number): string {
-  return Math.round(n).toLocaleString("es-CO");
 }
 
 export default async function InvestigacionPage({ searchParams }: { searchParams: { termino?: string | string[]; tab?: string } }) {
@@ -194,77 +187,16 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
           </p>
 
           {tab === "demanda" ? (
-            <>
-              <div className={styles.insignia}>
-                <InsigniaExtension />
-                <span className={styles.notaInsignia}>
-                  Con la extensión podés abrir cada candidato en Mercado Libre para ver datos reales actualizados al momento, y analizar Amazon,
-                  Temu y otras plataformas.
-                </span>
-              </div>
-
-              <div className={styles.kpis}>
-                <TarjetaKpi
-                  titulo="VENDIDOS TOTALES (REAL)"
-                  valor={resultado.vendidosTotalesReales ?? undefined}
-                  detalle={[`${resultado.publicacionesConVendidosReal} de ${resultado.publicacionesEncontradas} publicaciones con dato real`]}
-                />
-                <TarjetaKpi titulo="PROM. VENDIDOS POR PUBLICACIÓN" valor={resultado.promedioVendidosPorPublicacion ?? undefined} />
-                <TarjetaKpi
-                  titulo="FACTURACIÓN EST. COP / MES"
-                  valor={resultado.facturacionMesTotalEstimada != null ? money(resultado.facturacionMesTotalEstimada) : undefined}
-                  detalle={resultado.facturacionMesTotalEstimada != null ? ["Estimado (estilo Selltrix) — nunca confirmado por Mercado Libre"] : undefined}
-                />
-              </div>
-
-              <div>
-                <p className={styles.tituloSeccion}>
-                  Publicaciones encontradas (hasta 10 — ordenadas por vendidos real cuando hay dato, nunca por precio disfrazado de popularidad)
-                </p>
-                <Tabla encabezados={["Foto", "Producto", "Vendidos", "Precio", "Fact. est. COP/mes", "Catálogo", "Full", "Vendedor", "Enlace", ""]}>
-                  {resultado.publicaciones.map((p) => (
-                    <FilaTabla key={p.itemId}>
-                      <CeldaTabla>
-                        {/* app no usa next/image a propósito (mismo criterio que BarraSuperior/BarraLateral) — foto de Mercado Libre, dominio ajeno. */}
-                        {p.foto ? <img src={p.foto} alt="" width={36} height={36} className={styles.foto} /> : "—"}
-                      </CeldaTabla>
-                      <CeldaTabla>{p.titulo}</CeldaTabla>
-                      <CeldaTabla>
-                        {p.vendidos != null ? (
-                          <>
-                            {numero(p.vendidos)}
-                            {p.ventasMesEstimadas != null ? (
-                              <div className={styles.subdato}>~{numero(p.ventasMesEstimadas)}/mes (estimado)</div>
-                            ) : null}
-                          </>
-                        ) : (
-                          <Chip>Sin dato</Chip>
-                        )}
-                      </CeldaTabla>
-                      <CeldaTabla>{money(p.precio)}</CeldaTabla>
-                      <CeldaTabla>{p.facturacionMesEstimada != null ? money(p.facturacionMesEstimada) : "—"}</CeldaTabla>
-                      <CeldaTabla>{p.productId != null ? <Chip estado="exito">Sí</Chip> : <Chip>No</Chip>}</CeldaTabla>
-                      <CeldaTabla>{p.esFull ? <Chip estado="exito">Full</Chip> : <Chip>—</Chip>}</CeldaTabla>
-                      <CeldaTabla>{p.vendedor ?? "—"}</CeldaTabla>
-                      <CeldaTabla>
-                        {p.link ? (
-                          <a href={p.link} target="_blank" rel="noreferrer">
-                            Ver en Mercado Libre
-                          </a>
-                        ) : (
-                          "—"
-                        )}
-                      </CeldaTabla>
-                      <CeldaTabla>
-                        <Link href={`/panel/investigacion/seguimiento?agregar=${encodeURIComponent(p.itemId)}`} className={styles.enlaceSeguir}>
-                          Seguir
-                        </Link>
-                      </CeldaTabla>
-                    </FilaTabla>
-                  ))}
-                </Tabla>
-              </div>
-            </>
+            <PanelDemanda
+              publicacionesIniciales={resultado.publicaciones}
+              publicacionesEncontradas={resultado.publicacionesEncontradas}
+              kpisBase={{
+                vendidosTotalesReales: resultado.vendidosTotalesReales,
+                publicacionesConVendidosReal: resultado.publicacionesConVendidosReal,
+                promedioVendidosPorPublicacion: resultado.promedioVendidosPorPublicacion,
+                facturacionMesTotalEstimada: resultado.facturacionMesTotalEstimada,
+              }}
+            />
           ) : null}
 
           {tab === "mercado" ? (

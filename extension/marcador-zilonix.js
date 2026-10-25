@@ -14,4 +14,17 @@
 (function () {
   "use strict";
   document.documentElement.setAttribute("data-zilonix-extension", "1");
+
+  // Issue #210 — "Completar vendidos": reenvía a la página (el React
+  // de app/panel/investigacion/PanelDemanda.tsx, que escucha
+  // window.addEventListener("message", ...)) lo que extension/
+  // background.js mandó desde la pestaña de Mercado Libre donde se
+  // abrió el candidato. postMessage con un origin explícito (el de
+  // esta misma página, nunca "*") para que ningún otro sitio pueda
+  // escucharlo aunque lo intente. El panel vuelve a validar todo el
+  // payload igual (nunca confía ciegamente en un mensaje).
+  chrome.runtime.onMessage.addListener((mensaje) => {
+    if (!mensaje || mensaje.tipo !== "zilonix:vendidos" || !mensaje.payload) return;
+    window.postMessage({ fuente: "zilonix-extension", tipo: "vendidos-completados", payload: mensaje.payload }, window.location.origin);
+  });
 })();
