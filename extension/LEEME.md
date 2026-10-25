@@ -252,6 +252,18 @@ const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
 
 Extensión 0.3.17 → 0.3.18.
 
+## Hotfix de smoke #11 — Full del listado todavía no hidratado cuando se lee (issue #247)
+
+Ficha ya OK en 0.3.18 (#245). Pero el panel de Investigación seguía en 0% Full / columna Full en "No" después de "Analizar" fresco — y el KPI mostraba 0%, no "Sin dato", confirmando que el puente content.js → background.js → panel está bien (nada que tocar ahí, igual que #242/#245): el listado llegaba de verdad con `esFull: false` en todas las filas.
+
+**Causa real**: `esperarListadoEstable` (issue #231) espera a que la CANTIDAD de tarjetas que `leerListado` encuentra quede quieta (~1s) antes de leer de verdad — pero Mercado Libre puede terminar de pintar esa cantidad ANTES de hidratar los íconos/textos de envío dentro de cada tarjeta (`svg[aria-label="Enviado por FULL"]` / `.poly-component__shipp*`, mismo selector real de `detectarFullEnTarjeta`, issue #242 — no se reinventó ninguno nuevo). El snapshot que se mandaba quedaba con la cantidad correcta, pero sin ningún badge de envío todavía pintado.
+
+**Corrección**: una segunda fase de espera, solo después de que la cantidad ya esté estable — se resuelve apenas aparece el primer marcador real de envío en cualquier tarjeta de la página, o a los 1.8s si ese listado nunca tiene ninguno (nunca se espera infinito por un Full que tal vez no existe ahí). El tope externo de 14s (`maxEsperaMs`, sin cambios, issue #233) sigue mandando — bien por debajo de los 15s fijos de background.js.
+
+**Chip nuevo en el panel flotante de listado**: "Full detectados: X/Y" (X = tarjetas con `esFull: true`, Y = total de tarjetas visibles) — solo aparece si el sitio de verdad confirma Full en al menos una tarjeta (hoy, solo Mercado Libre); en Amazon/Temu/AliExpress/Shein/Alibaba, donde `esFull` nunca es un boolean real, mostrar "0/Y" sería un "Sin dato" disfrazado de cero — mismo criterio que #227 ya aplicó para Facturación est.
+
+Extensión 0.3.18 → 0.3.19.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).

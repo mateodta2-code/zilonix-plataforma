@@ -91,6 +91,14 @@
     const vendidosConDato = productos.filter((p) => typeof p.vendidos === "number");
     const sumaVendidos = vendidosConDato.reduce((acc, p) => acc + p.vendidos, 0);
     const top10 = [...vendidosConDato].sort((a, b) => b.vendidos - a.vendidos).slice(0, 10);
+    // Issue #247 — chip "Full detectados: X/Y" del panel flotante de
+    // listado. `fullConDato` decide si el chip se muestra: en
+    // Amazon/Temu/AliExpress/Shein/Alibaba `esFull` nunca es un
+    // boolean real (Amazon lo manda `null` a propósito, el resto ni lo
+    // manda) — mostrar "0/Y" ahí sería un "Sin dato" disfrazado de
+    // cero, mismo error que #227 ya evitó para Facturación est.
+    const conDatoFull = productos.filter((p) => typeof p.esFull === "boolean");
+    const fullDetectados = conDatoFull.filter((p) => p.esFull === true).length;
     return {
       total: productos.length,
       precioMinimo: precios.length ? Math.min(...precios) : null,
@@ -98,6 +106,8 @@
       precioMaximo: precios.length ? Math.max(...precios) : null,
       sumaVendidos: vendidosConDato.length ? sumaVendidos : null,
       top10,
+      fullDetectados,
+      fullConDato: conDatoFull.length,
     };
   }
 
@@ -238,6 +248,12 @@
     html += filaHtml("Precio promedio", formatoPrecio(resumen.precioPromedio, null), resumen.precioPromedio == null);
     html += filaHtml("Precio máximo", formatoPrecio(resumen.precioMaximo, null), resumen.precioMaximo == null);
     html += filaHtml("Suma de vendidos visibles", textoCampo(resumen.sumaVendidos), resumen.sumaVendidos == null);
+    // Issue #247 — solo se muestra si el sitio de verdad confirma Full
+    // en al menos una tarjeta (ver calcularResumenListado); nunca
+    // "0/Y" en un sitio que ni lo mide.
+    if (resumen.fullConDato > 0) {
+      html += filaHtml("Full detectados", `${resumen.fullDetectados}/${resumen.total}`, false);
+    }
 
     if (resumen.top10.length) {
       html += `<p class="zx-titulo-producto" style="margin-top:10px">Top ${resumen.top10.length} por vendidos</p><ul class="zx-top10">`;
@@ -454,6 +470,37 @@
   // espera si hace falta (ver manejarEscaneoAutomatico, abajo: si
   // esto termina sin ver nada, NUNCA se manda un resultado vacío por
   // cuenta propia, se deja que el timeout externo decida).
+  // Issue #247 — smoke de Sharel: con la cantidad de tarjetas YA
+  // estable (criterio de #231, arriba), el panel de Investigación
+  // seguía mandando 0% Full tras "Analizar" fresco. El KPI mostraba
+  // 0% y no "Sin dato" — el puente content.js -> background.js ->
+  // panel estaba bien (ver #242/#245), el listado mismo llegaba con
+  // `esFull: false` en todas las filas. Causa real: Mercado Libre
+  // puede terminar de pintar la CANTIDAD de tarjetas antes de
+  // hidratar los íconos/textos de envío DENTRO de cada una
+  // (svg[aria-label="Enviado por FULL"] / .poly-component__shipp*,
+  // mismo selector real de detectarFullEnTarjeta — issue #242, no se
+  // reinventa acá) — `esperarListadoEstable` leía ese snapshot
+  // intermedio: cantidad ya quieta, pero todavía sin ningún badge de
+  // envío pintado.
+  //
+  // Mismo criterio de "nunca colgarse": no se espera infinito a que
+  // aparezca un Full que tal vez ese listado nunca tiene — se
+  // resuelve apenas aparece el primer marcador real de envío en
+  // cualquier tarjeta, o a los ESPERA_HIDRATACION_ENVIO_MS si nunca
+  // aparece ninguno. El límite externo sigue siendo `maxEsperaMs`
+  // (14s, sin cambios) — bien por debajo del timeout fijo de 15s que
+  // ya tiene background.js (TIMEOUT_POR_VARIANTE_MS/
+  // TIEMPO_MAX_POR_TERMINO_MS).
+  const ESPERA_HIDRATACION_ENVIO_MS = 1800;
+  function hayMarcadorEnvioVisible() {
+    try {
+      return Boolean(document.querySelector('svg[aria-label="Enviado por FULL"], [class*="poly-component__shipp"]'));
+    } catch {
+      return false;
+    }
+  }
+
   function esperarListadoEstable(maxEsperaMs, esperaEstabilidadMs, intervaloMs) {
     maxEsperaMs = typeof maxEsperaMs === "number" ? maxEsperaMs : 14000;
     esperaEstabilidadMs = typeof esperaEstabilidadMs === "number" ? esperaEstabilidadMs : 1000;
@@ -462,6 +509,7 @@
       const inicio = Date.now();
       let ultimaCantidad = -1;
       let ultimoCambio = Date.now();
+      let momentoCuentaEstable = null;
       const intervalo = setInterval(() => {
         let resultado;
         try {
@@ -480,10 +528,16 @@
         if (cantidad !== ultimaCantidad) {
           ultimaCantidad = cantidad;
           ultimoCambio = ahora;
+          momentoCuentaEstable = null; // la cuenta volvió a moverse: la espera de hidratación de envío se reinicia con ella
         }
-        const estable = cantidad > 0 && ahora - ultimoCambio >= esperaEstabilidadMs;
+        const cuentaEstable = cantidad > 0 && ahora - ultimoCambio >= esperaEstabilidadMs;
+        if (cuentaEstable && momentoCuentaEstable === null) {
+          momentoCuentaEstable = ahora;
+        }
+        const hidratacionEnvioLista =
+          cuentaEstable && (hayMarcadorEnvioVisible() || ahora - momentoCuentaEstable >= ESPERA_HIDRATACION_ENVIO_MS);
         const seAgotoElTiempo = ahora - inicio > maxEsperaMs;
-        if (estable || seAgotoElTiempo) {
+        if (hidratacionEnvioLista || seAgotoElTiempo) {
           clearInterval(intervalo);
           resolve({ productos, captcha: false });
         }
