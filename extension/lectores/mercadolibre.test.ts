@@ -239,13 +239,25 @@ describe("tipoDePagina — issue #192, bug real: una tienda oficial real no se r
 
   // Issue #233, punto B — bug real del smoke: Brasil usa el dominio
   // "mercadolivre" (marca real en portugués, mismo dominio que ya usa
-  // urlListadoMl en background.js desde #227) — hasta esta tarea, acá
-  // solo se reconocía "mercadolibre", así que una URL real de listado
-  // de Brasil devolvía null (ni "listado" ni nada) y leerListado NUNCA
-  // se llegaba a llamar — 0 productos garantizado, aparte de cualquier
-  // otro bug.
-  it('listado.mercadolivre.com.br (Brasil) -> "listado", no null', () => {
-    expect(tipoDePagina("https://listado.mercadolivre.com.br/cargadores?_zilonix_escaneo=1")).toBe("listado");
+  // urlListadoMl en background.js desde #227) — hasta esa tarea, acá
+  // solo se reconocía "mercadolibre", así que una URL de listado de
+  // Brasil devolvía null (ni "listado" ni nada) y leerListado NUNCA
+  // se llegaba a llamar.
+  //
+  // Issue #235 — bug real APARTE, encontrado DESPUÉS de #233: el
+  // subdominio de Brasil tampoco es "listado" (español), es "lista"
+  // (portugués) — confirmado con una captura real de
+  // archive.org/web, nunca adivinado (ver el comentario largo en
+  // tipoDePagina). "listado.mercadolivre.com.br" (la URL que probaba
+  // este mismo test hasta #235) NUNCA fue una URL real de Mercado
+  // Livre — por eso este caso cambia de expectativa acá: antes
+  // confirmaba (sin saberlo) una URL que no existe de verdad.
+  it('lista.mercadolivre.com.br (Brasil, subdominio real confirmado) -> "listado"', () => {
+    expect(tipoDePagina("https://lista.mercadolivre.com.br/cargadores?_zilonix_escaneo=1")).toBe("listado");
+  });
+
+  it('listado.mercadolivre.com.br (la URL vieja, incorrecta, nunca existió de verdad) -> null', () => {
+    expect(tipoDePagina("https://listado.mercadolivre.com.br/cargadores?_zilonix_escaneo=1")).toBeNull();
   });
 
   it("un producto real de otro país (site-id distinto de MCO) también da \"producto\"", () => {

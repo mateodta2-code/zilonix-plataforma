@@ -28,16 +28,47 @@ const cspClerk = dominioClerk
   ? [
       `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""} https://${dominioClerk} https://challenges.cloudflare.com https://*.protect.clerk.com`,
       `connect-src 'self' https://${dominioClerk} https://*.protect.clerk.com:*`,
-      `img-src 'self' data: https://img.clerk.com`,
       `style-src 'self' 'unsafe-inline'`,
       `frame-src 'self' https://challenges.cloudflare.com https://*.protect.clerk.com`,
       `worker-src 'self' blob:`,
     ]
   : [];
 
+// Issue #235 — causa real de "columna FOTO siempre en '—'" en
+// /panel/investigacion: NUNCA fue un selector roto en los lectores de
+// la extensión (confirmado — ver extension/LEEME.md). El CSP global
+// de esta app (tarea 1.10) solo permitía `img-src 'self' data:` + el
+// dominio de Clerk — cualquier <img> apuntando a una foto real
+// escaneada de un marketplace quedaba bloqueada por el NAVEGADOR
+// antes de intentar siquiera la petición de red (nunca daba un error
+// de red "normal" que se pudiera ver con onError — el navegador ni
+// llegaba a pedirla). `img-src` está separado de `cspClerk` a
+// propósito: son dominios de marketplaces, nada que ver con Clerk —
+// tienen que seguir permitidos aunque algún día `dominioClerk` sea
+// null (ej. en desarrollo local sin esas variables).
+//
+// Dominios reales, confirmados contra una captura real de cada sitio
+// (Wayback Machine — listado.mercadolibre.com.co bloquea el acceso
+// directo desde este sandbox, igual que en #229/#231/#233; esta fue
+// la forma de conseguir HTML real sin inventar nada):
+//   - Mercado Libre: http2.mlstatic.com (confirmado en un listado de
+//     hoy, "zapatillas", el mismo <img class="poly-component__picture">
+//     que ya lee mercadolibre.js) -> *.mlstatic.com (varios edges http1/http2/etc).
+//   - Amazon: m.media-amazon.com (confirmado en el <img class="s-image">
+//     real que ya lee amazon.js) -> *.media-amazon.com.
+//   - Temu: img.kwcdn.com (confirmado en la home real) -> *.kwcdn.com.
+//   - AliExpress: ae01.alicdn.com (confirmado en un listado real,
+//     "shoes") y Alibaba: img.alicdn.com/i.alicdn.com (confirmado en
+//     la home real) — mismo grupo corporativo, mismo dominio ->
+//     *.alicdn.com cubre los dos.
+//   - Shein: img.ltwebstatic.com (confirmado en la home real) -> *.ltwebstatic.com.
+const IMG_SRC_CSP =
+  "img-src 'self' data: https://img.clerk.com https://*.mlstatic.com https://*.media-amazon.com https://*.kwcdn.com https://*.alicdn.com https://*.ltwebstatic.com";
+
 const csp = [
   "default-src 'self'",
   ...cspClerk,
+  IMG_SRC_CSP,
   "form-action 'self'",
   "frame-ancestors 'self'",
   "base-uri 'self'",

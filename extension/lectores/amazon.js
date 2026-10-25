@@ -125,7 +125,15 @@
         // `calificacion`, issue #227: nunca inventar una equivalencia
         // entre dos conceptos distintos). El panel además oculta la
         // columna Full fuera de Mercado Libre (PanelInvestigacion.tsx).
-        productos.push({ titulo, precio, vendidos, foto, calificacion: leerEstrellasAmazon(div), esFull: null, link: `https://www.amazon.com/dp/${asin}` });
+        //
+        // Issue #235, punto 8 — el banner estilo Zilonix OS para Amazon
+        // sí pide "% PRIME" como su propio KPI (nunca mezclado con
+        // Full): se reintroduce el selector real confirmado en #227
+        // (`i.a-icon-prime`, zilonix-os-web/scraper-amazon-search.js),
+        // esta vez con su propio nombre honesto (`esPrime`), nunca
+        // mapeado a `esFull`.
+        const esPrime = Boolean(U.primerElemento(["i.a-icon-prime"], div));
+        productos.push({ titulo, precio, vendidos, foto, calificacion: leerEstrellasAmazon(div), esFull: null, esPrime, link: `https://www.amazon.com/dp/${asin}` });
       }
     });
     return { productos };

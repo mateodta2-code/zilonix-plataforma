@@ -45,6 +45,11 @@ export type ProductoListado = {
   foto: string | null;
   senalVentas: SenalVentas;
   esFull: boolean | null;
+  // Issue #235, punto 8 — "% PRIME" del banner estilo Zilonix OS: solo
+  // Amazon lo confirma (extension/lectores/amazon.js) — nunca se
+  // mezcla con `esFull` (issue #231: "Full" es un programa específico
+  // de Mercado Libre, Prime es un concepto distinto de Amazon).
+  esPrime: boolean | null;
   esEnvioGratis: boolean | null;
   calificacion: number | null;
   vendedor: string | null;
@@ -162,6 +167,173 @@ export function calcularResumenBloque(productos: ProductoListado[]): ResumenBloq
     precioMaximo: precios.length ? Math.max(...precios) : null,
     sumaAcumuladaSinPeriodo: acumulados.length ? acumulados.reduce((s, p) => s + (p.senalVentas.valor as number), 0) : null,
     sumaMensualPiso: mensuales.length ? mensuales.reduce((s, p) => s + (p.senalVentas.valor as number), 0) : null,
+  };
+}
+
+// --- resumen local por bloque, estilo Zilonix OS (issue #235, punto 8) ---
+//
+// Referencia visual del pedido: el banner de Amazon de Zilonix OS
+// (PRODUCTOS ANALIZADOS, PRECIO PROM, RANGO, ESTRELLAS, COMPRADOS/MES,
+// % PRIME, DEMANDA VALIDADA). Acá es genérico por diseño (no asume
+// Mercado Libre ni Amazon) para poder renderizarse dentro de CUALQUIER
+// bloque/desplegable — el panel decide qué KPI mostrar según la
+// plataforma del bloque (ej. nunca se muestra "% Prime" en un bloque
+// de Mercado Libre, ni "% Full" en uno de Amazon).
+export type ResumenLocalBloque = {
+  productosAnalizados: number;
+  precioPromedio: number | null;
+  precioMinimo: number | null;
+  precioMaximo: number | null;
+  estrellasPromedio: number | null;
+  // "Comprados/mes" cuando el bloque tiene al menos una señal
+  // mensual_piso real (hoy, solo Amazon); "Acumulado" en cualquier
+  // otro caso — nunca se mezclan los dos tipos en un solo número
+  // (mismo criterio que calcularResumenBloque).
+  volumenEtiqueta: "Comprados/mes" | "Acumulado";
+  volumenValor: number | null;
+  porcentajeFull: number | null;
+  porcentajePrime: number | null;
+  // "Demanda validada" — judgment call documentado, no un estándar
+  // externo: al menos 5 productos analizados Y al menos un volumen de
+  // compras real confirmado (mensual o acumulado) en el bloque. Nunca
+  // una visita inventada ni una cifra que `senalVentas` no respalde.
+  demandaValidada: boolean;
+};
+
+export function calcularResumenLocalBloque(productos: ProductoListado[]): ResumenLocalBloque {
+  const resumen = calcularResumenBloque(productos);
+  const conCalificacion = productos.filter((p) => p.calificacion != null);
+  const estrellasPromedio = conCalificacion.length
+    ? Math.round((conCalificacion.reduce((s, p) => s + (p.calificacion as number), 0) / conCalificacion.length) * 10) / 10
+    : null;
+  const conFull = productos.filter((p) => p.esFull != null);
+  const porcentajeFull = conFull.length ? Math.round((conFull.filter((p) => p.esFull).length / conFull.length) * 100) : null;
+  const conPrime = productos.filter((p) => p.esPrime != null);
+  const porcentajePrime = conPrime.length ? Math.round((conPrime.filter((p) => p.esPrime).length / conPrime.length) * 100) : null;
+  const usaMensual = resumen.sumaMensualPiso != null;
+  return {
+    productosAnalizados: productos.length,
+    precioPromedio: resumen.precioPromedio,
+    precioMinimo: resumen.precioMinimo,
+    precioMaximo: resumen.precioMaximo,
+    estrellasPromedio,
+    volumenEtiqueta: usaMensual ? "Comprados/mes" : "Acumulado",
+    volumenValor: usaMensual ? resumen.sumaMensualPiso : resumen.sumaAcumuladaSinPeriodo,
+    porcentajeFull,
+    porcentajePrime,
+    demandaValidada: productos.length >= 5 && (usaMensual ? resumen.sumaMensualPiso : resumen.sumaAcumuladaSinPeriodo) != null,
+  };
+}
+
+// --- "Mejor opción para importar" (issue #235, punto 7) ---
+//
+// Bug real de Zilonix OS que esto evita a propósito (pedido explícito
+// de Sharel): "más barato" solo, sin filtro de relevancia, elegía
+// cosas como un estuche vacío, una cinta o un puntero — accesorios
+// sueltos que coinciden con la categoría pero no son el producto que
+// la persona buscó. Acá nunca se considera un candidato que no
+// comparta ninguna palabra significativa con el término de búsqueda —
+// filtro OBLIGATORIO, antes de cualquier cálculo de balance.
+const PALABRAS_VACIAS_RELEVANCIA = new Set([
+  "de",
+  "la",
+  "el",
+  "los",
+  "las",
+  "un",
+  "una",
+  "unos",
+  "unas",
+  "para",
+  "con",
+  "sin",
+  "y",
+  "o",
+  "a",
+  "en",
+  "del",
+  "al",
+]);
+
+function normalizarPalabra(palabra: string): string {
+  return palabra
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+}
+
+function palabrasSignificativas(texto: string): string[] {
+  return texto
+    .split(/\s+/)
+    .map(normalizarPalabra)
+    .map((p) => p.replace(/[^a-z0-9]/g, ""))
+    .filter((p) => p.length > 2 && !PALABRAS_VACIAS_RELEVANCIA.has(p));
+}
+
+// Exportada aparte (no solo usada adentro de mejorOpcionParaImportar)
+// para poder probarla sola con casos reales del bug de OS.
+export function esRelevanteAlTermino(titulo: string, termino: string): boolean {
+  const palabrasTermino = palabrasSignificativas(termino);
+  if (!palabrasTermino.length) return true; // término sin palabras útiles (ej. solo stopwords) — no hay con qué filtrar, nunca se descarta todo por esto
+  const palabrasTitulo = palabrasSignificativas(titulo);
+  if (!palabrasTitulo.length) return false; // título vacío/sin palabras reales — nunca se asume relevante a ciegas
+  // Substring en cualquier dirección: cubre singular/plural simple
+  // ("reloj"/"relojes") sin necesitar un stemmer completo — mismo
+  // criterio pragmático que ya usa lib/ml/variantesBusqueda.ts.
+  return palabrasTermino.some((pt) => palabrasTitulo.some((ptt) => ptt.includes(pt) || pt.includes(ptt)));
+}
+
+export type MejorOpcionImportar = {
+  producto: ProductoListado;
+  razon: string;
+};
+
+// Balance simple y documentado (nunca "solo el más barato", el bug
+// real de OS): precio más bajo, calificación más alta y volumen de
+// compras más alto pesan por igual (1/3 cada uno) entre los
+// candidatos REALMENTE relevantes al término. El volumen usa
+// `senalVentas.valor` tal cual esté clasificado — nunca se mezcla un
+// acumulado con uno mensual_piso al comparar dentro del mismo bloque
+// (todas las filas de un mismo bloque son de la misma plataforma, así
+// que ya vienen con el mismo tipo de señal) y la razón final siempre
+// aclara cuál de los dos es. Sin calificación -> ni premia ni
+// castiga (score neutro 0.5), nunca se trata un "sin dato" como 0.
+export function mejorOpcionParaImportar(productos: ProductoListado[], termino: string): MejorOpcionImportar | null {
+  const relevantes = productos.filter((p) => p.precio > 0 && esRelevanteAlTermino(p.titulo, termino));
+  if (!relevantes.length) return null;
+
+  const precios = relevantes.map((p) => p.precio);
+  const precioMin = Math.min(...precios);
+  const precioMax = Math.max(...precios);
+  const rangoPrecio = precioMax - precioMin || 1;
+
+  const volumenes = relevantes.map((p) => p.senalVentas.valor ?? 0);
+  const volumenMax = Math.max(...volumenes) || 1;
+
+  let mejor: ProductoListado | null = null;
+  let mejorScore = -Infinity;
+  for (const p of relevantes) {
+    const scorePrecio = 1 - (p.precio - precioMin) / rangoPrecio; // más barato -> más cerca de 1
+    const scoreCalificacion = p.calificacion != null ? p.calificacion / 5 : 0.5;
+    const scoreVolumen = (p.senalVentas.valor ?? 0) / volumenMax;
+    const score = scorePrecio / 3 + scoreCalificacion / 3 + scoreVolumen / 3;
+    if (score > mejorScore) {
+      mejorScore = score;
+      mejor = p;
+    }
+  }
+  if (!mejor) return null;
+
+  const etiquetaVolumen =
+    mejor.senalVentas.tipo === "mensual_piso"
+      ? `${mejor.senalVentas.valor ?? 0} compras/mes`
+      : mejor.senalVentas.tipo === "acumulado_sin_periodo"
+        ? `${mejor.senalVentas.valor ?? 0} acumulado — nunca /mes`
+        : "sin dato de ventas";
+  const etiquetaCalificacion = mejor.calificacion != null ? `${mejor.calificacion.toFixed(1)}★` : "sin calificación";
+  return {
+    producto: mejor,
+    razon: `Balance entre precio, calificación (${etiquetaCalificacion}) y volumen de compras (${etiquetaVolumen}), entre los resultados relevantes a "${termino}".`,
   };
 }
 

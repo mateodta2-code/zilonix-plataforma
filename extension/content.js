@@ -376,6 +376,10 @@
         foto: resolverLinkListadoSeguro(p.foto),
         calificacion: typeof p.calificacion === "number" && Number.isFinite(p.calificacion) ? p.calificacion : null,
         esFull: typeof p.esFull === "boolean" ? p.esFull : null,
+        // Issue #235, punto 8 — "% PRIME" en el banner de Amazon, nunca
+        // mezclado con Full (ver lectores/amazon.js) — null en el
+        // resto de los lectores (esa propiedad no existe ahí).
+        esPrime: typeof p.esPrime === "boolean" ? p.esPrime : null,
         esEnvioGratis: typeof p.esEnvioGratis === "boolean" ? p.esEnvioGratis : null,
         vendedor: typeof p.vendedor === "string" && p.vendedor ? p.vendedor : null,
         itemId: typeof p.itemId === "string" && p.itemId ? p.itemId : null,
@@ -492,6 +496,49 @@
   // cuando el envío real ya ocurrió (ver manejarEscaneoAutomatico).
   let esperandoEscaneoAutomatico = false;
 
+  // Issue #235 — sondeo activo tras un captcha (hoy solo Alibaba, ver
+  // alibaba.js/hayCaptchaAlibaba — genérico igual, por si otro sitio
+  // suma captcha el día de mañana): lee el DOM cada 2s, independiente
+  // del MutationObserver, buscando candidatos reales. Nunca resuelve
+  // ni hace clic por la persona — solo MIRA si ya lo hizo. Tope de
+  // 110s (por debajo de los 120s fijos que background.js
+  // — TIEMPO_MAX_CAPTCHA_MS — le da a la persona antes de rendirse del
+  // todo), para dejar un margen real al mensaje de vuelta.
+  let esperandoCaptchaResuelto = false;
+  const TIEMPO_MAX_ESPERA_CAPTCHA_MS = 110000;
+  const INTERVALO_POLL_CAPTCHA_MS = 2000;
+
+  function iniciarEsperaCaptchaResuelto() {
+    if (esperandoCaptchaResuelto || yaEnviadoEscaneoAutomatico) return;
+    esperandoCaptchaResuelto = true;
+    const inicio = Date.now();
+    const intervalo = setInterval(() => {
+      if (yaEnviadoEscaneoAutomatico) {
+        clearInterval(intervalo);
+        esperandoCaptchaResuelto = false;
+        return;
+      }
+      if (Date.now() - inicio > TIEMPO_MAX_ESPERA_CAPTCHA_MS) {
+        clearInterval(intervalo);
+        esperandoCaptchaResuelto = false;
+        return; // background.js tiene su propio timeout fijo — acá no se manda nada vacío, mismo criterio que #233 punto C
+      }
+      let resultado;
+      try {
+        resultado = lector.leerListado(document);
+      } catch {
+        resultado = { productos: [] };
+      }
+      if (resultado && resultado.captcha) return; // sigue bloqueado — se sigue esperando, nunca se intenta resolver
+      const productos = (resultado && resultado.productos) || [];
+      if (!productos.length) return; // todavía nada real que mandar
+      clearInterval(intervalo);
+      esperandoCaptchaResuelto = false;
+      yaEnviadoEscaneoAutomatico = true;
+      enviarListadoAZilonix(productos, true, false);
+    }, INTERVALO_POLL_CAPTCHA_MS);
+  }
+
   async function manejarEscaneoAutomatico() {
     if (yaEnviadoEscaneoAutomatico || esperandoEscaneoAutomatico) return;
     esperandoEscaneoAutomatico = true;
@@ -500,12 +547,29 @@
       if (yaEnviadoEscaneoAutomatico) return; // se resolvió por otro camino mientras tanto — nunca debería pasar, defensivo
       if (resultado.captcha) {
         // Issue #225 — mismo criterio de siempre: nunca se marca
-        // yaEnviadoEscaneoAutomatico acá, la persona resuelve a mano y
-        // el reescaneo normal (MutationObserver) vuelve a intentar.
+        // yaEnviadoEscaneoAutomatico acá, la persona resuelve a mano.
         if (!yaAvisadoCaptcha) {
           yaAvisadoCaptcha = true;
           enviarListadoAZilonix([], true, true);
         }
+        // Issue #235 — bug real del smoke: "aviso de captcha OK, pero
+        // nunca reanuda el escaneo al resolver a mano". Hasta esta
+        // tarea, el único camino para volver a intentar después de un
+        // captcha era pasivo: esperar a que el MutationObserver
+        // (observa SOLO document.body, nunca document.head) detectara
+        // un cambio real en el DOM, o que la URL cambiara. Si Alibaba
+        // resuelve el captcha de una forma que ese observer no agarra
+        // bien (ej. un cambio que tarda en reflejarse en el body, o un
+        // reload cuya URL final pierde el marcador `_zilonix_escaneo=1`),
+        // nunca se reintentaba — el escaneo quedaba "trabado" hasta el
+        // timeout fijo de 120s de background.js (TIEMPO_MAX_CAPTCHA_MS),
+        // sin ningún intento activo mientras tanto. Se agrega un sondeo
+        // PROPIO, activo, que no depende del MutationObserver — mismo
+        // criterio de "nunca evadir, nunca mandar vacío antes de
+        // tiempo" (#233, punto C) aplicado acá: nunca se resuelve ni
+        // se hace clic por la persona, solo se vuelve a LEER el DOM
+        // cada 2s, por si la persona ya lo resolvió a mano.
+        iniciarEsperaCaptchaResuelto();
         return;
       }
       if (!resultado.productos.length) {
