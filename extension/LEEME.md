@@ -293,6 +293,31 @@ Smoke de Sharel sobre 0.3.20 seguía en 0/48 con el filtro FULL puesto. La conso
 
 Extensión 0.3.20 → 0.3.21.
 
+## Hotfix de smoke #14 — Full del listado: confirmado timing puro, HTML real citado (issue #248, vuelta 3)
+
+Con 0.3.21: con el filtro Full puesto en la URL, el chip ya dio **48/48 OK** (la señal de URL de la vuelta 2 funcionó). **Sin** el filtro, seguía en 0/48 con 6.5s de espera.
+
+**Esta vez, Mateo consiguió y citó el HTML real del badge en vivo** (DOM vivo, filtro apagado):
+
+```html
+<div class="poly-component__shipping-v2">
+  <div class="poly-shipping-v2__item">
+    <span>
+      <span class="polylabel-pill polylabel-fw-semibold">Llega gratis mañana</span>
+      <svg aria-label="Enviado por FULL" role="img" class="polylabel-icon" width="44" height="14" viewBox="0 0 41 13">
+        <use href="#poly_full"></use>
+      </svg>
+    </span>
+  </div>
+</div>
+```
+
+**Resultado, con ese HTML real puesto en un fixture de prueba**: `detectarFullEnHtmlTarjeta` ya devuelve `true` — SIN ningún cambio de selector. El aria-label real sigue siendo exactamente `"Enviado por FULL"` (el selector de Zilonix OS de #242, nunca cambió) y la Capa 1 (atributos, issue #248 vuelta 1) ya lo agarra sin necesitar el bloque `poly-component__shipp*` (ahora `-v2`, cubierto por substring de todas formas). **"FULL" nunca es texto visible aparte** — vive solo en el `aria-label` del ícono — así que un strip-tags ingenuo SIEMPRE lo pierde; por eso la Capa 1 (atributos, no texto) es la que importa acá, confirmado con una prueba dedicada. Se agregó, además, un chequeo DOM explícito prioritario sobre `.poly-component__shipping-v2 use[href*="poly_full"]`/`svg[aria-label*="FULL" i]` (redundante con lo que ya funcionaba, pero deja la intención explícita en el código). Advertencia explícita de Mateo, ya cubierta sin cambios: **nunca** `poly-bookmark__icon-full` (ícono de favorito) cuenta como Full — confirmado con una prueba dedicada.
+
+**Conclusión: el bug restante es 100% timing, no un selector mal.** Con el filtro puesto, la señal de URL resuelve todo instantáneo, sin esperar nada del DOM — por eso ya daba 48/48. Sin el filtro, Mercado Libre tarda más en hidratar el ícono de envío en las 48 tarjetas de lo que alcanzaban los 6.5s. La espera de hidratación (`ESPERA_HIDRATACION_ENVIO_MS`, `content.js`) sube a **12s** — dentro del rango pedido (12-15s) y todavía por debajo del tope externo de 14s (`maxEsperaMs`, sin cambios) y del timeout fijo de background.js (15s, tampoco tocado): la fase de estabilidad del conteo típicamente tarda ~1s, dejando ya ~13s de margen real antes del tope de 14s — 12s entra cómodo ahí sin mover ningún otro número.
+
+Extensión 0.3.21 → 0.3.22.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).

@@ -566,6 +566,35 @@ describe("detectarFullEnHtmlTarjeta — issue #248, SEXTO intento: smoke real 0/
     const tarjeta = `<li class="ui-search-layout__item"><div class="poly-component__shipped-from"><svg aria-label="Enviado por FULL"></svg></div></li>`;
     expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
   });
+
+  // Issue #248, VUELTA 3 — HTML real capturado por Pablo/Sharel (DOM
+  // vivo, con el filtro Full apagado — el caso puntual que seguía en
+  // 0/48). Citado tal cual, sin recortar, salvo envolverlo en un <li>
+  // real con su título para que la prueba sea representativa de una
+  // tarjeta completa.
+  const TARJETA_REAL_SIN_FILTRO_VUELTA3 = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping-v2"><div class="poly-shipping-v2__item"><span><span class="polylabel-pill polylabel-fw-semibold">Llega gratis mañana</span><svg aria-label="Enviado por FULL" role="img" class="polylabel-icon" width="44" height="14" viewBox="0 0 41 13"><use href="#poly_full"></use></svg></span></div></div><h3 class="poly-component__title-wrapper">Tetero Anticólicos 260ml</h3></div></li>`;
+
+  it("issue #248, HTML REAL confirmado (vuelta 3, poly-component__shipping-v2) -> true", () => {
+    expect(detectarFullEnHtmlTarjeta(TARJETA_REAL_SIN_FILTRO_VUELTA3)).toBe(true);
+  });
+
+  it('issue #248, vuelta 3 — "FULL" vive SOLO en atributos (aria-label / href de sprite), nunca como texto visible aparte: si NINGÚN atributo sobreviviera, el texto visible solo diría "Llega gratis mañana" -> false, confirmando por qué la Capa 1 (atributos) es imprescindible acá, no un respaldo redundante', () => {
+    // Mismo fixture real, pero con los DOS atributos que delatan Full
+    // (aria-label del svg, href del sprite <use>) sacados — simula qué
+    // pasaría si la Capa 1 no existiera: el texto visible que queda
+    // (un strip-tags ingenuo de la Capa 2) es solo "Llega gratis
+    // mañana", sin la palabra "full" en ningún lado.
+    const sinAtributosFull = TARJETA_REAL_SIN_FILTRO_VUELTA3.replace('aria-label="Enviado por FULL" ', "").replace(
+      'href="#poly_full"',
+      'href="#otro-icono"'
+    );
+    expect(detectarFullEnHtmlTarjeta(sinAtributosFull)).toBe(false);
+  });
+
+  it('advertencia explícita de Mateo: "poly-bookmark__icon-full" (ícono de favorito, nunca el programa Full) nunca cuenta como Full', () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><button class="poly-bookmark__icon-full" aria-label="Favorito"></button><div class="poly-component__delivery">Llega gratis mañana</div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
+  });
 });
 
 describe("detectarFullEnHtmlFicha — issue #245, ficha de producto (leerProducto), calco exacto del selector de Zilonix OS", () => {

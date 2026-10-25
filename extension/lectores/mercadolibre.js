@@ -640,11 +640,53 @@
   // puede no existir) — y se agrega un volcado de diagnóstico
   // temporal (ver `volcarDiagnosticoFullSiHaceFalta`, abajo de
   // `leerListado`) para conseguir HTML real si esto tampoco alcanza.
+  // Issue #248, VUELTA 3 — HTML real capturado por Pablo/Sharel (DOM
+  // vivo, con el filtro Full apagado — el caso que seguía en 0/48):
+  //   <div class="poly-component__shipping-v2">
+  //     <div class="poly-shipping-v2__item">
+  //       <span>
+  //         <span class="polylabel-pill polylabel-fw-semibold">Llega gratis mañana</span>
+  //         <svg aria-label="Enviado por FULL" role="img" class="polylabel-icon" width="44" height="14" viewBox="0 0 41 13">
+  //           <use href="#poly_full"></use>
+  //         </svg>
+  //       </span>
+  //     </div>
+  //   </div>
+  // Confirma que el aria-label real SIGUE siendo exactamente
+  // "Enviado por FULL" — el primer selector de abajo (de Zilonix OS,
+  // #242) ya lo matchea tal cual, nunca cambió. "FULL" NO es texto
+  // visible aparte (vive solo en el aria-label del svg) — un
+  // strip-tags que descarte atributos lo pierde, por eso la Capa 2 de
+  // `detectarFullEnHtmlTarjeta` (texto, abajo) nunca lo agarraba sola;
+  // la Capa 1 (atributos, sin acotar a ningún bloque) sí. El
+  // contenedor real pasó a llamarse `poly-component__shipping-v2`
+  // (antes `poly-component__shipping`/`poly-component__shipped-from`)
+  // — ya cubierto por substring en la Capa 2, documentado explícito
+  // acá para no depender de esa coincidencia. Advertencia explícita
+  // de Mateo: NUNCA usar `poly-bookmark__icon-full` (ícono de
+  // favorito, nada que ver con el programa Full) — ninguno de los
+  // selectores de acá lo matchea (substring de "poly_full"/
+  // "icon-poly_full", ninguno presente en ese nombre).
   function detectarFullEnTarjeta(tarjeta) {
     if (!tarjeta) return false;
     // Selector real de Zilonix OS, primero y directo — mismo criterio
-    // exacto que ya corre en producción hoy.
+    // exacto que ya corre en producción hoy, y el mismo que confirma
+    // el HTML real de la vuelta 3 de #248 (arriba).
     if (U.primerElemento(['svg[aria-label="Enviado por FULL"]'], tarjeta)) return true;
+    // Issue #248, vuelta 3 — prioridad explícita, pedida por Mateo,
+    // sobre el contenedor real confirmado (`poly-component__shipping-v2`)
+    // y su ícono real (`use[href*="poly_full"]`) — redundante con los
+    // chequeos más laxos de abajo en este caso puntual, pero deja la
+    // intención explícita en el código en vez de depender solo de un
+    // substring match más genérico.
+    if (
+      U.primerElemento(
+        ['.poly-component__shipping-v2 use[href*="poly_full"]', '.poly-component__shipping-v2 svg[aria-label*="FULL" i]'],
+        tarjeta
+      )
+    ) {
+      return true;
+    }
     // Issue #248 — más laxo, sobre la tarjeta ENTERA (no acotado a
     // ningún bloque): el mismo ícono real, pero por si el valor exacto
     // del aria-label cambió, viene en un <img> en vez de un <svg>, o
@@ -704,7 +746,13 @@
     // (issue #248) ya NUNCA hace fallar todo el detector si este
     // bloque no existe: antes de #248 la ausencia de este bloque
     // cortaba en seco con `return false`, el bug real detrás del 0/48
-    // del smoke de Pablo con el filtro Full puesto.
+    // del smoke de Pablo con el filtro Full puesto. Issue #248, vuelta
+    // 3 — el HTML real confirmó que el contenedor pasó a llamarse
+    // `poly-component__shipping-v2` (antes `poly-component__shipping`/
+    // `poly-component__shipped-from`) — ya cubierto sin cambios por el
+    // substring de abajo (`poly-component__shipping-v2` CONTIENE
+    // `poly-component__shipping`), documentado así para que quede
+    // explícito que no es casualidad.
     const mApertura = htmlSinTitulo.match(/<(div|span)[^>]*class="[^"]*poly-component__shipp(?:ed-from|ing)[^"]*"[^>]*>/i);
     if (mApertura) {
       const idxInicio = mApertura.index + mApertura[0].length;

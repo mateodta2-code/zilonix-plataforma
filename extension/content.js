@@ -493,7 +493,7 @@
   // ya tiene background.js (TIMEOUT_POR_VARIANTE_MS/
   // TIEMPO_MAX_POR_TERMINO_MS).
   //
-  // Issue #248, follow-up — el smoke de Sharel/Pablo con 0.3.20 (1.8s
+  // Issue #248, vuelta 2 — el smoke de Sharel/Pablo con 0.3.20 (1.8s
   // de margen) seguía en 0/48, incluso con el filtro Full puesto en
   // la URL. Dos cambios, no uno: (1) `lector.leerListado` ya resuelve
   // `esFull` con el detector real en capas + la señal de URL del
@@ -501,10 +501,27 @@
   // `lectores/mercadolibre.js`) — chequear ESO directamente en vez de
   // una búsqueda de marcador propia y más floja acá (`hayMarcadorEnvioVisible`,
   // ya sacada: duplicaba lógica y no pasaba por el detector real); (2)
-  // 1.8s puede no alcanzar para que Mercado Libre termine de hidratar
-  // el badge en TODAS las tarjetas — el margen sube a un rango de
-  // 5-8s (antes "no solo 1.8s", por instrucción directa del issue).
-  const ESPERA_HIDRATACION_ENVIO_MS = 6500;
+  // 1.8s subió a 6.5s.
+  //
+  // Issue #248, VUELTA 3 — con el filtro Full puesto (señal de URL)
+  // quedó 48/48 OK, pero SIN el filtro seguía en 0/48 con 6.5s. Mateo
+  // confirmó con HTML real (ver el comentario completo sobre
+  // `detectarFullEnTarjeta`, `lectores/mercadolibre.js`) que el
+  // detector YA reconoce ese badge real — con el HTML real puesto en
+  // un fixture, el detector devuelve `true` sin ningún cambio de
+  // selector. Confirmado entonces: lo que queda es 100% timing, no un
+  // selector mal — 6.5s seguía sin ser suficiente para que Mercado
+  // Libre hidrate el ícono de envío en TODAS las tarjetas de un
+  // listado sin el filtro puesto (con el filtro, el signal de URL
+  // resuelve esto instantáneo, sin esperar nada del DOM — por eso
+  // *ese* caso ya daba 48/48). Sube a 12s — dentro del rango pedido
+  // (12-15s) y todavía por debajo del tope externo `maxEsperaMs`
+  // (14s, sin cambios acá) y del timeout fijo de background.js (15s,
+  // tampoco tocado): si la fase de estabilidad del conteo (arriba)
+  // tarda su ~1s típico, el margen real disponible para esto ya era
+  // ~13s antes de chocar con el tope de 14s — 12s entra cómodo en esa
+  // ventana sin tener que mover ningún otro número.
+  const ESPERA_HIDRATACION_ENVIO_MS = 12000;
 
   function esperarListadoEstable(maxEsperaMs, esperaEstabilidadMs, intervaloMs) {
     maxEsperaMs = typeof maxEsperaMs === "number" ? maxEsperaMs : 14000;
