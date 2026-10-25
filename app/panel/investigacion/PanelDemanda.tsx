@@ -15,7 +15,9 @@ import {
   reemplazarProductosImportados,
   type ProductoImportado,
 } from "@/lib/ml/importacionListadoCliente";
+import { generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
 import type { PublicacionInvestigacion } from "@/lib/ml/investigacion";
+import { consumirClicAnalizarReciente } from "./analizarClic";
 import styles from "./page.module.css";
 
 // Issue #210 (Sharel, staging) — "Analizar" trae candidatos reales de
@@ -65,6 +67,14 @@ type MensajeListadoExtension = {
   plataforma: string;
   url: string;
   productos: { titulo: string; precio: number; vendidos: number | null; link: string | null }[];
+  // Issue #221 — "escaneo-analizar" marca un listado que vino del
+  // escaneo automático que arrancó el propio clic en "Analizar"
+  // (nunca de un "Enviar a Zilonix" manual en una pestaña que la
+  // persona ya tenía abierta) — ese caso se fusiona directo, sin el
+  // paso extra de "Importar/Fusionar/Reemplazar" (que sigue existiendo
+  // para el caso manual, ver abajo). Ausente o cualquier otro valor =
+  // tratado como manual, mismo comportamiento de siempre (#213).
+  origen?: string;
 };
 
 function esMensajeListadoValido(valor: unknown): valor is MensajeListadoExtension {
@@ -79,10 +89,12 @@ function esMensajeListadoValido(valor: unknown): valor is MensajeListadoExtensio
 }
 
 export function PanelDemanda({
+  termino,
   publicacionesIniciales,
   kpisBase,
   publicacionesEncontradas,
 }: {
+  termino: string;
   publicacionesIniciales: PublicacionInvestigacion[];
   kpisBase: KpisDemanda;
   publicacionesEncontradas: number;
@@ -94,6 +106,9 @@ export function PanelDemanda({
   const [conExtension, setConExtension] = useState<boolean | null>(null);
   const [yaAbrioCompletar, setYaAbrioCompletar] = useState(false);
   const [avisoBloqueado, setAvisoBloqueado] = useState(false);
+  // Issue #221 — "Analizar estilo OS": true mientras la extensión está
+  // abriendo/leyendo/cerrando las variantes del listado real de ML.
+  const [escaneoEnCurso, setEscaneoEnCurso] = useState(false);
 
   // Issue #213 — "Importar listado": `importado` es la sesión ya
   // confirmada (nunca se mezcla con `estado.publicaciones`, la tabla
@@ -112,6 +127,31 @@ export function PanelDemanda({
   useEffect(() => {
     setConExtension(document.documentElement.hasAttribute("data-zilonix-extension"));
   }, []);
+
+  // Issue #221 — "Analizar estilo OS": si este montaje viene de un
+  // clic real y reciente en "Analizar" (consumirClicAnalizarReciente,
+  // ver FormularioAnalizar.tsx/analizarClic.ts) Y hay extensión, se le
+  // pide a la extensión escanear el listado real de Mercado Libre para
+  // el término y sus variantes — UN solo postMessage página->extensión,
+  // nunca abierto directo por esta página (la extensión es quien abre/
+  // lee/cierra las pestañas, ver extension/background.js). Sin
+  // extensión, o sin la marca reciente (ej. solo cambiaste de pestaña
+  // Mercado->Demanda), nunca se dispara nada — Analizar sigue
+  // funcionando 100% igual que siempre, solo por API.
+  useEffect(() => {
+    if (conExtension !== true) return;
+    if (!consumirClicAnalizarReciente()) return;
+    const variantes = generarVariantesBusqueda(termino);
+    if (!variantes.length) return;
+    window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo", payload: { terminos: variantes } }, window.location.origin);
+    setEscaneoEnCurso(true);
+    // Red de seguridad del lado del cliente: si la extensión nunca
+    // contesta (ej. el Service Worker se recicló a mitad de camino,
+    // ver la nota en extension/background.js), esto nunca deja
+    // "Escaneando..." para siempre en pantalla.
+    const limite = setTimeout(() => setEscaneoEnCurso(false), 90_000);
+    return () => clearTimeout(limite);
+  }, [conExtension, termino]);
 
   // Issue #210/#213 — puente extensión → panel. El mensaje real llega
   // por extension/marcador-zilonix.js (window.postMessage con origin =
@@ -156,6 +196,20 @@ export function PanelDemanda({
           vendidos: typeof p.vendidos === "number" && Number.isFinite(p.vendidos) ? p.vendidos : null,
           link: linkHttpSeguro(p.link),
         }));
+
+        // Issue #221 — "escaneo-analizar": la persona YA autorizó todo
+        // esto con el clic en Analizar (ver el efecto de arriba) — se
+        // fusiona directo, sin el paso extra de "Importar/Fusionar/
+        // Reemplazar" que sigue pidiéndose para un "Enviar a Zilonix"
+        // manual (#213, rama de abajo). Vacío es un resultado válido
+        // (ninguna variante encontró nada) — igual apaga el indicador.
+        if (payload.origen === "escaneo-analizar") {
+          setEscaneoEnCurso(false);
+          if (!productos.length) return;
+          setListado((actual) => ({ ...actual, importado: fusionarProductosImportados(actual.importado, productos) }));
+          return;
+        }
+
         if (!productos.length) return; // mensaje vacío — nada que ofrecer importar
         setListado((actual) => ({ ...actual, pendiente: { plataforma: payload.plataforma, productos } }));
       }
@@ -224,11 +278,20 @@ export function PanelDemanda({
       <div className={styles.insignia}>
         <InsigniaExtension />
         <span className={styles.notaInsignia}>
-          Con la extensión podés abrir cada candidato en Mercado Libre para ver datos reales actualizados al momento, y analizar Amazon, Temu y
-          otras plataformas — desde una página de búsqueda/listado, el botón &quot;Enviar a Zilonix&quot; del panel flotante importa esos
-          candidatos acá abajo.
+          Con la extensión, Analizar también escanea el listado real de Mercado Libre (tu término y unas pocas variantes) — abre y cierra esas
+          pestañas sola, sin tocar ninguna publicación individual. Desde una búsqueda en Amazon, Temu u otras plataformas, el botón
+          &quot;Enviar a Zilonix&quot; del panel flotante importa esos candidatos acá abajo.
         </span>
       </div>
+
+      {escaneoEnCurso ? (
+        <div className={styles.insignia}>
+          <Chip estado="aviso">Escaneando Mercado Libre…</Chip>
+          <span className={styles.notaInsignia}>
+            La extensión está abriendo y cerrando el listado real para tu término y sus variantes — no cierres esta pestaña, ya vuelve sola.
+          </span>
+        </div>
+      ) : null}
 
       {conExtension && estado.completadasPorExtension.length > 0 ? (
         <div className={styles.insignia}>
@@ -351,8 +414,9 @@ export function PanelDemanda({
       {listado.importado.length > 0 ? (
         <div>
           <p className={styles.tituloSeccion}>
-            Listados importados de la extensión ({listado.importado.length}) — Amazon/Temu/AliExpress/Shein/Alibaba y otros listados de Mercado
-            Libre leídos a mano; cobertura solo extensión, nunca mezclado con los datos reales de la API de Mercado Libre de arriba.
+            Listados importados de la extensión ({listado.importado.length}) — del escaneo automático de Analizar, de un listado manual de
+            Mercado Libre, o de Amazon/Temu/AliExpress/Shein/Alibaba; cobertura solo extensión, nunca mezclado con los datos reales de la API de
+            Mercado Libre de arriba.
           </p>
           <p className={styles.notaInsignia}>
             Precio {resumenImportado.precioMinimo != null ? money(resumenImportado.precioMinimo) : "—"} a{" "}

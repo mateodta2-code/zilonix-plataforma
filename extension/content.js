@@ -277,7 +277,7 @@
     boton.className = "zx-boton-seguir";
     boton.textContent = "Enviar a Zilonix";
     boton.onclick = () => {
-      enviarListadoAZilonix(productos);
+      enviarListadoAZilonix(productos, false);
       boton.textContent = "Enviado ✓";
       boton.disabled = true;
       setTimeout(() => {
@@ -329,7 +329,19 @@
     }
   }
 
-  function enviarListadoAZilonix(productos) {
+  // Issue #221 — "Analizar estilo OS": `auto` es true SOLO cuando esta
+  // pestaña de listado la abrió el escaneo automático (background.js,
+  // marcada con ?_zilonix_escaneo=1 en la URL — ver más abajo), nunca
+  // por un clic real de la persona en esta pestaña puntual. En ese
+  // caso se manda SIEMPRE (incluso con 0 candidatos — background.js
+  // necesita saber que esta variante ya terminó para cerrar la
+  // pestaña y seguir con la siguiente, nunca esperar el timeout de
+  // más) y con el tipo de mensaje "zilonix:escaneo-resultado" (nunca
+  // "zilonix:listado", que sigue siendo solo para el botón manual
+  // "Enviar a Zilonix" — background.js los trata distinto: el manual
+  // se reenvía tal cual al panel; este otro cierra la pestaña y
+  // sigue el escaneo).
+  function enviarListadoAZilonix(productos, auto) {
     if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
     const candidatos = ordenarProductosListado(productos)
       .filter((p) => p.titulo && typeof p.precio === "number" && Number.isFinite(p.precio))
@@ -340,16 +352,34 @@
         vendidos: typeof p.vendidos === "number" ? p.vendidos : null,
         link: resolverLinkListadoSeguro(p.link),
       }));
-    if (!candidatos.length) return; // nada confiable para mandar — nunca un mensaje vacío
-    const payload = { plataforma: lector.sitio, url: location.href, productos: candidatos };
+    if (!candidatos.length && !auto) return; // manual: nada confiable para mandar, nunca un mensaje vacío
+    const mensaje = auto
+      ? { tipo: "zilonix:escaneo-resultado", payload: { productos: candidatos } }
+      : { tipo: "zilonix:listado", payload: { plataforma: lector.sitio, url: location.href, productos: candidatos } };
     try {
-      chrome.runtime.sendMessage({ tipo: "zilonix:listado", payload }, () => {
+      chrome.runtime.sendMessage(mensaje, () => {
         void chrome.runtime.lastError; // sin panel de Investigación abierto en ninguna pestaña — nunca un error real
       });
     } catch {
       // Contexto de la extensión invalidado — nunca rompe el panel.
     }
   }
+
+  // Issue #221 — marca puesta por background.js al abrir esta pestaña
+  // como parte del escaneo automático de "Analizar" — nunca la pone
+  // la persona a mano. Cuando está, el listado se manda solo, sin
+  // esperar el clic de "Enviar a Zilonix" (tendría sentido pedirle a
+  // la persona que haga 4 clics más después de Analizar). Se manda
+  // una sola vez por carga de página, nunca en cada reescaneo del
+  // MutationObserver.
+  function esPaginaDeEscaneoAutomatico() {
+    try {
+      return new URL(location.href).searchParams.get("_zilonix_escaneo") === "1";
+    } catch {
+      return false;
+    }
+  }
+  let yaEnviadoEscaneoAutomatico = false;
 
   // Issue #210 — "Completar vendidos": cuando la persona abre un
   // candidato de Mercado Libre (por el botón "Completar vendidos
@@ -399,8 +429,14 @@
         const datos = lector.leerProducto(document);
         renderizarProducto(panel, datos);
         enviarVendidosAZilonix(datos);
-      } else if (tipo === "listado") renderizarListado(panel, lector.leerListado(document).productos);
-      else if (tipo === "tienda" && lector.leerTienda) renderizarTienda(panel, lector.leerTienda(document));
+      } else if (tipo === "listado") {
+        const productos = lector.leerListado(document).productos;
+        renderizarListado(panel, productos);
+        if (esPaginaDeEscaneoAutomatico() && !yaEnviadoEscaneoAutomatico) {
+          yaEnviadoEscaneoAutomatico = true;
+          enviarListadoAZilonix(productos, true);
+        }
+      } else if (tipo === "tienda" && lector.leerTienda) renderizarTienda(panel, lector.leerTienda(document));
     } catch (error) {
       // Un selector roto en vivo nunca deja la página del usuario rota
       // — solo el panel se queda sin mostrar nada, con el error en la

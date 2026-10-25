@@ -14,14 +14,14 @@ import {
   TerminoInvalidoError,
   type ResultadoInvestigacion,
 } from "@/lib/ml/investigacion";
-import { Boton, BotonLink } from "@/components/marco/Boton";
-import { Campo } from "@/components/marco/Campo";
+import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { FormularioAnalizar } from "./FormularioAnalizar";
 import { PanelDemanda } from "./PanelDemanda";
 import styles from "./page.module.css";
 
@@ -144,16 +144,11 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
       />
 
       <Tarjeta className={styles.formulario}>
-        <form method="get" className={styles.filaFormulario}>
-          <Campo etiqueta="Producto o nicho (hasta 3 palabras)">
-            <input type="search" name="termino" defaultValue={termino} placeholder='Ej: "reloj digital"' className="zx-control" required />
-          </Campo>
-          <input type="hidden" name="tab" value={tab} />
-          <Boton type="submit">Analizar</Boton>
-        </form>
+        <FormularioAnalizar termino={termino} tab={tab} />
         <p className={styles.ayuda}>
-          Solo Mercado Libre Colombia por API. Amazon, Temu, AliExpress, Shein y Alibaba: solo con la extensión de Zilonix instalada y la página de
-          ese producto ya abierta — todavía no se buscan desde aquí.
+          Mercado Libre Colombia: por la API de catálogo, y además por el listado real (con la extensión instalada, automático al Analizar —
+          issue #221). Amazon, Temu, AliExpress, Shein y Alibaba: solo con la extensión y &quot;Enviar a Zilonix&quot; manual desde la página —
+          todavía no se buscan desde aquí.
         </p>
       </Tarjeta>
 
@@ -186,8 +181,16 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
             mercado (esa cifra no la expone la API oficial de Mercado Libre a esta aplicación).
           </p>
 
+          {/* Issue #221 — el escaneo automático de "Analizar" (ver PanelDemanda.tsx)
+              solo se dispara cuando ESTE componente monta — es decir, solo si
+              la API ya encontró algo (hayResultado) Y la pestaña activa es
+              Demanda. Si la persona clickea Analizar estando en Mercado/
+              Estrategia, o si la API no encontró nada, la marca de
+              analizarClic.ts queda sin consumir y expira sola a los 8s —
+              limitación conocida de este slice 1, no un bug. */}
           {tab === "demanda" ? (
             <PanelDemanda
+              termino={resultado.termino}
               publicacionesIniciales={resultado.publicaciones}
               publicacionesEncontradas={resultado.publicacionesEncontradas}
               kpisBase={{
