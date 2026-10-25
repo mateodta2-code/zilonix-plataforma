@@ -137,11 +137,20 @@ describe("esLinkTiendaOficialSinIdDeVendedor (issue #192)", () => {
 });
 
 describe("construirLinkMlDeSeguimiento (issue #195)", () => {
-  it("item -> articulo.mercadolibre.com.co/<id>", () => {
-    expect(construirLinkMlDeSeguimiento("item", "MCO123456789")).toBe("https://articulo.mercadolibre.com.co/MCO123456789");
+  // Issue #212, bug real reportado por Sharel en staging: "Ver en ML"
+  // abría articulo.mercadolibre.com.co/MCO123456789 SIN guión -> 404.
+  // Mercado Libre solo redirige con el guión real (MCO-123456789) —
+  // mismo formato que linkPublicacion (lib/ml/cliente.ts), reutilizado
+  // acá en vez de reinventado.
+  it("item -> articulo.mercadolibre.com.co/<id> CON guión (issue #212, antes 404 sin él)", () => {
+    expect(construirLinkMlDeSeguimiento("item", "MCO123456789")).toBe("https://articulo.mercadolibre.com.co/MCO-123456789");
   });
 
-  it("product (catálogo) -> www.mercadolibre.com.co/p/<id>", () => {
+  it("item con un mlIdExterno que no matchea el patrón MCO\\d+: cae al link sin guión como red de seguridad, nunca undefined", () => {
+    expect(construirLinkMlDeSeguimiento("item", "algo-raro")).toBe("https://articulo.mercadolibre.com.co/algo-raro");
+  });
+
+  it("product (catálogo) -> www.mercadolibre.com.co/p/<id>, sin guión (formato real de catálogo, nunca cambiado)", () => {
     expect(construirLinkMlDeSeguimiento("product", "MCO123456789")).toBe("https://www.mercadolibre.com.co/p/MCO123456789");
   });
 

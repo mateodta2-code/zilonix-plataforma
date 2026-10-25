@@ -464,7 +464,13 @@ async function construirPublicacion(
     esEnvioGratis: oferta.esEnvioGratis,
     vendedor: vendedor?.nickname ?? null,
     esPlatinum: vendedor?.esPlatinum ?? false,
-    link: linkPublicacion(oferta.itemId),
+    // Issue #212 — bug real: el link armado a mano (linkPublicacion)
+    // está bien para Investigación (siempre tiene el guión correcto),
+    // pero el permalink que la propia API confirma es preferible
+    // cuando está disponible — mismo criterio que se aplica ahora en
+    // lib/seguimiento/link.ts. Nunca al revés: linkPublicacion queda
+    // como respaldo, nunca se descarta un permalink real por él.
+    link: oferta.permalink ?? linkPublicacion(oferta.itemId),
     vendidos: oferta.vendidos,
     ventasMesEstimadas,
     facturacionMesEstimada,

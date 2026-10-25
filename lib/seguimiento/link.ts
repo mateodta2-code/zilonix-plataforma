@@ -3,6 +3,7 @@
 // directo. Nunca llama a Mercado Libre acá (es puro parseo de texto) —
 // la resolución real (nombre, precio) la hace lib/seguimiento/seguimientos.ts
 // con las funciones ya existentes de lib/ml/cliente.ts.
+import { linkPublicacion } from "@/lib/ml/cliente";
 //
 // Formatos confirmados en producción (zilonix-os-web) para una
 // publicación/producto: articulo.mercadolibre.com.co/MCO-123456789
@@ -98,8 +99,20 @@ export function esLinkTiendaOficialSinIdDeVendedor(texto: string): boolean {
 // siempre se arma desde recursoMl + mlIdExterno, que ya quedaron
 // validados al agregar el seguimiento (interpretarEnlaceProducto/
 // interpretarEnlaceTienda, arriba).
+//
+// Issue #212, bug real reportado por Sharel en staging: el caso "item"
+// armaba el link a mano SIN el guión real (.../MCO123456789 → 404) —
+// Mercado Libre solo redirige con el guión (.../MCO-123456789,
+// confirmado en producción, ver linkPublicacion en lib/ml/cliente.ts).
+// Se reutiliza esa misma función en vez de reinventar el formato un
+// segundo lugar — si algún día cambia, cambia en un solo sitio.
 export function construirLinkMlDeSeguimiento(recursoMl: "item" | "product" | "seller", mlIdExterno: string): string {
-  if (recursoMl === "item") return `https://articulo.mercadolibre.com.co/${mlIdExterno}`;
+  // mlIdExterno ya viene validado (PATRON_ID_PRODUCTO_O_ITEM, al
+  // agregar el seguimiento) así que linkPublicacion no debería
+  // devolver null acá — si alguna vez lo hiciera (un dato guardado
+  // antes de esa validación), se cae al link sin guión como red de
+  // seguridad, nunca se muestra "undefined" en la pantalla.
+  if (recursoMl === "item") return linkPublicacion(mlIdExterno) ?? `https://articulo.mercadolibre.com.co/${mlIdExterno}`;
   if (recursoMl === "product") return `https://www.mercadolibre.com.co/p/${mlIdExterno}`;
   // "seller" — misma forma "confirmada en producción" que ya usa
   // interpretarEnlaceTienda (_CustId_, arriba) para ver todas las

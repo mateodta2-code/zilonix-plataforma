@@ -15,3 +15,17 @@
   **Pruebas nuevas**: `lib/ml/investigacionCliente.test.ts` (10 casos — completar sin pisar dato real, multiplicador +N, orden, KPIs combinados nunca desde 0).
 
   Verificado: `npm run typecheck` en verde. `npm run build` compila y tipa en verde, falla después en el mismo punto ambiental conocido (`DATABASE_URL_APP` ausente en este entorno). `npm test`: 670 pruebas en verde (23 archivos fallando solo por `DATABASE_URL_APP`/`DATABASE_URL_TRABAJADOR` ausentes — mismo baseline de siempre, ninguno nuevo por este cambio).
+
+- **2026-10-24** — issue #212 (Refs), reporte de Sharel en staging: "Ver en ML" en Seguimiento abría `articulo.mercadolibre.com.co/MCO123…` SIN el guión real → 404. Misma clase de fallo potencial en Investigación.
+
+  **Causa real**: `construirLinkMlDeSeguimiento` (`lib/seguimiento/link.ts`) armaba el link del caso `"item"` a mano, sin el guión que Mercado Libre de verdad necesita — `linkPublicacion` (`lib/ml/cliente.ts`) ya lo ponía bien desde el issue #147, pero nunca se reutilizó ahí. Se corrige reusando `linkPublicacion` tal cual (con un respaldo sin guión solo para un `mlIdExterno` que no matchee el patrón esperado, nunca mostrar `undefined`) — un solo lugar con el formato real, nunca dos.
+
+  **Investigación**: `OfertaMl` (`lib/ml/cliente.ts`) suma `permalink` — el link real que la propia API de Mercado Libre confirma para esa oferta puntual (`GET /items/{id}?attributes=...,permalink`, mismo campo ya confirmado en producción en `zilonix-os-web`, `app/api/ml/estado-item/route.js`). `PublicacionInvestigacion.link` (`lib/ml/investigacion.ts`) ahora prefiere `oferta.permalink` y solo cae a `linkPublicacion(itemId)` cuando Mercado Libre no lo mandó.
+
+  **No se implementó a propósito**: guardar un `permalink` en `seguimientos_ml`/`seguimiento_fotos` (la mejora "ideal" del pedido) — el fix de `construirLinkMlDeSeguimiento` ya es 100% determinístico a partir de `mlIdExterno` (mismo criterio que `linkPublicacion`, sin dato que pueda quedar desactualizado), así que agregar una columna nueva solo para esto exigiría una migración que el propio pedido condiciona a "si no hace falta, no migres" — no hace falta.
+
+  **No se tocó**: ninguna migración, ningún release a producción.
+
+  **Pruebas**: `lib/seguimiento/link.test.ts` — `construirLinkMlDeSeguimiento("item", ...)` ahora exige el guión real (antes afirmaba, a propósito, el formato roto) + caso de respaldo sin guión. `lib/ml/cliente.test.ts` — `obtenerItemMl` pide y guarda `permalink` (con y sin el campo). `lib/ml/investigacion.test.ts` — `PublicacionInvestigacion.link` prefiere `permalink` sobre `linkPublicacion` cuando está disponible, cae al armado a mano cuando no.
+
+  Verificado: `npm run typecheck` en verde. `npm run build` compila y tipa en verde, falla después en el mismo punto ambiental conocido (`DATABASE_URL_APP` ausente en este entorno). `npm test`: 675 pruebas en verde (mismos 23 archivos fallando solo por `DATABASE_URL_APP`/`DATABASE_URL_TRABAJADOR` ausentes — ninguno nuevo).
