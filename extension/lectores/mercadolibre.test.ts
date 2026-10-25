@@ -9,7 +9,7 @@ import {
   clasificarLinkListadoMl,
   construirLinkSeguirProducto,
   construirLinkSeguirTienda,
-  detectarFullEnHtmlEnvio,
+  detectarFullEnHtmlFicha,
   detectarFullEnHtmlTarjeta,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
@@ -490,47 +490,42 @@ describe("detectarFullEnHtmlTarjeta — issue #241/#242, respaldo de texto del d
   });
 });
 
-describe("detectarFullEnHtmlEnvio — issue #243, ficha de producto (leerProducto)", () => {
-  // Issue #243 — smoke de Sharel: ficha real de Mercado Libre Colombia
-  // (Anker 70W) con el badge verde "Almacenado y enviado por FULL"
-  // visible, pero el panel flotante marcaba "Full: No" y "Envío
-  // gratis: No" al mismo tiempo. Causa real confirmada contra una
-  // captura real y reciente (Wayback/CDX, mayo/2026): el bloque de
-  // envío de leerProducto usaba selectores viejos
-  // (.ui-pdp-shipping/.ui-pdp-container__col--shipping) que ya no
-  // existen en el HTML de hoy, así que bloqueEnvio nunca se resolvía y
-  // textoEnvio llegaba siempre "". A diferencia de
-  // detectarFullEnHtmlTarjeta (listado), esta función no necesita
-  // anclar una clase — el caller (leerProducto) ya resuelve el bloque
-  // correcto con el selector real nuevo antes de llamarla.
-  it('texto real del badge, "Almacenado y enviado por FULL" -> true', () => {
-    const htmlBloqueEnvio = `<div class="ui-pdp-container__row--shipping-summary" id="shipping_summary"><p class="ui-pdp-color--GREEN ui-pdp-family--REGULAR">Almacenado y enviado por FULL</p></div>`;
-    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(true);
+describe("detectarFullEnHtmlFicha — issue #245, ficha de producto (leerProducto), calco exacto del selector de Zilonix OS", () => {
+  // Issue #245 — Mateo confirmó leyendo Zilonix OS hoy
+  // (chrome-extension-busqueda/scraper-listado.js) que ese repo NO
+  // tiene ningún detector de Full en la ficha de producto, solo en el
+  // listado, con este selector exacto confirmado en producción:
+  //   const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+  // El intento de #243 (detectarFullEnHtmlEnvio, acotado a un bloque
+  // de envío resuelto con selectores nunca confirmados en producción)
+  // seguía gateando esFull a `false` cuando ese bloque no se resolvía
+  // — exactamente el bug real que reportó Sharel con "Zelotes F35" en
+  // 0.3.17. Esta función copia el MISMO selector de OS tal cual: match
+  // EXACTO del aria-label (igual que el selector CSS de atributo, que
+  // es exacto, no substring) — nunca un "full" suelto de texto plano.
+  it('badge real con el ícono svg confirmado por OS (aria-label="Enviado por FULL") -> true', () => {
+    const htmlFicha = `<div class="ui-pdp-container__row--shipping-summary" id="shipping_summary"><svg aria-label="Enviado por FULL" width="41" height="13"><use href="#poly_full"></use></svg><p class="ui-pdp-color--GREEN">Almacenado y enviado por FULL</p></div>`;
+    expect(detectarFullEnHtmlFicha(htmlFicha)).toBe(true);
   });
 
-  it('texto real corto, "Enviado por FULL" -> true', () => {
-    const htmlBloqueEnvio = `<div class="ui-vpp-shipping_summary"><span>Enviado por FULL</span></div>`;
-    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(true);
+  it("sin el ícono svg (ficha con envío gratis normal, sin Full) -> false", () => {
+    const htmlFicha = `<div class="ui-pdp-container__row--shipping-summary"><p>Llega gratis hoy sábado por ser tu primera compra</p></div>`;
+    expect(detectarFullEnHtmlFicha(htmlFicha)).toBe(false);
   });
 
-  it('mismo ícono real confirmado en el listado (aria-label="Enviado por FULL" en un svg) también cuenta en la ficha', () => {
-    const htmlBloqueEnvio = `<div id="shipping_summary"><svg aria-label="Enviado por FULL"><use href="#poly_full"></use></svg></div>`;
-    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(true);
+  it('solo el texto "Almacenado y enviado por FULL", SIN el ícono svg -> false: a propósito, OS nunca confirmó un detector de Full por texto en la ficha, y no se inventa uno nuevo sin evidencia real', () => {
+    const htmlFicha = `<div id="shipping_summary"><p class="ui-pdp-color--GREEN">Almacenado y enviado por FULL</p></div>`;
+    expect(detectarFullEnHtmlFicha(htmlFicha)).toBe(false);
   });
 
-  it("ficha sin Full (solo envío gratis normal) -> false", () => {
-    const htmlBloqueEnvio = `<div class="ui-pdp-container__row--shipping-summary"><p>Llega gratis hoy sábado por ser tu primera compra</p></div>`;
-    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(false);
-  });
-
-  it('"Full HD" en el título del producto nunca cuenta: leerProducto solo le pasa a esta función el outerHTML del bloque de envío YA resuelto por su propio selector, nunca el h1.ui-pdp-title ni la ficha completa — a diferencia de detectarFullEnHtmlTarjeta (listado), esta función no necesita su propia lógica de acotamiento por clase', () => {
-    const htmlBloqueEnvio = `<div class="ui-pdp-container__row--shipping-summary"><p>Llega gratis hoy</p></div>`;
-    expect(detectarFullEnHtmlEnvio(htmlBloqueEnvio)).toBe(false);
+  it('"Full HD" en el título del producto, sin el ícono svg, nunca cuenta', () => {
+    const htmlFicha = `<html><body><h1 class="ui-pdp-title">Televisor Full HD 42 Pulgadas</h1><div id="shipping_summary"><p>Llega gratis hoy</p></div></body></html>`;
+    expect(detectarFullEnHtmlFicha(htmlFicha)).toBe(false);
   });
 
   it("entradas vacías o inválidas -> false, nunca revienta", () => {
-    expect(detectarFullEnHtmlEnvio("")).toBe(false);
-    expect(detectarFullEnHtmlEnvio(null as unknown as string)).toBe(false);
-    expect(detectarFullEnHtmlEnvio(undefined as unknown as string)).toBe(false);
+    expect(detectarFullEnHtmlFicha("")).toBe(false);
+    expect(detectarFullEnHtmlFicha(null as unknown as string)).toBe(false);
+    expect(detectarFullEnHtmlFicha(undefined as unknown as string)).toBe(false);
   });
 });

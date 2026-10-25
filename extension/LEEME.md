@@ -236,6 +236,22 @@ Los dos "No" juntos son la pista real: el bug de #242 (`detectarFullEnTarjeta`, 
 
 Extensión 0.3.16 → 0.3.17.
 
+## Hotfix de smoke #10 — Full en la ficha, calco exacto del selector de Zilonix OS (issue #245)
+
+0.3.17 (#243) seguía fallando: smoke de Sharel con "Zelotes F35" (badge FULL visible en la ficha) → panel seguía marcando "Full: No". Mateo revisó Zilonix OS de nuevo y confirmó algo que #243 no tuvo en cuenta: **OS no tiene NINGÚN detector de Full en la ficha de producto** — `chrome-extension-busqueda/scraper-listado.js` solo lo detecta en el listado, y el scraper de la ficha (`scraper-pdp-resenas.js`) solo lee reseñas. El único selector real de Full que existe en todo el sistema, confirmado en producción, es:
+
+```js
+const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+```
+
+**El bug real de #243**: `detectarFullEnHtmlEnvio` solo corría si `bloqueEnvio` (el contenedor del resumen de envío) se resolvía primero — `const esFull = bloqueEnvio ? detectarFullEnHtmlEnvio(...) : false`. Si ese contenedor no se encontraba (selector equivocado, u otra variante de categoría/página), `esFull` caía siempre a `false`, sin importar si el badge real estaba visible en la página — ese gate, no el regex, era el bug.
+
+**Corrección**: `detectarFullEnHtmlFicha(htmlFicha)` (nueva, pura) copia el MISMO criterio de OS tal cual — match exacto del ícono `svg[aria-label="Enviado por FULL"]`, sin ningún respaldo de texto plano inventado (OS nunca confirmó uno, así que no se agrega uno sin evidencia real). `leerProducto` ya nunca gatea esFull a `false` por la ausencia de un contenedor: primero intenta buscar el ícono DENTRO del bloque de envío real si se resolvió (`.ui-pdp-container__row--shipping-summary`/`.ui-vpp-shipping_summary`/`#shipping_summary`, de #243 — para no confundir el Full de este producto con el de uno DISTINTO en el carrusel de "productos relacionados" de la misma página, donde se confirmó el mismo ícono en #243) y, si no se resolvió, busca en la ficha completa — igual que el criterio simple de OS, que en el listado nunca necesita este respaldo porque cada tarjeta ya viene separada.
+
+`envioGratis` no se tocó — sigue con su propio regex sobre `textoEnvio`, sin depender de esFull.
+
+Extensión 0.3.17 → 0.3.18.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).

@@ -343,53 +343,43 @@
     return Math.round(((vendidos * factor * 30) / diasTranscurridos) * 10) / 10;
   }
 
-  // Issue #243 — bug real confirmado por Sharel en una ficha Full
-  // real (Anker 70W, CO): la página mostraba el badge verde
-  // "Almacenado y enviado por FULL" visible, pero el panel flotante
-  // decía "Full: No" Y "Envío gratis: No" al mismo tiempo — los dos
-  // "No" juntos son la pista real de que `textoEnvio` llegaba VACÍO
-  // (`""`), no de que el regex de Full estuviera mal (`/\bfull\b/i`
-  // matchea bien esa frase si alguna vez le llega texto real).
-  // Confirmado contra una captura real y reciente de una ficha de
-  // Mercado Libre Colombia (CDX de archive.org, mayo/2026 — el acceso
-  // directo sigue bloqueado desde este sandbox): `.ui-pdp-shipping` y
-  // `.ui-pdp-container__col--shipping` tienen CERO ocurrencias en el
-  // HTML real de hoy — Mercado Libre renombró el bloque. El
-  // contenedor real del resumen de envío del producto principal
-  // (`id="shipping_summary"`, confirmado con contenido real: "Llega
-  // gratis hoy sábado por ser tu primera compra" en la ficha
-  // revisada) es `.ui-pdp-container__row--shipping-summary` /
-  // `.ui-vpp-shipping_summary`. Esta sesión no encontró, dentro del
-  // tiempo disponible, una ficha archivada que fuera Full en su
-  // resumen principal (la que se revisó mostraba una promo distinta,
-  // "primera compra") — pero el ícono real `svg[aria-label="Enviado
-  // por FULL"]` se confirmó DOS veces en contextos reales de hoy: en
-  // el listado (issue #242, selector real de Zilonix OS) y dentro del
-  // carrusel de "productos relacionados" de esta misma ficha — mismo
-  // componente de ícono reusado en todo el sitio, razonable asumir
-  // que el resumen principal lo usa igual, documentado así en vez de
-  // afirmado como 100% confirmado.
-  function detectarFullEnHtmlEnvio(htmlBloqueEnvio) {
-    if (typeof htmlBloqueEnvio !== "string" || !htmlBloqueEnvio) return false;
-    // Mismo ícono real confirmado en el listado (issue #242) — acá no
-    // hace falta anclar una clase primero: el caller ya resolvió el
-    // bloque de envío correcto antes de llamar a esto.
-    if (/aria-label\s*=\s*["'][^"']*full[^"']*["']/i.test(htmlBloqueEnvio)) return true;
-    const soloTexto = htmlBloqueEnvio.replace(/<[^>]+>/g, " ");
-    return /\bfull\b/i.test(soloTexto);
+  // Issue #245 — Mateo confirmó leyendo Zilonix OS hoy
+  // (chrome-extension-busqueda/scraper-listado.js) que ese repo NO
+  // tiene ningún detector de Full en la ficha de producto — solo en
+  // el listado, con este selector exacto, ya confirmado en producción:
+  //   const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+  // El intento de #243 (detectarFullEnHtmlEnvio, acotado a un bloque
+  // de envío resuelto con selectores nunca confirmados en producción
+  // de verdad) era la corrección equivocada: si ese bloque no se
+  // resolvía, `esFull` caía siempre a `false` sin importar si el
+  // badge real estaba visible — exactamente el bug que reportó Sharel
+  // con "Zelotes F35" en 0.3.17. Acá se copia el MISMO selector de OS,
+  // tal cual, sin un bloque de envío como gate obligatorio.
+  function detectarFullEnHtmlFicha(htmlFicha) {
+    if (typeof htmlFicha !== "string" || !htmlFicha) return false;
+    // Match EXACTO del aria-label, igual que el selector de atributo
+    // de OS (`[aria-label="Enviado por FULL"]` en CSS es exacto, no
+    // substring) — nunca un "full" suelto que confunda con un título
+    // real tipo "Full HD".
+    return /<svg\b[^>]*\baria-label\s*=\s*["']Enviado por FULL["'][^>]*>/i.test(htmlFicha);
   }
 
   function leerProducto(doc) {
+    // Issue #243 — selectores reales confirmados contra una ficha real
+    // (CDX/Wayback, mayo/2026); los viejos (.ui-pdp-shipping /
+    // .ui-pdp-container__col--shipping) quedan de respaldo, nunca
+    // confirmados vigentes hoy pero tampoco descartados por si alguna
+    // variante de categoría/país todavía los usa. Issue #245 — esto ya
+    // NO decide esFull (ver más abajo): solo sirve para envioGratis y,
+    // cuando existe, como zona segura para buscar el badge Full sin
+    // agarrar el de un producto DISTINTO en el carrusel de
+    // "productos relacionados" de la misma página (se confirmó el
+    // mismo ícono ahí en #243).
     const bloqueEnvio = U.primerElemento(
       [
-        // Issue #243 — selectores reales confirmados hoy, primero
-        // (ver detectarFullEnHtmlEnvio arriba para la evidencia completa).
         ".ui-pdp-container__row--shipping-summary",
         ".ui-vpp-shipping_summary",
         "#shipping_summary",
-        // Selectores viejos, de respaldo — nunca confirmados como
-        // vigentes hoy, pero tampoco se descartan por si alguna
-        // variante de categoría/país todavía los usa.
         ".ui-pdp-shipping",
         ".ui-pdp-container__col--shipping",
       ],
@@ -417,16 +407,17 @@
     // Issue #197 — calculado ACÁ (no más abajo, donde antes vivía
     // inline en el objeto de retorno) para poder pasarlo al ajuste
     // "estilo Selltrix" de calcularVentasPromedioMes.
-    // Issue #243 — antes era /\bfull\b/i.test(textoEnvio) (solo texto
-    // visible); el badge real "Almacenado y enviado por FULL" SÍ es
-    // texto plano, así que ese regex en el texto seguía siendo
-    // correcto — el bug real era que bloqueeEnvio nunca se resolvía
-    // (selectores viejos, ver comentario arriba de leerProducto), por
-    // lo que textoEnvio llegaba "" y el regex nunca tenía nada para
-    // matchear. detectarFullEnHtmlEnvio se usa igual (sobre el HTML,
-    // no solo el texto) para también agarrar el caso de un ícono SVG
-    // sin texto visible acompañante (aria-label solo).
-    const esFull = bloqueEnvio ? detectarFullEnHtmlEnvio(bloqueEnvio.outerHTML) : false;
+    // Issue #245 — Zilonix OS confirmó que NO tiene detector de Full
+    // en la ficha, solo en el listado (ver comentario completo sobre
+    // detectarFullEnHtmlFicha, arriba). #243 gateaba esFull a `false`
+    // si bloqueEnvio no se resolvía — ESE era el bug real que reportó
+    // Sharel con Zelotes F35 en 0.3.17, no el regex. Acá nunca hay un
+    // gate a `false`: se busca el badge primero en bloqueEnvio (si se
+    // resolvió, para no agarrar el de un producto distinto del
+    // carrusel de "relacionados") y, si no, en la ficha completa —
+    // igual que el criterio simple de OS, que en el listado nunca
+    // necesita este respaldo porque cada tarjeta ya viene separada.
+    const esFull = detectarFullEnHtmlFicha(bloqueEnvio ? bloqueEnvio.outerHTML : htmlCompleto);
 
     return {
       titulo: U.textoDe(["h1.ui-pdp-title", "h1[data-testid='product-title']"], doc),
@@ -833,10 +824,10 @@
     // puede probar con un fixture real sin depender de un selector CSS
     // que solo se confirma (o no) en vivo.
     detectarFullEnHtmlTarjeta,
-    // Issue #243 — puro (string de HTML del bloque de envío ya
-    // resuelto -> boolean), misma lógica de probarlo con fixture real
-    // sin depender de que el selector CSS siga vigente.
-    detectarFullEnHtmlEnvio,
+    // Issue #245 — puro (string de HTML de la ficha, o del bloque de
+    // envío ya resuelto -> boolean), calco exacto del selector real de
+    // Zilonix OS para Full, probado con fixture real.
+    detectarFullEnHtmlFicha,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe
