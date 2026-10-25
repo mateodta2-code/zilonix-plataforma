@@ -19,19 +19,19 @@ railway connect <servicio-postgres-de-produccion> --environment production --tun
 ```
 Con la URL que imprime el túnel, conectarse con **`psql` real** — nunca con la pestaña "Data" del dashboard de Railway (esa trae un `LIMIT` implícito que puede hacer pensar que algo salió mal cuando no salió mal).
 
-### 2.1 Migración `0009` (seguimientos_ml/seguimiento_fotos/seguimiento_alertas), si falta
+### 2.1 Migraciones `0008`–`0010`, si faltan
 
-Primero confirmar si ya está aplicada:
+Primero confirmar si la de seguimiento ya está aplicada:
 ```sql
 SELECT to_regclass('public.seguimientos_ml');
 ```
-Si devuelve `NULL`, falta — correr la migración:
+Si devuelve `NULL`, falta — correr las migraciones:
 ```
 DATABASE_URL="<la-url-del-túnel>" npm run db:migrate
 ```
-(Drizzle aplica solo lo que falte — si `0009` ya corrió antes, no hace nada y no rompe nada.)
+**Importante (lección real de este release, ver 2.5)**: `db:migrate` aplica TODAS las migraciones pendientes de una, en orden — nunca correrlo pensando solo en la `0009`. En producción, al momento de este release, faltaban la `0008` (despachos_ml), la `0009` (seguimiento) Y la `0010` (productos_ml/publicar) — las tres de una, no solo la última que se tenía en mente. Si `to_regclass` ya da algo distinto de `NULL` para `seguimientos_ml`, igual vale la pena correr `db:migrate` una vez para confirmar que no quedó ninguna otra pendiente suelta (es idempotente, nunca rompe nada si ya todo está aplicado).
 
-Si devuelve algo distinto de `NULL` (la tabla ya existe), seguir directo al punto 2.2.
+Si devuelve algo distinto de `NULL` (la tabla ya existe) Y `db:migrate` confirma que no hay nada pendiente, seguir directo al punto 2.2.
 
 ### 2.2 Rol `seguimiento_trabajador_user` + GRANTs + 5 políticas RLS
 
@@ -92,42 +92,25 @@ SELECT polname FROM pg_policies WHERE tablename LIKE 'seguimiento%';
 ```
 El primero: el rol existe, con `Login`, sin `Superuser`/`Createrole`. El segundo: 5 filas — `aislamiento_seguimientos_ml`, `aislamiento_seguimiento_fotos`, `aislamiento_seguimiento_alertas`, `seguimiento_trabajador_lee_seguimientos_ml`, `seguimiento_trabajador_marca_revision_seguimientos_ml`.
 
-## 2.5 Problema real encontrado en vivo: "Application error" al hacer "Seguir en Zilonix" en producción (issue #207, follow-up)
+## 2.5 Postmortem real: "Application error" en producción al agregar — RESUELTO (issue #207)
 
-Síntoma real: agregar un seguimiento en producción (desde la extensión o desde el formulario) termina en la pantalla genérica de Next.js ("Application error", con un número de digest tipo `2846050239`) en vez del aviso normal. Causa real confirmada: la contraseña que Postgres tiene puesta para el rol `seguimiento_trabajador_user` NO coincide con la que está codificada en la URL de la variable `DATABASE_URL_SEGUIMIENTO` de Railway (producción) — Postgres rechaza la conexión, `db/trabajador-seguimiento-context.ts` nunca llega a conectar, y esa excepción sin capturar es justo lo que Next.js muestra como "Application error" sin detalle (por diseño — nunca el stack real a quien no tiene sesión de servidor). Los HOSTS de las `DATABASE_URL_*` ya estaban corregidos a `postgres.railway.internal` antes de este diagnóstico — eso no es el problema, es la contraseña.
+Síntoma observado: agregar un seguimiento en producción (desde la extensión o desde el formulario) terminaba en la pantalla genérica de Next.js ("Application error", digest `2846050239`) en vez del aviso normal.
 
-**Paso 1 — confirmar qué existe de verdad, sin pegar ningún valor real** (mismo túnel + `psql` real de arriba):
-```sql
--- Tablas (ninguna debería dar NULL si la migración ya corrió)
-SELECT to_regclass('public.seguimientos_ml'), to_regclass('public.seguimiento_fotos'), to_regclass('public.seguimiento_alertas');
+**Diagnóstico inicial (incompleto)**: se sospechó solo un password mismatch del rol `seguimiento_trabajador_user` contra `DATABASE_URL_SEGUIMIENTO`. Real, pero no era la causa completa — ni la más grave.
 
--- Rol: tiene que existir, con Login, sin Superuser/Createrole
-\du seguimiento_trabajador_user
+**Causa real confirmada, de más grave a menos**:
+1. **`DATABASE_URL_APP` (la variable que usa TODO el tráfico normal de la app — no solo Seguimiento) estaba apuntando al rol `seguimiento_trabajador_user` en vez de a `app_user`.** `seguimiento_trabajador_user` solo tiene `SELECT`/`UPDATE` acotado sobre `seguimientos_ml` (ver 2.2) — con esa variable mal apuntada, prácticamente ninguna consulta de negocio real podía funcionar, mucho más allá de Seguimiento. Esta es la que de verdad importa para cualquier incidente futuro: **`DATABASE_URL_APP` SIEMPRE tiene que apuntar a `app_user`, nunca a ningún rol restringido** (regla ya en `CLAUDE.md`, pero el valor real en Railway producción no la cumplía).
+2. Las migraciones `0008`/`0009`/`0010` nunca se habían corrido contra el Postgres de producción (ver 2.1 actualizado) — ni las tablas de seguimiento ni `productos_ml` existían todavía.
+3. El rol `seguimiento_trabajador_user` tampoco existía (ni sus 5 políticas RLS).
 
--- Las 5 políticas de siempre
-SELECT polname FROM pg_policies WHERE tablename LIKE 'seguimiento%';
+**Ya resuelto por Pablo en producción (NO rehacer estos pasos — son ops reales ya aplicadas)**:
+- Migraciones `0008`–`0010` aplicadas contra el Postgres de producción.
+- Rol `seguimiento_trabajador_user` creado + las 5 políticas RLS de la sección 2.2.
+- `DATABASE_URL_APP` corregida en Railway (producción) para apuntar a `app_user` con `APP_USER_PASSWORD_TEMPORAL` — mismo criterio que ya usa staging.
+- Empresa de prueba creada en producción, sin "Application error".
+- Smoke test real de "Seguir en Zilonix" en verde: `?agregado=1` real en `web-production-af270.up.railway.app`.
 
--- GRANTs reales del rol — tiene que ser SELECT de la fila completa en
--- seguimientos_ml, y UPDATE solo de la columna ultima_revision_ts
--- (nunca de la fila completa)
-SELECT table_name, privilege_type FROM information_schema.table_privileges WHERE grantee = 'seguimiento_trabajador_user';
-SELECT table_name, column_name, privilege_type FROM information_schema.column_privileges WHERE grantee = 'seguimiento_trabajador_user';
-```
-Si CUALQUIERA de estos cuatro chequeos no da lo esperado, resolverlo con el bloque de la sección 2.2 (es idempotente, se puede repetir) antes de seguir al paso 2.
-
-**Paso 2 — sincronizar la contraseña del rol con la de `DATABASE_URL_SEGUIMIENTO`** (la variable de Railway es la fuente real — el rol tiene que quedar igual a ella, nunca al revés, porque la app ya está desplegada leyendo esa variable):
-1. Copiar (nunca escribir de memoria) la contraseña que YA está puesta en el valor de `DATABASE_URL_SEGUIMIENTO` en Railway (producción) — la parte entre `seguimiento_trabajador_user:` y `@` en la URL.
-2. Conectarse a Postgres con un usuario que pueda hacer `ALTER ROLE` (el superusuario de `DATABASE_URL`, nunca `app_user` ni ningún rol restringido) — dos formas, usar la que de verdad funcione con el plan de Railway:
-   - Si el servicio de Postgres admite `railway ssh` (shell directo al contenedor): `railway ssh --service <postgres-prod> --environment production`, y desde ahí `psql $DATABASE_URL` (la variable del superusuario ya vive en ese entorno).
-   - Si no, el túnel de siempre: `railway connect <postgres-prod> --environment production --tunnel-only`, y conectarse con `psql` local a la URL que imprime.
-3. Ya conectado, pegar (solo ahí, nunca en otro lado):
-   ```sql
-   ALTER ROLE seguimiento_trabajador_user WITH PASSWORD 'LA-CONTRASEÑA-QUE-COPIASTE-EN-EL-PASO-1';
-   ```
-   Postgres la guarda cifrada (SCRAM-SHA-256, el default actual) — nunca en texto plano, no hace falta ningún paso extra.
-4. Nunca hace falta reiniciar el servicio `web` a mano para esto — es un cambio solo del lado de Postgres, la próxima conexión del pool ya usa la contraseña nueva.
-
-**Criterio de éxito real**: agregar un seguimiento en producción (formulario o extensión) deja de dar "Application error" — termina en el aviso normal (agregado, ya existía, o un error de Mercado Libre con mensaje claro, nunca la pantalla genérica). Opcional, más contundente: una corrida manual del workflow (sección 4) deja al menos una fila nueva en `seguimiento_fotos` con la fecha de hoy.
+**Qué queda** (nada de SQL/RLS — eso ya está): el secreto de GitHub `SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION` y una corrida de `workflow_dispatch` para confirmar el batch diario de verdad — ver secciones 3 y 4 de este documento, sin cambios. **El `schedule` del workflow sigue sin activarse.**
 
 ## 3. Variables y secretos
 
