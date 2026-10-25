@@ -1,10 +1,15 @@
+/* Issue #186 (Sharel, Refs): este aviso cae justo debajo del
+   encabezado, directo sobre la franja oscura del degradado de fondo
+   (igual que .avisoExito de /panel/conectar-ml, issue #181/#185) — su
+   fondo (--acento-suave) es translúcido, se ve el degradado de atrás
+   igual. --texto normal es negro en claro — ilegible ahí. */
 .avisoSinVincular {
   padding: 10px 14px;
   background: var(--acento-suave);
   border: 1px solid var(--acento);
   border-radius: var(--radio-boton);
   font-size: 13.5px;
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
 }
 
 .enlaceAviso {
@@ -39,9 +44,10 @@
   color: var(--texto-suave);
 }
 
-/* Tarea "marca unificada": mismo borde azul/plata y línea azul
-   superior que <Tarjeta> (ver app/panel/pedidos/page.module.css, el
-   mismo bloque .filtros exacto) — nunca más "gris plano" en claro. */
+/* Tarea "marca unificada" + issue #186 (Sharel, Refs): mismo borde
+   azul/plata, línea azul superior y la MISMA superficie oscura que
+   <Tarjeta>/TarjetaKpi (ver app/panel/pedidos/page.module.css, el
+   mismo bloque .filtros exacto) — nunca más "caja blanca" en claro. */
 .filtros {
   position: relative;
   isolation: isolate;
@@ -54,9 +60,22 @@
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
-    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
     var(--degradado-plata-borde) border-box;
   overflow: hidden;
+
+  /* color explícito, no solo la variable — mismo motivo que
+     Tarjeta.module.css/ListaFilas.module.css (issue #186): un texto
+     plano sin su propia regla de color no recoge el --texto
+     redefinido abajo si nada vuelve a leerlo en este nivel. */
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
 }
 
 .filtros::before {

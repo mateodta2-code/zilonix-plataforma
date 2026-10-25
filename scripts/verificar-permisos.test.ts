@@ -37,6 +37,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/conectar-ml/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/actions.ts",
+  "app/panel/conectar-ml/confirmar-transferencia/page.tsx",
   "app/panel/avisos-ml/page.tsx",
   "app/panel/sku/page.tsx",
   "app/panel/sku/actions.ts",
@@ -47,9 +48,19 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/pedidos/[id]/page.tsx",
   "app/panel/despachos/page.tsx",
   "app/panel/investigacion/page.tsx",
+  "app/panel/investigacion/seguimiento/page.tsx",
+  "app/panel/investigacion/seguimiento/actions.ts",
+  "app/panel/investigacion/seguimiento/[id]/page.tsx",
   "app/api/ml/despachos/etiquetas/route.ts",
+  "app/panel/publicar/page.tsx",
+  "app/panel/publicar/nuevo/page.tsx",
+  "app/panel/publicar/nuevo/actions.ts",
+  "app/panel/publicar/[id]/page.tsx",
+  "app/panel/publicar/clip/page.tsx",
+  "app/panel/publicar/clip/actions.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
+  "app/api/ml/clip/route.ts",
 ]);
 
 // Tarea 1.11 — eje de autorización APARTE: "¿esta cuenta es
@@ -78,8 +89,12 @@ const RUTAS_EXENTAS: Record<string, string> = {
     "Mercado Libre llama esta ruta directo, sin sesión de usuario — el permiso real es dbComoAvisoWebhook() (db/empresa-context.ts), que solo deja ver la fila de cuentas_ml cuyo user_id coincide con el del aviso, nunca las de otra empresa",
   "app/api/ml/trabajador/route.ts":
     "la llama un cron, sin sesión de usuario — el permiso real es el secreto compartido x-trabajador-secret, y la conexión trabajador_user (db/trabajador-context.ts) solo puede tocar avisos_ml, ninguna otra tabla",
+  "app/api/trabajos/seguimiento/route.ts":
+    "la llama un cron, sin sesión de usuario (issue #175) — el permiso real es el secreto compartido x-seguimiento-trabajador-secret, y la conexión seguimiento_trabajador_user (db/trabajador-seguimiento-context.ts) solo puede tocar seguimientos_ml, ninguna otra tabla",
   "app/panel/sku/importar/actions.ts":
     "el permiso real (requierePermiso('inventario','modificar')) vive en lib/ml/sku-importar.ts (previsualizarImportacionSkus/confirmarImportacionSkus), llamado ANTES de leer o escribir — este archivo solo adapta el formulario a esas dos funciones, nunca toca la base por su cuenta",
+  "app/panel/conectar-ml/confirmar-transferencia/actions.ts":
+    "el permiso real (requierePermiso('configuracion','crear')) vive en confirmarTransferenciaCuentaMl (lib/ml/transferencia.ts), llamado ANTES de transferir — este archivo solo resuelve usuario/empresa desde las cookies y borra el pendiente, nunca toca cuentas_ml por su cuenta",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {
@@ -155,6 +170,7 @@ const RUTAS_DE_MAQUINA: Record<string, string> = {
   "app/api/ml/webhooks/route.ts": "/api/ml/webhooks",
   "app/api/ml/trabajador/route.ts": "/api/ml/trabajador",
   "app/api/salud/route.ts": "/api/salud",
+  "app/api/trabajos/seguimiento/route.ts": "/api/trabajos/seguimiento",
 };
 
 // La única ruta pública en el middleware que NO está exenta de

@@ -1,0 +1,23 @@
+// Issue #196 (apoya #195/#175) — "Hoy" y "~30 días" en el panel de
+// seguimiento necesitan unidades vendidas en un período, no el
+// acumulado histórico crudo que guarda cada foto. Mismo criterio real
+// ya confirmado en lib/seguimiento/alertas.ts (alertasDeVendidos):
+// `vendidos` es sold_quantity, un contador ACUMULADO que Mercado Libre
+// nunca hace bajar — la resta entre dos fotos reales SÍ es una venta
+// real confirmada, nunca una estimación.
+//
+// Puro, sin Postgres ni fetch — separado de lib/seguimiento/seguimientos.ts
+// (que sí hace las consultas) para poder probar la regla de negocio
+// sola, igual que compararFotos/alertasDeVendidos en alertas.ts.
+
+// Pedido explícito: nunca inventar un número cuando falta un dato (null
+// si cualquiera de las dos fotos no trajo `vendidos`) y nunca devolver
+// un negativo — `vendidos` nunca debería bajar entre dos fotos reales;
+// si el resto da negativo es un dato dudoso (reinicio de contador del
+// lado de Mercado Libre, fotos fuera de orden, etc.), nunca una "venta
+// negativa" fabricada — se trata igual que "no hay dato confiable".
+export function ventasDelPeriodo(actual: number | null, anterior: number | null): number | null {
+  if (actual == null || anterior == null) return null;
+  const diferencia = actual - anterior;
+  return diferencia < 0 ? null : diferencia;
+}

@@ -1,0 +1,83 @@
+.contenedor {
+  position: relative;
+  display: inline-flex;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.boton {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--borde-plata);
+  background: transparent;
+  color: var(--plata-etiqueta);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: help;
+  transition: var(--transicion-color);
+}
+
+.boton:hover,
+.boton:focus-visible {
+  border-color: var(--acento);
+  color: var(--acento);
+}
+
+.boton:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+/* Globo opaco de siempre (--superficie-2/--texto-superficie-2, mismo
+   criterio que .zx-control en app/globals.css): este cuadro nunca
+   debe heredar el --texto de zona oscura que una <Tarjeta> redefine
+   para todo lo de adentro (issue #186/#191) — tiene su PROPIO fondo
+   opaco, siempre tiene que leer bien contra ÉL, sin importar qué lo
+   rodee. */
+.globo {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 290px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+  border-radius: var(--radio-boton);
+  background: var(--superficie-2);
+  border: 1px solid var(--borde);
+  color: var(--texto-superficie-2);
+  font-size: 12.5px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.5;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.contenedor:hover .globo,
+.contenedor:focus-within .globo {
+  opacity: 1;
+  visibility: visible;
+}
+
+.globo ul {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.globo p {
+  margin: 0;
+}

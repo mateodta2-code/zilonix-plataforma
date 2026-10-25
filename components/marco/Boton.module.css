@@ -71,7 +71,12 @@
 
 .secundario {
   background: linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box, var(--degradado-plata-borde) border-box;
-  color: var(--texto);
+  /* Issue #186 — --texto-superficie-2 (app/globals.css), no --texto:
+     este botón pinta su PROPIO --superficie-2, nunca el de lo que lo
+     rodea — un secundario dentro de una Tarjeta/.filtros (ahora
+     oscura) no debe heredar el --texto de zona oscura que esas cajas
+     redefinen localmente, o quedaría claro sobre claro. */
+  color: var(--texto-superficie-2);
 }
 
 .secundario:hover:not(:disabled) {

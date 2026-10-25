@@ -1,0 +1,1 @@
+- **2026-10-24**: El texto de "+ Crear otra empresa" usa el mismo degradado plateado del saludo, el ícono queda plateado y en hover todo pasa a blanco (Refs #167).
