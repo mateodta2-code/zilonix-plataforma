@@ -410,7 +410,13 @@ export async function obtenerItemMl(itemId: string, token: string): Promise<Item
   // VISITAS (/visits/items, ese sí restringido para ajenas) — nunca
   // se había confirmado que sold_quantity es un campo distinto, sin
   // esa restricción.
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping,status,sold_quantity,date_created`;
+  // Issue #212 — permalink sumado a la lista de atributos: mismo
+  // endpoint y mismo campo que YA confirmado en producción en
+  // zilonix-os-web (app/api/ml/estado-item/route.js,
+  // GET /items/{id}?attributes=id,status,permalink,pictures) — el link
+  // real que Mercado Libre confirma para ESTA publicación puntual,
+  // preferible a armarlo a mano (linkPublicacion, más abajo).
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping,status,sold_quantity,date_created,permalink`;
   try {
     const resp = await pedir<{
       title?: unknown;
@@ -422,6 +428,7 @@ export async function obtenerItemMl(itemId: string, token: string): Promise<Item
       status?: unknown;
       sold_quantity?: unknown;
       date_created?: unknown;
+      permalink?: unknown;
     }>(url, token);
     if (!resp.ok) return null;
     // Bug real: una publicación pausada/cerrada seguía apareciendo en
@@ -448,6 +455,7 @@ export async function obtenerItemMl(itemId: string, token: string): Promise<Item
         esEnvioGratis: typeof resp.data.shipping?.free_shipping === "boolean" ? resp.data.shipping.free_shipping : null,
         vendidos: numeroONull(resp.data.sold_quantity),
         fechaCreacion: typeof resp.data.date_created === "string" ? resp.data.date_created : null,
+        permalink: typeof resp.data.permalink === "string" ? resp.data.permalink : null,
       };
     }
     return { producto, oferta };
@@ -478,6 +486,12 @@ export type OfertaMl = {
   // nunca lo leyó) — se lee de forma defensiva y el panel solo muestra
   // el % cuando al menos una oferta real sí trajo el dato.
   esEnvioGratis: boolean | null;
+  // Issue #212 — link real confirmado por Mercado Libre para ESTA
+  // oferta puntual (ver el comentario de la URL en obtenerItemMl/
+  // obtenerOfertasProducto) — preferible a linkPublicacion(itemId)
+  // (armado a mano) cuando está disponible. null si ML no lo mandó,
+  // nunca un link inventado en su lugar.
+  permalink: string | null;
 };
 
 // Ofertas reales (publicaciones activas) de un producto de catálogo.
@@ -512,6 +526,7 @@ export async function obtenerOfertasProducto(productId: string, token: string): 
         shipping?: { logistic_type?: unknown; free_shipping?: unknown };
         sold_quantity?: unknown;
         date_created?: unknown;
+        permalink?: unknown;
       };
       const itemIdCrudo = item.item_id ?? item.id;
       const itemId = typeof itemIdCrudo === "string" || typeof itemIdCrudo === "number" ? String(itemIdCrudo) : "";
@@ -534,6 +549,12 @@ export async function obtenerOfertasProducto(productId: string, token: string): 
         // nunca una cifra inventada en su lugar.
         vendidos: numeroONull(item.sold_quantity),
         fechaCreacion: typeof item.date_created === "string" ? item.date_created : null,
+        // Issue #212 — mismo criterio defensivo: este endpoint devuelve
+        // la representación completa del item (sin ?attributes=), así
+        // que debería traer permalink igual que /items/{id} — pero sin
+        // precedente puntual confirmado para ESTE endpoint, se lee
+        // igual de defensivo, null si no viene.
+        permalink: typeof item.permalink === "string" ? item.permalink : null,
       };
     })
     .filter((o): o is OfertaMl => o !== null);

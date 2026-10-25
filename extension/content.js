@@ -264,6 +264,39 @@
     boton.onclick = () => copiarAlPortapapeles(csvDeListado(productos), boton);
   }
 
+  // Issue #210 — "Completar vendidos": cuando la persona abre un
+  // candidato de Mercado Libre (por el botón "Completar vendidos
+  // (~5)" del panel de Investigación, o por cualquier otro motivo —
+  // no hace falta saber por qué se abrió) y se confirma un itemId real
+  // con algún dato de vendidos, se lo manda a extension/background.js,
+  // que lo reenvía a cualquier pestaña abierta (solo el panel de
+  // Investigación tiene extension/marcador-zilonix.js escuchando, así
+  // que en el resto no hace nada). Nunca manda nada sin itemId
+  // confirmado — nunca inventa, nunca abre ni navega ninguna pestaña
+  // por su cuenta. Genérico a propósito (no solo Mercado Libre): solo
+  // el lector de ML pone itemId/vendidos reales en `datos`, así que en
+  // los otros 5 sitios esta función no hace nada.
+  function enviarVendidosAZilonix(datos) {
+    if (!datos || typeof datos.itemId !== "string" || datos.vendidos == null) return;
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    const payload = {
+      itemId: datos.itemId,
+      sold_quantity: datos.vendidos,
+      date_created: datos.dateCreated || null,
+      esFull: datos.esFull === true,
+      etiquetaMasN: datos.vendidosExacto === false,
+    };
+    try {
+      chrome.runtime.sendMessage({ tipo: "zilonix:vendidos", payload }, () => {
+        // Sin background.js disponible (extensión recién actualizada,
+        // pestaña abierta antes del reinicio) — nunca rompe el panel.
+        void chrome.runtime.lastError;
+      });
+    } catch {
+      // Contexto de la extensión invalidado (ej. recién reinstalada) — ídem, nunca rompe el panel.
+    }
+  }
+
   function reescanear() {
     let tipo;
     try {
@@ -275,8 +308,11 @@
 
     const panel = obtenerOCrearPanel();
     try {
-      if (tipo === "producto") renderizarProducto(panel, lector.leerProducto(document));
-      else if (tipo === "listado") renderizarListado(panel, lector.leerListado(document).productos);
+      if (tipo === "producto") {
+        const datos = lector.leerProducto(document);
+        renderizarProducto(panel, datos);
+        enviarVendidosAZilonix(datos);
+      } else if (tipo === "listado") renderizarListado(panel, lector.leerListado(document).productos);
       else if (tipo === "tienda" && lector.leerTienda) renderizarTienda(panel, lector.leerTienda(document));
     } catch (error) {
       // Un selector roto en vivo nunca deja la página del usuario rota

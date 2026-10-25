@@ -342,6 +342,15 @@
       // MCO\d+) — construirLinkSeguirProducto lo vuelve a validar
       // igual, nunca confía en que ya se validó antes.
       linkSeguir: construirLinkSeguirProducto(itemIdActual),
+      // Issue #210 — "Completar vendidos": itemId/dateCreated, para que
+      // content.js pueda mandarle este dato al panel de Investigación
+      // (que necesita el itemId para saber a qué fila de la tabla
+      // corresponde, y dateCreated para estimar ventas/mes del mismo
+      // modo que lib/ml/estimacionVentas.ts). Nunca se inventa: mismo
+      // itemIdActual ya validado arriba, y dateCreated sale de
+      // leerDatosIncrustados (null si no se pudo confirmar).
+      itemId: itemIdActual,
+      dateCreated: incrustado.dateCreated,
     };
   }
 

@@ -8,7 +8,26 @@ Lee, en la página que ya tenés abierta (Mercado Libre Colombia, Amazon, Temu, 
 - En una página de **búsqueda o listado**: un resumen (cuántos productos se ven, precio mínimo/promedio/máximo, suma de vendidos visibles) y el top 10 por vendidos, con el mismo botón para copiar.
 - En Mercado Libre, además, **"Seguir en Zilonix"**: en una página de producto o de tienda/vendedor, un botón que abre (solo con ese clic, nunca solo) una pestaña nueva hacia Zilonix Seller para agregar ese producto o vendedor al seguimiento. La URL de Zilonix Seller sale de `extension/config.js` (producción por defecto, staging comentado ahí mismo).
 
-**Qué NO hace, a propósito**: no navega por su cuenta, no inicia sesión, no abre pestañas, no evade bloqueos ni captchas, y no manda nada a Zilonix Seller ni a ninguna base de datos — solo copia al portapapeles cuando vos apretás el botón. Un dato que el sitio no muestra sale como "No disponible", nunca inventado.
+**Qué NO hace, a propósito**: no navega por su cuenta, no inicia sesión, no evade bloqueos ni captchas, y no hay ningún scraper corriendo en un servidor — todo lo que lee sale del HTML que el navegador YA cargó, en la pestaña que la persona ya tiene abierta. Un dato que el sitio no muestra sale como "No disponible", nunca inventado. La única excepción a "nunca manda nada a Zilonix Seller" es el puente de "Completar vendidos" (ver abajo) — y ahí tampoco abre ninguna pestaña por su cuenta: siempre es la propia página de Zilonix Seller la que abre las pestañas de Mercado Libre, y siempre por UN clic real de la persona, nunca sola.
+
+## "Completar vendidos" — puente extensión → panel (issue #210)
+
+La API oficial de Mercado Libre no deja ver `sold_quantity` (vendidos real) para todos los candidatos que trae una búsqueda en `/panel/investigacion` — cuando falta, el panel ofrece un botón **"Completar vendidos (~5)"** que, con un solo clic real de la persona, abre en pestañas nuevas hasta 5 candidatos sin ese dato (siempre links que ya vienen en el resultado de la búsqueda — nunca inventados, nunca un término de búsqueda nuevo). Esa apertura la hace la propia página de Zilonix Seller (`window.open`, dentro del mismo manejador del clic) — la extensión no participa en abrir nada.
+
+Cuando una de esas pestañas de Mercado Libre carga, el lector de siempre (`extension/lectores/mercadolibre.js`) ya confirma `itemId`, `vendidos` (exacto o aproximado) y `dateCreated` — issue #210 agrega que, si hay un `itemId` real, `content.js` manda esos datos un paso más allá:
+
+1. **Pestaña de Mercado Libre → `background.js`**: `chrome.runtime.sendMessage({ tipo: "zilonix:vendidos", payload })`, con `payload = { itemId, sold_quantity, date_created, esFull, etiquetaMasN }` (`etiquetaMasN` = `true` cuando el número es solo la etiqueta redondeada "+N vendidos", no el `sold_quantity` exacto — mismo significado que en `lib/ml/estimacionVentas.ts`).
+2. **`background.js` → todas las pestañas abiertas**: reenvía el mismo mensaje a cada pestaña (`chrome.tabs.sendMessage`) — sin pedir el permiso `"tabs"` ni `"host_permissions"`, nunca hace falta: solo la pestaña con `marcador-zilonix.js` cargado (la del panel de Investigación) tiene algo escuchando; en el resto, el envío simplemente falla en silencio.
+3. **`marcador-zilonix.js` → la página**: `window.postMessage({ fuente: "zilonix-extension", tipo: "vendidos-completados", payload }, window.location.origin)` — con el `origin` real de la página, nunca `"*"`, para que ningún otro sitio pueda escucharlo.
+4. **La página (`app/panel/investigacion/PanelDemanda.tsx`)**: escucha `window.addEventListener("message", ...)`, valida `event.origin`/`event.source` y la forma del payload, y solo complementa una fila que **todavía no tenía** vendidos real — nunca pisa un dato que la API ya había confirmado.
+
+Reglas que este puente nunca rompe (las mismas de siempre, explícitas acá porque es la primera vez que la extensión manda algo de vuelta a Zilonix Seller):
+
+- **Nunca** inicia sesión ni guarda ninguna credencial — todo esto corre con la sesión que la persona ya tiene abierta en su propio navegador.
+- **Nunca** evade un captcha ni un bloqueo de Mercado Libre.
+- **Nunca** hay un scraper del lado del servidor — todo el dato sale del HTML que la pestaña de Mercado Libre ya cargó para la propia persona.
+- **Nunca** inventa una visita ni una vendidos que Mercado Libre no mostró — si el lector no confirma nada, no se manda ningún mensaje.
+- **Nunca** abre una pestaña sin un clic real de la persona — ni la extensión ni el panel abren nada por su cuenta, nunca en un `useEffect`, nunca al recibir un mensaje.
 
 ## Instalar en Chrome (modo desarrollador)
 

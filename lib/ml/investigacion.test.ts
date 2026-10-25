@@ -265,6 +265,44 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     expect(resultado.aviso).toMatch(/ninguno de sus productos tiene publicaciones activas/i);
   });
 
+  // Issue #212 — bug real reportado por Sharel en staging: el link
+  // armado a mano (linkPublicacion, mockeado arriba sin el guión real
+  // a propósito, para no probar DOS VECES el mismo detalle de formato
+  // que ya prueba lib/ml/cliente.test.ts) sigue siendo el respaldo,
+  // pero el permalink que la propia API confirma para esa oferta
+  // puntual tiene que ganarle cuando está disponible.
+  it("prefiere oferta.permalink (si Mercado Libre lo confirmó) sobre linkPublicacion armado a mano", async () => {
+    vi.mocked(buscarProductosCatalogo).mockResolvedValueOnce([{ id: "MCO1", nombre: "Reloj digital casio", foto: null }]).mockResolvedValue([]);
+    vi.mocked(obtenerOfertasProducto).mockResolvedValue([
+      {
+        itemId: "MCO111",
+        precio: 45_000,
+        monedaId: "COP",
+        sellerId: "vendedor-1",
+        esFull: false,
+        esEnvioGratis: null,
+        vendidos: null,
+        fechaCreacion: null,
+        permalink: "https://articulo.mercadolibre.com.co/MCO-111-reloj-digital",
+      },
+    ]);
+
+    const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
+
+    expect(resultado.publicaciones[0].link).toBe("https://articulo.mercadolibre.com.co/MCO-111-reloj-digital");
+  });
+
+  it("sin permalink (Mercado Libre no lo mandó): cae a linkPublicacion, nunca un link vacío", async () => {
+    vi.mocked(buscarProductosCatalogo).mockResolvedValueOnce([{ id: "MCO1", nombre: "Reloj digital casio", foto: null }]).mockResolvedValue([]);
+    vi.mocked(obtenerOfertasProducto).mockResolvedValue([
+      { itemId: "MCO111", precio: 45_000, monedaId: "COP", sellerId: "vendedor-1", esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null, permalink: null },
+    ]);
+
+    const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
+
+    expect(resultado.publicaciones[0].link).toBe("https://articulo.mercadolibre.com.co/MCO111");
+  });
+
   it("respuesta incompleta o rara de Mercado Libre (sin itemId / precio inválido): se descarta esa oferta sin tumbar la búsqueda", async () => {
     vi.mocked(buscarProductosCatalogo)
       .mockResolvedValueOnce([
@@ -275,7 +313,7 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     // MCO1: oferta válida real. MCO2: sin ofertas (simula el 404/respuesta rara que cliente.ts ya filtró a []).
     vi.mocked(obtenerOfertasProducto).mockImplementation(async (productId: string) => {
       if (productId === "MCO1") {
-        return [{ itemId: "MCO111", precio: 45_000, monedaId: "COP", sellerId: "vendedor-1", esFull: true, esEnvioGratis: null, vendidos: null, fechaCreacion: null }];
+        return [{ itemId: "MCO111", precio: 45_000, monedaId: "COP", sellerId: "vendedor-1", esFull: true, esEnvioGratis: null, vendidos: null, fechaCreacion: null, permalink: null }];
       }
       return [];
     });
@@ -306,7 +344,7 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue(categoriaIds);
     vi.mocked(obtenerProducto).mockImplementation(async (id: string) => ({ id, nombre: `Reloj digital categoria ${id}`, foto: null }));
     vi.mocked(obtenerOfertasProducto).mockImplementation(async (productId: string) => [
-      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null },
+      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null, permalink: null },
     ]);
     vi.mocked(obtenerVendedor).mockResolvedValue({ nickname: "Vendedor", esPlatinum: false });
 
@@ -336,7 +374,7 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue(categoriaIds);
     vi.mocked(obtenerProducto).mockImplementation(async (id: string) => ({ id, nombre: "Reloj digital categoria", foto: null }));
     vi.mocked(obtenerOfertasProducto).mockImplementation(async (productId: string) => [
-      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null },
+      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null, permalink: null },
     ]);
     vi.mocked(obtenerVendedor).mockResolvedValue({ nickname: "Vendedor", esPlatinum: false });
 
@@ -426,10 +464,10 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     vi.mocked(obtenerProducto).mockResolvedValue({ id: "MCO1", nombre: "Reloj digital de catálogo", foto: null });
     vi.mocked(obtenerItemMl).mockResolvedValue({
       producto: { id: "MCO2", nombre: "Reloj digital publicación", foto: null },
-      oferta: { itemId: "MCO222", precio: 35_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null },
+      oferta: { itemId: "MCO222", precio: 35_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null, permalink: null },
     });
     vi.mocked(obtenerOfertasProducto).mockResolvedValue([
-      { itemId: "MCO111", precio: 20_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null },
+      { itemId: "MCO111", precio: 20_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null, permalink: null },
     ]);
 
     const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");
