@@ -58,11 +58,15 @@ function esTabValida(valor: string | undefined): Tab {
 }
 
 function money(n: number): string {
-  return `$${n.toLocaleString("es-CO")}`;
+  // Issue #197/#201 — ventasMesEst/facturacionEst (lib/ml/estimacionVentas.ts,
+  // #203) devuelven floats sin redondear (una proyección, no un
+  // conteo entero) — se redondea solo acá, al mostrarlo, nunca en el
+  // dato guardado.
+  return `$${Math.round(n).toLocaleString("es-CO")}`;
 }
 
 function numero(n: number): string {
-  return n.toLocaleString("es-CO");
+  return Math.round(n).toLocaleString("es-CO");
 }
 
 export default async function InvestigacionPage({ searchParams }: { searchParams: { termino?: string | string[]; tab?: string } }) {

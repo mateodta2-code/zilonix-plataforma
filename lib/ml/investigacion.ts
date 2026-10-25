@@ -12,7 +12,7 @@ import {
   type ProductoCatalogoMl,
 } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
-import { estimarVentasMes } from "@/lib/ml/estimacionVentas";
+import { facturacionEst, ventasMesEst } from "@/lib/ml/estimacionVentas";
 import { normalizarTextoBusqueda } from "@/lib/filtros-listado";
 import { creaContador, superaLimite, type ContadorVentana } from "@/lib/limite-peticiones";
 
@@ -444,15 +444,14 @@ async function construirPublicacion(
     vendedor = await cacheVendedores.get(oferta.sellerId)!;
   }
 
-  // Issue #197 — vendidos (sold_quantity) y ventas/mes estimadas
-  // (lib/ml/estimacionVentas.ts, "estilo Selltrix"): vendidosEsExacto
-  // siempre true acá — a esta altura (API de Mercado Libre) nunca es
-  // la etiqueta redondeada "+N vendidos" de la interfaz, esa solo la
-  // lee la extensión del lado del navegador.
-  const estimacion =
-    oferta.vendidos != null && oferta.fechaCreacion != null
-      ? estimarVentasMes({ vendidos: oferta.vendidos, esFull: oferta.esFull, vendidosEsExacto: true, fechaCreacion: oferta.fechaCreacion, precio: oferta.precio })
-      : null;
+  // Issue #197/#201 — vendidos (sold_quantity) y ventas/mes estimadas
+  // (lib/ml/estimacionVentas.ts, "estilo Selltrix", mergeado por
+  // #203): nunca etiquetaMasN acá — a esta altura (API de Mercado
+  // Libre) vendidos siempre es el sold_quantity exacto, nunca la
+  // etiqueta redondeada "+N vendidos" de la interfaz (esa solo la lee
+  // la extensión del lado del navegador, extension/lectores/mercadolibre.js).
+  const ventasMesEstimadas = ventasMesEst(oferta.vendidos, oferta.fechaCreacion, { esFull: oferta.esFull });
+  const facturacionMesEstimada = facturacionEst(oferta.precio, ventasMesEstimadas);
 
   return {
     productId,
@@ -467,8 +466,8 @@ async function construirPublicacion(
     esPlatinum: vendedor?.esPlatinum ?? false,
     link: linkPublicacion(oferta.itemId),
     vendidos: oferta.vendidos,
-    ventasMesEstimadas: estimacion?.ventasMes ?? null,
-    facturacionMesEstimada: estimacion?.facturacionMes ?? null,
+    ventasMesEstimadas,
+    facturacionMesEstimada,
   };
 }
 

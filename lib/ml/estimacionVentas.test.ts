@@ -1,68 +1,72 @@
-import { describe, expect, it } from "vitest";
-import { estimarVentasMes, ETIQUETA_ESTIMACION_SELLTRIX, factorAjusteVentas } from "./estimacionVentas";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ETIQUETA_ESTIMADO, facturacionEst, ventasMesEst } from "./estimacionVentas";
 
-describe("factorAjusteVentas — issue #197, estilo Selltrix", () => {
-  it("Full -> ×2.2, gana sobre el ajuste de etiqueta aunque también sea redondeado", () => {
-    expect(factorAjusteVentas(true, false)).toBe(2.2);
-    expect(factorAjusteVentas(true, true)).toBe(2.2);
+const AHORA = new Date("2026-10-31T00:00:00.000Z");
+
+describe("ventasMesEst — estimación estilo Selltrix (issue #201, apoya #197)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(AHORA);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("sin multiplicador: vendidos × 30 ÷ días transcurridos", () => {
+    // Creada hace 20 días, 100 vendidos acumulados → 100*30/20 = 150.
+    const creado = new Date("2026-10-11T00:00:00.000Z");
+    expect(ventasMesEst(100, creado)).toBe(150);
   });
 
-  it("no Full + etiqueta redondeada (no exacto) -> ×1.55", () => {
-    expect(factorAjusteVentas(false, false)).toBe(1.55);
+  it("Full: aplica ×2.2 antes de proyectar al mes", () => {
+    const creado = new Date("2026-10-11T00:00:00.000Z"); // 20 días
+    expect(ventasMesEst(100, creado, { esFull: true })).toBe((100 * 2.2 * 30) / 20);
   });
 
-  it("no Full + vendidos exacto -> ×1 (sin ajuste)", () => {
-    expect(factorAjusteVentas(false, true)).toBe(1);
+  it("+N: aplica ×1.55 antes de proyectar al mes", () => {
+    const creado = new Date("2026-10-11T00:00:00.000Z"); // 20 días
+    expect(ventasMesEst(100, creado, { etiquetaMasN: true })).toBe((100 * 1.55 * 30) / 20);
+  });
+
+  it("Full y +N a la vez: Full gana, nunca se combinan los dos multiplicadores", () => {
+    const creado = new Date("2026-10-11T00:00:00.000Z");
+    expect(ventasMesEst(100, creado, { esFull: true, etiquetaMasN: true })).toBe(ventasMesEst(100, creado, { esFull: true }));
+  });
+
+  it("días transcurridos nunca baja de 1 (publicación creada hoy mismo)", () => {
+    expect(ventasMesEst(10, AHORA)).toBe(10 * 30); // 10*30/max(1,0)
+  });
+
+  it("acepta la fecha de creación como string ISO, igual que un Date", () => {
+    expect(ventasMesEst(100, "2026-10-11T00:00:00.000Z")).toBe(150);
+  });
+
+  it("soldQuantity 0 es un dato real (cero ventas confirmadas) — da 0, nunca null", () => {
+    const creado = new Date("2026-10-11T00:00:00.000Z");
+    expect(ventasMesEst(0, creado)).toBe(0);
+  });
+
+  it("null si falta soldQuantity, dateCreated, o la fecha es inválida — nunca 0 fabricado", () => {
+    const creado = new Date("2026-10-11T00:00:00.000Z");
+    expect(ventasMesEst(null, creado)).toBeNull();
+    expect(ventasMesEst(100, null)).toBeNull();
+    expect(ventasMesEst(100, "esto no es una fecha")).toBeNull();
+    expect(ventasMesEst(-1, creado)).toBeNull(); // soldQuantity negativo: dato imposible, nunca inventado
   });
 });
 
-describe("estimarVentasMes — issue #197", () => {
-  const ahora = new Date("2026-10-24T00:00:00.000Z").getTime();
-
-  it("vendidos exacto, no Full: vendidos × 30 ÷ días, sin ajuste", () => {
-    const creado = new Date(ahora - 30 * 86_400_000).toISOString(); // 30 días antes
-    const r = estimarVentasMes({ vendidos: 60, esFull: false, vendidosEsExacto: true, fechaCreacion: creado, ahoraMs: ahora });
-    expect(r?.ventasMes).toBe(60); // 60*1*30/30
-    expect(r?.etiqueta).toBe(ETIQUETA_ESTIMACION_SELLTRIX);
+describe("facturacionEst (issue #201)", () => {
+  it("precio real × la estimación de ventas del mes", () => {
+    expect(facturacionEst(50000, 150)).toBe(50000 * 150);
   });
 
-  // Caso real que motivó el issue: una publicación con pocos vendidos
-  // "crudos" ya no da ventas en cero/casi cero una vez ajustada.
-  it("Full: el ajuste ×2.2 evita una tasa mensual subestimada", () => {
-    const creado = new Date(ahora - 30 * 86_400_000).toISOString();
-    const r = estimarVentasMes({ vendidos: 10, esFull: true, vendidosEsExacto: true, fechaCreacion: creado, ahoraMs: ahora });
-    expect(r?.ventasMes).toBe(22); // 10*2.2*30/30
+  it("null si falta cualquiera de los dos — nunca 0 fabricado", () => {
+    expect(facturacionEst(null, 150)).toBeNull();
+    expect(facturacionEst(50000, null)).toBeNull();
+    expect(facturacionEst(-1, 150)).toBeNull(); // precio negativo: dato imposible
   });
+});
 
-  it("etiqueta redondeada (+N, no exacto): ajuste ×1.55", () => {
-    const creado = new Date(ahora - 30 * 86_400_000).toISOString();
-    const r = estimarVentasMes({ vendidos: 10, esFull: false, vendidosEsExacto: false, fechaCreacion: creado, ahoraMs: ahora });
-    expect(r?.ventasMes).toBe(15.5); // 10*1.55*30/30
-  });
-
-  it("facturación = ventasMes × precio, redondeada; null sin precio", () => {
-    const creado = new Date(ahora - 30 * 86_400_000).toISOString();
-    const r = estimarVentasMes({ vendidos: 60, esFull: false, vendidosEsExacto: true, fechaCreacion: creado, precio: 50_000, ahoraMs: ahora });
-    expect(r?.facturacionMes).toBe(3_000_000); // 60 * 50.000
-
-    const sinPrecio = estimarVentasMes({ vendidos: 60, esFull: false, vendidosEsExacto: true, fechaCreacion: creado, ahoraMs: ahora });
-    expect(sinPrecio?.facturacionMes).toBeNull();
-  });
-
-  it("publicación de hoy mismo: mínimo 1 día, nunca divide por 0", () => {
-    const r = estimarVentasMes({ vendidos: 5, esFull: false, vendidosEsExacto: true, fechaCreacion: new Date(ahora).toISOString(), ahoraMs: ahora });
-    expect(r?.ventasMes).toBe(150); // 5*30/1
-  });
-
-  it("sin vendidos válido, sin fecha, o fecha inválida -> null, nunca una cifra inventada", () => {
-    expect(estimarVentasMes({ vendidos: NaN, esFull: false, vendidosEsExacto: true, fechaCreacion: new Date().toISOString() })).toBeNull();
-    expect(estimarVentasMes({ vendidos: -1, esFull: false, vendidosEsExacto: true, fechaCreacion: new Date().toISOString() })).toBeNull();
-    expect(estimarVentasMes({ vendidos: 10, esFull: false, vendidosEsExacto: true, fechaCreacion: "esto no es una fecha" })).toBeNull();
-  });
-
-  it("0 vendidos reales: 0 ventas/mes (nunca se infla un 0 real a algo distinto)", () => {
-    const creado = new Date(ahora - 30 * 86_400_000).toISOString();
-    const r = estimarVentasMes({ vendidos: 0, esFull: true, vendidosEsExacto: true, fechaCreacion: creado, ahoraMs: ahora });
-    expect(r?.ventasMes).toBe(0);
+describe("ETIQUETA_ESTIMADO (issue #201)", () => {
+  it("existe como texto fijo para que toda pantalla marque igual una cifra estimada", () => {
+    expect(ETIQUETA_ESTIMADO).toBe("Estimado");
   });
 });

@@ -163,7 +163,16 @@ function GuiaAgregarSeguimiento() {
 export default async function SeguimientoPage({
   searchParams,
 }: {
-  searchParams: { error?: string; agregado?: string; eliminado?: string; leida?: string; yaExistia?: string; agregar?: string; agregar_tienda?: string };
+  searchParams: {
+    error?: string;
+    agregado?: string;
+    primeraRevisionError?: string;
+    eliminado?: string;
+    leida?: string;
+    yaExistia?: string;
+    agregar?: string;
+    agregar_tienda?: string;
+  };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -218,7 +227,19 @@ export default async function SeguimientoPage({
       />
 
       {searchParams.error ? <EstadoVacio>{searchParams.error}</EstadoVacio> : null}
-      {searchParams.agregado ? <p className={styles.aviso}>Seguimiento agregado — la primera foto llega con la próxima revisión diaria.</p> : null}
+      {/* Issue #204 — antes decía "la primera foto llega con la
+      próxima revisión diaria" (hasta una hora, el cron corre cada
+      hora): ahora la primera revisión corre en el mismo momento de
+      agregar, la fila de abajo ya debería traer datos reales. */}
+      {searchParams.agregado && !searchParams.primeraRevisionError ? (
+        <p className={styles.aviso}>Seguimiento agregado — ya se revisó con Mercado Libre, la fila de abajo trae los datos reales.</p>
+      ) : null}
+      {searchParams.primeraRevisionError ? (
+        <p className={styles.aviso}>
+          Seguimiento agregado, pero la primera revisión con Mercado Libre falló ({searchParams.primeraRevisionError}) — se va a reintentar solo
+          en la próxima revisión diaria.
+        </p>
+      ) : null}
       {searchParams.yaExistia ? <p className={styles.aviso}>Ese producto o tienda ya estaba en seguimiento.</p> : null}
       {searchParams.eliminado ? <p className={styles.aviso}>Seguimiento quitado.</p> : null}
       {searchParams.leida ? <p className={styles.aviso}>Alerta marcada como leída.</p> : null}
@@ -326,6 +347,11 @@ export default async function SeguimientoPage({
                 <FilaTabla key={seguimiento.id}>
                   <CeldaTabla>
                     <Link href={`/panel/investigacion/seguimiento/${seguimiento.id}`}>{seguimiento.nombre}</Link>
+                    {/* Issue #201 — antes la tabla solo mostraba el id
+                    (MCOxxxxx/seller_id), indistinguible entre filas; el
+                    id sigue visible, pero como dato secundario, nunca
+                    como el nombre principal. */}
+                    <div className={styles.subdato}>{seguimiento.mlIdExterno}</div>
                     {seguimiento.esCompetidor ? <Chip estado="aviso">Competidor</Chip> : null}
                     {altasHoy.has(seguimiento.id) ? <Chip estado="exito">Alta hoy</Chip> : null}
                     {bajasHoy.has(seguimiento.id) ? <Chip estado="peligro">Baja hoy</Chip> : null}

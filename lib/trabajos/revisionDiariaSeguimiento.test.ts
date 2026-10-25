@@ -6,7 +6,8 @@ import { db } from "@/db/index";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { obtenerSeguimientosPendientesDeHoy, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
+import { NOMBRE_PENDIENTE_PRIMERA_REVISION } from "@/lib/seguimiento/seguimientos";
+import { obtenerSeguimientosPendientesDeHoy, revisarAhoraUnSeguimiento, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
 
 // Issue #175 — prueba real contra Postgres (mismo criterio que
 // lib/ml/trabajador.test.ts): dbTrabajadorSeguimiento (DATABASE_URL_SEGUIMIENTO)
@@ -357,6 +358,187 @@ describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
     expect(linea).not.toContain("access-vigente");
 
     logSpy.mockRestore();
+  });
+});
+
+// Issue #201 — bug real en staging: si agregarSeguimiento() no pudo
+// resolver el nombre real ese instante, quedaba el id para siempre; la
+// revisión diaria tiene que corregirlo apenas pueda, con un token ya
+// confirmado vigente.
+//
+// Bug real de CI encontrado después (mismo issue): los dos tests de
+// abajo compartían UN solo seguimiento creado en un beforeAll — el
+// primer test actualizaba su nombre al real Y marcaba
+// ultima_revision_ts, así que el segundo test arrancaba con el nombre
+// YA resuelto (nunca entraba a reintentar, el chequeo
+// `nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION` ya daba falso) y,
+// encima, el seguimiento ya no aparecía en el lote de ese mismo día
+// (0 activos). Cada test ahora crea su PROPIA empresa/cuenta/
+// seguimiento con el placeholder, aislado del otro — nunca un fixture
+// compartido entre dos corridas de revisarSeguimientosDelDia.
+describe("revisarSeguimientosDelDia — resuelve el nombre pendiente en la primera revisión (issue #201)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function crearSeguimientoPendiente(prefijo: string) {
+    const creado = await crearEmpresaConUsuario(prefijo);
+    await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId: creado.empresaId,
+        cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+        nickname: `VENDEDOR_${prefijo}`,
+        accessTokenCifrado: cifrarToken("access-vigente"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
+
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId: creado.empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: nuevoMlId(),
+          nombre: NOMBRE_PENDIENTE_PRIMERA_REVISION, // a propósito: nunca se pudo resolver al agregar
+          linkOriginal: "https://x",
+          creadoPor: creado.usuarioId,
+        })
+        .returning()
+    );
+    return { empresaId: creado.empresaId, seguimientoId: seguimiento.id };
+  }
+
+  it("si Mercado Libre deja ver el título esta vez, actualiza el nombre real (nunca se queda pegado al placeholder)", async () => {
+    const { empresaId, seguimientoId } = await crearSeguimientoPendiente("NOMBRE-PENDIENTE-OK");
+    await aislarLotePara(seguimientoId);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuestaJson({ id: "MCO111", title: "Título real recién resuelto", price: 100, sold_quantity: 5, status: "active" }))
+    );
+
+    await revisarSeguimientosDelDia();
+
+    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
+    expect(actualizado.nombre).toBe("Título real recién resuelto");
+  });
+
+  it("si Mercado Libre sigue sin dejar verlo, el nombre se queda en el placeholder (nunca se pisa con el id ni con basura)", async () => {
+    const { empresaId, seguimientoId } = await crearSeguimientoPendiente("NOMBRE-PENDIENTE-SIGUE");
+    await aislarLotePara(seguimientoId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+
+    await revisarSeguimientosDelDia();
+
+    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
+    expect(actualizado.nombre).toBe(NOMBRE_PENDIENTE_PRIMERA_REVISION);
+  });
+});
+
+// Issue #204 — bug real en staging: una fila recién agregada se
+// quedaba en guiones hasta que corría el cron (hasta una hora
+// después, el workflow corre cada hora). revisarAhoraUnSeguimiento()
+// opera sobre UN seguimiento puntual — nunca necesita aislarLotePara()
+// como el resto de este archivo, porque nunca toca
+// obtenerSeguimientosPendientesDeHoy() (cross-empresa); no hay ningún
+// lote ajeno con el que pueda chocar.
+describe("revisarAhoraUnSeguimiento (issue #204)", () => {
+  async function crearSeguimientoConCuenta(prefijo: string) {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario(prefijo);
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId,
+        cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+        nickname: `VENDEDOR_${prefijo}`,
+        accessTokenCifrado: cifrarToken("access-vigente"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
+    const [seguimiento] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: nuevoMlId(),
+          nombre: "Producto de prueba",
+          linkOriginal: "https://x",
+          creadoPor: usuarioId,
+        })
+        .returning()
+    );
+    return seguimiento;
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("crea la primera foto al instante (nunca espera al cron) y marca ultima_revision_ts; sin alertas, nada con qué comparar todavía", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("PRIMERA-FOTO");
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 100, sold_quantity: 10, status: "active" })));
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+
+    expect(resultado).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
+
+    const hoy = new Date();
+    hoy.setUTCHours(0, 0, 0, 0);
+    const [fotoHoy] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+    );
+    expect(fotoHoy).toBeDefined();
+    expect(Number(fotoHoy.precio)).toBe(100);
+    expect(fotoHoy.vendidos).toBe(10);
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.ultimaRevisionTs).not.toBeNull();
+  });
+
+  it("si ya hay una foto de hoy (ej. el cron ya corrió), queda saltado — nunca duplica ni sobreescribe", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("YA-REVISADO-HOY");
+    const hoy = new Date();
+    hoy.setUTCHours(0, 0, 0, 0);
+    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: hoy, precio: "50", estado: "active" })
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" }))); // si duplicara, este precio lo delataría
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+
+    expect(resultado).toEqual({ ok: true, saltado: true, alertasCreadas: 0 });
+
+    const fotosDeHoy = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+    );
+    expect(fotosDeHoy).toHaveLength(1);
+    expect(Number(fotosDeHoy[0].precio)).toBe(50); // la que ya estaba, nunca 999
+  });
+
+  it("empresa sin cuenta ML conectada: {ok:false,error} claro, y NUNCA marca ultima_revision_ts (para que el cron de hoy mismo lo reintente)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario("SIN-CUENTA-INMEDIATA");
+    const [seguimiento] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: nuevoMlId(),
+          nombre: "Sin cuenta ML",
+          linkOriginal: "https://x",
+          creadoPor: usuarioId,
+        })
+        .returning()
+    );
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+
+    expect(resultado.ok).toBe(false);
+    expect((resultado as { ok: false; error: string }).error).toMatch(/ninguna cuenta de Mercado Libre/);
+
+    const [sinTocar] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(sinTocar.ultimaRevisionTs).toBeNull();
   });
 });
 
