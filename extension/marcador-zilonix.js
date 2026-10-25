@@ -41,4 +41,21 @@
     if (!tipo) return;
     window.postMessage({ fuente: "zilonix-extension", tipo, payload: mensaje.payload }, window.location.origin);
   });
+
+  // Issue #221 — "Analizar estilo OS": dirección inversa, PÁGINA ->
+  // extensión. Hasta ahora este archivo solo escuchaba a background.js
+  // (arriba); "Analizar" necesita lo opuesto: avisarle a la extensión
+  // que el clic real de la persona ya autorizó un escaneo acotado de
+  // listados de Mercado Libre (ver app/panel/investigacion/PanelDemanda.tsx,
+  // que manda este postMessage SOLO después de consumir la marca de
+  // analizarClic.ts). Mismo chequeo de origin que la otra dirección —
+  // nunca se reenvía un mensaje que no sea realmente de esta página.
+  window.addEventListener("message", (evento) => {
+    if (evento.source !== window || evento.origin !== window.location.origin) return;
+    const datos = evento.data;
+    if (!datos || datos.fuente !== "zilonix-panel" || datos.tipo !== "iniciar-escaneo") return;
+    chrome.runtime.sendMessage({ tipo: "zilonix:iniciar-escaneo", payload: datos.payload }, () => {
+      void chrome.runtime.lastError;
+    });
+  });
 })();
