@@ -111,9 +111,21 @@
       const vendidos = parseCompradosMes(U.textoDe(['[data-cy="reviews-block"] span.a-size-base.a-color-secondary'], div));
       const imgEl = U.primerElemento(["img.s-image"], div);
       const foto = imgEl ? imgEl.getAttribute("src") || imgEl.getAttribute("data-src") : null;
-      const esFull = Boolean(U.primerElemento(["i.a-icon-prime"], div));
       if (titulo || precio != null) {
-        productos.push({ titulo, precio, vendidos, foto, calificacion: leerEstrellasAmazon(div), esFull, link: `https://www.amazon.com/dp/${asin}` });
+        // Issue #231 — hotfix de smoke: "Full aparece en Amazon (Amazon
+        // no tiene Full)". Hasta esta tarea, acá se mapeaba el badge de
+        // Prime a `esFull` (comentario viejo: "mismo concepto de envío
+        // rápido confirmado") — Sharel confirmó que eso es confuso en
+        // la práctica, no solo un detalle de nombre: "Full" es un
+        // programa real y específico de Mercado Libre, y mostrar un
+        // chip "Full"/"No" en una fila de Amazon da a entender que
+        // Amazon tiene ese mismo programa, cosa que nunca fue cierta.
+        // Se saca el mapeo por completo — `esFull` queda siempre
+        // `null` para Amazon (mismo criterio que ya usa Alibaba con
+        // `calificacion`, issue #227: nunca inventar una equivalencia
+        // entre dos conceptos distintos). El panel además oculta la
+        // columna Full fuera de Mercado Libre (PanelInvestigacion.tsx).
+        productos.push({ titulo, precio, vendidos, foto, calificacion: leerEstrellasAmazon(div), esFull: null, link: `https://www.amazon.com/dp/${asin}` });
       }
     });
     return { productos };

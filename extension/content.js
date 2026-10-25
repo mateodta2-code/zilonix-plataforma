@@ -415,6 +415,105 @@
   // es yaEnviadoEscaneoAutomatico, arriba, un flag INDEPENDIENTE).
   let yaAvisadoCaptcha = false;
 
+  // Issue #231 — bug real confirmado por un incidente YA diagnosticado
+  // y corregido en zilonix-os-web (chrome-extension-busqueda/
+  // scraper-listado.js, commit "ML ahora tarda ~9s en pintar
+  // resultados — scraper leía antes de que aparecieran"): Mercado
+  // Libre (y cualquier sitio SPA) puede tardar varios segundos en
+  // pintar las tarjetas reales del listado después de que la página
+  // "cargó" — `document_idle` dispara mucho antes de eso. El código
+  // de acá hasta esta tarea leía el DOM UNA sola vez en el primer
+  // reescaneo automático y mandaba lo que hubiera (muchas veces 0
+  // tarjetas, porque ML seguía renderizando) — y, como
+  // `yaEnviadoEscaneoAutomatico` queda en `true` después de ese envío,
+  // NUNCA volvía a intentar, aunque el MutationObserver siguiera
+  // reescaneando la página normalmente. Esto explica el smoke real de
+  // Sharel: "banner conectado, chips de variantes IA visibles, pero
+  // nunca aparece ningún bloque" — el escaneo SÍ corría, pero siempre
+  // mandaba un resultado vacío antes de tiempo.
+  //
+  // `esperarListadoEstable` es el mismo patrón confirmado en el código
+  // real de zilonix-os-web (`esperarTarjetas`): no alcanza con "ya
+  // apareció la primera tarjeta" — un SPA puede seguir agregando más a
+  // mitad de un render en progreso — se exige que la CANTIDAD de
+  // candidatos que `lector.leerListado` encuentra quede estable por
+  // `esperaEstabilidadMs` antes de leer de verdad. Genérico (no
+  // specific de Mercado Libre): usa `lector.leerListado`, que ya
+  // existe para los 6 sitios, así que esta espera también ayuda al
+  // volumen de las otras 5 plataformas si son lentas en renderizar.
+  //
+  // `maxEsperaMs` queda en 10s (no 15s): esto corre DENTRO del
+  // timeout fijo de 15s que ya tiene background.js
+  // (TIMEOUT_POR_VARIANTE_MS/TIEMPO_MAX_POR_TERMINO_MS, sin cambios
+  // por esta tarea) para toda la operación de abrir la pestaña, leer y
+  // cerrarla — 10s de espera acá deja margen real para el tiempo que
+  // ya se gasta antes de que este content script arranque
+  // (document_idle) y para el mensaje de vuelta.
+  function esperarListadoEstable(maxEsperaMs, esperaEstabilidadMs, intervaloMs) {
+    maxEsperaMs = typeof maxEsperaMs === "number" ? maxEsperaMs : 10000;
+    esperaEstabilidadMs = typeof esperaEstabilidadMs === "number" ? esperaEstabilidadMs : 1000;
+    intervaloMs = typeof intervaloMs === "number" ? intervaloMs : 400;
+    return new Promise((resolve) => {
+      const inicio = Date.now();
+      let ultimaCantidad = -1;
+      let ultimoCambio = Date.now();
+      const intervalo = setInterval(() => {
+        let resultado;
+        try {
+          resultado = lector.leerListado(document);
+        } catch {
+          resultado = { productos: [] };
+        }
+        if (resultado && resultado.captcha) {
+          clearInterval(intervalo);
+          resolve({ productos: [], captcha: true });
+          return;
+        }
+        const productos = (resultado && resultado.productos) || [];
+        const cantidad = productos.length;
+        const ahora = Date.now();
+        if (cantidad !== ultimaCantidad) {
+          ultimaCantidad = cantidad;
+          ultimoCambio = ahora;
+        }
+        const estable = cantidad > 0 && ahora - ultimoCambio >= esperaEstabilidadMs;
+        const seAgotoElTiempo = ahora - inicio > maxEsperaMs;
+        if (estable || seAgotoElTiempo) {
+          clearInterval(intervalo);
+          resolve({ productos, captcha: false });
+        }
+      }, intervaloMs);
+    });
+  }
+  // Evita arrancar dos esperas en paralelo si el MutationObserver
+  // dispara varios reescaneos mientras la primera espera todavía no
+  // terminó — `yaEnviadoEscaneoAutomatico` solo pasa a `true` recién
+  // cuando el envío real ya ocurrió (ver manejarEscaneoAutomatico).
+  let esperandoEscaneoAutomatico = false;
+
+  async function manejarEscaneoAutomatico() {
+    if (yaEnviadoEscaneoAutomatico || esperandoEscaneoAutomatico) return;
+    esperandoEscaneoAutomatico = true;
+    try {
+      const resultado = await esperarListadoEstable();
+      if (yaEnviadoEscaneoAutomatico) return; // se resolvió por otro camino mientras tanto — nunca debería pasar, defensivo
+      if (resultado.captcha) {
+        // Issue #225 — mismo criterio de siempre: nunca se marca
+        // yaEnviadoEscaneoAutomatico acá, la persona resuelve a mano y
+        // el reescaneo normal (MutationObserver) vuelve a intentar.
+        if (!yaAvisadoCaptcha) {
+          yaAvisadoCaptcha = true;
+          enviarListadoAZilonix([], true, true);
+        }
+        return;
+      }
+      yaEnviadoEscaneoAutomatico = true;
+      enviarListadoAZilonix(resultado.productos, true, false);
+    } finally {
+      esperandoEscaneoAutomatico = false;
+    }
+  }
+
   // Issue #210 — "Completar vendidos": cuando la persona abre un
   // candidato de Mercado Libre (por el botón "Completar vendidos
   // (~5)" del panel de Investigación, o por cualquier otro motivo —
@@ -502,25 +601,15 @@
         const resultadoListado = lector.leerListado(document);
         const productos = resultadoListado.productos;
         renderizarListado(panel, productos);
+        // Issue #231 — ya no se decide acá mismo con esta UNA lectura
+        // sincrónica (ver manejarEscaneoAutomatico/esperarListadoEstable
+        // arriba: el bug real era mandar 0 candidatos antes de que el
+        // sitio terminara de renderizar). Esto sigue dependiendo del
+        // mismo marcador de siempre (`_zilonix_escaneo=1`) y del mismo
+        // flag de un solo envío — solo que la decisión de QUÉ mandar
+        // ahora espera a que el listado se estabilice.
         if (esPaginaDeEscaneoAutomatico() && !yaEnviadoEscaneoAutomatico) {
-          // Issue #225 — Alibaba puede interceptar con un CAPTCHA
-          // (resultadoListado.captcha === true, ver
-          // extension/lectores/alibaba.js) — a propósito NO se marca
-          // yaEnviadoEscaneoAutomatico en ese caso: la persona resuelve
-          // el captcha a mano en esta misma pestaña (que sigue activa/
-          // visible) y, cuando la página real cargue, este mismo
-          // reescaneo (disparado solo por el MutationObserver/cambio
-          // de URL de siempre) vuelve a intentar — nunca hace falta
-          // que la persona "reintente" nada desde el panel.
-          if (resultadoListado.captcha) {
-            if (!yaAvisadoCaptcha) {
-              yaAvisadoCaptcha = true;
-              enviarListadoAZilonix([], true, true);
-            }
-          } else {
-            yaEnviadoEscaneoAutomatico = true;
-            enviarListadoAZilonix(productos, true, false);
-          }
+          void manejarEscaneoAutomatico();
         }
       } else if (tipo === "tienda" && lector.leerTienda) renderizarTienda(panel, lector.leerTienda(document));
     } catch (error) {
