@@ -261,13 +261,27 @@
     return { soldQuantity, itemId, dateCreated };
   }
 
-  // "Ventas promedio al mes" = vendidos × 30 ÷ días desde la
+  // "Ventas promedio al mes" = vendidos AJUSTADO × 30 ÷ días desde la
   // publicación — siempre un ESTIMADO (lo pide la tarea explícito),
   // nunca una cifra que Mercado Libre confirme directamente. `vendidos`
   // puede ser el exacto (sold_quantity) o el aproximado de "+N
   // vendidos" — lo único obligatorio es `dateCreated`, que solo sale
   // del JSON incrustado (nunca de la interfaz visible).
-  function calcularVentasPromedioMes(vendidos, dateCreated, ahoraMs) {
+  //
+  // Issue #197 (Sharel, "estilo Selltrix"): "no dejar ventas en cero"
+  // — el vendidos crudo se ajusta antes de convertirlo en tasa
+  // mensual, para compensar un sesgo conocido hacia abajo. El primero
+  // que aplique, nunca los dos juntos:
+  //   - ×2.2 si es Full: más visibilidad/velocidad de venta de la que
+  //     refleja el promedio histórico completo.
+  //   - ×1.55 si vendidos viene de la etiqueta redondeada "+N
+  //     vendidos" (vendidosExacto === false), nunca del sold_quantity
+  //     real — esa etiqueta es un piso, no el número real.
+  //   - ×1 si vendidos es exacto y no es Full.
+  // Mismo criterio y mismos factores que lib/ml/estimacionVentas.ts
+  // (lado del servidor, /panel/investigacion) — para que "estimado"
+  // signifique lo mismo en los dos lados.
+  function calcularVentasPromedioMes(vendidos, dateCreated, ahoraMs, esFull, vendidosExacto) {
     if (typeof vendidos !== "number" || !Number.isFinite(vendidos) || !dateCreated) return null;
     const creadoMs = new Date(dateCreated).getTime();
     if (!Number.isFinite(creadoMs)) return null;
@@ -275,7 +289,8 @@
     // Mínimo 1 día — una publicación de hoy mismo no puede dividir por 0
     // ni dar un promedio mensual absurdamente alto por una fecha futura mal leída.
     const diasTranscurridos = Math.max(1, Math.round((ahora - creadoMs) / 86_400_000));
-    return Math.round(((vendidos * 30) / diasTranscurridos) * 10) / 10;
+    const factor = esFull ? 2.2 : vendidosExacto === false ? 1.55 : 1;
+    return Math.round(((vendidos * factor * 30) / diasTranscurridos) * 10) / 10;
   }
 
   function leerProducto(doc) {
@@ -299,6 +314,10 @@
     // true = exacto (sold_quantity real, del JSON/HTML incrustado);
     // false = solo la etiqueta redondeada "+N vendidos"; null = nada.
     const vendidosExacto = incrustado.soldQuantity !== null ? true : vendidosAproximado !== null ? false : null;
+    // Issue #197 — calculado ACÁ (no más abajo, donde antes vivía
+    // inline en el objeto de retorno) para poder pasarlo al ajuste
+    // "estilo Selltrix" de calcularVentasPromedioMes.
+    const esFull = /\bfull\b/i.test(textoEnvio);
 
     return {
       titulo: U.textoDe(["h1.ui-pdp-title", "h1[data-testid='product-title']"], doc),
@@ -312,12 +331,12 @@
       ),
       vendidos,
       vendidosExacto,
-      ventasPromedioMes: calcularVentasPromedioMes(vendidos, incrustado.dateCreated),
+      ventasPromedioMes: calcularVentasPromedioMes(vendidos, incrustado.dateCreated, undefined, esFull, vendidosExacto),
       vendedor: U.textoDe([".ui-pdp-seller__header__title", ".ui-pdp-seller__link-trigger-button", "a.ui-pdp-seller__link-trigger-button"], doc),
       calificacion: U.calificacionDesdeTexto(U.textoDe([".ui-pdp-review__rating", ".ui-review-capability__rating__average"], doc)),
       numeroOpiniones: U.enteroDesdeTexto(U.textoDe([".ui-pdp-review__amount", ".ui-review-capability__rating__amount"], doc)),
       esCatalogo: tieneBuybox,
-      esFull: /\bfull\b/i.test(textoEnvio),
+      esFull,
       envioGratis: /envío\s*gratis|envio\s*gratis/i.test(textoEnvio),
       // itemIdActual ya viene validado por extraerIdDeUrl (patrón
       // MCO\d+) — construirLinkSeguirProducto lo vuelve a validar

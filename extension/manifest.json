@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Zilonix Seller — Investigación",
   "short_name": "Zilonix Investigación",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Lee precio, vendidos, vendedor y calificación de la página que estás viendo en Mercado Libre, Amazon, Temu, AliExpress, Shein y Alibaba — para analizar antes de invertir. Solo lee lo que ya tenés abierto; nunca navega sola ni inicia sesión.",
   "content_scripts": [
     {
@@ -98,6 +98,16 @@
         "panel.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://web-production-af270.up.railway.app/panel/investigacion*",
+        "*://web-staging-d979.up.railway.app/panel/investigacion*"
+      ],
+      "js": [
+        "marcador-zilonix.js"
+      ],
+      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [

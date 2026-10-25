@@ -12,6 +12,7 @@ import {
   type ProductoCatalogoMl,
 } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
+import { facturacionEst, ventasMesEst } from "@/lib/ml/estimacionVentas";
 import { normalizarTextoBusqueda } from "@/lib/filtros-listado";
 import { creaContador, superaLimite, type ContadorVentana } from "@/lib/limite-peticiones";
 
@@ -171,6 +172,18 @@ export type PublicacionInvestigacion = {
   vendedor: string | null;
   esPlatinum: boolean;
   link: string | null;
+  // Issue #197 — sold_quantity REAL de Mercado Libre para esta oferta
+  // puntual (lib/ml/cliente.ts, OfertaMl.vendidos) — null si ML no lo
+  // dejó ver para este candidato en particular. Siempre el acumulado
+  // histórico, nunca una tasa mensual (ver ventasMesEstimadas).
+  vendidos: number | null;
+  // ventasMesEstimadas/facturacionMesEstimada: SIEMPRE una proyección
+  // (lib/ml/estimacionVentas.ts, "estilo Selltrix") a partir de
+  // vendidos + fechaCreacion — null si no hay vendidos o fecha de
+  // creación reales con los que calcularla. Nunca se muestran como
+  // si Mercado Libre las hubiera confirmado.
+  ventasMesEstimadas: number | null;
+  facturacionMesEstimada: number | null;
 };
 
 export type ReglaEstrategia = { texto: string };
@@ -194,8 +207,26 @@ export type ResultadoInvestigacion = {
   // precedente confirmado de este campo contra producción) — nunca se
   // muestra un 0% inventado.
   porcentajeEnvioGratis: number | null;
+  // Issue #197 — KPIs de "Demanda". vendidosTotalesReales es la suma
+  // del sold_quantity REAL (nunca estimado) de las publicaciones que
+  // sí lo trajeron — null si NINGUNA lo trajo (para distinguir de un
+  // 0 real). publicacionesConVendidosReal cuenta cuántas de
+  // publicacionesEncontradas tienen ese dato, para poder avisar en
+  // pantalla qué tan completa es la cifra. ventasMesTotalEstimadas/
+  // facturacionMesTotalEstimada son SIEMPRE una proyección (lib/ml/
+  // estimacionVentas.ts) — nunca se muestran como si fueran reales.
+  vendidosTotalesReales: number | null;
+  publicacionesConVendidosReal: number;
+  promedioVendidosPorPublicacion: number | null;
+  ventasMesTotalEstimadas: number | null;
+  facturacionMesTotalEstimada: number | null;
   publicaciones: PublicacionInvestigacion[]; // Top 10
   estrategiaSugerida: ReglaEstrategia[];
+  // Issue #197 — una sola frase que sintetiza demanda + competencia,
+  // con reglas explícitas (generarVeredicto, abajo) — nunca un
+  // modelo de IA opaco. null si no hay suficientes datos (aviso !=
+  // null, o 0 publicaciones).
+  veredicto: string | null;
   aviso: string | null;
 };
 
@@ -209,8 +240,14 @@ function avisoVacio(termino: string, aviso: string): ResultadoInvestigacion {
     precioMaximo: null,
     porcentajeFull: null,
     porcentajeEnvioGratis: null,
+    vendidosTotalesReales: null,
+    publicacionesConVendidosReal: 0,
+    promedioVendidosPorPublicacion: null,
+    ventasMesTotalEstimadas: null,
+    facturacionMesTotalEstimada: null,
     publicaciones: [],
     estrategiaSugerida: [],
+    veredicto: null,
     aviso,
   };
 }
@@ -267,12 +304,55 @@ function generarEstrategia(args: {
 }
 
 function ordenPublicaciones(a: PublicacionInvestigacion, b: PublicacionInvestigacion): number {
-  // Sin "vendidos" real disponible por API oficial (ver nota de
-  // SinVendidosDisponibles en el changelog), el Top 10 no puede
-  // ordenarse por ventas — se ordena por precio descendente solo para
-  // que el orden sea determinístico, nunca se etiqueta como "más
-  // vendidas" en la pantalla.
+  // Issue #197 — ahora SÍ hay vendidos real disponible por API
+  // oficial para buena parte de los candidatos (sold_quantity vía
+  // lib/ml/cliente.ts) — "más vendidas" tiene que ordenar por eso de
+  // verdad, nunca fingirlo con precio. Las publicaciones CON dato real
+  // van siempre antes que las SIN dato (tengan el precio que tengan);
+  // entre las que no tienen dato, precio descendente sigue siendo el
+  // único criterio determinístico que queda.
+  if (a.vendidos != null && b.vendidos != null) return b.vendidos - a.vendidos;
+  if (a.vendidos != null) return -1;
+  if (b.vendidos != null) return 1;
   return b.precio - a.precio;
+}
+
+// Issue #197 — "veredicto + plan de ataque simple, reglas claras, sin
+// IA opaca": una sola frase que combina demanda estimada (ventas/mes
+// sumadas, siempre una proyección) y competencia (vendedores
+// distintos) — mismo criterio y mismos umbrales de ticket que
+// generarEstrategia, que sigue siendo el "plan de ataque" (ver
+// ResultadoInvestigacion.estrategiaSugerida).
+const VENTAS_MES_ALTAS = 50; // umbral propio, conservador: ~1.7 ventas/día sumadas entre todos los candidatos con dato
+
+function generarVeredicto(args: {
+  publicacionesEncontradas: number;
+  vendedoresDistintos: number;
+  ventasMesTotalEstimadas: number | null;
+}): string | null {
+  const { publicacionesEncontradas, vendedoresDistintos, ventasMesTotalEstimadas } = args;
+  if (publicacionesEncontradas === 0) return null;
+  if (publicacionesEncontradas < 3) {
+    return "Pocos datos todavía para un veredicto confiable — revisá el nicho a mano en Mercado Libre antes de decidir.";
+  }
+
+  const demandaAlta = ventasMesTotalEstimadas != null && ventasMesTotalEstimadas >= VENTAS_MES_ALTAS;
+  const competenciaAlta = vendedoresDistintos >= 5;
+  const competenciaBaja = vendedoresDistintos > 0 && vendedoresDistintos <= 2;
+
+  if (demandaAlta && competenciaBaja) {
+    return "Oportunidad clara: demanda estimada alta y pocos vendedores — buen momento para entrar.";
+  }
+  if (demandaAlta && competenciaAlta) {
+    return "Nicho con demanda real, pero muy competido — hace falta diferenciarse (precio, Full, presentación) para destacar.";
+  }
+  if (ventasMesTotalEstimadas != null && !demandaAlta && competenciaAlta) {
+    return "Nicho saturado con demanda estimada baja — riesgo alto, revisá bien antes de invertir.";
+  }
+  if (ventasMesTotalEstimadas == null) {
+    return "Sin dato real de ventas para estimar demanda (ninguna publicación encontrada trajo sold_quantity) — abrí candidatos puntuales en Mercado Libre, con la extensión, antes de decidir.";
+  }
+  return "Nicho parejo — ni una oportunidad clara ni un riesgo evidente con los datos de hoy; revisá el plan de abajo.";
 }
 
 // Calcula KPIs + estrategia + aviso a partir de ofertas YA resueltas —
@@ -299,6 +379,25 @@ export function calcularResultadoInvestigacion(termino: string, publicaciones: P
 
   const vendedoresDistintos = new Set(publicaciones.map((p) => p.vendedor).filter((v): v is string => Boolean(v))).size;
 
+  // Issue #197 — "vendidos totales (real)": suma del sold_quantity
+  // REAL (nunca estimado) de las publicaciones que lo trajeron. null
+  // si ninguna lo trajo — nunca 0 en su lugar, que se leería como
+  // "cero ventas confirmadas" en vez de "no hay dato".
+  const conVendidosReal = publicaciones.filter((p): p is PublicacionInvestigacion & { vendidos: number } => p.vendidos != null);
+  const vendidosTotalesReales = conVendidosReal.length ? conVendidosReal.reduce((s, p) => s + p.vendidos, 0) : null;
+  const promedioVendidosPorPublicacion = conVendidosReal.length ? Math.round((vendidosTotalesReales! / conVendidosReal.length) * 10) / 10 : null;
+
+  // "Fact. est. COP" — siempre una proyección (lib/ml/estimacionVentas.ts),
+  // suma de las publicaciones que sí pudieron estimarla.
+  const conFacturacionEstimada = publicaciones.filter((p) => p.facturacionMesEstimada != null);
+  const facturacionMesTotalEstimada = conFacturacionEstimada.length
+    ? conFacturacionEstimada.reduce((s, p) => s + p.facturacionMesEstimada!, 0)
+    : null;
+  const conVentasMesEstimadas = publicaciones.filter((p) => p.ventasMesEstimadas != null);
+  const ventasMesTotalEstimadas = conVentasMesEstimadas.length
+    ? Math.round(conVentasMesEstimadas.reduce((s, p) => s + p.ventasMesEstimadas!, 0) * 10) / 10
+    : null;
+
   const top10 = [...publicaciones].sort(ordenPublicaciones).slice(0, TOPE_PUBLICACIONES);
 
   return {
@@ -310,8 +409,14 @@ export function calcularResultadoInvestigacion(termino: string, publicaciones: P
     precioMaximo,
     porcentajeFull,
     porcentajeEnvioGratis,
+    vendidosTotalesReales,
+    publicacionesConVendidosReal: conVendidosReal.length,
+    promedioVendidosPorPublicacion,
+    ventasMesTotalEstimadas,
+    facturacionMesTotalEstimada,
     publicaciones: top10,
     estrategiaSugerida: generarEstrategia({ publicacionesEncontradas: publicaciones.length, vendedoresDistintos, precioPromedio, porcentajeFull }),
+    veredicto: generarVeredicto({ publicacionesEncontradas: publicaciones.length, vendedoresDistintos, ventasMesTotalEstimadas }),
     aviso: null,
   };
 }
@@ -339,6 +444,15 @@ async function construirPublicacion(
     vendedor = await cacheVendedores.get(oferta.sellerId)!;
   }
 
+  // Issue #197/#201 — vendidos (sold_quantity) y ventas/mes estimadas
+  // (lib/ml/estimacionVentas.ts, "estilo Selltrix", mergeado por
+  // #203): nunca etiquetaMasN acá — a esta altura (API de Mercado
+  // Libre) vendidos siempre es el sold_quantity exacto, nunca la
+  // etiqueta redondeada "+N vendidos" de la interfaz (esa solo la lee
+  // la extensión del lado del navegador, extension/lectores/mercadolibre.js).
+  const ventasMesEstimadas = ventasMesEst(oferta.vendidos, oferta.fechaCreacion, { esFull: oferta.esFull });
+  const facturacionMesEstimada = facturacionEst(oferta.precio, ventasMesEstimadas);
+
   return {
     productId,
     itemId: oferta.itemId,
@@ -351,6 +465,9 @@ async function construirPublicacion(
     vendedor: vendedor?.nickname ?? null,
     esPlatinum: vendedor?.esPlatinum ?? false,
     link: linkPublicacion(oferta.itemId),
+    vendidos: oferta.vendidos,
+    ventasMesEstimadas,
+    facturacionMesEstimada,
   };
 }
 

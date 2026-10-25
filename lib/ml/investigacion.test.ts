@@ -58,6 +58,7 @@ function publicacion(parcial: Partial<PublicacionInvestigacion> = {}): Publicaci
     productId: "MCO1", itemId: "MCO111", titulo: "Reloj digital casio", foto: null,
     precio: 50_000, moneda: "COP", esFull: false, esEnvioGratis: null,
     vendedor: "vendedor-1", esPlatinum: false, link: "https://articulo.mercadolibre.com.co/MCO-111",
+    vendidos: null, ventasMesEstimadas: null, facturacionMesEstimada: null,
     ...parcial,
   };
 }
@@ -151,6 +152,86 @@ describe("calcularResultadoInvestigacion — cálculos puros (sin fetch ni base)
     expect(resultado.porcentajeFull).toBe(80);
     expect(resultado.estrategiaSugerida.some((r) => /desventaja/i.test(r.texto))).toBe(true);
   });
+
+  // Issue #197 — "ordenar por vendidos cuando haya dato (no fingir
+  // 'más vendidas' solo por precio)".
+  it("ordena por vendidos real cuando hay dato, nunca por precio — las que tienen dato van siempre primero", () => {
+    const resultado = calcularResultadoInvestigacion("reloj digital", [
+      publicacion({ itemId: "sin-dato-caro", precio: 999_999, vendidos: null, vendedor: "a" }),
+      publicacion({ itemId: "con-dato-bajo", precio: 1_000, vendidos: 5, vendedor: "b" }),
+      publicacion({ itemId: "con-dato-alto", precio: 2_000, vendidos: 500, vendedor: "c" }),
+    ]);
+    expect(resultado.publicaciones.map((p) => p.itemId)).toEqual(["con-dato-alto", "con-dato-bajo", "sin-dato-caro"]);
+  });
+
+  it("sin ningún dato de vendidos, sigue ordenando por precio descendente (criterio anterior, intacto)", () => {
+    const resultado = calcularResultadoInvestigacion("reloj digital", [
+      publicacion({ itemId: "barato", precio: 1_000, vendedor: "a" }),
+      publicacion({ itemId: "caro", precio: 5_000, vendedor: "b" }),
+    ]);
+    expect(resultado.publicaciones.map((p) => p.itemId)).toEqual(["caro", "barato"]);
+  });
+
+  // Issue #197 — KPIs de Demanda: "vendidos totales (real)" nunca es
+  // un 0 inventado cuando no hay ningún dato real.
+  it("vendidos totales (real): suma solo de las que trajeron dato; null si ninguna, nunca 0", () => {
+    const sinDato = calcularResultadoInvestigacion("reloj digital", [publicacion({ vendidos: null, vendedor: "a" })]);
+    expect(sinDato.vendidosTotalesReales).toBeNull();
+    expect(sinDato.publicacionesConVendidosReal).toBe(0);
+
+    const conDato = calcularResultadoInvestigacion("reloj digital", [
+      publicacion({ vendidos: 10, vendedor: "a" }),
+      publicacion({ vendidos: 20, vendedor: "b" }),
+      publicacion({ vendidos: null, vendedor: "c" }),
+    ]);
+    expect(conDato.vendidosTotalesReales).toBe(30);
+    expect(conDato.publicacionesConVendidosReal).toBe(2);
+    expect(conDato.promedioVendidosPorPublicacion).toBe(15);
+  });
+
+  it("facturación y ventas/mes totales estimadas: suma solo de las que pudieron estimarse, null si ninguna", () => {
+    const resultado = calcularResultadoInvestigacion("reloj digital", [
+      publicacion({ ventasMesEstimadas: 30, facturacionMesEstimada: 1_500_000, vendedor: "a" }),
+      publicacion({ ventasMesEstimadas: 10, facturacionMesEstimada: 500_000, vendedor: "b" }),
+      publicacion({ ventasMesEstimadas: null, facturacionMesEstimada: null, vendedor: "c" }),
+    ]);
+    expect(resultado.ventasMesTotalEstimadas).toBe(40);
+    expect(resultado.facturacionMesTotalEstimada).toBe(2_000_000);
+  });
+
+  // Issue #197 — veredicto: reglas simples y explicadas, nunca IA opaca.
+  describe("veredicto", () => {
+    it("pocas publicaciones (<3): pide revisar a mano, nunca un veredicto sobre poca evidencia", () => {
+      const resultado = calcularResultadoInvestigacion("nicho raro", [publicacion({ vendedor: "a" }), publicacion({ vendedor: "b" })]);
+      expect(resultado.veredicto).toMatch(/pocos datos/i);
+    });
+
+    it("demanda alta estimada + pocos vendedores -> oportunidad clara", () => {
+      const resultado = calcularResultadoInvestigacion("reloj digital", [
+        publicacion({ vendedor: "a", ventasMesEstimadas: 60 }),
+        publicacion({ vendedor: "a2", ventasMesEstimadas: 10 }),
+        publicacion({ vendedor: "a3", ventasMesEstimadas: 5 }),
+      ]);
+      expect(resultado.veredicto).toMatch(/oportunidad clara/i);
+    });
+
+    it("demanda alta estimada + muchos vendedores -> competido, hay que diferenciarse", () => {
+      const seis = Array.from({ length: 6 }, (_, i) => publicacion({ vendedor: `v${i}`, itemId: `MCO${i}`, ventasMesEstimadas: 20 }));
+      const resultado = calcularResultadoInvestigacion("reloj digital", seis);
+      expect(resultado.veredicto).toMatch(/muy competido/i);
+    });
+
+    it("sin ningún dato real de ventas: lo dice explícito, nunca inventa demanda", () => {
+      const tres = Array.from({ length: 3 }, (_, i) => publicacion({ vendedor: `v${i}`, itemId: `MCO${i}`, ventasMesEstimadas: null }));
+      const resultado = calcularResultadoInvestigacion("reloj digital", tres);
+      expect(resultado.veredicto).toMatch(/sin dato real de ventas/i);
+    });
+
+    it("sin publicaciones: null, nunca un veredicto sobre un aviso vacío", () => {
+      const resultado = calcularResultadoInvestigacion("nada", []);
+      expect(resultado.veredicto).toBeNull();
+    });
+  });
 });
 
 describe("buscarInvestigacionProducto — orquestación con respuestas de Mercado Libre simuladas", () => {
@@ -194,7 +275,7 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     // MCO1: oferta válida real. MCO2: sin ofertas (simula el 404/respuesta rara que cliente.ts ya filtró a []).
     vi.mocked(obtenerOfertasProducto).mockImplementation(async (productId: string) => {
       if (productId === "MCO1") {
-        return [{ itemId: "MCO111", precio: 45_000, monedaId: "COP", sellerId: "vendedor-1", esFull: true, esEnvioGratis: null }];
+        return [{ itemId: "MCO111", precio: 45_000, monedaId: "COP", sellerId: "vendedor-1", esFull: true, esEnvioGratis: null, vendidos: null, fechaCreacion: null }];
       }
       return [];
     });
@@ -225,7 +306,7 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue(categoriaIds);
     vi.mocked(obtenerProducto).mockImplementation(async (id: string) => ({ id, nombre: `Reloj digital categoria ${id}`, foto: null }));
     vi.mocked(obtenerOfertasProducto).mockImplementation(async (productId: string) => [
-      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null },
+      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null },
     ]);
     vi.mocked(obtenerVendedor).mockResolvedValue({ nickname: "Vendedor", esPlatinum: false });
 
@@ -255,7 +336,7 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     vi.mocked(obtenerMejoresProductosCategoria).mockResolvedValue(categoriaIds);
     vi.mocked(obtenerProducto).mockImplementation(async (id: string) => ({ id, nombre: "Reloj digital categoria", foto: null }));
     vi.mocked(obtenerOfertasProducto).mockImplementation(async (productId: string) => [
-      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null },
+      { itemId: `item-${productId}`, precio: 10_000, monedaId: "COP", sellerId: "1", esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null },
     ]);
     vi.mocked(obtenerVendedor).mockResolvedValue({ nickname: "Vendedor", esPlatinum: false });
 
@@ -345,10 +426,10 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
     vi.mocked(obtenerProducto).mockResolvedValue({ id: "MCO1", nombre: "Reloj digital de catálogo", foto: null });
     vi.mocked(obtenerItemMl).mockResolvedValue({
       producto: { id: "MCO2", nombre: "Reloj digital publicación", foto: null },
-      oferta: { itemId: "MCO222", precio: 35_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null },
+      oferta: { itemId: "MCO222", precio: 35_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null },
     });
     vi.mocked(obtenerOfertasProducto).mockResolvedValue([
-      { itemId: "MCO111", precio: 20_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null },
+      { itemId: "MCO111", precio: 20_000, monedaId: "COP", sellerId: null, esFull: false, esEnvioGratis: null, vendidos: null, fechaCreacion: null },
     ]);
 
     const resultado = await buscarInvestigacionProducto("empresa-1", "reloj digital");

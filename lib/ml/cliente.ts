@@ -400,7 +400,17 @@ export type ItemMl = { producto: ProductoCatalogoMl; oferta: OfertaMl | null };
 // para un candidato de tipo ITEM.
 export async function obtenerItemMl(itemId: string, token: string): Promise<ItemMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping,status`;
+  // Issue #197 — sold_quantity/date_created sumados a la lista de
+  // atributos: mismo endpoint (GET /items/{id}) y mismos dos campos
+  // que YA pide obtenerFotoItemMl (más abajo) para seguimiento de
+  // competidores (issue #175) — ahí ya está confirmado que Mercado
+  // Libre los da para una publicación AJENA, no solo la propia. Antes
+  // esta función no los pedía porque la Parte 1 de Investigación
+  // (issue #174) había descartado "vendidos" por el endpoint de
+  // VISITAS (/visits/items, ese sí restringido para ajenas) — nunca
+  // se había confirmado que sold_quantity es un campo distinto, sin
+  // esa restricción.
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping,status,sold_quantity,date_created`;
   try {
     const resp = await pedir<{
       title?: unknown;
@@ -410,6 +420,8 @@ export async function obtenerItemMl(itemId: string, token: string): Promise<Item
       seller_id?: unknown;
       shipping?: { logistic_type?: unknown; free_shipping?: unknown };
       status?: unknown;
+      sold_quantity?: unknown;
+      date_created?: unknown;
     }>(url, token);
     if (!resp.ok) return null;
     // Bug real: una publicación pausada/cerrada seguía apareciendo en
@@ -434,6 +446,8 @@ export async function obtenerItemMl(itemId: string, token: string): Promise<Item
         sellerId: sellerIdCrudo && PATRON_ID_VENDEDOR.test(sellerIdCrudo) ? sellerIdCrudo : null,
         esFull: resp.data.shipping?.logistic_type === "fulfillment",
         esEnvioGratis: typeof resp.data.shipping?.free_shipping === "boolean" ? resp.data.shipping.free_shipping : null,
+        vendidos: numeroONull(resp.data.sold_quantity),
+        fechaCreacion: typeof resp.data.date_created === "string" ? resp.data.date_created : null,
       };
     }
     return { producto, oferta };
@@ -449,6 +463,14 @@ export type OfertaMl = {
   monedaId: string;
   sellerId: string | null;
   esFull: boolean;
+  // Issue #197 — sold_quantity real de Mercado Libre para ESTA oferta
+  // puntual (no un estimado) — null si ML no lo mandó. fechaCreacion
+  // (date_created) es lo que necesita lib/ml/estimacionVentas.ts para
+  // convertir el acumulado en una tasa mensual — los dos, igual que
+  // esEnvioGratis abajo, se leen de forma defensiva, nunca se asume
+  // que van a venir siempre.
+  vendidos: number | null;
+  fechaCreacion: string | null;
   // null = Mercado Libre no mandó este campo en esta oferta puntual —
   // nunca se interpreta como "no tiene envío gratis" (eso sería
   // inventar un dato que no vino). Sin precedente confirmado contra
@@ -481,7 +503,16 @@ export async function obtenerOfertasProducto(productId: string, token: string): 
   const lista = Array.isArray(data) ? data : Array.isArray((data as { results?: unknown[] }).results) ? (data as { results: unknown[] }).results : [];
   return lista
     .map((raw) => {
-      const item = raw as { item_id?: unknown; id?: unknown; price?: unknown; currency_id?: unknown; seller_id?: unknown; shipping?: { logistic_type?: unknown; free_shipping?: unknown } };
+      const item = raw as {
+        item_id?: unknown;
+        id?: unknown;
+        price?: unknown;
+        currency_id?: unknown;
+        seller_id?: unknown;
+        shipping?: { logistic_type?: unknown; free_shipping?: unknown };
+        sold_quantity?: unknown;
+        date_created?: unknown;
+      };
       const itemIdCrudo = item.item_id ?? item.id;
       const itemId = typeof itemIdCrudo === "string" || typeof itemIdCrudo === "number" ? String(itemIdCrudo) : "";
       if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
@@ -496,6 +527,13 @@ export async function obtenerOfertasProducto(productId: string, token: string): 
         sellerId: sellerIdCrudo && PATRON_ID_VENDEDOR.test(sellerIdCrudo) ? sellerIdCrudo : null,
         esFull: item.shipping?.logistic_type === "fulfillment",
         esEnvioGratis: envioGratis,
+        // Issue #197 — igual que esEnvioGratis arriba: sin precedente
+        // confirmado contra producción de que /products/{id}/items
+        // mande estos dos campos (ese endpoint nunca los había leído
+        // antes) — se leen de forma defensiva, null si no vienen,
+        // nunca una cifra inventada en su lugar.
+        vendidos: numeroONull(item.sold_quantity),
+        fechaCreacion: typeof item.date_created === "string" ? item.date_created : null,
       };
     })
     .filter((o): o is OfertaMl => o !== null);

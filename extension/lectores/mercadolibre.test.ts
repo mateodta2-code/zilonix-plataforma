@@ -146,6 +146,29 @@ describe("calcularVentasPromedioMes — issue #174, siempre marcado como estimad
     expect(calcularVentasPromedioMes(10, null)).toBeNull();
     expect(calcularVentasPromedioMes(10, "esto no es una fecha")).toBeNull();
   });
+
+  // Issue #197 (Sharel, "estilo Selltrix") — "no dejar ventas en
+  // cero": el ajuste, pasado como 4° y 5° argumento — sin ellos (como
+  // en las pruebas de arriba, issue #174) sigue sin aplicar ningún
+  // ajuste, mismo comportamiento de siempre.
+  describe("ajuste estilo Selltrix (issue #197)", () => {
+    const ahora = new Date("2024-01-31T00:00:00.000Z").getTime();
+    const creado = "2024-01-01T00:00:00.000Z"; // 30 días antes
+
+    it("Full: ×2.2, gana sobre el ajuste de etiqueta aunque también sea redondeado", () => {
+      expect(calcularVentasPromedioMes(10, creado, ahora, true, false)).toBe(22); // 10*2.2*30/30
+      expect(calcularVentasPromedioMes(10, creado, ahora, true, true)).toBe(22);
+    });
+
+    it("no Full + etiqueta redondeada (vendidosExacto === false): ×1.55", () => {
+      expect(calcularVentasPromedioMes(10, creado, ahora, false, false)).toBe(15.5); // 10*1.55*30/30
+    });
+
+    it("no Full + vendidos exacto: sin ajuste (×1), igual que omitir los dos argumentos", () => {
+      expect(calcularVentasPromedioMes(10, creado, ahora, false, true)).toBe(10);
+      expect(calcularVentasPromedioMes(10, creado, ahora)).toBe(10);
+    });
+  });
 });
 
 describe("construirLinkSeguirProducto — issue #174, botón \"Seguir en Zilonix\"", () => {
