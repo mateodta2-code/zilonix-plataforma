@@ -297,7 +297,10 @@
   // vendidos" (content.js -> background.js -> marcador-zilonix.js ->
   // postMessage). Nunca manda nada solo al cargar la página — siempre
   // detrás del clic del botón.
-  const TOPE_PRODUCTOS_ENVIO_LISTADO = 20;
+  // Issue #229 — "maximizar volumen", tope subido de 20 a 30 (mismo
+  // límite para el botón manual "Enviar a Zilonix" y para el escaneo
+  // automático de Analizar/#221/#225 — ambos pasan por esta constante).
+  const TOPE_PRODUCTOS_ENVIO_LISTADO = 30;
 
   // Mismo criterio de orden que ordenarPorVendidos (lib/ml/investigacionCliente.ts,
   // panel): con vendidos real siempre antes que sin dato, más vendidos
@@ -332,7 +335,16 @@
   // Issue #221 — "Analizar estilo OS": `auto` es true SOLO cuando esta
   // pestaña de listado la abrió el escaneo automático (background.js,
   // marcada con ?_zilonix_escaneo=1 en la URL — ver más abajo), nunca
-  // por un clic real de la persona en esta pestaña puntual. En ese
+  // por un clic real de la persona en esta pestaña puntual. Issue #229,
+  // bug real corregido: hasta esta tarea, SOLO `urlListadoMl` (Mercado
+  // Libre) le ponía este marcador a la URL — las 5 plataformas no-ML
+  // (`PLATAFORMAS` en background.js) nunca lo tuvieron, así que
+  // `esPaginaDeEscaneoAutomatico()` siempre daba `false` para ellas y
+  // esta función nunca se llamaba — por eso el clic "Analizar también
+  // en: Amazon/Temu/…" no traía nada, siempre agotaba el timeout con 0
+  // resultados. Corregido agregando el mismo marcador a las 5 URLs
+  // (`conMarcadorEscaneo`, background.js) — esta función de acá no
+  // necesitó ningún cambio, ya era genérica por plataforma. En ese
   // caso se manda SIEMPRE (incluso con 0 candidatos — background.js
   // necesita saber que esta variante ya terminó para cerrar la
   // pestaña y seguir con la siguiente, nunca esperar el timeout de

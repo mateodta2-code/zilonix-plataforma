@@ -130,6 +130,42 @@
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
 }
 
+/* Issue #229 — "thumbnails reales + preview al hover (no solo
+   lightbox con clic)": .fotoPreview es la MISMA foto pedida a un
+   tamaño más grande (nunca la miniatura de 36px escalada con CSS,
+   que se ve pixelada) — oculta por default, visible solo mientras el
+   mouse está sobre .fotoContenedor. pointer-events: none en el
+   preview para que el clic siga llegando siempre a la miniatura de
+   abajo (y siga abriendo el lightbox de siempre). */
+.fotoContenedor {
+  position: relative;
+  display: inline-flex;
+}
+
+.fotoPreview {
+  position: absolute;
+  z-index: 60;
+  left: 44px;
+  top: 50%;
+  width: 220px;
+  height: 220px;
+  object-fit: cover;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  background: var(--tarjeta-fondo);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-50%) scale(0.92);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.fotoContenedor:hover .fotoPreview {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) scale(1);
+}
+
 /* Issue #227 — "Stack": cada búsqueda/plataforma agrega su propio
    bloque debajo, nunca mezclado con los demás en una sola tabla. */
 .bloque {

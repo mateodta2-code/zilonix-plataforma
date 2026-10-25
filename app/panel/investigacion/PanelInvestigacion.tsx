@@ -205,10 +205,29 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
 
   // Issue #221/#227 — un clic real y reciente en "Analizar" (con el
   // país elegido) dispara el escaneo de Mercado Libre.
+  //
+  // Issue #229 — "Selector de plataforma de inicio antes de Analizar":
+  // hasta esta tarea, este efecto SIEMPRE escaneaba Mercado Libre — la
+  // marca ahora trae también la plataforma elegida en el formulario
+  // (`marca.plataforma`, default "ml" si viene de una marca vieja).
+  // Para cualquiera de las otras 5, se delega directo en
+  // `analizarEnPlataforma` (definida más abajo en este mismo
+  // componente — un clic real distinto, "Analizar también en…", ya
+  // usaba exactamente esa función para agregar un bloque extra; acá es
+  // el MISMO mecanismo, solo que autorizado por el clic de Analizar en
+  // vez de un botón secundario) — nunca se duplica la lógica de
+  // armar queries/mandar el mensaje/timeout, que ya maneja sus propios
+  // refs (limitePlataformaRef/queriesUsadasPlataformaRef).
   useEffect(() => {
     if (conExtension !== true) return;
     const marca = consumirClicAnalizarReciente();
     if (!marca) return;
+
+    if (marca.plataforma !== "ml") {
+      void analizarEnPlataforma(marca.plataforma);
+      return;
+    }
+
     let cancelado = false;
     let limite: ReturnType<typeof setTimeout> | null = null;
 
@@ -230,6 +249,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
       cancelado = true;
       if (limite) clearTimeout(limite);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- analizarEnPlataforma es estable (misma identidad por render, no un valor que cambie por sí solo entre renders relevantes acá)
   }, [conExtension, termino]);
 
   function agregarBloque(plataforma: string, queriesUsadasBloque: string[], productos: ProductoListado[]) {
@@ -555,8 +575,20 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
                 <FilaTabla key={`${bloque.id}-${p.link ?? p.titulo}-${i}`}>
                   <CeldaTabla>
                     {p.foto ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- foto de un marketplace ajeno, mismo criterio que BarraSuperior/BarraLateral
-                      <img src={p.foto} alt="" width={36} height={36} className={`${styles.foto} ${styles.fotoClicable}`} onClick={() => setFotoAmpliada(p.foto)} />
+                      // Issue #229 — "preview al hover (no solo lightbox
+                      // con clic)": el lightbox de #227 (clic -> modal)
+                      // sigue existiendo tal cual; esto suma un preview
+                      // más grande que aparece solo con pasar el mouse,
+                      // sin ningún clic. Misma URL real (p.foto) en los
+                      // dos <img> — el preview no es la miniatura
+                      // escalada con CSS (eso se ve pixelado), es la
+                      // imagen real pedida a un tamaño más grande.
+                      <span className={styles.fotoContenedor}>
+                        {/* eslint-disable-next-line @next/next/no-img-element -- foto de un marketplace ajeno, mismo criterio que BarraSuperior/BarraLateral */}
+                        <img src={p.foto} alt="" width={36} height={36} className={`${styles.foto} ${styles.fotoClicable}`} onClick={() => setFotoAmpliada(p.foto)} />
+                        {/* eslint-disable-next-line @next/next/no-img-element -- idem arriba */}
+                        <img src={p.foto} alt="" className={styles.fotoPreview} />
+                      </span>
                     ) : (
                       "—"
                     )}
