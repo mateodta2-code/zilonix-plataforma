@@ -55,15 +55,31 @@ const cspClerk = dominioClerk
 //     hoy, "zapatillas", el mismo <img class="poly-component__picture">
 //     que ya lee mercadolibre.js) -> *.mlstatic.com (varios edges http1/http2/etc).
 //   - Amazon: m.media-amazon.com (confirmado en el <img class="s-image">
-//     real que ya lee amazon.js) -> *.media-amazon.com.
-//   - Temu: img.kwcdn.com (confirmado en la home real) -> *.kwcdn.com.
-//   - AliExpress: ae01.alicdn.com (confirmado en un listado real,
-//     "shoes") y Alibaba: img.alicdn.com/i.alicdn.com (confirmado en
-//     la home real) — mismo grupo corporativo, mismo dominio ->
-//     *.alicdn.com cubre los dos.
-//   - Shein: img.ltwebstatic.com (confirmado en la home real) -> *.ltwebstatic.com.
+//     real que ya lee amazon.js, captura de sept/2026) -> *.media-amazon.com.
+//   - Temu: img.kwcdn.com (confirmado en la home real, captura de
+//     oct/2026) -> *.kwcdn.com.
+//   - Alibaba: img.alicdn.com/i.alicdn.com (confirmado en la home
+//     real, captura de oct/2026) -> *.alicdn.com.
+//   - Shein: img.ltwebstatic.com (confirmado en la home real, captura
+//     de oct/2026) -> *.ltwebstatic.com.
+//
+// Issue #237 — hotfix de smoke de fotos: "sigue sin aparecer" para
+// AliExpress (el único que #236 no alcanzó a tapar) — causa real
+// confirmada, nunca un selector roto: `it.image.imgUrl`
+// (lectores/aliexpress.js) sigue siendo la ruta JSON correcta
+// (confirmado, estructura sin cambios: `"image":{"imgUrl":"...",...}`),
+// pero el VALOR real del dominio migró. #236 asumió `ae01.alicdn.com`
+// (confirmado en una captura de 2023) — una captura real fresca
+// (agosto/2026) confirma que AliExpress movió sus fotos de producto a
+// un dominio propio nuevo, `ae-pic-a1.aliexpress-media.com`
+// (`aliexpress-media.com`, NUNCA un subdominio de `alicdn.com` — dominio
+// de marca completamente distinto, aunque siga siendo el mismo grupo
+// corporativo) — ese dominio nunca estuvo en `img-src`, así que el
+// navegador bloqueaba la foto antes de pedirla, igual que el bug
+// original de #236 mismo. Se suma *.aliexpress-media.com — se deja
+// *.alicdn.com sin tocar (Alibaba sigue ahí, confirmado aparte).
 const IMG_SRC_CSP =
-  "img-src 'self' data: https://img.clerk.com https://*.mlstatic.com https://*.media-amazon.com https://*.kwcdn.com https://*.alicdn.com https://*.ltwebstatic.com";
+  "img-src 'self' data: https://img.clerk.com https://*.mlstatic.com https://*.media-amazon.com https://*.kwcdn.com https://*.alicdn.com https://*.aliexpress-media.com https://*.ltwebstatic.com";
 
 const csp = [
   "default-src 'self'",

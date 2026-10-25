@@ -133,7 +133,12 @@
         // Issue #227 — foto/estrellas confirmados en el mismo objeto
         // real (zilonix-os-web, scraper-aliexpress-search.js) que ya
         // confirmó precio/ventas — para fotos ampliables y el sort
-        // "Más calificación".
+        // "Más calificación". Issue #237 — la ruta JSON (`it.image.imgUrl`)
+        // nunca cambió (confirmado contra una captura real de hoy) —
+        // lo que cambió fue el DOMINIO del valor en sí: AliExpress
+        // movió las fotos de producto a `aliexpress-media.com`, ya no
+        // `alicdn.com` — la extensión nunca necesitó tocarse (no valida
+        // dominios, eso vive en el CSP de la app, ver next.config.mjs).
         const fotoRaw = (it.image && it.image.imgUrl) || "";
         const foto = fotoRaw ? (fotoRaw.indexOf("//") === 0 ? `https:${fotoRaw}` : fotoRaw) : null;
         const calificacion = it.evaluation && it.evaluation.starRating != null ? Number(it.evaluation.starRating) : null;
