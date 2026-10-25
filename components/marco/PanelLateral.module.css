@@ -1,0 +1,129 @@
+/* Issue #200 — <dialog> nativo ocupa toda la pantalla (es el propio
+   backdrop, clicable para cerrar) y el panel real se posiciona pegado
+   al borde derecho, nunca centrado como hace un <dialog> por defecto. */
+.dialogo {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.dialogo::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* Issue #200 (Sharel) — misma superficie que Inicio (--tarjeta-fondo,
+   issue #156/#186), nunca --superficie/blanco: todo lo de ADENTRO usa
+   los tokens de zona oscura, igual que Tarjeta.module.css. color
+   EXPLÍCITO (no solo redefinir la variable) — mismo motivo documentado
+   en Tarjeta.module.css: un texto plano sin su propia regla de color
+   no recoge el --texto redefinido si nada vuelve a leerlo acá. */
+.panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 100vw);
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--tarjeta-fondo);
+  border-left: 1px solid var(--degradado-plata-borde);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
+  --acento: var(--acento-zona-oscura);
+  --acento-fuerte: var(--acento-fuerte-zona-oscura);
+}
+
+.encabezado {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.titulo {
+  margin: 0;
+  font-family: var(--fuente-titulos);
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.botonCerrar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--borde-plata);
+  background: transparent;
+  color: var(--plata-etiqueta);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transicion-color);
+}
+
+.botonCerrar:hover,
+.botonCerrar:focus-visible {
+  border-color: var(--acento);
+  color: var(--acento);
+}
+
+.botonCerrar:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.contenido {
+  font-size: 13.5px;
+  line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.contenido h3 {
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.contenido p {
+  margin: 0 0 6px;
+}
+
+.contenido ul,
+.contenido ol {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.contenido code {
+  background: var(--superficie-2);
+  color: var(--texto-superficie-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12.5px;
+}
+
+@media (max-width: 480px) {
+  .panel {
+    width: 100vw;
+  }
+}

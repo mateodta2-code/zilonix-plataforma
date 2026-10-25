@@ -1,9 +1,12 @@
-/* Tarea "marca unificada": mismo borde azul/plata y línea azul
-   superior que <Tarjeta> (components/marco/Tarjeta.module.css) — este
-   formulario de filtros no usa ese componente (es solo un <form>,
-   para no forzar el padding/gap fijo de Tarjeta sobre una fila de
-   campos), pero sí comparte exactamente el mismo fondo y los mismos
-   tokens, para que no se vea "gris plano" al lado de las tarjetas. */
+/* Tarea "marca unificada" + issue #186 (Sharel, Refs): mismo borde
+   azul/plata, línea azul superior y la MISMA superficie oscura que
+   <Tarjeta>/TarjetaKpi (components/marco/Tarjeta.module.css, issue
+   #156) — este formulario de filtros no usa ese componente (es solo
+   un <form>, para no forzar el padding/gap fijo de Tarjeta sobre una
+   fila de campos), pero sí comparte exactamente el mismo fondo y los
+   mismos tokens, para que no se vea "caja blanca" al lado de las
+   tarjetas (antes --superficie, casi blanco en claro — el bug real
+   que pidió corregir Sharel). */
 .filtros {
   position: relative;
   isolation: isolate;
@@ -16,9 +19,27 @@
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
-    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
     var(--degradado-plata-borde) border-box;
   overflow: hidden;
+
+  /* Mismo criterio que Tarjeta.module.css: el fondo ya es oscuro en
+     los dos temas, así que las etiquetas (Campo.module.css) y
+     cualquier texto plano de adentro usan los tokens de "zona oscura"
+     también en los dos. .zx-control/.secundario quedan afuera a
+     propósito — pintan su propio --superficie-2 (--texto-superficie-2,
+     app/globals.css), nunca heredan esto. color EXPLÍCITO (no solo la
+     variable): un texto plano sin su propia regla de color hereda el
+     YA CALCULADO del ancestro más cercano que lo fije, no vuelve a
+     leer --texto acá — sin esta línea no se entera del cambio. */
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
 }
 
 .filtros::before {

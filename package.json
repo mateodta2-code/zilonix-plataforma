@@ -1,6 +1,6 @@
 {
   "name": "zilonix-plataforma",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx db/migrate.ts",
-    "docs:permisos": "tsx scripts/generar-matriz-permisos.ts"
+    "docs:permisos": "tsx scripts/generar-matriz-permisos.ts",
+    "extension:zip": "node scripts/empaquetar-extension.js"
   },
   "dependencies": {
     "next": "14.2.35",

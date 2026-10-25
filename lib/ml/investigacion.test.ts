@@ -62,14 +62,16 @@ function publicacion(parcial: Partial<PublicacionInvestigacion> = {}): Publicaci
   };
 }
 
-describe("validarTermino — 2 a 3 palabras (tarea Investigación ML, Parte 1)", () => {
-  it("acepta 2 y 3 palabras, recortadas", () => {
-    expect(validarTermino("  reloj digital  ")).toBe("reloj digital");
+// Issue #174 — antes exigía 2-3 palabras: una búsqueda real de una
+// sola palabra ("licuadora") no hacía nada, bug reportado por Sharel.
+describe("validarTermino — 1 a 3 palabras (issue #174)", () => {
+  it("acepta 1, 2 y 3 palabras, recortadas", () => {
+    expect(validarTermino("  reloj  ")).toBe("reloj");
+    expect(validarTermino("reloj digital")).toBe("reloj digital");
     expect(validarTermino("reloj digital casio")).toBe("reloj digital casio");
   });
 
-  it("rechaza una sola palabra, 4+, vacío y solo espacios", () => {
-    expect(() => validarTermino("reloj")).toThrow(TerminoInvalidoError);
+  it("rechaza 4+ palabras, vacío y solo espacios", () => {
     expect(() => validarTermino("reloj digital casio nuevo")).toThrow(TerminoInvalidoError);
     expect(() => validarTermino("")).toThrow(TerminoInvalidoError);
     expect(() => validarTermino("   ")).toThrow(TerminoInvalidoError);
@@ -272,8 +274,10 @@ describe("buscarInvestigacionProducto — orquestación con respuestas de Mercad
   // Issue #147, punto 5 — registrarBusqueda() descuenta cupo del límite
   // de 10/minuto; antes corría ANTES de validarTermino(), así que un
   // término inválido ya gastaba cupo real sin haber buscado nada.
-  it('término inválido ("reloj", 1 palabra) nunca descuenta cupo del límite de búsquedas', async () => {
-    await expect(buscarInvestigacionProducto("empresa-cupo", "reloj")).rejects.toThrow(TerminoInvalidoError);
+  // Issue #174: "reloj" (1 palabra) ya es válido — el término inválido
+  // de esta prueba pasa a ser 4+ palabras.
+  it("término inválido (4+ palabras) nunca descuenta cupo del límite de búsquedas", async () => {
+    await expect(buscarInvestigacionProducto("empresa-cupo", "reloj digital casio nuevo")).rejects.toThrow(TerminoInvalidoError);
     expect(buscarProductosCatalogo).not.toHaveBeenCalled();
     // Si hubiera descontado cupo, agotar las 10 búsquedas válidas de
     // abajo bloquearía la búsqueda 10 (no la 11) — confirma que el

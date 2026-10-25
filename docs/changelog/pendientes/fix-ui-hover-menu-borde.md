@@ -1,0 +1,1 @@
+- Menú lateral: el brillo al pasar el mouse queda por dentro del botón y ya no choca con el borde (Refs #172).

@@ -1,0 +1,1 @@
+- **2026-10-24**: En tema claro, el hover del menú lateral principal ya no se pone blanco y la letra se sigue leyendo (pedido de Sharel).
