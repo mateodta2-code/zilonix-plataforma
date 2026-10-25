@@ -16,7 +16,9 @@ import {
   listarSeguimientosConFotosParaVentas,
   listarSeguimientosConUltimaFoto,
   marcarAlertaLeida,
+  NOMBRE_PENDIENTE_PRIMERA_REVISION,
   obtenerDetalleSeguimiento,
+  resolverNombre,
   SinCuentaMlParaSeguimientoError,
   verificarCupoCompetidor,
 } from "./seguimientos";
@@ -142,7 +144,12 @@ describe("agregarSeguimiento (issue #175)", () => {
     expect(seguimiento.nombre).toBe("Reloj digital");
   });
 
-  it("tienda por seller_id: si Mercado Libre no deja ver el nickname, usa el id tal cual (nunca revienta)", async () => {
+  // Issue #201 — bug real en staging: antes el fallback era el id tal
+  // cual (ej. "123456789") y la tabla se llenaba de ids indistinguibles
+  // entre sí. Ahora el fallback es un placeholder explícito, nunca el
+  // id — lib/trabajos/revisionDiariaSeguimiento.ts reintenta resolverlo
+  // en la próxima revisión diaria mientras siga pendiente.
+  it("tienda por seller_id: si Mercado Libre no deja ver el nickname, usa el placeholder (nunca el id, nunca revienta)", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
     await conectarCuentaMl(empresaId);
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
@@ -151,7 +158,7 @@ describe("agregarSeguimiento (issue #175)", () => {
 
     expect(seguimiento.recursoMl).toBe("seller");
     expect(seguimiento.mlIdExterno).toBe("123456789");
-    expect(seguimiento.nombre).toBe("123456789");
+    expect(seguimiento.nombre).toBe(NOMBRE_PENDIENTE_PRIMERA_REVISION);
   });
 
   it("competidor que supera el cupo de 5: LimiteCompetidoresError, nunca inserta un sexto", async () => {
@@ -181,6 +188,48 @@ describe("agregarSeguimiento (issue #175)", () => {
 
     const activos = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.empresaId, empresaId)));
     expect(activos).toHaveLength(1);
+  });
+});
+
+// Issue #201 — resolverNombre() directo, sin pasar por agregarSeguimiento
+// (sin cuenta/token real de por medio) — el fallback nunca es el id,
+// siempre el placeholder explícito, para los 3 casos reales (item,
+// product de catálogo, tienda).
+describe("resolverNombre (issue #201)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("producto (item): trae el título real cuando Mercado Libre lo deja ver", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "MCO111", title: "Reloj digital", status: "active" })));
+    expect(await resolverNombre("producto", "item", "MCO111", "token")).toBe("Reloj digital");
+  });
+
+  it("producto (item): placeholder, nunca el id, si Mercado Libre no deja ver el título", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    expect(await resolverNombre("producto", "item", "MCO111", "token")).toBe(NOMBRE_PENDIENTE_PRIMERA_REVISION);
+  });
+
+  it("producto (catálogo): trae el nombre real; placeholder si Mercado Libre no lo deja ver", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ name: "Pulsera deportiva" })));
+    expect(await resolverNombre("producto", "product", "MCO222", "token")).toBe("Pulsera deportiva");
+
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    expect(await resolverNombre("producto", "product", "MCO222", "token")).toBe(NOMBRE_PENDIENTE_PRIMERA_REVISION);
+  });
+
+  it("tienda: trae el nickname real; placeholder si Mercado Libre no lo deja ver", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ nickname: "TIENDA_REAL" })));
+    expect(await resolverNombre("tienda", "seller", "123456", "token")).toBe("TIENDA_REAL");
+  });
+
+  it("nunca revienta: una falla de red también cae en el placeholder, nunca propaga ni usa el id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("falla de red");
+      })
+    );
+    expect(await resolverNombre("producto", "item", "MCO111", "token")).toBe(NOMBRE_PENDIENTE_PRIMERA_REVISION);
   });
 });
 

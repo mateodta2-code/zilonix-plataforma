@@ -6,6 +6,7 @@ import { db } from "@/db/index";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
+import { NOMBRE_PENDIENTE_PRIMERA_REVISION } from "@/lib/seguimiento/seguimientos";
 import { obtenerSeguimientosPendientesDeHoy, revisarAhoraUnSeguimiento, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
 
 // Issue #175 — prueba real contra Postgres (mismo criterio que
@@ -357,6 +358,80 @@ describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
     expect(linea).not.toContain("access-vigente");
 
     logSpy.mockRestore();
+  });
+});
+
+// Issue #201 — bug real en staging: si agregarSeguimiento() no pudo
+// resolver el nombre real ese instante, quedaba el id para siempre; la
+// revisión diaria tiene que corregirlo apenas pueda, con un token ya
+// confirmado vigente.
+//
+// Bug real de CI encontrado después (mismo issue): los dos tests de
+// abajo compartían UN solo seguimiento creado en un beforeAll — el
+// primer test actualizaba su nombre al real Y marcaba
+// ultima_revision_ts, así que el segundo test arrancaba con el nombre
+// YA resuelto (nunca entraba a reintentar, el chequeo
+// `nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION` ya daba falso) y,
+// encima, el seguimiento ya no aparecía en el lote de ese mismo día
+// (0 activos). Cada test ahora crea su PROPIA empresa/cuenta/
+// seguimiento con el placeholder, aislado del otro — nunca un fixture
+// compartido entre dos corridas de revisarSeguimientosDelDia.
+describe("revisarSeguimientosDelDia — resuelve el nombre pendiente en la primera revisión (issue #201)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function crearSeguimientoPendiente(prefijo: string) {
+    const creado = await crearEmpresaConUsuario(prefijo);
+    await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId: creado.empresaId,
+        cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+        nickname: `VENDEDOR_${prefijo}`,
+        accessTokenCifrado: cifrarToken("access-vigente"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
+
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId: creado.empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: nuevoMlId(),
+          nombre: NOMBRE_PENDIENTE_PRIMERA_REVISION, // a propósito: nunca se pudo resolver al agregar
+          linkOriginal: "https://x",
+          creadoPor: creado.usuarioId,
+        })
+        .returning()
+    );
+    return { empresaId: creado.empresaId, seguimientoId: seguimiento.id };
+  }
+
+  it("si Mercado Libre deja ver el título esta vez, actualiza el nombre real (nunca se queda pegado al placeholder)", async () => {
+    const { empresaId, seguimientoId } = await crearSeguimientoPendiente("NOMBRE-PENDIENTE-OK");
+    await aislarLotePara(seguimientoId);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuestaJson({ id: "MCO111", title: "Título real recién resuelto", price: 100, sold_quantity: 5, status: "active" }))
+    );
+
+    await revisarSeguimientosDelDia();
+
+    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
+    expect(actualizado.nombre).toBe("Título real recién resuelto");
+  });
+
+  it("si Mercado Libre sigue sin dejar verlo, el nombre se queda en el placeholder (nunca se pisa con el id ni con basura)", async () => {
+    const { empresaId, seguimientoId } = await crearSeguimientoPendiente("NOMBRE-PENDIENTE-SIGUE");
+    await aislarLotePara(seguimientoId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+
+    await revisarSeguimientosDelDia();
+
+    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
+    expect(actualizado.nombre).toBe(NOMBRE_PENDIENTE_PRIMERA_REVISION);
   });
 });
 
