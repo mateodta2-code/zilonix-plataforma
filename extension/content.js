@@ -262,6 +262,93 @@
 
     const boton = panel.querySelector(".zx-boton-copiar");
     boton.onclick = () => copiarAlPortapapeles(csvDeListado(productos), boton);
+    agregarBotonEnviarListado(panel, productos);
+  }
+
+  // Issue #213 — "Enviar a Zilonix": mismo estilo que "Seguir en
+  // Zilonix" (zx-boton-seguir, plateado) — construido con createElement/
+  // textContent, nunca innerHTML, mismo criterio que agregarBotonSeguir.
+  // Un solo clic real dispara el envío; nunca se repite solo ni en un
+  // reescaneo automático.
+  function agregarBotonEnviarListado(panel, productos) {
+    const pie = panel.querySelector(".zx-panel__pie");
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.className = "zx-boton-seguir";
+    boton.textContent = "Enviar a Zilonix";
+    boton.onclick = () => {
+      enviarListadoAZilonix(productos);
+      boton.textContent = "Enviado ✓";
+      boton.disabled = true;
+      setTimeout(() => {
+        boton.textContent = "Enviar a Zilonix";
+        boton.disabled = false;
+      }, 1500);
+    };
+    pie.appendChild(boton);
+  }
+
+  // Issue #213 — "Importar listado": en una página de búsqueda/listado
+  // (cualquiera de los 6 sitios), con un clic real de la persona en el
+  // botón "Enviar a Zilonix" del panel flotante, se manda hasta
+  // TOPE_PRODUCTOS_ENVIO_LISTADO candidatos (título, precio, vendidos
+  // si el sitio lo muestra, link ya resuelto a absoluto y validado) al
+  // panel de Investigación, por el mismo relevo que "Completar
+  // vendidos" (content.js -> background.js -> marcador-zilonix.js ->
+  // postMessage). Nunca manda nada solo al cargar la página — siempre
+  // detrás del clic del botón.
+  const TOPE_PRODUCTOS_ENVIO_LISTADO = 20;
+
+  // Mismo criterio de orden que ordenarPorVendidos (lib/ml/investigacionCliente.ts,
+  // panel): con vendidos real siempre antes que sin dato, más vendidos
+  // primero; entre los que no tienen dato, precio descendente.
+  function ordenarProductosListado(productos) {
+    return [...productos].sort((a, b) => {
+      const aVendidos = typeof a.vendidos === "number";
+      const bVendidos = typeof b.vendidos === "number";
+      if (aVendidos && bVendidos) return b.vendidos - a.vendidos;
+      if (aVendidos) return -1;
+      if (bVendidos) return 1;
+      const aPrecio = typeof a.precio === "number" ? a.precio : -Infinity;
+      const bPrecio = typeof b.precio === "number" ? b.precio : -Infinity;
+      return bPrecio - aPrecio;
+    });
+  }
+
+  // El link de un listado puede venir relativo (ej. Amazon: "/dp/XXXX")
+  // — se resuelve contra la URL real de esta página ANTES de validarlo
+  // con ZilonixSeguridad.linkSeguro (que exige http(s) real), para no
+  // perder el link solo por venir sin dominio. Nunca un javascript:/
+  // data: disfrazado: linkSeguro lo descarta igual después de resolver.
+  function resolverLinkListadoSeguro(valor) {
+    if (typeof valor !== "string" || !valor) return null;
+    try {
+      return ZS.linkSeguro(new URL(valor, location.href).href);
+    } catch {
+      return null;
+    }
+  }
+
+  function enviarListadoAZilonix(productos) {
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    const candidatos = ordenarProductosListado(productos)
+      .filter((p) => p.titulo && typeof p.precio === "number" && Number.isFinite(p.precio))
+      .slice(0, TOPE_PRODUCTOS_ENVIO_LISTADO)
+      .map((p) => ({
+        titulo: p.titulo,
+        precio: p.precio,
+        vendidos: typeof p.vendidos === "number" ? p.vendidos : null,
+        link: resolverLinkListadoSeguro(p.link),
+      }));
+    if (!candidatos.length) return; // nada confiable para mandar — nunca un mensaje vacío
+    const payload = { plataforma: lector.sitio, url: location.href, productos: candidatos };
+    try {
+      chrome.runtime.sendMessage({ tipo: "zilonix:listado", payload }, () => {
+        void chrome.runtime.lastError; // sin panel de Investigación abierto en ninguna pestaña — nunca un error real
+      });
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe el panel.
+    }
   }
 
   // Issue #210 — "Completar vendidos": cuando la persona abre un
