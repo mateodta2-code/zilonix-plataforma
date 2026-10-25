@@ -128,9 +128,9 @@ El SQL/RLS de producción y el smoke de "Seguir en Zilonix" ya están resueltos 
    - En el log de esa corrida (pestaña del job en GitHub Actions) no hay nada más que imprimir — el `curl` solo confirma que la petición HTTP llegó.
    - El dato real está en Postgres: con el mismo túnel/`psql` de la sección 2,
      ```sql
-     SELECT seguimiento_id, fecha, precio, vendidos FROM seguimiento_fotos ORDER BY creado_ts DESC LIMIT 5;
+     SELECT seguimiento_id, fecha, franja, precio, vendidos FROM seguimiento_fotos ORDER BY creado_ts DESC LIMIT 5;
      ```
-     tiene que aparecer al menos una fila con la fecha de hoy (igual que el paso 3 de la sección 4 — mismo chequeo, repetido acá para no tener que ir a buscarlo).
+     tiene que aparecer al menos una fila con la fecha de hoy (igual que el paso 3 de la sección 4 — mismo chequeo, repetido acá para no tener que ir a buscarlo). Issue #244 — `franja` ("manana"/"tarde") dice cuál de las dos pasadas del día guardó esa fila.
    - Si se tiene acceso a los logs del servicio `web` en Railway (producción) del momento exacto de la corrida, la línea real que deja el trabajo es `[lib/trabajos/revisionDiariaSeguimiento] lote del día: N activos, N procesados, N saltados, N con error, N alertas creadas.` (`lib/trabajos/revisionDiariaSeguimiento.ts`) — confirma cuántos seguimientos se intentaron sin tener que contarlos a mano en la tabla.
 5. **Qué NO hacer en este paso** (además de lo ya dicho en "Qué NO hacer" al final del documento):
    - Nunca tocar `DATABASE_URL_APP` para esto — ese incidente ya está resuelto (2.5), y esta tarea es solo del secreto de GitHub y el workflow, no de ninguna variable de conexión.
@@ -143,11 +143,11 @@ El SQL/RLS de producción y el smoke de "Seguir en Zilonix" ya están resueltos 
 2. Confirmar que la corrida termina en verde (ningún `curl` con `-f` falla silencioso — si el secreto no coincide o falta una variable, el paso se ve rojo).
 3. Verificar que de verdad guardó fotos — con el mismo túnel/psql del paso 2:
    ```sql
-   SELECT seguimiento_id, fecha, precio, vendidos FROM seguimiento_fotos ORDER BY creado_ts DESC LIMIT 5;
+   SELECT seguimiento_id, fecha, franja, precio, vendidos FROM seguimiento_fotos ORDER BY creado_ts DESC LIMIT 5;
    ```
    Tiene que aparecer al menos una fila con la fecha de hoy.
 4. Repetir el Run workflow una o dos veces más en los días siguientes (a mano) antes de confiar en que el cron automático va a andar solo.
-5. **Recién cuando los pasos 1-4 ya se probaron en verde varias veces**: descomentar el bloque `schedule` de `.github/workflows/revision-diaria-seguimiento-produccion.yml` (`cron: "0 8-13 * * *"`, mismo horario que staging — 6 corridas, 08:00 a 13:00 UTC) en un commit aparte, y hacer push a `main` → `produccion` de nuevo.
+5. **Recién cuando los pasos 1-4 ya se probaron en verde varias veces**: descomentar el bloque `schedule` de `.github/workflows/revision-diaria-seguimiento-produccion.yml` (`cron: "0 14,15,22,23 * * *"`, mismo horario que staging desde el issue #244 — 2 ventanas de 2 corridas: ~09:00-10:00 y ~17:00-18:00 en Colombia, una por franja mañana/tarde, ver `docs/cron-seguimiento.md`) en un commit aparte, y hacer push a `main` → `produccion` de nuevo.
 
 ## Qué NO hacer
 

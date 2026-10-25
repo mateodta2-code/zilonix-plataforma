@@ -7,7 +7,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarAlertasDelDia, listarSeguimientosConUltimaFoto, LIMITE_COMPETIDORES_POR_EMPRESA } from "@/lib/seguimiento/seguimientos";
 import { mensajeAlerta } from "@/lib/seguimiento/alertas";
-import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
+import { calcularDelta, calcularVentasHoy, periodoVentas } from "@/lib/seguimiento/comparativa";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
 import { Ayuda } from "@/components/marco/Ayuda";
 import { Boton, BotonLink } from "@/components/marco/Boton";
@@ -70,6 +70,14 @@ function celdaConDelta(
 }
 
 const numeroPlano = (n: number) => n.toLocaleString("es-CO");
+
+// Issue #244 — fecha Y hora en America/Bogota (antes solo la fecha,
+// con el huso horario del SERVIDOR — Railway corre en UTC, así que
+// ahí ya venía mal cerca de la medianoche en Colombia). Mismo patrón
+// que app/panel/pedidos/page.tsx y app/panel/despachos/page.tsx.
+function fechaHoraBogota(d: Date | string): string {
+  return new Date(d).toLocaleString("es-CO", { timeZone: "America/Bogota" });
+}
 
 // Issue #200 (Sharel) — la tarjeta de abajo solo tenía el "?" chico
 // (Ayuda.tsx) y a un cliente no le alcanzaba. Guía más larga, en un
@@ -342,6 +350,12 @@ export default async function SeguimientoPage({
           >
             {seguimientos.map(({ seguimiento, ultimaFoto, fotoAnterior, fotoHaceUnMes }) => {
               const ventasHoy = calcularVentasHoy(ultimaFoto?.vendidos ?? null, fotoAnterior?.vendidos ?? null);
+              // Issue #244 — honesto: con 2 fotos al día, "ventas hoy"
+              // puede ser la venta PARCIAL de la jornada en curso
+              // (mañana vs tarde de hoy), no el cierre de un día
+              // completo — nunca se muestra el mismo número sin avisar
+              // cuál de los dos es.
+              const periodo = periodoVentas(ultimaFoto?.fecha ?? null, fotoAnterior?.fecha ?? null);
               const deltaUnMes = fotoHaceUnMes ? calcularDelta(ultimaFoto?.vendidos ?? null, fotoHaceUnMes.vendidos) : null;
               return (
                 <FilaTabla key={seguimiento.id}>
@@ -365,14 +379,19 @@ export default async function SeguimientoPage({
                   </CeldaTabla>
                   <CeldaTabla>
                     {ultimaFoto?.vendidos ?? "—"}
-                    {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
+                    {ventasHoy != null ? (
+                      <div className={styles.subdato}>
+                        {periodo === "parcial" ? "Ventas parciales de hoy" : "Ventas hoy"}: {ventasHoy}
+                        {periodo === "parcial" ? <Chip estado="aviso">Parcial del día</Chip> : null}
+                      </div>
+                    ) : null}
                   </CeldaTabla>
                   <CeldaTabla>
                     {!fotoHaceUnMes ? "Aún sin 30 días" : deltaUnMes == null ? "—" : conSigno(deltaUnMes, numeroPlano)}
                   </CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.enCatalogo ?? null, "Sí", "No")}</CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.ganaBotonCompra ?? null, "Gana", "Pierde")}</CeldaTabla>
-                  <CeldaTabla>{seguimiento.ultimaRevisionTs ? new Date(seguimiento.ultimaRevisionTs).toLocaleDateString("es-CO") : "Todavía sin revisar"}</CeldaTabla>
+                  <CeldaTabla>{seguimiento.ultimaRevisionTs ? fechaHoraBogota(seguimiento.ultimaRevisionTs) : "Todavía sin revisar"}</CeldaTabla>
                   <CeldaTabla>
                     <a href={construirLinkMlDeSeguimiento(seguimiento.recursoMl, seguimiento.mlIdExterno)} target="_blank" rel="noopener noreferrer">
                       Ver en ML

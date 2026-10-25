@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
@@ -225,11 +225,16 @@ export async function listarSeguimientosConUltimaFoto(empresaId: string): Promis
 
     const resultado: SeguimientoConUltimaFoto[] = [];
     for (const seguimiento of activos) {
+      // Issue #244 — desc(creadoTs) como segundo criterio: con 2 fotos
+      // el mismo día (mañana/tarde, misma `fecha`), decide cuál es la
+      // más nueva de verdad. Sin esto, fotos[0]/fotos[1] podían salir
+      // en cualquier orden entre esas dos filas (ORDER BY con un
+      // empate no garantiza ningún orden estable).
       const fotos = await tx
         .select()
         .from(seguimientoFotos)
         .where(eq(seguimientoFotos.seguimientoId, seguimiento.id))
-        .orderBy(desc(seguimientoFotos.fecha));
+        .orderBy(desc(seguimientoFotos.fecha), desc(seguimientoFotos.creadoTs));
       const ultimaFoto = fotos[0] ?? null;
       const fotoAnterior = fotos[1] ?? null;
       const fotoHaceUnMes = ultimaFoto ? buscarFotoDeHaceUnMes(fotos.slice(1), ultimaFoto.fecha) : null;
@@ -280,6 +285,16 @@ function fotoMasCercaDe(fotos: (typeof seguimientoFotos.$inferSelect)[], objetiv
 // cercana a hace 30 días (para ventasDelPeriodo() de "~30 días").
 // Mismo criterio de volumen que listarSeguimientosConUltimaFoto (N+1 a
 // propósito, nunca cientos de seguimientos por empresa).
+//
+// Issue #244 — "2 fotos al día" cambia QUÉ significa "las dos fotos
+// más recientes", sin que esta función tenga que saberlo: si hoy ya
+// tiene su foto de la mañana Y la de la tarde, las dos más recientes
+// son ESAS DOS (ultimaFoto=tarde, fotoAnterior=mañana) — la resta que
+// ya hace ventasDelPeriodo() del lado del panel pasa a ser, sin ningún
+// cambio ahí, la venta PARCIAL de hoy. Si hoy todavía tiene una sola
+// foto, las dos más recientes siguen siendo hoy/ayer, igual que
+// siempre. Ver periodoVentas() en lib/seguimiento/comparativa.ts para
+// cómo el panel distingue un caso del otro en la etiqueta.
 export async function listarSeguimientosConFotosParaVentas(empresaId: string): Promise<SeguimientoConFotosParaVentas[]> {
   return dbComoEmpresa(empresaId, async (tx) => {
     const activos = await tx.select().from(seguimientosMl).where(and(eq(seguimientosMl.empresaId, empresaId), isNull(seguimientosMl.eliminadoTs))).orderBy(desc(seguimientosMl.creadoTs));
@@ -296,7 +311,7 @@ export async function listarSeguimientosConFotosParaVentas(empresaId: string): P
         .select()
         .from(seguimientoFotos)
         .where(eq(seguimientoFotos.seguimientoId, seguimiento.id))
-        .orderBy(desc(seguimientoFotos.fecha))
+        .orderBy(desc(seguimientoFotos.fecha), desc(seguimientoFotos.creadoTs))
         .limit(2);
 
       const candidatas30d = await tx
@@ -342,7 +357,7 @@ export async function buscarMedicionSiExiste(empresaId: string, mlIdExterno: str
       .select()
       .from(seguimientoFotos)
       .where(eq(seguimientoFotos.seguimientoId, seguimiento.id))
-      .orderBy(desc(seguimientoFotos.fecha))
+      .orderBy(desc(seguimientoFotos.fecha), desc(seguimientoFotos.creadoTs)) // issue #244 — tiebreak con 2 fotos el mismo día
       .limit(1);
     if (!ultimaFoto) return null;
 
@@ -375,13 +390,20 @@ export type DetalleSeguimiento = {
 
 // Detalle con historial completo — la gráfica de precio/ventas por día
 // (punto 5) se arma en la página directo a partir de `fotos`, en el
-// orden que ya vienen (más viejo primero).
+// orden que ya vienen (más viejo primero). Issue #244 — asc(creadoTs)
+// como segundo criterio: con 2 fotos el mismo día (mañana/tarde),
+// quedan en el orden cronológico real, nunca en un orden arbitrario
+// entre esas dos filas empatadas por `fecha`.
 export async function obtenerDetalleSeguimiento(empresaId: string, seguimientoId: string): Promise<DetalleSeguimiento | null> {
   return dbComoEmpresa(empresaId, async (tx) => {
     const [seguimiento] = await tx.select().from(seguimientosMl).where(and(eq(seguimientosMl.id, seguimientoId), eq(seguimientosMl.empresaId, empresaId)));
     if (!seguimiento) return null;
 
-    const fotos = await tx.select().from(seguimientoFotos).where(eq(seguimientoFotos.seguimientoId, seguimientoId)).orderBy(seguimientoFotos.fecha);
+    const fotos = await tx
+      .select()
+      .from(seguimientoFotos)
+      .where(eq(seguimientoFotos.seguimientoId, seguimientoId))
+      .orderBy(asc(seguimientoFotos.fecha), asc(seguimientoFotos.creadoTs));
     const alertas = await tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimientoId)).orderBy(desc(seguimientoAlertas.creadoTs));
     return { seguimiento, fotos, alertas };
   });

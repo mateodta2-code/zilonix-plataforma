@@ -23,6 +23,23 @@ export function calcularVentasHoy(actual: number | null, anterior: number | null
   return delta == null ? null : Math.max(0, delta);
 }
 
+export type PeriodoVentas = "parcial" | "diario";
+
+// Issue #244 — "etiqueta honesta": listarSeguimientosConFotosParaVentas
+// siempre entrega las DOS fotos más recientes como "ultimaFoto"/
+// "fotoAnterior", pero desde que hay 2 fotos al día esas dos pueden
+// ser del MISMO día (mañana y tarde de hoy) — ahí calcularVentasHoy()
+// da una venta PARCIAL de la jornada en curso, no el cierre de un día
+// completo contra el anterior. Nunca se decide comparando por hora o
+// por franja: alcanza con la MISMA `fecha` en las dos fotos (mismo
+// criterio que usa el propio Postgres para "mismo día", ver
+// seguimiento_fotos.fecha en db/schema.ts) — null si falta cualquiera
+// de las dos fechas (nunca hay venta que etiquetar sin las dos fotos).
+export function periodoVentas(fechaUltima: Date | null, fechaAnterior: Date | null): PeriodoVentas | null {
+  if (fechaUltima == null || fechaAnterior == null) return null;
+  return fechaUltima.getTime() === fechaAnterior.getTime() ? "parcial" : "diario";
+}
+
 const DIAS_MINIMO_VENTANA_MES = 25;
 const DIAS_OBJETIVO_VENTANA_MES = 30;
 const MS_POR_DIA = 1000 * 60 * 60 * 24;

@@ -6,6 +6,7 @@ import { db } from "@/db/index";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
+import { franjaBogota } from "@/lib/seguimiento/franja";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION } from "@/lib/seguimiento/seguimientos";
 import { obtenerSeguimientosPendientesDeHoy, revisarAhoraUnSeguimiento, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
 
@@ -309,11 +310,17 @@ describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
     // cubre. ultima_revision_ts queda en null a propósito, para que
     // el seguimiento SÍ entre al lote (si ya estuviera marcado, el
     // filtro de obtenerSeguimientosPendientesDeHoy lo excluiría antes
-    // de llegar a revisarUnSeguimiento).
+    // de llegar a revisarUnSeguimiento). Issue #244 — franja explícita
+    // igual a la real de AHORA (misma razón que YA-REVISADO-HOY más
+    // abajo): revisarSeguimientosDelDia() de este it mira el reloj
+    // real, así que esta foto tiene que estar en la MISMA franja para
+    // que el índice único choque — si no, insertaría una franja
+    // distinta y el seguimiento no quedaría saltado, según la hora
+    // real en que corra la prueba.
     const hoy = new Date();
     hoy.setUTCHours(0, 0, 0, 0);
     await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: hoy, precio: "100", estado: "active" })
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: hoy, franja: franjaBogota(), precio: "100", estado: "active" })
     );
   });
 
@@ -495,12 +502,17 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     expect(actualizado.ultimaRevisionTs).not.toBeNull();
   });
 
-  it("si ya hay una foto de hoy (ej. el cron ya corrió), queda saltado — nunca duplica ni sobreescribe", async () => {
+  it("si ya hay una foto de ESTA franja hoy (ej. el cron ya corrió), queda saltado — nunca duplica ni sobreescribe", async () => {
     const seguimiento = await crearSeguimientoConCuenta("YA-REVISADO-HOY");
     const hoy = new Date();
     hoy.setUTCHours(0, 0, 0, 0);
+    // Issue #244 — misma franja que la que va a calcular revisarAhoraUnSeguimiento
+    // más abajo (las dos miran el reloj real, a milisegundos de
+    // diferencia): si no coincidiera, el insert de abajo no chocaría
+    // contra el índice único (franjas distintas = filas distintas) y
+    // la prueba fallaría según la hora real en que corra.
     await dbComoEmpresa(seguimiento.empresaId, (tx) =>
-      tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: hoy, precio: "50", estado: "active" })
+      tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: hoy, franja: franjaBogota(), precio: "50", estado: "active" })
     );
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" }))); // si duplicara, este precio lo delataría
 
@@ -539,6 +551,119 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
 
     const [sinTocar] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
     expect(sinTocar.ultimaRevisionTs).toBeNull();
+  });
+});
+
+// Issue #244 (decisión de Sharel, 2026-10-25) — "2 fotos al día": la
+// pasada de la tarde ya no se salta siempre como antes (antes, "ya
+// revisado hoy" bloqueaba cualquier otra franja); ahora solo se salta
+// si ya tuvo la franja ACTUAL. Instantes FIJOS de HOY (mismo día real
+// que usa aislarLotePara, solo con la HORA elegida a mano) para que la
+// prueba nunca dependa de a qué hora del día corra en CI.
+describe("2 fotos al día — franja mañana/tarde (issue #244)", () => {
+  function hoyALasUtc(hora: number): Date {
+    const instante = new Date();
+    instante.setUTCHours(hora, 0, 0, 0);
+    return instante;
+  }
+  const AHORA_MANANA = hoyALasUtc(14); // 09:00 Bogotá
+  const AHORA_TARDE = hoyALasUtc(23); // 18:00 Bogotá
+
+  async function crearSeguimientoConCuenta(prefijo: string) {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario(prefijo);
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId,
+        cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+        nickname: `VENDEDOR_${prefijo}`,
+        accessTokenCifrado: cifrarToken("access-vigente"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
+    const [seguimiento] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: nuevoMlId(),
+          nombre: "Producto de prueba",
+          linkOriginal: "https://x",
+          creadoPor: usuarioId,
+        })
+        .returning()
+    );
+    return seguimiento;
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("manana + tarde el mismo día: 2 fotos reales, cada una con su franja, nunca pisa la primera", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("DOS-FOTOS-DIA");
+
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 100, sold_quantity: 100, status: "active" })));
+    const manana = await revisarAhoraUnSeguimiento(seguimiento, AHORA_MANANA);
+    expect(manana).toEqual({ ok: true, saltado: false, alertasCreadas: 0 }); // primera foto del seguimiento, nada con qué comparar
+
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 100, sold_quantity: 130, status: "active" })));
+    const tarde = await revisarAhoraUnSeguimiento(seguimiento, AHORA_TARDE);
+    expect(tarde.ok).toBe(true);
+    expect((tarde as { ok: true; saltado: boolean }).saltado).toBe(false); // franja DISTINTA de la de la mañana — nunca saltado
+
+    const hoy = new Date(AHORA_MANANA);
+    hoy.setUTCHours(0, 0, 0, 0);
+    const fotosDeHoy = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx
+        .select()
+        .from(seguimientoFotos)
+        .where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+        .orderBy(seguimientoFotos.creadoTs)
+    );
+    expect(fotosDeHoy).toHaveLength(2);
+    expect(fotosDeHoy[0].franja).toBe("manana");
+    expect(fotosDeHoy[0].vendidos).toBe(100);
+    expect(fotosDeHoy[1].franja).toBe("tarde");
+    expect(fotosDeHoy[1].vendidos).toBe(130);
+  });
+
+  it("una 2ª llamada en la MISMA franja sigue saltando — nunca duplica dentro de la misma franja", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("MISMA-FRANJA-SALTA");
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 100, sold_quantity: 10, status: "active" })));
+    const primera = await revisarAhoraUnSeguimiento(seguimiento, AHORA_MANANA);
+    expect(primera).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
+
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, sold_quantity: 999, status: "active" }))); // si no saltara, este precio lo delataría
+    const repetida = await revisarAhoraUnSeguimiento(seguimiento, AHORA_MANANA);
+    expect(repetida).toEqual({ ok: true, saltado: true, alertasCreadas: 0 });
+  });
+
+  it("obtenerSeguimientosPendientesDeHoy: tras la pasada de mañana, no aparece en franja manana, pero SÍ en franja tarde", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("PENDIENTES-POR-FRANJA");
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 100, sold_quantity: 10, status: "active" })));
+    await revisarAhoraUnSeguimiento(seguimiento, AHORA_MANANA);
+
+    const pendientesManana = await obtenerSeguimientosPendientesDeHoy(AHORA_MANANA);
+    expect(pendientesManana.some((p) => p.id === seguimiento.id)).toBe(false);
+
+    const pendientesTarde = await obtenerSeguimientosPendientesDeHoy(AHORA_TARDE);
+    expect(pendientesTarde.some((p) => p.id === seguimiento.id)).toBe(true);
+  });
+
+  it("una sola foto en total (recién agregado): sin foto anterior, ventasDelPeriodo() nunca inventa un número", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("UNA-SOLA-FOTO");
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 100, sold_quantity: 70, status: "active" })));
+    await revisarAhoraUnSeguimiento(seguimiento, AHORA_MANANA);
+
+    const { listarSeguimientosConUltimaFoto } = await import("@/lib/seguimiento/seguimientos");
+    const { ventasDelPeriodo } = await import("@/lib/seguimiento/ventas");
+    const lista = await listarSeguimientosConUltimaFoto(seguimiento.empresaId);
+    const fila = lista.find((f) => f.seguimiento.id === seguimiento.id);
+
+    expect(fila?.ultimaFoto?.vendidos).toBe(70);
+    expect(fila?.fotoAnterior).toBeNull(); // nunca inventa una foto anterior que no existe
+    expect(ventasDelPeriodo(fila?.ultimaFoto?.vendidos ?? null, fila?.fotoAnterior?.vendidos ?? null)).toBeNull();
   });
 });
 

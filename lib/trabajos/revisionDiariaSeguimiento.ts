@@ -6,6 +6,7 @@ import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuent
 import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
 import { compararFotos, type FotoComparable } from "@/lib/seguimiento/alertas";
+import { franjaBogota, limiteFranjaDeHoy } from "@/lib/seguimiento/franja";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION, resolverNombre } from "@/lib/seguimiento/seguimientos";
 
 // Issue #175 — regla de CLAUDE.md: "toda tarea en segundo plano vive
@@ -49,8 +50,11 @@ export type ResultadoRevisionDiaria = {
 // Solo la FECHA (medianoche UTC) — "misma fecha" es la clave real de
 // "misma foto del día", nunca el instante exacto en que corrió el
 // trabajo (ver el comentario de seguimiento_fotos.fecha en db/schema.ts).
-function fechaDeHoy(): Date {
-  const hoy = new Date();
+// Issue #244 — acepta `ahora` (default: el reloj real) para poder
+// probar el corte de franja con un instante fijo, sin depender de en
+// qué momento del día corra la prueba.
+function fechaDeHoy(ahora: Date = new Date()): Date {
+  const hoy = new Date(ahora);
   hoy.setUTCHours(0, 0, 0, 0);
   return hoy;
 }
@@ -60,27 +64,37 @@ function fechaDeHoy(): Date {
 // de un lote. Dos correcciones, exportada aparte para poder probar el
 // orden y el filtro solos:
 // - Filtro: nunca un seguimiento ya eliminado, y solo los que NO se
-//   revisaron hoy (ultima_revision_ts < medianoche UTC, o null — nunca
-//   revisado) — uno ya revisado hoy no vuelve a entrar en la cola
-//   aunque el cron corra varias veces (ver docs/cron-seguimiento.md,
-//   corre cada hora).
+//   revisaron todavía en la franja actual (ultima_revision_ts antes
+//   del límite de la franja de hoy, o null — nunca revisado) — uno ya
+//   revisado en ESTA franja no vuelve a entrar en la cola aunque el
+//   cron corra varias veces (ver docs/cron-seguimiento.md).
 // - Orden: ASC NULLS FIRST por ultima_revision_ts — el que nunca se
 //   revisó, o el que hace más tiempo que no se revisa, entra primero
-//   al lote. Así, entre varias corridas del mismo día, el lote
+//   al lote. Así, entre varias corridas de la misma franja, el lote
 //   siguiente SÍ llega a los que quedaron afuera del anterior, nunca
 //   repite los mismos primeros 50 una y otra vez.
-export async function obtenerSeguimientosPendientesDeHoy(): Promise<(typeof seguimientosMl.$inferSelect)[]> {
-  const hoy = fechaDeHoy();
+//
+// Issue #244 — "2 fotos al día": en franja "manana" el límite sigue
+// siendo la medianoche de hoy (idéntico al comportamiento de siempre:
+// una sola pasada). En franja "tarde" el límite se corre hasta el
+// corte de hoy (limiteFranjaDeHoy) — eso deja pendiente, de nuevo, a
+// quien YA tuvo su pasada de "manana" pero todavía no la de "tarde".
+// Antes, la 2ª pasada del día se saltaba siempre ("ya revisado hoy"
+// bloqueaba cualquier otra franja); ahora solo se salta si ya tuvo la
+// franja ACTUAL, nunca una franja anterior del mismo día.
+export async function obtenerSeguimientosPendientesDeHoy(ahora: Date = new Date()): Promise<(typeof seguimientosMl.$inferSelect)[]> {
+  const hoy = fechaDeHoy(ahora);
+  const limite = franjaBogota(ahora) === "tarde" ? limiteFranjaDeHoy(hoy) : hoy;
   return dbTrabajadorSeguimiento
     .select()
     .from(seguimientosMl)
-    .where(and(isNull(seguimientosMl.eliminadoTs), or(isNull(seguimientosMl.ultimaRevisionTs), lt(seguimientosMl.ultimaRevisionTs, hoy))))
+    .where(and(isNull(seguimientosMl.eliminadoTs), or(isNull(seguimientosMl.ultimaRevisionTs), lt(seguimientosMl.ultimaRevisionTs, limite))))
     .orderBy(sql`${seguimientosMl.ultimaRevisionTs} ASC NULLS FIRST`)
     .limit(TAMAÑO_LOTE);
 }
 
-export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiaria> {
-  const activos = await obtenerSeguimientosPendientesDeHoy();
+export async function revisarSeguimientosDelDia(ahora: Date = new Date()): Promise<ResultadoRevisionDiaria> {
+  const activos = await obtenerSeguimientosPendientesDeHoy(ahora);
 
   let procesados = 0;
   let saltados = 0;
@@ -91,7 +105,7 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
     if (i > 0) await esperar(PAUSA_ENTRE_SEGUIMIENTOS_MS);
     const seguimiento = activos[i];
     try {
-      const resultado = await revisarUnSeguimiento(seguimiento);
+      const resultado = await revisarUnSeguimiento(seguimiento, ahora);
       if (resultado.saltado) saltados += 1;
       else procesados += 1;
       alertasCreadas += resultado.alertasCreadas;
@@ -158,14 +172,15 @@ function aFotoComparable(fila: typeof seguimientoFotos.$inferSelect): FotoCompar
 
 type ResultadoUnSeguimiento = { saltado: boolean; alertasCreadas: number };
 
-// `saltado: true` SOLO cuando el índice único seguimiento_id+fecha
-// bloqueó el insert porque ya había una foto de hoy (ver el
+// `saltado: true` SOLO cuando el índice único seguimiento_id+fecha+franja
+// bloqueó el insert porque ya había una foto de ESTA franja hoy (ver el
 // onConflictDoNothing más abajo) — nunca se escribió nada nuevo.
 // `saltado: false` con `alertasCreadas: 0` es un caso DISTINTO: la
-// foto de hoy SÍ se escribió (sí fue "procesado"), simplemente no hay
-// foto de ayer con qué compararla todavía (primera foto de este
-// seguimiento) — no hay alertas que generar, pero no es un salto.
-async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoUnSeguimiento> {
+// foto de esta franja SÍ se escribió (sí fue "procesado"), simplemente
+// no hay ninguna foto anterior con qué compararla todavía (primera
+// foto de este seguimiento) — no hay alertas que generar, pero no es
+// un salto.
+async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect, ahora: Date = new Date()): Promise<ResultadoUnSeguimiento> {
   const cuenta = await obtenerCuentaMlActiva(seguimiento.empresaId);
   if (!cuenta) throw new Error("La empresa no tiene ninguna cuenta de Mercado Libre conectada.");
 
@@ -190,14 +205,28 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
 
   const datos = await leerConReintento429(seguimiento, token, cuentaFila.cuentaIdExterna);
 
-  const hoy = fechaDeHoy();
+  const hoy = fechaDeHoy(ahora);
+  const franja = franjaBogota(ahora);
 
+  // Issue #244 — antes comparaba SOLO contra la foto de un día
+  // anterior (`fecha < hoy`): con una sola foto por día alcanzaba,
+  // pero con 2 pasadas la de la tarde volvía a compararse contra
+  // "ayer" en vez de contra la de la mañana de HOY — generaba la MISMA
+  // alerta duplicada dos veces el mismo día (ej. "bajó el precio" a
+  // las 9am Y otra vez a las 6pm, aunque no cambió nada entre medio).
+  // Ahora es la foto real más reciente que ya exista, sea de hoy
+  // temprano o de un día previo — así la pasada de la tarde compara
+  // contra la de la mañana cuando las dos existen (alerta real si algo
+  // cambió en el día, ninguna si no cambió), y contra la de ayer
+  // cuando todavía no hay foto de hoy (comportamiento de siempre).
+  // desc(creadoTs) como segundo criterio: con dos fotos del mismo día
+  // (misma `fecha`), decide cuál es la más nueva de verdad.
   const [fotoAnterior] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx
       .select()
       .from(seguimientoFotos)
-      .where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), lt(seguimientoFotos.fecha, hoy)))
-      .orderBy(desc(seguimientoFotos.fecha))
+      .where(eq(seguimientoFotos.seguimientoId, seguimiento.id))
+      .orderBy(desc(seguimientoFotos.fecha), desc(seguimientoFotos.creadoTs))
       .limit(1)
   );
 
@@ -208,6 +237,7 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
         empresaId: seguimiento.empresaId,
         seguimientoId: seguimiento.id,
         fecha: hoy,
+        franja,
         precio: datos.precio != null ? String(datos.precio) : null,
         precioAnterior: datos.precioAnterior != null ? String(datos.precioAnterior) : null,
         inventarioDisponible: datos.inventarioDisponible,
@@ -220,10 +250,11 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
         esEnvioGratis: datos.esEnvioGratis,
         publicaciones: datos.publicaciones,
       })
-      // Si el trabajo ya corrió hoy para este seguimiento (una corrida
-      // manual repetida, o el cron disparado dos veces), el índice
-      // único seguimiento_id+fecha lo bloquea — onConflictDoNothing en
-      // vez de dejar que la excepción tumbe el lote entero.
+      // Si el trabajo ya corrió en ESTA franja hoy para este
+      // seguimiento (una corrida manual repetida, o el cron disparado
+      // dos veces dentro de la misma franja), el índice único
+      // seguimiento_id+fecha+franja lo bloquea — onConflictDoNothing
+      // en vez de dejar que la excepción tumbe el lote entero.
       .onConflictDoNothing()
       .returning()
   );
@@ -267,13 +298,16 @@ export type ResultadoRevisionInmediata = { ok: true; saltado: boolean; alertasCr
 // caso, para que el cron de hoy mismo lo reintente solo (al revés del
 // fallido del LOTE, que sí se marca para no ahogar los 50 cupos —
 // acá no hay ningún lote que ahogar, es un solo seguimiento puntual).
-// Si Mercado Libre YA tenía una foto de hoy para este seguimiento
-// (ej. revivir uno eliminado que el cron ya alcanzó a procesar hoy
-// mismo), el índice único + onConflictDoNothing de revisarUnSeguimiento
-// lo deja como "saltado", nunca duplicado.
-export async function revisarAhoraUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoRevisionInmediata> {
+// Si Mercado Libre YA tenía una foto de esta franja hoy para este
+// seguimiento (ej. revivir uno eliminado que el cron ya alcanzó a
+// procesar en esta misma franja), el índice único + onConflictDoNothing
+// de revisarUnSeguimiento lo deja como "saltado", nunca duplicado.
+export async function revisarAhoraUnSeguimiento(
+  seguimiento: typeof seguimientosMl.$inferSelect,
+  ahora: Date = new Date()
+): Promise<ResultadoRevisionInmediata> {
   try {
-    const resultado = await revisarUnSeguimiento(seguimiento);
+    const resultado = await revisarUnSeguimiento(seguimiento, ahora);
     await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id))
     );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buscarFotoDeHaceUnMes, calcularDelta, calcularVentasHoy } from "./comparativa";
+import { buscarFotoDeHaceUnMes, calcularDelta, calcularVentasHoy, periodoVentas } from "./comparativa";
 
 describe("calcularDelta", () => {
   it("resta actual - anterior cuando los dos existen", () => {
@@ -39,6 +39,26 @@ describe("calcularVentasHoy", () => {
 
   it("sin cambio -> 0", () => {
     expect(calcularVentasHoy(537, 537)).toBe(0);
+  });
+});
+
+describe("periodoVentas (issue #244)", () => {
+  it("misma fecha en las dos fotos (mañana y tarde de hoy) -> parcial", () => {
+    const hoy = new Date("2026-10-25T00:00:00.000Z");
+    expect(periodoVentas(hoy, new Date(hoy))).toBe("parcial");
+  });
+
+  it("fechas distintas (hoy vs ayer, o hoy vs hace varios días) -> diario", () => {
+    const hoy = new Date("2026-10-25T00:00:00.000Z");
+    const ayer = new Date("2026-10-24T00:00:00.000Z");
+    expect(periodoVentas(hoy, ayer)).toBe("diario");
+  });
+
+  it("falta cualquiera de las dos fechas -> null, nunca una etiqueta adivinada", () => {
+    const hoy = new Date("2026-10-25T00:00:00.000Z");
+    expect(periodoVentas(hoy, null)).toBeNull();
+    expect(periodoVentas(null, hoy)).toBeNull();
+    expect(periodoVentas(null, null)).toBeNull();
   });
 });
 

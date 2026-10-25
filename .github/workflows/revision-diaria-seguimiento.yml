@@ -10,16 +10,34 @@ name: Revisión diaria de seguimientos de Mercado Libre (staging)
 #
 # La ruta procesa UN lote por llamada (hasta 50 seguimientos — ver
 # TAMAÑO_LOTE en lib/trabajos/revisionDiariaSeguimiento.ts), nunca
-# todos de una sola corrida. Por eso este workflow corre cada hora de
-# 08:00 a 13:00 UTC (6 corridas — 03:00 a 08:00 en Colombia, UTC-5),
-# no una sola vez: una empresa con más de 50 seguimientos activos
-# necesita varias corridas para que el lote llegue a todos (el orden
-# ASC NULLS FIRST por ultima_revision_ts asegura que cada corrida
-# atienda a los que quedaron pendientes de la anterior, nunca repite
-# siempre los mismos primeros 50).
+# todos de una sola corrida.
+#
+# Issue #244 (decisión de Sharel, 2026-10-25) — "2 fotos al día": antes
+# había UNA sola ventana diaria (6 corridas, 08:00-13:00 UTC). Ahora son
+# DOS ventanas, una por franja (ver lib/seguimiento/franja.ts):
+# - "manana": 14:00-15:00 UTC (09:00-10:00 en Colombia, UTC-5).
+# - "tarde": 22:00-23:00 UTC (17:00-18:00 en Colombia).
+# Cada ventana tiene 2 corridas (no 6): a esta escala (Mateo/Débora,
+# bien debajo de 50 seguimientos por empresa) un lote entero cabe en
+# una sola corrida — la segunda es margen para que el orden ASC NULLS
+# FIRST por ultima_revision_ts alcance a lo que haya quedado pendiente
+# de la primera, sin pagar 6 corridas por ventana que hoy no hacen
+# falta (si el volumen real crece, ampliar el rango de horas de cada
+# ventana, nunca agregar una tercera franja).
+#
+# Por qué 22:00-23:00 UTC y no 23:00-00:00 (más cerca de las 18:00
+# Bogotá "oficiales" del issue): cruzar la medianoche UTC partiría la
+# ventana de la tarde en DOS fechas UTC distintas (`seguimiento_fotos.fecha`
+# sigue siendo medianoche UTC, sin cambios por este issue) — una
+# corrida a las 23:00 UTC y la siguiente a las 00:00 UTC insertarían
+# cada una con un `fecha` diferente para el MISMO seguimiento, y el
+# índice único seguimiento_id+fecha+franja no lo detectaría como
+# duplicado (fechas distintas). 22:00-23:00 UTC es ~18:00 Bogotá, cae
+# del lado "tarde" del corte de las 13:00 Bogotá (lib/seguimiento/franja.ts)
+# con horas de margen de cada lado, y nunca cruza la medianoche UTC.
 on:
   schedule:
-    - cron: "0 8-13 * * *"
+    - cron: "0 14,15,22,23 * * *"
   workflow_dispatch: {}
 
 jobs:

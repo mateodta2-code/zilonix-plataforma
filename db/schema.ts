@@ -59,6 +59,13 @@ export const seguimientoTipoEnum = pgEnum("seguimiento_tipo", ["producto", "tien
 // obtenerItemMl ya documenta en lib/ml/cliente.ts). "seller" es el
 // único valor real cuando el tipo es "tienda".
 export const seguimientoRecursoMlEnum = pgEnum("seguimiento_recurso_ml", ["item", "product", "seller"]);
+// Issue #244 (decisión de Sharel) — "2 fotos al día": hasta ahora
+// seguimiento_fotos tenía como mucho una foto por día; ahora puede
+// tener hasta dos, una por franja — ver lib/seguimiento/franja.ts para
+// cómo se decide en qué franja cae un instante (America/Bogota).
+// Valores en ASCII, mismo criterio que el resto de los enums de este
+// archivo (ninguno usa tildes/ñ).
+export const seguimientoFranjaEnum = pgEnum("seguimiento_franja", ["manana", "tarde"]);
 // Issue #175 — comparación contra la foto del día anterior. Cada valor
 // es un hecho objetivo observado, nunca una opinión ("posible venta" se
 // explica en el mensaje que arma lib/seguimiento/alertas.ts a partir de
@@ -513,9 +520,9 @@ export const seguimientosMl = pgTable(
   })
 );
 
-// Issue #175 — una foto por seguimiento por día (índice único de
-// abajo). Todo lo numérico/booleano queda NULL cuando Mercado Libre no
-// lo deja ver para ese recurso puntual (regla explícita del issue:
+// Issue #175 — una foto por seguimiento por día y franja (índice único
+// de abajo). Todo lo numérico/booleano queda NULL cuando Mercado Libre
+// no lo deja ver para ese recurso puntual (regla explícita del issue:
 // "lo que ML no deje ver queda como no disponible, nunca inventado") —
 // nunca un 0/false adivinado en su lugar.
 export const seguimientoFotos = pgTable(
@@ -524,9 +531,21 @@ export const seguimientoFotos = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
     seguimientoId: uuid("seguimiento_id").notNull().references(() => seguimientosMl.id, { onDelete: "cascade" }),
-    // DATE, no timestamp: la revisión diaria es una vez al día — "misma
-    // fecha" es la clave real de "misma foto", no un instante exacto.
+    // DATE, no timestamp: "misma fecha" (medianoche UTC) sigue siendo
+    // la clave de "mismo día" para las ventanas de 7/30 días — nunca
+    // cambiado por el issue #244, para no arrastrar ese cambio a toda
+    // consulta que ya filtra/ordena por esta columna. Lo que distingue
+    // la foto de la mañana de la de la tarde del MISMO día es `franja`
+    // (abajo), nunca esta columna.
     fecha: timestamp("fecha", { withTimezone: false, mode: "date" }).notNull(),
+    // Issue #244 — qué pasada del día es esta foto (America/Bogota, ver
+    // lib/seguimiento/franja.ts). Default "manana" SOLO para que la
+    // migración pueda backfillear las filas históricas (de antes de
+    // este issue, cuando había una sola foto por día) sin elegir a
+    // mano una por una — el trabajo en sí (revisionDiariaSeguimiento.ts)
+    // siempre manda el valor real calculado, nunca depende de este
+    // default.
+    franja: seguimientoFranjaEnum("franja").notNull().default("manana"),
     precio: numeric("precio", { precision: 14, scale: 2 }),
     // El campo original_price real de Mercado Libre (precio de
     // referencia tachado cuando hay descuento) — nunca una resta contra
@@ -559,7 +578,11 @@ export const seguimientoFotos = pgTable(
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    fotoUnicaPorDia: uniqueIndex("seguimiento_fotos_seguimiento_fecha_unica").on(t.seguimientoId, t.fecha),
+    // Issue #244 — antes, única por seguimiento_id+fecha (una foto por
+    // día); ahora suma franja, para permitir hasta dos (mañana y
+    // tarde) sin que una corrida repetida de la MISMA franja duplique
+    // nada (ver onConflictDoNothing en revisionDiariaSeguimiento.ts).
+    fotoUnicaPorFranja: uniqueIndex("seguimiento_fotos_seguimiento_fecha_franja_unica").on(t.seguimientoId, t.fecha, t.franja),
   })
 );
 

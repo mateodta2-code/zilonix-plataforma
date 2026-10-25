@@ -26,6 +26,15 @@ function fecha(d: Date): string {
   return new Date(d).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" });
 }
 
+// Issue #244 — desde que puede haber 2 fotos el mismo día (mañana y
+// tarde), fecha() sola ya no alcanza para distinguir las filas del
+// historial: agrega la hora real en America/Bogota (creado_ts), mismo
+// patrón que fechaHoraBogota() en la pantalla de la lista
+// (app/panel/investigacion/seguimiento/page.tsx).
+function fechaHora(creadoTs: Date): string {
+  return `${fecha(creadoTs)} ${new Date(creadoTs).toLocaleTimeString("es-CO", { timeZone: "America/Bogota", hour: "2-digit", minute: "2-digit" })}`;
+}
+
 // Issue #175, punto 5/6 — detalle con historial y gráfica de precio e
 // inventario/ventas por día. "Ventas por día" se calcula ACÁ, como la
 // diferencia entre el sold_quantity de una foto y el de la anterior
@@ -92,11 +101,15 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
           </Tarjeta>
 
           <Tarjeta className={styles.seccion}>
-            <p className={styles.tituloSeccion}>Historial ({fotos.length} día{fotos.length === 1 ? "" : "s"})</p>
+            <p className={styles.tituloSeccion}>Historial ({fotos.length} foto{fotos.length === 1 ? "" : "s"})</p>
+            {/* Issue #244 — fechaHora(creado_ts), no fecha(fecha): con
+            hasta 2 fotos el mismo día (mañana/tarde), mostrar solo el
+            día dejaba dos filas con la misma etiqueta, indistinguibles
+            entre sí. */}
             <Tabla encabezados={["Fecha", "Precio", "Inventario", "Vendidos", "Estado", "Catálogo", "Gana botón"]}>
               {[...fotos].reverse().map((f) => (
                 <FilaTabla key={f.id}>
-                  <CeldaTabla>{fecha(f.fecha)}</CeldaTabla>
+                  <CeldaTabla>{fechaHora(f.creadoTs)}</CeldaTabla>
                   <CeldaTabla>{dinero(f.precio)}</CeldaTabla>
                   <CeldaTabla>
                     {f.inventarioDisponible ?? "—"}
