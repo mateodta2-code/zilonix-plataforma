@@ -9,6 +9,7 @@ import {
   clasificarLinkListadoMl,
   construirLinkSeguirProducto,
   construirLinkSeguirTienda,
+  detectarFullEnHtmlTarjeta,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
   leerDatosIncrustados,
@@ -428,5 +429,50 @@ describe("leerResenasDesdeScript — issue #225 (Top 8 reseñas)", () => {
       recientes30: 0,
       recientes90: 0,
     });
+  });
+});
+
+describe("detectarFullEnHtmlTarjeta — issue #241, cuarto intento del bug real de Full ML", () => {
+  // Markup real confirmado contra capturas reales de hoy (Wayback
+  // Machine, listado.mercadolibre.com.co/gorras y
+  // lista.mercadolivre.com.br/tenis, +100 tarjetas revisadas en los
+  // dos países) — el mismo que ya usó #239, acá como fixture real de
+  // vitest en vez de solo un comentario.
+  const TARJETA_FULL_REAL = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipped-from">Enviado por <svg aria-label="FULL" width="41" height="13" viewbox="0 0 41 13" role="img"><use href="#poly_full"></use></svg></div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
+
+  const TARJETA_SIN_FULL = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping">Envío gratis</div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
+
+  it("el badge real confirmado (aria-label=\"FULL\" dentro de poly-component__shipped-from) -> true", () => {
+    expect(detectarFullEnHtmlTarjeta(TARJETA_FULL_REAL)).toBe(true);
+  });
+
+  it("una tarjeta con envío gratis pero sin Full -> false (nunca confunde los dos)", () => {
+    expect(detectarFullEnHtmlTarjeta(TARJETA_SIN_FULL)).toBe(false);
+  });
+
+  it("respaldo por sprite: use xlink:href=\"#poly_full\" (forma vieja del atributo SVG) también cuenta, aunque el aria-label cambie", () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-component__shipped-from">Enviado por <svg><use xlink:href="#poly_full"></use></svg></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
+  });
+
+  it("respaldo por texto: \"Full\" visible dentro del bloque de envío, sin ícono ni aria-label, también cuenta", () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-component__shipping"><span>Enviado por Full</span></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
+  });
+
+  it("nunca un falso positivo: un título real con \"Full\" (ej. \"Full HD\") fuera del bloque de envío NUNCA cuenta", () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping">Envío gratis</div><h3 class="poly-component__title-wrapper">Televisor Full HD 42 Pulgadas</h3></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
+  });
+
+  it("sin ningún bloque de envío confirmado -> false, nunca se arriesga a buscar \"full\" en toda la tarjeta", () => {
+    const tarjeta = `<li class="ui-search-layout__item"><h3 class="poly-component__title-wrapper">Mochila Full Pack Escolar</h3></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
+  });
+
+  it("entradas vacías o inválidas -> false, nunca revienta", () => {
+    expect(detectarFullEnHtmlTarjeta("")).toBe(false);
+    expect(detectarFullEnHtmlTarjeta(null as unknown as string)).toBe(false);
+    expect(detectarFullEnHtmlTarjeta(undefined as unknown as string)).toBe(false);
   });
 });
