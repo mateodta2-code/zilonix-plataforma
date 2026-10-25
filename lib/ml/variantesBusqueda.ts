@@ -85,6 +85,26 @@ function normalizarParaComparar(texto: string): string {
     .replace(/\s+/g, " ");
 }
 
+// Issue #225 (parte B) — mismo dedup, genérico para cualquier lista de
+// queries (no solo las de Mercado Libre) — Amazon/Temu/AliExpress/
+// Shein/Alibaba lo reusan tal cual para deduplicar lo que devuelve la
+// IA (lib/ml/variantesIA.ts, generarVariantesPlataforma) sin necesitar
+// la heurística de reglas (que es específica de texto en español).
+export function dedupQueries(queries: string[], tope: number): string[] {
+  const resultado: string[] = [];
+  const vistos = new Set<string>();
+  for (const candidato of queries) {
+    const limpio = candidato.trim();
+    if (!limpio) continue;
+    const clave = normalizarParaComparar(limpio);
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    resultado.push(limpio);
+    if (resultado.length >= tope) break;
+  }
+  return resultado;
+}
+
 export function completarQueriesAnalizar(termino: string, variantesIA: string[]): string[] {
   const base = termino.trim();
   if (!base) return [];

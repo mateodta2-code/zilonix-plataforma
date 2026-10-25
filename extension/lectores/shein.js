@@ -26,15 +26,48 @@
     };
   }
 
+  // Issue #225 — "parity Zilonix OS": estructura real confirmada en
+  // vivo (Cowork, zilonix-os-web, chrome-extension-busqueda/scraper-shein-search.js,
+  // shein.com.co, "organizador de gorras"/"raquetas de badminton") —
+  // NO adivinada. A diferencia de AliExpress, las tarjetas SÍ están
+  // completas en el DOM (sin render virtual):
+  //   div.bs-product-card[role=listitem]
+  //     a[href*="-p-"]                        (link + id, "...-p-{id}.html")
+  //     .bs-product-card__goods-name-text      (título)
+  //     .bs-product-card__offscreen            (precio)
+  //     .bs-product-card__sales-label          ("1.000+ vendidos")
+  function parseVentasShein(texto) {
+    if (!texto) return null;
+    const m = String(texto).match(/([\d.,]+)\+?\s*vendid/i);
+    if (!m) return null;
+    const limpio = m[1].replace(/\./g, "").replace(",", ".");
+    const n = Math.round(parseFloat(limpio));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function idSheinDesdeHref(href) {
+    const m = String(href || "").match(/-p-(\d+)\.html/);
+    return m ? m[1] : null;
+  }
+
   function leerListado(doc) {
-    const tarjetas = doc.querySelectorAll("[class*='product-card'], [class*='goods-item'], a[href*='-p-']");
+    const tarjetas = doc.querySelectorAll("div.bs-product-card[role=listitem]");
     const productos = [];
-    tarjetas.forEach((tarjeta) => {
-      const titulo = U.textoDe(["[class*='goods-title']", "[class*='name']"], tarjeta) || tarjeta.getAttribute("title");
-      const precio = U.numeroDesdeTexto(U.textoDe(["[class*='price']"], tarjeta));
-      const textoVendidos = tarjeta.textContent?.match(/\d[\d.,]*\+?\s*(sold|vendidos)/i)?.[0] || null;
-      const link = tarjeta.tagName === "A" ? tarjeta.getAttribute("href") : U.atributoDe(["a"], "href", tarjeta);
-      if (titulo || precio != null) productos.push({ titulo, precio, vendidos: U.enteroDesdeTexto(textoVendidos), link });
+    tarjetas.forEach((card) => {
+      const linkEl = U.primerElemento(['a[href*="-p-"]'], card);
+      const href = linkEl ? linkEl.getAttribute("href") : null;
+      const id = idSheinDesdeHref(href);
+      if (!id) return;
+      const titulo = U.textoDe([".bs-product-card__goods-name-text"], card);
+      const precio = U.numeroDesdeTexto(U.textoDe([".bs-product-card__offscreen"], card));
+      const vendidos = parseVentasShein(U.textoDe([".bs-product-card__sales-label"], card));
+      let link = href;
+      try {
+        link = href ? new URL(href, doc.location ? doc.location.origin : location.origin).href : null;
+      } catch {
+        link = href;
+      }
+      if (titulo || precio != null) productos.push({ titulo, precio, vendidos, link });
     });
     return { productos };
   }

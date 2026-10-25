@@ -35,6 +35,8 @@
     "zilonix:vendidos": "vendidos-completados",
     "zilonix:listado": "listado-importado",
     "zilonix:resenas-resultado": "resenas-leidas",
+    "zilonix:escaneo-plataforma-resultado": "escaneo-plataforma-importado",
+    "zilonix:escaneo-plataforma-captcha": "escaneo-plataforma-captcha",
   };
 
   chrome.runtime.onMessage.addListener((mensaje) => {
@@ -56,6 +58,7 @@
   const TIPOS_HACIA_EXTENSION = {
     "iniciar-escaneo": "zilonix:iniciar-escaneo",
     "iniciar-resenas": "zilonix:iniciar-resenas",
+    "iniciar-escaneo-plataforma": "zilonix:iniciar-escaneo-plataforma",
   };
 
   window.addEventListener("message", (evento) => {

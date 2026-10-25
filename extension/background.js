@@ -235,6 +235,165 @@ function finalizarLecturaResenas(tabIdPanel) {
   );
 }
 
+// Issue #225 (parte B) — "parity Zilonix OS" para las 5 plataformas
+// no-ML: mismas URLs de búsqueda confirmadas en producción en
+// zilonix-os-web (chrome-extension-busqueda/background.js), pero con
+// UN orquestador genérico (nunca 5 copias casi idénticas, que es lo
+// que tiene ese código real — "copiá el espíritu, no los bugs/olores")
+// y reutilizando UNA sola pestaña por plataforma (chrome.tabs.update,
+// nunca una pestaña nueva por término — mejora real sobre OS, que
+// creaba una pestaña por término y la cerraba).
+//
+// TIEMPO_MAX_POR_TERMINO_MS = 23000 es el valor REAL que Cowork afinó
+// en producción (zilonix-os-web) — nunca inventado. El bug real de OS
+// que esto evita: su panel tenía un timeout fijo de 90s sin importar
+// cuántos términos hubiera — con 5 términos × 23s = 115s, el panel se
+// rendía ANTES de que la extensión pudiera terminar en serio. Acá el
+// timeout del panel se calcula dinámico (ver PanelDemanda.tsx,
+// calcularTimeoutEscaneoMs: n × 25000 + 10000), nunca un número fijo
+// que pueda quedar corto.
+const TIEMPO_MAX_POR_TERMINO_MS = 23000;
+// Alibaba puede interceptar con un CAPTCHA (confirmado en vivo por
+// Cowork) — nunca se evade ni se resuelve solo; se detecta, se avisa,
+// y se le da a la persona mucho más tiempo (este timeout, no el de
+// arriba) para resolverlo A MANO en la misma pestaña, que queda
+// visible para eso (ver PLATAFORMAS.alibaba.previewPorDefecto).
+const TIEMPO_MAX_CAPTCHA_MS = 120000;
+
+function slugAliExpress(termino) {
+  // Mismo slug real confirmado en zilonix-os-web — AliExpress usa
+  // "/w/wholesale-<palabras-con-guiones>.html", nunca query string.
+  return termino
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Adaptadores por plataforma — SOLO lo que de verdad cambia entre una
+// y otra (la URL de búsqueda real, confirmada en producción) y si por
+// default conviene que la persona VEA la pestaña (solo Alibaba, por
+// el captcha). El resto del mecanismo (una pestaña reutilizada,
+// mismo timeout, mismo relevo con content.js) es idéntico para las 5.
+const PLATAFORMAS = {
+  amazon: {
+    url: (t) => `https://www.amazon.com/s?k=${encodeURIComponent(t.trim())}&language=es_US`,
+  },
+  temu: {
+    url: (t) => `https://www.temu.com/search_result.html?search_key=${encodeURIComponent(t.trim())}`,
+  },
+  aliexpress: {
+    url: (t) => `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(slugAliExpress(t.trim()))}.html`,
+  },
+  shein: {
+    url: (t) => `https://www.shein.com.co/pdsearch/${encodeURIComponent(t.trim())}/`,
+  },
+  alibaba: {
+    url: (t) => `https://www.alibaba.com/trade/search?SearchText=${encodeURIComponent(t.trim())}`,
+    previewPorDefecto: true,
+  },
+};
+
+const TOPE_TERMINOS_PLATAFORMA = 5; // término + hasta 4 variantes de IA (ver lib/ml/variantesIA.ts)
+
+// Un escaneo activo por pestaña del PANEL que lo pidió — mismo
+// criterio que escaneosActivos/resenasActivas arriba.
+const escaneosPlataforma = new Map(); // tabIdPanel -> { plataforma, tabId, terminos, indice, vistos, timeoutId }
+
+function iniciarEscaneoPlataforma(tabIdPanel, plataforma, terminosCrudos, previewPedido) {
+  const config = PLATAFORMAS[plataforma];
+  if (!config) return;
+
+  const anterior = escaneosPlataforma.get(tabIdPanel);
+  if (anterior) {
+    clearTimeout(anterior.timeoutId);
+    if (anterior.tabId != null) chrome.tabs.remove(anterior.tabId, () => void chrome.runtime.lastError);
+  }
+
+  const terminos = (terminosCrudos || []).filter((t) => typeof t === "string" && t.trim()).slice(0, TOPE_TERMINOS_PLATAFORMA);
+  if (!terminos.length) return;
+
+  // "Preview opcional (default on solo Alibaba)" — issue #225: la
+  // pestaña queda VISIBLE para que la persona pueda ver/resolver un
+  // captcha de inmediato, en vez de que todo pase a ciegas en una
+  // pestaña de fondo.
+  const activa = typeof previewPedido === "boolean" ? previewPedido : Boolean(config.previewPorDefecto);
+
+  chrome.tabs.create({ url: "about:blank", active: activa }, (tab) => {
+    if (chrome.runtime.lastError || !tab?.id) return;
+    escaneosPlataforma.set(tabIdPanel, { plataforma, tabId: tab.id, terminos, indice: 0, vistos: new Map(), timeoutId: null });
+    abrirSiguienteTerminoPlataforma(tabIdPanel);
+  });
+}
+
+function abrirSiguienteTerminoPlataforma(tabIdPanel) {
+  const estado = escaneosPlataforma.get(tabIdPanel);
+  if (!estado) return;
+
+  if (estado.indice >= estado.terminos.length) {
+    finalizarEscaneoPlataforma(tabIdPanel);
+    return;
+  }
+
+  const config = PLATAFORMAS[estado.plataforma];
+  const termino = estado.terminos[estado.indice];
+  chrome.tabs.update(estado.tabId, { url: config.url(termino) }, () => {
+    if (chrome.runtime.lastError) {
+      estado.indice++;
+      abrirSiguienteTerminoPlataforma(tabIdPanel);
+      return;
+    }
+    estado.timeoutId = setTimeout(() => avanzarEscaneoPlataforma(tabIdPanel, [], false), TIEMPO_MAX_POR_TERMINO_MS);
+  });
+}
+
+function avanzarEscaneoPlataforma(tabIdPanel, productos, captcha) {
+  const estado = escaneosPlataforma.get(tabIdPanel);
+  if (!estado) return;
+  clearTimeout(estado.timeoutId);
+
+  if (captcha) {
+    // Issue #225 — NUNCA se evade ni se resuelve solo: se avisa al
+    // panel y se le da a la persona mucho más tiempo (TIEMPO_MAX_CAPTCHA_MS)
+    // para resolverlo a mano en la misma pestaña (que ya está visible,
+    // ver previewPorDefecto). content.js sigue reintentando leer esa
+    // MISMA página sola (reescanearConRetardo) — en cuanto el captcha
+    // se resuelva y aparezcan resultados reales, llega un mensaje
+    // nuevo sin captcha y esto avanza normal, nunca hace falta que la
+    // persona "reintente" nada a mano en el panel.
+    chrome.tabs.sendMessage(tabIdPanel, { tipo: "zilonix:escaneo-plataforma-captcha", payload: { plataforma: estado.plataforma } }, () => void chrome.runtime.lastError);
+    estado.timeoutId = setTimeout(() => avanzarEscaneoPlataforma(tabIdPanel, [], false), TIEMPO_MAX_CAPTCHA_MS);
+    return;
+  }
+
+  // Dedup por link (content.js ya manda la forma genérica
+  // {titulo, precio, vendidos, link} para los 6 sitios, sin un id
+  // propio de cada plataforma) — mismo campo que usa el panel
+  // (fusionarProductosImportados), así que un duplicado entre dos
+  // variantes nunca infla el total, ni acá ni al fusionar después.
+  for (const p of productos) {
+    const clave = (p && p.link) || (p && p.titulo);
+    if (clave && !estado.vistos.has(clave)) estado.vistos.set(clave, p);
+  }
+  estado.indice++;
+  abrirSiguienteTerminoPlataforma(tabIdPanel);
+}
+
+function finalizarEscaneoPlataforma(tabIdPanel) {
+  const estado = escaneosPlataforma.get(tabIdPanel);
+  escaneosPlataforma.delete(tabIdPanel);
+  if (!estado) return;
+
+  chrome.tabs.remove(estado.tabId, () => void chrome.runtime.lastError);
+  chrome.tabs.sendMessage(
+    tabIdPanel,
+    { tipo: "zilonix:escaneo-plataforma-resultado", payload: { plataforma: estado.plataforma, productos: [...estado.vistos.values()] } },
+    () => void chrome.runtime.lastError
+  );
+  chrome.tabs.update(tabIdPanel, { active: true }, () => void chrome.runtime.lastError);
+}
+
 chrome.runtime.onMessage.addListener((mensaje, remitente) => {
   if (!mensaje) return;
 
@@ -249,14 +408,30 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
     // Viene de una pestaña de listado que ESTE Service Worker abrió —
     // se busca a qué escaneo (de qué pestaña del panel) pertenece por
     // tabIdActual, nunca por remitente.tab.id solo (content.js ni
-    // sabe qué pestaña de panel lo originó).
+    // sabe qué pestaña de panel lo originó). Mismo mensaje genérico
+    // para Mercado Libre (escaneosActivos, #221) y para las 5
+    // plataformas no-ML (escaneosPlataforma, #225) — content.js es el
+    // mismo content script para los 6 sitios, nunca duplicado.
     for (const [tabIdPanel, estado] of escaneosActivos) {
       if (estado.tabIdActual === remitente.tab?.id) {
         cerrarVarianteYSeguir(tabIdPanel, remitente.tab.id, mensaje.payload);
         return;
       }
     }
+    for (const [tabIdPanel, estado] of escaneosPlataforma) {
+      if (estado.tabId === remitente.tab?.id) {
+        avanzarEscaneoPlataforma(tabIdPanel, mensaje.payload?.productos || [], Boolean(mensaje.payload?.captcha));
+        return;
+      }
+    }
     return; // ninguna variante activa esperaba esto (ej. llegó tarde, después del timeout) — nunca rompe nada
+  }
+
+  if (mensaje.tipo === "zilonix:iniciar-escaneo-plataforma") {
+    if (!remitente.tab?.id) return;
+    const payload = mensaje.payload || {};
+    iniciarEscaneoPlataforma(remitente.tab.id, payload.plataforma, payload.terminos, payload.preview);
+    return;
   }
 
   if (mensaje.tipo === "zilonix:iniciar-resenas") {

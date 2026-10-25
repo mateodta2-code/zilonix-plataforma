@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Chip } from "@/components/marco/Chip";
 import { Boton } from "@/components/marco/Boton";
@@ -10,6 +10,7 @@ import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { aplicarVendidosExtension, combinarKpisConCompletados, ordenarPorVendidos, type KpisDemanda } from "@/lib/ml/investigacionCliente";
 import {
   calcularResumenImportado,
+  clasificarSenalVentas,
   fusionarProductosImportados,
   linkHttpSeguro,
   reemplazarProductosImportados,
@@ -18,7 +19,7 @@ import {
 import { generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
 import type { PublicacionInvestigacion } from "@/lib/ml/investigacion";
 import { consumirClicAnalizarReciente } from "./analizarClic";
-import { generarQueriesAnalizarAction } from "./actions";
+import { generarQueriesAnalizarAction, generarQueriesPlataformaAction } from "./actions";
 import styles from "./page.module.css";
 
 // Issue #210 (Sharel, staging) — "Analizar" trae candidatos reales de
@@ -43,6 +44,17 @@ function money(n: number): string {
 
 function numero(n: number): string {
   return Math.round(n).toLocaleString("es-CO");
+}
+
+// Issue #225 — bug real de Zilonix OS que esto evita: su panel tenía
+// un timeout fijo de 90s sin importar cuántos términos hubiera — con
+// 5 términos a 23s cada uno (extension/background.js,
+// TIEMPO_MAX_POR_TERMINO_MS) son 115s reales en el peor caso, más que
+// esos 90s fijos — el panel se rendía ANTES de que la extensión
+// pudiera terminar en serio. Acá el margen siempre depende de cuántas
+// queries se van a escanear de verdad.
+function calcularTimeoutEscaneoMs(nTerminos: number): number {
+  return nTerminos * 25_000 + 10_000;
 }
 
 type MensajeVendidosExtension = {
@@ -128,6 +140,38 @@ function esMensajeResenasValido(valor: unknown): valor is MensajeResenasExtensio
 
 const TOPE_ITEMS_RESENAS = 8;
 
+// Issue #225 (parte B) — las 5 plataformas no-ML, siempre manual (un
+// botón real por plataforma — "click-gate" igual que #221, pero
+// acotado a UNA plataforma por clic, nunca las 6 a la vez). La CLAVE
+// (minúscula) es la que entiende extension/background.js para armar
+// la URL real de búsqueda de cada sitio; NOMBRE es lo mismo que
+// `lector.sitio` en cada extension/lectores/<sitio>.js y lo que
+// clasificarSenalVentas (lib/ml/importacionListadoCliente.ts) espera
+// para distinguir "Amazon" (mensual_piso) del resto (acumulado_sin_periodo).
+const PLATAFORMAS_MULTIPLATAFORMA: { clave: "amazon" | "temu" | "aliexpress" | "shein" | "alibaba"; nombre: string }[] = [
+  { clave: "amazon", nombre: "Amazon" },
+  { clave: "temu", nombre: "Temu" },
+  { clave: "aliexpress", nombre: "AliExpress" },
+  { clave: "shein", nombre: "Shein" },
+  { clave: "alibaba", nombre: "Alibaba" },
+];
+
+type MensajeEscaneoPlataformaExtension = {
+  plataforma: string;
+  productos: { titulo: string; precio: number; vendidos: number | null; link: string | null }[];
+};
+
+function esMensajeEscaneoPlataformaValido(valor: unknown): valor is MensajeEscaneoPlataformaExtension {
+  if (!valor || typeof valor !== "object") return false;
+  const m = valor as Record<string, unknown>;
+  if (typeof m.plataforma !== "string" || !Array.isArray(m.productos)) return false;
+  return m.productos.every((p) => {
+    if (!p || typeof p !== "object") return false;
+    const prod = p as Record<string, unknown>;
+    return typeof prod.titulo === "string" && typeof prod.precio === "number" && Number.isFinite(prod.precio);
+  });
+}
+
 export function PanelDemanda({
   termino,
   publicacionesIniciales,
@@ -157,6 +201,11 @@ export function PanelDemanda({
   // la lectura (una sola pestaña reutilizada) está en curso.
   const [resenas, setResenas] = useState<Record<string, ResenaProducto>>({});
   const [resenasEnCurso, setResenasEnCurso] = useState(false);
+  // Issue #225 (parte B) — qué plataforma no-ML está escaneando ahora
+  // (null = ninguna; nunca más de una a la vez, un botón por clic) y
+  // cuál quedó bloqueada por un CAPTCHA (solo puede pasar en Alibaba).
+  const [escaneoPlataformaEnCurso, setEscaneoPlataformaEnCurso] = useState<string | null>(null);
+  const [captchaPlataforma, setCaptchaPlataforma] = useState<string | null>(null);
 
   // Issue #213 — "Importar listado": `importado` es la sesión ya
   // confirmada (nunca se mezcla con `estado.publicaciones`, la tabla
@@ -193,6 +242,7 @@ export function PanelDemanda({
     if (conExtension !== true) return;
     if (!consumirClicAnalizarReciente()) return;
     let cancelado = false;
+    let limite: ReturnType<typeof setTimeout> | null = null;
 
     (async () => {
       let queries: string[];
@@ -208,16 +258,17 @@ export function PanelDemanda({
       setQueriesUsadas(queries);
       window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo", payload: { terminos: queries } }, window.location.origin);
       setEscaneoEnCurso(true);
+      // Red de seguridad del lado del cliente: si la extensión nunca
+      // contesta (ej. el Service Worker se recicló a mitad de camino,
+      // ver la nota en extension/background.js), esto nunca deja
+      // "Escaneando..." para siempre en pantalla — el margen depende
+      // de cuántas queries se escanean de verdad, nunca un número fijo.
+      limite = setTimeout(() => setEscaneoEnCurso(false), calcularTimeoutEscaneoMs(queries.length));
     })();
 
-    // Red de seguridad del lado del cliente: si la extensión nunca
-    // contesta (ej. el Service Worker se recicló a mitad de camino,
-    // ver la nota en extension/background.js), esto nunca deja
-    // "Escaneando..." para siempre en pantalla.
-    const limite = setTimeout(() => setEscaneoEnCurso(false), 90_000);
     return () => {
       cancelado = true;
-      clearTimeout(limite);
+      if (limite) clearTimeout(limite);
     };
   }, [conExtension, termino]);
 
@@ -261,7 +312,7 @@ export function PanelDemanda({
           plataforma: payload.plataforma,
           titulo: p.titulo,
           precio: p.precio,
-          vendidos: typeof p.vendidos === "number" && Number.isFinite(p.vendidos) ? p.vendidos : null,
+          senalVentas: clasificarSenalVentas(payload.plataforma, typeof p.vendidos === "number" && Number.isFinite(p.vendidos) ? p.vendidos : null),
           link: linkHttpSeguro(p.link),
         }));
 
@@ -288,6 +339,39 @@ export function PanelDemanda({
         if (!esMensajeResenasValido(datos.payload)) return;
         const payload = datos.payload;
         setResenas((actual) => ({ ...actual, ...payload.resenasPorItemId }));
+        return;
+      }
+
+      if (datos.tipo === "escaneo-plataforma-captcha") {
+        // Issue #225 — nunca se evade: se avisa y se espera a que la
+        // persona lo resuelva a mano en la pestaña (que ya quedó
+        // visible, ver analizarEnPlataforma). Sigue "en curso" —
+        // background.js reintenta solo cuando el captcha se resuelva.
+        const payload = datos.payload as { plataforma?: string } | null;
+        if (payload?.plataforma) setCaptchaPlataforma(payload.plataforma);
+        return;
+      }
+
+      if (datos.tipo === "escaneo-plataforma-importado") {
+        setEscaneoPlataformaEnCurso(null);
+        setCaptchaPlataforma(null);
+        if (!esMensajeEscaneoPlataformaValido(datos.payload)) return;
+        const payload = datos.payload;
+        const config = PLATAFORMAS_MULTIPLATAFORMA.find((p) => p.clave === payload.plataforma);
+        const nombrePlataforma = config?.nombre ?? payload.plataforma;
+        const productos: ProductoImportado[] = payload.productos.map((p) => ({
+          plataforma: nombrePlataforma,
+          titulo: p.titulo,
+          precio: p.precio,
+          senalVentas: clasificarSenalVentas(nombrePlataforma, typeof p.vendidos === "number" && Number.isFinite(p.vendidos) ? p.vendidos : null),
+          link: linkHttpSeguro(p.link),
+        }));
+        if (!productos.length) return;
+        // Issue #225 — mismo criterio que "Importar listado" manual
+        // (#213): se fusiona directo, sin pedir confirmación — la
+        // persona ya autorizó esto con el clic del botón de la
+        // plataforma (su propio "click-gate").
+        setListado((actual) => ({ ...actual, importado: fusionarProductosImportados(actual.importado, productos) }));
       }
     }
 
@@ -329,6 +413,37 @@ export function PanelDemanda({
     if (!items.length) return;
     window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-resenas", payload: { items } }, window.location.origin);
     setResenasEnCurso(true);
+  }
+
+  // Issue #225 (parte B) — "click-gate" propio: este clic (nunca
+  // automático, nunca junto con los otros) autoriza a la extensión a
+  // escanear hasta 5 queries (término + variantes de IA, ver
+  // generarQueriesPlataformaAction) en UNA plataforma — Amazon, Temu,
+  // AliExpress, Shein o Alibaba. La extensión abre/lee/cierra sola,
+  // en una sola pestaña reutilizada (ver extension/background.js).
+  const limitePlataformaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function analizarEnPlataforma(clave: "amazon" | "temu" | "aliexpress" | "shein" | "alibaba") {
+    if (limitePlataformaRef.current) clearTimeout(limitePlataformaRef.current);
+    setEscaneoPlataformaEnCurso(clave);
+    setCaptchaPlataforma(null);
+    let queries: string[];
+    try {
+      queries = await generarQueriesPlataformaAction(termino, clave);
+    } catch {
+      queries = [termino]; // mismo respaldo que lib/ml/variantesIA.ts — nunca se rompe por esto
+    }
+    if (!queries.length) {
+      setEscaneoPlataformaEnCurso(null);
+      return;
+    }
+    window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo-plataforma", payload: { plataforma: clave, terminos: queries } }, window.location.origin);
+    // Mismo criterio que el escaneo de Mercado Libre, arriba: margen
+    // dinámico según cuántas queries se escanean de verdad — Alibaba
+    // además puede quedar esperando un captcha (hasta 120s más, ver
+    // extension/background.js), así que este timeout es a propósito
+    // generoso y solo es la red de seguridad del lado del cliente.
+    limitePlataformaRef.current = setTimeout(() => setEscaneoPlataformaEnCurso(null), calcularTimeoutEscaneoMs(queries.length) + 120_000);
   }
 
   function completarVendidos() {
@@ -390,6 +505,42 @@ export function PanelDemanda({
               {q}
             </Chip>
           ))}
+        </div>
+      ) : null}
+
+      {conExtension ? (
+        <div className={styles.insignia}>
+          <span className={styles.notaInsignia}>Analizar también en (un clic por plataforma, hasta 5 variantes de IA cada una):</span>
+          {PLATAFORMAS_MULTIPLATAFORMA.map(({ clave, nombre }) => (
+            <Boton
+              key={clave}
+              type="button"
+              variante="secundario"
+              chico
+              disabled={escaneoPlataformaEnCurso != null}
+              onClick={() => analizarEnPlataforma(clave)}
+            >
+              {escaneoPlataformaEnCurso === clave ? `Analizando ${nombre}…` : nombre}
+            </Boton>
+          ))}
+        </div>
+      ) : null}
+
+      {conExtension ? (
+        <p className={styles.notaInsignia}>
+          Amazon: &quot;comprados el mes pasado&quot; es la única cifra real mensual (piso, no exacta). Temu/AliExpress/Shein/Alibaba: &quot;vendidos&quot;
+          es un acumulado histórico sin período — nunca se muestra como tasa mensual. Alibaba es mayorista (precio por cantidad, puede venir como
+          rango) y puede pedir resolver un captcha a mano. Estrellas/reseñas de listado no se traen todavía para estas 5 plataformas.
+        </p>
+      ) : null}
+
+      {captchaPlataforma ? (
+        <div className={styles.insignia}>
+          <Chip estado="peligro">Captcha en {PLATAFORMAS_MULTIPLATAFORMA.find((p) => p.clave === captchaPlataforma)?.nombre ?? captchaPlataforma}</Chip>
+          <span className={styles.notaInsignia}>
+            Abrí la pestaña que se abrió sola y resolvela a mano — nunca se evade. En cuanto la resuelvas, el escaneo sigue solo, sin que tengas
+            que volver a hacer nada acá.
+          </span>
         </div>
       ) : null}
 
@@ -566,8 +717,11 @@ export function PanelDemanda({
           <p className={styles.notaInsignia}>
             Precio {resumenImportado.precioMinimo != null ? money(resumenImportado.precioMinimo) : "—"} a{" "}
             {resumenImportado.precioMaximo != null ? money(resumenImportado.precioMaximo) : "—"} (promedio{" "}
-            {resumenImportado.precioPromedio != null ? money(resumenImportado.precioPromedio) : "—"}) — suma de vendidos visibles:{" "}
-            {resumenImportado.sumaVendidos != null ? numero(resumenImportado.sumaVendidos) : "Sin dato"}.
+            {resumenImportado.precioPromedio != null ? money(resumenImportado.precioPromedio) : "—"}). Vendidos — acumulado histórico (NUNCA una
+            tasa mensual):{" "}
+            {resumenImportado.sumaAcumuladaSinPeriodo != null ? numero(resumenImportado.sumaAcumuladaSinPeriodo) : "Sin dato"}; comprados el mes
+            pasado (solo Amazon, sí es mensual real):{" "}
+            {resumenImportado.sumaMensualPiso != null ? numero(resumenImportado.sumaMensualPiso) : "Sin dato"}.
           </p>
           <Tabla encabezados={["Plataforma", "Producto", "Vendidos", "Precio", "Enlace"]}>
             {listado.importado.map((p, i) => (
@@ -576,7 +730,21 @@ export function PanelDemanda({
                   <Chip>{p.plataforma}</Chip>
                 </CeldaTabla>
                 <CeldaTabla>{p.titulo}</CeldaTabla>
-                <CeldaTabla>{p.vendidos != null ? numero(p.vendidos) : <Chip>Sin dato</Chip>}</CeldaTabla>
+                <CeldaTabla>
+                  {p.senalVentas.tipo === "ausente" ? (
+                    <Chip>Sin dato</Chip>
+                  ) : p.senalVentas.tipo === "mensual_piso" ? (
+                    <>
+                      {numero(p.senalVentas.valor as number)}
+                      <div className={styles.subdato}>comprados el mes pasado</div>
+                    </>
+                  ) : (
+                    <>
+                      {numero(p.senalVentas.valor as number)}
+                      <div className={styles.subdato}>histórico — nunca "/mes"</div>
+                    </>
+                  )}
+                </CeldaTabla>
                 <CeldaTabla>{money(p.precio)}</CeldaTabla>
                 <CeldaTabla>
                   {p.link ? (
