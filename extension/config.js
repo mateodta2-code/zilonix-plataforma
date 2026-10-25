@@ -8,15 +8,10 @@
 (function () {
   "use strict";
 
-  // Issue #213 (PR #217) — TEMPORAL para el smoke de Sharel en
-  // staging: NUNCA mergear a main así. Revertir a la línea de
-  // producción (de abajo, comentada) antes de mergear este PR, o
-  // dejar este cambio en un commit aparte que se revierte antes del
-  // merge — nunca mezclado en silencio con el resto del PR.
-  const URL_APP = "https://web-staging-d979.up.railway.app";
-  // Producción (default real — descomentar y comentar la de arriba
-  // antes de mergear/repartir una versión nueva):
-  // const URL_APP = "https://web-production-af270.up.railway.app";
+  const URL_APP = "https://web-production-af270.up.railway.app";
+  // Descomentar esta línea (y comentar la de arriba) para probar
+  // contra staging antes de repartir una versión nueva:
+  // const URL_APP = "https://web-staging-d979.up.railway.app";
 
   const api = { URL_APP };
 
