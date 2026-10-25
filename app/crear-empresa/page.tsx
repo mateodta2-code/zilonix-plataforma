@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
+import styles from "../page.module.css";
 import { crearEmpresaAction } from "./actions";
 
 // Tarea 1.6 — "crear empresa al registrarse". No es solo al registrarse
@@ -15,6 +16,19 @@ export default async function CrearEmpresaPage() {
 
   return (
     <main style={{ maxWidth: 420, margin: "0 auto", padding: "48px 24px" }}>
+      {/* Mismo SVG oficial que la portada (app/page.tsx) y la barra
+          lateral: nunca redibujado, 260px vía .logo, sin estirar,
+          rotar, recolorear ni sombra/brillo. Esta columna no es
+          .portada, así que el margen lo centra y deja el mismo aire
+          (32px) que el gap de esa pantalla. */}
+      <img
+        src="/marca/zilonix-seller-logo.svg"
+        alt="Zilonix Seller"
+        className={styles.logo}
+        width={260}
+        height={94}
+        style={{ margin: "0 auto 32px" }}
+      />
       <h1 style={{ fontSize: 24, fontWeight: 700 }}>
         {propias.length === 0 ? "Crea tu primera empresa" : "Crear otra empresa"}
       </h1>
