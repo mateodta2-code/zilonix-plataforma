@@ -168,6 +168,26 @@ El smoke de #235/#236 confirmó que `img-src` era la causa real del bloqueo de f
 
 **Nada se tocó del lado de la extensión** para este fix — ni `extension/lectores/aliexpress.js` (más allá de un comentario, sin cambio de comportamiento) ni ninguna otra pieza: la extensión nunca valida ni restringe dominios, eso vive por completo en el CSP de la app (`next.config.mjs`). Por eso esta tarea **no sube la versión de la extensión** (sigue en 0.3.13) — el fix necesita que *staging/producción redeploye desde `main`*, nunca una reinstalación de la extensión.
 
+## Hotfix de smoke #6 — Full ML, tercer intento (issue #239)
+
+Dos intentos anteriores (#229, #236) habían cambiado el selector de Full de `mercadolibre.js` SIN encontrar el marcador real dentro de una tarjeta — los dos terminaron apuntando a otros elementos de la página (un filtro de la barra lateral, no la tarjeta de producto en sí), así que seguían sin matchear nada real: "% FULL" en 0%, columna Full en "No" para todas las filas, en Colombia y en Brasil por igual.
+
+**Esta vez, confirmado DENTRO de más de 100 tarjetas de producto reales** (Wayback Machine, dos capturas frescas: `listado.mercadolibre.com.co/gorras` — 50 de 51 tarjetas con el badge — y `lista.mercadolivre.com.br/tenis` — mismo resultado exacto; el acceso directo a Mercado Libre sigue bloqueado desde este sandbox, mismo criterio de siempre): el badge real es
+
+```html
+<span class="poly-component__shipped-from">Enviado por
+  <svg aria-label="FULL" width="41" height="13" viewbox="0 0 41 13" role="img">
+    <use href="#poly_full"></use>
+  </svg>
+</span>
+```
+
+El `aria-label` real del `<svg>` es literalmente **`"FULL"`** (4 letras) — NUNCA `"Enviado por FULL"` (esa frase vive afuera del `svg`, en el texto del `<span>` que lo envuelve; de ahí el bug real de #229, que comparaba contra un string que nunca estuvo DENTRO del atributo). Tampoco tiene `data-testid="icon-poly_full"` ni la clase `ui-search-icon--full` que había asumido #236 (esos sí existen en la página, pero en el FILTRO "Envío · Full" de la barra lateral — un elemento completamente distinto, que `leerListado` nunca llega a leer porque está fuera de `li.ui-search-layout__item`). **Polycard es el mismo componente compartido entre países — "FULL" nunca se traduce, ni en Brasil.** Corregido: `esFull` ahora usa un único selector, `svg[aria-label="FULL" i]`, confirmado real — se sacan los 3 selectores viejos (#229/#236), confirmados ahora que apuntaban a elementos equivocados, cero matches reales en toda la evidencia revisada.
+
+**De paso (punto 4 del issue) — Brasil también tenía Calificación "—"**: confirmado que el texto de accesibilidad real en Brasil dice **"Avaliação X de 5"** (portugués), nunca "Calificación" (español) — `leerCalificacionYVendidosListado` solo reconocía la palabra en español, así que `estrellas` quedaba siempre `null` ahí (el número en sí, con coma decimal, es igual en los dos idiomas — solo la palabra cambiaba). Se suma la alternativa en portugués. **"Vendidos: Sin dato" en Brasil, en cambio, se confirmó correcto, no un bug**: tanto Colombia (`gorras`) como Brasil (`tenis`), en las categorías revisadas, solo muestran la etiqueta cualitativa "MÁS VENDIDO"/"MAIS VENDIDO" — sin ninguna cifra en la tarjeta — `null` ahí es honesto, nunca se inventó un número a partir de esa etiqueta. Se sumó igual una generalización defensiva a "productos/produtos vendidos" por si otra categoría sí muestra el número en portugués, documentada como no confirmada contra una captura real con cifra (nunca se afirmó que sí existe, solo que el código ya la reconocería si aparece). **"Fact. est. —" en Mercado Libre, confirmado correcto desde #227**: Mercado Libre nunca es `mensual_piso` (solo Amazon lo es) — ese guión es el comportamiento honesto de siempre, nunca un bug a corregir.
+
+**Fuera de alcance de esta tarea, a propósito**: `envioGratis` en `leerProducto` (PDP) usa `/envío\s*gratis|envio\s*gratis/i` — español únicamente, nunca probado contra "frete grátis" (el término real en portugués) — no estaba en el pedido explícito de este issue (que es sobre `leerListado`/Full, no sobre el envío gratis de una página de producto) y no se tocó; queda documentado acá por si hace falta una vuelta aparte.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).

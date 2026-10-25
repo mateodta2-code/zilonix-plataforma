@@ -493,14 +493,33 @@
     for (const s of candidatos) {
       const texto = (s.textContent || "").trim();
       if (estrellas === null) {
-        const mEst = texto.match(/Calificaci[oó]n\s+([\d.,]+)\s+de\s+5/i);
+        // Issue #239, punto 4 — bug real confirmado en Brasil: el texto
+        // de accesibilidad ahí NUNCA dice "Calificación" (español) —
+        // dice "Avaliação X de 5. (N avaliações)" (portugués),
+        // confirmado contra una captura real de hoy de
+        // lista.mercadolivre.com.br. El regex viejo solo reconocía la
+        // palabra en español, así que `estrellas` quedaba siempre
+        // `null` para Brasil — nunca un problema de formato del
+        // número (la coma decimal "4,7" es igual en los dos idiomas),
+        // solo de la palabra. Se suma la alternativa en portugués.
+        const mEst = texto.match(/(?:Calificaci[oó]n|Avaliaç[aã]o)\s+([\d.,]+)\s+de\s+5/i);
         if (mEst) {
           const valor = parseFloat(mEst[1].replace(",", "."));
           if (Number.isFinite(valor)) estrellas = valor;
         }
       }
       if (vendidos === null) {
-        const mVend = texto.match(/(?:[Mm]ás de\s+)?([\d.,]+)\+?\s*productos?\s+vendid/i);
+        // Issue #239, punto 4 — generalización defensiva (nunca
+        // confirmada contra una tarjeta real con número, español o
+        // portugués: tanto Colombia como Brasil, en las categorías
+        // revisadas hoy, solo muestran la etiqueta cualitativa "MÁS
+        // VENDIDO"/"MAIS VENDIDO" sin ninguna cifra — "vendidos: null"
+        // ahí es correcto, no un bug, nunca se inventa un número a
+        // partir de esa etiqueta). Se suma "mais de"/"produtos" (PT)
+        // junto a "más de"/"productos" (ES) por las dudas de que otra
+        // categoría sí muestre el número en portugués — "vendid" es
+        // la misma raíz en los dos idiomas, nunca hace falta duplicarla.
+        const mVend = texto.match(/(?:(?:[Mm]ás|[Mm]ais)\s+de\s+)?([\d.,]+)\+?\s*(?:productos?|produtos?)\s+vendid/i);
         if (mVend) {
           const valor = Number(mVend[1].replace(/\./g, "").replace(",", ""));
           if (Number.isFinite(valor)) vendidos = valor;
@@ -523,44 +542,31 @@
       const esAnuncio = Boolean(U.primerElemento(['a.poly-component__ads-promotions', 'a[aria-label="Promocionado"]'], tarjeta));
       if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico
 
-      // Issue #229 — hotfix de smoke: Sharel reportó TODO marcado "No"
-      // (nunca "Full") a pesar de publicaciones Full reales visibles.
-      // El selector `svg[aria-label="Enviado por FULL"]` (el que
-      // confirmó Cowork en zilonix-os-web hace tiempo) ya no existe en
-      // el HTML real — esta tarea (issue #235) confirmó, leyendo una
-      // captura real de hoy de listado.mercadolibre.com.co vía la
-      // Wayback Machine (el acceso directo sigue bloqueado por una
-      // verificación de cuenta, igual que en #229/#231/#233 — esa fue
-      // la forma de conseguir HTML real sin inventar nada), que
-      // Mercado Libre rediseñó el ícono de Full: ya NO es un
-      // aria-label de texto, es un ícono del sistema de diseño
-      // Polycard con `data-testid="icon-poly_full"` y clase
-      // `ui-search-icon--full` (confirmado en el filtro "Envío · Full"
-      // de esa misma página — el mismo ícono reusable que el propio
-      // JSON incrustado de la página nombra "vpp_full_icon"/"icon-poly_full"
-      // en su plantilla "Enviado por {vpp_full_icon}"). Esta sesión NO
-      // pudo confirmar ese mismo marcador DENTRO de una tarjeta de
-      // producto puntual en la captura disponible (ninguna de las
-      // tarjetas visibles en esa búsqueda concreta tenía el badge
-      // renderizado, aunque el filtro decía "17 resultados" con Full)
-      // — se prioriza igual como selector principal por ser la
-      // confirmación más real disponible, con los selectores viejos
-      // como respaldo por si alguna variante de tarjeta todavía los
-      // usa. Si sigue en "No" en el próximo smoke, hace falta
-      // confirmar el marcador real DENTRO de una tarjeta Full visible
-      // (clic derecho → inspeccionar sobre una publicación Full real),
-      // nunca adivinar de nuevo.
-      const esFull = Boolean(
-        U.primerElemento(
-          [
-            'svg[data-testid="icon-poly_full"]',
-            "svg.ui-search-icon--full",
-            'svg[aria-label="Enviado por FULL" i]',
-            '[aria-label*="envi" i][aria-label*="full" i]',
-          ],
-          tarjeta
-        )
-      );
+      // Issue #239 — tercer intento, esta vez confirmado DENTRO de una
+      // tarjeta Full real (los dos anteriores — #229's
+      // `aria-label="Enviado por FULL"` y #236's
+      // `data-testid="icon-poly_full"`/`ui-search-icon--full` — resultaron
+      // ser de OTROS elementos de la página — un filtro de la barra
+      // lateral, nunca la tarjeta en sí — por eso seguían sin matchear
+      // nada real). Confirmado contra capturas reales de hoy (Wayback
+      // Machine — listado.mercadolibre.com.co sigue bloqueando el
+      // acceso directo desde este sandbox) de Colombia (`gorras`, 50 de
+      // 51 tarjetas reales con el badge) Y Brasil (`tenis`,
+      // `lista.mercadolivre.com.br`, mismo resultado exacto — Polycard
+      // es el mismo componente compartido entre países, "FULL" nunca
+      // se traduce): el badge real DENTRO de la tarjeta es
+      //   <span class="poly-component__shipped-from">Enviado por
+      //     <svg aria-label="FULL" ...><use href="#poly_full"></use></svg>
+      //   </span>
+      // — el aria-label real del svg es literalmente "FULL" (4
+      // letras), NUNCA "Enviado por FULL" (esa frase está afuera del
+      // svg, en el texto del <span> que lo envuelve — de ahí el bug de
+      // #229: comparaba contra un string que nunca estuvo DENTRO del
+      // atributo). Se sacan los 3 selectores viejos (#229/#236): los
+      // tres se confirmaron ahora que apuntaban a elementos DISTINTOS
+      // de la tarjeta real (filtros, no el badge), mantenerlos no
+      // suma nada — cero matches reales en +100 tarjetas revisadas.
+      const esFull = Boolean(U.primerElemento(['svg[aria-label="FULL" i]'], tarjeta));
       const { estrellas, vendidos } = leerCalificacionYVendidosListado(tarjeta);
       const fotoEl = U.primerElemento(["img.poly-component__picture"], tarjeta);
 
