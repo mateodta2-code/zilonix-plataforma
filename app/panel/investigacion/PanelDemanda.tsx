@@ -115,9 +115,26 @@ export function PanelDemanda({
     // Issue #210 — "con UN clic del usuario, nunca sola": las pestañas
     // se abren todas acá, dentro del mismo manejador del clic real —
     // nunca en un efecto, nunca en una respuesta de red.
+    //
+    // Corrección de Pablo (revisión PR #211) — bug real: el estándar
+    // de HTML define que "noopener" (y "noreferrer", que internamente
+    // también activa noopener) hace que window.open() devuelva SIEMPRE
+    // null — con esas features no queda ninguna referencia real a la
+    // ventana para devolver, se haya abierto o no. Pasarlas acá hacía
+    // que `abiertas` quedara en 0 sin importar cuántas pestañas se
+    // hubieran abierto de verdad, y el aviso de "el navegador bloqueó
+    // alguna pestaña" salía siempre, incluso cuando todo había
+    // funcionado. Se abre SIN ninguna de las dos (para poder confirmar
+    // de verdad si el navegador bloqueó el popup) y se le quita el
+    // `opener` a mano después — mismo resultado de seguridad real (la
+    // pestaña nueva nunca recibe acceso de vuelta a esta página), sin
+    // perder la única señal confiable de "¿se abrió o no?".
     for (const candidato of candidatos) {
-      const ventana = window.open(candidato.link as string, "_blank", "noopener,noreferrer");
-      if (ventana) abiertas++;
+      const ventana = window.open(candidato.link as string, "_blank");
+      if (ventana) {
+        ventana.opener = null;
+        abiertas++;
+      }
     }
     setYaAbrioCompletar(true);
     setAvisoBloqueado(abiertas < candidatos.length);
@@ -158,7 +175,10 @@ export function PanelDemanda({
       ) : null}
 
       {avisoBloqueado ? (
-        <p className={styles.notaInsignia}>El navegador bloqueó alguna pestaña — permití ventanas emergentes para este sitio e intentá de nuevo.</p>
+        <p className={styles.notaInsignia}>
+          El navegador bloqueó alguna pestaña — permití ventanas emergentes para este sitio e intentá de nuevo. Chrome suele dejar pasar solo UNA
+          pestaña por clic salvo que el sitio esté permitido explícitamente.
+        </p>
       ) : null}
 
       <div className={styles.kpis}>

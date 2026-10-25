@@ -71,13 +71,30 @@ export type KpisDemanda = {
 export function combinarKpisConCompletados(base: KpisDemanda, completadasPorExtension: PublicacionInvestigacion[]): KpisDemanda {
   if (!completadasPorExtension.length) return base;
 
+  // vendidos siempre viene seteado en una fila "completada" —
+  // aplicarVendidosExtension solo agrega a este arreglo cuando de
+  // verdad puso un sold_quantity real — así que sumarlo tal cual nunca
+  // inventa un 0 que no vino.
   const sumaVendidosNuevos = completadasPorExtension.reduce((s, p) => s + (p.vendidos ?? 0), 0);
-  const sumaFacturacionNueva = completadasPorExtension.reduce((s, p) => s + (p.facturacionMesEstimada ?? 0), 0);
-
   const publicacionesConVendidosReal = base.publicacionesConVendidosReal + completadasPorExtension.length;
   const vendidosTotalesReales = (base.vendidosTotalesReales ?? 0) + sumaVendidosNuevos;
   const promedioVendidosPorPublicacion = publicacionesConVendidosReal > 0 ? Math.round((vendidosTotalesReales / publicacionesConVendidosReal) * 10) / 10 : null;
-  const facturacionMesTotalEstimada = (base.facturacionMesTotalEstimada ?? 0) + sumaFacturacionNueva;
+
+  // Corrección de Pablo (revisión PR #211) — bug real: facturacionMesEstimada
+  // SÍ puede quedar null en una fila completada (ventasMesEst, lib/ml/
+  // estimacionVentas.ts, devuelve null sin dateCreated — la extensión
+  // no siempre lo confirma). Antes `(null ?? 0) + 0` daba 0 en vez de
+  // null cuando ni la base ni ninguna fila nueva tenían el dato — eso
+  // inventaba "$0 Estimado" donde debía decir "Sin dato" (mismo
+  // criterio que el servidor, lib/ml/investigacion.ts, que nunca
+  // confunde "ningún dato" con 0). Solo se suma cuando AL MENOS una
+  // fila completada de verdad trae el número; si ninguna lo trae, la
+  // base queda tal cual vino (null o no — nunca se le resta ni se le
+  // inventa nada).
+  const filasConFacturacion = completadasPorExtension.filter((p): p is PublicacionInvestigacion & { facturacionMesEstimada: number } => p.facturacionMesEstimada != null);
+  const facturacionMesTotalEstimada = filasConFacturacion.length
+    ? (base.facturacionMesTotalEstimada ?? 0) + filasConFacturacion.reduce((s, p) => s + p.facturacionMesEstimada, 0)
+    : base.facturacionMesTotalEstimada;
 
   return { vendidosTotalesReales, publicacionesConVendidosReal, promedioVendidosPorPublicacion, facturacionMesTotalEstimada };
 }

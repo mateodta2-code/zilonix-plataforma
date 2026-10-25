@@ -119,4 +119,25 @@ describe("combinarKpisConCompletados — issue #210", () => {
     expect(resultado.promedioVendidosPorPublicacion).toBe(5);
     expect(resultado.facturacionMesTotalEstimada).toBe(50_000);
   });
+
+  // Corrección de Pablo (revisión PR #211) — bug real: facturacionMesEstimada
+  // puede quedar null en una fila completada (ventasMesEst sin
+  // dateCreated, ver investigacionCliente.ts) — sumarla con `?? 0`
+  // inventaba un "$0 Estimado" en vez de "Sin dato" cuando ni la base
+  // ni ninguna fila nueva traían el número.
+  it("base null + fila completada sin facturacionMesEstimada (vendidos sin dateCreated): queda null, nunca 0", () => {
+    const baseVacia: KpisDemanda = { vendidosTotalesReales: null, publicacionesConVendidosReal: 0, promedioVendidosPorPublicacion: null, facturacionMesTotalEstimada: null };
+    const completadas = [publicacion({ itemId: "A", vendidos: 5, facturacionMesEstimada: null })];
+    const resultado = combinarKpisConCompletados(baseVacia, completadas);
+
+    expect(resultado.vendidosTotalesReales).toBe(5);
+    expect(resultado.facturacionMesTotalEstimada).toBeNull();
+  });
+
+  it("base con facturación real + fila completada sin facturacionMesEstimada: mantiene la base tal cual, nunca le resta ni le suma 0 de más", () => {
+    const completadas = [publicacion({ itemId: "A", vendidos: 5, facturacionMesEstimada: null })];
+    const resultado = combinarKpisConCompletados(base, completadas);
+
+    expect(resultado.facturacionMesTotalEstimada).toBe(400_000);
+  });
 });
