@@ -10,7 +10,7 @@ import { generarVariantesIA, generarVariantesPlataforma, type PlataformaMultipla
 // Issue #225 — "Analizar estilo OS": Server Action (nunca un Route
 // Handler — regla de CLAUDE.md, "Server Actions por defecto"; esta
 // plataforma no tenía todavía un cliente de Anthropic, así que este
-// es el primer lugar que lo usa) que le da a PanelDemanda.tsx (Client
+// es el primer lugar que lo usa) que le da a PanelInvestigacion.tsx (Client
 // Component) las hasta 5 queries a escanear con la extensión: el
 // término + 4 variantes de IA (lib/ml/variantesIA.ts), completadas con
 // la heurística de reglas (lib/ml/variantesBusqueda.ts) si la IA

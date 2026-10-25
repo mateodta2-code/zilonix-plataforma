@@ -138,7 +138,14 @@
         const extra = porId.get(goodsId);
         const precio = U.numeroDesdeTexto(it.offers && it.offers.price != null ? String(it.offers.price) : null) ?? (extra && extra.priceInfo && extra.priceInfo.price != null ? Math.round(extra.priceInfo.price / 100) : null);
         const vendidos = parseVentasTemu((extra && (extra.salesNum || extra.salesTip)) || "");
-        return { titulo: it.name || (extra && extra.title) || null, precio, vendidos, link: it.url || null };
+        // Issue #227 — foto/estrellas confirmados en el mismo scraper
+        // real (zilonix-os-web, scraper-temu-search.js) que ya
+        // confirmó precio/ventas — para fotos ampliables y el sort
+        // "Más calificación".
+        const foto = it.image || (extra && extra.image && extra.image.url) || (extra && extra.thumbUrl) || null;
+        const calificacionCruda = (it.aggregateRating && it.aggregateRating.ratingValue) ?? (extra && extra.comment && extra.comment.goodsScore);
+        const calificacion = calificacionCruda != null ? parseFloat(calificacionCruda) : null;
+        return { titulo: it.name || (extra && extra.title) || null, precio, vendidos, foto, calificacion: Number.isFinite(calificacion) ? calificacion : null, link: it.url || null };
       })
       .filter(Boolean);
     return { productos };

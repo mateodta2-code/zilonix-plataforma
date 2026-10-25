@@ -137,7 +137,16 @@
         const precio = precioMatch ? U.numeroDesdeTexto(precioMatch[0]) : null;
         const linkRaw = o.productUrl || "";
         const link = linkRaw ? (linkRaw.indexOf("//") === 0 ? `https:${linkRaw}` : linkRaw) : `https://www.alibaba.com/product-detail/x_${productId}.html`;
-        return { titulo: o.title || null, precio, vendidos: parseVentasAlibaba(o.soldOrder || ""), link };
+        const fotoRaw = o.mainImage || "";
+        const foto = fotoRaw ? (fotoRaw.indexOf("//") === 0 ? `https:${fotoRaw}` : fotoRaw) : null;
+        // Issue #227 — o.reviewScore/o.reviewCount son del PROVEEDOR
+        // (la tienda), NUNCA del producto (confirmado por Cowork: un
+        // producto con reviewScore "4.9" en el listado puede decir
+        // "Sin reseñas" en su propia página) — a propósito NUNCA se
+        // manda como `calificacion` (eso implicaría "del producto").
+        // Alibaba simplemente queda sin calificación de producto a
+        // nivel listado — honesto, nunca una cifra ajena disfrazada.
+        return { titulo: o.title || null, precio, vendidos: parseVentasAlibaba(o.soldOrder || ""), foto, calificacion: null, link };
       })
       .filter(Boolean);
     return { productos, captcha: false };

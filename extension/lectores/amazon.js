@@ -83,6 +83,22 @@
     return m[2] ? base * 1000 : base;
   }
 
+  // Issue #227 — suma foto/estrellas/Prime, confirmados en el mismo
+  // scraper real (zilonix-os-web, scraper-amazon-search.js) que ya
+  // confirmó el resto — para fotos ampliables y el sort "Más
+  // calificación"/"Full" (Prime se mapea a esFull: mismo concepto de
+  // "envío rápido confirmado", nunca literalmente "Full" de ML).
+  function leerEstrellasAmazon(div) {
+    const el = U.primerElemento(['[data-cy="reviews-block"] a[aria-label*="de 5 estrellas"]'], div);
+    if (el) {
+      const m = (el.getAttribute("aria-label") || "").match(/([\d.,]+)\s*de\s*5\s*estrellas/i);
+      if (m) return parseFloat(m[1].replace(",", "."));
+    }
+    const iconEl = U.primerElemento(["i.a-icon-star-mini"], div);
+    const m2 = iconEl ? (iconEl.className || "").match(/a-star-mini-(\d)-(\d)/) : null;
+    return m2 ? parseFloat(`${m2[1]}.${m2[2]}`) : null;
+  }
+
   function leerListado(doc) {
     const tarjetas = doc.querySelectorAll('div[data-component-type="s-search-result"][data-asin]');
     const productos = [];
@@ -93,7 +109,12 @@
       const titulo = (tituloEl && tituloEl.textContent ? tituloEl.textContent.trim() : "") || null;
       const precio = parsePrecioUSD(U.textoDe(['[data-cy="price-recipe"] .a-price .a-offscreen'], div));
       const vendidos = parseCompradosMes(U.textoDe(['[data-cy="reviews-block"] span.a-size-base.a-color-secondary'], div));
-      if (titulo || precio != null) productos.push({ titulo, precio, vendidos, link: `https://www.amazon.com/dp/${asin}` });
+      const imgEl = U.primerElemento(["img.s-image"], div);
+      const foto = imgEl ? imgEl.getAttribute("src") || imgEl.getAttribute("data-src") : null;
+      const esFull = Boolean(U.primerElemento(["i.a-icon-prime"], div));
+      if (titulo || precio != null) {
+        productos.push({ titulo, precio, vendidos, foto, calificacion: leerEstrellasAmazon(div), esFull, link: `https://www.amazon.com/dp/${asin}` });
+      }
     });
     return { productos };
   }
