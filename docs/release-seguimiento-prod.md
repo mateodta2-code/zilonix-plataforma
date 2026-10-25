@@ -92,6 +92,43 @@ SELECT polname FROM pg_policies WHERE tablename LIKE 'seguimiento%';
 ```
 El primero: el rol existe, con `Login`, sin `Superuser`/`Createrole`. El segundo: 5 filas — `aislamiento_seguimientos_ml`, `aislamiento_seguimiento_fotos`, `aislamiento_seguimiento_alertas`, `seguimiento_trabajador_lee_seguimientos_ml`, `seguimiento_trabajador_marca_revision_seguimientos_ml`.
 
+## 2.5 Problema real encontrado en vivo: "Application error" al hacer "Seguir en Zilonix" en producción (issue #207, follow-up)
+
+Síntoma real: agregar un seguimiento en producción (desde la extensión o desde el formulario) termina en la pantalla genérica de Next.js ("Application error", con un número de digest tipo `2846050239`) en vez del aviso normal. Causa real confirmada: la contraseña que Postgres tiene puesta para el rol `seguimiento_trabajador_user` NO coincide con la que está codificada en la URL de la variable `DATABASE_URL_SEGUIMIENTO` de Railway (producción) — Postgres rechaza la conexión, `db/trabajador-seguimiento-context.ts` nunca llega a conectar, y esa excepción sin capturar es justo lo que Next.js muestra como "Application error" sin detalle (por diseño — nunca el stack real a quien no tiene sesión de servidor). Los HOSTS de las `DATABASE_URL_*` ya estaban corregidos a `postgres.railway.internal` antes de este diagnóstico — eso no es el problema, es la contraseña.
+
+**Paso 1 — confirmar qué existe de verdad, sin pegar ningún valor real** (mismo túnel + `psql` real de arriba):
+```sql
+-- Tablas (ninguna debería dar NULL si la migración ya corrió)
+SELECT to_regclass('public.seguimientos_ml'), to_regclass('public.seguimiento_fotos'), to_regclass('public.seguimiento_alertas');
+
+-- Rol: tiene que existir, con Login, sin Superuser/Createrole
+\du seguimiento_trabajador_user
+
+-- Las 5 políticas de siempre
+SELECT polname FROM pg_policies WHERE tablename LIKE 'seguimiento%';
+
+-- GRANTs reales del rol — tiene que ser SELECT de la fila completa en
+-- seguimientos_ml, y UPDATE solo de la columna ultima_revision_ts
+-- (nunca de la fila completa)
+SELECT table_name, privilege_type FROM information_schema.table_privileges WHERE grantee = 'seguimiento_trabajador_user';
+SELECT table_name, column_name, privilege_type FROM information_schema.column_privileges WHERE grantee = 'seguimiento_trabajador_user';
+```
+Si CUALQUIERA de estos cuatro chequeos no da lo esperado, resolverlo con el bloque de la sección 2.2 (es idempotente, se puede repetir) antes de seguir al paso 2.
+
+**Paso 2 — sincronizar la contraseña del rol con la de `DATABASE_URL_SEGUIMIENTO`** (la variable de Railway es la fuente real — el rol tiene que quedar igual a ella, nunca al revés, porque la app ya está desplegada leyendo esa variable):
+1. Copiar (nunca escribir de memoria) la contraseña que YA está puesta en el valor de `DATABASE_URL_SEGUIMIENTO` en Railway (producción) — la parte entre `seguimiento_trabajador_user:` y `@` en la URL.
+2. Conectarse a Postgres con un usuario que pueda hacer `ALTER ROLE` (el superusuario de `DATABASE_URL`, nunca `app_user` ni ningún rol restringido) — dos formas, usar la que de verdad funcione con el plan de Railway:
+   - Si el servicio de Postgres admite `railway ssh` (shell directo al contenedor): `railway ssh --service <postgres-prod> --environment production`, y desde ahí `psql $DATABASE_URL` (la variable del superusuario ya vive en ese entorno).
+   - Si no, el túnel de siempre: `railway connect <postgres-prod> --environment production --tunnel-only`, y conectarse con `psql` local a la URL que imprime.
+3. Ya conectado, pegar (solo ahí, nunca en otro lado):
+   ```sql
+   ALTER ROLE seguimiento_trabajador_user WITH PASSWORD 'LA-CONTRASEÑA-QUE-COPIASTE-EN-EL-PASO-1';
+   ```
+   Postgres la guarda cifrada (SCRAM-SHA-256, el default actual) — nunca en texto plano, no hace falta ningún paso extra.
+4. Nunca hace falta reiniciar el servicio `web` a mano para esto — es un cambio solo del lado de Postgres, la próxima conexión del pool ya usa la contraseña nueva.
+
+**Criterio de éxito real**: agregar un seguimiento en producción (formulario o extensión) deja de dar "Application error" — termina en el aviso normal (agregado, ya existía, o un error de Mercado Libre con mensaje claro, nunca la pantalla genérica). Opcional, más contundente: una corrida manual del workflow (sección 4) deja al menos una fila nueva en `seguimiento_fotos` con la fecha de hoy.
+
 ## 3. Variables y secretos
 
 - `DATABASE_URL_SEGUIMIENTO` y `SEGUIMIENTO_TRABAJADOR_SECRET` (variable de Railway, producción) — deberían existir ya; si no, armarlas ahora (ver punto 2.3 para la primera; la segunda es un secreto compartido nuevo, cualquier cadena larga y aleatoria).
