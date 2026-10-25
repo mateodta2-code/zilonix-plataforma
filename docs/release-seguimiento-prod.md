@@ -117,6 +117,26 @@ Síntoma observado: agregar un seguimiento en producción (desde la extensión o
 - `DATABASE_URL_SEGUIMIENTO` y `SEGUIMIENTO_TRABAJADOR_SECRET` (variable de Railway, producción) — deberían existir ya; si no, armarlas ahora (ver punto 2.3 para la primera; la segunda es un secreto compartido nuevo, cualquier cadena larga y aleatoria).
 - **GitHub → Settings → Secrets and variables → Actions**: crear `SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION` con el MISMO valor que `SEGUIMIENTO_TRABAJADOR_SECRET` tiene en Railway producción (copiar el valor de Railway a GitHub, nunca inventar uno distinto — si no coinciden, el workflow va a dar 401).
 
+### 3.1 Batch prod — secreto GH + workflow_dispatch (lo único que falta, issue #207)
+
+El SQL/RLS de producción y el smoke de "Seguir en Zilonix" ya están resueltos (ver 2.5) — esto es lo único operativo que queda, resumido en un solo lugar para no tener que releer todo el documento:
+
+1. **Secreto exacto a crear**: `SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION`, en **GitHub → Settings → Secrets and variables → Actions → New repository secret**. El valor tiene que ser EXACTAMENTE el mismo que ya tiene la variable `SEGUIMIENTO_TRABAJADOR_SECRET` en Railway (ambiente de producción del servicio `web-production-af270`) — copiarlo de ahí, nunca inventar uno nuevo ni escribirlo de memoria. Si no coinciden carácter por carácter, el workflow va a dar `401` (secreto comparado con `crypto.timingSafeEqual` en `app/api/trabajos/seguimiento/route.ts`).
+2. **Qué workflow disparar**: GitHub → Actions → **"Revisión diaria de seguimientos de Mercado Libre (producción)"** (`.github/workflows/revision-diaria-seguimiento-produccion.yml`) → **Run workflow**. No tiene ningún input que llenar — el workflow no define ninguno (`workflow_dispatch: {}`), solo hace falta elegir la rama (`main`) y confirmar.
+3. **NO activar el cron todavía**: el bloque `schedule` de ese mismo archivo sigue comentado a propósito — no descomentarlo en esta tarea, ni en ninguna corrida manual (ver paso 5 de la sección 4, para cuando corresponda).
+4. **Cómo verificar que la corrida guardó fotos de verdad** (nunca asumir solo porque el paso de GitHub Actions salió verde):
+   - En el log de esa corrida (pestaña del job en GitHub Actions) no hay nada más que imprimir — el `curl` solo confirma que la petición HTTP llegó.
+   - El dato real está en Postgres: con el mismo túnel/`psql` de la sección 2,
+     ```sql
+     SELECT seguimiento_id, fecha, precio, vendidos FROM seguimiento_fotos ORDER BY creado_ts DESC LIMIT 5;
+     ```
+     tiene que aparecer al menos una fila con la fecha de hoy (igual que el paso 3 de la sección 4 — mismo chequeo, repetido acá para no tener que ir a buscarlo).
+   - Si se tiene acceso a los logs del servicio `web` en Railway (producción) del momento exacto de la corrida, la línea real que deja el trabajo es `[lib/trabajos/revisionDiariaSeguimiento] lote del día: N activos, N procesados, N saltados, N con error, N alertas creadas.` (`lib/trabajos/revisionDiariaSeguimiento.ts`) — confirma cuántos seguimientos se intentaron sin tener que contarlos a mano en la tabla.
+5. **Qué NO hacer en este paso** (además de lo ya dicho en "Qué NO hacer" al final del documento):
+   - Nunca tocar `DATABASE_URL_APP` para esto — ese incidente ya está resuelto (2.5), y esta tarea es solo del secreto de GitHub y el workflow, no de ninguna variable de conexión.
+   - Nunca apuntar `app_user` (ni `DATABASE_URL_APP`) al rol `seguimiento_trabajador_user`, ni al revés — son roles con privilegios distintos a propósito (ver 2.5, punto 1).
+   - Nunca activar el `schedule` del workflow en este paso — eso es un commit aparte, después de confirmar varias corridas manuales en verde (sección 4, paso 5).
+
 ## 4. Correr el workflow una vez, a mano, y verificar
 
 1. GitHub → Actions → **"Revisión diaria de seguimientos de Mercado Libre (producción)"** → **Run workflow** (`workflow_dispatch` — el cron automático todavía está comentado en `.github/workflows/revision-diaria-seguimiento-produccion.yml`, a propósito).
