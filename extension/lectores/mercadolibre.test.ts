@@ -432,18 +432,30 @@ describe("leerResenasDesdeScript — issue #225 (Top 8 reseñas)", () => {
   });
 });
 
-describe("detectarFullEnHtmlTarjeta — issue #241, cuarto intento del bug real de Full ML", () => {
-  // Markup real confirmado contra capturas reales de hoy (Wayback
-  // Machine, listado.mercadolibre.com.co/gorras y
-  // lista.mercadolivre.com.br/tenis, +100 tarjetas revisadas en los
-  // dos países) — el mismo que ya usó #239, acá como fixture real de
-  // vitest en vez de solo un comentario.
-  const TARJETA_FULL_REAL = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipped-from">Enviado por <svg aria-label="FULL" width="41" height="13" viewbox="0 0 41 13" role="img"><use href="#poly_full"></use></svg></div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
+describe("detectarFullEnHtmlTarjeta — issue #241/#242, respaldo de texto del detector de Full", () => {
+  // Issue #242 — markup real CONFIRMADO FUNCIONANDO HOY en producción
+  // por Zilonix OS (mateodta2-code/zilonix-os,
+  // chrome-extension-busqueda/scraper-listado.js — "DOM vivo
+  // confirmado 6/10"): el aria-label real completo es
+  // "Enviado por FULL" (NUNCA solo "FULL") — la fixture de #241 tenía
+  // el valor equivocado (confirmado contra una captura estática de
+  // Wayback, no contra el DOM real) y por eso el bug seguía sin
+  // aparecer en las pruebas.
+  const TARJETA_FULL_REAL = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipped-from"><svg aria-label="Enviado por FULL" width="41" height="13" viewbox="0 0 41 13" role="img"><use href="#poly_full"></use></svg></div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
 
   const TARJETA_SIN_FULL = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping">Envío gratis</div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
 
-  it("el badge real confirmado (aria-label=\"FULL\" dentro de poly-component__shipped-from) -> true", () => {
+  it('el badge real confirmado por Zilonix OS (aria-label="Enviado por FULL" dentro de poly-component__shipped-from) -> true', () => {
     expect(detectarFullEnHtmlTarjeta(TARJETA_FULL_REAL)).toBe(true);
+  });
+
+  it('issue #242, regresión directa del bug real: aria-label="Enviado por FULL" (el valor real, más largo que solo "FULL") ya no se pierde por exigir un match exacto', () => {
+    // Antes de #242, el regex exigía aria-label="full" EXACTO — un
+    // valor más largo como "Enviado por FULL" nunca matcheaba, aunque
+    // contuviera la palabra. Este caso puntual es la prueba de que
+    // eso ya no pasa.
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-component__shipped-from"><svg aria-label="Enviado por FULL"></svg></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
   });
 
   it("una tarjeta con envío gratis pero sin Full -> false (nunca confunde los dos)", () => {

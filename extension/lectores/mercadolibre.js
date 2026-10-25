@@ -530,41 +530,47 @@
     return { estrellas, vendidos };
   }
 
-  // Issue #241 — tercer intento de #239 confirmado por Wayback, CUARTO
-  // intento en total: Sharel probó 0.3.14 en vivo y "% FULL" seguía en
-  // 0% — el selector `svg[aria-label="FULL" i]` de #239, aunque
-  // confirmado contra una captura real de Wayback Machine, no matcheó
-  // en el DOM real del navegador. Causa real más probable (documentada,
-  // no descartada a ciegas): Wayback captura el HTML que el SERVIDOR
-  // mandó — la página de listado de Mercado Libre es una SPA que
-  // puede hidratar/re-renderizar ese ícono del lado del cliente antes
-  // de que esta extensión lo lea; si React cambia cómo arma el
-  // `<svg>` al hidratar (un atributo que desaparece, un orden
-  // distinto), un `querySelector` exacto puede dejar de matchear sin
-  // que el HTML "servido" haya cambiado nunca. Por eso esta vez se
-  // abandona el selector CSS único y se pasa a una función PURA
-  // (string de HTML -> boolean, mismo criterio que
-  // `clasificarLinkListadoMl`, issue #233) que se puede probar con un
-  // fixture real en vitest — nunca otro selector adivinado sin poder
-  // confirmarlo. Recibe el `outerHTML` de la tarjeta (más tolerante a
-  // variaciones de estructura que un selector CSS exacto) y prueba, en
-  // capas, de más específico a más amplio — SIEMPRE acotado al bloque
-  // de envío (`poly-component__shipped-from`/`poly-component__shipping`),
-  // nunca "full" suelto en toda la tarjeta (un título real puede decir
-  // "Pantalla Full HD" o "Bolso Full Grande" — eso NUNCA debe contar):
-  //   1. `aria-label="FULL"` en cualquier elemento (svg u otro) — lo
-  //      que confirmó #239 contra Wayback, ahora sin depender de que
-  //      sea específicamente un <svg> ni de la posición exacta.
-  //   2. Un `<use href="#poly_full">` (o `xlink:href`, la forma vieja
-  //      del mismo atributo en SVG — sprites de ícono a veces usan una
-  //      u otra según la versión del navegador/build) — el sprite real
-  //      que ya confirmó #239, como señal aparte del aria-label por si
-  //      ese atributo es lo que cambió al hidratar.
-  //   3. Último recurso: la palabra "Full" como texto visible/accesible
-  //      DENTRO del bloque de envío — mismo criterio que ya usa
-  //      `leerProducto` (PDP) con `/\bfull\b/i` sobre `textoEnvio`.
-  // Sin el bloque de envío confirmado, se devuelve `false` directo —
-  // nunca se arriesga a buscar "full" en toda la tarjeta sin ese ancla.
+  // Issue #242 — QUINTO intento, esta vez con el detector REAL,
+  // confirmado funcionando HOY en producción: Zilonix OS
+  // (mateodta2-code/zilonix-os, chrome-extension-busqueda/scraper-listado.js)
+  // detecta Full correctamente con un selector simple:
+  //   const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+  // con el comentario "DOM vivo confirmado 6/10" — confirmado contra
+  // el navegador real, no una captura archivada. Es, literalmente, el
+  // selector que #229 ya había usado — #239 lo sacó por pensar
+  // (contra evidencia de Wayback, HTML SERVIDO, no necesariamente el
+  // DOM ya hidratado) que el aria-label real era solo "FULL" sin
+  // "Enviado por". Esa conclusión era la equivocada: el aria-label
+  // real completo SÍ es "Enviado por FULL" — confirmado ahora con el
+  // código que ya corre en producción, no con otra captura estática.
+  // El bug real del intento de #241 (`detectarFullEnHtmlTarjeta`) era
+  // doble: su capa 1 solo reconocía `aria-label="full"` EXACTO (no
+  // "Enviado por FULL", un valor más largo) y su capa de texto
+  // "strippeaba" las etiquetas completas (`<svg aria-label="Enviado
+  // por FULL">` entero) antes de buscar la palabra — el atributo
+  // nunca llegaba a quedar como texto visible para esa búsqueda. Dos
+  // razones reales, no una sola, por las que 0.3.14/0.3.15 seguían en
+  // 0%.
+  //
+  // Mercado Libre Brasil no tiene una confirmación propia disponible
+  // (Zilonix OS es solo Colombia, nunca tocó Brasil) — pero "Enviado"
+  // y "por" son la misma palabra en español y portugués, y "FULL"
+  // nunca se traduce (confirmado en capturas reales de los dos
+  // países, issue #239) — se asume el mismo texto para Brasil sin
+  // inventar una variante distinta sin evidencia.
+  function detectarFullEnTarjeta(tarjeta) {
+    // Selector real de Zilonix OS, primero y directo — mismo criterio
+    // exacto que ya corre en producción hoy.
+    if (U.primerElemento(['svg[aria-label="Enviado por FULL"]'], tarjeta)) return true;
+    // Respaldo (#241, corregido) — SOLO si el selector exacto de
+    // arriba no matchea: por si alguna variante de tarjeta (otro país,
+    // otro build) trae el aria-label con otro texto que igual
+    // contenga "full", u otro marcador del mismo ícono. Sigue acotado
+    // al bloque de envío real — nunca "full" suelto en toda la
+    // tarjeta (un título real puede decir "Pantalla Full HD").
+    return detectarFullEnHtmlTarjeta(tarjeta.outerHTML);
+  }
+
   const VENTANA_BLOQUE_ENVIO = 400;
   function detectarFullEnHtmlTarjeta(htmlTarjeta) {
     if (typeof htmlTarjeta !== "string" || !htmlTarjeta) return false;
@@ -582,7 +588,12 @@
     const tagCierre = `</${mApertura[1].toLowerCase()}>`;
     const idxCierre = htmlTarjeta.toLowerCase().indexOf(tagCierre, idxInicio);
     const ventana = idxCierre === -1 ? htmlTarjeta.slice(idxInicio, idxInicio + VENTANA_BLOQUE_ENVIO) : htmlTarjeta.slice(idxInicio, idxCierre);
-    if (/aria-label\s*=\s*["']full["']/i.test(ventana)) return true;
+    // Issue #242 — bug real corregido: esto antes exigía
+    // `aria-label="full"` EXACTO, así que nunca matcheaba
+    // "Enviado por FULL" (un valor más largo) — ahora es un substring
+    // del valor del atributo, sigue acotado al bloque de envío así
+    // que nunca agarra un "Full HD" de otra parte de la tarjeta.
+    if (/aria-label\s*=\s*["'][^"']*full[^"']*["']/i.test(ventana)) return true;
     if (/(?:xlink:)?href\s*=\s*["'][^"']*poly_full["']/i.test(ventana)) return true;
     const soloTexto = ventana.replace(/<[^>]+>/g, " ");
     return /\bfull\b/i.test(soloTexto);
@@ -600,11 +611,10 @@
       const esAnuncio = Boolean(U.primerElemento(['a.poly-component__ads-promotions', 'a[aria-label="Promocionado"]'], tarjeta));
       if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico
 
-      // Issue #241 — ver `detectarFullEnHtmlTarjeta` arriba para el
-      // historial completo (4 intentos: #229, #236, #239, #241) y por
-      // qué se abandonó el selector CSS único a favor de una función
-      // de texto probable con un fixture real.
-      const esFull = detectarFullEnHtmlTarjeta(tarjeta.outerHTML);
+      // Issue #242 — ver `detectarFullEnTarjeta` arriba para el
+      // historial completo (5 intentos: #229, #236, #239, #241, #242)
+      // y el selector real confirmado hoy en producción por Zilonix OS.
+      const esFull = detectarFullEnTarjeta(tarjeta);
       const { estrellas, vendidos } = leerCalificacionYVendidosListado(tarjeta);
       const fotoEl = U.primerElemento(["img.poly-component__picture"], tarjeta);
 
