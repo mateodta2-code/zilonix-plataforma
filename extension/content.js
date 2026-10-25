@@ -470,59 +470,18 @@
   // espera si hace falta (ver manejarEscaneoAutomatico, abajo: si
   // esto termina sin ver nada, NUNCA se manda un resultado vacío por
   // cuenta propia, se deja que el timeout externo decida).
-  // Issue #247 — smoke de Sharel: con la cantidad de tarjetas YA
-  // estable (criterio de #231, arriba), el panel de Investigación
-  // seguía mandando 0% Full tras "Analizar" fresco. El KPI mostraba
-  // 0% y no "Sin dato" — el puente content.js -> background.js ->
-  // panel estaba bien (ver #242/#245), el listado mismo llegaba con
-  // `esFull: false` en todas las filas. Causa real: Mercado Libre
-  // puede terminar de pintar la CANTIDAD de tarjetas antes de
-  // hidratar los íconos/textos de envío DENTRO de cada una
-  // (svg[aria-label="Enviado por FULL"] / .poly-component__shipp*,
-  // mismo selector real de detectarFullEnTarjeta — issue #242, no se
-  // reinventa acá) — `esperarListadoEstable` leía ese snapshot
-  // intermedio: cantidad ya quieta, pero todavía sin ningún badge de
-  // envío pintado.
   //
-  // Mismo criterio de "nunca colgarse": no se espera infinito a que
-  // aparezca un Full que tal vez ese listado nunca tiene — se
-  // resuelve apenas `lector.leerListado` ya trae al menos un producto
-  // con `esFull: true`, o a los ESPERA_HIDRATACION_ENVIO_MS si nunca
-  // aparece ninguno. El límite externo sigue siendo `maxEsperaMs`
-  // (14s, sin cambios) — bien por debajo del timeout fijo de 15s que
-  // ya tiene background.js (TIMEOUT_POR_VARIANTE_MS/
-  // TIEMPO_MAX_POR_TERMINO_MS).
-  //
-  // Issue #248, vuelta 2 — el smoke de Sharel/Pablo con 0.3.20 (1.8s
-  // de margen) seguía en 0/48, incluso con el filtro Full puesto en
-  // la URL. Dos cambios, no uno: (1) `lector.leerListado` ya resuelve
-  // `esFull` con el detector real en capas + la señal de URL del
-  // filtro (ver `filtroFullActivoEnUrl`/`detectarFullEnTarjeta`,
-  // `lectores/mercadolibre.js`) — chequear ESO directamente en vez de
-  // una búsqueda de marcador propia y más floja acá (`hayMarcadorEnvioVisible`,
-  // ya sacada: duplicaba lógica y no pasaba por el detector real); (2)
-  // 1.8s subió a 6.5s.
-  //
-  // Issue #248, VUELTA 3 — con el filtro Full puesto (señal de URL)
-  // quedó 48/48 OK, pero SIN el filtro seguía en 0/48 con 6.5s. Mateo
-  // confirmó con HTML real (ver el comentario completo sobre
-  // `detectarFullEnTarjeta`, `lectores/mercadolibre.js`) que el
-  // detector YA reconoce ese badge real — con el HTML real puesto en
-  // un fixture, el detector devuelve `true` sin ningún cambio de
-  // selector. Confirmado entonces: lo que queda es 100% timing, no un
-  // selector mal — 6.5s seguía sin ser suficiente para que Mercado
-  // Libre hidrate el ícono de envío en TODAS las tarjetas de un
-  // listado sin el filtro puesto (con el filtro, el signal de URL
-  // resuelve esto instantáneo, sin esperar nada del DOM — por eso
-  // *ese* caso ya daba 48/48). Sube a 12s — dentro del rango pedido
-  // (12-15s) y todavía por debajo del tope externo `maxEsperaMs`
-  // (14s, sin cambios acá) y del timeout fijo de background.js (15s,
-  // tampoco tocado): si la fase de estabilidad del conteo (arriba)
-  // tarda su ~1s típico, el margen real disponible para esto ya era
-  // ~13s antes de chocar con el tope de 14s — 12s entra cómodo en esa
-  // ventana sin tener que mover ningún otro número.
-  const ESPERA_HIDRATACION_ENVIO_MS = 12000;
-
+  // Issue #247/#248 (vueltas 1 a 3) — habían agregado una SEGUNDA fase
+  // de espera acá, específica para que Mercado Libre hidrate el badge
+  // Full dentro de cada tarjeta (más allá de la cantidad ya estable),
+  // subiendo varias veces (1.8s -> 6.5s -> 12s) buscando el bug real
+  // del 0/48. Issue #248 (vuelta 4) — Mateo confirmó con HTML real que
+  // el detector de Full (`detectarFullEnTarjeta`, `lectores/mercadolibre.js`)
+  // ya reconoce el badge real sin ninguna capa extra — Zilonix OS
+  // nunca tuvo esta segunda fase, solo `esperarTarjetas()` (cantidad
+  // estable) + el selector directo. Se saca esa fase entera y se
+  // vuelve al mismo criterio simple de OS: esperar solo la cantidad
+  // de tarjetas estable, nada específico de Full.
   function esperarListadoEstable(maxEsperaMs, esperaEstabilidadMs, intervaloMs) {
     maxEsperaMs = typeof maxEsperaMs === "number" ? maxEsperaMs : 14000;
     esperaEstabilidadMs = typeof esperaEstabilidadMs === "number" ? esperaEstabilidadMs : 1000;
@@ -531,7 +490,6 @@
       const inicio = Date.now();
       let ultimaCantidad = -1;
       let ultimoCambio = Date.now();
-      let momentoCuentaEstable = null;
       const intervalo = setInterval(() => {
         let resultado;
         try {
@@ -550,16 +508,10 @@
         if (cantidad !== ultimaCantidad) {
           ultimaCantidad = cantidad;
           ultimoCambio = ahora;
-          momentoCuentaEstable = null; // la cuenta volvió a moverse: la espera de hidratación de envío se reinicia con ella
         }
-        const cuentaEstable = cantidad > 0 && ahora - ultimoCambio >= esperaEstabilidadMs;
-        if (cuentaEstable && momentoCuentaEstable === null) {
-          momentoCuentaEstable = ahora;
-        }
-        const hidratacionEnvioLista =
-          cuentaEstable && (productos.some((p) => p.esFull === true) || ahora - momentoCuentaEstable >= ESPERA_HIDRATACION_ENVIO_MS);
+        const estable = cantidad > 0 && ahora - ultimoCambio >= esperaEstabilidadMs;
         const seAgotoElTiempo = ahora - inicio > maxEsperaMs;
-        if (hidratacionEnvioLista || seAgotoElTiempo) {
+        if (estable || seAgotoElTiempo) {
           clearInterval(intervalo);
           resolve({ productos, captcha: false });
         }

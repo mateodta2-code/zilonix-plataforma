@@ -434,53 +434,44 @@ describe("leerResenasDesdeScript — issue #225 (Top 8 reseñas)", () => {
   });
 });
 
-describe("detectarFullEnHtmlTarjeta — issue #241/#242, respaldo de texto del detector de Full", () => {
-  // Issue #242 — markup real CONFIRMADO FUNCIONANDO HOY en producción
-  // por Zilonix OS (mateodta2-code/zilonix-os,
-  // chrome-extension-busqueda/scraper-listado.js — "DOM vivo
-  // confirmado 6/10"): el aria-label real completo es
-  // "Enviado por FULL" (NUNCA solo "FULL") — la fixture de #241 tenía
-  // el valor equivocado (confirmado contra una captura estática de
-  // Wayback, no contra el DOM real) y por eso el bug seguía sin
-  // aparecer en las pruebas.
-  const TARJETA_FULL_REAL = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipped-from"><svg aria-label="Enviado por FULL" width="41" height="13" viewbox="0 0 41 13" role="img"><use href="#poly_full"></use></svg></div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
+describe("detectarFullEnHtmlTarjeta — issue #248 (vuelta 4), simplificado al mismo criterio de Zilonix OS", () => {
+  // Issue #248 (vuelta 4) — Mateo pidió simplificar de vuelta al mismo
+  // criterio simple que Zilonix OS ya usa en producción:
+  //   const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+  // Las capas de texto/atributos de #241/#242/#248 (vueltas 1-3) se
+  // sacaron — el HTML real citado en la vuelta 3 confirmó que este
+  // selector simple, solo, ya alcanza; el bug que quedaba era 100%
+  // timing (ver content.js), no el detector. `detectarFullEnHtmlTarjeta`
+  // queda como la versión de texto del MISMO selector único, solo
+  // para poder probarla sin DOM (este proyecto no tiene jsdom).
+  //
+  // Issue #248, VUELTA 3 — HTML real citado por Pablo/Sharel (DOM
+  // vivo, con el filtro Full apagado — el caso puntual que seguía en
+  // 0/48 antes de confirmarse que era timing). Citado tal cual, sin
+  // recortar, salvo envolverlo en un <li> real con su título.
+  const TARJETA_REAL_SIN_FILTRO_VUELTA3 = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping-v2"><div class="poly-shipping-v2__item"><span><span class="polylabel-pill polylabel-fw-semibold">Llega gratis mañana</span><svg aria-label="Enviado por FULL" role="img" class="polylabel-icon" width="44" height="14" viewBox="0 0 41 13"><use href="#poly_full"></use></svg></span></div></div><h3 class="poly-component__title-wrapper">Tetero Anticólicos 260ml</h3></div></li>`;
 
-  const TARJETA_SIN_FULL = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping">Envío gratis</div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
-
-  it('el badge real confirmado por Zilonix OS (aria-label="Enviado por FULL" dentro de poly-component__shipped-from) -> true', () => {
-    expect(detectarFullEnHtmlTarjeta(TARJETA_FULL_REAL)).toBe(true);
+  it("issue #248, HTML REAL confirmado (vuelta 3, poly-component__shipping-v2) -> true", () => {
+    expect(detectarFullEnHtmlTarjeta(TARJETA_REAL_SIN_FILTRO_VUELTA3)).toBe(true);
   });
 
-  it('issue #242, regresión directa del bug real: aria-label="Enviado por FULL" (el valor real, más largo que solo "FULL") ya no se pierde por exigir un match exacto', () => {
-    // Antes de #242, el regex exigía aria-label="full" EXACTO — un
-    // valor más largo como "Enviado por FULL" nunca matcheaba, aunque
-    // contuviera la palabra. Este caso puntual es la prueba de que
-    // eso ya no pasa.
+  it('issue #242, el selector exacto de Zilonix OS (aria-label="Enviado por FULL") -> true', () => {
     const tarjeta = `<li class="ui-search-layout__item"><div class="poly-component__shipped-from"><svg aria-label="Enviado por FULL"></svg></div></li>`;
     expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
   });
 
   it("una tarjeta con envío gratis pero sin Full -> false (nunca confunde los dos)", () => {
-    expect(detectarFullEnHtmlTarjeta(TARJETA_SIN_FULL)).toBe(false);
-  });
-
-  it("respaldo por sprite: use xlink:href=\"#poly_full\" (forma vieja del atributo SVG) también cuenta, aunque el aria-label cambie", () => {
-    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-component__shipped-from">Enviado por <svg><use xlink:href="#poly_full"></use></svg></div></li>`;
-    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
-  });
-
-  it("respaldo por texto: \"Full\" visible dentro del bloque de envío, sin ícono ni aria-label, también cuenta", () => {
-    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-component__shipping"><span>Enviado por Full</span></div></li>`;
-    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
-  });
-
-  it("nunca un falso positivo: un título real con \"Full\" (ej. \"Full HD\") fuera del bloque de envío NUNCA cuenta", () => {
-    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping">Envío gratis</div><h3 class="poly-component__title-wrapper">Televisor Full HD 42 Pulgadas</h3></div></li>`;
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping">Envío gratis</div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
     expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
   });
 
-  it("sin ningún bloque de envío confirmado -> false, nunca se arriesga a buscar \"full\" en toda la tarjeta", () => {
-    const tarjeta = `<li class="ui-search-layout__item"><h3 class="poly-component__title-wrapper">Mochila Full Pack Escolar</h3></li>`;
+  it('nunca un falso positivo: un título real con "Full" (ej. "Full HD") nunca cuenta — el selector único exige el svg con ese aria-label exacto, nunca texto suelto', () => {
+    const tarjeta = `<li class="ui-search-layout__item"><h3 class="poly-component__title-wrapper">Televisor Full HD 42 Pulgadas</h3></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
+  });
+
+  it('advertencia explícita de Mateo: "poly-bookmark__icon-full" (ícono de favorito, nunca el programa Full) nunca cuenta como Full', () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><button class="poly-bookmark__icon-full" aria-label="Favorito"></button><div class="poly-component__delivery">Llega gratis mañana</div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
     expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
   });
 
@@ -522,78 +513,6 @@ describe("filtroFullActivoEnUrl — issue #248 (vuelta 2), señal fuerte del fil
     expect(filtroFullActivoEnUrl("")).toBe(false);
     expect(filtroFullActivoEnUrl(null as unknown as string)).toBe(false);
     expect(filtroFullActivoEnUrl(undefined as unknown as string)).toBe(false);
-  });
-});
-
-describe("detectarFullEnHtmlTarjeta — issue #248, SEXTO intento: smoke real 0/48 incluso con el filtro Full puesto", () => {
-  // Issue #248 — Pablo confirmó en vivo (listado CO "tetero", HOY) que
-  // el badge Full visible es un logo verde itálico "FULL" + un rayo,
-  // junto al texto "Llega gratis mañana" — y que ese texto SOLO
-  // ("Llega gratis mañana") NO implica Full (hay tarjetas con ese
-  // mismo texto sin Full). El selector exacto de OS y el respaldo
-  // acotado a `poly-component__shipp(ed-from|ing)` (#241/#242) ya no
-  // matchean nada — bloque que, en el DOM de hoy, puede no existir más
-  // con ese nombre. Estas pruebas simulan esa variante (badge FUERA de
-  // ese bloque, en otra clase) para confirmar que las capas nuevas lo
-  // rescatan sin inventar HTML real (eso se pide en el PR real, ver
-  // changelog) — son fixtures de ejemplo, no una captura citada.
-  it('Capa 1: aria-label con "full" FUERA del bloque poly-component__shipp* (bloque renombrado/movido) -> true', () => {
-    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__delivery"><svg aria-label="Despachado FULL"></svg> Llega gratis mañana</div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
-    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
-  });
-
-  it('Capa 1: clase del ícono ("icon-poly_full") FUERA del bloque poly-component__shipp*, sin ningún aria-label -> true', () => {
-    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><span class="icon-poly_full"></span><div class="poly-component__delivery">Llega gratis mañana</div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
-    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
-  });
-
-  it('Capa 3: "FULL" suelto junto a "Llega gratis mañana", sin bloque poly-component__shipp* ni atributo reconocido -> true', () => {
-    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__delivery"><span class="zx-badge">FULL</span> Llega gratis mañana</div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
-    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
-  });
-
-  it('regresión directa del smoke de Pablo: "Llega gratis mañana" SOLO (sin ningún FULL cerca) -> false — ese texto por sí solo nunca implica Full', () => {
-    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__delivery">Llega gratis mañana</div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
-    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
-  });
-
-  it('nunca un falso positivo: título "Full HD" sin ningún bloque de envío ni badge real -> false, aunque "Llega" aparezca en otra parte de la tarjeta', () => {
-    const tarjeta = `<li class="ui-search-layout__item"><h3 class="poly-component__title-wrapper">Televisor Full HD 42 Pulgadas</h3><div class="poly-component__delivery">Llega gratis mañana</div></li>`;
-    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
-  });
-
-  it("el bloque poly-component__shipp* real (#241/#242) sigue funcionando igual que antes — #248 solo agrega capas, nunca saca la que ya funcionaba", () => {
-    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-component__shipped-from"><svg aria-label="Enviado por FULL"></svg></div></li>`;
-    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
-  });
-
-  // Issue #248, VUELTA 3 — HTML real capturado por Pablo/Sharel (DOM
-  // vivo, con el filtro Full apagado — el caso puntual que seguía en
-  // 0/48). Citado tal cual, sin recortar, salvo envolverlo en un <li>
-  // real con su título para que la prueba sea representativa de una
-  // tarjeta completa.
-  const TARJETA_REAL_SIN_FILTRO_VUELTA3 = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping-v2"><div class="poly-shipping-v2__item"><span><span class="polylabel-pill polylabel-fw-semibold">Llega gratis mañana</span><svg aria-label="Enviado por FULL" role="img" class="polylabel-icon" width="44" height="14" viewBox="0 0 41 13"><use href="#poly_full"></use></svg></span></div></div><h3 class="poly-component__title-wrapper">Tetero Anticólicos 260ml</h3></div></li>`;
-
-  it("issue #248, HTML REAL confirmado (vuelta 3, poly-component__shipping-v2) -> true", () => {
-    expect(detectarFullEnHtmlTarjeta(TARJETA_REAL_SIN_FILTRO_VUELTA3)).toBe(true);
-  });
-
-  it('issue #248, vuelta 3 — "FULL" vive SOLO en atributos (aria-label / href de sprite), nunca como texto visible aparte: si NINGÚN atributo sobreviviera, el texto visible solo diría "Llega gratis mañana" -> false, confirmando por qué la Capa 1 (atributos) es imprescindible acá, no un respaldo redundante', () => {
-    // Mismo fixture real, pero con los DOS atributos que delatan Full
-    // (aria-label del svg, href del sprite <use>) sacados — simula qué
-    // pasaría si la Capa 1 no existiera: el texto visible que queda
-    // (un strip-tags ingenuo de la Capa 2) es solo "Llega gratis
-    // mañana", sin la palabra "full" en ningún lado.
-    const sinAtributosFull = TARJETA_REAL_SIN_FILTRO_VUELTA3.replace('aria-label="Enviado por FULL" ', "").replace(
-      'href="#poly_full"',
-      'href="#otro-icono"'
-    );
-    expect(detectarFullEnHtmlTarjeta(sinAtributosFull)).toBe(false);
-  });
-
-  it('advertencia explícita de Mateo: "poly-bookmark__icon-full" (ícono de favorito, nunca el programa Full) nunca cuenta como Full', () => {
-    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><button class="poly-bookmark__icon-full" aria-label="Favorito"></button><div class="poly-component__delivery">Llega gratis mañana</div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
-    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
   });
 });
 

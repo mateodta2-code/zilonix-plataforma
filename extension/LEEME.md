@@ -318,6 +318,25 @@ Con 0.3.21: con el filtro Full puesto en la URL, el chip ya dio **48/48 OK** (la
 
 Extensión 0.3.21 → 0.3.22.
 
+## Hotfix de smoke #15 — Full: simplificación de vuelta al criterio de Zilonix OS (issue #248, vuelta 4)
+
+La vuelta 3 confirmó que el bug restante era 100% timing — el detector ya reconocía el badge real. Mateo pidió simplificar: Zilonix OS nunca tuvo capas de texto/atributos ni una espera de hidratación específica para Full, solo esto:
+
+```js
+await esperarTarjetas(); // 15s, cantidad estable 1s
+const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+```
+
+**Se sacó todo lo agregado en #241/#242/#248 (vueltas 1 a 3) que no era ese criterio simple**:
+
+- Las capas de texto/atributos de `detectarFullEnHtmlTarjeta` (acotamiento al bloque `poly-component__shipp*`, búsqueda de "full" suelto cerca de "Llega"/"Envío", `quitarTituloDeHtml`) — `detectarFullEnTarjeta` vuelve a ser un solo `querySelector('svg[aria-label="Enviado por FULL"]')`. `detectarFullEnHtmlTarjeta` queda solo como la versión de texto del MISMO selector único, para poder probarla sin DOM (este proyecto no tiene jsdom) — nunca se llama desde ningún camino real.
+- El diagnóstico temporal completo (`volcarDiagnosticoFullSiHaceFalta`, `extraerDiagnosticoFullDeTarjeta`, `textoPropioDe`) — ya cumplió su función (consiguió el HTML real de la vuelta 3), se saca entero.
+- La segunda fase de espera de hidratación en `content.js` (`ESPERA_HIDRATACION_ENVIO_MS`, que había subido 1.8s → 6.5s → 12s buscando el bug equivocado) — `esperarListadoEstable` vuelve a ser solo la espera de cantidad estable (1s), con el mismo tope de 14s de siempre (issue #233) — el mismo criterio simple de `esperarTarjetas()` de Zilonix OS.
+
+**Lo que queda, sin tocar**: `filtroFullActivoEnUrl` (issue #248, vuelta 2) — la señal de la URL del filtro Full sigue como un OR opcional sobre el detector real, nunca su reemplazo.
+
+Extensión 0.3.22 → 0.3.23.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).
