@@ -608,50 +608,142 @@
   // nunca se traduce (confirmado en capturas reales de los dos
   // países, issue #239) — se asume el mismo texto para Brasil sin
   // inventar una variante distinta sin evidencia.
+  // Issue #248 — SEXTO intento: smoke real de Pablo sobre listado CO
+  // "tetero" con 0.3.19 mostró 0/48 Full — INCLUSO con el filtro FULL
+  // de Mercado Libre puesto (todas esas 48 tarjetas, por definición
+  // del filtro, SON Full). El selector exacto de OS
+  // (`svg[aria-label="Enviado por FULL"]`, #242) y su respaldo
+  // acotado al bloque `poly-component__shipp(ed-from|ing)` (#241/#242)
+  // ya no matchean nada en el DOM vivo de hoy — hipótesis de Pablo
+  // (sin HTML real citado todavía, por eso #248 explícitamente pide
+  // NUNCA más adivinar desde Wayback/un comentario viejo de OS): el
+  // badge puede haberse movido fuera de ese bloque, o cambiado de
+  // ícono. Se ensancha el detector en capas, de más a menos
+  // específico, sobre la TARJETA ENTERA (nunca solo un bloque que hoy
+  // puede no existir) — y se agrega un volcado de diagnóstico
+  // temporal (ver `volcarDiagnosticoFullSiHaceFalta`, abajo de
+  // `leerListado`) para conseguir HTML real si esto tampoco alcanza.
   function detectarFullEnTarjeta(tarjeta) {
+    if (!tarjeta) return false;
     // Selector real de Zilonix OS, primero y directo — mismo criterio
     // exacto que ya corre en producción hoy.
     if (U.primerElemento(['svg[aria-label="Enviado por FULL"]'], tarjeta)) return true;
-    // Respaldo (#241, corregido) — SOLO si el selector exacto de
-    // arriba no matchea: por si alguna variante de tarjeta (otro país,
-    // otro build) trae el aria-label con otro texto que igual
-    // contenga "full", u otro marcador del mismo ícono. Sigue acotado
-    // al bloque de envío real — nunca "full" suelto en toda la
-    // tarjeta (un título real puede decir "Pantalla Full HD").
+    // Issue #248 — más laxo, sobre la tarjeta ENTERA (no acotado a
+    // ningún bloque): el mismo ícono real, pero por si el valor exacto
+    // del aria-label cambió, viene en un <img> en vez de un <svg>, o
+    // el marcador es la clase del ícono/sprite en vez del aria-label.
+    // Ninguno de estos atributos aparece nunca en un título real (un
+    // título no tiene aria-label="full" ni class="...poly_full..."),
+    // así que es seguro buscarlos en toda la tarjeta sin acotar.
+    if (
+      U.primerElemento(
+        ['svg[aria-label*="FULL" i]', 'img[aria-label*="FULL" i]', '[class*="poly_full"]', '[class*="icon-poly_full"]'],
+        tarjeta
+      )
+    ) {
+      return true;
+    }
+    // Respaldo de texto (#241, corregido en #242, ensanchado en #248)
+    // — ver detectarFullEnHtmlTarjeta.
     return detectarFullEnHtmlTarjeta(tarjeta.outerHTML);
+  }
+
+  // Issue #248 — se saca el título ANTES de cualquier búsqueda de
+  // texto plano por "full": así, sin importar qué tan relajado quede
+  // el resto del respaldo de texto, un título real como "Televisor
+  // Full HD" nunca puede contar — ya no está. Mismo patrón de "buscar
+  // la apertura real y su propio cierre" que el resto del archivo,
+  // nunca una ventana de caracteres a ciegas.
+  function quitarTituloDeHtml(htmlTarjeta) {
+    const mApertura = htmlTarjeta.match(/<(a|h2|h3)\b[^>]*class="[^"]*poly-component__title[^"]*"[^>]*>/i);
+    if (!mApertura) return htmlTarjeta;
+    const tag = mApertura[1].toLowerCase();
+    const idxInicio = mApertura.index + mApertura[0].length;
+    const tagCierre = `</${tag}>`;
+    const idxCierre = htmlTarjeta.toLowerCase().indexOf(tagCierre, idxInicio);
+    if (idxCierre === -1) return htmlTarjeta; // no se encontró cierre real — no se arriesga a cortar de más, se deja el html igual
+    return htmlTarjeta.slice(0, idxInicio) + " " + htmlTarjeta.slice(idxCierre + tagCierre.length);
   }
 
   const VENTANA_BLOQUE_ENVIO = 400;
   function detectarFullEnHtmlTarjeta(htmlTarjeta) {
     if (typeof htmlTarjeta !== "string" || !htmlTarjeta) return false;
-    // Se acota a la etiqueta de apertura real (div o span) del bloque
-    // de envío y se busca su propio cierre — nunca una ventana de
+    const htmlSinTitulo = quitarTituloDeHtml(htmlTarjeta);
+
+    // Capa 1 (issue #248) — atributos reales del ícono Full
+    // (aria-label, href de sprite, clase del ícono) en CUALQUIER parte
+    // de la tarjeta: ninguno de estos existe nunca en un título real,
+    // así que no hace falta acotar a ningún bloque para que sean
+    // seguros — a diferencia de la capa de texto plano, de abajo.
+    if (/aria-label\s*=\s*["'][^"']*full[^"']*["']/i.test(htmlSinTitulo)) return true;
+    if (/(?:[\w-]+:)?href\s*=\s*["'][^"']*(?:poly_full|icon-poly_full)[^"']*["']/i.test(htmlSinTitulo)) return true;
+    if (/class\s*=\s*["'][^"']*(?:poly_full|icon-poly_full)[^"']*["']/i.test(htmlSinTitulo)) return true;
+
+    // Capa 2 (issue #241/#242) — respaldo acotado al bloque real de
+    // envío CUANDO existe: se acota a la etiqueta de apertura real
+    // (div o span) y se busca su propio cierre — nunca una ventana de
     // caracteres a ciegas, que podía "derramarse" sobre contenido
-    // hermano (ej. el título del producto, justo después del bloque
-    // de envío en el HTML real) y producir un falso positivo con un
-    // título real tipo "Televisor Full HD". VENTANA_BLOQUE_ENVIO queda
-    // como tope de seguridad solo si el cierre nunca aparece (HTML
-    // cortado/inesperado) — nunca escanea la tarjeta entera sin límite.
-    const mApertura = htmlTarjeta.match(/<(div|span)[^>]*class="[^"]*poly-component__shipp(?:ed-from|ing)[^"]*"[^>]*>/i);
-    if (!mApertura) return false;
-    const idxInicio = mApertura.index + mApertura[0].length;
-    const tagCierre = `</${mApertura[1].toLowerCase()}>`;
-    const idxCierre = htmlTarjeta.toLowerCase().indexOf(tagCierre, idxInicio);
-    const ventana = idxCierre === -1 ? htmlTarjeta.slice(idxInicio, idxInicio + VENTANA_BLOQUE_ENVIO) : htmlTarjeta.slice(idxInicio, idxCierre);
-    // Issue #242 — bug real corregido: esto antes exigía
-    // `aria-label="full"` EXACTO, así que nunca matcheaba
-    // "Enviado por FULL" (un valor más largo) — ahora es un substring
-    // del valor del atributo, sigue acotado al bloque de envío así
-    // que nunca agarra un "Full HD" de otra parte de la tarjeta.
-    if (/aria-label\s*=\s*["'][^"']*full[^"']*["']/i.test(ventana)) return true;
-    if (/(?:xlink:)?href\s*=\s*["'][^"']*poly_full["']/i.test(ventana)) return true;
-    const soloTexto = ventana.replace(/<[^>]+>/g, " ");
-    return /\bfull\b/i.test(soloTexto);
+    // hermano. Más preciso que la capa 3 — se prueba primero, pero
+    // (issue #248) ya NUNCA hace fallar todo el detector si este
+    // bloque no existe: antes de #248 la ausencia de este bloque
+    // cortaba en seco con `return false`, el bug real detrás del 0/48
+    // del smoke de Pablo con el filtro Full puesto.
+    const mApertura = htmlSinTitulo.match(/<(div|span)[^>]*class="[^"]*poly-component__shipp(?:ed-from|ing)[^"]*"[^>]*>/i);
+    if (mApertura) {
+      const idxInicio = mApertura.index + mApertura[0].length;
+      const tagCierre = `</${mApertura[1].toLowerCase()}>`;
+      const idxCierre = htmlSinTitulo.toLowerCase().indexOf(tagCierre, idxInicio);
+      const ventana = idxCierre === -1 ? htmlSinTitulo.slice(idxInicio, idxInicio + VENTANA_BLOQUE_ENVIO) : htmlSinTitulo.slice(idxInicio, idxCierre);
+      if (/\bfull\b/i.test(ventana.replace(/<[^>]+>/g, " "))) return true;
+    }
+
+    // Capa 3 (issue #248) — "full" suelto, pero SOLO cerca de
+    // "Llega"/"Envío" (contexto real descrito por Pablo: el badge
+    // aparece junto a "Llega gratis mañana") — nunca en el título (ya
+    // sacado arriba) ni en cualquier otra parte de la tarjeta sin
+    // relación con el envío.
+    const soloTexto = htmlSinTitulo.replace(/<[^>]+>/g, " ");
+    const VENTANA_CERCANIA_ENVIO = 60;
+    const regexAncla = /(Llega|Env[íi]o)/gi;
+    let coincidenciaAncla;
+    while ((coincidenciaAncla = regexAncla.exec(soloTexto))) {
+      const inicio = Math.max(0, coincidenciaAncla.index - VENTANA_CERCANIA_ENVIO);
+      const fin = Math.min(soloTexto.length, coincidenciaAncla.index + coincidenciaAncla[0].length + VENTANA_CERCANIA_ENVIO);
+      if (/\bfull\b/i.test(soloTexto.slice(inicio, fin))) return true;
+    }
+    return false;
+  }
+
+  // Issue #248 — diagnóstico TEMPORAL: #248 pide explícitamente no
+  // seguir adivinando desde Wayback/un comentario viejo de OS — si
+  // ensanchar el detector (arriba) tampoco alcanza, hace falta HTML
+  // real de una tarjeta Full para seguir. Si un listado tiene
+  // productos pero NINGUNO salió Full, se vuelca a la consola una
+  // muestra de hasta 3 outerHTML recortados (600 caracteres, bastante
+  // para ver el bloque de envío sin inundar la consola) — así Pablo/
+  // Sharel lo puede copiar directo de DevTools sin tener que armar el
+  // outerHTML a mano. Una sola vez por carga de página (el flag nunca
+  // se resetea solo) — se saca este bloque entero una vez que el
+  // smoke confirme el fix real (ver docs/changelog/pendientes/
+  // *-248.md).
+  let diagnosticoFullYaLogueado = false;
+  function volcarDiagnosticoFullSiHaceFalta(productos, muestraTarjetas) {
+    if (diagnosticoFullYaLogueado || !productos.length) return;
+    if (productos.some((p) => p.esFull === true)) return; // ya hay al menos un Full real — nada que diagnosticar
+    diagnosticoFullYaLogueado = true;
+    // eslint-disable-next-line no-console
+    console.info(
+      "[Zilonix][diagnóstico temporal #248] 0 de " +
+        productos.length +
+        " tarjetas detectadas como Full — muestra real de hasta 3 tarjetas (outerHTML recortado a 600 caracteres):",
+      muestraTarjetas
+    );
   }
 
   function leerListado(doc) {
     const tarjetas = doc.querySelectorAll("li.ui-search-layout__item");
     const productos = [];
+    const muestraDiagnosticoFull = []; // issue #248, ver volcarDiagnosticoFullSiHaceFalta
     tarjetas.forEach((tarjeta) => {
       const linkEl = U.primerElemento(["a.poly-component__title"], tarjeta);
       const href = linkEl ? linkEl.getAttribute("href") : null;
@@ -661,10 +753,13 @@
       const esAnuncio = Boolean(U.primerElemento(['a.poly-component__ads-promotions', 'a[aria-label="Promocionado"]'], tarjeta));
       if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico
 
-      // Issue #242 — ver `detectarFullEnTarjeta` arriba para el
-      // historial completo (5 intentos: #229, #236, #239, #241, #242)
-      // y el selector real confirmado hoy en producción por Zilonix OS.
+      // Issue #242/#248 — ver `detectarFullEnTarjeta` arriba para el
+      // historial completo (6 intentos: #229, #236, #239, #241, #242,
+      // #248) y el detector real, ensanchado en capas, confirmado hoy.
       const esFull = detectarFullEnTarjeta(tarjeta);
+      if (muestraDiagnosticoFull.length < 3) {
+        muestraDiagnosticoFull.push((tarjeta.outerHTML || "").slice(0, 600));
+      }
       const { estrellas, vendidos } = leerCalificacionYVendidosListado(tarjeta);
       const fotoEl = U.primerElemento(["img.poly-component__picture"], tarjeta);
 
@@ -688,6 +783,7 @@
         link: href || null,
       });
     });
+    volcarDiagnosticoFullSiHaceFalta(productos, muestraDiagnosticoFull);
     return { productos };
   }
 

@@ -264,6 +264,22 @@ Ficha ya OK en 0.3.18 (#245). Pero el panel de Investigación seguía en 0% Full
 
 Extensión 0.3.18 → 0.3.19.
 
+## Hotfix de smoke #12 — Full del listado sigue en 0/48 incluso con el filtro Full puesto (issue #248)
+
+#247 (espera de hidratación) no alcanzó: smoke de Pablo sobre listado CO "tetero" con 0.3.19 seguía en 0/48 — e, incluso con el filtro **FULL** de Mercado Libre puesto en la URL (donde, por definición del filtro, las 48 tarjetas SON Full), el chip igual mostraba 0/48. Ficha sigue OK (#245).
+
+**Contexto real de Pablo (en vivo, sin HTML citado todavía)**: el badge Full visible hoy es un logo verde itálico "FULL" + un rayo, junto al texto "Llega gratis mañana" — y ese texto SOLO, sin el badge, NO implica Full (hay tarjetas con "Llega gratis mañana" que no son Full). Esto, más el 0/48 con el filtro puesto, apunta a que el selector exacto de Zilonix OS (`svg[aria-label="Enviado por FULL"]`) y el respaldo acotado al bloque `poly-component__shipp(ed-from|ing)` (#241/#242) ya no matchean nada del DOM vivo de hoy — ese bloque puede haberse movido o renombrado.
+
+**Esta vez, por instrucción explícita del issue, no se adivinó desde Wayback ni desde el comentario viejo de Zilonix OS** — en su lugar, se ensanchó el detector en capas, de más a menos específico, sobre la tarjeta ENTERA (nunca solo un bloque que hoy puede no existir):
+
+1. **Capa 1 (nueva, #248)** — atributos reales del ícono (aria-label que contenga "full", href de sprite `poly_full`/`icon-poly_full`, clase `poly_full`/`icon-poly_full`) en cualquier parte de la tarjeta, sin acotar a ningún bloque: ninguno de estos atributos existe nunca en un título real, así que es seguro.
+2. **Capa 2 (#241/#242, sin cambios)** — el bloque `poly-component__shipp(ed-from|ing)` real, cuando existe — pero issue #248 corrige que su AUSENCIA ya nunca hace fallar todo el detector (antes de #248, `return false` en seco si ese bloque no estaba — el bug real detrás del 0/48 con el filtro puesto).
+3. **Capa 3 (nueva, #248)** — "full" suelto, pero solo cerca de "Llega"/"Envío" (el contexto real que describió Pablo), con el título del producto SACADO antes de buscar (nunca "Televisor Full HD" cuenta, sin importar cuánto se relaje el resto).
+
+**Diagnóstico temporal agregado** (`volcarDiagnosticoFullSiHaceFalta`, `leerListado`): si un listado tiene productos pero NINGUNO sale Full con las 3 capas arriba, se vuelca a la consola una muestra real de hasta 3 tarjetas (outerHTML recortado a 600 caracteres) — para conseguir HTML real de Pablo/Sharel sin tener que pedírselo a mano cada vez, si esto tampoco alcanza. Se dispara una sola vez por carga de página. **Es temporal** — se saca una vez que el smoke confirme el fix real.
+
+Extensión 0.3.19 → 0.3.20.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).
