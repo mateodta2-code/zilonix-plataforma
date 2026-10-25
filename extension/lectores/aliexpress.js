@@ -130,10 +130,19 @@
           ? it.prices.salePrice.minPrice
           : U.numeroDesdeTexto(it.prices && it.prices.salePrice && it.prices.salePrice.formattedPrice);
         const vendidos = parseVentasAliExpress((it.trade && it.trade.tradeDesc) || "");
+        // Issue #227 — foto/estrellas confirmados en el mismo objeto
+        // real (zilonix-os-web, scraper-aliexpress-search.js) que ya
+        // confirmó precio/ventas — para fotos ampliables y el sort
+        // "Más calificación".
+        const fotoRaw = (it.image && it.image.imgUrl) || "";
+        const foto = fotoRaw ? (fotoRaw.indexOf("//") === 0 ? `https:${fotoRaw}` : fotoRaw) : null;
+        const calificacion = it.evaluation && it.evaluation.starRating != null ? Number(it.evaluation.starRating) : null;
         return {
           titulo: (it.title && it.title.displayTitle) || null,
           precio,
           vendidos,
+          foto,
+          calificacion: Number.isFinite(calificacion) ? calificacion : null,
           link: `https://es.aliexpress.com/item/${productId}.html`,
         };
       })

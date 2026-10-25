@@ -43,6 +43,13 @@ const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado"]);
 // siempre.
 const TOPE_TERMINOS_ESCANEO = 5; // issue #225 — término + hasta 4 variantes (IA + respaldo de reglas) = 5 queries, nunca más
 const TOPE_PRODUCTOS_POR_VARIANTE = 20; // "lee ~20" — el tope real vive en content.js (TOPE_PRODUCTOS_ENVIO_LISTADO), este es solo documentación
+// Issue #227 — 15s fijos, pedido explícito de Sharel; confirmado
+// además por Cowork en zilonix-os-web (chrome-extension-busqueda/
+// scraper-listado.js, esperarTarjetas) como el tiempo real que ML
+// necesita para pintar resultados cuando tarda (antes 8s, se quedaba
+// corto) — mismo valor que TIEMPO_MAX_POR_TERMINO_MS (plataformas
+// no-ML, más abajo) y TIEMPO_MAX_RESENA_MS (reseñas) — las 3 unificadas
+// a 15000 por este issue, nunca más un número distinto por mecanismo.
 const TIMEOUT_POR_VARIANTE_MS = 15000; // si una pestaña nunca contesta (bloqueo, captcha, red lenta), no se cuelga para siempre
 void TOPE_PRODUCTOS_POR_VARIANTE;
 
@@ -51,19 +58,38 @@ void TOPE_PRODUCTOS_POR_VARIANTE;
 // Investigación escaneando a la vez sin pisarse.
 const escaneosActivos = new Map(); // tabIdPanel -> { terminos, indice, resultados, tabIdActual, timeoutId }
 
-function urlListadoMl(termino) {
-  // Issue #221 — formato real de Mercado Libre Colombia para un
-  // listado por texto: palabras separadas por guión, nunca espacios
-  // codificados (confirmado por el formato que el propio pedido dio:
-  // "listado.mercadolibre.com.co/{término}"). El marcador
+// Issue #227 — selector de país ML. SOLO Colombia (CO) está confirmado
+// en vivo contra producción, en esta misma tarea (listado.mercadolibre.com.co) —
+// los otros 5 dominios son del conocimiento público real de Mercado
+// Libre (sus propios dominios regionales, no un detalle interno de
+// scraping) pero construidos por sustitución del mismo patrón
+// "listado.<dominio>/<término>", NUNCA probados en vivo todavía —
+// pendiente de confirmar en el smoke de staging para AR/BR/MX/CL/UY/PE.
+// Brasil es "mercadolivre" (marca en portugués), nunca "mercadolibre" —
+// y Chile es "mercadolibre.cl" (sin "com." en el medio), los dos
+// confirmados como dominios reales públicos de Mercado Libre.
+const DOMINIOS_ML_PAIS = {
+  CO: { dominio: "mercadolibre.com.co", nombre: "Mercado Libre Colombia" },
+  AR: { dominio: "mercadolibre.com.ar", nombre: "Mercado Libre Argentina" },
+  BR: { dominio: "mercadolivre.com.br", nombre: "Mercado Libre Brasil" },
+  MX: { dominio: "mercadolibre.com.mx", nombre: "Mercado Libre México" },
+  CL: { dominio: "mercadolibre.cl", nombre: "Mercado Libre Chile" },
+  UY: { dominio: "mercadolibre.com.uy", nombre: "Mercado Libre Uruguay" },
+  PE: { dominio: "mercadolibre.com.pe", nombre: "Mercado Libre Perú" },
+};
+
+function urlListadoMl(termino, pais) {
+  // Formato real confirmado contra producción para Colombia: palabras
+  // separadas por guión, nunca espacios codificados. El marcador
   // "_zilonix_escaneo=1" (propio, nunca de Mercado Libre) es lo que
   // content.js usa para saber que esta pestaña puntual la abrió el
   // escaneo automático — nunca una persona a mano.
+  const config = DOMINIOS_ML_PAIS[pais] || DOMINIOS_ML_PAIS.CO;
   const limpio = termino.trim().toLowerCase().replace(/\s+/g, "-");
-  return `https://listado.mercadolibre.com.co/${encodeURIComponent(limpio)}?_zilonix_escaneo=1`;
+  return `https://listado.${config.dominio}/${encodeURIComponent(limpio)}?_zilonix_escaneo=1`;
 }
 
-function iniciarEscaneo(tabIdPanel, terminosCrudos) {
+function iniciarEscaneo(tabIdPanel, terminosCrudos, pais) {
   // Si ya había un escaneo en curso para esta misma pestaña del panel
   // (ej. doble submit), se descarta el viejo — nunca dos escaneos
   // pisándose las pestañas entre sí.
@@ -78,7 +104,9 @@ function iniciarEscaneo(tabIdPanel, terminosCrudos) {
     .slice(0, TOPE_TERMINOS_ESCANEO);
   if (!terminos.length) return;
 
-  escaneosActivos.set(tabIdPanel, { terminos, indice: 0, resultados: [], tabIdActual: null, timeoutId: null });
+  // Issue #227 — selector de país ML (ver DOMINIOS_ML_PAIS arriba).
+  const paisValido = typeof pais === "string" && DOMINIOS_ML_PAIS[pais] ? pais : "CO";
+  escaneosActivos.set(tabIdPanel, { terminos, pais: paisValido, indice: 0, resultados: [], tabIdActual: null, timeoutId: null });
   abrirSiguienteVariante(tabIdPanel);
 }
 
@@ -94,7 +122,7 @@ function abrirSiguienteVariante(tabIdPanel) {
   const termino = estado.terminos[estado.indice];
   // "activa" (ver issue #221, punto 3) — chrome.tabs.create con
   // active:true, nunca una pestaña de fondo oculta.
-  chrome.tabs.create({ url: urlListadoMl(termino), active: true }, (tab) => {
+  chrome.tabs.create({ url: urlListadoMl(termino, estado.pais), active: true }, (tab) => {
     if (chrome.runtime.lastError || !tab?.id) {
       // No se pudo abrir esta variante (ej. Chrome bloqueó la
       // creación) — se sigue con la próxima, nunca se cuelga el
@@ -131,6 +159,7 @@ function finalizarEscaneo(tabIdPanel) {
   if (!estado) return;
 
   const productos = estado.resultados.flatMap((r) => (Array.isArray(r.productos) ? r.productos : []));
+  const nombrePais = (DOMINIOS_ML_PAIS[estado.pais] || DOMINIOS_ML_PAIS.CO).nombre;
   // Issue #221 — mismo tipo "zilonix:listado" que ya entiende el
   // panel (issue #213, "Importar listado") — con `origen:
   // "escaneo-analizar"` para que PanelDemanda.tsx lo fusione directo,
@@ -139,7 +168,7 @@ function finalizarEscaneo(tabIdPanel) {
   // acá la persona YA autorizó todo con el clic de Analizar).
   chrome.tabs.sendMessage(
     tabIdPanel,
-    { tipo: "zilonix:listado", payload: { plataforma: "Mercado Libre Colombia", url: "", productos, origen: "escaneo-analizar" } },
+    { tipo: "zilonix:listado", payload: { plataforma: nombrePais, url: "", productos, origen: "escaneo-analizar" } },
     () => void chrome.runtime.lastError
   );
   // Deja a la persona de vuelta en el panel, no en la última pestaña
@@ -157,7 +186,15 @@ function finalizarEscaneo(tabIdPanel) {
 // al que content.js espera adentro (ver lector.leerResenas +
 // reescanearConRetardo en content.js) — nunca ir pegados, mismo
 // comentario que ya dejó Cowork en el código real de OS.
-const TIEMPO_MAX_RESENA_MS = 14000;
+//
+// Issue #227 — 15s fijos y documentados (antes 14000, pedido explícito
+// de Sharel tras el smoke de CALZADO: "ajustar lo que hoy hace lento/
+// inestable a 15s fijos") — mismo número que usa esperarTarjetas() en
+// el scraper de listado real de ML (zilonix-os-web,
+// chrome-extension-busqueda/scraper-listado.js), confirmado en vivo
+// como el tiempo real que necesita Mercado Libre para pintar
+// resultados cuando tarda (antes 8s, se quedaba corto).
+const TIEMPO_MAX_RESENA_MS = 15000;
 const PAUSA_ENTRE_PDPS_MS = 500;
 const TOPE_ITEMS_RESENAS = 8; // "Top 8" del pedido — nunca más
 
@@ -244,15 +281,21 @@ function finalizarLecturaResenas(tabIdPanel) {
 // nunca una pestaña nueva por término — mejora real sobre OS, que
 // creaba una pestaña por término y la cerraba).
 //
-// TIEMPO_MAX_POR_TERMINO_MS = 23000 es el valor REAL que Cowork afinó
-// en producción (zilonix-os-web) — nunca inventado. El bug real de OS
-// que esto evita: su panel tenía un timeout fijo de 90s sin importar
-// cuántos términos hubiera — con 5 términos × 23s = 115s, el panel se
-// rendía ANTES de que la extensión pudiera terminar en serio. Acá el
-// timeout del panel se calcula dinámico (ver PanelDemanda.tsx,
-// calcularTimeoutEscaneoMs: n × 25000 + 10000), nunca un número fijo
-// que pueda quedar corto.
-const TIEMPO_MAX_POR_TERMINO_MS = 23000;
+// 23000 era el valor REAL que Cowork afinó para estas 5 plataformas en
+// zilonix-os-web — nunca inventado. El bug real de OS que esto evita:
+// su panel tenía un timeout fijo de 90s sin importar cuántos términos
+// hubiera — con 5 términos × 23s = 115s, el panel se rendía ANTES de
+// que la extensión pudiera terminar en serio. Acá el timeout del panel
+// se calcula dinámico (ver PanelDemanda.tsx, calcularTimeoutEscaneoMs:
+// n × 25000 + 10000), nunca un número fijo que pueda quedar corto.
+//
+// Issue #227 — bajado a 15000 (pedido explícito de Sharel: "15s por
+// búsqueda de variante", fijos y documentados, para las 6 plataformas
+// por igual) — mismo valor que ya usa TIMEOUT_POR_VARIANTE_MS para
+// Mercado Libre, y el mismo que confirmó Cowork como necesario en
+// zilonix-os-web (chrome-extension-busqueda/scraper-listado.js,
+// esperarTarjetas) para que ML termine de pintar resultados reales.
+const TIEMPO_MAX_POR_TERMINO_MS = 15000;
 // Alibaba puede interceptar con un CAPTCHA (confirmado en vivo por
 // Cowork) — nunca se evade ni se resuelve solo; se detecta, se avisa,
 // y se le da a la persona mucho más tiempo (este timeout, no el de
@@ -400,7 +443,7 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
   if (mensaje.tipo === "zilonix:iniciar-escaneo") {
     if (!remitente.tab?.id) return;
     const terminos = Array.isArray(mensaje.payload?.terminos) ? mensaje.payload.terminos : [];
-    iniciarEscaneo(remitente.tab.id, terminos);
+    iniciarEscaneo(remitente.tab.id, terminos, mensaje.payload?.pais);
     return;
   }
 

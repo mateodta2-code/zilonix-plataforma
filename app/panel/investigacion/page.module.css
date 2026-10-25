@@ -98,3 +98,49 @@
   font-size: 15px;
   line-height: 1.5;
 }
+
+/* Issue #227 — "fotos ampliables (hover/lightbox)": la miniatura de
+   .foto se agranda un poco al pasar el mouse (pista visual de que es
+   clicable) y abre el lightbox de abajo con un clic real — nunca
+   automático. */
+.fotoClicable {
+  cursor: zoom-in;
+  transition: transform 0.15s ease;
+}
+
+.fotoClicable:hover {
+  transform: scale(1.15);
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.75);
+  cursor: zoom-out;
+}
+
+.lightboxImagen {
+  max-width: min(90vw, 640px);
+  max-height: 90vh;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* Issue #227 — "Stack": cada búsqueda/plataforma agrega su propio
+   bloque debajo, nunca mezclado con los demás en una sola tabla. */
+.bloque {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.encabezadoBloque {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}

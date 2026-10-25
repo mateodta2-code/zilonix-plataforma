@@ -364,18 +364,95 @@
     };
   }
 
+  // Issue #227 — "quitar API de Investigación": Demanda/Mercado/Estrategia
+  // dejan de depender de la API de catálogo (buscarInvestigacionProducto) —
+  // ahora el dato real sale de ACÁ, el listado real de Mercado Libre, con
+  // la misma ambición de volumen/calidad que Selltrix/Zilonix OS (smoke de
+  // Sharel: Seller mostraba ~6 "Sin dato" contra ~24-40 de Selltrix/OS).
+  //
+  // Estructura real confirmada en vivo por Cowork (zilonix-os-web,
+  // chrome-extension-busqueda/scraper-listado.js) — NO adivinada:
+  //   li.ui-search-layout__item
+  //     img.poly-component__picture                         (foto)
+  //     a.poly-component__title                              (título + link)
+  //     span.poly-component__seller                          (vendedor, opcional)
+  //     span.andes-visually-hidden con "Calificación X de 5
+  //       estrellas. Más de N productos vendidos."            (calificación + vendidos juntos —
+  //                                                              más confiable que los spans visibles sueltos)
+  //     .poly-price__current .poly-price__amount[aria-label]  (precio, en el aria-label)
+  //     svg[aria-label="Enviado por FULL"]                    (badge Full)
+  //     a.poly-component__ads-promotions / [aria-label="Promocionado"]  (anuncio — se excluye)
+  //
+  // El link del título trae 3 formatos reales distintos — se clasifican
+  // para poder armar un itemId confiable (solo ese habilita "Seguir",
+  // issue #227 punto 9 "Seguir solo ML"): catálogo (/p/MCO...) y "user
+  // product" (/up/MCOU...) NO son itemId de publicación real, quedan
+  // sin itemId (nunca se inventa uno).
+  function clasificarLinkListadoMl(href) {
+    if (!href) return null;
+    let m = href.match(/\/p\/(MCO\d+)/);
+    if (m) return { tipo: "producto", id: m[1] };
+    m = href.match(/\/up\/(MCOU\d+)/);
+    if (m) return { tipo: "user_product", id: m[1] };
+    m = href.match(/MCO-?(\d{9,})/);
+    if (m) return { tipo: "item", id: `MCO${m[1]}` };
+    return null;
+  }
+
+  function precioDesdeAriaLabel(tarjeta) {
+    const span = U.primerElemento([".poly-price__current .poly-price__amount", ".poly-price__amount"], tarjeta);
+    const label = span ? span.getAttribute("aria-label") || "" : "";
+    const digitos = label.replace(/[^\d]/g, "");
+    return digitos ? Number(digitos) : null;
+  }
+
+  // Calificación + vendidos vienen JUNTOS en un solo span de
+  // accesibilidad (oculto visualmente) — confirmado por Cowork como
+  // más confiable que los spans visibles sueltos.
+  function leerCalificacionYVendidosListado(tarjeta) {
+    const candidatos = tarjeta.querySelectorAll("span.andes-visually-hidden");
+    for (const s of candidatos) {
+      const texto = (s.textContent || "").trim();
+      const mEst = texto.match(/Calificaci[oó]n\s+([\d.,]+)\s+de\s+5/i);
+      if (!mEst) continue; // este span oculto es de otra cosa (precio, badge, etc.) — se sigue buscando
+      const estrellas = parseFloat(mEst[1].replace(",", "."));
+      const mVend = texto.match(/(?:[Mm]ás de\s+)?([\d.,]+)\+?\s*productos?\s+vendid/i);
+      const vendidos = mVend ? Number(mVend[1].replace(/\./g, "").replace(",", "")) : null;
+      return { estrellas: Number.isFinite(estrellas) ? estrellas : null, vendidos };
+    }
+    return { estrellas: null, vendidos: null };
+  }
+
   function leerListado(doc) {
-    const tarjetas = doc.querySelectorAll("li.ui-search-layout__item, div.ui-search-result, li.ui-search-layout_grid-item");
+    const tarjetas = doc.querySelectorAll("li.ui-search-layout__item");
     const productos = [];
     tarjetas.forEach((tarjeta) => {
-      const titulo = U.textoDe(["h2.ui-search-item__title", ".ui-search-item__title", "h3.poly-component__title"], tarjeta);
-      const precio = U.numeroDesdeTexto(
-        U.textoDe([".ui-search-price__second-line .andes-money-amount__fraction", ".andes-money-amount__fraction"], tarjeta)
-      );
-      const textoTarjeta = tarjeta.textContent || "";
-      const vendidos = U.enteroDesdeTexto((textoTarjeta.match(/[\d.,]+\s*vendid/i) || [])[0] || null);
-      const link = U.atributoDe(["a.ui-search-link", "a.ui-search-item__group__element", "a.poly-component__title"], "href", tarjeta);
-      if (titulo || precio != null) productos.push({ titulo, precio, vendidos, link });
+      const linkEl = U.primerElemento(["a.poly-component__title"], tarjeta);
+      const href = linkEl ? linkEl.getAttribute("href") : null;
+      const idInfo = clasificarLinkListadoMl(href);
+      if (!idInfo) return; // sin forma de identificar la publicación, se descarta — nunca se inventa
+
+      const esAnuncio = Boolean(U.primerElemento(['a.poly-component__ads-promotions', 'a[aria-label="Promocionado"]'], tarjeta));
+      if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico
+
+      const esFull = Boolean(U.primerElemento(['svg[aria-label="Enviado por FULL"]'], tarjeta));
+      const { estrellas, vendidos } = leerCalificacionYVendidosListado(tarjeta);
+      const fotoEl = U.primerElemento(["img.poly-component__picture"], tarjeta);
+
+      productos.push({
+        titulo: (linkEl && linkEl.textContent ? linkEl.textContent.trim() : "") || null,
+        precio: precioDesdeAriaLabel(tarjeta),
+        foto: fotoEl ? fotoEl.getAttribute("src") : null,
+        vendedor: U.textoDe([".poly-component__seller"], tarjeta),
+        calificacion: estrellas,
+        vendidos,
+        esFull,
+        // Solo un link de tipo "item" (publicación real) da un itemId
+        // real — catálogo/user_product quedan sin itemId, nunca
+        // inventado (ver clasificarLinkListadoMl arriba).
+        itemId: idInfo.tipo === "item" ? idInfo.id : null,
+        link: href || null,
+      });
     });
     return { productos };
   }

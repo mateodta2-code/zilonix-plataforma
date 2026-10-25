@@ -50,7 +50,29 @@
     return m ? m[1] : null;
   }
 
+  // Issue #227 — estrellas/reseñas vía JSON-LD (confirmado en el mismo
+  // scraper real, zilonix-os-web, scraper-shein-search.js) — cubre
+  // solo los primeros ~20 productos, el resto queda sin calificación
+  // (nunca inventada), indexado por goods_id (sku).
+  function leerJsonLdPorIdShein(doc) {
+    const porId = new Map();
+    doc.querySelectorAll('script[type="application/ld+json"]').forEach((s) => {
+      try {
+        const data = JSON.parse(s.textContent || "");
+        const lista = Array.isArray(data && data.itemListElement) ? data.itemListElement.map((x) => x.item || x) : [];
+        lista.forEach((p) => {
+          const id = p && p.sku != null ? String(p.sku) : null;
+          if (id) porId.set(id, p);
+        });
+      } catch {
+        // bloque no parseable — se ignora
+      }
+    });
+    return porId;
+  }
+
   function leerListado(doc) {
+    const porIdJsonLd = leerJsonLdPorIdShein(doc);
     const tarjetas = doc.querySelectorAll("div.bs-product-card[role=listitem]");
     const productos = [];
     tarjetas.forEach((card) => {
@@ -61,13 +83,21 @@
       const titulo = U.textoDe([".bs-product-card__goods-name-text"], card);
       const precio = U.numeroDesdeTexto(U.textoDe([".bs-product-card__offscreen"], card));
       const vendidos = parseVentasShein(U.textoDe([".bs-product-card__sales-label"], card));
+      // Lazy-load confirmado (mismo bug que Amazon): el src real suele
+      // venir vacío, la URL buena está en data-src.
+      const imgEl = U.primerElemento(["img"], card);
+      const foto = imgEl ? imgEl.getAttribute("data-src") || imgEl.getAttribute("src") : null;
+      const extra = porIdJsonLd.get(id);
+      const calificacion = extra && extra.aggregateRating && extra.aggregateRating.ratingValue != null ? parseFloat(extra.aggregateRating.ratingValue) : null;
       let link = href;
       try {
         link = href ? new URL(href, doc.location ? doc.location.origin : location.origin).href : null;
       } catch {
         link = href;
       }
-      if (titulo || precio != null) productos.push({ titulo, precio, vendidos, link });
+      if (titulo || precio != null) {
+        productos.push({ titulo, precio, vendidos, foto, calificacion: Number.isFinite(calificacion) ? calificacion : null, link });
+      }
     });
     return { productos };
   }

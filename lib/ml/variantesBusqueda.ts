@@ -12,7 +12,7 @@
 // ni un término no relacionado con lo que la persona escribió.
 //
 // Puro, sin I/O — se usa del lado del cliente (app/panel/investigacion/
-// PanelDemanda.tsx) para no depender de otro viaje al servidor.
+// PanelInvestigacion.tsx) para no depender de otro viaje al servidor.
 
 // Quita diacríticos (tildes/diéresis) — transform puramente mecánico
 // (Unicode NFD + quitar los acentos combinados). Mucha gente busca

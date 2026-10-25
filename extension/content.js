@@ -345,6 +345,13 @@
   // extension/lectores/alibaba.js) avisa a background.js que esta
   // variante quedó bloqueada — nunca se evade, se espera a que la
   // persona la resuelva a mano (ver la nota en reescanear(), abajo).
+  // Issue #227 — "fotos ampliables" + sorts por calificación/Full:
+  // suma foto/calificacion/esFull/esEnvioGratis/vendedor/itemId al
+  // mensaje — cada campo queda `null`/`undefined` cuando el lector del
+  // sitio no lo confirma (nunca inventado). `itemId` SOLO lo manda
+  // mercadolibre.js (issue #227, punto 9 "Seguir solo ML") — en el
+  // resto de los lectores esta propiedad no existe, así que queda
+  // `null` acá, nunca se arma un id falso.
   function enviarListadoAZilonix(productos, auto, captcha) {
     if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
     const candidatos = ordenarProductosListado(productos)
@@ -354,6 +361,12 @@
         titulo: p.titulo,
         precio: p.precio,
         vendidos: typeof p.vendidos === "number" ? p.vendidos : null,
+        foto: resolverLinkListadoSeguro(p.foto),
+        calificacion: typeof p.calificacion === "number" && Number.isFinite(p.calificacion) ? p.calificacion : null,
+        esFull: typeof p.esFull === "boolean" ? p.esFull : null,
+        esEnvioGratis: typeof p.esEnvioGratis === "boolean" ? p.esEnvioGratis : null,
+        vendedor: typeof p.vendedor === "string" && p.vendedor ? p.vendedor : null,
+        itemId: typeof p.itemId === "string" && p.itemId ? p.itemId : null,
         link: resolverLinkListadoSeguro(p.link),
       }));
     if (!candidatos.length && !auto && !captcha) return; // manual: nada confiable para mandar, nunca un mensaje vacío
