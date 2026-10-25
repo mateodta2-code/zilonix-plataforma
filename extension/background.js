@@ -39,10 +39,10 @@ const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado"]);
 // Worker). Mientras no haya una alternativa con estado persistido
 // (chrome.storage.session), el peor caso es "el escaneo no avisa que
 // terminó" — el panel tiene su propio timeout del lado del cliente
-// (PanelDemanda.tsx) para no quedarse mostrando "Escaneando..." para
-// siempre.
+// (PanelInvestigacion.tsx) para no quedarse mostrando "Escaneando..."
+// para siempre.
 const TOPE_TERMINOS_ESCANEO = 5; // issue #225 — término + hasta 4 variantes (IA + respaldo de reglas) = 5 queries, nunca más
-const TOPE_PRODUCTOS_POR_VARIANTE = 20; // "lee ~20" — el tope real vive en content.js (TOPE_PRODUCTOS_ENVIO_LISTADO), este es solo documentación
+const TOPE_PRODUCTOS_POR_VARIANTE = 30; // issue #229 — "maximizar volumen" subió esto de 20 a 30; el tope real vive en content.js (TOPE_PRODUCTOS_ENVIO_LISTADO), este es solo documentación
 // Issue #227 — 15s fijos, pedido explícito de Sharel; confirmado
 // además por Cowork en zilonix-os-web (chrome-extension-busqueda/
 // scraper-listado.js, esperarTarjetas) como el tiempo real que ML
@@ -314,6 +314,31 @@ function slugAliExpress(termino) {
     .replace(/^-+|-+$/g, "");
 }
 
+// Issue #229 — hotfix de smoke real: "clic Amazon/Temu/AliExpress/
+// Shein/Alibaba agrega bloque real al tablero — hoy no trae nada".
+// Causa real confirmada leyendo content.js: `enviarListadoAZilonix`
+// solo manda el resultado SOLA (sin esperar un clic, issue #221) si
+// `esPaginaDeEscaneoAutomatico()` encuentra `_zilonix_escaneo=1` en la
+// URL — marcador que `urlListadoMl` (arriba) sí le pone a Mercado
+// Libre, pero que las 5 URLs de abajo NUNCA tuvieron. Sin ese
+// marcador, cada término simplemente agota TIEMPO_MAX_POR_TERMINO_MS
+// (15s) sin mandar nada — por eso el tablero quedaba siempre vacío
+// para estas 5 plataformas, no por ningún bloqueo del sitio ni
+// selector roto. `conMarcadorEscaneo` agrega el mismo marcador propio
+// (invisible para cada sitio, un query param más) usando `URL` real
+// en vez de concatenar `?`/`&` a mano, para no romper ninguna de las
+// 2 formas de URL de abajo (con query string ya armada, o sin
+// ninguna).
+function conMarcadorEscaneo(urlCruda) {
+  try {
+    const url = new URL(urlCruda);
+    url.searchParams.set("_zilonix_escaneo", "1");
+    return url.href;
+  } catch {
+    return urlCruda; // nunca debería pasar — las 5 URLs de abajo siempre son absolutas y válidas
+  }
+}
+
 // Adaptadores por plataforma — SOLO lo que de verdad cambia entre una
 // y otra (la URL de búsqueda real, confirmada en producción) y si por
 // default conviene que la persona VEA la pestaña (solo Alibaba, por
@@ -321,19 +346,19 @@ function slugAliExpress(termino) {
 // mismo timeout, mismo relevo con content.js) es idéntico para las 5.
 const PLATAFORMAS = {
   amazon: {
-    url: (t) => `https://www.amazon.com/s?k=${encodeURIComponent(t.trim())}&language=es_US`,
+    url: (t) => conMarcadorEscaneo(`https://www.amazon.com/s?k=${encodeURIComponent(t.trim())}&language=es_US`),
   },
   temu: {
-    url: (t) => `https://www.temu.com/search_result.html?search_key=${encodeURIComponent(t.trim())}`,
+    url: (t) => conMarcadorEscaneo(`https://www.temu.com/search_result.html?search_key=${encodeURIComponent(t.trim())}`),
   },
   aliexpress: {
-    url: (t) => `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(slugAliExpress(t.trim()))}.html`,
+    url: (t) => conMarcadorEscaneo(`https://www.aliexpress.com/w/wholesale-${encodeURIComponent(slugAliExpress(t.trim()))}.html`),
   },
   shein: {
-    url: (t) => `https://www.shein.com.co/pdsearch/${encodeURIComponent(t.trim())}/`,
+    url: (t) => conMarcadorEscaneo(`https://www.shein.com.co/pdsearch/${encodeURIComponent(t.trim())}/`),
   },
   alibaba: {
-    url: (t) => `https://www.alibaba.com/trade/search?SearchText=${encodeURIComponent(t.trim())}`,
+    url: (t) => conMarcadorEscaneo(`https://www.alibaba.com/trade/search?SearchText=${encodeURIComponent(t.trim())}`),
     previewPorDefecto: true,
   },
 };

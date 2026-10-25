@@ -13,6 +13,13 @@
 // compartido entre FormularioAnalizar.tsx (el form) y el efecto que
 // arranca el escaneo.
 //
+// Issue #229 — suma la plataforma de inicio elegida en el formulario
+// ("Selector de plataforma de inicio antes de Analizar" — hasta esta
+// tarea, Analizar arrancaba SIEMPRE con Mercado Libre; ahora la
+// persona elige con cuál de las 6 arranca ese clic puntual). El país
+// solo aplica cuando `plataforma === "ml"` — FormularioAnalizar.tsx
+// oculta el selector de país para las otras 5.
+//
 // Son funciones finas sobre sessionStorage — no hay lógica real que
 // probar con vitest sin un navegador (sessionStorage no existe en
 // Node); lo que SÍ es lógica real y probada aparte es
@@ -21,9 +28,16 @@
 const CLAVE = "zilonix:analizar-clic";
 const VENTANA_MS = 8000;
 
-export function marcarClicAnalizar(pais: string): void {
+export type PlataformaAnalizar = "ml" | "amazon" | "temu" | "aliexpress" | "shein" | "alibaba";
+const PLATAFORMAS_VALIDAS: readonly PlataformaAnalizar[] = ["ml", "amazon", "temu", "aliexpress", "shein", "alibaba"];
+
+function esPlataformaValida(valor: unknown): valor is PlataformaAnalizar {
+  return typeof valor === "string" && (PLATAFORMAS_VALIDAS as readonly string[]).includes(valor);
+}
+
+export function marcarClicAnalizar(pais: string, plataforma: PlataformaAnalizar): void {
   try {
-    sessionStorage.setItem(CLAVE, JSON.stringify({ ts: Date.now(), pais }));
+    sessionStorage.setItem(CLAVE, JSON.stringify({ ts: Date.now(), pais, plataforma }));
   } catch {
     // sessionStorage bloqueado (modo privado estricto, etc.) — el
     // escaneo automático de la extensión simplemente no se dispara;
@@ -32,7 +46,7 @@ export function marcarClicAnalizar(pais: string): void {
   }
 }
 
-export function consumirClicAnalizarReciente(): { pais: string } | null {
+export function consumirClicAnalizarReciente(): { pais: string; plataforma: PlataformaAnalizar } | null {
   let crudo: string | null = null;
   try {
     crudo = sessionStorage.getItem(CLAVE);
@@ -42,9 +56,12 @@ export function consumirClicAnalizarReciente(): { pais: string } | null {
   }
   if (!crudo) return null;
   try {
-    const { ts, pais } = JSON.parse(crudo) as { ts?: number; pais?: string };
+    const { ts, pais, plataforma } = JSON.parse(crudo) as { ts?: number; pais?: string; plataforma?: string };
     if (typeof ts !== "number" || !Number.isFinite(ts) || Date.now() - ts > VENTANA_MS) return null;
-    return { pais: typeof pais === "string" && pais ? pais : "CO" };
+    return {
+      pais: typeof pais === "string" && pais ? pais : "CO",
+      plataforma: esPlataformaValida(plataforma) ? plataforma : "ml",
+    };
   } catch {
     return null;
   }

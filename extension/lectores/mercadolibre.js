@@ -435,14 +435,38 @@
       const esAnuncio = Boolean(U.primerElemento(['a.poly-component__ads-promotions', 'a[aria-label="Promocionado"]'], tarjeta));
       if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico
 
-      const esFull = Boolean(U.primerElemento(['svg[aria-label="Enviado por FULL"]'], tarjeta));
+      // Issue #229 — hotfix de smoke: Sharel reportó TODO marcado "No"
+      // (nunca "Full") a pesar de publicaciones Full reales visibles.
+      // El selector original (exact-match, case-sensitive) seguía
+      // siendo el confirmado por Cowork en zilonix-os-web — la mejora
+      // acá es puramente defensiva, no una reescritura a ciegas: se
+      // suma la bandera CSS "i" (case-insensitive, soportada en Chrome,
+      // el único navegador que corre esta extensión) para no perder el
+      // match si el aria-label real viene con otra capitalización
+      // ("Enviado por Full"), más un respaldo por substring (cualquier
+      // elemento cuyo aria-label contenga a la vez "envi" y "full" —
+      // nunca solo "full" suelto, para no confundir con un título de
+      // producto tipo "Full HD"). Esta sesión no pudo confirmar en vivo
+      // el HTML real de hoy (listado.mercadolibre.com.co bloqueó el
+      // fetch directo con una verificación de cuenta, y el fetch con
+      // IA también dio 403) — si Sharel sigue viendo "No" en el próximo
+      // smoke, hace falta inspeccionar el HTML real a mano y ajustar
+      // este selector con ese dato confirmado, nunca adivinar de nuevo.
+      const esFull = Boolean(
+        U.primerElemento(['svg[aria-label="Enviado por FULL" i]', '[aria-label*="envi" i][aria-label*="full" i]'], tarjeta)
+      );
       const { estrellas, vendidos } = leerCalificacionYVendidosListado(tarjeta);
       const fotoEl = U.primerElemento(["img.poly-component__picture"], tarjeta);
 
       productos.push({
         titulo: (linkEl && linkEl.textContent ? linkEl.textContent.trim() : "") || null,
         precio: precioDesdeAriaLabel(tarjeta),
-        foto: fotoEl ? fotoEl.getAttribute("src") : null,
+        // Issue #229 — "thumbnails reales": el listado carga las fotos
+        // con lazy-load (mismo patrón ya confirmado en Shein, issue
+        // #227) — `src` suele ser todavía el placeholder cuando este
+        // script lee la tarjeta antes de que haga scroll a la vista;
+        // `data-src` es la URL real. Se prueba esa primero.
+        foto: fotoEl ? fotoEl.getAttribute("data-src") || fotoEl.getAttribute("src") : null,
         vendedor: U.textoDe([".poly-component__seller"], tarjeta),
         calificacion: estrellas,
         vendidos,
