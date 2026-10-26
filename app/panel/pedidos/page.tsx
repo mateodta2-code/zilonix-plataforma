@@ -6,7 +6,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
-import { ESTADOS_PEDIDO_FILTRO, listarPedidosFiltrados, TAMANO_PAGINA_PEDIDOS } from "@/lib/ml/pedidos";
+import { ESTADOS_PEDIDO_FILTRO, etiquetaEstadoPedido, listarPedidosFiltrados, TAMANO_PAGINA_PEDIDOS } from "@/lib/ml/pedidos";
 import { formatearMonto } from "@/lib/panel-kpis";
 import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -208,7 +208,12 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
                 <CeldaTabla className={styles.celdaFecha}>{formatoFechaColombia(pedido.fecha)}</CeldaTabla>
                 <CeldaTabla className={styles.celdaTotal}>{formatoMonto(pedido.moneda, pedido.total)}</CeldaTabla>
                 <CeldaTabla>
-                  <Chip estado={colorEstadoPedido(pedido.estado)}>{pedido.estado}</Chip>
+                  {/* Bug real reportado — esto mostraba pedido.estado
+                      crudo ("PAID"), el valor que manda Mercado Libre,
+                      en vez de la etiqueta en español que el filtro de
+                      "Estado" ya usa ("Pagado") — misma fuente ahora
+                      (ETIQUETAS_POR_ESTADO/ESTADOS_PEDIDO_FILTRO, lib/ml/pedidos.ts). */}
+                  <Chip estado={colorEstadoPedido(pedido.estado)}>{etiquetaEstadoPedido(pedido.estado)}</Chip>
                 </CeldaTabla>
               </FilaTabla>
             ))}
