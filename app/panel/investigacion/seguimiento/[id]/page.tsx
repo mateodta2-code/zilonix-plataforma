@@ -5,8 +5,19 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerDetalleSeguimiento } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones } from "@/lib/seguimiento/alertas";
+import {
+  calcularComparativaAyerHoy,
+  resumenPeriodoConteo,
+  resumenPeriodoVentas,
+  type ComparativaProducto,
+  type LecturaConteo,
+  type LecturaProducto,
+  type ResumenPeriodoConteo,
+  type ResumenPeriodoVentas,
+} from "@/lib/seguimiento/estimacionInventario";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
+import { EscuchaExtension } from "../EscuchaExtension";
 import { BotonLink } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
@@ -24,6 +35,34 @@ function dinero(n: number | string | null): string {
 
 function fecha(d: Date): string {
   return new Date(d).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" });
+}
+
+// Issue #251, puntos 8/12/13 — "estimado" nunca se muestra sin esta
+// etiqueta al lado (misma regla que lib/ml/estimacionVentas.ts para
+// no confundirlo con un dato confirmado por Mercado Libre).
+function Estimado() {
+  return <Chip estado="aviso">Estimado</Chip>;
+}
+
+function filaResumenPeriodo(titulo: string, resumen: ResumenPeriodoVentas | ResumenPeriodoConteo | null, unidad: string): React.ReactNode {
+  const valor = "ventasEstimadas" in (resumen ?? {}) ? (resumen as ResumenPeriodoVentas).ventasEstimadas : (resumen as ResumenPeriodoConteo | null)?.diferencia;
+  return (
+    <li className={styles.filaAlerta}>
+      <span>
+        <strong>{titulo}:</strong>{" "}
+        {resumen == null ? (
+          "Falta otra lectura para comparar"
+        ) : (
+          <>
+            {valor! >= 0 ? "+" : ""}
+            {valor} {unidad} (promedio {resumen.promedioPorDia >= 0 ? "+" : ""}
+            {resumen.promedioPorDia}/día — {resumen.diasConLectura} de {resumen.diasPeriodo} días con lectura)
+          </>
+        )}
+      </span>
+      {resumen != null ? <Estimado /> : null}
+    </li>
+  );
 }
 
 // Issue #175, punto 5/6 — detalle con historial y gráfica de precio e
@@ -62,8 +101,44 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
     return { etiqueta: fecha(f.fecha), valor: diferencia >= 0 ? diferencia : null }; // nunca negativo en la gráfica — sold_quantity nunca debería bajar
   });
 
+  // Issue #251, puntos 8/12/13 — comparativa/estimación de ventas, SOLO
+  // para un competidor: un seguimiento propio (esCompetidor=false) ya
+  // tiene sold_quantity real de la API, no necesita esta estimación
+  // (misma regla que necesitaLecturaDePagina, lib/seguimiento/
+  // estimacionInventario.ts).
+  const ahora = new Date();
+  let comparativaAyerHoy: ComparativaProducto | null = null;
+  let resumen7: ResumenPeriodoVentas | ResumenPeriodoConteo | null = null;
+  let resumen30: ResumenPeriodoVentas | ResumenPeriodoConteo | null = null;
+  if (seguimiento.esCompetidor && seguimiento.tipo === "producto") {
+    const lecturas: LecturaProducto[] = fotos.map((f) => ({
+      fecha: f.fecha,
+      inventario: f.inventarioDisponible,
+      aproximado: f.inventarioAproximado,
+      vendidosTexto: f.vendidos,
+    }));
+    // Issue #251 (corrección de Pablo, punto 9) — "Ayer vs hoy" exige
+    // una foto fechada EXACTAMENTE hoy y otra EXACTAMENTE ayer (hora
+    // Bogotá), con inventario en las dos — nunca "las últimas dos
+    // lecturas que hubiera", que podrían ser de hace varios días si el
+    // cron se saltó alguno.
+    comparativaAyerHoy = calcularComparativaAyerHoy(lecturas, ahora);
+    resumen7 = resumenPeriodoVentas(lecturas, 7, ahora);
+    resumen30 = resumenPeriodoVentas(lecturas, 30, ahora);
+  } else if (seguimiento.esCompetidor && seguimiento.tipo === "tienda") {
+    const lecturas: LecturaConteo[] = fotos.map((f) => ({ fecha: f.fecha, valor: normalizarPublicaciones(f.publicaciones)?.total ?? null }));
+    resumen7 = resumenPeriodoConteo(lecturas, 7, ahora);
+    resumen30 = resumenPeriodoConteo(lecturas, 30, ahora);
+  }
+
   return (
     <>
+      {/* Issue #251 (corrección de Pablo, punto 7) — antes solo
+      page.tsx (la lista) montaba esto; si la persona abre la ficha de
+      un competidor mientras tiene esta pantalla de DETALLE abierta en
+      Zilonix (no la lista), nada escuchaba el mensaje y esa lectura se
+      perdía. */}
+      <EscuchaExtension />
       <EncabezadoPagina
         titulo={seguimiento.nombre}
         descripcion={`${seguimiento.tipo === "tienda" ? "Tienda" : "Producto"} seguido desde ${fecha(seguimiento.creadoTs)}${seguimiento.esCompetidor ? " — marcado como competidor" : ""}.`}
@@ -112,6 +187,38 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
           </Tarjeta>
         </>
       )}
+
+      {seguimiento.esCompetidor && (comparativaAyerHoy || resumen7 || resumen30) ? (
+        <Tarjeta className={styles.seccion}>
+          <p className={styles.tituloSeccion}>Ventas estimadas (issue #251 — nunca sold_quantity real de un competidor, Mercado Libre no lo deja ver por la API)</p>
+          <ul className={styles.listaAlertas}>
+            {seguimiento.tipo === "producto" ? (
+              <li className={styles.filaAlerta}>
+                <span>
+                  <strong>Ayer a hoy:</strong>{" "}
+                  {comparativaAyerHoy == null ? (
+                    // Issue #251 (corrección de Pablo, punto 9) —
+                    // mensaje DISTINTO de "Falta otra lectura para
+                    // comparar": acá específicamente falta la foto de
+                    // HOY o de AYER (Bogotá) con inventario, no otra
+                    // lectura cualquiera.
+                    "Falta lectura de hoy o de ayer"
+                  ) : comparativaAyerHoy.reposicion ? (
+                    "reposición de stock detectada (inventario subió, no se cuenta como venta)"
+                  ) : comparativaAyerHoy.ventasEstimadas == null ? (
+                    "Falta otra lectura para comparar"
+                  ) : (
+                    `${comparativaAyerHoy.ventasEstimadas} unidades (${fecha(comparativaAyerHoy.fechaAnterior)} → ${fecha(comparativaAyerHoy.fechaActual)})`
+                  )}
+                </span>
+                {comparativaAyerHoy != null ? <Estimado /> : null}
+              </li>
+            ) : null}
+            {filaResumenPeriodo("Últimos 7 días", resumen7, seguimiento.tipo === "producto" ? "unidades" : "publicaciones")}
+            {filaResumenPeriodo("Últimos 30 días", resumen30, seguimiento.tipo === "producto" ? "unidades" : "publicaciones")}
+          </ul>
+        </Tarjeta>
+      ) : null}
 
       <Tarjeta className={styles.seccion}>
         <p className={styles.tituloSeccion}>Alertas</p>

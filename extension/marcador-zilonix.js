@@ -37,13 +37,29 @@
     "zilonix:resenas-resultado": "resenas-leidas",
     "zilonix:escaneo-plataforma-resultado": "escaneo-plataforma-importado",
     "zilonix:escaneo-plataforma-captcha": "escaneo-plataforma-captcha",
+    // Issue #251 — inventario/vendidos de un competidor, o
+    // publicaciones de una tienda seguida, leídos de la página abierta
+    // (Mercado Libre nunca los deja ver por la API para un recurso
+    // ajeno — confirmado en #250).
+    "zilonix:dato-pagina-seguimiento": "dato-pagina-seguimiento",
+    // Issue #251 (corrección de Pablo, punto 7) — toda la cola
+    // encolada por background.js (chrome.storage.session) de una sola
+    // vez, para que EscuchaExtension.tsx la guarde con una sola Server
+    // Action y un solo router.refresh().
+    "zilonix:cola-seguimiento": "cola-seguimiento",
   };
 
-  chrome.runtime.onMessage.addListener((mensaje) => {
+  chrome.runtime.onMessage.addListener((mensaje, _remitente, sendResponse) => {
     if (!mensaje || !mensaje.payload) return;
     const tipo = TIPOS_REENVIADOS[mensaje.tipo];
     if (!tipo) return;
     window.postMessage({ fuente: "zilonix-extension", tipo, payload: mensaje.payload }, window.location.origin);
+    // Issue #251 (corrección de Pablo, punto 7) — ack explícito: sin
+    // esto, background.js (vaciarColaSeguimiento) no tiene forma real
+    // de saber si esta pestaña de verdad recibió el mensaje antes de
+    // vaciar la cola. Síncrono (nunca hace falta `return true` para
+    // mantener el canal abierto).
+    if (typeof sendResponse === "function") sendResponse({ ok: true });
   });
 
   // Issue #221/#225 — dirección inversa, PÁGINA -> extensión. Hasta
@@ -59,6 +75,17 @@
     "iniciar-escaneo": "zilonix:iniciar-escaneo",
     "iniciar-resenas": "zilonix:iniciar-resenas",
     "iniciar-escaneo-plataforma": "zilonix:iniciar-escaneo-plataforma",
+    // Issue #251 (revisión de Pablo, punto 4) — EscuchaExtension.tsx lo
+    // manda una vez al montar /panel/investigacion/seguimiento, para
+    // vaciar lo que background.js haya encolado de visitas a Mercado
+    // Libre mientras esa pestaña estaba cerrada.
+    "pedir-cola-seguimiento": "zilonix:pedir-cola-seguimiento",
+    // Issue #251, punto 9 (corrección de Pablo) — "Actualizar todo"
+    // (BotonActualizarTodo.tsx) manda los links desde su propio clic
+    // real — background.js es quien de verdad los abre (chrome.tabs.create,
+    // con su propio allowlist de dominio y tope de 10, nunca solo
+    // confiando en lo que mande la página).
+    "abrir-seguimientos": "zilonix:abrir-seguimientos",
   };
 
   window.addEventListener("message", (evento) => {

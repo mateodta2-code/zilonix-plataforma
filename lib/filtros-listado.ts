@@ -72,6 +72,26 @@ export function rangoDiaBogota(ahora: Date): { inicio: Date; finExclusivo: Date 
   return limites;
 }
 
+// Issue #251 (corrección de Pablo, distinta de rangoDiaBogota de
+// arriba) — `rangoDiaBogota(ahora).inicio` es el INSTANTE real de la
+// medianoche de Bogotá (05:00 UTC), correcto para filtrar columnas
+// timestamptz reales (pedidos.creado_ts, seguimiento_alertas.creado_ts).
+// `seguimiento_fotos.fecha` (timestamp SIN zona horaria) es, en
+// cambio, un simple MARCADOR de día calendario — la convención ya
+// establecida desde antes de que existiera esta cuenta de Bogotá es
+// guardar la medianoche UTC (00:00Z) de ese día, nunca el instante
+// real de la medianoche de Bogotá. Usar rangoDiaBogota().inicio ahí
+// producía filas a las 05:00Z, incompatibles con las filas viejas
+// (00:00Z) y con cualquier comparación de igualdad exacta de fecha.
+// Mismo cálculo de "qué día calendario es en Bogotá" que rangoDiaBogota
+// (restar 5h, leer el día con getters UTC) — solo cambia CÓMO se
+// representa ese día como Date.
+export function fechaDiaBogota(ahora: Date): Date {
+  const relojBogota = new Date(ahora.getTime() - 5 * 60 * 60 * 1000);
+  const fechaBogotaISO = relojBogota.toISOString().slice(0, 10);
+  return new Date(`${fechaBogotaISO}T00:00:00.000Z`);
+}
+
 export function normalizarTextoBusqueda(valor: string | undefined | null): string | null {
   if (typeof valor !== "string") return null;
   const recortado = valor.trim().slice(0, LARGO_MAXIMO_BUSQUEDA);

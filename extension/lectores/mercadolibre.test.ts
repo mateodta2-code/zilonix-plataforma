@@ -9,12 +9,15 @@ import {
   clasificarLinkListadoMl,
   construirLinkSeguirProducto,
   construirLinkSeguirTienda,
+  construirPublicacionesTienda,
   detectarFullEnHtmlFicha,
   detectarFullEnHtmlTarjeta,
+  elegirInventarioPrincipal,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
   filtroFullActivoEnUrl,
   leerDatosIncrustados,
+  leerInventarioMaximoDeTexto,
   leerResenasDesdeScript,
   leerSellerIdDeTienda,
   tipoDePagina,
@@ -94,6 +97,7 @@ describe("leerDatosIncrustados — issue #174, amarrado al producto actual (nunc
       soldQuantity: 537,
       itemId: "MCO111111111",
       dateCreated: "2023-05-10T14:23:00.000Z",
+      inventarioSelector: null,
     });
   });
 
@@ -102,11 +106,17 @@ describe("leerDatosIncrustados — issue #174, amarrado al producto actual (nunc
       soldQuantity: 9999,
       itemId: "MCO222222222",
       dateCreated: "2020-01-01T00:00:00.000Z",
+      inventarioSelector: null,
     });
   });
 
   it("si el id actual no aparece en ningún lado del JSON, nunca devuelve el de otro producto — todo null", () => {
-    expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, "MCO333333333")).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
+    expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, "MCO333333333")).toEqual({
+      soldQuantity: null,
+      itemId: null,
+      dateCreated: null,
+      inventarioSelector: null,
+    });
   });
 
   it("respaldo de texto plano (sin __NORDIC_RENDERING_CTX__): agarra el sold_quantity cercano al id correcto, no el de otro producto más lejos en el HTML", () => {
@@ -114,25 +124,96 @@ describe("leerDatosIncrustados — issue #174, amarrado al producto actual (nunc
       soldQuantity: 50,
       itemId: "MCO111111111",
       dateCreated: "2024-01-01T00:00:00.000Z",
+      inventarioSelector: null,
     });
     expect(leerDatosIncrustados(HTML_TEXTO_DOS_PRODUCTOS, "MCO222222222")).toEqual({
       soldQuantity: 9999,
       itemId: "MCO222222222",
       dateCreated: "2020-01-01T00:00:00.000Z",
+      inventarioSelector: null,
     });
   });
 
   it("sin itemIdActual (la URL no trajo ningún id) -> todo null, nunca adivina", () => {
-    expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, null)).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
+    expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, null)).toEqual({
+      soldQuantity: null,
+      itemId: null,
+      dateCreated: null,
+      inventarioSelector: null,
+    });
   });
 
-  it("sin ningún dato incrustado ni en texto plano: los 3 campos en null, nunca inventados", () => {
-    expect(leerDatosIncrustados(HTML_SIN_NADA, "MCO111111111")).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
+  it("sin ningún dato incrustado ni en texto plano: los 4 campos en null, nunca inventados", () => {
+    expect(leerDatosIncrustados(HTML_SIN_NADA, "MCO111111111")).toEqual({
+      soldQuantity: null,
+      itemId: null,
+      dateCreated: null,
+      inventarioSelector: null,
+    });
   });
 
   it("entrada vacía o inválida no revienta", () => {
-    expect(leerDatosIncrustados("", "MCO111111111")).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
-    expect(leerDatosIncrustados(null, "MCO111111111")).toEqual({ soldQuantity: null, itemId: null, dateCreated: null });
+    const vacio = { soldQuantity: null, itemId: null, dateCreated: null, inventarioSelector: null };
+    expect(leerDatosIncrustados("", "MCO111111111")).toEqual(vacio);
+    expect(leerDatosIncrustados(null, "MCO111111111")).toEqual(vacio);
+  });
+
+  // Issue #251 (revisión de Pablo + corrección de Mateo) — fixtures
+  // construidos a partir de JSON real (archive.org): el caso de stock
+  // alto (quantity_selector.available_quantity == selector.rows,
+  // capado a 6, item real MCO1050084400 mayo/2026) y el caso de stock
+  // bajo exacto (available_quantity:2 == stock real, item real
+  // MCO1002047025 junio/2025) — ver leerProducto para cómo se combina
+  // con el texto "(+N disponibles)".
+  it("quantity_selector.available_quantity alto (capado por el tope de filas del dropdown) se lee igual, sin interpretar — eso lo hace leerProducto", () => {
+    const html = `<!doctype html><html><body>
+<script>
+window.__NORDIC_RENDERING_CTX__ = {"page":{"components":{
+  "item":{"id":"MCO1050084400","date_created":"2024-01-01T00:00:00.000Z"},
+  "available_quantity":{"id":"available_quantity","picker":{"description":"(+10 disponibles)"},"quantity_selector":{"type":"drop_down_list","available_quantity":6,"minimum_quantity":1,"selector":{"rows":6}}}
+}}};
+</script>
+</body></html>`;
+    expect(leerDatosIncrustados(html, "MCO1050084400").inventarioSelector).toBe(6);
+  });
+
+  it("quantity_selector.available_quantity bajo (stock real bajo, sin tope) también se lee igual", () => {
+    const html = `<!doctype html><html><body>
+<script>
+window.__NORDIC_RENDERING_CTX__ = {"page":{"components":{
+  "item":{"id":"MCO1002047025","date_created":"2024-01-01T00:00:00.000Z"},
+  "available_quantity":{"id":"available_quantity","picker":{"description":"(2 disponibles)"},"quantity_selector":{"type":"drop_down_list","available_quantity":2,"minimum_quantity":1,"selector":{"rows":2}}}
+}}};
+</script>
+</body></html>`;
+    expect(leerDatosIncrustados(html, "MCO1002047025").inventarioSelector).toBe(2);
+  });
+
+  it("sin quantity_selector en el JSON incrustado -> inventarioSelector null, nunca inventado", () => {
+    expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, "MCO111111111").inventarioSelector).toBeNull();
+  });
+
+  // Issue #251 (corrección de Pablo, punto 10) — bug real: antes se
+  // buscaba "quantity_selector" en TODO el JSON sin amarre al item
+  // actual — con dos productos, cada uno con su PROPIO quantity_selector
+  // anidado (un caso real: la página también trae recomendados con su
+  // propio selector de cantidad), el recorrido en profundidad podía
+  // devolver el de un recomendado en vez del del item que la persona
+  // está mirando. Ahora se busca PRIMERO dentro del objeto ya amarrado
+  // al id actual (buscarObjetoConId) — solo si ESE no tiene su propio
+  // quantity_selector se cae al árbol completo (ver los dos tests de
+  // arriba, donde el selector real SÍ vive fuera del objeto del item).
+  it("dos productos, cada uno con su PROPIO quantity_selector anidado: agarra el del item actual, nunca el de un recomendado", () => {
+    const html = `<!doctype html><html><body>
+<script>
+window.__NORDIC_RENDERING_CTX__ = {"page":{"components":{
+  "recomendados":[{"id":"MCO222222222","date_created":"2020-01-01T00:00:00.000Z","quantity_selector":{"available_quantity":3}}],
+  "item":{"id":"MCO111111111","date_created":"2023-05-10T14:23:00.000Z","quantity_selector":{"available_quantity":9}}
+}}};
+</script>
+</body></html>`;
+    expect(leerDatosIncrustados(html, "MCO111111111").inventarioSelector).toBe(9);
+    expect(leerDatosIncrustados(html, "MCO222222222").inventarioSelector).toBe(3);
   });
 });
 
@@ -574,5 +655,109 @@ describe("detectarFullEnHtmlFicha — issue #245, ficha de producto (leerProduct
     expect(detectarFullEnHtmlFicha("")).toBe(false);
     expect(detectarFullEnHtmlFicha(null as unknown as string)).toBe(false);
     expect(detectarFullEnHtmlFicha(undefined as unknown as string)).toBe(false);
+  });
+});
+
+describe("leerInventarioMaximoDeTexto — issue #251, inventario leído de la ficha abierta", () => {
+  // Issue #251 — Mercado Libre no deja ver `available_quantity` real
+  // de una publicación AJENA por la API (403/ausente, confirmado en
+  // #250) — se lee del selector de cantidad de la FICHA abierta en
+  // pantalla. Texto real confirmado (archive.org, ficha real de
+  // Mercado Libre Colombia, item MCO1050084400, snapshot de mayo/2026
+  // — acceso directo sigue bloqueado desde este sandbox):
+  //   <span class="ui-pdp-buybox__quantity__available">(+10 disponibles)</span>
+  it('texto real confirmado, "(+10 disponibles)" -> {valor: 10, aproximado: true}', () => {
+    expect(leerInventarioMaximoDeTexto("(+10 disponibles)")).toEqual({ valor: 10, aproximado: true });
+  });
+
+  it('stock bajo, sin "+" (nunca confirmado en una ficha real, pero simétrico al criterio ya usado para "+N vendidos") -> {valor: 5, aproximado: false}', () => {
+    expect(leerInventarioMaximoDeTexto("5 disponibles")).toEqual({ valor: 5, aproximado: false });
+  });
+
+  it("miles con separador real de Mercado Libre (punto) -> número completo, nunca cortado en el primer punto", () => {
+    expect(leerInventarioMaximoDeTexto("(+1.200 disponibles)")).toEqual({ valor: 1200, aproximado: true });
+  });
+
+  it("texto sin el patrón esperado -> valor null, nunca 0 inventado", () => {
+    expect(leerInventarioMaximoDeTexto("Sin stock")).toEqual({ valor: null, aproximado: false });
+  });
+
+  it("entradas vacías o inválidas -> valor null, nunca revienta", () => {
+    expect(leerInventarioMaximoDeTexto("")).toEqual({ valor: null, aproximado: false });
+    expect(leerInventarioMaximoDeTexto(null as unknown as string)).toEqual({ valor: null, aproximado: false });
+    expect(leerInventarioMaximoDeTexto(undefined as unknown as string)).toEqual({ valor: null, aproximado: false });
+  });
+});
+
+describe("elegirInventarioPrincipal — issue #251 (revisión de Pablo + corrección de Mateo), texto vs JSON incrustado", () => {
+  // Evidencia real (archive.org): MCO1050084400 (mayo/2026) tenía stock
+  // real "10 o más" (Mateo confirmó en vivo: 27) pero
+  // quantity_selector.available_quantity valía 6 (el tope de filas del
+  // dropdown, nunca el stock real) — con un "+" en el texto, SIEMPRE
+  // manda el texto, nunca el número del selector.
+  it('con "+" en el texto (stock alto, selector capado a 6): manda el texto, nunca el selector', () => {
+    expect(elegirInventarioPrincipal({ valor: 10, aproximado: true }, 6)).toEqual({ valor: 10, aproximado: true });
+  });
+
+  // Evidencia real: MCO1002047025 (junio/2025), stock bajo real,
+  // quantity_selector.available_quantity:2 == texto "2 disponibles"
+  // (sin "+") == el disponible real exacto.
+  it('sin "+" en el texto y selector por debajo del tope (stock bajo real): usa el selector, marcado exacto', () => {
+    expect(elegirInventarioPrincipal({ valor: 2, aproximado: false }, 2)).toEqual({ valor: 2, aproximado: false });
+  });
+
+  it("selector en o por encima del tope de filas (6): nunca se usa como exacto, aunque el texto no tenga \"+\"", () => {
+    expect(elegirInventarioPrincipal({ valor: 6, aproximado: false }, 6)).toEqual({ valor: 6, aproximado: false });
+  });
+
+  it("sin inventarioSelector (JSON no lo trajo): usa el texto tal cual, sea el que sea", () => {
+    expect(elegirInventarioPrincipal({ valor: null, aproximado: false }, null)).toEqual({ valor: null, aproximado: false });
+    expect(elegirInventarioPrincipal({ valor: 10, aproximado: true }, null)).toEqual({ valor: 10, aproximado: true });
+  });
+
+  it("selector bajo pero el texto no trajo ningún valor (selector sin \"+\" de por sí): usa el selector, nunca inventa 0", () => {
+    expect(elegirInventarioPrincipal({ valor: null, aproximado: false }, 3)).toEqual({ valor: 3, aproximado: false });
+  });
+});
+
+describe("construirPublicacionesTienda — issue #251 punto 8 (revisión de Pablo), lector de tienda sin DOM", () => {
+  // Formatos reales de href confirmados arriba (clasificarLinkListadoMl,
+  // issue #233/#227): catálogo (/p/MCO...) y "user product" (/up/MCOU...)
+  // también se clasifican y entran a idsVisibles — el filtro real (solo
+  // "producto" cuenta como seguible) vive en otro lado (construirLinkSeguirProducto/UI),
+  // no acá: esta función solo recolecta lo que el listado mostró.
+  it('"752 resultados" (total real de una tienda grande) junto con las tarjetas visibles -> total + ids, sin títulos falsos', () => {
+    expect(
+      construirPublicacionesTienda("752 resultados", [
+        "https://articulo.mercadolibre.com.co/MCO-111111111-producto-uno-_JM",
+        "https://www.mercadolibre.com.co/p/MCO222222222",
+      ])
+    ).toEqual({ total: 752, idsVisibles: ["MCO111111111", "MCO222222222"] });
+  });
+
+  it("una tarjeta sin link de título (linkEl null) o con href no clasificable -> se descarta, nunca un id inventado", () => {
+    expect(
+      construirPublicacionesTienda("3 resultados", [
+        null,
+        "https://articulo.mercadolibre.com.co/MCO-333333333-producto-tres-_JM",
+        "https://www.mercadolibre.com.co/ofertas",
+      ])
+    ).toEqual({ total: 3, idsVisibles: ["MCO333333333"] });
+  });
+
+  it("sin texto de total (landing de tienda oficial, antes de \"Todos los productos\") -> total null, nunca 0 inventado", () => {
+    expect(construirPublicacionesTienda(null, ["https://articulo.mercadolibre.com.co/MCO-444444444-producto-_JM"])).toEqual({
+      total: null,
+      idsVisibles: ["MCO444444444"],
+    });
+  });
+
+  it("sin ninguna tarjeta visible -> idsVisibles vacío, total igual se lee si está", () => {
+    expect(construirPublicacionesTienda("752 resultados", [])).toEqual({ total: 752, idsVisibles: [] });
+    expect(construirPublicacionesTienda("752 resultados", undefined)).toEqual({ total: 752, idsVisibles: [] });
+  });
+
+  it("miles con separador real de Mercado Libre (punto) en el total -> número completo", () => {
+    expect(construirPublicacionesTienda("1.200 resultados", [])).toEqual({ total: 1200, idsVisibles: [] });
   });
 });

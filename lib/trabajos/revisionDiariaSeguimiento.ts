@@ -2,10 +2,11 @@ import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
+import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { LimiteMercadoLibreError, MlNoAutorizadoError, MlNoDisponibleError, MlRespuestaInesperadaError, MlSinPermisoAppError } from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
-import { compararFotos, type FotoComparable } from "@/lib/seguimiento/alertas";
+import { compararFotos, normalizarPublicaciones, type FotoComparable } from "@/lib/seguimiento/alertas";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION, resolverNombre } from "@/lib/seguimiento/seguimientos";
 
 // Issue #175 — regla de CLAUDE.md: "toda tarea en segundo plano vive
@@ -59,49 +60,43 @@ export type ResultadoRevisionDiaria = {
   // nada nuevo, pero tampoco fue un error real (ver revisarUnSeguimiento).
   // Corrección de Pablo al punto 3 del #250 — el caso COMÚN de "ya
   // había foto de hoy" (la ronda de la tarde alcanzando lo que la
-  // madrugada ya procesó) ya NO cuenta como saltado: se detecta antes
-  // de llamar a ML y se actualiza esa fila, así que cuenta como
-  // "procesados".
+  // madrugada ya procesó, o la lectura de la extensión del #251 que ya
+  // creó la fila con solo sus propios campos) ya NO cuenta como
+  // saltado: se detecta antes de llamar a ML y se actualiza/completa
+  // esa fila, así que cuenta como "procesados".
   saltados: number;
   fallidos: number;
   alertasCreadas: number;
 };
 
-// Solo la FECHA (medianoche UTC) — "misma fecha" es la clave real de
-// "misma foto del día", nunca el instante exacto en que corrió el
-// trabajo (ver el comentario de seguimiento_fotos.fecha en db/schema.ts).
-// Issue #250, punto E — esto sigue siendo por FECHA calendario a
-// propósito: `seguimiento_fotos` sigue con una sola fila por
-// seguimiento por día (índice único, sin migración para cambiar eso
-// ahora). Ninguna de las dos ventanas del cron (madrugada/tarde, ver
-// abajo) cruza la medianoche de Bogotá, así que esta fecha (UTC
-// truncada) cae siempre en el mismo día calendario que percibe
-// alguien en Bogotá para esas ventanas — no hace falta una segunda
-// función de "hoy en hora Bogotá" para el chequeo del punto 3 de
-// revisarUnSeguimiento. Si la ronda de la tarde encuentra que ya hay
-// foto de hoy, ACTUALIZA esa fila con lo más reciente de la API (ver
-// revisarUnSeguimiento) — nunca inventa una segunda foto el mismo día.
+// Issue #251 (revisión de Pablo) — "mismo día" es medianoche de
+// BOGOTÁ, no de UTC: una persona que lee una ficha a las 8pm en
+// Colombia ya está en el día siguiente en UTC (19:00 Bogotá = 00:00
+// UTC) — con el criterio viejo, esa lectura se guardaba en la fecha de
+// MAÑANA desde la perspectiva de Bogotá. Más importante todavía: esta
+// es la misma cuenta que usa guardarDatoDePaginaSeguimiento
+// (lib/seguimiento/seguimientos.ts) para decidir la fila de HOY — si
+// las dos no coincidieran dígito a dígito, la revisión por API y la
+// lectura de la página nunca compartirían la misma fila (issue #251,
+// punto 11), por más que las dos pasaran el mismo día real.
+// `fechaDiaBogota` (lib/filtros-listado.ts) ya resuelve esta cuenta en
+// un solo lugar — nunca una cuenta de huso horario propia acá.
+// Corrección de Pablo — esto usaba `rangoDiaBogota(ahora).inicio`
+// (05:00 UTC, el instante real de la medianoche de Bogotá), pero
+// `seguimiento_fotos.fecha` es un marcador de día calendario que
+// siempre se guardó como medianoche UTC (00:00Z) — con 05:00Z, las
+// filas nuevas no coincidían con las viejas ni con lo que guarda
+// guardarDatoDePaginaSeguimiento (lib/seguimiento/seguimientos.ts),
+// rompiendo la fila compartida entre API y extensión (issue #251,
+// punto 11). `fechaDiaBogota` resuelve el mismo día calendario de
+// Bogotá, pero representado como 00:00Z — compatible con las filas
+// existentes. Issue #250, punto E — ninguna de las dos ventanas del
+// cron (madrugada/tarde, ver
+// .github/workflows/revision-diaria-seguimiento.yml) cruza la
+// medianoche de Bogotá, así que esta fecha sigue cayendo siempre en el
+// mismo día calendario para las dos ventanas.
 function fechaDeHoy(): Date {
-  const hoy = new Date();
-  hoy.setUTCHours(0, 0, 0, 0);
-  return hoy;
-}
-
-// Issue #250, punto 2 de la revisión de Pablo (PR #253, sobre 7aa93f2)
-// — "no duplicar alertas: nunca crear una del mismo tipo para el
-// mismo seguimiento si ya existe una hoy, hora Bogotá". A diferencia
-// de fechaDeHoy() (DATE, medianoche UTC, para seguimiento_fotos.fecha
-// — ningún día real necesita distinguir UTC de Bogotá ahí, ver el
-// comentario de arriba), seguimiento_alertas.creado_ts es un instante
-// real (timestamptz) — acá SÍ hace falta la medianoche real de
-// Bogotá (UTC-5 todo el año, sin horario de verano) para no confundir
-// "hoy" con el bloque de 24h equivocado cerca de la medianoche.
-const BOGOTA_OFFSET_MS = 5 * 3600_000;
-
-function inicioDiaBogota(ahora: Date): Date {
-  const corrido = new Date(ahora.getTime() - BOGOTA_OFFSET_MS); // instante "como si" ya fuera hora Bogotá
-  corrido.setUTCHours(0, 0, 0, 0); // medianoche Bogotá, expresada en ese desplazamiento
-  return new Date(corrido.getTime() + BOGOTA_OFFSET_MS); // instante UTC real que corresponde a esa medianoche
+  return fechaDiaBogota(new Date());
 }
 
 // Issue #250, punto E (decisión de Mateo, 2026-10-25) — dos ventanas
@@ -237,7 +232,12 @@ function aFotoComparable(fila: typeof seguimientoFotos.$inferSelect): FotoCompar
     estado: fila.estado,
     enCatalogo: fila.enCatalogo,
     ganaBotonCompra: fila.ganaBotonCompra,
-    publicaciones: fila.publicaciones,
+    // Issue #251 (corrección de Pablo, punto 3) — una fila guardada
+    // antes de que existiera `total`/`fuente` puede traer el array
+    // viejo directo; normalizarPublicaciones la envuelve antes de que
+    // compararFotos (lib/seguimiento/alertas.ts) la use, nunca revienta
+    // en `.visibles.map(...)`.
+    publicaciones: normalizarPublicaciones(fila.publicaciones),
   };
 }
 
@@ -249,9 +249,10 @@ type ResultadoUnSeguimiento = { saltado: boolean; alertasCreadas: number };
 // inventarioAproximado/vendidos/publicaciones quedan afuera a
 // propósito: son las mismas columnas que issue #251 reusa para lo que
 // la extensión lee de la página (nunca llamadas a Mercado Libre) —
-// aunque esa rama todavía no está mergeada acá, esta ronda nunca debe
-// pisar un dato más completo (de la extensión) con uno más parcial de
-// la API, mismo criterio ya documentado en #251.
+// esta ronda nunca debe pisar un dato más completo (de la extensión)
+// con uno más parcial de la API, mismo criterio documentado en
+// guardarDatoDePaginaSeguimiento (lib/seguimiento/seguimientos.ts),
+// que hace lo simétrico: nunca toca estos campos de acá.
 type CamposApiDeFoto = Pick<typeof seguimientoFotos.$inferInsert, "precio" | "precioAnterior" | "estado" | "enCatalogo" | "ganaBotonCompra" | "esFull" | "esEnvioGratis">;
 
 function camposApiDeDatos(datos: Awaited<ReturnType<typeof leerConReintento429>>): CamposApiDeFoto {
@@ -305,14 +306,19 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
 
   // Corrección de Pablo (revisión del PR #253), punto 3 — mirar ANTES
   // de llamar a Mercado Libre si ya hay foto de hoy (hora Bogotá;
-  // fechaDeHoy() ya corresponde al mismo día calendario en Bogotá que
+  // fechaDeHoy() ya resuelve el mismo día calendario en Bogotá para
   // las dos ventanas del cron, punto E — ninguna cruza medianoche
-  // Bogotá). La ronda de la tarde alcanzando un seguimiento que la
+  // Bogotá, y es la misma cuenta que usa guardarDatoDePaginaSeguimiento
+  // del #251). La ronda de la tarde alcanzando un seguimiento que la
   // madrugada ya procesó hoy mismo es el caso NORMAL, no una carrera —
   // antes esto llamaba a Mercado Libre igual y descartaba el resultado
   // con onConflictDoNothing ("saltado"), gastando la llamada para
   // nada. Ahora se sabe desde acá si toca ACTUALIZAR la fila de hoy en
-  // vez de intentar insertar una nueva.
+  // vez de intentar insertar una nueva — y esa fila puede existir
+  // también porque la extensión (#251) ya la creó hoy con solo sus
+  // propios campos (API en null): eso tampoco debe tratarse como "ya
+  // revisado por la API", así que nunca se gatea por `precio != null`
+  // acá, solo por la EXISTENCIA de la fila.
   const [fotoDeHoyExistente] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
   );
@@ -333,8 +339,9 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
     // Actualiza SOLO los campos de API (precio, Full, catálogo, etc.)
     // con lo más reciente — nunca toca inventarioDisponible/
     // inventarioAproximado/vendidos/publicaciones (ver camposApiDeDatos,
-    // arriba). Genera alertas comparando esta fila ya actualizada
-    // contra la de ayer, igual que el camino de insertar.
+    // arriba: son los mismos campos que issue #251 reusa para la
+    // lectura de la extensión). Genera alertas comparando esta fila ya
+    // actualizada contra la de ayer, igual que el camino de insertar.
     [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx.update(seguimientoFotos).set(camposApiDeDatos(datos)).where(eq(seguimientoFotos.id, fotoDeHoyExistente.id)).returning()
     );
@@ -350,13 +357,22 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
           inventarioDisponible: datos.inventarioDisponible,
           inventarioAproximado: datos.inventarioAproximado,
           vendidos: datos.vendidos,
-          publicaciones: datos.publicaciones,
+          // Issue #251, punto 5 — el total REAL ("752 resultados") solo
+          // lo puede traer la lectura de página (la API da 403 real al
+          // listar publicaciones de una tienda ajena); acá solo se
+          // insertó lo que la API pudo ver, nunca un total inventado.
+          publicaciones: datos.publicaciones != null ? { total: null, visibles: datos.publicaciones, fuente: "api" } : null,
         })
-        // Red de seguridad para la carrera real (rarísima) entre dos
-        // corridas del cron a la vez, en el instante exacto entre el
-        // chequeo de arriba y este insert — nunca el camino normal,
-        // ver el comentario de ResultadoUnSeguimiento arriba.
-        .onConflictDoNothing()
+        // Corrección de Pablo — onConflictDoUpdate en vez de
+        // onConflictDoNothing: en la carrera real (rarísima) de dos
+        // corridas a la vez, o del cron chocando con la extensión
+        // (#251) insertando casi al mismo tiempo, descartar el
+        // resultado tiraría los datos de la API que SÍ se acaban de
+        // leer. Actualiza solo los campos de API (mismo
+        // camposApiDeDatos de la rama "ya existe foto" de arriba)
+        // sobre lo que sea que ganó la carrera — nunca pisa
+        // inventarioDisponible/vendidos/publicaciones.
+        .onConflictDoUpdate({ target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha], set: camposApiDeDatos(datos) })
         .returning()
     );
   }
@@ -375,9 +391,11 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
   // aplicación, mismo criterio ya aceptado para volumen bajo que
   // verificarCupoCompetidor (lib/seguimiento/seguimientos.ts) — no es
   // un candado atómico contra una carrera exacta, pero el volumen real
-  // de alertas por seguimiento por día es bajísimo.
-  const inicioHoyBogota = inicioDiaBogota(new Date());
-  const finHoyBogota = new Date(inicioHoyBogota.getTime() + 24 * 3600_000);
+  // de alertas por seguimiento por día es bajísimo. `seguimiento_alertas.creado_ts`
+  // es un instante real (timestamptz, a diferencia de `fecha`, que es
+  // un DATE) — reusa el mismo `rangoDiaBogota` de arriba en vez de una
+  // segunda cuenta de huso horario propia.
+  const { inicio: inicioHoyBogota, finExclusivo: finHoyBogota } = rangoDiaBogota(new Date());
   const alertasDeHoy = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx
       .select({ tipo: seguimientoAlertas.tipo })
@@ -428,10 +446,11 @@ export type ResultadoRevisionInmediata = { ok: true; saltado: boolean; alertasCr
 // caso, para que el cron de hoy mismo lo reintente solo (al revés del
 // fallido del LOTE, que sí se marca para no ahogar los 50 cupos —
 // acá no hay ningún lote que ahogar, es un solo seguimiento puntual).
-// Si Mercado Libre YA tenía una foto de hoy para este seguimiento
-// (ej. revivir uno eliminado que el cron ya alcanzó a procesar hoy
-// mismo), el índice único + onConflictDoNothing de revisarUnSeguimiento
-// lo deja como "saltado", nunca duplicado.
+// Si ya hay foto de hoy para este seguimiento (ej. el cron ya lo
+// procesó hoy mismo), revisarUnSeguimiento ACTUALIZA esa fila con lo
+// más reciente de la API en vez de insertar una nueva — nunca
+// duplicada, y "saltado" queda solo para la carrera real (rarísima)
+// que describe el comentario de revisarUnSeguimiento.
 export async function revisarAhoraUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoRevisionInmediata> {
   try {
     const resultado = await revisarUnSeguimiento(seguimiento);

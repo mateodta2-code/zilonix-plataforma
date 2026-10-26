@@ -1,16 +1,19 @@
 import { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
+import { fechaDiaBogota } from "@/lib/filtros-listado";
 import {
   agregarSeguimiento,
   buscarMedicionSiExiste,
   buscarSeguimientoActivoPorMlId,
   contarCompetidoresActivos,
   eliminarSeguimiento,
-  LIMITE_COMPETIDORES_POR_EMPRESA,
+  guardarDatoDePaginaSeguimiento,
+  LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA,
+  LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA,
   LimiteCompetidoresError,
   LinkMlInvalidoError,
   listarAlertasDelDia,
@@ -48,63 +51,95 @@ function respuestaJson(data: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => data } as Response;
 }
 
-async function crearSeguimiento(empresaId: string, usuarioId: string, esCompetidor: boolean) {
+// Issue #251 — `tipo` opcional, default "producto" (para no tocar
+// las pruebas viejas que ya llamaban esto sin ese argumento) — las
+// pruebas nuevas del cupo separado 5+5 lo pasan explícito.
+async function crearSeguimiento(empresaId: string, usuarioId: string, esCompetidor: boolean, tipo: "producto" | "tienda" = "producto") {
   await dbComoEmpresa(empresaId, (tx) =>
-    tx.insert(seguimientosMl).values({
-      empresaId,
-      tipo: "producto",
-      recursoMl: "item",
-      mlIdExterno: `MCO${randomUUID().replace(/-/g, "").slice(0, 10)}`,
-      nombre: "Producto de prueba",
-      linkOriginal: "https://articulo.mercadolibre.com.co/MCO-1",
-      esCompetidor,
-      creadoPor: usuarioId,
-    })
+    tx.insert(seguimientosMl).values(
+      tipo === "tienda"
+        ? {
+            empresaId,
+            tipo: "tienda",
+            recursoMl: "seller",
+            mlIdExterno: String(Math.floor(Math.random() * 1_000_000_000)),
+            nombre: "Tienda de prueba",
+            linkOriginal: "https://listado.mercadolibre.com.co/_CustId_1",
+            esCompetidor,
+            creadoPor: usuarioId,
+          }
+        : {
+            empresaId,
+            tipo: "producto",
+            recursoMl: "item",
+            mlIdExterno: `MCO${randomUUID().replace(/-/g, "").slice(0, 10)}`,
+            nombre: "Producto de prueba",
+            linkOriginal: "https://articulo.mercadolibre.com.co/MCO-1",
+            esCompetidor,
+            creadoPor: usuarioId,
+          }
+    )
   );
 }
 
 // Issue #175 — "máximo 5 competidores por empresa, validado en el
 // servidor". Contra Postgres real (no un mock): dbComoEmpresa exige
 // una conexión real, igual que el resto de las pruebas de este repo.
-describe("verificarCupoCompetidor / contarCompetidoresActivos (issue #175)", () => {
-  it("cuenta solo los marcados como competidor, nunca los demás seguimientos", async () => {
+describe("verificarCupoCompetidor / contarCompetidoresActivos (issue #175, dos pozos separados desde #251)", () => {
+  it("cuenta solo los marcados como competidor del TIPO pedido, nunca los demás seguimientos ni el otro tipo", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
-    await crearSeguimiento(empresaId, usuarioId, true);
-    await crearSeguimiento(empresaId, usuarioId, false);
-    await crearSeguimiento(empresaId, usuarioId, false);
+    await crearSeguimiento(empresaId, usuarioId, true, "producto");
+    await crearSeguimiento(empresaId, usuarioId, false, "producto");
+    await crearSeguimiento(empresaId, usuarioId, true, "tienda");
 
-    expect(await contarCompetidoresActivos(empresaId)).toBe(1);
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(1);
+    expect(await contarCompetidoresActivos(empresaId, "tienda")).toBe(1);
   });
 
-  it(`deja agregar hasta ${LIMITE_COMPETIDORES_POR_EMPRESA}, el sexto lanza LimiteCompetidoresError`, async () => {
+  it(`deja agregar hasta ${LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA} productos, el sexto lanza LimiteCompetidoresError`, async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
-    for (let i = 0; i < LIMITE_COMPETIDORES_POR_EMPRESA; i++) {
-      await expect(verificarCupoCompetidor(empresaId)).resolves.toBeUndefined();
-      await crearSeguimiento(empresaId, usuarioId, true);
+    for (let i = 0; i < LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA; i++) {
+      await expect(verificarCupoCompetidor(empresaId, "producto")).resolves.toBeUndefined();
+      await crearSeguimiento(empresaId, usuarioId, true, "producto");
     }
-    expect(await contarCompetidoresActivos(empresaId)).toBe(LIMITE_COMPETIDORES_POR_EMPRESA);
-    await expect(verificarCupoCompetidor(empresaId)).rejects.toThrow(LimiteCompetidoresError);
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA);
+    await expect(verificarCupoCompetidor(empresaId, "producto")).rejects.toThrow(LimiteCompetidoresError);
   });
 
-  it("quitar un competidor (eliminado_ts) libera cupo real", async () => {
+  // Issue #251 — regresión directa: el pozo de tiendas lleno NO
+  // bloquea el de productos, y viceversa. Antes de #251 había un solo
+  // pozo combinado de 5 — esta prueba es la que hubiera fallado con
+  // ese código viejo (5 tiendas ya hubieran dejado el pozo combinado
+  // en el tope, bloqueando también el primer producto).
+  it(`el pozo de tiendas lleno (${LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA}) no afecta el cupo de productos, y viceversa`, async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
-    for (let i = 0; i < LIMITE_COMPETIDORES_POR_EMPRESA; i++) await crearSeguimiento(empresaId, usuarioId, true);
-    await expect(verificarCupoCompetidor(empresaId)).rejects.toThrow(LimiteCompetidoresError);
+    for (let i = 0; i < LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA; i++) await crearSeguimiento(empresaId, usuarioId, true, "tienda");
+    await expect(verificarCupoCompetidor(empresaId, "tienda")).rejects.toThrow(LimiteCompetidoresError);
+
+    // El pozo de PRODUCTOS sigue entero, en 0 — nunca se mezcla con el de tiendas.
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(0);
+    await expect(verificarCupoCompetidor(empresaId, "producto")).resolves.toBeUndefined();
+  });
+
+  it("quitar un competidor (eliminado_ts) libera cupo real, del mismo tipo", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    for (let i = 0; i < LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA; i++) await crearSeguimiento(empresaId, usuarioId, true, "producto");
+    await expect(verificarCupoCompetidor(empresaId, "producto")).rejects.toThrow(LimiteCompetidoresError);
 
     const [unCompetidor] = await dbComoEmpresa(empresaId, (tx) => tx.select({ id: seguimientosMl.id }).from(seguimientosMl).limit(1));
     await dbComoEmpresa(empresaId, (tx) => tx.update(seguimientosMl).set({ eliminadoTs: new Date() }).where(eq(seguimientosMl.id, unCompetidor.id)));
 
-    expect(await contarCompetidoresActivos(empresaId)).toBe(LIMITE_COMPETIDORES_POR_EMPRESA - 1);
-    await expect(verificarCupoCompetidor(empresaId)).resolves.toBeUndefined();
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA - 1);
+    await expect(verificarCupoCompetidor(empresaId, "producto")).resolves.toBeUndefined();
   });
 
-  it("el límite es por empresa: otra empresa con 5 competidores no afecta a esta", async () => {
+  it("el límite es por empresa: otra empresa con el cupo lleno no afecta a esta", async () => {
     const otra = await crearEmpresaConUsuario();
-    for (let i = 0; i < LIMITE_COMPETIDORES_POR_EMPRESA; i++) await crearSeguimiento(otra.empresaId, otra.usuarioId, true);
+    for (let i = 0; i < LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA; i++) await crearSeguimiento(otra.empresaId, otra.usuarioId, true, "producto");
 
     const { empresaId } = await crearEmpresaConUsuario();
-    expect(await contarCompetidoresActivos(empresaId)).toBe(0);
-    await expect(verificarCupoCompetidor(empresaId)).resolves.toBeUndefined();
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(0);
+    await expect(verificarCupoCompetidor(empresaId, "producto")).resolves.toBeUndefined();
   });
 });
 
@@ -222,7 +257,7 @@ describe("agregarSeguimiento (issue #175)", () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
     await conectarCuentaMl(empresaId);
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
-    for (let i = 0; i < LIMITE_COMPETIDORES_POR_EMPRESA; i++) {
+    for (let i = 0; i < LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA; i++) {
       await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: `MCO${i}`, esCompetidor: true });
     }
     await expect(agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO999", esCompetidor: true })).rejects.toThrow(
@@ -643,5 +678,385 @@ describe("listarAlertasDelDia / marcarAlertaLeida (issue #175)", () => {
 
     const [actualizada] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.id, alerta.id)));
     expect(actualizada.leidaTs).not.toBeNull();
+  });
+});
+
+// Issue #251 (revisión de Pablo) — guardarDatoDePaginaSeguimiento
+// inserta la foto de hoy si no existe (campos de API en null) y, si
+// ya existe, la lectura de página más reciente reemplaza a la
+// anterior SOLO en sus propios campos — nunca pisa precio/estado/
+// catálogo/Full (esos son de la revisión diaria por API).
+describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
+  function hoyBogota(): Date {
+    return fechaDiaBogota(new Date());
+  }
+
+  // Issue #251 (corrección de Pablo, punto 6) — leidoEn real (ISO,
+  // nunca futuro, no más viejo que 36h) — "ahora" alcanza para la
+  // mayoría de estos tests, que no están probando ESE campo puntual.
+  const leidoAhora = () => new Date().toISOString();
+
+  it("seguimiento no activo (mlIdExterno sin seguir): no hace nada, nunca inventa una fila", async () => {
+    const { empresaId } = await crearEmpresaConUsuario();
+    await expect(
+      guardarDatoDePaginaSeguimiento(empresaId, {
+        tipoSeguimiento: "producto",
+        mlIdExterno: "MCO999",
+        inventario: 10,
+        inventarioAproximado: false,
+        vendidos: 5,
+        vendidosExacto: true,
+        leidoEn: leidoAhora(),
+      })
+    ).resolves.toBeUndefined();
+
+    const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoFotos));
+    expect(filas).toHaveLength(0);
+  });
+
+  // Issue #251 (corrección de Pablo, punto 5) — un id de tienda y uno
+  // de producto podrían, en teoría, colisionar — nunca se escriben
+  // campos de un tipo sobre un seguimiento del tipo contrario.
+  it("tipo de la extensión no coincide con el tipo real del seguimiento: se ignora, nunca escribe nada", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "tienda", // el seguimiento real es "producto"
+      mlIdExterno: "MCO111",
+      totalPublicaciones: 10,
+      idsVisibles: ["MCO1"],
+      leidoEn: leidoAhora(),
+    });
+
+    const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoFotos).where(eq(seguimientoFotos.seguimientoId, seguimiento.id)));
+    expect(filas).toHaveLength(0);
+  });
+
+  it("producto, sin foto de hoy todavía: INSERTA una fila nueva con los campos de página, campos de API en null", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+    // Issue #204 — agregarSeguimiento ya dispara una revisión inmediata
+    // en la app real (actions.ts), pero esta prueba llama la función
+    // de abajo DIRECTO, sin pasar por ahí — nunca hay foto de hoy
+    // todavía en este punto.
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 24,
+      inventarioAproximado: true,
+      vendidos: 50,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto).toBeDefined();
+    expect(foto.inventarioDisponible).toBe(24);
+    expect(foto.inventarioAproximado).toBe(true);
+    expect(foto.vendidos).toBe(50);
+    expect(foto.precio).toBeNull(); // campo de API, nadie lo llenó todavía
+    expect(foto.estado).toBeNull();
+  });
+
+  // Issue #251 (corrección de Pablo, punto 5) — el "+N" aproximado
+  // nunca llega a la columna `vendidos` (la que compara alertasDeVendidos):
+  // vendidosExacto:false la omite por completo, nunca la pisa con un
+  // número aproximado.
+  it("producto con vendidosExacto:false: nunca escribe `vendidos` (queda null), aunque mande un número", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 24,
+      inventarioAproximado: false,
+      vendidos: 500, // "+500 vendidos", el piso aproximado — nunca exacto
+      vendidosExacto: false,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.inventarioDisponible).toBe(24); // esto sí se guarda, no depende de vendidosExacto
+    expect(foto.vendidos).toBeNull(); // nunca 500
+  });
+
+  it("producto, ya hay foto de hoy con datos de API: completa inventario/vendidos SIN tocar precio/estado", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    // Foto de hoy insertada directo, simulando que la revisión diaria
+    // por API ya corrió (precio/estado reales, inventario/vendidos
+    // todavía en null — la API no los confirmó para este competidor).
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: hoyBogota(), precio: "199900", estado: "active" })
+    );
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 24,
+      inventarioAproximado: true,
+      vendidos: 50,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.inventarioDisponible).toBe(24);
+    expect(foto.vendidos).toBe(50);
+    expect(Number(foto.precio)).toBe(199900); // nunca se tocó
+    expect(foto.estado).toBe("active"); // nunca se tocó
+  });
+
+  // Issue #251 (corrección de Pablo, punto 5) — COALESCE en el upsert:
+  // un campo en null en la lectura nueva nunca borra un dato bueno que
+  // ya hubiera de ese mismo día.
+  it("segunda lectura con inventario null (el selector no cargó a tiempo): nunca borra el inventario bueno que ya había", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 30,
+      inventarioAproximado: false,
+      vendidos: 10,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
+    // Segunda lectura: inventario null (no se pudo leer esta vez), vendidos exacto nuevo.
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: null,
+      inventarioAproximado: false,
+      vendidos: 15,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.inventarioDisponible).toBe(30); // nunca borrado por el null de la segunda lectura
+    expect(foto.vendidos).toBe(15); // este sí se actualizó, vino con dato real
+  });
+
+  // Corrección de Pablo (sobre 8474c60) — bug real: `inventario_aproximado`
+  // es NOT NULL (default false), así que un `coalesce(excluded.x, old.x)`
+  // simple nunca cae al valor viejo (excluded.x nunca es un SQL NULL
+  // real). Sin el CASE, esta misma lectura hubiera dejado
+  // {50, aproximado:false} — inventario preservado pero con la
+  // etiqueta de aproximado equivocada.
+  it("hoy hay {50, aproximado:true}; llega una lectura {inventario:null, aproximado:false} -> queda {50, aproximado:true}, nunca {50, false}", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 50,
+      inventarioAproximado: true,
+      vendidos: null,
+      vendidosExacto: false,
+      leidoEn: leidoAhora(),
+    });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: null,
+      inventarioAproximado: false,
+      vendidos: null,
+      vendidosExacto: false,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.inventarioDisponible).toBe(50);
+    expect(foto.inventarioAproximado).toBe(true); // nunca false — el inventario que sigue vigente SÍ era aproximado
+  });
+
+  // Corrección de Pablo — en el INSERT (primera foto del día), nunca
+  // manda `aproximado: true` si el inventario vino null: no tiene
+  // sentido marcar como aproximado un inventario que ni siquiera llegó.
+  it("primera lectura del día con inventario:null e inventarioAproximado:true (dato inconsistente de la extensión): el INSERT nunca guarda aproximado:true sin número", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: null,
+      inventarioAproximado: true, // inconsistente — nunca debería pasar, pero nunca se confía ciegamente
+      vendidos: null,
+      vendidosExacto: false,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.inventarioDisponible).toBeNull();
+    expect(foto.inventarioAproximado).toBe(false);
+  });
+
+  it("producto, dos lecturas de página el mismo día: la MÁS RECIENTE reemplaza a la anterior (nunca 'la primera gana')", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 30,
+      inventarioAproximado: false,
+      vendidos: 10,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 22,
+      inventarioAproximado: true,
+      vendidos: 18,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
+
+    const filas = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(filas).toHaveLength(1); // nunca una fila nueva por lectura — misma fila de hoy
+    expect(filas[0].inventarioDisponible).toBe(22);
+    expect(filas[0].inventarioAproximado).toBe(true);
+    expect(filas[0].vendidos).toBe(18);
+  });
+
+  it("tienda, sin foto de hoy: INSERTA el total real y los ids visibles, sin título falso", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ nickname: "Tienda X" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "tienda", link: "123456", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "tienda",
+      mlIdExterno: "123456",
+      totalPublicaciones: 752,
+      idsVisibles: ["MCO1", "MCO2"],
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.publicaciones?.total).toBe(752);
+    expect(foto.publicaciones?.fuente).toBe("pagina");
+    expect(foto.publicaciones?.visibles).toEqual([
+      { itemId: "MCO1", titulo: null, precio: null },
+      { itemId: "MCO2", titulo: null, precio: null },
+    ]);
+  });
+
+  it("tienda, segunda lectura el mismo día: reemplaza el total y los visibles anteriores", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ nickname: "Tienda X" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "tienda", link: "654321", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "tienda",
+      mlIdExterno: "654321",
+      totalPublicaciones: 100,
+      idsVisibles: ["MCO1"],
+      leidoEn: leidoAhora(),
+    });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "tienda",
+      mlIdExterno: "654321",
+      totalPublicaciones: 110,
+      idsVisibles: ["MCO1", "MCO2"],
+      leidoEn: leidoAhora(),
+    });
+
+    const filas = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(filas).toHaveLength(1);
+    expect(filas[0].publicaciones?.total).toBe(110);
+    expect(filas[0].publicaciones?.visibles).toHaveLength(2);
+  });
+
+  // Issue #251 (corrección de Pablo, punto 2) — la fecha de la fila
+  // sale de `leidoEn` (cuándo la extensión LEYÓ la página), nunca de
+  // "ahora" (cuándo el servidor procesa el mensaje) — relevante para
+  // una lectura entregada desde la cola de background.js horas después.
+  it("usa el día de `leidoEn`, nunca el de 'ahora': una lectura de ayer (Bogotá) se guarda en la fila de AYER", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    const ayer = new Date(hoyBogota().getTime() - 24 * 60 * 60 * 1000);
+    // leidoEn: mediodía de AYER (Bogotá) — bien lejos de cualquier borde de día.
+    const leidoAyerMediodia = new Date(ayer.getTime() + 17 * 60 * 60 * 1000).toISOString(); // 17:00Z = 12:00 Bogotá
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 24,
+      inventarioAproximado: false,
+      vendidos: 50,
+      vendidosExacto: true,
+      leidoEn: leidoAyerMediodia,
+    });
+
+    const fotoHoy = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(fotoHoy).toHaveLength(0); // nunca en la fila de hoy
+
+    const [fotoAyer] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, ayer)))
+    );
+    expect(fotoAyer).toBeDefined();
+    expect(fotoAyer.inventarioDisponible).toBe(24);
   });
 });

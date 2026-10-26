@@ -6,8 +6,27 @@ import { db } from "@/db/index";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
+import { fechaDiaBogota } from "@/lib/filtros-listado";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION } from "@/lib/seguimiento/seguimientos";
 import { obtenerSeguimientosPendientesDeHoy, revisarAhoraUnSeguimiento, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
+
+// Issue #251 (revisión de Pablo) — seguimiento_fotos.fecha y el
+// filtro de "pendiente" (ultima_revision_ts) ahora se miden en
+// medianoche de BOGOTÁ, no de UTC — estos dos helpers reemplazan los
+// `new Date(); x.setUTCHours(0,0,0,0)` sueltos que había en todo este
+// archivo, para que los fixtures de las pruebas coincidan dígito a
+// dígito con lo que la producción de verdad calcula. Corrección de
+// Pablo (segunda revisión) — `fechaDiaBogota`, no `rangoDiaBogota().inicio`:
+// ese da el instante real de la medianoche de Bogotá (05:00 UTC), pero
+// `seguimiento_fotos.fecha` guarda el día calendario como medianoche
+// UTC (00:00Z) — con 05:00Z estos fixtures ya no coincidían con lo que
+// de verdad guarda producción.
+function hoyBogota(): Date {
+  return fechaDiaBogota(new Date());
+}
+function diasAtras(dias: number): Date {
+  return new Date(hoyBogota().getTime() - dias * 24 * 60 * 60 * 1000);
+}
 
 // Issue #175 — prueba real contra Postgres (mismo criterio que
 // lib/ml/trabajador.test.ts): dbTrabajadorSeguimiento (DATABASE_URL_SEGUIMIENTO)
@@ -49,8 +68,7 @@ function nuevoMlId() {
 // todo lo demás pendiente — deja el lote con solo lo que la suite
 // insertó.
 async function aislarLotePara(seguimientoId: string) {
-  const hoy = new Date();
-  hoy.setUTCHours(0, 0, 0, 0);
+  const hoy = hoyBogota();
   await dbTrabajadorSeguimiento
     .update(seguimientosMl)
     .set({ ultimaRevisionTs: new Date() })
@@ -111,9 +129,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     // precio 100, vendidos 10 — la de "hoy" (simulada con fetch abajo)
     // trae precio 80 y vendidos 15, para disparar precio_bajo y
     // vendio_unidades al compararlas.
-    const ayer = new Date();
-    ayer.setUTCHours(0, 0, 0, 0);
-    ayer.setUTCDate(ayer.getUTCDate() - 1);
+    const ayer = diasAtras(1);
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(seguimientoFotos).values({
         empresaId,
@@ -162,8 +178,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     expect(resultado.procesados).toBeGreaterThanOrEqual(1);
     expect(resultado.fallidos).toBeLessThan(resultado.activos);
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const [fotoHoy] = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
     );
@@ -199,8 +214,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
 
       await revisarSeguimientosDelDia();
 
-      const hoy = new Date();
-      hoy.setUTCHours(0, 0, 0, 0);
+      const hoy = hoyBogota();
       const fotosDeHoy = await dbComoEmpresa(empresaId, (tx) =>
         tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
       );
@@ -380,17 +394,19 @@ describe("revisarSeguimientosDelDia — ya hay foto de hoy: actualiza los campos
     );
     seguimientoId = seguimiento.id;
 
-    const ayer = new Date();
-    ayer.setUTCHours(0, 0, 0, 0);
-    ayer.setUTCDate(ayer.getUTCDate() - 1);
+    const ayer = diasAtras(1);
     await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: ayer, precio: "100", estado: "active", vendidos: 3 }));
 
     // A propósito: una foto de HOY insertada directo (simula lo que la
-    // madrugada ya guardó) — con inventarioDisponible/vendidos puestos
-    // a mano, distintos de lo que traería el mock de abajo, para
-    // confirmar que la ronda de la tarde NUNCA los toca.
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    // madrugada ya guardó, nunca a través del trabajo) — con
+    // inventarioDisponible/vendidos puestos a mano, distintos de lo
+    // que traería el mock de abajo, para confirmar que la ronda de la
+    // tarde NUNCA los toca (son los campos que reusa la extensión,
+    // #251). ultima_revision_ts del seguimiento queda en null a
+    // propósito, para que SÍ entre al lote (si ya estuviera marcado,
+    // el filtro de obtenerSeguimientosPendientesDeHoy lo excluiría
+    // antes de llegar a revisarUnSeguimiento).
+    const hoy = hoyBogota();
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: hoy, precio: "100", estado: "active", inventarioDisponible: 7, vendidos: 3 })
     );
@@ -409,8 +425,7 @@ describe("revisarSeguimientosDelDia — ya hay foto de hoy: actualiza los campos
     expect(resultado.procesados).toBeGreaterThanOrEqual(1);
     expect(resultado.alertasCreadas).toBeGreaterThanOrEqual(1);
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const fotosDeHoy = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
     );
@@ -566,8 +581,7 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
 
     expect(resultado).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const [fotoHoy] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
     );
@@ -589,8 +603,7 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
   // revisionDiariaSeguimiento.ts.
   it("si ya hay una foto de hoy (ej. el cron ya corrió), actualiza los campos de API (saltado:false) — nunca duplica ni toca los campos de la extensión", async () => {
     const seguimiento = await crearSeguimientoConCuenta("YA-REVISADO-HOY");
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx.insert(seguimientoFotos).values({
         empresaId: seguimiento.empresaId,
@@ -708,6 +721,11 @@ describe("obtenerSeguimientosPendientesDeHoy — orden y filtro del lote (issue 
     const { empresaId, usuarioId } = await crearEmpresaConUsuario("LOTE-ORDEN");
     const base = { empresaId, tipo: "producto" as const, recursoMl: "item" as const, linkOriginal: "https://x", creadoPor: usuarioId };
 
+    // Issue #175 (filtro original) — `ultimaRevisionTs` es un instante
+    // real (timestamptz), nunca una fecha-calendario bucketizada como
+    // seguimiento_fotos.fecha — comparado contra "ahora menos N horas"
+    // (limiteRevisionReciente()), no hace falta truncar a medianoche
+    // de Bogotá para estos valores.
     const unDiaAtras = new Date();
     unDiaAtras.setUTCDate(unDiaAtras.getUTCDate() - 1);
     const hace8Horas = new Date();

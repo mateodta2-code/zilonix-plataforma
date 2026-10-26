@@ -6,7 +6,14 @@ import type { seguimientosMl } from "@/db/schema";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { agregarSeguimiento, buscarSeguimientoActivoPorMlId, eliminarSeguimiento, marcarAlertaLeida } from "@/lib/seguimiento/seguimientos";
+import {
+  agregarSeguimiento,
+  buscarSeguimientoActivoPorMlId,
+  type DatoPaginaSeguimiento,
+  eliminarSeguimiento,
+  guardarDatoDePaginaSeguimiento,
+  marcarAlertaLeida,
+} from "@/lib/seguimiento/seguimientos";
 
 async function empresaActivaDe(usuarioId: string) {
   const propias = await listarEmpresasDeUsuario(usuarioId);
@@ -135,4 +142,125 @@ export async function marcarAlertaLeidaAction(formData: FormData): Promise<void>
 
   await marcarAlertaLeida(empresa.id, alertaId);
   redirect("/panel/investigacion/seguimiento?leida=1");
+}
+
+// Issue #251 — a diferencia de las acciones de arriba (todas atadas a
+// un <form>, siempre terminan en redirect), esta la llama directo
+// código cliente (EscuchaExtension.tsx, el listener del mensaje
+// "dato-pagina-seguimiento" que ya reenvía marcador-zilonix.js) — es
+// una llamada de fondo, sin navegación: nunca redirige, nunca lanza
+// hacia la UI (un error acá no debe romper la pantalla que la persona
+// está mirando). `empresaId` SIEMPRE se resuelve del lado del
+// servidor (sesión + cookie, igual que el resto de este archivo) —
+// nunca se confía en nada que mande el cliente salvo el payload en
+// sí, y ESE se vuelve a validar entero acá, nunca se asume que el
+// mensaje de la extensión viene bien formado solo porque llegó por
+// este canal.
+// Issue #251 (corrección de Pablo, punto 6) — mismos prefijos reales
+// de Mercado Libre por país que ya usa el resto del repo (Colombia,
+// Argentina, Brasil, México, Chile, Uruguay, Perú) para un id de
+// producto/item, o puro numérico para un seller_id de tienda — nunca
+// un string cualquiera solo porque "no está vacío".
+const PATRON_ID_ML_O_VENDEDOR = /^(MCO|MLA|MLB|MLM|MLC|MLU|MPE)\d+$|^\d+$/;
+const MAX_IDS_VISIBLES = 100;
+// Issue #251 (corrección de Pablo, punto 6) — background.js puede
+// encolar una lectura y entregarla horas después (issue #251, punto 4
+// de la revisión anterior) mientras la pestaña de Seguimiento estaba
+// cerrada, pero nunca para siempre: 36h es más que suficiente margen
+// para esa cola oportunista sin dejar pasar un dato tan viejo que ya
+// no sirve ni para la estimación de ventas.
+const MAX_HORAS_LEIDO_EN = 36;
+
+function numeroEnteroEnRango(valor: unknown): valor is number | null {
+  return valor === null || (typeof valor === "number" && Number.isInteger(valor) && valor >= 0 && valor <= 1_000_000);
+}
+
+// Nunca confía en que `leidoEn` viene bien formado solo porque llegó
+// por este canal: tiene que ser una fecha ISO real, nunca futura (un
+// reloj de sistema mal puesto no debe mandar datos "del futuro" que
+// después nadie podría revisar) y de no más de MAX_HORAS_LEIDO_EN.
+function leidoEnValido(valor: unknown): valor is string {
+  if (typeof valor !== "string") return false;
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return false;
+  const ahoraMs = Date.now();
+  if (fecha.getTime() > ahoraMs) return false;
+  return ahoraMs - fecha.getTime() <= MAX_HORAS_LEIDO_EN * 60 * 60 * 1000;
+}
+
+function datoPaginaSeguimientoValido(payload: unknown): payload is DatoPaginaSeguimiento {
+  if (!payload || typeof payload !== "object") return false;
+  const p = payload as Record<string, unknown>;
+  if (typeof p.mlIdExterno !== "string" || !PATRON_ID_ML_O_VENDEDOR.test(p.mlIdExterno)) return false;
+  if (!leidoEnValido(p.leidoEn)) return false;
+  if (p.tipoSeguimiento === "producto") {
+    return numeroEnteroEnRango(p.inventario) && typeof p.inventarioAproximado === "boolean" && numeroEnteroEnRango(p.vendidos) && typeof p.vendidosExacto === "boolean";
+  }
+  if (p.tipoSeguimiento === "tienda") {
+    return (
+      numeroEnteroEnRango(p.totalPublicaciones) &&
+      Array.isArray(p.idsVisibles) &&
+      p.idsVisibles.length <= MAX_IDS_VISIBLES &&
+      p.idsVisibles.every((id) => typeof id === "string" && PATRON_ID_ML_O_VENDEDOR.test(id))
+    );
+  }
+  return false;
+}
+
+// Issue #251 — mismo chequeo (usuario real + empresa activa + permiso)
+// que necesitan tanto el guardado individual como el de la cola en
+// lote (abajo) — nunca navega ni lanza hacia la UI, solo devuelve la
+// empresa o null.
+async function empresaConPermisoDeExtension() {
+  const usuario = await obtenerOCrearUsuarioActual();
+  if (!usuario) return null;
+  let empresa;
+  try {
+    empresa = await empresaActivaDe(usuario.id);
+  } catch {
+    return null;
+  }
+  try {
+    await requierePermiso(usuario.id, empresa.id, "inventario", "modificar");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
+    return null; // sin permiso -> se ignora en silencio, nunca rompe la pantalla por un mensaje de fondo
+  }
+  return empresa;
+}
+
+export async function guardarDatoPaginaSeguimientoAction(payload: unknown): Promise<void> {
+  if (!datoPaginaSeguimientoValido(payload)) return;
+  const empresa = await empresaConPermisoDeExtension();
+  if (!empresa) return;
+  await guardarDatoDePaginaSeguimiento(empresa.id, payload);
+}
+
+// Issue #251 (corrección de Pablo, punto 7) — EscuchaExtension.tsx
+// vacía la cola que background.js encoló (visitas a Mercado Libre
+// mientras la pestaña de Seguimiento estaba cerrada) en UN SOLO golpe:
+// una Server Action para todo el lote, en vez de una llamada —y un
+// router.refresh()— por cada lectura encolada. Cada payload se valida
+// por separado (uno malformado no tumba a los demás) y se guarda en
+// el mismo ORDEN en que llegó (secuencial, nunca en paralelo: son
+// lecturas encoladas en orden cronológico — procesarlas en paralelo
+// podría hacer que una más vieja pise, por una carrera de escritura,
+// el resultado de una más nueva).
+export async function guardarVariosDatosPaginaSeguimientoAction(payloads: unknown): Promise<void> {
+  if (!Array.isArray(payloads) || payloads.length === 0) return;
+  const empresa = await empresaConPermisoDeExtension();
+  if (!empresa) return;
+
+  // Corrección de Pablo (sobre 8474c60) — ordena por `leidoEn`
+  // ASCENDENTE antes de guardar: el lote de la cola puede llegar
+  // desordenado — sin esto, una lectura vieja procesada DESPUÉS de una
+  // más nueva (del mismo día) pisaría el dato más fresco con uno más
+  // viejo, al revés de "la lectura más reciente manda" (ver
+  // guardarDatoDePaginaSeguimiento, lib/seguimiento/seguimientos.ts).
+  const validos = payloads.filter(datoPaginaSeguimientoValido);
+  validos.sort((a, b) => new Date(a.leidoEn).getTime() - new Date(b.leidoEn).getTime());
+
+  for (const payload of validos) {
+    await guardarDatoDePaginaSeguimiento(empresa.id, payload);
+  }
 }

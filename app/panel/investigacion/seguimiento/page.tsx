@@ -5,9 +5,15 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { listarAlertasDelDia, listarSeguimientosConUltimaFoto, LIMITE_COMPETIDORES_POR_EMPRESA } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta } from "@/lib/seguimiento/alertas";
+import {
+  LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA,
+  LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA,
+  listarAlertasDelDia,
+  listarSeguimientosConUltimaFoto,
+} from "@/lib/seguimiento/seguimientos";
+import { mensajeAlerta, normalizarPublicaciones } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
+import { necesitaLecturaDePagina } from "@/lib/seguimiento/estimacionInventario";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
 import { Ayuda } from "@/components/marco/Ayuda";
 import { Boton, BotonLink } from "@/components/marco/Boton";
@@ -20,6 +26,8 @@ import { PanelLateral } from "@/components/marco/PanelLateral";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { agregarSeguimientoAction, eliminarSeguimientoAction, marcarAlertaLeidaAction, procesarAgregarPorQuery } from "./actions";
+import { BotonActualizarTodo } from "./BotonActualizarTodo";
+import { EscuchaExtension } from "./EscuchaExtension";
 import styles from "./page.module.css";
 
 // Issue #182 — mismo patrón /^MCO\d+$/ y /^\d+$/ que la extensión usa
@@ -34,6 +42,11 @@ const PATRON_ID_VENDEDOR = /^\d+$/;
 function dinero(n: number | string | null): string {
   if (n == null) return "—";
   return `$${Number(n).toLocaleString("es-CO")}`;
+}
+
+// Issue #251, punto 7 — "leído de la página el {fecha}".
+function fechaLegible(d: Date): string {
+  return new Date(d).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function siNoODesconocido(valor: boolean | null, textoSi: string, textoNo: string): React.ReactNode {
@@ -210,7 +223,25 @@ export default async function SeguimientoPage({
   }
 
   const [alertasDelDia, seguimientos] = await Promise.all([listarAlertasDelDia(empresa.id), listarSeguimientosConUltimaFoto(empresa.id)]);
-  const competidoresActivos = seguimientos.filter((s) => s.seguimiento.esCompetidor).length;
+  // Issue #251 — dos pozos separados, nunca uno combinado (ver
+  // LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA/LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA,
+  // lib/seguimiento/seguimientos.ts).
+  const tiendasCompetidorActivas = seguimientos.filter((s) => s.seguimiento.esCompetidor && s.seguimiento.tipo === "tienda").length;
+  const productosCompetidorActivos = seguimientos.filter((s) => s.seguimiento.esCompetidor && s.seguimiento.tipo === "producto").length;
+
+  // Issue #251, punto 9 — "Actualizar todo": los links reales de cada
+  // competidor (nunca más de 10, por el tope 5+5 de arriba) para que
+  // el botón los abra con un solo clic real — la extensión lee cada
+  // página al cargar, mismo disparador que ya usa "abrir la ficha/
+  // tienda seguida". `.slice(0, 10)` acá TAMBIÉN (corrección de
+  // Pablo) — defensa en profundidad: BotonActualizarTodo.tsx y
+  // background.js (quien de verdad abre las pestañas) vuelven a
+  // aplicar su propio tope, cada capa sin confiar en la anterior.
+  const ahora = new Date();
+  const linksCompetidores = seguimientos
+    .filter((s) => s.seguimiento.esCompetidor)
+    .map((s) => construirLinkMlDeSeguimiento(s.seguimiento.recursoMl, s.seguimiento.mlIdExterno))
+    .slice(0, 10);
 
   // Issue #195 — chip "Alta/Baja hoy" en la fila de una tienda cuando
   // la revisión diaria ya generó la alerta correspondiente HOY (las
@@ -221,6 +252,11 @@ export default async function SeguimientoPage({
 
   return (
     <>
+      {/* Issue #251 — escucha "dato-pagina-seguimiento" (inventario/
+      vendidos de un competidor, publicaciones de una tienda seguida,
+      leídos de la página abierta con la extensión) y guarda con la
+      Server Action correspondiente. Nunca pinta nada por su cuenta. */}
+      <EscuchaExtension />
       <EncabezadoPagina
         titulo="Seguimiento"
         descripcion="Seguimiento diario de productos, tiendas y competidores de Mercado Libre — precio, inventario, ventas y alertas cuando algo cambia."
@@ -315,12 +351,20 @@ export default async function SeguimientoPage({
           <Boton type="submit">Agregar</Boton>
         </form>
         <p className={styles.ayuda}>
-          Competidores marcados: {competidoresActivos}/{LIMITE_COMPETIDORES_POR_EMPRESA}.
+          Tiendas de competencia: {tiendasCompetidorActivas}/{LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA}. Productos de competencia: {productosCompetidorActivos}/
+          {LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA}.
         </p>
       </Tarjeta>
 
       <Tarjeta className={styles.seccion}>
-        <p className={styles.tituloSeccion}>Seguimientos activos</p>
+        <div className={styles.encabezadoSeccion}>
+          <p className={styles.tituloSeccion}>Seguimientos activos</p>
+          {/* Issue #251, punto 9 — abre la ficha/tienda de cada
+          competidor en una pestaña nueva, con un clic real; la
+          extensión lee cada página al cargar, igual que al abrirla a
+          mano. Nunca se dispara sola. */}
+          <BotonActualizarTodo links={linksCompetidores} />
+        </div>
         {seguimientos.length === 0 ? (
           <EstadoVacio>Todavía no agregaste ningún producto, tienda o competidor.</EstadoVacio>
         ) : (
@@ -343,6 +387,10 @@ export default async function SeguimientoPage({
             {seguimientos.map(({ seguimiento, ultimaFoto, fotoAnterior, fotoHaceUnMes }) => {
               const ventasHoy = calcularVentasHoy(ultimaFoto?.vendidos ?? null, fotoAnterior?.vendidos ?? null);
               const deltaUnMes = fotoHaceUnMes ? calcularDelta(ultimaFoto?.vendidos ?? null, fotoHaceUnMes.vendidos) : null;
+              // Issue #251 (corrección de Pablo, punto 3) — normaliza
+              // ANTES de leer `.total`/`.visibles`: una fila vieja
+              // puede traer el array plano sin envolver.
+              const publicaciones = ultimaFoto ? normalizarPublicaciones(ultimaFoto.publicaciones) : null;
               return (
                 <FilaTabla key={seguimiento.id}>
                   <CeldaTabla>
@@ -355,29 +403,73 @@ export default async function SeguimientoPage({
                     {seguimiento.esCompetidor ? <Chip estado="aviso">Competidor</Chip> : null}
                     {altasHoy.has(seguimiento.id) ? <Chip estado="exito">Alta hoy</Chip> : null}
                     {bajasHoy.has(seguimiento.id) ? <Chip estado="peligro">Baja hoy</Chip> : null}
+                    {/* Issue #251, punto 10 — sin lectura de la
+                    página hoy para un competidor: inventario/vendidos/
+                    publicaciones todavía no tienen el dato real que
+                    solo la extensión puede traer. */}
+                    {necesitaLecturaDePagina({
+                      esCompetidor: seguimiento.esCompetidor,
+                      tipo: seguimiento.tipo,
+                      ultimaFoto: ultimaFoto ?? null,
+                      ahora,
+                    }) ? (
+                      <div className={styles.subdato}>Actualiza hoy para ver cuánto vendieron</div>
+                    ) : null}
                   </CeldaTabla>
                   <CeldaTabla>{seguimiento.tipo === "tienda" ? "Tienda" : "Producto"}</CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.esFull ?? null, "Full", "No full")}</CeldaTabla>
                   <CeldaTabla>{celdaConDelta(ultimaFoto?.precio ?? null, fotoAnterior?.precio ?? null, dinero)}</CeldaTabla>
                   <CeldaTabla>
-                    {celdaConDelta(ultimaFoto?.inventarioDisponible ?? null, fotoAnterior?.inventarioDisponible ?? null, numeroPlano)}
+                    {/* Issue #251, punto 7 — "Sin dato" en vez de "—"
+                    cuando todavía no hay ninguna lectura (de la
+                    página o de la API) para este campo. */}
+                    {ultimaFoto?.inventarioDisponible == null
+                      ? "Sin dato"
+                      : celdaConDelta(ultimaFoto.inventarioDisponible, fotoAnterior?.inventarioDisponible ?? null, numeroPlano)}
                     {ultimaFoto?.inventarioAproximado ? <Chip>Aproximado</Chip> : null}
                   </CeldaTabla>
                   <CeldaTabla>
-                    {/* Issue #250, punto B — una tienda nunca trae
-                    "vendidos" de la API (ver lib/seguimiento/lector.ts,
-                    fotoVacia()); en su lugar, el conteo de publicaciones
-                    visibles cuando el buscador de Mercado Libre dejó
-                    verlas hoy. `publicaciones` queda null cuando NINGÚN
-                    camino (propio ni público) dejó ver nada hoy — "sin
-                    dato de la API", nunca "la tienda no tiene
-                    publicaciones" (eso sería [] real). */}
-                    {seguimiento.tipo === "tienda"
-                      ? ultimaFoto?.publicaciones
-                        ? `${ultimaFoto.publicaciones.length} publicaciones`
-                        : "Sin dato de la API"
-                      : ultimaFoto?.vendidos ?? "—"}
-                    {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
+                    {seguimiento.tipo === "tienda" ? (
+                      // Issue #251, punto 5 — el TOTAL real (lo que
+                      // Mercado Libre muestra arriba del listado,
+                      // "752 resultados"), no la cantidad de
+                      // publicaciones visibles en esa sola carga de
+                      // página (eso es solo el detalle, ver [id]/page.tsx).
+                      // Issue #250, punto B — una tienda nunca trae
+                      // "vendidos" de la API (lib/seguimiento/lector.ts,
+                      // fotoVacia()) — `publicaciones.total` puede venir
+                      // de la API (buscador público) o de la extensión
+                      // (#251); si ninguna de las dos lo llenó todavía,
+                      // es "Sin dato" (genérico a propósito, nunca "de
+                      // la API": la extensión también puede ser la
+                      // fuente que falta). Corrección de Pablo, punto 3
+                      // — `total ?? visibles.length`: cuando el total
+                      // real todavía no llegó pero SÍ hay publicaciones
+                      // visibles (ej. la API solo trajo esas, nunca el
+                      // total — da 403 real al listar), mostrar ESE
+                      // conteo en vez de "Sin dato" — sigue siendo un
+                      // dato real, aunque parcial.
+                      publicaciones && (publicaciones.total != null || publicaciones.visibles.length > 0) ? (
+                        <>
+                          {publicaciones.total ?? publicaciones.visibles.length} publicaciones
+                          <div className={styles.subdato}>Leído de la página el {fechaLegible(ultimaFoto!.fecha)}</div>
+                        </>
+                      ) : (
+                        "Sin dato"
+                      )
+                    ) : (
+                      <>
+                        {ultimaFoto?.vendidos ?? "Sin dato"}
+                        {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
+                        {/* Issue #251, punto 7 — "leído de la página
+                        el {fecha}": inventario/vendidos de un
+                        competidor solo los llena esta lectura, nunca
+                        la API (ver lib/trabajos/revisionDiariaSeguimiento.ts). */}
+                        {seguimiento.esCompetidor && (ultimaFoto?.inventarioDisponible != null || ultimaFoto?.vendidos != null) ? (
+                          <div className={styles.subdato}>Leído de la página el {fechaLegible(ultimaFoto!.fecha)}</div>
+                        ) : null}
+                      </>
+                    )}
                   </CeldaTabla>
                   <CeldaTabla>
                     {!fotoHaceUnMes ? "Aún sin 30 días" : deltaUnMes == null ? "—" : conSigno(deltaUnMes, numeroPlano)}
