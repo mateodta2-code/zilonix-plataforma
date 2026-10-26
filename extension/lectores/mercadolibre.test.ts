@@ -15,6 +15,7 @@ import {
   extraerIdDeUrl,
   filtroFullActivoEnUrl,
   leerDatosIncrustados,
+  leerInventarioMaximoDeTexto,
   leerResenasDesdeScript,
   leerSellerIdDeTienda,
   tipoDePagina,
@@ -574,5 +575,36 @@ describe("detectarFullEnHtmlFicha — issue #245, ficha de producto (leerProduct
     expect(detectarFullEnHtmlFicha("")).toBe(false);
     expect(detectarFullEnHtmlFicha(null as unknown as string)).toBe(false);
     expect(detectarFullEnHtmlFicha(undefined as unknown as string)).toBe(false);
+  });
+});
+
+describe("leerInventarioMaximoDeTexto — issue #251, inventario leído de la ficha abierta", () => {
+  // Issue #251 — Mercado Libre no deja ver `available_quantity` real
+  // de una publicación AJENA por la API (403/ausente, confirmado en
+  // #250) — se lee del selector de cantidad de la FICHA abierta en
+  // pantalla. Texto real confirmado (archive.org, ficha real de
+  // Mercado Libre Colombia, item MCO1050084400, snapshot de mayo/2026
+  // — acceso directo sigue bloqueado desde este sandbox):
+  //   <span class="ui-pdp-buybox__quantity__available">(+10 disponibles)</span>
+  it('texto real confirmado, "(+10 disponibles)" -> {valor: 10, aproximado: true}', () => {
+    expect(leerInventarioMaximoDeTexto("(+10 disponibles)")).toEqual({ valor: 10, aproximado: true });
+  });
+
+  it('stock bajo, sin "+" (nunca confirmado en una ficha real, pero simétrico al criterio ya usado para "+N vendidos") -> {valor: 5, aproximado: false}', () => {
+    expect(leerInventarioMaximoDeTexto("5 disponibles")).toEqual({ valor: 5, aproximado: false });
+  });
+
+  it("miles con separador real de Mercado Libre (punto) -> número completo, nunca cortado en el primer punto", () => {
+    expect(leerInventarioMaximoDeTexto("(+1.200 disponibles)")).toEqual({ valor: 1200, aproximado: true });
+  });
+
+  it("texto sin el patrón esperado -> valor null, nunca 0 inventado", () => {
+    expect(leerInventarioMaximoDeTexto("Sin stock")).toEqual({ valor: null, aproximado: false });
+  });
+
+  it("entradas vacías o inválidas -> valor null, nunca revienta", () => {
+    expect(leerInventarioMaximoDeTexto("")).toEqual({ valor: null, aproximado: false });
+    expect(leerInventarioMaximoDeTexto(null as unknown as string)).toEqual({ valor: null, aproximado: false });
+    expect(leerInventarioMaximoDeTexto(undefined as unknown as string)).toEqual({ valor: null, aproximado: false });
   });
 });

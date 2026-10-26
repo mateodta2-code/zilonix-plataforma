@@ -18,7 +18,13 @@
 // haya hecho clic en "Analizar" (ver más abajo).
 "use strict";
 
-const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado"]);
+// Issue #251 — "zilonix:dato-pagina-seguimiento" suma al mismo relevo
+// genérico: Seguimiento no puede leer inventario/vendidos/publicaciones
+// de un recurso AJENO por la API de Mercado Libre (403/ausente,
+// confirmado en #250) — content.js lo manda cuando la persona abre la
+// ficha de un competidor o la tienda que sigue, y solo la pestaña del
+// panel de Seguimiento (con marcador-zilonix.js) hace algo con esto.
+const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix:dato-pagina-seguimiento"]);
 
 // Issue #221 — "Analizar estilo OS": orquesta el escaneo acotado de
 // listados REALES de Mercado Libre que arranca con "Analizar". Todo

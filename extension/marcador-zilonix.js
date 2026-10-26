@@ -37,6 +37,11 @@
     "zilonix:resenas-resultado": "resenas-leidas",
     "zilonix:escaneo-plataforma-resultado": "escaneo-plataforma-importado",
     "zilonix:escaneo-plataforma-captcha": "escaneo-plataforma-captcha",
+    // Issue #251 — inventario/vendidos de un competidor, o
+    // publicaciones de una tienda seguida, leídos de la página abierta
+    // (Mercado Libre nunca los deja ver por la API para un recurso
+    // ajeno — confirmado en #250).
+    "zilonix:dato-pagina-seguimiento": "dato-pagina-seguimiento",
   };
 
   chrome.runtime.onMessage.addListener((mensaje) => {

@@ -20,10 +20,10 @@ describe("/panel/investigacion/seguimiento — mismo permiso que Investigación 
     expect(contenidoDe("[id]/page.tsx")).toMatch(/requierePermiso\(\s*usuario\.id,\s*empresa\.id,\s*"inventario",\s*"consultar"\s*\)/);
   });
 
-  it("actions.ts pide inventario.modificar en las 3 acciones de escritura (agregar, quitar, marcar leída)", () => {
+  it("actions.ts pide inventario.modificar en las 4 acciones de escritura (agregar, quitar, marcar leída, guardar dato de página — issue #251)", () => {
     const contenido = contenidoDe("actions.ts");
     const coincidencias = contenido.match(/requierePermiso\(\s*usuario\.id,\s*empresa\.id,\s*"inventario",\s*"modificar"\s*\)/g) ?? [];
-    expect(coincidencias.length).toBe(3);
+    expect(coincidencias.length).toBe(4);
   });
 });
 

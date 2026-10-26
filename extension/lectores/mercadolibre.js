@@ -418,6 +418,19 @@
     // igual que el criterio simple de OS, que en el listado nunca
     // necesita este respaldo porque cada tarjeta ya viene separada.
     const esFull = detectarFullEnHtmlFicha(bloqueEnvio ? bloqueEnvio.outerHTML : htmlCompleto);
+    // Issue #251 — Mercado Libre nunca deja ver `available_quantity`
+    // real de una publicación AJENA por la API (403/ausente,
+    // confirmado en #250) — se lee de la FICHA abierta en pantalla en
+    // su lugar. Selector real confirmado (archive.org, snapshot de
+    // una ficha real de Mercado Libre Colombia, mayo/2026 — acceso
+    // directo sigue bloqueado desde este sandbox):
+    //   <span class="ui-pdp-buybox__quantity__available">(+10 disponibles)</span>
+    // dentro de #buybox_available_quantity. Mismo criterio que "+N
+    // vendidos" (abajo, ya confirmado desde #174): un número con "+"
+    // es un piso, nunca el disponible exacto — se marca `aproximado`
+    // igual que ya hace lector.ts del lado del servidor para un
+    // recurso ajeno (inventarioAproximado).
+    const inventario = leerInventarioMaximoDeTexto(U.textoDe([".ui-pdp-buybox__quantity__available"], doc));
 
     return {
       titulo: U.textoDe(["h1.ui-pdp-title", "h1[data-testid='product-title']"], doc),
@@ -451,17 +464,68 @@
       // leerDatosIncrustados (null si no se pudo confirmar).
       itemId: itemIdActual,
       dateCreated: incrustado.dateCreated,
+      // Issue #251 — null cuando el selector de cantidad no aparece
+      // (ej. sin stock, o un tipo de publicación distinto) — nunca
+      // 0 inventado en su lugar.
+      inventarioMaximo: inventario.valor,
+      inventarioMaximoAproximado: inventario.aproximado,
     };
+  }
+
+  // Issue #251 — puro (string de texto -> {valor, aproximado}), para
+  // poder probarlo con un fixture real sin DOM. "(+10 disponibles)" ->
+  // {valor: 10, aproximado: true} (el "+" es un piso real de Mercado
+  // Libre, igual que "+N vendidos" — nunca el disponible exacto).
+  // "5 disponibles" (sin "+", stock bajo) -> {valor: 5, aproximado:
+  // false} — forma simétrica a como ya se trata "vendidos" en este
+  // mismo archivo, documentada así aunque todavía no se confirmó un
+  // ejemplo real sin "+" (ningún producto de bajo stock apareció en
+  // la evidencia reunida para este issue).
+  function leerInventarioMaximoDeTexto(texto) {
+    if (typeof texto !== "string" || !texto) return { valor: null, aproximado: false };
+    const m = texto.match(/(\+)?\s*([\d.,]+)\s*disponibles?/i);
+    if (!m) return { valor: null, aproximado: false };
+    const valor = U.enteroDesdeTexto(m[2]);
+    return { valor, aproximado: Boolean(m[1]) };
   }
 
   function leerTienda(doc) {
     const htmlCompleto = doc && doc.documentElement ? doc.documentElement.outerHTML : "";
     const sellerId = leerSellerIdDeTienda(htmlCompleto, doc && doc.URL);
+    const publicaciones = leerPublicacionesTienda(doc);
     return {
       nombreTienda: U.textoDe(["h1", ".ui-seller-info__title", ".store-header__title"], doc),
       sellerId,
       linkSeguir: construirLinkSeguirTienda(sellerId),
+      // Issue #251 — null cuando la página de tienda no trae el
+      // listado real (ej. la landing de una tienda oficial, antes de
+      // entrar a "Todos los productos") — nunca 0 inventado.
+      totalPublicaciones: publicaciones.total,
+      idsVisibles: publicaciones.idsVisibles,
     };
+  }
+
+  // Issue #251 — Mercado Libre da 403 real al listar las publicaciones
+  // de un vendedor AJENO por la API (confirmado en #250) — se lee del
+  // LISTADO de la tienda abierto en pantalla. Selectores reales
+  // confirmados (archive.org, listado.mercadolibre.com.co/tienda/samsung/,
+  // snapshot de junio/2025 — acceso directo sigue bloqueado desde este
+  // sandbox): el total viene en
+  //   <span class="ui-search-search-result__quantity-results">752 resultados</span>
+  // y cada publicación visible es la MISMA tarjeta `li.ui-search-layout__item`
+  // que ya lee `leerListado` (abajo) — mismo criterio: el `href` del
+  // link del título (`a.poly-component__title`) clasificado con
+  // `clasificarLinkListadoMl` (abajo, issue #233), nunca inventado.
+  function leerPublicacionesTienda(doc) {
+    const total = U.enteroDesdeTexto(U.textoDe([".ui-search-search-result__quantity-results"], doc));
+    const tarjetas = doc.querySelectorAll("li.ui-search-layout__item");
+    const idsVisibles = [];
+    tarjetas.forEach((tarjeta) => {
+      const linkEl = U.primerElemento(["a.poly-component__title"], tarjeta);
+      const idInfo = clasificarLinkListadoMl(linkEl ? linkEl.getAttribute("href") : null);
+      if (idInfo) idsVisibles.push(idInfo.id);
+    });
+    return { total, idsVisibles };
   }
 
   // Issue #227 — "quitar API de Investigación": Demanda/Mercado/Estrategia
@@ -860,6 +924,10 @@
     // fuerte del filtro Full de Mercado Libre, probado con casos
     // reales de la URL.
     filtroFullActivoEnUrl,
+    // Issue #251 — puro (string de texto -> {valor, aproximado}),
+    // probado con el texto real del selector de cantidad de la ficha.
+    leerInventarioMaximoDeTexto,
+    leerPublicacionesTienda,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe

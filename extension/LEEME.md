@@ -390,6 +390,24 @@ Lo que cambia para la persona que usa el panel:
 - **Logos de plataforma (punto 16 del issue)**: se evaluó agregar el logo real de cada sitio (Amazon/Temu/AliExpress/Shein/Alibaba/Mercado Libre) en el selector y en cada bloque — se decidió NO hacerlo en este PR. Usar el logo/marca de un tercero dentro de la interfaz propia de Zilonix tiene un riesgo de marca real que el pedido mismo anticipaba ("si rompen marca, quitarlos") — se mantiene el badge de texto (`Chip`) que ya existía, sin ninguna imagen de marca de terceros.
 - **Ayuda "?"**: explícitamente fuera de este PR (punto 15 del issue) — queda para una vuelta aparte.
 
+## Seguimiento lee inventario, vendidos y publicaciones desde la página (issue #251)
+
+Mercado Libre nunca deja ver, por la API, el inventario (`available_quantity`) ni los vendidos (`sold_quantity`) reales de un ITEM ajeno de forma confiable (null/ausente — confirmado en #250), y da 403 real al listar publicaciones de una TIENDA ajena (misma causa, #250). Esos datos SÍ aparecen en la página que la persona ya tiene abierta — la extensión los lee de ahí.
+
+**Selectores reales confirmados** (archive.org — acceso directo a Mercado Libre sigue bloqueado desde este sandbox):
+
+- **Inventario** (ficha de producto, item MCO1050084400, snapshot de mayo/2026): `.ui-pdp-buybox__quantity__available`, texto `"(+10 disponibles)"` dentro de `#buybox_available_quantity`. El `"+"` es un piso real (nunca el disponible exacto), mismo criterio que `"+N vendidos"`.
+- **Vendidos** (misma ficha): ya se leía desde #174/#197 (`leerProducto`, `.ui-pdp-subtitle`, texto `"+500 vendidos"`) — issue #251 reusa ese mismo valor, nunca un lector nuevo.
+- **Publicaciones de una tienda** (listado.mercadolibre.com.co/tienda/samsung/, snapshot de junio/2025): el total viene en `.ui-search-search-result__quantity-results` (texto `"752 resultados"`); cada publicación visible es la MISMA tarjeta `li.ui-search-layout__item` que ya lee `leerListado` para cualquier búsqueda.
+
+**Lo que se guarda, honesto**: solo las publicaciones VISIBLES en esa carga de página (hasta ~48, igual que un listado normal) — nunca el total real que Mercado Libre muestra arriba de la página ("752 resultados"); guardar ese número aparte necesitaría una columna nueva (pendiente, ver changelog).
+
+**Disparo**: solo con un clic real — abrir la ficha de un producto de competencia, o la tienda que se sigue (`extension/content.js`, `reescanear()`, mismo momento que ya manda "Completar vendidos") — la extensión nunca navega sola a ninguna de estas páginas, nunca hace clic, nunca abre el carrito ni simula una compra, solo lee el DOM que ya está en pantalla.
+
+**Puente**: mismo relevo de siempre — `content.js` → `background.js` (`zilonix:dato-pagina-seguimiento` suma a `TIPOS_RELEVADOS`) → `marcador-zilonix.js` (solo corre en el dominio de la app) → `postMessage` → `EscuchaExtension.tsx` (nuevo, en `/panel/investigacion/seguimiento`) → `guardarDatoPaginaSeguimientoAction` (Server Action, revalida sesión/permiso/empresa siempre del lado del servidor).
+
+**Tope de 5 tiendas + 5 productos de competencia** (dos pozos separados, no uno combinado): `LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA`/`LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA`, `lib/seguimiento/seguimientos.ts` — antes de este issue era un solo pozo de 5 (tienda+producto mezclados).
+
 ## Instalar en Chrome (modo desarrollador)
 
 1. Abrí Chrome y entrá a `chrome://extensions`.

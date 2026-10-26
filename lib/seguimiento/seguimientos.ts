@@ -7,47 +7,58 @@ import { buscarFotoDeHaceUnMes } from "@/lib/seguimiento/comparativa";
 import { esLinkDeTienda, esLinkTiendaOficialSinIdDeVendedor, interpretarEnlaceProducto, interpretarEnlaceTienda } from "@/lib/seguimiento/link";
 import { ventasDelPeriodo } from "@/lib/seguimiento/ventas";
 
-// Issue #175 — "máximo 5 competidores por empresa, validado en el
-// servidor": literal, acá vive el candado. No es una constraint de
-// Postgres (un trigger de conteo agregaría SQL a mano por algo que la
-// propia aplicación ya puede chequear antes de insertar, dentro de la
-// misma transacción de dbComoEmpresa) — es intencional, pedido así en
-// el issue.
-export const LIMITE_COMPETIDORES_POR_EMPRESA = 5;
+// Issue #251 — "tope de 5 tiendas y 5 productos de competencia por
+// comercio, validado en el servidor": DOS pozos separados, no uno
+// combinado — antes de este issue, `LIMITE_COMPETIDORES_POR_EMPRESA`
+// (5) era un único pozo mezclando tienda+producto; el issue pide
+// explícitamente "5 tiendas Y 5 productos" (hasta 10 en total). No es
+// una constraint de Postgres (un trigger de conteo agregaría SQL a
+// mano por algo que la propia aplicación ya puede chequear antes de
+// insertar, dentro de la misma transacción de dbComoEmpresa) —
+// intencional, pedido así en el issue original (#175).
+export const LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA = 5;
+export const LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA = 5;
 
 export class LimiteCompetidoresError extends Error {
-  constructor() {
-    super(`Esta empresa ya tiene ${LIMITE_COMPETIDORES_POR_EMPRESA} competidores marcados — quita uno antes de agregar otro.`);
+  constructor(tipo: "producto" | "tienda") {
+    const limite = tipo === "tienda" ? LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA : LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA;
+    const sustantivo = tipo === "tienda" ? "tiendas" : "productos";
+    super(`Esta empresa ya tiene ${limite} ${sustantivo} de competencia marcados — quita uno antes de agregar otro.`);
     this.name = "LimiteCompetidoresError";
   }
 }
 
 // Nunca cuenta un seguimiento ya eliminado (eliminado_ts) — quitar un
 // competidor libera cupo real, no uno que sigue "gastado" para
-// siempre.
-export async function contarCompetidoresActivos(empresaId: string): Promise<number> {
+// siempre. Issue #251 — ahora cuenta POR TIPO, nunca los dos juntos
+// (ver el comentario de los límites, arriba).
+export async function contarCompetidoresActivos(empresaId: string, tipo: "producto" | "tienda"): Promise<number> {
   return dbComoEmpresa(empresaId, async (tx) => {
     const filas = await tx
       .select({ id: seguimientosMl.id })
       .from(seguimientosMl)
-      .where(and(eq(seguimientosMl.empresaId, empresaId), eq(seguimientosMl.esCompetidor, true), isNull(seguimientosMl.eliminadoTs)));
+      .where(
+        and(eq(seguimientosMl.empresaId, empresaId), eq(seguimientosMl.tipo, tipo), eq(seguimientosMl.esCompetidor, true), isNull(seguimientosMl.eliminadoTs))
+      );
     return filas.length;
   });
 }
 
 // Se llama ANTES de insertar un seguimiento nuevo marcado como
 // competidor (o de marcar uno existente como competidor) — lanza
-// LimiteCompetidoresError en vez de dejar pasar un sexto en silencio.
-// Nota real: esto no es un candado atómico contra una carrera exacta
-// (dos peticiones a la vez podrían las dos leer 4 y las dos insertar)
-// — aceptable a propósito para una acción de panel de administración,
-// de volumen bajísimo, nunca un endpoint de alto tráfico; si algún día
-// hiciera falta un candado real, sería un UPDATE con RETURNING contra
-// un contador dedicado, no esto.
-export async function verificarCupoCompetidor(empresaId: string): Promise<void> {
-  const actuales = await contarCompetidoresActivos(empresaId);
-  if (actuales >= LIMITE_COMPETIDORES_POR_EMPRESA) {
-    throw new LimiteCompetidoresError();
+// LimiteCompetidoresError en vez de dejar pasar un sexto DEL MISMO
+// TIPO en silencio (el sexto producto se rechaza aunque haya cupo de
+// tiendas, y viceversa). Nota real: esto no es un candado atómico
+// contra una carrera exacta (dos peticiones a la vez podrían las dos
+// leer 4 y las dos insertar) — aceptable a propósito para una acción
+// de panel de administración, de volumen bajísimo, nunca un endpoint
+// de alto tráfico; si algún día hiciera falta un candado real, sería
+// un UPDATE con RETURNING contra un contador dedicado, no esto.
+export async function verificarCupoCompetidor(empresaId: string, tipo: "producto" | "tienda"): Promise<void> {
+  const actuales = await contarCompetidoresActivos(empresaId, tipo);
+  const limite = tipo === "tienda" ? LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA : LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA;
+  if (actuales >= limite) {
+    throw new LimiteCompetidoresError(tipo);
   }
 }
 
@@ -119,6 +130,77 @@ export async function buscarSeguimientoActivoPorMlId(empresaId: string, mlIdExte
   });
 }
 
+// Issue #251 — Mercado Libre no deja ver, por la API, el inventario
+// (available_quantity) ni los vendidos (sold_quantity) reales de un
+// ITEM ajeno de forma confiable (null/ausente, confirmado en #250), y
+// da 403 real al listar publicaciones de una TIENDA ajena — la
+// extensión lee estos datos de la página que la persona ya tiene
+// abierta en pantalla (ficha del competidor, o listado de la tienda
+// seguida) y los manda por el mismo puente que ya usa "Completar
+// vendidos" (extension/content.js -> background.js ->
+// marcador-zilonix.js -> esta Server Action).
+export type DatoPaginaSeguimiento =
+  | { tipoSeguimiento: "producto"; mlIdExterno: string; inventario: number | null; inventarioAproximado: boolean; vendidos: number | null }
+  | { tipoSeguimiento: "tienda"; mlIdExterno: string; totalPublicaciones: number | null; idsVisibles: string[] };
+
+// Issue #251 — SOLO actualiza una foto de HOY que YA exista (nunca
+// inserta una nueva): `seguimiento_fotos` tiene un índice único
+// seguimiento_id+fecha (sin migración para darle más granularidad
+// ahora, decisión de Mateo, 2026-10-26 — turno de migración 0011
+// ocupado por otra rama) — si esta función insertara su propia fila
+// cuando todavía no hay ninguna hoy, y DESPUÉS corriera la revisión
+// diaria por API para ese mismo seguimiento, el índice único
+// bloquearía el insert de la API (onConflictDoNothing, ver
+// lib/trabajos/revisionDiariaSeguimiento.ts) y esta tarjeta se
+// quedaría SIN precio/estado/catálogo/Full de hoy — datos más
+// completos que los de esta sola página. Mejor perder el dato de la
+// extensión ese día puntual (la persona puede volver a abrir la
+// página otro momento) que bloquear el dato más completo de la API.
+//
+// Sin columna "fuente" (misma decisión, sin migración): para una
+// TIENDA, `inventarioDisponible`/`vendidos` JAMÁS los llena la
+// revisión por API (siempre quedan null por diseño, ver
+// lib/seguimiento/lector.ts) — si `publicaciones` aparece con dato en
+// una foto de tienda, por definición vino de este camino, sin
+// necesitar guardar ningún flag. Para un PRODUCTO, nunca se pisa un
+// número que la API ya haya confirmado hoy (más confiable que lo
+// visible en una sola carga de página) — solo se completa lo que
+// sigue en null.
+export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: DatoPaginaSeguimiento): Promise<void> {
+  const seguimiento = await buscarSeguimientoActivoPorMlId(empresaId, dato.mlIdExterno);
+  if (!seguimiento) return; // no es un seguimiento activo de esta empresa — nunca se inventa ni se cuela de otra
+
+  const hoy = new Date();
+  hoy.setUTCHours(0, 0, 0, 0);
+
+  await dbComoEmpresa(empresaId, async (tx) => {
+    const [fotoHoy] = await tx
+      .select()
+      .from(seguimientoFotos)
+      .where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)));
+    if (!fotoHoy) return; // todavía no hay foto de hoy (la revisión diaria no corrió aún) — se descarta, nunca se inventa una
+
+    if (dato.tipoSeguimiento === "tienda") {
+      if (fotoHoy.publicaciones != null) return; // ya hay un dato real de publicaciones hoy, nunca se pisa
+      await tx
+        .update(seguimientoFotos)
+        .set({ publicaciones: dato.idsVisibles.map((itemId) => ({ itemId, titulo: itemId, precio: null })) })
+        .where(eq(seguimientoFotos.id, fotoHoy.id));
+      return;
+    }
+
+    const actualizacion: Partial<typeof seguimientoFotos.$inferInsert> = {};
+    if (fotoHoy.inventarioDisponible == null && dato.inventario != null) {
+      actualizacion.inventarioDisponible = dato.inventario;
+      actualizacion.inventarioAproximado = dato.inventarioAproximado;
+    }
+    if (fotoHoy.vendidos == null && dato.vendidos != null) actualizacion.vendidos = dato.vendidos;
+    if (Object.keys(actualizacion).length > 0) {
+      await tx.update(seguimientoFotos).set(actualizacion).where(eq(seguimientoFotos.id, fotoHoy.id));
+    }
+  });
+}
+
 export type DatosNuevoSeguimiento = { tipo: "producto" | "tienda"; link: string; esCompetidor: boolean };
 
 // Issue #175, punto 5 — "agregar producto, tienda o competidor (máx. 5
@@ -154,7 +236,7 @@ export async function agregarSeguimiento(empresaId: string, usuarioId: string, d
     );
   }
 
-  if (datos.esCompetidor) await verificarCupoCompetidor(empresaId);
+  if (datos.esCompetidor) await verificarCupoCompetidor(empresaId, datos.tipo);
 
   const token = await tokenPropio(empresaId);
   const nombre = await resolverNombre(datos.tipo, interpretado.recursoMl, interpretado.mlIdExterno, token);

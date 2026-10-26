@@ -728,6 +728,57 @@
     }
   }
 
+  // Issue #251 — mismo criterio y mismo relevo que enviarVendidosAZilonix
+  // (arriba): nunca manda nada sin un id real confirmado, nunca sabe
+  // (ni le hace falta saber) si esto corresponde a un seguimiento
+  // activo — background.js lo reenvía a cualquier pestaña abierta y
+  // Seguimiento (el único que escucha "dato-pagina-seguimiento") decide
+  // si le importa. Disparado SOLO por un clic real de la persona —
+  // abrir la ficha de un competidor o la tienda que sigue — igual que
+  // "Completar vendidos": nunca la extensión navega sola a ninguna de
+  // estas páginas.
+  function enviarDatoPaginaSeguimientoAZilonix(payload) {
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    try {
+      chrome.runtime.sendMessage({ tipo: "zilonix:dato-pagina-seguimiento", payload }, () => {
+        void chrome.runtime.lastError; // sin panel de Seguimiento abierto en ninguna pestaña — nunca un error real
+      });
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe el panel.
+    }
+  }
+
+  // Issue #251 — ficha de un producto de competencia: inventario
+  // máximo del selector de cantidad + "+N vendidos" (ya leídos por
+  // lector.leerProducto, issue #174/#197) — nunca manda nada si no hay
+  // itemId confirmado.
+  function enviarInventarioFichaAZilonix(datos) {
+    if (!datos || typeof datos.itemId !== "string") return;
+    if (datos.inventarioMaximo == null && datos.vendidos == null) return;
+    enviarDatoPaginaSeguimientoAZilonix({
+      tipoSeguimiento: "producto",
+      mlIdExterno: datos.itemId,
+      inventario: datos.inventarioMaximo,
+      inventarioAproximado: datos.inventarioMaximoAproximado === true,
+      vendidos: datos.vendidos,
+      vendidosExacto: datos.vendidosExacto === true,
+    });
+  }
+
+  // Issue #251 — página de una tienda seguida: total de publicaciones
+  // + ids MCO visibles (lector.leerTienda) — nunca manda nada sin un
+  // sellerId confirmado.
+  function enviarPublicacionesTiendaAZilonix(datos) {
+    if (!datos || typeof datos.sellerId !== "string") return;
+    if (datos.totalPublicaciones == null) return;
+    enviarDatoPaginaSeguimientoAZilonix({
+      tipoSeguimiento: "tienda",
+      mlIdExterno: datos.sellerId,
+      totalPublicaciones: datos.totalPublicaciones,
+      idsVisibles: Array.isArray(datos.idsVisibles) ? datos.idsVisibles : [],
+    });
+  }
+
   // Issue #225 — "Top 8 reseñas": cuando background.js está leyendo
   // reseñas (una sola pestaña reutilizada, navegada con
   // chrome.tabs.update — ver extension/LEEME.md), cada navegación
@@ -769,6 +820,7 @@
         const datos = lector.leerProducto(document);
         renderizarProducto(panel, datos);
         enviarVendidosAZilonix(datos);
+        enviarInventarioFichaAZilonix(datos);
         // Issue #225 — se intenta SIEMPRE que haya un itemId confirmado
         // (igual que enviarVendidosAZilonix), no solo durante un "Ver
         // reseñas" activo — background.js es quien decide si le
@@ -796,7 +848,11 @@
         if (esPaginaDeEscaneoAutomatico() && !yaEnviadoEscaneoAutomatico) {
           void manejarEscaneoAutomatico();
         }
-      } else if (tipo === "tienda" && lector.leerTienda) renderizarTienda(panel, lector.leerTienda(document));
+      } else if (tipo === "tienda" && lector.leerTienda) {
+        const datosTienda = lector.leerTienda(document);
+        renderizarTienda(panel, datosTienda);
+        enviarPublicacionesTiendaAZilonix(datosTienda);
+      }
     } catch (error) {
       // Un selector roto en vivo nunca deja la página del usuario rota
       // — solo el panel se queda sin mostrar nada, con el error en la

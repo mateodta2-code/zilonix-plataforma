@@ -10,7 +10,8 @@ import {
   buscarSeguimientoActivoPorMlId,
   contarCompetidoresActivos,
   eliminarSeguimiento,
-  LIMITE_COMPETIDORES_POR_EMPRESA,
+  LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA,
+  LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA,
   LimiteCompetidoresError,
   LinkMlInvalidoError,
   listarAlertasDelDia,
@@ -48,63 +49,95 @@ function respuestaJson(data: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => data } as Response;
 }
 
-async function crearSeguimiento(empresaId: string, usuarioId: string, esCompetidor: boolean) {
+// Issue #251 — `tipo` opcional, default "producto" (para no tocar
+// las pruebas viejas que ya llamaban esto sin ese argumento) — las
+// pruebas nuevas del cupo separado 5+5 lo pasan explícito.
+async function crearSeguimiento(empresaId: string, usuarioId: string, esCompetidor: boolean, tipo: "producto" | "tienda" = "producto") {
   await dbComoEmpresa(empresaId, (tx) =>
-    tx.insert(seguimientosMl).values({
-      empresaId,
-      tipo: "producto",
-      recursoMl: "item",
-      mlIdExterno: `MCO${randomUUID().replace(/-/g, "").slice(0, 10)}`,
-      nombre: "Producto de prueba",
-      linkOriginal: "https://articulo.mercadolibre.com.co/MCO-1",
-      esCompetidor,
-      creadoPor: usuarioId,
-    })
+    tx.insert(seguimientosMl).values(
+      tipo === "tienda"
+        ? {
+            empresaId,
+            tipo: "tienda",
+            recursoMl: "seller",
+            mlIdExterno: String(Math.floor(Math.random() * 1_000_000_000)),
+            nombre: "Tienda de prueba",
+            linkOriginal: "https://listado.mercadolibre.com.co/_CustId_1",
+            esCompetidor,
+            creadoPor: usuarioId,
+          }
+        : {
+            empresaId,
+            tipo: "producto",
+            recursoMl: "item",
+            mlIdExterno: `MCO${randomUUID().replace(/-/g, "").slice(0, 10)}`,
+            nombre: "Producto de prueba",
+            linkOriginal: "https://articulo.mercadolibre.com.co/MCO-1",
+            esCompetidor,
+            creadoPor: usuarioId,
+          }
+    )
   );
 }
 
 // Issue #175 — "máximo 5 competidores por empresa, validado en el
 // servidor". Contra Postgres real (no un mock): dbComoEmpresa exige
 // una conexión real, igual que el resto de las pruebas de este repo.
-describe("verificarCupoCompetidor / contarCompetidoresActivos (issue #175)", () => {
-  it("cuenta solo los marcados como competidor, nunca los demás seguimientos", async () => {
+describe("verificarCupoCompetidor / contarCompetidoresActivos (issue #175, dos pozos separados desde #251)", () => {
+  it("cuenta solo los marcados como competidor del TIPO pedido, nunca los demás seguimientos ni el otro tipo", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
-    await crearSeguimiento(empresaId, usuarioId, true);
-    await crearSeguimiento(empresaId, usuarioId, false);
-    await crearSeguimiento(empresaId, usuarioId, false);
+    await crearSeguimiento(empresaId, usuarioId, true, "producto");
+    await crearSeguimiento(empresaId, usuarioId, false, "producto");
+    await crearSeguimiento(empresaId, usuarioId, true, "tienda");
 
-    expect(await contarCompetidoresActivos(empresaId)).toBe(1);
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(1);
+    expect(await contarCompetidoresActivos(empresaId, "tienda")).toBe(1);
   });
 
-  it(`deja agregar hasta ${LIMITE_COMPETIDORES_POR_EMPRESA}, el sexto lanza LimiteCompetidoresError`, async () => {
+  it(`deja agregar hasta ${LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA} productos, el sexto lanza LimiteCompetidoresError`, async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
-    for (let i = 0; i < LIMITE_COMPETIDORES_POR_EMPRESA; i++) {
-      await expect(verificarCupoCompetidor(empresaId)).resolves.toBeUndefined();
-      await crearSeguimiento(empresaId, usuarioId, true);
+    for (let i = 0; i < LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA; i++) {
+      await expect(verificarCupoCompetidor(empresaId, "producto")).resolves.toBeUndefined();
+      await crearSeguimiento(empresaId, usuarioId, true, "producto");
     }
-    expect(await contarCompetidoresActivos(empresaId)).toBe(LIMITE_COMPETIDORES_POR_EMPRESA);
-    await expect(verificarCupoCompetidor(empresaId)).rejects.toThrow(LimiteCompetidoresError);
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA);
+    await expect(verificarCupoCompetidor(empresaId, "producto")).rejects.toThrow(LimiteCompetidoresError);
   });
 
-  it("quitar un competidor (eliminado_ts) libera cupo real", async () => {
+  // Issue #251 — regresión directa: el pozo de tiendas lleno NO
+  // bloquea el de productos, y viceversa. Antes de #251 había un solo
+  // pozo combinado de 5 — esta prueba es la que hubiera fallado con
+  // ese código viejo (5 tiendas ya hubieran dejado el pozo combinado
+  // en el tope, bloqueando también el primer producto).
+  it(`el pozo de tiendas lleno (${LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA}) no afecta el cupo de productos, y viceversa`, async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
-    for (let i = 0; i < LIMITE_COMPETIDORES_POR_EMPRESA; i++) await crearSeguimiento(empresaId, usuarioId, true);
-    await expect(verificarCupoCompetidor(empresaId)).rejects.toThrow(LimiteCompetidoresError);
+    for (let i = 0; i < LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA; i++) await crearSeguimiento(empresaId, usuarioId, true, "tienda");
+    await expect(verificarCupoCompetidor(empresaId, "tienda")).rejects.toThrow(LimiteCompetidoresError);
+
+    // El pozo de PRODUCTOS sigue entero, en 0 — nunca se mezcla con el de tiendas.
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(0);
+    await expect(verificarCupoCompetidor(empresaId, "producto")).resolves.toBeUndefined();
+  });
+
+  it("quitar un competidor (eliminado_ts) libera cupo real, del mismo tipo", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    for (let i = 0; i < LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA; i++) await crearSeguimiento(empresaId, usuarioId, true, "producto");
+    await expect(verificarCupoCompetidor(empresaId, "producto")).rejects.toThrow(LimiteCompetidoresError);
 
     const [unCompetidor] = await dbComoEmpresa(empresaId, (tx) => tx.select({ id: seguimientosMl.id }).from(seguimientosMl).limit(1));
     await dbComoEmpresa(empresaId, (tx) => tx.update(seguimientosMl).set({ eliminadoTs: new Date() }).where(eq(seguimientosMl.id, unCompetidor.id)));
 
-    expect(await contarCompetidoresActivos(empresaId)).toBe(LIMITE_COMPETIDORES_POR_EMPRESA - 1);
-    await expect(verificarCupoCompetidor(empresaId)).resolves.toBeUndefined();
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA - 1);
+    await expect(verificarCupoCompetidor(empresaId, "producto")).resolves.toBeUndefined();
   });
 
-  it("el límite es por empresa: otra empresa con 5 competidores no afecta a esta", async () => {
+  it("el límite es por empresa: otra empresa con el cupo lleno no afecta a esta", async () => {
     const otra = await crearEmpresaConUsuario();
-    for (let i = 0; i < LIMITE_COMPETIDORES_POR_EMPRESA; i++) await crearSeguimiento(otra.empresaId, otra.usuarioId, true);
+    for (let i = 0; i < LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA; i++) await crearSeguimiento(otra.empresaId, otra.usuarioId, true, "producto");
 
     const { empresaId } = await crearEmpresaConUsuario();
-    expect(await contarCompetidoresActivos(empresaId)).toBe(0);
-    await expect(verificarCupoCompetidor(empresaId)).resolves.toBeUndefined();
+    expect(await contarCompetidoresActivos(empresaId, "producto")).toBe(0);
+    await expect(verificarCupoCompetidor(empresaId, "producto")).resolves.toBeUndefined();
   });
 });
 
@@ -166,7 +199,7 @@ describe("agregarSeguimiento (issue #175)", () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
     await conectarCuentaMl(empresaId);
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
-    for (let i = 0; i < LIMITE_COMPETIDORES_POR_EMPRESA; i++) {
+    for (let i = 0; i < LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA; i++) {
       await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: `MCO${i}`, esCompetidor: true });
     }
     await expect(agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO999", esCompetidor: true })).rejects.toThrow(

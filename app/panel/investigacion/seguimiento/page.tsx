@@ -5,7 +5,12 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { listarAlertasDelDia, listarSeguimientosConUltimaFoto, LIMITE_COMPETIDORES_POR_EMPRESA } from "@/lib/seguimiento/seguimientos";
+import {
+  LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA,
+  LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA,
+  listarAlertasDelDia,
+  listarSeguimientosConUltimaFoto,
+} from "@/lib/seguimiento/seguimientos";
 import { mensajeAlerta } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
@@ -20,6 +25,7 @@ import { PanelLateral } from "@/components/marco/PanelLateral";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { agregarSeguimientoAction, eliminarSeguimientoAction, marcarAlertaLeidaAction, procesarAgregarPorQuery } from "./actions";
+import { EscuchaExtension } from "./EscuchaExtension";
 import styles from "./page.module.css";
 
 // Issue #182 — mismo patrón /^MCO\d+$/ y /^\d+$/ que la extensión usa
@@ -210,7 +216,11 @@ export default async function SeguimientoPage({
   }
 
   const [alertasDelDia, seguimientos] = await Promise.all([listarAlertasDelDia(empresa.id), listarSeguimientosConUltimaFoto(empresa.id)]);
-  const competidoresActivos = seguimientos.filter((s) => s.seguimiento.esCompetidor).length;
+  // Issue #251 — dos pozos separados, nunca uno combinado (ver
+  // LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA/LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA,
+  // lib/seguimiento/seguimientos.ts).
+  const tiendasCompetidorActivas = seguimientos.filter((s) => s.seguimiento.esCompetidor && s.seguimiento.tipo === "tienda").length;
+  const productosCompetidorActivos = seguimientos.filter((s) => s.seguimiento.esCompetidor && s.seguimiento.tipo === "producto").length;
 
   // Issue #195 — chip "Alta/Baja hoy" en la fila de una tienda cuando
   // la revisión diaria ya generó la alerta correspondiente HOY (las
@@ -221,6 +231,11 @@ export default async function SeguimientoPage({
 
   return (
     <>
+      {/* Issue #251 — escucha "dato-pagina-seguimiento" (inventario/
+      vendidos de un competidor, publicaciones de una tienda seguida,
+      leídos de la página abierta con la extensión) y guarda con la
+      Server Action correspondiente. Nunca pinta nada por su cuenta. */}
+      <EscuchaExtension />
       <EncabezadoPagina
         titulo="Seguimiento"
         descripcion="Seguimiento diario de productos, tiendas y competidores de Mercado Libre — precio, inventario, ventas y alertas cuando algo cambia."
@@ -315,7 +330,8 @@ export default async function SeguimientoPage({
           <Boton type="submit">Agregar</Boton>
         </form>
         <p className={styles.ayuda}>
-          Competidores marcados: {competidoresActivos}/{LIMITE_COMPETIDORES_POR_EMPRESA}.
+          Tiendas de competencia: {tiendasCompetidorActivas}/{LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA}. Productos de competencia: {productosCompetidorActivos}/
+          {LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA}.
         </p>
       </Tarjeta>
 
@@ -364,8 +380,31 @@ export default async function SeguimientoPage({
                     {ultimaFoto?.inventarioAproximado ? <Chip>Aproximado</Chip> : null}
                   </CeldaTabla>
                   <CeldaTabla>
-                    {ultimaFoto?.vendidos ?? "—"}
-                    {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
+                    {seguimiento.tipo === "tienda" ? (
+                      // Issue #251 — una TIENDA nunca llena "vendidos"
+                      // por la API (siempre null por diseño, ver
+                      // lector.ts) — si `publicaciones` tiene datos
+                      // acá, por definición vinieron de la extensión
+                      // leyendo la página abierta (nunca un flag
+                      // guardado, sin columna nueva). Cuenta de
+                      // PUBLICACIONES VISIBLES en esa lectura, no el
+                      // total real que Mercado Libre muestra arriba de
+                      // la página (eso necesitaría guardar un número
+                      // aparte — pendiente de una migración futura).
+                      ultimaFoto?.publicaciones?.length != null ? (
+                        <>
+                          {ultimaFoto.publicaciones.length} publicaciones
+                          <div className={styles.subdato}>Visto en la página de ML</div>
+                        </>
+                      ) : (
+                        "—"
+                      )
+                    ) : (
+                      <>
+                        {ultimaFoto?.vendidos ?? "—"}
+                        {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
+                      </>
+                    )}
                   </CeldaTabla>
                   <CeldaTabla>
                     {!fotoHaceUnMes ? "Aún sin 30 días" : deltaUnMes == null ? "—" : conSigno(deltaUnMes, numeroPlano)}

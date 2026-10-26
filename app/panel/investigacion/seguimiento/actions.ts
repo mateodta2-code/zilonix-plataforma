@@ -6,7 +6,14 @@ import type { seguimientosMl } from "@/db/schema";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { agregarSeguimiento, buscarSeguimientoActivoPorMlId, eliminarSeguimiento, marcarAlertaLeida } from "@/lib/seguimiento/seguimientos";
+import {
+  agregarSeguimiento,
+  buscarSeguimientoActivoPorMlId,
+  type DatoPaginaSeguimiento,
+  eliminarSeguimiento,
+  guardarDatoDePaginaSeguimiento,
+  marcarAlertaLeida,
+} from "@/lib/seguimiento/seguimientos";
 
 async function empresaActivaDe(usuarioId: string) {
   const propias = await listarEmpresasDeUsuario(usuarioId);
@@ -135,4 +142,52 @@ export async function marcarAlertaLeidaAction(formData: FormData): Promise<void>
 
   await marcarAlertaLeida(empresa.id, alertaId);
   redirect("/panel/investigacion/seguimiento?leida=1");
+}
+
+// Issue #251 — a diferencia de las acciones de arriba (todas atadas a
+// un <form>, siempre terminan en redirect), esta la llama directo
+// código cliente (EscuchaExtension.tsx, el listener del mensaje
+// "dato-pagina-seguimiento" que ya reenvía marcador-zilonix.js) — es
+// una llamada de fondo, sin navegación: nunca redirige, nunca lanza
+// hacia la UI (un error acá no debe romper la pantalla que la persona
+// está mirando). `empresaId` SIEMPRE se resuelve del lado del
+// servidor (sesión + cookie, igual que el resto de este archivo) —
+// nunca se confía en nada que mande el cliente salvo el payload en
+// sí, y ESE se vuelve a validar entero acá, nunca se asume que el
+// mensaje de la extensión viene bien formado solo porque llegó por
+// este canal.
+function datoPaginaSeguimientoValido(payload: unknown): payload is DatoPaginaSeguimiento {
+  if (!payload || typeof payload !== "object") return false;
+  const p = payload as Record<string, unknown>;
+  if (typeof p.mlIdExterno !== "string" || !p.mlIdExterno) return false;
+  if (p.tipoSeguimiento === "producto") {
+    return (p.inventario === null || typeof p.inventario === "number") && typeof p.inventarioAproximado === "boolean" && (p.vendidos === null || typeof p.vendidos === "number");
+  }
+  if (p.tipoSeguimiento === "tienda") {
+    return (
+      (p.totalPublicaciones === null || typeof p.totalPublicaciones === "number") &&
+      Array.isArray(p.idsVisibles) &&
+      p.idsVisibles.every((id) => typeof id === "string")
+    );
+  }
+  return false;
+}
+
+export async function guardarDatoPaginaSeguimientoAction(payload: unknown): Promise<void> {
+  if (!datoPaginaSeguimientoValido(payload)) return;
+  const usuario = await obtenerOCrearUsuarioActual();
+  if (!usuario) return;
+  let empresa;
+  try {
+    empresa = await empresaActivaDe(usuario.id);
+  } catch {
+    return;
+  }
+  try {
+    await requierePermiso(usuario.id, empresa.id, "inventario", "modificar");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
+    return; // sin permiso -> se ignora en silencio, nunca rompe la pantalla por un mensaje de fondo
+  }
+  await guardarDatoDePaginaSeguimiento(empresa.id, payload);
 }
