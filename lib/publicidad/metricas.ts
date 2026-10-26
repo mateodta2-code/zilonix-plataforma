@@ -68,7 +68,11 @@ function campo<K extends keyof MetricasNormalizadas>(
   invalidos: (keyof MetricasNormalizadas)[]
 ): void {
   try {
-    destino[nombre] = leer();
+    const valor = leer();
+    destino[nombre] = valor;
+    // Ausente o null: no se marca como "leído". El upsert no escribe
+    // ese null encima de un valor que ya estaba.
+    if (valor == null) invalidos.push(nombre);
   } catch (error) {
     if (!(error instanceof DecimalInvalidoError)) throw error;
     destino[nombre] = null;
@@ -85,12 +89,13 @@ function ratio(valor: unknown): string | null {
 }
 
 function entero(valor: unknown): number | null {
+  if (valor == null) return null;
   if (typeof valor === "number" && Number.isInteger(valor) && Math.abs(valor) <= Number.MAX_SAFE_INTEGER) return valor;
   if (typeof valor === "string" && /^-?\d+$/.test(valor.trim())) {
     const n = Number(valor.trim());
-    return Number.isSafeInteger(n) ? n : null;
+    if (Number.isSafeInteger(n)) return n;
   }
-  return null;
+  throw new DecimalInvalidoError("entero inválido");
 }
 
 export type MetricasLeidas = { metricas: MetricasNormalizadas; invalidos: (keyof MetricasNormalizadas)[] };

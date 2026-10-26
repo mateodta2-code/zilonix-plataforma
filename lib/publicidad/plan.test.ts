@@ -8,11 +8,14 @@ import {
   contarReintentosMismoTramo,
   decisionAnteErrorDeCosto,
   decidirTramo,
+  diasARetomar,
   diasEntreInclusive,
   evaluarRefrescoManual,
   hoyBogota,
   leerRetryAfterMs,
   ordenarCuentasParaSync,
+  ordenDeTrabajo,
+  partidaAlCortar,
   restarDiasIso,
   textoErrorCorto,
 } from "./plan";
@@ -88,24 +91,99 @@ describe("rango de sincronización de publicidad (issue #254)", () => {
     expect(ordenarCuentasParaSync(cuentas).map((c) => c.id)).toEqual(["b", "d", "c", "a", "e", "f"]);
   });
 
-  it("un corte por tiempo no suma reintentos del tramo", () => {
-    const mismo = { estado: "error", rangoDesde: "2026-10-20", rangoHasta: "2026-10-26" };
+  it("un corte por tiempo que no avanza el día cuenta como intento", () => {
+    const mismo = { estado: "error", rangoDesde: "2026-10-20", rangoHasta: "2026-10-26", reanudaDesde: null as string | null };
     const n = contarReintentosMismoTramo([
       { ...mismo, error: "CorridaIncompletaError: corte" },
       { ...mismo, error: "CorridaIncompletaError: corte" },
       { ...mismo, error: "Error: 500" },
     ]);
-    expect(n).toBe(1);
+    expect(n).toBe(3);
   });
 
-  it("un 4xx de costo no bloquea el backfill; un corte de tiempo sí cierra el tramo", () => {
+  it("tres cortes en el mismo día agotan el tramo y el backfill sigue", () => {
+    const corte = {
+      estado: "error",
+      rangoDesde: "2026-10-20",
+      rangoHasta: "2026-10-26",
+      error: "CorridaIncompletaError: corte",
+      reanudaDesde: "2026-10-22",
+    };
+    // El primer corte que dejó el día sí avanzó. Los tres siguientes, en
+    // el mismo día, no: ahí el tramo se da por agotado.
+    expect(contarReintentosMismoTramo([corte, corte, corte, corte])).toBe(MAX_REINTENTOS_TRAMO);
+    const tramo = decidirTramo(
+      hoy,
+      { estado: "error", rangoDesde: "2026-10-20", rangoHasta: "2026-10-26", iniciadaTs: new Date() },
+      false,
+      MAX_REINTENTOS_TRAMO
+    );
+    expect(tramo.hasta).toBe("2026-10-19");
+  });
+
+  it("un corte que avanza el día no suma y corta la racha de intentos viejos", () => {
+    const base = { estado: "error", rangoDesde: "2026-10-20", rangoHasta: "2026-10-26", error: "CorridaIncompletaError: corte" };
+    expect(
+      contarReintentosMismoTramo([
+        { ...base, reanudaDesde: "2026-10-24" },
+        { ...base, reanudaDesde: "2026-10-22" },
+        { ...base, error: "Error: 500", reanudaDesde: null },
+      ])
+    ).toBe(0);
+    expect(
+      contarReintentosMismoTramo([
+        { estado: "error", rangoDesde: "2026-10-20", rangoHasta: "2026-10-26", error: "CorridaIncompletaError: corte", reanudaDesde: "2026-10-22" },
+      ])
+    ).toBe(0);
+  });
+
+  it("un 4xx de costo, incluido el 403 de la app, no bloquea el backfill", () => {
     const cuatro = new Error("4xx");
     cuatro.name = "MlRespuestaInesperadaError";
+    const sinPermiso = new Error("403");
+    sinPermiso.name = "MlSinPermisoAppError";
     const corte = new Error("tiempo");
     corte.name = "CorridaIncompletaError";
     expect(decisionAnteErrorDeCosto(cuatro)).toBe("seguir");
+    expect(decisionAnteErrorDeCosto(sinPermiso)).toBe("seguir");
     expect(decisionAnteErrorDeCosto(corte)).toBe("cerrar-tramo");
     expect(decisionAnteErrorDeCosto(new Error("token"))).toBe("fallar");
+  });
+
+  it("un corte a mitad de las campañas de un día no se salta los días ya pedidos ni las campañas que faltan", () => {
+    const todos = diasARetomar("2026-10-20", "2026-10-22", null);
+    expect(todos).toEqual(["2026-10-20", "2026-10-21", "2026-10-22"]);
+    const campanas = ["A", "B", "C"];
+    const grupos = ["g1", "g2"];
+    const orden = ordenDeTrabajo(campanas, grupos, todos);
+    const corte = orden.findIndex((paso) => paso.fase === "ad_groups" && paso.entidad === "B" && paso.dia === "2026-10-21");
+    const { hechos, pendientes } = partidaAlCortar(orden, corte);
+
+    expect(hechos.some((paso) => paso.fase === "ad_groups" && paso.entidad === "C" && paso.dia === "2026-10-20")).toBe(true);
+    expect(hechos.some((paso) => paso.fase === "anuncios" && paso.entidad === "g2" && paso.dia === "2026-10-20")).toBe(true);
+    expect(pendientes[0]).toEqual({ fase: "ad_groups", entidad: "B", dia: "2026-10-21" });
+    expect(pendientes.filter((paso) => paso.fase !== "metricas_campana" && paso.dia === "2026-10-22")).toHaveLength(campanas.length + grupos.length);
+
+    const retomados = diasARetomar("2026-10-20", "2026-10-22", "2026-10-21");
+    expect(retomados).not.toContain("2026-10-20");
+    expect(retomados[0]).toBe("2026-10-21");
+    const otraVez = ordenDeTrabajo(campanas, grupos, retomados);
+    expect(otraVez.filter((paso) => paso.fase === "ad_groups" && paso.dia === "2026-10-21").map((paso) => paso.entidad)).toEqual(campanas);
+  });
+
+  it("un corte a mitad de los anuncios deja hechos los ad groups de ese día y pendientes los días siguientes", () => {
+    const orden = ordenDeTrabajo(["A", "B"], ["g1", "g2"], ["2026-10-20", "2026-10-21"]);
+    const corte = orden.findIndex((paso) => paso.fase === "anuncios" && paso.entidad === "g2" && paso.dia === "2026-10-20");
+    const { hechos, pendientes } = partidaAlCortar(orden, corte);
+    expect(hechos.filter((paso) => paso.fase === "ad_groups" && paso.dia === "2026-10-20").map((paso) => paso.entidad)).toEqual(["A", "B"]);
+    expect(hechos.some((paso) => paso.fase === "anuncios" && paso.entidad === "g1" && paso.dia === "2026-10-20")).toBe(true);
+    expect(pendientes[0]).toEqual({ fase: "anuncios", entidad: "g2", dia: "2026-10-20" });
+    expect(pendientes.filter((paso) => paso.fase !== "metricas_campana" && paso.dia === "2026-10-21").map((paso) => paso.fase)).toEqual([
+      "ad_groups",
+      "ad_groups",
+      "anuncios",
+      "anuncios",
+    ]);
   });
 
   it("el refresco manual se niega si hay una en curso o pasó menos de 10 minutos", () => {

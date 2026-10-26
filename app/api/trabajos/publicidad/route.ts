@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { textoErrorCorto } from "@/lib/publicidad/plan";
 
 // Issue #254 — sin sesión de usuario (lo llama un cron, no una
 // persona). Pública en el middleware (lib/rutas-publicas.ts). El
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     const resultado = await sincronizarPublicidadProgramada();
     return NextResponse.json({ ok: true, ...resultado });
   } catch (error) {
-    console.error("[app/api/trabajos/publicidad] la sincronización no se pudo correr:", error instanceof Error ? error.message : error);
+    console.error("[app/api/trabajos/publicidad] la sincronización no se pudo correr:", textoErrorCorto(error));
     return NextResponse.json({ ok: false, error: "No se pudo sincronizar la publicidad — revisá los logs del servidor." }, { status: 503 });
   }
 }

@@ -153,36 +153,92 @@ export function backfillRealmenteCerrado(filas: { estado: string; cierraBackfill
   return filas.some((fila) => fila.estado === "ok" && fila.cierraBackfill);
 }
 
-// Un corte por tiempo no es un fallo de Mercado Libre: no consume el
-// tope de reintentos del tramo. El texto lo arma textoErrorCorto.
+// El texto lo arma textoErrorCorto. Un corte que avanzó el día de
+// reanudación no gasta intento: el tramo sigue. Uno que se quedó en el
+// mismo punto sí, para que un tramo que no cabe en 240 s no se
+// reintente para siempre.
 export function esCorteDeTiempo(error: string | null): boolean {
   return Boolean(error && error.startsWith("CorridaIncompletaError"));
 }
 
-export function contarReintentosMismoTramo(
-  filas: { estado: string; rangoDesde: string | null; rangoHasta: string | null; error: string | null }[]
-): number {
+type FilaReintento = {
+  estado: string;
+  rangoDesde: string | null;
+  rangoHasta: string | null;
+  error: string | null;
+  reanudaDesde?: string | null;
+};
+
+function corteSinProgreso(fila: FilaReintento, anterior: FilaReintento | null): boolean {
+  const cursor = fila.reanudaDesde ?? null;
+  if (!anterior) return cursor == null;
+  const previo = anterior.reanudaDesde ?? null;
+  if (cursor == null) return true;
+  if (previo == null) return false;
+  return cursor <= previo;
+}
+
+export function contarReintentosMismoTramo(filas: FilaReintento[]): number {
   const ultima = filas[0];
   if (!ultima) return 0;
   if (ultima.estado !== "error" && ultima.estado !== "en_curso") return 0;
   let n = 0;
-  for (const fila of filas) {
+  for (let i = 0; i < filas.length; i++) {
+    const fila = filas[i];
     if (fila.rangoDesde !== ultima.rangoDesde || fila.rangoHasta !== ultima.rangoHasta) break;
-    if (esCorteDeTiempo(fila.error)) continue;
+    if (esCorteDeTiempo(fila.error)) {
+      const anterior = filas[i + 1];
+      const misma =
+        anterior && anterior.rangoDesde === fila.rangoDesde && anterior.rangoHasta === fila.rangoHasta ? anterior : null;
+      if (!corteSinProgreso(fila, misma)) break;
+      n += 1;
+      continue;
+    }
     if (fila.estado === "error" || fila.estado === "en_curso") n += 1;
     else break;
   }
   return n;
 }
 
-// Un 4xx al leer el costo de un ítem no puede tumbar la cuenta: el
-// backfill de métricas ya guardado sigue. El corte por tiempo sí cierra
-// el tramo para retomarlo. Cualquier otro fallo (token, 5xx) corta.
+// Un 4xx al leer el costo de un ítem —incluido el 403 de la app— no
+// puede tumbar la cuenta: el backfill de métricas ya guardado sigue.
+// El corte por tiempo sí cierra el tramo para retomarlo. Un token
+// vencido o un 5xx corta.
 export function decisionAnteErrorDeCosto(error: unknown): "seguir" | "cerrar-tramo" | "fallar" {
   const nombre = error instanceof Error ? error.name : "";
   if (nombre === "CorridaIncompletaError") return "cerrar-tramo";
-  if (nombre === "MlRespuestaInesperadaError") return "seguir";
+  if (nombre === "MlRespuestaInesperadaError" || nombre === "MlSinPermisoAppError") return "seguir";
   return "fallar";
+}
+
+// Días por fuera, entidades por dentro. Si el corte cae en la campaña 2
+// del día 3, los días 1 y 2 ya se pidieron para todas las campañas, los
+// ad groups y los anuncios. Reanudar desde ese día no se los salta.
+export type TrabajoReanuda =
+  | { fase: "metricas_campana"; entidad: string }
+  | { fase: "ad_groups"; entidad: string; dia: string }
+  | { fase: "anuncios"; entidad: string; dia: string };
+
+export function diasARetomar(desde: string, hasta: string, reanudaDesde: string | null): string[] {
+  const dias = diasDelRango(desde, hasta);
+  if (!reanudaDesde || reanudaDesde <= desde || reanudaDesde > hasta) return dias;
+  const pendientes = dias.filter((dia) => dia >= reanudaDesde);
+  return pendientes.length > 0 ? pendientes : dias;
+}
+
+export function ordenDeTrabajo(campanas: string[], adGroups: string[], dias: string[]): TrabajoReanuda[] {
+  const orden: TrabajoReanuda[] = [];
+  for (const entidad of campanas) orden.push({ fase: "metricas_campana", entidad });
+  for (const dia of dias) {
+    for (const entidad of campanas) orden.push({ fase: "ad_groups", entidad, dia });
+    for (const entidad of adGroups) orden.push({ fase: "anuncios", entidad, dia });
+  }
+  return orden;
+}
+
+export function partidaAlCortar(orden: TrabajoReanuda[], indiceCorte: number): { hechos: TrabajoReanuda[]; pendientes: TrabajoReanuda[] } {
+  const corte = Math.max(0, Math.min(indiceCorte, orden.length));
+  return { hechos: orden.slice(0, corte), pendientes: orden.slice(corte) };
 }
 
 export type DecisionRefresco =

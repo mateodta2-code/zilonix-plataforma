@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DecimalInvalidoError, aEscala, normalizarDecimal } from "./normalizar-decimal";
+import { DecimalInvalidoError, aEscala, normalizarDecimal, textoDeNumeroJson } from "./normalizar-decimal";
 
 describe("normalizarDecimal (issue #254)", () => {
   it("acepta punto decimal, coma decimal y miles con coma decimal", () => {
@@ -33,5 +33,11 @@ describe("normalizarDecimal (issue #254)", () => {
     expect(() => aEscala("1.005", 2)).toThrow(/ambiguo/);
     expect(aEscala("1.005", 2, { origenJson: true })).toBe("1.01");
     expect(aEscala("0.5714285714285714", 4, { origenJson: true })).toBe("0.5714");
+  });
+
+  it("expande la notación científica de JSON sin pasar por float", () => {
+    expect(textoDeNumeroJson(1e-7)).toBe("0.0000001");
+    expect(textoDeNumeroJson(1.23e-7)).toBe("0.000000123");
+    expect(aEscala(textoDeNumeroJson(1e-7), 2, { origenJson: true })).toBe("0.00");
   });
 });

@@ -170,6 +170,8 @@ function setDeMetricas(metricas: MetricasNormalizadas, invalidos: (keyof Metrica
   const set: Record<string, string | number | null | Date> = { sincronizadaTs: new Date() };
   for (const clave of Object.keys(metricas) as (keyof MetricasNormalizadas)[]) {
     if (omitir.has(clave)) continue;
+    // Un null que no quedó en `invalidos` tampoco pisa la columna.
+    if (metricas[clave] == null) continue;
     set[clave] = metricas[clave];
   }
   return set;

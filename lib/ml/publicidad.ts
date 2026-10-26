@@ -144,10 +144,19 @@ async function pagina<T>(ruta: string, token: string, q: string): Promise<Pagina
   return resp.data ?? {};
 }
 
-async function todasLasPaginas<T>(ruta: string, token: string, base: Record<string, string | undefined>): Promise<T[]> {
+async function todasLasPaginas<T>(
+  ruta: string,
+  token: string,
+  base: Record<string, string | undefined>,
+  // Entre páginas, no antes de la primera: si el plazo ya venció, no
+  // se arranca otra petición que el curl del workflow va a cortar a
+  // la mitad. La primera igual corre: quien llama ya vigiló el plazo.
+  seguir?: () => void
+): Promise<T[]> {
   const acumulado: T[] = [];
   let offset = 0;
   while (offset < TOPE_PAGINACION) {
+    if (offset > 0) seguir?.();
     const limit = Math.min(LIMITE_PAGINA, TOPE_PAGINACION - offset);
     const data = await pagina<T>(ruta, token, query({ ...base, limit: String(limit), offset: String(offset) }));
     const results = Array.isArray(data.results) ? data.results : [];
@@ -203,20 +212,25 @@ export type CampanaAds = Record<string, unknown> & { id?: unknown };
 
 export async function listarCampanas(
   cuenta: ContextoAds,
-  filtro: { desde?: string; hasta?: string; metricas?: string; estado?: "active" | "paused" }
+  filtro: { desde?: string; hasta?: string; metricas?: string; estado?: "active" | "paused"; seguir?: () => void }
 ): Promise<CampanaAds[]> {
   const site = exigirSite(cuenta.siteId);
   const adv = exigirIdNum(cuenta.advertiserId, "advertiser_id");
   if (filtro.desde) exigirFecha(filtro.desde);
   if (filtro.hasta) exigirFecha(filtro.hasta);
   const ruta = `/advertising/${site}/advertisers/${adv}/product_ads/campaigns/search`;
-  return todasLasPaginas<CampanaAds>(ruta, cuenta.token, {
-    "filters[status]": filtro.estado,
-    date_from: filtro.desde,
-    date_to: filtro.hasta,
-    metrics: filtro.metricas,
-    metrics_summary: filtro.metricas ? "true" : undefined,
-  });
+  return todasLasPaginas<CampanaAds>(
+    ruta,
+    cuenta.token,
+    {
+      "filters[status]": filtro.estado,
+      date_from: filtro.desde,
+      date_to: filtro.hasta,
+      metrics: filtro.metricas,
+      metrics_summary: filtro.metricas ? "true" : undefined,
+    },
+    filtro.seguir
+  );
 }
 
 export async function metricasDiariasCampana(
@@ -240,21 +254,29 @@ export async function metricasDiariasCampana(
   return resp.data;
 }
 
-export async function metricasDiariasCuenta(cuenta: ContextoAds, rango: { desde: string; hasta: string }): Promise<unknown[]> {
+export async function metricasDiariasCuenta(
+  cuenta: ContextoAds,
+  rango: { desde: string; hasta: string; seguir?: () => void }
+): Promise<unknown[]> {
   const site = exigirSite(cuenta.siteId);
   const adv = exigirIdNum(cuenta.advertiserId, "advertiser_id");
   const ruta = `/advertising/${site}/advertisers/${adv}/product_ads/campaigns/search`;
-  return todasLasPaginas(ruta, cuenta.token, {
-    date_from: exigirFecha(rango.desde),
-    date_to: exigirFecha(rango.hasta),
-    metrics: METRICAS_CAMPANA,
-    aggregation_type: "DAILY",
-  });
+  return todasLasPaginas(
+    ruta,
+    cuenta.token,
+    {
+      date_from: exigirFecha(rango.desde),
+      date_to: exigirFecha(rango.hasta),
+      metrics: METRICAS_CAMPANA,
+      aggregation_type: "DAILY",
+    },
+    rango.seguir
+  );
 }
 
 export async function adGroupsDeCampana(
   cuenta: ContextoAds,
-  filtro: { campanas: string[]; desde: string; hasta: string; estado: "active" | "paused" }
+  filtro: { campanas: string[]; desde: string; hasta: string; estado: "active" | "paused"; seguir?: () => void }
 ): Promise<unknown[]> {
   const site = exigirSite(cuenta.siteId);
   const adv = exigirIdNum(cuenta.advertiserId, "advertiser_id");
@@ -263,17 +285,24 @@ export async function adGroupsDeCampana(
   const ruta = `/advertising/${site}/advertisers/${adv}/product_ads/ad_groups/search`;
   const acumulado: unknown[] = [];
   // La URL no puede crecer sin límite. Se parte la lista de campañas;
-  // el filtro `filters[campaigns]` es el documentado.
+  // el filtro `filters[campaigns]` es el documentado. Entre lotes se
+  // vuelve a mirar el plazo, igual que entre páginas.
   for (let i = 0; i < ids.length; i += 20) {
+    if (i > 0) filtro.seguir?.();
     const lote = ids.slice(i, i + 20);
-    const paginaLote = await todasLasPaginas(ruta, cuenta.token, {
-      "filters[campaigns]": lote.join(","),
-      "filters[statuses]": filtro.estado,
-      date_from: exigirFecha(filtro.desde),
-      date_to: exigirFecha(filtro.hasta),
-      metrics: METRICAS_AD_GROUP_BUSQUEDA,
-      metrics_summary: "true",
-    });
+    const paginaLote = await todasLasPaginas(
+      ruta,
+      cuenta.token,
+      {
+        "filters[campaigns]": lote.join(","),
+        "filters[statuses]": filtro.estado,
+        date_from: exigirFecha(filtro.desde),
+        date_to: exigirFecha(filtro.hasta),
+        metrics: METRICAS_AD_GROUP_BUSQUEDA,
+        metrics_summary: "true",
+      },
+      filtro.seguir
+    );
     acumulado.push(...paginaLote);
   }
   return acumulado;
@@ -300,16 +329,21 @@ export async function metricasAdGroupsDelDia(cuenta: ContextoAds, campanaId: str
 export async function anunciosDeAdGroup(
   cuenta: ContextoAds,
   adGroupId: string,
-  rango: { desde: string; hasta: string }
+  rango: { desde: string; hasta: string; seguir?: () => void }
 ): Promise<unknown[]> {
   const site = exigirSite(cuenta.siteId);
   const id = exigirIdNum(adGroupId, "ad_group");
   const ruta = `/advertising/${site}/product_ads/ad_groups/${id}/ads`;
-  return todasLasPaginas(ruta, cuenta.token, {
-    date_from: exigirFecha(rango.desde),
-    date_to: exigirFecha(rango.hasta),
-    metrics: METRICAS_ANUNCIO,
-  });
+  return todasLasPaginas(
+    ruta,
+    cuenta.token,
+    {
+      date_from: exigirFecha(rango.desde),
+      date_to: exigirFecha(rango.hasta),
+      metrics: METRICAS_ANUNCIO,
+    },
+    rango.seguir
+  );
 }
 
 export function idNumerico(valor: unknown): string | null {

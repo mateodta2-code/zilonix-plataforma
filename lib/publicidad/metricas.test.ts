@@ -31,7 +31,9 @@ describe("métricas de Product Ads (issue #254)", () => {
     expect(leidas.metricas.costo).toBe("10.00");
     expect(leidas.metricas.ctr).toBe("0.5714");
     expect(leidas.metricas.clicks).toBeNull();
-    expect(leidas.invalidos).toEqual([]);
+    expect(leidas.invalidos).toContain("clicks");
+    expect(leidas.invalidos).not.toContain("costo");
+    expect(leidas.invalidos).not.toContain("ctr");
   });
 
   it("un campo que no se puede leer queda null solo en ese campo", () => {
@@ -39,7 +41,19 @@ describe("métricas de Product Ads (issue #254)", () => {
     expect(leidas.metricas.clicks).toBe(4);
     expect(leidas.metricas.montoTotal).toBe("20.00");
     expect(leidas.metricas.costo).toBeNull();
-    expect(leidas.invalidos).toEqual(["costo"]);
+    expect(leidas.invalidos).toContain("costo");
+    expect(leidas.invalidos).not.toContain("clicks");
+    expect(leidas.invalidos).not.toContain("montoTotal");
+  });
+
+  it("un entero inválido o un campo ausente se marcan inválidos para no pisar lo guardado", () => {
+    const leidas = metricasDesdeApi({ cost: 10, clicks: "no" });
+    expect(leidas.metricas.costo).toBe("10.00");
+    expect(leidas.metricas.clicks).toBeNull();
+    expect(leidas.metricas.impresiones).toBeNull();
+    expect(leidas.invalidos).toContain("clicks");
+    expect(leidas.invalidos).toContain("impresiones");
+    expect(leidas.invalidos).not.toContain("costo");
   });
 
   it("acepta los nombres en mayúsculas del ejemplo de ad groups", () => {

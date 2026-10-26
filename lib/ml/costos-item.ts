@@ -35,10 +35,10 @@ type ItemCrudo = {
 
 function dinero(valor: unknown): string | null {
   if (valor == null) return null;
-  const texto = typeof valor === "number" ? textoDeNumeroJson(valor) : typeof valor === "string" ? valor.trim() : null;
-  if (!texto) return null;
-  const opciones = typeof valor === "number" ? { origenJson: true as const } : undefined;
   try {
+    const texto = typeof valor === "number" ? textoDeNumeroJson(valor) : typeof valor === "string" ? valor.trim() : null;
+    if (!texto) return null;
+    const opciones = typeof valor === "number" ? { origenJson: true as const } : undefined;
     return aEscala(texto, 2, opciones);
   } catch (error) {
     if (error instanceof DecimalInvalidoError) return null;

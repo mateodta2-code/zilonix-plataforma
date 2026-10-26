@@ -58,7 +58,7 @@ import {
   PRESUPUESTO_CORRIDA_MS,
   decisionAnteErrorDeCosto,
   decidirTramo,
-  diasDelRango,
+  diasARetomar,
   evaluarRefrescoManual,
   hoyBogota,
   ordenarCuentasParaSync,
@@ -203,13 +203,6 @@ function metricaDe(
   };
 }
 
-function diasARetomar(desde: string, hasta: string, reanudaDesde: string | null): string[] {
-  const dias = diasDelRango(desde, hasta);
-  if (!reanudaDesde || reanudaDesde <= desde || reanudaDesde > hasta) return dias;
-  const pendientes = dias.filter((dia) => dia >= reanudaDesde);
-  return pendientes.length > 0 ? pendientes : dias;
-}
-
 async function sincronizarCuenta(
   empresaId: string,
   cuentaMlId: string,
@@ -248,7 +241,11 @@ async function sincronizarCuenta(
 
   const metricas: MetricaGuardada[] = [];
   const anuncios: AnuncioGuardado[] = [];
-  let reanuda: string | null = null;
+  // El cursor es el día en curso. Arranca en el de la corrida anterior
+  // para que un corte antes del bucle de días no parezca progreso.
+  let reanuda: string | null = reanudaInicial;
+  let cerrado = false;
+  let errorCierre: unknown = null;
 
   async function volcar(): Promise<void> {
     if (metricas.length > 0) {
@@ -292,6 +289,7 @@ async function sincronizarCuenta(
         error: aviso,
         cierraBackfill: false,
       });
+      cerrado = true;
       return anunciante.estado === "sin_permiso_app"
         ? SUGERENCIA_RECONECTAR_PUBLICIDAD
         : "Esta cuenta no tiene Product Ads activo en Mercado Libre.";
@@ -305,10 +303,11 @@ async function sincronizarCuenta(
       estadoAcceso: "ok",
     });
     const ctx = { token, siteId: anunciante.siteId, advertiserId: anunciante.advertiserId };
+    const seguir = () => vigilar(deadline);
 
     const crudas = [
-      ...(await llamar(contador, deadline, () => listarCampanas(ctx, { estado: "active" }))),
-      ...(await llamar(contador, deadline, () => listarCampanas(ctx, { estado: "paused" }))),
+      ...(await llamar(contador, deadline, () => listarCampanas(ctx, { estado: "active", seguir }))),
+      ...(await llamar(contador, deadline, () => listarCampanas(ctx, { estado: "paused", seguir }))),
     ];
     const campanas = crudas.map((raw) => campanaDesde(cuentaMlId, raw)).filter((c): c is CampanaGuardada => c !== null);
     const porId = new Map(campanas.map((c) => [c.campanaIdMl, c]));
@@ -324,7 +323,9 @@ async function sincronizarCuenta(
       await volcar();
     }
     vigilar(deadline);
-    const diariasCuenta = await llamar(contador, deadline, () => metricasDiariasCuenta(ctx, tramo));
+    const diariasCuenta = await llamar(contador, deadline, () =>
+      metricasDiariasCuenta(ctx, { desde: tramo.desde, hasta: tramo.hasta, seguir })
+    );
     const interpretadas = filasDiariasDeCuenta(diariasCuenta);
     if (interpretadas.ambiguo) avisos.push(AVISO_DAILY);
     for (const fila of interpretadas.filas) {
@@ -336,10 +337,10 @@ async function sincronizarCuenta(
 
     const grupos = [
       ...(await llamar(contador, deadline, () =>
-        adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "active" })
+        adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "active", seguir })
       )),
       ...(await llamar(contador, deadline, () =>
-        adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "paused" })
+        adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "paused", seguir })
       )),
     ];
     const tipoPorGrupo = new Map<string, { tipo: string | null; externo: string | null; campana: string | null }>();
@@ -355,11 +356,16 @@ async function sincronizarCuenta(
       });
     }
 
+    // Mismo orden que ordenDeTrabajo: el día va por fuera. Si el corte
+    // cae en la campaña 2 del día 3, los días 1 y 2 ya se pidieron para
+    // todas las campañas, los ad groups y los anuncios. Retomar ese día
+    // los rehace (el upsert es idempotente) y no se salta los anteriores.
     const dias = diasARetomar(tramo.desde, tramo.hasta, reanudaInicial);
-    for (const campana of porId.values()) {
-      for (const dia of dias) {
+    const items = new Set<string>();
+    for (const dia of dias) {
+      reanuda = dia;
+      for (const campana of porId.values()) {
         vigilar(deadline);
-        reanuda = dia;
         const data = await llamar(contador, deadline, () => metricasAdGroupsDelDia(ctx, campana.campanaIdMl, dia));
         for (const raw of resultsDe(data)) {
           if (!raw || typeof raw !== "object") continue;
@@ -371,14 +377,9 @@ async function sincronizarCuenta(
         }
         await volcar();
       }
-    }
-
-    const items = new Set<string>();
-    for (const [adGroupId, meta] of tipoPorGrupo) {
-      for (const dia of dias) {
+      for (const [adGroupId, meta] of tipoPorGrupo) {
         vigilar(deadline);
-        reanuda = dia;
-        const filas = await llamar(contador, deadline, () => anunciosDeAdGroup(ctx, adGroupId, { desde: dia, hasta: dia }));
+        const filas = await llamar(contador, deadline, () => anunciosDeAdGroup(ctx, adGroupId, { desde: dia, hasta: dia, seguir }));
         for (const raw of filas) {
           if (!raw || typeof raw !== "object") continue;
           const rec = raw as Record<string, unknown>;
@@ -447,21 +448,36 @@ async function sincronizarCuenta(
       error: avisos[0] ?? null,
       cierraBackfill: estado === "ok" && tramo.cierraBackfill,
     });
+    cerrado = true;
     return estado === "ok" ? "Publicidad actualizada." : "Se guardó un tramo del historial. La próxima corrida sigue con los días anteriores.";
   } catch (error) {
-    const aviso = textoErrorCorto(error);
-    console.error(`[publicidad] cuenta ${cuentaMlId} no se pudo sincronizar:`, aviso);
-    await volcar();
-    await cerrarSincronizacion(empresaId, syncId, {
-      estado: "error",
-      llamadas: contador.n,
-      error: aviso,
-      cierraBackfill: false,
-      reanudaDesde: error instanceof CorridaIncompletaError ? reanuda : null,
-    });
-    if (error instanceof CorridaIncompletaError) return "La actualización quedó a medias y se retoma en la próxima corrida.";
-    throw error;
+    errorCierre = error;
+    console.error(`[publicidad] cuenta ${cuentaMlId} no se pudo sincronizar:`, textoErrorCorto(error));
+  } finally {
+    // Si volcar vuelve a fallar, igual se cierra: si no, la fila queda
+    // en_curso 30 minutos y la cuenta no se retoma. Un return acá se
+    // comería el resultado del try, así que el cierre no retorna.
+    if (!cerrado) {
+      try {
+        await volcar();
+      } catch (errorVolcar) {
+        console.error(`[publicidad] cuenta ${cuentaMlId} no pudo guardar el avance:`, textoErrorCorto(errorVolcar));
+      }
+      try {
+        await cerrarSincronizacion(empresaId, syncId, {
+          estado: "error",
+          llamadas: contador.n,
+          error: textoErrorCorto(errorCierre),
+          cierraBackfill: false,
+          reanudaDesde: errorCierre instanceof CorridaIncompletaError ? reanuda : null,
+        });
+      } catch (errorCerrar) {
+        console.error(`[publicidad] cuenta ${cuentaMlId} no pudo cerrar la sincronización:`, textoErrorCorto(errorCerrar));
+      }
+    }
   }
+  if (errorCierre instanceof CorridaIncompletaError) return "La actualización quedó a medias y se retoma en la próxima corrida.";
+  throw errorCierre;
 }
 
 function debeSaltar(ultima: UltimaSync | null, ahora: Date): boolean {

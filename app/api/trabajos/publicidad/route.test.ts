@@ -85,4 +85,23 @@ describe("POST /api/trabajos/publicidad (issue #254)", () => {
     expect(body.error).not.toMatch(/postgres:\/\//);
     expect(JSON.stringify(body)).not.toMatch(/secreto-en-el-error/);
   });
+
+  it("el log del fallo no conserva access_token ni refresh_token", async () => {
+    process.env.PUBLICIDAD_TRABAJADOR_SECRET = "secreto-real";
+    process.env.DATABASE_URL_PUBLICIDAD = "postgres://lo-que-sea";
+    vi.mocked(sincronizarPublicidadProgramada).mockRejectedValue(
+      new Error("falló access_token=secreto-largo refresh_token=otro-secreto")
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(peticion({ "x-publicidad-trabajador-secret": "secreto-real" }));
+
+    expect(res.status).toBe(503);
+    const texto = errorSpy.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
+    expect(texto).not.toContain("secreto-largo");
+    expect(texto).not.toContain("otro-secreto");
+    expect(texto).toContain("access_token=[omitido]");
+    expect(texto).toContain("refresh_token=[omitido]");
+    errorSpy.mockRestore();
+  });
 });

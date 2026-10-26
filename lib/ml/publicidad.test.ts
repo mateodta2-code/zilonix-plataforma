@@ -4,6 +4,7 @@ import { MlSinPermisoAppError, linkPublicacion } from "@/lib/ml/cliente";
 import {
   CODIGO_SIN_PERMISO_PUBLICIDAD,
   SUGERENCIA_RECONECTAR_PUBLICIDAD,
+  adGroupsDeCampana,
   anunciosDeAdGroup,
   listarCampanas,
   metricasAdGroupsDelDia,
@@ -117,6 +118,44 @@ describe("cliente de Product Ads, solo lectura (issue #254)", () => {
 
   it("el link de publicación lleva el guion de Mercado Libre Colombia", () => {
     expect(linkPublicacion("MCO123456")).toBe("https://articulo.mercadolibre.com.co/MCO-123456");
+  });
+
+  it("revisa el deadline entre páginas, no antes de la primera", async () => {
+    const pagina = {
+      paging: { total: 120, offset: 0, limit: 50 },
+      results: Array.from({ length: 50 }, (_, i) => ({ id: i + 1 })),
+    };
+    const orden: string[] = [];
+    const fetchMock = vi.fn(async () => {
+      orden.push("fetch");
+      return respuesta(200, pagina);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const seguir = () => {
+      orden.push("seguir");
+      throw new Error("deadline");
+    };
+    await expect(
+      listarCampanas({ token: "token-prueba", siteId: "MCO", advertiserId: "222" }, { estado: "active", seguir })
+    ).rejects.toThrow(/deadline/);
+    expect(orden).toEqual(["fetch", "seguir"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("revisa el deadline entre lotes de campañas al listar ad groups", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respuesta(200, { paging: { total: 1 }, results: [{ id: 1 }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const campanas = Array.from({ length: 21 }, (_, i) => String(i + 1));
+    const seguir = () => {
+      throw new Error("deadline");
+    };
+    await expect(
+      adGroupsDeCampana(
+        { token: "t", siteId: "MCO", advertiserId: "222" },
+        { campanas, desde: "2026-10-20", hasta: "2026-10-26", estado: "active", seguir }
+      )
+    ).rejects.toThrow(/deadline/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("hasta la fase 4 el cliente no escribe campañas: solo GET", () => {

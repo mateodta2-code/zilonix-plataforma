@@ -126,12 +126,25 @@ export function aEscala(decimal: string, escala: number, opciones?: OpcionesDeci
   return `${signo}${entero}.${fraccion.toString().padStart(escala, "0")}`;
 }
 
+// JSON.stringify de un número chico sale en notación científica
+// (`1e-7`). Se expande con los dígitos del texto, sin pasar por float.
+function expandirCientifico(texto: string): string {
+  const partes = /^(-?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(texto);
+  if (!partes) return texto;
+  const signo = partes[1];
+  const crudo = `${partes[2]}${partes[3] ?? ""}`;
+  const pos = partes[2].length + Number(partes[4]);
+  if (pos <= 0) return `${signo}0.${"0".repeat(-pos)}${crudo}`;
+  if (pos >= crudo.length) return `${signo}${crudo}${"0".repeat(pos - crudo.length)}`;
+  return `${signo}${crudo.slice(0, pos)}.${crudo.slice(pos)}`;
+}
+
 // Un número que ya vino de JSON.parse. JSON.stringify lo devuelve en el
 // mismo texto corto con el que JSON lo acepta (`3992`, `25.58`), sin
 // pasar por toFixed.
 export function textoDeNumeroJson(valor: number): string {
   if (!Number.isFinite(valor)) throw new DecimalInvalidoError("no es un número");
-  const texto = JSON.stringify(valor);
+  const texto = expandirCientifico(JSON.stringify(valor));
   if (!/^-?\d+(\.\d+)?$/.test(texto)) throw new DecimalInvalidoError("número no decimal");
   return texto;
 }
