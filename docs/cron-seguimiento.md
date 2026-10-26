@@ -8,7 +8,7 @@ Mismo criterio que `/api/ml/trabajador` (tarea 2.4, `docs/ESTADO.md`): Railway t
 
 ## Opción ya lista: GitHub Actions
 
-`.github/workflows/revision-diaria-seguimiento.yml` ya está armado, mismo patrón que `trabajador-avisos-ml.yml` — corre cada hora de 08:00 a 13:00 UTC (6 corridas; 03:00 a 08:00 en Colombia, UTC-5) contra staging, cada una procesando un lote. Para que funcione hace falta:
+`.github/workflows/revision-diaria-seguimiento.yml` ya está armado, mismo patrón que `trabajador-avisos-ml.yml` — corre contra staging en DOS ventanas por día (issue #250, punto E): madrugada, cada hora de 08:00 a 13:00 UTC (6 corridas; 03:00 a 08:00 en Colombia, UTC-5), y tarde, cada hora de 20:00 a 23:00 UTC (4 corridas; 15:00 a 18:00 en Colombia). El filtro de `obtenerSeguimientosPendientesDeHoy` (`lib/trabajos/revisionDiariaSeguimiento.ts`) ya no es "no revisado hoy" (fecha calendario) sino "no revisado hace menos de 6 horas" — si siguiera siendo por fecha calendario, la ventana de la tarde nunca volvería a tomar lo que la madrugada ya marcó como revisado ese mismo día. Para que funcione hace falta:
 
 1. En GitHub → el repo → **Settings → Secrets and variables → Actions**, crear el secreto `SEGUIMIENTO_TRABAJADOR_SECRET_STAGING` con el mismo valor que la variable de entorno `SEGUIMIENTO_TRABAJADOR_SECRET` de Railway en staging.
 2. Cuando se conecten cuentas reales en producción (ver el workflow para el comentario completo), duplicar el workflow apuntando al dominio de producción, con su propio secreto `SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION`.
@@ -21,7 +21,7 @@ Railway permite un servicio tipo "Cron Job" (un comando que corre en un horario,
 
 1. Crear un nuevo servicio en el proyecto de Railway (**New → Cron Job**, o el servicio `web` existente con un "Cron Schedule" si Railway lo permite en el plan actual — confirmar en el dashboard, puede variar).
 2. Comando: `curl -sf -X POST https://<dominio-del-servicio-web>/api/trabajos/seguimiento -H "x-seguimiento-trabajador-secret: $SEGUIMIENTO_TRABAJADOR_SECRET" --max-time 300`.
-3. Horario sugerido: `0 8-13 * * *` (mismo que el workflow de GitHub — cada hora de 08:00 a 13:00 UTC, 6 corridas).
+3. Horario sugerido: `0 8-13 * * *` y `0 20-23 * * *` (mismas dos ventanas que el workflow de GitHub — madrugada y tarde, ver arriba).
 4. La variable `SEGUIMIENTO_TRABAJADOR_SECRET` tiene que estar disponible en ESE servicio de cron (puede ser la misma variable compartida del servicio `web`, vía "Shared Variables" de Railway, o una copia — nunca pegada a mano en el comando).
 
 ## Alternativa: servicio externo de cron (cron-job.org, EasyCron, etc.)
@@ -32,4 +32,4 @@ Si se prefiere no depender de GitHub Actions ni de un servicio nuevo en Railway:
 
 - Nunca pegar el valor real del secreto en este documento, en un commit, ni en un comando de terminal — vive solo en Railway (`SEGUIMIENTO_TRABAJADOR_SECRET`) y, si se usa GitHub Actions, en el secreto de GitHub correspondiente.
 - Nunca llamar a este endpoint con un `--max-time` menor a unos minutos: un lote de 50 seguimientos, cada uno con su pausa entre llamadas y sus reintentos en 429, puede tardar varios minutos en terminar — cortarlo a mitad de un lote no rompe nada (cada seguimiento se guarda apenas termina, no al final del lote entero) pero deja el resto del lote sin procesar hasta la próxima corrida.
-- Llamar a este endpoint más de lo necesario el mismo día no rompe nada (un seguimiento ya revisado hoy simplemente no vuelve a entrar al lote, ver el filtro en `lib/trabajos/revisionDiariaSeguimiento.ts`), pero tampoco aporta nada una vez que todos los seguimientos activos ya tienen su foto del día.
+- Llamar a este endpoint más de lo necesario no rompe nada (un seguimiento revisado hace menos de 6 horas simplemente no vuelve a entrar al lote, ver el filtro en `lib/trabajos/revisionDiariaSeguimiento.ts`), pero tampoco aporta nada una vez que todos los seguimientos activos ya tienen su foto del día — `seguimiento_fotos` sigue con una sola fila por seguimiento por día (índice único), así que una segunda corrida el mismo día que encuentre un seguimiento ya fotografiado hoy lo deja como "saltado", nunca inventa una segunda foto.

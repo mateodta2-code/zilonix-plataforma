@@ -180,6 +180,62 @@ describe("agregarSeguimiento (issue #175)", () => {
     expect(seguimiento.nombre).toBe("Reloj digital");
   });
 
+  // Issue #250, punto A — bug real en staging: un id de PRODUCTO de
+  // catálogo pegado SIN "/p/" en el link (lib/seguimiento/link.ts lo
+  // interpreta como "item" por default) quedaba guardado así para
+  // siempre — /items/{id} da 404 real, la fila nunca salía de
+  // "Pendiente de primera revisión". Ahora se confirma contra Mercado
+  // Libre ANTES de guardar: 404 en /items se prueba en /products.
+  it("id de catálogo pegado sin '/p/': confirma 404 en /items y corrige a recurso product antes de guardar", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/items/")) return respuestaJson({}, 404);
+      if (urlStr.includes("/products/")) return respuestaJson({ name: "Pulsera deportiva" });
+      throw new Error(`URL inesperada: ${urlStr}`);
+    });
+
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+
+    expect(seguimiento.recursoMl).toBe("product");
+    expect(seguimiento.mlIdExterno).toBe("MCO111");
+    expect(seguimiento.nombre).toBe("Pulsera deportiva");
+  });
+
+  // Issue #250, punto A — un fallo TRANSITORIO al confirmar (403/5xx,
+  // nunca un 404 real) nunca debe bloquear el alta completa: se sigue
+  // con lo que ya interpretó el texto del link, igual que antes de
+  // este punto. scripts/corregir-tipo-recurso-seguimiento.ts corrige
+  // después los que de verdad hayan quedado mal guardados.
+  it("confirmación con 403 transitorio: nunca bloquea el alta, sigue con el tipo que interpretó el texto", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+
+    expect(seguimiento.recursoMl).toBe("item"); // lo que interpretó el texto, nunca bloqueado por el 403 transitorio
+    expect(seguimiento.nombre).toBe(NOMBRE_PENDIENTE_PRIMERA_REVISION);
+  });
+
+  // Issue #250, punto 4 de la revisión de Pablo — si /items Y /products
+  // dan 404 real (el recurso de verdad no existe), el alta se rechaza
+  // con un mensaje claro, nunca guarda un recurso que Mercado Libre ya
+  // confirmó que no existe.
+  it("ni /items ni /products lo encuentran (404 real en los dos): rechaza con mensaje claro, nunca guarda nada", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+
+    await expect(agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false })).rejects.toThrow(
+      /No encontramos ese producto en Mercado Libre/
+    );
+
+    const activos = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.empresaId, empresaId)));
+    expect(activos).toHaveLength(0);
+  });
+
   // Issue #201 — bug real en staging: antes el fallback era el id tal
   // cual (ej. "123456789") y la tabla se llenaba de ids indistinguibles
   // entre sí. Ahora el fallback es un placeholder explícito, nunca el

@@ -427,6 +427,14 @@ export default async function SeguimientoPage({
                       // "752 resultados"), no la cantidad de
                       // publicaciones visibles en esa sola carga de
                       // página (eso es solo el detalle, ver [id]/page.tsx).
+                      // Issue #250, punto B — una tienda nunca trae
+                      // "vendidos" de la API (lib/seguimiento/lector.ts,
+                      // fotoVacia()) — `publicaciones.total` puede venir
+                      // de la API (buscador público) o de la extensión
+                      // (#251); si ninguna de las dos lo llenó todavía,
+                      // es "Sin dato" (genérico a propósito, nunca "de
+                      // la API": la extensión también puede ser la
+                      // fuente que falta).
                       ultimaFoto?.publicaciones?.total != null ? (
                         <>
                           {ultimaFoto.publicaciones.total} publicaciones
