@@ -1,7 +1,7 @@
-import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
-import { rangoDiaBogota } from "@/lib/filtros-listado";
+import { fechaDiaBogota } from "@/lib/filtros-listado";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { confirmarRecursoProductoMl, obtenerItemMl, obtenerProducto, obtenerVendedor } from "@/lib/ml/cliente";
 import { buscarFotoDeHaceUnMes } from "@/lib/seguimiento/comparativa";
@@ -141,8 +141,25 @@ export async function buscarSeguimientoActivoPorMlId(empresaId: string, mlIdExte
 // vendidos" (extension/content.js -> background.js ->
 // marcador-zilonix.js -> esta Server Action).
 export type DatoPaginaSeguimiento =
-  | { tipoSeguimiento: "producto"; mlIdExterno: string; inventario: number | null; inventarioAproximado: boolean; vendidos: number | null }
-  | { tipoSeguimiento: "tienda"; mlIdExterno: string; totalPublicaciones: number | null; idsVisibles: string[] };
+  | {
+      tipoSeguimiento: "producto";
+      mlIdExterno: string;
+      inventario: number | null;
+      inventarioAproximado: boolean;
+      vendidos: number | null;
+      // Issue #251 (corrección de Pablo, punto 5) — "+N vendidos" (el
+      // piso redondeado de la ficha) nunca es el mismo dato que
+      // sold_quantity real: false cuando `vendidos` es solo esa
+      // etiqueta aproximada — guardarDatoDePaginaSeguimiento nunca la
+      // escribe en la columna que alertasDeVendidos compara.
+      vendidosExacto: boolean;
+      // Issue #251 (corrección de Pablo, punto 6) — cuándo la
+      // extensión LEYÓ la página de verdad (nunca "cuándo llegó al
+      // servidor" — background.js puede encolarla y entregarla horas
+      // después, punto 4 de la revisión anterior).
+      leidoEn: string;
+    }
+  | { tipoSeguimiento: "tienda"; mlIdExterno: string; totalPublicaciones: number | null; idsVisibles: string[]; leidoEn: string };
 
 // Issue #251 (revisión de Pablo, corrige el diseño anterior de este
 // mismo PR) — INSERTA la foto de hoy si todavía no existe (con los
@@ -155,8 +172,9 @@ export type DatoPaginaSeguimiento =
 // un competidor, así que siempre gana la lectura más fresca, nunca
 // "la primera que llegó".
 //
-// Fecha del día en hora de BOGOTÁ (`rangoDiaBogota`), no UTC — tiene
-// que coincidir dígito a dígito con la que usa
+// Fecha del día en hora de BOGOTÁ (`fechaDiaBogota`, desde `leidoEn` —
+// corrección de Pablo, punto 2), no UTC ni "ahora" — tiene que
+// coincidir dígito a dígito con la que usa
 // lib/trabajos/revisionDiariaSeguimiento.ts para que las dos fuentes
 // compartan la MISMA fila (issue #251, punto 11): si una persona lee
 // una ficha a las 8pm en Colombia, con UTC eso ya sería "mañana".
@@ -164,7 +182,19 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
   const seguimiento = await buscarSeguimientoActivoPorMlId(empresaId, dato.mlIdExterno);
   if (!seguimiento) return; // no es un seguimiento activo de esta empresa — nunca se inventa ni se cuela de otra
 
-  const hoy = rangoDiaBogota(new Date()).inicio;
+  // Issue #251 (corrección de Pablo, punto 5) — un id de tienda
+  // (seller_id, solo dígitos) y uno de producto podrían, en teoría,
+  // colisionar entre empresas o tipos — nunca se escriben campos de un
+  // tipo (ej. `publicaciones`) sobre un seguimiento del tipo
+  // contrario solo porque el `mlIdExterno` coincidió.
+  if (dato.tipoSeguimiento !== seguimiento.tipo) {
+    console.warn(
+      `[lib/seguimiento/seguimientos] guardarDatoDePaginaSeguimiento: tipo "${dato.tipoSeguimiento}" de la extensión no coincide con el seguimiento real (${seguimiento.tipo}) para ${dato.mlIdExterno} — se ignora.`
+    );
+    return;
+  }
+
+  const hoy = fechaDiaBogota(new Date(dato.leidoEn));
 
   // Issue #251, punto 5 — el total REAL ("752 resultados") viaja con
   // la lista de visibles, dentro del mismo campo jsonb (sin columna
@@ -172,21 +202,55 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
   // solo lee el id de cada tarjeta visible, nunca su título real, así
   // que `titulo` queda `null` (honesto) y quien muestra el mensaje de
   // una alerta cae al itemId recién ahí (lib/seguimiento/alertas.ts).
+  // `fuente: "pagina"` (corrección de Pablo) — nunca un snapshot
+  // completo, solo lo visible en esa carga; lib/seguimiento/alertas.ts
+  // la usa para no comparar nuevas/eliminadas contra esto.
   const camposPagina =
     dato.tipoSeguimiento === "tienda"
       ? {
           publicaciones: {
             total: dato.totalPublicaciones,
             visibles: dato.idsVisibles.map((itemId) => ({ itemId, titulo: null, precio: null })),
+            fuente: "pagina" as const,
           },
         }
-      : { inventarioDisponible: dato.inventario, inventarioAproximado: dato.inventarioAproximado, vendidos: dato.vendidos };
+      : {
+          inventarioDisponible: dato.inventario,
+          inventarioAproximado: dato.inventarioAproximado,
+          // Issue #251 (corrección de Pablo, punto 5) — el "+N"
+          // aproximado NUNCA llega a esta columna (la misma que
+          // alertasDeVendidos, lib/seguimiento/alertas.ts, compara
+          // asumiendo un contador exacto real) — `undefined` la omite
+          // del INSERT/UPDATE entero, así que el coalesce de abajo
+          // deja intacto lo que ya hubiera (o la deja en null si es la
+          // primera foto del día), nunca pisa un dato exacto con uno
+          // aproximado ni guarda el aproximado en su lugar.
+          vendidos: dato.vendidosExacto ? dato.vendidos : undefined,
+        };
+
+  // Issue #251 (corrección de Pablo, punto 5) — COALESCE en el SET del
+  // upsert: sin esto, una lectura con un campo en null (ej. la persona
+  // abrió la ficha pero el selector de cantidad no cargó a tiempo)
+  // BORRABA el dato bueno que ya hubiera de ese mismo día — un dato
+  // más parcial pisando uno más completo, justo lo que este diseño
+  // (arriba) dice evitar. `excluded` es la fila nueva que se intentó
+  // insertar; `seguimiento_fotos` (sin alias) es la fila vieja que ya
+  // estaba — sintaxis real de upsert de Postgres, no un helper de
+  // Drizzle (no hay un objeto que represente `excluded`).
+  const setDelConflicto =
+    dato.tipoSeguimiento === "tienda"
+      ? { publicaciones: sql`coalesce(excluded.publicaciones, seguimiento_fotos.publicaciones)` }
+      : {
+          inventarioDisponible: sql`coalesce(excluded.inventario_disponible, seguimiento_fotos.inventario_disponible)`,
+          inventarioAproximado: sql`coalesce(excluded.inventario_aproximado, seguimiento_fotos.inventario_aproximado)`,
+          vendidos: sql`coalesce(excluded.vendidos, seguimiento_fotos.vendidos)`,
+        };
 
   await dbComoEmpresa(empresaId, (tx) =>
     tx
       .insert(seguimientoFotos)
       .values({ empresaId, seguimientoId: seguimiento.id, fecha: hoy, ...camposPagina })
-      .onConflictDoUpdate({ target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha], set: camposPagina })
+      .onConflictDoUpdate({ target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha], set: setDelConflicto })
   );
 }
 

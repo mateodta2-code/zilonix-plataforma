@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { guardarDatoPaginaSeguimientoAction } from "./actions";
+import { guardarDatoPaginaSeguimientoAction, guardarVariosDatosPaginaSeguimientoAction } from "./actions";
 
 // Issue #251 — mismo puente que ya usa /panel/investigacion
 // (PanelInvestigacion.tsx, "vendidos-completados"/"listado-importado"):
@@ -30,8 +30,24 @@ export function EscuchaExtension() {
     function alRecibirMensaje(evento: MessageEvent) {
       if (evento.origin !== window.location.origin || evento.source !== window) return;
       const datos = evento.data as { fuente?: string; tipo?: string; payload?: unknown } | null;
-      if (!datos || datos.fuente !== "zilonix-extension" || datos.tipo !== "dato-pagina-seguimiento") return;
-      void guardarDatoPaginaSeguimientoAction(datos.payload).then(() => router.refresh());
+      if (!datos || datos.fuente !== "zilonix-extension") return;
+      if (datos.tipo === "dato-pagina-seguimiento") {
+        void guardarDatoPaginaSeguimientoAction(datos.payload).then(() => router.refresh());
+        return;
+      }
+      // Issue #251 (corrección de Pablo, punto 7) — "vacía la cola en
+      // lote: una sola Server Action y un solo router.refresh()": antes,
+      // cada lectura encolada que background.js reenviaba (una por una)
+      // disparaba su PROPIA llamada y su PROPIO refresh — con una cola
+      // de varias lecturas, eso eran varios refetches completos de la
+      // página, uno detrás del otro. Ahora background.js manda toda la
+      // cola en un solo mensaje ("cola-seguimiento", `{payloads: [...]}`).
+      if (datos.tipo === "cola-seguimiento") {
+        const payloads = (datos.payload as { payloads?: unknown } | null)?.payloads;
+        if (Array.isArray(payloads) && payloads.length > 0) {
+          void guardarVariosDatosPaginaSeguimientoAction(payloads).then(() => router.refresh());
+        }
+      }
     }
 
     window.addEventListener("message", alRecibirMensaje);

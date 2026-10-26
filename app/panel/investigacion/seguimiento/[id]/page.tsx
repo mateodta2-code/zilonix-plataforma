@@ -5,17 +5,19 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerDetalleSeguimiento } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones } from "@/lib/seguimiento/alertas";
 import {
-  compararProductoDiaADia,
+  calcularComparativaAyerHoy,
   resumenPeriodoConteo,
   resumenPeriodoVentas,
+  type ComparativaProducto,
   type LecturaConteo,
   type LecturaProducto,
   type ResumenPeriodoConteo,
   type ResumenPeriodoVentas,
 } from "@/lib/seguimiento/estimacionInventario";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
+import { EscuchaExtension } from "../EscuchaExtension";
 import { BotonLink } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
@@ -105,24 +107,38 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
   // (misma regla que necesitaLecturaDePagina, lib/seguimiento/
   // estimacionInventario.ts).
   const ahora = new Date();
-  let comparativaAyerHoy: ReturnType<typeof compararProductoDiaADia> | null = null;
+  let comparativaAyerHoy: ComparativaProducto | null = null;
   let resumen7: ResumenPeriodoVentas | ResumenPeriodoConteo | null = null;
   let resumen30: ResumenPeriodoVentas | ResumenPeriodoConteo | null = null;
   if (seguimiento.esCompetidor && seguimiento.tipo === "producto") {
-    const lecturas: LecturaProducto[] = fotos.map((f) => ({ fecha: f.fecha, inventario: f.inventarioDisponible, vendidosTexto: f.vendidos }));
-    const hoy = lecturas[lecturas.length - 1] ?? null;
-    const ayer = lecturas.length >= 2 ? lecturas[lecturas.length - 2] : null;
-    comparativaAyerHoy = hoy && ayer ? compararProductoDiaADia(ayer, hoy) : null;
+    const lecturas: LecturaProducto[] = fotos.map((f) => ({
+      fecha: f.fecha,
+      inventario: f.inventarioDisponible,
+      aproximado: f.inventarioAproximado,
+      vendidosTexto: f.vendidos,
+    }));
+    // Issue #251 (corrección de Pablo, punto 9) — "Ayer vs hoy" exige
+    // una foto fechada EXACTAMENTE hoy y otra EXACTAMENTE ayer (hora
+    // Bogotá), con inventario en las dos — nunca "las últimas dos
+    // lecturas que hubiera", que podrían ser de hace varios días si el
+    // cron se saltó alguno.
+    comparativaAyerHoy = calcularComparativaAyerHoy(lecturas, ahora);
     resumen7 = resumenPeriodoVentas(lecturas, 7, ahora);
     resumen30 = resumenPeriodoVentas(lecturas, 30, ahora);
   } else if (seguimiento.esCompetidor && seguimiento.tipo === "tienda") {
-    const lecturas: LecturaConteo[] = fotos.map((f) => ({ fecha: f.fecha, valor: f.publicaciones?.total ?? null }));
+    const lecturas: LecturaConteo[] = fotos.map((f) => ({ fecha: f.fecha, valor: normalizarPublicaciones(f.publicaciones)?.total ?? null }));
     resumen7 = resumenPeriodoConteo(lecturas, 7, ahora);
     resumen30 = resumenPeriodoConteo(lecturas, 30, ahora);
   }
 
   return (
     <>
+      {/* Issue #251 (corrección de Pablo, punto 7) — antes solo
+      page.tsx (la lista) montaba esto; si la persona abre la ficha de
+      un competidor mientras tiene esta pantalla de DETALLE abierta en
+      Zilonix (no la lista), nada escuchaba el mensaje y esa lectura se
+      perdía. */}
+      <EscuchaExtension />
       <EncabezadoPagina
         titulo={seguimiento.nombre}
         descripcion={`${seguimiento.tipo === "tienda" ? "Tienda" : "Producto"} seguido desde ${fecha(seguimiento.creadoTs)}${seguimiento.esCompetidor ? " — marcado como competidor" : ""}.`}
@@ -181,7 +197,12 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
                 <span>
                   <strong>Ayer a hoy:</strong>{" "}
                   {comparativaAyerHoy == null ? (
-                    "Falta otra lectura para comparar"
+                    // Issue #251 (corrección de Pablo, punto 9) —
+                    // mensaje DISTINTO de "Falta otra lectura para
+                    // comparar": acá específicamente falta la foto de
+                    // HOY o de AYER (Bogotá) con inventario, no otra
+                    // lectura cualquiera.
+                    "Falta lectura de hoy o de ayer"
                   ) : comparativaAyerHoy.reposicion ? (
                     "reposición de stock detectada (inventario subió, no se cuenta como venta)"
                   ) : comparativaAyerHoy.ventasEstimadas == null ? (

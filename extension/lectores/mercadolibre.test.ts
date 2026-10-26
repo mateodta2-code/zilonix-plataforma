@@ -192,6 +192,29 @@ window.__NORDIC_RENDERING_CTX__ = {"page":{"components":{
   it("sin quantity_selector en el JSON incrustado -> inventarioSelector null, nunca inventado", () => {
     expect(leerDatosIncrustados(HTML_DOS_PRODUCTOS, "MCO111111111").inventarioSelector).toBeNull();
   });
+
+  // Issue #251 (corrección de Pablo, punto 10) — bug real: antes se
+  // buscaba "quantity_selector" en TODO el JSON sin amarre al item
+  // actual — con dos productos, cada uno con su PROPIO quantity_selector
+  // anidado (un caso real: la página también trae recomendados con su
+  // propio selector de cantidad), el recorrido en profundidad podía
+  // devolver el de un recomendado en vez del del item que la persona
+  // está mirando. Ahora se busca PRIMERO dentro del objeto ya amarrado
+  // al id actual (buscarObjetoConId) — solo si ESE no tiene su propio
+  // quantity_selector se cae al árbol completo (ver los dos tests de
+  // arriba, donde el selector real SÍ vive fuera del objeto del item).
+  it("dos productos, cada uno con su PROPIO quantity_selector anidado: agarra el del item actual, nunca el de un recomendado", () => {
+    const html = `<!doctype html><html><body>
+<script>
+window.__NORDIC_RENDERING_CTX__ = {"page":{"components":{
+  "recomendados":[{"id":"MCO222222222","date_created":"2020-01-01T00:00:00.000Z","quantity_selector":{"available_quantity":3}}],
+  "item":{"id":"MCO111111111","date_created":"2023-05-10T14:23:00.000Z","quantity_selector":{"available_quantity":9}}
+}}};
+</script>
+</body></html>`;
+    expect(leerDatosIncrustados(html, "MCO111111111").inventarioSelector).toBe(9);
+    expect(leerDatosIncrustados(html, "MCO222222222").inventarioSelector).toBe(3);
+  });
 });
 
 describe("calcularVentasPromedioMes — issue #174, siempre marcado como estimado", () => {

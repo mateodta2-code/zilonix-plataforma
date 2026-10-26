@@ -11,7 +11,7 @@ import {
   listarAlertasDelDia,
   listarSeguimientosConUltimaFoto,
 } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
 import { necesitaLecturaDePagina } from "@/lib/seguimiento/estimacionInventario";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
@@ -233,11 +233,15 @@ export default async function SeguimientoPage({
   // competidor (nunca más de 10, por el tope 5+5 de arriba) para que
   // el botón los abra con un solo clic real — la extensión lee cada
   // página al cargar, mismo disparador que ya usa "abrir la ficha/
-  // tienda seguida".
+  // tienda seguida". `.slice(0, 10)` acá TAMBIÉN (corrección de
+  // Pablo) — defensa en profundidad: BotonActualizarTodo.tsx y
+  // background.js (quien de verdad abre las pestañas) vuelven a
+  // aplicar su propio tope, cada capa sin confiar en la anterior.
   const ahora = new Date();
   const linksCompetidores = seguimientos
     .filter((s) => s.seguimiento.esCompetidor)
-    .map((s) => construirLinkMlDeSeguimiento(s.seguimiento.recursoMl, s.seguimiento.mlIdExterno));
+    .map((s) => construirLinkMlDeSeguimiento(s.seguimiento.recursoMl, s.seguimiento.mlIdExterno))
+    .slice(0, 10);
 
   // Issue #195 — chip "Alta/Baja hoy" en la fila de una tienda cuando
   // la revisión diaria ya generó la alerta correspondiente HOY (las
@@ -383,6 +387,10 @@ export default async function SeguimientoPage({
             {seguimientos.map(({ seguimiento, ultimaFoto, fotoAnterior, fotoHaceUnMes }) => {
               const ventasHoy = calcularVentasHoy(ultimaFoto?.vendidos ?? null, fotoAnterior?.vendidos ?? null);
               const deltaUnMes = fotoHaceUnMes ? calcularDelta(ultimaFoto?.vendidos ?? null, fotoHaceUnMes.vendidos) : null;
+              // Issue #251 (corrección de Pablo, punto 3) — normaliza
+              // ANTES de leer `.total`/`.visibles`: una fila vieja
+              // puede traer el array plano sin envolver.
+              const publicaciones = ultimaFoto ? normalizarPublicaciones(ultimaFoto.publicaciones) : null;
               return (
                 <FilaTabla key={seguimiento.id}>
                   <CeldaTabla>
@@ -434,11 +442,17 @@ export default async function SeguimientoPage({
                       // (#251); si ninguna de las dos lo llenó todavía,
                       // es "Sin dato" (genérico a propósito, nunca "de
                       // la API": la extensión también puede ser la
-                      // fuente que falta).
-                      ultimaFoto?.publicaciones?.total != null ? (
+                      // fuente que falta). Corrección de Pablo, punto 3
+                      // — `total ?? visibles.length`: cuando el total
+                      // real todavía no llegó pero SÍ hay publicaciones
+                      // visibles (ej. la API solo trajo esas, nunca el
+                      // total — da 403 real al listar), mostrar ESE
+                      // conteo en vez de "Sin dato" — sigue siendo un
+                      // dato real, aunque parcial.
+                      publicaciones && (publicaciones.total != null || publicaciones.visibles.length > 0) ? (
                         <>
-                          {ultimaFoto.publicaciones.total} publicaciones
-                          <div className={styles.subdato}>Leído de la página el {fechaLegible(ultimaFoto.fecha)}</div>
+                          {publicaciones.total ?? publicaciones.visibles.length} publicaciones
+                          <div className={styles.subdato}>Leído de la página el {fechaLegible(ultimaFoto!.fecha)}</div>
                         </>
                       ) : (
                         "Sin dato"

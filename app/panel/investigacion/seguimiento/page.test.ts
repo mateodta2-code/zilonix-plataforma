@@ -23,7 +23,47 @@ describe("/panel/investigacion/seguimiento — mismo permiso que Investigación 
   it("actions.ts pide inventario.modificar en las 4 acciones de escritura (agregar, quitar, marcar leída, guardar dato de página — issue #251)", () => {
     const contenido = contenidoDe("actions.ts");
     const coincidencias = contenido.match(/requierePermiso\(\s*usuario\.id,\s*empresa\.id,\s*"inventario",\s*"modificar"\s*\)/g) ?? [];
+    // Corrección de Pablo (punto 7) — guardarDatoPaginaSeguimientoAction
+    // Y guardarVariosDatosPaginaSeguimientoAction (la cola en lote)
+    // ahora comparten UN SOLO chequeo (empresaConPermisoDeExtension) en
+    // vez de tener el suyo cada una — sigue siendo 4 llamadas reales en
+    // el archivo (agregar, quitar, marcar leída, el helper compartido),
+    // nunca una por acción de extensión.
     expect(coincidencias.length).toBe(4);
+  });
+});
+
+// Issue #251 (corrección de Pablo, punto 6) — chequeo estático del
+// validador de la extensión: sin Postgres ni Clerk (los helpers de
+// permiso/sesión no son triviales de montar en un test unitario), pero
+// confirma que las reglas reales que pidió la revisión están en el
+// código, no solo en la intención. El comportamiento real (acepta/
+// rechaza un payload concreto) ya lo prueba indirectamente
+// lib/seguimiento/seguimientos.test.ts contra Postgres real, llamando
+// guardarDatoDePaginaSeguimiento con datos ya validados.
+describe("datoPaginaSeguimientoValido — validador real de la extensión (issue #251, corrección de Pablo al punto 6)", () => {
+  it("mlIdExterno e idsVisibles se validan con el patrón real de ids de Mercado Libre, no 'cualquier string no vacío'", () => {
+    const contenido = contenidoDe("actions.ts");
+    expect(contenido).toMatch(/PATRON_ID_ML_O_VENDEDOR\s*=\s*\/\^\(MCO\|MLA\|MLB\|MLM\|MLC\|MLU\|MPE\)\\d\+\$\|\^\\d\+\$\//);
+  });
+
+  it("inventario/vendidos/totalPublicaciones se validan con Number.isInteger y un rango real (0 a 1_000_000)", () => {
+    const contenido = contenidoDe("actions.ts");
+    expect(contenido).toMatch(/Number\.isInteger\(valor\)/);
+    expect(contenido).toMatch(/valor\s*>=\s*0/);
+    expect(contenido).toMatch(/valor\s*<=\s*1_000_000/);
+  });
+
+  it("idsVisibles tiene un tope real (100)", () => {
+    const contenido = contenidoDe("actions.ts");
+    expect(contenido).toMatch(/MAX_IDS_VISIBLES\s*=\s*100/);
+    expect(contenido).toMatch(/idsVisibles\.length\s*<=\s*MAX_IDS_VISIBLES/);
+  });
+
+  it("leidoEn se valida como fecha ISO real, nunca futura, y con un tope de antigüedad (36h)", () => {
+    const contenido = contenidoDe("actions.ts");
+    expect(contenido).toMatch(/MAX_HORAS_LEIDO_EN\s*=\s*36/);
+    expect(contenido).toMatch(/fecha\.getTime\(\)\s*>\s*ahoraMs/); // nunca en el futuro
   });
 });
 

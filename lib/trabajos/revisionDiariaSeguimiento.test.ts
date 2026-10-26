@@ -6,7 +6,7 @@ import { db } from "@/db/index";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { rangoDiaBogota } from "@/lib/filtros-listado";
+import { fechaDiaBogota } from "@/lib/filtros-listado";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION } from "@/lib/seguimiento/seguimientos";
 import { obtenerSeguimientosPendientesDeHoy, revisarAhoraUnSeguimiento, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
 
@@ -15,9 +15,14 @@ import { obtenerSeguimientosPendientesDeHoy, revisarAhoraUnSeguimiento, revisarS
 // medianoche de BOGOTÁ, no de UTC — estos dos helpers reemplazan los
 // `new Date(); x.setUTCHours(0,0,0,0)` sueltos que había en todo este
 // archivo, para que los fixtures de las pruebas coincidan dígito a
-// dígito con lo que la producción de verdad calcula.
+// dígito con lo que la producción de verdad calcula. Corrección de
+// Pablo (segunda revisión) — `fechaDiaBogota`, no `rangoDiaBogota().inicio`:
+// ese da el instante real de la medianoche de Bogotá (05:00 UTC), pero
+// `seguimiento_fotos.fecha` guarda el día calendario como medianoche
+// UTC (00:00Z) — con 05:00Z estos fixtures ya no coincidían con lo que
+// de verdad guarda producción.
 function hoyBogota(): Date {
-  return rangoDiaBogota(new Date()).inicio;
+  return fechaDiaBogota(new Date());
 }
 function diasAtras(dias: number): Date {
   return new Date(hoyBogota().getTime() - dias * 24 * 60 * 60 * 1000);

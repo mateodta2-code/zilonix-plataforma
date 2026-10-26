@@ -558,9 +558,21 @@ export const seguimientoFotos = pgTable(
     // Mercado Libre muestra arriba del listado ("752 resultados"),
     // leído de la página por la extensión (la API da 403 real al
     // listar publicaciones de una tienda ajena) — `null` mientras no
-    // haya lectura de página todavía. Sin columna aparte a propósito
-    // (sin migración): va dentro del mismo JSON que ya existía.
-    publicaciones: jsonb("publicaciones").$type<{ total: number | null; visibles: { itemId: string; titulo: string | null; precio: number | null }[] }>(),
+    // haya lectura de página todavía. `fuente` (corrección de Pablo) —
+    // "api" o "pagina": `visibles` de "pagina" es solo una página
+    // (~48) del listado real, nunca el total completo que sí trae una
+    // foto "api" — lib/seguimiento/alertas.ts la usa para no comparar
+    // nuevas/eliminadas entre dos snapshots que nunca fueron
+    // completos. Las filas viejas (antes de este campo) se tratan como
+    // "api" vía normalizarPublicaciones (lib/seguimiento/alertas.ts),
+    // nunca se asume "pagina" sin confirmarlo. Sin columna aparte a
+    // propósito (sin migración): todo va dentro del mismo JSON que ya
+    // existía.
+    publicaciones: jsonb("publicaciones").$type<{
+      total: number | null;
+      visibles: { itemId: string; titulo: string | null; precio: number | null }[];
+      fuente: "api" | "pagina";
+    }>(),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { rangoDiaBogota } from "@/lib/filtros-listado";
+import { fechaDiaBogota } from "@/lib/filtros-listado";
 import {
   agregarSeguimiento,
   buscarMedicionSiExiste,
@@ -688,16 +688,51 @@ describe("listarAlertasDelDia / marcarAlertaLeida (issue #175)", () => {
 // catálogo/Full (esos son de la revisión diaria por API).
 describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
   function hoyBogota(): Date {
-    return rangoDiaBogota(new Date()).inicio;
+    return fechaDiaBogota(new Date());
   }
+
+  // Issue #251 (corrección de Pablo, punto 6) — leidoEn real (ISO,
+  // nunca futuro, no más viejo que 36h) — "ahora" alcanza para la
+  // mayoría de estos tests, que no están probando ESE campo puntual.
+  const leidoAhora = () => new Date().toISOString();
 
   it("seguimiento no activo (mlIdExterno sin seguir): no hace nada, nunca inventa una fila", async () => {
     const { empresaId } = await crearEmpresaConUsuario();
     await expect(
-      guardarDatoDePaginaSeguimiento(empresaId, { tipoSeguimiento: "producto", mlIdExterno: "MCO999", inventario: 10, inventarioAproximado: false, vendidos: 5 })
+      guardarDatoDePaginaSeguimiento(empresaId, {
+        tipoSeguimiento: "producto",
+        mlIdExterno: "MCO999",
+        inventario: 10,
+        inventarioAproximado: false,
+        vendidos: 5,
+        vendidosExacto: true,
+        leidoEn: leidoAhora(),
+      })
     ).resolves.toBeUndefined();
 
     const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoFotos));
+    expect(filas).toHaveLength(0);
+  });
+
+  // Issue #251 (corrección de Pablo, punto 5) — un id de tienda y uno
+  // de producto podrían, en teoría, colisionar — nunca se escriben
+  // campos de un tipo sobre un seguimiento del tipo contrario.
+  it("tipo de la extensión no coincide con el tipo real del seguimiento: se ignora, nunca escribe nada", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "tienda", // el seguimiento real es "producto"
+      mlIdExterno: "MCO111",
+      totalPublicaciones: 10,
+      idsVisibles: ["MCO1"],
+      leidoEn: leidoAhora(),
+    });
+
+    const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoFotos).where(eq(seguimientoFotos.seguimientoId, seguimiento.id)));
     expect(filas).toHaveLength(0);
   });
 
@@ -718,6 +753,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventario: 24,
       inventarioAproximado: true,
       vendidos: 50,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
     });
 
     const [foto] = await dbComoEmpresa(empresaId, (tx) =>
@@ -729,6 +766,34 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     expect(foto.vendidos).toBe(50);
     expect(foto.precio).toBeNull(); // campo de API, nadie lo llenó todavía
     expect(foto.estado).toBeNull();
+  });
+
+  // Issue #251 (corrección de Pablo, punto 5) — el "+N" aproximado
+  // nunca llega a la columna `vendidos` (la que compara alertasDeVendidos):
+  // vendidosExacto:false la omite por completo, nunca la pisa con un
+  // número aproximado.
+  it("producto con vendidosExacto:false: nunca escribe `vendidos` (queda null), aunque mande un número", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 24,
+      inventarioAproximado: false,
+      vendidos: 500, // "+500 vendidos", el piso aproximado — nunca exacto
+      vendidosExacto: false,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.inventarioDisponible).toBe(24); // esto sí se guarda, no depende de vendidosExacto
+    expect(foto.vendidos).toBeNull(); // nunca 500
   });
 
   it("producto, ya hay foto de hoy con datos de API: completa inventario/vendidos SIN tocar precio/estado", async () => {
@@ -745,7 +810,15 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: hoyBogota(), precio: "199900", estado: "active" })
     );
 
-    await guardarDatoDePaginaSeguimiento(empresaId, { tipoSeguimiento: "producto", mlIdExterno: "MCO111", inventario: 24, inventarioAproximado: true, vendidos: 50 });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 24,
+      inventarioAproximado: true,
+      vendidos: 50,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
 
     const [foto] = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
@@ -756,6 +829,43 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     expect(foto.estado).toBe("active"); // nunca se tocó
   });
 
+  // Issue #251 (corrección de Pablo, punto 5) — COALESCE en el upsert:
+  // un campo en null en la lectura nueva nunca borra un dato bueno que
+  // ya hubiera de ese mismo día.
+  it("segunda lectura con inventario null (el selector no cargó a tiempo): nunca borra el inventario bueno que ya había", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 30,
+      inventarioAproximado: false,
+      vendidos: 10,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
+    // Segunda lectura: inventario null (no se pudo leer esta vez), vendidos exacto nuevo.
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: null,
+      inventarioAproximado: false,
+      vendidos: 15,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.inventarioDisponible).toBe(30); // nunca borrado por el null de la segunda lectura
+    expect(foto.vendidos).toBe(15); // este sí se actualizó, vino con dato real
+  });
+
   it("producto, dos lecturas de página el mismo día: la MÁS RECIENTE reemplaza a la anterior (nunca 'la primera gana')", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
     await conectarCuentaMl(empresaId);
@@ -763,8 +873,24 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
     vi.unstubAllGlobals();
 
-    await guardarDatoDePaginaSeguimiento(empresaId, { tipoSeguimiento: "producto", mlIdExterno: "MCO111", inventario: 30, inventarioAproximado: false, vendidos: 10 });
-    await guardarDatoDePaginaSeguimiento(empresaId, { tipoSeguimiento: "producto", mlIdExterno: "MCO111", inventario: 22, inventarioAproximado: true, vendidos: 18 });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 30,
+      inventarioAproximado: false,
+      vendidos: 10,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 22,
+      inventarioAproximado: true,
+      vendidos: 18,
+      vendidosExacto: true,
+      leidoEn: leidoAhora(),
+    });
 
     const filas = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
@@ -782,12 +908,19 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "tienda", link: "123456", esCompetidor: true });
     vi.unstubAllGlobals();
 
-    await guardarDatoDePaginaSeguimiento(empresaId, { tipoSeguimiento: "tienda", mlIdExterno: "123456", totalPublicaciones: 752, idsVisibles: ["MCO1", "MCO2"] });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "tienda",
+      mlIdExterno: "123456",
+      totalPublicaciones: 752,
+      idsVisibles: ["MCO1", "MCO2"],
+      leidoEn: leidoAhora(),
+    });
 
     const [foto] = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
     );
     expect(foto.publicaciones?.total).toBe(752);
+    expect(foto.publicaciones?.fuente).toBe("pagina");
     expect(foto.publicaciones?.visibles).toEqual([
       { itemId: "MCO1", titulo: null, precio: null },
       { itemId: "MCO2", titulo: null, precio: null },
@@ -801,8 +934,20 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "tienda", link: "654321", esCompetidor: true });
     vi.unstubAllGlobals();
 
-    await guardarDatoDePaginaSeguimiento(empresaId, { tipoSeguimiento: "tienda", mlIdExterno: "654321", totalPublicaciones: 100, idsVisibles: ["MCO1"] });
-    await guardarDatoDePaginaSeguimiento(empresaId, { tipoSeguimiento: "tienda", mlIdExterno: "654321", totalPublicaciones: 110, idsVisibles: ["MCO1", "MCO2"] });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "tienda",
+      mlIdExterno: "654321",
+      totalPublicaciones: 100,
+      idsVisibles: ["MCO1"],
+      leidoEn: leidoAhora(),
+    });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "tienda",
+      mlIdExterno: "654321",
+      totalPublicaciones: 110,
+      idsVisibles: ["MCO1", "MCO2"],
+      leidoEn: leidoAhora(),
+    });
 
     const filas = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
@@ -810,5 +955,42 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     expect(filas).toHaveLength(1);
     expect(filas[0].publicaciones?.total).toBe(110);
     expect(filas[0].publicaciones?.visibles).toHaveLength(2);
+  });
+
+  // Issue #251 (corrección de Pablo, punto 2) — la fecha de la fila
+  // sale de `leidoEn` (cuándo la extensión LEYÓ la página), nunca de
+  // "ahora" (cuándo el servidor procesa el mensaje) — relevante para
+  // una lectura entregada desde la cola de background.js horas después.
+  it("usa el día de `leidoEn`, nunca el de 'ahora': una lectura de ayer (Bogotá) se guarda en la fila de AYER", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    const ayer = new Date(hoyBogota().getTime() - 24 * 60 * 60 * 1000);
+    // leidoEn: mediodía de AYER (Bogotá) — bien lejos de cualquier borde de día.
+    const leidoAyerMediodia = new Date(ayer.getTime() + 17 * 60 * 60 * 1000).toISOString(); // 17:00Z = 12:00 Bogotá
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 24,
+      inventarioAproximado: false,
+      vendidos: 50,
+      vendidosExacto: true,
+      leidoEn: leidoAyerMediodia,
+    });
+
+    const fotoHoy = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(fotoHoy).toHaveLength(0); // nunca en la fila de hoy
+
+    const [fotoAyer] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, ayer)))
+    );
+    expect(fotoAyer).toBeDefined();
+    expect(fotoAyer.inventarioDisponible).toBe(24);
   });
 });

@@ -6,7 +6,7 @@
 // horario, sin tocar la base), para poder probar reposición/
 // cobertura/una sola lectura con datos inventados — mismo criterio
 // que lib/seguimiento/comparativa.ts y ventas.ts.
-import { rangoDiaBogota } from "@/lib/filtros-listado";
+import { fechaDiaBogota } from "@/lib/filtros-listado";
 
 export type LecturaProducto = {
   fecha: Date;
@@ -15,10 +15,18 @@ export type LecturaProducto = {
   // leyó del selector de cantidad de la ficha ese día, o null si esa
   // foto no tiene lectura de página.
   inventario: number | null;
+  // Issue #251 (corrección de Pablo, punto 9) — si el inventario de
+  // ESTA lectura viene aproximado (seguimiento_fotos.inventarioAproximado),
+  // compararProductoDiaADia nunca lo resta contra la otra punta: un
+  // "+10 disponibles" no es un número exacto, restar dos aproximados
+  // (o uno aproximado contra uno exacto) podría inventar una caída que
+  // nunca pasó.
+  aproximado: boolean;
   // "+N vendidos" de la ficha — piso redondeado, respaldo cuando no
-  // hay inventario para comparar (nunca se usa si el inventario SÍ
-  // está disponible en las dos puntas: la caída de inventario es la
-  // señal primaria, pedida explícita por el issue).
+  // hay inventario CONFIABLE para comparar (nunca se usa si el
+  // inventario SÍ está disponible y es exacto en las dos puntas: la
+  // caída de inventario es la señal primaria, pedida explícita por el
+  // issue).
   vendidosTexto: number | null;
 };
 
@@ -41,7 +49,14 @@ export type ComparativaProducto = {
 export function compararProductoDiaADia(anterior: LecturaProducto, actual: LecturaProducto): ComparativaProducto {
   const base = { fechaAnterior: anterior.fecha, fechaActual: actual.fecha, etiqueta: "estimado" as const };
 
-  if (anterior.inventario != null && actual.inventario != null) {
+  // Issue #251 (corrección de Pablo, punto 9) — la caída de inventario
+  // solo es una señal confiable cuando NINGUNA de las dos puntas es
+  // aproximada: un "+10 disponibles" (inventarioAproximado) no es un
+  // número exacto, restarlo (contra otro aproximado o contra uno
+  // exacto) podría inventar una caída que nunca pasó. Con cualquiera
+  // de las dos puntas aproximada, se cae al respaldo de "+N vendidos"
+  // (si existe) o a null — nunca se adivina.
+  if (anterior.inventario != null && actual.inventario != null && !anterior.aproximado && !actual.aproximado) {
     const caida = anterior.inventario - actual.inventario;
     if (caida < 0) return { ...base, ventasEstimadas: 0, reposicion: true };
     return { ...base, ventasEstimadas: caida, reposicion: false };
@@ -79,10 +94,36 @@ function redondear1(n: number): number {
 // persona que lee una ficha de noche en Colombia ya está en el día
 // siguiente en UTC) — trunca `ahora` ANTES de calcular la ventana,
 // para que el resultado no cambie según la hora real del día en que
-// se consulte. `rangoDiaBogota` (lib/filtros-listado.ts) es la cuenta
-// ya establecida en el resto del repo, reusada acá tal cual.
+// se consulte. Corrección de Pablo — `fechaDiaBogota` (no
+// `rangoDiaBogota().inicio`, que da el instante real de la medianoche
+// de Bogotá, 05:00 UTC): esta cuenta tiene que coincidir dígito a
+// dígito con cómo se guardan las fechas en `seguimiento_fotos.fecha`
+// (00:00Z del día de Bogotá), o las lecturas nunca calzarían con las
+// fotos reales al comparar fechas.
 function hoyBogota(ahora: Date): Date {
-  return rangoDiaBogota(ahora).inicio;
+  return fechaDiaBogota(ahora);
+}
+
+// Issue #251 (corrección de Pablo, punto 9) — "Ayer vs hoy" es un
+// caso aparte, no el caso general de resumenPeriodoVentas(lecturas, 1,
+// ahora): acá SOLO cuenta si existe, de verdad, una foto fechada
+// exactamente HOY (Bogotá) y otra fechada exactamente AYER, las DOS
+// con inventario — nunca "las dos lecturas más recientes que hubiera"
+// (que podrían ser de hace varios días si el cron se saltó alguno), y
+// nunca el respaldo de "+N vendidos" para esta tarjeta puntual (ese
+// respaldo sigue existiendo dentro de compararProductoDiaADia para el
+// caso general de resumenPeriodoVentas). `null` = "Falta lectura de
+// hoy o de ayer", un mensaje DISTINTO de "Falta otra lectura para
+// comparar" (que sí puede pasar incluso con las dos fechas presentes,
+// si compararProductoDiaADia no logra comparar nada real — ver el
+// llamador en [id]/page.tsx).
+export function calcularComparativaAyerHoy(lecturas: LecturaProducto[], ahora: Date): ComparativaProducto | null {
+  const hoy = hoyBogota(ahora);
+  const ayer = new Date(hoy.getTime() - MS_POR_DIA);
+  const lecturaHoy = lecturas.find((l) => l.fecha.getTime() === hoy.getTime());
+  const lecturaAyer = lecturas.find((l) => l.fecha.getTime() === ayer.getTime());
+  if (!lecturaHoy || !lecturaAyer || lecturaHoy.inventario == null || lecturaAyer.inventario == null) return null;
+  return compararProductoDiaADia(lecturaAyer, lecturaHoy);
 }
 
 // Ventas estimadas en una ventana de `diasPeriodo` días — suma de las
@@ -94,7 +135,13 @@ function hoyBogota(ahora: Date): Date {
 // comparar", nunca un 0 inventado.
 export function resumenPeriodoVentas(lecturas: LecturaProducto[], diasPeriodo: number, ahora: Date): ResumenPeriodoVentas | null {
   const hoy = hoyBogota(ahora);
-  const desde = new Date(hoy.getTime() - diasPeriodo * MS_POR_DIA);
+  // Issue #251 (corrección de Pablo, punto 9) — "7 días calendario
+  // CONTANDO hoy": [hoy-(diasPeriodo-1), hoy] son exactamente
+  // diasPeriodo días (hoy, hoy-1, ..., hoy-(diasPeriodo-1)). Antes
+  // `desde = hoy - diasPeriodo` dejaba la ventana en diasPeriodo+1
+  // días (ej. 8 días reales para "los últimos 7") — un día de más que
+  // nadie pidió.
+  const desde = new Date(hoy.getTime() - (diasPeriodo - 1) * MS_POR_DIA);
   const enVentana = lecturas
     .filter((l) => l.fecha >= desde && l.fecha <= hoy && (l.inventario != null || l.vendidosTexto != null))
     .sort((a, b) => a.fecha.getTime() - b.fecha.getTime());
@@ -145,7 +192,10 @@ export type ResumenPeriodoConteo = {
 // siempre da lo mismo, pero sin tener que sumarlos uno por uno).
 export function resumenPeriodoConteo(lecturas: LecturaConteo[], diasPeriodo: number, ahora: Date): ResumenPeriodoConteo | null {
   const hoy = hoyBogota(ahora);
-  const desde = new Date(hoy.getTime() - diasPeriodo * MS_POR_DIA);
+  // Issue #251 (corrección de Pablo, punto 9) — mismo ajuste de
+  // resumenPeriodoVentas, arriba: diasPeriodo días calendario
+  // contando hoy, nunca diasPeriodo+1.
+  const desde = new Date(hoy.getTime() - (diasPeriodo - 1) * MS_POR_DIA);
   const enVentana = lecturas
     .filter((l) => l.fecha >= desde && l.fecha <= hoy && l.valor != null)
     .sort((a, b) => a.fecha.getTime() - b.fecha.getTime());

@@ -333,7 +333,18 @@
         // texto "2 disponibles" sin "+", exacto). leerProducto (abajo)
         // es quien decide cuándo usarlo — acá solo se extrae el número
         // crudo, nunca se interpreta.
-        const quantitySelector = buscarPorClave(datos, "quantity_selector");
+        // Issue #251 (corrección de Pablo, punto 10) — bug real: una
+        // página con productos recomendados/relacionados puede traer
+        // VARIOS "quantity_selector" en el mismo JSON incrustado, uno
+        // por tarjeta — buscar sin amarre (como antes) podía devolver
+        // el de un producto DISTINTO si ese aparecía primero en el
+        // árbol. Ahora se busca PRIMERO dentro del objeto ya amarrado
+        // al item actual (`objetoDelItem`, el mismo que da sold_quantity/
+        // date_created arriba); solo si ESE objeto no tiene su propio
+        // quantity_selector se cae al árbol completo (el caso real
+        // confirmado de MCO1050084400, donde el selector no vive
+        // anidado dentro del objeto del item) — nunca al revés.
+        const quantitySelector = (objetoDelItem && buscarPorClave(objetoDelItem, "quantity_selector")) || buscarPorClave(datos, "quantity_selector");
         if (quantitySelector && typeof quantitySelector.available_quantity === "number" && Number.isFinite(quantitySelector.available_quantity)) {
           inventarioSelector = quantitySelector.available_quantity;
         }

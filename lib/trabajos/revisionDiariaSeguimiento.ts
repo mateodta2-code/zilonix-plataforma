@@ -2,11 +2,11 @@ import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
-import { rangoDiaBogota } from "@/lib/filtros-listado";
+import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { LimiteMercadoLibreError, MlNoAutorizadoError, MlNoDisponibleError, MlRespuestaInesperadaError, MlSinPermisoAppError } from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
-import { compararFotos, type FotoComparable } from "@/lib/seguimiento/alertas";
+import { compararFotos, normalizarPublicaciones, type FotoComparable } from "@/lib/seguimiento/alertas";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION, resolverNombre } from "@/lib/seguimiento/seguimientos";
 
 // Issue #175 — regla de CLAUDE.md: "toda tarea en segundo plano vive
@@ -79,15 +79,24 @@ export type ResultadoRevisionDiaria = {
 // las dos no coincidieran dígito a dígito, la revisión por API y la
 // lectura de la página nunca compartirían la misma fila (issue #251,
 // punto 11), por más que las dos pasaran el mismo día real.
-// `rangoDiaBogota` (lib/filtros-listado.ts) ya resuelve esta cuenta en
-// un solo lugar, reusado por Pedidos/Despachos/KPIs — nunca una cuenta
-// de huso horario propia acá. Issue #250, punto E — ninguna de las dos
-// ventanas del cron (madrugada/tarde, ver
+// `fechaDiaBogota` (lib/filtros-listado.ts) ya resuelve esta cuenta en
+// un solo lugar — nunca una cuenta de huso horario propia acá.
+// Corrección de Pablo — esto usaba `rangoDiaBogota(ahora).inicio`
+// (05:00 UTC, el instante real de la medianoche de Bogotá), pero
+// `seguimiento_fotos.fecha` es un marcador de día calendario que
+// siempre se guardó como medianoche UTC (00:00Z) — con 05:00Z, las
+// filas nuevas no coincidían con las viejas ni con lo que guarda
+// guardarDatoDePaginaSeguimiento (lib/seguimiento/seguimientos.ts),
+// rompiendo la fila compartida entre API y extensión (issue #251,
+// punto 11). `fechaDiaBogota` resuelve el mismo día calendario de
+// Bogotá, pero representado como 00:00Z — compatible con las filas
+// existentes. Issue #250, punto E — ninguna de las dos ventanas del
+// cron (madrugada/tarde, ver
 // .github/workflows/revision-diaria-seguimiento.yml) cruza la
 // medianoche de Bogotá, así que esta fecha sigue cayendo siempre en el
 // mismo día calendario para las dos ventanas.
 function fechaDeHoy(): Date {
-  return rangoDiaBogota(new Date()).inicio;
+  return fechaDiaBogota(new Date());
 }
 
 // Issue #250, punto E (decisión de Mateo, 2026-10-25) — dos ventanas
@@ -223,7 +232,12 @@ function aFotoComparable(fila: typeof seguimientoFotos.$inferSelect): FotoCompar
     estado: fila.estado,
     enCatalogo: fila.enCatalogo,
     ganaBotonCompra: fila.ganaBotonCompra,
-    publicaciones: fila.publicaciones,
+    // Issue #251 (corrección de Pablo, punto 3) — una fila guardada
+    // antes de que existiera `total`/`fuente` puede traer el array
+    // viejo directo; normalizarPublicaciones la envuelve antes de que
+    // compararFotos (lib/seguimiento/alertas.ts) la use, nunca revienta
+    // en `.visibles.map(...)`.
+    publicaciones: normalizarPublicaciones(fila.publicaciones),
   };
 }
 
@@ -347,13 +361,18 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
           // lo puede traer la lectura de página (la API da 403 real al
           // listar publicaciones de una tienda ajena); acá solo se
           // insertó lo que la API pudo ver, nunca un total inventado.
-          publicaciones: datos.publicaciones != null ? { total: null, visibles: datos.publicaciones } : null,
+          publicaciones: datos.publicaciones != null ? { total: null, visibles: datos.publicaciones, fuente: "api" } : null,
         })
-        // Red de seguridad para la carrera real (rarísima) entre dos
-        // corridas del cron a la vez, en el instante exacto entre el
-        // chequeo de arriba y este insert — nunca el camino normal,
-        // ver el comentario de ResultadoUnSeguimiento arriba.
-        .onConflictDoNothing()
+        // Corrección de Pablo — onConflictDoUpdate en vez de
+        // onConflictDoNothing: en la carrera real (rarísima) de dos
+        // corridas a la vez, o del cron chocando con la extensión
+        // (#251) insertando casi al mismo tiempo, descartar el
+        // resultado tiraría los datos de la API que SÍ se acaban de
+        // leer. Actualiza solo los campos de API (mismo
+        // camposApiDeDatos de la rama "ya existe foto" de arriba)
+        // sobre lo que sea que ganó la carrera — nunca pisa
+        // inventarioDisponible/vendidos/publicaciones.
+        .onConflictDoUpdate({ target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha], set: camposApiDeDatos(datos) })
         .returning()
     );
   }

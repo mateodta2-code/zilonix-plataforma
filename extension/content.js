@@ -782,6 +782,13 @@
       inventarioAproximado: datos.inventarioMaximoAproximado === true,
       vendidos: datos.vendidos,
       vendidosExacto: datos.vendidosExacto === true,
+      // Issue #251 (corrección de Pablo, punto 6/7) — cuándo se LEYÓ
+      // la página de verdad, nunca cuándo llega al servidor:
+      // background.js puede encolar esto y entregarlo horas después
+      // (punto 4 de la revisión anterior) — sin esto, el servidor
+      // habría usado "ahora" (el momento de la entrega) para decidir a
+      // qué día pertenece la lectura.
+      leidoEn: new Date().toISOString(),
     });
   }
 
@@ -796,6 +803,7 @@
       mlIdExterno: datos.sellerId,
       totalPublicaciones: datos.totalPublicaciones,
       idsVisibles: Array.isArray(datos.idsVisibles) ? datos.idsVisibles : [],
+      leidoEn: new Date().toISOString(),
     });
   }
 
