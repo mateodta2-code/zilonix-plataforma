@@ -29,6 +29,17 @@ describe("leerFotoSeguimiento — tienda", () => {
     expect(resultado.precio).toBeNull();
     expect(resultado.estado).toBeNull();
   });
+
+  // Issue #250, punto B — "sin dato de la API" (null) nunca se
+  // confunde con "la tienda no tiene publicaciones" ([]): se propaga
+  // tal cual, nunca revienta ni se convierte en [].
+  it("obtenerPublicacionesVendedorAjenoMl devuelve null (sin dato de la API hoy): se propaga tal cual, nunca revienta", async () => {
+    vi.mocked(obtenerPublicacionesVendedorAjenoMl).mockResolvedValue(null);
+
+    const resultado = await leerFotoSeguimiento({ tipo: "tienda", recursoMl: "seller", mlIdExterno: "222222222" }, "token", CUENTA_PROPIA);
+
+    expect(resultado.publicaciones).toBeNull();
+  });
 });
 
 describe("leerFotoSeguimiento — producto, recursoMl item", () => {

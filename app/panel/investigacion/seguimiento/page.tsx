@@ -364,7 +364,19 @@ export default async function SeguimientoPage({
                     {ultimaFoto?.inventarioAproximado ? <Chip>Aproximado</Chip> : null}
                   </CeldaTabla>
                   <CeldaTabla>
-                    {ultimaFoto?.vendidos ?? "—"}
+                    {/* Issue #250, punto B — una tienda nunca trae
+                    "vendidos" de la API (ver lib/seguimiento/lector.ts,
+                    fotoVacia()); en su lugar, el conteo de publicaciones
+                    visibles cuando el buscador de Mercado Libre dejó
+                    verlas hoy. `publicaciones` queda null cuando NINGÚN
+                    camino (propio ni público) dejó ver nada hoy — "sin
+                    dato de la API", nunca "la tienda no tiene
+                    publicaciones" (eso sería [] real). */}
+                    {seguimiento.tipo === "tienda"
+                      ? ultimaFoto?.publicaciones
+                        ? `${ultimaFoto.publicaciones.length} publicaciones`
+                        : "Sin dato de la API"
+                      : ultimaFoto?.vendidos ?? "—"}
                     {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
                   </CeldaTabla>
                   <CeldaTabla>
