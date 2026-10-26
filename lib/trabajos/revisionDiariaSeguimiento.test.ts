@@ -570,34 +570,42 @@ describe("obtenerSeguimientosPendientesDeHoy — orden y filtro del lote (issue 
     expect(pendientes.some((p) => p.id === eliminado.id)).toBe(false);
   });
 
-  it("excluye el ya revisado HOY, incluye los de ayer/hace 2 días/nunca, y ordena ASC NULLS FIRST", async () => {
+  it("excluye el revisado hace menos de 6 horas, incluye los de hace más de 6h/1 día/nunca, y ordena ASC NULLS FIRST", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario("LOTE-ORDEN");
     const base = { empresaId, tipo: "producto" as const, recursoMl: "item" as const, linkOriginal: "https://x", creadoPor: usuarioId };
 
-    const dosDiasAtras = new Date();
-    dosDiasAtras.setUTCHours(0, 0, 0, 0);
-    dosDiasAtras.setUTCDate(dosDiasAtras.getUTCDate() - 2);
     const unDiaAtras = new Date();
-    unDiaAtras.setUTCHours(0, 0, 0, 0);
     unDiaAtras.setUTCDate(unDiaAtras.getUTCDate() - 1);
+    const hace8Horas = new Date();
+    hace8Horas.setUTCHours(hace8Horas.getUTCHours() - 8);
+    const hace3Horas = new Date();
+    hace3Horas.setUTCHours(hace3Horas.getUTCHours() - 3);
 
     const [nuncaRevisado] = await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Nunca" }).returning());
-    const [revisadoHaceDosDias] = await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hace 2 días", ultimaRevisionTs: dosDiasAtras }).returning()
-    );
     const [revisadoAyer] = await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Ayer", ultimaRevisionTs: unDiaAtras }).returning()
+      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hace 1 día", ultimaRevisionTs: unDiaAtras }).returning()
     );
-    const [revisadoHoy] = await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hoy", ultimaRevisionTs: new Date() }).returning()
+    // Issue #250, punto E — regresión directa: "hace 8 horas" puede
+    // ser el MISMO día calendario que "ahora" (ej. revisado a la 1am,
+    // ahora son las 9am) — antes del fix, el filtro por fecha
+    // calendario lo hubiera excluido igual que el de "hoy", nunca
+    // llegaba a la segunda ventana de la tarde.
+    const [revisadoHace8Horas] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hace 8 horas", ultimaRevisionTs: hace8Horas }).returning()
+    );
+    // "Hace 3 horas" siempre dentro de la ventana mínima de 6 horas —
+    // tiene que seguir excluido, sea el mismo día calendario o no.
+    const [revisadoHace3Horas] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hace 3 horas", ultimaRevisionTs: hace3Horas }).returning()
     );
 
     const pendientes = await obtenerSeguimientosPendientesDeHoy();
     const idsDeEstaEmpresa = pendientes.filter((p) => p.empresaId === empresaId).map((p) => p.id);
 
-    // El de "hoy" nunca aparece; el resto, del que hace más tiempo que
-    // no se revisa (o nunca) al más reciente.
-    expect(idsDeEstaEmpresa).toEqual([nuncaRevisado.id, revisadoHaceDosDias.id, revisadoAyer.id]);
-    expect(idsDeEstaEmpresa).not.toContain(revisadoHoy.id);
+    // El de "hace 3 horas" nunca aparece (dentro de la ventana mínima
+    // de 6h); el resto, del que hace más tiempo que no se revisa (o
+    // nunca) al más reciente.
+    expect(idsDeEstaEmpresa).toEqual([nuncaRevisado.id, revisadoAyer.id, revisadoHace8Horas.id]);
+    expect(idsDeEstaEmpresa).not.toContain(revisadoHace3Horas.id);
   });
 });

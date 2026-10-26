@@ -49,10 +49,42 @@ export type ResultadoRevisionDiaria = {
 // Solo la FECHA (medianoche UTC) — "misma fecha" es la clave real de
 // "misma foto del día", nunca el instante exacto en que corrió el
 // trabajo (ver el comentario de seguimiento_fotos.fecha en db/schema.ts).
+// Issue #250, punto E — esto sigue siendo por FECHA calendario a
+// propósito: `seguimiento_fotos` sigue con una sola fila por
+// seguimiento por día (índice único, sin migración para cambiar eso
+// ahora) — la ronda de la tarde intenta igual, pero si ya hay foto de
+// hoy, el `onConflictDoNothing()` de revisarUnSeguimiento la deja como
+// "saltada", nunca inventa una segunda foto el mismo día.
 function fechaDeHoy(): Date {
   const hoy = new Date();
   hoy.setUTCHours(0, 0, 0, 0);
   return hoy;
+}
+
+// Issue #250, punto E (decisión de Mateo, 2026-10-25) — dos ventanas
+// de revisión automática al día (madrugada 08:00-13:00 UTC, tarde
+// 20:00-23:00 UTC — ver .github/workflows/revision-diaria-seguimiento.yml).
+// Antes de esto, el filtro de abajo comparaba contra la fecha
+// calendario ("ya revisado HOY") — con dos ventanas en el mismo día
+// calendario, la ronda de la tarde nunca volvía a tomar un
+// seguimiento que la madrugada ya había marcado con
+// `ultima_revision_ts` esa misma mañana: las dos rondas colapsaban en
+// una sola. Se compara contra "hace menos de N horas" en vez de "hoy".
+//
+// N = 6 horas, elegido a partir de las ventanas reales: el hueco más
+// corto entre el FIN de una ventana y el INICIO de la siguiente es de
+// 7 horas (13:00 UTC -> 20:00 UTC, madrugada a tarde). 6 horas deja un
+// margen real de al menos 1 hora antes de que la ventana siguiente
+// empiece a correr — un seguimiento revisado en el último minuto de
+// una ventana ya queda elegible desde el primer minuto de la próxima,
+// con margen de sobra para los reintentos horarios dentro de cada
+// ventana.
+const VENTANA_MINIMA_ENTRE_REVISIONES_HORAS = 6;
+
+function limiteRevisionReciente(): Date {
+  const limite = new Date();
+  limite.setUTCHours(limite.getUTCHours() - VENTANA_MINIMA_ENTRE_REVISIONES_HORAS);
+  return limite;
 }
 
 // Issue real: el lote tomaba siempre los mismos 50 sin ningún orden —
@@ -60,21 +92,20 @@ function fechaDeHoy(): Date {
 // de un lote. Dos correcciones, exportada aparte para poder probar el
 // orden y el filtro solos:
 // - Filtro: nunca un seguimiento ya eliminado, y solo los que NO se
-//   revisaron hoy (ultima_revision_ts < medianoche UTC, o null — nunca
-//   revisado) — uno ya revisado hoy no vuelve a entrar en la cola
-//   aunque el cron corra varias veces (ver docs/cron-seguimiento.md,
-//   corre cada hora).
+//   revisaron en las últimas VENTANA_MINIMA_ENTRE_REVISIONES_HORAS
+//   horas (o nunca) — issue #250, punto E: antes era "hoy" (fecha
+//   calendario), lo que bloqueaba la segunda ronda del mismo día.
 // - Orden: ASC NULLS FIRST por ultima_revision_ts — el que nunca se
 //   revisó, o el que hace más tiempo que no se revisa, entra primero
-//   al lote. Así, entre varias corridas del mismo día, el lote
+//   al lote. Así, entre varias corridas de la misma ventana, el lote
 //   siguiente SÍ llega a los que quedaron afuera del anterior, nunca
 //   repite los mismos primeros 50 una y otra vez.
 export async function obtenerSeguimientosPendientesDeHoy(): Promise<(typeof seguimientosMl.$inferSelect)[]> {
-  const hoy = fechaDeHoy();
+  const limite = limiteRevisionReciente();
   return dbTrabajadorSeguimiento
     .select()
     .from(seguimientosMl)
-    .where(and(isNull(seguimientosMl.eliminadoTs), or(isNull(seguimientosMl.ultimaRevisionTs), lt(seguimientosMl.ultimaRevisionTs, hoy))))
+    .where(and(isNull(seguimientosMl.eliminadoTs), or(isNull(seguimientosMl.ultimaRevisionTs), lt(seguimientosMl.ultimaRevisionTs, limite))))
     .orderBy(sql`${seguimientosMl.ultimaRevisionTs} ASC NULLS FIRST`)
     .limit(TAMAÑO_LOTE);
 }
