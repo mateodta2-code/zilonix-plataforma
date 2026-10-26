@@ -381,6 +381,40 @@ export async function obtenerProducto(productId: string, token: string): Promise
   }
 }
 
+// Issue #250, punto A — bug real en staging ("Pendiente de primera
+// revisión" para siempre): lib/seguimiento/link.ts interpreta el texto
+// pegado SIN llamar a Mercado Libre (PATRON_CATALOGO solo reconoce un
+// link de catálogo cuando trae literalmente "/p/" antes del id) — un
+// id de PRODUCTO de catálogo pegado de otra forma (ej. el id suelto,
+// o un link que no trae "/p/") queda guardado como "item" por
+// default; /items/{id} da 404 para SIEMPRE con ese id, nunca se
+// corrige solo. Esta función confirma el tipo real contra Mercado
+// Libre antes de guardar (agregarSeguimiento, lib/seguimiento/seguimientos.ts):
+// intenta /items/{id}; solo si da 404 (nunca con otro código — un
+// 403/5xx transitorio no prueba nada sobre el tipo real) prueba
+// /products/{id} (reusa obtenerProducto, ya tolerante a 403/5xx).
+// null = no se pudo confirmar nada hoy (ni existe como item con 404
+// real, ni se pudo confirmar como product, o Mercado Libre no deja
+// ver ninguno de los dos ahora) — el llamador decide: nunca se
+// adivina un tipo a partir de esto solo. 401 propaga, mismo criterio
+// que el resto del archivo.
+export async function confirmarRecursoProductoMl(mlIdExterno: string, token: string): Promise<"item" | "product" | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(mlIdExterno)) return null;
+  const urlItem = `${BASE_URL}/items/${encodeURIComponent(mlIdExterno)}?attributes=id`;
+  let eraNotFound = false;
+  try {
+    const resp = await pedir<{ id?: unknown }>(urlItem, token);
+    if (resp.ok) return "item";
+    eraNotFound = resp.status === 404;
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null; // transitorio, no confirma nada
+    throw e;
+  }
+  if (!eraNotFound) return null; // 4xx distinto de 404 — no es el caso que resuelve este issue
+  const producto = await obtenerProducto(mlIdExterno, token);
+  return producto ? "product" : null;
+}
+
 export type ItemMl = { producto: ProductoCatalogoMl; oferta: OfertaMl | null };
 
 // Issue #147 — hermana de obtenerProducto, pero para un id de tipo
@@ -842,7 +876,19 @@ function idsDeResultadosBusqueda(resultados: unknown): string[] {
 // ya usa lib/ml/importacion.ts). 401 (token inválido de verdad)
 // propaga tal cual, nunca tiene sentido probar el camino público con
 // el mismo token roto.
-async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Promise<string[]> {
+//
+// Issue #250, punto B — bug real en staging (2 de 5 tiendas fallidas
+// en la primera corrida real): el buscador público TAMBIÉN puede dar
+// 403 para cierto vendedor/tienda (no solo el camino propio) — antes
+// esa segunda llamada no tenía try/catch, así que el 403 subía sin
+// capturar hasta revisarUnSeguimiento y toda la revisión del día
+// contaba como "fallida" (ni siquiera guardaba una foto). Ahora null
+// significa "ninguno de los dos caminos dejó ver nada hoy" (sin dato
+// de la API, nunca "la tienda no tiene publicaciones") — distinto de
+// [] (los dos caminos respondieron, de verdad no hay ninguna
+// publicación visible). El llamador (obtenerPublicacionesVendedorAjenoMl)
+// propaga esa misma distinción.
+async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Promise<string[] | null> {
   if (!PATRON_ID_VENDEDOR.test(sellerId)) return [];
   const urlPropio = `${BASE_URL}/users/${encodeURIComponent(sellerId)}/items/search?limit=${TOPE_PUBLICACIONES_TIENDA}`;
   try {
@@ -852,13 +898,19 @@ async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Pr
     if (!(e instanceof MlSinPermisoAppError)) throw e;
   }
   const urlPublico = `${BASE_URL}/sites/${SITE_ID}/search?seller_id=${encodeURIComponent(sellerId)}&limit=${TOPE_PUBLICACIONES_TIENDA}`;
-  const respPublico = await pedir<{ results?: unknown[] }>(urlPublico, token);
-  if (!respPublico.ok) return [];
-  return idsDeResultadosBusqueda(respPublico.data.results);
+  try {
+    const respPublico = await pedir<{ results?: unknown[] }>(urlPublico, token);
+    if (!respPublico.ok) return [];
+    return idsDeResultadosBusqueda(respPublico.data.results);
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError) return null; // sin dato de la API hoy — nunca una falla del lote
+    throw e;
+  }
 }
 
-export async function obtenerPublicacionesVendedorAjenoMl(sellerId: string, token: string): Promise<PublicacionTiendaMl[]> {
+export async function obtenerPublicacionesVendedorAjenoMl(sellerId: string, token: string): Promise<PublicacionTiendaMl[] | null> {
   const ids = await idsDePublicacionesDeVendedor(sellerId, token);
+  if (ids === null) return null;
   const publicaciones: PublicacionTiendaMl[] = [];
   for (let i = 0; i < ids.length; i += TAMAÑO_LOTE_DETALLE_ITEMS) {
     if (i > 0) await esperar(PAUSA_ENTRE_LOTES_MS);

@@ -3,7 +3,7 @@ import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
-import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
+import { LimiteMercadoLibreError, MlNoAutorizadoError, MlNoDisponibleError, MlRespuestaInesperadaError, MlSinPermisoAppError } from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
 import { compararFotos, type FotoComparable } from "@/lib/seguimiento/alertas";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION, resolverNombre } from "@/lib/seguimiento/seguimientos";
@@ -31,6 +31,23 @@ const ESPERA_BASE_429_MS = 2_000;
 
 function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Issue #250, punto C — "agregar recurso_ml, ml_id_externo y status
+// HTTP al log (nunca el token)": el status real no viene siempre como
+// un número suelto (ver lib/ml/cliente.ts) — cada tipo de error ya
+// confirmado ahí implica un código fijo, salvo MlRespuestaInesperadaError
+// (trae el suyo) y MlNoDisponibleError (5xx O tiempo agotado, sin un
+// único código real que mostrar). Nunca lee nada del error que no sea
+// uno de estos tipos ya confirmados — nunca imprime el texto crudo de
+// una respuesta de Mercado Libre, que podría traer datos de la cuenta.
+function detalleErrorMlParaLog(error: unknown): { status: number | null; endpoint: string | null } {
+  if (error instanceof MlRespuestaInesperadaError) return { status: error.status, endpoint: null };
+  if (error instanceof MlSinPermisoAppError) return { status: 403, endpoint: error.endpoint };
+  if (error instanceof MlNoAutorizadoError) return { status: 401, endpoint: null };
+  if (error instanceof LimiteMercadoLibreError) return { status: 429, endpoint: null };
+  if (error instanceof MlNoDisponibleError) return { status: null, endpoint: null }; // 5xx o tiempo agotado, sin un código único
+  return { status: null, endpoint: null };
 }
 
 export type ResultadoRevisionDiaria = {
@@ -132,16 +149,28 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
       // Libre caído, etc.) no debe tumbar el lote entero — mismo
       // criterio que procesarAvisosPendientes (lib/ml/trabajador.ts).
       fallidos += 1;
-      console.error(`Seguimiento ${seguimiento.id} (${seguimiento.tipo}) no se pudo revisar:`, error instanceof Error ? error.message : error);
-      // Bug real (issue #175): si un fallido NUNCA marca
-      // ultima_revision_ts, el orden ASC NULLS FIRST lo deja al frente
-      // del lote para siempre — ahoga los cupos en cada corrida
-      // siguiente (encontrado en CI: seguimientos viejos sin cuenta ML
-      // conectada, ahogando el lote de 50 y haciendo timeout). Marcarlo
-      // igual que un éxito lo rota al final; el filtro "ya revisado
-      // hoy" evita que la MISMA corrida (o una corrida posterior el
-      // mismo día) lo vuelva a tomar, pero mañana sí se reintenta.
-      await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id));
+      const { status, endpoint } = detalleErrorMlParaLog(error);
+      console.error(
+        `Seguimiento ${seguimiento.id} (${seguimiento.tipo}, recurso_ml=${seguimiento.recursoMl}, ml_id_externo=${seguimiento.mlIdExterno}` +
+          `${status != null ? `, HTTP ${status}` : ""}${endpoint ? `, endpoint=${endpoint}` : ""}) no se pudo revisar:`,
+        error instanceof Error ? error.message : error
+      );
+      // Issue #250, punto C (decisión de Mateo, 2026-10-25) — ya NO se
+      // marca ultima_revision_ts en un fallo. El issue #175 original
+      // SÍ la marcaba a propósito (ver el comentario que esto
+      // reemplaza): sin eso, un fallido permanente (empresa sin cuenta
+      // ML conectada, recurso que de verdad no existe) se quedaba al
+      // frente del lote (ASC NULLS FIRST) para siempre, ahogando los
+      // 50 cupos en cada corrida siguiente. Revertir ESE fix es
+      // intencional acá: con dos ventanas al día (punto E) y el cron
+      // horario dentro de cada ventana, Mateo prefiere que un fallo
+      // TRANSITORIO (token recién vencido, un 403/5xx puntual) se
+      // reintente en la próxima corrida en vez de esperar hasta
+      // mañana. El riesgo real que motivó el fix de #175 sigue
+      // existiendo para un fallo PERMANENTE (nunca se va a poder
+      // revisar) — si eso vuelve a ahogar un lote en producción, hace
+      // falta otra solución (ej. un tope de reintentos por
+      // seguimiento), documentado en docs/ESTADO.md si pasa.
     }
   }
 

@@ -5,6 +5,7 @@ import {
   buscarEnSitioMl,
   buscarItemsPorSkuMl,
   buscarProductosCatalogo,
+  confirmarRecursoProductoMl,
   crearItemMl,
   domainDiscoveryMl,
   leerAtributosCategoriaMl,
@@ -639,5 +640,67 @@ describe("obtenerPublicacionesVendedorAjenoMl — dos caminos (items/search -> s
     });
     const resultado = await obtenerPublicacionesVendedorAjenoMl("123456789", "token");
     expect(resultado).toEqual([{ itemId: "MCO2", titulo: "Pulsera", precio: 20_000 }]);
+  });
+
+  // Issue #250, punto B — bug real en staging: el buscador público
+  // TAMBIÉN daba 403 para 2 de 5 tiendas en la primera corrida real, y
+  // antes esa segunda llamada no tenía try/catch — el 403 subía sin
+  // capturar y toda la revisión de esa tienda contaba como "fallida"
+  // (ni siquiera guardaba una foto del día). Ahora null ("sin dato de
+  // la API hoy"), nunca una excepción.
+  it("items/search Y el buscador público dan 403: null (sin dato de la API), nunca lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(obtenerPublicacionesVendedorAjenoMl("123456789", "token")).resolves.toBeNull();
+  });
+});
+
+describe("confirmarRecursoProductoMl — confirmar item/product contra ML antes de guardar (issue #250, punto A)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("/items/{id} responde ok: confirmado como 'item', nunca prueba /products", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/products/")) throw new Error(`no debería llamar a ${urlStr}`);
+      return respuestaJson({ id: "MCO123" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(confirmarRecursoProductoMl("MCO123", "token")).resolves.toBe("item");
+  });
+
+  it("/items/{id} da 404 y /products/{id} responde ok: confirmado como 'product' — bug real (catálogo pegado sin '/p/')", async () => {
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/items/")) return respuestaJson({}, 404);
+      if (urlStr.includes("/products/")) return respuestaJson({ name: "Producto de catálogo" });
+      throw new Error(`URL inesperada: ${urlStr}`);
+    });
+    await expect(confirmarRecursoProductoMl("MCO123", "token")).resolves.toBe("product");
+  });
+
+  it("/items/{id} da 404 y /products/{id} también 404: null, no confirma nada", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+    await expect(confirmarRecursoProductoMl("MCO123", "token")).resolves.toBeNull();
+  });
+
+  it("/items/{id} da 403 (transitorio): null, nunca prueba /products ni adivina", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/products/")) throw new Error(`no debería llamar a ${urlStr}`);
+      return respuestaJson({}, 403);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(confirmarRecursoProductoMl("MCO123", "token")).resolves.toBeNull();
+  });
+
+  it("401 de verdad propaga", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    await expect(confirmarRecursoProductoMl("MCO123", "token")).rejects.toThrow(MlNoAutorizadoError);
+  });
+
+  it("id con formato inválido nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(confirmarRecursoProductoMl("no-es-un-id-ml", "token")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

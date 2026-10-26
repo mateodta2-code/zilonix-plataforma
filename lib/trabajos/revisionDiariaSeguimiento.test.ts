@@ -211,15 +211,17 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
   );
 });
 
-// Issue real, encontrado en CI (segunda vuelta del fix de orden/filtro):
-// si un seguimiento fallido (ej. empresa sin cuenta ML conectada) NUNCA
-// marca ultima_revision_ts, el orden ASC NULLS FIRST lo deja al frente
-// del lote para siempre — ahoga los 50 cupos en cada corrida siguiente
-// (en CI, con varios seguimientos viejos sin cuenta, esto hacía
-// timeout: cada uno paga PAUSA_ENTRE_SEGUIMIENTOS_MS). La corrección
-// real está en revisionDiariaSeguimiento.ts: también marca
-// ultima_revision_ts en el catch.
-describe("revisarSeguimientosDelDia — un fallido no ahoga el lote para siempre (issue #175)", () => {
+// Issue #175 (histórico) — antes, un seguimiento fallido (ej. empresa
+// sin cuenta ML conectada) SÍ marcaba ultima_revision_ts en el catch, a
+// propósito, para que el orden ASC NULLS FIRST no lo dejara al frente
+// del lote para siempre (ahogando los 50 cupos en cada corrida
+// siguiente). Issue #250, punto C (decisión de Mateo, 2026-10-25) —
+// eso se revierte a propósito: con dos ventanas al día (punto E), un
+// fallo transitorio se reintenta en la próxima corrida en vez de
+// esperar hasta mañana. El riesgo real de #175 (un fallido PERMANENTE
+// ahogando el lote) queda documentado como tensión conocida en el
+// comentario del catch, no resuelto de nuevo acá.
+describe("revisarSeguimientosDelDia — un fallido NUNCA marca ultima_revision_ts (issue #250, punto C)", () => {
   let empresaId: string;
   let seguimientoId: string;
 
@@ -248,7 +250,7 @@ describe("revisarSeguimientosDelDia — un fallido no ahoga el lote para siempre
     await aislarLotePara(seguimientoId);
   });
 
-  it("cuenta como fallido Y queda con ultima_revision_ts no null, y no vuelve a aparecer en el lote de hoy", async () => {
+  it("cuenta como fallido y NUNCA marca ultima_revision_ts — sigue pendiente para la próxima corrida", async () => {
     // Mismo motivo que en las pruebas de arriba: aislar de nuevo acá
     // (dejando SOLO este seguimiento pendiente), lo más cerca posible
     // de la llamada real, por la carrera con otras suites en paralelo.
@@ -259,10 +261,76 @@ describe("revisarSeguimientosDelDia — un fallido no ahoga el lote para siempre
     expect(resultado.fallidos).toBeGreaterThanOrEqual(1);
 
     const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
-    expect(actualizado.ultimaRevisionTs).not.toBeNull();
+    expect(actualizado.ultimaRevisionTs).toBeNull();
 
     const pendientes = await obtenerSeguimientosPendientesDeHoy();
-    expect(pendientes.some((p) => p.id === seguimientoId)).toBe(false);
+    expect(pendientes.some((p) => p.id === seguimientoId)).toBe(true);
+  });
+});
+
+// Issue #250, punto C — "agregar recurso_ml, ml_id_externo y status
+// HTTP al log (nunca el token)": antes el console.error solo traía el
+// id del seguimiento y el mensaje — sin saber QUÉ recurso de Mercado
+// Libre falló ni con qué status real, cada fallo había que
+// diagnosticarlo a ciegas.
+describe("revisarSeguimientosDelDia — el log de un fallido trae recurso_ml/ml_id_externo/status, nunca el token (issue #250, punto C)", () => {
+  let empresaId: string;
+  let seguimientoId: string;
+  let itemId: string;
+
+  beforeAll(async () => {
+    const creado = await crearEmpresaConUsuario("LOG-ENRIQUECIDO");
+    empresaId = creado.empresaId;
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId,
+        cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+        nickname: "VENDEDOR_LOG",
+        accessTokenCifrado: cifrarToken("access-secreto-nunca-en-el-log"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000), // vigente — no debería intentar renovar
+      })
+    );
+    itemId = nuevoMlId();
+    const [seguimiento] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: itemId,
+          nombre: "Producto con 401 real",
+          linkOriginal: "https://x",
+          creadoPor: creado.usuarioId,
+        })
+        .returning({ id: seguimientosMl.id })
+    );
+    seguimientoId = seguimiento.id;
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("un 401 real de Mercado Libre (token ya no válido) queda en el log con recurso_ml, ml_id_externo y HTTP 401 — nunca el token", async () => {
+    await aislarLotePara(seguimientoId);
+    // obtenerFotoItemMl (lib/ml/cliente.ts) NO tolera 401 — propaga
+    // MlNoAutorizadoError tal cual, mismo criterio que el resto del
+    // archivo (401 siempre significa "hay que reconectar la cuenta").
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const resultado = await revisarSeguimientosDelDia();
+    expect(resultado.fallidos).toBeGreaterThanOrEqual(1);
+
+    const lineaDeEsteSeguimiento = errorSpy.mock.calls.find(([linea]) => typeof linea === "string" && linea.includes(seguimientoId));
+    expect(lineaDeEsteSeguimiento).toBeDefined();
+    const [linea] = lineaDeEsteSeguimiento as [string];
+    expect(linea).toContain("recurso_ml=item");
+    expect(linea).toContain(`ml_id_externo=${itemId}`);
+    expect(linea).toContain("HTTP 401");
+    expect(linea).not.toContain("access-secreto-nunca-en-el-log");
+
+    errorSpy.mockRestore();
   });
 });
 

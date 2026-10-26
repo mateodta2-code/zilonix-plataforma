@@ -2,7 +2,7 @@ import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
-import { obtenerItemMl, obtenerProducto, obtenerVendedor } from "@/lib/ml/cliente";
+import { confirmarRecursoProductoMl, obtenerItemMl, obtenerProducto, obtenerVendedor } from "@/lib/ml/cliente";
 import { buscarFotoDeHaceUnMes } from "@/lib/seguimiento/comparativa";
 import { esLinkDeTienda, esLinkTiendaOficialSinIdDeVendedor, interpretarEnlaceProducto, interpretarEnlaceTienda } from "@/lib/seguimiento/link";
 import { ventasDelPeriodo } from "@/lib/seguimiento/ventas";
@@ -157,6 +157,21 @@ export async function agregarSeguimiento(empresaId: string, usuarioId: string, d
   if (datos.esCompetidor) await verificarCupoCompetidor(empresaId);
 
   const token = await tokenPropio(empresaId);
+
+  // Issue #250, punto A — confirmar item/product contra Mercado Libre
+  // ANTES de guardar (nunca se guarda solo lo que adivinó el texto del
+  // link): corrige en el momento el caso real del bug (un id de
+  // catálogo pegado sin "/p/" en la URL, que el texto solo clasifica
+  // como "item"). Si Mercado Libre no deja confirmar nada ahora mismo
+  // (403/5xx transitorio, o ninguno de los dos existe), se sigue con
+  // lo que ya interpretó el texto — nunca se bloquea todo el alta por
+  // un fallo transitorio de confirmación; scripts/corregir-tipo-recurso-seguimiento.ts
+  // corrige después los que de verdad quedaron mal.
+  if (datos.tipo === "producto") {
+    const confirmado = await confirmarRecursoProductoMl(interpretado.mlIdExterno, token);
+    if (confirmado) interpretado = { recursoMl: confirmado, mlIdExterno: interpretado.mlIdExterno };
+  }
+
   const nombre = await resolverNombre(datos.tipo, interpretado.recursoMl, interpretado.mlIdExterno, token);
 
   return dbComoEmpresa(empresaId, async (tx) => {
