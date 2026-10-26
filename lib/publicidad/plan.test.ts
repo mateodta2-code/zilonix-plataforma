@@ -4,6 +4,8 @@ import {
   DIAS_INCREMENTAL,
   DIAS_MAX_API,
   MAX_REINTENTOS_TRAMO,
+  MIN_PRESUPUESTO_CUENTA_MS,
+  alcanzaParaAbrirCuenta,
   backfillRealmenteCerrado,
   contarReintentosMismoTramo,
   decisionAnteErrorDeCosto,
@@ -148,6 +150,40 @@ describe("rango de sincronización de publicidad (issue #254)", () => {
     expect(decisionAnteErrorDeCosto(sinPermiso)).toBe("seguir");
     expect(decisionAnteErrorDeCosto(corte)).toBe("cerrar-tramo");
     expect(decisionAnteErrorDeCosto(new Error("token"))).toBe("fallar");
+  });
+
+  it("un corte antes de los días no gasta intentos aunque el cursor siga en null", () => {
+    const pre = {
+      estado: "error",
+      rangoDesde: "2026-10-20",
+      rangoHasta: "2026-10-26",
+      error: "CorridaIncompletaError: fase:pre-dias. corte",
+      reanudaDesde: null as string | null,
+    };
+    expect(contarReintentosMismoTramo([pre, pre, pre])).toBe(0);
+    const tramo = decidirTramo(
+      hoy,
+      { estado: "error", rangoDesde: "2026-10-20", rangoHasta: "2026-10-26", iniciadaTs: new Date() },
+      false,
+      0
+    );
+    expect(tramo).toMatchObject({ desde: "2026-10-20", hasta: "2026-10-26" });
+  });
+
+  it("un corte durante costos no gasta intentos", () => {
+    const costos = {
+      estado: "error",
+      rangoDesde: "2026-10-20",
+      rangoHasta: "2026-10-26",
+      error: "CorridaIncompletaError: fase:costos. corte",
+      reanudaDesde: "2026-10-26",
+    };
+    expect(contarReintentosMismoTramo([costos, costos, costos])).toBe(0);
+  });
+
+  it("no abre otra cuenta si quedan menos de 60 segundos", () => {
+    expect(alcanzaParaAbrirCuenta(MIN_PRESUPUESTO_CUENTA_MS)).toBe(true);
+    expect(alcanzaParaAbrirCuenta(MIN_PRESUPUESTO_CUENTA_MS - 1)).toBe(false);
   });
 
   it("un corte a mitad de las campañas de un día no se salta los días ya pedidos ni las campañas que faltan", () => {

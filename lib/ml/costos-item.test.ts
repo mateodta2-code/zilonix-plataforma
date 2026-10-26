@@ -87,6 +87,16 @@ describe("costos por ítem (issue #254)", () => {
     expect(costo.envioVendedorEstimado).toBe("0.00");
   });
 
+  it("un amount que no entra en numeric(14,2) deja el precio en null", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/sale_price")) return respuesta({ amount: 10000000000000, regular_amount: null });
+      return respuesta({ ...itemBase, shipping: { logistic_type: "drop_off", mode: "me1", free_shipping: false } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const costo = await costosDeItem({ token: "token-prueba", userId: "998877", itemId: "MCO12345" });
+    expect(costo.precioVentaVigente).toBeNull();
+  });
+
   it("un amount en notación científica no tumba el ítem", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).includes("/sale_price")) return respuesta({ amount: 1e-7, regular_amount: null });

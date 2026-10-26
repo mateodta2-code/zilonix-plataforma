@@ -56,6 +56,18 @@ describe("métricas de Product Ads (issue #254)", () => {
     expect(leidas.invalidos).not.toContain("costo");
   });
 
+  it("un entero por encima de int4 o un numeric(14,2) enorme queda inválido y no se escribe", () => {
+    const leidas = metricasDesdeApi({ clicks: 2147483648, cost: 10, total_amount: "9999999999999.99" });
+    expect(leidas.metricas.clicks).toBeNull();
+    expect(leidas.metricas.costo).toBe("10.00");
+    expect(leidas.metricas.montoTotal).toBeNull();
+    expect(leidas.invalidos).toContain("clicks");
+    expect(leidas.invalidos).toContain("montoTotal");
+    expect(leidas.invalidos).not.toContain("costo");
+    expect(leidas.desbordados).toEqual(expect.arrayContaining(["clicks", "montoTotal"]));
+    expect(metricasDesdeApi({ clicks: 2147483647 }).metricas.clicks).toBe(2147483647);
+  });
+
   it("acepta los nombres en mayúsculas del ejemplo de ad groups", () => {
     const fila = metricasDesdeApi({ metrics: { CLICKS: 1, PRINTS: 2, COST: 3, TACOS: 4 } }).metricas;
     expect(fila.clicks).toBe(1);

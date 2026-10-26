@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DecimalInvalidoError, aEscala, normalizarDecimal, textoDeNumeroJson } from "./normalizar-decimal";
+import { DecimalInvalidoError, aEscala, cabeEnNumeric, normalizarDecimal, textoDeNumeroJson } from "./normalizar-decimal";
 
 describe("normalizarDecimal (issue #254)", () => {
   it("acepta punto decimal, coma decimal y miles con coma decimal", () => {
@@ -39,5 +39,10 @@ describe("normalizarDecimal (issue #254)", () => {
     expect(textoDeNumeroJson(1e-7)).toBe("0.0000001");
     expect(textoDeNumeroJson(1.23e-7)).toBe("0.000000123");
     expect(aEscala(textoDeNumeroJson(1e-7), 2, { origenJson: true })).toBe("0.00");
+  });
+
+  it("numeric(14,2) rechaza una parte entera de más de 12 dígitos", () => {
+    expect(cabeEnNumeric("999999999999.99", 14, 2)).toBe(true);
+    expect(cabeEnNumeric("1000000000000.00", 14, 2)).toBe(false);
   });
 });

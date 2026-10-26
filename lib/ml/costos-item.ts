@@ -6,7 +6,7 @@
 // costo real de un despacho.
 
 import { MlRespuestaInesperadaError, PATRON_ID_PRODUCTO_O_ITEM, PATRON_ID_VENDEDOR, SITE_ID, pedirLecturaMl } from "@/lib/ml/cliente";
-import { DecimalInvalidoError, aEscala, textoDeNumeroJson } from "@/lib/numeros/normalizar-decimal";
+import { DecimalInvalidoError, aEscala, cabeEnNumeric, textoDeNumeroJson } from "@/lib/numeros/normalizar-decimal";
 
 export type CostoItemLeido = {
   itemId: string;
@@ -39,7 +39,9 @@ function dinero(valor: unknown): string | null {
     const texto = typeof valor === "number" ? textoDeNumeroJson(valor) : typeof valor === "string" ? valor.trim() : null;
     if (!texto) return null;
     const opciones = typeof valor === "number" ? { origenJson: true as const } : undefined;
-    return aEscala(texto, 2, opciones);
+    const escalado = aEscala(texto, 2, opciones);
+    if (!cabeEnNumeric(escalado, 14, 2)) return null;
+    return escalado;
   } catch (error) {
     if (error instanceof DecimalInvalidoError) return null;
     throw error;

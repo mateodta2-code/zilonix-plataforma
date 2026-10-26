@@ -18,6 +18,10 @@ export const MINUTOS_EN_CURSO_ABANDONADO = 30;
 // para poder cerrar la fila; lo que no entró queda para la siguiente.
 export const PRESUPUESTO_CORRIDA_MS = 240_000;
 export const MARGEN_CIERRE_MS = 15_000;
+// Por debajo de esto no se abre otra cuenta: si arranca a los ~226 s
+// se corta antes de los días, queda última por iniciada_ts y puede
+// quemar los 3 intentos del tramo sin haber pedido un día.
+export const MIN_PRESUPUESTO_CUENTA_MS = 60_000;
 export const MAX_REINTENTOS_TRAMO = 3;
 
 export { leerRetryAfterMs, msDeReintento429 } from "@/lib/ml/reintento-429";
@@ -154,11 +158,32 @@ export function backfillRealmenteCerrado(filas: { estado: string; cierraBackfill
 }
 
 // El texto lo arma textoErrorCorto. Un corte que avanzó el día de
-// reanudación no gasta intento: el tramo sigue. Uno que se quedó en el
-// mismo punto sí, para que un tramo que no cabe en 240 s no se
-// reintente para siempre.
+// reanudación no gasta intento. Uno que se quedó en el mismo día del
+// bucle sí, para que un tramo que no cabe en 240 s no se reintente
+// para siempre. Un corte antes de ese bucle, o ya en costos, no gasta:
+// la cuenta no perdió días, o los días ya están guardados.
 export function esCorteDeTiempo(error: string | null): boolean {
   return Boolean(error && error.startsWith("CorridaIncompletaError"));
+}
+
+export type FaseCorte = "pre-dias" | "dias" | "costos";
+
+export function marcaDeFase(fase: FaseCorte): string {
+  if (fase === "pre-dias") return "fase:pre-dias";
+  if (fase === "costos") return "fase:costos";
+  return "fase:dias";
+}
+
+export function faseDeCorte(error: string | null): FaseCorte | null {
+  if (!esCorteDeTiempo(error) || !error) return null;
+  if (error.includes("fase:pre-dias")) return "pre-dias";
+  if (error.includes("fase:costos")) return "costos";
+  if (error.includes("fase:dias")) return "dias";
+  return null;
+}
+
+export function alcanzaParaAbrirCuenta(restanteMs: number): boolean {
+  return restanteMs >= MIN_PRESUPUESTO_CUENTA_MS;
 }
 
 type FilaReintento = {
@@ -187,6 +212,8 @@ export function contarReintentosMismoTramo(filas: FilaReintento[]): number {
     const fila = filas[i];
     if (fila.rangoDesde !== ultima.rangoDesde || fila.rangoHasta !== ultima.rangoHasta) break;
     if (esCorteDeTiempo(fila.error)) {
+      const fase = faseDeCorte(fila.error);
+      if (fase === "pre-dias" || fase === "costos") continue;
       const anterior = filas[i + 1];
       const misma =
         anterior && anterior.rangoDesde === fila.rangoDesde && anterior.rangoHasta === fila.rangoHasta ? anterior : null;

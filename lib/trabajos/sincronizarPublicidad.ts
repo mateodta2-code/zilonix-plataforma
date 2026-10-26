@@ -46,23 +46,34 @@ import {
   guardarCostoItem,
   guardarMetricas,
   historialSync,
+  itemsSincronizadosDesde,
   type AnuncioGuardado,
   type CampanaGuardada,
   type MetricaGuardada,
 } from "@/lib/publicidad/guardar";
-import { acosDesdeRoas, filasDiariasDeCampana, filasDiariasDeCuenta, metricasDesdeApi, type MetricasLeidas } from "@/lib/publicidad/metricas";
-import { aEscala, textoDeNumeroJson } from "@/lib/numeros/normalizar-decimal";
 import {
-  MARGEN_CIERRE_MS,
+  AVISO_FUERA_DE_RANGO,
+  acosDesdeRoas,
+  filasDiariasDeCampana,
+  filasDiariasDeCuenta,
+  metricasDesdeApi,
+  type MetricasLeidas,
+} from "@/lib/publicidad/metricas";
+import { aEscala, cabeEnNumeric, textoDeNumeroJson } from "@/lib/numeros/normalizar-decimal";
+import {
   MINUTOS_EN_CURSO_ABANDONADO,
   PRESUPUESTO_CORRIDA_MS,
+  alcanzaParaAbrirCuenta,
   decisionAnteErrorDeCosto,
   decidirTramo,
   diasARetomar,
   evaluarRefrescoManual,
+  faseDeCorte,
   hoyBogota,
+  marcaDeFase,
   ordenarCuentasParaSync,
   textoErrorCorto,
+  type FaseCorte,
   type UltimaSync,
 } from "@/lib/publicidad/plan";
 
@@ -72,9 +83,11 @@ const AVISO_COSTO =
   "Un costo de ítem no se pudo leer (respuesta 4xx de Mercado Libre). El resto de la cuenta siguió; ese ítem se reintenta en la próxima corrida.";
 
 class CorridaIncompletaError extends Error {
-  constructor() {
-    super("La corrida se cortó antes de terminar el tramo para poder retomarla.");
+  readonly fase: FaseCorte;
+  constructor(fase: FaseCorte) {
+    super(`${marcaDeFase(fase)}. La corrida se cortó antes de terminar el tramo para poder retomarla.`);
     this.name = "CorridaIncompletaError";
+    this.fase = fase;
   }
 }
 
@@ -91,15 +104,11 @@ function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function vigilar(deadline: number): void {
-  if (Date.now() > deadline) throw new CorridaIncompletaError();
+function vigilar(deadline: number, fase: FaseCorte): void {
+  if (Date.now() > deadline) throw new CorridaIncompletaError(fase);
 }
 
-function quedaMargen(deadline: number): boolean {
-  return deadline - Date.now() > MARGEN_CIERRE_MS;
-}
-
-async function llamar<T>(contador: { n: number }, deadline: number, fn: () => Promise<T>): Promise<T> {
+async function llamar<T>(contador: { n: number }, deadline: number, fase: FaseCorte, fn: () => Promise<T>): Promise<T> {
   let espera = 2_000;
   for (let intento = 0; intento < 4; intento++) {
     contador.n += 1;
@@ -108,7 +117,7 @@ async function llamar<T>(contador: { n: number }, deadline: number, fn: () => Pr
     } catch (error) {
       if (!(error instanceof LimiteMercadoLibreError) || intento === 3) throw error;
       const pausa = msDeReintento429(espera + Math.floor(Math.random() * 400), error.retryAfterMs);
-      if (Date.now() + pausa > deadline) throw new CorridaIncompletaError();
+      if (Date.now() + pausa > deadline) throw new CorridaIncompletaError(fase);
       await esperar(pausa);
       espera *= 2;
     }
@@ -116,12 +125,21 @@ async function llamar<T>(contador: { n: number }, deadline: number, fn: () => Pr
   throw new LimiteMercadoLibreError();
 }
 
-function decimalONull(valor: unknown, escala: number): string | null {
+function decimalONull(valor: unknown, escala: number, precision = 14, alDesbordar?: () => void): string | null {
   if (valor == null) return null;
   try {
-    if (typeof valor === "number") return aEscala(textoDeNumeroJson(valor), escala, { origenJson: true });
-    if (typeof valor !== "string" || !valor.trim()) return null;
-    return aEscala(valor.trim(), escala);
+    const texto =
+      typeof valor === "number"
+        ? aEscala(textoDeNumeroJson(valor), escala, { origenJson: true })
+        : typeof valor === "string" && valor.trim()
+          ? aEscala(valor.trim(), escala)
+          : null;
+    if (!texto) return null;
+    if (!cabeEnNumeric(texto, precision, escala)) {
+      alDesbordar?.();
+      return null;
+    }
+    return texto;
   } catch {
     return null;
   }
@@ -133,18 +151,18 @@ function fechaMl(valor: unknown): Date | null {
   return Number.isNaN(fecha.getTime()) ? null : fecha;
 }
 
-function campanaDesde(cuentaMlId: string, raw: CampanaAds): CampanaGuardada | null {
+function campanaDesde(cuentaMlId: string, raw: CampanaAds, alDesbordar?: () => void): CampanaGuardada | null {
   const campanaIdMl = idNumerico(raw.id);
   if (!campanaIdMl) return null;
-  const roas = decimalONull(raw.roas_target, 2);
-  let acos = decimalONull(raw.acos_target, 4);
+  const roas = decimalONull(raw.roas_target, 2, 6, alDesbordar);
+  let acos = decimalONull(raw.acos_target, 4, 10, alDesbordar);
   let calculado = false;
   if (!acos && roas) {
     const derivado = acosDesdeRoas(roas);
-    if (derivado) {
+    if (derivado && cabeEnNumeric(derivado, 10, 4)) {
       acos = derivado;
       calculado = true;
-    }
+    } else if (derivado) alDesbordar?.();
   }
   return {
     cuentaMlId,
@@ -152,8 +170,8 @@ function campanaDesde(cuentaMlId: string, raw: CampanaAds): CampanaGuardada | nu
     nombre: typeof raw.name === "string" ? raw.name : null,
     estado: typeof raw.status === "string" ? raw.status : null,
     estrategia: typeof raw.strategy === "string" ? raw.strategy : null,
-    presupuesto: decimalONull(raw.budget, 2),
-    presupuestoDiario: decimalONull(raw.daily_budget, 2),
+    presupuesto: decimalONull(raw.budget, 2, 14, alDesbordar),
+    presupuestoDiario: decimalONull(raw.daily_budget, 2, 14, alDesbordar),
     presupuestoAutomatico: typeof raw.automatic_budget === "boolean" ? raw.automatic_budget : null,
     roasObjetivo: roas,
     acosObjetivo: acos,
@@ -203,7 +221,7 @@ function metricaDe(
   };
 }
 
-async function sincronizarCuenta(
+export async function sincronizarCuenta(
   empresaId: string,
   cuentaMlId: string,
   origen: "programada" | "manual",
@@ -222,13 +240,11 @@ async function sincronizarCuenta(
       }
     : null;
   const tramo = decidirTramo(hoy, ultima, historial.yaTerminoBackfill, historial.reintentosMismoTramo);
-  const reanudaInicial =
-    ultima &&
-    ultima.estado === "error" &&
-    ultima.rangoDesde === tramo.desde &&
-    ultima.rangoHasta === tramo.hasta
-      ? historial.ultima?.reanudaDesde ?? null
-      : null;
+  const mismoTramoError = Boolean(
+    ultima && ultima.estado === "error" && ultima.rangoDesde === tramo.desde && ultima.rangoHasta === tramo.hasta
+  );
+  const reanudaInicial = mismoTramoError ? historial.ultima?.reanudaDesde ?? null : null;
+  const faseInicial = mismoTramoError ? faseDeCorte(historial.ultima?.error ?? null) : null;
   const contador = { n: 0 };
   const avisos: string[] = [];
   const syncId = await abrirSincronizacion(empresaId, {
@@ -241,11 +257,17 @@ async function sincronizarCuenta(
 
   const metricas: MetricaGuardada[] = [];
   const anuncios: AnuncioGuardado[] = [];
-  // El cursor es el día en curso. Arranca en el de la corrida anterior
-  // para que un corte antes del bucle de días no parezca progreso.
+  // Antes del bucle de días la fase queda en pre-dias: ese corte no
+  // gasta intento. En el bucle, el cursor es el día. En costos, el
+  // cursor es el último día del tramo y la fase dice que no hay que
+  // rehacerlos.
   let reanuda: string | null = reanudaInicial;
+  let faseActual: FaseCorte = "pre-dias";
   let cerrado = false;
   let errorCierre: unknown = null;
+  function anotarDesborde(): void {
+    if (!avisos.includes(AVISO_FUERA_DE_RANGO)) avisos.push(AVISO_FUERA_DE_RANGO);
+  }
 
   async function volcar(): Promise<void> {
     if (metricas.length > 0) {
@@ -268,7 +290,7 @@ async function sincronizarCuenta(
     );
     if (!cuenta) throw new Error("No se encontró la cuenta.");
 
-    const anunciante = await llamar(contador, deadline, () => obtenerAnunciante(token));
+    const anunciante = await llamar(contador, deadline, faseActual, () => obtenerAnunciante(token));
     if (anunciante.estado !== "ok") {
       await guardarAnunciante(empresaId, {
         cuentaMlId,
@@ -303,32 +325,44 @@ async function sincronizarCuenta(
       estadoAcceso: "ok",
     });
     const ctx = { token, siteId: anunciante.siteId, advertiserId: anunciante.advertiserId };
-    const seguir = () => vigilar(deadline);
+    const seguir = () => vigilar(deadline, faseActual);
+    let items = new Set<string>();
+    const itemsDeCostos =
+      faseInicial === "costos" && historial.ultima?.iniciadaTs
+        ? await itemsSincronizadosDesde(empresaId, cuentaMlId, historial.ultima.iniciadaTs)
+        : [];
 
+    if (itemsDeCostos.length > 0) {
+      faseActual = "costos";
+      reanuda = tramo.hasta;
+      items = new Set(itemsDeCostos);
+    } else {
     const crudas = [
-      ...(await llamar(contador, deadline, () => listarCampanas(ctx, { estado: "active", seguir }))),
-      ...(await llamar(contador, deadline, () => listarCampanas(ctx, { estado: "paused", seguir }))),
+      ...(await llamar(contador, deadline, faseActual, () => listarCampanas(ctx, { estado: "active", seguir }))),
+      ...(await llamar(contador, deadline, faseActual, () => listarCampanas(ctx, { estado: "paused", seguir }))),
     ];
-    const campanas = crudas.map((raw) => campanaDesde(cuentaMlId, raw)).filter((c): c is CampanaGuardada => c !== null);
+    const campanas = crudas.map((raw) => campanaDesde(cuentaMlId, raw, anotarDesborde)).filter((c): c is CampanaGuardada => c !== null);
     const porId = new Map(campanas.map((c) => [c.campanaIdMl, c]));
     await guardarCampanas(empresaId, [...porId.values()]);
 
     for (const campana of porId.values()) {
-      vigilar(deadline);
-      const data = await llamar(contador, deadline, () => metricasDiariasCampana(ctx, campana.campanaIdMl, tramo));
+      vigilar(deadline, faseActual);
+      const data = await llamar(contador, deadline, faseActual, () => metricasDiariasCampana(ctx, campana.campanaIdMl, tramo));
       for (const fila of filasDiariasDeCampana(resultsDe(data), campana.campanaIdMl)) {
         if (!fila.entidadIdMl) continue;
+        if (fila.desbordados.length > 0) anotarDesborde();
         metricas.push(metricaDe(cuentaMlId, "campana", fila.entidadIdMl, fila.fecha, fila));
       }
       await volcar();
     }
-    vigilar(deadline);
-    const diariasCuenta = await llamar(contador, deadline, () =>
+    vigilar(deadline, faseActual);
+    const diariasCuenta = await llamar(contador, deadline, faseActual, () =>
       metricasDiariasCuenta(ctx, { desde: tramo.desde, hasta: tramo.hasta, seguir })
     );
     const interpretadas = filasDiariasDeCuenta(diariasCuenta);
     if (interpretadas.ambiguo) avisos.push(AVISO_DAILY);
     for (const fila of interpretadas.filas) {
+      if (fila.desbordados.length > 0) anotarDesborde();
       const entidad = fila.entidadIdMl ?? anunciante.advertiserId;
       const nivel = fila.entidadIdMl ? "campana" : "cuenta";
       metricas.push(metricaDe(cuentaMlId, nivel, entidad, fila.fecha, fila));
@@ -336,10 +370,10 @@ async function sincronizarCuenta(
     await volcar();
 
     const grupos = [
-      ...(await llamar(contador, deadline, () =>
+      ...(await llamar(contador, deadline, faseActual, () =>
         adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "active", seguir })
       )),
-      ...(await llamar(contador, deadline, () =>
+      ...(await llamar(contador, deadline, faseActual, () =>
         adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "paused", seguir })
       )),
     ];
@@ -360,26 +394,28 @@ async function sincronizarCuenta(
     // cae en la campaña 2 del día 3, los días 1 y 2 ya se pidieron para
     // todas las campañas, los ad groups y los anuncios. Retomar ese día
     // los rehace (el upsert es idempotente) y no se salta los anteriores.
+    faseActual = "dias";
     const dias = diasARetomar(tramo.desde, tramo.hasta, reanudaInicial);
-    const items = new Set<string>();
     for (const dia of dias) {
       reanuda = dia;
       for (const campana of porId.values()) {
-        vigilar(deadline);
-        const data = await llamar(contador, deadline, () => metricasAdGroupsDelDia(ctx, campana.campanaIdMl, dia));
+        vigilar(deadline, faseActual);
+        const data = await llamar(contador, deadline, faseActual, () => metricasAdGroupsDelDia(ctx, campana.campanaIdMl, dia));
         for (const raw of resultsDe(data)) {
           if (!raw || typeof raw !== "object") continue;
           const rec = raw as Record<string, unknown>;
           const entidad = idNumerico(rec.ad_group_id);
           if (!entidad) continue;
           const fecha = typeof rec.date === "string" ? rec.date : dia;
-          metricas.push(metricaDe(cuentaMlId, "ad_group", entidad, fecha, metricasDesdeApi(rec)));
+          const leidas = metricasDesdeApi(rec);
+          if (leidas.desbordados.length > 0) anotarDesborde();
+          metricas.push(metricaDe(cuentaMlId, "ad_group", entidad, fecha, leidas));
         }
         await volcar();
       }
       for (const [adGroupId, meta] of tipoPorGrupo) {
-        vigilar(deadline);
-        const filas = await llamar(contador, deadline, () => anunciosDeAdGroup(ctx, adGroupId, { desde: dia, hasta: dia, seguir }));
+        vigilar(deadline, faseActual);
+        const filas = await llamar(contador, deadline, faseActual, () => anunciosDeAdGroup(ctx, adGroupId, { desde: dia, hasta: dia, seguir }));
         for (const raw of filas) {
           if (!raw || typeof raw !== "object") continue;
           const rec = raw as Record<string, unknown>;
@@ -396,22 +432,26 @@ async function sincronizarCuenta(
             titulo: typeof rec.title === "string" ? rec.title : null,
             permalink: typeof rec.permalink === "string" ? rec.permalink : null,
             estado: typeof rec.status === "string" ? rec.status : null,
-            precio: decimalONull(rec.price, 2),
+            precio: decimalONull(rec.price, 2, 14, anotarDesborde),
             logisticType: typeof rec.logistic_type === "string" ? rec.logistic_type : null,
             listingTypeId: typeof rec.listing_type_id === "string" ? rec.listing_type_id : null,
           });
-          metricas.push(metricaDe(cuentaMlId, "anuncio", itemId, dia, metricasDesdeApi(rec), adGroupId));
+          const leidas = metricasDesdeApi(rec);
+          if (leidas.desbordados.length > 0) anotarDesborde();
+          metricas.push(metricaDe(cuentaMlId, "anuncio", itemId, dia, leidas, adGroupId));
         }
         await volcar();
       }
     }
-    reanuda = null;
+    faseActual = "costos";
+    reanuda = tramo.hasta;
+    }
 
     for (const itemId of items) {
-      vigilar(deadline);
+      vigilar(deadline, faseActual);
       if (await costoYaConsultado(empresaId, cuentaMlId, itemId, hoy)) continue;
       try {
-        const costo = await llamar(contador, deadline, () =>
+        const costo = await llamar(contador, deadline, faseActual, () =>
           costosDeItem({ token, userId: cuenta.cuentaIdExterna, itemId, siteId: anunciante.siteId })
         );
         await guardarCostoItem(empresaId, {
@@ -445,7 +485,7 @@ async function sincronizarCuenta(
     await cerrarSincronizacion(empresaId, syncId, {
       estado,
       llamadas: contador.n,
-      error: avisos[0] ?? null,
+      error: avisos.length > 0 ? avisos.join(" ") : null,
       cierraBackfill: estado === "ok" && tramo.cierraBackfill,
     });
     cerrado = true;
@@ -526,7 +566,7 @@ export async function sincronizarPublicidadProgramada(ahora = new Date()): Promi
   };
   const deadline = Date.now() + PRESUPUESTO_CORRIDA_MS;
   for (let i = 0; i < ordenadas.length; i++) {
-    if (!quedaMargen(deadline)) {
+    if (!alcanzaParaAbrirCuenta(deadline - Date.now())) {
       resultado.pendientes = ordenadas.length - i;
       break;
     }

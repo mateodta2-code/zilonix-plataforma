@@ -4,7 +4,7 @@
 // empresa anterior (RLS no lo muestra a la nueva) y la nueva inserta
 // sus propias filas sin pisar las viejas.
 
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { db } from "@/db/index";
 import {
@@ -259,6 +259,16 @@ export async function guardarCostoItem(empresaId: string, fila: CostoGuardado): 
         set: setDeCosto(fila),
       })
   );
+}
+
+export async function itemsSincronizadosDesde(empresaId: string, cuentaMlId: string, desde: Date): Promise<string[]> {
+  const filas = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ itemId: publicidadAnuncios.itemId })
+      .from(publicidadAnuncios)
+      .where(and(eq(publicidadAnuncios.cuentaMlId, cuentaMlId), gte(publicidadAnuncios.sincronizadoTs, desde)))
+  );
+  return [...new Set(filas.map((fila) => fila.itemId))];
 }
 
 export async function costoYaConsultado(empresaId: string, cuentaMlId: string, itemId: string, fecha: string): Promise<boolean> {

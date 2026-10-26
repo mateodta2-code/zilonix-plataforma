@@ -126,6 +126,16 @@ export function aEscala(decimal: string, escala: number, opciones?: OpcionesDeci
   return `${signo}${entero}.${fraccion.toString().padStart(escala, "0")}`;
 }
 
+// numeric(precision, escala) rechaza con 22003 si la parte entera no
+// entra. Se mira el texto ya escalado, sin float.
+export function cabeEnNumeric(escalado: string, precision: number, escala: number): boolean {
+  if (!Number.isInteger(precision) || !Number.isInteger(escala) || escala < 0 || precision <= escala) return false;
+  const cuerpo = escalado.startsWith("-") ? escalado.slice(1) : escalado;
+  const [entero = "0"] = cuerpo.split(".");
+  const digitos = entero.replace(/^0+/, "");
+  return digitos.length <= precision - escala;
+}
+
 // JSON.stringify de un número chico sale en notación científica
 // (`1e-7`). Se expande con los dígitos del texto, sin pasar por float.
 function expandirCientifico(texto: string): string {
