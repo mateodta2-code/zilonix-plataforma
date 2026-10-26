@@ -652,19 +652,35 @@ describe("obtenerPublicacionesVendedorAjenoMl — dos caminos (items/search -> s
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
     await expect(obtenerPublicacionesVendedorAjenoMl("123456789", "token")).resolves.toBeNull();
   });
+
+  // Corrección de Pablo (revisión del PR #253), punto 6 — CUALQUIER
+  // no-ok del buscador público es "sin dato" (null), no solo un 403:
+  // antes de este punto, un 404/400/etc. ahí caía en el "return []"
+  // genérico, inventando un "cero publicaciones" que Mercado Libre
+  // nunca confirmó.
+  it("items/search da 403 y el buscador público da 404 (no 403): también null, nunca []", async () => {
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/users/") && urlStr.includes("/items/search")) return respuestaJson({}, 403);
+      if (urlStr.includes("/sites/MCO/search")) return respuestaJson({}, 404);
+      throw new Error(`URL inesperada: ${urlStr}`);
+    });
+    await expect(obtenerPublicacionesVendedorAjenoMl("123456789", "token")).resolves.toBeNull();
+  });
 });
 
-describe("confirmarRecursoProductoMl — confirmar item/product contra ML antes de guardar (issue #250, punto A)", () => {
+describe("confirmarRecursoProductoMl — confirmar item/product contra ML antes de guardar, SIN token (issue #250, punto A + corrección de Pablo)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("/items/{id} responde ok: confirmado como 'item', nunca prueba /products", async () => {
-    const fetchMock = vi.fn(async (url: unknown) => {
+  it("/items/{id} responde ok: confirmado como 'item', nunca prueba /products, nunca manda Authorization", async () => {
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
       const urlStr = String(url);
       if (urlStr.includes("/products/")) throw new Error(`no debería llamar a ${urlStr}`);
+      expect((init?.headers as Record<string, string> | undefined)?.Authorization).toBeUndefined();
       return respuestaJson({ id: "MCO123" });
     });
     vi.stubGlobal("fetch", fetchMock);
-    await expect(confirmarRecursoProductoMl("MCO123", "token")).resolves.toBe("item");
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "confirmado", recursoMl: "item" });
   });
 
   it("/items/{id} da 404 y /products/{id} responde ok: confirmado como 'product' — bug real (catálogo pegado sin '/p/')", async () => {
@@ -674,33 +690,50 @@ describe("confirmarRecursoProductoMl — confirmar item/product contra ML antes 
       if (urlStr.includes("/products/")) return respuestaJson({ name: "Producto de catálogo" });
       throw new Error(`URL inesperada: ${urlStr}`);
     });
-    await expect(confirmarRecursoProductoMl("MCO123", "token")).resolves.toBe("product");
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "confirmado", recursoMl: "product" });
   });
 
-  it("/items/{id} da 404 y /products/{id} también 404: null, no confirma nada", async () => {
+  it("/items/{id} da 404 y /products/{id} también 404: 'no_encontrado' real — issue #250, punto 4 de la revisión", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
-    await expect(confirmarRecursoProductoMl("MCO123", "token")).resolves.toBeNull();
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "no_encontrado" });
   });
 
-  it("/items/{id} da 403 (transitorio): null, nunca prueba /products ni adivina", async () => {
+  it("/items/{id} da 403 (transitorio): 'transitorio', nunca prueba /products ni adivina", async () => {
     const fetchMock = vi.fn(async (url: unknown) => {
       const urlStr = String(url);
       if (urlStr.includes("/products/")) throw new Error(`no debería llamar a ${urlStr}`);
       return respuestaJson({}, 403);
     });
     vi.stubGlobal("fetch", fetchMock);
-    await expect(confirmarRecursoProductoMl("MCO123", "token")).resolves.toBeNull();
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "transitorio" });
   });
 
-  it("401 de verdad propaga", async () => {
+  it("/items/{id} da 404 y /products/{id} da 403: 'transitorio' (no se puede confirmar el negativo), nunca 'no_encontrado'", async () => {
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/items/")) return respuestaJson({}, 404);
+      if (urlStr.includes("/products/")) return respuestaJson({}, 403);
+      throw new Error(`URL inesperada: ${urlStr}`);
+    });
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "transitorio" });
+  });
+
+  // Corrección de Pablo — nunca se le busca otra forma de usar un
+  // token: un 401 inesperado (sin haber mandado ninguno) se trata
+  // como "transitorio", con un aviso en el log, nunca una excepción
+  // sin capturar ni una vuelta a mandar token.
+  it("401 inesperado sin token: 'transitorio', nunca lanza ni busca la forma de mandar un token", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
-    await expect(confirmarRecursoProductoMl("MCO123", "token")).rejects.toThrow(MlNoAutorizadoError);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "transitorio" });
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it("id con formato inválido nunca llama a fetch", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await expect(confirmarRecursoProductoMl("no-es-un-id-ml", "token")).resolves.toBeNull();
+    await expect(confirmarRecursoProductoMl("no-es-un-id-ml")).resolves.toEqual({ estado: "transitorio" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

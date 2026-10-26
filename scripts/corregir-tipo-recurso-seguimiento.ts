@@ -14,17 +14,25 @@
 // dbTrabajadorSeguimiento (mismo rol restringido, SELECT/UPDATE solo
 // en seguimientos_ml, que ya usa lib/trabajos/revisionDiariaSeguimiento.ts)
 // para enumerar cruzando TODAS las empresas — nunca el superusuario de
-// Postgres para esto. El token de cada empresa sale de
-// obtenerAccessTokenVigente (lib/ml/cuentas.ts), mismo camino que la
-// revisión diaria — nunca un token usado o refrescado a mano.
+// Postgres para esto.
 //
-//   npx tsx scripts/corregir-tipo-recurso-seguimiento.ts            # dry-run, solo reporta
-//   npx tsx scripts/corregir-tipo-recurso-seguimiento.ts --aplicar  # corrige de verdad
+// Corrección de Pablo (revisión del PR #253) — confirmarRecursoProductoMl
+// NUNCA recibe un token: es solo una verificación pública de
+// existencia (/items y /products), nunca hace falta ver datos
+// privados de una cuenta por esto, y pasar un token acá arriesgaba
+// consumir un refresh token de un solo uso de la app de Mercado Libre
+// COMPARTIDA entre staging y producción por una simple corrección de
+// datos. Este script, a propósito, ya NO resuelve cuenta/token de
+// ninguna empresa.
+//
+//   npx tsx scripts/corregir-tipo-recurso-seguimiento.ts                       # dry-run, todas las empresas
+//   npx tsx scripts/corregir-tipo-recurso-seguimiento.ts --aplicar             # corrige de verdad
+//   npx tsx scripts/corregir-tipo-recurso-seguimiento.ts --empresa=<id>        # solo esa empresa (dry-run)
+//   npx tsx scripts/corregir-tipo-recurso-seguimiento.ts --empresa=<id> --aplicar
 
 import { and, eq, isNull } from "drizzle-orm";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { seguimientosMl } from "@/db/schema";
-import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { confirmarRecursoProductoMl } from "@/lib/ml/cliente";
 
 // "Respeta los límites de ML: pausa entre llamadas" — mismo criterio
@@ -35,43 +43,49 @@ function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function empresaDeArgv(): string | null {
+  const arg = process.argv.find((a) => a.startsWith("--empresa="));
+  return arg ? arg.slice("--empresa=".length) : null;
+}
+
 async function main() {
   const aplicar = process.argv.includes("--aplicar");
+  const empresaId = empresaDeArgv();
 
-  const candidatos = await dbTrabajadorSeguimiento
-    .select()
-    .from(seguimientosMl)
-    .where(and(eq(seguimientosMl.tipo, "producto"), eq(seguimientosMl.recursoMl, "item"), isNull(seguimientosMl.eliminadoTs)));
+  const filtro = empresaId
+    ? and(eq(seguimientosMl.tipo, "producto"), eq(seguimientosMl.recursoMl, "item"), isNull(seguimientosMl.eliminadoTs), eq(seguimientosMl.empresaId, empresaId))
+    : and(eq(seguimientosMl.tipo, "producto"), eq(seguimientosMl.recursoMl, "item"), isNull(seguimientosMl.eliminadoTs));
 
-  console.log(`${candidatos.length} seguimiento(s) de tipo producto/item activos — confirmando contra Mercado Libre...`);
+  const candidatos = await dbTrabajadorSeguimiento.select().from(seguimientosMl).where(filtro);
+
+  console.log(
+    `${candidatos.length} seguimiento(s) de tipo producto/item activos${empresaId ? ` (empresa ${empresaId})` : ""} — confirmando contra Mercado Libre (sin token)...`
+  );
 
   let corregidos = 0;
   let sinCambio = 0;
+  let noEncontrados = 0;
   let sinConfirmar = 0;
 
   for (let i = 0; i < candidatos.length; i++) {
     if (i > 0) await esperar(PAUSA_ENTRE_LLAMADAS_MS);
     const seguimiento = candidatos[i];
     try {
-      const cuenta = await obtenerCuentaMlActiva(seguimiento.empresaId);
-      if (!cuenta) {
-        console.log(`  ${seguimiento.id} (${seguimiento.mlIdExterno}) — empresa sin cuenta ML conectada, se saltea.`);
-        sinConfirmar += 1;
-        continue;
-      }
-      const token = await obtenerAccessTokenVigente(seguimiento.empresaId, cuenta.id);
-      const confirmado = await confirmarRecursoProductoMl(seguimiento.mlIdExterno, token);
+      const confirmacion = await confirmarRecursoProductoMl(seguimiento.mlIdExterno);
 
-      if (confirmado === "product") {
+      if (confirmacion.estado === "confirmado" && confirmacion.recursoMl === "product") {
         console.log(`  ${seguimiento.id} (${seguimiento.mlIdExterno}) — confirmado como "product", ${aplicar ? "corrigiendo" : "se corregiría"}.`);
         if (aplicar) {
           await dbTrabajadorSeguimiento.update(seguimientosMl).set({ recursoMl: "product" }).where(eq(seguimientosMl.id, seguimiento.id));
         }
         corregidos += 1;
-      } else if (confirmado === "item") {
-        sinCambio += 1;
+      } else if (confirmacion.estado === "confirmado") {
+        sinCambio += 1; // confirmado como "item" real, nada que corregir
+      } else if (confirmacion.estado === "no_encontrado") {
+        console.log(`  ${seguimiento.id} (${seguimiento.mlIdExterno}) — ni /items ni /products lo encuentran (404 real) — revisar a mano, el script nunca borra.`);
+        noEncontrados += 1;
       } else {
-        console.log(`  ${seguimiento.id} (${seguimiento.mlIdExterno}) — no se pudo confirmar contra Mercado Libre ahora, se saltea.`);
+        console.log(`  ${seguimiento.id} (${seguimiento.mlIdExterno}) — no se pudo confirmar contra Mercado Libre ahora (403/5xx), se saltea.`);
         sinConfirmar += 1;
       }
     } catch (error) {
@@ -81,8 +95,11 @@ async function main() {
   }
 
   console.log(
-    `Listo. ${corregidos} corregido(s)${aplicar ? "" : " (dry-run, nada se guardó todavía — correr con --aplicar)"}, ${sinCambio} ya eran "item" real, ${sinConfirmar} sin confirmar (se pueden reintentar corriendo el script otra vez).`
+    `Listo. ${corregidos} corregido(s)${aplicar ? "" : " (dry-run, nada se guardó todavía — correr con --aplicar)"}, ${sinCambio} ya eran "item" real, ` +
+      `${noEncontrados} sin encontrar en ML (revisar a mano), ${sinConfirmar} sin confirmar (se pueden reintentar corriendo el script otra vez).`
   );
+
+  process.exit(0);
 }
 
 main();

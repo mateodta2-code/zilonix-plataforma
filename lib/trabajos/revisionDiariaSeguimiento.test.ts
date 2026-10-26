@@ -211,17 +211,17 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
   );
 });
 
-// Issue #175 (histórico) — antes, un seguimiento fallido (ej. empresa
-// sin cuenta ML conectada) SÍ marcaba ultima_revision_ts en el catch, a
-// propósito, para que el orden ASC NULLS FIRST no lo dejara al frente
-// del lote para siempre (ahogando los 50 cupos en cada corrida
-// siguiente). Issue #250, punto C (decisión de Mateo, 2026-10-25) —
-// eso se revierte a propósito: con dos ventanas al día (punto E), un
-// fallo transitorio se reintenta en la próxima corrida en vez de
-// esperar hasta mañana. El riesgo real de #175 (un fallido PERMANENTE
-// ahogando el lote) queda documentado como tensión conocida en el
-// comentario del catch, no resuelto de nuevo acá.
-describe("revisarSeguimientosDelDia — un fallido NUNCA marca ultima_revision_ts (issue #250, punto C)", () => {
+// Issue #175 — si un seguimiento fallido (ej. empresa sin cuenta ML
+// conectada) NUNCA marca ultima_revision_ts, el orden ASC NULLS FIRST
+// lo deja al frente del lote para siempre — ahoga los 50 cupos en
+// cada corrida siguiente. Issue #250, punto C — una primera versión
+// de este punto quitó esa marca pensando que hacía falta para
+// reintentar más seguido; Pablo corrigió eso en la revisión del PR
+// #253: con la ventana de 6h (punto E), SÍ marcar ultima_revision_ts
+// ya significa "reintentar en la próxima ventana" (dos veces al día),
+// nunca "esperar hasta mañana" como antes de ese punto — así que la
+// protección real de #175 se mantiene, sin perder el reintento rápido.
+describe("revisarSeguimientosDelDia — un fallido SÍ marca ultima_revision_ts, nunca ahoga el lote (issue #175 + #250 punto C)", () => {
   let empresaId: string;
   let seguimientoId: string;
 
@@ -250,7 +250,7 @@ describe("revisarSeguimientosDelDia — un fallido NUNCA marca ultima_revision_t
     await aislarLotePara(seguimientoId);
   });
 
-  it("cuenta como fallido y NUNCA marca ultima_revision_ts — sigue pendiente para la próxima corrida", async () => {
+  it("cuenta como fallido Y queda con ultima_revision_ts no null, y no vuelve a aparecer en el lote de hoy (dentro de las 6h)", async () => {
     // Mismo motivo que en las pruebas de arriba: aislar de nuevo acá
     // (dejando SOLO este seguimiento pendiente), lo más cerca posible
     // de la llamada real, por la carrera con otras suites en paralelo.
@@ -261,10 +261,10 @@ describe("revisarSeguimientosDelDia — un fallido NUNCA marca ultima_revision_t
     expect(resultado.fallidos).toBeGreaterThanOrEqual(1);
 
     const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
-    expect(actualizado.ultimaRevisionTs).toBeNull();
+    expect(actualizado.ultimaRevisionTs).not.toBeNull();
 
     const pendientes = await obtenerSeguimientosPendientesDeHoy();
-    expect(pendientes.some((p) => p.id === seguimientoId)).toBe(true);
+    expect(pendientes.some((p) => p.id === seguimientoId)).toBe(false);
   });
 });
 
@@ -334,22 +334,30 @@ describe("revisarSeguimientosDelDia — el log de un fallido trae recurso_ml/ml_
   });
 });
 
-// Issue #196 — "saltado" es un resultado DISTINTO de "procesado": el
-// índice único seguimiento_id+fecha bloqueó el insert porque ya había
-// una foto de hoy (ej. una carrera entre dos corridas del cron a la
-// vez), nunca se escribió nada nuevo, pero tampoco fue un error real.
-describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
+// Issue #196 (histórico) + corrección de Pablo al punto 3 del #250
+// (revisión del PR #253) — antes, cuando el lote alcanzaba un
+// seguimiento que ya tenía foto de hoy (ronda de la tarde sobre uno
+// que la madrugada ya procesó, o una corrida manual repetida),
+// llamaba a Mercado Libre igual y descartaba el resultado con
+// onConflictDoNothing ("saltado") — una llamada real gastada para
+// nada. Ahora ACTUALIZA esa fila con lo más reciente de la API
+// (precio, estado, etc.) y genera alertas contra la foto de ayer,
+// SIN tocar nunca inventarioDisponible/vendidos/publicaciones — las
+// mismas columnas que issue #251 reusa para lo que lee la extensión
+// (esa rama no está mergeada acá todavía, pero esta ronda tiene que
+// ser segura para cuando lo esté).
+describe("revisarSeguimientosDelDia — ya hay foto de hoy: actualiza los campos de API, nunca duplica ni toca los de la extensión (issue #196 + corrección de Pablo al #250 punto 3)", () => {
   let empresaId: string;
   let seguimientoId: string;
 
   beforeAll(async () => {
-    const creado = await crearEmpresaConUsuario("SALTADO");
+    const creado = await crearEmpresaConUsuario("RONDA-TARDE");
     empresaId = creado.empresaId;
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(cuentasMl).values({
         empresaId,
         cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
-        nickname: "VENDEDOR_SALTADO",
+        nickname: "VENDEDOR_RONDA_TARDE",
         accessTokenCifrado: cifrarToken("access-vigente"),
         refreshTokenCifrado: cifrarToken("refresh"),
         tokenExpiraTs: new Date(Date.now() + 3600_000),
@@ -372,39 +380,47 @@ describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
     );
     seguimientoId = seguimiento.id;
 
-    // A propósito: una foto de HOY insertada directo (nunca a través
-    // del trabajo) — simula la carrera real que onConflictDoNothing
-    // cubre. ultima_revision_ts queda en null a propósito, para que
-    // el seguimiento SÍ entre al lote (si ya estuviera marcado, el
-    // filtro de obtenerSeguimientosPendientesDeHoy lo excluiría antes
-    // de llegar a revisarUnSeguimiento).
+    const ayer = new Date();
+    ayer.setUTCHours(0, 0, 0, 0);
+    ayer.setUTCDate(ayer.getUTCDate() - 1);
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: ayer, precio: "100", estado: "active", vendidos: 3 }));
+
+    // A propósito: una foto de HOY insertada directo (simula lo que la
+    // madrugada ya guardó) — con inventarioDisponible/vendidos puestos
+    // a mano, distintos de lo que traería el mock de abajo, para
+    // confirmar que la ronda de la tarde NUNCA los toca.
     const hoy = new Date();
     hoy.setUTCHours(0, 0, 0, 0);
     await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: hoy, precio: "100", estado: "active" })
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: hoy, precio: "100", estado: "active", inventarioDisponible: 7, vendidos: 3 })
     );
   });
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("el lote lo cuenta como saltado (no procesado), le marca ultima_revision_ts, y nunca duplica/sobreescribe la foto de hoy", async () => {
+  it("actualiza precio con lo más reciente de la API, genera alerta contra ayer, nunca duplica la fila ni toca inventarioDisponible/vendidos", async () => {
     await aislarLotePara(seguimientoId);
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" }))); // si no saltara, este precio lo delataría
+    // Precio bajó de 100 (ayer) a 50 — tiene que generar precio_bajo
+    // comparando la fila de HOY ya actualizada contra la de ayer.
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 50, status: "active" })));
 
     const resultado = await revisarSeguimientosDelDia();
 
-    expect(resultado.saltados).toBeGreaterThanOrEqual(1);
-
-    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
-    expect(actualizado.ultimaRevisionTs).not.toBeNull();
+    expect(resultado.procesados).toBeGreaterThanOrEqual(1);
+    expect(resultado.alertasCreadas).toBeGreaterThanOrEqual(1);
 
     const hoy = new Date();
     hoy.setUTCHours(0, 0, 0, 0);
     const fotosDeHoy = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
     );
-    expect(fotosDeHoy).toHaveLength(1);
-    expect(Number(fotosDeHoy[0].precio)).toBe(100); // la que ya estaba, nunca 999
+    expect(fotosDeHoy).toHaveLength(1); // nunca duplica la fila
+    expect(Number(fotosDeHoy[0].precio)).toBe(50); // actualizado con lo más reciente de la API
+    expect(fotosDeHoy[0].inventarioDisponible).toBe(7); // nunca tocado — campo que reusa la extensión (#251)
+    expect(fotosDeHoy[0].vendidos).toBe(3); // nunca tocado — campo que reusa la extensión (#251)
+
+    const alertas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimientoId)));
+    expect(alertas.some((a) => a.tipo === "precio_bajo")).toBe(true);
   });
 
   it("logea UN resumen de lote con los conteos reales (procesados/saltados/con error), sin ids ni tokens", async () => {

@@ -162,14 +162,30 @@ export async function agregarSeguimiento(empresaId: string, usuarioId: string, d
   // ANTES de guardar (nunca se guarda solo lo que adivinó el texto del
   // link): corrige en el momento el caso real del bug (un id de
   // catálogo pegado sin "/p/" en la URL, que el texto solo clasifica
-  // como "item"). Si Mercado Libre no deja confirmar nada ahora mismo
-  // (403/5xx transitorio, o ninguno de los dos existe), se sigue con
-  // lo que ya interpretó el texto — nunca se bloquea todo el alta por
-  // un fallo transitorio de confirmación; scripts/corregir-tipo-recurso-seguimiento.ts
-  // corrige después los que de verdad quedaron mal.
+  // como "item"). confirmarRecursoProductoMl nunca recibe el token de
+  // la cuenta (corrección de Pablo, revisión del PR #253) — es solo
+  // una verificación de existencia, no hace falta gastar ni arriesgar
+  // un token de la app compartida de Mercado Libre por esto.
+  //
+  // Punto 4 de esa misma revisión — tres resultados reales, cada uno
+  // con su propio manejo: "confirmado" corrige el tipo; "no_encontrado"
+  // (los DOS, /items Y /products, dieron 404 real) rechaza el alta con
+  // un mensaje claro, nunca guarda un recurso que Mercado Libre
+  // confirmó que no existe; "transitorio" (403/5xx, nunca bloquea)
+  // sigue con lo que ya interpretó el texto del link, con un aviso en
+  // el log — scripts/corregir-tipo-recurso-seguimiento.ts corrige
+  // después los que de verdad hayan quedado mal guardados por esto.
   if (datos.tipo === "producto") {
-    const confirmado = await confirmarRecursoProductoMl(interpretado.mlIdExterno, token);
-    if (confirmado) interpretado = { recursoMl: confirmado, mlIdExterno: interpretado.mlIdExterno };
+    const confirmacion = await confirmarRecursoProductoMl(interpretado.mlIdExterno);
+    if (confirmacion.estado === "confirmado") {
+      interpretado = { recursoMl: confirmacion.recursoMl, mlIdExterno: interpretado.mlIdExterno };
+    } else if (confirmacion.estado === "no_encontrado") {
+      throw new LinkMlInvalidoError("No encontramos ese producto en Mercado Libre — revisá el link o el id.");
+    } else {
+      console.warn(
+        `[lib/seguimiento/seguimientos] no se pudo confirmar el tipo de ${interpretado.mlIdExterno} contra Mercado Libre (403/5xx transitorio) — se guarda como "${interpretado.recursoMl}", el tipo que interpretó el link.`
+      );
+    }
   }
 
   const nombre = await resolverNombre(datos.tipo, interpretado.recursoMl, interpretado.mlIdExterno, token);

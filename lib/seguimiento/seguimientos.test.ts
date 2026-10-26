@@ -184,6 +184,23 @@ describe("agregarSeguimiento (issue #175)", () => {
     expect(seguimiento.nombre).toBe(NOMBRE_PENDIENTE_PRIMERA_REVISION);
   });
 
+  // Issue #250, punto 4 de la revisión de Pablo — si /items Y /products
+  // dan 404 real (el recurso de verdad no existe), el alta se rechaza
+  // con un mensaje claro, nunca guarda un recurso que Mercado Libre ya
+  // confirmó que no existe.
+  it("ni /items ni /products lo encuentran (404 real en los dos): rechaza con mensaje claro, nunca guarda nada", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+
+    await expect(agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false })).rejects.toThrow(
+      /No encontramos ese producto en Mercado Libre/
+    );
+
+    const activos = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.empresaId, empresaId)));
+    expect(activos).toHaveLength(0);
+  });
+
   // Issue #201 — bug real en staging: antes el fallback era el id tal
   // cual (ej. "123456789") y la tabla se llenaba de ids indistinguibles
   // entre sí. Ahora el fallback es un placeholder explícito, nunca el

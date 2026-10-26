@@ -54,10 +54,14 @@ export type ResultadoRevisionDiaria = {
   activos: number;
   procesados: number;
   // Issue #196 — distinto de "procesados": el índice único
-  // seguimiento_id+fecha bloqueó el insert porque YA había una foto de
-  // hoy para este seguimiento (corrida manual repetida, o una carrera
-  // entre dos corridas del cron a la vez) — nunca se escribió nada
-  // nuevo, pero tampoco fue un error real (ver revisarUnSeguimiento).
+  // seguimiento_id+fecha bloqueó el insert en la carrera real
+  // (rarísima) de dos corridas del cron a la vez — nunca se escribió
+  // nada nuevo, pero tampoco fue un error real (ver revisarUnSeguimiento).
+  // Corrección de Pablo al punto 3 del #250 — el caso COMÚN de "ya
+  // había foto de hoy" (la ronda de la tarde alcanzando lo que la
+  // madrugada ya procesó) ya NO cuenta como saltado: se detecta antes
+  // de llamar a ML y se actualiza esa fila, así que cuenta como
+  // "procesados".
   saltados: number;
   fallidos: number;
   alertasCreadas: number;
@@ -69,9 +73,14 @@ export type ResultadoRevisionDiaria = {
 // Issue #250, punto E — esto sigue siendo por FECHA calendario a
 // propósito: `seguimiento_fotos` sigue con una sola fila por
 // seguimiento por día (índice único, sin migración para cambiar eso
-// ahora) — la ronda de la tarde intenta igual, pero si ya hay foto de
-// hoy, el `onConflictDoNothing()` de revisarUnSeguimiento la deja como
-// "saltada", nunca inventa una segunda foto el mismo día.
+// ahora). Ninguna de las dos ventanas del cron (madrugada/tarde, ver
+// abajo) cruza la medianoche de Bogotá, así que esta fecha (UTC
+// truncada) cae siempre en el mismo día calendario que percibe
+// alguien en Bogotá para esas ventanas — no hace falta una segunda
+// función de "hoy en hora Bogotá" para el chequeo del punto 3 de
+// revisarUnSeguimiento. Si la ronda de la tarde encuentra que ya hay
+// foto de hoy, ACTUALIZA esa fila con lo más reciente de la API (ver
+// revisarUnSeguimiento) — nunca inventa una segunda foto el mismo día.
 function fechaDeHoy(): Date {
   const hoy = new Date();
   hoy.setUTCHours(0, 0, 0, 0);
@@ -155,22 +164,21 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
           `${status != null ? `, HTTP ${status}` : ""}${endpoint ? `, endpoint=${endpoint}` : ""}) no se pudo revisar:`,
         error instanceof Error ? error.message : error
       );
-      // Issue #250, punto C (decisión de Mateo, 2026-10-25) — ya NO se
-      // marca ultima_revision_ts en un fallo. El issue #175 original
-      // SÍ la marcaba a propósito (ver el comentario que esto
-      // reemplaza): sin eso, un fallido permanente (empresa sin cuenta
-      // ML conectada, recurso que de verdad no existe) se quedaba al
-      // frente del lote (ASC NULLS FIRST) para siempre, ahogando los
-      // 50 cupos en cada corrida siguiente. Revertir ESE fix es
-      // intencional acá: con dos ventanas al día (punto E) y el cron
-      // horario dentro de cada ventana, Mateo prefiere que un fallo
-      // TRANSITORIO (token recién vencido, un 403/5xx puntual) se
-      // reintente en la próxima corrida en vez de esperar hasta
-      // mañana. El riesgo real que motivó el fix de #175 sigue
-      // existiendo para un fallo PERMANENTE (nunca se va a poder
-      // revisar) — si eso vuelve a ahogar un lote en producción, hace
-      // falta otra solución (ej. un tope de reintentos por
-      // seguimiento), documentado en docs/ESTADO.md si pasa.
+      // Issue #175 (reafirmado tras la corrección de Pablo al punto C
+      // del #250) — SÍ se marca ultima_revision_ts también en un
+      // fallo: sin esto, un fallido permanente (empresa sin cuenta ML
+      // conectada, recurso que de verdad no existe) se queda al frente
+      // del lote (ASC NULLS FIRST) para siempre, ahogando los 50 cupos
+      // en cada corrida siguiente — el bug real que #175 corrigió.
+      // Con el filtro de VENTANA_MINIMA_ENTRE_REVISIONES_HORAS (6h,
+      // punto E) esto YA significa "reintentar en la próxima ventana"
+      // (dos veces al día), nunca "esperar hasta mañana" como antes de
+      // ese punto — por eso una primera versión de este punto C había
+      // quitado esta línea pensando que hacía falta para reintentar
+      // más seguido; Pablo corrigió que eso rompía la protección real
+      // de #175 sin necesidad, porque la ventana de 6h ya resuelve el
+      // reintento rápido por sí sola.
+      await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id));
     }
   }
 
@@ -218,13 +226,41 @@ function aFotoComparable(fila: typeof seguimientoFotos.$inferSelect): FotoCompar
 
 type ResultadoUnSeguimiento = { saltado: boolean; alertasCreadas: number };
 
-// `saltado: true` SOLO cuando el índice único seguimiento_id+fecha
-// bloqueó el insert porque ya había una foto de hoy (ver el
-// onConflictDoNothing más abajo) — nunca se escribió nada nuevo.
-// `saltado: false` con `alertasCreadas: 0` es un caso DISTINTO: la
-// foto de hoy SÍ se escribió (sí fue "procesado"), simplemente no hay
-// foto de ayer con qué compararla todavía (primera foto de este
-// seguimiento) — no hay alertas que generar, pero no es un salto.
+// Campos que SIEMPRE vienen de la API (nunca los escribe la
+// extensión) — los únicos que la ronda de la tarde actualiza cuando
+// ya existe una foto de hoy (ver más abajo). inventarioDisponible/
+// inventarioAproximado/vendidos/publicaciones quedan afuera a
+// propósito: son las mismas columnas que issue #251 reusa para lo que
+// la extensión lee de la página (nunca llamadas a Mercado Libre) —
+// aunque esa rama todavía no está mergeada acá, esta ronda nunca debe
+// pisar un dato más completo (de la extensión) con uno más parcial de
+// la API, mismo criterio ya documentado en #251.
+type CamposApiDeFoto = Pick<typeof seguimientoFotos.$inferInsert, "precio" | "precioAnterior" | "estado" | "enCatalogo" | "ganaBotonCompra" | "esFull" | "esEnvioGratis">;
+
+function camposApiDeDatos(datos: Awaited<ReturnType<typeof leerConReintento429>>): CamposApiDeFoto {
+  return {
+    precio: datos.precio != null ? String(datos.precio) : null,
+    precioAnterior: datos.precioAnterior != null ? String(datos.precioAnterior) : null,
+    estado: datos.estado,
+    enCatalogo: datos.enCatalogo,
+    ganaBotonCompra: datos.ganaBotonCompra,
+    esFull: datos.esFull,
+    esEnvioGratis: datos.esEnvioGratis,
+  };
+}
+
+// `saltado: true` SOLO en la carrera real (rarísima) de dos corridas
+// del cron a la vez: la ronda de la tarde (abajo) ya mira si hay foto
+// de hoy ANTES de llamar a Mercado Libre, así que el índice único
+// seguimiento_id+fecha solo llega a bloquear un insert cuando otra
+// corrida lo insertó en el instante exacto entre ese chequeo y este
+// insert — onConflictDoNothing sigue de red de seguridad para ESE
+// caso, nunca para el camino normal de la tarde (que ahora actualiza,
+// no inserta-y-descarta). `saltado: false` con `alertasCreadas: 0` es
+// un caso DISTINTO: la foto de hoy SÍ se escribió/actualizó (sí fue
+// "procesado"), simplemente no hay foto de ayer con qué compararla
+// todavía (primera foto de este seguimiento) — no hay alertas que
+// generar, pero no es un salto.
 async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoUnSeguimiento> {
   const cuenta = await obtenerCuentaMlActiva(seguimiento.empresaId);
   if (!cuenta) throw new Error("La empresa no tiene ninguna cuenta de Mercado Libre conectada.");
@@ -248,9 +284,23 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
     }
   }
 
-  const datos = await leerConReintento429(seguimiento, token, cuentaFila.cuentaIdExterna);
-
   const hoy = fechaDeHoy();
+
+  // Corrección de Pablo (revisión del PR #253), punto 3 — mirar ANTES
+  // de llamar a Mercado Libre si ya hay foto de hoy (hora Bogotá;
+  // fechaDeHoy() ya corresponde al mismo día calendario en Bogotá que
+  // las dos ventanas del cron, punto E — ninguna cruza medianoche
+  // Bogotá). La ronda de la tarde alcanzando un seguimiento que la
+  // madrugada ya procesó hoy mismo es el caso NORMAL, no una carrera —
+  // antes esto llamaba a Mercado Libre igual y descartaba el resultado
+  // con onConflictDoNothing ("saltado"), gastando la llamada para
+  // nada. Ahora se sabe desde acá si toca ACTUALIZAR la fila de hoy en
+  // vez de intentar insertar una nueva.
+  const [fotoDeHoyExistente] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+    tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+  );
+
+  const datos = await leerConReintento429(seguimiento, token, cuentaFila.cuentaIdExterna);
 
   const [fotoAnterior] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx
@@ -261,32 +311,38 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
       .limit(1)
   );
 
-  const [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
-    tx
-      .insert(seguimientoFotos)
-      .values({
-        empresaId: seguimiento.empresaId,
-        seguimientoId: seguimiento.id,
-        fecha: hoy,
-        precio: datos.precio != null ? String(datos.precio) : null,
-        precioAnterior: datos.precioAnterior != null ? String(datos.precioAnterior) : null,
-        inventarioDisponible: datos.inventarioDisponible,
-        inventarioAproximado: datos.inventarioAproximado,
-        vendidos: datos.vendidos,
-        estado: datos.estado,
-        enCatalogo: datos.enCatalogo,
-        ganaBotonCompra: datos.ganaBotonCompra,
-        esFull: datos.esFull,
-        esEnvioGratis: datos.esEnvioGratis,
-        publicaciones: datos.publicaciones,
-      })
-      // Si el trabajo ya corrió hoy para este seguimiento (una corrida
-      // manual repetida, o el cron disparado dos veces), el índice
-      // único seguimiento_id+fecha lo bloquea — onConflictDoNothing en
-      // vez de dejar que la excepción tumbe el lote entero.
-      .onConflictDoNothing()
-      .returning()
-  );
+  let fotoNueva: typeof seguimientoFotos.$inferSelect | undefined;
+  if (fotoDeHoyExistente) {
+    // Actualiza SOLO los campos de API (precio, Full, catálogo, etc.)
+    // con lo más reciente — nunca toca inventarioDisponible/
+    // inventarioAproximado/vendidos/publicaciones (ver camposApiDeDatos,
+    // arriba). Genera alertas comparando esta fila ya actualizada
+    // contra la de ayer, igual que el camino de insertar.
+    [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.update(seguimientoFotos).set(camposApiDeDatos(datos)).where(eq(seguimientoFotos.id, fotoDeHoyExistente.id)).returning()
+    );
+  } else {
+    [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx
+        .insert(seguimientoFotos)
+        .values({
+          empresaId: seguimiento.empresaId,
+          seguimientoId: seguimiento.id,
+          fecha: hoy,
+          ...camposApiDeDatos(datos),
+          inventarioDisponible: datos.inventarioDisponible,
+          inventarioAproximado: datos.inventarioAproximado,
+          vendidos: datos.vendidos,
+          publicaciones: datos.publicaciones,
+        })
+        // Red de seguridad para la carrera real (rarísima) entre dos
+        // corridas del cron a la vez, en el instante exacto entre el
+        // chequeo de arriba y este insert — nunca el camino normal,
+        // ver el comentario de ResultadoUnSeguimiento arriba.
+        .onConflictDoNothing()
+        .returning()
+    );
+  }
   if (!fotoNueva) return { saltado: true, alertasCreadas: 0 };
   if (!fotoAnterior) return { saltado: false, alertasCreadas: 0 };
 

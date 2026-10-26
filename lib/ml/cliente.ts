@@ -392,27 +392,60 @@ export async function obtenerProducto(productId: string, token: string): Promise
 // Libre antes de guardar (agregarSeguimiento, lib/seguimiento/seguimientos.ts):
 // intenta /items/{id}; solo si da 404 (nunca con otro código — un
 // 403/5xx transitorio no prueba nada sobre el tipo real) prueba
-// /products/{id} (reusa obtenerProducto, ya tolerante a 403/5xx).
-// null = no se pudo confirmar nada hoy (ni existe como item con 404
-// real, ni se pudo confirmar como product, o Mercado Libre no deja
-// ver ninguno de los dos ahora) — el llamador decide: nunca se
-// adivina un tipo a partir de esto solo. 401 propaga, mismo criterio
-// que el resto del archivo.
-export async function confirmarRecursoProductoMl(mlIdExterno: string, token: string): Promise<"item" | "product" | null> {
-  if (!PATRON_ID_PRODUCTO_O_ITEM.test(mlIdExterno)) return null;
+// /products/{id}.
+//
+// Corrección de Pablo (revisión del PR #253) — a propósito SIN token:
+// esta confirmación es solo "¿existe este recurso?", nunca necesita
+// ver datos privados de una cuenta — pasar un token acá arriesgaba
+// consumir un refresh token de un solo uso de la app de Mercado Libre
+// COMPARTIDA entre staging y producción, por una simple verificación
+// de existencia. pedir() acepta token opcional (sin Authorization
+// cuando no se pasa) — si algún día Mercado Libre empezara a exigir
+// autenticación para esto (un 401 real, inesperado sin token), se
+// trata como "transitorio" (nunca se bloquea el alta, nunca se busca
+// la forma de mandar un token acá) y se deja un aviso en el log para
+// que alguien lo revise — nunca se vuelve a meter un token en su
+// lugar sin hablarlo primero.
+//
+// Tres resultados reales, nunca uno solo "no sé" (issue #250, punto 4
+// de la revisión): "confirmado" (se puede guardar con ese recurso_ml),
+// "no_encontrado" (los DOS dieron 404 real — no existe, el alta debe
+// rechazarse con un mensaje claro) y "transitorio" (403/5xx, formato
+// inválido, o un 401 inesperado — nunca se adivina nada, el llamador
+// sigue con lo que ya interpretó el texto del link).
+export type ConfirmacionRecursoMl = { estado: "confirmado"; recursoMl: "item" | "product" } | { estado: "no_encontrado" } | { estado: "transitorio" };
+
+export async function confirmarRecursoProductoMl(mlIdExterno: string): Promise<ConfirmacionRecursoMl> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(mlIdExterno)) return { estado: "transitorio" };
   const urlItem = `${BASE_URL}/items/${encodeURIComponent(mlIdExterno)}?attributes=id`;
   let eraNotFound = false;
   try {
-    const resp = await pedir<{ id?: unknown }>(urlItem, token);
-    if (resp.ok) return "item";
+    const resp = await pedir<{ id?: unknown }>(urlItem);
+    if (resp.ok) return { estado: "confirmado", recursoMl: "item" };
     eraNotFound = resp.status === 404;
   } catch (e) {
-    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null; // transitorio, no confirma nada
+    if (e instanceof MlNoAutorizadoError) {
+      console.warn(`[lib/ml/cliente] confirmarRecursoProductoMl — 401 SIN token en /items/${mlIdExterno}: inesperado, revisar con Pablo/Mateo si ML empezó a exigir auth acá.`);
+      return { estado: "transitorio" };
+    }
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return { estado: "transitorio" };
     throw e;
   }
-  if (!eraNotFound) return null; // 4xx distinto de 404 — no es el caso que resuelve este issue
-  const producto = await obtenerProducto(mlIdExterno, token);
-  return producto ? "product" : null;
+  if (!eraNotFound) return { estado: "transitorio" }; // 4xx distinto de 404 — no es el caso que resuelve este issue
+
+  const urlProducto = `${BASE_URL}/products/${encodeURIComponent(mlIdExterno)}?attributes=id`;
+  try {
+    const resp = await pedir<{ id?: unknown }>(urlProducto);
+    if (resp.ok) return { estado: "confirmado", recursoMl: "product" };
+    return resp.status === 404 ? { estado: "no_encontrado" } : { estado: "transitorio" };
+  } catch (e) {
+    if (e instanceof MlNoAutorizadoError) {
+      console.warn(`[lib/ml/cliente] confirmarRecursoProductoMl — 401 SIN token en /products/${mlIdExterno}: inesperado, revisar con Pablo/Mateo si ML empezó a exigir auth acá.`);
+      return { estado: "transitorio" };
+    }
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return { estado: "transitorio" };
+    throw e;
+  }
 }
 
 export type ItemMl = { producto: ProductoCatalogoMl; oferta: OfertaMl | null };
@@ -885,9 +918,17 @@ function idsDeResultadosBusqueda(resultados: unknown): string[] {
 // contaba como "fallida" (ni siquiera guardaba una foto). Ahora null
 // significa "ninguno de los dos caminos dejó ver nada hoy" (sin dato
 // de la API, nunca "la tienda no tiene publicaciones") — distinto de
-// [] (los dos caminos respondieron, de verdad no hay ninguna
+// [] (los dos caminos respondieron OK, de verdad no hay ninguna
 // publicación visible). El llamador (obtenerPublicacionesVendedorAjenoMl)
 // propaga esa misma distinción.
+//
+// Corrección de Pablo (revisión del PR #253) — CUALQUIER respuesta
+// no-ok del buscador público es "sin dato" (null), no solo un 403: un
+// 404/400/etc. ahí no confirma que la tienda de verdad no tenga
+// publicaciones (ese buscador no es el dueño de ese dato, al revés
+// del 404 real de /items o /products en confirmarRecursoProductoMl) —
+// tratarlo como [] hubiera sido inventar un "cero publicaciones" que
+// Mercado Libre nunca confirmó.
 async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Promise<string[] | null> {
   if (!PATRON_ID_VENDEDOR.test(sellerId)) return [];
   const urlPropio = `${BASE_URL}/users/${encodeURIComponent(sellerId)}/items/search?limit=${TOPE_PUBLICACIONES_TIENDA}`;
@@ -900,7 +941,7 @@ async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Pr
   const urlPublico = `${BASE_URL}/sites/${SITE_ID}/search?seller_id=${encodeURIComponent(sellerId)}&limit=${TOPE_PUBLICACIONES_TIENDA}`;
   try {
     const respPublico = await pedir<{ results?: unknown[] }>(urlPublico, token);
-    if (!respPublico.ok) return [];
+    if (!respPublico.ok) return null; // cualquier no-ok, no solo 403 — sin dato, nunca "cero publicaciones" inventado
     return idsDeResultadosBusqueda(respPublico.data.results);
   } catch (e) {
     if (e instanceof MlSinPermisoAppError) return null; // sin dato de la API hoy — nunca una falla del lote
