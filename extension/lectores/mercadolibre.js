@@ -343,8 +343,48 @@
     return Math.round(((vendidos * factor * 30) / diasTranscurridos) * 10) / 10;
   }
 
+  // Issue #245 — Mateo confirmó leyendo Zilonix OS hoy
+  // (chrome-extension-busqueda/scraper-listado.js) que ese repo NO
+  // tiene ningún detector de Full en la ficha de producto — solo en
+  // el listado, con este selector exacto, ya confirmado en producción:
+  //   const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+  // El intento de #243 (detectarFullEnHtmlEnvio, acotado a un bloque
+  // de envío resuelto con selectores nunca confirmados en producción
+  // de verdad) era la corrección equivocada: si ese bloque no se
+  // resolvía, `esFull` caía siempre a `false` sin importar si el
+  // badge real estaba visible — exactamente el bug que reportó Sharel
+  // con "Zelotes F35" en 0.3.17. Acá se copia el MISMO selector de OS,
+  // tal cual, sin un bloque de envío como gate obligatorio.
+  function detectarFullEnHtmlFicha(htmlFicha) {
+    if (typeof htmlFicha !== "string" || !htmlFicha) return false;
+    // Match EXACTO del aria-label, igual que el selector de atributo
+    // de OS (`[aria-label="Enviado por FULL"]` en CSS es exacto, no
+    // substring) — nunca un "full" suelto que confunda con un título
+    // real tipo "Full HD".
+    return /<svg\b[^>]*\baria-label\s*=\s*["']Enviado por FULL["'][^>]*>/i.test(htmlFicha);
+  }
+
   function leerProducto(doc) {
-    const bloqueEnvio = U.primerElemento([".ui-pdp-shipping", ".ui-pdp-container__col--shipping"], doc);
+    // Issue #243 — selectores reales confirmados contra una ficha real
+    // (CDX/Wayback, mayo/2026); los viejos (.ui-pdp-shipping /
+    // .ui-pdp-container__col--shipping) quedan de respaldo, nunca
+    // confirmados vigentes hoy pero tampoco descartados por si alguna
+    // variante de categoría/país todavía los usa. Issue #245 — esto ya
+    // NO decide esFull (ver más abajo): solo sirve para envioGratis y,
+    // cuando existe, como zona segura para buscar el badge Full sin
+    // agarrar el de un producto DISTINTO en el carrusel de
+    // "productos relacionados" de la misma página (se confirmó el
+    // mismo ícono ahí en #243).
+    const bloqueEnvio = U.primerElemento(
+      [
+        ".ui-pdp-container__row--shipping-summary",
+        ".ui-vpp-shipping_summary",
+        "#shipping_summary",
+        ".ui-pdp-shipping",
+        ".ui-pdp-container__col--shipping",
+      ],
+      doc
+    );
     const textoEnvio = bloqueEnvio ? bloqueEnvio.textContent || "" : "";
     const textoSubtitulo = U.textoDe([".ui-pdp-subtitle", "span.ui-pdp-subtitle"], doc) || "";
 
@@ -367,7 +407,17 @@
     // Issue #197 — calculado ACÁ (no más abajo, donde antes vivía
     // inline en el objeto de retorno) para poder pasarlo al ajuste
     // "estilo Selltrix" de calcularVentasPromedioMes.
-    const esFull = /\bfull\b/i.test(textoEnvio);
+    // Issue #245 — Zilonix OS confirmó que NO tiene detector de Full
+    // en la ficha, solo en el listado (ver comentario completo sobre
+    // detectarFullEnHtmlFicha, arriba). #243 gateaba esFull a `false`
+    // si bloqueEnvio no se resolvía — ESE era el bug real que reportó
+    // Sharel con Zelotes F35 en 0.3.17, no el regex. Acá nunca hay un
+    // gate a `false`: se busca el badge primero en bloqueEnvio (si se
+    // resolvió, para no agarrar el de un producto distinto del
+    // carrusel de "relacionados") y, si no, en la ficha completa —
+    // igual que el criterio simple de OS, que en el listado nunca
+    // necesita este respaldo porque cada tarjeta ya viene separada.
+    const esFull = detectarFullEnHtmlFicha(bloqueEnvio ? bloqueEnvio.outerHTML : htmlCompleto);
 
     return {
       titulo: U.textoDe(["h1.ui-pdp-title", "h1[data-testid='product-title']"], doc),
@@ -493,14 +543,33 @@
     for (const s of candidatos) {
       const texto = (s.textContent || "").trim();
       if (estrellas === null) {
-        const mEst = texto.match(/Calificaci[oó]n\s+([\d.,]+)\s+de\s+5/i);
+        // Issue #239, punto 4 — bug real confirmado en Brasil: el texto
+        // de accesibilidad ahí NUNCA dice "Calificación" (español) —
+        // dice "Avaliação X de 5. (N avaliações)" (portugués),
+        // confirmado contra una captura real de hoy de
+        // lista.mercadolivre.com.br. El regex viejo solo reconocía la
+        // palabra en español, así que `estrellas` quedaba siempre
+        // `null` para Brasil — nunca un problema de formato del
+        // número (la coma decimal "4,7" es igual en los dos idiomas),
+        // solo de la palabra. Se suma la alternativa en portugués.
+        const mEst = texto.match(/(?:Calificaci[oó]n|Avaliaç[aã]o)\s+([\d.,]+)\s+de\s+5/i);
         if (mEst) {
           const valor = parseFloat(mEst[1].replace(",", "."));
           if (Number.isFinite(valor)) estrellas = valor;
         }
       }
       if (vendidos === null) {
-        const mVend = texto.match(/(?:[Mm]ás de\s+)?([\d.,]+)\+?\s*productos?\s+vendid/i);
+        // Issue #239, punto 4 — generalización defensiva (nunca
+        // confirmada contra una tarjeta real con número, español o
+        // portugués: tanto Colombia como Brasil, en las categorías
+        // revisadas hoy, solo muestran la etiqueta cualitativa "MÁS
+        // VENDIDO"/"MAIS VENDIDO" sin ninguna cifra — "vendidos: null"
+        // ahí es correcto, no un bug, nunca se inventa un número a
+        // partir de esa etiqueta). Se suma "mais de"/"produtos" (PT)
+        // junto a "más de"/"productos" (ES) por las dudas de que otra
+        // categoría sí muestre el número en portugués — "vendid" es
+        // la misma raíz en los dos idiomas, nunca hace falta duplicarla.
+        const mVend = texto.match(/(?:(?:[Mm]ás|[Mm]ais)\s+de\s+)?([\d.,]+)\+?\s*(?:productos?|produtos?)\s+vendid/i);
         if (mVend) {
           const valor = Number(mVend[1].replace(/\./g, "").replace(",", ""));
           if (Number.isFinite(valor)) vendidos = valor;
@@ -511,56 +580,118 @@
     return { estrellas, vendidos };
   }
 
+  // Issue #242 — confirmado funcionando en producción por Zilonix OS
+  // (mateodta2-code/zilonix-os, chrome-extension-busqueda/scraper-listado.js):
+  //   const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+  // Issue #248 (vueltas 1 a 3) había ensanchado esto en capas de
+  // texto/atributos más un diagnóstico temporal, buscando un bug que
+  // resultó ser 100% timing (ver content.js, `esperarListadoEstable`)
+  // — el HTML real citado en la vuelta 3 confirmó que el selector
+  // simple de OS, SOLO, ya reconoce el badge real sin necesitar
+  // ninguna capa extra. Issue #248 (vuelta 4) — simplificación pedida
+  // por Mateo: se sacan esas capas y el diagnóstico, de vuelta al
+  // mismo criterio simple de OS.
+  //
+  // Mercado Libre Brasil no tiene una confirmación propia disponible
+  // (Zilonix OS es solo Colombia, nunca tocó Brasil) — pero "Enviado"
+  // y "por" son la misma palabra en español y portugués, y "FULL"
+  // nunca se traduce (confirmado en capturas reales de los dos
+  // países, issue #239) — se asume el mismo texto para Brasil sin
+  // inventar una variante distinta sin evidencia.
+  // Issue #240, revisión final antes de mergear — Zilonix OS confirma
+  // Full con DOS marcadores reales, no solo uno: el aria-label exacto
+  // del ícono SVG (confirmado en producción desde #242) y la clase del
+  // ícono del sprite (`icon-poly_full`) — algunas tarjetas (sobre todo
+  // anuncios/Ad, que a veces renderizan el badge con otro markup) lo
+  // traen solo por la clase, sin el aria-label exacto. Nunca
+  // `poly-bookmark__icon-full` (el ícono de favorito, otra cosa por
+  // completo) — ese nombre NUNCA contiene el substring literal
+  // `icon-poly_full` (compará "icon-poly_full" vs "...__icon-full":
+  // el guion bajo entre "poly" y "full" nunca aparece en el de
+  // favorito), así que el selector de abajo no lo confunde.
+  function detectarFullEnTarjeta(tarjeta) {
+    if (!tarjeta) return false;
+    return Boolean(U.primerElemento(['svg[aria-label="Enviado por FULL"]', '[class*="icon-poly_full"]'], tarjeta));
+  }
+
+  // Issue #248 (vuelta 4)/#240 — versión de texto del MISMO criterio de
+  // arriba (los dos marcadores), solo para poder probarlo con un
+  // fixture real sin DOM (este proyecto no tiene jsdom/happy-dom) —
+  // nunca se llama desde ningún camino real: `detectarFullEnTarjeta`
+  // (DOM, arriba) es el único detector que corre en producción.
+  function detectarFullEnHtmlTarjeta(htmlTarjeta) {
+    if (typeof htmlTarjeta !== "string" || !htmlTarjeta) return false;
+    if (/<svg\b[^>]*\baria-label\s*=\s*["']Enviado por FULL["'][^>]*>/i.test(htmlTarjeta)) return true;
+    return /class\s*=\s*["'][^"']*icon-poly_full[^"']*["']/i.test(htmlTarjeta);
+  }
+
+  // Issue #248 (vuelta 2) — señal fuerte y barata, OPCIONAL (un OR
+  // sobre el detector real de arriba, nunca su reemplazo): si la URL
+  // del listado ya tiene el filtro "Full" de Mercado Libre puesto,
+  // TODOS los productos orgánicos de ese listado SON Full por
+  // DEFINICIÓN del filtro — no hace falta que ningún selector de DOM
+  // lo confirme. Formas reales conocidas del filtro en la URL:
+  // "_Envio_FULL" (confirmada en el issue #247) y
+  // "shipping_highlighted_fulfillment" (confirmada en #248) — nunca se
+  // inventa una tercera sin evidencia.
+  const REGEX_FILTRO_FULL_EN_URL = /envio[-_]?full\b|shipping[-_]?highlighted[-_]?fulfillment|full[-_]?fulfillment/i;
+  function filtroFullActivoEnUrl(url) {
+    return typeof url === "string" && REGEX_FILTRO_FULL_EN_URL.test(url);
+  }
+
+  // Issue #248 (vuelta 5) — evidencia real de Pablo (listado "tetero"
+  // CO, filtro apagado): ~60 `li` reales, 39 con Full visible (7
+  // anuncios + 32 orgánicos) — y el panel seguía en 0/48. Hipótesis
+  // confirmada: `esperarListadoEstable` (content.js) medía la
+  // cantidad YA FILTRADA (`leerListado(...).productos.length`, sin
+  // anuncios/inválidas) para decidir "estable" — ese número puede
+  // quedar quieto ANTES de que Mercado Libre termine de hidratar el
+  // badge Full DENTRO de cada `li`, aunque la cantidad de tarjetas en
+  // sí todavía esté cambiando. Zilonix OS (`esperarTarjetas`) nunca
+  // tuvo este problema porque mide la cantidad CRUDA de `li` en el
+  // DOM, antes de cualquier filtro — se expone esa misma cuenta cruda
+  // acá para que `content.js` pueda usarla igual, sin que
+  // `esperarListadoEstable` deje de ser genérico para las otras 5
+  // plataformas (si el lector activo no expone esta función, cae de
+  // vuelta a `productos.length`, el criterio de siempre).
+  function contarTarjetasListado(doc) {
+    return doc.querySelectorAll("li.ui-search-layout__item").length;
+  }
+
   function leerListado(doc) {
+    // Issue #248 (vuelta 2) — ver filtroFullActivoEnUrl arriba: si el
+    // filtro Full de la URL está puesto, se calcula UNA vez por
+    // listado, nunca por tarjeta.
+    const filtroFullActivo = filtroFullActivoEnUrl(doc && doc.URL);
     const tarjetas = doc.querySelectorAll("li.ui-search-layout__item");
     const productos = [];
+    // Issue #248 (vuelta 6) — decisión de producto de Sharel, con
+    // evidencia real: listado de teteros CO sin filtro, ~60 tarjetas
+    // = ~12 Ad (la mayoría con el badge Full real visible) + ~48
+    // orgánicos (~0-1 Full). `productos` nunca incluye Ads (regla de
+    // siempre, nunca mezclar pago con orgánico) — así que contar Full
+    // SOLO sobre `productos` daba un "0/48" técnicamente correcto pero
+    // engañoso, con badges Full bien visibles en pantalla (los de los
+    // Ad). `estadisticasFull` cuenta sobre TODAS las tarjetas
+    // (orgánicos + Ad) — nunca se usa para decidir qué entra a
+    // `productos`, solo para este número aparte.
+    let tarjetasConFull = 0;
     tarjetas.forEach((tarjeta) => {
+      // Issue #242/#248 — ver `detectarFullEnTarjeta`/
+      // `filtroFullActivoEnUrl` arriba. Si el filtro de la URL ya
+      // confirma Full para TODO el listado, ni se llama al detector de
+      // DOM — la URL nunca puede contradecir su propio filtro.
+      const esFull = filtroFullActivo || detectarFullEnTarjeta(tarjeta);
+      if (esFull) tarjetasConFull += 1;
+
       const linkEl = U.primerElemento(["a.poly-component__title"], tarjeta);
       const href = linkEl ? linkEl.getAttribute("href") : null;
       const idInfo = clasificarLinkListadoMl(href);
       if (!idInfo) return; // sin forma de identificar la publicación, se descarta — nunca se inventa
 
       const esAnuncio = Boolean(U.primerElemento(['a.poly-component__ads-promotions', 'a[aria-label="Promocionado"]'], tarjeta));
-      if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico
+      if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico (esFull de este Ad YA se contó arriba, en tarjetasConFull — nunca entra a productos)
 
-      // Issue #229 — hotfix de smoke: Sharel reportó TODO marcado "No"
-      // (nunca "Full") a pesar de publicaciones Full reales visibles.
-      // El selector `svg[aria-label="Enviado por FULL"]` (el que
-      // confirmó Cowork en zilonix-os-web hace tiempo) ya no existe en
-      // el HTML real — esta tarea (issue #235) confirmó, leyendo una
-      // captura real de hoy de listado.mercadolibre.com.co vía la
-      // Wayback Machine (el acceso directo sigue bloqueado por una
-      // verificación de cuenta, igual que en #229/#231/#233 — esa fue
-      // la forma de conseguir HTML real sin inventar nada), que
-      // Mercado Libre rediseñó el ícono de Full: ya NO es un
-      // aria-label de texto, es un ícono del sistema de diseño
-      // Polycard con `data-testid="icon-poly_full"` y clase
-      // `ui-search-icon--full` (confirmado en el filtro "Envío · Full"
-      // de esa misma página — el mismo ícono reusable que el propio
-      // JSON incrustado de la página nombra "vpp_full_icon"/"icon-poly_full"
-      // en su plantilla "Enviado por {vpp_full_icon}"). Esta sesión NO
-      // pudo confirmar ese mismo marcador DENTRO de una tarjeta de
-      // producto puntual en la captura disponible (ninguna de las
-      // tarjetas visibles en esa búsqueda concreta tenía el badge
-      // renderizado, aunque el filtro decía "17 resultados" con Full)
-      // — se prioriza igual como selector principal por ser la
-      // confirmación más real disponible, con los selectores viejos
-      // como respaldo por si alguna variante de tarjeta todavía los
-      // usa. Si sigue en "No" en el próximo smoke, hace falta
-      // confirmar el marcador real DENTRO de una tarjeta Full visible
-      // (clic derecho → inspeccionar sobre una publicación Full real),
-      // nunca adivinar de nuevo.
-      const esFull = Boolean(
-        U.primerElemento(
-          [
-            'svg[data-testid="icon-poly_full"]',
-            "svg.ui-search-icon--full",
-            'svg[aria-label="Enviado por FULL" i]',
-            '[aria-label*="envi" i][aria-label*="full" i]',
-          ],
-          tarjeta
-        )
-      );
       const { estrellas, vendidos } = leerCalificacionYVendidosListado(tarjeta);
       const fotoEl = U.primerElemento(["img.poly-component__picture"], tarjeta);
 
@@ -584,7 +715,7 @@
         link: href || null,
       });
     });
-    return { productos };
+    return { productos, estadisticasFull: { totalTarjetas: tarjetas.length, conFull: tarjetasConFull } };
   }
 
   // Issue #225 — "Top 8 reseñas": fuente real confirmada en vivo por
@@ -698,6 +829,7 @@
     tipoDePagina,
     leerProducto,
     leerListado,
+    contarTarjetasListado,
     leerTienda,
     leerDatosIncrustados,
     calcularVentasPromedioMes,
@@ -715,6 +847,19 @@
     // poder probarla de verdad, mismo criterio que el resto de este
     // archivo.
     clasificarLinkListadoMl,
+    // Issue #241 — puro (string de HTML -> boolean, sin DOM) a
+    // propósito: es la cuarta vuelta del bug de Full, y esta vez se
+    // puede probar con un fixture real sin depender de un selector CSS
+    // que solo se confirma (o no) en vivo.
+    detectarFullEnHtmlTarjeta,
+    // Issue #245 — puro (string de HTML de la ficha, o del bloque de
+    // envío ya resuelto -> boolean), calco exacto del selector real de
+    // Zilonix OS para Full, probado con fixture real.
+    detectarFullEnHtmlFicha,
+    // Issue #248 (vuelta 2) — puro (string de URL -> boolean), señal
+    // fuerte del filtro Full de Mercado Libre, probado con casos
+    // reales de la URL.
+    filtroFullActivoEnUrl,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe
@@ -724,6 +869,18 @@
     module.exports = api;
   }
   if (typeof window !== "undefined") {
-    window.ZilonixLectorActivo = { sitio: "Mercado Libre Colombia", tipoDePagina, leerProducto, leerListado, leerTienda, leerResenas };
+    window.ZilonixLectorActivo = {
+      sitio: "Mercado Libre Colombia",
+      tipoDePagina,
+      leerProducto,
+      leerListado,
+      leerTienda,
+      leerResenas,
+      // Issue #248 (vuelta 5) — ver el comentario completo arriba de
+      // `contarTarjetasListado`. Opcional a propósito: las otras 5
+      // plataformas no la exponen, `esperarListadoEstable`
+      // (content.js) cae a `productos.length` si no está.
+      contarTarjetasListado,
+    };
   }
 })();

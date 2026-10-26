@@ -168,6 +168,209 @@ El smoke de #235/#236 confirmó que `img-src` era la causa real del bloqueo de f
 
 **Nada se tocó del lado de la extensión** para este fix — ni `extension/lectores/aliexpress.js` (más allá de un comentario, sin cambio de comportamiento) ni ninguna otra pieza: la extensión nunca valida ni restringe dominios, eso vive por completo en el CSP de la app (`next.config.mjs`). Por eso esta tarea **no sube la versión de la extensión** (sigue en 0.3.13) — el fix necesita que *staging/producción redeploye desde `main`*, nunca una reinstalación de la extensión.
 
+## Hotfix de smoke #6 — Full ML, tercer intento (issue #239)
+
+Dos intentos anteriores (#229, #236) habían cambiado el selector de Full de `mercadolibre.js` SIN encontrar el marcador real dentro de una tarjeta — los dos terminaron apuntando a otros elementos de la página (un filtro de la barra lateral, no la tarjeta de producto en sí), así que seguían sin matchear nada real: "% FULL" en 0%, columna Full en "No" para todas las filas, en Colombia y en Brasil por igual.
+
+**Esta vez, confirmado DENTRO de más de 100 tarjetas de producto reales** (Wayback Machine, dos capturas frescas: `listado.mercadolibre.com.co/gorras` — 50 de 51 tarjetas con el badge — y `lista.mercadolivre.com.br/tenis` — mismo resultado exacto; el acceso directo a Mercado Libre sigue bloqueado desde este sandbox, mismo criterio de siempre): el badge real es
+
+```html
+<span class="poly-component__shipped-from">Enviado por
+  <svg aria-label="FULL" width="41" height="13" viewbox="0 0 41 13" role="img">
+    <use href="#poly_full"></use>
+  </svg>
+</span>
+```
+
+El `aria-label` real del `<svg>` es literalmente **`"FULL"`** (4 letras) — NUNCA `"Enviado por FULL"` (esa frase vive afuera del `svg`, en el texto del `<span>` que lo envuelve; de ahí el bug real de #229, que comparaba contra un string que nunca estuvo DENTRO del atributo). Tampoco tiene `data-testid="icon-poly_full"` ni la clase `ui-search-icon--full` que había asumido #236 (esos sí existen en la página, pero en el FILTRO "Envío · Full" de la barra lateral — un elemento completamente distinto, que `leerListado` nunca llega a leer porque está fuera de `li.ui-search-layout__item`). **Polycard es el mismo componente compartido entre países — "FULL" nunca se traduce, ni en Brasil.** Corregido: `esFull` ahora usa un único selector, `svg[aria-label="FULL" i]`, confirmado real — se sacan los 3 selectores viejos (#229/#236), confirmados ahora que apuntaban a elementos equivocados, cero matches reales en toda la evidencia revisada.
+
+**De paso (punto 4 del issue) — Brasil también tenía Calificación "—"**: confirmado que el texto de accesibilidad real en Brasil dice **"Avaliação X de 5"** (portugués), nunca "Calificación" (español) — `leerCalificacionYVendidosListado` solo reconocía la palabra en español, así que `estrellas` quedaba siempre `null` ahí (el número en sí, con coma decimal, es igual en los dos idiomas — solo la palabra cambiaba). Se suma la alternativa en portugués. **"Vendidos: Sin dato" en Brasil, en cambio, se confirmó correcto, no un bug**: tanto Colombia (`gorras`) como Brasil (`tenis`), en las categorías revisadas, solo muestran la etiqueta cualitativa "MÁS VENDIDO"/"MAIS VENDIDO" — sin ninguna cifra en la tarjeta — `null` ahí es honesto, nunca se inventó un número a partir de esa etiqueta. Se sumó igual una generalización defensiva a "productos/produtos vendidos" por si otra categoría sí muestra el número en portugués, documentada como no confirmada contra una captura real con cifra (nunca se afirmó que sí existe, solo que el código ya la reconocería si aparece). **"Fact. est. —" en Mercado Libre, confirmado correcto desde #227**: Mercado Libre nunca es `mensual_piso` (solo Amazon lo es) — ese guión es el comportamiento honesto de siempre, nunca un bug a corregir.
+
+**Fuera de alcance de esta tarea, a propósito**: `envioGratis` en `leerProducto` (PDP) usa `/envío\s*gratis|envio\s*gratis/i` — español únicamente, nunca probado contra "frete grátis" (el término real en portugués) — no estaba en el pedido explícito de este issue (que es sobre `leerListado`/Full, no sobre el envío gratis de una página de producto) y no se tocó; queda documentado acá por si hace falta una vuelta aparte.
+
+## Hotfix de smoke #7 — Full ML, cuarto intento (issue #241)
+
+El selector de #239 (`svg[aria-label="FULL" i]`), aunque confirmado contra una captura real de Wayback Machine, **no matcheó en el navegador real** cuando Sharel lo probó con la extensión 0.3.14 en staging: "% FULL" seguía en 0%. Causa real más probable, documentada en vez de adivinada de nuevo: **Wayback captura el HTML que el SERVIDOR mandó** — el listado de Mercado Libre es una SPA que hidrata/re-renderiza del lado del cliente, y esa hidratación puede cambiar cómo queda armado el `<svg>` del ícono sin que el HTML "servido" (lo único que Wayback puede capturar) haya cambiado nunca. Un selector CSS exacto, confirmado solo contra HTML servido, puede dejar de matchear en el DOM real por esto — no significa que la evidencia de #239 fuera falsa, significa que no alcanza.
+
+**Se abandona el selector CSS único** a favor de una función PURA (`detectarFullEnHtmlTarjeta`, string de HTML → boolean — mismo criterio que `clasificarLinkListadoMl`, issue #233) que **se puede probar con un fixture real en vitest**, en vez de depender otra vez de que un selector exacto siga vigente en producción. Recibe el `outerHTML` de la tarjeta (`tarjeta.outerHTML`, no una referencia DOM) y prueba, en capas, siempre acotado al bloque de envío real (`poly-component__shipped-from`/`poly-component__shipping` — nunca "full" suelto en toda la tarjeta, un título real puede decir "Full HD" o "Full Pack"):
+
+1. `aria-label="FULL"` en cualquier elemento del bloque (lo que confirmó #239, ahora sin exigir que sea específicamente un `<svg>`).
+2. Un `<use href="#poly_full">` o `xlink:href` (la forma vieja del mismo atributo SVG — builds/navegadores distintos a veces difieren) — el sprite real que ya confirmó #239, como señal aparte del `aria-label` por si ese atributo es justo lo que cambia al hidratar.
+3. Último recurso: la palabra "Full" como texto visible dentro del bloque de envío — mismo criterio que ya usa `leerProducto` (PDP) con `/\bfull\b/i`.
+
+El acotado al bloque real usa la etiqueta de apertura (`<div>` o `<span>`) y busca su propio cierre — nunca una ventana de caracteres a ciegas: la primera versión de este fix SÍ usaba una ventana fija y el propio test nuevo encontró un falso positivo real (un título "Televisor Full HD" justo después de un bloque "Envío gratis" entraba en la ventana) — corregido antes de este commit, documentado acá porque es exactamente el tipo de bug que el pedido de "tests con fixture HTML real" existe para atrapar.
+
+**Verificado (punto 3 del issue) que el bridge extensión → panel nunca fue el problema**: `content.js` (`esFull: typeof p.esFull === "boolean" ? p.esFull : null`) y `PanelInvestigacion.tsx` (mismo patrón) ya pasaban cualquier boolean real sin pisarlo — el bug siempre estuvo en el lector, nunca en el puente.
+
+**Si "% FULL" sigue en 0% después de este fix, el próximo paso real es el que pidió el issue desde el principio**: un `outerHTML` real de una tarjeta Full en vivo (DevTools → clic derecho sobre la tarjeta → Inspeccionar → copiar el `<li>` completo), pegado directo — no otra ronda de capturas de Wayback. Con una función pura y testeada, un selector nuevo confirmado así se agrega en minutos, sin volver a adivinar.
+
+## Hotfix de smoke #8 — Full ML, QUINTO intento, esta vez con el selector real (issue #242)
+
+0.3.14/0.3.15 (#239/#241) seguían en 0%. Causa real, encontrada esta vez sin Wayback: **Zilonix OS ya detecta Full correctamente, en producción, hoy** (`mateodta2-code/zilonix-os`, `chrome-extension-busqueda/scraper-listado.js`, comentado "DOM vivo confirmado 6/10" — confirmado contra el navegador real, no una captura archivada):
+
+```js
+const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+```
+
+Es, literalmente, **el mismo selector que #229 ya había usado** — #239 lo sacó pensando (con evidencia de Wayback, que solo puede capturar el HTML que el SERVIDOR manda, no necesariamente el DOM ya hidratado) que el aria-label real era solo `"FULL"`, sin `"Enviado por"`. Esa conclusión era la equivocada: el valor real completo **sí** es `"Enviado por FULL"` — confirmado ahora con código que corre en producción, no con otra captura estática.
+
+**El bug real del intento de #241 (`detectarFullEnHtmlTarjeta`) tenía DOS problemas, no uno**:
+1. Su capa 1 exigía `aria-label="full"` **exacto** — nunca matcheaba `"Enviado por FULL"` (un valor más largo que sí contiene la palabra, pero no es igual a ella).
+2. Su capa de texto "strippeaba" la etiqueta `<svg aria-label="Enviado por FULL">` ENTERA (atributos incluidos) antes de buscar la palabra "full" como texto visible — el valor del atributo nunca llegaba a quedar como texto para esa búsqueda, así que ni siquiera el respaldo podía rescatar el caso real.
+
+**Corrección**: `detectarFullEnTarjeta(tarjeta)` (nueva, DOM) prueba primero el selector exacto de Zilonix OS — directo, simple, confirmado en producción — y solo si eso no matchea, cae a `detectarFullEnHtmlTarjeta` (de #241) como respaldo, con su capa 1 corregida de exact-match a substring (`aria-label="..."` que CONTENGA "full", no que sea igual) — acotada al bloque de envío real, igual que siempre, para nunca confundir un `aria-label="Enviado por FULL"` con un título real tipo "Televisor Full HD".
+
+**Brasil**: Zilonix OS nunca tocó Mercado Libre Brasil (es un sistema de un solo negocio, siempre Colombia) — no hay una confirmación propia de ese lado. Se asume el mismo texto `"Enviado por FULL"` para Brasil sin inventar una variante distinta: "Enviado" y "por" son la misma palabra en español y portugués, y "FULL" nunca se traduce (confirmado en capturas reales de los dos países, issue #239) — si Brasil de verdad usa otra redacción, el respaldo por substring/texto de `detectarFullEnHtmlTarjeta` debería seguir agarrándolo igual.
+
+## Hotfix de smoke #9 — Full/Envío gratis en la FICHA del producto (issue #243)
+
+Smoke de Sharel sobre 0.3.16 (#242): el panel de Investigación (cargadores en staging) seguía en 0% Full. Y, más decisivo todavía: en una ficha real de producto (Anker 70W, Colombia, `/p/MCO…`) con el badge verde **"Almacenado y enviado por FULL" visible en la página**, el panel flotante de la extensión decía "Full: No" **y** "Envío gratis: No" al mismo tiempo.
+
+Los dos "No" juntos son la pista real: el bug de #242 (`detectarFullEnTarjeta`, el detector del **listado**) es un código completamente distinto del que lee la **ficha de un solo producto** (`leerProducto`) — #242 nunca tocó este segundo. Confirmado contra una captura real y reciente (CDX/Wayback, mayo/2026, el acceso directo a Mercado Libre sigue bloqueado desde este entorno): los selectores que `leerProducto` usaba para encontrar el bloque de envío, `.ui-pdp-shipping` y `.ui-pdp-container__col--shipping`, tienen **cero ocurrencias** en el HTML real de hoy — Mercado Libre renombró ese bloque. Sin el bloque resuelto, `textoEnvio` llegaba siempre `""`, así que tanto `esFull` como `envioGratis` calculaban `false` sin importar qué mostrara la página — de ahí los dos "No" idénticos de la captura de Sharel.
+
+**Corrección**: el selector del bloque de envío de `leerProducto` ahora prueba primero los contenedores reales confirmados hoy (`.ui-pdp-container__row--shipping-summary`, `.ui-vpp-shipping_summary`, `#shipping_summary`) y solo si ninguno matchea cae a los dos viejos como respaldo (nunca se descartan, por si alguna variante de categoría/país todavía los usa). `esFull` ahora sale de una función nueva y pura, `detectarFullEnHtmlEnvio(htmlBloqueEnvio)` — a diferencia de `detectarFullEnHtmlTarjeta` (listado), esta no necesita anclar ninguna clase: el caller (`leerProducto`) ya le pasa el `outerHTML` del bloque correcto, ya resuelto. `envioGratis` sigue con el mismo regex de siempre sobre `textoEnvio` — el bug nunca estuvo en ese regex, estaba en que el bloque nunca se encontraba.
+
+**Honestidad sobre la evidencia**: esta sesión no encontró, dentro del tiempo disponible, una ficha archivada que fuera Full en su propio resumen de envío principal (la ficha real revisada mostraba una promo distinta, "primera compra"). El ícono real `svg[aria-label="Enviado por FULL"]` sí se confirmó dos veces en contextos reales de hoy — en el listado (#242) y en el carrusel de "productos relacionados" de esa misma ficha — razonable asumir que el resumen principal reusa el mismo componente, pero documentado como la mejor evidencia disponible, no como 100% confirmado contra un ejemplo Full real de la ficha principal.
+
+**Listado (`detectarFullEnTarjeta`, #242) sin cambios**: no se encontró evidencia nueva de que esté roto — el 0% del panel se explica por el bug de la ficha arriba, que es un código aparte.
+
+Extensión 0.3.16 → 0.3.17.
+
+## Hotfix de smoke #10 — Full en la ficha, calco exacto del selector de Zilonix OS (issue #245)
+
+0.3.17 (#243) seguía fallando: smoke de Sharel con "Zelotes F35" (badge FULL visible en la ficha) → panel seguía marcando "Full: No". Mateo revisó Zilonix OS de nuevo y confirmó algo que #243 no tuvo en cuenta: **OS no tiene NINGÚN detector de Full en la ficha de producto** — `chrome-extension-busqueda/scraper-listado.js` solo lo detecta en el listado, y el scraper de la ficha (`scraper-pdp-resenas.js`) solo lee reseñas. El único selector real de Full que existe en todo el sistema, confirmado en producción, es:
+
+```js
+const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+```
+
+**El bug real de #243**: `detectarFullEnHtmlEnvio` solo corría si `bloqueEnvio` (el contenedor del resumen de envío) se resolvía primero — `const esFull = bloqueEnvio ? detectarFullEnHtmlEnvio(...) : false`. Si ese contenedor no se encontraba (selector equivocado, u otra variante de categoría/página), `esFull` caía siempre a `false`, sin importar si el badge real estaba visible en la página — ese gate, no el regex, era el bug.
+
+**Corrección**: `detectarFullEnHtmlFicha(htmlFicha)` (nueva, pura) copia el MISMO criterio de OS tal cual — match exacto del ícono `svg[aria-label="Enviado por FULL"]`, sin ningún respaldo de texto plano inventado (OS nunca confirmó uno, así que no se agrega uno sin evidencia real). `leerProducto` ya nunca gatea esFull a `false` por la ausencia de un contenedor: primero intenta buscar el ícono DENTRO del bloque de envío real si se resolvió (`.ui-pdp-container__row--shipping-summary`/`.ui-vpp-shipping_summary`/`#shipping_summary`, de #243 — para no confundir el Full de este producto con el de uno DISTINTO en el carrusel de "productos relacionados" de la misma página, donde se confirmó el mismo ícono en #243) y, si no se resolvió, busca en la ficha completa — igual que el criterio simple de OS, que en el listado nunca necesita este respaldo porque cada tarjeta ya viene separada.
+
+`envioGratis` no se tocó — sigue con su propio regex sobre `textoEnvio`, sin depender de esFull.
+
+Extensión 0.3.17 → 0.3.18.
+
+## Hotfix de smoke #11 — Full del listado todavía no hidratado cuando se lee (issue #247)
+
+Ficha ya OK en 0.3.18 (#245). Pero el panel de Investigación seguía en 0% Full / columna Full en "No" después de "Analizar" fresco — y el KPI mostraba 0%, no "Sin dato", confirmando que el puente content.js → background.js → panel está bien (nada que tocar ahí, igual que #242/#245): el listado llegaba de verdad con `esFull: false` en todas las filas.
+
+**Causa real**: `esperarListadoEstable` (issue #231) espera a que la CANTIDAD de tarjetas que `leerListado` encuentra quede quieta (~1s) antes de leer de verdad — pero Mercado Libre puede terminar de pintar esa cantidad ANTES de hidratar los íconos/textos de envío dentro de cada tarjeta (`svg[aria-label="Enviado por FULL"]` / `.poly-component__shipp*`, mismo selector real de `detectarFullEnTarjeta`, issue #242 — no se reinventó ninguno nuevo). El snapshot que se mandaba quedaba con la cantidad correcta, pero sin ningún badge de envío todavía pintado.
+
+**Corrección**: una segunda fase de espera, solo después de que la cantidad ya esté estable — se resuelve apenas aparece el primer marcador real de envío en cualquier tarjeta de la página, o a los 1.8s si ese listado nunca tiene ninguno (nunca se espera infinito por un Full que tal vez no existe ahí). El tope externo de 14s (`maxEsperaMs`, sin cambios, issue #233) sigue mandando — bien por debajo de los 15s fijos de background.js.
+
+**Chip nuevo en el panel flotante de listado**: "Full detectados: X/Y" (X = tarjetas con `esFull: true`, Y = total de tarjetas visibles) — solo aparece si el sitio de verdad confirma Full en al menos una tarjeta (hoy, solo Mercado Libre); en Amazon/Temu/AliExpress/Shein/Alibaba, donde `esFull` nunca es un boolean real, mostrar "0/Y" sería un "Sin dato" disfrazado de cero — mismo criterio que #227 ya aplicó para Facturación est.
+
+Extensión 0.3.18 → 0.3.19.
+
+## Hotfix de smoke #12 — Full del listado sigue en 0/48 incluso con el filtro Full puesto (issue #248)
+
+#247 (espera de hidratación) no alcanzó: smoke de Pablo sobre listado CO "tetero" con 0.3.19 seguía en 0/48 — e, incluso con el filtro **FULL** de Mercado Libre puesto en la URL (donde, por definición del filtro, las 48 tarjetas SON Full), el chip igual mostraba 0/48. Ficha sigue OK (#245).
+
+**Contexto real de Pablo (en vivo, sin HTML citado todavía)**: el badge Full visible hoy es un logo verde itálico "FULL" + un rayo, junto al texto "Llega gratis mañana" — y ese texto SOLO, sin el badge, NO implica Full (hay tarjetas con "Llega gratis mañana" que no son Full). Esto, más el 0/48 con el filtro puesto, apunta a que el selector exacto de Zilonix OS (`svg[aria-label="Enviado por FULL"]`) y el respaldo acotado al bloque `poly-component__shipp(ed-from|ing)` (#241/#242) ya no matchean nada del DOM vivo de hoy — ese bloque puede haberse movido o renombrado.
+
+**Esta vez, por instrucción explícita del issue, no se adivinó desde Wayback ni desde el comentario viejo de Zilonix OS** — en su lugar, se ensanchó el detector en capas, de más a menos específico, sobre la tarjeta ENTERA (nunca solo un bloque que hoy puede no existir):
+
+1. **Capa 1 (nueva, #248)** — atributos reales del ícono (aria-label que contenga "full", href de sprite `poly_full`/`icon-poly_full`, clase `poly_full`/`icon-poly_full`) en cualquier parte de la tarjeta, sin acotar a ningún bloque: ninguno de estos atributos existe nunca en un título real, así que es seguro.
+2. **Capa 2 (#241/#242, sin cambios)** — el bloque `poly-component__shipp(ed-from|ing)` real, cuando existe — pero issue #248 corrige que su AUSENCIA ya nunca hace fallar todo el detector (antes de #248, `return false` en seco si ese bloque no estaba — el bug real detrás del 0/48 con el filtro puesto).
+3. **Capa 3 (nueva, #248)** — "full" suelto, pero solo cerca de "Llega"/"Envío" (el contexto real que describió Pablo), con el título del producto SACADO antes de buscar (nunca "Televisor Full HD" cuenta, sin importar cuánto se relaje el resto).
+
+**Diagnóstico temporal agregado** (`volcarDiagnosticoFullSiHaceFalta`, `leerListado`): si un listado tiene productos pero NINGUNO sale Full con las 3 capas arriba, se vuelca a la consola una muestra real de hasta 3 tarjetas (outerHTML recortado a 600 caracteres) — para conseguir HTML real de Pablo/Sharel sin tener que pedírselo a mano cada vez, si esto tampoco alcanza. Se dispara una sola vez por carga de página. **Es temporal** — se saca una vez que el smoke confirme el fix real.
+
+Extensión 0.3.19 → 0.3.20.
+
+## Hotfix de smoke #13 — Full del listado sigue en 0/48 con 0.3.20: señal de URL + espera más larga (issue #248, vuelta 2)
+
+Smoke de Sharel sobre 0.3.20 seguía en 0/48 con el filtro FULL puesto. La consola mostró el diagnóstico temporal de la vuelta 1 (`[Zilonix][diagnóstico temporal #248] 0 de 48…`) pero las 3 muestras pegadas solo traían el HEAD de la tarjeta (`poly-card__portada` + la foto) — `slice(0, 600)` desde el inicio nunca llegaba al bloque real de envío/Full, que vive más adelante en el HTML. El wrapper sigue siendo `li.ui-search-layout__item` + `poly-card`. Sharel planteó una hipótesis de timing: 1.8s de espera de hidratación podía no alcanzar.
+
+**Dos cambios, no uno** (ambos por instrucción directa del issue, sin adivinar HTML nuevo):
+
+1. **Señal fuerte de la URL del filtro** (`filtroFullActivoEnUrl`, `lectores/mercadolibre.js`): si la URL del listado ya tiene el filtro "Full" de Mercado Libre puesto (`_Envio_FULL`, confirmada en #247; `shipping_highlighted_fulfillment`, confirmada ahora), TODOS los productos orgánicos de ese listado SON Full por definición del filtro — `leerListado` ya ni llama al detector de DOM en ese caso, la URL nunca puede contradecir su propio filtro.
+2. **Espera de hidratación más larga** (`content.js`, `esperarListadoEstable`): 1.8s subió a 6.5s (rango pedido: 5-8s) — y, en vez de una búsqueda de marcador propia y más floja (`hayMarcadorEnvioVisible`, sacada), ahora chequea directamente si `lector.leerListado` ya trae al menos un producto con `esFull: true` — pasa por el detector real completo (capas + señal de URL), no por una aproximación paralela. El tope externo de 14s sigue sin cambios.
+
+**Diagnóstico temporal, versión 2** (`extraerDiagnosticoFullDeTarjeta`): en vez de `slice(0, 600)` ciego desde el inicio, ahora saca tres cosas por tarjeta sin Full: (a) la COLA del outerHTML (últimos ~1500 caracteres — el bloque de envío suele estar cerca del cierre de la tarjeta), (b) outerHTML recortado de los nodos cuyo texto PROPIO (nunca heredado de hijos) contiene "Llega"/"Envío"/"shipp"/"full", hasta 3, y (c) la lista de todo atributo `aria-label`/`class` de la tarjeta que contenga "full"/"shipp"/"fulfill". Sigue temporal — se saca una vez confirmado el fix real.
+
+Extensión 0.3.20 → 0.3.21.
+
+## Hotfix de smoke #14 — Full del listado: confirmado timing puro, HTML real citado (issue #248, vuelta 3)
+
+Con 0.3.21: con el filtro Full puesto en la URL, el chip ya dio **48/48 OK** (la señal de URL de la vuelta 2 funcionó). **Sin** el filtro, seguía en 0/48 con 6.5s de espera.
+
+**Esta vez, Mateo consiguió y citó el HTML real del badge en vivo** (DOM vivo, filtro apagado):
+
+```html
+<div class="poly-component__shipping-v2">
+  <div class="poly-shipping-v2__item">
+    <span>
+      <span class="polylabel-pill polylabel-fw-semibold">Llega gratis mañana</span>
+      <svg aria-label="Enviado por FULL" role="img" class="polylabel-icon" width="44" height="14" viewBox="0 0 41 13">
+        <use href="#poly_full"></use>
+      </svg>
+    </span>
+  </div>
+</div>
+```
+
+**Resultado, con ese HTML real puesto en un fixture de prueba**: `detectarFullEnHtmlTarjeta` ya devuelve `true` — SIN ningún cambio de selector. El aria-label real sigue siendo exactamente `"Enviado por FULL"` (el selector de Zilonix OS de #242, nunca cambió) y la Capa 1 (atributos, issue #248 vuelta 1) ya lo agarra sin necesitar el bloque `poly-component__shipp*` (ahora `-v2`, cubierto por substring de todas formas). **"FULL" nunca es texto visible aparte** — vive solo en el `aria-label` del ícono — así que un strip-tags ingenuo SIEMPRE lo pierde; por eso la Capa 1 (atributos, no texto) es la que importa acá, confirmado con una prueba dedicada. Se agregó, además, un chequeo DOM explícito prioritario sobre `.poly-component__shipping-v2 use[href*="poly_full"]`/`svg[aria-label*="FULL" i]` (redundante con lo que ya funcionaba, pero deja la intención explícita en el código). Advertencia explícita de Mateo, ya cubierta sin cambios: **nunca** `poly-bookmark__icon-full` (ícono de favorito) cuenta como Full — confirmado con una prueba dedicada.
+
+**Conclusión: el bug restante es 100% timing, no un selector mal.** Con el filtro puesto, la señal de URL resuelve todo instantáneo, sin esperar nada del DOM — por eso ya daba 48/48. Sin el filtro, Mercado Libre tarda más en hidratar el ícono de envío en las 48 tarjetas de lo que alcanzaban los 6.5s. La espera de hidratación (`ESPERA_HIDRATACION_ENVIO_MS`, `content.js`) sube a **12s** — dentro del rango pedido (12-15s) y todavía por debajo del tope externo de 14s (`maxEsperaMs`, sin cambios) y del timeout fijo de background.js (15s, tampoco tocado): la fase de estabilidad del conteo típicamente tarda ~1s, dejando ya ~13s de margen real antes del tope de 14s — 12s entra cómodo ahí sin mover ningún otro número.
+
+Extensión 0.3.21 → 0.3.22.
+
+## Hotfix de smoke #15 — Full: simplificación de vuelta al criterio de Zilonix OS (issue #248, vuelta 4)
+
+La vuelta 3 confirmó que el bug restante era 100% timing — el detector ya reconocía el badge real. Mateo pidió simplificar: Zilonix OS nunca tuvo capas de texto/atributos ni una espera de hidratación específica para Full, solo esto:
+
+```js
+await esperarTarjetas(); // 15s, cantidad estable 1s
+const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+```
+
+**Se sacó todo lo agregado en #241/#242/#248 (vueltas 1 a 3) que no era ese criterio simple**:
+
+- Las capas de texto/atributos de `detectarFullEnHtmlTarjeta` (acotamiento al bloque `poly-component__shipp*`, búsqueda de "full" suelto cerca de "Llega"/"Envío", `quitarTituloDeHtml`) — `detectarFullEnTarjeta` vuelve a ser un solo `querySelector('svg[aria-label="Enviado por FULL"]')`. `detectarFullEnHtmlTarjeta` queda solo como la versión de texto del MISMO selector único, para poder probarla sin DOM (este proyecto no tiene jsdom) — nunca se llama desde ningún camino real.
+- El diagnóstico temporal completo (`volcarDiagnosticoFullSiHaceFalta`, `extraerDiagnosticoFullDeTarjeta`, `textoPropioDe`) — ya cumplió su función (consiguió el HTML real de la vuelta 3), se saca entero.
+- La segunda fase de espera de hidratación en `content.js` (`ESPERA_HIDRATACION_ENVIO_MS`, que había subido 1.8s → 6.5s → 12s buscando el bug equivocado) — `esperarListadoEstable` vuelve a ser solo la espera de cantidad estable (1s), con el mismo tope de 14s de siempre (issue #233) — el mismo criterio simple de `esperarTarjetas()` de Zilonix OS.
+
+**Lo que queda, sin tocar**: `filtroFullActivoEnUrl` (issue #248, vuelta 2) — la señal de la URL del filtro Full sigue como un OR opcional sobre el detector real, nunca su reemplazo.
+
+Extensión 0.3.22 → 0.3.23.
+
+## Hotfix de smoke #16 — Full seguía en 0/48: la cuenta de "estable" era la equivocada (issue #248, vuelta 5)
+
+Con 0.3.23 (criterio simplificado de la vuelta 4), el smoke de Pablo seguía fallando: listado "tetero" CO sin filtro, ~60 `li` reales, 39 con Full visible (7 anuncios + 32 orgánicos) — panel en 0/48 igual.
+
+**Dos causas reales, no una**:
+
+1. **`esperarListadoEstable` medía la cantidad EQUIVOCADA**: usaba `lector.leerListado(document).productos.length` — la cantidad YA FILTRADA (sin anuncios, sin tarjetas inválidas) — para decidir "estable". Ese número puede quedar quieto ANTES de que Mercado Libre termine de hidratar el badge Full dentro de cada tarjeta, aunque la cantidad de tarjetas en el DOM siga cambiando. `esperarTarjetas()` de Zilonix OS nunca tiene este problema porque mide la cantidad CRUDA de `li` (`document.querySelectorAll('li.ui-search-layout__item').length`), antes de cualquier filtro — se agrega `contarTarjetasListado` (`lectores/mercadolibre.js`) con esa misma cuenta cruda, y `esperarListadoEstable` la usa cuando el lector activo la expone; si no (las otras 5 plataformas, sin este bug reportado), cae a `productos.length`, el criterio genérico de siempre.
+
+2. **El panel FLOTANTE de listado nunca pasaba por esa espera**: `reescanear()` (disparado en cada carga y en cada cambio del DOM vía `MutationObserver`) llamaba `lector.leerListado(document)` EN CALIENTE, directo, para pintar el panel — la espera de estabilidad solo corría del lado del escaneo automático (`manejarEscaneoAutomatico`). El chip "Full detectados" de ese panel, que es justo lo que Pablo estaba mirando en el smoke, podía mostrar 0/Y aunque los badges ya estuvieran visibles en pantalla, por la misma razón de siempre: una lectura tomada antes de tiempo. Se agrega `manejarListadoFlotante` (con el mismo guard de "nunca dos esperas en paralelo" que ya usa `manejarEscaneoAutomatico`) — ahora el panel flotante también espera a `esperarListadoEstable` antes de pintar, nunca lee en caliente.
+
+**Detector sin cambios**: sigue siendo el único `querySelector('svg[aria-label="Enviado por FULL"]')` de la vuelta 4 — nunca se reintrodujeron las capas de #241/#242/#248 (vueltas 1-3). `filtroFullActivoEnUrl` sigue como OR opcional. `poly-bookmark__icon-full` (favorito) sigue sin contar como Full.
+
+Extensión 0.3.23 → 0.3.24.
+
+## Hotfix de smoke #17 — Full "0/48" era correcto pero engañoso: faltaba contar los Ad (issue #248, vuelta 6)
+
+Con 0.3.24 (cuenta cruda + panel flotante esperando), el smoke de Pablo sobre "tetero" CO sin filtro seguía mostrando "Full detectados 0/48" — pero esta vez NO era un bug de espera ni del selector. Conteo en vivo: ~60 `li` = ~12 Ad (la mayoría con `svg[aria-label="Enviado por FULL"]` visible) + ~48 orgánicos (~0-1 Full). `leerListado` descarta los Ad de `productos` (regla de siempre: nunca mezclar pago con orgánico) — así que el chip, que contaba Full solo sobre `productos`, daba "0/48": técnicamente correcto, pero engañoso, con badges Full bien visibles en pantalla (los de los Ad).
+
+**Decisión de producto de Sharel (obligatoria)**: el chip "Full detectados: X/Y" tiene que contar Full sobre TODAS las tarjetas visibles — orgánicos **y** Ad. `productos[]` (lo que se analiza/exporta/envía a Zilonix) sigue sin Ad, sin cambios.
+
+**Implementación**: `leerListado` (`lectores/mercadolibre.js`) ahora calcula `esFull` para CADA tarjeta ANTES de filtrar por anuncio/validez, y devuelve una `estadisticasFull: { totalTarjetas, conFull }` aparte de `productos` — nunca se cuela un Ad dentro de `productos`, es una cuenta aparte. `content.js` (`renderizarListado`) ya no calcula el chip desde `productos` (`calcularResumenListado` perdió `fullDetectados`/`fullConDato`, que ya no se usaban para nada más) — usa `estadisticasFull` directo, que viaja junto con `productos` desde `esperarListadoEstable` hasta el renderizado final. `estadisticasFull` es opcional a propósito: solo Mercado Libre la expone hoy, las otras 5 plataformas siguen sin chip (nunca un "0/Y" disfrazado de "Sin dato").
+
+**Sin cambios**: el detector (`detectarFullEnTarjeta`, un solo `querySelector`, vuelta 4), `filtroFullActivoEnUrl` (OR opcional, vuelta 2), la espera de estabilidad con cuenta cruda (vuelta 5). `poly-bookmark__icon-full` (favorito) sigue sin contar como Full. "Productos visibles" sigue siendo solo orgánicos.
+
+Extensión 0.3.24 → 0.3.25.
+
+## Hotfix de smoke #18 — segundo marcador real de Full, revisión final antes de mergear el PR #240
+
+Revisión final antes de mergear: Zilonix OS confirma Full con DOS marcadores reales, no uno — el `aria-label` exacto del ícono SVG (`"Enviado por FULL"`, confirmado desde #242) Y la clase del ícono del sprite (`icon-poly_full`). Algunas tarjetas (sobre todo anuncios/Ad, que a veces renderizan el badge con otro markup) lo traen solo por la clase, sin el aria-label exacto — `detectarFullEnTarjeta`/`detectarFullEnHtmlTarjeta` ahora prueban los dos, con un OR.
+
+**Nunca confunde con `poly-bookmark__icon-full`** (el ícono de favorito, otra cosa por completo): ese nombre no contiene el substring literal `icon-poly_full` — el guion bajo entre "poly" y "full" nunca aparece ahí (es "...__icon-full", no "...icon-poly_full") — confirmado con una prueba dedicada.
+
+Extensión 0.3.25 → 0.3.26.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).
@@ -213,7 +416,7 @@ Deja el archivo en `dist/extension/zilonix-investigacion-v<version>.zip` (usa la
 
 ## Pruebas
 
-Los selectores de cada sitio (`extension/lectores/*.js`), el panel (`extension/content.js`) y la orquestación con `chrome.tabs.*` (`extension/background.js`) corren dentro del navegador — no se pueden probar con vitest sin un navegador real. Las funciones que SÍ son texto puro, sin DOM, están separadas justo para poder probarse con un HTML/texto de ejemplo: `extension/seguridad.js` (escapar HTML, validar que un link sea http(s) real, neutralizar una fórmula de Excel/Sheets en el CSV) y, en Mercado Libre, `leerDatosIncrustados`/`calcularVentasPromedioMes`/`leerResenasDesdeScript`/`extraerIdDeUrl`/`construirLinkSeguirProducto`/`tipoDePagina`/`clasificarLinkListadoMl` (`extension/lectores/mercadolibre.js` — `clasificarLinkListadoMl`, sumada a esta lista recién en issue #233, es la función que tenía el bug real de "solo reconoce MCO"). `extension/seguridad.test.ts` y `extension/lectores/mercadolibre.test.ts` corren con el resto de `npm test`, igual que cualquier prueba de `lib/` — incluida `lib/ml/variantesBusqueda.test.ts` (heurística de variantes + `completarQueriesAnalizar`, issue #221/#225) y `lib/ml/listadoCliente.test.ts` (issue #227 — `senalVentas`/`facturacionEstimadaListado`/`ordenarProductos`/`calcularKpisMercado`/`generarVeredictoListado`, con casos explícitos para nunca mezclar un acumulado con una tasa mensual; issue #235 suma `esRelevanteAlTermino`/`mejorOpcionParaImportar` — con el caso explícito del bug real de Zilonix OS, un accesorio más barato pero irrelevante nunca gana — y `calcularResumenLocalBloque`, el resumen por bloque estilo Zilonix OS).
+Los selectores de cada sitio (`extension/lectores/*.js`), el panel (`extension/content.js`) y la orquestación con `chrome.tabs.*` (`extension/background.js`) corren dentro del navegador — no se pueden probar con vitest sin un navegador real. Las funciones que SÍ son texto puro, sin DOM, están separadas justo para poder probarse con un HTML/texto de ejemplo: `extension/seguridad.js` (escapar HTML, validar que un link sea http(s) real, neutralizar una fórmula de Excel/Sheets en el CSV) y, en Mercado Libre, `leerDatosIncrustados`/`calcularVentasPromedioMes`/`leerResenasDesdeScript`/`extraerIdDeUrl`/`construirLinkSeguirProducto`/`tipoDePagina`/`clasificarLinkListadoMl`/`detectarFullEnHtmlTarjeta` (`extension/lectores/mercadolibre.js` — `clasificarLinkListadoMl`, sumada a esta lista en issue #233, es la función que tenía el bug real de "solo reconoce MCO"; `detectarFullEnHtmlTarjeta`, sumada en issue #241 y corregida en #242 (exact-match → substring), es el respaldo del detector de Full — el selector principal real, confirmado hoy en producción por Zilonix OS, vive en `detectarFullEnTarjeta`, que sí necesita DOM y no se prueba directo). `extension/seguridad.test.ts` y `extension/lectores/mercadolibre.test.ts` corren con el resto de `npm test`, igual que cualquier prueba de `lib/` — incluida `lib/ml/variantesBusqueda.test.ts` (heurística de variantes + `completarQueriesAnalizar`, issue #221/#225) y `lib/ml/listadoCliente.test.ts` (issue #227 — `senalVentas`/`facturacionEstimadaListado`/`ordenarProductos`/`calcularKpisMercado`/`generarVeredictoListado`, con casos explícitos para nunca mezclar un acumulado con una tasa mensual; issue #235 suma `esRelevanteAlTermino`/`mejorOpcionParaImportar` — con el caso explícito del bug real de Zilonix OS, un accesorio más barato pero irrelevante nunca gana — y `calcularResumenLocalBloque`, el resumen por bloque estilo Zilonix OS).
 
 ## Si un sitio cambió y algún dato dejó de aparecer
 
