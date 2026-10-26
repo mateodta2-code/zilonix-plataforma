@@ -92,6 +92,13 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // (`x-seguimiento-trabajador-secret`, comparado con
   // `crypto.timingSafeEqual` en app/api/trabajos/seguimiento/route.ts).
   "/api/trabajos/seguimiento",
+
+  // Issue #254 — sincronización diaria de Product Ads, llamada por un
+  // cron (ver docs/cron-publicidad.md), sin sesión de usuario. Mismo
+  // patrón: secreto compartido (`x-publicidad-trabajador-secret`,
+  // comparado con `crypto.timingSafeEqual` en
+  // app/api/trabajos/publicidad/route.ts).
+  "/api/trabajos/publicidad",
 ];
 
 export const esRutaPublica = createRouteMatcher(PATRONES_RUTAS_PUBLICAS);

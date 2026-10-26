@@ -94,10 +94,14 @@ export class MlNoAutorizadoError extends Error {
 
 export class MlSinPermisoAppError extends Error {
   readonly endpoint: string;
-  constructor(endpoint: string) {
+  // Issue #254 — el 403 de Product Ads trae `code: PA_UNAUTHORIZED_RESULT_FROM_POLICIES`.
+  // El resto de los 403 de este archivo no leen el cuerpo (siguen sin código).
+  readonly codigoPolitica: string | null;
+  constructor(endpoint: string, codigoPolitica: string | null = null) {
     super("Mercado Libre no le da permiso a esta aplicación para esta consulta.");
     this.name = "MlSinPermisoAppError";
     this.endpoint = endpoint;
+    this.codigoPolitica = codigoPolitica;
   }
 }
 
@@ -185,6 +189,85 @@ async function pedir<T>(url: string, token?: string): Promise<{ ok: true; data: 
 // vez de reintentar). Se traduce de vuelta acá, una sola vez. 429
 // (LimiteMercadoLibreError) nunca se traduce — sigue propagando tal
 // cual, mismo criterio de siempre ("corta TODA la búsqueda").
+export type CuerpoErrorMl = { code: string | null; message: string | null };
+
+// Solo el code y un message corto. Nunca se loguea el cuerpo: un 403/404
+// de Mercado Libre puede traer ids de cuenta. No se busca un token adentro
+// para imprimirlo — directamente no se imprime.
+async function cuerpoErrorCorto(res: Response): Promise<CuerpoErrorMl> {
+  try {
+    const texto = await res.text();
+    if (texto.length > 4_000) return { code: null, message: null };
+    const json = JSON.parse(texto) as { code?: unknown; message?: unknown; error?: unknown };
+    const code = typeof json.code === "string" ? json.code.slice(0, 80) : null;
+    const message =
+      typeof json.message === "string"
+        ? json.message.slice(0, 180)
+        : typeof json.error === "string"
+          ? json.error.slice(0, 180)
+          : null;
+    return { code, message };
+  } catch {
+    return { code: null, message: null };
+  }
+}
+
+export type RespuestaLecturaMl<T> = { ok: true; data: T } | { ok: false; status: number; error: CuerpoErrorMl };
+
+// Issue #254 — lectura autenticada con cabeceras extra (Api-Version).
+// Toda llamada de Product Ads y de costos por ítem pasa por acá: nadie
+// en lib/ml/publicidad.ts ni lib/ml/costos-item.ts hace fetch por su cuenta.
+// `ruta` es un path de la API que arma el llamador con ids ya validados
+// (site, advertiser, campaña, ítem) — se rechaza cualquier cosa que no
+// sea un path relativo, para que un id mal formado no pueda cambiar de host.
+export async function pedirLecturaMl<T>(
+  ruta: string,
+  token: string,
+  opciones?: { cabeceras?: Record<string, string>; query?: string }
+): Promise<RespuestaLecturaMl<T>> {
+  if (!ruta.startsWith("/") || ruta.includes("..") || ruta.includes("://") || ruta.includes("?")) {
+    throw new Error("Ruta de Mercado Libre inválida — no se llamó a la API.");
+  }
+  const query = opciones?.query ?? "";
+  if (query && !query.startsWith("?")) {
+    throw new Error("Query de Mercado Libre inválida — no se llamó a la API.");
+  }
+  const url = `${BASE_URL}${ruta}${query}`;
+  const endpoint = endpointSinQuery(url);
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (opciones?.cabeceras) {
+    for (const [clave, valor] of Object.entries(opciones.cabeceras)) {
+      headers[clave] = valor;
+    }
+  }
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch {
+    console.warn(`[lib/ml/cliente] ${endpoint} — tiempo agotado o falla de red`);
+    throw new MlNoDisponibleError();
+  }
+  if (res.status === 429) throw new LimiteMercadoLibreError();
+  if (res.status === 401) {
+    console.warn(`[lib/ml/cliente] ${endpoint} — 401`);
+    throw new MlNoAutorizadoError();
+  }
+  if (res.status === 403) {
+    const error = await cuerpoErrorCorto(res);
+    console.warn(`[lib/ml/cliente] ${endpoint} — 403${error.code ? ` ${error.code}` : ""}`);
+    throw new MlSinPermisoAppError(endpoint, error.code);
+  }
+  if (res.status >= 500) {
+    console.warn(`[lib/ml/cliente] ${endpoint} — ${res.status}`);
+    throw new MlNoDisponibleError();
+  }
+  if (!res.ok) {
+    const error = await cuerpoErrorCorto(res);
+    return { ok: false, status: res.status, error };
+  }
+  return { ok: true, data: (await res.json()) as T };
+}
+
 async function pedirTolerante<T>(url: string, token?: string): Promise<{ ok: true; data: T } | { ok: false; status: number }> {
   try {
     return await pedir<T>(url, token);

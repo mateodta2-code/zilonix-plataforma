@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
 import type {
   DatosPorCuenta,
@@ -600,4 +600,145 @@ export const seguimientoAlertas = pgTable("seguimiento_alertas", {
   // historial de alertas siga completo.
   leidaTs: timestamp("leida_ts", { withTimezone: true }),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Issue #254 — Product Ads. La API no documenta la zona del corte de
+// `date_from`/`date_to` (docs/publicidad/api-research.md §8.6). `fecha`
+// guarda el `date` (YYYY-MM-DD) que devuelve Mercado Libre, sin
+// convertirlo a otra zona: moverlo podría juntar dos días o partir uno.
+export const publicidadEstadoAccesoEnum = pgEnum("publicidad_estado_acceso", ["ok", "sin_product_ads", "sin_permiso_app"]);
+export const publicidadNivelMetricaEnum = pgEnum("publicidad_nivel_metrica", ["cuenta", "campana", "ad_group", "anuncio"]);
+export const publicidadOrigenSyncEnum = pgEnum("publicidad_origen_sync", ["programada", "manual"]);
+export const publicidadEstadoSyncEnum = pgEnum("publicidad_estado_sync", ["en_curso", "ok", "parcial", "error"]);
+
+export const publicidadAnunciantes = pgTable("publicidad_anunciantes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  advertiserId: text("advertiser_id"),
+  siteId: text("site_id"),
+  nombre: text("nombre"),
+  estadoAcceso: publicidadEstadoAccesoEnum("estado_acceso").notNull(),
+  verificadoTs: timestamp("verificado_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  cuentaUnica: uniqueIndex("publicidad_anunciantes_cuenta_unica").on(t.cuentaMlId),
+}));
+
+export const publicidadCampanas = pgTable("publicidad_campanas", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  campanaIdMl: text("campana_id_ml").notNull(),
+  nombre: text("nombre"),
+  estado: text("estado"),
+  estrategia: text("estrategia"),
+  presupuesto: numeric("presupuesto", { precision: 14, scale: 2 }),
+  presupuestoDiario: numeric("presupuesto_diario", { precision: 14, scale: 2 }),
+  // La doc no define automatic_budget (api-research §8.4). Se guarda tal
+  // cual llegó; null si el campo no vino. No se interpreta como
+  // "presupuesto compartido".
+  presupuestoAutomatico: boolean("presupuesto_automatico"),
+  roasObjetivo: numeric("roas_objetivo", { precision: 6, scale: 2 }),
+  acosObjetivo: numeric("acos_objetivo", { precision: 10, scale: 4 }),
+  acosObjetivoCalculado: boolean("acos_objetivo_calculado").notNull().default(false),
+  moneda: text("moneda"),
+  creadaMlTs: timestamp("creada_ml_ts", { withTimezone: true }),
+  actualizadaMlTs: timestamp("actualizada_ml_ts", { withTimezone: true }),
+  sincronizadaTs: timestamp("sincronizada_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  campanaUnica: uniqueIndex("publicidad_campanas_cuenta_campana_unica").on(t.cuentaMlId, t.campanaIdMl),
+}));
+
+export const publicidadAnuncios = pgTable("publicidad_anuncios", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  adGroupId: text("ad_group_id").notNull(),
+  tipoAdGroup: text("tipo_ad_group"),
+  adGroupExternoId: text("ad_group_externo_id"),
+  campanaIdMl: text("campana_id_ml"),
+  itemId: text("item_id").notNull(),
+  titulo: text("titulo"),
+  permalink: text("permalink"),
+  estado: text("estado"),
+  precio: numeric("precio", { precision: 14, scale: 2 }),
+  logisticType: text("logistic_type"),
+  listingTypeId: text("listing_type_id"),
+  sincronizadoTs: timestamp("sincronizado_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  anuncioUnico: uniqueIndex("publicidad_anuncios_cuenta_grupo_item_unico").on(t.cuentaMlId, t.adGroupId, t.itemId),
+}));
+
+export const publicidadMetricasDiarias = pgTable("publicidad_metricas_diarias", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  nivel: publicidadNivelMetricaEnum("nivel").notNull(),
+  entidadIdMl: text("entidad_id_ml").notNull(),
+  fecha: date("fecha", { mode: "string" }).notNull(),
+  clicks: integer("clicks"),
+  impresiones: integer("impresiones"),
+  costo: numeric("costo", { precision: 14, scale: 2 }),
+  montoDirecto: numeric("monto_directo", { precision: 14, scale: 2 }),
+  montoIndirecto: numeric("monto_indirecto", { precision: 14, scale: 2 }),
+  montoTotal: numeric("monto_total", { precision: 14, scale: 2 }),
+  unidadesDirectas: integer("unidades_directas"),
+  unidadesIndirectas: integer("unidades_indirectas"),
+  unidadesTotal: integer("unidades_total"),
+  ventasPublicidad: integer("ventas_publicidad"),
+  ventasOrganicasCant: integer("ventas_organicas_cant"),
+  ventasOrganicasMonto: numeric("ventas_organicas_monto", { precision: 14, scale: 2 }),
+  acos: numeric("acos", { precision: 10, scale: 4 }),
+  roas: numeric("roas", { precision: 10, scale: 4 }),
+  tacos: numeric("tacos", { precision: 10, scale: 4 }),
+  sov: numeric("sov", { precision: 10, scale: 4 }),
+  cvr: numeric("cvr", { precision: 10, scale: 4 }),
+  ctr: numeric("ctr", { precision: 10, scale: 4 }),
+  cpc: numeric("cpc", { precision: 14, scale: 2 }),
+  sincronizadaTs: timestamp("sincronizada_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  metricaUnica: uniqueIndex("publicidad_metricas_diarias_unica").on(t.cuentaMlId, t.nivel, t.entidadIdMl, t.fecha),
+}));
+
+export const publicidadCostosItem = pgTable("publicidad_costos_item", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  itemId: text("item_id").notNull(),
+  fecha: date("fecha", { mode: "string" }).notNull(),
+  skuCodigo: text("sku_codigo"),
+  categoryId: text("category_id"),
+  precioVentaVigente: numeric("precio_venta_vigente", { precision: 14, scale: 2 }),
+  precioRegular: numeric("precio_regular", { precision: 14, scale: 2 }),
+  comisionMl: numeric("comision_ml", { precision: 14, scale: 2 }),
+  comisionDetalle: jsonb("comision_detalle").$type<Record<string, unknown> | null>(),
+  // Estimado de F9 (`coverage.all_country.list_cost`), una sola unidad.
+  // 0 cuando el comprador paga el envío. No es el costo real de un
+  // envío ya despachado.
+  envioVendedorEstimado: numeric("envio_vendedor_estimado", { precision: 14, scale: 2 }),
+  compradorPagaEnvio: boolean("comprador_paga_envio"),
+  logisticType: text("logistic_type"),
+  shippingMode: text("shipping_mode"),
+  listingTypeId: text("listing_type_id"),
+  consultadoTs: timestamp("consultado_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  costoUnico: uniqueIndex("publicidad_costos_item_unico").on(t.cuentaMlId, t.itemId, t.fecha),
+}));
+
+export const publicidadSincronizaciones = pgTable("publicidad_sincronizaciones", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  origen: publicidadOrigenSyncEnum("origen").notNull(),
+  solicitadaPor: uuid("solicitada_por").references(() => usuarios.id, { onDelete: "set null" }),
+  rangoDesde: date("rango_desde", { mode: "string" }),
+  rangoHasta: date("rango_hasta", { mode: "string" }),
+  estado: publicidadEstadoSyncEnum("estado").notNull(),
+  llamadas: integer("llamadas").notNull().default(0),
+  // Texto corto. Nunca un token, ni el cuerpo crudo de Mercado Libre.
+  // En una corrida `ok` puede traer un aviso (forma de DAILY sin
+  // confirmar), no solo un fallo.
+  error: text("error"),
+  iniciadaTs: timestamp("iniciada_ts", { withTimezone: true }).notNull().defaultNow(),
+  terminadaTs: timestamp("terminada_ts", { withTimezone: true }),
 });

@@ -201,6 +201,19 @@ export function IconoInvestigacion(props: IconoProps) {
   );
 }
 
+// Issue #254 — megáfono chico, distinto de Finanzas (barras) y de
+// Investigación (lupa). La pantalla de campañas llega en la fase 2;
+// el ítem del menú ya tiene que reconocerse.
+export function IconoPublicidad(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 10v4l8 3V7L4 10z" />
+      <path d="M12 8.2c2.2.6 3.5 2 3.5 3.8S14.2 15.2 12 15.8" />
+      <path d="M6.5 14.2 7.8 18" />
+    </Svg>
+  );
+}
+
 export function IconoBuscar(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -234,6 +247,7 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   sku: IconoSku,
   investigacion: IconoInvestigacion,
   finanzas: IconoFinanzas,
+  publicidad: IconoPublicidad,
   actividad: IconoActividad,
   personas: IconoPersonas,
   invitar: IconoInvitar,

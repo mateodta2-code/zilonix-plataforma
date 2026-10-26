@@ -28,6 +28,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const vePedidosYDespachos = tienePermiso(permisos, "ventas", "consultar");
   const veSku = tienePermiso(permisos, "inventario", "consultar");
   const veFinanzas = tienePermiso(permisos, "finanzas", "consultar");
+  const vePublicidad = tienePermiso(permisos, "publicidad", "consultar");
   const veActividad = tienePermiso(permisos, "configuracion", "consultar");
 
   const grupoPrincipal: GrupoNav = {
@@ -44,6 +45,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       // también decide qué traer/revender, no vende ni despacha nada.
       ...(veSku ? [{ etiqueta: "Investigación", href: "/panel/investigacion", icono: "investigacion" as const }] : []),
       ...(veFinanzas ? [{ etiqueta: "Finanzas", href: "/panel/finanzas", icono: "finanzas" as const }] : []),
+      ...(vePublicidad ? [{ etiqueta: "Publicidad", href: "/panel/publicidad", icono: "publicidad" as const }] : []),
       ...(veActividad ? [{ etiqueta: "Actividad", href: "/panel/actividad", icono: "actividad" as const }] : []),
       { etiqueta: "Personas", href: "#", icono: "personas", deshabilitada: true, titulo: "Próximamente" },
     ],

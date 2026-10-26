@@ -103,6 +103,21 @@ empresas ──┬── membresias ──── usuarios
            └── auditoria
 ```
 
+## 8. Publicidad (Product Ads, issue #254)
+
+Seis tablas, todas con `empresa_id` y `cuenta_ml_id`. El dinero es `numeric`, nunca float. La `fecha` de una métrica es el `date` que devuelve Mercado Libre, sin corrimiento de zona (la API no documenta el corte del día).
+
+| Tabla | Qué guarda | Única por |
+|---|---|---|
+| `publicidad_anunciantes` | Si la cuenta tiene Product Ads, no lo tiene, o la app no tiene el permiso | cuenta |
+| `publicidad_campanas` | Campaña: estado, presupuesto, ROAS/ACOS objetivo | cuenta + id de campaña |
+| `publicidad_anuncios` | Anuncio dentro de un ad group | cuenta + ad group + ítem |
+| `publicidad_metricas_diarias` | Métricas del día, a nivel cuenta, campaña, ad group o anuncio | cuenta + nivel + entidad + fecha |
+| `publicidad_costos_item` | Precio, comisión y envío estimado vigentes del ítem (no es una serie histórica) | cuenta + ítem + fecha |
+| `publicidad_sincronizaciones` | Bitácora de cada corrida: origen, rango, estado, texto corto de error | — |
+
+`automatic_budget` se guarda tal cual llega. La doc no dice que signifique presupuesto compartido. `acos_target` puede no venir y se calcula como 100/ROAS, marcado como calculado. El estado "Aprendiendo" no está en la API.
+
 ## Lo que falta para que esto funcione seguro (próximas tareas, no esta)
 
 - ~~**Seguridad por fila (RLS)** en Postgres~~ — tarea 1.3, completa: `db/rls-setup.sql` ya corrido contra la base real de Railway (ver `docs/rls.md`).

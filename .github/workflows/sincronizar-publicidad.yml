@@ -1,0 +1,36 @@
+name: Sincronizar Product Ads (staging)
+
+# Issue #254 — apunta a STAGING. El permiso de la app Zilonix
+# Plataforma y la reconexión de MTTIENDA ya están. Producción queda
+# comentada hasta las pruebas reales en staging (totales, DAILY, ruta).
+# El secreto de GitHub se llama
+# PUBLICIDAD_TRABAJADOR_SECRET_STAGING y tiene que coincidir con la
+# variable PUBLICIDAD_TRABAJADOR_SECRET de Railway en staging. El de
+# producción, cuando toque, es PUBLICIDAD_TRABAJADOR_SECRET_PRODUCCION.
+# Nunca el valor en este archivo.
+#
+# 14:00 UTC = 09:00 en Bogotá (UTC-5), después de las 08:30. Las métricas
+# de Product Ads se actualizan cerca de las 10:00 GMT-3, así que una
+# corrida de la mañana puede ir un día atrás — es el atraso documentado
+# de la API, no un fallo del cron. workflow_dispatch queda para retomar
+# el backfill de 62 días: cada corrida guarda un tramo y la siguiente
+# sigue hacia atrás.
+on:
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sincronizar un lote de cuentas en staging
+        run: |
+          curl -sf -X POST "https://web-staging-d979.up.railway.app/api/trabajos/publicidad" \
+            -H "x-publicidad-trabajador-secret: ${{ secrets.PUBLICIDAD_TRABAJADOR_SECRET_STAGING }}" \
+            --max-time 300
+
+# Producción, cuando el checklist de la PR esté cerrado:
+# curl -sf -X POST "https://<dominio-produccion>/api/trabajos/publicidad" \
+#   -H "x-publicidad-trabajador-secret: ${{ secrets.PUBLICIDAD_TRABAJADOR_SECRET_PRODUCCION }}" \
+#   --max-time 300
