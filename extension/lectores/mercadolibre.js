@@ -653,20 +653,33 @@
     const filtroFullActivo = filtroFullActivoEnUrl(doc && doc.URL);
     const tarjetas = doc.querySelectorAll("li.ui-search-layout__item");
     const productos = [];
+    // Issue #248 (vuelta 6) — decisión de producto de Sharel, con
+    // evidencia real: listado de teteros CO sin filtro, ~60 tarjetas
+    // = ~12 Ad (la mayoría con el badge Full real visible) + ~48
+    // orgánicos (~0-1 Full). `productos` nunca incluye Ads (regla de
+    // siempre, nunca mezclar pago con orgánico) — así que contar Full
+    // SOLO sobre `productos` daba un "0/48" técnicamente correcto pero
+    // engañoso, con badges Full bien visibles en pantalla (los de los
+    // Ad). `estadisticasFull` cuenta sobre TODAS las tarjetas
+    // (orgánicos + Ad) — nunca se usa para decidir qué entra a
+    // `productos`, solo para este número aparte.
+    let tarjetasConFull = 0;
     tarjetas.forEach((tarjeta) => {
+      // Issue #242/#248 — ver `detectarFullEnTarjeta`/
+      // `filtroFullActivoEnUrl` arriba. Si el filtro de la URL ya
+      // confirma Full para TODO el listado, ni se llama al detector de
+      // DOM — la URL nunca puede contradecir su propio filtro.
+      const esFull = filtroFullActivo || detectarFullEnTarjeta(tarjeta);
+      if (esFull) tarjetasConFull += 1;
+
       const linkEl = U.primerElemento(["a.poly-component__title"], tarjeta);
       const href = linkEl ? linkEl.getAttribute("href") : null;
       const idInfo = clasificarLinkListadoMl(href);
       if (!idInfo) return; // sin forma de identificar la publicación, se descarta — nunca se inventa
 
       const esAnuncio = Boolean(U.primerElemento(['a.poly-component__ads-promotions', 'a[aria-label="Promocionado"]'], tarjeta));
-      if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico
+      if (esAnuncio) return; // mismo criterio que las otras 5 plataformas: nunca mezcla pago con orgánico (esFull de este Ad YA se contó arriba, en tarjetasConFull — nunca entra a productos)
 
-      // Issue #242/#248 — ver `detectarFullEnTarjeta`/
-      // `filtroFullActivoEnUrl` arriba. Si el filtro de la URL ya
-      // confirma Full para TODO el listado, ni se llama al detector de
-      // DOM — la URL nunca puede contradecir su propio filtro.
-      const esFull = filtroFullActivo || detectarFullEnTarjeta(tarjeta);
       const { estrellas, vendidos } = leerCalificacionYVendidosListado(tarjeta);
       const fotoEl = U.primerElemento(["img.poly-component__picture"], tarjeta);
 
@@ -690,7 +703,7 @@
         link: href || null,
       });
     });
-    return { productos };
+    return { productos, estadisticasFull: { totalTarjetas: tarjetas.length, conFull: tarjetasConFull } };
   }
 
   // Issue #225 — "Top 8 reseñas": fuente real confirmada en vivo por

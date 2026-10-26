@@ -351,6 +351,18 @@ Con 0.3.23 (criterio simplificado de la vuelta 4), el smoke de Pablo seguía fal
 
 Extensión 0.3.23 → 0.3.24.
 
+## Hotfix de smoke #17 — Full "0/48" era correcto pero engañoso: faltaba contar los Ad (issue #248, vuelta 6)
+
+Con 0.3.24 (cuenta cruda + panel flotante esperando), el smoke de Pablo sobre "tetero" CO sin filtro seguía mostrando "Full detectados 0/48" — pero esta vez NO era un bug de espera ni del selector. Conteo en vivo: ~60 `li` = ~12 Ad (la mayoría con `svg[aria-label="Enviado por FULL"]` visible) + ~48 orgánicos (~0-1 Full). `leerListado` descarta los Ad de `productos` (regla de siempre: nunca mezclar pago con orgánico) — así que el chip, que contaba Full solo sobre `productos`, daba "0/48": técnicamente correcto, pero engañoso, con badges Full bien visibles en pantalla (los de los Ad).
+
+**Decisión de producto de Sharel (obligatoria)**: el chip "Full detectados: X/Y" tiene que contar Full sobre TODAS las tarjetas visibles — orgánicos **y** Ad. `productos[]` (lo que se analiza/exporta/envía a Zilonix) sigue sin Ad, sin cambios.
+
+**Implementación**: `leerListado` (`lectores/mercadolibre.js`) ahora calcula `esFull` para CADA tarjeta ANTES de filtrar por anuncio/validez, y devuelve una `estadisticasFull: { totalTarjetas, conFull }` aparte de `productos` — nunca se cuela un Ad dentro de `productos`, es una cuenta aparte. `content.js` (`renderizarListado`) ya no calcula el chip desde `productos` (`calcularResumenListado` perdió `fullDetectados`/`fullConDato`, que ya no se usaban para nada más) — usa `estadisticasFull` directo, que viaja junto con `productos` desde `esperarListadoEstable` hasta el renderizado final. `estadisticasFull` es opcional a propósito: solo Mercado Libre la expone hoy, las otras 5 plataformas siguen sin chip (nunca un "0/Y" disfrazado de "Sin dato").
+
+**Sin cambios**: el detector (`detectarFullEnTarjeta`, un solo `querySelector`, vuelta 4), `filtroFullActivoEnUrl` (OR opcional, vuelta 2), la espera de estabilidad con cuenta cruda (vuelta 5). `poly-bookmark__icon-full` (favorito) sigue sin contar como Full. "Productos visibles" sigue siendo solo orgánicos.
+
+Extensión 0.3.24 → 0.3.25.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).

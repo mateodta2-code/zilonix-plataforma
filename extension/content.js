@@ -86,19 +86,22 @@
   }
 
   // --- Agregados del listado (cuántos, min/prom/máx, suma vendidos, top 10) ---
+  // Issue #248 (vuelta 6) — el chip "Full detectados" YA NO sale de
+  // acá (ver `renderizarListado`): `productos` nunca incluye Ads
+  // (nunca mezcla pago con orgánico, regla de siempre), pero decisión
+  // de producto de Sharel confirmó con evidencia real que los Ad son
+  // justamente los que más muestran el badge Full (listado real de
+  // teteros: ~60 tarjetas, ~12 Ad —la mayoría Full— + ~48 orgánicos
+  // con ~0-1 Full) — contar Full solo sobre `productos` daba un 0/48
+  // técnicamente correcto pero engañoso, con badges Full bien visibles
+  // en pantalla. El chip ahora usa `estadisticasFull` (de
+  // `leerListado`, `lectores/mercadolibre.js`), que sí cuenta sobre
+  // TODAS las tarjetas visibles.
   function calcularResumenListado(productos) {
     const precios = productos.map((p) => p.precio).filter((p) => typeof p === "number" && Number.isFinite(p));
     const vendidosConDato = productos.filter((p) => typeof p.vendidos === "number");
     const sumaVendidos = vendidosConDato.reduce((acc, p) => acc + p.vendidos, 0);
     const top10 = [...vendidosConDato].sort((a, b) => b.vendidos - a.vendidos).slice(0, 10);
-    // Issue #247 — chip "Full detectados: X/Y" del panel flotante de
-    // listado. `fullConDato` decide si el chip se muestra: en
-    // Amazon/Temu/AliExpress/Shein/Alibaba `esFull` nunca es un
-    // boolean real (Amazon lo manda `null` a propósito, el resto ni lo
-    // manda) — mostrar "0/Y" ahí sería un "Sin dato" disfrazado de
-    // cero, mismo error que #227 ya evitó para Facturación est.
-    const conDatoFull = productos.filter((p) => typeof p.esFull === "boolean");
-    const fullDetectados = conDatoFull.filter((p) => p.esFull === true).length;
     return {
       total: productos.length,
       precioMinimo: precios.length ? Math.min(...precios) : null,
@@ -106,8 +109,6 @@
       precioMaximo: precios.length ? Math.max(...precios) : null,
       sumaVendidos: vendidosConDato.length ? sumaVendidos : null,
       top10,
-      fullDetectados,
-      fullConDato: conDatoFull.length,
     };
   }
 
@@ -235,7 +236,17 @@
     }
   }
 
-  function renderizarListado(panel, productos) {
+  // Issue #248 (vuelta 6) — `estadisticasFull` es OPCIONAL a propósito
+  // (viene de `leerListado`, `lectores/mercadolibre.js`, solo en
+  // Mercado Libre hoy): decisión de producto de Sharel, el chip
+  // "Full detectados" tiene que contar Full sobre TODAS las tarjetas
+  // visibles — orgánicos Y Ads — porque en la práctica los Ad son
+  // justamente los que más muestran el badge Full real. `productos`
+  // (el parámetro de arriba) SIGUE sin Ads, sin cambios — nunca se
+  // usa para este chip, solo para "Productos visibles"/precios/top10,
+  // que siguen siendo solo orgánicos a propósito (nunca mezclar pago
+  // con orgánico en lo que se analiza/exporta).
+  function renderizarListado(panel, productos, estadisticasFull) {
     const cuerpo = renderizarEsqueleto(panel, "Zilonix · Resumen de búsqueda", lector.sitio);
     if (!productos.length) {
       cuerpo.innerHTML = '<p class="zx-vacio">No se reconoció ningún producto en esta página todavía.</p>';
@@ -248,11 +259,12 @@
     html += filaHtml("Precio promedio", formatoPrecio(resumen.precioPromedio, null), resumen.precioPromedio == null);
     html += filaHtml("Precio máximo", formatoPrecio(resumen.precioMaximo, null), resumen.precioMaximo == null);
     html += filaHtml("Suma de vendidos visibles", textoCampo(resumen.sumaVendidos), resumen.sumaVendidos == null);
-    // Issue #247 — solo se muestra si el sitio de verdad confirma Full
-    // en al menos una tarjeta (ver calcularResumenListado); nunca
-    // "0/Y" en un sitio que ni lo mide.
-    if (resumen.fullConDato > 0) {
-      html += filaHtml("Full detectados", `${resumen.fullDetectados}/${resumen.total}`, false);
+    // Issue #247/#248 — solo se muestra si el sitio de verdad confirma
+    // Full (hoy, solo Mercado Libre expone `estadisticasFull`); nunca
+    // "0/Y" en un sitio que ni lo mide, y nunca "0/0" si el listado no
+    // tiene ninguna tarjeta todavía.
+    if (estadisticasFull && estadisticasFull.totalTarjetas > 0) {
+      html += filaHtml("Full detectados", `${estadisticasFull.conFull}/${estadisticasFull.totalTarjetas}`, false);
     }
 
     if (resumen.top10.length) {
@@ -514,10 +526,16 @@
         }
         if (resultado && resultado.captcha) {
           clearInterval(intervalo);
-          resolve({ productos: [], captcha: true });
+          resolve({ productos: [], captcha: true, estadisticasFull: null });
           return;
         }
         const productos = (resultado && resultado.productos) || [];
+        // Issue #248 (vuelta 6) — se lleva junto con `productos` hasta
+        // el resolve final (ver `lector.leerListado`,
+        // `lectores/mercadolibre.js`) para que quien renderice tenga
+        // las estadísticas de Full de la MISMA lectura ya estabilizada
+        // — nunca undefined solo porque este helper no las reenviaba.
+        const estadisticasFull = (resultado && resultado.estadisticasFull) || null;
         let cantidad;
         try {
           cantidad = typeof lector.contarTarjetasListado === "function" ? lector.contarTarjetasListado(document) : productos.length;
@@ -533,7 +551,7 @@
         const seAgotoElTiempo = ahora - inicio > maxEsperaMs;
         if (estable || seAgotoElTiempo) {
           clearInterval(intervalo);
-          resolve({ productos, captcha: false });
+          resolve({ productos, captcha: false, estadisticasFull });
         }
       }, intervaloMs);
     });
@@ -566,7 +584,7 @@
       // manejarEscaneoAutomatico por su cuenta; acá, sin nada confiable
       // que mostrar, se deja el panel como esté.
       if (resultado.captcha) return;
-      renderizarListado(panel, resultado.productos);
+      renderizarListado(panel, resultado.productos, resultado.estadisticasFull);
     } finally {
       esperandoListadoFlotante = false;
     }
