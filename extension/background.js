@@ -61,6 +61,68 @@ const PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO =
 // vuelve a abrir pestañas antes de este tiempo.
 const COOLDOWN_ABRIR_SEGUIMIENTOS_MS = 30_000;
 
+// Issue #252, punto 5 — Mateo confirmó que "Actualizar todo" SÍ abre
+// las pestañas (las 4 se abrieron de verdad), pero se quedan abiertas
+// para siempre — nadie las cierra. Se guarda el id de cada pestaña que
+// background.js (acá, el único con el permiso real) abrió para ese
+// botón, en chrome.storage.session (sobrevive un reciclado del
+// Service Worker, igual que colaSeguimiento más arriba; nunca un
+// reinicio de Chrome — correcto, una pestaña que ya no existe tampoco
+// sobrevive eso). Nunca se guarda el id de una pestaña que la persona
+// abrió a mano (ni "Actualizar todo" ni nada de este archivo abre
+// pestañas fuera de los `chrome.tabs.create` ya documentados) — y
+// cerrarPestanaActualizarTodo (abajo) SOLO cierra un id que esté en
+// esta lista, nunca "la pestaña que mandó el mensaje" a ciegas.
+const TIEMPO_MAX_PESTANA_ACTUALIZAR_TODO_MS = 45_000;
+
+function registrarPestanaActualizarTodo(tabId) {
+  if (tabId == null) return;
+  chrome.storage.session.get({ pestanasActualizarTodo: [] }, (datos) => {
+    const lista = Array.isArray(datos.pestanasActualizarTodo) ? datos.pestanasActualizarTodo : [];
+    lista.push({ tabId, creadoMs: Date.now() });
+    chrome.storage.session.set({ pestanasActualizarTodo: lista });
+  });
+  // Respaldo de los 45s en memoria — misma limitación de Manifest V3
+  // ya documentada arriba para el escaneo de #221 (un Service Worker
+  // reciclado por inactividad pierde este timer); en la práctica, la
+  // propia carga de la pestaña (content.js reescaneando) genera
+  // actividad que lo mantiene vivo durante esta ventana corta.
+  setTimeout(() => cerrarPestanaActualizarTodo(tabId), TIEMPO_MAX_PESTANA_ACTUALIZAR_TODO_MS);
+}
+
+// Cierra `tabId` SOLO si de verdad está en la lista de pestañas que
+// "Actualizar todo" abrió — nunca una pestaña que la persona abrió a
+// mano, y nunca dos veces la misma (una vez que sale de la lista, una
+// segunda llamada con el mismo id no hace nada). `chrome.tabs.remove`
+// sobre una pestaña que la persona ya cerró a mano da un
+// `chrome.runtime.lastError` normal (nunca un error real que haga
+// falta mostrar en ningún lado), igual que el resto de este archivo.
+function cerrarPestanaActualizarTodo(tabId) {
+  chrome.storage.session.get({ pestanasActualizarTodo: [] }, (datos) => {
+    const lista = Array.isArray(datos.pestanasActualizarTodo) ? datos.pestanasActualizarTodo : [];
+    if (!lista.some((p) => p.tabId === tabId)) return;
+    chrome.storage.session.set({ pestanasActualizarTodo: lista.filter((p) => p.tabId !== tabId) });
+    chrome.tabs.remove(tabId, () => void chrome.runtime.lastError);
+  });
+}
+
+// Issue #252, punto 5 — "si la persona activó o se puso a usar esa
+// pestaña, no la cierres": apenas se activa (se le da foco) CUALQUIER
+// pestaña, se desregistra de la lista — nunca más se cierra sola,
+// ni porque su lectura llegue después ni por el respaldo de 45s.
+// Desregistrar un id que no estaba en la lista (la inmensa mayoría de
+// las activaciones, de pestañas que la extensión nunca abrió) no hace
+// nada. `chrome.tabs.onActivated` no necesita ningún permiso nuevo
+// (ni "tabs" ni "host_permissions") — mismo criterio de todo este
+// archivo, documentado arriba.
+function desregistrarPestanaActualizarTodo(tabId) {
+  chrome.storage.session.get({ pestanasActualizarTodo: [] }, (datos) => {
+    const lista = Array.isArray(datos.pestanasActualizarTodo) ? datos.pestanasActualizarTodo : [];
+    if (!lista.some((p) => p.tabId === tabId)) return;
+    chrome.storage.session.set({ pestanasActualizarTodo: lista.filter((p) => p.tabId !== tabId) });
+  });
+}
+
 function encolarDatoPaginaSeguimiento(payload) {
   chrome.storage.session.get({ colaSeguimiento: [] }, (datos) => {
     const cola = Array.isArray(datos.colaSeguimiento) ? datos.colaSeguimiento : [];
@@ -704,7 +766,12 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
         // le quitan el foco a la persona del clic que las disparó; la
         // extensión las lee igual al cargar (content.js/reescanear()),
         // estén o no en foco.
-        chrome.tabs.create({ url, active: false });
+        // Issue #252, punto 5 — se registra el id real (el que Chrome
+        // devuelve, nunca uno inventado) para poder cerrarla sola más
+        // adelante — nunca antes de tener ese id confirmado.
+        chrome.tabs.create({ url, active: false }, (tab) => {
+          if (tab && tab.id != null) registrarPestanaActualizarTodo(tab.id);
+        });
       }
     });
     return;
@@ -752,5 +819,24 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
         void chrome.runtime.lastError;
       });
     }
+    // Issue #252, punto 5 — apenas esta lectura de inventario/vendidos/
+    // publicaciones quedó encolada (arriba) o se intentó entregar
+    // (el broadcast de arriba, a la pestaña de Seguimiento que ya
+    // estaba abierta), se cierra la pestaña que la mandó — PERO SOLO
+    // si de verdad es una que "Actualizar todo" abrió
+    // (cerrarPestanaActualizarTodo no hace nada si no está en esa
+    // lista: nunca cierra una pestaña que la persona abrió a mano, ni
+    // una que ya se desregistró porque la persona la activó).
+    if (mensaje.tipo === "zilonix:dato-pagina-seguimiento" && remitente.tab && remitente.tab.id != null) {
+      cerrarPestanaActualizarTodo(remitente.tab.id);
+    }
   });
+});
+
+// Issue #252, punto 5 — "si la persona activó o se puso a usar esa
+// pestaña, no la cierres": dispara apenas Chrome le da el foco a
+// CUALQUIER pestaña (la persona haciendo clic en ella, Alt+Tab, etc.)
+// — mucho antes de que su lectura llegue o de que pasen los 45s.
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  desregistrarPestanaActualizarTodo(tabId);
 });
