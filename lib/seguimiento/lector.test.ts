@@ -70,8 +70,8 @@ describe("leerFotoSeguimiento — producto, recursoMl item", () => {
       esEnvioGratis: true,
     });
     vi.mocked(obtenerOfertasProducto).mockResolvedValue([
-      { itemId: "MCO111", precio: 100, monedaId: "COP", sellerId: "333", esFull: true, esEnvioGratis: true },
-      { itemId: "MCO222", precio: 105, monedaId: "COP", sellerId: "444", esFull: false, esEnvioGratis: false },
+      { itemId: "MCO111", precio: 100, monedaId: "COP", sellerId: "333", esFull: true, esEnvioGratis: true, vendidos: null, fechaCreacion: null, permalink: null },
+      { itemId: "MCO222", precio: 105, monedaId: "COP", sellerId: "444", esFull: false, esEnvioGratis: false, vendidos: null, fechaCreacion: null, permalink: null },
     ]);
 
     const resultado = await leerFotoSeguimiento({ tipo: "producto", recursoMl: "item", mlIdExterno: "MCO111" }, "token", CUENTA_PROPIA);
@@ -93,8 +93,8 @@ describe("leerFotoSeguimiento — producto, recursoMl item", () => {
       esEnvioGratis: false,
     });
     vi.mocked(obtenerOfertasProducto).mockResolvedValue([
-      { itemId: "MCO222", precio: 100, monedaId: "COP", sellerId: "444", esFull: true, esEnvioGratis: true },
-      { itemId: "MCO111", precio: 105, monedaId: "COP", sellerId: "333", esFull: false, esEnvioGratis: false },
+      { itemId: "MCO222", precio: 100, monedaId: "COP", sellerId: "444", esFull: true, esEnvioGratis: true, vendidos: null, fechaCreacion: null, permalink: null },
+      { itemId: "MCO111", precio: 105, monedaId: "COP", sellerId: "333", esFull: false, esEnvioGratis: false, vendidos: null, fechaCreacion: null, permalink: null },
     ]);
 
     const resultado = await leerFotoSeguimiento({ tipo: "producto", recursoMl: "item", mlIdExterno: "MCO111" }, "token", CUENTA_PROPIA);
@@ -116,8 +116,8 @@ describe("leerFotoSeguimiento — producto, recursoMl product (catálogo directo
 
   it("gana el botón de compra cuando la cuenta PROPIA es la primera oferta", async () => {
     vi.mocked(obtenerOfertasProducto).mockResolvedValue([
-      { itemId: "MCO111", precio: 100, monedaId: "COP", sellerId: CUENTA_PROPIA, esFull: true, esEnvioGratis: true },
-      { itemId: "MCO222", precio: 105, monedaId: "COP", sellerId: "444", esFull: false, esEnvioGratis: false },
+      { itemId: "MCO111", precio: 100, monedaId: "COP", sellerId: CUENTA_PROPIA, esFull: true, esEnvioGratis: true, vendidos: null, fechaCreacion: null, permalink: null },
+      { itemId: "MCO222", precio: 105, monedaId: "COP", sellerId: "444", esFull: false, esEnvioGratis: false, vendidos: null, fechaCreacion: null, permalink: null },
     ]);
 
     const resultado = await leerFotoSeguimiento({ tipo: "producto", recursoMl: "product", mlIdExterno: "MCO999" }, "token", CUENTA_PROPIA);

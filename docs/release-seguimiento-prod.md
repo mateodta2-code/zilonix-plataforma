@@ -19,19 +19,19 @@ railway connect <servicio-postgres-de-produccion> --environment production --tun
 ```
 Con la URL que imprime el túnel, conectarse con **`psql` real** — nunca con la pestaña "Data" del dashboard de Railway (esa trae un `LIMIT` implícito que puede hacer pensar que algo salió mal cuando no salió mal).
 
-### 2.1 Migración `0009` (seguimientos_ml/seguimiento_fotos/seguimiento_alertas), si falta
+### 2.1 Migraciones `0008`–`0010`, si faltan
 
-Primero confirmar si ya está aplicada:
+Primero confirmar si la de seguimiento ya está aplicada:
 ```sql
 SELECT to_regclass('public.seguimientos_ml');
 ```
-Si devuelve `NULL`, falta — correr la migración:
+Si devuelve `NULL`, falta — correr las migraciones:
 ```
 DATABASE_URL="<la-url-del-túnel>" npm run db:migrate
 ```
-(Drizzle aplica solo lo que falte — si `0009` ya corrió antes, no hace nada y no rompe nada.)
+**Importante (lección real de este release, ver 2.5)**: `db:migrate` aplica TODAS las migraciones pendientes de una, en orden — nunca correrlo pensando solo en la `0009`. En producción, al momento de este release, faltaban la `0008` (despachos_ml), la `0009` (seguimiento) Y la `0010` (productos_ml/publicar) — las tres de una, no solo la última que se tenía en mente. Si `to_regclass` ya da algo distinto de `NULL` para `seguimientos_ml`, igual vale la pena correr `db:migrate` una vez para confirmar que no quedó ninguna otra pendiente suelta (es idempotente, nunca rompe nada si ya todo está aplicado).
 
-Si devuelve algo distinto de `NULL` (la tabla ya existe), seguir directo al punto 2.2.
+Si devuelve algo distinto de `NULL` (la tabla ya existe) Y `db:migrate` confirma que no hay nada pendiente, seguir directo al punto 2.2.
 
 ### 2.2 Rol `seguimiento_trabajador_user` + GRANTs + 5 políticas RLS
 
@@ -92,10 +92,50 @@ SELECT polname FROM pg_policies WHERE tablename LIKE 'seguimiento%';
 ```
 El primero: el rol existe, con `Login`, sin `Superuser`/`Createrole`. El segundo: 5 filas — `aislamiento_seguimientos_ml`, `aislamiento_seguimiento_fotos`, `aislamiento_seguimiento_alertas`, `seguimiento_trabajador_lee_seguimientos_ml`, `seguimiento_trabajador_marca_revision_seguimientos_ml`.
 
+## 2.5 Postmortem real: "Application error" en producción al agregar — RESUELTO (issue #207)
+
+Síntoma observado: agregar un seguimiento en producción (desde la extensión o desde el formulario) terminaba en la pantalla genérica de Next.js ("Application error", digest `2846050239`) en vez del aviso normal.
+
+**Diagnóstico inicial (incompleto)**: se sospechó solo un password mismatch del rol `seguimiento_trabajador_user` contra `DATABASE_URL_SEGUIMIENTO`. Real, pero no era la causa completa — ni la más grave.
+
+**Causa real confirmada, de más grave a menos**:
+1. **`DATABASE_URL_APP` (la variable que usa TODO el tráfico normal de la app — no solo Seguimiento) estaba apuntando al rol `seguimiento_trabajador_user` en vez de a `app_user`.** `seguimiento_trabajador_user` solo tiene `SELECT`/`UPDATE` acotado sobre `seguimientos_ml` (ver 2.2) — con esa variable mal apuntada, prácticamente ninguna consulta de negocio real podía funcionar, mucho más allá de Seguimiento. Esta es la que de verdad importa para cualquier incidente futuro: **`DATABASE_URL_APP` SIEMPRE tiene que apuntar a `app_user`, nunca a ningún rol restringido** (regla ya en `CLAUDE.md`, pero el valor real en Railway producción no la cumplía).
+2. Las migraciones `0008`/`0009`/`0010` nunca se habían corrido contra el Postgres de producción (ver 2.1 actualizado) — ni las tablas de seguimiento ni `productos_ml` existían todavía.
+3. El rol `seguimiento_trabajador_user` tampoco existía (ni sus 5 políticas RLS).
+
+**Ya resuelto por Pablo en producción (NO rehacer estos pasos — son ops reales ya aplicadas)**:
+- Migraciones `0008`–`0010` aplicadas contra el Postgres de producción.
+- Rol `seguimiento_trabajador_user` creado + las 5 políticas RLS de la sección 2.2.
+- `DATABASE_URL_APP` corregida en Railway (producción) para apuntar a `app_user` con `APP_USER_PASSWORD_TEMPORAL` — mismo criterio que ya usa staging.
+- Empresa de prueba creada en producción, sin "Application error".
+- Smoke test real de "Seguir en Zilonix" en verde: `?agregado=1` real en `web-production-af270.up.railway.app`.
+
+**Qué queda** (nada de SQL/RLS — eso ya está): el secreto de GitHub `SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION` y una corrida de `workflow_dispatch` para confirmar el batch diario de verdad — ver secciones 3 y 4 de este documento, sin cambios. **El `schedule` del workflow sigue sin activarse.**
+
 ## 3. Variables y secretos
 
 - `DATABASE_URL_SEGUIMIENTO` y `SEGUIMIENTO_TRABAJADOR_SECRET` (variable de Railway, producción) — deberían existir ya; si no, armarlas ahora (ver punto 2.3 para la primera; la segunda es un secreto compartido nuevo, cualquier cadena larga y aleatoria).
 - **GitHub → Settings → Secrets and variables → Actions**: crear `SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION` con el MISMO valor que `SEGUIMIENTO_TRABAJADOR_SECRET` tiene en Railway producción (copiar el valor de Railway a GitHub, nunca inventar uno distinto — si no coinciden, el workflow va a dar 401).
+
+### 3.1 Batch prod — secreto GH + workflow_dispatch (lo único que falta, issue #207)
+
+El SQL/RLS de producción y el smoke de "Seguir en Zilonix" ya están resueltos (ver 2.5) — esto es lo único operativo que queda, resumido en un solo lugar para no tener que releer todo el documento:
+
+1. **Secreto exacto a crear**: `SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION`, en **GitHub → Settings → Secrets and variables → Actions → New repository secret**. El valor tiene que ser EXACTAMENTE el mismo que ya tiene la variable `SEGUIMIENTO_TRABAJADOR_SECRET` en Railway (ambiente de producción del servicio `web-production-af270`) — copiarlo de ahí, nunca inventar uno nuevo ni escribirlo de memoria. Si no coinciden carácter por carácter, el workflow va a dar `401` (secreto comparado con `crypto.timingSafeEqual` en `app/api/trabajos/seguimiento/route.ts`).
+2. **Qué workflow disparar**: GitHub → Actions → **"Revisión diaria de seguimientos de Mercado Libre (producción)"** (`.github/workflows/revision-diaria-seguimiento-produccion.yml`) → **Run workflow**. No tiene ningún input que llenar — el workflow no define ninguno (`workflow_dispatch: {}`), solo hace falta elegir la rama (`main`) y confirmar.
+3. **NO activar el cron todavía**: el bloque `schedule` de ese mismo archivo sigue comentado a propósito — no descomentarlo en esta tarea, ni en ninguna corrida manual (ver paso 5 de la sección 4, para cuando corresponda).
+4. **Cómo verificar que la corrida guardó fotos de verdad** (nunca asumir solo porque el paso de GitHub Actions salió verde):
+   - En el log de esa corrida (pestaña del job en GitHub Actions) no hay nada más que imprimir — el `curl` solo confirma que la petición HTTP llegó.
+   - El dato real está en Postgres: con el mismo túnel/`psql` de la sección 2,
+     ```sql
+     SELECT seguimiento_id, fecha, precio, vendidos FROM seguimiento_fotos ORDER BY creado_ts DESC LIMIT 5;
+     ```
+     tiene que aparecer al menos una fila con la fecha de hoy (igual que el paso 3 de la sección 4 — mismo chequeo, repetido acá para no tener que ir a buscarlo).
+   - Si se tiene acceso a los logs del servicio `web` en Railway (producción) del momento exacto de la corrida, la línea real que deja el trabajo es `[lib/trabajos/revisionDiariaSeguimiento] lote del día: N activos, N procesados, N saltados, N con error, N alertas creadas.` (`lib/trabajos/revisionDiariaSeguimiento.ts`) — confirma cuántos seguimientos se intentaron sin tener que contarlos a mano en la tabla.
+5. **Qué NO hacer en este paso** (además de lo ya dicho en "Qué NO hacer" al final del documento):
+   - Nunca tocar `DATABASE_URL_APP` para esto — ese incidente ya está resuelto (2.5), y esta tarea es solo del secreto de GitHub y el workflow, no de ninguna variable de conexión.
+   - Nunca apuntar `app_user` (ni `DATABASE_URL_APP`) al rol `seguimiento_trabajador_user`, ni al revés — son roles con privilegios distintos a propósito (ver 2.5, punto 1).
+   - Nunca activar el `schedule` del workflow en este paso — eso es un commit aparte, después de confirmar varias corridas manuales en verde (sección 4, paso 5).
 
 ## 4. Correr el workflow una vez, a mano, y verificar
 

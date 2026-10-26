@@ -400,6 +400,33 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
     expect(r?.producto).toEqual({ id: "MCO111", nombre: "Reloj", foto: "https://x" });
     expect(r?.oferta?.precio).toBe(35_000);
   });
+
+  // Issue #212 — obtenerItemMl ahora pide también "permalink"
+  // (confirmado en producción en zilonix-os-web, GET /items/{id}
+  // ?attributes=id,status,permalink,pictures) — investigacion.ts lo
+  // prefiere sobre el link armado a mano cuando Mercado Libre lo manda.
+  it("obtenerItemMl: pide 'permalink' y lo guarda en la oferta cuando Mercado Libre lo manda", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      expect(String(url)).toContain("permalink");
+      return respuestaJson({
+        title: "Reloj",
+        price: 35_000,
+        currency_id: "COP",
+        seller_id: "123456",
+        status: "active",
+        permalink: "https://articulo.mercadolibre.com.co/MCO-111-reloj",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await obtenerItemMl("MCO111", "token");
+    expect(r?.oferta?.permalink).toBe("https://articulo.mercadolibre.com.co/MCO-111-reloj");
+  });
+
+  it("obtenerItemMl: sin permalink en la respuesta, queda null (nunca inventado)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Reloj", price: 35_000, currency_id: "COP", seller_id: "123456", status: "active" })));
+    const r = await obtenerItemMl("MCO111", "token");
+    expect(r?.oferta?.permalink).toBeNull();
+  });
 });
 
 describe("resolverCategoria — 3 intentos con 800ms*intento ante 403/5xx (issue #147, mismo criterio que zilonix-os-web)", () => {

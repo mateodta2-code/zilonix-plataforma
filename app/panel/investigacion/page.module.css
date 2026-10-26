@@ -54,3 +54,122 @@
   align-self: flex-start;
   margin-top: 16px;
 }
+
+/* Issue #197 — badge de extensión (InsigniaExtension) + nota de qué
+   cambia si está conectada. */
+.insignia {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notaInsignia {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.foto {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+}
+
+.subdato {
+  font-size: 11.5px;
+  color: var(--texto-suave);
+}
+
+.enlaceSeguir {
+  color: var(--acento);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.enlaceSeguir:hover {
+  text-decoration: underline;
+}
+
+.veredicto {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* Issue #227 — "fotos ampliables (hover/lightbox)": la miniatura de
+   .foto se agranda un poco al pasar el mouse (pista visual de que es
+   clicable) y abre el lightbox de abajo con un clic real — nunca
+   automático. */
+.fotoClicable {
+  cursor: zoom-in;
+  transition: transform 0.15s ease;
+}
+
+.fotoClicable:hover {
+  transform: scale(1.15);
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.75);
+  cursor: zoom-out;
+}
+
+.lightboxImagen {
+  max-width: min(90vw, 640px);
+  max-height: 90vh;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* Issue #229 — "thumbnails reales + preview al hover (no solo
+   lightbox con clic)". Issue #231 — bug real corregido: el preview de
+   #229 usaba position:absolute dentro de .fotoContenedor, pero
+   components/marco/Tabla.module.css tiene overflow-x:auto en el
+   contenedor de la tabla — un position:absolute NUNCA escapa el
+   overflow de su ancestro, así que el preview quedaba siempre
+   recortado/invisible (confirmado leyendo Tabla.module.css, no una
+   suposición). Se reemplaza por UN único preview "flotante"
+   (.fotoPreviewFija, position:fixed — sí escapa el overflow de un
+   ancestro, mientras ningún ancestro tenga su propio transform/filter;
+   confirmado que Tarjeta/Tabla no lo tienen), posicionado por JS con
+   coordenadas reales del viewport (PanelInvestigacion.tsx,
+   mostrarPreview) en vez de depender de :hover en CSS puro. */
+.fotoContenedor {
+  display: inline-flex;
+}
+
+.fotoPreviewFija {
+  position: fixed;
+  z-index: 1001;
+  width: 220px;
+  height: 220px;
+  object-fit: cover;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  background: var(--tarjeta-fondo);
+  pointer-events: none;
+}
+
+/* Issue #227 — "Stack": cada búsqueda/plataforma agrega su propio
+   bloque debajo, nunca mezclado con los demás en una sola tabla. */
+.bloque {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.encabezadoBloque {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}

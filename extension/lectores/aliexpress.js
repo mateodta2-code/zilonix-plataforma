@@ -32,16 +32,126 @@
     };
   }
 
+  // Issue #225 — "parity Zilonix OS": fuente real confirmada en vivo
+  // (Cowork, zilonix-os-web, chrome-extension-busqueda/scraper-aliexpress-search.js,
+  // "auriculares bluetooth"/"raquetas de badminton") — NO adivinada:
+  // window._dida_config_._init_data_.data.data.root.fields.mods.itemList.content
+  // — 60 productos, SIEMPRE completos (el DOM solo renderiza 18-24 de
+  // 60 sin scroll, por eso se lee del JSON directo, nunca del DOM).
+  // El JSON-LD de esta página existe pero viene con comillas mal
+  // escapadas y sin precio/ventas — no se usa.
+  //
+  // Bug real que esto evita (confirmado por Cowork): la asignación
+  // real tiene DOS sentencias en el mismo script
+  // ("window._dida_config_={...chico...}; window._dida_config_._init_data_={...grande...}")
+  // — buscar solo "_dida_config_" agarra la sentencia CHICA (parsea
+  // sin error, pero vacía de lo que hace falta). El marcador tiene que
+  // ser "_dida_config_._init_data_" específico. Además el valor real
+  // es "{ data: {...} }" con la clave "data" SIN comillas (literal de
+  // JS, no JSON puro) — hay que cortar el objeto de ADENTRO de "data:".
+  function extraerObjetoJsonDesde(texto, inicio) {
+    let profundidad = 0;
+    let dentroDeString = false;
+    let escapando = false;
+    for (let i = inicio; i < texto.length; i++) {
+      const c = texto[i];
+      if (dentroDeString) {
+        if (escapando) escapando = false;
+        else if (c === "\\") escapando = true;
+        else if (c === '"') dentroDeString = false;
+        continue;
+      }
+      if (c === '"') {
+        dentroDeString = true;
+        continue;
+      }
+      if (c === "{") profundidad++;
+      else if (c === "}") {
+        profundidad--;
+        if (profundidad === 0) return texto.slice(inicio, i + 1);
+      }
+    }
+    return null;
+  }
+
+  // "1.000+ vendidos"/"213 vendidos" -> el punto SÍ es separador de
+  // miles en ESTE campo puntual (formato distinto del precio, abajo —
+  // cada campo de AliExpress usa el suyo, confirmado por Cowork).
+  function parseVentasAliExpress(texto) {
+    if (!texto) return null;
+    const m = String(texto).match(/([\d.,]+)\+?\s*vendid/i);
+    if (!m) return null;
+    const limpio = m[1].replace(/\./g, "").replace(",", ".");
+    const n = Math.round(parseFloat(limpio));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function leerDidaConfig(doc) {
+    const marcador = "_dida_config_._init_data_";
+    const scripts = doc.querySelectorAll("script");
+    for (const s of scripts) {
+      const texto = s.textContent || "";
+      const idxMarcador = texto.indexOf(marcador);
+      if (idxMarcador === -1) continue;
+      const idxIgual = texto.indexOf("=", idxMarcador + marcador.length);
+      if (idxIgual === -1) continue;
+      const idxLlaveExterna = texto.indexOf("{", idxIgual);
+      if (idxLlaveExterna === -1) continue;
+      const prefijo = texto.slice(idxLlaveExterna, idxLlaveExterna + 30).match(/^\{\s*data\s*:\s*/);
+      if (!prefijo) continue;
+      const idxLlaveInterna = idxLlaveExterna + prefijo[0].length;
+      if (texto[idxLlaveInterna] !== "{") continue;
+      const jsonTexto = extraerObjetoJsonDesde(texto, idxLlaveInterna);
+      if (!jsonTexto) continue;
+      try {
+        const data = JSON.parse(jsonTexto);
+        // "data" ya es el contenido de "data:" (ver nota arriba) —
+        // ahí sigue habiendo OTRA clave "data" propia antes de "root"
+        // (confirmado por Cowork) — nunca data.root directo.
+        if (!data || !data.data || !data.data.root) continue;
+        return data;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
   function leerListado(doc) {
-    const tarjetas = doc.querySelectorAll("[class*='SearchProductFeed'] a, [class*='product-card'], a[href*='/item/']");
-    const productos = [];
-    tarjetas.forEach((tarjeta) => {
-      const titulo = U.textoDe(["[class*='title']", "h1", "h3"], tarjeta) || tarjeta.getAttribute("title");
-      const precio = U.numeroDesdeTexto(U.textoDe(["[class*='price']"], tarjeta));
-      const textoVendidos = tarjeta.textContent?.match(/\d[\d.,]*\+?\s*(sold|vendidos)/i)?.[0] || null;
-      const link = tarjeta.tagName === "A" ? tarjeta.getAttribute("href") : U.atributoDe(["a"], "href", tarjeta);
-      if (titulo || precio != null) productos.push({ titulo, precio, vendidos: U.enteroDesdeTexto(textoVendidos), link });
-    });
+    const config = leerDidaConfig(doc);
+    const lista = (config && config.data && config.data.root && config.data.root.fields && config.data.root.fields.mods && config.data.root.fields.mods.itemList && config.data.root.fields.mods.itemList.content) || [];
+    // productType "ad" = patrocinado — se excluye, mismo criterio que las demás plataformas.
+    const productos = lista
+      .filter((it) => it && it.productType !== "ad")
+      .map((it) => {
+        const productId = it.productId ? String(it.productId) : null;
+        if (!productId) return null;
+        const precio = typeof (it.prices && it.prices.salePrice && it.prices.salePrice.minPrice) === "number"
+          ? it.prices.salePrice.minPrice
+          : U.numeroDesdeTexto(it.prices && it.prices.salePrice && it.prices.salePrice.formattedPrice);
+        const vendidos = parseVentasAliExpress((it.trade && it.trade.tradeDesc) || "");
+        // Issue #227 — foto/estrellas confirmados en el mismo objeto
+        // real (zilonix-os-web, scraper-aliexpress-search.js) que ya
+        // confirmó precio/ventas — para fotos ampliables y el sort
+        // "Más calificación". Issue #237 — la ruta JSON (`it.image.imgUrl`)
+        // nunca cambió (confirmado contra una captura real de hoy) —
+        // lo que cambió fue el DOMINIO del valor en sí: AliExpress
+        // movió las fotos de producto a `aliexpress-media.com`, ya no
+        // `alicdn.com` — la extensión nunca necesitó tocarse (no valida
+        // dominios, eso vive en el CSP de la app, ver next.config.mjs).
+        const fotoRaw = (it.image && it.image.imgUrl) || "";
+        const foto = fotoRaw ? (fotoRaw.indexOf("//") === 0 ? `https:${fotoRaw}` : fotoRaw) : null;
+        const calificacion = it.evaluation && it.evaluation.starRating != null ? Number(it.evaluation.starRating) : null;
+        return {
+          titulo: (it.title && it.title.displayTitle) || null,
+          precio,
+          vendidos,
+          foto,
+          calificacion: Number.isFinite(calificacion) ? calificacion : null,
+          link: `https://es.aliexpress.com/item/${productId}.html`,
+        };
+      })
+      .filter(Boolean);
     return { productos };
   }
 
