@@ -441,6 +441,26 @@
     }
   }
   let yaEnviadoEscaneoAutomatico = false;
+
+  // Issue #251 (revisión de Pablo, punto 4) — marca puesta por
+  // background.js (conMarcadorResena) al navegar la pestaña de fondo
+  // de "Top 8 reseñas" — nunca la pone la persona a mano. Gatea SOLO
+  // los envíos de Seguimiento (ver enviarInventarioFichaAZilonix/
+  // enviarPublicacionesTiendaAZilonix, abajo): esta pestaña la abrió la
+  // extensión para leer reseñas de un candidato cualquiera, nunca
+  // porque la persona entró a ver un competidor que sigue — mandar
+  // inventario/vendidos desde acá sería un dato real pero mal
+  // atribuido a "la persona lo revisó", que es la premisa de
+  // Seguimiento. No afecta "Completar vendidos"/reseñas en sí, que
+  // siguen mandándose igual desde esta misma pestaña (ese es justo el
+  // propósito de que la extensión la abra).
+  function esPaginaDeLecturaResenas() {
+    try {
+      return new URL(location.href).searchParams.get("_zilonix_resena") === "1";
+    } catch {
+      return false;
+    }
+  }
   // Issue #225 — aviso de captcha, UN solo uso por carga de página —
   // a propósito NUNCA bloquea que, más adelante en la MISMA carga, se
   // mande el resultado real una vez que el captcha se resuelva (ese
@@ -820,7 +840,17 @@
         const datos = lector.leerProducto(document);
         renderizarProducto(panel, datos);
         enviarVendidosAZilonix(datos);
-        enviarInventarioFichaAZilonix(datos);
+        // Issue #251 (revisión de Pablo, punto 4) — nunca en una
+        // pestaña que la propia extensión abrió para "Analizar" o
+        // "Top 8 reseñas" (ver esPaginaDeEscaneoAutomatico/
+        // esPaginaDeLecturaResenas, arriba). Sí se manda en cualquier
+        // otra, incluidas las que abre el botón "Actualizar todo" del
+        // panel de Seguimiento (window.open desde la página, nunca
+        // marcadas por background.js — un clic real, igual que abrir
+        // la ficha a mano).
+        if (!esPaginaDeEscaneoAutomatico() && !esPaginaDeLecturaResenas()) {
+          enviarInventarioFichaAZilonix(datos);
+        }
         // Issue #225 — se intenta SIEMPRE que haya un itemId confirmado
         // (igual que enviarVendidosAZilonix), no solo durante un "Ver
         // reseñas" activo — background.js es quien decide si le
@@ -851,7 +881,11 @@
       } else if (tipo === "tienda" && lector.leerTienda) {
         const datosTienda = lector.leerTienda(document);
         renderizarTienda(panel, datosTienda);
-        enviarPublicacionesTiendaAZilonix(datosTienda);
+        // Issue #251 (revisión de Pablo, punto 4) — mismo criterio que
+        // el bloque "producto", arriba.
+        if (!esPaginaDeEscaneoAutomatico() && !esPaginaDeLecturaResenas()) {
+          enviarPublicacionesTiendaAZilonix(datosTienda);
+        }
       }
     } catch (error) {
       // Un selector roto en vivo nunca deja la página del usuario rota

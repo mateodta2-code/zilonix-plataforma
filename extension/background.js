@@ -23,8 +23,60 @@
 // de un recurso AJENO por la API de Mercado Libre (403/ausente,
 // confirmado en #250) — content.js lo manda cuando la persona abre la
 // ficha de un competidor o la tienda que sigue, y solo la pestaña del
-// panel de Seguimiento (con marcador-zilonix.js) hace algo con esto.
+// panel de Seguimiento (con marcador-zilonix.js, y con el componente
+// que escucha "dato-pagina-seguimiento" montado) hace algo con esto.
 const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix:dato-pagina-seguimiento"]);
+
+// Issue #251 (revisión de Pablo, punto 4) — "que la lectura no dependa
+// de tener abierta la pestaña de Seguimiento". Decisión de Mateo:
+// SOLO cola + vaciado oportunista, nunca abrir una pestaña por su
+// cuenta (seguiría siendo cierto que esta extensión "nunca navega sin
+// un clic real" — abrir una pestaña nueva en automático para vaciar la
+// cola habría roto esa garantía, documentada en LEEME.md, y hubiera
+// necesitado un permiso nuevo en manifest.json solo para eso).
+// chrome.storage.session (permiso "storage", nuevo en esta tarea — el
+// único que tiene esta extensión) persiste mientras Chrome esté
+// abierto, sin sobrevivir un reinicio del navegador: correcto para
+// este dato (una lectura de página vieja ya no vale mucho) y evita
+// guardar nada permanente sin que la persona lo sepa.
+// Tope de seguridad — si de verdad nadie abre Seguimiento en mucho
+// tiempo, la cola no crece sin límite; se descarta lo más viejo primero.
+const TOPE_COLA_SEGUIMIENTO = 200;
+
+function encolarDatoPaginaSeguimiento(payload) {
+  chrome.storage.session.get({ colaSeguimiento: [] }, (datos) => {
+    const cola = Array.isArray(datos.colaSeguimiento) ? datos.colaSeguimiento : [];
+    cola.push(payload);
+    while (cola.length > TOPE_COLA_SEGUIMIENTO) cola.shift();
+    chrome.storage.session.set({ colaSeguimiento: cola });
+  });
+}
+
+// Issue #251 — la página de Seguimiento (EscuchaExtension.tsx) pide
+// esto una vez al montar, vía marcador-zilonix.js (dirección PÁGINA ->
+// EXTENSIÓN, mismo criterio que "iniciar-escaneo"). Reenvía cada
+// lectura encolada por el mismo camino de siempre (como si acabara de
+// llegar de la ficha) y vacía la cola — "oportunista": si la pestaña
+// se cierra a mitad de camino, esa lectura se pierde (igual que
+// cualquier mensaje de este relevo hoy, que tampoco tiene confirmación
+// de guardado), nunca se reintenta sola.
+function vaciarColaSeguimiento() {
+  chrome.storage.session.get({ colaSeguimiento: [] }, (datos) => {
+    const cola = Array.isArray(datos.colaSeguimiento) ? datos.colaSeguimiento : [];
+    if (!cola.length) return;
+    chrome.storage.session.set({ colaSeguimiento: [] });
+    chrome.tabs.query({}, (pestanas) => {
+      for (const payload of cola) {
+        for (const pestana of pestanas) {
+          if (pestana.id == null) continue;
+          chrome.tabs.sendMessage(pestana.id, { tipo: "zilonix:dato-pagina-seguimiento", payload }, () => {
+            void chrome.runtime.lastError; // pestaña sin marcador-zilonix.js — nunca un error real
+          });
+        }
+      }
+    });
+  });
+}
 
 // Issue #221 — "Analizar estilo OS": orquesta el escaneo acotado de
 // listados REALES de Mercado Libre que arranca con "Analizar". Todo
@@ -261,7 +313,7 @@ function leerSiguienteResena(tabIdPanel) {
   }
 
   const item = estado.items[estado.indice];
-  chrome.tabs.update(estado.tabId, { url: item.link }, () => {
+  chrome.tabs.update(estado.tabId, { url: conMarcadorResena(item.link) }, () => {
     if (chrome.runtime.lastError) {
       avanzarLecturaResena(tabIdPanel, null);
       return;
@@ -360,6 +412,23 @@ function conMarcadorEscaneo(urlCruda) {
     return url.href;
   } catch {
     return urlCruda; // nunca debería pasar — las 5 URLs de abajo siempre son absolutas y válidas
+  }
+}
+
+// Issue #251 (revisión de Pablo, punto 4) — mismo criterio que
+// conMarcadorEscaneo (arriba): esta pestaña de "Top 8 reseñas" la abrió
+// la propia extensión, nunca la persona con un clic sobre ESTA página
+// en particular — content.js la usa para no mandar inventario/vendidos
+// de Seguimiento desde acá (ver esPaginaDeLecturaResenas, en
+// content.js). No afecta "Completar vendidos"/reseñas en sí (eso sigue
+// mandándose igual, el marcador solo gatea Seguimiento).
+function conMarcadorResena(urlCruda) {
+  try {
+    const url = new URL(urlCruda);
+    url.searchParams.set("_zilonix_resena", "1");
+    return url.href;
+  } catch {
+    return urlCruda;
   }
 }
 
@@ -532,6 +601,15 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
     return;
   }
 
+  // Issue #251 (revisión de Pablo, punto 4) — EscuchaExtension.tsx lo
+  // manda una vez al montar /panel/investigacion/seguimiento, para
+  // vaciar lo que haya quedado encolado de visitas a Mercado Libre
+  // mientras esa pestaña estaba cerrada.
+  if (mensaje.tipo === "zilonix:pedir-cola-seguimiento") {
+    vaciarColaSeguimiento();
+    return;
+  }
+
   if (mensaje.tipo === "zilonix:resena") {
     // Mismo criterio que "zilonix:escaneo-resultado" — content.js
     // manda esto SIEMPRE que confirma una reseña en cualquier PDP
@@ -551,6 +629,20 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
 
   if (!TIPOS_RELEVADOS.has(mensaje.tipo) || !mensaje.payload) return;
   chrome.tabs.query({}, (pestanas) => {
+    // Issue #251 (revisión de Pablo, punto 4) — si NINGUNA pestaña
+    // abierta ahora mismo es la de Seguimiento, se encola para
+    // cuando se abra. Si YA hay una (p.url visible sin permiso nuevo:
+    // esta extensión ya tiene un content script que matchea esa URL,
+    // ver manifest.json), nunca se encola — el broadcast de abajo
+    // (el mismo de siempre, sin confirmación de guardado) es quien la
+    // entrega, y encolarla también replayaría después un dato viejo
+    // encima de uno más fresco que ese broadcast ya guardó.
+    if (mensaje.tipo === "zilonix:dato-pagina-seguimiento") {
+      const hayPestanaSeguimientoAbierta = pestanas.some(
+        (p) => typeof p.url === "string" && p.url.includes("/panel/investigacion/seguimiento")
+      );
+      if (!hayPestanaSeguimientoAbierta) encolarDatoPaginaSeguimiento(mensaje.payload);
+    }
     for (const pestana of pestanas) {
       if (pestana.id == null || pestana.id === remitente.tab?.id) continue; // nunca de vuelta a la misma pestaña que lo mandó
       chrome.tabs.sendMessage(pestana.id, mensaje, () => {

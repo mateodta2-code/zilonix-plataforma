@@ -32,7 +32,19 @@ export type AlertaSeguimientoTipo =
 
 export type AlertaGenerada = { tipo: AlertaSeguimientoTipo; detalle: Record<string, unknown> };
 
-export type PublicacionTienda = { itemId: string; titulo: string; precio: number | null };
+// Issue #251, punto 5 — `titulo` pasa a `string | null`: la lectura de
+// página de una tienda (guardarDatoDePaginaSeguimiento) solo trae el
+// `itemId` de cada publicación visible, nunca su título real — antes
+// se rellenaba con el propio `itemId` como título falso, que Pablo
+// pidió sacar. `null` es honesto; quien muestra el mensaje cae al
+// `itemId` recién AHÍ, nunca se inventa un título guardado.
+export type PublicacionTienda = { itemId: string; titulo: string | null; precio: number | null };
+
+// Issue #251, punto 5 — `total` (el número real que Mercado Libre
+// muestra arriba del listado) viaja junto con `visibles` (el snapshot
+// liviano que ya usaba la comparación de nuevas/eliminadas) dentro del
+// mismo campo jsonb, sin columna aparte.
+export type PublicacionesTienda = { total: number | null; visibles: PublicacionTienda[] };
 
 // Mismas columnas reales de seguimiento_fotos (db/schema.ts) que
 // importan para comparar — nunca el campo id/empresaId/fecha, que no
@@ -44,7 +56,7 @@ export type FotoComparable = {
   estado: string | null;
   enCatalogo: boolean | null;
   ganaBotonCompra: boolean | null;
-  publicaciones: PublicacionTienda[] | null;
+  publicaciones: PublicacionesTienda | null;
 };
 
 function redondear2(n: number): number {
@@ -120,11 +132,11 @@ function alertasDeEstado(anterior: FotoComparable, actual: FotoComparable): Aler
 // (ej. falló la búsqueda de publicaciones ese día puntual).
 function alertasDePublicaciones(anterior: FotoComparable, actual: FotoComparable): AlertaGenerada[] {
   if (!anterior.publicaciones || !actual.publicaciones) return [];
-  const idsAnterior = new Set(anterior.publicaciones.map((p) => p.itemId));
-  const idsActual = new Set(actual.publicaciones.map((p) => p.itemId));
+  const idsAnterior = new Set(anterior.publicaciones.visibles.map((p) => p.itemId));
+  const idsActual = new Set(actual.publicaciones.visibles.map((p) => p.itemId));
 
-  const nuevas = actual.publicaciones.filter((p) => !idsAnterior.has(p.itemId));
-  const eliminadas = anterior.publicaciones.filter((p) => !idsActual.has(p.itemId));
+  const nuevas = actual.publicaciones.visibles.filter((p) => !idsAnterior.has(p.itemId));
+  const eliminadas = anterior.publicaciones.visibles.filter((p) => !idsActual.has(p.itemId));
 
   const alertas: AlertaGenerada[] = [];
   if (nuevas.length > 0) alertas.push({ tipo: "publicacion_nueva", detalle: { publicaciones: nuevas } });
@@ -181,13 +193,13 @@ export function mensajeAlerta(alerta: AlertaGenerada): string {
     case "publicacion_nueva": {
       const publicaciones = d.publicaciones as PublicacionTienda[];
       return publicaciones.length === 1
-        ? `Publicación nueva: ${publicaciones[0].titulo}.`
+        ? `Publicación nueva: ${publicaciones[0].titulo ?? publicaciones[0].itemId}.`
         : `${publicaciones.length} publicaciones nuevas.`;
     }
     case "publicacion_eliminada": {
       const publicaciones = d.publicaciones as PublicacionTienda[];
       return publicaciones.length === 1
-        ? `Publicación eliminada: ${publicaciones[0].titulo}.`
+        ? `Publicación eliminada: ${publicaciones[0].titulo ?? publicaciones[0].itemId}.`
         : `${publicaciones.length} publicaciones eliminadas.`;
     }
   }

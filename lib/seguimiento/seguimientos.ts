@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
+import { rangoDiaBogota } from "@/lib/filtros-listado";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { obtenerItemMl, obtenerProducto, obtenerVendedor } from "@/lib/ml/cliente";
 import { buscarFotoDeHaceUnMes } from "@/lib/seguimiento/comparativa";
@@ -143,62 +144,50 @@ export type DatoPaginaSeguimiento =
   | { tipoSeguimiento: "producto"; mlIdExterno: string; inventario: number | null; inventarioAproximado: boolean; vendidos: number | null }
   | { tipoSeguimiento: "tienda"; mlIdExterno: string; totalPublicaciones: number | null; idsVisibles: string[] };
 
-// Issue #251 — SOLO actualiza una foto de HOY que YA exista (nunca
-// inserta una nueva): `seguimiento_fotos` tiene un índice único
-// seguimiento_id+fecha (sin migración para darle más granularidad
-// ahora, decisión de Mateo, 2026-10-26 — turno de migración 0011
-// ocupado por otra rama) — si esta función insertara su propia fila
-// cuando todavía no hay ninguna hoy, y DESPUÉS corriera la revisión
-// diaria por API para ese mismo seguimiento, el índice único
-// bloquearía el insert de la API (onConflictDoNothing, ver
-// lib/trabajos/revisionDiariaSeguimiento.ts) y esta tarjeta se
-// quedaría SIN precio/estado/catálogo/Full de hoy — datos más
-// completos que los de esta sola página. Mejor perder el dato de la
-// extensión ese día puntual (la persona puede volver a abrir la
-// página otro momento) que bloquear el dato más completo de la API.
+// Issue #251 (revisión de Pablo, corrige el diseño anterior de este
+// mismo PR) — INSERTA la foto de hoy si todavía no existe (con los
+// campos de API en null — la revisión diaria los completa después,
+// ver lib/trabajos/revisionDiariaSeguimiento.ts, que ahora usa
+// `onConflictDoUpdate` solo para SUS propios campos, nunca para los
+// de página) y, si ya existe, la lectura más reciente REEMPLAZA a la
+// anterior en los campos de página — "página" es la fuente de verdad
+// de inventario/vendidos/publicaciones mientras el seguimiento sea de
+// un competidor, así que siempre gana la lectura más fresca, nunca
+// "la primera que llegó".
 //
-// Sin columna "fuente" (misma decisión, sin migración): para una
-// TIENDA, `inventarioDisponible`/`vendidos` JAMÁS los llena la
-// revisión por API (siempre quedan null por diseño, ver
-// lib/seguimiento/lector.ts) — si `publicaciones` aparece con dato en
-// una foto de tienda, por definición vino de este camino, sin
-// necesitar guardar ningún flag. Para un PRODUCTO, nunca se pisa un
-// número que la API ya haya confirmado hoy (más confiable que lo
-// visible en una sola carga de página) — solo se completa lo que
-// sigue en null.
+// Fecha del día en hora de BOGOTÁ (`rangoDiaBogota`), no UTC — tiene
+// que coincidir dígito a dígito con la que usa
+// lib/trabajos/revisionDiariaSeguimiento.ts para que las dos fuentes
+// compartan la MISMA fila (issue #251, punto 11): si una persona lee
+// una ficha a las 8pm en Colombia, con UTC eso ya sería "mañana".
 export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: DatoPaginaSeguimiento): Promise<void> {
   const seguimiento = await buscarSeguimientoActivoPorMlId(empresaId, dato.mlIdExterno);
   if (!seguimiento) return; // no es un seguimiento activo de esta empresa — nunca se inventa ni se cuela de otra
 
-  const hoy = new Date();
-  hoy.setUTCHours(0, 0, 0, 0);
+  const hoy = rangoDiaBogota(new Date()).inicio;
 
-  await dbComoEmpresa(empresaId, async (tx) => {
-    const [fotoHoy] = await tx
-      .select()
-      .from(seguimientoFotos)
-      .where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)));
-    if (!fotoHoy) return; // todavía no hay foto de hoy (la revisión diaria no corrió aún) — se descarta, nunca se inventa una
+  // Issue #251, punto 5 — el total REAL ("752 resultados") viaja con
+  // la lista de visibles, dentro del mismo campo jsonb (sin columna
+  // aparte); nunca un título falso (`titulo: itemId`) — la extensión
+  // solo lee el id de cada tarjeta visible, nunca su título real, así
+  // que `titulo` queda `null` (honesto) y quien muestra el mensaje de
+  // una alerta cae al itemId recién ahí (lib/seguimiento/alertas.ts).
+  const camposPagina =
+    dato.tipoSeguimiento === "tienda"
+      ? {
+          publicaciones: {
+            total: dato.totalPublicaciones,
+            visibles: dato.idsVisibles.map((itemId) => ({ itemId, titulo: null, precio: null })),
+          },
+        }
+      : { inventarioDisponible: dato.inventario, inventarioAproximado: dato.inventarioAproximado, vendidos: dato.vendidos };
 
-    if (dato.tipoSeguimiento === "tienda") {
-      if (fotoHoy.publicaciones != null) return; // ya hay un dato real de publicaciones hoy, nunca se pisa
-      await tx
-        .update(seguimientoFotos)
-        .set({ publicaciones: dato.idsVisibles.map((itemId) => ({ itemId, titulo: itemId, precio: null })) })
-        .where(eq(seguimientoFotos.id, fotoHoy.id));
-      return;
-    }
-
-    const actualizacion: Partial<typeof seguimientoFotos.$inferInsert> = {};
-    if (fotoHoy.inventarioDisponible == null && dato.inventario != null) {
-      actualizacion.inventarioDisponible = dato.inventario;
-      actualizacion.inventarioAproximado = dato.inventarioAproximado;
-    }
-    if (fotoHoy.vendidos == null && dato.vendidos != null) actualizacion.vendidos = dato.vendidos;
-    if (Object.keys(actualizacion).length > 0) {
-      await tx.update(seguimientoFotos).set(actualizacion).where(eq(seguimientoFotos.id, fotoHoy.id));
-    }
-  });
+  await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .insert(seguimientoFotos)
+      .values({ empresaId, seguimientoId: seguimiento.id, fecha: hoy, ...camposPagina })
+      .onConflictDoUpdate({ target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha], set: camposPagina })
+  );
 }
 
 export type DatosNuevoSeguimiento = { tipo: "producto" | "tienda"; link: string; esCompetidor: boolean };

@@ -6,8 +6,22 @@ import { db } from "@/db/index";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
+import { rangoDiaBogota } from "@/lib/filtros-listado";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION } from "@/lib/seguimiento/seguimientos";
 import { obtenerSeguimientosPendientesDeHoy, revisarAhoraUnSeguimiento, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
+
+// Issue #251 (revisión de Pablo) — seguimiento_fotos.fecha y el
+// filtro de "pendiente" (ultima_revision_ts) ahora se miden en
+// medianoche de BOGOTÁ, no de UTC — estos dos helpers reemplazan los
+// `new Date(); x.setUTCHours(0,0,0,0)` sueltos que había en todo este
+// archivo, para que los fixtures de las pruebas coincidan dígito a
+// dígito con lo que la producción de verdad calcula.
+function hoyBogota(): Date {
+  return rangoDiaBogota(new Date()).inicio;
+}
+function diasAtras(dias: number): Date {
+  return new Date(hoyBogota().getTime() - dias * 24 * 60 * 60 * 1000);
+}
 
 // Issue #175 — prueba real contra Postgres (mismo criterio que
 // lib/ml/trabajador.test.ts): dbTrabajadorSeguimiento (DATABASE_URL_SEGUIMIENTO)
@@ -49,8 +63,7 @@ function nuevoMlId() {
 // todo lo demás pendiente — deja el lote con solo lo que la suite
 // insertó.
 async function aislarLotePara(seguimientoId: string) {
-  const hoy = new Date();
-  hoy.setUTCHours(0, 0, 0, 0);
+  const hoy = hoyBogota();
   await dbTrabajadorSeguimiento
     .update(seguimientosMl)
     .set({ ultimaRevisionTs: new Date() })
@@ -111,9 +124,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     // precio 100, vendidos 10 — la de "hoy" (simulada con fetch abajo)
     // trae precio 80 y vendidos 15, para disparar precio_bajo y
     // vendio_unidades al compararlas.
-    const ayer = new Date();
-    ayer.setUTCHours(0, 0, 0, 0);
-    ayer.setUTCDate(ayer.getUTCDate() - 1);
+    const ayer = diasAtras(1);
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(seguimientoFotos).values({
         empresaId,
@@ -162,8 +173,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     expect(resultado.procesados).toBeGreaterThanOrEqual(1);
     expect(resultado.fallidos).toBeLessThan(resultado.activos);
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const [fotoHoy] = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
     );
@@ -199,8 +209,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
 
       await revisarSeguimientosDelDia();
 
-      const hoy = new Date();
-      hoy.setUTCHours(0, 0, 0, 0);
+      const hoy = hoyBogota();
       const fotosDeHoy = await dbComoEmpresa(empresaId, (tx) =>
         tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
       );
@@ -310,8 +319,7 @@ describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
     // el seguimiento SÍ entre al lote (si ya estuviera marcado, el
     // filtro de obtenerSeguimientosPendientesDeHoy lo excluiría antes
     // de llegar a revisarUnSeguimiento).
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: hoy, precio: "100", estado: "active" })
     );
@@ -330,8 +338,7 @@ describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
     const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
     expect(actualizado.ultimaRevisionTs).not.toBeNull();
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const fotosDeHoy = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
     );
@@ -482,8 +489,7 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
 
     expect(resultado).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const [fotoHoy] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
     );
@@ -497,8 +503,7 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
 
   it("si ya hay una foto de hoy (ej. el cron ya corrió), queda saltado — nunca duplica ni sobreescribe", async () => {
     const seguimiento = await crearSeguimientoConCuenta("YA-REVISADO-HOY");
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: hoy, precio: "50", estado: "active" })
     );
@@ -574,12 +579,8 @@ describe("obtenerSeguimientosPendientesDeHoy — orden y filtro del lote (issue 
     const { empresaId, usuarioId } = await crearEmpresaConUsuario("LOTE-ORDEN");
     const base = { empresaId, tipo: "producto" as const, recursoMl: "item" as const, linkOriginal: "https://x", creadoPor: usuarioId };
 
-    const dosDiasAtras = new Date();
-    dosDiasAtras.setUTCHours(0, 0, 0, 0);
-    dosDiasAtras.setUTCDate(dosDiasAtras.getUTCDate() - 2);
-    const unDiaAtras = new Date();
-    unDiaAtras.setUTCHours(0, 0, 0, 0);
-    unDiaAtras.setUTCDate(unDiaAtras.getUTCDate() - 1);
+    const dosDiasAtras = diasAtras(2);
+    const unDiaAtras = diasAtras(1);
 
     const [nuncaRevisado] = await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Nunca" }).returning());
     const [revisadoHaceDosDias] = await dbComoEmpresa(empresaId, (tx) =>

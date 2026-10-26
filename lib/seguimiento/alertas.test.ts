@@ -130,12 +130,15 @@ describe("compararFotos — publicaciones de tienda (nuevas/eliminadas)", () => 
   it("publicación nueva detectada", () => {
     const alertas = compararFotos(
       "tienda",
-      foto({ publicaciones: [{ itemId: "MCO1", titulo: "Reloj", precio: 50_000 }] }),
+      foto({ publicaciones: { total: 1, visibles: [{ itemId: "MCO1", titulo: "Reloj", precio: 50_000 }] } }),
       foto({
-        publicaciones: [
-          { itemId: "MCO1", titulo: "Reloj", precio: 50_000 },
-          { itemId: "MCO2", titulo: "Pulsera", precio: 20_000 },
-        ],
+        publicaciones: {
+          total: 2,
+          visibles: [
+            { itemId: "MCO1", titulo: "Reloj", precio: 50_000 },
+            { itemId: "MCO2", titulo: "Pulsera", precio: 20_000 },
+          ],
+        },
       })
     );
     expect(alertas).toEqual([{ tipo: "publicacion_nueva", detalle: { publicaciones: [{ itemId: "MCO2", titulo: "Pulsera", precio: 20_000 }] } }]);
@@ -145,12 +148,15 @@ describe("compararFotos — publicaciones de tienda (nuevas/eliminadas)", () => 
     const alertas = compararFotos(
       "tienda",
       foto({
-        publicaciones: [
-          { itemId: "MCO1", titulo: "Reloj", precio: 50_000 },
-          { itemId: "MCO2", titulo: "Pulsera", precio: 20_000 },
-        ],
+        publicaciones: {
+          total: 2,
+          visibles: [
+            { itemId: "MCO1", titulo: "Reloj", precio: 50_000 },
+            { itemId: "MCO2", titulo: "Pulsera", precio: 20_000 },
+          ],
+        },
       }),
-      foto({ publicaciones: [{ itemId: "MCO1", titulo: "Reloj", precio: 50_000 }] })
+      foto({ publicaciones: { total: 1, visibles: [{ itemId: "MCO1", titulo: "Reloj", precio: 50_000 }] } })
     );
     expect(alertas).toEqual([{ tipo: "publicacion_eliminada", detalle: { publicaciones: [{ itemId: "MCO2", titulo: "Pulsera", precio: 20_000 }] } }]);
   });
@@ -158,25 +164,25 @@ describe("compararFotos — publicaciones de tienda (nuevas/eliminadas)", () => 
   it("nuevas Y eliminadas en el mismo día: las dos alertas aparecen", () => {
     const alertas = compararFotos(
       "tienda",
-      foto({ publicaciones: [{ itemId: "MCO1", titulo: "Se va", precio: 1000 }] }),
-      foto({ publicaciones: [{ itemId: "MCO2", titulo: "Llega", precio: 2000 }] })
+      foto({ publicaciones: { total: 1, visibles: [{ itemId: "MCO1", titulo: "Se va", precio: 1000 }] } }),
+      foto({ publicaciones: { total: 1, visibles: [{ itemId: "MCO2", titulo: "Llega", precio: 2000 }] } })
     );
     expect(alertas).toHaveLength(2);
     expect(alertas.map((a) => a.tipo).sort()).toEqual(["publicacion_eliminada", "publicacion_nueva"]);
   });
 
   it("mismas publicaciones: ninguna alerta", () => {
-    const lista = [{ itemId: "MCO1", titulo: "Reloj", precio: 50_000 }];
+    const lista = { total: 1, visibles: [{ itemId: "MCO1", titulo: "Reloj", precio: 50_000 }] };
     expect(compararFotos("tienda", foto({ publicaciones: lista }), foto({ publicaciones: lista }))).toEqual([]);
   });
 
   it("tipo = producto nunca compara publicaciones, aunque vinieran pobladas por error", () => {
-    const lista = [{ itemId: "MCO1", titulo: "Reloj", precio: 50_000 }];
-    expect(compararFotos("producto", foto({ publicaciones: [] }), foto({ publicaciones: lista }))).toEqual([]);
+    const lista = { total: 1, visibles: [{ itemId: "MCO1", titulo: "Reloj", precio: 50_000 }] };
+    expect(compararFotos("producto", foto({ publicaciones: { total: 0, visibles: [] } }), foto({ publicaciones: lista }))).toEqual([]);
   });
 
   it("sin snapshot de publicaciones en alguna de las dos fotos: ninguna alerta", () => {
-    expect(compararFotos("tienda", foto({ publicaciones: null }), foto({ publicaciones: [] }))).toEqual([]);
+    expect(compararFotos("tienda", foto({ publicaciones: null }), foto({ publicaciones: { total: 0, visibles: [] } }))).toEqual([]);
   });
 });
 

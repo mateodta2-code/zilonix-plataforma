@@ -248,6 +248,27 @@
     return undefined;
   }
 
+  // Busca, en cualquier nivel de profundidad de `obj`, el valor de la
+  // primera clave `clave` que encuentre (usada para "quantity_selector",
+  // issue #251 — ver el comentario de inventarioSelector más abajo).
+  // Sin amarre a itemIdActual a propósito: este componente del buybox
+  // solo existe para el producto que el usuario está viendo (los
+  // productos recomendados se renderizan como tarjetas simples, sin su
+  // propio quantity_selector) — confirmado contra la ficha real de
+  // MCO1050084400 (archive.org, mayo/2026).
+  function buscarPorClave(obj, clave, visitados) {
+    visitados = visitados || new Set();
+    if (!obj || typeof obj !== "object" || visitados.has(obj)) return undefined;
+    visitados.add(obj);
+    if (!Array.isArray(obj) && Object.prototype.hasOwnProperty.call(obj, clave)) return obj[clave];
+    const valores = Array.isArray(obj) ? obj : Object.values(obj);
+    for (const valor of valores) {
+      const resultado = buscarPorClave(valor, clave, visitados);
+      if (resultado !== undefined) return resultado;
+    }
+    return undefined;
+  }
+
   // Respaldo de texto plano (sin JSON.parse) — mismo criterio de
   // amarre: solo cuenta un "sold_quantity"/"date_created" si aparece
   // dentro de los ~500 caracteres alrededor de un "id"/"item_id" que
@@ -274,12 +295,13 @@
   // correcto, así que se devuelve todo en null (el llamador cae al
   // aproximado de "+N vendidos", marcado "(aproximado)").
   function leerDatosIncrustados(html, itemIdActual) {
-    const vacio = { soldQuantity: null, itemId: null, dateCreated: null };
+    const vacio = { soldQuantity: null, itemId: null, dateCreated: null, inventarioSelector: null };
     if (typeof html !== "string" || !html || !itemIdActual) return vacio;
 
     let soldQuantity = null;
     let itemId = null;
     let dateCreated = null;
+    let inventarioSelector = null;
 
     const jsonCrudo = extraerJsonTrasVariable(html, NOMBRE_VARIABLE_INCRUSTADA);
     if (jsonCrudo) {
@@ -293,6 +315,27 @@
           if (typeof objetoDelItem.date_created === "string") dateCreated = objetoDelItem.date_created;
           const valorId = objetoDelItem.item_id ?? objetoDelItem.id;
           if (typeof valorId === "string") itemId = valorId;
+        }
+        // Issue #251 (revisión de Pablo) — probado contra evidencia real
+        // (archive.org, mayo/2026, MCO1050084400, el mismo item que ya
+        // documenta leerInventarioMaximoDeTexto): el
+        // "quantity_selector.available_quantity" del JSON incrustado NO
+        // es el stock real — es el número de filas del dropdown de
+        // cantidad, SIEMPRE igual a "selector.rows" y capado a 6 por UX
+        // (ese item mostraba available_quantity:6 mientras el texto real
+        // decía "(+10 disponibles)", y Mateo confirmó en vivo que de
+        // verdad se podían comprar 27 — el tope real nunca aparece en la
+        // página sin interactuar, así que no hay forma de leerlo acá).
+        // Solo sirve como EXACTO cuando el stock real es BAJO: ahí el
+        // dropdown nunca llega a su tope de 6 filas, así que coincide
+        // con el disponible real — confirmado con otra ficha real
+        // (archive.org, junio/2025, MCO1002047025: available_quantity:2,
+        // texto "2 disponibles" sin "+", exacto). leerProducto (abajo)
+        // es quien decide cuándo usarlo — acá solo se extrae el número
+        // crudo, nunca se interpreta.
+        const quantitySelector = buscarPorClave(datos, "quantity_selector");
+        if (quantitySelector && typeof quantitySelector.available_quantity === "number" && Number.isFinite(quantitySelector.available_quantity)) {
+          inventarioSelector = quantitySelector.available_quantity;
         }
       } catch {
         // JSON cortado, o cambió de forma — se cae al respaldo de texto de abajo, nunca revienta.
@@ -308,7 +351,7 @@
       if (soldQuantity !== null && itemId === null) itemId = itemIdActual;
     }
 
-    return { soldQuantity, itemId, dateCreated };
+    return { soldQuantity, itemId, dateCreated, inventarioSelector };
   }
 
   // "Ventas promedio al mes" = vendidos AJUSTADO × 30 ÷ días desde la
@@ -430,7 +473,8 @@
     // es un piso, nunca el disponible exacto — se marca `aproximado`
     // igual que ya hace lector.ts del lado del servidor para un
     // recurso ajeno (inventarioAproximado).
-    const inventario = leerInventarioMaximoDeTexto(U.textoDe([".ui-pdp-buybox__quantity__available"], doc));
+    const inventarioTexto = leerInventarioMaximoDeTexto(U.textoDe([".ui-pdp-buybox__quantity__available"], doc));
+    const inventario = elegirInventarioPrincipal(inventarioTexto, incrustado.inventarioSelector);
 
     return {
       titulo: U.textoDe(["h1.ui-pdp-title", "h1[data-testid='product-title']"], doc),
@@ -489,6 +533,27 @@
     return { valor, aproximado: Boolean(m[1]) };
   }
 
+  // Issue #251 (revisión de Pablo + corrección de Mateo) — puro, para
+  // poder probarlo sin DOM. El texto "(+N disponibles)" sigue siendo el
+  // valor PRINCIPAL (ver el comentario completo en leerDatosIncrustados
+  // sobre por qué `quantity_selector.available_quantity` del JSON
+  // incrustado NO es el stock real: es el tope de filas del dropdown,
+  // confirmado contra evidencia real — MCO1050084400, mayo/2026,
+  // available_quantity:6 mientras el stock real era "10 o más", Mateo
+  // confirmó en vivo que de verdad se podían comprar 27).
+  // TOPE_FILAS_SELECTOR=6 es ese tope real del dropdown — por debajo de
+  // eso el stock nunca necesita un "+" para mostrarse, así que ahí el
+  // número del selector SÍ coincide con el disponible real (confirmado
+  // con MCO1002047025, junio/2025: available_quantity:2 == "2
+  // disponibles" sin "+", exacto).
+  const TOPE_FILAS_SELECTOR_CANTIDAD = 6;
+  function elegirInventarioPrincipal(inventarioTexto, inventarioSelector) {
+    if (inventarioSelector !== null && inventarioSelector < TOPE_FILAS_SELECTOR_CANTIDAD && !inventarioTexto.aproximado) {
+      return { valor: inventarioSelector, aproximado: false };
+    }
+    return inventarioTexto;
+  }
+
   function leerTienda(doc) {
     const htmlCompleto = doc && doc.documentElement ? doc.documentElement.outerHTML : "";
     const sellerId = leerSellerIdDeTienda(htmlCompleto, doc && doc.URL);
@@ -516,16 +581,30 @@
   // que ya lee `leerListado` (abajo) — mismo criterio: el `href` del
   // link del título (`a.poly-component__title`) clasificado con
   // `clasificarLinkListadoMl` (abajo, issue #233), nunca inventado.
-  function leerPublicacionesTienda(doc) {
-    const total = U.enteroDesdeTexto(U.textoDe([".ui-search-search-result__quantity-results"], doc));
-    const tarjetas = doc.querySelectorAll("li.ui-search-layout__item");
+  // Issue #251 (revisión de Pablo, punto 8 "tests... del lector de
+  // tienda") — puro (texto del total + lista de hrefs -> {total,
+  // idsVisibles}), separado de leerPublicacionesTienda a propósito: el
+  // resto de este archivo no tiene DOM real en las pruebas (sin jsdom),
+  // mismo criterio que leerInventarioMaximoDeTexto/clasificarLinkListadoMl.
+  function construirPublicacionesTienda(totalTexto, hrefsVisibles) {
+    const total = U.enteroDesdeTexto(totalTexto);
     const idsVisibles = [];
+    for (const href of hrefsVisibles || []) {
+      const idInfo = clasificarLinkListadoMl(href);
+      if (idInfo) idsVisibles.push(idInfo.id);
+    }
+    return { total, idsVisibles };
+  }
+
+  function leerPublicacionesTienda(doc) {
+    const totalTexto = U.textoDe([".ui-search-search-result__quantity-results"], doc);
+    const tarjetas = doc.querySelectorAll("li.ui-search-layout__item");
+    const hrefsVisibles = [];
     tarjetas.forEach((tarjeta) => {
       const linkEl = U.primerElemento(["a.poly-component__title"], tarjeta);
-      const idInfo = clasificarLinkListadoMl(linkEl ? linkEl.getAttribute("href") : null);
-      if (idInfo) idsVisibles.push(idInfo.id);
+      hrefsVisibles.push(linkEl ? linkEl.getAttribute("href") : null);
     });
-    return { total, idsVisibles };
+    return construirPublicacionesTienda(totalTexto, hrefsVisibles);
   }
 
   // Issue #227 — "quitar API de Investigación": Demanda/Mercado/Estrategia
@@ -927,7 +1006,12 @@
     // Issue #251 — puro (string de texto -> {valor, aproximado}),
     // probado con el texto real del selector de cantidad de la ficha.
     leerInventarioMaximoDeTexto,
+    // Issue #251 (revisión de Pablo + corrección de Mateo) — puro,
+    // probado con los fixtures reales de available_quantity (ver
+    // comentario completo junto a la función).
+    elegirInventarioPrincipal,
     leerPublicacionesTienda,
+    construirPublicacionesTienda,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe

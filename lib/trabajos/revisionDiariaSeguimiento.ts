@@ -2,6 +2,7 @@ import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
+import { rangoDiaBogota } from "@/lib/filtros-listado";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
@@ -36,23 +37,32 @@ function esperar(ms: number): Promise<void> {
 export type ResultadoRevisionDiaria = {
   activos: number;
   procesados: number;
-  // Issue #196 — distinto de "procesados": el índice único
-  // seguimiento_id+fecha bloqueó el insert porque YA había una foto de
-  // hoy para este seguimiento (corrida manual repetida, o una carrera
-  // entre dos corridas del cron a la vez) — nunca se escribió nada
-  // nuevo, pero tampoco fue un error real (ver revisarUnSeguimiento).
+  // Issue #196 — distinto de "procesados": la revisión por API ya
+  // había corrido hoy para este seguimiento (`precio` ya no nulo —
+  // corrida manual repetida, o una carrera entre dos corridas del
+  // cron a la vez), así que esta vuelta ni siquiera llama a Mercado
+  // Libre — nunca se escribió nada nuevo, pero tampoco fue un error
+  // real (ver revisarUnSeguimiento).
   saltados: number;
   fallidos: number;
   alertasCreadas: number;
 };
 
-// Solo la FECHA (medianoche UTC) — "misma fecha" es la clave real de
-// "misma foto del día", nunca el instante exacto en que corrió el
-// trabajo (ver el comentario de seguimiento_fotos.fecha en db/schema.ts).
+// Issue #251 (revisión de Pablo) — "mismo día" pasa a ser medianoche
+// de BOGOTÁ, no de UTC: una persona que lee una ficha a las 8pm en
+// Colombia ya está en el día siguiente en UTC (19:00 Bogotá = 00:00
+// UTC) — con el criterio viejo, esa lectura se guardaba en la fecha
+// de MAÑANA desde la perspectiva de Bogotá. Más importante todavía:
+// esta es la misma cuenta que usa guardarDatoDePaginaSeguimiento
+// (lib/seguimiento/seguimientos.ts) para decidir la fila de HOY — si
+// las dos no coincidieran dígito a dígito, la revisión por API y la
+// lectura de la página nunca compartirían la misma fila (issue #251,
+// punto 11), por más que las dos pasaran el mismo día real.
+// `rangoDiaBogota` (lib/filtros-listado.ts) ya resuelve esta cuenta en
+// un solo lugar, reusado por Pedidos/Despachos/KPIs — nunca una cuenta
+// de huso horario propia acá.
 function fechaDeHoy(): Date {
-  const hoy = new Date();
-  hoy.setUTCHours(0, 0, 0, 0);
-  return hoy;
+  return rangoDiaBogota(new Date()).inicio;
 }
 
 // Issue real: el lote tomaba siempre los mismos 50 sin ningún orden —
@@ -158,12 +168,15 @@ function aFotoComparable(fila: typeof seguimientoFotos.$inferSelect): FotoCompar
 
 type ResultadoUnSeguimiento = { saltado: boolean; alertasCreadas: number };
 
-// `saltado: true` SOLO cuando el índice único seguimiento_id+fecha
-// bloqueó el insert porque ya había una foto de hoy (ver el
-// onConflictDoNothing más abajo) — nunca se escribió nada nuevo.
-// `saltado: false` con `alertasCreadas: 0` es un caso DISTINTO: la
-// foto de hoy SÍ se escribió (sí fue "procesado"), simplemente no hay
-// foto de ayer con qué compararla todavía (primera foto de este
+// `saltado: true` SOLO cuando la revisión por API ya corrió hoy para
+// este seguimiento (`precio` ya no nulo en la foto de hoy, chequeo
+// explícito más abajo — issue #251, ya no se puede confiar solo en el
+// índice único: una fila de hoy puede existir con SOLO los campos de
+// la lectura de página, eso nunca cuenta como "ya revisado por la
+// API") — nunca se escribió nada nuevo. `saltado: false` con
+// `alertasCreadas: 0` es un caso DISTINTO: la foto de hoy SÍ se
+// escribió/completó (sí fue "procesado"), simplemente no hay foto de
+// un día anterior con qué compararla todavía (primera foto de este
 // seguimiento) — no hay alertas que generar, pero no es un salto.
 async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoUnSeguimiento> {
   const cuenta = await obtenerCuentaMlActiva(seguimiento.empresaId);
@@ -188,9 +201,27 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
     }
   }
 
-  const datos = await leerConReintento429(seguimiento, token, cuentaFila.cuentaIdExterna);
-
   const hoy = fechaDeHoy();
+
+  // Issue #251 (revisión de Pablo) — antes, "¿ya corrió hoy?" lo
+  // decidía el índice único al chocar contra el insert (onConflictDoNothing).
+  // Ya no alcanza: desde este issue, una fila de hoy puede existir
+  // SOLO con los campos de la lectura de página (creada por
+  // guardarDatoDePaginaSeguimiento, lib/seguimiento/seguimientos.ts,
+  // con los campos de API en null) — chocar contra ESA fila nunca
+  // debería contar como "ya revisado por la API". El chequeo real
+  // pasa a ser explícito: `precio` (el campo más básico que la API
+  // siempre intenta llenar) ya no nulo significa que esta revisión
+  // por API, no la de la página, ya corrió hoy de verdad — evita
+  // gastar una llamada más a Mercado Libre, mismo criterio de siempre.
+  const [fotoExistente] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+    tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+  );
+  if (fotoExistente && fotoExistente.precio != null) {
+    return { saltado: true, alertasCreadas: 0 };
+  }
+
+  const datos = await leerConReintento429(seguimiento, token, cuentaFila.cuentaIdExterna);
 
   const [fotoAnterior] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx
@@ -218,13 +249,34 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
         ganaBotonCompra: datos.ganaBotonCompra,
         esFull: datos.esFull,
         esEnvioGratis: datos.esEnvioGratis,
-        publicaciones: datos.publicaciones,
+        // Issue #251, punto 5 — el total REAL ("752 resultados") solo
+        // lo puede traer la lectura de página (la API da 403 real al
+        // listar publicaciones de una tienda ajena); acá solo se
+        // insertó lo que la API pudo ver, nunca un total inventado.
+        publicaciones: datos.publicaciones != null ? { total: null, visibles: datos.publicaciones } : null,
       })
-      // Si el trabajo ya corrió hoy para este seguimiento (una corrida
-      // manual repetida, o el cron disparado dos veces), el índice
-      // único seguimiento_id+fecha lo bloquea — onConflictDoNothing en
-      // vez de dejar que la excepción tumbe el lote entero.
-      .onConflictDoNothing()
+      // Issue #251 (revisión de Pablo) — "la revisión por API debe
+      // completar los campos de API de esa misma fila si ya existe,
+      // sin borrar los de página": si `guardarDatoDePaginaSeguimiento`
+      // ya creó la fila de hoy (con los campos de página reales y los
+      // de API en null), este insert choca contra el índice único —
+      // antes se descartaba entero (onConflictDoNothing); ahora
+      // completa SOLO sus propios campos (precio/estado/catálogo/
+      // Full/envío gratis), nunca toca inventarioDisponible/
+      // inventarioAproximado/vendidos/publicaciones (son de la
+      // página, esta revisión nunca los pisa ni los borra).
+      .onConflictDoUpdate({
+        target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha],
+        set: {
+          precio: datos.precio != null ? String(datos.precio) : null,
+          precioAnterior: datos.precioAnterior != null ? String(datos.precioAnterior) : null,
+          estado: datos.estado,
+          enCatalogo: datos.enCatalogo,
+          ganaBotonCompra: datos.ganaBotonCompra,
+          esFull: datos.esFull,
+          esEnvioGratis: datos.esEnvioGratis,
+        },
+      })
       .returning()
   );
   if (!fotoNueva) return { saltado: true, alertasCreadas: 0 };
@@ -267,10 +319,10 @@ export type ResultadoRevisionInmediata = { ok: true; saltado: boolean; alertasCr
 // caso, para que el cron de hoy mismo lo reintente solo (al revés del
 // fallido del LOTE, que sí se marca para no ahogar los 50 cupos —
 // acá no hay ningún lote que ahogar, es un solo seguimiento puntual).
-// Si Mercado Libre YA tenía una foto de hoy para este seguimiento
-// (ej. revivir uno eliminado que el cron ya alcanzó a procesar hoy
-// mismo), el índice único + onConflictDoNothing de revisarUnSeguimiento
-// lo deja como "saltado", nunca duplicado.
+// Si la revisión por API YA corrió hoy para este seguimiento (ej.
+// revivir uno eliminado que el cron ya alcanzó a procesar hoy mismo),
+// el chequeo explícito de revisarUnSeguimiento lo deja como "saltado",
+// nunca duplicado — nunca gasta una llamada de más a Mercado Libre.
 export async function revisarAhoraUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoRevisionInmediata> {
   try {
     const resultado = await revisarUnSeguimiento(seguimiento);

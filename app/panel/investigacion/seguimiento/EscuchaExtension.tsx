@@ -35,6 +35,17 @@ export function EscuchaExtension() {
     }
 
     window.addEventListener("message", alRecibirMensaje);
+
+    // Issue #251 (revisión de Pablo, punto 4) — "que la lectura no
+    // dependa de tener abierta la pestaña de Seguimiento": si la
+    // persona visitó la ficha de un competidor mientras esta pantalla
+    // estaba cerrada, extension/background.js lo guardó en una cola
+    // (chrome.storage.session) en vez de perderlo. Al montar, se le
+    // pide que la vacíe — marcador-zilonix.js reenvía cada lectura
+    // encolada por el mismo canal de siempre ("dato-pagina-seguimiento",
+    // arriba), así que este mismo listener las procesa igual.
+    window.postMessage({ fuente: "zilonix-panel", tipo: "pedir-cola-seguimiento" }, window.location.origin);
+
     return () => window.removeEventListener("message", alRecibirMensaje);
   }, [router]);
 

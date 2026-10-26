@@ -64,6 +64,11 @@
     "iniciar-escaneo": "zilonix:iniciar-escaneo",
     "iniciar-resenas": "zilonix:iniciar-resenas",
     "iniciar-escaneo-plataforma": "zilonix:iniciar-escaneo-plataforma",
+    // Issue #251 (revisión de Pablo, punto 4) — EscuchaExtension.tsx lo
+    // manda una vez al montar /panel/investigacion/seguimiento, para
+    // vaciar lo que background.js haya encolado de visitas a Mercado
+    // Libre mientras esa pestaña estaba cerrada.
+    "pedir-cola-seguimiento": "zilonix:pedir-cola-seguimiento",
   };
 
   window.addEventListener("message", (evento) => {

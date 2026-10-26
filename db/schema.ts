@@ -551,11 +551,16 @@ export const seguimientoFotos = pgTable(
     ganaBotonCompra: boolean("gana_boton_compra"),
     esFull: boolean("es_full"),
     esEnvioGratis: boolean("es_envio_gratis"),
-    // Solo para tipo = "tienda": snapshot liviano de sus publicaciones
-    // ({ itemId, titulo, precio }[]) — lo necesita la comparación de
-    // alertas para detectar publicaciones nuevas/eliminadas entre un
-    // día y el siguiente. null para tipo = "producto".
-    publicaciones: jsonb("publicaciones").$type<{ itemId: string; titulo: string; precio: number | null }[]>(),
+    // Solo para tipo = "tienda". null para tipo = "producto". `visibles`
+    // es el snapshot liviano de publicaciones que la comparación de
+    // alertas usa para detectar nuevas/eliminadas entre un día y el
+    // siguiente. `total` (issue #251, punto 5) — el total REAL que
+    // Mercado Libre muestra arriba del listado ("752 resultados"),
+    // leído de la página por la extensión (la API da 403 real al
+    // listar publicaciones de una tienda ajena) — `null` mientras no
+    // haya lectura de página todavía. Sin columna aparte a propósito
+    // (sin migración): va dentro del mismo JSON que ya existía.
+    publicaciones: jsonb("publicaciones").$type<{ total: number | null; visibles: { itemId: string; titulo: string | null; precio: number | null }[] }>(),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
