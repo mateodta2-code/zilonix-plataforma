@@ -363,6 +363,14 @@ Con 0.3.24 (cuenta cruda + panel flotante esperando), el smoke de Pablo sobre "t
 
 Extensión 0.3.24 → 0.3.25.
 
+## Hotfix de smoke #18 — segundo marcador real de Full, revisión final antes de mergear el PR #240
+
+Revisión final antes de mergear: Zilonix OS confirma Full con DOS marcadores reales, no uno — el `aria-label` exacto del ícono SVG (`"Enviado por FULL"`, confirmado desde #242) Y la clase del ícono del sprite (`icon-poly_full`). Algunas tarjetas (sobre todo anuncios/Ad, que a veces renderizan el badge con otro markup) lo traen solo por la clase, sin el aria-label exacto — `detectarFullEnTarjeta`/`detectarFullEnHtmlTarjeta` ahora prueban los dos, con un OR.
+
+**Nunca confunde con `poly-bookmark__icon-full`** (el ícono de favorito, otra cosa por completo): ese nombre no contiene el substring literal `icon-poly_full` — el guion bajo entre "poly" y "full" nunca aparece ahí (es "...__icon-full", no "...icon-poly_full") — confirmado con una prueba dedicada.
+
+Extensión 0.3.25 → 0.3.26.
+
 ## Investigación sin API de catálogo (issue #227)
 
 Smoke real con Sharel (término "calzado"): Selltrix mostraba ~24 publicaciones con datos reales, Zilonix OS ~40, y `/panel/investigacion` (que hasta entonces pintaba Demanda/Mercado/Estrategia con `buscarInvestigacionProducto`, la API de catálogo de Mercado Libre) apenas ~6, casi todas "Sin dato". La API de catálogo nunca iba a dar ese volumen — no es un bug a corregir, es una limitación real de esa API para este uso. Issue #227 saca esa dependencia por completo: `lib/ml/investigacion.ts` (la API de catálogo) y sus dos módulos derivados, `lib/ml/investigacionCliente.ts` y `lib/ml/importacionListadoCliente.ts`, se BORRARON — las tres pestañas (Demanda, Mercado, Estrategia) de `app/panel/investigacion/page.tsx` ahora corren 100% del lado del cliente, en `PanelInvestigacion.tsx`, sobre bloques de listados reales escaneados por esta extensión (`lib/ml/listadoCliente.ts`).

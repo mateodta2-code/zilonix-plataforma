@@ -598,19 +598,31 @@
   // nunca se traduce (confirmado en capturas reales de los dos
   // países, issue #239) — se asume el mismo texto para Brasil sin
   // inventar una variante distinta sin evidencia.
+  // Issue #240, revisión final antes de mergear — Zilonix OS confirma
+  // Full con DOS marcadores reales, no solo uno: el aria-label exacto
+  // del ícono SVG (confirmado en producción desde #242) y la clase del
+  // ícono del sprite (`icon-poly_full`) — algunas tarjetas (sobre todo
+  // anuncios/Ad, que a veces renderizan el badge con otro markup) lo
+  // traen solo por la clase, sin el aria-label exacto. Nunca
+  // `poly-bookmark__icon-full` (el ícono de favorito, otra cosa por
+  // completo) — ese nombre NUNCA contiene el substring literal
+  // `icon-poly_full` (compará "icon-poly_full" vs "...__icon-full":
+  // el guion bajo entre "poly" y "full" nunca aparece en el de
+  // favorito), así que el selector de abajo no lo confunde.
   function detectarFullEnTarjeta(tarjeta) {
     if (!tarjeta) return false;
-    return Boolean(U.primerElemento(['svg[aria-label="Enviado por FULL"]'], tarjeta));
+    return Boolean(U.primerElemento(['svg[aria-label="Enviado por FULL"]', '[class*="icon-poly_full"]'], tarjeta));
   }
 
-  // Issue #248 (vuelta 4) — versión de texto del MISMO selector de
-  // arriba, solo para poder probarla con un fixture real sin DOM (este
-  // proyecto no tiene jsdom/happy-dom) — nunca se llama desde ningún
-  // camino real: `detectarFullEnTarjeta` (DOM, arriba) es el único
-  // detector que corre en producción.
+  // Issue #248 (vuelta 4)/#240 — versión de texto del MISMO criterio de
+  // arriba (los dos marcadores), solo para poder probarlo con un
+  // fixture real sin DOM (este proyecto no tiene jsdom/happy-dom) —
+  // nunca se llama desde ningún camino real: `detectarFullEnTarjeta`
+  // (DOM, arriba) es el único detector que corre en producción.
   function detectarFullEnHtmlTarjeta(htmlTarjeta) {
     if (typeof htmlTarjeta !== "string" || !htmlTarjeta) return false;
-    return /<svg\b[^>]*\baria-label\s*=\s*["']Enviado por FULL["'][^>]*>/i.test(htmlTarjeta);
+    if (/<svg\b[^>]*\baria-label\s*=\s*["']Enviado por FULL["'][^>]*>/i.test(htmlTarjeta)) return true;
+    return /class\s*=\s*["'][^"']*icon-poly_full[^"']*["']/i.test(htmlTarjeta);
   }
 
   // Issue #248 (vuelta 2) — señal fuerte y barata, OPCIONAL (un OR

@@ -460,6 +460,27 @@ describe("detectarFullEnHtmlTarjeta — issue #248 (vuelta 4), simplificado al m
     expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
   });
 
+  // Issue #240, revisión final — Zilonix OS confirma Full con DOS
+  // marcadores reales: el aria-label exacto (arriba) Y la clase del
+  // ícono del sprite (`icon-poly_full`) — algunas tarjetas (sobre todo
+  // Ad) traen solo la clase, sin el aria-label exacto.
+  it('tarjeta normal (orgánica) con el ícono por CLASE ("icon-poly_full"), sin aria-label exacto -> true', () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><span class="icon-poly_full"></span><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
+  });
+
+  // Issue #248 (vuelta 6)/#240 — evidencia real: en un listado sin
+  // filtro, los anuncios (Ad) son justamente los que más muestran el
+  // badge Full. El detector en sí (esta función) nunca distingue
+  // Ad de orgánico — esa separación vive en `leerListado`
+  // (`estadisticasFull` cuenta ambos, `productos` solo orgánicos) —
+  // acá solo se confirma que el badge se reconoce igual sin importar
+  // si la tarjeta es un anuncio.
+  it("tarjeta marcada como anuncio (Ad) con el badge Full real -> true (el detector no distingue Ad de orgánico, eso vive en leerListado)", () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><a class="poly-component__ads-promotions" href="#"></a><div class="poly-component__shipped-from"><svg aria-label="Enviado por FULL"></svg></div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
+  });
+
   it("una tarjeta con envío gratis pero sin Full -> false (nunca confunde los dos)", () => {
     const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping">Envío gratis</div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
     expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
