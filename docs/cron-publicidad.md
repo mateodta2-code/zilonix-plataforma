@@ -4,7 +4,7 @@
 
 Lo llama un cron, sin sesión de Clerk. La puerta es `PUBLICIDAD_TRABAJADOR_SECRET` en la cabecera `x-publicidad-trabajador-secret`, comparada con `crypto.timingSafeEqual`. La conexión de base es `DATABASE_URL_PUBLICIDAD` (`publicidad_trabajador_user`, creado en `db/rls-setup.sql`): solo puede listar `id`, `empresa_id`, `desconectada_ts` y `creado_ts` de `cuentas_ml`, y leer `publicidad_sincronizaciones`. El token y las escrituras pasan por `dbComoEmpresa` / `app_user`.
 
-`db/rls-setup.sql` no viaja en el deploy. Hay que correrlo a mano, por el túnel privado, en staging y en producción, después de la migración de Drizzle. Recién ahí se cargan en Railway `DATABASE_URL_PUBLICIDAD` y `PUBLICIDAD_TRABAJADOR_SECRET`. Los nombres del secreto en GitHub Actions son `PUBLICIDAD_TRABAJADOR_SECRET_STAGING` y `PUBLICIDAD_TRABAJADOR_SECRET_PRODUCCION`. Nunca el valor en un chat, un commit o este documento.
+`db/rls-setup.sql` no viaja en el deploy. Después del merge, Mateo crea el usuario `publicidad_trabajador_user` corriéndolo a mano, por el túnel privado, y carga en Railway `DATABASE_URL_PUBLICIDAD` y `PUBLICIDAD_TRABAJADOR_SECRET`. El secreto de GitHub Actions para staging ya existe: `PUBLICIDAD_TRABAJADOR_SECRET_STAGING`. Tiene que ser el mismo valor que `PUBLICIDAD_TRABAJADOR_SECRET` de Railway en staging. El de producción, cuando toque, se llama `PUBLICIDAD_TRABAJADOR_SECRET_PRODUCCION`. Nunca el valor en un chat, un commit o este documento.
 
 ## Horario
 
@@ -12,11 +12,11 @@ Lo llama un cron, sin sesión de Clerk. La puerta es `PUBLICIDAD_TRABAJADOR_SECR
 
 ## Qué hace falta para que corra en staging
 
-1. Migración de Drizzle aplicada contra el Postgres de staging.
-2. `db/rls-setup.sql` corrido a mano (crea `publicidad_trabajador_user` y las políticas).
-3. En Railway, staging: `DATABASE_URL_PUBLICIDAD` y `PUBLICIDAD_TRABAJADOR_SECRET`.
-4. En GitHub → Settings → Secrets and variables → Actions: `PUBLICIDAD_TRABAJADOR_SECRET_STAGING`, el mismo valor que la variable de Railway. No pegarlo en ningún otro lado.
-5. El permiso "Publicidad de un producto" ya está en la app Zilonix Plataforma (lectura y escritura) y MTTIENDA se reconectó en Seller. Lo que falta es la prueba en staging: totales contra la Central, la forma de `aggregation_type=DAILY` y la ruta `/advertising/...`. Una cuenta cuyo token se emitió antes del permiso puede seguir en 403 hasta reconectarla; la pantalla lo dice.
+1. Migración de Drizzle `0011_publicidad_product_ads` aplicada contra el Postgres de staging.
+2. Mateo crea el usuario `publicidad_trabajador_user` corriendo `db/rls-setup.sql` a mano. El script, si el rol no existe, lo crea con ese nombre y le deja: `CONNECT`, `USAGE` en `public`, `SELECT (id, empresa_id, desconectada_ts, creado_ts)` sobre `cuentas_ml`, `SELECT` sobre `publicidad_sincronizaciones`, y las dos políticas de lectura. No puede leer tokens ni escribir.
+3. En Railway, staging, después del merge: `DATABASE_URL_PUBLICIDAD` (ese usuario) y `PUBLICIDAD_TRABAJADOR_SECRET`.
+4. El secreto de GitHub `PUBLICIDAD_TRABAJADOR_SECRET_STAGING` ya existe. El workflow de staging lo usa. El valor tiene que coincidir con `PUBLICIDAD_TRABAJADOR_SECRET` de Railway. No pegarlo en ningún otro lado.
+5. El permiso "Publicidad de un producto" ya está en la app Zilonix Plataforma (lectura y escritura) y MTTIENDA se reconectó en Seller. Esta fase no escribe campañas aunque el permiso lo permita. Lo que falta es la prueba en staging: totales contra la Central, la forma de `aggregation_type=DAILY` y la ruta `/advertising/...`. Staging y producción comparten la app: esa cuenta no se conecta en los dos a la vez (`docs/publicidad/entornos.md`).
 
 Producción usa los mismos pasos con su propio Postgres, su propio secreto (`PUBLICIDAD_TRABAJADOR_SECRET_PRODUCCION`) y el workflow de producción todavía comentado en el archivo del cron.
 

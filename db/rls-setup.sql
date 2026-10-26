@@ -93,8 +93,13 @@ GRANT USAGE ON SCHEMA public TO seguimiento_trabajador_user;
 GRANT SELECT ON seguimientos_ml TO seguimiento_trabajador_user;
 GRANT UPDATE (ultima_revision_ts) ON seguimientos_ml TO seguimiento_trabajador_user;
 
--- 1e) Issue #254 — quinto usuario de base. El cron de Product Ads
--- tiene que listar las cuentas conectadas de CUALQUIER empresa (no
+-- 1e) Issue #254 — quinto usuario de base. El nombre es exacto:
+-- publicidad_trabajador_user. Lo crea Mateo a mano, después del merge,
+-- al correr este script contra el Postgres del ambiente (el deploy no
+-- lo crea). La contraseña la elige él al reemplazar el placeholder;
+-- nunca queda en el repo. Después carga DATABASE_URL_PUBLICIDAD en
+-- Railway. El cron de Product Ads
+-- lista las cuentas conectadas de CUALQUIER empresa (no
 -- sabe de antemano cuál) sin poder leer ni escribir tokens. El token
 -- y todas las escrituras de publicidad pasan por dbComoEmpresa()/
 -- app_user cuando ya se sabe la empresa. Las columnas del GRANT son

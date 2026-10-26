@@ -3,10 +3,11 @@ name: Sincronizar Product Ads (staging)
 # Issue #254 — apunta a STAGING. El permiso de la app Zilonix
 # Plataforma y la reconexión de MTTIENDA ya están. Producción queda
 # comentada hasta las pruebas reales en staging (totales, DAILY, ruta).
-# El secreto de GitHub se llama
-# PUBLICIDAD_TRABAJADOR_SECRET_STAGING y tiene que coincidir con la
+# El secreto de GitHub para staging ya existe, con este nombre exacto:
+# PUBLICIDAD_TRABAJADOR_SECRET_STAGING. Tiene que coincidir con la
 # variable PUBLICIDAD_TRABAJADOR_SECRET de Railway en staging. El de
-# producción, cuando toque, es PUBLICIDAD_TRABAJADOR_SECRET_PRODUCCION.
+# producción, cuando toque, es PUBLICIDAD_TRABAJADOR_SECRET_PRODUCCION
+# (solo el nombre; el paso de producción sigue comentado).
 # Nunca el valor en este archivo.
 #
 # 14:00 UTC = 09:00 en Bogotá (UTC-5), después de las 08:30. Las métricas

@@ -1,3 +1,4 @@
+import { readFileSync } from "fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MlSinPermisoAppError, linkPublicacion } from "@/lib/ml/cliente";
 import {
@@ -9,6 +10,10 @@ import {
   metricasDiariasCuenta,
   obtenerAnunciante,
 } from "./publicidad";
+
+function sinComentarios(fuente: string): string {
+  return fuente.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+}
 
 function respuesta(status: number, body: unknown): Response {
   const texto = JSON.stringify(body);
@@ -112,6 +117,26 @@ describe("cliente de Product Ads, solo lectura (issue #254)", () => {
 
   it("el link de publicación lleva el guion de Mercado Libre Colombia", () => {
     expect(linkPublicacion("MCO123456")).toBe("https://articulo.mercadolibre.com.co/MCO-123456");
+  });
+
+  it("hasta la fase 4 el cliente no escribe campañas: solo GET", () => {
+    // La app de Mercado Libre tiene escritura. Esta fase no puede usarla.
+    // Se mira el fuente, no una corrida: una función nueva que nadie llama
+    // en los otros tests igual tiene que fallar acá.
+    for (const ruta of ["lib/ml/publicidad.ts", "lib/ml/costos-item.ts"]) {
+      const codigo = sinComentarios(readFileSync(ruta, "utf8"));
+      expect(codigo, ruta).not.toMatch(/\b(POST|PUT|PATCH|DELETE)\b/);
+      expect(codigo, ruta).not.toMatch(/\bfetch\s*\(/);
+      expect(codigo, ruta).not.toMatch(/\bmethod\s*:/);
+      expect(codigo, ruta).toContain("pedirLecturaMl");
+    }
+    const cliente = sinComentarios(readFileSync("lib/ml/cliente.ts", "utf8"));
+    const inicio = cliente.indexOf("export async function pedirLecturaMl");
+    const fin = cliente.indexOf("async function pedirTolerante");
+    const lectura = cliente.slice(inicio, fin);
+    expect(lectura).toContain("fetch(");
+    expect(lectura).not.toMatch(/\bmethod\s*:/);
+    expect(lectura).not.toMatch(/\b(POST|PUT|PATCH|DELETE)\b/);
   });
 
   it("el 403 de lectura sigue siendo MlSinPermisoAppError", async () => {
