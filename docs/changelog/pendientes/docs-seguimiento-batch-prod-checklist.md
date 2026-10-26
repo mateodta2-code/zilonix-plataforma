@@ -1,5 +1,0 @@
-- **2026-10-24** — issue #207: checklist operativo consolidado del batch de producción, en `docs/release-seguimiento-prod.md` — sin código, sin migración, sin secretos en el diff.
-
-  **Nueva §3.1 "Batch prod — secreto GH + workflow_dispatch"**: lo único operativo que queda (el SQL/RLS y el smoke de "Seguir en Zilonix" ya están resueltos, ver §2.5) resumido en un solo lugar — el secreto exacto a crear (`SEGUIMIENTO_TRABAJADOR_SECRET_PRODUCCION`, mismo valor que `SEGUIMIENTO_TRABAJADOR_SECRET` en Railway producción), dónde crearlo en GitHub, qué workflow disparar (`workflow_dispatch`, sin inputs) y que el `schedule` sigue sin activarse, cómo confirmar que la corrida guardó fotos de verdad (la consulta SQL ya documentada en §4, más la línea real de log que deja `lib/trabajos/revisionDiariaSeguimiento.ts`), y una lista corta de qué no hacer (nunca tocar `DATABASE_URL_APP` ni cruzar roles — ese incidente ya está resuelto en §2.5).
-
-  **No se tocó**: ningún archivo de código, ninguna migración, `docs/CHANGELOG.md`, la versión de `package.json`.
