@@ -568,11 +568,28 @@ export const seguimientoFotos = pgTable(
     // nunca se asume "pagina" sin confirmarlo. Sin columna aparte a
     // propósito (sin migración): todo va dentro del mismo JSON que ya
     // existía.
-    publicaciones: jsonb("publicaciones").$type<{
-      total: number | null;
-      visibles: { itemId: string; titulo: string | null; precio: number | null }[];
-      fuente: "api" | "pagina";
-    }>(),
+    // Issue #252 (smoke de staging) — para tipo = "producto", esta
+    // MISMA columna (nunca una nueva, sin migración) también guarda
+    // `{ vendidosAproximado }` — el piso "+N vendidos" de la ficha,
+    // cuando Mercado Libre no deja ver el número exacto. Es la ÚNICA
+    // columna que tipo="producto" nunca llena por otro motivo, así
+    // que reusarla acá no choca con nada — `vendidosAproximado` nunca
+    // aparece junto con `visibles` (son dos formas mutuamente
+    // excluyentes del mismo campo, una por tipo de seguimiento).
+    // Nunca se compara en alertas (lib/seguimiento/alertas.ts,
+    // compararFotos, solo mira `publicaciones` para tipo="tienda") —
+    // ver `obtenerVendidosAproximado`/`obtenerPrecioAproximado` para
+    // cómo se lee del lado de la UI sin confundirla con el total de
+    // una tienda. `precioAproximado` (también #252) — mismo criterio,
+    // el precio que lee la extensión como respaldo cuando ML nunca
+    // confirma uno real por la API. Los dos campos son independientes
+    // (pueden venir juntos o separados) — el `set` del upsert
+    // (lib/seguimiento/seguimientos.ts) los MEZCLA con `||` de
+    // Postgres, nunca los reemplaza como objeto completo.
+    publicaciones: jsonb("publicaciones").$type<
+      | { total: number | null; visibles: { itemId: string; titulo: string | null; precio: number | null }[]; fuente: "api" | "pagina" }
+      | { vendidosAproximado?: number; precioAproximado?: number }
+    >(),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

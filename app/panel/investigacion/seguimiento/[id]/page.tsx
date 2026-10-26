@@ -5,7 +5,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerDetalleSeguimiento } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta, normalizarPublicaciones } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import {
   calcularComparativaAyerHoy,
   resumenPeriodoConteo,
@@ -115,7 +115,14 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
       fecha: f.fecha,
       inventario: f.inventarioDisponible,
       aproximado: f.inventarioAproximado,
-      vendidosTexto: f.vendidos,
+      // Issue #252 (smoke de staging) — `vendidos` quedó reservado al
+      // número EXACTO (corrección de Pablo, punto 5 de la revisión
+      // anterior); el piso "+N vendidos" vive aparte, en
+      // `publicaciones` (ver obtenerVendidosAproximado). Sin este
+      // respaldo, compararProductoDiaADia nunca tenía con qué
+      // comparar cuando el inventario no estaba disponible — el
+      // respaldo de texto quedaba muerto en la práctica.
+      vendidosTexto: f.vendidos ?? obtenerVendidosAproximado(f.publicaciones),
     }));
     // Issue #251 (corrección de Pablo, punto 9) — "Ayer vs hoy" exige
     // una foto fechada EXACTAMENTE hoy y otra EXACTAMENTE ayer (hora
@@ -172,12 +179,24 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
               {[...fotos].reverse().map((f) => (
                 <FilaTabla key={f.id}>
                   <CeldaTabla>{fecha(f.fecha)}</CeldaTabla>
-                  <CeldaTabla>{dinero(f.precio)}</CeldaTabla>
+                  <CeldaTabla>
+                    {/* Issue #252 (smoke de staging, punto 3) — mismo
+                    respaldo que vendidos: si la API nunca confirmó el
+                    precio pero la extensión ya lo leyó de la página,
+                    se muestra ese valor como aproximado en vez de "—". */}
+                    {f.precio != null ? dinero(f.precio) : obtenerPrecioAproximado(f.publicaciones) != null ? `${dinero(obtenerPrecioAproximado(f.publicaciones))} (aproximado)` : "—"}
+                  </CeldaTabla>
                   <CeldaTabla>
                     {f.inventarioDisponible ?? "—"}
                     {f.inventarioAproximado ? <Chip>Aprox.</Chip> : null}
                   </CeldaTabla>
-                  <CeldaTabla>{f.vendidos ?? "—"}</CeldaTabla>
+                  <CeldaTabla>
+                    {/* Issue #252 (smoke de staging) — mismo criterio
+                    que la lista (page.tsx): el piso "+N vendidos"
+                    (nunca comparado en alertas) se muestra cuando no
+                    hay un número exacto todavía. */}
+                    {f.vendidos ?? (obtenerVendidosAproximado(f.publicaciones) != null ? `+${obtenerVendidosAproximado(f.publicaciones)} (aproximado)` : "—")}
+                  </CeldaTabla>
                   <CeldaTabla>{f.estado ?? "—"}</CeldaTabla>
                   <CeldaTabla>{f.enCatalogo == null ? "—" : f.enCatalogo ? "Sí" : "No"}</CeldaTabla>
                   <CeldaTabla>{f.ganaBotonCompra == null ? "—" : f.ganaBotonCompra ? "Gana" : "Pierde"}</CeldaTabla>

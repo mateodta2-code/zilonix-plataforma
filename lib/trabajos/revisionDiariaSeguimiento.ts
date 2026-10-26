@@ -4,7 +4,14 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
 import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
-import { LimiteMercadoLibreError, MlNoAutorizadoError, MlNoDisponibleError, MlRespuestaInesperadaError, MlSinPermisoAppError } from "@/lib/ml/cliente";
+import {
+  confirmarRecursoProductoMl,
+  LimiteMercadoLibreError,
+  MlNoAutorizadoError,
+  MlNoDisponibleError,
+  MlRespuestaInesperadaError,
+  MlSinPermisoAppError,
+} from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
 import { compararFotos, normalizarPublicaciones, type FotoComparable } from "@/lib/seguimiento/alertas";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION, resolverNombre } from "@/lib/seguimiento/seguimientos";
@@ -295,8 +302,32 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
   // confirmado vigente, en cada revisión diaria mientras siga
   // pendiente. Nunca se reintenta si ya hay un nombre real, para no
   // gastar una llamada a ML de más todos los días.
+  //
+  // Issue #252 (smoke de staging) — bug real confirmado: MCO452014269
+  // se quedó en el placeholder para SIEMPRE porque `recurso_ml` se
+  // guardó mal ANTES de que agregarSeguimiento confirmara el tipo
+  // contra ML (issue #250, punto A) — `/items/{id}` 404 para siempre
+  // con un id que en realidad es de catálogo, así que `resolverNombre`
+  // (abajo) nunca podía resolver nada, sin importar cuántas veces
+  // corriera el cron (ni "Revisar ahora", que comparte esta misma
+  // función). Mientras el nombre siga en el placeholder, se vuelve a
+  // confirmar el tipo real con `confirmarRecursoProductoMl` (el mismo
+  // chequeo que ya usa el alta nueva y
+  // scripts/corregir-tipo-recurso-seguimiento.ts, sin token) — si
+  // Mercado Libre confirma un tipo DISTINTO al guardado, se corrige en
+  // la base ANTES de intentar el nombre, y el resto de esta función
+  // (la lectura de la foto del día, más abajo) usa el tipo corregido,
+  // nunca el viejo.
+  let recursoMl = seguimiento.recursoMl;
   if (seguimiento.nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION) {
-    const nombreResuelto = await resolverNombre(seguimiento.tipo, seguimiento.recursoMl, seguimiento.mlIdExterno, token);
+    if (seguimiento.tipo === "producto") {
+      const confirmacion = await confirmarRecursoProductoMl(seguimiento.mlIdExterno);
+      if (confirmacion.estado === "confirmado" && confirmacion.recursoMl !== recursoMl) {
+        recursoMl = confirmacion.recursoMl;
+        await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ recursoMl }).where(eq(seguimientosMl.id, seguimiento.id)));
+      }
+    }
+    const nombreResuelto = await resolverNombre(seguimiento.tipo, recursoMl, seguimiento.mlIdExterno, token);
     if (nombreResuelto !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
       await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: nombreResuelto }).where(eq(seguimientosMl.id, seguimiento.id)));
     }
@@ -323,7 +354,11 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
     tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
   );
 
-  const datos = await leerConReintento429(seguimiento, token, cuentaFila.cuentaIdExterna);
+  // Issue #252 (smoke de staging) — `{ ...seguimiento, recursoMl }`,
+  // nunca `seguimiento` tal cual: si el bloque de arriba corrigió el
+  // tipo real, esta lectura (y todo lo que dependa de ella) tiene que
+  // usar el tipo YA corregido, nunca el que seguía guardado mal.
+  const datos = await leerConReintento429({ ...seguimiento, recursoMl }, token, cuentaFila.cuentaIdExterna);
 
   const [fotoAnterior] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx

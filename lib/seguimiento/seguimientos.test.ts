@@ -5,6 +5,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import { fechaDiaBogota } from "@/lib/filtros-listado";
+import { normalizarPublicaciones, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import {
   agregarSeguimiento,
   buscarMedicionSiExiste,
@@ -706,6 +707,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
         inventarioAproximado: false,
         vendidos: 5,
         vendidosExacto: true,
+        titulo: null,
+        precio: null,
         leidoEn: leidoAhora(),
       })
     ).resolves.toBeUndefined();
@@ -736,6 +739,59 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     expect(filas).toHaveLength(0);
   });
 
+  // Issue #252 (smoke de staging, punto 3) — MCO452014269 se quedó en
+  // "Pendiente de primera revisión" aunque la extensión ya había
+  // guardado inventario (porque ya leyó título y precio de la
+  // página): este respaldo completa el nombre con lo que la extensión
+  // SÍ pudo leer, sin esperar a que la API de ML lo confirme.
+  it("producto con nombre pendiente: usa el título que mandó la extensión como respaldo del nombre", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403))); // confirmación falla -> queda con el placeholder
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+    expect(seguimiento.nombre).toBe(NOMBRE_PENDIENTE_PRIMERA_REVISION);
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 10,
+      inventarioAproximado: false,
+      vendidos: null,
+      vendidosExacto: false,
+      titulo: "Cargador HP 65W original",
+      precio: 89900,
+      leidoEn: leidoAhora(),
+    });
+
+    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.nombre).toBe("Cargador HP 65W original");
+  });
+
+  it("producto con nombre YA confirmado por la API: el título de la extensión nunca lo pisa", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "Nombre real de ML", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+    expect(seguimiento.nombre).toBe("Nombre real de ML");
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 10,
+      inventarioAproximado: false,
+      vendidos: null,
+      vendidosExacto: false,
+      titulo: "Título distinto leído de la página",
+      precio: 89900,
+      leidoEn: leidoAhora(),
+    });
+
+    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.nombre).toBe("Nombre real de ML"); // nunca pisado por el título de la extensión
+  });
+
   it("producto, sin foto de hoy todavía: INSERTA una fila nueva con los campos de página, campos de API en null", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
     await conectarCuentaMl(empresaId);
@@ -754,6 +810,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: true,
       vendidos: 50,
       vendidosExacto: true,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
 
@@ -786,6 +844,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: false,
       vendidos: 500, // "+500 vendidos", el piso aproximado — nunca exacto
       vendidosExacto: false,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
 
@@ -794,6 +854,45 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     );
     expect(foto.inventarioDisponible).toBe(24); // esto sí se guarda, no depende de vendidosExacto
     expect(foto.vendidos).toBeNull(); // nunca 500
+    expect(obtenerVendidosAproximado(foto.publicaciones)).toBe(500); // el "+500" queda guardado aparte, para mostrarlo como aproximado
+  });
+
+  it("producto: una lectura exacta posterior deja intacto el aproximado que ya hubiera (nunca hace falta borrarlo)", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 24,
+      inventarioAproximado: false,
+      vendidos: 500,
+      vendidosExacto: false,
+      titulo: null,
+      precio: null,
+      leidoEn: leidoAhora(),
+    });
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 23,
+      inventarioAproximado: false,
+      vendidos: 523,
+      vendidosExacto: true,
+      titulo: null,
+      precio: null,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.vendidos).toBe(523); // el exacto manda en la columna
+    expect(obtenerVendidosAproximado(foto.publicaciones)).toBe(500); // el aproximado previo no se borra
   });
 
   it("producto, ya hay foto de hoy con datos de API: completa inventario/vendidos SIN tocar precio/estado", async () => {
@@ -817,6 +916,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: true,
       vendidos: 50,
       vendidosExacto: true,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
 
@@ -846,6 +947,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: false,
       vendidos: 10,
       vendidosExacto: true,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
     // Segunda lectura: inventario null (no se pudo leer esta vez), vendidos exacto nuevo.
@@ -856,6 +959,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: false,
       vendidos: 15,
       vendidosExacto: true,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
 
@@ -886,6 +991,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: true,
       vendidos: null,
       vendidosExacto: false,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
     await guardarDatoDePaginaSeguimiento(empresaId, {
@@ -895,6 +1002,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: false,
       vendidos: null,
       vendidosExacto: false,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
 
@@ -922,6 +1031,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: true, // inconsistente — nunca debería pasar, pero nunca se confía ciegamente
       vendidos: null,
       vendidosExacto: false,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
 
@@ -946,6 +1057,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: false,
       vendidos: 10,
       vendidosExacto: true,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
     await guardarDatoDePaginaSeguimiento(empresaId, {
@@ -955,6 +1068,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: true,
       vendidos: 18,
       vendidosExacto: true,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAhora(),
     });
 
@@ -985,9 +1100,10 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     const [foto] = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
     );
-    expect(foto.publicaciones?.total).toBe(752);
-    expect(foto.publicaciones?.fuente).toBe("pagina");
-    expect(foto.publicaciones?.visibles).toEqual([
+    const publicacionesFoto = normalizarPublicaciones(foto.publicaciones);
+    expect(publicacionesFoto?.total).toBe(752);
+    expect(publicacionesFoto?.fuente).toBe("pagina");
+    expect(publicacionesFoto?.visibles).toEqual([
       { itemId: "MCO1", titulo: null, precio: null },
       { itemId: "MCO2", titulo: null, precio: null },
     ]);
@@ -1019,8 +1135,9 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
     );
     expect(filas).toHaveLength(1);
-    expect(filas[0].publicaciones?.total).toBe(110);
-    expect(filas[0].publicaciones?.visibles).toHaveLength(2);
+    const publicacionesFila = normalizarPublicaciones(filas[0].publicaciones);
+    expect(publicacionesFila?.total).toBe(110);
+    expect(publicacionesFila?.visibles).toHaveLength(2);
   });
 
   // Issue #251 (corrección de Pablo, punto 2) — la fecha de la fila
@@ -1045,6 +1162,8 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
       inventarioAproximado: false,
       vendidos: 50,
       vendidosExacto: true,
+      titulo: null,
+      precio: null,
       leidoEn: leidoAyerMediodia,
     });
 

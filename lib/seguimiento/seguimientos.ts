@@ -153,6 +153,16 @@ export type DatoPaginaSeguimiento =
       // etiqueta aproximada — guardarDatoDePaginaSeguimiento nunca la
       // escribe en la columna que alertasDeVendidos compara.
       vendidosExacto: boolean;
+      // Issue #252 (smoke de staging) — respaldo para el NOMBRE (y el
+      // precio, mostrado como aproximado) cuando Mercado Libre nunca
+      // los resuelve por la API — ej. un seguimiento con `recurso_ml`
+      // guardado mal antes del punto A del #250, donde `/items/{id}`
+      // (o `/products/{id}`) 404 para siempre con ese id. `leerProducto`
+      // (extension/lectores/mercadolibre.js) ya los lee del DOM para
+      // el panel flotante — nunca pisan un nombre/precio YA confirmado
+      // por la API, solo completan el placeholder.
+      titulo: string | null;
+      precio: number | null;
       // Issue #251 (corrección de Pablo, punto 6) — cuándo la
       // extensión LEYÓ la página de verdad (nunca "cuándo llegó al
       // servidor" — background.js puede encolarla y entregarla horas
@@ -194,6 +204,18 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
     return;
   }
 
+  // Issue #252 (smoke de staging) — bug real: MCO452014269 se quedó
+  // en "Pendiente de primera revisión" porque Mercado Libre nunca
+  // confirmó su nombre por la API (recurso_ml guardado mal, ver
+  // revisionDiariaSeguimiento.ts) — aunque la extensión SÍ tenía el
+  // título real de la página. Nunca pisa un nombre YA confirmado por
+  // la API (solo completa el placeholder) — `seguimientos_ml.nombre`
+  // es una tabla DISTINTA de `seguimiento_fotos` (lo que actualiza el
+  // resto de esta función), por eso es una escritura aparte.
+  if (dato.tipoSeguimiento === "producto" && dato.titulo && seguimiento.nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION) {
+    await dbComoEmpresa(empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: dato.titulo as string }).where(eq(seguimientosMl.id, seguimiento.id)));
+  }
+
   const hoy = fechaDiaBogota(new Date(dato.leidoEn));
 
   // Issue #251, punto 5 — el total REAL ("752 resultados") viaja con
@@ -233,6 +255,26 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
           // primera foto del día), nunca pisa un dato exacto con uno
           // aproximado ni guarda el aproximado en su lugar.
           vendidos: dato.vendidosExacto ? dato.vendidos : undefined,
+          // Issue #252 (smoke de staging) — bug real: con `vendidos`
+          // reservado al número exacto (punto de arriba), el piso "+N
+          // vendidos" que SÍ lee la extensión se perdía por completo —
+          // la fila quedaba en "Sin dato" aunque la página mostrara
+          // "+500 vendidos". Se guarda en `publicaciones` (reusada
+          // para tipo="producto", ver el comentario de la columna en
+          // db/schema.ts — nunca una columna nueva): `vendidosAproximado`
+          // solo cuando esta lectura es aproximada y trae un número;
+          // `precioAproximado` (respaldo del precio, cuando ML nunca
+          // lo confirma por la API) cuando la página trae uno. `undefined`
+          // entero cuando no hay NINGUNO de los dos que reportar —
+          // el `||` de setDelConflicto (abajo) MEZCLA los campos con
+          // lo que ya hubiera, nunca reemplaza el objeto completo.
+          publicaciones:
+            (!dato.vendidosExacto && dato.vendidos != null) || dato.precio != null
+              ? {
+                  ...(!dato.vendidosExacto && dato.vendidos != null ? { vendidosAproximado: dato.vendidos } : {}),
+                  ...(dato.precio != null ? { precioAproximado: dato.precio } : {}),
+                }
+              : undefined,
         };
 
   // Issue #251 (corrección de Pablo, punto 5) — COALESCE en el SET del
@@ -261,6 +303,17 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
           // nunca con el de una lectura que ni siquiera trajo un número.
           inventarioAproximado: sql`case when excluded.inventario_disponible is null then seguimiento_fotos.inventario_aproximado else excluded.inventario_aproximado end`,
           vendidos: sql`coalesce(excluded.vendidos, seguimiento_fotos.vendidos)`,
+          // Issue #252 (smoke de staging) — `||` (merge shallow de
+          // jsonb de Postgres), NUNCA `coalesce`: para tipo="producto"
+          // esta columna guarda DOS campos independientes
+          // (`vendidosAproximado`/`precioAproximado`, ver camposPagina
+          // arriba) — un `coalesce` reemplazaría el objeto COMPLETO,
+          // así que una lectura que solo trae precio (sin vendidos
+          // aproximado, ej. ya es exacto) hubiera borrado el
+          // `vendidosAproximado` viejo sin querer. `old || new` deja
+          // cada clave que NO venga en `new`, y sobreescribe solo las
+          // que sí — nunca pisa un dato bueno con uno ausente.
+          publicaciones: sql`coalesce(seguimiento_fotos.publicaciones, '{}'::jsonb) || coalesce(excluded.publicaciones, '{}'::jsonb)`,
         };
 
   await dbComoEmpresa(empresaId, (tx) =>

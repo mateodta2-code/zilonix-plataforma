@@ -175,6 +175,22 @@ function numeroEnteroEnRango(valor: unknown): valor is number | null {
   return valor === null || (typeof valor === "number" && Number.isInteger(valor) && valor >= 0 && valor <= 1_000_000);
 }
 
+// Issue #252 (punto 3) — título/precio de respaldo, leídos por la
+// extensión directo de la página, para mostrar un nombre cuando la
+// revisión automática todavía no pudo confirmar el recurso real en ML
+// (ver guardarDatoDePaginaSeguimiento). MAX_LARGO_TITULO solo para
+// cortar basura (un selector equivocado trayendo HTML entero, por
+// ejemplo) — nunca trunca un título real de ML, que es mucho más corto.
+const MAX_LARGO_TITULO = 300;
+
+function tituloEnRango(valor: unknown): valor is string | null {
+  return valor === null || (typeof valor === "string" && valor.trim().length > 0 && valor.length <= MAX_LARGO_TITULO);
+}
+
+function precioEnRango(valor: unknown): valor is number | null {
+  return valor === null || (typeof valor === "number" && Number.isFinite(valor) && valor >= 0 && valor <= 1_000_000_000);
+}
+
 // Nunca confía en que `leidoEn` viene bien formado solo porque llegó
 // por este canal: tiene que ser una fecha ISO real, nunca futura (un
 // reloj de sistema mal puesto no debe mandar datos "del futuro" que
@@ -194,7 +210,14 @@ function datoPaginaSeguimientoValido(payload: unknown): payload is DatoPaginaSeg
   if (typeof p.mlIdExterno !== "string" || !PATRON_ID_ML_O_VENDEDOR.test(p.mlIdExterno)) return false;
   if (!leidoEnValido(p.leidoEn)) return false;
   if (p.tipoSeguimiento === "producto") {
-    return numeroEnteroEnRango(p.inventario) && typeof p.inventarioAproximado === "boolean" && numeroEnteroEnRango(p.vendidos) && typeof p.vendidosExacto === "boolean";
+    return (
+      numeroEnteroEnRango(p.inventario) &&
+      typeof p.inventarioAproximado === "boolean" &&
+      numeroEnteroEnRango(p.vendidos) &&
+      typeof p.vendidosExacto === "boolean" &&
+      tituloEnRango(p.titulo) &&
+      precioEnRango(p.precio)
+    );
   }
   if (p.tipoSeguimiento === "tienda") {
     return (

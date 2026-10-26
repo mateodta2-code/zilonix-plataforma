@@ -593,6 +593,50 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     expect(actualizado.ultimaRevisionTs).not.toBeNull();
   });
 
+  // Issue #252 (smoke de staging, punto 3) — MCO452014269 se quedó en
+  // el placeholder para siempre porque `recurso_ml` se guardó mal
+  // (ej. "item") ANTES de la confirmación del #250: `/items/{id}`
+  // daba 404 para siempre, aunque el recurso real fuera "product", y
+  // `resolverNombre` nunca podía resolver nada sin importar cuántas
+  // veces corriera "Revisar ahora". Ahora, mientras el nombre siga en
+  // el placeholder, se vuelve a confirmar el tipo real contra ML antes
+  // de reintentar el nombre, y se corrige `recurso_ml` en la base si
+  // Mercado Libre confirma uno distinto.
+  it("recurso_ml guardado mal (item en vez de product) con nombre pendiente: lo corrige solo y resuelve el nombre", async () => {
+    const creado = await crearSeguimientoConCuenta("RECURSO-MAL-GUARDADO");
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx.update(seguimientosMl).set({ nombre: NOMBRE_PENDIENTE_PRIMERA_REVISION }).where(eq(seguimientosMl.id, creado.id)).returning()
+    );
+    expect(seguimiento.recursoMl).toBe("item"); // a propósito, el valor mal guardado que hay que corregir
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/items/") && u.includes("attributes=id") && !u.includes("price")) {
+          return respuestaJson({}, 404); // confirmarRecursoProductoMl: no es un item real
+        }
+        if (u.includes("/products/") && u.includes("attributes=id")) {
+          return respuestaJson({ id: seguimiento.mlIdExterno }); // confirmarRecursoProductoMl: SÍ es product
+        }
+        if (u.includes("/products/") && u.endsWith("/items")) {
+          return respuestaJson({ results: [] }); // leerFotoSeguimiento con el recurso YA corregido: sin ofertas
+        }
+        if (u.includes("/products/")) {
+          return respuestaJson({ name: "Nombre real de catálogo" }); // resolverNombre -> obtenerProducto
+        }
+        throw new Error(`URL inesperada: ${u}`);
+      })
+    );
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultado.ok).toBe(true);
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.recursoMl).toBe("product"); // corregido solo, nunca se quedó en "item"
+    expect(actualizado.nombre).toBe("Nombre real de catálogo"); // ya no el placeholder
+  });
+
   // Corrección de Pablo (revisión del PR #253, sobre 7aa93f2) — "Revisar
   // ahora" comparte revisarUnSeguimiento con la ronda de la tarde: si ya
   // hay foto de hoy (ej. el cron ya corrió, o un clic repetido en
