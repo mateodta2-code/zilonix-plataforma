@@ -579,24 +579,74 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     expect(actualizado.ultimaRevisionTs).not.toBeNull();
   });
 
-  it("si ya hay una foto de hoy (ej. el cron ya corrió), queda saltado — nunca duplica ni sobreescribe", async () => {
+  // Corrección de Pablo (revisión del PR #253, sobre 7aa93f2) — "Revisar
+  // ahora" comparte revisarUnSeguimiento con la ronda de la tarde: si ya
+  // hay foto de hoy (ej. el cron ya corrió, o un clic repetido en
+  // "Revisar ahora"), ya NO queda "saltado" — actualiza esa fila con lo
+  // más reciente de la API y cuenta como procesado (saltado: false).
+  // "saltado: true" queda solo para la carrera real (rarísima) entre dos
+  // corridas a la vez, ver el comentario de ResultadoUnSeguimiento en
+  // revisionDiariaSeguimiento.ts.
+  it("si ya hay una foto de hoy (ej. el cron ya corrió), actualiza los campos de API (saltado:false) — nunca duplica ni toca los campos de la extensión", async () => {
     const seguimiento = await crearSeguimientoConCuenta("YA-REVISADO-HOY");
     const hoy = new Date();
     hoy.setUTCHours(0, 0, 0, 0);
     await dbComoEmpresa(seguimiento.empresaId, (tx) =>
-      tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: hoy, precio: "50", estado: "active" })
+      tx.insert(seguimientoFotos).values({
+        empresaId: seguimiento.empresaId,
+        seguimientoId: seguimiento.id,
+        fecha: hoy,
+        precio: "50",
+        estado: "active",
+        inventarioDisponible: 9,
+        vendidos: 4,
+      })
     );
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" }))); // si duplicara, este precio lo delataría
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" })));
 
     const resultado = await revisarAhoraUnSeguimiento(seguimiento);
 
-    expect(resultado).toEqual({ ok: true, saltado: true, alertasCreadas: 0 });
+    expect(resultado).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
 
     const fotosDeHoy = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
     );
-    expect(fotosDeHoy).toHaveLength(1);
-    expect(Number(fotosDeHoy[0].precio)).toBe(50); // la que ya estaba, nunca 999
+    expect(fotosDeHoy).toHaveLength(1); // nunca duplica
+    expect(Number(fotosDeHoy[0].precio)).toBe(999); // actualizado con lo más reciente de la API
+    expect(fotosDeHoy[0].inventarioDisponible).toBe(9); // nunca tocado — campo de la extensión (#251)
+    expect(fotosDeHoy[0].vendidos).toBe(4); // nunca tocado — campo de la extensión (#251)
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.ultimaRevisionTs).not.toBeNull();
+  });
+
+  // Punto 2 de la revisión de Pablo (PR #253, sobre 7aa93f2) — "sin
+  // duplicar alertas": la ronda de la tarde (simulada acá con una
+  // segunda llamada a "Revisar ahora" el mismo día) vuelve a comparar
+  // la foto de hoy ya actualizada contra la MISMA foto de ayer — si
+  // la baja de precio sigue ahí, es la MISMA alerta del mismo día,
+  // nunca una segunda.
+  it("mañana más tarde con la misma baja de precio: una sola alerta precio_bajo, nunca duplicada", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("SIN-ALERTA-DUPLICADA");
+    const ayer = new Date();
+    ayer.setUTCHours(0, 0, 0, 0);
+    ayer.setUTCDate(ayer.getUTCDate() - 1);
+    await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: ayer, precio: "100", estado: "active" }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 80, status: "active" }))); // baja real de 100 a 80
+
+    const primera = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(primera).toEqual({ ok: true, saltado: false, alertasCreadas: 1 });
+
+    // Segunda revisión el MISMO día (misma baja contra la misma foto
+    // de ayer) — ya hay foto de hoy, así que toma el camino de
+    // actualizar (ver el test de arriba), y vuelve a comparar contra
+    // la foto de ayer: la misma alerta de precio_bajo, nunca una nueva.
+    const segunda = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(segunda).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
+
+    const alertas = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimiento.id)));
+    expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
   });
 
   it("empresa sin cuenta ML conectada: {ok:false,error} claro, y NUNCA marca ultima_revision_ts (para que el cron de hoy mismo lo reintente)", async () => {

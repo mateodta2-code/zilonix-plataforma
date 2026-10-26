@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
@@ -85,6 +85,23 @@ function fechaDeHoy(): Date {
   const hoy = new Date();
   hoy.setUTCHours(0, 0, 0, 0);
   return hoy;
+}
+
+// Issue #250, punto 2 de la revisión de Pablo (PR #253, sobre 7aa93f2)
+// — "no duplicar alertas: nunca crear una del mismo tipo para el
+// mismo seguimiento si ya existe una hoy, hora Bogotá". A diferencia
+// de fechaDeHoy() (DATE, medianoche UTC, para seguimiento_fotos.fecha
+// — ningún día real necesita distinguir UTC de Bogotá ahí, ver el
+// comentario de arriba), seguimiento_alertas.creado_ts es un instante
+// real (timestamptz) — acá SÍ hace falta la medianoche real de
+// Bogotá (UTC-5 todo el año, sin horario de verano) para no confundir
+// "hoy" con el bloque de 24h equivocado cerca de la medianoche.
+const BOGOTA_OFFSET_MS = 5 * 3600_000;
+
+function inicioDiaBogota(ahora: Date): Date {
+  const corrido = new Date(ahora.getTime() - BOGOTA_OFFSET_MS); // instante "como si" ya fuera hora Bogotá
+  corrido.setUTCHours(0, 0, 0, 0); // medianoche Bogotá, expresada en ese desplazamiento
+  return new Date(corrido.getTime() + BOGOTA_OFFSET_MS); // instante UTC real que corresponde a esa medianoche
 }
 
 // Issue #250, punto E (decisión de Mateo, 2026-10-25) — dos ventanas
@@ -349,9 +366,37 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
   const alertas = compararFotos(seguimiento.tipo, aFotoComparable(fotoAnterior), aFotoComparable(fotoNueva));
   if (alertas.length === 0) return { saltado: false, alertasCreadas: 0 };
 
+  // Punto 2 de la revisión de Pablo — la ronda de la tarde (o "Revisar
+  // ahora") puede volver a comparar la foto de hoy YA actualizada
+  // contra la misma foto de ayer y encontrar la MISMA alerta otra vez
+  // (ej. el mismo precio_bajo). Nunca se inserta una alerta del mismo
+  // tipo para el mismo seguimiento si ya existe una de hoy (hora
+  // Bogotá) — sin índice único nuevo (sin migración): se filtra en la
+  // aplicación, mismo criterio ya aceptado para volumen bajo que
+  // verificarCupoCompetidor (lib/seguimiento/seguimientos.ts) — no es
+  // un candado atómico contra una carrera exacta, pero el volumen real
+  // de alertas por seguimiento por día es bajísimo.
+  const inicioHoyBogota = inicioDiaBogota(new Date());
+  const finHoyBogota = new Date(inicioHoyBogota.getTime() + 24 * 3600_000);
+  const alertasDeHoy = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+    tx
+      .select({ tipo: seguimientoAlertas.tipo })
+      .from(seguimientoAlertas)
+      .where(
+        and(
+          eq(seguimientoAlertas.seguimientoId, seguimiento.id),
+          gte(seguimientoAlertas.creadoTs, inicioHoyBogota),
+          lt(seguimientoAlertas.creadoTs, finHoyBogota)
+        )
+      )
+  );
+  const tiposYaHoy = new Set(alertasDeHoy.map((a) => a.tipo));
+  const alertasNuevas = alertas.filter((alerta) => !tiposYaHoy.has(alerta.tipo));
+  if (alertasNuevas.length === 0) return { saltado: false, alertasCreadas: 0 };
+
   await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx.insert(seguimientoAlertas).values(
-      alertas.map((alerta) => ({
+      alertasNuevas.map((alerta) => ({
         empresaId: seguimiento.empresaId,
         seguimientoId: seguimiento.id,
         fotoId: fotoNueva.id,
@@ -361,7 +406,7 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
     )
   );
 
-  return { saltado: false, alertasCreadas: alertas.length };
+  return { saltado: false, alertasCreadas: alertasNuevas.length };
 }
 
 export type ResultadoRevisionInmediata = { ok: true; saltado: boolean; alertasCreadas: number } | { ok: false; error: string };
