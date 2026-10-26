@@ -10,6 +10,8 @@
 // y lib/mercadolibre-publicar.js) — no inventada. Documentado puntual
 // donde corresponde.
 
+import { leerRetryAfterMs } from "@/lib/ml/reintento-429";
+
 const BASE_URL = "https://api.mercadolibre.com";
 
 // Colombia, único país en alcance de esta tarea (Parte 1). Si algún
@@ -52,9 +54,11 @@ const TIMEOUT_ESCRITURA_MS = 30_000;
 const TIMEOUT_SUBIDA_CLIP_MS = 300_000;
 
 export class LimiteMercadoLibreError extends Error {
-  constructor() {
+  readonly retryAfterMs: number | null;
+  constructor(retryAfterMs: number | null = null) {
     super("Mercado Libre está limitando las consultas, intenta en un minuto.");
     this.name = "LimiteMercadoLibreError";
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -143,6 +147,12 @@ function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function retryAfterDe(res: Response): number | null {
+  const headers = res.headers;
+  if (!headers || typeof headers.get !== "function") return null;
+  return leerRetryAfterMs(headers.get("retry-after"));
+}
+
 // token opcional: GET /categories/{id} y GET /categories/{id}/attributes
 // son endpoints PÚBLICOS de Mercado Libre (sin Authorization) — antes
 // de esta tarea vivían como fetch sueltos en lib/ml/publicar.ts; ahora
@@ -160,7 +170,7 @@ async function pedir<T>(url: string, token?: string): Promise<{ ok: true; data: 
   // 429 corta TODA la búsqueda, no solo esta llamada puntual — se
   // lanza en vez de devolver {ok:false}, para que ninguna de las
   // funciones de abajo lo trague en silencio como "sin datos".
-  if (res.status === 429) throw new LimiteMercadoLibreError();
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
   if (res.status === 401) {
     console.warn(`[lib/ml/cliente] ${endpoint} — 401`);
     throw new MlNoAutorizadoError();
@@ -247,7 +257,7 @@ export async function pedirLecturaMl<T>(
     console.warn(`[lib/ml/cliente] ${endpoint} — tiempo agotado o falla de red`);
     throw new MlNoDisponibleError();
   }
-  if (res.status === 429) throw new LimiteMercadoLibreError();
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
   if (res.status === 401) {
     console.warn(`[lib/ml/cliente] ${endpoint} — 401`);
     throw new MlNoAutorizadoError();
@@ -305,7 +315,7 @@ async function escribir<T>(
   } catch {
     return { ok: false, status: 0, data: null, textoCrudo: "" };
   }
-  if (res.status === 429) throw new LimiteMercadoLibreError();
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
   const textoCrudo = await res.text().catch(() => "");
   let data: T | null = null;
   try {

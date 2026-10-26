@@ -45,7 +45,7 @@ export function normalizarDecimal(entrada: string, opciones?: OpcionesDecimal): 
     const partes = tienePunto ? cuerpo.split(".") : [cuerpo];
     if (partes.length > 2) throw new DecimalInvalidoError("texto");
     const [izq, der = ""] = partes;
-    if (!/^\d+$/.test(izq) || (der !== "" && !/^\d+$/.test(der)) || der.length > 6) {
+    if (!/^\d+$/.test(izq) || (der !== "" && !/^\d+$/.test(der))) {
       throw new DecimalInvalidoError("fracción inválida");
     }
     entero = izq;
@@ -59,7 +59,7 @@ export function normalizarDecimal(entrada: string, opciones?: OpcionesDecimal): 
     const corte = cuerpo.lastIndexOf(separadorDecimal);
     entero = sinMiles(cuerpo.slice(0, corte), separadorMiles);
     fraccion = cuerpo.slice(corte + 1);
-    if (!/^\d+$/.test(fraccion) || fraccion.length > 6) throw new DecimalInvalidoError("fracción inválida");
+    if (!/^\d+$/.test(fraccion)) throw new DecimalInvalidoError("fracción inválida");
   } else if (tienePunto || tieneComa) {
     const separador = tienePunto ? "." : ",";
     const partes = cuerpo.split(separador);
@@ -74,8 +74,6 @@ export function normalizarDecimal(entrada: string, opciones?: OpcionesDecimal): 
       if (der.length === 3) {
         if (!opciones?.copSinDecimales) throw new DecimalInvalidoError("ambiguo");
         entero = izq + der;
-      } else if (der.length > 6) {
-        throw new DecimalInvalidoError("fracción inválida");
       } else {
         entero = izq;
         fraccion = der;

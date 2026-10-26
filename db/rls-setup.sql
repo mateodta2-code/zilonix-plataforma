@@ -99,8 +99,10 @@ GRANT UPDATE (ultima_revision_ts) ON seguimientos_ml TO seguimiento_trabajador_u
 -- y todas las escrituras de publicidad pasan por dbComoEmpresa()/
 -- app_user cuando ya se sabe la empresa. Las columnas del GRANT son
 -- exactamente las que usa el SELECT de lib/trabajos/sincronizarPublicidad.ts
--- (id, empresa_id, desconectada_ts, creado_ts). Sumar una columna a
--- esa consulta sin sumarla acá hace fallar el cron con permission denied.
+-- (id, empresa_id, desconectada_ts, creado_ts). La última sincronización
+-- sale de publicidad_sincronizaciones, que sí se lee entera. Sumar una
+-- columna de cuentas_ml a esa consulta sin sumarla acá hace fallar el
+-- cron con permission denied.
 -- publicidad_sincronizaciones sí se puede leer entera: es la bitácora
 -- técnica (estado, rango, texto corto de error). Nunca trae el token.
 DO $$

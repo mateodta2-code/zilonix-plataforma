@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS "publicidad_metricas_diarias" (
 	"cuenta_ml_id" uuid NOT NULL,
 	"nivel" "publicidad_nivel_metrica" NOT NULL,
 	"entidad_id_ml" text NOT NULL,
+	"ad_group_id" text DEFAULT '' NOT NULL,
 	"fecha" date NOT NULL,
 	"clicks" integer,
 	"impresiones" integer,
@@ -109,6 +110,8 @@ CREATE TABLE IF NOT EXISTS "publicidad_sincronizaciones" (
 	"rango_desde" date,
 	"rango_hasta" date,
 	"estado" "publicidad_estado_sync" NOT NULL,
+	"cierra_backfill" boolean DEFAULT false NOT NULL,
+	"reanuda_desde" date,
 	"llamadas" integer DEFAULT 0 NOT NULL,
 	"error" text,
 	"iniciada_ts" timestamp with time zone DEFAULT now() NOT NULL,
@@ -193,8 +196,31 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_anunciantes_cuenta_unica" ON "publicidad_anunciantes" USING btree ("cuenta_ml_id");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_anuncios_cuenta_grupo_item_unico" ON "publicidad_anuncios" USING btree ("cuenta_ml_id","ad_group_id","item_id");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_campanas_cuenta_campana_unica" ON "publicidad_campanas" USING btree ("cuenta_ml_id","campana_id_ml");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_costos_item_unico" ON "publicidad_costos_item" USING btree ("cuenta_ml_id","item_id","fecha");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_metricas_diarias_unica" ON "publicidad_metricas_diarias" USING btree ("cuenta_ml_id","nivel","entidad_id_ml","fecha");
+CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_anunciantes_cuenta_unica" ON "publicidad_anunciantes" USING btree ("empresa_id","cuenta_ml_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_anuncios_cuenta_grupo_item_unico" ON "publicidad_anuncios" USING btree ("empresa_id","cuenta_ml_id","ad_group_id","item_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_campanas_cuenta_campana_unica" ON "publicidad_campanas" USING btree ("empresa_id","cuenta_ml_id","campana_id_ml");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_costos_item_unico" ON "publicidad_costos_item" USING btree ("empresa_id","cuenta_ml_id","item_id","fecha");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_metricas_diarias_unica" ON "publicidad_metricas_diarias" USING btree ("empresa_id","cuenta_ml_id","nivel","entidad_id_ml","ad_group_id","fecha");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "publicidad_sincronizaciones_en_curso_unica" ON "publicidad_sincronizaciones" USING btree ("empresa_id","cuenta_ml_id") WHERE "publicidad_sincronizaciones"."estado" = 'en_curso';
+--> statement-breakpoint
+-- backfill permisos publicidad (issue #254)
+INSERT INTO permisos_rol (id, rol_id, modulo, accion, alcance)
+SELECT gen_random_uuid(), r.id, 'publicidad', 'consultar'::accion, 'todo'::alcance
+FROM roles r
+WHERE r.nombre IN ('Gerente', 'Auxiliar', 'Operaciones')
+  AND NOT EXISTS (
+    SELECT 1 FROM permisos_rol p
+    WHERE p.rol_id = r.id AND p.modulo = 'publicidad' AND p.accion = 'consultar'
+  );
+--> statement-breakpoint
+INSERT INTO permisos_rol (id, rol_id, modulo, accion, alcance)
+SELECT gen_random_uuid(), r.id, 'publicidad', a.accion, 'todo'::alcance
+FROM roles r
+CROSS JOIN (
+  SELECT unnest(ARRAY['consultar', 'crear', 'modificar', 'anular', 'autorizar']::accion[]) AS accion
+) a
+WHERE r.nombre = 'Dueño'
+  AND NOT EXISTS (
+    SELECT 1 FROM permisos_rol p
+    WHERE p.rol_id = r.id AND p.modulo = 'publicidad' AND p.accion = a.accion
+  );

@@ -32,5 +32,6 @@ describe("normalizarDecimal (issue #254)", () => {
     // el punto ya es decimal: 1.005 redondeado a 2 queda 1.01, sin float.
     expect(() => aEscala("1.005", 2)).toThrow(/ambiguo/);
     expect(aEscala("1.005", 2, { origenJson: true })).toBe("1.01");
+    expect(aEscala("0.5714285714285714", 4, { origenJson: true })).toBe("0.5714");
   });
 });

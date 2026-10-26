@@ -14,6 +14,13 @@ export const DIAS_TRAMO = 7;
 export const DIAS_MAX_API = 90;
 export const MINUTOS_REFRESCO_MANUAL = 10;
 export const MINUTOS_EN_CURSO_ABANDONADO = 30;
+// El curl del workflow corta a los 300 s. La corrida se detiene antes
+// para poder cerrar la fila; lo que no entró queda para la siguiente.
+export const PRESUPUESTO_CORRIDA_MS = 240_000;
+export const MARGEN_CIERRE_MS = 15_000;
+export const MAX_REINTENTOS_TRAMO = 3;
+
+export { leerRetryAfterMs, msDeReintento429 } from "@/lib/ml/reintento-429";
 
 const DIA_MS = 86_400_000;
 
@@ -63,7 +70,12 @@ export type Tramo = {
   cierraBackfill: boolean;
 };
 
-export function decidirTramo(hoy: string, ultima: UltimaSync | null, yaTerminoBackfill: boolean): Tramo {
+export function decidirTramo(
+  hoy: string,
+  ultima: UltimaSync | null,
+  yaTerminoBackfill: boolean,
+  reintentosMismoTramo = 0
+): Tramo {
   const piso = restarDiasIso(hoy, DIAS_MAX_API - 1);
   const objetivo = restarDiasIso(hoy, DIAS_BACKFILL - 1);
   const inicioObjetivo = objetivo < piso ? piso : objetivo;
@@ -73,8 +85,10 @@ export function decidirTramo(hoy: string, ultima: UltimaSync | null, yaTerminoBa
     return { desde: desde < piso ? piso : desde, hasta: hoy, cierraBackfill: true };
   }
 
+  const mismoTramoAgotado = reintentosMismoTramo >= MAX_REINTENTOS_TRAMO;
   const reintenta =
     ultima &&
+    !mismoTramoAgotado &&
     (ultima.estado === "error" || ultima.estado === "en_curso") &&
     ultima.rangoDesde &&
     ultima.rangoHasta &&
@@ -89,7 +103,13 @@ export function decidirTramo(hoy: string, ultima: UltimaSync | null, yaTerminoBa
     };
   }
 
-  if (ultima?.estado === "parcial" && ultima.rangoDesde && ultima.rangoDesde > inicioObjetivo) {
+  const seguirAtras =
+    ultima &&
+    ultima.rangoDesde &&
+    ultima.rangoDesde > inicioObjetivo &&
+    (ultima.estado === "parcial" || (ultima.estado === "error" && mismoTramoAgotado));
+
+  if (seguirAtras && ultima.rangoDesde) {
     const hasta = restarDiasIso(ultima.rangoDesde, 1);
     let desde = restarDiasIso(hasta, DIAS_TRAMO - 1);
     if (desde < inicioObjetivo) desde = inicioObjetivo;
@@ -107,7 +127,62 @@ export function textoErrorCorto(error: unknown): string {
   return `${nombre}: ${mensaje}`
     .replace(/Bearer\s+\S+/gi, "Bearer [omitido]")
     .replace(/access_token["']?\s*[:=]\s*\S+/gi, "access_token=[omitido]")
+    .replace(/refresh_token["']?\s*[:=]\s*\S+/gi, "refresh_token=[omitido]")
+    .replace(/client_secret["']?\s*[:=]\s*\S+/gi, "client_secret=[omitido]")
     .slice(0, 180);
+}
+
+// Nunca sincronizadas primero; después la última corrida más vieja.
+// Así una corrida diaria no vuelve a tomar siempre las mismas primeras
+// cuentas ordenadas por fecha de alta.
+export type CuentaParaOrden = { id: string; creadoTs: number; ultimaSyncTs: number | null };
+
+export function ordenarCuentasParaSync<T extends CuentaParaOrden>(cuentas: T[]): T[] {
+  return [...cuentas].sort((a, b) => {
+    if (a.ultimaSyncTs == null && b.ultimaSyncTs != null) return -1;
+    if (a.ultimaSyncTs != null && b.ultimaSyncTs == null) return 1;
+    if (a.ultimaSyncTs != null && b.ultimaSyncTs != null && a.ultimaSyncTs !== b.ultimaSyncTs) {
+      return a.ultimaSyncTs - b.ultimaSyncTs;
+    }
+    if (a.creadoTs !== b.creadoTs) return a.creadoTs - b.creadoTs;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}
+
+export function backfillRealmenteCerrado(filas: { estado: string; cierraBackfill: boolean }[]): boolean {
+  return filas.some((fila) => fila.estado === "ok" && fila.cierraBackfill);
+}
+
+// Un corte por tiempo no es un fallo de Mercado Libre: no consume el
+// tope de reintentos del tramo. El texto lo arma textoErrorCorto.
+export function esCorteDeTiempo(error: string | null): boolean {
+  return Boolean(error && error.startsWith("CorridaIncompletaError"));
+}
+
+export function contarReintentosMismoTramo(
+  filas: { estado: string; rangoDesde: string | null; rangoHasta: string | null; error: string | null }[]
+): number {
+  const ultima = filas[0];
+  if (!ultima) return 0;
+  if (ultima.estado !== "error" && ultima.estado !== "en_curso") return 0;
+  let n = 0;
+  for (const fila of filas) {
+    if (fila.rangoDesde !== ultima.rangoDesde || fila.rangoHasta !== ultima.rangoHasta) break;
+    if (esCorteDeTiempo(fila.error)) continue;
+    if (fila.estado === "error" || fila.estado === "en_curso") n += 1;
+    else break;
+  }
+  return n;
+}
+
+// Un 4xx al leer el costo de un ítem no puede tumbar la cuenta: el
+// backfill de métricas ya guardado sigue. El corte por tiempo sí cierra
+// el tramo para retomarlo. Cualquier otro fallo (token, 5xx) corta.
+export function decisionAnteErrorDeCosto(error: unknown): "seguir" | "cerrar-tramo" | "fallar" {
+  const nombre = error instanceof Error ? error.name : "";
+  if (nombre === "CorridaIncompletaError") return "cerrar-tramo";
+  if (nombre === "MlRespuestaInesperadaError") return "seguir";
+  return "fallar";
 }
 
 export type DecisionRefresco =

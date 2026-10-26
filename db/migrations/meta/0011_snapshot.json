@@ -1,5 +1,5 @@
 {
-  "id": "72713340-d423-4110-bdf2-3aff6dcc08db",
+  "id": "fb5b2236-b34f-495a-9d05-bd7181f05994",
   "prevId": "3919efa6-07d7-465d-9b92-e5f501c6cfbd",
   "version": "7",
   "dialect": "postgresql",
@@ -1740,6 +1740,12 @@
           "name": "publicidad_anunciantes_cuenta_unica",
           "columns": [
             {
+              "expression": "empresa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "cuenta_ml_id",
               "isExpression": false,
               "asc": true,
@@ -1887,6 +1893,12 @@
         "publicidad_anuncios_cuenta_grupo_item_unico": {
           "name": "publicidad_anuncios_cuenta_grupo_item_unico",
           "columns": [
+            {
+              "expression": "empresa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "cuenta_ml_id",
               "isExpression": false,
@@ -2061,6 +2073,12 @@
           "name": "publicidad_campanas_cuenta_campana_unica",
           "columns": [
             {
+              "expression": "empresa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "cuenta_ml_id",
               "isExpression": false,
               "asc": true,
@@ -2227,6 +2245,12 @@
           "name": "publicidad_costos_item_unico",
           "columns": [
             {
+              "expression": "empresa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "cuenta_ml_id",
               "isExpression": false,
               "asc": true,
@@ -2320,6 +2344,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "ad_group_id": {
+          "name": "ad_group_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
         },
         "fecha": {
           "name": "fecha",
@@ -2454,6 +2485,12 @@
           "name": "publicidad_metricas_diarias_unica",
           "columns": [
             {
+              "expression": "empresa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "cuenta_ml_id",
               "isExpression": false,
               "asc": true,
@@ -2467,6 +2504,12 @@
             },
             {
               "expression": "entidad_id_ml",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ad_group_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2573,6 +2616,19 @@
           "primaryKey": false,
           "notNull": true
         },
+        "cierra_backfill": {
+          "name": "cierra_backfill",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "reanuda_desde": {
+          "name": "reanuda_desde",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
         "llamadas": {
           "name": "llamadas",
           "type": "integer",
@@ -2600,7 +2656,30 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "publicidad_sincronizaciones_en_curso_unica": {
+          "name": "publicidad_sincronizaciones_en_curso_unica",
+          "columns": [
+            {
+              "expression": "empresa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "cuenta_ml_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"publicidad_sincronizaciones\".\"estado\" = 'en_curso'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "publicidad_sincronizaciones_empresa_id_empresas_id_fk": {
           "name": "publicidad_sincronizaciones_empresa_id_empresas_id_fk",

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
 import type {
@@ -621,7 +622,11 @@ export const publicidadAnunciantes = pgTable("publicidad_anunciantes", {
   estadoAcceso: publicidadEstadoAccesoEnum("estado_acceso").notNull(),
   verificadoTs: timestamp("verificado_ts", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  cuentaUnica: uniqueIndex("publicidad_anunciantes_cuenta_unica").on(t.cuentaMlId),
+  // empresa_id va en la clave: transferir la cuenta (la fila de
+  // cuentas_ml cambia de empresa, el id no) no puede chocar con el
+  // historial que se queda en la empresa anterior. Esas filas siguen
+  // visibles solo para esa empresa, por RLS, y la nueva empieza de cero.
+  cuentaUnica: uniqueIndex("publicidad_anunciantes_cuenta_unica").on(t.empresaId, t.cuentaMlId),
 }));
 
 export const publicidadCampanas = pgTable("publicidad_campanas", {
@@ -646,7 +651,7 @@ export const publicidadCampanas = pgTable("publicidad_campanas", {
   actualizadaMlTs: timestamp("actualizada_ml_ts", { withTimezone: true }),
   sincronizadaTs: timestamp("sincronizada_ts", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  campanaUnica: uniqueIndex("publicidad_campanas_cuenta_campana_unica").on(t.cuentaMlId, t.campanaIdMl),
+  campanaUnica: uniqueIndex("publicidad_campanas_cuenta_campana_unica").on(t.empresaId, t.cuentaMlId, t.campanaIdMl),
 }));
 
 export const publicidadAnuncios = pgTable("publicidad_anuncios", {
@@ -666,7 +671,7 @@ export const publicidadAnuncios = pgTable("publicidad_anuncios", {
   listingTypeId: text("listing_type_id"),
   sincronizadoTs: timestamp("sincronizado_ts", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  anuncioUnico: uniqueIndex("publicidad_anuncios_cuenta_grupo_item_unico").on(t.cuentaMlId, t.adGroupId, t.itemId),
+  anuncioUnico: uniqueIndex("publicidad_anuncios_cuenta_grupo_item_unico").on(t.empresaId, t.cuentaMlId, t.adGroupId, t.itemId),
 }));
 
 export const publicidadMetricasDiarias = pgTable("publicidad_metricas_diarias", {
@@ -675,6 +680,9 @@ export const publicidadMetricasDiarias = pgTable("publicidad_metricas_diarias", 
   cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
   nivel: publicidadNivelMetricaEnum("nivel").notNull(),
   entidadIdMl: text("entidad_id_ml").notNull(),
+  // Vacío en cuenta/campaña/ad group. En anuncio es el ad group: el
+  // mismo ítem puede estar en dos grupos y no se pueden pisar.
+  adGroupId: text("ad_group_id").notNull().default(""),
   fecha: date("fecha", { mode: "string" }).notNull(),
   clicks: integer("clicks"),
   impresiones: integer("impresiones"),
@@ -697,7 +705,14 @@ export const publicidadMetricasDiarias = pgTable("publicidad_metricas_diarias", 
   cpc: numeric("cpc", { precision: 14, scale: 2 }),
   sincronizadaTs: timestamp("sincronizada_ts", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  metricaUnica: uniqueIndex("publicidad_metricas_diarias_unica").on(t.cuentaMlId, t.nivel, t.entidadIdMl, t.fecha),
+  metricaUnica: uniqueIndex("publicidad_metricas_diarias_unica").on(
+    t.empresaId,
+    t.cuentaMlId,
+    t.nivel,
+    t.entidadIdMl,
+    t.adGroupId,
+    t.fecha
+  ),
 }));
 
 export const publicidadCostosItem = pgTable("publicidad_costos_item", {
@@ -722,7 +737,7 @@ export const publicidadCostosItem = pgTable("publicidad_costos_item", {
   listingTypeId: text("listing_type_id"),
   consultadoTs: timestamp("consultado_ts", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  costoUnico: uniqueIndex("publicidad_costos_item_unico").on(t.cuentaMlId, t.itemId, t.fecha),
+  costoUnico: uniqueIndex("publicidad_costos_item_unico").on(t.empresaId, t.cuentaMlId, t.itemId, t.fecha),
 }));
 
 export const publicidadSincronizaciones = pgTable("publicidad_sincronizaciones", {
@@ -734,6 +749,14 @@ export const publicidadSincronizaciones = pgTable("publicidad_sincronizaciones",
   rangoDesde: date("rango_desde", { mode: "string" }),
   rangoHasta: date("rango_hasta", { mode: "string" }),
   estado: publicidadEstadoSyncEnum("estado").notNull(),
+  // true solo cuando el tramo cierra un backfill con acceso real a
+  // Product Ads. Un ok de sin_product_ads o sin_permiso_app queda en
+  // false: no cuenta como historial ya cubierto.
+  cierraBackfill: boolean("cierra_backfill").notNull().default(false),
+  // Día desde el que hay que retomar anuncios si la corrida se cortó
+  // por tiempo. Un error real lo deja vacío: ese tramo se reintenta
+  // entero, y al tercer fallo se avanza para no trabar el backfill.
+  reanudaDesde: date("reanuda_desde", { mode: "string" }),
   llamadas: integer("llamadas").notNull().default(0),
   // Texto corto. Nunca un token, ni el cuerpo crudo de Mercado Libre.
   // En una corrida `ok` puede traer un aviso (forma de DAILY sin
@@ -741,4 +764,10 @@ export const publicidadSincronizaciones = pgTable("publicidad_sincronizaciones",
   error: text("error"),
   iniciadaTs: timestamp("iniciada_ts", { withTimezone: true }).notNull().defaultNow(),
   terminadaTs: timestamp("terminada_ts", { withTimezone: true }),
-});
+}, (t) => ({
+  // Una sola corrida en curso por empresa y cuenta. El id de la cuenta
+  // no cambia al transferirla, así que la empresa va en la clave.
+  enCursoUnica: uniqueIndex("publicidad_sincronizaciones_en_curso_unica")
+    .on(t.empresaId, t.cuentaMlId)
+    .where(sql`${t.estado} = 'en_curso'`),
+}));

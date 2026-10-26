@@ -61,6 +61,21 @@ function escalar(valor: unknown, escala: number): string | null {
   return null;
 }
 
+function campo<K extends keyof MetricasNormalizadas>(
+  nombre: K,
+  leer: () => MetricasNormalizadas[K],
+  destino: MetricasNormalizadas,
+  invalidos: (keyof MetricasNormalizadas)[]
+): void {
+  try {
+    destino[nombre] = leer();
+  } catch (error) {
+    if (!(error instanceof DecimalInvalidoError)) throw error;
+    destino[nombre] = null;
+    invalidos.push(nombre);
+  }
+}
+
 function dinero(valor: unknown): string | null {
   return escalar(valor, 2);
 }
@@ -78,39 +93,37 @@ function entero(valor: unknown): number | null {
   return null;
 }
 
-export function metricasDesdeApi(raw: unknown): MetricasNormalizadas {
-  if (!raw || typeof raw !== "object") return { ...VACIAS };
+export type MetricasLeidas = { metricas: MetricasNormalizadas; invalidos: (keyof MetricasNormalizadas)[] };
+
+export function metricasDesdeApi(raw: unknown): MetricasLeidas {
+  const metricas: MetricasNormalizadas = { ...VACIAS };
+  const invalidos: (keyof MetricasNormalizadas)[] = [];
+  if (!raw || typeof raw !== "object") return { metricas, invalidos };
   const registro = raw as Record<string, unknown>;
   const fuente =
     registro.metrics && typeof registro.metrics === "object"
       ? (registro.metrics as Record<string, unknown>)
       : registro;
-  try {
-    return {
-      clicks: entero(leerCrudo(fuente, ["clicks", "CLICKS"])),
-      impresiones: entero(leerCrudo(fuente, ["prints", "PRINTS"])),
-      costo: dinero(leerCrudo(fuente, ["cost", "COST"])),
-      montoDirecto: dinero(leerCrudo(fuente, ["direct_amount", "DIRECT_AMOUNT"])),
-      montoIndirecto: dinero(leerCrudo(fuente, ["indirect_amount", "INDIRECT_AMOUNT"])),
-      montoTotal: dinero(leerCrudo(fuente, ["total_amount", "TOTAL_AMOUNT"])),
-      unidadesDirectas: entero(leerCrudo(fuente, ["direct_units_quantity", "DIRECT_UNITS_QUANTITY"])),
-      unidadesIndirectas: entero(leerCrudo(fuente, ["indirect_units_quantity", "INDIRECT_UNITS_QUANTITY"])),
-      unidadesTotal: entero(leerCrudo(fuente, ["units_quantity", "UNITS_QUANTITY"])),
-      ventasPublicidad: entero(leerCrudo(fuente, ["advertising_items_quantity", "ADVERTISING_ITEMS_QUANTITY"])),
-      ventasOrganicasCant: entero(leerCrudo(fuente, ["organic_items_quantity", "ORGANIC_ITEMS_QUANTITY"])),
-      ventasOrganicasMonto: dinero(leerCrudo(fuente, ["organic_units_amount", "ORGANIC_UNITS_AMOUNT"])),
-      acos: ratio(leerCrudo(fuente, ["acos", "ACOS"])),
-      roas: ratio(leerCrudo(fuente, ["roas", "ROAS"])),
-      tacos: ratio(leerCrudo(fuente, ["tacos", "TACOS"])),
-      sov: ratio(leerCrudo(fuente, ["sov", "SOV"])),
-      cvr: ratio(leerCrudo(fuente, ["cvr", "CVR"])),
-      ctr: ratio(leerCrudo(fuente, ["ctr", "CTR"])),
-      cpc: dinero(leerCrudo(fuente, ["cpc", "CPC"])),
-    };
-  } catch (error) {
-    if (error instanceof DecimalInvalidoError) return { ...VACIAS };
-    throw error;
-  }
+  campo("clicks", () => entero(leerCrudo(fuente, ["clicks", "CLICKS"])), metricas, invalidos);
+  campo("impresiones", () => entero(leerCrudo(fuente, ["prints", "PRINTS"])), metricas, invalidos);
+  campo("costo", () => dinero(leerCrudo(fuente, ["cost", "COST"])), metricas, invalidos);
+  campo("montoDirecto", () => dinero(leerCrudo(fuente, ["direct_amount", "DIRECT_AMOUNT"])), metricas, invalidos);
+  campo("montoIndirecto", () => dinero(leerCrudo(fuente, ["indirect_amount", "INDIRECT_AMOUNT"])), metricas, invalidos);
+  campo("montoTotal", () => dinero(leerCrudo(fuente, ["total_amount", "TOTAL_AMOUNT"])), metricas, invalidos);
+  campo("unidadesDirectas", () => entero(leerCrudo(fuente, ["direct_units_quantity", "DIRECT_UNITS_QUANTITY"])), metricas, invalidos);
+  campo("unidadesIndirectas", () => entero(leerCrudo(fuente, ["indirect_units_quantity", "INDIRECT_UNITS_QUANTITY"])), metricas, invalidos);
+  campo("unidadesTotal", () => entero(leerCrudo(fuente, ["units_quantity", "UNITS_QUANTITY"])), metricas, invalidos);
+  campo("ventasPublicidad", () => entero(leerCrudo(fuente, ["advertising_items_quantity", "ADVERTISING_ITEMS_QUANTITY"])), metricas, invalidos);
+  campo("ventasOrganicasCant", () => entero(leerCrudo(fuente, ["organic_items_quantity", "ORGANIC_ITEMS_QUANTITY"])), metricas, invalidos);
+  campo("ventasOrganicasMonto", () => dinero(leerCrudo(fuente, ["organic_units_amount", "ORGANIC_UNITS_AMOUNT"])), metricas, invalidos);
+  campo("acos", () => ratio(leerCrudo(fuente, ["acos", "ACOS"])), metricas, invalidos);
+  campo("roas", () => ratio(leerCrudo(fuente, ["roas", "ROAS"])), metricas, invalidos);
+  campo("tacos", () => ratio(leerCrudo(fuente, ["tacos", "TACOS"])), metricas, invalidos);
+  campo("sov", () => ratio(leerCrudo(fuente, ["sov", "SOV"])), metricas, invalidos);
+  campo("cvr", () => ratio(leerCrudo(fuente, ["cvr", "CVR"])), metricas, invalidos);
+  campo("ctr", () => ratio(leerCrudo(fuente, ["ctr", "CTR"])), metricas, invalidos);
+  campo("cpc", () => dinero(leerCrudo(fuente, ["cpc", "CPC"])), metricas, invalidos);
+  return { metricas, invalidos };
 }
 
 // acos = 100 / roas. La doc dice que acos_target se calcula así y que
@@ -136,6 +149,7 @@ export type FilaDiaria = {
   fecha: string;
   entidadIdMl: string | null;
   metricas: MetricasNormalizadas;
+  invalidos: (keyof MetricasNormalizadas)[];
 };
 
 function esRegistro(valor: unknown): valor is Record<string, unknown> {
@@ -167,7 +181,8 @@ export function filasDiariasDeCuenta(results: unknown[]): { filas: FilaDiaria[];
     const fecha = fechaDe(raw);
     if (!fecha) continue;
     const id = idDe(raw);
-    const fila: FilaDiaria = { fecha, entidadIdMl: id, metricas: metricasDesdeApi(raw) };
+    const leidas = metricasDesdeApi(raw);
+    const fila: FilaDiaria = { fecha, entidadIdMl: id, metricas: leidas.metricas, invalidos: leidas.invalidos };
     if (id && (raw.id != null || raw.campaign_id != null)) conId.push(fila);
     else {
       porFecha.set(fecha, (porFecha.get(fecha) ?? 0) + 1);
@@ -184,7 +199,8 @@ export function filasDiariasDeCampana(results: unknown[], campanaId: string): Fi
     if (!esRegistro(raw)) continue;
     const fecha = fechaDe(raw);
     if (!fecha) continue;
-    filas.push({ fecha, entidadIdMl: idDe(raw) ?? campanaId, metricas: metricasDesdeApi(raw) });
+    const leidas = metricasDesdeApi(raw);
+    filas.push({ fecha, entidadIdMl: idDe(raw) ?? campanaId, metricas: leidas.metricas, invalidos: leidas.invalidos });
   }
   return filas;
 }

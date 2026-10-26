@@ -20,7 +20,7 @@ Confirmado en vivo (prueba de aislamiento, tarea 1.4): si una consulta pasa por 
 
 Ese rol se crea en `db/rls-setup.sql` (placeholder `PONE_ACA_UNA_QUINTA_CONTRASEÑA_REAL`). No viaja en la migración de Drizzle. Hay que correr el script a mano, por el túnel, en cada ambiente, y cargar la URL en Railway. La contraseña no se pega en un chat ni en un commit.
 
-Las seis tablas de publicidad tienen la misma política de aislamiento que el resto: `empresa_id` igual a `app.empresa_actual`. La prueba es `db/rls-publicidad.test.ts`.
+Las seis tablas de publicidad tienen la misma política de aislamiento que el resto: `empresa_id` igual a `app.empresa_actual`. La prueba es `db/rls-publicidad.test.ts`. Las claves únicas incluyen `empresa_id`: si la cuenta se transfiere, el historial se queda en la empresa anterior y la nueva no lo ve. Hay un índice único parcial de `publicidad_sincronizaciones` para una sola fila `en_curso` por empresa y cuenta; el tope de 10 minutos del refresco manual además toma `pg_advisory_xact_lock` dentro de la transacción.
 
 ## Estado — ya corrido contra la base real
 

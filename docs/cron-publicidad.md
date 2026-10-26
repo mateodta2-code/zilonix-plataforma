@@ -1,6 +1,6 @@
 # Cron de Product Ads (issue #254)
 
-`POST /api/trabajos/publicidad` (`app/api/trabajos/publicidad/route.ts`) sincroniza un lote de cuentas conectadas (hasta 5, o hasta ~200 segundos). Lee Product Ads con el OAuth de cada vendedor y guarda anunciante, campañas, métricas diarias, anuncios y el costo vigente del ítem. No escribe campañas en Mercado Libre.
+`POST /api/trabajos/publicidad` (`app/api/trabajos/publicidad/route.ts`) sincroniza las cuentas conectadas que entren en el presupuesto de la corrida (240 segundos, por debajo del `--max-time 300` del curl). El orden es la última sincronización más vieja; las que nunca corrieron van primero. La respuesta trae `pendientes`: las cuentas que no alcanzaron a entrar. El workflow encadena hasta 4 tandas mientras `pendientes` no sea 0. Lee Product Ads con el OAuth de cada vendedor y guarda anunciante, campañas, métricas diarias, anuncios y el costo vigente del ítem. No escribe campañas en Mercado Libre.
 
 Lo llama un cron, sin sesión de Clerk. La puerta es `PUBLICIDAD_TRABAJADOR_SECRET` en la cabecera `x-publicidad-trabajador-secret`, comparada con `crypto.timingSafeEqual`. La conexión de base es `DATABASE_URL_PUBLICIDAD` (`publicidad_trabajador_user`, creado en `db/rls-setup.sql`): solo puede listar `id`, `empresa_id`, `desconectada_ts` y `creado_ts` de `cuentas_ml`, y leer `publicidad_sincronizaciones`. El token y las escrituras pasan por `dbComoEmpresa` / `app_user`.
 
@@ -8,7 +8,7 @@ Lo llama un cron, sin sesión de Clerk. La puerta es `PUBLICIDAD_TRABAJADOR_SECR
 
 ## Horario
 
-`.github/workflows/sincronizar-publicidad.yml` corre una vez por día a las 14:00 UTC (09:00 en Bogotá, después de las 08:30). Las métricas de la API se refrescan cerca de las 10:00 GMT-3, así que el total del día puede ir atrasado respecto de la Central de vendedores. `workflow_dispatch` sirve para seguir el backfill: la primera vez pide 62 días en tramos de 7, y cada corrida retoma donde quedó. Después de un tramo `ok` que cierra ese historial, las siguientes piden los últimos 15 días (14 de atribución más uno).
+`.github/workflows/sincronizar-publicidad.yml` corre una vez por día a las 14:00 UTC (09:00 en Bogotá, después de las 08:30) y, dentro de esa corrida, hasta 4 tandas de 240 segundos. Las métricas de la API se refrescan cerca de las 10:00 GMT-3, así que el total del día puede ir atrasado respecto de la Central de vendedores. `workflow_dispatch` sirve para seguir el backfill: la primera vez pide 62 días en tramos de 7, y cada corrida retoma donde quedó. Un `ok` de cuenta sin Product Ads o sin permiso de la app no cierra el backfill: `cierra_backfill` queda en false y al día siguiente se vuelve a preguntar. Después de un tramo `ok` con `cierra_backfill`, las siguientes piden los últimos 15 días (14 de atribución más uno).
 
 ## Qué hace falta para que corra en staging
 

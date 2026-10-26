@@ -71,6 +71,22 @@ describe("costos por ítem (issue #254)", () => {
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("shipping_options"))).toBe(false);
   });
 
+  it("un decimal largo se redondea y un texto inválido deja null solo ese campo", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/sale_price")) return respuesta({ amount: 0.5714285714285714, regular_amount: "no-es-numero" });
+      if (String(url).includes("/listing_prices")) {
+        return respuesta([{ listing_type_id: "gold_special", sale_fee_amount: 10.129, sale_fee_details: {} }]);
+      }
+      return respuesta({ ...itemBase, shipping: { logistic_type: "drop_off", mode: "me1", free_shipping: false } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const costo = await costosDeItem({ token: "token-prueba", userId: "998877", itemId: "MCO12345" });
+    expect(costo.precioVentaVigente).toBe("0.57");
+    expect(costo.precioRegular).toBeNull();
+    expect(costo.comisionMl).toBe("10.13");
+    expect(costo.envioVendedorEstimado).toBe("0.00");
+  });
+
   it("sin logistic_type no llama a listing_prices", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).includes("/sale_price")) return respuesta({ amount: 1000, regular_amount: 1000 });

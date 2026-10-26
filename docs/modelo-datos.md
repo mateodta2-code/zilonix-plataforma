@@ -109,12 +109,18 @@ Seis tablas, todas con `empresa_id` y `cuenta_ml_id`. El dinero es `numeric`, nu
 
 | Tabla | Qué guarda | Única por |
 |---|---|---|
-| `publicidad_anunciantes` | Si la cuenta tiene Product Ads, no lo tiene, o la app no tiene el permiso | cuenta |
-| `publicidad_campanas` | Campaña: estado, presupuesto, ROAS/ACOS objetivo | cuenta + id de campaña |
-| `publicidad_anuncios` | Anuncio dentro de un ad group | cuenta + ad group + ítem |
-| `publicidad_metricas_diarias` | Métricas del día, a nivel cuenta, campaña, ad group o anuncio | cuenta + nivel + entidad + fecha |
-| `publicidad_costos_item` | Precio, comisión y envío estimado vigentes del ítem (no es una serie histórica) | cuenta + ítem + fecha |
-| `publicidad_sincronizaciones` | Bitácora de cada corrida: origen, rango, estado, texto corto de error | — |
+| `publicidad_anunciantes` | Si la cuenta tiene Product Ads, no lo tiene, o la app no tiene el permiso | empresa + cuenta |
+| `publicidad_campanas` | Campaña: estado, presupuesto, ROAS/ACOS objetivo | empresa + cuenta + id de campaña |
+| `publicidad_anuncios` | Anuncio dentro de un ad group | empresa + cuenta + ad group + ítem |
+| `publicidad_metricas_diarias` | Métricas del día, a nivel cuenta, campaña, ad group o anuncio | empresa + cuenta + nivel + entidad + ad group + fecha |
+| `publicidad_costos_item` | Precio, comisión y envío estimado vigentes del ítem (no es una serie histórica) | empresa + cuenta + ítem + fecha |
+| `publicidad_sincronizaciones` | Bitácora de cada corrida: origen, rango, estado, texto corto de error | una sola fila `en_curso` por empresa + cuenta |
+
+Transferir una cuenta de Mercado Libre cambia el `empresa_id` de `cuentas_ml` y deja el mismo `id`. Las filas de publicidad no se mueven con ella: se quedan con el `empresa_id` de la empresa que las sincronizó. RLS las muestra solo a esa empresa. La empresa nueva no las ve y empieza de cero; un upsert no pisa el historial anterior porque `empresa_id` entra en la clave única. No quedan datos visibles de una empresa en la otra.
+
+En métricas de anuncio, `ad_group_id` vacío no aplica (cuenta, campaña, ad group). En anuncio es el grupo: el mismo ítem puede estar en dos grupos y son dos filas.
+
+`cierra_backfill` es true solo cuando un tramo `ok` termina el historial con acceso real a Product Ads. Un `ok` de `sin_product_ads` o `sin_permiso_app` no lo prende.
 
 `automatic_budget` se guarda tal cual llega. La doc no dice que signifique presupuesto compartido. `acos_target` puede no venir y se calcula como 100/ROAS, marcado como calculado. El estado "Aprendiendo" no está en la API.
 

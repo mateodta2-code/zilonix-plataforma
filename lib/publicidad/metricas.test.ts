@@ -16,7 +16,7 @@ describe("métricas de Product Ads (issue #254)", () => {
         roas: 156.06,
         tacos: 1.2,
       },
-    });
+    }).metricas;
     expect(fila.clicks).toBe(3);
     expect(fila.impresiones).toBe(11);
     expect(fila.costo).toBe("1.01");
@@ -26,8 +26,24 @@ describe("métricas de Product Ads (issue #254)", () => {
     expect(fila.tacos).toBe("1.2000");
   });
 
+  it("un ctr con muchos decimales se redondea y no anula el costo", () => {
+    const leidas = metricasDesdeApi({ cost: 10, ctr: 0.5714285714285714, clicks: "no" });
+    expect(leidas.metricas.costo).toBe("10.00");
+    expect(leidas.metricas.ctr).toBe("0.5714");
+    expect(leidas.metricas.clicks).toBeNull();
+    expect(leidas.invalidos).toEqual([]);
+  });
+
+  it("un campo que no se puede leer queda null solo en ese campo", () => {
+    const leidas = metricasDesdeApi({ cost: "no-es-numero", clicks: 4, total_amount: 20 });
+    expect(leidas.metricas.clicks).toBe(4);
+    expect(leidas.metricas.montoTotal).toBe("20.00");
+    expect(leidas.metricas.costo).toBeNull();
+    expect(leidas.invalidos).toEqual(["costo"]);
+  });
+
   it("acepta los nombres en mayúsculas del ejemplo de ad groups", () => {
-    const fila = metricasDesdeApi({ metrics: { CLICKS: 1, PRINTS: 2, COST: 3, TACOS: 4 } });
+    const fila = metricasDesdeApi({ metrics: { CLICKS: 1, PRINTS: 2, COST: 3, TACOS: 4 } }).metricas;
     expect(fila.clicks).toBe(1);
     expect(fila.impresiones).toBe(2);
     expect(fila.costo).toBe("3.00");

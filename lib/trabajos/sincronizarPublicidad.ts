@@ -3,16 +3,23 @@
 // no corta a las demás. Los tokens no se escriben en el log ni en
 // publicidad_sincronizaciones.error.
 //
-// El cron enumera cuentas con publicidad_trabajador_user. Apenas se
-// sabe la empresa, el resto va por dbComoEmpresa, igual que la
-// revisión diaria de seguimientos.
+// El cron enumera cuentas con publicidad_trabajador_user (id, empresa,
+// alta y última corrida — nunca el token). Apenas se sabe la empresa,
+// el resto va por dbComoEmpresa. El orden es la última sincronización
+// más vieja, no la fecha de alta: si no, las primeras cinco cuentas
+// se comen la única corrida del día y el resto nunca corre.
+//
+// El presupuesto es de la corrida entera (240 s), alineado con el
+// curl de 300 s del workflow. Lo que no entra queda en `pendientes`
+// para la tanda siguiente.
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, max } from "drizzle-orm";
 import { dbTrabajadorPublicidad } from "@/db/trabajador-publicidad-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl } from "@/db/schema";
+import { cuentasMl, publicidadSincronizaciones } from "@/db/schema";
 import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
 import { costosDeItem } from "@/lib/ml/costos-item";
+import { msDeReintento429 } from "@/lib/ml/reintento-429";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import {
   adGroupsDeCampana,
@@ -28,6 +35,9 @@ import {
   type CampanaAds,
 } from "@/lib/ml/publicidad";
 import {
+  SyncEnCursoError,
+  SyncMuyRecienteError,
+  abrirSincronizacion,
   cerrarSincronizacion,
   costoYaConsultado,
   guardarAnunciante,
@@ -36,27 +46,30 @@ import {
   guardarCostoItem,
   guardarMetricas,
   historialSync,
-  abrirSincronizacion,
   type AnuncioGuardado,
   type CampanaGuardada,
   type MetricaGuardada,
 } from "@/lib/publicidad/guardar";
-import { acosDesdeRoas, filasDiariasDeCampana, filasDiariasDeCuenta, metricasDesdeApi } from "@/lib/publicidad/metricas";
+import { acosDesdeRoas, filasDiariasDeCampana, filasDiariasDeCuenta, metricasDesdeApi, type MetricasLeidas } from "@/lib/publicidad/metricas";
 import { aEscala, textoDeNumeroJson } from "@/lib/numeros/normalizar-decimal";
 import {
+  MARGEN_CIERRE_MS,
+  MINUTOS_EN_CURSO_ABANDONADO,
+  PRESUPUESTO_CORRIDA_MS,
+  decisionAnteErrorDeCosto,
   decidirTramo,
   diasDelRango,
   evaluarRefrescoManual,
   hoyBogota,
-  MINUTOS_EN_CURSO_ABANDONADO,
+  ordenarCuentasParaSync,
   textoErrorCorto,
   type UltimaSync,
 } from "@/lib/publicidad/plan";
 
-const PRESUPUESTO_MS = 200_000;
-const LOTE_CUENTAS = 5;
 const AVISO_DAILY =
   "aggregation_type=DAILY en campaigns/search repitió una fecha sin id de campaña. No se guardó el total de cuenta: la forma no está confirmada contra una cuenta real.";
+const AVISO_COSTO =
+  "Un costo de ítem no se pudo leer (respuesta 4xx de Mercado Libre). El resto de la cuenta siguió; ese ítem se reintenta en la próxima corrida.";
 
 class CorridaIncompletaError extends Error {
   constructor() {
@@ -65,14 +78,28 @@ class CorridaIncompletaError extends Error {
   }
 }
 
-export type ResultadoLote = { revisadas: number; procesadas: number; saltadas: number; fallidas: number };
+export type ResultadoLote = {
+  revisadas: number;
+  procesadas: number;
+  saltadas: number;
+  fallidas: number;
+  pendientes: number;
+};
 export type ResultadoManual = { ok: boolean; aviso: string };
 
 function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function llamar<T>(contador: { n: number }, fn: () => Promise<T>): Promise<T> {
+function vigilar(deadline: number): void {
+  if (Date.now() > deadline) throw new CorridaIncompletaError();
+}
+
+function quedaMargen(deadline: number): boolean {
+  return deadline - Date.now() > MARGEN_CIERRE_MS;
+}
+
+async function llamar<T>(contador: { n: number }, deadline: number, fn: () => Promise<T>): Promise<T> {
   let espera = 2_000;
   for (let intento = 0; intento < 4; intento++) {
     contador.n += 1;
@@ -80,7 +107,9 @@ async function llamar<T>(contador: { n: number }, fn: () => Promise<T>): Promise
       return await fn();
     } catch (error) {
       if (!(error instanceof LimiteMercadoLibreError) || intento === 3) throw error;
-      await esperar(espera + Math.floor(Math.random() * 400));
+      const pausa = msDeReintento429(espera + Math.floor(Math.random() * 400), error.retryAfterMs);
+      if (Date.now() + pausa > deadline) throw new CorridaIncompletaError();
+      await esperar(pausa);
       espera *= 2;
     }
   }
@@ -149,8 +178,36 @@ function resultsDe(data: unknown): unknown[] {
   });
 }
 
-function vigilar(inicio: number): void {
-  if (Date.now() - inicio > PRESUPUESTO_MS) throw new CorridaIncompletaError();
+function aMs(valor: Date | string | null): number | null {
+  if (valor == null) return null;
+  const ms = valor instanceof Date ? valor.getTime() : Date.parse(String(valor));
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function metricaDe(
+  cuentaMlId: string,
+  nivel: MetricaGuardada["nivel"],
+  entidadIdMl: string,
+  fecha: string,
+  leidas: MetricasLeidas,
+  adGroupId = ""
+): MetricaGuardada {
+  return {
+    cuentaMlId,
+    nivel,
+    entidadIdMl,
+    fecha,
+    adGroupId,
+    metricas: leidas.metricas,
+    invalidos: leidas.invalidos,
+  };
+}
+
+function diasARetomar(desde: string, hasta: string, reanudaDesde: string | null): string[] {
+  const dias = diasDelRango(desde, hasta);
+  if (!reanudaDesde || reanudaDesde <= desde || reanudaDesde > hasta) return dias;
+  const pendientes = dias.filter((dia) => dia >= reanudaDesde);
+  return pendientes.length > 0 ? pendientes : dias;
 }
 
 async function sincronizarCuenta(
@@ -158,7 +215,8 @@ async function sincronizarCuenta(
   cuentaMlId: string,
   origen: "programada" | "manual",
   solicitadaPor: string | null,
-  ahora: Date
+  ahora: Date,
+  deadline: number
 ): Promise<string> {
   const hoy = hoyBogota(ahora);
   const historial = await historialSync(empresaId, cuentaMlId);
@@ -170,10 +228,16 @@ async function sincronizarCuenta(
         iniciadaTs: historial.ultima.iniciadaTs,
       }
     : null;
-  const tramo = decidirTramo(hoy, ultima, historial.yaTerminoBackfill);
+  const tramo = decidirTramo(hoy, ultima, historial.yaTerminoBackfill, historial.reintentosMismoTramo);
+  const reanudaInicial =
+    ultima &&
+    ultima.estado === "error" &&
+    ultima.rangoDesde === tramo.desde &&
+    ultima.rangoHasta === tramo.hasta
+      ? historial.ultima?.reanudaDesde ?? null
+      : null;
   const contador = { n: 0 };
   const avisos: string[] = [];
-  const inicio = Date.now();
   const syncId = await abrirSincronizacion(empresaId, {
     cuentaMlId,
     origen,
@@ -181,6 +245,21 @@ async function sincronizarCuenta(
     rangoDesde: tramo.desde,
     rangoHasta: tramo.hasta,
   });
+
+  const metricas: MetricaGuardada[] = [];
+  const anuncios: AnuncioGuardado[] = [];
+  let reanuda: string | null = null;
+
+  async function volcar(): Promise<void> {
+    if (metricas.length > 0) {
+      const lote = metricas.splice(0, metricas.length);
+      await guardarMetricas(empresaId, lote);
+    }
+    if (anuncios.length > 0) {
+      const lote = anuncios.splice(0, anuncios.length);
+      await guardarAnuncios(empresaId, lote);
+    }
+  }
 
   try {
     const token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
@@ -192,7 +271,7 @@ async function sincronizarCuenta(
     );
     if (!cuenta) throw new Error("No se encontró la cuenta.");
 
-    const anunciante = await llamar(contador, () => obtenerAnunciante(token));
+    const anunciante = await llamar(contador, deadline, () => obtenerAnunciante(token));
     if (anunciante.estado !== "ok") {
       await guardarAnunciante(empresaId, {
         cuentaMlId,
@@ -205,7 +284,14 @@ async function sincronizarCuenta(
       if (anunciante.estado === "sin_permiso_app") {
         console.warn(`[publicidad] cuenta ${cuentaMlId} sin_permiso_app. ${SUGERENCIA_RECONECTAR_PUBLICIDAD}`);
       }
-      await cerrarSincronizacion(empresaId, syncId, { estado: "ok", llamadas: contador.n, error: aviso });
+      // ok de clasificación, no de backfill: cierraBackfill queda en
+      // false para que mañana se vuelva a preguntar si ya tiene ads.
+      await cerrarSincronizacion(empresaId, syncId, {
+        estado: "ok",
+        llamadas: contador.n,
+        error: aviso,
+        cierraBackfill: false,
+      });
       return anunciante.estado === "sin_permiso_app"
         ? SUGERENCIA_RECONECTAR_PUBLICIDAD
         : "Esta cuenta no tiene Product Ads activo en Mercado Libre.";
@@ -221,34 +307,40 @@ async function sincronizarCuenta(
     const ctx = { token, siteId: anunciante.siteId, advertiserId: anunciante.advertiserId };
 
     const crudas = [
-      ...(await llamar(contador, () => listarCampanas(ctx, { estado: "active" }))),
-      ...(await llamar(contador, () => listarCampanas(ctx, { estado: "paused" }))),
+      ...(await llamar(contador, deadline, () => listarCampanas(ctx, { estado: "active" }))),
+      ...(await llamar(contador, deadline, () => listarCampanas(ctx, { estado: "paused" }))),
     ];
     const campanas = crudas.map((raw) => campanaDesde(cuentaMlId, raw)).filter((c): c is CampanaGuardada => c !== null);
     const porId = new Map(campanas.map((c) => [c.campanaIdMl, c]));
     await guardarCampanas(empresaId, [...porId.values()]);
 
-    const metricas: MetricaGuardada[] = [];
     for (const campana of porId.values()) {
-      vigilar(inicio);
-      const data = await llamar(contador, () => metricasDiariasCampana(ctx, campana.campanaIdMl, tramo));
+      vigilar(deadline);
+      const data = await llamar(contador, deadline, () => metricasDiariasCampana(ctx, campana.campanaIdMl, tramo));
       for (const fila of filasDiariasDeCampana(resultsDe(data), campana.campanaIdMl)) {
         if (!fila.entidadIdMl) continue;
-        metricas.push({ cuentaMlId, nivel: "campana", entidadIdMl: fila.entidadIdMl, fecha: fila.fecha, metricas: fila.metricas });
+        metricas.push(metricaDe(cuentaMlId, "campana", fila.entidadIdMl, fila.fecha, fila));
       }
+      await volcar();
     }
-    const diariasCuenta = await llamar(contador, () => metricasDiariasCuenta(ctx, tramo));
+    vigilar(deadline);
+    const diariasCuenta = await llamar(contador, deadline, () => metricasDiariasCuenta(ctx, tramo));
     const interpretadas = filasDiariasDeCuenta(diariasCuenta);
     if (interpretadas.ambiguo) avisos.push(AVISO_DAILY);
     for (const fila of interpretadas.filas) {
       const entidad = fila.entidadIdMl ?? anunciante.advertiserId;
       const nivel = fila.entidadIdMl ? "campana" : "cuenta";
-      metricas.push({ cuentaMlId, nivel, entidadIdMl: entidad, fecha: fila.fecha, metricas: fila.metricas });
+      metricas.push(metricaDe(cuentaMlId, nivel, entidad, fila.fecha, fila));
     }
+    await volcar();
 
     const grupos = [
-      ...(await llamar(contador, () => adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "active" }))),
-      ...(await llamar(contador, () => adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "paused" }))),
+      ...(await llamar(contador, deadline, () =>
+        adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "active" })
+      )),
+      ...(await llamar(contador, deadline, () =>
+        adGroupsDeCampana(ctx, { campanas: [...porId.keys()], desde: tramo.desde, hasta: tramo.hasta, estado: "paused" })
+      )),
     ];
     const tipoPorGrupo = new Map<string, { tipo: string | null; externo: string | null; campana: string | null }>();
     for (const raw of grupos) {
@@ -263,37 +355,30 @@ async function sincronizarCuenta(
       });
     }
 
-    const dias = diasDelRango(tramo.desde, tramo.hasta);
+    const dias = diasARetomar(tramo.desde, tramo.hasta, reanudaInicial);
     for (const campana of porId.values()) {
       for (const dia of dias) {
-        vigilar(inicio);
-        const data = await llamar(contador, () => metricasAdGroupsDelDia(ctx, campana.campanaIdMl, dia));
+        vigilar(deadline);
+        reanuda = dia;
+        const data = await llamar(contador, deadline, () => metricasAdGroupsDelDia(ctx, campana.campanaIdMl, dia));
         for (const raw of resultsDe(data)) {
           if (!raw || typeof raw !== "object") continue;
           const rec = raw as Record<string, unknown>;
           const entidad = idNumerico(rec.ad_group_id);
           if (!entidad) continue;
-          metricas.push({
-            cuentaMlId,
-            nivel: "ad_group",
-            entidadIdMl: entidad,
-            fecha: typeof rec.date === "string" ? rec.date : dia,
-            metricas: metricasDesdeApi(rec),
-          });
+          const fecha = typeof rec.date === "string" ? rec.date : dia;
+          metricas.push(metricaDe(cuentaMlId, "ad_group", entidad, fecha, metricasDesdeApi(rec)));
         }
+        await volcar();
       }
     }
-    // Se persiste antes de los anuncios: si la corrida se corta, el
-    // reintento hace upsert y no pierde lo ya pedido.
-    await guardarMetricas(empresaId, metricas);
-    metricas.length = 0;
 
-    const anuncios: AnuncioGuardado[] = [];
     const items = new Set<string>();
     for (const [adGroupId, meta] of tipoPorGrupo) {
       for (const dia of dias) {
-        vigilar(inicio);
-        const filas = await llamar(contador, () => anunciosDeAdGroup(ctx, adGroupId, { desde: dia, hasta: dia }));
+        vigilar(deadline);
+        reanuda = dia;
+        const filas = await llamar(contador, deadline, () => anunciosDeAdGroup(ctx, adGroupId, { desde: dia, hasta: dia }));
         for (const raw of filas) {
           if (!raw || typeof raw !== "object") continue;
           const rec = raw as Record<string, unknown>;
@@ -314,42 +399,45 @@ async function sincronizarCuenta(
             logisticType: typeof rec.logistic_type === "string" ? rec.logistic_type : null,
             listingTypeId: typeof rec.listing_type_id === "string" ? rec.listing_type_id : null,
           });
-          metricas.push({
-            cuentaMlId,
-            nivel: "anuncio",
-            entidadIdMl: itemId,
-            fecha: dia,
-            metricas: metricasDesdeApi(rec),
-          });
+          metricas.push(metricaDe(cuentaMlId, "anuncio", itemId, dia, metricasDesdeApi(rec), adGroupId));
         }
+        await volcar();
       }
     }
-
-    await guardarMetricas(empresaId, metricas);
-    await guardarAnuncios(empresaId, anuncios);
+    reanuda = null;
 
     for (const itemId of items) {
-      vigilar(inicio);
+      vigilar(deadline);
       if (await costoYaConsultado(empresaId, cuentaMlId, itemId, hoy)) continue;
-      const costo = await llamar(contador, () =>
-        costosDeItem({ token, userId: cuenta.cuentaIdExterna, itemId, siteId: anunciante.siteId })
-      );
-      await guardarCostoItem(empresaId, {
-        cuentaMlId,
-        itemId,
-        fecha: hoy,
-        skuCodigo: costo.skuCodigo,
-        categoryId: costo.categoryId,
-        precioVentaVigente: costo.precioVentaVigente,
-        precioRegular: costo.precioRegular,
-        comisionMl: costo.comisionMl,
-        comisionDetalle: costo.comisionDetalle,
-        envioVendedorEstimado: costo.envioVendedorEstimado,
-        compradorPagaEnvio: costo.compradorPagaEnvio,
-        logisticType: costo.logisticType,
-        shippingMode: costo.shippingMode,
-        listingTypeId: costo.listingTypeId,
-      });
+      try {
+        const costo = await llamar(contador, deadline, () =>
+          costosDeItem({ token, userId: cuenta.cuentaIdExterna, itemId, siteId: anunciante.siteId })
+        );
+        await guardarCostoItem(empresaId, {
+          cuentaMlId,
+          itemId,
+          fecha: hoy,
+          skuCodigo: costo.skuCodigo,
+          categoryId: costo.categoryId,
+          precioVentaVigente: costo.precioVentaVigente,
+          precioRegular: costo.precioRegular,
+          comisionMl: costo.comisionMl,
+          comisionDetalle: costo.comisionDetalle,
+          envioVendedorEstimado: costo.envioVendedorEstimado,
+          compradorPagaEnvio: costo.compradorPagaEnvio,
+          logisticType: costo.logisticType,
+          shippingMode: costo.shippingMode,
+          listingTypeId: costo.listingTypeId,
+        });
+      } catch (error) {
+        const decision = decisionAnteErrorDeCosto(error);
+        if (decision === "cerrar-tramo") throw error;
+        if (decision === "seguir") {
+          if (!avisos.includes(AVISO_COSTO)) avisos.push(AVISO_COSTO);
+          continue;
+        }
+        throw error;
+      }
     }
 
     const estado = tramo.cierraBackfill ? "ok" : "parcial";
@@ -357,37 +445,76 @@ async function sincronizarCuenta(
       estado,
       llamadas: contador.n,
       error: avisos[0] ?? null,
+      cierraBackfill: estado === "ok" && tramo.cierraBackfill,
     });
     return estado === "ok" ? "Publicidad actualizada." : "Se guardó un tramo del historial. La próxima corrida sigue con los días anteriores.";
   } catch (error) {
     const aviso = textoErrorCorto(error);
     console.error(`[publicidad] cuenta ${cuentaMlId} no se pudo sincronizar:`, aviso);
-    await cerrarSincronizacion(empresaId, syncId, { estado: "error", llamadas: contador.n, error: aviso });
+    await volcar();
+    await cerrarSincronizacion(empresaId, syncId, {
+      estado: "error",
+      llamadas: contador.n,
+      error: aviso,
+      cierraBackfill: false,
+      reanudaDesde: error instanceof CorridaIncompletaError ? reanuda : null,
+    });
     if (error instanceof CorridaIncompletaError) return "La actualización quedó a medias y se retoma en la próxima corrida.";
     throw error;
   }
 }
 
-function debeSaltar(ultima: UltimaSync | null, yaOk: boolean, ahora: Date): boolean {
+function debeSaltar(ultima: UltimaSync | null, ahora: Date): boolean {
   if (!ultima) return false;
   const edad = ahora.getTime() - ultima.iniciadaTs.getTime();
   if (ultima.estado === "en_curso" && edad < MINUTOS_EN_CURSO_ABANDONADO * 60_000) return true;
-  if (yaOk && ultima.estado === "ok" && hoyBogota(ultima.iniciadaTs) === hoyBogota(ahora)) return true;
+  if (ultima.estado === "ok" && hoyBogota(ultima.iniciadaTs) === hoyBogota(ahora)) return true;
   return false;
 }
 
 export async function sincronizarPublicidadProgramada(ahora = new Date()): Promise<ResultadoLote> {
-  const cuentas = await dbTrabajadorPublicidad
-    .select({ id: cuentasMl.id, empresaId: cuentasMl.empresaId })
-    .from(cuentasMl)
-    .where(isNull(cuentasMl.desconectadaTs))
-    .orderBy(asc(cuentasMl.creadoTs));
+  const ultimas = dbTrabajadorPublicidad
+    .select({
+      cuentaMlId: publicidadSincronizaciones.cuentaMlId,
+      ultimaSyncTs: max(publicidadSincronizaciones.iniciadaTs).as("ultima_sync_ts"),
+    })
+    .from(publicidadSincronizaciones)
+    .groupBy(publicidadSincronizaciones.cuentaMlId)
+    .as("ultimas_sync");
 
-  const resultado: ResultadoLote = { revisadas: cuentas.length, procesadas: 0, saltadas: 0, fallidas: 0 };
-  const inicio = Date.now();
-  let hechas = 0;
-  for (const cuenta of cuentas) {
-    if (hechas >= LOTE_CUENTAS || Date.now() - inicio > PRESUPUESTO_MS) break;
+  const cuentas = await dbTrabajadorPublicidad
+    .select({
+      id: cuentasMl.id,
+      empresaId: cuentasMl.empresaId,
+      creadoTs: cuentasMl.creadoTs,
+      ultimaSyncTs: ultimas.ultimaSyncTs,
+    })
+    .from(cuentasMl)
+    .leftJoin(ultimas, eq(ultimas.cuentaMlId, cuentasMl.id))
+    .where(isNull(cuentasMl.desconectadaTs));
+
+  const ordenadas = ordenarCuentasParaSync(
+    cuentas.map((cuenta) => ({
+      ...cuenta,
+      creadoTs: aMs(cuenta.creadoTs) ?? 0,
+      ultimaSyncTs: aMs(cuenta.ultimaSyncTs),
+    }))
+  );
+
+  const resultado: ResultadoLote = {
+    revisadas: ordenadas.length,
+    procesadas: 0,
+    saltadas: 0,
+    fallidas: 0,
+    pendientes: 0,
+  };
+  const deadline = Date.now() + PRESUPUESTO_CORRIDA_MS;
+  for (let i = 0; i < ordenadas.length; i++) {
+    if (!quedaMargen(deadline)) {
+      resultado.pendientes = ordenadas.length - i;
+      break;
+    }
+    const cuenta = ordenadas[i];
     const historial = await historialSync(cuenta.empresaId, cuenta.id);
     const ultima: UltimaSync | null = historial.ultima
       ? {
@@ -397,15 +524,18 @@ export async function sincronizarPublicidadProgramada(ahora = new Date()): Promi
           iniciadaTs: historial.ultima.iniciadaTs,
         }
       : null;
-    if (debeSaltar(ultima, historial.yaTerminoBackfill, ahora)) {
+    if (debeSaltar(ultima, ahora)) {
       resultado.saltadas += 1;
       continue;
     }
-    hechas += 1;
     try {
-      await sincronizarCuenta(cuenta.empresaId, cuenta.id, "programada", null, ahora);
+      await sincronizarCuenta(cuenta.empresaId, cuenta.id, "programada", null, ahora, deadline);
       resultado.procesadas += 1;
     } catch (error) {
+      if (error instanceof SyncEnCursoError || error instanceof SyncMuyRecienteError) {
+        resultado.saltadas += 1;
+        continue;
+      }
       resultado.fallidas += 1;
       console.error(`[publicidad] lote, cuenta ${cuenta.id}:`, textoErrorCorto(error));
     }
@@ -440,9 +570,10 @@ export async function refrescarPublicidadManual(
   if (!decision.permitir) return { ok: false, aviso: decision.aviso };
 
   try {
-    const aviso = await sincronizarCuenta(empresaId, cuentaMlId, "manual", usuarioId, ahora);
+    const aviso = await sincronizarCuenta(empresaId, cuentaMlId, "manual", usuarioId, ahora, Date.now() + PRESUPUESTO_CORRIDA_MS);
     return { ok: true, aviso };
   } catch (error) {
+    if (error instanceof SyncEnCursoError || error instanceof SyncMuyRecienteError) return { ok: false, aviso: error.message };
     return { ok: false, aviso: textoErrorCorto(error) };
   }
 }

@@ -15,6 +15,10 @@ name: Sincronizar Product Ads (staging)
 # de la API, no un fallo del cron. workflow_dispatch queda para retomar
 # el backfill de 62 días: cada corrida guarda un tramo y la siguiente
 # sigue hacia atrás.
+#
+# La app corta a los 240 s para cerrar la fila antes de este curl
+# (--max-time 300). Si pendientes no es 0, se encadenan hasta 4 tandas.
+# El orden es la última sincronización más vieja.
 on:
   schedule:
     - cron: "0 14 * * *"
@@ -24,11 +28,22 @@ jobs:
   sincronizar:
     runs-on: ubuntu-latest
     steps:
-      - name: Sincronizar un lote de cuentas en staging
+      - name: Sincronizar cuentas en staging, en tandas
         run: |
-          curl -sf -X POST "https://web-staging-d979.up.railway.app/api/trabajos/publicidad" \
-            -H "x-publicidad-trabajador-secret: ${{ secrets.PUBLICIDAD_TRABAJADOR_SECRET_STAGING }}" \
-            --max-time 300
+          pendientes=1
+          tanda=0
+          while [ "$pendientes" != "0" ] && [ "$tanda" -lt 4 ]; do
+            tanda=$((tanda + 1))
+            cuerpo=$(curl -sf -X POST "https://web-staging-d979.up.railway.app/api/trabajos/publicidad" \
+              -H "x-publicidad-trabajador-secret: ${{ secrets.PUBLICIDAD_TRABAJADOR_SECRET_STAGING }}" \
+              --max-time 300)
+            echo "$cuerpo"
+            pendientes=$(printf '%s' "$cuerpo" | sed -n 's/.*"pendientes":\([0-9][0-9]*\).*/\1/p')
+            if [ -z "$pendientes" ]; then
+              echo "La respuesta no trajo pendientes."
+              exit 1
+            fi
+          done
 
 # Producción, cuando el checklist de la PR esté cerrado:
 # curl -sf -X POST "https://<dominio-produccion>/api/trabajos/publicidad" \

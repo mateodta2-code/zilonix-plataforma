@@ -60,12 +60,18 @@ describe("POST /api/trabajos/publicidad (issue #254)", () => {
   it("secreto correcto y variables presentes: corre la sincronización", async () => {
     process.env.PUBLICIDAD_TRABAJADOR_SECRET = "secreto-real";
     process.env.DATABASE_URL_PUBLICIDAD = "postgres://lo-que-sea";
-    vi.mocked(sincronizarPublicidadProgramada).mockResolvedValue({ revisadas: 2, procesadas: 1, saltadas: 1, fallidas: 0 });
+    vi.mocked(sincronizarPublicidadProgramada).mockResolvedValue({
+      revisadas: 2,
+      procesadas: 1,
+      saltadas: 1,
+      fallidas: 0,
+      pendientes: 3,
+    });
 
     const res = await POST(peticion({ "x-publicidad-trabajador-secret": "secreto-real" }));
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, revisadas: 2, procesadas: 1, saltadas: 1, fallidas: 0 });
+    expect(await res.json()).toEqual({ ok: true, revisadas: 2, procesadas: 1, saltadas: 1, fallidas: 0, pendientes: 3 });
   });
 
   it("un fallo al correr: 503 genérico, sin el detalle crudo", async () => {
