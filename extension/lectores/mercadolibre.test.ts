@@ -9,8 +9,11 @@ import {
   clasificarLinkListadoMl,
   construirLinkSeguirProducto,
   construirLinkSeguirTienda,
+  detectarFullEnHtmlFicha,
+  detectarFullEnHtmlTarjeta,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
+  filtroFullActivoEnUrl,
   leerDatosIncrustados,
   leerResenasDesdeScript,
   leerSellerIdDeTienda,
@@ -428,5 +431,148 @@ describe("leerResenasDesdeScript — issue #225 (Top 8 reseñas)", () => {
       recientes30: 0,
       recientes90: 0,
     });
+  });
+});
+
+describe("detectarFullEnHtmlTarjeta — issue #248 (vuelta 4), simplificado al mismo criterio de Zilonix OS", () => {
+  // Issue #248 (vuelta 4) — Mateo pidió simplificar de vuelta al mismo
+  // criterio simple que Zilonix OS ya usa en producción:
+  //   const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+  // Las capas de texto/atributos de #241/#242/#248 (vueltas 1-3) se
+  // sacaron — el HTML real citado en la vuelta 3 confirmó que este
+  // selector simple, solo, ya alcanza; el bug que quedaba era 100%
+  // timing (ver content.js), no el detector. `detectarFullEnHtmlTarjeta`
+  // queda como la versión de texto del MISMO selector único, solo
+  // para poder probarla sin DOM (este proyecto no tiene jsdom).
+  //
+  // Issue #248, VUELTA 3 — HTML real citado por Pablo/Sharel (DOM
+  // vivo, con el filtro Full apagado — el caso puntual que seguía en
+  // 0/48 antes de confirmarse que era timing). Citado tal cual, sin
+  // recortar, salvo envolverlo en un <li> real con su título.
+  const TARJETA_REAL_SIN_FILTRO_VUELTA3 = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping-v2"><div class="poly-shipping-v2__item"><span><span class="polylabel-pill polylabel-fw-semibold">Llega gratis mañana</span><svg aria-label="Enviado por FULL" role="img" class="polylabel-icon" width="44" height="14" viewBox="0 0 41 13"><use href="#poly_full"></use></svg></span></div></div><h3 class="poly-component__title-wrapper">Tetero Anticólicos 260ml</h3></div></li>`;
+
+  it("issue #248, HTML REAL confirmado (vuelta 3, poly-component__shipping-v2) -> true", () => {
+    expect(detectarFullEnHtmlTarjeta(TARJETA_REAL_SIN_FILTRO_VUELTA3)).toBe(true);
+  });
+
+  it('issue #242, el selector exacto de Zilonix OS (aria-label="Enviado por FULL") -> true', () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-component__shipped-from"><svg aria-label="Enviado por FULL"></svg></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
+  });
+
+  // Issue #240, revisión final — Zilonix OS confirma Full con DOS
+  // marcadores reales: el aria-label exacto (arriba) Y la clase del
+  // ícono del sprite (`icon-poly_full`) — algunas tarjetas (sobre todo
+  // Ad) traen solo la clase, sin el aria-label exacto.
+  it('tarjeta normal (orgánica) con el ícono por CLASE ("icon-poly_full"), sin aria-label exacto -> true', () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><span class="icon-poly_full"></span><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
+  });
+
+  // Issue #248 (vuelta 6)/#240 — evidencia real: en un listado sin
+  // filtro, los anuncios (Ad) son justamente los que más muestran el
+  // badge Full. El detector en sí (esta función) nunca distingue
+  // Ad de orgánico — esa separación vive en `leerListado`
+  // (`estadisticasFull` cuenta ambos, `productos` solo orgánicos) —
+  // acá solo se confirma que el badge se reconoce igual sin importar
+  // si la tarjeta es un anuncio.
+  it("tarjeta marcada como anuncio (Ad) con el badge Full real -> true (el detector no distingue Ad de orgánico, eso vive en leerListado)", () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><a class="poly-component__ads-promotions" href="#"></a><div class="poly-component__shipped-from"><svg aria-label="Enviado por FULL"></svg></div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(true);
+  });
+
+  it("una tarjeta con envío gratis pero sin Full -> false (nunca confunde los dos)", () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><div class="poly-component__shipping">Envío gratis</div><h3 class="poly-component__title-wrapper">Gorra Deportiva Ajustable</h3></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
+  });
+
+  it('nunca un falso positivo: un título real con "Full" (ej. "Full HD") nunca cuenta — el selector único exige el svg con ese aria-label exacto, nunca texto suelto', () => {
+    const tarjeta = `<li class="ui-search-layout__item"><h3 class="poly-component__title-wrapper">Televisor Full HD 42 Pulgadas</h3></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
+  });
+
+  it('advertencia explícita de Mateo: "poly-bookmark__icon-full" (ícono de favorito, nunca el programa Full) nunca cuenta como Full', () => {
+    const tarjeta = `<li class="ui-search-layout__item"><div class="poly-card"><button class="poly-bookmark__icon-full" aria-label="Favorito"></button><div class="poly-component__delivery">Llega gratis mañana</div><h3 class="poly-component__title-wrapper">Biberón Anticólicos</h3></div></li>`;
+    expect(detectarFullEnHtmlTarjeta(tarjeta)).toBe(false);
+  });
+
+  it("entradas vacías o inválidas -> false, nunca revienta", () => {
+    expect(detectarFullEnHtmlTarjeta("")).toBe(false);
+    expect(detectarFullEnHtmlTarjeta(null as unknown as string)).toBe(false);
+    expect(detectarFullEnHtmlTarjeta(undefined as unknown as string)).toBe(false);
+  });
+});
+
+describe("filtroFullActivoEnUrl — issue #248 (vuelta 2), señal fuerte del filtro Full de la URL", () => {
+  // Issue #248, follow-up — el detector de DOM en capas seguía en
+  // 0/48 aunque la persona ya tenía el filtro "Full" de Mercado Libre
+  // puesto en la URL. Por DEFINICIÓN del filtro, todo lo que aparece
+  // ahí ya es Full — no hace falta ningún selector de DOM para
+  // confirmarlo. Formas reales conocidas: "_Envio_FULL" (#247) y
+  // "shipping_highlighted_fulfillment" (follow-up de #248).
+  it('URL real con el filtro "_Envio_FULL" (confirmada en #247) -> true', () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/tetero_Envio_FULL")).toBe(true);
+  });
+
+  it('URL real con "shipping_highlighted_fulfillment" (confirmada en el follow-up de #248) -> true', () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/tetero?shipping_highlighted_fulfillment=true")).toBe(true);
+  });
+
+  it("insensible a mayúsculas/minúsculas y a guion vs guion bajo", () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/tetero_envio-full")).toBe(true);
+  });
+
+  it("URL de un listado normal, sin el filtro Full puesto -> false", () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/tetero")).toBe(false);
+  });
+
+  it('URL con "full" suelto en otro contexto (nunca el filtro real) -> false', () => {
+    expect(filtroFullActivoEnUrl("https://listado.mercadolibre.com.co/pantalla-full-hd")).toBe(false);
+  });
+
+  it("entradas vacías o inválidas -> false, nunca revienta", () => {
+    expect(filtroFullActivoEnUrl("")).toBe(false);
+    expect(filtroFullActivoEnUrl(null as unknown as string)).toBe(false);
+    expect(filtroFullActivoEnUrl(undefined as unknown as string)).toBe(false);
+  });
+});
+
+describe("detectarFullEnHtmlFicha — issue #245, ficha de producto (leerProducto), calco exacto del selector de Zilonix OS", () => {
+  // Issue #245 — Mateo confirmó leyendo Zilonix OS hoy
+  // (chrome-extension-busqueda/scraper-listado.js) que ese repo NO
+  // tiene ningún detector de Full en la ficha de producto, solo en el
+  // listado, con este selector exacto confirmado en producción:
+  //   const esFull = Boolean(li.querySelector('svg[aria-label="Enviado por FULL"]'));
+  // El intento de #243 (detectarFullEnHtmlEnvio, acotado a un bloque
+  // de envío resuelto con selectores nunca confirmados en producción)
+  // seguía gateando esFull a `false` cuando ese bloque no se resolvía
+  // — exactamente el bug real que reportó Sharel con "Zelotes F35" en
+  // 0.3.17. Esta función copia el MISMO selector de OS tal cual: match
+  // EXACTO del aria-label (igual que el selector CSS de atributo, que
+  // es exacto, no substring) — nunca un "full" suelto de texto plano.
+  it('badge real con el ícono svg confirmado por OS (aria-label="Enviado por FULL") -> true', () => {
+    const htmlFicha = `<div class="ui-pdp-container__row--shipping-summary" id="shipping_summary"><svg aria-label="Enviado por FULL" width="41" height="13"><use href="#poly_full"></use></svg><p class="ui-pdp-color--GREEN">Almacenado y enviado por FULL</p></div>`;
+    expect(detectarFullEnHtmlFicha(htmlFicha)).toBe(true);
+  });
+
+  it("sin el ícono svg (ficha con envío gratis normal, sin Full) -> false", () => {
+    const htmlFicha = `<div class="ui-pdp-container__row--shipping-summary"><p>Llega gratis hoy sábado por ser tu primera compra</p></div>`;
+    expect(detectarFullEnHtmlFicha(htmlFicha)).toBe(false);
+  });
+
+  it('solo el texto "Almacenado y enviado por FULL", SIN el ícono svg -> false: a propósito, OS nunca confirmó un detector de Full por texto en la ficha, y no se inventa uno nuevo sin evidencia real', () => {
+    const htmlFicha = `<div id="shipping_summary"><p class="ui-pdp-color--GREEN">Almacenado y enviado por FULL</p></div>`;
+    expect(detectarFullEnHtmlFicha(htmlFicha)).toBe(false);
+  });
+
+  it('"Full HD" en el título del producto, sin el ícono svg, nunca cuenta', () => {
+    const htmlFicha = `<html><body><h1 class="ui-pdp-title">Televisor Full HD 42 Pulgadas</h1><div id="shipping_summary"><p>Llega gratis hoy</p></div></body></html>`;
+    expect(detectarFullEnHtmlFicha(htmlFicha)).toBe(false);
+  });
+
+  it("entradas vacías o inválidas -> false, nunca revienta", () => {
+    expect(detectarFullEnHtmlFicha("")).toBe(false);
+    expect(detectarFullEnHtmlFicha(null as unknown as string)).toBe(false);
+    expect(detectarFullEnHtmlFicha(undefined as unknown as string)).toBe(false);
   });
 });

@@ -86,6 +86,17 @@
   }
 
   // --- Agregados del listado (cuántos, min/prom/máx, suma vendidos, top 10) ---
+  // Issue #248 (vuelta 6) — el chip "Full detectados" YA NO sale de
+  // acá (ver `renderizarListado`): `productos` nunca incluye Ads
+  // (nunca mezcla pago con orgánico, regla de siempre), pero decisión
+  // de producto de Sharel confirmó con evidencia real que los Ad son
+  // justamente los que más muestran el badge Full (listado real de
+  // teteros: ~60 tarjetas, ~12 Ad —la mayoría Full— + ~48 orgánicos
+  // con ~0-1 Full) — contar Full solo sobre `productos` daba un 0/48
+  // técnicamente correcto pero engañoso, con badges Full bien visibles
+  // en pantalla. El chip ahora usa `estadisticasFull` (de
+  // `leerListado`, `lectores/mercadolibre.js`), que sí cuenta sobre
+  // TODAS las tarjetas visibles.
   function calcularResumenListado(productos) {
     const precios = productos.map((p) => p.precio).filter((p) => typeof p === "number" && Number.isFinite(p));
     const vendidosConDato = productos.filter((p) => typeof p.vendidos === "number");
@@ -225,7 +236,17 @@
     }
   }
 
-  function renderizarListado(panel, productos) {
+  // Issue #248 (vuelta 6) — `estadisticasFull` es OPCIONAL a propósito
+  // (viene de `leerListado`, `lectores/mercadolibre.js`, solo en
+  // Mercado Libre hoy): decisión de producto de Sharel, el chip
+  // "Full detectados" tiene que contar Full sobre TODAS las tarjetas
+  // visibles — orgánicos Y Ads — porque en la práctica los Ad son
+  // justamente los que más muestran el badge Full real. `productos`
+  // (el parámetro de arriba) SIGUE sin Ads, sin cambios — nunca se
+  // usa para este chip, solo para "Productos visibles"/precios/top10,
+  // que siguen siendo solo orgánicos a propósito (nunca mezclar pago
+  // con orgánico en lo que se analiza/exporta).
+  function renderizarListado(panel, productos, estadisticasFull) {
     const cuerpo = renderizarEsqueleto(panel, "Zilonix · Resumen de búsqueda", lector.sitio);
     if (!productos.length) {
       cuerpo.innerHTML = '<p class="zx-vacio">No se reconoció ningún producto en esta página todavía.</p>';
@@ -238,6 +259,13 @@
     html += filaHtml("Precio promedio", formatoPrecio(resumen.precioPromedio, null), resumen.precioPromedio == null);
     html += filaHtml("Precio máximo", formatoPrecio(resumen.precioMaximo, null), resumen.precioMaximo == null);
     html += filaHtml("Suma de vendidos visibles", textoCampo(resumen.sumaVendidos), resumen.sumaVendidos == null);
+    // Issue #247/#248 — solo se muestra si el sitio de verdad confirma
+    // Full (hoy, solo Mercado Libre expone `estadisticasFull`); nunca
+    // "0/Y" en un sitio que ni lo mide, y nunca "0/0" si el listado no
+    // tiene ninguna tarjeta todavía.
+    if (estadisticasFull && estadisticasFull.totalTarjetas > 0) {
+      html += filaHtml("Full detectados", `${estadisticasFull.conFull}/${estadisticasFull.totalTarjetas}`, false);
+    }
 
     if (resumen.top10.length) {
       html += `<p class="zx-titulo-producto" style="margin-top:10px">Top ${resumen.top10.length} por vendidos</p><ul class="zx-top10">`;
@@ -454,6 +482,33 @@
   // espera si hace falta (ver manejarEscaneoAutomatico, abajo: si
   // esto termina sin ver nada, NUNCA se manda un resultado vacío por
   // cuenta propia, se deja que el timeout externo decida).
+  //
+  // Issue #247/#248 (vueltas 1 a 3) — habían agregado una SEGUNDA fase
+  // de espera acá, específica para que Mercado Libre hidrate el badge
+  // Full dentro de cada tarjeta (más allá de la cantidad ya estable),
+  // subiendo varias veces (1.8s -> 6.5s -> 12s) buscando el bug real
+  // del 0/48. Issue #248 (vuelta 4) — Mateo confirmó con HTML real que
+  // el detector de Full (`detectarFullEnTarjeta`, `lectores/mercadolibre.js`)
+  // ya reconoce el badge real sin ninguna capa extra — Zilonix OS
+  // nunca tuvo esta segunda fase, solo `esperarTarjetas()` (cantidad
+  // estable) + el selector directo. Se saca esa fase entera y se
+  // vuelve al mismo criterio simple de OS: esperar solo la cantidad
+  // de tarjetas estable, nada específico de Full.
+  //
+  // Issue #248 (vuelta 5) — con eso solo, el smoke de Pablo (listado
+  // "tetero" sin filtro) seguía en 0/48 con badges Full visibles.
+  // Causa real: esta función medía "estable" con
+  // `lector.leerListado(document).productos.length` — la cantidad YA
+  // FILTRADA (sin anuncios, sin tarjetas inválidas) — que puede quedar
+  // quieta ANTES de que Mercado Libre termine de hidratar el badge
+  // Full DENTRO de cada tarjeta, aunque la cantidad de tarjetas en sí
+  // siga cambiando. `esperarTarjetas()` de Zilonix OS mide la cantidad
+  // CRUDA de `li` (`document.querySelectorAll('li.ui-search-layout__item').length`)
+  // — nunca tiene este problema. Se usa esa misma cuenta cruda cuando
+  // el lector activo la expone (`lector.contarTarjetasListado`, hoy
+  // solo Mercado Libre, ver `lectores/mercadolibre.js`) — si no la
+  // expone (las otras 5 plataformas, sin este bug reportado), se cae
+  // a `productos.length`, el criterio genérico de siempre.
   function esperarListadoEstable(maxEsperaMs, esperaEstabilidadMs, intervaloMs) {
     maxEsperaMs = typeof maxEsperaMs === "number" ? maxEsperaMs : 14000;
     esperaEstabilidadMs = typeof esperaEstabilidadMs === "number" ? esperaEstabilidadMs : 1000;
@@ -471,11 +526,22 @@
         }
         if (resultado && resultado.captcha) {
           clearInterval(intervalo);
-          resolve({ productos: [], captcha: true });
+          resolve({ productos: [], captcha: true, estadisticasFull: null });
           return;
         }
         const productos = (resultado && resultado.productos) || [];
-        const cantidad = productos.length;
+        // Issue #248 (vuelta 6) — se lleva junto con `productos` hasta
+        // el resolve final (ver `lector.leerListado`,
+        // `lectores/mercadolibre.js`) para que quien renderice tenga
+        // las estadísticas de Full de la MISMA lectura ya estabilizada
+        // — nunca undefined solo porque este helper no las reenviaba.
+        const estadisticasFull = (resultado && resultado.estadisticasFull) || null;
+        let cantidad;
+        try {
+          cantidad = typeof lector.contarTarjetasListado === "function" ? lector.contarTarjetasListado(document) : productos.length;
+        } catch {
+          cantidad = productos.length;
+        }
         const ahora = Date.now();
         if (cantidad !== ultimaCantidad) {
           ultimaCantidad = cantidad;
@@ -485,10 +551,43 @@
         const seAgotoElTiempo = ahora - inicio > maxEsperaMs;
         if (estable || seAgotoElTiempo) {
           clearInterval(intervalo);
-          resolve({ productos, captcha: false });
+          resolve({ productos, captcha: false, estadisticasFull });
         }
       }, intervaloMs);
     });
+  }
+
+  // Issue #248 (vuelta 5) — Pablo confirmó que el panel FLOTANTE de un
+  // listado (el que se ve al navegar normal, sin "Analizar"
+  // automático) llamaba `lector.leerListado(document)` EN CALIENTE,
+  // directo desde `reescanear()`, sin pasar nunca por
+  // `esperarListadoEstable` — esa espera solo corría del lado del
+  // escaneo automático (`manejarEscaneoAutomatico`, abajo). El chip
+  // "Full detectados" de ese panel podía mostrar 0/Y con badges reales
+  // visibles en la página por la misma razón de siempre: una lectura
+  // tomada antes de que el sitio termine de hidratar. Se agrega el
+  // mismo guard de "nunca dos esperas en paralelo" que ya usa
+  // `manejarEscaneoAutomatico` (ver `esperandoEscaneoAutomatico`,
+  // abajo) — si el MutationObserver dispara `reescanear()` de nuevo
+  // mientras esta espera sigue en curso, ese reescaneo se ignora acá
+  // (no hace falta: cuando la espera en curso resuelva, pinta con lo
+  // que haya en ese momento, que ya va a incluir cualquier cambio
+  // reciente del DOM).
+  let esperandoListadoFlotante = false;
+  async function manejarListadoFlotante(panel) {
+    if (esperandoListadoFlotante) return;
+    esperandoListadoFlotante = true;
+    try {
+      const resultado = await esperarListadoEstable();
+      // Nunca se pinta un captcha como si fuera un listado real — el
+      // aviso de captcha para el escaneo automático ya lo maneja
+      // manejarEscaneoAutomatico por su cuenta; acá, sin nada confiable
+      // que mostrar, se deja el panel como esté.
+      if (resultado.captcha) return;
+      renderizarListado(panel, resultado.productos, resultado.estadisticasFull);
+    } finally {
+      esperandoListadoFlotante = false;
+    }
   }
   // Evita arrancar dos esperas en paralelo si el MutationObserver
   // dispara varios reescaneos mientras la primera espera todavía no
@@ -680,9 +779,13 @@
           if (resena && resena.resenasTotales != null) enviarResenaAZilonix(datos.itemId, resena);
         }
       } else if (tipo === "listado") {
-        const resultadoListado = lector.leerListado(document);
-        const productos = resultadoListado.productos;
-        renderizarListado(panel, productos);
+        // Issue #248 (vuelta 5) — ya no se pinta con una lectura en
+        // caliente: `manejarListadoFlotante` espera a que el listado
+        // se estabilice (mismo criterio que el escaneo automático,
+        // abajo) antes de pintar el panel — ver el comentario completo
+        // junto a `esperarListadoEstable`/`manejarListadoFlotante`,
+        // arriba.
+        void manejarListadoFlotante(panel);
         // Issue #231 — ya no se decide acá mismo con esta UNA lectura
         // sincrónica (ver manejarEscaneoAutomatico/esperarListadoEstable
         // arriba: el bug real era mandar 0 candidatos antes de que el
