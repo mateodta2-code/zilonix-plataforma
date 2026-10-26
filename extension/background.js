@@ -56,6 +56,10 @@ const TOPE_COLA_SEGUIMIENTO = 200;
 const TOPE_SEGUIMIENTOS_ABRIR = 10;
 const PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO =
   /^https:\/\/([a-z0-9-]+\.)*mercado(libre\.(com\.co|com\.ar|com\.mx|cl|com\.uy|com\.pe)|livre\.com\.br)\//i;
+// Corrección de Pablo (sobre 8474c60) — 30s entre lotes de "Actualizar
+// todo": un clic repetido (o un reenvío del mismo mensaje) nunca
+// vuelve a abrir pestañas antes de este tiempo.
+const COOLDOWN_ABRIR_SEGUIMIENTOS_MS = 30_000;
 
 function encolarDatoPaginaSeguimiento(payload) {
   chrome.storage.session.get({ colaSeguimiento: [] }, (datos) => {
@@ -88,6 +92,7 @@ function vaciarColaSeguimiento() {
   chrome.storage.session.get({ colaSeguimiento: [] }, (datos) => {
     const cola = Array.isArray(datos.colaSeguimiento) ? datos.colaSeguimiento : [];
     if (!cola.length) return;
+    const tamanioEnviado = cola.length; // cuántos elementos de ESTE intento — nunca más de lo que de verdad se mandó
     chrome.tabs.query({}, (pestanas) => {
       if (pestanas.length === 0) return; // nada que intentar — la cola queda intacta para el próximo "pedir-cola-seguimiento"
       let entregada = false;
@@ -95,7 +100,20 @@ function vaciarColaSeguimiento() {
       const terminar = () => {
         pendientes -= 1;
         if (pendientes > 0) return;
-        if (entregada) chrome.storage.session.set({ colaSeguimiento: [] });
+        if (!entregada) return;
+        // Corrección de Pablo (sobre 8474c60) — nunca
+        // chrome.storage.session.set({colaSeguimiento: []}): mientras
+        // se esperaba la respuesta de las pestañas (async), pudo haber
+        // llegado una lectura NUEVA (encolarDatoPaginaSeguimiento la
+        // agrega al final) — vaciar TODO la perdería. Se vuelve a leer
+        // la cola actual y se quitan solo los primeros `tamanioEnviado`
+        // elementos (los que de verdad se mandaron en este intento,
+        // siempre al principio porque solo se agrega al final) — lo
+        // que se encoló después queda intacto para el próximo vaciado.
+        chrome.storage.session.get({ colaSeguimiento: [] }, (datosActuales) => {
+          const colaActual = Array.isArray(datosActuales.colaSeguimiento) ? datosActuales.colaSeguimiento : [];
+          chrome.storage.session.set({ colaSeguimiento: colaActual.slice(tamanioEnviado) });
+        });
       };
       for (const pestana of pestanas) {
         if (pestana.id == null) {
@@ -653,15 +671,42 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
   // sin importar qué mande la página — background.js es el único
   // lugar con el permiso real de abrir pestañas.
   if (mensaje.tipo === "zilonix:abrir-seguimientos") {
-    const links = Array.isArray(mensaje.payload && mensaje.payload.links) ? mensaje.payload.links : [];
-    const validos = links.filter((link) => typeof link === "string" && PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO.test(link)).slice(0, TOPE_SEGUIMIENTOS_ABRIR);
-    for (const url of validos) {
-      // active: false — las pestañas se abren en segundo plano, nunca
-      // le quitan el foco a la persona del clic que las disparó; la
-      // extensión las lee igual al cargar (content.js/reescanear()),
-      // estén o no en foco.
-      chrome.tabs.create({ url, active: false });
-    }
+    // Corrección de Pablo (sobre 8474c60) — solo se acepta si el
+    // remitente de verdad ES la pestaña de Seguimiento (nunca basta
+    // con que el mensaje DIGA "abrir-seguimientos": cualquier otro
+    // content script de esta misma extensión podría, en teoría,
+    // mandar el mismo tipo de mensaje). `remitente.tab.url` lo pone
+    // Chrome mismo, nunca lo manda la página — no se puede falsificar
+    // desde el content script que lo originó.
+    const urlRemitente = remitente && remitente.tab && typeof remitente.tab.url === "string" ? remitente.tab.url : "";
+    const esPestanaDeSeguimiento =
+      urlRemitente.startsWith("https://web-production-af270.up.railway.app/panel/investigacion/seguimiento") ||
+      urlRemitente.startsWith("https://web-staging-d979.up.railway.app/panel/investigacion/seguimiento");
+    if (!esPestanaDeSeguimiento) return;
+
+    // Corrección de Pablo — cooldown real de 30s entre lotes: evita
+    // que un clic repetido (o cualquier reenvío del mismo mensaje)
+    // abra pestañas sin parar. chrome.storage.session (no una
+    // variable en memoria) para que el cooldown sobreviva si el
+    // Service Worker se recicla por inactividad entre un lote y el
+    // siguiente (limitación real de Manifest V3, ya documentada más
+    // arriba en este archivo).
+    chrome.storage.session.get({ ultimoAbrirSeguimientosMs: 0 }, (datos) => {
+      const ahoraMs = Date.now();
+      const ultimoMs = typeof datos.ultimoAbrirSeguimientosMs === "number" ? datos.ultimoAbrirSeguimientosMs : 0;
+      if (ahoraMs - ultimoMs < COOLDOWN_ABRIR_SEGUIMIENTOS_MS) return;
+      chrome.storage.session.set({ ultimoAbrirSeguimientosMs: ahoraMs });
+
+      const links = Array.isArray(mensaje.payload && mensaje.payload.links) ? mensaje.payload.links : [];
+      const validos = links.filter((link) => typeof link === "string" && PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO.test(link)).slice(0, TOPE_SEGUIMIENTOS_ABRIR);
+      for (const url of validos) {
+        // active: false — las pestañas se abren en segundo plano, nunca
+        // le quitan el foco a la persona del clic que las disparó; la
+        // extensión las lee igual al cargar (content.js/reescanear()),
+        // estén o no en foco.
+        chrome.tabs.create({ url, active: false });
+      }
+    });
     return;
   }
 

@@ -866,6 +866,72 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     expect(foto.vendidos).toBe(15); // este sí se actualizó, vino con dato real
   });
 
+  // Corrección de Pablo (sobre 8474c60) — bug real: `inventario_aproximado`
+  // es NOT NULL (default false), así que un `coalesce(excluded.x, old.x)`
+  // simple nunca cae al valor viejo (excluded.x nunca es un SQL NULL
+  // real). Sin el CASE, esta misma lectura hubiera dejado
+  // {50, aproximado:false} — inventario preservado pero con la
+  // etiqueta de aproximado equivocada.
+  it("hoy hay {50, aproximado:true}; llega una lectura {inventario:null, aproximado:false} -> queda {50, aproximado:true}, nunca {50, false}", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 50,
+      inventarioAproximado: true,
+      vendidos: null,
+      vendidosExacto: false,
+      leidoEn: leidoAhora(),
+    });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: null,
+      inventarioAproximado: false,
+      vendidos: null,
+      vendidosExacto: false,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.inventarioDisponible).toBe(50);
+    expect(foto.inventarioAproximado).toBe(true); // nunca false — el inventario que sigue vigente SÍ era aproximado
+  });
+
+  // Corrección de Pablo — en el INSERT (primera foto del día), nunca
+  // manda `aproximado: true` si el inventario vino null: no tiene
+  // sentido marcar como aproximado un inventario que ni siquiera llegó.
+  it("primera lectura del día con inventario:null e inventarioAproximado:true (dato inconsistente de la extensión): el INSERT nunca guarda aproximado:true sin número", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: null,
+      inventarioAproximado: true, // inconsistente — nunca debería pasar, pero nunca se confía ciegamente
+      vendidos: null,
+      vendidosExacto: false,
+      leidoEn: leidoAhora(),
+    });
+
+    const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(foto.inventarioDisponible).toBeNull();
+    expect(foto.inventarioAproximado).toBe(false);
+  });
+
   it("producto, dos lecturas de página el mismo día: la MÁS RECIENTE reemplaza a la anterior (nunca 'la primera gana')", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario();
     await conectarCuentaMl(empresaId);

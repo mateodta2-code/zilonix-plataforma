@@ -216,7 +216,14 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
         }
       : {
           inventarioDisponible: dato.inventario,
-          inventarioAproximado: dato.inventarioAproximado,
+          // Corrección de Pablo (sobre 8474c60) — si esta lectura no
+          // trae inventario, nunca manda `aproximado: true`: no tiene
+          // sentido marcar como "aproximado" un inventario que ni
+          // siquiera vino. El valor real que importa para una fila YA
+          // existente lo decide el CASE de setDelConflicto, no esto
+          // (esto solo importa para el INSERT de la primera foto del
+          // día, donde no hay nada que preservar todavía).
+          inventarioAproximado: dato.inventario != null ? dato.inventarioAproximado : false,
           // Issue #251 (corrección de Pablo, punto 5) — el "+N"
           // aproximado NUNCA llega a esta columna (la misma que
           // alertasDeVendidos, lib/seguimiento/alertas.ts, compara
@@ -242,7 +249,17 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
       ? { publicaciones: sql`coalesce(excluded.publicaciones, seguimiento_fotos.publicaciones)` }
       : {
           inventarioDisponible: sql`coalesce(excluded.inventario_disponible, seguimiento_fotos.inventario_disponible)`,
-          inventarioAproximado: sql`coalesce(excluded.inventario_aproximado, seguimiento_fotos.inventario_aproximado)`,
+          // Corrección de Pablo (sobre 8474c60) — bug real: `inventario_aproximado`
+          // es NOT NULL (default false), así que `coalesce(excluded.x, old.x)`
+          // SIEMPRE devuelve `excluded.x` (nunca es un SQL NULL real) —
+          // el coalesce nunca caía al valor viejo, aunque
+          // `inventario_disponible` SÍ se hubiera preservado por el
+          // coalesce de arriba. El CASE decide por la señal real: si
+          // esta lectura no trajo inventario (`excluded.inventario_disponible`
+          // es null), se queda con el `aproximado` VIEJO — el que
+          // corresponde al inventario que de verdad sigue vigente —
+          // nunca con el de una lectura que ni siquiera trajo un número.
+          inventarioAproximado: sql`case when excluded.inventario_disponible is null then seguimiento_fotos.inventario_aproximado else excluded.inventario_aproximado end`,
           vendidos: sql`coalesce(excluded.vendidos, seguimiento_fotos.vendidos)`,
         };
 

@@ -250,8 +250,17 @@ export async function guardarVariosDatosPaginaSeguimientoAction(payloads: unknow
   if (!Array.isArray(payloads) || payloads.length === 0) return;
   const empresa = await empresaConPermisoDeExtension();
   if (!empresa) return;
-  for (const payload of payloads) {
-    if (!datoPaginaSeguimientoValido(payload)) continue;
+
+  // Corrección de Pablo (sobre 8474c60) — ordena por `leidoEn`
+  // ASCENDENTE antes de guardar: el lote de la cola puede llegar
+  // desordenado — sin esto, una lectura vieja procesada DESPUÉS de una
+  // más nueva (del mismo día) pisaría el dato más fresco con uno más
+  // viejo, al revés de "la lectura más reciente manda" (ver
+  // guardarDatoDePaginaSeguimiento, lib/seguimiento/seguimientos.ts).
+  const validos = payloads.filter(datoPaginaSeguimientoValido);
+  validos.sort((a, b) => new Date(a.leidoEn).getTime() - new Date(b.leidoEn).getTime());
+
+  for (const payload of validos) {
     await guardarDatoDePaginaSeguimiento(empresa.id, payload);
   }
 }
