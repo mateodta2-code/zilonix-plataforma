@@ -206,6 +206,42 @@ describe("facturacionMes — issue #251, punto 4 (ventas/mes × precio actual)",
 // la fecha real exacta de esa publicación de referencia, así que se
 // reconstruye hacia atrás a partir de las 3 cifras que sí dio la
 // tarea, no se inventa un date_created suelto.
+// Issue #262 — segundo caso real de referencia (captura de Selltrix
+// de un PDP de CATÁLOGO, /p/MCO...: MCO64541261 "Rtafull Drenador
+// Hepático Colon Menta"): "+100 vendidos" Full, precio $79.900,
+// "5 m" de antigüedad -> Vendidos (histórico) 220, Ventas/mes est. 41,
+// Facturación mensual est. $3.267.910. Mismo criterio que el caso de
+// "Colchón Relax" de arriba: nunca se tuvo la fecha real exacta de
+// esta publicación, así que los días se despejan hacia atrás a partir
+// de las cifras que sí dio la tarea — pero a diferencia del caso de
+// arriba, acá el despeje da un número EXACTO, no redondeado: ventasMes
+// = facturación / precio = 3.267.910 / 79.900 = 40.9 EXACTO (409/10) ->
+// días = 220 × 30 / 40.9 = 66000/409 ≈ 161.37, que floor(días/30) = 5
+// — consistente con la "5 m" que muestra la pantalla de referencia.
+// Nunca se inventa un date_created suelto: las 4 cifras finales
+// (220, "5 m", 41, $3.267.910) son las 4 que mostró la captura real.
+describe("caso real de referencia completo (Selltrix, catálogo) — los 4 cálculos encadenados", () => {
+  it('+100 vendidos Full, precio $79.900, catálogo MCO64541261 ("5 m" de antigüedad) -> 220 / 41 / $3.267.910', () => {
+    const diasExactos = 66000 / 409; // despejado de 220 × 30 / días = 40.9 (= 3.267.910 / 79.900)
+    const ahora = new Date("2026-10-27T00:00:00.000Z");
+    const dateCreated = new Date(ahora.getTime() - diasExactos * UN_DIA_MS);
+
+    const vendidos = vendidosEstimados(100, { exacto: false, esFull: true });
+    expect(vendidos).toBeCloseTo(220, 9); // "Vendidos (histórico) 220"
+
+    const dias = antiguedadDias({ dateCreated, mlId: null, recursoMl: null, ahora });
+    expect(dias).toBeCloseTo(diasExactos, 6);
+    expect(Math.floor(dias! / 30)).toBe(5); // "Antigüedad 5 m"
+
+    const ventasMesValor = ventasMes(vendidos, dias);
+    expect(ventasMesValor).toBeCloseTo(40.9, 6);
+    expect(Math.round(ventasMesValor!)).toBe(41); // "Ventas/mes est. 41"
+
+    const facturacion = facturacionMes(ventasMesValor, 79900);
+    expect(facturacion).toBeCloseTo(3267910, 2); // "Facturación mensual est. $3.267.910"
+  });
+});
+
 describe("caso real de referencia completo (Selltrix) — los 4 cálculos encadenados", () => {
   it("+100 vendidos Full, precio $939.900, ~423 días de antigüedad -> 220 / 15.6 / $14.662.440", () => {
     const diasExactos = 5500 / 13; // despejado de 220 × 30 / días = 15.6

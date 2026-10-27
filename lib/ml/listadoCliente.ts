@@ -15,6 +15,7 @@
 // 100% con la API de Mercado Libre, sin tocar (issue #227, explícito).
 
 import { facturacionEst } from "@/lib/ml/estimacionVentas";
+import { antiguedadDias, ETIQUETA_APROXIMADO, facturacionMes, ventasMes, vendidosEstimados, type PuntoCalibracionId } from "@/lib/seguimiento/aproximados";
 
 // --- señal de ventas: nunca mezclar un acumulado con una tasa mensual ---
 // Mismo criterio que lib/ml/importacionListadoCliente.ts (issue #225) —
@@ -117,6 +118,38 @@ export type CriterioOrden = "facturacion" | "vendidos" | "calificacion" | "full"
 export function facturacionEstimadaListado(p: ProductoListado): number | null {
   if (p.senalVentas.tipo !== "mensual_piso" || p.senalVentas.valor == null) return null;
   return facturacionEst(p.precio, p.senalVentas.valor);
+}
+
+// Issue #262 ("Aproximados estilo Selltrix en los 3 lugares", punto 2)
+// — issue #227 (más arriba en este archivo) había dejado "vendidos
+// estimados" imposible para Demanda: `ventasMesEst` (lib/ml/estimacionVentas.ts)
+// exige date_created real, y un listado nunca lo expone. Ahora SÍ es
+// posible para Mercado Libre: cada fila de listado SÍ trae `itemId`
+// real (comentario de ProductoListado, arriba) — alcanza para
+// interpolar antigüedad por id (lib/seguimiento/aproximados.ts,
+// antiguedadDias, la misma tabla de calibración que usa Seguimiento y
+// el popup de la extensión). `null` en los 3 campos para cualquier fila
+// sin itemId (las 5 plataformas no-ML nunca lo confirman) o sin señal
+// "acumulado_sin_periodo" real — nunca inventa un número.
+export type EstimacionAproximadaListado = {
+  vendidosEst: number | null;
+  ventasMesEst: number | null;
+  facturacionMesEst: number | null;
+};
+
+const SIN_ESTIMACION: EstimacionAproximadaListado = { vendidosEst: null, ventasMesEst: null, facturacionMesEst: null };
+
+export function estimarAproximadosListado(p: ProductoListado, ahora: Date, puntos?: PuntoCalibracionId[]): EstimacionAproximadaListado {
+  if (p.itemId == null || p.senalVentas.tipo !== "acumulado_sin_periodo" || p.senalVentas.valor == null) return SIN_ESTIMACION;
+  // Un listado nunca confirma el sold_quantity exacto de una tarjeta
+  // ajena (issue #251/#250) — el número que trae es siempre el piso
+  // "+N vendidos" de la tarjeta, nunca el exacto.
+  const vendidosEst = vendidosEstimados(p.senalVentas.valor, { exacto: false, esFull: p.esFull === true });
+  if (vendidosEst == null) return SIN_ESTIMACION;
+  const dias = antiguedadDias({ dateCreated: null, mlId: p.itemId, recursoMl: "item", ahora, puntos });
+  const ventasMesValor = ventasMes(vendidosEst, dias);
+  const facturacionMesValor = facturacionMes(ventasMesValor, p.precio);
+  return { vendidosEst, ventasMesEst: ventasMesValor, facturacionMesEst: facturacionMesValor };
 }
 
 function comparar(a: number | null, b: number | null, desc: boolean): number {
@@ -291,14 +324,34 @@ export type MejorOpcionImportar = {
 // Balance simple y documentado (nunca "solo el más barato", el bug
 // real de OS): precio más bajo, calificación más alta y volumen de
 // compras más alto pesan por igual (1/3 cada uno) entre los
-// candidatos REALMENTE relevantes al término. El volumen usa
-// `senalVentas.valor` tal cual esté clasificado — nunca se mezcla un
-// acumulado con uno mensual_piso al comparar dentro del mismo bloque
-// (todas las filas de un mismo bloque son de la misma plataforma, así
-// que ya vienen con el mismo tipo de señal) y la razón final siempre
-// aclara cuál de los dos es. Sin calificación -> ni premia ni
-// castiga (score neutro 0.5), nunca se trata un "sin dato" como 0.
-export function mejorOpcionParaImportar(productos: ProductoListado[], termino: string): MejorOpcionImportar | null {
+// candidatos REALMENTE relevantes al término. Sin calificación -> ni
+// premia ni castiga (score neutro 0.5), nunca se trata un "sin dato"
+// como 0.
+//
+// Issue #262, punto 2 (revisión de Pablo) — "revisar cómo se elige el
+// volumen": antes comparaba `senalVentas.valor` tal cual (el acumulado
+// histórico crudo para Mercado Libre) — bug real de criterio: una
+// publicación VIEJA con mucho acumulado le ganaba a una NUEVA que
+// vende mucho más rápido por mes, aunque el ritmo reciente sea la
+// señal que de verdad importa para decidir qué importar. Ahora, para
+// cada candidato, `volumenPara` prefiere ventas/mes ESTIMADAS
+// (estimarAproximadosListado — Mercado Libre con itemId y antigüedad
+// calibrada) cuando se puede calcular; cae al criterio de siempre
+// (mensual_piso real de Amazon, o el acumulado crudo si no hay
+// estimación posible) en cualquier otro caso — nunca mezclado sin
+// marcar: la razón final siempre aclara cuál de los 3 es, con
+// ETIQUETA_APROXIMADO cuando es una estimación.
+function volumenPara(p: ProductoListado, ahora: Date, puntos?: PuntoCalibracionId[]): { valor: number; etiqueta: string } {
+  if (p.senalVentas.tipo === "mensual_piso") return { valor: p.senalVentas.valor ?? 0, etiqueta: `${p.senalVentas.valor ?? 0} compras/mes` };
+  const estimado = estimarAproximadosListado(p, ahora, puntos).ventasMesEst;
+  if (estimado != null) return { valor: estimado, etiqueta: `${Math.round(estimado)} ventas/mes (${ETIQUETA_APROXIMADO})` };
+  if (p.senalVentas.tipo === "acumulado_sin_periodo") {
+    return { valor: p.senalVentas.valor ?? 0, etiqueta: `${p.senalVentas.valor ?? 0} acumulado (sin fecha para estimar /mes todavía)` };
+  }
+  return { valor: 0, etiqueta: "sin dato de ventas" };
+}
+
+export function mejorOpcionParaImportar(productos: ProductoListado[], termino: string, ahora: Date, puntos?: PuntoCalibracionId[]): MejorOpcionImportar | null {
   const relevantes = productos.filter((p) => p.precio > 0 && esRelevanteAlTermino(p.titulo, termino));
   if (!relevantes.length) return null;
 
@@ -307,33 +360,30 @@ export function mejorOpcionParaImportar(productos: ProductoListado[], termino: s
   const precioMax = Math.max(...precios);
   const rangoPrecio = precioMax - precioMin || 1;
 
-  const volumenes = relevantes.map((p) => p.senalVentas.valor ?? 0);
+  const volumenes = relevantes.map((p) => volumenPara(p, ahora, puntos).valor);
   const volumenMax = Math.max(...volumenes) || 1;
 
   let mejor: ProductoListado | null = null;
+  let mejorVolumen = { valor: 0, etiqueta: "sin dato de ventas" };
   let mejorScore = -Infinity;
   for (const p of relevantes) {
+    const volumen = volumenPara(p, ahora, puntos);
     const scorePrecio = 1 - (p.precio - precioMin) / rangoPrecio; // más barato -> más cerca de 1
     const scoreCalificacion = p.calificacion != null ? p.calificacion / 5 : 0.5;
-    const scoreVolumen = (p.senalVentas.valor ?? 0) / volumenMax;
+    const scoreVolumen = volumen.valor / volumenMax;
     const score = scorePrecio / 3 + scoreCalificacion / 3 + scoreVolumen / 3;
     if (score > mejorScore) {
       mejorScore = score;
       mejor = p;
+      mejorVolumen = volumen;
     }
   }
   if (!mejor) return null;
 
-  const etiquetaVolumen =
-    mejor.senalVentas.tipo === "mensual_piso"
-      ? `${mejor.senalVentas.valor ?? 0} compras/mes`
-      : mejor.senalVentas.tipo === "acumulado_sin_periodo"
-        ? `${mejor.senalVentas.valor ?? 0} acumulado — nunca /mes`
-        : "sin dato de ventas";
   const etiquetaCalificacion = mejor.calificacion != null ? `${mejor.calificacion.toFixed(1)}★` : "sin calificación";
   return {
     producto: mejor,
-    razon: `Balance entre precio, calificación (${etiquetaCalificacion}) y volumen de compras (${etiquetaVolumen}), entre los resultados relevantes a "${termino}".`,
+    razon: `Balance entre precio, calificación (${etiquetaCalificacion}) y volumen de compras (${mejorVolumen.etiqueta}), entre los resultados relevantes a "${termino}".`,
   };
 }
 

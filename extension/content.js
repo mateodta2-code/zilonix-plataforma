@@ -9,6 +9,11 @@
   const ZS = window.ZilonixSeguridad;
   const lector = window.ZilonixLectorActivo;
   if (!U || !ZS || !lector) return; // sitio sin lector/seguridad cargados — nada que hacer acá
+  // Issue #262 ("Aproximados estilo Selltrix en los 3 lugares") —
+  // optativos a propósito: solo Mercado Libre los carga (manifest.json),
+  // nunca los otros 5 sitios — ver "Análisis aprox." en renderizarProducto.
+  const APROX = window.ZilonixAproximados;
+  const CAL = window.ZilonixCalibracion;
 
   const SIN_DATO = "No disponible";
   const PANEL_ID = "zilonix-panel-investigacion-174";
@@ -186,6 +191,60 @@
     return panel.querySelector(".zx-panel__cuerpo");
   }
 
+  // Issue #262 ("Aproximados estilo Selltrix en los 3 lugares") —
+  // reemplaza el viejo "Ventas promedio al mes (estimado)" (que solo
+  // funcionaba con date_created real, ausente en la mayoría de las
+  // páginas, sobre todo un PDP de catálogo /p/) por un bloque completo
+  // con los 4 cálculos de Selltrix, usando EXACTAMENTE la misma fuente
+  // de factores/calibración que la app (extension/lectores/aproximados.js
+  // + extension/calibracion-aproximados.js, generado desde
+  // lib/seguimiento/calibracion-aproximados.json — ver ese archivo).
+  // Nunca llama a la API de Mercado Libre: todo sale de `datos`, ya
+  // leído del DOM/JSON incrustado de esta misma página por
+  // lectores/mercadolibre.js.
+  function tipoIdDePagina() {
+    // Mismo criterio que PATRON_CATALOGO del lado del servidor
+    // (lib/seguimiento/link.ts): "/p/" antes del id real de Mercado
+    // Libre es un catálogo ("product"); cualquier otra cosa es una
+    // publicación puntual ("item"). Nunca se confía en esto para
+    // llamar a Mercado Libre — solo para elegir qué tabla de
+    // calibración usar, y antiguedadDias() cae a null si el id no
+    // matchea nada calibrado de todas formas.
+    return /\/p\/[a-z]{3}\d+/i.test(location.href) ? "product" : "item";
+  }
+
+  function formatoAntiguedad(dias) {
+    if (dias == null) return null;
+    const meses = Math.floor(dias / 30);
+    return meses >= 1 ? `${meses} m` : `${Math.round(dias)} d`;
+  }
+
+  function bloqueAnalisisAproximado(datos) {
+    if (!APROX || !CAL) return ""; // sitio sin estos globales cargados (solo Mercado Libre los trae, ver manifest.json)
+    if (typeof datos.vendidos !== "number") return ""; // sin ningún vendidos (exacto ni "+N") no hay nada que estimar
+
+    const vendidosEst = APROX.vendidosEstimados(datos.vendidos, { exacto: datos.vendidosExacto === true, esFull: datos.esFull === true }, CAL);
+    if (vendidosEst == null) return "";
+
+    const dias = APROX.antiguedadDias(
+      { dateCreated: datos.dateCreated, mlId: datos.itemId, tipo: tipoIdDePagina(), ahoraMs: Date.now() },
+      CAL
+    );
+    const ventasMesEst = APROX.ventasMes(vendidosEst, dias);
+    const facturacionMesEst = APROX.facturacionMes(ventasMesEst, datos.precio);
+
+    const etiquetaMl = datos.vendidosExacto === false ? ` <span class="zx-fila__valor--chip">+${textoCampo(datos.vendidos)} en ML</span>` : "";
+
+    let html = '<p class="zx-seccion-titulo">Análisis aprox.</p>';
+    html += filaHtml("Vendidos estimados", `${Math.round(vendidosEst)}${etiquetaMl}`, false);
+    html += filaHtml("Antigüedad", formatoAntiguedad(dias) ?? SIN_DATO, dias == null);
+    html += filaHtml("Ventas/mes", ventasMesEst != null ? Math.round(ventasMesEst) : SIN_DATO, ventasMesEst == null);
+    html += filaHtml("Facturación/mes", facturacionMesEst != null ? formatoPrecio(facturacionMesEst, datos.moneda) : SIN_DATO, facturacionMesEst == null);
+    html +=
+      '<p class="zx-nota-aprox">Estimado: vendidos × factor según Full/"+N" (2.2 / 1.55), llevado a "por mes" con la antigüedad real o calibrada de la publicación — nunca un dato que Mercado Libre confirme directamente.</p>';
+    return html;
+  }
+
   function renderizarProducto(panel, datos) {
     const cuerpo = renderizarEsqueleto(panel, "Zilonix · Investigación", lector.sitio);
     let html = `<p class="zx-titulo-producto">${textoCampo(datos.titulo)}</p>`;
@@ -206,13 +265,7 @@
       html += filaHtml("Full", datos.esFull ? '<span class="zx-fila__valor--chip">FULL</span>' : "No", false);
       html += filaHtml("Envío gratis", datos.envioGratis ? "Sí" : "No", false);
     }
-    // Issue #174, mejora ML — siempre "estimado": multiplicar/dividir
-    // nunca es una cifra que Mercado Libre confirme directamente,
-    // aunque "vendidos" sea el exacto. Solo existe en ML (ventasPromedioMes
-    // viene undefined en los otros 5 sitios).
-    if (datos.ventasPromedioMes !== undefined) {
-      html += filaHtml("Ventas promedio al mes (estimado)", textoCampo(datos.ventasPromedioMes), datos.ventasPromedioMes == null);
-    }
+    html += bloqueAnalisisAproximado(datos);
     cuerpo.innerHTML = html;
 
     const boton = panel.querySelector(".zx-boton-copiar");

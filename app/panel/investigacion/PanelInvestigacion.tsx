@@ -14,6 +14,7 @@ import {
   calcularResumenLocalBloque,
   cargarBloques,
   clasificarSenalVentas,
+  estimarAproximadosListado,
   facturacionEstimadaListado,
   generarEstrategiaListado,
   generarVeredictoListado,
@@ -25,6 +26,7 @@ import {
   type CriterioOrden,
   type ProductoListado,
 } from "@/lib/ml/listadoCliente";
+import { ETIQUETA_APROXIMADO } from "@/lib/seguimiento/aproximados";
 import { generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
 import { consumirClicAnalizarReciente, type PlataformaAnalizar } from "./analizarClic";
 import { generarQueriesAnalizarAction, generarQueriesPlataformaAction } from "./actions";
@@ -173,6 +175,13 @@ function idBloque(): string {
 }
 
 export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "demanda" | "mercado" | "estrategia" }) {
+  // Issue #262, punto 2 — "ahora" para antiguedadDias (vendidos
+  // estimados/ventas-mes/facturación-mes aprox., y el volumen que usa
+  // mejorOpcionParaImportar) — fijo durante todo este montaje del
+  // componente (useMemo con deps vacías), nunca un `new Date()` distinto
+  // en cada fila ni en cada re-render, para que todas las filas de la
+  // misma pantalla midan la antigüedad contra el mismo instante.
+  const ahora = useMemo(() => new Date(), []);
   const [conExtension, setConExtension] = useState<boolean | null>(null);
   const [bloques, setBloques] = useState<Bloque[]>([]);
   const [cargado, setCargado] = useState(false);
@@ -580,8 +589,9 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
             <TarjetaKpi titulo="% FULL" valor={kpisMercado.porcentajeFull != null ? `${kpisMercado.porcentajeFull}%` : undefined} textoVacio="Sin dato" />
           </div>
           <p className={styles.notaInsignia}>
-            Resumen de todos los bloques de Mercado Libre juntos (cualquier país) — nunca una venta/mes estimada acá; ver &quot;Fact. est.&quot; por
-            fila, columna que solo se confirma para Amazon.
+            Resumen de todos los bloques de Mercado Libre juntos (cualquier país) — nunca una venta/mes estimada acá; ver &quot;Vendidos&quot; y
+            &quot;Fact. est.&quot; por fila, con la etiqueta &quot;{ETIQUETA_APROXIMADO}&quot; cuando es una estimación (requiere antigüedad real o
+            calibrada de la publicación — puede faltar todavía, ver docs/ESTADO.md).
           </p>
         </div>
       ) : null}
@@ -620,9 +630,11 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
 
       {conExtension ? (
         <p className={styles.notaInsignia}>
-          Amazon: &quot;comprados el mes pasado&quot; es la única cifra real mensual. Mercado Libre/Temu/AliExpress/Shein/Alibaba: &quot;vendidos&quot;
-          es un acumulado histórico sin período — nunca se muestra como tasa mensual. Alibaba es mayorista (precio por cantidad) y puede pedir
-          resolver un captcha a mano.
+          Amazon: &quot;comprados el mes pasado&quot; es la única cifra real mensual. Mercado Libre: &quot;vendidos&quot; es un acumulado histórico
+          sin período real — la fila SÍ puede sumar vendidos estimados/ventas por mes/facturación por mes, siempre con la etiqueta &quot;
+          {ETIQUETA_APROXIMADO}&quot;, nunca mezclados con el acumulado como si fueran lo mismo. Temu/AliExpress/Shein/Alibaba: &quot;vendidos&quot;
+          sigue siendo acumulado sin período, sin ninguna estimación todavía. Alibaba es mayorista (precio por cantidad) y puede pedir resolver un
+          captcha a mano.
         </p>
       ) : null}
 
@@ -681,7 +693,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
         // VALIDADA, Mejor opción).
         const esAmazon = bloque.plataforma === "Amazon";
         const resumenLocal = calcularResumenLocalBloque(bloque.productos);
-        const mejorOpcion = mejorOpcionParaImportar(bloque.productos, termino);
+        const mejorOpcion = mejorOpcionParaImportar(bloque.productos, termino, ahora);
         return (
           <div key={bloque.id} className={styles.bloque}>
             <div className={styles.encabezadoBloque}>
@@ -792,14 +804,45 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
                       {p.senalVentas.valor != null ? (
                         <>
                           {numero(p.senalVentas.valor)}
-                          <div className={styles.subdato}>{p.senalVentas.tipo === "mensual_piso" ? "comprados el mes pasado" : "acumulado — nunca /mes"}</div>
+                          <div className={styles.subdato}>
+                            {p.senalVentas.tipo === "mensual_piso" ? "comprados el mes pasado" : "acumulado histórico (sin período real)"}
+                          </div>
+                          {/* Issue #262, punto 2 — vendidos estimados/ventas-mes
+                              aprox. (Mercado Libre, con itemId + antigüedad
+                              real o calibrada — puede faltar todavía, ver
+                              docs/ESTADO.md) — nunca mezclado sin la
+                              etiqueta "aprox." al lado. */}
+                          {(() => {
+                            const est = estimarAproximadosListado(p, ahora);
+                            if (est.vendidosEst == null) return null;
+                            return (
+                              <div className={styles.subdato}>
+                                {numero(Math.round(est.vendidosEst))} vendidos
+                                {est.ventasMesEst != null ? ` · ${numero(Math.round(est.ventasMesEst))} /mes` : ""} <Chip>{ETIQUETA_APROXIMADO}</Chip>
+                              </div>
+                            );
+                          })()}
                         </>
                       ) : (
                         <Chip>Sin dato</Chip>
                       )}
                     </CeldaTabla>
                     <CeldaTabla>{money(p.precio)}</CeldaTabla>
-                    <CeldaTabla>{facturacionEstimadaListado(p) != null ? money(facturacionEstimadaListado(p) as number) : "—"}</CeldaTabla>
+                    <CeldaTabla>
+                      {(() => {
+                        const facturacionReal = facturacionEstimadaListado(p);
+                        if (facturacionReal != null) return money(facturacionReal); // Amazon, mensual_piso real
+                        const facturacionAprox = estimarAproximadosListado(p, ahora).facturacionMesEst;
+                        if (facturacionAprox != null) {
+                          return (
+                            <>
+                              {money(facturacionAprox)} <Chip>{ETIQUETA_APROXIMADO}</Chip>
+                            </>
+                          );
+                        }
+                        return "—";
+                      })()}
+                    </CeldaTabla>
                     {/* Issue #231, punto B — "Full aparece en Amazon (Amazon
                         no tiene Full)": "Full" solo tiene sentido en
                         Mercado Libre. Issue #235, punto 4 — fuera de ML
