@@ -4,7 +4,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { obtenerPedidoConEventos, PASOS_PEDIDO, type EventoPedido, type PasoPedido } from "@/lib/ml/pedidos";
+import { etiquetaEstadoPedido, obtenerPedidoConEventos, PASOS_PEDIDO, type EventoPedido, type PasoPedido } from "@/lib/ml/pedidos";
 import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -57,7 +57,7 @@ export default async function PedidoDetallePage({ params }: { params: { id: stri
     <>
       <EncabezadoPagina
         titulo={`Pedido #${pedido.pedidoIdExterno}`}
-        descripcion={`${pedido.moneda} ${pedido.total} · ${pedido.estado}`}
+        descripcion={`${pedido.moneda} ${pedido.total} · ${etiquetaEstadoPedido(pedido.estado)}`}
       />
 
       <ol className={styles.linea}>
