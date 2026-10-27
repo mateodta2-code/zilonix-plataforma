@@ -41,6 +41,7 @@ describe("leerConReintento429 — reintento con espera creciente en 429 (issue #
       esFull: null,
       esEnvioGratis: null,
       publicaciones: null,
+      fechaCreacion: null,
     };
     vi.mocked(leerFotoSeguimiento)
       .mockRejectedValueOnce(new LimiteMercadoLibreError())

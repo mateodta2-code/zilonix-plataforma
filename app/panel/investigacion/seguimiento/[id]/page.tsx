@@ -5,7 +5,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerDetalleSeguimiento } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta, normalizarPublicaciones, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacion, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import {
   calcularComparativaAyerHoy,
   resumenPeriodoConteo,
@@ -16,8 +16,10 @@ import {
   type ResumenPeriodoConteo,
   type ResumenPeriodoVentas,
 } from "@/lib/seguimiento/estimacionInventario";
+import { antiguedadDias, ETIQUETA_APROXIMADO, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
 import { EscuchaExtension } from "../EscuchaExtension";
+import { Ayuda } from "@/components/marco/Ayuda";
 import { BotonLink } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
@@ -144,6 +146,32 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
     resumen30 = resumenPeriodoConteo(lecturas, 30, ahora);
   }
 
+  // Issue #251 ("Seguimiento muestra aproximados como Selltrix") —
+  // vendidos estimados/antigüedad/ventas-mes/facturación-mes, con la
+  // foto más reciente. Usa el vendidos EXACTO si hay; si no, el piso
+  // "+N" que guarda la extensión (issue #252, obtenerVendidosAproximado,
+  // misma columna `publicaciones`) ajustado por el factor Full/no-Full.
+  // `antiguedadDias` usa fechaCreacion real (SOLO la escribe el cron,
+  // ver lib/trabajos/revisionDiariaSeguimiento.ts) cuando la API ya la
+  // confirmó; si no, interpola por el id (tabla de calibración, puede
+  // estar vacía todavía) — "Sin dato" en la UI cuando ninguno de los
+  // dos aplica, nunca una antigüedad inventada.
+  const ultimaFoto = fotos.length > 0 ? fotos[fotos.length - 1] : null;
+  const vendidosAproximadoDetalle = ultimaFoto && ultimaFoto.vendidos == null ? obtenerVendidosAproximado(ultimaFoto.publicaciones) : null;
+  const precioAproximadoDetalle = ultimaFoto && ultimaFoto.precio == null ? obtenerPrecioAproximado(ultimaFoto.publicaciones) : null;
+  const vendidosParaAproxDetalle = ultimaFoto?.vendidos ?? vendidosAproximadoDetalle;
+  const vendidosAprox =
+    seguimiento.tipo === "producto" && vendidosParaAproxDetalle != null && ultimaFoto?.esFull != null
+      ? vendidosEstimados(vendidosParaAproxDetalle, { exacto: ultimaFoto.vendidos != null, esFull: ultimaFoto.esFull })
+      : null;
+  const diasAprox =
+    vendidosAprox != null
+      ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, recursoMl: seguimiento.recursoMl, ahora })
+      : null;
+  const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
+  const precioParaFacturacionDetalle = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximadoDetalle;
+  const facturacionMesAprox = facturacionMes(ventasMesAprox, precioParaFacturacionDetalle);
+
   return (
     <>
       {/* Issue #251 (corrección de Pablo, punto 7) — antes solo
@@ -213,7 +241,7 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
         </>
       )}
 
-      {seguimiento.esCompetidor && (comparativaAyerHoy || resumen7 || resumen30) ? (
+      {seguimiento.esCompetidor && (comparativaAyerHoy || resumen7 || resumen30 || vendidosAprox != null) ? (
         <Tarjeta className={styles.seccion}>
           <p className={styles.tituloSeccion}>Ventas estimadas (issue #251 — nunca sold_quantity real de un competidor, Mercado Libre no lo deja ver por la API)</p>
           <ul className={styles.listaAlertas}>
@@ -241,6 +269,35 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
             ) : null}
             {filaResumenPeriodo("Últimos 7 días", resumen7, seguimiento.tipo === "producto" ? "unidades" : "publicaciones")}
             {filaResumenPeriodo("Últimos 30 días", resumen30, seguimiento.tipo === "producto" ? "unidades" : "publicaciones")}
+            {vendidosAprox != null ? (
+              <li className={styles.filaAlerta}>
+                <span>
+                  <strong>Vendidos estimados (estilo Selltrix):</strong> {Math.round(vendidosAprox)}{" "}
+                  <Ayuda id="ayuda-vendidos-aprox">
+                    Mercado Libre no deja ver el sold_quantity real de un competidor — "+N vendidos" × un factor según sea Full o no.
+                  </Ayuda>
+                </span>
+                <Chip estado="aviso">{ETIQUETA_APROXIMADO}</Chip>
+              </li>
+            ) : null}
+            {ventasMesAprox != null ? (
+              <li className={styles.filaAlerta}>
+                <span>
+                  <strong>Ventas/mes (estilo Selltrix):</strong> {Math.round(ventasMesAprox)}{" "}
+                  <Ayuda id="ayuda-ventas-mes-aprox">Vendidos estimados × antigüedad de la publicación, nunca un dato que Mercado Libre confirme.</Ayuda>
+                </span>
+                <Chip estado="aviso">{ETIQUETA_APROXIMADO}</Chip>
+              </li>
+            ) : null}
+            {facturacionMesAprox != null ? (
+              <li className={styles.filaAlerta}>
+                <span>
+                  <strong>Facturación/mes (estilo Selltrix):</strong> {dinero(facturacionMesAprox)}{" "}
+                  <Ayuda id="ayuda-facturacion-mes-aprox">Ventas/mes estimadas × precio actual.</Ayuda>
+                </span>
+                <Chip estado="aviso">{ETIQUETA_APROXIMADO}</Chip>
+              </li>
+            ) : null}
           </ul>
         </Tarjeta>
       ) : null}

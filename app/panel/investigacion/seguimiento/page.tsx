@@ -11,9 +11,10 @@ import {
   listarAlertasDelDia,
   listarSeguimientosConUltimaFoto,
 } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta, normalizarPublicaciones, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacion, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
 import { necesitaLecturaDePagina } from "@/lib/seguimiento/estimacionInventario";
+import { antiguedadDias, ETIQUETA_APROXIMADO, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
 import { Ayuda } from "@/components/marco/Ayuda";
 import { Boton, BotonLink } from "@/components/marco/Boton";
@@ -403,6 +404,30 @@ export default async function SeguimientoPage({
               // (seguimiento pendiente de primera revisión), aunque la
               // extensión sí lo había leído de la página.
               const precioAproximado = ultimaFoto && ultimaFoto.precio == null ? obtenerPrecioAproximado(ultimaFoto.publicaciones) : null;
+              // Issue #251 ("Seguimiento muestra aproximados como
+              // Selltrix") — usa el vendidos EXACTO si hay
+              // (`exacto: true`, se muestra tal cual); si no, el piso
+              // "+N" de arriba (`exacto: false`, se ajusta por el
+              // factor Full/no-Full). `antiguedadDias` usa
+              // fechaCreacion real (issue #252 reusa la misma columna
+              // `publicaciones`, pero SOLO el cron la escribe — ver
+              // lib/trabajos/revisionDiariaSeguimiento.ts) cuando la
+              // API ya la confirmó; si no, interpola por el id (tabla
+              // de calibración, puede estar vacía todavía) — "Sin
+              // dato" en la UI cuando ninguno de los dos aplica, nunca
+              // una antigüedad inventada.
+              const vendidosParaAprox = ultimaFoto?.vendidos ?? vendidosAproximado;
+              const vendidosAprox =
+                seguimiento.tipo === "producto" && vendidosParaAprox != null && ultimaFoto?.esFull != null
+                  ? vendidosEstimados(vendidosParaAprox, { exacto: ultimaFoto.vendidos != null, esFull: ultimaFoto.esFull })
+                  : null;
+              const diasAprox =
+                vendidosAprox != null
+                  ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, recursoMl: seguimiento.recursoMl, ahora })
+                  : null;
+              const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
+              const precioParaFacturacion = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximado;
+              const facturacionMesAprox = facturacionMes(ventasMesAprox, precioParaFacturacion);
               return (
                 <FilaTabla key={seguimiento.id}>
                   <CeldaTabla>
@@ -501,6 +526,24 @@ export default async function SeguimientoPage({
                         la API (ver lib/trabajos/revisionDiariaSeguimiento.ts). */}
                         {seguimiento.esCompetidor && (ultimaFoto?.inventarioDisponible != null || ultimaFoto?.vendidos != null || vendidosAproximado != null) ? (
                           <div className={styles.subdato}>Leído de la página el {fechaLegible(ultimaFoto!.fecha)}</div>
+                        ) : null}
+                        {/* Issue #251 — ventas/mes y facturación/mes
+                        estimadas, estilo Selltrix. Nunca sin la
+                        etiqueta "aprox." al lado (nunca se mezcla un
+                        estimado con un dato exacto sin marcarlo). */}
+                        {ventasMesAprox != null ? (
+                          <div className={styles.subdato}>
+                            Ventas/mes: {numeroPlano(Math.round(ventasMesAprox))} <Chip>{ETIQUETA_APROXIMADO}</Chip>{" "}
+                            <Ayuda id={`ayuda-ventas-mes-${seguimiento.id}`}>
+                              Estimado a partir de vendidos × antigüedad de la publicación, nunca un dato que Mercado Libre confirme directamente.
+                            </Ayuda>
+                          </div>
+                        ) : null}
+                        {facturacionMesAprox != null ? (
+                          <div className={styles.subdato}>
+                            Facturación/mes: {dinero(facturacionMesAprox)} <Chip>{ETIQUETA_APROXIMADO}</Chip>{" "}
+                            <Ayuda id={`ayuda-facturacion-mes-${seguimiento.id}`}>Ventas/mes estimadas × precio actual.</Ayuda>
+                          </div>
                         ) : null}
                       </>
                     )}

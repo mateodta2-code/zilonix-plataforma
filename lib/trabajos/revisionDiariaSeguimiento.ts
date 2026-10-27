@@ -274,6 +274,39 @@ function camposApiDeDatos(datos: Awaited<ReturnType<typeof leerConReintento429>>
   };
 }
 
+// Issue #251 ("Seguimiento muestra aproximados como Selltrix") — lo
+// que el cron guarda en `publicaciones` (nunca una columna nueva, ver
+// db/schema.ts): para tipo="tienda", el snapshot de siempre
+// (total/visibles/fuente); para tipo="producto", SOLO `fechaCreacion`
+// (date_created real, issue #252 ya reusa esta misma columna para
+// vendidosAproximado/precioAproximado, que únicamente escribe la
+// extensión — nunca este cron). `undefined` cuando no hay nada que
+// guardar (tienda sin publicaciones, o la API no confirmó
+// date_created esta vez) — Drizzle lo omite del INSERT/UPDATE entero,
+// mismo criterio que camposPagina en guardarDatoDePaginaSeguimiento
+// (lib/seguimiento/seguimientos.ts).
+function publicacionesParaGuardar(
+  tipo: "producto" | "tienda",
+  datos: Awaited<ReturnType<typeof leerConReintento429>>
+): typeof seguimientoFotos.$inferInsert.publicaciones {
+  if (tipo === "tienda") {
+    return datos.publicaciones != null ? { total: null, visibles: datos.publicaciones, fuente: "api" as const } : undefined;
+  }
+  return datos.fechaCreacion != null ? { fechaCreacion: datos.fechaCreacion } : undefined;
+}
+
+// Issue #251 — expresión SQL compartida por los 3 lugares que escriben
+// `publicaciones` desde el cron (abajo): `||` (merge shallow de jsonb
+// de Postgres), NUNCA un reemplazo del objeto completo — mismo
+// criterio que ya usa guardarDatoDePaginaSeguimiento (issue #252) para
+// no pisar vendidosAproximado/precioAproximado (que solo escribe la
+// extensión) con fechaCreacion (que solo escribe este cron), ni
+// viceversa. `excluded.publicaciones` es lo que esta misma sentencia
+// INSERT/UPDATE intenta guardar (publicacionesParaGuardar, arriba) —
+// nunca undefined de verdad en SQL (null si la función de arriba
+// devolvió undefined), por eso el segundo coalesce.
+const MERGE_PUBLICACIONES_SQL = sql`coalesce(seguimiento_fotos.publicaciones, '{}'::jsonb) || coalesce(excluded.publicaciones, '{}'::jsonb)`;
+
 // `saltado: true` SOLO en la carrera real (rarísima) de dos corridas
 // del cron a la vez: la ronda de la tarde (abajo) ya mira si hay foto
 // de hoy ANTES de llamar a Mercado Libre, así que el índice único
@@ -406,12 +439,29 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
   if (fotoDeHoyExistente) {
     // Actualiza SOLO los campos de API (precio, Full, catálogo, etc.)
     // con lo más reciente — nunca toca inventarioDisponible/
-    // inventarioAproximado/vendidos/publicaciones (ver camposApiDeDatos,
-    // arriba: son los mismos campos que issue #251 reusa para la
-    // lectura de la extensión). Genera alertas comparando esta fila ya
-    // actualizada contra la de ayer, igual que el camino de insertar.
+    // inventarioAproximado/vendidos (ver camposApiDeDatos, arriba: son
+    // los mismos campos que issue #251 reusa para la lectura de la
+    // extensión). Genera alertas comparando esta fila ya actualizada
+    // contra la de ayer, igual que el camino de insertar.
+    // Issue #251 ("aproximados estilo Selltrix") — SOLO para
+    // tipo="producto" (nunca tienda, que no cambia su comportamiento
+    // acá): si la API confirmó date_created esta vez, se MEZCLA
+    // (`||`) con lo que ya hubiera en `publicaciones` (puede traer
+    // vendidosAproximado/precioAproximado de la extensión, issue
+    // #252) — nunca se reemplaza el objeto completo. Si la API no lo
+    // confirmó, la columna queda intacta (ni siquiera entra al SET).
+    const fechaCreacionNueva = seguimiento.tipo === "producto" && datos.fechaCreacion != null ? { fechaCreacion: datos.fechaCreacion } : undefined;
     [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
-      tx.update(seguimientoFotos).set(camposApiDeDatos(datos)).where(eq(seguimientoFotos.id, fotoDeHoyExistente.id)).returning()
+      tx
+        .update(seguimientoFotos)
+        .set({
+          ...camposApiDeDatos(datos),
+          ...(fechaCreacionNueva !== undefined
+            ? { publicaciones: sql`coalesce(seguimiento_fotos.publicaciones, '{}'::jsonb) || ${JSON.stringify(fechaCreacionNueva)}::jsonb` }
+            : {}),
+        })
+        .where(eq(seguimientoFotos.id, fotoDeHoyExistente.id))
+        .returning()
     );
   } else {
     [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
@@ -429,7 +479,14 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
           // lo puede traer la lectura de página (la API da 403 real al
           // listar publicaciones de una tienda ajena); acá solo se
           // insertó lo que la API pudo ver, nunca un total inventado.
-          publicaciones: datos.publicaciones != null ? { total: null, visibles: datos.publicaciones, fuente: "api" } : null,
+          // Issue #251 ("aproximados estilo Selltrix") — para
+          // tipo="producto", en vez de siempre `null`, guarda
+          // `fechaCreacion` cuando la API la confirmó (publicacionesParaGuardar,
+          // arriba) — la extensión nunca llega a correr ANTES de este
+          // primer insert del día en la práctica (el cron corre temprano),
+          // pero si así fuera, onConflictDoUpdate (abajo) mezcla en vez
+          // de pisar.
+          publicaciones: publicacionesParaGuardar(seguimiento.tipo, datos),
         })
         // Corrección de Pablo — onConflictDoUpdate en vez de
         // onConflictDoNothing: en la carrera real (rarísima) de dos
@@ -439,8 +496,15 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
         // leer. Actualiza solo los campos de API (mismo
         // camposApiDeDatos de la rama "ya existe foto" de arriba)
         // sobre lo que sea que ganó la carrera — nunca pisa
-        // inventarioDisponible/vendidos/publicaciones.
-        .onConflictDoUpdate({ target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha], set: camposApiDeDatos(datos) })
+        // inventarioDisponible/vendidos. `publicaciones` sí entra acá
+        // (MERGE_PUBLICACIONES_SQL, arriba) — degrada solo a
+        // "preservar lo que ya había" cuando no hay nada nuevo que
+        // guardar (coalesce con `{}` a los dos lados), nunca reemplaza
+        // el objeto completo.
+        .onConflictDoUpdate({
+          target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha],
+          set: { ...camposApiDeDatos(datos), publicaciones: MERGE_PUBLICACIONES_SQL },
+        })
         .returning()
     );
   }

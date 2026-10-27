@@ -7,7 +7,9 @@ import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import { fechaDiaBogota } from "@/lib/filtros-listado";
-import { NOMBRE_PENDIENTE_PRIMERA_REVISION } from "@/lib/seguimiento/seguimientos";
+import { NOMBRE_PENDIENTE_PRIMERA_REVISION, guardarDatoDePaginaSeguimiento } from "@/lib/seguimiento/seguimientos";
+import { obtenerFechaCreacion, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
+import { antiguedadDias, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
 import { obtenerSeguimientosPendientesDeHoy, revisarAhoraUnSeguimiento, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
 
 // Issue #251 (revisión de Pablo) — seguimiento_fotos.fecha y el
@@ -861,5 +863,121 @@ describe("obtenerSeguimientosPendientesDeHoy — orden y filtro del lote (issue 
     // nunca) al más reciente.
     expect(idsDeEstaEmpresa).toEqual([nuncaRevisado.id, revisadoAyer.id, revisadoHace8Horas.id]);
     expect(idsDeEstaEmpresa).not.toContain(revisadoHace3Horas.id);
+  });
+});
+
+// Issue #251 ("Seguimiento muestra aproximados como Selltrix") — test
+// de integración del flujo completo, contra Postgres real: la
+// extensión guarda el piso "+N vendidos" (guardarDatoDePaginaSeguimiento,
+// lib/seguimiento/seguimientos.ts), DESPUÉS el cron confirma precio/
+// esFull/date_created por la API (revisarAhoraUnSeguimiento) — los dos
+// escritores tienen que coexistir en la MISMA fila de hoy, sin que
+// ninguno pise al otro (issue #252's `||` para vendidosAproximado/
+// precioAproximado de la extensión, y el nuevo merge de este issue
+// para fechaCreacion del cron) — y recién con las dos escrituras
+// adentro, los 4 cálculos de lib/seguimiento/aproximados.ts (los
+// mismos que usa la UI) dan un resultado real, nunca null.
+describe("Flujo completo de aproximados — extensión + cron + UI (issue #251)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("extensión guarda +N vendidos, cron guarda precio/esFull/date_created: la UI calcula los 4 aproximados con datos reales", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario("FLUJO-APROXIMADOS");
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId,
+        cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+        nickname: "VENDEDOR_FLUJO_APROXIMADOS",
+        accessTokenCifrado: cifrarToken("access-vigente"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
+    const mlIdExterno = nuevoMlId();
+    const [seguimiento] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno,
+          nombre: "Producto de prueba",
+          linkOriginal: "https://x",
+          esCompetidor: true,
+          creadoPor: usuarioId,
+        })
+        .returning()
+    );
+
+    // 1. La extensión lee la ficha del competidor y guarda el piso
+    // "+100 vendidos" (nunca el exacto — Mercado Libre no lo deja ver
+    // para un competidor) — mismo caso de referencia que
+    // lib/seguimiento/aproximados.test.ts ("+100 vendidos" Full -> 220).
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno,
+      inventario: null,
+      inventarioAproximado: false,
+      vendidos: 100,
+      vendidosExacto: false,
+      titulo: null,
+      precio: null,
+      leidoEn: new Date().toISOString(),
+    });
+
+    // 2. El cron corre DESPUÉS (mismo día) y confirma precio/Full/
+    // date_created por la API — fecha de creación elegida para que
+    // "+100 vendidos" Full dé el mismo caso de referencia verificado
+    // (220 vendidos -> 15.6 ventas/mes -> $14.662.440/mes).
+    const diasDeAntiguedad = 5500 / 13; // mismo despeje que el caso de referencia de aproximados.test.ts
+    const dateCreated = new Date(Date.now() - diasDeAntiguedad * 24 * 60 * 60 * 1000).toISOString();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          price: 939900,
+          status: "active",
+          shipping: { logistic_type: "fulfillment" },
+          date_created: dateCreated,
+        })
+      )
+    );
+    const resultadoCron = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultadoCron.ok).toBe(true);
+
+    // 3. La fila de hoy tiene que traer LAS DOS escrituras juntas,
+    // ninguna pisó a la otra.
+    const hoy = hoyBogota();
+    const [fotoDeHoy] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+    );
+    expect(fotoDeHoy).toBeDefined();
+    expect(fotoDeHoy.vendidos).toBeNull(); // nunca exacto — sigue sin confirmar por la API
+    expect(Number(fotoDeHoy.precio)).toBe(939900); // del cron
+    expect(fotoDeHoy.esFull).toBe(true); // del cron
+    expect(obtenerVendidosAproximado(fotoDeHoy.publicaciones)).toBe(100); // de la extensión, el cron no lo pisó
+    expect(obtenerFechaCreacion(fotoDeHoy.publicaciones)).toBe(dateCreated); // del cron, la extensión no lo pisó
+
+    // 4. Los 4 cálculos de lib/seguimiento/aproximados.ts, con los
+    // datos REALES que acaban de quedar guardados — exactamente lo
+    // que hace la UI (app/panel/investigacion/seguimiento/page.tsx y
+    // [id]/page.tsx).
+    const vendidosAprox = vendidosEstimados(fotoDeHoy.vendidos ?? obtenerVendidosAproximado(fotoDeHoy.publicaciones), {
+      exacto: fotoDeHoy.vendidos != null,
+      esFull: fotoDeHoy.esFull === true,
+    });
+    expect(vendidosAprox).toBeCloseTo(220, 6);
+
+    const dias = antiguedadDias({ dateCreated: obtenerFechaCreacion(fotoDeHoy.publicaciones), mlId: mlIdExterno, recursoMl: seguimiento.recursoMl, ahora: new Date() });
+    expect(dias).not.toBeNull();
+    expect(dias!).toBeCloseTo(diasDeAntiguedad, 1);
+
+    const ventasMesValor = ventasMes(vendidosAprox, dias);
+    expect(ventasMesValor).not.toBeNull();
+    expect(ventasMesValor!).toBeCloseTo(15.6, 1);
+
+    const facturacionMesValor = facturacionMes(ventasMesValor, Number(fotoDeHoy.precio));
+    expect(facturacionMesValor).not.toBeNull();
+    expect(facturacionMesValor!).toBeCloseTo(14662440, 0);
   });
 });

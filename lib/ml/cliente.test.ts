@@ -509,7 +509,7 @@ describe("obtenerFotoItemMl — lector de item ajeno (issue #175)", () => {
   it("pide los campos exactos pedidos y arma la foto completa", async () => {
     const fetchMock = vi.fn(async (url: unknown) => {
       expect(String(url)).toBe(
-        "https://api.mercadolibre.com/items/MCO111?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping"
+        "https://api.mercadolibre.com/items/MCO111?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping,date_created"
       );
       return respuestaJson({
         price: 100,
@@ -520,6 +520,7 @@ describe("obtenerFotoItemMl — lector de item ajeno (issue #175)", () => {
         catalog_listing: true,
         catalog_product_id: "MCO999",
         shipping: { logistic_type: "fulfillment", free_shipping: true },
+        date_created: "2024-01-01T00:00:00.000Z",
       });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -536,6 +537,7 @@ describe("obtenerFotoItemMl — lector de item ajeno (issue #175)", () => {
       catalogProductId: "MCO999",
       esFull: true,
       esEnvioGratis: true,
+      fechaCreacion: "2024-01-01T00:00:00.000Z",
     });
   });
 
@@ -548,6 +550,7 @@ describe("obtenerFotoItemMl — lector de item ajeno (issue #175)", () => {
     expect(resultado?.catalogProductId).toBeNull();
     expect(resultado?.esFull).toBeNull();
     expect(resultado?.esEnvioGratis).toBeNull();
+    expect(resultado?.fechaCreacion).toBeNull();
   });
 
   it("itemId inválido nunca llama a fetch", async () => {

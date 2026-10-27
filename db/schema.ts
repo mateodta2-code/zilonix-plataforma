@@ -586,9 +586,16 @@ export const seguimientoFotos = pgTable(
     // (pueden venir juntos o separados) — el `set` del upsert
     // (lib/seguimiento/seguimientos.ts) los MEZCLA con `||` de
     // Postgres, nunca los reemplaza como objeto completo.
+    // Issue #251 ("Seguimiento muestra aproximados como Selltrix") —
+    // `fechaCreacion` (date_created real) suma al mismo objeto de
+    // tipo="producto" — SOLO la escribe el cron (lib/trabajos/
+    // revisionDiariaSeguimiento.ts, con el mismo merge `||`, nunca
+    // reemplaza el objeto completo), nunca la extensión: a diferencia
+    // de vendidosAproximado/precioAproximado (respaldos de la página),
+    // esta es un dato que la API sí confirma.
     publicaciones: jsonb("publicaciones").$type<
       | { total: number | null; visibles: { itemId: string; titulo: string | null; precio: number | null }[]; fuente: "api" | "pagina" }
-      | { vendidosAproximado?: number; precioAproximado?: number }
+      | { vendidosAproximado?: number; precioAproximado?: number; fechaCreacion?: string }
     >(),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },

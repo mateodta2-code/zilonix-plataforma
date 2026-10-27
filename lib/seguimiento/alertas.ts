@@ -101,6 +101,22 @@ export function obtenerPrecioAproximado(raw: unknown): number | null {
   return typeof obj.precioAproximado === "number" ? obj.precioAproximado : null;
 }
 
+// Issue #251 ("Seguimiento muestra aproximados como Selltrix") —
+// mismo criterio que obtenerVendidosAproximado/obtenerPrecioAproximado:
+// para tipo = "producto", esta MISMA columna también guarda
+// `fechaCreacion` (date_created real de Mercado Libre, cuando la API
+// lo confirma) — a diferencia de los otros dos campos, este SOLO lo
+// escribe el cron (lib/trabajos/revisionDiariaSeguimiento.ts), nunca
+// la extensión: es un dato que la API sí puede confirmar, no un
+// respaldo de la página. lib/seguimiento/aproximados.ts lo usa para la
+// antigüedad real de la publicación; si viene null, esa misma función
+// cae a interpolar por el id.
+export function obtenerFechaCreacion(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw as { fechaCreacion?: unknown };
+  return typeof obj.fechaCreacion === "string" ? obj.fechaCreacion : null;
+}
+
 // Mismas columnas reales de seguimiento_fotos (db/schema.ts) que
 // importan para comparar — nunca el campo id/empresaId/fecha, que no
 // participan de ninguna regla de alerta.
