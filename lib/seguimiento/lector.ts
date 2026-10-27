@@ -16,6 +16,13 @@ export type DatosFotoNueva = {
   esFull: boolean | null;
   esEnvioGratis: boolean | null;
   publicaciones: PublicacionTiendaMl[] | null;
+  // Issue #251 ("Seguimiento muestra aproximados como Selltrix") —
+  // date_created real de Mercado Libre, cuando la API lo confirma
+  // (nunca para tipo "tienda", que no tiene una fecha de creación
+  // propia). lib/seguimiento/aproximados.ts lo usa para la antigüedad
+  // real de la publicación; si viene null, esa misma función cae a
+  // interpolar por el número del id — nunca se inventa acá.
+  fechaCreacion: string | null;
 };
 
 function fotoVacia(): DatosFotoNueva {
@@ -31,6 +38,7 @@ function fotoVacia(): DatosFotoNueva {
     esFull: null,
     esEnvioGratis: null,
     publicaciones: null,
+    fechaCreacion: null,
   };
 }
 
@@ -86,6 +94,7 @@ export async function leerFotoSeguimiento(seguimiento: SeguimientoParaLeer, toke
       esFull: item.esFull,
       esEnvioGratis: item.esEnvioGratis,
       publicaciones: null,
+      fechaCreacion: item.fechaCreacion,
     };
   }
 
@@ -104,5 +113,8 @@ export async function leerFotoSeguimiento(seguimiento: SeguimientoParaLeer, toke
     esFull: ganadora?.esFull ?? null,
     esEnvioGratis: ganadora?.esEnvioGratis ?? null,
     publicaciones: null,
+    // ganadora sale de obtenerOfertasProducto, que ya pide date_created
+    // (issue #197, para Investigación) — mismo campo, reusado acá.
+    fechaCreacion: ganadora?.fechaCreacion ?? null,
   };
 }
