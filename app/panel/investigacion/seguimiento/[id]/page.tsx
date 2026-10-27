@@ -166,7 +166,7 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
       : null;
   const diasAprox =
     vendidosAprox != null
-      ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, ahora })
+      ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, recursoMl: seguimiento.recursoMl, ahora })
       : null;
   const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
   const precioParaFacturacionDetalle = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximadoDetalle;

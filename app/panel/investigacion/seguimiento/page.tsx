@@ -423,7 +423,7 @@ export default async function SeguimientoPage({
                   : null;
               const diasAprox =
                 vendidosAprox != null
-                  ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, ahora })
+                  ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, recursoMl: seguimiento.recursoMl, ahora })
                   : null;
               const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
               const precioParaFacturacion = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximado;

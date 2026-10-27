@@ -968,7 +968,7 @@ describe("Flujo completo de aproximados — extensión + cron + UI (issue #251)"
     });
     expect(vendidosAprox).toBeCloseTo(220, 6);
 
-    const dias = antiguedadDias({ dateCreated: obtenerFechaCreacion(fotoDeHoy.publicaciones), mlId: mlIdExterno, ahora: new Date() });
+    const dias = antiguedadDias({ dateCreated: obtenerFechaCreacion(fotoDeHoy.publicaciones), mlId: mlIdExterno, recursoMl: seguimiento.recursoMl, ahora: new Date() });
     expect(dias).not.toBeNull();
     expect(dias!).toBeCloseTo(diasDeAntiguedad, 1);
 

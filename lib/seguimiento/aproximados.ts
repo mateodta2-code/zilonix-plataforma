@@ -82,8 +82,19 @@ export function vendidosEstimados(vendidos: number | null, opciones: OpcionesVen
 // esto), pero una vez que obtenerFotoItemMl empiece a guardar
 // date_created (este PR ya lo agrega del lado del cron), cualquier
 // seguimiento con 2+ fotos con date_created real sirve como punto.
-// Hacen falta al menos 2 para poder interpolar.
-export type PuntoCalibracionId = { id: string; fecha: Date };
+// Hacen falta al menos 2 del MISMO tipo para poder interpolar.
+//
+// Corrección de Pablo (revisión sobre 0e22594) — `tipo` ("item" o
+// "product", el mismo recurso_ml real del seguimiento, nunca "seller":
+// esto es solo para producto) suma al punto: un id de ITEM
+// (publicación puntual, MCOxxxxxxxxx) y uno de PRODUCT (catálogo,
+// /p/MCOxxxxxxxxx) son dos numeraciones INDEPENDIENTES de Mercado
+// Libre que pueden compartir el mismo prefijo de país y hasta rangos
+// de números parecidos sin que eso signifique nada — interpolar un id
+// de item contra puntos de product (o viceversa) daría una antigüedad
+// sin sentido, aunque el país coincidiera.
+export type TipoIdMl = "item" | "product";
+export type PuntoCalibracionId = { id: string; tipo: TipoIdMl; fecha: Date };
 export const PUNTOS_CALIBRACION_ID_FECHA: PuntoCalibracionId[] = [];
 
 // Mismo patrón de prefijo+dígitos que PATRON_ID_PRODUCTO_O_ITEM
@@ -101,24 +112,30 @@ function numeroYPrefijoDeId(id: string): { prefijo: string; numero: number } | n
 
 // Interpolación (o extrapolación con los 2 puntos más cercanos, si el
 // id cae afuera del rango calibrado) entre los puntos del MISMO país
-// que `id` — nunca mezcla prefijos distintos (MCO vs. MLA son
-// numeraciones independientes de Mercado Libre). `null` con menos de 2
-// puntos calibrados de ese país, o si `id`/alguno de los puntos no
-// matchea el patrón.
-export function antiguedadDiasPorId(id: string, ahora: Date, puntos: PuntoCalibracionId[] = PUNTOS_CALIBRACION_ID_FECHA): number | null {
+// Y del MISMO tipo (item vs. product, corrección de Pablo arriba) que
+// `id` — nunca mezcla prefijos ni tipos distintos. `null` con menos de
+// 2 puntos calibrados de ese país+tipo, o si `id`/alguno de los puntos
+// no matchea el patrón.
+export function antiguedadDiasPorId(
+  id: string,
+  tipo: TipoIdMl,
+  ahora: Date,
+  puntos: PuntoCalibracionId[] = PUNTOS_CALIBRACION_ID_FECHA
+): number | null {
   const objetivo = numeroYPrefijoDeId(id);
   if (!objetivo) return null;
 
-  const delMismoPais = puntos
+  const delMismoPaisYTipo = puntos
+    .filter((p) => p.tipo === tipo)
     .map((p) => ({ ...numeroYPrefijoDeId(p.id), fecha: p.fecha }))
     .filter((p): p is { prefijo: string; numero: number; fecha: Date } => p.prefijo === objetivo.prefijo)
     .sort((a, b) => a.numero - b.numero);
-  if (delMismoPais.length < 2) return null;
+  if (delMismoPaisYTipo.length < 2) return null;
 
   let i = 0;
-  while (i < delMismoPais.length - 2 && delMismoPais[i + 1].numero <= objetivo.numero) i++;
-  const a = delMismoPais[i];
-  const b = delMismoPais[i + 1];
+  while (i < delMismoPaisYTipo.length - 2 && delMismoPaisYTipo[i + 1].numero <= objetivo.numero) i++;
+  const a = delMismoPaisYTipo[i];
+  const b = delMismoPaisYTipo[i + 1];
   if (a.numero === b.numero) return null; // 2 puntos calibrados con el mismo número — no hay con qué interpolar
 
   const fraccion = (objetivo.numero - a.numero) / (b.numero - a.numero);
@@ -130,6 +147,13 @@ export function antiguedadDiasPorId(id: string, ahora: Date, puntos: PuntoCalibr
 export type OpcionesAntiguedad = {
   dateCreated: Date | string | null;
   mlId: string | null;
+  // Corrección de Pablo — el recurso_ml real del seguimiento (nunca
+  // "seller": esto es solo para producto), para saber contra qué tipo
+  // de punto de calibración interpolar (antiguedadDiasPorId, arriba).
+  // Cualquier valor que no sea "item"/"product" (incluido "seller" o
+  // null) nunca interpola — no hay un concepto de antigüedad por id
+  // para una tienda.
+  recursoMl: "item" | "product" | "seller" | null;
   ahora: Date;
   puntos?: PuntoCalibracionId[];
 };
@@ -146,7 +170,8 @@ export function antiguedadDias(opciones: OpcionesAntiguedad): number | null {
     }
   }
   if (opciones.mlId == null) return null;
-  return antiguedadDiasPorId(opciones.mlId, opciones.ahora, opciones.puntos);
+  if (opciones.recursoMl !== "item" && opciones.recursoMl !== "product") return null;
+  return antiguedadDiasPorId(opciones.mlId, opciones.recursoMl, opciones.ahora, opciones.puntos);
 }
 
 // 3. Ventas/mes — issue #251: vendidos estimados × min(30, días) /
