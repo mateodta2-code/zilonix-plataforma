@@ -24,7 +24,7 @@ const fecha = (iso: string): Date => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date
 // `aproximado: false` en cada lectura de los tests que no están
 // probando específicamente ese campo.
 function lectura(parcial: Partial<LecturaProducto> & { fecha: Date }): LecturaProducto {
-  return { inventario: null, aproximado: false, vendidosTexto: null, ...parcial };
+  return { inventario: null, aproximado: false, vendidosTexto: null, vendidosTextoAproximado: false, ...parcial };
 }
 
 describe("compararProductoDiaADia (issue #251, punto 8)", () => {
@@ -48,12 +48,31 @@ describe("compararProductoDiaADia (issue #251, punto 8)", () => {
     expect(resultado.ventasEstimadas).toBe(0);
   });
 
-  it("sin inventario en ninguna de las dos puntas, usa '+N vendidos' como respaldo", () => {
-    const anterior = lectura({ fecha: fecha("2026-10-24"), vendidosTexto: 50 });
-    const actual = lectura({ fecha: fecha("2026-10-25"), vendidosTexto: 55 });
+  it("sin inventario en ninguna de las dos puntas, usa '+N vendidos' aproximado como respaldo (las dos puntas aproximadas)", () => {
+    const anterior = lectura({ fecha: fecha("2026-10-24"), vendidosTexto: 50, vendidosTextoAproximado: true });
+    const actual = lectura({ fecha: fecha("2026-10-25"), vendidosTexto: 55, vendidosTextoAproximado: true });
     const resultado = compararProductoDiaADia(anterior, actual);
     expect(resultado.ventasEstimadas).toBe(5);
     expect(resultado.reposicion).toBe(false);
+  });
+
+  it("sin inventario en ninguna de las dos puntas, pero las dos con el número EXACTO de vendidos: también se restan", () => {
+    const anterior = lectura({ fecha: fecha("2026-10-24"), vendidosTexto: 500 });
+    const actual = lectura({ fecha: fecha("2026-10-25"), vendidosTexto: 523 });
+    expect(compararProductoDiaADia(anterior, actual).ventasEstimadas).toBe(23);
+  });
+
+  // Issue #252 (revisión de Pablo, punto 7) — bug real: un "+520"
+  // aproximado de hoy contra un 500 EXACTO de ayer se restaba igual,
+  // como si las dos puntas fueran igual de confiables.
+  it("una punta con el número exacto y la otra con el piso '+N' aproximado: null, nunca se mezclan", () => {
+    const anteriorExacta = lectura({ fecha: fecha("2026-10-24"), vendidosTexto: 500 });
+    const actualAproximada = lectura({ fecha: fecha("2026-10-25"), vendidosTexto: 520, vendidosTextoAproximado: true });
+    expect(compararProductoDiaADia(anteriorExacta, actualAproximada).ventasEstimadas).toBeNull();
+
+    const anteriorAproximada = lectura({ fecha: fecha("2026-10-24"), vendidosTexto: 500, vendidosTextoAproximado: true });
+    const actualExacta = lectura({ fecha: fecha("2026-10-25"), vendidosTexto: 523 });
+    expect(compararProductoDiaADia(anteriorAproximada, actualExacta).ventasEstimadas).toBeNull();
   });
 
   it("el inventario gana siempre que esté en las dos puntas, nunca se mezcla con el texto de respaldo", () => {
@@ -63,8 +82,8 @@ describe("compararProductoDiaADia (issue #251, punto 8)", () => {
   });
 
   it("'+N vendidos' que baja (contador que nunca debería bajar) -> null, nunca una venta negativa inventada", () => {
-    const anterior = lectura({ fecha: fecha("2026-10-24"), vendidosTexto: 60 });
-    const actual = lectura({ fecha: fecha("2026-10-25"), vendidosTexto: 50 });
+    const anterior = lectura({ fecha: fecha("2026-10-24"), vendidosTexto: 60, vendidosTextoAproximado: true });
+    const actual = lectura({ fecha: fecha("2026-10-25"), vendidosTexto: 50, vendidosTextoAproximado: true });
     const resultado = compararProductoDiaADia(anterior, actual);
     expect(resultado.ventasEstimadas).toBeNull();
     expect(resultado.reposicion).toBe(false);
@@ -278,6 +297,22 @@ describe("necesitaLecturaDePagina (issue #251, punto 10 — aviso de actualizaci
   it("producto competidor con foto de hoy pero sin inventario ni vendidos -> necesita lectura", () => {
     const ultimaFoto = { fecha: HOY, inventarioDisponible: null, vendidos: null, publicaciones: null };
     expect(necesitaLecturaDePagina({ esCompetidor: true, tipo: "producto", ultimaFoto, ahora: AHORA })).toBe(true);
+  });
+
+  // Issue #252 (revisión de Pablo, punto 6) — bug real: con SOLO el
+  // piso "+N (aproximado)" guardado hoy, esto decía "necesita lectura"
+  // igual — el aviso "Actualiza hoy para ver cuánto vendieron"
+  // aparecía al lado del "+N (aproximado)" que ya se estaba mostrando.
+  it("producto competidor con foto de hoy, sin inventario ni vendidos exacto, pero CON el piso '+N' aproximado -> ya no necesita lectura", () => {
+    const ultimaFoto = { fecha: HOY, inventarioDisponible: null, vendidos: null, publicaciones: null, vendidosAproximado: 520 };
+    expect(necesitaLecturaDePagina({ esCompetidor: true, tipo: "producto", ultimaFoto, ahora: AHORA })).toBe(false);
+  });
+
+  it("vendidosAproximado en null (o sin mandarlo, un llamador viejo) se trata igual que 'sin dato' -> sigue necesitando lectura", () => {
+    const sinAproximado = { fecha: HOY, inventarioDisponible: null, vendidos: null, publicaciones: null, vendidosAproximado: null };
+    const sinElCampo = { fecha: HOY, inventarioDisponible: null, vendidos: null, publicaciones: null };
+    expect(necesitaLecturaDePagina({ esCompetidor: true, tipo: "producto", ultimaFoto: sinAproximado, ahora: AHORA })).toBe(true);
+    expect(necesitaLecturaDePagina({ esCompetidor: true, tipo: "producto", ultimaFoto: sinElCampo, ahora: AHORA })).toBe(true);
   });
 
   it("producto competidor con foto de hoy y AL MENOS uno de los dos (inventario o vendidos) -> ya no necesita lectura", () => {

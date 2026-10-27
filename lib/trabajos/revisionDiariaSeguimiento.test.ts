@@ -637,6 +637,64 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     expect(actualizado.nombre).toBe("Nombre real de catálogo"); // ya no el placeholder
   });
 
+  // Issue #252 (revisión de Pablo, punto 4) — bug real: si la extensión
+  // lee la página ANTES de que corra el cron, guardarDatoDePaginaSeguimiento
+  // (lib/seguimiento/seguimientos.ts) ya reemplaza el placeholder por
+  // un nombre de respaldo (con el sufijo "(aproximado)") — con la
+  // condición VIEJA (gatear la corrección de recurso_ml por
+  // `nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION`), eso bastaba para
+  // que el cron NUNCA volviera a intentar corregir `recurso_ml`, aunque
+  // la API jamás hubiera confirmado nada real — exactamente el caso de
+  // MCO452014269. Simula ese orden exacto: primero el estado que deja
+  // la extensión (nombre con el sufijo, una foto SOLO con inventario,
+  // sin ningún campo de la API), después el cron.
+  it('orden "primero la extensión, después el cron": un nombre de respaldo (ya no el placeholder) nunca bloquea la corrección de recurso_ml, porque depende de la API, no del nombre', async () => {
+    const creado = await crearSeguimientoConCuenta("EXTENSION-ANTES-DEL-CRON");
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx.update(seguimientosMl).set({ nombre: "Cargador HP 65W original (aproximado)" }).where(eq(seguimientosMl.id, creado.id)).returning()
+    );
+    expect(seguimiento.recursoMl).toBe("item"); // a propósito, el valor mal guardado que hay que corregir
+
+    // La extensión ya guardó inventario hoy — ningún campo de la API
+    // (precio/estado/enCatalogo/ganaBotonCompra) tiene nada todavía,
+    // porque /items/{id} 404 siempre con el recurso mal guardado.
+    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: hoyBogota(), inventarioDisponible: 10 })
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/items/") && u.includes("attributes=id") && !u.includes("price")) {
+          return respuestaJson({}, 404); // confirmarRecursoProductoMl: no es un item real
+        }
+        if (u.includes("/products/") && u.includes("attributes=id")) {
+          return respuestaJson({ id: seguimiento.mlIdExterno }); // confirmarRecursoProductoMl: SÍ es product
+        }
+        if (u.includes("/products/") && u.endsWith("/items")) {
+          return respuestaJson({ results: [] }); // leerFotoSeguimiento con el recurso YA corregido: sin ofertas
+        }
+        if (u.includes("/products/")) {
+          return respuestaJson({ name: "Nombre real de catálogo" }); // resolverNombre -> obtenerProducto
+        }
+        throw new Error(`URL inesperada: ${u}`);
+      })
+    );
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultado.ok).toBe(true);
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.recursoMl).toBe("product"); // corregido solo, aunque el nombre ya NO fuera el placeholder
+    expect(actualizado.nombre).toBe("Nombre real de catálogo"); // la API reemplaza el respaldo de la extensión apenas confirma uno real
+
+    const [fotoDeHoy] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(fotoDeHoy.inventarioDisponible).toBe(10); // el inventario de la extensión nunca se tocó
+  });
+
   // Corrección de Pablo (revisión del PR #253, sobre 7aa93f2) — "Revisar
   // ahora" comparte revisarUnSeguimiento con la ronda de la tarde: si ya
   // hay foto de hoy (ej. el cron ya corrió, o un clic repetido en

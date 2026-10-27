@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
@@ -14,7 +14,7 @@ import {
 } from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
 import { compararFotos, normalizarPublicaciones, type FotoComparable } from "@/lib/seguimiento/alertas";
-import { NOMBRE_PENDIENTE_PRIMERA_REVISION, resolverNombre } from "@/lib/seguimiento/seguimientos";
+import { NOMBRE_PENDIENTE_PRIMERA_REVISION, nombreEsAproximado, resolverNombre } from "@/lib/seguimiento/seguimientos";
 
 // Issue #175 — regla de CLAUDE.md: "toda tarea en segundo plano vive
 // en lib/trabajos/". Mismo patrón que lib/ml/trabajador.ts (tarea
@@ -286,6 +286,41 @@ function camposApiDeDatos(datos: Awaited<ReturnType<typeof leerConReintento429>>
 // "procesado"), simplemente no hay foto de ayer con qué compararla
 // todavía (primera foto de este seguimiento) — no hay alertas que
 // generar, pero no es un salto.
+// Issue #252 (revisión de Pablo, punto 4) — bug real: antes, la
+// autocorrección de `recurso_ml` (más abajo) dependía de
+// `seguimiento.nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION` — si la
+// extensión leía la página ANTES de que corriera el cron, ya
+// reemplazaba ese placeholder (guardarDatoDePaginaSeguimiento,
+// lib/seguimiento/seguimientos.ts), así que esta condición daba falso
+// para siempre y `recurso_ml` se quedaba mal guardado (MCO452014269:
+// nombre resuelto por la extensión, `recurso_ml` "item" cuando el real
+// era "product", `/items/{id}` 404 para siempre). Ahora depende de si
+// la API YA CONFIRMÓ algo real para este seguimiento — cualquier foto
+// con precio/estado/enCatalogo/ganaBotonCompra no nulos (los mismos
+// campos de CamposApiDeFoto, arriba) — nunca del nombre, que la
+// extensión puede resolver sin que eso diga nada sobre si `recurso_ml`
+// es correcto.
+async function huboAlgunaLecturaDeApiConfirmada(empresaId: string, seguimientoId: string): Promise<boolean> {
+  const [fila] = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ id: seguimientoFotos.id })
+      .from(seguimientoFotos)
+      .where(
+        and(
+          eq(seguimientoFotos.seguimientoId, seguimientoId),
+          or(
+            isNotNull(seguimientoFotos.precio),
+            isNotNull(seguimientoFotos.estado),
+            isNotNull(seguimientoFotos.enCatalogo),
+            isNotNull(seguimientoFotos.ganaBotonCompra)
+          )
+        )
+      )
+      .limit(1)
+  );
+  return fila != null;
+}
+
 async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoUnSeguimiento> {
   const cuenta = await obtenerCuentaMlActiva(seguimiento.empresaId);
   if (!cuenta) throw new Error("La empresa no tiene ninguna cuenta de Mercado Libre conectada.");
@@ -303,30 +338,28 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
   // pendiente. Nunca se reintenta si ya hay un nombre real, para no
   // gastar una llamada a ML de más todos los días.
   //
-  // Issue #252 (smoke de staging) — bug real confirmado: MCO452014269
-  // se quedó en el placeholder para SIEMPRE porque `recurso_ml` se
-  // guardó mal ANTES de que agregarSeguimiento confirmara el tipo
-  // contra ML (issue #250, punto A) — `/items/{id}` 404 para siempre
-  // con un id que en realidad es de catálogo, así que `resolverNombre`
-  // (abajo) nunca podía resolver nada, sin importar cuántas veces
-  // corriera el cron (ni "Revisar ahora", que comparte esta misma
-  // función). Mientras el nombre siga en el placeholder, se vuelve a
-  // confirmar el tipo real con `confirmarRecursoProductoMl` (el mismo
-  // chequeo que ya usa el alta nueva y
-  // scripts/corregir-tipo-recurso-seguimiento.ts, sin token) — si
-  // Mercado Libre confirma un tipo DISTINTO al guardado, se corrige en
-  // la base ANTES de intentar el nombre, y el resto de esta función
-  // (la lectura de la foto del día, más abajo) usa el tipo corregido,
-  // nunca el viejo.
+  // Issue #252 (revisión de Pablo, punto 4) — las dos correcciones de
+  // abajo son INDEPENDIENTES a propósito (dos `if` separados, nunca
+  // uno solo): la de `recurso_ml` depende de si la API confirmó algo
+  // real alguna vez (huboAlgunaLecturaDeApiConfirmada, arriba); la del
+  // nombre depende de si sigue siendo aproximado (nombreEsAproximado,
+  // lib/seguimiento/seguimientos.ts — el placeholder original, o un
+  // respaldo de la extensión todavía sin confirmar). Antes las dos
+  // compartían la misma condición (nombre pendiente) — bug real:
+  // MCO452014269 tenía `recurso_ml` guardado mal ("item" cuando el
+  // real era "product", `/items/{id}` 404 para siempre), pero la
+  // extensión ya había puesto un nombre ahí (issue #251), así que la
+  // condición compartida daba falso para siempre y `recurso_ml` NUNCA
+  // se corregía, aunque la API jamás hubiera confirmado nada.
   let recursoMl = seguimiento.recursoMl;
-  if (seguimiento.nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION) {
-    if (seguimiento.tipo === "producto") {
-      const confirmacion = await confirmarRecursoProductoMl(seguimiento.mlIdExterno);
-      if (confirmacion.estado === "confirmado" && confirmacion.recursoMl !== recursoMl) {
-        recursoMl = confirmacion.recursoMl;
-        await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ recursoMl }).where(eq(seguimientosMl.id, seguimiento.id)));
-      }
+  if (seguimiento.tipo === "producto" && !(await huboAlgunaLecturaDeApiConfirmada(seguimiento.empresaId, seguimiento.id))) {
+    const confirmacion = await confirmarRecursoProductoMl(seguimiento.mlIdExterno);
+    if (confirmacion.estado === "confirmado" && confirmacion.recursoMl !== recursoMl) {
+      recursoMl = confirmacion.recursoMl;
+      await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ recursoMl }).where(eq(seguimientosMl.id, seguimiento.id)));
     }
+  }
+  if (nombreEsAproximado(seguimiento.nombre)) {
     const nombreResuelto = await resolverNombre(seguimiento.tipo, recursoMl, seguimiento.mlIdExterno, token);
     if (nombreResuelto !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
       await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: nombreResuelto }).where(eq(seguimientosMl.id, seguimiento.id)));

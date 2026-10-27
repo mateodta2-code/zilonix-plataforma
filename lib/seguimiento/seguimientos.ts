@@ -90,6 +90,29 @@ async function tokenPropio(empresaId: string): Promise<string> {
 // siempre con el id.
 export const NOMBRE_PENDIENTE_PRIMERA_REVISION = "Pendiente de primera revisión";
 
+// Issue #252 (revisión de Pablo, punto 4) — sufijo que marca un
+// `nombre` guardado desde el RESPALDO de la extensión (el título que
+// leyó de la página, ver guardarDatoDePaginaSeguimiento más abajo),
+// nunca confirmado todavía por la API de Mercado Libre. Antes, ese
+// respaldo pisaba el placeholder con el título tal cual, sin ninguna
+// marca — una vez pisado, `nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION`
+// daba falso para siempre, así que revisarUnSeguimiento (lib/trabajos/
+// revisionDiariaSeguimiento.ts) nunca volvía a intentar resolverlo por
+// la API, aunque esta JAMÁS hubiera confirmado nada real (bug real:
+// MCO452014269, con recurso_ml guardado mal — ver el comentario de
+// abajo). Con este sufijo, nombreEsAproximado (abajo) sigue
+// reconociendo que el nombre todavía no es definitivo, y la API puede
+// reemplazarlo en cuanto confirme uno real.
+const SUFIJO_NOMBRE_APROXIMADO = " (aproximado)";
+
+// `true` para el placeholder original O para un nombre con el sufijo
+// de respaldo de arriba — en los dos casos, todavía no es un nombre
+// confirmado por la API, así que vale la pena seguir intentando
+// resolverlo.
+export function nombreEsAproximado(nombre: string): boolean {
+  return nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION || nombre.endsWith(SUFIJO_NOMBRE_APROXIMADO);
+}
+
 // Nombre para mostrar en la lista — se intenta al agregar (igual que
 // invitaciones.empresa_nombre/rol_nombre) con las funciones YA
 // existentes de lib/ml/cliente.ts, nunca una llamada nueva; y se
@@ -209,11 +232,21 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
   // confirmó su nombre por la API (recurso_ml guardado mal, ver
   // revisionDiariaSeguimiento.ts) — aunque la extensión SÍ tenía el
   // título real de la página. Nunca pisa un nombre YA confirmado por
-  // la API (solo completa el placeholder) — `seguimientos_ml.nombre`
+  // la API (solo completa el placeholder, o un respaldo anterior de
+  // este mismo tipo — nombreEsAproximado, arriba) — `seguimientos_ml.nombre`
   // es una tabla DISTINTA de `seguimiento_fotos` (lo que actualiza el
   // resto de esta función), por eso es una escritura aparte.
-  if (dato.tipoSeguimiento === "producto" && dato.titulo && seguimiento.nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION) {
-    await dbComoEmpresa(empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: dato.titulo as string }).where(eq(seguimientosMl.id, seguimiento.id)));
+  // Corrección de Pablo (punto 4) — se guarda con SUFIJO_NOMBRE_APROXIMADO
+  // (nunca el título pelado): si se guardara igual que un nombre
+  // confirmado, `nombreEsAproximado` dejaría de reconocerlo como
+  // pendiente apenas la extensión lo escribiera una vez, y
+  // revisarUnSeguimiento nunca volvería a intentar resolverlo por la
+  // API — el mismo bug que tenía antes, solo que ahora escondido
+  // detrás de un nombre que SE VE confirmado sin estarlo.
+  if (dato.tipoSeguimiento === "producto" && dato.titulo && nombreEsAproximado(seguimiento.nombre)) {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.update(seguimientosMl).set({ nombre: `${dato.titulo}${SUFIJO_NOMBRE_APROXIMADO}` }).where(eq(seguimientosMl.id, seguimiento.id))
+    );
   }
 
   const hoy = fechaDiaBogota(new Date(dato.leidoEn));

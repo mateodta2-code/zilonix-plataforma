@@ -765,7 +765,46 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     });
 
     const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
-    expect(actualizado.nombre).toBe("Cargador HP 65W original");
+    // Issue #252 (revisión de Pablo, punto 4) — con el sufijo "(aproximado)",
+    // nunca el título pelado: así `nombreEsAproximado` (lib/seguimiento/
+    // seguimientos.ts) sigue reconociendo que este nombre no es
+    // definitivo, y revisionDiariaSeguimiento.ts puede reemplazarlo en
+    // cuanto la API confirme uno real — ver ese archivo de pruebas.
+    expect(actualizado.nombre).toBe("Cargador HP 65W original (aproximado)");
+  });
+
+  it("producto con nombre pendiente, DOS lecturas de la extensión (título distinto la segunda vez): el respaldo se actualiza, siempre con el sufijo", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 10,
+      inventarioAproximado: false,
+      vendidos: null,
+      vendidosExacto: false,
+      titulo: "Título leído la primera vez",
+      precio: null,
+      leidoEn: leidoAhora(),
+    });
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno: "MCO111",
+      inventario: 9,
+      inventarioAproximado: false,
+      vendidos: null,
+      vendidosExacto: false,
+      titulo: "Título leído la segunda vez",
+      precio: null,
+      leidoEn: leidoAhora(),
+    });
+
+    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.nombre).toBe("Título leído la segunda vez (aproximado)"); // sigue siendo aproximado -> se actualiza, no se queda pegado al primero
   });
 
   it("producto con nombre YA confirmado por la API: el título de la extensión nunca lo pisa", async () => {

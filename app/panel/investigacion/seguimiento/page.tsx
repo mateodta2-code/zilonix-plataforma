@@ -427,7 +427,11 @@ export default async function SeguimientoPage({
                       // es una unión (`{vendidosAproximado}` también
                       // vive ahí para tipo="producto"), nunca el tipo
                       // más angosto que espera esta función.
-                      ultimaFoto: ultimaFoto ? { ...ultimaFoto, publicaciones } : null,
+                      // Issue #252 (revisión de Pablo, punto 6) — se
+                      // suma el aproximado ya calculado arriba: si hoy
+                      // solo hay "+N (aproximado)", esta función ya no
+                      // dice "falta lectura" al lado de eso.
+                      ultimaFoto: ultimaFoto ? { ...ultimaFoto, publicaciones, vendidosAproximado } : null,
                       ahora,
                     }) ? (
                       <div className={styles.subdato}>Actualiza hoy para ver cuánto vendieron</div>

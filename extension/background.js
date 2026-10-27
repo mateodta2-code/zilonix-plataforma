@@ -74,19 +74,59 @@ const COOLDOWN_ABRIR_SEGUIMIENTOS_MS = 30_000;
 // cerrarPestanaActualizarTodo (abajo) SOLO cierra un id que esté en
 // esta lista, nunca "la pestaña que mandó el mensaje" a ciegas.
 const TIEMPO_MAX_PESTANA_ACTUALIZAR_TODO_MS = 45_000;
+// Corrección de Pablo (revisión del PR #260, punto 5) — espera real
+// sin lecturas NUEVAS de esa pestaña antes de cerrarla: la primera
+// lectura que llega puede no ser la última — el MutationObserver de
+// content.js sigue completando datos (inventario, después vendidos)
+// con varias relecturas de la misma carga de página, y cerrar con la
+// primera las cortaría a la mitad. El tope absoluto sigue siendo
+// TIEMPO_MAX_PESTANA_ACTUALIZAR_TODO_MS (45s desde que se abrió, nunca
+// desde la última lectura) — manda igual aunque las relecturas nunca
+// paren.
+const TIEMPO_ESPERA_SIN_NUEVAS_LECTURAS_MS = 5_000;
+
+// Corrección de Pablo (revisión del PR #260, punto 1) — bug real
+// confirmado con un mock de storage con retraso: registrar/cerrar/
+// desregistrar hacían su propio get→modificar→set sin ninguna
+// exclusión entre sí — dos llamadas casi simultáneas (ej. el `for` de
+// "Actualizar todo" creando 4 pestañas una tras otra) leían la MISMA
+// lista vieja y el último `set` pisaba el trabajo de las demás (de 4
+// pestañas, solo 2 quedaban registradas, y solo esas se llegaban a
+// cerrar). TODA lectura+escritura de `pestanasActualizarTodo` pasa
+// ahora por esta cola de promesas — cada operación espera a que la
+// anterior termine antes de leer el storage, así que ninguna puede
+// pisar lo que la otra acaba de escribir. `transformar(lista)` recibe
+// la lista ACTUAL (nunca una copia vieja) y devuelve la lista nueva a
+// guardar.
+let colaPestanasActualizarTodo = Promise.resolve();
+
+function conPestanasActualizarTodo(transformar) {
+  const resultado = colaPestanasActualizarTodo.then(
+    () =>
+      new Promise((resolve) => {
+        chrome.storage.session.get({ pestanasActualizarTodo: [] }, (datos) => {
+          const lista = Array.isArray(datos.pestanasActualizarTodo) ? datos.pestanasActualizarTodo : [];
+          const listaNueva = transformar(lista);
+          chrome.storage.session.set({ pestanasActualizarTodo: listaNueva }, () => resolve(listaNueva));
+        });
+      })
+  );
+  // La cola sigue andando aunque esta operación puntual falle — nunca
+  // se traba para las que vengan después.
+  colaPestanasActualizarTodo = resultado.then(
+    () => undefined,
+    () => undefined
+  );
+  return resultado;
+}
 
 function registrarPestanaActualizarTodo(tabId) {
   if (tabId == null) return;
-  chrome.storage.session.get({ pestanasActualizarTodo: [] }, (datos) => {
-    const lista = Array.isArray(datos.pestanasActualizarTodo) ? datos.pestanasActualizarTodo : [];
-    lista.push({ tabId, creadoMs: Date.now() });
-    chrome.storage.session.set({ pestanasActualizarTodo: lista });
-  });
-  // Respaldo de los 45s en memoria — misma limitación de Manifest V3
-  // ya documentada arriba para el escaneo de #221 (un Service Worker
-  // reciclado por inactividad pierde este timer); en la práctica, la
-  // propia carga de la pestaña (content.js reescaneando) genera
-  // actividad que lo mantiene vivo durante esta ventana corta.
+  conPestanasActualizarTodo((lista) => [...lista, { tabId, creadoMs: Date.now() }]);
+  // Respaldo ABSOLUTO de los 45s en memoria — si el Service Worker se
+  // recicla antes de que esto dispare, cerrarPestanasActualizarTodoVencidas()
+  // (abajo) alcanza a cerrarla igual apenas el worker vuelva a
+  // despertar por cualquier motivo, tarde pero nunca para siempre.
   setTimeout(() => cerrarPestanaActualizarTodo(tabId), TIEMPO_MAX_PESTANA_ACTUALIZAR_TODO_MS);
 }
 
@@ -98,11 +138,10 @@ function registrarPestanaActualizarTodo(tabId) {
 // `chrome.runtime.lastError` normal (nunca un error real que haga
 // falta mostrar en ningún lado), igual que el resto de este archivo.
 function cerrarPestanaActualizarTodo(tabId) {
-  chrome.storage.session.get({ pestanasActualizarTodo: [] }, (datos) => {
-    const lista = Array.isArray(datos.pestanasActualizarTodo) ? datos.pestanasActualizarTodo : [];
-    if (!lista.some((p) => p.tabId === tabId)) return;
-    chrome.storage.session.set({ pestanasActualizarTodo: lista.filter((p) => p.tabId !== tabId) });
+  conPestanasActualizarTodo((lista) => {
+    if (!lista.some((p) => p.tabId === tabId)) return lista;
     chrome.tabs.remove(tabId, () => void chrome.runtime.lastError);
+    return lista.filter((p) => p.tabId !== tabId);
   });
 }
 
@@ -116,12 +155,65 @@ function cerrarPestanaActualizarTodo(tabId) {
 // (ni "tabs" ni "host_permissions") — mismo criterio de todo este
 // archivo, documentado arriba.
 function desregistrarPestanaActualizarTodo(tabId) {
+  conPestanasActualizarTodo((lista) => lista.filter((p) => p.tabId !== tabId));
+}
+
+// Corrección de Pablo (revisión del PR #260, punto 5) — nunca cierra
+// con la PRIMERA lectura: espera TIEMPO_ESPERA_SIN_NUEVAS_LECTURAS_MS
+// sin que llegue una lectura NUEVA de esa misma pestaña — cada lectura
+// nueva reinicia esta espera (clearTimeout + un timer nuevo); el
+// respaldo absoluto de 45s (desde que se abrió la pestaña,
+// registrarPestanaActualizarTodo) manda igual, sin importar cuántas
+// veces se reinicie esto.
+const timersEsperaCierre = new Map(); // tabId -> timeoutId del debounce, nunca persistido (se pierde si el worker se recicla, igual que cualquier setTimeout de este archivo)
+
+function programarCierrePorInactividad(tabId) {
+  const timerAnterior = timersEsperaCierre.get(tabId);
+  if (timerAnterior != null) clearTimeout(timerAnterior);
+  const timerId = setTimeout(() => {
+    timersEsperaCierre.delete(tabId);
+    cerrarPestanaActualizarTodo(tabId);
+  }, TIEMPO_ESPERA_SIN_NUEVAS_LECTURAS_MS);
+  timersEsperaCierre.set(tabId, timerId);
+}
+
+// Corrección de Pablo (revisión del PR #260, punto 2) — bug real: el
+// `setTimeout` de 45s (registrarPestanaActualizarTodo, arriba) se
+// pierde si el Service Worker de Manifest V3 se duerme por
+// inactividad — justo el caso más probable cuando la lectura NUNCA
+// llega (nada mantiene al worker despierto). Sin ningún permiso
+// nuevo: cada vez que el worker despierta por cualquier motivo (un
+// mensaje nuevo, una pestaña que se activa, `onStartup`, o simplemente
+// porque este script se vuelve a cargar — la llamada suelta de más
+// abajo) se recorre el registro completo y se cierra cualquier entrada
+// con `creadoMs` de más de TIEMPO_MAX_PESTANA_ACTUALIZAR_TODO_MS — red
+// de seguridad real, independiente de que el `setTimeout` puntual de
+// esa pestaña haya sobrevivido o no.
+function cerrarPestanasActualizarTodoVencidas() {
+  const ahoraMs = Date.now();
   chrome.storage.session.get({ pestanasActualizarTodo: [] }, (datos) => {
     const lista = Array.isArray(datos.pestanasActualizarTodo) ? datos.pestanasActualizarTodo : [];
-    if (!lista.some((p) => p.tabId === tabId)) return;
-    chrome.storage.session.set({ pestanasActualizarTodo: lista.filter((p) => p.tabId !== tabId) });
+    for (const p of lista) {
+      if (ahoraMs - p.creadoMs >= TIEMPO_MAX_PESTANA_ACTUALIZAR_TODO_MS) cerrarPestanaActualizarTodo(p.tabId);
+    }
   });
 }
+// "Al cargar" — este script entero se vuelve a ejecutar cada vez que
+// el Service Worker despierta (Manifest V3 no lo mantiene vivo entre
+// eventos), así que esta llamada suelta YA cubre ese caso sin falta.
+cerrarPestanasActualizarTodoVencidas();
+chrome.runtime.onStartup.addListener(() => cerrarPestanasActualizarTodoVencidas());
+
+// Corrección de Pablo (revisión del PR #260, punto 2) — si la persona
+// cierra a mano una de estas pestañas ANTES de que llegue su lectura o
+// de que pasen los 45s, se desregistra apenas Chrome avisa que ya no
+// existe — mejor higiene (la lista nunca acumula ids de pestañas que
+// ya no existen) aunque llamar chrome.tabs.remove sobre un id que ya
+// no existe tampoco sería un error real (mismo chrome.runtime.lastError
+// normal de siempre).
+chrome.tabs.onRemoved.addListener((tabId) => {
+  desregistrarPestanaActualizarTodo(tabId);
+});
 
 function encolarDatoPaginaSeguimiento(payload) {
   chrome.storage.session.get({ colaSeguimiento: [] }, (datos) => {
@@ -671,6 +763,11 @@ function finalizarEscaneoPlataforma(tabIdPanel) {
 }
 
 chrome.runtime.onMessage.addListener((mensaje, remitente) => {
+  // Corrección de Pablo (revisión del PR #260, punto 2) — "el worker
+  // despertó", sin importar qué mensaje sea: barre el registro de
+  // "Actualizar todo" por si había alguna pestaña vencida esperando a
+  // que algo despertara al Service Worker para poder cerrarla.
+  cerrarPestanasActualizarTodoVencidas();
   if (!mensaje) return;
 
   if (mensaje.tipo === "zilonix:iniciar-escaneo") {
@@ -822,13 +919,16 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
     // Issue #252, punto 5 — apenas esta lectura de inventario/vendidos/
     // publicaciones quedó encolada (arriba) o se intentó entregar
     // (el broadcast de arriba, a la pestaña de Seguimiento que ya
-    // estaba abierta), se cierra la pestaña que la mandó — PERO SOLO
-    // si de verdad es una que "Actualizar todo" abrió
-    // (cerrarPestanaActualizarTodo no hace nada si no está en esa
-    // lista: nunca cierra una pestaña que la persona abrió a mano, ni
-    // una que ya se desregistró porque la persona la activó).
+    // estaba abierta), se PROGRAMA el cierre de la pestaña que la
+    // mandó — nunca inmediato (corrección de Pablo, punto 5: el
+    // MutationObserver de content.js puede seguir completando datos
+    // con relecturas de la misma carga, ver programarCierrePorInactividad
+    // arriba). `programarCierrePorInactividad`/`cerrarPestanaActualizarTodo`
+    // no hacen nada si esta pestaña no es una que "Actualizar todo"
+    // abrió de verdad — nunca cierra una pestaña que la persona abrió
+    // a mano, ni una que ya se desregistró porque la persona la activó.
     if (mensaje.tipo === "zilonix:dato-pagina-seguimiento" && remitente.tab && remitente.tab.id != null) {
-      cerrarPestanaActualizarTodo(remitente.tab.id);
+      programarCierrePorInactividad(remitente.tab.id);
     }
   });
 });
@@ -838,5 +938,9 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
 // CUALQUIER pestaña (la persona haciendo clic en ella, Alt+Tab, etc.)
 // — mucho antes de que su lectura llegue o de que pasen los 45s.
 chrome.tabs.onActivated.addListener(({ tabId }) => {
+  // Corrección de Pablo (revisión del PR #260, punto 2) — "el worker
+  // despertó" también cuenta acá (activar una pestaña dispara este
+  // evento igual, aunque el worker estuviera dormido).
+  cerrarPestanasActualizarTodoVencidas();
   desregistrarPestanaActualizarTodo(tabId);
 });

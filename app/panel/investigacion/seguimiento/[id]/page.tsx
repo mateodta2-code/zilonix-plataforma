@@ -123,6 +123,12 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
       // comparar cuando el inventario no estaba disponible — el
       // respaldo de texto quedaba muerto en la práctica.
       vendidosTexto: f.vendidos ?? obtenerVendidosAproximado(f.publicaciones),
+      // Issue #252 (revisión de Pablo, punto 7) — `true` cuando este
+      // `vendidosTexto` vino del piso aproximado (f.vendidos era
+      // null), nunca cuando vino del número exacto — compararProductoDiaADia
+      // solo resta dos puntas con la MISMA bandera, nunca mezcla un
+      // día exacto con otro aproximado.
+      vendidosTextoAproximado: f.vendidos == null,
     }));
     // Issue #251 (corrección de Pablo, punto 9) — "Ayer vs hoy" exige
     // una foto fechada EXACTAMENTE hoy y otra EXACTAMENTE ayer (hora
