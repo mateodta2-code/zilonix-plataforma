@@ -317,6 +317,22 @@ describe("tipoDePagina — issue #192, bug real: una tienda oficial real no se r
     expect(tipoDePagina("https://listado.mercadolibre.com.co/vendedor?CustId=123456789")).toBe("tienda");
   });
 
+  // Issue #252 (smoke de staging) — bug real: las dos tiendas de
+  // competencia probadas en staging (TECNOLOSYS COLOMBIA id
+  // 145150422, TIENDAMERCADOMAX id 456866397) quedaron en "Sin dato"
+  // después de "Actualizar todo". `construirLinkMlDeSeguimiento`
+  // (lib/seguimiento/link.ts) arma el link como
+  // `listado.mercadolibre.com.co/_CustId_{sellerId}` (confirmado real
+  // en archive.org: 200, con "N resultados" — el mismo patrón de
+  // listado filtrado por vendedor) — pero acá solo se reconocía
+  // `?CustId=`/`&CustId=` (con "="), nunca `_CustId_` (con guión
+  // bajo): esa URL caía al chequeo de `/listado` de más abajo y se
+  // leía como una búsqueda genérica, nunca como la tienda.
+  it('_CustId_123456 (sin "=", la forma real que arma "Actualizar todo" para una tienda) -> "tienda", nunca "listado"', () => {
+    expect(tipoDePagina("https://listado.mercadolibre.com.co/_CustId_145150422")).toBe("tienda");
+    expect(tipoDePagina("https://listado.mercadolibre.com.co/_CustId_456866397")).toBe("tienda");
+  });
+
   it('un producto real sigue dando "producto", nunca "tienda"', () => {
     expect(tipoDePagina("https://articulo.mercadolibre.com.co/MCO-1234567890-reloj-_JM")).toBe("producto");
   });
@@ -381,6 +397,16 @@ describe("extraerCustIdDeUrl — issue #174, corrección: la forma clásica de \
   it("?CustId=<dígitos> en la URL, solo o junto con otros parámetros", () => {
     expect(extraerCustIdDeUrl("https://listado.mercadolibre.com.co/vendedor?CustId=123456789")).toBe("123456789");
     expect(extraerCustIdDeUrl("https://listado.mercadolibre.com.co/vendedor?algo=x&CustId=123456789")).toBe("123456789");
+  });
+
+  // Issue #252 (smoke de staging) — misma causa que el bug de
+  // tipoDePagina de arriba: `_CustId_123456` (la forma real que arma
+  // "Actualizar todo" para una tienda, sin "=") no se reconocía acá —
+  // aunque tipoDePagina ya clasificara bien la página como "tienda",
+  // leerSellerIdDeTienda hubiera caído al respaldo del HTML (menos
+  // confiable) en vez de leer el id directo de la URL.
+  it("_CustId_<dígitos> (sin '=') también se reconoce", () => {
+    expect(extraerCustIdDeUrl("https://listado.mercadolibre.com.co/_CustId_145150422")).toBe("145150422");
   });
 
   it("sin CustId, o entrada inválida -> null", () => {
@@ -759,5 +785,27 @@ describe("construirPublicacionesTienda — issue #251 punto 8 (revisión de Pabl
 
   it("miles con separador real de Mercado Libre (punto) en el total -> número completo", () => {
     expect(construirPublicacionesTienda("1.200 resultados", [])).toEqual({ total: 1200, idsVisibles: [] });
+  });
+
+  // Issue #252 (smoke de staging) — texto y hrefs REALES, tal cual
+  // los trae una página de tienda capturada en archive.org
+  // (listado.mercadolibre.com.co/_CustId_1012038349, snapshot de
+  // mayo/2025 — acceso directo sigue bloqueado desde este sandbox):
+  // el total real ("23 resultados", `.ui-search-search-result__quantity-results`)
+  // y 3 hrefs reales de `a.poly-component__title` (uno de catálogo
+  // con `/p/`, dos de publicación directa) — confirma que el lector
+  // funciona con el HTML real de ESTA página puntual, no solo con un
+  // ejemplo inventado a mano.
+  it("HTML real de una página de tienda (_CustId_, archive.org, mayo/2025): total + ids reales", () => {
+    const totalReal = "23 resultados";
+    const hrefsReales = [
+      "https://www.mercadolibre.com.co/cargador-hp-g4-dv6-dv7-g42-g62-g72-compaq-cq42-cq56-cq60/p/MCO38280231?pdp_filters=seller_id%3A1012038349#polycard_client=search-nordic&searchVariation=MCO38280231&position=1",
+      "https://articulo.mercadolibre.com.co/MCO-1325134601-soportes-decorativos-para-telefono-de-dibujos-animados-_JM#polycard_client=search-nordic&position=2",
+      "https://articulo.mercadolibre.com.co/MCO-1534758597-shenzhen-12-v-12-a-con-certificacion-ce-y-gs-_JM?searchVariation=186805913835#polycard_client=search-nordic",
+    ];
+    expect(construirPublicacionesTienda(totalReal, hrefsReales)).toEqual({
+      total: 23,
+      idsVisibles: ["MCO38280231", "MCO1325134601", "MCO1534758597"],
+    });
   });
 });

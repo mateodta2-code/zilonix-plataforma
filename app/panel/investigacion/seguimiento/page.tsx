@@ -11,7 +11,7 @@ import {
   listarAlertasDelDia,
   listarSeguimientosConUltimaFoto,
 } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta, normalizarPublicaciones } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacion, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
 import { necesitaLecturaDePagina } from "@/lib/seguimiento/estimacionInventario";
 import { antiguedadDias, ETIQUETA_APROXIMADO, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
@@ -392,26 +392,42 @@ export default async function SeguimientoPage({
               // ANTES de leer `.total`/`.visibles`: una fila vieja
               // puede traer el array plano sin envolver.
               const publicaciones = ultimaFoto ? normalizarPublicaciones(ultimaFoto.publicaciones) : null;
+              // Issue #252 (smoke de staging) — el piso "+N vendidos"
+              // (nunca comparado en alertas) vive en esta misma
+              // columna para tipo="producto" — solo importa cuando
+              // todavía no hay un `vendidos` exacto.
+              const vendidosAproximado =
+                ultimaFoto && ultimaFoto.vendidos == null ? obtenerVendidosAproximado(ultimaFoto.publicaciones) : null;
+              // Issue #252 (smoke de staging, punto 3) — mismo respaldo
+              // que vendidosAproximado, pero para el precio: MCO452014269
+              // se quedó sin precio porque la API nunca lo confirmó
+              // (seguimiento pendiente de primera revisión), aunque la
+              // extensión sí lo había leído de la página.
+              const precioAproximado = ultimaFoto && ultimaFoto.precio == null ? obtenerPrecioAproximado(ultimaFoto.publicaciones) : null;
               // Issue #251 ("Seguimiento muestra aproximados como
-              // Selltrix") — `exacto: true` siempre: hoy
-              // seguimiento_fotos.vendidos NUNCA guarda el piso "+N"
-              // aproximado (lib/seguimiento/seguimientos.ts,
-              // guardarDatoDePaginaSeguimiento lo descarta a propósito
-              // para no confundir alertas) — lo único que llega acá es
-              // un sold_quantity real o null. `antiguedadDias` sin
-              // date_created real (todavía no se guarda — ver el
-              // changelog de esta rama) cae a interpolar por el id, con
-              // una tabla de calibración que hoy no tiene puntos
-              // todavía — por eso estos dos valores salen `null` en la
-              // práctica hasta que haya date_created real guardado o
-              // puntos de calibración reales.
+              // Selltrix") — usa el vendidos EXACTO si hay
+              // (`exacto: true`, se muestra tal cual); si no, el piso
+              // "+N" de arriba (`exacto: false`, se ajusta por el
+              // factor Full/no-Full). `antiguedadDias` usa
+              // fechaCreacion real (issue #252 reusa la misma columna
+              // `publicaciones`, pero SOLO el cron la escribe — ver
+              // lib/trabajos/revisionDiariaSeguimiento.ts) cuando la
+              // API ya la confirmó; si no, interpola por el id (tabla
+              // de calibración, puede estar vacía todavía) — "Sin
+              // dato" en la UI cuando ninguno de los dos aplica, nunca
+              // una antigüedad inventada.
+              const vendidosParaAprox = ultimaFoto?.vendidos ?? vendidosAproximado;
               const vendidosAprox =
-                seguimiento.tipo === "producto" && ultimaFoto?.vendidos != null && ultimaFoto.esFull != null
-                  ? vendidosEstimados(ultimaFoto.vendidos, { exacto: true, esFull: ultimaFoto.esFull })
+                seguimiento.tipo === "producto" && vendidosParaAprox != null && ultimaFoto?.esFull != null
+                  ? vendidosEstimados(vendidosParaAprox, { exacto: ultimaFoto.vendidos != null, esFull: ultimaFoto.esFull })
                   : null;
-              const diasAprox = vendidosAprox != null ? antiguedadDias({ dateCreated: null, mlId: seguimiento.mlIdExterno, ahora }) : null;
+              const diasAprox =
+                vendidosAprox != null
+                  ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, ahora })
+                  : null;
               const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
-              const facturacionMesAprox = facturacionMes(ventasMesAprox, ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : null);
+              const precioParaFacturacion = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximado;
+              const facturacionMesAprox = facturacionMes(ventasMesAprox, precioParaFacturacion);
               return (
                 <FilaTabla key={seguimiento.id}>
                   <CeldaTabla>
@@ -431,7 +447,16 @@ export default async function SeguimientoPage({
                     {necesitaLecturaDePagina({
                       esCompetidor: seguimiento.esCompetidor,
                       tipo: seguimiento.tipo,
-                      ultimaFoto: ultimaFoto ?? null,
+                      // Issue #252 (smoke de staging) — `publicaciones`
+                      // ya normalizada (arriba): la columna real ahora
+                      // es una unión (`{vendidosAproximado}` también
+                      // vive ahí para tipo="producto"), nunca el tipo
+                      // más angosto que espera esta función.
+                      // Issue #252 (revisión de Pablo, punto 6) — se
+                      // suma el aproximado ya calculado arriba: si hoy
+                      // solo hay "+N (aproximado)", esta función ya no
+                      // dice "falta lectura" al lado de eso.
+                      ultimaFoto: ultimaFoto ? { ...ultimaFoto, publicaciones, vendidosAproximado } : null,
                       ahora,
                     }) ? (
                       <div className={styles.subdato}>Actualiza hoy para ver cuánto vendieron</div>
@@ -439,7 +464,13 @@ export default async function SeguimientoPage({
                   </CeldaTabla>
                   <CeldaTabla>{seguimiento.tipo === "tienda" ? "Tienda" : "Producto"}</CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.esFull ?? null, "Full", "No full")}</CeldaTabla>
-                  <CeldaTabla>{celdaConDelta(ultimaFoto?.precio ?? null, fotoAnterior?.precio ?? null, dinero)}</CeldaTabla>
+                  <CeldaTabla>
+                    {ultimaFoto?.precio != null
+                      ? celdaConDelta(ultimaFoto.precio, fotoAnterior?.precio ?? null, dinero)
+                      : precioAproximado != null
+                        ? `${dinero(precioAproximado)} (aproximado)`
+                        : "—"}
+                  </CeldaTabla>
                   <CeldaTabla>
                     {/* Issue #251, punto 7 — "Sin dato" en vez de "—"
                     cuando todavía no hay ninguna lectura (de la
@@ -480,13 +511,20 @@ export default async function SeguimientoPage({
                       )
                     ) : (
                       <>
-                        {ultimaFoto?.vendidos ?? "Sin dato"}
+                        {/* Issue #252 (smoke de staging) — bug real:
+                        con `vendidos` reservado al número exacto, el
+                        piso "+N vendidos" que la extensión SÍ lee se
+                        mostraba como "Sin dato", aunque la página lo
+                        tuviera. Nunca se usa para alertas (ver
+                        lib/seguimiento/alertas.ts) — es solo una
+                        pista visual aproximada. */}
+                        {ultimaFoto?.vendidos ?? (vendidosAproximado != null ? `+${vendidosAproximado} (aproximado)` : "Sin dato")}
                         {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
                         {/* Issue #251, punto 7 — "leído de la página
                         el {fecha}": inventario/vendidos de un
                         competidor solo los llena esta lectura, nunca
                         la API (ver lib/trabajos/revisionDiariaSeguimiento.ts). */}
-                        {seguimiento.esCompetidor && (ultimaFoto?.inventarioDisponible != null || ultimaFoto?.vendidos != null) ? (
+                        {seguimiento.esCompetidor && (ultimaFoto?.inventarioDisponible != null || ultimaFoto?.vendidos != null || vendidosAproximado != null) ? (
                           <div className={styles.subdato}>Leído de la página el {fechaLegible(ultimaFoto!.fecha)}</div>
                         ) : null}
                         {/* Issue #251 — ventas/mes y facturación/mes

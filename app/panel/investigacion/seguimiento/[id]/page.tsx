@@ -5,7 +5,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerDetalleSeguimiento } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta, normalizarPublicaciones } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacion, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import {
   calcularComparativaAyerHoy,
   resumenPeriodoConteo,
@@ -117,7 +117,20 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
       fecha: f.fecha,
       inventario: f.inventarioDisponible,
       aproximado: f.inventarioAproximado,
-      vendidosTexto: f.vendidos,
+      // Issue #252 (smoke de staging) — `vendidos` quedó reservado al
+      // número EXACTO (corrección de Pablo, punto 5 de la revisión
+      // anterior); el piso "+N vendidos" vive aparte, en
+      // `publicaciones` (ver obtenerVendidosAproximado). Sin este
+      // respaldo, compararProductoDiaADia nunca tenía con qué
+      // comparar cuando el inventario no estaba disponible — el
+      // respaldo de texto quedaba muerto en la práctica.
+      vendidosTexto: f.vendidos ?? obtenerVendidosAproximado(f.publicaciones),
+      // Issue #252 (revisión de Pablo, punto 7) — `true` cuando este
+      // `vendidosTexto` vino del piso aproximado (f.vendidos era
+      // null), nunca cuando vino del número exacto — compararProductoDiaADia
+      // solo resta dos puntas con la MISMA bandera, nunca mezcla un
+      // día exacto con otro aproximado.
+      vendidosTextoAproximado: f.vendidos == null,
     }));
     // Issue #251 (corrección de Pablo, punto 9) — "Ayer vs hoy" exige
     // una foto fechada EXACTAMENTE hoy y otra EXACTAMENTE ayer (hora
@@ -135,21 +148,29 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
 
   // Issue #251 ("Seguimiento muestra aproximados como Selltrix") —
   // vendidos estimados/antigüedad/ventas-mes/facturación-mes, con la
-  // foto más reciente. `exacto: true` siempre: hoy seguimiento_fotos.vendidos
-  // nunca guarda el piso "+N" aproximado (ver el comentario completo
-  // en app/panel/investigacion/seguimiento/page.tsx) — y `antiguedadDias`
-  // sin date_created real cae a interpolar por id, con una tabla de
-  // calibración sin puntos todavía, así que estos 2 últimos valores
-  // salen `null` en la práctica hasta que haya date_created real
-  // guardado o puntos de calibración reales (ver el changelog).
+  // foto más reciente. Usa el vendidos EXACTO si hay; si no, el piso
+  // "+N" que guarda la extensión (issue #252, obtenerVendidosAproximado,
+  // misma columna `publicaciones`) ajustado por el factor Full/no-Full.
+  // `antiguedadDias` usa fechaCreacion real (SOLO la escribe el cron,
+  // ver lib/trabajos/revisionDiariaSeguimiento.ts) cuando la API ya la
+  // confirmó; si no, interpola por el id (tabla de calibración, puede
+  // estar vacía todavía) — "Sin dato" en la UI cuando ninguno de los
+  // dos aplica, nunca una antigüedad inventada.
   const ultimaFoto = fotos.length > 0 ? fotos[fotos.length - 1] : null;
+  const vendidosAproximadoDetalle = ultimaFoto && ultimaFoto.vendidos == null ? obtenerVendidosAproximado(ultimaFoto.publicaciones) : null;
+  const precioAproximadoDetalle = ultimaFoto && ultimaFoto.precio == null ? obtenerPrecioAproximado(ultimaFoto.publicaciones) : null;
+  const vendidosParaAproxDetalle = ultimaFoto?.vendidos ?? vendidosAproximadoDetalle;
   const vendidosAprox =
-    seguimiento.tipo === "producto" && ultimaFoto?.vendidos != null && ultimaFoto.esFull != null
-      ? vendidosEstimados(ultimaFoto.vendidos, { exacto: true, esFull: ultimaFoto.esFull })
+    seguimiento.tipo === "producto" && vendidosParaAproxDetalle != null && ultimaFoto?.esFull != null
+      ? vendidosEstimados(vendidosParaAproxDetalle, { exacto: ultimaFoto.vendidos != null, esFull: ultimaFoto.esFull })
       : null;
-  const diasAprox = vendidosAprox != null ? antiguedadDias({ dateCreated: null, mlId: seguimiento.mlIdExterno, ahora }) : null;
+  const diasAprox =
+    vendidosAprox != null
+      ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, ahora })
+      : null;
   const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
-  const facturacionMesAprox = facturacionMes(ventasMesAprox, ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : null);
+  const precioParaFacturacionDetalle = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximadoDetalle;
+  const facturacionMesAprox = facturacionMes(ventasMesAprox, precioParaFacturacionDetalle);
 
   return (
     <>
@@ -192,12 +213,24 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
               {[...fotos].reverse().map((f) => (
                 <FilaTabla key={f.id}>
                   <CeldaTabla>{fecha(f.fecha)}</CeldaTabla>
-                  <CeldaTabla>{dinero(f.precio)}</CeldaTabla>
+                  <CeldaTabla>
+                    {/* Issue #252 (smoke de staging, punto 3) — mismo
+                    respaldo que vendidos: si la API nunca confirmó el
+                    precio pero la extensión ya lo leyó de la página,
+                    se muestra ese valor como aproximado en vez de "—". */}
+                    {f.precio != null ? dinero(f.precio) : obtenerPrecioAproximado(f.publicaciones) != null ? `${dinero(obtenerPrecioAproximado(f.publicaciones))} (aproximado)` : "—"}
+                  </CeldaTabla>
                   <CeldaTabla>
                     {f.inventarioDisponible ?? "—"}
                     {f.inventarioAproximado ? <Chip>Aprox.</Chip> : null}
                   </CeldaTabla>
-                  <CeldaTabla>{f.vendidos ?? "—"}</CeldaTabla>
+                  <CeldaTabla>
+                    {/* Issue #252 (smoke de staging) — mismo criterio
+                    que la lista (page.tsx): el piso "+N vendidos"
+                    (nunca comparado en alertas) se muestra cuando no
+                    hay un número exacto todavía. */}
+                    {f.vendidos ?? (obtenerVendidosAproximado(f.publicaciones) != null ? `+${obtenerVendidosAproximado(f.publicaciones)} (aproximado)` : "—")}
+                  </CeldaTabla>
                   <CeldaTabla>{f.estado ?? "—"}</CeldaTabla>
                   <CeldaTabla>{f.enCatalogo == null ? "—" : f.enCatalogo ? "Sí" : "No"}</CeldaTabla>
                   <CeldaTabla>{f.ganaBotonCompra == null ? "—" : f.ganaBotonCompra ? "Gana" : "Pierde"}</CeldaTabla>
