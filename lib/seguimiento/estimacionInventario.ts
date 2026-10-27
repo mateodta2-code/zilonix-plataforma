@@ -28,6 +28,18 @@ export type LecturaProducto = {
   // caída de inventario es la señal primaria, pedida explícita por el
   // issue).
   vendidosTexto: number | null;
+  // Issue #252 (revisión de Pablo, punto 7) — bug real: `vendidosTexto`
+  // puede venir del número EXACTO (`seguimiento_fotos.vendidos`) o del
+  // piso aproximado "+N vendidos" (`obtenerVendidosAproximado`) — sin
+  // esta bandera, compararProductoDiaADia los restaba igual sin
+  // distinguir, mezclando un día con dato exacto y otro con el piso
+  // aproximado (ej. 500 exacto de ayer contra "+520" aproximado de
+  // hoy) como si los dos fueran igual de confiables. `true` = este
+  // `vendidosTexto` es el piso aproximado; `false` = es el número
+  // exacto. compararProductoDiaADia solo resta cuando las DOS puntas
+  // tienen la MISMA bandera (las dos exactas, o las dos aproximadas) —
+  // nunca una mezcla de las dos.
+  vendidosTextoAproximado: boolean;
 };
 
 export type ComparativaProducto = {
@@ -62,7 +74,10 @@ export function compararProductoDiaADia(anterior: LecturaProducto, actual: Lectu
     return { ...base, ventasEstimadas: caida, reposicion: false };
   }
 
-  if (anterior.vendidosTexto != null && actual.vendidosTexto != null) {
+  // Issue #252 (revisión de Pablo, punto 7) — `vendidosTextoAproximado`
+  // tiene que coincidir en las dos puntas: nunca se mezcla un día con
+  // el número exacto y otro con el piso "+N" aproximado.
+  if (anterior.vendidosTexto != null && actual.vendidosTexto != null && anterior.vendidosTextoAproximado === actual.vendidosTextoAproximado) {
     const diferencia = actual.vendidosTexto - anterior.vendidosTexto;
     // El piso de "+N vendidos" es un contador acumulado — nunca debería
     // bajar. Si baja, es un dato dudoso (reinicio del lado de ML,
@@ -236,6 +251,15 @@ export function necesitaLecturaDePagina(params: {
     inventarioDisponible: number | null;
     vendidos: number | null;
     publicaciones: { total: number | null; visibles: unknown[] } | null;
+    // Issue #252 (revisión de Pablo, punto 6) — bug real: con solo el
+    // piso "+N vendidos" guardado hoy (sin inventario ni vendidos
+    // exacto), esta función igual decía "falta lectura de hoy" — el
+    // aviso "Actualiza hoy para ver cuánto vendieron" aparecía AL LADO
+    // del "+N (aproximado)" que ya se estaba mostrando, contradictorio.
+    // Opcional (nunca rompe un llamador viejo que no lo mande): `null`
+    // se trata igual que "no hay dato", mismo criterio que el resto de
+    // esta función.
+    vendidosAproximado?: number | null;
   } | null;
   ahora: Date;
 }): boolean {
@@ -243,5 +267,5 @@ export function necesitaLecturaDePagina(params: {
   const hoy = hoyBogota(params.ahora);
   if (!params.ultimaFoto || params.ultimaFoto.fecha.getTime() !== hoy.getTime()) return true;
   if (params.tipo === "tienda") return params.ultimaFoto.publicaciones == null || params.ultimaFoto.publicaciones.total == null;
-  return params.ultimaFoto.inventarioDisponible == null && params.ultimaFoto.vendidos == null;
+  return params.ultimaFoto.inventarioDisponible == null && params.ultimaFoto.vendidos == null && params.ultimaFoto.vendidosAproximado == null;
 }

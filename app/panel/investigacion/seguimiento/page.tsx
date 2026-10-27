@@ -11,7 +11,7 @@ import {
   listarAlertasDelDia,
   listarSeguimientosConUltimaFoto,
 } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta, normalizarPublicaciones } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
 import { necesitaLecturaDePagina } from "@/lib/seguimiento/estimacionInventario";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
@@ -391,6 +391,18 @@ export default async function SeguimientoPage({
               // ANTES de leer `.total`/`.visibles`: una fila vieja
               // puede traer el array plano sin envolver.
               const publicaciones = ultimaFoto ? normalizarPublicaciones(ultimaFoto.publicaciones) : null;
+              // Issue #252 (smoke de staging) — el piso "+N vendidos"
+              // (nunca comparado en alertas) vive en esta misma
+              // columna para tipo="producto" — solo importa cuando
+              // todavía no hay un `vendidos` exacto.
+              const vendidosAproximado =
+                ultimaFoto && ultimaFoto.vendidos == null ? obtenerVendidosAproximado(ultimaFoto.publicaciones) : null;
+              // Issue #252 (smoke de staging, punto 3) — mismo respaldo
+              // que vendidosAproximado, pero para el precio: MCO452014269
+              // se quedó sin precio porque la API nunca lo confirmó
+              // (seguimiento pendiente de primera revisión), aunque la
+              // extensión sí lo había leído de la página.
+              const precioAproximado = ultimaFoto && ultimaFoto.precio == null ? obtenerPrecioAproximado(ultimaFoto.publicaciones) : null;
               return (
                 <FilaTabla key={seguimiento.id}>
                   <CeldaTabla>
@@ -410,7 +422,16 @@ export default async function SeguimientoPage({
                     {necesitaLecturaDePagina({
                       esCompetidor: seguimiento.esCompetidor,
                       tipo: seguimiento.tipo,
-                      ultimaFoto: ultimaFoto ?? null,
+                      // Issue #252 (smoke de staging) — `publicaciones`
+                      // ya normalizada (arriba): la columna real ahora
+                      // es una unión (`{vendidosAproximado}` también
+                      // vive ahí para tipo="producto"), nunca el tipo
+                      // más angosto que espera esta función.
+                      // Issue #252 (revisión de Pablo, punto 6) — se
+                      // suma el aproximado ya calculado arriba: si hoy
+                      // solo hay "+N (aproximado)", esta función ya no
+                      // dice "falta lectura" al lado de eso.
+                      ultimaFoto: ultimaFoto ? { ...ultimaFoto, publicaciones, vendidosAproximado } : null,
                       ahora,
                     }) ? (
                       <div className={styles.subdato}>Actualiza hoy para ver cuánto vendieron</div>
@@ -418,7 +439,13 @@ export default async function SeguimientoPage({
                   </CeldaTabla>
                   <CeldaTabla>{seguimiento.tipo === "tienda" ? "Tienda" : "Producto"}</CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.esFull ?? null, "Full", "No full")}</CeldaTabla>
-                  <CeldaTabla>{celdaConDelta(ultimaFoto?.precio ?? null, fotoAnterior?.precio ?? null, dinero)}</CeldaTabla>
+                  <CeldaTabla>
+                    {ultimaFoto?.precio != null
+                      ? celdaConDelta(ultimaFoto.precio, fotoAnterior?.precio ?? null, dinero)
+                      : precioAproximado != null
+                        ? `${dinero(precioAproximado)} (aproximado)`
+                        : "—"}
+                  </CeldaTabla>
                   <CeldaTabla>
                     {/* Issue #251, punto 7 — "Sin dato" en vez de "—"
                     cuando todavía no hay ninguna lectura (de la
@@ -459,13 +486,20 @@ export default async function SeguimientoPage({
                       )
                     ) : (
                       <>
-                        {ultimaFoto?.vendidos ?? "Sin dato"}
+                        {/* Issue #252 (smoke de staging) — bug real:
+                        con `vendidos` reservado al número exacto, el
+                        piso "+N vendidos" que la extensión SÍ lee se
+                        mostraba como "Sin dato", aunque la página lo
+                        tuviera. Nunca se usa para alertas (ver
+                        lib/seguimiento/alertas.ts) — es solo una
+                        pista visual aproximada. */}
+                        {ultimaFoto?.vendidos ?? (vendidosAproximado != null ? `+${vendidosAproximado} (aproximado)` : "Sin dato")}
                         {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
                         {/* Issue #251, punto 7 — "leído de la página
                         el {fecha}": inventario/vendidos de un
                         competidor solo los llena esta lectura, nunca
                         la API (ver lib/trabajos/revisionDiariaSeguimiento.ts). */}
-                        {seguimiento.esCompetidor && (ultimaFoto?.inventarioDisponible != null || ultimaFoto?.vendidos != null) ? (
+                        {seguimiento.esCompetidor && (ultimaFoto?.inventarioDisponible != null || ultimaFoto?.vendidos != null || vendidosAproximado != null) ? (
                           <div className={styles.subdato}>Leído de la página el {fechaLegible(ultimaFoto!.fecha)}</div>
                         ) : null}
                       </>
