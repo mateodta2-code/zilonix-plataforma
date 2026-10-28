@@ -4,6 +4,8 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { tienePermiso } from "@/lib/roles";
+import { tieneVentaFinanzas } from "@/lib/finanzas/ventas-consulta";
 import { etiquetaEstadoPedido, obtenerPedidoConEventos, PASOS_PEDIDO, type EventoPedido, type PasoPedido } from "@/lib/ml/pedidos";
 import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
@@ -52,6 +54,10 @@ export default async function PedidoDetallePage({ params }: { params: { id: stri
   if (!resultado) redirect("/panel/pedidos");
   const { pedido, eventos } = resultado;
   const eventoPorPaso = new Map<PasoPedido, EventoPedido>(eventos.map((e) => [e.paso, e]));
+  // Issue #131 (Parte A) — "Ver utilidad" solo con finanzas.consultar y si
+  // el pedido ya tiene foto financiera (pedidos_finanzas).
+  const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
+  const verUtilidad = tienePermiso(miMembresia?.permisos ?? [], "finanzas", "consultar") && (await tieneVentaFinanzas(empresa.id, pedido.id));
 
   return (
     <>
@@ -83,6 +89,11 @@ export default async function PedidoDetallePage({ params }: { params: { id: stri
         })}
       </ol>
 
+      {verUtilidad && (
+        <BotonLink href={`/panel/finanzas/ventas/${pedido.id}`} variante="secundario" chico className={styles.volver}>
+          Ver utilidad
+        </BotonLink>
+      )}{" "}
       <BotonLink href="/panel/pedidos" variante="fantasma" chico className={styles.volver}>
         Volver a pedidos
       </BotonLink>
