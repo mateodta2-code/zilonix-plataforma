@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, foreignKey, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
 import type {
   DatosPorCuenta,
@@ -84,7 +84,11 @@ export const alertaSeguimientoTipoEnum = pgEnum("alerta_seguimiento_tipo", [
 export const empresas = pgTable("empresas", {
   id: uuid("id").primaryKey().defaultRandom(),
   nombre: text("nombre").notNull(),
-  // Una empresa por NIT/sociedad — decisión D2.
+  // Una empresa por NIT/sociedad — decisión D2. Cada comercio (Zilonix,
+  // Pachamama) es su propia fila de esta tabla. Los titulares son filas
+  // de `titulares` dentro de esa empresa (issue #125, decisión de
+  // Sharel); el NIT no se parte por titular. El issue pide ajustar solo
+  // este comentario y deja la confirmación de la lectura en Mateo.
   nit: text("nit").notNull().unique(),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -204,9 +208,99 @@ export const auditoria = pgTable("auditoria", {
   actorTipo: actorTipoEnum("actor_tipo").notNull(),
   accion: text("accion").notNull(),
   entidad: text("entidad").notNull(),
+  // Issue #125 — qué registro cambió y el antes/después. Quedan vacíos
+  // en las filas viejas y en acciones que no son un cambio (invitar,
+  // sincronizar). Texto, no uuid: un id de Mercado Libre no siempre es
+  // uuid. Documento, correo y WhatsApp no se escriben acá en claro
+  // (lib/finanzas/enmascarar.ts).
+  entidadId: text("entidad_id"),
+  valorAnterior: text("valor_anterior"),
+  valorNuevo: text("valor_nuevo"),
   detalle: text("detalle"),
   ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Issue #125 (Z-FIN-03) — persona o sociedad DENTRO de una empresa.
+// No es otra fila de `empresas` (eso seguiría siendo D2, un NIT por
+// empresa). Mateo confirma el comentario de D2; el enum en sí es el
+// que pidió el issue.
+export const tipoTitularEnum = pgEnum("tipo_titular", ["persona", "sociedad"]);
+
+export const titulares = pgTable(
+  "titulares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    tipo: tipoTitularEnum("tipo").notNull(),
+    nombre: text("nombre").notNull(),
+    documento: text("documento").notNull(),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // El par (empresa_id, id) es la clave que referencia la FK compuesta
+    // de cuentas_ml. El id solo ya es único, pero Postgres exige un
+    // UNIQUE que cubra exactamente las columnas referenciadas.
+    empresaIdUnica: unique("titulares_empresa_id_unica").on(t.empresaId, t.id),
+    // El mismo documento puede existir en otra empresa; en la misma, no.
+    documentoUnico: unique("titulares_empresa_documento_unico").on(t.empresaId, t.documento),
+  })
+);
+
+// Issue #125 — una fila por empresa. Sin fila, la app no inventa
+// valores (ni 19 % de IVA ni otra cifra): leerConfiguracionFinanzas
+// devuelve null. El default 3 de plazo_vencimiento_dias es de la
+// columna, solo cuando la fila se inserta sin mandar ese campo.
+// Los interruptores de aviso quedan vacíos (null) hasta que la
+// empresa elija: el issue no les fija un valor.
+export const configuracionFinanzas = pgTable(
+  "configuracion_finanzas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    flexValor: numeric("flex_valor", { precision: 14, scale: 2 }),
+    ivaPublicidad: numeric("iva_publicidad", { precision: 5, scale: 2 }),
+    plazoVencimientoDias: integer("plazo_vencimiento_dias").notNull().default(3),
+    avisoDiasAntes: integer("aviso_dias_antes"),
+    avisoCorreoActivo: boolean("aviso_correo_activo"),
+    avisoWhatsappActivo: boolean("aviso_whatsapp_activo"),
+    avisoCorreoDestino: text("aviso_correo_destino"),
+    avisoWhatsappDestino: text("aviso_whatsapp_destino"),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaPor: uuid("actualizada_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    unaPorEmpresa: unique("configuracion_finanzas_empresa_unica").on(t.empresaId),
+    plazoNoNegativo: check("configuracion_finanzas_plazo_no_negativo", sql`${t.plazoVencimientoDias} >= 0`),
+    ivaRango: check(
+      "configuracion_finanzas_iva_rango",
+      sql`${t.ivaPublicidad} IS NULL OR (${t.ivaPublicidad} >= 0 AND ${t.ivaPublicidad} <= 100)`
+    ),
+  })
+);
+
+// Issue #125 — la meta no es una columna de configuracion_finanzas:
+// cambia por empresa Y por mes (Sharel, 24-oct-2026). Mes sin fila =
+// sin meta (no se asume 0 ni se copia el mes anterior). Quién puede
+// cambiarla (solo el Dueño) lo revisa la acción de #126; acá la RLS
+// solo aísla por empresa. Moneda por defecto COP: decisión de Mateo
+// ya escrita en el issue.
+export const metasMensuales = pgTable(
+  "metas_mensuales",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    mes: date("mes", { mode: "string" }).notNull(),
+    metaUtilidad: numeric("meta_utilidad", { precision: 14, scale: 2 }).notNull(),
+    moneda: text("moneda").notNull().default("COP"),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaPor: uuid("actualizada_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    empresaMesMonedaUnica: unique("metas_mensuales_empresa_mes_moneda_unica").on(t.empresaId, t.mes, t.moneda),
+    mesDiaUno: check("metas_mensuales_dia_uno", sql`extract(day from ${t.mes}) = 1`),
+    utilidadNoNegativa: check("metas_mensuales_utilidad_no_negativa", sql`${t.metaUtilidad} >= 0`),
+  })
+);
 
 // Tarea 2.3 — una cuenta de Mercado Libre conectada a una empresa.
 // Tokens cifrados (lib/cifrado.ts, AES-256-GCM con versión de clave —
@@ -217,6 +311,13 @@ export const cuentasMl = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // Issue #125 — vacío hasta que alguien asigne titular. La FK no es
+    // solo titular_id → titulares.id (eso dejaría colgar un titular de
+    // otra empresa): es el par (empresa_id, titular_id). ON DELETE
+    // RESTRICT: no se borra un titular que todavía tiene cuentas.
+    // No se agrega `estado` (activa / requiere_reconexion /
+    // desconectada): eso es el issue #59, otra migración.
+    titularId: uuid("titular_id"),
     cuentaIdExterna: text("cuenta_id_externa").notNull(),
     nickname: text("nickname").notNull(),
     accessTokenCifrado: jsonb("access_token_cifrado").$type<TokenCifrado>().notNull(),
@@ -242,6 +343,14 @@ export const cuentasMl = pgTable(
     // empresas de Zilonix a la vez — evita ambigüedad de a quién le
     // pertenecen sus avisos y sus pedidos.
     cuentaUnica: uniqueIndex("cuentas_ml_cuenta_externa_unica").on(t.cuentaIdExterna),
+    // MATCH SIMPLE (el default de Postgres): si titular_id es null, la
+    // FK no se evalúa. Con valor, empresa_id + titular_id tienen que
+    // existir juntos en titulares.
+    titularDeLaMismaEmpresa: foreignKey({
+      name: "cuentas_ml_empresa_titular_fk",
+      columns: [t.empresaId, t.titularId],
+      foreignColumns: [titulares.empresaId, titulares.id],
+    }).onDelete("restrict"),
   })
 );
 

@@ -11,6 +11,14 @@ export type NuevaAuditoria = {
   accion: string;
   entidad: string;
   detalle?: string;
+  // Issue #125 — opcionales: las acciones que ya se registraban
+  // (invitar, sincronizar) siguen igual sin estos campos. Quien
+  // escriba un documento, un correo o un WhatsApp tiene que pasarlos
+  // ya enmascarados (lib/finanzas/enmascarar.ts): esta función no los
+  // adivina ni los reescribe.
+  entidadId?: string;
+  valorAnterior?: string;
+  valorNuevo?: string;
 };
 
 // Tarea 1.9 — se llama SIEMPRE dentro de la misma transacción
@@ -29,6 +37,9 @@ export async function registrarAuditoria(tx: typeof db, entrada: NuevaAuditoria)
     actorTipo: entrada.actorTipo,
     accion: entrada.accion,
     entidad: entrada.entidad,
+    entidadId: entrada.entidadId,
+    valorAnterior: entrada.valorAnterior,
+    valorNuevo: entrada.valorNuevo,
     detalle: entrada.detalle,
   });
 }

@@ -27,11 +27,24 @@ END $$;
 GRANT CONNECT ON DATABASE railway TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-  empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria, accesos_temporales, cuentas_ml, avisos_ml,
+  empresas, usuarios, roles, membresias, permisos_rol, invitaciones, accesos_temporales, cuentas_ml, avisos_ml,
   pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml, productos_ml,
   seguimientos_ml, seguimiento_fotos, seguimiento_alertas,
+  titulares, configuracion_finanzas, metas_mensuales,
   publicidad_anunciantes, publicidad_campanas, publicidad_anuncios, publicidad_metricas_diarias, publicidad_costos_item, publicidad_sincronizaciones
   TO app_user;
+-- Issue #125 (Z-FIN-03) — auditoria queda de solo inserción para
+-- app_user: puede dejar el rastro y leer el de su empresa, no
+-- reescribirlo ni borrarlo. REVOKE porque este script es repetible:
+-- sacar la tabla de la lista de arriba no le quita un GRANT que ya
+-- se había corrido en staging o producción. La pregunta 8 del
+-- borrador (el issue la pone como condición) no aparece resuelta en
+-- docs/ ni en los issues enlazados — en #124 "pregunta 8" es la de
+-- los roles, ya contestada, y no habla de este GRANT. Se aplica igual
+-- porque es criterio de aceptación de #125; queda pendiente de
+-- confirmación de Sharel/Mateo.
+GRANT SELECT, INSERT ON auditoria TO app_user;
+REVOKE UPDATE, DELETE ON auditoria FROM app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
 -- "serial" en el esquema — no existe ninguna secuencia que otorgar.
@@ -137,6 +150,14 @@ ALTER TABLE invitaciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invitaciones FORCE ROW LEVEL SECURITY;
 ALTER TABLE auditoria ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auditoria FORCE ROW LEVEL SECURITY;
+-- Issue #125 — mismas tres tablas nuevas. Sin FORCE, el dueño de la
+-- tabla se salta la política igual que un superusuario.
+ALTER TABLE titulares ENABLE ROW LEVEL SECURITY;
+ALTER TABLE titulares FORCE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_finanzas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_finanzas FORCE ROW LEVEL SECURITY;
+ALTER TABLE metas_mensuales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE metas_mensuales FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
@@ -275,6 +296,19 @@ CREATE POLICY aislamiento_invitaciones ON invitaciones
 
 DROP POLICY IF EXISTS aislamiento_auditoria ON auditoria;
 CREATE POLICY aislamiento_auditoria ON auditoria
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #125 — mismo patrón que el resto de las tablas de negocio.
+DROP POLICY IF EXISTS aislamiento_titulares ON titulares;
+CREATE POLICY aislamiento_titulares ON titulares
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_configuracion_finanzas ON configuracion_finanzas;
+CREATE POLICY aislamiento_configuracion_finanzas ON configuracion_finanzas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_metas_mensuales ON metas_mensuales;
+CREATE POLICY aislamiento_metas_mensuales ON metas_mensuales
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;
