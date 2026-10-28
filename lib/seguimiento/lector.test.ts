@@ -56,6 +56,7 @@ describe("leerFotoSeguimiento — producto, recursoMl item", () => {
       catalogProductId: null,
       esFull: false,
       esEnvioGratis: null,
+      fechaCreacion: "2024-01-01T00:00:00.000Z",
     });
 
     const resultado = await leerFotoSeguimiento({ tipo: "producto", recursoMl: "item", mlIdExterno: "MCO111" }, "token", CUENTA_PROPIA);
@@ -66,6 +67,8 @@ describe("leerFotoSeguimiento — producto, recursoMl item", () => {
     expect(resultado.vendidos).toBe(10);
     // item ajeno con inventario real -> siempre marcado aproximado
     expect(resultado.inventarioAproximado).toBe(true);
+    // Issue #251 — date_created real de la API, reusado tal cual.
+    expect(resultado.fechaCreacion).toBe("2024-01-01T00:00:00.000Z");
   });
 
   it("con catalogProductId: gana el botón de compra si nuestro itemId es la primera oferta", async () => {
@@ -79,6 +82,7 @@ describe("leerFotoSeguimiento — producto, recursoMl item", () => {
       catalogProductId: "MCO999",
       esFull: true,
       esEnvioGratis: true,
+      fechaCreacion: null,
     });
     vi.mocked(obtenerOfertasProducto).mockResolvedValue([
       { itemId: "MCO111", precio: 100, monedaId: "COP", sellerId: "333", esFull: true, esEnvioGratis: true, vendidos: null, fechaCreacion: null, permalink: null },
@@ -102,6 +106,7 @@ describe("leerFotoSeguimiento — producto, recursoMl item", () => {
       catalogProductId: "MCO999",
       esFull: false,
       esEnvioGratis: false,
+      fechaCreacion: null,
     });
     vi.mocked(obtenerOfertasProducto).mockResolvedValue([
       { itemId: "MCO222", precio: 100, monedaId: "COP", sellerId: "444", esFull: true, esEnvioGratis: true, vendidos: null, fechaCreacion: null, permalink: null },
@@ -127,7 +132,7 @@ describe("leerFotoSeguimiento — producto, recursoMl product (catálogo directo
 
   it("gana el botón de compra cuando la cuenta PROPIA es la primera oferta", async () => {
     vi.mocked(obtenerOfertasProducto).mockResolvedValue([
-      { itemId: "MCO111", precio: 100, monedaId: "COP", sellerId: CUENTA_PROPIA, esFull: true, esEnvioGratis: true, vendidos: null, fechaCreacion: null, permalink: null },
+      { itemId: "MCO111", precio: 100, monedaId: "COP", sellerId: CUENTA_PROPIA, esFull: true, esEnvioGratis: true, vendidos: null, fechaCreacion: "2024-06-01T00:00:00.000Z", permalink: null },
       { itemId: "MCO222", precio: 105, monedaId: "COP", sellerId: "444", esFull: false, esEnvioGratis: false, vendidos: null, fechaCreacion: null, permalink: null },
     ]);
 
@@ -137,6 +142,9 @@ describe("leerFotoSeguimiento — producto, recursoMl product (catálogo directo
     expect(resultado.ganaBotonCompra).toBe(true);
     expect(resultado.precio).toBe(100);
     expect(resultado.enCatalogo).toBe(true);
+    // Issue #251 — fechaCreacion de la oferta GANADORA (la primera),
+    // ya la pide obtenerOfertasProducto desde el issue #197.
+    expect(resultado.fechaCreacion).toBe("2024-06-01T00:00:00.000Z");
   });
 
   it("sin ninguna oferta real: foto vacía salvo enCatalogo en null (nunca se afirma catálogo sin ofertas)", async () => {

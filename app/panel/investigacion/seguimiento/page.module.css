@@ -1,5 +1,19 @@
+/* Issue #252 (smoke de staging, punto 4) — bug real reportado por
+   Mateo: el encabezado "Agregar producto, tienda o competidor" (título
+   + botón "Ver guía", ver .encabezadoSeccion abajo) quedaba tapado por
+   el buscador de la barra superior (BarraSuperior.module.css, .barra:
+   sticky, top:0, 64px de alto, con fondo OPACO en cada hijo incluido
+   "Buscar…") — cualquier scroll-hacia-este-elemento que el navegador
+   dispara solo (ej. la validación nativa de `required` en el input
+   "link" cuando el formulario se manda vacío) lo alinea con el borde
+   de arriba del viewport por default, justo detrás de esa barra
+   sticky. scroll-margin-top reserva ese mismo alto (64px + margen)
+   para que CUALQUIER scroll-into-view (nativo del navegador, un
+   anchor, foco por teclado) nunca lo deje tapado.
+*/
 .seccion {
   margin-bottom: 20px;
+  scroll-margin-top: 80px;
 }
 
 .tituloSeccion {

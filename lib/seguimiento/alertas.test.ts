@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { compararFotos, mensajeAlerta, normalizarPublicaciones, type FotoComparable, type PublicacionesTienda } from "./alertas";
+import {
+  compararFotos,
+  mensajeAlerta,
+  normalizarPublicaciones,
+  obtenerPrecioAproximado,
+  obtenerVendidosAproximado,
+  type FotoComparable,
+  type PublicacionesTienda,
+} from "./alertas";
 
 // Issue #175, punto 7 — toda esta prueba usa datos simulados a mano,
 // nunca contra la API real de Mercado Libre (pedido explícito).
@@ -260,6 +268,55 @@ describe("normalizarPublicaciones — issue #251 (corrección de Pablo, punto 3)
   it("basura (string, número): null, nunca revienta", () => {
     expect(normalizarPublicaciones("no es un objeto")).toBeNull();
     expect(normalizarPublicaciones(42)).toBeNull();
+  });
+
+  // Issue #252 (smoke de staging) — un objeto `{vendidosAproximado}`
+  // (el OTRO formato que vive en esta misma columna, para tipo =
+  // "producto") nunca se confunde con el de tienda: no tiene
+  // `visibles`, así que esto tiene que devolver null, nunca un
+  // {total:null, visibles:[], fuente:"api"} inventado.
+  it("{vendidosAproximado} (el formato de producto en la misma columna) -> null, nunca se confunde con tienda", () => {
+    expect(normalizarPublicaciones({ vendidosAproximado: 500 })).toBeNull();
+  });
+});
+
+describe("obtenerVendidosAproximado — issue #252 (smoke de staging)", () => {
+  it("lee el número cuando el objeto trae {vendidosAproximado}", () => {
+    expect(obtenerVendidosAproximado({ vendidosAproximado: 500 })).toBe(500);
+  });
+
+  it("null, undefined, o el formato de tienda ({total,visibles,fuente}) -> null, nunca se confunde", () => {
+    expect(obtenerVendidosAproximado(null)).toBeNull();
+    expect(obtenerVendidosAproximado(undefined)).toBeNull();
+    expect(obtenerVendidosAproximado({ total: 10, visibles: [], fuente: "api" })).toBeNull();
+  });
+
+  it("basura (array, string, número) -> null, nunca revienta", () => {
+    expect(obtenerVendidosAproximado([1, 2, 3])).toBeNull();
+    expect(obtenerVendidosAproximado("500")).toBeNull();
+    expect(obtenerVendidosAproximado(500)).toBeNull();
+  });
+});
+
+describe("obtenerPrecioAproximado — issue #252 (smoke de staging, punto 3)", () => {
+  it("lee el número cuando el objeto trae {precioAproximado}", () => {
+    expect(obtenerPrecioAproximado({ precioAproximado: 89900 })).toBe(89900);
+  });
+
+  it("null, undefined, o el formato de tienda ({total,visibles,fuente}) -> null, nunca se confunde", () => {
+    expect(obtenerPrecioAproximado(null)).toBeNull();
+    expect(obtenerPrecioAproximado(undefined)).toBeNull();
+    expect(obtenerPrecioAproximado({ total: 10, visibles: [], fuente: "api" })).toBeNull();
+  });
+
+  it("{vendidosAproximado} solo (sin precioAproximado) -> null, nunca confunde los dos campos", () => {
+    expect(obtenerPrecioAproximado({ vendidosAproximado: 500 })).toBeNull();
+  });
+
+  it("basura (array, string, número) -> null, nunca revienta", () => {
+    expect(obtenerPrecioAproximado([1, 2, 3])).toBeNull();
+    expect(obtenerPrecioAproximado("89900")).toBeNull();
+    expect(obtenerPrecioAproximado(89900)).toBeNull();
   });
 });
 

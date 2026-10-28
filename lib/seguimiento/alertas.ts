@@ -67,11 +67,54 @@ export function normalizarPublicaciones(raw: unknown): PublicacionesTienda | nul
   if (Array.isArray(raw)) return { total: null, visibles: raw as PublicacionTienda[], fuente: "api" };
   if (typeof raw !== "object") return null;
   const obj = raw as { total?: unknown; visibles?: unknown; fuente?: unknown };
+  if (!("visibles" in obj)) return null; // es el otro formato que vive en esta misma columna — ver obtenerVendidosAproximado
   return {
     total: typeof obj.total === "number" ? obj.total : null,
     visibles: Array.isArray(obj.visibles) ? (obj.visibles as PublicacionTienda[]) : [],
     fuente: obj.fuente === "pagina" ? "pagina" : "api",
   };
+}
+
+// Issue #252 (smoke de staging) — para tipo = "producto", la MISMA
+// columna `publicaciones` (nunca una columna nueva, sin migración —
+// ver el comentario en db/schema.ts) guarda `{vendidosAproximado}`:
+// el piso "+N vendidos" de la ficha, cuando Mercado Libre no deja ver
+// el número exacto (`seguimiento_fotos.vendidos` queda reservado al
+// exacto — nunca se compara en alertas, ver compararFotos más abajo,
+// que solo mira `publicaciones` para tipo="tienda"). Nunca se confunde
+// con el formato de tienda: ese siempre tiene `visibles`, este nunca.
+export function obtenerVendidosAproximado(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw as { vendidosAproximado?: unknown };
+  return typeof obj.vendidosAproximado === "number" ? obj.vendidosAproximado : null;
+}
+
+// Issue #252 (smoke de staging) — mismo criterio que
+// obtenerVendidosAproximado: el precio que la extensión lee de la
+// página (respaldo cuando Mercado Libre nunca confirma uno real por
+// la API para este producto) vive en la MISMA columna, bajo
+// `precioAproximado` — nunca confundido con `vendidosAproximado` ni
+// con el formato de tienda.
+export function obtenerPrecioAproximado(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw as { precioAproximado?: unknown };
+  return typeof obj.precioAproximado === "number" ? obj.precioAproximado : null;
+}
+
+// Issue #251 ("Seguimiento muestra aproximados como Selltrix") —
+// mismo criterio que obtenerVendidosAproximado/obtenerPrecioAproximado:
+// para tipo = "producto", esta MISMA columna también guarda
+// `fechaCreacion` (date_created real de Mercado Libre, cuando la API
+// lo confirma) — a diferencia de los otros dos campos, este SOLO lo
+// escribe el cron (lib/trabajos/revisionDiariaSeguimiento.ts), nunca
+// la extensión: es un dato que la API sí puede confirmar, no un
+// respaldo de la página. lib/seguimiento/aproximados.ts lo usa para la
+// antigüedad real de la publicación; si viene null, esa misma función
+// cae a interpolar por el id.
+export function obtenerFechaCreacion(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw as { fechaCreacion?: unknown };
+  return typeof obj.fechaCreacion === "string" ? obj.fechaCreacion : null;
 }
 
 // Mismas columnas reales de seguimiento_fotos (db/schema.ts) que

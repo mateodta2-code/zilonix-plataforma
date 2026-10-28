@@ -54,7 +54,21 @@
     // tienda.mercadolibre.*, y no trae ?CustId=) — el panel ni
     // siquiera se dibujaba, silencio total. /tienda/ (el path real de
     // una tienda oficial) se suma como cuarto patrón.
-    if (/\/perfil\/|tienda\.(mercadolibre|mercadolivre)|\/tienda\/|[?&]CustId=/i.test(url)) return "tienda";
+    // Issue #252 (smoke de staging) — bug real: `construirLinkMlDeSeguimiento`
+    // (lib/seguimiento/link.ts) arma el link de "Actualizar todo" para
+    // una tienda como `listado.mercadolibre.com.co/_CustId_{sellerId}`
+    // (confirmado en archive.org: una captura real de esa forma, 200,
+    // con `quantity-results` y "N resultados" — es el MISMO patrón de
+    // listado de siempre, con el vendedor filtrado) — pero este regex
+    // solo reconocía `?CustId=`/`&CustId=` (con `=`), nunca `_CustId_`
+    // (con guión bajo). Con las dos TIENDAS de competencia probadas en
+    // staging (TECNOLOSYS, TIENDAMERCADOMAX), esa URL caía al chequeo
+    // de `/listado` de abajo — se leía como una búsqueda genérica,
+    // nunca como la tienda — y nunca se mandaba el dato de
+    // publicaciones. `_CustId_` suma al mismo patrón, mismo criterio
+    // que ya usa `lib/seguimiento/link.ts` (`PATRON_ID_VENDEDOR_EN_LINK`)
+    // del lado del servidor.
+    if (/\/perfil\/|tienda\.(mercadolibre|mercadolivre)|\/tienda\/|_CustId_|[?&]CustId=/i.test(url)) return "tienda";
     // Issue #233, punto B — bug real confirmado por Sharel: Brasil usa
     // el dominio "mercadolivre" (marca real en portugués — mismo
     // dominio que ya arma `urlListadoMl` en background.js desde #227),
@@ -108,10 +122,17 @@
   // "visitar vendedor" de Mercado Libre) -> "123456". Viene directo
   // de la URL, nada que adivinar del HTML — por eso leerSellerIdDeTienda
   // (abajo) la prueba primero, antes que cualquier cosa del HTML.
+  // Issue #252 (smoke de staging) — suma `_CustId_123456` (con guión
+  // bajo, sin "="): la misma forma que arma `construirLinkMlDeSeguimiento`
+  // para "Actualizar todo" en una tienda — antes solo se reconocía la
+  // forma con "=", así que esta función nunca encontraba el id en esa
+  // URL puntual y caía al respaldo del HTML (menos confiable). Mismo
+  // patrón combinado que ya usa `lib/seguimiento/link.ts`
+  // (`PATRON_ID_VENDEDOR_EN_LINK`).
   function extraerCustIdDeUrl(url) {
     if (typeof url !== "string") return null;
-    const m = url.match(/[?&]CustId=(\d+)/i);
-    return m ? m[1] : null;
+    const m = url.match(/_CustId_(\d+)|[?&]CustId=(\d+)/i);
+    return m ? m[1] || m[2] : null;
   }
 
   // Issue #174, corrección real: `user_id` en el JSON incrustado de

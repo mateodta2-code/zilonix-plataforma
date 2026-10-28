@@ -934,6 +934,18 @@ export type FotoItemMl = {
   catalogProductId: string | null;
   esFull: boolean | null;
   esEnvioGratis: boolean | null;
+  // Issue #251 ("Seguimiento muestra aproximados como Selltrix") —
+  // sumado a la lista de atributos: MISMO endpoint y mismo campo que
+  // ya pide obtenerItemMl/obtenerOfertasProducto (arriba, para
+  // Investigación) — ahí ya está confirmado que Mercado Libre lo da
+  // sin costo extra (un atributo más en la misma respuesta, nunca una
+  // llamada aparte) y sin restricción para un item AJENO. Antes de
+  // este issue, obtenerFotoItemMl (el lector real de Seguimiento,
+  // distinto de obtenerItemMl) nunca lo había pedido — hallazgo real
+  // del punto (a): sin esto, lib/seguimiento/aproximados.ts no tenía
+  // ningún date_created real con qué calcular antigüedad, siempre caía
+  // al respaldo por interpolación de id.
+  fechaCreacion: string | null;
 };
 
 function numeroONull(valor: unknown): number | null {
@@ -944,7 +956,7 @@ function numeroONull(valor: unknown): number | null {
 
 export async function obtenerFotoItemMl(itemId: string, token: string): Promise<FotoItemMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping`;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping,date_created`;
   try {
     const resp = await pedir<{
       price?: unknown;
@@ -955,6 +967,7 @@ export async function obtenerFotoItemMl(itemId: string, token: string): Promise<
       catalog_listing?: unknown;
       catalog_product_id?: unknown;
       shipping?: { logistic_type?: unknown; free_shipping?: unknown };
+      date_created?: unknown;
     }>(url, token);
     if (!resp.ok) return null;
     const d = resp.data;
@@ -968,6 +981,7 @@ export async function obtenerFotoItemMl(itemId: string, token: string): Promise<
       catalogProductId: typeof d.catalog_product_id === "string" ? d.catalog_product_id : null,
       esFull: d.shipping ? d.shipping.logistic_type === "fulfillment" : null,
       esEnvioGratis: typeof d.shipping?.free_shipping === "boolean" ? d.shipping.free_shipping : null,
+      fechaCreacion: typeof d.date_created === "string" ? d.date_created : null,
     };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;

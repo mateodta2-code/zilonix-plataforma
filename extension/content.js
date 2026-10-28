@@ -782,6 +782,13 @@
       inventarioAproximado: datos.inventarioMaximoAproximado === true,
       vendidos: datos.vendidos,
       vendidosExacto: datos.vendidosExacto === true,
+      // Issue #252 (punto 3) — respaldo para el nombre: si la revisión
+      // automática todavía no pudo confirmar el recurso real en ML
+      // (ej. recurso_ml guardado mal antes del #250), el servidor usa
+      // esto para no dejar el seguimiento en "Pendiente de primera
+      // revisión" para siempre.
+      titulo: datos.titulo ?? null,
+      precio: datos.precio ?? null,
       // Issue #251 (corrección de Pablo, punto 6/7) — cuándo se LEYÓ
       // la página de verdad, nunca cuándo llega al servidor:
       // background.js puede encolar esto y entregarlo horas después

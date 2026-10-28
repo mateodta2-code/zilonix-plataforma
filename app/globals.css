@@ -1,5 +1,18 @@
 :root {
-  color-scheme: light dark;
+  /* Bug real reportado en Pedidos: los <select> (Estado, Ordenar por)
+     mostraban las opciones del desplegable con texto blanco sobre
+     fondo blanco, ilegibles salvo la resaltada. Causa: "light dark"
+     le dice al navegador "elegí vos según el sistema operativo" — si
+     el SO está en claro pero la app quedó en oscuro (data-tema lo fija
+     por script, app/layout.tsx, independiente del SO), el desplegable
+     nativo (popup de <option>, fuera del alcance normal de CSS) se
+     pintaba claro mientras el resto de la página seguía oscura. Acá
+     se fija a la paleta REAL de la app (coincide con el fondo oscuro
+     de base, arriba) — :root[data-tema="claro"], más abajo, lo
+     cambia a "light" para ese tema. select/option (abajo del todo)
+     suman color/background-color explícitos para los navegadores que
+     no respetan color-scheme en el popup del desplegable. */
+  color-scheme: dark;
 
   /* Identidad visual de Zilonix Seller — manual de marca oficial:
      negro de base, plata del manual y azul en lo interactivo y en el
@@ -302,6 +315,11 @@
    así que "oscuro" necesita su propio bloque para que elegirlo a
    propósito gane siempre, incluso si el sistema está en claro. */
 :root[data-tema="oscuro"] {
+  /* Explícito acá también, mismo motivo que el resto de este bloque
+     ("mismos valores que :root, explícitos") — elegir oscuro a
+     propósito tiene que ganar siempre, incluso si alguien cambia el
+     default de :root el día de mañana sin tocar este bloque. */
+  color-scheme: dark;
   --fondo: #000000;
   --superficie: #0b0b0c;
   --superficie-2: #121214;
@@ -378,6 +396,12 @@
 }
 
 :root[data-tema="claro"] {
+  /* Lo mismo al revés que :root[data-tema="oscuro"] (arriba) — sin
+     esto, este tema heredaría "dark" del :root base y el desplegable
+     nativo de un <select> quedaría pintado oscuro mientras el resto
+     de la página (fondo blanco, --texto negro de este bloque) sigue
+     clara, el mismo bug reportado pero invertido. */
+  color-scheme: light;
   --fondo: #ffffff;
   --superficie: #f5f5f6;
   --superficie-2: #ececee;
@@ -724,6 +748,34 @@ button {
 .zx-control:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* Bug real reportado en el panel de Pedidos (filtros "Estado"/
+   "Ordenar por"): el desplegable de un <select> mostraba las
+   opciones con texto blanco sobre fondo blanco, solo se leía la
+   resaltada. Causa real: color-scheme (ver :root, arriba) decidía el
+   tema del POPUP nativo según el sistema operativo, no según el tema
+   que la app de verdad tiene puesto (data-tema) — ya corregido ahí,
+   pero el popup de <option> es territorio del navegador/SO y no
+   todos respetan color-scheme ahí de forma confiable (background-
+   color/color sobre <option> sí son las dos propiedades que todo
+   navegador moderno deja fijar directo, el resto del popup no se
+   puede tocar con CSS). Selector de ELEMENTO a propósito, nunca
+   .zx-control: un arreglo GLOBAL, no uno por página — cubre también
+   los <select> que todavía no usan esa clase compartida (estilo
+   inline propio en app/panel/publicar/nuevo y .../clip, o su propia
+   clase en BarraSuperior.module.css) sin tener que tocar cada uno.
+   `.zx-control`/`.select` (arriba, BarraSuperior) siguen pintando su
+   PROPIO fondo del control cerrado con más especificidad — esto solo
+   agrega lo que les faltaba: el popup abierto. */
+select {
+  background-color: var(--superficie-2);
+  color: var(--texto-superficie-2);
+}
+
+select option {
+  background-color: var(--superficie-2);
+  color: var(--texto-superficie-2);
 }
 
 /* Checkboxes/radios reales (ej. selección múltiple de despachos) —
