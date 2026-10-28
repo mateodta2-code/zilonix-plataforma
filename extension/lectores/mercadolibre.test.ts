@@ -17,6 +17,7 @@ import {
   esPaginaUserProduct,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
+  extraerIdIncrustadoConfiable,
   extraerWidDeUrl,
   filtroFullActivoEnUrl,
   leerDatosIncrustados,
@@ -541,6 +542,145 @@ describe("esPaginaUserProduct / extraerWidDeUrl — issue #251 (smoke de Mateo)"
     const resultado = extraerWidDeUrl(URL_COLIPLUS);
     expect(resultado).not.toBe("MCOU3018471021");
     expect(resultado).not.toMatch(/U/);
+  });
+});
+
+// Issue #251 (smoke de Mateo, segunda vuelta) — bug real: ficha
+// /up/MCOU2401140163?quantity=6 (SIN wid ni pdp_filters — solo
+// "quantity") dejaba Antigüedad/Ventas-mes/Facturación-mes en "Sin
+// dato" aunque Vendidos estimados ya funcionara bien. Último recurso:
+// 3 marcadores SIEMPRE autorreferenciales a la página actual (nunca a
+// un producto recomendado), ver el comentario completo junto a la
+// función.
+describe("extraerIdIncrustadoConfiable — issue #251 (smoke de Mateo, ficha /up/ sin wid)", () => {
+  it("<link rel=\"canonical\"> solo -> el itemId real", () => {
+    const html = `<!doctype html><html><head>
+      <link rel="canonical" href="https://articulo.mercadolibre.com.co/MCO-1742001365-almohada-cojin-dona-_JM">
+    </head><body></body></html>`;
+    expect(extraerIdIncrustadoConfiable(html)).toBe("MCO1742001365");
+  });
+
+  it('<meta property="og:url"> solo -> el itemId real', () => {
+    const html = `<!doctype html><html><head>
+      <meta property="og:url" content="https://articulo.mercadolibre.com.co/MCO-1742001365-almohada-cojin-dona-_JM">
+    </head><body></body></html>`;
+    expect(extraerIdIncrustadoConfiable(html)).toBe("MCO1742001365");
+  });
+
+  it('JSON-LD ("@type":"Product", productID) solo -> el itemId real', () => {
+    const html = `<!doctype html><html><head>
+      <script type="application/ld+json">{"@type":"Product","productID":"MCO1742001365","name":"Almohada"}</script>
+    </head><body></body></html>`;
+    expect(extraerIdIncrustadoConfiable(html)).toBe("MCO1742001365");
+  });
+
+  it('JSON-LD con "sku" o "url" (no solo productID) también sirve', () => {
+    expect(
+      extraerIdIncrustadoConfiable(`<script type="application/ld+json">{"@type":"Product","sku":"MCO1742001365"}</script>`)
+    ).toBe("MCO1742001365");
+    expect(
+      extraerIdIncrustadoConfiable(
+        `<script type="application/ld+json">{"@type":"Product","url":"https://articulo.mercadolibre.com.co/MCO-1742001365-x"}</script>`
+      )
+    ).toBe("MCO1742001365");
+  });
+
+  // Caso real de la tarea: la ficha trae productos recomendados en
+  // __NORDIC_RENDERING_CTX__ (otros MCO) y hasta links a esos
+  // recomendados en el body (/p/MCO...) — extraerIdIncrustadoConfiable
+  // NUNCA mira esas fuentes, solo canonical/og:url/JSON-LD Product, así
+  // que no hay forma de que los confunda con el producto principal.
+  it("con productos recomendados en la misma página (otros MCO) -> nunca los confunde, da el itemId real", () => {
+    const html = `<!doctype html><html><head>
+      <link rel="canonical" href="https://articulo.mercadolibre.com.co/MCO-1742001365-almohada-cojin-dona-_JM">
+    </head><body>
+      <script>window.__NORDIC_RENDERING_CTX__ = {"item":{"id":"MCO1742001365"},"recomendados":[{"id":"MCO9999999999"},{"id":"MCO8888888888"}]};</script>
+      <a href="/p/MCO9999999999">recomendado 1</a>
+      <a href="/p/MCO8888888888">recomendado 2</a>
+    </body></html>`;
+    const id = extraerIdIncrustadoConfiable(html);
+    expect(id).toBe("MCO1742001365");
+    expect(id).not.toBe("MCO9999999999");
+    expect(id).not.toBe("MCO8888888888");
+  });
+
+  it("sin canonical, sin og:url, sin JSON-LD -> null, nunca inventa", () => {
+    const html = `<!doctype html><html><head></head><body><p>Página sin ningún marcador</p></body></html>`;
+    expect(extraerIdIncrustadoConfiable(html)).toBeNull();
+    expect(extraerIdIncrustadoConfiable(null)).toBeNull();
+    expect(extraerIdIncrustadoConfiable("")).toBeNull();
+  });
+
+  it("canonical y og:url EN DESACUERDO (ids distintos) -> null, nunca adivina cuál es el real", () => {
+    const html = `<!doctype html><html><head>
+      <link rel="canonical" href="https://articulo.mercadolibre.com.co/MCO-1111111111-x">
+      <meta property="og:url" content="https://articulo.mercadolibre.com.co/MCO-2222222222-x">
+    </head><body></body></html>`;
+    expect(extraerIdIncrustadoConfiable(html)).toBeNull();
+  });
+
+  it("2 bloques JSON-LD \"Product\" con ids DISTINTOS y ninguna otra fuente -> null, nunca adivina", () => {
+    const html = `<!doctype html><html><head>
+      <script type="application/ld+json">{"@type":"Product","productID":"MCO1111111111"}</script>
+      <script type="application/ld+json">{"@type":"Product","productID":"MCO2222222222"}</script>
+    </head><body></body></html>`;
+    expect(extraerIdIncrustadoConfiable(html)).toBeNull();
+  });
+
+  it("JSON-LD ambiguo (2 ids distintos) pero canonical sí desambigua -> usa canonical, ignora el JSON-LD confuso", () => {
+    const html = `<!doctype html><html><head>
+      <link rel="canonical" href="https://articulo.mercadolibre.com.co/MCO-1111111111-x">
+      <script type="application/ld+json">{"@type":"Product","productID":"MCO1111111111"}</script>
+      <script type="application/ld+json">{"@type":"Product","productID":"MCO2222222222"}</script>
+    </head><body></body></html>`;
+    expect(extraerIdIncrustadoConfiable(html)).toBe("MCO1111111111");
+  });
+
+  it("un bloque JSON-LD que no es \"Product\" (ej. BreadcrumbList) se ignora, nunca revienta ni confunde", () => {
+    const html = `<!doctype html><html><head>
+      <script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[{"@id":"MCO9999999999"}]}</script>
+      <script type="application/ld+json">{"@type":"Product","productID":"MCO1742001365"}</script>
+    </head><body></body></html>`;
+    expect(extraerIdIncrustadoConfiable(html)).toBe("MCO1742001365");
+  });
+
+  it("JSON-LD cortado/forma inesperada -> se ignora ese bloque, nunca revienta", () => {
+    const html = `<!doctype html><html><head>
+      <link rel="canonical" href="https://articulo.mercadolibre.com.co/MCO-1742001365-x">
+      <script type="application/ld+json">{esto no es JSON válido</script>
+    </head><body></body></html>`;
+    expect(extraerIdIncrustadoConfiable(html)).toBe("MCO1742001365");
+  });
+});
+
+// Issue #251 (smoke de Mateo, segunda vuelta) — orden real completo
+// pedido por la tarea: wid de la URL -> pdp_filters -> incrustado
+// confiable -> null. wid/pdp_filters SIEMPRE ganan cuando están
+// presentes (extraerWidDeUrl ya los prueba en ese orden); el
+// incrustado confiable es el ÚLTIMO recurso, solo cuando los otros dos
+// no dieron nada.
+describe("orden wid -> pdp_filters -> incrustado confiable -> null (issue #251)", () => {
+  it("con wid en la URL, nunca llega a mirar el HTML incrustado (gana wid)", () => {
+    const url = "https://www.mercadolibre.com.co/almohada-cojin-dona/up/MCOU2401140163?wid=MCO1742001365";
+    // HTML con un id DISTINTO a propósito — si el código llegara a
+    // usarlo, esta prueba lo detectaría.
+    const htmlConOtroId = `<link rel="canonical" href="https://articulo.mercadolibre.com.co/MCO-9999999999-x">`;
+    const itemId = extraerWidDeUrl(url) || extraerIdIncrustadoConfiable(htmlConOtroId);
+    expect(itemId).toBe("MCO1742001365");
+  });
+
+  it("sin wid ni pdp_filters en la URL, cae al incrustado confiable", () => {
+    const url = "https://www.mercadolibre.com.co/almohada-cojin-dona-para-hemorroides-coxis/up/MCOU2401140163?quantity=6";
+    const html = `<link rel="canonical" href="https://articulo.mercadolibre.com.co/MCO-1742001365-almohada-cojin-dona-_JM">`;
+    const itemId = extraerWidDeUrl(url) || extraerIdIncrustadoConfiable(html);
+    expect(itemId).toBe("MCO1742001365");
+  });
+
+  it("sin wid, sin pdp_filters y sin ningún marcador confiable en el HTML -> null (nunca el MCOU)", () => {
+    const url = "https://www.mercadolibre.com.co/almohada-cojin-dona-para-hemorroides-coxis/up/MCOU2401140163?quantity=6";
+    const html = `<!doctype html><html><head></head><body><p>sin marcadores</p></body></html>`;
+    const itemId = extraerWidDeUrl(url) || extraerIdIncrustadoConfiable(html);
+    expect(itemId).toBeNull();
   });
 });
 
