@@ -573,7 +573,12 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     return seguimiento;
   }
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    // Los casos con reloj fijo falsean solo `Date`. Si un expect falla
+    // antes del `finally`, este afterEach igual devuelve el reloj real.
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it("crea la primera foto al instante (nunca espera al cron) y marca ultima_revision_ts; sin alertas, nada con qué comparar todavía", async () => {
     const seguimiento = await crearSeguimientoConCuenta("PRIMERA-FOTO");
@@ -773,66 +778,60 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
   });
 
-  // Regresión directa del bug del PR #258 (CI corrido ~7:30pm Bogotá):
-  // fija el reloj a las 23:30 de Bogotá — el borde horario exacto
-  // donde "ayer" en UTC (medianoche UTC) todavía no coincide con "hoy"
-  // en Bogotá. Solo se falsea `Date` (`toFake: ["Date"]`), nunca los
-  // timers reales — Postgres sigue async de verdad, nada que avanzar
-  // a mano. `diasAtras(1)` (el mismo helper ya usado arriba, ahora
-  // corregido) tiene que seguir dando la foto de AYER real en Bogotá,
-  // nunca la de hoy, sin importar la hora del día en que corra el CI.
-  it("a las 23:30 de Bogotá, diasAtras(1) sigue siendo ayer de verdad: la alerta precio_bajo se crea igual", async () => {
-    // rangoDiaBogota(...).inicio es el INSTANTE real de la medianoche
-    // de Bogotá (05:00 UTC ese día) — a diferencia de hoyBogota()/
-    // fechaDiaBogota(), que da un valor de FECHA (día calendario, sin
-    // hora, pensado para la columna DATE seguimiento_fotos.fecha,
-    // nunca para sumarle horas reales). +23h30 sobre ese instante real
-    // -> 23:30 de Bogotá de HOY (hora real de cuando corre el test,
-    // calculada ANTES de fijar el reloj falso, para no depender de en
-    // qué instante arranca vi.useFakeTimers()), sin importar qué hora
-    // real sea cuando el CI ejecuta esto.
+  // Regresión del bug del PR #258 (CI ~19:30 Bogotá). El caso de
+  // arriba ya usa `diasAtras(1)` con el reloj real; estas tres horas
+  // fijan `Date` para que el corte de las 19:00 se pruebe también
+  // cuando el CI corre de día. 10:00 cae del mismo lado del calendario
+  // UTC que Bogotá; 19:30 y 23:59 ya son el día siguiente en UTC.
+  // Solo se falsea `Date` — si se falsea `setTimeout`, el driver de
+  // Postgres se cuelga. El instante se arma ANTES de congelar el
+  // reloj, sumando la hora a la medianoche real de Bogotá
+  // (`rangoDiaBogota().inicio`, 05:00 UTC), nunca a `fechaDiaBogota()`
+  // (eso es el marcador 00:00Z de la columna, no un instante).
+  //
+  // La cuenta se crea DESPUÉS de fijar el reloj (CI del PR #263):
+  // `crearSeguimientoConCuenta` pone `tokenExpiraTs` en `Date.now()+1h`
+  // y `obtenerAccessTokenVigente` lo compara contra el mismo
+  // `Date.now()`. Si la cuenta naciera con el reloj real y después el
+  // reloj saltara varias horas, el token se vería vencido y el test
+  // fallaría renovando la conexión, no por la alerta.
+  function instanteDeHoyEnBogota(hora: number, minuto: number): Date {
     const medianocheBogotaReal = rangoDiaBogota(new Date()).inicio;
-    const horaRiesgosa = new Date(medianocheBogotaReal.getTime() + 23.5 * 60 * 60 * 1000);
+    return new Date(medianocheBogotaReal.getTime() + (hora * 60 + minuto) * 60 * 1000);
+  }
 
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(horaRiesgosa);
+  it.each([
+    ["10:00", 10, 0],
+    ["19:30", 19, 30],
+    ["23:59", 23, 59],
+  ] as const)(
+    "a las %s de Bogotá, dos revisiones el mismo día con la misma baja de precio: una sola alerta precio_bajo, nunca duplicada",
+    async (etiqueta, hora, minuto) => {
+      const horaSimulada = instanteDeHoyEnBogota(hora, minuto);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(horaSimulada);
+        const seguimiento = await crearSeguimientoConCuenta(`AYER-BOGOTA-${etiqueta.replace(":", "")}`);
+        const ayer = diasAtras(1);
+        await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+          tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: ayer, precio: "100", estado: "active" })
+        );
 
-      // Corrección real (CI del PR #263) — crearSeguimientoConCuenta
-      // tiene que crearse DESPUÉS de fijar el reloj falso, nunca
-      // antes: calcula tokenExpiraTs como `Date.now() + 1h`, y
-      // obtenerAccessTokenVigente (lib/ml/cuentas.ts) compara ese
-      // valor contra `Date.now()` otra vez más adelante, bajo el
-      // MISMO reloj falso. Si la cuenta se crea con el reloj real
-      // (antes de este punto) y horaRiesgosa cae horas después (puede
-      // ser cualquier salto, según la hora real en que corra el CI),
-      // el token queda "vencido" para el reloj falso y
-      // obtenerAccessTokenVigente intenta renovarlo — el fetch
-      // mockeado de abajo (precio/estado) no sirve para esa renovación
-      // y el test fallaba con un error de "no se pudo renovar la
-      // conexión", NUNCA relacionado con la alerta real que esto
-      // prueba. Creando la cuenta ACÁ, con el reloj ya congelado en
-      // horaRiesgosa, tokenExpiraTs sale `horaRiesgosa + 1h` — siempre
-      // en el futuro respecto al mismo reloj congelado, nunca vencido,
-      // sin importar qué tan lejos esté horaRiesgosa de la hora real.
-      const seguimiento = await crearSeguimientoConCuenta("AYER-BOGOTA-23-30");
+        vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 80, status: "active" }))); // baja real de 100 a 80
 
-      const ayer = diasAtras(1);
-      await dbComoEmpresa(seguimiento.empresaId, (tx) =>
-        tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: ayer, precio: "100", estado: "active" })
-      );
+        const primera = await revisarAhoraUnSeguimiento(seguimiento);
+        expect(primera).toEqual({ ok: true, saltado: false, alertasCreadas: 1 });
 
-      vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 80, status: "active" }))); // baja real de 100 a 80
+        const segunda = await revisarAhoraUnSeguimiento(seguimiento);
+        expect(segunda).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
 
-      const resultado = await revisarAhoraUnSeguimiento(seguimiento);
-      expect(resultado).toEqual({ ok: true, saltado: false, alertasCreadas: 1 });
-
-      const alertas = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimiento.id)));
-      expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
-    } finally {
-      vi.useRealTimers();
+        const alertas = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimiento.id)));
+        expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
     }
-  });
+  );
 
   it("empresa sin cuenta ML conectada: {ok:false,error} claro, y NUNCA marca ultima_revision_ts (para que el cron de hoy mismo lo reintente)", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario("SIN-CUENTA-INMEDIATA");
