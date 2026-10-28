@@ -37,6 +37,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
 -- fila de la tabla maestra se corrige, ninguno se borra. Son tablas
 -- nuevas, así que no hay un DELETE viejo que revocar.
 GRANT SELECT, INSERT, UPDATE ON terceros, costos_sku TO app_user;
+-- Issue #129 (Z-FIN-07) — ventas: sin DELETE. La cabecera y las
+-- líneas solo se borran en cascada con su pedido. Una corrección no se
+-- edita ni se borra: el único UPDATE permitido es anularla
+-- (anulada_ts), y la política de abajo no deja des-anularla.
+GRANT SELECT, INSERT, UPDATE ON pedidos_finanzas, pedido_items TO app_user;
+GRANT SELECT, INSERT ON ventas_correcciones TO app_user;
+GRANT UPDATE (anulada_ts) ON ventas_correcciones TO app_user;
 -- Issue #125 (Z-FIN-03) — auditoria queda de solo inserción para
 -- app_user: puede dejar el rastro y leer el de su empresa, no
 -- reescribirlo ni borrarlo. REVOKE porque este script es repetible:
@@ -167,6 +174,13 @@ ALTER TABLE terceros ENABLE ROW LEVEL SECURITY;
 ALTER TABLE terceros FORCE ROW LEVEL SECURITY;
 ALTER TABLE costos_sku ENABLE ROW LEVEL SECURITY;
 ALTER TABLE costos_sku FORCE ROW LEVEL SECURITY;
+-- Issue #129.
+ALTER TABLE pedidos_finanzas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pedidos_finanzas FORCE ROW LEVEL SECURITY;
+ALTER TABLE pedido_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pedido_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE ventas_correcciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ventas_correcciones FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
@@ -329,6 +343,31 @@ CREATE POLICY aislamiento_terceros ON terceros
 DROP POLICY IF EXISTS aislamiento_costos_sku ON costos_sku;
 CREATE POLICY aislamiento_costos_sku ON costos_sku
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #129 — mismo patrón para la cabecera y las líneas de venta.
+DROP POLICY IF EXISTS aislamiento_pedidos_finanzas ON pedidos_finanzas;
+CREATE POLICY aislamiento_pedidos_finanzas ON pedidos_finanzas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_pedido_items ON pedido_items;
+CREATE POLICY aislamiento_pedido_items ON pedido_items
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- ventas_correcciones: una política por comando. Se inserta activa
+-- (sin anulada_ts) y el UPDATE (que el GRANT ya limita a anulada_ts)
+-- solo toma una corrección activa y la deja anulada: no se des-anula
+-- ni se cambia la fecha de una ya anulada.
+DROP POLICY IF EXISTS aislamiento_ventas_correcciones ON ventas_correcciones;
+DROP POLICY IF EXISTS ventas_correcciones_ver ON ventas_correcciones;
+CREATE POLICY ventas_correcciones_ver ON ventas_correcciones FOR SELECT
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS ventas_correcciones_crear ON ventas_correcciones;
+CREATE POLICY ventas_correcciones_crear ON ventas_correcciones FOR INSERT
+  WITH CHECK (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NULL);
+DROP POLICY IF EXISTS ventas_correcciones_anular ON ventas_correcciones;
+CREATE POLICY ventas_correcciones_anular ON ventas_correcciones FOR UPDATE
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NULL)
+  WITH CHECK (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NOT NULL);
 
 DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;
 CREATE POLICY aislamiento_accesos_temporales ON accesos_temporales
