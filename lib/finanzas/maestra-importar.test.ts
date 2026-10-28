@@ -1,16 +1,18 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { auditoria, costosSku, skus } from "@/db/schema";
+import { auditoria, costosSku, skus, terceros } from "@/db/schema";
 import { costosParaUtilidad, leerCostoSku } from "@/lib/costos-sku";
 import { SinPermisoError } from "@/lib/permisos";
 import { actualizarTercero, crearTercero } from "@/lib/terceros";
 import { crearEmpresaConPermisos } from "@/lib/test-utils/empresa-con-permiso";
+import type { FilaArchivo } from "@/lib/importar-archivo";
 import { crearXlsxDePrueba, type ValorCeldaPrueba } from "@/lib/test-utils/xlsx";
 import {
   ArchivoMaestraInvalidoError,
   FILAS_MAXIMAS_MAESTRA,
   ImportacionMaestraConErroresError,
+  calcularVistaPrevia,
   confirmarImportacionMaestra,
   previsualizarImportacionMaestra,
   puedeConfirmar,
@@ -68,7 +70,7 @@ describe("carga de la tabla maestra (issue #128)", () => {
     expect(vista.filas.find((f) => f.sku === "REF-003")?.avisos.join(" ")).toContain("Packing distinto");
     expect(puedeConfirmar(vista)).toBe(true);
 
-    expect(await confirmarImportacionMaestra(e.empresaId, e.usuarioId, archivo)).toEqual({ nuevas: 3, actualizadas: 0, sinCambios: 0 });
+    expect(await confirmarImportacionMaestra(e.empresaId, e.usuarioId, archivo)).toEqual({ nuevas: 3, actualizadas: 0, sinCambios: 0, proveedoresCreados: 0 });
 
     const ful = await leerCostoSku(e.empresaId, "FUL-001");
     expect(ful).toMatchObject({ costo: "45000.00", empaque: null, envioAgencia: "2000.00", precioMinimoUnidad: "60000.00", precioMinimoComboX2: null, precioMinimoComboX3: null, terceroId: e.infinity, fuente: "archivo" });
@@ -112,11 +114,64 @@ describe("carga de la tabla maestra (issue #128)", () => {
     expect(puedeConfirmar(vista)).toBe(false);
   });
 
-  it("un proveedor que no existe se rechaza y no se crea", async () => {
+  it("un proveedor que no existe se crea al confirmar (uno solo por nombre), con bitácora; una segunda carga no lo duplica", async () => {
     const e = await empresaConProveedores();
-    const vista = await previsualizarImportacionMaestra(e.empresaId, e.usuarioId, csv(["sku,proveedor,costo", "X-1,Proveedor Fantasma,10"]));
-    expect(vista.errores[0]).toMatchObject({ numeroFila: 2, columna: "Proveedor" });
-    expect(vista.errores[0].mensaje).toContain("no existe");
+    const archivo = csv(["sku,proveedor,costo", "N-1,Proveedor  Nuevo,10", "N-2,proveedor nuevo,20", "N-3,Infinity,30"]);
+    const vista = await previsualizarImportacionMaestra(e.empresaId, e.usuarioId, archivo);
+    expect(vista.errores).toEqual([]);
+    expect(vista.resumen.proveedoresNuevos).toBe(1);
+    expect(vista.filas.find((f) => f.sku === "N-2")?.avisos).toContain("Se creará el proveedor «Proveedor Nuevo».");
+    // La vista previa no escribe.
+    const antes = await dbComoEmpresa(e.empresaId, (tx) => tx.select().from(terceros).where(eq(terceros.nombre, "Proveedor Nuevo")));
+    expect(antes).toHaveLength(0);
+
+    expect(await confirmarImportacionMaestra(e.empresaId, e.usuarioId, archivo)).toEqual({ nuevas: 3, actualizadas: 0, sinCambios: 0, proveedoresCreados: 1 });
+    const creados = await dbComoEmpresa(e.empresaId, (tx) => tx.select().from(terceros).where(eq(terceros.nombre, "Proveedor Nuevo")));
+    expect(creados).toHaveLength(1);
+    expect(creados[0]).toMatchObject({
+      tipo: "proveedor_producto",
+      condicionPago: "inmediato",
+      periodicidad: null,
+      empaque: null,
+      plazoDias: null,
+      activo: true,
+      actualizadoPor: e.usuarioId,
+      predeterminadoEmpaque: false,
+    });
+    expect((await leerCostoSku(e.empresaId, "N-1"))?.terceroId).toBe(creados[0].id);
+    expect((await leerCostoSku(e.empresaId, "N-2"))?.terceroId).toBe(creados[0].id);
+    const bitacora = await dbComoEmpresa(e.empresaId, (tx) => tx.select().from(auditoria).where(eq(auditoria.entidadId, creados[0].id)));
+    expect(bitacora).toEqual([
+      expect.objectContaining({ accion: "crear", entidad: "tercero", detalle: "Creó el tercero «Proveedor Nuevo» (desde importación maestra)." }),
+    ]);
+
+    // Segunda carga con el mismo nombre (otras mayúsculas): usa el que ya existe.
+    const otra = csv(["sku,proveedor,costo", "N-4,PROVEEDOR NUEVO,40"]);
+    expect((await previsualizarImportacionMaestra(e.empresaId, e.usuarioId, otra)).resumen.proveedoresNuevos).toBe(0);
+    expect((await confirmarImportacionMaestra(e.empresaId, e.usuarioId, otra)).proveedoresCreados).toBe(0);
+    expect((await leerCostoSku(e.empresaId, "N-4"))?.terceroId).toBe(creados[0].id);
+    const todos = await dbComoEmpresa(e.empresaId, (tx) => tx.select().from(terceros).where(eq(terceros.empresaId, e.empresaId)));
+    expect(todos.filter((t) => t.nombre.toLowerCase() === "proveedor nuevo")).toHaveLength(1);
+  });
+
+  it("si el proveedor se crea a mano entre la vista previa y la confirmación, se usa ese y no se duplica", async () => {
+    const e = await empresaConProveedores();
+    const archivo = csv(["sku,proveedor,costo", "R-1,Carrera,10"]);
+    expect((await previsualizarImportacionMaestra(e.empresaId, e.usuarioId, archivo)).resumen.proveedoresNuevos).toBe(1);
+    const aMano = await crearTercero({ empresaId: e.empresaId, usuarioId: e.usuarioId, nombre: "Carrera", tipo: "proveedor_producto", condicionPago: "inmediato" });
+    expect((await confirmarImportacionMaestra(e.empresaId, e.usuarioId, archivo)).proveedoresCreados).toBe(0);
+    expect((await leerCostoSku(e.empresaId, "R-1"))?.terceroId).toBe(aMano.id);
+  });
+
+  it("el proveedor creado por A no existe para B (A/B)", async () => {
+    const a = await empresaConProveedores();
+    const b = await empresaConProveedores();
+    await confirmarImportacionMaestra(a.empresaId, a.usuarioId, csv(["sku,proveedor,costo", "AB-1,Solo De A,10"]));
+    const deB = await dbComoEmpresa(b.empresaId, (tx) => tx.select().from(terceros).where(eq(terceros.nombre, "Solo De A")));
+    expect(deB).toHaveLength(0);
+    // Para B sigue siendo un proveedor por crear.
+    const vistaB = await previsualizarImportacionMaestra(b.empresaId, b.usuarioId, csv(["sku,proveedor,costo", "AB-1,Solo De A,10"]));
+    expect(vistaB.resumen.proveedoresNuevos).toBe(1);
   });
 
   it("costo: vacío no pisa uno guardado, 0 lo cambia a 0.00 como cambio (CSV y .xlsx)", async () => {
@@ -209,5 +264,71 @@ describe("carga de la tabla maestra (issue #128)", () => {
 
     const enorme = { nombre: "grande.csv", contenido: Buffer.alloc(5 * 1024 * 1024 + 1, "a") };
     await expect(previsualizarImportacionMaestra(e.empresaId, e.usuarioId, enorme)).rejects.toBeInstanceOf(ArchivoMaestraInvalidoError);
+  });
+});
+
+// Pura (calcularVistaPrevia no lee la base): proveedor nuevo, repetido,
+// desactivado y duplicado.
+describe("vista previa: proveedores que no existen (Refs #128)", () => {
+  const texto = (valor: string) => ({ tipo: "texto" as const, valor });
+  const hoja = (filas: [string, string][]): FilaArchivo[] => [
+    { numeroFila: 1, celdas: [texto("SKU"), texto("Proveedor"), texto("Costo")] },
+    ...filas.map(([sku, proveedor], i) => ({ numeroFila: i + 2, celdas: [texto(sku), texto(proveedor), { tipo: "numero" as const, valor: "100" }] })),
+  ];
+  const contexto = (proveedores: { id: string; nombre: string; activo: boolean }[]) => ({
+    existentes: new Map(),
+    proveedores: proveedores.map((p) => ({ ...p, empaque: null })),
+    nombresCatalogo: new Map<string, string>(),
+  });
+
+  it("un nombre nuevo no es error: aviso, proveedorACrear y proveedoresNuevos", () => {
+    const vista = calcularVistaPrevia(hoja([["A-1", "  Nuevo   Prov "]]), contexto([]));
+    expect(vista.errores).toEqual([]);
+    expect(vista.filas[0]).toMatchObject({ estado: "nueva", proveedorACrear: "Nuevo Prov", proveedorNombre: "Nuevo Prov" });
+    expect(vista.filas[0].valores.terceroId).toBeNull();
+    expect(vista.filas[0].avisos).toContain("Se creará el proveedor «Nuevo Prov».");
+    expect(vista.filas[0].cambios).toContainEqual({ campo: "proveedor", anterior: null, nuevo: "Nuevo Prov" });
+    expect(vista.resumen.proveedoresNuevos).toBe(1);
+    expect(puedeConfirmar(vista)).toBe(true);
+  });
+
+  it("dos filas con el mismo nombre (mayúsculas y espacios aparte) crean un solo proveedor", () => {
+    const vista = calcularVistaPrevia(hoja([["A-1", "Nuevo Prov"], ["A-2", "nuevo  PROV"]]), contexto([]));
+    expect(vista.resumen.proveedoresNuevos).toBe(1);
+    expect(vista.filas.map((f) => f.proveedorACrear)).toEqual(["Nuevo Prov", "Nuevo Prov"]);
+  });
+
+  it("sigue siendo error: un proveedor desactivado, o dos con el mismo nombre", () => {
+    const inactivo = calcularVistaPrevia(hoja([["A-1", "Viejo"]]), contexto([{ id: "t1", nombre: "Viejo", activo: false }]));
+    expect(inactivo.errores[0].mensaje).toContain("desactivado");
+    expect(inactivo.resumen.proveedoresNuevos).toBe(0);
+
+    const duplicado = calcularVistaPrevia(
+      hoja([["A-1", "Doble"]]),
+      contexto([
+        { id: "t1", nombre: "Doble", activo: true },
+        { id: "t2", nombre: "doble", activo: true },
+      ])
+    );
+    expect(duplicado.errores[0].mensaje).toContain("más de un proveedor");
+  });
+
+  it("un SKU guardado que pasa a un proveedor nuevo cuenta como cambio", () => {
+    const ctx = contexto([{ id: "t1", nombre: "Viejo", activo: true }]);
+    ctx.existentes.set("A-1", {
+      id: "c1",
+      skuCodigo: "A-1",
+      nombreProducto: null,
+      terceroId: "t1",
+      costo: "100.00",
+      empaque: null,
+      envioAgencia: null,
+      precioMinimoUnidad: null,
+      precioMinimoComboX2: null,
+      precioMinimoComboX3: null,
+      precioVenta: null,
+    });
+    const vista = calcularVistaPrevia(hoja([["A-1", "Otro"]]), ctx);
+    expect(vista.filas[0]).toMatchObject({ estado: "cambio", cambios: [{ campo: "proveedor", anterior: "Viejo", nuevo: "Otro" }] });
   });
 });
