@@ -85,9 +85,16 @@ describe("antiguedadDias — issue #262 (date_created real gana siempre que est�
     expect(dias).toBeCloseTo(30, 6);
   });
 
-  it("sin date_created y sin puntos calibrados todavía -> null (el estado real de hoy, tabla vacía)", () => {
+  // Issue #251 — calibracionReal (lib/seguimiento/calibracion-aproximados.json)
+  // ya NO está vacía (9 puntos reales, ver aproximados.test.ts del lado
+  // de la app) — esta prueba usa una calibración sin puntos a propósito
+  // (nunca `calibracionReal`) para seguir cubriendo el invariante real:
+  // sin date_created y sin NINGÚN punto calibrado, nunca se inventa una
+  // antigüedad.
+  it("sin date_created y sin puntos calibrados -> null, nunca inventa", () => {
     const ahoraMs = Date.now();
-    expect(antiguedadDias({ dateCreated: null, mlId: "MCO1050000000", tipo: "item", ahoraMs }, calibracionReal)).toBeNull();
+    const sinPuntos = { factorVendidosFull: 2.2, factorVendidosSinFull: 1.55, puntos: [] };
+    expect(antiguedadDias({ dateCreated: null, mlId: "MCO1050000000", tipo: "item", ahoraMs }, sinPuntos)).toBeNull();
   });
 });
 

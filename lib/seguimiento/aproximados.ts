@@ -90,22 +90,40 @@ export function vendidosEstimados(vendidos: number | null, opciones: OpcionesVen
 // garantizado exacto para una publicación puntual, por eso es
 // "aproximado" y nunca se usa si hay un date_created real disponible.
 //
-// SIN PUNTOS TODAVÍA (issue #262 — causa de fondo confirmada: ningún
-// "por mes" aparece en ningún lado mientras esta tabla siga vacía):
-// nada en la base de hoy tenía suficientes pares REALES confirmados
-// para calibrar. `scripts/generar-calibracion-id-fecha.ts` (issue #262,
-// solo lectura) saca pares reales de `seguimiento_fotos.publicaciones.fechaCreacion`
-// (competidores que el cron ya confirmó, PR #261) y de publicaciones
-// propias recién publicadas (`productos_ml.resultado[].itemId` +
-// `publicadoTs`, prácticamente el mismo instante que el date_created
-// real de Mercado Libre) — imprime el JSON para pegar en `puntos`
-// (abajo, en calibracion-aproximados.json), nunca escribe nada solo.
-// Agregar acá pares REALES únicamente (mlIdExterno real + fecha real
-// que Mercado Libre confirmó o que Zilonix generó al publicar, nunca
-// un id o fecha inventados). Hacen falta al menos 2 del MISMO tipo
-// (item/product) y MISMO país para poder interpolar siquiera un poco
-// — ver el changelog de esta rama para cuántos puntos hacen falta para
-// que la interpolación sea razonable (no solo "posible").
+// PUNTOS DE SELLTRIX + UNA PROPIA CONFIRMADA (issue #251): correr
+// `scripts/generar-calibracion-id-fecha.ts` (issue #262, solo lectura,
+// saca pares reales de `seguimiento_fotos.publicaciones.fechaCreacion`
+// y de `productos_ml.resultado[].itemId`+`publicadoTs`) contra staging
+// dio 0 pares confirmados todavía — el cron de date_created (PR #261)
+// recién empieza a acumular (ver el changelog de esta rama). Mientras
+// tanto, estos 9 puntos salen del panel de Selltrix (el mismo
+// competidor que YA estima antigüedad por id, igual que acá): Mateo
+// sacó la "antigüedad" que esa pantalla muestra para 5 ids "item" y 4
+// ids de catálogo "product", y la fecha de cada uno se derivó con la
+// MISMA fórmula que usa Selltrix (días = vendidosEst × 30 /
+// (facturaciónMes / precio) — su propia pantalla ya hace esa cuenta).
+// Son referenciales, no un date_created confirmado por la API — por
+// eso siguen siendo "aproximado" (ETIQUETA_APROXIMADO), igual que el
+// resto de esta tabla.
+// Un punto SÍ es un dato real: MCO2275587337 es una publicación propia
+// de Zilonix cuya primera venta real (14 oct 2026, Mis Ventas de
+// Mercado Libre) cuadra con la fecha que da Selltrix para ese id —
+// ancla el resto de la serie "item" contra un punto no inferido.
+// Publicaciones INTERNACIONALES (envío desde China, ej. MCO4106040446
+// ≈ 2026-06-27 según Selltrix) usan OTRA serie de numeración de MCO —
+// nunca entran acá como "item": mezclar las dos series tuerce la
+// interpolación para TODAS las publicaciones domésticas del mismo
+// rango. Esos ids se dejan afuera de PUNTOS_CALIBRACION_ID_FECHA a
+// propósito; con el tope de 90 días de extrapolación
+// (LIMITE_EXTRAPOLACION_DIAS, abajo) terminan en "Sin dato" en vez de
+// una antigüedad inventada.
+// Reemplazar por pares 100% confirmados por la API en cuanto
+// `scripts/generar-calibracion-id-fecha.ts` tenga suficientes (ver el
+// changelog de esta rama) — hasta entonces, agregar acá solo lo que
+// venga de una fuente real (Selltrix o una venta/publicación propia
+// confirmada), nunca un id o fecha inventados. Hacen falta al menos 2
+// del MISMO tipo (item/product) y MISMO país para poder interpolar
+// siquiera un poco.
 //
 // Corrección de Pablo (revisión sobre 0e22594) — `tipo` ("item" o
 // "product", el mismo recurso_ml real del seguimiento, nunca "seller":

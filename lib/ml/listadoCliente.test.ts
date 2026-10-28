@@ -214,7 +214,14 @@ describe("estimarAproximadosListado — issue #251 (fix 'aproximados siempre vis
       esFull: true,
       senalVentas: { valor: 100, tipo: "acumulado_sin_periodo" },
     });
-    const est = estimarAproximadosListado(p, AHORA);
+    // Issue #251 — `puntos: []` explícito a propósito: desde que
+    // lib/seguimiento/calibracion-aproximados.json tiene puntos reales
+    // de tipo "product" (ver lib/seguimiento/aproximados.test.ts), NO
+    // pasar el tercer argumento haría que este MCO64541261 caiga dentro
+    // del rango real calibrado y SÍ interpole — esta prueba es sobre el
+    // caso sin ninguna antigüedad calibrada, no sobre el estado real de
+    // hoy de la tabla de calibración.
+    const est = estimarAproximadosListado(p, AHORA, []);
     expect(est.vendidosEst).toBeCloseTo(220); // 100 × 2.2 (Full) — EXACTO, nunca depende de la antigüedad
     expect(est.ventasMesEst).toBeNull(); // sin puntos de calibración de tipo "product" en esta prueba
     expect(est.facturacionMesEst).toBeNull();

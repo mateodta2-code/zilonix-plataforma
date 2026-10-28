@@ -5,6 +5,7 @@ import {
   facturacionMes,
   FACTOR_VENDIDOS_FULL,
   FACTOR_VENDIDOS_SIN_FULL,
+  PUNTOS_CALIBRACION_ID_FECHA,
   ventasMes,
   vendidosEstimados,
   type PuntoCalibracionId,
@@ -283,5 +284,84 @@ describe("caso real de referencia completo (Selltrix) — los 4 cálculos encade
 
     const facturacion = facturacionMes(ventasMesValor, 939900);
     expect(facturacion).toBeCloseTo(14662440, 2);
+  });
+});
+
+// Issue #251 — PUNTOS_CALIBRACION_ID_FECHA real (lib/seguimiento/calibracion-aproximados.json):
+// 9 puntos del panel de Selltrix + MCO2275587337 (publicación propia,
+// confirmada por la primera venta real del 14 oct 2026 en Mis Ventas
+// de Mercado Libre) — ver el comentario de aproximados.ts para el
+// origen completo. "ahora" fijo en 2026-10-27, la misma fecha de la
+// tarea que pidió calibrar esto.
+describe("PUNTOS_CALIBRACION_ID_FECHA real — issue #251 (Selltrix + 1 propia confirmada)", () => {
+  const ahora = new Date("2026-10-27T00:00:00.000Z");
+
+  it("item MCO2275587337 (publicación propia, ancla real) -> ~16 días", () => {
+    const dias = antiguedadDiasPorId("MCO2275587337", "item", ahora, PUNTOS_CALIBRACION_ID_FECHA);
+    expect(dias).not.toBeNull();
+    expect(dias!).toBeCloseTo(16, 0);
+  });
+
+  it("item MCO1836584643 -> ~250 días", () => {
+    const dias = antiguedadDiasPorId("MCO1836584643", "item", ahora, PUNTOS_CALIBRACION_ID_FECHA);
+    expect(dias).not.toBeNull();
+    expect(dias!).toBeCloseTo(250, 0);
+  });
+
+  it("item MCO602965132 (el punto calibrado más viejo) -> ~2129 días (±3)", () => {
+    const dias = antiguedadDiasPorId("MCO602965132", "item", ahora, PUNTOS_CALIBRACION_ID_FECHA);
+    expect(dias).not.toBeNull();
+    expect(Math.abs(dias! - 2129)).toBeLessThanOrEqual(3);
+  });
+
+  it("product MCO2068057559 -> ~195 días", () => {
+    const dias = antiguedadDiasPorId("MCO2068057559", "product", ahora, PUNTOS_CALIBRACION_ID_FECHA);
+    expect(dias).not.toBeNull();
+    expect(dias!).toBeCloseTo(195, 0);
+  });
+
+  it("un id ENTRE dos puntos item calibrados interpola entre sus fechas (nunca extrapola)", () => {
+    // Entre MCO1742001365 (2025-12-01) y MCO1836584643 (2026-02-19) —
+    // la antigüedad tiene que caer estrictamente entre la de esos dos
+    // puntos: más vieja que la del más nuevo (2026-02-19, ~250 días) y
+    // más nueva que la del más viejo (2025-12-01, bastante más).
+    const diasPuntoNuevo = antiguedadDiasPorId("MCO1836584643", "item", ahora, PUNTOS_CALIBRACION_ID_FECHA)!;
+    const diasPuntoViejo = antiguedadDiasPorId("MCO1742001365", "item", ahora, PUNTOS_CALIBRACION_ID_FECHA)!;
+    const diasEntreMedio = antiguedadDiasPorId("MCO1800000000", "item", ahora, PUNTOS_CALIBRACION_ID_FECHA);
+    expect(diasEntreMedio).not.toBeNull();
+    expect(diasEntreMedio!).toBeGreaterThan(diasPuntoNuevo);
+    expect(diasEntreMedio!).toBeLessThan(diasPuntoViejo);
+  });
+
+  // MCO4106040446 (≈2026-06-27 según Selltrix) es una publicación
+  // INTERNACIONAL (envío desde China) — usa otra serie de numeración de
+  // MCO, a propósito nunca agregada a PUNTOS_CALIBRACION_ID_FECHA (ver
+  // el comentario de aproximados.ts). Cae tan lejos de los puntos item
+  // calibrados que supera LIMITE_EXTRAPOLACION_DIAS (90) -> "Sin dato",
+  // nunca una antigüedad inventada mezclando las dos series.
+  it("item MCO4106040446 (publicación internacional, otra serie de ids) -> null, nunca inventa", () => {
+    expect(antiguedadDiasPorId("MCO4106040446", "item", ahora, PUNTOS_CALIBRACION_ID_FECHA)).toBeNull();
+  });
+
+  it('un "product" nunca usa puntos calibrados de "item", y viceversa, aunque sea el MISMO id', () => {
+    // MCO1836584643 es un punto calibrado real de tipo "item" (fecha
+    // exacta, sin interpolar -> ~250 días). Pedido como "product", da
+    // un número totalmente distinto (interpola solo con los 4 puntos
+    // reales de "product"), nunca el mismo valor ni null por pedirlo
+    // como el tipo que no corresponde.
+    const comoItem = antiguedadDiasPorId("MCO1836584643", "item", ahora, PUNTOS_CALIBRACION_ID_FECHA);
+    const comoProduct = antiguedadDiasPorId("MCO1836584643", "product", ahora, PUNTOS_CALIBRACION_ID_FECHA);
+    expect(comoItem).not.toBeNull();
+    expect(comoProduct).not.toBeNull();
+    expect(comoProduct).not.toBeCloseTo(comoItem!, 0);
+
+    // Mismo chequeo en la otra dirección: MCO2068057559 es un punto
+    // calibrado real de "product" (~195 días exactos); como "item" da
+    // otro número distinto, viniendo solo de los puntos de "item".
+    const productComoProduct = antiguedadDiasPorId("MCO2068057559", "product", ahora, PUNTOS_CALIBRACION_ID_FECHA);
+    const productComoItem = antiguedadDiasPorId("MCO2068057559", "item", ahora, PUNTOS_CALIBRACION_ID_FECHA);
+    expect(productComoProduct).not.toBeNull();
+    expect(productComoItem).not.toBeNull();
+    expect(productComoItem).not.toBeCloseTo(productComoProduct!, 0);
   });
 });
