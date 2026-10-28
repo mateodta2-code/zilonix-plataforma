@@ -1,5 +1,6 @@
 CREATE TYPE "public"."estado_costeo" AS ENUM('completo', 'parcial', 'sin_costo');--> statement-breakpoint
 CREATE TYPE "public"."forma_entrega" AS ENUM('full_ml', 'flex', 'agencia', 'desconocida');--> statement-breakpoint
+ALTER TABLE "pedidos" ADD CONSTRAINT "pedidos_empresa_id_unica" UNIQUE("empresa_id","id");--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "pedido_items" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"empresa_id" uuid NOT NULL,
@@ -110,13 +111,13 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
- ALTER TABLE "pedidos_finanzas" ADD CONSTRAINT "pedidos_finanzas_pedido_id_pedidos_id_fk" FOREIGN KEY ("pedido_id") REFERENCES "public"."pedidos"("id") ON DELETE cascade ON UPDATE no action;
+ ALTER TABLE "pedidos_finanzas" ADD CONSTRAINT "pedidos_finanzas_cuenta_ml_id_cuentas_ml_id_fk" FOREIGN KEY ("cuenta_ml_id") REFERENCES "public"."cuentas_ml"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
- ALTER TABLE "pedidos_finanzas" ADD CONSTRAINT "pedidos_finanzas_cuenta_ml_id_cuentas_ml_id_fk" FOREIGN KEY ("cuenta_ml_id") REFERENCES "public"."cuentas_ml"("id") ON DELETE cascade ON UPDATE no action;
+ ALTER TABLE "pedidos_finanzas" ADD CONSTRAINT "pedidos_finanzas_pedido_misma_empresa_fk" FOREIGN KEY ("empresa_id","pedido_id") REFERENCES "public"."pedidos"("empresa_id","id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;

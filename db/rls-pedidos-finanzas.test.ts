@@ -44,6 +44,15 @@ describe("pedidos_finanzas (RLS, issue #129)", () => {
     }
   });
 
+  it("B no puede crear una cabecera suya sobre el pedido de A (clave compuesta)", async () => {
+    const cuentaBId = await crearCuentaMlDePrueba(contexto.empresaBId);
+    await expect(
+      dbComoEmpresa(contexto.empresaBId, (tx) =>
+        tx.insert(pedidosFinanzas).values({ empresaId: contexto.empresaBId, pedidoId: pedidoAId, cuentaMlId: cuentaBId, valorVenta: "1.00" })
+      )
+    ).rejects.toThrow();
+  });
+
   it("una sola cabecera por pedido", async () => {
     await expect(crearCabecera(contexto.empresaAId, pedidoAId)).rejects.toThrow();
   });

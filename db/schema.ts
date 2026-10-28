@@ -519,6 +519,11 @@ export const pedidos = pgTable(
   },
   (t) => ({
     pedidoUnico: uniqueIndex("pedidos_empresa_pedido_externo_unico").on(t.empresaId, t.pedidoIdExterno),
+    // Issue #129 — destino de la FK compuesta de pedidos_finanzas: la
+    // cabecera financiera de la empresa A nunca apunta a un pedido de
+    // B. Constraint y no índice: drizzle-kit crea los índices después
+    // de las claves foráneas.
+    empresaIdUnica: unique("pedidos_empresa_id_unica").on(t.empresaId, t.id),
   })
 );
 
@@ -675,7 +680,8 @@ export const pedidosFinanzas = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
-    pedidoId: uuid("pedido_id").notNull().references(() => pedidos.id, { onDelete: "cascade" }),
+    // FK compuesta (empresa_id, pedido_id) → pedidos, abajo.
+    pedidoId: uuid("pedido_id").notNull(),
     cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
     formaEntrega: formaEntregaEnum("forma_entrega").notNull().default("desconocida"),
     // Se guarda como dato; la vista de detalle agrupa por pedidos.fecha
@@ -712,6 +718,11 @@ export const pedidosFinanzas = pgTable(
   },
   (t) => ({
     pedidoUnico: unique("pedidos_finanzas_pedido_unico").on(t.pedidoId),
+    delPedido: foreignKey({
+      name: "pedidos_finanzas_pedido_misma_empresa_fk",
+      columns: [t.empresaId, t.pedidoId],
+      foreignColumns: [pedidos.empresaId, pedidos.id],
+    }).onDelete("cascade"),
     // Destino de las FK compuestas de pedido_items y
     // ventas_correcciones: una línea o corrección de la empresa A nunca
     // cuelga de una venta de B.

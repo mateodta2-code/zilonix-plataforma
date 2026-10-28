@@ -1,5 +1,5 @@
 {
-  "id": "fac69ce7-422e-464f-bc53-aae7046de20b",
+  "id": "e748862e-9902-4590-a2b2-753285cdc465",
   "prevId": "0458fc06-4513-4e67-a8f4-3812207d32d9",
   "version": "7",
   "dialect": "postgresql",
@@ -1967,7 +1967,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "pedidos_empresa_id_unica": {
+          "name": "pedidos_empresa_id_unica",
+          "nullsNotDistinct": false,
+          "columns": [
+            "empresa_id",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -2163,19 +2172,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "pedidos_finanzas_pedido_id_pedidos_id_fk": {
-          "name": "pedidos_finanzas_pedido_id_pedidos_id_fk",
-          "tableFrom": "pedidos_finanzas",
-          "tableTo": "pedidos",
-          "columnsFrom": [
-            "pedido_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "pedidos_finanzas_cuenta_ml_id_cuentas_ml_id_fk": {
           "name": "pedidos_finanzas_cuenta_ml_id_cuentas_ml_id_fk",
           "tableFrom": "pedidos_finanzas",
@@ -2184,6 +2180,21 @@
             "cuenta_ml_id"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "pedidos_finanzas_pedido_misma_empresa_fk": {
+          "name": "pedidos_finanzas_pedido_misma_empresa_fk",
+          "tableFrom": "pedidos_finanzas",
+          "tableTo": "pedidos",
+          "columnsFrom": [
+            "empresa_id",
+            "pedido_id"
+          ],
+          "columnsTo": [
+            "empresa_id",
             "id"
           ],
           "onDelete": "cascade",
