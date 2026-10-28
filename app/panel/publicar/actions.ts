@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
+import { eq } from "drizzle-orm";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
@@ -160,5 +161,39 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
     console.error("Error publicando el producto:", error instanceof Error ? error.message : error);
   });
 
-  redirect(`/panel/publicar/${producto[0].id}`);
+  // Parte 2 (página única, estructura de Zilonix OS) — antes esto
+  // mandaba a /panel/publicar/{id} (su propia pantalla de detalle).
+  // Ahora el historial vive en la MISMA página que el formulario — se
+  // vuelve ahí (con el ancla de esa sección) para ver la fila nueva
+  // ("Publicando…" hasta que el fondo termine). /panel/publicar/{id}
+  // sigue existiendo (nunca se borró) para quien tenga ese link viejo
+  // guardado — "ver detalle" en la tabla del historial sigue
+  // enlazando ahí.
+  redirect(`/panel/publicar#historial`);
+}
+
+// Punto 8 del pedido de Mateo — "Borrar (🗑): confirma y borra SOLO la
+// fila local de productos_ml (mensaje: 'no borra nada en Mercado
+// Libre'), con requierePermiso de modificar." Nunca toca Mercado
+// Libre — ni siquiera si la publicación tuvo éxito: si algo ya se
+// publicó de verdad, sigue publicado allá; esto solo limpia el
+// historial local. La confirmación real ("¿estás seguro?") vive en el
+// cliente (PaginaPublicar.tsx) — acá solo se borra, con el mismo
+// permiso que ya exige editar cualquier otro dato de inventario.
+export async function borrarProductoAction(formData: FormData): Promise<void> {
+  const usuario = await obtenerOCrearUsuarioActual();
+  if (!usuario) redirect("/sign-in");
+  const empresa = await empresaActivaDe(usuario.id);
+  await requierePermiso(usuario.id, empresa.id, "inventario", "modificar");
+
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) throw new Error("Falta el id del producto a borrar.");
+
+  // dbComoEmpresa (RLS) ya garantiza que esto nunca borra una fila de
+  // otra empresa — un id real pero de otra empresa simplemente no es
+  // visible para este DELETE, mismo criterio que el resto del repo
+  // (ej. lib/roles.ts).
+  await dbComoEmpresa(empresa.id, (tx) => tx.delete(productosMl).where(eq(productosMl.id, id)));
+
+  redirect(`/panel/publicar#historial`);
 }

@@ -1,0 +1,284 @@
+import { describe, expect, it } from "vitest";
+import type { ResultadoPublicacionCuenta } from "@/lib/ml/publicar-tipos";
+import {
+  construirEstadoInicial,
+  cuentasFallidas,
+  esRellenoFalsoDimensiones,
+  formatearFechaBogota,
+  fotosDentroDelLimite,
+  moverFoto,
+  productoCartesiano,
+  resumenEstadoProducto,
+  serializarCategoriaOverride,
+  serializarClaveValor,
+  type FilaProductoParaCargar,
+} from "./formulario-logica";
+
+describe("esRellenoFalsoDimensiones — ADENDO UX de Publicar, punto 9", () => {
+  it("las 4 medidas en 1 (relleno falso): true", () => {
+    expect(esRellenoFalsoDimensiones({ peso: "1", largo: "1", ancho: "1", alto: "1" })).toBe(true);
+  });
+
+  it("las 4 medidas por debajo de 1 (ej. 0.5): también true — nunca solo exactamente '1'", () => {
+    expect(esRellenoFalsoDimensiones({ peso: "0.5", largo: "1", ancho: "0.8", alto: "0" })).toBe(true);
+  });
+
+  it("medidas reales (alguna > 1): false, nunca bloquea un paquete real", () => {
+    expect(esRellenoFalsoDimensiones({ peso: "500", largo: "20", ancho: "15", alto: "10" })).toBe(false);
+  });
+
+  it("una sola medida en 1 pero las demás reales: false — no todas son <=1", () => {
+    expect(esRellenoFalsoDimensiones({ peso: "500", largo: "1", ancho: "15", alto: "10" })).toBe(false);
+  });
+
+  it("alguna medida vacía (todavía sin completar): false — no se bloquea algo a medio llenar", () => {
+    expect(esRellenoFalsoDimensiones({ peso: "1", largo: "1", ancho: "1", alto: "" })).toBe(false);
+  });
+
+  it("valor no numérico: false, nunca lanza", () => {
+    expect(esRellenoFalsoDimensiones({ peso: "mucho", largo: "1", ancho: "1", alto: "1" })).toBe(false);
+  });
+});
+
+describe("productoCartesiano — ADENDO UX de Publicar, punto 4 (editor de variantes)", () => {
+  it("un solo eje: una combinación por valor", () => {
+    expect(productoCartesiano({ TALLA: ["S", "M", "L"] }, ["TALLA"])).toEqual([{ TALLA: "S" }, { TALLA: "M" }, { TALLA: "L" }]);
+  });
+
+  it("dos ejes: el producto cartesiano completo, en orden", () => {
+    const resultado = productoCartesiano({ TALLA: ["S", "M"], COLOR: ["Rojo", "Azul"] }, ["TALLA", "COLOR"]);
+    expect(resultado).toEqual([
+      { TALLA: "S", COLOR: "Rojo" },
+      { TALLA: "S", COLOR: "Azul" },
+      { TALLA: "M", COLOR: "Rojo" },
+      { TALLA: "M", COLOR: "Azul" },
+    ]);
+  });
+
+  it("un eje sin ningún valor elegido todavía: sin combinaciones (nunca inventa una vacía)", () => {
+    expect(productoCartesiano({ TALLA: [] }, ["TALLA"])).toEqual([]);
+  });
+
+  it("sin ejes: sin combinaciones", () => {
+    expect(productoCartesiano({}, [])).toEqual([]);
+  });
+});
+
+describe("serializarClaveValor — mismo formato que parsearLineasClaveValor (nuevo/actions.ts) ya lee", () => {
+  it("arma 'ID=valor' por línea", () => {
+    expect(serializarClaveValor({ BRAND: "Genérica", GTIN: "7701234567890" })).toBe("BRAND=Genérica\nGTIN=7701234567890");
+  });
+
+  it("omite valores vacíos (el parser los ignora igual, nunca manda una línea basura)", () => {
+    expect(serializarClaveValor({ BRAND: "Genérica", GENDER: "" })).toBe("BRAND=Genérica");
+  });
+
+  it("sin nada lleno: string vacío", () => {
+    expect(serializarClaveValor({})).toBe("");
+  });
+});
+
+describe("serializarCategoriaOverride — mismo formato 'siteId::título=categoryId' que ya lee nuevo/actions.ts", () => {
+  it("arma la clave real", () => {
+    expect(serializarCategoriaOverride("MCO", "Reloj Casio Digital", "MCO1234")).toBe("MCO::Reloj Casio Digital=MCO1234");
+  });
+
+  it("sin título o sin categoría: string vacío, nunca una clave a medias", () => {
+    expect(serializarCategoriaOverride("MCO", "", "MCO1234")).toBe("");
+    expect(serializarCategoriaOverride("MCO", "Reloj", "")).toBe("");
+  });
+});
+
+describe("fotosDentroDelLimite — ADENDO UX de Publicar, punto 5 (respetar max_pictures)", () => {
+  it("recorta al límite real de la categoría", () => {
+    expect(fotosDentroDelLimite(["a", "b", "c", "d"], 2)).toEqual(["a", "b"]);
+  });
+
+  it("sin límite conocido todavía (null): no recorta nada", () => {
+    expect(fotosDentroDelLimite(["a", "b", "c"], null)).toEqual(["a", "b", "c"]);
+  });
+
+  it("menos fotos que el límite: se quedan todas", () => {
+    expect(fotosDentroDelLimite(["a"], 12)).toEqual(["a"]);
+  });
+});
+
+// --- Parte 2 (página única, estructura de Zilonix OS) ---
+
+function exito(cuentaMlId: string): ResultadoPublicacionCuenta {
+  return {
+    cuentaMlId,
+    ok: true,
+    itemId: "MCOITEM1",
+    permalink: "https://articulo.mercadolibre.com.co/MCOITEM1",
+    categoria: "Relojes",
+    atributosAsumidos: [],
+    status: "active",
+    modoPrueba: false,
+    avisoFotosVariante: null,
+    avisoMarca: null,
+    avisoDescripcion: null,
+  };
+}
+
+function fallo(cuentaMlId: string, error = "Mercado Libre rechazó la publicación."): ResultadoPublicacionCuenta {
+  return { cuentaMlId, ok: false, categoria: "Relojes", error };
+}
+
+describe("resumenEstadoProducto — punto 8 del pedido (✅/⚠️/❌ ok/total)", () => {
+  it("todas OK: ✅", () => {
+    expect(resumenEstadoProducto([exito("c1"), exito("c2")])).toEqual({ ok: 2, total: 2, icono: "✅" });
+  });
+
+  it("parcial (algunas OK, algunas no): ⚠️", () => {
+    expect(resumenEstadoProducto([exito("c1"), fallo("c2")])).toEqual({ ok: 1, total: 2, icono: "⚠️" });
+  });
+
+  it("ninguna OK: ❌", () => {
+    expect(resumenEstadoProducto([fallo("c1"), fallo("c2")])).toEqual({ ok: 0, total: 2, icono: "❌" });
+  });
+
+  it("sin resultado todavía (null) o vacío: null — nunca inventa un ícono para 'Publicando…'", () => {
+    expect(resumenEstadoProducto(null)).toBeNull();
+    expect(resumenEstadoProducto(undefined)).toBeNull();
+    expect(resumenEstadoProducto([])).toBeNull();
+  });
+
+  it("también cuenta un resultado de familia (User Products) por su propio ok/cuentaMlId", () => {
+    const familia: ResultadoPublicacionCuenta = { cuentaMlId: "c1", ok: true, categoria: "Ropa interior", familia: { familyName: "Combo X", items: [] } };
+    expect(resumenEstadoProducto([familia, fallo("c2")])).toEqual({ ok: 1, total: 2, icono: "⚠️" });
+  });
+});
+
+describe("cuentasFallidas — punto 8 del pedido (Cargar/Reintentar: solo las que fallaron)", () => {
+  it("devuelve solo los cuentaMlId con ok:false", () => {
+    expect(cuentasFallidas([exito("c1"), fallo("c2"), fallo("c3")])).toEqual(["c2", "c3"]);
+  });
+
+  it("todas OK: []", () => {
+    expect(cuentasFallidas([exito("c1"), exito("c2")])).toEqual([]);
+  });
+
+  it("sin resultado (null/undefined): []", () => {
+    expect(cuentasFallidas(null)).toEqual([]);
+    expect(cuentasFallidas(undefined)).toEqual([]);
+  });
+});
+
+function productoBase(overrides: Partial<FilaProductoParaCargar> = {}): FilaProductoParaCargar {
+  return {
+    precio: "79900",
+    stock: 10,
+    condicion: "new",
+    envioGratis: true,
+    sku: "SKU-1",
+    dimensiones: { peso: "300", largo: "20", ancho: "15", alto: "10" },
+    imagenes: [{ url: "https://x/1.jpg" }, { url: "https://x/2.jpg" }],
+    atributosExtra: { BRAND: "Genérica" },
+    categoriasOverride: { "MCO::Reloj Casio Digital": "MCO1234" },
+    variantes: null,
+    porCuenta: { c1: { titulo: "Reloj Casio Digital", descripcion: "Descripción real", portadaUrl: "https://x/portada.jpg" } },
+    cuentasSeleccionadas: ["c1", "c2"],
+    resultado: null,
+    modoPrueba: true,
+    ...overrides,
+  };
+}
+
+describe("construirEstadoInicial — punto 8 del pedido (Cargar/Reintentar y Duplicar)", () => {
+  it("reintentar, con resultado parcial: solo las cuentas que fallaron quedan incluidas", () => {
+    const producto = productoBase({ resultado: [exito("c1"), fallo("c2")] });
+    const estado = construirEstadoInicial(producto, "reintentar");
+    expect(estado.cuentasIncluidas).toEqual(["c2"]);
+  });
+
+  it("reintentar, sin resultado todavía (nunca llegó a publicar): cae a cuentasSeleccionadas", () => {
+    const producto = productoBase({ resultado: null });
+    const estado = construirEstadoInicial(producto, "reintentar");
+    expect(estado.cuentasIncluidas).toEqual(["c1", "c2"]);
+  });
+
+  it("duplicar: SIEMPRE cuentas desmarcadas, sin importar el resultado anterior", () => {
+    const producto = productoBase({ resultado: [exito("c1"), fallo("c2")] });
+    const estado = construirEstadoInicial(producto, "duplicar");
+    expect(estado.cuentasIncluidas).toEqual([]);
+  });
+
+  it("copia precio/stock/condición/envío/SKU/dimensiones/fotos/atributos/categoría/modo prueba tal cual, en los dos modos", () => {
+    const producto = productoBase();
+    for (const modo of ["reintentar", "duplicar"] as const) {
+      const estado = construirEstadoInicial(producto, modo);
+      expect(estado.precio).toBe("79900");
+      expect(estado.stock).toBe("10");
+      expect(estado.condicion).toBe("new");
+      expect(estado.envioGratis).toBe(true);
+      expect(estado.sku).toBe("SKU-1");
+      expect(estado.dimensiones).toEqual({ peso: "300", largo: "20", ancho: "15", alto: "10" });
+      expect(estado.imagenes).toEqual(["https://x/1.jpg", "https://x/2.jpg"]);
+      expect(estado.atributosExtra).toEqual({ BRAND: "Genérica" });
+      expect(estado.categoriasOverride).toEqual({ "MCO::Reloj Casio Digital": "MCO1234" });
+      expect(estado.modoPrueba).toBe(true);
+      expect(estado.datosPorCuenta.c1).toEqual({ titulo: "Reloj Casio Digital", descripcion: "Descripción real", portadaUrl: "https://x/portada.jpg" });
+    }
+  });
+
+  it("variantes: convierte sku/stock/precio numéricos de la fila a texto para los inputs controlados", () => {
+    const producto = productoBase({
+      variantes: { ejes: ["TALLA"], ejeFoto: null, combinaciones: [{ valores: { TALLA: "S" }, sku: "SKU-S", stock: 5, precio: 50000 }] },
+    });
+    const estado = construirEstadoInicial(producto, "reintentar");
+    expect(estado.variantes).toEqual({
+      ejes: ["TALLA"],
+      ejeFoto: null,
+      combinaciones: [{ valores: { TALLA: "S" }, sku: "SKU-S", stock: "5", precio: "50000" }],
+    });
+  });
+
+  it("sin variantes (null o sin combinaciones): variantes queda null", () => {
+    expect(construirEstadoInicial(productoBase({ variantes: null }), "reintentar").variantes).toBeNull();
+    expect(construirEstadoInicial(productoBase({ variantes: { ejes: [], ejeFoto: null, combinaciones: [] } }), "reintentar").variantes).toBeNull();
+  });
+
+  it("portadasPorVariante: toma el primer mapeo no vacío entre las cuentas (se guarda igual en todas)", () => {
+    const producto = productoBase({
+      porCuenta: {
+        c1: { titulo: "T", descripcion: "", portadaUrl: null, portadasPorVariante: {} },
+        c2: { titulo: "T", descripcion: "", portadaUrl: null, portadasPorVariante: { S: "https://x/s.jpg" } },
+      },
+    });
+    const estado = construirEstadoInicial(producto, "reintentar");
+    expect(estado.portadasPorVariante).toEqual({ S: "https://x/s.jpg" });
+  });
+});
+
+describe("formatearFechaBogota — punto 8 del pedido (Fecha en America/Bogota, sin importar el TZ del servidor)", () => {
+  it("formatea una fecha real en la zona de Bogotá (UTC-5 fijo, sin horario de verano)", () => {
+    // 2026-01-15T03:30:00Z = 2026-01-14 22:30 en Bogotá (UTC-5).
+    const texto = formatearFechaBogota(new Date("2026-01-15T03:30:00Z"));
+    expect(texto).toContain("14/01/2026");
+  });
+
+  it("acepta un string ISO (tal cual sale de una columna timestamp serializada)", () => {
+    const texto = formatearFechaBogota("2026-06-01T12:00:00Z");
+    expect(texto).toContain("2026");
+  });
+});
+
+describe("moverFoto — punto 4 del pedido (reordenar la galería arrastrando)", () => {
+  it("mueve una foto de atrás hacia adelante", () => {
+    expect(moverFoto(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
+  });
+
+  it("mueve una foto de adelante hacia atrás", () => {
+    expect(moverFoto(["a", "b", "c"], 0, 2)).toEqual(["b", "c", "a"]);
+  });
+
+  it("mismo índice: no cambia nada", () => {
+    expect(moverFoto(["a", "b", "c"], 1, 1)).toEqual(["a", "b", "c"]);
+  });
+
+  it("índices fuera de rango: devuelve el array tal cual, nunca lanza", () => {
+    expect(moverFoto(["a", "b"], -1, 0)).toEqual(["a", "b"]);
+    expect(moverFoto(["a", "b"], 0, 5)).toEqual(["a", "b"]);
+  });
+});

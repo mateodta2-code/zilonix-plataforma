@@ -96,9 +96,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Origen no autorizado." }, { status: 403 });
   }
 
+  // Parte 2 (página única, estructura de Zilonix OS) — antes volvía a
+  // /panel/publicar/clip (su propia pantalla); la sección de Clip
+  // ahora vive AL FINAL de /panel/publicar — mismo query, con el
+  // ancla de esa sección.
   const volver = (query: Record<string, string>) => {
     const params = new URLSearchParams(query);
-    return NextResponse.redirect(`${base}/panel/publicar/clip?${params.toString()}`, 303);
+    return NextResponse.redirect(`${base}/panel/publicar?${params.toString()}#clip`, 303);
   };
 
   const usuario = await obtenerOCrearUsuarioActual();
