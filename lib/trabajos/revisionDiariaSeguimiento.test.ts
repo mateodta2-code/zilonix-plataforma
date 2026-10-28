@@ -776,14 +776,12 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
   // Regresión directa del bug del PR #258 (CI corrido ~7:30pm Bogotá):
   // fija el reloj a las 23:30 de Bogotá — el borde horario exacto
   // donde "ayer" en UTC (medianoche UTC) todavía no coincide con "hoy"
-  // en Bogotá. Solo se faltsea `Date` (`toFake: ["Date"]`), nunca los
+  // en Bogotá. Solo se falsea `Date` (`toFake: ["Date"]`), nunca los
   // timers reales — Postgres sigue async de verdad, nada que avanzar
   // a mano. `diasAtras(1)` (el mismo helper ya usado arriba, ahora
   // corregido) tiene que seguir dando la foto de AYER real en Bogotá,
   // nunca la de hoy, sin importar la hora del día en que corra el CI.
   it("a las 23:30 de Bogotá, diasAtras(1) sigue siendo ayer de verdad: la alerta precio_bajo se crea igual", async () => {
-    const seguimiento = await crearSeguimientoConCuenta("AYER-BOGOTA-23-30");
-
     // rangoDiaBogota(...).inicio es el INSTANTE real de la medianoche
     // de Bogotá (05:00 UTC ese día) — a diferencia de hoyBogota()/
     // fechaDiaBogota(), que da un valor de FECHA (día calendario, sin
@@ -799,6 +797,25 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(horaRiesgosa);
+
+      // Corrección real (CI del PR #263) — crearSeguimientoConCuenta
+      // tiene que crearse DESPUÉS de fijar el reloj falso, nunca
+      // antes: calcula tokenExpiraTs como `Date.now() + 1h`, y
+      // obtenerAccessTokenVigente (lib/ml/cuentas.ts) compara ese
+      // valor contra `Date.now()` otra vez más adelante, bajo el
+      // MISMO reloj falso. Si la cuenta se crea con el reloj real
+      // (antes de este punto) y horaRiesgosa cae horas después (puede
+      // ser cualquier salto, según la hora real en que corra el CI),
+      // el token queda "vencido" para el reloj falso y
+      // obtenerAccessTokenVigente intenta renovarlo — el fetch
+      // mockeado de abajo (precio/estado) no sirve para esa renovación
+      // y el test fallaba con un error de "no se pudo renovar la
+      // conexión", NUNCA relacionado con la alerta real que esto
+      // prueba. Creando la cuenta ACÁ, con el reloj ya congelado en
+      // horaRiesgosa, tokenExpiraTs sale `horaRiesgosa + 1h` — siempre
+      // en el futuro respecto al mismo reloj congelado, nunca vencido,
+      // sin importar qué tan lejos esté horaRiesgosa de la hora real.
+      const seguimiento = await crearSeguimientoConCuenta("AYER-BOGOTA-23-30");
 
       const ayer = diasAtras(1);
       await dbComoEmpresa(seguimiento.empresaId, (tx) =>
