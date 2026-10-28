@@ -398,12 +398,17 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
     await expect(obtenerItemMl("MCO1", "token")).rejects.toThrow(MlNoAutorizadoError);
   });
 
-  // Issue #262 (revisión de Pablo, punto 2) — obtenerProducto ahora
-  // también pide `date_created` (mismo GET /products/{id} de siempre,
-  // nunca una llamada nueva) para que resolverNombre pueda guardar el
+  // Issue #262 (revisión de Pablo, punto 2; corrección de Pablo sobre
+  // el punto 2) — obtenerProducto lee `date_created` de la respuesta
+  // COMPLETA de la MISMA llamada de siempre (GET /products/{id}, SIN
+  // `?attributes=...`): nunca se confirmó que ese endpoint acepte ese
+  // parámetro (a diferencia de /items/{id}, que sí lo confirma en
+  // producción) — pedirlo ahí arriesgaba un 400 real que también
+  // tumbara el nombre, que esta función ya traía bien antes de esta
+  // tarea. Nunca una llamada nueva — resolverNombre pasa a guardar el
   // date_created REAL del catálogo (fechaCreacionCatalogo), nunca el
   // de una oferta ganadora (ver lib/seguimiento/lector.ts).
-  it("obtenerProducto: pide 'date_created' en la misma llamada y lo devuelve como fechaCreacion", async () => {
+  it("obtenerProducto: lee 'date_created' de la respuesta completa, SIN pedir ?attributes=... (nunca arriesga perder el nombre)", async () => {
     let urlPedida = "";
     vi.stubGlobal(
       "fetch",
@@ -414,8 +419,7 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
     );
     const producto = await obtenerProducto("MCO222", "token");
     expect(producto?.fechaCreacion).toBe("2025-03-15T10:00:00.000Z");
-    expect(urlPedida).toContain("date_created");
-    expect(urlPedida).not.toContain("/items/"); // nunca el endpoint de ítem — sigue siendo /products/{id}
+    expect(urlPedida).toBe("https://api.mercadolibre.com/products/MCO222"); // sin query string
   });
 
   // Pregunta explícita de la revisión: si la respuesta real de Mercado

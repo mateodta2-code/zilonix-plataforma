@@ -13,7 +13,7 @@ import {
   MlSinPermisoAppError,
 } from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
-import { compararFotos, normalizarPublicaciones, type FotoComparable } from "@/lib/seguimiento/alertas";
+import { compararFotos, normalizarPublicaciones, obtenerFechaCreacionCatalogo, type FotoComparable } from "@/lib/seguimiento/alertas";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION, nombreEsAproximado, resolverNombre, resolverNombreYFechaCatalogo } from "@/lib/seguimiento/seguimientos";
 
 // Issue #175 — regla de CLAUDE.md: "toda tarea en segundo plano vive
@@ -360,6 +360,24 @@ async function huboAlgunaLecturaDeApiConfirmada(empresaId: string, seguimientoId
   return fila != null;
 }
 
+// Issue #262 (revisión de Pablo, punto BLOQUEANTE) — bug real: la
+// llamada a resolverNombreYFechaCatalogo (abajo, en revisarUnSeguimiento)
+// vivía DENTRO de `if (nombreEsAproximado(...))` — un catálogo que YA
+// tiene nombre real (la mayoría: MCO64541261 "Rtafull", el Colchón
+// Relax) nunca disparaba esa llamada, así que `fechaCreacionCatalogo`
+// nunca se completaba para ninguno de ellos. Este chequeo (jsonb de
+// `publicaciones`, mismo criterio de lectura que el script de
+// calibración) es independiente del nombre: una vez que CUALQUIER
+// foto de este seguimiento ya tiene `fechaCreacionCatalogo`, nunca se
+// vuelve a pedir — una sola llamada real por catálogo, nunca una
+// diaria.
+async function huboFechaCreacionCatalogoConfirmada(empresaId: string, seguimientoId: string): Promise<boolean> {
+  const fotos = await dbComoEmpresa(empresaId, (tx) =>
+    tx.select({ publicaciones: seguimientoFotos.publicaciones }).from(seguimientoFotos).where(eq(seguimientoFotos.seguimientoId, seguimientoId))
+  );
+  return fotos.some((f) => obtenerFechaCreacionCatalogo(f.publicaciones) != null);
+}
+
 async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoUnSeguimiento> {
   const cuenta = await obtenerCuentaMlActiva(seguimiento.empresaId);
   if (!cuenta) throw new Error("La empresa no tiene ninguna cuenta de Mercado Libre conectada.");
@@ -398,25 +416,40 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
       await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ recursoMl }).where(eq(seguimientosMl.id, seguimiento.id)));
     }
   }
-  // Issue #262 (revisión de Pablo, punto 2) — "product" (catálogo)
-  // usa resolverNombreYFechaCatalogo en vez de resolverNombre (mismo
-  // GET /products/{id} de siempre, nunca una llamada nueva): además
-  // del nombre, esa misma respuesta trae el date_created REAL del
+  // Issue #262 (revisión de Pablo, punto 2, corregido en el punto
+  // BLOQUEANTE de la revisión siguiente) — "product" (catálogo) usa
+  // resolverNombreYFechaCatalogo en vez de resolverNombre (mismo GET
+  // /products/{id} de siempre, nunca una llamada nueva): además del
+  // nombre, esa misma respuesta trae el date_created REAL del
   // catálogo (nunca el de una oferta ganadora, ver lib/seguimiento/lector.ts),
   // que se guarda más abajo junto con la foto del día.
+  //
+  // Bug real corregido acá: antes esta llamada vivía DENTRO de
+  // `if (nombreEsAproximado(...))` — un catálogo que YA tiene nombre
+  // real (la mayoría) nunca la disparaba, así que `fechaCreacionCatalogo`
+  // nunca se completaba para esos. Ahora se llama también cuando
+  // TODAVÍA no hay ninguna foto con `fechaCreacionCatalogo` confirmada
+  // (huboFechaCreacionCatalogoConfirmada, arriba) — independiente del
+  // nombre. Una vez que exista, nunca se vuelve a pedir: una sola
+  // llamada real por catálogo, nunca una diaria. La ACTUALIZACIÓN del
+  // nombre sigue gateada aparte, solo mientras siga aproximado —
+  // nunca se pisa un nombre real ya confirmado solo porque esta
+  // llamada se repitió por la fecha.
+  const nombreAproximado = nombreEsAproximado(seguimiento.nombre);
   let fechaCreacionCatalogo: string | null = null;
-  if (nombreEsAproximado(seguimiento.nombre)) {
-    if (seguimiento.tipo === "producto" && recursoMl === "product") {
+  if (seguimiento.tipo === "producto" && recursoMl === "product") {
+    const yaTieneFechaCatalogo = await huboFechaCreacionCatalogoConfirmada(seguimiento.empresaId, seguimiento.id);
+    if (nombreAproximado || !yaTieneFechaCatalogo) {
       const resuelto = await resolverNombreYFechaCatalogo(seguimiento.mlIdExterno, token);
       fechaCreacionCatalogo = resuelto.fechaCreacionCatalogo;
-      if (resuelto.nombre !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
+      if (nombreAproximado && resuelto.nombre !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
         await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: resuelto.nombre }).where(eq(seguimientosMl.id, seguimiento.id)));
       }
-    } else {
-      const nombreResuelto = await resolverNombre(seguimiento.tipo, recursoMl, seguimiento.mlIdExterno, token);
-      if (nombreResuelto !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
-        await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: nombreResuelto }).where(eq(seguimientosMl.id, seguimiento.id)));
-      }
+    }
+  } else if (nombreAproximado) {
+    const nombreResuelto = await resolverNombre(seguimiento.tipo, recursoMl, seguimiento.mlIdExterno, token);
+    if (nombreResuelto !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
+      await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: nombreResuelto }).where(eq(seguimientosMl.id, seguimiento.id)));
     }
   }
 

@@ -702,6 +702,113 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     expect(fotoDeHoy.inventarioDisponible).toBe(10); // el inventario de la extensión nunca se tocó
   });
 
+  // Issue #262 (revisión de Pablo, punto BLOQUEANTE) — bug real:
+  // resolverNombreYFechaCatalogo solo se llamaba DENTRO de
+  // `nombreEsAproximado(...)` — un catálogo que YA tiene nombre real
+  // (la mayoría, ej. MCO64541261 "Rtafull", el Colchón Relax) nunca
+  // disparaba esa llamada, así que `fechaCreacionCatalogo` nunca se
+  // completaba para ninguno de ellos. Ahora se llama también mientras
+  // ninguna foto tenga `fechaCreacionCatalogo` todavía, sin importar
+  // el nombre — y el nombre real nunca se pisa, porque la
+  // actualización del nombre sigue gateada aparte.
+  it("catálogo con nombre REAL (no aproximado) y sin fechaCreacionCatalogo: la recibe en la siguiente revisión, sin tocar el nombre", async () => {
+    const creado = await crearSeguimientoConCuenta("CATALOGO-SIN-FECHA");
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx
+        .update(seguimientosMl)
+        .set({ recursoMl: "product", nombre: "Nombre real ya confirmado" })
+        .where(eq(seguimientosMl.id, creado.id))
+        .returning()
+    );
+
+    // Una foto de ayer con la API ya confirmada (precio/enCatalogo no
+    // nulos) para que huboAlgunaLecturaDeApiConfirmada sea true y el
+    // bloque de arriba NUNCA vuelva a probar confirmarRecursoProductoMl
+    // (no es lo que esta prueba quiere ejercitar) — sin
+    // fechaCreacionCatalogo todavía en `publicaciones`.
+    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({
+        empresaId: seguimiento.empresaId,
+        seguimientoId: seguimiento.id,
+        fecha: diasAtras(1),
+        precio: "100",
+        enCatalogo: true,
+      })
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.endsWith("/items")) {
+          return respuestaJson({ results: [] }); // obtenerOfertasProducto: sin ofertas ganadoras
+        }
+        if (u.includes("/products/")) {
+          // obtenerProducto (resolverNombreYFechaCatalogo) — issue #262,
+          // punto 2: SIN `?attributes=...`, la respuesta completa ya
+          // trae date_created.
+          return respuestaJson({ name: "Nombre real ya confirmado", date_created: "2024-01-01T00:00:00.000Z" });
+        }
+        throw new Error(`URL inesperada: ${u}`);
+      })
+    );
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultado.ok).toBe(true);
+
+    const hoy = hoyBogota();
+    const [fotoDeHoy] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+    );
+    expect((fotoDeHoy.publicaciones as { fechaCreacionCatalogo?: string } | null)?.fechaCreacionCatalogo).toBe("2024-01-01T00:00:00.000Z");
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.nombre).toBe("Nombre real ya confirmado"); // nunca se pisa un nombre real ya confirmado
+  });
+
+  it("catálogo que YA tiene fechaCreacionCatalogo confirmada: nunca vuelve a llamar a /products/{id} por ella (una sola vez por catálogo, nunca diaria)", async () => {
+    const creado = await crearSeguimientoConCuenta("CATALOGO-CON-FECHA");
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx
+        .update(seguimientosMl)
+        .set({ recursoMl: "product", nombre: "Nombre real ya confirmado" })
+        .where(eq(seguimientosMl.id, creado.id))
+        .returning()
+    );
+
+    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({
+        empresaId: seguimiento.empresaId,
+        seguimientoId: seguimiento.id,
+        fecha: diasAtras(1),
+        precio: "100",
+        enCatalogo: true,
+        publicaciones: { fechaCreacionCatalogo: "2023-05-05T00:00:00.000Z" },
+      })
+    );
+
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.endsWith("/items")) {
+        return respuestaJson({ results: [] }); // obtenerOfertasProducto: sin ofertas ganadoras
+      }
+      throw new Error(`URL inesperada (no debería llamar a /products/{id} por la fecha, ya la tiene): ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultado.ok).toBe(true);
+
+    // Ninguna llamada pidió /products/{id} (sin /items al final): la
+    // fecha ya estaba confirmada, así que resolverNombreYFechaCatalogo
+    // nunca se invocó.
+    const llamadasAProducto = fetchMock.mock.calls.filter(([url]) => !String(url).endsWith("/items"));
+    expect(llamadasAProducto).toHaveLength(0);
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.nombre).toBe("Nombre real ya confirmado"); // nunca tocado
+  });
+
   // Corrección de Pablo (revisión del PR #253, sobre 7aa93f2) — "Revisar
   // ahora" comparte revisarUnSeguimiento con la ronda de la tarde: si ya
   // hay foto de hoy (ej. el cron ya corrió, o un clic repetido en

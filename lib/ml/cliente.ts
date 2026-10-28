@@ -473,7 +473,14 @@ export type ProductoCatalogoConFechaMl = { id: string; nombre: string | null; fo
 // (enriquecimiento); 401 propaga.
 export async function obtenerProducto(productId: string, token: string): Promise<ProductoCatalogoConFechaMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(productId)) return null;
-  const url = `${BASE_URL}/products/${encodeURIComponent(productId)}?attributes=id,name,pictures,date_created`;
+  // Issue #262 (revisión de Pablo) — SIN `?attributes=...`: nunca se
+  // confirmó contra evidencia real que /products/{id} acepte ese
+  // parámetro (a diferencia de /items/{id}, que sí lo confirma en
+  // producción) — si Mercado Libre respondiera 400 por un atributo que
+  // no reconoce ahí, se perdería también el nombre, que esta función
+  // ya traía bien. La respuesta COMPLETA (sin filtrar) ya incluye
+  // `date_created` cuando existe — no hace falta pedirlo aparte.
+  const url = `${BASE_URL}/products/${encodeURIComponent(productId)}`;
   try {
     const resp = await pedir<{ name?: unknown; pictures?: unknown; date_created?: unknown }>(url, token);
     if (!resp.ok) return null;
