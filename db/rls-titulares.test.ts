@@ -5,6 +5,7 @@ import { dbComoEmpresa } from "./empresa-context";
 import { auditoria, cuentasMl, titulares } from "./schema";
 import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { CuentaMlNoEncontradaError, TitularNoEncontradoError, crearTitular, asignarTitularACuenta } from "../lib/titulares";
+import { transferirCuentaMlAOtraEmpresa } from "../lib/ml/cuentas";
 
 // Issue #125 — titulares. La FK compuesta (empresa_id, titular_id) es
 // la que impide colgarle a una cuenta de A un titular de B: el id del
@@ -175,5 +176,51 @@ describe("titulares (RLS, issue #125)", () => {
         titularId: titularAId,
       })
     ).rejects.toBeInstanceOf(CuentaMlNoEncontradaError);
+  });
+});
+
+// Issue #181 + #125 — transferir una cuenta con titular a otra empresa.
+// El titular es de la empresa anterior: con la FK compuesta, cambiar
+// empresa_id y dejar el titular_id viejo falla.
+describe("transferir una cuenta con titular (issue #125)", () => {
+  it("la cuenta llega a la otra empresa sin titular, y el titular se queda en la anterior", async () => {
+    const { empresaAId, empresaBId, usuarioAId } = await crearDosEmpresas();
+    const cuentaIdExterna = `ml-transferir-titular-${randomUUID()}`;
+    const [cuenta] = await dbComoEmpresa(empresaAId, (tx) =>
+      tx
+        .insert(cuentasMl)
+        .values({
+          empresaId: empresaAId,
+          cuentaIdExterna,
+          nickname: "CUENTA_CON_TITULAR",
+          accessTokenCifrado: tokenFalso,
+          refreshTokenCifrado: tokenFalso,
+          tokenExpiraTs: new Date(Date.now() + 3600_000),
+        })
+        .returning({ id: cuentasMl.id })
+    );
+    const { id: titularId } = await crearTitular({
+      empresaId: empresaAId,
+      usuarioId: usuarioAId,
+      tipo: "persona",
+      nombre: "Titular que se queda en A",
+      documento: `700${randomUUID().slice(0, 7)}`,
+    });
+    await asignarTitularACuenta({ empresaId: empresaAId, usuarioId: usuarioAId, cuentaMlId: cuenta.id, titularId });
+
+    await transferirCuentaMlAOtraEmpresa(empresaBId, {
+      cuentaIdExterna,
+      nickname: "CUENTA_EN_B",
+      tokens: { accessToken: "access-b", refreshToken: "refresh-b", expiraEnSegundos: 21_600, cuentaIdExterna },
+    });
+
+    const [enB] = await dbComoEmpresa(empresaBId, (tx) =>
+      tx.select({ empresaId: cuentasMl.empresaId, titularId: cuentasMl.titularId }).from(cuentasMl).where(eq(cuentasMl.id, cuenta.id))
+    );
+    expect(enB.empresaId).toBe(empresaBId);
+    expect(enB.titularId).toBeNull();
+
+    const titularEnA = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(titulares).where(eq(titulares.id, titularId)));
+    expect(titularEnA).toHaveLength(1);
   });
 });
