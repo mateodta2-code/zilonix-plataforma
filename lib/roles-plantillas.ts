@@ -12,7 +12,11 @@
 // sirve de demo para el criterio de "listo" de la tarea 1.7 ("el
 // operador no ve Finanzas"). La lista es a propósito la misma que ya
 // anticipaba el comentario de `auditoria` en db/schema.ts.
-export const MODULOS = ["ventas", "inventario", "finanzas", "personas", "configuracion"] as const;
+// Issue #254 — "publicidad" entra con una sola acción de fábrica
+// (consultar). Crear, modificar, anular y autorizar llegan en las fases
+// 3 y 4, cuando haya propuestas y escritura en Mercado Libre. Dueño las
+// tiene igual, porque permisosDeDueno() recorre MODULOS × ACCIONES.
+export const MODULOS = ["ventas", "inventario", "finanzas", "personas", "configuracion", "publicidad"] as const;
 export type Modulo = (typeof MODULOS)[number];
 
 export const ACCIONES = ["consultar", "crear", "modificar", "anular", "autorizar"] as const;
@@ -67,13 +71,22 @@ function permisosTodo(modulos: Modulo[], acciones: Accion[]): Permiso[] {
   return modulos.flatMap((modulo) => acciones.map((accion) => ({ modulo, accion, alcance: "todo" as const })));
 }
 
+// Quién consulta Publicidad en la plantilla (issue #254): Gerente (ve
+// el negocio), Auxiliar (comodín operativo) y Operaciones (el comentario
+// de arriba ya le asigna promociones cuando el módulo exista). Contador,
+// Tecnología y Operador no la traen de fábrica — se les puede dar después
+// desde /panel/roles. Solo "consultar": esta fase no escribe campañas.
 export const PLANTILLAS: Record<NombrePlantilla, Permiso[]> = {
   Gerente: [
     ...permisosTodo(["ventas", "inventario", "finanzas"], ["consultar", "crear", "modificar", "anular", "autorizar"]),
     ...permisosTodo(["personas"], ["consultar", "crear", "modificar"]),
     ...permisosTodo(["configuracion"], ["consultar", "modificar"]),
+    ...permisosTodo(["publicidad"], ["consultar"]),
   ],
-  Auxiliar: permisosTodo(["ventas", "inventario", "finanzas"], ["consultar", "crear", "modificar"]),
+  Auxiliar: [
+    ...permisosTodo(["ventas", "inventario", "finanzas"], ["consultar", "crear", "modificar"]),
+    ...permisosTodo(["publicidad"], ["consultar"]),
+  ],
   Tecnología: [
     ...permisosTodo(["configuracion"], ["consultar", "modificar"]),
     ...permisosTodo(["personas"], ["consultar", "crear", "modificar"]),
@@ -82,6 +95,7 @@ export const PLANTILLAS: Record<NombrePlantilla, Permiso[]> = {
   Operaciones: [
     ...permisosTodo(["ventas"], ["consultar", "crear", "modificar"]),
     ...permisosTodo(["inventario"], ["consultar", "crear", "modificar", "anular"]),
+    ...permisosTodo(["publicidad"], ["consultar"]),
   ],
   Operador: [
     { modulo: "ventas", accion: "consultar", alcance: "todo" },

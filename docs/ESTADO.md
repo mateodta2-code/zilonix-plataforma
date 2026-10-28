@@ -80,6 +80,8 @@ Solo los nombres — ningún valor real vive ni debe vivir en este repositorio. 
 | `DATABASE_URL_APP` | Usuario `app_user` (respeta RLS) — el que usa la app en tiempo real |
 | `DATABASE_URL_SUPERADMIN` | Usuario `superadmin_user` — solo lectura agregada, panel `/superadmin` |
 | `DATABASE_URL_TRABAJADOR` | Usuario `trabajador_user` — solo puede tocar `avisos_ml` |
+| `DATABASE_URL_PUBLICIDAD` | Usuario `publicidad_trabajador_user` (issue #254) — lista cuentas sin leer tokens y lee `publicidad_sincronizaciones` |
+| `PUBLICIDAD_TRABAJADOR_SECRET` | Secreto del cron `POST /api/trabajos/publicidad` (cabecera `x-publicidad-trabajador-secret`) |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk, lado del navegador |
 | `CLERK_SECRET_KEY` | Clerk, lado del servidor |
 | `ML_CLIENT_ID` / `ML_CLIENT_SECRET` | App de Mercado Libre (OAuth) — `ML_CLIENT_ID` además valida que un aviso que llega a `/api/ml/webhooks` sea de verdad nuestro |

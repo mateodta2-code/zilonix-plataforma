@@ -29,7 +29,8 @@ GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria, accesos_temporales, cuentas_ml, avisos_ml,
   pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml, productos_ml,
-  seguimientos_ml, seguimiento_fotos, seguimiento_alertas
+  seguimientos_ml, seguimiento_fotos, seguimiento_alertas,
+  publicidad_anunciantes, publicidad_campanas, publicidad_anuncios, publicidad_metricas_diarias, publicidad_costos_item, publicidad_sincronizaciones
   TO app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
@@ -92,6 +93,34 @@ GRANT USAGE ON SCHEMA public TO seguimiento_trabajador_user;
 GRANT SELECT ON seguimientos_ml TO seguimiento_trabajador_user;
 GRANT UPDATE (ultima_revision_ts) ON seguimientos_ml TO seguimiento_trabajador_user;
 
+-- 1e) Issue #254 — quinto usuario de base. El nombre es exacto:
+-- publicidad_trabajador_user. Lo crea Mateo a mano, después del merge,
+-- al correr este script contra el Postgres del ambiente (el deploy no
+-- lo crea). La contraseña la elige él al reemplazar el placeholder;
+-- nunca queda en el repo. Después carga DATABASE_URL_PUBLICIDAD en
+-- Railway. El cron de Product Ads
+-- lista las cuentas conectadas de CUALQUIER empresa (no
+-- sabe de antemano cuál) sin poder leer ni escribir tokens. El token
+-- y todas las escrituras de publicidad pasan por dbComoEmpresa()/
+-- app_user cuando ya se sabe la empresa. Las columnas del GRANT son
+-- exactamente las que usa el SELECT de lib/trabajos/sincronizarPublicidad.ts
+-- (id, empresa_id, desconectada_ts, creado_ts). La última sincronización
+-- sale de publicidad_sincronizaciones, que sí se lee entera. Sumar una
+-- columna de cuentas_ml a esa consulta sin sumarla acá hace fallar el
+-- cron con permission denied.
+-- publicidad_sincronizaciones sí se puede leer entera: es la bitácora
+-- técnica (estado, rango, texto corto de error). Nunca trae el token.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'publicidad_trabajador_user') THEN
+    CREATE ROLE publicidad_trabajador_user WITH LOGIN PASSWORD 'PONE_ACA_UNA_QUINTA_CONTRASEÑA_REAL';
+  END IF;
+END $$;
+GRANT CONNECT ON DATABASE railway TO publicidad_trabajador_user;
+GRANT USAGE ON SCHEMA public TO publicidad_trabajador_user;
+GRANT SELECT (id, empresa_id, desconectada_ts, creado_ts) ON cuentas_ml TO publicidad_trabajador_user;
+GRANT SELECT ON publicidad_sincronizaciones TO publicidad_trabajador_user;
+
 -- 2) Seguridad por fila — se activa por tabla, y se FUERZA también para
 -- el dueño de la tabla (sin el FORCE, el dueño de la tabla se salta la
 -- política igual que un superusuario, que es justo el agujero que
@@ -136,6 +165,18 @@ ALTER TABLE seguimiento_fotos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE seguimiento_fotos FORCE ROW LEVEL SECURITY;
 ALTER TABLE seguimiento_alertas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE seguimiento_alertas FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_anunciantes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_anunciantes FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_campanas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_campanas FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_anuncios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_anuncios FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_metricas_diarias ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_metricas_diarias FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_costos_item ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_costos_item FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_sincronizaciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_sincronizaciones FORCE ROW LEVEL SECURITY;
 
 -- La tabla "usuarios" NO lleva RLS por empresa: una persona puede estar
 -- en varias empresas (decisión D2), así que no tiene una sola
@@ -340,6 +381,39 @@ DROP POLICY IF EXISTS seguimiento_trabajador_lee_seguimientos_ml ON seguimientos
 CREATE POLICY seguimiento_trabajador_lee_seguimientos_ml ON seguimientos_ml FOR SELECT TO seguimiento_trabajador_user USING (true);
 DROP POLICY IF EXISTS seguimiento_trabajador_marca_revision_seguimientos_ml ON seguimientos_ml;
 CREATE POLICY seguimiento_trabajador_marca_revision_seguimientos_ml ON seguimientos_ml FOR UPDATE TO seguimiento_trabajador_user USING (true);
+
+-- Issue #254 — app_user solo ve la publicidad de la empresa activa.
+DROP POLICY IF EXISTS aislamiento_publicidad_anunciantes ON publicidad_anunciantes;
+CREATE POLICY aislamiento_publicidad_anunciantes ON publicidad_anunciantes
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_campanas ON publicidad_campanas;
+CREATE POLICY aislamiento_publicidad_campanas ON publicidad_campanas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_anuncios ON publicidad_anuncios;
+CREATE POLICY aislamiento_publicidad_anuncios ON publicidad_anuncios
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_metricas_diarias ON publicidad_metricas_diarias;
+CREATE POLICY aislamiento_publicidad_metricas_diarias ON publicidad_metricas_diarias
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_costos_item ON publicidad_costos_item;
+CREATE POLICY aislamiento_publicidad_costos_item ON publicidad_costos_item
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_sincronizaciones ON publicidad_sincronizaciones;
+CREATE POLICY aislamiento_publicidad_sincronizaciones ON publicidad_sincronizaciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- El cron lista cuentas y la bitácora de cualquier empresa. No
+-- reemplaza el aislamiento de app_user: el TO limita estas políticas
+-- a publicidad_trabajador_user.
+DROP POLICY IF EXISTS publicidad_trabajador_lee_cuentas_ml ON cuentas_ml;
+CREATE POLICY publicidad_trabajador_lee_cuentas_ml ON cuentas_ml FOR SELECT TO publicidad_trabajador_user USING (true);
+DROP POLICY IF EXISTS publicidad_trabajador_lee_sincronizaciones ON publicidad_sincronizaciones;
+CREATE POLICY publicidad_trabajador_lee_sincronizaciones ON publicidad_sincronizaciones FOR SELECT TO publicidad_trabajador_user USING (true);
 
 -- Tarea 2.4 — política APARTE, con TO trabajador_user: el trabajador de
 -- cola ve y marca procesado cualquier aviso pendiente, de cualquier

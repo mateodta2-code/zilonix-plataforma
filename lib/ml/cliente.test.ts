@@ -13,6 +13,7 @@ import {
   leerCuentaMl,
   leerItemBasicoMl,
   LimiteMercadoLibreError,
+  pedirLecturaMl,
   linkPublicacion,
   MlNoAutorizadoError,
   MlNoDisponibleError,
@@ -100,6 +101,23 @@ describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)"
   it("HTTP 429: corta con LimiteMercadoLibreError en vez de devolver {ok:false} en silencio", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 429)));
     await expect(obtenerVendedor("123456", "token")).rejects.toThrow(LimiteMercadoLibreError);
+  });
+
+  it("HTTP 429 de lectura guarda Retry-After", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 429,
+        headers: { get: (nombre: string) => (nombre.toLowerCase() === "retry-after" ? "12" : null) },
+        json: async () => ({}),
+        text: async () => "",
+      }))
+    );
+    await expect(pedirLecturaMl("/users/123456", "token")).rejects.toMatchObject({
+      name: "LimiteMercadoLibreError",
+      retryAfterMs: 12_000,
+    });
   });
 });
 
