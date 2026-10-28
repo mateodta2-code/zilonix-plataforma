@@ -6,6 +6,7 @@ import { requierePermiso } from "@/lib/permisos";
 import { SITE_ID } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { buscarCategorias } from "@/lib/ml/publicar";
+import { respuestaDeErrorMl, respuestaSiCuentaIdInvalido, respuestaSiSinPermiso } from "../../_ayudantes";
 
 // ADENDO UX de Publicar, punto 2 — "buscador de categoría sobre
 // buscarCategorias de lib/ml/publicar.ts" (ya existía como función,
@@ -25,18 +26,27 @@ export async function GET(request: NextRequest) {
   const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) return NextResponse.json({ error: "Sin empresa activa." }, { status: 400 });
 
-  await requierePermiso(usuario.id, empresa.id, "inventario", "crear");
+  try {
+    await requierePermiso(usuario.id, empresa.id, "inventario", "crear");
+  } catch (error) {
+    const respuestaPermiso = respuestaSiSinPermiso(error);
+    if (respuestaPermiso) return respuestaPermiso;
+    throw error;
+  }
 
   const cuentaId = request.nextUrl.searchParams.get("cuentaId");
   const texto = request.nextUrl.searchParams.get("texto")?.trim();
-  if (!cuentaId || !texto) return NextResponse.json({ error: "Faltan cuentaId/texto." }, { status: 400 });
+  // Code review de Pablo, punto 2 — formato de cuentaId validado ANTES
+  // de tocar la base (esta ruta no recibe categoryId).
+  const respuestaId = respuestaSiCuentaIdInvalido(cuentaId);
+  if (respuestaId) return respuestaId;
+  if (!texto) return NextResponse.json({ error: "Falta texto." }, { status: 400 });
 
   try {
-    const token = await obtenerAccessTokenVigente(empresa.id, cuentaId);
+    const token = await obtenerAccessTokenVigente(empresa.id, cuentaId as string);
     const resultados = await buscarCategorias(SITE_ID, texto, token);
     return NextResponse.json({ resultados });
   } catch (error) {
-    const mensaje = error instanceof Error ? error.message : "Error buscando categorías.";
-    return NextResponse.json({ error: mensaje }, { status: 502 });
+    return respuestaDeErrorMl(error);
   }
 }

@@ -27,6 +27,22 @@ export default async function PublicarClipPage({
   const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) redirect("/crear-empresa");
 
+  // Code review de Pablo — antes CLIP_HABILITADO solo ocultaba el
+  // link en /panel/publicar/page.tsx; esta pantalla seguía abierta por
+  // URL directa. Clip exige que la cuenta ya tenga reputación real en
+  // Mercado Libre (clipRequiereReputacion, lib/ml/publicar-reglas.ts)
+  // — ninguna cuenta de prueba la tiene, así que entrar acá sin la
+  // bandera activada solo confunde. Default seguro: oculto si falta o
+  // es distinta de "true".
+  if (process.env.CLIP_HABILITADO !== "true") {
+    return (
+      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
+        <p>Esta función no está disponible todavía.</p>
+        <Link href="/panel/publicar">Volver</Link>
+      </main>
+    );
+  }
+
   try {
     await requierePermiso(usuario.id, empresa.id, "inventario", "consultar");
   } catch (error) {

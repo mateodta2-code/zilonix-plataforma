@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
-import { SITE_ID } from "@/lib/ml/cliente";
+import { PATRON_ID_CATEGORIA, SITE_ID } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { leerArbolCategorias } from "@/lib/ml/publicar";
+import { respuestaDeErrorMl, respuestaSiCategoryIdInvalido, respuestaSiCuentaIdInvalido, respuestaSiSinPermiso } from "../../_ayudantes";
 
 // ADENDO UX de Publicar, punto 2 — "árbol de categorías: UI + ruta que
 // liste raíces/hijos (patrón OS app/api/ml/categorias-arbol)". Sin
@@ -21,18 +22,29 @@ export async function GET(request: NextRequest) {
   const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) return NextResponse.json({ error: "Sin empresa activa." }, { status: 400 });
 
-  await requierePermiso(usuario.id, empresa.id, "inventario", "crear");
+  try {
+    await requierePermiso(usuario.id, empresa.id, "inventario", "crear");
+  } catch (error) {
+    const respuestaPermiso = respuestaSiSinPermiso(error);
+    if (respuestaPermiso) return respuestaPermiso;
+    throw error;
+  }
 
   const cuentaId = request.nextUrl.searchParams.get("cuentaId");
-  if (!cuentaId) return NextResponse.json({ error: "Falta cuentaId." }, { status: 400 });
-  const categoryId = request.nextUrl.searchParams.get("categoryId") || undefined;
+  const categoryIdCrudo = request.nextUrl.searchParams.get("categoryId");
+  // Code review de Pablo, punto 2 — formato de cuentaId/categoryId
+  // validado ANTES de tocar la base/Mercado Libre.
+  const respuestaCuenta = respuestaSiCuentaIdInvalido(cuentaId);
+  if (respuestaCuenta) return respuestaCuenta;
+  const respuestaCategoria = respuestaSiCategoryIdInvalido(categoryIdCrudo, PATRON_ID_CATEGORIA);
+  if (respuestaCategoria) return respuestaCategoria;
+  const categoryId = categoryIdCrudo || undefined;
 
   try {
-    const token = await obtenerAccessTokenVigente(empresa.id, cuentaId);
+    const token = await obtenerAccessTokenVigente(empresa.id, cuentaId as string);
     const nodo = await leerArbolCategorias(SITE_ID, token, categoryId);
     return NextResponse.json(nodo);
   } catch (error) {
-    const mensaje = error instanceof Error ? error.message : "Error leyendo el árbol de categorías.";
-    return NextResponse.json({ error: mensaje }, { status: 502 });
+    return respuestaDeErrorMl(error);
   }
 }
