@@ -10,7 +10,53 @@
   const calibracion = {
   "factorVendidosFull": 2.2,
   "factorVendidosSinFull": 1.55,
-  "puntos": []
+  "puntos": [
+    {
+      "id": "MCO602965132",
+      "tipo": "item",
+      "fecha": "2020-12-28"
+    },
+    {
+      "id": "MCO1333873907",
+      "tipo": "item",
+      "fecha": "2023-08-05"
+    },
+    {
+      "id": "MCO1742001365",
+      "tipo": "item",
+      "fecha": "2025-12-01"
+    },
+    {
+      "id": "MCO1836584643",
+      "tipo": "item",
+      "fecha": "2026-02-19"
+    },
+    {
+      "id": "MCO2275587337",
+      "tipo": "item",
+      "fecha": "2026-10-11"
+    },
+    {
+      "id": "MCO24729698",
+      "tipo": "product",
+      "fecha": "2023-07-24"
+    },
+    {
+      "id": "MCO52242836",
+      "tipo": "product",
+      "fecha": "2025-07-11"
+    },
+    {
+      "id": "MCO52762065",
+      "tipo": "product",
+      "fecha": "2025-07-16"
+    },
+    {
+      "id": "MCO2068057559",
+      "tipo": "product",
+      "fecha": "2026-04-15"
+    }
+  ]
 };
   if (typeof module !== "undefined" && module.exports) {
     module.exports = calibracion;
