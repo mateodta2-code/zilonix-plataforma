@@ -182,4 +182,46 @@ describe("registro de auditoría (tarea 1.9)", () => {
     expect(opcionesA.entidades).toContain("producto");
     expect(opcionesA.actores.map((a) => a.valor)).toEqual(expect.arrayContaining([usuario1Id, "sistema"]));
   });
+
+  // Issue #125 — app_user solo inserta. UPDATE y DELETE se los quitó
+  // el GRANT de db/rls-setup.sql (REVOKE, porque el script es
+  // repetible). Los campos nuevos son opcionales: sin ellos, el
+  // insert de siempre sigue funcionando.
+  it("app_user inserta auditoria con los campos nuevos y no puede actualizarla ni borrarla", async () => {
+    await dbComoEmpresa(empresaAId, (tx) =>
+      registrarAuditoria(tx, {
+        empresaId: empresaAId,
+        usuarioId: usuario1Id,
+        actorTipo: "persona",
+        accion: "modificar",
+        entidad: "configuracion_finanzas",
+        entidadId: "fila-125",
+        valorAnterior: "iva=",
+        valorNuevo: "iva=10.00",
+        detalle: "Prueba de solo inserción (#125).",
+      })
+    );
+
+    const [fila] = await dbComoEmpresa(empresaAId, (tx) =>
+      tx.select().from(auditoria).where(eq(auditoria.entidadId, "fila-125"))
+    );
+    expect(fila.valorAnterior).toBe("iva=");
+    expect(fila.valorNuevo).toBe("iva=10.00");
+    expect(fila.detalle).toBe("Prueba de solo inserción (#125).");
+
+    await expect(
+      dbComoEmpresa(empresaAId, (tx) =>
+        tx.update(auditoria).set({ detalle: "reescripto" }).where(eq(auditoria.id, fila.id))
+      )
+    ).rejects.toThrow(/permission denied/i);
+
+    await expect(
+      dbComoEmpresa(empresaAId, (tx) => tx.delete(auditoria).where(eq(auditoria.id, fila.id)))
+    ).rejects.toThrow(/permission denied/i);
+
+    const [sigue] = await dbComoEmpresa(empresaAId, (tx) =>
+      tx.select({ detalle: auditoria.detalle }).from(auditoria).where(eq(auditoria.id, fila.id))
+    );
+    expect(sigue.detalle).toBe("Prueba de solo inserción (#125).");
+  });
 });
