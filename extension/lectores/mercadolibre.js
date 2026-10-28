@@ -503,6 +503,36 @@
     return /<svg\b[^>]*\baria-label\s*=\s*["']Enviado por FULL["'][^>]*>/i.test(htmlFicha);
   }
 
+  // Issue #251 (smoke de Mateo) — puro (números -> {vendidos, exacto}),
+  // para poder probarlo con el caso real sin DOM, mismo criterio que
+  // elegirInventarioPrincipal. Bug real confirmado: ficha
+  // /up/MCOU2401140163, "Almohada Cojín Dona Para Hemorroides Coxis",
+  // Full, "+1000 vendidos" visible en el subtítulo Y sold_quantity:1000
+  // en el JSON incrustado — Mercado Libre NO solo redondea el texto
+  // visible para publicaciones de alto volumen, el MISMO piso se
+  // filtra también al sold_quantity del JSON (__NORDIC_RENDERING_CTX__,
+  // ver el comentario completo en leerProducto). Marcarlo "exacto" (lo
+  // que hacía este archivo hasta esta tarea) se saltaba el ajuste ×2.2
+  // (Full) que SÍ aplica Selltrix para la misma publicación — Zilonix
+  // mostraba 1.000 vendidos/24 ventas-mes/$2.031.706 contra los
+  // 2.200/50/$4.279.716 reales.
+  // Regla: Mercado Libre ya NO muestra ningún conteo exacto en la
+  // interfaz (ver el comentario de NOMBRE_VARIABLE_INCRUSTADA, arriba)
+  // — `vendidosAproximado` (el "+N vendidos" del subtítulo) SIEMPRE es
+  // un piso redondeado, nunca un conteo real. Si el sold_quantity del
+  // JSON coincide EXACTO con ese piso, es el MISMO piso filtrándose por
+  // los dos lados — nunca un dato nuevo — se trata como aproximado,
+  // mismo ajuste ×2.2 Full / ×1.55 "+N" de siempre. Solo cuenta como
+  // exacto un sold_quantity que NO coincide con el piso visible (ej.
+  // 537 confirmado cuando la ficha muestra "+500 vendidos" — ahí sí es
+  // más preciso que el piso, se respeta tal cual, sin ningún ajuste).
+  function elegirVendidosPrincipal(soldQuantityIncrustado, vendidosAproximado) {
+    const esSoloElPiso = soldQuantityIncrustado !== null && soldQuantityIncrustado === vendidosAproximado;
+    if (!esSoloElPiso && soldQuantityIncrustado !== null) return { vendidos: soldQuantityIncrustado, exacto: true };
+    if (vendidosAproximado !== null) return { vendidos: vendidosAproximado, exacto: false };
+    return { vendidos: null, exacto: null };
+  }
+
   function leerProducto(doc) {
     // Issue #243 — selectores reales confirmados contra una ficha real
     // (CDX/Wayback, mayo/2026); los viejos (.ui-pdp-shipping /
@@ -547,10 +577,11 @@
     // separado acá.
     const itemIdActual = esPaginaUserProduct(doc && doc.URL) ? extraerWidDeUrl(doc && doc.URL) : extraerIdDeUrl(doc && doc.URL);
     const incrustado = leerDatosIncrustados(htmlCompleto, itemIdActual);
-    const vendidos = incrustado.soldQuantity !== null ? incrustado.soldQuantity : vendidosAproximado;
-    // true = exacto (sold_quantity real, del JSON/HTML incrustado);
-    // false = solo la etiqueta redondeada "+N vendidos"; null = nada.
-    const vendidosExacto = incrustado.soldQuantity !== null ? true : vendidosAproximado !== null ? false : null;
+    // Issue #251 (smoke de Mateo) — ver elegirVendidosPrincipal, arriba,
+    // para el bug real que esto corrige (el piso "+N vendidos" se
+    // filtraba también al sold_quantity del JSON, marcado "exacto" por
+    // error, se saltaba el ajuste ×2.2/×1.55).
+    const { vendidos, exacto: vendidosExacto } = elegirVendidosPrincipal(incrustado.soldQuantity, vendidosAproximado);
     // Issue #197 — calculado ACÁ (no más abajo, donde antes vivía
     // inline en el objeto de retorno) para poder pasarlo al ajuste
     // "estilo Selltrix" de calcularVentasPromedioMes.
@@ -1128,6 +1159,9 @@
     // probado con los fixtures reales de available_quantity (ver
     // comentario completo junto a la función).
     elegirInventarioPrincipal,
+    // Issue #251 (smoke de Mateo) — puro, probado con el caso real del
+    // cojín (comentario completo junto a la función).
+    elegirVendidosPrincipal,
     leerPublicacionesTienda,
     construirPublicacionesTienda,
   };

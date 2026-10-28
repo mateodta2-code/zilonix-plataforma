@@ -13,6 +13,7 @@ import {
   detectarFullEnHtmlFicha,
   detectarFullEnHtmlTarjeta,
   elegirInventarioPrincipal,
+  elegirVendidosPrincipal,
   esPaginaUserProduct,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
@@ -274,6 +275,102 @@ describe("calcularVentasPromedioMes — issue #174, siempre marcado como estimad
       expect(calcularVentasPromedioMes(10, creado, ahora, false, true)).toBe(10);
       expect(calcularVentasPromedioMes(10, creado, ahora)).toBe(10);
     });
+  });
+});
+
+// Issue #251 (smoke de Mateo) — bug real confirmado: ficha
+// /up/MCOU2401140163, "Almohada Cojín Dona Para Hemorroides Coxis",
+// Full, "+1000 vendidos" visible en el subtítulo Y sold_quantity:1000
+// en el JSON incrustado — el MISMO piso redondeado se filtraba también
+// al sold_quantity "exacto", así que se marcaba exacto:true y se
+// SALTABA el ajuste ×2.2 Full. Zilonix mostraba "Vendidos (exacto)
+// 1000"/"Ventas/mes 24"/"$2.031.706" contra los 2.200/50/mes/$4.279.716
+// reales que muestra Selltrix (antigüedad 3.6 a) para la misma
+// publicación, aplicando el mismo ×2.2.
+describe("elegirVendidosPrincipal — issue #251 (smoke de Mateo)", () => {
+  it('caso real del cojín: sold_quantity del JSON (1000) == piso visible "+1000 vendidos" -> NO es exacto', () => {
+    expect(elegirVendidosPrincipal(1000, 1000)).toEqual({ vendidos: 1000, exacto: false });
+  });
+
+  it("un sold_quantity DISTINTO del piso visible sigue siendo exacto, se respeta tal cual", () => {
+    // Ej. "+500 vendidos" visible pero el JSON confirma 537 — más
+    // preciso que el piso, nunca un simple eco del mismo número.
+    expect(elegirVendidosPrincipal(537, 500)).toEqual({ vendidos: 537, exacto: true });
+  });
+
+  it("sin sold_quantity del JSON, solo el piso visible -> aproximado (comportamiento de siempre)", () => {
+    expect(elegirVendidosPrincipal(null, 100)).toEqual({ vendidos: 100, exacto: false });
+  });
+
+  it("sold_quantity del JSON, sin ningún piso visible en el subtítulo -> exacto (comportamiento de siempre)", () => {
+    expect(elegirVendidosPrincipal(50, null)).toEqual({ vendidos: 50, exacto: true });
+  });
+
+  it("sin ningún dato -> {vendidos: null, exacto: null}, nunca inventa", () => {
+    expect(elegirVendidosPrincipal(null, null)).toEqual({ vendidos: null, exacto: null });
+  });
+
+  // Otros umbrales reales que Mercado Libre redondea con "+" (5, 25,
+  // 50, 100, 500, 1000, 5000, 10000, 50000…) — mismo criterio, no hace
+  // falta una lista: alcanza con la igualdad exacta entre las dos
+  // fuentes, porque el piso visible SIEMPRE es uno de estos números
+  // (Mercado Libre ya no muestra ningún conteo exacto en la interfaz).
+  it("el mismo criterio vale para cualquier otro umbral redondeado (25, 500, 10000)", () => {
+    expect(elegirVendidosPrincipal(25, 25)).toEqual({ vendidos: 25, exacto: false });
+    expect(elegirVendidosPrincipal(500, 500)).toEqual({ vendidos: 500, exacto: false });
+    expect(elegirVendidosPrincipal(10000, 10000)).toEqual({ vendidos: 10000, exacto: false });
+  });
+});
+
+// Caso real de referencia completo (smoke de Mateo) — ficha
+// /up/MCOU2401140163, "Almohada Cojín Dona Para Hemorroides Coxis",
+// Full, precio $84.915, "+1000 vendidos": 1.000 × 2.2 = 2.200 vendidos
+// estimados; Selltrix confirma 50/mes, $4.279.716/mes, antigüedad 3.6
+// años para la misma publicación — nunca se tuvo la fecha real exacta,
+// así que los días se despejan hacia atrás a partir de las 2 cifras
+// que sí dio la tarea (precio y facturación): ventasMes EXACTO =
+// 4.279.716 / 84.915 = 50.4 (limpio, no una cifra redondeada) -> días
+// = vendidosEst × 30 / ventasMes = 66000 / 50.4 ≈ 1309.52 (≈3.59 años,
+// consistente con los "3.6 a" que muestra Selltrix, redondeado).
+describe("caso real de referencia completo (smoke de Mateo, cojín /up/) — elegirVendidosPrincipal + calcularVentasPromedioMes", () => {
+  const PRECIO = 84915;
+  const diasExactos = 66000 / 50.4; // despejado de 2200 × 30 / días = 50.4 (= 4.279.716 / 84.915)
+  const ahora = new Date("2026-10-27T00:00:00.000Z").getTime();
+  const dateCreated = new Date(ahora - diasExactos * 24 * 60 * 60 * 1000).toISOString();
+
+  it("Full: 1000 vendidos (piso) -> 2200 estimados, ~50.4 ventas/mes, $4.279.716/mes", () => {
+    const elegido = elegirVendidosPrincipal(1000, 1000);
+    expect(elegido).toEqual({ vendidos: 1000, exacto: false }); // nunca exacto — es el mismo piso que el subtítulo
+    const vendidosEst = elegido.vendidos! * 2.2; // mismo ajuste Full que ya aplica calcularVentasPromedioMes internamente
+    expect(vendidosEst).toBeCloseTo(2200, 6);
+
+    const ventas = calcularVentasPromedioMes(elegido.vendidos, dateCreated, ahora, true, elegido.exacto);
+    expect(ventas).not.toBeNull();
+    expect(ventas!).toBeCloseTo(50.4, 1);
+
+    const facturacion = Math.round((ventas as number) * PRECIO);
+    expect(facturacion).toBe(4279716);
+  });
+
+  it("no Full (mismo piso +1000): ×1.55 en vez de ×2.2, nunca los dos juntos", () => {
+    const elegido = elegirVendidosPrincipal(1000, 1000);
+    const ventas = calcularVentasPromedioMes(elegido.vendidos, dateCreated, ahora, false, elegido.exacto);
+    expect(ventas).not.toBeNull();
+    // 1000 × 1.55 × 30 / diasExactos (redondeado a entero adentro de
+    // calcularVentasPromedioMes) — nunca el mismo valor que el caso
+    // Full de arriba, confirma que el factor SÍ cambia según esFull.
+    expect(ventas!).toBeCloseTo((1000 * 1.55 * 30) / Math.round(diasExactos), 0);
+    expect(ventas!).not.toBeCloseTo(50.4, 1);
+  });
+
+  it("sold_quantity exacto real (no coincide con el piso) se respeta tal cual, sin ningún ajuste ×1.55 aunque no sea Full", () => {
+    // "+500 vendidos" visible, pero el JSON confirma 537 — un dato más
+    // preciso que el piso, nunca se multiplica.
+    const elegido = elegirVendidosPrincipal(537, 500);
+    expect(elegido).toEqual({ vendidos: 537, exacto: true });
+    const ventas = calcularVentasPromedioMes(elegido.vendidos, dateCreated, ahora, false, elegido.exacto);
+    expect(ventas).not.toBeNull();
+    expect(ventas!).toBeCloseTo((537 * 30) / Math.round(diasExactos), 1); // factor ×1, nunca ×1.55
   });
 });
 
