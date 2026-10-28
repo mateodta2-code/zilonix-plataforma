@@ -6,7 +6,7 @@ import { db } from "@/db/index";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { fechaDiaBogota } from "@/lib/filtros-listado";
+import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION, guardarDatoDePaginaSeguimiento } from "@/lib/seguimiento/seguimientos";
 import { obtenerFechaCreacion, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import { antiguedadDias, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
@@ -745,9 +745,16 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
   // nunca una segunda.
   it("mañana más tarde con la misma baja de precio: una sola alerta precio_bajo, nunca duplicada", async () => {
     const seguimiento = await crearSeguimientoConCuenta("SIN-ALERTA-DUPLICADA");
-    const ayer = new Date();
-    ayer.setUTCHours(0, 0, 0, 0);
-    ayer.setUTCDate(ayer.getUTCDate() - 1);
+    // Bug real (PR #258, CI corrido ~7:30pm Bogotá): `ayer` armado con
+    // setUTCHours/setUTCDate (medianoche UTC) nunca es lo mismo que
+    // "ayer en Bogotá" entre las 19:00 y las 24:00 locales — en ese
+    // rango horario, "hoy 00:00 UTC" todavía no llegó (son las 05:00
+    // UTC del día siguiente en Bogotá), así que restarle un día daba
+    // la fecha de HOY en Bogotá, no la de ayer. El código real usa
+    // fechaDeHoy() (lib/trabajos/revisionDiariaSeguimiento.ts), que es
+    // fechaDiaBogota() — el fixture tiene que coincidir dígito a
+    // dígito con esa misma cuenta, nunca una propia en UTC.
+    const ayer = diasAtras(1);
     await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: ayer, precio: "100", estado: "active" }));
 
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 80, status: "active" }))); // baja real de 100 a 80
@@ -764,6 +771,50 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
 
     const alertas = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimiento.id)));
     expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
+  });
+
+  // Regresión directa del bug del PR #258 (CI corrido ~7:30pm Bogotá):
+  // fija el reloj a las 23:30 de Bogotá — el borde horario exacto
+  // donde "ayer" en UTC (medianoche UTC) todavía no coincide con "hoy"
+  // en Bogotá. Solo se faltsea `Date` (`toFake: ["Date"]`), nunca los
+  // timers reales — Postgres sigue async de verdad, nada que avanzar
+  // a mano. `diasAtras(1)` (el mismo helper ya usado arriba, ahora
+  // corregido) tiene que seguir dando la foto de AYER real en Bogotá,
+  // nunca la de hoy, sin importar la hora del día en que corra el CI.
+  it("a las 23:30 de Bogotá, diasAtras(1) sigue siendo ayer de verdad: la alerta precio_bajo se crea igual", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("AYER-BOGOTA-23-30");
+
+    // rangoDiaBogota(...).inicio es el INSTANTE real de la medianoche
+    // de Bogotá (05:00 UTC ese día) — a diferencia de hoyBogota()/
+    // fechaDiaBogota(), que da un valor de FECHA (día calendario, sin
+    // hora, pensado para la columna DATE seguimiento_fotos.fecha,
+    // nunca para sumarle horas reales). +23h30 sobre ese instante real
+    // -> 23:30 de Bogotá de HOY (hora real de cuando corre el test,
+    // calculada ANTES de fijar el reloj falso, para no depender de en
+    // qué instante arranca vi.useFakeTimers()), sin importar qué hora
+    // real sea cuando el CI ejecuta esto.
+    const medianocheBogotaReal = rangoDiaBogota(new Date()).inicio;
+    const horaRiesgosa = new Date(medianocheBogotaReal.getTime() + 23.5 * 60 * 60 * 1000);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(horaRiesgosa);
+
+      const ayer = diasAtras(1);
+      await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+        tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: ayer, precio: "100", estado: "active" })
+      );
+
+      vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 80, status: "active" }))); // baja real de 100 a 80
+
+      const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+      expect(resultado).toEqual({ ok: true, saltado: false, alertasCreadas: 1 });
+
+      const alertas = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimiento.id)));
+      expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("empresa sin cuenta ML conectada: {ok:false,error} claro, y NUNCA marca ultima_revision_ts (para que el cron de hoy mismo lo reintente)", async () => {
