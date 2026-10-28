@@ -307,6 +307,85 @@
     return null;
   }
 
+  // Issue #251 (smoke de Mateo) — bug real confirmado: una ficha /up/
+  // SIN wid ni pdp_filters en la URL (ej.
+  // .../up/MCOU2401140163?quantity=6 — solo trae "quantity", ningún
+  // parámetro con el id real) deja itemIdActual en null, así que
+  // "Antigüedad"/"Ventas/mes"/"Facturación/mes" caen todos a "Sin
+  // dato" aunque "Vendidos estimados" ya funcione bien (ese no
+  // necesita itemId). Último recurso antes de rendirse: 3 marcadores
+  // ESTÁNDAR de cualquier página de producto (no específicos de
+  // Mercado Libre, por eso no hace falta confirmarlos contra una
+  // captura puntual de ML — son convención SEO/Open Graph que
+  // cualquier PDP real implementa) que son SIEMPRE autorreferenciales
+  // a la página actual, nunca a un producto recomendado/relacionado
+  // del carrusel:
+  //   1. <link rel="canonical" href="..."> — la URL "real" que el
+  //      sitio declara para ESTA página (nunca la de otra tarjeta).
+  //   2. <meta property="og:url" content="..."> — mismo concepto,
+  //      Open Graph.
+  //   3. JSON-LD (<script type="application/ld+json">) con
+  //      "@type":"Product" — su productID/sku/@id/url identifican el
+  //      producto principal de la página.
+  // A propósito NUNCA se usa __NORDIC_RENDERING_CTX__ acá: ese JSON
+  // trae VARIOS productos (el actual + recomendados, ver el comentario
+  // completo en leerDatosIncrustados) SIN ningún campo de nivel
+  // superior confirmado que diga "este es el que se está viendo" —
+  // usarlo sin un itemId ya conocido para amarrar sería adivinar,
+  // justo el riesgo que este archivo evita en todos lados.
+  // Si las fuentes de arriba DISCREPAN entre sí (ids distintos), o si
+  // el JSON-LD trae más de un "Product" con ids distintos, nunca se
+  // elige ninguno a ciegas — null, mismo criterio que el resto de este
+  // archivo ("sin certeza, no se inventa").
+  function extraerIdIncrustadoConfiable(html) {
+    if (typeof html !== "string" || !html) return null;
+
+    const candidatos = new Set();
+
+    const mCanonical = html.match(/<link[^>]+rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
+    if (mCanonical) {
+      const id = extraerIdDeUrl(mCanonical[1]);
+      if (id) candidatos.add(id);
+    }
+
+    const mOgUrl = html.match(/<meta[^>]+property=["']og:url["'][^>]*content=["']([^"']+)["']/i);
+    if (mOgUrl) {
+      const id = extraerIdDeUrl(mOgUrl[1]);
+      if (id) candidatos.add(id);
+    }
+
+    // Varios <script type="application/ld+json"> pueden convivir en la
+    // misma página (breadcrumbs, organización, producto...) — se
+    // revisan TODOS, pero solo cuenta el/los que declaren
+    // "@type":"Product". Si hay más de un Product con ids DISTINTOS
+    // (ej. el producto principal + uno recomendado también marcado
+    // como Product), el aporte de JSON-LD se descarta entero — nunca
+    // se adivina cuál de los dos es el real.
+    const idsJsonLd = new Set();
+    const regexLd = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let bloqueLd;
+    while ((bloqueLd = regexLd.exec(html))) {
+      try {
+        const datos = JSON.parse(bloqueLd[1]);
+        const items = Array.isArray(datos) ? datos : [datos];
+        for (const item of items) {
+          if (!item || item["@type"] !== "Product") continue;
+          for (const campo of [item.productID, item.sku, item["@id"], item.url]) {
+            if (typeof campo !== "string") continue;
+            const id = extraerIdDeUrl(campo);
+            if (id) idsJsonLd.add(id);
+          }
+        }
+      } catch {
+        // JSON-LD cortado o con forma inesperada — se ignora ese bloque, nunca revienta.
+      }
+    }
+    if (idsJsonLd.size === 1) candidatos.add([...idsJsonLd][0]);
+
+    if (candidatos.size === 1) return [...candidatos][0];
+    return null; // 0 candidatos, o discrepancia entre fuentes -> nunca se adivina
+  }
+
   function normalizarId(valor) {
     if (typeof valor !== "string" && typeof valor !== "number") return null;
     return String(valor).toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -575,7 +654,18 @@
     // sold_quantity/dateCreated una vez que itemIdActual ya es el id
     // real — nunca hace falta un segundo mecanismo de descubrimiento
     // separado acá.
-    const itemIdActual = esPaginaUserProduct(doc && doc.URL) ? extraerWidDeUrl(doc && doc.URL) : extraerIdDeUrl(doc && doc.URL);
+    // Issue #251 (smoke de Mateo, segunda vuelta) — bug real: una ficha
+    // /up/ sin wid NI pdp_filters en la URL (ej. solo trae ?quantity=6)
+    // dejaba itemIdActual en null — "Vendidos estimados" seguía
+    // funcionando (no necesita itemId), pero Antigüedad/Ventas-mes/
+    // Facturación-mes caían todos a "Sin dato". Orden real: wid de la
+    // URL -> pdp_filters -> incrustado confiable (extraerIdIncrustadoConfiable,
+    // arriba) -> null. Los dos primeros ya los prueba extraerWidDeUrl
+    // en ese orden; el tercero solo se intenta si los dos anteriores
+    // no dieron nada.
+    const itemIdActual = esPaginaUserProduct(doc && doc.URL)
+      ? extraerWidDeUrl(doc && doc.URL) || extraerIdIncrustadoConfiable(htmlCompleto)
+      : extraerIdDeUrl(doc && doc.URL);
     const incrustado = leerDatosIncrustados(htmlCompleto, itemIdActual);
     // Issue #251 (smoke de Mateo) — ver elegirVendidosPrincipal, arriba,
     // para el bug real que esto corrige (el piso "+N vendidos" se
@@ -1126,6 +1216,10 @@
     // sin DOM), probadas con las 3 URLs reales de /up/ del smoke.
     esPaginaUserProduct,
     extraerWidDeUrl,
+    // Issue #251 (smoke de Mateo, segunda vuelta) — puro (string de
+    // HTML -> id o null), probado con fixtures de canonical/og:url/
+    // JSON-LD (comentario completo junto a la función).
+    extraerIdIncrustadoConfiable,
     construirLinkSeguirProducto,
     construirLinkSeguirTienda,
     leerSellerIdDeTienda,
