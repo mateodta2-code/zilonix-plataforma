@@ -210,6 +210,13 @@
     // llamar a Mercado Libre — solo para elegir qué tabla de
     // calibración usar, y antiguedadDias() cae a null si el id no
     // matchea nada calibrado de todas formas.
+    // Issue #251 (smoke de Mateo) — revisado para "/up/MCOU…" (ficha
+    // "user product"): el regex de abajo NUNCA matchea "/up/" (no
+    // contiene el substring literal "/p/"), así que cae al default
+    // "item" — correcto a propósito: el id real de esas fichas (del
+    // wid/pdp_filters, ver extraerWidDeUrl en lectores/mercadolibre.js)
+    // es siempre un itemId de publicación puntual, nunca un id de
+    // catálogo. Nunca hace falta un caso aparte para "/up/" acá.
     return /\/p\/[a-z]{3}\d+/i.test(location.href) ? "product" : "item";
   }
 
@@ -259,7 +266,11 @@
       vendidosEst != null ? `${Math.round(vendidosEst)}${etiquetaMl}` : `${SIN_DATO_APROX} (0 o no visible en ML)`,
       vendidosEst == null
     );
-    html += filaHtml("Antigüedad", formatoAntiguedad(dias) ?? SIN_DATO_APROX, dias == null);
+    // Issue #251 (smoke de Mateo) — "(falta antigüedad)" explícito (no
+    // el "Sin dato" bare de las otras filas): sin wid/pdp_filters/date_created
+    // confirmado, nunca hay con qué interpolar — el bloque entero sigue
+    // dibujándose igual (nunca se oculta), solo esta fila explica por qué.
+    html += filaHtml("Antigüedad", formatoAntiguedad(dias) ?? `${SIN_DATO_APROX} (falta antigüedad)`, dias == null);
     html += filaHtml("Ventas/mes", ventasMesEst != null ? Math.round(ventasMesEst) : SIN_DATO_APROX, ventasMesEst == null);
     html += filaHtml("Facturación/mes", facturacionMesEst != null ? formatoPrecio(facturacionMesEst, datos.moneda) : SIN_DATO_APROX, facturacionMesEst == null);
     html +=

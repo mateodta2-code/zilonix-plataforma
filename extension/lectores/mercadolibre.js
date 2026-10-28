@@ -36,8 +36,28 @@
   // desactualizado si se agrega un país nuevo el día de mañana.
   const PREFIJO_ITEM_ML = "MCO|MLA|MLB|MLM|MLC|MLU|MPE";
 
+  // Issue #251 (smoke de Mateo) — bug real confirmado: una ficha "user
+  // product" (/up/MCOU…, ej. "Cojín antiescaras lumbar coxis
+  // ortopédico hemorroides") nunca matcheaba el patrón de arriba
+  // (`/(p/)?(?:MCO|...)-?\d+`) porque "MCOU" no es "MCO" + dígitos — la
+  // "U" rompe el match — así que `tipoDePagina` devolvía `null` y
+  // `reescanear()` (content.js) salía sin dibujar nada, panel ausente
+  // por completo. El id real de ESA numeración (MCOU + dígitos) nunca
+  // es un itemId real de publicación (ver extraerWidDeUrl, más abajo,
+  // y el comentario de clasificarLinkListadoMl sobre lo mismo para
+  // tarjetas de listado) — pero la PÁGINA sigue siendo una ficha de
+  // producto real, con su propio panel, así que el patrón de acá
+  // reconoce la FORMA de la URL (/up/ + MCOU/MLAU/etc + dígitos), nunca
+  // el id en sí (eso lo decide extraerIdDeUrl/extraerWidDeUrl, abajo).
+  const PATRON_PAGINA_USER_PRODUCT = new RegExp(`/up/(?:${PREFIJO_ITEM_ML})U\\d+`, "i");
+
   function tipoDePagina(url) {
-    if (new RegExp(`/(p/)?(?:${PREFIJO_ITEM_ML})-?\\d+`, "i").test(url) || /articulo\.(mercadolibre|mercadolivre)/i.test(url)) return "producto";
+    if (
+      new RegExp(`/(p/)?(?:${PREFIJO_ITEM_ML})-?\\d+`, "i").test(url) ||
+      PATRON_PAGINA_USER_PRODUCT.test(url) ||
+      /articulo\.(mercadolibre|mercadolivre)/i.test(url)
+    )
+      return "producto";
     // Página de UN vendedor/tienda (perfil público o tienda oficial) —
     // nunca confundir con /listado (que es una búsqueda, no un
     // perfil). Se prueba ANTES del check de /listado de abajo:
@@ -241,6 +261,50 @@
     if (typeof url !== "string") return null;
     const m = url.match(new RegExp(`(${PREFIJO_ITEM_ML})-?(\\d+)`, "i"));
     return m ? `${m[1].toUpperCase()}${m[2]}` : null;
+  }
+
+  function esPaginaUserProduct(url) {
+    return typeof url === "string" && PATRON_PAGINA_USER_PRODUCT.test(url);
+  }
+
+  // Issue #251 (smoke de Mateo) — el itemId real de una ficha "user
+  // product" (/up/MCOU…) NUNCA es el MCOU del path (esa numeración es
+  // de variante/selector, no de publicación — ver el comentario de
+  // clasificarLinkListadoMl, más abajo, que ya documenta lo mismo para
+  // tarjetas de listado) — viaja aparte, en el query string: `wid=`
+  // (confirmado con las 3 fichas reales del smoke: "Coliplus" wid
+  // MCO1742001365, "cobija" wid MCO1836584643, "Rtafull" x2 wid
+  // MCO1333873907 — los 3 YA son puntos reales de
+  // PUNTOS_CALIBRACION_ID_FECHA, lib/seguimiento/aproximados.ts) o, si
+  // no hay wid, en `pdp_filters=item_id:MCO…` (mismo id, otro
+  // parámetro — Mercado Libre usa los dos según la ficha). Se decodifica
+  // la URL primero porque `pdp_filters` suele traer el ":" codificado
+  // (`%3A`); si falla (URL mal formada), se sigue con la original, nunca
+  // revienta. A propósito nunca usa `extraerIdDeUrl` (arriba): ese
+  // busca el primer MCO+dígitos en TODA la url sin ningún criterio —
+  // contra una url con MCOU en el path y wid/pdp_filters en el query,
+  // podría devolver cualquier cosa, o nada, según qué parámetro venga
+  // primero. Sin wid ni pdp_filters -> null, nunca se inventa un id a
+  // partir del MCOU.
+  function extraerWidDeUrl(url) {
+    if (typeof url !== "string") return null;
+    let decodificada = url;
+    try {
+      decodificada = decodeURIComponent(url);
+    } catch {
+      // "%" suelto / URL mal formada -> se sigue con la original tal cual.
+    }
+    // Dos grupos de captura (prefijo, dígitos), nunca uno solo con el
+    // "\d+" pegado adentro de la alternación: `(MCO|MLA|...\d+)` solo
+    // ataría los dígitos a la ÚLTIMA alternativa (MPE) — "MCO", "MLA",
+    // etc. matchearían con CERO dígitos y listo (bug real encontrado al
+    // probar esta función: devolvía "MCO" truncado, nunca el id
+    // completo). Mismo patrón de 2 grupos que ya usa extraerIdDeUrl, arriba.
+    let m = decodificada.match(new RegExp(`[?&]wid=(${PREFIJO_ITEM_ML})(\\d+)`, "i"));
+    if (m) return `${m[1].toUpperCase()}${m[2]}`;
+    m = decodificada.match(new RegExp(`pdp_filters=item_id:(${PREFIJO_ITEM_ML})(\\d+)`, "i"));
+    if (m) return `${m[1].toUpperCase()}${m[2]}`;
+    return null;
   }
 
   function normalizarId(valor) {
@@ -473,7 +537,15 @@
     // doc.URL es la URL real de la página (mismo valor que location.href
     // para el documento que el navegador ya cargó) — de ahí sale el id
     // del producto actual, para no confundirlo con otro de la misma página.
-    const itemIdActual = extraerIdDeUrl(doc && doc.URL);
+    // Issue #251 (smoke de Mateo) — una ficha "user product" (/up/MCOU…)
+    // usa extraerWidDeUrl (arriba) en vez de extraerIdDeUrl: el MCOU del
+    // path NUNCA es el itemId real (ver el comentario de
+    // extraerWidDeUrl). leerDatosIncrustados de abajo sigue siendo "los
+    // datos incrustados de la ficha" que confirman/completan
+    // sold_quantity/dateCreated una vez que itemIdActual ya es el id
+    // real — nunca hace falta un segundo mecanismo de descubrimiento
+    // separado acá.
+    const itemIdActual = esPaginaUserProduct(doc && doc.URL) ? extraerWidDeUrl(doc && doc.URL) : extraerIdDeUrl(doc && doc.URL);
     const incrustado = leerDatosIncrustados(htmlCompleto, itemIdActual);
     const vendidos = incrustado.soldQuantity !== null ? incrustado.soldQuantity : vendidosAproximado;
     // true = exacto (sold_quantity real, del JSON/HTML incrustado);
@@ -1019,6 +1091,10 @@
     leerDatosIncrustados,
     calcularVentasPromedioMes,
     extraerIdDeUrl,
+    // Issue #251 (smoke de Mateo) — puras (string de URL -> boolean/id,
+    // sin DOM), probadas con las 3 URLs reales de /up/ del smoke.
+    esPaginaUserProduct,
+    extraerWidDeUrl,
     construirLinkSeguirProducto,
     construirLinkSeguirTienda,
     leerSellerIdDeTienda,
