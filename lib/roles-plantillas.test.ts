@@ -46,6 +46,7 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
         "personas.modificar.todo",
         "configuracion.consultar.todo",
         "configuracion.modificar.todo",
+        "publicidad.consultar.todo",
       ].sort()
     );
     expect(sinDuplicados(PLANTILLAS.Gerente)).toBe(true);
@@ -63,6 +64,7 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
         "finanzas.consultar.todo",
         "finanzas.crear.todo",
         "finanzas.modificar.todo",
+        "publicidad.consultar.todo",
       ].sort()
     );
     expect(PLANTILLAS.Auxiliar.some((p) => p.accion === "anular" || p.accion === "autorizar")).toBe(false);
@@ -95,6 +97,7 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
         "inventario.crear.todo",
         "inventario.modificar.todo",
         "inventario.anular.todo",
+        "publicidad.consultar.todo",
       ].sort()
     );
     expect(PLANTILLAS.Operaciones.some((p) => p.modulo === "finanzas")).toBe(false);
@@ -107,8 +110,16 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
     }
   });
 
-  it("no se agregó ningún módulo nuevo (despachos y promociones llegan con sus pantallas)", () => {
-    expect([...MODULOS]).toEqual(["ventas", "inventario", "finanzas", "personas", "configuracion"]);
+  it("publicidad es el único módulo nuevo y las plantillas solo dan consultar (issue #254)", () => {
+    expect([...MODULOS]).toEqual(["ventas", "inventario", "finanzas", "personas", "configuracion", "publicidad"]);
+    for (const nombre of ["Gerente", "Auxiliar", "Operaciones"] as const) {
+      expect(PLANTILLAS[nombre].filter((p) => p.modulo === "publicidad")).toEqual([
+        { modulo: "publicidad", accion: "consultar", alcance: "todo" },
+      ]);
+    }
+    for (const nombre of ["Tecnología", "Contador", "Operador", "Proveedor", "Domiciliario"] as const) {
+      expect(PLANTILLAS[nombre].some((p) => p.modulo === "publicidad")).toBe(false);
+    }
   });
 });
 

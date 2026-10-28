@@ -10,6 +10,7 @@ export type ClaveIcono =
   | "sku"
   | "investigacion"
   | "finanzas"
+  | "publicidad"
   | "actividad"
   | "personas"
   | "invitar"

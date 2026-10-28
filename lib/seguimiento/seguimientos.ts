@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
-import { fechaDiaBogota } from "@/lib/filtros-listado";
+import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { confirmarRecursoProductoMl, obtenerItemMl, obtenerProducto, obtenerVendedor } from "@/lib/ml/cliente";
 import { buscarFotoDeHaceUnMes } from "@/lib/seguimiento/comparativa";
@@ -543,8 +543,11 @@ export type SeguimientoConFotosParaVentas = {
   fotoCerca30d: typeof seguimientoFotos.$inferSelect | null;
 };
 
-// Días desde hoy (medianoche UTC) hacia atrás — mismo criterio de
-// "solo la FECHA" que fechaDeHoy() en lib/trabajos/revisionDiariaSeguimiento.ts.
+// Días hacia atrás desde la fecha que se le pase — pura resta de
+// calendario, sin ninguna cuenta de huso horario propia: quien llama
+// a esto decide qué es "hoy" (fechaDiaBogota(), más abajo, igual que
+// fechaDeHoy() en lib/trabajos/revisionDiariaSeguimiento.ts desde el
+// issue #258/#204).
 function diasAtras(desde: Date, dias: number): Date {
   const d = new Date(desde);
   d.setUTCDate(d.getUTCDate() - dias);
@@ -571,8 +574,14 @@ export async function listarSeguimientosConFotosParaVentas(empresaId: string): P
   return dbComoEmpresa(empresaId, async (tx) => {
     const activos = await tx.select().from(seguimientosMl).where(and(eq(seguimientosMl.empresaId, empresaId), isNull(seguimientosMl.eliminadoTs))).orderBy(desc(seguimientosMl.creadoTs));
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    // Corrección (issue #204, revisión de Pablo sobre el #263) — "hoy"
+    // en hora de BOGOTÁ (fechaDiaBogota), no UTC: `seguimiento_fotos.fecha`
+    // ya se guarda así desde fechaDeHoy()/guardarDatoDePaginaSeguimiento
+    // (issue #258) — con medianoche UTC acá, esta ventana de ±5 días
+    // quedaba corrida hasta 5 horas en la práctica (nunca rompía un
+    // caso real por lo ancha que es la ventana, pero sí era la misma
+    // mezcla de convenciones que #204 ya encontró en listarAlertasDelDia).
+    const hoy = fechaDiaBogota(new Date());
     const objetivo30d = diasAtras(hoy, 30);
     const desdeVentana30d = diasAtras(hoy, 35);
     const hastaVentana30d = diasAtras(hoy, 25);
@@ -633,8 +642,10 @@ export async function buscarMedicionSiExiste(empresaId: string, mlIdExterno: str
       .limit(1);
     if (!ultimaFoto) return null;
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    // Mismo criterio que listarSeguimientosConFotosParaVentas, arriba
+    // (issue #204): "hoy" en hora de Bogotá, no UTC — para coincidir
+    // con cómo se guarda seguimiento_fotos.fecha de verdad.
+    const hoy = fechaDiaBogota(new Date());
     const objetivo7d = diasAtras(hoy, DIAS_VENTANA_MEDICION);
     const desdeVentana7d = diasAtras(hoy, DIAS_VENTANA_MEDICION + MARGEN_VENTANA_MEDICION);
     const hastaVentana7d = diasAtras(hoy, DIAS_VENTANA_MEDICION - MARGEN_VENTANA_MEDICION);
@@ -680,6 +691,21 @@ export type AlertaDelDia = { alerta: typeof seguimientoAlertas.$inferSelect; nom
 // creación de la alerta, nunca por fecha de la foto (una alerta
 // siempre se crea el mismo día que corre la revisión, son la misma
 // fecha en la práctica, pero comparar por creado_ts es más directo).
+//
+// Bug real (issue #204, encontrado en el CI del PR #263): esto cortaba
+// el día en medianoche UTC — entre las 19:00 y las 24:00 de Bogotá,
+// "hoy 00:00 UTC" ya cruzó (son las 00:00-05:00 UTC del día
+// siguiente), así que `hoy` saltaba a lo que en Bogotá todavía son las
+// 19:00 de HOY — cualquier alerta creada HOY pero antes de esa hora
+// (ej. a las 2pm) quedaba con `creadoTs < hoy` y se excluía de
+// "Alertas de hoy", aunque para la persona en Bogotá siguiera siendo
+// claramente de hoy. `creadoTs` es un INSTANTE real (timestamptz,
+// nunca una fecha-calendario bucketizada como seguimiento_fotos.fecha)
+// — por eso usa `rangoDiaBogota().inicio` (el instante real de
+// medianoche Bogotá, 05:00 UTC ese día), nunca `fechaDiaBogota()` (que
+// da un valor de FECHA pensado para la columna DATE, sin hora real) —
+// mismo criterio que ya usa revisarUnSeguimiento (lib/trabajos/
+// revisionDiariaSeguimiento.ts) para no duplicar alertas del mismo día.
 export async function listarAlertasDelDia(empresaId: string): Promise<AlertaDelDia[]> {
   return dbComoEmpresa(empresaId, async (tx) => {
     const filas = await tx
@@ -689,9 +715,8 @@ export async function listarAlertasDelDia(empresaId: string): Promise<AlertaDelD
       .where(eq(seguimientoAlertas.empresaId, empresaId))
       .orderBy(desc(seguimientoAlertas.creadoTs));
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
-    return filas.filter((f) => f.alerta.creadoTs >= hoy);
+    const inicioHoyBogota = rangoDiaBogota(new Date()).inicio;
+    return filas.filter((f) => f.alerta.creadoTs >= inicioHoyBogota);
   });
 }
 
