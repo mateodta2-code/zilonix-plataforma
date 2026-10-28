@@ -398,6 +398,42 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
     await expect(obtenerItemMl("MCO1", "token")).rejects.toThrow(MlNoAutorizadoError);
   });
 
+  // Issue #262 (revisión de Pablo, punto 2; corrección de Pablo sobre
+  // el punto 2) — obtenerProducto lee `date_created` de la respuesta
+  // COMPLETA de la MISMA llamada de siempre (GET /products/{id}, SIN
+  // `?attributes=...`): nunca se confirmó que ese endpoint acepte ese
+  // parámetro (a diferencia de /items/{id}, que sí lo confirma en
+  // producción) — pedirlo ahí arriesgaba un 400 real que también
+  // tumbara el nombre, que esta función ya traía bien antes de esta
+  // tarea. Nunca una llamada nueva — resolverNombre pasa a guardar el
+  // date_created REAL del catálogo (fechaCreacionCatalogo), nunca el
+  // de una oferta ganadora (ver lib/seguimiento/lector.ts).
+  it("obtenerProducto: lee 'date_created' de la respuesta completa, SIN pedir ?attributes=... (nunca arriesga perder el nombre)", async () => {
+    let urlPedida = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urlPedida = url;
+        return respuestaJson({ name: "Pulsera deportiva", pictures: [], date_created: "2025-03-15T10:00:00.000Z" });
+      })
+    );
+    const producto = await obtenerProducto("MCO222", "token");
+    expect(producto?.fechaCreacion).toBe("2025-03-15T10:00:00.000Z");
+    expect(urlPedida).toBe("https://api.mercadolibre.com/products/MCO222"); // sin query string
+  });
+
+  // Pregunta explícita de la revisión: si la respuesta real de Mercado
+  // Libre no trae `date_created` (puede pasar: no todos los catálogos
+  // lo confirman), el tipo nunca queda en `undefined` silencioso —
+  // siempre `null` explícito, mismo criterio que el resto del repo
+  // ("nunca inventa, pero tampoco esconde que falta").
+  it("sin date_created en la respuesta real: fechaCreacion queda en null explícito, nunca undefined", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ name: "Pulsera deportiva", pictures: [] })));
+    const producto = await obtenerProducto("MCO222", "token");
+    expect(producto?.fechaCreacion).toBeNull();
+    expect(producto?.fechaCreacion).not.toBeUndefined();
+  });
+
   // Bug real: una publicación pausada/cerrada (status !== "active")
   // igual aparecía en la tabla de Investigación — su precio/oferta ya
   // no sirve para analizar el mercado (no se puede comprar). Se

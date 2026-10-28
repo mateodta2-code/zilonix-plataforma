@@ -142,9 +142,15 @@ describe("leerFotoSeguimiento — producto, recursoMl product (catálogo directo
     expect(resultado.ganaBotonCompra).toBe(true);
     expect(resultado.precio).toBe(100);
     expect(resultado.enCatalogo).toBe(true);
-    // Issue #251 — fechaCreacion de la oferta GANADORA (la primera),
-    // ya la pide obtenerOfertasProducto desde el issue #197.
-    expect(resultado.fechaCreacion).toBe("2024-06-01T00:00:00.000Z");
+    // Issue #262 (revisión de Pablo, punto bloqueante) — bug real
+    // corregido: ANTES esto devolvía el `fechaCreacion` de la oferta
+    // GANADORA (acá, "2024-06-01...") como si fuera la antigüedad del
+    // catálogo — es el date_created de un ÍTEM puntual de un vendedor
+    // cualquiera, nunca el del catálogo en sí. Ahora SIEMPRE null para
+    // recursoMl "product", sin importar qué fechaCreacion traiga la
+    // oferta ganadora — el date_created real del catálogo sale aparte
+    // (resolverNombreYFechaCatalogo, lib/seguimiento/seguimientos.ts).
+    expect(resultado.fechaCreacion).toBeNull();
   });
 
   it("sin ninguna oferta real: foto vacía salvo enCatalogo en null (nunca se afirma catálogo sin ofertas)", async () => {

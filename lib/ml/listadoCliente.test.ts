@@ -15,6 +15,7 @@ import {
   ordenarProductos,
   type ProductoListado,
 } from "./listadoCliente";
+import { ETIQUETA_APROXIMADO } from "@/lib/seguimiento/aproximados";
 
 function producto(parciales: Partial<ProductoListado> & { plataforma: string; titulo: string }): ProductoListado {
   return {
@@ -192,13 +193,15 @@ describe("esRelevanteAlTermino — issue #235, filtro obligatorio para 'Mejor op
   });
 });
 
-describe("mejorOpcionParaImportar — issue #235, punto 7", () => {
+describe("mejorOpcionParaImportar — issue #235, punto 7 (y issue #262, punto 2 — volumen)", () => {
+  const AHORA = new Date("2026-10-27T00:00:00.000Z");
+
   it("nunca elige el más barato si es irrelevante al término (el bug real de Zilonix OS)", () => {
     const productos = [
       producto({ plataforma: "Mercado Libre Colombia", titulo: "Estuche Vacío Organizador de Joyas", precio: 5_000, calificacion: 5 }),
       producto({ plataforma: "Mercado Libre Colombia", titulo: "Reloj Casio Digital Hombre", precio: 80_000, calificacion: 4.5, senalVentas: { valor: 200, tipo: "acumulado_sin_periodo" } }),
     ];
-    const mejor = mejorOpcionParaImportar(productos, "reloj casio");
+    const mejor = mejorOpcionParaImportar(productos, "reloj casio", AHORA);
     expect(mejor?.producto.titulo).toBe("Reloj Casio Digital Hombre");
   });
 
@@ -207,25 +210,71 @@ describe("mejorOpcionParaImportar — issue #235, punto 7", () => {
       producto({ plataforma: "Amazon", titulo: "Reloj Casio barato", precio: 50_000, calificacion: 2, senalVentas: { valor: 5, tipo: "mensual_piso" } }),
       producto({ plataforma: "Amazon", titulo: "Reloj Casio premium", precio: 90_000, calificacion: 4.9, senalVentas: { valor: 300, tipo: "mensual_piso" } }),
     ];
-    const mejor = mejorOpcionParaImportar(productos, "reloj casio");
+    const mejor = mejorOpcionParaImportar(productos, "reloj casio", AHORA);
     expect(mejor?.producto.titulo).toBe("Reloj Casio premium");
     expect(mejor?.razon).toMatch(/compras\/mes/);
   });
 
-  it("la razón nunca llama 'mensual' a un acumulado (senalVentas honesto también acá)", () => {
+  // Issue #262, punto 2 — bug real: "acumulado — nunca /mes" leía como
+  // una limitación técnica permanente, cuando en realidad era solo que
+  // la tabla de calibración todavía no tenía puntos (sin itemId acá,
+  // ni siquiera se intenta estimar). Corregido a un texto que explica
+  // POR QUÉ falta el /mes, no que "nunca" va a existir.
+  it("sin itemId (no se puede estimar): la razón nunca llama 'mensual' a un acumulado, y ya no dice 'nunca /mes'", () => {
     const productos = [producto({ plataforma: "Mercado Libre Colombia", titulo: "Reloj Casio", precio: 60_000, senalVentas: { valor: 150, tipo: "acumulado_sin_periodo" } })];
-    const mejor = mejorOpcionParaImportar(productos, "reloj casio");
-    expect(mejor?.razon).toMatch(/acumulado — nunca \/mes/);
+    const mejor = mejorOpcionParaImportar(productos, "reloj casio", AHORA);
+    expect(mejor?.razon).toMatch(/acumulado/);
+    expect(mejor?.razon).not.toMatch(/nunca \/mes/);
     expect(mejor?.razon).not.toMatch(/\/mes"|compras\/mes/);
+  });
+
+  // Issue #262, punto 2 — con itemId real (Mercado Libre), SÍ se
+  // estima ventas/mes para el balance — un candidato con MENOS
+  // acumulado histórico pero MÁS reciente (ritmo/mes más alto) gana
+  // sobre uno más viejo con más acumulado, nunca al revés.
+  it("con itemId real: usa ventas/mes ESTIMADAS para el balance, nunca el acumulado crudo", () => {
+    const productos = [
+      // Viejo: más acumulado (100), pero publicado hace 300 días -> ritmo
+      // real bajo (155 ajustado × 30 / 300 = 15.5/mes).
+      producto({
+        plataforma: "Mercado Libre Colombia",
+        titulo: "Reloj Casio Digital Viejo",
+        precio: 60_000,
+        itemId: "MCO1000000000",
+        esFull: false,
+        senalVentas: { valor: 100, tipo: "acumulado_sin_periodo" },
+      }),
+      // Nuevo: menos acumulado (60), pero publicado hace solo 40 días ->
+      // ritmo real mucho más alto (93 ajustado × 30 / 40 = 69.75/mes).
+      // Los dos con 30+ días de historia (nunca el tope de "menos de 30
+      // días" de ventasMes, que compararía cosas distintas).
+      producto({
+        plataforma: "Mercado Libre Colombia",
+        titulo: "Reloj Casio Digital Nuevo",
+        precio: 60_000,
+        itemId: "MCO1100000000",
+        esFull: false,
+        senalVentas: { valor: 60, tipo: "acumulado_sin_periodo" },
+      }),
+    ];
+    const puntos = [
+      { id: "MCO1000000000", tipo: "item" as const, fecha: new Date(AHORA.getTime() - 300 * 24 * 60 * 60 * 1000) },
+      { id: "MCO1100000000", tipo: "item" as const, fecha: new Date(AHORA.getTime() - 40 * 24 * 60 * 60 * 1000) },
+    ];
+    // Puntos calibrados pasados vía el 4to param (opcional, solo para
+    // esta prueba) — en producción salen de PUNTOS_CALIBRACION_ID_FECHA.
+    const mejor = mejorOpcionParaImportar(productos, "reloj casio", AHORA, puntos);
+    expect(mejor?.producto.titulo).toBe("Reloj Casio Digital Nuevo");
+    expect(mejor?.razon).toMatch(new RegExp(ETIQUETA_APROXIMADO));
   });
 
   it("sin ningún candidato relevante -> null, nunca se fuerza una 'mejor opción' irrelevante", () => {
     const productos = [producto({ plataforma: "Mercado Libre Colombia", titulo: "Cinta Métrica", precio: 3_000 })];
-    expect(mejorOpcionParaImportar(productos, "reloj casio")).toBeNull();
+    expect(mejorOpcionParaImportar(productos, "reloj casio", AHORA)).toBeNull();
   });
 
   it("lista vacía -> null", () => {
-    expect(mejorOpcionParaImportar([], "reloj casio")).toBeNull();
+    expect(mejorOpcionParaImportar([], "reloj casio", AHORA)).toBeNull();
   });
 });
 

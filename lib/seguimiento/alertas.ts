@@ -117,6 +117,32 @@ export function obtenerFechaCreacion(raw: unknown): string | null {
   return typeof obj.fechaCreacion === "string" ? obj.fechaCreacion : null;
 }
 
+// Issue #262 (revisión de Pablo, punto 2) — date_created real del
+// CATÁLOGO (recursoMl "product"), nunca el de una oferta/ítem ganador
+// — campo APARTE de `fechaCreacion` (arriba, que es real solo para
+// recursoMl "item"). Quien calcula antigüedad para un seguimiento
+// "product" tiene que leer ESTE campo, nunca `obtenerFechaCreacion` —
+// ver lib/seguimiento/lector.ts para por qué están separados.
+export function obtenerFechaCreacionCatalogo(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw as { fechaCreacionCatalogo?: unknown };
+  return typeof obj.fechaCreacionCatalogo === "string" ? obj.fechaCreacionCatalogo : null;
+}
+
+// Issue #262 (revisión de Pablo, punto 2) — un solo punto de entrada
+// para "qué date_created real usar para antigüedad", según el tipo de
+// recurso real del seguimiento — nunca se adivina cuál campo leer en
+// cada pantalla por separado (el bug bloqueante de esta revisión era
+// justo eso: alguien leyendo el campo equivocado). "item" ->
+// fechaCreacion (del ítem puntual); "product" -> fechaCreacionCatalogo
+// (del catálogo, nunca de una oferta ganadora); "seller" o null -> una
+// tienda no tiene date_created propio, siempre null.
+export function obtenerFechaCreacionParaAntiguedad(raw: unknown, recursoMl: "item" | "product" | "seller" | null): string | null {
+  if (recursoMl === "item") return obtenerFechaCreacion(raw);
+  if (recursoMl === "product") return obtenerFechaCreacionCatalogo(raw);
+  return null;
+}
+
 // Mismas columnas reales de seguimiento_fotos (db/schema.ts) que
 // importan para comparar — nunca el campo id/empresaId/fecha, que no
 // participan de ninguna regla de alerta.

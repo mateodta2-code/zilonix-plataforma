@@ -702,10 +702,23 @@ export const seguimientoFotos = pgTable(
     // revisionDiariaSeguimiento.ts, con el mismo merge `||`, nunca
     // reemplaza el objeto completo), nunca la extensión: a diferencia
     // de vendidosAproximado/precioAproximado (respaldos de la página),
-    // esta es un dato que la API sí confirma.
+    // esta es un dato que la API sí confirma. SOLO para recurso_ml
+    // "item" — el date_created de LA publicación puntual que se sigue.
+    //
+    // Issue #262 (revisión de Pablo, punto bloqueante) — `fechaCreacionCatalogo`
+    // es un campo APARTE, nunca el mismo `fechaCreacion`: para
+    // recurso_ml "product" (catálogo, /p/MCO...), `fechaCreacion`
+    // (arriba) hubiera salido de la oferta GANADORA de ese catálogo —
+    // el date_created de un ITEM puntual de un vendedor cualquiera,
+    // nunca el del catálogo en sí (lib/seguimiento/lector.ts ya NO lo
+    // guarda ahí, a propósito). `fechaCreacionCatalogo` sale de
+    // obtenerProducto (lib/ml/cliente.ts, GET /products/{id} — la
+    // misma llamada que ya hacía resolverNombre para el nombre, sin
+    // ninguna llamada nueva), la única fuente real del date_created
+    // del catálogo mismo.
     publicaciones: jsonb("publicaciones").$type<
       | { total: number | null; visibles: { itemId: string; titulo: string | null; precio: number | null }[]; fuente: "api" | "pagina" }
-      | { vendidosAproximado?: number; precioAproximado?: number; fechaCreacion?: string }
+      | { vendidosAproximado?: number; precioAproximado?: number; fechaCreacion?: string; fechaCreacionCatalogo?: string }
     >(),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },

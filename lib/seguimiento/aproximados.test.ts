@@ -56,19 +56,42 @@ describe("antiguedadDiasPorId — issue #251, punto 2 (respaldo sin date_created
     expect(dias!).toBeLessThan(186);
   });
 
-  it("extrapola con la pendiente de los 2 puntos más cercanos cuando el id cae FUERA del rango calibrado", () => {
-    // 100M más que el punto más alto -> misma distancia que entre los 2
-    // puntos calibrados -> la fecha interpolada cae ~1 año después del
-    // punto más alto (2025-01-01), aprox. 2026-01-01/02 (el salto real
-    // en ms es el mismo que 2024->2025, que incluye el 29 de febrero).
-    // "ahora" bien más adelante (2027) para no depender de ese ajuste
-    // fino de un día por el año bisiesto.
-    const ahora = new Date("2027-01-01T05:00:00.000Z");
-    const idMasNuevo = "MCO1200000000";
-    const dias = antiguedadDiasPorId(idMasNuevo, "item", ahora, puntos);
+  it("extrapola con la pendiente de los 2 puntos más cercanos cuando el id cae FUERA del rango calibrado, dentro del tope de 90 días", () => {
+    // 10M más que el punto más alto -> con la pendiente real (100M en
+    // ~1 año), eso cae ~36.5 días DESPUÉS del punto más alto
+    // (2025-01-01) -> dentro de LIMITE_EXTRAPOLACION_DIAS (90).
+    const ahora = new Date("2025-02-10T05:00:00.000Z");
+    const idUnPocoMasNuevo = "MCO1110000000";
+    const dias = antiguedadDiasPorId(idUnPocoMasNuevo, "item", ahora, puntos);
     expect(dias).not.toBeNull();
-    expect(dias!).toBeGreaterThan(300);
-    expect(dias!).toBeLessThan(370);
+    expect(dias!).toBeGreaterThan(0);
+  });
+
+  // Issue #262 (revisión de Pablo, punto menor) — bug real que esto
+  // evita: antes, un id mucho más allá del rango calibrado extrapolaba
+  // igual, con la pendiente de los 2 puntos más cercanos — cuanto más
+  // lejos el id, menos confiable esa pendiente (la numeración de
+  // Mercado Libre nunca es perfectamente lineal). Más allá de
+  // LIMITE_EXTRAPOLACION_DIAS (90) desde el punto calibrado más
+  // cercano, "Sin dato" (null) es más honesto que una antigüedad sin
+  // ningún respaldo real cerca.
+  it("nunca extrapola más de 90 días más allá del último punto calibrado -> null fuera de ese rango", () => {
+    // 100M más que el punto más alto -> misma distancia que entre los
+    // 2 puntos calibrados -> la fecha interpolada cae ~1 año después
+    // del punto más alto (2025-01-01) — muy por encima del tope de 90
+    // días.
+    const ahora = new Date("2027-01-01T05:00:00.000Z");
+    const idMuyMasNuevo = "MCO1200000000";
+    expect(antiguedadDiasPorId(idMuyMasNuevo, "item", ahora, puntos)).toBeNull();
+  });
+
+  it("el mismo tope aplica para atrás (antes del primer punto calibrado), simétrico", () => {
+    const ahora = new Date("2025-06-01T05:00:00.000Z");
+    // 10M menos que el punto más bajo -> ~36.5 días ANTES del punto
+    // más bajo (2024-01-01) -> dentro del tope.
+    expect(antiguedadDiasPorId("MCO0990000000", "item", ahora, puntos)).not.toBeNull();
+    // 100M menos -> ~1 año antes del punto más bajo -> fuera del tope.
+    expect(antiguedadDiasPorId("MCO0900000000", "item", ahora, puntos)).toBeNull();
   });
 
   it("nunca mezcla ids de países distintos (MLA no calibra con puntos MCO)", () => {
@@ -206,6 +229,42 @@ describe("facturacionMes — issue #251, punto 4 (ventas/mes × precio actual)",
 // la fecha real exacta de esa publicación de referencia, así que se
 // reconstruye hacia atrás a partir de las 3 cifras que sí dio la
 // tarea, no se inventa un date_created suelto.
+// Issue #262 — segundo caso real de referencia (captura de Selltrix
+// de un PDP de CATÁLOGO, /p/MCO...: MCO64541261 "Rtafull Drenador
+// Hepático Colon Menta"): "+100 vendidos" Full, precio $79.900,
+// "5 m" de antigüedad -> Vendidos (histórico) 220, Ventas/mes est. 41,
+// Facturación mensual est. $3.267.910. Mismo criterio que el caso de
+// "Colchón Relax" de arriba: nunca se tuvo la fecha real exacta de
+// esta publicación, así que los días se despejan hacia atrás a partir
+// de las cifras que sí dio la tarea — pero a diferencia del caso de
+// arriba, acá el despeje da un número EXACTO, no redondeado: ventasMes
+// = facturación / precio = 3.267.910 / 79.900 = 40.9 EXACTO (409/10) ->
+// días = 220 × 30 / 40.9 = 66000/409 ≈ 161.37, que floor(días/30) = 5
+// — consistente con la "5 m" que muestra la pantalla de referencia.
+// Nunca se inventa un date_created suelto: las 4 cifras finales
+// (220, "5 m", 41, $3.267.910) son las 4 que mostró la captura real.
+describe("caso real de referencia completo (Selltrix, catálogo) — los 4 cálculos encadenados", () => {
+  it('+100 vendidos Full, precio $79.900, catálogo MCO64541261 ("5 m" de antigüedad) -> 220 / 41 / $3.267.910', () => {
+    const diasExactos = 66000 / 409; // despejado de 220 × 30 / días = 40.9 (= 3.267.910 / 79.900)
+    const ahora = new Date("2026-10-27T00:00:00.000Z");
+    const dateCreated = new Date(ahora.getTime() - diasExactos * UN_DIA_MS);
+
+    const vendidos = vendidosEstimados(100, { exacto: false, esFull: true });
+    expect(vendidos).toBeCloseTo(220, 9); // "Vendidos (histórico) 220"
+
+    const dias = antiguedadDias({ dateCreated, mlId: null, recursoMl: null, ahora });
+    expect(dias).toBeCloseTo(diasExactos, 6);
+    expect(Math.floor(dias! / 30)).toBe(5); // "Antigüedad 5 m"
+
+    const ventasMesValor = ventasMes(vendidos, dias);
+    expect(ventasMesValor).toBeCloseTo(40.9, 6);
+    expect(Math.round(ventasMesValor!)).toBe(41); // "Ventas/mes est. 41"
+
+    const facturacion = facturacionMes(ventasMesValor, 79900);
+    expect(facturacion).toBeCloseTo(3267910, 2); // "Facturación mensual est. $3.267.910"
+  });
+});
+
 describe("caso real de referencia completo (Selltrix) — los 4 cálculos encadenados", () => {
   it("+100 vendidos Full, precio $939.900, ~423 días de antigüedad -> 220 / 15.6 / $14.662.440", () => {
     const diasExactos = 5500 / 13; // despejado de 220 × 30 / días = 15.6

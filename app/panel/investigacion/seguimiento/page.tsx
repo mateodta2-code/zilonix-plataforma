@@ -11,7 +11,7 @@ import {
   listarAlertasDelDia,
   listarSeguimientosConUltimaFoto,
 } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacion, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacionParaAntiguedad, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
 import { necesitaLecturaDePagina } from "@/lib/seguimiento/estimacionInventario";
 import { antiguedadDias, ETIQUETA_APROXIMADO, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
@@ -29,6 +29,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { agregarSeguimientoAction, eliminarSeguimientoAction, marcarAlertaLeidaAction, procesarAgregarPorQuery } from "./actions";
 import { BotonActualizarTodo } from "./BotonActualizarTodo";
 import { EscuchaExtension } from "./EscuchaExtension";
+import { celdaConDelta, conSigno } from "./formato";
 import styles from "./page.module.css";
 
 // Issue #182 — mismo patrón /^MCO\d+$/ y /^\d+$/ que la extensión usa
@@ -53,34 +54,6 @@ function fechaLegible(d: Date): string {
 function siNoODesconocido(valor: boolean | null, textoSi: string, textoNo: string): React.ReactNode {
   if (valor == null) return <Chip>No disponible</Chip>;
   return valor ? <Chip estado="exito">{textoSi}</Chip> : <Chip estado="peligro">{textoNo}</Chip>;
-}
-
-// Issue #195 — "valor + delta" (ej. 9 (−1)) cuando hay foto anterior
-// con la que comparar; solo el valor cuando no hay. `formatearValor`
-// decide cómo se ve el número entero (dinero() para precio, tal cual
-// para inventario/vendidos); el delta usa el mismo formateador, con
-// signo explícito agregado acá (nunca "+"/"-" adivinados adentro del
-// formateador, que solo sabe mostrar valores absolutos).
-function conSigno(n: number, formatearValor: (n: number) => string): string {
-  if (n === 0) return formatearValor(0);
-  return n > 0 ? `+${formatearValor(n)}` : `-${formatearValor(Math.abs(n))}`;
-}
-
-function celdaConDelta(
-  actual: number | string | null,
-  anterior: number | string | null,
-  formatearValor: (n: number) => string
-): React.ReactNode {
-  if (actual == null) return "—";
-  const texto = formatearValor(Number(actual));
-  const delta = calcularDelta(actual, anterior);
-  if (delta == null) return texto;
-  const signo = delta > 0 ? "positivo" : delta < 0 ? "negativo" : "neutro";
-  return (
-    <>
-      {texto} <span className={styles.delta} data-signo={signo}>({conSigno(delta, formatearValor)})</span>
-    </>
-  );
 }
 
 const numeroPlano = (n: number) => n.toLocaleString("es-CO");
@@ -423,7 +396,17 @@ export default async function SeguimientoPage({
                   : null;
               const diasAprox =
                 vendidosAprox != null
-                  ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, recursoMl: seguimiento.recursoMl, ahora })
+                  ? antiguedadDias({
+                      // Issue #262 (revisión de Pablo, punto 2) —
+                      // nunca obtenerFechaCreacion a secas: para
+                      // recurso_ml "product" (catálogo), el date_created
+                      // real sale de fechaCreacionCatalogo, nunca de
+                      // una oferta ganadora (ver lib/seguimiento/lector.ts).
+                      dateCreated: obtenerFechaCreacionParaAntiguedad(ultimaFoto?.publicaciones, seguimiento.recursoMl),
+                      mlId: seguimiento.mlIdExterno,
+                      recursoMl: seguimiento.recursoMl,
+                      ahora,
+                    })
                   : null;
               const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
               const precioParaFacturacion = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximado;
@@ -520,6 +503,19 @@ export default async function SeguimientoPage({
                         pista visual aproximada. */}
                         {ultimaFoto?.vendidos ?? (vendidosAproximado != null ? `+${vendidosAproximado} (aproximado)` : "Sin dato")}
                         {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
+                        {/* Issue #262 (revisión de Mateo, punto 3) —
+                        faltaba mostrar los vendidos ESTIMADOS (estilo
+                        Selltrix: "+N en ML" × factor Full/no-Full) acá
+                        en la lista — [id]/page.tsx (detalle) ya lo
+                        mostraba, esta fila no. */}
+                        {vendidosAprox != null ? (
+                          <div className={styles.subdato}>
+                            {numeroPlano(Math.round(vendidosAprox))} vendidos <Chip>{ETIQUETA_APROXIMADO}</Chip>{" "}
+                            <Ayuda id={`ayuda-vendidos-aprox-${seguimiento.id}`}>
+                              Mercado Libre no deja ver el sold_quantity real de un competidor — "+N vendidos" × un factor según sea Full o no.
+                            </Ayuda>
+                          </div>
+                        ) : null}
                         {/* Issue #251, punto 7 — "leído de la página
                         el {fecha}": inventario/vendidos de un
                         competidor solo los llena esta lectura, nunca
@@ -549,7 +545,26 @@ export default async function SeguimientoPage({
                     )}
                   </CeldaTabla>
                   <CeldaTabla>
-                    {!fotoHaceUnMes ? "Aún sin 30 días" : deltaUnMes == null ? "—" : conSigno(deltaUnMes, numeroPlano)}
+                    {/* Issue #262 (revisión de Mateo, punto 3) —
+                    mientras no haya 30 días de historia REAL, se
+                    muestra el estimado de ventas/mes marcado "aprox."
+                    en vez de dejar la celda vacía ("Aún sin 30 días");
+                    en cuanto SÍ hay historia real, se muestra el real
+                    y el estimado queda aparte (arriba, en la columna
+                    Vendidos) — nunca mezclados en la misma celda. */}
+                    {!fotoHaceUnMes ? (
+                      ventasMesAprox != null ? (
+                        <>
+                          {numeroPlano(Math.round(ventasMesAprox))} <Chip>{ETIQUETA_APROXIMADO}</Chip>
+                        </>
+                      ) : (
+                        "Aún sin 30 días"
+                      )
+                    ) : deltaUnMes == null ? (
+                      "—"
+                    ) : (
+                      conSigno(deltaUnMes, numeroPlano)
+                    )}
                   </CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.enCatalogo ?? null, "Sí", "No")}</CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.ganaBotonCompra ?? null, "Gana", "Pierde")}</CeldaTabla>

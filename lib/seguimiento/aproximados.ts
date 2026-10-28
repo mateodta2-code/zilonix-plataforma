@@ -20,6 +20,19 @@
 // el día de mañana (ver scripts/calibrar-factor-vendidos.ts, de este
 // módulo).
 //
+// Issue #262 ("Aproximados estilo Selltrix en los 3 lugares") — UNA
+// SOLA FUENTE para los 2 factores y la tabla de calibración id→fecha,
+// compartida con el popup de la extensión (extension/lectores/aproximados.js,
+// que porta estas mismas 4 funciones a JS plano): antes vivían como
+// constantes TS acá y, aparte, el popup de la extensión no tenía
+// ninguna forma de usarlas — dos lugares mostrando "aproximados" con
+// fórmulas que podían desalinearse sin que nada lo avisara.
+// scripts/empaquetar-extension.js regenera extension/calibracion-aproximados.js
+// a partir de ESTE MISMO archivo antes de armar el ZIP — nunca se edita
+// ese archivo generado a mano. lib/seguimiento/calibracion-aproximados.test.ts
+// prueba que la copia de la extensión nunca queda desincronizada.
+import calibracion from "./calibracion-aproximados.json";
+
 // Etiqueta única — toda pantalla que muestre cualquiera de estos 4
 // valores SIEMPRE suma esta etiqueta al lado (nunca el número solo,
 // nunca mezclado sin marcar con un dato exacto real).
@@ -27,6 +40,10 @@ export const ETIQUETA_APROXIMADO = "aprox.";
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 const DIAS_POR_MES = 30;
+// Issue #262 (revisión de Pablo, punto menor) — tope real de
+// extrapolación en antiguedadDiasPorId (abajo): nunca más de 90 días
+// más allá de la fecha del punto calibrado más cercano al id buscado.
+const LIMITE_EXTRAPOLACION_DIAS = 90;
 
 // Selltrix: una publicación Full vende más rápido en la práctica
 // (mejor exposición/logística) que lo que el "+N" redondeado sugiere
@@ -35,11 +52,12 @@ const DIAS_POR_MES = 30;
 // el caso real de referencia: "+100 vendidos" Full → 220, exactamente
 // 100 × 2.2). "+N" sin Full ajusta menos (1.55) — nunca los dos a la
 // vez, son dos señales del mismo fenómeno ("vende más rápido de lo que
-// el piso redondeado sugiere"). Un solo lugar para los dos — ajustarlos
-// después de correr scripts/calibrar-factor-vendidos.ts es cambiar
-// estas 2 líneas, nada más.
-export const FACTOR_VENDIDOS_FULL = 2.2;
-export const FACTOR_VENDIDOS_SIN_FULL = 1.55;
+// el piso redondeado sugiere"). Salen de calibracion-aproximados.json
+// (arriba) — ajustarlos después de correr scripts/calibrar-factor-vendidos.ts
+// es cambiar ese JSON, nada más (y volver a correr `npm run extension:zip`
+// para que la extensión se empaquete con el valor nuevo).
+export const FACTOR_VENDIDOS_FULL: number = calibracion.factorVendidosFull;
+export const FACTOR_VENDIDOS_SIN_FULL: number = calibracion.factorVendidosSinFull;
 
 export type OpcionesVendidosEstimados = {
   // true = `vendidos` ya es sold_quantity real (confirmado por la API
@@ -72,17 +90,22 @@ export function vendidosEstimados(vendidos: number | null, opciones: OpcionesVen
 // garantizado exacto para una publicación puntual, por eso es
 // "aproximado" y nunca se usa si hay un date_created real disponible.
 //
-// SIN PUNTOS TODAVÍA (ver el hallazgo del punto (a), changelog de esta
-// rama): nada en la base de hoy guarda date_created, así que no hay
-// ningún par real confirmado para calibrar. Agregar acá pares REALES
-// únicamente (mlIdExterno real + date_created real que la API de
-// Mercado Libre confirmó, nunca un id o fecha inventados) apenas haya
-// evidencia — scripts/calibrar-factor-vendidos.ts (de este mismo
-// issue) no arma esta tabla (esa calibra los 2 factores de arriba, no
-// esto), pero una vez que obtenerFotoItemMl empiece a guardar
-// date_created (este PR ya lo agrega del lado del cron), cualquier
-// seguimiento con 2+ fotos con date_created real sirve como punto.
-// Hacen falta al menos 2 del MISMO tipo para poder interpolar.
+// SIN PUNTOS TODAVÍA (issue #262 — causa de fondo confirmada: ningún
+// "por mes" aparece en ningún lado mientras esta tabla siga vacía):
+// nada en la base de hoy tenía suficientes pares REALES confirmados
+// para calibrar. `scripts/generar-calibracion-id-fecha.ts` (issue #262,
+// solo lectura) saca pares reales de `seguimiento_fotos.publicaciones.fechaCreacion`
+// (competidores que el cron ya confirmó, PR #261) y de publicaciones
+// propias recién publicadas (`productos_ml.resultado[].itemId` +
+// `publicadoTs`, prácticamente el mismo instante que el date_created
+// real de Mercado Libre) — imprime el JSON para pegar en `puntos`
+// (abajo, en calibracion-aproximados.json), nunca escribe nada solo.
+// Agregar acá pares REALES únicamente (mlIdExterno real + fecha real
+// que Mercado Libre confirmó o que Zilonix generó al publicar, nunca
+// un id o fecha inventados). Hacen falta al menos 2 del MISMO tipo
+// (item/product) y MISMO país para poder interpolar siquiera un poco
+// — ver el changelog de esta rama para cuántos puntos hacen falta para
+// que la interpolación sea razonable (no solo "posible").
 //
 // Corrección de Pablo (revisión sobre 0e22594) — `tipo` ("item" o
 // "product", el mismo recurso_ml real del seguimiento, nunca "seller":
@@ -95,7 +118,12 @@ export function vendidosEstimados(vendidos: number | null, opciones: OpcionesVen
 // sin sentido, aunque el país coincidiera.
 export type TipoIdMl = "item" | "product";
 export type PuntoCalibracionId = { id: string; tipo: TipoIdMl; fecha: Date };
-export const PUNTOS_CALIBRACION_ID_FECHA: PuntoCalibracionId[] = [];
+type PuntoCalibracionJson = { id: string; tipo: TipoIdMl; fecha: string };
+export const PUNTOS_CALIBRACION_ID_FECHA: PuntoCalibracionId[] = (calibracion.puntos as PuntoCalibracionJson[]).map((p) => ({
+  id: p.id,
+  tipo: p.tipo,
+  fecha: new Date(p.fecha),
+}));
 
 // Mismo patrón de prefijo+dígitos que PATRON_ID_PRODUCTO_O_ITEM
 // (lib/ml/cliente.ts) — nunca duplicado de ahí porque ese patrón
@@ -140,6 +168,24 @@ export function antiguedadDiasPorId(
 
   const fraccion = (objetivo.numero - a.numero) / (b.numero - a.numero);
   const fechaInterpolada = new Date(a.fecha.getTime() + fraccion * (b.fecha.getTime() - a.fecha.getTime()));
+
+  // Corrección de Pablo (revisión, punto menor) — `fraccion` fuera de
+  // [0,1] significa que `id` cae AFUERA del rango calibrado: esto
+  // EXTRAPOLA con la pendiente de los 2 puntos más cercanos, confiable
+  // cerca del borde, cada vez menos a medida que el id se aleja (la
+  // numeración de Mercado Libre nunca es perfectamente lineal en el
+  // tiempo). Tope real: nunca más de LIMITE_EXTRAPOLACION_DIAS (90)
+  // más allá de la fecha del punto calibrado más cercano al id
+  // buscado — más lejos que eso, "Sin dato" (null) es más honesto que
+  // una antigüedad sin ningún punto real cerca que la respalde.
+  if (fraccion > 1) {
+    const diasMasAllaDelUltimoPunto = (fechaInterpolada.getTime() - b.fecha.getTime()) / MS_POR_DIA;
+    if (diasMasAllaDelUltimoPunto > LIMITE_EXTRAPOLACION_DIAS) return null;
+  } else if (fraccion < 0) {
+    const diasAntesDelPrimerPunto = (a.fecha.getTime() - fechaInterpolada.getTime()) / MS_POR_DIA;
+    if (diasAntesDelPrimerPunto > LIMITE_EXTRAPOLACION_DIAS) return null;
+  }
+
   const dias = (ahora.getTime() - fechaInterpolada.getTime()) / MS_POR_DIA;
   return dias > 0 ? dias : null;
 }

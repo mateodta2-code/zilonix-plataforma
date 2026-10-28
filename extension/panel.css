@@ -114,6 +114,26 @@
   font-size: 11px;
 }
 
+/* Issue #262 — encabezado del bloque "Análisis aprox." (vendidos
+   estimados/antigüedad/ventas-mes/facturación-mes), separado del resto
+   de las filas de la ficha con un margen/borde arriba, para que nunca
+   se confunda con un dato que Mercado Libre confirma directamente. */
+.zx-seccion-titulo {
+  margin: 10px 0 2px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(34, 34, 37, 0.6);
+  font-size: 12px;
+  font-weight: 700;
+  color: #60a5fa;
+}
+
+.zx-nota-aprox {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-style: italic;
+  color: #939393;
+}
+
 .zx-titulo-producto {
   font-size: 13px;
   font-weight: 700;
