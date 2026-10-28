@@ -85,6 +85,13 @@
       "when": 1793049702407,
       "tag": "0011_publicidad_product_ads",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793149558098,
+      "tag": "0012_finanzas_base_titulares_config_auditoria",
+      "breakpoints": true
     }
   ]
 }

@@ -269,6 +269,10 @@ export async function transferirCuentaMlAOtraEmpresa(
         tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
         desconectadaTs: null,
         renovandoTs: null,
+        // Issue #125 — el titular es de la empresa anterior. La FK
+        // compuesta (empresa_id, titular_id) rechaza el cambio de
+        // empresa con el titular viejo puesto.
+        titularId: null,
       })
       .where(eq(cuentasMl.cuentaIdExterna, datos.cuentaIdExterna))
       .returning({ id: cuentasMl.id });
