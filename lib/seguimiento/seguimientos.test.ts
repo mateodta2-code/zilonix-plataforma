@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { fechaDiaBogota } from "@/lib/filtros-listado";
+import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
 import { normalizarPublicaciones, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import {
   agregarSeguimiento,
@@ -463,11 +463,17 @@ describe("listarSeguimientosConUltimaFoto / obtenerDetalleSeguimiento (issue #17
   });
 });
 
+// Issue #204 (revisión sobre el #263) — "hoy" en hora de BOGOTÁ
+// (fechaDiaBogota), no UTC: ahora coincide dígito a dígito con lo que
+// listarSeguimientosConFotosParaVentas/buscarMedicionSiExiste usan de
+// verdad — antes de este cambio, los dos (producción y este fixture)
+// truncaban en UTC, así que coincidían por construcción; con
+// producción ya corregida, este helper tenía que corregirse igual
+// para no introducir el mismo desfase horario intermitente que ya
+// encontró el CI del PR #263 con `ayer` en revisionDiariaSeguimiento.test.ts.
 function diasAtras(dias: number): Date {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  d.setUTCDate(d.getUTCDate() - dias);
-  return d;
+  const hoy = fechaDiaBogota(new Date());
+  return new Date(hoy.getTime() - dias * 24 * 60 * 60 * 1000);
 }
 
 // Issue #196 (apoya #195/#175) — capa de datos que Code 1 usa para las
@@ -659,6 +665,84 @@ describe("listarAlertasDelDia / marcarAlertaLeida (issue #175)", () => {
     expect(alertasDeHoy).toHaveLength(1);
     expect(alertasDeHoy[0].alerta.fotoId).toBe(fotoHoy.id);
     expect(alertasDeHoy[0].nombreSeguimiento).toBe("Producto de prueba");
+  });
+
+  // Issue #204, bug real encontrado en el CI del PR #263 — regresión
+  // directa. A las 23:30 de Bogotá, el corte viejo (medianoche UTC)
+  // todavía no había cruzado (faltan ~5h): "hoy" seguía siendo la
+  // fecha UTC de AYER, que en Bogotá recién arranca a las 19:00 — una
+  // alerta de HOY pero de ANTES de esa hora (ej. 2pm) quedaba
+  // `creadoTs < hoy` y se excluía de "Alertas de hoy".
+  //
+  // Reloj falso fijado ANTES de crear la cuenta ML (lección real del
+  // PR #263: crearla con el reloj real y recién después saltar la hora
+  // deja el token "vencido" para el reloj falso, y dispara una
+  // renovación que el fetch mockeado no sabe responder) — acá nunca
+  // hace falta ningún mock de renovación porque el token se crea YA
+  // bajo el reloj falso.
+  it("a las 23:30 de Bogotá, una alerta de HOY creada a las 2pm sigue contando como 'de hoy'", async () => {
+    const inicioHoyBogotaReal = rangoDiaBogota(new Date()).inicio;
+    const horaRiesgosa = new Date(inicioHoyBogotaReal.getTime() + 23.5 * 60 * 60 * 1000); // 23:30 Bogotá
+    const dosPmBogotaMismoDia = new Date(inicioHoyBogotaReal.getTime() + 14 * 60 * 60 * 1000); // 2pm Bogotá, mismo día que horaRiesgosa
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(horaRiesgosa);
+
+      const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+      await conectarCuentaMl(empresaId);
+      vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "Producto de prueba", status: "active" })));
+      const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+      vi.unstubAllGlobals();
+
+      const [foto] = await dbComoEmpresa(empresaId, (tx) =>
+        tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: fechaDiaBogota(horaRiesgosa), precio: "90" }).returning()
+      );
+      await dbComoEmpresa(empresaId, (tx) =>
+        tx.insert(seguimientoAlertas).values({ empresaId, seguimientoId: seguimiento.id, fotoId: foto.id, tipo: "precio_bajo", detalle: {}, creadoTs: dosPmBogotaMismoDia })
+      );
+
+      const alertasDeHoy = await listarAlertasDelDia(empresaId);
+      expect(alertasDeHoy.some((a) => a.alerta.fotoId === foto.id)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Issue #204 — el mismo bug, visto desde el otro borde: a las 00:30
+  // de Bogotá (recién empezó el día nuevo en Bogotá), el corte viejo
+  // (medianoche UTC) SÍ había cruzado ya (05:00 UTC es 00:00 Bogotá) —
+  // pero "hoy" en UTC arrancó a las 19:00 de AYER en Bogotá, así que
+  // una alerta de las 11pm de AYER (Bogotá) quedaba `creadoTs >= hoy`
+  // y se INCLUÍA por error en "Alertas de hoy", aunque para la persona
+  // en Bogotá fuera claramente de ayer.
+  it("a las 00:30 de Bogotá, una alerta de AYER a las 11pm NUNCA cuenta como 'de hoy'", async () => {
+    const inicioHoyBogotaReal = rangoDiaBogota(new Date()).inicio;
+    const horaRiesgosa = new Date(inicioHoyBogotaReal.getTime() + 0.5 * 60 * 60 * 1000); // 00:30 Bogotá
+    const onceDeLaNocheAyer = new Date(inicioHoyBogotaReal.getTime() - 1 * 60 * 60 * 1000); // 11pm Bogotá, día ANTERIOR
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(horaRiesgosa);
+
+      const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+      await conectarCuentaMl(empresaId);
+      vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "Producto de prueba", status: "active" })));
+      const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+      vi.unstubAllGlobals();
+
+      const [fotoAyer] = await dbComoEmpresa(empresaId, (tx) =>
+        tx.insert(seguimientoFotos).values({ empresaId, seguimientoId: seguimiento.id, fecha: fechaDiaBogota(onceDeLaNocheAyer), precio: "100" }).returning()
+      );
+      await dbComoEmpresa(empresaId, (tx) =>
+        tx.insert(seguimientoAlertas).values({ empresaId, seguimientoId: seguimiento.id, fotoId: fotoAyer.id, tipo: "precio_bajo", detalle: {}, creadoTs: onceDeLaNocheAyer })
+      );
+
+      const alertasDeHoy = await listarAlertasDelDia(empresaId);
+      expect(alertasDeHoy.some((a) => a.alerta.fotoId === fotoAyer.id)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("marcarAlertaLeida fija leida_ts, nunca borra la alerta", async () => {
