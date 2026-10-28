@@ -33,6 +33,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   titulares, configuracion_finanzas, metas_mensuales,
   publicidad_anunciantes, publicidad_campanas, publicidad_anuncios, publicidad_metricas_diarias, publicidad_costos_item, publicidad_sincronizaciones
   TO app_user;
+-- Issue #127 (Z-FIN-05) — sin DELETE: un tercero se desactiva y una
+-- fila de la tabla maestra se corrige, ninguno se borra. Son tablas
+-- nuevas, así que no hay un DELETE viejo que revocar.
+GRANT SELECT, INSERT, UPDATE ON terceros, costos_sku TO app_user;
 -- Issue #125 (Z-FIN-03) — auditoria queda de solo inserción para
 -- app_user: puede dejar el rastro y leer el de su empresa, no
 -- reescribirlo ni borrarlo. REVOKE porque este script es repetible:
@@ -158,6 +162,11 @@ ALTER TABLE configuracion_finanzas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE configuracion_finanzas FORCE ROW LEVEL SECURITY;
 ALTER TABLE metas_mensuales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE metas_mensuales FORCE ROW LEVEL SECURITY;
+-- Issue #127.
+ALTER TABLE terceros ENABLE ROW LEVEL SECURITY;
+ALTER TABLE terceros FORCE ROW LEVEL SECURITY;
+ALTER TABLE costos_sku ENABLE ROW LEVEL SECURITY;
+ALTER TABLE costos_sku FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
@@ -309,6 +318,16 @@ CREATE POLICY aislamiento_configuracion_finanzas ON configuracion_finanzas
 
 DROP POLICY IF EXISTS aislamiento_metas_mensuales ON metas_mensuales;
 CREATE POLICY aislamiento_metas_mensuales ON metas_mensuales
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #127 — mismo patrón: una empresa nunca ve ni toca los
+-- proveedores ni la tabla maestra de otra.
+DROP POLICY IF EXISTS aislamiento_terceros ON terceros;
+CREATE POLICY aislamiento_terceros ON terceros
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_costos_sku ON costos_sku;
+CREATE POLICY aislamiento_costos_sku ON costos_sku
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;

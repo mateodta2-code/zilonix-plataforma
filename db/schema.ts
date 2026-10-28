@@ -302,6 +302,123 @@ export const metasMensuales = pgTable(
   })
 );
 
+// Issue #127 (Z-FIN-05) — proveedores y transportadores de la empresa.
+// `tipo` es una etiqueta informativa: no limita qué conceptos cubre el
+// tercero (el de agencia puede ser también el de empaque).
+export const tipoTerceroEnum = pgEnum("tipo_tercero", ["proveedor_producto", "empaque", "agencia", "flex", "otro"]);
+export const condicionPagoEnum = pgEnum("condicion_pago", ["inmediato", "cuenta_cobro", "anticipado_full_ml"]);
+// El cierre de cada período es fijo: semana de lunes a domingo (cierra
+// el domingo), quincenal el 15 y el último día del mes, mensual el
+// último día.
+export const periodicidadPagoEnum = pgEnum("periodicidad_pago", ["semanal", "quincenal", "mensual"]);
+
+// Sin DELETE para app_user (db/rls-setup.sql): un tercero se desactiva
+// con `activo`, nunca se borra, para no perder a quién se le debía.
+export const terceros = pgTable(
+  "terceros",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    nombre: text("nombre").notNull(),
+    tipo: tipoTerceroEnum("tipo").notNull(),
+    activo: boolean("activo").notNull().default(true),
+    // Packing que cobra este proveedor, una vez por paquete. 0 = no
+    // cobra (valor real); vacío = sin dato. Es el mismo para Full y
+    // para agencia (Sharel, 24-oct-2026).
+    empaque: numeric("empaque", { precision: 14, scale: 2 }),
+    // Sin default de columna: agencia y flex nacen como cuenta_cobro
+    // semanal (lib/terceros.ts); para los demás tipos se elige.
+    condicionPago: condicionPagoEnum("condicion_pago").notNull(),
+    periodicidad: periodicidadPagoEnum("periodicidad"),
+    // Vacío = usa configuracion_finanzas.plazo_vencimiento_dias.
+    plazoDias: integer("plazo_dias"),
+    // Tercero habitual por concepto. Un mismo tercero puede tener
+    // varias marcas (agencia y empaque suelen ser el mismo).
+    predeterminadoEnvioAgencia: boolean("predeterminado_envio_agencia").notNull().default(false),
+    predeterminadoEmpaque: boolean("predeterminado_empaque").notNull().default(false),
+    predeterminadoFlex: boolean("predeterminado_flex").notNull().default(false),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    // Destino de la FK compuesta de costos_sku. Constraint y no índice:
+    // drizzle-kit crea los índices después de las claves foráneas.
+    empresaIdUnica: unique("terceros_empresa_id_unica").on(t.empresaId, t.id),
+    nombreUnico: unique("terceros_empresa_nombre_unico").on(t.empresaId, t.nombre),
+    empaqueNoNegativo: check("terceros_empaque_no_negativo", sql`${t.empaque} >= 0`),
+    plazoNoNegativo: check("terceros_plazo_no_negativo", sql`${t.plazoDias} >= 0`),
+    cuentaCobroConPeriodicidad: check(
+      "terceros_cuenta_cobro_con_periodicidad",
+      sql`${t.condicionPago} <> 'cuenta_cobro' OR ${t.periodicidad} IS NOT NULL`
+    ),
+    // A lo sumo un tercero habitual por concepto y empresa.
+    habitualEnvioAgencia: uniqueIndex("terceros_habitual_envio_agencia_unico")
+      .on(t.empresaId)
+      .where(sql`${t.predeterminadoEnvioAgencia}`),
+    habitualEmpaque: uniqueIndex("terceros_habitual_empaque_unico").on(t.empresaId).where(sql`${t.predeterminadoEmpaque}`),
+    habitualFlex: uniqueIndex("terceros_habitual_flex_unico").on(t.empresaId).where(sql`${t.predeterminadoFlex}`),
+  })
+);
+
+export const fuenteCostoEnum = pgEnum("fuente_costo", ["manual", "archivo"]);
+
+// Issue #127 (Z-FIN-05) — tabla maestra por SKU, como la hoja de
+// Zilonix: una fila por SKU con lo que cuesta y los pisos de venta.
+// La llave es el SKU de la publicación de Mercado Libre normalizado
+// (trim + mayúsculas), no `skus`: sin FK hacia `skus`, la importación
+// (#128) crea filas aunque el SKU no esté en el catálogo. El costo de
+// cada venta lo congela #129/#130 y el historial va a `auditoria`, así
+// que acá no hay vigencias.
+//
+// Ceros (Sharel, 22-oct-2026): costo vacío = sin costo (se alerta) y
+// costo 0 = costo real de $0. Empaque y envío agencia 0 = $0 real.
+// Precio mínimo 0 = no aplica, se guarda vacío (el CHECK > 0 lo
+// impide en la base). Empaque vacío = usar el del proveedor.
+export const costosSku = pgTable(
+  "costos_sku",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    skuCodigo: text("sku_codigo").notNull(),
+    nombreProducto: text("nombre_producto"),
+    costo: numeric("costo", { precision: 14, scale: 2 }),
+    empaque: numeric("empaque", { precision: 14, scale: 2 }),
+    envioAgencia: numeric("envio_agencia", { precision: 14, scale: 2 }),
+    // Pisos de venta por cantidad fija de unidades (1, 2 o 3), para el
+    // agente de promociones. Son independientes entre sí.
+    precioMinimoUnidad: numeric("precio_minimo_unidad", { precision: 14, scale: 2 }),
+    precioMinimoComboX2: numeric("precio_minimo_combo_x2", { precision: 14, scale: 2 }),
+    precioMinimoComboX3: numeric("precio_minimo_combo_x3", { precision: 14, scale: 2 }),
+    precioVenta: numeric("precio_venta", { precision: 14, scale: 2 }),
+    // Proveedor del producto. Vacío no bloquea la utilidad: solo queda
+    // sin cuenta por pagar asociada (#140).
+    terceroId: uuid("tercero_id"),
+    fuente: fuenteCostoEnum("fuente").notNull().default("manual"),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    skuUnico: unique("costos_sku_empresa_sku_unico").on(t.empresaId, t.skuCodigo),
+    // La base rechaza un código sin normalizar: así " ab-1" y "AB-1"
+    // nunca quedan como dos filas.
+    skuNormalizado: check("costos_sku_sku_normalizado", sql`${t.skuCodigo} = upper(btrim(${t.skuCodigo})) AND ${t.skuCodigo} <> ''`),
+    costoNoNegativo: check("costos_sku_costo_no_negativo", sql`${t.costo} >= 0`),
+    empaqueNoNegativo: check("costos_sku_empaque_no_negativo", sql`${t.empaque} >= 0`),
+    envioNoNegativo: check("costos_sku_envio_agencia_no_negativo", sql`${t.envioAgencia} >= 0`),
+    precioVentaNoNegativo: check("costos_sku_precio_venta_no_negativo", sql`${t.precioVenta} >= 0`),
+    minimoUnidadPositivo: check("costos_sku_precio_minimo_unidad_positivo", sql`${t.precioMinimoUnidad} > 0`),
+    minimoX2Positivo: check("costos_sku_precio_minimo_combo_x2_positivo", sql`${t.precioMinimoComboX2} > 0`),
+    minimoX3Positivo: check("costos_sku_precio_minimo_combo_x3_positivo", sql`${t.precioMinimoComboX3} > 0`),
+    // Un SKU de la empresa A nunca apunta a un tercero de la empresa B.
+    terceroDeLaEmpresa: foreignKey({
+      name: "costos_sku_tercero_misma_empresa_fk",
+      columns: [t.empresaId, t.terceroId],
+      foreignColumns: [terceros.empresaId, terceros.id],
+    }).onDelete("restrict"),
+  })
+);
+
 // Tarea 2.3 — una cuenta de Mercado Libre conectada a una empresa.
 // Tokens cifrados (lib/cifrado.ts, AES-256-GCM con versión de clave —
 // regla de CLAUDE.md "tokens de marketplaces siempre cifrados"), nunca
