@@ -68,6 +68,16 @@ function codigoDeErrorDeSubida(error: unknown): string {
 }
 
 export async function POST(request: NextRequest) {
+  // Code review de Pablo — antes CLIP_HABILITADO solo ocultaba el
+  // link en /panel/publicar/page.tsx; esta API seguía aceptando una
+  // subida real por URL directa. 404 (nunca 403/503): para cualquiera
+  // que no sea quien la desactivó, la ruta simplemente "no existe" —
+  // mismo default seguro que la página (oculto si falta o es distinta
+  // de "true"), antes de leer sesión/body/nada del cuerpo.
+  if (process.env.CLIP_HABILITADO !== "true") {
+    return NextResponse.json({ error: "No encontrado." }, { status: 404 });
+  }
+
   const base = urlPublicaBase();
   const origenEsperado = new URL(base).origin;
   // Issue real: este endpoint acepta un <form> normal (nunca JSON, ni

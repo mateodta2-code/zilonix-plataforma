@@ -10,6 +10,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { productosMl } from "@/db/schema";
 import { publicarProductoEnCuentas } from "@/lib/ml/publicar";
 import type { DatosPorCuenta, VariantesProducto } from "@/lib/ml/publicar-tipos";
+import { esRellenoFalsoDimensiones } from "./formulario-logica";
 
 async function empresaActivaDe(usuarioId: string) {
   const propias = await listarEmpresasDeUsuario(usuarioId);
@@ -51,8 +52,26 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
     const titulo = String(formData.get(`titulo_${c.id}`) ?? "").trim();
     const descripcion = String(formData.get(`descripcion_${c.id}`) ?? "").trim();
     const portadaUrl = String(formData.get(`portada_${c.id}`) ?? "").trim();
-    if (titulo || descripcion || portadaUrl) {
-      porCuenta[c.id] = { titulo: titulo || undefined, descripcion: descripcion || undefined, portadaUrl: portadaUrl || null };
+    // ADENDO UX de Publicar, punto 4 — "incluir portadasPorVariante por
+    // valor del ejeFoto": el editor visual (EditorVariantes.tsx) manda
+    // un solo mapeo {valorEje: url} replicado a cada cuenta vía un
+    // hidden input — se descarta silenciosamente si no es un JSON
+    // válido (nunca rompe el resto del envío por un campo opcional).
+    let portadasPorVariante: Record<string, string> | undefined;
+    const portadasPorVarianteCrudo = String(formData.get(`portadasPorVariante_${c.id}`) ?? "").trim();
+    if (portadasPorVarianteCrudo) {
+      try {
+        const parsed = JSON.parse(portadasPorVarianteCrudo) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const entradas = Object.entries(parsed as Record<string, unknown>).filter(([, v]) => typeof v === "string" && v.trim() !== "");
+          if (entradas.length) portadasPorVariante = Object.fromEntries(entradas) as Record<string, string>;
+        }
+      } catch {
+        // JSON inválido/vacío — se ignora, nunca bloquea el resto del formulario.
+      }
+    }
+    if (titulo || descripcion || portadaUrl || portadasPorVariante) {
+      porCuenta[c.id] = { titulo: titulo || undefined, descripcion: descripcion || undefined, portadaUrl: portadaUrl || null, portadasPorVariante };
     }
   }
   if (cuentasSeleccionadas.every((id) => !porCuenta[id]?.titulo) && Object.values(porCuenta).every((d) => !d.titulo)) {
@@ -71,6 +90,17 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
   const largo = String(formData.get("largo") ?? "").trim();
   const ancho = String(formData.get("ancho") ?? "").trim();
   const alto = String(formData.get("alto") ?? "").trim();
+  // Code review de Pablo (LOW) — el chequeo de "relleno falso" vivía
+  // solo en el cliente (FormularioPublicar.tsx) — un POST armado a
+  // mano (o con JS deshabilitado) nunca lo pasaba por acá. Mismo
+  // helper puro, mismo mensaje que ya ve la persona en el formulario
+  // (formulario-logica.ts, con sus propias pruebas) — nunca una
+  // segunda regla distinta del mismo chequeo.
+  if (esRellenoFalsoDimensiones({ peso, largo, ancho, alto })) {
+    throw new Error(
+      "Las 4 medidas del paquete están en 1 o menos — parece un relleno sin medir de verdad. Mercado Libre usa esto para calcular el envío real: completá el peso/largo/ancho/alto reales del paquete."
+    );
+  }
   const dimensiones = { ...(peso && { peso }), ...(largo && { largo }), ...(ancho && { ancho }), ...(alto && { alto }) };
 
   const imagenes = String(formData.get("imagenes") ?? "")

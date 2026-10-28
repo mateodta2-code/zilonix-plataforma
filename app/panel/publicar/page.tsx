@@ -54,7 +54,15 @@ export default async function PublicarPage() {
         <Link href="/panel/publicar/nuevo" style={{ fontWeight: 600 }}>
           + Publicar producto nuevo
         </Link>
-        <Link href="/panel/publicar/clip">Subir Clip a una publicación existente</Link>
+        {/* ADENDO UX de Publicar, punto 7 — bandera CLIP_HABILITADO
+        (env): Clip exige que la cuenta ya tenga reputación real en
+        Mercado Libre (color de reputación, ver
+        lib/ml/publicar-reglas.ts, clipRequiereReputacion) — ninguna
+        cuenta de prueba la tiene, así que mostrarlo sin esa condición
+        cumplida solo confunde. Si falta o es "false", se oculta —
+        nunca se oculta por accidente dejándolo sin definir en
+        producción (false explícito es el default seguro). */}
+        {process.env.CLIP_HABILITADO === "true" && <Link href="/panel/publicar/clip">Subir Clip a una publicación existente</Link>}
       </div>
 
       <ul style={{ listStyle: "none", padding: 0, marginTop: 24 }}>
