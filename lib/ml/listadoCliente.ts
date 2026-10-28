@@ -41,6 +41,17 @@ export type ProductoListado = {
   // listado (issue #227, punto 9 "Seguir solo ML") — null en el resto,
   // nunca inventado.
   itemId: string | null;
+  // Issue #251 (fix "aproximados siempre visibles") — id de CATÁLOGO
+  // (link /p/MCO…, recurso_ml "product"), una numeración de Mercado
+  // Libre INDEPENDIENTE de itemId (ver TipoIdMl en aproximados.ts) —
+  // nunca el mismo campo que itemId, para no confundir las dos
+  // numeraciones al interpolar antigüedad. Antes un resultado de
+  // catálogo quedaba sin NINGÚN id usable para el aproximado — con
+  // este campo, `estimarAproximadosListado` (abajo) puede interpolar
+  // su antigüedad igual que un ítem, solo que contra los puntos de
+  // calibración de tipo "product". `null` para cualquier fila que no
+  // sea un link /p/ de catálogo (incluido un itemId real).
+  productId: string | null;
   titulo: string;
   precio: number;
   foto: string | null;
@@ -139,14 +150,29 @@ export type EstimacionAproximadaListado = {
 
 const SIN_ESTIMACION: EstimacionAproximadaListado = { vendidosEst: null, ventasMesEst: null, facturacionMesEst: null };
 
+// Issue #251 (fix "aproximados siempre visibles") — bug real probado
+// en staging: el corte `p.itemId == null` dejaba TODO resultado de
+// catálogo (link /p/MCO…, el más común en Mercado Libre — Selltrix sí
+// los estima) sin `vendidosEst`, aunque la tarjeta SÍ traiga vendidos.
+// `vendidosEst` ahora se calcula siempre que haya una señal de
+// vendidos real (acumulado_sin_periodo), sea item o catálogo — la
+// antigüedad (y por lo tanto ventas/mes y facturación/mes, que SÍ la
+// necesitan) usa itemId con recurso "item" o, si no hay itemId,
+// productId con recurso "product" — nunca mezclados (antiguedadDias
+// interpola contra puntos del mismo tipo, ver aproximados.ts).
 export function estimarAproximadosListado(p: ProductoListado, ahora: Date, puntos?: PuntoCalibracionId[]): EstimacionAproximadaListado {
-  if (p.itemId == null || p.senalVentas.tipo !== "acumulado_sin_periodo" || p.senalVentas.valor == null) return SIN_ESTIMACION;
+  if (p.senalVentas.tipo !== "acumulado_sin_periodo" || p.senalVentas.valor == null) return SIN_ESTIMACION;
   // Un listado nunca confirma el sold_quantity exacto de una tarjeta
   // ajena (issue #251/#250) — el número que trae es siempre el piso
   // "+N vendidos" de la tarjeta, nunca el exacto.
   const vendidosEst = vendidosEstimados(p.senalVentas.valor, { exacto: false, esFull: p.esFull === true });
   if (vendidosEst == null) return SIN_ESTIMACION;
-  const dias = antiguedadDias({ dateCreated: null, mlId: p.itemId, recursoMl: "item", ahora, puntos });
+  const idParaAntiguedad = p.itemId ?? p.productId;
+  const recursoMlParaAntiguedad: "item" | "product" | null = p.itemId != null ? "item" : p.productId != null ? "product" : null;
+  const dias =
+    idParaAntiguedad != null && recursoMlParaAntiguedad != null
+      ? antiguedadDias({ dateCreated: null, mlId: idParaAntiguedad, recursoMl: recursoMlParaAntiguedad, ahora, puntos })
+      : null;
   const ventasMesValor = ventasMes(vendidosEst, dias);
   const facturacionMesValor = facturacionMes(ventasMesValor, p.precio);
   return { vendidosEst, ventasMesEst: ventasMesValor, facturacionMesEst: facturacionMesValor };
@@ -333,20 +359,26 @@ export type MejorOpcionImportar = {
 // histórico crudo para Mercado Libre) — bug real de criterio: una
 // publicación VIEJA con mucho acumulado le ganaba a una NUEVA que
 // vende mucho más rápido por mes, aunque el ritmo reciente sea la
-// señal que de verdad importa para decidir qué importar. Ahora, para
-// cada candidato, `volumenPara` prefiere ventas/mes ESTIMADAS
-// (estimarAproximadosListado — Mercado Libre con itemId y antigüedad
-// calibrada) cuando se puede calcular; cae al criterio de siempre
-// (mensual_piso real de Amazon, o el acumulado crudo si no hay
-// estimación posible) en cualquier otro caso — nunca mezclado sin
-// marcar: la razón final siempre aclara cuál de los 3 es, con
-// ETIQUETA_APROXIMADO cuando es una estimación.
+// señal que de verdad importa para decidir qué importar. `volumenPara`
+// prefiere ventas/mes ESTIMADAS (estimarAproximadosListado — Mercado
+// Libre con itemId/productId y antigüedad real o calibrada) cuando se
+// puede calcular.
+//
+// Issue #251 (fix "aproximados siempre visibles") — bug real: el
+// fallback de acá seguía comparando el acumulado CRUDO (`senalVentas.valor`,
+// sin ajuste por Full/"+N") contra un `estimado` que SÍ venía ajustado
+// — dos escalas distintas peleando por el mismo score. Ahora que
+// `estimarAproximadosListado` siempre calcula `vendidosEst` (ajustado)
+// con solo tener un acumulado, sin exigir itemId/productId (ver el fix
+// de ese archivo), el fallback usa ESE número ajustado en vez del
+// crudo — nunca mezclado sin marcar: la razón final siempre aclara
+// cuál de los 3 es, con ETIQUETA_APROXIMADO cuando es una estimación.
 function volumenPara(p: ProductoListado, ahora: Date, puntos?: PuntoCalibracionId[]): { valor: number; etiqueta: string } {
   if (p.senalVentas.tipo === "mensual_piso") return { valor: p.senalVentas.valor ?? 0, etiqueta: `${p.senalVentas.valor ?? 0} compras/mes` };
-  const estimado = estimarAproximadosListado(p, ahora, puntos).ventasMesEst;
-  if (estimado != null) return { valor: estimado, etiqueta: `${Math.round(estimado)} ventas/mes (${ETIQUETA_APROXIMADO})` };
-  if (p.senalVentas.tipo === "acumulado_sin_periodo") {
-    return { valor: p.senalVentas.valor ?? 0, etiqueta: `${p.senalVentas.valor ?? 0} acumulado (sin fecha para estimar /mes todavía)` };
+  const estimacion = estimarAproximadosListado(p, ahora, puntos);
+  if (estimacion.ventasMesEst != null) return { valor: estimacion.ventasMesEst, etiqueta: `${Math.round(estimacion.ventasMesEst)} ventas/mes (${ETIQUETA_APROXIMADO})` };
+  if (estimacion.vendidosEst != null) {
+    return { valor: estimacion.vendidosEst, etiqueta: `${Math.round(estimacion.vendidosEst)} vendidos estimados, sin antigüedad para /mes todavía (${ETIQUETA_APROXIMADO})` };
   }
   return { valor: 0, etiqueta: "sin dato de ventas" };
 }

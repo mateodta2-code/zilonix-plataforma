@@ -227,24 +227,38 @@
   // dato para estimar esto".
   const SIN_DATO_APROX = "Sin dato";
 
+  // Issue #251 (fix "aproximados siempre visibles") — bug real probado
+  // en staging: sin vendidos (0, o un "+N" que la ficha no muestra)
+  // esta función devolvía "" — el bloque entero desaparecía del panel,
+  // indistinguible de un error silencioso. Ahora SIEMPRE dibuja el
+  // bloque: "Vendidos estimados" explica por qué falta ("Sin dato (0 o
+  // no visible en ML)") en vez de desaparecer, y el resto de las filas
+  // caen solas a "Sin dato" (ya lo hacían) porque dias/ventasMesEst/
+  // facturacionMesEst quedan en null cuando no hay vendidosEst de
+  // dónde partir.
   function bloqueAnalisisAproximado(datos) {
-    if (!APROX || !CAL) return ""; // sitio sin estos globales cargados (solo Mercado Libre los trae, ver manifest.json)
-    if (typeof datos.vendidos !== "number") return ""; // sin ningún vendidos (exacto ni "+N") no hay nada que estimar
+    if (!APROX || !CAL) return ""; // sitio sin estos globales cargados (solo Mercado Libre los trae, ver manifest.json) — nunca pasa en Mercado Libre, así que "" acá nunca es el bug de arriba
 
-    const vendidosEst = APROX.vendidosEstimados(datos.vendidos, { exacto: datos.vendidosExacto === true, esFull: datos.esFull === true }, CAL);
-    if (vendidosEst == null) return "";
+    const vendidosEst =
+      typeof datos.vendidos === "number"
+        ? APROX.vendidosEstimados(datos.vendidos, { exacto: datos.vendidosExacto === true, esFull: datos.esFull === true }, CAL)
+        : null;
 
-    const dias = APROX.antiguedadDias(
-      { dateCreated: datos.dateCreated, mlId: datos.itemId, tipo: tipoIdDePagina(), ahoraMs: Date.now() },
-      CAL
-    );
-    const ventasMesEst = APROX.ventasMes(vendidosEst, dias);
-    const facturacionMesEst = APROX.facturacionMes(ventasMesEst, datos.precio);
+    const dias =
+      vendidosEst != null
+        ? APROX.antiguedadDias({ dateCreated: datos.dateCreated, mlId: datos.itemId, tipo: tipoIdDePagina(), ahoraMs: Date.now() }, CAL)
+        : null;
+    const ventasMesEst = vendidosEst != null ? APROX.ventasMes(vendidosEst, dias) : null;
+    const facturacionMesEst = ventasMesEst != null ? APROX.facturacionMes(ventasMesEst, datos.precio) : null;
 
     const etiquetaMl = datos.vendidosExacto === false ? ` <span class="zx-fila__valor--chip">+${textoCampo(datos.vendidos)} en ML</span>` : "";
 
     let html = '<p class="zx-seccion-titulo">Análisis aprox.</p>';
-    html += filaHtml("Vendidos estimados", `${Math.round(vendidosEst)}${etiquetaMl}`, false);
+    html += filaHtml(
+      "Vendidos estimados",
+      vendidosEst != null ? `${Math.round(vendidosEst)}${etiquetaMl}` : `${SIN_DATO_APROX} (0 o no visible en ML)`,
+      vendidosEst == null
+    );
     html += filaHtml("Antigüedad", formatoAntiguedad(dias) ?? SIN_DATO_APROX, dias == null);
     html += filaHtml("Ventas/mes", ventasMesEst != null ? Math.round(ventasMesEst) : SIN_DATO_APROX, ventasMesEst == null);
     html += filaHtml("Facturación/mes", facturacionMesEst != null ? formatoPrecio(facturacionMesEst, datos.moneda) : SIN_DATO_APROX, facturacionMesEst == null);
@@ -472,6 +486,11 @@
         esEnvioGratis: typeof p.esEnvioGratis === "boolean" ? p.esEnvioGratis : null,
         vendedor: typeof p.vendedor === "string" && p.vendedor ? p.vendedor : null,
         itemId: typeof p.itemId === "string" && p.itemId ? p.itemId : null,
+        // Issue #251 (fix "aproximados siempre visibles") — id de
+        // catálogo (/p/MCO…), SOLO lo manda mercadolibre.js (igual que
+        // itemId, ver comentario de arriba) — nunca inventado en el
+        // resto de los lectores.
+        productId: typeof p.productId === "string" && p.productId ? p.productId : null,
         link: resolverLinkListadoSeguro(p.link),
       }));
     if (!candidatos.length && !auto && !captcha) return; // manual: nada confiable para mandar, nunca un mensaje vacío
@@ -988,4 +1007,14 @@
       reescanearConRetardo();
     }
   }, 1000);
+
+  // Issue #251 (fix "aproximados siempre visibles") — mismo patrón
+  // dual que extension/lectores/aproximados.js: en el navegador real
+  // no existe `module`, así que esto nunca corre ahí; en Node
+  // (vitest, content.test.ts) permite probar bloqueAnalisisAproximado
+  // (la función pura detrás del bloque "Análisis aprox.") sin un DOM
+  // real — nunca se exporta nada que dependa de document/chrome.
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { bloqueAnalisisAproximado, tipoIdDePagina };
+  }
 })();
