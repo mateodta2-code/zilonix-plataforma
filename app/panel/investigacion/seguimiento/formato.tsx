@@ -5,6 +5,7 @@
 // Movidas a este módulo aparte (solo depende de calcularDelta, que ya
 // era puro) para poder probarlas sin DATABASE_URL_APP.
 import { calcularDelta } from "@/lib/seguimiento/comparativa";
+import { vendidosEstimados } from "@/lib/seguimiento/aproximados";
 import styles from "./page.module.css";
 
 // Issue #195 — "valor + delta" (ej. 9 (−1)) cuando hay foto anterior
@@ -36,4 +37,18 @@ export function celdaConDelta(actual: number | string | null, anterior: number |
       {texto} <span className={styles.delta} data-signo={signo}>({conSigno(delta, formatearValor)})</span>
     </>
   );
+}
+
+// Issue #251 (fix "aproximados siempre visibles") — bug real probado
+// en staging: la lista exigía `esFull != null` antes de estimar
+// NADA — sin ese dato confirmado (la mayoría de los seguimientos
+// nuevos, antes de que la API/extensión lo lean) la fila se quedaba
+// sin ningún estimado de vendidos, aunque sí hubiera un "+N vendidos"
+// para ajustar. Ahora, con Full desconocido, se asume el factor "no
+// Full" (1.55, el mismo criterio que vendidosEstimados ya usa cuando
+// `esFull` no es exactamente `true`) — la UI avisa "Full desconocido"
+// aparte (page.tsx), nunca se esconde la suposición.
+export function vendidosAproxParaFila(tipo: "producto" | "tienda", vendidosParaAprox: number | null, vendidosExacto: boolean, esFull: boolean | null): number | null {
+  if (tipo !== "producto" || vendidosParaAprox == null) return null;
+  return vendidosEstimados(vendidosParaAprox, { exacto: vendidosExacto, esFull: esFull === true });
 }

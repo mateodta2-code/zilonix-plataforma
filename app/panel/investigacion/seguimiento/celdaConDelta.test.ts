@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { celdaConDelta, conSigno } from "./formato";
+import { celdaConDelta, conSigno, vendidosAproxParaFila } from "./formato";
 
 const dinero = (n: number) => `$${n.toLocaleString("es-CO")}`;
 const numeroPlano = (n: number) => n.toLocaleString("es-CO");
@@ -47,5 +47,35 @@ describe("conSigno — issue #262 (sigue mostrando 0 cuando se lo llama directo,
   it("positivo y negativo llevan el signo explícito", () => {
     expect(conSigno(5, numeroPlano)).toBe("+5");
     expect(conSigno(-5, numeroPlano)).toBe("-5");
+  });
+});
+
+// Issue #251 (fix "aproximados siempre visibles") — bug real probado
+// en staging: antes, `esFull == null` (la mayoría de los seguimientos
+// nuevos) descartaba el estimado ENTERO. Ahora asume el factor "no
+// Full" (1.55) en vez de no estimar nada.
+describe("vendidosAproxParaFila — issue #251 (fix 'aproximados siempre visibles')", () => {
+  it("esFull null (desconocido): estima con el factor 'no Full' (1.55), nunca descarta el estimado", () => {
+    const resultado = vendidosAproxParaFila("producto", 100, false, null);
+    expect(resultado).toBeCloseTo(155); // 100 × 1.55
+  });
+
+  it("esFull true (confirmado): usa el factor Full (2.2)", () => {
+    const resultado = vendidosAproxParaFila("producto", 100, false, true);
+    expect(resultado).toBeCloseTo(220);
+  });
+
+  it("esFull false (confirmado 'no Full'): mismo factor que 'desconocido' (1.55) — ya era el comportamiento correcto", () => {
+    const resultado = vendidosAproxParaFila("producto", 100, false, false);
+    expect(resultado).toBeCloseTo(155);
+  });
+
+  it("vendidos exacto (confirmado por la API): se usa tal cual, sin multiplicar, con o sin esFull", () => {
+    expect(vendidosAproxParaFila("producto", 40, true, null)).toBe(40);
+  });
+
+  it("tipo 'tienda' (no aplica este estimado) o sin vendidos: null", () => {
+    expect(vendidosAproxParaFila("tienda", 100, false, true)).toBeNull();
+    expect(vendidosAproxParaFila("producto", null, false, true)).toBeNull();
   });
 });

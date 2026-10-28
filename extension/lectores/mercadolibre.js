@@ -887,6 +887,16 @@
         // real — catálogo/user_product quedan sin itemId, nunca
         // inventado (ver clasificarLinkListadoMl arriba).
         itemId: idInfo.tipo === "item" ? idInfo.id : null,
+        // Issue #251 (fix "aproximados siempre visibles") — bug real
+        // probado en staging: un resultado de catálogo (/p/MCO…, el
+        // más común en Mercado Libre) nunca traía NINGÚN id usable —
+        // sin él, el panel no podía interpolar su antigüedad y
+        // vendidos/mes quedaba sin estimar. `productId` es una
+        // numeración de Mercado Libre DISTINTA de itemId (recurso_ml
+        // "product", nunca mezclada con "item" al calibrar — ver
+        // TipoIdMl en lib/seguimiento/aproximados.ts) — se manda
+        // aparte a propósito, nunca reutilizando el mismo campo.
+        productId: idInfo.tipo === "producto" ? idInfo.id : null,
         link: href || null,
       });
     });

@@ -6,6 +6,7 @@ import {
   calcularResumenLocalBloque,
   clasificarSenalVentas,
   esRelevanteAlTermino,
+  estimarAproximadosListado,
   facturacionEstimadaListado,
   fusionarProductos,
   generarEstrategiaListado,
@@ -20,6 +21,7 @@ import { ETIQUETA_APROXIMADO } from "@/lib/seguimiento/aproximados";
 function producto(parciales: Partial<ProductoListado> & { plataforma: string; titulo: string }): ProductoListado {
   return {
     itemId: null,
+    productId: null,
     precio: 10_000,
     foto: null,
     senalVentas: { valor: null, tipo: "ausente" },
@@ -193,6 +195,65 @@ describe("esRelevanteAlTermino — issue #235, filtro obligatorio para 'Mejor op
   });
 });
 
+// Issue #251 (fix "aproximados siempre visibles") — bug probado en
+// staging: un resultado de catálogo (link /p/MCO…, sin itemId real de
+// publicación — solo item lo confirma, ver el comentario de itemId en
+// listadoCliente.ts) se quedaba SIN estimar nada, aunque la tarjeta sí
+// trajera vendidos ("+N vendidos"). vendidosEst ahora se calcula igual
+// que un item; solo ventasMesEst/facturacionMesEst dependen de tener
+// ALGÚN id (itemId o productId) calibrado para interpolar antigüedad.
+describe("estimarAproximadosListado — issue #251 (fix 'aproximados siempre visibles')", () => {
+  const AHORA = new Date("2026-10-27T00:00:00.000Z");
+
+  it("resultado de catálogo (sin itemId, con productId): vendidosEst presente aunque no haya antigüedad calibrada", () => {
+    const p = producto({
+      plataforma: "Mercado Libre Colombia",
+      titulo: "Colchón Relax",
+      itemId: null,
+      productId: "MCO64541261",
+      esFull: true,
+      senalVentas: { valor: 100, tipo: "acumulado_sin_periodo" },
+    });
+    const est = estimarAproximadosListado(p, AHORA);
+    expect(est.vendidosEst).toBeCloseTo(220); // 100 × 2.2 (Full) — EXACTO, nunca depende de la antigüedad
+    expect(est.ventasMesEst).toBeNull(); // sin puntos de calibración de tipo "product" en esta prueba
+    expect(est.facturacionMesEst).toBeNull();
+  });
+
+  it("resultado de catálogo CON antigüedad calibrada (tipo 'product'): también estima ventas/mes y facturación/mes", () => {
+    const p = producto({
+      plataforma: "Mercado Libre Colombia",
+      titulo: "Colchón Relax",
+      itemId: null,
+      productId: "MCO64541261",
+      precio: 79_900,
+      esFull: true,
+      senalVentas: { valor: 100, tipo: "acumulado_sin_periodo" },
+    });
+    const puntosProducto = [
+      { id: "MCO64541260", tipo: "product" as const, fecha: new Date(AHORA.getTime() - 200 * 24 * 60 * 60 * 1000) },
+      { id: "MCO64541262", tipo: "product" as const, fecha: new Date(AHORA.getTime() - 100 * 24 * 60 * 60 * 1000) },
+    ];
+    const est = estimarAproximadosListado(p, AHORA, puntosProducto);
+    expect(est.vendidosEst).toBeCloseTo(220);
+    expect(est.ventasMesEst).not.toBeNull();
+    expect(est.facturacionMesEst).not.toBeNull();
+  });
+
+  it("sin itemId NI productId: vendidosEst presente, ventas/mes y facturación/mes en null (nunca inventa antigüedad)", () => {
+    const p = producto({ plataforma: "Mercado Libre Colombia", titulo: "Sin id identificable", senalVentas: { valor: 50, tipo: "acumulado_sin_periodo" } });
+    const est = estimarAproximadosListado(p, AHORA);
+    expect(est.vendidosEst).toBe(50 * 1.55); // sin Full
+    expect(est.ventasMesEst).toBeNull();
+    expect(est.facturacionMesEst).toBeNull();
+  });
+
+  it("sin señal de vendidos (ausente): sin ninguna estimación", () => {
+    const p = producto({ plataforma: "Mercado Libre Colombia", titulo: "X" });
+    expect(estimarAproximadosListado(p, AHORA)).toEqual({ vendidosEst: null, ventasMesEst: null, facturacionMesEst: null });
+  });
+});
+
 describe("mejorOpcionParaImportar — issue #235, punto 7 (y issue #262, punto 2 — volumen)", () => {
   const AHORA = new Date("2026-10-27T00:00:00.000Z");
 
@@ -217,13 +278,20 @@ describe("mejorOpcionParaImportar — issue #235, punto 7 (y issue #262, punto 2
 
   // Issue #262, punto 2 — bug real: "acumulado — nunca /mes" leía como
   // una limitación técnica permanente, cuando en realidad era solo que
-  // la tabla de calibración todavía no tenía puntos (sin itemId acá,
-  // ni siquiera se intenta estimar). Corregido a un texto que explica
-  // POR QUÉ falta el /mes, no que "nunca" va a existir.
-  it("sin itemId (no se puede estimar): la razón nunca llama 'mensual' a un acumulado, y ya no dice 'nunca /mes'", () => {
+  // la tabla de calibración todavía no tenía puntos. Corregido a un
+  // texto que explica POR QUÉ falta el /mes, no que "nunca" va a
+  // existir.
+  //
+  // Issue #251 (fix "aproximados siempre visibles") — bug real: sin
+  // itemId/productId no hay con qué interpolar antigüedad, pero
+  // vendidosEst (el acumulado YA ajustado por Full/"+N") sí se puede
+  // calcular siempre — el fallback ahora usa ESE número ajustado en
+  // vez del acumulado crudo (ver volumenPara, listadoCliente.ts).
+  it("sin itemId ni productId (no se puede estimar antigüedad): usa vendidosEst ajustado, nunca el acumulado crudo ni 'nunca /mes'", () => {
     const productos = [producto({ plataforma: "Mercado Libre Colombia", titulo: "Reloj Casio", precio: 60_000, senalVentas: { valor: 150, tipo: "acumulado_sin_periodo" } })];
     const mejor = mejorOpcionParaImportar(productos, "reloj casio", AHORA);
-    expect(mejor?.razon).toMatch(/acumulado/);
+    expect(mejor?.razon).toMatch(/vendidos estimados/);
+    expect(mejor?.razon).toMatch(new RegExp(ETIQUETA_APROXIMADO));
     expect(mejor?.razon).not.toMatch(/nunca \/mes/);
     expect(mejor?.razon).not.toMatch(/\/mes"|compras\/mes/);
   });
