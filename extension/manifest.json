@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Zilonix Seller — Investigación",
   "short_name": "Zilonix Investigación",
-  "version": "0.3.35",
+  "version": "0.3.36",
   "background": {
     "service_worker": "background.js"
   },

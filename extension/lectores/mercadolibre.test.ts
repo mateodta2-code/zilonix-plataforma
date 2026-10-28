@@ -13,8 +13,10 @@ import {
   detectarFullEnHtmlFicha,
   detectarFullEnHtmlTarjeta,
   elegirInventarioPrincipal,
+  esPaginaUserProduct,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
+  extraerWidDeUrl,
   filtroFullActivoEnUrl,
   leerDatosIncrustados,
   leerInventarioMaximoDeTexto,
@@ -22,6 +24,14 @@ import {
   leerSellerIdDeTienda,
   tipoDePagina,
 } from "./mercadolibre.js";
+// Issue #251 (smoke de Mateo) — antiguedadDiasPorId real de la
+// extensión (JS plano, mismo cálculo que lib/seguimiento/aproximados.ts)
+// + la tabla de calibración REAL comiteada (ya con los 9 puntos de
+// Selltrix/propia, ver lib/seguimiento/calibracion-aproximados.json) —
+// para probar el pipeline completo "URL /up/ -> itemId -> antigüedad"
+// sin necesitar jsdom (este proyecto no lo tiene).
+import { antiguedadDiasPorId } from "./aproximados.js";
+import calibracionReal from "../../lib/seguimiento/calibracion-aproximados.json";
 
 // Issue #192 — bug real: una tienda oficial real de Mercado Libre.
 const LINK_TIENDA_OFICIAL_SIN_SELLER =
@@ -363,6 +373,121 @@ describe("tipoDePagina — issue #192, bug real: una tienda oficial real no se r
   it("un producto real de otro país (site-id distinto de MCO) también da \"producto\"", () => {
     expect(tipoDePagina("https://articulo.mercadolibre.com.ar/MLA-987654321-auriculares-_JM")).toBe("producto");
     expect(tipoDePagina("https://www.mercadolivre.com.br/p/MLB111222333")).toBe("producto");
+  });
+
+  // Issue #251 (smoke de Mateo) — bug real: una ficha "user product"
+  // (/up/MCOU…, "Cojín antiescaras lumbar coxis ortopédico
+  // hemorroides") no matcheaba ningún patrón acá — "MCOU" no es "MCO" +
+  // dígitos (la "U" rompe el match) — así que tipoDePagina devolvía
+  // null y el panel no se dibujaba. 3 URLs reales del smoke de Selltrix.
+  it('"/up/MCOU…" (ficha "user product") -> "producto", nunca null', () => {
+    expect(
+      tipoDePagina(
+        "https://www.mercadolibre.com.co/coliplus-cojin-lumbar/up/MCOU3018471021?matt_tool=12345&wid=MCO1742001365"
+      )
+    ).toBe("producto");
+    expect(
+      tipoDePagina("https://www.mercadolibre.com.co/cobija-algo-especial/up/MCOU3018471022?matt_tool=12345&wid=MCO1836584643")
+    ).toBe("producto");
+    expect(
+      tipoDePagina("https://www.mercadolibre.com.co/rtafull-drenador/up/MCOU3018471023?pdp_filters=item_id%3AMCO1333873907")
+    ).toBe("producto");
+    // La URL real del bug (sin wid/pdp_filters en el extracto que dio
+    // Mateo) también tiene que reconocerse como "producto" — tipoDePagina
+    // solo mira la FORMA de la url, nunca si wid/item_id están presentes.
+    expect(
+      tipoDePagina("https://www.mercadolibre.com.co/cojin-antiescaras-lumbar-coxis-ortopedico-hemorroides/up/MCOU301800000?wid=MCO…")
+    ).toBe("producto");
+  });
+
+  it('"/up/" de otros países (site-id distinto de MCO) también da "producto"', () => {
+    expect(tipoDePagina("https://www.mercadolibre.com.ar/algun-producto/up/MLAU123456?wid=MLA987654321")).toBe("producto");
+  });
+});
+
+describe("esPaginaUserProduct / extraerWidDeUrl — issue #251 (smoke de Mateo)", () => {
+  const URL_COLIPLUS = "https://www.mercadolibre.com.co/coliplus-cojin-lumbar/up/MCOU3018471021?matt_tool=12345&wid=MCO1742001365";
+  const URL_COBIJA = "https://www.mercadolibre.com.co/cobija-algo-especial/up/MCOU3018471022?matt_tool=12345&wid=MCO1836584643";
+  // pdp_filters, nunca wid — y con el ":" codificado (%3A), la forma
+  // real que trae Mercado Libre en ese parámetro.
+  const URL_RTAFULL = "https://www.mercadolibre.com.co/rtafull-drenador/up/MCOU3018471023?pdp_filters=item_id%3AMCO1333873907&matt_tool=777";
+  const URL_SIN_WID_NI_FILTRO = "https://www.mercadolibre.com.co/cojin-antiescaras-lumbar-coxis-ortopedico-hemorroides/up/MCOU999999999";
+
+  it("esPaginaUserProduct: true para las 4 URLs /up/, false para una ficha normal", () => {
+    expect(esPaginaUserProduct(URL_COLIPLUS)).toBe(true);
+    expect(esPaginaUserProduct(URL_COBIJA)).toBe(true);
+    expect(esPaginaUserProduct(URL_RTAFULL)).toBe(true);
+    expect(esPaginaUserProduct(URL_SIN_WID_NI_FILTRO)).toBe(true);
+    expect(esPaginaUserProduct("https://articulo.mercadolibre.com.co/MCO-1234567890-reloj-_JM")).toBe(false);
+    expect(esPaginaUserProduct(null)).toBe(false);
+  });
+
+  // Caso real de referencia (smoke de Mateo): las 3 fichas reales de
+  // Selltrix. El wid es SIEMPRE el itemId real — nunca el MCOU del path.
+  it("extraerWidDeUrl: el wid real de las 3 fichas del smoke, nunca el MCOU del path", () => {
+    expect(extraerWidDeUrl(URL_COLIPLUS)).toBe("MCO1742001365");
+    expect(extraerWidDeUrl(URL_COBIJA)).toBe("MCO1836584643");
+  });
+
+  it("extraerWidDeUrl: cae a pdp_filters=item_id: cuando no hay wid= (URL-encoded, ':' como %3A)", () => {
+    expect(extraerWidDeUrl(URL_RTAFULL)).toBe("MCO1333873907");
+  });
+
+  it("extraerWidDeUrl: sin wid ni pdp_filters -> null, nunca inventa a partir del MCOU", () => {
+    expect(extraerWidDeUrl(URL_SIN_WID_NI_FILTRO)).toBeNull();
+    expect(extraerWidDeUrl(null)).toBeNull();
+  });
+
+  it("extraerWidDeUrl: nunca confunde el MCOU del path con el wid real, aunque el path venga primero en la URL", () => {
+    // El MCOU del path nunca matchea el patrón PREFIJO+dígitos sin la
+    // "U" interpuesta -- confirmado explícitamente, no solo por omisión.
+    const resultado = extraerWidDeUrl(URL_COLIPLUS);
+    expect(resultado).not.toBe("MCOU3018471021");
+    expect(resultado).not.toMatch(/U/);
+  });
+});
+
+// Issue #251 (smoke de Mateo) — pipeline completo pedido por la tarea:
+// de la URL real de /up/ al itemId (wid) a la antigüedad calibrada,
+// con la tabla REAL ya comiteada (lib/seguimiento/calibracion-aproximados.json,
+// 9 puntos de Selltrix/propia) — los 3 wid del smoke YA son puntos
+// calibrados exactos (sin interpolar), así que la antigüedad da
+// EXACTO el número de días desde su fecha calibrada hasta "ahora"
+// (2026-10-27, la misma fecha que usó Mateo al tomar los datos de
+// Selltrix) — por eso coincide con lo que mostraba esa pantalla.
+describe("pipeline real /up/ -> itemId -> antigüedad (issue #251, smoke de Mateo)", () => {
+  const ahoraMs = new Date("2026-10-27T00:00:00.000Z").getTime();
+
+  it('Coliplus (wid MCO1742001365) -> itemId real, antigüedad ≈330 días (Selltrix)', () => {
+    const url = "https://www.mercadolibre.com.co/coliplus-cojin-lumbar/up/MCOU3018471021?matt_tool=12345&wid=MCO1742001365";
+    const itemId = extraerWidDeUrl(url);
+    expect(itemId).toBe("MCO1742001365");
+    const dias = antiguedadDiasPorId(itemId, "item", ahoraMs, calibracionReal.puntos);
+    expect(dias).not.toBeNull();
+    expect(Math.abs(dias! - 330)).toBeLessThanOrEqual(3);
+  });
+
+  it('cobija (wid MCO1836584643) -> itemId real, antigüedad ≈250 días (Selltrix)', () => {
+    const url = "https://www.mercadolibre.com.co/cobija-algo-especial/up/MCOU3018471022?matt_tool=12345&wid=MCO1836584643";
+    const itemId = extraerWidDeUrl(url);
+    expect(itemId).toBe("MCO1836584643");
+    const dias = antiguedadDiasPorId(itemId, "item", ahoraMs, calibracionReal.puntos);
+    expect(dias).not.toBeNull();
+    expect(Math.abs(dias! - 250)).toBeLessThanOrEqual(3);
+  });
+
+  it('Rtafull x2 (wid MCO1333873907, vía pdp_filters) -> itemId real, antigüedad ≈1179 días (Selltrix)', () => {
+    const url = "https://www.mercadolibre.com.co/rtafull-drenador/up/MCOU3018471023?pdp_filters=item_id%3AMCO1333873907&matt_tool=777";
+    const itemId = extraerWidDeUrl(url);
+    expect(itemId).toBe("MCO1333873907");
+    const dias = antiguedadDiasPorId(itemId, "item", ahoraMs, calibracionReal.puntos);
+    expect(dias).not.toBeNull();
+    expect(Math.abs(dias! - 1179)).toBeLessThanOrEqual(3);
+  });
+
+  it("sin wid ni pdp_filters -> itemId null, nunca interpola a partir del MCOU (el panel queda con 'Sin dato')", () => {
+    const url = "https://www.mercadolibre.com.co/cojin-antiescaras-lumbar-coxis-ortopedico-hemorroides/up/MCOU999999999";
+    expect(extraerWidDeUrl(url)).toBeNull();
   });
 });
 
