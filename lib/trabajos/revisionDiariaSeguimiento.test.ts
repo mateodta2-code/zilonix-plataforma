@@ -6,8 +6,29 @@ import { db } from "@/db/index";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { NOMBRE_PENDIENTE_PRIMERA_REVISION } from "@/lib/seguimiento/seguimientos";
+import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
+import { NOMBRE_PENDIENTE_PRIMERA_REVISION, guardarDatoDePaginaSeguimiento } from "@/lib/seguimiento/seguimientos";
+import { obtenerFechaCreacion, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
+import { antiguedadDias, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
 import { obtenerSeguimientosPendientesDeHoy, revisarAhoraUnSeguimiento, revisarSeguimientosDelDia } from "./revisionDiariaSeguimiento";
+
+// Issue #251 (revisión de Pablo) — seguimiento_fotos.fecha y el
+// filtro de "pendiente" (ultima_revision_ts) ahora se miden en
+// medianoche de BOGOTÁ, no de UTC — estos dos helpers reemplazan los
+// `new Date(); x.setUTCHours(0,0,0,0)` sueltos que había en todo este
+// archivo, para que los fixtures de las pruebas coincidan dígito a
+// dígito con lo que la producción de verdad calcula. Corrección de
+// Pablo (segunda revisión) — `fechaDiaBogota`, no `rangoDiaBogota().inicio`:
+// ese da el instante real de la medianoche de Bogotá (05:00 UTC), pero
+// `seguimiento_fotos.fecha` guarda el día calendario como medianoche
+// UTC (00:00Z) — con 05:00Z estos fixtures ya no coincidían con lo que
+// de verdad guarda producción.
+function hoyBogota(): Date {
+  return fechaDiaBogota(new Date());
+}
+function diasAtras(dias: number): Date {
+  return new Date(hoyBogota().getTime() - dias * 24 * 60 * 60 * 1000);
+}
 
 // Issue #175 — prueba real contra Postgres (mismo criterio que
 // lib/ml/trabajador.test.ts): dbTrabajadorSeguimiento (DATABASE_URL_SEGUIMIENTO)
@@ -49,8 +70,7 @@ function nuevoMlId() {
 // todo lo demás pendiente — deja el lote con solo lo que la suite
 // insertó.
 async function aislarLotePara(seguimientoId: string) {
-  const hoy = new Date();
-  hoy.setUTCHours(0, 0, 0, 0);
+  const hoy = hoyBogota();
   await dbTrabajadorSeguimiento
     .update(seguimientosMl)
     .set({ ultimaRevisionTs: new Date() })
@@ -111,9 +131,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     // precio 100, vendidos 10 — la de "hoy" (simulada con fetch abajo)
     // trae precio 80 y vendidos 15, para disparar precio_bajo y
     // vendio_unidades al compararlas.
-    const ayer = new Date();
-    ayer.setUTCHours(0, 0, 0, 0);
-    ayer.setUTCDate(ayer.getUTCDate() - 1);
+    const ayer = diasAtras(1);
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(seguimientoFotos).values({
         empresaId,
@@ -162,8 +180,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
     expect(resultado.procesados).toBeGreaterThanOrEqual(1);
     expect(resultado.fallidos).toBeLessThan(resultado.activos);
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const [fotoHoy] = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
     );
@@ -199,8 +216,7 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
 
       await revisarSeguimientosDelDia();
 
-      const hoy = new Date();
-      hoy.setUTCHours(0, 0, 0, 0);
+      const hoy = hoyBogota();
       const fotosDeHoy = await dbComoEmpresa(empresaId, (tx) =>
         tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
       );
@@ -211,15 +227,17 @@ describe("revisarSeguimientosDelDia (issue #175)", () => {
   );
 });
 
-// Issue real, encontrado en CI (segunda vuelta del fix de orden/filtro):
-// si un seguimiento fallido (ej. empresa sin cuenta ML conectada) NUNCA
-// marca ultima_revision_ts, el orden ASC NULLS FIRST lo deja al frente
-// del lote para siempre — ahoga los 50 cupos en cada corrida siguiente
-// (en CI, con varios seguimientos viejos sin cuenta, esto hacía
-// timeout: cada uno paga PAUSA_ENTRE_SEGUIMIENTOS_MS). La corrección
-// real está en revisionDiariaSeguimiento.ts: también marca
-// ultima_revision_ts en el catch.
-describe("revisarSeguimientosDelDia — un fallido no ahoga el lote para siempre (issue #175)", () => {
+// Issue #175 — si un seguimiento fallido (ej. empresa sin cuenta ML
+// conectada) NUNCA marca ultima_revision_ts, el orden ASC NULLS FIRST
+// lo deja al frente del lote para siempre — ahoga los 50 cupos en
+// cada corrida siguiente. Issue #250, punto C — una primera versión
+// de este punto quitó esa marca pensando que hacía falta para
+// reintentar más seguido; Pablo corrigió eso en la revisión del PR
+// #253: con la ventana de 6h (punto E), SÍ marcar ultima_revision_ts
+// ya significa "reintentar en la próxima ventana" (dos veces al día),
+// nunca "esperar hasta mañana" como antes de ese punto — así que la
+// protección real de #175 se mantiene, sin perder el reintento rápido.
+describe("revisarSeguimientosDelDia — un fallido SÍ marca ultima_revision_ts, nunca ahoga el lote (issue #175 + #250 punto C)", () => {
   let empresaId: string;
   let seguimientoId: string;
 
@@ -248,7 +266,7 @@ describe("revisarSeguimientosDelDia — un fallido no ahoga el lote para siempre
     await aislarLotePara(seguimientoId);
   });
 
-  it("cuenta como fallido Y queda con ultima_revision_ts no null, y no vuelve a aparecer en el lote de hoy", async () => {
+  it("cuenta como fallido Y queda con ultima_revision_ts no null, y no vuelve a aparecer en el lote de hoy (dentro de las 6h)", async () => {
     // Mismo motivo que en las pruebas de arriba: aislar de nuevo acá
     // (dejando SOLO este seguimiento pendiente), lo más cerca posible
     // de la llamada real, por la carrera con otras suites en paralelo.
@@ -266,22 +284,96 @@ describe("revisarSeguimientosDelDia — un fallido no ahoga el lote para siempre
   });
 });
 
-// Issue #196 — "saltado" es un resultado DISTINTO de "procesado": el
-// índice único seguimiento_id+fecha bloqueó el insert porque ya había
-// una foto de hoy (ej. una carrera entre dos corridas del cron a la
-// vez), nunca se escribió nada nuevo, pero tampoco fue un error real.
-describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
+// Issue #250, punto C — "agregar recurso_ml, ml_id_externo y status
+// HTTP al log (nunca el token)": antes el console.error solo traía el
+// id del seguimiento y el mensaje — sin saber QUÉ recurso de Mercado
+// Libre falló ni con qué status real, cada fallo había que
+// diagnosticarlo a ciegas.
+describe("revisarSeguimientosDelDia — el log de un fallido trae recurso_ml/ml_id_externo/status, nunca el token (issue #250, punto C)", () => {
   let empresaId: string;
   let seguimientoId: string;
+  let itemId: string;
 
   beforeAll(async () => {
-    const creado = await crearEmpresaConUsuario("SALTADO");
+    const creado = await crearEmpresaConUsuario("LOG-ENRIQUECIDO");
     empresaId = creado.empresaId;
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(cuentasMl).values({
         empresaId,
         cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
-        nickname: "VENDEDOR_SALTADO",
+        nickname: "VENDEDOR_LOG",
+        accessTokenCifrado: cifrarToken("access-secreto-nunca-en-el-log"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000), // vigente — no debería intentar renovar
+      })
+    );
+    itemId = nuevoMlId();
+    const [seguimiento] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno: itemId,
+          nombre: "Producto con 401 real",
+          linkOriginal: "https://x",
+          creadoPor: creado.usuarioId,
+        })
+        .returning({ id: seguimientosMl.id })
+    );
+    seguimientoId = seguimiento.id;
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("un 401 real de Mercado Libre (token ya no válido) queda en el log con recurso_ml, ml_id_externo y HTTP 401 — nunca el token", async () => {
+    await aislarLotePara(seguimientoId);
+    // obtenerFotoItemMl (lib/ml/cliente.ts) NO tolera 401 — propaga
+    // MlNoAutorizadoError tal cual, mismo criterio que el resto del
+    // archivo (401 siempre significa "hay que reconectar la cuenta").
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const resultado = await revisarSeguimientosDelDia();
+    expect(resultado.fallidos).toBeGreaterThanOrEqual(1);
+
+    const lineaDeEsteSeguimiento = errorSpy.mock.calls.find(([linea]) => typeof linea === "string" && linea.includes(seguimientoId));
+    expect(lineaDeEsteSeguimiento).toBeDefined();
+    const [linea] = lineaDeEsteSeguimiento as [string];
+    expect(linea).toContain("recurso_ml=item");
+    expect(linea).toContain(`ml_id_externo=${itemId}`);
+    expect(linea).toContain("HTTP 401");
+    expect(linea).not.toContain("access-secreto-nunca-en-el-log");
+
+    errorSpy.mockRestore();
+  });
+});
+
+// Issue #196 (histórico) + corrección de Pablo al punto 3 del #250
+// (revisión del PR #253) — antes, cuando el lote alcanzaba un
+// seguimiento que ya tenía foto de hoy (ronda de la tarde sobre uno
+// que la madrugada ya procesó, o una corrida manual repetida),
+// llamaba a Mercado Libre igual y descartaba el resultado con
+// onConflictDoNothing ("saltado") — una llamada real gastada para
+// nada. Ahora ACTUALIZA esa fila con lo más reciente de la API
+// (precio, estado, etc.) y genera alertas contra la foto de ayer,
+// SIN tocar nunca inventarioDisponible/vendidos/publicaciones — las
+// mismas columnas que issue #251 reusa para lo que lee la extensión
+// (esa rama no está mergeada acá todavía, pero esta ronda tiene que
+// ser segura para cuando lo esté).
+describe("revisarSeguimientosDelDia — ya hay foto de hoy: actualiza los campos de API, nunca duplica ni toca los de la extensión (issue #196 + corrección de Pablo al #250 punto 3)", () => {
+  let empresaId: string;
+  let seguimientoId: string;
+
+  beforeAll(async () => {
+    const creado = await crearEmpresaConUsuario("RONDA-TARDE");
+    empresaId = creado.empresaId;
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId,
+        cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+        nickname: "VENDEDOR_RONDA_TARDE",
         accessTokenCifrado: cifrarToken("access-vigente"),
         refreshTokenCifrado: cifrarToken("refresh"),
         tokenExpiraTs: new Date(Date.now() + 3600_000),
@@ -304,39 +396,48 @@ describe("revisarSeguimientosDelDia — saltados (issue #196)", () => {
     );
     seguimientoId = seguimiento.id;
 
-    // A propósito: una foto de HOY insertada directo (nunca a través
-    // del trabajo) — simula la carrera real que onConflictDoNothing
-    // cubre. ultima_revision_ts queda en null a propósito, para que
-    // el seguimiento SÍ entre al lote (si ya estuviera marcado, el
-    // filtro de obtenerSeguimientosPendientesDeHoy lo excluiría antes
-    // de llegar a revisarUnSeguimiento).
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const ayer = diasAtras(1);
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: ayer, precio: "100", estado: "active", vendidos: 3 }));
+
+    // A propósito: una foto de HOY insertada directo (simula lo que la
+    // madrugada ya guardó, nunca a través del trabajo) — con
+    // inventarioDisponible/vendidos puestos a mano, distintos de lo
+    // que traería el mock de abajo, para confirmar que la ronda de la
+    // tarde NUNCA los toca (son los campos que reusa la extensión,
+    // #251). ultima_revision_ts del seguimiento queda en null a
+    // propósito, para que SÍ entre al lote (si ya estuviera marcado,
+    // el filtro de obtenerSeguimientosPendientesDeHoy lo excluiría
+    // antes de llegar a revisarUnSeguimiento).
+    const hoy = hoyBogota();
     await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: hoy, precio: "100", estado: "active" })
+      tx.insert(seguimientoFotos).values({ empresaId, seguimientoId, fecha: hoy, precio: "100", estado: "active", inventarioDisponible: 7, vendidos: 3 })
     );
   });
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("el lote lo cuenta como saltado (no procesado), le marca ultima_revision_ts, y nunca duplica/sobreescribe la foto de hoy", async () => {
+  it("actualiza precio con lo más reciente de la API, genera alerta contra ayer, nunca duplica la fila ni toca inventarioDisponible/vendidos", async () => {
     await aislarLotePara(seguimientoId);
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" }))); // si no saltara, este precio lo delataría
+    // Precio bajó de 100 (ayer) a 50 — tiene que generar precio_bajo
+    // comparando la fila de HOY ya actualizada contra la de ayer.
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 50, status: "active" })));
 
     const resultado = await revisarSeguimientosDelDia();
 
-    expect(resultado.saltados).toBeGreaterThanOrEqual(1);
+    expect(resultado.procesados).toBeGreaterThanOrEqual(1);
+    expect(resultado.alertasCreadas).toBeGreaterThanOrEqual(1);
 
-    const [actualizado] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimientoId)));
-    expect(actualizado.ultimaRevisionTs).not.toBeNull();
-
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const fotosDeHoy = await dbComoEmpresa(empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimientoId), eq(seguimientoFotos.fecha, hoy)))
     );
-    expect(fotosDeHoy).toHaveLength(1);
-    expect(Number(fotosDeHoy[0].precio)).toBe(100); // la que ya estaba, nunca 999
+    expect(fotosDeHoy).toHaveLength(1); // nunca duplica la fila
+    expect(Number(fotosDeHoy[0].precio)).toBe(50); // actualizado con lo más reciente de la API
+    expect(fotosDeHoy[0].inventarioDisponible).toBe(7); // nunca tocado — campo que reusa la extensión (#251)
+    expect(fotosDeHoy[0].vendidos).toBe(3); // nunca tocado — campo que reusa la extensión (#251)
+
+    const alertas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimientoId)));
+    expect(alertas.some((a) => a.tipo === "precio_bajo")).toBe(true);
   });
 
   it("logea UN resumen de lote con los conteos reales (procesados/saltados/con error), sin ids ni tokens", async () => {
@@ -472,7 +573,12 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     return seguimiento;
   }
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    // Los casos con reloj fijo falsean solo `Date`. Si un expect falla
+    // antes del `finally`, este afterEach igual devuelve el reloj real.
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it("crea la primera foto al instante (nunca espera al cron) y marca ultima_revision_ts; sin alertas, nada con qué comparar todavía", async () => {
     const seguimiento = await crearSeguimientoConCuenta("PRIMERA-FOTO");
@@ -482,8 +588,7 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
 
     expect(resultado).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const [fotoHoy] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
     );
@@ -495,25 +600,345 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     expect(actualizado.ultimaRevisionTs).not.toBeNull();
   });
 
-  it("si ya hay una foto de hoy (ej. el cron ya corrió), queda saltado — nunca duplica ni sobreescribe", async () => {
-    const seguimiento = await crearSeguimientoConCuenta("YA-REVISADO-HOY");
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
-    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
-      tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: hoy, precio: "50", estado: "active" })
+  // Issue #252 (smoke de staging, punto 3) — MCO452014269 se quedó en
+  // el placeholder para siempre porque `recurso_ml` se guardó mal
+  // (ej. "item") ANTES de la confirmación del #250: `/items/{id}`
+  // daba 404 para siempre, aunque el recurso real fuera "product", y
+  // `resolverNombre` nunca podía resolver nada sin importar cuántas
+  // veces corriera "Revisar ahora". Ahora, mientras el nombre siga en
+  // el placeholder, se vuelve a confirmar el tipo real contra ML antes
+  // de reintentar el nombre, y se corrige `recurso_ml` en la base si
+  // Mercado Libre confirma uno distinto.
+  it("recurso_ml guardado mal (item en vez de product) con nombre pendiente: lo corrige solo y resuelve el nombre", async () => {
+    const creado = await crearSeguimientoConCuenta("RECURSO-MAL-GUARDADO");
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx.update(seguimientosMl).set({ nombre: NOMBRE_PENDIENTE_PRIMERA_REVISION }).where(eq(seguimientosMl.id, creado.id)).returning()
     );
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" }))); // si duplicara, este precio lo delataría
+    expect(seguimiento.recursoMl).toBe("item"); // a propósito, el valor mal guardado que hay que corregir
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/items/") && u.includes("attributes=id") && !u.includes("price")) {
+          return respuestaJson({}, 404); // confirmarRecursoProductoMl: no es un item real
+        }
+        if (u.includes("/products/") && u.includes("attributes=id")) {
+          return respuestaJson({ id: seguimiento.mlIdExterno }); // confirmarRecursoProductoMl: SÍ es product
+        }
+        if (u.includes("/products/") && u.endsWith("/items")) {
+          return respuestaJson({ results: [] }); // leerFotoSeguimiento con el recurso YA corregido: sin ofertas
+        }
+        if (u.includes("/products/")) {
+          return respuestaJson({ name: "Nombre real de catálogo" }); // resolverNombre -> obtenerProducto
+        }
+        throw new Error(`URL inesperada: ${u}`);
+      })
+    );
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultado.ok).toBe(true);
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.recursoMl).toBe("product"); // corregido solo, nunca se quedó en "item"
+    expect(actualizado.nombre).toBe("Nombre real de catálogo"); // ya no el placeholder
+  });
+
+  // Issue #252 (revisión de Pablo, punto 4) — bug real: si la extensión
+  // lee la página ANTES de que corra el cron, guardarDatoDePaginaSeguimiento
+  // (lib/seguimiento/seguimientos.ts) ya reemplaza el placeholder por
+  // un nombre de respaldo (con el sufijo "(aproximado)") — con la
+  // condición VIEJA (gatear la corrección de recurso_ml por
+  // `nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION`), eso bastaba para
+  // que el cron NUNCA volviera a intentar corregir `recurso_ml`, aunque
+  // la API jamás hubiera confirmado nada real — exactamente el caso de
+  // MCO452014269. Simula ese orden exacto: primero el estado que deja
+  // la extensión (nombre con el sufijo, una foto SOLO con inventario,
+  // sin ningún campo de la API), después el cron.
+  it('orden "primero la extensión, después el cron": un nombre de respaldo (ya no el placeholder) nunca bloquea la corrección de recurso_ml, porque depende de la API, no del nombre', async () => {
+    const creado = await crearSeguimientoConCuenta("EXTENSION-ANTES-DEL-CRON");
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx.update(seguimientosMl).set({ nombre: "Cargador HP 65W original (aproximado)" }).where(eq(seguimientosMl.id, creado.id)).returning()
+    );
+    expect(seguimiento.recursoMl).toBe("item"); // a propósito, el valor mal guardado que hay que corregir
+
+    // La extensión ya guardó inventario hoy — ningún campo de la API
+    // (precio/estado/enCatalogo/ganaBotonCompra) tiene nada todavía,
+    // porque /items/{id} 404 siempre con el recurso mal guardado.
+    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: hoyBogota(), inventarioDisponible: 10 })
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/items/") && u.includes("attributes=id") && !u.includes("price")) {
+          return respuestaJson({}, 404); // confirmarRecursoProductoMl: no es un item real
+        }
+        if (u.includes("/products/") && u.includes("attributes=id")) {
+          return respuestaJson({ id: seguimiento.mlIdExterno }); // confirmarRecursoProductoMl: SÍ es product
+        }
+        if (u.includes("/products/") && u.endsWith("/items")) {
+          return respuestaJson({ results: [] }); // leerFotoSeguimiento con el recurso YA corregido: sin ofertas
+        }
+        if (u.includes("/products/")) {
+          return respuestaJson({ name: "Nombre real de catálogo" }); // resolverNombre -> obtenerProducto
+        }
+        throw new Error(`URL inesperada: ${u}`);
+      })
+    );
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultado.ok).toBe(true);
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.recursoMl).toBe("product"); // corregido solo, aunque el nombre ya NO fuera el placeholder
+    expect(actualizado.nombre).toBe("Nombre real de catálogo"); // la API reemplaza el respaldo de la extensión apenas confirma uno real
+
+    const [fotoDeHoy] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoyBogota())))
+    );
+    expect(fotoDeHoy.inventarioDisponible).toBe(10); // el inventario de la extensión nunca se tocó
+  });
+
+  // Issue #262 (revisión de Pablo, punto BLOQUEANTE) — bug real:
+  // resolverNombreYFechaCatalogo solo se llamaba DENTRO de
+  // `nombreEsAproximado(...)` — un catálogo que YA tiene nombre real
+  // (la mayoría, ej. MCO64541261 "Rtafull", el Colchón Relax) nunca
+  // disparaba esa llamada, así que `fechaCreacionCatalogo` nunca se
+  // completaba para ninguno de ellos. Ahora se llama también mientras
+  // ninguna foto tenga `fechaCreacionCatalogo` todavía, sin importar
+  // el nombre — y el nombre real nunca se pisa, porque la
+  // actualización del nombre sigue gateada aparte.
+  it("catálogo con nombre REAL (no aproximado) y sin fechaCreacionCatalogo: la recibe en la siguiente revisión, sin tocar el nombre", async () => {
+    const creado = await crearSeguimientoConCuenta("CATALOGO-SIN-FECHA");
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx
+        .update(seguimientosMl)
+        .set({ recursoMl: "product", nombre: "Nombre real ya confirmado" })
+        .where(eq(seguimientosMl.id, creado.id))
+        .returning()
+    );
+
+    // Una foto de ayer con la API ya confirmada (precio/enCatalogo no
+    // nulos) para que huboAlgunaLecturaDeApiConfirmada sea true y el
+    // bloque de arriba NUNCA vuelva a probar confirmarRecursoProductoMl
+    // (no es lo que esta prueba quiere ejercitar) — sin
+    // fechaCreacionCatalogo todavía en `publicaciones`.
+    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({
+        empresaId: seguimiento.empresaId,
+        seguimientoId: seguimiento.id,
+        fecha: diasAtras(1),
+        precio: "100",
+        enCatalogo: true,
+      })
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.endsWith("/items")) {
+          return respuestaJson({ results: [] }); // obtenerOfertasProducto: sin ofertas ganadoras
+        }
+        if (u.includes("/products/")) {
+          // obtenerProducto (resolverNombreYFechaCatalogo) — issue #262,
+          // punto 2: SIN `?attributes=...`, la respuesta completa ya
+          // trae date_created.
+          return respuestaJson({ name: "Nombre real ya confirmado", date_created: "2024-01-01T00:00:00.000Z" });
+        }
+        throw new Error(`URL inesperada: ${u}`);
+      })
+    );
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultado.ok).toBe(true);
+
+    const hoy = hoyBogota();
+    const [fotoDeHoy] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+    );
+    expect((fotoDeHoy.publicaciones as { fechaCreacionCatalogo?: string } | null)?.fechaCreacionCatalogo).toBe("2024-01-01T00:00:00.000Z");
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.nombre).toBe("Nombre real ya confirmado"); // nunca se pisa un nombre real ya confirmado
+  });
+
+  it("catálogo que YA tiene fechaCreacionCatalogo confirmada: nunca vuelve a llamar a /products/{id} por ella (una sola vez por catálogo, nunca diaria)", async () => {
+    const creado = await crearSeguimientoConCuenta("CATALOGO-CON-FECHA");
+    const [seguimiento] = await dbComoEmpresa(creado.empresaId, (tx) =>
+      tx
+        .update(seguimientosMl)
+        .set({ recursoMl: "product", nombre: "Nombre real ya confirmado" })
+        .where(eq(seguimientosMl.id, creado.id))
+        .returning()
+    );
+
+    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({
+        empresaId: seguimiento.empresaId,
+        seguimientoId: seguimiento.id,
+        fecha: diasAtras(1),
+        precio: "100",
+        enCatalogo: true,
+        publicaciones: { fechaCreacionCatalogo: "2023-05-05T00:00:00.000Z" },
+      })
+    );
+
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.endsWith("/items")) {
+        return respuestaJson({ results: [] }); // obtenerOfertasProducto: sin ofertas ganadoras
+      }
+      throw new Error(`URL inesperada (no debería llamar a /products/{id} por la fecha, ya la tiene): ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultado.ok).toBe(true);
+
+    // Ninguna llamada pidió /products/{id} (sin /items al final): la
+    // fecha ya estaba confirmada, así que resolverNombreYFechaCatalogo
+    // nunca se invocó.
+    const llamadasAProducto = fetchMock.mock.calls.filter(([url]) => !String(url).endsWith("/items"));
+    expect(llamadasAProducto).toHaveLength(0);
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.nombre).toBe("Nombre real ya confirmado"); // nunca tocado
+  });
+
+  // Corrección de Pablo (revisión del PR #253, sobre 7aa93f2) — "Revisar
+  // ahora" comparte revisarUnSeguimiento con la ronda de la tarde: si ya
+  // hay foto de hoy (ej. el cron ya corrió, o un clic repetido en
+  // "Revisar ahora"), ya NO queda "saltado" — actualiza esa fila con lo
+  // más reciente de la API y cuenta como procesado (saltado: false).
+  // "saltado: true" queda solo para la carrera real (rarísima) entre dos
+  // corridas a la vez, ver el comentario de ResultadoUnSeguimiento en
+  // revisionDiariaSeguimiento.ts.
+  it("si ya hay una foto de hoy (ej. el cron ya corrió), actualiza los campos de API (saltado:false) — nunca duplica ni toca los campos de la extensión", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("YA-REVISADO-HOY");
+    const hoy = hoyBogota();
+    await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx.insert(seguimientoFotos).values({
+        empresaId: seguimiento.empresaId,
+        seguimientoId: seguimiento.id,
+        fecha: hoy,
+        precio: "50",
+        estado: "active",
+        inventarioDisponible: 9,
+        vendidos: 4,
+      })
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 999, status: "active" })));
 
     const resultado = await revisarAhoraUnSeguimiento(seguimiento);
 
-    expect(resultado).toEqual({ ok: true, saltado: true, alertasCreadas: 0 });
+    expect(resultado).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
 
     const fotosDeHoy = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
     );
-    expect(fotosDeHoy).toHaveLength(1);
-    expect(Number(fotosDeHoy[0].precio)).toBe(50); // la que ya estaba, nunca 999
+    expect(fotosDeHoy).toHaveLength(1); // nunca duplica
+    expect(Number(fotosDeHoy[0].precio)).toBe(999); // actualizado con lo más reciente de la API
+    expect(fotosDeHoy[0].inventarioDisponible).toBe(9); // nunca tocado — campo de la extensión (#251)
+    expect(fotosDeHoy[0].vendidos).toBe(4); // nunca tocado — campo de la extensión (#251)
+
+    const [actualizado] = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientosMl).where(eq(seguimientosMl.id, seguimiento.id)));
+    expect(actualizado.ultimaRevisionTs).not.toBeNull();
   });
+
+  // Punto 2 de la revisión de Pablo (PR #253, sobre 7aa93f2) — "sin
+  // duplicar alertas": la ronda de la tarde (simulada acá con una
+  // segunda llamada a "Revisar ahora" el mismo día) vuelve a comparar
+  // la foto de hoy ya actualizada contra la MISMA foto de ayer — si
+  // la baja de precio sigue ahí, es la MISMA alerta del mismo día,
+  // nunca una segunda.
+  it("mañana más tarde con la misma baja de precio: una sola alerta precio_bajo, nunca duplicada", async () => {
+    const seguimiento = await crearSeguimientoConCuenta("SIN-ALERTA-DUPLICADA");
+    // Bug real (PR #258, CI corrido ~7:30pm Bogotá): `ayer` armado con
+    // setUTCHours/setUTCDate (medianoche UTC) nunca es lo mismo que
+    // "ayer en Bogotá" entre las 19:00 y las 24:00 locales — en ese
+    // rango horario, "hoy 00:00 UTC" todavía no llegó (son las 05:00
+    // UTC del día siguiente en Bogotá), así que restarle un día daba
+    // la fecha de HOY en Bogotá, no la de ayer. El código real usa
+    // fechaDeHoy() (lib/trabajos/revisionDiariaSeguimiento.ts), que es
+    // fechaDiaBogota() — el fixture tiene que coincidir dígito a
+    // dígito con esa misma cuenta, nunca una propia en UTC.
+    const ayer = diasAtras(1);
+    await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: ayer, precio: "100", estado: "active" }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 80, status: "active" }))); // baja real de 100 a 80
+
+    const primera = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(primera).toEqual({ ok: true, saltado: false, alertasCreadas: 1 });
+
+    // Segunda revisión el MISMO día (misma baja contra la misma foto
+    // de ayer) — ya hay foto de hoy, así que toma el camino de
+    // actualizar (ver el test de arriba), y vuelve a comparar contra
+    // la foto de ayer: la misma alerta de precio_bajo, nunca una nueva.
+    const segunda = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(segunda).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
+
+    const alertas = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimiento.id)));
+    expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
+  });
+
+  // Regresión del bug del PR #258 (CI ~19:30 Bogotá). El caso de
+  // arriba ya usa `diasAtras(1)` con el reloj real; estas tres horas
+  // fijan `Date` para que el corte de las 19:00 se pruebe también
+  // cuando el CI corre de día. 10:00 cae del mismo lado del calendario
+  // UTC que Bogotá; 19:30 y 23:59 ya son el día siguiente en UTC.
+  // Solo se falsea `Date` — si se falsea `setTimeout`, el driver de
+  // Postgres se cuelga. El instante se arma ANTES de congelar el
+  // reloj, sumando la hora a la medianoche real de Bogotá
+  // (`rangoDiaBogota().inicio`, 05:00 UTC), nunca a `fechaDiaBogota()`
+  // (eso es el marcador 00:00Z de la columna, no un instante).
+  //
+  // La cuenta se crea DESPUÉS de fijar el reloj (CI del PR #263):
+  // `crearSeguimientoConCuenta` pone `tokenExpiraTs` en `Date.now()+1h`
+  // y `obtenerAccessTokenVigente` lo compara contra el mismo
+  // `Date.now()`. Si la cuenta naciera con el reloj real y después el
+  // reloj saltara varias horas, el token se vería vencido y el test
+  // fallaría renovando la conexión, no por la alerta.
+  function instanteDeHoyEnBogota(hora: number, minuto: number): Date {
+    const medianocheBogotaReal = rangoDiaBogota(new Date()).inicio;
+    return new Date(medianocheBogotaReal.getTime() + (hora * 60 + minuto) * 60 * 1000);
+  }
+
+  it.each([
+    ["10:00", 10, 0],
+    ["19:30", 19, 30],
+    ["23:59", 23, 59],
+  ] as const)(
+    "a las %s de Bogotá, dos revisiones el mismo día con la misma baja de precio: una sola alerta precio_bajo, nunca duplicada",
+    async (etiqueta, hora, minuto) => {
+      const horaSimulada = instanteDeHoyEnBogota(hora, minuto);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(horaSimulada);
+        const seguimiento = await crearSeguimientoConCuenta(`AYER-BOGOTA-${etiqueta.replace(":", "")}`);
+        const ayer = diasAtras(1);
+        await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+          tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: ayer, precio: "100", estado: "active" })
+        );
+
+        vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 80, status: "active" }))); // baja real de 100 a 80
+
+        const primera = await revisarAhoraUnSeguimiento(seguimiento);
+        expect(primera).toEqual({ ok: true, saltado: false, alertasCreadas: 1 });
+
+        const segunda = await revisarAhoraUnSeguimiento(seguimiento);
+        expect(segunda).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
+
+        const alertas = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimiento.id)));
+        expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it("empresa sin cuenta ML conectada: {ok:false,error} claro, y NUNCA marca ultima_revision_ts (para que el cron de hoy mismo lo reintente)", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario("SIN-CUENTA-INMEDIATA");
@@ -570,34 +995,163 @@ describe("obtenerSeguimientosPendientesDeHoy — orden y filtro del lote (issue 
     expect(pendientes.some((p) => p.id === eliminado.id)).toBe(false);
   });
 
-  it("excluye el ya revisado HOY, incluye los de ayer/hace 2 días/nunca, y ordena ASC NULLS FIRST", async () => {
+  it("excluye el revisado hace menos de 6 horas, incluye los de hace más de 6h/1 día/nunca, y ordena ASC NULLS FIRST", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario("LOTE-ORDEN");
     const base = { empresaId, tipo: "producto" as const, recursoMl: "item" as const, linkOriginal: "https://x", creadoPor: usuarioId };
 
-    const dosDiasAtras = new Date();
-    dosDiasAtras.setUTCHours(0, 0, 0, 0);
-    dosDiasAtras.setUTCDate(dosDiasAtras.getUTCDate() - 2);
+    // Issue #175 (filtro original) — `ultimaRevisionTs` es un instante
+    // real (timestamptz), nunca una fecha-calendario bucketizada como
+    // seguimiento_fotos.fecha — comparado contra "ahora menos N horas"
+    // (limiteRevisionReciente()), no hace falta truncar a medianoche
+    // de Bogotá para estos valores.
     const unDiaAtras = new Date();
-    unDiaAtras.setUTCHours(0, 0, 0, 0);
     unDiaAtras.setUTCDate(unDiaAtras.getUTCDate() - 1);
+    const hace8Horas = new Date();
+    hace8Horas.setUTCHours(hace8Horas.getUTCHours() - 8);
+    const hace3Horas = new Date();
+    hace3Horas.setUTCHours(hace3Horas.getUTCHours() - 3);
 
     const [nuncaRevisado] = await dbComoEmpresa(empresaId, (tx) => tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Nunca" }).returning());
-    const [revisadoHaceDosDias] = await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hace 2 días", ultimaRevisionTs: dosDiasAtras }).returning()
-    );
     const [revisadoAyer] = await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Ayer", ultimaRevisionTs: unDiaAtras }).returning()
+      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hace 1 día", ultimaRevisionTs: unDiaAtras }).returning()
     );
-    const [revisadoHoy] = await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hoy", ultimaRevisionTs: new Date() }).returning()
+    // Issue #250, punto E — regresión directa: "hace 8 horas" puede
+    // ser el MISMO día calendario que "ahora" (ej. revisado a la 1am,
+    // ahora son las 9am) — antes del fix, el filtro por fecha
+    // calendario lo hubiera excluido igual que el de "hoy", nunca
+    // llegaba a la segunda ventana de la tarde.
+    const [revisadoHace8Horas] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hace 8 horas", ultimaRevisionTs: hace8Horas }).returning()
+    );
+    // "Hace 3 horas" siempre dentro de la ventana mínima de 6 horas —
+    // tiene que seguir excluido, sea el mismo día calendario o no.
+    const [revisadoHace3Horas] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(seguimientosMl).values({ ...base, mlIdExterno: nuevoMlId(), nombre: "Hace 3 horas", ultimaRevisionTs: hace3Horas }).returning()
     );
 
     const pendientes = await obtenerSeguimientosPendientesDeHoy();
     const idsDeEstaEmpresa = pendientes.filter((p) => p.empresaId === empresaId).map((p) => p.id);
 
-    // El de "hoy" nunca aparece; el resto, del que hace más tiempo que
-    // no se revisa (o nunca) al más reciente.
-    expect(idsDeEstaEmpresa).toEqual([nuncaRevisado.id, revisadoHaceDosDias.id, revisadoAyer.id]);
-    expect(idsDeEstaEmpresa).not.toContain(revisadoHoy.id);
+    // El de "hace 3 horas" nunca aparece (dentro de la ventana mínima
+    // de 6h); el resto, del que hace más tiempo que no se revisa (o
+    // nunca) al más reciente.
+    expect(idsDeEstaEmpresa).toEqual([nuncaRevisado.id, revisadoAyer.id, revisadoHace8Horas.id]);
+    expect(idsDeEstaEmpresa).not.toContain(revisadoHace3Horas.id);
+  });
+});
+
+// Issue #251 ("Seguimiento muestra aproximados como Selltrix") — test
+// de integración del flujo completo, contra Postgres real: la
+// extensión guarda el piso "+N vendidos" (guardarDatoDePaginaSeguimiento,
+// lib/seguimiento/seguimientos.ts), DESPUÉS el cron confirma precio/
+// esFull/date_created por la API (revisarAhoraUnSeguimiento) — los dos
+// escritores tienen que coexistir en la MISMA fila de hoy, sin que
+// ninguno pise al otro (issue #252's `||` para vendidosAproximado/
+// precioAproximado de la extensión, y el nuevo merge de este issue
+// para fechaCreacion del cron) — y recién con las dos escrituras
+// adentro, los 4 cálculos de lib/seguimiento/aproximados.ts (los
+// mismos que usa la UI) dan un resultado real, nunca null.
+describe("Flujo completo de aproximados — extensión + cron + UI (issue #251)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("extensión guarda +N vendidos, cron guarda precio/esFull/date_created: la UI calcula los 4 aproximados con datos reales", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario("FLUJO-APROXIMADOS");
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId,
+        cuentaIdExterna: `${Date.now()}${Math.floor(Math.random() * 10_000)}`,
+        nickname: "VENDEDOR_FLUJO_APROXIMADOS",
+        accessTokenCifrado: cifrarToken("access-vigente"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
+    const mlIdExterno = nuevoMlId();
+    const [seguimiento] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(seguimientosMl)
+        .values({
+          empresaId,
+          tipo: "producto",
+          recursoMl: "item",
+          mlIdExterno,
+          nombre: "Producto de prueba",
+          linkOriginal: "https://x",
+          esCompetidor: true,
+          creadoPor: usuarioId,
+        })
+        .returning()
+    );
+
+    // 1. La extensión lee la ficha del competidor y guarda el piso
+    // "+100 vendidos" (nunca el exacto — Mercado Libre no lo deja ver
+    // para un competidor) — mismo caso de referencia que
+    // lib/seguimiento/aproximados.test.ts ("+100 vendidos" Full -> 220).
+    await guardarDatoDePaginaSeguimiento(empresaId, {
+      tipoSeguimiento: "producto",
+      mlIdExterno,
+      inventario: null,
+      inventarioAproximado: false,
+      vendidos: 100,
+      vendidosExacto: false,
+      titulo: null,
+      precio: null,
+      leidoEn: new Date().toISOString(),
+    });
+
+    // 2. El cron corre DESPUÉS (mismo día) y confirma precio/Full/
+    // date_created por la API — fecha de creación elegida para que
+    // "+100 vendidos" Full dé el mismo caso de referencia verificado
+    // (220 vendidos -> 15.6 ventas/mes -> $14.662.440/mes).
+    const diasDeAntiguedad = 5500 / 13; // mismo despeje que el caso de referencia de aproximados.test.ts
+    const dateCreated = new Date(Date.now() - diasDeAntiguedad * 24 * 60 * 60 * 1000).toISOString();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          price: 939900,
+          status: "active",
+          shipping: { logistic_type: "fulfillment" },
+          date_created: dateCreated,
+        })
+      )
+    );
+    const resultadoCron = await revisarAhoraUnSeguimiento(seguimiento);
+    expect(resultadoCron.ok).toBe(true);
+
+    // 3. La fila de hoy tiene que traer LAS DOS escrituras juntas,
+    // ninguna pisó a la otra.
+    const hoy = hoyBogota();
+    const [fotoDeHoy] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+    );
+    expect(fotoDeHoy).toBeDefined();
+    expect(fotoDeHoy.vendidos).toBeNull(); // nunca exacto — sigue sin confirmar por la API
+    expect(Number(fotoDeHoy.precio)).toBe(939900); // del cron
+    expect(fotoDeHoy.esFull).toBe(true); // del cron
+    expect(obtenerVendidosAproximado(fotoDeHoy.publicaciones)).toBe(100); // de la extensión, el cron no lo pisó
+    expect(obtenerFechaCreacion(fotoDeHoy.publicaciones)).toBe(dateCreated); // del cron, la extensión no lo pisó
+
+    // 4. Los 4 cálculos de lib/seguimiento/aproximados.ts, con los
+    // datos REALES que acaban de quedar guardados — exactamente lo
+    // que hace la UI (app/panel/investigacion/seguimiento/page.tsx y
+    // [id]/page.tsx).
+    const vendidosAprox = vendidosEstimados(fotoDeHoy.vendidos ?? obtenerVendidosAproximado(fotoDeHoy.publicaciones), {
+      exacto: fotoDeHoy.vendidos != null,
+      esFull: fotoDeHoy.esFull === true,
+    });
+    expect(vendidosAprox).toBeCloseTo(220, 6);
+
+    const dias = antiguedadDias({ dateCreated: obtenerFechaCreacion(fotoDeHoy.publicaciones), mlId: mlIdExterno, recursoMl: seguimiento.recursoMl, ahora: new Date() });
+    expect(dias).not.toBeNull();
+    expect(dias!).toBeCloseTo(diasDeAntiguedad, 1);
+
+    const ventasMesValor = ventasMes(vendidosAprox, dias);
+    expect(ventasMesValor).not.toBeNull();
+    expect(ventasMesValor!).toBeCloseTo(15.6, 1);
+
+    const facturacionMesValor = facturacionMes(ventasMesValor, Number(fotoDeHoy.precio));
+    expect(facturacionMesValor).not.toBeNull();
+    expect(facturacionMesValor!).toBeCloseTo(14662440, 0);
   });
 });

@@ -1,4 +1,5 @@
-import { boolean, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { boolean, check, date, foreignKey, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
 import type {
   DatosPorCuenta,
@@ -83,7 +84,11 @@ export const alertaSeguimientoTipoEnum = pgEnum("alerta_seguimiento_tipo", [
 export const empresas = pgTable("empresas", {
   id: uuid("id").primaryKey().defaultRandom(),
   nombre: text("nombre").notNull(),
-  // Una empresa por NIT/sociedad — decisión D2.
+  // Una empresa por NIT/sociedad — decisión D2. Cada comercio (Zilonix,
+  // Pachamama) es su propia fila de esta tabla. Los titulares son filas
+  // de `titulares` dentro de esa empresa (issue #125, decisión de
+  // Sharel); el NIT no se parte por titular. El issue pide ajustar solo
+  // este comentario y deja la confirmación de la lectura en Mateo.
   nit: text("nit").notNull().unique(),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -203,9 +208,216 @@ export const auditoria = pgTable("auditoria", {
   actorTipo: actorTipoEnum("actor_tipo").notNull(),
   accion: text("accion").notNull(),
   entidad: text("entidad").notNull(),
+  // Issue #125 — qué registro cambió y el antes/después. Quedan vacíos
+  // en las filas viejas y en acciones que no son un cambio (invitar,
+  // sincronizar). Texto, no uuid: un id de Mercado Libre no siempre es
+  // uuid. Documento, correo y WhatsApp no se escriben acá en claro
+  // (lib/finanzas/enmascarar.ts).
+  entidadId: text("entidad_id"),
+  valorAnterior: text("valor_anterior"),
+  valorNuevo: text("valor_nuevo"),
   detalle: text("detalle"),
   ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Issue #125 (Z-FIN-03) — persona o sociedad DENTRO de una empresa.
+// No es otra fila de `empresas` (eso seguiría siendo D2, un NIT por
+// empresa). Mateo confirma el comentario de D2; el enum en sí es el
+// que pidió el issue.
+export const tipoTitularEnum = pgEnum("tipo_titular", ["persona", "sociedad"]);
+
+export const titulares = pgTable(
+  "titulares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    tipo: tipoTitularEnum("tipo").notNull(),
+    nombre: text("nombre").notNull(),
+    documento: text("documento").notNull(),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // El par (empresa_id, id) es la clave que referencia la FK compuesta
+    // de cuentas_ml. El id solo ya es único, pero Postgres exige un
+    // UNIQUE que cubra exactamente las columnas referenciadas.
+    empresaIdUnica: unique("titulares_empresa_id_unica").on(t.empresaId, t.id),
+    // El mismo documento puede existir en otra empresa; en la misma, no.
+    documentoUnico: unique("titulares_empresa_documento_unico").on(t.empresaId, t.documento),
+  })
+);
+
+// Issue #125 — una fila por empresa. Sin fila, la app no inventa
+// valores (ni 19 % de IVA ni otra cifra): leerConfiguracionFinanzas
+// devuelve null. El default 3 de plazo_vencimiento_dias es de la
+// columna, solo cuando la fila se inserta sin mandar ese campo.
+// Los interruptores de aviso quedan vacíos (null) hasta que la
+// empresa elija: el issue no les fija un valor.
+export const configuracionFinanzas = pgTable(
+  "configuracion_finanzas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    flexValor: numeric("flex_valor", { precision: 14, scale: 2 }),
+    ivaPublicidad: numeric("iva_publicidad", { precision: 5, scale: 2 }),
+    plazoVencimientoDias: integer("plazo_vencimiento_dias").notNull().default(3),
+    avisoDiasAntes: integer("aviso_dias_antes"),
+    avisoCorreoActivo: boolean("aviso_correo_activo"),
+    avisoWhatsappActivo: boolean("aviso_whatsapp_activo"),
+    avisoCorreoDestino: text("aviso_correo_destino"),
+    avisoWhatsappDestino: text("aviso_whatsapp_destino"),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaPor: uuid("actualizada_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    unaPorEmpresa: unique("configuracion_finanzas_empresa_unica").on(t.empresaId),
+    plazoNoNegativo: check("configuracion_finanzas_plazo_no_negativo", sql`${t.plazoVencimientoDias} >= 0`),
+    ivaRango: check(
+      "configuracion_finanzas_iva_rango",
+      sql`${t.ivaPublicidad} IS NULL OR (${t.ivaPublicidad} >= 0 AND ${t.ivaPublicidad} <= 100)`
+    ),
+  })
+);
+
+// Issue #125 — la meta no es una columna de configuracion_finanzas:
+// cambia por empresa Y por mes (Sharel, 24-oct-2026). Mes sin fila =
+// sin meta (no se asume 0 ni se copia el mes anterior). Quién puede
+// cambiarla (solo el Dueño) lo revisa la acción de #126; acá la RLS
+// solo aísla por empresa. Moneda por defecto COP: decisión de Mateo
+// ya escrita en el issue.
+export const metasMensuales = pgTable(
+  "metas_mensuales",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    mes: date("mes", { mode: "string" }).notNull(),
+    metaUtilidad: numeric("meta_utilidad", { precision: 14, scale: 2 }).notNull(),
+    moneda: text("moneda").notNull().default("COP"),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaPor: uuid("actualizada_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    empresaMesMonedaUnica: unique("metas_mensuales_empresa_mes_moneda_unica").on(t.empresaId, t.mes, t.moneda),
+    mesDiaUno: check("metas_mensuales_dia_uno", sql`extract(day from ${t.mes}) = 1`),
+    utilidadNoNegativa: check("metas_mensuales_utilidad_no_negativa", sql`${t.metaUtilidad} >= 0`),
+  })
+);
+
+// Issue #127 (Z-FIN-05) — proveedores y transportadores de la empresa.
+// `tipo` es una etiqueta informativa: no limita qué conceptos cubre el
+// tercero (el de agencia puede ser también el de empaque).
+export const tipoTerceroEnum = pgEnum("tipo_tercero", ["proveedor_producto", "empaque", "agencia", "flex", "otro"]);
+export const condicionPagoEnum = pgEnum("condicion_pago", ["inmediato", "cuenta_cobro", "anticipado_full_ml"]);
+// El cierre de cada período es fijo: semana de lunes a domingo (cierra
+// el domingo), quincenal el 15 y el último día del mes, mensual el
+// último día.
+export const periodicidadPagoEnum = pgEnum("periodicidad_pago", ["semanal", "quincenal", "mensual"]);
+
+// Sin DELETE para app_user (db/rls-setup.sql): un tercero se desactiva
+// con `activo`, nunca se borra, para no perder a quién se le debía.
+export const terceros = pgTable(
+  "terceros",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    nombre: text("nombre").notNull(),
+    tipo: tipoTerceroEnum("tipo").notNull(),
+    activo: boolean("activo").notNull().default(true),
+    // Packing que cobra este proveedor, una vez por paquete. 0 = no
+    // cobra (valor real); vacío = sin dato. Es el mismo para Full y
+    // para agencia (Sharel, 24-oct-2026).
+    empaque: numeric("empaque", { precision: 14, scale: 2 }),
+    // Sin default de columna: agencia y flex nacen como cuenta_cobro
+    // semanal (lib/terceros.ts); para los demás tipos se elige.
+    condicionPago: condicionPagoEnum("condicion_pago").notNull(),
+    periodicidad: periodicidadPagoEnum("periodicidad"),
+    // Vacío = usa configuracion_finanzas.plazo_vencimiento_dias.
+    plazoDias: integer("plazo_dias"),
+    // Tercero habitual por concepto. Un mismo tercero puede tener
+    // varias marcas (agencia y empaque suelen ser el mismo).
+    predeterminadoEnvioAgencia: boolean("predeterminado_envio_agencia").notNull().default(false),
+    predeterminadoEmpaque: boolean("predeterminado_empaque").notNull().default(false),
+    predeterminadoFlex: boolean("predeterminado_flex").notNull().default(false),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    // Destino de la FK compuesta de costos_sku. Constraint y no índice:
+    // drizzle-kit crea los índices después de las claves foráneas.
+    empresaIdUnica: unique("terceros_empresa_id_unica").on(t.empresaId, t.id),
+    nombreUnico: unique("terceros_empresa_nombre_unico").on(t.empresaId, t.nombre),
+    empaqueNoNegativo: check("terceros_empaque_no_negativo", sql`${t.empaque} >= 0`),
+    plazoNoNegativo: check("terceros_plazo_no_negativo", sql`${t.plazoDias} >= 0`),
+    cuentaCobroConPeriodicidad: check(
+      "terceros_cuenta_cobro_con_periodicidad",
+      sql`${t.condicionPago} <> 'cuenta_cobro' OR ${t.periodicidad} IS NOT NULL`
+    ),
+    // A lo sumo un tercero habitual por concepto y empresa.
+    habitualEnvioAgencia: uniqueIndex("terceros_habitual_envio_agencia_unico")
+      .on(t.empresaId)
+      .where(sql`${t.predeterminadoEnvioAgencia}`),
+    habitualEmpaque: uniqueIndex("terceros_habitual_empaque_unico").on(t.empresaId).where(sql`${t.predeterminadoEmpaque}`),
+    habitualFlex: uniqueIndex("terceros_habitual_flex_unico").on(t.empresaId).where(sql`${t.predeterminadoFlex}`),
+  })
+);
+
+export const fuenteCostoEnum = pgEnum("fuente_costo", ["manual", "archivo"]);
+
+// Issue #127 (Z-FIN-05) — tabla maestra por SKU, como la hoja de
+// Zilonix: una fila por SKU con lo que cuesta y los pisos de venta.
+// La llave es el SKU de la publicación de Mercado Libre normalizado
+// (trim + mayúsculas), no `skus`: sin FK hacia `skus`, la importación
+// (#128) crea filas aunque el SKU no esté en el catálogo. El costo de
+// cada venta lo congela #129/#130 y el historial va a `auditoria`, así
+// que acá no hay vigencias.
+//
+// Ceros (Sharel, 22-oct-2026): costo vacío = sin costo (se alerta) y
+// costo 0 = costo real de $0. Empaque y envío agencia 0 = $0 real.
+// Precio mínimo 0 = no aplica, se guarda vacío (el CHECK > 0 lo
+// impide en la base). Empaque vacío = usar el del proveedor.
+export const costosSku = pgTable(
+  "costos_sku",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    skuCodigo: text("sku_codigo").notNull(),
+    nombreProducto: text("nombre_producto"),
+    costo: numeric("costo", { precision: 14, scale: 2 }),
+    empaque: numeric("empaque", { precision: 14, scale: 2 }),
+    envioAgencia: numeric("envio_agencia", { precision: 14, scale: 2 }),
+    // Pisos de venta por cantidad fija de unidades (1, 2 o 3), para el
+    // agente de promociones. Son independientes entre sí.
+    precioMinimoUnidad: numeric("precio_minimo_unidad", { precision: 14, scale: 2 }),
+    precioMinimoComboX2: numeric("precio_minimo_combo_x2", { precision: 14, scale: 2 }),
+    precioMinimoComboX3: numeric("precio_minimo_combo_x3", { precision: 14, scale: 2 }),
+    precioVenta: numeric("precio_venta", { precision: 14, scale: 2 }),
+    // Proveedor del producto. Vacío no bloquea la utilidad: solo queda
+    // sin cuenta por pagar asociada (#140).
+    terceroId: uuid("tercero_id"),
+    fuente: fuenteCostoEnum("fuente").notNull().default("manual"),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    skuUnico: unique("costos_sku_empresa_sku_unico").on(t.empresaId, t.skuCodigo),
+    // La base rechaza un código sin normalizar: así " ab-1" y "AB-1"
+    // nunca quedan como dos filas.
+    skuNormalizado: check("costos_sku_sku_normalizado", sql`${t.skuCodigo} = upper(btrim(${t.skuCodigo})) AND ${t.skuCodigo} <> ''`),
+    costoNoNegativo: check("costos_sku_costo_no_negativo", sql`${t.costo} >= 0`),
+    empaqueNoNegativo: check("costos_sku_empaque_no_negativo", sql`${t.empaque} >= 0`),
+    envioNoNegativo: check("costos_sku_envio_agencia_no_negativo", sql`${t.envioAgencia} >= 0`),
+    precioVentaNoNegativo: check("costos_sku_precio_venta_no_negativo", sql`${t.precioVenta} >= 0`),
+    minimoUnidadPositivo: check("costos_sku_precio_minimo_unidad_positivo", sql`${t.precioMinimoUnidad} > 0`),
+    minimoX2Positivo: check("costos_sku_precio_minimo_combo_x2_positivo", sql`${t.precioMinimoComboX2} > 0`),
+    minimoX3Positivo: check("costos_sku_precio_minimo_combo_x3_positivo", sql`${t.precioMinimoComboX3} > 0`),
+    // Un SKU de la empresa A nunca apunta a un tercero de la empresa B.
+    terceroDeLaEmpresa: foreignKey({
+      name: "costos_sku_tercero_misma_empresa_fk",
+      columns: [t.empresaId, t.terceroId],
+      foreignColumns: [terceros.empresaId, terceros.id],
+    }).onDelete("restrict"),
+  })
+);
 
 // Tarea 2.3 — una cuenta de Mercado Libre conectada a una empresa.
 // Tokens cifrados (lib/cifrado.ts, AES-256-GCM con versión de clave —
@@ -216,6 +428,13 @@ export const cuentasMl = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // Issue #125 — vacío hasta que alguien asigne titular. La FK no es
+    // solo titular_id → titulares.id (eso dejaría colgar un titular de
+    // otra empresa): es el par (empresa_id, titular_id). ON DELETE
+    // RESTRICT: no se borra un titular que todavía tiene cuentas.
+    // No se agrega `estado` (activa / requiere_reconexion /
+    // desconectada): eso es el issue #59, otra migración.
+    titularId: uuid("titular_id"),
     cuentaIdExterna: text("cuenta_id_externa").notNull(),
     nickname: text("nickname").notNull(),
     accessTokenCifrado: jsonb("access_token_cifrado").$type<TokenCifrado>().notNull(),
@@ -241,6 +460,14 @@ export const cuentasMl = pgTable(
     // empresas de Zilonix a la vez — evita ambigüedad de a quién le
     // pertenecen sus avisos y sus pedidos.
     cuentaUnica: uniqueIndex("cuentas_ml_cuenta_externa_unica").on(t.cuentaIdExterna),
+    // MATCH SIMPLE (el default de Postgres): si titular_id es null, la
+    // FK no se evalúa. Con valor, empresa_id + titular_id tienen que
+    // existir juntos en titulares.
+    titularDeLaMismaEmpresa: foreignKey({
+      name: "cuentas_ml_empresa_titular_fk",
+      columns: [t.empresaId, t.titularId],
+      foreignColumns: [titulares.empresaId, titulares.id],
+    }).onDelete("restrict"),
   })
 );
 
@@ -551,11 +778,65 @@ export const seguimientoFotos = pgTable(
     ganaBotonCompra: boolean("gana_boton_compra"),
     esFull: boolean("es_full"),
     esEnvioGratis: boolean("es_envio_gratis"),
-    // Solo para tipo = "tienda": snapshot liviano de sus publicaciones
-    // ({ itemId, titulo, precio }[]) — lo necesita la comparación de
-    // alertas para detectar publicaciones nuevas/eliminadas entre un
-    // día y el siguiente. null para tipo = "producto".
-    publicaciones: jsonb("publicaciones").$type<{ itemId: string; titulo: string; precio: number | null }[]>(),
+    // Solo para tipo = "tienda". null para tipo = "producto". `visibles`
+    // es el snapshot liviano de publicaciones que la comparación de
+    // alertas usa para detectar nuevas/eliminadas entre un día y el
+    // siguiente. `total` (issue #251, punto 5) — el total REAL que
+    // Mercado Libre muestra arriba del listado ("752 resultados"),
+    // leído de la página por la extensión (la API da 403 real al
+    // listar publicaciones de una tienda ajena) — `null` mientras no
+    // haya lectura de página todavía. `fuente` (corrección de Pablo) —
+    // "api" o "pagina": `visibles` de "pagina" es solo una página
+    // (~48) del listado real, nunca el total completo que sí trae una
+    // foto "api" — lib/seguimiento/alertas.ts la usa para no comparar
+    // nuevas/eliminadas entre dos snapshots que nunca fueron
+    // completos. Las filas viejas (antes de este campo) se tratan como
+    // "api" vía normalizarPublicaciones (lib/seguimiento/alertas.ts),
+    // nunca se asume "pagina" sin confirmarlo. Sin columna aparte a
+    // propósito (sin migración): todo va dentro del mismo JSON que ya
+    // existía.
+    // Issue #252 (smoke de staging) — para tipo = "producto", esta
+    // MISMA columna (nunca una nueva, sin migración) también guarda
+    // `{ vendidosAproximado }` — el piso "+N vendidos" de la ficha,
+    // cuando Mercado Libre no deja ver el número exacto. Es la ÚNICA
+    // columna que tipo="producto" nunca llena por otro motivo, así
+    // que reusarla acá no choca con nada — `vendidosAproximado` nunca
+    // aparece junto con `visibles` (son dos formas mutuamente
+    // excluyentes del mismo campo, una por tipo de seguimiento).
+    // Nunca se compara en alertas (lib/seguimiento/alertas.ts,
+    // compararFotos, solo mira `publicaciones` para tipo="tienda") —
+    // ver `obtenerVendidosAproximado`/`obtenerPrecioAproximado` para
+    // cómo se lee del lado de la UI sin confundirla con el total de
+    // una tienda. `precioAproximado` (también #252) — mismo criterio,
+    // el precio que lee la extensión como respaldo cuando ML nunca
+    // confirma uno real por la API. Los dos campos son independientes
+    // (pueden venir juntos o separados) — el `set` del upsert
+    // (lib/seguimiento/seguimientos.ts) los MEZCLA con `||` de
+    // Postgres, nunca los reemplaza como objeto completo.
+    // Issue #251 ("Seguimiento muestra aproximados como Selltrix") —
+    // `fechaCreacion` (date_created real) suma al mismo objeto de
+    // tipo="producto" — SOLO la escribe el cron (lib/trabajos/
+    // revisionDiariaSeguimiento.ts, con el mismo merge `||`, nunca
+    // reemplaza el objeto completo), nunca la extensión: a diferencia
+    // de vendidosAproximado/precioAproximado (respaldos de la página),
+    // esta es un dato que la API sí confirma. SOLO para recurso_ml
+    // "item" — el date_created de LA publicación puntual que se sigue.
+    //
+    // Issue #262 (revisión de Pablo, punto bloqueante) — `fechaCreacionCatalogo`
+    // es un campo APARTE, nunca el mismo `fechaCreacion`: para
+    // recurso_ml "product" (catálogo, /p/MCO...), `fechaCreacion`
+    // (arriba) hubiera salido de la oferta GANADORA de ese catálogo —
+    // el date_created de un ITEM puntual de un vendedor cualquiera,
+    // nunca el del catálogo en sí (lib/seguimiento/lector.ts ya NO lo
+    // guarda ahí, a propósito). `fechaCreacionCatalogo` sale de
+    // obtenerProducto (lib/ml/cliente.ts, GET /products/{id} — la
+    // misma llamada que ya hacía resolverNombre para el nombre, sin
+    // ninguna llamada nueva), la única fuente real del date_created
+    // del catálogo mismo.
+    publicaciones: jsonb("publicaciones").$type<
+      | { total: number | null; visibles: { itemId: string; titulo: string | null; precio: number | null }[]; fuente: "api" | "pagina" }
+      | { vendidosAproximado?: number; precioAproximado?: number; fechaCreacion?: string; fechaCreacionCatalogo?: string }
+    >(),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -584,3 +865,172 @@ export const seguimientoAlertas = pgTable("seguimiento_alertas", {
   leidaTs: timestamp("leida_ts", { withTimezone: true }),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Issue #254 — Product Ads. La API no documenta la zona del corte de
+// `date_from`/`date_to` (docs/publicidad/api-research.md §8.6). `fecha`
+// guarda el `date` (YYYY-MM-DD) que devuelve Mercado Libre, sin
+// convertirlo a otra zona: moverlo podría juntar dos días o partir uno.
+export const publicidadEstadoAccesoEnum = pgEnum("publicidad_estado_acceso", ["ok", "sin_product_ads", "sin_permiso_app"]);
+export const publicidadNivelMetricaEnum = pgEnum("publicidad_nivel_metrica", ["cuenta", "campana", "ad_group", "anuncio"]);
+export const publicidadOrigenSyncEnum = pgEnum("publicidad_origen_sync", ["programada", "manual"]);
+export const publicidadEstadoSyncEnum = pgEnum("publicidad_estado_sync", ["en_curso", "ok", "parcial", "error"]);
+
+export const publicidadAnunciantes = pgTable("publicidad_anunciantes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  advertiserId: text("advertiser_id"),
+  siteId: text("site_id"),
+  nombre: text("nombre"),
+  estadoAcceso: publicidadEstadoAccesoEnum("estado_acceso").notNull(),
+  verificadoTs: timestamp("verificado_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  // empresa_id va en la clave: transferir la cuenta (la fila de
+  // cuentas_ml cambia de empresa, el id no) no puede chocar con el
+  // historial que se queda en la empresa anterior. Esas filas siguen
+  // visibles solo para esa empresa, por RLS, y la nueva empieza de cero.
+  cuentaUnica: uniqueIndex("publicidad_anunciantes_cuenta_unica").on(t.empresaId, t.cuentaMlId),
+}));
+
+export const publicidadCampanas = pgTable("publicidad_campanas", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  campanaIdMl: text("campana_id_ml").notNull(),
+  nombre: text("nombre"),
+  estado: text("estado"),
+  estrategia: text("estrategia"),
+  presupuesto: numeric("presupuesto", { precision: 14, scale: 2 }),
+  presupuestoDiario: numeric("presupuesto_diario", { precision: 14, scale: 2 }),
+  // La doc no define automatic_budget (api-research §8.4). Se guarda tal
+  // cual llegó; null si el campo no vino. No se interpreta como
+  // "presupuesto compartido".
+  presupuestoAutomatico: boolean("presupuesto_automatico"),
+  roasObjetivo: numeric("roas_objetivo", { precision: 6, scale: 2 }),
+  acosObjetivo: numeric("acos_objetivo", { precision: 10, scale: 4 }),
+  acosObjetivoCalculado: boolean("acos_objetivo_calculado").notNull().default(false),
+  moneda: text("moneda"),
+  creadaMlTs: timestamp("creada_ml_ts", { withTimezone: true }),
+  actualizadaMlTs: timestamp("actualizada_ml_ts", { withTimezone: true }),
+  sincronizadaTs: timestamp("sincronizada_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  campanaUnica: uniqueIndex("publicidad_campanas_cuenta_campana_unica").on(t.empresaId, t.cuentaMlId, t.campanaIdMl),
+}));
+
+export const publicidadAnuncios = pgTable("publicidad_anuncios", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  adGroupId: text("ad_group_id").notNull(),
+  tipoAdGroup: text("tipo_ad_group"),
+  adGroupExternoId: text("ad_group_externo_id"),
+  campanaIdMl: text("campana_id_ml"),
+  itemId: text("item_id").notNull(),
+  titulo: text("titulo"),
+  permalink: text("permalink"),
+  estado: text("estado"),
+  precio: numeric("precio", { precision: 14, scale: 2 }),
+  logisticType: text("logistic_type"),
+  listingTypeId: text("listing_type_id"),
+  sincronizadoTs: timestamp("sincronizado_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  anuncioUnico: uniqueIndex("publicidad_anuncios_cuenta_grupo_item_unico").on(t.empresaId, t.cuentaMlId, t.adGroupId, t.itemId),
+}));
+
+export const publicidadMetricasDiarias = pgTable("publicidad_metricas_diarias", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  nivel: publicidadNivelMetricaEnum("nivel").notNull(),
+  entidadIdMl: text("entidad_id_ml").notNull(),
+  // Vacío en cuenta/campaña/ad group. En anuncio es el ad group: el
+  // mismo ítem puede estar en dos grupos y no se pueden pisar.
+  adGroupId: text("ad_group_id").notNull().default(""),
+  fecha: date("fecha", { mode: "string" }).notNull(),
+  clicks: integer("clicks"),
+  impresiones: integer("impresiones"),
+  costo: numeric("costo", { precision: 14, scale: 2 }),
+  montoDirecto: numeric("monto_directo", { precision: 14, scale: 2 }),
+  montoIndirecto: numeric("monto_indirecto", { precision: 14, scale: 2 }),
+  montoTotal: numeric("monto_total", { precision: 14, scale: 2 }),
+  unidadesDirectas: integer("unidades_directas"),
+  unidadesIndirectas: integer("unidades_indirectas"),
+  unidadesTotal: integer("unidades_total"),
+  ventasPublicidad: integer("ventas_publicidad"),
+  ventasOrganicasCant: integer("ventas_organicas_cant"),
+  ventasOrganicasMonto: numeric("ventas_organicas_monto", { precision: 14, scale: 2 }),
+  acos: numeric("acos", { precision: 10, scale: 4 }),
+  roas: numeric("roas", { precision: 10, scale: 4 }),
+  tacos: numeric("tacos", { precision: 10, scale: 4 }),
+  sov: numeric("sov", { precision: 10, scale: 4 }),
+  cvr: numeric("cvr", { precision: 10, scale: 4 }),
+  ctr: numeric("ctr", { precision: 10, scale: 4 }),
+  cpc: numeric("cpc", { precision: 14, scale: 2 }),
+  sincronizadaTs: timestamp("sincronizada_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  metricaUnica: uniqueIndex("publicidad_metricas_diarias_unica").on(
+    t.empresaId,
+    t.cuentaMlId,
+    t.nivel,
+    t.entidadIdMl,
+    t.adGroupId,
+    t.fecha
+  ),
+}));
+
+export const publicidadCostosItem = pgTable("publicidad_costos_item", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  itemId: text("item_id").notNull(),
+  fecha: date("fecha", { mode: "string" }).notNull(),
+  skuCodigo: text("sku_codigo"),
+  categoryId: text("category_id"),
+  precioVentaVigente: numeric("precio_venta_vigente", { precision: 14, scale: 2 }),
+  precioRegular: numeric("precio_regular", { precision: 14, scale: 2 }),
+  comisionMl: numeric("comision_ml", { precision: 14, scale: 2 }),
+  comisionDetalle: jsonb("comision_detalle").$type<Record<string, unknown> | null>(),
+  // Estimado de F9 (`coverage.all_country.list_cost`), una sola unidad.
+  // 0 cuando el comprador paga el envío. No es el costo real de un
+  // envío ya despachado.
+  envioVendedorEstimado: numeric("envio_vendedor_estimado", { precision: 14, scale: 2 }),
+  compradorPagaEnvio: boolean("comprador_paga_envio"),
+  logisticType: text("logistic_type"),
+  shippingMode: text("shipping_mode"),
+  listingTypeId: text("listing_type_id"),
+  consultadoTs: timestamp("consultado_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  costoUnico: uniqueIndex("publicidad_costos_item_unico").on(t.empresaId, t.cuentaMlId, t.itemId, t.fecha),
+}));
+
+export const publicidadSincronizaciones = pgTable("publicidad_sincronizaciones", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  origen: publicidadOrigenSyncEnum("origen").notNull(),
+  solicitadaPor: uuid("solicitada_por").references(() => usuarios.id, { onDelete: "set null" }),
+  rangoDesde: date("rango_desde", { mode: "string" }),
+  rangoHasta: date("rango_hasta", { mode: "string" }),
+  estado: publicidadEstadoSyncEnum("estado").notNull(),
+  // true solo cuando el tramo cierra un backfill con acceso real a
+  // Product Ads. Un ok de sin_product_ads o sin_permiso_app queda en
+  // false: no cuenta como historial ya cubierto.
+  cierraBackfill: boolean("cierra_backfill").notNull().default(false),
+  // Día desde el que hay que retomar anuncios si la corrida se cortó
+  // por tiempo. Un error real lo deja vacío: ese tramo se reintenta
+  // entero, y al tercer fallo se avanza para no trabar el backfill.
+  reanudaDesde: date("reanuda_desde", { mode: "string" }),
+  llamadas: integer("llamadas").notNull().default(0),
+  // Texto corto. Nunca un token, ni el cuerpo crudo de Mercado Libre.
+  // En una corrida `ok` puede traer un aviso (forma de DAILY sin
+  // confirmar), no solo un fallo.
+  error: text("error"),
+  iniciadaTs: timestamp("iniciada_ts", { withTimezone: true }).notNull().defaultNow(),
+  terminadaTs: timestamp("terminada_ts", { withTimezone: true }),
+}, (t) => ({
+  // Una sola corrida en curso por empresa y cuenta. El id de la cuenta
+  // no cambia al transferirla, así que la empresa va en la clave.
+  enCursoUnica: uniqueIndex("publicidad_sincronizaciones_en_curso_unica")
+    .on(t.empresaId, t.cuentaMlId)
+    .where(sql`${t.estado} = 'en_curso'`),
+}));

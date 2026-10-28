@@ -1,22 +1,33 @@
 import styles from "./TarjetaKpi.module.css";
 
-// Sin `valor` dice "Pendiente de conectar" — no inventa una cifra ni
-// una curva. Quien ya tiene el dato lo pasa (en /panel, incluso "COP 0"
-// o 0): eso no es este estado vacío. `detalle` son líneas en letra
-// pequeña bajo la cifra (ej. el monto de "Ventas de hoy"); sin
+// Sin `valor` dice "Pendiente de conectar" por default — no inventa una
+// cifra ni una curva. Quien ya tiene el dato lo pasa (en /panel, incluso
+// "COP 0" o 0): eso no es este estado vacío. `detalle` son líneas en
+// letra pequeña bajo la cifra (ej. el monto de "Ventas de hoy"); sin
 // `detalle`, la tarjeta se ve igual que siempre.
+//
+// Issue #209/#210 — bug real reportado por Sharel en el smoke de
+// staging: en Investigación (Demanda), un `valor` undefined significa
+// "la búsqueda no trajo vendidos reales para ningún candidato" — NADA
+// que ver con "falta conectar una cuenta de Mercado Libre" (ese caso ya
+// se atrapa antes, como SinCuentaMlError, y nunca llega a esta tarjeta).
+// `textoVacio` deja que cada pantalla elija su propio texto para el
+// estado vacío sin tocar el default de /panel (Inicio) ni de
+// /panel/avisos-ml, que sí dependen de "Pendiente de conectar" tal cual.
 export function TarjetaKpi({
   titulo,
   valor,
   variacionPorcentaje,
   puntos,
   detalle,
+  textoVacio = "Pendiente de conectar",
 }: {
   titulo: string;
   valor?: string | number;
   variacionPorcentaje?: number;
   puntos?: number[];
   detalle?: string[];
+  textoVacio?: string;
 }) {
   const tieneValor = valor !== undefined;
 
@@ -41,7 +52,7 @@ export function TarjetaKpi({
           {puntos && puntos.length > 1 && <Sparkline puntos={puntos} />}
         </>
       ) : (
-        <p className={styles.vacio}>Pendiente de conectar</p>
+        <p className={styles.vacio}>{textoVacio}</p>
       )}
     </div>
   );

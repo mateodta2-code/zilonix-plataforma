@@ -6,7 +6,14 @@ import type { seguimientosMl } from "@/db/schema";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { agregarSeguimiento, buscarSeguimientoActivoPorMlId, eliminarSeguimiento, marcarAlertaLeida } from "@/lib/seguimiento/seguimientos";
+import {
+  agregarSeguimiento,
+  buscarSeguimientoActivoPorMlId,
+  eliminarSeguimiento,
+  guardarDatoDePaginaSeguimiento,
+  marcarAlertaLeida,
+} from "@/lib/seguimiento/seguimientos";
+import { datoPaginaSeguimientoValido } from "@/lib/seguimiento/validarDatoPagina";
 
 async function empresaActivaDe(usuarioId: string) {
   const propias = await listarEmpresasDeUsuario(usuarioId);
@@ -135,4 +142,81 @@ export async function marcarAlertaLeidaAction(formData: FormData): Promise<void>
 
   await marcarAlertaLeida(empresa.id, alertaId);
   redirect("/panel/investigacion/seguimiento?leida=1");
+}
+
+// Issue #251 — a diferencia de las acciones de arriba (todas atadas a
+// un <form>, siempre terminan en redirect), esta la llama directo
+// código cliente (EscuchaExtension.tsx, el listener del mensaje
+// "dato-pagina-seguimiento" que ya reenvía marcador-zilonix.js) — es
+// una llamada de fondo, sin navegación: nunca redirige, nunca lanza
+// hacia la UI (un error acá no debe romper la pantalla que la persona
+// está mirando). `empresaId` SIEMPRE se resuelve del lado del
+// servidor (sesión + cookie, igual que el resto de este archivo) —
+// nunca se confía en nada que mande el cliente salvo el payload en
+// sí, y ESE se vuelve a validar entero acá, nunca se asume que el
+// mensaje de la extensión viene bien formado solo porque llegó por
+// este canal.
+// Issue #252 (revisión de Pablo, punto 3) — datoPaginaSeguimientoValido
+// (y los patrones/topes que usa) se movieron a lib/seguimiento/
+// validarDatoPagina.ts: este archivo tiene "use server" (Next.js exige
+// que un archivo así solo exporte funciones async), así que un type
+// guard sync no podía exportarse de acá para probarlo directo con
+// vitest.
+
+// Issue #251 — mismo chequeo (usuario real + empresa activa + permiso)
+// que necesitan tanto el guardado individual como el de la cola en
+// lote (abajo) — nunca navega ni lanza hacia la UI, solo devuelve la
+// empresa o null.
+async function empresaConPermisoDeExtension() {
+  const usuario = await obtenerOCrearUsuarioActual();
+  if (!usuario) return null;
+  let empresa;
+  try {
+    empresa = await empresaActivaDe(usuario.id);
+  } catch {
+    return null;
+  }
+  try {
+    await requierePermiso(usuario.id, empresa.id, "inventario", "modificar");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
+    return null; // sin permiso -> se ignora en silencio, nunca rompe la pantalla por un mensaje de fondo
+  }
+  return empresa;
+}
+
+export async function guardarDatoPaginaSeguimientoAction(payload: unknown): Promise<void> {
+  if (!datoPaginaSeguimientoValido(payload)) return;
+  const empresa = await empresaConPermisoDeExtension();
+  if (!empresa) return;
+  await guardarDatoDePaginaSeguimiento(empresa.id, payload);
+}
+
+// Issue #251 (corrección de Pablo, punto 7) — EscuchaExtension.tsx
+// vacía la cola que background.js encoló (visitas a Mercado Libre
+// mientras la pestaña de Seguimiento estaba cerrada) en UN SOLO golpe:
+// una Server Action para todo el lote, en vez de una llamada —y un
+// router.refresh()— por cada lectura encolada. Cada payload se valida
+// por separado (uno malformado no tumba a los demás) y se guarda en
+// el mismo ORDEN en que llegó (secuencial, nunca en paralelo: son
+// lecturas encoladas en orden cronológico — procesarlas en paralelo
+// podría hacer que una más vieja pise, por una carrera de escritura,
+// el resultado de una más nueva).
+export async function guardarVariosDatosPaginaSeguimientoAction(payloads: unknown): Promise<void> {
+  if (!Array.isArray(payloads) || payloads.length === 0) return;
+  const empresa = await empresaConPermisoDeExtension();
+  if (!empresa) return;
+
+  // Corrección de Pablo (sobre 8474c60) — ordena por `leidoEn`
+  // ASCENDENTE antes de guardar: el lote de la cola puede llegar
+  // desordenado — sin esto, una lectura vieja procesada DESPUÉS de una
+  // más nueva (del mismo día) pisaría el dato más fresco con uno más
+  // viejo, al revés de "la lectura más reciente manda" (ver
+  // guardarDatoDePaginaSeguimiento, lib/seguimiento/seguimientos.ts).
+  const validos = payloads.filter(datoPaginaSeguimientoValido);
+  validos.sort((a, b) => new Date(a.leidoEn).getTime() - new Date(b.leidoEn).getTime());
+
+  for (const payload of validos) {
+    await guardarDatoDePaginaSeguimiento(empresa.id, payload);
+  }
 }

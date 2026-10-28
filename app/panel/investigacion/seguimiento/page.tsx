@@ -5,9 +5,16 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { listarAlertasDelDia, listarSeguimientosConUltimaFoto, LIMITE_COMPETIDORES_POR_EMPRESA } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta } from "@/lib/seguimiento/alertas";
+import {
+  LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA,
+  LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA,
+  listarAlertasDelDia,
+  listarSeguimientosConUltimaFoto,
+} from "@/lib/seguimiento/seguimientos";
+import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacionParaAntiguedad, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
+import { necesitaLecturaDePagina } from "@/lib/seguimiento/estimacionInventario";
+import { antiguedadDias, ETIQUETA_APROXIMADO, facturacionMes, ventasMes } from "@/lib/seguimiento/aproximados";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
 import { Ayuda } from "@/components/marco/Ayuda";
 import { Boton, BotonLink } from "@/components/marco/Boton";
@@ -20,6 +27,9 @@ import { PanelLateral } from "@/components/marco/PanelLateral";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { agregarSeguimientoAction, eliminarSeguimientoAction, marcarAlertaLeidaAction, procesarAgregarPorQuery } from "./actions";
+import { BotonActualizarTodo } from "./BotonActualizarTodo";
+import { EscuchaExtension } from "./EscuchaExtension";
+import { celdaConDelta, conSigno, vendidosAproxParaFila } from "./formato";
 import styles from "./page.module.css";
 
 // Issue #182 — mismo patrón /^MCO\d+$/ y /^\d+$/ que la extensión usa
@@ -36,37 +46,14 @@ function dinero(n: number | string | null): string {
   return `$${Number(n).toLocaleString("es-CO")}`;
 }
 
+// Issue #251, punto 7 — "leído de la página el {fecha}".
+function fechaLegible(d: Date): string {
+  return new Date(d).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 function siNoODesconocido(valor: boolean | null, textoSi: string, textoNo: string): React.ReactNode {
   if (valor == null) return <Chip>No disponible</Chip>;
   return valor ? <Chip estado="exito">{textoSi}</Chip> : <Chip estado="peligro">{textoNo}</Chip>;
-}
-
-// Issue #195 — "valor + delta" (ej. 9 (−1)) cuando hay foto anterior
-// con la que comparar; solo el valor cuando no hay. `formatearValor`
-// decide cómo se ve el número entero (dinero() para precio, tal cual
-// para inventario/vendidos); el delta usa el mismo formateador, con
-// signo explícito agregado acá (nunca "+"/"-" adivinados adentro del
-// formateador, que solo sabe mostrar valores absolutos).
-function conSigno(n: number, formatearValor: (n: number) => string): string {
-  if (n === 0) return formatearValor(0);
-  return n > 0 ? `+${formatearValor(n)}` : `-${formatearValor(Math.abs(n))}`;
-}
-
-function celdaConDelta(
-  actual: number | string | null,
-  anterior: number | string | null,
-  formatearValor: (n: number) => string
-): React.ReactNode {
-  if (actual == null) return "—";
-  const texto = formatearValor(Number(actual));
-  const delta = calcularDelta(actual, anterior);
-  if (delta == null) return texto;
-  const signo = delta > 0 ? "positivo" : delta < 0 ? "negativo" : "neutro";
-  return (
-    <>
-      {texto} <span className={styles.delta} data-signo={signo}>({conSigno(delta, formatearValor)})</span>
-    </>
-  );
 }
 
 const numeroPlano = (n: number) => n.toLocaleString("es-CO");
@@ -210,7 +197,25 @@ export default async function SeguimientoPage({
   }
 
   const [alertasDelDia, seguimientos] = await Promise.all([listarAlertasDelDia(empresa.id), listarSeguimientosConUltimaFoto(empresa.id)]);
-  const competidoresActivos = seguimientos.filter((s) => s.seguimiento.esCompetidor).length;
+  // Issue #251 — dos pozos separados, nunca uno combinado (ver
+  // LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA/LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA,
+  // lib/seguimiento/seguimientos.ts).
+  const tiendasCompetidorActivas = seguimientos.filter((s) => s.seguimiento.esCompetidor && s.seguimiento.tipo === "tienda").length;
+  const productosCompetidorActivos = seguimientos.filter((s) => s.seguimiento.esCompetidor && s.seguimiento.tipo === "producto").length;
+
+  // Issue #251, punto 9 — "Actualizar todo": los links reales de cada
+  // competidor (nunca más de 10, por el tope 5+5 de arriba) para que
+  // el botón los abra con un solo clic real — la extensión lee cada
+  // página al cargar, mismo disparador que ya usa "abrir la ficha/
+  // tienda seguida". `.slice(0, 10)` acá TAMBIÉN (corrección de
+  // Pablo) — defensa en profundidad: BotonActualizarTodo.tsx y
+  // background.js (quien de verdad abre las pestañas) vuelven a
+  // aplicar su propio tope, cada capa sin confiar en la anterior.
+  const ahora = new Date();
+  const linksCompetidores = seguimientos
+    .filter((s) => s.seguimiento.esCompetidor)
+    .map((s) => construirLinkMlDeSeguimiento(s.seguimiento.recursoMl, s.seguimiento.mlIdExterno))
+    .slice(0, 10);
 
   // Issue #195 — chip "Alta/Baja hoy" en la fila de una tienda cuando
   // la revisión diaria ya generó la alerta correspondiente HOY (las
@@ -221,6 +226,11 @@ export default async function SeguimientoPage({
 
   return (
     <>
+      {/* Issue #251 — escucha "dato-pagina-seguimiento" (inventario/
+      vendidos de un competidor, publicaciones de una tienda seguida,
+      leídos de la página abierta con la extensión) y guarda con la
+      Server Action correspondiente. Nunca pinta nada por su cuenta. */}
+      <EscuchaExtension />
       <EncabezadoPagina
         titulo="Seguimiento"
         descripcion="Seguimiento diario de productos, tiendas y competidores de Mercado Libre — precio, inventario, ventas y alertas cuando algo cambia."
@@ -315,12 +325,20 @@ export default async function SeguimientoPage({
           <Boton type="submit">Agregar</Boton>
         </form>
         <p className={styles.ayuda}>
-          Competidores marcados: {competidoresActivos}/{LIMITE_COMPETIDORES_POR_EMPRESA}.
+          Tiendas de competencia: {tiendasCompetidorActivas}/{LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA}. Productos de competencia: {productosCompetidorActivos}/
+          {LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA}.
         </p>
       </Tarjeta>
 
       <Tarjeta className={styles.seccion}>
-        <p className={styles.tituloSeccion}>Seguimientos activos</p>
+        <div className={styles.encabezadoSeccion}>
+          <p className={styles.tituloSeccion}>Seguimientos activos</p>
+          {/* Issue #251, punto 9 — abre la ficha/tienda de cada
+          competidor en una pestaña nueva, con un clic real; la
+          extensión lee cada página al cargar, igual que al abrirla a
+          mano. Nunca se dispara sola. */}
+          <BotonActualizarTodo links={linksCompetidores} />
+        </div>
         {seguimientos.length === 0 ? (
           <EstadoVacio>Todavía no agregaste ningún producto, tienda o competidor.</EstadoVacio>
         ) : (
@@ -343,6 +361,71 @@ export default async function SeguimientoPage({
             {seguimientos.map(({ seguimiento, ultimaFoto, fotoAnterior, fotoHaceUnMes }) => {
               const ventasHoy = calcularVentasHoy(ultimaFoto?.vendidos ?? null, fotoAnterior?.vendidos ?? null);
               const deltaUnMes = fotoHaceUnMes ? calcularDelta(ultimaFoto?.vendidos ?? null, fotoHaceUnMes.vendidos) : null;
+              // Issue #251 (corrección de Pablo, punto 3) — normaliza
+              // ANTES de leer `.total`/`.visibles`: una fila vieja
+              // puede traer el array plano sin envolver.
+              const publicaciones = ultimaFoto ? normalizarPublicaciones(ultimaFoto.publicaciones) : null;
+              // Issue #252 (smoke de staging) — el piso "+N vendidos"
+              // (nunca comparado en alertas) vive en esta misma
+              // columna para tipo="producto" — solo importa cuando
+              // todavía no hay un `vendidos` exacto.
+              const vendidosAproximado =
+                ultimaFoto && ultimaFoto.vendidos == null ? obtenerVendidosAproximado(ultimaFoto.publicaciones) : null;
+              // Issue #252 (smoke de staging, punto 3) — mismo respaldo
+              // que vendidosAproximado, pero para el precio: MCO452014269
+              // se quedó sin precio porque la API nunca lo confirmó
+              // (seguimiento pendiente de primera revisión), aunque la
+              // extensión sí lo había leído de la página.
+              const precioAproximado = ultimaFoto && ultimaFoto.precio == null ? obtenerPrecioAproximado(ultimaFoto.publicaciones) : null;
+              // Issue #251 ("Seguimiento muestra aproximados como
+              // Selltrix") — usa el vendidos EXACTO si hay
+              // (`exacto: true`, se muestra tal cual); si no, el piso
+              // "+N" de arriba (`exacto: false`, se ajusta por el
+              // factor Full/no-Full). `antiguedadDias` usa
+              // fechaCreacion real (issue #252 reusa la misma columna
+              // `publicaciones`, pero SOLO el cron la escribe — ver
+              // lib/trabajos/revisionDiariaSeguimiento.ts) cuando la
+              // API ya la confirmó; si no, interpola por el id (tabla
+              // de calibración, puede estar vacía todavía) — "Sin
+              // dato" en la UI cuando ninguno de los dos aplica, nunca
+              // una antigüedad inventada.
+              const vendidosParaAprox = ultimaFoto?.vendidos ?? vendidosAproximado;
+              // Issue #251 (fix "aproximados siempre visibles") — bug
+              // real probado en staging: `esFull != null` descartaba
+              // el estimado ENTERO (vendidosAprox en null) para
+              // cualquier seguimiento sin ese dato confirmado todavía
+              // — la mayoría, de hecho, porque `esFull` solo lo trae
+              // la lectura real de la API/extensión. Ahora, con Full
+              // desconocido, se asume el factor "no Full" (1.55, el
+              // mismo criterio que lib/seguimiento/aproximados.ts usa
+              // cuando `esFull` no es exactamente `true`) y la UI
+              // avisa "(Full desconocido)" en vez de mostrar un número
+              // sin ninguna aclaración.
+              const fullConocido = ultimaFoto?.esFull != null;
+              const vendidosAprox = vendidosAproxParaFila(seguimiento.tipo, vendidosParaAprox, ultimaFoto?.vendidos != null, ultimaFoto?.esFull ?? null);
+              // Issue #251 (fix "aproximados siempre visibles") —
+              // antes diasAprox dependía de `vendidosAprox != null`
+              // (sin vendidos, nunca se intentaba ni siquiera leer la
+              // antigüedad) — pero antiguedadDias no necesita vendidos
+              // para nada, solo fecha/id. Calculado aparte: permite
+              // distinguir "sin vendidos pero sabemos que es nuevo"
+              // (antigüedad real < 30 días) de "no sabemos nada" (sin
+              // fecha ni calibración), en la columna "Ventas ~30d" de
+              // abajo.
+              const diasAprox = antiguedadDias({
+                // Issue #262 (revisión de Pablo, punto 2) —
+                // nunca obtenerFechaCreacion a secas: para
+                // recurso_ml "product" (catálogo), el date_created
+                // real sale de fechaCreacionCatalogo, nunca de
+                // una oferta ganadora (ver lib/seguimiento/lector.ts).
+                dateCreated: obtenerFechaCreacionParaAntiguedad(ultimaFoto?.publicaciones, seguimiento.recursoMl),
+                mlId: seguimiento.mlIdExterno,
+                recursoMl: seguimiento.recursoMl,
+                ahora,
+              });
+              const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
+              const precioParaFacturacion = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximado;
+              const facturacionMesAprox = facturacionMes(ventasMesAprox, precioParaFacturacion);
               return (
                 <FilaTabla key={seguimiento.id}>
                   <CeldaTabla>
@@ -355,20 +438,166 @@ export default async function SeguimientoPage({
                     {seguimiento.esCompetidor ? <Chip estado="aviso">Competidor</Chip> : null}
                     {altasHoy.has(seguimiento.id) ? <Chip estado="exito">Alta hoy</Chip> : null}
                     {bajasHoy.has(seguimiento.id) ? <Chip estado="peligro">Baja hoy</Chip> : null}
+                    {/* Issue #251, punto 10 — sin lectura de la
+                    página hoy para un competidor: inventario/vendidos/
+                    publicaciones todavía no tienen el dato real que
+                    solo la extensión puede traer. */}
+                    {necesitaLecturaDePagina({
+                      esCompetidor: seguimiento.esCompetidor,
+                      tipo: seguimiento.tipo,
+                      // Issue #252 (smoke de staging) — `publicaciones`
+                      // ya normalizada (arriba): la columna real ahora
+                      // es una unión (`{vendidosAproximado}` también
+                      // vive ahí para tipo="producto"), nunca el tipo
+                      // más angosto que espera esta función.
+                      // Issue #252 (revisión de Pablo, punto 6) — se
+                      // suma el aproximado ya calculado arriba: si hoy
+                      // solo hay "+N (aproximado)", esta función ya no
+                      // dice "falta lectura" al lado de eso.
+                      ultimaFoto: ultimaFoto ? { ...ultimaFoto, publicaciones, vendidosAproximado } : null,
+                      ahora,
+                    }) ? (
+                      <div className={styles.subdato}>Actualiza hoy para ver cuánto vendieron</div>
+                    ) : null}
                   </CeldaTabla>
                   <CeldaTabla>{seguimiento.tipo === "tienda" ? "Tienda" : "Producto"}</CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.esFull ?? null, "Full", "No full")}</CeldaTabla>
-                  <CeldaTabla>{celdaConDelta(ultimaFoto?.precio ?? null, fotoAnterior?.precio ?? null, dinero)}</CeldaTabla>
                   <CeldaTabla>
-                    {celdaConDelta(ultimaFoto?.inventarioDisponible ?? null, fotoAnterior?.inventarioDisponible ?? null, numeroPlano)}
+                    {ultimaFoto?.precio != null
+                      ? celdaConDelta(ultimaFoto.precio, fotoAnterior?.precio ?? null, dinero)
+                      : precioAproximado != null
+                        ? `${dinero(precioAproximado)} (aproximado)`
+                        : "—"}
+                  </CeldaTabla>
+                  <CeldaTabla>
+                    {/* Issue #251, punto 7 — "Sin dato" en vez de "—"
+                    cuando todavía no hay ninguna lectura (de la
+                    página o de la API) para este campo. */}
+                    {ultimaFoto?.inventarioDisponible == null
+                      ? "Sin dato"
+                      : celdaConDelta(ultimaFoto.inventarioDisponible, fotoAnterior?.inventarioDisponible ?? null, numeroPlano)}
                     {ultimaFoto?.inventarioAproximado ? <Chip>Aproximado</Chip> : null}
                   </CeldaTabla>
                   <CeldaTabla>
-                    {ultimaFoto?.vendidos ?? "—"}
-                    {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
+                    {seguimiento.tipo === "tienda" ? (
+                      // Issue #251, punto 5 — el TOTAL real (lo que
+                      // Mercado Libre muestra arriba del listado,
+                      // "752 resultados"), no la cantidad de
+                      // publicaciones visibles en esa sola carga de
+                      // página (eso es solo el detalle, ver [id]/page.tsx).
+                      // Issue #250, punto B — una tienda nunca trae
+                      // "vendidos" de la API (lib/seguimiento/lector.ts,
+                      // fotoVacia()) — `publicaciones.total` puede venir
+                      // de la API (buscador público) o de la extensión
+                      // (#251); si ninguna de las dos lo llenó todavía,
+                      // es "Sin dato" (genérico a propósito, nunca "de
+                      // la API": la extensión también puede ser la
+                      // fuente que falta). Corrección de Pablo, punto 3
+                      // — `total ?? visibles.length`: cuando el total
+                      // real todavía no llegó pero SÍ hay publicaciones
+                      // visibles (ej. la API solo trajo esas, nunca el
+                      // total — da 403 real al listar), mostrar ESE
+                      // conteo en vez de "Sin dato" — sigue siendo un
+                      // dato real, aunque parcial.
+                      publicaciones && (publicaciones.total != null || publicaciones.visibles.length > 0) ? (
+                        <>
+                          {publicaciones.total ?? publicaciones.visibles.length} publicaciones
+                          <div className={styles.subdato}>Leído de la página el {fechaLegible(ultimaFoto!.fecha)}</div>
+                        </>
+                      ) : (
+                        "Sin dato"
+                      )
+                    ) : (
+                      <>
+                        {/* Issue #252 (smoke de staging) — bug real:
+                        con `vendidos` reservado al número exacto, el
+                        piso "+N vendidos" que la extensión SÍ lee se
+                        mostraba como "Sin dato", aunque la página lo
+                        tuviera. Nunca se usa para alertas (ver
+                        lib/seguimiento/alertas.ts) — es solo una
+                        pista visual aproximada. */}
+                        {ultimaFoto?.vendidos ?? (vendidosAproximado != null ? `+${vendidosAproximado} (aproximado)` : "Sin dato")}
+                        {ventasHoy != null ? <div className={styles.subdato}>Ventas hoy: {ventasHoy}</div> : null}
+                        {/* Issue #262 (revisión de Mateo, punto 3) —
+                        faltaba mostrar los vendidos ESTIMADOS (estilo
+                        Selltrix: "+N en ML" × factor Full/no-Full) acá
+                        en la lista — [id]/page.tsx (detalle) ya lo
+                        mostraba, esta fila no. */}
+                        {vendidosAprox != null ? (
+                          <div className={styles.subdato}>
+                            {numeroPlano(Math.round(vendidosAprox))} vendidos <Chip>{ETIQUETA_APROXIMADO}</Chip>
+                            {/* Issue #251 (fix "aproximados siempre
+                            visibles") — sin esFull confirmado todavía,
+                            el estimado de arriba ya asumió el factor
+                            "no Full" (1.55) — esto lo aclara, nunca se
+                            muestra como si Full estuviera confirmado
+                            en "No". */}
+                            {!fullConocido ? <Chip title="Full sin confirmar todavía — se asumió el factor sin Full (1.55)">Full desconocido</Chip> : null}{" "}
+                            <Ayuda id={`ayuda-vendidos-aprox-${seguimiento.id}`}>
+                              Mercado Libre no deja ver el sold_quantity real de un competidor — "+N vendidos" × un factor según sea Full o no.
+                            </Ayuda>
+                          </div>
+                        ) : null}
+                        {/* Issue #251, punto 7 — "leído de la página
+                        el {fecha}": inventario/vendidos de un
+                        competidor solo los llena esta lectura, nunca
+                        la API (ver lib/trabajos/revisionDiariaSeguimiento.ts). */}
+                        {seguimiento.esCompetidor && (ultimaFoto?.inventarioDisponible != null || ultimaFoto?.vendidos != null || vendidosAproximado != null) ? (
+                          <div className={styles.subdato}>Leído de la página el {fechaLegible(ultimaFoto!.fecha)}</div>
+                        ) : null}
+                        {/* Issue #251 — ventas/mes y facturación/mes
+                        estimadas, estilo Selltrix. Nunca sin la
+                        etiqueta "aprox." al lado (nunca se mezcla un
+                        estimado con un dato exacto sin marcarlo). */}
+                        {ventasMesAprox != null ? (
+                          <div className={styles.subdato}>
+                            Ventas/mes: {numeroPlano(Math.round(ventasMesAprox))} <Chip>{ETIQUETA_APROXIMADO}</Chip>{" "}
+                            <Ayuda id={`ayuda-ventas-mes-${seguimiento.id}`}>
+                              Estimado a partir de vendidos × antigüedad de la publicación, nunca un dato que Mercado Libre confirme directamente.
+                            </Ayuda>
+                          </div>
+                        ) : null}
+                        {facturacionMesAprox != null ? (
+                          <div className={styles.subdato}>
+                            Facturación/mes: {dinero(facturacionMesAprox)} <Chip>{ETIQUETA_APROXIMADO}</Chip>{" "}
+                            <Ayuda id={`ayuda-facturacion-mes-${seguimiento.id}`}>Ventas/mes estimadas × precio actual.</Ayuda>
+                          </div>
+                        ) : null}
+                      </>
+                    )}
                   </CeldaTabla>
                   <CeldaTabla>
-                    {!fotoHaceUnMes ? "Aún sin 30 días" : deltaUnMes == null ? "—" : conSigno(deltaUnMes, numeroPlano)}
+                    {/* Issue #262 (revisión de Mateo, punto 3) —
+                    mientras no haya 30 días de historia REAL, se
+                    muestra el estimado de ventas/mes marcado "aprox."
+                    en vez de dejar la celda vacía ("Aún sin 30 días");
+                    en cuanto SÍ hay historia real, se muestra el real
+                    y el estimado queda aparte (arriba, en la columna
+                    Vendidos) — nunca mezclados en la misma celda.
+                    Issue #251 (fix "aproximados siempre visibles") —
+                    bug real: "Aún sin 30 días" también aparecía SIN
+                    ninguna fecha real ni calibrada (diasAprox null) —
+                    leía como "esperá unos días más y va a aparecer",
+                    cuando en realidad nunca iba a aparecer sin
+                    antigüedad. Ahora "Aún sin 30 días" queda solo para
+                    cuando SÍ hay una fecha confirmada y da menos de 30
+                    días — el resto (sin fecha para saber nada) dice
+                    "Sin dato (falta antigüedad)". */}
+                    {!fotoHaceUnMes ? (
+                      ventasMesAprox != null ? (
+                        <>
+                          {numeroPlano(Math.round(ventasMesAprox))} <Chip>{ETIQUETA_APROXIMADO}</Chip>
+                        </>
+                      ) : diasAprox != null && diasAprox < 30 ? (
+                        "Aún sin 30 días"
+                      ) : (
+                        <Chip title="Falta antigüedad (real o calibrada) para proyectar ventas/mes">Ventas/mes: Sin dato (falta antigüedad)</Chip>
+                      )
+                    ) : deltaUnMes == null ? (
+                      "—"
+                    ) : (
+                      conSigno(deltaUnMes, numeroPlano)
+                    )}
                   </CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.enCatalogo ?? null, "Sí", "No")}</CeldaTabla>
                   <CeldaTabla>{siNoODesconocido(ultimaFoto?.ganaBotonCompra ?? null, "Gana", "Pierde")}</CeldaTabla>

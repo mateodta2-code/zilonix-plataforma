@@ -1,12 +1,20 @@
-import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
+import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
 import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
-import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
+import {
+  confirmarRecursoProductoMl,
+  LimiteMercadoLibreError,
+  MlNoAutorizadoError,
+  MlNoDisponibleError,
+  MlRespuestaInesperadaError,
+  MlSinPermisoAppError,
+} from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
-import { compararFotos, type FotoComparable } from "@/lib/seguimiento/alertas";
-import { NOMBRE_PENDIENTE_PRIMERA_REVISION, resolverNombre } from "@/lib/seguimiento/seguimientos";
+import { compararFotos, normalizarPublicaciones, obtenerFechaCreacionCatalogo, type FotoComparable } from "@/lib/seguimiento/alertas";
+import { NOMBRE_PENDIENTE_PRIMERA_REVISION, nombreEsAproximado, resolverNombre, resolverNombreYFechaCatalogo } from "@/lib/seguimiento/seguimientos";
 
 // Issue #175 — regla de CLAUDE.md: "toda tarea en segundo plano vive
 // en lib/trabajos/". Mismo patrón que lib/ml/trabajador.ts (tarea
@@ -33,26 +41,95 @@ function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Issue #250, punto C — "agregar recurso_ml, ml_id_externo y status
+// HTTP al log (nunca el token)": el status real no viene siempre como
+// un número suelto (ver lib/ml/cliente.ts) — cada tipo de error ya
+// confirmado ahí implica un código fijo, salvo MlRespuestaInesperadaError
+// (trae el suyo) y MlNoDisponibleError (5xx O tiempo agotado, sin un
+// único código real que mostrar). Nunca lee nada del error que no sea
+// uno de estos tipos ya confirmados — nunca imprime el texto crudo de
+// una respuesta de Mercado Libre, que podría traer datos de la cuenta.
+function detalleErrorMlParaLog(error: unknown): { status: number | null; endpoint: string | null } {
+  if (error instanceof MlRespuestaInesperadaError) return { status: error.status, endpoint: null };
+  if (error instanceof MlSinPermisoAppError) return { status: 403, endpoint: error.endpoint };
+  if (error instanceof MlNoAutorizadoError) return { status: 401, endpoint: null };
+  if (error instanceof LimiteMercadoLibreError) return { status: 429, endpoint: null };
+  if (error instanceof MlNoDisponibleError) return { status: null, endpoint: null }; // 5xx o tiempo agotado, sin un código único
+  return { status: null, endpoint: null };
+}
+
 export type ResultadoRevisionDiaria = {
   activos: number;
   procesados: number;
   // Issue #196 — distinto de "procesados": el índice único
-  // seguimiento_id+fecha bloqueó el insert porque YA había una foto de
-  // hoy para este seguimiento (corrida manual repetida, o una carrera
-  // entre dos corridas del cron a la vez) — nunca se escribió nada
-  // nuevo, pero tampoco fue un error real (ver revisarUnSeguimiento).
+  // seguimiento_id+fecha bloqueó el insert en la carrera real
+  // (rarísima) de dos corridas del cron a la vez — nunca se escribió
+  // nada nuevo, pero tampoco fue un error real (ver revisarUnSeguimiento).
+  // Corrección de Pablo al punto 3 del #250 — el caso COMÚN de "ya
+  // había foto de hoy" (la ronda de la tarde alcanzando lo que la
+  // madrugada ya procesó, o la lectura de la extensión del #251 que ya
+  // creó la fila con solo sus propios campos) ya NO cuenta como
+  // saltado: se detecta antes de llamar a ML y se actualiza/completa
+  // esa fila, así que cuenta como "procesados".
   saltados: number;
   fallidos: number;
   alertasCreadas: number;
 };
 
-// Solo la FECHA (medianoche UTC) — "misma fecha" es la clave real de
-// "misma foto del día", nunca el instante exacto en que corrió el
-// trabajo (ver el comentario de seguimiento_fotos.fecha en db/schema.ts).
+// Issue #251 (revisión de Pablo) — "mismo día" es medianoche de
+// BOGOTÁ, no de UTC: una persona que lee una ficha a las 8pm en
+// Colombia ya está en el día siguiente en UTC (19:00 Bogotá = 00:00
+// UTC) — con el criterio viejo, esa lectura se guardaba en la fecha de
+// MAÑANA desde la perspectiva de Bogotá. Más importante todavía: esta
+// es la misma cuenta que usa guardarDatoDePaginaSeguimiento
+// (lib/seguimiento/seguimientos.ts) para decidir la fila de HOY — si
+// las dos no coincidieran dígito a dígito, la revisión por API y la
+// lectura de la página nunca compartirían la misma fila (issue #251,
+// punto 11), por más que las dos pasaran el mismo día real.
+// `fechaDiaBogota` (lib/filtros-listado.ts) ya resuelve esta cuenta en
+// un solo lugar — nunca una cuenta de huso horario propia acá.
+// Corrección de Pablo — esto usaba `rangoDiaBogota(ahora).inicio`
+// (05:00 UTC, el instante real de la medianoche de Bogotá), pero
+// `seguimiento_fotos.fecha` es un marcador de día calendario que
+// siempre se guardó como medianoche UTC (00:00Z) — con 05:00Z, las
+// filas nuevas no coincidían con las viejas ni con lo que guarda
+// guardarDatoDePaginaSeguimiento (lib/seguimiento/seguimientos.ts),
+// rompiendo la fila compartida entre API y extensión (issue #251,
+// punto 11). `fechaDiaBogota` resuelve el mismo día calendario de
+// Bogotá, pero representado como 00:00Z — compatible con las filas
+// existentes. Issue #250, punto E — ninguna de las dos ventanas del
+// cron (madrugada/tarde, ver
+// .github/workflows/revision-diaria-seguimiento.yml) cruza la
+// medianoche de Bogotá, así que esta fecha sigue cayendo siempre en el
+// mismo día calendario para las dos ventanas.
 function fechaDeHoy(): Date {
-  const hoy = new Date();
-  hoy.setUTCHours(0, 0, 0, 0);
-  return hoy;
+  return fechaDiaBogota(new Date());
+}
+
+// Issue #250, punto E (decisión de Mateo, 2026-10-25) — dos ventanas
+// de revisión automática al día (madrugada 08:00-13:00 UTC, tarde
+// 20:00-23:00 UTC — ver .github/workflows/revision-diaria-seguimiento.yml).
+// Antes de esto, el filtro de abajo comparaba contra la fecha
+// calendario ("ya revisado HOY") — con dos ventanas en el mismo día
+// calendario, la ronda de la tarde nunca volvía a tomar un
+// seguimiento que la madrugada ya había marcado con
+// `ultima_revision_ts` esa misma mañana: las dos rondas colapsaban en
+// una sola. Se compara contra "hace menos de N horas" en vez de "hoy".
+//
+// N = 6 horas, elegido a partir de las ventanas reales: el hueco más
+// corto entre el FIN de una ventana y el INICIO de la siguiente es de
+// 7 horas (13:00 UTC -> 20:00 UTC, madrugada a tarde). 6 horas deja un
+// margen real de al menos 1 hora antes de que la ventana siguiente
+// empiece a correr — un seguimiento revisado en el último minuto de
+// una ventana ya queda elegible desde el primer minuto de la próxima,
+// con margen de sobra para los reintentos horarios dentro de cada
+// ventana.
+const VENTANA_MINIMA_ENTRE_REVISIONES_HORAS = 6;
+
+function limiteRevisionReciente(): Date {
+  const limite = new Date();
+  limite.setUTCHours(limite.getUTCHours() - VENTANA_MINIMA_ENTRE_REVISIONES_HORAS);
+  return limite;
 }
 
 // Issue real: el lote tomaba siempre los mismos 50 sin ningún orden —
@@ -60,21 +137,20 @@ function fechaDeHoy(): Date {
 // de un lote. Dos correcciones, exportada aparte para poder probar el
 // orden y el filtro solos:
 // - Filtro: nunca un seguimiento ya eliminado, y solo los que NO se
-//   revisaron hoy (ultima_revision_ts < medianoche UTC, o null — nunca
-//   revisado) — uno ya revisado hoy no vuelve a entrar en la cola
-//   aunque el cron corra varias veces (ver docs/cron-seguimiento.md,
-//   corre cada hora).
+//   revisaron en las últimas VENTANA_MINIMA_ENTRE_REVISIONES_HORAS
+//   horas (o nunca) — issue #250, punto E: antes era "hoy" (fecha
+//   calendario), lo que bloqueaba la segunda ronda del mismo día.
 // - Orden: ASC NULLS FIRST por ultima_revision_ts — el que nunca se
 //   revisó, o el que hace más tiempo que no se revisa, entra primero
-//   al lote. Así, entre varias corridas del mismo día, el lote
+//   al lote. Así, entre varias corridas de la misma ventana, el lote
 //   siguiente SÍ llega a los que quedaron afuera del anterior, nunca
 //   repite los mismos primeros 50 una y otra vez.
 export async function obtenerSeguimientosPendientesDeHoy(): Promise<(typeof seguimientosMl.$inferSelect)[]> {
-  const hoy = fechaDeHoy();
+  const limite = limiteRevisionReciente();
   return dbTrabajadorSeguimiento
     .select()
     .from(seguimientosMl)
-    .where(and(isNull(seguimientosMl.eliminadoTs), or(isNull(seguimientosMl.ultimaRevisionTs), lt(seguimientosMl.ultimaRevisionTs, hoy))))
+    .where(and(isNull(seguimientosMl.eliminadoTs), or(isNull(seguimientosMl.ultimaRevisionTs), lt(seguimientosMl.ultimaRevisionTs, limite))))
     .orderBy(sql`${seguimientosMl.ultimaRevisionTs} ASC NULLS FIRST`)
     .limit(TAMAÑO_LOTE);
 }
@@ -101,15 +177,26 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
       // Libre caído, etc.) no debe tumbar el lote entero — mismo
       // criterio que procesarAvisosPendientes (lib/ml/trabajador.ts).
       fallidos += 1;
-      console.error(`Seguimiento ${seguimiento.id} (${seguimiento.tipo}) no se pudo revisar:`, error instanceof Error ? error.message : error);
-      // Bug real (issue #175): si un fallido NUNCA marca
-      // ultima_revision_ts, el orden ASC NULLS FIRST lo deja al frente
-      // del lote para siempre — ahoga los cupos en cada corrida
-      // siguiente (encontrado en CI: seguimientos viejos sin cuenta ML
-      // conectada, ahogando el lote de 50 y haciendo timeout). Marcarlo
-      // igual que un éxito lo rota al final; el filtro "ya revisado
-      // hoy" evita que la MISMA corrida (o una corrida posterior el
-      // mismo día) lo vuelva a tomar, pero mañana sí se reintenta.
+      const { status, endpoint } = detalleErrorMlParaLog(error);
+      console.error(
+        `Seguimiento ${seguimiento.id} (${seguimiento.tipo}, recurso_ml=${seguimiento.recursoMl}, ml_id_externo=${seguimiento.mlIdExterno}` +
+          `${status != null ? `, HTTP ${status}` : ""}${endpoint ? `, endpoint=${endpoint}` : ""}) no se pudo revisar:`,
+        error instanceof Error ? error.message : error
+      );
+      // Issue #175 (reafirmado tras la corrección de Pablo al punto C
+      // del #250) — SÍ se marca ultima_revision_ts también en un
+      // fallo: sin esto, un fallido permanente (empresa sin cuenta ML
+      // conectada, recurso que de verdad no existe) se queda al frente
+      // del lote (ASC NULLS FIRST) para siempre, ahogando los 50 cupos
+      // en cada corrida siguiente — el bug real que #175 corrigió.
+      // Con el filtro de VENTANA_MINIMA_ENTRE_REVISIONES_HORAS (6h,
+      // punto E) esto YA significa "reintentar en la próxima ventana"
+      // (dos veces al día), nunca "esperar hasta mañana" como antes de
+      // ese punto — por eso una primera versión de este punto C había
+      // quitado esta línea pensando que hacía falta para reintentar
+      // más seguido; Pablo corrigió que eso rompía la protección real
+      // de #175 sin necesidad, porque la ventana de 6h ya resuelve el
+      // reintento rápido por sí sola.
       await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id));
     }
   }
@@ -152,19 +239,145 @@ function aFotoComparable(fila: typeof seguimientoFotos.$inferSelect): FotoCompar
     estado: fila.estado,
     enCatalogo: fila.enCatalogo,
     ganaBotonCompra: fila.ganaBotonCompra,
-    publicaciones: fila.publicaciones,
+    // Issue #251 (corrección de Pablo, punto 3) — una fila guardada
+    // antes de que existiera `total`/`fuente` puede traer el array
+    // viejo directo; normalizarPublicaciones la envuelve antes de que
+    // compararFotos (lib/seguimiento/alertas.ts) la use, nunca revienta
+    // en `.visibles.map(...)`.
+    publicaciones: normalizarPublicaciones(fila.publicaciones),
   };
 }
 
 type ResultadoUnSeguimiento = { saltado: boolean; alertasCreadas: number };
 
-// `saltado: true` SOLO cuando el índice único seguimiento_id+fecha
-// bloqueó el insert porque ya había una foto de hoy (ver el
-// onConflictDoNothing más abajo) — nunca se escribió nada nuevo.
-// `saltado: false` con `alertasCreadas: 0` es un caso DISTINTO: la
-// foto de hoy SÍ se escribió (sí fue "procesado"), simplemente no hay
-// foto de ayer con qué compararla todavía (primera foto de este
-// seguimiento) — no hay alertas que generar, pero no es un salto.
+// Campos que SIEMPRE vienen de la API (nunca los escribe la
+// extensión) — los únicos que la ronda de la tarde actualiza cuando
+// ya existe una foto de hoy (ver más abajo). inventarioDisponible/
+// inventarioAproximado/vendidos/publicaciones quedan afuera a
+// propósito: son las mismas columnas que issue #251 reusa para lo que
+// la extensión lee de la página (nunca llamadas a Mercado Libre) —
+// esta ronda nunca debe pisar un dato más completo (de la extensión)
+// con uno más parcial de la API, mismo criterio documentado en
+// guardarDatoDePaginaSeguimiento (lib/seguimiento/seguimientos.ts),
+// que hace lo simétrico: nunca toca estos campos de acá.
+type CamposApiDeFoto = Pick<typeof seguimientoFotos.$inferInsert, "precio" | "precioAnterior" | "estado" | "enCatalogo" | "ganaBotonCompra" | "esFull" | "esEnvioGratis">;
+
+function camposApiDeDatos(datos: Awaited<ReturnType<typeof leerConReintento429>>): CamposApiDeFoto {
+  return {
+    precio: datos.precio != null ? String(datos.precio) : null,
+    precioAnterior: datos.precioAnterior != null ? String(datos.precioAnterior) : null,
+    estado: datos.estado,
+    enCatalogo: datos.enCatalogo,
+    ganaBotonCompra: datos.ganaBotonCompra,
+    esFull: datos.esFull,
+    esEnvioGratis: datos.esEnvioGratis,
+  };
+}
+
+// Issue #251 ("Seguimiento muestra aproximados como Selltrix") — lo
+// que el cron guarda en `publicaciones` (nunca una columna nueva, ver
+// db/schema.ts): para tipo="tienda", el snapshot de siempre
+// (total/visibles/fuente); para tipo="producto", `fechaCreacion`
+// (date_created real del ÍTEM, nunca de catálogo — ver lib/seguimiento/lector.ts,
+// siempre null ahí para recursoMl "product") y/o `fechaCreacionCatalogo`
+// (date_created real del catálogo, issue #262 — viene de
+// resolverNombreYFechaCatalogo, nunca de este `datos`). Issue #252 ya
+// reusa esta misma columna para vendidosAproximado/precioAproximado,
+// que únicamente escribe la extensión — nunca este cron. `undefined`
+// cuando no hay nada nuevo que guardar — Drizzle lo omite del
+// INSERT/UPDATE entero, mismo criterio que camposPagina en
+// guardarDatoDePaginaSeguimiento (lib/seguimiento/seguimientos.ts).
+function publicacionesParaGuardar(
+  tipo: "producto" | "tienda",
+  datos: Awaited<ReturnType<typeof leerConReintento429>>,
+  fechaCreacionCatalogo: string | null
+): typeof seguimientoFotos.$inferInsert.publicaciones {
+  if (tipo === "tienda") {
+    return datos.publicaciones != null ? { total: null, visibles: datos.publicaciones, fuente: "api" as const } : undefined;
+  }
+  const campos: { fechaCreacion?: string; fechaCreacionCatalogo?: string } = {};
+  if (datos.fechaCreacion != null) campos.fechaCreacion = datos.fechaCreacion;
+  if (fechaCreacionCatalogo != null) campos.fechaCreacionCatalogo = fechaCreacionCatalogo;
+  return Object.keys(campos).length > 0 ? campos : undefined;
+}
+
+// Issue #251 — expresión SQL compartida por los 3 lugares que escriben
+// `publicaciones` desde el cron (abajo): `||` (merge shallow de jsonb
+// de Postgres), NUNCA un reemplazo del objeto completo — mismo
+// criterio que ya usa guardarDatoDePaginaSeguimiento (issue #252) para
+// no pisar vendidosAproximado/precioAproximado (que solo escribe la
+// extensión) con fechaCreacion (que solo escribe este cron), ni
+// viceversa. `excluded.publicaciones` es lo que esta misma sentencia
+// INSERT/UPDATE intenta guardar (publicacionesParaGuardar, arriba) —
+// nunca undefined de verdad en SQL (null si la función de arriba
+// devolvió undefined), por eso el segundo coalesce.
+const MERGE_PUBLICACIONES_SQL = sql`coalesce(seguimiento_fotos.publicaciones, '{}'::jsonb) || coalesce(excluded.publicaciones, '{}'::jsonb)`;
+
+// `saltado: true` SOLO en la carrera real (rarísima) de dos corridas
+// del cron a la vez: la ronda de la tarde (abajo) ya mira si hay foto
+// de hoy ANTES de llamar a Mercado Libre, así que el índice único
+// seguimiento_id+fecha solo llega a bloquear un insert cuando otra
+// corrida lo insertó en el instante exacto entre ese chequeo y este
+// insert — onConflictDoNothing sigue de red de seguridad para ESE
+// caso, nunca para el camino normal de la tarde (que ahora actualiza,
+// no inserta-y-descarta). `saltado: false` con `alertasCreadas: 0` es
+// un caso DISTINTO: la foto de hoy SÍ se escribió/actualizó (sí fue
+// "procesado"), simplemente no hay foto de ayer con qué compararla
+// todavía (primera foto de este seguimiento) — no hay alertas que
+// generar, pero no es un salto.
+// Issue #252 (revisión de Pablo, punto 4) — bug real: antes, la
+// autocorrección de `recurso_ml` (más abajo) dependía de
+// `seguimiento.nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION` — si la
+// extensión leía la página ANTES de que corriera el cron, ya
+// reemplazaba ese placeholder (guardarDatoDePaginaSeguimiento,
+// lib/seguimiento/seguimientos.ts), así que esta condición daba falso
+// para siempre y `recurso_ml` se quedaba mal guardado (MCO452014269:
+// nombre resuelto por la extensión, `recurso_ml` "item" cuando el real
+// era "product", `/items/{id}` 404 para siempre). Ahora depende de si
+// la API YA CONFIRMÓ algo real para este seguimiento — cualquier foto
+// con precio/estado/enCatalogo/ganaBotonCompra no nulos (los mismos
+// campos de CamposApiDeFoto, arriba) — nunca del nombre, que la
+// extensión puede resolver sin que eso diga nada sobre si `recurso_ml`
+// es correcto.
+async function huboAlgunaLecturaDeApiConfirmada(empresaId: string, seguimientoId: string): Promise<boolean> {
+  const [fila] = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ id: seguimientoFotos.id })
+      .from(seguimientoFotos)
+      .where(
+        and(
+          eq(seguimientoFotos.seguimientoId, seguimientoId),
+          or(
+            isNotNull(seguimientoFotos.precio),
+            isNotNull(seguimientoFotos.estado),
+            isNotNull(seguimientoFotos.enCatalogo),
+            isNotNull(seguimientoFotos.ganaBotonCompra)
+          )
+        )
+      )
+      .limit(1)
+  );
+  return fila != null;
+}
+
+// Issue #262 (revisión de Pablo, punto BLOQUEANTE) — bug real: la
+// llamada a resolverNombreYFechaCatalogo (abajo, en revisarUnSeguimiento)
+// vivía DENTRO de `if (nombreEsAproximado(...))` — un catálogo que YA
+// tiene nombre real (la mayoría: MCO64541261 "Rtafull", el Colchón
+// Relax) nunca disparaba esa llamada, así que `fechaCreacionCatalogo`
+// nunca se completaba para ninguno de ellos. Este chequeo (jsonb de
+// `publicaciones`, mismo criterio de lectura que el script de
+// calibración) es independiente del nombre: una vez que CUALQUIER
+// foto de este seguimiento ya tiene `fechaCreacionCatalogo`, nunca se
+// vuelve a pedir — una sola llamada real por catálogo, nunca una
+// diaria.
+async function huboFechaCreacionCatalogoConfirmada(empresaId: string, seguimientoId: string): Promise<boolean> {
+  const fotos = await dbComoEmpresa(empresaId, (tx) =>
+    tx.select({ publicaciones: seguimientoFotos.publicaciones }).from(seguimientoFotos).where(eq(seguimientoFotos.seguimientoId, seguimientoId))
+  );
+  return fotos.some((f) => obtenerFechaCreacionCatalogo(f.publicaciones) != null);
+}
+
 async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoUnSeguimiento> {
   const cuenta = await obtenerCuentaMlActiva(seguimiento.empresaId);
   if (!cuenta) throw new Error("La empresa no tiene ninguna cuenta de Mercado Libre conectada.");
@@ -181,16 +394,91 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
   // confirmado vigente, en cada revisión diaria mientras siga
   // pendiente. Nunca se reintenta si ya hay un nombre real, para no
   // gastar una llamada a ML de más todos los días.
-  if (seguimiento.nombre === NOMBRE_PENDIENTE_PRIMERA_REVISION) {
-    const nombreResuelto = await resolverNombre(seguimiento.tipo, seguimiento.recursoMl, seguimiento.mlIdExterno, token);
+  //
+  // Issue #252 (revisión de Pablo, punto 4) — las dos correcciones de
+  // abajo son INDEPENDIENTES a propósito (dos `if` separados, nunca
+  // uno solo): la de `recurso_ml` depende de si la API confirmó algo
+  // real alguna vez (huboAlgunaLecturaDeApiConfirmada, arriba); la del
+  // nombre depende de si sigue siendo aproximado (nombreEsAproximado,
+  // lib/seguimiento/seguimientos.ts — el placeholder original, o un
+  // respaldo de la extensión todavía sin confirmar). Antes las dos
+  // compartían la misma condición (nombre pendiente) — bug real:
+  // MCO452014269 tenía `recurso_ml` guardado mal ("item" cuando el
+  // real era "product", `/items/{id}` 404 para siempre), pero la
+  // extensión ya había puesto un nombre ahí (issue #251), así que la
+  // condición compartida daba falso para siempre y `recurso_ml` NUNCA
+  // se corregía, aunque la API jamás hubiera confirmado nada.
+  let recursoMl = seguimiento.recursoMl;
+  if (seguimiento.tipo === "producto" && !(await huboAlgunaLecturaDeApiConfirmada(seguimiento.empresaId, seguimiento.id))) {
+    const confirmacion = await confirmarRecursoProductoMl(seguimiento.mlIdExterno);
+    if (confirmacion.estado === "confirmado" && confirmacion.recursoMl !== recursoMl) {
+      recursoMl = confirmacion.recursoMl;
+      await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ recursoMl }).where(eq(seguimientosMl.id, seguimiento.id)));
+    }
+  }
+  // Issue #262 (revisión de Pablo, punto 2, corregido en el punto
+  // BLOQUEANTE de la revisión siguiente) — "product" (catálogo) usa
+  // resolverNombreYFechaCatalogo en vez de resolverNombre (mismo GET
+  // /products/{id} de siempre, nunca una llamada nueva): además del
+  // nombre, esa misma respuesta trae el date_created REAL del
+  // catálogo (nunca el de una oferta ganadora, ver lib/seguimiento/lector.ts),
+  // que se guarda más abajo junto con la foto del día.
+  //
+  // Bug real corregido acá: antes esta llamada vivía DENTRO de
+  // `if (nombreEsAproximado(...))` — un catálogo que YA tiene nombre
+  // real (la mayoría) nunca la disparaba, así que `fechaCreacionCatalogo`
+  // nunca se completaba para esos. Ahora se llama también cuando
+  // TODAVÍA no hay ninguna foto con `fechaCreacionCatalogo` confirmada
+  // (huboFechaCreacionCatalogoConfirmada, arriba) — independiente del
+  // nombre. Una vez que exista, nunca se vuelve a pedir: una sola
+  // llamada real por catálogo, nunca una diaria. La ACTUALIZACIÓN del
+  // nombre sigue gateada aparte, solo mientras siga aproximado —
+  // nunca se pisa un nombre real ya confirmado solo porque esta
+  // llamada se repitió por la fecha.
+  const nombreAproximado = nombreEsAproximado(seguimiento.nombre);
+  let fechaCreacionCatalogo: string | null = null;
+  if (seguimiento.tipo === "producto" && recursoMl === "product") {
+    const yaTieneFechaCatalogo = await huboFechaCreacionCatalogoConfirmada(seguimiento.empresaId, seguimiento.id);
+    if (nombreAproximado || !yaTieneFechaCatalogo) {
+      const resuelto = await resolverNombreYFechaCatalogo(seguimiento.mlIdExterno, token);
+      fechaCreacionCatalogo = resuelto.fechaCreacionCatalogo;
+      if (nombreAproximado && resuelto.nombre !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
+        await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: resuelto.nombre }).where(eq(seguimientosMl.id, seguimiento.id)));
+      }
+    }
+  } else if (nombreAproximado) {
+    const nombreResuelto = await resolverNombre(seguimiento.tipo, recursoMl, seguimiento.mlIdExterno, token);
     if (nombreResuelto !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
       await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: nombreResuelto }).where(eq(seguimientosMl.id, seguimiento.id)));
     }
   }
 
-  const datos = await leerConReintento429(seguimiento, token, cuentaFila.cuentaIdExterna);
-
   const hoy = fechaDeHoy();
+
+  // Corrección de Pablo (revisión del PR #253), punto 3 — mirar ANTES
+  // de llamar a Mercado Libre si ya hay foto de hoy (hora Bogotá;
+  // fechaDeHoy() ya resuelve el mismo día calendario en Bogotá para
+  // las dos ventanas del cron, punto E — ninguna cruza medianoche
+  // Bogotá, y es la misma cuenta que usa guardarDatoDePaginaSeguimiento
+  // del #251). La ronda de la tarde alcanzando un seguimiento que la
+  // madrugada ya procesó hoy mismo es el caso NORMAL, no una carrera —
+  // antes esto llamaba a Mercado Libre igual y descartaba el resultado
+  // con onConflictDoNothing ("saltado"), gastando la llamada para
+  // nada. Ahora se sabe desde acá si toca ACTUALIZAR la fila de hoy en
+  // vez de intentar insertar una nueva — y esa fila puede existir
+  // también porque la extensión (#251) ya la creó hoy con solo sus
+  // propios campos (API en null): eso tampoco debe tratarse como "ya
+  // revisado por la API", así que nunca se gatea por `precio != null`
+  // acá, solo por la EXISTENCIA de la fila.
+  const [fotoDeHoyExistente] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+    tx.select().from(seguimientoFotos).where(and(eq(seguimientoFotos.seguimientoId, seguimiento.id), eq(seguimientoFotos.fecha, hoy)))
+  );
+
+  // Issue #252 (smoke de staging) — `{ ...seguimiento, recursoMl }`,
+  // nunca `seguimiento` tal cual: si el bloque de arriba corrigió el
+  // tipo real, esta lectura (y todo lo que dependa de ella) tiene que
+  // usar el tipo YA corregido, nunca el que seguía guardado mal.
+  const datos = await leerConReintento429({ ...seguimiento, recursoMl }, token, cuentaFila.cuentaIdExterna);
 
   const [fotoAnterior] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx
@@ -201,41 +489,119 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
       .limit(1)
   );
 
-  const [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
-    tx
-      .insert(seguimientoFotos)
-      .values({
-        empresaId: seguimiento.empresaId,
-        seguimientoId: seguimiento.id,
-        fecha: hoy,
-        precio: datos.precio != null ? String(datos.precio) : null,
-        precioAnterior: datos.precioAnterior != null ? String(datos.precioAnterior) : null,
-        inventarioDisponible: datos.inventarioDisponible,
-        inventarioAproximado: datos.inventarioAproximado,
-        vendidos: datos.vendidos,
-        estado: datos.estado,
-        enCatalogo: datos.enCatalogo,
-        ganaBotonCompra: datos.ganaBotonCompra,
-        esFull: datos.esFull,
-        esEnvioGratis: datos.esEnvioGratis,
-        publicaciones: datos.publicaciones,
-      })
-      // Si el trabajo ya corrió hoy para este seguimiento (una corrida
-      // manual repetida, o el cron disparado dos veces), el índice
-      // único seguimiento_id+fecha lo bloquea — onConflictDoNothing en
-      // vez de dejar que la excepción tumbe el lote entero.
-      .onConflictDoNothing()
-      .returning()
-  );
+  let fotoNueva: typeof seguimientoFotos.$inferSelect | undefined;
+  if (fotoDeHoyExistente) {
+    // Actualiza SOLO los campos de API (precio, Full, catálogo, etc.)
+    // con lo más reciente — nunca toca inventarioDisponible/
+    // inventarioAproximado/vendidos (ver camposApiDeDatos, arriba: son
+    // los mismos campos que issue #251 reusa para la lectura de la
+    // extensión). Genera alertas comparando esta fila ya actualizada
+    // contra la de ayer, igual que el camino de insertar.
+    // Issue #251 ("aproximados estilo Selltrix") — SOLO para
+    // tipo="producto" (nunca tienda, que no cambia su comportamiento
+    // acá): si la API confirmó date_created (del ítem) o se resolvió
+    // fechaCreacionCatalogo (del catálogo, issue #262) esta vez, se
+    // MEZCLA (`||`) con lo que ya hubiera en `publicaciones` (puede
+    // traer vendidosAproximado/precioAproximado de la extensión, issue
+    // #252) — nunca se reemplaza el objeto completo. Si no hay nada
+    // nuevo, la columna queda intacta (ni siquiera entra al SET).
+    const fechaCreacionNueva = seguimiento.tipo === "producto" ? publicacionesParaGuardar(seguimiento.tipo, datos, fechaCreacionCatalogo) : undefined;
+    [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx
+        .update(seguimientoFotos)
+        .set({
+          ...camposApiDeDatos(datos),
+          ...(fechaCreacionNueva !== undefined
+            ? { publicaciones: sql`coalesce(seguimiento_fotos.publicaciones, '{}'::jsonb) || ${JSON.stringify(fechaCreacionNueva)}::jsonb` }
+            : {}),
+        })
+        .where(eq(seguimientoFotos.id, fotoDeHoyExistente.id))
+        .returning()
+    );
+  } else {
+    [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+      tx
+        .insert(seguimientoFotos)
+        .values({
+          empresaId: seguimiento.empresaId,
+          seguimientoId: seguimiento.id,
+          fecha: hoy,
+          ...camposApiDeDatos(datos),
+          inventarioDisponible: datos.inventarioDisponible,
+          inventarioAproximado: datos.inventarioAproximado,
+          vendidos: datos.vendidos,
+          // Issue #251, punto 5 — el total REAL ("752 resultados") solo
+          // lo puede traer la lectura de página (la API da 403 real al
+          // listar publicaciones de una tienda ajena); acá solo se
+          // insertó lo que la API pudo ver, nunca un total inventado.
+          // Issue #251 ("aproximados estilo Selltrix") — para
+          // tipo="producto", en vez de siempre `null`, guarda
+          // `fechaCreacion` cuando la API la confirmó (publicacionesParaGuardar,
+          // arriba) — la extensión nunca llega a correr ANTES de este
+          // primer insert del día en la práctica (el cron corre temprano),
+          // pero si así fuera, onConflictDoUpdate (abajo) mezcla en vez
+          // de pisar.
+          publicaciones: publicacionesParaGuardar(seguimiento.tipo, datos, fechaCreacionCatalogo),
+        })
+        // Corrección de Pablo — onConflictDoUpdate en vez de
+        // onConflictDoNothing: en la carrera real (rarísima) de dos
+        // corridas a la vez, o del cron chocando con la extensión
+        // (#251) insertando casi al mismo tiempo, descartar el
+        // resultado tiraría los datos de la API que SÍ se acaban de
+        // leer. Actualiza solo los campos de API (mismo
+        // camposApiDeDatos de la rama "ya existe foto" de arriba)
+        // sobre lo que sea que ganó la carrera — nunca pisa
+        // inventarioDisponible/vendidos. `publicaciones` sí entra acá
+        // (MERGE_PUBLICACIONES_SQL, arriba) — degrada solo a
+        // "preservar lo que ya había" cuando no hay nada nuevo que
+        // guardar (coalesce con `{}` a los dos lados), nunca reemplaza
+        // el objeto completo.
+        .onConflictDoUpdate({
+          target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha],
+          set: { ...camposApiDeDatos(datos), publicaciones: MERGE_PUBLICACIONES_SQL },
+        })
+        .returning()
+    );
+  }
   if (!fotoNueva) return { saltado: true, alertasCreadas: 0 };
   if (!fotoAnterior) return { saltado: false, alertasCreadas: 0 };
 
   const alertas = compararFotos(seguimiento.tipo, aFotoComparable(fotoAnterior), aFotoComparable(fotoNueva));
   if (alertas.length === 0) return { saltado: false, alertasCreadas: 0 };
 
+  // Punto 2 de la revisión de Pablo — la ronda de la tarde (o "Revisar
+  // ahora") puede volver a comparar la foto de hoy YA actualizada
+  // contra la misma foto de ayer y encontrar la MISMA alerta otra vez
+  // (ej. el mismo precio_bajo). Nunca se inserta una alerta del mismo
+  // tipo para el mismo seguimiento si ya existe una de hoy (hora
+  // Bogotá) — sin índice único nuevo (sin migración): se filtra en la
+  // aplicación, mismo criterio ya aceptado para volumen bajo que
+  // verificarCupoCompetidor (lib/seguimiento/seguimientos.ts) — no es
+  // un candado atómico contra una carrera exacta, pero el volumen real
+  // de alertas por seguimiento por día es bajísimo. `seguimiento_alertas.creado_ts`
+  // es un instante real (timestamptz, a diferencia de `fecha`, que es
+  // un DATE) — reusa el mismo `rangoDiaBogota` de arriba en vez de una
+  // segunda cuenta de huso horario propia.
+  const { inicio: inicioHoyBogota, finExclusivo: finHoyBogota } = rangoDiaBogota(new Date());
+  const alertasDeHoy = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+    tx
+      .select({ tipo: seguimientoAlertas.tipo })
+      .from(seguimientoAlertas)
+      .where(
+        and(
+          eq(seguimientoAlertas.seguimientoId, seguimiento.id),
+          gte(seguimientoAlertas.creadoTs, inicioHoyBogota),
+          lt(seguimientoAlertas.creadoTs, finHoyBogota)
+        )
+      )
+  );
+  const tiposYaHoy = new Set(alertasDeHoy.map((a) => a.tipo));
+  const alertasNuevas = alertas.filter((alerta) => !tiposYaHoy.has(alerta.tipo));
+  if (alertasNuevas.length === 0) return { saltado: false, alertasCreadas: 0 };
+
   await dbComoEmpresa(seguimiento.empresaId, (tx) =>
     tx.insert(seguimientoAlertas).values(
-      alertas.map((alerta) => ({
+      alertasNuevas.map((alerta) => ({
         empresaId: seguimiento.empresaId,
         seguimientoId: seguimiento.id,
         fotoId: fotoNueva.id,
@@ -245,7 +611,7 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
     )
   );
 
-  return { saltado: false, alertasCreadas: alertas.length };
+  return { saltado: false, alertasCreadas: alertasNuevas.length };
 }
 
 export type ResultadoRevisionInmediata = { ok: true; saltado: boolean; alertasCreadas: number } | { ok: false; error: string };
@@ -267,10 +633,11 @@ export type ResultadoRevisionInmediata = { ok: true; saltado: boolean; alertasCr
 // caso, para que el cron de hoy mismo lo reintente solo (al revés del
 // fallido del LOTE, que sí se marca para no ahogar los 50 cupos —
 // acá no hay ningún lote que ahogar, es un solo seguimiento puntual).
-// Si Mercado Libre YA tenía una foto de hoy para este seguimiento
-// (ej. revivir uno eliminado que el cron ya alcanzó a procesar hoy
-// mismo), el índice único + onConflictDoNothing de revisarUnSeguimiento
-// lo deja como "saltado", nunca duplicado.
+// Si ya hay foto de hoy para este seguimiento (ej. el cron ya lo
+// procesó hoy mismo), revisarUnSeguimiento ACTUALIZA esa fila con lo
+// más reciente de la API en vez de insertar una nueva — nunca
+// duplicada, y "saltado" queda solo para la carrera real (rarísima)
+// que describe el comentario de revisarUnSeguimiento.
 export async function revisarAhoraUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSelect): Promise<ResultadoRevisionInmediata> {
   try {
     const resultado = await revisarUnSeguimiento(seguimiento);

@@ -5,6 +5,7 @@ import {
   buscarEnSitioMl,
   buscarItemsPorSkuMl,
   buscarProductosCatalogo,
+  confirmarRecursoProductoMl,
   crearItemMl,
   domainDiscoveryMl,
   leerAtributosCategoriaMl,
@@ -12,6 +13,7 @@ import {
   leerCuentaMl,
   leerItemBasicoMl,
   LimiteMercadoLibreError,
+  pedirLecturaMl,
   linkPublicacion,
   MlNoAutorizadoError,
   MlNoDisponibleError,
@@ -99,6 +101,23 @@ describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)"
   it("HTTP 429: corta con LimiteMercadoLibreError en vez de devolver {ok:false} en silencio", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 429)));
     await expect(obtenerVendedor("123456", "token")).rejects.toThrow(LimiteMercadoLibreError);
+  });
+
+  it("HTTP 429 de lectura guarda Retry-After", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 429,
+        headers: { get: (nombre: string) => (nombre.toLowerCase() === "retry-after" ? "12" : null) },
+        json: async () => ({}),
+        text: async () => "",
+      }))
+    );
+    await expect(pedirLecturaMl("/users/123456", "token")).rejects.toMatchObject({
+      name: "LimiteMercadoLibreError",
+      retryAfterMs: 12_000,
+    });
   });
 });
 
@@ -379,6 +398,42 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
     await expect(obtenerItemMl("MCO1", "token")).rejects.toThrow(MlNoAutorizadoError);
   });
 
+  // Issue #262 (revisión de Pablo, punto 2; corrección de Pablo sobre
+  // el punto 2) — obtenerProducto lee `date_created` de la respuesta
+  // COMPLETA de la MISMA llamada de siempre (GET /products/{id}, SIN
+  // `?attributes=...`): nunca se confirmó que ese endpoint acepte ese
+  // parámetro (a diferencia de /items/{id}, que sí lo confirma en
+  // producción) — pedirlo ahí arriesgaba un 400 real que también
+  // tumbara el nombre, que esta función ya traía bien antes de esta
+  // tarea. Nunca una llamada nueva — resolverNombre pasa a guardar el
+  // date_created REAL del catálogo (fechaCreacionCatalogo), nunca el
+  // de una oferta ganadora (ver lib/seguimiento/lector.ts).
+  it("obtenerProducto: lee 'date_created' de la respuesta completa, SIN pedir ?attributes=... (nunca arriesga perder el nombre)", async () => {
+    let urlPedida = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urlPedida = url;
+        return respuestaJson({ name: "Pulsera deportiva", pictures: [], date_created: "2025-03-15T10:00:00.000Z" });
+      })
+    );
+    const producto = await obtenerProducto("MCO222", "token");
+    expect(producto?.fechaCreacion).toBe("2025-03-15T10:00:00.000Z");
+    expect(urlPedida).toBe("https://api.mercadolibre.com/products/MCO222"); // sin query string
+  });
+
+  // Pregunta explícita de la revisión: si la respuesta real de Mercado
+  // Libre no trae `date_created` (puede pasar: no todos los catálogos
+  // lo confirman), el tipo nunca queda en `undefined` silencioso —
+  // siempre `null` explícito, mismo criterio que el resto del repo
+  // ("nunca inventa, pero tampoco esconde que falta").
+  it("sin date_created en la respuesta real: fechaCreacion queda en null explícito, nunca undefined", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ name: "Pulsera deportiva", pictures: [] })));
+    const producto = await obtenerProducto("MCO222", "token");
+    expect(producto?.fechaCreacion).toBeNull();
+    expect(producto?.fechaCreacion).not.toBeUndefined();
+  });
+
   // Bug real: una publicación pausada/cerrada (status !== "active")
   // igual aparecía en la tabla de Investigación — su precio/oferta ya
   // no sirve para analizar el mercado (no se puede comprar). Se
@@ -399,6 +454,33 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
     const r = await obtenerItemMl("MCO111", "token");
     expect(r?.producto).toEqual({ id: "MCO111", nombre: "Reloj", foto: "https://x" });
     expect(r?.oferta?.precio).toBe(35_000);
+  });
+
+  // Issue #212 — obtenerItemMl ahora pide también "permalink"
+  // (confirmado en producción en zilonix-os-web, GET /items/{id}
+  // ?attributes=id,status,permalink,pictures) — investigacion.ts lo
+  // prefiere sobre el link armado a mano cuando Mercado Libre lo manda.
+  it("obtenerItemMl: pide 'permalink' y lo guarda en la oferta cuando Mercado Libre lo manda", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      expect(String(url)).toContain("permalink");
+      return respuestaJson({
+        title: "Reloj",
+        price: 35_000,
+        currency_id: "COP",
+        seller_id: "123456",
+        status: "active",
+        permalink: "https://articulo.mercadolibre.com.co/MCO-111-reloj",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await obtenerItemMl("MCO111", "token");
+    expect(r?.oferta?.permalink).toBe("https://articulo.mercadolibre.com.co/MCO-111-reloj");
+  });
+
+  it("obtenerItemMl: sin permalink en la respuesta, queda null (nunca inventado)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Reloj", price: 35_000, currency_id: "COP", seller_id: "123456", status: "active" })));
+    const r = await obtenerItemMl("MCO111", "token");
+    expect(r?.oferta?.permalink).toBeNull();
   });
 });
 
@@ -481,7 +563,7 @@ describe("obtenerFotoItemMl — lector de item ajeno (issue #175)", () => {
   it("pide los campos exactos pedidos y arma la foto completa", async () => {
     const fetchMock = vi.fn(async (url: unknown) => {
       expect(String(url)).toBe(
-        "https://api.mercadolibre.com/items/MCO111?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping"
+        "https://api.mercadolibre.com/items/MCO111?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping,date_created"
       );
       return respuestaJson({
         price: 100,
@@ -492,6 +574,7 @@ describe("obtenerFotoItemMl — lector de item ajeno (issue #175)", () => {
         catalog_listing: true,
         catalog_product_id: "MCO999",
         shipping: { logistic_type: "fulfillment", free_shipping: true },
+        date_created: "2024-01-01T00:00:00.000Z",
       });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -508,6 +591,7 @@ describe("obtenerFotoItemMl — lector de item ajeno (issue #175)", () => {
       catalogProductId: "MCO999",
       esFull: true,
       esEnvioGratis: true,
+      fechaCreacion: "2024-01-01T00:00:00.000Z",
     });
   });
 
@@ -520,6 +604,7 @@ describe("obtenerFotoItemMl — lector de item ajeno (issue #175)", () => {
     expect(resultado?.catalogProductId).toBeNull();
     expect(resultado?.esFull).toBeNull();
     expect(resultado?.esEnvioGratis).toBeNull();
+    expect(resultado?.fechaCreacion).toBeNull();
   });
 
   it("itemId inválido nunca llama a fetch", async () => {
@@ -612,5 +697,100 @@ describe("obtenerPublicacionesVendedorAjenoMl — dos caminos (items/search -> s
     });
     const resultado = await obtenerPublicacionesVendedorAjenoMl("123456789", "token");
     expect(resultado).toEqual([{ itemId: "MCO2", titulo: "Pulsera", precio: 20_000 }]);
+  });
+
+  // Issue #250, punto B — bug real en staging: el buscador público
+  // TAMBIÉN daba 403 para 2 de 5 tiendas en la primera corrida real, y
+  // antes esa segunda llamada no tenía try/catch — el 403 subía sin
+  // capturar y toda la revisión de esa tienda contaba como "fallida"
+  // (ni siquiera guardaba una foto del día). Ahora null ("sin dato de
+  // la API hoy"), nunca una excepción.
+  it("items/search Y el buscador público dan 403: null (sin dato de la API), nunca lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(obtenerPublicacionesVendedorAjenoMl("123456789", "token")).resolves.toBeNull();
+  });
+
+  // Corrección de Pablo (revisión del PR #253), punto 6 — CUALQUIER
+  // no-ok del buscador público es "sin dato" (null), no solo un 403:
+  // antes de este punto, un 404/400/etc. ahí caía en el "return []"
+  // genérico, inventando un "cero publicaciones" que Mercado Libre
+  // nunca confirmó.
+  it("items/search da 403 y el buscador público da 404 (no 403): también null, nunca []", async () => {
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/users/") && urlStr.includes("/items/search")) return respuestaJson({}, 403);
+      if (urlStr.includes("/sites/MCO/search")) return respuestaJson({}, 404);
+      throw new Error(`URL inesperada: ${urlStr}`);
+    });
+    await expect(obtenerPublicacionesVendedorAjenoMl("123456789", "token")).resolves.toBeNull();
+  });
+});
+
+describe("confirmarRecursoProductoMl — confirmar item/product contra ML antes de guardar, SIN token (issue #250, punto A + corrección de Pablo)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("/items/{id} responde ok: confirmado como 'item', nunca prueba /products, nunca manda Authorization", async () => {
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/products/")) throw new Error(`no debería llamar a ${urlStr}`);
+      expect((init?.headers as Record<string, string> | undefined)?.Authorization).toBeUndefined();
+      return respuestaJson({ id: "MCO123" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "confirmado", recursoMl: "item" });
+  });
+
+  it("/items/{id} da 404 y /products/{id} responde ok: confirmado como 'product' — bug real (catálogo pegado sin '/p/')", async () => {
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/items/")) return respuestaJson({}, 404);
+      if (urlStr.includes("/products/")) return respuestaJson({ name: "Producto de catálogo" });
+      throw new Error(`URL inesperada: ${urlStr}`);
+    });
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "confirmado", recursoMl: "product" });
+  });
+
+  it("/items/{id} da 404 y /products/{id} también 404: 'no_encontrado' real — issue #250, punto 4 de la revisión", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "no_encontrado" });
+  });
+
+  it("/items/{id} da 403 (transitorio): 'transitorio', nunca prueba /products ni adivina", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/products/")) throw new Error(`no debería llamar a ${urlStr}`);
+      return respuestaJson({}, 403);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "transitorio" });
+  });
+
+  it("/items/{id} da 404 y /products/{id} da 403: 'transitorio' (no se puede confirmar el negativo), nunca 'no_encontrado'", async () => {
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/items/")) return respuestaJson({}, 404);
+      if (urlStr.includes("/products/")) return respuestaJson({}, 403);
+      throw new Error(`URL inesperada: ${urlStr}`);
+    });
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "transitorio" });
+  });
+
+  // Corrección de Pablo — nunca se le busca otra forma de usar un
+  // token: un 401 inesperado (sin haber mandado ninguno) se trata
+  // como "transitorio", con un aviso en el log, nunca una excepción
+  // sin capturar ni una vuelta a mandar token.
+  it("401 inesperado sin token: 'transitorio', nunca lanza ni busca la forma de mandar un token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(confirmarRecursoProductoMl("MCO123")).resolves.toEqual({ estado: "transitorio" });
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("id con formato inválido nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(confirmarRecursoProductoMl("no-es-un-id-ml")).resolves.toEqual({ estado: "transitorio" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

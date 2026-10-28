@@ -10,6 +10,8 @@
 // y lib/mercadolibre-publicar.js) — no inventada. Documentado puntual
 // donde corresponde.
 
+import { leerRetryAfterMs } from "@/lib/ml/reintento-429";
+
 const BASE_URL = "https://api.mercadolibre.com";
 
 // Colombia, único país en alcance de esta tarea (Parte 1). Si algún
@@ -52,9 +54,11 @@ const TIMEOUT_ESCRITURA_MS = 30_000;
 const TIMEOUT_SUBIDA_CLIP_MS = 300_000;
 
 export class LimiteMercadoLibreError extends Error {
-  constructor() {
+  readonly retryAfterMs: number | null;
+  constructor(retryAfterMs: number | null = null) {
     super("Mercado Libre está limitando las consultas, intenta en un minuto.");
     this.name = "LimiteMercadoLibreError";
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -94,10 +98,14 @@ export class MlNoAutorizadoError extends Error {
 
 export class MlSinPermisoAppError extends Error {
   readonly endpoint: string;
-  constructor(endpoint: string) {
+  // Issue #254 — el 403 de Product Ads trae `code: PA_UNAUTHORIZED_RESULT_FROM_POLICIES`.
+  // El resto de los 403 de este archivo no leen el cuerpo (siguen sin código).
+  readonly codigoPolitica: string | null;
+  constructor(endpoint: string, codigoPolitica: string | null = null) {
     super("Mercado Libre no le da permiso a esta aplicación para esta consulta.");
     this.name = "MlSinPermisoAppError";
     this.endpoint = endpoint;
+    this.codigoPolitica = codigoPolitica;
   }
 }
 
@@ -139,6 +147,12 @@ function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function retryAfterDe(res: Response): number | null {
+  const headers = res.headers;
+  if (!headers || typeof headers.get !== "function") return null;
+  return leerRetryAfterMs(headers.get("retry-after"));
+}
+
 // token opcional: GET /categories/{id} y GET /categories/{id}/attributes
 // son endpoints PÚBLICOS de Mercado Libre (sin Authorization) — antes
 // de esta tarea vivían como fetch sueltos en lib/ml/publicar.ts; ahora
@@ -156,7 +170,7 @@ async function pedir<T>(url: string, token?: string): Promise<{ ok: true; data: 
   // 429 corta TODA la búsqueda, no solo esta llamada puntual — se
   // lanza en vez de devolver {ok:false}, para que ninguna de las
   // funciones de abajo lo trague en silencio como "sin datos".
-  if (res.status === 429) throw new LimiteMercadoLibreError();
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
   if (res.status === 401) {
     console.warn(`[lib/ml/cliente] ${endpoint} — 401`);
     throw new MlNoAutorizadoError();
@@ -185,6 +199,85 @@ async function pedir<T>(url: string, token?: string): Promise<{ ok: true; data: 
 // vez de reintentar). Se traduce de vuelta acá, una sola vez. 429
 // (LimiteMercadoLibreError) nunca se traduce — sigue propagando tal
 // cual, mismo criterio de siempre ("corta TODA la búsqueda").
+export type CuerpoErrorMl = { code: string | null; message: string | null };
+
+// Solo el code y un message corto. Nunca se loguea el cuerpo: un 403/404
+// de Mercado Libre puede traer ids de cuenta. No se busca un token adentro
+// para imprimirlo — directamente no se imprime.
+async function cuerpoErrorCorto(res: Response): Promise<CuerpoErrorMl> {
+  try {
+    const texto = await res.text();
+    if (texto.length > 4_000) return { code: null, message: null };
+    const json = JSON.parse(texto) as { code?: unknown; message?: unknown; error?: unknown };
+    const code = typeof json.code === "string" ? json.code.slice(0, 80) : null;
+    const message =
+      typeof json.message === "string"
+        ? json.message.slice(0, 180)
+        : typeof json.error === "string"
+          ? json.error.slice(0, 180)
+          : null;
+    return { code, message };
+  } catch {
+    return { code: null, message: null };
+  }
+}
+
+export type RespuestaLecturaMl<T> = { ok: true; data: T } | { ok: false; status: number; error: CuerpoErrorMl };
+
+// Issue #254 — lectura autenticada con cabeceras extra (Api-Version).
+// Toda llamada de Product Ads y de costos por ítem pasa por acá: nadie
+// en lib/ml/publicidad.ts ni lib/ml/costos-item.ts hace fetch por su cuenta.
+// `ruta` es un path de la API que arma el llamador con ids ya validados
+// (site, advertiser, campaña, ítem) — se rechaza cualquier cosa que no
+// sea un path relativo, para que un id mal formado no pueda cambiar de host.
+export async function pedirLecturaMl<T>(
+  ruta: string,
+  token: string,
+  opciones?: { cabeceras?: Record<string, string>; query?: string }
+): Promise<RespuestaLecturaMl<T>> {
+  if (!ruta.startsWith("/") || ruta.includes("..") || ruta.includes("://") || ruta.includes("?")) {
+    throw new Error("Ruta de Mercado Libre inválida — no se llamó a la API.");
+  }
+  const query = opciones?.query ?? "";
+  if (query && !query.startsWith("?")) {
+    throw new Error("Query de Mercado Libre inválida — no se llamó a la API.");
+  }
+  const url = `${BASE_URL}${ruta}${query}`;
+  const endpoint = endpointSinQuery(url);
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (opciones?.cabeceras) {
+    for (const [clave, valor] of Object.entries(opciones.cabeceras)) {
+      headers[clave] = valor;
+    }
+  }
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch {
+    console.warn(`[lib/ml/cliente] ${endpoint} — tiempo agotado o falla de red`);
+    throw new MlNoDisponibleError();
+  }
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
+  if (res.status === 401) {
+    console.warn(`[lib/ml/cliente] ${endpoint} — 401`);
+    throw new MlNoAutorizadoError();
+  }
+  if (res.status === 403) {
+    const error = await cuerpoErrorCorto(res);
+    console.warn(`[lib/ml/cliente] ${endpoint} — 403${error.code ? ` ${error.code}` : ""}`);
+    throw new MlSinPermisoAppError(endpoint, error.code);
+  }
+  if (res.status >= 500) {
+    console.warn(`[lib/ml/cliente] ${endpoint} — ${res.status}`);
+    throw new MlNoDisponibleError();
+  }
+  if (!res.ok) {
+    const error = await cuerpoErrorCorto(res);
+    return { ok: false, status: res.status, error };
+  }
+  return { ok: true, data: (await res.json()) as T };
+}
+
 async function pedirTolerante<T>(url: string, token?: string): Promise<{ ok: true; data: T } | { ok: false; status: number }> {
   try {
     return await pedir<T>(url, token);
@@ -222,7 +315,7 @@ async function escribir<T>(
   } catch {
     return { ok: false, status: 0, data: null, textoCrudo: "" };
   }
-  if (res.status === 429) throw new LimiteMercadoLibreError();
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
   const textoCrudo = await res.text().catch(() => "");
   let data: T | null = null;
   try {
@@ -363,20 +456,115 @@ export async function obtenerMejoresProductosCategoria(categoryId: string, token
   }
 }
 
+// Issue #262 (revisión de Pablo, punto 2) — único caller real:
+// resolverNombre (lib/seguimiento/seguimientos.ts), que necesitaba el
+// nombre del catálogo Y, ahora, también su date_created real — nunca
+// una llamada nueva a Mercado Libre, es el MISMO `GET /products/{id}`
+// de siempre, solo que ahora también pide el atributo `date_created`.
+// Tipo PROPIO (nunca ProductoCatalogoMl, que usan otras 2 funciones de
+// este archivo con respuestas que no tienen date_created) para no
+// forzar ese campo sobre llamadores que nunca lo necesitan.
+export type ProductoCatalogoConFechaMl = { id: string; nombre: string | null; foto: string | null; fechaCreacion: string | null };
+
 // Nombre + foto de un product_id de catálogo — solo se usa para
 // completar los candidatos de tipo PRODUCT que vinieron de
 // obtenerMejoresProductosCategoria (que no trae esos datos), nunca
 // para los que ya vinieron de buscarProductosCatalogo. Tolera 403/5xx
 // (enriquecimiento); 401 propaga.
-export async function obtenerProducto(productId: string, token: string): Promise<ProductoCatalogoMl | null> {
+export async function obtenerProducto(productId: string, token: string): Promise<ProductoCatalogoConFechaMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(productId)) return null;
+  // Issue #262 (revisión de Pablo) — SIN `?attributes=...`: nunca se
+  // confirmó contra evidencia real que /products/{id} acepte ese
+  // parámetro (a diferencia de /items/{id}, que sí lo confirma en
+  // producción) — si Mercado Libre respondiera 400 por un atributo que
+  // no reconoce ahí, se perdería también el nombre, que esta función
+  // ya traía bien. La respuesta COMPLETA (sin filtrar) ya incluye
+  // `date_created` cuando existe — no hace falta pedirlo aparte.
   const url = `${BASE_URL}/products/${encodeURIComponent(productId)}`;
   try {
-    const resp = await pedir<{ name?: unknown; pictures?: unknown }>(url, token);
+    const resp = await pedir<{ name?: unknown; pictures?: unknown; date_created?: unknown }>(url, token);
     if (!resp.ok) return null;
-    return { id: productId, nombre: typeof resp.data.name === "string" ? resp.data.name : null, foto: fotoDe(resp.data.pictures) };
+    return {
+      id: productId,
+      nombre: typeof resp.data.name === "string" ? resp.data.name : null,
+      foto: fotoDe(resp.data.pictures),
+      // Issue #262 — `date_created` real del CATÁLOGO (nunca de una
+      // oferta/ítem ganador, ver lib/seguimiento/lector.ts) — `null`
+      // explícito cuando Mercado Libre no lo trae en la respuesta
+      // (nunca undefined silencioso: el resto del repo siempre deja
+      // explícito que faltó, en vez de un campo ausente que alguien
+      // podría leer como "0"/"falsy" sin darse cuenta).
+      fechaCreacion: typeof resp.data.date_created === "string" ? resp.data.date_created : null,
+    };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+// Issue #250, punto A — bug real en staging ("Pendiente de primera
+// revisión" para siempre): lib/seguimiento/link.ts interpreta el texto
+// pegado SIN llamar a Mercado Libre (PATRON_CATALOGO solo reconoce un
+// link de catálogo cuando trae literalmente "/p/" antes del id) — un
+// id de PRODUCTO de catálogo pegado de otra forma (ej. el id suelto,
+// o un link que no trae "/p/") queda guardado como "item" por
+// default; /items/{id} da 404 para SIEMPRE con ese id, nunca se
+// corrige solo. Esta función confirma el tipo real contra Mercado
+// Libre antes de guardar (agregarSeguimiento, lib/seguimiento/seguimientos.ts):
+// intenta /items/{id}; solo si da 404 (nunca con otro código — un
+// 403/5xx transitorio no prueba nada sobre el tipo real) prueba
+// /products/{id}.
+//
+// Corrección de Pablo (revisión del PR #253) — a propósito SIN token:
+// esta confirmación es solo "¿existe este recurso?", nunca necesita
+// ver datos privados de una cuenta — pasar un token acá arriesgaba
+// consumir un refresh token de un solo uso de la app de Mercado Libre
+// COMPARTIDA entre staging y producción, por una simple verificación
+// de existencia. pedir() acepta token opcional (sin Authorization
+// cuando no se pasa) — si algún día Mercado Libre empezara a exigir
+// autenticación para esto (un 401 real, inesperado sin token), se
+// trata como "transitorio" (nunca se bloquea el alta, nunca se busca
+// la forma de mandar un token acá) y se deja un aviso en el log para
+// que alguien lo revise — nunca se vuelve a meter un token en su
+// lugar sin hablarlo primero.
+//
+// Tres resultados reales, nunca uno solo "no sé" (issue #250, punto 4
+// de la revisión): "confirmado" (se puede guardar con ese recurso_ml),
+// "no_encontrado" (los DOS dieron 404 real — no existe, el alta debe
+// rechazarse con un mensaje claro) y "transitorio" (403/5xx, formato
+// inválido, o un 401 inesperado — nunca se adivina nada, el llamador
+// sigue con lo que ya interpretó el texto del link).
+export type ConfirmacionRecursoMl = { estado: "confirmado"; recursoMl: "item" | "product" } | { estado: "no_encontrado" } | { estado: "transitorio" };
+
+export async function confirmarRecursoProductoMl(mlIdExterno: string): Promise<ConfirmacionRecursoMl> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(mlIdExterno)) return { estado: "transitorio" };
+  const urlItem = `${BASE_URL}/items/${encodeURIComponent(mlIdExterno)}?attributes=id`;
+  let eraNotFound = false;
+  try {
+    const resp = await pedir<{ id?: unknown }>(urlItem);
+    if (resp.ok) return { estado: "confirmado", recursoMl: "item" };
+    eraNotFound = resp.status === 404;
+  } catch (e) {
+    if (e instanceof MlNoAutorizadoError) {
+      console.warn(`[lib/ml/cliente] confirmarRecursoProductoMl — 401 SIN token en /items/${mlIdExterno}: inesperado, revisar con Pablo/Mateo si ML empezó a exigir auth acá.`);
+      return { estado: "transitorio" };
+    }
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return { estado: "transitorio" };
+    throw e;
+  }
+  if (!eraNotFound) return { estado: "transitorio" }; // 4xx distinto de 404 — no es el caso que resuelve este issue
+
+  const urlProducto = `${BASE_URL}/products/${encodeURIComponent(mlIdExterno)}?attributes=id`;
+  try {
+    const resp = await pedir<{ id?: unknown }>(urlProducto);
+    if (resp.ok) return { estado: "confirmado", recursoMl: "product" };
+    return resp.status === 404 ? { estado: "no_encontrado" } : { estado: "transitorio" };
+  } catch (e) {
+    if (e instanceof MlNoAutorizadoError) {
+      console.warn(`[lib/ml/cliente] confirmarRecursoProductoMl — 401 SIN token en /products/${mlIdExterno}: inesperado, revisar con Pablo/Mateo si ML empezó a exigir auth acá.`);
+      return { estado: "transitorio" };
+    }
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return { estado: "transitorio" };
     throw e;
   }
 }
@@ -400,7 +588,23 @@ export type ItemMl = { producto: ProductoCatalogoMl; oferta: OfertaMl | null };
 // para un candidato de tipo ITEM.
 export async function obtenerItemMl(itemId: string, token: string): Promise<ItemMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping,status`;
+  // Issue #197 — sold_quantity/date_created sumados a la lista de
+  // atributos: mismo endpoint (GET /items/{id}) y mismos dos campos
+  // que YA pide obtenerFotoItemMl (más abajo) para seguimiento de
+  // competidores (issue #175) — ahí ya está confirmado que Mercado
+  // Libre los da para una publicación AJENA, no solo la propia. Antes
+  // esta función no los pedía porque la Parte 1 de Investigación
+  // (issue #174) había descartado "vendidos" por el endpoint de
+  // VISITAS (/visits/items, ese sí restringido para ajenas) — nunca
+  // se había confirmado que sold_quantity es un campo distinto, sin
+  // esa restricción.
+  // Issue #212 — permalink sumado a la lista de atributos: mismo
+  // endpoint y mismo campo que YA confirmado en producción en
+  // zilonix-os-web (app/api/ml/estado-item/route.js,
+  // GET /items/{id}?attributes=id,status,permalink,pictures) — el link
+  // real que Mercado Libre confirma para ESTA publicación puntual,
+  // preferible a armarlo a mano (linkPublicacion, más abajo).
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,currency_id,seller_id,shipping,status,sold_quantity,date_created,permalink`;
   try {
     const resp = await pedir<{
       title?: unknown;
@@ -410,6 +614,9 @@ export async function obtenerItemMl(itemId: string, token: string): Promise<Item
       seller_id?: unknown;
       shipping?: { logistic_type?: unknown; free_shipping?: unknown };
       status?: unknown;
+      sold_quantity?: unknown;
+      date_created?: unknown;
+      permalink?: unknown;
     }>(url, token);
     if (!resp.ok) return null;
     // Bug real: una publicación pausada/cerrada seguía apareciendo en
@@ -434,6 +641,9 @@ export async function obtenerItemMl(itemId: string, token: string): Promise<Item
         sellerId: sellerIdCrudo && PATRON_ID_VENDEDOR.test(sellerIdCrudo) ? sellerIdCrudo : null,
         esFull: resp.data.shipping?.logistic_type === "fulfillment",
         esEnvioGratis: typeof resp.data.shipping?.free_shipping === "boolean" ? resp.data.shipping.free_shipping : null,
+        vendidos: numeroONull(resp.data.sold_quantity),
+        fechaCreacion: typeof resp.data.date_created === "string" ? resp.data.date_created : null,
+        permalink: typeof resp.data.permalink === "string" ? resp.data.permalink : null,
       };
     }
     return { producto, oferta };
@@ -449,6 +659,14 @@ export type OfertaMl = {
   monedaId: string;
   sellerId: string | null;
   esFull: boolean;
+  // Issue #197 — sold_quantity real de Mercado Libre para ESTA oferta
+  // puntual (no un estimado) — null si ML no lo mandó. fechaCreacion
+  // (date_created) es lo que necesita lib/ml/estimacionVentas.ts para
+  // convertir el acumulado en una tasa mensual — los dos, igual que
+  // esEnvioGratis abajo, se leen de forma defensiva, nunca se asume
+  // que van a venir siempre.
+  vendidos: number | null;
+  fechaCreacion: string | null;
   // null = Mercado Libre no mandó este campo en esta oferta puntual —
   // nunca se interpreta como "no tiene envío gratis" (eso sería
   // inventar un dato que no vino). Sin precedente confirmado contra
@@ -456,6 +674,12 @@ export type OfertaMl = {
   // nunca lo leyó) — se lee de forma defensiva y el panel solo muestra
   // el % cuando al menos una oferta real sí trajo el dato.
   esEnvioGratis: boolean | null;
+  // Issue #212 — link real confirmado por Mercado Libre para ESTA
+  // oferta puntual (ver el comentario de la URL en obtenerItemMl/
+  // obtenerOfertasProducto) — preferible a linkPublicacion(itemId)
+  // (armado a mano) cuando está disponible. null si ML no lo mandó,
+  // nunca un link inventado en su lugar.
+  permalink: string | null;
 };
 
 // Ofertas reales (publicaciones activas) de un producto de catálogo.
@@ -481,7 +705,17 @@ export async function obtenerOfertasProducto(productId: string, token: string): 
   const lista = Array.isArray(data) ? data : Array.isArray((data as { results?: unknown[] }).results) ? (data as { results: unknown[] }).results : [];
   return lista
     .map((raw) => {
-      const item = raw as { item_id?: unknown; id?: unknown; price?: unknown; currency_id?: unknown; seller_id?: unknown; shipping?: { logistic_type?: unknown; free_shipping?: unknown } };
+      const item = raw as {
+        item_id?: unknown;
+        id?: unknown;
+        price?: unknown;
+        currency_id?: unknown;
+        seller_id?: unknown;
+        shipping?: { logistic_type?: unknown; free_shipping?: unknown };
+        sold_quantity?: unknown;
+        date_created?: unknown;
+        permalink?: unknown;
+      };
       const itemIdCrudo = item.item_id ?? item.id;
       const itemId = typeof itemIdCrudo === "string" || typeof itemIdCrudo === "number" ? String(itemIdCrudo) : "";
       if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
@@ -496,6 +730,19 @@ export async function obtenerOfertasProducto(productId: string, token: string): 
         sellerId: sellerIdCrudo && PATRON_ID_VENDEDOR.test(sellerIdCrudo) ? sellerIdCrudo : null,
         esFull: item.shipping?.logistic_type === "fulfillment",
         esEnvioGratis: envioGratis,
+        // Issue #197 — igual que esEnvioGratis arriba: sin precedente
+        // confirmado contra producción de que /products/{id}/items
+        // mande estos dos campos (ese endpoint nunca los había leído
+        // antes) — se leen de forma defensiva, null si no vienen,
+        // nunca una cifra inventada en su lugar.
+        vendidos: numeroONull(item.sold_quantity),
+        fechaCreacion: typeof item.date_created === "string" ? item.date_created : null,
+        // Issue #212 — mismo criterio defensivo: este endpoint devuelve
+        // la representación completa del item (sin ?attributes=), así
+        // que debería traer permalink igual que /items/{id} — pero sin
+        // precedente puntual confirmado para ESTE endpoint, se lee
+        // igual de defensivo, null si no viene.
+        permalink: typeof item.permalink === "string" ? item.permalink : null,
       };
     })
     .filter((o): o is OfertaMl => o !== null);
@@ -715,6 +962,18 @@ export type FotoItemMl = {
   catalogProductId: string | null;
   esFull: boolean | null;
   esEnvioGratis: boolean | null;
+  // Issue #251 ("Seguimiento muestra aproximados como Selltrix") —
+  // sumado a la lista de atributos: MISMO endpoint y mismo campo que
+  // ya pide obtenerItemMl/obtenerOfertasProducto (arriba, para
+  // Investigación) — ahí ya está confirmado que Mercado Libre lo da
+  // sin costo extra (un atributo más en la misma respuesta, nunca una
+  // llamada aparte) y sin restricción para un item AJENO. Antes de
+  // este issue, obtenerFotoItemMl (el lector real de Seguimiento,
+  // distinto de obtenerItemMl) nunca lo había pedido — hallazgo real
+  // del punto (a): sin esto, lib/seguimiento/aproximados.ts no tenía
+  // ningún date_created real con qué calcular antigüedad, siempre caía
+  // al respaldo por interpolación de id.
+  fechaCreacion: string | null;
 };
 
 function numeroONull(valor: unknown): number | null {
@@ -725,7 +984,7 @@ function numeroONull(valor: unknown): number | null {
 
 export async function obtenerFotoItemMl(itemId: string, token: string): Promise<FotoItemMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping`;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,price,original_price,available_quantity,sold_quantity,status,catalog_listing,catalog_product_id,shipping,date_created`;
   try {
     const resp = await pedir<{
       price?: unknown;
@@ -736,6 +995,7 @@ export async function obtenerFotoItemMl(itemId: string, token: string): Promise<
       catalog_listing?: unknown;
       catalog_product_id?: unknown;
       shipping?: { logistic_type?: unknown; free_shipping?: unknown };
+      date_created?: unknown;
     }>(url, token);
     if (!resp.ok) return null;
     const d = resp.data;
@@ -749,6 +1009,7 @@ export async function obtenerFotoItemMl(itemId: string, token: string): Promise<
       catalogProductId: typeof d.catalog_product_id === "string" ? d.catalog_product_id : null,
       esFull: d.shipping ? d.shipping.logistic_type === "fulfillment" : null,
       esEnvioGratis: typeof d.shipping?.free_shipping === "boolean" ? d.shipping.free_shipping : null,
+      fechaCreacion: typeof d.date_created === "string" ? d.date_created : null,
     };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
@@ -783,7 +1044,27 @@ function idsDeResultadosBusqueda(resultados: unknown): string[] {
 // ya usa lib/ml/importacion.ts). 401 (token inválido de verdad)
 // propaga tal cual, nunca tiene sentido probar el camino público con
 // el mismo token roto.
-async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Promise<string[]> {
+//
+// Issue #250, punto B — bug real en staging (2 de 5 tiendas fallidas
+// en la primera corrida real): el buscador público TAMBIÉN puede dar
+// 403 para cierto vendedor/tienda (no solo el camino propio) — antes
+// esa segunda llamada no tenía try/catch, así que el 403 subía sin
+// capturar hasta revisarUnSeguimiento y toda la revisión del día
+// contaba como "fallida" (ni siquiera guardaba una foto). Ahora null
+// significa "ninguno de los dos caminos dejó ver nada hoy" (sin dato
+// de la API, nunca "la tienda no tiene publicaciones") — distinto de
+// [] (los dos caminos respondieron OK, de verdad no hay ninguna
+// publicación visible). El llamador (obtenerPublicacionesVendedorAjenoMl)
+// propaga esa misma distinción.
+//
+// Corrección de Pablo (revisión del PR #253) — CUALQUIER respuesta
+// no-ok del buscador público es "sin dato" (null), no solo un 403: un
+// 404/400/etc. ahí no confirma que la tienda de verdad no tenga
+// publicaciones (ese buscador no es el dueño de ese dato, al revés
+// del 404 real de /items o /products en confirmarRecursoProductoMl) —
+// tratarlo como [] hubiera sido inventar un "cero publicaciones" que
+// Mercado Libre nunca confirmó.
+async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Promise<string[] | null> {
   if (!PATRON_ID_VENDEDOR.test(sellerId)) return [];
   const urlPropio = `${BASE_URL}/users/${encodeURIComponent(sellerId)}/items/search?limit=${TOPE_PUBLICACIONES_TIENDA}`;
   try {
@@ -793,13 +1074,19 @@ async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Pr
     if (!(e instanceof MlSinPermisoAppError)) throw e;
   }
   const urlPublico = `${BASE_URL}/sites/${SITE_ID}/search?seller_id=${encodeURIComponent(sellerId)}&limit=${TOPE_PUBLICACIONES_TIENDA}`;
-  const respPublico = await pedir<{ results?: unknown[] }>(urlPublico, token);
-  if (!respPublico.ok) return [];
-  return idsDeResultadosBusqueda(respPublico.data.results);
+  try {
+    const respPublico = await pedir<{ results?: unknown[] }>(urlPublico, token);
+    if (!respPublico.ok) return null; // cualquier no-ok, no solo 403 — sin dato, nunca "cero publicaciones" inventado
+    return idsDeResultadosBusqueda(respPublico.data.results);
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError) return null; // sin dato de la API hoy — nunca una falla del lote
+    throw e;
+  }
 }
 
-export async function obtenerPublicacionesVendedorAjenoMl(sellerId: string, token: string): Promise<PublicacionTiendaMl[]> {
+export async function obtenerPublicacionesVendedorAjenoMl(sellerId: string, token: string): Promise<PublicacionTiendaMl[] | null> {
   const ids = await idsDePublicacionesDeVendedor(sellerId, token);
+  if (ids === null) return null;
   const publicaciones: PublicacionTiendaMl[] = [];
   for (let i = 0; i < ids.length; i += TAMAÑO_LOTE_DETALLE_ITEMS) {
     if (i > 0) await esperar(PAUSA_ENTRE_LOTES_MS);

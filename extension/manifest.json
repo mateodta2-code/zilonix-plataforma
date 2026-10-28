@@ -2,17 +2,29 @@
   "manifest_version": 3,
   "name": "Zilonix Seller — Investigación",
   "short_name": "Zilonix Investigación",
-  "version": "0.3.2",
+  "version": "0.3.38",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage"],
   "description": "Lee precio, vendidos, vendedor y calificación de la página que estás viendo en Mercado Libre, Amazon, Temu, AliExpress, Shein y Alibaba — para analizar antes de invertir. Solo lee lo que ya tenés abierto; nunca navega sola ni inicia sesión.",
   "content_scripts": [
     {
       "matches": [
-        "*://*.mercadolibre.com.co/*"
+        "*://*.mercadolibre.com.co/*",
+        "*://*.mercadolibre.com.ar/*",
+        "*://*.mercadolivre.com.br/*",
+        "*://*.mercadolibre.com.mx/*",
+        "*://*.mercadolibre.cl/*",
+        "*://*.mercadolibre.com.uy/*",
+        "*://*.mercadolibre.com.pe/*"
       ],
       "js": [
         "utilidades.js",
         "seguridad.js",
         "config.js",
+        "calibracion-aproximados.js",
+        "lectores/aproximados.js",
         "lectores/mercadolibre.js",
         "content.js"
       ],
@@ -98,6 +110,16 @@
         "panel.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://web-production-af270.up.railway.app/panel/investigacion*",
+        "*://web-staging-d979.up.railway.app/panel/investigacion*"
+      ],
+      "js": [
+        "marcador-zilonix.js"
+      ],
+      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
@@ -107,6 +129,12 @@
       ],
       "matches": [
         "*://*.mercadolibre.com.co/*",
+        "*://*.mercadolibre.com.ar/*",
+        "*://*.mercadolivre.com.br/*",
+        "*://*.mercadolibre.com.mx/*",
+        "*://*.mercadolibre.cl/*",
+        "*://*.mercadolibre.com.uy/*",
+        "*://*.mercadolibre.com.pe/*",
         "*://*.amazon.com/*",
         "*://*.amazon.com.mx/*",
         "*://*.temu.com/*",

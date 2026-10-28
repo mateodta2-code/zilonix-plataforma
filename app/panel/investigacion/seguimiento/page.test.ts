@@ -11,6 +11,15 @@ function contenidoDe(archivo: string): string {
   return readFileSync(join(__dirname, archivo), "utf8");
 }
 
+// Issue #252 (revisión de Pablo, punto 3) — datoPaginaSeguimientoValido
+// (y los patrones/topes que usa) se movieron de actions.ts a
+// lib/seguimiento/validarDatoPagina.ts (actions.ts tiene "use server",
+// que exige que TODO lo exportado sea async — un type guard sync no
+// podía vivir ahí si hacía falta importarlo en una prueba).
+function contenidoValidador(): string {
+  return readFileSync(join(__dirname, "../../../../lib/seguimiento/validarDatoPagina.ts"), "utf8");
+}
+
 describe("/panel/investigacion/seguimiento — mismo permiso que Investigación para ver, 'modificar' para escribir (issue #175)", () => {
   it("page.tsx pide inventario.consultar (ver la lista y las alertas)", () => {
     expect(contenidoDe("page.tsx")).toMatch(/requierePermiso\(\s*usuario\.id,\s*empresa\.id,\s*"inventario",\s*"consultar"\s*\)/);
@@ -20,10 +29,60 @@ describe("/panel/investigacion/seguimiento — mismo permiso que Investigación 
     expect(contenidoDe("[id]/page.tsx")).toMatch(/requierePermiso\(\s*usuario\.id,\s*empresa\.id,\s*"inventario",\s*"consultar"\s*\)/);
   });
 
-  it("actions.ts pide inventario.modificar en las 3 acciones de escritura (agregar, quitar, marcar leída)", () => {
+  it("actions.ts pide inventario.modificar en las 4 acciones de escritura (agregar, quitar, marcar leída, guardar dato de página — issue #251)", () => {
     const contenido = contenidoDe("actions.ts");
     const coincidencias = contenido.match(/requierePermiso\(\s*usuario\.id,\s*empresa\.id,\s*"inventario",\s*"modificar"\s*\)/g) ?? [];
-    expect(coincidencias.length).toBe(3);
+    // Corrección de Pablo (punto 7) — guardarDatoPaginaSeguimientoAction
+    // Y guardarVariosDatosPaginaSeguimientoAction (la cola en lote)
+    // ahora comparten UN SOLO chequeo (empresaConPermisoDeExtension) en
+    // vez de tener el suyo cada una — sigue siendo 4 llamadas reales en
+    // el archivo (agregar, quitar, marcar leída, el helper compartido),
+    // nunca una por acción de extensión.
+    expect(coincidencias.length).toBe(4);
+  });
+});
+
+// Issue #251 (corrección de Pablo, punto 6) — chequeo estático del
+// validador de la extensión: sin Postgres ni Clerk (los helpers de
+// permiso/sesión no son triviales de montar en un test unitario), pero
+// confirma que las reglas reales que pidió la revisión están en el
+// código, no solo en la intención. El comportamiento real (acepta/
+// rechaza un payload concreto) ya lo prueba indirectamente
+// lib/seguimiento/seguimientos.test.ts contra Postgres real, llamando
+// guardarDatoDePaginaSeguimiento con datos ya validados.
+describe("datoPaginaSeguimientoValido — validador real de la extensión (issue #251, corrección de Pablo al punto 6)", () => {
+  it("mlIdExterno e idsVisibles se validan con el patrón real de ids de Mercado Libre, no 'cualquier string no vacío'", () => {
+    expect(contenidoValidador()).toMatch(/PATRON_ID_ML_O_VENDEDOR\s*=\s*\/\^\(MCO\|MLA\|MLB\|MLM\|MLC\|MLU\|MPE\)\\d\+\$\|\^\\d\+\$\//);
+  });
+
+  it("inventario/vendidos/totalPublicaciones se validan con Number.isInteger y un rango real (0 a 1_000_000)", () => {
+    const contenido = contenidoValidador();
+    expect(contenido).toMatch(/Number\.isInteger\(valor\)/);
+    expect(contenido).toMatch(/valor\s*>=\s*0/);
+    expect(contenido).toMatch(/valor\s*<=\s*1_000_000/);
+  });
+
+  it("idsVisibles tiene un tope real (100)", () => {
+    const contenido = contenidoValidador();
+    expect(contenido).toMatch(/MAX_IDS_VISIBLES\s*=\s*100/);
+    expect(contenido).toMatch(/idsVisibles\.length\s*<=\s*MAX_IDS_VISIBLES/);
+  });
+
+  it("leidoEn se valida como fecha ISO real, nunca futura, y con un tope de antigüedad (36h)", () => {
+    const contenido = contenidoValidador();
+    expect(contenido).toMatch(/MAX_HORAS_LEIDO_EN\s*=\s*36/);
+    expect(contenido).toMatch(/fecha\.getTime\(\)\s*>\s*ahoraMs/); // nunca en el futuro
+  });
+
+  // Issue #252 (revisión de Pablo, punto 3) — bug real: la extensión
+  // 0.3.30 nunca mandaba `titulo`/`precio` (undefined, no null) — eso
+  // descartaba el payload ENTERO. tituloEnRango/precioEnRango tienen
+  // que aceptar las dos formas por igual (== null, nunca === null a
+  // secas) para no volver a romperlo.
+  it("titulo/precio aceptan tanto null como undefined (== null, nunca === null a secas) — nunca descartan el payload solo porque la extensión vieja no los manda", () => {
+    const contenido = contenidoValidador();
+    expect(contenido).toMatch(/function tituloEnRango\(valor: unknown\)[\s\S]{0,80}valor == null/);
+    expect(contenido).toMatch(/function precioEnRango\(valor: unknown\)[\s\S]{0,80}valor == null/);
   });
 });
 
