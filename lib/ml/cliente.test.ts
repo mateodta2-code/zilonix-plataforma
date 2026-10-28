@@ -10,6 +10,7 @@ import {
   domainDiscoveryMl,
   leerAtributosCategoriaMl,
   leerCategoriaMl,
+  leerCategoriasRaizMl,
   leerCuentaMl,
   leerItemBasicoMl,
   LimiteMercadoLibreError,
@@ -238,7 +239,54 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
     });
     vi.stubGlobal("fetch", fetchMock);
     const cat = await leerCategoriaMl("MCO1234");
-    expect(cat).toEqual({ categoryId: "MCO1234", categoryName: "Categoría", maxPicturesPerItem: 10 });
+    expect(cat).toEqual({ categoryId: "MCO1234", categoryName: "Categoría", maxPicturesPerItem: 10, childrenCategories: [], pathFromRoot: [] });
+  });
+
+  // ADENDO UX de Publicar — children_categories/path_from_root vienen
+  // de la MISMA respuesta de /categories/{id} (nunca una llamada
+  // nueva); children_categories vacío es la señal real de "es hoja"
+  // (nunca se adivina por otro campo).
+  it("leerCategoriaMl: children_categories/path_from_root de la misma respuesta — vacío es la señal real de 'es hoja'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          id: "MCO1234",
+          name: "Relojes de Pulsera",
+          max_pictures_per_item: 10,
+          children_categories: [],
+          path_from_root: [{ id: "MCO1000", name: "Relojes" }, { id: "MCO1234", name: "Relojes de Pulsera" }],
+        })
+      )
+    );
+    const cat = await leerCategoriaMl("MCO1234");
+    expect(cat.childrenCategories).toEqual([]);
+    expect(cat.pathFromRoot).toEqual([
+      { id: "MCO1000", name: "Relojes" },
+      { id: "MCO1234", name: "Relojes de Pulsera" },
+    ]);
+  });
+
+  it("leerCategoriasRaizMl: SIEMPRE manda el token (a diferencia de leerCategoriaMl) — sin uno, Mercado Libre daría 403", async () => {
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      expect((init?.headers as Record<string, string> | undefined)?.Authorization).toBe("Bearer token-real");
+      return respuestaJson([
+        { id: "MCO1000", name: "Electrónica" },
+        { id: "MCO1001", name: "Hogar" },
+      ]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const raices = await leerCategoriasRaizMl("MCO", "token-real");
+    expect(raices).toEqual([
+      { id: "MCO1000", name: "Electrónica" },
+      { id: "MCO1001", name: "Hogar" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith("https://api.mercadolibre.com/sites/MCO/categories", expect.anything());
+  });
+
+  it("leerCategoriasRaizMl: 403 real de Mercado Libre (sin token) se propaga como el error tipado de siempre", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(leerCategoriasRaizMl("MCO", "token-real")).rejects.toThrow(MlSinPermisoAppError);
   });
 
   it("buscarEnSitioMl/domainDiscoveryMl: traen categoryId/categoryName tal cual manda Mercado Libre", async () => {

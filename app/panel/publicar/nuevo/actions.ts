@@ -51,8 +51,26 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
     const titulo = String(formData.get(`titulo_${c.id}`) ?? "").trim();
     const descripcion = String(formData.get(`descripcion_${c.id}`) ?? "").trim();
     const portadaUrl = String(formData.get(`portada_${c.id}`) ?? "").trim();
-    if (titulo || descripcion || portadaUrl) {
-      porCuenta[c.id] = { titulo: titulo || undefined, descripcion: descripcion || undefined, portadaUrl: portadaUrl || null };
+    // ADENDO UX de Publicar, punto 4 — "incluir portadasPorVariante por
+    // valor del ejeFoto": el editor visual (EditorVariantes.tsx) manda
+    // un solo mapeo {valorEje: url} replicado a cada cuenta vía un
+    // hidden input — se descarta silenciosamente si no es un JSON
+    // válido (nunca rompe el resto del envío por un campo opcional).
+    let portadasPorVariante: Record<string, string> | undefined;
+    const portadasPorVarianteCrudo = String(formData.get(`portadasPorVariante_${c.id}`) ?? "").trim();
+    if (portadasPorVarianteCrudo) {
+      try {
+        const parsed = JSON.parse(portadasPorVarianteCrudo) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const entradas = Object.entries(parsed as Record<string, unknown>).filter(([, v]) => typeof v === "string" && v.trim() !== "");
+          if (entradas.length) portadasPorVariante = Object.fromEntries(entradas) as Record<string, string>;
+        }
+      } catch {
+        // JSON inválido/vacío — se ignora, nunca bloquea el resto del formulario.
+      }
+    }
+    if (titulo || descripcion || portadaUrl || portadasPorVariante) {
+      porCuenta[c.id] = { titulo: titulo || undefined, descripcion: descripcion || undefined, portadaUrl: portadaUrl || null, portadasPorVariante };
     }
   }
   if (cuentasSeleccionadas.every((id) => !porCuenta[id]?.titulo) && Object.values(porCuenta).every((d) => !d.titulo)) {

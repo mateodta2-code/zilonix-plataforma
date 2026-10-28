@@ -9,6 +9,7 @@ export type ClaveIcono =
   | "despachos"
   | "sku"
   | "investigacion"
+  | "publicar"
   | "finanzas"
   | "publicidad"
   | "actividad"

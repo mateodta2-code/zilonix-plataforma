@@ -59,6 +59,12 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/publicar/[id]/page.tsx",
   "app/panel/publicar/clip/page.tsx",
   "app/panel/publicar/clip/actions.ts",
+  // ADENDO UX de Publicar — mismo permiso que crear el producto en sí
+  // ("inventario","crear"): estas 3 solo AYUDAN a elegir categoría/
+  // atributos, nunca publican nada.
+  "app/api/ml/publicar/categorias/buscar/route.ts",
+  "app/api/ml/publicar/categorias/arbol/route.ts",
+  "app/api/ml/publicar/caracteristicas/route.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
   "app/api/ml/clip/route.ts",
