@@ -27,3 +27,13 @@ export function validarMonto(valor: string | number | null | undefined, campo: s
 export function esCero(monto: string): boolean {
   return Number(monto) === 0;
 }
+
+// Issue #128 — para mostrar en pantalla: "3000.00" → "$ 3.000",
+// "1234.5" → "$ 1.234,50", vacío → "—". Solo texto, sin Number.
+export function mostrarMonto(monto: string | null): string {
+  if (monto === null) return "—";
+  const [entero, fraccion = ""] = monto.split(".");
+  const miles = entero.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const decimales = fraccion.replace(/0+$/, "") ? `,${fraccion.padEnd(2, "0")}` : "";
+  return `$ ${miles}${decimales}`;
+}

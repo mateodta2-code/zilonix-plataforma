@@ -40,6 +40,13 @@ export default async function FinanzasPage() {
         <EstadoVacio>
           Sin datos reales todavía (llegan en la Fase 3) — esta pantalla solo demuestra que tu rol ({miMembresia.rolNombre}) sí puede verla.
         </EstadoVacio>
+        {/* Issue #128 — primeras pantallas reales de la Fase 1. */}
+        <BotonLink href="/panel/finanzas/maestra-sku" variante="secundario" chico>
+          Tabla maestra de SKU
+        </BotonLink>{" "}
+        <BotonLink href="/panel/finanzas/proveedores" variante="secundario" chico>
+          Proveedores y transportadores
+        </BotonLink>{" "}
         <BotonLink href="/panel" variante="fantasma" chico>
           Volver al panel
         </BotonLink>
