@@ -25,6 +25,17 @@ const APP_DIR = join(RAIZ, "app");
 const RUTAS_PROTEGIDAS = new Set([
   "app/panel/page.tsx",
   "app/panel/finanzas/page.tsx",
+  // Issue #128 (Z-FIN-06) — ver pide finanzas.consultar; crear, editar,
+  // desactivar e importar, finanzas.modificar (también en cada acción).
+  "app/panel/finanzas/proveedores/page.tsx",
+  "app/panel/finanzas/proveedores/actions.ts",
+  "app/panel/finanzas/proveedores/[id]/page.tsx",
+  "app/panel/finanzas/maestra-sku/page.tsx",
+  "app/panel/finanzas/maestra-sku/actions.ts",
+  "app/panel/finanzas/maestra-sku/editar/page.tsx",
+  "app/panel/finanzas/maestra-sku/alertas/page.tsx",
+  "app/panel/finanzas/maestra-sku/importar/page.tsx",
+  "app/panel/finanzas/maestra-sku/importar/actions.ts",
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
   "app/panel/invitar/actions.ts",
