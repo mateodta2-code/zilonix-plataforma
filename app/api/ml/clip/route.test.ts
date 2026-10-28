@@ -101,9 +101,18 @@ function codigoDeError(location: string): string | null {
 }
 
 describe("POST /api/ml/clip — CSRF, códigos de error cerrados y validación previa (tarea 2.11)", () => {
+  const CLIP_HABILITADO_ORIGINAL = process.env.CLIP_HABILITADO;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockearCookies();
+    // Code review de Pablo (ADENDO UX de Publicar) — la bandera ahora
+    // bloquea esta ruta ANTES de todo lo demás; "true" explícito acá
+    // para que el resto de las pruebas de este describe (que ya
+    // existían, probando CSRF/sesión/validación) sigan ejercitando esa
+    // lógica real, nunca el 404 nuevo. El caso "deshabilitado" tiene
+    // su propio describe, más abajo, con la bandera restaurada.
+    process.env.CLIP_HABILITADO = "true";
     vi.mocked(obtenerOCrearUsuarioActual).mockResolvedValue({ id: "usuario-1" } as never);
     vi.mocked(requierePermiso).mockResolvedValue({} as never);
     vi.mocked(listarCuentasConectadas).mockResolvedValue([
@@ -112,7 +121,11 @@ describe("POST /api/ml/clip — CSRF, códigos de error cerrados y validación p
     vi.mocked(obtenerAccessTokenVigente).mockResolvedValue("token-falso");
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (CLIP_HABILITADO_ORIGINAL === undefined) delete process.env.CLIP_HABILITADO;
+    else process.env.CLIP_HABILITADO = CLIP_HABILITADO_ORIGINAL;
+  });
 
   it("Origin ajeno -> 403, nunca llega a mirar sesión ni leer el formulario", async () => {
     const res = await POST(peticionFormulario({ origin: "https://sitio-ajeno.test", cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
@@ -273,5 +286,43 @@ describe("POST /api/ml/clip — CSRF, códigos de error cerrados y validación p
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toContain(`/marketplace/items/${ITEM_VALIDO}/clips/upload`);
+  });
+});
+
+// Code review de Pablo (ADENDO UX de Publicar) — antes CLIP_HABILITADO
+// solo ocultaba el link en /panel/publicar/page.tsx; esta ruta seguía
+// aceptando una subida real por URL directa aunque la bandera
+// estuviera apagada. Describe aparte (nunca mezclado con el de
+// arriba, que fija CLIP_HABILITADO="true" en su propio beforeEach)
+// para probar el valor REAL por default del entorno.
+describe("POST /api/ml/clip — CLIP_HABILITADO apagado (code review de Pablo)", () => {
+  const CLIP_HABILITADO_ORIGINAL = process.env.CLIP_HABILITADO;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (CLIP_HABILITADO_ORIGINAL === undefined) delete process.env.CLIP_HABILITADO;
+    else process.env.CLIP_HABILITADO = CLIP_HABILITADO_ORIGINAL;
+  });
+
+  it("variable ausente -> 404, nunca mira Origin/sesión/nada del cuerpo", async () => {
+    delete process.env.CLIP_HABILITADO;
+    vi.clearAllMocks();
+    mockearCookies();
+
+    const res = await POST(peticionFormulario({ origin: "https://sitio-ajeno.test", cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
+
+    expect(res.status).toBe(404);
+    expect(obtenerOCrearUsuarioActual).not.toHaveBeenCalled();
+  });
+
+  it('variable en "false" -> 404, mismo default seguro que ausente', async () => {
+    process.env.CLIP_HABILITADO = "false";
+    vi.clearAllMocks();
+    mockearCookies();
+
+    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
+
+    expect(res.status).toBe(404);
+    expect(obtenerOCrearUsuarioActual).not.toHaveBeenCalled();
   });
 });
