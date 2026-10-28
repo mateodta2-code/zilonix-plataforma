@@ -92,6 +92,13 @@
       "when": 1793149558098,
       "tag": "0012_finanzas_base_titulares_config_auditoria",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793152864828,
+      "tag": "0013_finanzas_tabla_maestra_sku_proveedores",
+      "breakpoints": true
     }
   ]
 }
