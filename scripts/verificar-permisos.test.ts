@@ -36,6 +36,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/finanzas/maestra-sku/alertas/page.tsx",
   "app/panel/finanzas/maestra-sku/importar/page.tsx",
   "app/panel/finanzas/maestra-sku/importar/actions.ts",
+  // Issue #131 Parte A — ventas y utilidad, solo lectura: las dos piden
+  // finanzas.consultar (y lib/finanzas/ventas-consulta.ts otra vez).
+  "app/panel/finanzas/ventas/page.tsx",
+  "app/panel/finanzas/ventas/[pedidoId]/page.tsx",
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
   "app/panel/invitar/actions.ts",
