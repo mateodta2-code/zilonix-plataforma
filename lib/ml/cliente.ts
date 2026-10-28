@@ -789,7 +789,27 @@ export function linkPublicacion(itemId: string): string | null {
 // cada función de abajo valida su propio id con exigirId() ANTES de
 // construir la URL.
 
-export type CategoriaDetalleMl = { categoryId: string; categoryName: string; maxPicturesPerItem: number | null };
+export type NodoCategoriaMl = { id: string; name: string };
+export type CategoriaDetalleMl = {
+  categoryId: string;
+  categoryName: string;
+  maxPicturesPerItem: number | null;
+  // ADENDO UX de Publicar — mismo GET /categories/{id} de siempre (sin
+  // llamada nueva): children_categories/path_from_root ya venían en esa
+  // misma respuesta, solo no se leían todavía porque nada los
+  // necesitaba hasta el árbol de categorías. children_categories vacío
+  // = categoría hoja (nunca se adivina por otro campo).
+  childrenCategories: NodoCategoriaMl[];
+  pathFromRoot: NodoCategoriaMl[];
+};
+
+function nodosCategoriaDesde(valor: unknown): NodoCategoriaMl[] {
+  if (!Array.isArray(valor)) return [];
+  return valor
+    .map((c) => c as { id?: unknown; name?: unknown })
+    .filter((c): c is { id: string; name: string } => typeof c.id === "string" && typeof c.name === "string")
+    .map((c) => ({ id: c.id, name: c.name }));
+}
 
 // GET /categories/{id} — público (sin token). Usado por
 // leerCategoriaPorId (lanza si falla) y obtenerLimiteFotos (tolera
@@ -798,13 +818,32 @@ export type CategoriaDetalleMl = { categoryId: string; categoryName: string; max
 export async function leerCategoriaMl(categoryId: string): Promise<CategoriaDetalleMl> {
   exigirId(categoryId, PATRON_ID_CATEGORIA, "categoryId");
   const url = `${BASE_URL}/categories/${encodeURIComponent(categoryId)}`;
-  const resp = await pedir<{ id?: unknown; name?: unknown; max_pictures_per_item?: unknown }>(url);
+  const resp = await pedir<{ id?: unknown; name?: unknown; max_pictures_per_item?: unknown; children_categories?: unknown; path_from_root?: unknown }>(url);
   if (!resp.ok) throw new Error(`No se pudo leer la categoría ${categoryId} (HTTP ${resp.status}).`);
   return {
     categoryId: typeof resp.data.id === "string" ? resp.data.id : categoryId,
     categoryName: typeof resp.data.name === "string" ? resp.data.name : categoryId,
     maxPicturesPerItem: typeof resp.data.max_pictures_per_item === "number" ? resp.data.max_pictures_per_item : null,
+    childrenCategories: nodosCategoriaDesde(resp.data.children_categories),
+    pathFromRoot: nodosCategoriaDesde(resp.data.path_from_root),
   };
+}
+
+// ADENDO UX de Publicar (avisado antes de este cambio) — GET
+// /sites/{siteId}/categories, la RAÍZ del árbol real de categorías.
+// Helper nuevo: no existía ninguna función para esto en cliente.ts
+// todavía (el árbol de navegación manual de Mercado Libre, cuando ni
+// la predicción automática ni el buscador de texto dan con la
+// categoría correcta, lo necesita para el primer nivel). A diferencia
+// de /categories/{id} (público, arriba), este SÍ exige token — sin
+// Authorization, Mercado Libre responde 403 (confirmado en la
+// investigación real del módulo equivalente de Zilonix OS) — nunca se
+// llama sin uno.
+export async function leerCategoriasRaizMl(siteId: string, token: string): Promise<NodoCategoriaMl[]> {
+  const url = `${BASE_URL}/sites/${encodeURIComponent(siteId)}/categories`;
+  const resp = await pedir<unknown[]>(url, token);
+  if (!resp.ok) throw new Error(`No se pudieron leer las categorías raíz de ${siteId} (HTTP ${resp.status}).`);
+  return nodosCategoriaDesde(resp.data);
 }
 
 // GET /categories/{id}/attributes — público (sin token). Devuelve la
