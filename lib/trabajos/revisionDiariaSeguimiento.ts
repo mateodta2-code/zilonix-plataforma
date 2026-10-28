@@ -14,7 +14,7 @@ import {
 } from "@/lib/ml/cliente";
 import { leerFotoSeguimiento, type SeguimientoParaLeer } from "@/lib/seguimiento/lector";
 import { compararFotos, normalizarPublicaciones, type FotoComparable } from "@/lib/seguimiento/alertas";
-import { NOMBRE_PENDIENTE_PRIMERA_REVISION, nombreEsAproximado, resolverNombre } from "@/lib/seguimiento/seguimientos";
+import { NOMBRE_PENDIENTE_PRIMERA_REVISION, nombreEsAproximado, resolverNombre, resolverNombreYFechaCatalogo } from "@/lib/seguimiento/seguimientos";
 
 // Issue #175 — regla de CLAUDE.md: "toda tarea en segundo plano vive
 // en lib/trabajos/". Mismo patrón que lib/ml/trabajador.ts (tarea
@@ -277,22 +277,28 @@ function camposApiDeDatos(datos: Awaited<ReturnType<typeof leerConReintento429>>
 // Issue #251 ("Seguimiento muestra aproximados como Selltrix") — lo
 // que el cron guarda en `publicaciones` (nunca una columna nueva, ver
 // db/schema.ts): para tipo="tienda", el snapshot de siempre
-// (total/visibles/fuente); para tipo="producto", SOLO `fechaCreacion`
-// (date_created real, issue #252 ya reusa esta misma columna para
-// vendidosAproximado/precioAproximado, que únicamente escribe la
-// extensión — nunca este cron). `undefined` cuando no hay nada que
-// guardar (tienda sin publicaciones, o la API no confirmó
-// date_created esta vez) — Drizzle lo omite del INSERT/UPDATE entero,
-// mismo criterio que camposPagina en guardarDatoDePaginaSeguimiento
-// (lib/seguimiento/seguimientos.ts).
+// (total/visibles/fuente); para tipo="producto", `fechaCreacion`
+// (date_created real del ÍTEM, nunca de catálogo — ver lib/seguimiento/lector.ts,
+// siempre null ahí para recursoMl "product") y/o `fechaCreacionCatalogo`
+// (date_created real del catálogo, issue #262 — viene de
+// resolverNombreYFechaCatalogo, nunca de este `datos`). Issue #252 ya
+// reusa esta misma columna para vendidosAproximado/precioAproximado,
+// que únicamente escribe la extensión — nunca este cron. `undefined`
+// cuando no hay nada nuevo que guardar — Drizzle lo omite del
+// INSERT/UPDATE entero, mismo criterio que camposPagina en
+// guardarDatoDePaginaSeguimiento (lib/seguimiento/seguimientos.ts).
 function publicacionesParaGuardar(
   tipo: "producto" | "tienda",
-  datos: Awaited<ReturnType<typeof leerConReintento429>>
+  datos: Awaited<ReturnType<typeof leerConReintento429>>,
+  fechaCreacionCatalogo: string | null
 ): typeof seguimientoFotos.$inferInsert.publicaciones {
   if (tipo === "tienda") {
     return datos.publicaciones != null ? { total: null, visibles: datos.publicaciones, fuente: "api" as const } : undefined;
   }
-  return datos.fechaCreacion != null ? { fechaCreacion: datos.fechaCreacion } : undefined;
+  const campos: { fechaCreacion?: string; fechaCreacionCatalogo?: string } = {};
+  if (datos.fechaCreacion != null) campos.fechaCreacion = datos.fechaCreacion;
+  if (fechaCreacionCatalogo != null) campos.fechaCreacionCatalogo = fechaCreacionCatalogo;
+  return Object.keys(campos).length > 0 ? campos : undefined;
 }
 
 // Issue #251 — expresión SQL compartida por los 3 lugares que escriben
@@ -392,10 +398,25 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
       await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ recursoMl }).where(eq(seguimientosMl.id, seguimiento.id)));
     }
   }
+  // Issue #262 (revisión de Pablo, punto 2) — "product" (catálogo)
+  // usa resolverNombreYFechaCatalogo en vez de resolverNombre (mismo
+  // GET /products/{id} de siempre, nunca una llamada nueva): además
+  // del nombre, esa misma respuesta trae el date_created REAL del
+  // catálogo (nunca el de una oferta ganadora, ver lib/seguimiento/lector.ts),
+  // que se guarda más abajo junto con la foto del día.
+  let fechaCreacionCatalogo: string | null = null;
   if (nombreEsAproximado(seguimiento.nombre)) {
-    const nombreResuelto = await resolverNombre(seguimiento.tipo, recursoMl, seguimiento.mlIdExterno, token);
-    if (nombreResuelto !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
-      await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: nombreResuelto }).where(eq(seguimientosMl.id, seguimiento.id)));
+    if (seguimiento.tipo === "producto" && recursoMl === "product") {
+      const resuelto = await resolverNombreYFechaCatalogo(seguimiento.mlIdExterno, token);
+      fechaCreacionCatalogo = resuelto.fechaCreacionCatalogo;
+      if (resuelto.nombre !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
+        await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: resuelto.nombre }).where(eq(seguimientosMl.id, seguimiento.id)));
+      }
+    } else {
+      const nombreResuelto = await resolverNombre(seguimiento.tipo, recursoMl, seguimiento.mlIdExterno, token);
+      if (nombreResuelto !== NOMBRE_PENDIENTE_PRIMERA_REVISION) {
+        await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.update(seguimientosMl).set({ nombre: nombreResuelto }).where(eq(seguimientosMl.id, seguimiento.id)));
+      }
     }
   }
 
@@ -445,12 +466,13 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
     // contra la de ayer, igual que el camino de insertar.
     // Issue #251 ("aproximados estilo Selltrix") — SOLO para
     // tipo="producto" (nunca tienda, que no cambia su comportamiento
-    // acá): si la API confirmó date_created esta vez, se MEZCLA
-    // (`||`) con lo que ya hubiera en `publicaciones` (puede traer
-    // vendidosAproximado/precioAproximado de la extensión, issue
-    // #252) — nunca se reemplaza el objeto completo. Si la API no lo
-    // confirmó, la columna queda intacta (ni siquiera entra al SET).
-    const fechaCreacionNueva = seguimiento.tipo === "producto" && datos.fechaCreacion != null ? { fechaCreacion: datos.fechaCreacion } : undefined;
+    // acá): si la API confirmó date_created (del ítem) o se resolvió
+    // fechaCreacionCatalogo (del catálogo, issue #262) esta vez, se
+    // MEZCLA (`||`) con lo que ya hubiera en `publicaciones` (puede
+    // traer vendidosAproximado/precioAproximado de la extensión, issue
+    // #252) — nunca se reemplaza el objeto completo. Si no hay nada
+    // nuevo, la columna queda intacta (ni siquiera entra al SET).
+    const fechaCreacionNueva = seguimiento.tipo === "producto" ? publicacionesParaGuardar(seguimiento.tipo, datos, fechaCreacionCatalogo) : undefined;
     [fotoNueva] = await dbComoEmpresa(seguimiento.empresaId, (tx) =>
       tx
         .update(seguimientoFotos)
@@ -486,7 +508,7 @@ async function revisarUnSeguimiento(seguimiento: typeof seguimientosMl.$inferSel
           // primer insert del día en la práctica (el cron corre temprano),
           // pero si así fuera, onConflictDoUpdate (abajo) mezcla en vez
           // de pisar.
-          publicaciones: publicacionesParaGuardar(seguimiento.tipo, datos),
+          publicaciones: publicacionesParaGuardar(seguimiento.tipo, datos, fechaCreacionCatalogo),
         })
         // Corrección de Pablo — onConflictDoUpdate en vez de
         // onConflictDoNothing: en la carrera real (rarísima) de dos

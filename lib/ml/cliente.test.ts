@@ -380,6 +380,38 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
     await expect(obtenerItemMl("MCO1", "token")).rejects.toThrow(MlNoAutorizadoError);
   });
 
+  // Issue #262 (revisión de Pablo, punto 2) — obtenerProducto ahora
+  // también pide `date_created` (mismo GET /products/{id} de siempre,
+  // nunca una llamada nueva) para que resolverNombre pueda guardar el
+  // date_created REAL del catálogo (fechaCreacionCatalogo), nunca el
+  // de una oferta ganadora (ver lib/seguimiento/lector.ts).
+  it("obtenerProducto: pide 'date_created' en la misma llamada y lo devuelve como fechaCreacion", async () => {
+    let urlPedida = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urlPedida = url;
+        return respuestaJson({ name: "Pulsera deportiva", pictures: [], date_created: "2025-03-15T10:00:00.000Z" });
+      })
+    );
+    const producto = await obtenerProducto("MCO222", "token");
+    expect(producto?.fechaCreacion).toBe("2025-03-15T10:00:00.000Z");
+    expect(urlPedida).toContain("date_created");
+    expect(urlPedida).not.toContain("/items/"); // nunca el endpoint de ítem — sigue siendo /products/{id}
+  });
+
+  // Pregunta explícita de la revisión: si la respuesta real de Mercado
+  // Libre no trae `date_created` (puede pasar: no todos los catálogos
+  // lo confirman), el tipo nunca queda en `undefined` silencioso —
+  // siempre `null` explícito, mismo criterio que el resto del repo
+  // ("nunca inventa, pero tampoco esconde que falta").
+  it("sin date_created en la respuesta real: fechaCreacion queda en null explícito, nunca undefined", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ name: "Pulsera deportiva", pictures: [] })));
+    const producto = await obtenerProducto("MCO222", "token");
+    expect(producto?.fechaCreacion).toBeNull();
+    expect(producto?.fechaCreacion).not.toBeUndefined();
+  });
+
   // Bug real: una publicación pausada/cerrada (status !== "active")
   // igual aparecía en la tabla de Investigación — su precio/oferta ya
   // no sirve para analizar el mercado (no se puede comprar). Se

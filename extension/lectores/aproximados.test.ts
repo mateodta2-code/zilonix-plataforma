@@ -54,6 +54,22 @@ describe("antiguedadDiasPorId — issue #262 (interpolación, mismo criterio que
     expect(antiguedadDiasPorId("MCO1050000000", "product", ahoraMs, puntos)).toBeNull();
   });
 
+  // Issue #262 (revisión de Pablo, punto menor) — mismo tope de 90
+  // días que lib/seguimiento/aproximados.ts.
+  it("nunca extrapola más de 90 días más allá del último punto calibrado -> null fuera de ese rango", () => {
+    const ahoraMs = new Date("2027-01-01T05:00:00.000Z").getTime();
+    // 100M más que el punto más alto -> misma distancia que entre los
+    // 2 puntos calibrados -> ~1 año después del punto más alto, muy
+    // por encima del tope.
+    expect(antiguedadDiasPorId("MCO1200000000", "item", ahoraMs, puntos)).toBeNull();
+  });
+
+  it("extrapola igual dentro del tope de 90 días", () => {
+    const ahoraMs = new Date("2025-02-10T05:00:00.000Z").getTime();
+    const dias = antiguedadDiasPorId("MCO1110000000", "item", ahoraMs, puntos);
+    expect(dias).not.toBeNull();
+  });
+
   it("con menos de 2 puntos del mismo tipo, o un id sin el patrón real -> null, nunca inventa", () => {
     const ahoraMs = new Date("2025-06-01T05:00:00.000Z").getTime();
     expect(antiguedadDiasPorId("MCO1050000000", "item", ahoraMs, [puntos[0]])).toBeNull();

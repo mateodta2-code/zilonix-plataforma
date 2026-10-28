@@ -56,19 +56,42 @@ describe("antiguedadDiasPorId — issue #251, punto 2 (respaldo sin date_created
     expect(dias!).toBeLessThan(186);
   });
 
-  it("extrapola con la pendiente de los 2 puntos más cercanos cuando el id cae FUERA del rango calibrado", () => {
-    // 100M más que el punto más alto -> misma distancia que entre los 2
-    // puntos calibrados -> la fecha interpolada cae ~1 año después del
-    // punto más alto (2025-01-01), aprox. 2026-01-01/02 (el salto real
-    // en ms es el mismo que 2024->2025, que incluye el 29 de febrero).
-    // "ahora" bien más adelante (2027) para no depender de ese ajuste
-    // fino de un día por el año bisiesto.
-    const ahora = new Date("2027-01-01T05:00:00.000Z");
-    const idMasNuevo = "MCO1200000000";
-    const dias = antiguedadDiasPorId(idMasNuevo, "item", ahora, puntos);
+  it("extrapola con la pendiente de los 2 puntos más cercanos cuando el id cae FUERA del rango calibrado, dentro del tope de 90 días", () => {
+    // 10M más que el punto más alto -> con la pendiente real (100M en
+    // ~1 año), eso cae ~36.5 días DESPUÉS del punto más alto
+    // (2025-01-01) -> dentro de LIMITE_EXTRAPOLACION_DIAS (90).
+    const ahora = new Date("2025-02-10T05:00:00.000Z");
+    const idUnPocoMasNuevo = "MCO1110000000";
+    const dias = antiguedadDiasPorId(idUnPocoMasNuevo, "item", ahora, puntos);
     expect(dias).not.toBeNull();
-    expect(dias!).toBeGreaterThan(300);
-    expect(dias!).toBeLessThan(370);
+    expect(dias!).toBeGreaterThan(0);
+  });
+
+  // Issue #262 (revisión de Pablo, punto menor) — bug real que esto
+  // evita: antes, un id mucho más allá del rango calibrado extrapolaba
+  // igual, con la pendiente de los 2 puntos más cercanos — cuanto más
+  // lejos el id, menos confiable esa pendiente (la numeración de
+  // Mercado Libre nunca es perfectamente lineal). Más allá de
+  // LIMITE_EXTRAPOLACION_DIAS (90) desde el punto calibrado más
+  // cercano, "Sin dato" (null) es más honesto que una antigüedad sin
+  // ningún respaldo real cerca.
+  it("nunca extrapola más de 90 días más allá del último punto calibrado -> null fuera de ese rango", () => {
+    // 100M más que el punto más alto -> misma distancia que entre los
+    // 2 puntos calibrados -> la fecha interpolada cae ~1 año después
+    // del punto más alto (2025-01-01) — muy por encima del tope de 90
+    // días.
+    const ahora = new Date("2027-01-01T05:00:00.000Z");
+    const idMuyMasNuevo = "MCO1200000000";
+    expect(antiguedadDiasPorId(idMuyMasNuevo, "item", ahora, puntos)).toBeNull();
+  });
+
+  it("el mismo tope aplica para atrás (antes del primer punto calibrado), simétrico", () => {
+    const ahora = new Date("2025-06-01T05:00:00.000Z");
+    // 10M menos que el punto más bajo -> ~36.5 días ANTES del punto
+    // más bajo (2024-01-01) -> dentro del tope.
+    expect(antiguedadDiasPorId("MCO0990000000", "item", ahora, puntos)).not.toBeNull();
+    // 100M menos -> ~1 año antes del punto más bajo -> fuera del tope.
+    expect(antiguedadDiasPorId("MCO0900000000", "item", ahora, puntos)).toBeNull();
   });
 
   it("nunca mezcla ids de países distintos (MLA no calibra con puntos MCO)", () => {

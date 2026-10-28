@@ -363,18 +363,39 @@ export async function obtenerMejoresProductosCategoria(categoryId: string, token
   }
 }
 
+// Issue #262 (revisión de Pablo, punto 2) — único caller real:
+// resolverNombre (lib/seguimiento/seguimientos.ts), que necesitaba el
+// nombre del catálogo Y, ahora, también su date_created real — nunca
+// una llamada nueva a Mercado Libre, es el MISMO `GET /products/{id}`
+// de siempre, solo que ahora también pide el atributo `date_created`.
+// Tipo PROPIO (nunca ProductoCatalogoMl, que usan otras 2 funciones de
+// este archivo con respuestas que no tienen date_created) para no
+// forzar ese campo sobre llamadores que nunca lo necesitan.
+export type ProductoCatalogoConFechaMl = { id: string; nombre: string | null; foto: string | null; fechaCreacion: string | null };
+
 // Nombre + foto de un product_id de catálogo — solo se usa para
 // completar los candidatos de tipo PRODUCT que vinieron de
 // obtenerMejoresProductosCategoria (que no trae esos datos), nunca
 // para los que ya vinieron de buscarProductosCatalogo. Tolera 403/5xx
 // (enriquecimiento); 401 propaga.
-export async function obtenerProducto(productId: string, token: string): Promise<ProductoCatalogoMl | null> {
+export async function obtenerProducto(productId: string, token: string): Promise<ProductoCatalogoConFechaMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(productId)) return null;
-  const url = `${BASE_URL}/products/${encodeURIComponent(productId)}`;
+  const url = `${BASE_URL}/products/${encodeURIComponent(productId)}?attributes=id,name,pictures,date_created`;
   try {
-    const resp = await pedir<{ name?: unknown; pictures?: unknown }>(url, token);
+    const resp = await pedir<{ name?: unknown; pictures?: unknown; date_created?: unknown }>(url, token);
     if (!resp.ok) return null;
-    return { id: productId, nombre: typeof resp.data.name === "string" ? resp.data.name : null, foto: fotoDe(resp.data.pictures) };
+    return {
+      id: productId,
+      nombre: typeof resp.data.name === "string" ? resp.data.name : null,
+      foto: fotoDe(resp.data.pictures),
+      // Issue #262 — `date_created` real del CATÁLOGO (nunca de una
+      // oferta/ítem ganador, ver lib/seguimiento/lector.ts) — `null`
+      // explícito cuando Mercado Libre no lo trae en la respuesta
+      // (nunca undefined silencioso: el resto del repo siempre deja
+      // explícito que faltó, en vez de un campo ausente que alguien
+      // podría leer como "0"/"falsy" sin darse cuenta).
+      fechaCreacion: typeof resp.data.date_created === "string" ? resp.data.date_created : null,
+    };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
     throw e;

@@ -19,6 +19,11 @@
 
   const MS_POR_DIA = 24 * 60 * 60 * 1000;
   const DIAS_POR_MES = 30;
+  // Issue #262 (revisión de Pablo, punto menor) — mismo tope que
+  // lib/seguimiento/aproximados.ts (antiguedadDiasPorId): nunca
+  // extrapola más de 90 días más allá de la fecha del punto calibrado
+  // más cercano al id buscado.
+  const LIMITE_EXTRAPOLACION_DIAS = 90;
 
   // Mismo patrón prefijo+dígitos que numeroYPrefijoDeId (lib/seguimiento/
   // aproximados.ts) — acá solo hace falta el número para comparar
@@ -73,6 +78,17 @@
 
     const fraccion = (objetivo.numero - a.numero) / (b.numero - a.numero);
     const fechaInterpoladaMs = a.fechaMs + fraccion * (b.fechaMs - a.fechaMs);
+
+    // Mismo tope que el lado del servidor — ver el comentario de
+    // LIMITE_EXTRAPOLACION_DIAS, arriba.
+    if (fraccion > 1) {
+      const diasMasAllaDelUltimoPunto = (fechaInterpoladaMs - b.fechaMs) / MS_POR_DIA;
+      if (diasMasAllaDelUltimoPunto > LIMITE_EXTRAPOLACION_DIAS) return null;
+    } else if (fraccion < 0) {
+      const diasAntesDelPrimerPunto = (a.fechaMs - fechaInterpoladaMs) / MS_POR_DIA;
+      if (diasAntesDelPrimerPunto > LIMITE_EXTRAPOLACION_DIAS) return null;
+    }
+
     const dias = (ahoraMs - fechaInterpoladaMs) / MS_POR_DIA;
     return dias > 0 ? dias : null;
   }

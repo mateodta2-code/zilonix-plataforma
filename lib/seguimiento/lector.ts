@@ -22,6 +22,17 @@ export type DatosFotoNueva = {
   // propia). lib/seguimiento/aproximados.ts lo usa para la antigüedad
   // real de la publicación; si viene null, esa misma función cae a
   // interpolar por el número del id — nunca se inventa acá.
+  //
+  // Issue #262 (revisión de Pablo, punto bloqueante) — SOLO real para
+  // recurso_ml "item" (la publicación puntual que de verdad se sigue).
+  // Para "product" (catálogo) este campo queda SIEMPRE null acá abajo
+  // — el date_created de catálogo real nunca sale de este lector (que
+  // solo ve ofertas/ítems puntuales), sale de resolverNombreYFechaCatalogo
+  // (lib/seguimiento/seguimientos.ts, GET /products/{id}) y se guarda
+  // aparte como `fechaCreacionCatalogo` (lib/trabajos/revisionDiariaSeguimiento.ts) —
+  // nunca la fecha de la oferta GANADORA de ese catálogo, que es el
+  // date_created de un ítem puntual de un vendedor cualquiera, no del
+  // catálogo en sí.
   fechaCreacion: string | null;
 };
 
@@ -113,8 +124,17 @@ export async function leerFotoSeguimiento(seguimiento: SeguimientoParaLeer, toke
     esFull: ganadora?.esFull ?? null,
     esEnvioGratis: ganadora?.esEnvioGratis ?? null,
     publicaciones: null,
-    // ganadora sale de obtenerOfertasProducto, que ya pide date_created
-    // (issue #197, para Investigación) — mismo campo, reusado acá.
-    fechaCreacion: ganadora?.fechaCreacion ?? null,
+    // Issue #262 (revisión de Pablo, punto bloqueante) — bug real:
+    // antes esto era `ganadora?.fechaCreacion ?? null` — el
+    // date_created de la OFERTA GANADORA (un ítem puntual de un
+    // vendedor cualquiera), nunca el del catálogo en sí. Guardarlo acá
+    // como si fuera la antigüedad del catálogo hubiera calibrado (y
+    // mostrado) una antigüedad de catálogo basada en cuándo un
+    // vendedor cualquiera publicó SU oferta — nunca el campo correcto.
+    // Siempre `null`, a propósito: el date_created real del catálogo
+    // sale de resolverNombreYFechaCatalogo (lib/seguimiento/seguimientos.ts,
+    // GET /products/{id}) y se guarda aparte como `fechaCreacionCatalogo`
+    // (lib/trabajos/revisionDiariaSeguimiento.ts) — nunca de este lector.
+    fechaCreacion: null,
   };
 }

@@ -130,10 +130,28 @@ export async function resolverNombre(tipo: "producto" | "tienda", recursoMl: "it
       const item = await obtenerItemMl(mlIdExterno, token);
       return item?.producto.nombre ?? NOMBRE_PENDIENTE_PRIMERA_REVISION;
     }
-    const producto = await obtenerProducto(mlIdExterno, token);
-    return producto?.nombre ?? NOMBRE_PENDIENTE_PRIMERA_REVISION;
+    return (await resolverNombreYFechaCatalogo(mlIdExterno, token)).nombre;
   } catch {
     return NOMBRE_PENDIENTE_PRIMERA_REVISION;
+  }
+}
+
+// Issue #262 (revisión de Pablo, punto 2) — mismo `GET /products/{id}`
+// que resolverNombre ya hacía para el nombre del catálogo (recursoMl
+// "product"), nunca una llamada nueva — obtenerProducto (lib/ml/cliente.ts)
+// ahora también pide `date_created` en esa MISMA respuesta. Expone los
+// dos juntos para que revisarUnSeguimiento (lib/trabajos/revisionDiariaSeguimiento.ts)
+// pueda guardar `fechaCreacionCatalogo` sin pedir la misma publicación
+// dos veces. `resolverNombre` (arriba) sigue siendo la función de
+// siempre para los demás llamadores (agregarSeguimiento, tienda, item)
+// — delega acá solo para el caso "producto"+"product", quedándose
+// únicamente con el nombre.
+export async function resolverNombreYFechaCatalogo(mlIdExterno: string, token: string): Promise<{ nombre: string; fechaCreacionCatalogo: string | null }> {
+  try {
+    const producto = await obtenerProducto(mlIdExterno, token);
+    return { nombre: producto?.nombre ?? NOMBRE_PENDIENTE_PRIMERA_REVISION, fechaCreacionCatalogo: producto?.fechaCreacion ?? null };
+  } catch {
+    return { nombre: NOMBRE_PENDIENTE_PRIMERA_REVISION, fechaCreacionCatalogo: null };
   }
 }
 

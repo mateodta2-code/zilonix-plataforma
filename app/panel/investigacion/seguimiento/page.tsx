@@ -11,7 +11,7 @@ import {
   listarAlertasDelDia,
   listarSeguimientosConUltimaFoto,
 } from "@/lib/seguimiento/seguimientos";
-import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacion, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
+import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacionParaAntiguedad, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
 import { necesitaLecturaDePagina } from "@/lib/seguimiento/estimacionInventario";
 import { antiguedadDias, ETIQUETA_APROXIMADO, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
@@ -396,7 +396,17 @@ export default async function SeguimientoPage({
                   : null;
               const diasAprox =
                 vendidosAprox != null
-                  ? antiguedadDias({ dateCreated: obtenerFechaCreacion(ultimaFoto?.publicaciones), mlId: seguimiento.mlIdExterno, recursoMl: seguimiento.recursoMl, ahora })
+                  ? antiguedadDias({
+                      // Issue #262 (revisión de Pablo, punto 2) —
+                      // nunca obtenerFechaCreacion a secas: para
+                      // recurso_ml "product" (catálogo), el date_created
+                      // real sale de fechaCreacionCatalogo, nunca de
+                      // una oferta ganadora (ver lib/seguimiento/lector.ts).
+                      dateCreated: obtenerFechaCreacionParaAntiguedad(ultimaFoto?.publicaciones, seguimiento.recursoMl),
+                      mlId: seguimiento.mlIdExterno,
+                      recursoMl: seguimiento.recursoMl,
+                      ahora,
+                    })
                   : null;
               const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
               const precioParaFacturacion = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximado;

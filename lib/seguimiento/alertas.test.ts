@@ -3,6 +3,9 @@ import {
   compararFotos,
   mensajeAlerta,
   normalizarPublicaciones,
+  obtenerFechaCreacion,
+  obtenerFechaCreacionCatalogo,
+  obtenerFechaCreacionParaAntiguedad,
   obtenerPrecioAproximado,
   obtenerVendidosAproximado,
   type FotoComparable,
@@ -317,6 +320,49 @@ describe("obtenerPrecioAproximado — issue #252 (smoke de staging, punto 3)", (
     expect(obtenerPrecioAproximado([1, 2, 3])).toBeNull();
     expect(obtenerPrecioAproximado("89900")).toBeNull();
     expect(obtenerPrecioAproximado(89900)).toBeNull();
+  });
+});
+
+describe("obtenerFechaCreacion / obtenerFechaCreacionCatalogo — issue #262 (revisión de Pablo, punto 2): dos campos SEPARADOS, nunca confundidos", () => {
+  it("obtenerFechaCreacion lee {fechaCreacion} (date_created del ÍTEM), nunca {fechaCreacionCatalogo}", () => {
+    expect(obtenerFechaCreacion({ fechaCreacion: "2024-01-01T00:00:00.000Z" })).toBe("2024-01-01T00:00:00.000Z");
+    expect(obtenerFechaCreacion({ fechaCreacionCatalogo: "2025-03-15T00:00:00.000Z" })).toBeNull();
+  });
+
+  it("obtenerFechaCreacionCatalogo lee {fechaCreacionCatalogo} (date_created del CATÁLOGO), nunca {fechaCreacion}", () => {
+    expect(obtenerFechaCreacionCatalogo({ fechaCreacionCatalogo: "2025-03-15T00:00:00.000Z" })).toBe("2025-03-15T00:00:00.000Z");
+    // Issue #262, punto bloqueante — `fechaCreacion`, aunque tenga un
+    // valor real, es la fecha de un ÍTEM (ganador de una oferta,
+    // nunca del catálogo) — jamás debe leerse acá como si fuera la
+    // del catálogo.
+    expect(obtenerFechaCreacionCatalogo({ fechaCreacion: "2024-01-01T00:00:00.000Z" })).toBeNull();
+  });
+
+  it("null/undefined/el formato de tienda/basura -> null en los dos, nunca revientan", () => {
+    for (const fn of [obtenerFechaCreacion, obtenerFechaCreacionCatalogo]) {
+      expect(fn(null)).toBeNull();
+      expect(fn(undefined)).toBeNull();
+      expect(fn({ total: 10, visibles: [], fuente: "api" })).toBeNull();
+      expect(fn([1, 2, 3])).toBeNull();
+      expect(fn("2024-01-01")).toBeNull();
+    }
+  });
+});
+
+describe("obtenerFechaCreacionParaAntiguedad — issue #262 (revisión de Pablo, punto 2): un solo punto de entrada según recurso_ml", () => {
+  const publicaciones = { fechaCreacion: "2024-01-01T00:00:00.000Z", fechaCreacionCatalogo: "2025-03-15T00:00:00.000Z" };
+
+  it('recurso_ml "item": usa fechaCreacion, nunca fechaCreacionCatalogo', () => {
+    expect(obtenerFechaCreacionParaAntiguedad(publicaciones, "item")).toBe("2024-01-01T00:00:00.000Z");
+  });
+
+  it('recurso_ml "product": usa fechaCreacionCatalogo, nunca fechaCreacion (el bug bloqueante que motivó esta función)', () => {
+    expect(obtenerFechaCreacionParaAntiguedad(publicaciones, "product")).toBe("2025-03-15T00:00:00.000Z");
+  });
+
+  it('recurso_ml "seller" o null: siempre null — una tienda no tiene date_created propio', () => {
+    expect(obtenerFechaCreacionParaAntiguedad(publicaciones, "seller")).toBeNull();
+    expect(obtenerFechaCreacionParaAntiguedad(publicaciones, null)).toBeNull();
   });
 });
 

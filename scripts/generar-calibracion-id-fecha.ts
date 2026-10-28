@@ -52,36 +52,31 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { dbSuperadmin } from "@/db/superadmin-context";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { empresas, productosMl, seguimientoFotos, seguimientosMl } from "@/db/schema";
-import { obtenerFechaCreacion } from "@/lib/seguimiento/alertas";
-
-type Punto = { id: string; tipo: "item" | "product"; fecha: string };
-
-function prefijoDeId(id: string): string | null {
-  const m = id.match(/^([A-Z]{3})\d+$/);
-  return m ? m[1] : null;
-}
+import { decidirPuntoCompetidor, esResultadoExito, prefijoDeId, puntoDePropia, type Punto } from "./generar-calibracion-id-fecha-logica";
 
 // Fuente 1 — competidores con date_created ya confirmado por la API.
-async function puntosDeCompetidores(): Promise<Punto[]> {
+// decidirPuntoCompetidor (generar-calibracion-id-fecha-logica.ts) es
+// la decisión real (issue #262, punto BLOQUEANTE: nunca la fecha de
+// un ítem ganador para un catálogo) — ver ese archivo.
+async function puntosDeCompetidores(): Promise<{ puntos: Punto[]; omitidos: number }> {
   const seguimientos = await dbTrabajadorSeguimiento
     .select()
     .from(seguimientosMl)
     .where(and(eq(seguimientosMl.tipo, "producto"), isNull(seguimientosMl.eliminadoTs)));
 
   const puntos: Punto[] = [];
+  let omitidos = 0;
   for (const s of seguimientos) {
     // "seller" nunca aplica acá (tipo ya filtrado a "producto" arriba,
     // nunca puede ser "seller") — el chequeo es solo para que TS sepa
     // que de acá en más recursoMl es "item" | "product".
     if (s.recursoMl !== "item" && s.recursoMl !== "product") continue;
     const fotos = await dbComoEmpresa(s.empresaId, (tx) => tx.select().from(seguimientoFotos).where(eq(seguimientoFotos.seguimientoId, s.id)));
-    // Cualquier foto con la fecha confirmada alcanza — todas deberían
-    // traer la MISMA fecha real una vez que la API la confirma una
-    // vez (date_created de una publicación no cambia).
-    const fecha = fotos.map((f) => obtenerFechaCreacion(f.publicaciones)).find((f): f is string => f != null);
-    if (fecha) puntos.push({ id: s.mlIdExterno, tipo: s.recursoMl, fecha });
+    const { punto, omitido } = decidirPuntoCompetidor(s.mlIdExterno, s.recursoMl, fotos);
+    if (punto) puntos.push(punto);
+    if (omitido) omitidos += 1;
   }
-  return puntos;
+  return { puntos, omitidos };
 }
 
 // Fuente 2 — publicaciones propias recién publicadas (resultado[].itemId
@@ -93,11 +88,11 @@ async function puntosDePropias(): Promise<Punto[]> {
   for (const { id: empresaId } of todasLasEmpresas) {
     const productos = await dbComoEmpresa(empresaId, (tx) => tx.select().from(productosMl).where(isNotNull(productosMl.resultado)));
     for (const p of productos) {
-      if (!p.publicadoTs || !Array.isArray(p.resultado)) continue;
+      if (!Array.isArray(p.resultado)) continue;
       for (const r of p.resultado) {
-        if (r && typeof r === "object" && "ok" in r && r.ok === true && "itemId" in r && typeof r.itemId === "string") {
-          puntos.push({ id: r.itemId, tipo: "item", fecha: p.publicadoTs.toISOString() });
-        }
+        if (!esResultadoExito(r)) continue;
+        const punto = puntoDePropia(r.itemId, p.publicadoTs);
+        if (punto) puntos.push(punto);
       }
     }
   }
@@ -106,8 +101,14 @@ async function puntosDePropias(): Promise<Punto[]> {
 
 async function main() {
   console.log("Leyendo seguimiento_fotos (competidores con date_created confirmado por la API)...");
-  const deCompetidores = await puntosDeCompetidores();
+  const { puntos: deCompetidores, omitidos } = await puntosDeCompetidores();
   console.log(`  ${deCompetidores.length} punto(s) real(es) encontrados.`);
+  if (omitidos > 0) {
+    console.log(
+      `  ${omitidos} seguimiento(s) de catálogo (recurso_ml "product") omitido(s): fecha de ítem ganador, no de catálogo — ` +
+        `sin fechaCreacionCatalogo confirmada todavía, nunca se usa la del ítem ganador en su lugar.`
+    );
+  }
 
   console.log("Leyendo productos_ml (publicaciones propias, resultado[].itemId + publicado_ts)...");
   const dePropias = await puntosDePropias();

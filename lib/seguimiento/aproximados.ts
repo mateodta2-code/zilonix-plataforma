@@ -40,6 +40,10 @@ export const ETIQUETA_APROXIMADO = "aprox.";
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 const DIAS_POR_MES = 30;
+// Issue #262 (revisión de Pablo, punto menor) — tope real de
+// extrapolación en antiguedadDiasPorId (abajo): nunca más de 90 días
+// más allá de la fecha del punto calibrado más cercano al id buscado.
+const LIMITE_EXTRAPOLACION_DIAS = 90;
 
 // Selltrix: una publicación Full vende más rápido en la práctica
 // (mejor exposición/logística) que lo que el "+N" redondeado sugiere
@@ -164,6 +168,24 @@ export function antiguedadDiasPorId(
 
   const fraccion = (objetivo.numero - a.numero) / (b.numero - a.numero);
   const fechaInterpolada = new Date(a.fecha.getTime() + fraccion * (b.fecha.getTime() - a.fecha.getTime()));
+
+  // Corrección de Pablo (revisión, punto menor) — `fraccion` fuera de
+  // [0,1] significa que `id` cae AFUERA del rango calibrado: esto
+  // EXTRAPOLA con la pendiente de los 2 puntos más cercanos, confiable
+  // cerca del borde, cada vez menos a medida que el id se aleja (la
+  // numeración de Mercado Libre nunca es perfectamente lineal en el
+  // tiempo). Tope real: nunca más de LIMITE_EXTRAPOLACION_DIAS (90)
+  // más allá de la fecha del punto calibrado más cercano al id
+  // buscado — más lejos que eso, "Sin dato" (null) es más honesto que
+  // una antigüedad sin ningún punto real cerca que la respalde.
+  if (fraccion > 1) {
+    const diasMasAllaDelUltimoPunto = (fechaInterpolada.getTime() - b.fecha.getTime()) / MS_POR_DIA;
+    if (diasMasAllaDelUltimoPunto > LIMITE_EXTRAPOLACION_DIAS) return null;
+  } else if (fraccion < 0) {
+    const diasAntesDelPrimerPunto = (a.fecha.getTime() - fechaInterpolada.getTime()) / MS_POR_DIA;
+    if (diasAntesDelPrimerPunto > LIMITE_EXTRAPOLACION_DIAS) return null;
+  }
+
   const dias = (ahora.getTime() - fechaInterpolada.getTime()) / MS_POR_DIA;
   return dias > 0 ? dias : null;
 }

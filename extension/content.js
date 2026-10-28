@@ -219,6 +219,14 @@
     return meses >= 1 ? `${meses} m` : `${Math.round(dias)} d`;
   }
 
+  // Issue #262 (revisión de Pablo, punto menor) — "Sin dato" (nunca
+  // SIN_DATO = "No disponible", el genérico del resto del panel) para
+  // los 3 campos aprox. que pueden faltar acá — mismo texto que ya usa
+  // la app (page.tsx/[id]/page.tsx) para lo mismo, para que las dos
+  // pantallas digan exactamente lo mismo ante el mismo "todavía no hay
+  // dato para estimar esto".
+  const SIN_DATO_APROX = "Sin dato";
+
   function bloqueAnalisisAproximado(datos) {
     if (!APROX || !CAL) return ""; // sitio sin estos globales cargados (solo Mercado Libre los trae, ver manifest.json)
     if (typeof datos.vendidos !== "number") return ""; // sin ningún vendidos (exacto ni "+N") no hay nada que estimar
@@ -237,9 +245,9 @@
 
     let html = '<p class="zx-seccion-titulo">Análisis aprox.</p>';
     html += filaHtml("Vendidos estimados", `${Math.round(vendidosEst)}${etiquetaMl}`, false);
-    html += filaHtml("Antigüedad", formatoAntiguedad(dias) ?? SIN_DATO, dias == null);
-    html += filaHtml("Ventas/mes", ventasMesEst != null ? Math.round(ventasMesEst) : SIN_DATO, ventasMesEst == null);
-    html += filaHtml("Facturación/mes", facturacionMesEst != null ? formatoPrecio(facturacionMesEst, datos.moneda) : SIN_DATO, facturacionMesEst == null);
+    html += filaHtml("Antigüedad", formatoAntiguedad(dias) ?? SIN_DATO_APROX, dias == null);
+    html += filaHtml("Ventas/mes", ventasMesEst != null ? Math.round(ventasMesEst) : SIN_DATO_APROX, ventasMesEst == null);
+    html += filaHtml("Facturación/mes", facturacionMesEst != null ? formatoPrecio(facturacionMesEst, datos.moneda) : SIN_DATO_APROX, facturacionMesEst == null);
     html +=
       '<p class="zx-nota-aprox">Estimado: vendidos × factor según Full/"+N" (2.2 / 1.55), llevado a "por mes" con la antigüedad real o calibrada de la publicación — nunca un dato que Mercado Libre confirme directamente.</p>';
     return html;
