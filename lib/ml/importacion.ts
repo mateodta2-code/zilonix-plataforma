@@ -4,6 +4,8 @@ import { importacionesMl, pedidos, publicaciones } from "@/db/schema";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { registrarEventoPedido } from "@/lib/ml/pedidos";
 import { sincronizarDespacho } from "@/lib/ml/despachos";
+import { guardarOrdenMl } from "@/lib/ml/ventas-finanzas";
+import type { OrdenMl } from "@/lib/finanzas/venta-ml";
 
 const DIAS_HACIA_ATRAS = 60;
 const TAMAÑO_PAGINA = 50;
@@ -145,6 +147,13 @@ export async function ejecutarImportacionInicial(empresaId: string, cuentaId: st
           console.error("No se pudo sincronizar el despacho durante la importación:", error instanceof Error ? error.message : error);
         });
       }
+
+      // Issue #130 — la foto financiera de la venta (cabecera, líneas y,
+      // si ya hay costo en la maestra, el congelado). Un fallo acá no
+      // corta la importación: la sincronización de ventas la retoma.
+      await guardarOrdenMl(empresaId, cuentaId, accessToken, pedido as OrdenMl).catch((error) => {
+        console.error("No se pudo guardar la venta en finanzas durante la importación:", error instanceof Error ? error.message : error);
+      });
 
       pedidosImportados += 1;
       await dbComoEmpresa(empresaId, (tx) =>
