@@ -6,7 +6,7 @@ import { db } from "@/db/index";
 import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { cuentasMl, empresas, seguimientoAlertas, seguimientoFotos, seguimientosMl, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { fechaDiaBogota } from "@/lib/filtros-listado";
+import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
 import { NOMBRE_PENDIENTE_PRIMERA_REVISION, guardarDatoDePaginaSeguimiento } from "@/lib/seguimiento/seguimientos";
 import { obtenerFechaCreacion, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import { antiguedadDias, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
@@ -573,7 +573,12 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     return seguimiento;
   }
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    // Los casos con reloj fijo falsean solo `Date`. Si un expect falla
+    // antes del `finally`, este afterEach igual devuelve el reloj real.
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it("crea la primera foto al instante (nunca espera al cron) y marca ultima_revision_ts; sin alertas, nada con qué comparar todavía", async () => {
     const seguimiento = await crearSeguimientoConCuenta("PRIMERA-FOTO");
@@ -745,9 +750,16 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
   // nunca una segunda.
   it("mañana más tarde con la misma baja de precio: una sola alerta precio_bajo, nunca duplicada", async () => {
     const seguimiento = await crearSeguimientoConCuenta("SIN-ALERTA-DUPLICADA");
-    const ayer = new Date();
-    ayer.setUTCHours(0, 0, 0, 0);
-    ayer.setUTCDate(ayer.getUTCDate() - 1);
+    // Bug real (PR #258, CI corrido ~7:30pm Bogotá): `ayer` armado con
+    // setUTCHours/setUTCDate (medianoche UTC) nunca es lo mismo que
+    // "ayer en Bogotá" entre las 19:00 y las 24:00 locales — en ese
+    // rango horario, "hoy 00:00 UTC" todavía no llegó (son las 05:00
+    // UTC del día siguiente en Bogotá), así que restarle un día daba
+    // la fecha de HOY en Bogotá, no la de ayer. El código real usa
+    // fechaDeHoy() (lib/trabajos/revisionDiariaSeguimiento.ts), que es
+    // fechaDiaBogota() — el fixture tiene que coincidir dígito a
+    // dígito con esa misma cuenta, nunca una propia en UTC.
+    const ayer = diasAtras(1);
     await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: ayer, precio: "100", estado: "active" }));
 
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 80, status: "active" }))); // baja real de 100 a 80
@@ -765,6 +777,61 @@ describe("revisarAhoraUnSeguimiento (issue #204)", () => {
     const alertas = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimiento.id)));
     expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
   });
+
+  // Regresión del bug del PR #258 (CI ~19:30 Bogotá). El caso de
+  // arriba ya usa `diasAtras(1)` con el reloj real; estas tres horas
+  // fijan `Date` para que el corte de las 19:00 se pruebe también
+  // cuando el CI corre de día. 10:00 cae del mismo lado del calendario
+  // UTC que Bogotá; 19:30 y 23:59 ya son el día siguiente en UTC.
+  // Solo se falsea `Date` — si se falsea `setTimeout`, el driver de
+  // Postgres se cuelga. El instante se arma ANTES de congelar el
+  // reloj, sumando la hora a la medianoche real de Bogotá
+  // (`rangoDiaBogota().inicio`, 05:00 UTC), nunca a `fechaDiaBogota()`
+  // (eso es el marcador 00:00Z de la columna, no un instante).
+  //
+  // La cuenta se crea DESPUÉS de fijar el reloj (CI del PR #263):
+  // `crearSeguimientoConCuenta` pone `tokenExpiraTs` en `Date.now()+1h`
+  // y `obtenerAccessTokenVigente` lo compara contra el mismo
+  // `Date.now()`. Si la cuenta naciera con el reloj real y después el
+  // reloj saltara varias horas, el token se vería vencido y el test
+  // fallaría renovando la conexión, no por la alerta.
+  function instanteDeHoyEnBogota(hora: number, minuto: number): Date {
+    const medianocheBogotaReal = rangoDiaBogota(new Date()).inicio;
+    return new Date(medianocheBogotaReal.getTime() + (hora * 60 + minuto) * 60 * 1000);
+  }
+
+  it.each([
+    ["10:00", 10, 0],
+    ["19:30", 19, 30],
+    ["23:59", 23, 59],
+  ] as const)(
+    "a las %s de Bogotá, dos revisiones el mismo día con la misma baja de precio: una sola alerta precio_bajo, nunca duplicada",
+    async (etiqueta, hora, minuto) => {
+      const horaSimulada = instanteDeHoyEnBogota(hora, minuto);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(horaSimulada);
+        const seguimiento = await crearSeguimientoConCuenta(`AYER-BOGOTA-${etiqueta.replace(":", "")}`);
+        const ayer = diasAtras(1);
+        await dbComoEmpresa(seguimiento.empresaId, (tx) =>
+          tx.insert(seguimientoFotos).values({ empresaId: seguimiento.empresaId, seguimientoId: seguimiento.id, fecha: ayer, precio: "100", estado: "active" })
+        );
+
+        vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ price: 80, status: "active" }))); // baja real de 100 a 80
+
+        const primera = await revisarAhoraUnSeguimiento(seguimiento);
+        expect(primera).toEqual({ ok: true, saltado: false, alertasCreadas: 1 });
+
+        const segunda = await revisarAhoraUnSeguimiento(seguimiento);
+        expect(segunda).toEqual({ ok: true, saltado: false, alertasCreadas: 0 });
+
+        const alertas = await dbComoEmpresa(seguimiento.empresaId, (tx) => tx.select().from(seguimientoAlertas).where(eq(seguimientoAlertas.seguimientoId, seguimiento.id)));
+        expect(alertas.filter((a) => a.tipo === "precio_bajo")).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it("empresa sin cuenta ML conectada: {ok:false,error} claro, y NUNCA marca ultima_revision_ts (para que el cron de hoy mismo lo reintente)", async () => {
     const { empresaId, usuarioId } = await crearEmpresaConUsuario("SIN-CUENTA-INMEDIATA");
