@@ -14,7 +14,7 @@ import {
 import { mensajeAlerta, normalizarPublicaciones, obtenerFechaCreacionParaAntiguedad, obtenerPrecioAproximado, obtenerVendidosAproximado } from "@/lib/seguimiento/alertas";
 import { calcularDelta, calcularVentasHoy } from "@/lib/seguimiento/comparativa";
 import { necesitaLecturaDePagina } from "@/lib/seguimiento/estimacionInventario";
-import { antiguedadDias, ETIQUETA_APROXIMADO, facturacionMes, ventasMes, vendidosEstimados } from "@/lib/seguimiento/aproximados";
+import { antiguedadDias, ETIQUETA_APROXIMADO, facturacionMes, ventasMes } from "@/lib/seguimiento/aproximados";
 import { construirLinkMlDeSeguimiento } from "@/lib/seguimiento/link";
 import { Ayuda } from "@/components/marco/Ayuda";
 import { Boton, BotonLink } from "@/components/marco/Boton";
@@ -29,7 +29,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { agregarSeguimientoAction, eliminarSeguimientoAction, marcarAlertaLeidaAction, procesarAgregarPorQuery } from "./actions";
 import { BotonActualizarTodo } from "./BotonActualizarTodo";
 import { EscuchaExtension } from "./EscuchaExtension";
-import { celdaConDelta, conSigno } from "./formato";
+import { celdaConDelta, conSigno, vendidosAproxParaFila } from "./formato";
 import styles from "./page.module.css";
 
 // Issue #182 — mismo patrón /^MCO\d+$/ y /^\d+$/ que la extensión usa
@@ -390,24 +390,39 @@ export default async function SeguimientoPage({
               // dato" en la UI cuando ninguno de los dos aplica, nunca
               // una antigüedad inventada.
               const vendidosParaAprox = ultimaFoto?.vendidos ?? vendidosAproximado;
-              const vendidosAprox =
-                seguimiento.tipo === "producto" && vendidosParaAprox != null && ultimaFoto?.esFull != null
-                  ? vendidosEstimados(vendidosParaAprox, { exacto: ultimaFoto.vendidos != null, esFull: ultimaFoto.esFull })
-                  : null;
-              const diasAprox =
-                vendidosAprox != null
-                  ? antiguedadDias({
-                      // Issue #262 (revisión de Pablo, punto 2) —
-                      // nunca obtenerFechaCreacion a secas: para
-                      // recurso_ml "product" (catálogo), el date_created
-                      // real sale de fechaCreacionCatalogo, nunca de
-                      // una oferta ganadora (ver lib/seguimiento/lector.ts).
-                      dateCreated: obtenerFechaCreacionParaAntiguedad(ultimaFoto?.publicaciones, seguimiento.recursoMl),
-                      mlId: seguimiento.mlIdExterno,
-                      recursoMl: seguimiento.recursoMl,
-                      ahora,
-                    })
-                  : null;
+              // Issue #251 (fix "aproximados siempre visibles") — bug
+              // real probado en staging: `esFull != null` descartaba
+              // el estimado ENTERO (vendidosAprox en null) para
+              // cualquier seguimiento sin ese dato confirmado todavía
+              // — la mayoría, de hecho, porque `esFull` solo lo trae
+              // la lectura real de la API/extensión. Ahora, con Full
+              // desconocido, se asume el factor "no Full" (1.55, el
+              // mismo criterio que lib/seguimiento/aproximados.ts usa
+              // cuando `esFull` no es exactamente `true`) y la UI
+              // avisa "(Full desconocido)" en vez de mostrar un número
+              // sin ninguna aclaración.
+              const fullConocido = ultimaFoto?.esFull != null;
+              const vendidosAprox = vendidosAproxParaFila(seguimiento.tipo, vendidosParaAprox, ultimaFoto?.vendidos != null, ultimaFoto?.esFull ?? null);
+              // Issue #251 (fix "aproximados siempre visibles") —
+              // antes diasAprox dependía de `vendidosAprox != null`
+              // (sin vendidos, nunca se intentaba ni siquiera leer la
+              // antigüedad) — pero antiguedadDias no necesita vendidos
+              // para nada, solo fecha/id. Calculado aparte: permite
+              // distinguir "sin vendidos pero sabemos que es nuevo"
+              // (antigüedad real < 30 días) de "no sabemos nada" (sin
+              // fecha ni calibración), en la columna "Ventas ~30d" de
+              // abajo.
+              const diasAprox = antiguedadDias({
+                // Issue #262 (revisión de Pablo, punto 2) —
+                // nunca obtenerFechaCreacion a secas: para
+                // recurso_ml "product" (catálogo), el date_created
+                // real sale de fechaCreacionCatalogo, nunca de
+                // una oferta ganadora (ver lib/seguimiento/lector.ts).
+                dateCreated: obtenerFechaCreacionParaAntiguedad(ultimaFoto?.publicaciones, seguimiento.recursoMl),
+                mlId: seguimiento.mlIdExterno,
+                recursoMl: seguimiento.recursoMl,
+                ahora,
+              });
               const ventasMesAprox = ventasMes(vendidosAprox, diasAprox);
               const precioParaFacturacion = ultimaFoto?.precio != null ? Number(ultimaFoto.precio) : precioAproximado;
               const facturacionMesAprox = facturacionMes(ventasMesAprox, precioParaFacturacion);
@@ -510,7 +525,14 @@ export default async function SeguimientoPage({
                         mostraba, esta fila no. */}
                         {vendidosAprox != null ? (
                           <div className={styles.subdato}>
-                            {numeroPlano(Math.round(vendidosAprox))} vendidos <Chip>{ETIQUETA_APROXIMADO}</Chip>{" "}
+                            {numeroPlano(Math.round(vendidosAprox))} vendidos <Chip>{ETIQUETA_APROXIMADO}</Chip>
+                            {/* Issue #251 (fix "aproximados siempre
+                            visibles") — sin esFull confirmado todavía,
+                            el estimado de arriba ya asumió el factor
+                            "no Full" (1.55) — esto lo aclara, nunca se
+                            muestra como si Full estuviera confirmado
+                            en "No". */}
+                            {!fullConocido ? <Chip title="Full sin confirmar todavía — se asumió el factor sin Full (1.55)">Full desconocido</Chip> : null}{" "}
                             <Ayuda id={`ayuda-vendidos-aprox-${seguimiento.id}`}>
                               Mercado Libre no deja ver el sold_quantity real de un competidor — "+N vendidos" × un factor según sea Full o no.
                             </Ayuda>
@@ -551,14 +573,25 @@ export default async function SeguimientoPage({
                     en vez de dejar la celda vacía ("Aún sin 30 días");
                     en cuanto SÍ hay historia real, se muestra el real
                     y el estimado queda aparte (arriba, en la columna
-                    Vendidos) — nunca mezclados en la misma celda. */}
+                    Vendidos) — nunca mezclados en la misma celda.
+                    Issue #251 (fix "aproximados siempre visibles") —
+                    bug real: "Aún sin 30 días" también aparecía SIN
+                    ninguna fecha real ni calibrada (diasAprox null) —
+                    leía como "esperá unos días más y va a aparecer",
+                    cuando en realidad nunca iba a aparecer sin
+                    antigüedad. Ahora "Aún sin 30 días" queda solo para
+                    cuando SÍ hay una fecha confirmada y da menos de 30
+                    días — el resto (sin fecha para saber nada) dice
+                    "Sin dato (falta antigüedad)". */}
                     {!fotoHaceUnMes ? (
                       ventasMesAprox != null ? (
                         <>
                           {numeroPlano(Math.round(ventasMesAprox))} <Chip>{ETIQUETA_APROXIMADO}</Chip>
                         </>
-                      ) : (
+                      ) : diasAprox != null && diasAprox < 30 ? (
                         "Aún sin 30 días"
+                      ) : (
+                        <Chip title="Falta antigüedad (real o calibrada) para proyectar ventas/mes">Ventas/mes: Sin dato (falta antigüedad)</Chip>
                       )
                     ) : deltaUnMes == null ? (
                       "—"

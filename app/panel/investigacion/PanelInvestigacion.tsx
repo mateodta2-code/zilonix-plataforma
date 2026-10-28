@@ -98,6 +98,10 @@ type ProductoWire = {
   esEnvioGratis?: boolean | null;
   vendedor?: string | null;
   itemId?: string | null;
+  // Issue #251 (fix "aproximados siempre visibles") — id de catálogo
+  // (/p/MCO…), ver el comentario de ProductoListado.productId en
+  // listadoCliente.ts.
+  productId?: string | null;
   link: string | null;
 };
 
@@ -111,6 +115,7 @@ function construirProductoListado(plataforma: string, p: ProductoWire): Producto
   return {
     plataforma,
     itemId: typeof p.itemId === "string" && p.itemId ? p.itemId : null,
+    productId: typeof p.productId === "string" && p.productId ? p.productId : null,
     titulo: p.titulo,
     precio: p.precio,
     foto: linkHttpSeguro(p.foto ?? null),
@@ -807,21 +812,40 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
                           <div className={styles.subdato}>
                             {p.senalVentas.tipo === "mensual_piso" ? "comprados el mes pasado" : "acumulado histórico (sin período real)"}
                           </div>
-                          {/* Issue #262, punto 2 — vendidos estimados/ventas-mes
-                              aprox. (Mercado Libre, con itemId + antigüedad
-                              real o calibrada — puede faltar todavía, ver
-                              docs/ESTADO.md) — nunca mezclado sin la
+                          {/* Issue #251 (fix "aproximados siempre visibles")
+                              — bug real probado en staging: antes, sin
+                              vendidosEst (ej. un resultado de catálogo
+                              /p/, sin itemId) esta fila desaparecía
+                              entera — ahora SIEMPRE se dibuja: con
+                              acumulado presente, vendidosEst casi
+                              siempre existe (issue #262, punto 2 —
+                              vendidos estimados/ventas-mes aprox.,
+                              Mercado Libre, con itemId/productId +
+                              antigüedad real o calibrada, puede faltar
+                              todavía, ver docs/ESTADO.md); "/mes" cae a
+                              "Sin dato (falta antigüedad)" en vez de
+                              desaparecer en silencio cuando no hay con
+                              qué interpolar. Nunca mezclado sin la
                               etiqueta "aprox." al lado. */}
-                          {(() => {
-                            const est = estimarAproximadosListado(p, ahora);
-                            if (est.vendidosEst == null) return null;
-                            return (
-                              <div className={styles.subdato}>
-                                {numero(Math.round(est.vendidosEst))} vendidos
-                                {est.ventasMesEst != null ? ` · ${numero(Math.round(est.ventasMesEst))} /mes` : ""} <Chip>{ETIQUETA_APROXIMADO}</Chip>
-                              </div>
-                            );
-                          })()}
+                          <div className={styles.subdato}>
+                            {(() => {
+                              const est = estimarAproximadosListado(p, ahora);
+                              if (est.vendidosEst == null) {
+                                return <Chip title="No hay vendidos confirmados que ajustar">Sin dato</Chip>;
+                              }
+                              return (
+                                <>
+                                  {numero(Math.round(est.vendidosEst))} vendidos ·{" "}
+                                  {est.ventasMesEst != null ? (
+                                    `${numero(Math.round(est.ventasMesEst))} /mes`
+                                  ) : (
+                                    <Chip title="Falta antigüedad (real o calibrada) para proyectar un ritmo mensual">Sin dato (falta antigüedad)</Chip>
+                                  )}{" "}
+                                  <Chip>{ETIQUETA_APROXIMADO}</Chip>
+                                </>
+                              );
+                            })()}
+                          </div>
                         </>
                       ) : (
                         <Chip>Sin dato</Chip>
@@ -839,6 +863,16 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
                               {money(facturacionAprox)} <Chip>{ETIQUETA_APROXIMADO}</Chip>
                             </>
                           );
+                        }
+                        // Issue #251 (fix "aproximados siempre visibles")
+                        // — "—" solo cuando de verdad no hay NINGUNA
+                        // señal de vendidos (ausente); con acumulado
+                        // presente pero sin antigüedad para proyectar
+                        // /mes, "Sin dato (falta antigüedad)" explica
+                        // POR QUÉ falta, nunca un "—" indistinguible de
+                        // "nunca va a haber dato acá".
+                        if (p.senalVentas.tipo === "acumulado_sin_periodo" && p.senalVentas.valor != null) {
+                          return <Chip title="Falta antigüedad (real o calibrada) para proyectar la facturación mensual">Sin dato (falta antigüedad)</Chip>;
                         }
                         return "—";
                       })()}
