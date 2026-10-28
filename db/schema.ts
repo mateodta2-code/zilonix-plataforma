@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, foreignKey, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, foreignKey, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
 import type {
   DatosPorCuenta,
@@ -519,6 +519,11 @@ export const pedidos = pgTable(
   },
   (t) => ({
     pedidoUnico: uniqueIndex("pedidos_empresa_pedido_externo_unico").on(t.empresaId, t.pedidoIdExterno),
+    // Issue #129 — destino de la FK compuesta de pedidos_finanzas: la
+    // cabecera financiera de la empresa A nunca apunta a un pedido de
+    // B. Constraint y no índice: drizzle-kit crea los índices después
+    // de las claves foráneas.
+    empresaIdUnica: unique("pedidos_empresa_id_unica").on(t.empresaId, t.id),
   })
 );
 
@@ -647,6 +652,192 @@ export const despachosMl = pgTable(
   },
   (t) => ({
     shipmentUnico: uniqueIndex("despachos_ml_empresa_shipment_unico").on(t.empresaId, t.shipmentIdExterno),
+  })
+);
+
+// Issue #129 (Z-FIN-07) — datos financieros de cada venta. `pedidos`
+// no se toca (sigue siendo la Venta, solo con el total): lo de acá lo
+// llena la sincronización de #130 y lo lee el motor de utilidad.
+//
+// Congelado: al sincronizar una venta por primera vez con costo
+// completo se fijan costo, empaque y envío y no se recalculan; comisión
+// y flete de ML sí se actualizan en cada sincronización. Una corrección
+// manual activa (ventas_correcciones) siempre gana.
+//
+// Ceros: un costo, empaque o envío vacío es "sin dato"; 0.00 es $0
+// real. Ningún monto es float.
+//
+// forma_entrega sale de la logística de ML (fulfillment → full_ml,
+// self_service → flex, cross_docking / xd_drop_off / drop_off →
+// agencia, otro → desconocida), nunca del prefijo del SKU.
+export const formaEntregaEnum = pgEnum("forma_entrega", ["full_ml", "flex", "agencia", "desconocida"]);
+export const estadoCosteoEnum = pgEnum("estado_costeo", ["completo", "parcial", "sin_costo"]);
+
+// Cabecera financiera, 1:1 con `pedidos`. Sin DELETE para app_user: se
+// borra solo en cascada con su pedido.
+export const pedidosFinanzas = pgTable(
+  "pedidos_finanzas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // FK compuesta (empresa_id, pedido_id) → pedidos, abajo.
+    pedidoId: uuid("pedido_id").notNull(),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    formaEntrega: formaEntregaEnum("forma_entrega").notNull().default("desconocida"),
+    // Se guarda como dato; la vista de detalle agrupa por pedidos.fecha
+    // (date_created de ML) y, más adelante, por fecha_despacho.
+    fechaPagoAprobado: timestamp("fecha_pago_aprobado", { withTimezone: true }),
+    // Lo que pagó el cliente (pagos aprobados), SIN restar reembolsos
+    // (Sharel, 24-oct-2026). "Con devolución" = reembolsos > 0, se
+    // calcula.
+    valorVenta: numeric("valor_venta", { precision: 14, scale: 2 }).notNull(),
+    reembolsos: numeric("reembolsos", { precision: 14, scale: 2 }).notNull().default("0.00"),
+    comisionMl: numeric("comision_ml", { precision: 14, scale: 2 }),
+    fleteMl: numeric("flete_ml", { precision: 14, scale: 2 }),
+    // La parte de esta orden del cargo de su paquete (uno solo por
+    // paquete, el mayor de sus SKU). Tiene que dar la suma de sus
+    // líneas (lo valida el motor, #162). En Full el empaque se cobra y
+    // el envío es $0.
+    empaqueCongelado: numeric("empaque_congelado", { precision: 14, scale: 2 }),
+    envioAgenciaCongelado: numeric("envio_agencia_congelado", { precision: 14, scale: 2 }),
+    estadoCosteo: estadoCosteoEnum("estado_costeo").notNull().default("sin_costo"),
+    // Vacío = todavía no se congeló.
+    congeladoTs: timestamp("congelado_ts", { withTimezone: true }),
+    cancelada: boolean("cancelada").notNull().default(false),
+    sincronizadoTs: timestamp("sincronizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    // Paquete = el envío de ML (shipping.id, el mismo shipment_id de
+    // despachos_ml). Un carrito puede ser varias órdenes con el mismo
+    // envío, así que no es único. pack_id es solo dato: ML puede partir
+    // un carrito en varios envíos. Llave del paquete (se calcula):
+    // shipment, si no pack, si no pedido_id.
+    shipmentIdExterno: text("shipment_id_externo"),
+    packIdExterno: text("pack_id_externo"),
+    // status_history.date_shipped / date_delivered del envío.
+    fechaDespacho: timestamp("fecha_despacho", { withTimezone: true }),
+    fechaEntrega: timestamp("fecha_entrega", { withTimezone: true }),
+  },
+  (t) => ({
+    pedidoUnico: unique("pedidos_finanzas_pedido_unico").on(t.pedidoId),
+    delPedido: foreignKey({
+      name: "pedidos_finanzas_pedido_misma_empresa_fk",
+      columns: [t.empresaId, t.pedidoId],
+      foreignColumns: [pedidos.empresaId, pedidos.id],
+    }).onDelete("cascade"),
+    // Destino de las FK compuestas de pedido_items y
+    // ventas_correcciones: una línea o corrección de la empresa A nunca
+    // cuelga de una venta de B.
+    empresaPedidoUnico: unique("pedidos_finanzas_empresa_pedido_unico").on(t.empresaId, t.pedidoId),
+    porShipment: index("pedidos_finanzas_empresa_shipment_idx").on(t.empresaId, t.shipmentIdExterno),
+    porFechaDespacho: index("pedidos_finanzas_empresa_fecha_despacho_idx").on(t.empresaId, t.fechaDespacho),
+    valorVentaNoNegativo: check("pedidos_finanzas_valor_venta_no_negativo", sql`${t.valorVenta} >= 0`),
+    reembolsosNoNegativos: check("pedidos_finanzas_reembolsos_no_negativos", sql`${t.reembolsos} >= 0`),
+    comisionNoNegativa: check("pedidos_finanzas_comision_ml_no_negativa", sql`${t.comisionMl} >= 0`),
+    fleteNoNegativo: check("pedidos_finanzas_flete_ml_no_negativo", sql`${t.fleteMl} >= 0`),
+    empaqueNoNegativo: check("pedidos_finanzas_empaque_no_negativo", sql`${t.empaqueCongelado} >= 0`),
+    envioNoNegativo: check("pedidos_finanzas_envio_agencia_no_negativo", sql`${t.envioAgenciaCongelado} >= 0`),
+  })
+);
+
+// Líneas de la venta, con su foto congelada. Sin DELETE para app_user.
+export const pedidoItems = pgTable(
+  "pedido_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    pedidoId: uuid("pedido_id").notNull(),
+    linea: integer("linea").notNull(),
+    publicacionId: uuid("publicacion_id").references(() => publicaciones.id, { onDelete: "set null" }),
+    itemIdExterno: text("item_id_externo").notNull(),
+    // SKU de la publicación de ML normalizado (trim + mayúsculas): es la
+    // llave para buscar el costo en costos_sku. Vacío si ML no trae SKU.
+    skuCodigo: text("sku_codigo"),
+    // Solo informativo: se llena si el código existe en `skus`.
+    skuId: uuid("sku_id").references(() => skus.id, { onDelete: "set null" }),
+    cantidad: integer("cantidad").notNull(),
+    precioUnitario: numeric("precio_unitario", { precision: 14, scale: 2 }).notNull(),
+    valorLinea: numeric("valor_linea", { precision: 14, scale: 2 }).notNull(),
+    // Reparto de la línea de lo que cobra ML a la orden.
+    comisionMl: numeric("comision_ml", { precision: 14, scale: 2 }),
+    fleteMl: numeric("flete_ml", { precision: 14, scale: 2 }),
+    // Vacío = sin costo; 0.00 = costo real de $0.
+    costoCongelado: numeric("costo_congelado", { precision: 14, scale: 2 }),
+    // order_item.item.title al vender: no cambia si cambia la publicación.
+    titulo: text("titulo").notNull(),
+    // Dirección de la miniatura de la publicación (no se guarda la imagen).
+    imagenUrl: text("imagen_url"),
+    // La parte de la línea del empaque y el envío del paquete (reparto
+    // por peso, solo para que las filas sumen). Vacío = sin dato.
+    empaqueCongelado: numeric("empaque_congelado", { precision: 14, scale: 2 }),
+    envioCongelado: numeric("envio_congelado", { precision: 14, scale: 2 }),
+  },
+  (t) => ({
+    lineaUnica: unique("pedido_items_pedido_linea_unica").on(t.pedidoId, t.linea),
+    deLaVenta: foreignKey({
+      name: "pedido_items_venta_misma_empresa_fk",
+      columns: [t.empresaId, t.pedidoId],
+      foreignColumns: [pedidosFinanzas.empresaId, pedidosFinanzas.pedidoId],
+    }).onDelete("cascade"),
+    lineaPositiva: check("pedido_items_linea_positiva", sql`${t.linea} >= 1`),
+    cantidadPositiva: check("pedido_items_cantidad_positiva", sql`${t.cantidad} > 0`),
+    skuNormalizado: check("pedido_items_sku_normalizado", sql`${t.skuCodigo} = upper(btrim(${t.skuCodigo})) AND ${t.skuCodigo} <> ''`),
+    precioNoNegativo: check("pedido_items_precio_unitario_no_negativo", sql`${t.precioUnitario} >= 0`),
+    valorNoNegativo: check("pedido_items_valor_linea_no_negativo", sql`${t.valorLinea} >= 0`),
+    comisionNoNegativa: check("pedido_items_comision_ml_no_negativa", sql`${t.comisionMl} >= 0`),
+    fleteNoNegativo: check("pedido_items_flete_ml_no_negativo", sql`${t.fleteMl} >= 0`),
+    costoNoNegativo: check("pedido_items_costo_no_negativo", sql`${t.costoCongelado} >= 0`),
+    empaqueNoNegativo: check("pedido_items_empaque_no_negativo", sql`${t.empaqueCongelado} >= 0`),
+    envioNoNegativo: check("pedido_items_envio_no_negativo", sql`${t.envioCongelado} >= 0`),
+  })
+);
+
+// Correcciones manuales: no se editan ni se borran. Corregir de nuevo =
+// anular la activa y crear otra fila. app_user solo puede hacer UPDATE
+// de anulada_ts, y solo para anular (db/rls-setup.sql).
+export const CAMPOS_CORRECCION_VENTA = ["costo_producto", "empaque", "envio_agencia", "comision_ml", "flete_ml"] as const;
+export type CampoCorreccionVenta = (typeof CAMPOS_CORRECCION_VENTA)[number];
+
+export const ventasCorrecciones = pgTable(
+  "ventas_correcciones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    pedidoId: uuid("pedido_id").notNull(),
+    // Vacío = toda la orden.
+    linea: integer("linea"),
+    campo: text("campo").$type<CampoCorreccionVenta>().notNull(),
+    valorNuevo: numeric("valor_nuevo", { precision: 14, scale: 2 }).notNull(),
+    nota: text("nota").notNull(),
+    creadoPor: uuid("creado_por")
+      .notNull()
+      .references(() => usuarios.id, { onDelete: "restrict" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    anuladaTs: timestamp("anulada_ts", { withTimezone: true }),
+  },
+  (t) => ({
+    deLaVenta: foreignKey({
+      name: "ventas_correcciones_venta_misma_empresa_fk",
+      columns: [t.empresaId, t.pedidoId],
+      foreignColumns: [pedidosFinanzas.empresaId, pedidosFinanzas.pedidoId],
+    }).onDelete("cascade"),
+    // MATCH SIMPLE: con linea vacía (toda la orden) no se evalúa.
+    deLaLinea: foreignKey({
+      name: "ventas_correcciones_linea_fk",
+      columns: [t.pedidoId, t.linea],
+      foreignColumns: [pedidoItems.pedidoId, pedidoItems.linea],
+    }).onDelete("cascade"),
+    // Lista cerrada en la base, no solo en la app.
+    campoValido: check(
+      "ventas_correcciones_campo_valido",
+      sql`${t.campo} IN ('costo_producto', 'empaque', 'envio_agencia', 'comision_ml', 'flete_ml')`
+    ),
+    valorNoNegativo: check("ventas_correcciones_valor_no_negativo", sql`${t.valorNuevo} >= 0`),
+    notaConTexto: check("ventas_correcciones_nota_con_texto", sql`btrim(${t.nota}) <> ''`),
+    // Una sola corrección activa por (pedido, linea, campo). coalesce
+    // para que dos correcciones de toda la orden (linea vacía) también
+    // choquen: en un índice único dos NULL no son iguales.
+    unaActiva: uniqueIndex("ventas_correcciones_una_activa")
+      .on(t.pedidoId, sql`coalesce(${t.linea}, 0)`, t.campo)
+      .where(sql`${t.anuladaTs} IS NULL`),
   })
 );
 
