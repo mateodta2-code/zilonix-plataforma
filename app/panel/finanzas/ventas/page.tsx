@@ -12,7 +12,7 @@ import styles from "../finanzas.module.css";
 // botones de guardar o recalcular: la corrección manual es la Parte B y
 // el recálculo con el costo actual, la Parte C. La tabla vive en
 // components/finanzas/DetalleDiaCuentaProducto.tsx, la misma que pinta
-// /panel/pedidos?vista=detalle.
+// /panel/pedidos.
 export default async function VentasUtilidadPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const { usuario, activa: empresa, rolNombre } = await obtenerContextoPanel();
 

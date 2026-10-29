@@ -5,22 +5,26 @@ import { mostrarMonto } from "@/lib/finanzas/montos";
 import type { TotalesDetalle } from "@/lib/finanzas/detalle-ventas";
 import { listarVentasUtilidad, RangoVentasInvalidoError, type ResultadoVentasUtilidad } from "@/lib/finanzas/ventas-consulta";
 import { hrefVentasUtilidad, porcentajeVentasConCosto, resolverRangoVentas, type FiltrosUrlVentas } from "@/lib/finanzas/ventas-pantalla";
+import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { BotonTraerVentasMes } from "./BotonTraerVentasMes";
 import { ETIQUETA_FORMA, mostrarPorcentaje } from "./formato";
 import estilos from "./ventasUtilidad.module.css";
 
 // Issue #131 (Parte A) — el «Detalle día a día · cuenta · producto» de
 // Finanzas → Ventas, sacado a un componente para pintarlo igual en
-// /panel/finanzas/ventas y en /panel/pedidos?vista=detalle. Solo
+// /panel/finanzas/ventas y en /panel/pedidos. Solo
 // lectura: filtros, KPIs, total por cuenta y la tabla día → cuenta →
 // producto. El permiso (finanzas.consultar) lo pide cada página antes de
 // pintar esto, y listarVentasUtilidad lo vuelve a pedir y lee con RLS de
-// la empresa: una empresa nunca ve ventas de otra.
+// la empresa: una empresa nunca ve ventas de otra. El botón «Traer
+// ventas de este mes» solo sale con finanzas.modificar (escribe en
+// pedidos_finanzas; la acción lo vuelve a pedir).
 
 // Días por página del detalle. Los totales de arriba son siempre de todo
 // el rango.
@@ -54,6 +58,13 @@ type Props = {
 
 export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchParams, ruta, extra = {} }: Props) {
   const cuentas = await listarCuentasMlParaSelector(empresaId);
+  let puedeTraerVentas = true;
+  try {
+    await requierePermiso(usuarioId, empresaId, "finanzas", "modificar");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
+    puedeTraerVentas = false;
+  }
   // Solo un id de la lista de ESTA empresa llega al filtro; cualquier
   // otra cosa es "Todas".
   const cuentaId = resolverCuentaMl(searchParams[PARAM_CUENTA], cuentas);
@@ -128,6 +139,8 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
         </div>
       </form>
 
+      {puedeTraerVentas && <BotonTraerVentasMes cuentaId={cuentaId} />}
+
       {errorRango && <p className={estilos.avisoError}>{errorRango}</p>}
 
       {datos && total && (
@@ -163,7 +176,10 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
           )}
 
           {total.ventas === 0 ? (
-            <EstadoVacio>No hay ventas con foto financiera en este rango.</EstadoVacio>
+            <EstadoVacio>
+              No hay ventas con foto financiera en este rango.
+              {puedeTraerVentas && " Si las ventas de este mes no aparecen, usa «Traer ventas de este mes»."}
+            </EstadoVacio>
           ) : (
             <>
               <section className={estilos.seccion}>
