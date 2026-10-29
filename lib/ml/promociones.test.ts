@@ -50,6 +50,7 @@ function item(overrides: Partial<ItemConPromociones> = {}): ItemConPromociones {
     thumbnail: "https://x/thumb.jpg",
     skuCodigo: "SKU-1",
     tieneVariantes: false,
+    skuVariantesDistintas: false,
     promociones: [],
     ...overrides,
   };
@@ -69,6 +70,34 @@ describe("calcularCandidatosItem — motor de reglas (rama feat-promociones)", (
     );
     expect(resultado[0].cumpleReglas).toBe(false);
     expect(resultado[0].accionSugerida).toBeNull();
+    expect(resultado[0].motivoRevisarManual).toContain("variantes");
+  });
+
+  // Review de Pablo (PR #304) — motivo específico cuando las
+  // variaciones tienen SKU distinto entre sí: distingue la causa real
+  // (ambigüedad de SKU, nunca un único piso que calcular) del motivo
+  // genérico de "tiene variantes".
+  it("variantes con SKU distinto entre sí: motivo específico, sigue sin cumplir reglas igual que cualquier ítem con variantes", () => {
+    const resultado = calcularCandidatosItem(
+      item({ tieneVariantes: true, skuVariantesDistintas: true, skuCodigo: null, promociones: [{ type: "DEAL", status: "candidate", original_price: 100000 }] }),
+      REGLAS_DEFECTO,
+      null, // sin SKU único, nunca hay piso que buscar
+      null
+    );
+    expect(resultado[0].cumpleReglas).toBe(false);
+    expect(resultado[0].accionSugerida).toBeNull();
+    expect(resultado[0].motivoRevisarManual).toContain("SKU distinto");
+    expect(resultado[0].precioMinimo).toBeNull(); // el chip de precio mínimo queda oculto solo, nunca inventa un piso
+  });
+
+  it("variantes con el MISMO SKU (skuVariantesDistintas=false): motivo genérico de siempre, no el de SKU distinto", () => {
+    const resultado = calcularCandidatosItem(
+      item({ tieneVariantes: true, skuVariantesDistintas: false, promociones: [{ type: "DEAL", status: "candidate", original_price: 100000 }] }),
+      REGLAS_DEFECTO,
+      80000,
+      50000
+    );
+    expect(resultado[0].motivoRevisarManual).not.toContain("SKU distinto");
     expect(resultado[0].motivoRevisarManual).toContain("variantes");
   });
 

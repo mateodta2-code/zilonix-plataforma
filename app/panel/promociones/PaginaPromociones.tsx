@@ -68,6 +68,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   // que confirmar con el mismo peso que aprobar/ejecutar). `rechazandoId`
   // es el candidatoId en curso, para deshabilitar solo ESE botón.
   const [rechazandoId, setRechazandoId] = useState<string | null>(null);
+  const [errorRechazoFila, setErrorRechazoFila] = useState<string | null>(null);
 
   const [historial, setHistorial] = useState<AccionHistorialCliente[]>([]);
   const [reglas, setReglas] = useState<ReglasCuentaCliente[]>([]);
@@ -94,16 +95,26 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     setCargandoCandidatos(false);
   }
 
+  // Review de Pablo (PR #304) — N tiene que ser el total REAL de
+  // aprobadas pendientes de la empresa entera, nunca una aproximación
+  // con el .limit(200) de /historial (ese límite es para la pestaña
+  // Historial, no para contar) — con más de 200 aprobadas, el botón
+  // mostraba un N más chico que lo que "Lanzar" de verdad iba a
+  // procesar. count(*) real en /acciones/pendientes-lanzar.
   async function cargarPendientesLanzar() {
-    const res = await fetch("/api/ml/promociones/historial?estado=aceptada");
+    const res = await fetch("/api/ml/promociones/acciones/pendientes-lanzar");
     if (!res.ok) return;
     const body = await res.json();
-    const filas: AccionHistorialCliente[] = body.filas ?? [];
-    setPendientesLanzar(filas.filter((f) => !f.modoSimulacion).length);
+    setPendientesLanzar(typeof body.total === "number" ? body.total : 0);
   }
 
   useEffect(() => {
     void cargarCandidatos();
+    // Review de Pablo (PR #304) — una selección vieja podía apuntar a
+    // candidatoIds que ya no están en la lista filtrada (de otra
+    // cuenta, o de un filtro distinto) y "Seleccionar todo"/los
+    // botones en lote terminaban operando sobre filas invisibles.
+    setSeleccionados({});
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cargarCandidatos se recrea cada render; solo nos importa reaccionar a cuentaSeleccionada/filtro
   }, [cuentaSeleccionada, filtro]);
 
@@ -225,11 +236,19 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   // comentario de `rechazandoId` más arriba).
   async function rechazarFila(candidato: CandidatoClienteCliente) {
     setRechazandoId(candidato.id);
-    const res = await fetch("/api/ml/promociones/acciones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decisiones: [{ candidatoId: candidato.id, accion: accionParaCandidato(candidato), decision: "rechazar" }] }),
-    });
+    setErrorRechazoFila(null);
+    let res: Response;
+    try {
+      res = await fetch("/api/ml/promociones/acciones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decisiones: [{ candidatoId: candidato.id, accion: accionParaCandidato(candidato), decision: "rechazar" }] }),
+      });
+    } catch {
+      setRechazandoId(null);
+      setErrorRechazoFila("No se pudo rechazar — revisá tu conexión e intentá de nuevo.");
+      return;
+    }
     setRechazandoId(null);
     if (res.ok) {
       setSeleccionados((actual) => {
@@ -238,6 +257,12 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
         return siguiente;
       });
       void cargarCandidatos();
+    } else {
+      // Review de Pablo (PR #304) — antes, un fallo acá no se veía en
+      // ningún lado: el botón volvía a "No" y la fila seguía igual,
+      // sin ninguna pista de qué pasó.
+      const cuerpo = await res.json().catch(() => ({}));
+      setErrorRechazoFila(cuerpo.error || "No se pudo rechazar este producto.");
     }
   }
 
@@ -412,6 +437,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
             </Tarjeta>
           )}
           {resultadoEjecutarPendientes && <p style={{ fontSize: 13, marginTop: 8 }}>{resultadoEjecutarPendientes}</p>}
+          {errorRechazoFila && <p style={{ color: "var(--kpi-peligro-texto)", fontSize: 13, marginTop: 8 }}>{errorRechazoFila}</p>}
 
           {cargandoCandidatos ? (
             <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 12 }}>Cargando…</p>

@@ -51,6 +51,13 @@ function candidatoComoItem(candidato: CandidatoFila): ItemConPromociones {
     thumbnail: candidato.thumbnail,
     skuCodigo: candidato.skuCodigo,
     tieneVariantes: candidato.tieneVariantes,
+    // promociones_candidatos no guarda esto (review de Pablo, PR #304
+    // — nunca se agregó columna, sin migración): da igual acá — con
+    // tieneVariantes=true el motor ya fuerza cumpleReglas=false sin
+    // mirar este flag, así que la revalidación sigue bloqueando el
+    // write igual; solo cambia CUÁL de los dos motivos de variantes
+    // se arma (el genérico, nunca el específico de SKU distinto).
+    skuVariantesDistintas: false,
     promociones: [promo],
   };
 }

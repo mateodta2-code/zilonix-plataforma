@@ -1044,6 +1044,7 @@ describe("leerItemParaPromocionMl — rama feat-promociones", () => {
       thumbnail: "https://x/thumb.jpg",
       skuCodigo: "SKU-1",
       tieneVariantes: true,
+      skuVariantesDistintas: false,
     });
   });
 
@@ -1086,6 +1087,50 @@ describe("leerItemParaPromocionMl — rama feat-promociones", () => {
       )
     );
     await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-VARIANTE-2", tieneVariantes: true });
+  });
+
+  // Review de Pablo (PR #304) — bug real evitado: tomar "la primera
+  // variación que tenga SKU" a ciegas podía calcular el piso de
+  // Finanzas con el SKU de UNA sola variante y mostrarlo como si
+  // aplicara a todo el ítem. Con SKUs distintos entre variaciones,
+  // skuCodigo tiene que quedar null y skuVariantesDistintas=true —
+  // nunca se adivina cuál variación "manda".
+  it("variaciones con SKU DISTINTO entre sí: skuCodigo null, skuVariantesDistintas=true — nunca toma una a ciegas", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          variations: [
+            { id: 1, attributes: [{ id: "SELLER_SKU", value_name: "sku-a" }] },
+            { id: 2, attributes: [{ id: "SELLER_SKU", value_name: "sku-b" }] },
+          ],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: null, tieneVariantes: true, skuVariantesDistintas: true });
+  });
+
+  it("variaciones con el MISMO SKU (solo cambia mayúsculas/espacios): se normaliza y sigue normal, nunca 'distintas'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          variations: [
+            { id: 1, attributes: [{ id: "SELLER_SKU", value_name: "sku-1" }] },
+            { id: 2, attributes: [{ id: "SELLER_SKU", value_name: "  SKU-1  " }] },
+            { id: 3, attributes: [] },
+          ],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-1", tieneVariantes: true, skuVariantesDistintas: false });
+  });
+
+  it("item SIN variaciones: skuVariantesDistintas siempre false", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", seller_custom_field: "sku-1", variations: [] })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuVariantesDistintas: false, tieneVariantes: false });
   });
 
   it("con variaciones pero ninguna trae SELLER_SKU: cae al SKU del ítem padre", async () => {

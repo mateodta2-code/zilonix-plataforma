@@ -214,4 +214,70 @@ describe("POST /api/ml/promociones/acciones — aprobar/rechazar (rama feat-prom
     expect(ejecutarLoteDeAccionesMock).not.toHaveBeenCalled();
     expect(body.ejecutado).toBe(false);
   });
+
+  // Review de Pablo (PR #304), punto 1 — tope del lote.
+  describe("tope de 200 decisiones por request", () => {
+    it("201 decisiones: 400 con mensaje claro, nunca procesa nada", async () => {
+      const decisiones = Array.from({ length: 201 }, (_, i) => ({
+        candidatoId: `${i}`.padStart(8, "0") + "-1111-1111-1111-111111111111",
+        accion: "participar",
+      }));
+      const res = await POST(peticion({ cuerpo: { decisiones } }));
+      const body = await res.json();
+      expect(res.status).toBe(400);
+      expect(body.error).toMatch(/200/);
+      expect(insertsPromocionesAcciones).toHaveLength(0);
+      expect(validarCandidatoParaEscrituraMock).not.toHaveBeenCalled();
+    });
+
+    it("exactamente 200 decisiones: pasa el tope (el límite es inclusivo)", async () => {
+      filasPorTabla.set(
+        promocionesCandidatos,
+        Array.from({ length: 200 }, (_, i) => candidato({ id: `${i}`.padStart(8, "0") + "-1111-1111-1111-111111111111", itemId: `MCO${i}` }))
+      );
+      const decisiones = Array.from({ length: 200 }, (_, i) => ({
+        candidatoId: `${i}`.padStart(8, "0") + "-1111-1111-1111-111111111111",
+        accion: "participar",
+      }));
+      const res = await POST(peticion({ cuerpo: { decisiones } }));
+      expect(res.status).toBe(200);
+    });
+  });
+
+  // Review de Pablo (PR #304), punto 1 — dedupe por candidatoId.
+  describe("dedupe por candidatoId dentro del mismo lote", () => {
+    it("el mismo candidatoId dos veces en un lote: se procesa una sola vez (se queda con la primera decisión)", async () => {
+      filasPorTabla.set(promocionesCandidatos, [candidato()]);
+      const res = await POST(
+        peticion({
+          cuerpo: {
+            decisiones: [
+              { candidatoId: CANDIDATO_1, accion: "participar", decision: "aprobar" },
+              { candidatoId: CANDIDATO_1, accion: "participar", decision: "rechazar" },
+            ],
+          },
+        })
+      );
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.acciones).toHaveLength(1);
+      expect(body.acciones[0].estado).toBe("aceptada"); // la primera decisión gana
+      expect(validarCandidatoParaEscrituraMock).toHaveBeenCalledTimes(1);
+      expect(insertsPromocionesAcciones).toHaveLength(1);
+    });
+  });
+
+  // LOW (review de Pablo, PR #304) — rechazo duplicado por doble clic.
+  describe("idempotencia de 'rechazar' entre requests separados", () => {
+    it("un rechazo MUY reciente para la misma combinación: no-op, reusa la fila existente", async () => {
+      const rechazoReciente = { id: "accion-previa", estado: "rechazada", creadoTs: new Date() };
+      filasPorTabla.set(promocionesCandidatos, [candidato()]);
+      filasPorTabla.set(promocionesAcciones, [rechazoReciente]);
+      const res = await POST(peticion({ cuerpo: { decisiones: [{ candidatoId: CANDIDATO_1, accion: "participar", decision: "rechazar" }] } }));
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.acciones[0].id).toBe("accion-previa");
+      expect(insertsPromocionesAcciones).toHaveLength(0); // nunca insertó una fila nueva
+    });
+  });
 });

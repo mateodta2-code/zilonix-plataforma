@@ -86,6 +86,11 @@ export type ItemConPromociones = {
   thumbnail: string | null;
   skuCodigo: string | null;
   tieneVariantes: boolean;
+  // Review de Pablo (PR #304) — true cuando las variaciones de este
+  // ítem tienen SKU distinto entre sí (ver lib/ml/cliente.ts,
+  // leerItemParaPromocionMl): skuCodigo ya viene null en ese caso,
+  // nunca el de la primera variación a ciegas.
+  skuVariantesDistintas: boolean;
   promociones: PromocionCrudaMl[];
 };
 
@@ -194,6 +199,18 @@ export function calcularCandidatosItem(
     // (confirmado en vivo en zilonix-os-web: ajustar por item_id solo
     // tocaba una variante y dejaba otra desactualizada).
     if (item.tieneVariantes) {
+      // Review de Pablo (PR #304) — motivo más específico cuando el
+      // SKU no es el mismo entre variaciones (item.skuCodigo ya viene
+      // null en ese caso, lib/ml/cliente.ts): nunca se adivina cuál
+      // variación manda, así que tampoco hay piso que calcular — el
+      // chip de precio mínimo queda oculto solo (depende de que
+      // precioMinimo exista, y acá nunca existe).
+      if (item.skuVariantesDistintas) {
+        return {
+          ...base,
+          motivoRevisarManual: "Revisar a mano (variantes con SKU distinto) — cada variación tiene su propio SKU en Mercado Libre, no hay un único piso de Finanzas que calcular para todo el ítem.",
+        };
+      }
       return { ...base, motivoRevisarManual: "Este producto tiene variantes (colores/modelos) — Mercado Libre no deja ajustar todas por esta vía, se revisa a mano." };
     }
 
@@ -341,6 +358,7 @@ export async function leerPromocionesDeItem(
       thumbnail: detalle?.thumbnail ?? null,
       skuCodigo: detalle?.skuCodigo ?? null,
       tieneVariantes: detalle?.tieneVariantes ?? false,
+      skuVariantesDistintas: detalle?.skuVariantesDistintas ?? false,
       promociones: resultado.promociones,
     },
   };

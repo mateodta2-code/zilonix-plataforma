@@ -138,6 +138,10 @@ const RUTAS_PROTEGIDAS = new Set([
   // su propio requierePermiso("promociones","ejecutar"), nunca el
   // mismo "aprobar" que exige el POST combinado de arriba.
   "app/api/ml/promociones/acciones/ejecutar/route.ts",
+  // Review de Pablo (PR #304) — count(*) real para "Lanzar aprobadas a
+  // Mercado Libre (N)": mismo permiso de solo lectura que el resto de
+  // lo que solo CONSULTA (buscar/trabajo/candidatos/historial).
+  "app/api/ml/promociones/acciones/pendientes-lanzar/route.ts",
   "app/api/ml/promociones/historial/route.ts",
   "app/panel/promociones/page.tsx",
   // "Conexión de IA" vive bajo el módulo "configuracion" que ya

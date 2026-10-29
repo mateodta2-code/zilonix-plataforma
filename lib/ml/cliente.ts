@@ -1314,7 +1314,19 @@ export async function listarItemsActivosMl(cuentaIdExterna: string, token: strin
 // llamadores ya existentes y probados) — mismo criterio que
 // buscarItemParaClip en su momento, un wrapper propio en vez de tocar
 // uno compartido.
-export type ItemParaPromocionMl = { title: string | null; thumbnail: string | null; skuCodigo: string | null; tieneVariantes: boolean };
+export type ItemParaPromocionMl = {
+  title: string | null;
+  thumbnail: string | null;
+  skuCodigo: string | null;
+  tieneVariantes: boolean;
+  // Review de Pablo (PR #304) — true cuando el ítem tiene variaciones
+  // con SKU distinto entre sí: no hay forma honesta de elegir "la"
+  // variación para calcular un solo piso, así que skuCodigo queda
+  // null (nunca se toma la primera a ciegas) y el motor (lib/ml/promociones.ts)
+  // usa esto para dejar un motivo específico, distinto del genérico
+  // "tiene variantes".
+  skuVariantesDistintas: boolean;
+};
 
 type AtributoMl = { id?: unknown; value_name?: unknown };
 type VariacionMl = { attributes?: unknown; seller_custom_field?: unknown };
@@ -1359,31 +1371,39 @@ export async function leerItemParaPromocionMl(itemId: string, token: string): Pr
     const variaciones = Array.isArray(resp.data.variations) ? resp.data.variations : [];
     const tieneVariantes = variaciones.length > 0;
 
-    // Con variaciones, el vendedor puede cargar un SELLER_SKU DISTINTO
-    // por variante — se usa el de la primera variación que tenga uno,
-    // nunca directo el del ítem padre, para que el piso de Finanzas
-    // salga del SKU real de esa variante. Sin ninguno en ninguna
-    // variación, cae al mismo fallback que un ítem sin variantes.
-    let skuCrudo: string | null = null;
-    for (const variacion of variaciones) {
-      skuCrudo = skuDeVariacion(variacion);
-      if (skuCrudo) break;
+    // Review de Pablo (PR #304) — bug real evitado acá: con variaciones,
+    // el vendedor puede cargar un SELLER_SKU DISTINTO por cada una —
+    // tomar "la primera que tenga uno" a ciegas podía calcular el piso
+    // con el SKU de una variante y mostrarlo como si fuera de todo el
+    // ítem. Se normalizan TODAS las que traen un SKU propio y se
+    // comparan: si son todas la misma, se usa esa (sigue normal); si
+    // hay más de una distinta, skuCodigo queda null (nunca se adivina
+    // cuál es "la" correcta) y skuVariantesDistintas avisa por qué.
+    const skusDeVariaciones = new Set(
+      variaciones
+        .map((variacion) => skuDeVariacion(variacion))
+        .filter((s): s is string => s !== null)
+        .map((s) => normalizarSkuCodigo(s))
+    );
+    let skuCodigo: string | null = null;
+    let skuVariantesDistintas = false;
+    if (skusDeVariaciones.size > 1) {
+      skuVariantesDistintas = true;
+    } else if (skusDeVariaciones.size === 1) {
+      skuCodigo = [...skusDeVariaciones][0]!;
+    } else {
+      // Ninguna variación trae SKU propio — cae al mismo fallback que
+      // un ítem sin variantes (SKU del ítem padre).
+      const skuCrudo = skuDeAtributos(resp.data.attributes) ?? (typeof resp.data.seller_custom_field === "string" && resp.data.seller_custom_field.trim() ? resp.data.seller_custom_field.trim() : null);
+      skuCodigo = skuCrudo ? normalizarSkuCodigo(skuCrudo) : null;
     }
-    if (!skuCrudo) {
-      skuCrudo = skuDeAtributos(resp.data.attributes) ?? (typeof resp.data.seller_custom_field === "string" && resp.data.seller_custom_field.trim() ? resp.data.seller_custom_field.trim() : null);
-    }
-    // Mismo criterio en los dos lados del cruce (lib/costos-sku.ts,
-    // normalizarSkuCodigo): el SKU de la publicación de ML se
-    // normaliza ACÁ, antes de que nada lo use para buscar el piso en
-    // costos_sku — nunca una comparación cruda que falle solo por
-    // mayúsculas o un espacio de más.
-    const skuCodigo = skuCrudo ? normalizarSkuCodigo(skuCrudo) : null;
 
     return {
       title: typeof resp.data.title === "string" ? resp.data.title : null,
       thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
       skuCodigo,
       tieneVariantes,
+      skuVariantesDistintas,
     };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
