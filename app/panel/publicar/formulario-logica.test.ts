@@ -12,6 +12,7 @@ import {
   itemImportadoDesdeMensajeExtension,
   moverFoto,
   parseImportacionBookmarklet,
+  permalinkMlSeguro,
   productoCartesiano,
   resumenEstadoProducto,
   serializarCategoriaOverride,
@@ -358,6 +359,84 @@ describe("enlacesPermalink — Parte 3, punto B (permalink en el historial)", ()
     ];
     expect(enlacesPermalink(resultado, cuentas)).toEqual([{ cuentaMlId: "c-desconocida", etiqueta: "c-desconocida", permalink: "https://articulo.mercadolibre.com.co/MCO-1" }]);
   });
+
+  it("revisión de seguridad — permalink http:// (no https): se omite, nunca un link inseguro clickeable", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c1",
+        ok: true,
+        itemId: "MCO1",
+        permalink: "http://articulo.mercadolibre.com.co/MCO-1",
+        categoria: "MCO123",
+        atributosAsumidos: [],
+        status: "active",
+        modoPrueba: false,
+        avisoFotosVariante: null,
+        avisoMarca: null,
+        avisoDescripcion: null,
+      },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+
+  it("revisión de seguridad — permalink de un dominio ajeno (nunca Mercado Libre): se omite", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c1",
+        ok: true,
+        itemId: "MCO1",
+        permalink: "https://evil.com/MCO-1",
+        categoria: "MCO123",
+        atributosAsumidos: [],
+        status: "active",
+        modoPrueba: false,
+        avisoFotosVariante: null,
+        avisoMarca: null,
+        avisoDescripcion: null,
+      },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+
+  it("revisión de seguridad — permalink javascript:/data: disfrazado (de familia): se omite, nunca llega a <a href>", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c2",
+        ok: true,
+        familia: {
+          familyName: "Remera",
+          items: [{ valores: { TALLA: "S" }, sku: "REM-S", ok: true, itemId: "MCO2", permalink: "javascript:alert(1)" }],
+        },
+      },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+});
+
+describe("permalinkMlSeguro — revisión de seguridad (hallazgo MED): solo https + Mercado Libre", () => {
+  it("acepta un permalink real de Mercado Libre (https, cualquier país)", () => {
+    expect(permalinkMlSeguro("https://articulo.mercadolibre.com.co/MCO-1234567890-algo")).toBe("https://articulo.mercadolibre.com.co/MCO-1234567890-algo");
+    expect(permalinkMlSeguro("https://articulo.mercadolibre.com.ar/MLA-1")).toBe("https://articulo.mercadolibre.com.ar/MLA-1");
+  });
+
+  it("rechaza javascript:/data: disfrazado de URL", () => {
+    expect(permalinkMlSeguro("javascript:alert(1)")).toBeNull();
+    expect(permalinkMlSeguro("data:text/html,<script>alert(1)</script>")).toBeNull();
+  });
+
+  it("rechaza http:// (no https)", () => {
+    expect(permalinkMlSeguro("http://articulo.mercadolibre.com.co/MCO-1")).toBeNull();
+  });
+
+  it("rechaza un dominio ajeno (nunca Mercado Libre), incluso uno que solo CONTIENE el nombre real", () => {
+    expect(permalinkMlSeguro("https://evil.com")).toBeNull();
+    expect(permalinkMlSeguro("https://mercadolibre.com.ataque.com/MCO-1")).toBeNull();
+  });
+
+  it("texto que no es una URL: null, nunca lanza", () => {
+    expect(permalinkMlSeguro("no es un link")).toBeNull();
+    expect(permalinkMlSeguro("")).toBeNull();
+  });
 });
 
 describe("idItemDesdeLinkMl — Parte 3, punto A.2 (importar por link)", () => {
@@ -429,6 +508,24 @@ describe("parseImportacionBookmarklet — Parte 3, punto A.3 (pegar el JSON del 
       imagenes: [],
       dimensiones: { peso: "", largo: "", ancho: "", alto: "" },
     });
+  });
+
+  it("revisión de seguridad — filtra fotos que NO son https reales (javascript:/data: disfrazado), mismo criterio que la extensión", () => {
+    const json = JSON.stringify({
+      titulo: "X",
+      galeria: [
+        { id: "bk-0", url: "https://http2.mlstatic.com/foo-O.jpg" },
+        { id: "bk-1", url: "javascript:alert(1)" },
+        { id: "bk-2", url: "data:text/html,<script>alert(1)</script>" },
+        { id: "bk-3", url: "http://sin-https.com/foo.jpg" },
+      ],
+    });
+    expect(parseImportacionBookmarklet(json)?.imagenes).toEqual(["https://http2.mlstatic.com/foo-O.jpg"]);
+  });
+
+  it("revisión de seguridad — sin título/descripción/precio y sin ninguna foto https real: null (nunca hidrata el formulario con nada)", () => {
+    expect(parseImportacionBookmarklet(JSON.stringify({}))).toBeNull();
+    expect(parseImportacionBookmarklet(JSON.stringify({ galeria: [{ id: "bk-0", url: "javascript:alert(1)" }] }))).toBeNull();
   });
 });
 

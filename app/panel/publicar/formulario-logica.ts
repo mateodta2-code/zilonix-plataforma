@@ -240,6 +240,34 @@ export function moverFoto(fotos: string[], desde: number, hasta: number): string
 
 // --- Parte 3 (importadores + permalink) ---
 
+// Revisión de seguridad (hallazgo MED) — un solo patrón de hostname
+// real de Mercado Libre, compartido por permalinkMlSeguro (abajo) e
+// idItemDesdeLinkMl (más abajo en este archivo): cualquier subdominio +
+// el país opcional (".co", ".ar", etc.), nunca un dominio que solo
+// CONTIENE "mercadolibre.com" en otra parte de la URL (ej.
+// "mercadolibre.com.ataque.com" no matchea — el "$" ancla el final).
+const PATRON_HOST_MERCADOLIBRE = /(^|\.)mercadolibre\.com(\.[a-z]{2})?$/i;
+
+// Revisión de seguridad (hallazgo MED) — producto.resultado ya viene
+// de Mercado Libre (publicar.ts, lib/ml/cliente.ts), pero
+// enlacesPermalink arma un <a href> real para HistorialPublicaciones.tsx
+// — nunca se confía en que ese campo siga siendo lo que ML mandó
+// originalmente (una fila vieja, un bug futuro de publicar.ts, datos
+// corruptos): se exige https real Y un hostname real de Mercado Libre
+// antes de dejarlo pasar a un link clickeable. Un "javascript:"/
+// "data:" o un dominio ajeno nunca llega a <a href>.
+export function permalinkMlSeguro(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:") return null;
+  if (!PATRON_HOST_MERCADOLIBRE.test(parsed.hostname)) return null;
+  return url;
+}
+
 // Punto B del pedido — "cuando una cuenta publicó OK, el nombre de la
 // cuenta o un link debe abrir ese permalink. No inventes columna; lee
 // producto.resultado." Una sola función, discrimina por forma (ver
@@ -263,12 +291,15 @@ export function enlacesPermalink(
     if ("familia" in r) {
       for (const item of r.familia.items) {
         if (item.ok && item.permalink) {
+          const permalinkSeguro = permalinkMlSeguro(item.permalink);
+          if (!permalinkSeguro) continue;
           const sufijo = item.sku || Object.values(item.valores).join(" / ");
-          enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: sufijo ? `${nombreCuenta} (${sufijo})` : nombreCuenta, permalink: item.permalink });
+          enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: sufijo ? `${nombreCuenta} (${sufijo})` : nombreCuenta, permalink: permalinkSeguro });
         }
       }
     } else if (r.ok) {
-      enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: nombreCuenta, permalink: r.permalink });
+      const permalinkSeguro = permalinkMlSeguro(r.permalink);
+      if (permalinkSeguro) enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: nombreCuenta, permalink: permalinkSeguro });
     }
   }
   return enlaces;
@@ -352,7 +383,7 @@ export function idItemDesdeLinkMl(urlCruda: string): string | null {
   } catch {
     return null;
   }
-  if (!/(^|\.)mercadolibre\.com(\.[a-z]{2})?$/i.test(url.hostname)) return null;
+  if (!PATRON_HOST_MERCADOLIBRE.test(url.hostname)) return null;
 
   const candidatos: string[] = [];
   for (const clave of ["wid", "item_id", "itemId"]) {
@@ -414,13 +445,24 @@ export function parseImportacionBookmarklet(texto: string): ItemImportado | null
   const d = crudo as Record<string, unknown>;
   const dim = (d.dimensiones && typeof d.dimensiones === "object" ? (d.dimensiones as Record<string, unknown>) : {}) ?? {};
   const galeria = Array.isArray(d.galeria) ? d.galeria : [];
+  // Revisión de seguridad (hallazgo MED) — mismas reglas que
+  // itemImportadoDesdeMensajeExtension (el mensaje de "Importar a
+  // Publicar" de la extensión): el JSON lo pega la PERSONA a mano
+  // (copiado por el bookmarklet, corriendo en su propio navegador),
+  // pero nunca se confía en que el texto pegado sea de verdad lo que
+  // el bookmarklet copió — un "javascript:"/"data:" disfrazado de URL
+  // de foto nunca llega a <img src> ni a la portada del formulario.
   const imagenes = galeria
     .map((g) => (g && typeof g === "object" && typeof (g as { url?: unknown }).url === "string" ? (g as { url: string }).url : null))
-    .filter((u): u is string => !!u);
+    .filter((u): u is string => !!u && /^https:\/\//i.test(u));
+  const titulo = typeof d.titulo === "string" ? d.titulo : "";
+  const descripcion = typeof d.descripcion === "string" ? d.descripcion : "";
+  const precio = typeof d.precio === "number" && Number.isFinite(d.precio) ? String(d.precio) : "";
+  if (!titulo && !descripcion && !precio && imagenes.length === 0) return null; // nada útil pegado — nunca se hidrata el formulario con nada
   return {
-    titulo: typeof d.titulo === "string" ? d.titulo : "",
-    descripcion: typeof d.descripcion === "string" ? d.descripcion : "",
-    precio: typeof d.precio === "number" && Number.isFinite(d.precio) ? String(d.precio) : "",
+    titulo,
+    descripcion,
+    precio,
     stock: "",
     sku: "",
     imagenes,

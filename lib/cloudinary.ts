@@ -1,3 +1,12 @@
+// Revisión de seguridad (hallazgo MED) — marcador real de Next.js/React:
+// si algún día este archivo (o algo que lo importe) se cuela en un
+// bundle de cliente (ej. un "use client" que lo importa por error), el
+// build falla con un error explícito en vez de empaquetar en silencio
+// CLOUDINARY_API_KEY/CLOUDINARY_API_SECRET para el navegador. Tiene que
+// ser el primer import del archivo — así lo exige la propia convención
+// de Next.js/React para que el bundler lo detecte.
+import "server-only";
+
 import crypto from "crypto";
 
 // Parte 3, punto C ("fotos: PC + Canva → Cloudinary, sin migración") —

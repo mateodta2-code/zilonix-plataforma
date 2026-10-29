@@ -6,6 +6,7 @@ import { requierePermiso } from "@/lib/permisos";
 import { cloudinaryConfigurado, CloudinaryNoConfiguradoError, CloudinaryRechazoError, subirACloudinary } from "@/lib/cloudinary";
 import {
   descargarImagenExternaSegura,
+  tipoImagenPorMagicBytes,
   TAMANO_MAXIMO_FOTO_EXTERNA_BYTES,
   UrlExternaDemasiadoGrandeError,
   UrlExternaInvalidaError,
@@ -117,8 +118,19 @@ export async function POST(request: NextRequest) {
       if (archivo.size > TAMANO_MAXIMO_FOTO_BYTES) {
         return NextResponse.json({ error: "La imagen supera el tamaño máximo permitido." }, { status: 413 });
       }
-      const buffer = await archivo.arrayBuffer();
-      const { url } = await subirACloudinary(buffer, archivo.name, archivo.type);
+      const buffer = Buffer.from(await archivo.arrayBuffer());
+      // Revisión de seguridad (hallazgo MED) — archivo.type lo pone el
+      // NAVEGADOR de quien sube el archivo (a partir de la extensión o
+      // de lo que declare el <input type="file">), nunca algo que este
+      // servidor pueda confiar ciegamente: un .txt renombrado a .jpg
+      // (o un archivo armado a mano) puede declararse "image/jpeg" sin
+      // serlo. Se confirma contra la firma binaria real antes de
+      // subirlo a Cloudinary — nunca solo por el MIME declarado.
+      const tipoReal = tipoImagenPorMagicBytes(buffer);
+      if (!tipoReal) {
+        return NextResponse.json({ error: "El archivo no tiene una firma real de JPEG, PNG ni WEBP." }, { status: 400 });
+      }
+      const { url } = await subirACloudinary(buffer, archivo.name, tipoReal);
       return NextResponse.json({ url });
     }
 

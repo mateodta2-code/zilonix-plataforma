@@ -1,4 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Revisión de seguridad (hallazgo MED) — lib/cloudinary.ts ahora
+// importa "server-only" en su primera línea (mismo motivo que
+// middleware.test.ts/lib/usuarios.test.ts): revienta fuera de un
+// runtime real de Server Component — hace falta mockearlo para que
+// vitest (Node) pueda cargar el módulo.
+vi.mock("server-only", () => ({}));
+
 import { cloudinaryConfigurado, CloudinaryNoConfiguradoError, CloudinaryRechazoError, subirACloudinary } from "./cloudinary";
 
 function respuestaJson(data: unknown, status = 200) {
