@@ -72,4 +72,31 @@ describe("recibirMultipartVideo — rama feat-publicar-clip, punto 4 (streaming 
 
     await expect(recibirMultipartVideo(peticion, 1000)).rejects.toThrow(MultipartInvalidoError);
   });
+
+  // Code review de Pablo — topes de CANTIDAD (archivos/campos), no solo
+  // de tamaño por archivo. busboy nunca lanza por su cuenta al pasar
+  // estos límites (solo deja de emitir más partes) — sin escucharlo,
+  // esto pasaría en silencio con solo las primeras N partes.
+  it("más de 20 archivos: rechaza con MultipartInvalidoError y borra todo lo ya escrito (nunca queda un .tmp huérfano)", async () => {
+    const { readdirSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const antes = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith("zilonix-clip-subida-")));
+
+    const form = new FormData();
+    for (let i = 0; i < 25; i++) {
+      form.append(`archivo_${i}`, new File([new Uint8Array([1])], `clip-${i}.mp4`, { type: "video/mp4" }));
+    }
+
+    await expect(recibirMultipartVideo(peticionMultipart(form), 1024)).rejects.toThrow(MultipartInvalidoError);
+
+    const despues = readdirSync(tmpdir()).filter((n) => n.startsWith("zilonix-clip-subida-") && !antes.has(n));
+    expect(despues).toEqual([]);
+  });
+
+  it("más de 50 campos de texto: rechaza con MultipartInvalidoError", async () => {
+    const form = new FormData();
+    for (let i = 0; i < 55; i++) form.append(`campo_${i}`, "x");
+
+    await expect(recibirMultipartVideo(peticionMultipart(form), 1024)).rejects.toThrow(MultipartInvalidoError);
+  });
 });

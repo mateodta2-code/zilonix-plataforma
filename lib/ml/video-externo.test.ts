@@ -80,10 +80,24 @@ describe("hostPermitidoVideo — allowlist", () => {
     expect(hostPermitidoVideo("img.ltwebstatic.com")).toBe(true);
   });
 
-  it("rechaza un host que solo CONTIENE el nombre real (spoofing real: evilmlstatic.com, mlstatic.com.evil.com)", () => {
+  // Code review de Pablo — TikTok alineado con el allowlist real que
+  // ya usa extension/lectores/video-comun.js (PR #291): el bare
+  // "tiktok.com"/"tiktokcdn.com" y cualquier subdominio real de CDN de
+  // video (una URL real sin extensión reconocible, firmada, es el caso
+  // real que ese archivo documenta).
+  it("acepta tiktok.com, tiktokcdn.com y una URL real de CDN de TikTok sin extensión", () => {
+    expect(hostPermitidoVideo("tiktok.com")).toBe(true);
+    expect(hostPermitidoVideo("tiktokcdn.com")).toBe(true);
+    expect(hostPermitidoVideo("v16-webapp-prime.tiktok.com")).toBe(true);
+    expect(hostPermitidoVideo("v9-default.tiktokcdn.com")).toBe(true);
+  });
+
+  it("rechaza un host que solo CONTIENE el nombre real (spoofing real: evilmlstatic.com, mlstatic.com.evil.com, evil-tiktokcdn.com, tiktokcdn.com.evil.com)", () => {
     expect(hostPermitidoVideo("evilmlstatic.com")).toBe(false);
     expect(hostPermitidoVideo("mlstatic.com.evil.com")).toBe(false);
     expect(hostPermitidoVideo("notcanva.com")).toBe(false);
+    expect(hostPermitidoVideo("evil-tiktokcdn.com")).toBe(false);
+    expect(hostPermitidoVideo("tiktokcdn.com.evil.com")).toBe(false);
   });
 
   it("rechaza un dominio ajeno cualquiera", () => {
@@ -236,5 +250,44 @@ describe("descargarVideoExternoSeguro — anti-SSRF + streaming a disco", () => 
     expect(resultado.byteLength).toBe(contenido.byteLength);
     expect(existsSync(resultado.rutaArchivo)).toBe(true);
     expect(readFileSync(resultado.rutaArchivo).byteLength).toBe(contenido.byteLength);
+  });
+
+  // Code review de Pablo — bug real: 15s cubría solo la respuesta de
+  // cabeceras, nunca el streaming del cuerpo. Acá se simula una
+  // conexión real que entrega las cabeceras rápido pero se queda
+  // COLGADA a mitad del cuerpo (el `reader.read()` del body nunca
+  // resuelve por su cuenta) — el único motivo por el que esto termina
+  // es el AbortSignal compartido que `descargarVideoExternoSeguro` le
+  // pasa a `fetch()` (acá, al propio mock, para que su reader lo
+  // escuche) — igual que `fetch` real propagaría el abort al stream
+  // del cuerpo. `timeoutTotalMs` chico (nunca el real de 120s) para
+  // que la prueba no tarde — nunca se escribe el video completo.
+  it("conexión colgada a mitad del cuerpo: el tope de tiempo total la corta, nunca se queda esperando para siempre", async () => {
+    lookupMock.mockResolvedValue([{ address: "151.101.1.1" }]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => {
+        const signal = init?.signal;
+        const reader = {
+          read: () =>
+            new Promise((_resolve, reject) => {
+              if (signal?.aborted) {
+                reject(new DOMException("La descarga se abortó.", "AbortError"));
+                return;
+              }
+              signal?.addEventListener("abort", () => reject(new DOMException("La descarga se abortó.", "AbortError")), { once: true });
+            }),
+          cancel: async () => undefined,
+        };
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: (k: string) => (k.toLowerCase() === "content-type" ? "video/mp4" : null) },
+          body: { getReader: () => reader },
+        } as unknown as Response;
+      })
+    );
+
+    await expect(descargarVideoExternoSeguro("https://img.kwcdn.com/colgado.mp4", 50)).rejects.toThrow(VideoExternoNoDisponibleError);
   });
 });

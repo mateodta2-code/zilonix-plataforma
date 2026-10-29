@@ -28,6 +28,16 @@ import {
 // pero el seguimiento de progreso de esta sesión del navegador se
 // pierde. Aceptable para esta tarea: la migración de la Parte 4 es
 // quien le da persistencia real.
+//
+// Code review de Pablo — mismo límite, dicho de otra forma: este Map
+// vive en la memoria de UN proceso Node. Con más de 1 réplica de
+// Railway corriendo detrás del mismo load balancer, un POST /api/ml/clip
+// que arranca el trabajo en la réplica A y un GET /api/ml/clip/trabajo/[jobId]
+// que cae en la réplica B (round-robin) nunca va a encontrar ese jobId
+// — 404 real, no un bug de lógica. Staging corre con 1 sola réplica
+// hasta que la Parte 4 le dé persistencia real (Postgres) a este
+// estado; production necesita confirmar eso ANTES de prender
+// CLIP_HABILITADO ahí si llega a correr con más de 1 réplica.
 
 export type EstadoCuentaClip = "en_cola" | "subiendo" | "en_moderacion" | "publicado" | "rechazado" | "error";
 
@@ -152,8 +162,17 @@ export function iniciarTrabajoClip(
         }
       });
     } finally {
-      trabajo.terminadoTs = Date.now();
+      // Code review de Pablo — orden real importante: `terminadoTs` es
+      // la señal que el polling (GET /api/ml/clip/trabajo/[jobId]) usa
+      // para decir "ya se puede dejar de consultar". Si se fijaba ANTES
+      // de borrar los temporales, una prueba (o un cliente real) que
+      // reacciona a `terminadoTs != null` podía leer el trabajo como
+      // "terminado" mientras el `rm` todavía estaba en vuelo — orden
+      // equivocado, nunca una carrera real entre llamadas concurrentes
+      // (esto sigue siendo un solo `finally`, secuencial). Primero se
+      // borra TODO, recién después se marca terminado.
       await Promise.all([...rutasABorrar].map((ruta) => rm(ruta, { force: true }).catch(() => undefined)));
+      trabajo.terminadoTs = Date.now();
     }
   })();
 

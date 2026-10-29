@@ -24,6 +24,18 @@ export type ArchivoRecibido = { rutaArchivo: string; contentType: string; nombre
 
 export type ResultadoMultipart = { campos: Record<string, string>; archivos: Record<string, ArchivoRecibido> };
 
+// Code review de Pablo — topes de CANTIDAD, no solo de tamaño: sin
+// esto, alguien podía mandar un multipart con cientos de partes
+// (archivos chicos o campos de texto) y aunque cada uno respetara el
+// tope de bytes individual, el parseo entero (un `rutasCreadas.push`,
+// un `escritura`/stream por archivo) crecía sin techo. 20 archivos y 50
+// campos son de sobra para el caso real (un video por defecto + hasta
+// unos pocos overrides puntuales por cuenta, más `cuentas`/`tempVideoId`
+// — ver app/api/ml/clip/route.ts) y chicos a propósito, para que
+// cualquier intento real de abuso corte rápido.
+const TOPE_ARCHIVOS_MULTIPART = 20;
+const TOPE_CAMPOS_MULTIPART = 50;
+
 // Un tope de bytes POR ARCHIVO (no total) — varias cuentas pueden traer
 // cada una su propio video de override, así que el límite real es "cada
 // parte individual respeta el tamaño máximo de un Clip", nunca una
@@ -40,7 +52,10 @@ export async function recibirMultipartVideo(request: Request, topeBytesPorArchiv
   const archivos: Record<string, ArchivoRecibido> = {};
   const rutasCreadas: string[] = [];
 
-  const bb = busboy({ headers: { "content-type": contentType }, limits: { fileSize: topeBytesPorArchivo } });
+  const bb = busboy({
+    headers: { "content-type": contentType },
+    limits: { fileSize: topeBytesPorArchivo, files: TOPE_ARCHIVOS_MULTIPART, fields: TOPE_CAMPOS_MULTIPART },
+  });
 
   // Bug real encontrado probando esto: el "close" de busboy dispara en
   // cuanto termina de LEER el multipart de entrada, pero cada archivo
@@ -100,6 +115,16 @@ export async function recibirMultipartVideo(request: Request, topeBytesPorArchiv
       escriturasPendientes.push(promesaArchivo);
     });
 
+    // Code review de Pablo — busboy NUNCA lanza por su cuenta al pasar
+    // `limits.files`/`limits.fields`: simplemente deja de emitir más
+    // partes y emite estos 2 eventos aparte. Sin escucharlos, una
+    // subida con de más archivos/campos que el tope terminaría en
+    // "close" normal, con solo las primeras N partes — silencioso,
+    // nunca un error real. Acá se trata igual que cualquier otra falla
+    // de parseo: rechaza con MultipartInvalidoError y limpia todo lo ya
+    // escrito (mismo catch de abajo).
+    bb.on("filesLimit", () => fallar(new MultipartInvalidoError(`La subida tiene más de ${TOPE_ARCHIVOS_MULTIPART} archivos — rechazada.`)));
+    bb.on("fieldsLimit", () => fallar(new MultipartInvalidoError(`La subida tiene más de ${TOPE_CAMPOS_MULTIPART} campos — rechazada.`)));
     bb.on("error", fallar);
     bb.on("close", () => {
       Promise.all(escriturasPendientes).then(() => resolve(), fallar);

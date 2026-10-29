@@ -24,7 +24,18 @@ export class VideoExternoNoDisponibleError extends Error {}
 export class VideoExternoDemasiadoGrandeError extends Error {}
 export class VideoExternoTipoInvalidoError extends Error {}
 
-const TIMEOUT_MS = 15_000; // más generoso que una foto — un video pesa más y tarda más en empezar a responder
+// Code review de Pablo — bug real: 15s alcanzaba para UNA respuesta de
+// cabeceras (lo que medía antes), pero nunca cubría el streaming del
+// CUERPO — un video de 280MB a una conexión lenta (pero real, nunca
+// colgada a propósito) tranquilamente tarda más de 15s en terminar de
+// llegar, y una conexión de verdad colgada a la mitad del streaming
+// (nunca se vuelve a pedir, "server trickling") se quedaba sin ningún
+// tope. Ahora es UN SOLO presupuesto de tiempo que cubre TODO: seguir
+// los redirects Y escribir el cuerpo entero a disco — se pasa como un
+// único AbortSignal compartido (ver descargarVideoExternoSeguro) que
+// cualquier `fetch()` de cualquier salto, y la lectura del cuerpo del
+// salto final, respetan por igual.
+export const TIMEOUT_TOTAL_DESCARGA_MS = 120_000;
 const TOPE_REDIRECTS = 5;
 // Mismo límite real que ya exige Mercado Libre para Clips (lib/ml/clip.ts,
 // TAMANO_MAXIMO_CLIP_BYTES) — una sola fuente de verdad del número,
@@ -50,13 +61,24 @@ export const TAMANO_MAXIMO_VIDEO_EXTERNO_BYTES = 280 * 1024 * 1024;
 // hay que probar un link de video real de cada plataforma y ajustar
 // esta lista si hace falta (agregar o sacar un host), nunca asumir que
 // el de fotos sirve video también solo porque "debería".
-const HOSTS_EXACTOS_PERMITIDOS_VIDEO = new Set(["export-download.canva.com"]);
+//
+// Code review de Pablo — TikTok: SÍ confirmado para video, al alinear
+// con el allowlist real que ya usa la extensión (PR #291,
+// extension/lectores/video-comun.js, SUFIJOS_HOST_CDN_VIDEO_PERMITIDOS)
+// para decidir qué URL de video de TikTok es "descargable" del lado
+// del navegador — las URLs firmadas del CDN de TikTok no siempre
+// muestran una extensión real en el path, así que esa extensión
+// confía en el HOST para esos casos; acá se replica el mismo host
+// (nunca "por si acaso", mismo criterio que el resto de esta lista).
+const HOSTS_EXACTOS_PERMITIDOS_VIDEO = new Set(["export-download.canva.com", "tiktok.com", "tiktokcdn.com"]);
 const SUFIJOS_HOST_PERMITIDOS_VIDEO = [
   ".canva.com", // Canva — confirmado por el pedido
   ".mlstatic.com", // Mercado Libre — CDN de imagen confirmado, video SIN confirmar todavía
   ".media-amazon.com", // Amazon — idem
   ".kwcdn.com", // Temu — idem
   ".alicdn.com", // AliExpress/Alibaba — idem
+  ".tiktok.com", // TikTok — confirmado, mismo host que usa extension/lectores/video-comun.js
+  ".tiktokcdn.com", // TikTok CDN — idem
   ".aliexpress-media.com", // AliExpress — idem
   ".ltwebstatic.com", // Shein — idem
 ];
@@ -74,7 +96,22 @@ export function hostPermitidoVideo(hostname: string): boolean {
 // casos, nunca se confía solo en esto.
 const TIPOS_DECLARADOS_TOLERADOS = new Set(["video/mp4", "video/quicktime", "video/mpeg", "video/x-msvideo", "application/octet-stream"]);
 
-async function validarYResolverRedirectSeguro(urlActual: URL): Promise<{ url: URL; res: Response } | { redirigidoA: URL }> {
+// Límite conocido y aceptado para esta primera versión (documentado,
+// no silencioso, mismo criterio que app/panel/publicar/fotos/
+// validar-url-externa.ts:119-123 para Canva): exigirHostnamePublico
+// resuelve el DNS y valida esa IP, pero la llamada a `fetch()` de más
+// abajo vuelve a resolver el DNS por su cuenta — nunca se fija la
+// conexión a la IP ya validada. Esto cierra el caso real (un link que
+// apunta directo a una IP privada), no un DNS rebinding cronometrado
+// (TTL=0, la IP cambia entre el `lookup()` de arriba y el `connect()`
+// de `fetch()` unos milisegundos después). Evaluado y postergado a
+// propósito: fijar la conexión de verdad requeriría dejar de usar el
+// `fetch` global (que no expone un `lookup` propio) por el de
+// `undici` con un `Agent({connect:{lookup}})` — un cambio real, no
+// barato, que además rompería el mock de `fetch` global que ya usan
+// las pruebas de este archivo. Se revisa si aparece evidencia real de
+// que hace falta (nunca "por si acaso").
+async function validarYResolverRedirectSeguro(urlActual: URL, signal: AbortSignal): Promise<{ url: URL; res: Response } | { redirigidoA: URL }> {
   if (urlActual.protocol !== "https:") throw new VideoExternoInvalidoError("Solo se acepta un link https.");
   if (!hostPermitidoVideo(urlActual.hostname)) {
     throw new VideoExternoNoPermitidoError(`"${urlActual.hostname}" no está en la lista de hosts de video permitidos.`);
@@ -91,8 +128,10 @@ async function validarYResolverRedirectSeguro(urlActual: URL): Promise<{ url: UR
   try {
     // `redirect: "manual"` a propósito — nunca se sigue un redirect a
     // ciegas (ver el comentario completo arriba del archivo); esta
-    // función revalida CADA salto antes de pedirlo.
-    res = await fetch(urlActual.toString(), { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "manual" });
+    // función revalida CADA salto antes de pedirlo. `signal` es el
+    // presupuesto de tiempo TOTAL compartido (ver el comentario de
+    // TIMEOUT_TOTAL_DESCARGA_MS) — nunca un timeout nuevo por salto.
+    res = await fetch(urlActual.toString(), { signal, redirect: "manual" });
   } catch {
     throw new VideoExternoNoDisponibleError("No se pudo descargar ese video a tiempo.");
   }
@@ -112,10 +151,10 @@ async function validarYResolverRedirectSeguro(urlActual: URL): Promise<{ url: UR
   return { url: urlActual, res };
 }
 
-async function seguirHastaElVideo(urlInicial: URL): Promise<Response> {
+async function seguirHastaElVideo(urlInicial: URL, signal: AbortSignal): Promise<Response> {
   let actual = urlInicial;
   for (let salto = 0; salto <= TOPE_REDIRECTS; salto++) {
-    const resultado = await validarYResolverRedirectSeguro(actual);
+    const resultado = await validarYResolverRedirectSeguro(actual, signal);
     if ("res" in resultado) return resultado.res;
     actual = resultado.redirigidoA;
   }
@@ -193,7 +232,11 @@ function leerPrimerosBytes(rutaArchivo: string, cantidad: number): Promise<Buffe
 // borrar `rutaArchivo` cuando ya no lo necesite (ver
 // lib/trabajos/subirClipMultiCuenta.ts — el archivo se comparte entre
 // varias cuentas, se borra al terminar el trabajo entero, no acá).
-export async function descargarVideoExternoSeguro(urlCruda: string): Promise<VideoDescargado> {
+// `timeoutTotalMs` parametrizado (nunca la constante fija) — mismo
+// motivo que `topeBytes` en escribirCuerpoEnArchivoConTope: un test
+// real de "se agotó el tiempo a mitad del streaming" necesita un tope
+// CHICO (milisegundos, no 120s) para no quedarse esperando de verdad.
+export async function descargarVideoExternoSeguro(urlCruda: string, timeoutTotalMs: number = TIMEOUT_TOTAL_DESCARGA_MS): Promise<VideoDescargado> {
   let urlInicial: URL;
   try {
     urlInicial = new URL(urlCruda);
@@ -201,32 +244,52 @@ export async function descargarVideoExternoSeguro(urlCruda: string): Promise<Vid
     throw new VideoExternoInvalidoError("Ese link no es una URL válida.");
   }
 
-  const res = await seguirHastaElVideo(urlInicial);
+  // Presupuesto de tiempo ÚNICO para toda la operación (ver el
+  // comentario de TIMEOUT_TOTAL_DESCARGA_MS) — un solo AbortController
+  // compartido entre seguir los redirects Y leer el cuerpo entero.
+  // Abortar este signal mientras `escribirCuerpoEnArchivoConTope` está
+  // leyendo el stream hace que `reader.read()` rechace con un error de
+  // abort "en crudo" (nunca uno de las clases tipadas de este
+  // archivo) — por eso el `catch` de abajo normaliza ESE caso puntual
+  // a VideoExternoNoDisponibleError, igual que cualquier otro timeout.
+  const controlador = new AbortController();
+  const temporizador = setTimeout(() => controlador.abort(), timeoutTotalMs);
 
-  const contentTypeDeclarado = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-  if (contentTypeDeclarado && !TIPOS_DECLARADOS_TOLERADOS.has(contentTypeDeclarado)) {
-    throw new VideoExternoTipoInvalidoError(`Tipo de archivo no permitido (${contentTypeDeclarado}) — solo video MP4, MOV, MPEG o AVI.`);
+  try {
+    const res = await seguirHastaElVideo(urlInicial, controlador.signal);
+
+    const contentTypeDeclarado = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (contentTypeDeclarado && !TIPOS_DECLARADOS_TOLERADOS.has(contentTypeDeclarado)) {
+      throw new VideoExternoTipoInvalidoError(`Tipo de archivo no permitido (${contentTypeDeclarado}) — solo video MP4, MOV, MPEG o AVI.`);
+    }
+
+    const contentLengthCrudo = res.headers.get("content-length");
+    const contentLength = Number(contentLengthCrudo);
+    if (contentLengthCrudo && Number.isFinite(contentLength) && contentLength > TAMANO_MAXIMO_VIDEO_EXTERNO_BYTES) {
+      throw new VideoExternoDemasiadoGrandeError("El video supera el tamaño máximo permitido (280MB).");
+    }
+
+    const carpetaTemporal = tmpdir();
+    await mkdir(carpetaTemporal, { recursive: true });
+    const rutaArchivo = path.join(carpetaTemporal, `zilonix-clip-${crypto.randomUUID()}.tmp`);
+
+    await escribirCuerpoEnArchivoConTope(res, rutaArchivo, TAMANO_MAXIMO_VIDEO_EXTERNO_BYTES);
+
+    const encabezado = await leerPrimerosBytes(rutaArchivo, 64 * 1024);
+    const contentTypeReal = tipoVideoPorMagicBytes(encabezado);
+    if (!contentTypeReal) {
+      await rm(rutaArchivo, { force: true });
+      throw new VideoExternoTipoInvalidoError("El video descargado no tiene una firma real de MP4, MOV, MPEG ni AVI.");
+    }
+
+    const info = await stat(rutaArchivo);
+    return { rutaArchivo, contentType: contentTypeReal, byteLength: info.size };
+  } catch (error) {
+    if (controlador.signal.aborted) {
+      throw new VideoExternoNoDisponibleError("El video tardó demasiado en descargarse — probá de nuevo o descargalo y subilo desde el computador.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(temporizador);
   }
-
-  const contentLengthCrudo = res.headers.get("content-length");
-  const contentLength = Number(contentLengthCrudo);
-  if (contentLengthCrudo && Number.isFinite(contentLength) && contentLength > TAMANO_MAXIMO_VIDEO_EXTERNO_BYTES) {
-    throw new VideoExternoDemasiadoGrandeError("El video supera el tamaño máximo permitido (280MB).");
-  }
-
-  const carpetaTemporal = tmpdir();
-  await mkdir(carpetaTemporal, { recursive: true });
-  const rutaArchivo = path.join(carpetaTemporal, `zilonix-clip-${crypto.randomUUID()}.tmp`);
-
-  await escribirCuerpoEnArchivoConTope(res, rutaArchivo, TAMANO_MAXIMO_VIDEO_EXTERNO_BYTES);
-
-  const encabezado = await leerPrimerosBytes(rutaArchivo, 64 * 1024);
-  const contentTypeReal = tipoVideoPorMagicBytes(encabezado);
-  if (!contentTypeReal) {
-    await rm(rutaArchivo, { force: true });
-    throw new VideoExternoTipoInvalidoError("El video descargado no tiene una firma real de MP4, MOV, MPEG ni AVI.");
-  }
-
-  const info = await stat(rutaArchivo);
-  return { rutaArchivo, contentType: contentTypeReal, byteLength: info.size };
 }
