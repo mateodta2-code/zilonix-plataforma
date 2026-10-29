@@ -468,6 +468,23 @@
       return;
     }
 
+    // Revisión de Pablo (sobre a6fdcbd, HIGH 1) — bug real: hasta esta
+    // corrección, el botón marcaba "Enviado ✓" apenas llegaba CUALQUIER
+    // respuesta de background.js, sin mirar si de verdad hizo algo —
+    // una URL que background.js rechaza (`{ok:false}`, última línea
+    // real de defensa) terminaba mostrando éxito en silencio. Ahora
+    // solo "Enviado ✓" si `respuesta.ok` es real; si no, un mensaje
+    // claro en el pie del panel, nunca silencio.
+    function mostrarErrorImportarVideo() {
+      let aviso = pie.querySelector(".zx-video-error");
+      if (!aviso) {
+        aviso = document.createElement("p");
+        aviso.className = "zx-vacio zx-video-error";
+        pie.appendChild(aviso);
+      }
+      aviso.textContent = "No pude tomar ese video, prueba descargarlo y subirlo desde la computadora.";
+    }
+
     function crearBotonVideo(url, etiqueta) {
       const boton = document.createElement("button");
       boton.type = "button";
@@ -481,8 +498,14 @@
           // marca "Enviado ✓" hasta que background.js de verdad
           // confirme que abrió o enfocó /panel/publicar#clip.
           boton.textContent = "Abriendo Publicar…";
-          chrome.runtime.sendMessage({ tipo: "zilonix:importar-video", payload }, () => {
-            void chrome.runtime.lastError; // Service Worker dormido/reciclado justo en este instante — nunca un error real
+          chrome.runtime.sendMessage({ tipo: "zilonix:importar-video", payload }, (respuesta) => {
+            const error = chrome.runtime.lastError; // Service Worker dormido/reciclado justo en este instante — nunca un error real
+            void error;
+            if (error || !respuesta || !respuesta.ok) {
+              mostrarErrorImportarVideo();
+              boton.textContent = etiqueta;
+              return;
+            }
             boton.textContent = "Enviado ✓";
             setTimeout(() => (boton.textContent = etiqueta), 1500);
           });

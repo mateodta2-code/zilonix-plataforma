@@ -65,3 +65,22 @@
 
   Refs #273
   Refs #44
+
+- **2026-10-29** — revisión de Pablo sobre el commit `a6fdcbd` (anexo 2, "Importar video a Clip"): 1 HIGH, 2 MED, 1 LOW, todos corregidos en la misma rama y misma versión (ext 0.3.41).
+
+  **HIGH 1 (bloqueante) — 2 validaciones de video DISTINTAS que se desalinearon**: `extension/lectores/video-comun.js` confirmaba un `<source type="video/mp4">` sin extensión real en CUALQUIER host https (caso real de TikTok, cuyas URLs firmadas de CDN no siempre muestran `.mp4` en el path), pero `background.js` tenía su PROPIA copia de la validación, más estricta, que lo rechazaba en silencio. Arreglado con UNA sola función real compartida (`esUrlVideoValida`, en `video-comun.js`) en los 2 lados — `background.js` la carga con `importScripts("lectores/video-comun.js")` (real en un Service Worker de Manifest V3 sin `"type":"module"`; en Node/vitest, sin `importScripts`, se usa `require()` directo). La función ahora: exige https siempre; rechaza `blob:`, `data:`, `.m3u8` (HLS) y `.mpd` (DASH); acepta `.mp4`/`.mov`/`.webm` en cualquier host (la extensión real alcanza); y, SIN extensión reconocible, solo confía en el HOST si está en una allowlist anclada por hostname de los CDNs reales de las 7 fuentes (`tiktok.com`/`tiktokcdn.com`, `mlstatic.com`, `amazon.com`/`media-amazon.com`, `temu.com`/`kwcdn.com`, `alicdn.com`, `shein.com`/`ltwebstatic.com`) — nunca más en lo que la propia página declare con `type`, que es markup suyo, no una prueba real. Si `background.js` rechaza la URL, ahora contesta `{ok:false}` explícito (antes era un `return;` mudo) y `content.js` muestra "No pude tomar ese video, prueba descargarlo y subirlo desde la computadora" en el panel en vez de marcar "Enviado ✓" como si hubiera funcionado.
+
+  **MED 2 — `"zilonix:importar-link"` sin confirmar el remitente**: igual que ya hacía `"zilonix:abrir-seguimientos"` desde una corrección anterior de Pablo, ahora se exige que `remitente.tab.url` (lo pone Chrome, nunca se puede falsificar desde el content script que lo originó) de verdad empiece con uno de los 2 hosts de Seller + `/panel/publicar` (`esRemitentePublicar`, nueva, reutilizada también en el punto LOW 4) antes de abrir ninguna pestaña de lectura.
+
+  **MED 3 — la rama MIME en `video-comun.js`**: quedó cubierta por la allowlist del HIGH 1 — un `<source type="video/mp4">` sin extensión ya nunca acepta un host fuera de esa lista, pase lo que declare el `type`.
+
+  **LOW 4 — `"zilonix:pedir-importacion-pendiente"` sin confirmar el remitente**: mismo `esRemitentePublicar`, aplicado ANTES de tocar `chrome.storage.session` — un remitente falso nunca puede leer/borrar (ni "comerse" en silencio) un pendiente real que de verdad era para Publicar; la pestaña legítima de `/panel/publicar` sigue pudiendo pedirlo después, intacto.
+
+  **Tests nuevos**: `extension/lectores/video-comun.test.ts` (+9 pruebas) — la allowlist de CDNs sin extensión, los spoofs de dominio (`tiktokcdn.com.evil.com`, `evil-tiktokcdn.com`, y equivalentes sobre `mlstatic.com`/`amazon.com`), `.mpd` y `data:`, y que un `type="video/mp4"` en un host NO permitido ya no alcanza. `extension/background.test.ts` (+5 pruebas) — prueba end-to-end content→background con una URL de CDN de TikTok sin extensión (aceptada) y con los 2 spoofs de dominio (rechazados, con `{ok:false}` explícito); `"zilonix:importar-link"`/`"zilonix:pedir-importacion-pendiente"` rechazando un remitente que no es `/panel/publicar` (otra ruta de Seller, o sin `tab.url`); un remitente falso nunca consume el pendiente real. `extension/content.test.ts`/`marcador-zilonix.test.ts`: sin cambios (el mensaje de error del botón toca DOM real, se verifica por inspección manual, mismo límite ya documentado del resto de `content.js`).
+
+  De paso, se removió `esUrlVideoDirectaValida` (la copia duplicada en `background.js`, ya innecesaria) y la constante `COOLDOWN_IMPORTAR_VIDEO_MS` (muerta — el cooldown real siempre usó `COOLDOWN_IMPORTAR_PUBLICAR_MS`, solo cambiaba la clave de `storage.session`).
+
+  Extensión sigue en **0.3.41**. Sin migraciones. Sin push forzado ni rebase.
+
+  Refs #273
+  Refs #44

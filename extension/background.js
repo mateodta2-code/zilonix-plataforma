@@ -18,6 +18,24 @@
 // haya hecho clic en "Analizar" (ver más abajo).
 "use strict";
 
+// Revisión de Pablo (sobre a6fdcbd, HIGH 1) — bug real: hasta esta
+// corrección, la validación de URL de video vivía DUPLICADA (una
+// versión en extension/lectores/video-comun.js, otra a mano acá, más
+// estricta) y se desalinearon — video-comun.js SÍ confirmaba un
+// `<source type="video/mp4">` sin extensión real de TikTok, pero esta
+// copia lo rechazaba en silencio. Ahora es LA MISMA función real en
+// los 2 lados: `importScripts` (real en un Service Worker de
+// Manifest V3 sin `"type":"module"`, como este — carga un script
+// adicional de forma síncrona, sin bundler) deja `ZilonixVideoComun`
+// disponible acá igual que en un content script. En Node (vitest,
+// `import()` dinámico de este archivo) no existe `importScripts`, se
+// usa require() directo — mismo patrón dual que el resto de la
+// extensión (ver lectores/mercadolibre.js para U/CONFIG).
+if (typeof importScripts === "function") {
+  importScripts("lectores/video-comun.js");
+}
+const ZilonixVideoComun = typeof importScripts === "function" ? globalThis.ZilonixVideoComun : require("./lectores/video-comun.js");
+
 // Issue #251 — "zilonix:dato-pagina-seguimiento" suma al mismo relevo
 // genérico: Seguimiento no puede leer inventario/vendidos/publicaciones
 // de un recurso AJENO por la API de Mercado Libre (403/ausente,
@@ -48,6 +66,20 @@ const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix
 // abajo, para "Actualizar todo").
 const ORIGENES_SELLER_PERMITIDOS_PUBLICAR = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app"];
 const URL_APP_PRODUCCION_DEFAULT = "https://web-production-af270.up.railway.app";
+
+// Revisión de Pablo (sobre a6fdcbd, MED 2/LOW 4) — mismo criterio real
+// que "zilonix:abrir-seguimientos" (más abajo): "zilonix:importar-link"
+// y "zilonix:pedir-importacion-pendiente" los manda /panel/publicar
+// (marcador-zilonix.js) — nunca basta con que el mensaje DIGA el tipo
+// que dice, hay que confirmar que el REMITENTE de verdad sea esa
+// pestaña. `remitente.tab.url` lo pone Chrome mismo (nunca lo manda la
+// página ni el content script que originó el mensaje) — no se puede
+// falsificar desde ahí. Mismos hosts exactos que
+// ORIGENES_SELLER_PERMITIDOS_PUBLICAR, arriba.
+function esRemitentePublicar(remitente) {
+  const urlRemitente = remitente && remitente.tab && typeof remitente.tab.url === "string" ? remitente.tab.url : "";
+  return ORIGENES_SELLER_PERMITIDOS_PUBLICAR.some((origen) => urlRemitente.startsWith(`${origen}/panel/publicar`));
+}
 const CLAVE_IMPORTACION_PENDIENTE = "importacionPendiente";
 // 2 minutos — tope real: un payload de "Importar a Publicar" viejo
 // (ej. la persona cerró la pestaña nueva sin llenar nada, y vuelve a
@@ -63,36 +95,14 @@ const COOLDOWN_IMPORTAR_PUBLICAR_MS = 3000;
 // Issue #44 (anexo "Importar video a Clip") — "zilonix:importar-video"
 // reutiliza EXACTAMENTE el mismo mecanismo de abrir-o-enfocar-Publicar
 // que "zilonix:importar-publicar" (ver manejarAbrirOEnfocarPublicar,
-// abajo) — mismo cooldown de 3s, pero con su propia clave de
-// storage.session: un clic en "Importar a Publicar" y uno en "Importar
-// video a Clip" casi al mismo tiempo (desde 2 pestañas distintas, por
-// ejemplo) no tienen por qué pisarse entre sí.
-const COOLDOWN_IMPORTAR_VIDEO_MS = 3000;
-// Mismo criterio de "última línea real de defensa" que el resto de
-// este archivo (PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO/PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO):
-// aunque extension/lectores/video-comun.js ya validó esta URL antes de
-// mandar el mensaje, background.js es quien de verdad decide abrir o
-// enfocar una pestaña, así que la revalida acá también. Se duplica la
-// regla a mano (nunca un import real entre un content script y el
-// Service Worker en este proyecto — sin bundler, y un Service Worker
-// de Manifest V3 no tiene `window`) en vez de depender de que
-// content.js nunca tenga un bug. Solo vale una URL https de video
-// DIRECTO (MP4/MOV/WEBM) — nunca un stream HLS (.m3u8) ni un blob:
-// local, mismo criterio que el resto de "Importar video a Clip"
-// (nunca se reconstruye un stream).
-function esUrlVideoDirectaValida(url) {
-  if (typeof url !== "string" || !url) return false;
-  if (/^blob:/i.test(url)) return false;
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== "https:") return false;
-  if (/\.m3u8(?:[?#].*)?$/i.test(parsed.pathname)) return false;
-  return /\.(mp4|mov|webm)$/i.test(parsed.pathname);
-}
+// abajo) — mismo valor de cooldown (COOLDOWN_IMPORTAR_PUBLICAR_MS,
+// arriba), pero con su propia clave de storage.session: un clic en
+// "Importar a Publicar" y uno en "Importar video a Clip" casi al
+// mismo tiempo (desde 2 pestañas distintas, por ejemplo) no tienen por
+// qué pisarse entre sí. La validación real de la URL del video (última
+// línea real de defensa) vive ahora en `ZilonixVideoComun.esUrlVideoValida`
+// (ver el require()/importScripts al principio de este archivo) —
+// nunca una copia separada acá.
 
 // Issue #44 — misma idea que CONFIG.URL_APP (extension/config.js) pero
 // del lado del Service Worker, que nunca carga ese archivo (solo corre
@@ -1139,11 +1149,21 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
   // Mercado Libre/Amazon/Temu/AliExpress/Alibaba/Shein/TikTok (ver
   // extension/lectores/video-comun.js + content.js): la URL de video
   // (CON la marca de agua del sitio, nunca se intenta quitarla) ya
-  // pasó por lector.leerVideo (y por esUrlVideoDirectaValida acá
-  // mismo, última línea real de defensa) antes de llegar — se abre o
-  // enfoca /panel/publicar#clip con el MISMO mecanismo de arriba.
+  // pasó por lector.leerVideo (y por ZilonixVideoComun.esUrlVideoValida
+  // acá mismo, última línea real de defensa) antes de llegar — se abre
+  // o enfoca /panel/publicar#clip con el MISMO mecanismo de arriba.
+  //
+  // Revisión de Pablo (sobre a6fdcbd, HIGH 1) — bug real: hasta esta
+  // corrección, una URL rechazada acá terminaba en un `return;` mudo
+  // — content.js nunca se enteraba de que background.js no hizo nada,
+  // y el botón terminaba mostrando "Enviado ✓" como si hubiera
+  // funcionado. Ahora se contesta `{ok:false}` siempre, para que
+  // content.js pueda mostrar un mensaje real en vez de fingir éxito.
   if (mensaje.tipo === "zilonix:importar-video") {
-    if (!mensaje.payload || !esUrlVideoDirectaValida(mensaje.payload.url)) return;
+    if (!mensaje.payload || !ZilonixVideoComun.esUrlVideoValida(mensaje.payload.url)) {
+      if (typeof sendResponse === "function") sendResponse({ ok: false, razon: "url_no_valida" });
+      return;
+    }
     return manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, { claveCooldown: "ultimoImportarVideoMs", hashDestino: "#clip" });
   }
 
@@ -1153,7 +1173,21 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
   // entrega UNA sola vez (se borra al leerlo, haya algo o no) y nunca
   // si ya pasaron los 2 minutos — un pendiente viejo no se entrega
   // como si fuera de ahora.
+  //
+  // Revisión de Pablo (sobre a6fdcbd, LOW 4) — se confirma que el
+  // REMITENTE de verdad sea /panel/publicar (esRemitentePublicar,
+  // arriba) ANTES de tocar el storage — nunca solo porque el mensaje
+  // diga este tipo. A propósito, el chequeo corta ANTES del
+  // `chrome.storage.session.get`: si se dejara leer/borrar igual y
+  // solo se ocultara la respuesta, cualquier otro content script de
+  // esta misma extensión podría "comerse" en silencio un pendiente
+  // real que de verdad era para Publicar, sin que esa pestaña nunca
+  // llegue a pedirlo.
   if (mensaje.tipo === "zilonix:pedir-importacion-pendiente") {
+    if (!esRemitentePublicar(remitente)) {
+      if (typeof sendResponse === "function") sendResponse({ payload: null, tipo: null });
+      return;
+    }
     chrome.storage.session.get({ [CLAVE_IMPORTACION_PENDIENTE]: null }, (datos) => {
       const pendiente = datos[CLAVE_IMPORTACION_PENDIENTE];
       chrome.storage.session.remove(CLAVE_IMPORTACION_PENDIENTE);
@@ -1173,8 +1207,13 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
   // que ya validó la página — ver PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO,
   // arriba), aplica el cooldown de 5s, y recién ahí abre la pestaña de
   // lectura (iniciarImportarLink, arriba).
+  //
+  // Revisión de Pablo (sobre a6fdcbd, MED 2) — mismo criterio real que
+  // "zilonix:abrir-seguimientos" (más abajo): se confirma que el
+  // REMITENTE de verdad sea /panel/publicar antes de abrir ninguna
+  // pestaña de lectura — nunca solo porque el mensaje diga este tipo.
   if (mensaje.tipo === "zilonix:importar-link") {
-    if (!remitente.tab?.id) return;
+    if (!remitente.tab?.id || !esRemitentePublicar(remitente)) return;
     const tabIdSolicitante = remitente.tab.id;
     const link = typeof mensaje.payload?.link === "string" ? mensaje.payload.link : "";
     if (!esLinkImportarValido(link)) {
