@@ -7,6 +7,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { crearYPublicarProductoAction } from "./actions";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
 import { GaleriaFotos } from "./GaleriaFotos";
+import { PortadaCuenta } from "./PortadaCuenta";
 import { SelectorCategoria, type CategoriaElegida } from "./SelectorCategoria";
 import { CaracteristicasDinamicas, type CaracteristicaCategoria } from "./CaracteristicasDinamicas";
 import { EditorVariantes, type VariantesEditadas } from "./EditorVariantes";
@@ -280,12 +281,12 @@ export function FormularioPublicar({
           <div style={{ marginTop: 10 }}>
             {cuentasMarcadas.map((c) => (
               <div key={c.id} className={`${styles.recuadroMarca} ${styles.filaCuentaDetalle}`}>
-                <div className={`${styles.recuadroMarca} ${styles.portadaChica}`}>
-                  {datosPorCuenta[c.id]?.portadaUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- URL externa puesta a mano
-                    <img src={datosPorCuenta[c.id].portadaUrl} alt="" className={styles.portadaChicaImg} />
-                  ) : null}
-                </div>
+                <PortadaCuenta
+                  portadaUrl={datosPorCuenta[c.id]?.portadaUrl ?? ""}
+                  onChange={(url) => actualizarCuenta(c.id, "portadaUrl", url)}
+                  cloudinaryConfigurado={cloudinaryConfigurado}
+                  previaGaleria={imagenes[0] ?? null}
+                />
                 <div style={{ flex: 1 }}>
                   <Campo etiqueta={`Título en ${c.nickname}`}>
                     <input
@@ -304,14 +305,7 @@ export function FormularioPublicar({
                       onChange={(e) => actualizarCuenta(c.id, "descripcion", e.target.value)}
                     />
                   </Campo>
-                  <Campo etiqueta={`URL de la foto de portada en ${c.nickname}`}>
-                    <input
-                      name={`portada_${c.id}`}
-                      className="zx-control"
-                      value={datosPorCuenta[c.id]?.portadaUrl ?? ""}
-                      onChange={(e) => actualizarCuenta(c.id, "portadaUrl", e.target.value)}
-                    />
-                  </Campo>
+                  <input type="hidden" name={`portada_${c.id}`} value={datosPorCuenta[c.id]?.portadaUrl ?? ""} />
                 </div>
               </div>
             ))}
