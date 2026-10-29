@@ -40,3 +40,38 @@
   padding: 10px 12px;
   vertical-align: middle;
 }
+
+/* El scroll es de la tabla, no de la página: el encabezado se pega
+   arriba de esta caja y no compite con BarraSuperior. */
+.scroll {
+  max-height: min(70vh, 720px);
+  overflow: auto;
+}
+
+.scroll .th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.numerica {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* En el celular la tabla se desplaza de costado y la primera columna
+   sigue visible. En escritorio no se pega a la izquierda. */
+@media (max-width: 760px) {
+  .tdFija {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--tabla-fondo);
+  }
+
+  .scroll .thFija {
+    left: 0;
+    z-index: 3;
+  }
+}

@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { COLUMNAS_ORDEN } from "@/lib/publicidad/kpis";
 import { textoErrorCorto } from "@/lib/publicidad/plan";
 
 // Issue #254 — refresco manual, mínimo para probar la capa de datos
@@ -25,8 +26,19 @@ export async function actualizarPublicidadAction(formData: FormData) {
 
   const cuentaCruda = formData.get("cuentaMlId");
   const cuentaMlId = typeof cuentaCruda === "string" ? cuentaCruda : "";
-  const destino = (aviso: string) =>
-    `/panel/publicidad?cuenta=${encodeURIComponent(cuentaMlId)}&aviso=${encodeURIComponent(aviso)}`;
+  const destino = (aviso: string) => {
+    const q = new URLSearchParams();
+    if (cuentaMlId) q.set("cuenta", cuentaMlId);
+    q.set("aviso", aviso);
+    const mes = formData.get("mes");
+    if (typeof mes === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) q.set("mes", mes);
+    const orden = formData.get("orden");
+    if (typeof orden === "string" && (COLUMNAS_ORDEN as readonly string[]).includes(orden)) q.set("orden", orden);
+    const dir = formData.get("dir");
+    if (dir === "asc" || dir === "desc") q.set("dir", dir);
+    if (formData.get("pausadas") === "1") q.set("pausadas", "1");
+    return `/panel/publicidad?${q.toString()}`;
+  };
 
   try {
     await requierePermiso(usuario.id, empresa.id, "publicidad", "consultar");
