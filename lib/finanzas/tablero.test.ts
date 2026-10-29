@@ -5,7 +5,21 @@ import { pedidos, pedidosFinanzas } from "@/db/schema";
 import { crearCuentaMlDePrueba } from "@/db/test-utils/venta";
 import { SinPermisoError } from "@/lib/permisos";
 import { crearEmpresaConPermisos } from "@/lib/test-utils/empresa-con-permiso";
-import { leerTableroMes, promedioDiario, textoVariacion, tramosBogota, variacion } from "./tablero";
+import { guardarCostoSku } from "@/lib/costos-sku";
+import type { TotalesDetalle } from "./detalle-ventas";
+import { guardarVentaFinanzas } from "./guardar-venta";
+import {
+  leerTableroMes,
+  leerUtilidadMes,
+  promedioDiario,
+  resumirUtilidadMes,
+  textoVariacion,
+  tramosBogota,
+  variacion,
+} from "./tablero";
+import type { VentaMl } from "./venta-ml";
+import { listarVentasUtilidad } from "./ventas-consulta";
+import { porcentajeVentasConCosto } from "./ventas-pantalla";
 
 // Issue #163 (parte de #143) — tablero del mes de /panel/finanzas. La
 // parte pura (tramos, promedio, variación) sin base; la consulta contra
@@ -191,5 +205,165 @@ describe("leerTableroMes (issue #163)", () => {
     const conDos = await consultasCon(2);
     const conDieciseis = await consultasCon(16);
     expect(conDieciseis).toBe(conDos);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Utilidad del mes antes de publicidad (siguiente parte de #143)
+// ---------------------------------------------------------------------------
+
+function totales(extra: Partial<TotalesDetalle>): TotalesDetalle {
+  return {
+    ventas: 0,
+    ventas_sin_costo: 0,
+    recaudo: "0.00",
+    recaudo_sin_costo: "0.00",
+    comision_ml: "0.00",
+    flete_ml: "0.00",
+    costo_producto: "0.00",
+    empaque: "0.00",
+    envio: "0.00",
+    utilidad: "0.00",
+    porcentaje_utilidad: null,
+    porcentaje_ml: null,
+    cantidad: 0,
+    ...extra,
+  };
+}
+
+describe("resumirUtilidadMes (#143)", () => {
+  it("con ventas con y sin costo: la utilidad es la del detalle y el % sale de ventas-pantalla", () => {
+    const r = resumirUtilidadMes(totales({ ventas: 3, ventas_sin_costo: 1, utilidad: "34000.00", recaudo_sin_costo: "50000.00" }), 0, ["COP"]);
+    expect(r).toEqual({
+      ventas: 3,
+      ventasConCosto: 2,
+      ventasSinCosto: 1,
+      utilidad: "34000.00",
+      recaudoSinCosto: "50000.00",
+      porcentajeVentasConCosto: "66.67",
+      rechazadas: 0,
+      variasMonedas: false,
+    });
+    for (const v of [r.utilidad, r.recaudoSinCosto, r.porcentajeVentasConCosto]) expect(typeof v).toBe("string");
+  });
+
+  it("todas sin costo → «—» (null), no 0; el % es 0", () => {
+    const r = resumirUtilidadMes(totales({ ventas: 2, ventas_sin_costo: 2, recaudo_sin_costo: "90000.00" }), 0, ["COP"]);
+    expect(r).toMatchObject({ utilidad: null, porcentajeVentasConCosto: "0.00", ventasConCosto: 0 });
+  });
+
+  it("sin ventas → utilidad 0 y % «—»", () => {
+    expect(resumirUtilidadMes(totales({}), 0, [])).toMatchObject({ ventas: 0, utilidad: "0.00", porcentajeVentasConCosto: null, variasMonedas: false });
+  });
+
+  it("varias monedas → null y variasMonedas; una moneda repetida no cuenta como varias", () => {
+    const t = totales({ ventas: 2, utilidad: "17000.00" });
+    expect(resumirUtilidadMes(t, 0, ["COP", "USD"])).toMatchObject({ utilidad: null, variasMonedas: true });
+    expect(resumirUtilidadMes(t, 0, ["COP", "COP"])).toMatchObject({ utilidad: "17000.00", variasMonedas: false });
+  });
+
+  it("la utilidad negativa se conserva como texto, y cuenta las rechazadas", () => {
+    expect(resumirUtilidadMes(totales({ ventas: 1, utilidad: "-1500.00" }), 2, ["COP"])).toMatchObject({ utilidad: "-1500.00", rechazadas: 2 });
+  });
+});
+
+function ventaMl(fecha: string, extra: Partial<VentaMl> = {}): VentaMl {
+  return {
+    pedidoIdExterno: `orden-${randomUUID()}`,
+    fecha: new Date(fecha),
+    total: "50000.00",
+    moneda: "COP",
+    estado: "paid",
+    formaEntrega: "agencia",
+    logisticTypeMl: "cross_docking",
+    fechaPagoAprobado: new Date(fecha),
+    valorVenta: "50000.00",
+    reembolsos: "0.00",
+    comisionMl: "6000.00",
+    fleteMl: "4000.00",
+    cancelada: false,
+    shipmentIdExterno: null,
+    packIdExterno: null,
+    fechaDespacho: null,
+    fechaEntrega: null,
+    lineas: [{ itemIdExterno: "MCO1", skuCodigo: "TAB-CON", cantidad: 1, precioUnitario: "50000.00", titulo: "Con costo", imagenUrl: null }],
+    ...extra,
+  };
+}
+
+const SIN_COSTO: Partial<VentaMl> = {
+  lineas: [{ itemIdExterno: "MCO2", skuCodigo: "TAB-SIN", cantidad: 1, precioUnitario: "50000.00", titulo: "Sin costo", imagenUrl: null }],
+};
+
+const CONSULTAR_Y_MODIFICAR = [
+  { modulo: "finanzas" as const, accion: "consultar" as const },
+  { modulo: "finanzas" as const, accion: "modificar" as const },
+];
+
+// Empresa con el costo de TAB-CON cargado: 50.000 − 6.000 − 4.000 −
+// 20.000 − 1.000 − 2.000 = 17.000 de utilidad por venta con costo.
+async function empresaConCosto(nombre: string) {
+  const e = await crearEmpresaConPermisos(nombre, CONSULTAR_Y_MODIFICAR);
+  await guardarCostoSku({ empresaId: e.empresaId, usuarioId: e.usuarioId, skuCodigo: "TAB-CON", datos: { costo: "20000", empaque: "1000", envioAgencia: "2000" } });
+  return e;
+}
+
+describe("leerUtilidadMes (#143)", () => {
+  // 31-oct 10:00 en Bogotá: tramo actual 1–31 oct.
+  const AHORA = new Date("2026-10-31T15:00:00Z");
+  const { actual } = tramosBogota(AHORA);
+
+  it("cuadra exacto con listarVentasUtilidad, suma varias cuentas y deja afuera canceladas, inválidas y bordes de Bogotá", async () => {
+    const e = await empresaConCosto("Utilidad cuadre");
+    const cuenta1 = await crearCuentaMlDePrueba(e.empresaId);
+    const cuenta2 = await crearCuentaMlDePrueba(e.empresaId);
+    for (const v of [
+      ventaMl("2026-10-01T05:00:00Z"), // 1-oct 00:00 Bogotá: entra
+      ventaMl("2026-10-10T15:00:00Z"),
+      ventaMl("2026-10-11T15:00:00Z", SIN_COSTO),
+      ventaMl("2026-10-12T15:00:00Z", { estado: "cancelled" }),
+      ventaMl("2026-10-13T15:00:00Z", { estado: "invalid" }),
+      ventaMl("2026-10-14T15:00:00Z", { cancelada: true }),
+      ventaMl("2026-10-01T04:59:00Z"), // 30-sep 23:59 Bogotá: no entra
+      ventaMl("2026-11-01T05:00:00Z"), // mañana: no entra
+    ]) {
+      await guardarVentaFinanzas(e.empresaId, cuenta1, v);
+    }
+    await guardarVentaFinanzas(e.empresaId, cuenta2, ventaMl("2026-10-20T15:00:00Z"));
+
+    const u = await leerUtilidadMes(e.empresaId, e.usuarioId, AHORA, ["COP"]);
+    expect(u).toEqual({
+      ventas: 4,
+      ventasConCosto: 3,
+      ventasSinCosto: 1,
+      utilidad: "51000.00",
+      recaudoSinCosto: "50000.00",
+      porcentajeVentasConCosto: "75.00",
+      rechazadas: 0,
+      variasMonedas: false,
+    });
+
+    const ventas = await listarVentasUtilidad(e.empresaId, e.usuarioId, { cuentaId: null, desde: actual.inicio, hastaExclusivo: actual.finExclusivo });
+    expect(u.utilidad).toBe(ventas.detalle.total.utilidad);
+    expect(u.porcentajeVentasConCosto).toBe(porcentajeVentasConCosto(ventas.detalle.total));
+  });
+
+  it("A/B: la utilidad de B no incluye ventas ni costos de A, y al revés", async () => {
+    const a = await empresaConCosto("Utilidad A/B — A");
+    const b = await crearEmpresaConPermisos("Utilidad A/B — B", CONSULTAR_Y_MODIFICAR);
+    await guardarVentaFinanzas(a.empresaId, await crearCuentaMlDePrueba(a.empresaId), ventaMl("2026-10-05T15:00:00Z"));
+    // B vende el mismo SKU pero no le cargó costo: el de A no le sirve.
+    await guardarVentaFinanzas(b.empresaId, await crearCuentaMlDePrueba(b.empresaId), ventaMl("2026-10-06T15:00:00Z"));
+    await guardarVentaFinanzas(b.empresaId, await crearCuentaMlDePrueba(b.empresaId), ventaMl("2026-10-07T15:00:00Z"));
+
+    expect(await leerUtilidadMes(a.empresaId, a.usuarioId, AHORA, ["COP"])).toMatchObject({ ventas: 1, utilidad: "17000.00", porcentajeVentasConCosto: "100.00" });
+    expect(await leerUtilidadMes(b.empresaId, b.usuarioId, AHORA, ["COP"])).toMatchObject({ ventas: 2, ventasSinCosto: 2, utilidad: null, porcentajeVentasConCosto: "0.00" });
+  });
+
+  it("sin finanzas.consultar, o con la empresa de otro, es SinPermisoError", async () => {
+    const a = await empresaConCosto("Utilidad permiso A");
+    const sinFinanzas = await crearEmpresaConPermisos("Utilidad sin finanzas", [{ modulo: "ventas", accion: "consultar" }]);
+    await expect(leerUtilidadMes(sinFinanzas.empresaId, sinFinanzas.usuarioId, AHORA, [])).rejects.toBeInstanceOf(SinPermisoError);
+    await expect(leerUtilidadMes(a.empresaId, sinFinanzas.usuarioId, AHORA, [])).rejects.toBeInstanceOf(SinPermisoError);
   });
 });

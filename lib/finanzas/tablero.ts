@@ -16,6 +16,11 @@
 //   aparte (sinSincronizar). Si el tramo anterior tiene ventas sin foto,
 //   la variación de recaudo y de promedio es null: nunca se compara
 //   contra un mes a medias.
+//
+// Utilidad antes de publicidad (#143): sale de listarVentasUtilidad, la
+// misma lectura de Finanzas → Ventas, para que cuadre al peso; no hay
+// otra fórmula ni otra suma en SQL. Sin publicidad (#135) ni variación
+// vs. mes anterior. El % de ventas con costo es sobre las sincronizadas.
 
 import { and, eq, gte, lt, notInArray, or, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
@@ -23,7 +28,10 @@ import { pedidos, pedidosFinanzas } from "@/db/schema";
 import { ESTADOS_QUE_NO_SON_VENTA } from "@/lib/estados-venta";
 import { limitesDiaBogota } from "@/lib/filtros-listado";
 import { requierePermiso } from "@/lib/permisos";
+import type { TotalesDetalle } from "./detalle-ventas";
 import { aCentavos, desdeCentavos } from "./utilidad-venta";
+import { listarVentasUtilidad } from "./ventas-consulta";
+import { porcentajeVentasConCosto } from "./ventas-pantalla";
 
 const CERO = BigInt(0);
 const MIL = BigInt(1000);
@@ -201,6 +209,52 @@ export async function leerTableroMes(empresaId: string, usuarioId: string, ahora
       .groupBy(tramoSql, pedidos.moneda)
   );
   return armarTablero(filas, tramos);
+}
+
+// ---------------------------------------------------------------------------
+// Utilidad del mes antes de publicidad (#143)
+// ---------------------------------------------------------------------------
+
+export type UtilidadMes = {
+  // Ventas sincronizadas del tramo actual (detalle.total.ventas).
+  ventas: number;
+  ventasConCosto: number;
+  ventasSinCosto: number;
+  // null = "—": ninguna venta con costo, o ventas en varias monedas.
+  utilidad: string | null;
+  recaudoSinCosto: string;
+  porcentajeVentasConCosto: string | null;
+  // Ventas que el motor no pudo calcular.
+  rechazadas: number;
+  variasMonedas: boolean;
+};
+
+// El motor y el detalle no separan por moneda: con más de una, la
+// utilidad no se suma (sería mezclar pesos con dólares). Sin costos no
+// es 0 sino "—" (#143); sin ventas sí es "0.00".
+export function resumirUtilidadMes(total: TotalesDetalle, rechazadas: number, monedas: string[]): UtilidadMes {
+  const ventasConCosto = total.ventas - total.ventas_sin_costo;
+  const variasMonedas = new Set(monedas).size > 1;
+  const sinCostos = total.ventas > 0 && ventasConCosto === 0;
+  return {
+    ventas: total.ventas,
+    ventasConCosto,
+    ventasSinCosto: total.ventas_sin_costo,
+    utilidad: variasMonedas || sinCostos ? null : total.utilidad,
+    recaudoSinCosto: total.recaudo_sin_costo,
+    porcentajeVentasConCosto: porcentajeVentasConCosto(total),
+    rechazadas,
+    variasMonedas,
+  };
+}
+
+// Tramo actual de tramosBogota, todas las cuentas. `monedas` viene de
+// leerTableroMes (recaudo por moneda), para no hacer otra consulta.
+export async function leerUtilidadMes(empresaId: string, usuarioId: string, ahora: Date, monedas: string[]): Promise<UtilidadMes> {
+  await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
+  const { actual } = tramosBogota(ahora);
+  const res = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: null, desde: actual.inicio, hastaExclusivo: actual.finExclusivo });
+  return resumirUtilidadMes(res.detalle.total, res.rechazadas.length, monedas);
 }
 
 // ---------------------------------------------------------------------------
