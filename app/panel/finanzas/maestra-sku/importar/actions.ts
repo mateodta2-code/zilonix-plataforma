@@ -5,6 +5,7 @@ import {
   ArchivoMaestraInvalidoError,
   confirmarImportacionMaestra,
   ImportacionMaestraConErroresError,
+  ProveedorImportacionError,
   previsualizarImportacionMaestra,
   type ResultadoImportacionMaestra,
   type VistaPreviaMaestra,
@@ -42,7 +43,7 @@ async function leerEntrada(formData: FormData) {
 
 function errorConocido(error: unknown): EstadoImportacionMaestra | null {
   if (error instanceof SinPermisoError) return { paso: "error", mensaje: "Tu rol no puede cargar la tabla maestra." };
-  if (error instanceof ArchivoMaestraInvalidoError) return { paso: "error", mensaje: error.message };
+  if (error instanceof ArchivoMaestraInvalidoError || error instanceof ProveedorImportacionError) return { paso: "error", mensaje: error.message };
   return null;
 }
 
