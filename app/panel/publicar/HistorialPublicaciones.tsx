@@ -67,20 +67,32 @@ export function HistorialPublicaciones({
           <Tabla encabezados={["Título", "Precio", "Estado", "", "Fecha", "Acciones"]}>
             {productos.map((p) => {
               const enlaces = enlacesPermalink(p.resultado, cuentas);
+              const tituloTexto = p.titulo || "(sin título)";
               return (
               <FilaTabla key={p.id}>
                 <CeldaTabla>
-                  {p.titulo || "(sin título)"}
-                  {/* Punto B del pedido — "el nombre de la cuenta o un
-                  link debe abrir ese permalink. No inventes columna":
-                  se agrega DENTRO de la celda de título que ya existía,
-                  nunca un <th> nuevo. Un enlace por cuenta que publicó
-                  OK (y uno por ítem de familia, si hubo variantes). */}
-                  {enlaces.length > 0 && (
+                  {/* Feedback real de Mateo (staging) — el TÍTULO en sí
+                  tiene que ser el link clicable a la publicación
+                  (target="_blank", rel="noreferrer"). Con una sola
+                  cuenta publicada OK, no hay ambigüedad: el título
+                  completo abre ESE permalink. Con varias cuentas, el
+                  título queda como texto (cuál de los N permalinks
+                  abriría si no es un link) y se agrega un link chico
+                  por cuenta debajo, con su nickname — mismo criterio
+                  que ya pedía el punto B original, "no inventes
+                  columna": sigue dentro de la celda de Título. */}
+                  {enlaces.length === 1 ? (
+                    <a href={enlaces[0].permalink} target="_blank" rel="noreferrer">
+                      {tituloTexto}
+                    </a>
+                  ) : (
+                    tituloTexto
+                  )}
+                  {enlaces.length > 1 && (
                     <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
                       {enlaces.map((e, i) => (
                         <a key={`${e.cuentaMlId}-${i}`} href={e.permalink} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
-                          Ver en {e.etiqueta} ↗
+                          {e.etiqueta} ↗
                         </a>
                       ))}
                     </div>
