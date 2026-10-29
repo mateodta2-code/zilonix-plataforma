@@ -1285,3 +1285,137 @@ export async function obtenerClipsMl(itemId: string, token: string): Promise<Cli
     throw e;
   }
 }
+
+// ---------- Rama feat-promociones (motor portado de zilonix-os-web,
+// lib/mercadolibre-promo.js — ver docs/investigacion/promociones-mercado-libre.md
+// de ese repo para la evidencia real citada en cada regla) ----------
+
+// GET /users/{cuentaIdExterna}/items/search?status=active — UNA página
+// (el llamador, lib/trabajos/buscarPromocionesMultiCuenta.ts, pagina él
+// mismo para poder reportar progreso real y nunca con un tope fijo de
+// antemano, al revés de la versión vieja de Zilonix OS que paraba en
+// 250 productos).
+export type PaginaItemsActivosMl = { ids: string[]; totalCatalogo: number };
+
+export async function listarItemsActivosMl(cuentaIdExterna: string, token: string, offset: number, limite = 50): Promise<PaginaItemsActivosMl> {
+  exigirId(cuentaIdExterna, PATRON_ID_VENDEDOR, "cuentaIdExterna");
+  const url = `${BASE_URL}/users/${encodeURIComponent(cuentaIdExterna)}/items/search?status=active&limit=${limite}&offset=${offset}`;
+  const resp = await pedir<{ results?: unknown[]; paging?: { total?: unknown } }>(url, token);
+  if (!resp.ok) throw new Error(`No se pudo listar publicaciones activas de Mercado Libre (HTTP ${resp.status}).`);
+  const ids = Array.isArray(resp.data.results) ? resp.data.results.filter((r): r is string => typeof r === "string") : [];
+  const totalCatalogo = typeof resp.data.paging?.total === "number" ? resp.data.paging.total : ids.length;
+  return { ids, totalCatalogo };
+}
+
+// Detalle mínimo que necesita Promociones de un item — NO reusa
+// leerItemCompletoMl (nunca se le agrega `variations` a esa función
+// compartida solo para esto, para no cambiarle el contrato a sus
+// llamadores ya existentes y probados) — mismo criterio que
+// buscarItemParaClip en su momento, un wrapper propio en vez de tocar
+// uno compartido.
+export type ItemParaPromocionMl = { title: string | null; thumbnail: string | null; sellerCustomField: string | null; tieneVariantes: boolean };
+
+export async function leerItemParaPromocionMl(itemId: string, token: string): Promise<ItemParaPromocionMl | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,seller_custom_field,variations`;
+  try {
+    const resp = await pedir<{ title?: unknown; thumbnail?: unknown; seller_custom_field?: unknown; variations?: unknown }>(url, token);
+    if (!resp.ok) return null;
+    return {
+      title: typeof resp.data.title === "string" ? resp.data.title : null,
+      thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
+      sellerCustomField: typeof resp.data.seller_custom_field === "string" ? resp.data.seller_custom_field : null,
+      tieneVariantes: Array.isArray(resp.data.variations) && resp.data.variations.length > 0,
+    };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+// GET /seller-promotions/items/{itemId}?app_version=v2 — confirmado
+// contra el código real de zilonix-os-web. null = Mercado Libre no
+// dejó ver el estado (403/404/5xx, o la publicación está cerrada);
+// distinto de [] (sí respondió, de verdad no tiene ninguna promoción
+// aplicable) — el llamador nunca confunde los dos casos.
+export type PromocionCrudaMl = {
+  type?: unknown;
+  status?: unknown;
+  id?: unknown;
+  price?: unknown;
+  original_price?: unknown;
+  suggested_discounted_price?: unknown;
+  meli_percentage?: unknown;
+  max_discounted_price?: unknown;
+  start_date?: unknown;
+  finish_date?: unknown;
+};
+
+export async function leerPromocionesItemMl(itemId: string, token: string): Promise<PromocionCrudaMl[] | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
+  try {
+    const resp = await pedir<unknown>(url, token);
+    if (!resp.ok) return null;
+    return Array.isArray(resp.data) ? (resp.data as PromocionCrudaMl[]) : [];
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+export type RespuestaPromocionMl = { ok: boolean; status: number; textoCrudo: string };
+
+// "participar" (unirse por primera vez) — POST, confirmado real en
+// zilonix-os-web (una promoción pasó a "started"). `top_deal_price`
+// nunca se manda (bug real ya corregido ahí: se creía obligatorio,
+// una prueba real confirmó que es opcional y activa un precio
+// exclusivo "Meli+" no deseado).
+export async function participarPromocionMl(
+  itemId: string,
+  token: string,
+  body: { promotion_id: string; promotion_type: string; deal_price: number; start_date: string; finish_date: string }
+): Promise<RespuestaPromocionMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
+  const { ok, status, textoCrudo } = await escribir<unknown>(url, token, "POST", body);
+  return { ok, status, textoCrudo };
+}
+
+// "modificar" (ya participaba, solo cambia el precio) — PUT,
+// confirmado real en zilonix-os-web (probado 12/12 exitosas).
+export async function modificarPromocionMl(
+  itemId: string,
+  token: string,
+  body: { promotion_id: string; promotion_type: string; deal_price: number }
+): Promise<RespuestaPromocionMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
+  const { ok, status, textoCrudo } = await escribir<unknown>(url, token, "PUT", body);
+  return { ok, status, textoCrudo };
+}
+
+// "salir" (dejar una promoción activa) — **SIN CONFIRMAR contra una
+// cuenta real** (al revés de participar/modificar, que sí vienen
+// probados en producción de zilonix-os-web — ese sistema nunca tuvo
+// esta acción). Se intenta con DELETE sobre el mismo endpoint, mismo
+// patrón real de la API de Promociones que ya confirmaron POST/PUT —
+// es la forma más consistente con el resto del contrato, pero NUNCA
+// se trató como un hecho confirmado: si Mercado Libre responde algo
+// inesperado, el error real queda visible tal cual (nunca se traga ni
+// se adivina otra forma por detrás). Antes de ir a producción con
+// esta acción habilitada, confirmar en vivo contra una cuenta de
+// prueba.
+export async function salirDePromocionMl(itemId: string, token: string, promotionId: string, promotionType: string): Promise<RespuestaPromocionMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2&promotion_id=${encodeURIComponent(promotionId)}&promotion_type=${encodeURIComponent(promotionType)}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_ESCRITURA_MS) });
+  } catch {
+    return { ok: false, status: 0, textoCrudo: "" };
+  }
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
+  const textoCrudo = await res.text().catch(() => "");
+  return { ok: res.ok, status: res.status, textoCrudo };
+}

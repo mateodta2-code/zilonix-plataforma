@@ -14,6 +14,8 @@ export type ClaveIcono =
   | "publicar"
   | "finanzas"
   | "publicidad"
+  | "promociones"
+  | "configuracion"
   | "actividad"
   | "personas"
   | "invitar"
