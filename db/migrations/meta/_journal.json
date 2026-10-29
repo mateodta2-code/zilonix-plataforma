@@ -127,6 +127,13 @@
       "when": 1793287671392,
       "tag": "0017_promociones",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793301448658,
+      "tag": "0018_backfill_permisos_promociones",
+      "breakpoints": true
     }
   ]
 }
