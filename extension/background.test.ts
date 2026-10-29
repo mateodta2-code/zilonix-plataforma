@@ -201,6 +201,14 @@ function crearChromeMock() {
     setRespuestasSendMessage: (respuestas: Record<number, unknown>) => {
       respuestasSendMessage = respuestas;
     },
+    // fix-extension-importar-link — igual que la de arriba, pero
+    // MEZCLA en vez de reemplazar: hace falta para simular 2 pestañas
+    // de lectura con respuestas distintas a "zilonix:sonar-url-importar"
+    // sin pisarse entre sí (setRespuestasSendMessage reemplaza TODO el
+    // mapa, lo que borraría la respuesta de la otra pestaña).
+    setRespuestaSendMessageParaTab: (tabId: number, respuesta: unknown) => {
+      respuestasSendMessage[tabId] = respuesta;
+    },
     setZilonixUrlApp: (url: string | null) => {
       if (url === null) delete storageLocal.zilonixUrlApp;
       else storageLocal.zilonixUrlApp = url;
@@ -760,6 +768,22 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
     ) as Array<{ tabId: number; mensaje: { tipo: string; payload: { razon: string } } }>;
   }
 
+  // fix-extension-importar-link — bug real confirmado en staging:
+  // `chrome.tabs.onUpdated` NUNCA manda `tab.url` sin el permiso
+  // "tabs"/host_permissions (que esta extensión no tiene a propósito)
+  // — por eso `dispararTabActualizada` (arriba, simula el 3er
+  // argumento real de Chrome) deja ese campo SIEMPRE presente en el
+  // mock pero background.js ya NO lo lee. En su lugar, background.js
+  // le pide la URL real a la pestaña con `chrome.tabs.sendMessage` —
+  // este helper simula esa respuesta (`href: null` = sin content
+  // script ahí, el mismo caso real de meli.la o cualquier salto sin
+  // "matches") antes de disparar el "complete".
+  async function dispararComplete(tabIdLectura: number, href: string | null) {
+    mockActual.setRespuestaSendMessageParaTab(tabIdLectura, href == null ? undefined : { href });
+    mockActual.dispararTabActualizada(tabIdLectura, href ?? "https://no-se-usa.example/", "complete");
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+  }
+
   it("rechaza dominios con spoofing real (mercadolibre.com.co.evil.com, evilmercadolibre.com, etc.) — nunca abre ninguna pestaña", async () => {
     await cargarBackgroundFresco();
     for (const linkMalo of [
@@ -786,32 +810,107 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
     expect(mockActual.llamadas.create.every((t) => t.active === false)).toBe(true); // nunca roba el foco
   });
 
-  it("meli.la: espera la URL FINAL después del redirect antes de pedir la lectura — nunca lee mientras sigue en meli.la", async () => {
+  // fix-extension-importar-link — bug real confirmado en staging: TODOS
+  // los links (incluido uno normal, sin ningún redirect) rompían con
+  // "no_es_mercadolibre", porque background.js confiaba en
+  // `tabActualizada.url` (SIEMPRE vacío sin el permiso "tabs") en vez
+  // de pedirle la URL a la propia pestaña. Esta prueba reproduce el
+  // caso MÁS simple: un link normal, "complete" con `tab.url`
+  // indefinido (el mock sigue mandándolo igual, pero background.js ya
+  // no lo mira), y la pestaña SÍ responde con su `location.href` real
+  // — tiene que pedir la lectura, nunca cortar.
+  it("un link normal (sin redirect): 'complete' con tab.url indefinido + la pestaña responde su href real -> pide la lectura, NUNCA 'no_es_mercadolibre'", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    const tabIdLectura = mockActual.llamadas.create[0].id;
+
+    await dispararComplete(tabIdLectura, LINK_NORMAL);
+
+    expect(mockActual.llamadas.sendMessage).toContainEqual({ tabId: tabIdLectura, mensaje: { tipo: "zilonix:leer-para-importar" } });
+    expect(erroresA(1)).toEqual([]);
+  });
+
+  // URLs reales con hash/query (confirmadas por Mateo en staging) —
+  // el regex de esUrlFinalDeMercadoLibre nunca se fija en lo que
+  // sigue después del dominio, pero esto confirma la tubería completa
+  // (href -> validación -> "zilonix:leer-para-importar") con cada una.
+  it("URLs reales con hash y query (up/ con hash de polycard, /p/, articulo con slug) pasan la validación final sin problema", async () => {
+    await cargarBackgroundFresco();
+    const urlsReales = [
+      "https://www.mercadolibre.com.co/up/MCOU5085372943#polycard_client=search-nordic",
+      "https://www.mercadolibre.com.co/p/MCO123456",
+      "https://articulo.mercadolibre.com.co/MCO-123456-cojin-antiescaras-_JM",
+    ];
+    for (const urlReal of urlsReales) {
+      await mandarImportarLink(urlReal, 1);
+      const tabIdLectura = mockActual.llamadas.create[mockActual.llamadas.create.length - 1].id;
+      await dispararComplete(tabIdLectura, urlReal);
+      expect(mockActual.llamadas.sendMessage).toContainEqual({ tabId: tabIdLectura, mensaje: { tipo: "zilonix:leer-para-importar" } });
+      await vi.advanceTimersByTimeAsync(COOLDOWN_IMPORTAR_LINK_MS + 100); // separa del cooldown global para la próxima vuelta
+    }
+    expect(erroresA(1)).toEqual([]);
+  });
+
+  it("meli.la: espera la URL FINAL después del redirect antes de pedir la lectura — nunca lee mientras sigue en meli.la (sin content script todavía, meli.la no está en los \"matches\")", async () => {
     await cargarBackgroundFresco();
     await mandarImportarLink(LINK_CORTO, 1);
     const tabIdLectura = mockActual.llamadas.create[0].id;
 
-    mockActual.dispararTabActualizada(tabIdLectura, "https://meli.la/paso-intermedio-del-redirect", "complete");
-    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+    // Todavía en meli.la (o un salto intermedio) -- SIN content script
+    // ahí, chrome.tabs.sendMessage falla (sin respuesta real) -- nunca
+    // se corta, se espera el próximo "complete".
+    await dispararComplete(tabIdLectura, null);
     expect(mockActual.llamadas.sendMessage.find((m) => (m.mensaje as { tipo?: string }).tipo === "zilonix:leer-para-importar")).toBeUndefined();
+    expect(erroresA(1)).toEqual([]);
 
-    mockActual.dispararTabActualizada(tabIdLectura, LINK_NORMAL, "complete");
-    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+    // Llegó a la URL final real de Mercado Libre -- content.js SÍ
+    // responde con su location.href real.
+    await dispararComplete(tabIdLectura, LINK_NORMAL);
     expect(mockActual.llamadas.sendMessage).toContainEqual({ tabId: tabIdLectura, mensaje: { tipo: "zilonix:leer-para-importar" } });
   });
 
-  it("si meli.la termina en un dominio que NO es Mercado Libre, cierra la pestaña y avisa — nunca intenta leerla", async () => {
+  it("si meli.la termina en un dominio que NO es Mercado Libre (content.js ahí SÍ respondería con ese href), cierra la pestaña y avisa — nunca intenta leerla", async () => {
     await cargarBackgroundFresco();
     await mandarImportarLink(LINK_CORTO, 1);
     const tabIdLectura = mockActual.llamadas.create[0].id;
 
-    mockActual.dispararTabActualizada(tabIdLectura, "https://evil.com/phishing", "complete");
-    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+    await dispararComplete(tabIdLectura, "https://evil.com/phishing");
 
     expect(mockActual.llamadas.remove).toContain(tabIdLectura);
     expect(erroresA(1).some((e) => e.mensaje.payload.razon === "no_es_mercadolibre")).toBe(true);
     expect(mockActual.llamadas.sendMessage.find((m) => (m.mensaje as { tipo?: string }).tipo === "zilonix:leer-para-importar")).toBeUndefined();
     expect(mockActual.cantidadListenersOnUpdated()).toBe(0);
+  });
+
+  it("un href final que es un spoof (mercadolibre.com.co.evil.com, evilmercadolibre.com) también se rechaza como 'no_es_mercadolibre'", async () => {
+    await cargarBackgroundFresco();
+    for (const hrefSpoof of ["https://mercadolibre.com.co.evil.com/MCO-123", "https://evilmercadolibre.com/MCO-123"]) {
+      await mandarImportarLink(LINK_CORTO, 1);
+      const tabIdLectura = mockActual.llamadas.create[mockActual.llamadas.create.length - 1].id;
+      await dispararComplete(tabIdLectura, hrefSpoof);
+      expect(mockActual.llamadas.remove).toContain(tabIdLectura);
+      await vi.advanceTimersByTimeAsync(COOLDOWN_IMPORTAR_LINK_MS + 100);
+    }
+    expect(erroresA(1).filter((e) => e.mensaje.payload.razon === "no_es_mercadolibre").length).toBe(2);
+  });
+
+  // Limitación real, documentada: SIN el permiso "tabs", si ningún
+  // salto del redirect llega a tener content script (ej. meli.la
+  // termina en un dominio fuera de los "matches" del manifest), nunca
+  // hay forma real de confirmar a dónde fue — el tope de 30s sigue
+  // cerrando la pestaña igual, solo que con "timeout" en vez de
+  // "no_es_mercadolibre" (nunca se inventa una razón sin evidencia).
+  it("si ningún salto del redirect tiene content script (nunca responde con href), el tope de 30s cierra la pestaña igual -- con 'timeout', nunca con una razón inventada", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_CORTO, 1);
+    const tabIdLectura = mockActual.llamadas.create[0].id;
+
+    await dispararComplete(tabIdLectura, null);
+    expect(erroresA(1)).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(TIEMPO_MAX_IMPORTAR_LINK_MS + 1_000);
+    expect(mockActual.llamadas.remove).toContain(tabIdLectura);
+    expect(erroresA(1).some((e) => e.mensaje.payload.razon === "timeout")).toBe(true);
   });
 
   it("cooldown de 5s GLOBAL: un segundo link casi al mismo tiempo (aunque sea desde otra pestaña) no abre otra lectura", async () => {
@@ -864,9 +963,14 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
     await mandarImportarLink(LINK_CATALOGO, 2);
     const tabIdLectura2 = mockActual.llamadas.create[1].id;
 
+    // 2 pestañas de lectura activas a la vez -- cada una tiene que
+    // recibir SU PROPIA respuesta de "sonar-url-importar", sin
+    // pisarse (setRespuestaSendMessageParaTab mezcla, nunca reemplaza).
+    mockActual.setRespuestaSendMessageParaTab(tabIdLectura1, { href: LINK_NORMAL });
+    mockActual.setRespuestaSendMessageParaTab(tabIdLectura2, { href: LINK_CATALOGO });
     mockActual.dispararTabActualizada(tabIdLectura1, LINK_NORMAL, "complete");
     mockActual.dispararTabActualizada(tabIdLectura2, LINK_CATALOGO, "complete");
-    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
 
     await mandarResultadoLectura(tabIdLectura1, { datos: PAYLOAD_IMPORTADO });
 
@@ -879,8 +983,7 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
     await cargarBackgroundFresco();
     await mandarImportarLink(LINK_NORMAL, 1);
     const tabIdLectura = mockActual.llamadas.create[0].id;
-    mockActual.dispararTabActualizada(tabIdLectura, LINK_NORMAL, "complete");
-    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+    await dispararComplete(tabIdLectura, LINK_NORMAL);
 
     await mandarResultadoLectura(tabIdLectura, { captcha: true });
 
@@ -895,8 +998,7 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
     await cargarBackgroundFresco();
     await mandarImportarLink(LINK_NORMAL, 1);
     const tabIdLectura = mockActual.llamadas.create[0].id;
-    mockActual.dispararTabActualizada(tabIdLectura, LINK_NORMAL, "complete");
-    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+    await dispararComplete(tabIdLectura, LINK_NORMAL);
 
     await mandarResultadoLectura(tabIdLectura, {});
 

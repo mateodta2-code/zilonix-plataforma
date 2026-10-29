@@ -1635,10 +1635,23 @@
   // enviarVendidosAZilonix y el resto de este archivo: en vitest
   // (content.test.ts) `chrome` es `undefined`, nunca revienta el import.
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
-    chrome.runtime.onMessage.addListener((mensaje, remitente) => {
+    chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
       if (!esMensajeDePropiaExtension(remitente, chrome.runtime.id)) return;
       if (mensaje && mensaje.tipo === "zilonix:mostrar-panel") mostrarPanelPorIcono();
       if (mensaje && mensaje.tipo === "zilonix:leer-para-importar") setTimeout(leerParaImportar, RETARDO_REESCANEO_MS);
+      // Issue #44 (fix real, confirmado en staging) — background.js
+      // NUNCA puede leer `tab.url` sin el permiso "tabs" ni
+      // host_permissions (que esta extensión NO tiene, a propósito —
+      // ver extension/LEEME.md): hasta este arreglo, "Traer datos de
+      // ese link" cortaba con "no_es_mercadolibre" para TODO link,
+      // porque `tabActualizada.url` llegaba siempre vacío. En vez de
+      // ese permiso nuevo, background.js le pide la URL real a ESTA
+      // pestaña con un mensaje — síncrono, `location.href` siempre
+      // está disponible apenas el content script corre.
+      if (mensaje && mensaje.tipo === "zilonix:sonar-url-importar") {
+        if (typeof sendResponse === "function") sendResponse({ href: location.href });
+        return;
+      }
     });
   }
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {

@@ -223,18 +223,44 @@ function iniciarImportarLink(tabIdSolicitante, link) {
     // cargar en cualquier OTRO dominio (meli.la que mandó a otro lado,
     // o cualquier cosa rara), se corta ahí mismo — nunca se intenta
     // leer una página que no sea de Mercado Libre.
-    function alActualizarTab(idActualizado, cambioInfo, tabActualizada) {
+    //
+    // Bug real confirmado en staging (fix-extension-importar-link) —
+    // `tabActualizada.url` (el 3er argumento de `chrome.tabs.onUpdated`)
+    // NUNCA viene sin el permiso `"tabs"` o un `host_permissions` que
+    // matchee esa URL (https://developer.chrome.com/docs/extensions/reference/api/tabs)
+    // — `content_scripts.matches` NO alcanza para esto en Chrome. Esta
+    // extensión tiene SOLO `"storage"` a propósito (ver LEEME.md, nunca
+    // se agrega `"tabs"` ni un `host_permissions` amplio) — así que
+    // `urlFinal` llegaba SIEMPRE vacío, y esto cortaba con
+    // "no_es_mercadolibre" para TODO link, aunque fuera 100% válido.
+    // Arreglo real: en vez de leer `tabActualizada.url`, se le pide la
+    // URL a la PROPIA pestaña de lectura por mensaje
+    // (`chrome.tabs.sendMessage`, que SÍ funciona sin `"tabs"` — mismo
+    // mecanismo que el resto de este archivo) — la pestaña se
+    // identifica siempre por el `tabIdLectura` que este mismo
+    // `background.js` abrió, nunca por nada que la página diga.
+    function alActualizarTab(idActualizado, cambioInfo) {
       if (idActualizado !== tabIdLectura || cambioInfo.status !== "complete") return;
-      const urlFinal = tabActualizada && typeof tabActualizada.url === "string" ? tabActualizada.url : "";
-      if (PATRON_LINK_CORTO_ML.test(urlFinal)) return; // todavía en meli.la (o una redirección intermedia propia) — espera el próximo "complete"
-      chrome.tabs.onUpdated.removeListener(alActualizarTab);
-      const activa = lecturasLinkActivas.get(tabIdSolicitante);
-      if (activa) activa.listenerOnUpdated = null; // ya no hay nada que sacar al cancelar/terminar
-      if (!esUrlFinalDeMercadoLibre(urlFinal)) {
-        terminarLecturaLink(tabIdSolicitante, { tipo: "zilonix:importar-link-error", payload: { razon: "no_es_mercadolibre" } });
-        return;
-      }
-      chrome.tabs.sendMessage(tabIdLectura, { tipo: "zilonix:leer-para-importar" }, () => void chrome.runtime.lastError);
+      chrome.tabs.sendMessage(tabIdLectura, { tipo: "zilonix:sonar-url-importar" }, (respuesta) => {
+        const error = chrome.runtime.lastError;
+        void error;
+        // Sin respuesta real (lastError, o ningún content script
+        // corriendo ahí) — NUNCA se corta: `meli.la` y cualquier salto
+        // intermedio del redirect no están en los "matches" del
+        // manifest, así que no tienen content script todavía. Se
+        // espera el próximo "complete" (el siguiente salto, o la URL
+        // final real de Mercado Libre, donde SÍ hay uno).
+        const href = !error && respuesta && typeof respuesta.href === "string" ? respuesta.href : null;
+        if (href == null) return;
+        chrome.tabs.onUpdated.removeListener(alActualizarTab);
+        const activa = lecturasLinkActivas.get(tabIdSolicitante);
+        if (activa) activa.listenerOnUpdated = null; // ya no hay nada que sacar al cancelar/terminar
+        if (!esUrlFinalDeMercadoLibre(href)) {
+          terminarLecturaLink(tabIdSolicitante, { tipo: "zilonix:importar-link-error", payload: { razon: "no_es_mercadolibre" } });
+          return;
+        }
+        chrome.tabs.sendMessage(tabIdLectura, { tipo: "zilonix:leer-para-importar" }, () => void chrome.runtime.lastError);
+      });
     }
     chrome.tabs.onUpdated.addListener(alActualizarTab);
 
