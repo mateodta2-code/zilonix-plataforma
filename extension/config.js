@@ -10,9 +10,21 @@
 
   const URL_APP_PRODUCCION = "https://web-production-af270.up.railway.app";
 
+  // Issue #44 (revisión de Pablo sobre el PR #290, LOW) — mismos 2
+  // hosts EXACTOS que ORIGENES_SELLER_PERMITIDOS en marcador-zilonix.js
+  // (el único que escribe "zilonixUrlApp") y en background.js (que
+  // también la revalida para "Importar a Publicar") — nunca una lista
+  // distinta en cada archivo. Revalidado acá, de nuevo: aunque hoy solo
+  // marcador-zilonix.js escribe esta clave, confiar en que SIEMPRE será
+  // así (sin volver a chequear del lado que LEE) es la clase de
+  // supuesto que este archivo ya documentó como bug real para URL_APP
+  // fijo — nunca una segunda vez.
+  const ORIGENES_SELLER_PERMITIDOS = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app"];
+
   // `api.URL_APP` arranca en producción — comportamiento de siempre —
   // y se actualiza EN EL MISMO OBJETO (nunca se reemplaza `api`
-  // entero) si chrome.storage.local trae "zilonixUrlApp" (ver abajo).
+  // entero) si chrome.storage.local trae "zilonixUrlApp" Y ese valor
+  // está en la allowlist (ver abajo).
   const api = { URL_APP: URL_APP_PRODUCCION };
 
   // Issue #273 (revisión de Pablo, punto 2) — bug real: "Seguir
@@ -38,7 +50,9 @@
     if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return;
     try {
       chrome.storage.local.get({ zilonixUrlApp: null }, (datos) => {
-        if (typeof datos.zilonixUrlApp === "string") api.URL_APP = datos.zilonixUrlApp;
+        if (typeof datos.zilonixUrlApp === "string" && ORIGENES_SELLER_PERMITIDOS.includes(datos.zilonixUrlApp)) {
+          api.URL_APP = datos.zilonixUrlApp;
+        }
       });
     } catch {
       // Contexto de la extensión invalidado — nunca rompe nada, sigue con producción.
@@ -51,7 +65,9 @@
           // persona abre staging en otra pestaña mientras esta ficha de
           // Mercado Libre ya está abierta, el próximo clic ya usa el
           // ambiente nuevo, sin recargar nada.
-          if (typeof cambios.zilonixUrlApp.newValue === "string") api.URL_APP = cambios.zilonixUrlApp.newValue;
+          if (typeof cambios.zilonixUrlApp.newValue === "string" && ORIGENES_SELLER_PERMITIDOS.includes(cambios.zilonixUrlApp.newValue)) {
+            api.URL_APP = cambios.zilonixUrlApp.newValue;
+          }
         });
       } catch {
         // ídem arriba, nunca revienta

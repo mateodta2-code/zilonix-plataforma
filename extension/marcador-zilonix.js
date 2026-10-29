@@ -56,6 +56,16 @@
 
   guardarUrlAppSiCorresponde(window.location.origin);
 
+  // Issue #44 (revisión de Pablo sobre el PR #290) — "Importar a
+  // Publicar" necesita saber, en varios lugares de este archivo, si
+  // ESTA pestaña es de verdad /panel/publicar (nunca /panel/investigacion*
+  // ni /panel/investigacion/seguimiento*, que cargan este mismo content
+  // script) — tanto para decidir el ack real de "zilonix:importar-publicar"
+  // (abajo) como para decidir si pedirle a background.js el pendiente.
+  function esPaginaPublicar() {
+    return typeof location !== "undefined" && typeof location.pathname === "string" && location.pathname.startsWith("/panel/publicar");
+  }
+
   // Issue #210/#213 — reenvía a la página (el React de
   // app/panel/investigacion/PanelDemanda.tsx, que escucha
   // window.addEventListener("message", ...)) lo que extension/
@@ -94,13 +104,53 @@
     // /panel/publicar (matches ampliado en manifest.json, ver más
     // abajo) — las demás (Investigación/Seguimiento) ignoran este tipo.
     "zilonix:importar-publicar": "importar-publicar",
+    // Issue #44 (anexo) — "Importar publicación desde un link": si el
+    // link no era de Mercado Libre, si Mercado Libre pidió login/
+    // verificación, o si se agotaron los 30s — background.js lo manda
+    // directo a la pestaña que lo pidió (nunca un broadcast), así que
+    // acá no hace falta ningún chequeo de ruta aparte, mismo criterio
+    // que el resto de este mapa.
+    "zilonix:importar-link-error": "importar-link-error",
+    // Issue #44 (anexo 2 "Importar video a Clip") — "Importar video a
+    // Clip" (Mercado Libre, Amazon, Temu, AliExpress, Alibaba, Shein,
+    // TikTok): mismo criterio exacto que "zilonix:importar-publicar",
+    // ver el ack especial más abajo (`TIPOS_QUE_NECESITAN_ACK_PUBLICAR`)
+    // — background.js necesita el mismo {ok:true, publicar:true/false}
+    // para decidir si enfoca esta pestaña o abre una nueva.
+    "zilonix:importar-video": "importar-video",
   };
+
+  // Issue #44 (anexo 2) — generalizado de "solo zilonix:importar-publicar"
+  // a un set: background.js necesita el MISMO ack real
+  // {ok:true, publicar:esPaginaPublicar()} para los 2 tipos que abren o
+  // enfocan /panel/publicar (ver manejarAbrirOEnfocarPublicar en
+  // background.js) — nunca el {ok:true} simple que alcanza para el
+  // resto de este mapa (vendidos/listado/resenas/seguimiento/cola).
+  const TIPOS_QUE_NECESITAN_ACK_PUBLICAR = new Set(["zilonix:importar-publicar", "zilonix:importar-video"]);
 
   chrome.runtime.onMessage.addListener((mensaje, _remitente, sendResponse) => {
     if (!mensaje || !mensaje.payload) return;
     const tipo = TIPOS_REENVIADOS[mensaje.tipo];
     if (!tipo) return;
     window.postMessage({ fuente: "zilonix-extension", tipo, payload: mensaje.payload }, window.location.origin);
+    // Issue #44 (revisión de Pablo sobre el PR #290) — bug real: este
+    // listener corre en CUALQUIER pestaña de Seller (/panel/investigacion*
+    // Y /panel/publicar*, mismo content script — ver "matches" en
+    // manifest.json), así que hasta esta corrección respondía
+    // {ok:true} desde CUALQUIER ruta, con cualquier tipo de mensaje —
+    // background.js ("Importar a Publicar" nuevo, y "Importar video a
+    // Clip" desde el anexo 2) necesita distinguir de verdad si la
+    // pestaña que acaba de reenviar el postMessage es /panel/publicar
+    // (la única con algo real escuchando estos 2 tipos), nunca si
+    // cualquier otra pestaña de Seller simplemente reenvió el mensaje
+    // sin que nadie del otro lado hiciera algo útil con él. Para el
+    // resto de tipos (vendidos/listado/resenas/seguimiento/
+    // cola-seguimiento), el ack sigue siendo {ok:true} a secas, sin
+    // cambios — esos SÍ tienen sentido en cualquier ruta de Seller.
+    if (TIPOS_QUE_NECESITAN_ACK_PUBLICAR.has(mensaje.tipo)) {
+      if (typeof sendResponse === "function") sendResponse({ ok: true, publicar: esPaginaPublicar() });
+      return;
+    }
     // Issue #251 (corrección de Pablo, punto 7) — ack explícito: sin
     // esto, background.js (vaciarColaSeguimiento) no tiene forma real
     // de saber si esta pestaña de verdad recibió el mensaje antes de
@@ -133,12 +183,25 @@
     // con su propio allowlist de dominio y tope de 10, nunca solo
     // confiando en lo que mande la página).
     "abrir-seguimientos": "zilonix:abrir-seguimientos",
+    // Issue #44 (anexo) — "Traer datos de ese link" (SeccionesImportar.tsx):
+    // el clic real manda el link acá; background.js valida el dominio
+    // de nuevo, aplica el cooldown y abre la pestaña de lectura.
+    "importar-link": "zilonix:importar-link",
   };
 
   window.addEventListener("message", (evento) => {
     if (evento.source !== window || evento.origin !== window.location.origin) return;
     const datos = evento.data;
     if (!datos || datos.fuente !== "zilonix-panel") return;
+    // Issue #44 — "la página está lista" (PaginaPublicar.tsx, apenas
+    // monta su propio listener de "importar-publicar") NUNCA se
+    // reenvía como un "zilonix:*" más hacia background.js — es la
+    // señal que dispara pedirImportacionPendiente() acá mismo, ver
+    // abajo. Las demás entradas de TIPOS_HACIA_EXTENSION siguen igual.
+    if (datos.tipo === "publicar-listo") {
+      pedirImportacionPendiente();
+      return;
+    }
     const tipo = TIPOS_HACIA_EXTENSION[datos.tipo];
     if (!tipo) return;
     chrome.runtime.sendMessage({ tipo, payload: datos.payload }, () => {
@@ -146,11 +209,63 @@
     });
   });
 
+  // Issue #44 — "Importar a Publicar"/"Importar video a Clip" (anexo
+  // 2) abren o enfocan /panel/publicar (background.js) y dejan el
+  // payload guardado como "importacionPendiente" cuando TODAVÍA no hay
+  // ninguna pestaña de Publicar escuchando — esta pestaña (recién
+  // cargada, o ya abierta) lo pide UNA vez que esté lista. background.js
+  // lo entrega una sola vez y lo borra — llamar esto más de una vez (el
+  // fallback de abajo) es seguro: sin nada pendiente, la respuesta
+  // simplemente no trae `payload`.
+  //
+  // Issue #44 (anexo 2) — generalizado: el pendiente ahora viaja con
+  // su propio `tipo` (antes siempre era "importar-publicar" a secas,
+  // hardcodeado) — se reenvía con el nombre externo correcto vía
+  // TIPOS_REENVIADOS, el MISMO mapa que ya traduce el broadcast en
+  // vivo (arriba), así que un pendiente de video nunca se posta como
+  // si fuera uno de publicar. `|| "importar-publicar"` es solo
+  // compatibilidad defensiva con un pendiente sin `tipo` (nunca
+  // debería pasar en la práctica — chrome.storage.session no sobrevive
+  // un reinicio del navegador, así que no hay pendientes viejos reales
+  // tras este deploy — pero nunca cuesta nada cubrir el caso).
+  function pedirImportacionPendiente() {
+    if (!esPaginaPublicar()) return;
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    try {
+      chrome.runtime.sendMessage({ tipo: "zilonix:pedir-importacion-pendiente" }, (respuesta) => {
+        void chrome.runtime.lastError; // Service Worker dormido/reciclado justo en este instante — nunca un error real
+        if (respuesta && respuesta.payload) {
+          const tipoExterno = TIPOS_REENVIADOS[respuesta.tipo] || "importar-publicar";
+          window.postMessage({ fuente: "zilonix-extension", tipo: tipoExterno, payload: respuesta.payload }, window.location.origin);
+        }
+      });
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe la página.
+    }
+  }
+
+  // Issue #44 — este content script corre con `run_at: "document_start"`
+  // (manifest.json) — MUCHO antes de que PaginaPublicar.tsx monte su
+  // `useEffect` (React, después de hidratar). Pedir el pendiente acá
+  // mismo, de entrada, lo perdería para siempre: background.js ya lo
+  // habría entregado (y borrado) antes de que la página tuviera algo
+  // escuchando. La señal real es "publicar-listo" (arriba, la manda
+  // PaginaPublicar.tsx apenas su listener está montado) — este
+  // reintento acotado es SOLO una red de seguridad, por si esa señal
+  // se pierde (ej. un build viejo cacheado sin el aviso todavía): 3
+  // intentos, con más espacio cada vez, nunca indefinido.
+  const REINTENTOS_IMPORTACION_PENDIENTE_MS = [1000, 2000, 4000];
+  if (esPaginaPublicar()) {
+    for (const espera of REINTENTOS_IMPORTACION_PENDIENTE_MS) {
+      setTimeout(pedirImportacionPendiente, espera);
+    }
+  }
+
   // Issue #273 (revisión de Pablo, punto 2) — mismo patrón dual que el
   // resto de la extensión: en el navegador real no existe `module`
   // (este bloque nunca corre ahí); en Node (vitest) permite probar
   // debeGuardarUrlApp sin chrome/DOM real.
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { debeGuardarUrlApp };
+    module.exports = { debeGuardarUrlApp, esPaginaPublicar };
   }
 })();

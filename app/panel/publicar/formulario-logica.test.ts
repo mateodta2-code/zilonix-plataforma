@@ -472,6 +472,20 @@ describe("permalinkMlSeguro — revisión de seguridad (hallazgo MED): solo http
     expect(permalinkMlSeguro("http://mercadolibre.com.ataque.com/MCO-1")).toBeNull();
   });
 
+  // Issue #44 (LOW pendiente del PR #290, Parte 4) — 2 casos puntuales
+  // de spoofing con el nombre real pegado sin punto antes (nunca matchea
+  // el `(^|\.)` de PATRON_HOST_MERCADOLIBRE) o después del final real
+  // (nunca matchea el `$` del final) — mismo criterio que el caso
+  // "mercadolibre.com.ataque.com" de arriba, con los nombres exactos
+  // que pidió la revisión.
+  it("rechaza evilmercadolibre.com (sin el punto real antes de mercadolibre.com)", () => {
+    expect(permalinkMlSeguro("https://evilmercadolibre.com/MCO-1")).toBeNull();
+  });
+
+  it("rechaza mercadolibre.com.evil.com (el nombre real queda en el medio, no al final)", () => {
+    expect(permalinkMlSeguro("https://mercadolibre.com.evil.com/MCO-1")).toBeNull();
+  });
+
   it("rechaza otros protocolos distintos de http/https (ftp:, etc.)", () => {
     expect(permalinkMlSeguro("ftp://articulo.mercadolibre.com.co/MCO-1")).toBeNull();
   });
@@ -596,6 +610,26 @@ describe("itemImportadoDesdeMensajeExtension — Parte 3, punto D (postMessage d
     const r = itemImportadoDesdeMensajeExtension({
       titulo: "X",
       imagenes: ["https://http2.mlstatic.com/foo.jpg", "javascript:alert(1)", "data:text/html,<script>", "http://sin-https.com/foo.jpg", 123],
+    });
+    expect(r?.imagenes).toEqual(["https://http2.mlstatic.com/foo.jpg"]);
+  });
+
+  // Issue #44 (hallazgo real al preparar "Importar por link") — antes
+  // de esta corrección, CUALQUIER https pasaba (nunca se exigía el
+  // dominio real de imágenes de Mercado Libre) — un mensaje con una
+  // imagen https de un dominio ajeno (o uno que solo CONTIENE
+  // "mlstatic.com") se hidrataba igual en el formulario. Mismo
+  // criterio anclado que esUrlFotoMlValida (extension/lectores/mercadolibre.js,
+  // corregida en esta misma revisión).
+  it("filtra imágenes https que NO son del dominio real de Mercado Libre (mlstatic.com) — nunca un host ajeno", () => {
+    const r = itemImportadoDesdeMensajeExtension({
+      titulo: "X",
+      imagenes: [
+        "https://http2.mlstatic.com/foo.jpg", // real, se queda
+        "https://evilmlstatic.com/foo.jpg", // spoofing: sin el punto real antes
+        "https://mlstatic.com.ataque.com/foo.jpg", // spoofing: el nombre real queda en el medio
+        "https://otrositio.com/foo.jpg", // host completamente ajeno
+      ],
     });
     expect(r?.imagenes).toEqual(["https://http2.mlstatic.com/foo.jpg"]);
   });
