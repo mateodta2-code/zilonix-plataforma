@@ -265,9 +265,8 @@ export function resolverRangoVentas(
 export type FiltrosUrlVentas = { cuenta?: string; desde: string; hasta: string; costo?: "con" | "sin" };
 
 // Arma el href de una página del detalle conservando los filtros. extra
-// va primero (p. ej. { vista: "detalle" } en /panel/pedidos) para que la
-// misma tabla sirva en las dos rutas sin que una pise los filtros de la
-// otra.
+// va primero: parámetros fijos de la ruta que pinta la tabla, si los
+// tiene (hoy ni Finanzas → Ventas ni Pedidos usan ninguno).
 export function hrefVentasUtilidad(ruta: string, extra: Record<string, string>, filtros: FiltrosUrlVentas, pagina: number): string {
   const params = new URLSearchParams(extra);
   if (filtros.cuenta) params.set("cuenta", filtros.cuenta);
@@ -276,11 +275,4 @@ export function hrefVentasUtilidad(ruta: string, extra: Record<string, string>, 
   if (filtros.costo) params.set("costo", filtros.costo);
   if (pagina > 1) params.set("pagina", String(pagina));
   return `${ruta}?${params.toString()}`;
-}
-
-// /panel/pedidos?vista= — solo "detalle" cambia la vista; cualquier otra
-// cosa (o nada) es la lista de siempre.
-export type VistaPedidos = "lista" | "detalle";
-export function resolverVistaPedidos(valor: string | undefined): VistaPedidos {
-  return valor === "detalle" ? "detalle" : "lista";
 }
