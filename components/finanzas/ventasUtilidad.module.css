@@ -165,3 +165,97 @@
   border: 1px solid var(--exito, #2e7d32);
   background: color-mix(in srgb, var(--exito, #2e7d32) 18%, transparent);
 }
+
+/* Issue #131 — tabla del detalle compacta, estilo DETALLE DÍA A DÍA de
+   Zilonix OS (Pedidos y Finanzas → Ventas). Solo dentro de esta
+   envoltura: <Tabla> del marco (13px, padding 10×12) no cambia en el
+   resto de las pantallas. Los selectores llevan elemento (th/td) para
+   ganarle a .th/.td del marco y a .zx-etiqueta sin !important.
+   Primera columna fija al desplazar en horizontal, con el mismo fondo
+   de la tabla para que lo de atrás no se transparente. */
+.tablaCompacta table {
+  font-size: 12px;
+}
+
+.tablaCompacta th {
+  padding: 6px 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+}
+
+.tablaCompacta td {
+  padding: 4px 8px;
+  line-height: 1.35;
+}
+
+/* En un celular la primera columna (~500px) es más ancha que la
+   pantalla: fija taparía los números. Ahí se desplaza todo junto y el
+   título se corta antes. */
+@media (min-width: 768px) {
+  .tablaCompacta th:first-child,
+  .tablaCompacta td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--tabla-fondo);
+    box-shadow: inset -1px 0 0 var(--borde);
+  }
+
+  .tablaCompacta th:first-child,
+  .tablaCompacta .filaDia td:first-child {
+    background: var(--tabla-encabezado-fondo);
+  }
+
+  .tablaCompacta .filaProducto:hover td:first-child {
+    background: linear-gradient(var(--fila-hover), var(--fila-hover)), var(--tabla-fondo);
+  }
+}
+
+.tablaCompacta .filaDia td {
+  white-space: nowrap;
+}
+
+.tablaCompacta .sangriaCuenta {
+  padding-left: 16px !important;
+  white-space: nowrap;
+}
+
+.tablaCompacta .sangriaProducto {
+  padding-left: 28px !important;
+  min-width: 0;
+}
+
+/* Chips del detalle más chicos (Agencia/Flex/Full, sin costo, con
+   devolución). */
+.tablaCompacta [data-estado] {
+  padding: 0 6px;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+
+.tablaCompacta .suave {
+  font-size: 11px;
+}
+
+.lineaProducto {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.tituloProducto {
+  display: inline-block;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+@media (max-width: 767px) {
+  .tituloProducto {
+    max-width: 180px;
+  }
+}

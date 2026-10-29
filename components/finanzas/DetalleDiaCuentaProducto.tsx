@@ -24,12 +24,16 @@ import estilos from "./ventasUtilidad.module.css";
 // pintar esto, y listarVentasUtilidad lo vuelve a pedir y lee con RLS de
 // la empresa: una empresa nunca ve ventas de otra. El botón «Traer
 // ventas de este mes» solo sale con finanzas.modificar (escribe en
-// pedidos_finanzas; la acción lo vuelve a pedir).
+// pedidos_finanzas; la acción lo vuelve a pedir). Pedidos lo pinta con
+// mostrarResumen={false}: sin tarjetas KPI ni «Total por cuenta» (esos
+// indicadores van a Inicio, #143/#163); Finanzas → Ventas los sigue
+// mostrando.
 
 // Días por página del detalle. Los totales de arriba son siempre de todo
 // el rango.
 const DIAS_POR_PAGINA = 7;
 
+// Encabezados largos: tabla «Total por cuenta» de Finanzas → Ventas.
 const COLUMNAS = [
   "Día · cuenta · producto",
   "Número de ventas",
@@ -46,17 +50,40 @@ const COLUMNAS = [
   "Cnt",
 ];
 
+// La tabla del detalle es compacta (estilo DETALLE DÍA A DÍA de Zilonix
+// OS) y usa encabezados cortos con el mismo significado:
+// Nº ventas = Número de ventas · Recaudo = Recaudo ventas · Comisión =
+// Comisión ML · Flete = Flete ML · Costo = Costo producto · Envío =
+// Envío agencia · Dev. = Devolución. El resto queda igual.
+const COLUMNAS_CORTAS = [
+  "Día · cuenta · producto",
+  "Nº ventas",
+  "Recaudo",
+  "Comisión",
+  "Flete",
+  "Costo",
+  "Packing",
+  "Envío",
+  "Dev.",
+  "Utilidad",
+  "% util",
+  "% ML",
+  "Cnt",
+];
+
 type Props = {
   empresaId: string;
   usuarioId: string;
   searchParams: Record<string, string | string[] | undefined>;
   // Ruta de la página que lo pinta (el formulario y la paginación vuelven acá).
   ruta: string;
-  // Parámetros fijos de esa ruta, p. ej. { vista: "detalle" } en Pedidos.
+  // Parámetros fijos de esa ruta, si los tiene.
   extra?: Record<string, string>;
+  // Tarjetas KPI y «Total por cuenta». false en Pedidos.
+  mostrarResumen?: boolean;
 };
 
-export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchParams, ruta, extra = {} }: Props) {
+export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchParams, ruta, extra = {}, mostrarResumen = true }: Props) {
   const cuentas = await listarCuentasMlParaSelector(empresaId);
   let puedeTraerVentas = true;
   try {
@@ -145,18 +172,20 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
 
       {datos && total && (
         <>
-          <div className={estilos.gridKpi}>
-            <TarjetaKpi titulo="Recaudo ventas" valor={mostrarMonto(total.recaudo)} detalle={[`${total.ventas} ventas · ${total.cantidad} unidades`]} />
-            <TarjetaKpi titulo="Utilidad" valor={mostrarMonto(total.utilidad)} detalle={["Solo ventas con costo, antes de publicidad"]} />
-            <TarjetaKpi titulo="% util" valor={mostrarPorcentaje(total.porcentaje_utilidad)} />
-            <TarjetaKpi titulo="% ML" valor={mostrarPorcentaje(total.porcentaje_ml)} detalle={["Comisión ÷ recaudo, sin flete"]} />
-            <TarjetaKpi titulo="% de ventas con costo" valor={mostrarPorcentaje(porcentajeVentasConCosto(total))} />
-            <TarjetaKpi
-              titulo="Ventas sin costo"
-              valor={`${total.ventas_sin_costo} ventas sin costo · ${mostrarMonto(total.recaudo_sin_costo)}`}
-              detalle={total.ventas_sin_costo > 0 ? ["Fuera de la utilidad hasta tener costo"] : undefined}
-            />
-          </div>
+          {mostrarResumen && (
+            <div className={estilos.gridKpi}>
+              <TarjetaKpi titulo="Recaudo ventas" valor={mostrarMonto(total.recaudo)} detalle={[`${total.ventas} ventas · ${total.cantidad} unidades`]} />
+              <TarjetaKpi titulo="Utilidad" valor={mostrarMonto(total.utilidad)} detalle={["Solo ventas con costo, antes de publicidad"]} />
+              <TarjetaKpi titulo="% util" valor={mostrarPorcentaje(total.porcentaje_utilidad)} />
+              <TarjetaKpi titulo="% ML" valor={mostrarPorcentaje(total.porcentaje_ml)} detalle={["Comisión ÷ recaudo, sin flete"]} />
+              <TarjetaKpi titulo="% de ventas con costo" valor={mostrarPorcentaje(porcentajeVentasConCosto(total))} />
+              <TarjetaKpi
+                titulo="Ventas sin costo"
+                valor={`${total.ventas_sin_costo} ventas sin costo · ${mostrarMonto(total.recaudo_sin_costo)}`}
+                detalle={total.ventas_sin_costo > 0 ? ["Fuera de la utilidad hasta tener costo"] : undefined}
+              />
+            </div>
+          )}
 
           {datos.rechazadas.length > 0 && (
             <div className={estilos.avisoError}>
@@ -182,28 +211,32 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
             </EstadoVacio>
           ) : (
             <>
-              <section className={estilos.seccion}>
-                <h2 className={estilos.tituloSeccion}>Total por cuenta, antes de publicidad</h2>
-                <Tabla encabezados={["Cuenta", ...COLUMNAS.slice(1), "% con costo"]}>
-                  {datos.resumenCuentas.map((c) => (
-                    <FilaTabla key={c.cuenta_ml_id}>
-                      <CeldaTabla>
-                        <strong>{c.nickname}</strong>
-                      </CeldaTabla>
-                      <CeldasMontos t={c.totales} costo={c.totales.costo_producto} utilidad={c.totales.utilidad} />
-                      <CeldaTabla className={estilos.numero}>{mostrarPorcentaje(c.porcentaje_ventas_con_costo)}</CeldaTabla>
-                    </FilaTabla>
-                  ))}
-                </Tabla>
-              </section>
+              {mostrarResumen && (
+                <section className={estilos.seccion}>
+                  <h2 className={estilos.tituloSeccion}>Total por cuenta, antes de publicidad</h2>
+                  <Tabla encabezados={["Cuenta", ...COLUMNAS.slice(1), "% con costo"]}>
+                    {datos.resumenCuentas.map((c) => (
+                      <FilaTabla key={c.cuenta_ml_id}>
+                        <CeldaTabla>
+                          <strong>{c.nickname}</strong>
+                        </CeldaTabla>
+                        <CeldasMontos t={c.totales} costo={c.totales.costo_producto} utilidad={c.totales.utilidad} />
+                        <CeldaTabla className={estilos.numero}>{mostrarPorcentaje(c.porcentaje_ventas_con_costo)}</CeldaTabla>
+                      </FilaTabla>
+                    ))}
+                  </Tabla>
+                </section>
+              )}
 
               <section className={estilos.seccion}>
                 <h2 className={estilos.tituloSeccion}>Detalle día a día · cuenta · producto</h2>
-                <Tabla encabezados={COLUMNAS}>
-                  {diasPagina.map((dia) => (
-                    <DiaFilas key={dia.dia} dia={dia} datos={datos as ResultadoVentasUtilidad} conDevolucion={conDevolucion} />
-                  ))}
-                </Tabla>
+                <div className={estilos.tablaCompacta}>
+                  <Tabla encabezados={COLUMNAS_CORTAS}>
+                    {diasPagina.map((dia) => (
+                      <DiaFilas key={dia.dia} dia={dia} datos={datos as ResultadoVentasUtilidad} conDevolucion={conDevolucion} />
+                    ))}
+                  </Tabla>
+                </div>
                 {totalPaginas > 1 && (
                   <div className={estilos.paginacion}>
                     <span className={estilos.suave}>
@@ -299,11 +332,13 @@ function CuentaFilas({
       {cuenta.productos.map((p) => (
         <tr key={`${p.pedido_id}-${p.linea}`} className={estilos.filaProducto}>
           <CeldaTabla className={estilos.sangriaProducto}>
-            <Link href={`/panel/finanzas/ventas/${p.pedido_id}`} className={estilos.enlace}>
-              {p.titulo}
-            </Link>{" "}
-            <span className={estilos.suave}>[{p.sku_codigo ?? "sin SKU"}]</span>
-            <div className={estilos.marcas}>
+            {/* Una sola línea: el título largo se corta con «…» y se lee
+                entero al pasar el mouse. */}
+            <div className={estilos.lineaProducto}>
+              <Link href={`/panel/finanzas/ventas/${p.pedido_id}`} className={`${estilos.enlace} ${estilos.tituloProducto}`} title={p.titulo}>
+                {p.titulo}
+              </Link>
+              <span className={estilos.suave}>[{p.sku_codigo ?? "sin SKU"}]</span>
               <Chip>{ETIQUETA_FORMA[p.forma_entrega]}</Chip>
               {conDevolucion.has(p.pedido_id) && <Chip estado="peligro">con devolución · revisar</Chip>}
               <span className={estilos.suave}>#{datos.pedidoIdExterno[p.pedido_id]}</span>
