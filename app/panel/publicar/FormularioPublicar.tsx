@@ -7,6 +7,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { crearYPublicarProductoAction } from "./actions";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
 import { GaleriaFotos } from "./GaleriaFotos";
+import { PortadaCuenta } from "./PortadaCuenta";
 import { SelectorCategoria, type CategoriaElegida } from "./SelectorCategoria";
 import { CaracteristicasDinamicas, type CaracteristicaCategoria } from "./CaracteristicasDinamicas";
 import { EditorVariantes, type VariantesEditadas } from "./EditorVariantes";
@@ -41,7 +42,15 @@ type RespuestaCaracteristicas = {
 // REMONTA (prop `key`) cada vez que cambia, para que los `useState`
 // de abajo arranquen de cero con los valores nuevos — nunca hace
 // falta un efecto que "reseedee" el estado a mano.
-export function FormularioPublicar({ cuentas, inicial }: { cuentas: Cuenta[]; inicial: EstadoInicialFormulario }) {
+export function FormularioPublicar({
+  cuentas,
+  inicial,
+  cloudinaryConfigurado,
+}: {
+  cuentas: Cuenta[];
+  inicial: EstadoInicialFormulario;
+  cloudinaryConfigurado: boolean;
+}) {
   const [incluidas, setIncluidas] = useState<Record<string, boolean>>(() => {
     const mapa: Record<string, boolean> = {};
     for (const id of inicial.cuentasIncluidas) mapa[id] = true;
@@ -243,7 +252,7 @@ export function FormularioPublicar({ cuentas, inicial }: { cuentas: Cuenta[]; in
         el envío si nadie la completaba); la tarjeta "+" de
         GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
         agregar nada. */}
-        <GaleriaFotos urls={imagenes} onChange={setImagenes} />
+        <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} />
         {maxFotos != null && (
           <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
             Esta categoría admite hasta {maxFotos} fotos en Mercado Libre
@@ -251,7 +260,7 @@ export function FormularioPublicar({ cuentas, inicial }: { cuentas: Cuenta[]; in
           </p>
         )}
         <p style={{ fontSize: 12, color: "var(--texto-suave)" }}>
-          La primera es la portada si ninguna cuenta tiene una propia. La subida real a Cloudinary llega más adelante — por ahora, URL externa.
+          La primera es la portada si ninguna cuenta tiene una propia. Podés pegar una URL externa, subir un archivo de tu PC, o traer una exportación de Canva.
         </p>
         <textarea name="imagenes" value={fotosDentroDelLimite(imagenes.filter(Boolean), maxFotos).join("\n")} readOnly hidden />
       </Tarjeta>
@@ -272,12 +281,12 @@ export function FormularioPublicar({ cuentas, inicial }: { cuentas: Cuenta[]; in
           <div style={{ marginTop: 10 }}>
             {cuentasMarcadas.map((c) => (
               <div key={c.id} className={`${styles.recuadroMarca} ${styles.filaCuentaDetalle}`}>
-                <div className={`${styles.recuadroMarca} ${styles.portadaChica}`}>
-                  {datosPorCuenta[c.id]?.portadaUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- URL externa puesta a mano
-                    <img src={datosPorCuenta[c.id].portadaUrl} alt="" className={styles.portadaChicaImg} />
-                  ) : null}
-                </div>
+                <PortadaCuenta
+                  portadaUrl={datosPorCuenta[c.id]?.portadaUrl ?? ""}
+                  onChange={(url) => actualizarCuenta(c.id, "portadaUrl", url)}
+                  cloudinaryConfigurado={cloudinaryConfigurado}
+                  previaGaleria={imagenes[0] ?? null}
+                />
                 <div style={{ flex: 1 }}>
                   <Campo etiqueta={`Título en ${c.nickname}`}>
                     <input
@@ -296,14 +305,7 @@ export function FormularioPublicar({ cuentas, inicial }: { cuentas: Cuenta[]; in
                       onChange={(e) => actualizarCuenta(c.id, "descripcion", e.target.value)}
                     />
                   </Campo>
-                  <Campo etiqueta={`URL de la foto de portada en ${c.nickname}`}>
-                    <input
-                      name={`portada_${c.id}`}
-                      className="zx-control"
-                      value={datosPorCuenta[c.id]?.portadaUrl ?? ""}
-                      onChange={(e) => actualizarCuenta(c.id, "portadaUrl", e.target.value)}
-                    />
-                  </Campo>
+                  <input type="hidden" name={`portada_${c.id}`} value={datosPorCuenta[c.id]?.portadaUrl ?? ""} />
                 </div>
               </div>
             ))}

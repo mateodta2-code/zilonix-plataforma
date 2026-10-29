@@ -15,6 +15,47 @@
   "use strict";
   document.documentElement.setAttribute("data-zilonix-extension", "1");
 
+  // Issue #273 (revisión de Pablo, punto 2) — bug real: "Seguir
+  // tienda"/"Seguir en Zilonix" (extension/lectores/mercadolibre.js)
+  // siempre abrían producción (extension/config.js, URL_APP fijo),
+  // aunque la persona estuviera trabajando contra staging — el único
+  // mecanismo para cambiar de ambiente era editar config.js a mano (una
+  // línea comentada) y reinstalar la extensión entera. Esta página YA
+  // es necesariamente una de Seller real (staging o producción — es
+  // justo donde este content script corre, por los `matches` de
+  // manifest.json) — se guarda SU origin real en chrome.storage.local
+  // ("zilonixUrlApp") para que config.js (cargado en Mercado Libre) lo
+  // lea y lo use en lugar del default fijo. Sin ningún permiso/
+  // host_permission/match nuevo: chrome.storage.local ya existe
+  // (permiso "storage"), y este content script ya corre en esta página
+  // por los matches de siempre.
+  //
+  // Allowlist EXPLÍCITA, nunca "cualquier origin que llegue acá": los
+  // MISMOS 2 hosts que ya están en los `matches` de este content
+  // script (manifest.json) — nunca un host nuevo sin que el manifest
+  // ya lo autorizara primero. `location.origin` lo pone el navegador
+  // mismo, nunca algo que la página pueda falsificar desde JS.
+  const ORIGENES_SELLER_PERMITIDOS = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app"];
+  const CLAVE_URL_APP = "zilonixUrlApp";
+
+  // Puro — separado a propósito, para poder probarlo sin chrome/DOM
+  // real (mismo criterio que el resto de la extensión).
+  function debeGuardarUrlApp(origin, origenesPermitidos) {
+    return Array.isArray(origenesPermitidos) && origenesPermitidos.includes(origin);
+  }
+
+  function guardarUrlAppSiCorresponde(origin) {
+    if (!debeGuardarUrlApp(origin, ORIGENES_SELLER_PERMITIDOS)) return;
+    if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return;
+    try {
+      chrome.storage.local.set({ [CLAVE_URL_APP]: origin });
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe la página.
+    }
+  }
+
+  guardarUrlAppSiCorresponde(window.location.origin);
+
   // Issue #210/#213 — reenvía a la página (el React de
   // app/panel/investigacion/PanelDemanda.tsx, que escucha
   // window.addEventListener("message", ...)) lo que extension/
@@ -47,6 +88,12 @@
     // vez, para que EscuchaExtension.tsx la guarde con una sola Server
     // Action y un solo router.refresh().
     "zilonix:cola-seguimiento": "cola-seguimiento",
+    // Parte 3, punto D ("Importar a Publicar") — mandado desde una
+    // ficha de Mercado Libre (content.js, con un clic real en el botón
+    // "Importar a Publicar"); solo hace algo si ESTA pestaña es
+    // /panel/publicar (matches ampliado en manifest.json, ver más
+    // abajo) — las demás (Investigación/Seguimiento) ignoran este tipo.
+    "zilonix:importar-publicar": "importar-publicar",
   };
 
   chrome.runtime.onMessage.addListener((mensaje, _remitente, sendResponse) => {
@@ -98,4 +145,12 @@
       void chrome.runtime.lastError;
     });
   });
+
+  // Issue #273 (revisión de Pablo, punto 2) — mismo patrón dual que el
+  // resto de la extensión: en el navegador real no existe `module`
+  // (este bloque nunca corre ahí); en Node (vitest) permite probar
+  // debeGuardarUrlApp sin chrome/DOM real.
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { debeGuardarUrlApp };
+  }
 })();

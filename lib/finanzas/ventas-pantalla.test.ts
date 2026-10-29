@@ -3,6 +3,7 @@ import { armarDetalleVentas, type TotalesDetalle } from "./detalle-ventas";
 import { aCentavos, calcularUtilidadVenta, desdeCentavos } from "./utilidad-venta";
 import {
   armarVentaEntrada,
+  hrefVentasUtilidad,
   mesActualBogota,
   porcentajeVentasConCosto,
   resolverRangoVentas,
@@ -171,5 +172,20 @@ describe("resolverRangoVentas (issue #131 Parte A)", () => {
     // Una sola fecha = ese día.
     const unDia = resolverRangoVentas("2026-10-20", undefined, ahora).rango!;
     expect([unDia.desde, unDia.hasta]).toEqual(["2026-10-20", "2026-10-20"]);
+  });
+});
+
+describe("hrefVentasUtilidad (issue #131)", () => {
+  it("la paginación conserva cuenta, rango y costo, sin ?vista=", () => {
+    const filtros = { cuenta: "c1", desde: "2026-10-01", hasta: "2026-10-31", costo: "sin" as const };
+    expect(hrefVentasUtilidad("/panel/pedidos", {}, filtros, 2)).toBe("/panel/pedidos?cuenta=c1&desde=2026-10-01&hasta=2026-10-31&costo=sin&pagina=2");
+    // La página 1 no va en la URL.
+    expect(hrefVentasUtilidad("/panel/finanzas/ventas", {}, { desde: "2026-10-01", hasta: "2026-10-07" }, 1)).toBe(
+      "/panel/finanzas/ventas?desde=2026-10-01&hasta=2026-10-07"
+    );
+  });
+
+  it("los parámetros fijos de la ruta van primero", () => {
+    expect(hrefVentasUtilidad("/x", { a: "1" }, { desde: "2026-10-01", hasta: "2026-10-01" }, 1)).toBe("/x?a=1&desde=2026-10-01&hasta=2026-10-01");
   });
 });

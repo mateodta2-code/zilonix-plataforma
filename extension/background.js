@@ -25,7 +25,16 @@
 // ficha de un competidor o la tienda que sigue, y solo la pestaña del
 // panel de Seguimiento (con marcador-zilonix.js, y con el componente
 // que escucha "dato-pagina-seguimiento" montado) hace algo con esto.
-const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix:dato-pagina-seguimiento"]);
+// Parte 3, punto D ("Importar a Publicar") — "zilonix:importar-publicar"
+// suma al mismo relevo genérico: content.js lo manda con un clic real
+// en una ficha de Mercado Libre, solo la pestaña con /panel/publicar
+// abierto (marcador-zilonix.js, matches ampliado en manifest.json)
+// hace algo con esto. Sin cola a propósito (a diferencia de
+// "zilonix:dato-pagina-seguimiento"): si la persona todavía no tiene
+// /panel/publicar abierto en ninguna pestaña, el mensaje simplemente no
+// llega a nadie — mismo criterio simple que ya tenían "zilonix:vendidos"/
+// "zilonix:listado" antes de que #251 le agregara cola a Seguimiento.
+const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix:dato-pagina-seguimiento", "zilonix:importar-publicar"]);
 
 // Issue #251 (revisión de Pablo, punto 4) — "que la lectura no dependa
 // de tener abierta la pestaña de Seguimiento". Decisión de Mateo:
@@ -943,4 +952,28 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   // evento igual, aunque el worker estuviera dormido).
   cerrarPestanasActualizarTodoVencidas();
   desregistrarPestanaActualizarTodo(tabId);
+});
+
+// Issue #273 (Mateo) — interruptor global: "apagado" hace que
+// content.js (lectores/mercadolibre.js + content.js, ver el comentario
+// completo en content.js) ya NO inyecte el panel ni los botones solo,
+// en ninguna página — pero la persona tiene que poder seguir abriendo
+// el panel CUANDO SÍ quiere, con un clic real en el ícono de la
+// extensión. `chrome.action.onClicked` solo se dispara cuando el
+// manifest NO declara un `default_popup` (manifest.json tiene
+// `"action": {}`, sin popup, a propósito) — un clic real de la
+// persona, nunca algo que esta extensión dispara sola. Nunca necesita
+// ningún permiso nuevo: `chrome.action` es parte del núcleo de
+// Manifest V3, y `chrome.tabs.sendMessage` ya lo usa el resto de este
+// archivo sin "tabs" en manifest.json (ver el comentario del
+// encabezado, arriba del todo).
+chrome.action.onClicked.addListener((tab) => {
+  if (!tab || tab.id == null) return;
+  chrome.tabs.sendMessage(tab.id, { tipo: "zilonix:mostrar-panel" }, () => {
+    // Pestaña sin ningún content script de esta extensión cargado (ej.
+    // un sitio que esta extensión no lee) — nunca un error real que
+    // haga falta mostrar en ningún lado, mismo criterio que el resto
+    // de este archivo.
+    void chrome.runtime.lastError;
+  });
 });

@@ -9,8 +9,8 @@ import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
-import { ETIQUETA_AVISO, ETIQUETA_CAMPO, ETIQUETA_FORMA, ETIQUETA_ORIGEN, fechaHoraBogota, mostrarPorcentaje } from "../formato";
-import estilos from "../ventas.module.css";
+import { ETIQUETA_AVISO, ETIQUETA_CAMPO, ETIQUETA_FORMA, ETIQUETA_ORIGEN, fechaHoraBogota, mostrarPorcentaje } from "@/components/finanzas/formato";
+import estilos from "@/components/finanzas/ventasUtilidad.module.css";
 import styles from "../../finanzas.module.css";
 
 function Origen({ valor }: { valor: ValorConcepto }) {

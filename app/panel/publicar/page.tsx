@@ -14,6 +14,9 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { PaginaPublicar } from "./PaginaPublicar";
 import type { ProductoHistorial } from "./HistorialPublicaciones";
 import { buscarItemConDatos } from "./clip/buscar-item";
+import { importarItemCompleto } from "./importadores/importar-item";
+import type { ItemImportado } from "./formulario-logica";
+import { cloudinaryConfigurado } from "@/lib/cloudinary";
 
 // Parte 2 (página única, estructura de Zilonix OS) — reemplaza las 4
 // pantallas sueltas de la Parte 1 (/panel/publicar historial,
@@ -31,7 +34,21 @@ import { buscarItemConDatos } from "./clip/buscar-item";
 export default async function PublicarPage({
   searchParams,
 }: {
-  searchParams: { titulo?: string; precio?: string; foto?: string; cuentaId?: string; sku?: string; itemId?: string; clipSubido?: string; error?: string };
+  searchParams: {
+    titulo?: string;
+    precio?: string;
+    foto?: string;
+    cuentaId?: string;
+    sku?: string;
+    itemId?: string;
+    clipSubido?: string;
+    error?: string;
+    importarItemId?: string;
+    importarCuentaId?: string;
+    importarOrigen?: string;
+    importarSkuNoEncontrado?: string;
+    importarLinkError?: string;
+  };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -116,6 +133,21 @@ export default async function PublicarPage({
     }
   }
 
+  // Parte 3, punto A — importarItemId/importarCuentaId llegan de
+  // importadores/actions.ts (por SKU o por link, ver importarOrigen).
+  // El lookup real (importarItemCompleto) sigue siendo SOLO del
+  // servidor (token de la cuenta) — mismo criterio que itemClip arriba.
+  // null = Mercado Libre no deja traer ese ítem por la API (403/404,
+  // típico de una publicación ajena) — la UI manda a usar el
+  // bookmarklet/extensión en su lugar, nunca se reintenta scrapeando.
+  let itemImportado: ItemImportado | null = null;
+  let importarNoDisponible = false;
+  const cuentaImportar = cuentas.find((c) => c.id === searchParams.importarCuentaId);
+  if (cuentaImportar && searchParams.importarItemId) {
+    itemImportado = await importarItemCompleto(empresa.id, cuentaImportar.id, searchParams.importarItemId);
+    importarNoDisponible = itemImportado === null;
+  }
+
   return (
     <>
       <EncabezadoPagina
@@ -129,6 +161,12 @@ export default async function PublicarPage({
         prefillClip={prefillClip}
         itemClip={itemClip}
         clipHabilitado={clipHabilitado}
+        itemImportado={itemImportado}
+        importarOrigen={searchParams.importarOrigen ?? ""}
+        importarSkuNoEncontrado={searchParams.importarSkuNoEncontrado ?? ""}
+        importarLinkError={searchParams.importarLinkError ?? ""}
+        importarNoDisponible={importarNoDisponible}
+        cloudinaryConfigurado={cloudinaryConfigurado()}
       />
     </>
   );

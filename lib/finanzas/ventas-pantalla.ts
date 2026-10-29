@@ -257,3 +257,22 @@ export function resolverRangoVentas(
   if (dias > RANGO_MAXIMO_DIAS) return { error: `El rango puede tener como máximo ${RANGO_MAXIMO_DIAS} días (pediste ${dias}).` };
   return { rango: { desde: desde as string, hasta: hasta as string, inicio: limitesDesde.inicio, finExclusivo: limitesHasta.finExclusivo } };
 }
+
+// ---------------------------------------------------------------------------
+// URL del detalle (Finanzas → Ventas y Pedidos → Detalle día a día)
+// ---------------------------------------------------------------------------
+
+export type FiltrosUrlVentas = { cuenta?: string; desde: string; hasta: string; costo?: "con" | "sin" };
+
+// Arma el href de una página del detalle conservando los filtros. extra
+// va primero: parámetros fijos de la ruta que pinta la tabla, si los
+// tiene (hoy ni Finanzas → Ventas ni Pedidos usan ninguno).
+export function hrefVentasUtilidad(ruta: string, extra: Record<string, string>, filtros: FiltrosUrlVentas, pagina: number): string {
+  const params = new URLSearchParams(extra);
+  if (filtros.cuenta) params.set("cuenta", filtros.cuenta);
+  params.set("desde", filtros.desde);
+  params.set("hasta", filtros.hasta);
+  if (filtros.costo) params.set("costo", filtros.costo);
+  if (pagina > 1) params.set("pagina", String(pagina));
+  return `${ruta}?${params.toString()}`;
+}
