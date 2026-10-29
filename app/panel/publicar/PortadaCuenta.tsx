@@ -5,7 +5,11 @@ import { Boton } from "@/components/marco/Boton";
 import { usarSubidaFotoCloudinary } from "./usarSubidaFotoCloudinary";
 import styles from "./publicar.module.css";
 
-const TIPOS_IMAGEN_ACEPTADOS = "image/jpeg,image/png,image/webp";
+// Rama feat-publicar-fotos-zip — también admite .zip (ver el
+// comentario completo en GaleriaFotos.tsx); acá solo se toma la
+// PRIMERA imagen del ZIP para la portada (ver procesarArchivos,
+// usarSubidaFotoCloudinary.ts) — nunca un error, solo un aviso.
+const TIPOS_IMAGEN_ACEPTADOS = "image/jpeg,image/png,image/webp,.zip,application/zip,application/x-zip-compressed";
 
 // Punto 3 del feedback de Mateo (staging) — se quitó el campo "URL de
 // la foto de portada en <cuenta>": el cuadrito de portada de cada
@@ -33,7 +37,7 @@ export function PortadaCuenta({
   const [urlNueva, setUrlNueva] = useState("");
   const [canvaUrl, setCanvaUrl] = useState("");
   const inputArchivoRef = useRef<HTMLInputElement>(null);
-  const { subiendo, error, subirArchivo, subirCanvaUrl } = usarSubidaFotoCloudinary(onChange);
+  const { subiendo, error, aviso, progreso, subirCanvaUrl, procesarArchivos } = usarSubidaFotoCloudinary(onChange);
 
   function alHacerClic() {
     if (subiendo) return;
@@ -42,15 +46,18 @@ export function PortadaCuenta({
   }
 
   function alElegirArchivo(e: React.ChangeEvent<HTMLInputElement>) {
-    const archivo = e.target.files?.[0];
+    const archivos = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (archivo) subirArchivo(archivo);
+    // `true` = soloUna — la portada de una cuenta es UNA sola foto;
+    // si llega un ZIP con varias (o varios archivos sueltos a la vez),
+    // se toma solo la primera (orden natural) y se avisa, nunca error.
+    if (archivos.length) void procesarArchivos(archivos, true);
   }
 
   function alSoltar(e: React.DragEvent) {
     e.preventDefault();
-    const archivo = e.dataTransfer.files?.[0];
-    if (archivo) subirArchivo(archivo);
+    const archivos = Array.from(e.dataTransfer.files ?? []);
+    if (archivos.length) void procesarArchivos(archivos, true);
   }
 
   function confirmarUrlManual() {
@@ -107,14 +114,18 @@ export function PortadaCuenta({
             // eslint-disable-next-line @next/next/no-img-element -- URL externa/Cloudinary, sin optimizar con next/image
             <img src={imagenAMostrar} alt="" className={styles.portadaChicaImg} style={esSoloVistaPrevia ? { opacity: 0.45 } : undefined} />
           ) : null}
-          {subiendo ? (
+          {progreso ? (
+            <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, textAlign: "center" }}>
+              {progreso.actual}/{progreso.total}
+            </span>
+          ) : subiendo ? (
             <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9 }}>Subiendo…</span>
           ) : !imagenAMostrar ? (
             <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>+</span>
           ) : null}
         </button>
       )}
-      <input ref={inputArchivoRef} type="file" accept={TIPOS_IMAGEN_ACEPTADOS} onChange={alElegirArchivo} hidden />
+      <input ref={inputArchivoRef} type="file" accept={TIPOS_IMAGEN_ACEPTADOS} multiple onChange={alElegirArchivo} hidden />
 
       {cloudinaryConfigurado && (
         <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 3 }}>
@@ -134,6 +145,7 @@ export function PortadaCuenta({
           </Boton>
         </div>
       )}
+      {aviso && <p style={{ fontSize: 9, color: "var(--texto-suave)", marginTop: 3 }}>{aviso}</p>}
       {error && <p style={{ fontSize: 9, color: "var(--kpi-peligro-texto)", marginTop: 3 }}>{error}</p>}
     </div>
   );

@@ -14,20 +14,21 @@
     "extension:zip": "node scripts/empaquetar-extension.js"
   },
   "dependencies": {
-    "next": "14.2.35",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
+    "@clerk/nextjs": "6.39.8",
     "drizzle-orm": "0.36.4",
+    "fflate": "^0.8.3",
+    "next": "14.2.35",
     "postgres": "3.4.5",
-    "@clerk/nextjs": "6.39.8"
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
-    "typescript": "5.7.2",
     "@types/node": "20.17.9",
     "@types/react": "18.3.17",
     "@types/react-dom": "18.3.5",
     "drizzle-kit": "0.28.1",
     "tsx": "4.19.2",
+    "typescript": "5.7.2",
     "vitest": "2.1.8"
   }
 }

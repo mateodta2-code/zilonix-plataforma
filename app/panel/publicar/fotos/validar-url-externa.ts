@@ -1,5 +1,13 @@
 import { lookup } from "dns/promises";
 import { isIP } from "net";
+import { tipoImagenPorMagicBytes, type TipoImagenDetectado } from "./magic-bytes";
+
+// Re-exportado tal cual — el resto del repo (app/api/ml/publicar/fotos/
+// route.ts, sus tests) sigue importando esto desde acá, nunca hace
+// falta tocar esos imports. La función en sí ahora vive en
+// magic-bytes.ts (sin imports de Node) para que el código de ZIP del
+// lado del cliente (rama feat-publicar-fotos-zip) también pueda usarla.
+export { tipoImagenPorMagicBytes, type TipoImagenDetectado };
 
 // Parte 3, punto C — Canva. El pedido de Mateo descarta aceptar el link
 // de "compartir" del diseño (canva.com/design/...): esa página es HTML
@@ -28,42 +36,6 @@ const TIMEOUT_MS = 8_000;
 // — una foto de producto bien comprimida nunca necesita más que esto.
 export const TAMANO_MAXIMO_FOTO_EXTERNA_BYTES = 10 * 1024 * 1024;
 const TIPOS_IMAGEN_VALIDOS = new Set(["image/jpeg", "image/png", "image/webp"]);
-
-// Revisión de seguridad (hallazgo MED) — el Content-Type que manda el
-// servidor (header HTTP, o `file.type` que pone el propio navegador en
-// una subida) nunca es prueba real de qué bytes son esos: un archivo
-// de texto cualquiera puede declararse "image/jpeg" sin que nada lo
-// verifique. Se confirma contra los primeros bytes REALES del archivo
-// (firma binaria real de cada formato) antes de subir nada a
-// Cloudinary — nunca se confía solo en el header/MIME declarado.
-export type TipoImagenDetectado = "image/jpeg" | "image/png" | "image/webp";
-
-export function tipoImagenPorMagicBytes(buffer: Buffer | Uint8Array): TipoImagenDetectado | null {
-  // JPEG: FF D8 FF (los 3 primeros bytes de cualquier JPEG real).
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
-  // PNG: firma completa de 8 bytes (89 50 4E 47 0D 0A 1A 0A) — el
-  // pedido menciona los primeros 4 ("89 50 4E 47"), se confirma la
-  // firma real completa, más estricta, nunca menos.
-  if (
-    buffer.length >= 8 &&
-    buffer[0] === 0x89 &&
-    buffer[1] === 0x50 &&
-    buffer[2] === 0x4e &&
-    buffer[3] === 0x47 &&
-    buffer[4] === 0x0d &&
-    buffer[5] === 0x0a &&
-    buffer[6] === 0x1a &&
-    buffer[7] === 0x0a
-  ) {
-    return "image/png";
-  }
-  // WEBP: contenedor RIFF — bytes 0-3 "RIFF", bytes 8-11 "WEBP"
-  // (bytes 4-7 son el tamaño del archivo, varían siempre).
-  if (buffer.length >= 12 && String.fromCharCode(...buffer.subarray(0, 4)) === "RIFF" && String.fromCharCode(...buffer.subarray(8, 12)) === "WEBP") {
-    return "image/webp";
-  }
-  return null;
-}
 
 // Rangos privados/especiales reales (RFC 1918, RFC 3927, loopback,
 // CGNAT, y 169.254.169.254 — la IP de metadata de AWS/GCP/Azure, el

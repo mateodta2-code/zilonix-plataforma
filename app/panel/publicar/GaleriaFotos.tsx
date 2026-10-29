@@ -6,7 +6,10 @@ import { moverFoto } from "./formulario-logica";
 import { usarSubidaFotoCloudinary } from "./usarSubidaFotoCloudinary";
 import styles from "./publicar.module.css";
 
-const TIPOS_IMAGEN_ACEPTADOS = "image/jpeg,image/png,image/webp";
+// Rama feat-publicar-fotos-zip — el accept también admite .zip (el
+// respaldo "sin Canva": el negocio descarga su diseño de Canva como
+// ZIP cuando tiene varias páginas, y lo suelta acá tal cual).
+const TIPOS_IMAGEN_ACEPTADOS = "image/jpeg,image/png,image/webp,.zip,application/zip,application/x-zip-compressed";
 
 // Feedback real de Mateo probando en staging — la tarjeta "+" dejó de
 // ser "escribir una URL a mano" y pasó a ser "subir un archivo de la
@@ -30,7 +33,13 @@ export function GaleriaFotos({
   cloudinaryConfigurado,
 }: {
   urls: string[];
-  onChange: (urls: string[]) => void;
+  // Acepta también la forma "actualizador" (como useState) — el "+"
+  // ahora puede subir VARIAS imágenes seguidas (archivos sueltos o un
+  // ZIP): cada una se agrega sobre el valor MÁS RECIENTE, nunca sobre
+  // una foto de `urls` tomada al momento del clic (esa foto quedaría
+  // vieja apenas la primera subida terminara, y la segunda pisaría a
+  // la primera en vez de sumarse).
+  onChange: (urls: string[] | ((anteriores: string[]) => string[])) => void;
   cloudinaryConfigurado: boolean;
 }) {
   const [agregandoUrlManual, setAgregandoUrlManual] = useState(false);
@@ -40,19 +49,26 @@ export function GaleriaFotos({
 
   const [canvaUrl, setCanvaUrl] = useState("");
   const inputArchivoRef = useRef<HTMLInputElement>(null);
-  const { subiendo, error: errorSubida, subirArchivo, subirCanvaUrl } = usarSubidaFotoCloudinary((url) => onChange([...urls, url]));
+  const {
+    subiendo,
+    error: errorSubida,
+    aviso,
+    progreso,
+    subirCanvaUrl,
+    procesarArchivos,
+  } = usarSubidaFotoCloudinary((url) => onChange((anteriores) => [...anteriores, url]));
 
   function confirmarAgregarUrlManual() {
     const limpia = urlNueva.trim();
-    if (limpia) onChange([...urls, limpia]);
+    if (limpia) onChange((anteriores) => [...anteriores, limpia]);
     setUrlNueva("");
     setAgregandoUrlManual(false);
   }
 
   function alElegirArchivo(e: React.ChangeEvent<HTMLInputElement>) {
-    const archivo = e.target.files?.[0];
-    e.target.value = ""; // permite elegir el MISMO archivo dos veces seguidas
-    if (archivo) subirArchivo(archivo);
+    const archivos = Array.from(e.target.files ?? []);
+    e.target.value = ""; // permite elegir los MISMOS archivos dos veces seguidas
+    if (archivos.length) void procesarArchivos(archivos, false);
   }
 
   function confirmarCanvaUrl() {
@@ -67,15 +83,16 @@ export function GaleriaFotos({
 
   // Un drop puede ser 2 cosas bien distintas: reordenar una miniatura
   // que YA está en la galería (arrastrada desde otra miniatura de acá
-  // mismo, sin ningún `File` real adentro de dataTransfer) o soltar un
-  // archivo real desde el escritorio/explorador (dataTransfer.files
-  // con contenido) — se mira `files` primero para no confundir una
+  // mismo, sin ningún `File` real adentro de dataTransfer) o soltar
+  // uno o varios archivos reales desde el escritorio/explorador
+  // (dataTransfer.files con contenido, puede ser más de uno, puede
+  // incluir un .zip) — se mira `files` primero para no confundir una
   // cosa con la otra.
   function alSoltar(e: React.DragEvent, indiceDestino: number) {
     e.preventDefault();
-    const archivo = e.dataTransfer.files?.[0];
-    if (archivo) {
-      subirArchivo(archivo);
+    const archivos = Array.from(e.dataTransfer.files ?? []);
+    if (archivos.length) {
+      void procesarArchivos(archivos, false);
       return;
     }
     if (indiceArrastrado == null) return;
@@ -85,8 +102,8 @@ export function GaleriaFotos({
 
   function alSoltarEnAgregar(e: React.DragEvent) {
     e.preventDefault();
-    const archivo = e.dataTransfer.files?.[0];
-    if (archivo) subirArchivo(archivo);
+    const archivos = Array.from(e.dataTransfer.files ?? []);
+    if (archivos.length) void procesarArchivos(archivos, false);
   }
 
   function alHacerClicEnAgregar() {
@@ -121,7 +138,7 @@ export function GaleriaFotos({
           </div>
         ))}
 
-        <input ref={inputArchivoRef} type="file" accept={TIPOS_IMAGEN_ACEPTADOS} onChange={alElegirArchivo} hidden />
+        <input ref={inputArchivoRef} type="file" accept={TIPOS_IMAGEN_ACEPTADOS} multiple onChange={alElegirArchivo} hidden />
 
         {agregandoUrlManual ? (
           <div className={`${styles.recuadroMarca} ${styles.miniatura}`} style={{ cursor: "default", display: "flex", flexDirection: "column", padding: 4, gap: 4 }}>
@@ -152,9 +169,20 @@ export function GaleriaFotos({
             onDrop={alSoltarEnAgregar}
             className={`${styles.recuadroMarca} ${styles.tarjetaAgregar}`}
             disabled={subiendo}
-            aria-label={cloudinaryConfigurado ? "Subir foto desde la PC" : "Agregar foto"}
+            aria-label={cloudinaryConfigurado ? "Subir fotos desde la PC (archivos sueltos o un ZIP)" : "Agregar foto"}
           >
-            {subiendo ? <span style={{ fontSize: 11 }}>Subiendo…</span> : "+"}
+            {/* Punto del pedido — "muestra el progreso ('Subiendo 3 de 8')". */}
+            {progreso ? (
+              <span style={{ fontSize: 10, textAlign: "center" }}>
+                Subiendo
+                <br />
+                {progreso.actual} de {progreso.total}
+              </span>
+            ) : subiendo ? (
+              <span style={{ fontSize: 11 }}>Subiendo…</span>
+            ) : (
+              "+"
+            )}
           </button>
         )}
       </div>
@@ -183,6 +211,7 @@ export function GaleriaFotos({
               Traer
             </Boton>
           </div>
+          {aviso && <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 6 }}>{aviso}</p>}
           {errorSubida && <p style={{ fontSize: 12, color: "var(--kpi-peligro-texto)", marginTop: 6 }}>{errorSubida}</p>}
         </>
       ) : (
