@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { FormularioPublicar } from "./FormularioPublicar";
-import { SeccionesImportarPlaceholder } from "./SeccionesImportarPlaceholder";
+import { SeccionesImportar } from "./SeccionesImportar";
 import type { Cuenta } from "./CuentasDestino";
 import { HistorialPublicaciones, type ProductoHistorial } from "./HistorialPublicaciones";
 import { SeccionClip, type ItemClip, type PrefillClip } from "./SeccionClip";
-import { construirEstadoInicial, type EstadoInicialFormulario } from "./formulario-logica";
+import { construirEstadoInicial, construirEstadoInicialDesdeImportacion, type EstadoInicialFormulario, type ItemImportado } from "./formulario-logica";
 import styles from "./publicar.module.css";
 
 export type { Cuenta };
@@ -56,6 +56,11 @@ export function PaginaPublicar({
   prefillClip,
   itemClip,
   clipHabilitado,
+  itemImportado,
+  importarOrigen,
+  importarSkuNoEncontrado,
+  importarLinkError,
+  importarNoDisponible,
 }: {
   cuentas: Cuenta[];
   historial: ProductoHistorial[];
@@ -63,14 +68,36 @@ export function PaginaPublicar({
   prefillClip: PrefillClip;
   itemClip: ItemClip;
   clipHabilitado: boolean;
+  itemImportado: ItemImportado | null;
+  importarOrigen: string;
+  importarSkuNoEncontrado: string;
+  importarLinkError: string;
+  importarNoDisponible: boolean;
 }) {
-  const [formInicial, setFormInicial] = useState<EstadoInicialFormulario>(() =>
-    prefillNuevo.titulo || prefillNuevo.precio || prefillNuevo.foto ? estadoInicialDesdePrefill(cuentas, prefillNuevo) : estadoInicialVacio()
-  );
+  const [formInicial, setFormInicial] = useState<EstadoInicialFormulario>(() => {
+    // Parte 3, punto A — un ítem importado (por SKU o por link, ya
+    // resuelto en page.tsx) tiene prioridad sobre el prefill angosto de
+    // Investigación: si llegó acá con ambos a la vez es porque la
+    // persona disparó un importador desde esta misma página, el prefill
+    // de Investigación es de la visita anterior.
+    if (itemImportado) return construirEstadoInicialDesdeImportacion(cuentas.map((c) => c.id), itemImportado);
+    return prefillNuevo.titulo || prefillNuevo.precio || prefillNuevo.foto ? estadoInicialDesdePrefill(cuentas, prefillNuevo) : estadoInicialVacio();
+  });
   const [formKey, setFormKey] = useState(0);
 
   function cargarEnFormulario(producto: ProductoHistorial, modo: "reintentar" | "duplicar") {
     setFormInicial(construirEstadoInicial(producto, modo));
+    setFormKey((k) => k + 1);
+    document.getElementById("formulario-publicar")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // Parte 3, punto A.3 — el bookmarklet nunca recarga la página (el
+  // pegado/parseo es enteramente del cliente): a diferencia de SKU/link
+  // (que llegan con itemImportado ya resuelto desde el mount, por el
+  // query de un redirect), este camino hidrata el formulario en vivo,
+  // igual que "Cargar/Reintentar" del historial.
+  function importarEnFormulario(item: ItemImportado) {
+    setFormInicial(construirEstadoInicialDesdeImportacion(cuentas.map((c) => c.id), item));
     setFormKey((k) => k + 1);
     document.getElementById("formulario-publicar")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -85,18 +112,27 @@ export function PaginaPublicar({
         </p>
       </Tarjeta>
 
-      {/* --- Punto 2: importadores (placeholder, Parte 3) --- */}
+      {/* --- Punto 2: importadores (Parte 3) --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Importar desde otra publicación</p>
-        <SeccionesImportarPlaceholder />
+        <SeccionesImportar
+          cuentas={cuentas}
+          itemImportado={itemImportado}
+          importarOrigen={importarOrigen}
+          skuNoEncontrado={importarSkuNoEncontrado}
+          linkError={importarLinkError}
+          noDisponible={importarNoDisponible}
+          onImportarBookmarklet={importarEnFormulario}
+        />
       </Tarjeta>
 
       {/* --- Puntos 3-7: el formulario (cuentas, datos, por cuenta, categoría, publicar) --- */}
       <FormularioPublicar key={formKey} cuentas={cuentas} inicial={formInicial} />
 
-      {/* --- Punto 8: historial --- */}
+      {/* --- Punto 8: historial (y, Parte 3 punto B, el permalink real por cuenta) --- */}
       <HistorialPublicaciones
         productos={historial}
+        cuentas={cuentas}
         onCargar={(p) => cargarEnFormulario(p, "reintentar")}
         onDuplicar={(p) => cargarEnFormulario(p, "duplicar")}
       />

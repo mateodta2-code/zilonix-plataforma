@@ -6,8 +6,9 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Chip } from "@/components/marco/Chip";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import type { Cuenta } from "./CuentasDestino";
 import { borrarProductoAction } from "./actions";
-import { formatearFechaBogota, resumenEstadoProducto, type FilaProductoParaCargar } from "./formulario-logica";
+import { enlacesPermalink, formatearFechaBogota, resumenEstadoProducto, type FilaProductoParaCargar } from "./formulario-logica";
 
 export type ProductoHistorial = FilaProductoParaCargar & {
   id: string;
@@ -46,10 +47,12 @@ function EstadoCelda({ producto }: { producto: ProductoHistorial }) {
 // publicación real.
 export function HistorialPublicaciones({
   productos,
+  cuentas,
   onCargar,
   onDuplicar,
 }: {
   productos: ProductoHistorial[];
+  cuentas: Cuenta[];
   onCargar: (producto: ProductoHistorial) => void;
   onDuplicar: (producto: ProductoHistorial) => void;
 }) {
@@ -62,9 +65,27 @@ export function HistorialPublicaciones({
           <EstadoVacio>Todavía no se publicó ningún producto.</EstadoVacio>
         ) : (
           <Tabla encabezados={["Título", "Precio", "Estado", "", "Fecha", "Acciones"]}>
-            {productos.map((p) => (
+            {productos.map((p) => {
+              const enlaces = enlacesPermalink(p.resultado, cuentas);
+              return (
               <FilaTabla key={p.id}>
-                <CeldaTabla>{p.titulo || "(sin título)"}</CeldaTabla>
+                <CeldaTabla>
+                  {p.titulo || "(sin título)"}
+                  {/* Punto B del pedido — "el nombre de la cuenta o un
+                  link debe abrir ese permalink. No inventes columna":
+                  se agrega DENTRO de la celda de título que ya existía,
+                  nunca un <th> nuevo. Un enlace por cuenta que publicó
+                  OK (y uno por ítem de familia, si hubo variantes). */}
+                  {enlaces.length > 0 && (
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {enlaces.map((e, i) => (
+                        <a key={`${e.cuentaMlId}-${i}`} href={e.permalink} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+                          Ver en {e.etiqueta} ↗
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </CeldaTabla>
                 <CeldaTabla>${Number(p.precio).toLocaleString("es-CO")}</CeldaTabla>
                 <CeldaTabla>
                   <EstadoCelda producto={p} />
@@ -101,7 +122,8 @@ export function HistorialPublicaciones({
                   </div>
                 </CeldaTabla>
               </FilaTabla>
-            ))}
+              );
+            })}
           </Tabla>
         )}
       </div>

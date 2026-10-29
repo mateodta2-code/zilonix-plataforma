@@ -12,7 +12,9 @@ import {
   leerCategoriaMl,
   leerCategoriasRaizMl,
   leerCuentaMl,
+  leerDescripcionItemMl,
   leerItemBasicoMl,
+  leerItemCompletoMl,
   LimiteMercadoLibreError,
   pedirLecturaMl,
   linkPublicacion,
@@ -840,5 +842,87 @@ describe("confirmarRecursoProductoMl — confirmar item/product contra ML antes 
     vi.stubGlobal("fetch", fetchMock);
     await expect(confirmarRecursoProductoMl("no-es-un-id-ml")).resolves.toEqual({ estado: "transitorio" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// Parte 3 ("importadores + permalink + fotos Cloudinary + botón
+// extensión"), punto A — leerItemCompletoMl/leerDescripcionItemMl son
+// el wrapper más rico que hacía falta para precargar el formulario de
+// Publicar desde un SKU/link propio (title/thumbnail de leerItemBasicoMl
+// no alcanzaba: faltaba precio, stock, condición, galería completa y el
+// SKU propio). Avisado antes de tocar lib/ml/cliente.ts.
+describe("leerItemCompletoMl/leerDescripcionItemMl — Parte 3, punto A (importar por SKU/link)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("leerItemCompletoMl: itemId inválido nunca llama a fetch, devuelve null", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(leerItemCompletoMl("'; DROP TABLE x; --", "token")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("leerItemCompletoMl: trae title/price/available_quantity/condition/pictures/permalink/sku propio", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto importado",
+          price: 25000,
+          available_quantity: 7,
+          condition: "new",
+          pictures: [{ url: "https://x/foto1.jpg" }, { url: "https://x/foto2.jpg" }, { sin_url: true }],
+          permalink: "https://articulo.mercadolibre.com.co/MCO-111",
+          seller_custom_field: "SKU-PROPIO",
+        })
+      )
+    );
+    const r = await leerItemCompletoMl("MCO111", "token");
+    expect(r).toEqual({
+      itemId: "MCO111",
+      title: "Producto importado",
+      price: 25000,
+      availableQuantity: 7,
+      condition: "new",
+      pictures: ["https://x/foto1.jpg", "https://x/foto2.jpg"],
+      permalink: "https://articulo.mercadolibre.com.co/MCO-111",
+      sellerCustomField: "SKU-PROPIO",
+    });
+  });
+
+  it("leerItemCompletoMl: NO filtra por status (a diferencia de obtenerItemMl) — una publicación propia pausada también se puede importar", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Pausada", price: 1000, status: "paused" })));
+    const r = await leerItemCompletoMl("MCO111", "token");
+    expect(r?.title).toBe("Pausada");
+  });
+
+  it("leerItemCompletoMl: 403/5xx de Mercado Libre se tragan como null (enriquecimiento, nunca tira abajo el importador)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(leerItemCompletoMl("MCO111", "token")).resolves.toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 503)));
+    await expect(leerItemCompletoMl("MCO111", "token")).resolves.toBeNull();
+  });
+
+  it("leerDescripcionItemMl: itemId inválido nunca llama a fetch, devuelve null", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(leerDescripcionItemMl("no-es-un-id", "token")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("leerDescripcionItemMl: prefiere plain_text sobre text", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ plain_text: "Texto plano", text: "<p>Texto con HTML</p>" })));
+    await expect(leerDescripcionItemMl("MCO111", "token")).resolves.toBe("Texto plano");
+  });
+
+  it("leerDescripcionItemMl: sin plain_text, cae a text", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ text: "Solo text" })));
+    await expect(leerDescripcionItemMl("MCO111", "token")).resolves.toBe("Solo text");
+  });
+
+  it("leerDescripcionItemMl: 404 (publicación sin descripción cargada) es null, nunca lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+    await expect(leerDescripcionItemMl("MCO111", "token")).resolves.toBeNull();
   });
 });
