@@ -1,9 +1,10 @@
 import { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { cifrarToken } from "../lib/cifrado";
+import { SQL_BACKFILL_PERMISOS_PROMOCIONES } from "../lib/ml/backfill-permisos-promociones";
 import { dbComoEmpresa } from "./empresa-context";
-import { cuentasMl, iaConexiones, promocionesAcciones, promocionesCandidatos, promocionesReglas } from "./schema";
+import { cuentasMl, iaConexiones, permisosRol, promocionesAcciones, promocionesCandidatos, promocionesReglas, roles } from "./schema";
 import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 
 async function crearCuentaMl(empresaId: string, nickname: string) {
@@ -144,5 +145,47 @@ describe("promociones_reglas/candidatos/acciones + ia_conexiones (RLS, rama feat
       tx.insert(iaConexiones).values({ empresaId: empresaAId, proveedor: "anthropic", modelo: "claude-sonnet-5", apiKeyCifrada: cifrarToken(claveReal) }).returning()
     );
     expect(JSON.stringify(fila.apiKeyCifrada)).not.toContain(claveReal);
+  });
+
+  // Rama fix-promociones-permisos-dueno — mismo criterio real que
+  // db/rls-publicidad.test.ts (issue #254): el backfill de la
+  // migración 0018 le da promociones.* a roles ya creados ANTES de que
+  // existiera el módulo, nunca a Contador (que no debería tenerlo), y
+  // corre dos veces sin duplicar filas (NOT EXISTS, idempotente).
+  it("el backfill de la migración 0018 da promociones.* a roles ya creados y no se lo da al Contador", async () => {
+    const contexto = await crearDosEmpresas();
+    const gerenteId = randomUUID();
+    const duenoId = randomUUID();
+    const operadorId = randomUUID();
+    const contadorId = randomUUID();
+    await dbComoEmpresa(contexto.empresaAId, async (tx) => {
+      await tx.insert(roles).values([
+        { id: gerenteId, nombre: "Gerente", empresaId: contexto.empresaAId },
+        { id: duenoId, nombre: "Dueño", empresaId: contexto.empresaAId },
+        { id: operadorId, nombre: "Operador", empresaId: contexto.empresaAId },
+        { id: contadorId, nombre: "Contador", empresaId: contexto.empresaAId },
+      ]);
+      await tx.insert(permisosRol).values({ id: randomUUID(), rolId: contadorId, modulo: "finanzas", accion: "consultar", alcance: "todo" });
+      for (const sentencia of SQL_BACKFILL_PERMISOS_PROMOCIONES) {
+        await tx.execute(sql.raw(sentencia));
+      }
+      // Corre dos veces a propósito — el NOT EXISTS tiene que frenar
+      // la segunda pasada sin duplicar ninguna fila.
+      for (const sentencia of SQL_BACKFILL_PERMISOS_PROMOCIONES) {
+        await tx.execute(sql.raw(sentencia));
+      }
+    });
+
+    const filas = await dbComoEmpresa(contexto.empresaAId, (tx) =>
+      tx
+        .select({ rolId: permisosRol.rolId, accion: permisosRol.accion })
+        .from(permisosRol)
+        .where(eq(permisosRol.modulo, "promociones"))
+    );
+    const de = (rolId: string) => filas.filter((f) => f.rolId === rolId).map((f) => f.accion).sort();
+    expect(de(gerenteId)).toEqual(["aprobar", "consultar", "ejecutar"]);
+    expect(de(duenoId)).toEqual(["anular", "aprobar", "autorizar", "consultar", "crear", "ejecutar", "modificar"]);
+    expect(de(operadorId)).toEqual(["consultar"]);
+    expect(de(contadorId)).toEqual([]);
   });
 });

@@ -57,12 +57,13 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       // sin grupos de empresa hardcodeados: cualquier empresa con ese
       // permiso ve el ítem, nunca una lista fija de nombres.
       ...(veSku ? [{ etiqueta: "Publicar", href: "/panel/publicar", icono: "publicar" as const }] : []),
+      // Rama fix-promociones-permisos-dueno — movida a justo debajo de
+      // "Publicar" (antes vivía después de Publicidad): mismo permiso
+      // de módulo de siempre ("promociones","consultar"), sin ninguna
+      // lista fija de cuentas/empresas; solo cambia el orden en el menú.
+      ...(vePromociones ? [{ etiqueta: "Promociones", href: "/panel/promociones", icono: "promociones" as const }] : []),
       ...(veFinanzas ? [{ etiqueta: "Finanzas", href: "/panel/finanzas", icono: "finanzas" as const }] : []),
       ...(vePublicidad ? [{ etiqueta: "Publicidad", href: "/panel/publicidad", icono: "publicidad" as const }] : []),
-      // Rama feat-promociones — mismo permiso de módulo que el resto
-      // ("promociones","consultar"), sin ninguna lista fija de
-      // cuentas/empresas.
-      ...(vePromociones ? [{ etiqueta: "Promociones", href: "/panel/promociones", icono: "promociones" as const }] : []),
       ...(veActividad ? [{ etiqueta: "Actividad", href: "/panel/actividad", icono: "actividad" as const }] : []),
       // Rama feat-promociones, punto 6 — "Conexión de IA" vive en
       // Configuración, mismo permiso que Actividad (ambos leen
