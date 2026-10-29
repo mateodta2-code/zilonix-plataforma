@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { productosMl } from "@/db/schema";
@@ -8,19 +7,32 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { linkHttpSeguro } from "@/lib/ml/listadoCliente";
+import { SinAcceso } from "@/components/marco/SinAcceso";
+import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { PaginaPublicar } from "./PaginaPublicar";
+import type { ProductoHistorial } from "./HistorialPublicaciones";
+import { buscarItemConDatos } from "./clip/buscar-item";
 
-const ETIQUETA_ESTADO: Record<string, string> = {
-  borrador: "Borrador",
-  publicando: "Publicando…",
-  publicado: "Publicado",
-  con_errores: "Con errores",
-};
-
-// Tarea 2.11 ("Publicar producto y clip") — historial de intentos de
-// publicación. Cada fila es una de las cuentas elegidas; el resultado
-// detallado (atributos asumidos, avisos, diagnóstico de fallos) vive en
-// /panel/publicar/[id].
-export default async function PublicarPage() {
+// Parte 2 (página única, estructura de Zilonix OS) — reemplaza las 4
+// pantallas sueltas de la Parte 1 (/panel/publicar historial,
+// /nuevo, /[id], /clip) por UNA sola, de arriba a abajo. Esta página
+// (Server Component) solo resuelve sesión/empresa/permiso, trae las
+// cuentas conectadas y el historial (últimos 50), y lee los 2 juegos
+// de query params que todavía pueden llegar de afuera: el prefill de
+// Investigación (titulo/precio/foto) y el de Clip (cuentaId/sku/
+// itemId/clipSubido/error, reenviados por los redirects de
+// /nuevo y /clip — ver esos page.tsx). Todo el estado INTERACTIVO
+// (qué cuenta está marcada, qué producto se cargó para reintentar...)
+// vive en PaginaPublicar.tsx ("use client"), porque "Cargar/
+// Reintentar" y "Duplicar" necesitan repoblar el formulario de arriba
+// SIN navegar — no hay forma de hacer eso con una Server Action sola.
+export default async function PublicarPage({
+  searchParams,
+}: {
+  searchParams: { titulo?: string; precio?: string; foto?: string; cuentaId?: string; sku?: string; itemId?: string; clipSubido?: string; error?: string };
+}) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
 
@@ -34,54 +46,90 @@ export default async function PublicarPage() {
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
-    return (
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
-        <p>Tu rol ({miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.</p>
-        <Link href="/panel">Volver al panel</Link>
-      </main>
-    );
+    return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
-  const historial = await dbComoEmpresa(empresa.id, (tx) =>
-    tx.select().from(productosMl).where(eq(productosMl.empresaId, empresa.id)).orderBy(desc(productosMl.creadoTs))
+  const cuentas = (await listarCuentasConectadas(empresa.id)).filter((c) => !c.desconectadaTs);
+
+  const filasHistorial = await dbComoEmpresa(empresa.id, (tx) =>
+    tx.select().from(productosMl).where(eq(productosMl.empresaId, empresa.id)).orderBy(desc(productosMl.creadoTs)).limit(50)
   );
+  // Punto 8 del pedido — "Paginar o limitar a los últimos 50" (arriba,
+  // .limit(50)); acá solo se adapta la forma de la fila (jsonb ya
+  // viene tipado por db/schema.ts, timestamp pasa a ISO string al
+  // cruzar a un componente cliente) — nunca una consulta nueva.
+  const historial: ProductoHistorial[] = filasHistorial.map((p) => ({
+    id: p.id,
+    titulo: p.titulo,
+    estado: p.estado,
+    creadoTs: p.creadoTs.toISOString(),
+    precio: p.precio,
+    stock: p.stock,
+    condicion: p.condicion,
+    envioGratis: p.envioGratis,
+    sku: p.sku,
+    dimensiones: p.dimensiones,
+    imagenes: p.imagenes,
+    atributosExtra: p.atributosExtra,
+    categoriasOverride: p.categoriasOverride,
+    variantes: p.variantes,
+    porCuenta: p.porCuenta,
+    cuentasSeleccionadas: p.cuentasSeleccionadas,
+    resultado: p.resultado,
+    modoPrueba: p.modoPrueba,
+  }));
+
+  // Punto 8 del pedido original (Investigación → Publicar, ya
+  // vigente desde la Parte 1) — título/precio van directo a un
+  // <input> de React (nunca innerHTML); la foto se sanea con
+  // linkHttpSeguro (mismo helper de siempre) antes de usarla.
+  const prefillNuevo = {
+    titulo: (searchParams.titulo ?? "").slice(0, 60),
+    precio: searchParams.precio && Number.isFinite(Number(searchParams.precio)) ? searchParams.precio : "",
+    foto: linkHttpSeguro(searchParams.foto ?? null) ?? "",
+  };
+
+  // Rutas viejas /panel/publicar/clip (y el POST real a /api/ml/clip)
+  // redirigen ACÁ reenviando estos mismos query params — nunca se
+  // pierde el estado de "ya encontré un ítem por SKU" al consolidar
+  // las 2 pantallas en una.
+  const prefillClip = {
+    cuentaId: searchParams.cuentaId ?? "",
+    sku: searchParams.sku ?? "",
+    itemId: searchParams.itemId ?? "",
+    clipSubido: searchParams.clipSubido === "1",
+    error: searchParams.error ?? "",
+  };
+
+  // El lookup real (buscarItemConDatos, lib/ml/clip.ts) sigue siendo
+  // SOLO del servidor (token de la cuenta) — antes vivía en
+  // clip/page.tsx; esta página lo hace una vez, antes de renderizar,
+  // igual que esa pantalla ya hacía.
+  const clipHabilitado = process.env.CLIP_HABILITADO === "true";
+  let itemClip: { itemId: string; titulo: string; thumbnail: string | null } | null = null;
+  if (clipHabilitado) {
+    const cuentaClip = cuentas.find((c) => c.id === prefillClip.cuentaId);
+    if (cuentaClip && prefillClip.sku) {
+      itemClip = await buscarItemConDatos(empresa.id, cuentaClip.id, cuentaClip.cuentaIdExterna, prefillClip.sku);
+    } else if (cuentaClip && prefillClip.itemId) {
+      itemClip = { itemId: prefillClip.itemId, titulo: prefillClip.itemId, thumbnail: null };
+    }
+  }
 
   return (
-    <main style={{ maxWidth: 560, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>Publicar en Mercado Libre</h1>
-
-      <div style={{ display: "flex", gap: 16, marginTop: 16, fontSize: 13 }}>
-        <Link href="/panel/publicar/nuevo" style={{ fontWeight: 600 }}>
-          + Publicar producto nuevo
-        </Link>
-        {/* ADENDO UX de Publicar, punto 7 — bandera CLIP_HABILITADO
-        (env): Clip exige que la cuenta ya tenga reputación real en
-        Mercado Libre (color de reputación, ver
-        lib/ml/publicar-reglas.ts, clipRequiereReputacion) — ninguna
-        cuenta de prueba la tiene, así que mostrarlo sin esa condición
-        cumplida solo confunde. Si falta o es "false", se oculta —
-        nunca se oculta por accidente dejándolo sin definir en
-        producción (false explícito es el default seguro). */}
-        {process.env.CLIP_HABILITADO === "true" && <Link href="/panel/publicar/clip">Subir Clip a una publicación existente</Link>}
-      </div>
-
-      <ul style={{ listStyle: "none", padding: 0, marginTop: 24 }}>
-        {historial.map((p) => (
-          <li key={p.id} style={{ padding: "10px 0", borderBottom: "1px solid #eee", fontSize: 14 }}>
-            <Link href={`/panel/publicar/${p.id}`}>
-              <strong>{p.titulo || "(sin título)"}</strong>
-              <span style={{ opacity: 0.6, marginLeft: 8, fontSize: 12 }}>{ETIQUETA_ESTADO[p.estado] ?? p.estado}</span>
-            </Link>
-          </li>
-        ))}
-        {historial.length === 0 && <p style={{ opacity: 0.7, fontSize: 14 }}>Todavía no se publicó ningún producto.</p>}
-      </ul>
-
-      <p style={{ marginTop: 24 }}>
-        <Link href="/panel/sku" style={{ fontSize: 13 }}>
-          Volver a SKU
-        </Link>
-      </p>
-    </main>
+    <>
+      <EncabezadoPagina
+        titulo="Publicar en Mercado Libre"
+        descripcion="Elige las cuentas destino — cada una tiene su propio título, descripción y foto de portada. Precio, stock, SKU y el resto de fotos son iguales para todas. Publicación tipo Premium con garantía del vendedor de 30 días, siempre."
+      />
+      <PaginaPublicar
+        cuentas={cuentas.map((c) => ({ id: c.id, nickname: c.nickname }))}
+        historial={historial}
+        prefillNuevo={prefillNuevo}
+        prefillClip={prefillClip}
+        itemClip={itemClip}
+        clipHabilitado={clipHabilitado}
+      />
+    </>
   );
 }
