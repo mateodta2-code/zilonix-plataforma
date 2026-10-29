@@ -25,3 +25,31 @@
   - "Operaciones" no recibió el módulo `promociones` esta vuelta, aunque un comentario viejo en `lib/roles-plantillas.ts` lo anticipaba — decisión explícita de Mateo para esta tarea (solo Dueño/Gerente/Operador), se puede ampliar después.
 
   Verificado: `npm run typecheck` en verde. `npx vitest run`: ~1670 pruebas en verde (mismo baseline de archivos fallando solo por `DATABASE_URL_APP` ausente en este entorno, sin regresión real — 1 test de `scripts/humo.test.ts` resultó flaky bajo la carga de la suite completa, confirmado en verde al correrlo solo). `npm run build`: compila y tipa en verde; falla después en el mismo punto ya conocido (`DATABASE_URL_APP` ausente al recolectar datos de página) — sin relación con este cambio.
+
+- **2026-10-29 (Refs #44) — Ronda de revisión de código (Pablo): todos los HIGH y MED, más LOW 10 y 11.**
+
+  **HIGH 1 — migración real** — `cuentas_ml` nunca tuvo un `UNIQUE(empresa_id, id)` propio; las 3 FK compuestas nuevas de la 0017 (`*_empresa_cuenta_fk`, contra `cuentas_ml(empresa_id, id)`) habrían fallado al correr contra Postgres real (nunca se notó local: `drizzle-kit` solo genera SQL, no lo ejecuta). Se agregó `cuentas_ml_empresa_id_unica` en `schema.ts` y al INICIO de `0017_promociones.sql` (mismo patrón que `skus`/`bodegas`, 0015/0016) — migración hand-editada a propósito, con su `meta/0017_snapshot.json`, verificado con `drizzle-kit check` y `db:generate` (sin diff pendiente).
+
+  **HIGH 2 — seguridad de dinero** — nuevo `lib/ml/promocionesEjecucion.ts`: único lugar que decide si una acción se puede escribir en Mercado Libre. `validarCandidatoParaEscritura` relee el candidato de la empresa, reglas y piso FRESCOS (nunca el snapshot ni nada que mande el cliente) y recalcula con el mismo motor (`calcularCandidatosItem`) — exige `cumpleReglas===true`, que la acción pedida siga correspondiendo al estado actual, y un guard final explícito `Number.isFinite(deal) && deal>0 && deal>=piso` (también cubre LOW 10). `app/api/ml/promociones/acciones/route.ts` y la nueva `app/api/ml/promociones/acciones/ejecutar/route.ts` (MED 7) comparten esta misma validación — nunca duplicada.
+
+  **HIGH 3 — SSRF en la conexión de IA** — nuevo `lib/ia/validarUrlBase.ts` (`exigirUrlBaseIASegura`): exige `https:`, parsea la URL y llama `exigirHostnamePublico` (`lib/seguridad/ssrf.ts`, ya probado con la descarga de video de Clip). Se llama DOS veces — al guardar la conexión (`PUT /api/configuracion/ia-conexion`) y otra vez justo antes de cada `fetch` real en `lib/ia/proveedores.ts` (DNS rebinding) — nunca se confía en que "ya se validó alguna vez".
+
+  **MED 4 — "Salir de la promo"** — botón apagado en la UI (`disabled` fijo, con el motivo en el `title`); la ruta rechaza `accion==="salir"` con 501. El helper `salirDePromocionMl` sigue en `lib/ml/cliente.ts` con su comentario, sin tocar — se reactiva el día que se confirme en vivo contra una cuenta real.
+
+  **MED 5 — idempotencia** — antes de insertar una fila nueva en `promociones_acciones`, se busca una existente "aceptada"/"ejecutada" para la misma cuenta+ítem+tipo+acción en los últimos 5 minutos; si existe, se reusa (no-op) — un doble clic no puede escribir dos veces.
+
+  **MED 6 — revalidación justo antes del write** — `ejecutarLoteDeAcciones` vuelve a leer el candidato (existe todavía) y compara el precio actual fresco contra el `precioAntes` capturado al aprobar: más de 2% de diferencia frena la ejecución ("hace falta una búsqueda nueva"), documentado en el código.
+
+  **MED 7 — flujo en 2 pasos** — nueva `POST /api/ml/promociones/acciones/ejecutar` (permiso `ejecutar` propio, mismo chequeo de Origin, clasificada en `scripts/verificar-permisos.test.ts`): toma las acciones "aceptada" de la empresa con `modoSimulacion=false` y las ejecuta con las mismas validaciones de dinero. UI: botón "Ejecutar pendientes", visible solo con permiso `ejecutar`.
+
+  **MED 8 — paginación sin tope confirmado** — este repo no tiene ningún `scroll_id`/`search_type=scan` para reusar, y el corte real de Mercado Libre por offset (~1000) no está confirmado con una prueba propia — se documentó así, nunca adivinado. `listarTodosLosItemsActivos` ahora devuelve `{ids, catalogoIncompleto}`: si una página falla DESPUÉS de haber leído al menos una con éxito, se corta ahí (nunca tira abajo la cuenta) y se avisa. El flag llega hasta `ProgresoCuentaBusquedaPromo`/`ProgresoCuentaBusquedaCliente` y se muestra como "⚠ catálogo incompleto" en `/panel/promociones`.
+
+  **MED 9 — trabajo en memoria** — se revisó: mismo patrón de `Map` que Clip (`subirClipMultiCuenta.ts`), ya documentado como límite de 1 réplica — no se inventó infraestructura nueva.
+
+  **LOW 10 — guard de `deal_price`** — cubierto por el guard final de `validarCandidatoParaEscritura` (ver HIGH 2): nunca sale un `deal_price` no finito, ≤0 o por debajo del piso hacia un POST/PUT a Mercado Libre, incluso si el motor lo dejara pasar.
+
+  **LOW 11 — texto de riesgo anotado** — comentario explícito en `lib/ml/promocionesEjecucion.ts` (bloqueo de `accion==="salir"`) con los 3 pasos necesarios para reactivarla: confirmar el DELETE en vivo, sacar el bloqueo, sumar "salir" a `validarCandidatoParaEscritura`.
+
+  **Pruebas nuevas**: `lib/ml/promocionesEjecucion.test.ts` (validación fresca, deriva de precio, corte por cuenta, "salir" bloqueado), ampliación de `lib/ml/promociones.test.ts` (paginación MED 8, lecturas frescas HIGH 2), `lib/ia/validarUrlBase.test.ts` + ampliación de `lib/ia/proveedores.test.ts` (SSRF HIGH 3), ampliación de `lib/trabajos/buscarPromocionesMultiCuenta.test.ts` (shape nuevo de `listarTodosLosItemsActivos` + `catalogoIncompleto`).
+
+  Verificado: `npm run typecheck` en verde. `npx vitest run`: 1716 pruebas en verde, mismo baseline de 42 suites fallando solo por `DATABASE_URL_APP` ausente en este entorno (sin regresión). `npm run build`: compila y tipa en verde; falla después en el mismo punto ya conocido (`DATABASE_URL_APP` ausente al recolectar datos de página).
