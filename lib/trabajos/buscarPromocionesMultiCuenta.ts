@@ -19,9 +19,10 @@ import { msDeReintento429 } from "@/lib/ml/reintento-429";
 // ningún candidato y sin ningún error visible. leerPromocionesDeItem
 // ya distingue "sin_permiso" (403 en seller-promotions — la APP no
 // tiene el scope de Promociones para esta cuenta) de "sin_promos" (de
-// verdad no hay nada que ofrecer); acá se CUENTA y, si se acumulan
-// varios 403 de seguida, se frena la cuenta entera con un mensaje
-// claro — nunca se sigue recorriendo el catálogo completo a ciegas
+// verdad no hay nada que ofrecer); acá se CUENTA — el contador es
+// ACUMULADO (nunca resetea entre ítems, no exige que sean seguidos) —
+// y al llegar al umbral se frena la cuenta entera con un mensaje
+// claro, nunca se sigue recorriendo el catálogo completo a ciegas
 // contra una app que claramente no tiene el permiso.
 const UMBRAL_SIN_PERMISO_PROMOCIONES = 5;
 
@@ -31,6 +32,17 @@ export class PromocionesSinPermisoError extends Error {
     this.name = "PromocionesSinPermisoError";
   }
 }
+
+// Review de Pablo (rama fix-promociones-buscar) — "omitido": el ítem
+// nunca llegó a pedirse a Mercado Libre porque la cuenta ya se frenó
+// por el umbral de sin_permiso. Un worker hermano de
+// conConcurrenciaLimitada que esté en curso cuando se cruza el umbral
+// ve el flag compartido en su SIGUIENTE vuelta y deja de pedir —
+// nunca vuelve a lanzar un error (el primer diseño tiraba
+// PromocionesSinPermisoError desde cada worker que cruzara el umbral,
+// un riesgo real de unhandledRejection entre los workers hermanos de
+// Promise.all).
+type ResultadoItemBusqueda = ResultadoItemConPromociones | { estado: "omitido" };
 
 // Rama feat-promociones, punto 4 — "La búsqueda corre como un trabajo
 // en lib/trabajos/ sobre todas las cuentas de la empresa, con barra
@@ -124,15 +136,22 @@ async function buscarPromocionesCuenta(empresaId: string, cuenta: CuentaParaBusc
     const token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
     const reglas = await leerReglasFrescasCuenta(empresaId, cuentaMlId);
     const { ids, catalogoIncompleto } = await conReintento429(() => listarTodosLosItemsActivos(cuenta.cuentaIdExterna, token));
-    fila.productosRevisados = ids.length;
     fila.catalogoIncompleto = catalogoIncompleto;
 
-    let sinPermiso = 0;
+    let sinPermisoAcumulado = 0;
     let noAutorizado = 0;
     let otroError = 0;
     let sinPromos = 0;
+    // Compartido por TODOS los workers de esta cuenta (conConcurrenciaLimitada,
+    // CONCURRENCIA_ITEMS_POR_CUENTA en paralelo) — nunca se throw-ea: el
+    // worker que cruza el umbral solo prende el flag; cualquier worker
+    // (el mismo u otro) lo revisa ANTES de pedir su siguiente ítem y, si
+    // ya está prendido, devuelve "omitido" sin llamar a Mercado Libre.
+    let abortadoPorSinPermiso = false;
 
-    const resultadosItems = await conConcurrenciaLimitada(ids, CONCURRENCIA_ITEMS_POR_CUENTA, async (itemId) => {
+    const resultadosItems = await conConcurrenciaLimitada(ids, CONCURRENCIA_ITEMS_POR_CUENTA, async (itemId): Promise<ResultadoItemBusqueda> => {
+      if (abortadoPorSinPermiso) return { estado: "omitido" };
+
       let resultado: ResultadoItemConPromociones;
       try {
         resultado = await conReintento429(() => leerPromocionesDeItem(itemId, cuentaMlId, cuenta.nickname, token));
@@ -142,15 +161,11 @@ async function buscarPromocionesCuenta(empresaId: string, cuenta: CuentaParaBusc
         // de acá abajo, es la ÚNICA razón real para frenar la cuenta
         // entera.
         otroError += 1;
-        return { estado: "otro_error" as const };
+        return { estado: "otro_error" };
       }
       if (resultado.estado === "sin_permiso") {
-        sinPermiso += 1;
-        // Fuera del try/catch de arriba a propósito: este throw tiene
-        // que llegar hasta el catch de buscarPromocionesCuenta (abajo),
-        // nunca quedar atrapado como un fallo "tolerable" de un ítem
-        // puntual.
-        if (sinPermiso >= UMBRAL_SIN_PERMISO_PROMOCIONES) throw new PromocionesSinPermisoError();
+        sinPermisoAcumulado += 1;
+        if (sinPermisoAcumulado >= UMBRAL_SIN_PERMISO_PROMOCIONES) abortadoPorSinPermiso = true;
       } else if (resultado.estado === "no_autorizado") {
         noAutorizado += 1;
       } else if (resultado.estado === "otro_error") {
@@ -161,13 +176,25 @@ async function buscarPromocionesCuenta(empresaId: string, cuenta: CuentaParaBusc
       return resultado;
     });
 
+    // Review de Pablo — "revisado" es el ítem que de verdad se le pidió
+    // a Mercado Libre (cualquier resultado real, incluso un fallo
+    // puntual); un "omitido" post-frenada nunca cuenta, para que el
+    // resumen no salga inflado si la cuenta se detuvo en el umbral.
+    fila.productosRevisados = resultadosItems.filter((r) => r.estado !== "omitido").length;
+
     // Nunca en silencio — si hubo algo distinto de "sin_promos" real,
     // queda en el log (nunca el token, nunca datos de negocio) para
     // poder diagnosticar un "Listo (0/N)" sin tener que adivinar.
-    if (sinPermiso > 0 || noAutorizado > 0 || otroError > 0) {
+    if (sinPermisoAcumulado > 0 || noAutorizado > 0 || otroError > 0) {
       console.warn(
-        `[buscarPromocionesMultiCuenta] cuenta ${cuentaMlId} — de ${ids.length} ítems: sin_permiso=${sinPermiso} no_autorizado=${noAutorizado} otro_error=${otroError} sin_promos=${sinPromos}`
+        `[buscarPromocionesMultiCuenta] cuenta ${cuentaMlId} — de ${ids.length} ítems: sin_permiso=${sinPermisoAcumulado} no_autorizado=${noAutorizado} otro_error=${otroError} sin_promos=${sinPromos}`
       );
+    }
+
+    if (abortadoPorSinPermiso) {
+      fila.estado = "error";
+      fila.error = new PromocionesSinPermisoError().message;
+      return;
     }
 
     const itemsReales = resultadosItems

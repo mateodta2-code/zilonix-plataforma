@@ -210,6 +210,44 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
     expect(fila?.error).toContain("Reconectá esta cuenta en Conectar Mercado Libre");
     expect(fila?.error).toContain("Promociones");
     expect(registroUpserts.length).toBe(0); // nunca llega a guardar candidatos de una cuenta que se frenó por falta de permiso
+    // Review de Pablo — productosRevisados cuenta lo que de verdad se
+    // pidió a Mercado Libre, nunca ids.length de entrada: con el umbral
+    // del módulo en 5 y 20 ids, el resumen nunca puede salir "inflado" a 20.
+    expect(fila?.productosRevisados).toBeGreaterThanOrEqual(5);
+    expect(fila?.productosRevisados).toBeLessThan(20);
+  });
+
+  // Review de Pablo — el primer diseño lanzaba PromocionesSinPermisoError
+  // desde CADA worker que cruzara el umbral; con varios workers
+  // concurrentes viendo el mismo contador compartido, más de uno podía
+  // cruzarlo casi al mismo tiempo y volver a lanzar — riesgo real de
+  // unhandledRejection entre los workers hermanos de conConcurrenciaLimitada.
+  // Ahora es un flag compartido que los workers solo LEEN (nunca lanzan).
+  it("al cruzar el umbral de 403, ningún worker hermano deja una unhandledRejection", async () => {
+    filasPorTabla.set(promocionesReglas, []);
+    filasPorTabla.set(costosSku, []);
+    listarTodosLosItemsActivosMock.mockResolvedValue({
+      ids: Array.from({ length: 20 }, (_, i) => `MCO${i}`),
+      catalogoIncompleto: false,
+    });
+    leerPromocionesDeItemMock.mockResolvedValue({ estado: "sin_permiso" });
+
+    const rechazosNoAtendidos: unknown[] = [];
+    const alRechazoNoAtendido = (razon: unknown) => rechazosNoAtendidos.push(razon);
+    process.on("unhandledRejection", alRechazoNoAtendido);
+
+    try {
+      const jobId = iniciarBusquedaPromociones("empresa-10", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
+      const trabajo = await esperarTrabajoTerminado(jobId, "empresa-10");
+      // Una vuelta extra del loop de eventos para darle tiempo a
+      // cualquier rejection tardía de un worker hermano a aparecer.
+      await esperar(50);
+
+      expect(trabajo?.cuentas[0]?.estado).toBe("error");
+      expect(rechazosNoAtendidos).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", alRechazoNoAtendido);
+    }
   });
 
   it("menos del umbral de 403: la cuenta sigue normal, un par de ítems puntuales nunca la frenan", async () => {
