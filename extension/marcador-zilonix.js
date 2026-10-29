@@ -47,6 +47,12 @@
     // vez, para que EscuchaExtension.tsx la guarde con una sola Server
     // Action y un solo router.refresh().
     "zilonix:cola-seguimiento": "cola-seguimiento",
+    // Parte 3, punto D ("Importar a Publicar") — mandado desde una
+    // ficha de Mercado Libre (content.js, con un clic real en el botón
+    // "Importar a Publicar"); solo hace algo si ESTA pestaña es
+    // /panel/publicar (matches ampliado en manifest.json, ver más
+    // abajo) — las demás (Investigación/Seguimiento) ignoran este tipo.
+    "zilonix:importar-publicar": "importar-publicar",
   };
 
   chrome.runtime.onMessage.addListener((mensaje, _remitente, sendResponse) => {

@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 import type { ResultadoPublicacionCuenta } from "@/lib/ml/publicar-tipos";
 import {
   construirEstadoInicial,
+  construirEstadoInicialDesdeImportacion,
   cuentasFallidas,
+  enlacesPermalink,
   esRellenoFalsoDimensiones,
   formatearFechaBogota,
   fotosDentroDelLimite,
+  idItemDesdeLinkMl,
+  itemImportadoDesdeMensajeExtension,
   moverFoto,
+  parseImportacionBookmarklet,
+  permalinkMlSeguro,
   productoCartesiano,
   resumenEstadoProducto,
   serializarCategoriaOverride,
@@ -280,5 +286,345 @@ describe("moverFoto — punto 4 del pedido (reordenar la galería arrastrando)",
   it("índices fuera de rango: devuelve el array tal cual, nunca lanza", () => {
     expect(moverFoto(["a", "b"], -1, 0)).toEqual(["a", "b"]);
     expect(moverFoto(["a", "b"], 0, 5)).toEqual(["a", "b"]);
+  });
+});
+
+describe("enlacesPermalink — Parte 3, punto B (permalink en el historial)", () => {
+  const cuentas = [
+    { id: "c1", nickname: "Tienda Uno" },
+    { id: "c2", nickname: "Tienda Dos" },
+  ];
+
+  it("sin resultado todavía: []", () => {
+    expect(enlacesPermalink(null, cuentas)).toEqual([]);
+    expect(enlacesPermalink(undefined, cuentas)).toEqual([]);
+  });
+
+  it("éxito clásico: un enlace con el nickname real de la cuenta", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c1",
+        ok: true,
+        itemId: "MCO1",
+        permalink: "https://articulo.mercadolibre.com.co/MCO-1",
+        categoria: "MCO123",
+        atributosAsumidos: [],
+        status: "active",
+        modoPrueba: false,
+        avisoFotosVariante: null,
+        avisoMarca: null,
+        avisoDescripcion: null,
+      },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([{ cuentaMlId: "c1", etiqueta: "Tienda Uno", permalink: "https://articulo.mercadolibre.com.co/MCO-1" }]);
+  });
+
+  it("fallo (ok:false): nunca aparece, nunca un link roto", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [{ cuentaMlId: "c1", ok: false, error: "Mercado Libre rechazó la publicación" }];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+
+  it("familia (User Products): un enlace por cada ítem OK con permalink, con el sufijo del SKU o los valores", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c2",
+        ok: true,
+        familia: {
+          familyName: "Remera",
+          items: [
+            { valores: { TALLA: "S" }, sku: "REM-S", ok: true, itemId: "MCO2", permalink: "https://articulo.mercadolibre.com.co/MCO-2" },
+            { valores: { TALLA: "M" }, ok: false, error: "rechazado" },
+          ],
+        },
+      },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([{ cuentaMlId: "c2", etiqueta: "Tienda Dos (REM-S)", permalink: "https://articulo.mercadolibre.com.co/MCO-2" }]);
+  });
+
+  it("cuentaMlId sin match en la lista de cuentas (ej. ya desconectada): usa el id crudo como etiqueta, nunca lanza", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c-desconocida",
+        ok: true,
+        itemId: "MCO1",
+        permalink: "https://articulo.mercadolibre.com.co/MCO-1",
+        categoria: "MCO123",
+        atributosAsumidos: [],
+        status: "active",
+        modoPrueba: false,
+        avisoFotosVariante: null,
+        avisoMarca: null,
+        avisoDescripcion: null,
+      },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([{ cuentaMlId: "c-desconocida", etiqueta: "c-desconocida", permalink: "https://articulo.mercadolibre.com.co/MCO-1" }]);
+  });
+
+  it("revisión de seguridad — permalink http:// (no https): se omite, nunca un link inseguro clickeable", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c1",
+        ok: true,
+        itemId: "MCO1",
+        permalink: "http://articulo.mercadolibre.com.co/MCO-1",
+        categoria: "MCO123",
+        atributosAsumidos: [],
+        status: "active",
+        modoPrueba: false,
+        avisoFotosVariante: null,
+        avisoMarca: null,
+        avisoDescripcion: null,
+      },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+
+  it("revisión de seguridad — permalink de un dominio ajeno (nunca Mercado Libre): se omite", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c1",
+        ok: true,
+        itemId: "MCO1",
+        permalink: "https://evil.com/MCO-1",
+        categoria: "MCO123",
+        atributosAsumidos: [],
+        status: "active",
+        modoPrueba: false,
+        avisoFotosVariante: null,
+        avisoMarca: null,
+        avisoDescripcion: null,
+      },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+
+  it("revisión de seguridad — permalink javascript:/data: disfrazado (de familia): se omite, nunca llega a <a href>", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c2",
+        ok: true,
+        familia: {
+          familyName: "Remera",
+          items: [{ valores: { TALLA: "S" }, sku: "REM-S", ok: true, itemId: "MCO2", permalink: "javascript:alert(1)" }],
+        },
+      },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+});
+
+describe("permalinkMlSeguro — revisión de seguridad (hallazgo MED): solo https + Mercado Libre", () => {
+  it("acepta un permalink real de Mercado Libre (https, cualquier país)", () => {
+    expect(permalinkMlSeguro("https://articulo.mercadolibre.com.co/MCO-1234567890-algo")).toBe("https://articulo.mercadolibre.com.co/MCO-1234567890-algo");
+    expect(permalinkMlSeguro("https://articulo.mercadolibre.com.ar/MLA-1")).toBe("https://articulo.mercadolibre.com.ar/MLA-1");
+  });
+
+  it("rechaza javascript:/data: disfrazado de URL", () => {
+    expect(permalinkMlSeguro("javascript:alert(1)")).toBeNull();
+    expect(permalinkMlSeguro("data:text/html,<script>alert(1)</script>")).toBeNull();
+  });
+
+  it("rechaza http:// (no https)", () => {
+    expect(permalinkMlSeguro("http://articulo.mercadolibre.com.co/MCO-1")).toBeNull();
+  });
+
+  it("rechaza un dominio ajeno (nunca Mercado Libre), incluso uno que solo CONTIENE el nombre real", () => {
+    expect(permalinkMlSeguro("https://evil.com")).toBeNull();
+    expect(permalinkMlSeguro("https://mercadolibre.com.ataque.com/MCO-1")).toBeNull();
+  });
+
+  it("texto que no es una URL: null, nunca lanza", () => {
+    expect(permalinkMlSeguro("no es un link")).toBeNull();
+    expect(permalinkMlSeguro("")).toBeNull();
+  });
+});
+
+describe("idItemDesdeLinkMl — Parte 3, punto A.2 (importar por link)", () => {
+  it("link clásico de publicación (/MCO-1234567890-slug): el id sin el guion", () => {
+    expect(idItemDesdeLinkMl("https://articulo.mercadolibre.com.co/MCO-1234567890-algo-_JM")).toBe("MCO1234567890");
+  });
+
+  it("link de catálogo (/p/MCO...): el id de producto", () => {
+    expect(idItemDesdeLinkMl("https://www.mercadolibre.com.co/producto-x/p/MCO12345678")).toBe("MCO12345678");
+  });
+
+  it("id real dentro de un query param (wid=): prioridad sobre el path", () => {
+    expect(idItemDesdeLinkMl("https://articulo.mercadolibre.com.co/MCO-999-slug?wid=MCO1111111111")).toBe("MCO1111111111");
+  });
+
+  it("texto que no es una URL: null, nunca lanza", () => {
+    expect(idItemDesdeLinkMl("no es un link")).toBeNull();
+  });
+
+  it("URL de otro sitio (nunca Mercado Libre): null — nunca se llama a la API con un id ajeno a esto", () => {
+    expect(idItemDesdeLinkMl("https://www.ejemplo.com/MCO-123")).toBeNull();
+  });
+
+  it("vacío: null", () => {
+    expect(idItemDesdeLinkMl("")).toBeNull();
+    expect(idItemDesdeLinkMl("   ")).toBeNull();
+  });
+});
+
+describe("parseImportacionBookmarklet — Parte 3, punto A.3 (pegar el JSON del bookmarklet)", () => {
+  it("JSON válido con galería: arma el ItemImportado completo", () => {
+    const json = JSON.stringify({
+      titulo: "Producto de prueba",
+      descripcion: "Una descripción",
+      precio: 25000,
+      dimensiones: { peso: "300", largo: "20", ancho: "15", alto: "10" },
+      galeria: [
+        { id: "bk-0", url: "https://http2.mlstatic.com/foo-O.jpg" },
+        { id: "bk-1", url: "https://http2.mlstatic.com/bar-O.jpg" },
+      ],
+    });
+    expect(parseImportacionBookmarklet(json)).toEqual({
+      titulo: "Producto de prueba",
+      descripcion: "Una descripción",
+      precio: "25000",
+      stock: "",
+      sku: "",
+      imagenes: ["https://http2.mlstatic.com/foo-O.jpg", "https://http2.mlstatic.com/bar-O.jpg"],
+      dimensiones: { peso: "300", largo: "20", ancho: "15", alto: "10" },
+    });
+  });
+
+  it("JSON inválido (la persona pegó cualquier otra cosa): null, nunca lanza", () => {
+    expect(parseImportacionBookmarklet("esto no es JSON")).toBeNull();
+    expect(parseImportacionBookmarklet("")).toBeNull();
+  });
+
+  it("JSON válido pero sin la forma esperada (ej. un array suelto): null", () => {
+    expect(parseImportacionBookmarklet("[1,2,3]")).toBeNull();
+  });
+
+  it("campos faltantes (ej. sin precio ni galería): valores vacíos, nunca lanza", () => {
+    expect(parseImportacionBookmarklet(JSON.stringify({ titulo: "X" }))).toEqual({
+      titulo: "X",
+      descripcion: "",
+      precio: "",
+      stock: "",
+      sku: "",
+      imagenes: [],
+      dimensiones: { peso: "", largo: "", ancho: "", alto: "" },
+    });
+  });
+
+  it("revisión de seguridad — filtra fotos que NO son https reales (javascript:/data: disfrazado), mismo criterio que la extensión", () => {
+    const json = JSON.stringify({
+      titulo: "X",
+      galeria: [
+        { id: "bk-0", url: "https://http2.mlstatic.com/foo-O.jpg" },
+        { id: "bk-1", url: "javascript:alert(1)" },
+        { id: "bk-2", url: "data:text/html,<script>alert(1)</script>" },
+        { id: "bk-3", url: "http://sin-https.com/foo.jpg" },
+      ],
+    });
+    expect(parseImportacionBookmarklet(json)?.imagenes).toEqual(["https://http2.mlstatic.com/foo-O.jpg"]);
+  });
+
+  it("revisión de seguridad — sin título/descripción/precio y sin ninguna foto https real: null (nunca hidrata el formulario con nada)", () => {
+    expect(parseImportacionBookmarklet(JSON.stringify({}))).toBeNull();
+    expect(parseImportacionBookmarklet(JSON.stringify({ galeria: [{ id: "bk-0", url: "javascript:alert(1)" }] }))).toBeNull();
+  });
+});
+
+describe("itemImportadoDesdeMensajeExtension — Parte 3, punto D (postMessage de 'Importar a Publicar', nunca confiado ciegamente)", () => {
+  it("mensaje válido completo: arma el ItemImportado", () => {
+    expect(
+      itemImportadoDesdeMensajeExtension({
+        titulo: "Producto de Mercado Libre",
+        descripcion: "Descripción real",
+        precio: 50000,
+        imagenes: ["https://http2.mlstatic.com/foo-O.jpg", "https://http2.mlstatic.com/bar-O.jpg"],
+      })
+    ).toEqual({
+      titulo: "Producto de Mercado Libre",
+      descripcion: "Descripción real",
+      precio: "50000",
+      stock: "",
+      sku: "",
+      imagenes: ["https://http2.mlstatic.com/foo-O.jpg", "https://http2.mlstatic.com/bar-O.jpg"],
+      dimensiones: {},
+    });
+  });
+
+  it("filtra imágenes que NO son http(s) reales (ej. javascript:/data: disfrazado) — nunca confía en lo que mande la página", () => {
+    const r = itemImportadoDesdeMensajeExtension({
+      titulo: "X",
+      imagenes: ["https://http2.mlstatic.com/foo.jpg", "javascript:alert(1)", "data:text/html,<script>", "http://sin-https.com/foo.jpg", 123],
+    });
+    expect(r?.imagenes).toEqual(["https://http2.mlstatic.com/foo.jpg"]);
+  });
+
+  it("precio no numérico, cero o negativo: cadena vacía, nunca NaN ni un precio inválido", () => {
+    expect(itemImportadoDesdeMensajeExtension({ titulo: "X", precio: "50000" })?.precio).toBe("");
+    expect(itemImportadoDesdeMensajeExtension({ titulo: "X", precio: 0 })?.precio).toBe("");
+    expect(itemImportadoDesdeMensajeExtension({ titulo: "X", precio: -100 })?.precio).toBe("");
+    expect(itemImportadoDesdeMensajeExtension({ titulo: "X", precio: NaN })?.precio).toBe("");
+  });
+
+  it("título recortado a 60 caracteres (mismo tope que el prefill de Investigación)", () => {
+    const tituloLargo = "X".repeat(100);
+    expect(itemImportadoDesdeMensajeExtension({ titulo: tituloLargo })?.titulo.length).toBe(60);
+  });
+
+  it("no es un objeto (string/número/array/null): null, nunca lanza", () => {
+    expect(itemImportadoDesdeMensajeExtension("texto")).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension(123)).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension([1, 2, 3])).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension(null)).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension(undefined)).toBeNull();
+  });
+
+  it("objeto vacío o sin ningún campo reconocible: null — nunca hidrata el formulario con nada", () => {
+    expect(itemImportadoDesdeMensajeExtension({})).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension({ otraCosa: true })).toBeNull();
+  });
+});
+
+describe("construirEstadoInicialDesdeImportacion — Parte 3, punto A (precargar el formulario sin publicar)", () => {
+  const item = {
+    titulo: "Importado",
+    descripcion: "Desc importada",
+    precio: "15000",
+    stock: "5",
+    sku: "SKU-1",
+    imagenes: ["https://a.jpg", "https://b.jpg"],
+    dimensiones: { peso: "300" },
+  };
+
+  it("copia título/descripción/portada (primera foto) a TODAS las cuentas recibidas", () => {
+    const estado = construirEstadoInicialDesdeImportacion(["c1", "c2"], item);
+    expect(estado.datosPorCuenta).toEqual({
+      c1: { titulo: "Importado", descripcion: "Desc importada", portadaUrl: "https://a.jpg" },
+      c2: { titulo: "Importado", descripcion: "Desc importada", portadaUrl: "https://a.jpg" },
+    });
+  });
+
+  it("cuentasIncluidas queda vacío a propósito (la persona elige a cuáles publicar)", () => {
+    expect(construirEstadoInicialDesdeImportacion(["c1"], item).cuentasIncluidas).toEqual([]);
+  });
+
+  it("precio/stock/sku/imágenes/dimensiones vienen del item importado", () => {
+    const estado = construirEstadoInicialDesdeImportacion(["c1"], item);
+    expect(estado.precio).toBe("15000");
+    expect(estado.stock).toBe("5");
+    expect(estado.sku).toBe("SKU-1");
+    expect(estado.imagenes).toEqual(["https://a.jpg", "https://b.jpg"]);
+    expect(estado.dimensiones).toEqual({ peso: "300", largo: "", ancho: "", alto: "" });
+  });
+
+  it("sin stock en el item importado: cae a '1' (mismo valor por defecto que un producto nuevo)", () => {
+    expect(construirEstadoInicialDesdeImportacion(["c1"], { ...item, stock: "" }).stock).toBe("1");
+  });
+
+  it("sin ninguna foto: portadaUrl vacía, nunca undefined", () => {
+    const estado = construirEstadoInicialDesdeImportacion(["c1"], { ...item, imagenes: [] });
+    expect(estado.datosPorCuenta.c1.portadaUrl).toBe("");
+  });
+
+  it("sin ninguna cuenta: datosPorCuenta vacío, nunca lanza", () => {
+    expect(construirEstadoInicialDesdeImportacion([], item).datosPorCuenta).toEqual({});
   });
 });

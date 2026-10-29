@@ -170,6 +170,56 @@
     pie.appendChild(boton);
   }
 
+  // Parte 3, punto D ("Importar a Publicar") — mismo relevo YA
+  // probado que "Completar vendidos"/"Enviar a Zilonix" (content.js ->
+  // background.js -> marcador-zilonix.js -> postMessage, ver el
+  // comentario completo de enviarVendidosAZilonix más abajo): nunca
+  // abre una pestaña nueva, nunca navega sola — si /panel/publicar
+  // (extension/marcador-zilonix.js, matches ampliado en manifest.json)
+  // ya está abierto en alguna pestaña, el mensaje llega ahí; si no, el
+  // broadcast simplemente no tiene ningún listener y no pasa nada
+  // (mismo criterio de siempre, nunca se adivina ni se encola sin que
+  // la persona lo sepa). Solo Mercado Libre tiene
+  // `lector.leerGaleriaYDescripcion` (ver mercadolibre.js) — en los
+  // otros 5 sitios este botón directamente no se agrega.
+  function agregarBotonImportarPublicar(panel, datos) {
+    if (typeof lector.leerGaleriaYDescripcion !== "function") return;
+    if (!datos || !datos.titulo) return; // nada confiable que importar todavía
+    const pie = panel.querySelector(".zx-panel__pie");
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.className = "zx-boton-seguir";
+    boton.textContent = "Importar a Publicar";
+    boton.onclick = () => {
+      // SOLO por este clic real — mismo criterio que agregarBotonSeguir,
+      // nunca se lee la galería/descripción completa al cargar la
+      // página, solo cuando la persona de verdad quiere importar.
+      let extra;
+      try {
+        extra = lector.leerGaleriaYDescripcion(document);
+      } catch {
+        extra = { descripcion: null, imagenes: [] };
+      }
+      const payload = {
+        titulo: datos.titulo,
+        descripcion: (extra && extra.descripcion) || null,
+        precio: typeof datos.precio === "number" ? datos.precio : null,
+        imagenes: (extra && extra.imagenes) || [],
+      };
+      if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+      try {
+        chrome.runtime.sendMessage({ tipo: "zilonix:importar-publicar", payload }, () => {
+          void chrome.runtime.lastError; // sin /panel/publicar abierto en ninguna pestaña — nunca un error real
+        });
+        boton.textContent = "Enviado ✓";
+        setTimeout(() => (boton.textContent = "Importar a Publicar"), 1500);
+      } catch {
+        // Contexto de la extensión invalidado — nunca rompe el panel.
+      }
+    };
+    pie.appendChild(boton);
+  }
+
   function renderizarEsqueleto(panel, tituloPanel, subtituloSitio) {
     panel.innerHTML = `
       <div class="zx-panel__encabezado">
@@ -306,6 +356,9 @@
     // Issue #174 — solo Mercado Libre manda linkSeguir (undefined en
     // los otros 5 sitios); null cuando no se pudo confirmar el id.
     agregarBotonSeguir(panel, datos.linkSeguir, "Seguir en Zilonix");
+    // Parte 3, punto D — mismo criterio: al lado de "Seguir en
+    // Zilonix", nunca lo reemplaza.
+    agregarBotonImportarPublicar(panel, datos);
   }
 
   // Issue #174 — página de un vendedor/tienda: panel mínimo, solo el
