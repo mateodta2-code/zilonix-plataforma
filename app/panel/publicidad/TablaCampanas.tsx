@@ -54,7 +54,13 @@ function FilaGrupo({
     <>
       <FilaTabla>
         <CeldaTabla fija>
-          <button type="button" className={styles.expandir} aria-expanded={abierta} aria-controls={panelId} onClick={onToggle}>
+          <button
+            type="button"
+            className={styles.expandir}
+            aria-expanded={abierta}
+            aria-controls={abierta ? panelId : undefined}
+            onClick={onToggle}
+          >
             <span className={styles.chevron} aria-hidden="true" />
             <span>
               <span className={styles.nombreCampana}>{campana.nombre}</span>

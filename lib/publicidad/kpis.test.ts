@@ -5,6 +5,7 @@ import {
   mostrarEntero,
   mostrarFraccion,
   mostrarRoas,
+  textoComparacion,
 } from "@/lib/publicidad/formato";
 import {
   compararOrden,
@@ -22,7 +23,7 @@ import {
   type FilaOrdenable,
 } from "@/lib/publicidad/kpis";
 import { hrefPublicidad, leerParametrosPublicidad } from "@/lib/publicidad/params";
-import { NOTA_DIAGNOSTICO, rotuloDiagnostico, textoVariacion, tituloSemaforo } from "@/lib/publicidad/rotulos";
+import { NOTA_DIAGNOSTICO, rotuloDiagnostico, rotuloSemaforo, subirEsMejor, textoVariacion, tituloSemaforo } from "@/lib/publicidad/rotulos";
 
 const DIA: DiaMetrica = {
   costo: null,
@@ -103,8 +104,21 @@ describe("sumas y ratios del rango", () => {
     expect(variacionPorcentual("10.00", "0.00")).toBeNull();
     expect(variacionPorcentual(null, "10.00")).toBeNull();
     expect(variacionPorcentual("10.00", null)).toBeNull();
-    expect(textoVariacion(null)).toBe("Sin datos para comparar");
-    expect(textoVariacion("12.3")).toBe("Sube 12,3 % frente al mismo tramo del mes anterior");
+    expect(textoVariacion(null)).toEqual({ texto: "Sin datos para comparar", mejor: null });
+    expect(textoVariacion("0.0")).toEqual({ texto: "Igual que el periodo anterior", mejor: null });
+  });
+
+  it("en ACOS, TACOS y CPC subir es peor; en el resto, subir es mejor", () => {
+    expect(subirEsMejor("acos")).toBe(false);
+    expect(subirEsMejor("tacos")).toBe(false);
+    expect(subirEsMejor("cpc")).toBe(false);
+    for (const campo of ["gasto", "ventasPublicidad", "ventasTotales", "roas", "clicks", "impresiones"]) {
+      expect(subirEsMejor(campo)).toBe(true);
+    }
+    expect(textoVariacion("12.3", { subirEsMejor: true })).toEqual({ texto: "Sube 12,3 % (mejor)", mejor: true });
+    expect(textoVariacion("-4.1", { subirEsMejor: true })).toEqual({ texto: "Baja 4,1 % (peor)", mejor: false });
+    expect(textoVariacion("12.3", { subirEsMejor: false })).toEqual({ texto: "Sube 12,3 % (peor)", mejor: false });
+    expect(textoVariacion("-4.1", { subirEsMejor: false })).toEqual({ texto: "Baja 4,1 % (mejor)", mejor: true });
   });
 });
 
@@ -137,6 +151,18 @@ describe("semáforo por anuncio", () => {
     const sinGasto = semaforoAnuncio({ gasto: null, ventasPublicidad: null, precio: "100000.00", config });
     expect(sinGasto).toEqual({ estado: "neutro", motivo: "sin_gasto" });
     expect(tituloSemaforo(sinGasto)).toBe("Sin gasto en el rango");
+    expect(rotuloSemaforo(sinGasto)).toBe("—");
+  });
+
+  it("gasto 0 o null queda neutro aunque haya ventas con publicidad", () => {
+    const cero = semaforoAnuncio({ gasto: "0.00", ventasPublicidad: "100.00", precio: "50000.00", config });
+    expect(cero).toEqual({ estado: "neutro", motivo: "sin_gasto" });
+    expect(rotuloSemaforo(cero)).toBe("—");
+    expect(tituloSemaforo(cero)).toBe("Sin gasto en el rango");
+
+    const nulo = semaforoAnuncio({ gasto: null, ventasPublicidad: "80.00", precio: "50000.00", config });
+    expect(nulo).toEqual({ estado: "neutro", motivo: "sin_gasto" });
+    expect(rotuloSemaforo(nulo)).toBe("—");
   });
 });
 
@@ -205,6 +231,25 @@ describe("diagnóstico de campaña", () => {
     expect(vacio.tipo).toBe("sin_datos");
     expect(rotuloDiagnostico(vacio)).toBe("Sin datos");
   });
+
+  it("con gasto pero ventas con publicidad null en todos los días es sin datos, no bajo objetivo", () => {
+    const totales = totalesDeDias([
+      dia({ costo: "100.00", montoTotal: null, ventasOrganicasMonto: "0.00", clicks: 4, impresiones: 10 }),
+      dia({ costo: "50.00", montoTotal: null, ventasOrganicasMonto: null, clicks: 1, impresiones: 2 }),
+    ]);
+    expect(totales.gasto).toBe("150.00");
+    expect(totales.ventasPublicidad).toBeNull();
+    const diag = diagnosticarCampana({
+      ahora,
+      creadaMlTs: new Date("2026-09-01T12:00:00-05:00"),
+      actualizadaMlTs: new Date("2026-09-01T12:00:00-05:00"),
+      roasObjetivo: "2.00",
+      totales,
+      config,
+    });
+    expect(diag.tipo).toBe("sin_datos");
+    expect(rotuloDiagnostico(diag)).toBe("Sin datos");
+  });
 });
 
 describe("periodo en Bogotá", () => {
@@ -249,15 +294,26 @@ describe("periodo en Bogotá", () => {
     expect(resolverPeriodo(null, new Date("2026-10-29T05:00:00Z")).hasta).toBe("2026-10-29");
   });
 
-  it("un mes ya cerrado se mira entero, y un valor inválido cae al mes en curso", () => {
-    expect(resolverPeriodo("2026-09", new Date("2026-10-29T15:00:00-05:00"))).toMatchObject({
+  it("un mes ya cerrado se compara con el mes anterior completo, y un valor inválido cae al mes en curso", () => {
+    const cerrado = resolverPeriodo("2026-09", new Date("2026-10-29T15:00:00-05:00"));
+    expect(cerrado).toMatchObject({
       mes: "2026-09",
       desde: "2026-09-01",
       hasta: "2026-09-30",
       comparacionDesde: "2026-08-01",
-      comparacionHasta: "2026-08-30",
+      comparacionHasta: "2026-08-31",
       incluyeHoy: false,
+      esMesEnCurso: false,
     });
+    expect(textoComparacion(cerrado)).toContain("mes anterior completo");
+    expect(resolverPeriodo("2026-02", new Date("2026-10-29T15:00:00-05:00"))).toMatchObject({
+      desde: "2026-02-01",
+      hasta: "2026-02-28",
+      comparacionDesde: "2026-01-01",
+      comparacionHasta: "2026-01-31",
+    });
+    const enCurso = resolverPeriodo(null, new Date("2026-10-29T15:00:00-05:00"));
+    expect(textoComparacion(enCurso)).toContain("mismo tramo del mes anterior");
     const ahora = new Date("2026-10-29T15:00:00-05:00");
     for (const invalido of ["no", "2026-13", "2026-00", "2026-10-01", "2026-12", "1999-01", ""]) {
       expect(resolverPeriodo(invalido, ahora).mes).toBe("2026-10");

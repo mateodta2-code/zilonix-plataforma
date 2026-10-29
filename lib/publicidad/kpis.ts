@@ -236,15 +236,16 @@ export function semaforoAnuncio(entrada: {
   config: ConfigPublicidad;
 }): Semaforo {
   const { gasto, ventasPublicidad, precio, config } = entrada;
+  // Sin gasto (null o 0) no hay ACOS que juzgar, aunque haya ventas
+  // atribuidas: un 0 % inventado pintaría verde un anuncio que no se midió.
+  if (gasto === null || sinGasto(gasto)) return { estado: "neutro", motivo: "sin_gasto" };
   if (montoPositivo(ventasPublicidad)) {
-    if (gasto === null || ventasPublicidad === null) return { estado: "neutro", motivo: "sin_gasto" };
     const acos = porcentajeDeRazon(gasto, ventasPublicidad);
-    if (acos === null) return { estado: "neutro", motivo: "sin_gasto" };
+    if (acos === null || ventasPublicidad === null) return { estado: "neutro", motivo: "sin_gasto" };
     const dentro = razonNoSupera(gasto, ventasPublicidad, config.acosMaximo);
     if (dentro === null) return { estado: "neutro", motivo: "sin_gasto" };
     return { estado: dentro ? "exito" : "peligro", motivo: "acos", acos, tope: config.acosMaximo };
   }
-  if (gasto === null || sinGasto(gasto)) return { estado: "neutro", motivo: "sin_gasto" };
   if (precio === null || sinGasto(precio)) return { estado: "neutro", motivo: "sin_precio" };
   const dentro = razonNoSupera(gasto, precio, config.topeGastoSinVentas);
   if (dentro === null) return { estado: "neutro", motivo: "sin_precio" };
@@ -290,11 +291,13 @@ export function diagnosticarCampana(entrada: {
     const dias = diasTranscurridosBogota(ultima, entrada.ahora);
     if (dias < entrada.config.diasAprendizaje) return { tipo: "aprendiendo", dias };
   }
-  if (sinGasto(entrada.totales.gasto)) return { tipo: "sin_datos", dias: 0 };
+  const gasto = entrada.totales.gasto;
+  const ventas = entrada.totales.ventasPublicidad;
+  // Ventas null no es cero: si ningún día trajo monto, no se puede
+  // decir que el ROAS quedó bajo el objetivo.
+  if (gasto === null || sinGasto(gasto) || ventas === null) return { tipo: "sin_datos", dias: 0 };
   const objetivo = entrada.roasObjetivo;
   if (objetivo === null || centavos(aEscala(objetivo, 2)) <= CERO) return { tipo: "sin_objetivo", dias: 0 };
-  const ventas = entrada.totales.ventasPublicidad ?? "0.00";
-  const gasto = entrada.totales.gasto ?? "0.00";
   const excelente = roasAlcanza(ventas, gasto, objetivo, entrada.config.factorExcelente);
   if (excelente) return { tipo: "excelente", dias: 0 };
   const enObjetivo = roasAlcanza(ventas, gasto, objetivo, "1");
@@ -323,8 +326,9 @@ function mesPrevio(anio: number, mes: number): { anio: number; mes: number } {
 // Mes en curso: del día 1 a hoy (Bogotá), contra el mismo número de
 // día del mes anterior. Si ese mes es más corto (31 de marzo contra
 // febrero), el corte se queda en su último día. Un mes ya cerrado se
-// mira entero, contra el mismo tramo del mes previo. Cualquier
-// `mes` que no sea AAAA-MM, o que sea futuro, cae al mes en curso.
+// mira entero y se compara con el mes anterior también entero
+// (septiembre 1-30 contra agosto 1-31). Cualquier `mes` que no sea
+// AAAA-MM, o que sea futuro, cae al mes en curso.
 export function resolverPeriodo(mesParam: string | null | undefined, ahora: Date): Periodo {
   const hoyIso = hoyBogota(ahora);
   const hoy = partesIso(hoyIso);
@@ -345,7 +349,7 @@ export function resolverPeriodo(mesParam: string | null | undefined, ahora: Date
   const diaHasta = esMesEnCurso ? Math.min(hoy.dia, ultimo) : ultimo;
   const previo = mesPrevio(anio, mes);
   const ultimoPrevio = ultimoDiaDelMes(previo.anio, previo.mes);
-  const diaHastaPrevio = Math.min(diaHasta, ultimoPrevio);
+  const diaHastaPrevio = esMesEnCurso ? Math.min(diaHasta, ultimoPrevio) : ultimoPrevio;
   return {
     mes: armarIso(anio, mes, 1).slice(0, 7),
     desde: armarIso(anio, mes, 1),

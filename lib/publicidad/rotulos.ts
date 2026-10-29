@@ -149,12 +149,26 @@ export function tituloSemaforo(semaforo: Semaforo): string {
   return "Sin gasto en el rango";
 }
 
-export function textoVariacion(variacion: string | null): string {
-  if (variacion === null) return "Sin datos para comparar";
-  if (variacion === "0.0" || variacion === "-0.0") return "Igual que el mismo tramo del mes anterior";
+// En inversión, ventas, ROAS, clics e impresiones, subir es mejor.
+// En ACOS, TACOS y CPC, subir es peor: el texto lo dice, el color solo lo refuerza.
+export type VariacionPintada = { texto: string; mejor: boolean | null };
+
+const CAMPOS_SUBIR_ES_PEOR = new Set(["acos", "tacos", "cpc"]);
+
+export function subirEsMejor(campo: string): boolean {
+  return !CAMPOS_SUBIR_ES_PEOR.has(campo);
+}
+
+export function textoVariacion(variacion: string | null, opciones?: { subirEsMejor?: boolean }): VariacionPintada {
+  const mejorSiSube = opciones?.subirEsMejor !== false;
+  if (variacion === null) return { texto: "Sin datos para comparar", mejor: null };
+  if (variacion === "0.0" || variacion === "-0.0") return { texto: "Igual que el periodo anterior", mejor: null };
   const baja = variacion.startsWith("-");
   const absoluto = mostrarPorcentaje(baja ? variacion.slice(1) : variacion);
-  return baja
-    ? `Baja ${absoluto} frente al mismo tramo del mes anterior`
-    : `Sube ${absoluto} frente al mismo tramo del mes anterior`;
+  const mejor = baja ? !mejorSiSube : mejorSiSube;
+  const juicio = mejor ? "mejor" : "peor";
+  return {
+    texto: baja ? `Baja ${absoluto} (${juicio})` : `Sube ${absoluto} (${juicio})`,
+    mejor,
+  };
 }

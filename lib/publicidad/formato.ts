@@ -5,7 +5,7 @@
 import { mostrarPorcentaje } from "@/components/finanzas/formato";
 import { mostrarMonto } from "@/lib/finanzas/montos";
 import { aEscala } from "@/lib/numeros/normalizar-decimal";
-import { porcentajeDeRazon } from "@/lib/publicidad/kpis";
+import { porcentajeDeRazon, type Periodo } from "@/lib/publicidad/kpis";
 
 const GUION = "—";
 
@@ -49,6 +49,19 @@ export function fechaCorta(iso: string): string {
     month: "short",
     year: "numeric",
   });
+}
+
+// El mes en curso se compara con el mismo tramo. Un mes ya cerrado,
+// con el mes anterior entero. El texto lo dice; no alcanza con las fechas.
+export function textoComparacion(periodo: Periodo): string {
+  const desde = fechaCorta(periodo.desde);
+  const hasta = fechaCorta(periodo.hasta);
+  const compDesde = fechaCorta(periodo.comparacionDesde);
+  const compHasta = fechaCorta(periodo.comparacionHasta);
+  if (periodo.esMesEnCurso) {
+    return `Del ${desde} al ${hasta} (lo que va del mes), comparado con el mismo tramo del mes anterior (${compDesde} al ${compHasta}).`;
+  }
+  return `Mes cerrado, del ${desde} al ${hasta}, comparado con el mes anterior completo (${compDesde} al ${compHasta}).`;
 }
 
 export function nombreMes(anio: number, mes: number): string {

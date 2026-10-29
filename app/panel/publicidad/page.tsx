@@ -17,7 +17,7 @@ import { SUGERENCIA_RECONECTAR_PUBLICIDAD } from "@/lib/ml/publicidad";
 import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { consultarTableroPublicidad } from "@/lib/publicidad/consultas";
-import { fechaCorta } from "@/lib/publicidad/formato";
+import { textoComparacion } from "@/lib/publicidad/formato";
 import type { ColumnaOrden, DireccionOrden } from "@/lib/publicidad/kpis";
 import { hrefPublicidad, leerParametrosPublicidad, opcionesDeMes } from "@/lib/publicidad/params";
 import {
@@ -298,8 +298,7 @@ function Cuerpo({
       </form>
 
       <p className={styles.nota}>
-        Datos de Mercado Libre actualizados: {actualizado}. Del {fechaCorta(periodo.desde)} al {fechaCorta(periodo.hasta)}, comparado
-        con el {fechaCorta(periodo.comparacionDesde)} al {fechaCorta(periodo.comparacionHasta)}.
+        Datos de Mercado Libre actualizados: {actualizado}. {textoComparacion(periodo)}
         {tablero.enCurso ? " Hay una actualización en curso." : ""}
       </p>
       <p className={styles.nota}>{NOTA_ATRIBUCION}</p>
@@ -310,7 +309,7 @@ function Cuerpo({
 
       <div className={styles.gridKpi}>
         {kpis.map((kpi) => (
-          <TarjetaKpi key={kpi.clave} titulo={kpi.titulo} valor={kpi.valor} detalle={kpi.detalle} textoVacio="—" />
+          <TarjetaKpi key={kpi.clave} titulo={kpi.titulo} valor={kpi.valor} detalle={kpi.detalle} variacion={kpi.variacion} textoVacio="—" />
         ))}
       </div>
 

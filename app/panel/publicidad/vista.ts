@@ -21,8 +21,10 @@ import {
   ROTULO_KPI,
   rotuloDiagnostico,
   rotuloSemaforo,
+  subirEsMejor,
   textoVariacion,
   tituloSemaforo,
+  type VariacionPintada,
 } from "@/lib/publicidad/rotulos";
 
 export type AnuncioPintado = {
@@ -70,6 +72,7 @@ export type KpiPintado = {
   titulo: string;
   valor: string;
   detalle: string[];
+  variacion: VariacionPintada;
 };
 
 export function pintarCampana(campana: CampanaCalculada): CampanaPintada {
@@ -118,41 +121,45 @@ export function pintarCampana(campana: CampanaCalculada): CampanaPintada {
   };
 }
 
-function linea(actual: TotalesRango, anterior: TotalesRango, campo: keyof TotalesRango): string {
-  return textoVariacion(variacionPorcentual(actual[campo], anterior[campo]));
+function linea(actual: TotalesRango, anterior: TotalesRango, campo: keyof TotalesRango): VariacionPintada {
+  return textoVariacion(variacionPorcentual(actual[campo], anterior[campo]), { subirEsMejor: subirEsMejor(campo) });
 }
 
 export function kpisDelResumen(tablero: Pick<TableroPublicidad, "resumen">): KpiPintado[] {
   const { actual, anterior } = tablero.resumen;
   return [
-    { clave: "inversion", titulo: ROTULO_KPI.inversion, valor: mostrarDineroTarjeta(actual.gasto), detalle: [linea(actual, anterior, "gasto")] },
+    { clave: "inversion", titulo: ROTULO_KPI.inversion, valor: mostrarDineroTarjeta(actual.gasto), detalle: [], variacion: linea(actual, anterior, "gasto") },
     {
       clave: "ventasPublicidad",
       titulo: ROTULO_KPI.ventasPublicidad,
       valor: mostrarDineroTarjeta(actual.ventasPublicidad),
-      detalle: [linea(actual, anterior, "ventasPublicidad")],
+      detalle: [],
+      variacion: linea(actual, anterior, "ventasPublicidad"),
     },
     {
       clave: "ventasTotales",
       titulo: ROTULO_KPI.ventasTotales,
       valor: mostrarDineroTarjeta(actual.ventasTotales),
-      detalle: [linea(actual, anterior, "ventasTotales"), NOTA_VENTAS_ORGANICAS],
+      detalle: [NOTA_VENTAS_ORGANICAS],
+      variacion: linea(actual, anterior, "ventasTotales"),
     },
-    { clave: "roas", titulo: ROTULO_KPI.roas, valor: mostrarRoas(actual.roas), detalle: [linea(actual, anterior, "roas")] },
-    { clave: "acos", titulo: ROTULO_KPI.acos, valor: mostrarFraccion(actual.acos), detalle: [linea(actual, anterior, "acos")] },
+    { clave: "roas", titulo: ROTULO_KPI.roas, valor: mostrarRoas(actual.roas), detalle: [], variacion: linea(actual, anterior, "roas") },
+    { clave: "acos", titulo: ROTULO_KPI.acos, valor: mostrarFraccion(actual.acos), detalle: [], variacion: linea(actual, anterior, "acos") },
     {
       clave: "tacos",
       titulo: ROTULO_KPI.tacos,
       valor: mostrarFraccion(actual.tacos),
-      detalle: [linea(actual, anterior, "tacos"), NOTA_TACOS_PROMOCIONADAS],
+      detalle: [NOTA_TACOS_PROMOCIONADAS],
+      variacion: linea(actual, anterior, "tacos"),
     },
-    { clave: "cpc", titulo: ROTULO_KPI.cpc, valor: mostrarDineroTarjeta(actual.cpc), detalle: [linea(actual, anterior, "cpc")] },
-    { clave: "clics", titulo: ROTULO_KPI.clics, valor: mostrarEntero(actual.clicks), detalle: [linea(actual, anterior, "clicks")] },
+    { clave: "cpc", titulo: ROTULO_KPI.cpc, valor: mostrarDineroTarjeta(actual.cpc), detalle: [], variacion: linea(actual, anterior, "cpc") },
+    { clave: "clics", titulo: ROTULO_KPI.clics, valor: mostrarEntero(actual.clicks), detalle: [], variacion: linea(actual, anterior, "clicks") },
     {
       clave: "impresiones",
       titulo: ROTULO_KPI.impresiones,
       valor: mostrarEntero(actual.impresiones),
-      detalle: [linea(actual, anterior, "impresiones")],
+      detalle: [],
+      variacion: linea(actual, anterior, "impresiones"),
     },
   ];
 }
