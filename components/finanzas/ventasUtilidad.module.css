@@ -175,9 +175,9 @@
    !important.
 
    Ancho real disponible: barra lateral de 287px y contenido con
-   max-width 1100px y 28px de padding (MarcoApp.module.css) → la tabla
-   tiene ~755px a 1100px de ventana, ~855px a 1200, ~935px a 1280 y
-   ~1042px de 1440 en adelante.
+   max-width 1480px y 28px de padding (MarcoApp.module.css) → la tabla
+   tiene ~755px a 1100px de ventana, ~855px a 1200, ~935px a 1280,
+   ~1097px a 1440 y ~1424px de 1767 en adelante.
 
    table-layout queda en auto a propósito (no fixed): con anchos fijos
    un total grande del día («$ 12.345.678») se cortaría o se montaría
@@ -185,7 +185,7 @@
    que mide su número más largo, nunca menos, y la 1ª columna tiene un
    ancho fijo (--ancho-col1) porque todo lo de adentro es un bloque de
    ese ancho con overflow hidden: es lo único que cede. Con totales
-   del día de 8 cifras la tabla mide ~815px como mínimo: cabe desde
+   del día de 8 cifras la tabla mide ~828px como mínimo: cabe desde
    ~1200px de ventana; por debajo (1100) se desplaza de lado.
 
    Sin columna fija (sticky): existía porque había scroll de lado; ya
