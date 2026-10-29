@@ -121,6 +121,24 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/clip/estado/route.ts",
   "app/panel/publicidad/page.tsx",
   "app/panel/publicidad/actions.ts",
+  // Rama feat-promociones — módulo nuevo "promociones"
+  // (consultar/aprobar/ejecutar, lib/roles-plantillas.ts). "consultar"
+  // para lo que solo LEE (buscar, el polling del trabajo, candidatos,
+  // historial); "aprobar" para decidir el lote y editar las reglas de
+  // una cuenta (ejecutar() mismo que decide, de una, también dentro
+  // del handler, si quien llama además tiene "ejecutar").
+  "app/api/ml/promociones/buscar/route.ts",
+  "app/api/ml/promociones/trabajo/[jobId]/route.ts",
+  "app/api/ml/promociones/candidatos/route.ts",
+  "app/api/ml/promociones/reglas/route.ts",
+  "app/api/ml/promociones/acciones/route.ts",
+  "app/api/ml/promociones/historial/route.ts",
+  "app/panel/promociones/page.tsx",
+  // "Conexión de IA" vive bajo el módulo "configuracion" que ya
+  // existe (consultar/modificar) — nunca un permiso nuevo solo para
+  // esto.
+  "app/api/configuracion/ia-conexion/route.ts",
+  "app/panel/configuracion/page.tsx",
 ]);
 
 // Tarea 1.11 — eje de autorización APARTE: "¿esta cuenta es
