@@ -13,6 +13,7 @@
 // (Cargar/Reintentar y Duplicar — reconstruyen el estado del
 // formulario desde una fila ya guardada de productos_ml) y moverFoto
 // (reordenar la galería con drag & drop).
+import { linkPublicacion } from "@/lib/ml/cliente";
 import type { DatosPorCuenta, ResultadoPublicacionCuenta, VariantesProducto } from "@/lib/ml/publicar-tipos";
 
 export type DimensionesTexto = { peso: string; largo: string; ancho: string; alto: string };
@@ -253,9 +254,23 @@ const PATRON_HOST_MERCADOLIBRE = /(^|\.)mercadolibre\.com(\.[a-z]{2})?$/i;
 // enlacesPermalink arma un <a href> real para HistorialPublicaciones.tsx
 // — nunca se confía en que ese campo siga siendo lo que ML mandó
 // originalmente (una fila vieja, un bug futuro de publicar.ts, datos
-// corruptos): se exige https real Y un hostname real de Mercado Libre
-// antes de dejarlo pasar a un link clickeable. Un "javascript:"/
-// "data:" o un dominio ajeno nunca llega a <a href>.
+// corruptos): se exige un hostname real de Mercado Libre antes de
+// dejarlo pasar a un link clickeable. Un "javascript:"/"data:" o un
+// dominio ajeno nunca llega a <a href>.
+//
+// Feedback real de Mateo probando en staging (publicó 1/1 OK y el
+// historial no mostraba ningún link) — causa confirmada contra
+// lib/ml/publicar.ts: `permalink` se guarda tal cual lo devuelve
+// `POST /items` (`data.permalink`, líneas ~444/679), y esa respuesta de
+// creación de Mercado Libre a veces trae el link en `http://` (el
+// mismo ítem, consultado después por `GET /items/{id}`, ya lo da en
+// `https://` — comportamiento real y conocido de esa API, no un bug de
+// este repo). El chequeo de seguridad de la revisión anterior exigía
+// `https:` a secas y por eso descartaba en silencio un link real. Acá
+// se sigue exigiendo el HOST real de Mercado Libre (nunca se afloja
+// eso), pero si el protocolo es `http:` y el host SÍ es de Mercado
+// Libre, se sube a `https:` de forma determinística — nunca para un
+// host ajeno, que ya se descartó arriba de todas formas.
 export function permalinkMlSeguro(url: string): string | null {
   let parsed: URL;
   try {
@@ -263,9 +278,28 @@ export function permalinkMlSeguro(url: string): string | null {
   } catch {
     return null;
   }
-  if (parsed.protocol !== "https:") return null;
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
   if (!PATRON_HOST_MERCADOLIBRE.test(parsed.hostname)) return null;
-  return url;
+  return parsed.protocol === "http:" ? url.replace(/^http:/i, "https:") : url;
+}
+
+// Mismo feedback de Mateo — a veces `producto.resultado` ni siquiera
+// trae `permalink` (confirmado como posible en el tipo:
+// `ResultadoFamiliaItem.permalink` es opcional; y una fila vieja previa
+// a que `publicar.ts` empezara a guardarlo tampoco lo tendría). Con el
+// `itemId` real ya confirmado por Mercado Libre (ese sí siempre está en
+// un resultado `ok:true`) se arma el link oficial sin llamar a la API
+// — mismo formato exacto que ya usa `linkPublicacion` (lib/ml/cliente.ts,
+// confirmado contra producción de zilonix-os-web: Colombia, único site
+// en alcance de esta fase). `permalinkMlSeguro` sigue siendo el único
+// camino para un permalink que SÍ vino de Mercado Libre — este armado
+// manual es solo el respaldo cuando no hay nada que validar.
+function permalinkOArmado(permalink: string | undefined, itemId: string | undefined): string | null {
+  if (permalink) {
+    const seguro = permalinkMlSeguro(permalink);
+    if (seguro) return seguro;
+  }
+  return itemId ? linkPublicacion(itemId) : null;
 }
 
 // Punto B del pedido — "cuando una cuenta publicó OK, el nombre de la
@@ -290,16 +324,15 @@ export function enlacesPermalink(
     const nombreCuenta = nicknamePorCuenta.get(r.cuentaMlId) ?? r.cuentaMlId;
     if ("familia" in r) {
       for (const item of r.familia.items) {
-        if (item.ok && item.permalink) {
-          const permalinkSeguro = permalinkMlSeguro(item.permalink);
-          if (!permalinkSeguro) continue;
-          const sufijo = item.sku || Object.values(item.valores).join(" / ");
-          enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: sufijo ? `${nombreCuenta} (${sufijo})` : nombreCuenta, permalink: permalinkSeguro });
-        }
+        if (!item.ok) continue;
+        const link = permalinkOArmado(item.permalink, item.itemId);
+        if (!link) continue;
+        const sufijo = item.sku || Object.values(item.valores).join(" / ");
+        enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: sufijo ? `${nombreCuenta} (${sufijo})` : nombreCuenta, permalink: link });
       }
     } else if (r.ok) {
-      const permalinkSeguro = permalinkMlSeguro(r.permalink);
-      if (permalinkSeguro) enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: nombreCuenta, permalink: permalinkSeguro });
+      const link = permalinkOArmado(r.permalink, r.itemId);
+      if (link) enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: nombreCuenta, permalink: link });
     }
   }
   return enlaces;
