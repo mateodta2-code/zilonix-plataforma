@@ -44,6 +44,15 @@ GRANT SELECT, INSERT, UPDATE ON terceros, costos_sku TO app_user;
 GRANT SELECT, INSERT, UPDATE ON pedidos_finanzas, pedido_items TO app_user;
 GRANT SELECT, INSERT ON ventas_correcciones TO app_user;
 GRANT UPDATE (anulada_ts) ON ventas_correcciones TO app_user;
+-- Issue #280 (WMS Fase 1) — nada de inventario se borra: una bodega se
+-- desactiva, un saldo cambia solo por un movimiento y el kardex es de
+-- solo inserción (ni UPDATE ni DELETE: la historia no se reescribe).
+-- Una recepción tampoco se edita: si llegó mal, se corrige con un
+-- ajuste, que queda en el kardex.
+GRANT SELECT, INSERT, UPDATE ON bodegas, stock_bodega, ordenes_compra, orden_compra_items,
+  configuracion_inventario, sync_stock_ml, alertas_ultima_unidad TO app_user;
+GRANT SELECT, INSERT ON kardex_movimientos, recepciones, recepcion_items TO app_user;
+REVOKE UPDATE, DELETE ON kardex_movimientos, recepciones, recepcion_items FROM app_user;
 -- Issue #125 (Z-FIN-03) — auditoria queda de solo inserción para
 -- app_user: puede dejar el rastro y leer el de su empresa, no
 -- reescribirlo ni borrarlo. REVOKE porque este script es repetible:
@@ -181,6 +190,27 @@ ALTER TABLE pedido_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedido_items FORCE ROW LEVEL SECURITY;
 ALTER TABLE ventas_correcciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ventas_correcciones FORCE ROW LEVEL SECURITY;
+-- Issue #280.
+ALTER TABLE bodegas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bodegas FORCE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega FORCE ROW LEVEL SECURITY;
+ALTER TABLE kardex_movimientos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kardex_movimientos FORCE ROW LEVEL SECURITY;
+ALTER TABLE ordenes_compra ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ordenes_compra FORCE ROW LEVEL SECURITY;
+ALTER TABLE orden_compra_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orden_compra_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepciones FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_inventario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_inventario FORCE ROW LEVEL SECURITY;
+ALTER TABLE sync_stock_ml ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sync_stock_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE alertas_ultima_unidad ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alertas_ultima_unidad FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
@@ -368,6 +398,41 @@ DROP POLICY IF EXISTS ventas_correcciones_anular ON ventas_correcciones;
 CREATE POLICY ventas_correcciones_anular ON ventas_correcciones FOR UPDATE
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NULL)
   WITH CHECK (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NOT NULL);
+
+-- Issue #280 — mismo patrón en las tablas de inventario: una empresa
+-- nunca ve ni mueve el stock, el kardex ni las compras de otra. Las
+-- FK compuestas (empresa_id, ...) cierran el otro hueco: una fila de A
+-- no puede apuntar a una bodega o un SKU de B.
+DROP POLICY IF EXISTS aislamiento_bodegas ON bodegas;
+CREATE POLICY aislamiento_bodegas ON bodegas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_stock_bodega ON stock_bodega;
+CREATE POLICY aislamiento_stock_bodega ON stock_bodega
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_kardex_movimientos ON kardex_movimientos;
+CREATE POLICY aislamiento_kardex_movimientos ON kardex_movimientos
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_ordenes_compra ON ordenes_compra;
+CREATE POLICY aislamiento_ordenes_compra ON ordenes_compra
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_orden_compra_items ON orden_compra_items;
+CREATE POLICY aislamiento_orden_compra_items ON orden_compra_items
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_recepciones ON recepciones;
+CREATE POLICY aislamiento_recepciones ON recepciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_recepcion_items ON recepcion_items;
+CREATE POLICY aislamiento_recepcion_items ON recepcion_items
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_configuracion_inventario ON configuracion_inventario;
+CREATE POLICY aislamiento_configuracion_inventario ON configuracion_inventario
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_sync_stock_ml ON sync_stock_ml;
+CREATE POLICY aislamiento_sync_stock_ml ON sync_stock_ml
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_alertas_ultima_unidad ON alertas_ultima_unidad;
+CREATE POLICY aislamiento_alertas_ultima_unidad ON alertas_ultima_unidad
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;
 CREATE POLICY aislamiento_accesos_temporales ON accesos_temporales

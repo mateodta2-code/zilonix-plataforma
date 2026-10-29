@@ -585,6 +585,11 @@ export const skus = pgTable(
     // Un código de SKU tiene que ser único DENTRO de una empresa —
     // nunca entre empresas distintas, cada una arma su propio catálogo.
     codigoUnico: uniqueIndex("skus_empresa_codigo_unico").on(t.empresaId, t.codigo),
+    // Issue #280 — destino de las FK compuestas de stock_bodega,
+    // kardex_movimientos y compras: una fila de inventario de la
+    // empresa A nunca apunta a un SKU de B. Constraint y no índice:
+    // drizzle-kit crea los índices después de las claves foráneas.
+    empresaIdUnica: unique("skus_empresa_id_unica").on(t.empresaId, t.id),
   })
 );
 
@@ -1225,3 +1230,392 @@ export const publicidadSincronizaciones = pgTable("publicidad_sincronizaciones",
     .on(t.empresaId, t.cuentaMlId)
     .where(sql`${t.estado} = 'en_curso'`),
 }));
+
+// ---------------------------------------------------------------------
+// Issue #280 — WMS Fase 1: bodegas, stock por SKU y bodega, kardex y
+// compras. Seller es la fuente de verdad del inventario (no Fulfy).
+// Todo en unidades enteras: no hay fracciones de producto. Sin
+// ubicaciones dentro de la bodega (fuera de Fase 1).
+//
+// Una sola puerta de escritura: lib/inventario/movimientos.ts
+// (aplicarMovimientos). Ninguna otra parte del código actualiza
+// stock_bodega a mano: cada cambio deja su fila en el kardex en la
+// misma transacción, y el kardex nunca se edita ni se borra (app_user
+// solo tiene SELECT e INSERT, db/rls-setup.sql).
+// ---------------------------------------------------------------------
+
+// fulfillment_ml = el stock que Mercado Libre guarda en Full. No se
+// suma al disponible que se publica (ML ya lo conoce por su lado) y no
+// se reserva para pedidos: Full despacha solo.
+export const tipoBodegaEnum = pgEnum("tipo_bodega", ["propia", "fulfillment_ml", "tercero"]);
+
+export const bodegas = pgTable(
+  "bodegas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    nombre: text("nombre").notNull(),
+    tipo: tipoBodegaEnum("tipo").notNull().default("propia"),
+    // La primera que se intenta para reservar un pedido de ML.
+    esPrincipal: boolean("es_principal").notNull().default(false),
+    // Una bodega se desactiva, nunca se borra: su kardex sigue siendo
+    // historia real.
+    activa: boolean("activa").notNull().default(true),
+    // Si su disponible cuenta para lo que se publica en ML. Nace en
+    // false para fulfillment_ml (lib/inventario/bodegas.ts).
+    sumaAlPublicado: boolean("suma_al_publicado").notNull().default(true),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    empresaIdUnica: unique("bodegas_empresa_id_unica").on(t.empresaId, t.id),
+    nombreUnico: unique("bodegas_empresa_nombre_unico").on(t.empresaId, t.nombre),
+    // A lo sumo una principal por empresa.
+    principalUnica: uniqueIndex("bodegas_principal_unica").on(t.empresaId).where(sql`${t.esPrincipal}`),
+    nombreNoVacio: check("bodegas_nombre_no_vacio", sql`btrim(${t.nombre}) <> ''`),
+  })
+);
+
+// Saldo actual de un SKU en una bodega. Los kits no tienen fila acá:
+// su stock se deriva de sus componentes (lib/inventario/calculos.ts).
+// en_transito queda en 0 en Fase 1 (el traslado es instantáneo); la
+// columna existe para la 1.1 sin otra migración.
+export const stockBodega = pgTable(
+  "stock_bodega",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    bodegaId: uuid("bodega_id").notNull(),
+    skuId: uuid("sku_id").notNull(),
+    disponible: integer("disponible").notNull().default(0),
+    reservado: integer("reservado").notNull().default(0),
+    enTransito: integer("en_transito").notNull().default(0),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    skuBodegaUnico: unique("stock_bodega_sku_bodega_unico").on(t.empresaId, t.bodegaId, t.skuId),
+    deLaBodega: foreignKey({
+      name: "stock_bodega_bodega_misma_empresa_fk",
+      columns: [t.empresaId, t.bodegaId],
+      foreignColumns: [bodegas.empresaId, bodegas.id],
+    }).onDelete("restrict"),
+    delSku: foreignKey({
+      name: "stock_bodega_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("restrict"),
+    porSku: index("stock_bodega_empresa_sku_idx").on(t.empresaId, t.skuId),
+    // La última defensa contra vender lo que no hay: aunque un bug se
+    // saltara la validación de aplicarMovimientos, la base no deja un
+    // saldo negativo.
+    disponibleNoNegativo: check("stock_bodega_disponible_no_negativo", sql`${t.disponible} >= 0`),
+    reservadoNoNegativo: check("stock_bodega_reservado_no_negativo", sql`${t.reservado} >= 0`),
+    enTransitoNoNegativo: check("stock_bodega_en_transito_no_negativo", sql`${t.enTransito} >= 0`),
+  })
+);
+
+// Qué hace cada tipo con el saldo (lib/inventario/calculos.ts):
+// entrada +disponible · salida −disponible · ajuste ±disponible ·
+// traslado −disponible en origen y +disponible en destino (dos filas,
+// mismo grupo) · reserva −disponible +reservado · liberacion
+// −reservado +disponible · confirmacion −reservado (la unidad salió).
+export const tipoMovimientoEnum = pgEnum("tipo_movimiento", [
+  "entrada",
+  "salida",
+  "ajuste",
+  "traslado",
+  "reserva",
+  "liberacion",
+  "confirmacion",
+]);
+// De dónde viene el movimiento: lo que dispara un pedido de ML nunca
+// se confunde con un ajuste a mano.
+export const origenMovimientoEnum = pgEnum("origen_movimiento", ["manual", "recepcion", "pedido_ml", "traslado"]);
+
+// Kardex append-only. Cada fila guarda el cambio (delta) y el saldo que
+// quedó después, así una auditoría no tiene que recalcular nada.
+export const kardexMovimientos = pgTable(
+  "kardex_movimientos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+    // Las filas de una misma operación (las dos puntas de un traslado,
+    // las líneas de una recepción o de un pedido) comparten grupo.
+    grupoId: uuid("grupo_id").notNull(),
+    linea: integer("linea").notNull(),
+    // Idempotencia: la misma operación nunca se aplica dos veces (un
+    // aviso de ML repetido, un doble clic). Ej. "pedido:<id>:reserva".
+    claveIdempotencia: text("clave_idempotencia").notNull(),
+    tipo: tipoMovimientoEnum("tipo").notNull(),
+    origen: origenMovimientoEnum("origen").notNull(),
+    bodegaId: uuid("bodega_id").notNull(),
+    skuId: uuid("sku_id").notNull(),
+    deltaDisponible: integer("delta_disponible").notNull(),
+    deltaReservado: integer("delta_reservado").notNull(),
+    deltaEnTransito: integer("delta_en_transito").notNull().default(0),
+    saldoDisponible: integer("saldo_disponible").notNull(),
+    saldoReservado: integer("saldo_reservado").notNull(),
+    saldoEnTransito: integer("saldo_en_transito").notNull().default(0),
+    // Id de lo que lo originó (pedido, recepción). Texto: puede ser un
+    // uuid propio o, en el futuro, un id externo.
+    referenciaId: text("referencia_id"),
+    // Se separa siempre la persona del sistema (mismo criterio que
+    // auditoria y pedido_eventos).
+    actorTipo: actorTipoEnum("actor_tipo").notNull(),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    nota: text("nota"),
+  },
+  (t) => ({
+    claveUnica: unique("kardex_movimientos_clave_linea_unica").on(t.empresaId, t.claveIdempotencia, t.linea),
+    deLaBodega: foreignKey({
+      name: "kardex_movimientos_bodega_misma_empresa_fk",
+      columns: [t.empresaId, t.bodegaId],
+      foreignColumns: [bodegas.empresaId, bodegas.id],
+    }).onDelete("restrict"),
+    delSku: foreignKey({
+      name: "kardex_movimientos_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("restrict"),
+    porSkuTs: index("kardex_movimientos_empresa_sku_ts_idx").on(t.empresaId, t.skuId, t.ts),
+    porBodegaTs: index("kardex_movimientos_empresa_bodega_ts_idx").on(t.empresaId, t.bodegaId, t.ts),
+    porReferencia: index("kardex_movimientos_empresa_referencia_idx").on(t.empresaId, t.referenciaId),
+    lineaPositiva: check("kardex_movimientos_linea_positiva", sql`${t.linea} >= 1`),
+    claveNoVacia: check("kardex_movimientos_clave_no_vacia", sql`btrim(${t.claveIdempotencia}) <> ''`),
+    // Un movimiento que no mueve nada no es un movimiento.
+    mueveAlgo: check(
+      "kardex_movimientos_mueve_algo",
+      sql`${t.deltaDisponible} <> 0 OR ${t.deltaReservado} <> 0 OR ${t.deltaEnTransito} <> 0`
+    ),
+    saldosNoNegativos: check(
+      "kardex_movimientos_saldos_no_negativos",
+      sql`${t.saldoDisponible} >= 0 AND ${t.saldoReservado} >= 0 AND ${t.saldoEnTransito} >= 0`
+    ),
+  })
+);
+
+// Orden de compra simple: a quién, a qué bodega llega y qué SKUs. El
+// estado parcial/recibida lo calcula la recepción, nunca se escribe a
+// mano.
+export const estadoOrdenCompraEnum = pgEnum("estado_orden_compra", ["abierta", "parcial", "recibida", "anulada"]);
+
+export const ordenesCompra = pgTable(
+  "ordenes_compra",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // Consecutivo legible por empresa (OC-1, OC-2...), lo asigna lib/inventario/compras.ts.
+    numero: integer("numero").notNull(),
+    // Proveedor de la tabla de terceros (opcional: una compra de
+    // contado puede no tener tercero creado todavía).
+    terceroId: uuid("tercero_id"),
+    bodegaDestinoId: uuid("bodega_destino_id").notNull(),
+    estado: estadoOrdenCompraEnum("estado").notNull().default("abierta"),
+    nota: text("nota"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    empresaIdUnica: unique("ordenes_compra_empresa_id_unica").on(t.empresaId, t.id),
+    numeroUnico: unique("ordenes_compra_empresa_numero_unico").on(t.empresaId, t.numero),
+    delTercero: foreignKey({
+      name: "ordenes_compra_tercero_misma_empresa_fk",
+      columns: [t.empresaId, t.terceroId],
+      foreignColumns: [terceros.empresaId, terceros.id],
+    }).onDelete("restrict"),
+    deLaBodega: foreignKey({
+      name: "ordenes_compra_bodega_misma_empresa_fk",
+      columns: [t.empresaId, t.bodegaDestinoId],
+      foreignColumns: [bodegas.empresaId, bodegas.id],
+    }).onDelete("restrict"),
+    numeroPositivo: check("ordenes_compra_numero_positivo", sql`${t.numero} >= 1`),
+  })
+);
+
+export const ordenCompraItems = pgTable(
+  "orden_compra_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    ordenCompraId: uuid("orden_compra_id").notNull(),
+    skuId: uuid("sku_id").notNull(),
+    cantidadPedida: integer("cantidad_pedida").notNull(),
+    // La suma de lo recibido contra esta línea. Puede pasarse de lo
+    // pedido (el proveedor mandó de más): se recibe lo que llegó.
+    cantidadRecibida: integer("cantidad_recibida").notNull().default(0),
+    // Vacío = sin dato. El costo oficial sigue en costos_sku (finanzas).
+    costoUnitario: numeric("costo_unitario", { precision: 14, scale: 2 }),
+  },
+  (t) => ({
+    empresaIdUnica: unique("orden_compra_items_empresa_id_unica").on(t.empresaId, t.id),
+    skuUnicoPorOrden: unique("orden_compra_items_orden_sku_unico").on(t.ordenCompraId, t.skuId),
+    deLaOrden: foreignKey({
+      name: "orden_compra_items_orden_misma_empresa_fk",
+      columns: [t.empresaId, t.ordenCompraId],
+      foreignColumns: [ordenesCompra.empresaId, ordenesCompra.id],
+    }).onDelete("cascade"),
+    delSku: foreignKey({
+      name: "orden_compra_items_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("restrict"),
+    pedidaPositiva: check("orden_compra_items_pedida_positiva", sql`${t.cantidadPedida} > 0`),
+    recibidaNoNegativa: check("orden_compra_items_recibida_no_negativa", sql`${t.cantidadRecibida} >= 0`),
+    costoNoNegativo: check("orden_compra_items_costo_no_negativo", sql`${t.costoUnitario} >= 0`),
+  })
+);
+
+// Una recepción es lo que de verdad llegó, contra una OC o directo
+// (orden_compra_id vacío). Cada línea entra al kardex como "entrada".
+export const recepciones = pgTable(
+  "recepciones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    ordenCompraId: uuid("orden_compra_id"),
+    bodegaId: uuid("bodega_id").notNull(),
+    nota: text("nota"),
+    recibidoTs: timestamp("recibido_ts", { withTimezone: true }).notNull().defaultNow(),
+    recibidoPor: uuid("recibido_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    empresaIdUnica: unique("recepciones_empresa_id_unica").on(t.empresaId, t.id),
+    deLaOrden: foreignKey({
+      name: "recepciones_orden_misma_empresa_fk",
+      columns: [t.empresaId, t.ordenCompraId],
+      foreignColumns: [ordenesCompra.empresaId, ordenesCompra.id],
+    }).onDelete("restrict"),
+    deLaBodega: foreignKey({
+      name: "recepciones_bodega_misma_empresa_fk",
+      columns: [t.empresaId, t.bodegaId],
+      foreignColumns: [bodegas.empresaId, bodegas.id],
+    }).onDelete("restrict"),
+  })
+);
+
+export const recepcionItems = pgTable(
+  "recepcion_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    recepcionId: uuid("recepcion_id").notNull(),
+    skuId: uuid("sku_id").notNull(),
+    // Vacío en un ingreso directo.
+    ordenCompraItemId: uuid("orden_compra_item_id"),
+    cantidad: integer("cantidad").notNull(),
+  },
+  (t) => ({
+    deLaRecepcion: foreignKey({
+      name: "recepcion_items_recepcion_misma_empresa_fk",
+      columns: [t.empresaId, t.recepcionId],
+      foreignColumns: [recepciones.empresaId, recepciones.id],
+    }).onDelete("cascade"),
+    delSku: foreignKey({
+      name: "recepcion_items_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("restrict"),
+    deLaLineaOc: foreignKey({
+      name: "recepcion_items_linea_oc_misma_empresa_fk",
+      columns: [t.empresaId, t.ordenCompraItemId],
+      foreignColumns: [ordenCompraItems.empresaId, ordenCompraItems.id],
+    }).onDelete("restrict"),
+    cantidadPositiva: check("recepcion_items_cantidad_positiva", sql`${t.cantidad} > 0`),
+  })
+);
+
+// Regla de la última unidad: qué hacer cuando el disponible publicado de
+// un SKU baja al umbral (por defecto 1) y la publicación tiene promos.
+// preguntar = banner con Aplicar / No aplicar. quitar_promos y
+// vender_sin_promo también pasan por el banner en Fase 1: la API de
+// promociones no está en lib/ml/cliente.ts (ver docs/wms-fase1.md).
+export const reglaUltimaUnidadEnum = pgEnum("regla_ultima_unidad", ["preguntar", "quitar_promos", "vender_sin_promo"]);
+
+export const configuracionInventario = pgTable(
+  "configuracion_inventario",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    reglaUltimaUnidad: reglaUltimaUnidadEnum("regla_ultima_unidad").notNull().default("preguntar"),
+    umbralUltimaUnidad: integer("umbral_ultima_unidad").notNull().default(1),
+    // Unidades que se guardan sin publicar (colchón contra sobreventa).
+    bufferMl: integer("buffer_ml").notNull().default(0),
+    // Apagado por defecto: nada se escribe en ML hasta que la empresa
+    // lo prenda a propósito, después de cargar su stock real.
+    syncMlActivo: boolean("sync_ml_activo").notNull().default(false),
+    // Solo los pedidos de ML creados desde este momento reservan stock.
+    // Vacío = todavía no se reserva nada. Sin esto, la importación
+    // inicial (60 días de pedidos ya despachados) descontaría del stock
+    // real unidades que salieron antes de contarlo.
+    reservaPedidosDesdeTs: timestamp("reserva_pedidos_desde_ts", { withTimezone: true }),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaPor: uuid("actualizada_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    unaPorEmpresa: unique("configuracion_inventario_empresa_unica").on(t.empresaId),
+    umbralNoNegativo: check("configuracion_inventario_umbral_no_negativo", sql`${t.umbralUltimaUnidad} >= 0`),
+    bufferNoNegativo: check("configuracion_inventario_buffer_no_negativo", sql`${t.bufferMl} >= 0`),
+  })
+);
+
+// Estado del envío de stock a ML por SKU. Sirve de cola con espera
+// (debounce): cada movimiento marca pendiente_desde, y el trabajo solo
+// envía los que llevan quietos un rato, así diez movimientos seguidos
+// del mismo SKU son un solo PUT a ML.
+export const syncStockMl = pgTable(
+  "sync_stock_ml",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    skuId: uuid("sku_id").notNull(),
+    pendienteDesdeTs: timestamp("pendiente_desde_ts", { withTimezone: true }),
+    ultimoEnvioTs: timestamp("ultimo_envio_ts", { withTimezone: true }),
+    ultimaCantidadEnviada: integer("ultima_cantidad_enviada"),
+    // Texto corto para la pantalla. Nunca un token ni el cuerpo crudo de ML.
+    ultimoResultado: text("ultimo_resultado"),
+  },
+  (t) => ({
+    skuUnico: unique("sync_stock_ml_empresa_sku_unico").on(t.empresaId, t.skuId),
+    delSku: foreignKey({
+      name: "sync_stock_ml_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("cascade"),
+    porPendiente: index("sync_stock_ml_empresa_pendiente_idx").on(t.empresaId, t.pendienteDesdeTs),
+  })
+);
+
+export const estadoAlertaUltimaUnidadEnum = pgEnum("estado_alerta_ultima_unidad", ["pendiente", "aplicada", "descartada"]);
+
+// Banner de la última unidad. Una sola alerta pendiente por SKU: si
+// vuelve a bajar mientras sigue pendiente, no se apila otra.
+export const alertasUltimaUnidad = pgTable(
+  "alertas_ultima_unidad",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    skuId: uuid("sku_id").notNull(),
+    disponibleAlCrear: integer("disponible_al_crear").notNull(),
+    regla: reglaUltimaUnidadEnum("regla").notNull(),
+    estado: estadoAlertaUltimaUnidadEnum("estado").notNull().default("pendiente"),
+    creadaTs: timestamp("creada_ts", { withTimezone: true }).notNull().defaultNow(),
+    resueltaTs: timestamp("resuelta_ts", { withTimezone: true }),
+    resueltaPor: uuid("resuelta_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    delSku: foreignKey({
+      name: "alertas_ultima_unidad_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("cascade"),
+    pendienteUnica: uniqueIndex("alertas_ultima_unidad_pendiente_unica")
+      .on(t.empresaId, t.skuId)
+      .where(sql`${t.estado} = 'pendiente'`),
+    resueltaConFecha: check(
+      "alertas_ultima_unidad_resuelta_con_fecha",
+      sql`(${t.estado} = 'pendiente') = (${t.resueltaTs} IS NULL)`
+    ),
+  })
+);
