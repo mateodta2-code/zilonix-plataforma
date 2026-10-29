@@ -63,6 +63,15 @@ const cspClerk = dominioClerk
 //   - Shein: img.ltwebstatic.com (confirmado en la home real, captura
 //     de oct/2026) -> *.ltwebstatic.com.
 //
+// Parte 3, punto C ("fotos: PC + Canva → Cloudinary") — res.cloudinary.com
+// es el host FIJO real de toda `secure_url` que devuelve Cloudinary (no
+// depende del cloud_name, que va en el PATH, no en el host — confirmado
+// contra la forma real que ya devuelve lib/cloudinary.ts). Sin esto, la
+// miniatura de GaleriaFotos.tsx quedaría bloqueada por el navegador
+// (mismo bug real que el issue #235 de arriba, pero para un dominio
+// nuevo en vez de uno de un marketplace).
+const CLOUDINARY_HOST = "https://res.cloudinary.com";
+
 // Issue #237 — hotfix de smoke de fotos: "sigue sin aparecer" para
 // AliExpress (el único que #236 no alcanzó a tapar) — causa real
 // confirmada, nunca un selector roto: `it.image.imgUrl`
@@ -79,7 +88,7 @@ const cspClerk = dominioClerk
 // original de #236 mismo. Se suma *.aliexpress-media.com — se deja
 // *.alicdn.com sin tocar (Alibaba sigue ahí, confirmado aparte).
 const IMG_SRC_CSP =
-  "img-src 'self' data: https://img.clerk.com https://*.mlstatic.com https://*.media-amazon.com https://*.kwcdn.com https://*.alicdn.com https://*.aliexpress-media.com https://*.ltwebstatic.com";
+  `img-src 'self' data: https://img.clerk.com https://*.mlstatic.com https://*.media-amazon.com https://*.kwcdn.com https://*.alicdn.com https://*.aliexpress-media.com https://*.ltwebstatic.com ${CLOUDINARY_HOST}`;
 
 const csp = [
   "default-src 'self'",

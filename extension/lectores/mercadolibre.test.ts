@@ -10,21 +10,25 @@ import {
   construirLinkSeguirProducto,
   construirLinkSeguirTienda,
   construirPublicacionesTienda,
+  deduplicarFotosMl,
   detectarFullEnHtmlFicha,
   detectarFullEnHtmlTarjeta,
   elegirInventarioPrincipal,
   elegirVendidosPrincipal,
   esPaginaUserProduct,
+  esUrlFotoMlValida,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
   extraerIdIncrustadoConfiable,
   extraerWidDeUrl,
   filtroFullActivoEnUrl,
+  idNumericoDeArchivo,
   leerDatosIncrustados,
   leerInventarioMaximoDeTexto,
   leerResenasDesdeScript,
   leerSellerIdDeTienda,
   tipoDePagina,
+  urlFotoGrande,
 } from "./mercadolibre.js";
 // Issue #251 (smoke de Mateo) — antiguedadDiasPorId real de la
 // extensión (JS plano, mismo cálculo que lib/seguimiento/aproximados.ts)
@@ -1169,5 +1173,74 @@ describe("construirPublicacionesTienda — issue #251 punto 8 (revisión de Pabl
       total: 23,
       idsVisibles: ["MCO38280231", "MCO1325134601", "MCO1534758597"],
     });
+  });
+});
+
+// Parte 3, punto D ("Importar a Publicar") — mismo algoritmo ya
+// probado en producción en zilonix-os-web/lib/ml-bookmarklet.js
+// (portado en app/panel/publicar/importadores/bookmarklet.ts), acá
+// como funciones normales en vez de un bookmarklet minificado.
+describe("urlFotoGrande/idNumericoDeArchivo/esUrlFotoMlValida/deduplicarFotosMl — galería de 'Importar a Publicar'", () => {
+  it("urlFotoGrande fuerza el sufijo -O (original), sin importar el tamaño original", () => {
+    expect(urlFotoGrande("https://http2.mlstatic.com/D_NQ_NP_123456-MCO12345-I.jpg")).toBe("https://http2.mlstatic.com/D_NQ_NP_123456-MCO12345-O.jpg");
+    // Mismo comportamiento real del bookmarklet original (aGrande): el
+    // query string queda afuera del replace a propósito — nunca se
+    // confirmó que Mercado Libre lo necesite para servir la imagen.
+    expect(urlFotoGrande("https://http2.mlstatic.com/foo-F.webp?v=2")).toBe("https://http2.mlstatic.com/foo-O.webp");
+  });
+
+  it("urlFotoGrande deja intacta una URL que no matchea el patrón de sufijo (nunca rompe un formato inesperado)", () => {
+    expect(urlFotoGrande("https://http2.mlstatic.com/sin-sufijo.jpg")).toBe("https://http2.mlstatic.com/sin-sufijo.jpg");
+  });
+
+  it("idNumericoDeArchivo saca TODOS los números de 5+ dígitos del nombre de archivo (ignorando el query string) y los junta como clave", () => {
+    expect(idNumericoDeArchivo("https://http2.mlstatic.com/D_NQ_NP_2X_987654321-MCO99999999-I.jpg?v=2")).toBe("987654321-99999999");
+  });
+
+  it("idNumericoDeArchivo: sin ningún número de 5+ dígitos, null — nunca inventa una clave", () => {
+    expect(idNumericoDeArchivo("https://http2.mlstatic.com/sin-numeros.jpg")).toBeNull();
+  });
+
+  it("esUrlFotoMlValida acepta mlstatic.com real, rechaza logos/iconos/sprites/badges y dominios ajenos", () => {
+    expect(esUrlFotoMlValida("https://http2.mlstatic.com/D_NQ_NP_123-O.jpg")).toBe(true);
+    expect(esUrlFotoMlValida("https://http2.mlstatic.com/org-img/mp-logo.png")).toBe(false);
+    expect(esUrlFotoMlValida("https://http2.mlstatic.com/resources/frontend/statics/icon-play.svg")).toBe(false);
+    expect(esUrlFotoMlValida("https://otrositio.com/foto.jpg")).toBe(false);
+    expect(esUrlFotoMlValida("")).toBe(false);
+  });
+
+  it("deduplicarFotosMl: la misma foto en miniatura y grande (mismo número, distinto sufijo) queda UNA sola vez, forzada a -O", () => {
+    const crudas = [
+      "https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-I.jpg",
+      "https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-O.jpg",
+    ];
+    expect(deduplicarFotosMl(crudas)).toEqual(["https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-O.jpg"]);
+  });
+
+  it("deduplicarFotosMl: 2 fotos reales distintas quedan las 2, en el orden en que aparecieron", () => {
+    const crudas = [
+      "https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-I.jpg",
+      "https://http2.mlstatic.com/D_NQ_NP_2X_444555666-MCO1-I.jpg",
+    ];
+    expect(deduplicarFotosMl(crudas)).toEqual([
+      "https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-O.jpg",
+      "https://http2.mlstatic.com/D_NQ_NP_2X_444555666-MCO1-O.jpg",
+    ]);
+  });
+
+  it("deduplicarFotosMl: descarta logos/iconos y URLs de otro dominio, nunca las cuenta como foto real", () => {
+    const crudas = [
+      "https://http2.mlstatic.com/org-img/mp-logo-123456.png",
+      "https://otrositio.com/999999999-foto.jpg",
+      "",
+      null,
+      undefined,
+    ];
+    expect(deduplicarFotosMl(crudas)).toEqual([]);
+  });
+
+  it("deduplicarFotosMl: respeta el array vacío/ausente, nunca lanza", () => {
+    expect(deduplicarFotosMl([])).toEqual([]);
+    expect(deduplicarFotosMl(undefined)).toEqual([]);
   });
 });

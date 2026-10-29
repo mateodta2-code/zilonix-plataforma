@@ -25,7 +25,16 @@
 // ficha de un competidor o la tienda que sigue, y solo la pestaña del
 // panel de Seguimiento (con marcador-zilonix.js, y con el componente
 // que escucha "dato-pagina-seguimiento" montado) hace algo con esto.
-const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix:dato-pagina-seguimiento"]);
+// Parte 3, punto D ("Importar a Publicar") — "zilonix:importar-publicar"
+// suma al mismo relevo genérico: content.js lo manda con un clic real
+// en una ficha de Mercado Libre, solo la pestaña con /panel/publicar
+// abierto (marcador-zilonix.js, matches ampliado en manifest.json)
+// hace algo con esto. Sin cola a propósito (a diferencia de
+// "zilonix:dato-pagina-seguimiento"): si la persona todavía no tiene
+// /panel/publicar abierto en ninguna pestaña, el mensaje simplemente no
+// llega a nadie — mismo criterio simple que ya tenían "zilonix:vendidos"/
+// "zilonix:listado" antes de que #251 le agregara cola a Seguimiento.
+const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix:dato-pagina-seguimiento", "zilonix:importar-publicar"]);
 
 // Issue #251 (revisión de Pablo, punto 4) — "que la lectura no dependa
 // de tener abierta la pestaña de Seguimiento". Decisión de Mateo:
