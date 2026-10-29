@@ -1,3 +1,6 @@
+import { inArray } from "drizzle-orm";
+import { dbComoEmpresa } from "@/db/empresa-context";
+import { costosSku, promocionesReglas } from "@/db/schema";
 import { leerItemParaPromocionMl, leerPromocionesItemMl, listarItemsActivosMl, type PromocionCrudaMl } from "@/lib/ml/cliente";
 
 // Rama feat-promociones — motor de reglas puro, portado de
@@ -30,6 +33,50 @@ export type ReglasCuentaPromocion = {
   participarCompartidas: boolean;
   igualarAlPiso: boolean;
 };
+
+// Code review de Pablo — "saca un helper de validación si el route
+// queda más limpio": estas 2 lecturas vivían DUPLICADAS, privadas
+// dentro de lib/trabajos/buscarPromocionesMultiCuenta.ts; ahora viven
+// acá (el módulo del motor, donde reglas/piso son insumos de verdad
+// del cálculo) y las usan tanto el trabajo de búsqueda como
+// lib/ml/promocionesEjecucion.ts (HIGH 2 — releer reglas/piso FRESCOS
+// justo antes de escribir en Mercado Libre, nunca confiar en lo que
+// mandó el cliente ni en el snapshot viejo).
+export const REGLAS_POR_DEFECTO: ReglasCuentaPromocion = { descuentoMaximoPct: 20, participarCompartidas: false, igualarAlPiso: true };
+
+export async function leerReglasFrescasCuenta(empresaId: string, cuentaMlId: string): Promise<ReglasCuentaPromocion> {
+  const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(promocionesReglas).where(inArray(promocionesReglas.cuentaMlId, [cuentaMlId])));
+  const fila = filas[0];
+  if (!fila) return REGLAS_POR_DEFECTO;
+  return { descuentoMaximoPct: fila.descuentoMaximoPct, participarCompartidas: fila.participarCompartidas, igualarAlPiso: fila.igualarAlPiso };
+}
+
+export type PisoYCostoFrescos = { precioMinimo: number | null; costo: number | null };
+
+// Batcheada — para el trabajo de búsqueda, que necesita el piso de
+// potencialmente cientos de SKUs de una sola cuenta en una pasada
+// (nunca un N+1, una consulta por SKU).
+export async function leerPisosYCostosFrescos(empresaId: string, skuCodigos: string[]): Promise<Map<string, PisoYCostoFrescos>> {
+  const mapa = new Map<string, PisoYCostoFrescos>();
+  if (skuCodigos.length === 0) return mapa;
+  const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(costosSku).where(inArray(costosSku.skuCodigo, skuCodigos)));
+  for (const fila of filas) {
+    mapa.set(fila.skuCodigo, {
+      precioMinimo: fila.precioMinimoUnidad != null ? Number(fila.precioMinimoUnidad) : null,
+      costo: fila.costo != null ? Number(fila.costo) : null,
+    });
+  }
+  return mapa;
+}
+
+// Un solo SKU — para lib/ml/promocionesEjecucion.ts (HIGH 2), que
+// revalida UN candidato puntual justo antes de escribir en Mercado
+// Libre, nunca un lote entero.
+export async function leerPisoYCostoFresco(empresaId: string, skuCodigo: string | null): Promise<PisoYCostoFrescos> {
+  if (!skuCodigo) return { precioMinimo: null, costo: null };
+  const mapa = await leerPisosYCostosFrescos(empresaId, [skuCodigo]);
+  return mapa.get(skuCodigo) ?? { precioMinimo: null, costo: null };
+}
 
 export type ItemConPromociones = {
   itemId: string;
@@ -217,23 +264,43 @@ export function calcularCandidatosItem(
 }
 
 // Lee TODAS las publicaciones activas de una cuenta (paginado, sin
-// tope fijo — al revés de la versión vieja de Zilonix OS, que paraba
-// en 250) y, por cada una, sus promociones reales. El llamador
+// tope fijo propio — al revés de la versión vieja de Zilonix OS, que
+// paraba en 250) y, por cada una, sus promociones reales. El llamador
 // (lib/trabajos/buscarPromocionesMultiCuenta.ts) decide la
 // concurrencia y reporta progreso — esta función solo sabe leer UNA
 // cuenta de punta a punta.
 const TAMANO_PAGINA_ITEMS = 50;
 
-export async function listarTodosLosItemsActivos(cuentaIdExterna: string, token: string): Promise<string[]> {
+export type ResultadoListadoActivos = { ids: string[]; catalogoIncompleto: boolean };
+
+// Code review de Pablo — MED 8: `GET /users/{id}/items/search` por
+// `offset` es real pero NO infinito: Mercado Libre lo corta cerca de
+// offset+limit = 1000 (comportamiento real conocido de su búsqueda
+// por offset, no confirmado con una prueba propia contra una cuenta
+// con más de 1000 publicaciones — este repo tampoco usa todavía
+// ningún `scroll_id`/`search_type=scan` como respaldo, así que no hay
+// nada que reusar). En vez de adivinar el límite exacto o inventar un
+// scroll que nunca se confirmó, esto se defiende así: si una página
+// falla DESPUÉS de haber leído al menos una página con éxito, se
+// corta ahí (nunca se tira abajo toda la cuenta) y se avisa con
+// `catalogoIncompleto: true` — el trabajo lo muestra en el progreso,
+// nunca en silencio.
+export async function listarTodosLosItemsActivos(cuentaIdExterna: string, token: string): Promise<ResultadoListadoActivos> {
   const ids: string[] = [];
   let offset = 0;
   while (true) {
-    const pagina = await listarItemsActivosMl(cuentaIdExterna, token, offset, TAMANO_PAGINA_ITEMS);
+    let pagina;
+    try {
+      pagina = await listarItemsActivosMl(cuentaIdExterna, token, offset, TAMANO_PAGINA_ITEMS);
+    } catch (error) {
+      if (ids.length > 0) return { ids, catalogoIncompleto: true };
+      throw error;
+    }
     ids.push(...pagina.ids);
     if (pagina.ids.length < TAMANO_PAGINA_ITEMS || ids.length >= pagina.totalCatalogo) break;
     offset += TAMANO_PAGINA_ITEMS;
   }
-  return ids;
+  return { ids, catalogoIncompleto: false };
 }
 
 export async function leerPromocionesDeItem(

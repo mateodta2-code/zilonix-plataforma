@@ -82,7 +82,7 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
   it("busca en varias cuentas, cada una termina 'listo' y guarda sus candidatos (upsert)", async () => {
     filasPorTabla.set(promocionesReglas, []);
     filasPorTabla.set(costosSku, []);
-    listarTodosLosItemsActivosMock.mockResolvedValue(["MCO1", "MCO2"]);
+    listarTodosLosItemsActivosMock.mockResolvedValue({ ids: ["MCO1", "MCO2"], catalogoIncompleto: false });
     leerPromocionesDeItemMock.mockImplementation(async (itemId: string, cuentaMlId: string) => ({
       itemId,
       cuentaMlId,
@@ -113,7 +113,7 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
     filasPorTabla.set(costosSku, []);
     listarTodosLosItemsActivosMock.mockImplementation(async (cuentaIdExterna: string) => {
       if (cuentaIdExterna === "111") throw new LimiteMercadoLibreError(1000);
-      return ["MCO1"];
+      return { ids: ["MCO1"], catalogoIncompleto: false };
     });
     leerPromocionesDeItemMock.mockResolvedValue(null);
 
@@ -138,7 +138,7 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
     filasPorTabla.set(costosSku, []);
     listarTodosLosItemsActivosMock.mockImplementation(async () => {
       await esperar(500);
-      return [];
+      return { ids: [], catalogoIncompleto: false };
     });
     const antes = Date.now();
     const jobId = iniciarBusquedaPromociones("empresa-3", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
@@ -149,7 +149,7 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
   it("RLS a mano — un trabajo nunca se devuelve para una empresa distinta a la que lo creó", async () => {
     filasPorTabla.set(promocionesReglas, []);
     filasPorTabla.set(costosSku, []);
-    listarTodosLosItemsActivosMock.mockResolvedValue([]);
+    listarTodosLosItemsActivosMock.mockResolvedValue({ ids: [], catalogoIncompleto: false });
     const jobId = iniciarBusquedaPromociones("empresa-dueña", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
     expect(obtenerTrabajoBusquedaPromociones(jobId, "empresa-ajena")).toBeNull();
     await esperarTrabajoTerminado(jobId, "empresa-dueña");
@@ -157,5 +157,31 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
 
   it("un jobId inexistente: null, nunca lanza", () => {
     expect(obtenerTrabajoBusquedaPromociones("no-existe", "empresa-1")).toBeNull();
+  });
+
+  // MED 8 (review de Pablo) — cuando la paginación por offset corta
+  // antes de terminar el catálogo real, el aviso tiene que llegar hasta
+  // el progreso de esa cuenta (nunca en silencio).
+  it("catalogoIncompleto:true de listarTodosLosItemsActivos llega hasta el progreso de la cuenta", async () => {
+    filasPorTabla.set(promocionesReglas, []);
+    filasPorTabla.set(costosSku, []);
+    listarTodosLosItemsActivosMock.mockResolvedValue({ ids: ["MCO1"], catalogoIncompleto: true });
+    leerPromocionesDeItemMock.mockResolvedValue(null);
+
+    const jobId = iniciarBusquedaPromociones("empresa-4", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
+    const trabajo = await esperarTrabajoTerminado(jobId, "empresa-4");
+
+    expect(trabajo?.cuentas[0]?.catalogoIncompleto).toBe(true);
+  });
+
+  it("catalogoIncompleto:false por defecto cuando la paginación terminó completa", async () => {
+    filasPorTabla.set(promocionesReglas, []);
+    filasPorTabla.set(costosSku, []);
+    listarTodosLosItemsActivosMock.mockResolvedValue({ ids: [], catalogoIncompleto: false });
+
+    const jobId = iniciarBusquedaPromociones("empresa-5", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
+    const trabajo = await esperarTrabajoTerminado(jobId, "empresa-5");
+
+    expect(trabajo?.cuentas[0]?.catalogoIncompleto).toBe(false);
   });
 });

@@ -132,6 +132,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/promociones/candidatos/route.ts",
   "app/api/ml/promociones/reglas/route.ts",
   "app/api/ml/promociones/acciones/route.ts",
+  // MED 7 (review de Pablo) — paso separado de "ejecutar": requiere
+  // su propio requierePermiso("promociones","ejecutar"), nunca el
+  // mismo "aprobar" que exige el POST combinado de arriba.
+  "app/api/ml/promociones/acciones/ejecutar/route.ts",
   "app/api/ml/promociones/historial/route.ts",
   "app/panel/promociones/page.tsx",
   // "Conexión de IA" vive bajo el módulo "configuracion" que ya

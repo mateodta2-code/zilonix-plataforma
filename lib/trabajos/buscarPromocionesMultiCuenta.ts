@@ -1,10 +1,15 @@
-import { inArray } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { costosSku, promocionesCandidatos, promocionesReglas } from "@/db/schema";
+import { promocionesCandidatos } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
-import { calcularCandidatosItem, leerPromocionesDeItem, listarTodosLosItemsActivos, type ReglasCuentaPromocion } from "@/lib/ml/promociones";
+import {
+  calcularCandidatosItem,
+  leerPisosYCostosFrescos,
+  leerPromocionesDeItem,
+  leerReglasFrescasCuenta,
+  listarTodosLosItemsActivos,
+} from "@/lib/ml/promociones";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
 
 // Rama feat-promociones, punto 4 — "La búsqueda corre como un trabajo
@@ -33,6 +38,11 @@ export type ProgresoCuentaBusquedaPromo = {
   estado: EstadoCuentaBusquedaPromo;
   productosRevisados: number;
   itemsConPromociones: number;
+  // Code review de Pablo — MED 8: true si la paginación por offset de
+  // Mercado Libre cortó antes de terminar el catálogo real (ver
+  // listarTodosLosItemsActivos en lib/ml/promociones.ts). No silencioso:
+  // se muestra en /panel/promociones para esta cuenta.
+  catalogoIncompleto: boolean;
   error: string | null;
 };
 
@@ -51,8 +61,6 @@ const CONCURRENCIA_ITEMS_POR_CUENTA = 5;
 const REINTENTOS_429 = 3;
 const ESPERA_BASE_429_MS = 2_000;
 const TOPE_EDAD_TRABAJO_MS = 2 * 60 * 60 * 1000;
-
-const REGLAS_POR_DEFECTO: ReglasCuentaPromocion = { descuentoMaximoPct: 20, participarCompartidas: false, igualarAlPiso: true };
 
 const trabajos = new Map<string, TrabajoBusquedaPromociones>();
 
@@ -84,28 +92,6 @@ async function conReintento429<T>(tarea: () => Promise<T>): Promise<T> {
   }
 }
 
-async function leerReglasCuenta(empresaId: string, cuentaMlId: string): Promise<ReglasCuentaPromocion> {
-  const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(promocionesReglas).where(inArray(promocionesReglas.cuentaMlId, [cuentaMlId])));
-  const fila = filas[0];
-  if (!fila) return REGLAS_POR_DEFECTO;
-  return { descuentoMaximoPct: fila.descuentoMaximoPct, participarCompartidas: fila.participarCompartidas, igualarAlPiso: fila.igualarAlPiso };
-}
-
-type PisoYCosto = { precioMinimo: number | null; costo: number | null };
-
-async function leerPisosYCostos(empresaId: string, skuCodigos: string[]): Promise<Map<string, PisoYCosto>> {
-  const mapa = new Map<string, PisoYCosto>();
-  if (skuCodigos.length === 0) return mapa;
-  const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(costosSku).where(inArray(costosSku.skuCodigo, skuCodigos)));
-  for (const fila of filas) {
-    mapa.set(fila.skuCodigo, {
-      precioMinimo: fila.precioMinimoUnidad != null ? Number(fila.precioMinimoUnidad) : null,
-      costo: fila.costo != null ? Number(fila.costo) : null,
-    });
-  }
-  return mapa;
-}
-
 function mensajeDeErrorBusqueda(error: unknown): string {
   if (error instanceof LimiteMercadoLibreError) return error.message;
   if (error instanceof Error) return error.message.slice(0, 400);
@@ -116,9 +102,10 @@ async function buscarPromocionesCuenta(empresaId: string, cuenta: CuentaParaBusc
   fila.estado = "buscando";
   try {
     const token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
-    const reglas = await leerReglasCuenta(empresaId, cuentaMlId);
-    const ids = await conReintento429(() => listarTodosLosItemsActivos(cuenta.cuentaIdExterna, token));
+    const reglas = await leerReglasFrescasCuenta(empresaId, cuentaMlId);
+    const { ids, catalogoIncompleto } = await conReintento429(() => listarTodosLosItemsActivos(cuenta.cuentaIdExterna, token));
     fila.productosRevisados = ids.length;
+    fila.catalogoIncompleto = catalogoIncompleto;
 
     const itemsConPromos = await conConcurrenciaLimitada(ids, CONCURRENCIA_ITEMS_POR_CUENTA, async (itemId) => {
       try {
@@ -134,7 +121,7 @@ async function buscarPromocionesCuenta(empresaId: string, cuenta: CuentaParaBusc
     fila.itemsConPromociones = itemsReales.length;
 
     const skuCodigos = [...new Set(itemsReales.map((i) => i.skuCodigo).filter((s): s is string => Boolean(s)))];
-    const pisosYCostos = await leerPisosYCostos(empresaId, skuCodigos);
+    const pisosYCostos = await leerPisosYCostosFrescos(empresaId, skuCodigos);
 
     const candidatos = itemsReales.flatMap((item) => {
       const pisoYCosto = item.skuCodigo ? pisosYCostos.get(item.skuCodigo) : undefined;
@@ -214,7 +201,7 @@ export function iniciarBusquedaPromociones(empresaId: string, cuentas: (CuentaPa
     empresaId,
     creadoTs: Date.now(),
     terminadoTs: null,
-    cuentas: cuentas.map((c) => ({ cuentaId: c.cuentaMlId, nickname: c.nickname, estado: "en_cola", productosRevisados: 0, itemsConPromociones: 0, error: null })),
+    cuentas: cuentas.map((c) => ({ cuentaId: c.cuentaMlId, nickname: c.nickname, estado: "en_cola", productosRevisados: 0, itemsConPromociones: 0, catalogoIncompleto: false, error: null })),
   };
   trabajos.set(id, trabajo);
 

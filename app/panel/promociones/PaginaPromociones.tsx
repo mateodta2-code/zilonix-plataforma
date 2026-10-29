@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
@@ -63,6 +63,12 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
 
   const [historial, setHistorial] = useState<AccionHistorialCliente[]>([]);
   const [reglas, setReglas] = useState<ReglasCuentaCliente[]>([]);
+
+  // MED 7 — paso separado de ejecutar (/api/ml/promociones/acciones/ejecutar):
+  // dispara TODAS las acciones "aceptada" pendientes de la empresa que no
+  // estén en modo simulación.
+  const [ejecutandoPendientes, setEjecutandoPendientes] = useState(false);
+  const [resultadoEjecutarPendientes, setResultadoEjecutarPendientes] = useState<string | null>(null);
 
   async function cargarCandidatos() {
     setCargandoCandidatos(true);
@@ -157,9 +163,19 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     );
   }
 
-  function salirDeLaPromo() {
-    const idsSeleccionados = Object.keys(seleccionados).filter((id) => seleccionados[id]);
-    abrirVistaPrevia(idsSeleccionados.map((candidatoId) => ({ candidatoId, accion: "salir" as const })));
+  async function ejecutarPendientes() {
+    setEjecutandoPendientes(true);
+    setResultadoEjecutarPendientes(null);
+    const res = await fetch("/api/ml/promociones/acciones/ejecutar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+    const body = await res.json().catch(() => ({}));
+    setEjecutandoPendientes(false);
+    if (res.ok) {
+      setResultadoEjecutarPendientes(`Se procesaron ${body.acciones.length} acción(es) pendiente(s).`);
+      void cargarCandidatos();
+      void cargarHistorial();
+    } else {
+      setResultadoEjecutarPendientes(body.error || "No se pudo ejecutar.");
+    }
   }
 
   async function confirmarVistaPrevia() {
@@ -187,8 +203,6 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
       setResultadoAplicar(body.error || "No se pudo aplicar.");
     }
   }
-
-  const hayAlgunoSeleccionado = useMemo(() => Object.values(seleccionados).some(Boolean), [seleccionados]);
 
   return (
     <>
@@ -222,8 +236,13 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
           {trabajo && (
             <div className={styles.progreso}>
               {trabajo.cuentas.map((c) => (
-                <Chip key={c.cuentaId} estado={c.estado === "error" ? "peligro" : c.estado === "listo" ? "exito" : "aviso"} title={c.error ?? undefined}>
+                <Chip
+                  key={c.cuentaId}
+                  estado={c.estado === "error" ? "peligro" : c.catalogoIncompleto ? "aviso" : c.estado === "listo" ? "exito" : "aviso"}
+                  title={c.error ?? (c.catalogoIncompleto ? "El catálogo de esta cuenta tiene más publicaciones de las que se pudieron leer en esta búsqueda — probá de nuevo más tarde." : undefined)}
+                >
                   {c.nickname}: {ETIQUETA_ESTADO_CUENTA[c.estado]} {c.estado === "listo" ? `(${c.itemsConPromociones}/${c.productosRevisados})` : ""}
+                  {c.catalogoIncompleto ? " ⚠ catálogo incompleto" : ""}
                 </Chip>
               ))}
             </div>
@@ -241,10 +260,21 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
             <Boton type="button" variante="primario" chico disabled={!candidatos.some((c) => c.cumpleReglas)} onClick={aceptarLasQueCumplen}>
               Aceptar todas las que cumplen
             </Boton>
-            <Boton type="button" variante="secundario" chico disabled={!hayAlgunoSeleccionado} onClick={salirDeLaPromo}>
+            {/* MED 4 (review de Pablo) — apagado a propósito: "salir de
+                la promo" (DELETE) todavía no se confirmó contra una
+                cuenta real de Mercado Libre (lib/ml/cliente.ts,
+                salirDePromocionMl) y la ruta la rechaza con 501. Se
+                reactiva el día que se confirme en vivo. */}
+            <Boton type="button" variante="secundario" chico disabled title="Todavía no confirmado contra Mercado Libre real — deshabilitado a propósito.">
               Salir de la promo
             </Boton>
+            {puedeEjecutar && (
+              <Boton type="button" variante="secundario" chico disabled={ejecutandoPendientes} onClick={ejecutarPendientes} title="Ejecuta contra Mercado Libre todas las acciones aceptadas y pendientes de esta empresa (fuera de modo simulación).">
+                {ejecutandoPendientes ? "Ejecutando…" : "Ejecutar pendientes"}
+              </Boton>
+            )}
           </div>
+          {resultadoEjecutarPendientes && <p style={{ fontSize: 13, marginTop: 8 }}>{resultadoEjecutarPendientes}</p>}
 
           {cargandoCandidatos ? (
             <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 12 }}>Cargando…</p>

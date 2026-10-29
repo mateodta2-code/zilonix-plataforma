@@ -1,5 +1,43 @@
-import { describe, expect, it } from "vitest";
-import { calcularCandidatosItem, fechasParaParticipar, TIPOS_SIN_ESCRITURA_API, type ItemConPromociones, type ReglasCuentaPromocion } from "./promociones";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+// MED 8 / HIGH 2 (review de Pablo) — listarTodosLosItemsActivos toca
+// Mercado Libre (lib/ml/cliente) y las 2 lecturas "frescas" tocan
+// Postgres (dbComoEmpresa) — ninguno existe en este sandbox. Mismo
+// patrón de mock que lib/trabajos/buscarPromocionesMultiCuenta.test.ts:
+// una tabla "tx" mínima que devuelve lo programado por tabla.
+const { listarItemsActivosMlMock } = vi.hoisted(() => ({ listarItemsActivosMlMock: vi.fn() }));
+vi.mock("@/lib/ml/cliente", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/ml/cliente")>();
+  return { ...real, listarItemsActivosMl: listarItemsActivosMlMock };
+});
+
+const { filasPorTabla } = vi.hoisted(() => ({ filasPorTabla: new Map<unknown, unknown[]>() }));
+vi.mock("@/db/empresa-context", () => ({
+  dbComoEmpresa: async (_empresaId: string, fn: (tx: unknown) => unknown) => {
+    const tx = {
+      select: () => ({
+        from: (tabla: unknown) => ({
+          where: async () => filasPorTabla.get(tabla) ?? [],
+        }),
+      }),
+    };
+    return fn(tx);
+  },
+}));
+
+import { costosSku, promocionesReglas } from "@/db/schema";
+import {
+  calcularCandidatosItem,
+  fechasParaParticipar,
+  leerPisoYCostoFresco,
+  leerPisosYCostosFrescos,
+  leerReglasFrescasCuenta,
+  listarTodosLosItemsActivos,
+  REGLAS_POR_DEFECTO,
+  TIPOS_SIN_ESCRITURA_API,
+  type ItemConPromociones,
+  type ReglasCuentaPromocion,
+} from "./promociones";
 
 const REGLAS_DEFECTO: ReglasCuentaPromocion = { descuentoMaximoPct: 20, participarCompartidas: false, igualarAlPiso: true };
 
@@ -191,5 +229,82 @@ describe("fechasParaParticipar — bug 3 (formato local Colombia, sin zona horar
     const resultado = fechasParaParticipar({});
     expect(resultado.fechaInicio).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00$/);
     expect(resultado.fechaFin).toMatch(/^\d{4}-\d{2}-\d{2}T23:59:59$/);
+  });
+});
+
+describe("listarTodosLosItemsActivos — paginación sin tope fijo (MED 8, review de Pablo)", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("una sola página, menos de 50 ids: termina ahí, catalogoIncompleto=false", async () => {
+    listarItemsActivosMlMock.mockResolvedValue({ ids: ["MCO1", "MCO2"], totalCatalogo: 2 });
+    const resultado = await listarTodosLosItemsActivos("111", "token");
+    expect(resultado).toEqual({ ids: ["MCO1", "MCO2"], catalogoIncompleto: false });
+  });
+
+  it("varias páginas llenas hasta agotar el catálogo real: junta todas, catalogoIncompleto=false", async () => {
+    const pagina1 = Array.from({ length: 50 }, (_, i) => `MCO${i}`);
+    const pagina2 = Array.from({ length: 10 }, (_, i) => `MCO${50 + i}`);
+    listarItemsActivosMlMock
+      .mockResolvedValueOnce({ ids: pagina1, totalCatalogo: 60 })
+      .mockResolvedValueOnce({ ids: pagina2, totalCatalogo: 60 });
+    const resultado = await listarTodosLosItemsActivos("111", "token");
+    expect(resultado.ids).toHaveLength(60);
+    expect(resultado.catalogoIncompleto).toBe(false);
+    expect(listarItemsActivosMlMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("una página falla DESPUÉS de haber leído al menos una con éxito: corta ahí, catalogoIncompleto=true (nunca tira abajo toda la cuenta)", async () => {
+    const pagina1 = Array.from({ length: 50 }, (_, i) => `MCO${i}`);
+    listarItemsActivosMlMock.mockResolvedValueOnce({ ids: pagina1, totalCatalogo: 1000 }).mockRejectedValueOnce(new Error("ML no respondió"));
+    const resultado = await listarTodosLosItemsActivos("111", "token");
+    expect(resultado).toEqual({ ids: pagina1, catalogoIncompleto: true });
+  });
+
+  it("la primera página falla sin haber leído nada antes: el error se propaga (nunca se esconde)", async () => {
+    listarItemsActivosMlMock.mockRejectedValueOnce(new Error("ML no respondió"));
+    await expect(listarTodosLosItemsActivos("111", "token")).rejects.toThrow("ML no respondió");
+  });
+});
+
+describe("leerReglasFrescasCuenta / leerPisosYCostosFrescos / leerPisoYCostoFresco — HIGH 2, review de Pablo (releer fresco, nunca el snapshot)", () => {
+  afterEach(() => filasPorTabla.clear());
+
+  it("leerReglasFrescasCuenta — sin fila en promociones_reglas: REGLAS_POR_DEFECTO", async () => {
+    filasPorTabla.set(promocionesReglas, []);
+    const reglas = await leerReglasFrescasCuenta("empresa-1", "cuenta-1");
+    expect(reglas).toEqual(REGLAS_POR_DEFECTO);
+  });
+
+  it("leerReglasFrescasCuenta — con fila real: exactamente lo guardado, nunca el default", async () => {
+    filasPorTabla.set(promocionesReglas, [{ descuentoMaximoPct: 10, participarCompartidas: true, igualarAlPiso: false }]);
+    const reglas = await leerReglasFrescasCuenta("empresa-1", "cuenta-1");
+    expect(reglas).toEqual({ descuentoMaximoPct: 10, participarCompartidas: true, igualarAlPiso: false });
+  });
+
+  it("leerPisosYCostosFrescos — batcheada, convierte los numeric de Postgres a number", async () => {
+    filasPorTabla.set(costosSku, [
+      { skuCodigo: "SKU-1", precioMinimoUnidad: "90000.00", costo: "50000.00" },
+      { skuCodigo: "SKU-2", precioMinimoUnidad: null, costo: null },
+    ]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["SKU-1", "SKU-2", "SKU-3"]);
+    expect(mapa.get("SKU-1")).toEqual({ precioMinimo: 90000, costo: 50000 });
+    expect(mapa.get("SKU-2")).toEqual({ precioMinimo: null, costo: null });
+    expect(mapa.has("SKU-3")).toBe(false); // sin costos_sku para ese SKU — nunca se inventa una fila
+  });
+
+  it("leerPisosYCostosFrescos — lista vacía: mapa vacío, nunca consulta la base", async () => {
+    const mapa = await leerPisosYCostosFrescos("empresa-1", []);
+    expect(mapa.size).toBe(0);
+  });
+
+  it("leerPisoYCostoFresco — sin skuCodigo: null/null sin consultar la base", async () => {
+    const resultado = await leerPisoYCostoFresco("empresa-1", null);
+    expect(resultado).toEqual({ precioMinimo: null, costo: null });
+  });
+
+  it("leerPisoYCostoFresco — con skuCodigo real: el piso/costo de ese SKU puntual", async () => {
+    filasPorTabla.set(costosSku, [{ skuCodigo: "SKU-1", precioMinimoUnidad: "90000", costo: "50000" }]);
+    const resultado = await leerPisoYCostoFresco("empresa-1", "SKU-1");
+    expect(resultado).toEqual({ precioMinimo: 90000, costo: 50000 });
   });
 });

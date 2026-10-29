@@ -32,6 +32,10 @@ export type ProgresoCuentaBusquedaCliente = {
   estado: EstadoCuentaBusquedaCliente;
   productosRevisados: number;
   itemsConPromociones: number;
+  // Code review de Pablo — MED 8: true si la paginación por offset de
+  // Mercado Libre cortó antes de terminar el catálogo real de esta
+  // cuenta (ver listarTodosLosItemsActivos en lib/ml/promociones.ts).
+  catalogoIncompleto: boolean;
   error: string | null;
 };
 export type TrabajoBusquedaCliente = { id: string; empresaId: string; creadoTs: number; terminadoTs: number | null; cuentas: ProgresoCuentaBusquedaCliente[] };
