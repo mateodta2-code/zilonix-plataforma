@@ -128,3 +128,15 @@
 .volver {
   margin-top: 20px;
 }
+
+/* Issue #163 — tablero de /panel/finanzas: tarjetas del mes. */
+.tablero {
+  margin-bottom: 24px;
+}
+
+.gridKpi {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
