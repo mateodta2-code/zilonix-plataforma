@@ -442,6 +442,25 @@ Mercado Libre nunca deja ver, por la API, el inventario (`available_quantity`) n
 
 **Tope de 5 tiendas + 5 productos de competencia** (dos pozos separados, no uno combinado): `LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA`/`LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA`, `lib/seguimiento/seguimientos.ts` — antes de este issue era un solo pozo de 5 (tienda+producto mezclados).
 
+## Interruptor global Encendido/Apagado + ícono de la extensión (Mateo, issue #273)
+
+Bug reportado por Mateo: el panel aparecía siempre en Mercado Libre, y si lo minimizaba o lo cerraba volvía a aparecer enseguida — estorbaba cuando no lo quería usar.
+
+**Causa real**: `reescanear()` (el `MutationObserver` + el `setInterval` al final de `content.js`) se dispara con CUALQUIER mutación del DOM — muchas por segundo en una página de Mercado Libre viva — y hasta esta tarea nunca chequeaba nada antes de llamar a `obtenerOCrearPanel()`. Cerrar con el botón ✕ solo sacaba el nodo del DOM (`host.remove()`), sin avisarle a nada que esta pestaña lo había cerrado — el próximo tick del observer/intervalo, `obtenerOCrearPanel()` no encontraba el nodo y lo volvía a crear de cero. Minimizar tampoco sobrevivía: `renderizarEsqueleto` hace `panel.innerHTML = "..."` en CADA `reescanear()`, reconstruyendo el cuerpo del panel sin el atributo `hidden` que había puesto el clic de colapsar un instante antes.
+
+**Arreglo, sin ningún permiso nuevo** (el permiso `"storage"` ya existe desde #251):
+
+- **Interruptor global** (`chrome.storage.local`, clave `zilonixInterruptorEncendido`, default `true` — comportamiento de siempre hasta que la persona lo apague) — visible como un switch en el encabezado de TODOS los tipos de panel (producto/tienda/listado, los 3 pasan por `renderizarEsqueleto`). Apagado: `content.js` no inyecta nada automático en ninguna página (ni el panel, ni "Completar vendidos"/el relevo de Seguimiento — el interruptor es de verdad global, no solo visual). `chrome.storage.onChanged` mantiene el estado al día en todas las pestañas abiertas sin recargar ninguna.
+- **Cerrado por pestaña** (`sessionStorage` — por pestaña y origen, nunca sobrevive una pestaña nueva ni se comparte entre pestañas): el botón ✕ ahora también marca "cerrado en esta pestaña" — `reescanear()` corta antes de tocar el DOM mientras ese estado siga así, pase lo que pase con el `MutationObserver`/el intervalo. Se reabre solo con un clic real en el ícono de la extensión.
+- **Minimizado por pestaña** (mismo mecanismo, otra clave de `sessionStorage`): el botón ▾/▸ ahora también persiste el estado — `renderizarEsqueleto` lo reaplica (`aplicarEstadoMinimizado`) apenas reconstruye el esqueleto, en cada `reescanear()`, así que sobrevive a cualquier cantidad de re-renders.
+- **Ícono de la extensión** (`chrome.action.onClicked`, `manifest.json` suma `"action": {}` SIN `default_popup` — así `onClicked` se dispara; `chrome.action` es núcleo de Manifest V3, nunca necesita declararse en `"permissions"`): un clic real siempre muestra el panel en la pestaña activa, con un mensaje nuevo (`"zilonix:mostrar-panel"`, `background.js` → `content.js`, mismo relevo sin permiso `"tabs"` de siempre) que limpia "cerrado"/"minimizado" de esa pestaña y fuerza un `reescanear()` inmediato — funciona SIEMPRE, aunque el interruptor global esté apagado: es la forma explícita de "quiero usarlo ahora".
+
+**Nunca rompe los flujos que ya dependían de `reescanear()`** ("Seguir tienda en Zilonix", "Completar vendidos", el relevo de Seguimiento, "Importar a Publicar") — todos siguen funcionando exactamente igual CUANDO el panel está visible (interruptor encendido) o se abrió con el ícono, porque todos cuelgan del mismo `reescanear()` que ahora solo se gatea con 2 chequeos nuevos al principio, antes de leer nada de la página. Con el interruptor apagado y sin abrir con el ícono, estos flujos tampoco corren — es la consecuencia esperada de que el interruptor sea de verdad "todo apagado", no solo el panel visual.
+
+**Reglas duras reafirmadas**: esta tarea no agrega ninguna navegación nueva, ningún login, ninguna forma de evadir un captcha ni ningún clic/carrito/compra simulado — solo decide CUÁNDO `reescanear()` tiene permiso de dibujar algo que ya hacía, y un mensaje de ida y vuelta disparado por un clic real en el ícono.
+
+**Tests** (`extension/content.test.ts`, `extension/background.test.ts`): `valorInterruptorDesdeStorage` (default `true` sin nada guardado), `debeReescanearAuto` (las 4 combinaciones interruptor×cerrado — el invariante real de "nunca se reinyecta solo"), `leerPanelCerrado`/`escribirPanelCerrado` y `leerPanelMinimizado`/`escribirPanelMinimizado` (con un storage-fake en memoria, sin `sessionStorage` real — este proyecto no tiene jsdom) y `chrome.action.onClicked` manda `"zilonix:mostrar-panel"` a la pestaña correcta.
+
 ## Instalar en Chrome (modo desarrollador)
 
 1. Abrí Chrome y entrá a `chrome://extensions`.

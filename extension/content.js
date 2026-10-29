@@ -19,6 +19,118 @@
   const PANEL_ID = "zilonix-panel-investigacion-174";
   const RETARDO_REESCANEO_MS = 900; // sitios SPA (ML, Amazon) cambian el DOM sin recargar la página
 
+  // Issue #273 (Mateo) — "el panel aparece siempre, y si lo minimizo o
+  // lo cierro vuelve enseguida": causa real confirmada leyendo el
+  // final de este archivo — reescanear() (MutationObserver +
+  // setInterval, abajo) se dispara con CUALQUIER mutación del DOM de
+  // una página ML normal (muchas por segundo) y nunca chequeaba nada
+  // antes de llamar a obtenerOCrearPanel(); cerrar con botonCerrar
+  // (cablearEncabezado) solo hace host.remove() — el próximo tick del
+  // observer/intervalo, obtenerOCrearPanel() no encuentra el nodo y lo
+  // vuelve a crear de cero. Minimizar tampoco sobrevivía: renderizarEsqueleto
+  // hace panel.innerHTML = "..." en CADA reescanear() (varias veces por
+  // segundo en una página viva), reconstruyendo el cuerpo sin el
+  // atributo "hidden" que había puesto el clic anterior.
+  // Interruptor global (chrome.storage.local, permiso "storage" que ya
+  // existe) + 2 estados por pestaña (sessionStorage — por pestaña Y
+  // origen, nunca sobrevive una pestaña nueva ni se comparte entre
+  // pestañas, correcto para "cerrado/minimizado EN ESTA pestaña"):
+  // nunca un permiso nuevo, nunca un host_permission nuevo.
+  const CLAVE_INTERRUPTOR = "zilonixInterruptorEncendido"; // chrome.storage.local — compartido entre pestañas/sitios
+  const CLAVE_PANEL_CERRADO = "zilonix-panel-cerrado-174"; // sessionStorage — por pestaña
+  const CLAVE_PANEL_MINIMIZADO = "zilonix-panel-minimizado-174"; // sessionStorage — por pestaña
+
+  // Default ON (comportamiento de siempre) hasta que leerInterruptorInicial
+  // (abajo, al final del archivo) confirme lo contrario — nunca aparece
+  // y desaparece de golpe mientras se resuelve chrome.storage.local.get.
+  let interruptorEncendido = true;
+
+  // --- Funciones puras de abajo (issue #273) — mismo criterio que
+  // bloqueAnalisisAproximado/tipoIdDePagina (ver el export al final):
+  // reciben el storage como parámetro en vez de leer sessionStorage/
+  // chrome.storage directo, para poder probarlas con un storage-fake
+  // {getItem,setItem,removeItem}/{get,set} sin DOM ni chrome real.
+
+  // `valorGuardado` es lo que YA hay en chrome.storage.local (undefined
+  // la primera vez que se instala/usa esta versión) -- default TRUE
+  // (comportamiento de siempre) salvo que de verdad se haya guardado
+  // `false` explícito.
+  function valorInterruptorDesdeStorage(valorGuardado) {
+    return valorGuardado !== false;
+  }
+
+  // La decisión real de "reescanear() se inyecta sola" — nunca si el
+  // interruptor global está apagado, nunca si la persona cerró el
+  // panel en ESTA pestaña (hasta que la reabra con el ícono o navegue
+  // a una pestaña/origen nuevo). Pura y separada a propósito: es el
+  // corazón del bug real de "vuelve a aparecer", así que queda
+  // probada sola, sin depender del resto de reescanear().
+  function debeReescanearAuto(interruptorEnc, panelCerrado) {
+    return interruptorEnc && !panelCerrado;
+  }
+
+  function leerPanelCerrado(storage) {
+    if (!storage) return false;
+    try {
+      return storage.getItem(CLAVE_PANEL_CERRADO) === "1";
+    } catch {
+      return false; // sessionStorage bloqueado (ej. contexto restringido) — nunca revienta, se comporta como "no cerrado"
+    }
+  }
+
+  function escribirPanelCerrado(storage, cerrado) {
+    if (!storage) return;
+    try {
+      if (cerrado) storage.setItem(CLAVE_PANEL_CERRADO, "1");
+      else storage.removeItem(CLAVE_PANEL_CERRADO);
+    } catch {
+      // ídem arriba, nunca revienta
+    }
+  }
+
+  function leerPanelMinimizado(storage) {
+    if (!storage) return false;
+    try {
+      return storage.getItem(CLAVE_PANEL_MINIMIZADO) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function escribirPanelMinimizado(storage, minimizado) {
+    if (!storage) return;
+    try {
+      if (minimizado) storage.setItem(CLAVE_PANEL_MINIMIZADO, "1");
+      else storage.removeItem(CLAVE_PANEL_MINIMIZADO);
+    } catch {
+      // nunca revienta
+    }
+  }
+
+  // `typeof sessionStorage` nunca revienta ni con la variable sin
+  // declarar en ningún lado (a diferencia de referenciarla directo) —
+  // seguro de llamar siempre, incluido en los tests de vitest (sin DOM
+  // real, ver content.test.ts) y en un iframe sandboxeado de 3ros que
+  // bloquee el acceso (el try/catch de adentro cubre ESE caso puntual).
+  function storageDeSesion() {
+    try {
+      return typeof sessionStorage !== "undefined" ? sessionStorage : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Mismo criterio que storageDeSesion — nunca revienta sin chrome.storage
+  // real disponible (vitest, o la extensión recién reinstalada/con el
+  // contexto invalidado).
+  function storageExtension() {
+    try {
+      return typeof chrome !== "undefined" && chrome.storage && chrome.storage.local ? chrome.storage.local : null;
+    } catch {
+      return null;
+    }
+  }
+
   // Issue #174, revisión de Pablo — textoCampo es la ÚNICA puerta por
   // la que pasa texto de la página (título, vendedor, nombre de un
   // producto del Top 10...) antes de entrar a un template de HTML más
@@ -135,18 +247,91 @@
     return panel;
   }
 
+  // Issue #273 — devuelve el host REAL del panel (el <div id=PANEL_ID>
+  // fuera del shadow DOM), nunca el nodo `panel` de adentro — mismo
+  // criterio que ya usaba botonCerrar antes de esta tarea, reutilizado
+  // acá (apagar el interruptor desde el propio switch también saca el
+  // panel entero de la página, no solo lo esconde).
+  function hostDelPanel(panel) {
+    return (panel.getRootNode && panel.getRootNode().host) || panel;
+  }
+
   function cablearEncabezado(panel, subtitulo) {
     const cuerpo = panel.querySelector(".zx-panel__cuerpo");
     const botonColapsar = panel.querySelector("[data-accion='colapsar']");
     const botonCerrar = panel.querySelector("[data-accion='cerrar']");
+    const inputInterruptor = panel.querySelector("[data-accion='interruptor']");
+    const textoInterruptor = panel.querySelector("[data-accion='interruptor-texto']");
     panel.querySelector(".zx-panel__sitio").textContent = subtitulo;
     botonColapsar.onclick = () => {
-      const oculto = cuerpo.hasAttribute("hidden");
-      if (oculto) cuerpo.removeAttribute("hidden");
+      const estabaOculto = cuerpo.hasAttribute("hidden");
+      if (estabaOculto) cuerpo.removeAttribute("hidden");
       else cuerpo.setAttribute("hidden", "");
-      botonColapsar.textContent = oculto ? "▾" : "▸";
+      botonColapsar.textContent = estabaOculto ? "▾" : "▸";
+      // Issue #273 — persiste el nuevo estado por pestaña: el próximo
+      // reescanear() (reconstruye panel.innerHTML entero) lo vuelve a
+      // aplicar con aplicarEstadoMinimizado, en vez de perderlo.
+      escribirPanelMinimizado(storageDeSesion(), !estabaOculto);
     };
-    botonCerrar.onclick = () => panel.closest ? (panel.getRootNode().host || panel).remove() : panel.remove();
+    botonCerrar.onclick = () => {
+      // Issue #273 — causa real del "vuelve a aparecer": antes solo
+      // sacaba el nodo del DOM, sin avisarle a reescanear() que esta
+      // pestaña lo cerró. Ahora, además, se marca "cerrado en esta
+      // pestaña" — debeReescanearAuto (arriba) corta reescanear() antes
+      // de volver a crear el panel, pase lo que pase con el
+      // MutationObserver/el intervalo de abajo. Se reabre solo con un
+      // clic real en el ícono de la extensión (mostrarPanelPorIcono).
+      escribirPanelCerrado(storageDeSesion(), true);
+      hostDelPanel(panel).remove();
+    };
+    // Issue #273 — interruptor global, visible en TODOS los tipos de
+    // panel (producto/tienda/listado — los 3 pasan por acá, ver
+    // renderizarEsqueleto). El estado real vive en chrome.storage.local
+    // (interruptorEncendido, variable de módulo mantenida al día por
+    // chrome.storage.onChanged, al final del archivo) — acá solo se
+    // refleja y se escribe, nunca se decide por su cuenta.
+    if (inputInterruptor) {
+      inputInterruptor.checked = interruptorEncendido;
+      if (textoInterruptor) textoInterruptor.textContent = interruptorEncendido ? "Zilonix encendido" : "Zilonix apagado";
+      inputInterruptor.onchange = () => {
+        const encendido = inputInterruptor.checked;
+        if (textoInterruptor) textoInterruptor.textContent = encendido ? "Zilonix encendido" : "Zilonix apagado";
+        const storage = storageExtension();
+        if (storage) {
+          try {
+            storage.set({ [CLAVE_INTERRUPTOR]: encendido });
+          } catch {
+            // contexto de la extensión invalidado — nunca rompe el panel
+          }
+        }
+        if (!encendido) {
+          // Apagar desde acá mismo esconde YA este panel en esta
+          // pestaña — nunca espera al próximo tick del
+          // MutationObserver/intervalo (que de todas formas ya no lo
+          // volvería a dibujar solo una vez que interruptorEncendido
+          // se actualice, pero este panel YA construido seguiría
+          // visible hasta que algo lo saque). chrome.storage.onChanged
+          // (al final del archivo) actualiza interruptorEncendido en
+          // TODAS las pestañas igual — esto solo adelanta el efecto
+          // visual en ESTA, sin esperar la vuelta del storage.
+          hostDelPanel(panel).remove();
+        }
+      };
+    }
+  }
+
+  // Issue #273 — renderizarEsqueleto (abajo) reconstruye panel.innerHTML
+  // ENTERO en cada reescanear() (varias veces por segundo en una
+  // página viva) — sin esto, "minimizado" se perdía apenas llegaba la
+  // próxima mutación del DOM, que es casi inmediata. Se aplica DESPUÉS
+  // de cablearEncabezado (que ya dejó el botón/cuerpo recién creados,
+  // sin "hidden").
+  function aplicarEstadoMinimizado(panel) {
+    if (!leerPanelMinimizado(storageDeSesion())) return;
+    const cuerpo = panel.querySelector(".zx-panel__cuerpo");
+    const botonColapsar = panel.querySelector("[data-accion='colapsar']");
+    if (cuerpo) cuerpo.setAttribute("hidden", "");
+    if (botonColapsar) botonColapsar.textContent = "▸";
   }
 
   // Issue #174 — "Seguir en Zilonix": construida por completo con
@@ -232,12 +417,20 @@
           <button type="button" class="zx-panel__boton-icono" data-accion="cerrar" title="Cerrar">✕</button>
         </div>
       </div>
+      <div class="zx-panel__interruptor">
+        <span class="zx-panel__interruptor-texto" data-accion="interruptor-texto">Zilonix encendido</span>
+        <label class="zx-interruptor" title="Encender o apagar el panel automático de Zilonix en todas las páginas">
+          <input type="checkbox" class="zx-interruptor__input" data-accion="interruptor" />
+          <span class="zx-interruptor__pista"><span class="zx-interruptor__perilla"></span></span>
+        </label>
+      </div>
       <div class="zx-panel__cuerpo"></div>
       <div class="zx-panel__pie">
         <button type="button" class="zx-boton-copiar">Copiar datos (CSV)</button>
       </div>
     `;
     cablearEncabezado(panel, subtituloSitio);
+    aplicarEstadoMinimizado(panel);
     return panel.querySelector(".zx-panel__cuerpo");
   }
 
@@ -984,7 +1177,15 @@
     }
   }
 
-  function reescanear() {
+  // Issue #273 — `forzado` SOLO lo pasa mostrarPanelPorIcono (abajo):
+  // un clic real en el ícono de la extensión tiene que mostrar el
+  // panel aunque el interruptor esté apagado o la persona ya lo haya
+  // cerrado en esta pestaña — las únicas 2 formas en las que
+  // reescanear() normal (MutationObserver/intervalo, SIN forzado) se
+  // corta antes de tocar nada del DOM.
+  function reescanear(forzado) {
+    if (!forzado && !debeReescanearAuto(interruptorEncendido, leerPanelCerrado(storageDeSesion()))) return;
+
     let tipo;
     try {
       tipo = lector.tipoDePagina(location.href, document);
@@ -1060,17 +1261,82 @@
     temporizador = setTimeout(reescanear, RETARDO_REESCANEO_MS);
   }
 
-  reescanear();
-  new MutationObserver(reescanearConRetardo).observe(document.body, { childList: true, subtree: true });
-  // Sitios SPA (ML, Amazon) cambian la URL con history.pushState sin
-  // disparar ningún evento propio — se detecta comparando el href.
-  let ultimaUrl = location.href;
-  setInterval(() => {
-    if (location.href !== ultimaUrl) {
-      ultimaUrl = location.href;
-      reescanearConRetardo();
+  // Issue #273 — clic real en el ícono de la extensión
+  // (chrome.action.onClicked, background.js) -> "zilonix:mostrar-panel"
+  // acá. SIEMPRE muestra el panel en ESTA pestaña, aunque el
+  // interruptor global esté apagado o la persona lo haya cerrado antes
+  // en esta misma pestaña: es la forma explícita de "quiero usarlo
+  // ahora", un clic real de la persona (nunca automático). Limpia los
+  // 2 estados por pestaña (cerrado/minimizado) antes de forzar el
+  // reescaneo, para que quede abierto Y desplegado, nunca minimizado
+  // de una vez anterior.
+  function mostrarPanelPorIcono() {
+    const storage = storageDeSesion();
+    escribirPanelCerrado(storage, false);
+    escribirPanelMinimizado(storage, false);
+    reescanear(true);
+  }
+
+  // Issue #273 — registrados ANTES de leerInterruptorInicial (abajo) a
+  // propósito: un clic en el ícono, o un cambio del interruptor desde
+  // OTRA pestaña, tienen que funcionar aunque la lectura inicial de
+  // chrome.storage.local todavía no haya vuelto (interruptorEncendido
+  // sigue en su default `true` hasta entonces, un valor razonable).
+  // typeof chrome !== "undefined" — mismo criterio que
+  // enviarVendidosAZilonix y el resto de este archivo: en vitest
+  // (content.test.ts) `chrome` es `undefined`, nunca revienta el import.
+  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((mensaje) => {
+      if (mensaje && mensaje.tipo === "zilonix:mostrar-panel") mostrarPanelPorIcono();
+    });
+  }
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((cambios, area) => {
+      if (area !== "local" || !cambios[CLAVE_INTERRUPTOR]) return;
+      interruptorEncendido = valorInterruptorDesdeStorage(cambios[CLAVE_INTERRUPTOR].newValue);
+      // Se prendió desde OTRA pestaña (o desde el propio switch de
+      // esta, ver cablearEncabezado) -> no esperar al próximo tick del
+      // MutationObserver/intervalo para que se note acá también.
+      if (interruptorEncendido) reescanearConRetardo();
+    });
+  }
+
+  // Issue #273 — lee el interruptor UNA vez al cargar esta página, y
+  // recién AHÍ arranca reescanear()/el MutationObserver/el intervalo —
+  // nunca antes: evitar un parpadeo real (panel dibujado y sacado de
+  // encima medio segundo después si el interruptor resulta estar
+  // apagado). Sin chrome.storage.local disponible (vitest, o la
+  // extensión con el contexto invalidado), sigue con el default `true`
+  // de siempre — comportamiento idéntico al de antes de esta tarea.
+  function leerInterruptorInicial(continuar) {
+    const storage = storageExtension();
+    if (!storage) {
+      continuar();
+      return;
     }
-  }, 1000);
+    try {
+      storage.get({ [CLAVE_INTERRUPTOR]: true }, (datos) => {
+        interruptorEncendido = valorInterruptorDesdeStorage(datos[CLAVE_INTERRUPTOR]);
+        continuar();
+      });
+    } catch {
+      continuar();
+    }
+  }
+
+  leerInterruptorInicial(() => {
+    reescanear();
+    new MutationObserver(reescanearConRetardo).observe(document.body, { childList: true, subtree: true });
+    // Sitios SPA (ML, Amazon) cambian la URL con history.pushState sin
+    // disparar ningún evento propio — se detecta comparando el href.
+    let ultimaUrl = location.href;
+    setInterval(() => {
+      if (location.href !== ultimaUrl) {
+        ultimaUrl = location.href;
+        reescanearConRetardo();
+      }
+    }, 1000);
+  });
 
   // Issue #251 (fix "aproximados siempre visibles") — mismo patrón
   // dual que extension/lectores/aproximados.js: en el navegador real
@@ -1078,7 +1344,19 @@
   // (vitest, content.test.ts) permite probar bloqueAnalisisAproximado
   // (la función pura detrás del bloque "Análisis aprox.") sin un DOM
   // real — nunca se exporta nada que dependa de document/chrome.
+  // Issue #273 — suma las funciones puras del interruptor/cerrado-por-
+  // pestaña/minimizado-por-pestaña, mismo criterio (reciben el storage
+  // como parámetro, nunca leen sessionStorage/chrome.storage directo).
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { bloqueAnalisisAproximado, tipoIdDePagina };
+    module.exports = {
+      bloqueAnalisisAproximado,
+      tipoIdDePagina,
+      valorInterruptorDesdeStorage,
+      debeReescanearAuto,
+      leerPanelCerrado,
+      escribirPanelCerrado,
+      leerPanelMinimizado,
+      escribirPanelMinimizado,
+    };
   }
 })();

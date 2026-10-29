@@ -36,10 +36,12 @@ function crearChromeMock() {
     onActivated: ((info: { tabId: number }) => void) | null;
     onRemoved: ((tabId: number) => void) | null;
     onStartup: (() => void) | null;
-  } = { onMessage: null, onActivated: null, onRemoved: null, onStartup: null };
+    onClicked: ((tab: { id?: number }) => void) | null;
+  } = { onMessage: null, onActivated: null, onRemoved: null, onStartup: null, onClicked: null };
   const llamadas = {
     create: [] as Array<{ id: number; url: string; active: boolean }>,
     remove: [] as number[],
+    sendMessage: [] as Array<{ tabId: number; mensaje: unknown }>,
   };
   // `pestanasAbiertas` — qué devuelve chrome.tabs.query({}) en esta
   // prueba puntual; por default ninguna (así que "dato-pagina-
@@ -58,6 +60,15 @@ function crearChromeMock() {
       onStartup: {
         addListener: (fn: () => void) => {
           listeners.onStartup = fn;
+        },
+      },
+    },
+    // Issue #273 — chrome.action es el núcleo de Manifest V3 para el
+    // ícono de la extensión, nunca un permiso nuevo en "permissions".
+    action: {
+      onClicked: {
+        addListener: (fn: (tab: { id?: number }) => void) => {
+          listeners.onClicked = fn;
         },
       },
     },
@@ -103,7 +114,8 @@ function crearChromeMock() {
       query: (_filtro: unknown, cb: (pestanas: Array<{ id: number; url: string }>) => void) => {
         cb(pestanasAbiertas);
       },
-      sendMessage: (_tabId: number, _mensaje: unknown, cb?: (respuesta?: unknown) => void) => {
+      sendMessage: (tabId: number, mensaje: unknown, cb?: (respuesta?: unknown) => void) => {
+        llamadas.sendMessage.push({ tabId, mensaje });
         cb?.();
       },
       update: (_tabId: number, _props: unknown, cb?: () => void) => {
@@ -391,5 +403,38 @@ describe("background.js — cierre automático de 'Actualizar todo' (issue #252,
 
     await vi.advanceTimersByTimeAsync(TOPE_ABSOLUTO_MS + 1_000); // deja pasar el tope absoluto también
     expect(mockActual.llamadas.remove).not.toContain(tabId); // ya no estaba registrada, nunca se reintenta
+  });
+});
+
+// Issue #273 (Mateo) — "clic en el ícono de la extensión abre/muestra
+// el panel en la pestaña actual, aunque el interruptor esté apagado".
+// chrome.action.onClicked solo se dispara con un clic real de la
+// persona (nunca algo que la extensión dispare sola) — background.js
+// se limita a reenviar "zilonix:mostrar-panel" a esa MISMA pestaña;
+// content.js (ver content.test.ts) es quien decide qué hacer con eso.
+describe("chrome.action.onClicked — issue #273 (interruptor del panel)", () => {
+  let mockActual: ReturnType<typeof crearChromeMock>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockActual = crearChromeMock();
+    (globalThis as unknown as { chrome: unknown }).chrome = mockActual.chrome;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (globalThis as unknown as { chrome?: unknown }).chrome;
+  });
+
+  it("un clic manda zilonix:mostrar-panel a la MISMA pestaña que lo disparó", async () => {
+    await cargarBackgroundFresco();
+    mockActual.listeners.onClicked!({ id: 42 });
+    expect(mockActual.llamadas.sendMessage).toEqual([{ tabId: 42, mensaje: { tipo: "zilonix:mostrar-panel" } }]);
+  });
+
+  it("sin tab.id (caso defensivo, Chrome siempre lo manda en la práctica) -> nunca manda nada, nunca revienta", async () => {
+    await cargarBackgroundFresco();
+    mockActual.listeners.onClicked!({});
+    expect(mockActual.llamadas.sendMessage).toEqual([]);
   });
 });

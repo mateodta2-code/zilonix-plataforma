@@ -63,6 +63,75 @@
   color: #e6e6e6;
 }
 
+/* Issue #273 (Mateo) — interruptor global Encendido/Apagado, visible
+   en los 3 tipos de panel (producto/tienda/listado, todos pasan por
+   renderizarEsqueleto en content.js). Fondo azul tenue para separarlo
+   visualmente del resto del encabezado sin salirse de los colores de
+   marca de arriba. */
+.zx-panel__interruptor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #222225;
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.zx-panel__interruptor-texto {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c0c0c0;
+}
+
+.zx-interruptor {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.zx-interruptor__input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.zx-interruptor__pista {
+  position: absolute;
+  inset: 0;
+  background: #3a3a3d;
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+
+.zx-interruptor__perilla {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e6e6e6;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.zx-interruptor__input:checked + .zx-interruptor__pista {
+  background: #3b82f6;
+}
+
+.zx-interruptor__input:checked + .zx-interruptor__pista .zx-interruptor__perilla {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.zx-interruptor__input:focus-visible + .zx-interruptor__pista {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
 .zx-panel__cuerpo {
   padding: 10px 12px;
 }
