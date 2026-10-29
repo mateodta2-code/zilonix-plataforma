@@ -7,7 +7,6 @@ import {
   mesActualBogota,
   porcentajeVentasConCosto,
   resolverRangoVentas,
-  resolverVistaPedidos,
   resumirPorCuenta,
   type CabeceraVentaFila,
   type LineaVentaFila,
@@ -176,23 +175,17 @@ describe("resolverRangoVentas (issue #131 Parte A)", () => {
   });
 });
 
-describe("detalle día a día en Pedidos (issue #131)", () => {
-  it("solo ?vista=detalle cambia la vista; lo demás es la lista", () => {
-    expect(resolverVistaPedidos("detalle")).toBe("detalle");
-    expect(resolverVistaPedidos(undefined)).toBe("lista");
-    expect(resolverVistaPedidos("")).toBe("lista");
-    expect(resolverVistaPedidos("DETALLE")).toBe("lista");
-    expect(resolverVistaPedidos("lista")).toBe("lista");
-  });
-
-  it("la paginación conserva vista, cuenta, rango y costo", () => {
+describe("hrefVentasUtilidad (issue #131)", () => {
+  it("la paginación conserva cuenta, rango y costo, sin ?vista=", () => {
     const filtros = { cuenta: "c1", desde: "2026-10-01", hasta: "2026-10-31", costo: "sin" as const };
-    expect(hrefVentasUtilidad("/panel/pedidos", { vista: "detalle" }, filtros, 2)).toBe(
-      "/panel/pedidos?vista=detalle&cuenta=c1&desde=2026-10-01&hasta=2026-10-31&costo=sin&pagina=2"
-    );
-    // En Finanzas no hay vista, y la página 1 no va en la URL.
+    expect(hrefVentasUtilidad("/panel/pedidos", {}, filtros, 2)).toBe("/panel/pedidos?cuenta=c1&desde=2026-10-01&hasta=2026-10-31&costo=sin&pagina=2");
+    // La página 1 no va en la URL.
     expect(hrefVentasUtilidad("/panel/finanzas/ventas", {}, { desde: "2026-10-01", hasta: "2026-10-07" }, 1)).toBe(
       "/panel/finanzas/ventas?desde=2026-10-01&hasta=2026-10-07"
     );
+  });
+
+  it("los parámetros fijos de la ruta van primero", () => {
+    expect(hrefVentasUtilidad("/x", { a: "1" }, { desde: "2026-10-01", hasta: "2026-10-01" }, 1)).toBe("/x?a=1&desde=2026-10-01&hasta=2026-10-01");
   });
 });

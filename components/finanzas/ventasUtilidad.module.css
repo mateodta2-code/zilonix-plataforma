@@ -147,3 +147,21 @@
   border-radius: 6px;
   vertical-align: middle;
 }
+
+/* Issue #131 — «Traer ventas de este mes», debajo de los filtros. */
+.traerVentas {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -8px 0 16px;
+}
+
+.avisoExito {
+  margin: 8px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+  border: 1px solid var(--exito, #2e7d32);
+  background: color-mix(in srgb, var(--exito, #2e7d32) 18%, transparent);
+}
