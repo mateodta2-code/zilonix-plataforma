@@ -360,7 +360,13 @@ describe("enlacesPermalink — Parte 3, punto B (permalink en el historial)", ()
     expect(enlacesPermalink(resultado, cuentas)).toEqual([{ cuentaMlId: "c-desconocida", etiqueta: "c-desconocida", permalink: "https://articulo.mercadolibre.com.co/MCO-1" }]);
   });
 
-  it("revisión de seguridad — permalink http:// (no https): se omite, nunca un link inseguro clickeable", () => {
+  // Feedback real de Mateo (staging): publicó 1/1 OK y el historial no
+  // mostraba ningún link. Causa confirmada: lib/ml/publicar.ts guarda
+  // el permalink tal cual lo devuelve POST /items, que a veces viene
+  // en http:// (ese mismo ítem, consultado después por GET /items/{id},
+  // ya lo da en https:// — comportamiento real de esa API). Normaliza,
+  // nunca lo descarta.
+  it("permalink http:// de Mercado Libre: se normaliza a https, nunca se omite", () => {
     const resultado: ResultadoPublicacionCuenta[] = [
       {
         cuentaMlId: "c1",
@@ -376,29 +382,33 @@ describe("enlacesPermalink — Parte 3, punto B (permalink en el historial)", ()
         avisoDescripcion: null,
       },
     ];
-    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([{ cuentaMlId: "c1", etiqueta: "Tienda Uno", permalink: "https://articulo.mercadolibre.com.co/MCO-1" }]);
   });
 
-  it("revisión de seguridad — permalink de un dominio ajeno (nunca Mercado Libre): se omite", () => {
+  // Mismo feedback — a veces el resultado ni siquiera trae permalink
+  // (el tipo lo permite para la familia; una fila vieja tampoco lo
+  // tendría). Con el itemId real ya confirmado por ML se arma el link
+  // oficial (mismo formato que linkPublicacion, lib/ml/cliente.ts).
+  it("sin permalink pero con itemId real: arma el link oficial desde el itemId", () => {
     const resultado: ResultadoPublicacionCuenta[] = [
       {
         cuentaMlId: "c1",
         ok: true,
-        itemId: "MCO1",
-        permalink: "https://evil.com/MCO-1",
+        itemId: "MCO1234567890",
+        permalink: "",
         categoria: "MCO123",
         atributosAsumidos: [],
         status: "active",
-        modoPrueba: false,
+        modoPrueba: true,
         avisoFotosVariante: null,
         avisoMarca: null,
         avisoDescripcion: null,
       },
     ];
-    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([{ cuentaMlId: "c1", etiqueta: "Tienda Uno", permalink: "https://articulo.mercadolibre.com.co/MCO-1234567890" }]);
   });
 
-  it("revisión de seguridad — permalink javascript:/data: disfrazado (de familia): se omite, nunca llega a <a href>", () => {
+  it("permalink inválido (javascript:) pero con itemId real: igual arma el link oficial desde el itemId, nunca se queda sin nada", () => {
     const resultado: ResultadoPublicacionCuenta[] = [
       {
         cuentaMlId: "c2",
@@ -408,6 +418,28 @@ describe("enlacesPermalink — Parte 3, punto B (permalink en el historial)", ()
           items: [{ valores: { TALLA: "S" }, sku: "REM-S", ok: true, itemId: "MCO2", permalink: "javascript:alert(1)" }],
         },
       },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([{ cuentaMlId: "c2", etiqueta: "Tienda Dos (REM-S)", permalink: "https://articulo.mercadolibre.com.co/MCO-2" }]);
+  });
+
+  it("ni permalink útil ni itemId: se omite, nunca un link roto", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [{ cuentaMlId: "c1", ok: true, familia: { familyName: "Remera", items: [{ valores: { TALLA: "S" }, ok: true }] } }];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+
+  // Dominio ajeno SIN ningún itemId con el que armar un respaldo
+  // seguro — así se confirma el rechazo del host en sí, aislado del
+  // fallback por itemId (que ya se prueba arriba).
+  it("revisión de seguridad — permalink de un dominio ajeno y sin itemId: se omite, nunca un link inseguro", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      { cuentaMlId: "c1", ok: true, familia: { familyName: "Remera", items: [{ valores: { TALLA: "S" }, ok: true, permalink: "https://evil.com/MCO-1" }] } },
+    ];
+    expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+
+  it("revisión de seguridad — permalink javascript:/data: disfrazado Y sin itemId: se omite, nunca llega a <a href>", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      { cuentaMlId: "c2", ok: true, familia: { familyName: "Remera", items: [{ valores: { TALLA: "S" }, sku: "REM-S", ok: true, permalink: "javascript:alert(1)" }] } },
     ];
     expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
   });
@@ -424,13 +456,24 @@ describe("permalinkMlSeguro — revisión de seguridad (hallazgo MED): solo http
     expect(permalinkMlSeguro("data:text/html,<script>alert(1)</script>")).toBeNull();
   });
 
-  it("rechaza http:// (no https)", () => {
-    expect(permalinkMlSeguro("http://articulo.mercadolibre.com.co/MCO-1")).toBeNull();
+  // Feedback real de Mateo (staging): POST /items de Mercado Libre a
+  // veces devuelve el permalink en http:// — se normaliza a https
+  // cuando el HOST ya es de Mercado Libre, nunca se descarta un link
+  // real por eso.
+  it("normaliza http:// a https:// cuando el host SÍ es de Mercado Libre", () => {
+    expect(permalinkMlSeguro("http://articulo.mercadolibre.com.co/MCO-1")).toBe("https://articulo.mercadolibre.com.co/MCO-1");
+    expect(permalinkMlSeguro("http://articulo.mercadolibre.com.ar/MLA-1")).toBe("https://articulo.mercadolibre.com.ar/MLA-1");
   });
 
-  it("rechaza un dominio ajeno (nunca Mercado Libre), incluso uno que solo CONTIENE el nombre real", () => {
+  it("rechaza un dominio ajeno (nunca Mercado Libre), incluso uno que solo CONTIENE el nombre real — en http O https", () => {
     expect(permalinkMlSeguro("https://evil.com")).toBeNull();
+    expect(permalinkMlSeguro("http://evil.com")).toBeNull();
     expect(permalinkMlSeguro("https://mercadolibre.com.ataque.com/MCO-1")).toBeNull();
+    expect(permalinkMlSeguro("http://mercadolibre.com.ataque.com/MCO-1")).toBeNull();
+  });
+
+  it("rechaza otros protocolos distintos de http/https (ftp:, etc.)", () => {
+    expect(permalinkMlSeguro("ftp://articulo.mercadolibre.com.co/MCO-1")).toBeNull();
   });
 
   it("texto que no es una URL: null, nunca lanza", () => {
