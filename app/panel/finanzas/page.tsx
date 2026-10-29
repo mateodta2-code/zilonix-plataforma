@@ -5,7 +5,8 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { formatearMonto } from "@/lib/panel-kpis";
-import { leerTableroMes, textoVariacion, type TableroMes } from "@/lib/finanzas/tablero";
+import { leerTableroMes, leerUtilidadMes, textoVariacion, type TableroMes, type UtilidadMes } from "@/lib/finanzas/tablero";
+import { mostrarPorcentaje } from "@/components/finanzas/formato";
 import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -30,6 +31,10 @@ import styles from "./finanzas.module.css";
 // promedio diario del mes, contra el mismo tramo del mes anterior
 // (lib/finanzas/tablero.ts). Solo la empresa de la sesión, todas sus
 // cuentas de Mercado Libre.
+//
+// Siguiente parte de #143 — Utilidad del mes (antes de publicidad) y %
+// de ventas con costo, leídas con la misma función de Finanzas → Ventas
+// para que cuadren al peso. Sin variación vs. mes anterior.
 
 // "COP 1.234.000 · USD 50"; sin ventas, "COP 0" (mismo criterio que
 // Ventas del mes de /panel).
@@ -46,6 +51,17 @@ function variacionesPorMoneda(tablero: TableroMes, campo: "variacion" | "variaci
   return tablero.recaudo.map((r) => `${varias ? `${r.moneda}: ` : ""}${textoVariacion(r[campo], sinSincronizarAntes)}`);
 }
 
+// "COP 1.234.567" con la moneda del mes (sin ventas, COP); "—" si no se
+// puede sumar (sin costos o varias monedas).
+function valorUtilidad(tablero: TableroMes, utilidad: UtilidadMes): string {
+  if (utilidad.utilidad === null) return "—";
+  return `${tablero.recaudo[0]?.moneda ?? "COP"} ${formatearMonto(utilidad.utilidad)}`;
+}
+
+function plural(n: number, uno: string, varios: string): string {
+  return `${n} ${n === 1 ? uno : varios}`;
+}
+
 export default async function FinanzasPage() {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -57,7 +73,16 @@ export default async function FinanzasPage() {
 
   try {
     await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
-    const tablero = await leerTableroMes(empresa.id, usuario.id, new Date());
+    // Un solo reloj para las dos lecturas: mismo tramo en todas las tarjetas.
+    const ahora = new Date();
+    const tablero = await leerTableroMes(empresa.id, usuario.id, ahora);
+    const utilidad = await leerUtilidadMes(
+      empresa.id,
+      usuario.id,
+      ahora,
+      tablero.recaudo.map((r) => r.moneda)
+    );
+    const moneda = tablero.recaudo[0]?.moneda ?? "COP";
     const faltan = tablero.sinSincronizar.actual;
     const avisoFaltan = faltan > 0 ? [`Faltan ${faltan} ${faltan === 1 ? "venta" : "ventas"} por sincronizar · usa “Traer ventas de este mes” en Finanzas → Ventas`] : [];
     return (
@@ -70,7 +95,7 @@ export default async function FinanzasPage() {
           </h2>
           <p className={styles.ayuda}>
             Todas las cuentas de Mercado Libre de esta empresa · sin ventas canceladas ni inválidas · el recaudo es el de las ventas sincronizadas,
-            igual que en Ventas y utilidad.
+            igual que en Ventas y utilidad · la utilidad es antes de publicidad.
           </p>
           <div className={styles.gridKpi}>
             <TarjetaKpi
@@ -96,12 +121,45 @@ export default async function FinanzasPage() {
                 ...avisoFaltan,
               ]}
             />
+            <TarjetaKpi
+              titulo="Utilidad del mes (antes de publicidad)"
+              valor={valorUtilidad(tablero, utilidad)}
+              detalle={[
+                "Suma de la utilidad de cada venta con costo: recaudo − comisión ML − flete ML − costo − packing − envío. Sin restar publicidad.",
+                ...(utilidad.ventasSinCosto > 0
+                  ? [`${plural(utilidad.ventasSinCosto, "venta", "ventas")} sin costo (${moneda} ${formatearMonto(utilidad.recaudoSinCosto)}) no entran`]
+                  : []),
+                ...(utilidad.rechazadas > 0
+                  ? [`${plural(utilidad.rechazadas, "venta no se pudo", "ventas no se pudieron")} calcular · revisa Finanzas → Ventas`]
+                  : []),
+                ...(utilidad.variasMonedas ? ["Hay ventas en varias monedas: la utilidad por moneda llega después"] : []),
+                ...(!utilidad.variasMonedas && utilidad.utilidad === null ? ["Ninguna venta del mes tiene costo cargado"] : []),
+                ...avisoFaltan,
+              ]}
+            />
+            <TarjetaKpi
+              titulo="% de ventas con costo"
+              valor={mostrarPorcentaje(utilidad.porcentajeVentasConCosto)}
+              detalle={[
+                `${utilidad.ventasConCosto} de ${plural(utilidad.ventas, "venta sincronizada tiene", "ventas sincronizadas tienen")} costo cargado.`,
+                "Ventas con costo ÷ ventas sincronizadas del mes.",
+                ...(utilidad.ventasSinCosto > 0 ? ["Carga los costos que faltan en la Tabla maestra de SKU."] : []),
+                ...avisoFaltan,
+              ]}
+            />
           </div>
-          {faltan > 0 && (
+          {(faltan > 0 || utilidad.ventasSinCosto > 0) && (
             <p className={styles.ayuda}>
-              <BotonLink href="/panel/finanzas/ventas" variante="secundario" chico>
-                Ir a Finanzas → Ventas para traer las ventas
-              </BotonLink>
+              {faltan > 0 && (
+                <BotonLink href="/panel/finanzas/ventas" variante="secundario" chico>
+                  Ir a Finanzas → Ventas para traer las ventas
+                </BotonLink>
+              )}{" "}
+              {utilidad.ventasSinCosto > 0 && (
+                <BotonLink href="/panel/finanzas/maestra-sku" variante="secundario" chico>
+                  Cargar costos en la Tabla maestra de SKU
+                </BotonLink>
+              )}
             </p>
           )}
         </section>
