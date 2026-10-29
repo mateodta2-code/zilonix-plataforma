@@ -44,4 +44,32 @@
 
   Verificado: `npm run typecheck` en verde. `npx vitest run`: 1217 pruebas en verde, 0 fallidas; misma línea base de 38 archivos fallando solo por `DATABASE_URL_APP`. **`npm run build` NO se corrió en este commit** — este sandbox quedó con muy poco espacio libre de disco (~3.8GB/98% usado, el mismo tipo de problema que ya bloqueó por completo esta sesión una vez, documentado en Parte 1/2) y un build completo arriesgaba repetirlo; typecheck + vitest ya cubren compilación/tipos de punta a punta. Mateo: si querés el build real antes de abrir el PR, avisame y lo corro con `.next` limpio antes/después.
 
+- **2026-10-28 (tercera entrada del día, Refs #34, Refs #44)** — Parte 3, tercer commit: botón **"Importar a Publicar"** en la extensión (punto D), versión `0.3.38 → 0.3.39`. **Anunciado antes de tocar `extension/`** (como pide `CLAUDE.md`) — re-verificado, antes de empezar y de nuevo justo antes de pushear, que ningún PR abierto hacia `main` toca `extension/` (el único que sí lo toca, #249, es un release `release-investigacion → produccion` — reproduce historia ya mergeada en `main`, no trabajo en curso).
+
+  **Rama de origin/main mergeada a mitad de los commits** (nunca rebase): `e1e0492 → 4c4c38a` (#283, Pedidos/detalle día a día), sin conflictos de contenido reales — `scripts/verificar-permisos.test.ts` se fusionó solo, con las 3 listas intactas (la de este branch + la de #283).
+
+  **`extension/lectores/mercadolibre.js`** — nueva `leerGaleriaYDescripcion(doc)`: mismo algoritmo YA probado en producción que `zilonix-os-web/lib/ml-bookmarklet.js` (ya portado como bookmarklet en Publicar, commit 1 de esta misma rama), traducido a funciones normales en vez de un `javascript:` minificado — un content script no necesita ser un bookmarklet. Mismos 2 bugs reales ya corregidos ahí, nunca reintroducidos: identificar cada foto por el número largo de su nombre de archivo (nunca por la URL completa, que cambia entre miniatura/grande) para deduplicar de verdad, y forzar siempre el sufijo "-O" (el tamaño más grande). 4 funciones puras nuevas con pruebas (`urlFotoGrande`, `idNumericoDeArchivo`, `esUrlFotoMlValida`, `deduplicarFotosMl`) — `leerGaleriaYDescripcion` en sí toca el DOM real, igual que `leerProducto`/`leerTienda`, y no se prueba directo (mismo criterio ya documentado en `extension/LEEME.md`).
+
+  **`extension/content.js`** — nueva `agregarBotonImportarPublicar(panel, datos)`, al lado de "Seguir en Zilonix" en una ficha de producto de Mercado Libre (nunca en los otros 5 sitios, que no tienen `leerGaleriaYDescripcion`). Un clic real: lee galería/descripción (solo en ese momento, nunca al cargar la página) y manda `{titulo, descripcion, precio, imagenes}` por **el mismo relevo YA existente** que "Completar vendidos"/"Importar listado" (`chrome.runtime.sendMessage({tipo:"zilonix:importar-publicar",...})` → `background.js` → `marcador-zilonix.js` → `postMessage`) — nunca abre ninguna pestaña, nunca navega, nunca hace clic por la persona.
+
+  **`extension/background.js`** — `"zilonix:importar-publicar"` se suma a `TIPOS_RELEVADOS` (broadcast a todas las pestañas abiertas, sin ningún permiso nuevo — solo la que tenga `marcador-zilonix.js` cargado hace algo). A propósito **sin cola** (a diferencia de "zilonix:dato-pagina-seguimiento"): si `/panel/publicar` no está abierto en ninguna pestaña, el mensaje no llega a nadie — mismo criterio simple que ya tenían "Completar vendidos"/"Importar listado" antes de que la cola de Seguimiento se agregara.
+
+  **`extension/marcador-zilonix.js`** — `"zilonix:importar-publicar": "importar-publicar"` se suma a `TIPOS_REENVIADOS`.
+
+  **`extension/manifest.json`** — el `content_scripts` de `marcador-zilonix.js` amplía su `matches` para incluir también `/panel/publicar*` (producción y staging), al lado de `/panel/investigacion*` que ya tenía — **sin ningún permiso nuevo** (sigue siendo solo `"storage"`). Versión `0.3.38 → 0.3.39` (y `extension/version.json`, mismo número).
+
+  **`app/panel/publicar/formulario-logica.ts`** — nuevo helper puro `itemImportadoDesdeMensajeExtension(datos)`, con pruebas: valida la forma del mensaje (nunca confía ciegamente en lo que llega por `postMessage`, mismo criterio que ya documenta `marcador-zilonix.js`), filtra `imagenes` a solo http**s** reales (nunca `javascript:`/`data:` disfrazado), recorta el título a 60 caracteres, descarta un precio no numérico/cero/negativo.
+
+  **`app/panel/publicar/PaginaPublicar.tsx`** — nuevo `useEffect` que escucha `window.addEventListener("message", ...)`, valida `origin`/`source`/forma del payload y, si es válido, hidrata el formulario con `construirEstadoInicialDesdeImportacion` — exactamente el mismo camino que ya usan SKU/link/bookmarklet (commit 1), nunca un cuarto camino de hidratación distinto.
+
+  **`extension/LEEME.md`** — nueva sección "Importar a Publicar — puente extensión → Publicar", documentando el relevo completo (mismo formato que "Completar vendidos"/"Importar listado") y las reglas reafirmadas (nunca sesión, nunca evade captcha, nunca scraper de servidor, nunca simula clic/carrito/compra, nunca abre pestaña por su cuenta). Intro del archivo actualizada (6 puentes en vez de 5).
+
+  **No tocado**: ningún permiso nuevo en `manifest.json` (sigue siendo solo `"storage"`); ningún token real de Mercado Libre usado ni refrescado desde este entorno; `db/schema.ts`, migraciones.
+
+  **Pendiente real, fuera de alcance de esta rama** (manual, de Mateo/Cowork): empaquetar el ZIP (`npm run extension:zip`) y repartirlo — recordatorio de `CLAUDE.md`: **toda actualización de la extensión exige reinstalación completa** del lado de quien la usa (nunca alcanza con "Recargar"), bajar el ZIP solo después de confirmar que `version.json` ya muestra `0.3.39`.
+
+  **Tests nuevos**: `extension/lectores/mercadolibre.test.ts` (+10: `urlFotoGrande`/`idNumericoDeArchivo`/`esUrlFotoMlValida`/`deduplicarFotosMl`). `app/panel/publicar/formulario-logica.test.ts` (+6: `itemImportadoDesdeMensajeExtension`).
+
+  Verificado: `npm run typecheck` en verde. `npx vitest run`: 1234 pruebas en verde, 0 fallidas; 39 archivos fallando solo por `DATABASE_URL_APP` (+1 sobre el commit anterior, por `lib/finanzas/traer-ventas-mes.test.ts` que trajo el merge de #283 — ninguno nuevo de este cambio). `npm run build` tampoco se corrió en este commit (mismo motivo real de espacio de disco que el commit anterior).
+
 Refs #34, Refs #44

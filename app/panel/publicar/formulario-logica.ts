@@ -371,6 +371,31 @@ export function idItemDesdeLinkMl(urlCruda: string): string | null {
   return null;
 }
 
+// Punto D del pedido — "Importar a Publicar" desde la extensión: el
+// botón del content script (extension/content.js) lee título/
+// descripción/precio/galería de la publicación de Mercado Libre
+// abierta y lo manda por el relevo content->background->marcador/
+// postMessage (mismo mecanismo ya usado para "Completar vendidos" —
+// ver extension/marcador-zilonix.js). PaginaPublicar.tsx escucha ese
+// mensaje, pero NUNCA confía ciegamente en lo que llega por
+// postMessage (ver el comentario real de marcador-zilonix.js: "el
+// panel vuelve a validar todo el payload igual") — esta función es esa
+// validación, pura y con sus propias pruebas. `imagenes` se filtra a
+// solo http(s) reales (nunca javascript:/data: disfrazado) — mismo
+// criterio que ZilonixSeguridad.linkSeguro del lado de la extensión,
+// reimplementado acá sin DOM/fetch porque este archivo no puede
+// importar nada de lib/ (helper puro, sin ciclos).
+export function itemImportadoDesdeMensajeExtension(datos: unknown): ItemImportado | null {
+  if (!datos || typeof datos !== "object" || Array.isArray(datos)) return null;
+  const d = datos as Record<string, unknown>;
+  const titulo = typeof d.titulo === "string" ? d.titulo.slice(0, 60) : "";
+  const descripcion = typeof d.descripcion === "string" ? d.descripcion : "";
+  const precio = typeof d.precio === "number" && Number.isFinite(d.precio) && d.precio > 0 ? String(d.precio) : "";
+  const imagenes = Array.isArray(d.imagenes) ? d.imagenes.filter((u): u is string => typeof u === "string" && /^https:\/\//i.test(u)) : [];
+  if (!titulo && !descripcion && !precio && imagenes.length === 0) return null; // mensaje vacío/con otra forma — nunca se hidrata el formulario con nada
+  return { titulo, descripcion, precio, stock: "", sku: "", imagenes, dimensiones: {} };
+}
+
 // Punto A.3 del pedido — lee el JSON que copia el bookmarklet portado
 // de zilonix-os-web/lib/ml-bookmarklet.js (galeria:[{id,url}], precio
 // número o null, dimensiones ya en cm/gramos tal cual las arma ESE

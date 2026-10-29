@@ -9,6 +9,7 @@ import {
   formatearFechaBogota,
   fotosDentroDelLimite,
   idItemDesdeLinkMl,
+  itemImportadoDesdeMensajeExtension,
   moverFoto,
   parseImportacionBookmarklet,
   productoCartesiano,
@@ -428,6 +429,60 @@ describe("parseImportacionBookmarklet — Parte 3, punto A.3 (pegar el JSON del 
       imagenes: [],
       dimensiones: { peso: "", largo: "", ancho: "", alto: "" },
     });
+  });
+});
+
+describe("itemImportadoDesdeMensajeExtension — Parte 3, punto D (postMessage de 'Importar a Publicar', nunca confiado ciegamente)", () => {
+  it("mensaje válido completo: arma el ItemImportado", () => {
+    expect(
+      itemImportadoDesdeMensajeExtension({
+        titulo: "Producto de Mercado Libre",
+        descripcion: "Descripción real",
+        precio: 50000,
+        imagenes: ["https://http2.mlstatic.com/foo-O.jpg", "https://http2.mlstatic.com/bar-O.jpg"],
+      })
+    ).toEqual({
+      titulo: "Producto de Mercado Libre",
+      descripcion: "Descripción real",
+      precio: "50000",
+      stock: "",
+      sku: "",
+      imagenes: ["https://http2.mlstatic.com/foo-O.jpg", "https://http2.mlstatic.com/bar-O.jpg"],
+      dimensiones: {},
+    });
+  });
+
+  it("filtra imágenes que NO son http(s) reales (ej. javascript:/data: disfrazado) — nunca confía en lo que mande la página", () => {
+    const r = itemImportadoDesdeMensajeExtension({
+      titulo: "X",
+      imagenes: ["https://http2.mlstatic.com/foo.jpg", "javascript:alert(1)", "data:text/html,<script>", "http://sin-https.com/foo.jpg", 123],
+    });
+    expect(r?.imagenes).toEqual(["https://http2.mlstatic.com/foo.jpg"]);
+  });
+
+  it("precio no numérico, cero o negativo: cadena vacía, nunca NaN ni un precio inválido", () => {
+    expect(itemImportadoDesdeMensajeExtension({ titulo: "X", precio: "50000" })?.precio).toBe("");
+    expect(itemImportadoDesdeMensajeExtension({ titulo: "X", precio: 0 })?.precio).toBe("");
+    expect(itemImportadoDesdeMensajeExtension({ titulo: "X", precio: -100 })?.precio).toBe("");
+    expect(itemImportadoDesdeMensajeExtension({ titulo: "X", precio: NaN })?.precio).toBe("");
+  });
+
+  it("título recortado a 60 caracteres (mismo tope que el prefill de Investigación)", () => {
+    const tituloLargo = "X".repeat(100);
+    expect(itemImportadoDesdeMensajeExtension({ titulo: tituloLargo })?.titulo.length).toBe(60);
+  });
+
+  it("no es un objeto (string/número/array/null): null, nunca lanza", () => {
+    expect(itemImportadoDesdeMensajeExtension("texto")).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension(123)).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension([1, 2, 3])).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension(null)).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension(undefined)).toBeNull();
+  });
+
+  it("objeto vacío o sin ningún campo reconocible: null — nunca hidrata el formulario con nada", () => {
+    expect(itemImportadoDesdeMensajeExtension({})).toBeNull();
+    expect(itemImportadoDesdeMensajeExtension({ otraCosa: true })).toBeNull();
   });
 });
 

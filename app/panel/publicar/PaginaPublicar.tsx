@@ -1,13 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { FormularioPublicar } from "./FormularioPublicar";
 import { SeccionesImportar } from "./SeccionesImportar";
 import type { Cuenta } from "./CuentasDestino";
 import { HistorialPublicaciones, type ProductoHistorial } from "./HistorialPublicaciones";
 import { SeccionClip, type ItemClip, type PrefillClip } from "./SeccionClip";
-import { construirEstadoInicial, construirEstadoInicialDesdeImportacion, type EstadoInicialFormulario, type ItemImportado } from "./formulario-logica";
+import {
+  construirEstadoInicial,
+  construirEstadoInicialDesdeImportacion,
+  itemImportadoDesdeMensajeExtension,
+  type EstadoInicialFormulario,
+  type ItemImportado,
+} from "./formulario-logica";
 import styles from "./publicar.module.css";
 
 export type { Cuenta };
@@ -103,6 +109,28 @@ export function PaginaPublicar({
     setFormKey((k) => k + 1);
     document.getElementById("formulario-publicar")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+
+  // Parte 3, punto D ("Importar a Publicar" de la extensión) — mismo
+  // mecanismo que extension/marcador-zilonix.js ya usa para "Completar
+  // vendidos"/"Importar listado": un content script propio de Zilonix
+  // (inyectado SOLO en /panel/publicar* de este mismo dominio, ver
+  // manifest.json) reenvía el mensaje con postMessage, origin explícito.
+  // Mismo criterio que ya documenta ese archivo: "el panel vuelve a
+  // validar todo el payload igual, nunca confía ciegamente en un
+  // mensaje" — itemImportadoDesdeMensajeExtension (formulario-logica.ts,
+  // con sus propias pruebas) es esa validación.
+  useEffect(() => {
+    function alRecibirMensaje(evento: MessageEvent) {
+      if (evento.source !== window || evento.origin !== window.location.origin) return;
+      const datos = evento.data as { fuente?: string; tipo?: string; payload?: unknown } | null;
+      if (!datos || datos.fuente !== "zilonix-extension" || datos.tipo !== "importar-publicar") return;
+      const item = itemImportadoDesdeMensajeExtension(datos.payload);
+      if (item) importarEnFormulario(item);
+    }
+    window.addEventListener("message", alRecibirMensaje);
+    return () => window.removeEventListener("message", alRecibirMensaje);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- importarEnFormulario/cuentas cambian de referencia en cada render (closures de PaginaPublicar) pero el listener solo necesita montarse una vez; lee cuentas/setFormInicial por clausura, no por dependencia
+  }, []);
 
   return (
     <>
