@@ -15,6 +15,7 @@
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { guardarVentaFinanzas, type ResultadoGuardarVenta } from "@/lib/finanzas/guardar-venta";
+import { sincronizarInventarioPedido } from "@/lib/inventario/pedidos-ml";
 import {
   publicacionesDesdeItemsMl,
   ventaDesdeMl,
@@ -84,7 +85,16 @@ export async function guardarOrdenMl(
   }
   const itemIds = (orden.order_items ?? []).map((i) => String(i.item?.id ?? ""));
   const publicaciones = itemIds.length ? await leerPublicaciones(token, itemIds, esperar) : new Map();
-  return guardarVentaFinanzas(empresaId, cuentaMlId, ventaDesdeMl(orden, envio, costos, publicaciones));
+  const guardada = await guardarVentaFinanzas(empresaId, cuentaMlId, ventaDesdeMl(orden, envio, costos, publicaciones));
+  // Issue #280 — reserva / confirma / libera stock con lo recién
+  // guardado (idempotente). Un fallo del inventario no tumba la venta:
+  // la próxima sincronización de esta orden lo vuelve a intentar.
+  try {
+    await sincronizarInventarioPedido(empresaId, guardada.pedidoId);
+  } catch (error) {
+    console.error(`[inventario] el stock de la orden ${orden.id} no se pudo actualizar:`, error instanceof Error ? error.message : "error desconocido");
+  }
+  return guardada;
 }
 
 export type ResultadoSyncVentas = {
