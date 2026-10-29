@@ -8,7 +8,13 @@
 // - valor_venta = suma de transaction_amount de los pagos aprobados
 //   (también los que después se reembolsaron), SIN restar reembolsos.
 // - reembolsos = suma de transaction_amount_refunded de esos pagos.
-// - comision_ml = suma de marketplace_fee de esos pagos.
+// - comision_ml: sale del DETALLE de la orden (GET /orders/{id}, que
+//   pide lib/ml/ventas-finanzas.ts). El listado /orders/search trae
+//   marketplace_fee vacío o en 0 (Sharel en #123, 22-oct), y por eso la
+//   comisión salía en $0 (#131). Se usa la suma de marketplace_fee de
+//   esos pagos si da > 0; si no, la de order_items[].sale_fee × quantity
+//   (sale_fee es la comisión POR UNIDAD); si ninguna trae dato, null
+//   (nunca un $0 inventado: así salta el aviso comision_sin_dato).
 // - flete_ml = suma de `cost` de los senders de /shipments/{id}/costs.
 //   Flex = $0 (regla del OS: ML lo revierte después).
 // - forma de entrega = logistic_type del envío, nunca el prefijo del SKU.
@@ -41,6 +47,8 @@ export type OrdenMl = {
     item?: { id?: string; title?: string | null; seller_sku?: string | null };
     quantity?: number;
     unit_price?: number;
+    // Comisión de ML por unidad (detalle de la orden).
+    sale_fee?: number | null;
   }[];
 };
 
@@ -111,6 +119,23 @@ function sumarMontos(valores: (string | null)[]): string | null {
   return desdeCentavos(presentes.reduce((s, v) => s + aCentavos(v), CERO));
 }
 
+function cantidadDe(valor: number | undefined): number {
+  return typeof valor === "number" && Number.isInteger(valor) && valor > 0 ? valor : 1;
+}
+
+// marketplace_fee de los pagos si suma > 0; si no, sale_fee × cantidad
+// de los ítems; si tampoco viene, null.
+function comisionDeOrden(pagos: NonNullable<OrdenMl["payments"]>, items: NonNullable<OrdenMl["order_items"]>): string | null {
+  const dePagos = sumarMontos(pagos.map((p) => montoDeJson(p.marketplace_fee)));
+  if (dePagos !== null && aCentavos(dePagos) > CERO) return dePagos;
+  return sumarMontos(
+    items.map((item) => {
+      const porUnidad = montoDeJson(item.sale_fee);
+      return porUnidad === null ? null : desdeCentavos(aCentavos(porUnidad) * BigInt(cantidadDe(item.quantity)));
+    })
+  );
+}
+
 function fechaONull(valor: string | null | undefined): Date | null {
   if (!valor) return null;
   const fecha = new Date(valor);
@@ -132,7 +157,7 @@ export function ventaDesdeMl(
   const pagos = (orden.payments ?? []).filter((p) => p.status === "approved" || p.status === "refunded");
   const valorVenta = sumarMontos(pagos.map((p) => montoDeJson(p.transaction_amount))) ?? "0.00";
   const reembolsos = sumarMontos(pagos.map((p) => montoDeJson(p.transaction_amount_refunded))) ?? "0.00";
-  const comisionMl = sumarMontos(pagos.map((p) => montoDeJson(p.marketplace_fee)));
+  const comisionMl = comisionDeOrden(pagos, orden.order_items ?? []);
   const fechasPago = pagos.map((p) => fechaONull(p.date_approved)).filter((f): f is Date => f !== null);
   const fechaPagoAprobado = fechasPago.length ? new Date(Math.min(...fechasPago.map((f) => f.getTime()))) : null;
 

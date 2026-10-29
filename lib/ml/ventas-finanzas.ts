@@ -65,8 +65,29 @@ async function leerPublicaciones(token: string, itemIds: string[], esperar: Espe
   return resultado;
 }
 
-// Detalle de una orden ya traída (orders/search devuelve la orden
-// completa): su envío, los costos del envío y las publicaciones.
+// El listado /orders/search NO trae la orden completa: marketplace_fee
+// llega vacío o en 0 (#123, #131). La comisión real está en el detalle
+// GET /orders/{id}. Si el detalle falla se sigue con la orden del
+// listado (venta-ml.ts usa sale_fee × cantidad o deja la comisión en
+// null): una venta no se cae por esto. Un 429 persistente sí se
+// propaga, para cortar la cuenta y retomarla.
+async function leerDetalleOrden(token: string, orden: OrdenMl, esperar: Esperar): Promise<OrdenMl> {
+  const id = String(orden.id ?? "");
+  if (!PATRON_ID_NUMERICO.test(id)) return orden;
+  try {
+    const resp = await leerConReintento<OrdenMl>(`/orders/${id}`, token, undefined, esperar);
+    if (resp.ok) return resp.data;
+    console.error(`[ventas-finanzas] el detalle de la orden ${id} respondió ${resp.status}; se usa la del listado.`);
+  } catch (error) {
+    if (error instanceof LimiteMercadoLibreError) throw error;
+    console.error(`[ventas-finanzas] el detalle de la orden ${id} no se pudo leer; se usa la del listado:`, error instanceof Error ? error.message : "error desconocido");
+  }
+  return orden;
+}
+
+// Una orden del listado: primero su detalle (comisión real), después
+// su envío, los costos del envío y las publicaciones. La usan
+// sincronizarVentasCuenta y la importación inicial (lib/ml/importacion.ts).
 export async function guardarOrdenMl(
   empresaId: string,
   cuentaMlId: string,
@@ -74,6 +95,7 @@ export async function guardarOrdenMl(
   orden: OrdenMl,
   esperar: Esperar = esperarDeVerdad
 ): Promise<ResultadoGuardarVenta> {
+  orden = await leerDetalleOrden(token, orden, esperar);
   const shipmentId = orden.shipping?.id != null ? String(orden.shipping.id) : null;
   let envio: EnvioMl | null = null;
   let costos: CostosEnvioMl | null = null;
