@@ -1375,6 +1375,112 @@
     return Boolean(remitente) && remitente.id === idPropio;
   }
 
+  // Issue #44 (anexo, "Importar publicación desde un link") —
+  // background.js abre esta pestaña (chrome.tabs.create, siempre
+  // active:false) solo para LEER y cerrarla — el panel NUNCA se
+  // dibuja acá, la persona nunca la ve. Si reescanear() (el arranque
+  // normal de esta misma página) ya alcanzó a dibujar un panel antes
+  // de que llegue este mensaje — carrera posible, nunca garantizada —
+  // se saca del DOM antes de leer, para que "el panel no se dibuja en
+  // esa pestaña" sea cierto sin importar el orden real de los eventos.
+  function sacarPanelSiExiste() {
+    if (typeof document === "undefined" || typeof document.getElementById !== "function") return;
+    const host = document.getElementById(PANEL_ID);
+    if (host && typeof host.remove === "function") host.remove();
+  }
+
+  function enviarResultadoLeerParaImportar(payload) {
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    try {
+      chrome.runtime.sendMessage({ tipo: "zilonix:resultado-leer-para-importar", payload }, () => {
+        void chrome.runtime.lastError; // la pestaña solicitante pudo cerrarse justo antes — nunca un error real
+      });
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe nada.
+    }
+  }
+
+  // Issue #44 — único marcador CONFIRMABLE de "Mercado Libre pide
+  // iniciar sesión/verificar" sin poder confirmar en vivo contra
+  // Mercado Libre hoy (a diferencia de Alibaba, "Captcha Interception",
+  // confirmado por Cowork — ver detectarFullEnHtmlFicha/el resto de
+  // este archivo): el subdominio REAL de cuentas de Mercado Libre
+  // (accounts.mercadolibre.*/accounts.mercadolivre.*, el mismo
+  // criterio "accounts.<dominio>" que usan Google y la mayoría de
+  // sitios grandes) — si la pestaña de lectura termina ahí, NUNCA se
+  // intenta pasar el login/captcha, se avisa como tal. Cualquier OTRO
+  // fallo de lectura (tipoDePagina no reconoce nada, leerProducto no
+  // trae título) se reporta como un fallo genérico — nunca se inventa
+  // que fue específicamente un captcha sin poder confirmarlo.
+  function esPaginaDeCuentasMl() {
+    return typeof location !== "undefined" && typeof location.hostname === "string" && /(^|\.)accounts\.mercado(libre|livre)\.com/i.test(location.hostname);
+  }
+
+  // Issue #44 — la lectura real para "Importar publicación desde un
+  // link": mismo par de funciones que ya usa el botón "Importar a
+  // Publicar" (leerProducto + leerGaleriaYDescripcion, issue #44
+  // original) — nunca duplicadas, solo reunidas en el MISMO payload
+  // {titulo, descripcion, precio, imagenes} que ya entiende
+  // itemImportadoDesdeMensajeExtension del lado de la página (el
+  // resultado viaja de vuelta como "zilonix:importar-publicar", el
+  // MISMO tipo de mensaje de siempre — background.js, no esta
+  // función, decide eso). Con un pequeño retardo (RETARDO_REESCANEO_MS,
+  // el mismo que usa reescanearConRetardo) antes de leer: "complete"
+  // (lo que espera background.js antes de mandar este mensaje) no
+  // garantiza que Mercado Libre ya terminó de hidratar el precio/título
+  // si la ficha los arma con JS después de cargar.
+  function leerParaImportar() {
+    sacarPanelSiExiste();
+
+    if (esPaginaDeCuentasMl()) {
+      enviarResultadoLeerParaImportar({ captcha: true });
+      return;
+    }
+
+    let tipo;
+    try {
+      tipo = lector.tipoDePagina(location.href, document);
+    } catch {
+      tipo = null;
+    }
+    // tipoDePagina ya reconoce producto/articulo/p//up/ por igual (ver
+    // issue #251) — un link de catálogo o /up/ llega acá exactamente
+    // igual que uno de publicación puntual, sin ningún caso aparte.
+    if (tipo !== "producto") {
+      enviarResultadoLeerParaImportar({});
+      return;
+    }
+
+    let datos;
+    try {
+      datos = lector.leerProducto(document);
+    } catch {
+      datos = null;
+    }
+    if (!datos || !datos.titulo) {
+      enviarResultadoLeerParaImportar({});
+      return;
+    }
+
+    let extra = { descripcion: null, imagenes: [] };
+    if (typeof lector.leerGaleriaYDescripcion === "function") {
+      try {
+        extra = lector.leerGaleriaYDescripcion(document) || extra;
+      } catch {
+        // se sigue con lo que sí se pudo leer — nunca revienta
+      }
+    }
+
+    enviarResultadoLeerParaImportar({
+      datos: {
+        titulo: datos.titulo,
+        descripcion: (extra && extra.descripcion) || null,
+        precio: typeof datos.precio === "number" ? datos.precio : null,
+        imagenes: (extra && extra.imagenes) || [],
+      },
+    });
+  }
+
   // Issue #273 — registrados ANTES de leerInterruptorInicial (abajo) a
   // propósito: un clic en el ícono, o un cambio del interruptor desde
   // OTRA pestaña, tienen que funcionar aunque la lectura inicial de
@@ -1387,6 +1493,7 @@
     chrome.runtime.onMessage.addListener((mensaje, remitente) => {
       if (!esMensajeDePropiaExtension(remitente, chrome.runtime.id)) return;
       if (mensaje && mensaje.tipo === "zilonix:mostrar-panel") mostrarPanelPorIcono();
+      if (mensaje && mensaje.tipo === "zilonix:leer-para-importar") setTimeout(leerParaImportar, RETARDO_REESCANEO_MS);
     });
   }
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {
@@ -1458,6 +1565,7 @@
       escribirPanelMinimizado,
       esMensajeDePropiaExtension,
       etiquetaAmbienteDeUrlApp,
+      esPaginaDeCuentasMl,
     };
   }
 })();

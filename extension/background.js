@@ -74,6 +74,130 @@ function resolverUrlPublicar(callback) {
   });
 }
 
+// Issue #44 — "Importar publicación desde un link" (anexo): la persona
+// pega CUALQUIER link de Mercado Libre en /panel/publicar y le da
+// "Traer datos de ese link" — la extensión abre esa publicación en una
+// pestaña de fondo, la lee, la cierra, y llena el formulario con el
+// MISMO mensaje "zilonix:importar-publicar" que ya usa el botón
+// "Importar a Publicar" (nunca un tipo de mensaje aparte para el
+// resultado — PaginaPublicar.tsx no necesita saber de dónde vino).
+//
+// Mismo criterio de seguridad que PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO
+// (arriba, "Actualizar todo") — la ÚLTIMA línea real de defensa antes
+// de abrir una pestaña nunca puede confiar solo en lo que ya validó la
+// página: aunque SeccionesImportar.tsx valide el link del lado del
+// cliente, background.js es quien de verdad tiene el permiso de abrir
+// pestañas, así que vuelve a validar acá.
+const PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO =
+  /^https:\/\/([a-z0-9-]+\.)*mercado(libre\.(com\.co|com\.ar|com\.mx|cl|com\.uy|com\.pe)|livre\.com\.br)\//i;
+// meli.la es el acortador REAL de Mercado Libre para "Compartir" un
+// link — nunca se sabe a qué URL final resuelve hasta que el
+// navegador lo navega de verdad (es justo lo que hace chrome.tabs.create
+// de abajo), así que se acepta SOLO como punto de PARTIDA — nunca como
+// destino confirmado. `esUrlFinalDeMercadoLibre` (abajo) es quien
+// exige que la URL FINAL, después de cualquier redirect, sí sea de
+// verdad un dominio de Mercado Libre antes de pedirle a content.js que
+// lea algo — si meli.la termina mandando a cualquier otro lado, nunca
+// se lee esa página.
+const PATRON_LINK_CORTO_ML = /^https:\/\/meli\.la\//i;
+
+function esLinkImportarValido(link) {
+  return typeof link === "string" && (PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO.test(link) || PATRON_LINK_CORTO_ML.test(link));
+}
+
+function esUrlFinalDeMercadoLibre(url) {
+  return typeof url === "string" && PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO.test(url);
+}
+
+// Evita que un clic repetido (o un reenvío del mismo mensaje) dispare
+// varias lecturas casi juntas — mismo criterio y mismo storage
+// (chrome.storage.session, sobrevive un reciclado del Service Worker)
+// que COOLDOWN_ABRIR_SEGUIMIENTOS_MS/COOLDOWN_IMPORTAR_PUBLICAR_MS,
+// arriba.
+const COOLDOWN_IMPORTAR_LINK_MS = 5_000;
+// Tope real: si Mercado Libre nunca contesta (red lenta, bloqueo,
+// captcha que nadie resuelve), la pestaña de lectura no queda abierta
+// para siempre — se cierra sola y se avisa.
+const TIEMPO_MAX_IMPORTAR_LINK_MS = 30_000;
+
+// "Máximo una lectura a la vez" — por PESTAÑA SOLICITANTE (la de
+// /panel/publicar que pidió el link), mismo criterio que
+// escaneosActivos/resenasActivas/escaneosPlataforma más abajo en este
+// archivo: un pedido NUEVO desde la MISMA pestaña cancela el anterior
+// (nunca 2 lecturas de la misma pestaña a la vez); pestañas de Publicar
+// DISTINTAS (2 ventanas, por ejemplo) sí pueden tener cada una la suya,
+// sin pisarse. En memoria a propósito (no chrome.storage.session): si
+// el Service Worker se recicla a mitad de una lectura, la pestaña
+// queda huérfana — mismo límite conocido y documentado que el resto de
+// los escaneos de este archivo (issue #221).
+const lecturasLinkActivas = new Map(); // tabIdSolicitante -> { tabIdLectura, timeoutId, listenerOnUpdated }
+
+function cancelarLecturaLinkActiva(tabIdSolicitante) {
+  const activa = lecturasLinkActivas.get(tabIdSolicitante);
+  if (!activa) return;
+  clearTimeout(activa.timeoutId);
+  if (activa.listenerOnUpdated) chrome.tabs.onUpdated.removeListener(activa.listenerOnUpdated);
+  if (activa.tabIdLectura != null) chrome.tabs.remove(activa.tabIdLectura, () => void chrome.runtime.lastError);
+  lecturasLinkActivas.delete(tabIdSolicitante);
+}
+
+function terminarLecturaLink(tabIdSolicitante, respuesta) {
+  const activa = lecturasLinkActivas.get(tabIdSolicitante);
+  if (!activa) return;
+  clearTimeout(activa.timeoutId);
+  if (activa.listenerOnUpdated) chrome.tabs.onUpdated.removeListener(activa.listenerOnUpdated);
+  const tabIdLectura = activa.tabIdLectura;
+  lecturasLinkActivas.delete(tabIdSolicitante);
+  if (tabIdLectura != null) chrome.tabs.remove(tabIdLectura, () => void chrome.runtime.lastError);
+  chrome.tabs.sendMessage(tabIdSolicitante, respuesta, () => void chrome.runtime.lastError);
+}
+
+function iniciarImportarLink(tabIdSolicitante, link) {
+  cancelarLecturaLinkActiva(tabIdSolicitante); // nunca 2 lecturas de la misma pestaña a la vez — la nueva reemplaza a la anterior
+
+  chrome.tabs.create({ url: link, active: false }, (tab) => {
+    if (chrome.runtime.lastError || !tab || tab.id == null) {
+      chrome.tabs.sendMessage(
+        tabIdSolicitante,
+        { tipo: "zilonix:importar-link-error", payload: { razon: "no_se_pudo_abrir" } },
+        () => void chrome.runtime.lastError
+      );
+      return;
+    }
+    const tabIdLectura = tab.id;
+
+    const timeoutId = setTimeout(() => {
+      terminarLecturaLink(tabIdSolicitante, { tipo: "zilonix:importar-link-error", payload: { razon: "timeout" } });
+    }, TIEMPO_MAX_IMPORTAR_LINK_MS);
+
+    // Issue #44 — "background se lo dice a esa pestaña por su id,
+    // nunca porque la página lo pida": se espera a que la pestaña
+    // termine de cargar (status "complete" — puede dispararse más de
+    // una vez con meli.la, una por cada salto del redirect) y, recién
+    // con la URL FINAL confirmada, se decide. Si la URL final YA es de
+    // Mercado Libre, se le pide a esa pestaña que lea. Si terminó de
+    // cargar en cualquier OTRO dominio (meli.la que mandó a otro lado,
+    // o cualquier cosa rara), se corta ahí mismo — nunca se intenta
+    // leer una página que no sea de Mercado Libre.
+    function alActualizarTab(idActualizado, cambioInfo, tabActualizada) {
+      if (idActualizado !== tabIdLectura || cambioInfo.status !== "complete") return;
+      const urlFinal = tabActualizada && typeof tabActualizada.url === "string" ? tabActualizada.url : "";
+      if (PATRON_LINK_CORTO_ML.test(urlFinal)) return; // todavía en meli.la (o una redirección intermedia propia) — espera el próximo "complete"
+      chrome.tabs.onUpdated.removeListener(alActualizarTab);
+      const activa = lecturasLinkActivas.get(tabIdSolicitante);
+      if (activa) activa.listenerOnUpdated = null; // ya no hay nada que sacar al cancelar/terminar
+      if (!esUrlFinalDeMercadoLibre(urlFinal)) {
+        terminarLecturaLink(tabIdSolicitante, { tipo: "zilonix:importar-link-error", payload: { razon: "no_es_mercadolibre" } });
+        return;
+      }
+      chrome.tabs.sendMessage(tabIdLectura, { tipo: "zilonix:leer-para-importar" }, () => void chrome.runtime.lastError);
+    }
+    chrome.tabs.onUpdated.addListener(alActualizarTab);
+
+    lecturasLinkActivas.set(tabIdSolicitante, { tabIdLectura, timeoutId, listenerOnUpdated: alActualizarTab });
+  });
+}
+
 // Issue #251 (revisión de Pablo, punto 4) — "que la lectura no dependa
 // de tener abierta la pestaña de Seguimiento". Decisión de Mateo:
 // SOLO cola + vaciado oportunista, nunca abrir una pestaña por su
@@ -260,6 +384,22 @@ chrome.runtime.onStartup.addListener(() => cerrarPestanasActualizarTodoVencidas(
 // normal de siempre).
 chrome.tabs.onRemoved.addListener((tabId) => {
   desregistrarPestanaActualizarTodo(tabId);
+  // Issue #44 — mismo criterio: si la persona cierra a mano la
+  // pestaña de Publicar que pidió un link (o la propia pestaña de
+  // LECTURA, por cualquier motivo), se limpia la lectura activa
+  // correspondiente — nunca se intenta `chrome.tabs.remove` sobre un
+  // id que ya no existe, ni se deja un timeout/listener huérfano
+  // corriendo para nada.
+  if (lecturasLinkActivas.has(tabId)) {
+    cancelarLecturaLinkActiva(tabId);
+  } else {
+    for (const [tabIdSolicitante, activa] of lecturasLinkActivas) {
+      if (activa.tabIdLectura === tabId) {
+        cancelarLecturaLinkActiva(tabIdSolicitante);
+        break;
+      }
+    }
+  }
 });
 
 function encolarDatoPaginaSeguimiento(payload) {
@@ -966,6 +1106,64 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
       if (typeof sendResponse === "function") sendResponse({ payload: vencido ? null : pendiente.payload });
     });
     return true; // respuesta async
+  }
+
+  // Issue #44 (anexo) — "Importar publicación desde un link": un clic
+  // real en "Traer datos de ese link" (SeccionesImportar.tsx) manda
+  // esto vía marcador-zilonix.js. Revalida el link (nunca confía en lo
+  // que ya validó la página — ver PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO,
+  // arriba), aplica el cooldown de 5s, y recién ahí abre la pestaña de
+  // lectura (iniciarImportarLink, arriba).
+  if (mensaje.tipo === "zilonix:importar-link") {
+    if (!remitente.tab?.id) return;
+    const tabIdSolicitante = remitente.tab.id;
+    const link = typeof mensaje.payload?.link === "string" ? mensaje.payload.link : "";
+    if (!esLinkImportarValido(link)) {
+      chrome.tabs.sendMessage(
+        tabIdSolicitante,
+        { tipo: "zilonix:importar-link-error", payload: { razon: "dominio_no_permitido" } },
+        () => void chrome.runtime.lastError
+      );
+      return;
+    }
+    chrome.storage.session.get({ ultimoImportarLinkMs: 0 }, (datosCooldown) => {
+      const ahoraMs = Date.now();
+      const ultimoMs = typeof datosCooldown.ultimoImportarLinkMs === "number" ? datosCooldown.ultimoImportarLinkMs : 0;
+      if (ahoraMs - ultimoMs < COOLDOWN_IMPORTAR_LINK_MS) return; // doble clic -- nunca abre una segunda pestaña de lectura
+      chrome.storage.session.set({ ultimoImportarLinkMs: ahoraMs });
+      iniciarImportarLink(tabIdSolicitante, link);
+    });
+    return;
+  }
+
+  // Issue #44 — content.js (en la pestaña de LECTURA que
+  // iniciarImportarLink abrió, nunca en una pestaña que la persona
+  // abrió a mano) manda esto apenas termina de leer — con el payload
+  // real, o con `captcha:true`/`vacio:true` si no se pudo. Solo se le
+  // hace caso si de verdad hay una lectura activa esperando justo a
+  // ESTA pestaña (por tabId, nunca por adivinar) — cualquier otra
+  // "zilonix:resultado-leer-para-importar" perdida (ej. llegó tarde,
+  // después del timeout, cuando la lectura activa ya se canceló) se
+  // ignora sin romper nada.
+  if (mensaje.tipo === "zilonix:resultado-leer-para-importar") {
+    if (!remitente.tab?.id) return;
+    let tabIdSolicitanteEncontrado = null;
+    for (const [tabIdSolicitante, activa] of lecturasLinkActivas) {
+      if (activa.tabIdLectura === remitente.tab.id) {
+        tabIdSolicitanteEncontrado = tabIdSolicitante;
+        break;
+      }
+    }
+    if (tabIdSolicitanteEncontrado == null) return; // ninguna lectura activa esperaba esto -- nunca rompe nada
+    const payload = mensaje.payload || {};
+    if (payload.captcha) {
+      terminarLecturaLink(tabIdSolicitanteEncontrado, { tipo: "zilonix:importar-link-error", payload: { razon: "captcha" } });
+    } else if (payload.datos) {
+      terminarLecturaLink(tabIdSolicitanteEncontrado, { tipo: "zilonix:importar-publicar", payload: payload.datos });
+    } else {
+      terminarLecturaLink(tabIdSolicitanteEncontrado, { tipo: "zilonix:importar-link-error", payload: { razon: "vacio" } });
+    }
+    return;
   }
 
   // Issue #251 (revisión de Pablo, punto 4) — EscuchaExtension.tsx lo

@@ -27,6 +27,10 @@ const RETRASO_MOCK_MS = 10;
 const DEBOUNCE_MS = 5_000;
 // Mismo valor real que TIEMPO_MAX_PESTANA_ACTUALIZAR_TODO_MS.
 const TOPE_ABSOLUTO_MS = 45_000;
+// Mismos valores reales que COOLDOWN_IMPORTAR_LINK_MS/TIEMPO_MAX_IMPORTAR_LINK_MS
+// en background.js (anexo #44/#273, "Importar por link").
+const COOLDOWN_IMPORTAR_LINK_MS = 5_000;
+const TIEMPO_MAX_IMPORTAR_LINK_MS = 30_000;
 
 function crearChromeMock() {
   const storageSession: Record<string, unknown> = {};
@@ -39,6 +43,13 @@ function crearChromeMock() {
     onStartup: (() => void) | null;
     onClicked: ((tab: { id?: number }) => void) | null;
   } = { onMessage: null, onActivated: null, onRemoved: null, onStartup: null, onClicked: null };
+  // Issue #44/#273 (anexo "Importar por link") — a diferencia de los
+  // demás eventos de arriba (un solo listener, registrado una vez al
+  // cargar el script), chrome.tabs.onUpdated se registra y desregistra
+  // UNA VEZ POR CADA LECTURA (iniciarImportarLink lo agrega, y lo quita
+  // apenas resuelve el link o se cancela) — por eso necesita un
+  // registro real de varios listeners, nunca un solo slot.
+  const listenersOnUpdated: Array<(tabId: number, cambioInfo: { status?: string }, tab: { id: number; url: string }) => void> = [];
   const llamadas = {
     create: [] as Array<{ id: number; url: string; active: boolean }>,
     remove: [] as number[],
@@ -127,6 +138,17 @@ function crearChromeMock() {
           listeners.onRemoved = fn;
         },
       },
+      // Issue #44 (anexo) — registro real de varios listeners (ver el
+      // comentario de listenersOnUpdated más arriba), nunca un slot.
+      onUpdated: {
+        addListener: (fn: (tabId: number, cambioInfo: { status?: string }, tab: { id: number; url: string }) => void) => {
+          listenersOnUpdated.push(fn);
+        },
+        removeListener: (fn: (tabId: number, cambioInfo: { status?: string }, tab: { id: number; url: string }) => void) => {
+          const i = listenersOnUpdated.indexOf(fn);
+          if (i !== -1) listenersOnUpdated.splice(i, 1);
+        },
+      },
       create: (props: { url: string; active: boolean }, cb?: (tab: { id: number }) => void) => {
         setTimeout(() => {
           const tab = { id: siguienteTabId++, url: props.url, active: props.active };
@@ -164,6 +186,13 @@ function crearChromeMock() {
     chrome,
     listeners,
     llamadas,
+    // Issue #44 (anexo) — simula que una pestaña terminó de cargar (o
+    // sigue redirigiendo) con esta URL — dispara TODOS los listeners
+    // de onUpdated registrados en este momento, como el Chrome real.
+    dispararTabActualizada: (tabId: number, url: string, status = "complete") => {
+      for (const fn of [...listenersOnUpdated]) fn(tabId, { status }, { id: tabId, url });
+    },
+    cantidadListenersOnUpdated: () => listenersOnUpdated.length,
     setPestanasAbiertas: (pestanas: Array<{ id: number; url: string; windowId?: number }>) => {
       pestanasAbiertas = pestanas;
     },
@@ -632,5 +661,244 @@ describe("zilonix:importar-publicar — issue #44 (abre o enfoca Publicar)", () 
     await cargarBackgroundFresco();
     const respuesta = await pedirImportacionPendiente();
     expect(respuesta).toEqual([{ payload: null }]);
+  });
+});
+
+// Issue #44/#273 (anexo, pedido de Pablo tras el PR #290) — "Traer
+// datos de ese link": con cualquier link de Mercado Libre (publicación
+// normal, catálogo /p/, /up/, o un link corto meli.la), la extensión
+// abre esa publicación en una pestaña de fondo, la lee, la cierra, y
+// manda el resultado de vuelta SOLO a la pestaña que lo pidió — con el
+// mismo mensaje "zilonix:importar-publicar" que ya usa "Importar a
+// Publicar". background.js es la última línea real de defensa: vuelve
+// a validar el dominio del link (nunca confía en SeccionesImportar.tsx)
+// y, después de que meli.la redirige, vuelve a validar la URL FINAL
+// antes de pedirle a content.js que lea nada.
+describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#273)', () => {
+  let mockActual: ReturnType<typeof crearChromeMock>;
+  const LINK_NORMAL = "https://articulo.mercadolibre.com.co/MCO-123456-cojin-antiescaras-_JM";
+  const LINK_CATALOGO = "https://www.mercadolibre.com.co/p/MCO12345678";
+  const LINK_UP = "https://www.mercadolibre.com.co/up/MCOU987654321?quantity=6";
+  const LINK_CORTO = "https://meli.la/abc123XYZ";
+  const PAYLOAD_IMPORTADO = { titulo: "Cojín antiescaras", descripcion: "Descripción", precio: 50_000, imagenes: [] };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockActual = crearChromeMock();
+    (globalThis as unknown as { chrome: unknown }).chrome = mockActual.chrome;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (globalThis as unknown as { chrome?: unknown }).chrome;
+  });
+
+  async function mandarImportarLink(link: unknown, tabIdSolicitante = 1) {
+    mockActual.listeners.onMessage!({ tipo: "zilonix:importar-link", payload: { link } }, { tab: { id: tabIdSolicitante } });
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+  }
+
+  async function mandarResultadoLectura(tabIdLectura: number, payload: unknown) {
+    mockActual.listeners.onMessage!({ tipo: "zilonix:resultado-leer-para-importar", payload }, { tab: { id: tabIdLectura } });
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+  }
+
+  function erroresA(tabIdSolicitante: number) {
+    return mockActual.llamadas.sendMessage.filter(
+      (m) => m.tabId === tabIdSolicitante && (m.mensaje as { tipo?: string }).tipo === "zilonix:importar-link-error"
+    ) as Array<{ tabId: number; mensaje: { tipo: string; payload: { razon: string } } }>;
+  }
+
+  it("rechaza dominios con spoofing real (mercadolibre.com.co.evil.com, evilmercadolibre.com, etc.) — nunca abre ninguna pestaña", async () => {
+    await cargarBackgroundFresco();
+    for (const linkMalo of [
+      "https://mercadolibre.com.co.evil.com/MCO-123",
+      "https://evilmercadolibre.com/MCO-123",
+      "https://notmercadolibre.com/MCO-123",
+      "http://articulo.mercadolibre.com.co/MCO-123", // http, no https
+      "",
+    ]) {
+      await mandarImportarLink(linkMalo, 1);
+    }
+    expect(mockActual.llamadas.create).toEqual([]);
+    expect(erroresA(1).length).toBe(5);
+    expect(erroresA(1).every((e) => e.mensaje.payload.razon === "dominio_no_permitido")).toBe(true);
+  });
+
+  it("acepta los 4 tipos de link reales: publicación normal, catálogo /p/, /up/ y el link corto meli.la — siempre en una pestaña de fondo", async () => {
+    await cargarBackgroundFresco();
+    for (const linkBueno of [LINK_NORMAL, LINK_CATALOGO, LINK_UP, LINK_CORTO]) {
+      await mandarImportarLink(linkBueno, 1);
+      await vi.advanceTimersByTimeAsync(COOLDOWN_IMPORTAR_LINK_MS + 100); // separa cada uno del cooldown global
+    }
+    expect(mockActual.llamadas.create.map((t) => t.url)).toEqual([LINK_NORMAL, LINK_CATALOGO, LINK_UP, LINK_CORTO]);
+    expect(mockActual.llamadas.create.every((t) => t.active === false)).toBe(true); // nunca roba el foco
+  });
+
+  it("meli.la: espera la URL FINAL después del redirect antes de pedir la lectura — nunca lee mientras sigue en meli.la", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_CORTO, 1);
+    const tabIdLectura = mockActual.llamadas.create[0].id;
+
+    mockActual.dispararTabActualizada(tabIdLectura, "https://meli.la/paso-intermedio-del-redirect", "complete");
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+    expect(mockActual.llamadas.sendMessage.find((m) => (m.mensaje as { tipo?: string }).tipo === "zilonix:leer-para-importar")).toBeUndefined();
+
+    mockActual.dispararTabActualizada(tabIdLectura, LINK_NORMAL, "complete");
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+    expect(mockActual.llamadas.sendMessage).toContainEqual({ tabId: tabIdLectura, mensaje: { tipo: "zilonix:leer-para-importar" } });
+  });
+
+  it("si meli.la termina en un dominio que NO es Mercado Libre, cierra la pestaña y avisa — nunca intenta leerla", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_CORTO, 1);
+    const tabIdLectura = mockActual.llamadas.create[0].id;
+
+    mockActual.dispararTabActualizada(tabIdLectura, "https://evil.com/phishing", "complete");
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+
+    expect(mockActual.llamadas.remove).toContain(tabIdLectura);
+    expect(erroresA(1).some((e) => e.mensaje.payload.razon === "no_es_mercadolibre")).toBe(true);
+    expect(mockActual.llamadas.sendMessage.find((m) => (m.mensaje as { tipo?: string }).tipo === "zilonix:leer-para-importar")).toBeUndefined();
+    expect(mockActual.cantidadListenersOnUpdated()).toBe(0);
+  });
+
+  it("cooldown de 5s GLOBAL: un segundo link casi al mismo tiempo (aunque sea desde otra pestaña) no abre otra lectura", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    await mandarImportarLink(LINK_CATALOGO, 2); // otra pestaña solicitante -- el cooldown es global, no por pestaña
+
+    expect(mockActual.llamadas.create.length).toBe(1);
+  });
+
+  it("pasado el cooldown de 5s, un link nuevo SÍ abre otra lectura", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    await vi.advanceTimersByTimeAsync(COOLDOWN_IMPORTAR_LINK_MS + 100);
+    await mandarImportarLink(LINK_CATALOGO, 1);
+
+    expect(mockActual.llamadas.create.length).toBe(2);
+  });
+
+  it("una segunda lectura de la MISMA pestaña solicitante reemplaza a la anterior: cierra la pestaña de lectura vieja, nunca deja 2 a la vez", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    const tabIdLecturaVieja = mockActual.llamadas.create[0].id;
+    await vi.advanceTimersByTimeAsync(COOLDOWN_IMPORTAR_LINK_MS + 100);
+    await mandarImportarLink(LINK_CATALOGO, 1);
+
+    expect(mockActual.llamadas.remove).toContain(tabIdLecturaVieja);
+    expect(mockActual.llamadas.create.length).toBe(2);
+    expect(mockActual.cantidadListenersOnUpdated()).toBe(1); // solo el listener de la lectura nueva queda vivo
+  });
+
+  it("tope de 30s: si nunca llega el 'complete' final, cierra la pestaña y avisa 'timeout' — nunca reintenta sola", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    const tabIdLectura = mockActual.llamadas.create[0].id;
+
+    await vi.advanceTimersByTimeAsync(TIEMPO_MAX_IMPORTAR_LINK_MS + 1_000);
+
+    expect(mockActual.llamadas.remove).toContain(tabIdLectura);
+    expect(erroresA(1).some((e) => e.mensaje.payload.razon === "timeout")).toBe(true);
+    expect(mockActual.cantidadListenersOnUpdated()).toBe(0);
+    expect(mockActual.llamadas.create.length).toBe(1); // nunca abre otra sola
+  });
+
+  it("el resultado se manda SOLO a la pestaña que lo pidió, nunca a otra pestaña solicitante con una lectura paralela", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    const tabIdLectura1 = mockActual.llamadas.create[0].id;
+    await vi.advanceTimersByTimeAsync(COOLDOWN_IMPORTAR_LINK_MS + 100);
+    await mandarImportarLink(LINK_CATALOGO, 2);
+    const tabIdLectura2 = mockActual.llamadas.create[1].id;
+
+    mockActual.dispararTabActualizada(tabIdLectura1, LINK_NORMAL, "complete");
+    mockActual.dispararTabActualizada(tabIdLectura2, LINK_CATALOGO, "complete");
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+
+    await mandarResultadoLectura(tabIdLectura1, { datos: PAYLOAD_IMPORTADO });
+
+    const mandadosATab2 = mockActual.llamadas.sendMessage.filter((m) => m.tabId === 2);
+    expect(mandadosATab2).toEqual([]); // la pestaña 2 (solicitante del otro link) nunca recibe este resultado
+    expect(mockActual.llamadas.sendMessage).toContainEqual({ tabId: 1, mensaje: { tipo: "zilonix:importar-publicar", payload: PAYLOAD_IMPORTADO } });
+  });
+
+  it("captcha detectado en la pestaña de lectura: cierra la pestaña, avisa 'captcha', y nunca reintenta sola", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    const tabIdLectura = mockActual.llamadas.create[0].id;
+    mockActual.dispararTabActualizada(tabIdLectura, LINK_NORMAL, "complete");
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+
+    await mandarResultadoLectura(tabIdLectura, { captcha: true });
+
+    expect(mockActual.llamadas.remove).toContain(tabIdLectura);
+    expect(erroresA(1).some((e) => e.mensaje.payload.razon === "captcha")).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(TIEMPO_MAX_IMPORTAR_LINK_MS + 1_000);
+    expect(mockActual.llamadas.create.length).toBe(1); // nunca vuelve a intentar sola
+  });
+
+  it("sin datos ni captcha (lectura vacía) -> avisa 'vacio' y cierra la pestaña", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    const tabIdLectura = mockActual.llamadas.create[0].id;
+    mockActual.dispararTabActualizada(tabIdLectura, LINK_NORMAL, "complete");
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+
+    await mandarResultadoLectura(tabIdLectura, {});
+
+    expect(mockActual.llamadas.remove).toContain(tabIdLectura);
+    expect(erroresA(1).some((e) => e.mensaje.payload.razon === "vacio")).toBe(true);
+  });
+
+  it("un 'resultado-leer-para-importar' de una pestaña sin ninguna lectura activa se ignora, nunca rompe nada", async () => {
+    await cargarBackgroundFresco();
+    await mandarResultadoLectura(999, { datos: PAYLOAD_IMPORTADO });
+    expect(mockActual.llamadas.sendMessage).toEqual([]);
+  });
+
+  it("si la persona cierra a mano la pestaña de LECTURA, se cancela la lectura sin dejar timeout/listener huérfano, y no manda ningún error", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    const tabIdLectura = mockActual.llamadas.create[0].id;
+
+    mockActual.listeners.onRemoved!(tabIdLectura);
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+
+    expect(mockActual.cantidadListenersOnUpdated()).toBe(0);
+    expect(erroresA(1)).toEqual([]); // cancelar (a diferencia de terminar) nunca manda un mensaje a la solicitante
+
+    await vi.advanceTimersByTimeAsync(TIEMPO_MAX_IMPORTAR_LINK_MS + 1_000);
+    expect(erroresA(1)).toEqual([]); // el timeout ya se canceló, nunca dispara igual
+  });
+
+  it("si la persona cierra a mano la pestaña SOLICITANTE (la de Publicar), se cancela la lectura y se cierra su pestaña de lectura", async () => {
+    await cargarBackgroundFresco();
+    await mandarImportarLink(LINK_NORMAL, 1);
+    const tabIdLectura = mockActual.llamadas.create[0].id;
+
+    mockActual.listeners.onRemoved!(1);
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+
+    expect(mockActual.llamadas.remove).toContain(tabIdLectura);
+    expect(mockActual.cantidadListenersOnUpdated()).toBe(0);
+  });
+
+  it("si chrome.tabs.create falla (lastError) -> avisa 'no_se_pudo_abrir', nunca revienta", async () => {
+    await cargarBackgroundFresco();
+    mockActual.chrome.runtime.lastError = { message: "No se pudo abrir la pestaña" };
+    await mandarImportarLink(LINK_NORMAL, 1);
+
+    expect(erroresA(1).some((e) => e.mensaje.payload.razon === "no_se_pudo_abrir")).toBe(true);
+  });
+
+  it("sin remitente.tab.id (caso defensivo) -> no hace nada, nunca revienta", async () => {
+    await cargarBackgroundFresco();
+    mockActual.listeners.onMessage!({ tipo: "zilonix:importar-link", payload: { link: LINK_NORMAL } }, {});
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+
+    expect(mockActual.llamadas.create).toEqual([]);
   });
 });

@@ -449,13 +449,34 @@ export function idItemDesdeLinkMl(urlCruda: string): string | null {
 // criterio que ZilonixSeguridad.linkSeguro del lado de la extensión,
 // reimplementado acá sin DOM/fetch porque este archivo no puede
 // importar nada de lib/ (helper puro, sin ciclos).
+// Issue #44 (revisión — hallazgo real al preparar "Importar por link")
+// — antes esta función solo exigía `https://` a secas para una foto —
+// CUALQUIER host https pasaba. Se endurece para exigir el dominio REAL
+// de imágenes de Mercado Libre (mlstatic.com, mismo hostname anclado
+// que ya usa esUrlFotoMlValida del lado de la extensión,
+// extension/lectores/mercadolibre.js — ese archivo no se puede
+// importar acá, DOM/chrome-dependiente, así que se reimplementa el
+// mismo chequeo, puro, sin DOM). Nunca un substring suelto
+// (`mlstatic.com` en cualquier parte de la URL) — el HOSTNAME real,
+// anclado con `(^|\.)mlstatic\.com$`, mismo criterio que
+// PATRON_HOST_MERCADOLIBRE más arriba en este archivo.
+function esUrlFotoMlSegura(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" && /(^|\.)mlstatic\.com$/i.test(parsed.hostname);
+}
+
 export function itemImportadoDesdeMensajeExtension(datos: unknown): ItemImportado | null {
   if (!datos || typeof datos !== "object" || Array.isArray(datos)) return null;
   const d = datos as Record<string, unknown>;
   const titulo = typeof d.titulo === "string" ? d.titulo.slice(0, 60) : "";
   const descripcion = typeof d.descripcion === "string" ? d.descripcion : "";
   const precio = typeof d.precio === "number" && Number.isFinite(d.precio) && d.precio > 0 ? String(d.precio) : "";
-  const imagenes = Array.isArray(d.imagenes) ? d.imagenes.filter((u): u is string => typeof u === "string" && /^https:\/\//i.test(u)) : [];
+  const imagenes = Array.isArray(d.imagenes) ? d.imagenes.filter((u): u is string => typeof u === "string" && esUrlFotoMlSegura(u)) : [];
   if (!titulo && !descripcion && !precio && imagenes.length === 0) return null; // mensaje vacío/con otra forma — nunca se hidrata el formulario con nada
   return { titulo, descripcion, precio, stock: "", sku: "", imagenes, dimensiones: {} };
 }

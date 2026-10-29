@@ -251,3 +251,51 @@ describe("pedirImportacionPendiente — issue #44 (entrega el pendiente a /panel
     expect(sendMessageImpl).not.toHaveBeenCalled();
   });
 });
+
+// Issue #44 (anexo, "Traer datos de ese link") — las 2 entradas nuevas
+// de este mapa: PÁGINA -> extensión ("importar-link", el clic real en
+// "Traer datos de ese link") y extensión -> PÁGINA ("zilonix:importar-link-error",
+// background.js avisando que el link no era de Mercado Libre, pidió
+// login/captcha, o se agotó el tiempo). Mismo mecanismo genérico de
+// siempre (TIPOS_HACIA_EXTENSION / TIPOS_REENVIADOS) — estas pruebas
+// solo confirman que las 2 entradas nuevas están bien cableadas.
+describe('"importar-link" / "zilonix:importar-link-error" — issue #44 (anexo, Traer datos de ese link)', () => {
+  it('la página manda "importar-link" (postMessage) -> se reenvía a background.js como "zilonix:importar-link"', async () => {
+    const sendMessageImpl = vi.fn();
+    const { enviarDesdeLaPagina } = await cargarMarcadorFresco("https://web-production-af270.up.railway.app", {
+      pathname: "/panel/publicar",
+      sendMessageImpl,
+    });
+    enviarDesdeLaPagina({ fuente: "zilonix-panel", tipo: "importar-link", payload: { link: "https://articulo.mercadolibre.com.co/MCO-123" } });
+    expect(sendMessageImpl).toHaveBeenCalledWith(
+      { tipo: "zilonix:importar-link", payload: { link: "https://articulo.mercadolibre.com.co/MCO-123" } },
+      expect.any(Function)
+    );
+  });
+
+  it('background.js manda "zilonix:importar-link-error" -> se reenvía a la página (postMessage) como "importar-link-error", con el ack simple {ok:true}', async () => {
+    const { enviarDesdeBackground, mensajesPostMessage } = await cargarMarcadorFresco("https://web-production-af270.up.railway.app", {
+      pathname: "/panel/publicar",
+    });
+    const respuestas: unknown[] = [];
+    enviarDesdeBackground({ tipo: "zilonix:importar-link-error", payload: { razon: "captcha" } }, (r) => respuestas.push(r));
+    expect(mensajesPostMessage).toContainEqual({ fuente: "zilonix-extension", tipo: "importar-link-error", payload: { razon: "captcha" } });
+    expect(respuestas).toEqual([{ ok: true }]); // tipo genérico -- nunca el ack especial de "importar-publicar"
+  });
+
+  it('"zilonix:importar-link-error" también se reenvía en una pestaña que NO es /panel/publicar (background.js nunca lo difunde a ciegas, pero marcador-zilonix.js no filtra por ruta en este tipo)', async () => {
+    const { enviarDesdeBackground, mensajesPostMessage } = await cargarMarcadorFresco("https://web-production-af270.up.railway.app", {
+      pathname: "/panel/investigacion",
+    });
+    enviarDesdeBackground({ tipo: "zilonix:importar-link-error", payload: { razon: "timeout" } });
+    expect(mensajesPostMessage).toContainEqual({ fuente: "zilonix-extension", tipo: "importar-link-error", payload: { razon: "timeout" } });
+  });
+
+  it('sin payload en "zilonix:importar-link-error" -> no reenvía nada (mismo chequeo genérico de siempre, "if (!mensaje || !mensaje.payload) return")', async () => {
+    const { enviarDesdeBackground, mensajesPostMessage } = await cargarMarcadorFresco("https://web-production-af270.up.railway.app", {
+      pathname: "/panel/publicar",
+    });
+    enviarDesdeBackground({ tipo: "zilonix:importar-link-error" });
+    expect(mensajesPostMessage).toEqual([]);
+  });
+});

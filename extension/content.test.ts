@@ -20,10 +20,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // no reviente, sin necesitar jsdom.
 const CALIBRACION_PRUEBA = { factorVendidosFull: 2.2, factorVendidosSinFull: 1.55, puntos: [] };
 
-async function cargarContentFresco() {
+async function cargarContentFresco(hostname = "articulo.mercadolibre.com.co") {
   vi.resetModules();
   (globalThis as unknown as { window: unknown }).window = globalThis;
-  (globalThis as unknown as { location: { href: string } }).location = { href: "https://articulo.mercadolibre.com.co/MCO-123456789-reloj" };
+  (globalThis as unknown as { location: { href: string; hostname: string } }).location = {
+    href: `https://${hostname}/MCO-123456789-reloj`,
+    hostname,
+  };
   (globalThis as unknown as { document: { body: unknown } }).document = { body: {} };
   (globalThis as unknown as { MutationObserver: unknown }).MutationObserver = class {
     observe() {
@@ -55,6 +58,7 @@ async function cargarContentFresco() {
     escribirPanelMinimizado: (storage: StorageFake | null, minimizado: boolean) => void;
     esMensajeDePropiaExtension: (remitente: { id?: string } | null | undefined, idPropio: string) => boolean;
     etiquetaAmbienteDeUrlApp: (urlApp: unknown) => string;
+    esPaginaDeCuentasMl: () => boolean;
   };
 }
 
@@ -440,5 +444,53 @@ describe("leerPanelMinimizado / escribirPanelMinimizado — issue #273 (minimiza
     const mod = await cargarContentFresco();
     expect(mod.leerPanelMinimizado(null)).toBe(false);
     expect(() => mod.escribirPanelMinimizado(null, true)).not.toThrow();
+  });
+});
+
+// Issue #44 (anexo, "Traer datos de ese link") — único marcador
+// CONFIRMABLE de login/captcha de Mercado Libre (ver el comentario real
+// en content.js, junto a esPaginaDeCuentasMl): el subdominio REAL de
+// cuentas (accounts.mercadolibre.*/accounts.mercadolivre.*). leerParaImportar
+// (la función que de verdad usa esto) no se prueba acá — toca
+// document/chrome reales, como el resto de este archivo — solo este
+// marcador puro.
+describe("esPaginaDeCuentasMl — issue #44 (anexo, único marcador confirmable de login/captcha)", () => {
+  it("accounts.mercadolibre.com.co (el dominio real de login de ML) -> true", async () => {
+    const mod = await cargarContentFresco("accounts.mercadolibre.com.co");
+    expect(mod.esPaginaDeCuentasMl()).toBe(true);
+  });
+
+  it("accounts.mercadolivre.com.br (Brasil) -> true", async () => {
+    const mod = await cargarContentFresco("accounts.mercadolivre.com.br");
+    expect(mod.esPaginaDeCuentasMl()).toBe(true);
+  });
+
+  it("una ficha normal (articulo.mercadolibre.com.co) -> false", async () => {
+    const mod = await cargarContentFresco("articulo.mercadolibre.com.co");
+    expect(mod.esPaginaDeCuentasMl()).toBe(false);
+  });
+
+  // El patrón exige "accounts." como segmento propio, anclado al inicio
+  // o después de un punto — nunca un substring suelto en cualquier
+  // posición del hostname.
+  it("notaccounts.mercadolibre.com ('accounts' no es un segmento propio) -> false", async () => {
+    const mod = await cargarContentFresco("notaccounts.mercadolibre.com");
+    expect(mod.esPaginaDeCuentasMl()).toBe(false);
+  });
+
+  it("accounts.mercadolibreevil.com (dominio ajeno, no termina en '.com' justo después de mercadolibre) -> false", async () => {
+    const mod = await cargarContentFresco("accounts.mercadolibreevil.com");
+    expect(mod.esPaginaDeCuentasMl()).toBe(false);
+  });
+
+  // NO es un hueco explotable: para que content.js llegue a evaluar
+  // esto, background.js YA validó la URL final contra el patrón
+  // anclado con "/" al final (PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO) —
+  // "accounts.mercadolibre.com.evil.com/" nunca pasa ESE filtro, así
+  // que la pestaña de lectura nunca llega a cargar ese dominio en la
+  // práctica. Documentado acá para que quede explícito, no para "arreglarlo".
+  it("accounts.mercadolibre.com.evil.com SÍ coincide en aislamiento (el patrón no ancla el final) -- inofensivo porque background.js ya filtró antes", async () => {
+    const mod = await cargarContentFresco("accounts.mercadolibre.com.evil.com");
+    expect(mod.esPaginaDeCuentasMl()).toBe(true);
   });
 });

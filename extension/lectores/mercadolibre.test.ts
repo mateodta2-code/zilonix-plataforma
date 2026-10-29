@@ -1209,6 +1209,27 @@ describe("urlFotoGrande/idNumericoDeArchivo/esUrlFotoMlValida/deduplicarFotosMl 
     expect(esUrlFotoMlValida("")).toBe(false);
   });
 
+  // Issue #44 (hallazgo real de seguridad al preparar "Importar por
+  // link") — antes de esta corrección, esUrlFotoMlValida era un
+  // substring suelto (`/mlstatic\.com/i.test(url)`) sobre la URL
+  // ENTERA, nunca el hostname real — estos 4 casos pasaban como
+  // "válidos" sin serlo. Mismo criterio de ataque ya probado para
+  // PATRON_HOST_MERCADOLIBRE/hostPermitidoCanva en app/panel/publicar.
+  it("rechaza dominios que solo CONTIENEN mlstatic.com sin ser mlstatic.com de verdad (bug real corregido)", () => {
+    expect(esUrlFotoMlValida("https://evilmlstatic.com/foto.jpg")).toBe(false);
+    expect(esUrlFotoMlValida("https://mlstatic.com.ataque.com/foto.jpg")).toBe(false);
+    expect(esUrlFotoMlValida("https://ataque.com/mlstatic.com/foto.jpg")).toBe(false);
+    expect(esUrlFotoMlValida("https://ataque.com/?u=mlstatic.com/foto.jpg")).toBe(false);
+  });
+
+  it("http (no https) a un host real de mlstatic.com -> false, solo https", () => {
+    expect(esUrlFotoMlValida("http://http2.mlstatic.com/D_NQ_NP_123-O.jpg")).toBe(false);
+  });
+
+  it("mlstatic.com exacto (sin subdominio) también es válido", () => {
+    expect(esUrlFotoMlValida("https://mlstatic.com/foto.jpg")).toBe(true);
+  });
+
   it("deduplicarFotosMl: la misma foto en miniatura y grande (mismo número, distinto sufijo) queda UNA sola vez, forzada a -O", () => {
     const crudas = [
       "https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-I.jpg",

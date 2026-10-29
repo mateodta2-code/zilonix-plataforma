@@ -104,6 +104,13 @@
     // /panel/publicar (matches ampliado en manifest.json, ver más
     // abajo) — las demás (Investigación/Seguimiento) ignoran este tipo.
     "zilonix:importar-publicar": "importar-publicar",
+    // Issue #44 (anexo) — "Importar publicación desde un link": si el
+    // link no era de Mercado Libre, si Mercado Libre pidió login/
+    // verificación, o si se agotaron los 30s — background.js lo manda
+    // directo a la pestaña que lo pidió (nunca un broadcast), así que
+    // acá no hace falta ningún chequeo de ruta aparte, mismo criterio
+    // que el resto de este mapa.
+    "zilonix:importar-link-error": "importar-link-error",
   };
 
   chrome.runtime.onMessage.addListener((mensaje, _remitente, sendResponse) => {
@@ -160,6 +167,10 @@
     // con su propio allowlist de dominio y tope de 10, nunca solo
     // confiando en lo que mande la página).
     "abrir-seguimientos": "zilonix:abrir-seguimientos",
+    // Issue #44 (anexo) — "Traer datos de ese link" (SeccionesImportar.tsx):
+    // el clic real manda el link acá; background.js valida el dominio
+    // de nuevo, aplica el cooldown y abre la pestaña de lectura.
+    "importar-link": "zilonix:importar-link",
   };
 
   window.addEventListener("message", (evento) => {
