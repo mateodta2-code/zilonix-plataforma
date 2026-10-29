@@ -208,6 +208,16 @@ export function IconoContraer(props: IconoProps) {
   );
 }
 
+// Issue #131 — flecha del acordeón del detalle día a día (apunta a la
+// derecha cerrado; el que la usa la gira 90° al abrir).
+export function IconoChevron(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="m9 6 6 6-6 6" />
+    </Svg>
+  );
+}
+
 // Pedido de Pablo (tarea Investigación ML): lupa + barritas ascendentes
 // adentro, para distinguirla de IconoBuscar (lupa sola, ya usada en la
 // barra superior para el buscador de texto) y de IconoFinanzas (barras
