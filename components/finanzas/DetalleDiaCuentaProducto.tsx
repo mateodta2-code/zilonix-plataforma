@@ -2,18 +2,18 @@ import Link from "next/link";
 import { acotarPagina, normalizarParametro, parsearPagina } from "@/lib/filtros-listado";
 import { listarCuentasMlParaSelector, PARAM_CUENTA, resolverCuentaMl } from "@/lib/ml/selector-cuenta";
 import { mostrarMonto } from "@/lib/finanzas/montos";
-import type { TotalesDetalle } from "@/lib/finanzas/detalle-ventas";
 import { listarVentasUtilidad, RangoVentasInvalidoError, type ResultadoVentasUtilidad } from "@/lib/finanzas/ventas-consulta";
 import { hrefVentasUtilidad, porcentajeVentasConCosto, resolverRangoVentas, type FiltrosUrlVentas } from "@/lib/finanzas/ventas-pantalla";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
-import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { BotonTraerVentasMes } from "./BotonTraerVentasMes";
-import { ETIQUETA_FORMA, mostrarPorcentaje } from "./formato";
+import { CeldasMontos } from "./CeldasMontos";
+import { TablaDetalleAcordeon } from "./TablaDetalleAcordeon";
+import { mostrarPorcentaje } from "./formato";
 import estilos from "./ventasUtilidad.module.css";
 
 // Issue #131 (Parte A) — el «Detalle día a día · cuenta · producto» de
@@ -28,6 +28,10 @@ import estilos from "./ventasUtilidad.module.css";
 // mostrarResumen={false}: sin tarjetas KPI ni «Total por cuenta» (esos
 // indicadores van a Inicio, #143/#163); Finanzas → Ventas los sigue
 // mostrando.
+//
+// La tabla día → cuenta → producto es un acordeón cliente
+// (TablaDetalleAcordeon.tsx): acá se calcula todo y allá solo vive qué
+// día y qué cuenta están abiertos.
 
 // Días por página del detalle. Los totales de arriba son siempre de todo
 // el rango.
@@ -129,6 +133,9 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
   const pagina = acotarPagina(parsearPagina(normalizarParametro(searchParams.pagina)), totalPaginas);
   const diasPagina = dias.slice((pagina - 1) * DIAS_POR_PAGINA, pagina * DIAS_POR_PAGINA);
   const conDevolucion = new Set(datos?.conDevolucion ?? []);
+  // Al acordeón (cliente) solo viajan los pedidos de la página.
+  const idsPagina = new Set(diasPagina.flatMap((d) => d.cuentas.flatMap((c) => c.productos.map((p) => p.pedido_id))));
+  const pedidoIdExternoPagina = Object.fromEntries([...idsPagina].map((id) => [id, datos?.pedidoIdExterno[id] ?? ""]));
   // Ventas cuya comisión no vino de Mercado Libre (ni marketplace_fee ni
   // sale_fee): suman $0 en la columna Comisión, y eso no puede pasar
   // callado (#131).
@@ -245,11 +252,15 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
                   </p>
                 )}
                 <div className={estilos.tablaCompacta}>
-                  <Tabla encabezados={COLUMNAS_CORTAS}>
-                    {diasPagina.map((dia) => (
-                      <DiaFilas key={dia.dia} dia={dia} datos={datos as ResultadoVentasUtilidad} conDevolucion={conDevolucion} />
-                    ))}
-                  </Tabla>
+                  {/* La key cambia con la página y los filtros: el acordeón
+                      vuelve a abrir solo el día más nuevo de la página. */}
+                  <TablaDetalleAcordeon
+                    key={`${pagina}|${filtros.cuenta ?? ""}|${filtros.desde}|${filtros.hasta}|${filtros.costo ?? ""}`}
+                    encabezados={COLUMNAS_CORTAS}
+                    dias={diasPagina}
+                    pedidoIdExterno={pedidoIdExternoPagina}
+                    conDevolucion={[...conDevolucion].filter((id) => idsPagina.has(id))}
+                  />
                 </div>
                 {totalPaginas > 1 && (
                   <div className={estilos.paginacion}>
@@ -275,107 +286,6 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
           )}
         </>
       )}
-    </>
-  );
-}
-
-// Las columnas de dinero de una fila. Costo y utilidad null = venta sin
-// costo: "—" y el chip, nunca un $0 inventado.
-function CeldasMontos({ t, costo, utilidad }: { t: Omit<TotalesDetalle, "costo_producto" | "utilidad">; costo: string | null; utilidad: string | null }) {
-  return (
-    <>
-      <CeldaTabla className={estilos.numero}>{t.ventas}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarMonto(t.recaudo)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarMonto(t.comision_ml)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarMonto(t.flete_ml)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{costo === null ? <Chip estado="aviso">sin costo</Chip> : mostrarMonto(costo)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarMonto(t.empaque)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarMonto(t.envio)}</CeldaTabla>
-      {/* La devolución como concepto aparte llega con #164. */}
-      <CeldaTabla className={estilos.numero}>—</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{utilidad === null ? "—" : mostrarMonto(utilidad)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{utilidad === null ? "—" : mostrarPorcentaje(t.porcentaje_utilidad)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarPorcentaje(t.porcentaje_ml)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{t.cantidad}</CeldaTabla>
-    </>
-  );
-}
-
-function DiaFilas({
-  dia,
-  datos,
-  conDevolucion,
-}: {
-  dia: ResultadoVentasUtilidad["detalle"]["dias"][number];
-  datos: ResultadoVentasUtilidad;
-  conDevolucion: Set<string>;
-}) {
-  return (
-    <>
-      <tr className={estilos.filaDia}>
-        <CeldaTabla>
-          {/* Corto, para que la 1ª columna no estire la tabla: «2 cta · 12 vtas». */}
-          <span
-            className={estilos.textoNivel}
-            title={`${dia.dia} · ${dia.numero_cuentas} ${dia.numero_cuentas === 1 ? "cuenta" : "cuentas"} · ${dia.numero_ventas} ${dia.numero_ventas === 1 ? "venta" : "ventas"}`}
-          >
-            {dia.dia} · {dia.numero_cuentas} cta · {dia.numero_ventas} {dia.numero_ventas === 1 ? "vta" : "vtas"}
-          </span>
-        </CeldaTabla>
-        <CeldasMontos t={dia.totales} costo={dia.totales.costo_producto} utilidad={dia.totales.utilidad} />
-      </tr>
-      {dia.cuentas.map((cuenta) => (
-        <CuentaFilas key={cuenta.cuenta_ml_id} cuenta={cuenta} datos={datos} conDevolucion={conDevolucion} />
-      ))}
-    </>
-  );
-}
-
-function CuentaFilas({
-  cuenta,
-  datos,
-  conDevolucion,
-}: {
-  cuenta: ResultadoVentasUtilidad["detalle"]["dias"][number]["cuentas"][number];
-  datos: ResultadoVentasUtilidad;
-  conDevolucion: Set<string>;
-}) {
-  return (
-    <>
-      <tr className={estilos.filaCuenta}>
-        <CeldaTabla className={estilos.sangriaCuenta}>
-          <span className={estilos.textoNivel} title={`${cuenta.nickname} · ${cuenta.numero_ventas} Vta`}>
-            {cuenta.nickname} · {cuenta.numero_ventas} Vta
-          </span>
-        </CeldaTabla>
-        <CeldasMontos t={cuenta.totales} costo={cuenta.totales.costo_producto} utilidad={cuenta.totales.utilidad} />
-      </tr>
-      {cuenta.productos.map((p) => (
-        <tr key={`${p.pedido_id}-${p.linea}`} className={estilos.filaProducto}>
-          <CeldaTabla className={estilos.sangriaProducto}>
-            {/* Una sola línea de ancho fijo: el título se corta con «…»,
-                los chips van enseguida y SKU y número de pedido se cortan
-                al final si no caben. Todo se lee entero al pasar el mouse. */}
-            <div
-              className={estilos.lineaProducto}
-              title={`${p.titulo} · ${p.sku_codigo ?? "sin SKU"} · ${ETIQUETA_FORMA[p.forma_entrega]} · #${datos.pedidoIdExterno[p.pedido_id]}`}
-            >
-              <Link href={`/panel/finanzas/ventas/${p.pedido_id}`} className={`${estilos.enlace} ${estilos.tituloProducto}`}>
-                {p.titulo}
-              </Link>
-              <Chip>{ETIQUETA_FORMA[p.forma_entrega]}</Chip>
-              {conDevolucion.has(p.pedido_id) && (
-                <Chip estado="peligro" title="Con devolución: revisar">
-                  devolución
-                </Chip>
-              )}
-              <span className={estilos.suave}>[{p.sku_codigo ?? "sin SKU"}]</span>
-              <span className={estilos.suave}>#{datos.pedidoIdExterno[p.pedido_id]}</span>
-            </div>
-          </CeldaTabla>
-          <CeldasMontos t={p} costo={p.costo_producto} utilidad={p.utilidad} />
-        </tr>
-      ))}
     </>
   );
 }

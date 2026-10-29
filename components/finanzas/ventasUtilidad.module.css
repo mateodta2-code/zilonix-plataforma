@@ -242,7 +242,9 @@
 }
 
 .tablaCompacta .sangriaProducto {
-  padding-left: 22px !important;
+  /* Bajo el texto de la cuenta: 14px de su sangría + la flecha del
+     acordeón (12px + 3px). */
+  padding-left: 29px !important;
   min-width: 0;
 }
 
@@ -263,7 +265,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  width: calc(var(--ancho-col1) - 17px);
+  width: calc(var(--ancho-col1) - 24px);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -279,6 +281,67 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Issue #131 — acordeón del detalle (TablaDetalleAcordeon.tsx), como
+   Zilonix OS: el día y la cuenta son botones con una flecha que se gira
+   al abrir. La 1ª columna mide lo mismo que antes (~185px): la flecha
+   (12px + 3px de espacio) sale del ancho del texto, y el producto
+   corre su sangría para quedar alineado bajo el texto de la cuenta. */
+.controlNivel {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.controlNivel:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+.chevron {
+  flex: none;
+  color: var(--texto-suave);
+  transition: transform 0.15s ease;
+}
+
+.controlNivel[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+}
+
+.tablaCompacta .controlNivel .textoNivel {
+  width: calc(var(--ancho-col1) - 15px);
+}
+
+.tablaCompacta .sangriaCuenta .controlNivel .textoNivel {
+  width: calc(var(--ancho-col1) - 24px);
+}
+
+/* Día: el más marcado (fondo de encabezado y 700 de .filaDia). */
+.tablaCompacta .filaDia .textoNivel {
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+}
+
+.tablaCompacta .filaDia .chevron {
+  color: var(--texto);
+}
+
+/* Producto: el título manda; SKU y número de pedido, más chicos y
+   suaves. */
+.tablaCompacta .datoProducto {
+  color: var(--texto-suave);
+  font-size: 9.5px;
 }
 
 /* Issue #131 (Parte C) — «Recalcular costo con la tabla maestra»
