@@ -18,6 +18,24 @@
 // haya hecho clic en "Analizar" (ver más abajo).
 "use strict";
 
+// Revisión de Pablo (sobre a6fdcbd, HIGH 1) — bug real: hasta esta
+// corrección, la validación de URL de video vivía DUPLICADA (una
+// versión en extension/lectores/video-comun.js, otra a mano acá, más
+// estricta) y se desalinearon — video-comun.js SÍ confirmaba un
+// `<source type="video/mp4">` sin extensión real de TikTok, pero esta
+// copia lo rechazaba en silencio. Ahora es LA MISMA función real en
+// los 2 lados: `importScripts` (real en un Service Worker de
+// Manifest V3 sin `"type":"module"`, como este — carga un script
+// adicional de forma síncrona, sin bundler) deja `ZilonixVideoComun`
+// disponible acá igual que en un content script. En Node (vitest,
+// `import()` dinámico de este archivo) no existe `importScripts`, se
+// usa require() directo — mismo patrón dual que el resto de la
+// extensión (ver lectores/mercadolibre.js para U/CONFIG).
+if (typeof importScripts === "function") {
+  importScripts("lectores/video-comun.js");
+}
+const ZilonixVideoComun = typeof importScripts === "function" ? globalThis.ZilonixVideoComun : require("./lectores/video-comun.js");
+
 // Issue #251 — "zilonix:dato-pagina-seguimiento" suma al mismo relevo
 // genérico: Seguimiento no puede leer inventario/vendidos/publicaciones
 // de un recurso AJENO por la API de Mercado Libre (403/ausente,
@@ -25,7 +43,204 @@
 // ficha de un competidor o la tienda que sigue, y solo la pestaña del
 // panel de Seguimiento (con marcador-zilonix.js, y con el componente
 // que escucha "dato-pagina-seguimiento" montado) hace algo con esto.
+//
+// Issue #44 (revisión de Pablo sobre el PR #290) — "zilonix:importar-publicar"
+// SALIÓ de este relevo genérico y tiene su propio manejador, más abajo
+// (buscar "Importar a Publicar abre o enfoca Publicar"): el relevo
+// genérico de acá nunca abre ni enfoca ninguna pestaña por su cuenta —
+// hasta esta tarea, "Importar a Publicar" dependía de que la persona YA
+// tuviera /panel/publicar abierto a mano, y si no, el mensaje se perdía
+// en silencio (bug real reportado por Mateo: "no pasó nada"). Ahora, sin
+// ninguna pestaña de Publicar que acepte el mensaje, background.js abre
+// o enfoca una sola — mismo espíritu que "zilonix:abrir-seguimientos"
+// (más abajo), nunca el broadcast simple que sigue sirviendo para
+// "zilonix:vendidos"/"zilonix:listado".
 const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix:dato-pagina-seguimiento"]);
+
+// Issue #44 — "Importar a Publicar abre o enfoca Publicar". Mismos
+// hosts EXACTOS que ORIGENES_SELLER_PERMITIDOS en marcador-zilonix.js
+// (el único que escribe "zilonixUrlApp") — revalidados acá de nuevo
+// antes de abrir una pestaña: background.js es el único lugar con el
+// permiso real de abrir pestañas, así que es la última línea real de
+// defensa (mismo criterio que PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO,
+// abajo, para "Actualizar todo").
+const ORIGENES_SELLER_PERMITIDOS_PUBLICAR = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app"];
+const URL_APP_PRODUCCION_DEFAULT = "https://web-production-af270.up.railway.app";
+
+// Revisión de Pablo (sobre a6fdcbd, MED 2/LOW 4) — mismo criterio real
+// que "zilonix:abrir-seguimientos" (más abajo): "zilonix:importar-link"
+// y "zilonix:pedir-importacion-pendiente" los manda /panel/publicar
+// (marcador-zilonix.js) — nunca basta con que el mensaje DIGA el tipo
+// que dice, hay que confirmar que el REMITENTE de verdad sea esa
+// pestaña. `remitente.tab.url` lo pone Chrome mismo (nunca lo manda la
+// página ni el content script que originó el mensaje) — no se puede
+// falsificar desde ahí. Mismos hosts exactos que
+// ORIGENES_SELLER_PERMITIDOS_PUBLICAR, arriba.
+function esRemitentePublicar(remitente) {
+  const urlRemitente = remitente && remitente.tab && typeof remitente.tab.url === "string" ? remitente.tab.url : "";
+  return ORIGENES_SELLER_PERMITIDOS_PUBLICAR.some((origen) => urlRemitente.startsWith(`${origen}/panel/publicar`));
+}
+const CLAVE_IMPORTACION_PENDIENTE = "importacionPendiente";
+// 2 minutos — tope real: un payload de "Importar a Publicar" viejo
+// (ej. la persona cerró la pestaña nueva sin llenar nada, y vuelve a
+// intentar horas después desde otra ficha) nunca se entrega como si
+// fuera de ahora.
+const TIEMPO_MAX_IMPORTACION_PENDIENTE_MS = 2 * 60 * 1000;
+// Evita abrir 2 pestañas con un doble clic real en 3s — mismo patrón
+// que COOLDOWN_ABRIR_SEGUIMIENTOS_MS (chrome.storage.session, no una
+// variable en memoria, para sobrevivir un reciclado del Service Worker
+// entre el primer clic y el segundo).
+const COOLDOWN_IMPORTAR_PUBLICAR_MS = 3000;
+
+// Issue #44 (anexo "Importar video a Clip") — "zilonix:importar-video"
+// reutiliza EXACTAMENTE el mismo mecanismo de abrir-o-enfocar-Publicar
+// que "zilonix:importar-publicar" (ver manejarAbrirOEnfocarPublicar,
+// abajo) — mismo valor de cooldown (COOLDOWN_IMPORTAR_PUBLICAR_MS,
+// arriba), pero con su propia clave de storage.session: un clic en
+// "Importar a Publicar" y uno en "Importar video a Clip" casi al
+// mismo tiempo (desde 2 pestañas distintas, por ejemplo) no tienen por
+// qué pisarse entre sí. La validación real de la URL del video (última
+// línea real de defensa) vive ahora en `ZilonixVideoComun.esUrlVideoValida`
+// (ver el require()/importScripts al principio de este archivo) —
+// nunca una copia separada acá.
+
+// Issue #44 — misma idea que CONFIG.URL_APP (extension/config.js) pero
+// del lado del Service Worker, que nunca carga ese archivo (solo corre
+// en páginas de Mercado Libre) — lee "zilonixUrlApp" directo de
+// chrome.storage.local, mismo criterio: solo se usa si está en la
+// allowlist, si no, cae a producción — nunca confía en que
+// marcador-zilonix.js fue la única forma de llegar ahí.
+function resolverUrlPublicar(callback) {
+  chrome.storage.local.get({ zilonixUrlApp: null }, (datos) => {
+    const guardada = typeof datos.zilonixUrlApp === "string" ? datos.zilonixUrlApp : null;
+    const base = guardada && ORIGENES_SELLER_PERMITIDOS_PUBLICAR.includes(guardada) ? guardada : URL_APP_PRODUCCION_DEFAULT;
+    callback(`${base}/panel/publicar`);
+  });
+}
+
+// Issue #44 — "Importar publicación desde un link" (anexo): la persona
+// pega CUALQUIER link de Mercado Libre en /panel/publicar y le da
+// "Traer datos de ese link" — la extensión abre esa publicación en una
+// pestaña de fondo, la lee, la cierra, y llena el formulario con el
+// MISMO mensaje "zilonix:importar-publicar" que ya usa el botón
+// "Importar a Publicar" (nunca un tipo de mensaje aparte para el
+// resultado — PaginaPublicar.tsx no necesita saber de dónde vino).
+//
+// Mismo criterio de seguridad que PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO
+// (arriba, "Actualizar todo") — la ÚLTIMA línea real de defensa antes
+// de abrir una pestaña nunca puede confiar solo en lo que ya validó la
+// página: aunque SeccionesImportar.tsx valide el link del lado del
+// cliente, background.js es quien de verdad tiene el permiso de abrir
+// pestañas, así que vuelve a validar acá.
+const PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO =
+  /^https:\/\/([a-z0-9-]+\.)*mercado(libre\.(com\.co|com\.ar|com\.mx|cl|com\.uy|com\.pe)|livre\.com\.br)\//i;
+// meli.la es el acortador REAL de Mercado Libre para "Compartir" un
+// link — nunca se sabe a qué URL final resuelve hasta que el
+// navegador lo navega de verdad (es justo lo que hace chrome.tabs.create
+// de abajo), así que se acepta SOLO como punto de PARTIDA — nunca como
+// destino confirmado. `esUrlFinalDeMercadoLibre` (abajo) es quien
+// exige que la URL FINAL, después de cualquier redirect, sí sea de
+// verdad un dominio de Mercado Libre antes de pedirle a content.js que
+// lea algo — si meli.la termina mandando a cualquier otro lado, nunca
+// se lee esa página.
+const PATRON_LINK_CORTO_ML = /^https:\/\/meli\.la\//i;
+
+function esLinkImportarValido(link) {
+  return typeof link === "string" && (PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO.test(link) || PATRON_LINK_CORTO_ML.test(link));
+}
+
+function esUrlFinalDeMercadoLibre(url) {
+  return typeof url === "string" && PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO.test(url);
+}
+
+// Evita que un clic repetido (o un reenvío del mismo mensaje) dispare
+// varias lecturas casi juntas — mismo criterio y mismo storage
+// (chrome.storage.session, sobrevive un reciclado del Service Worker)
+// que COOLDOWN_ABRIR_SEGUIMIENTOS_MS/COOLDOWN_IMPORTAR_PUBLICAR_MS,
+// arriba.
+const COOLDOWN_IMPORTAR_LINK_MS = 5_000;
+// Tope real: si Mercado Libre nunca contesta (red lenta, bloqueo,
+// captcha que nadie resuelve), la pestaña de lectura no queda abierta
+// para siempre — se cierra sola y se avisa.
+const TIEMPO_MAX_IMPORTAR_LINK_MS = 30_000;
+
+// "Máximo una lectura a la vez" — por PESTAÑA SOLICITANTE (la de
+// /panel/publicar que pidió el link), mismo criterio que
+// escaneosActivos/resenasActivas/escaneosPlataforma más abajo en este
+// archivo: un pedido NUEVO desde la MISMA pestaña cancela el anterior
+// (nunca 2 lecturas de la misma pestaña a la vez); pestañas de Publicar
+// DISTINTAS (2 ventanas, por ejemplo) sí pueden tener cada una la suya,
+// sin pisarse. En memoria a propósito (no chrome.storage.session): si
+// el Service Worker se recicla a mitad de una lectura, la pestaña
+// queda huérfana — mismo límite conocido y documentado que el resto de
+// los escaneos de este archivo (issue #221).
+const lecturasLinkActivas = new Map(); // tabIdSolicitante -> { tabIdLectura, timeoutId, listenerOnUpdated }
+
+function cancelarLecturaLinkActiva(tabIdSolicitante) {
+  const activa = lecturasLinkActivas.get(tabIdSolicitante);
+  if (!activa) return;
+  clearTimeout(activa.timeoutId);
+  if (activa.listenerOnUpdated) chrome.tabs.onUpdated.removeListener(activa.listenerOnUpdated);
+  if (activa.tabIdLectura != null) chrome.tabs.remove(activa.tabIdLectura, () => void chrome.runtime.lastError);
+  lecturasLinkActivas.delete(tabIdSolicitante);
+}
+
+function terminarLecturaLink(tabIdSolicitante, respuesta) {
+  const activa = lecturasLinkActivas.get(tabIdSolicitante);
+  if (!activa) return;
+  clearTimeout(activa.timeoutId);
+  if (activa.listenerOnUpdated) chrome.tabs.onUpdated.removeListener(activa.listenerOnUpdated);
+  const tabIdLectura = activa.tabIdLectura;
+  lecturasLinkActivas.delete(tabIdSolicitante);
+  if (tabIdLectura != null) chrome.tabs.remove(tabIdLectura, () => void chrome.runtime.lastError);
+  chrome.tabs.sendMessage(tabIdSolicitante, respuesta, () => void chrome.runtime.lastError);
+}
+
+function iniciarImportarLink(tabIdSolicitante, link) {
+  cancelarLecturaLinkActiva(tabIdSolicitante); // nunca 2 lecturas de la misma pestaña a la vez — la nueva reemplaza a la anterior
+
+  chrome.tabs.create({ url: link, active: false }, (tab) => {
+    if (chrome.runtime.lastError || !tab || tab.id == null) {
+      chrome.tabs.sendMessage(
+        tabIdSolicitante,
+        { tipo: "zilonix:importar-link-error", payload: { razon: "no_se_pudo_abrir" } },
+        () => void chrome.runtime.lastError
+      );
+      return;
+    }
+    const tabIdLectura = tab.id;
+
+    const timeoutId = setTimeout(() => {
+      terminarLecturaLink(tabIdSolicitante, { tipo: "zilonix:importar-link-error", payload: { razon: "timeout" } });
+    }, TIEMPO_MAX_IMPORTAR_LINK_MS);
+
+    // Issue #44 — "background se lo dice a esa pestaña por su id,
+    // nunca porque la página lo pida": se espera a que la pestaña
+    // termine de cargar (status "complete" — puede dispararse más de
+    // una vez con meli.la, una por cada salto del redirect) y, recién
+    // con la URL FINAL confirmada, se decide. Si la URL final YA es de
+    // Mercado Libre, se le pide a esa pestaña que lea. Si terminó de
+    // cargar en cualquier OTRO dominio (meli.la que mandó a otro lado,
+    // o cualquier cosa rara), se corta ahí mismo — nunca se intenta
+    // leer una página que no sea de Mercado Libre.
+    function alActualizarTab(idActualizado, cambioInfo, tabActualizada) {
+      if (idActualizado !== tabIdLectura || cambioInfo.status !== "complete") return;
+      const urlFinal = tabActualizada && typeof tabActualizada.url === "string" ? tabActualizada.url : "";
+      if (PATRON_LINK_CORTO_ML.test(urlFinal)) return; // todavía en meli.la (o una redirección intermedia propia) — espera el próximo "complete"
+      chrome.tabs.onUpdated.removeListener(alActualizarTab);
+      const activa = lecturasLinkActivas.get(tabIdSolicitante);
+      if (activa) activa.listenerOnUpdated = null; // ya no hay nada que sacar al cancelar/terminar
+      if (!esUrlFinalDeMercadoLibre(urlFinal)) {
+        terminarLecturaLink(tabIdSolicitante, { tipo: "zilonix:importar-link-error", payload: { razon: "no_es_mercadolibre" } });
+        return;
+      }
+      chrome.tabs.sendMessage(tabIdLectura, { tipo: "zilonix:leer-para-importar" }, () => void chrome.runtime.lastError);
+    }
+    chrome.tabs.onUpdated.addListener(alActualizarTab);
+
+    lecturasLinkActivas.set(tabIdSolicitante, { tabIdLectura, timeoutId, listenerOnUpdated: alActualizarTab });
+  });
+}
 
 // Issue #251 (revisión de Pablo, punto 4) — "que la lectura no dependa
 // de tener abierta la pestaña de Seguimiento". Decisión de Mateo:
@@ -213,6 +428,22 @@ chrome.runtime.onStartup.addListener(() => cerrarPestanasActualizarTodoVencidas(
 // normal de siempre).
 chrome.tabs.onRemoved.addListener((tabId) => {
   desregistrarPestanaActualizarTodo(tabId);
+  // Issue #44 — mismo criterio: si la persona cierra a mano la
+  // pestaña de Publicar que pidió un link (o la propia pestaña de
+  // LECTURA, por cualquier motivo), se limpia la lectura activa
+  // correspondiente — nunca se intenta `chrome.tabs.remove` sobre un
+  // id que ya no existe, ni se deja un timeout/listener huérfano
+  // corriendo para nada.
+  if (lecturasLinkActivas.has(tabId)) {
+    cancelarLecturaLinkActiva(tabId);
+  } else {
+    for (const [tabIdSolicitante, activa] of lecturasLinkActivas) {
+      if (activa.tabIdLectura === tabId) {
+        cancelarLecturaLinkActiva(tabIdSolicitante);
+        break;
+      }
+    }
+  }
 });
 
 function encolarDatoPaginaSeguimiento(payload) {
@@ -762,7 +993,7 @@ function finalizarEscaneoPlataforma(tabIdPanel) {
   chrome.tabs.update(tabIdPanel, { active: true }, () => void chrome.runtime.lastError);
 }
 
-chrome.runtime.onMessage.addListener((mensaje, remitente) => {
+chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
   // Corrección de Pablo (revisión del PR #260, punto 2) — "el worker
   // despertó", sin importar qué mensaje sea: barre el registro de
   // "Actualizar todo" por si había alguna pestaña vencida esperando a
@@ -810,6 +1041,226 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
   if (mensaje.tipo === "zilonix:iniciar-resenas") {
     if (!remitente.tab?.id) return;
     iniciarLecturaResenas(remitente.tab.id, mensaje.payload?.items);
+    return;
+  }
+
+  // Issue #44 (revisión de Pablo sobre el PR #290; generalizado en el
+  // anexo "Importar video a Clip") — "Importar a Publicar abre o
+  // enfoca Publicar": bug real que Mateo reportó — hasta la tarea
+  // original, el botón solo mandaba el mensaje a una pestaña de
+  // /panel/publicar que YA estuviera abierta; sin ninguna, se perdía
+  // en silencio ("no pasó nada"). "Seguir en Zilonix" sí abre su
+  // propia pestaña con el clic — este manejador hace lo mismo, con el
+  // mismo criterio de "nunca navega sin un clic real" (el clic YA
+  // pasó, en content.js, antes de este mensaje). El anexo reutiliza
+  // ESTE MISMO manejador para "zilonix:importar-video" ("Importar
+  // video a Clip") — mismo mecanismo de abrir/enfocar/pendiente, solo
+  // cambia la clave del cooldown (independiente entre los 2 botones) y
+  // el ancla de la URL cuando hace falta abrir una pestaña nueva
+  // (`#clip` para el video, nada para el formulario normal).
+  function manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, opciones) {
+    if (!mensaje.payload) return;
+    // Evita el doble clic: un segundo mensaje del MISMO tipo dentro de
+    // los 3s del primero no abre una segunda pestaña ni vuelve a
+    // guardar un pendiente — chrome.storage.session (no una variable
+    // en memoria) para que el cooldown sobreviva si el Service Worker
+    // se recicla entre un clic y el siguiente, mismo criterio que
+    // COOLDOWN_ABRIR_SEGUIMIENTOS_MS.
+    chrome.storage.session.get({ [opciones.claveCooldown]: 0 }, (datosCooldown) => {
+      const ahoraMs = Date.now();
+      const ultimoMs = typeof datosCooldown[opciones.claveCooldown] === "number" ? datosCooldown[opciones.claveCooldown] : 0;
+      if (ahoraMs - ultimoMs < COOLDOWN_IMPORTAR_PUBLICAR_MS) return;
+      chrome.storage.session.set({ [opciones.claveCooldown]: ahoraMs });
+
+      // a. Guarda el payload CON SU TIPO y marca de tiempo — entregado
+      // una sola vez cuando /panel/publicar pida
+      // "zilonix:pedir-importacion-pendiente" (abajo), con el mismo
+      // tope de 2 minutos ahí. El tipo viaja junto al payload para que
+      // marcador-zilonix.js sepa con qué nombre reenviarlo a la página
+      // (issue #44, anexo — antes era siempre "importar-publicar" a
+      // secas, hardcodeado).
+      chrome.storage.session.set({ [CLAVE_IMPORTACION_PENDIENTE]: { tipo: mensaje.tipo, payload: mensaje.payload, creadoMs: ahoraMs } });
+
+      const abrirONuevaPestana = () => {
+        resolverUrlPublicar((urlPublicar) => {
+          // active:true — igual que "Seguir en Zilonix" (window.open
+          // sin "background"), la pestaña nueva se ve de inmediato.
+          chrome.tabs.create({ url: `${urlPublicar}${opciones.hashDestino || ""}`, active: true }, () => void chrome.runtime.lastError);
+          if (typeof sendResponse === "function") sendResponse({ ok: true, abrioNueva: true });
+        });
+      };
+
+      // b. Manda el mensaje a las pestañas abiertas, igual que antes —
+      // marcador-zilonix.js solo responde ack {ok:true, publicar:true}
+      // si ESA pestaña es de verdad /panel/publicar, nunca desde
+      // cualquier otra ruta de Seller.
+      chrome.tabs.query({}, (pestanas) => {
+        if (pestanas.length === 0) {
+          abrirONuevaPestana();
+          return;
+        }
+        let pendientes = pestanas.length;
+        let tabIdEnfocado = null;
+        let windowIdEnfocado = null;
+        const terminar = () => {
+          pendientes -= 1;
+          if (pendientes > 0) return;
+          if (tabIdEnfocado != null) {
+            // c. Una pestaña de Publicar YA abierta aceptó el mensaje
+            // en vivo — nunca hace falta que lo vuelva a pedir, se
+            // borra el pendiente y se la pone al frente (pestaña Y
+            // ventana, por si estaba en otra ventana de Chrome).
+            chrome.storage.session.remove(CLAVE_IMPORTACION_PENDIENTE);
+            chrome.tabs.update(tabIdEnfocado, { active: true }, () => void chrome.runtime.lastError);
+            if (windowIdEnfocado != null) chrome.windows.update(windowIdEnfocado, { focused: true }, () => void chrome.runtime.lastError);
+            if (typeof sendResponse === "function") sendResponse({ ok: true, abrioNueva: false });
+            return;
+          }
+          // d. Ninguna pestaña de Publicar la aceptó — se abre una
+          // nueva. El pendiente sigue guardado (paso a) — esa pestaña
+          // nueva lo pide apenas su listener esté montado.
+          abrirONuevaPestana();
+        };
+        for (const pestana of pestanas) {
+          if (pestana.id == null || pestana.id === remitente.tab?.id) {
+            terminar();
+            continue;
+          }
+          chrome.tabs.sendMessage(pestana.id, mensaje, (respuesta) => {
+            const error = chrome.runtime.lastError; // pestaña sin marcador-zilonix.js — nunca un error real
+            void error;
+            if (!error && respuesta && respuesta.ok && respuesta.publicar) {
+              tabIdEnfocado = pestana.id;
+              windowIdEnfocado = pestana.windowId;
+            }
+            terminar();
+          });
+        }
+      });
+    });
+    return true; // respuesta async (sendResponse se llama más tarde, arriba) — mantiene el canal abierto
+  }
+
+  if (mensaje.tipo === "zilonix:importar-publicar") {
+    return manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, { claveCooldown: "ultimoImportarPublicarMs", hashDestino: "" });
+  }
+
+  // Issue #44 (anexo "Importar video a Clip") — botón nuevo en
+  // Mercado Libre/Amazon/Temu/AliExpress/Alibaba/Shein/TikTok (ver
+  // extension/lectores/video-comun.js + content.js): la URL de video
+  // (CON la marca de agua del sitio, nunca se intenta quitarla) ya
+  // pasó por lector.leerVideo (y por ZilonixVideoComun.esUrlVideoValida
+  // acá mismo, última línea real de defensa) antes de llegar — se abre
+  // o enfoca /panel/publicar#clip con el MISMO mecanismo de arriba.
+  //
+  // Revisión de Pablo (sobre a6fdcbd, HIGH 1) — bug real: hasta esta
+  // corrección, una URL rechazada acá terminaba en un `return;` mudo
+  // — content.js nunca se enteraba de que background.js no hizo nada,
+  // y el botón terminaba mostrando "Enviado ✓" como si hubiera
+  // funcionado. Ahora se contesta `{ok:false}` siempre, para que
+  // content.js pueda mostrar un mensaje real en vez de fingir éxito.
+  if (mensaje.tipo === "zilonix:importar-video") {
+    if (!mensaje.payload || !ZilonixVideoComun.esUrlVideoValida(mensaje.payload.url)) {
+      if (typeof sendResponse === "function") sendResponse({ ok: false, razon: "url_no_valida" });
+      return;
+    }
+    return manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, { claveCooldown: "ultimoImportarVideoMs", hashDestino: "#clip" });
+  }
+
+  // Issue #44 — /panel/publicar (marcador-zilonix.js) lo pide apenas su
+  // listener de postMessage está montado (señal "publicar-listo") o,
+  // como red de seguridad, con un par de reintentos acotados. Se
+  // entrega UNA sola vez (se borra al leerlo, haya algo o no) y nunca
+  // si ya pasaron los 2 minutos — un pendiente viejo no se entrega
+  // como si fuera de ahora.
+  //
+  // Revisión de Pablo (sobre a6fdcbd, LOW 4) — se confirma que el
+  // REMITENTE de verdad sea /panel/publicar (esRemitentePublicar,
+  // arriba) ANTES de tocar el storage — nunca solo porque el mensaje
+  // diga este tipo. A propósito, el chequeo corta ANTES del
+  // `chrome.storage.session.get`: si se dejara leer/borrar igual y
+  // solo se ocultara la respuesta, cualquier otro content script de
+  // esta misma extensión podría "comerse" en silencio un pendiente
+  // real que de verdad era para Publicar, sin que esa pestaña nunca
+  // llegue a pedirlo.
+  if (mensaje.tipo === "zilonix:pedir-importacion-pendiente") {
+    if (!esRemitentePublicar(remitente)) {
+      if (typeof sendResponse === "function") sendResponse({ payload: null, tipo: null });
+      return;
+    }
+    chrome.storage.session.get({ [CLAVE_IMPORTACION_PENDIENTE]: null }, (datos) => {
+      const pendiente = datos[CLAVE_IMPORTACION_PENDIENTE];
+      chrome.storage.session.remove(CLAVE_IMPORTACION_PENDIENTE);
+      if (!pendiente || typeof pendiente.creadoMs !== "number") {
+        if (typeof sendResponse === "function") sendResponse({ payload: null, tipo: null });
+        return;
+      }
+      const vencido = Date.now() - pendiente.creadoMs > TIEMPO_MAX_IMPORTACION_PENDIENTE_MS;
+      if (typeof sendResponse === "function") sendResponse({ payload: vencido ? null : pendiente.payload, tipo: vencido ? null : pendiente.tipo });
+    });
+    return true; // respuesta async
+  }
+
+  // Issue #44 (anexo) — "Importar publicación desde un link": un clic
+  // real en "Traer datos de ese link" (SeccionesImportar.tsx) manda
+  // esto vía marcador-zilonix.js. Revalida el link (nunca confía en lo
+  // que ya validó la página — ver PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO,
+  // arriba), aplica el cooldown de 5s, y recién ahí abre la pestaña de
+  // lectura (iniciarImportarLink, arriba).
+  //
+  // Revisión de Pablo (sobre a6fdcbd, MED 2) — mismo criterio real que
+  // "zilonix:abrir-seguimientos" (más abajo): se confirma que el
+  // REMITENTE de verdad sea /panel/publicar antes de abrir ninguna
+  // pestaña de lectura — nunca solo porque el mensaje diga este tipo.
+  if (mensaje.tipo === "zilonix:importar-link") {
+    if (!remitente.tab?.id || !esRemitentePublicar(remitente)) return;
+    const tabIdSolicitante = remitente.tab.id;
+    const link = typeof mensaje.payload?.link === "string" ? mensaje.payload.link : "";
+    if (!esLinkImportarValido(link)) {
+      chrome.tabs.sendMessage(
+        tabIdSolicitante,
+        { tipo: "zilonix:importar-link-error", payload: { razon: "dominio_no_permitido" } },
+        () => void chrome.runtime.lastError
+      );
+      return;
+    }
+    chrome.storage.session.get({ ultimoImportarLinkMs: 0 }, (datosCooldown) => {
+      const ahoraMs = Date.now();
+      const ultimoMs = typeof datosCooldown.ultimoImportarLinkMs === "number" ? datosCooldown.ultimoImportarLinkMs : 0;
+      if (ahoraMs - ultimoMs < COOLDOWN_IMPORTAR_LINK_MS) return; // doble clic -- nunca abre una segunda pestaña de lectura
+      chrome.storage.session.set({ ultimoImportarLinkMs: ahoraMs });
+      iniciarImportarLink(tabIdSolicitante, link);
+    });
+    return;
+  }
+
+  // Issue #44 — content.js (en la pestaña de LECTURA que
+  // iniciarImportarLink abrió, nunca en una pestaña que la persona
+  // abrió a mano) manda esto apenas termina de leer — con el payload
+  // real, o con `captcha:true`/`vacio:true` si no se pudo. Solo se le
+  // hace caso si de verdad hay una lectura activa esperando justo a
+  // ESTA pestaña (por tabId, nunca por adivinar) — cualquier otra
+  // "zilonix:resultado-leer-para-importar" perdida (ej. llegó tarde,
+  // después del timeout, cuando la lectura activa ya se canceló) se
+  // ignora sin romper nada.
+  if (mensaje.tipo === "zilonix:resultado-leer-para-importar") {
+    if (!remitente.tab?.id) return;
+    let tabIdSolicitanteEncontrado = null;
+    for (const [tabIdSolicitante, activa] of lecturasLinkActivas) {
+      if (activa.tabIdLectura === remitente.tab.id) {
+        tabIdSolicitanteEncontrado = tabIdSolicitante;
+        break;
+      }
+    }
+    if (tabIdSolicitanteEncontrado == null) return; // ninguna lectura activa esperaba esto -- nunca rompe nada
+    const payload = mensaje.payload || {};
+    if (payload.captcha) {
+      terminarLecturaLink(tabIdSolicitanteEncontrado, { tipo: "zilonix:importar-link-error", payload: { razon: "captcha" } });
+    } else if (payload.datos) {
+      terminarLecturaLink(tabIdSolicitanteEncontrado, { tipo: "zilonix:importar-publicar", payload: payload.datos });
+    } else {
+      terminarLecturaLink(tabIdSolicitanteEncontrado, { tipo: "zilonix:importar-link-error", payload: { razon: "vacio" } });
+    }
     return;
   }
 
@@ -943,4 +1394,28 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   // evento igual, aunque el worker estuviera dormido).
   cerrarPestanasActualizarTodoVencidas();
   desregistrarPestanaActualizarTodo(tabId);
+});
+
+// Issue #273 (Mateo) — interruptor global: "apagado" hace que
+// content.js (lectores/mercadolibre.js + content.js, ver el comentario
+// completo en content.js) ya NO inyecte el panel ni los botones solo,
+// en ninguna página — pero la persona tiene que poder seguir abriendo
+// el panel CUANDO SÍ quiere, con un clic real en el ícono de la
+// extensión. `chrome.action.onClicked` solo se dispara cuando el
+// manifest NO declara un `default_popup` (manifest.json tiene
+// `"action": {}`, sin popup, a propósito) — un clic real de la
+// persona, nunca algo que esta extensión dispara sola. Nunca necesita
+// ningún permiso nuevo: `chrome.action` es parte del núcleo de
+// Manifest V3, y `chrome.tabs.sendMessage` ya lo usa el resto de este
+// archivo sin "tabs" en manifest.json (ver el comentario del
+// encabezado, arriba del todo).
+chrome.action.onClicked.addListener((tab) => {
+  if (!tab || tab.id == null) return;
+  chrome.tabs.sendMessage(tab.id, { tipo: "zilonix:mostrar-panel" }, () => {
+    // Pestaña sin ningún content script de esta extensión cargado (ej.
+    // un sitio que esta extensión no lee) — nunca un error real que
+    // haga falta mostrar en ningún lado, mismo criterio que el resto
+    // de este archivo.
+    void chrome.runtime.lastError;
+  });
 });

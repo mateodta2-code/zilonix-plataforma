@@ -18,6 +18,12 @@
   // Issue #174 — URL_APP para el botón "Seguir en Zilonix", ver
   // extension/config.js. Mismo patrón de acceso dual que U, arriba.
   const CONFIG = typeof window !== "undefined" ? window.ZilonixConfig : require("../config.js");
+  // Issue #44 (anexo "Importar video a Clip") — mismo patrón dual que
+  // U/CONFIG arriba: en Node (vitest) no existe `window`, se usa
+  // video-comun.js directo con require() (archivo hermano, en esta
+  // misma carpeta); en el navegador (content script real) `window` sí
+  // existe.
+  const V = typeof window !== "undefined" ? window.ZilonixVideoComun : require("./video-comun.js");
 
   // Issue #233 — bug real confirmado en el smoke de Sharel: "panel
   // sigue sin bloques, escaneo → 0 productos" en Argentina/Brasil/etc.
@@ -832,6 +838,142 @@
     return construirPublicacionesTienda(totalTexto, hrefsVisibles);
   }
 
+  // Parte 3, punto D ("Importar a Publicar") — mismo algoritmo YA
+  // probado en producción que zilonix-os-web/lib/ml-bookmarklet.js
+  // (portado tal cual en app/panel/publicar/importadores/bookmarklet.ts,
+  // Parte 3 commit 1), traducido a funciones normales en vez de un
+  // bookmarklet minificado — el botón de la extensión corre en el
+  // content script, no necesita ser un `javascript:` para pegar en la
+  // barra de marcadores. Mismos 2 bugs reales ya corregidos ahí, nunca
+  // reintroducidos acá: (1) Mercado Libre repite cada foto como
+  // miniatura y como grande con el MISMO número largo en el nombre de
+  // archivo, cambiando solo el sufijo de tamaño — se identifica cada
+  // foto por ese número (nunca por la URL completa) para no duplicarla;
+  // (2) sin importar cuál tamaño apareció primero en el HTML, se fuerza
+  // siempre el sufijo "-O" (Original, el más grande) antes de guardarla.
+  //
+  // `idNumericoDeArchivo`/`urlFotoGrande`/`esUrlFotoMlValida`/
+  // `deduplicarFotosMl` son PUROS (string/array -> string/array, sin
+  // DOM) a propósito, mismo criterio que `clasificarLinkListadoMl` de
+  // arriba — así se pueden probar con URLs de ejemplo sin jsdom (este
+  // proyecto no lo tiene). Solo `leerGaleriaYDescripcion` toca el DOM
+  // real (`doc.querySelectorAll`), igual que `leerProducto`/`leerTienda`
+  // — nunca se prueba con vitest, se confirma en vivo.
+  function idNumericoDeArchivo(url) {
+    const archivo = url.split("?")[0].split("/").pop() || url;
+    const numeros = archivo.match(/\d{5,}/g);
+    return numeros ? numeros.join("-") : null;
+  }
+
+  function urlFotoGrande(url) {
+    return url.replace(/-[A-Za-z]\.(jpg|jpeg|png|webp)(\?.*)?$/i, "-O.$1");
+  }
+
+  // Nunca un logo/ícono/avatar/sprite/insignia de reputación/botón de
+  // "reproducir video" — esos SÍ viven en el mismo dominio mlstatic.com
+  // que las fotos reales de la publicación, pero nunca son una foto del
+  // producto en sí (mismo filtro ya confirmado en el bookmarklet).
+  // Issue #44/#273 (revisión, hallazgo real al preparar "Importar por
+  // link") — bug real de seguridad: el chequeo de abajo ERA
+  // `/mlstatic\.com/i.test(url)`, un substring suelto sobre la URL
+  // entera — nunca el hostname real. Una URL como
+  // "https://evilmlstatic.com/foto.jpg" o
+  // "https://mlstatic.com.ataque.com/foto.jpg" (que NUNCA son
+  // mlstatic.com de verdad) pasaban igual, porque el substring
+  // "mlstatic.com" aparece en algún lado de la URL sin importar el
+  // host real. Corregido: se valida el HOSTNAME real (vía `new URL`),
+  // anclado con `(^|\.)mlstatic\.com$` — mismo criterio que
+  // PATRON_HOST_MERCADOLIBRE (formulario-logica.ts) y hostPermitidoCanva
+  // (fotos/validar-url-externa.ts), nunca un substring suelto.
+  function esUrlFotoMlValida(url) {
+    if (typeof url !== "string" || !url) return false;
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return false;
+    }
+    if (parsed.protocol !== "https:") return false;
+    if (!/(^|\.)mlstatic\.com$/i.test(parsed.hostname)) return false;
+    return !/logo|icon|avatar|sprite|reputation|play|badge/i.test(url);
+  }
+
+  function deduplicarFotosMl(urlsCrudas) {
+    const vistos = new Set();
+    const resultado = [];
+    for (const url of urlsCrudas || []) {
+      if (!esUrlFotoMlValida(url)) continue;
+      const clave = idNumericoDeArchivo(url);
+      if (!clave || vistos.has(clave)) continue; // sin número largo confiable, o ya visto — nunca una foto repetida/sin cómo identificarla
+      vistos.add(clave);
+      resultado.push(urlFotoGrande(url));
+    }
+    return resultado;
+  }
+
+  const TOPE_FOTOS_IMPORTAR = 20; // mismo tope que el bookmarklet — suficiente para cualquier publicación real, nunca sin límite
+  const CONTENEDORES_GALERIA_IMPORTAR = [
+    ".ui-pdp-gallery",
+    "[data-testid='gallery']",
+    ".ui-pdp-gallery__column",
+    ".ui-pdp-gallery__wrapper",
+    ".ui-pdp-container__col--dynamic",
+  ];
+
+  // Mismo respaldo que el bookmarklet: la descripción real de la ficha
+  // primero (".ui-pdp-description__content"); si Mercado Libre cambió
+  // esa clase, se busca un encabezado que empiece con "descripci" y se
+  // toma el texto del elemento siguiente — nunca el resumen corto de
+  // og:description (pensado para redes sociales, casi siempre recortado).
+  function textoPorEncabezado(patron, raiz) {
+    const encabezados = raiz.querySelectorAll("h1,h2,h3,h4");
+    for (const encabezado of encabezados) {
+      const texto = (encabezado.textContent || "").trim().toLowerCase();
+      if (texto.indexOf(patron) === 0) {
+        const siguiente = encabezado.nextElementSibling;
+        if (siguiente) return (siguiente.textContent || "").trim();
+      }
+    }
+    return null;
+  }
+
+  // Galería real de ESTA publicación — primero se busca el contenedor
+  // real de la galería (mismo prefijo "ui-pdp-" ya confirmado para el
+  // título); si no se encuentra, se busca en toda la página como
+  // respaldo (nunca se bloquea solo porque el contenedor cambió de
+  // clase) — el filtro de `deduplicarFotosMl` igual descarta cualquier
+  // foto de "productos relacionados" que no sea mlstatic.com válida en
+  // el mismo patrón que ya se usa.
+  function leerGaleriaYDescripcion(doc) {
+    const raiz = doc || document;
+    const contenedor = U.primerElemento(CONTENEDORES_GALERIA_IMPORTAR, raiz);
+    const alcance = contenedor || raiz;
+    const nodos = alcance.querySelectorAll("img,source");
+    const crudas = Array.from(nodos)
+      .map((nodo) => nodo.getAttribute("data-zoom") || nodo.getAttribute("data-src") || nodo.src || (nodo.srcset ? nodo.srcset.split(",")[0].trim().split(" ")[0] : ""))
+      .filter(Boolean);
+    return {
+      descripcion: U.textoDe([".ui-pdp-description__content"], raiz) || textoPorEncabezado("descripci", raiz),
+      imagenes: deduplicarFotosMl(crudas).slice(0, TOPE_FOTOS_IMPORTAR),
+    };
+  }
+
+  // Issue #44 (anexo "Importar video a Clip") — ver el comentario
+  // completo en extension/lectores/video-comun.js: heurística
+  // GENÉRICA compartida por las 7 plataformas (<video>/<source> con
+  // una URL https de video directo, nunca un selector propio de
+  // Mercado Libre). Pura (string -> objeto), probada con un HTML de
+  // ejemplo sin navegador — ver mercadolibre.test.ts.
+  function leerVideoDesdeHtml(html) {
+    return V.extraerUrlsVideoDeHtml(html);
+  }
+
+  function leerVideo(doc) {
+    const raiz = doc || document;
+    const html = raiz && raiz.documentElement && typeof raiz.documentElement.outerHTML === "string" ? raiz.documentElement.outerHTML : "";
+    return leerVideoDesdeHtml(html);
+  }
+
   // Issue #227 — "quitar API de Investigación": Demanda/Mercado/Estrategia
   // dejan de depender de la API de catálogo (buscarInvestigacionProducto) —
   // ahora el dato real sale de ACÁ, el listado real de Mercado Libre, con
@@ -1258,6 +1400,16 @@
     elegirVendidosPrincipal,
     leerPublicacionesTienda,
     construirPublicacionesTienda,
+    // Parte 3, punto D — puras, probadas con URLs de ejemplo (ver el
+    // comentario completo junto a deduplicarFotosMl).
+    idNumericoDeArchivo,
+    urlFotoGrande,
+    esUrlFotoMlValida,
+    deduplicarFotosMl,
+    leerGaleriaYDescripcion,
+    // Issue #44 (anexo "Importar video a Clip") — pura (string ->
+    // objeto), ver el comentario completo junto a la función.
+    leerVideoDesdeHtml,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe
@@ -1279,6 +1431,15 @@
       // plataformas no la exponen, `esperarListadoEstable`
       // (content.js) cae a `productos.length` si no está.
       contarTarjetasListado,
+      // Parte 3, punto D — opcional a propósito, igual que
+      // contarTarjetasListado: solo Mercado Libre la expone; content.js
+      // revisa que exista antes de ofrecer "Importar a Publicar" en los
+      // otros 5 sitios (que nunca la tienen).
+      leerGaleriaYDescripcion,
+      // Issue #44 (anexo "Importar video a Clip") — todas las 7
+      // plataformas la exponen (ver video-comun.js), a diferencia de
+      // leerGaleriaYDescripcion/contarTarjetasListado (solo ML).
+      leerVideo,
     };
   }
 })();

@@ -10,8 +10,11 @@ import {
   domainDiscoveryMl,
   leerAtributosCategoriaMl,
   leerCategoriaMl,
+  leerCategoriasRaizMl,
   leerCuentaMl,
+  leerDescripcionItemMl,
   leerItemBasicoMl,
+  leerItemCompletoMl,
   LimiteMercadoLibreError,
   pedirLecturaMl,
   linkPublicacion,
@@ -19,6 +22,7 @@ import {
   MlNoDisponibleError,
   MlRespuestaInesperadaError,
   MlSinPermisoAppError,
+  obtenerClipsMl,
   obtenerFotoItemMl,
   obtenerItemMl,
   obtenerMejoresProductosCategoria,
@@ -238,7 +242,54 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
     });
     vi.stubGlobal("fetch", fetchMock);
     const cat = await leerCategoriaMl("MCO1234");
-    expect(cat).toEqual({ categoryId: "MCO1234", categoryName: "Categoría", maxPicturesPerItem: 10 });
+    expect(cat).toEqual({ categoryId: "MCO1234", categoryName: "Categoría", maxPicturesPerItem: 10, childrenCategories: [], pathFromRoot: [] });
+  });
+
+  // ADENDO UX de Publicar — children_categories/path_from_root vienen
+  // de la MISMA respuesta de /categories/{id} (nunca una llamada
+  // nueva); children_categories vacío es la señal real de "es hoja"
+  // (nunca se adivina por otro campo).
+  it("leerCategoriaMl: children_categories/path_from_root de la misma respuesta — vacío es la señal real de 'es hoja'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          id: "MCO1234",
+          name: "Relojes de Pulsera",
+          max_pictures_per_item: 10,
+          children_categories: [],
+          path_from_root: [{ id: "MCO1000", name: "Relojes" }, { id: "MCO1234", name: "Relojes de Pulsera" }],
+        })
+      )
+    );
+    const cat = await leerCategoriaMl("MCO1234");
+    expect(cat.childrenCategories).toEqual([]);
+    expect(cat.pathFromRoot).toEqual([
+      { id: "MCO1000", name: "Relojes" },
+      { id: "MCO1234", name: "Relojes de Pulsera" },
+    ]);
+  });
+
+  it("leerCategoriasRaizMl: SIEMPRE manda el token (a diferencia de leerCategoriaMl) — sin uno, Mercado Libre daría 403", async () => {
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      expect((init?.headers as Record<string, string> | undefined)?.Authorization).toBe("Bearer token-real");
+      return respuestaJson([
+        { id: "MCO1000", name: "Electrónica" },
+        { id: "MCO1001", name: "Hogar" },
+      ]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const raices = await leerCategoriasRaizMl("MCO", "token-real");
+    expect(raices).toEqual([
+      { id: "MCO1000", name: "Electrónica" },
+      { id: "MCO1001", name: "Hogar" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith("https://api.mercadolibre.com/sites/MCO/categories", expect.anything());
+  });
+
+  it("leerCategoriasRaizMl: 403 real de Mercado Libre (sin token) se propaga como el error tipado de siempre", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(leerCategoriasRaizMl("MCO", "token-real")).rejects.toThrow(MlSinPermisoAppError);
   });
 
   it("buscarEnSitioMl/domainDiscoveryMl: traen categoryId/categoryName tal cual manda Mercado Libre", async () => {
@@ -792,5 +843,156 @@ describe("confirmarRecursoProductoMl — confirmar item/product contra ML antes 
     vi.stubGlobal("fetch", fetchMock);
     await expect(confirmarRecursoProductoMl("no-es-un-id-ml")).resolves.toEqual({ estado: "transitorio" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// Parte 3 ("importadores + permalink + fotos Cloudinary + botón
+// extensión"), punto A — leerItemCompletoMl/leerDescripcionItemMl son
+// el wrapper más rico que hacía falta para precargar el formulario de
+// Publicar desde un SKU/link propio (title/thumbnail de leerItemBasicoMl
+// no alcanzaba: faltaba precio, stock, condición, galería completa y el
+// SKU propio). Avisado antes de tocar lib/ml/cliente.ts.
+describe("leerItemCompletoMl/leerDescripcionItemMl — Parte 3, punto A (importar por SKU/link)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("leerItemCompletoMl: itemId inválido nunca llama a fetch, devuelve null", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(leerItemCompletoMl("'; DROP TABLE x; --", "token")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("leerItemCompletoMl: trae title/price/available_quantity/condition/pictures/permalink/sku propio/status/thumbnail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto importado",
+          price: 25000,
+          available_quantity: 7,
+          condition: "new",
+          pictures: [{ url: "https://x/foto1.jpg" }, { url: "https://x/foto2.jpg" }, { sin_url: true }],
+          permalink: "https://articulo.mercadolibre.com.co/MCO-111",
+          seller_custom_field: "SKU-PROPIO",
+          status: "active",
+          thumbnail: "https://x/thumb.jpg",
+        })
+      )
+    );
+    const r = await leerItemCompletoMl("MCO111", "token");
+    expect(r).toEqual({
+      itemId: "MCO111",
+      title: "Producto importado",
+      price: 25000,
+      availableQuantity: 7,
+      condition: "new",
+      pictures: ["https://x/foto1.jpg", "https://x/foto2.jpg"],
+      permalink: "https://articulo.mercadolibre.com.co/MCO-111",
+      sellerCustomField: "SKU-PROPIO",
+      status: "active",
+      thumbnail: "https://x/thumb.jpg",
+    });
+  });
+
+  it("leerItemCompletoMl: NO filtra por status (a diferencia de obtenerItemMl) — una publicación propia pausada también se puede importar, y el status real se devuelve tal cual (rama feat-publicar-clip)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Pausada", price: 1000, status: "paused" })));
+    const r = await leerItemCompletoMl("MCO111", "token");
+    expect(r?.title).toBe("Pausada");
+    expect(r?.status).toBe("paused");
+  });
+
+  it("leerItemCompletoMl: sin status/thumbnail en la respuesta: null, nunca inventado", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "X" })));
+    const r = await leerItemCompletoMl("MCO111", "token");
+    expect(r?.status).toBeNull();
+    expect(r?.thumbnail).toBeNull();
+  });
+
+  it("leerItemCompletoMl: 403/5xx de Mercado Libre se tragan como null (enriquecimiento, nunca tira abajo el importador)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(leerItemCompletoMl("MCO111", "token")).resolves.toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 503)));
+    await expect(leerItemCompletoMl("MCO111", "token")).resolves.toBeNull();
+  });
+
+  it("leerDescripcionItemMl: itemId inválido nunca llama a fetch, devuelve null", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(leerDescripcionItemMl("no-es-un-id", "token")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("leerDescripcionItemMl: prefiere plain_text sobre text", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ plain_text: "Texto plano", text: "<p>Texto con HTML</p>" })));
+    await expect(leerDescripcionItemMl("MCO111", "token")).resolves.toBe("Texto plano");
+  });
+
+  it("leerDescripcionItemMl: sin plain_text, cae a text", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ text: "Solo text" })));
+    await expect(leerDescripcionItemMl("MCO111", "token")).resolves.toBe("Solo text");
+  });
+
+  it("leerDescripcionItemMl: 404 (publicación sin descripción cargada) es null, nunca lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+    await expect(leerDescripcionItemMl("MCO111", "token")).resolves.toBeNull();
+  });
+});
+
+// Rama feat-publicar-clip, punto 5 — avisado antes de tocar
+// lib/ml/cliente.ts. Advertencia explícita (ver el comentario completo
+// junto a obtenerClipsMl): la forma exacta de GET .../clips nunca se
+// confirmó contra una cuenta real con un clip ya moderado — se prueba
+// parseando de forma defensiva las 2 formas razonables (array suelto
+// o {results:[...]}), nunca asumiendo una sola.
+describe("obtenerClipsMl — Parte Clip, punto 5 (estado de moderación)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("itemId inválido: null, nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(obtenerClipsMl("no-es-un-id", "token")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("array suelto: parsea clip_uuid/moderation_status/rejection_reason", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson([
+          { clip_uuid: "uuid-1", moderation_status: "REJECTED", rejection_reason: "Audio con copyright" },
+          { clip_uuid: "uuid-2", moderation_status: "PUBLISHED" },
+        ])
+      )
+    );
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([
+      { clipUuid: "uuid-1", moderationStatus: "REJECTED", motivoRechazo: "Audio con copyright" },
+      { clipUuid: "uuid-2", moderationStatus: "PUBLISHED", motivoRechazo: null },
+    ]);
+  });
+
+  it("forma {results:[...]}: misma lectura", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ results: [{ id: "uuid-3", status: "UNDER_REVIEW" }] })));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-3", moderationStatus: "UNDER_REVIEW", motivoRechazo: null }]);
+  });
+
+  it("404 (nunca se subió ningún clip todavía): [], nunca null (distingue 'sin dato' de 'de verdad no hay nada')", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([]);
+  });
+
+  it("403/5xx: null (sin dato de la API, nunca [] inventado)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 503)));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toBeNull();
+  });
+
+  it("un campo con forma inesperada (ej. moderation_status numérico): null para ese campo, nunca lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson([{ clip_uuid: "uuid-1", moderation_status: 123 }])));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-1", moderationStatus: null, motivoRechazo: null }]);
   });
 });

@@ -214,6 +214,21 @@ export function IconoPublicidad(props: IconoProps) {
   );
 }
 
+// ADENDO UX de Publicar — caja (el producto) con una flecha hacia
+// arriba saliendo de ella (publicar = mandarlo hacia afuera, a
+// Mercado Libre) — distinta de IconoSku (una etiqueta/tag) y de
+// IconoPublicidad (megáfono), para que no se confundan en la barra
+// lateral.
+export function IconoPublicar(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 10.5h16v9H4z" />
+      <path d="M12 10.5V3.5" />
+      <path d="M8.5 7 12 3.5 15.5 7" />
+    </Svg>
+  );
+}
+
 export function IconoBuscar(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -246,6 +261,7 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   despachos: IconoDespachos,
   sku: IconoSku,
   investigacion: IconoInvestigacion,
+  publicar: IconoPublicar,
   finanzas: IconoFinanzas,
   publicidad: IconoPublicidad,
   actividad: IconoActividad,

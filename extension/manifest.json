@@ -2,12 +2,15 @@
   "manifest_version": 3,
   "name": "Zilonix Seller — Investigación",
   "short_name": "Zilonix Investigación",
-  "version": "0.3.38",
+  "version": "0.3.41",
   "background": {
     "service_worker": "background.js"
   },
   "permissions": ["storage"],
-  "description": "Lee precio, vendidos, vendedor y calificación de la página que estás viendo en Mercado Libre, Amazon, Temu, AliExpress, Shein y Alibaba — para analizar antes de invertir. Solo lee lo que ya tenés abierto; nunca navega sola ni inicia sesión.",
+  "action": {
+    "default_title": "Zilonix · abrir el panel en esta página"
+  },
+  "description": "Lee precio, vendidos, vendedor y calificación de la página que estás viendo en Mercado Libre, Amazon, Temu, AliExpress, Shein y Alibaba — para analizar antes de invertir. En TikTok, además, trae el video de un clip para usarlo en Publicar. Solo lee lo que ya tenés abierto; nunca navega sola ni inicia sesión.",
   "content_scripts": [
     {
       "matches": [
@@ -25,6 +28,7 @@
         "config.js",
         "calibracion-aproximados.js",
         "lectores/aproximados.js",
+        "lectores/video-comun.js",
         "lectores/mercadolibre.js",
         "content.js"
       ],
@@ -41,6 +45,7 @@
       "js": [
         "utilidades.js",
         "seguridad.js",
+        "lectores/video-comun.js",
         "lectores/amazon.js",
         "content.js"
       ],
@@ -56,6 +61,7 @@
       "js": [
         "utilidades.js",
         "seguridad.js",
+        "lectores/video-comun.js",
         "lectores/temu.js",
         "content.js"
       ],
@@ -72,6 +78,7 @@
       "js": [
         "utilidades.js",
         "seguridad.js",
+        "lectores/video-comun.js",
         "lectores/aliexpress.js",
         "content.js"
       ],
@@ -88,6 +95,7 @@
       "js": [
         "utilidades.js",
         "seguridad.js",
+        "lectores/video-comun.js",
         "lectores/shein.js",
         "content.js"
       ],
@@ -103,6 +111,7 @@
       "js": [
         "utilidades.js",
         "seguridad.js",
+        "lectores/video-comun.js",
         "lectores/alibaba.js",
         "content.js"
       ],
@@ -113,8 +122,26 @@
     },
     {
       "matches": [
+        "*://*.tiktok.com/*"
+      ],
+      "js": [
+        "utilidades.js",
+        "seguridad.js",
+        "lectores/video-comun.js",
+        "lectores/tiktok.js",
+        "content.js"
+      ],
+      "css": [
+        "panel.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "*://web-production-af270.up.railway.app/panel/investigacion*",
-        "*://web-staging-d979.up.railway.app/panel/investigacion*"
+        "*://web-staging-d979.up.railway.app/panel/investigacion*",
+        "*://web-production-af270.up.railway.app/panel/publicar*",
+        "*://web-staging-d979.up.railway.app/panel/publicar*"
       ],
       "js": [
         "marcador-zilonix.js"
@@ -142,7 +169,8 @@
         "*://*.aliexpress.us/*",
         "*://*.shein.com/*",
         "*://*.shein.com.co/*",
-        "*://*.alibaba.com/*"
+        "*://*.alibaba.com/*",
+        "*://*.tiktok.com/*"
       ]
     }
   ]

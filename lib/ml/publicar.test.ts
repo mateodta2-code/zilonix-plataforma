@@ -5,7 +5,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { auditoria, cuentasMl, empresas, productosMl, publicaciones } from "@/db/schema";
 import { afirmarAislamiento, crearDosEmpresas } from "@/db/test-utils/aislamiento";
 import { cifrarToken } from "@/lib/cifrado";
-import { publicarProductoEnCuentas } from "./publicar";
+import { leerArbolCategorias, publicarProductoEnCuentas } from "./publicar";
 
 // Tarea 2.11 ("Publicar producto y clip") — pruebas de integración
 // contra Postgres real (RLS incluido) con `fetch` mockeado, mismo
@@ -107,6 +107,82 @@ async function crearProducto(empresaId: string, cuentaId: string, overrides: Par
   );
   return producto;
 }
+
+// ADENDO UX de Publicar, punto 2 — árbol de categorías (navegación
+// manual nivel por nivel, cuando ni la predicción automática ni la
+// búsqueda de texto dan con la categoría correcta). Sin DB real
+// (nunca toca productos_ml/cuentas_ml) — solo fetch mockeado, como
+// cliente.test.ts.
+describe("leerArbolCategorias — ADENDO UX de Publicar", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sin categoryId: trae la raíz real del sitio (GET /sites/{siteId}/categories, CON token)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      enrutarFetch([
+        [
+          /\/sites\/MCO\/categories$/,
+          (_u, init) => {
+            expect((init?.headers as Record<string, string> | undefined)?.Authorization).toBe("Bearer token-real");
+            return jsonRes(200, [
+              { id: "MCO1000", name: "Electrónica" },
+              { id: "MCO1001", name: "Hogar" },
+            ]);
+          },
+        ],
+      ])
+    );
+    const nodo = await leerArbolCategorias("MCO", "token-real");
+    expect(nodo).toEqual({
+      categoryId: "",
+      categoryName: "",
+      esRaiz: true,
+      esHoja: false,
+      pathFromRoot: [],
+      children: [
+        { id: "MCO1000", name: "Electrónica" },
+        { id: "MCO1001", name: "Hogar" },
+      ],
+    });
+  });
+
+  it("con categoryId y children reales: esHoja=false, trae el breadcrumb (pathFromRoot)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      enrutarFetch([
+        [
+          /\/categories\/MCO1000$/,
+          () =>
+            jsonRes(200, {
+              id: "MCO1000",
+              name: "Electrónica",
+              children_categories: [{ id: "MCO1010", name: "Celulares" }],
+              path_from_root: [{ id: "MCO1000", name: "Electrónica" }],
+            }),
+        ],
+      ])
+    );
+    const nodo = await leerArbolCategorias("MCO", "token-real", "MCO1000");
+    expect(nodo.esRaiz).toBe(false);
+    expect(nodo.esHoja).toBe(false);
+    expect(nodo.children).toEqual([{ id: "MCO1010", name: "Celulares" }]);
+    expect(nodo.pathFromRoot).toEqual([{ id: "MCO1000", name: "Electrónica" }]);
+  });
+
+  // La señal real de "es hoja" es children_categories vacío — nunca se
+  // adivina por otro campo (ej. un value_type, un nombre de dominio).
+  it("con categoryId SIN children (categoría hoja): esHoja=true", async () => {
+    vi.stubGlobal(
+      "fetch",
+      enrutarFetch([
+        [/\/categories\/MCO1234$/, () => jsonRes(200, { id: "MCO1234", name: "Relojes de Pulsera", children_categories: [], path_from_root: [] })],
+      ])
+    );
+    const nodo = await leerArbolCategorias("MCO", "token-real", "MCO1234");
+    expect(nodo.esHoja).toBe(true);
+    expect(nodo.children).toEqual([]);
+  });
+});
 
 describe("publicarProductoEnCuentas (tarea 2.11) — camino clásico", () => {
   vi.setConfig({ testTimeout: 15_000 });

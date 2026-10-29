@@ -789,7 +789,27 @@ export function linkPublicacion(itemId: string): string | null {
 // cada función de abajo valida su propio id con exigirId() ANTES de
 // construir la URL.
 
-export type CategoriaDetalleMl = { categoryId: string; categoryName: string; maxPicturesPerItem: number | null };
+export type NodoCategoriaMl = { id: string; name: string };
+export type CategoriaDetalleMl = {
+  categoryId: string;
+  categoryName: string;
+  maxPicturesPerItem: number | null;
+  // ADENDO UX de Publicar — mismo GET /categories/{id} de siempre (sin
+  // llamada nueva): children_categories/path_from_root ya venían en esa
+  // misma respuesta, solo no se leían todavía porque nada los
+  // necesitaba hasta el árbol de categorías. children_categories vacío
+  // = categoría hoja (nunca se adivina por otro campo).
+  childrenCategories: NodoCategoriaMl[];
+  pathFromRoot: NodoCategoriaMl[];
+};
+
+function nodosCategoriaDesde(valor: unknown): NodoCategoriaMl[] {
+  if (!Array.isArray(valor)) return [];
+  return valor
+    .map((c) => c as { id?: unknown; name?: unknown })
+    .filter((c): c is { id: string; name: string } => typeof c.id === "string" && typeof c.name === "string")
+    .map((c) => ({ id: c.id, name: c.name }));
+}
 
 // GET /categories/{id} — público (sin token). Usado por
 // leerCategoriaPorId (lanza si falla) y obtenerLimiteFotos (tolera
@@ -798,13 +818,32 @@ export type CategoriaDetalleMl = { categoryId: string; categoryName: string; max
 export async function leerCategoriaMl(categoryId: string): Promise<CategoriaDetalleMl> {
   exigirId(categoryId, PATRON_ID_CATEGORIA, "categoryId");
   const url = `${BASE_URL}/categories/${encodeURIComponent(categoryId)}`;
-  const resp = await pedir<{ id?: unknown; name?: unknown; max_pictures_per_item?: unknown }>(url);
+  const resp = await pedir<{ id?: unknown; name?: unknown; max_pictures_per_item?: unknown; children_categories?: unknown; path_from_root?: unknown }>(url);
   if (!resp.ok) throw new Error(`No se pudo leer la categoría ${categoryId} (HTTP ${resp.status}).`);
   return {
     categoryId: typeof resp.data.id === "string" ? resp.data.id : categoryId,
     categoryName: typeof resp.data.name === "string" ? resp.data.name : categoryId,
     maxPicturesPerItem: typeof resp.data.max_pictures_per_item === "number" ? resp.data.max_pictures_per_item : null,
+    childrenCategories: nodosCategoriaDesde(resp.data.children_categories),
+    pathFromRoot: nodosCategoriaDesde(resp.data.path_from_root),
   };
+}
+
+// ADENDO UX de Publicar (avisado antes de este cambio) — GET
+// /sites/{siteId}/categories, la RAÍZ del árbol real de categorías.
+// Helper nuevo: no existía ninguna función para esto en cliente.ts
+// todavía (el árbol de navegación manual de Mercado Libre, cuando ni
+// la predicción automática ni el buscador de texto dan con la
+// categoría correcta, lo necesita para el primer nivel). A diferencia
+// de /categories/{id} (público, arriba), este SÍ exige token — sin
+// Authorization, Mercado Libre responde 403 (confirmado en la
+// investigación real del módulo equivalente de Zilonix OS) — nunca se
+// llama sin uno.
+export async function leerCategoriasRaizMl(siteId: string, token: string): Promise<NodoCategoriaMl[]> {
+  const url = `${BASE_URL}/sites/${encodeURIComponent(siteId)}/categories`;
+  const resp = await pedir<unknown[]>(url, token);
+  if (!resp.ok) throw new Error(`No se pudieron leer las categorías raíz de ${siteId} (HTTP ${resp.status}).`);
+  return nodosCategoriaDesde(resp.data);
 }
 
 // GET /categories/{id}/attributes — público (sin token). Devuelve la
@@ -1106,4 +1145,143 @@ export async function obtenerPublicacionesVendedorAjenoMl(sellerId: string, toke
     }
   }
   return publicaciones;
+}
+
+// ---------- Parte 3 ("importadores + permalink + fotos Cloudinary + botón extensión") ----------
+//
+// Punto A del pedido — importar por SKU propio o por link necesita MÁS
+// que leerItemBasicoMl (solo title/thumbnail, pensado para Clip): el
+// formulario de Publicar quiere precargarse con precio, stock, condición,
+// TODA la galería y el SKU propio si Mercado Libre ya lo tiene cargado —
+// ningún wrapper existente lo traía junto. Mismo GET /items/{id} de
+// siempre (confirmado ya en obtenerItemMl/leerItemBasicoMl), solo con la
+// lista de attributes ampliada — nunca una llamada nueva distinta.
+// Avisado a Mateo/Pablo antes de tocar este archivo, como pide CLAUDE.md.
+export type ItemCompletoMl = {
+  itemId: string;
+  title: string | null;
+  price: number | null;
+  availableQuantity: number | null;
+  condition: "new" | "used" | null;
+  pictures: string[];
+  permalink: string | null;
+  // seller_custom_field = el SKU propio tal como Mercado Libre lo
+  // guarda para ESA publicación — null si nunca se cargó uno.
+  sellerCustomField: string | null;
+  // Rama feat-publicar-clip — avisado antes de tocar este archivo
+  // (CLAUDE.md): `status`/`thumbnail` se suman al mismo GET /items/{id}
+  // de siempre (attributes ampliado, nunca una llamada nueva distinta)
+  // porque la tabla de "buscar SKU en mis cuentas" de Clip necesita el
+  // estado real de la publicación (activa/pausada) y una miniatura por
+  // fila — este es el único wrapper rico que ya traía SKU+itemId
+  // juntos, reusarlo evita una tercera llamada aparte por cuenta.
+  status: string | null;
+  thumbnail: string | null;
+};
+
+// A propósito SIN filtrar por status==="active" (a diferencia de
+// obtenerItemMl, pensado para Investigación/competencia): acá se puede
+// importar una publicación PROPIA pausada o cerrada para reutilizarla —
+// nunca tiene sentido ocultarla solo por su estado.
+export async function leerItemCompletoMl(itemId: string, token: string): Promise<ItemCompletoMl | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,price,available_quantity,condition,pictures,permalink,seller_custom_field,status,thumbnail`;
+  try {
+    const resp = await pedir<{
+      title?: unknown;
+      price?: unknown;
+      available_quantity?: unknown;
+      condition?: unknown;
+      pictures?: unknown;
+      permalink?: unknown;
+      seller_custom_field?: unknown;
+      status?: unknown;
+      thumbnail?: unknown;
+    }>(url, token);
+    if (!resp.ok) return null;
+    const pictures = Array.isArray(resp.data.pictures)
+      ? resp.data.pictures
+          .map((p) => (p && typeof p === "object" && typeof (p as { url?: unknown }).url === "string" ? (p as { url: string }).url : null))
+          .filter((u): u is string => u !== null)
+      : [];
+    return {
+      itemId,
+      title: typeof resp.data.title === "string" ? resp.data.title : null,
+      price: numeroONull(resp.data.price),
+      availableQuantity: numeroONull(resp.data.available_quantity),
+      condition: resp.data.condition === "used" ? "used" : resp.data.condition === "new" ? "new" : null,
+      pictures,
+      permalink: typeof resp.data.permalink === "string" ? resp.data.permalink : null,
+      sellerCustomField: typeof resp.data.seller_custom_field === "string" ? resp.data.seller_custom_field : null,
+      status: typeof resp.data.status === "string" ? resp.data.status : null,
+      thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
+    };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+// GET /items/{id}/description — endpoint SEPARADO del body de /items
+// (mismo endpoint que agregarDescripcionItemMl usa para ESCRIBIR, acá
+// para LEER lo que ya tiene una publicación existente al importarla).
+// Contrato real documentado por Mercado Libre: {plain_text, text} — se
+// prefiere plain_text (sin el HTML que algunas publicaciones viejas
+// todavía traen en `text`).
+export async function leerDescripcionItemMl(itemId: string, token: string): Promise<string | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}/description`;
+  try {
+    const resp = await pedir<{ plain_text?: unknown; text?: unknown }>(url, token);
+    if (!resp.ok) return null;
+    if (typeof resp.data.plain_text === "string" && resp.data.plain_text) return resp.data.plain_text;
+    return typeof resp.data.text === "string" ? resp.data.text : null;
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+// Rama feat-publicar-clip, punto 5 ("estado de moderación") — avisado
+// antes de tocar este archivo (CLAUDE.md). GET /marketplace/items/{id}/clips,
+// documentado por Mercado Libre ("Working with Clips"): devuelve
+// moderation_status (UNDER_REVIEW, PUBLISHED o REJECTED) por clip.
+// Advertencia explícita heredada de subirClipMl (ESTE módulo nunca se
+// confirmó contra una cuenta real con un clip de verdad ya moderado):
+// la forma exacta del cuerpo (¿un array suelto? ¿{results:[...]}?
+// ¿el motivo de un REJECTED viene en `rejection_reason`, `reason` o no
+// viene?) está documentada acá tal como la da la documentación
+// oficial, nunca confirmada en vivo — se parsea TODO de forma
+// defensiva (unknown -> tipo, nunca un cast ciego) para que un campo
+// real distinto al esperado nunca tire un 500, solo deje ese campo en
+// null.
+export type EstadoModeracionClip = "UNDER_REVIEW" | "PUBLISHED" | "REJECTED" | string;
+export type ClipMl = { clipUuid: string | null; moderationStatus: EstadoModeracionClip | null; motivoRechazo: string | null };
+
+function clipsDesdeRespuesta(data: unknown): ClipMl[] {
+  const lista = Array.isArray(data) ? data : Array.isArray((data as { results?: unknown[] })?.results) ? (data as { results: unknown[] }).results : [];
+  return lista.map((crudo) => {
+    const c = crudo as { clip_uuid?: unknown; id?: unknown; moderation_status?: unknown; status?: unknown; rejection_reason?: unknown; reason?: unknown };
+    const clipUuid = typeof c.clip_uuid === "string" ? c.clip_uuid : typeof c.id === "string" ? c.id : null;
+    const moderationStatus = typeof c.moderation_status === "string" ? c.moderation_status : typeof c.status === "string" ? c.status : null;
+    const motivoRechazo = typeof c.rejection_reason === "string" ? c.rejection_reason : typeof c.reason === "string" ? c.reason : null;
+    return { clipUuid, moderationStatus, motivoRechazo };
+  });
+}
+
+// null = Mercado Libre no dejó ver el estado (403/404/5xx) — distinto
+// de [] (sí respondió, de verdad no hay ningún clip todavía en esta
+// publicación). El llamador (lib/trabajos/subirClipMultiCuenta.ts)
+// nunca confunde los dos casos.
+export async function obtenerClipsMl(itemId: string, token: string): Promise<ClipMl[] | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips`;
+  try {
+    const resp = await pedir<unknown>(url, token);
+    if (!resp.ok) return resp.status === 404 ? [] : null;
+    return clipsDesdeRespuesta(resp.data);
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
 }

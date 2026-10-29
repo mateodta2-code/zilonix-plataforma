@@ -933,6 +933,32 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
                       ) : (
                         "—"
                       )}
+                      {/* ADENDO UX de Publicar, punto 8 — "botón desde
+                      Investigación hacia /panel/publicar/nuevo con
+                      prefill seguro": solo título/precio/foto, nunca el
+                      vendedor/link del competidor ni ningún dato que
+                      Mercado Libre vaya a confiar como propio. La
+                      página de destino vuelve a sanear la foto
+                      (linkHttpSeguro) antes de usarla — esto solo evita
+                      mandar algo obviamente roto. Solo tiene sentido en
+                      Mercado Libre (el único marketplace que este
+                      módulo publica). */}
+                      {esMl && (
+                        <Link
+                          href={{
+                            pathname: "/panel/publicar/nuevo",
+                            query: {
+                              titulo: p.titulo,
+                              ...(p.precio ? { precio: String(p.precio) } : {}),
+                              ...(linkHttpSeguro(p.foto) ? { foto: linkHttpSeguro(p.foto) as string } : {}),
+                            },
+                          }}
+                          className={styles.enlaceSeguir}
+                          style={{ marginLeft: 8 }}
+                        >
+                          Publicar
+                        </Link>
+                      )}
                     </CeldaTabla>
                   </FilaTabla>
                 ))}

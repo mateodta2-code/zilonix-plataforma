@@ -10,21 +10,26 @@ import {
   construirLinkSeguirProducto,
   construirLinkSeguirTienda,
   construirPublicacionesTienda,
+  deduplicarFotosMl,
   detectarFullEnHtmlFicha,
   detectarFullEnHtmlTarjeta,
   elegirInventarioPrincipal,
   elegirVendidosPrincipal,
   esPaginaUserProduct,
+  esUrlFotoMlValida,
   extraerCustIdDeUrl,
   extraerIdDeUrl,
   extraerIdIncrustadoConfiable,
   extraerWidDeUrl,
   filtroFullActivoEnUrl,
+  idNumericoDeArchivo,
   leerDatosIncrustados,
   leerInventarioMaximoDeTexto,
   leerResenasDesdeScript,
   leerSellerIdDeTienda,
+  leerVideoDesdeHtml,
   tipoDePagina,
+  urlFotoGrande,
 } from "./mercadolibre.js";
 // Issue #251 (smoke de Mateo) — antiguedadDiasPorId real de la
 // extensión (JS plano, mismo cálculo que lib/seguimiento/aproximados.ts)
@@ -1169,5 +1174,128 @@ describe("construirPublicacionesTienda — issue #251 punto 8 (revisión de Pabl
       total: 23,
       idsVisibles: ["MCO38280231", "MCO1325134601", "MCO1534758597"],
     });
+  });
+});
+
+// Parte 3, punto D ("Importar a Publicar") — mismo algoritmo ya
+// probado en producción en zilonix-os-web/lib/ml-bookmarklet.js
+// (portado en app/panel/publicar/importadores/bookmarklet.ts), acá
+// como funciones normales en vez de un bookmarklet minificado.
+describe("urlFotoGrande/idNumericoDeArchivo/esUrlFotoMlValida/deduplicarFotosMl — galería de 'Importar a Publicar'", () => {
+  it("urlFotoGrande fuerza el sufijo -O (original), sin importar el tamaño original", () => {
+    expect(urlFotoGrande("https://http2.mlstatic.com/D_NQ_NP_123456-MCO12345-I.jpg")).toBe("https://http2.mlstatic.com/D_NQ_NP_123456-MCO12345-O.jpg");
+    // Mismo comportamiento real del bookmarklet original (aGrande): el
+    // query string queda afuera del replace a propósito — nunca se
+    // confirmó que Mercado Libre lo necesite para servir la imagen.
+    expect(urlFotoGrande("https://http2.mlstatic.com/foo-F.webp?v=2")).toBe("https://http2.mlstatic.com/foo-O.webp");
+  });
+
+  it("urlFotoGrande deja intacta una URL que no matchea el patrón de sufijo (nunca rompe un formato inesperado)", () => {
+    expect(urlFotoGrande("https://http2.mlstatic.com/sin-sufijo.jpg")).toBe("https://http2.mlstatic.com/sin-sufijo.jpg");
+  });
+
+  it("idNumericoDeArchivo saca TODOS los números de 5+ dígitos del nombre de archivo (ignorando el query string) y los junta como clave", () => {
+    expect(idNumericoDeArchivo("https://http2.mlstatic.com/D_NQ_NP_2X_987654321-MCO99999999-I.jpg?v=2")).toBe("987654321-99999999");
+  });
+
+  it("idNumericoDeArchivo: sin ningún número de 5+ dígitos, null — nunca inventa una clave", () => {
+    expect(idNumericoDeArchivo("https://http2.mlstatic.com/sin-numeros.jpg")).toBeNull();
+  });
+
+  it("esUrlFotoMlValida acepta mlstatic.com real, rechaza logos/iconos/sprites/badges y dominios ajenos", () => {
+    expect(esUrlFotoMlValida("https://http2.mlstatic.com/D_NQ_NP_123-O.jpg")).toBe(true);
+    expect(esUrlFotoMlValida("https://http2.mlstatic.com/org-img/mp-logo.png")).toBe(false);
+    expect(esUrlFotoMlValida("https://http2.mlstatic.com/resources/frontend/statics/icon-play.svg")).toBe(false);
+    expect(esUrlFotoMlValida("https://otrositio.com/foto.jpg")).toBe(false);
+    expect(esUrlFotoMlValida("")).toBe(false);
+  });
+
+  // Issue #44 (hallazgo real de seguridad al preparar "Importar por
+  // link") — antes de esta corrección, esUrlFotoMlValida era un
+  // substring suelto (`/mlstatic\.com/i.test(url)`) sobre la URL
+  // ENTERA, nunca el hostname real — estos 4 casos pasaban como
+  // "válidos" sin serlo. Mismo criterio de ataque ya probado para
+  // PATRON_HOST_MERCADOLIBRE/hostPermitidoCanva en app/panel/publicar.
+  it("rechaza dominios que solo CONTIENEN mlstatic.com sin ser mlstatic.com de verdad (bug real corregido)", () => {
+    expect(esUrlFotoMlValida("https://evilmlstatic.com/foto.jpg")).toBe(false);
+    expect(esUrlFotoMlValida("https://mlstatic.com.ataque.com/foto.jpg")).toBe(false);
+    expect(esUrlFotoMlValida("https://ataque.com/mlstatic.com/foto.jpg")).toBe(false);
+    expect(esUrlFotoMlValida("https://ataque.com/?u=mlstatic.com/foto.jpg")).toBe(false);
+  });
+
+  it("http (no https) a un host real de mlstatic.com -> false, solo https", () => {
+    expect(esUrlFotoMlValida("http://http2.mlstatic.com/D_NQ_NP_123-O.jpg")).toBe(false);
+  });
+
+  it("mlstatic.com exacto (sin subdominio) también es válido", () => {
+    expect(esUrlFotoMlValida("https://mlstatic.com/foto.jpg")).toBe(true);
+  });
+
+  it("deduplicarFotosMl: la misma foto en miniatura y grande (mismo número, distinto sufijo) queda UNA sola vez, forzada a -O", () => {
+    const crudas = [
+      "https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-I.jpg",
+      "https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-O.jpg",
+    ];
+    expect(deduplicarFotosMl(crudas)).toEqual(["https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-O.jpg"]);
+  });
+
+  it("deduplicarFotosMl: 2 fotos reales distintas quedan las 2, en el orden en que aparecieron", () => {
+    const crudas = [
+      "https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-I.jpg",
+      "https://http2.mlstatic.com/D_NQ_NP_2X_444555666-MCO1-I.jpg",
+    ];
+    expect(deduplicarFotosMl(crudas)).toEqual([
+      "https://http2.mlstatic.com/D_NQ_NP_2X_111222333-MCO1-O.jpg",
+      "https://http2.mlstatic.com/D_NQ_NP_2X_444555666-MCO1-O.jpg",
+    ]);
+  });
+
+  it("deduplicarFotosMl: descarta logos/iconos y URLs de otro dominio, nunca las cuenta como foto real", () => {
+    const crudas = [
+      "https://http2.mlstatic.com/org-img/mp-logo-123456.png",
+      "https://otrositio.com/999999999-foto.jpg",
+      "",
+      null,
+      undefined,
+    ];
+    expect(deduplicarFotosMl(crudas)).toEqual([]);
+  });
+
+  it("deduplicarFotosMl: respeta el array vacío/ausente, nunca lanza", () => {
+    expect(deduplicarFotosMl([])).toEqual([]);
+    expect(deduplicarFotosMl(undefined)).toEqual([]);
+  });
+});
+
+// Issue #44 (anexo "Importar video a Clip") — leerVideoDesdeHtml acá
+// es solo un delegado fino a video-comun.js (ver ese archivo y su
+// propia batería de pruebas) — estas pruebas confirman el cableado
+// real de ESTE lector, nunca repiten cada caso de borde del núcleo
+// compartido.
+describe("leerVideoDesdeHtml (Mercado Libre) — issue #44 (anexo 'Importar video a Clip')", () => {
+  it("extrae la URL de un <video src> real de una ficha", () => {
+    const html = `<div class="ui-pdp-gallery"><video src="https://video.mercadolibre.com/MCO123/clip.mp4" controls></video></div>`;
+    const resultado = leerVideoDesdeHtml(html);
+    expect(resultado.candidatos).toEqual(["https://video.mercadolibre.com/MCO123/clip.mp4"]);
+    expect(resultado.huboVideoNoDescargable).toBe(false);
+  });
+
+  it("rechaza un .m3u8 -- avisa 'no descargable', nunca lo agrega como candidato", () => {
+    const html = `<video><source src="https://video.mercadolibre.com/clip.m3u8" type="application/x-mpegURL"></video>`;
+    const resultado = leerVideoDesdeHtml(html);
+    expect(resultado.candidatos).toEqual([]);
+    expect(resultado.huboVideoNoDescargable).toBe(true);
+  });
+
+  it("rechaza un blob: local", () => {
+    const html = `<video src="blob:https://articulo.mercadolibre.com.co/1234-5678"></video>`;
+    const resultado = leerVideoDesdeHtml(html);
+    expect(resultado.candidatos).toEqual([]);
+    expect(resultado.huboVideoNoDescargable).toBe(true);
+  });
+
+  it("rechaza una URL que no es https", () => {
+    const html = `<video src="http://video.mercadolibre.com/clip.mp4"></video>`;
+    expect(leerVideoDesdeHtml(html).candidatos).toEqual([]);
   });
 });

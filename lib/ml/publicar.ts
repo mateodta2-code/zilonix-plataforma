@@ -11,7 +11,9 @@ import {
   domainDiscoveryMl,
   leerAtributosCategoriaMl,
   leerCategoriaMl,
+  leerCategoriasRaizMl,
   leerCuentaMl,
+  type NodoCategoriaMl,
 } from "@/lib/ml/cliente";
 import {
   aplicarReglaSaleFormat,
@@ -258,6 +260,41 @@ export type CaracteristicaCategoria = {
   permiteVariante: boolean; // tags.allow_variations — pedido de Débora
   definePic: boolean; // tags.defines_picture — pedido de Débora, 16/9
 };
+
+// ADENDO UX de Publicar, punto 2 — "árbol de categorías: UI + ruta que
+// liste raíces/hijos" (mismo patrón que app/api/ml/categorias-arbol
+// del Zilonix OS actual, portado acá). Solo para cuando ni la
+// predicción automática (resolverCategoria) ni la búsqueda de texto
+// (buscarCategorias) dan con la categoría correcta — navegación manual
+// nivel por nivel. Sin categoryId, trae la raíz real del sitio
+// (leerCategoriasRaizMl, nuevo); con categoryId, el siguiente nivel
+// (children de leerCategoriaMl) + el breadcrumb real (pathFromRoot).
+// `esHoja` nunca se adivina por otro campo — children vacío es la
+// señal real que da Mercado Libre.
+export type NodoArbolCategorias = {
+  categoryId: string;
+  categoryName: string;
+  esRaiz: boolean;
+  esHoja: boolean;
+  pathFromRoot: NodoCategoriaMl[];
+  children: NodoCategoriaMl[];
+};
+
+export async function leerArbolCategorias(siteId: string, token: string, categoryId?: string): Promise<NodoArbolCategorias> {
+  if (!categoryId) {
+    const raices = await leerCategoriasRaizMl(siteId, token);
+    return { categoryId: "", categoryName: "", esRaiz: true, esHoja: false, pathFromRoot: [], children: raices };
+  }
+  const cat = await leerCategoriaMl(categoryId);
+  return {
+    categoryId: cat.categoryId,
+    categoryName: cat.categoryName,
+    esRaiz: false,
+    esHoja: cat.childrenCategories.length === 0,
+    pathFromRoot: cat.pathFromRoot,
+    children: cat.childrenCategories,
+  };
+}
 
 // §7 — función de PREPARACIÓN del formulario (no publica nada). Expone
 // qué características tiene la categoría detectada para que la persona
