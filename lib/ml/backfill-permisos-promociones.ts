@@ -11,6 +11,19 @@
 // Corre dentro de la migración, como superusuario: la migración no
 // pasa por RLS. El mismo texto se prueba contra app_user con el
 // contexto de una empresa, para que no se desfase del archivo SQL.
+//
+// Estas 3 sentencias usan 'aprobar'/'ejecutar' — valores NUEVOS del
+// enum `accion`, agregados recién en la migración 0017. El archivo
+// real (db/migrations/0018_backfill_permisos_promociones.sql) trae un
+// COMMIT suelto ANTES de estas 3 sentencias — ver el comentario
+// completo ahí: en una base recién creada (como la de CI), drizzle-orm
+// mete 0001..0018 en una sola transacción, y Postgres rechaza usar un
+// valor de enum agregado en esa misma transacción todavía sin
+// confirmar ("unsafe use of new value... must be committed"). Esta
+// prueba (db/rls-promociones.test.ts) nunca lo necesita porque corre
+// contra una base YA migrada de punta a punta, en una conexión
+// aparte — ahí 'aprobar'/'ejecutar' ya están confirmados desde hace
+// rato.
 
 export const MARCA_BACKFILL_PERMISOS_PROMOCIONES = "backfill permisos promociones (Refs #44)";
 
