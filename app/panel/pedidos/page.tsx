@@ -16,6 +16,9 @@ import styles from "./page.module.css";
 // pidió así). La ficha de cada pedido sigue en /panel/pedidos/[id]. Pide
 // ventas.consultar para entrar y finanzas.consultar porque todo lo que
 // se ve son montos de utilidad; sin eso, aviso y no se consulta nada.
+// Sin tarjetas KPI ni «Total por cuenta» (mostrarResumen={false}):
+// solo filtros, «Traer ventas de este mes» y la tabla. Los indicadores
+// van a Inicio (#143/#163).
 // Cualquier ?vista= viejo (lista o detalle) cae acá mismo.
 export default async function PedidosPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const usuario = await obtenerOCrearUsuarioActual();
@@ -50,7 +53,7 @@ export default async function PedidosPage({ searchParams }: { searchParams: Reco
         }
       />
 
-      <DetalleDiaCuentaProducto empresaId={empresa.id} usuarioId={usuario.id} searchParams={searchParams} ruta="/panel/pedidos" extra={{}} />
+      <DetalleDiaCuentaProducto empresaId={empresa.id} usuarioId={usuario.id} searchParams={searchParams} ruta="/panel/pedidos" extra={{}} mostrarResumen={false} />
 
       <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
         Volver al panel
