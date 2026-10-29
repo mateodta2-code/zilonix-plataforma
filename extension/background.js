@@ -953,3 +953,27 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   cerrarPestanasActualizarTodoVencidas();
   desregistrarPestanaActualizarTodo(tabId);
 });
+
+// Issue #273 (Mateo) — interruptor global: "apagado" hace que
+// content.js (lectores/mercadolibre.js + content.js, ver el comentario
+// completo en content.js) ya NO inyecte el panel ni los botones solo,
+// en ninguna página — pero la persona tiene que poder seguir abriendo
+// el panel CUANDO SÍ quiere, con un clic real en el ícono de la
+// extensión. `chrome.action.onClicked` solo se dispara cuando el
+// manifest NO declara un `default_popup` (manifest.json tiene
+// `"action": {}`, sin popup, a propósito) — un clic real de la
+// persona, nunca algo que esta extensión dispara sola. Nunca necesita
+// ningún permiso nuevo: `chrome.action` es parte del núcleo de
+// Manifest V3, y `chrome.tabs.sendMessage` ya lo usa el resto de este
+// archivo sin "tabs" en manifest.json (ver el comentario del
+// encabezado, arriba del todo).
+chrome.action.onClicked.addListener((tab) => {
+  if (!tab || tab.id == null) return;
+  chrome.tabs.sendMessage(tab.id, { tipo: "zilonix:mostrar-panel" }, () => {
+    // Pestaña sin ningún content script de esta extensión cargado (ej.
+    // un sitio que esta extensión no lee) — nunca un error real que
+    // haga falta mostrar en ningún lado, mismo criterio que el resto
+    // de este archivo.
+    void chrome.runtime.lastError;
+  });
+});
