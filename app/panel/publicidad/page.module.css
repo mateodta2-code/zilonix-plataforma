@@ -1,0 +1,145 @@
+.bloque {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.barra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.campo {
+  display: grid;
+  gap: 4px;
+}
+
+.campo select {
+  min-width: 180px;
+}
+
+.nota {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.aviso {
+  margin: 0;
+  font-size: 14px;
+}
+
+.gridKpi {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.tarjetaTabla {
+  /* El encabezado sticky vive en el scroll de la tabla. Tarjeta trae
+     overflow:hidden y, con la misma especificidad, se queda con el
+     ancla: el !important es para que gane esta caja. */
+  overflow: visible !important;
+}
+
+.thConAyuda {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.orden {
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-decoration: none;
+}
+
+.orden:hover,
+.orden:focus-visible,
+.ordenActivo {
+  color: var(--acento-fuerte);
+}
+
+.orden:focus-visible,
+.expandir:focus-visible,
+.enlace:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.expandir {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 280px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chevron {
+  width: 0;
+  height: 0;
+  margin-top: 6px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--texto);
+  flex: none;
+}
+
+.expandir[aria-expanded="true"] .chevron {
+  margin-top: 8px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--texto);
+  border-bottom: 0;
+}
+
+.nombreCampana {
+  font-weight: 600;
+}
+
+.pausada,
+.chipNota,
+.enlacePendiente {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--texto-suave);
+}
+
+.enlacePendiente {
+  cursor: help;
+  text-decoration: underline dotted;
+}
+
+.enlace {
+  color: var(--acento-fuerte);
+}
+
+.anuncios {
+  margin-top: 4px;
+}
+
+@media (max-width: 760px) {
+  .gridKpi {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .gridKpi {
+    grid-template-columns: 1fr;
+  }
+}
