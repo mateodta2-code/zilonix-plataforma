@@ -1334,10 +1334,7 @@ export async function leerItemParaPromocionMl(itemId: string, token: string): Pr
 }
 
 // GET /seller-promotions/items/{itemId}?app_version=v2 — confirmado
-// contra el código real de zilonix-os-web. null = Mercado Libre no
-// dejó ver el estado (403/404/5xx, o la publicación está cerrada);
-// distinto de [] (sí respondió, de verdad no tiene ninguna promoción
-// aplicable) — el llamador nunca confunde los dos casos.
+// contra el código real de zilonix-os-web.
 export type PromocionCrudaMl = {
   type?: unknown;
   status?: unknown;
@@ -1351,15 +1348,50 @@ export type PromocionCrudaMl = {
   finish_date?: unknown;
 };
 
-export async function leerPromocionesItemMl(itemId: string, token: string): Promise<PromocionCrudaMl[] | null> {
-  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+// Bug real en vivo (rama fix-promociones-buscar, Refs #44): en staging,
+// una empresa dio "Buscar" y la búsqueda terminó "Listo (0/N)" sin
+// ningún candidato, sin ningún error visible — la sospecha fuerte
+// (confirmada acá) es que la versión vieja de esta función devolvía
+// `null` para CUALQUIER caso que no fuera un array real: una
+// publicación sin promociones aplicables (404 — legítimo), un 403 de
+// la app sin el scope de Promociones, un 401 de la cuenta, o cualquier
+// otro !ok — los 4 casos se veían EXACTAMENTE igual río abajo
+// (ítem saltado, sin candidato, sin rastro). Ahora cada caso se
+// distingue de verdad:
+// - "ok": respondió bien (200 con array real, o 404 — una publicación
+//   sin ninguna promoción aplicable es una respuesta legítima de este
+//   endpoint, confirmado real, nunca un fallo).
+// - "sin_permiso": 403 (MlSinPermisoAppError) — la APP no tiene el
+//   scope de Promociones para esta cuenta. Si se repite en varios
+//   ítems de la misma cuenta, es la causa real de un "Listo (0/N)"
+//   silencioso (ver buscarPromocionesCuenta, que cuenta esto y frena
+//   la cuenta en vez de recorrer todo el catálogo a ciegas).
+// - "no_autorizado": 401 (MlNoAutorizadoError) — el token ya no es
+//   válido (no debería pasar, obtenerAccessTokenVigente ya lo
+//   refresca antes de llegar acá; si pasa, es señal real de que la
+//   cuenta hay que reconectarla).
+// - "otro_error": 5xx (MlNoDisponibleError, sin status propio) o
+//   cualquier otro !ok inesperado (con su status real).
+export type ResultadoPromocionesItemMl =
+  | { estado: "ok"; promociones: PromocionCrudaMl[] }
+  | { estado: "sin_permiso" }
+  | { estado: "no_autorizado" }
+  | { estado: "otro_error"; status: number | null };
+
+export async function leerPromocionesItemMl(itemId: string, token: string): Promise<ResultadoPromocionesItemMl> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return { estado: "ok", promociones: [] };
   const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
   try {
     const resp = await pedir<unknown>(url, token);
-    if (!resp.ok) return null;
-    return Array.isArray(resp.data) ? (resp.data as PromocionCrudaMl[]) : [];
+    if (!resp.ok) {
+      if (resp.status === 404) return { estado: "ok", promociones: [] };
+      return { estado: "otro_error", status: resp.status };
+    }
+    return { estado: "ok", promociones: Array.isArray(resp.data) ? (resp.data as PromocionCrudaMl[]) : [] };
   } catch (e) {
-    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    if (e instanceof MlSinPermisoAppError) return { estado: "sin_permiso" };
+    if (e instanceof MlNoAutorizadoError) return { estado: "no_autorizado" };
+    if (e instanceof MlNoDisponibleError) return { estado: "otro_error", status: null };
     throw e;
   }
 }

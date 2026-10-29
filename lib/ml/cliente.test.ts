@@ -1058,29 +1058,49 @@ describe("leerItemParaPromocionMl — rama feat-promociones", () => {
   });
 });
 
-describe("leerPromocionesItemMl — rama feat-promociones", () => {
+describe("leerPromocionesItemMl — rama feat-promociones / fix-promociones-buscar", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("itemId inválido: null, nunca llama a fetch", async () => {
+  it("itemId inválido: ok con array vacío, nunca llama a fetch", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await expect(leerPromocionesItemMl("no-es-un-id", "token")).resolves.toBeNull();
+    await expect(leerPromocionesItemMl("no-es-un-id", "token")).resolves.toEqual({ estado: "ok", promociones: [] });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("array real de promociones: se devuelve tal cual, crudo", async () => {
+  it("array real de promociones: estado ok, se devuelve tal cual, crudo", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson([{ type: "DEAL", status: "candidate" }])));
-    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual([{ type: "DEAL", status: "candidate" }]);
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate" }] });
   });
 
-  it("404 (publicación sin ninguna promoción aplicable): null, nunca []", async () => {
+  it("404 (publicación sin ninguna promoción aplicable): estado ok con array vacío — nunca se confunde con un fallo", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
-    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toBeNull();
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "ok", promociones: [] });
   });
 
-  it("403/5xx: null, nunca lanza", async () => {
+  // Bug real (Refs #44) — antes esto se devolvía como `null`, EXACTAMENTE
+  // igual que el 404 de arriba. Río abajo (leerPromocionesDeItem,
+  // buscarPromocionesCuenta) ya no puede distinguir "esta publicación no
+  // tiene promos" de "la app no tiene permiso para consultar esto" — una
+  // cuenta entera podía terminar "Listo (0/N)" sin ningún aviso.
+  it("403 (la app sin el scope de Promociones): estado sin_permiso, nunca se confunde con 'sin promos'", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toBeNull();
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "sin_permiso" });
+  });
+
+  it("401 (token ya no válido): estado no_autorizado, nunca lanza ni se confunde con 'sin promos'", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "no_autorizado" });
+  });
+
+  it("5xx: estado otro_error con status null (MlNoDisponibleError no guarda el status real)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 500)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "otro_error", status: null });
+  });
+
+  it("otro !ok inesperado (ej. 400): estado otro_error con el status real", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 400)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "otro_error", status: 400 });
   });
 });
 

@@ -303,23 +303,45 @@ export async function listarTodosLosItemsActivos(cuentaIdExterna: string, token:
   return { ids, catalogoIncompleto: false };
 }
 
+// Code review real (rama fix-promociones-buscar, Refs #44) — antes
+// esta función devolvía `null` para "sin promos" Y para cualquier
+// fallo de leerPromocionesItemMl (403/401/5xx), exactamente igual —
+// río abajo (buscarPromocionesCuenta) no podía distinguir un catálogo
+// sano sin promociones activas de una cuenta sin el scope de
+// Promociones. Ahora el resultado trae el motivo real, para que el
+// llamador pueda contar cada caso y decidir si la cuenta entera hay
+// que frenarla (ver UMBRAL_SIN_PERMISO_PROMOCIONES).
+export type ResultadoItemConPromociones =
+  | { estado: "sin_promos" }
+  | { estado: "con_promos"; item: ItemConPromociones }
+  | { estado: "sin_permiso" }
+  | { estado: "no_autorizado" }
+  | { estado: "otro_error" };
+
 export async function leerPromocionesDeItem(
   itemId: string,
   cuentaMlId: string,
   nickname: string,
   token: string
-): Promise<ItemConPromociones | null> {
-  const promos = await leerPromocionesItemMl(itemId, token);
-  if (!promos || promos.length === 0) return null;
+): Promise<ResultadoItemConPromociones> {
+  const resultado = await leerPromocionesItemMl(itemId, token);
+  if (resultado.estado === "sin_permiso") return { estado: "sin_permiso" };
+  if (resultado.estado === "no_autorizado") return { estado: "no_autorizado" };
+  if (resultado.estado === "otro_error") return { estado: "otro_error" };
+  if (resultado.promociones.length === 0) return { estado: "sin_promos" };
+
   const detalle = await leerItemParaPromocionMl(itemId, token);
   return {
-    itemId,
-    cuentaMlId,
-    nickname,
-    tituloProducto: detalle?.title ?? null,
-    thumbnail: detalle?.thumbnail ?? null,
-    skuCodigo: detalle?.sellerCustomField ?? null,
-    tieneVariantes: detalle?.tieneVariantes ?? false,
-    promociones: promos,
+    estado: "con_promos",
+    item: {
+      itemId,
+      cuentaMlId,
+      nickname,
+      tituloProducto: detalle?.title ?? null,
+      thumbnail: detalle?.thumbnail ?? null,
+      skuCodigo: detalle?.sellerCustomField ?? null,
+      tieneVariantes: detalle?.tieneVariantes ?? false,
+      promociones: resultado.promociones,
+    },
   };
 }
