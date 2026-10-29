@@ -57,12 +57,21 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/publicar/actions.ts",
   "app/panel/publicar/[id]/page.tsx",
   "app/panel/publicar/clip/actions.ts",
+  // Parte 3 ("importadores + permalink + fotos Cloudinary + botón
+  // extensión") — buscarImportacionPorSkuAction/buscarImportacionPorLinkAction
+  // piden "inventario","consultar" (mismo permiso que buscarItemAction
+  // de Clip): solo TRAEN datos para precargar el formulario, nunca
+  // publican nada por su cuenta.
+  "app/panel/publicar/importadores/actions.ts",
   // ADENDO UX de Publicar — mismo permiso que crear el producto en sí
   // ("inventario","crear"): estas 3 solo AYUDAN a elegir categoría/
   // atributos, nunca publican nada.
   "app/api/ml/publicar/categorias/buscar/route.ts",
   "app/api/ml/publicar/categorias/arbol/route.ts",
   "app/api/ml/publicar/caracteristicas/route.ts",
+  // Parte 3, punto C — sube una foto (de la PC o una URL de Canva ya
+  // validada) a Cloudinary; mismo permiso que crear el producto en sí.
+  "app/api/ml/publicar/fotos/route.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
   "app/api/ml/clip/route.ts",

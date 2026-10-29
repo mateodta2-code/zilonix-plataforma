@@ -41,7 +41,15 @@ type RespuestaCaracteristicas = {
 // REMONTA (prop `key`) cada vez que cambia, para que los `useState`
 // de abajo arranquen de cero con los valores nuevos — nunca hace
 // falta un efecto que "reseedee" el estado a mano.
-export function FormularioPublicar({ cuentas, inicial }: { cuentas: Cuenta[]; inicial: EstadoInicialFormulario }) {
+export function FormularioPublicar({
+  cuentas,
+  inicial,
+  cloudinaryConfigurado,
+}: {
+  cuentas: Cuenta[];
+  inicial: EstadoInicialFormulario;
+  cloudinaryConfigurado: boolean;
+}) {
   const [incluidas, setIncluidas] = useState<Record<string, boolean>>(() => {
     const mapa: Record<string, boolean> = {};
     for (const id of inicial.cuentasIncluidas) mapa[id] = true;
@@ -243,7 +251,7 @@ export function FormularioPublicar({ cuentas, inicial }: { cuentas: Cuenta[]; in
         el envío si nadie la completaba); la tarjeta "+" de
         GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
         agregar nada. */}
-        <GaleriaFotos urls={imagenes} onChange={setImagenes} />
+        <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} />
         {maxFotos != null && (
           <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
             Esta categoría admite hasta {maxFotos} fotos en Mercado Libre
@@ -251,7 +259,7 @@ export function FormularioPublicar({ cuentas, inicial }: { cuentas: Cuenta[]; in
           </p>
         )}
         <p style={{ fontSize: 12, color: "var(--texto-suave)" }}>
-          La primera es la portada si ninguna cuenta tiene una propia. La subida real a Cloudinary llega más adelante — por ahora, URL externa.
+          La primera es la portada si ninguna cuenta tiene una propia. Podés pegar una URL externa, subir un archivo de tu PC, o traer una exportación de Canva.
         </p>
         <textarea name="imagenes" value={fotosDentroDelLimite(imagenes.filter(Boolean), maxFotos).join("\n")} readOnly hidden />
       </Tarjeta>

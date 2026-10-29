@@ -1146,3 +1146,85 @@ export async function obtenerPublicacionesVendedorAjenoMl(sellerId: string, toke
   }
   return publicaciones;
 }
+
+// ---------- Parte 3 ("importadores + permalink + fotos Cloudinary + botón extensión") ----------
+//
+// Punto A del pedido — importar por SKU propio o por link necesita MÁS
+// que leerItemBasicoMl (solo title/thumbnail, pensado para Clip): el
+// formulario de Publicar quiere precargarse con precio, stock, condición,
+// TODA la galería y el SKU propio si Mercado Libre ya lo tiene cargado —
+// ningún wrapper existente lo traía junto. Mismo GET /items/{id} de
+// siempre (confirmado ya en obtenerItemMl/leerItemBasicoMl), solo con la
+// lista de attributes ampliada — nunca una llamada nueva distinta.
+// Avisado a Mateo/Pablo antes de tocar este archivo, como pide CLAUDE.md.
+export type ItemCompletoMl = {
+  itemId: string;
+  title: string | null;
+  price: number | null;
+  availableQuantity: number | null;
+  condition: "new" | "used" | null;
+  pictures: string[];
+  permalink: string | null;
+  // seller_custom_field = el SKU propio tal como Mercado Libre lo
+  // guarda para ESA publicación — null si nunca se cargó uno.
+  sellerCustomField: string | null;
+};
+
+// A propósito SIN filtrar por status==="active" (a diferencia de
+// obtenerItemMl, pensado para Investigación/competencia): acá se puede
+// importar una publicación PROPIA pausada o cerrada para reutilizarla —
+// nunca tiene sentido ocultarla solo por su estado.
+export async function leerItemCompletoMl(itemId: string, token: string): Promise<ItemCompletoMl | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,price,available_quantity,condition,pictures,permalink,seller_custom_field`;
+  try {
+    const resp = await pedir<{
+      title?: unknown;
+      price?: unknown;
+      available_quantity?: unknown;
+      condition?: unknown;
+      pictures?: unknown;
+      permalink?: unknown;
+      seller_custom_field?: unknown;
+    }>(url, token);
+    if (!resp.ok) return null;
+    const pictures = Array.isArray(resp.data.pictures)
+      ? resp.data.pictures
+          .map((p) => (p && typeof p === "object" && typeof (p as { url?: unknown }).url === "string" ? (p as { url: string }).url : null))
+          .filter((u): u is string => u !== null)
+      : [];
+    return {
+      itemId,
+      title: typeof resp.data.title === "string" ? resp.data.title : null,
+      price: numeroONull(resp.data.price),
+      availableQuantity: numeroONull(resp.data.available_quantity),
+      condition: resp.data.condition === "used" ? "used" : resp.data.condition === "new" ? "new" : null,
+      pictures,
+      permalink: typeof resp.data.permalink === "string" ? resp.data.permalink : null,
+      sellerCustomField: typeof resp.data.seller_custom_field === "string" ? resp.data.seller_custom_field : null,
+    };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+// GET /items/{id}/description — endpoint SEPARADO del body de /items
+// (mismo endpoint que agregarDescripcionItemMl usa para ESCRIBIR, acá
+// para LEER lo que ya tiene una publicación existente al importarla).
+// Contrato real documentado por Mercado Libre: {plain_text, text} — se
+// prefiere plain_text (sin el HTML que algunas publicaciones viejas
+// todavía traen en `text`).
+export async function leerDescripcionItemMl(itemId: string, token: string): Promise<string | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}/description`;
+  try {
+    const resp = await pedir<{ plain_text?: unknown; text?: unknown }>(url, token);
+    if (!resp.ok) return null;
+    if (typeof resp.data.plain_text === "string" && resp.data.plain_text) return resp.data.plain_text;
+    return typeof resp.data.text === "string" ? resp.data.text : null;
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}

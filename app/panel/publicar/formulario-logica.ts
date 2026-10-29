@@ -237,3 +237,240 @@ export function moverFoto(fotos: string[], desde: number, hasta: number): string
   copia.splice(hasta, 0, movida);
   return copia;
 }
+
+// --- Parte 3 (importadores + permalink) ---
+
+// Revisión de seguridad (hallazgo MED) — un solo patrón de hostname
+// real de Mercado Libre, compartido por permalinkMlSeguro (abajo) e
+// idItemDesdeLinkMl (más abajo en este archivo): cualquier subdominio +
+// el país opcional (".co", ".ar", etc.), nunca un dominio que solo
+// CONTIENE "mercadolibre.com" en otra parte de la URL (ej.
+// "mercadolibre.com.ataque.com" no matchea — el "$" ancla el final).
+const PATRON_HOST_MERCADOLIBRE = /(^|\.)mercadolibre\.com(\.[a-z]{2})?$/i;
+
+// Revisión de seguridad (hallazgo MED) — producto.resultado ya viene
+// de Mercado Libre (publicar.ts, lib/ml/cliente.ts), pero
+// enlacesPermalink arma un <a href> real para HistorialPublicaciones.tsx
+// — nunca se confía en que ese campo siga siendo lo que ML mandó
+// originalmente (una fila vieja, un bug futuro de publicar.ts, datos
+// corruptos): se exige https real Y un hostname real de Mercado Libre
+// antes de dejarlo pasar a un link clickeable. Un "javascript:"/
+// "data:" o un dominio ajeno nunca llega a <a href>.
+export function permalinkMlSeguro(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:") return null;
+  if (!PATRON_HOST_MERCADOLIBRE.test(parsed.hostname)) return null;
+  return url;
+}
+
+// Punto B del pedido — "cuando una cuenta publicó OK, el nombre de la
+// cuenta o un link debe abrir ese permalink. No inventes columna; lee
+// producto.resultado." Una sola función, discrimina por forma (ver
+// lib/ml/publicar-tipos.ts): la familia (User Products) puede traer
+// VARIOS permalinks (uno por ítem/variante) bajo la misma cuenta — se
+// listan todos, nunca solo el primero (publicar.ts ya los guarda todos,
+// perderlos acá sería descartar un dato que ya existe). El caso
+// clásico de éxito trae uno solo. Un fallo (ok:false) nunca tiene
+// permalink — se omite, nunca un link roto.
+export type EnlacePermalink = { cuentaMlId: string; etiqueta: string; permalink: string };
+
+export function enlacesPermalink(
+  resultado: ResultadoPublicacionCuenta[] | null | undefined,
+  cuentas: { id: string; nickname: string }[]
+): EnlacePermalink[] {
+  if (!resultado) return [];
+  const nicknamePorCuenta = new Map(cuentas.map((c) => [c.id, c.nickname]));
+  const enlaces: EnlacePermalink[] = [];
+  for (const r of resultado) {
+    const nombreCuenta = nicknamePorCuenta.get(r.cuentaMlId) ?? r.cuentaMlId;
+    if ("familia" in r) {
+      for (const item of r.familia.items) {
+        if (item.ok && item.permalink) {
+          const permalinkSeguro = permalinkMlSeguro(item.permalink);
+          if (!permalinkSeguro) continue;
+          const sufijo = item.sku || Object.values(item.valores).join(" / ");
+          enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: sufijo ? `${nombreCuenta} (${sufijo})` : nombreCuenta, permalink: permalinkSeguro });
+        }
+      }
+    } else if (r.ok) {
+      const permalinkSeguro = permalinkMlSeguro(r.permalink);
+      if (permalinkSeguro) enlaces.push({ cuentaMlId: r.cuentaMlId, etiqueta: nombreCuenta, permalink: permalinkSeguro });
+    }
+  }
+  return enlaces;
+}
+
+// Punto A del pedido — forma común de "lo que se trajo de afuera" para
+// precargar el formulario, sin importar si vino de un SKU propio, de un
+// link, o del bookmarklet (las 3 vías del punto A llegan a esto mismo,
+// nunca cada una con su propio camino de hidratación). Todo texto
+// (nunca número) porque así lo espera EstadoInicialFormulario — mismo
+// criterio que el resto de este archivo.
+export type ItemImportado = {
+  titulo: string;
+  descripcion: string;
+  precio: string;
+  stock: string;
+  sku: string;
+  imagenes: string[];
+  dimensiones: Partial<DimensionesTexto>;
+};
+
+// Mismo criterio que estadoInicialDesdePrefill (PaginaPublicar.tsx,
+// prefill de Investigación): título/descripción/portada se copian
+// IGUAL a todas las cuentas conectadas (quien importa todavía no eligió
+// a mano para cuál cuenta es cada campo) — `cuentasIncluidas` queda
+// vacío a propósito, igual que "Duplicar". Recibe los ids de cuenta en
+// vez de Cuenta[] completo para poder probarse sin React.
+export function construirEstadoInicialDesdeImportacion(cuentaIds: string[], item: ItemImportado): EstadoInicialFormulario {
+  const portada = item.imagenes[0] ?? "";
+  const datosPorCuenta: Record<string, DatosCuentaTexto> = {};
+  for (const id of cuentaIds) datosPorCuenta[id] = { titulo: item.titulo, descripcion: item.descripcion, portadaUrl: portada };
+  return {
+    ...estadoInicialVacioBase(),
+    datosPorCuenta,
+    precio: item.precio,
+    stock: item.stock || "1",
+    sku: item.sku,
+    dimensiones: { peso: item.dimensiones.peso ?? "", largo: item.dimensiones.largo ?? "", ancho: item.dimensiones.ancho ?? "", alto: item.dimensiones.alto ?? "" },
+    imagenes: item.imagenes,
+  };
+}
+
+// Base vacía puramente local (sin React) — PaginaPublicar.tsx tiene la
+// suya propia (estadoInicialVacio) con los mismos valores; se duplica a
+// propósito en vez de importarla desde un componente "use client" (este
+// archivo tiene que seguir siendo importable sin DOM/React, igual que
+// el resto de formulario-logica.ts).
+function estadoInicialVacioBase(): EstadoInicialFormulario {
+  return {
+    cuentasIncluidas: [],
+    datosPorCuenta: {},
+    precio: "",
+    stock: "1",
+    condicion: "new",
+    envioGratis: false,
+    sku: "",
+    dimensiones: { peso: "", largo: "", ancho: "", alto: "" },
+    imagenes: [],
+    atributosExtra: {},
+    categoriasOverride: {},
+    variantes: null,
+    portadasPorVariante: {},
+    modoPrueba: true,
+  };
+}
+
+// Punto A.2 del pedido — "parsear robustamente el id del ítem: paths
+// /MCO-…, /p/MCO…, query params, etc.". Nunca scrapea la página (eso
+// está prohibido, ver CLAUDE.md): solo interpreta el TEXTO del link
+// pegado para sacar un id con el que después sí se llama a la API
+// oficial (obtenerItemMl/leerItemCompletoMl, con token). Devuelve
+// siempre "MCO" + dígitos (sin el guion que Mercado Libre pone en la
+// URL humana) — el mismo formato que PATRON_ID_PRODUCTO_O_ITEM
+// (lib/ml/cliente.ts) exige antes de llamar a la API.
+export function idItemDesdeLinkMl(urlCruda: string): string | null {
+  const texto = urlCruda.trim();
+  if (!texto) return null;
+  let url: URL;
+  try {
+    url = new URL(texto);
+  } catch {
+    return null;
+  }
+  if (!PATRON_HOST_MERCADOLIBRE.test(url.hostname)) return null;
+
+  const candidatos: string[] = [];
+  for (const clave of ["wid", "item_id", "itemId"]) {
+    const valor = url.searchParams.get(clave);
+    if (valor) candidatos.push(valor);
+  }
+  const porProducto = url.pathname.match(/\/p\/(MCO\d+)/i);
+  if (porProducto) candidatos.push(porProducto[1]);
+  const porPublicacion = url.pathname.match(/\/(MCO-?\d+)(?:[/?#-]|$)/i);
+  if (porPublicacion) candidatos.push(porPublicacion[1]);
+
+  for (const candidato of candidatos) {
+    const normalizado = candidato.toUpperCase().replace(/-/g, "");
+    if (/^MCO\d+$/.test(normalizado)) return normalizado;
+  }
+  return null;
+}
+
+// Punto D del pedido — "Importar a Publicar" desde la extensión: el
+// botón del content script (extension/content.js) lee título/
+// descripción/precio/galería de la publicación de Mercado Libre
+// abierta y lo manda por el relevo content->background->marcador/
+// postMessage (mismo mecanismo ya usado para "Completar vendidos" —
+// ver extension/marcador-zilonix.js). PaginaPublicar.tsx escucha ese
+// mensaje, pero NUNCA confía ciegamente en lo que llega por
+// postMessage (ver el comentario real de marcador-zilonix.js: "el
+// panel vuelve a validar todo el payload igual") — esta función es esa
+// validación, pura y con sus propias pruebas. `imagenes` se filtra a
+// solo http(s) reales (nunca javascript:/data: disfrazado) — mismo
+// criterio que ZilonixSeguridad.linkSeguro del lado de la extensión,
+// reimplementado acá sin DOM/fetch porque este archivo no puede
+// importar nada de lib/ (helper puro, sin ciclos).
+export function itemImportadoDesdeMensajeExtension(datos: unknown): ItemImportado | null {
+  if (!datos || typeof datos !== "object" || Array.isArray(datos)) return null;
+  const d = datos as Record<string, unknown>;
+  const titulo = typeof d.titulo === "string" ? d.titulo.slice(0, 60) : "";
+  const descripcion = typeof d.descripcion === "string" ? d.descripcion : "";
+  const precio = typeof d.precio === "number" && Number.isFinite(d.precio) && d.precio > 0 ? String(d.precio) : "";
+  const imagenes = Array.isArray(d.imagenes) ? d.imagenes.filter((u): u is string => typeof u === "string" && /^https:\/\//i.test(u)) : [];
+  if (!titulo && !descripcion && !precio && imagenes.length === 0) return null; // mensaje vacío/con otra forma — nunca se hidrata el formulario con nada
+  return { titulo, descripcion, precio, stock: "", sku: "", imagenes, dimensiones: {} };
+}
+
+// Punto A.3 del pedido — lee el JSON que copia el bookmarklet portado
+// de zilonix-os-web/lib/ml-bookmarklet.js (galeria:[{id,url}], precio
+// número o null, dimensiones ya en cm/gramos tal cual las arma ESE
+// script en el navegador de la persona — nunca se vuelve a convertir
+// acá). Nunca lanza con texto pegado inválido (puede venir con espacios
+// de más, o la persona pegó cualquier otra cosa por error) — null, el
+// llamador decide el mensaje.
+export function parseImportacionBookmarklet(texto: string): ItemImportado | null {
+  let crudo: unknown;
+  try {
+    crudo = JSON.parse(texto.trim());
+  } catch {
+    return null;
+  }
+  if (!crudo || typeof crudo !== "object" || Array.isArray(crudo)) return null;
+  const d = crudo as Record<string, unknown>;
+  const dim = (d.dimensiones && typeof d.dimensiones === "object" ? (d.dimensiones as Record<string, unknown>) : {}) ?? {};
+  const galeria = Array.isArray(d.galeria) ? d.galeria : [];
+  // Revisión de seguridad (hallazgo MED) — mismas reglas que
+  // itemImportadoDesdeMensajeExtension (el mensaje de "Importar a
+  // Publicar" de la extensión): el JSON lo pega la PERSONA a mano
+  // (copiado por el bookmarklet, corriendo en su propio navegador),
+  // pero nunca se confía en que el texto pegado sea de verdad lo que
+  // el bookmarklet copió — un "javascript:"/"data:" disfrazado de URL
+  // de foto nunca llega a <img src> ni a la portada del formulario.
+  const imagenes = galeria
+    .map((g) => (g && typeof g === "object" && typeof (g as { url?: unknown }).url === "string" ? (g as { url: string }).url : null))
+    .filter((u): u is string => !!u && /^https:\/\//i.test(u));
+  const titulo = typeof d.titulo === "string" ? d.titulo : "";
+  const descripcion = typeof d.descripcion === "string" ? d.descripcion : "";
+  const precio = typeof d.precio === "number" && Number.isFinite(d.precio) ? String(d.precio) : "";
+  if (!titulo && !descripcion && !precio && imagenes.length === 0) return null; // nada útil pegado — nunca se hidrata el formulario con nada
+  return {
+    titulo,
+    descripcion,
+    precio,
+    stock: "",
+    sku: "",
+    imagenes,
+    dimensiones: {
+      peso: typeof dim.peso === "string" ? dim.peso : "",
+      largo: typeof dim.largo === "string" ? dim.largo : "",
+      ancho: typeof dim.ancho === "string" ? dim.ancho : "",
+      alto: typeof dim.alto === "string" ? dim.alto : "",
+    },
+  };
+}
