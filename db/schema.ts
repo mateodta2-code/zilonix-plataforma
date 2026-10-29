@@ -15,7 +15,14 @@ import type {
 // Todavía SIN seguridad por fila (RLS) ni usuario de base sin privilegios
 // — eso es la tarea 1.3, a propósito la siguiente, no esta.
 
-export const accionEnum = pgEnum("accion", ["consultar", "crear", "modificar", "anular", "autorizar"]);
+// Rama feat-promociones — "aprobar"/"ejecutar" se agregan para el
+// módulo promociones (decisión de Mateo: son 2 pasos reales distintos
+// de un humano antes de que algo cambie de verdad en Mercado Libre,
+// nunca el mismo permiso que "modificar" de otros módulos). Agregar un
+// valor a un enum de Postgres SIEMPRE necesita su propia migración
+// (ALTER TYPE ... ADD VALUE) — drizzle-kit la genera solo al correr
+// `npm run db:generate` sobre este cambio, nunca a mano.
+export const accionEnum = pgEnum("accion", ["consultar", "crear", "modificar", "anular", "autorizar", "aprobar", "ejecutar"]);
 // "todo" = ve/toca cualquier registro del módulo; "propio" = solo lo que
 // esa persona creó. Idea real tomada de Effi (docs/investigacion/effi.md,
 // sección D) — ahí solo aplica a "Consultar"; acá se generaliza para
@@ -1617,5 +1624,174 @@ export const alertasUltimaUnidad = pgTable(
       "alertas_ultima_unidad_resuelta_con_fecha",
       sql`(${t.estado} = 'pendiente') = (${t.resueltaTs} IS NULL)`
     ),
+  })
+);
+
+// Rama feat-promociones — motor portado de zilonix-os-web
+// (lib/mercadolibre-promo.js, docs/investigacion/promociones-mercado-libre.md
+// de ese repo), generalizado para cualquier empresa: nunca una app de
+// Mercado Libre aparte (reusa el token normal de cuentas_ml), nunca
+// una regla global ni la clasificación suplemento/importación —
+// reglas por cuenta, piso siempre desde costos_sku (Finanzas).
+
+// Reglas del agente, UNA fila por cuenta de Mercado Libre conectada —
+// nunca una sola regla global para toda la empresa (decisión de
+// Mateo, al revés de zilonix-os-web). "Usar las mismas reglas para
+// todas las cuentas" (la UI) es una COPIA explícita de un clic, no un
+// vínculo que las mantenga sincronizadas después — por eso no hay
+// ninguna columna acá para eso, cada fila sigue siendo independiente.
+export const promocionesReglas = pgTable(
+  "promociones_reglas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    descuentoMaximoPct: integer("descuento_maximo_pct").notNull().default(20),
+    participarCompartidas: boolean("participar_compartidas").notNull().default(false),
+    igualarAlPiso: boolean("igualar_al_piso").notNull().default(true),
+    // "HH:MM" en hora de Colombia, o NULL = apagada (nunca corre sola).
+    // Validado en código, no acá — mismo criterio que el resto del
+    // repo para evitar un tipo de columna exótico sin precedente.
+    busquedaAutomaticaHora: text("busqueda_automatica_hora"),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    unaPorCuenta: unique("promociones_reglas_cuenta_unica").on(t.cuentaMlId),
+    descuentoEnRango: check("promociones_reglas_descuento_rango", sql`${t.descuentoMaximoPct} > 0 AND ${t.descuentoMaximoPct} <= 100`),
+    cuentaDeLaEmpresa: foreignKey({
+      name: "promociones_reglas_empresa_cuenta_fk",
+      columns: [t.empresaId, t.cuentaMlId],
+      foreignColumns: [cuentasMl.empresaId, cuentasMl.id],
+    }).onDelete("cascade"),
+  })
+);
+
+// Snapshot de la última búsqueda real contra Mercado Libre — se
+// sobreescribe (upsert) cada vez que se vuelve a buscar, nunca se
+// acumula historial acá (el historial real de decisiones/ejecución es
+// `promociones_acciones`, abajo). "precio_minimo" NULL = sin SKU o sin
+// precio mínimo en costos_sku — ese producto queda bloqueado para
+// participar, nunca se inventa un piso (regla no negociable de Mateo).
+export const promocionesCandidatos = pgTable(
+  "promociones_candidatos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    itemId: text("item_id").notNull(),
+    skuCodigo: text("sku_codigo"),
+    tituloProducto: text("titulo_producto"),
+    thumbnail: text("thumbnail"),
+    tieneVariantes: boolean("tiene_variantes").notNull().default(false),
+    // Tipo real de Mercado Libre (DEAL, PRICE_DISCOUNT, LIGHTNING,
+    // SMART, UNHEALTHY_STOCK...) — texto libre a propósito, nunca un
+    // enum de Postgres: la lista la controla Mercado Libre, no
+    // nosotros (ver TIPOS_SIN_ESCRITURA_API en lib/ml/promociones.ts).
+    tipoPromocion: text("tipo_promocion").notNull(),
+    promotionIdMl: text("promotion_id_ml"),
+    // Estado real que da Mercado Libre: "started"/"pending"/"candidate".
+    estadoMl: text("estado_ml").notNull(),
+    esCompartida: boolean("es_compartida").notNull().default(false),
+    // true si tipoPromocion está en TIPOS_SIN_ESCRITURA_API — Mercado
+    // Libre nunca deja escribir este tipo por la API de Promociones.
+    soloEnMl: boolean("solo_en_ml").notNull().default(false),
+    precioOriginal: numeric("precio_original", { precision: 14, scale: 2 }),
+    precioActual: numeric("precio_actual", { precision: 14, scale: 2 }),
+    precioMinimo: numeric("precio_minimo", { precision: 14, scale: 2 }),
+    precioSugerido: numeric("precio_sugerido", { precision: 14, scale: 2 }),
+    maxDiscountedPrice: numeric("max_discounted_price", { precision: 14, scale: 2 }),
+    gananciaEstimada: numeric("ganancia_estimada", { precision: 14, scale: 2 }),
+    cumpleReglas: boolean("cumple_reglas").notNull().default(false),
+    motivoRevisarManual: text("motivo_revisar_manual"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    candidatoUnico: unique("promociones_candidatos_unico").on(t.cuentaMlId, t.itemId, t.tipoPromocion),
+    cuentaDeLaEmpresa: foreignKey({
+      name: "promociones_candidatos_empresa_cuenta_fk",
+      columns: [t.empresaId, t.cuentaMlId],
+      foreignColumns: [cuentasMl.empresaId, cuentasMl.id],
+    }).onDelete("cascade"),
+    porEmpresa: index("promociones_candidatos_empresa_idx").on(t.empresaId),
+  })
+);
+
+export const promocionAccionTipoEnum = pgEnum("promocion_accion_tipo", ["participar", "modificar", "salir"]);
+export const promocionAccionEstadoEnum = pgEnum("promocion_accion_estado", ["pendiente", "aceptada", "rechazada", "ejecutada", "fallida"]);
+
+// Historial real y auditoría — quién aprobó, cuándo, precio antes y
+// después, resultado real de Mercado Libre. Nunca se borra ni se
+// sobreescribe (al revés de promociones_candidatos): cada intento deja
+// su propia fila.
+export const promocionesAcciones = pgTable(
+  "promociones_acciones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    itemId: text("item_id").notNull(),
+    tituloProducto: text("titulo_producto"),
+    tipoPromocion: text("tipo_promocion").notNull(),
+    promotionIdMl: text("promotion_id_ml"),
+    accion: promocionAccionTipoEnum("accion").notNull(),
+    precioAntes: numeric("precio_antes", { precision: 14, scale: 2 }),
+    precioDespues: numeric("precio_despues", { precision: 14, scale: 2 }),
+    estado: promocionAccionEstadoEnum("estado").notNull().default("pendiente"),
+    aprobadoPor: uuid("aprobado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    aprobadoTs: timestamp("aprobado_ts", { withTimezone: true }),
+    ejecutadoPor: uuid("ejecutado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    ejecutadoTs: timestamp("ejecutado_ts", { withTimezone: true }),
+    // true = esto corrió en modo simulación (nunca tocó Mercado
+    // Libre) — queda en el historial igual, para que se vea qué se
+    // habría hecho, pero nunca se confunde con una ejecución real.
+    modoSimulacion: boolean("modo_simulacion").notNull().default(false),
+    // {ok, status, respuesta} — nunca el token, nunca más de 500
+    // caracteres del cuerpo crudo de Mercado Libre (mismo criterio que
+    // zilonix-os-web).
+    resultadoMl: jsonb("resultado_ml"),
+    error: text("error"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    cuentaDeLaEmpresa: foreignKey({
+      name: "promociones_acciones_empresa_cuenta_fk",
+      columns: [t.empresaId, t.cuentaMlId],
+      foreignColumns: [cuentasMl.empresaId, cuentasMl.id],
+    }).onDelete("cascade"),
+    porEmpresaYEstado: index("promociones_acciones_empresa_estado_idx").on(t.empresaId, t.estado),
+  })
+);
+
+// Rama feat-promociones, punto 6 — "Conexión de IA" por empresa,
+// pensada como pieza COMÚN (lib/ia/) para que cualquier módulo futuro
+// la use, no solo Promociones. Una sola fila por empresa por ahora
+// (unique en empresaId) — si algún día hace falta más de una conexión
+// por empresa, se agrega ahí, no se adivina acá. La API key se cifra
+// con el MISMO mecanismo que los tokens de Mercado Libre
+// (lib/cifrado.ts, AES-256-GCM versionado) — mismo criterio de
+// CLAUDE.md ("tokens de marketplaces y credenciales... siempre
+// cifrados"), reusado a propósito en vez de armar un segundo sistema
+// de cifrado solo para esto.
+export const proveedorIaEnum = pgEnum("proveedor_ia", ["anthropic", "openai", "google", "xai", "otro_compatible_openai"]);
+
+export const iaConexiones = pgTable(
+  "ia_conexiones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    proveedor: proveedorIaEnum("proveedor").notNull(),
+    // Solo tiene sentido para "otro_compatible_openai" — cualquier
+    // servidor que hable el mismo formato que la API de OpenAI.
+    baseUrl: text("base_url"),
+    modelo: text("modelo").notNull(),
+    apiKeyCifrada: jsonb("api_key_cifrada").$type<TokenCifrado>().notNull(),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    unaPorEmpresa: unique("ia_conexiones_empresa_unica").on(t.empresaId),
   })
 );
