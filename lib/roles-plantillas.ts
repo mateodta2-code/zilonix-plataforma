@@ -16,10 +16,21 @@
 // (consultar). Crear, modificar, anular y autorizar llegan en las fases
 // 3 y 4, cuando haya propuestas y escritura en Mercado Libre. Dueño las
 // tiene igual, porque permisosDeDueno() recorre MODULOS × ACCIONES.
-export const MODULOS = ["ventas", "inventario", "finanzas", "personas", "configuracion", "publicidad"] as const;
+// Rama feat-promociones — "promociones" entra con 3 acciones reales
+// (consultar/aprobar/ejecutar, decisión de Mateo), no las 5 genéricas
+// de siempre: buscar propuestas es "consultar", marcar Sí/No y
+// confirmar el lote es "aprobar", y disparar el cambio real contra
+// Mercado Libre es "ejecutar" — dos pasos humanos distintos a
+// propósito, antes de que algo cambie de verdad en la cuenta de un
+// vendedor. Solo Gerente y Operador reciben algo de fábrica esta
+// vuelta (ver PLANTILLAS más abajo); Operaciones queda sin este
+// módulo por ahora aunque el comentario viejo de arriba lo anticipaba
+// — decisión explícita de Mateo para esta tarea, se puede ampliar
+// después desde /panel/roles.
+export const MODULOS = ["ventas", "inventario", "finanzas", "personas", "configuracion", "publicidad", "promociones"] as const;
 export type Modulo = (typeof MODULOS)[number];
 
-export const ACCIONES = ["consultar", "crear", "modificar", "anular", "autorizar"] as const;
+export const ACCIONES = ["consultar", "crear", "modificar", "anular", "autorizar", "aprobar", "ejecutar"] as const;
 export type Accion = (typeof ACCIONES)[number];
 
 export type Permiso = { modulo: Modulo; accion: Accion; alcance: "todo" | "propio" };
@@ -82,6 +93,9 @@ export const PLANTILLAS: Record<NombrePlantilla, Permiso[]> = {
     ...permisosTodo(["personas"], ["consultar", "crear", "modificar"]),
     ...permisosTodo(["configuracion"], ["consultar", "modificar"]),
     ...permisosTodo(["publicidad"], ["consultar"]),
+    // Rama feat-promociones — Dueño y Gerente tienen todo (decisión de
+    // Mateo); Gerente es quien de verdad usa el módulo día a día.
+    ...permisosTodo(["promociones"], ["consultar", "aprobar", "ejecutar"]),
   ],
   Auxiliar: [
     ...permisosTodo(["ventas", "inventario", "finanzas"], ["consultar", "crear", "modificar"]),
@@ -103,6 +117,10 @@ export const PLANTILLAS: Record<NombrePlantilla, Permiso[]> = {
     { modulo: "ventas", accion: "modificar", alcance: "todo" },
     { modulo: "inventario", accion: "consultar", alcance: "todo" },
     { modulo: "inventario", accion: "modificar", alcance: "todo" },
+    // Rama feat-promociones — Operador solo consulta (decisión de
+    // Mateo): puede ver candidatos/historial, nunca aprobar ni
+    // ejecutar un cambio real en Mercado Libre.
+    { modulo: "promociones", accion: "consultar", alcance: "todo" },
   ],
   Contador: [
     { modulo: "finanzas", accion: "consultar", alcance: "todo" },
@@ -168,6 +186,12 @@ export const PERMISOS_PELIGROSOS: { modulo: Modulo; accion: Accion }[] = [
   { modulo: "finanzas", accion: "autorizar" },
   { modulo: "finanzas", accion: "anular" },
   { modulo: "personas", accion: "autorizar" },
+  // Rama feat-promociones — "ejecutar" cambia precios/promociones DE
+  // VERDAD en la cuenta de Mercado Libre de un cliente real; mismo
+  // criterio que los de arriba (plata o accesos de la empresa
+  // entera), nunca se concede sin que quien lo da sepa exactamente
+  // qué está autorizando.
+  { modulo: "promociones", accion: "ejecutar" },
 ];
 
 export function esPeligroso(modulo: Modulo, accion: Accion): boolean {
