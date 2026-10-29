@@ -1,0 +1,149 @@
+/* Issue #131 (Parte A) — ventas y utilidad, compartido por
+   Finanzas → Ventas, el detalle de una venta y Pedidos → Detalle día a
+   día (components/finanzas/DetalleDiaCuentaProducto.tsx). Las tablas
+   usan <Tabla> del marco; acá los niveles de fila (día, cuenta,
+   producto), la grilla de tarjetas y el bloque de filtros, que es el
+   mismo de app/panel/finanzas/finanzas.module.css (issue #186:
+   superficie oscura de <Tarjeta>, borde plateado-azul, nunca "caja
+   blanca"). */
+.filtros {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 20px 0;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
+}
+
+.accionesFiltro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.avisoError {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+  border: 1px solid var(--peligro, #c0392b);
+  background: color-mix(in srgb, var(--peligro, #c0392b) 18%, transparent);
+}
+
+.enlace {
+  font-weight: 600;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.enlace:hover {
+  text-decoration: underline;
+}
+
+.suave {
+  color: var(--texto-suave);
+  font-size: 12.5px;
+}
+
+.seccion {
+  margin-top: 24px;
+}
+
+.tituloSeccion {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.gridKpi {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 16px 0 24px;
+}
+
+.filaDia {
+  border-top: 2px solid var(--borde);
+  background: var(--tabla-encabezado-fondo);
+  font-weight: 700;
+}
+
+.filaCuenta {
+  border-top: 1px solid var(--borde);
+  font-weight: 600;
+}
+
+.filaProducto {
+  border-top: 1px solid var(--borde);
+}
+
+.filaProducto:hover {
+  background: var(--fila-hover);
+}
+
+.numero {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.sangriaCuenta {
+  padding-left: 24px !important;
+}
+
+.sangriaProducto {
+  padding-left: 40px !important;
+  min-width: 240px;
+}
+
+.marcas {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.listaSimple {
+  margin: 8px 0;
+  padding-left: 20px;
+  font-size: 13.5px;
+}
+
+.anulada {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.miniatura {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  vertical-align: middle;
+}
