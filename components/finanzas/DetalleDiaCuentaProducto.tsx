@@ -81,9 +81,12 @@ type Props = {
   extra?: Record<string, string>;
   // Tarjetas KPI y «Total por cuenta». false en Pedidos.
   mostrarResumen?: boolean;
+  // Acciones extra en la franja de «Traer ventas» (Finanzas → Ventas:
+  // recalcular costo, #131 Parte C). Pedidos no pasa nada.
+  acciones?: React.ReactNode;
 };
 
-export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchParams, ruta, extra = {}, mostrarResumen = true }: Props) {
+export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchParams, ruta, extra = {}, mostrarResumen = true, acciones }: Props) {
   const cuentas = await listarCuentasMlParaSelector(empresaId);
   let puedeTraerVentas = true;
   try {
@@ -171,6 +174,7 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
       </form>
 
       {puedeTraerVentas && <BotonTraerVentasMes cuentaId={cuentaId} />}
+      {acciones}
 
       {errorRango && <p className={estilos.avisoError}>{errorRango}</p>}
 
