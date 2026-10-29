@@ -16,6 +16,7 @@ import type { ProductoHistorial } from "./HistorialPublicaciones";
 import { buscarItemConDatos } from "./clip/buscar-item";
 import { importarItemCompleto } from "./importadores/importar-item";
 import type { ItemImportado } from "./formulario-logica";
+import { cloudinaryConfigurado } from "@/lib/cloudinary";
 
 // Parte 2 (página única, estructura de Zilonix OS) — reemplaza las 4
 // pantallas sueltas de la Parte 1 (/panel/publicar historial,
@@ -165,6 +166,7 @@ export default async function PublicarPage({
         importarSkuNoEncontrado={searchParams.importarSkuNoEncontrado ?? ""}
         importarLinkError={searchParams.importarLinkError ?? ""}
         importarNoDisponible={importarNoDisponible}
+        cloudinaryConfigurado={cloudinaryConfigurado()}
       />
     </>
   );

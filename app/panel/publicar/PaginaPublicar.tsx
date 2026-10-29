@@ -61,6 +61,7 @@ export function PaginaPublicar({
   importarSkuNoEncontrado,
   importarLinkError,
   importarNoDisponible,
+  cloudinaryConfigurado,
 }: {
   cuentas: Cuenta[];
   historial: ProductoHistorial[];
@@ -73,6 +74,7 @@ export function PaginaPublicar({
   importarSkuNoEncontrado: string;
   importarLinkError: string;
   importarNoDisponible: boolean;
+  cloudinaryConfigurado: boolean;
 }) {
   const [formInicial, setFormInicial] = useState<EstadoInicialFormulario>(() => {
     // Parte 3, punto A — un ítem importado (por SKU o por link, ya
@@ -127,7 +129,7 @@ export function PaginaPublicar({
       </Tarjeta>
 
       {/* --- Puntos 3-7: el formulario (cuentas, datos, por cuenta, categoría, publicar) --- */}
-      <FormularioPublicar key={formKey} cuentas={cuentas} inicial={formInicial} />
+      <FormularioPublicar key={formKey} cuentas={cuentas} inicial={formInicial} cloudinaryConfigurado={cloudinaryConfigurado} />
 
       {/* --- Punto 8: historial (y, Parte 3 punto B, el permalink real por cuenta) --- */}
       <HistorialPublicaciones

@@ -84,6 +84,9 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/publicar/categorias/buscar/route.ts",
   "app/api/ml/publicar/categorias/arbol/route.ts",
   "app/api/ml/publicar/caracteristicas/route.ts",
+  // Parte 3, punto C — sube una foto (de la PC o una URL de Canva ya
+  // validada) a Cloudinary; mismo permiso que crear el producto en sí.
+  "app/api/ml/publicar/fotos/route.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
   "app/api/ml/clip/route.ts",
