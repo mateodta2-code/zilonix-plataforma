@@ -15,6 +15,9 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
+import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
+import { DetalleDiaCuentaProducto } from "@/components/finanzas/DetalleDiaCuentaProducto";
+import { resolverVistaPedidos, type VistaPedidos } from "@/lib/finanzas/ventas-pantalla";
 import styles from "./page.module.css";
 
 // Next entrega string[] cuando la misma clave viene repetida
@@ -27,6 +30,9 @@ type FiltrosUrl = {
   hasta?: ParametroUrl;
   orden?: ParametroUrl;
   pagina?: ParametroUrl;
+  vista?: ParametroUrl;
+  // ?cuenta= y ?costo= del detalle día a día.
+  [clave: string]: ParametroUrl;
 };
 type FiltrosNormalizados = { q?: string; estado?: string; desde?: string; hasta?: string; orden?: string };
 
@@ -73,6 +79,22 @@ function hrefConPagina(filtros: FiltrosNormalizados, pagina: number): string {
   return qs ? `/panel/pedidos?${qs}` : "/panel/pedidos";
 }
 
+const accionDespachos = (
+  <BotonLink href="/panel/despachos" variante="secundario" chico>
+    Despachos
+  </BotonLink>
+);
+
+// Lista (la de siempre) y detalle día a día. Cambiar de pestaña no
+// arrastra filtros: desde/hasta no valen lo mismo en las dos (el detalle
+// tiene tope de 31 días y arranca en el mes en curso).
+function pestanasPedidos(vista: VistaPedidos): Pestana[] {
+  return [
+    { etiqueta: "Lista de pedidos", href: "/panel/pedidos", activa: vista === "lista" },
+    { etiqueta: "Detalle día a día", href: "/panel/pedidos?vista=detalle", activa: vista === "detalle" },
+  ];
+}
+
 // Tarea 2.7 / issue "tabla completa de pedidos" — búsqueda, filtro por
 // estado y fecha, orden y paginación, todo en la URL (?q=, ?estado=,
 // ?desde=, ?hasta=, ?orden=, ?pagina=) para que se pueda compartir o
@@ -100,6 +122,40 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
     return <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />;
   }
 
+  // Issue #131 — ?vista=detalle pinta el mismo «Detalle día a día ·
+  // cuenta · producto» de Finanzas → Ventas. Tiene montos de utilidad,
+  // así que además de ventas.consultar pide finanzas.consultar; sin ese
+  // permiso no se consulta nada y solo queda el aviso.
+  const vista = resolverVistaPedidos(normalizarParametro(searchParams.vista));
+  if (vista === "detalle") {
+    let puedeVerMontos = true;
+    try {
+      await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
+    } catch (error) {
+      if (!(error instanceof SinPermisoError)) throw error;
+      puedeVerMontos = false;
+    }
+    const rolNombre = puedeVerMontos ? null : ((await obtenerMiMembresia(usuario.id, empresa.id))?.rolNombre ?? "sin rol");
+    return (
+      <>
+        <EncabezadoPagina titulo="Pedidos" accion={accionDespachos} />
+        <div className={styles.pestanas}>
+          <Pestanas pestanas={pestanasPedidos(vista)} />
+        </div>
+        {puedeVerMontos ? (
+          <DetalleDiaCuentaProducto empresaId={empresa.id} usuarioId={usuario.id} searchParams={searchParams} ruta="/panel/pedidos" extra={{ vista: "detalle" }} />
+        ) : (
+          <SinAcceso
+            mensaje={`Tu rol (${rolNombre}) no puede ver el detalle día a día: tiene montos de utilidad y hace falta acceso a Finanzas. La lista de pedidos sigue disponible.`}
+          />
+        )}
+        <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
+          Volver al panel
+        </BotonLink>
+      </>
+    );
+  }
+
   const filtros: FiltrosNormalizados = {
     q: normalizarParametro(searchParams.q),
     estado: normalizarParametro(searchParams.estado),
@@ -125,14 +181,10 @@ export default async function PedidosPage({ searchParams }: { searchParams: Filt
 
   return (
     <>
-      <EncabezadoPagina
-        titulo="Pedidos"
-        accion={
-          <BotonLink href="/panel/despachos" variante="secundario" chico>
-            Despachos
-          </BotonLink>
-        }
-      />
+      <EncabezadoPagina titulo="Pedidos" accion={accionDespachos} />
+      <div className={styles.pestanas}>
+        <Pestanas pestanas={pestanasPedidos(vista)} />
+      </div>
 
       <form method="get" className={styles.filtros}>
         <Campo etiqueta="Buscar">

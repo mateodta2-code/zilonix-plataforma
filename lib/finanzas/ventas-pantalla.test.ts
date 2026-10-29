@@ -3,9 +3,11 @@ import { armarDetalleVentas, type TotalesDetalle } from "./detalle-ventas";
 import { aCentavos, calcularUtilidadVenta, desdeCentavos } from "./utilidad-venta";
 import {
   armarVentaEntrada,
+  hrefVentasUtilidad,
   mesActualBogota,
   porcentajeVentasConCosto,
   resolverRangoVentas,
+  resolverVistaPedidos,
   resumirPorCuenta,
   type CabeceraVentaFila,
   type LineaVentaFila,
@@ -171,5 +173,26 @@ describe("resolverRangoVentas (issue #131 Parte A)", () => {
     // Una sola fecha = ese día.
     const unDia = resolverRangoVentas("2026-10-20", undefined, ahora).rango!;
     expect([unDia.desde, unDia.hasta]).toEqual(["2026-10-20", "2026-10-20"]);
+  });
+});
+
+describe("detalle día a día en Pedidos (issue #131)", () => {
+  it("solo ?vista=detalle cambia la vista; lo demás es la lista", () => {
+    expect(resolverVistaPedidos("detalle")).toBe("detalle");
+    expect(resolverVistaPedidos(undefined)).toBe("lista");
+    expect(resolverVistaPedidos("")).toBe("lista");
+    expect(resolverVistaPedidos("DETALLE")).toBe("lista");
+    expect(resolverVistaPedidos("lista")).toBe("lista");
+  });
+
+  it("la paginación conserva vista, cuenta, rango y costo", () => {
+    const filtros = { cuenta: "c1", desde: "2026-10-01", hasta: "2026-10-31", costo: "sin" as const };
+    expect(hrefVentasUtilidad("/panel/pedidos", { vista: "detalle" }, filtros, 2)).toBe(
+      "/panel/pedidos?vista=detalle&cuenta=c1&desde=2026-10-01&hasta=2026-10-31&costo=sin&pagina=2"
+    );
+    // En Finanzas no hay vista, y la página 1 no va en la URL.
+    expect(hrefVentasUtilidad("/panel/finanzas/ventas", {}, { desde: "2026-10-01", hasta: "2026-10-07" }, 1)).toBe(
+      "/panel/finanzas/ventas?desde=2026-10-01&hasta=2026-10-07"
+    );
   });
 });

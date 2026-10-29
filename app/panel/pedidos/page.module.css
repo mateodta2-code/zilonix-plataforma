@@ -128,3 +128,9 @@
   align-self: flex-start;
   margin-top: 16px;
 }
+
+/* Issue #131 — pestañas Lista / Detalle día a día, con aire antes de
+   los filtros. */
+.pestanas {
+  margin-bottom: 16px;
+}
