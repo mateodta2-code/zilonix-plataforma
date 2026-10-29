@@ -14,6 +14,12 @@
   // nunca los otros 5 sitios — ver "Análisis aprox." en renderizarProducto.
   const APROX = window.ZilonixAproximados;
   const CAL = window.ZilonixCalibracion;
+  // Issue #273 (revisión de Pablo, punto 2) — mismo criterio opcional
+  // que APROX/CAL: solo Mercado Libre carga config.js (manifest.json,
+  // "Seguir en Zilonix"/"Seguir tienda" son funciones solo de ahí) —
+  // se usa para mostrar a qué ambiente (staging/producción) se manda
+  // "Seguir en Zilonix", ver el texto chico en renderizarEsqueleto.
+  const CONFIG = window.ZilonixConfig;
 
   const SIN_DATO = "No disponible";
   const PANEL_ID = "zilonix-panel-investigacion-174";
@@ -59,13 +65,20 @@
     return valorGuardado !== false;
   }
 
-  // La decisión real de "reescanear() se inyecta sola" — nunca si el
-  // interruptor global está apagado, nunca si la persona cerró el
-  // panel en ESTA pestaña (hasta que la reabra con el ícono o navegue
-  // a una pestaña/origen nuevo). Pura y separada a propósito: es el
-  // corazón del bug real de "vuelve a aparecer", así que queda
+  // Issue #273 (revisión de Pablo, punto 1 — HIGH) — nombre corregido:
+  // esto SOLO decide si el panel se CREA/DIBUJA (obtenerOCrearPanel +
+  // renderizarProducto/renderizarTienda/manejarListadoFlotante) — nunca
+  // si la página se lee ni si los envíos silenciosos (enviarVendidosAZilonix,
+  // enviarInventarioFichaAZilonix, enviarPublicacionesTiendaAZilonix,
+  // manejarEscaneoAutomatico) corren. Antes de esta corrección se
+  // llamaba debeReescanearAuto y gateaba reescanear() ENTERO desde el
+  // principio — bug real encontrado por Pablo: con el interruptor
+  // apagado, o con la pestaña cerrada con la X, "Completar vendidos" y
+  // el relevo de datos de Seguimiento se perdían en silencio, nunca
+  // llegaban a leer la página siquiera. Pura y separada a propósito:
+  // es el corazón del bug real de "vuelve a aparecer", así que queda
   // probada sola, sin depender del resto de reescanear().
-  function debeReescanearAuto(interruptorEnc, panelCerrado) {
+  function debeDibujarPanel(interruptorEnc, panelCerrado) {
     return interruptorEnc && !panelCerrado;
   }
 
@@ -277,10 +290,12 @@
       // Issue #273 — causa real del "vuelve a aparecer": antes solo
       // sacaba el nodo del DOM, sin avisarle a reescanear() que esta
       // pestaña lo cerró. Ahora, además, se marca "cerrado en esta
-      // pestaña" — debeReescanearAuto (arriba) corta reescanear() antes
-      // de volver a crear el panel, pase lo que pase con el
-      // MutationObserver/el intervalo de abajo. Se reabre solo con un
-      // clic real en el ícono de la extensión (mostrarPanelPorIcono).
+      // pestaña" — debeDibujarPanel (arriba) corta la parte de DIBUJO
+      // de reescanear() (nunca la lectura ni los envíos, ver el
+      // comentario completo de reescanear()) antes de volver a crear
+      // el panel, pase lo que pase con el MutationObserver/el
+      // intervalo de abajo. Se reabre solo con un clic real en el
+      // ícono de la extensión (mostrarPanelPorIcono).
       escribirPanelCerrado(storageDeSesion(), true);
       hostDelPanel(panel).remove();
     };
@@ -405,6 +420,16 @@
     pie.appendChild(boton);
   }
 
+  // Issue #273 (revisión de Pablo, punto 2) — puro (string -> string),
+  // para poder probarlo sin chrome/DOM real. "Enviando a: Staging" vs.
+  // "Enviando a: Producción" — el único marcador real que distingue los
+  // 2 hosts de Seller (ver ORIGENES_SELLER_PERMITIDOS, extension/marcador-zilonix.js)
+  // es la palabra "staging" en el subdominio — nunca hace falta una
+  // lista aparte acá, alcanza con ese substring.
+  function etiquetaAmbienteDeUrlApp(urlApp) {
+    return typeof urlApp === "string" && urlApp.includes("staging") ? "Staging" : "Producción";
+  }
+
   function renderizarEsqueleto(panel, tituloPanel, subtituloSitio) {
     panel.innerHTML = `
       <div class="zx-panel__encabezado">
@@ -424,6 +449,7 @@
           <span class="zx-interruptor__pista"><span class="zx-interruptor__perilla"></span></span>
         </label>
       </div>
+      ${CONFIG ? `<p class="zx-panel__ambiente">Enviando a: ${etiquetaAmbienteDeUrlApp(CONFIG.URL_APP)}</p>` : ""}
       <div class="zx-panel__cuerpo"></div>
       <div class="zx-panel__pie">
         <button type="button" class="zx-boton-copiar">Copiar datos (CSV)</button>
@@ -1177,28 +1203,56 @@
     }
   }
 
-  // Issue #273 — `forzado` SOLO lo pasa mostrarPanelPorIcono (abajo):
-  // un clic real en el ícono de la extensión tiene que mostrar el
-  // panel aunque el interruptor esté apagado o la persona ya lo haya
-  // cerrado en esta pestaña — las únicas 2 formas en las que
-  // reescanear() normal (MutationObserver/intervalo, SIN forzado) se
-  // corta antes de tocar nada del DOM.
+  // Issue #273 (revisión de Pablo, punto 1 — HIGH) — `forzado` SOLO lo
+  // pasa mostrarPanelPorIcono (abajo): un clic real en el ícono fuerza
+  // a `dibujarPanel` a `true` aunque el interruptor esté apagado o la
+  // persona haya cerrado el panel en esta pestaña.
+  //
+  // `dibujarPanel` es la ÚNICA cosa que el interruptor/el cerrado por
+  // pestaña deciden acá — nunca si la página se lee, nunca si los
+  // envíos silenciosos corren. Bug real corregido en esta revisión:
+  // antes, reescanear() entero cortaba al principio si el panel no
+  // tenía que dibujarse — con el interruptor apagado o la X apretada,
+  // "Completar vendidos" (enviarVendidosAZilonix/enviarInventarioFichaAZilonix)
+  // y el relevo de datos de Seguimiento (enviarPublicacionesTiendaAZilonix)
+  // se perdían en silencio, nunca llegaban ni a leer la página. Ahora
+  // `tipo`/`lector.leerX(document)`/los `enviarXAZilonix` corren
+  // SIEMPRE que haya una página reconocida — `panel` queda en `null`
+  // cuando no corresponde dibujar, y cada llamada de dibujo
+  // (`obtenerOCrearPanel`, `renderizarProducto`/`renderizarTienda`,
+  // `manejarListadoFlotante`) se salta explícitamente con `if (panel)`
+  // — nunca toca el DOM cuando no corresponde (punto 3 de la revisión,
+  // MED: el MutationObserver/intervalo pueden seguir disparando
+  // reescanear() todo lo que quieran, nunca hacen trabajo de dibujo
+  // mientras dibujarPanel sea false).
   function reescanear(forzado) {
-    if (!forzado && !debeReescanearAuto(interruptorEncendido, leerPanelCerrado(storageDeSesion()))) return;
-
     let tipo;
     try {
       tipo = lector.tipoDePagina(location.href, document);
     } catch {
       tipo = null;
     }
-    if (!tipo) return; // ni producto ni listado reconocido — no se dibuja nada encima de la página
+    if (!tipo) return; // ni producto ni listado reconocido — nada que leer ni dibujar
 
-    const panel = obtenerOCrearPanel();
+    const dibujarPanel = Boolean(forzado) || debeDibujarPanel(interruptorEncendido, leerPanelCerrado(storageDeSesion()));
+    const panel = dibujarPanel ? obtenerOCrearPanel() : null;
+
     try {
       if (tipo === "producto") {
         const datos = lector.leerProducto(document);
-        renderizarProducto(panel, datos);
+        // Issue #273 (revisión de Pablo, punto 1) — try/catch PROPIO
+        // para el dibujo: si renderizarProducto revienta (un selector
+        // roto, mismo caso que ya cubre el catch de afuera), nunca
+        // puede tirarse abajo los envíos de las líneas de abajo —
+        // esos tienen que correr SIEMPRE que haya datos, sin importar
+        // si el panel se pudo dibujar bien o no.
+        if (panel) {
+          try {
+            renderizarProducto(panel, datos);
+          } catch (errorDibujo) {
+            console.warn("[Zilonix Investigación] no se pudo dibujar el panel:", errorDibujo);
+          }
+        }
         enviarVendidosAZilonix(datos);
         // Issue #251 (revisión de Pablo, punto 4) — nunca en una
         // pestaña que la propia extensión abrió para "Analizar" o
@@ -1207,7 +1261,10 @@
         // otra, incluidas las que abre el botón "Actualizar todo" del
         // panel de Seguimiento (window.open desde la página, nunca
         // marcadas por background.js — un clic real, igual que abrir
-        // la ficha a mano).
+        // la ficha a mano) — y, desde esta revisión, también con el
+        // panel sin dibujarse (interruptor apagado o pestaña cerrada):
+        // "Completar vendidos" nunca depende de que el panel esté a
+        // la vista.
         if (!esPaginaDeEscaneoAutomatico() && !esPaginaDeLecturaResenas()) {
           enviarInventarioFichaAZilonix(datos);
         }
@@ -1226,23 +1283,38 @@
         // se estabilice (mismo criterio que el escaneo automático,
         // abajo) antes de pintar el panel — ver el comentario completo
         // junto a `esperarListadoEstable`/`manejarListadoFlotante`,
-        // arriba.
-        void manejarListadoFlotante(panel);
+        // arriba. Issue #273 — solo se llama si hay panel que dibujar;
+        // `manejarListadoFlotante` SIEMPRE necesita un `panel` real
+        // (termina en `renderizarListado(panel, ...)`), nunca tiene
+        // sentido invocarla con `panel === null`.
+        if (panel) void manejarListadoFlotante(panel);
         // Issue #231 — ya no se decide acá mismo con esta UNA lectura
         // sincrónica (ver manejarEscaneoAutomatico/esperarListadoEstable
         // arriba: el bug real era mandar 0 candidatos antes de que el
         // sitio terminara de renderizar). Esto sigue dependiendo del
         // mismo marcador de siempre (`_zilonix_escaneo=1`) y del mismo
         // flag de un solo envío — solo que la decisión de QUÉ mandar
-        // ahora espera a que el listado se estabilice.
+        // ahora espera a que el listado se estabilice. Issue #273 —
+        // SIEMPRE independiente de `dibujarPanel`: estas son pestañas
+        // que la propia extensión abrió tras un clic real en
+        // "Analizar" — el interruptor de ESTA pestaña nunca puede
+        // cancelar un escaneo que la persona ya autorizó desde el panel.
         if (esPaginaDeEscaneoAutomatico() && !yaEnviadoEscaneoAutomatico) {
           void manejarEscaneoAutomatico();
         }
       } else if (tipo === "tienda" && lector.leerTienda) {
         const datosTienda = lector.leerTienda(document);
-        renderizarTienda(panel, datosTienda);
+        // Issue #273 — mismo try/catch propio que el bloque "producto".
+        if (panel) {
+          try {
+            renderizarTienda(panel, datosTienda);
+          } catch (errorDibujo) {
+            console.warn("[Zilonix Investigación] no se pudo dibujar el panel:", errorDibujo);
+          }
+        }
         // Issue #251 (revisión de Pablo, punto 4) — mismo criterio que
-        // el bloque "producto", arriba.
+        // el bloque "producto", arriba — y, desde esta revisión,
+        // también independiente de `dibujarPanel`.
         if (!esPaginaDeEscaneoAutomatico() && !esPaginaDeLecturaResenas()) {
           enviarPublicacionesTiendaAZilonix(datosTienda);
         }
@@ -1277,6 +1349,19 @@
     reescanear(true);
   }
 
+  // Issue #273 (revisión de Pablo, punto 4 — LOW) — puro, separado a
+  // propósito para poder probarlo sin chrome real. `chrome.runtime.onMessage`
+  // puede, en teoría, recibir un mensaje de OTRA extensión instalada
+  // (Chrome permite mensajería entre extensiones con `externally_connectable`/
+  // `chrome.runtime.sendMessage(idDeOtraExtension, ...)`) — nunca confiar
+  // en el `tipo` del mensaje solo. `remitente.id` lo pone Chrome mismo
+  // (nunca se puede falsificar desde quien manda el mensaje) — mismo
+  // criterio que ya usa background.js con `remitente.tab.url` para
+  // "zilonix:abrir-seguimientos".
+  function esMensajeDePropiaExtension(remitente, idPropio) {
+    return Boolean(remitente) && remitente.id === idPropio;
+  }
+
   // Issue #273 — registrados ANTES de leerInterruptorInicial (abajo) a
   // propósito: un clic en el ícono, o un cambio del interruptor desde
   // OTRA pestaña, tienen que funcionar aunque la lectura inicial de
@@ -1286,7 +1371,8 @@
   // enviarVendidosAZilonix y el resto de este archivo: en vitest
   // (content.test.ts) `chrome` es `undefined`, nunca revienta el import.
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
-    chrome.runtime.onMessage.addListener((mensaje) => {
+    chrome.runtime.onMessage.addListener((mensaje, remitente) => {
+      if (!esMensajeDePropiaExtension(remitente, chrome.runtime.id)) return;
       if (mensaje && mensaje.tipo === "zilonix:mostrar-panel") mostrarPanelPorIcono();
     });
   }
@@ -1352,11 +1438,13 @@
       bloqueAnalisisAproximado,
       tipoIdDePagina,
       valorInterruptorDesdeStorage,
-      debeReescanearAuto,
+      debeDibujarPanel,
       leerPanelCerrado,
       escribirPanelCerrado,
       leerPanelMinimizado,
       escribirPanelMinimizado,
+      esMensajeDePropiaExtension,
+      etiquetaAmbienteDeUrlApp,
     };
   }
 })();

@@ -132,6 +132,18 @@
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
 }
 
+/* Issue #273 (revisión de Pablo, punto 2) — "Enviando a: Staging/Producción",
+   solo en Mercado Libre (único lector con config.js cargado, ver
+   renderizarEsqueleto en content.js). Texto chico, gris, nunca compite
+   con el resto del encabezado. */
+.zx-panel__ambiente {
+  margin: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid #222225;
+  font-size: 10px;
+  color: #6e6e6e;
+}
+
 .zx-panel__cuerpo {
   padding: 10px 12px;
 }
