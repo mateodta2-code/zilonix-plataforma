@@ -4,7 +4,15 @@
 // panel) — nunca se inventa un valor.
 (function () {
   "use strict";
-  const U = window.ZilonixUtilidades;
+  // Issue #44 (anexo "Importar video a Clip") — mismo patrón dual que
+  // lectores/mercadolibre.js: en Node (vitest) no existe `window`, se
+  // usa utilidades.js/video-comun.js directo con require(); en el
+  // navegador (content script real) `window` sí existe. Hasta esta
+  // tarea `U` nunca tenía este guard porque este archivo no tenía
+  // ningún test que lo importara en Node — ahora leerVideoDesdeHtml
+  // (abajo) sí, así que hace falta.
+  const U = typeof window !== "undefined" ? window.ZilonixUtilidades : require("../utilidades.js");
+  const V = typeof window !== "undefined" ? window.ZilonixVideoComun : require("./video-comun.js");
 
   function tipoDePagina(url) {
     if (/\/(dp|gp\/product)\//i.test(url)) return "producto";
@@ -139,5 +147,32 @@
     return { productos };
   }
 
-  window.ZilonixLectorActivo = { sitio: "Amazon", tipoDePagina, leerProducto, leerListado };
+  // Issue #44 (anexo "Importar video a Clip") — ver el comentario
+  // completo en extension/lectores/video-comun.js: heurística
+  // GENÉRICA compartida por las 7 plataformas, nunca selectores
+  // propios de Amazon (sin evidencia real confirmada de cómo Amazon
+  // embebe su video de producto). `leerVideoDesdeHtml` es pura (string
+  // -> objeto), probada con un HTML de ejemplo sin navegador — ver
+  // amazon.test.ts.
+  function leerVideoDesdeHtml(html) {
+    return V.extraerUrlsVideoDeHtml(html);
+  }
+
+  function leerVideo(doc) {
+    const html = doc && doc.documentElement && typeof doc.documentElement.outerHTML === "string" ? doc.documentElement.outerHTML : "";
+    return leerVideoDesdeHtml(html);
+  }
+
+  // Issue #44 (anexo) — mismo patrón dual module.exports/window.X que
+  // extension/lectores/mercadolibre.js, solo para lo que de verdad se
+  // puede probar sin DOM real.
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { leerVideoDesdeHtml };
+  }
+
+  // Issue #44 (anexo) — igual que mercadolibre.js: en Node (vitest,
+  // require() de leerVideoDesdeHtml) no existe `window` real.
+  if (typeof window !== "undefined") {
+    window.ZilonixLectorActivo = { sitio: "Amazon", tipoDePagina, leerProducto, leerListado, leerVideo };
+  }
 })();

@@ -408,16 +408,129 @@
       };
       if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
       try {
+        // Issue #44 (revisión de Pablo sobre el PR #290) — bug real
+        // que Mateo reportó: "no pasó nada" en una ficha sin
+        // /panel/publicar ya abierto, porque el mensaje se perdía en
+        // silencio. Ahora background.js SIEMPRE abre o enfoca una
+        // pestaña de Publicar — el texto del botón refleja las 2
+        // etapas reales: "Abriendo Publicar…" mientras background.js
+        // decide/abre/enfoca (puede tardar un instante, nunca
+        // instantáneo como antes), "Enviado ✓" recién cuando confirma
+        // que terminó — nunca antes, a diferencia de la versión vieja
+        // que marcaba "Enviado ✓" apenas se llamaba a sendMessage, sin
+        // esperar ninguna confirmación real.
+        boton.textContent = "Abriendo Publicar…";
         chrome.runtime.sendMessage({ tipo: "zilonix:importar-publicar", payload }, () => {
-          void chrome.runtime.lastError; // sin /panel/publicar abierto en ninguna pestaña — nunca un error real
+          void chrome.runtime.lastError; // Service Worker dormido/reciclado justo en este instante — nunca un error real
+          boton.textContent = "Enviado ✓";
+          setTimeout(() => (boton.textContent = "Importar a Publicar"), 1500);
         });
-        boton.textContent = "Enviado ✓";
-        setTimeout(() => (boton.textContent = "Importar a Publicar"), 1500);
       } catch {
         // Contexto de la extensión invalidado — nunca rompe el panel.
+        boton.textContent = "Importar a Publicar";
       }
     };
     pie.appendChild(boton);
+  }
+
+  // Issue #44 (anexo "Importar video a Clip") — mismo relevo YA
+  // probado que "Importar a Publicar" (arriba): content.js ->
+  // background.js (que abre o enfoca /panel/publicar#clip, mismo
+  // mecanismo exacto de manejarAbrirOEnfocarPublicar) ->
+  // marcador-zilonix.js -> postMessage. El video SIGUE con la marca de
+  // agua del sitio (Mateo lo aceptó explícitamente para las 7
+  // plataformas) — nunca se intenta quitarla ni reconstruir un stream.
+  // Mercado Libre puede rechazar en moderación un clip con el logo de
+  // otra plataforma (documentado en extension/LEEME.md) — decisión de
+  // la persona al elegir cuál video subir, no de la extensión.
+  //
+  // `resultadoVideo` sale de `lector.leerVideo(document)` (opcional —
+  // solo lo exponen las 7 plataformas de este anexo, ver
+  // lectores/video-comun.js) con la forma
+  // `{candidatos: string[], huboVideoNoDescargable: boolean}`. Sin
+  // ningún candidato y sin ese aviso, el botón directamente no se
+  // agrega — "el botón solo aparece en páginas de producto o de video
+  // donde el lector encontró al menos un video".
+  function agregarBotonImportarVideo(panel, resultadoVideo) {
+    if (!resultadoVideo) return;
+    const pie = panel.querySelector(".zx-panel__pie");
+    const candidatos = Array.isArray(resultadoVideo.candidatos) ? resultadoVideo.candidatos : [];
+    if (candidatos.length === 0) {
+      // Solo había un stream HLS (.m3u8) o un blob: local -- nunca se
+      // reconstruye un stream, se avisa y se deja en manos de la
+      // persona (descargarlo y subirlo desde el computador).
+      if (resultadoVideo.huboVideoNoDescargable) {
+        const aviso = document.createElement("p");
+        aviso.className = "zx-vacio";
+        aviso.textContent = "Este video no se puede traer, descárgalo y súbelo desde el computador.";
+        pie.appendChild(aviso);
+      }
+      return;
+    }
+
+    // Revisión de Pablo (sobre a6fdcbd, HIGH 1) — bug real: hasta esta
+    // corrección, el botón marcaba "Enviado ✓" apenas llegaba CUALQUIER
+    // respuesta de background.js, sin mirar si de verdad hizo algo —
+    // una URL que background.js rechaza (`{ok:false}`, última línea
+    // real de defensa) terminaba mostrando éxito en silencio. Ahora
+    // solo "Enviado ✓" si `respuesta.ok` es real; si no, un mensaje
+    // claro en el pie del panel, nunca silencio.
+    function mostrarErrorImportarVideo() {
+      let aviso = pie.querySelector(".zx-video-error");
+      if (!aviso) {
+        aviso = document.createElement("p");
+        aviso.className = "zx-vacio zx-video-error";
+        pie.appendChild(aviso);
+      }
+      aviso.textContent = "No pude tomar ese video, prueba descargarlo y subirlo desde la computadora.";
+    }
+
+    function crearBotonVideo(url, etiqueta) {
+      const boton = document.createElement("button");
+      boton.type = "button";
+      boton.className = "zx-boton-seguir";
+      boton.textContent = etiqueta;
+      boton.onclick = () => {
+        if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+        const payload = { url, origen: lector.sitio, paginaUrl: location.href };
+        try {
+          // Mismas 2 etapas reales que "Importar a Publicar": nunca
+          // marca "Enviado ✓" hasta que background.js de verdad
+          // confirme que abrió o enfocó /panel/publicar#clip.
+          boton.textContent = "Abriendo Publicar…";
+          chrome.runtime.sendMessage({ tipo: "zilonix:importar-video", payload }, (respuesta) => {
+            const error = chrome.runtime.lastError; // Service Worker dormido/reciclado justo en este instante — nunca un error real
+            void error;
+            if (error || !respuesta || !respuesta.ok) {
+              mostrarErrorImportarVideo();
+              boton.textContent = etiqueta;
+              return;
+            }
+            boton.textContent = "Enviado ✓";
+            setTimeout(() => (boton.textContent = etiqueta), 1500);
+          });
+        } catch {
+          // Contexto de la extensión invalidado — nunca rompe el panel.
+          boton.textContent = etiqueta;
+        }
+      };
+      return boton;
+    }
+
+    if (candidatos.length === 1) {
+      pie.appendChild(crearBotonVideo(candidatos[0], "Importar video a Clip"));
+      return;
+    }
+
+    // Más de un video encontrado en la misma página -- nunca se elige
+    // uno a ciegas, la persona decide cuál (ej. una ficha con video de
+    // portada Y un video de reseña, o varias calidades del mismo video).
+    const lista = document.createElement("div");
+    lista.className = "zx-lista-videos";
+    candidatos.forEach((url, indice) => {
+      lista.appendChild(crearBotonVideo(url, `Importar video ${indice + 1} a Clip`));
+    });
+    pie.appendChild(lista);
   }
 
   // Issue #273 (revisión de Pablo, punto 2) — puro (string -> string),
@@ -547,7 +660,7 @@
     return html;
   }
 
-  function renderizarProducto(panel, datos) {
+  function renderizarProducto(panel, datos, resultadoVideo) {
     const cuerpo = renderizarEsqueleto(panel, "Zilonix · Investigación", lector.sitio);
     let html = `<p class="zx-titulo-producto">${textoCampo(datos.titulo)}</p>`;
     html += filaHtml("Precio", formatoPrecio(datos.precio, datos.moneda), datos.precio == null);
@@ -578,6 +691,25 @@
     // Parte 3, punto D — mismo criterio: al lado de "Seguir en
     // Zilonix", nunca lo reemplaza.
     agregarBotonImportarPublicar(panel, datos);
+    // Issue #44 (anexo "Importar video a Clip") — al lado de los 2
+    // botones de arriba, nunca los reemplaza. Las 6 plataformas de
+    // este bloque ("producto") lo exponen vía lector.leerVideo.
+    agregarBotonImportarVideo(panel, resultadoVideo);
+  }
+
+  // Issue #44 (anexo "Importar video a Clip") — TikTok no es un
+  // marketplace que esta extensión investigue (sin precio/vendidos/
+  // vendedor que mostrar) — panel mínimo, solo el botón de importar
+  // video, mismo criterio que renderizarTienda (sin nada que copiar).
+  function renderizarVideo(panel, resultadoVideo) {
+    const cuerpo = renderizarEsqueleto(panel, "Zilonix · Investigación", lector.sitio);
+    cuerpo.innerHTML = "";
+    const botonCopiar = panel.querySelector(".zx-boton-copiar");
+    if (botonCopiar) botonCopiar.remove(); // nada que copiar en una página de video
+    agregarBotonImportarVideo(panel, resultadoVideo);
+    if (!resultadoVideo || (!resultadoVideo.candidatos.length && !resultadoVideo.huboVideoNoDescargable)) {
+      panel.querySelector(".zx-panel__pie").insertAdjacentHTML("afterbegin", '<p class="zx-vacio">No se encontró ningún video en esta página.</p>');
+    }
   }
 
   // Issue #174 — página de un vendedor/tienda: panel mínimo, solo el
@@ -1240,6 +1372,18 @@
     try {
       if (tipo === "producto") {
         const datos = lector.leerProducto(document);
+        // Issue #44 (anexo "Importar video a Clip") — opcional, igual
+        // que lector.leerResenas más abajo: solo las 7 plataformas de
+        // este anexo exponen lector.leerVideo (ver video-comun.js).
+        // Nunca puede tirar abajo el resto de esta función si revienta.
+        let resultadoVideo = null;
+        if (typeof lector.leerVideo === "function") {
+          try {
+            resultadoVideo = lector.leerVideo(document);
+          } catch {
+            resultadoVideo = null;
+          }
+        }
         // Issue #273 (revisión de Pablo, punto 1) — try/catch PROPIO
         // para el dibujo: si renderizarProducto revienta (un selector
         // roto, mismo caso que ya cubre el catch de afuera), nunca
@@ -1248,7 +1392,7 @@
         // si el panel se pudo dibujar bien o no.
         if (panel) {
           try {
-            renderizarProducto(panel, datos);
+            renderizarProducto(panel, datos, resultadoVideo);
           } catch (errorDibujo) {
             console.warn("[Zilonix Investigación] no se pudo dibujar el panel:", errorDibujo);
           }
@@ -1318,6 +1462,20 @@
         if (!esPaginaDeEscaneoAutomatico() && !esPaginaDeLecturaResenas()) {
           enviarPublicacionesTiendaAZilonix(datosTienda);
         }
+      } else if (tipo === "video" && typeof lector.leerVideo === "function") {
+        // Issue #44 (anexo "Importar video a Clip") — TikTok, hoy la
+        // única plataforma con este `tipo` (ver lectores/tiktok.js).
+        // Nunca lee/envía nada más acá: TikTok no es un marketplace
+        // que esta extensión investigue, este tipo existe SOLO para
+        // ofrecer el botón de importar video.
+        const resultadoVideo = lector.leerVideo(document);
+        if (panel) {
+          try {
+            renderizarVideo(panel, resultadoVideo);
+          } catch (errorDibujo) {
+            console.warn("[Zilonix Investigación] no se pudo dibujar el panel:", errorDibujo);
+          }
+        }
       }
     } catch (error) {
       // Un selector roto en vivo nunca deja la página del usuario rota
@@ -1362,6 +1520,112 @@
     return Boolean(remitente) && remitente.id === idPropio;
   }
 
+  // Issue #44 (anexo, "Importar publicación desde un link") —
+  // background.js abre esta pestaña (chrome.tabs.create, siempre
+  // active:false) solo para LEER y cerrarla — el panel NUNCA se
+  // dibuja acá, la persona nunca la ve. Si reescanear() (el arranque
+  // normal de esta misma página) ya alcanzó a dibujar un panel antes
+  // de que llegue este mensaje — carrera posible, nunca garantizada —
+  // se saca del DOM antes de leer, para que "el panel no se dibuja en
+  // esa pestaña" sea cierto sin importar el orden real de los eventos.
+  function sacarPanelSiExiste() {
+    if (typeof document === "undefined" || typeof document.getElementById !== "function") return;
+    const host = document.getElementById(PANEL_ID);
+    if (host && typeof host.remove === "function") host.remove();
+  }
+
+  function enviarResultadoLeerParaImportar(payload) {
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    try {
+      chrome.runtime.sendMessage({ tipo: "zilonix:resultado-leer-para-importar", payload }, () => {
+        void chrome.runtime.lastError; // la pestaña solicitante pudo cerrarse justo antes — nunca un error real
+      });
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe nada.
+    }
+  }
+
+  // Issue #44 — único marcador CONFIRMABLE de "Mercado Libre pide
+  // iniciar sesión/verificar" sin poder confirmar en vivo contra
+  // Mercado Libre hoy (a diferencia de Alibaba, "Captcha Interception",
+  // confirmado por Cowork — ver detectarFullEnHtmlFicha/el resto de
+  // este archivo): el subdominio REAL de cuentas de Mercado Libre
+  // (accounts.mercadolibre.*/accounts.mercadolivre.*, el mismo
+  // criterio "accounts.<dominio>" que usan Google y la mayoría de
+  // sitios grandes) — si la pestaña de lectura termina ahí, NUNCA se
+  // intenta pasar el login/captcha, se avisa como tal. Cualquier OTRO
+  // fallo de lectura (tipoDePagina no reconoce nada, leerProducto no
+  // trae título) se reporta como un fallo genérico — nunca se inventa
+  // que fue específicamente un captcha sin poder confirmarlo.
+  function esPaginaDeCuentasMl() {
+    return typeof location !== "undefined" && typeof location.hostname === "string" && /(^|\.)accounts\.mercado(libre|livre)\.com/i.test(location.hostname);
+  }
+
+  // Issue #44 — la lectura real para "Importar publicación desde un
+  // link": mismo par de funciones que ya usa el botón "Importar a
+  // Publicar" (leerProducto + leerGaleriaYDescripcion, issue #44
+  // original) — nunca duplicadas, solo reunidas en el MISMO payload
+  // {titulo, descripcion, precio, imagenes} que ya entiende
+  // itemImportadoDesdeMensajeExtension del lado de la página (el
+  // resultado viaja de vuelta como "zilonix:importar-publicar", el
+  // MISMO tipo de mensaje de siempre — background.js, no esta
+  // función, decide eso). Con un pequeño retardo (RETARDO_REESCANEO_MS,
+  // el mismo que usa reescanearConRetardo) antes de leer: "complete"
+  // (lo que espera background.js antes de mandar este mensaje) no
+  // garantiza que Mercado Libre ya terminó de hidratar el precio/título
+  // si la ficha los arma con JS después de cargar.
+  function leerParaImportar() {
+    sacarPanelSiExiste();
+
+    if (esPaginaDeCuentasMl()) {
+      enviarResultadoLeerParaImportar({ captcha: true });
+      return;
+    }
+
+    let tipo;
+    try {
+      tipo = lector.tipoDePagina(location.href, document);
+    } catch {
+      tipo = null;
+    }
+    // tipoDePagina ya reconoce producto/articulo/p//up/ por igual (ver
+    // issue #251) — un link de catálogo o /up/ llega acá exactamente
+    // igual que uno de publicación puntual, sin ningún caso aparte.
+    if (tipo !== "producto") {
+      enviarResultadoLeerParaImportar({});
+      return;
+    }
+
+    let datos;
+    try {
+      datos = lector.leerProducto(document);
+    } catch {
+      datos = null;
+    }
+    if (!datos || !datos.titulo) {
+      enviarResultadoLeerParaImportar({});
+      return;
+    }
+
+    let extra = { descripcion: null, imagenes: [] };
+    if (typeof lector.leerGaleriaYDescripcion === "function") {
+      try {
+        extra = lector.leerGaleriaYDescripcion(document) || extra;
+      } catch {
+        // se sigue con lo que sí se pudo leer — nunca revienta
+      }
+    }
+
+    enviarResultadoLeerParaImportar({
+      datos: {
+        titulo: datos.titulo,
+        descripcion: (extra && extra.descripcion) || null,
+        precio: typeof datos.precio === "number" ? datos.precio : null,
+        imagenes: (extra && extra.imagenes) || [],
+      },
+    });
+  }
+
   // Issue #273 — registrados ANTES de leerInterruptorInicial (abajo) a
   // propósito: un clic en el ícono, o un cambio del interruptor desde
   // OTRA pestaña, tienen que funcionar aunque la lectura inicial de
@@ -1374,6 +1638,7 @@
     chrome.runtime.onMessage.addListener((mensaje, remitente) => {
       if (!esMensajeDePropiaExtension(remitente, chrome.runtime.id)) return;
       if (mensaje && mensaje.tipo === "zilonix:mostrar-panel") mostrarPanelPorIcono();
+      if (mensaje && mensaje.tipo === "zilonix:leer-para-importar") setTimeout(leerParaImportar, RETARDO_REESCANEO_MS);
     });
   }
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {
@@ -1445,6 +1710,7 @@
       escribirPanelMinimizado,
       esMensajeDePropiaExtension,
       etiquetaAmbienteDeUrlApp,
+      esPaginaDeCuentasMl,
     };
   }
 })();

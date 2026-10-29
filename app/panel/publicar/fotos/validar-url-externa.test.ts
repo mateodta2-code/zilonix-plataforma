@@ -93,6 +93,20 @@ describe("hostPermitidoCanva — Parte 3, punto C (allowlist de Canva)", () => {
   it("no distingue mayúsculas/minúsculas", () => {
     expect(hostPermitidoCanva("MEDIA.CANVA.COM")).toBe(true);
   });
+
+  // Issue #44 (LOW pendiente del PR #290, Parte 4) — 2 casos de
+  // spoofing para el sufijo canvausercontent.com: "evilcanvausercontent.com"
+  // nunca tiene el "." que SUFIJOS_HOST_PERMITIDOS exige antes de
+  // "canvausercontent.com" (el endsWith(".canvausercontent.com") ya lo
+  // rechazaba — esto solo agrega la prueba que faltaba); "canvausercontent.com.evil.com"
+  // termina en ".evil.com", nunca en ".canvausercontent.com".
+  it("rechaza evilcanvausercontent.com (sin el punto real antes del sufijo permitido)", () => {
+    expect(hostPermitidoCanva("evilcanvausercontent.com")).toBe(false);
+  });
+
+  it("rechaza canvausercontent.com.evil.com (el sufijo real queda en el medio, no al final)", () => {
+    expect(hostPermitidoCanva("canvausercontent.com.evil.com")).toBe(false);
+  });
 });
 
 describe("descargarImagenExternaSegura — anti-SSRF", () => {
