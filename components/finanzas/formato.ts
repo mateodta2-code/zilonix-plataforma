@@ -10,6 +10,20 @@ export function mostrarPorcentaje(valor: string | null): string {
   return valor === null ? "—" : `${valor.replace(".", ",")} %`;
 }
 
+// Issue #131 — % de la tabla del detalle sin decimales, como Zilonix OS:
+// "33.15" → "33 %", "12.50" → "13 %". La mitad redondea lejos de cero
+// (como dividirRedondeando del tablero): "-12.50" → "-13 %". Solo texto y
+// BigInt, sin Number: el motor sigue entregando el porcentaje con 2
+// decimales y esto es solo cómo se pinta.
+export function mostrarPorcentajeEntero(valor: string | null): string {
+  if (valor === null) return "—";
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(valor);
+  if (!m) return mostrarPorcentaje(valor);
+  const [, signo, entero, decimales = ""] = m;
+  const redondeado = BigInt(entero) + (decimales !== "" && decimales[0] >= "5" ? BigInt(1) : BigInt(0));
+  return `${redondeado === BigInt(0) ? "" : signo}${redondeado} %`;
+}
+
 export const ETIQUETA_FORMA: Record<FormaEntrega, string> = {
   agencia: "Agencia",
   flex: "Flex",

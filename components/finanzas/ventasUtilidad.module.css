@@ -184,26 +184,30 @@
    sobre la columna de al lado. En auto cada columna de montos mide lo
    que mide su número más largo, nunca menos, y la 1ª columna tiene un
    ancho fijo (--ancho-col1) porque todo lo de adentro es un bloque de
-   ese ancho con overflow hidden: es lo único que cede. Con totales
-   del día de 8 cifras la tabla mide ~828px como mínimo: cabe desde
-   ~1200px de ventana; por debajo (1100) se desplaza de lado.
+   ese ancho con overflow hidden: es lo único que cede.
+
+   29-oct (Sharel, tras el acordeón): el título del producto se cortaba
+   a tres palabras. La 1ª columna pasa a 300px, el producto va en dos
+   líneas (título y chips; debajo SKU y #pedido), los montos a 12px y
+   los % sin decimales. Prioriza leer el producto: cabe sin desplazar
+   de lado desde ~1440px de ventana; a 1280 se desplaza un poco.
 
    Sin columna fija (sticky): existía porque había scroll de lado; ya
    no hace falta. En pantallas angostas la envoltura del marco sigue
    con overflow-x: auto y se desplaza todo junto. */
 .tablaCompacta {
-  --ancho-col1: 180px;
+  --ancho-col1: 300px;
 }
 
 .tablaCompacta table {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tablaCompacta th {
-  padding: 4px 4px;
-  font-size: 9.5px;
-  letter-spacing: 0.03em;
-  line-height: 1.2;
+  padding: 5px 5px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
   white-space: normal;
   vertical-align: bottom;
 }
@@ -214,8 +218,8 @@
 }
 
 .tablaCompacta td {
-  padding: 3px 4px;
-  line-height: 1.3;
+  padding: 4px 5px;
+  line-height: 1.35;
 }
 
 .tablaCompacta .numero {
@@ -252,42 +256,63 @@
    devolución). */
 .tablaCompacta [data-estado] {
   padding: 0 4px;
-  font-size: 8.5px;
+  font-size: 9px;
   letter-spacing: 0.03em;
   line-height: 1.5;
 }
 
 .tablaCompacta .suave {
-  font-size: 10px;
+  font-size: 10.5px;
 }
 
 .lineaProducto {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  gap: 1px;
   width: calc(var(--ancho-col1) - 24px);
   overflow: hidden;
+}
+
+/* Línea 1: el título usa todo lo que dejan los chips; los chips no
+   ceden y van pegados al título. */
+.filaTituloProducto {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   white-space: nowrap;
 }
 
-.lineaProducto > * {
+.filaTituloProducto > * {
   flex: none;
 }
 
-/* El título no cede: mide hasta 100px y lo que se corta es la cola
-   (SKU y número de pedido). */
+.filaTituloProducto > .tituloProducto {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .tituloProducto {
-  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* Línea 2: SKU y número de pedido, chicos y suaves. */
+.filaDatosProducto {
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
   white-space: nowrap;
 }
 
 /* Issue #131 — acordeón del detalle (TablaDetalleAcordeon.tsx), como
    Zilonix OS: el día y la cuenta son botones con una flecha que se gira
-   al abrir. La 1ª columna mide lo mismo que antes (~185px): la flecha
-   (12px + 3px de espacio) sale del ancho del texto, y el producto
-   corre su sangría para quedar alineado bajo el texto de la cuenta. */
+   al abrir. Las tres filas miden lo mismo (--ancho-col1 + ~9px): la
+   flecha (12px + 3px de espacio) sale del ancho del texto, y el
+   producto corre su sangría para quedar alineado bajo el texto de la
+   cuenta. */
 .controlNivel {
   display: flex;
   align-items: center;
@@ -329,7 +354,7 @@
 
 /* Día: el más marcado (fondo de encabezado y 700 de .filaDia). */
 .tablaCompacta .filaDia .textoNivel {
-  font-size: 11.5px;
+  font-size: 12.5px;
   letter-spacing: 0.01em;
 }
 
@@ -341,7 +366,7 @@
    suaves. */
 .tablaCompacta .datoProducto {
   color: var(--texto-suave);
-  font-size: 9.5px;
+  font-size: 10px;
 }
 
 /* Issue #131 (Parte C) — «Recalcular costo con la tabla maestra»

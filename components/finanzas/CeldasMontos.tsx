@@ -2,7 +2,7 @@ import { mostrarMonto } from "@/lib/finanzas/montos";
 import type { TotalesDetalle } from "@/lib/finanzas/detalle-ventas";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla } from "@/components/marco/Tabla";
-import { mostrarPorcentaje } from "./formato";
+import { mostrarPorcentajeEntero } from "./formato";
 import estilos from "./ventasUtilidad.module.css";
 
 // Issue #131 — las columnas de dinero de una fila del detalle (y del
@@ -31,8 +31,8 @@ export function CeldasMontos({
       {/* La devolución como concepto aparte llega con #164. */}
       <CeldaTabla className={estilos.numero}>—</CeldaTabla>
       <CeldaTabla className={estilos.numero}>{utilidad === null ? "—" : mostrarMonto(utilidad)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{utilidad === null ? "—" : mostrarPorcentaje(t.porcentaje_utilidad)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarPorcentaje(t.porcentaje_ml)}</CeldaTabla>
+      <CeldaTabla className={estilos.numero}>{utilidad === null ? "—" : mostrarPorcentajeEntero(t.porcentaje_utilidad)}</CeldaTabla>
+      <CeldaTabla className={estilos.numero}>{mostrarPorcentajeEntero(t.porcentaje_ml)}</CeldaTabla>
       <CeldaTabla className={estilos.numero}>{t.cantidad}</CeldaTabla>
     </>
   );
