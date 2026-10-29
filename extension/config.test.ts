@@ -104,4 +104,40 @@ describe("config.js — URL_APP dinámico (issue #273, revisión de Pablo)", () 
     onChangedCb!({ otraClave: { newValue: "x" } }, "local");
     expect(mod.URL_APP).toBe(URL_APP_PRODUCCION);
   });
+
+  // Issue #44 (revisión de Pablo sobre el PR #290, LOW) — bug real
+  // posible: un "zilonixUrlApp" que NO está en la allowlist (nunca
+  // debería poder escribirse — marcador-zilonix.js ya lo valida antes
+  // de guardar — pero esta es la capa que lee, nunca confía en que la
+  // que escribe fue la única forma de llegar ahí) se ignora, tanto al
+  // leer como en caliente.
+  it("zilonixUrlApp guardado que NO está en la allowlist -> se ignora al leer, queda en producción", async () => {
+    const chromeMock = {
+      storage: {
+        local: {
+          get: (_defaults: Record<string, unknown>, cb: (datos: Record<string, unknown>) => void) => cb({ zilonixUrlApp: "https://evil.com" }),
+        },
+        onChanged: { addListener: () => {} },
+      },
+    };
+    const mod = await cargarConfigFresco(chromeMock);
+    expect(mod.URL_APP).toBe(URL_APP_PRODUCCION);
+  });
+
+  it("zilonixUrlApp que NO está en la allowlist, vía onChanged -> se ignora en caliente", async () => {
+    let onChangedCb: ((cambios: Record<string, { newValue?: unknown }>, area: string) => void) | null = null;
+    const chromeMock = {
+      storage: {
+        local: { get: (defaults: Record<string, unknown>, cb: (datos: Record<string, unknown>) => void) => cb(defaults) },
+        onChanged: {
+          addListener: (fn: (cambios: Record<string, { newValue?: unknown }>, area: string) => void) => {
+            onChangedCb = fn;
+          },
+        },
+      },
+    };
+    const mod = await cargarConfigFresco(chromeMock);
+    onChangedCb!({ zilonixUrlApp: { newValue: "https://evil.com" } }, "local");
+    expect(mod.URL_APP).toBe(URL_APP_PRODUCCION);
+  });
 });

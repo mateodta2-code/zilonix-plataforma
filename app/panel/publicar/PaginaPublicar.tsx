@@ -128,6 +128,18 @@ export function PaginaPublicar({
       if (item) importarEnFormulario(item);
     }
     window.addEventListener("message", alRecibirMensaje);
+    // Issue #44 (revisión de Pablo sobre el PR #290) — "Importar a
+    // Publicar abre o enfoca Publicar": extension/marcador-zilonix.js
+    // corre con `run_at: "document_start"` (manifest.json) — MUCHO
+    // antes de que este efecto monte (recién después de que React
+    // hidrata). Si esa pestaña pide el importacionPendiente a
+    // background.js apenas carga, la respuesta podría llegar ANTES de
+    // que el listener de arriba exista — el postMessage se perdería
+    // para siempre (nadie escuchando todavía), y background.js ya lo
+    // habría borrado (se entrega una sola vez). Este aviso es la señal
+    // real que dispara ese pedido del lado de la extensión — recién
+    // DESPUÉS de que el listener ya está montado, nunca antes.
+    window.postMessage({ fuente: "zilonix-panel", tipo: "publicar-listo" }, window.location.origin);
     return () => window.removeEventListener("message", alRecibirMensaje);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- importarEnFormulario/cuentas cambian de referencia en cada render (closures de PaginaPublicar) pero el listener solo necesita montarse una vez; lee cuentas/setFormInicial por clausura, no por dependencia
   }, []);

@@ -408,13 +408,26 @@
       };
       if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
       try {
+        // Issue #44 (revisión de Pablo sobre el PR #290) — bug real
+        // que Mateo reportó: "no pasó nada" en una ficha sin
+        // /panel/publicar ya abierto, porque el mensaje se perdía en
+        // silencio. Ahora background.js SIEMPRE abre o enfoca una
+        // pestaña de Publicar — el texto del botón refleja las 2
+        // etapas reales: "Abriendo Publicar…" mientras background.js
+        // decide/abre/enfoca (puede tardar un instante, nunca
+        // instantáneo como antes), "Enviado ✓" recién cuando confirma
+        // que terminó — nunca antes, a diferencia de la versión vieja
+        // que marcaba "Enviado ✓" apenas se llamaba a sendMessage, sin
+        // esperar ninguna confirmación real.
+        boton.textContent = "Abriendo Publicar…";
         chrome.runtime.sendMessage({ tipo: "zilonix:importar-publicar", payload }, () => {
-          void chrome.runtime.lastError; // sin /panel/publicar abierto en ninguna pestaña — nunca un error real
+          void chrome.runtime.lastError; // Service Worker dormido/reciclado justo en este instante — nunca un error real
+          boton.textContent = "Enviado ✓";
+          setTimeout(() => (boton.textContent = "Importar a Publicar"), 1500);
         });
-        boton.textContent = "Enviado ✓";
-        setTimeout(() => (boton.textContent = "Importar a Publicar"), 1500);
       } catch {
         // Contexto de la extensión invalidado — nunca rompe el panel.
+        boton.textContent = "Importar a Publicar";
       }
     };
     pie.appendChild(boton);

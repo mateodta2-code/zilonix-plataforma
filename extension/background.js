@@ -25,16 +25,54 @@
 // ficha de un competidor o la tienda que sigue, y solo la pestaña del
 // panel de Seguimiento (con marcador-zilonix.js, y con el componente
 // que escucha "dato-pagina-seguimiento" montado) hace algo con esto.
-// Parte 3, punto D ("Importar a Publicar") — "zilonix:importar-publicar"
-// suma al mismo relevo genérico: content.js lo manda con un clic real
-// en una ficha de Mercado Libre, solo la pestaña con /panel/publicar
-// abierto (marcador-zilonix.js, matches ampliado en manifest.json)
-// hace algo con esto. Sin cola a propósito (a diferencia de
-// "zilonix:dato-pagina-seguimiento"): si la persona todavía no tiene
-// /panel/publicar abierto en ninguna pestaña, el mensaje simplemente no
-// llega a nadie — mismo criterio simple que ya tenían "zilonix:vendidos"/
-// "zilonix:listado" antes de que #251 le agregara cola a Seguimiento.
-const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix:dato-pagina-seguimiento", "zilonix:importar-publicar"]);
+//
+// Issue #44 (revisión de Pablo sobre el PR #290) — "zilonix:importar-publicar"
+// SALIÓ de este relevo genérico y tiene su propio manejador, más abajo
+// (buscar "Importar a Publicar abre o enfoca Publicar"): el relevo
+// genérico de acá nunca abre ni enfoca ninguna pestaña por su cuenta —
+// hasta esta tarea, "Importar a Publicar" dependía de que la persona YA
+// tuviera /panel/publicar abierto a mano, y si no, el mensaje se perdía
+// en silencio (bug real reportado por Mateo: "no pasó nada"). Ahora, sin
+// ninguna pestaña de Publicar que acepte el mensaje, background.js abre
+// o enfoca una sola — mismo espíritu que "zilonix:abrir-seguimientos"
+// (más abajo), nunca el broadcast simple que sigue sirviendo para
+// "zilonix:vendidos"/"zilonix:listado".
+const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix:dato-pagina-seguimiento"]);
+
+// Issue #44 — "Importar a Publicar abre o enfoca Publicar". Mismos
+// hosts EXACTOS que ORIGENES_SELLER_PERMITIDOS en marcador-zilonix.js
+// (el único que escribe "zilonixUrlApp") — revalidados acá de nuevo
+// antes de abrir una pestaña: background.js es el único lugar con el
+// permiso real de abrir pestañas, así que es la última línea real de
+// defensa (mismo criterio que PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO,
+// abajo, para "Actualizar todo").
+const ORIGENES_SELLER_PERMITIDOS_PUBLICAR = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app"];
+const URL_APP_PRODUCCION_DEFAULT = "https://web-production-af270.up.railway.app";
+const CLAVE_IMPORTACION_PENDIENTE = "importacionPendiente";
+// 2 minutos — tope real: un payload de "Importar a Publicar" viejo
+// (ej. la persona cerró la pestaña nueva sin llenar nada, y vuelve a
+// intentar horas después desde otra ficha) nunca se entrega como si
+// fuera de ahora.
+const TIEMPO_MAX_IMPORTACION_PENDIENTE_MS = 2 * 60 * 1000;
+// Evita abrir 2 pestañas con un doble clic real en 3s — mismo patrón
+// que COOLDOWN_ABRIR_SEGUIMIENTOS_MS (chrome.storage.session, no una
+// variable en memoria, para sobrevivir un reciclado del Service Worker
+// entre el primer clic y el segundo).
+const COOLDOWN_IMPORTAR_PUBLICAR_MS = 3000;
+
+// Issue #44 — misma idea que CONFIG.URL_APP (extension/config.js) pero
+// del lado del Service Worker, que nunca carga ese archivo (solo corre
+// en páginas de Mercado Libre) — lee "zilonixUrlApp" directo de
+// chrome.storage.local, mismo criterio: solo se usa si está en la
+// allowlist, si no, cae a producción — nunca confía en que
+// marcador-zilonix.js fue la única forma de llegar ahí.
+function resolverUrlPublicar(callback) {
+  chrome.storage.local.get({ zilonixUrlApp: null }, (datos) => {
+    const guardada = typeof datos.zilonixUrlApp === "string" ? datos.zilonixUrlApp : null;
+    const base = guardada && ORIGENES_SELLER_PERMITIDOS_PUBLICAR.includes(guardada) ? guardada : URL_APP_PRODUCCION_DEFAULT;
+    callback(`${base}/panel/publicar`);
+  });
+}
 
 // Issue #251 (revisión de Pablo, punto 4) — "que la lectura no dependa
 // de tener abierta la pestaña de Seguimiento". Decisión de Mateo:
@@ -771,7 +809,7 @@ function finalizarEscaneoPlataforma(tabIdPanel) {
   chrome.tabs.update(tabIdPanel, { active: true }, () => void chrome.runtime.lastError);
 }
 
-chrome.runtime.onMessage.addListener((mensaje, remitente) => {
+chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
   // Corrección de Pablo (revisión del PR #260, punto 2) — "el worker
   // despertó", sin importar qué mensaje sea: barre el registro de
   // "Actualizar todo" por si había alguna pestaña vencida esperando a
@@ -820,6 +858,114 @@ chrome.runtime.onMessage.addListener((mensaje, remitente) => {
     if (!remitente.tab?.id) return;
     iniciarLecturaResenas(remitente.tab.id, mensaje.payload?.items);
     return;
+  }
+
+  // Issue #44 (revisión de Pablo sobre el PR #290) — "Importar a
+  // Publicar abre o enfoca Publicar": bug real que Mateo reportó —
+  // hasta esta tarea, el botón solo mandaba el mensaje a una pestaña
+  // de /panel/publicar que YA estuviera abierta; sin ninguna, se
+  // perdía en silencio ("no pasó nada"). "Seguir en Zilonix" sí abre
+  // su propia pestaña con el clic — este handler hace lo mismo para
+  // Importar, con el mismo criterio de "nunca navega sin un clic
+  // real" (el clic YA pasó, en content.js, antes de este mensaje).
+  if (mensaje.tipo === "zilonix:importar-publicar") {
+    if (!mensaje.payload) return;
+    // Evita el doble clic: un segundo "zilonix:importar-publicar"
+    // dentro de los 3s del primero no abre una segunda pestaña ni
+    // vuelve a guardar un pendiente — chrome.storage.session (no una
+    // variable en memoria) para que el cooldown sobreviva si el
+    // Service Worker se recicla entre un clic y el siguiente, mismo
+    // criterio que COOLDOWN_ABRIR_SEGUIMIENTOS_MS.
+    chrome.storage.session.get({ ultimoImportarPublicarMs: 0 }, (datosCooldown) => {
+      const ahoraMs = Date.now();
+      const ultimoMs = typeof datosCooldown.ultimoImportarPublicarMs === "number" ? datosCooldown.ultimoImportarPublicarMs : 0;
+      if (ahoraMs - ultimoMs < COOLDOWN_IMPORTAR_PUBLICAR_MS) return;
+      chrome.storage.session.set({ ultimoImportarPublicarMs: ahoraMs });
+
+      // a. Guarda el payload con marca de tiempo — entregado una sola
+      // vez cuando /panel/publicar pida "zilonix:pedir-importacion-pendiente"
+      // (abajo), con el mismo tope de 2 minutos ahí.
+      chrome.storage.session.set({ [CLAVE_IMPORTACION_PENDIENTE]: { payload: mensaje.payload, creadoMs: ahoraMs } });
+
+      const abrirONuevaPestana = () => {
+        resolverUrlPublicar((urlPublicar) => {
+          // active:true — igual que "Seguir en Zilonix" (window.open
+          // sin "background"), la pestaña nueva se ve de inmediato.
+          chrome.tabs.create({ url: urlPublicar, active: true }, () => void chrome.runtime.lastError);
+          if (typeof sendResponse === "function") sendResponse({ ok: true, abrioNueva: true });
+        });
+      };
+
+      // b. Manda el mensaje a las pestañas abiertas, igual que antes —
+      // marcador-zilonix.js (corregido en esta misma revisión) solo
+      // responde ack {ok:true, publicar:true} si ESA pestaña es de
+      // verdad /panel/publicar, nunca desde cualquier otra ruta de
+      // Seller.
+      chrome.tabs.query({}, (pestanas) => {
+        if (pestanas.length === 0) {
+          abrirONuevaPestana();
+          return;
+        }
+        let pendientes = pestanas.length;
+        let tabIdEnfocado = null;
+        let windowIdEnfocado = null;
+        const terminar = () => {
+          pendientes -= 1;
+          if (pendientes > 0) return;
+          if (tabIdEnfocado != null) {
+            // c. Una pestaña de Publicar YA abierta aceptó el mensaje
+            // en vivo — nunca hace falta que lo vuelva a pedir, se
+            // borra el pendiente y se la pone al frente (pestaña Y
+            // ventana, por si estaba en otra ventana de Chrome).
+            chrome.storage.session.remove(CLAVE_IMPORTACION_PENDIENTE);
+            chrome.tabs.update(tabIdEnfocado, { active: true }, () => void chrome.runtime.lastError);
+            if (windowIdEnfocado != null) chrome.windows.update(windowIdEnfocado, { focused: true }, () => void chrome.runtime.lastError);
+            if (typeof sendResponse === "function") sendResponse({ ok: true, abrioNueva: false });
+            return;
+          }
+          // d. Ninguna pestaña de Publicar la aceptó — se abre una
+          // nueva. El pendiente sigue guardado (paso a) — esa pestaña
+          // nueva lo pide apenas su listener esté montado.
+          abrirONuevaPestana();
+        };
+        for (const pestana of pestanas) {
+          if (pestana.id == null || pestana.id === remitente.tab?.id) {
+            terminar();
+            continue;
+          }
+          chrome.tabs.sendMessage(pestana.id, mensaje, (respuesta) => {
+            const error = chrome.runtime.lastError; // pestaña sin marcador-zilonix.js — nunca un error real
+            void error;
+            if (!error && respuesta && respuesta.ok && respuesta.publicar) {
+              tabIdEnfocado = pestana.id;
+              windowIdEnfocado = pestana.windowId;
+            }
+            terminar();
+          });
+        }
+      });
+    });
+    return true; // respuesta async (sendResponse se llama más tarde, arriba) — mantiene el canal abierto
+  }
+
+  // Issue #44 — /panel/publicar (marcador-zilonix.js) lo pide apenas su
+  // listener de postMessage está montado (señal "publicar-listo") o,
+  // como red de seguridad, con un par de reintentos acotados. Se
+  // entrega UNA sola vez (se borra al leerlo, haya algo o no) y nunca
+  // si ya pasaron los 2 minutos — un pendiente viejo no se entrega
+  // como si fuera de ahora.
+  if (mensaje.tipo === "zilonix:pedir-importacion-pendiente") {
+    chrome.storage.session.get({ [CLAVE_IMPORTACION_PENDIENTE]: null }, (datos) => {
+      const pendiente = datos[CLAVE_IMPORTACION_PENDIENTE];
+      chrome.storage.session.remove(CLAVE_IMPORTACION_PENDIENTE);
+      if (!pendiente || typeof pendiente.creadoMs !== "number") {
+        if (typeof sendResponse === "function") sendResponse({ payload: null });
+        return;
+      }
+      const vencido = Date.now() - pendiente.creadoMs > TIEMPO_MAX_IMPORTACION_PENDIENTE_MS;
+      if (typeof sendResponse === "function") sendResponse({ payload: vencido ? null : pendiente.payload });
+    });
+    return true; // respuesta async
   }
 
   // Issue #251 (revisión de Pablo, punto 4) — EscuchaExtension.tsx lo
