@@ -40,8 +40,10 @@ const RUTAS_PROTEGIDAS = new Set([
   // finanzas.consultar (y lib/finanzas/ventas-consulta.ts otra vez).
   "app/panel/finanzas/ventas/page.tsx",
   "app/panel/finanzas/ventas/[pedidoId]/page.tsx",
-  // «Traer ventas de este mes» (también en /panel/pedidos): pide
-  // finanzas.modificar, acá y en lib/finanzas/traer-ventas-mes.ts.
+  // «Traer ventas de este mes» (también en /panel/pedidos) y, Parte C,
+  // vista previa y confirmación del recálculo de costos: piden
+  // finanzas.modificar, acá y en lib/finanzas/ (traer-ventas-mes.ts,
+  // recalcular-costos.ts).
   "app/panel/finanzas/ventas/actions.ts",
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
@@ -121,6 +123,32 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/clip/estado/route.ts",
   "app/panel/publicidad/page.tsx",
   "app/panel/publicidad/actions.ts",
+  // Rama feat-promociones — módulo nuevo "promociones"
+  // (consultar/aprobar/ejecutar, lib/roles-plantillas.ts). "consultar"
+  // para lo que solo LEE (buscar, el polling del trabajo, candidatos,
+  // historial); "aprobar" para decidir el lote y editar las reglas de
+  // una cuenta (ejecutar() mismo que decide, de una, también dentro
+  // del handler, si quien llama además tiene "ejecutar").
+  "app/api/ml/promociones/buscar/route.ts",
+  "app/api/ml/promociones/trabajo/[jobId]/route.ts",
+  "app/api/ml/promociones/candidatos/route.ts",
+  "app/api/ml/promociones/reglas/route.ts",
+  "app/api/ml/promociones/acciones/route.ts",
+  // MED 7 (review de Pablo) — paso separado de "ejecutar": requiere
+  // su propio requierePermiso("promociones","ejecutar"), nunca el
+  // mismo "aprobar" que exige el POST combinado de arriba.
+  "app/api/ml/promociones/acciones/ejecutar/route.ts",
+  // Review de Pablo (PR #304) — count(*) real para "Lanzar aprobadas a
+  // Mercado Libre (N)": mismo permiso de solo lectura que el resto de
+  // lo que solo CONSULTA (buscar/trabajo/candidatos/historial).
+  "app/api/ml/promociones/acciones/pendientes-lanzar/route.ts",
+  "app/api/ml/promociones/historial/route.ts",
+  "app/panel/promociones/page.tsx",
+  // "Conexión de IA" vive bajo el módulo "configuracion" que ya
+  // existe (consultar/modificar) — nunca un permiso nuevo solo para
+  // esto.
+  "app/api/configuracion/ia-conexion/route.ts",
+  "app/panel/configuracion/page.tsx",
 ]);
 
 // Tarea 1.11 — eje de autorización APARTE: "¿esta cuenta es

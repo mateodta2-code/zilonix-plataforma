@@ -11,6 +11,7 @@
 // donde corresponde.
 
 import { leerRetryAfterMs } from "@/lib/ml/reintento-429";
+import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 
 const BASE_URL = "https://api.mercadolibre.com";
 
@@ -1284,4 +1285,247 @@ export async function obtenerClipsMl(itemId: string, token: string): Promise<Cli
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
     throw e;
   }
+}
+
+// ---------- Rama feat-promociones (motor portado de zilonix-os-web,
+// lib/mercadolibre-promo.js — ver docs/investigacion/promociones-mercado-libre.md
+// de ese repo para la evidencia real citada en cada regla) ----------
+
+// GET /users/{cuentaIdExterna}/items/search?status=active — UNA página
+// (el llamador, lib/trabajos/buscarPromocionesMultiCuenta.ts, pagina él
+// mismo para poder reportar progreso real y nunca con un tope fijo de
+// antemano, al revés de la versión vieja de Zilonix OS que paraba en
+// 250 productos).
+export type PaginaItemsActivosMl = { ids: string[]; totalCatalogo: number };
+
+export async function listarItemsActivosMl(cuentaIdExterna: string, token: string, offset: number, limite = 50): Promise<PaginaItemsActivosMl> {
+  exigirId(cuentaIdExterna, PATRON_ID_VENDEDOR, "cuentaIdExterna");
+  const url = `${BASE_URL}/users/${encodeURIComponent(cuentaIdExterna)}/items/search?status=active&limit=${limite}&offset=${offset}`;
+  const resp = await pedir<{ results?: unknown[]; paging?: { total?: unknown } }>(url, token);
+  if (!resp.ok) throw new Error(`No se pudo listar publicaciones activas de Mercado Libre (HTTP ${resp.status}).`);
+  const ids = Array.isArray(resp.data.results) ? resp.data.results.filter((r): r is string => typeof r === "string") : [];
+  const totalCatalogo = typeof resp.data.paging?.total === "number" ? resp.data.paging.total : ids.length;
+  return { ids, totalCatalogo };
+}
+
+// Detalle mínimo que necesita Promociones de un item — NO reusa
+// leerItemCompletoMl (nunca se le agrega `variations` a esa función
+// compartida solo para esto, para no cambiarle el contrato a sus
+// llamadores ya existentes y probados) — mismo criterio que
+// buscarItemParaClip en su momento, un wrapper propio en vez de tocar
+// uno compartido.
+export type ItemParaPromocionMl = {
+  title: string | null;
+  thumbnail: string | null;
+  skuCodigo: string | null;
+  tieneVariantes: boolean;
+  // Review de Pablo (PR #304) — true cuando el ítem tiene variaciones
+  // con SKU distinto entre sí: no hay forma honesta de elegir "la"
+  // variación para calcular un solo piso, así que skuCodigo queda
+  // null (nunca se toma la primera a ciegas) y el motor (lib/ml/promociones.ts)
+  // usa esto para dejar un motivo específico, distinto del genérico
+  // "tiene variantes".
+  skuVariantesDistintas: boolean;
+};
+
+type AtributoMl = { id?: unknown; value_name?: unknown };
+type VariacionMl = { attributes?: unknown; seller_custom_field?: unknown };
+
+// Bug real (rama feat-promociones-aprobacion): esta función solo leía
+// `seller_custom_field` — muchas empresas (confirmado en staging,
+// sharel/FMCBIENESTAR) cargan el SKU como atributo `SELLER_SKU`, no en
+// ese campo, y el precio mínimo de Finanzas nunca se encontraba
+// ("Falta precio mínimo" aunque el SKU sí existiera en la maestra).
+// Mismo criterio ya confirmado real en lib/ml/costos-item.ts:55-63
+// (skuDe): `attributes` con id `SELLER_SKU` manda sobre
+// `seller_custom_field`, nunca al revés.
+function skuDeAtributos(atributos: unknown): string | null {
+  if (!Array.isArray(atributos)) return null;
+  for (const atributo of atributos) {
+    if (!atributo || typeof atributo !== "object") continue;
+    const fila = atributo as AtributoMl;
+    if (fila.id === "SELLER_SKU" && typeof fila.value_name === "string" && fila.value_name.trim()) return fila.value_name.trim();
+  }
+  return null;
+}
+
+function skuDeVariacion(variacion: VariacionMl | undefined): string | null {
+  if (!variacion) return null;
+  const deAtributos = skuDeAtributos(variacion.attributes);
+  if (deAtributos) return deAtributos;
+  return typeof variacion.seller_custom_field === "string" && variacion.seller_custom_field.trim() ? variacion.seller_custom_field.trim() : null;
+}
+
+export async function leerItemParaPromocionMl(itemId: string, token: string): Promise<ItemParaPromocionMl | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,seller_custom_field,attributes,variations`;
+  try {
+    const resp = await pedir<{
+      title?: unknown;
+      thumbnail?: unknown;
+      seller_custom_field?: unknown;
+      attributes?: unknown;
+      variations?: VariacionMl[];
+    }>(url, token);
+    if (!resp.ok) return null;
+    const variaciones = Array.isArray(resp.data.variations) ? resp.data.variations : [];
+    const tieneVariantes = variaciones.length > 0;
+
+    // Review de Pablo (PR #304) — bug real evitado acá: con variaciones,
+    // el vendedor puede cargar un SELLER_SKU DISTINTO por cada una —
+    // tomar "la primera que tenga uno" a ciegas podía calcular el piso
+    // con el SKU de una variante y mostrarlo como si fuera de todo el
+    // ítem. Se normalizan TODAS las que traen un SKU propio y se
+    // comparan: si son todas la misma, se usa esa (sigue normal); si
+    // hay más de una distinta, skuCodigo queda null (nunca se adivina
+    // cuál es "la" correcta) y skuVariantesDistintas avisa por qué.
+    const skusDeVariaciones = new Set(
+      variaciones
+        .map((variacion) => skuDeVariacion(variacion))
+        .filter((s): s is string => s !== null)
+        .map((s) => normalizarSkuCodigo(s))
+    );
+    let skuCodigo: string | null = null;
+    let skuVariantesDistintas = false;
+    if (skusDeVariaciones.size > 1) {
+      skuVariantesDistintas = true;
+    } else if (skusDeVariaciones.size === 1) {
+      skuCodigo = [...skusDeVariaciones][0]!;
+    } else {
+      // Ninguna variación trae SKU propio — cae al mismo fallback que
+      // un ítem sin variantes (SKU del ítem padre).
+      const skuCrudo = skuDeAtributos(resp.data.attributes) ?? (typeof resp.data.seller_custom_field === "string" && resp.data.seller_custom_field.trim() ? resp.data.seller_custom_field.trim() : null);
+      skuCodigo = skuCrudo ? normalizarSkuCodigo(skuCrudo) : null;
+    }
+
+    return {
+      title: typeof resp.data.title === "string" ? resp.data.title : null,
+      thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
+      skuCodigo,
+      tieneVariantes,
+      skuVariantesDistintas,
+    };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+// GET /seller-promotions/items/{itemId}?app_version=v2 — confirmado
+// contra el código real de zilonix-os-web.
+export type PromocionCrudaMl = {
+  type?: unknown;
+  status?: unknown;
+  id?: unknown;
+  price?: unknown;
+  original_price?: unknown;
+  suggested_discounted_price?: unknown;
+  meli_percentage?: unknown;
+  max_discounted_price?: unknown;
+  start_date?: unknown;
+  finish_date?: unknown;
+};
+
+// Bug real en vivo (rama fix-promociones-buscar, Refs #44): en staging,
+// una empresa dio "Buscar" y la búsqueda terminó "Listo (0/N)" sin
+// ningún candidato, sin ningún error visible — la sospecha fuerte
+// (confirmada acá) es que la versión vieja de esta función devolvía
+// `null` para CUALQUIER caso que no fuera un array real: una
+// publicación sin promociones aplicables (404 — legítimo), un 403 de
+// la app sin el scope de Promociones, un 401 de la cuenta, o cualquier
+// otro !ok — los 4 casos se veían EXACTAMENTE igual río abajo
+// (ítem saltado, sin candidato, sin rastro). Ahora cada caso se
+// distingue de verdad:
+// - "ok": respondió bien (200 con array real, o 404 — una publicación
+//   sin ninguna promoción aplicable es una respuesta legítima de este
+//   endpoint, confirmado real, nunca un fallo).
+// - "sin_permiso": 403 (MlSinPermisoAppError) — la APP no tiene el
+//   scope de Promociones para esta cuenta. Si se repite en varios
+//   ítems de la misma cuenta, es la causa real de un "Listo (0/N)"
+//   silencioso (ver buscarPromocionesCuenta, que cuenta esto y frena
+//   la cuenta en vez de recorrer todo el catálogo a ciegas).
+// - "no_autorizado": 401 (MlNoAutorizadoError) — el token ya no es
+//   válido (no debería pasar, obtenerAccessTokenVigente ya lo
+//   refresca antes de llegar acá; si pasa, es señal real de que la
+//   cuenta hay que reconectarla).
+// - "otro_error": 5xx (MlNoDisponibleError, sin status propio) o
+//   cualquier otro !ok inesperado (con su status real).
+export type ResultadoPromocionesItemMl =
+  | { estado: "ok"; promociones: PromocionCrudaMl[] }
+  | { estado: "sin_permiso" }
+  | { estado: "no_autorizado" }
+  | { estado: "otro_error"; status: number | null };
+
+export async function leerPromocionesItemMl(itemId: string, token: string): Promise<ResultadoPromocionesItemMl> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return { estado: "ok", promociones: [] };
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
+  try {
+    const resp = await pedir<unknown>(url, token);
+    if (!resp.ok) {
+      if (resp.status === 404) return { estado: "ok", promociones: [] };
+      return { estado: "otro_error", status: resp.status };
+    }
+    return { estado: "ok", promociones: Array.isArray(resp.data) ? (resp.data as PromocionCrudaMl[]) : [] };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError) return { estado: "sin_permiso" };
+    if (e instanceof MlNoAutorizadoError) return { estado: "no_autorizado" };
+    if (e instanceof MlNoDisponibleError) return { estado: "otro_error", status: null };
+    throw e;
+  }
+}
+
+export type RespuestaPromocionMl = { ok: boolean; status: number; textoCrudo: string };
+
+// "participar" (unirse por primera vez) — POST, confirmado real en
+// zilonix-os-web (una promoción pasó a "started"). `top_deal_price`
+// nunca se manda (bug real ya corregido ahí: se creía obligatorio,
+// una prueba real confirmó que es opcional y activa un precio
+// exclusivo "Meli+" no deseado).
+export async function participarPromocionMl(
+  itemId: string,
+  token: string,
+  body: { promotion_id: string; promotion_type: string; deal_price: number; start_date: string; finish_date: string }
+): Promise<RespuestaPromocionMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
+  const { ok, status, textoCrudo } = await escribir<unknown>(url, token, "POST", body);
+  return { ok, status, textoCrudo };
+}
+
+// "modificar" (ya participaba, solo cambia el precio) — PUT,
+// confirmado real en zilonix-os-web (probado 12/12 exitosas).
+export async function modificarPromocionMl(
+  itemId: string,
+  token: string,
+  body: { promotion_id: string; promotion_type: string; deal_price: number }
+): Promise<RespuestaPromocionMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
+  const { ok, status, textoCrudo } = await escribir<unknown>(url, token, "PUT", body);
+  return { ok, status, textoCrudo };
+}
+
+// "salir" (dejar una promoción activa) — **SIN CONFIRMAR contra una
+// cuenta real** (al revés de participar/modificar, que sí vienen
+// probados en producción de zilonix-os-web — ese sistema nunca tuvo
+// esta acción). Se intenta con DELETE sobre el mismo endpoint, mismo
+// patrón real de la API de Promociones que ya confirmaron POST/PUT —
+// es la forma más consistente con el resto del contrato, pero NUNCA
+// se trató como un hecho confirmado: si Mercado Libre responde algo
+// inesperado, el error real queda visible tal cual (nunca se traga ni
+// se adivina otra forma por detrás). Antes de ir a producción con
+// esta acción habilitada, confirmar en vivo contra una cuenta de
+// prueba.
+export async function salirDePromocionMl(itemId: string, token: string, promotionId: string, promotionType: string): Promise<RespuestaPromocionMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2&promotion_id=${encodeURIComponent(promotionId)}&promotion_type=${encodeURIComponent(promotionType)}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_ESCRITURA_MS) });
+  } catch {
+    return { ok: false, status: 0, textoCrudo: "" };
+  }
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
+  const textoCrudo = await res.text().catch(() => "");
+  return { ok: res.ok, status: res.status, textoCrudo };
 }

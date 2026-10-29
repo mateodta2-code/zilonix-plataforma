@@ -208,6 +208,16 @@ export function IconoContraer(props: IconoProps) {
   );
 }
 
+// Issue #131 — flecha del acordeón del detalle día a día (apunta a la
+// derecha cerrado; el que la usa la gira 90° al abrir).
+export function IconoChevron(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="m9 6 6 6-6 6" />
+    </Svg>
+  );
+}
+
 // Pedido de Pablo (tarea Investigación ML): lupa + barritas ascendentes
 // adentro, para distinguirla de IconoBuscar (lupa sola, ya usada en la
 // barra superior para el buscador de texto) y de IconoFinanzas (barras
@@ -232,6 +242,28 @@ export function IconoPublicidad(props: IconoProps) {
       <path d="M4 10v4l8 3V7L4 10z" />
       <path d="M12 8.2c2.2.6 3.5 2 3.5 3.8S14.2 15.2 12 15.8" />
       <path d="M6.5 14.2 7.8 18" />
+    </Svg>
+  );
+}
+
+// Rama feat-promociones — etiqueta de precio con un %, distinta de
+// Finanzas (barras) y Publicidad (megáfono).
+export function IconoPromociones(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3h6a1 1 0 0 1 1 1v6l-9.5 9.5a1 1 0 0 1-1.4 0L4 15.4a1 1 0 0 1 0-1.4L12 3z" />
+      <circle cx="16.5" cy="7.5" r="1.1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+// Rama feat-promociones — engranaje simple, para la sección de
+// Configuración (hoy solo "Conexión de IA").
+export function IconoConfiguracion(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="2.6" />
+      <path d="M12 4v2.2M12 17.8V20M4 12h2.2M17.8 12H20M6.3 6.3l1.6 1.6M16.1 16.1l1.6 1.6M6.3 17.7l1.6-1.6M16.1 7.9l1.6-1.6" />
     </Svg>
   );
 }
@@ -288,6 +320,8 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   publicar: IconoPublicar,
   finanzas: IconoFinanzas,
   publicidad: IconoPublicidad,
+  promociones: IconoPromociones,
+  configuracion: IconoConfiguracion,
   actividad: IconoActividad,
   personas: IconoPersonas,
   invitar: IconoInvitar,

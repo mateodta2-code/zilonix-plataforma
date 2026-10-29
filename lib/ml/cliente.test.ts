@@ -15,7 +15,12 @@ import {
   leerDescripcionItemMl,
   leerItemBasicoMl,
   leerItemCompletoMl,
+  leerItemParaPromocionMl,
+  leerPromocionesItemMl,
   LimiteMercadoLibreError,
+  listarItemsActivosMl,
+  modificarPromocionMl,
+  participarPromocionMl,
   pedirLecturaMl,
   linkPublicacion,
   MlNoAutorizadoError,
@@ -31,6 +36,7 @@ import {
   obtenerPublicacionesVendedorAjenoMl,
   obtenerVendedor,
   resolverCategoria,
+  salirDePromocionMl,
   subirClipMl,
 } from "./cliente";
 
@@ -994,5 +1000,299 @@ describe("obtenerClipsMl — Parte Clip, punto 5 (estado de moderación)", () =>
   it("un campo con forma inesperada (ej. moderation_status numérico): null para ese campo, nunca lanza", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson([{ clip_uuid: "uuid-1", moderation_status: 123 }])));
     await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-1", moderationStatus: null, motivoRechazo: null }]);
+  });
+});
+
+describe("listarItemsActivosMl — rama feat-promociones, una página", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("cuentaIdExterna inválida nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listarItemsActivosMl("no-es-numerico", "token", 0)).rejects.toThrow(/inválido/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("devuelve ids y el total real del catálogo", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ results: ["MCO1", "MCO2"], paging: { total: 137 } })));
+    await expect(listarItemsActivosMl("123", "token", 0)).resolves.toEqual({ ids: ["MCO1", "MCO2"], totalCatalogo: 137 });
+  });
+
+  it("status >= 500 lanza (nunca devuelve una página vacía en silencio)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 500)));
+    await expect(listarItemsActivosMl("123", "token", 0)).rejects.toThrow();
+  });
+});
+
+describe("leerItemParaPromocionMl — rama feat-promociones", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("itemId inválido: null, nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(leerItemParaPromocionMl("no-es-un-id", "token")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sin SELLER_SKU en attributes: cae a seller_custom_field, normalizado", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuestaJson({ title: "Producto", thumbnail: "https://x/thumb.jpg", seller_custom_field: "  sku-1 ", variations: [{ id: 1 }, { id: 2 }] }))
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toEqual({
+      title: "Producto",
+      thumbnail: "https://x/thumb.jpg",
+      skuCodigo: "SKU-1",
+      tieneVariantes: true,
+      skuVariantesDistintas: false,
+    });
+  });
+
+  // Bug real (rama feat-promociones-aprobacion, confirmado en staging
+  // con sharel/FMCBIENESTAR): el SKU vive en `attributes` (id
+  // SELLER_SKU), no en `seller_custom_field` — mismo criterio ya
+  // confirmado real en lib/ml/costos-item.ts (skuDe). Antes de este
+  // arreglo, estos ítems siempre salían "Falta precio mínimo" aunque
+  // el SKU existiera en la maestra de Finanzas.
+  it("SELLER_SKU en attributes manda sobre seller_custom_field, nunca al revés", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          seller_custom_field: "otro-campo-viejo",
+          attributes: [{ id: "COLOR", value_name: "Azul" }, { id: "SELLER_SKU", value_name: "sku-real" }],
+          variations: [],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-REAL" });
+  });
+
+  // El vendedor puede cargar un SELLER_SKU distinto por variante — se
+  // usa el de la variación, nunca el del ítem padre, para que el piso
+  // de Finanzas salga del SKU real de esa variante puntual.
+  it("con variaciones: usa el SELLER_SKU de la primera variación que lo tenga, no el del ítem padre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          attributes: [{ id: "SELLER_SKU", value_name: "sku-padre" }],
+          variations: [
+            { id: 1, attributes: [] },
+            { id: 2, attributes: [{ id: "SELLER_SKU", value_name: "sku-variante-2" }] },
+          ],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-VARIANTE-2", tieneVariantes: true });
+  });
+
+  // Review de Pablo (PR #304) — bug real evitado: tomar "la primera
+  // variación que tenga SKU" a ciegas podía calcular el piso de
+  // Finanzas con el SKU de UNA sola variante y mostrarlo como si
+  // aplicara a todo el ítem. Con SKUs distintos entre variaciones,
+  // skuCodigo tiene que quedar null y skuVariantesDistintas=true —
+  // nunca se adivina cuál variación "manda".
+  it("variaciones con SKU DISTINTO entre sí: skuCodigo null, skuVariantesDistintas=true — nunca toma una a ciegas", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          variations: [
+            { id: 1, attributes: [{ id: "SELLER_SKU", value_name: "sku-a" }] },
+            { id: 2, attributes: [{ id: "SELLER_SKU", value_name: "sku-b" }] },
+          ],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: null, tieneVariantes: true, skuVariantesDistintas: true });
+  });
+
+  it("variaciones con el MISMO SKU (solo cambia mayúsculas/espacios): se normaliza y sigue normal, nunca 'distintas'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          variations: [
+            { id: 1, attributes: [{ id: "SELLER_SKU", value_name: "sku-1" }] },
+            { id: 2, attributes: [{ id: "SELLER_SKU", value_name: "  SKU-1  " }] },
+            { id: 3, attributes: [] },
+          ],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-1", tieneVariantes: true, skuVariantesDistintas: false });
+  });
+
+  it("item SIN variaciones: skuVariantesDistintas siempre false", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", seller_custom_field: "sku-1", variations: [] })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuVariantesDistintas: false, tieneVariantes: false });
+  });
+
+  it("con variaciones pero ninguna trae SELLER_SKU: cae al SKU del ítem padre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          attributes: [{ id: "SELLER_SKU", value_name: "sku-padre" }],
+          variations: [{ id: 1, attributes: [] }],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-PADRE", tieneVariantes: true });
+  });
+
+  it("una variación trae seller_custom_field propio (sin attributes): también se usa, mismo criterio que el ítem padre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          variations: [{ id: 1, seller_custom_field: "sku-de-la-variante" }],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-DE-LA-VARIANTE" });
+  });
+
+  it("sin ningún SKU en ningún lado: skuCodigo null, nunca lanza SkuCodigoInvalidoError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", variations: [] })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: null });
+  });
+
+  it("sin variations (o vacío): tieneVariantes false", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", variations: [] })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ tieneVariantes: false });
+  });
+
+  it("403/404/5xx: null, nunca lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toBeNull();
+  });
+});
+
+describe("leerPromocionesItemMl — rama feat-promociones / fix-promociones-buscar", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("itemId inválido: ok con array vacío, nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(leerPromocionesItemMl("no-es-un-id", "token")).resolves.toEqual({ estado: "ok", promociones: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("array real de promociones: estado ok, se devuelve tal cual, crudo", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson([{ type: "DEAL", status: "candidate" }])));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate" }] });
+  });
+
+  it("404 (publicación sin ninguna promoción aplicable): estado ok con array vacío — nunca se confunde con un fallo", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "ok", promociones: [] });
+  });
+
+  // Bug real (Refs #44) — antes esto se devolvía como `null`, EXACTAMENTE
+  // igual que el 404 de arriba. Río abajo (leerPromocionesDeItem,
+  // buscarPromocionesCuenta) ya no puede distinguir "esta publicación no
+  // tiene promos" de "la app no tiene permiso para consultar esto" — una
+  // cuenta entera podía terminar "Listo (0/N)" sin ningún aviso.
+  it("403 (la app sin el scope de Promociones): estado sin_permiso, nunca se confunde con 'sin promos'", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "sin_permiso" });
+  });
+
+  it("401 (token ya no válido): estado no_autorizado, nunca lanza ni se confunde con 'sin promos'", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "no_autorizado" });
+  });
+
+  it("5xx: estado otro_error con status null (MlNoDisponibleError no guarda el status real)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 500)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "otro_error", status: null });
+  });
+
+  it("otro !ok inesperado (ej. 400): estado otro_error con el status real", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 400)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "otro_error", status: 400 });
+  });
+});
+
+describe("participarPromocionMl/modificarPromocionMl — rama feat-promociones", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("participar — POST real, el body nunca incluye top_deal_price (bug real ya corregido en zilonix-os-web)", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ status: "accepted" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = { promotion_id: "p1", promotion_type: "DEAL", deal_price: 90000, start_date: "2026-11-01T00:00:00", finish_date: "2026-11-30T23:59:59" };
+    const resultado = await participarPromocionMl("MCO111", "token", body);
+    expect(resultado.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain("/seller-promotions/items/MCO111");
+    expect(init?.method).toBe("POST");
+    const bodyEnviado = JSON.parse(init?.body as string);
+    expect(bodyEnviado).not.toHaveProperty("top_deal_price");
+    expect(bodyEnviado).toEqual(body);
+  });
+
+  it("modificar — PUT real, mismo endpoint", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ status: "accepted" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await modificarPromocionMl("MCO111", "token", { promotion_id: "p1", promotion_type: "DEAL", deal_price: 80000 });
+    expect(resultado.ok).toBe(true);
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init?.method).toBe("PUT");
+  });
+
+  it("itemId inválido: nunca llama a fetch (participar y modificar)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(participarPromocionMl("no-es-un-id", "token", { promotion_id: "p1", promotion_type: "DEAL", deal_price: 1, start_date: "x", finish_date: "y" })).rejects.toThrow(/inválido/);
+    await expect(modificarPromocionMl("no-es-un-id", "token", { promotion_id: "p1", promotion_type: "DEAL", deal_price: 1 })).rejects.toThrow(/inválido/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("429: lanza LimiteMercadoLibreError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 429)));
+    await expect(
+      participarPromocionMl("MCO111", "token", { promotion_id: "p1", promotion_type: "DEAL", deal_price: 1, start_date: "x", finish_date: "y" })
+    ).rejects.toBeInstanceOf(LimiteMercadoLibreError);
+  });
+});
+
+describe("salirDePromocionMl — rama feat-promociones (SIN CONFIRMAR contra Mercado Libre real)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("DELETE real al mismo endpoint, con promotion_id/promotion_type en la query", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({}, 200));
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await salirDePromocionMl("MCO111", "token", "p1", "DEAL");
+    expect(resultado.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain("/seller-promotions/items/MCO111");
+    expect(String(url)).toContain("promotion_id=p1");
+    expect(String(url)).toContain("promotion_type=DEAL");
+    expect(init?.method).toBe("DELETE");
+  });
+
+  it("itemId inválido nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(salirDePromocionMl("no-es-un-id", "token", "p1", "DEAL")).rejects.toThrow(/inválido/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("429: lanza LimiteMercadoLibreError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 429)));
+    await expect(salirDePromocionMl("MCO111", "token", "p1", "DEAL")).rejects.toBeInstanceOf(LimiteMercadoLibreError);
+  });
+
+  it("falla de red: {ok:false, status:0}, nunca lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("red caída"); }));
+    await expect(salirDePromocionMl("MCO111", "token", "p1", "DEAL")).resolves.toEqual({ ok: false, status: 0, textoCrudo: "" });
   });
 });

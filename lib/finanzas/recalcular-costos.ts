@@ -13,6 +13,11 @@
 // la orden) siempre gana: esa línea no se toca. Un SKU que hoy no tiene
 // costo en la maestra tampoco: no se "des-costea" una venta.
 // Cada venta cambiada deja una fila en auditoria (antes → después).
+//
+// SKU combo (Sharel, 29-oct-2026): el costo se resuelve con la misma
+// regla del congelado (resolverCostoSku de combo-sku.ts), así BASEX2 sin
+// fila exacta con costo toma BASE × 2. Filtrar por BASE trae también
+// BASEX2 y BASEX3, para que un cambio del costo base alcance sus combos.
 
 import { and, eq, gte, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import type { db } from "@/db";
@@ -21,6 +26,7 @@ import { costosSku, pedidoItems, pedidos, pedidosFinanzas, ventasCorrecciones } 
 import { registrarAuditoria } from "@/lib/auditoria";
 import { normalizarSkuCodigo } from "@/lib/costos-sku";
 import { requierePermiso } from "@/lib/permisos";
+import { codigosParaMaestra, parsearComboSku, resolverCostoSku, type MaestraSku, type OrigenCosto } from "./combo-sku";
 import { aCentavos, desdeCentavos } from "./utilidad-venta";
 
 type Tx = typeof db;
@@ -34,6 +40,7 @@ export type CambioCosto = {
   skuCodigo: string;
   antes: string | null;
   despues: string;
+  origen: OrigenCosto;
 };
 
 export type OmitidoRecalculo = {
@@ -64,7 +71,8 @@ async function calcularVista(tx: Tx, empresaId: string, filtro: FiltroRecalculo)
   if (sku === undefined && !filtro.desde && !filtro.hasta) throw new FiltroRecalculoInvalidoError();
 
   const condiciones = [eq(pedidoItems.empresaId, empresaId), isNotNull(pedidosFinanzas.congeladoTs)];
-  if (sku !== undefined) condiciones.push(eq(pedidoItems.skuCodigo, sku));
+  // El SKU y sus combos X2/X3, que pueden tomar su costo de él.
+  if (sku !== undefined) condiciones.push(inArray(pedidoItems.skuCodigo, [sku, `${sku}X2`, `${sku}X3`]));
   if (filtro.desde) condiciones.push(gte(pedidos.fecha, filtro.desde));
   if (filtro.hasta) condiciones.push(lt(pedidos.fecha, filtro.hasta));
 
@@ -76,14 +84,25 @@ async function calcularVista(tx: Tx, empresaId: string, filtro: FiltroRecalculo)
       skuCodigo: pedidoItems.skuCodigo,
       cantidad: pedidoItems.cantidad,
       costoCongelado: pedidoItems.costoCongelado,
-      costoMaestra: costosSku.costo,
     })
     .from(pedidoItems)
     .innerJoin(pedidosFinanzas, eq(pedidosFinanzas.pedidoId, pedidoItems.pedidoId))
     .innerJoin(pedidos, eq(pedidos.id, pedidoItems.pedidoId))
-    .leftJoin(costosSku, and(eq(costosSku.empresaId, pedidoItems.empresaId), eq(costosSku.skuCodigo, pedidoItems.skuCodigo)))
     .where(and(...condiciones))
     .orderBy(pedidos.fecha, pedidoItems.pedidoId, pedidoItems.linea);
+
+  // Una sola lectura de la maestra: cada SKU y la base de los combos.
+  const codigos = codigosParaMaestra([...new Set(lineas.flatMap((l) => (l.skuCodigo === null ? [] : [l.skuCodigo])))]);
+  const filasMaestra = codigos.length
+    ? await tx
+        .select({ sku: costosSku.skuCodigo, costo: costosSku.costo })
+        .from(costosSku)
+        .where(and(eq(costosSku.empresaId, empresaId), inArray(costosSku.skuCodigo, codigos)))
+    : [];
+  // Solo importa el costo: el recálculo no toca empaque ni envío.
+  const maestra = new Map<string, MaestraSku>(
+    filasMaestra.map((f) => [f.sku, { costo: f.costo, empaque: null, empaqueProveedor: null, envioAgencia: null }])
+  );
 
   const idsPedidos = [...new Set(lineas.map((l) => l.pedidoId))];
   const corregidas = idsPedidos.length
@@ -106,13 +125,14 @@ async function calcularVista(tx: Tx, empresaId: string, filtro: FiltroRecalculo)
       vista.omitidos.push({ pedidoId: l.pedidoId, linea: l.linea, skuCodigo: l.skuCodigo, motivo: "correccion_manual" });
       continue;
     }
-    if (l.skuCodigo === null || l.costoMaestra === null) {
+    const { costoUnitario, origen } = resolverCostoSku(l.skuCodigo, maestra);
+    if (l.skuCodigo === null || costoUnitario === null || origen === null) {
       vista.omitidos.push({ pedidoId: l.pedidoId, linea: l.linea, skuCodigo: l.skuCodigo, motivo: "sin_costo_en_maestra" });
       continue;
     }
-    const despues = desdeCentavos(aCentavos(l.costoMaestra) * BigInt(l.cantidad));
+    const despues = desdeCentavos(aCentavos(costoUnitario) * BigInt(l.cantidad));
     if (l.costoCongelado === despues) continue;
-    vista.cambios.push({ pedidoId: l.pedidoId, pedidoIdExterno: l.pedidoIdExterno, linea: l.linea, skuCodigo: l.skuCodigo, antes: l.costoCongelado, despues });
+    vista.cambios.push({ pedidoId: l.pedidoId, pedidoIdExterno: l.pedidoIdExterno, linea: l.linea, skuCodigo: l.skuCodigo, antes: l.costoCongelado, despues, origen });
   }
   return vista;
 }
@@ -121,6 +141,12 @@ async function calcularVista(tx: Tx, empresaId: string, filtro: FiltroRecalculo)
 export async function previsualizarRecalculoCostos(empresaId: string, usuarioId: string, filtro: FiltroRecalculo): Promise<VistaRecalculo> {
   await requierePermiso(usuarioId, empresaId, "finanzas", "modificar");
   return dbComoEmpresa(empresaId, (tx) => calcularVista(tx, empresaId, filtro));
+}
+
+// "BASEX2, costo de BASE × 2" para las que toman el costo de la base.
+function etiquetaSku(c: Pick<CambioCosto, "skuCodigo" | "origen">): string {
+  const combo = c.origen === "combo_base" ? parsearComboSku(c.skuCodigo) : null;
+  return combo ? `${c.skuCodigo}, costo de ${combo.base} × ${combo.multiplicador}` : c.skuCodigo;
 }
 
 function claveCambio(c: Pick<CambioCosto, "pedidoId" | "linea" | "antes" | "despues">): string {
@@ -170,7 +196,7 @@ export async function confirmarRecalculoCostos(
         entidad: "pedido_items",
         entidadId: pedidoId,
         valorAnterior: cambios.map((c) => `línea ${c.linea} (${c.skuCodigo}): ${c.antes ?? "sin costo"}`).join("; "),
-        valorNuevo: cambios.map((c) => `línea ${c.linea} (${c.skuCodigo}): ${c.despues}`).join("; "),
+        valorNuevo: cambios.map((c) => `línea ${c.linea} (${etiquetaSku(c)}): ${c.despues}`).join("; "),
         detalle: `Recálculo del costo congelado de la venta ${cambios[0].pedidoIdExterno} con la tabla maestra.`,
       });
     }

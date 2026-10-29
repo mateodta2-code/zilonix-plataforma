@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ACCIONES,
+  esPeligroso,
   MODULOS,
   NOMBRES_PLANTILLA,
   PLANTILLAS,
@@ -47,6 +48,9 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
         "configuracion.consultar.todo",
         "configuracion.modificar.todo",
         "publicidad.consultar.todo",
+        "promociones.consultar.todo",
+        "promociones.aprobar.todo",
+        "promociones.ejecutar.todo",
       ].sort()
     );
     expect(sinDuplicados(PLANTILLAS.Gerente)).toBe(true);
@@ -110,8 +114,8 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
     }
   });
 
-  it("publicidad es el único módulo nuevo y las plantillas solo dan consultar (issue #254)", () => {
-    expect([...MODULOS]).toEqual(["ventas", "inventario", "finanzas", "personas", "configuracion", "publicidad"]);
+  it("publicidad y promociones son los módulos nuevos; publicidad solo da consultar en las plantillas (issue #254)", () => {
+    expect([...MODULOS]).toEqual(["ventas", "inventario", "finanzas", "personas", "configuracion", "publicidad", "promociones"]);
     for (const nombre of ["Gerente", "Auxiliar", "Operaciones"] as const) {
       expect(PLANTILLAS[nombre].filter((p) => p.modulo === "publicidad")).toEqual([
         { modulo: "publicidad", accion: "consultar", alcance: "todo" },
@@ -121,12 +125,35 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
       expect(PLANTILLAS[nombre].some((p) => p.modulo === "publicidad")).toBe(false);
     }
   });
+
+  it("promociones — solo Gerente (todo) y Operador (solo consultar) reciben algo de fábrica; el resto, nada", () => {
+    expect(claves(PLANTILLAS.Gerente.filter((p) => p.modulo === "promociones"))).toEqual(
+      ["promociones.consultar.todo", "promociones.aprobar.todo", "promociones.ejecutar.todo"].sort()
+    );
+    expect(PLANTILLAS.Operador.filter((p) => p.modulo === "promociones")).toEqual([{ modulo: "promociones", accion: "consultar", alcance: "todo" }]);
+    for (const nombre of ["Auxiliar", "Tecnología", "Operaciones", "Contador", "Proveedor", "Domiciliario"] as const) {
+      expect(PLANTILLAS[nombre].some((p) => p.modulo === "promociones")).toBe(false);
+    }
+  });
+
+  it("promociones.ejecutar está en PERMISOS_PELIGROSOS (cambia precios reales en Mercado Libre)", () => {
+    expect(esPeligroso("promociones", "ejecutar")).toBe(true);
+    expect(esPeligroso("promociones", "consultar")).toBe(false);
+    expect(esPeligroso("promociones", "aprobar")).toBe(false);
+  });
 });
 
 describe("los roles que ya existían no cambiaron (issue #124)", () => {
-  it("Operador", () => {
+  it("Operador — más 'promociones.consultar' (rama feat-promociones)", () => {
     expect(claves(PLANTILLAS.Operador)).toEqual(
-      ["ventas.consultar.todo", "ventas.crear.todo", "ventas.modificar.todo", "inventario.consultar.todo", "inventario.modificar.todo"].sort()
+      [
+        "ventas.consultar.todo",
+        "ventas.crear.todo",
+        "ventas.modificar.todo",
+        "inventario.consultar.todo",
+        "inventario.modificar.todo",
+        "promociones.consultar.todo",
+      ].sort()
     );
   });
 

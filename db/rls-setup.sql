@@ -65,6 +65,14 @@ REVOKE UPDATE, DELETE ON kardex_movimientos, recepciones, recepcion_items FROM a
 -- confirmación de Sharel/Mateo.
 GRANT SELECT, INSERT ON auditoria TO app_user;
 REVOKE UPDATE, DELETE ON auditoria FROM app_user;
+-- Rama feat-promociones — promociones_candidatos es un snapshot que se
+-- UPSERTea (nunca se borra fila por fila, siempre ON CONFLICT DO
+-- UPDATE); promociones_acciones es historial/auditoría, solo se agrega
+-- y se actualiza su propio estado, nunca se borra. ia_conexiones sí
+-- necesita DELETE real: desconectar la IA de una empresa es una acción
+-- legítima de un clic, sin ningún motivo para guardar la fila vieja.
+GRANT SELECT, INSERT, UPDATE ON promociones_reglas, promociones_candidatos, promociones_acciones TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ia_conexiones TO app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
 -- "serial" en el esquema — no existe ninguna secuencia que otorgar.
@@ -211,6 +219,15 @@ ALTER TABLE sync_stock_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sync_stock_ml FORCE ROW LEVEL SECURITY;
 ALTER TABLE alertas_ultima_unidad ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alertas_ultima_unidad FORCE ROW LEVEL SECURITY;
+-- Rama feat-promociones.
+ALTER TABLE promociones_reglas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE promociones_reglas FORCE ROW LEVEL SECURITY;
+ALTER TABLE promociones_candidatos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE promociones_candidatos FORCE ROW LEVEL SECURITY;
+ALTER TABLE promociones_acciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE promociones_acciones FORCE ROW LEVEL SECURITY;
+ALTER TABLE ia_conexiones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ia_conexiones FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
@@ -432,6 +449,20 @@ CREATE POLICY aislamiento_sync_stock_ml ON sync_stock_ml
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 DROP POLICY IF EXISTS aislamiento_alertas_ultima_unidad ON alertas_ultima_unidad;
 CREATE POLICY aislamiento_alertas_ultima_unidad ON alertas_ultima_unidad
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Rama feat-promociones.
+DROP POLICY IF EXISTS aislamiento_promociones_reglas ON promociones_reglas;
+CREATE POLICY aislamiento_promociones_reglas ON promociones_reglas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_promociones_candidatos ON promociones_candidatos;
+CREATE POLICY aislamiento_promociones_candidatos ON promociones_candidatos
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_promociones_acciones ON promociones_acciones;
+CREATE POLICY aislamiento_promociones_acciones ON promociones_acciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_ia_conexiones ON ia_conexiones;
+CREATE POLICY aislamiento_ia_conexiones ON ia_conexiones
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;
