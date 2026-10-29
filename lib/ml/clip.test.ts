@@ -29,22 +29,32 @@ function cuentaIdExternaDePrueba(): string {
   return `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
 }
 
-async function crearEmpresaYCuenta() {
-  const empresaId = randomUUID();
-  await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa clip", nit: `TEST-CLIP-${empresaId.slice(0, 8)}` }));
+// Code review de Pablo (CI real contra Postgres) — separada de
+// crearEmpresaYCuenta para que varias cuentas puedan vivir en la MISMA
+// empresa (buscarSkuEnTodasLasCuentas busca con un solo empresaId —
+// una cuenta real pero de OTRA empresa nunca se ve por RLS, que es el
+// comportamiento correcto; el bug real estaba en el test, no acá).
+async function crearCuentaEnEmpresa(empresaId: string, nickname: string) {
   const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
     tx
       .insert(cuentasMl)
       .values({
         empresaId,
         cuentaIdExterna: cuentaIdExternaDePrueba(),
-        nickname: "VENDEDOR_CLIP",
+        nickname,
         accessTokenCifrado: cifrarToken("access"),
         refreshTokenCifrado: cifrarToken("refresh"),
         tokenExpiraTs: new Date(Date.now() + 3600_000),
       })
       .returning({ id: cuentasMl.id, cuentaIdExterna: cuentasMl.cuentaIdExterna })
   );
+  return cuenta;
+}
+
+async function crearEmpresaYCuenta() {
+  const empresaId = randomUUID();
+  await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa clip", nit: `TEST-CLIP-${empresaId.slice(0, 8)}` }));
+  const cuenta = await crearCuentaEnEmpresa(empresaId, "VENDEDOR_CLIP");
   return { empresaId, cuenta };
 }
 
@@ -105,8 +115,13 @@ describe("buscarSkuEnTodasLasCuentas (rama feat-publicar-clip, punto 3) — busc
 
   it("una cuenta encuentra el SKU (activa), otra no lo tiene, una tercera da un error real de red — las 3 filas vuelven, cada una con su motivo real", async () => {
     const { empresaId, cuenta: cuentaA } = await crearEmpresaYCuenta();
-    const { cuenta: cuentaB } = await crearEmpresaYCuenta();
-    const { cuenta: cuentaC } = await crearEmpresaYCuenta();
+    // Las 3 cuentas en la MISMA empresa (bug real del test, no del
+    // código): buscarSkuEnTodasLasCuentas busca con un solo empresaId
+    // — una cuenta de OTRA empresa nunca se ve por RLS (correcto), así
+    // que antes esto hacía que B/C resolvieran como "cuenta no
+    // encontrada" en vez de ejercitar de verdad "sin SKU"/"error de red".
+    const cuentaB = await crearCuentaEnEmpresa(empresaId, "Cuenta B");
+    const cuentaC = await crearCuentaEnEmpresa(empresaId, "Cuenta C");
     const cuentas = [
       { id: cuentaA.id, nickname: "Cuenta A", cuentaIdExterna: cuentaA.cuentaIdExterna },
       { id: cuentaB.id, nickname: "Cuenta B", cuentaIdExterna: cuentaB.cuentaIdExterna },
@@ -130,8 +145,11 @@ describe("buscarSkuEnTodasLasCuentas (rama feat-publicar-clip, punto 3) — busc
     const filaC = filas.find((f) => f.cuentaId === cuentaC.id);
     expect(filaA).toMatchObject({ encontrado: true, itemId: "MCO999", activo: true, motivoNoDisponible: null });
     expect(filaB).toMatchObject({ encontrado: false, motivoNoDisponible: expect.stringContaining("Sin ese SKU") });
-    expect(filaC?.encontrado).toBe(false);
-    expect(filaC?.motivoNoDisponible).toBeTruthy(); // el motivo real del error, nunca vacío ni silencioso
+    // Un 500 real de Mercado Libre: pedir() (lib/ml/cliente.ts) lo
+    // mapea a MlNoDisponibleError ANTES de llegar a buscarItemsPorSkuMl
+    // — el motivo real que llega acá es el mensaje de esa clase, nunca
+    // un texto genérico ni vacío.
+    expect(filaC).toMatchObject({ encontrado: false, motivoNoDisponible: expect.stringContaining("no respondió") });
   });
 
   it("el SKU se encuentra pero la publicación está pausada: activo=false, con el motivo real para no ofrecerla marcada", async () => {
@@ -222,7 +240,12 @@ describe("problemasDeVideoClip — Parte Clip, punto 2 (revisión antes de subir
   });
 
   it("horizontal (ancho >= alto): no_vertical", () => {
-    expect(problemasDeVideoClip({ ...VALIDO, ancho: 854, alto: 480 })).toEqual(["no_vertical"]);
+    // 700x680 (alto >= 640) a propósito — espejo exacto del duplicado
+    // cliente (app/panel/publicar/clip/validacion-video-cliente.test.ts)
+    // — así solo dispara no_vertical, nunca también resolucion_baja
+    // (alto < 640), que es un problema real DISTINTO (ver el siguiente
+    // test).
+    expect(problemasDeVideoClip({ ...VALIDO, ancho: 700, alto: 680 })).toEqual(["no_vertical"]);
   });
 
   it("por debajo de 360x640: resolucion_baja", () => {
@@ -234,9 +257,12 @@ describe("problemasDeVideoClip — Parte Clip, punto 2 (revisión antes de subir
   });
 
   it("varios problemas a la vez: devuelve TODOS, nunca solo el primero", () => {
+    // 854x480 es horizontal (no_vertical) Y mide menos de 360x640
+    // (resolucion_baja) — las dos son problemas reales y DISTINTOS a
+    // la vez, nunca se excluyen entre sí.
     const problemas = problemasDeVideoClip({ duracionSegundos: 5, ancho: 854, alto: 480, tamanoBytes: TAMANO_MAXIMO_CLIP_BYTES + 1 });
-    expect(problemas).toEqual(expect.arrayContaining(["duracion_corta", "no_vertical", "demasiado_grande"]));
-    expect(problemas).toHaveLength(3);
+    expect(problemas).toEqual(expect.arrayContaining(["duracion_corta", "no_vertical", "resolucion_baja", "demasiado_grande"]));
+    expect(problemas).toHaveLength(4);
   });
 
   it("cada problema tiene un mensaje real propio, nunca un texto genérico repetido", () => {
