@@ -11,6 +11,7 @@
 // donde corresponde.
 
 import { leerRetryAfterMs } from "@/lib/ml/reintento-429";
+import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 
 const BASE_URL = "https://api.mercadolibre.com";
 
@@ -1313,19 +1314,96 @@ export async function listarItemsActivosMl(cuentaIdExterna: string, token: strin
 // llamadores ya existentes y probados) — mismo criterio que
 // buscarItemParaClip en su momento, un wrapper propio en vez de tocar
 // uno compartido.
-export type ItemParaPromocionMl = { title: string | null; thumbnail: string | null; sellerCustomField: string | null; tieneVariantes: boolean };
+export type ItemParaPromocionMl = {
+  title: string | null;
+  thumbnail: string | null;
+  skuCodigo: string | null;
+  tieneVariantes: boolean;
+  // Review de Pablo (PR #304) — true cuando el ítem tiene variaciones
+  // con SKU distinto entre sí: no hay forma honesta de elegir "la"
+  // variación para calcular un solo piso, así que skuCodigo queda
+  // null (nunca se toma la primera a ciegas) y el motor (lib/ml/promociones.ts)
+  // usa esto para dejar un motivo específico, distinto del genérico
+  // "tiene variantes".
+  skuVariantesDistintas: boolean;
+};
+
+type AtributoMl = { id?: unknown; value_name?: unknown };
+type VariacionMl = { attributes?: unknown; seller_custom_field?: unknown };
+
+// Bug real (rama feat-promociones-aprobacion): esta función solo leía
+// `seller_custom_field` — muchas empresas (confirmado en staging,
+// sharel/FMCBIENESTAR) cargan el SKU como atributo `SELLER_SKU`, no en
+// ese campo, y el precio mínimo de Finanzas nunca se encontraba
+// ("Falta precio mínimo" aunque el SKU sí existiera en la maestra).
+// Mismo criterio ya confirmado real en lib/ml/costos-item.ts:55-63
+// (skuDe): `attributes` con id `SELLER_SKU` manda sobre
+// `seller_custom_field`, nunca al revés.
+function skuDeAtributos(atributos: unknown): string | null {
+  if (!Array.isArray(atributos)) return null;
+  for (const atributo of atributos) {
+    if (!atributo || typeof atributo !== "object") continue;
+    const fila = atributo as AtributoMl;
+    if (fila.id === "SELLER_SKU" && typeof fila.value_name === "string" && fila.value_name.trim()) return fila.value_name.trim();
+  }
+  return null;
+}
+
+function skuDeVariacion(variacion: VariacionMl | undefined): string | null {
+  if (!variacion) return null;
+  const deAtributos = skuDeAtributos(variacion.attributes);
+  if (deAtributos) return deAtributos;
+  return typeof variacion.seller_custom_field === "string" && variacion.seller_custom_field.trim() ? variacion.seller_custom_field.trim() : null;
+}
 
 export async function leerItemParaPromocionMl(itemId: string, token: string): Promise<ItemParaPromocionMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,seller_custom_field,variations`;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,seller_custom_field,attributes,variations`;
   try {
-    const resp = await pedir<{ title?: unknown; thumbnail?: unknown; seller_custom_field?: unknown; variations?: unknown }>(url, token);
+    const resp = await pedir<{
+      title?: unknown;
+      thumbnail?: unknown;
+      seller_custom_field?: unknown;
+      attributes?: unknown;
+      variations?: VariacionMl[];
+    }>(url, token);
     if (!resp.ok) return null;
+    const variaciones = Array.isArray(resp.data.variations) ? resp.data.variations : [];
+    const tieneVariantes = variaciones.length > 0;
+
+    // Review de Pablo (PR #304) — bug real evitado acá: con variaciones,
+    // el vendedor puede cargar un SELLER_SKU DISTINTO por cada una —
+    // tomar "la primera que tenga uno" a ciegas podía calcular el piso
+    // con el SKU de una variante y mostrarlo como si fuera de todo el
+    // ítem. Se normalizan TODAS las que traen un SKU propio y se
+    // comparan: si son todas la misma, se usa esa (sigue normal); si
+    // hay más de una distinta, skuCodigo queda null (nunca se adivina
+    // cuál es "la" correcta) y skuVariantesDistintas avisa por qué.
+    const skusDeVariaciones = new Set(
+      variaciones
+        .map((variacion) => skuDeVariacion(variacion))
+        .filter((s): s is string => s !== null)
+        .map((s) => normalizarSkuCodigo(s))
+    );
+    let skuCodigo: string | null = null;
+    let skuVariantesDistintas = false;
+    if (skusDeVariaciones.size > 1) {
+      skuVariantesDistintas = true;
+    } else if (skusDeVariaciones.size === 1) {
+      skuCodigo = [...skusDeVariaciones][0]!;
+    } else {
+      // Ninguna variación trae SKU propio — cae al mismo fallback que
+      // un ítem sin variantes (SKU del ítem padre).
+      const skuCrudo = skuDeAtributos(resp.data.attributes) ?? (typeof resp.data.seller_custom_field === "string" && resp.data.seller_custom_field.trim() ? resp.data.seller_custom_field.trim() : null);
+      skuCodigo = skuCrudo ? normalizarSkuCodigo(skuCrudo) : null;
+    }
+
     return {
       title: typeof resp.data.title === "string" ? resp.data.title : null,
       thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
-      sellerCustomField: typeof resp.data.seller_custom_field === "string" ? resp.data.seller_custom_field : null,
-      tieneVariantes: Array.isArray(resp.data.variations) && resp.data.variations.length > 0,
+      skuCodigo,
+      tieneVariantes,
+      skuVariantesDistintas,
     };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
