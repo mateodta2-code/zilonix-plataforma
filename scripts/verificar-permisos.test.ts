@@ -40,8 +40,10 @@ const RUTAS_PROTEGIDAS = new Set([
   // finanzas.consultar (y lib/finanzas/ventas-consulta.ts otra vez).
   "app/panel/finanzas/ventas/page.tsx",
   "app/panel/finanzas/ventas/[pedidoId]/page.tsx",
-  // «Traer ventas de este mes» (también en /panel/pedidos): pide
-  // finanzas.modificar, acá y en lib/finanzas/traer-ventas-mes.ts.
+  // «Traer ventas de este mes» (también en /panel/pedidos) y, Parte C,
+  // vista previa y confirmación del recálculo de costos: piden
+  // finanzas.modificar, acá y en lib/finanzas/ (traer-ventas-mes.ts,
+  // recalcular-costos.ts).
   "app/panel/finanzas/ventas/actions.ts",
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",

@@ -280,3 +280,74 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Issue #131 (Parte C) — «Recalcular costo con la tabla maestra»
+   (PanelRecalculoCostos.tsx). Misma superficie de zona oscura y borde
+   plateado que el bloque de filtros; sin colores nuevos. */
+.recalculo {
+  composes: filtros;
+  display: block;
+  /* Igual que <Tarjeta> (issue #191): la <Tabla> y los enlaces de
+     adentro usan los tokens de zona oscura; si no, en tema claro la
+     tabla pinta su fondo claro con el texto claro de la zona. */
+  --acento: var(--acento-zona-oscura);
+  --acento-fuerte: var(--acento-fuerte-zona-oscura);
+  --borde: var(--borde-zona-oscura);
+  --tabla-fondo: var(--tarjeta-fondo);
+  --tabla-encabezado-fondo: var(--superficie-2-zona-oscura);
+}
+
+.recalculo .suave {
+  margin: 0 0 6px;
+  max-width: 900px;
+}
+
+.formRecalculo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+
+.vistaRecalculo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.resumenRecalculo {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tablaRecalculo td {
+  padding: 6px 10px;
+  font-size: 12.5px;
+}
+
+.tablaRecalculo .numero {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.omitidos summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+/* En el celular: SKU y antes → después; Pedido, Línea y Origen se ocultan. */
+@media (max-width: 640px) {
+  .tablaRecalculo th:nth-child(1),
+  .tablaRecalculo td:nth-child(1),
+  .tablaRecalculo th:nth-child(2),
+  .tablaRecalculo td:nth-child(2),
+  .tablaRecalculo th:nth-child(6),
+  .tablaRecalculo td:nth-child(6) {
+    display: none;
+  }
+}
