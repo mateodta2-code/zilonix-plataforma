@@ -28,15 +28,37 @@ async function llamarAnthropic(conexion: ConexionIAConClave, prompt: string, max
 
 // OpenAI, xAI (Grok) y cualquier "otro compatible con OpenAI" hablan
 // el MISMO formato de Chat Completions — un solo helper para los 3.
-async function llamarCompatibleOpenAI(baseUrl: string, conexion: ConexionIAConClave, prompt: string, maxTokens: number): Promise<string> {
+// `redirectManual` solo lo pide otro_compatible_openai (ver llamarIA):
+// openai/xai son hosts fijos y de confianza, sin riesgo de SSRF por
+// redirect; una baseUrl configurada por la empresa sí lo tiene.
+async function llamarCompatibleOpenAI(
+  baseUrl: string,
+  conexion: ConexionIAConClave,
+  prompt: string,
+  maxTokens: number,
+  opciones: { redirectManual?: boolean } = {}
+): Promise<string> {
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${conexion.apiKey}` },
     body: JSON.stringify({ model: conexion.modelo, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
+    ...(opciones.redirectManual ? { redirect: "manual" as const } : {}),
   }).catch(() => {
     throw new ErrorProveedorIA("No se pudo conectar con el proveedor de IA a tiempo.");
   });
+  // Re-review de Pablo — HIGH: SSRF por redirect. exigirUrlBaseIASegura
+  // valida el host de la baseUrl guardada, pero un `fetch` con
+  // redirect:"follow" (el default) seguiría a ciegas un 3xx hacia
+  // CUALQUIER otro host — incluida una IP privada o de metadata — sin
+  // volver a pasar por esa validación. Con redirect:"manual" nunca se
+  // sigue solo: en Node/undici un redirect real llega como un 3xx
+  // normal con Location (o como "opaqueredirect" según el runtime,
+  // mismo criterio que lib/ml/video-externo.ts) — cualquiera de los
+  // dos se trata como error, JAMÁS como un segundo fetch.
+  if (opciones.redirectManual && (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400))) {
+    throw new ErrorProveedorIA("El proveedor de IA respondió con un redirect — no se sigue.");
+  }
   if (!res.ok) throw new ErrorProveedorIA(`El proveedor de IA respondió con error (${res.status}).`);
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   return (data.choices?.[0]?.message?.content ?? "").trim();
@@ -74,12 +96,19 @@ export async function llamarIA(conexion: ConexionIAConClave, prompt: string, opc
       // DNS de ese hostname puede cambiar entre medio (DNS rebinding).
       // Se revalida OTRA VEZ, acá, justo antes del fetch real — nunca
       // se confía en que "ya se validó alguna vez".
+      let urlSegura: URL;
       try {
-        await exigirUrlBaseIASegura(conexion.baseUrl);
+        urlSegura = await exigirUrlBaseIASegura(conexion.baseUrl);
       } catch {
         throw new ErrorProveedorIA("Esa URL base no se puede usar — no es https o no resuelve a una dirección pública.");
       }
-      return llamarCompatibleOpenAI(conexion.baseUrl.replace(/\/$/, ""), conexion, prompt, maxTokens);
+      // Re-review de Pablo — HIGH: se arma la URL final con la URL YA
+      // PARSEADA y validada (origin + pathname), nunca con el string
+      // crudo que guardó la empresa — evita un "//" duplicado
+      // (ej. "https://x.test//chat/completions") y cualquier
+      // diferencia entre lo que se validó y lo que de verdad se llama.
+      const baseNormalizada = (urlSegura.origin + urlSegura.pathname).replace(/\/$/, "");
+      return llamarCompatibleOpenAI(baseNormalizada, conexion, prompt, maxTokens, { redirectManual: true });
     }
     case "google":
       return llamarGoogle(conexion, prompt, maxTokens);

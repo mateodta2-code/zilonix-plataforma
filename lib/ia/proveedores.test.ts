@@ -105,6 +105,41 @@ describe("llamarIA — dispatch por proveedor (rama feat-promociones)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // Re-review de Pablo — HIGH: SSRF por redirect. exigirUrlBaseIASegura
+  // valida el host de la baseUrl guardada, pero un fetch con
+  // redirect:"follow" (el default) seguiría a ciegas un 3xx hacia
+  // cualquier otro host sin volver a pasar por esa validación — mismo
+  // criterio que lib/ml/video-externo.ts.
+  it("otro_compatible_openai pide redirect:'manual' en el fetch real, nunca el default 'follow'", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ choices: [{ message: { content: "ok" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await llamarIA(conexion({ proveedor: "otro_compatible_openai", baseUrl: "https://mi-servidor.test/v1" }), "hola");
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect((init as RequestInit).redirect).toBe("manual");
+  });
+
+  it("otro_compatible_openai cuyo fetch responde un redirect (302): ErrorProveedorIA, nunca un segundo fetch siguiéndolo", async () => {
+    const fetchMock = vi.fn(async () => respuestaJson({}, 302));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(llamarIA(conexion({ proveedor: "otro_compatible_openai", baseUrl: "https://mi-servidor.test/v1" }), "hola")).rejects.toBeInstanceOf(ErrorProveedorIA);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("otro_compatible_openai cuyo fetch responde 'opaqueredirect' (undici real con redirect:'manual'): ErrorProveedorIA, nunca un segundo fetch", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 0, type: "opaqueredirect", json: async () => ({}) }) as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(llamarIA(conexion({ proveedor: "otro_compatible_openai", baseUrl: "https://mi-servidor.test/v1" }), "hola")).rejects.toBeInstanceOf(ErrorProveedorIA);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("otro_compatible_openai con pathname + barra final: la URL real nunca lleva '//' duplicado antes de /chat/completions", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ choices: [{ message: { content: "ok" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await llamarIA(conexion({ proveedor: "otro_compatible_openai", baseUrl: "https://mi-servidor.test/v1/" }), "hola");
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://mi-servidor.test/v1/chat/completions");
+  });
+
   it("google — generateContent, la key va en la query, nunca en un header", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ candidates: [{ content: { parts: [{ text: "Resumen Google." }] } }] }));
     vi.stubGlobal("fetch", fetchMock);
