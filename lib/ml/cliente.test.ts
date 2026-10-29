@@ -1034,17 +1034,90 @@ describe("leerItemParaPromocionMl — rama feat-promociones", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("lee título/thumbnail/sku y detecta variantes reales", async () => {
+  it("sin SELLER_SKU en attributes: cae a seller_custom_field, normalizado", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => respuestaJson({ title: "Producto", thumbnail: "https://x/thumb.jpg", seller_custom_field: "SKU-1", variations: [{ id: 1 }, { id: 2 }] }))
+      vi.fn(async () => respuestaJson({ title: "Producto", thumbnail: "https://x/thumb.jpg", seller_custom_field: "  sku-1 ", variations: [{ id: 1 }, { id: 2 }] }))
     );
     await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toEqual({
       title: "Producto",
       thumbnail: "https://x/thumb.jpg",
-      sellerCustomField: "SKU-1",
+      skuCodigo: "SKU-1",
       tieneVariantes: true,
     });
+  });
+
+  // Bug real (rama feat-promociones-aprobacion, confirmado en staging
+  // con sharel/FMCBIENESTAR): el SKU vive en `attributes` (id
+  // SELLER_SKU), no en `seller_custom_field` — mismo criterio ya
+  // confirmado real en lib/ml/costos-item.ts (skuDe). Antes de este
+  // arreglo, estos ítems siempre salían "Falta precio mínimo" aunque
+  // el SKU existiera en la maestra de Finanzas.
+  it("SELLER_SKU en attributes manda sobre seller_custom_field, nunca al revés", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          seller_custom_field: "otro-campo-viejo",
+          attributes: [{ id: "COLOR", value_name: "Azul" }, { id: "SELLER_SKU", value_name: "sku-real" }],
+          variations: [],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-REAL" });
+  });
+
+  // El vendedor puede cargar un SELLER_SKU distinto por variante — se
+  // usa el de la variación, nunca el del ítem padre, para que el piso
+  // de Finanzas salga del SKU real de esa variante puntual.
+  it("con variaciones: usa el SELLER_SKU de la primera variación que lo tenga, no el del ítem padre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          attributes: [{ id: "SELLER_SKU", value_name: "sku-padre" }],
+          variations: [
+            { id: 1, attributes: [] },
+            { id: 2, attributes: [{ id: "SELLER_SKU", value_name: "sku-variante-2" }] },
+          ],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-VARIANTE-2", tieneVariantes: true });
+  });
+
+  it("con variaciones pero ninguna trae SELLER_SKU: cae al SKU del ítem padre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          attributes: [{ id: "SELLER_SKU", value_name: "sku-padre" }],
+          variations: [{ id: 1, attributes: [] }],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-PADRE", tieneVariantes: true });
+  });
+
+  it("una variación trae seller_custom_field propio (sin attributes): también se usa, mismo criterio que el ítem padre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          variations: [{ id: 1, seller_custom_field: "sku-de-la-variante" }],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-DE-LA-VARIANTE" });
+  });
+
+  it("sin ningún SKU en ningún lado: skuCodigo null, nunca lanza SkuCodigoInvalidoError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", variations: [] })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: null });
   });
 
   it("sin variations (o vacío): tieneVariantes false", async () => {

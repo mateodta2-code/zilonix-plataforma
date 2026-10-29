@@ -339,7 +339,7 @@ export async function leerPromocionesDeItem(
       nickname,
       tituloProducto: detalle?.title ?? null,
       thumbnail: detalle?.thumbnail ?? null,
-      skuCodigo: detalle?.sellerCustomField ?? null,
+      skuCodigo: detalle?.skuCodigo ?? null,
       tieneVariantes: detalle?.tieneVariantes ?? false,
       promociones: resultado.promociones,
     },

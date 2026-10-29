@@ -32,13 +32,26 @@ import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolver
 const TIPO_ACCION = ["participar", "modificar", "salir"] as const;
 type TipoAccion = (typeof TIPO_ACCION)[number];
 
-type Decision = { candidatoId: string; accion: TipoAccion };
+// Rama feat-promociones-aprobacion — "No" en una fila (o "Rechazar
+// seleccionados" en el lote) nunca necesitó un valor de enum nuevo:
+// `promocion_accion_estado` ya tenía "rechazada" desde la migración
+// 0017 (pensado para cuando algo no pasa la validación del motor).
+// Acá se reusa para una decisión humana explícita — nunca se valida
+// ni se toca Mercado Libre para un rechazo, pase lo que pase con el
+// motor; es una decisión final, no depende de si el motor seguiría
+// recomendándolo.
+const DECISION_HUMANA = ["aprobar", "rechazar"] as const;
+type DecisionHumana = (typeof DECISION_HUMANA)[number];
+
+type Decision = { candidatoId: string; accion: TipoAccion; decisionHumana: DecisionHumana };
 
 // MED 5 — ventana de idempotencia: un doble clic (o un reintento de
 // red del navegador) no puede crear dos filas de historial para la
 // misma cuenta+ítem+tipo+acción. 5 minutos es suficiente para cubrir
 // un doble clic real sin esconder una decisión nueva y deliberada
-// tomada minutos más tarde sobre el mismo producto.
+// tomada minutos más tarde sobre el mismo producto. Solo aplica a
+// "aprobar" — un rechazo nunca toca Mercado Libre, duplicarlo en el
+// historial no tiene el mismo riesgo real.
 const VENTANA_IDEMPOTENCIA_MS = 5 * 60 * 1000;
 
 function parsearDecisiones(cuerpo: unknown): Decision[] | null {
@@ -48,9 +61,15 @@ function parsearDecisiones(cuerpo: unknown): Decision[] | null {
   for (const fila of lista) {
     const candidatoId = (fila as { candidatoId?: unknown })?.candidatoId;
     const accion = (fila as { accion?: unknown })?.accion;
+    const decisionCruda = (fila as { decision?: unknown })?.decision;
     if (typeof candidatoId !== "string" || !PATRON_UUID.test(candidatoId)) return null;
     if (typeof accion !== "string" || !(TIPO_ACCION as readonly string[]).includes(accion)) return null;
-    resultado.push({ candidatoId, accion: accion as TipoAccion });
+    if (decisionCruda !== undefined && !(DECISION_HUMANA as readonly string[]).includes(decisionCruda as string)) return null;
+    // Compatibilidad hacia atrás — "Aceptar todas las que cumplen" ya
+    // mandaba {candidatoId, accion} sin "decision"; eso sigue
+    // significando "aprobar", igual que siempre.
+    const decisionHumana: DecisionHumana = decisionCruda === "rechazar" ? "rechazar" : "aprobar";
+    resultado.push({ candidatoId, accion: accion as TipoAccion, decisionHumana });
   }
   return resultado;
 }
@@ -90,7 +109,7 @@ export async function POST(request: Request) {
   if (decisiones.some((d) => d.accion === "salir")) {
     return NextResponse.json({ error: "Salir de una promoción todavía no está confirmado contra Mercado Libre real." }, { status: 501 });
   }
-  const decisionesEscribibles = decisiones as { candidatoId: string; accion: "participar" | "modificar" }[];
+  const decisionesEscribibles = decisiones as { candidatoId: string; accion: "participar" | "modificar"; decisionHumana: DecisionHumana }[];
   const modoSimulacion = (cuerpo as { modoSimulacion?: unknown })?.modoSimulacion === true;
 
   const candidatoIds = decisionesEscribibles.map((d) => d.candidatoId);
@@ -103,6 +122,37 @@ export async function POST(request: Request) {
   for (const decision of decisionesEscribibles) {
     const candidato = candidatoPorId.get(decision.candidatoId);
     if (!candidato) continue; // candidatoId que no existe o es de otra empresa (RLS) — se ignora, nunca rompe el resto
+
+    if (decision.decisionHumana === "rechazar") {
+      // Rechazo humano explícito ("No" en la fila, o "Rechazar
+      // seleccionados" en el lote): SIEMPRE "rechazada", sin pasar por
+      // validarCandidatoParaEscritura (no tiene sentido recalcular si
+      // "cumpliría" algo que la persona ya decidió que no quiere) y sin
+      // tocar Mercado Libre nunca.
+      const [fila] = await dbComoEmpresa(empresa.id, (tx) =>
+        tx
+          .insert(promocionesAcciones)
+          .values({
+            empresaId: empresa.id,
+            cuentaMlId: candidato.cuentaMlId,
+            itemId: candidato.itemId,
+            tituloProducto: candidato.tituloProducto,
+            tipoPromocion: candidato.tipoPromocion,
+            promotionIdMl: candidato.promotionIdMl,
+            accion: decision.accion,
+            precioAntes: candidato.precioActual,
+            precioDespues: null,
+            estado: "rechazada",
+            aprobadoPor: usuario.id,
+            aprobadoTs: new Date(),
+            modoSimulacion,
+            error: null,
+          })
+          .returning()
+      );
+      filasCreadas.push(fila);
+      continue;
+    }
 
     // MED 5 — no-op si ya existe una fila reciente aceptada/ejecutada
     // para exactamente esta combinación.
