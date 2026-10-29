@@ -145,18 +145,20 @@ export default async function PublicidadPage({
         }
       />
       <div className={styles.bloque}>
-        <SelectorCuentaMl
-          empresaId={empresa.id}
-          cuenta={cuentaParam}
-          parametros={{
-            mes: params.periodo.mes,
-            orden: params.orden,
-            dir: params.dir,
-            ...(params.incluirPausadas ? { pausadas: "1" } : {}),
-            ...(aviso ? { aviso } : {}),
-          }}
-        />
-        {aviso ? <p className={styles.aviso}>{aviso}</p> : null}
+        <div className={styles.panelDatos}>
+          <SelectorCuentaMl
+            empresaId={empresa.id}
+            cuenta={cuentaParam}
+            parametros={{
+              mes: params.periodo.mes,
+              orden: params.orden,
+              dir: params.dir,
+              ...(params.incluirPausadas ? { pausadas: "1" } : {}),
+              ...(aviso ? { aviso } : {}),
+            }}
+          />
+          {aviso ? <p className={styles.aviso}>{aviso}</p> : null}
+        </div>
         {cuentas.length === 0 ? (
           <EstadoVacio>
             No hay cuentas de Mercado Libre en esta empresa.{" "}
@@ -270,42 +272,44 @@ function Cuerpo({
 
   return (
     <>
-      <form method="get" className={styles.barra}>
-        {hrefBase.cuenta ? <input type="hidden" name="cuenta" value={hrefBase.cuenta} /> : null}
-        <input type="hidden" name="orden" value={orden} />
-        <input type="hidden" name="dir" value={dir} />
-        {incluirPausadas ? <input type="hidden" name="pausadas" value="1" /> : null}
-        <label className={styles.campo}>
-          <span className="zx-etiqueta">Periodo</span>
-          <select name="mes" className="zx-control" defaultValue={periodo.mes}>
-            {opciones.map((opcion) => (
-              <option key={opcion.valor} value={opcion.valor}>
-                {opcion.rotulo}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Boton type="submit" variante="secundario" chico>
-          Ver
-        </Boton>
-        <BotonLink
-          href={hrefPublicidad({ ...hrefBase, pausadas: !incluirPausadas })}
-          variante="fantasma"
-          chico
-        >
-          {incluirPausadas ? ROTULO_PERIODO.ocultarPausadas : ROTULO_PERIODO.verPausadas}
-        </BotonLink>
-      </form>
+      <div className={styles.panelDatos}>
+        <form method="get" className={styles.barra}>
+          {hrefBase.cuenta ? <input type="hidden" name="cuenta" value={hrefBase.cuenta} /> : null}
+          <input type="hidden" name="orden" value={orden} />
+          <input type="hidden" name="dir" value={dir} />
+          {incluirPausadas ? <input type="hidden" name="pausadas" value="1" /> : null}
+          <label className={styles.campo}>
+            <span className="zx-etiqueta">Periodo</span>
+            <select name="mes" className="zx-control" defaultValue={periodo.mes}>
+              {opciones.map((opcion) => (
+                <option key={opcion.valor} value={opcion.valor}>
+                  {opcion.rotulo}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Boton type="submit" variante="secundario" chico>
+            Ver
+          </Boton>
+          <BotonLink
+            href={hrefPublicidad({ ...hrefBase, pausadas: !incluirPausadas })}
+            variante="fantasma"
+            chico
+          >
+            {incluirPausadas ? ROTULO_PERIODO.ocultarPausadas : ROTULO_PERIODO.verPausadas}
+          </BotonLink>
+        </form>
 
-      <p className={styles.nota}>
-        Datos de Mercado Libre actualizados: {actualizado}. {textoComparacion(periodo)}
-        {tablero.enCurso ? " Hay una actualización en curso." : ""}
-      </p>
-      <p className={styles.nota}>{NOTA_ATRIBUCION}</p>
-      {periodo.incluyeHoy ? <p className={styles.nota}>{NOTA_HOY_INCOMPLETO}</p> : null}
-      <p className={styles.nota}>
-        {NOTA_TACOS_TIENDA} <Ayuda id="ayuda-tacos-tienda">{AYUDA_TACOS_TIENDA}</Ayuda>
-      </p>
+        <p className={styles.nota}>
+          Datos de Mercado Libre actualizados: {actualizado}. {textoComparacion(periodo)}
+          {tablero.enCurso ? " Hay una actualización en curso." : ""}
+        </p>
+        <p className={styles.nota}>{NOTA_ATRIBUCION}</p>
+        {periodo.incluyeHoy ? <p className={styles.nota}>{NOTA_HOY_INCOMPLETO}</p> : null}
+        <p className={styles.nota}>
+          {NOTA_TACOS_TIENDA} <Ayuda id="ayuda-tacos-tienda">{AYUDA_TACOS_TIENDA}</Ayuda>
+        </p>
+      </div>
 
       <div className={styles.gridKpi}>
         {kpis.map((kpi) => (

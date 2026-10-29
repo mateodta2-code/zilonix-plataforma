@@ -53,7 +53,7 @@ function FilaGrupo({
   return (
     <>
       <FilaTabla>
-        <CeldaTabla fija>
+        <CeldaTabla fija className={styles.celdaCampana}>
           <button
             type="button"
             className={styles.expandir}

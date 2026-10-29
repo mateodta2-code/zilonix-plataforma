@@ -1,7 +1,52 @@
 .bloque {
   display: grid;
+  /* minmax(0, 1fr), no el 1fr de siempre (= minmax(auto, 1fr)): con
+     auto, el ancho mínimo de la columna era el de la tabla de
+     campañas (~1335px medidos a 1440 de pantalla, para ~1153px
+     disponibles) y la página entera se ensanchaba y cortaba el
+     selector de cuenta, las notas, la 4.ª KPI y las últimas columnas.
+     Así la tabla se desplaza adentro de su propia caja. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 16px;
   margin-top: 16px;
+
+  /* Copia de los tokens del tema ACTIVO, tomada acá (fuera de
+     cualquier Tarjeta). Tarjeta/TarjetaKpi redefinen --texto,
+     --texto-suave, --tabla-fondo, etc. a "zona oscura" para todo lo
+     de adentro; adentro ya no se puede leer el valor del tema con
+     var(--texto) sin crear un ciclo. Con esta copia, la tabla y las
+     tarjetas de esta pantalla vuelven a los valores del tema (claro u
+     oscuro) donde hace falta, sin ningún hex suelto. */
+  --tema-texto: var(--texto);
+  --tema-texto-suave: var(--texto-suave);
+  --tema-plata-etiqueta: var(--plata-etiqueta);
+  --tema-degradado-plata-texto: var(--degradado-plata-texto);
+  --tema-acento: var(--acento);
+  --tema-acento-fuerte: var(--acento-fuerte);
+  --tema-exito-texto: var(--exito-texto);
+  --tema-peligro-texto: var(--peligro-texto);
+  --tema-tabla-fondo: var(--tabla-fondo);
+  --tema-tabla-encabezado-fondo: var(--tabla-encabezado-fondo);
+}
+
+/* Selector de cuenta, periodo y notas: en claro caían sobre la franja
+   gris del degradado de la página (--fondo-app, "zona muerta" donde
+   ningún texto plano pasa AA). Una superficie opaca del tema detrás
+   resuelve el contraste: --texto-suave sobre --superficie pasa AA en
+   los dos temas. En oscuro no cambia nada (el fondo ya es oscuro). */
+.panelDatos {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+:global(:root[data-tema="claro"]) .panelDatos {
+  padding: 14px 16px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie);
+  color: var(--tema-texto);
 }
 
 .barra {
@@ -37,11 +82,85 @@
   gap: 16px;
 }
 
-.tarjetaTabla {
-  /* El encabezado sticky vive en el scroll de la tabla. Tarjeta trae
-     overflow:hidden y, con la misma especificidad, se queda con el
-     ancla: el !important es para que gane esta caja. */
-  overflow: visible !important;
+/* Sin el overflow: visible !important de antes: el encabezado sticky
+   se pega contra la caja con scroll de <Tabla> (la más cercana), no
+   contra la tarjeta, así que el overflow: hidden de Tarjeta no lo
+   afecta. Ese visible dejaba que la tabla empujara el ancho de la
+   tarjeta y de la página. min-width: 0 para que, como ítem del grid
+   de .bloque, nunca tome el ancho mínimo de la tabla. */
+.bloque .tarjetaTabla {
+  min-width: 0;
+  /* Fondo SÓLIDO del tema (issue #191: --tabla-fondo/
+     --tabla-encabezado-fondo), no el degradado de la tarjeta: la
+     columna "Campaña" fija necesita el mismo color liso que el resto
+     de la fila para tapar lo que pasa por debajo al desplazar. */
+  --tabla-fondo: var(--tema-tabla-fondo);
+  --tabla-encabezado-fondo: var(--tema-tabla-encabezado-fondo);
+}
+
+/* Tema claro: la tarjeta de la tabla y las KPI seguían oscuras sobre
+   la página clara. Vuelven a la superficie y a los tokens de texto del
+   tema (AA: --texto/--texto-suave/--plata-etiqueta sobre --superficie
+   y --superficie-2 ya medidos en app/globals.css). */
+:global(:root[data-tema="claro"]) .tarjetaTabla,
+:global(:root[data-tema="claro"]) .gridKpi > * {
+  background:
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  color: var(--tema-texto);
+  --texto: var(--tema-texto);
+  --texto-suave: var(--tema-texto-suave);
+  --plata-etiqueta: var(--tema-plata-etiqueta);
+  --degradado-plata-texto: var(--tema-degradado-plata-texto);
+  --acento: var(--tema-acento);
+  --acento-fuerte: var(--tema-acento-fuerte);
+  --exito-texto: var(--tema-exito-texto);
+  --peligro-texto: var(--tema-peligro-texto);
+}
+
+/* Columna "Campaña" fija también en escritorio (Tabla.module.css solo
+   la pega en el celular). Fondo liso + el hover de la fila encima,
+   para que no se vea un hueco transparente al pasar el mouse. */
+.celdaCampana {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--tabla-fondo);
+}
+
+.tarjetaTabla tr:hover > .celdaCampana {
+  background: linear-gradient(var(--fila-hover), var(--fila-hover)), var(--tabla-fondo);
+}
+
+.tarjetaTabla > div > table > thead > tr > th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+}
+
+/* La banda vacía al final del scroll horizontal eran los globos de
+   <Ayuda> del encabezado (290px, ocultos con visibility: hidden, que
+   igual suman al área de scroll). Adentro de la tabla se sacan del
+   flujo mientras no se muestran, abren hacia abajo (arriba los corta
+   la caja con scroll) y los de las últimas columnas se anclan a la
+   derecha. */
+.tarjetaTabla [role="tooltip"] {
+  display: none;
+}
+
+.tarjetaTabla :hover > [role="tooltip"],
+.tarjetaTabla :focus-within > [role="tooltip"] {
+  display: block;
+}
+
+.tarjetaTabla th [role="tooltip"] {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+
+.tarjetaTabla th:nth-last-child(-n + 2) [role="tooltip"] {
+  left: auto;
+  right: 0;
 }
 
 .thConAyuda {
