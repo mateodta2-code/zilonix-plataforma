@@ -183,6 +183,30 @@ describe('ack de "zilonix:importar-publicar" — issue #44 (SOLO desde /panel/pu
   });
 });
 
+// Issue #44 (anexo 2, "Importar video a Clip") — mismo ack especial
+// que "zilonix:importar-publicar" (arriba): background.js necesita
+// saber si ESTA pestaña es de verdad /panel/publicar antes de decidir
+// si la enfoca o abre una nueva.
+describe('ack de "zilonix:importar-video" — issue #44 (anexo 2, SOLO desde /panel/publicar)', () => {
+  it("en /panel/publicar -> ack {ok:true, publicar:true}, y reenvía el postMessage como 'importar-video'", async () => {
+    const { enviarDesdeBackground, mensajesPostMessage } = await cargarMarcadorFresco("https://web-production-af270.up.railway.app", {
+      pathname: "/panel/publicar",
+    });
+    const respuestas: unknown[] = [];
+    const payload = { url: "https://video.mercadolibre.com/MCO123/clip.mp4", origen: "Mercado Libre Colombia", paginaUrl: "https://articulo.mercadolibre.com.co/MCO-123" };
+    enviarDesdeBackground({ tipo: "zilonix:importar-video", payload }, (r) => respuestas.push(r));
+    expect(respuestas).toEqual([{ ok: true, publicar: true }]);
+    expect(mensajesPostMessage).toEqual([{ fuente: "zilonix-extension", tipo: "importar-video", payload }]);
+  });
+
+  it("en /panel/investigacion (NUNCA Publicar) -> ack {ok:true, publicar:false}", async () => {
+    const { enviarDesdeBackground } = await cargarMarcadorFresco("https://web-production-af270.up.railway.app", { pathname: "/panel/investigacion" });
+    const respuestas: unknown[] = [];
+    enviarDesdeBackground({ tipo: "zilonix:importar-video", payload: { url: "https://video.mercadolibre.com/clip.mp4" } }, (r) => respuestas.push(r));
+    expect(respuestas).toEqual([{ ok: true, publicar: false }]);
+  });
+});
+
 // Issue #44 — pedirImportacionPendiente() es lo que de verdad entrega
 // el payload guardado por background.js a la página, una vez que
 // /panel/publicar está lista. Se dispara por 2 caminos: la señal
@@ -204,6 +228,23 @@ describe("pedirImportacionPendiente — issue #44 (entrega el pendiente a /panel
       tipo: "importar-publicar",
       payload: { titulo: "Cojín", precio: 50000 },
     });
+  });
+
+  // Issue #44 (anexo 2, "Importar video a Clip") — el pendiente ahora
+  // viaja con su propio `tipo` (background.js, generalizado) — acá se
+  // confirma que SE REENVÍA con el nombre externo correcto
+  // ("importar-video"), nunca como si fuera "importar-publicar".
+  it('un pendiente de video (tipo "zilonix:importar-video") se reenvía como "importar-video", nunca como "importar-publicar"', async () => {
+    const payloadVideo = { url: "https://video.mercadolibre.com/clip.mp4", origen: "Mercado Libre Colombia", paginaUrl: "https://x.com" };
+    const sendMessageImpl = vi.fn((_mensaje: unknown, cb?: (respuesta?: unknown) => void) => {
+      cb?.({ payload: payloadVideo, tipo: "zilonix:importar-video" });
+    });
+    const { enviarDesdeLaPagina, mensajesPostMessage } = await cargarMarcadorFresco("https://web-production-af270.up.railway.app", {
+      pathname: "/panel/publicar",
+      sendMessageImpl,
+    });
+    enviarDesdeLaPagina({ fuente: "zilonix-panel", tipo: "publicar-listo" });
+    expect(mensajesPostMessage).toContainEqual({ fuente: "zilonix-extension", tipo: "importar-video", payload: payloadVideo });
   });
 
   it("sin nada pendiente (background responde sin payload) -> nunca manda un postMessage vacío/inventado", async () => {

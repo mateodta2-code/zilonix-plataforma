@@ -641,10 +641,14 @@ describe("zilonix:importar-publicar — issue #44 (abre o enfoca Publicar)", () 
     await mandarImportarPublicar();
 
     const primera = await pedirImportacionPendiente();
-    expect(primera).toEqual([{ payload: PAYLOAD }]);
+    // Issue #44 (anexo "Importar video a Clip") — el pendiente ahora
+    // viaja con su `tipo` (generalizado para que marcador-zilonix.js
+    // sepa con qué nombre reenviarlo a la página — antes era siempre
+    // "importar-publicar" a secas).
+    expect(primera).toEqual([{ payload: PAYLOAD, tipo: "zilonix:importar-publicar" }]);
 
     const segunda = await pedirImportacionPendiente();
-    expect(segunda).toEqual([{ payload: null }]);
+    expect(segunda).toEqual([{ payload: null, tipo: null }]);
   });
 
   it("el pendiente caduca a los 2 minutos — pasado ese tiempo, se entrega null (y se borra igual)", async () => {
@@ -654,13 +658,13 @@ describe("zilonix:importar-publicar — issue #44 (abre o enfoca Publicar)", () 
 
     await vi.advanceTimersByTimeAsync(2 * 60 * 1000 + 1_000);
     const respuesta = await pedirImportacionPendiente();
-    expect(respuesta).toEqual([{ payload: null }]);
+    expect(respuesta).toEqual([{ payload: null, tipo: null }]);
   });
 
   it("sin nada pendiente todavía -> se entrega null, nunca revienta", async () => {
     await cargarBackgroundFresco();
     const respuesta = await pedirImportacionPendiente();
-    expect(respuesta).toEqual([{ payload: null }]);
+    expect(respuesta).toEqual([{ payload: null, tipo: null }]);
   });
 });
 
@@ -900,5 +904,120 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
     await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
 
     expect(mockActual.llamadas.create).toEqual([]);
+  });
+});
+
+// Issue #44 (anexo 2, "Importar video a Clip") — mismo mecanismo de
+// abrir-o-enfocar-Publicar que "zilonix:importar-publicar" (arriba,
+// manejarAbrirOEnfocarPublicar), con su propio cooldown y un ancla
+// "#clip" cuando hace falta abrir una pestaña nueva. background.js
+// revalida la URL del video (última línea real de defensa) aunque
+// extension/lectores/video-comun.js ya la validó antes de mandar el
+// mensaje.
+describe('zilonix:importar-video — anexo "Importar video a Clip" (issue #44)', () => {
+  let mockActual: ReturnType<typeof crearChromeMock>;
+  const URL_PRODUCCION = "https://web-production-af270.up.railway.app";
+  const PAYLOAD_VIDEO = { url: "https://video.mercadolibre.com/MCO123/clip.mp4", origen: "Mercado Libre Colombia", paginaUrl: "https://articulo.mercadolibre.com.co/MCO-123" };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockActual = crearChromeMock();
+    (globalThis as unknown as { chrome: unknown }).chrome = mockActual.chrome;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (globalThis as unknown as { chrome?: unknown }).chrome;
+  });
+
+  async function mandarImportarVideo(payload: unknown = PAYLOAD_VIDEO, remitenteTabId = 999) {
+    const respuestas: unknown[] = [];
+    mockActual.listeners.onMessage!({ tipo: "zilonix:importar-video", payload }, { tab: { id: remitenteTabId } }, (r) => respuestas.push(r));
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 10);
+    return respuestas;
+  }
+
+  it("sin ninguna pestaña de Publicar abierta -> abre una pestaña nueva en /panel/publicar#clip (nunca sin el ancla)", async () => {
+    await cargarBackgroundFresco();
+    mockActual.setPestanasAbiertas([]);
+
+    const respuestas = await mandarImportarVideo();
+
+    expect(mockActual.llamadas.create).toEqual([{ id: 100, url: `${URL_PRODUCCION}/panel/publicar#clip`, active: true }]);
+    expect(respuestas).toEqual([{ ok: true, abrioNueva: true }]);
+  });
+
+  it("con una pestaña de Publicar YA abierta -> la enfoca, nunca abre otra (mismo criterio que importar-publicar)", async () => {
+    await cargarBackgroundFresco();
+    mockActual.setPestanasAbiertas([{ id: 7, url: `${URL_PRODUCCION}/panel/publicar`, windowId: 3 }]);
+    mockActual.setRespuestasSendMessage({ 7: { ok: true, publicar: true } });
+
+    const respuestas = await mandarImportarVideo();
+
+    expect(mockActual.llamadas.create).toEqual([]);
+    expect(mockActual.llamadas.update).toEqual([{ tabId: 7, props: { active: true } }]);
+    expect(respuestas).toEqual([{ ok: true, abrioNueva: false }]);
+  });
+
+  it("rechaza una URL que no es https, un m3u8 o un blob: -- nunca abre ni enfoca nada (última línea real de defensa)", async () => {
+    await cargarBackgroundFresco();
+    mockActual.setPestanasAbiertas([]);
+    for (const urlMala of [
+      "http://video.mercadolibre.com/clip.mp4",
+      "https://video.mercadolibre.com/clip.m3u8",
+      "blob:https://articulo.mercadolibre.com.co/1234-5678",
+      "https://video.mercadolibre.com/clip.mp4.html",
+    ]) {
+      await mandarImportarVideo({ ...PAYLOAD_VIDEO, url: urlMala });
+    }
+    expect(mockActual.llamadas.create).toEqual([]);
+  });
+
+  it("sin payload -> no hace nada, nunca revienta", async () => {
+    await cargarBackgroundFresco();
+    const respuestas = await mandarImportarVideo(null);
+    expect(respuestas).toEqual([]);
+    expect(mockActual.llamadas.create).toEqual([]);
+  });
+
+  it("doble clic en menos de 3s -> solo se abre UNA pestaña", async () => {
+    await cargarBackgroundFresco();
+    mockActual.setPestanasAbiertas([]);
+
+    await mandarImportarVideo(PAYLOAD_VIDEO, 1);
+    await mandarImportarVideo(PAYLOAD_VIDEO, 1);
+
+    expect(mockActual.llamadas.create.length).toBe(1);
+  });
+
+  it("el cooldown de 'importar video' es independiente del de 'importar a Publicar' -- uno no bloquea al otro", async () => {
+    await cargarBackgroundFresco();
+    mockActual.setPestanasAbiertas([]);
+
+    const respuestasPublicar: unknown[] = [];
+    mockActual.listeners.onMessage!(
+      { tipo: "zilonix:importar-publicar", payload: { titulo: "Reloj", precio: 1000, descripcion: null, imagenes: [] } },
+      { tab: { id: 1 } },
+      (r) => respuestasPublicar.push(r)
+    );
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 10);
+    await mandarImportarVideo(PAYLOAD_VIDEO, 1);
+
+    // 2 pestañas nuevas -- una para el formulario normal, otra (con
+    // #clip) para el video, ninguna bloqueada por el cooldown de la otra.
+    expect(mockActual.llamadas.create.length).toBe(2);
+    expect(mockActual.llamadas.create[1].url).toBe(`${URL_PRODUCCION}/panel/publicar#clip`);
+  });
+
+  it("el pendiente guardado viaja con tipo 'zilonix:importar-video' -- zilonix:pedir-importacion-pendiente lo entrega tal cual", async () => {
+    await cargarBackgroundFresco();
+    mockActual.setPestanasAbiertas([]); // nadie acepta en vivo -> queda pendiente
+    await mandarImportarVideo();
+
+    const respuestas: unknown[] = [];
+    mockActual.listeners.onMessage!({ tipo: "zilonix:pedir-importacion-pendiente" }, { tab: { id: 7 } }, (r) => respuestas.push(r));
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+
+    expect(respuestas).toEqual([{ payload: PAYLOAD_VIDEO, tipo: "zilonix:importar-video" }]);
   });
 });

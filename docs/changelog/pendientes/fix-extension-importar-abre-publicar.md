@@ -46,3 +46,22 @@
 
   Refs #273
   Refs #44
+
+- **2026-10-28** — anexo 2 de los 2 puntos anteriores, misma rama y misma versión (ext 0.3.41): botón **"Importar video a Clip"** en Mercado Libre, Amazon, Temu, AliExpress, Alibaba, Shein y, NUEVO en la extensión, **TikTok**. Con un clic real sobre una página de producto (o un video individual de TikTok), manda la URL del video — CON la marca de agua del sitio de origen, nunca se intenta quitarla — a la sección Clip de `/panel/publicar`.
+
+  **Cambio de permisos de contenido, revisar con cuidado**: `manifest.json` suma `"matches": ["*://*.tiktok.com/*"]` (ningún permiso ni `host_permission` nuevo — sigue siendo solo `content_scripts`). TikTok no es un marketplace que esta extensión investigue (sin precio/vendidos/vendedor) — `lectores/tiktok.js` es un lector nuevo y acotado, solo para esto.
+
+  **Núcleo compartido, GENÉRICO a propósito** (`extension/lectores/video-comun.js`, nuevo): sin evidencia real confirmada de cómo Temu/Alibaba/Shein/TikTok embeben su video (a diferencia de los selectores confirmados que ya tiene Mercado Libre/Amazon), las 7 plataformas comparten la MISMA heurística — un `<video>`/`<source>` real (estándar HTML5) con una URL https de video DIRECTO (`.mp4`/`.mov`/`.webm`, o un `<source type="video/mp4">` sin extensión visible — caso real de CDNs firmadas como TikTok), más un respaldo que busca la misma URL suelta en el HTML/JSON incrustado. Nunca se reconstruye un stream: un `.m3u8` o un `blob:` local nunca son candidatos — si es el único video de la página, se avisa "Este video no se puede traer, descárgalo y súbelo desde el computador" en vez de mostrar el botón. Más de un video -> una lista, nunca se elige uno a ciegas.
+
+  **Flujo, reutilizando lo ya construido en el anexo 1** (`manejarAbrirOEnfocarPublicar`, generalizado): `content.js` manda `{tipo:"zilonix:importar-video", payload:{url, origen, paginaUrl}}`; `background.js` revalida la URL (`esUrlVideoDirectaValida` — https, nunca `.m3u8`/`blob:`, última línea real de defensa) y abre o enfoca `/panel/publicar#clip` con el MISMO mecanismo exacto que `"zilonix:importar-publicar"` (cooldown propio de 3s, independiente); el pendiente ahora viaja con su `tipo` real (antes siempre `"importar-publicar"` a secas, hardcodeado) para que `marcador-zilonix.js` lo reenvíe con el nombre correcto. El receptor del lado de la página (valida la URL contra una allowlist de hosts de video, descarga en el servidor) vive en la rama de Sesión A para Clip — no se encontró esa rama fusionada a `main` todavía; el envío queda listo con el contrato de mensaje documentado en `extension/LEEME.md` ("Importar video a Clip") para coordinar cuando aterrice. No se tocó `lib/ml/cliente.ts`.
+
+  **Mercado Libre puede rechazar en moderación** un clip con el logo de otra plataforma — documentado, responsabilidad de la persona al elegir cuál video subir.
+
+  **Tests nuevos**: `extension/lectores/video-comun.test.ts` (18 pruebas, núcleo compartido). `amazon.test.ts`/`temu.test.ts`/`aliexpress.test.ts`/`alibaba.test.ts`/`shein.test.ts` (4 pruebas cada uno, nuevos — hasta esta tarea estos 5 lectores no tenían NINGÚN test) y una `describe` nueva en `mercadolibre.test.ts` (4 pruebas) — confirman el cableado real de `leerVideoDesdeHtml` en cada lector. `tiktok.test.ts` (10 pruebas, lector nuevo) — `tipoDePagina` + `leerVideoDesdeHtml`. `extension/background.test.ts` (7 pruebas) — abre `/panel/publicar#clip`; enfoca una pestaña ya abierta; rechaza una URL que no es https/es `.m3u8`/`blob:` sin abrir nada; el cooldown es independiente del de "importar a Publicar"; doble clic -> una sola pestaña; el pendiente viaja con su `tipo` real. `extension/marcador-zilonix.test.ts` (3 pruebas) — el ack especial también para este tipo; el pendiente se reenvía como `"importar-video"`, nunca como `"importar-publicar"`. La lista visual con varios botones (`content.js`, DOM real) se verifica por inspección manual — mismo límite ya documentado de `agregarBotonImportarPublicar`/`renderizarProducto`.
+
+  Extensión sigue en **0.3.41** (sin bump — mismo anexo de la misma versión).
+
+  Sin migraciones. Sin push forzado ni rebase.
+
+  Refs #273
+  Refs #44

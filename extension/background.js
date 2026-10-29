@@ -60,6 +60,40 @@ const TIEMPO_MAX_IMPORTACION_PENDIENTE_MS = 2 * 60 * 1000;
 // entre el primer clic y el segundo).
 const COOLDOWN_IMPORTAR_PUBLICAR_MS = 3000;
 
+// Issue #44 (anexo "Importar video a Clip") — "zilonix:importar-video"
+// reutiliza EXACTAMENTE el mismo mecanismo de abrir-o-enfocar-Publicar
+// que "zilonix:importar-publicar" (ver manejarAbrirOEnfocarPublicar,
+// abajo) — mismo cooldown de 3s, pero con su propia clave de
+// storage.session: un clic en "Importar a Publicar" y uno en "Importar
+// video a Clip" casi al mismo tiempo (desde 2 pestañas distintas, por
+// ejemplo) no tienen por qué pisarse entre sí.
+const COOLDOWN_IMPORTAR_VIDEO_MS = 3000;
+// Mismo criterio de "última línea real de defensa" que el resto de
+// este archivo (PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO/PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO):
+// aunque extension/lectores/video-comun.js ya validó esta URL antes de
+// mandar el mensaje, background.js es quien de verdad decide abrir o
+// enfocar una pestaña, así que la revalida acá también. Se duplica la
+// regla a mano (nunca un import real entre un content script y el
+// Service Worker en este proyecto — sin bundler, y un Service Worker
+// de Manifest V3 no tiene `window`) en vez de depender de que
+// content.js nunca tenga un bug. Solo vale una URL https de video
+// DIRECTO (MP4/MOV/WEBM) — nunca un stream HLS (.m3u8) ni un blob:
+// local, mismo criterio que el resto de "Importar video a Clip"
+// (nunca se reconstruye un stream).
+function esUrlVideoDirectaValida(url) {
+  if (typeof url !== "string" || !url) return false;
+  if (/^blob:/i.test(url)) return false;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  if (/\.m3u8(?:[?#].*)?$/i.test(parsed.pathname)) return false;
+  return /\.(mp4|mov|webm)$/i.test(parsed.pathname);
+}
+
 // Issue #44 — misma idea que CONFIG.URL_APP (extension/config.js) pero
 // del lado del Service Worker, que nunca carga ese archivo (solo corre
 // en páginas de Mercado Libre) — lee "zilonixUrlApp" directo de
@@ -1000,47 +1034,56 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
     return;
   }
 
-  // Issue #44 (revisión de Pablo sobre el PR #290) — "Importar a
-  // Publicar abre o enfoca Publicar": bug real que Mateo reportó —
-  // hasta esta tarea, el botón solo mandaba el mensaje a una pestaña
-  // de /panel/publicar que YA estuviera abierta; sin ninguna, se
-  // perdía en silencio ("no pasó nada"). "Seguir en Zilonix" sí abre
-  // su propia pestaña con el clic — este handler hace lo mismo para
-  // Importar, con el mismo criterio de "nunca navega sin un clic
-  // real" (el clic YA pasó, en content.js, antes de este mensaje).
-  if (mensaje.tipo === "zilonix:importar-publicar") {
+  // Issue #44 (revisión de Pablo sobre el PR #290; generalizado en el
+  // anexo "Importar video a Clip") — "Importar a Publicar abre o
+  // enfoca Publicar": bug real que Mateo reportó — hasta la tarea
+  // original, el botón solo mandaba el mensaje a una pestaña de
+  // /panel/publicar que YA estuviera abierta; sin ninguna, se perdía
+  // en silencio ("no pasó nada"). "Seguir en Zilonix" sí abre su
+  // propia pestaña con el clic — este manejador hace lo mismo, con el
+  // mismo criterio de "nunca navega sin un clic real" (el clic YA
+  // pasó, en content.js, antes de este mensaje). El anexo reutiliza
+  // ESTE MISMO manejador para "zilonix:importar-video" ("Importar
+  // video a Clip") — mismo mecanismo de abrir/enfocar/pendiente, solo
+  // cambia la clave del cooldown (independiente entre los 2 botones) y
+  // el ancla de la URL cuando hace falta abrir una pestaña nueva
+  // (`#clip` para el video, nada para el formulario normal).
+  function manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, opciones) {
     if (!mensaje.payload) return;
-    // Evita el doble clic: un segundo "zilonix:importar-publicar"
-    // dentro de los 3s del primero no abre una segunda pestaña ni
-    // vuelve a guardar un pendiente — chrome.storage.session (no una
-    // variable en memoria) para que el cooldown sobreviva si el
-    // Service Worker se recicla entre un clic y el siguiente, mismo
-    // criterio que COOLDOWN_ABRIR_SEGUIMIENTOS_MS.
-    chrome.storage.session.get({ ultimoImportarPublicarMs: 0 }, (datosCooldown) => {
+    // Evita el doble clic: un segundo mensaje del MISMO tipo dentro de
+    // los 3s del primero no abre una segunda pestaña ni vuelve a
+    // guardar un pendiente — chrome.storage.session (no una variable
+    // en memoria) para que el cooldown sobreviva si el Service Worker
+    // se recicla entre un clic y el siguiente, mismo criterio que
+    // COOLDOWN_ABRIR_SEGUIMIENTOS_MS.
+    chrome.storage.session.get({ [opciones.claveCooldown]: 0 }, (datosCooldown) => {
       const ahoraMs = Date.now();
-      const ultimoMs = typeof datosCooldown.ultimoImportarPublicarMs === "number" ? datosCooldown.ultimoImportarPublicarMs : 0;
+      const ultimoMs = typeof datosCooldown[opciones.claveCooldown] === "number" ? datosCooldown[opciones.claveCooldown] : 0;
       if (ahoraMs - ultimoMs < COOLDOWN_IMPORTAR_PUBLICAR_MS) return;
-      chrome.storage.session.set({ ultimoImportarPublicarMs: ahoraMs });
+      chrome.storage.session.set({ [opciones.claveCooldown]: ahoraMs });
 
-      // a. Guarda el payload con marca de tiempo — entregado una sola
-      // vez cuando /panel/publicar pida "zilonix:pedir-importacion-pendiente"
-      // (abajo), con el mismo tope de 2 minutos ahí.
-      chrome.storage.session.set({ [CLAVE_IMPORTACION_PENDIENTE]: { payload: mensaje.payload, creadoMs: ahoraMs } });
+      // a. Guarda el payload CON SU TIPO y marca de tiempo — entregado
+      // una sola vez cuando /panel/publicar pida
+      // "zilonix:pedir-importacion-pendiente" (abajo), con el mismo
+      // tope de 2 minutos ahí. El tipo viaja junto al payload para que
+      // marcador-zilonix.js sepa con qué nombre reenviarlo a la página
+      // (issue #44, anexo — antes era siempre "importar-publicar" a
+      // secas, hardcodeado).
+      chrome.storage.session.set({ [CLAVE_IMPORTACION_PENDIENTE]: { tipo: mensaje.tipo, payload: mensaje.payload, creadoMs: ahoraMs } });
 
       const abrirONuevaPestana = () => {
         resolverUrlPublicar((urlPublicar) => {
           // active:true — igual que "Seguir en Zilonix" (window.open
           // sin "background"), la pestaña nueva se ve de inmediato.
-          chrome.tabs.create({ url: urlPublicar, active: true }, () => void chrome.runtime.lastError);
+          chrome.tabs.create({ url: `${urlPublicar}${opciones.hashDestino || ""}`, active: true }, () => void chrome.runtime.lastError);
           if (typeof sendResponse === "function") sendResponse({ ok: true, abrioNueva: true });
         });
       };
 
       // b. Manda el mensaje a las pestañas abiertas, igual que antes —
-      // marcador-zilonix.js (corregido en esta misma revisión) solo
-      // responde ack {ok:true, publicar:true} si ESA pestaña es de
-      // verdad /panel/publicar, nunca desde cualquier otra ruta de
-      // Seller.
+      // marcador-zilonix.js solo responde ack {ok:true, publicar:true}
+      // si ESA pestaña es de verdad /panel/publicar, nunca desde
+      // cualquier otra ruta de Seller.
       chrome.tabs.query({}, (pestanas) => {
         if (pestanas.length === 0) {
           abrirONuevaPestana();
@@ -1088,6 +1131,22 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
     return true; // respuesta async (sendResponse se llama más tarde, arriba) — mantiene el canal abierto
   }
 
+  if (mensaje.tipo === "zilonix:importar-publicar") {
+    return manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, { claveCooldown: "ultimoImportarPublicarMs", hashDestino: "" });
+  }
+
+  // Issue #44 (anexo "Importar video a Clip") — botón nuevo en
+  // Mercado Libre/Amazon/Temu/AliExpress/Alibaba/Shein/TikTok (ver
+  // extension/lectores/video-comun.js + content.js): la URL de video
+  // (CON la marca de agua del sitio, nunca se intenta quitarla) ya
+  // pasó por lector.leerVideo (y por esUrlVideoDirectaValida acá
+  // mismo, última línea real de defensa) antes de llegar — se abre o
+  // enfoca /panel/publicar#clip con el MISMO mecanismo de arriba.
+  if (mensaje.tipo === "zilonix:importar-video") {
+    if (!mensaje.payload || !esUrlVideoDirectaValida(mensaje.payload.url)) return;
+    return manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, { claveCooldown: "ultimoImportarVideoMs", hashDestino: "#clip" });
+  }
+
   // Issue #44 — /panel/publicar (marcador-zilonix.js) lo pide apenas su
   // listener de postMessage está montado (señal "publicar-listo") o,
   // como red de seguridad, con un par de reintentos acotados. Se
@@ -1099,11 +1158,11 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
       const pendiente = datos[CLAVE_IMPORTACION_PENDIENTE];
       chrome.storage.session.remove(CLAVE_IMPORTACION_PENDIENTE);
       if (!pendiente || typeof pendiente.creadoMs !== "number") {
-        if (typeof sendResponse === "function") sendResponse({ payload: null });
+        if (typeof sendResponse === "function") sendResponse({ payload: null, tipo: null });
         return;
       }
       const vencido = Date.now() - pendiente.creadoMs > TIEMPO_MAX_IMPORTACION_PENDIENTE_MS;
-      if (typeof sendResponse === "function") sendResponse({ payload: vencido ? null : pendiente.payload });
+      if (typeof sendResponse === "function") sendResponse({ payload: vencido ? null : pendiente.payload, tipo: vencido ? null : pendiente.tipo });
     });
     return true; // respuesta async
   }

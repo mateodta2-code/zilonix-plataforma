@@ -321,3 +321,15 @@
   font-style: italic;
   padding: 8px 0;
 }
+
+/* Issue #44 (anexo "Importar video a Clip") — varios videos
+   encontrados en la misma página: cada uno es un .zx-boton-seguir
+   (mismo estilo de siempre), solo que agrupados en este contenedor en
+   vez de ir directo en .zx-panel__pie (que ya hace flex-column con
+   gap, acá se repite para que el grupo se vea igual que un botón
+   suelto). */
+.zx-lista-videos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

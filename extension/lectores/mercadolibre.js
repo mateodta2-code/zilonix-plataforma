@@ -18,6 +18,12 @@
   // Issue #174 — URL_APP para el botón "Seguir en Zilonix", ver
   // extension/config.js. Mismo patrón de acceso dual que U, arriba.
   const CONFIG = typeof window !== "undefined" ? window.ZilonixConfig : require("../config.js");
+  // Issue #44 (anexo "Importar video a Clip") — mismo patrón dual que
+  // U/CONFIG arriba: en Node (vitest) no existe `window`, se usa
+  // video-comun.js directo con require() (archivo hermano, en esta
+  // misma carpeta); en el navegador (content script real) `window` sí
+  // existe.
+  const V = typeof window !== "undefined" ? window.ZilonixVideoComun : require("./video-comun.js");
 
   // Issue #233 — bug real confirmado en el smoke de Sharel: "panel
   // sigue sin bloques, escaneo → 0 productos" en Argentina/Brasil/etc.
@@ -952,6 +958,22 @@
     };
   }
 
+  // Issue #44 (anexo "Importar video a Clip") — ver el comentario
+  // completo en extension/lectores/video-comun.js: heurística
+  // GENÉRICA compartida por las 7 plataformas (<video>/<source> con
+  // una URL https de video directo, nunca un selector propio de
+  // Mercado Libre). Pura (string -> objeto), probada con un HTML de
+  // ejemplo sin navegador — ver mercadolibre.test.ts.
+  function leerVideoDesdeHtml(html) {
+    return V.extraerUrlsVideoDeHtml(html);
+  }
+
+  function leerVideo(doc) {
+    const raiz = doc || document;
+    const html = raiz && raiz.documentElement && typeof raiz.documentElement.outerHTML === "string" ? raiz.documentElement.outerHTML : "";
+    return leerVideoDesdeHtml(html);
+  }
+
   // Issue #227 — "quitar API de Investigación": Demanda/Mercado/Estrategia
   // dejan de depender de la API de catálogo (buscarInvestigacionProducto) —
   // ahora el dato real sale de ACÁ, el listado real de Mercado Libre, con
@@ -1385,6 +1407,9 @@
     esUrlFotoMlValida,
     deduplicarFotosMl,
     leerGaleriaYDescripcion,
+    // Issue #44 (anexo "Importar video a Clip") — pura (string ->
+    // objeto), ver el comentario completo junto a la función.
+    leerVideoDesdeHtml,
   };
 
   // Igual que extension/seguridad.js: en el navegador real no existe
@@ -1411,6 +1436,10 @@
       // revisa que exista antes de ofrecer "Importar a Publicar" en los
       // otros 5 sitios (que nunca la tienen).
       leerGaleriaYDescripcion,
+      // Issue #44 (anexo "Importar video a Clip") — todas las 7
+      // plataformas la exponen (ver video-comun.js), a diferencia de
+      // leerGaleriaYDescripcion/contarTarjetasListado (solo ML).
+      leerVideo,
     };
   }
 })();

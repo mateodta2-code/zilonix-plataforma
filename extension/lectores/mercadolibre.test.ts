@@ -27,6 +27,7 @@ import {
   leerInventarioMaximoDeTexto,
   leerResenasDesdeScript,
   leerSellerIdDeTienda,
+  leerVideoDesdeHtml,
   tipoDePagina,
   urlFotoGrande,
 } from "./mercadolibre.js";
@@ -1263,5 +1264,38 @@ describe("urlFotoGrande/idNumericoDeArchivo/esUrlFotoMlValida/deduplicarFotosMl 
   it("deduplicarFotosMl: respeta el array vacío/ausente, nunca lanza", () => {
     expect(deduplicarFotosMl([])).toEqual([]);
     expect(deduplicarFotosMl(undefined)).toEqual([]);
+  });
+});
+
+// Issue #44 (anexo "Importar video a Clip") — leerVideoDesdeHtml acá
+// es solo un delegado fino a video-comun.js (ver ese archivo y su
+// propia batería de pruebas) — estas pruebas confirman el cableado
+// real de ESTE lector, nunca repiten cada caso de borde del núcleo
+// compartido.
+describe("leerVideoDesdeHtml (Mercado Libre) — issue #44 (anexo 'Importar video a Clip')", () => {
+  it("extrae la URL de un <video src> real de una ficha", () => {
+    const html = `<div class="ui-pdp-gallery"><video src="https://video.mercadolibre.com/MCO123/clip.mp4" controls></video></div>`;
+    const resultado = leerVideoDesdeHtml(html);
+    expect(resultado.candidatos).toEqual(["https://video.mercadolibre.com/MCO123/clip.mp4"]);
+    expect(resultado.huboVideoNoDescargable).toBe(false);
+  });
+
+  it("rechaza un .m3u8 -- avisa 'no descargable', nunca lo agrega como candidato", () => {
+    const html = `<video><source src="https://video.mercadolibre.com/clip.m3u8" type="application/x-mpegURL"></video>`;
+    const resultado = leerVideoDesdeHtml(html);
+    expect(resultado.candidatos).toEqual([]);
+    expect(resultado.huboVideoNoDescargable).toBe(true);
+  });
+
+  it("rechaza un blob: local", () => {
+    const html = `<video src="blob:https://articulo.mercadolibre.com.co/1234-5678"></video>`;
+    const resultado = leerVideoDesdeHtml(html);
+    expect(resultado.candidatos).toEqual([]);
+    expect(resultado.huboVideoNoDescargable).toBe(true);
+  });
+
+  it("rechaza una URL que no es https", () => {
+    const html = `<video src="http://video.mercadolibre.com/clip.mp4"></video>`;
+    expect(leerVideoDesdeHtml(html).candidatos).toEqual([]);
   });
 });
