@@ -1,6 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// HIGH 3 (review de Pablo) — "otro_compatible_openai" revalida https +
+// IP pública (lib/seguridad/ssrf.ts) justo antes de cada fetch real.
+// Mismo patrón de mock que lib/ml/video-externo.test.ts: dns/promises
+// con una IP pública por defecto, para que los casos existentes
+// (otro_compatible_openai con una baseUrl normal) sigan pasando sin
+// tocar DNS de verdad — los casos negativos pisan ese default.
+vi.mock("dns/promises", () => ({ lookup: vi.fn() }));
+
+import { lookup } from "dns/promises";
 import { ErrorProveedorIA, llamarIA } from "./proveedores";
 import type { ConexionIAConClave } from "./tipos";
+
+const lookupMock = lookup as unknown as ReturnType<typeof vi.fn>;
 
 function respuestaJson(data: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => data } as Response;
@@ -15,6 +27,7 @@ function conexion(overrides: Partial<ConexionIAConClave> = {}): ConexionIAConCla
 // pruebas confirman el dispatch y la forma real de cada petición,
 // nunca llaman a un proveedor real.
 describe("llamarIA — dispatch por proveedor (rama feat-promociones)", () => {
+  beforeEach(() => lookupMock.mockResolvedValue([{ address: "203.0.113.10" }])); // IP pública por defecto (TEST-NET-3, RFC 5737)
   afterEach(() => vi.unstubAllGlobals());
 
   it("anthropic — Messages API, x-api-key, thinking deshabilitado", async () => {
@@ -62,6 +75,33 @@ describe("llamarIA — dispatch por proveedor (rama feat-promociones)", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     await expect(llamarIA(conexion({ proveedor: "otro_compatible_openai", baseUrl: null }), "hola")).rejects.toBeInstanceOf(ErrorProveedorIA);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // HIGH 3 (review de Pablo) — la baseUrl ya se validó al guardar la
+  // conexión, pero se revalida OTRA VEZ acá: el DNS puede cambiar entre
+  // medio (DNS rebinding), y esto es lo único que corre justo antes de
+  // cada fetch real.
+  it("otro_compatible_openai con http (no https): ErrorProveedorIA, nunca llama a fetch ni a dns", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(llamarIA(conexion({ proveedor: "otro_compatible_openai", baseUrl: "http://mi-servidor.test/v1" }), "hola")).rejects.toBeInstanceOf(ErrorProveedorIA);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("otro_compatible_openai cuyo hostname resuelve a una IP privada: ErrorProveedorIA, nunca llama a fetch (SSRF)", async () => {
+    lookupMock.mockResolvedValue([{ address: "169.254.169.254" }]); // IP de metadata de nube — el blanco clásico de un SSRF
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(llamarIA(conexion({ proveedor: "otro_compatible_openai", baseUrl: "https://interno.test/v1" }), "hola")).rejects.toBeInstanceOf(ErrorProveedorIA);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("otro_compatible_openai cuyo hostname no resuelve: ErrorProveedorIA, nunca llama a fetch", async () => {
+    lookupMock.mockRejectedValueOnce(new Error("ENOTFOUND"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(llamarIA(conexion({ proveedor: "otro_compatible_openai", baseUrl: "https://no-existe.test/v1" }), "hola")).rejects.toBeInstanceOf(ErrorProveedorIA);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

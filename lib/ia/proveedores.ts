@@ -1,3 +1,4 @@
+import { exigirUrlBaseIASegura } from "./validarUrlBase";
 import type { ConexionIAConClave } from "./tipos";
 
 // Rama feat-promociones, punto 6 — un dispatcher por proveedor, cada
@@ -65,9 +66,21 @@ export async function llamarIA(conexion: ConexionIAConClave, prompt: string, opc
       return llamarCompatibleOpenAI("https://api.openai.com/v1", conexion, prompt, maxTokens);
     case "xai":
       return llamarCompatibleOpenAI("https://api.x.ai/v1", conexion, prompt, maxTokens);
-    case "otro_compatible_openai":
+    case "otro_compatible_openai": {
       if (!conexion.baseUrl) throw new ErrorProveedorIA("Falta la URL base del proveedor de IA compatible con OpenAI.");
+      // Code review de Pablo — HIGH 3: la URL base ya se validó al
+      // guardar (app/api/configuracion/ia-conexion/route.ts), pero una
+      // conexión se guarda una vez y se usa muchas veces después — el
+      // DNS de ese hostname puede cambiar entre medio (DNS rebinding).
+      // Se revalida OTRA VEZ, acá, justo antes del fetch real — nunca
+      // se confía en que "ya se validó alguna vez".
+      try {
+        await exigirUrlBaseIASegura(conexion.baseUrl);
+      } catch {
+        throw new ErrorProveedorIA("Esa URL base no se puede usar — no es https o no resuelve a una dirección pública.");
+      }
       return llamarCompatibleOpenAI(conexion.baseUrl.replace(/\/$/, ""), conexion, prompt, maxTokens);
+    }
     case "google":
       return llamarGoogle(conexion, prompt, maxTokens);
   }
