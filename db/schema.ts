@@ -475,6 +475,15 @@ export const cuentasMl = pgTable(
       columns: [t.empresaId, t.titularId],
       foreignColumns: [titulares.empresaId, titulares.id],
     }).onDelete("restrict"),
+    // Code review de Pablo (rama feat-promociones) — igual que
+    // skus_empresa_id_unica (0015) y bodegas_empresa_id_unica (0016):
+    // Postgres exige que la columna referenciada por una FK compuesta
+    // tenga su propio UNIQUE — promociones_reglas/candidatos/acciones
+    // (migración 0017) referencian (empresa_id, cuenta_ml_id) contra
+    // esto mismo. Sin este constraint, la migración 0017 fallaba de
+    // verdad al correr contra Postgres real (nunca se notó local
+    // porque drizzle-kit solo genera el SQL, no lo ejecuta).
+    empresaIdUnica: unique("cuentas_ml_empresa_id_unica").on(t.empresaId, t.id),
   })
 );
 

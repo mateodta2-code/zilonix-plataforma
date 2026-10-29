@@ -1,3 +1,4 @@
+ALTER TABLE "cuentas_ml" ADD CONSTRAINT "cuentas_ml_empresa_id_unica" UNIQUE("empresa_id","id");--> statement-breakpoint
 CREATE TYPE "public"."promocion_accion_estado" AS ENUM('pendiente', 'aceptada', 'rechazada', 'ejecutada', 'fallida');--> statement-breakpoint
 CREATE TYPE "public"."promocion_accion_tipo" AS ENUM('participar', 'modificar', 'salir');--> statement-breakpoint
 CREATE TYPE "public"."proveedor_ia" AS ENUM('anthropic', 'openai', 'google', 'xai', 'otro_compatible_openai');--> statement-breakpoint

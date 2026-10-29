@@ -1140,7 +1140,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "cuentas_ml_empresa_id_unica": {
+          "name": "cuentas_ml_empresa_id_unica",
+          "nullsNotDistinct": false,
+          "columns": [
+            "empresa_id",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
