@@ -6,6 +6,7 @@ import { auditoria, costosSku, skus, terceros } from "@/db/schema";
 import { normalizarSkuCodigo } from "@/lib/costos-sku";
 import { leerArchivo, leerMonto, textoDeCelda, type Celda, type FilaArchivo } from "@/lib/importar-archivo";
 import { requierePermiso } from "@/lib/permisos";
+import { textoAuditoriaTercero, type DatosTercero } from "@/lib/terceros";
 import { CAMPOS_MAESTRA, ETIQUETAS_CAMPO, type CampoMaestra, type MapeoColumnas } from "./maestra-campos";
 
 // Issue #128 (Z-FIN-06) — carga de la hoja PRODUCTOS de Zilonix a la
@@ -24,7 +25,11 @@ import { CAMPOS_MAESTRA, ETIQUETAS_CAMPO, type CampoMaestra, type MapeoColumnas 
 // - Costo vacío = sin costo (aviso); costo 0 = costo real, sin aviso.
 // - Packing igual al del proveedor no crea valor propio; distinto, sí
 //   (y se marca) [SUPUESTO del issue].
-// - El proveedor tiene que existir y estar activo: no se crea solo.
+// - Proveedor: si el nombre (sin distinguir mayúsculas ni espacios de
+//   más) no existe en la empresa, se crea al confirmar, como
+//   proveedor_producto con pago inmediato (pedido de Sharel, Refs #128).
+//   Varias filas con el mismo nombre crean uno solo. Sigue siendo error
+//   un nombre que coincide con dos terceros o con uno desactivado.
 
 export { CAMPOS_MAESTRA, ETIQUETAS_CAMPO } from "./maestra-campos";
 export type { CampoMaestra, MapeoColumnas } from "./maestra-campos";
@@ -48,6 +53,9 @@ const ALIAS: Record<CampoMaestra, string[]> = {
 // datos dejan margen y mantienen la transacción corta.
 export const FILAS_MAXIMAS_MAESTRA = 5_000;
 const LARGO_MAXIMO_PRODUCTO = 300;
+// Solo para el proveedor que se crea desde el archivo: un texto más
+// largo casi siempre es una celda corrida, no un nombre.
+const LARGO_MAXIMO_PROVEEDOR = 120;
 const TAMANO_LOTE = 500;
 
 export function normalizarEncabezado(texto: string): string {
@@ -127,6 +135,9 @@ export type FilaVistaPrevia = {
   avisos: string[];
   valores: ValoresMaestra;
   proveedorNombre: string | null;
+  // Nombre del proveedor que no existe y se crea al confirmar (entonces
+  // valores.terceroId sigue vacío hasta tener el id real).
+  proveedorACrear: string | null;
 };
 
 export type ErrorFilaMaestra = { numeroFila: number; columna: string; mensaje: string };
@@ -136,7 +147,7 @@ export type VistaPreviaMaestra = {
   mapeo: MapeoColumnas;
   filas: FilaVistaPrevia[];
   errores: ErrorFilaMaestra[];
-  resumen: { nuevas: number; cambios: number; sinCambios: number; conError: number; conAviso: number };
+  resumen: { nuevas: number; cambios: number; sinCambios: number; conError: number; conAviso: number; proveedoresNuevos: number };
 };
 
 function centavos(monto: string): bigint {
@@ -149,8 +160,14 @@ function montosIguales(a: string | null, b: string | null): boolean {
   return centavos(a) === centavos(b);
 }
 
+// Nombre tal como se guarda (sin espacios de más) y clave para comparar
+// (además, sin distinguir mayúsculas).
+function limpiarNombreProveedor(nombre: string): string {
+  return nombre.trim().replace(/\s+/g, " ");
+}
+
 function normalizarNombreProveedor(nombre: string): string {
-  return nombre.trim().replace(/\s+/g, " ").toLowerCase();
+  return limpiarNombreProveedor(nombre).toLowerCase();
 }
 
 function vistaVacia(encabezados: string[], mapeo: MapeoColumnas, errores: ErrorFilaMaestra[]): VistaPreviaMaestra {
@@ -159,7 +176,7 @@ function vistaVacia(encabezados: string[], mapeo: MapeoColumnas, errores: ErrorF
     mapeo,
     filas: [],
     errores,
-    resumen: { nuevas: 0, cambios: 0, sinCambios: 0, conError: new Set(errores.map((e) => e.numeroFila)).size, conAviso: 0 },
+    resumen: { nuevas: 0, cambios: 0, sinCambios: 0, conError: new Set(errores.map((e) => e.numeroFila)).size, conAviso: 0, proveedoresNuevos: 0 },
   };
 }
 
@@ -195,6 +212,9 @@ export function calcularVistaPrevia(
     proveedoresPorNombre.set(clave, [...(proveedoresPorNombre.get(clave) ?? []), p]);
   }
   const proveedoresPorId = new Map(contexto.proveedores.map((p) => [p.id, p]));
+  // Clave normalizada → nombre que se va a crear: el de la primera fila
+  // que lo trae, así varias filas con el mismo nombre crean uno solo.
+  const proveedoresACrear = new Map<string, string>();
 
   const errores: ErrorFilaMaestra[] = [];
   const filas: FilaVistaPrevia[] = [];
@@ -254,11 +274,21 @@ export function calcularVistaPrevia(
       if (enCatalogo && enCatalogo.trim() !== producto) avisos.push(`En el catálogo de SKU se llama «${enCatalogo}».`);
     }
 
+    let proveedorACrear: string | null = null;
     const proveedorTexto = textoDeCelda(celda(fila, "proveedor"));
     if (proveedorTexto) {
-      const candidatos = proveedoresPorNombre.get(normalizarNombreProveedor(proveedorTexto)) ?? [];
+      const clave = normalizarNombreProveedor(proveedorTexto);
+      const candidatos = proveedoresPorNombre.get(clave) ?? [];
       if (candidatos.length === 0) {
-        error("proveedor", `El proveedor «${proveedorTexto}» no existe. Créalo primero en Proveedores.`);
+        const nombre = limpiarNombreProveedor(proveedorTexto);
+        if (nombre.length > LARGO_MAXIMO_PROVEEDOR) {
+          error("proveedor", `El nombre del proveedor supera ${LARGO_MAXIMO_PROVEEDOR} caracteres.`);
+        } else {
+          if (!proveedoresACrear.has(clave)) proveedoresACrear.set(clave, nombre);
+          proveedorACrear = proveedoresACrear.get(clave)!;
+          valores.terceroId = null;
+          avisos.push(`Se creará el proveedor «${proveedorACrear}».`);
+        }
       } else if (candidatos.length > 1) {
         error("proveedor", `Hay más de un proveedor llamado «${proveedorTexto}». Renombra uno en Proveedores.`);
       } else if (!candidatos[0].activo) {
@@ -312,12 +342,17 @@ export function calcularVistaPrevia(
     }
 
     const cambios: CambioCampo[] = [];
+    const nombreDe = (id: string | null) => (id ? (proveedoresPorId.get(id)?.nombre ?? id) : null);
     for (const [campo, columna] of Object.entries(CAMPO_A_COLUMNA) as [Exclude<CampoMaestra, "sku">, keyof ValoresMaestra][]) {
       const anterior = existente ? existente[columna] : null;
+      if (columna === "terceroId" && proveedorACrear !== null) {
+        // El proveedor nuevo todavía no tiene id: siempre es un cambio.
+        cambios.push({ campo, anterior: nombreDe(anterior), nuevo: proveedorACrear });
+        continue;
+      }
       const nuevo = valores[columna];
       const igual = columna === "nombreProducto" || columna === "terceroId" ? anterior === nuevo : montosIguales(anterior, nuevo);
       if (igual) continue;
-      const nombreDe = (id: string | null) => (id ? (proveedoresPorId.get(id)?.nombre ?? id) : null);
       cambios.push(columna === "terceroId" ? { campo, anterior: nombreDe(anterior), nuevo: nombreDe(nuevo) } : { campo, anterior, nuevo });
     }
 
@@ -328,7 +363,8 @@ export function calcularVistaPrevia(
       cambios,
       avisos,
       valores,
-      proveedorNombre: valores.terceroId ? (proveedoresPorId.get(valores.terceroId)?.nombre ?? null) : null,
+      proveedorNombre: proveedorACrear ?? (valores.terceroId ? (proveedoresPorId.get(valores.terceroId)?.nombre ?? null) : null),
+      proveedorACrear,
     });
   }
 
@@ -355,6 +391,7 @@ export function calcularVistaPrevia(
       sinCambios: filasSinError.filter((f) => f.estado === "sin_cambios").length,
       conError: filasConError.size,
       conAviso: filasSinError.filter((f) => f.avisos.length > 0).length,
+      proveedoresNuevos: new Set(filasSinError.flatMap((f) => (f.proveedorACrear ? [normalizarNombreProveedor(f.proveedorACrear)] : []))).size,
     },
   };
 }
@@ -409,6 +446,13 @@ export class ArchivoMaestraInvalidoError extends Error {
   }
 }
 
+export class ProveedorImportacionError extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = "ProveedorImportacionError";
+  }
+}
+
 export class ImportacionMaestraConErroresError extends Error {
   constructor(public readonly vista: VistaPreviaMaestra) {
     super("El archivo tiene filas con error: no se guardó ninguna. Corrígelas y vuelve a subirlo.");
@@ -446,7 +490,69 @@ export async function previsualizarImportacionMaestra(
   return calcularVistaPrevia(hoja, contexto, manual);
 }
 
-export type ResultadoImportacionMaestra = { nuevas: number; actualizadas: number; sinCambios: number };
+export type ResultadoImportacionMaestra = { nuevas: number; actualizadas: number; sinCambios: number; proveedoresCreados: number };
+
+// Crea, dentro de la transacción de la importación, los proveedores que
+// el archivo nombra y la empresa no tiene. Devuelve clave normalizada →
+// id. Si alguien creó el mismo nombre a mano en medio (choca el UNIQUE
+// empresa + nombre), se usa ese y no se duplica; si ese está desactivado,
+// la carga entera se cancela con un error claro.
+async function crearProveedoresDelArchivo(
+  tx: typeof db,
+  empresaId: string,
+  usuarioId: string,
+  filas: FilaVistaPrevia[],
+  filasAuditoria: (typeof auditoria.$inferInsert)[]
+): Promise<Map<string, string>> {
+  const nombres = new Map<string, string>();
+  for (const f of filas) {
+    if (f.proveedorACrear) nombres.set(normalizarNombreProveedor(f.proveedorACrear), f.proveedorACrear);
+  }
+  const ids = new Map<string, string>();
+  for (const [clave, nombre] of nombres) {
+    // [SUPUESTO] proveedor de producto con pago inmediato y sin packing
+    // propio: el resto se completa después en Proveedores.
+    const datos: DatosTercero = {
+      nombre,
+      tipo: "proveedor_producto",
+      empaque: null,
+      condicionPago: "inmediato",
+      periodicidad: null,
+      plazoDias: null,
+      predeterminadoEnvioAgencia: false,
+      predeterminadoEmpaque: false,
+      predeterminadoFlex: false,
+    };
+    const [creado] = await tx
+      .insert(terceros)
+      .values({ empresaId, ...datos, activo: true, actualizadoPor: usuarioId })
+      .onConflictDoNothing({ target: [terceros.empresaId, terceros.nombre] })
+      .returning({ id: terceros.id });
+    if (creado) {
+      ids.set(clave, creado.id);
+      filasAuditoria.push({
+        id: randomUUID(),
+        empresaId,
+        usuarioId,
+        actorTipo: "persona",
+        accion: "crear",
+        entidad: "tercero",
+        entidadId: creado.id,
+        detalle: `Creó el tercero «${nombre}» (desde importación maestra).`,
+        valorNuevo: textoAuditoriaTercero(datos),
+      });
+      continue;
+    }
+    const [existente] = await tx
+      .select({ id: terceros.id, activo: terceros.activo })
+      .from(terceros)
+      .where(and(eq(terceros.empresaId, empresaId), eq(terceros.nombre, nombre)));
+    if (!existente) throw new ProveedorImportacionError(`No se pudo crear el proveedor «${nombre}». Vuelve a intentarlo.`);
+    if (!existente.activo) throw new ProveedorImportacionError(`El proveedor «${nombre}» se acaba de crear desactivado en Proveedores. Actívalo o cambia el nombre en el archivo.`);
+    ids.set(clave, existente.id);
+  }
+  return ids;
+}
 
 function textoValores(valores: Partial<Record<string, string | null>>): string {
   return Object.entries(valores)
@@ -473,10 +579,18 @@ export async function confirmarImportacionMaestra(
     const vista = calcularVistaPrevia(hoja, contexto, manual);
     if (vista.errores.length > 0) throw new ImportacionMaestraConErroresError(vista);
 
-    const nuevas = vista.filas.filter((f) => f.estado === "nueva");
-    const cambiadas = vista.filas.filter((f) => f.estado === "cambio");
     const ahora = new Date();
     const filasAuditoria: (typeof auditoria.$inferInsert)[] = [];
+
+    // Primero los proveedores nuevos, para tener su id antes del upsert
+    // de costos_sku.
+    const idsProveedores = await crearProveedoresDelArchivo(tx, empresaId, usuarioId, vista.filas, filasAuditoria);
+    for (const f of vista.filas) {
+      if (f.proveedorACrear) f.valores.terceroId = idsProveedores.get(normalizarNombreProveedor(f.proveedorACrear)) ?? null;
+    }
+
+    const nuevas = vista.filas.filter((f) => f.estado === "nueva");
+    const cambiadas = vista.filas.filter((f) => f.estado === "cambio");
 
     for (let i = 0; i < nuevas.length; i += TAMANO_LOTE) {
       const lote = nuevas.slice(i, i + TAMANO_LOTE);
@@ -528,12 +642,12 @@ export async function confirmarImportacionMaestra(
       accion: "importar_maestra_sku",
       entidad: "costo_sku",
       // Nunca el contenido del archivo, solo el resumen.
-      detalle: `Cargó la tabla maestra desde ${archivo.nombre.endsWith(".csv") ? "CSV" : "Excel"}: ${nuevas.length} nueva(s), ${cambiadas.length} cambiada(s), ${vista.resumen.sinCambios} sin cambios.`,
+      detalle: `Cargó la tabla maestra desde ${archivo.nombre.endsWith(".csv") ? "CSV" : "Excel"}: ${nuevas.length} nueva(s), ${cambiadas.length} cambiada(s), ${vista.resumen.sinCambios} sin cambios, ${idsProveedores.size} proveedor(es) nuevo(s).`,
     });
     for (let i = 0; i < filasAuditoria.length; i += TAMANO_LOTE) {
       await tx.insert(auditoria).values(filasAuditoria.slice(i, i + TAMANO_LOTE));
     }
 
-    return { nuevas: nuevas.length, actualizadas: cambiadas.length, sinCambios: vista.resumen.sinCambios };
+    return { nuevas: nuevas.length, actualizadas: cambiadas.length, sinCambios: vista.resumen.sinCambios, proveedoresCreados: filasAuditoria.filter((a) => a.entidad === "tercero").length };
   });
 }

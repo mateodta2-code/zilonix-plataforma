@@ -56,11 +56,17 @@ export function ImportarMaestraClient() {
   }
 
   if (estado.paso === "confirmado") {
-    const { nuevas, actualizadas, sinCambios } = estado.resultado;
+    const { nuevas, actualizadas, sinCambios, proveedoresCreados } = estado.resultado;
     return (
       <div className={styles.form}>
         <p className={styles.avisoExito}>
           Listo: <strong>{nuevas}</strong> SKU nuevo(s), <strong>{actualizadas}</strong> actualizado(s) y {sinCambios} sin cambios.
+          {proveedoresCreados > 0 && (
+            <>
+              {" "}
+              Se crearon <strong>{proveedoresCreados}</strong> proveedor(es) nuevo(s), con pago inmediato: revísalos en Proveedores.
+            </>
+          )}
         </p>
         <div className={styles.acciones}>
           <Boton type="button" onClick={reiniciar}>
@@ -83,6 +89,12 @@ export function ImportarMaestraClient() {
         <p>
           <strong>{resumen.nuevas}</strong> nueva(s) · <strong>{resumen.cambios}</strong> con cambios · {resumen.sinCambios} sin cambios ·{" "}
           <strong>{resumen.conError}</strong> con error · {resumen.conAviso} con aviso
+          {resumen.proveedoresNuevos > 0 && (
+            <>
+              {" "}
+              · se creará(n) <strong>{resumen.proveedoresNuevos}</strong> proveedor(es) nuevo(s)
+            </>
+          )}
         </p>
 
         {encabezados.length > 0 && (
