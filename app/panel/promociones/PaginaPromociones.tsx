@@ -6,6 +6,7 @@ import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Tabla, FilaTabla, CeldaTabla } from "@/components/marco/Tabla";
+import { debeMostrarResumenBusquedaVacia, lineasResumenBusquedaVacia } from "./resumenBusquedaVacia";
 import type {
   AccionHistorialCliente,
   CandidatoClienteCliente,
@@ -105,18 +106,29 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   useEffect(() => {
     if (!jobId) return;
     let activo = true;
+    // Bug real en staging (rama fix-promociones-buscar, Refs #44) —
+    // este interval nunca se frenaba solo: seguía pidiendo
+    // /trabajo/[jobId] cada 2s para siempre (confirmado: "polling
+    // trabajo 200 varios minutos" en los logs de la empresa que
+    // reportó el problema), aunque `terminadoTs` ya estuviera puesto
+    // desde la primera consulta. `id` se declara ACÁ para poder
+    // frenarlo desde dentro de `consultar()`, no solo al desmontar.
+    let id: ReturnType<typeof setInterval> | undefined;
     async function consultar() {
       const res = await fetch(`/api/ml/promociones/trabajo/${jobId}`);
       if (!activo || !res.ok) return;
       const body = await res.json();
       setTrabajo(body.trabajo);
-      if (body.trabajo.terminadoTs != null) void cargarCandidatos();
+      if (body.trabajo.terminadoTs != null) {
+        void cargarCandidatos();
+        if (id != null) clearInterval(id);
+      }
     }
     void consultar();
-    const id = setInterval(() => void consultar(), 2000);
+    id = setInterval(() => void consultar(), 2000);
     return () => {
       activo = false;
-      clearInterval(id);
+      if (id != null) clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consultar se recrea cada render; solo nos importa reaccionar a jobId
   }, [jobId]);
@@ -278,6 +290,17 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
 
           {cargandoCandidatos ? (
             <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 12 }}>Cargando…</p>
+          ) : debeMostrarResumenBusquedaVacia(trabajo, candidatos.length) ? (
+            <div style={{ marginTop: 12 }}>
+              <p style={{ fontSize: 13, color: "var(--text-muted)" }}>La búsqueda terminó sin ningún candidato. Resumen por cuenta:</p>
+              <ul style={{ marginTop: 8, paddingLeft: 18 }}>
+                {lineasResumenBusquedaVacia(trabajo as TrabajoBusquedaCliente).map((linea) => (
+                  <li key={linea.cuentaId} style={{ fontSize: 13, marginTop: 4, color: linea.tieneError ? "var(--kpi-peligro-texto)" : "var(--text-muted)" }}>
+                    {linea.texto}
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : candidatos.length === 0 ? (
             <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 12 }}>Todavía no hay resultados — dale &quot;Buscar&quot; arriba.</p>
           ) : (
