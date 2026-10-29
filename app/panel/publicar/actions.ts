@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
@@ -12,6 +12,15 @@ import { productosMl } from "@/db/schema";
 import { publicarProductoEnCuentas } from "@/lib/ml/publicar";
 import type { DatosPorCuenta, VariantesProducto } from "@/lib/ml/publicar-tipos";
 import { esRellenoFalsoDimensiones } from "./formulario-logica";
+
+// Code review de Pablo (sobre 768305e) — mismo patrón que ya usa el
+// resto del repo para un UUID real (columna `id`, Postgres
+// `gen_random_uuid()`): app/api/ml/clip/route.ts (cuentaId),
+// app/api/ml/publicar/_ayudantes.ts, lib/finanzas/ventas-consulta.ts
+// — redeclarado acá en vez de importado de cualquiera de esos (nunca
+// se cruza una Server Action con una ruta/módulo de otra capa solo
+// para compartir un regex).
+const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function empresaActivaDe(usuarioId: string) {
   const propias = await listarEmpresasDeUsuario(usuarioId);
@@ -187,13 +196,21 @@ export async function borrarProductoAction(formData: FormData): Promise<void> {
   await requierePermiso(usuario.id, empresa.id, "inventario", "modificar");
 
   const id = String(formData.get("id") ?? "").trim();
-  if (!id) throw new Error("Falta el id del producto a borrar.");
+  // Code review de Pablo — formato validado ANTES de tocar la base,
+  // mismo criterio que exigirId() en lib/ml/cliente.ts y la
+  // validación adelantada de app/api/ml/clip/route.ts: un id mal
+  // formado nunca llega a un DELETE.
+  if (!PATRON_UUID.test(id)) throw new Error("id inválido.");
 
-  // dbComoEmpresa (RLS) ya garantiza que esto nunca borra una fila de
-  // otra empresa — un id real pero de otra empresa simplemente no es
-  // visible para este DELETE, mismo criterio que el resto del repo
-  // (ej. lib/roles.ts).
-  await dbComoEmpresa(empresa.id, (tx) => tx.delete(productosMl).where(eq(productosMl.id, id)));
+  // Patrón real del repo para una fila de negocio con empresa_id: RLS
+  // (dbComoEmpresa, siempre) + el WHERE compuesto id+empresaId
+  // explícito en la propia consulta — mismo criterio que lib/roles.ts
+  // (ej. `and(eq(roles.id, rolId), eq(roles.empresaId, empresaId))`)
+  // y que app/panel/publicar/page.tsx para leer el historial. Nunca
+  // solo uno de los dos: RLS sola ya alcanzaría para el aislamiento
+  // real, pero el WHERE explícito es la misma defensa en profundidad
+  // que ya usa el resto del repo para una escritura.
+  await dbComoEmpresa(empresa.id, (tx) => tx.delete(productosMl).where(and(eq(productosMl.id, id), eq(productosMl.empresaId, empresa.id))));
 
   redirect(`/panel/publicar#historial`);
 }

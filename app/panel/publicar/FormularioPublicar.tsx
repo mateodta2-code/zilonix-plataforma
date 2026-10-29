@@ -237,17 +237,13 @@ export function FormularioPublicar({ cuentas, inicial }: { cuentas: Cuenta[]; in
         <p className="zx-etiqueta" style={{ marginTop: 16 }}>
           Fotos (galería)
         </p>
+        {/* Code review de Pablo (sobre 768305e) — se quitó el botón
+        "+ Agregar foto (URL)" de acá: empujaba una URL vacía ("") a
+        la galería (un hueco real — esa foto vacía podía colarse hasta
+        el envío si nadie la completaba); la tarjeta "+" de
+        GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
+        agregar nada. */}
         <GaleriaFotos urls={imagenes} onChange={setImagenes} />
-        <Boton
-          type="button"
-          variante="secundario"
-          chico
-          onClick={() => setImagenes((actual) => [...actual, ""])}
-          disabled={maxFotos != null && imagenes.length >= maxFotos}
-          style={{ marginTop: 10 }}
-        >
-          + Agregar foto (URL)
-        </Boton>
         {maxFotos != null && (
           <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
             Esta categoría admite hasta {maxFotos} fotos en Mercado Libre

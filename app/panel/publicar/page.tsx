@@ -13,7 +13,7 @@ import { SinAcceso } from "@/components/marco/SinAcceso";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { PaginaPublicar } from "./PaginaPublicar";
 import type { ProductoHistorial } from "./HistorialPublicaciones";
-import { buscarItemConDatos } from "./clip/actions";
+import { buscarItemConDatos } from "./clip/buscar-item";
 
 // Parte 2 (página única, estructura de Zilonix OS) — reemplaza las 4
 // pantallas sueltas de la Parte 1 (/panel/publicar historial,

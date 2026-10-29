@@ -48,13 +48,20 @@
   color: var(--texto-suave);
 }
 
+/* Code review de Pablo (sobre 768305e) — nunca un rgba()/hex suelto
+   nuevo: la base es --superficie-2-zona-oscura (app/globals.css), el
+   MISMO token "siempre oscuro, en los dos temas" que ya usan
+   Tarjeta/TarjetaKpi para su fondo — acá diluido con color-mix (no un
+   negro inventado) porque esto es un overlay SOBRE una foto
+   arbitraria, no una superficie propia; el texto usa su contraparte
+   real, --texto-zona-oscura. */
 .etiquetaPortada {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  background: color-mix(in srgb, var(--superficie-2-zona-oscura) 85%, transparent);
+  color: var(--texto-zona-oscura);
   font-size: 10px;
   text-align: center;
   padding: 2px 0;
@@ -64,8 +71,8 @@
   position: absolute;
   top: 2px;
   right: 2px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
+  background: color-mix(in srgb, var(--superficie-2-zona-oscura) 80%, transparent);
+  color: var(--texto-zona-oscura);
   border: none;
   border-radius: 50%;
   width: 18px;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Boton } from "@/components/marco/Boton";
 import { moverFoto } from "./formulario-logica";
 import styles from "./publicar.module.css";
 
@@ -83,9 +84,9 @@ export function GaleriaFotos({ urls, onChange }: { urls: string[]; onChange: (ur
             className="zx-control"
             style={{ fontSize: 10, padding: 3 }}
           />
-          <button type="button" onClick={confirmarAgregar} style={{ fontSize: 10, padding: "2px 4px", cursor: "pointer" }}>
+          <Boton type="button" variante="secundario" chico onClick={confirmarAgregar} style={{ fontSize: 10, padding: "2px 4px" }}>
             Agregar
-          </button>
+          </Boton>
         </div>
       ) : (
         <button type="button" onClick={() => setAgregando(true)} className={`${styles.recuadroMarca} ${styles.tarjetaAgregar}`} aria-label="Agregar foto">

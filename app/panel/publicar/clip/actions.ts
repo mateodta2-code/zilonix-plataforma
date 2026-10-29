@@ -93,7 +93,3 @@ export async function cambiarEstadoAction(formData: FormData): Promise<void> {
   const params = new URLSearchParams({ cuentaId, itemId });
   redirect(`/panel/publicar?${params.toString()}#clip`);
 }
-
-export async function buscarItemConDatos(empresaId: string, cuentaId: string, cuentaIdExterna: string, sku: string) {
-  return buscarItemPorSku(empresaId, { id: cuentaId, cuentaIdExterna }, sku);
-}
