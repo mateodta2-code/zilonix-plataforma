@@ -1168,6 +1168,15 @@ export type ItemCompletoMl = {
   // seller_custom_field = el SKU propio tal como Mercado Libre lo
   // guarda para ESA publicación — null si nunca se cargó uno.
   sellerCustomField: string | null;
+  // Rama feat-publicar-clip — avisado antes de tocar este archivo
+  // (CLAUDE.md): `status`/`thumbnail` se suman al mismo GET /items/{id}
+  // de siempre (attributes ampliado, nunca una llamada nueva distinta)
+  // porque la tabla de "buscar SKU en mis cuentas" de Clip necesita el
+  // estado real de la publicación (activa/pausada) y una miniatura por
+  // fila — este es el único wrapper rico que ya traía SKU+itemId
+  // juntos, reusarlo evita una tercera llamada aparte por cuenta.
+  status: string | null;
+  thumbnail: string | null;
 };
 
 // A propósito SIN filtrar por status==="active" (a diferencia de
@@ -1176,7 +1185,7 @@ export type ItemCompletoMl = {
 // nunca tiene sentido ocultarla solo por su estado.
 export async function leerItemCompletoMl(itemId: string, token: string): Promise<ItemCompletoMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,price,available_quantity,condition,pictures,permalink,seller_custom_field`;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,price,available_quantity,condition,pictures,permalink,seller_custom_field,status,thumbnail`;
   try {
     const resp = await pedir<{
       title?: unknown;
@@ -1186,6 +1195,8 @@ export async function leerItemCompletoMl(itemId: string, token: string): Promise
       pictures?: unknown;
       permalink?: unknown;
       seller_custom_field?: unknown;
+      status?: unknown;
+      thumbnail?: unknown;
     }>(url, token);
     if (!resp.ok) return null;
     const pictures = Array.isArray(resp.data.pictures)
@@ -1202,6 +1213,8 @@ export async function leerItemCompletoMl(itemId: string, token: string): Promise
       pictures,
       permalink: typeof resp.data.permalink === "string" ? resp.data.permalink : null,
       sellerCustomField: typeof resp.data.seller_custom_field === "string" ? resp.data.seller_custom_field : null,
+      status: typeof resp.data.status === "string" ? resp.data.status : null,
+      thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
     };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
@@ -1223,6 +1236,50 @@ export async function leerDescripcionItemMl(itemId: string, token: string): Prom
     if (!resp.ok) return null;
     if (typeof resp.data.plain_text === "string" && resp.data.plain_text) return resp.data.plain_text;
     return typeof resp.data.text === "string" ? resp.data.text : null;
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    throw e;
+  }
+}
+
+// Rama feat-publicar-clip, punto 5 ("estado de moderación") — avisado
+// antes de tocar este archivo (CLAUDE.md). GET /marketplace/items/{id}/clips,
+// documentado por Mercado Libre ("Working with Clips"): devuelve
+// moderation_status (UNDER_REVIEW, PUBLISHED o REJECTED) por clip.
+// Advertencia explícita heredada de subirClipMl (ESTE módulo nunca se
+// confirmó contra una cuenta real con un clip de verdad ya moderado):
+// la forma exacta del cuerpo (¿un array suelto? ¿{results:[...]}?
+// ¿el motivo de un REJECTED viene en `rejection_reason`, `reason` o no
+// viene?) está documentada acá tal como la da la documentación
+// oficial, nunca confirmada en vivo — se parsea TODO de forma
+// defensiva (unknown -> tipo, nunca un cast ciego) para que un campo
+// real distinto al esperado nunca tire un 500, solo deje ese campo en
+// null.
+export type EstadoModeracionClip = "UNDER_REVIEW" | "PUBLISHED" | "REJECTED" | string;
+export type ClipMl = { clipUuid: string | null; moderationStatus: EstadoModeracionClip | null; motivoRechazo: string | null };
+
+function clipsDesdeRespuesta(data: unknown): ClipMl[] {
+  const lista = Array.isArray(data) ? data : Array.isArray((data as { results?: unknown[] })?.results) ? (data as { results: unknown[] }).results : [];
+  return lista.map((crudo) => {
+    const c = crudo as { clip_uuid?: unknown; id?: unknown; moderation_status?: unknown; status?: unknown; rejection_reason?: unknown; reason?: unknown };
+    const clipUuid = typeof c.clip_uuid === "string" ? c.clip_uuid : typeof c.id === "string" ? c.id : null;
+    const moderationStatus = typeof c.moderation_status === "string" ? c.moderation_status : typeof c.status === "string" ? c.status : null;
+    const motivoRechazo = typeof c.rejection_reason === "string" ? c.rejection_reason : typeof c.reason === "string" ? c.reason : null;
+    return { clipUuid, moderationStatus, motivoRechazo };
+  });
+}
+
+// null = Mercado Libre no dejó ver el estado (403/404/5xx) — distinto
+// de [] (sí respondió, de verdad no hay ningún clip todavía en esta
+// publicación). El llamador (lib/trabajos/subirClipMultiCuenta.ts)
+// nunca confunde los dos casos.
+export async function obtenerClipsMl(itemId: string, token: string): Promise<ClipMl[] | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const url = `${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips`;
+  try {
+    const resp = await pedir<unknown>(url, token);
+    if (!resp.ok) return resp.status === 404 ? [] : null;
+    return clipsDesdeRespuesta(resp.data);
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
     throw e;

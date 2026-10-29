@@ -22,6 +22,7 @@ import {
   MlNoDisponibleError,
   MlRespuestaInesperadaError,
   MlSinPermisoAppError,
+  obtenerClipsMl,
   obtenerFotoItemMl,
   obtenerItemMl,
   obtenerMejoresProductosCategoria,
@@ -863,7 +864,7 @@ describe("leerItemCompletoMl/leerDescripcionItemMl — Parte 3, punto A (importa
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("leerItemCompletoMl: trae title/price/available_quantity/condition/pictures/permalink/sku propio", async () => {
+  it("leerItemCompletoMl: trae title/price/available_quantity/condition/pictures/permalink/sku propio/status/thumbnail", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -875,6 +876,8 @@ describe("leerItemCompletoMl/leerDescripcionItemMl — Parte 3, punto A (importa
           pictures: [{ url: "https://x/foto1.jpg" }, { url: "https://x/foto2.jpg" }, { sin_url: true }],
           permalink: "https://articulo.mercadolibre.com.co/MCO-111",
           seller_custom_field: "SKU-PROPIO",
+          status: "active",
+          thumbnail: "https://x/thumb.jpg",
         })
       )
     );
@@ -888,13 +891,23 @@ describe("leerItemCompletoMl/leerDescripcionItemMl — Parte 3, punto A (importa
       pictures: ["https://x/foto1.jpg", "https://x/foto2.jpg"],
       permalink: "https://articulo.mercadolibre.com.co/MCO-111",
       sellerCustomField: "SKU-PROPIO",
+      status: "active",
+      thumbnail: "https://x/thumb.jpg",
     });
   });
 
-  it("leerItemCompletoMl: NO filtra por status (a diferencia de obtenerItemMl) — una publicación propia pausada también se puede importar", async () => {
+  it("leerItemCompletoMl: NO filtra por status (a diferencia de obtenerItemMl) — una publicación propia pausada también se puede importar, y el status real se devuelve tal cual (rama feat-publicar-clip)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Pausada", price: 1000, status: "paused" })));
     const r = await leerItemCompletoMl("MCO111", "token");
     expect(r?.title).toBe("Pausada");
+    expect(r?.status).toBe("paused");
+  });
+
+  it("leerItemCompletoMl: sin status/thumbnail en la respuesta: null, nunca inventado", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "X" })));
+    const r = await leerItemCompletoMl("MCO111", "token");
+    expect(r?.status).toBeNull();
+    expect(r?.thumbnail).toBeNull();
   });
 
   it("leerItemCompletoMl: 403/5xx de Mercado Libre se tragan como null (enriquecimiento, nunca tira abajo el importador)", async () => {
@@ -924,5 +937,62 @@ describe("leerItemCompletoMl/leerDescripcionItemMl — Parte 3, punto A (importa
   it("leerDescripcionItemMl: 404 (publicación sin descripción cargada) es null, nunca lanza", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
     await expect(leerDescripcionItemMl("MCO111", "token")).resolves.toBeNull();
+  });
+});
+
+// Rama feat-publicar-clip, punto 5 — avisado antes de tocar
+// lib/ml/cliente.ts. Advertencia explícita (ver el comentario completo
+// junto a obtenerClipsMl): la forma exacta de GET .../clips nunca se
+// confirmó contra una cuenta real con un clip ya moderado — se prueba
+// parseando de forma defensiva las 2 formas razonables (array suelto
+// o {results:[...]}), nunca asumiendo una sola.
+describe("obtenerClipsMl — Parte Clip, punto 5 (estado de moderación)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("itemId inválido: null, nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(obtenerClipsMl("no-es-un-id", "token")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("array suelto: parsea clip_uuid/moderation_status/rejection_reason", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson([
+          { clip_uuid: "uuid-1", moderation_status: "REJECTED", rejection_reason: "Audio con copyright" },
+          { clip_uuid: "uuid-2", moderation_status: "PUBLISHED" },
+        ])
+      )
+    );
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([
+      { clipUuid: "uuid-1", moderationStatus: "REJECTED", motivoRechazo: "Audio con copyright" },
+      { clipUuid: "uuid-2", moderationStatus: "PUBLISHED", motivoRechazo: null },
+    ]);
+  });
+
+  it("forma {results:[...]}: misma lectura", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ results: [{ id: "uuid-3", status: "UNDER_REVIEW" }] })));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-3", moderationStatus: "UNDER_REVIEW", motivoRechazo: null }]);
+  });
+
+  it("404 (nunca se subió ningún clip todavía): [], nunca null (distingue 'sin dato' de 'de verdad no hay nada')", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([]);
+  });
+
+  it("403/5xx: null (sin dato de la API, nunca [] inventado)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 503)));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toBeNull();
+  });
+
+  it("un campo con forma inesperada (ej. moderation_status numérico): null para ese campo, nunca lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson([{ clip_uuid: "uuid-1", moderation_status: 123 }])));
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-1", moderationStatus: null, motivoRechazo: null }]);
   });
 });

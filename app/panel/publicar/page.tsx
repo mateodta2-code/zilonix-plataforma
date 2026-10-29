@@ -13,7 +13,6 @@ import { SinAcceso } from "@/components/marco/SinAcceso";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { PaginaPublicar } from "./PaginaPublicar";
 import type { ProductoHistorial } from "./HistorialPublicaciones";
-import { buscarItemConDatos } from "./clip/buscar-item";
 import { importarItemCompleto } from "./importadores/importar-item";
 import type { ItemImportado } from "./formulario-logica";
 import { cloudinaryConfigurado } from "@/lib/cloudinary";
@@ -22,15 +21,18 @@ import { cloudinaryConfigurado } from "@/lib/cloudinary";
 // pantallas sueltas de la Parte 1 (/panel/publicar historial,
 // /nuevo, /[id], /clip) por UNA sola, de arriba a abajo. Esta página
 // (Server Component) solo resuelve sesión/empresa/permiso, trae las
-// cuentas conectadas y el historial (últimos 50), y lee los 2 juegos
-// de query params que todavía pueden llegar de afuera: el prefill de
-// Investigación (titulo/precio/foto) y el de Clip (cuentaId/sku/
-// itemId/clipSubido/error, reenviados por los redirects de
-// /nuevo y /clip — ver esos page.tsx). Todo el estado INTERACTIVO
-// (qué cuenta está marcada, qué producto se cargó para reintentar...)
-// vive en PaginaPublicar.tsx ("use client"), porque "Cargar/
-// Reintentar" y "Duplicar" necesitan repoblar el formulario de arriba
-// SIN navegar — no hay forma de hacer eso con una Server Action sola.
+// cuentas conectadas y el historial (últimos 50), y lee el único juego
+// de query params que todavía puede llegar de afuera: el prefill de
+// Investigación (titulo/precio/foto, reenviado por el redirect de
+// /nuevo — ver ese page.tsx). Rama feat-publicar-clip — el prefill de
+// Clip por query param (cuentaId/sku/itemId/clipSubido/error) se
+// retiró: SeccionClip.tsx ahora busca/sube/consulta estado por su
+// cuenta, con fetch del lado del cliente, nunca con un redirect de
+// vuelta acá. Todo el estado INTERACTIVO (qué cuenta está marcada, qué
+// producto se cargó para reintentar...) vive en PaginaPublicar.tsx
+// ("use client"), porque "Cargar/Reintentar" y "Duplicar" necesitan
+// repoblar el formulario de arriba SIN navegar — no hay forma de hacer
+// eso con una Server Action sola.
 export default async function PublicarPage({
   searchParams,
 }: {
@@ -38,11 +40,6 @@ export default async function PublicarPage({
     titulo?: string;
     precio?: string;
     foto?: string;
-    cuentaId?: string;
-    sku?: string;
-    itemId?: string;
-    clipSubido?: string;
-    error?: string;
     importarItemId?: string;
     importarCuentaId?: string;
     importarOrigen?: string;
@@ -106,32 +103,11 @@ export default async function PublicarPage({
     foto: linkHttpSeguro(searchParams.foto ?? null) ?? "",
   };
 
-  // Rutas viejas /panel/publicar/clip (y el POST real a /api/ml/clip)
-  // redirigen ACÁ reenviando estos mismos query params — nunca se
-  // pierde el estado de "ya encontré un ítem por SKU" al consolidar
-  // las 2 pantallas en una.
-  const prefillClip = {
-    cuentaId: searchParams.cuentaId ?? "",
-    sku: searchParams.sku ?? "",
-    itemId: searchParams.itemId ?? "",
-    clipSubido: searchParams.clipSubido === "1",
-    error: searchParams.error ?? "",
-  };
-
-  // El lookup real (buscarItemConDatos, lib/ml/clip.ts) sigue siendo
-  // SOLO del servidor (token de la cuenta) — antes vivía en
-  // clip/page.tsx; esta página lo hace una vez, antes de renderizar,
-  // igual que esa pantalla ya hacía.
+  // Rama feat-publicar-clip — SeccionClip.tsx ahora busca por SKU,
+  // sube y consulta estado por su cuenta (fetch del cliente a los
+  // Route Handlers nuevos bajo app/api/ml/clip/), nunca con un
+  // query param resuelto acá del lado del servidor como antes.
   const clipHabilitado = process.env.CLIP_HABILITADO === "true";
-  let itemClip: { itemId: string; titulo: string; thumbnail: string | null } | null = null;
-  if (clipHabilitado) {
-    const cuentaClip = cuentas.find((c) => c.id === prefillClip.cuentaId);
-    if (cuentaClip && prefillClip.sku) {
-      itemClip = await buscarItemConDatos(empresa.id, cuentaClip.id, cuentaClip.cuentaIdExterna, prefillClip.sku);
-    } else if (cuentaClip && prefillClip.itemId) {
-      itemClip = { itemId: prefillClip.itemId, titulo: prefillClip.itemId, thumbnail: null };
-    }
-  }
 
   // Parte 3, punto A — importarItemId/importarCuentaId llegan de
   // importadores/actions.ts (por SKU o por link, ver importarOrigen).
@@ -158,8 +134,6 @@ export default async function PublicarPage({
         cuentas={cuentas.map((c) => ({ id: c.id, nickname: c.nickname }))}
         historial={historial}
         prefillNuevo={prefillNuevo}
-        prefillClip={prefillClip}
-        itemClip={itemClip}
         clipHabilitado={clipHabilitado}
         itemImportado={itemImportado}
         importarOrigen={searchParams.importarOrigen ?? ""}

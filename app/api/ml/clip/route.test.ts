@@ -1,38 +1,26 @@
-import { NextRequest } from "next/server";
+import { existsSync, mkdtempSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Tarea 2.11 — bug real: subirClipAction (Server Action) pasaba por el
-// límite GLOBAL de next.config.mjs (bodySizeLimit: "6mb") y cualquier
-// Clip real (hasta 280MB) se rechazaba antes de llegar a
-// validarArchivoClip. Issue de seguridad real encontrado después: el
-// Route Handler nuevo acepta un <form> normal, el mismo perfil de
-// petición que un CSRF clásico puede mandar desde otro sitio — y
-// mandaba el detalle de cualquier error (hasta el texto crudo de
-// Mercado Libre) directo a la URL del redirect.
-//
-// Estas pruebas mockean sesión/empresa/permiso/cuenta/token (evitan
-// Postgres real) y lib/ml/clip.ts PARCIALMENTE: las clases de error y
-// validarArchivoClip son las REALES (importOriginal), subirClipItem es
-// un spy que por defecto llama a la implementación real (así el caso
-// feliz y el de "texto crudo" siguen probando la cadena real hasta
-// fetch) pero se puede sobreescribir por prueba para forzar un tipo de
-// error puntual. lib/ml/cliente.ts NO se mockea: PATRON_ID_PRODUCTO_O_ITEM
-// es el real, para que "itemId inválido" siga siendo la validación de
-// verdad, no un mock que lo dé por sentado.
-// vi.mock() se hoistea ANTES que cualquier const del módulo — un
-// cuentaId fijo que la fábrica de @/lib/ml/cuentas necesita abajo
-// tiene que declararse con vi.hoisted(), o sería un ReferenceError.
-const { CUENTA_ID_VALIDA } = vi.hoisted(() => ({ CUENTA_ID_VALIDA: "11111111-1111-1111-1111-111111111111" }));
+// Rama feat-publicar-clip, punto 4 — esta ruta reemplaza por completo
+// la versión de la tarea 2.11 (una sola cuenta, request.formData() en
+// memoria, redirect con `?error=`). Mismo criterio de mocks que el
+// resto del repo: @/lib/ml/cuentas se mockea ANTES de cualquier import
+// real (vi.mock se hoistea arriba de todo) para que importar
+// @/lib/ml/clip de verdad (sus clases de error, validarArchivoClip)
+// NUNCA llegue a tocar db/empresa-context.ts (exige DATABASE_URL_APP
+// con solo importarse). @/lib/trabajos/subirClipMultiCuenta se mockea
+// ENTERO — ya tiene su propia prueba (subirClipMultiCuenta.test.ts);
+// acá solo interesa que esta ruta lo LLAME con los datos correctos.
+const { CUENTA_1, CUENTA_2 } = vi.hoisted(() => ({
+  CUENTA_1: "11111111-1111-1111-1111-111111111111",
+  CUENTA_2: "22222222-2222-2222-2222-222222222222",
+}));
 
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 vi.mock("@/lib/empresas", () => ({ listarEmpresasDeUsuario: vi.fn(async () => [{ id: "empresa-1", nombre: "Empresa de prueba" }]) }));
 vi.mock("@/lib/usuarios", () => ({ obtenerOCrearUsuarioActual: vi.fn(async () => ({ id: "usuario-1" })) }));
-// No se usa vi.importActual para lib/permisos.ts: importa (transitivo)
-// db/index.ts, que revienta sin DATABASE_URL_APP. Se redefine
-// SinPermisoError con la misma forma real (mismo constructor, mismo
-// mensaje) — route.ts la importa de este mismo módulo mockeado, así
-// que el "instanceof" sigue funcionando igual (mismo criterio que
-// app/api/ml/callback/route.test.ts).
 vi.mock("@/lib/permisos", () => {
   class SinPermisoError extends Error {
     constructor(modulo: string, accion: string) {
@@ -44,23 +32,27 @@ vi.mock("@/lib/permisos", () => {
 });
 vi.mock("@/lib/ml/cuentas", () => ({
   obtenerAccessTokenVigente: vi.fn(async () => "token-falso"),
-  listarCuentasConectadas: vi.fn(async () => [{ id: CUENTA_ID_VALIDA, cuentaIdExterna: "123456", nickname: "VENDEDOR", desconectadaTs: null, creadoTs: new Date() }]),
+  listarCuentasConectadas: vi.fn(async () => [
+    { id: CUENTA_1, cuentaIdExterna: "111", nickname: "Cuenta 1", desconectadaTs: null, creadoTs: new Date() },
+    { id: CUENTA_2, cuentaIdExterna: "222", nickname: "Cuenta 2", desconectadaTs: null, creadoTs: new Date() },
+  ]),
 }));
 vi.mock("@/lib/url-publica", () => ({ urlPublicaBase: () => "https://staging.test" }));
-vi.mock("@/lib/ml/clip", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/lib/ml/clip")>();
-  return { ...real, subirClipItem: vi.fn(real.subirClipItem) };
-});
+const iniciarTrabajoClipMock = vi.hoisted(() =>
+  vi.fn((_empresaId: string, _cuentas: { cuentaId: string; nickname: string; itemId: string; rutaArchivo?: string; contentType?: string }[], _rutaPorDefecto: string, _contentTypePorDefecto: string) => "job-123")
+);
+vi.mock("@/lib/trabajos/subirClipMultiCuenta", () => ({ iniciarTrabajoClip: iniciarTrabajoClipMock }));
 
 import { cookies } from "next/headers";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
-import { ClipRechazadoError, ClipReputacionRequeridaError, subirClipItem, TAMANO_MAXIMO_CLIP_BYTES } from "@/lib/ml/clip";
+import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { registrarVideoTemporal, obtenerVideoTemporal } from "@/lib/trabajos/videoTemporalClip";
 import { POST } from "./route";
 
 const ORIGEN_PROPIO = "https://staging.test";
-const ITEM_VALIDO = "MCO111";
+const ITEM_1 = "MCO111";
+const ITEM_2 = "MCO222";
 
 function mockearCookies(valores: Record<string, string | undefined> = {}) {
   vi.mocked(cookies).mockReturnValue({
@@ -68,262 +60,261 @@ function mockearCookies(valores: Record<string, string | undefined> = {}) {
   } as unknown as ReturnType<typeof cookies>);
 }
 
-function peticionFormulario(opts: {
+function archivoVideoValido(nombre = "clip.mp4", bytes = 100): File {
+  return new File([new Uint8Array(bytes)], nombre, { type: "video/mp4" });
+}
+
+function peticionSubida(opts: {
   origin?: string | null;
-  referer?: string | null;
   contentLength?: string | null;
-  cuentaId?: string;
-  itemId?: string;
-  sinArchivo?: boolean;
-  archivo?: { nombre: string; tipo: string; tamanoBytes: number };
-} = {}): NextRequest {
+  cuentas?: { cuentaId: string; itemId: string }[] | string;
+  archivo?: File | null;
+  tempVideoId?: string;
+  overrides?: Record<string, File | string>;
+} = {}): Request {
   const form = new FormData();
-  if (opts.cuentaId !== undefined) form.append("cuentaId", opts.cuentaId);
-  if (opts.itemId !== undefined) form.append("itemId", opts.itemId);
-  if (!opts.sinArchivo) {
-    const archivo = opts.archivo ?? { nombre: "clip.mp4", tipo: "video/mp4", tamanoBytes: 10 };
-    form.append("archivo", new File([new Uint8Array(archivo.tamanoBytes)], archivo.nombre, { type: archivo.tipo }));
+  if (opts.cuentas !== undefined) {
+    form.append("cuentas", typeof opts.cuentas === "string" ? opts.cuentas : JSON.stringify(opts.cuentas));
+  } else {
+    form.append("cuentas", JSON.stringify([{ cuentaId: CUENTA_1, itemId: ITEM_1 }]));
   }
+  if (opts.archivo !== null) form.append("archivo", opts.archivo ?? archivoVideoValido());
+  if (opts.tempVideoId) form.append("tempVideoId", opts.tempVideoId);
+  for (const [nombre, valor] of Object.entries(opts.overrides ?? {})) {
+    form.append(nombre, valor);
+  }
+
   const headers = new Headers();
   const origin = opts.origin === undefined ? ORIGEN_PROPIO : opts.origin;
   if (origin !== null) headers.set("origin", origin);
-  if (opts.referer) headers.set("referer", opts.referer);
-  // Content-length explícito (no el que undici calcularía solo a
-  // partir del FormData) — así cada prueba controla exactamente qué ve
-  // el chequeo de tamaño, sin depender del tamaño real serializado.
   const contentLength = opts.contentLength === undefined ? "1000" : opts.contentLength;
   if (contentLength !== null) headers.set("content-length", contentLength);
-  return new NextRequest("https://staging.test/api/ml/clip", { method: "POST", headers, body: form });
+
+  return new Request("https://staging.test/api/ml/clip", { method: "POST", headers, body: form });
 }
 
-function codigoDeError(location: string): string | null {
-  return new URL(location).searchParams.get("error");
+function archivoTemporalDePrueba(): string {
+  const carpeta = mkdtempSync(path.join(tmpdir(), "zilonix-clip-route-test-"));
+  const ruta = path.join(carpeta, "video.mp4");
+  writeFileSync(ruta, new Uint8Array(100));
+  return ruta;
 }
 
-describe("POST /api/ml/clip — CSRF, códigos de error cerrados y validación previa (tarea 2.11)", () => {
+describe("POST /api/ml/clip — rama feat-publicar-clip, punto 4 (subir, multi-cuenta, streaming a disco)", () => {
   const CLIP_HABILITADO_ORIGINAL = process.env.CLIP_HABILITADO;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockearCookies();
-    // Code review de Pablo (ADENDO UX de Publicar) — la bandera ahora
-    // bloquea esta ruta ANTES de todo lo demás; "true" explícito acá
-    // para que el resto de las pruebas de este describe (que ya
-    // existían, probando CSRF/sesión/validación) sigan ejercitando esa
-    // lógica real, nunca el 404 nuevo. El caso "deshabilitado" tiene
-    // su propio describe, más abajo, con la bandera restaurada.
     process.env.CLIP_HABILITADO = "true";
     vi.mocked(obtenerOCrearUsuarioActual).mockResolvedValue({ id: "usuario-1" } as never);
     vi.mocked(requierePermiso).mockResolvedValue({} as never);
     vi.mocked(listarCuentasConectadas).mockResolvedValue([
-      { id: CUENTA_ID_VALIDA, cuentaIdExterna: "123456", nickname: "VENDEDOR", desconectadaTs: null, creadoTs: new Date() } as never,
+      { id: CUENTA_1, cuentaIdExterna: "111", nickname: "Cuenta 1", desconectadaTs: null, creadoTs: new Date() } as never,
+      { id: CUENTA_2, cuentaIdExterna: "222", nickname: "Cuenta 2", desconectadaTs: null, creadoTs: new Date() } as never,
     ]);
-    vi.mocked(obtenerAccessTokenVigente).mockResolvedValue("token-falso");
+    iniciarTrabajoClipMock.mockReturnValue("job-123");
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     if (CLIP_HABILITADO_ORIGINAL === undefined) delete process.env.CLIP_HABILITADO;
     else process.env.CLIP_HABILITADO = CLIP_HABILITADO_ORIGINAL;
   });
 
-  it("Origin ajeno -> 403, nunca llega a mirar sesión ni leer el formulario", async () => {
-    const res = await POST(peticionFormulario({ origin: "https://sitio-ajeno.test", cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(403);
+  it("CLIP_HABILITADO apagado -> 404, nunca mira sesión", async () => {
+    delete process.env.CLIP_HABILITADO;
+    const res = await POST(peticionSubida());
+    expect(res.status).toBe(404);
     expect(obtenerOCrearUsuarioActual).not.toHaveBeenCalled();
-    expect(requierePermiso).not.toHaveBeenCalled();
-    expect(subirClipItem).not.toHaveBeenCalled();
   });
 
-  it("sin Origin ni Referer -> 403, nunca llega a mirar sesión", async () => {
-    const res = await POST(peticionFormulario({ origin: null, cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
+  it("Origin ajeno -> 403, nunca llega a mirar sesión", async () => {
+    const res = await POST(peticionSubida({ origin: "https://sitio-ajeno.test" }));
     expect(res.status).toBe(403);
     expect(obtenerOCrearUsuarioActual).not.toHaveBeenCalled();
   });
 
-  it("Referer del origen propio alcanza cuando no hay Origin (mismo resultado que si coincidiera)", async () => {
-    // Sin stub de fetch, subirClipItem (passthrough real) llegaría a
-    // golpear la red real de Mercado Libre — esta prueba solo le
-    // interesa la puerta del CSRF, así que corta antes con un fetch
-    // mockeado cualquiera, nunca deja que la red real decida el
-    // resultado de una prueba.
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ status: "accepted" }) }) as Response));
-
-    const res = await POST(peticionFormulario({ origin: null, referer: `${ORIGEN_PROPIO}/panel/publicar/clip`, cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    // No se rechaza por CSRF — sigue de largo hasta la sesión real.
-    expect(res.status).not.toBe(403);
-    expect(obtenerOCrearUsuarioActual).toHaveBeenCalled();
-  });
-
-  it("sin sesión -> redirige a /sign-in, nunca sube", async () => {
+  it("sin sesión -> 401 JSON, nunca sube", async () => {
     vi.mocked(obtenerOCrearUsuarioActual).mockResolvedValueOnce(null as never);
-
-    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toContain("/sign-in");
-    expect(subirClipItem).not.toHaveBeenCalled();
+    const res = await POST(peticionSubida());
+    expect(res.status).toBe(401);
+    expect(iniciarTrabajoClipMock).not.toHaveBeenCalled();
   });
 
-  it('sin permiso "modificar" -> error=sin_permiso, nunca sube', async () => {
+  it('sin permiso "modificar" -> 403, nunca sube', async () => {
     vi.mocked(requierePermiso).mockRejectedValueOnce(new SinPermisoError("inventario", "modificar"));
-
-    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(303);
-    const location = res.headers.get("location") ?? "";
-    expect(location).toContain("/panel/publicar");
-    expect(location).toContain("#clip");
-    expect(codigoDeError(location)).toBe("sin_permiso");
-    expect(subirClipItem).not.toHaveBeenCalled();
+    const res = await POST(peticionSubida());
+    expect(res.status).toBe(403);
+    expect(iniciarTrabajoClipMock).not.toHaveBeenCalled();
   });
 
-  it("content-length por encima de 280MB + margen -> error=demasiado_grande (redirect, nunca JSON)", async () => {
-    const res = await POST(peticionFormulario({ contentLength: String(TAMANO_MAXIMO_CLIP_BYTES + 10 * 1024 * 1024), cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(303);
-    expect(codigoDeError(res.headers.get("location") ?? "")).toBe("demasiado_grande");
-    expect(subirClipItem).not.toHaveBeenCalled();
+  it("content-length por encima del tope -> 400 demasiado_grande, nunca parsea el multipart", async () => {
+    const res = await POST(peticionSubida({ contentLength: String(300 * 1024 * 1024 * 6) }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("demasiado_grande");
+    expect(iniciarTrabajoClipMock).not.toHaveBeenCalled();
   });
 
-  it("content-length ausente -> error=demasiado_grande (nunca se asume 0 ni se sigue de largo)", async () => {
-    const res = await POST(peticionFormulario({ contentLength: null, cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(303);
-    expect(codigoDeError(res.headers.get("location") ?? "")).toBe("demasiado_grande");
-    expect(subirClipItem).not.toHaveBeenCalled();
+  it("sin cuentas (campo vacío) -> 400 faltan_datos", async () => {
+    const res = await POST(peticionSubida({ cuentas: "" }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("faltan_datos");
   });
 
-  it("content-length no numérico -> error=demasiado_grande", async () => {
-    const res = await POST(peticionFormulario({ contentLength: "no-es-un-numero", cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(303);
-    expect(codigoDeError(res.headers.get("location") ?? "")).toBe("demasiado_grande");
+  it("cuentas con JSON inválido -> 400 faltan_datos", async () => {
+    const res = await POST(peticionSubida({ cuentas: "no-es-json" }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("faltan_datos");
   });
 
-  it("cuentaId que no es UUID -> error=cuenta_invalida, nunca toca la base", async () => {
-    const res = await POST(peticionFormulario({ cuentaId: "no-es-un-uuid", itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(303);
-    expect(codigoDeError(res.headers.get("location") ?? "")).toBe("cuenta_invalida");
-    expect(listarCuentasConectadas).not.toHaveBeenCalled();
-    expect(obtenerAccessTokenVigente).not.toHaveBeenCalled();
-    expect(subirClipItem).not.toHaveBeenCalled();
+  it("cuentaId que no es UUID en la lista -> 400 faltan_datos (nunca asume un formato)", async () => {
+    const res = await POST(peticionSubida({ cuentas: [{ cuentaId: "no-es-uuid", itemId: ITEM_1 }] }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("faltan_datos");
   });
 
-  it("itemId inválido -> error=item_invalido (validación real de PATRON_ID_PRODUCTO_O_ITEM), nunca toca la base", async () => {
-    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: "MCO1/../users/me" }));
-
-    expect(res.status).toBe(303);
-    expect(codigoDeError(res.headers.get("location") ?? "")).toBe("item_invalido");
-    expect(listarCuentasConectadas).not.toHaveBeenCalled();
-    expect(subirClipItem).not.toHaveBeenCalled();
+  it("ni archivo ni tempVideoId -> 400 faltan_datos", async () => {
+    const res = await POST(peticionSubida({ archivo: null }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("faltan_datos");
   });
 
-  it("cuentaId con formato válido pero que no es de esta empresa -> error=cuenta_invalida", async () => {
+  it("archivo Y tempVideoId a la vez -> 400 faltan_datos (exactamente uno de los dos)", async () => {
+    const res = await POST(peticionSubida({ tempVideoId: "algun-id" }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("faltan_datos");
+  });
+
+  it("tempVideoId que no existe -> 400 video_no_encontrado", async () => {
+    const res = await POST(peticionSubida({ archivo: null, tempVideoId: "no-existe" }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("video_no_encontrado");
+  });
+
+  it("archivo con tipo inválido -> 400 archivo_invalido", async () => {
+    const archivo = new File([new Uint8Array(10)], "clip.txt", { type: "text/plain" });
+    const res = await POST(peticionSubida({ archivo }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("archivo_invalido");
+    expect(iniciarTrabajoClipMock).not.toHaveBeenCalled();
+  });
+
+  it("ninguna cuenta pedida está conectada -> 400 cuenta_invalida, y el temporal se borra igual (nunca queda huérfano)", async () => {
     vi.mocked(listarCuentasConectadas).mockResolvedValueOnce([]);
-
-    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(303);
-    expect(codigoDeError(res.headers.get("location") ?? "")).toBe("cuenta_invalida");
-    expect(obtenerAccessTokenVigente).not.toHaveBeenCalled();
+    const res = await POST(peticionSubida());
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("cuenta_invalida");
+    expect(iniciarTrabajoClipMock).not.toHaveBeenCalled();
   });
 
-  it("cuenta desconectada -> error=cuenta_desconectada, nunca pide el token", async () => {
-    vi.mocked(listarCuentasConectadas).mockResolvedValueOnce([
-      { id: CUENTA_ID_VALIDA, cuentaIdExterna: "123456", nickname: "VENDEDOR", desconectadaTs: new Date(), creadoTs: new Date() } as never,
-    ]);
-
-    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(303);
-    expect(codigoDeError(res.headers.get("location") ?? "")).toBe("cuenta_desconectada");
-    expect(obtenerAccessTokenVigente).not.toHaveBeenCalled();
-  });
-
-  it("falta de permiso puntual (reputación) -> error=reputacion_requerida, nunca el mensaje largo real en la URL", async () => {
-    vi.mocked(subirClipItem).mockRejectedValueOnce(
-      new ClipReputacionRequeridaError(
-        "Mercado Libre no deja subir Clips en esta cuenta todavía — necesita tener un color de reputación asignado (se gana con ventas reales)."
-      )
+  it("caso feliz: 2 cuentas, mismo video para ambas -> 200 {jobId}, iniciarTrabajoClip recibe las 2 filas", async () => {
+    const res = await POST(
+      peticionSubida({
+        cuentas: [
+          { cuentaId: CUENTA_1, itemId: ITEM_1 },
+          { cuentaId: CUENTA_2, itemId: ITEM_2 },
+        ],
+      })
     );
+    const body = await res.json();
 
-    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-    const location = res.headers.get("location") ?? "";
-
-    expect(res.status).toBe(303);
-    expect(codigoDeError(location)).toBe("reputacion_requerida");
-    expect(location).not.toContain("color de reputaci");
+    expect(res.status).toBe(200);
+    expect(body.jobId).toBe("job-123");
+    expect(iniciarTrabajoClipMock).toHaveBeenCalledTimes(1);
+    const [empresaId, cuentas, rutaPorDefecto, contentTypePorDefecto] = iniciarTrabajoClipMock.mock.calls[0]!;
+    expect(empresaId).toBe("empresa-1");
+    expect(cuentas).toEqual([
+      { cuentaId: CUENTA_1, nickname: "Cuenta 1", itemId: ITEM_1, rutaArchivo: undefined, contentType: undefined },
+      { cuentaId: CUENTA_2, nickname: "Cuenta 2", itemId: ITEM_2, rutaArchivo: undefined, contentType: undefined },
+    ]);
+    expect(contentTypePorDefecto).toBe("video/mp4");
+    expect(existsSync(rutaPorDefecto)).toBe(true);
   });
 
-  it("Mercado Libre rechaza con el detalle crudo -> redirige con el código, la URL NUNCA contiene ese texto crudo", async () => {
-    const detalleCrudoSensible = "DETALLE_CRUDO_QUE_NUNCA_TIENE_QUE_APARECER_EN_LA_URL_12345";
-    vi.mocked(subirClipItem).mockRejectedValueOnce(new ClipRechazadoError(`Mercado Libre rechazó el video (HTTP 400): ${detalleCrudoSensible}`));
-
-    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-    const location = res.headers.get("location") ?? "";
-
-    expect(res.status).toBe(303);
-    expect(codigoDeError(location)).toBe("rechazado_ml");
-    expect(location).not.toContain(detalleCrudoSensible);
-    expect(location).not.toContain("HTTP 400");
+  it("una cuenta pedida no está conectada: se excluye sola, el resto sigue (nunca rompe todo el pedido)", async () => {
+    vi.mocked(listarCuentasConectadas).mockResolvedValueOnce([
+      { id: CUENTA_1, cuentaIdExterna: "111", nickname: "Cuenta 1", desconectadaTs: null, creadoTs: new Date() } as never,
+    ]);
+    const res = await POST(
+      peticionSubida({
+        cuentas: [
+          { cuentaId: CUENTA_1, itemId: ITEM_1 },
+          { cuentaId: CUENTA_2, itemId: ITEM_2 },
+        ],
+      })
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.jobId).toBe("job-123");
+    const [, cuentas] = iniciarTrabajoClipMock.mock.calls[0]!;
+    expect(cuentas).toHaveLength(1);
+    expect(cuentas[0].cuentaId).toBe(CUENTA_1);
   });
 
-  it("caso feliz: valida el archivo, pide el token y llama de verdad a subirClipMl (fetch) hasta el final", async () => {
-    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => ({ ok: true, status: 200, text: async () => JSON.stringify({ status: "accepted", clip_uuid: "clip-1", site_ids: ["MCO"] }) }) as Response);
-    vi.stubGlobal("fetch", fetchMock);
+  it("override por cuenta ('usar otro video para esta cuenta'): esa fila lleva SU PROPIA ruta/tipo, distinta a la del resto", async () => {
+    const archivoPropio = new File([new Uint8Array(50)], "propio.mp4", { type: "video/mp4" });
+    const res = await POST(
+      peticionSubida({
+        cuentas: [
+          { cuentaId: CUENTA_1, itemId: ITEM_1 },
+          { cuentaId: CUENTA_2, itemId: ITEM_2 },
+        ],
+        overrides: { [`archivo_${CUENTA_2}`]: archivoPropio },
+      })
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.jobId).toBe("job-123");
+    const [, cuentas, rutaPorDefecto] = iniciarTrabajoClipMock.mock.calls[0]!;
+    const filaC1 = cuentas.find((c) => c.cuentaId === CUENTA_1)!;
+    const filaC2 = cuentas.find((c) => c.cuentaId === CUENTA_2)!;
+    expect(filaC1.rutaArchivo).toBeUndefined();
+    expect(filaC2.rutaArchivo).not.toBeUndefined();
+    expect(filaC2.rutaArchivo).not.toBe(rutaPorDefecto);
+  });
 
-    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
+  it("origen por tempVideoId: usa el video ya bajado antes (traer-video) y lo saca del mapa temporal al reclamarlo", async () => {
+    const rutaArchivo = archivoTemporalDePrueba();
+    const video = registrarVideoTemporal("empresa-1", rutaArchivo, "video/mp4", "traido.mp4");
 
-    expect(res.status).toBe(303);
-    const location = res.headers.get("location") ?? "";
-    expect(location).toContain("/panel/publicar");
-    expect(location).toContain("#clip");
-    expect(location).toContain("clipSubido=1");
-    expect(subirClipItem).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0];
-    expect(String(url)).toContain(`/marketplace/items/${ITEM_VALIDO}/clips/upload`);
+    const res = await POST(peticionSubida({ archivo: null, tempVideoId: video.id }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.jobId).toBe("job-123");
+    const [, , rutaPorDefecto, contentTypePorDefecto] = iniciarTrabajoClipMock.mock.calls[0]!;
+    expect(rutaPorDefecto).toBe(rutaArchivo);
+    expect(contentTypePorDefecto).toBe("video/mp4");
+    // Ya es responsabilidad exclusiva del trabajo — no se puede volver
+    // a pedir por el mismo id.
+    expect(obtenerVideoTemporal(video.id, "empresa-1")).toBeNull();
   });
 });
 
-// Code review de Pablo (ADENDO UX de Publicar) — antes CLIP_HABILITADO
-// solo ocultaba el link en /panel/publicar/page.tsx; esta ruta seguía
-// aceptando una subida real por URL directa aunque la bandera
-// estuviera apagada. Describe aparte (nunca mezclado con el de
-// arriba, que fija CLIP_HABILITADO="true" en su propio beforeEach)
-// para probar el valor REAL por default del entorno.
-describe("POST /api/ml/clip — CLIP_HABILITADO apagado (code review de Pablo)", () => {
+// Mismo criterio que el describe de arriba (bandera apagada probada
+// aparte, sin pisar el beforeEach que la fija en "true").
+describe("POST /api/ml/clip — CLIP_HABILITADO apagado por default", () => {
   const CLIP_HABILITADO_ORIGINAL = process.env.CLIP_HABILITADO;
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     if (CLIP_HABILITADO_ORIGINAL === undefined) delete process.env.CLIP_HABILITADO;
     else process.env.CLIP_HABILITADO = CLIP_HABILITADO_ORIGINAL;
-  });
-
-  it("variable ausente -> 404, nunca mira Origin/sesión/nada del cuerpo", async () => {
-    delete process.env.CLIP_HABILITADO;
-    vi.clearAllMocks();
-    mockearCookies();
-
-    const res = await POST(peticionFormulario({ origin: "https://sitio-ajeno.test", cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
-    expect(res.status).toBe(404);
-    expect(obtenerOCrearUsuarioActual).not.toHaveBeenCalled();
   });
 
   it('variable en "false" -> 404, mismo default seguro que ausente', async () => {
     process.env.CLIP_HABILITADO = "false";
     vi.clearAllMocks();
     mockearCookies();
-
-    const res = await POST(peticionFormulario({ cuentaId: CUENTA_ID_VALIDA, itemId: ITEM_VALIDO }));
-
+    const res = await POST(peticionSubida());
     expect(res.status).toBe(404);
     expect(obtenerOCrearUsuarioActual).not.toHaveBeenCalled();
   });
