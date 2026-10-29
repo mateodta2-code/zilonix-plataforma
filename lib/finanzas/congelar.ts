@@ -7,6 +7,10 @@
 // - El costo se busca en la maestra por el SKU normalizado de la línea;
 //   no hace falta que exista en `skus`. Sin fila o con costo vacío =
 //   "sin costo": la venta no se congela. Un costo 0.00 es válido.
+// - SKU combo (Sharel, 29-oct-2026; combo-sku.ts): sin fila exacta con
+//   costo, BASEX2 / BASEX3 toman el costo de BASE × 2 o × 3. Empaque y
+//   envío salen de la fila exacta si existe, si no de la base, y nunca
+//   se multiplican.
 // - Se congela solo si TODAS las líneas tienen costo. Nunca un costo
 //   provisional.
 // - Forma de entrega `desconocida`: no se congela y se alerta. Flex sin
@@ -24,19 +28,14 @@
 // pagan solo la diferencia contra el mayor (nunca negativa), así el
 // paquete suma el cargo una sola vez sin tocar lo ya congelado.
 
+import { resolverCostoSku, type MaestraSku, type OrigenCosto } from "./combo-sku";
 import { aCentavos, desdeCentavos, repartirProporcional, type FormaEntrega } from "./utilidad-venta";
+
+export type { MaestraSku } from "./combo-sku";
 
 const CERO = BigInt(0);
 
 export type EstadoCosteo = "completo" | "parcial" | "sin_costo";
-
-// Una fila de costos_sku con el packing de su proveedor al lado.
-export type MaestraSku = {
-  costo: string | null;
-  empaque: string | null;
-  empaqueProveedor: string | null;
-  envioAgencia: string | null;
-};
 
 export type LineaACongelar = {
   linea: number;
@@ -73,6 +72,9 @@ export type LineaCongelada = {
   costo: string | null;
   empaque: string | null;
   envio: string | null;
+  // De dónde salió el costo. Solo informativo (no se guarda); null
+  // cuando la línea no se congela.
+  origenCosto: OrigenCosto | null;
 };
 
 export type OrdenCongelada = {
@@ -87,11 +89,10 @@ export type OrdenCongelada = {
 
 export type ResultadoCongelar = { ordenes: OrdenCongelada[]; alertas: AlertaCongelado[] };
 
-function costoDeLinea(linea: LineaACongelar, maestra: ReadonlyMap<string, MaestraSku>): string | null {
-  if (!linea.skuCodigo) return null;
-  const fila = maestra.get(linea.skuCodigo);
-  if (!fila || fila.costo === null) return null;
-  return desdeCentavos(aCentavos(fila.costo) * BigInt(linea.cantidad));
+function costoDeLinea(linea: LineaACongelar, maestra: ReadonlyMap<string, MaestraSku>): { costo: string | null; origen: OrigenCosto | null } {
+  const { costoUnitario, origen } = resolverCostoSku(linea.skuCodigo, maestra);
+  if (costoUnitario === null) return { costo: null, origen: null };
+  return { costo: desdeCentavos(aCentavos(costoUnitario) * BigInt(linea.cantidad)), origen };
 }
 
 // Misma regla que packingEfectivo (lib/costos-sku.ts): el del SKU; si
@@ -141,13 +142,14 @@ export function congelarPaquete(entrada: EntradaCongelar): ResultadoCongelar {
   const { formaEntrega, flexValor, maestra, ordenes } = entrada;
   const alertas: AlertaCongelado[] = [];
 
-  const costos = ordenes.map((orden) =>
+  const resueltos = ordenes.map((orden) =>
     orden.lineas.map((linea) => {
-      const costo = costoDeLinea(linea, maestra);
-      if (costo === null) alertas.push({ tipo: "sin_costo", pedidoId: orden.pedidoId, linea: linea.linea, skuCodigo: linea.skuCodigo });
-      return costo;
+      const resuelto = costoDeLinea(linea, maestra);
+      if (resuelto.costo === null) alertas.push({ tipo: "sin_costo", pedidoId: orden.pedidoId, linea: linea.linea, skuCodigo: linea.skuCodigo });
+      return resuelto;
     })
   );
+  const costos = resueltos.map((lineas) => lineas.map((r) => r.costo));
   const estados = costos.map(estadoDe);
 
   let bloqueado = false;
@@ -166,7 +168,8 @@ export function congelarPaquete(entrada: EntradaCongelar): ResultadoCongelar {
   let empaquePaquete: bigint | null = null;
   let envioPaquete: bigint | null = null;
   if (lineasCongelables.length > 0) {
-    const skus = lineasCongelables.map((l) => (l.skuCodigo ? maestra.get(l.skuCodigo) : undefined));
+    // La fila de cargos de cada línea (exacta, o la base si es combo).
+    const skus = lineasCongelables.map((l) => resolverCostoSku(l.skuCodigo, maestra).filaCargos);
     empaquePaquete = cargoNuevo(mayor(skus.map(packingDe)), entrada.yaCobrado?.empaque ?? null);
     if (empaquePaquete === null) alertas.push({ tipo: "empaque_sin_dato" });
 
@@ -190,7 +193,7 @@ export function congelarPaquete(entrada: EntradaCongelar): ResultadoCongelar {
         congelar: false,
         empaque: null,
         envio: null,
-        lineas: orden.lineas.map((l) => ({ linea: l.linea, costo: null, empaque: null, envio: null })),
+        lineas: orden.lineas.map((l) => ({ linea: l.linea, costo: null, empaque: null, envio: null, origenCosto: null })),
       };
     }
     const empaque = empaquePorOrden[posicion];
@@ -204,7 +207,13 @@ export function congelarPaquete(entrada: EntradaCongelar): ResultadoCongelar {
       congelar: true,
       empaque,
       envio,
-      lineas: orden.lineas.map((l, j) => ({ linea: l.linea, costo: costos[i][j], empaque: empaqueLineas[j], envio: envioLineas[j] })),
+      lineas: orden.lineas.map((l, j) => ({
+        linea: l.linea,
+        costo: costos[i][j],
+        empaque: empaqueLineas[j],
+        envio: envioLineas[j],
+        origenCosto: resueltos[i][j].origen,
+      })),
     };
   });
 

@@ -163,3 +163,87 @@ describe("congelarPaquete (issue #130)", () => {
     expect(r.ordenes[0]).toMatchObject({ empaque: "1000.00", envio: "0.00" });
   });
 });
+
+describe("congelarPaquete con SKU combo X2/X3 (Sharel, 29-oct-2026)", () => {
+  const BASE = sku({ costo: "10000.00", empaque: "1000.00", envioAgencia: "5000.00" });
+
+  it("BASEX2 sin fila exacta: costo de la base × 2 × cantidad; empaque y envío una vez, sin multiplicar", () => {
+    const r = congelarPaquete(
+      entrada({
+        maestra: new Map([["BASE", BASE]]),
+        ordenes: [{ pedidoId: "p1", lineas: [{ linea: 1, cantidad: 2, valorLinea: "80000.00", skuCodigo: "BASEX2" }] }],
+      })
+    );
+    expect(r.alertas).toEqual([]);
+    expect(r.ordenes[0]).toMatchObject({
+      congelar: true,
+      empaque: "1000.00",
+      envio: "5000.00",
+      lineas: [{ costo: "40000.00", empaque: "1000.00", envio: "5000.00", origenCosto: "combo_base" }],
+    });
+  });
+
+  it("la fila exacta con empaque y envío propios: se usan los de la exacta", () => {
+    const exacta = sku({ costo: null, empaque: "1500.00", envioAgencia: "6000.00" });
+    const r = congelarPaquete(
+      entrada({
+        maestra: new Map([["BASE", BASE], ["BASEX2", exacta]]),
+        ordenes: [{ pedidoId: "p1", lineas: [{ linea: 1, cantidad: 1, valorLinea: "40000.00", skuCodigo: "BASEX2" }] }],
+      })
+    );
+    expect(r.ordenes[0]).toMatchObject({ empaque: "1500.00", envio: "6000.00", lineas: [{ costo: "20000.00", origenCosto: "combo_base" }] });
+
+    const conCosto = congelarPaquete(
+      entrada({
+        maestra: new Map([["BASE", BASE], ["BASEX2", sku({ costo: "18000.00", empaque: "1500.00", envioAgencia: "6000.00" })]]),
+        ordenes: [{ pedidoId: "p1", lineas: [{ linea: 1, cantidad: 1, valorLinea: "40000.00", skuCodigo: "BASEX2" }] }],
+      })
+    );
+    expect(conCosto.ordenes[0].lineas[0]).toMatchObject({ costo: "18000.00", origenCosto: "exacto" });
+  });
+
+  it("paquete con BASEX3 y otro SKU: empaque y envío siguen siendo el mayor, una sola vez", () => {
+    const r = congelarPaquete(
+      entrada({
+        maestra: new Map([["BASE", BASE], ["OTRO", sku({ costo: "3000.00", empaque: "2000.00", envioAgencia: "4000.00" })]]),
+        ordenes: [
+          {
+            pedidoId: "p1",
+            lineas: [
+              { linea: 1, cantidad: 1, valorLinea: "60000.00", skuCodigo: "BASEX3" },
+              { linea: 2, cantidad: 1, valorLinea: "20000.00", skuCodigo: "OTRO" },
+            ],
+          },
+        ],
+      })
+    );
+    expect(r.ordenes[0]).toMatchObject({ empaque: "2000.00", envio: "5000.00" });
+    expect(r.ordenes[0].lineas.map((l) => [l.costo, l.origenCosto])).toEqual([
+      ["30000.00", "combo_base"],
+      ["3000.00", "exacto"],
+    ]);
+  });
+
+  it("Full: envío $0 también con combo", () => {
+    const r = congelarPaquete(
+      entrada({
+        formaEntrega: "full_ml",
+        maestra: new Map([["BASE", BASE]]),
+        ordenes: [{ pedidoId: "p1", lineas: [{ linea: 1, cantidad: 1, valorLinea: "40000.00", skuCodigo: "BASEX2" }] }],
+      })
+    );
+    expect(r.ordenes[0]).toMatchObject({ congelar: true, empaque: "1000.00", envio: "0.00", lineas: [{ costo: "20000.00" }] });
+  });
+
+  it("AGUJA2 y BASEX4 no son combo: siguen sin costo", () => {
+    for (const skuCodigo of ["AGUJA2", "BASEX4"]) {
+      const r = congelarPaquete(
+        entrada({
+          maestra: new Map([["AGUJA", BASE], ["BASE", BASE]]),
+          ordenes: [{ pedidoId: "p1", lineas: [{ linea: 1, cantidad: 1, valorLinea: "1.00", skuCodigo }] }],
+        })
+      );
+      expect(r.ordenes[0]).toMatchObject({ congelar: false, estadoCosteo: "sin_costo", lineas: [{ costo: null, origenCosto: null }] });
+    }
+  });
+});

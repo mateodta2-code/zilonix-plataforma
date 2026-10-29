@@ -19,6 +19,7 @@ import type { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { configuracionFinanzas, costosSku, pedidoItems, pedidos, pedidosFinanzas, publicaciones, skus, terceros } from "@/db/schema";
 import { normalizarSkuCodigo } from "@/lib/costos-sku";
+import { codigosParaMaestra } from "./combo-sku";
 import { congelarPaquete, type AlertaCongelado, type EstadoCosteo, type MaestraSku, type OrdenACongelar } from "./congelar";
 import { aCentavos, desdeCentavos, repartirProporcional } from "./utilidad-venta";
 import type { VentaMl } from "./venta-ml";
@@ -186,7 +187,8 @@ async function leerMaestra(tx: Tx, empresaId: string, codigos: string[]): Promis
     })
     .from(costosSku)
     .leftJoin(terceros, and(eq(terceros.id, costosSku.terceroId), eq(terceros.empresaId, costosSku.empresaId)))
-    .where(and(eq(costosSku.empresaId, empresaId), inArray(costosSku.skuCodigo, codigos)));
+    // Cada SKU y, si es combo X2/X3, su base (combo-sku.ts): una sola consulta.
+    .where(and(eq(costosSku.empresaId, empresaId), inArray(costosSku.skuCodigo, codigosParaMaestra(codigos))));
   return new Map(filas.map((f) => [f.sku, { costo: f.costo, empaque: f.empaque, envioAgencia: f.envioAgencia, empaqueProveedor: f.empaqueProveedor }]));
 }
 
