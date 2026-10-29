@@ -300,8 +300,13 @@ function DiaFilas({
     <>
       <tr className={estilos.filaDia}>
         <CeldaTabla>
-          {dia.dia} · {dia.numero_cuentas} {dia.numero_cuentas === 1 ? "cuenta" : "cuentas"} · {dia.numero_ventas}{" "}
-          {dia.numero_ventas === 1 ? "venta" : "ventas"}
+          {/* Corto, para que la 1ª columna no estire la tabla: «2 cta · 12 vtas». */}
+          <span
+            className={estilos.textoNivel}
+            title={`${dia.dia} · ${dia.numero_cuentas} ${dia.numero_cuentas === 1 ? "cuenta" : "cuentas"} · ${dia.numero_ventas} ${dia.numero_ventas === 1 ? "venta" : "ventas"}`}
+          >
+            {dia.dia} · {dia.numero_cuentas} cta · {dia.numero_ventas} {dia.numero_ventas === 1 ? "vta" : "vtas"}
+          </span>
         </CeldaTabla>
         <CeldasMontos t={dia.totales} costo={dia.totales.costo_producto} utilidad={dia.totales.utilidad} />
       </tr>
@@ -325,22 +330,32 @@ function CuentaFilas({
     <>
       <tr className={estilos.filaCuenta}>
         <CeldaTabla className={estilos.sangriaCuenta}>
-          {cuenta.nickname} · {cuenta.numero_ventas} Vta
+          <span className={estilos.textoNivel} title={`${cuenta.nickname} · ${cuenta.numero_ventas} Vta`}>
+            {cuenta.nickname} · {cuenta.numero_ventas} Vta
+          </span>
         </CeldaTabla>
         <CeldasMontos t={cuenta.totales} costo={cuenta.totales.costo_producto} utilidad={cuenta.totales.utilidad} />
       </tr>
       {cuenta.productos.map((p) => (
         <tr key={`${p.pedido_id}-${p.linea}`} className={estilos.filaProducto}>
           <CeldaTabla className={estilos.sangriaProducto}>
-            {/* Una sola línea: el título largo se corta con «…» y se lee
-                entero al pasar el mouse. */}
-            <div className={estilos.lineaProducto}>
-              <Link href={`/panel/finanzas/ventas/${p.pedido_id}`} className={`${estilos.enlace} ${estilos.tituloProducto}`} title={p.titulo}>
+            {/* Una sola línea de ancho fijo: el título se corta con «…»,
+                los chips van enseguida y SKU y número de pedido se cortan
+                al final si no caben. Todo se lee entero al pasar el mouse. */}
+            <div
+              className={estilos.lineaProducto}
+              title={`${p.titulo} · ${p.sku_codigo ?? "sin SKU"} · ${ETIQUETA_FORMA[p.forma_entrega]} · #${datos.pedidoIdExterno[p.pedido_id]}`}
+            >
+              <Link href={`/panel/finanzas/ventas/${p.pedido_id}`} className={`${estilos.enlace} ${estilos.tituloProducto}`}>
                 {p.titulo}
               </Link>
-              <span className={estilos.suave}>[{p.sku_codigo ?? "sin SKU"}]</span>
               <Chip>{ETIQUETA_FORMA[p.forma_entrega]}</Chip>
-              {conDevolucion.has(p.pedido_id) && <Chip estado="peligro">con devolución · revisar</Chip>}
+              {conDevolucion.has(p.pedido_id) && (
+                <Chip estado="peligro" title="Con devolución: revisar">
+                  devolución
+                </Chip>
+              )}
+              <span className={estilos.suave}>[{p.sku_codigo ?? "sin SKU"}]</span>
               <span className={estilos.suave}>#{datos.pedidoIdExterno[p.pedido_id]}</span>
             </div>
           </CeldaTabla>

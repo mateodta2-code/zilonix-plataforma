@@ -167,95 +167,116 @@
 }
 
 /* Issue #131 — tabla del detalle compacta, estilo DETALLE DÍA A DÍA de
-   Zilonix OS (Pedidos y Finanzas → Ventas). Solo dentro de esta
-   envoltura: <Tabla> del marco (13px, padding 10×12) no cambia en el
-   resto de las pantallas. Los selectores llevan elemento (th/td) para
-   ganarle a .th/.td del marco y a .zx-etiqueta sin !important.
-   Primera columna fija al desplazar en horizontal, con el mismo fondo
-   de la tabla para que lo de atrás no se transparente. */
+   Zilonix OS (Pedidos y Finanzas → Ventas), que CABE en el ancho del
+   panel sin desplazar de lado desde ~1100px de ventana. Solo dentro de
+   esta envoltura: <Tabla> del marco (13px, padding 10×12, th nowrap) no
+   cambia en el resto de las pantallas. Los selectores llevan elemento
+   (th/td) para ganarle a .th/.td del marco y a .zx-etiqueta sin
+   !important.
+
+   Ancho real disponible: barra lateral de 287px y contenido con
+   max-width 1100px y 28px de padding (MarcoApp.module.css) → la tabla
+   tiene ~755px a 1100px de ventana, ~855px a 1200, ~935px a 1280 y
+   ~1042px de 1440 en adelante.
+
+   table-layout queda en auto a propósito (no fixed): con anchos fijos
+   un total grande del día («$ 12.345.678») se cortaría o se montaría
+   sobre la columna de al lado. En auto cada columna de montos mide lo
+   que mide su número más largo, nunca menos, y la 1ª columna tiene un
+   ancho fijo (--ancho-col1) porque todo lo de adentro es un bloque de
+   ese ancho con overflow hidden: es lo único que cede. Con totales
+   del día de 8 cifras la tabla mide ~815px como mínimo: cabe desde
+   ~1200px de ventana; por debajo (1100) se desplaza de lado.
+
+   Sin columna fija (sticky): existía porque había scroll de lado; ya
+   no hace falta. En pantallas angostas la envoltura del marco sigue
+   con overflow-x: auto y se desplaza todo junto. */
+.tablaCompacta {
+  --ancho-col1: 180px;
+}
+
 .tablaCompacta table {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .tablaCompacta th {
-  padding: 6px 8px;
-  font-size: 10.5px;
-  letter-spacing: 0.05em;
+  padding: 4px 4px;
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+/* Encabezados de montos a la derecha, como sus números. */
+.tablaCompacta th:not(:first-child) {
+  text-align: right;
 }
 
 .tablaCompacta td {
-  padding: 4px 8px;
-  line-height: 1.35;
+  padding: 3px 4px;
+  line-height: 1.3;
 }
 
-/* En un celular la primera columna (~500px) es más ancha que la
-   pantalla: fija taparía los números. Ahí se desplaza todo junto y el
-   título se corta antes. */
-@media (min-width: 768px) {
-  .tablaCompacta th:first-child,
-  .tablaCompacta td:first-child {
-    position: sticky;
-    left: 0;
-    z-index: 1;
-    background: var(--tabla-fondo);
-    box-shadow: inset -1px 0 0 var(--borde);
-  }
-
-  .tablaCompacta th:first-child,
-  .tablaCompacta .filaDia td:first-child {
-    background: var(--tabla-encabezado-fondo);
-  }
-
-  .tablaCompacta .filaProducto:hover td:first-child {
-    background: linear-gradient(var(--fila-hover), var(--fila-hover)), var(--tabla-fondo);
-  }
+.tablaCompacta .numero {
+  font-variant-numeric: tabular-nums;
 }
 
-.tablaCompacta .filaDia td {
+/* Día, cuenta y producto: un bloque de ancho fijo que corta con «…»;
+   el texto entero va en el title. La sangría se descuenta del ancho
+   para que las tres filas midan lo mismo. */
+.textoNivel {
+  display: block;
+  width: var(--ancho-col1);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .tablaCompacta .sangriaCuenta {
-  padding-left: 16px !important;
-  white-space: nowrap;
+  padding-left: 14px !important;
+}
+
+.tablaCompacta .sangriaCuenta .textoNivel {
+  width: calc(var(--ancho-col1) - 9px);
 }
 
 .tablaCompacta .sangriaProducto {
-  padding-left: 28px !important;
+  padding-left: 22px !important;
   min-width: 0;
 }
 
-/* Chips del detalle más chicos (Agencia/Flex/Full, sin costo, con
+/* Chips del detalle más chicos (Agencia/Flex/Full, sin costo,
    devolución). */
 .tablaCompacta [data-estado] {
-  padding: 0 6px;
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-  line-height: 1.6;
+  padding: 0 4px;
+  font-size: 8.5px;
+  letter-spacing: 0.03em;
+  line-height: 1.5;
 }
 
 .tablaCompacta .suave {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .lineaProducto {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  width: calc(var(--ancho-col1) - 17px);
+  overflow: hidden;
   white-space: nowrap;
 }
 
+.lineaProducto > * {
+  flex: none;
+}
+
+/* El título no cede: mide hasta 100px y lo que se corta es la cola
+   (SKU y número de pedido). */
 .tituloProducto {
-  display: inline-block;
-  max-width: 280px;
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  vertical-align: bottom;
-}
-
-@media (max-width: 767px) {
-  .tituloProducto {
-    max-width: 180px;
-  }
 }
