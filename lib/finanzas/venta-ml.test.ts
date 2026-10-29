@@ -83,3 +83,34 @@ describe("ventaDesdeMl (issue #130)", () => {
     expect(mapa.has("MCO4")).toBe(false);
   });
 });
+
+describe("comisión ML (issue #131: el listado de ML la trae vacía)", () => {
+  const pago = { status: "approved", date_approved: "2026-10-20T12:00:00.000-05:00", transaction_amount: 120000 };
+  const items = [
+    { item: { id: "MCO111", title: "Aspiradora", seller_sku: "A-1" }, quantity: 2, unit_price: 40000, sale_fee: 4800.5 },
+    { item: { id: "MCO222", title: "Filtro", seller_sku: "F-1" }, quantity: 1, unit_price: 40000, sale_fee: 4800 },
+  ];
+  const comision = (orden: OrdenMl) => ventaDesdeMl(orden, null, null, new Map()).comisionMl;
+
+  it("sin marketplace_fee usa sale_fee × cantidad de cada línea", () => {
+    expect(comision({ ...ORDEN, payments: [pago], order_items: items })).toBe("14401.00");
+  });
+
+  it("marketplace_fee en 0 (como en el listado) también cae a sale_fee", () => {
+    expect(comision({ ...ORDEN, payments: [{ ...pago, marketplace_fee: 0 }], order_items: items })).toBe("14401.00");
+    expect(comision({ ...ORDEN, payments: [{ ...pago, marketplace_fee: null }], order_items: items })).toBe("14401.00");
+  });
+
+  it("marketplace_fee > 0 se usa tal cual, aunque haya sale_fee", () => {
+    expect(comision({ ...ORDEN, payments: [{ ...pago, marketplace_fee: 15600.5 }], order_items: items })).toBe("15600.50");
+  });
+
+  it("sin ninguna de las dos queda null, nunca $0", () => {
+    expect(comision({ ...ORDEN, payments: [pago], order_items: items.map(({ sale_fee: _, ...resto }) => resto) })).toBeNull();
+    expect(comision({ ...ORDEN, payments: [{ ...pago, marketplace_fee: 0 }], order_items: [] })).toBeNull();
+  });
+
+  it("cantidad ausente cuenta como 1", () => {
+    expect(comision({ ...ORDEN, payments: [pago], order_items: [{ item: { id: "MCO9" }, sale_fee: 3000 }] })).toBe("3000.00");
+  });
+});

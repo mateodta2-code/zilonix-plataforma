@@ -26,7 +26,8 @@ function orden(id: number, extra: Record<string, unknown> = {}) {
     total_amount: 80000,
     currency_id: "COP",
     shipping: { id: 5000 + id },
-    payments: [{ status: "approved", date_approved: "2026-10-23T10:00:00.000-05:00", transaction_amount: 80000, marketplace_fee: 9600 }],
+    // Como el listado real de ML: sin marketplace_fee (issue #131).
+    payments: [{ status: "approved", date_approved: "2026-10-23T10:00:00.000-05:00", transaction_amount: 80000 }],
     order_items: [{ item: { id: `MCO${id}`, title: `Producto ${id}`, seller_sku: "SYNC-1" }, quantity: 1, unit_price: 80000 }],
     ...extra,
   };
@@ -54,6 +55,10 @@ describe("sincronizarVentasCuenta (issue #130)", () => {
         busquedas += 1;
         return json({ results: busquedas === 1 ? [orden(101)] : [] });
       }
+      // El detalle sí trae la comisión real.
+      if (u.pathname === "/orders/101") {
+        return json(orden(101, { payments: [{ status: "approved", date_approved: "2026-10-23T10:00:00.000-05:00", transaction_amount: 80000, marketplace_fee: 9600 }] }));
+      }
       if (u.pathname === "/shipments/5101") return json({ logistic_type: "fulfillment", status_history: { date_shipped: "2026-10-24T09:00:00.000-05:00" } });
       if (u.pathname === "/shipments/5101/costs") return json({ senders: [{ cost: 0 }] });
       if (u.pathname === "/items") {
@@ -79,6 +84,11 @@ describe("sincronizarVentasCuenta (issue #130)", () => {
     const [linea] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidoItems).where(eq(pedidoItems.pedidoId, cabecera.pedidos.id)));
     expect(linea).toMatchObject({ imagenUrl: "https://http2.mlstatic.com/D_101.jpg", costoCongelado: "30000.00", titulo: "Producto 101" });
 
+    // Una sola lectura del detalle, antes del envío.
+    const rutas = fetchMock.mock.calls.map(([u]) => new URL(u as string).pathname);
+    expect(rutas.filter((r) => r === "/orders/101")).toHaveLength(1);
+    expect(rutas.indexOf("/orders/101")).toBeLessThan(rutas.indexOf("/shipments/5101"));
+
     // Sin token en la URL ni en las cabeceras de log: el token va solo en Authorization.
     expect(fetchMock.mock.calls.every(([u]) => !String(u).includes("access"))).toBe(true);
   });
@@ -103,6 +113,34 @@ describe("sincronizarVentasCuenta (issue #130)", () => {
       tx.select({ imagen: pedidoItems.imagenUrl }).from(pedidoItems).innerJoin(pedidos, eq(pedidos.id, pedidoItems.pedidoId)).where(eq(pedidos.pedidoIdExterno, "201"))
     );
     expect(fila.imagen).toBeNull();
+  });
+
+  it("si el detalle de la orden falla, se guarda igual con sale_fee × cantidad del listado", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = new URL(url);
+        if (u.pathname === "/orders/search") {
+          return json({
+            results:
+              u.searchParams.get("offset") === "0"
+                ? [orden(301, { shipping: null, order_items: [{ item: { id: "MCO301", title: "Producto 301", seller_sku: "SYNC-1" }, quantity: 2, unit_price: 40000, sale_fee: 4550 }] })]
+                : [],
+          });
+        }
+        if (u.pathname === "/orders/301") return json({ message: "error" }, 500);
+        if (u.pathname === "/items") return json([]);
+        throw new Error(`fetch no esperado: ${u.pathname}`);
+      })
+    );
+    const resultado = await sincronizarVentasCuenta(empresaId, cuentaMlId, "123456", { desde: new Date("2026-10-20T00:00:00Z") }, sinEspera);
+    expect(resultado).toMatchObject({ leidas: 1, guardadas: 1, fallidas: 0 });
+    const [cabecera] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select({ comisionMl: pedidosFinanzas.comisionMl }).from(pedidosFinanzas).innerJoin(pedidos, eq(pedidos.id, pedidosFinanzas.pedidoId)).where(eq(pedidos.pedidoIdExterno, "301"))
+    );
+    expect(cabecera.comisionMl).toBe("9100.00");
+    vi.restoreAllMocks();
   });
 
   it("429 persistente corta la cuenta sin perder lo hecho y deja constancia en auditoria", async () => {

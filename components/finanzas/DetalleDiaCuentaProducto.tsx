@@ -126,6 +126,10 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
   const pagina = acotarPagina(parsearPagina(normalizarParametro(searchParams.pagina)), totalPaginas);
   const diasPagina = dias.slice((pagina - 1) * DIAS_POR_PAGINA, pagina * DIAS_POR_PAGINA);
   const conDevolucion = new Set(datos?.conDevolucion ?? []);
+  // Ventas cuya comisión no vino de Mercado Libre (ni marketplace_fee ni
+  // sale_fee): suman $0 en la columna Comisión, y eso no puede pasar
+  // callado (#131).
+  const ventasSinComision = Object.values(datos?.avisosArmado ?? {}).filter((avisos) => avisos.includes("comision_sin_dato")).length;
 
   return (
     <>
@@ -230,6 +234,12 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
 
               <section className={estilos.seccion}>
                 <h2 className={estilos.tituloSeccion}>Detalle día a día · cuenta · producto</h2>
+                {ventasSinComision > 0 && (
+                  <p className={estilos.suave}>
+                    Comisión sin dato de Mercado Libre en {ventasSinComision} {ventasSinComision === 1 ? "venta" : "ventas"}: cuenta como $0
+                    {puedeTraerVentas ? ". Vuelve a traer las ventas para leerla del detalle de la orden." : "."}
+                  </p>
+                )}
                 <div className={estilos.tablaCompacta}>
                   <Tabla encabezados={COLUMNAS_CORTAS}>
                     {diasPagina.map((dia) => (
