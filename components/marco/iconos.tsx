@@ -59,6 +59,28 @@ export function IconoSku(props: IconoProps) {
   );
 }
 
+// Issue #280 — bodega: galpón con portón.
+export function IconoBodegas(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 10 12 5l9 5v9H3z" />
+      <path d="M7 19v-6h10v6" />
+      <path d="M7 16h10" />
+    </Svg>
+  );
+}
+
+// Issue #280 — inventario: cajas apiladas.
+export function IconoInventario(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <rect x="4" y="12" width="7" height="7" rx="1" />
+      <rect x="13" y="12" width="7" height="7" rx="1" />
+      <rect x="8.5" y="5" width="7" height="7" rx="1" />
+    </Svg>
+  );
+}
+
 export function IconoFinanzas(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -260,6 +282,8 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   pedidos: IconoPedidos,
   despachos: IconoDespachos,
   sku: IconoSku,
+  inventario: IconoInventario,
+  bodegas: IconoBodegas,
   investigacion: IconoInvestigacion,
   publicar: IconoPublicar,
   finanzas: IconoFinanzas,

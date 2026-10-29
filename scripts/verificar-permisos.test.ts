@@ -59,6 +59,23 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/avisos-ml/page.tsx",
   "app/panel/sku/page.tsx",
   "app/panel/sku/actions.ts",
+  // Issue #280 (WMS Fase 1) — ver pide inventario.consultar; crear
+  // bodegas, ingresos, OC y recepciones, inventario.crear; ajustes,
+  // traslados y la alerta de última unidad, inventario.modificar;
+  // anular una OC, inventario.anular; la configuración y el envío a
+  // ML, inventario.autorizar.
+  "app/panel/bodegas/page.tsx",
+  "app/panel/bodegas/actions.ts",
+  "app/panel/inventario/page.tsx",
+  "app/panel/inventario/actions.ts",
+  "app/panel/inventario/kardex/page.tsx",
+  "app/panel/inventario/ingresos/page.tsx",
+  "app/panel/inventario/ingresos/actions.ts",
+  "app/panel/inventario/compras/page.tsx",
+  "app/panel/inventario/compras/actions.ts",
+  "app/panel/inventario/compras/[id]/page.tsx",
+  "app/panel/inventario/configuracion/page.tsx",
+  "app/panel/inventario/configuracion/actions.ts",
   "app/panel/sku/sin-vincular/page.tsx",
   "app/panel/sku/sin-vincular/actions.ts",
   "app/panel/sku/importar/page.tsx",
