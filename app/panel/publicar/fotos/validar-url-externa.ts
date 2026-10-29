@@ -1,5 +1,4 @@
-import { lookup } from "dns/promises";
-import { isIP } from "net";
+import { HostnameNoResueltoError, HostnamePrivadoError, exigirHostnamePublico } from "@/lib/seguridad/ssrf";
 
 // Parte 3, punto C — Canva. El pedido de Mateo descarta aceptar el link
 // de "compartir" del diseño (canva.com/design/...): esa página es HTML
@@ -63,37 +62,6 @@ export function tipoImagenPorMagicBytes(buffer: Buffer | Uint8Array): TipoImagen
     return "image/webp";
   }
   return null;
-}
-
-// Rangos privados/especiales reales (RFC 1918, RFC 3927, loopback,
-// CGNAT, y 169.254.169.254 — la IP de metadata de AWS/GCP/Azure, el
-// blanco clásico de un SSRF contra infraestructura en la nube). Nunca
-// se confía en que "parece una URL pública" — se resuelve el DNS de
-// verdad y se rechaza si CUALQUIERA de las IPs resueltas cae en estos
-// rangos.
-function esIpPrivadaOEspecial(ip: string): boolean {
-  const version = isIP(ip);
-  if (version === 4) {
-    const partes = ip.split(".").map(Number);
-    const [a, b] = partes;
-    if (a === 127) return true; // loopback
-    if (a === 10) return true; // privada
-    if (a === 172 && b >= 16 && b <= 31) return true; // privada
-    if (a === 192 && b === 168) return true; // privada
-    if (a === 169 && b === 254) return true; // link-local, incluye la IP de metadata de nube
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT (RFC 6598)
-    if (a === 0) return true;
-    return false;
-  }
-  if (version === 6) {
-    const ipv6 = ip.toLowerCase();
-    if (ipv6 === "::1") return true; // loopback
-    if (ipv6.startsWith("fe80:")) return true; // link-local
-    if (ipv6.startsWith("fc") || ipv6.startsWith("fd")) return true; // unique local (RFC 4193)
-    if (ipv6.startsWith("::ffff:")) return esIpPrivadaOEspecial(ipv6.slice(7)); // IPv4-mapeada
-    return false;
-  }
-  return true; // ni v4 ni v6 reconocida — nunca se asume pública
 }
 
 // Revisión de seguridad (hallazgo MED) — `res.arrayBuffer()` (lo que
@@ -165,14 +133,12 @@ export async function descargarImagenExternaSegura(urlCruda: string): Promise<{ 
     throw new UrlExternaNoPermitidaError(`"${url.hostname}" no está en la lista permitida — solo exportaciones reales de Canva, nunca el link de compartir el diseño.`);
   }
 
-  let direcciones: { address: string }[];
   try {
-    direcciones = await lookup(url.hostname, { all: true });
-  } catch {
-    throw new UrlExternaNoDisponibleError("No se pudo resolver ese dominio.");
-  }
-  if (direcciones.length === 0 || direcciones.some((d) => esIpPrivadaOEspecial(d.address))) {
-    throw new UrlExternaNoPermitidaError("Ese dominio resuelve a una dirección privada — no se permite.");
+    await exigirHostnamePublico(url.hostname);
+  } catch (e) {
+    if (e instanceof HostnameNoResueltoError) throw new UrlExternaNoDisponibleError(e.message);
+    if (e instanceof HostnamePrivadoError) throw new UrlExternaNoPermitidaError(e.message);
+    throw e;
   }
 
   let res: Response;

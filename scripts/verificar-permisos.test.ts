@@ -91,12 +91,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/publicar/page.tsx",
   "app/panel/publicar/actions.ts",
   "app/panel/publicar/[id]/page.tsx",
-  "app/panel/publicar/clip/actions.ts",
   // Parte 3 ("importadores + permalink + fotos Cloudinary + botón
   // extensión") — buscarImportacionPorSkuAction/buscarImportacionPorLinkAction
-  // piden "inventario","consultar" (mismo permiso que buscarItemAction
-  // de Clip): solo TRAEN datos para precargar el formulario, nunca
-  // publican nada por su cuenta.
+  // piden "inventario","consultar": solo TRAEN datos para precargar el
+  // formulario, nunca publican nada por su cuenta.
   "app/panel/publicar/importadores/actions.ts",
   // ADENDO UX de Publicar — mismo permiso que crear el producto en sí
   // ("inventario","crear"): estas 3 solo AYUDAN a elegir categoría/
@@ -110,6 +108,17 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
   "app/api/ml/clip/route.ts",
+  // Rama feat-publicar-clip, punto 3/4/5 — las 5 rutas nuevas del
+  // sub-flujo de Clip. "modificar" para las que arrancan o cambian
+  // algo (subir, traer el video); "consultar" para las que solo LEEN
+  // (buscar por SKU, el polling del trabajo, el preview del video
+  // temporal, el estado de moderación) — mismo permiso real que ya
+  // usaban buscarItemAction/cambiarEstadoAction en clip/actions.ts.
+  "app/api/ml/clip/buscar-sku/route.ts",
+  "app/api/ml/clip/traer-video/route.ts",
+  "app/api/ml/clip/video-temp/[id]/route.ts",
+  "app/api/ml/clip/trabajo/[jobId]/route.ts",
+  "app/api/ml/clip/estado/route.ts",
   "app/panel/publicidad/page.tsx",
   "app/panel/publicidad/actions.ts",
 ]);
@@ -150,14 +159,17 @@ const RUTAS_EXENTAS: Record<string, string> = {
     "el permiso real (requierePermiso('configuracion','crear')) vive en confirmarTransferenciaCuentaMl (lib/ml/transferencia.ts), llamado ANTES de transferir — este archivo solo resuelve usuario/empresa desde las cookies y borra el pendiente, nunca toca cuentas_ml por su cuenta",
   // Parte 2 (página única, estructura de Zilonix OS) — estas dos rutas
   // se retiraron a simples redirects hacia /panel/publicar (con el
-  // ancla de la sección), reenviando los mismos query params: nunca
-  // leen ni escriben nada, el permiso real se revisa en
-  // /panel/publicar (y en clip/actions.ts para las 2 acciones reales
-  // de Clip) — siguen existiendo solo para no romper un link viejo
-  // guardado (el botón de Investigación, un bookmark, una notificación
-  // ya mandada).
+  // ancla de la sección): nunca leen ni escriben nada — siguen
+  // existiendo solo para no romper un link viejo guardado (el botón de
+  // Investigación, un bookmark, una notificación ya mandada).
   "app/panel/publicar/nuevo/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#formulario-publicar (reenviando titulo/precio/foto) — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
-  "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#clip (reenviando cuentaId/sku/itemId/clipSubido/error) — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar y en clip/actions.ts",
+  // Rama feat-publicar-clip — reenviar cuentaId/sku/itemId/clipSubido/
+  // error ya no tiene efecto (SeccionClip.tsx busca/sube/consulta por
+  // su cuenta, con fetch del cliente a las rutas nuevas bajo
+  // app/api/ml/clip/, todas en RUTAS_PROTEGIDAS más arriba) — el
+  // redirect sigue existiendo solo por compatibilidad con un link
+  // viejo, nunca lee ni escribe nada.
+  "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#clip — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar y en las rutas nuevas de app/api/ml/clip/",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {
