@@ -175,7 +175,8 @@ describe("POST /api/ml/clip — CSRF, códigos de error cerrados y validación p
 
     expect(res.status).toBe(303);
     const location = res.headers.get("location") ?? "";
-    expect(location).toContain("/panel/publicar/clip");
+    expect(location).toContain("/panel/publicar");
+    expect(location).toContain("#clip");
     expect(codigoDeError(location)).toBe("sin_permiso");
     expect(subirClipItem).not.toHaveBeenCalled();
   });
@@ -280,7 +281,8 @@ describe("POST /api/ml/clip — CSRF, códigos de error cerrados y validación p
 
     expect(res.status).toBe(303);
     const location = res.headers.get("location") ?? "";
-    expect(location).toContain("/panel/publicar/clip");
+    expect(location).toContain("/panel/publicar");
+    expect(location).toContain("#clip");
     expect(location).toContain("clipSubido=1");
     expect(subirClipItem).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);

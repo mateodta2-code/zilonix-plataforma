@@ -54,10 +54,8 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/investigacion/seguimiento/[id]/page.tsx",
   "app/api/ml/despachos/etiquetas/route.ts",
   "app/panel/publicar/page.tsx",
-  "app/panel/publicar/nuevo/page.tsx",
-  "app/panel/publicar/nuevo/actions.ts",
+  "app/panel/publicar/actions.ts",
   "app/panel/publicar/[id]/page.tsx",
-  "app/panel/publicar/clip/page.tsx",
   "app/panel/publicar/clip/actions.ts",
   // ADENDO UX de Publicar — mismo permiso que crear el producto en sí
   // ("inventario","crear"): estas 3 solo AYUDAN a elegir categoría/
@@ -106,6 +104,16 @@ const RUTAS_EXENTAS: Record<string, string> = {
     "el permiso real (requierePermiso('inventario','modificar')) vive en lib/ml/sku-importar.ts (previsualizarImportacionSkus/confirmarImportacionSkus), llamado ANTES de leer o escribir — este archivo solo adapta el formulario a esas dos funciones, nunca toca la base por su cuenta",
   "app/panel/conectar-ml/confirmar-transferencia/actions.ts":
     "el permiso real (requierePermiso('configuracion','crear')) vive en confirmarTransferenciaCuentaMl (lib/ml/transferencia.ts), llamado ANTES de transferir — este archivo solo resuelve usuario/empresa desde las cookies y borra el pendiente, nunca toca cuentas_ml por su cuenta",
+  // Parte 2 (página única, estructura de Zilonix OS) — estas dos rutas
+  // se retiraron a simples redirects hacia /panel/publicar (con el
+  // ancla de la sección), reenviando los mismos query params: nunca
+  // leen ni escriben nada, el permiso real se revisa en
+  // /panel/publicar (y en clip/actions.ts para las 2 acciones reales
+  // de Clip) — siguen existiendo solo para no romper un link viejo
+  // guardado (el botón de Investigación, un bookmark, una notificación
+  // ya mandada).
+  "app/panel/publicar/nuevo/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#formulario-publicar (reenviando titulo/precio/foto) — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
+  "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#clip (reenviando cuentaId/sku/itemId/clipSubido/error) — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar y en clip/actions.ts",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {
