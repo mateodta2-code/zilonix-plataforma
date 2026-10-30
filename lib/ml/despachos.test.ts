@@ -470,6 +470,7 @@ function tarjetaDePrueba(id: string, fechaPedido: Date, extra: Partial<TarjetaDe
     cuentaNickname: "VENDEDOR_PRUEBA",
     pedidoIdExterno: "ORD-1",
     fechaPedido,
+    actualizadoTs: fechaPedido,
     comprador: null,
     bodegaAsignada: null,
     items: [],
@@ -919,5 +920,116 @@ describe("backfill del plazo — no reintenta antes de 30 minutos (revisión de 
     const tarjeta2 = segundaCarga.find((t) => t.shipmentIdExterno === "910000002")!;
     expect(tarjeta2.slaExpectedDate?.getTime()).toBe(tarjeta1.slaExpectedDate?.getTime());
     expect(fetchMock.mock.calls.length).toBe(llamadasTrasPrimera); // ninguna llamada nueva
+  });
+});
+
+// Bug real reportado por Mateo en staging: pedidos del 22/23 de
+// octubre, ready_to_ship con substatus "ya lo recogió el
+// transportador/domiciliario" (picked_up o similar), seguían saliendo
+// en Pendientes. Dos mecanismos distintos cubren los dos casos reales
+// (la fila ya tiene el substatus correcto vs. todavía no) — cada test
+// prueba uno.
+describe("Pendientes nunca incluye un envío que ya salió de la tienda (fix mateo/fix-despachos-pendientes-recogidos)", () => {
+  vi.setConfig({ testTimeout: 20_000 });
+  const empresaId = randomUUID();
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa ya salio", nit: `TEST-DESPY-${empresaId.slice(0, 8)}` }));
+  });
+
+  async function despachoConEstado(shipmentIdExterno: string, status: string | null, substatus: string | null): Promise<string> {
+    const cuentaId = await crearCuentaMlDePrueba(empresaId);
+    const pedidoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidosFinanzas).values({ empresaId, pedidoId, cuentaMlId: cuentaId, valorVenta: "100000.00" }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoId, 1)));
+    const [{ id: despachoId }] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(despachosMl)
+        .values({ empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno, logisticType: "self_service", status, substatus, imprimible: status === "ready_to_ship" })
+        .returning({ id: despachosMl.id })
+    );
+    return despachoId;
+  }
+
+  // refrescarEstadoViejo solo revisa en vivo lo que lleva más de 1h
+  // sin sincronizar (UMBRAL_VIEJO_MS) — un despacho recién insertado
+  // en la prueba (actualizado_ts = ahora) no califica todavía.
+  async function envejecer(despachoId: string): Promise<void> {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.update(despachosMl).set({ actualizadoTs: new Date(Date.now() - 2 * 60 * 60 * 1000) }).where(eq(despachosMl.id, despachoId))
+    );
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("filtro de la consulta: la fila YA tiene substatus picked_up guardado — nunca aparece, y nunca llama a Mercado Libre por ella", async () => {
+    await despachoConEstado("920000001", "ready_to_ship", "picked_up");
+    const fetchMock = vi.fn(async () => {
+      throw new Error("no debía llamar a Mercado Libre — el filtro de la consulta ya la descarta");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    expect(pendientes.map((t) => t.shipmentIdExterno)).not.toContain("920000001");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("filtro de la consulta: dropped_off / out_for_delivery / at_the_door también quedan afuera", async () => {
+    await despachoConEstado("920000002", "ready_to_ship", "dropped_off");
+    await despachoConEstado("920000003", "ready_to_ship", "out_for_delivery");
+    await despachoConEstado("920000004", "ready_to_ship", "at_the_door");
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ status: "on_time", expected_date: "2026-03-15T20:00:00Z" })));
+
+    const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    const ids = pendientes.map((t) => t.shipmentIdExterno);
+    expect(ids).not.toContain("920000002");
+    expect(ids).not.toContain("920000003");
+    expect(ids).not.toContain("920000004");
+  });
+
+  it("refresco en vivo: status/substatus viejos (sin actualizar desde el import) se corrigen contra Mercado Libre y la fila sale de Pendientes en la MISMA carga", async () => {
+    const despachoId = await despachoConEstado("920000005", "ready_to_ship", null); // nunca se refrescó desde que se importó
+    await envejecer(despachoId);
+    const fetchMock = vi.fn(async () => respuestaJson({ status: "delivered", substatus: "delivered", logistic_type: "self_service" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    expect(pendientes.map((t) => t.shipmentIdExterno)).not.toContain("920000005");
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.shipmentIdExterno, "920000005")));
+    expect(fila.status).toBe("delivered");
+    expect(fila.imprimible).toBe(false);
+  });
+
+  it("refresco en vivo: si Mercado Libre confirma que sigue ready_to_ship sin substatus, queda en Pendientes y no vuelve a refrescar antes de 30 minutos", async () => {
+    const despachoId = await despachoConEstado("920000006", "ready_to_ship", null);
+    await envejecer(despachoId);
+    const fetchMock = vi.fn(async () => respuestaJson({ status: "ready_to_ship", substatus: null, logistic_type: "self_service" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const primeraCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    expect(primeraCarga.map((t) => t.shipmentIdExterno)).toContain("920000006");
+    const llamadasTrasPrimera = fetchMock.mock.calls.length;
+    expect(llamadasTrasPrimera).toBeGreaterThan(0);
+
+    const segundaCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    expect(segundaCarga.map((t) => t.shipmentIdExterno)).toContain("920000006");
+    expect(fetchMock.mock.calls.length).toBe(llamadasTrasPrimera); // ninguna llamada nueva — freno de 30 min
+  });
+
+  it("un despacho recién sincronizado (menos de 1h) NUNCA dispara el refresco en vivo — solo lo viejo", async () => {
+    const despachoId = await despachoConEstado("920000007", "ready_to_ship", null); // actualizado_ts = ahora, sin envejecer
+    // Ya tiene plazo guardado para que backfillSlaFaltante (otro
+    // mecanismo, sin relación con el umbral de "vieja") tampoco llame
+    // — esta prueba aísla solo refrescarEstadoViejo.
+    await dbComoEmpresa(empresaId, (tx) => tx.update(despachosMl).set({ slaExpectedDate: new Date("2026-03-15T20:00:00Z") }).where(eq(despachosMl.id, despachoId)));
+    const fetchMock = vi.fn(async () => {
+      throw new Error("no debía llamar a Mercado Libre — todavía no es 'vieja'");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    expect(pendientes.map((t) => t.shipmentIdExterno)).toContain("920000007");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
