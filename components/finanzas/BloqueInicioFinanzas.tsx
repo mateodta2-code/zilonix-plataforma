@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { aCentavos } from "@/lib/finanzas/utilidad-venta";
 import {
+  MONEDA_PUBLICIDAD,
   participacion,
   textoVariacion,
   type FilaCuentaTablero,
@@ -27,7 +28,11 @@ import styles from "./inicio.module.css";
 // de Zilonix OS que Sharel pegó el 29-oct: KPIs del mes, participación
 // por cuenta, comparativo por cuenta y publicidad por cuenta. Solo pinta
 // lo que ya leyó app/panel/page.tsx (y solo si el rol tiene
-// finanzas.consultar; si no, este componente ni se monta). Gráficas en
+// finanzas.consultar; si no, este componente ni se monta).
+//
+// Las tarjetas de cantidad dicen «Cantidad de ventas…» para no
+// confundirse con «Ventas de hoy» / «Ventas del mes» (en plata) de
+// arriba, que no cambian (Sharel, review de #306). Gráficas en
 // SVG y CSS, sin librería; colores de tokens existentes.
 
 type Props = {
@@ -66,8 +71,8 @@ export function BloqueInicioFinanzas({ tablero, utilidad, porCuenta, publicidad,
       </Tarjeta>
 
       <div className={styles.gridKpi}>
-        <TarjetaKpi titulo="Ventas del mes" valor={String(tablero.ventas.actual)} detalle={[textoVariacion(tablero.ventas.variacion)]} />
-        {ventasDeHoy && <TarjetaKpi titulo="Ventas de hoy" valor={ventasDeHoy.cantidad} detalle={detalleVentasDeHoy(ventasDeHoy)} />}
+        <TarjetaKpi titulo="Cantidad de ventas del mes" valor={String(tablero.ventas.actual)} detalle={[textoVariacion(tablero.ventas.variacion)]} />
+        {ventasDeHoy && <TarjetaKpi titulo="Cantidad de ventas de hoy" valor={ventasDeHoy.cantidad} detalle={detalleVentasDeHoy(ventasDeHoy)} />}
         <TarjetaKpi
           titulo="Recaudo del mes"
           valor={porMoneda(tablero, "actual")}
@@ -88,7 +93,7 @@ export function BloqueInicioFinanzas({ tablero, utilidad, porCuenta, publicidad,
 
       <div className={styles.gridGraficas}>
         <Tarjeta className={styles.panel}>
-          <h3 className={styles.subtitulo}>Participación por cuenta (unidades)</h3>
+          <h3 className={styles.subtitulo}>Participación por cuenta (ventas)</h3>
           <Participacion filas={porCuenta} />
         </Tarjeta>
         <Tarjeta className={styles.panel}>
@@ -211,7 +216,7 @@ function Comparativo({ filas }: { filas: FilaCuentaTablero[] }) {
             </CeldaTabla>
             <CeldaTabla className={styles.numero}>{f.ventas}</CeldaTabla>
             <CeldaTabla className={styles.numero}>{montosPorMoneda(f.recaudoPorMoneda)}</CeldaTabla>
-            <CeldaTabla className={styles.numero}>{f.publicidad === null ? "—" : `COP ${formatearMonto(f.publicidad)}`}</CeldaTabla>
+            <CeldaTabla className={styles.numero}>{f.publicidad === null ? "—" : `${MONEDA_PUBLICIDAD} ${formatearMonto(f.publicidad)}`}</CeldaTabla>
           </FilaTabla>
         ))}
       </Tabla>

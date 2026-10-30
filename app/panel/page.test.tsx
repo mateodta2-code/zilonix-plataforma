@@ -47,11 +47,12 @@ describe("Inicio · bloque de Finanzas (#143)", () => {
     const html = await pintarInicio(e.usuarioId, e.empresaId);
     for (const texto of [
       "Indicadores de Finanzas del mes",
-      "Ventas de hoy",
+      "Cantidad de ventas del mes",
+      "Cantidad de ventas de hoy",
       "Utilidad del mes (antes de publicidad)",
       "Publicidad invertida",
       "Sin datos",
-      "Participación por cuenta (unidades)",
+      "Participación por cuenta (ventas)",
       "Comparativo por cuenta (equipo)",
       "Publicidad · inversión por cuenta",
       'href="/panel/finanzas"',
@@ -65,7 +66,7 @@ describe("Inicio · bloque de Finanzas (#143)", () => {
     const e = await crearEmpresaConPermisos("Inicio sin finanzas", [{ modulo: "ventas", accion: "consultar" }]);
     const html = await pintarInicio(e.usuarioId, e.empresaId);
     expect(html).toContain("Ventas de hoy");
-    for (const texto of ["Indicadores de Finanzas del mes", "Utilidad", "Publicidad", "Participación por cuenta", "Recaudo"]) {
+    for (const texto of ["Indicadores de Finanzas del mes", "Cantidad de ventas", "Utilidad", "Publicidad", "Participación por cuenta", "Recaudo"]) {
       expect(html).not.toContain(texto);
     }
     for (const f of lecturas()) expect(f).not.toHaveBeenCalled();
