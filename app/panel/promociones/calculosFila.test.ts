@@ -3,8 +3,13 @@ import {
   accionParaCandidato,
   descuentoDesdePrecio,
   estadoPrecioMinimo,
+  formatoEnteroEsCo,
+  formatoPorcentaje,
+  formatoPorcentajeInput,
+  fueraDeRango,
   gananciaEstimadaParaPrecio,
   numero,
+  parsearNumeroEsCo,
   porcentajeDescuento,
   precioConPromo,
   precioDesdeDescuento,
@@ -197,5 +202,92 @@ describe("gananciaEstimadaParaPrecio — utilidad estimada para un precio editad
   it("sin precioSugerido o sin gananciaEstimada original: null, nunca inventa un costo", () => {
     expect(gananciaEstimadaParaPrecio(candidato({ precioSugerido: null, gananciaEstimada: "30000" }), 90000)).toBeNull();
     expect(gananciaEstimadaParaPrecio(candidato({ precioSugerido: "80000", gananciaEstimada: null }), 90000)).toBeNull();
+  });
+});
+
+// Rama fix-promociones-edicion, punto 3 — bug real reportado por Mateo
+// en staging: "27.557278635919...%" salía crudo en las filas de solo
+// lectura.
+describe("formatoPorcentaje / formatoPorcentajeInput — redondeo a 1 decimal, formato es-CO", () => {
+  it("redondea un número largo a 1 decimal con coma decimal (bug real reportado)", () => {
+    expect(formatoPorcentaje(27.557278635919)).toBe("27,6%");
+    expect(formatoPorcentajeInput(27.557278635919)).toBe("27,6");
+  });
+
+  it("siempre muestra 1 decimal, incluso en un número redondo", () => {
+    expect(formatoPorcentaje(10)).toBe("10,0%");
+  });
+
+  it("null: guion, nunca '0%' inventado", () => {
+    expect(formatoPorcentaje(null)).toBe("—");
+  });
+
+  it("redondea hacia arriba en el límite (es-CO redondea igual que Math.round en este rango)", () => {
+    expect(formatoPorcentaje(9.95)).toBe("10,0%");
+  });
+});
+
+describe("formatoEnteroEsCo — precio entero con puntos de miles, sin signo $", () => {
+  it("formatea con puntos de miles", () => {
+    expect(formatoEnteroEsCo(169900)).toBe("169.900");
+  });
+
+  it("redondea antes de formatear", () => {
+    expect(formatoEnteroEsCo(169900.4)).toBe("169.900");
+  });
+});
+
+// Rama fix-promociones-edicion, punto 1 — el borrador de texto acepta
+// el formato real es-CO (puntos de miles, coma decimal), nunca el
+// formato con punto decimal que asumía `Number(texto)` a secas.
+describe("parsearNumeroEsCo", () => {
+  it("un precio con puntos de miles: el número sin los puntos", () => {
+    expect(parsearNumeroEsCo("169.900")).toBe(169900);
+  });
+
+  it("un % con coma decimal: el número con punto decimal real", () => {
+    expect(parsearNumeroEsCo("27,6")).toBe(27.6);
+  });
+
+  it("precio con puntos de miles Y nada más: entero exacto, nunca 169.9 (el punto NO es decimal en este formato)", () => {
+    expect(parsearNumeroEsCo("49.900")).toBe(49900);
+  });
+
+  it("vacío o solo '-': null, nunca NaN ni 0 inventado", () => {
+    expect(parsearNumeroEsCo("")).toBeNull();
+    expect(parsearNumeroEsCo("  ")).toBeNull();
+    expect(parsearNumeroEsCo("-")).toBeNull();
+  });
+
+  it("texto no numérico: null", () => {
+    expect(parsearNumeroEsCo("abc")).toBeNull();
+  });
+});
+
+describe("fueraDeRango — rama fix-promociones-edicion, punto 1 (ya NO se fuerza de vuelta al rango)", () => {
+  it("dentro del rango: false", () => {
+    const c = candidato({ precioMinimo: "149900", maxDiscountedPrice: "169900", precioOriginal: "199900" });
+    expect(fueraDeRango(c, 160000)).toBe(false);
+  });
+
+  it("por debajo del mínimo: true", () => {
+    const c = candidato({ precioMinimo: "149900", maxDiscountedPrice: "169900", precioOriginal: "199900" });
+    expect(fueraDeRango(c, 100000)).toBe(true);
+  });
+
+  it("por encima del máximo: true", () => {
+    const c = candidato({ precioMinimo: "149900", maxDiscountedPrice: "169900", precioOriginal: "199900" });
+    expect(fueraDeRango(c, 180000)).toBe(true);
+  });
+
+  it("sin rango válido (ej. sin precio mínimo): false — nada que comparar, nunca bloquea por sí solo", () => {
+    const c = candidato({ precioMinimo: null, precioOriginal: "199900" });
+    expect(fueraDeRango(c, 100)).toBe(false);
+  });
+
+  it("exactamente en el límite (mín o máx): false, nunca 'fuera' en el borde", () => {
+    const c = candidato({ precioMinimo: "149900", maxDiscountedPrice: "169900", precioOriginal: "199900" });
+    expect(fueraDeRango(c, 149900)).toBe(false);
+    expect(fueraDeRango(c, 169900)).toBe(false);
   });
 });
