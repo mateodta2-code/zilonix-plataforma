@@ -2,8 +2,8 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { crearCuentaMlDePrueba, crearPedidoDePrueba, lineaDePrueba } from "@/db/test-utils/venta";
-import { cuentasMl, despachosMl, empresas, pedidoItems, pedidos } from "@/db/schema";
+import { crearCuentaMlDePrueba, crearVentaDePrueba } from "@/db/test-utils/venta";
+import { cuentasMl, despachosMl, empresas, pedidos } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import { LARGO_MAXIMO_BUSQUEDA, normalizarParametro, PAGINA_MAXIMA } from "@/lib/filtros-listado";
 import {
@@ -574,9 +574,11 @@ describe("tarjetas de Despachos — Fase 1 (gate, marcar/deshacer, listarTarjeta
       tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B tarjetas despachos", nit: `TEST-DESPTB-${empresaBId.slice(0, 8)}` })
     );
 
-    cuentaId = await crearCuentaMlDePrueba(empresaId);
-    pedidoId = await crearPedidoDePrueba(empresaId, cuentaId);
-    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoId, 1)));
+    // pedido_items exige una cabecera en pedidos_finanzas con el MISMO
+    // (empresa_id, pedido_id) — FK compuesta pedido_items_venta_misma_
+    // empresa_fk (db/schema.ts) — crearVentaDePrueba ya la crea junto
+    // con la línea, a diferencia de armar pedido_items a mano.
+    ({ cuentaMlId: cuentaId, pedidoId } = await crearVentaDePrueba(empresaId, { lineas: 1 }));
 
     [despachoFlexId, despachoFullId, despachoAgenciaId] = await dbComoEmpresa(empresaId, async (tx) => {
       const filas = await tx
