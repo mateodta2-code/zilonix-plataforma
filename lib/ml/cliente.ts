@@ -1529,3 +1529,113 @@ export async function salirDePromocionMl(itemId: string, token: string, promotio
   const textoCrudo = await res.text().catch(() => "");
   return { ok: res.ok, status: res.status, textoCrudo };
 }
+
+// ---------- Fase 1 de Despachos (issue "Despachos") ----------
+//
+// Hasta esta tarea, lib/ml/despachos.ts tenía sus propios fetch
+// sueltos contra api.mercadolibre.com (GET /shipments/{id} y GET
+// /shipment_labels) — regla de CLAUDE.md incumplida, igual que
+// publicar.ts/clip.ts/estado-item.ts antes de la tarea 2.11. Se
+// centralizan acá, reusando pedirLecturaMl() (ya existente) para las
+// 2 lecturas JSON y un helper nuevo (pedirBinarioMl) para el PDF, que
+// NUNCA es JSON — pedir()/pedirLecturaMl() siempre hacen
+// `await res.json()`, así que no sirven para esto.
+//
+// Shipment id: siempre solo dígitos (BIGINT real de Mercado Libre,
+// confirmado en despachos_ml.shipment_id_externo) — mismo criterio
+// que PATRON_ID_VENDEDOR, nunca se reusa ese porque son conceptos
+// distintos (un vendedor vs. un envío), aunque el patrón sea igual.
+export const PATRON_ID_ENVIO = /^\d+$/;
+
+export type ShipmentMl = { status: string | null; substatus: string | null; logisticType: string | null };
+
+// GET /shipments/{id} — confirmado contra el código real ya en
+// producción (zilonix-os-web, lib/mercadolibre-despachos.js): trae el
+// estado real del envío (status/substatus) y el tipo de logística
+// (self_service=Flex, xd_drop_off=Agencia/Places, cross_docking=Colecta,
+// fulfillment=Full, excluido de Despachos). Se llama al sincronizar un
+// pedido nuevo o un aviso de envío — nunca en vivo en cada carga de la
+// pantalla de Despachos (eso lee despachos_ml, ya sincronizado).
+export async function obtenerShipmentMl(shipmentIdExterno: string, token: string): Promise<ShipmentMl> {
+  const id = exigirId(shipmentIdExterno, PATRON_ID_ENVIO, "shipmentId");
+  const resp = await pedirLecturaMl<{ status?: unknown; substatus?: unknown; logistic_type?: unknown }>(`/shipments/${encodeURIComponent(id)}`, token);
+  if (!resp.ok) throw new Error(`No se pudo leer el envío ${id} en Mercado Libre (HTTP ${resp.status}).`);
+  return {
+    status: typeof resp.data.status === "string" ? resp.data.status : null,
+    substatus: typeof resp.data.substatus === "string" ? resp.data.substatus : null,
+    logisticType: typeof resp.data.logistic_type === "string" ? resp.data.logistic_type : null,
+  };
+}
+
+export type SlaEnvioMl = { status: string | null; expectedDate: string | null };
+
+// GET /shipments/{id}/sla — confirmado contra el código real ya en
+// producción: "expected_date" es la hora límite real para dejarlo en
+// la agencia/recogida; "status" es "on_time" o "delayed" si ya se
+// pasó. No todo envío tiene SLA (ej. un acuerdo directo con el
+// comprador, o un tipo de logística sin plazo) — se tolera cualquier
+// fallo (404 o lo que sea) devolviendo los 2 campos en null, nunca se
+// lanza: el SLA es un dato COMPLEMENTARIO, nunca bloquea sincronizar
+// el resto del envío.
+export async function obtenerSlaEnvioMl(shipmentIdExterno: string, token: string): Promise<SlaEnvioMl> {
+  const id = exigirId(shipmentIdExterno, PATRON_ID_ENVIO, "shipmentId");
+  try {
+    const resp = await pedirLecturaMl<{ status?: unknown; expected_date?: unknown }>(`/shipments/${encodeURIComponent(id)}/sla`, token);
+    if (!resp.ok) return { status: null, expectedDate: null };
+    return {
+      status: typeof resp.data.status === "string" ? resp.data.status : null,
+      expectedDate: typeof resp.data.expected_date === "string" ? resp.data.expected_date : null,
+    };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return { status: null, expectedDate: null };
+    throw e;
+  }
+}
+
+export type RespuestaBinarioMl = { ok: true; data: ArrayBuffer } | { ok: false; status: number; textoCrudo: string };
+
+// Hermano de pedirLecturaMl, para una respuesta que NUNCA es JSON (el
+// PDF real de la guía) — mismo chequeo de ruta/429/timeout, pero
+// devuelve el ArrayBuffer crudo en éxito, o el texto crudo del error
+// (que SÍ suele ser JSON con el motivo real de Mercado Libre, ej.
+// "NOT_PRINTABLE_STATUS") para que el llamador decida qué significa,
+// sin que este cliente genérico tenga que conocer esa semántica.
+export async function pedirBinarioMl(ruta: string, token: string, query?: string): Promise<RespuestaBinarioMl> {
+  if (!ruta.startsWith("/") || ruta.includes("..") || ruta.includes("://") || ruta.includes("?")) {
+    throw new Error("Ruta de Mercado Libre inválida — no se llamó a la API.");
+  }
+  if (query && !query.startsWith("?")) {
+    throw new Error("Query de Mercado Libre inválida — no se llamó a la API.");
+  }
+  const url = `${BASE_URL}${ruta}${query ?? ""}`;
+  const endpoint = endpointSinQuery(url);
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch {
+    console.warn(`[lib/ml/cliente] ${endpoint} — tiempo agotado o falla de red`);
+    throw new MlNoDisponibleError();
+  }
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
+  if (res.status === 401) {
+    console.warn(`[lib/ml/cliente] ${endpoint} — 401`);
+    throw new MlNoAutorizadoError();
+  }
+  if (!res.ok) {
+    const textoCrudo = await res.text().catch(() => "");
+    return { ok: false, status: res.status, textoCrudo };
+  }
+  return { ok: true, data: await res.arrayBuffer() };
+}
+
+// GET /shipment_labels?shipment_ids=X,Y,Z&response_type=pdf — confirmado
+// en producción: acepta varios shipment_ids de una vez (la impresión
+// masiva de siempre), y ES el mismo PDF que se usa para "Ver guía" de
+// un solo envío (un arreglo de un elemento). Nunca se llama para un
+// envío de tipo "fulfillment" (Full) — Mercado Libre lo rechaza con
+// "INVALID_SHIPMENT_FF_PUBLIC", confirmado en producción; el llamador
+// (lib/ml/despachos.ts) nunca deja llegar un Full hasta acá.
+export async function obtenerEtiquetaPdfMl(shipmentIdsExternos: string[], token: string): Promise<RespuestaBinarioMl> {
+  const ids = shipmentIdsExternos.map((id) => exigirId(id, PATRON_ID_ENVIO, "shipmentId"));
+  return pedirBinarioMl("/shipment_labels", token, `?shipment_ids=${ids.join(",")}&response_type=pdf`);
+}

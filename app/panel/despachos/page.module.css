@@ -116,3 +116,129 @@
   align-self: flex-start;
   margin-top: 16px;
 }
+
+/* Fase 1 de Despachos (issue "Despachos") — tarjetas agrupadas por
+   día/plazo. El borde plata-azul y el fondo oscuro de cada tarjeta ya
+   los da <Tarjeta> (components/marco/Tarjeta.module.css) con los
+   tokens --degradado-plata-borde/--tarjeta-fondo que ya existen en
+   los dos temas — nada de paleta nueva acá, solo layout. */
+.aviso {
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie-2);
+}
+
+.avisoTitulo {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+}
+
+.avisoLista {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+}
+
+.grupoDia {
+  margin-bottom: 28px;
+}
+
+.tituloGrupo {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.grilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.encabezadoTarjeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+/* Flex resaltado (punto 3 de la tarea) — reusa el Chip estado="aviso"
+   ya existente (--acento/--acento-fuerte) en vez de un color naranja
+   nuevo: "sin paleta nueva" aplica también acá, no solo al fondo de
+   la tarjeta. */
+.avisoFlex {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--acento-fuerte);
+}
+
+.filaItems {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.filaItem {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.imagenItem,
+.imagenItemVacia {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--superficie-2);
+}
+
+.tituloItem {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.detalleItem {
+  margin: 0;
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.datosTarjeta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 12.5px;
+}
+
+.datosTarjeta dt {
+  color: var(--texto-suave);
+}
+
+.datosTarjeta dd {
+  margin: 0;
+}
+
+.acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notaDespachado {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+.errorTarjeta {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--peligro-texto);
+}

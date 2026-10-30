@@ -2,17 +2,35 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl, despachosMl, empresas, pedidos } from "@/db/schema";
+import { db } from "@/db";
+import { crearCuentaMlDePrueba, crearVentaDePrueba } from "@/db/test-utils/venta";
+import { cuentasMl, despachosMl, empresas, pedidos, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import { LARGO_MAXIMO_BUSQUEDA, normalizarParametro, PAGINA_MAXIMA } from "@/lib/filtros-listado";
 import {
+  agruparDespachosPorDia,
   contarDespachosPendientes,
+  deshacerDespachado,
+  DespachoNoEncontradoError,
+  esFlex,
+  esPlazoVencido,
+  etiquetaDiaPlazo,
   EtiquetaNoImprimibleError,
+  formatoPlazoChip,
+  GuiaNoVistaError,
+  listarCuentasConErrorDespacho,
   listarDespachosFiltrados,
   listarDespachosPendientes,
+  listarTarjetasDespacho,
+  marcarDespachado,
   marcarEtiquetasImpresas,
+  marcarGuiaVista,
   obtenerEtiquetasPdf,
+  puedeMarcarDespachado,
   sincronizarDespacho,
+  VentanaDeshacerVencidaError,
+  VENTANA_DESHACER_MS,
+  type TarjetaDespacho,
 } from "./despachos";
 
 function respuestaJson(data: unknown) {
@@ -430,5 +448,271 @@ describe("listarDespachosFiltrados / contarDespachosPendientes — búsqueda, fi
     expect(resultado.totalPaginas).toBe(1);
     expect(resultado.despachos).toHaveLength(0);
     expect(await contarDespachosPendientes(empresaVaciaId)).toBe(0);
+  });
+});
+
+function tarjetaDePrueba(id: string, slaExpectedDate: Date | null, extra: Partial<TarjetaDespacho> = {}): TarjetaDespacho {
+  return {
+    id,
+    shipmentIdExterno: id,
+    logisticType: "self_service",
+    status: "pending",
+    substatus: null,
+    slaExpectedDate,
+    guiaVistaTs: null,
+    despachadoTs: null,
+    imprimible: true,
+    etiquetaImpresaTs: null,
+    cuentaMlId: "cuenta-de-prueba",
+    cuentaNickname: "VENDEDOR_PRUEBA",
+    pedidoIdExterno: "ORD-1",
+    fechaPedido: new Date("2026-03-10T15:00:00Z"),
+    comprador: null,
+    items: [],
+    ...extra,
+  };
+}
+
+// Fase 1 de Despachos (issue "Despachos") — plazo, agrupación por día
+// (America/Bogota) y detección de tipo: funciones puras, sin Postgres.
+describe("plazo, agrupación por día y detección de tipo (Fase 1 de Despachos)", () => {
+  // 2026-03-10, 10:00 a.m. hora de Bogotá (15:00 UTC) — fijo para que
+  // ninguna prueba dependa de en qué momento real se corra.
+  const AHORA = new Date("2026-03-10T15:00:00Z");
+
+  it("esFlex: solo self_service es Flex", () => {
+    expect(esFlex("self_service")).toBe(true);
+    expect(esFlex("xd_drop_off")).toBe(false);
+    expect(esFlex("cross_docking")).toBe(false);
+    expect(esFlex("fulfillment")).toBe(false);
+    expect(esFlex(null)).toBe(false);
+  });
+
+  it("esPlazoVencido: sin plazo nunca está vencido; con plazo, vencido es estrictamente antes de 'ahora'", () => {
+    expect(esPlazoVencido(null, AHORA)).toBe(false);
+    expect(esPlazoVencido(new Date(AHORA.getTime() - 1), AHORA)).toBe(true);
+    expect(esPlazoVencido(new Date(AHORA.getTime() + 1), AHORA)).toBe(false);
+    expect(esPlazoVencido(AHORA, AHORA)).toBe(false); // el instante exacto todavía no venció
+  });
+
+  it("formatoPlazoChip: null sin plazo, texto con 'Plazo:' cuando sí hay", () => {
+    expect(formatoPlazoChip(null)).toBeNull();
+    const texto = formatoPlazoChip(new Date("2026-03-13T21:00:00Z")); // viernes 4pm Bogotá
+    expect(texto).toMatch(/^Plazo: /);
+  });
+
+  it("etiquetaDiaPlazo: sin slaExpectedDate es 'Sin plazo definido'", () => {
+    expect(etiquetaDiaPlazo(null, AHORA)).toBe("Sin plazo definido");
+  });
+
+  it("etiquetaDiaPlazo: un plazo ya pasado (incluso del mismo día, antes de 'ahora') nunca es 'Hoy' si el DÍA de Bogotá ya quedó atrás", () => {
+    const ayerBogota = new Date("2026-03-09T18:00:00Z"); // 2026-03-09, 1pm Bogotá
+    expect(etiquetaDiaPlazo(ayerBogota, AHORA)).toBe("Vencidos");
+  });
+
+  it("etiquetaDiaPlazo: el mismo día de Bogotá que 'ahora' es 'Hoy', sin importar la hora exacta", () => {
+    const masTardeHoy = new Date("2026-03-11T02:00:00Z"); // 2026-03-10, 9pm Bogotá — mismo día que AHORA
+    expect(etiquetaDiaPlazo(masTardeHoy, AHORA)).toBe("Hoy");
+  });
+
+  it("etiquetaDiaPlazo: el día de Bogotá siguiente es 'Mañana'", () => {
+    const mañana = new Date("2026-03-11T15:00:00Z"); // 2026-03-11, 10am Bogotá
+    expect(etiquetaDiaPlazo(mañana, AHORA)).toBe("Mañana");
+  });
+
+  it("etiquetaDiaPlazo: más de un día en el futuro trae día de la semana + fecha", () => {
+    const enCincoDias = new Date("2026-03-15T15:00:00Z"); // 2026-03-15 Bogotá
+    expect(etiquetaDiaPlazo(enCincoDias, AHORA)).toMatch(/^[A-ZÁÉÍÓÚ][a-záéíóúñ]+ 15 de marzo$/);
+  });
+
+  it("etiquetaDiaPlazo: un borde de 04:59 UTC vs 05:00 UTC cae en días de Bogotá distintos (medianoche de Bogotá = 05:00 UTC)", () => {
+    expect(etiquetaDiaPlazo(new Date("2026-03-11T04:59:00Z"), AHORA)).toBe("Hoy"); // todavía 2026-03-10 en Bogotá
+    expect(etiquetaDiaPlazo(new Date("2026-03-11T05:00:00Z"), AHORA)).toBe("Mañana"); // ya 2026-03-11 en Bogotá
+  });
+
+  it("agruparDespachosPorDia: 'Vencidos' siempre primero, 'Sin plazo definido' siempre al final, el resto en orden de fecha", () => {
+    const grupos = agruparDespachosPorDia(
+      [
+        tarjetaDePrueba("sin-plazo", null),
+        tarjetaDePrueba("futuro-lejano", new Date("2026-03-20T15:00:00Z")),
+        tarjetaDePrueba("hoy-1", new Date("2026-03-10T16:00:00Z")),
+        tarjetaDePrueba("hoy-2", new Date("2026-03-10T18:00:00Z")),
+        tarjetaDePrueba("mañana", new Date("2026-03-11T15:00:00Z")),
+        tarjetaDePrueba("vencido", new Date("2026-03-08T15:00:00Z")),
+      ],
+      AHORA
+    );
+    expect(grupos.map((g) => g.etiqueta)).toEqual(["Vencidos", "Hoy (2)", "Mañana", "Viernes 20 de marzo", "Sin plazo definido"]);
+    expect(grupos.find((g) => g.etiqueta === "Hoy (2)")!.despachos.map((d) => d.id)).toEqual(["hoy-1", "hoy-2"]);
+  });
+
+  it("agruparDespachosPorDia: una lista vacía da una lista de grupos vacía, nunca truena", () => {
+    expect(agruparDespachosPorDia([], AHORA)).toEqual([]);
+  });
+});
+
+// Fase 1 de Despachos — gate "guía vista → despachado", deshacer con
+// ventana de 10 minutos, y listarTarjetasDespacho (join con
+// pedidos/pedido_items/cuentas_ml, exclusión de Full, filtros y
+// aislamiento por empresa). Todo contra Postgres real.
+describe("tarjetas de Despachos — Fase 1 (gate, marcar/deshacer, listarTarjetasDespacho)", () => {
+  vi.setConfig({ testTimeout: 20_000 });
+
+  const empresaId = randomUUID();
+  const empresaBId = randomUUID();
+  const usuarioId = randomUUID();
+  let cuentaId: string;
+  let pedidoId: string;
+  let despachoFlexId: string;
+  let despachoFullId: string;
+  let despachoAgenciaId: string;
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(empresas).values({ id: empresaId, nombre: "Empresa tarjetas despachos", nit: `TEST-DESPT-${empresaId.slice(0, 8)}` })
+    );
+    await dbComoEmpresa(empresaBId, (tx) =>
+      tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B tarjetas despachos", nit: `TEST-DESPTB-${empresaBId.slice(0, 8)}` })
+    );
+    // despachos_ml.despachado_por referencia usuarios.id — usuarios no
+    // es una tabla de empresa (no pasa por dbComoEmpresa), por eso va
+    // con el `db` crudo, igual que el resto de las pruebas que insertan
+    // un usuario de prueba (ej. lib/ml/transferencia.test.ts).
+    await db.insert(usuarios).values({ id: usuarioId, email: `prueba-despachos-${usuarioId.slice(0, 8)}@zilonix.test`, nombre: "Usuario de prueba Despachos" });
+
+    // pedido_items exige una cabecera en pedidos_finanzas con el MISMO
+    // (empresa_id, pedido_id) — FK compuesta pedido_items_venta_misma_
+    // empresa_fk (db/schema.ts) — crearVentaDePrueba ya la crea junto
+    // con la línea, a diferencia de armar pedido_items a mano.
+    ({ cuentaMlId: cuentaId, pedidoId } = await crearVentaDePrueba(empresaId, { lineas: 1 }));
+
+    [despachoFlexId, despachoFullId, despachoAgenciaId] = await dbComoEmpresa(empresaId, async (tx) => {
+      const filas = await tx
+        .insert(despachosMl)
+        .values([
+          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "FLEX-1", logisticType: "self_service", status: "pending", imprimible: true },
+          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "FULL-1", logisticType: "fulfillment", status: "pending", imprimible: false },
+          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "AGENCIA-1", logisticType: "xd_drop_off", status: "pending", imprimible: true },
+        ])
+        .returning({ id: despachosMl.id });
+      return filas.map((f) => f.id);
+    });
+  });
+
+  it("listarTarjetasDespacho: nunca incluye Full (fulfillment), sin importar el filtro de tipo", async () => {
+    const todas = await listarTarjetasDespacho(empresaId);
+    expect(todas.map((d) => d.shipmentIdExterno)).not.toContain("FULL-1");
+    expect(todas.map((d) => d.shipmentIdExterno).sort()).toEqual(["AGENCIA-1", "FLEX-1"]);
+  });
+
+  it("listarTarjetasDespacho: trae los items de pedido_items de la tarjeta (imagen, título, cantidad, SKU)", async () => {
+    const [flex] = await listarTarjetasDespacho(empresaId, { tipo: "self_service" });
+    expect(flex.items).toHaveLength(1);
+    expect(flex.items[0]).toMatchObject({ itemIdExterno: "MCO1001", skuCodigo: "REF-1", cantidad: 1, titulo: "Producto 1" });
+    expect(flex.cuentaNickname).toBe("VENDEDOR_PRUEBA");
+    expect(flex.pedidoIdExterno).toBeTruthy();
+  });
+
+  it("listarTarjetasDespacho: filtro de tipo fuera de la lista permitida se ignora (trae todo, no 0 filas)", async () => {
+    const resultado = await listarTarjetasDespacho(empresaId, { tipo: "no-existe" });
+    expect(resultado.length).toBeGreaterThan(0);
+  });
+
+  it("listarTarjetasDespacho: filtro por cuenta", async () => {
+    const otraCuentaId = await crearCuentaMlDePrueba(empresaId);
+    const resultado = await listarTarjetasDespacho(empresaId, { cuentaId: otraCuentaId });
+    expect(resultado).toHaveLength(0);
+  });
+
+  it("marcarDespachado: sin haber abierto la guía primero, tira GuiaNoVistaError y no marca nada", async () => {
+    await expect(marcarDespachado(empresaId, despachoAgenciaId, usuarioId)).rejects.toThrow(GuiaNoVistaError);
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.id, despachoAgenciaId)));
+    expect(fila.despachadoTs).toBeNull();
+  });
+
+  it("puedeMarcarDespachado: refleja el mismo gate que marcarDespachado (para deshabilitar el botón en la UI)", () => {
+    expect(puedeMarcarDespachado(null)).toBe(false);
+    expect(puedeMarcarDespachado(new Date())).toBe(true);
+  });
+
+  it("marcarGuiaVista + marcarDespachado: abrir la guía habilita marcar, y la tarjeta pasa de 'pendientes' a 'despachados_hoy'", async () => {
+    await marcarGuiaVista(empresaId, despachoFlexId);
+    await marcarDespachado(empresaId, despachoFlexId, usuarioId);
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.id, despachoFlexId)));
+    expect(fila.despachadoTs).not.toBeNull();
+    expect(fila.despachadoPor).toBe(usuarioId);
+
+    const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    expect(pendientes.map((d) => d.id)).not.toContain(despachoFlexId);
+
+    const despachadosHoy = await listarTarjetasDespacho(empresaId, { pestaña: "despachados_hoy" });
+    expect(despachadosHoy.map((d) => d.id)).toContain(despachoFlexId);
+  });
+
+  it("marcarGuiaVista es idempotente: abrir la guía dos veces no corre guia_vista_ts hacia adelante", async () => {
+    const [antes] = await dbComoEmpresa(empresaId, (tx) => tx.select({ guiaVistaTs: despachosMl.guiaVistaTs }).from(despachosMl).where(eq(despachosMl.id, despachoFlexId)));
+    await new Promise((r) => setTimeout(r, 5));
+    await marcarGuiaVista(empresaId, despachoFlexId);
+    const [despues] = await dbComoEmpresa(empresaId, (tx) => tx.select({ guiaVistaTs: despachosMl.guiaVistaTs }).from(despachosMl).where(eq(despachosMl.id, despachoFlexId)));
+    expect(despues.guiaVistaTs?.getTime()).toBe(antes.guiaVistaTs?.getTime());
+  });
+
+  it("deshacerDespachado: dentro de la ventana de 10 minutos, vuelve a 'pendientes'", async () => {
+    await deshacerDespachado(empresaId, despachoFlexId);
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.id, despachoFlexId)));
+    expect(fila.despachadoTs).toBeNull();
+    expect(fila.despachadoPor).toBeNull();
+
+    const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    expect(pendientes.map((d) => d.id)).toContain(despachoFlexId);
+  });
+
+  it("deshacerDespachado: sobre algo que ya no estaba marcado es un no-op, nunca un error", async () => {
+    await expect(deshacerDespachado(empresaId, despachoFlexId)).resolves.toBeUndefined();
+  });
+
+  it("deshacerDespachado: pasada la ventana de 10 minutos, tira VentanaDeshacerVencidaError y NO deshace", async () => {
+    await marcarGuiaVista(empresaId, despachoFlexId);
+    await marcarDespachado(empresaId, despachoFlexId, usuarioId);
+    // Simula que ya pasaron más de 10 minutos desde que se marcó.
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.update(despachosMl).set({ despachadoTs: new Date(Date.now() - VENTANA_DESHACER_MS - 1_000) }).where(eq(despachosMl.id, despachoFlexId))
+    );
+    await expect(deshacerDespachado(empresaId, despachoFlexId)).rejects.toThrow(VentanaDeshacerVencidaError);
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.id, despachoFlexId)));
+    expect(fila.despachadoTs).not.toBeNull(); // sigue marcado, no se deshizo
+  });
+
+  it("marcarDespachado y deshacerDespachado sobre un id que no existe: DespachoNoEncontradoError", async () => {
+    const idInexistente = randomUUID();
+    await expect(marcarDespachado(empresaId, idInexistente, usuarioId)).rejects.toThrow(DespachoNoEncontradoError);
+    await expect(deshacerDespachado(empresaId, idInexistente)).rejects.toThrow(DespachoNoEncontradoError);
+  });
+
+  it("aislamiento A/B: empresa B nunca ve, marca ni deshace una tarjeta de la empresa A", async () => {
+    const deB = await listarTarjetasDespacho(empresaBId);
+    expect(deB).toHaveLength(0);
+    await expect(marcarGuiaVista(empresaBId, despachoAgenciaId)).resolves.toBeUndefined(); // UPDATE con 0 filas, nunca un error
+    const [filaIntacta] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.id, despachoAgenciaId)));
+    expect(filaIntacta.guiaVistaTs).toBeNull(); // la empresa A nunca se vio afectada por el intento de B
+  });
+
+  it("listarCuentasConErrorDespacho: una cuenta desconectada aparece con su motivo; una activa nunca aparece", async () => {
+    const cuentaDesconectadaId = await crearCuentaMlDePrueba(empresaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.update(cuentasMl).set({ desconectadaTs: new Date() }).where(eq(cuentasMl.id, cuentaDesconectadaId)));
+
+    const conError = await listarCuentasConErrorDespacho(empresaId);
+    expect(conError.map((c) => c.cuentaId)).toContain(cuentaDesconectadaId);
+    expect(conError.map((c) => c.cuentaId)).not.toContain(cuentaId);
+    expect(conError.find((c) => c.cuentaId === cuentaDesconectadaId)?.motivo).toMatch(/reconectar/i);
+  });
+
+  it("listarCuentasConErrorDespacho: empresa sin cuentas desconectadas da una lista vacía, nunca un error", async () => {
+    const empresaSinErroresId = randomUUID();
+    await dbComoEmpresa(empresaSinErroresId, (tx) =>
+      tx.insert(empresas).values({ id: empresaSinErroresId, nombre: "Empresa sin errores", nit: `TEST-DESPE-${empresaSinErroresId.slice(0, 8)}` })
+    );
+    expect(await listarCuentasConErrorDespacho(empresaSinErroresId)).toEqual([]);
   });
 });

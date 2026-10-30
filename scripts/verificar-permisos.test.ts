@@ -84,6 +84,13 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/pedidos/page.tsx",
   "app/panel/pedidos/[id]/page.tsx",
   "app/panel/despachos/page.tsx",
+  // Fase 1 de Despachos (issue "Despachos") — Marcar/Deshacer piden
+  // "ventas"/"modificar" (actions.ts); "Ver guía"/"Ver guía (sticker)"
+  // de una sola tarjeta piden solo "ventas"/"consultar" (ver el
+  // despacho no es la acción de "modificar" — eso es Marcar
+  // despachado), aunque de paso guarde guia_vista_ts.
+  "app/panel/despachos/actions.ts",
+  "app/api/ml/despachos/etiqueta/route.ts",
   "app/panel/investigacion/page.tsx",
   "app/panel/investigacion/actions.ts",
   "app/panel/investigacion/seguimiento/page.tsx",
