@@ -104,6 +104,60 @@ export function descuentoDesdePrecio(original: number, precioElegido: number): n
   return ((original - precioElegido) / original) * 100;
 }
 
+// Punto 3 (rama fix-promociones-edicion) — bug real reportado por
+// Mateo en staging: "27.557278635919...%" salía crudo, sin redondear,
+// en las filas de SOLO LECTURA (`porcentajeDescuento` nunca redondea a
+// propósito, para no perder precisión en el cálculo — mostrarlo crudo
+// en pantalla es un error de presentación distinto). Formato es-CO
+// (coma decimal), siempre a 1 decimal, en todas las columnas.
+export function formatoPorcentaje(valor: number | null): string {
+  if (valor == null) return "—";
+  return `${valor.toLocaleString("es-CO", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+}
+
+// Mismo formato que `formatoPorcentaje`, sin el símbolo "%" — para el
+// valor de un input editable (el signo ya lo da el encabezado de la
+// columna, ponerlo dentro del texto que se edita solo complica parsear
+// de vuelta lo que la persona escribió).
+export function formatoPorcentajeInput(valor: number): string {
+  return valor.toLocaleString("es-CO", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+// Precio entero en formato es-CO (puntos de miles), sin el signo "$" —
+// para el valor de un input editable de precio.
+export function formatoEnteroEsCo(valor: number): string {
+  return Math.round(valor).toLocaleString("es-CO");
+}
+
+// Punto 1 (rama fix-promociones-edicion) — bug real: los inputs de
+// "Precio con promo"/"% desc." redondeaban y CLAMPEABAN en cada tecla
+// (cada onChange llamaba de inmediato a algo como esta misma función
+// con el valor a medio escribir) — borrar un dígito o escribir un
+// número más chico que el mínimo saltaba al instante al piso, nunca
+// dejaba terminar de escribir. La corrección real es no tocar nada
+// mientras se escribe: se guarda un borrador de texto libre
+// (PaginaPromociones.tsx) y esto solo corre al confirmar (blur/Enter).
+// Acepta el formato es-CO real que alguien tipearía a mano: puntos de
+// miles, coma como separador decimal.
+export function parsearNumeroEsCo(texto: string): number | null {
+  const limpio = texto.trim().replace(/\./g, "").replace(",", ".");
+  if (limpio === "" || limpio === "-") return null;
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Un precio ya confirmado (redondeado) que quedó fuera del rango real
+// de ML (`rangoEdicion`) — a propósito, esto YA NO lo fuerza de vuelta
+// al rango (ese forzado automático era exactamente el bug de arriba):
+// se deja tal cual se escribió, con un aviso, y bloquea "Sí" hasta que
+// se corrija a mano. El piso de Finanzas y el techo de ML los vuelve a
+// exigir el servidor siempre, sin excepción (lib/ml/promocionesEjecucion.ts).
+export function fueraDeRango(candidato: CandidatoClienteCliente, precio: number): boolean {
+  const rango = rangoEdicion(candidato);
+  if (!rango) return false;
+  return precio < rango.min || precio > rango.max;
+}
+
 // Utilidad estimada para un precio DISTINTO del sugerido por el motor.
 // `costo` nunca se guarda en promociones_candidatos (sin migración,
 // solo gananciaEstimada — ya calculada para precioSugerido) así que
