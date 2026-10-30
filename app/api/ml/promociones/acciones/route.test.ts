@@ -152,6 +152,54 @@ describe("POST /api/ml/promociones/acciones — aprobar/rechazar (rama feat-prom
     expect(body.acciones[0].precioDespues).toBe("90000");
   });
 
+  // BUG REAL, URGENTE (rama fix-promociones-aprobar-no-ejecuta) —
+  // confirmado en staging (cuenta sharel): Dueño/Gerente (permiso
+  // "ejecutar" por default) aprobaba una fila VÁLIDA y eso la mandaba
+  // DE UNA a Mercado Libre real, sin que nadie apretara "Lanzar
+  // aprobadas". Este es el test que debió existir desde el principio
+  // y no existía — `ejecutarLoteDeAccionesMock` acá se programa para
+  // RECHAZAR si se llega a llamar, así el test revienta fuerte (nunca
+  // en silencio) si alguna vez se reintroduce el auto-ejecutar.
+  it("CRÍTICO: aprobar una fila válida con permiso 'ejecutar' activo NUNCA llama a Mercado Libre — solo queda 'aceptada'", async () => {
+    vi.mocked(requierePermiso).mockResolvedValue({ permisos: [{ modulo: "promociones", accion: "ejecutar" }] } as never);
+    ejecutarLoteDeAccionesMock.mockRejectedValue(new Error("NUNCA se debería llamar a ejecutarLoteDeAcciones desde este endpoint"));
+    filasPorTabla.set(promocionesCandidatos, [candidato()]);
+    validarCandidatoParaEscrituraMock.mockResolvedValue({ ok: true, deal: 90000 });
+
+    const res = await POST(peticion({ cuerpo: { decisiones: [{ candidatoId: CANDIDATO_1, accion: "participar", decision: "aprobar" }] } }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(ejecutarLoteDeAccionesMock).not.toHaveBeenCalled();
+    expect(body.ejecutado).toBe(false);
+    expect(body.acciones[0].estado).toBe("aceptada");
+  });
+
+  it("CRÍTICO: 'Aprobar seleccionados' (varias filas) con permiso 'ejecutar' activo tampoco ejecuta ninguna", async () => {
+    vi.mocked(requierePermiso).mockResolvedValue({ permisos: [{ modulo: "promociones", accion: "ejecutar" }] } as never);
+    ejecutarLoteDeAccionesMock.mockRejectedValue(new Error("NUNCA se debería llamar a ejecutarLoteDeAcciones desde este endpoint"));
+    const candidato2 = candidato({ id: CANDIDATO_2, itemId: "MCO2" });
+    filasPorTabla.set(promocionesCandidatos, [candidato(), candidato2]);
+    validarCandidatoParaEscrituraMock.mockResolvedValue({ ok: true, deal: 90000 });
+
+    const res = await POST(
+      peticion({
+        cuerpo: {
+          decisiones: [
+            { candidatoId: CANDIDATO_1, accion: "participar", decision: "aprobar" },
+            { candidatoId: CANDIDATO_2, accion: "participar", decision: "aprobar" },
+          ],
+        },
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(ejecutarLoteDeAccionesMock).not.toHaveBeenCalled();
+    expect(body.ejecutado).toBe(false);
+    expect(body.acciones.every((a: { estado: string }) => a.estado === "aceptada")).toBe(true);
+  });
+
   // Punto 3 — "rechazar" nunca necesitó un valor de enum nuevo:
   // promocion_accion_estado ya tenía "rechazada".
   it("decision 'rechazar': NUNCA llama a validarCandidatoParaEscritura ni a Mercado Libre, guarda directo como rechazada", async () => {

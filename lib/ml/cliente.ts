@@ -1476,6 +1476,35 @@ export async function leerPromocionesItemMl(itemId: string, token: string): Prom
 
 export type RespuestaPromocionMl = { ok: boolean; status: number; textoCrudo: string };
 
+// Rama fix-promociones-aprobar-no-ejecuta, punto 4 — bug real
+// encontrado al diagnosticar el 400 de VITALCLOROFULL (cuenta
+// sharel): cuando Mercado Libre rechaza un POST/PUT de Promociones,
+// el cuerpo real de la respuesta SÍ llegaba hasta acá (`textoCrudo`),
+// pero el llamador (lib/ml/promocionesEjecucion.ts) lo descartaba y
+// solo guardaba "Mercado Libre respondió 400." — un mensaje inútil
+// para diagnosticar nada. Las respuestas de error reales de Mercado
+// Libre suelen traer `message`/`error` sueltos o un array `cause` con
+// el detalle real por campo (ej. `[{"code":"...", "message":"deal_price
+// must be..."}]`) — se prefiere `cause` cuando existe (más específico),
+// cae a `message`/`error` si no.
+export function motivoErrorEscrituraMl(textoCrudo: string): string | null {
+  if (!textoCrudo) return null;
+  try {
+    const json = JSON.parse(textoCrudo) as { message?: unknown; error?: unknown; cause?: unknown };
+    if (Array.isArray(json.cause) && json.cause.length > 0) {
+      const motivos = json.cause
+        .map((c) => (c && typeof c === "object" ? (c as { message?: unknown; description?: unknown }).message ?? (c as { description?: unknown }).description : null))
+        .filter((m): m is string => typeof m === "string" && m.length > 0);
+      if (motivos.length > 0) return motivos.join(" / ").slice(0, 400);
+    }
+    if (typeof json.message === "string" && json.message) return json.message.slice(0, 400);
+    if (typeof json.error === "string" && json.error) return json.error.slice(0, 400);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // "participar" (unirse por primera vez) — POST, confirmado real en
 // zilonix-os-web (una promoción pasó a "started"). `top_deal_price`
 // nunca se manda (bug real ya corregido ahí: se creía obligatorio,
