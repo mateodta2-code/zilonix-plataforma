@@ -19,13 +19,14 @@
 //
 // Inicio (#143, capturas de Zilonix OS de Sharel, 29-oct): por cuenta
 // (participación y comparativo) y publicidad invertida del tramo actual.
-// La publicidad suma SOLO publicidad_metricas_diarias de nivel «cuenta»
-// (el total diario de la cuenta; sumar también campañas lo duplicaría).
-// Ojo: la sincronización no guarda ese total cuando la respuesta de ML
-// es ambigua (AVISO_DAILY en sincronizarPublicidad.ts); ese mes sale
-// «Sin datos» aunque /panel/publicidad (que suma campañas) sí tenga
-// gasto. Decisión de Sharel, 29-oct. Moneda: las métricas no la traen;
-// Product Ads en Seller es COP en la práctica, así que va "COP" fijo.
+// La publicidad suma SOLO publicidad_metricas_diarias de nivel
+// «campana», la misma regla de /panel/publicidad (sumarCuenta en
+// lib/publicidad/consultas.ts). El total de nivel «cuenta» no sirve: la
+// sincronización no lo guarda cuando la respuesta de ML es ambigua
+// (AVISO_DAILY en sincronizarPublicidad.ts), y en el smoke del 30-oct
+// STOREKINGSAS quedaba afuera. Sumar los dos niveles lo duplicaría.
+// Moneda: las métricas no la traen; Product Ads en Seller es COP en la
+// práctica, así que va "COP" fijo.
 //
 // Utilidad antes de publicidad (#143): sale de listarVentasUtilidad, la
 // misma lectura de Finanzas → Ventas, para que cuadre al peso; no hay
@@ -278,8 +279,8 @@ export type MontoMoneda = { moneda: string; monto: string };
 export type PublicidadCuenta = { cuentaMlId: string; nickname: string; monto: string; moneda: string };
 
 export type PublicidadMes = {
-  // null = ninguna fila de métricas de cuenta en el tramo («Sin datos»,
-  // nunca 0).
+  // null = ninguna fila de métricas de campaña en el tramo («Sin
+  // datos», nunca 0).
   totalPorMoneda: MontoMoneda[] | null;
   // Mayor gasto primero.
   porCuenta: PublicidadCuenta[];
@@ -370,7 +371,7 @@ export async function leerPublicidadMes(empresaId: string, usuarioId: string, ah
         .where(
           and(
             eq(publicidadMetricasDiarias.empresaId, empresaId),
-            eq(publicidadMetricasDiarias.nivel, "cuenta"),
+            eq(publicidadMetricasDiarias.nivel, "campana"),
             gte(publicidadMetricasDiarias.fecha, actual.desdeTexto),
             lte(publicidadMetricasDiarias.fecha, actual.hastaTexto)
           )

@@ -48,7 +48,6 @@ describe("Inicio · bloque de Finanzas (#143)", () => {
     for (const texto of [
       "Indicadores de Finanzas del mes",
       "Cantidad de ventas del mes",
-      "Cantidad de ventas de hoy",
       "Utilidad del mes (antes de publicidad)",
       "Publicidad invertida",
       "Sin datos",
@@ -60,6 +59,10 @@ describe("Inicio · bloque de Finanzas (#143)", () => {
       expect(html).toContain(texto);
     }
     for (const f of lecturas()) expect(f).toHaveBeenCalledTimes(1);
+    // «Cantidad de ventas de hoy» salió del bloque (30-oct): repetía la
+    // tarjeta «Ventas de hoy» de arriba, que sí sigue.
+    expect(html).not.toContain("Cantidad de ventas de hoy");
+    expect(html).toContain("Ventas de hoy");
   });
 
   it("sin finanzas.consultar: Inicio como hoy, sin el bloque y sin leer finanzas", async () => {

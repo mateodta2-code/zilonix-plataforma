@@ -440,14 +440,14 @@ describe("leerTableroPorCuenta y leerPublicidadMes (#143)", () => {
     return id;
   }
 
-  async function publicidad(empresaId: string, cuentaMlId: string, filas: { fecha: string; costo: string; nivel?: "cuenta" | "campana" }[]) {
+  async function publicidad(empresaId: string, cuentaMlId: string, filas: { fecha: string; costo: string; nivel?: "cuenta" | "campana"; campana?: string }[]) {
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(publicidadMetricasDiarias).values(
         filas.map((f, i) => ({
           empresaId,
           cuentaMlId,
-          nivel: f.nivel ?? ("cuenta" as const),
-          entidadIdMl: f.nivel === "campana" ? `campana-${i}` : "anunciante",
+          nivel: f.nivel ?? ("campana" as const),
+          entidadIdMl: f.nivel === "cuenta" ? "anunciante" : (f.campana ?? `campana-${i}`),
           fecha: f.fecha,
           costo: f.costo,
         }))
@@ -455,7 +455,7 @@ describe("leerTableroPorCuenta y leerPublicidadMes (#143)", () => {
     );
   }
 
-  it("ventas y recaudo por cuenta con el criterio del tablero; publicidad solo nivel cuenta y del tramo", async () => {
+  it("ventas y recaudo por cuenta con el criterio del tablero; publicidad solo nivel campaña (como /panel/publicidad) y del tramo", async () => {
     const e = await crearEmpresaConPermisos("Inicio por cuenta", SOLO_CONSULTAR);
     const store = await cuentaConNombre(e.empresaId, "STOREKINGSAS");
     const fmc = await cuentaConNombre(e.empresaId, "FMCBIENESTAR");
@@ -468,10 +468,12 @@ describe("leerTableroPorCuenta y leerPublicidadMes (#143)", () => {
     ]);
     await crearVentas(e.empresaId, fmc, [{ fecha: "2026-10-15T15:00:00Z", valor: "20000.00", cancelada: false }]);
     await publicidad(e.empresaId, store, [
-      { fecha: "2026-10-01", costo: "10000.00" },
-      { fecha: "2026-10-31", costo: "5000.50" },
-      { fecha: "2026-10-05", costo: "99999.00", nivel: "campana" }, // no se suma
-      { fecha: "2026-09-30", costo: "88888.00" }, // fuera del tramo
+      // Dos campañas el mismo día y otra al final del mes: se suman.
+      { fecha: "2026-10-01", costo: "6000.00", campana: "c1" },
+      { fecha: "2026-10-01", costo: "4000.00", campana: "c2" },
+      { fecha: "2026-10-31", costo: "5000.50", campana: "c1" },
+      { fecha: "2026-10-05", costo: "99999.00", nivel: "cuenta" }, // total de cuenta: no se suma
+      { fecha: "2026-09-30", costo: "88888.00", campana: "c1" }, // fuera del tramo
     ]);
 
     const pub = await leerPublicidadMes(e.empresaId, e.usuarioId, AHORA);
@@ -494,10 +496,10 @@ describe("leerTableroPorCuenta y leerPublicidadMes (#143)", () => {
     expect(tablero.recaudo.map((r) => r.actual)).toEqual(["170000.00"]);
   });
 
-  it("mes sin publicidad de cuenta: «Sin datos» (null), aunque haya campañas", async () => {
+  it("mes sin campañas: «Sin datos» (null), aunque haya un total de cuenta", async () => {
     const e = await crearEmpresaConPermisos("Inicio sin ads", SOLO_CONSULTAR);
     const c = await cuentaConNombre(e.empresaId, "SINADS");
-    await publicidad(e.empresaId, c, [{ fecha: "2026-10-05", costo: "5000.00", nivel: "campana" }]);
+    await publicidad(e.empresaId, c, [{ fecha: "2026-10-05", costo: "5000.00", nivel: "cuenta" }]);
     expect(await leerPublicidadMes(e.empresaId, e.usuarioId, AHORA)).toEqual({ totalPorMoneda: null, porCuenta: [] });
   });
 
