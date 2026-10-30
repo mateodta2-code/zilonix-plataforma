@@ -428,6 +428,11 @@ export type TarjetaDespacho = {
   cuentaNickname: string;
   pedidoIdExterno: string;
   fechaPedido: Date;
+  // Última vez que esta fila se sincronizó de verdad (sincronizarDespacho,
+  // o el propio refrescarEstadoViejo de más abajo) — define qué tan
+  // "vieja" está para el refresco de status/substatus en vivo. No es
+  // la fecha de venta (fechaPedido, la de arriba).
+  actualizadoTs: Date;
   // Comprador y bodega asignada: ninguna de las dos existe hoy en el
   // esquema (confirmado: no hay nickname de comprador en pedidos/
   // despachos_ml, y la asignación de bodega a un pedido es la fase 3,
@@ -521,6 +526,7 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
         pedidoId: despachosMl.pedidoId,
         pedidoIdExterno: pedidos.pedidoIdExterno,
         fechaPedido: pedidos.fecha,
+        actualizadoTs: despachosMl.actualizadoTs,
       })
       .from(despachosMl)
       .innerJoin(pedidos, eq(despachosMl.pedidoId, pedidos.id))
@@ -597,6 +603,7 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       cuentaNickname: f.cuentaNickname,
       pedidoIdExterno: f.pedidoIdExterno,
       fechaPedido: f.fechaPedido,
+      actualizadoTs: f.actualizadoTs,
       comprador: null,
       bodegaAsignada: null,
       items: itemsPorPedido.get(f.pedidoId) ?? [],
@@ -674,6 +681,12 @@ async function conLimiteDeConcurrencia<T>(items: T[], limite: number, fn: (item:
 const MAX_REFRESCO_ESTADO_POR_CARGA = 20;
 const CONCURRENCIA_REFRESCO_ESTADO = 4;
 const COOLDOWN_REFRESCO_ESTADO_MS = 30 * 60 * 1000;
+// "Viejas" (pedido literal de la tarea) — un despacho recién
+// sincronizado (ej. al importar el pedido, hace segundos) no
+// necesita un chequeo en vivo todavía; solo lo que lleva más de 1h
+// sin confirmarse es candidato. Esto también evita revisar en vivo
+// algo que ni siquiera tuvo tiempo de cambiar de estado real.
+const UMBRAL_VIEJO_MS = 60 * 60 * 1000;
 const ultimoIntentoRefrescoEstado = new Map<string, number>();
 
 function puedeRefrescarEstado(despachoId: string, ahoraMs: number): boolean {
@@ -684,7 +697,12 @@ function puedeRefrescarEstado(despachoId: string, ahoraMs: number): boolean {
 async function refrescarEstadoViejo(empresaId: string, tarjetas: TarjetaDespacho[]): Promise<TarjetaDespacho[]> {
   const ahoraMs = Date.now();
   const candidatos = tarjetas
-    .filter((t) => t.status === STATUS_PENDIENTES && puedeRefrescarEstado(t.id, ahoraMs))
+    .filter(
+      (t) =>
+        t.status === STATUS_PENDIENTES &&
+        ahoraMs - t.actualizadoTs.getTime() >= UMBRAL_VIEJO_MS &&
+        puedeRefrescarEstado(t.id, ahoraMs)
+    )
     .slice(0, MAX_REFRESCO_ESTADO_POR_CARGA);
 
   if (candidatos.length === 0) return tarjetas;

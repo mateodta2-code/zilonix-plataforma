@@ -470,6 +470,7 @@ function tarjetaDePrueba(id: string, fechaPedido: Date, extra: Partial<TarjetaDe
     cuentaNickname: "VENDEDOR_PRUEBA",
     pedidoIdExterno: "ORD-1",
     fechaPedido,
+    actualizadoTs: fechaPedido,
     comprador: null,
     bodegaAsignada: null,
     items: [],
@@ -950,6 +951,15 @@ describe("Pendientes nunca incluye un envío que ya salió de la tienda (fix mat
     return despachoId;
   }
 
+  // refrescarEstadoViejo solo revisa en vivo lo que lleva más de 1h
+  // sin sincronizar (UMBRAL_VIEJO_MS) — un despacho recién insertado
+  // en la prueba (actualizado_ts = ahora) no califica todavía.
+  async function envejecer(despachoId: string): Promise<void> {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.update(despachosMl).set({ actualizadoTs: new Date(Date.now() - 2 * 60 * 60 * 1000) }).where(eq(despachosMl.id, despachoId))
+    );
+  }
+
   afterEach(() => vi.unstubAllGlobals());
 
   it("filtro de la consulta: la fila YA tiene substatus picked_up guardado — nunca aparece, y nunca llama a Mercado Libre por ella", async () => {
@@ -978,7 +988,8 @@ describe("Pendientes nunca incluye un envío que ya salió de la tienda (fix mat
   });
 
   it("refresco en vivo: status/substatus viejos (sin actualizar desde el import) se corrigen contra Mercado Libre y la fila sale de Pendientes en la MISMA carga", async () => {
-    await despachoConEstado("920000005", "ready_to_ship", null); // nunca se refrescó desde que se importó
+    const despachoId = await despachoConEstado("920000005", "ready_to_ship", null); // nunca se refrescó desde que se importó
+    await envejecer(despachoId);
     const fetchMock = vi.fn(async () => respuestaJson({ status: "delivered", substatus: "delivered", logistic_type: "self_service" }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -991,7 +1002,8 @@ describe("Pendientes nunca incluye un envío que ya salió de la tienda (fix mat
   });
 
   it("refresco en vivo: si Mercado Libre confirma que sigue ready_to_ship sin substatus, queda en Pendientes y no vuelve a refrescar antes de 30 minutos", async () => {
-    await despachoConEstado("920000006", "ready_to_ship", null);
+    const despachoId = await despachoConEstado("920000006", "ready_to_ship", null);
+    await envejecer(despachoId);
     const fetchMock = vi.fn(async () => respuestaJson({ status: "ready_to_ship", substatus: null, logistic_type: "self_service" }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1003,5 +1015,21 @@ describe("Pendientes nunca incluye un envío que ya salió de la tienda (fix mat
     const segundaCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
     expect(segundaCarga.map((t) => t.shipmentIdExterno)).toContain("920000006");
     expect(fetchMock.mock.calls.length).toBe(llamadasTrasPrimera); // ninguna llamada nueva — freno de 30 min
+  });
+
+  it("un despacho recién sincronizado (menos de 1h) NUNCA dispara el refresco en vivo — solo lo viejo", async () => {
+    const despachoId = await despachoConEstado("920000007", "ready_to_ship", null); // actualizado_ts = ahora, sin envejecer
+    // Ya tiene plazo guardado para que backfillSlaFaltante (otro
+    // mecanismo, sin relación con el umbral de "vieja") tampoco llame
+    // — esta prueba aísla solo refrescarEstadoViejo.
+    await dbComoEmpresa(empresaId, (tx) => tx.update(despachosMl).set({ slaExpectedDate: new Date("2026-03-15T20:00:00Z") }).where(eq(despachosMl.id, despachoId)));
+    const fetchMock = vi.fn(async () => {
+      throw new Error("no debía llamar a Mercado Libre — todavía no es 'vieja'");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    expect(pendientes.map((t) => t.shipmentIdExterno)).toContain("920000007");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
