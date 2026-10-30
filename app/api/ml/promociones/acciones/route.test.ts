@@ -280,4 +280,69 @@ describe("POST /api/ml/promociones/acciones — aprobar/rechazar (rama feat-prom
       expect(insertsPromocionesAcciones).toHaveLength(0); // nunca insertó una fila nueva
     });
   });
+
+  // Rama feat-promociones-editar-precio, punto 1 — precioElegido viaja
+  // de la UI hasta validarCandidatoParaEscritura, que es la ÚNICA que
+  // de verdad lo valida (piso/techo frescos) — esta ruta nunca confía
+  // en el número, solo lo pasa.
+  describe("precioElegido (editar precio a mano)", () => {
+    it("decision 'aprobar' con precioElegido: se lo pasa a validarCandidatoParaEscritura como 4to argumento", async () => {
+      filasPorTabla.set(promocionesCandidatos, [candidato()]);
+      validarCandidatoParaEscrituraMock.mockResolvedValue({ ok: true, deal: 95000 });
+      const res = await POST(peticion({ cuerpo: { decisiones: [{ candidatoId: CANDIDATO_1, accion: "participar", decision: "aprobar", precioElegido: 95000 }] } }));
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(validarCandidatoParaEscrituraMock).toHaveBeenCalledWith("empresa-1", expect.anything(), "participar", 95000);
+      expect(body.acciones[0].precioDespues).toBe("95000");
+    });
+
+    it("precioElegido con un tipo que no es número: 400, nunca procesa nada", async () => {
+      filasPorTabla.set(promocionesCandidatos, [candidato()]);
+      const res = await POST(peticion({ cuerpo: { decisiones: [{ candidatoId: CANDIDATO_1, accion: "participar", precioElegido: "95000" }] } }));
+      expect(res.status).toBe(400);
+      expect(insertsPromocionesAcciones).toHaveLength(0);
+    });
+
+    it("precioElegido junto con 'rechazar': se ignora (rechazar nunca necesita un precio)", async () => {
+      filasPorTabla.set(promocionesCandidatos, [candidato()]);
+      const res = await POST(peticion({ cuerpo: { decisiones: [{ candidatoId: CANDIDATO_1, accion: "participar", decision: "rechazar", precioElegido: 95000 }] } }));
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.acciones[0].estado).toBe("rechazada");
+      expect(validarCandidatoParaEscrituraMock).not.toHaveBeenCalled();
+    });
+
+    it("precioElegido inválido (NaN/piso no respetado): validarCandidatoParaEscritura lo rechaza, la fila queda 'rechazada' con el motivo", async () => {
+      filasPorTabla.set(promocionesCandidatos, [candidato()]);
+      validarCandidatoParaEscrituraMock.mockResolvedValue({ ok: false, motivo: "El precio elegido no es válido o quedó por debajo del piso de Finanzas — no se escribe en Mercado Libre." });
+      const res = await POST(peticion({ cuerpo: { decisiones: [{ candidatoId: CANDIDATO_1, accion: "participar", precioElegido: 1000 }] } }));
+      const body = await res.json();
+      expect(body.acciones[0].estado).toBe("rechazada");
+      expect(body.acciones[0].error).toContain("piso");
+    });
+  });
+
+  // Rama feat-promociones-editar-precio, punto 2 — "Volver a pendiente".
+  describe("decision 'volver_a_pendiente'", () => {
+    it("inserta una fila nueva con estado 'pendiente', nunca valida ni toca Mercado Libre", async () => {
+      filasPorTabla.set(promocionesCandidatos, [candidato()]);
+      const res = await POST(peticion({ cuerpo: { decisiones: [{ candidatoId: CANDIDATO_1, accion: "participar", decision: "volver_a_pendiente" }] } }));
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.acciones[0].estado).toBe("pendiente");
+      expect(validarCandidatoParaEscrituraMock).not.toHaveBeenCalled();
+      expect(ejecutarLoteDeAccionesMock).not.toHaveBeenCalled();
+      expect(insertsPromocionesAcciones).toHaveLength(1);
+    });
+
+    it("nunca se agrupa con el lote que se ejecuta contra ML, aunque quien llama tenga permiso de ejecutar", async () => {
+      vi.mocked(requierePermiso).mockResolvedValue({ permisos: [{ modulo: "promociones", accion: "ejecutar" }] } as never);
+      filasPorTabla.set(promocionesCandidatos, [candidato()]);
+      filasPorTabla.set(promocionesAcciones, []);
+      const res = await POST(peticion({ cuerpo: { decisiones: [{ candidatoId: CANDIDATO_1, accion: "participar", decision: "volver_a_pendiente" }] } }));
+      const body = await res.json();
+      expect(body.ejecutado).toBe(false);
+      expect(ejecutarLoteDeAccionesMock).not.toHaveBeenCalled();
+    });
+  });
 });

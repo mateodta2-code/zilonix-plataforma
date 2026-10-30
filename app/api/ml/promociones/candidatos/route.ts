@@ -1,16 +1,40 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl, promocionesCandidatos } from "@/db/schema";
+import { cuentasMl, promocionesAcciones, promocionesCandidatos } from "@/db/schema";
 import { requierePermiso } from "@/lib/permisos";
 import { PATRON_UUID, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../_ayudantes";
 
 // Rama feat-promociones, punto 3 — la tabla principal de la pantalla.
 // Lee el snapshot de la última búsqueda (promociones_candidatos, ya
-// upserteado por el trabajo) con los filtros reales: Todas / Cumplen /
-// Revisar a mano / Sin precio mínimo / Solo en ML.
-const FILTROS = ["todas", "cumplen", "revisar", "sin-minimo", "solo-ml"] as const;
+// upserteado por el trabajo).
+//
+// Rama feat-promociones-editar-precio, punto 2 — "Sí/No sacan la fila
+// de la lista". El estado de decisión (pendiente/aprobada/rechazada)
+// de cada candidato NUNCA se guarda en promociones_candidatos (ese
+// snapshot se SOBREESCRIBE en cada búsqueda nueva, sin tocar ninguna
+// decisión humana) — se deriva acá, al leer, de la ÚLTIMA fila de
+// promociones_acciones para la misma (cuenta,ítem,tipo_promoción). Así
+// "Buscar" de nuevo NUNCA resucita un rechazo como pendiente: una
+// búsqueda nueva solo toca promociones_candidatos, jamás
+// promociones_acciones — la última fila de acciones sigue siendo la
+// misma "rechazada" de antes, sin importar cuántas veces se vuelva a
+// buscar. "Volver a pendiente" (otra decisión humana) inserta una fila
+// NUEVA con estado "pendiente" — eso sí vuelve a traer el producto acá.
+//
+// Se trae TODO promociones_acciones de la empresa (acotado a 5000 más
+// recientes — no silencioso: una empresa con más de 5000 decisiones
+// históricas podría ver un candidato viejísimo como "pendiente" por
+// error; en la práctica, muy por encima de lo que cualquier empresa
+// real acumula) y se reduce en memoria a "la última por combinación" —
+// más simple y seguro de verificar que una subconsulta correlacionada
+// en SQL cruda, sin Postgres real en este sandbox para probarla.
+const FILTROS = ["todas", "cumplen", "revisar", "sin-minimo", "solo-ml", "aprobadas", "rechazadas"] as const;
 type Filtro = (typeof FILTROS)[number];
+
+const TOPE_ACCIONES_HISTORIAL = 5000;
+
+type EstadoDecision = "pendiente" | "aceptada" | "rechazada" | "ejecutada" | "fallida";
 
 export async function GET(request: Request) {
   const sesion = await resolverSesionYEmpresa();
@@ -31,44 +55,99 @@ export async function GET(request: Request) {
   const filtroCrudo = searchParams.get("filtro") ?? "todas";
   const filtro: Filtro = (FILTROS as readonly string[]).includes(filtroCrudo) ? (filtroCrudo as Filtro) : "todas";
 
-  const filas = await dbComoEmpresa(empresa.id, (tx) => {
-    const condiciones = [eq(promocionesCandidatos.empresaId, empresa.id)];
-    if (cuentaId) condiciones.push(eq(promocionesCandidatos.cuentaMlId, cuentaId));
-    if (filtro === "cumplen") condiciones.push(eq(promocionesCandidatos.cumpleReglas, true));
-    if (filtro === "solo-ml") condiciones.push(eq(promocionesCandidatos.soloEnMl, true));
-    if (filtro === "sin-minimo") condiciones.push(isNull(promocionesCandidatos.precioMinimo));
-    if (filtro === "revisar") {
-      condiciones.push(eq(promocionesCandidatos.cumpleReglas, false));
-      condiciones.push(eq(promocionesCandidatos.soloEnMl, false));
-    }
-    return tx
-      .select({
-        id: promocionesCandidatos.id,
-        cuentaMlId: promocionesCandidatos.cuentaMlId,
-        nicknameCuenta: cuentasMl.nickname,
-        itemId: promocionesCandidatos.itemId,
-        skuCodigo: promocionesCandidatos.skuCodigo,
-        tituloProducto: promocionesCandidatos.tituloProducto,
-        thumbnail: promocionesCandidatos.thumbnail,
-        tieneVariantes: promocionesCandidatos.tieneVariantes,
-        tipoPromocion: promocionesCandidatos.tipoPromocion,
-        estadoMl: promocionesCandidatos.estadoMl,
-        esCompartida: promocionesCandidatos.esCompartida,
-        soloEnMl: promocionesCandidatos.soloEnMl,
-        precioOriginal: promocionesCandidatos.precioOriginal,
-        precioActual: promocionesCandidatos.precioActual,
-        precioMinimo: promocionesCandidatos.precioMinimo,
-        precioSugerido: promocionesCandidatos.precioSugerido,
-        gananciaEstimada: promocionesCandidatos.gananciaEstimada,
-        cumpleReglas: promocionesCandidatos.cumpleReglas,
-        motivoRevisarManual: promocionesCandidatos.motivoRevisarManual,
-        actualizadoTs: promocionesCandidatos.actualizadoTs,
-      })
-      .from(promocionesCandidatos)
-      .innerJoin(cuentasMl, eq(cuentasMl.id, promocionesCandidatos.cuentaMlId))
-      .where(and(...condiciones))
-      .orderBy(desc(promocionesCandidatos.actualizadoTs));
+  const [candidatosCrudos, accionesCrudas] = await dbComoEmpresa(empresa.id, async (tx) => {
+    const condicionesCandidatos = [eq(promocionesCandidatos.empresaId, empresa.id)];
+    if (cuentaId) condicionesCandidatos.push(eq(promocionesCandidatos.cuentaMlId, cuentaId));
+    const condicionesAcciones = [eq(promocionesAcciones.empresaId, empresa.id)];
+    if (cuentaId) condicionesAcciones.push(eq(promocionesAcciones.cuentaMlId, cuentaId));
+
+    return Promise.all([
+      tx
+        .select({
+          id: promocionesCandidatos.id,
+          cuentaMlId: promocionesCandidatos.cuentaMlId,
+          nicknameCuenta: cuentasMl.nickname,
+          itemId: promocionesCandidatos.itemId,
+          skuCodigo: promocionesCandidatos.skuCodigo,
+          tituloProducto: promocionesCandidatos.tituloProducto,
+          thumbnail: promocionesCandidatos.thumbnail,
+          tieneVariantes: promocionesCandidatos.tieneVariantes,
+          tipoPromocion: promocionesCandidatos.tipoPromocion,
+          estadoMl: promocionesCandidatos.estadoMl,
+          esCompartida: promocionesCandidatos.esCompartida,
+          soloEnMl: promocionesCandidatos.soloEnMl,
+          precioOriginal: promocionesCandidatos.precioOriginal,
+          precioActual: promocionesCandidatos.precioActual,
+          precioMinimo: promocionesCandidatos.precioMinimo,
+          precioSugerido: promocionesCandidatos.precioSugerido,
+          maxDiscountedPrice: promocionesCandidatos.maxDiscountedPrice,
+          gananciaEstimada: promocionesCandidatos.gananciaEstimada,
+          cumpleReglas: promocionesCandidatos.cumpleReglas,
+          motivoRevisarManual: promocionesCandidatos.motivoRevisarManual,
+          actualizadoTs: promocionesCandidatos.actualizadoTs,
+        })
+        .from(promocionesCandidatos)
+        .innerJoin(cuentasMl, eq(cuentasMl.id, promocionesCandidatos.cuentaMlId))
+        .where(and(...condicionesCandidatos))
+        .orderBy(desc(promocionesCandidatos.actualizadoTs)),
+      tx
+        .select({
+          cuentaMlId: promocionesAcciones.cuentaMlId,
+          itemId: promocionesAcciones.itemId,
+          tipoPromocion: promocionesAcciones.tipoPromocion,
+          estado: promocionesAcciones.estado,
+          error: promocionesAcciones.error,
+          creadoTs: promocionesAcciones.creadoTs,
+        })
+        .from(promocionesAcciones)
+        .where(and(...condicionesAcciones))
+        .orderBy(desc(promocionesAcciones.creadoTs))
+        .limit(TOPE_ACCIONES_HISTORIAL),
+    ]);
   });
 
-  return NextResponse.json({ filas });
+  // accionesCrudas ya viene ordenada desc por creadoTs — la primera vez
+  // que se ve una clave ES la más reciente.
+  const ultimaAccionPorClave = new Map<string, { estado: EstadoDecision; error: string | null }>();
+  for (const accion of accionesCrudas) {
+    const clave = `${accion.cuentaMlId}:${accion.itemId}:${accion.tipoPromocion}`;
+    if (!ultimaAccionPorClave.has(clave)) ultimaAccionPorClave.set(clave, { estado: accion.estado, error: accion.error });
+  }
+
+  const candidatosConDecision = candidatosCrudos.map((c) => {
+    const ultima = ultimaAccionPorClave.get(`${c.cuentaMlId}:${c.itemId}:${c.tipoPromocion}`);
+    const estadoDecision: EstadoDecision | null = ultima?.estado ?? null;
+    return {
+      ...c,
+      estadoDecision,
+      motivoRechazo: estadoDecision === "rechazada" ? (ultima?.error ?? null) : null,
+    };
+  });
+
+  const esPendiente = (c: (typeof candidatosConDecision)[number]) => c.estadoDecision == null || c.estadoDecision === "pendiente";
+
+  const conteos = {
+    todas: candidatosConDecision.filter(esPendiente).length,
+    cumplen: candidatosConDecision.filter((c) => esPendiente(c) && c.cumpleReglas).length,
+    revisar: candidatosConDecision.filter((c) => esPendiente(c) && !c.cumpleReglas && !c.soloEnMl).length,
+    "sin-minimo": candidatosConDecision.filter((c) => esPendiente(c) && c.precioMinimo == null).length,
+    "solo-ml": candidatosConDecision.filter((c) => esPendiente(c) && c.soloEnMl).length,
+    aprobadas: candidatosConDecision.filter((c) => c.estadoDecision === "aceptada").length,
+    rechazadas: candidatosConDecision.filter((c) => c.estadoDecision === "rechazada").length,
+  };
+
+  let filas = candidatosConDecision;
+  if (filtro === "aprobadas") {
+    filas = filas.filter((c) => c.estadoDecision === "aceptada");
+  } else if (filtro === "rechazadas") {
+    filas = filas.filter((c) => c.estadoDecision === "rechazada");
+  } else {
+    filas = filas.filter(esPendiente);
+    if (filtro === "cumplen") filas = filas.filter((c) => c.cumpleReglas);
+    if (filtro === "revisar") filas = filas.filter((c) => !c.cumpleReglas && !c.soloEnMl);
+    if (filtro === "sin-minimo") filas = filas.filter((c) => c.precioMinimo == null);
+    if (filtro === "solo-ml") filas = filas.filter((c) => c.soloEnMl);
+  }
+
+  return NextResponse.json({ filas, conteos });
 }

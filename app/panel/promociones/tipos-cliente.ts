@@ -19,10 +19,34 @@ export type CandidatoClienteCliente = {
   precioActual: string | null;
   precioMinimo: string | null;
   precioSugerido: string | null;
+  // Rama feat-promociones-editar-precio — techo real de Mercado Libre
+  // para esta promoción puntual (ya se calculaba, nunca se mostraba).
+  maxDiscountedPrice: string | null;
   gananciaEstimada: string | null;
   cumpleReglas: boolean;
   motivoRevisarManual: string | null;
   actualizadoTs: string;
+  // Rama feat-promociones-editar-precio, punto 2 — derivado de la
+  // ÚLTIMA fila de promociones_acciones para esta combinación (nunca
+  // guardado en promociones_candidatos). null = nunca se decidió nada.
+  estadoDecision: "pendiente" | "aceptada" | "rechazada" | "ejecutada" | "fallida" | null;
+  // Punto 4 — el motivo real de un rechazo automático del servidor
+  // (HTTP 200, "rechazo blando"), solo presente cuando estadoDecision
+  // === "rechazada".
+  motivoRechazo: string | null;
+};
+
+// Rama feat-promociones-editar-precio, punto 2 — un número por cada
+// botón de filtro, para que "Pendientes (12)"/"Aprobadas (3)"/etc. no
+// tengan que adivinarse contando `filas.length` de la página actual.
+export type ConteosCandidatosCliente = {
+  todas: number;
+  cumplen: number;
+  revisar: number;
+  "sin-minimo": number;
+  "solo-ml": number;
+  aprobadas: number;
+  rechazadas: number;
 };
 
 export type EstadoCuentaBusquedaCliente = "en_cola" | "buscando" | "listo" | "error";

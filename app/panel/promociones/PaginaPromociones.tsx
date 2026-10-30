@@ -6,11 +6,22 @@ import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Tabla, FilaTabla, CeldaTabla } from "@/components/marco/Tabla";
-import { accionParaCandidato, estadoPrecioMinimo, numero, porcentajeDescuento, precioConPromo } from "./calculosFila";
+import {
+  accionParaCandidato,
+  descuentoDesdePrecio,
+  gananciaEstimadaParaPrecio,
+  numero,
+  porcentajeDescuento,
+  precioConPromo,
+  precioDesdeDescuento,
+  puedeEditarPrecio,
+  rangoEdicion,
+} from "./calculosFila";
 import { debeMostrarResumenBusquedaVacia, lineasResumenBusquedaVacia } from "./resumenBusquedaVacia";
 import type {
   AccionHistorialCliente,
   CandidatoClienteCliente,
+  ConteosCandidatosCliente,
   ReglasCuentaCliente,
   TrabajoBusquedaCliente,
 } from "./tipos-cliente";
@@ -18,15 +29,20 @@ import styles from "./promociones.module.css";
 
 type Cuenta = { id: string; nickname: string };
 type Pestana = "buscar" | "historial" | "reglas";
-type Filtro = "todas" | "cumplen" | "revisar" | "sin-minimo" | "solo-ml";
+// Rama feat-promociones-editar-precio, punto 2 — "todas" ya significaba
+// "pendientes" del lado del servidor (GET .../candidatos solo devuelve
+// filas sin decisión bajo este filtro); la etiqueta ahora lo dice.
+type Filtro = "todas" | "cumplen" | "revisar" | "sin-minimo" | "solo-ml" | "aprobadas" | "rechazadas";
 type TipoLote = "aprobar" | "rechazar";
 
 const ETIQUETA_FILTRO: Record<Filtro, string> = {
-  todas: "Todas",
+  todas: "Pendientes",
   cumplen: "Cumplen",
   revisar: "Revisar a mano",
   "sin-minimo": "Sin precio mínimo",
   "solo-ml": "Solo en ML",
+  aprobadas: "Aprobadas",
+  rechazadas: "Rechazadas",
 };
 
 const ETIQUETA_ESTADO_CUENTA: Record<string, string> = { en_cola: "En cola", buscando: "Buscando…", listo: "Listo", error: "Error" };
@@ -49,13 +65,21 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   const [errorBusqueda, setErrorBusqueda] = useState<string | null>(null);
 
   const [candidatos, setCandidatos] = useState<CandidatoClienteCliente[]>([]);
+  const [conteos, setConteos] = useState<ConteosCandidatosCliente | null>(null);
   const [cargandoCandidatos, setCargandoCandidatos] = useState(false);
   const [seleccionados, setSeleccionados] = useState<Record<string, boolean>>({});
+
+  // Rama feat-promociones-editar-precio, punto 1 — precio con
+  // promo/% desc. editados a mano, por candidatoId. Nunca se guarda
+  // nada acá hasta que se aprueba esa fila (precioElegido viaja en el
+  // POST a /acciones) — el servidor vuelve a validar todo fresco
+  // igual, esto es solo para la pantalla.
+  const [preciosEditados, setPreciosEditados] = useState<Record<string, number>>({});
 
   const [modoSimulacion, setModoSimulacion] = useState(false);
   const [vistaPrevia, setVistaPrevia] = useState<{
     tipo: TipoLote;
-    decisiones: { candidatoId: string; accion: "participar" | "modificar" }[];
+    decisiones: { candidatoId: string; accion: "participar" | "modificar"; precioElegido?: number }[];
     cantidad: number;
     cuentasAfectadas: string[];
     gananciaTotal: number;
@@ -63,12 +87,13 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   const [aplicando, setAplicando] = useState(false);
   const [resultadoAplicar, setResultadoAplicar] = useState<string | null>(null);
 
-  // Rama feat-promociones-aprobacion — "No" en una fila es un rechazo
-  // directo, sin vista previa (nunca toca Mercado Libre, no hay nada
-  // que confirmar con el mismo peso que aprobar/ejecutar). `rechazandoId`
-  // es el candidatoId en curso, para deshabilitar solo ESE botón.
-  const [rechazandoId, setRechazandoId] = useState<string | null>(null);
-  const [errorRechazoFila, setErrorRechazoFila] = useState<string | null>(null);
+  // Rama feat-promociones-aprobacion — "No"/"Volver a pendiente" en una
+  // fila son decisiones directas, sin vista previa (nunca tocan
+  // Mercado Libre, no hay nada que confirmar con el mismo peso que
+  // aprobar/ejecutar). `decisionDirectaId` es el candidatoId en curso,
+  // para deshabilitar solo ESE botón.
+  const [decisionDirectaId, setDecisionDirectaId] = useState<string | null>(null);
+  const [errorDecisionDirecta, setErrorDecisionDirecta] = useState<string | null>(null);
 
   const [historial, setHistorial] = useState<AccionHistorialCliente[]>([]);
   const [reglas, setReglas] = useState<ReglasCuentaCliente[]>([]);
@@ -91,6 +116,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     if (res.ok) {
       const body = await res.json();
       setCandidatos(body.filas);
+      setConteos(body.conteos ?? null);
     }
     setCargandoCandidatos(false);
   }
@@ -191,16 +217,72 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     return { texto: "Revisar a mano", estado: "aviso", title: candidato.motivoRevisarManual ?? undefined };
   }
 
-  // Indicador dedicado al piso de Finanzas (punto 2) — distinto del
-  // chip de arriba, que también exige el tope de descuento y otros
-  // permisos de la cuenta.
-  function chipPrecioMinimo(candidato: CandidatoClienteCliente): { texto: string; estado: EstadoChip } | null {
-    const estado = estadoPrecioMinimo(candidato);
-    if (estado === "sin_dato") return null;
-    return estado === "cumple" ? { texto: "Cumple precio mínimo", estado: "exito" } : { texto: "Queda por debajo", estado: "peligro" };
+  // Punto 1 — "Precio con promo" editado a mano para esta fila (o el
+  // valor que ya traía el motor, si nadie lo tocó todavía).
+  function precioEditado(candidato: CandidatoClienteCliente): number {
+    const editado = preciosEditados[candidato.id];
+    if (editado != null) return editado;
+    return precioConPromo(candidato) ?? numero(candidato.precioOriginal) ?? 0;
   }
 
-  function abrirVistaPrevia(decisiones: { candidatoId: string; accion: "participar" | "modificar" }[], tipo: TipoLote) {
+  function clamparAlRango(candidato: CandidatoClienteCliente, valor: number): number {
+    const rango = rangoEdicion(candidato);
+    if (!rango) return Math.round(valor);
+    return Math.round(Math.min(rango.max, Math.max(rango.min, valor)));
+  }
+
+  function editarPrecioFila(candidato: CandidatoClienteCliente, nuevoPrecio: number) {
+    if (!Number.isFinite(nuevoPrecio)) return;
+    setPreciosEditados((actual) => ({ ...actual, [candidato.id]: clamparAlRango(candidato, nuevoPrecio) }));
+  }
+
+  function editarDescuentoFila(candidato: CandidatoClienteCliente, nuevoDescuentoPct: number) {
+    const original = numero(candidato.precioOriginal);
+    if (original == null || !Number.isFinite(nuevoDescuentoPct)) return;
+    editarPrecioFila(candidato, precioDesdeDescuento(original, nuevoDescuentoPct));
+  }
+
+  // El precio que de verdad se va a mandar si se aprueba esta fila
+  // (editado a mano, o el que ya sugería el motor si nadie la tocó) —
+  // usado para el chip del piso y la utilidad en vivo, y es lo que se
+  // manda como precioElegido al aprobar.
+  function precioParaValidar(candidato: CandidatoClienteCliente): number | null {
+    return puedeEditarPrecio(candidato) ? precioEditado(candidato) : precioConPromo(candidato);
+  }
+
+  // Indicador dedicado al piso de Finanzas (punto 2) — distinto del
+  // chip de "Cumple"/"Revisar a mano", que también exige el tope de
+  // descuento y otros permisos de la cuenta (esos dependen de reglas
+  // que viven solo en el servidor — nunca se duplican acá). Este sí se
+  // recalcula en vivo contra el precio editado, porque es una
+  // comparación simple contra un solo número (precioMinimo) que ya
+  // tenemos en pantalla.
+  function chipPrecioMinimoEnVivo(candidato: CandidatoClienteCliente): { texto: string; estado: EstadoChip } | null {
+    const minimo = numero(candidato.precioMinimo);
+    const precioMostrado = precioParaValidar(candidato);
+    if (minimo == null || precioMostrado == null) return null;
+    return precioMostrado >= minimo ? { texto: "Cumple precio mínimo", estado: "exito" } : { texto: "Queda por debajo", estado: "peligro" };
+  }
+
+  // Utilidad estimada en vivo — para una fila editable usa el precio
+  // que el usuario puso; para una de solo lectura, la que ya vino del
+  // motor (gananciaEstimadaParaPrecio necesita precioSugerido, que no
+  // siempre está).
+  function gananciaEnVivo(candidato: CandidatoClienteCliente): number | null {
+    if (!puedeEditarPrecio(candidato)) return numero(candidato.gananciaEstimada);
+    return gananciaEstimadaParaPrecio(candidato, precioEditado(candidato)) ?? numero(candidato.gananciaEstimada);
+  }
+
+  // Decisión lista para mandar al aprobar (fila a fila o en lote) —
+  // precioElegido solo viaja cuando la fila es editable Y alguien la
+  // tocó o puede tocarla; si no es editable, el servidor vuelve a
+  // sugerir su propio precio (tipos con precio fijo de ML).
+  function decisionParaAprobar(candidato: CandidatoClienteCliente): { candidatoId: string; accion: "participar" | "modificar"; precioElegido?: number } {
+    const editable = puedeEditarPrecio(candidato);
+    return { candidatoId: candidato.id, accion: accionParaCandidato(candidato), precioElegido: editable ? precioEditado(candidato) : undefined };
+  }
+
+  function abrirVistaPrevia(decisiones: { candidatoId: string; accion: "participar" | "modificar"; precioElegido?: number }[], tipo: TipoLote) {
     const porId = new Map(candidatos.map((c) => [c.id, c]));
     const cuentasAfectadas = [...new Set(decisiones.map((d) => porId.get(d.candidatoId)?.nicknameCuenta).filter((n): n is string => !!n))];
     const gananciaTotal = decisiones.reduce((acc, d) => acc + (numero(porId.get(d.candidatoId)?.gananciaEstimada ?? null) ?? 0), 0);
@@ -210,18 +292,12 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
 
   function aceptarLasQueCumplen() {
     const candidatosQueCumplen = candidatos.filter((c) => c.cumpleReglas);
-    abrirVistaPrevia(
-      candidatosQueCumplen.map((c) => ({ candidatoId: c.id, accion: accionParaCandidato(c) })),
-      "aprobar"
-    );
+    abrirVistaPrevia(candidatosQueCumplen.map(decisionParaAprobar), "aprobar");
   }
 
   function aprobarSeleccionados() {
     const elegidos = candidatos.filter((c) => seleccionados[c.id]);
-    abrirVistaPrevia(
-      elegidos.map((c) => ({ candidatoId: c.id, accion: accionParaCandidato(c) })),
-      "aprobar"
-    );
+    abrirVistaPrevia(elegidos.map(decisionParaAprobar), "aprobar");
   }
 
   function rechazarSeleccionados() {
@@ -232,24 +308,24 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     );
   }
 
-  // "No" en una fila puntual — directo, sin vista previa (ver el
-  // comentario de `rechazandoId` más arriba).
-  async function rechazarFila(candidato: CandidatoClienteCliente) {
-    setRechazandoId(candidato.id);
-    setErrorRechazoFila(null);
+  // "No"/"Volver a pendiente" en una fila puntual — directo, sin vista
+  // previa (ver el comentario de `decisionDirectaId` más arriba).
+  async function enviarDecisionDirecta(candidato: CandidatoClienteCliente, decision: "rechazar" | "volver_a_pendiente") {
+    setDecisionDirectaId(candidato.id);
+    setErrorDecisionDirecta(null);
     let res: Response;
     try {
       res = await fetch("/api/ml/promociones/acciones", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decisiones: [{ candidatoId: candidato.id, accion: accionParaCandidato(candidato), decision: "rechazar" }] }),
+        body: JSON.stringify({ decisiones: [{ candidatoId: candidato.id, accion: accionParaCandidato(candidato), decision }] }),
       });
     } catch {
-      setRechazandoId(null);
-      setErrorRechazoFila("No se pudo rechazar — revisá tu conexión e intentá de nuevo.");
+      setDecisionDirectaId(null);
+      setErrorDecisionDirecta("No se pudo guardar — revisá tu conexión e intentá de nuevo.");
       return;
     }
-    setRechazandoId(null);
+    setDecisionDirectaId(null);
     if (res.ok) {
       setSeleccionados((actual) => {
         const siguiente = { ...actual };
@@ -262,7 +338,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
       // ningún lado: el botón volvía a "No" y la fila seguía igual,
       // sin ninguna pista de qué pasó.
       const cuerpo = await res.json().catch(() => ({}));
-      setErrorRechazoFila(cuerpo.error || "No se pudo rechazar este producto.");
+      setErrorDecisionDirecta(cuerpo.error || "No se pudo guardar este cambio.");
     }
   }
 
@@ -315,13 +391,26 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
       if (vistaPrevia.tipo === "rechazar") {
         setResultadoAplicar(`Rechazado: ${body.acciones.length} producto(s) — nunca se tocó Mercado Libre.`);
       } else {
-        setResultadoAplicar(
+        // Punto 4 — cuando el servidor rechaza alguna en silencio al
+        // revalidar fresco (HTTP 200 con rechazo blando: el piso cambió,
+        // el precio editado ya no entra en el rango de ML, etc.), el
+        // motivo tiene que verse ACÁ, no solo quedar perdido en el
+        // historial.
+        const acciones: { estado: string; error: string | null }[] = body.acciones ?? [];
+        const aceptadas = acciones.filter((a) => a.estado === "aceptada" || a.estado === "ejecutada");
+        const rechazadasAlValidar = acciones.filter((a) => a.estado === "rechazada");
+        const partes: string[] = [
           modoSimulacion
-            ? `Simulación: ${body.acciones.length} acción(es) calculadas, nada se envió a Mercado Libre.`
+            ? `Simulación: ${acciones.length} acción(es) calculadas, nada se envió a Mercado Libre.`
             : body.ejecutado
-              ? `Listo: ${body.acciones.length} acción(es) procesadas.`
-              : `Guardado como pendiente de aprobación/ejecución (${body.acciones.length} acción(es)) — todavía no se tocó Mercado Libre.`
-        );
+              ? `Listo: ${aceptadas.length} acción(es) procesadas.`
+              : `Guardado como pendiente de aprobación/ejecución (${aceptadas.length} acción(es)) — todavía no se tocó Mercado Libre.`,
+        ];
+        if (rechazadasAlValidar.length > 0) {
+          const motivos = [...new Set(rechazadasAlValidar.map((a) => a.error).filter((m): m is string => !!m))];
+          partes.push(`${rechazadasAlValidar.length} producto(s) se rechazaron solos al revalidar: ${motivos.join(" / ")}`);
+        }
+        setResultadoAplicar(partes.join(" "));
       }
       setVistaPrevia(null);
       setSeleccionados({});
@@ -380,6 +469,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
             {(Object.keys(ETIQUETA_FILTRO) as Filtro[]).map((f) => (
               <Boton key={f} type="button" variante={filtro === f ? "primario" : "secundario"} chico onClick={() => setFiltro(f)}>
                 {ETIQUETA_FILTRO[f]}
+                {conteos ? ` (${conteos[f]})` : ""}
               </Boton>
             ))}
           </div>
@@ -437,7 +527,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
             </Tarjeta>
           )}
           {resultadoEjecutarPendientes && <p style={{ fontSize: 13, marginTop: 8 }}>{resultadoEjecutarPendientes}</p>}
-          {errorRechazoFila && <p style={{ color: "var(--kpi-peligro-texto)", fontSize: 13, marginTop: 8 }}>{errorRechazoFila}</p>}
+          {errorDecisionDirecta && <p style={{ color: "var(--kpi-peligro-texto)", fontSize: 13, marginTop: 8 }}>{errorDecisionDirecta}</p>}
 
           {cargandoCandidatos ? (
             <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 12 }}>Cargando…</p>
@@ -473,10 +563,18 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
               >
                 {candidatos.map((c) => {
                   const chip = chipEstado(c);
-                  const chipMinimo = chipPrecioMinimo(c);
+                  const chipMinimo = chipPrecioMinimoEnVivo(c);
                   const precioHoy = numero(c.precioOriginal);
-                  const conPromo = precioConPromo(c);
-                  const descuento = porcentajeDescuento(c);
+                  const editable = puedeEditarPrecio(c) && puedeAprobar;
+                  const rango = rangoEdicion(c);
+                  const precioMostrado = editable ? precioEditado(c) : precioConPromo(c);
+                  const descuentoMostrado = editable
+                    ? precioHoy != null
+                      ? Math.round(descuentoDesdePrecio(precioHoy, precioEditado(c)) * 10) / 10
+                      : null
+                    : porcentajeDescuento(c);
+                  const minimo = numero(c.precioMinimo);
+                  const porDebajoDelPiso = minimo != null && precioMostrado != null && precioMostrado < minimo;
                   return (
                     <FilaTabla key={c.id}>
                       <CeldaTabla>
@@ -493,12 +591,53 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                       </CeldaTabla>
                       <CeldaTabla>{c.skuCodigo ?? "—"}</CeldaTabla>
                       <CeldaTabla>{precioHoy == null ? "ML no envió precio" : formatoPesos(precioHoy)}</CeldaTabla>
-                      <CeldaTabla>{formatoPesos(conPromo)}</CeldaTabla>
-                      <CeldaTabla>{descuento == null ? "—" : `${Math.round(descuento * 10) / 10}%`}</CeldaTabla>
+                      <CeldaTabla>
+                        {editable ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <input
+                              type="number"
+                              className="zx-control"
+                              style={{ width: 110 }}
+                              value={Math.round(precioEditado(c))}
+                              min={rango?.min}
+                              max={rango?.max}
+                              step={1}
+                              onChange={(e) => editarPrecioFila(c, Number(e.target.value))}
+                            />
+                            {rango && (
+                              <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                                mín {formatoPesos(rango.min)} – máx {formatoPesos(rango.max)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            {formatoPesos(precioMostrado)}
+                            {c.soloEnMl && <span style={{ fontSize: 11, color: "var(--text-faint)" }}>precio fijo de ML</span>}
+                          </div>
+                        )}
+                      </CeldaTabla>
+                      <CeldaTabla>
+                        {editable ? (
+                          <input
+                            type="number"
+                            className="zx-control"
+                            style={{ width: 70 }}
+                            value={descuentoMostrado ?? ""}
+                            step={0.1}
+                            disabled={precioHoy == null}
+                            onChange={(e) => editarDescuentoFila(c, Number(e.target.value))}
+                          />
+                        ) : descuentoMostrado == null ? (
+                          "—"
+                        ) : (
+                          `${descuentoMostrado}%`
+                        )}
+                      </CeldaTabla>
                       <CeldaTabla>{c.precioMinimo ? formatoPesos(numero(c.precioMinimo)) : <span style={{ color: "var(--kpi-peligro-texto)" }}>Falta precio mínimo</span>}</CeldaTabla>
                       <CeldaTabla>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {formatoPesos(numero(c.gananciaEstimada))}
+                          {formatoPesos(gananciaEnVivo(c))}
                           {chipMinimo && <Chip estado={chipMinimo.estado}>{chipMinimo.texto}</Chip>}
                         </div>
                       </CeldaTabla>
@@ -508,18 +647,42 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                             {chip.texto}
                           </Chip>
                           <span style={{ fontSize: 11, color: "var(--text-faint)" }}>{c.tipoPromocion}</span>
+                          {filtro === "rechazadas" && c.motivoRechazo && (
+                            <span style={{ fontSize: 11, color: "var(--kpi-peligro-texto)" }}>{c.motivoRechazo}</span>
+                          )}
                         </div>
                       </CeldaTabla>
                       {puedeAprobar && (
                         <CeldaTabla>
-                          <div style={{ display: "flex", gap: 4 }}>
-                            <Boton type="button" variante="primario" chico onClick={() => abrirVistaPrevia([{ candidatoId: c.id, accion: accionParaCandidato(c) }], "aprobar")}>
-                              Sí
+                          {filtro === "rechazadas" ? (
+                            <Boton
+                              type="button"
+                              variante="secundario"
+                              chico
+                              disabled={decisionDirectaId === c.id}
+                              onClick={() => enviarDecisionDirecta(c, "volver_a_pendiente")}
+                            >
+                              {decisionDirectaId === c.id ? "…" : "Volver a pendiente"}
                             </Boton>
-                            <Boton type="button" variante="secundario" chico disabled={rechazandoId === c.id} onClick={() => rechazarFila(c)}>
-                              {rechazandoId === c.id ? "…" : "No"}
-                            </Boton>
-                          </div>
+                          ) : filtro === "aprobadas" ? (
+                            <span style={{ fontSize: 12, color: "var(--text-faint)" }}>—</span>
+                          ) : (
+                            <div style={{ display: "flex", gap: 4 }}>
+                              <Boton
+                                type="button"
+                                variante="primario"
+                                chico
+                                disabled={porDebajoDelPiso}
+                                title={porDebajoDelPiso ? "El precio quedó por debajo del precio mínimo de Finanzas — el servidor nunca lo deja pasar." : undefined}
+                                onClick={() => abrirVistaPrevia([decisionParaAprobar(c)], "aprobar")}
+                              >
+                                Sí
+                              </Boton>
+                              <Boton type="button" variante="secundario" chico disabled={decisionDirectaId === c.id} onClick={() => enviarDecisionDirecta(c, "rechazar")}>
+                                {decisionDirectaId === c.id ? "…" : "No"}
+                              </Boton>
+                            </div>
+                          )}
                         </CeldaTabla>
                       )}
                     </FilaTabla>

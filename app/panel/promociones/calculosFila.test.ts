@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { accionParaCandidato, estadoPrecioMinimo, numero, porcentajeDescuento, precioConPromo } from "./calculosFila";
+import {
+  accionParaCandidato,
+  descuentoDesdePrecio,
+  estadoPrecioMinimo,
+  gananciaEstimadaParaPrecio,
+  numero,
+  porcentajeDescuento,
+  precioConPromo,
+  precioDesdeDescuento,
+  puedeEditarPrecio,
+  rangoEdicion,
+} from "./calculosFila";
 import type { CandidatoClienteCliente } from "./tipos-cliente";
 
 function candidato(overrides: Partial<CandidatoClienteCliente> = {}): CandidatoClienteCliente {
@@ -20,10 +31,13 @@ function candidato(overrides: Partial<CandidatoClienteCliente> = {}): CandidatoC
     precioActual: null,
     precioMinimo: null,
     precioSugerido: null,
+    maxDiscountedPrice: null,
     gananciaEstimada: null,
     cumpleReglas: false,
     motivoRevisarManual: null,
     actualizadoTs: new Date().toISOString(),
+    estadoDecision: null,
+    motivoRechazo: null,
     ...overrides,
   };
 }
@@ -34,17 +48,33 @@ describe("numero", () => {
   it("string no numérica: null, nunca NaN", () => expect(numero("no-es-un-numero")).toBeNull());
 });
 
-describe("precioConPromo — rama feat-promociones-aprobacion", () => {
-  it("con precioActual (el deal ya activo en ML): usa ese", () => {
-    expect(precioConPromo(candidato({ precioActual: "85000", precioSugerido: "90000" }))).toBe(85000);
+describe("precioConPromo — rama feat-promociones-editar-precio (bug del chip corregido)", () => {
+  it("con precioSugerido (el que el motor YA calculó respetando el piso): usa ese, nunca precioActual", () => {
+    expect(precioConPromo(candidato({ precioActual: "56015", precioSugerido: "90000" }))).toBe(90000);
   });
 
-  it("sin precioActual: cae al sugerido por el motor", () => {
-    expect(precioConPromo(candidato({ precioActual: null, precioSugerido: "90000" }))).toBe(90000);
+  it("sin precioSugerido (el motor nunca llegó a calcular nada, ej. bloqueado): cae a precioActual", () => {
+    expect(precioConPromo(candidato({ precioActual: "85000", precioSugerido: null }))).toBe(85000);
   });
 
   it("sin ninguno de los dos: null", () => {
     expect(precioConPromo(candidato())).toBeNull();
+  });
+
+  // Bug real reportado (VITALBISGLICINATO: precio hoy 65.900, mínimo
+  // 65.900, promo 56.015 mostrando "CUMPLE" y "QUEDA POR DEBAJO" a la
+  // vez). La causa real: precioActual es el número CRUDO que Mercado
+  // Libre manda como "sugerido" para un candidato que todavía no se
+  // unió — puede venir por debajo del piso. precioSugerido es el que
+  // el motor YA calculó (lib/ml/promociones.ts siempre lo fija =
+  // precioMinimo cuando hay que participar/modificar) — nunca puede
+  // quedar por debajo del piso, por construcción. cumpleReglas se
+  // calcula CONTRA precioSugerido, así que mostrar otro número es
+  // exactamente la causa de la contradicción.
+  it("reproduce el bug real: ML manda un precioActual por debajo del piso, pero precioSugerido (lo que de verdad se usaría) sí cumple — nunca contradice el chip", () => {
+    const c = candidato({ precioOriginal: "65900", precioMinimo: "65900", precioActual: "56015", precioSugerido: "65900", cumpleReglas: true });
+    expect(precioConPromo(c)).toBe(65900); // nunca 56015
+    expect(estadoPrecioMinimo(c)).toBe("cumple"); // nunca "por_debajo" cuando cumpleReglas es true
   });
 });
 
@@ -92,5 +122,80 @@ describe("accionParaCandidato", () => {
   it("cualquier otro estado (ya confirmada/pendiente): modificar", () => {
     expect(accionParaCandidato(candidato({ estadoMl: "started" }))).toBe("modificar");
     expect(accionParaCandidato(candidato({ estadoMl: "pending" }))).toBe("modificar");
+  });
+});
+
+// Rama feat-promociones-editar-precio, punto 1 — rango permitido para
+// editar "Precio con promo"/"% desc".
+describe("rangoEdicion", () => {
+  it("con techo de ML (maxDiscountedPrice) por debajo del precio original: ese manda", () => {
+    expect(rangoEdicion(candidato({ precioMinimo: "50000", maxDiscountedPrice: "80000", precioOriginal: "100000" }))).toEqual({ min: 50000, max: 80000 });
+  });
+
+  it("sin maxDiscountedPrice: el techo es el precio original (nunca un 'descuento' más caro que el precio de hoy)", () => {
+    expect(rangoEdicion(candidato({ precioMinimo: "50000", maxDiscountedPrice: null, precioOriginal: "100000" }))).toEqual({ min: 50000, max: 100000 });
+  });
+
+  it("sin precio mínimo: null, nunca se puede editar sin un piso contra qué validar", () => {
+    expect(rangoEdicion(candidato({ precioMinimo: null, precioOriginal: "100000" }))).toBeNull();
+  });
+
+  it("sin ningún techo disponible (ni maxDiscountedPrice ni precioOriginal): null", () => {
+    expect(rangoEdicion(candidato({ precioMinimo: "50000", maxDiscountedPrice: null, precioOriginal: null }))).toBeNull();
+  });
+
+  it("el piso quedó por encima de todo techo real: null (rango degenerado, nunca inventa uno)", () => {
+    expect(rangoEdicion(candidato({ precioMinimo: "90000", maxDiscountedPrice: "80000", precioOriginal: "100000" }))).toBeNull();
+  });
+});
+
+describe("puedeEditarPrecio — punto 1: tipos sin escritura y variantes quedan de solo lectura", () => {
+  it("fila normal con rango válido: editable", () => {
+    expect(puedeEditarPrecio(candidato({ precioMinimo: "50000", precioOriginal: "100000", soloEnMl: false, tieneVariantes: false }))).toBe(true);
+  });
+
+  it("soloEnMl (tipo sin escritura por API, ej. UNHEALTHY_STOCK): nunca editable, 'precio fijo de ML'", () => {
+    expect(puedeEditarPrecio(candidato({ precioMinimo: "50000", precioOriginal: "100000", soloEnMl: true }))).toBe(false);
+  });
+
+  it("con variantes: nunca editable (se revisa a mano, no hay un solo piso que calcular)", () => {
+    expect(puedeEditarPrecio(candidato({ precioMinimo: "50000", precioOriginal: "100000", tieneVariantes: true }))).toBe(false);
+  });
+
+  it("sin rango válido (sin precio mínimo): nunca editable", () => {
+    expect(puedeEditarPrecio(candidato({ precioMinimo: null, precioOriginal: "100000" }))).toBe(false);
+  });
+});
+
+describe("precioDesdeDescuento / descuentoDesdePrecio — cálculo %↔precio, redondeado a pesos enteros", () => {
+  it("20% de descuento sobre 100000: 80000", () => {
+    expect(precioDesdeDescuento(100000, 20)).toBe(80000);
+  });
+
+  it("redondea a pesos enteros (nunca centavos)", () => {
+    expect(precioDesdeDescuento(99999, 15)).toBe(Math.round(99999 * 0.85));
+    expect(Number.isInteger(precioDesdeDescuento(99999, 15))).toBe(true);
+  });
+
+  it("descuentoDesdePrecio es el inverso real de precioDesdeDescuento", () => {
+    expect(descuentoDesdePrecio(100000, 80000)).toBe(20);
+  });
+
+  it("original en 0: 0%, nunca división por cero ni NaN", () => {
+    expect(descuentoDesdePrecio(0, 80000)).toBe(0);
+  });
+});
+
+describe("gananciaEstimadaParaPrecio — utilidad estimada para un precio editado a mano", () => {
+  it("deriva el costo implícito (precioSugerido - gananciaEstimada) y lo aplica al nuevo precio", () => {
+    // precioSugerido=80000, gananciaEstimada=30000 => costo implícito=50000
+    const c = candidato({ precioSugerido: "80000", gananciaEstimada: "30000" });
+    expect(gananciaEstimadaParaPrecio(c, 90000)).toBe(40000); // 90000 - 50000
+    expect(gananciaEstimadaParaPrecio(c, 80000)).toBe(30000); // el mismo precio sugerido, misma ganancia de siempre
+  });
+
+  it("sin precioSugerido o sin gananciaEstimada original: null, nunca inventa un costo", () => {
+    expect(gananciaEstimadaParaPrecio(candidato({ precioSugerido: null, gananciaEstimada: "30000" }), 90000)).toBeNull();
+    expect(gananciaEstimadaParaPrecio(candidato({ precioSugerido: "80000", gananciaEstimada: null }), 90000)).toBeNull();
   });
 });
