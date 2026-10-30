@@ -40,10 +40,19 @@ type TipoAccion = (typeof TIPO_ACCION)[number];
 // ni se toca Mercado Libre para un rechazo, pase lo que pase con el
 // motor; es una decisión final, no depende de si el motor seguiría
 // recomendándolo.
-const DECISION_HUMANA = ["aprobar", "rechazar"] as const;
+//
+// Rama feat-promociones-editar-precio, punto 2 — "volver_a_pendiente"
+// tampoco necesitó nada nuevo: "pendiente" ya es el DEFAULT del enum
+// (pensado para una fila que todavía no se decidió). Deshacer un
+// rechazo inserta una fila nueva con ese estado — nunca se borra ni se
+// edita la fila "rechazada" original (promociones_acciones no se toca
+// así, es auditoría real) — la vista de candidatos (GET .../candidatos)
+// siempre mira la ÚLTIMA fila por (cuenta,ítem,tipo), así que esta
+// nueva fila "pendiente" devuelve el producto a la lista principal.
+const DECISION_HUMANA = ["aprobar", "rechazar", "volver_a_pendiente"] as const;
 type DecisionHumana = (typeof DECISION_HUMANA)[number];
 
-type Decision = { candidatoId: string; accion: TipoAccion; decisionHumana: DecisionHumana };
+type Decision = { candidatoId: string; accion: TipoAccion; decisionHumana: DecisionHumana; precioElegido?: number };
 
 // MED 5 — ventana de idempotencia: un doble clic (o un reintento de
 // red del navegador) no puede crear dos filas de historial para la
@@ -78,14 +87,26 @@ function parsearDecisiones(cuerpo: unknown): Decision[] | null {
     const candidatoId = (fila as { candidatoId?: unknown })?.candidatoId;
     const accion = (fila as { accion?: unknown })?.accion;
     const decisionCruda = (fila as { decision?: unknown })?.decision;
+    const precioElegidoCrudo = (fila as { precioElegido?: unknown })?.precioElegido;
     if (typeof candidatoId !== "string" || !PATRON_UUID.test(candidatoId)) return null;
     if (typeof accion !== "string" || !(TIPO_ACCION as readonly string[]).includes(accion)) return null;
     if (decisionCruda !== undefined && !(DECISION_HUMANA as readonly string[]).includes(decisionCruda as string)) return null;
+    // Rama feat-promociones-editar-precio — precioElegido es opcional y
+    // SOLO tiene sentido junto con "aprobar" (editar el precio de un
+    // rechazo o de un "volver a pendiente" no significa nada); se
+    // valida acá que sea un número finito, el resto (piso/techo reales)
+    // lo valida validarCandidatoParaEscritura más abajo, nunca acá.
+    if (precioElegidoCrudo !== undefined && typeof precioElegidoCrudo !== "number") return null;
     // Compatibilidad hacia atrás — "Aceptar todas las que cumplen" ya
     // mandaba {candidatoId, accion} sin "decision"; eso sigue
     // significando "aprobar", igual que siempre.
-    const decisionHumana: DecisionHumana = decisionCruda === "rechazar" ? "rechazar" : "aprobar";
-    resultado.push({ candidatoId, accion: accion as TipoAccion, decisionHumana });
+    const decisionHumana: DecisionHumana = decisionCruda === "rechazar" || decisionCruda === "volver_a_pendiente" ? decisionCruda : "aprobar";
+    resultado.push({
+      candidatoId,
+      accion: accion as TipoAccion,
+      decisionHumana,
+      precioElegido: decisionHumana === "aprobar" && typeof precioElegidoCrudo === "number" ? precioElegidoCrudo : undefined,
+    });
   }
   return resultado;
 }
@@ -151,7 +172,7 @@ export async function POST(request: Request) {
   if (decisiones.some((d) => d.accion === "salir")) {
     return NextResponse.json({ error: "Salir de una promoción todavía no está confirmado contra Mercado Libre real." }, { status: 501 });
   }
-  const decisionesEscribibles = decisiones as { candidatoId: string; accion: "participar" | "modificar"; decisionHumana: DecisionHumana }[];
+  const decisionesEscribibles = decisiones as { candidatoId: string; accion: "participar" | "modificar"; decisionHumana: DecisionHumana; precioElegido?: number }[];
   const modoSimulacion = (cuerpo as { modoSimulacion?: unknown })?.modoSimulacion === true;
 
   const candidatoIds = decisionesEscribibles.map((d) => d.candidatoId);
@@ -164,6 +185,35 @@ export async function POST(request: Request) {
   for (const decision of decisionesEscribibles) {
     const candidato = candidatoPorId.get(decision.candidatoId);
     if (!candidato) continue; // candidatoId que no existe o es de otra empresa (RLS) — se ignora, nunca rompe el resto
+
+    if (decision.decisionHumana === "volver_a_pendiente") {
+      // Deshacer un rechazo — ver el comentario completo arriba de
+      // DECISION_HUMANA. Nunca valida ni toca Mercado Libre; solo dejar
+      // la marca de que alguien volvió a poner esto en revisión.
+      const [fila] = await dbComoEmpresa(empresa.id, (tx) =>
+        tx
+          .insert(promocionesAcciones)
+          .values({
+            empresaId: empresa.id,
+            cuentaMlId: candidato.cuentaMlId,
+            itemId: candidato.itemId,
+            tituloProducto: candidato.tituloProducto,
+            tipoPromocion: candidato.tipoPromocion,
+            promotionIdMl: candidato.promotionIdMl,
+            accion: decision.accion,
+            precioAntes: candidato.precioActual,
+            precioDespues: null,
+            estado: "pendiente",
+            aprobadoPor: usuario.id,
+            aprobadoTs: new Date(),
+            modoSimulacion,
+            error: null,
+          })
+          .returning()
+      );
+      filasCreadas.push(fila);
+      continue;
+    }
 
     if (decision.decisionHumana === "rechazar") {
       // LOW — no-op si ya existe un rechazo MUY reciente para
@@ -246,7 +296,7 @@ export async function POST(request: Request) {
 
     // HIGH 2 — nunca se confía en candidato.cumpleReglas/precioSugerido
     // del snapshot: se recalcula fresco antes de aceptar la acción.
-    const validacion = await validarCandidatoParaEscritura(empresa.id, candidato, decision.accion);
+    const validacion = await validarCandidatoParaEscritura(empresa.id, candidato, decision.accion, decision.precioElegido);
     const [fila] = await dbComoEmpresa(empresa.id, (tx) =>
       tx
         .insert(promocionesAcciones)

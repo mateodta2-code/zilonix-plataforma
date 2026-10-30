@@ -191,6 +191,94 @@ describe("validarCandidatoParaEscritura — HIGH 2 (review de Pablo): nunca conf
   });
 });
 
+// Rama feat-promociones-editar-precio, punto 1 — precio elegido a mano
+// por un humano para ESTE producto puntual. El piso de Finanzas y el
+// techo real de ML siguen sin negociarse; el tope de descuento de la
+// cuenta (pensado para el flujo automático) SÍ se puede superar acá.
+describe("validarCandidatoParaEscritura — precioElegido (rama feat-promociones-editar-precio)", () => {
+  afterEach(limpiar);
+
+  it("precio elegido dentro del rango (piso<=precio<=techo): ok, usa EXACTAMENTE ese precio, nunca el sugerido del motor", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila()); // piso 90000
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato(), "participar", 95000);
+    expect(resultado).toEqual({ ok: true, deal: 95000 });
+  });
+
+  it("precio elegido por debajo del piso: rechazado, el piso nunca se negocia", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila()); // piso 90000
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato(), "participar", 85000);
+    expect(resultado.ok).toBe(false);
+    if (!resultado.ok) expect(resultado.motivo).toContain("piso");
+  });
+
+  it("precio elegido por encima del techo real de ML (maxDiscountedPrice): rechazado", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato({ maxDiscountedPrice: "92000" }), "participar", 95000);
+    expect(resultado.ok).toBe(false);
+    if (!resultado.ok) expect(resultado.motivo).toContain("máximo");
+  });
+
+  it("precio elegido por encima del precio original (sin maxDiscountedPrice): rechazado — nunca un 'descuento' más caro que hoy", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato({ precioOriginal: "100000", maxDiscountedPrice: null }), "participar", 150000);
+    expect(resultado.ok).toBe(false);
+  });
+
+  it("supera el tope de descuento de la cuenta: OK de todos modos — ese tope es para el flujo automático, no para una decisión humana explícita", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto({ descuentoMaximoPct: 1 })); // 100000->91000 es 9%, muy por encima del 1%
+    filasPorTabla.set(costosSku, costoFila()); // piso 90000
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato(), "participar", 91000);
+    expect(resultado).toEqual({ ok: true, deal: 91000 });
+  });
+
+  it("sin precio mínimo (SKU sin costo cargado): rechazado igual, un precio elegido nunca inventa un piso", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, []);
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato(), "participar", 95000);
+    expect(resultado.ok).toBe(false);
+  });
+
+  it("promoción compartida sin participarCompartidas: rechazado igual, un precio elegido no sortea el gate de participación", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto({ participarCompartidas: false }));
+    filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato({ esCompartida: true }), "participar", 95000);
+    expect(resultado.ok).toBe(false);
+  });
+
+  it("producto con variantes: rechazado igual, sin importar el precio elegido", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato({ tieneVariantes: true }), "participar", 95000);
+    expect(resultado.ok).toBe(false);
+  });
+
+  it("tipo sin escritura por API: rechazado igual, sin importar el precio elegido", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato({ tipoPromocion: "UNHEALTHY_STOCK" }), "participar", 95000);
+    expect(resultado.ok).toBe(false);
+  });
+
+  it("precio elegido no finito (NaN): rechazado", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato(), "participar", NaN);
+    expect(resultado.ok).toBe(false);
+  });
+
+  it("la acción ya no corresponde al estado actual: rechazado igual con precio elegido", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato({ estadoMl: "started" }), "participar", 95000);
+    expect(resultado.ok).toBe(false);
+    if (!resultado.ok) expect(resultado.motivo).toContain("ya no corresponde");
+  });
+});
+
 describe("precioCambioDemasiado — MED 6 (review de Pablo): criterio documentado de deriva de precio", () => {
   it("sin dato de comparación (null de cualquier lado): nunca bloquea por sí solo", () => {
     expect(precioCambioDemasiado(null, 90000)).toBe(false);
@@ -214,18 +302,45 @@ describe("precioCambioDemasiado — MED 6 (review de Pablo): criterio documentad
 describe("ejecutarLoteDeAcciones — HIGH 2 / MED 6 / LOW 11 (review de Pablo)", () => {
   afterEach(limpiar);
 
-  it("caso feliz — participar: llama a Mercado Libre con el deal recalculado fresco (nunca precioDespues del cliente) y marca 'ejecutada'", async () => {
+  it("caso feliz — participar: llama a Mercado Libre con EXACTAMENTE el precio aprobado (fila.precioDespues), revalidado fresco, y marca 'ejecutada'", async () => {
     filasPorTabla.set(promocionesCandidatos, [candidato()]);
     filasPorTabla.set(promocionesReglas, reglasPorDefecto());
     filasPorTabla.set(costosSku, costoFila());
 
-    await ejecutarLoteDeAcciones("empresa-1", "usuario-1", [accion({ precioDespues: "999999" })]); // precioDespues del cliente nunca se usa
+    await ejecutarLoteDeAcciones("empresa-1", "usuario-1", [accion({ precioDespues: "90000" })]);
 
     expect(participarPromocionMlMock).toHaveBeenCalledTimes(1);
     const [, , body] = participarPromocionMlMock.mock.calls[0]!;
     expect(body.deal_price).toBe(90000);
     expect(updatesRegistrados).toHaveLength(1);
     expect(updatesRegistrados[0]!.estado).toBe("ejecutada");
+  });
+
+  // Rama feat-promociones-editar-precio — lo que se lanza es el precio
+  // QUE DE VERDAD SE APROBÓ (editado a mano o no), nunca uno distinto
+  // recalculado de cero al momento de ejecutar — mientras siga siendo
+  // válido contra el piso/techo frescos.
+  it("precio aprobado editado a mano (distinto del que el motor recalcularía): se manda EXACTAMENTE ese, no el recalculado", async () => {
+    filasPorTabla.set(promocionesCandidatos, [candidato()]); // el motor recalcularía 90000 (el piso)
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+
+    await ejecutarLoteDeAcciones("empresa-1", "usuario-1", [accion({ precioDespues: "95000" })]); // aprobado a mano, distinto del piso
+
+    expect(participarPromocionMlMock).toHaveBeenCalledTimes(1);
+    const [, , body] = participarPromocionMlMock.mock.calls[0]!;
+    expect(body.deal_price).toBe(95000);
+  });
+
+  it("precio aprobado que YA NO es válido (quedó por encima del techo real tras revalidar fresco): 'fallida', nunca llama a Mercado Libre", async () => {
+    filasPorTabla.set(promocionesCandidatos, [candidato({ precioOriginal: "100000", maxDiscountedPrice: null })]);
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+
+    await ejecutarLoteDeAcciones("empresa-1", "usuario-1", [accion({ precioDespues: "999999" })]);
+
+    expect(participarPromocionMlMock).not.toHaveBeenCalled();
+    expect(updatesRegistrados[0]!.estado).toBe("fallida");
   });
 
   it("'salir': nunca llama a Mercado Libre, queda 'fallida' con el motivo documentado (MED 4 / LOW 11)", async () => {
