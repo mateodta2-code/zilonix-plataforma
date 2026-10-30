@@ -103,24 +103,30 @@ export function TablaDetalleAcordeon({ encabezados, dias, pedidoIdExterno, conDe
                       cuenta.productos.map((p) => (
                         <tr key={`${p.pedido_id}-${p.linea}`} className={estilos.filaProducto}>
                           <CeldaTabla className={estilos.sangriaProducto}>
-                            {/* Una sola línea de ancho fijo: el título se corta con «…»,
-                                los chips van enseguida y SKU y número de pedido se cortan
-                                al final si no caben. Todo se lee entero al pasar el mouse. */}
+                            {/* Bloque de ancho fijo en dos líneas, como Zilonix OS: el
+                                título usa el ancho de la columna (si aún no cabe, «…»)
+                                y SKU y número de pedido van debajo. Todo se lee entero
+                                al pasar el mouse. */}
                             <div
                               className={estilos.lineaProducto}
                               title={`${p.titulo} · ${p.sku_codigo ?? "sin SKU"} · ${ETIQUETA_FORMA[p.forma_entrega]} · #${pedidoIdExterno[p.pedido_id]}`}
                             >
-                              <Link href={`/panel/finanzas/ventas/${p.pedido_id}`} className={`${estilos.enlace} ${estilos.tituloProducto}`}>
-                                {p.titulo}
-                              </Link>
-                              <Chip>{ETIQUETA_FORMA[p.forma_entrega]}</Chip>
-                              {devoluciones.has(p.pedido_id) && (
-                                <Chip estado="peligro" title="Con devolución: revisar">
-                                  devolución
-                                </Chip>
-                              )}
-                              <span className={estilos.datoProducto}>[{p.sku_codigo ?? "sin SKU"}]</span>
-                              <span className={estilos.datoProducto}>#{pedidoIdExterno[p.pedido_id]}</span>
+                              {/* Línea 1: título y chips; línea 2: SKU y número de pedido. */}
+                              <div className={estilos.filaTituloProducto}>
+                                <Link href={`/panel/finanzas/ventas/${p.pedido_id}`} className={`${estilos.enlace} ${estilos.tituloProducto}`}>
+                                  {p.titulo}
+                                </Link>
+                                <Chip>{ETIQUETA_FORMA[p.forma_entrega]}</Chip>
+                                {devoluciones.has(p.pedido_id) && (
+                                  <Chip estado="peligro" title="Con devolución: revisar">
+                                    devolución
+                                  </Chip>
+                                )}
+                              </div>
+                              <div className={estilos.filaDatosProducto}>
+                                <span className={estilos.datoProducto}>[{p.sku_codigo ?? "sin SKU"}]</span>
+                                <span className={estilos.datoProducto}>#{pedidoIdExterno[p.pedido_id]}</span>
+                              </div>
                             </div>
                           </CeldaTabla>
                           <CeldasMontos t={p} costo={p.costo_producto} utilidad={p.utilidad} />
