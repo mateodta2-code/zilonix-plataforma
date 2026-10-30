@@ -147,9 +147,22 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   // que de verdad se va a lanzar es siempre el de la empresa entera),
   // fuera de modo simulación. Se confirma antes de llamar a ML.
   const [pendientesLanzar, setPendientesLanzar] = useState(0);
+  // Rama fix-promociones-aprobar-no-ejecuta, punto 1 — bug real,
+  // urgente (cuenta sharel): aprobar con permiso de ejecutar activo
+  // mandaba la promoción real a Mercado Libre SIN este modal — ya se
+  // corrigió del lado del servidor (POST .../acciones nunca más
+  // ejecuta), pero el modal en sí también tenía que reforzarse: ahora
+  // lista cada producto/precio/cuenta que se va a lanzar (nunca solo
+  // un número) y exige escribir la palabra de confirmación a mano
+  // antes de habilitar el botón — un clic de más nunca alcanza.
+  const [pendientesLanzarFilas, setPendientesLanzarFilas] = useState<
+    { id: string; cuentaMlId: string; nicknameCuenta: string; itemId: string; tituloProducto: string | null; tipoPromocion: string; precioAntes: string | null; precioDespues: string | null }[]
+  >([]);
   const [confirmandoLanzar, setConfirmandoLanzar] = useState(false);
+  const [textoConfirmacionLanzar, setTextoConfirmacionLanzar] = useState("");
   const [ejecutandoPendientes, setEjecutandoPendientes] = useState(false);
   const [resultadoEjecutarPendientes, setResultadoEjecutarPendientes] = useState<string | null>(null);
+  const PALABRA_CONFIRMACION_LANZAR = "LANZAR";
 
   async function cargarCandidatos() {
     setCargandoCandidatos(true);
@@ -175,6 +188,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     if (!res.ok) return;
     const body = await res.json();
     setPendientesLanzar(typeof body.total === "number" ? body.total : 0);
+    setPendientesLanzarFilas(Array.isArray(body.filas) ? body.filas : []);
   }
 
   useEffect(() => {
@@ -508,17 +522,38 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
 
   async function lanzarAprobadas() {
     setConfirmandoLanzar(false);
+    setTextoConfirmacionLanzar("");
     setEjecutandoPendientes(true);
     setResultadoEjecutarPendientes(null);
-    const res = await fetch("/api/ml/promociones/acciones/ejecutar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-    const body = await res.json().catch(() => ({}));
+    let res: Response;
+    let body: { error?: string; acciones?: { estado: string; tituloProducto: string | null; error: string | null }[] } = {};
+    try {
+      res = await fetch("/api/ml/promociones/acciones/ejecutar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      body = await res.json().catch(() => ({}));
+    } catch {
+      setEjecutandoPendientes(false);
+      mostrarToast("No se pudo conectar con el servidor — revisá tu conexión e intentá de nuevo.", "peligro");
+      return;
+    }
     setEjecutandoPendientes(false);
     if (res.ok) {
-      setResultadoEjecutarPendientes(`Se procesaron ${body.acciones.length} acción(es) pendiente(s).`);
+      const acciones = body.acciones ?? [];
+      const ejecutadas = acciones.filter((a) => a.estado === "ejecutada");
+      const fallidas = acciones.filter((a) => a.estado !== "ejecutada");
+      const partes = [`${ejecutadas.length} de ${acciones.length} acción(es) se lanzaron bien.`];
+      if (fallidas.length > 0) {
+        const detalle = fallidas.map((f) => `${f.tituloProducto ?? "producto"}: ${f.error ?? "falló"}`).join(" / ");
+        partes.push(`${fallidas.length} fallaron — ${detalle}`);
+      }
+      const texto = partes.join(" ");
+      setResultadoEjecutarPendientes(texto);
+      mostrarToast(texto, fallidas.length > 0 ? (ejecutadas.length > 0 ? "aviso" : "peligro") : "exito");
       void cargarCandidatos();
       void cargarPendientesLanzar();
     } else {
-      setResultadoEjecutarPendientes(body.error || "No se pudo ejecutar.");
+      const texto = body.error || "No se pudo ejecutar.";
+      setResultadoEjecutarPendientes(texto);
+      mostrarToast(texto, "peligro");
     }
   }
 
@@ -563,14 +598,18 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
         // etc.), el motivo tiene que verse, no solo quedar perdido en
         // el historial.
         const acciones = body.acciones ?? [];
-        const aceptadas = acciones.filter((a) => a.estado === "aceptada" || a.estado === "ejecutada");
+        const aceptadas = acciones.filter((a) => a.estado === "aceptada");
         const rechazadasAlValidar = acciones.filter((a) => a.estado === "rechazada");
+        // BUG REAL, URGENTE (rama fix-promociones-aprobar-no-ejecuta) —
+        // este endpoint YA NUNCA ejecuta nada contra Mercado Libre, sin
+        // importar el permiso de quien aprueba (ver app/api/ml/promociones/acciones/route.ts).
+        // El mensaje acá tiene que ser consistente con eso: "aprobar"
+        // nunca es "listo, ya se mandó" — siempre queda pendiente de
+        // "Lanzar aprobadas", un paso humano separado y explícito.
         const partes: string[] = [
           modoSimulacion
             ? `Simulación: ${acciones.length} acción(es) calculadas, nada se envió a Mercado Libre.`
-            : body.ejecutado
-              ? `Listo: ${aceptadas.length} acción(es) procesadas.`
-              : `Guardado como pendiente de aprobación/ejecución (${aceptadas.length} acción(es)) — todavía no se tocó Mercado Libre.`,
+            : `Aprobado: ${aceptadas.length} acción(es) — quedan pendientes de "Lanzar aprobadas a Mercado Libre", todavía no se tocó Mercado Libre.`,
         ];
         if (rechazadasAlValidar.length > 0) {
           const motivos = [...new Set(rechazadasAlValidar.map((a) => a.error).filter((m): m is string => !!m))];
@@ -674,7 +713,10 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                   variante="secundario"
                   chico
                   disabled={ejecutandoPendientes || pendientesLanzar === 0}
-                  onClick={() => setConfirmandoLanzar(true)}
+                  onClick={() => {
+                    void cargarPendientesLanzar(); // refresca la lista justo antes de mostrarla — nunca confirmar sobre algo desactualizado
+                    setConfirmandoLanzar(true);
+                  }}
                   title="Ejecuta contra Mercado Libre todas las acciones aceptadas y pendientes de esta empresa (fuera de modo simulación)."
                 >
                   {ejecutandoPendientes ? "Lanzando…" : `Lanzar aprobadas a Mercado Libre (${pendientesLanzar})`}
@@ -686,12 +728,45 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
             <Tarjeta className={styles.vistaPrevia}>
               <p style={{ fontSize: 13 }}>
                 Vas a lanzar <strong>{pendientesLanzar}</strong> acción(es) aprobadas contra Mercado Libre DE VERDAD — no hay vuelta atrás una vez que se envían.
+                {pendientesLanzar > pendientesLanzarFilas.length ? ` Mostrando las primeras ${pendientesLanzarFilas.length}.` : ""}
               </p>
+              <div style={{ maxHeight: 240, overflowY: "auto", marginTop: 10 }}>
+                <Tabla encabezados={["Cuenta", "Producto", "Tipo", "Precio antes", "Precio a lanzar"]}>
+                  {pendientesLanzarFilas.map((f) => (
+                    <FilaTabla key={f.id}>
+                      <CeldaTabla>{f.nicknameCuenta}</CeldaTabla>
+                      <CeldaTabla>{f.tituloProducto ?? f.itemId}</CeldaTabla>
+                      <CeldaTabla>{f.tipoPromocion}</CeldaTabla>
+                      <CeldaTabla>{formatoPesos(numero(f.precioAntes))}</CeldaTabla>
+                      <CeldaTabla>{formatoPesos(numero(f.precioDespues))}</CeldaTabla>
+                    </FilaTabla>
+                  ))}
+                </Tabla>
+              </div>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, marginTop: 10 }}>
+                Escribí <strong>{PALABRA_CONFIRMACION_LANZAR}</strong> para confirmar que revisaste la lista de arriba:
+                <input
+                  type="text"
+                  className="zx-control"
+                  style={{ maxWidth: 200 }}
+                  value={textoConfirmacionLanzar}
+                  onChange={(e) => setTextoConfirmacionLanzar(e.target.value)}
+                  autoComplete="off"
+                />
+              </label>
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <Boton type="button" variante="primario" chico onClick={lanzarAprobadas}>
+                <Boton type="button" variante="primario" chico disabled={textoConfirmacionLanzar.trim().toUpperCase() !== PALABRA_CONFIRMACION_LANZAR} onClick={lanzarAprobadas}>
                   Confirmar y lanzar
                 </Boton>
-                <Boton type="button" variante="secundario" chico onClick={() => setConfirmandoLanzar(false)}>
+                <Boton
+                  type="button"
+                  variante="secundario"
+                  chico
+                  onClick={() => {
+                    setConfirmandoLanzar(false);
+                    setTextoConfirmacionLanzar("");
+                  }}
+                >
                   Cancelar
                 </Boton>
               </div>

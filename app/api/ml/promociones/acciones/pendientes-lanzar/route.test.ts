@@ -14,14 +14,31 @@ vi.mock("@/lib/permisos", () => {
   return { requierePermiso: vi.fn(async () => ({ permisos: [] })), SinPermisoError };
 });
 
-const { totalProgramado } = vi.hoisted(() => ({ totalProgramado: { valor: 0 } }));
+// Rama fix-promociones-aprobar-no-ejecuta, punto 1 — la ruta ahora
+// hace DOS consultas en paralelo: el count(*) de siempre (.from().where())
+// y la lista de filas para el modal (.from().innerJoin().where().orderBy().limit()).
+// El mock diferencia las dos por la forma de la cadena, no por el
+// contenido real del .where() (mismo atajo de siempre en este repo).
+const { totalProgramado, filasProgramadas } = vi.hoisted(() => ({
+  totalProgramado: { valor: 0 },
+  filasProgramadas: { valor: [] as unknown[] },
+}));
 vi.mock("@/db/empresa-context", () => ({
   dbComoEmpresa: async (_empresaId: string, fn: (tx: unknown) => unknown) => {
+    type EncadenableJoin = { where: () => EncadenableJoin; orderBy: () => EncadenableJoin; limit: () => Promise<unknown[]> };
     const tx = {
       select: () => ({
-        from: () => ({
-          where: () => Promise.resolve([{ total: totalProgramado.valor }]),
-        }),
+        from: () => {
+          const encadenableJoin: EncadenableJoin = {
+            where: () => encadenableJoin,
+            orderBy: () => encadenableJoin,
+            limit: () => Promise.resolve(filasProgramadas.valor),
+          };
+          return {
+            where: () => Promise.resolve([{ total: totalProgramado.valor }]),
+            innerJoin: () => encadenableJoin,
+          };
+        },
       }),
     };
     return fn(tx);
@@ -47,6 +64,7 @@ describe("GET /api/ml/promociones/acciones/pendientes-lanzar — rama feat-promo
     vi.mocked(obtenerOCrearUsuarioActual).mockResolvedValue({ id: "usuario-1" } as never);
     vi.mocked(requierePermiso).mockResolvedValue({} as never);
     totalProgramado.valor = 0;
+    filasProgramadas.valor = [];
   });
 
   afterEach(() => vi.unstubAllGlobals());
@@ -77,5 +95,21 @@ describe("GET /api/ml/promociones/acciones/pendientes-lanzar — rama feat-promo
     const res = await GET();
     const body = await res.json();
     expect(body.total).toBe(0);
+  });
+
+  // Rama fix-promociones-aprobar-no-ejecuta, punto 1 — el modal de
+  // "Lanzar aprobadas" tiene que poder listar producto/precio/cuenta
+  // antes de dejar confirmar, nunca solo el número.
+  it("devuelve también las filas (producto, precio, cuenta) para el modal de confirmación", async () => {
+    totalProgramado.valor = 2;
+    filasProgramadas.valor = [
+      { id: "a1", cuentaMlId: "cuenta-1", nicknameCuenta: "Cuenta Uno", itemId: "MCO1", tituloProducto: "VITALCARNITINA", tipoPromocion: "DEAL", precioAntes: "80000", precioDespues: "69900" },
+      { id: "a2", cuentaMlId: "cuenta-1", nicknameCuenta: "Cuenta Uno", itemId: "MCO2", tituloProducto: "VITALREMOLACHA", tipoPromocion: "DEAL", precioAntes: "75000", precioDespues: "60000" },
+    ];
+    const res = await GET();
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.filas).toHaveLength(2);
+    expect(body.filas[0]).toMatchObject({ tituloProducto: "VITALCARNITINA", nicknameCuenta: "Cuenta Uno", precioDespues: "69900" });
   });
 });

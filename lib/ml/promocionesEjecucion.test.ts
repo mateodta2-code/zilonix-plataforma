@@ -371,6 +371,63 @@ describe("ejecutarLoteDeAcciones — HIGH 2 / MED 6 / LOW 11 (review de Pablo)",
     expect(updatesRegistrados[0]!.estado).toBe("fallida");
   });
 
+  // Punto 3 (rama fix-promociones-aprobar-no-ejecuta) — tope de
+  // concurrencia real de 4 CUENTAS a la vez, nunca todas sin límite.
+  it("nunca más de 4 cuentas ejecutando a la vez, con tope de concurrencia real (no secuencial)", async () => {
+    filasPorTabla.set(promocionesCandidatos, [candidato()]);
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+
+    let enVuelo = 0;
+    let maximoEnVuelo = 0;
+    participarPromocionMlMock.mockImplementation(async () => {
+      enVuelo++;
+      maximoEnVuelo = Math.max(maximoEnVuelo, enVuelo);
+      await new Promise((r) => setTimeout(r, 5));
+      enVuelo--;
+      return { ok: true, status: 200, textoCrudo: "{}" };
+    });
+
+    const filas = Array.from({ length: 10 }, (_, i) => accion({ cuentaMlId: `cuenta-${i}`, precioDespues: "90000" }));
+    await ejecutarLoteDeAcciones("empresa-1", "usuario-1", filas);
+
+    expect(participarPromocionMlMock).toHaveBeenCalledTimes(10);
+    expect(maximoEnVuelo).toBeLessThanOrEqual(4);
+    expect(maximoEnVuelo).toBeGreaterThan(1); // de verdad corrió en paralelo, no una cuenta por vez
+  });
+
+  // Punto 4 (rama fix-promociones-aprobar-no-ejecuta) — bug real
+  // diagnosticado con el 400 de VITALCLOROFULL: el motivo real de
+  // Mercado Libre (cause/message del cuerpo) tiene que quedar en
+  // `error`, nunca el genérico "Mercado Libre respondió 400."
+  it("cuando ML rechaza con un 400, `error` guarda el motivo real del cuerpo (cause/message), nunca el genérico", async () => {
+    filasPorTabla.set(promocionesCandidatos, [candidato()]);
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    participarPromocionMlMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      textoCrudo: JSON.stringify({ message: "Bad request", cause: [{ code: "deal_price.invalid", message: "deal_price must be between 50000 and 95000" }] }),
+    });
+
+    await ejecutarLoteDeAcciones("empresa-1", "usuario-1", [accion({ precioDespues: "90000" })]);
+
+    expect(updatesRegistrados[0]!.estado).toBe("fallida");
+    expect(updatesRegistrados[0]!.error).toBe("deal_price must be between 50000 and 95000");
+  });
+
+  it("cuando ML rechaza sin ningún cuerpo útil (no-JSON o sin cause/message): cae al genérico, nunca deja `error` vacío", async () => {
+    filasPorTabla.set(promocionesCandidatos, [candidato()]);
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    participarPromocionMlMock.mockResolvedValue({ ok: false, status: 503, textoCrudo: "" });
+
+    await ejecutarLoteDeAcciones("empresa-1", "usuario-1", [accion({ precioDespues: "90000" })]);
+
+    expect(updatesRegistrados[0]!.estado).toBe("fallida");
+    expect(updatesRegistrados[0]!.error).toBe("Mercado Libre respondió 503.");
+  });
+
   it("'salir': nunca llama a Mercado Libre, queda 'fallida' con el motivo documentado (MED 4 / LOW 11)", async () => {
     await ejecutarLoteDeAcciones("empresa-1", "usuario-1", [accion({ accion: "salir" })]);
     expect(participarPromocionMlMock).not.toHaveBeenCalled();

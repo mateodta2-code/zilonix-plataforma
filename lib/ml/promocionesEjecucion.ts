@@ -1,8 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { promocionesAcciones, promocionesCandidatos } from "@/db/schema";
+import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import type { PromocionCrudaMl } from "@/lib/ml/cliente";
-import { modificarPromocionMl, participarPromocionMl } from "@/lib/ml/cliente";
+import { modificarPromocionMl, motivoErrorEscrituraMl, participarPromocionMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import {
   calcularCandidatosItem,
@@ -272,9 +273,19 @@ async function resolverYEjecutar(empresaId: string, fila: AccionFila, token: str
     return { estado: "fallida", error: error instanceof Error ? error.message.slice(0, 400) : "No se pudo ejecutar.", resultadoMl: null };
   }
 
+  // Punto 4 (rama fix-promociones-aprobar-no-ejecuta) — bug real
+  // diagnosticado con el 400 de VITALCLOROFULL: el cuerpo real de la
+  // respuesta de Mercado Libre YA llegaba hasta acá (quedaba guardado
+  // en resultadoMl.respuesta), pero `error` — el único campo que
+  // muestra la UI (Historial, chip con title) — se llenaba con un
+  // genérico "Mercado Libre respondió 400.", inútil para diagnosticar
+  // nada. Ahora se extrae el motivo real (cause/message del cuerpo) y,
+  // si Mercado Libre no mandó ninguno de los dos, se cae al genérico
+  // de siempre (nunca deja `error` vacío en una fila fallida).
+  const motivoReal = respuestaMl.ok ? null : motivoErrorEscrituraMl(respuestaMl.textoCrudo);
   return {
     estado: respuestaMl.ok ? "ejecutada" : "fallida",
-    error: respuestaMl.ok ? null : `Mercado Libre respondió ${respuestaMl.status}.`,
+    error: respuestaMl.ok ? null : motivoReal ?? `Mercado Libre respondió ${respuestaMl.status}.`,
     resultadoMl: { ok: respuestaMl.ok, status: respuestaMl.status, respuesta: respuestaMl.textoCrudo.slice(0, 500) },
   };
 }
@@ -288,6 +299,19 @@ async function marcarResultado(empresaId: string, filaId: string, usuarioId: str
   );
 }
 
+// Punto 3 (rama fix-promociones-aprobar-no-ejecuta) — tope de
+// concurrencia real: antes, TODAS las cuentas del lote arrancaban en
+// paralelo sin ningún límite (un lote con muchas cuentas podía
+// disparar decenas de requests simultáneos contra la API de Mercado
+// Libre de una sola vez). Mismo helper ya usado en
+// buscarPromocionesMultiCuenta.ts y promocionesParticipando.ts
+// (lib/concurrencia.ts) — máximo 4 CUENTAS procesándose a la vez;
+// dentro de cada cuenta sigue siendo estrictamente secuencial, fila
+// por fila, cortando esa cuenta puntual en la primera falla (sin
+// tocar esto: necesita orden real, no se puede paralelizar sin perder
+// el corte temprano).
+const TOPE_CONCURRENCIA_CUENTAS = 4;
+
 // Punto de entrada único para ejecutar un lote de filas "aceptada" de
 // verdad contra Mercado Libre — agrupa por cuenta (token una vez por
 // cuenta) y corta esa cuenta puntual ante la primera falla, nunca el
@@ -299,22 +323,20 @@ export async function ejecutarLoteDeAcciones(empresaId: string, usuarioId: strin
     porCuenta.get(fila.cuentaMlId)!.push(fila);
   }
 
-  await Promise.all(
-    [...porCuenta.entries()].map(async ([cuentaMlId, filasCuenta]) => {
-      let token: string;
-      try {
-        token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
-      } catch (error) {
-        const motivo = error instanceof Error ? error.message : "No se pudo obtener el token.";
-        await Promise.all(filasCuenta.map((f) => marcarResultado(empresaId, f.id, usuarioId, { estado: "fallida", error: motivo, resultadoMl: null })));
-        return;
-      }
+  await conConcurrenciaLimitada([...porCuenta.entries()], TOPE_CONCURRENCIA_CUENTAS, async ([cuentaMlId, filasCuenta]) => {
+    let token: string;
+    try {
+      token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
+    } catch (error) {
+      const motivo = error instanceof Error ? error.message : "No se pudo obtener el token.";
+      await Promise.all(filasCuenta.map((f) => marcarResultado(empresaId, f.id, usuarioId, { estado: "fallida", error: motivo, resultadoMl: null })));
+      return;
+    }
 
-      for (const fila of filasCuenta) {
-        const resultado = await resolverYEjecutar(empresaId, fila, token);
-        await marcarResultado(empresaId, fila.id, usuarioId, resultado);
-        if (resultado.estado !== "ejecutada") break; // esta cuenta se detiene; las demás ya corren en paralelo, siguen de largo
-      }
-    })
-  );
+    for (const fila of filasCuenta) {
+      const resultado = await resolverYEjecutar(empresaId, fila, token);
+      await marcarResultado(empresaId, fila.id, usuarioId, resultado);
+      if (resultado.estado !== "ejecutada") break; // esta cuenta se detiene; el resto del lote sigue (hasta 4 cuentas a la vez)
+    }
+  });
 }

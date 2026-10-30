@@ -431,3 +431,91 @@ describe("PaginaPromociones — punto 3 (rama fix-promociones-aprobadas-particip
     await screen.findByText("Producto participando"); // sigue ahí, nada se mandó
   });
 });
+
+// BUG REAL, URGENTE (rama fix-promociones-aprobar-no-ejecuta) —
+// confirmado en staging (cuenta sharel): aprobar con permiso de
+// ejecutar activo mandaba la promoción real a ML sin pasar por este
+// modal. Acá se prueba la mitad que vive en el cliente: "Lanzar"
+// NUNCA llama a /acciones/ejecutar antes de que la persona escriba la
+// palabra de confirmación — el fix del servidor (aprobar nunca
+// ejecuta) tiene su propio test en acciones/route.test.ts.
+describe("PaginaPromociones — punto 1 (rama fix-promociones-aprobar-no-ejecuta): Lanzar exige confirmación explícita", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function filaPendienteLanzar(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "accion-1",
+      cuentaMlId: "cuenta-1",
+      nicknameCuenta: "Cuenta 1",
+      itemId: "MCO1",
+      tituloProducto: "VITALCARNITINA",
+      tipoPromocion: "DEAL",
+      precioAntes: "80000",
+      precioDespues: "69900",
+      ...overrides,
+    };
+  }
+
+  it("el modal lista el producto/precio/cuenta y 'Confirmar y lanzar' arranca deshabilitado", async () => {
+    const fetchMock = mockearFetchBase((url) => {
+      if (url.includes("/pendientes-lanzar")) return new Response(JSON.stringify({ total: 1, filas: [filaPendienteLanzar()] }), { status: 200 });
+      if (url.includes("/candidatos")) return respuestaCandidatos([]);
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Lanzar aprobadas a Mercado Libre \(1\)/ }));
+
+    expect(await screen.findByText("VITALCARNITINA")).toBeTruthy();
+    expect(await screen.findByText("$69.900")).toBeTruthy();
+    expect(estaDeshabilitado("Confirmar y lanzar")).toBe(true);
+  });
+
+  it("Lanzar NUNCA llama a /acciones/ejecutar hasta escribir la palabra de confirmación — después sí", async () => {
+    let ejecutarLlamado = false;
+    const fetchMock = mockearFetchBase((url, init) => {
+      if (url.includes("/acciones/ejecutar") && init?.method === "POST") {
+        ejecutarLlamado = true;
+        return new Response(JSON.stringify({ ok: true, ejecutado: true, acciones: [{ estado: "ejecutada", tituloProducto: "VITALCARNITINA", error: null }] }), { status: 200 });
+      }
+      if (url.includes("/pendientes-lanzar")) return new Response(JSON.stringify({ total: 1, filas: [filaPendienteLanzar()] }), { status: 200 });
+      if (url.includes("/candidatos")) return respuestaCandidatos([]);
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Lanzar aprobadas a Mercado Libre \(1\)/ }));
+    await screen.findByText("VITALCARNITINA");
+
+    // Clic con el botón todavía deshabilitado: no debería poder
+    // dispararse nada (jsdom respeta disabled, pero lo confirmamos).
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar y lanzar" }));
+    expect(ejecutarLlamado).toBe(false);
+
+    const inputConfirmacion = screen.getByRole("textbox");
+    fireEvent.change(inputConfirmacion, { target: { value: "lanzar" } }); // minúsculas también cuentan
+    expect(estaDeshabilitado("Confirmar y lanzar")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar y lanzar" }));
+    await waitFor(() => expect(ejecutarLlamado).toBe(true));
+  });
+
+  it("si cancela, nunca llama a /acciones/ejecutar", async () => {
+    const fetchMock = mockearFetchBase((url) => {
+      if (url.includes("/acciones/ejecutar")) throw new Error("no debería llamarse");
+      if (url.includes("/pendientes-lanzar")) return new Response(JSON.stringify({ total: 1, filas: [filaPendienteLanzar()] }), { status: 200 });
+      if (url.includes("/candidatos")) return respuestaCandidatos([]);
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Lanzar aprobadas a Mercado Libre \(1\)/ }));
+    await screen.findByText("VITALCARNITINA");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByText("VITALCARNITINA")).toBeNull();
+  });
+});

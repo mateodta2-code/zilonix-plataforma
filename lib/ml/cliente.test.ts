@@ -20,6 +20,7 @@ import {
   LimiteMercadoLibreError,
   listarItemsActivosMl,
   modificarPromocionMl,
+  motivoErrorEscrituraMl,
   participarPromocionMl,
   pedirLecturaMl,
   linkPublicacion,
@@ -1261,6 +1262,44 @@ describe("participarPromocionMl/modificarPromocionMl — rama feat-promociones",
     await expect(
       participarPromocionMl("MCO111", "token", { promotion_id: "p1", promotion_type: "DEAL", deal_price: 1, start_date: "x", finish_date: "y" })
     ).rejects.toBeInstanceOf(LimiteMercadoLibreError);
+  });
+});
+
+// Rama fix-promociones-aprobar-no-ejecuta, punto 4 — bug real
+// encontrado al diagnosticar el 400 de VITALCLOROFULL: el cuerpo real
+// del error de ML llegaba hasta el código, pero se descartaba antes
+// de guardarse — esta función es la que ahora lo extrae.
+describe("motivoErrorEscrituraMl — rama fix-promociones-aprobar-no-ejecuta, punto 4", () => {
+  it("prefiere 'cause' (más específico) cuando existe", () => {
+    const texto = JSON.stringify({ message: "Bad request", cause: [{ code: "deal_price.invalid", message: "deal_price must be between 1000 and 2000" }] });
+    expect(motivoErrorEscrituraMl(texto)).toBe("deal_price must be between 1000 and 2000");
+  });
+
+  it("junta varios motivos de 'cause' si hay más de uno", () => {
+    const texto = JSON.stringify({ cause: [{ message: "motivo uno" }, { message: "motivo dos" }] });
+    expect(motivoErrorEscrituraMl(texto)).toBe("motivo uno / motivo dos");
+  });
+
+  it("'cause' con 'description' en vez de 'message'", () => {
+    const texto = JSON.stringify({ cause: [{ code: "x", description: "item not eligible" }] });
+    expect(motivoErrorEscrituraMl(texto)).toBe("item not eligible");
+  });
+
+  it("sin 'cause' útil: cae a 'message'", () => {
+    expect(motivoErrorEscrituraMl(JSON.stringify({ message: "Invalid promotion type" }))).toBe("Invalid promotion type");
+  });
+
+  it("sin 'message': cae a 'error'", () => {
+    expect(motivoErrorEscrituraMl(JSON.stringify({ error: "bad_request" }))).toBe("bad_request");
+  });
+
+  it("texto vacío o no-JSON: null, nunca lanza", () => {
+    expect(motivoErrorEscrituraMl("")).toBeNull();
+    expect(motivoErrorEscrituraMl("<html>no es json</html>")).toBeNull();
+  });
+
+  it("JSON válido sin ninguno de los 3 campos: null", () => {
+    expect(motivoErrorEscrituraMl(JSON.stringify({ status: 400 }))).toBeNull();
   });
 });
 

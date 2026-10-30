@@ -3,32 +3,37 @@ import { NextResponse } from "next/server";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { promocionesAcciones, promocionesCandidatos } from "@/db/schema";
 import { requierePermiso } from "@/lib/permisos";
-import { tienePermiso } from "@/lib/roles-plantillas";
-import { ejecutarLoteDeAcciones, validarCandidatoParaEscritura } from "@/lib/ml/promocionesEjecucion";
+import { validarCandidatoParaEscritura } from "@/lib/ml/promocionesEjecucion";
 import { urlPublicaBase } from "@/lib/url-publica";
 import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../_ayudantes";
 
-// Rama feat-promociones, punto 3/5 — "nada se aplica en ML sin ese
-// clic de confirmación". Un solo endpoint para el lote completo:
-// SIEMPRE exige "aprobar" (marca las acciones como aceptadas y queda
-// en el historial); si quien llama TAMBIÉN tiene "ejecutar", sigue de
-// una vez y dispara el cambio real contra Mercado Libre — si no, el
-// lote queda "aceptada", pendiente de que alguien con permiso de
-// ejecutar lo dispare después desde POST .../acciones/ejecutar (MED 7,
-// 2 pasos humanos reales, decisión de Mateo). "modoSimulacion" nunca
-// llega a tocar Mercado Libre, pase lo que pase con el permiso de
-// ejecutar — calcula y deja registro igual, para que se vea qué se
-// habría hecho.
-//
-// Punto 5 — "si una cuenta falla al aplicar, esa cuenta se detiene y
-// las demás siguen": el corte es por CUENTA, nunca global (ver
-// lib/ml/promocionesEjecucion.ts, ejecutarLoteDeAcciones).
+// BUG REAL, URGENTE (rama fix-promociones-aprobar-no-ejecuta) —
+// confirmado en staging, cuenta sharel: Mateo (Dueño) le dio "Sí" a 3
+// filas y 2 se mandaron DE VERDAD a Mercado Libre (VITALCARNITINA y
+// VITALREMOLACHA quedaron "ejecutada", cambiando precios reales) sin
+// que nadie apretara "Lanzar aprobadas" — la tercera (VITALCLOROFULL)
+// falló con un 400 real de ML. Causa real: este endpoint (antes)
+// SEGUÍA de una al lote de ejecución si quien llamaba TAMBIÉN tenía
+// el permiso "ejecutar" (Dueño/Gerente lo tienen por default,
+// lib/roles-plantillas.ts) — "aprobar" y "ejecutar" quedaban
+// mezclados en un solo clic para ese rol, exactamente lo que la regla
+// de negocio dice que nunca puede pasar ("nada se lanza a Mercado
+// Libre real hasta la prueba controlada"). Corregido: este endpoint
+// NUNCA llama a Mercado Libre, sin importar el permiso de quien
+// llama — "aprobar" SOLO marca la fila como "aceptada" en
+// promociones_acciones. El ÚNICO lugar que ejecuta de verdad es
+// POST .../acciones/ejecutar ("Lanzar aprobadas"), con su propio
+// requierePermiso("ejecutar") y, del lado del cliente, un modal de
+// confirmación explícito (ver PaginaPromociones.tsx).
 //
 // Code review de Pablo — HIGH 2: esta ruta NUNCA confía en
 // candidato.precioSugerido/cumpleReglas del snapshot ni en nada que
 // mande el cliente más allá de candidatoId/accion — todo decision de
 // dinero se recalcula fresco en lib/ml/promocionesEjecucion.ts, con
-// reglas y piso leídos de la base en este mismo instante.
+// reglas y piso leídos de la base en este mismo instante. Esa
+// revalidación sigue corriendo acá (para que la fila quede
+// "aceptada"/"rechazada" con el motivo correcto desde ya) — lo único
+// que cambió es que NUNCA sigue de una a escribir en Mercado Libre.
 const TIPO_ACCION = ["participar", "modificar", "salir"] as const;
 type TipoAccion = (typeof TIPO_ACCION)[number];
 
@@ -136,15 +141,13 @@ export async function POST(request: Request) {
   if (sesion instanceof NextResponse) return sesion;
   const { usuario, empresa } = sesion;
 
-  let miMembresia;
   try {
-    miMembresia = await requierePermiso(usuario.id, empresa.id, "promociones", "aprobar");
+    await requierePermiso(usuario.id, empresa.id, "promociones", "aprobar");
   } catch (error) {
     const respuestaPermiso = respuestaSiSinPermiso(error);
     if (respuestaPermiso) return respuestaPermiso;
     throw error;
   }
-  const puedeEjecutar = tienePermiso(miMembresia.permisos, "promociones", "ejecutar");
 
   let cuerpo: unknown;
   try {
@@ -321,19 +324,12 @@ export async function POST(request: Request) {
     filasCreadas.push(fila);
   }
 
-  const aEjecutar = filasCreadas.filter((f) => f.estado === "aceptada");
-
-  if (modoSimulacion || !puedeEjecutar || aEjecutar.length === 0) {
-    return NextResponse.json({ ok: true, acciones: filasCreadas, ejecutado: false });
-  }
-
-  await ejecutarLoteDeAcciones(empresa.id, usuario.id, aEjecutar);
-
-  const idsEjecutados = aEjecutar.map((f) => f.id);
-  const filasFinal = await dbComoEmpresa(empresa.id, (tx) =>
-    tx.select().from(promocionesAcciones).where(inArray(promocionesAcciones.id, idsEjecutados))
-  );
-  const filaFinalPorId = new Map(filasFinal.map((f) => [f.id, f]));
-
-  return NextResponse.json({ ok: true, acciones: filasCreadas.map((f) => filaFinalPorId.get(f.id) ?? f), ejecutado: true });
+  // BUG REAL corregido acá — este endpoint NUNCA ejecuta contra
+  // Mercado Libre, sin importar el permiso de quien llama ni
+  // `modoSimulacion`. "aprobar" deja la fila "aceptada" (o
+  // "rechazada" si no pasó la revalidación) y ahí se queda — lanzarla
+  // de verdad es SIEMPRE un paso humano separado y explícito desde
+  // POST .../acciones/ejecutar ("Lanzar aprobadas"), nunca un efecto
+  // secundario de aprobar.
+  return NextResponse.json({ ok: true, acciones: filasCreadas, ejecutado: false });
 }
