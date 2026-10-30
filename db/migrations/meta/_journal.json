@@ -134,6 +134,13 @@
       "when": 1793301448658,
       "tag": "0018_backfill_permisos_promociones",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793332387294,
+      "tag": "0019_icy_terror",
+      "breakpoints": true
     }
   ]
 }

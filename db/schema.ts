@@ -669,6 +669,23 @@ export const despachosMl = pgTable(
     substatus: text("substatus"),
     imprimible: boolean("imprimible").notNull().default(false),
     etiquetaImpresaTs: timestamp("etiqueta_impresa_ts", { withTimezone: true }),
+    // Fase 1 de Despachos (issue "Despachos") — "expected_date" real de
+    // GET /shipments/{id}/sla (lib/ml/cliente.ts) — la hora límite para
+    // dejarlo en la agencia/recogida. Se guarda al sincronizar, nunca
+    // se pide en vivo en cada carga de la pantalla (ese SLA no cambia
+    // una vez el envío está armado, confirmado contra el código real
+    // de zilonix-os-web).
+    slaExpectedDate: timestamp("sla_expected_date", { withTimezone: true }),
+    // "Ver guía" (normal o sticker) tiene que abrirse al menos una vez
+    // antes de poder marcar despachado — gate real pedido en esta
+    // tarea, nunca al revés. null = todavía no se abrió ninguna.
+    guiaVistaTs: timestamp("guia_vista_ts", { withTimezone: true }),
+    // "Marcar despachado" NUNCA llama a Mercado Libre (a propósito,
+    // ver lib/ml/despachos.ts) — solo registra que ESTA persona, en
+    // ESTE momento, confirmó que el paquete salió. "Deshacer" (10 min)
+    // limpia los dos campos, nunca se guarda un historial de deshacer.
+    despachadoTs: timestamp("despachado_ts", { withTimezone: true }),
+    despachadoPor: uuid("despachado_por").references(() => usuarios.id, { onDelete: "set null" }),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
