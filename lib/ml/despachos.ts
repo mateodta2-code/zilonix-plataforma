@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl, despachosMl, pedidoItems, pedidos } from "@/db/schema";
+import { bodegas, cuentasMl, despachosMl, pedidoItems, pedidos, stockBodega } from "@/db/schema";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { obtenerEtiquetaPdfMl, obtenerShipmentMl, obtenerSlaEnvioMl } from "@/lib/ml/cliente";
 import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike, rangoDiaBogota } from "@/lib/filtros-listado";
@@ -21,6 +21,72 @@ function calcularImprimible(status: string | null, substatus: string | null): bo
   if (status && !ESTADOS_IMPRIMIBLES.includes(status)) return false;
   if (substatus && SUBESTADOS_YA_SALIO.includes(substatus)) return false;
   return true;
+}
+
+// Traducción de los estados reales de /shipments/{id} — portada tal
+// cual del Zilonix OS actual (lib/mercadolibre-despachos.js,
+// ESTADO_ENVIO_LABELS/SUBESTADO_ENVIO_LABELS), confirmada contra la
+// tabla OFICIAL de developers.mercadolibre.com (GET
+// /shipment_statuses) — no son nombres adivinados, son los IDs reales
+// que manda la API. Solo se traducen los que de verdad importan para
+// despachar; un status/substatus nuevo que no esté acá se muestra tal
+// cual (con "_" cambiado por espacio), nunca se inventa una traducción.
+const ESTADO_ENVIO_LABELS: Record<string, string> = {
+  pending: "Pendiente",
+  handling: "En preparación",
+  ready_to_ship: "Listo para despachar",
+  shipped: "En camino",
+  delivered: "Entregado",
+  not_delivered: "No se pudo entregar",
+  not_verified: "Sin verificar",
+  cancelled: "Cancelado",
+};
+const SUBESTADO_ENVIO_LABELS: Record<string, string> = {
+  ready_to_print: "listo para imprimir la guía",
+  invoice_pending: "falta la factura",
+  printed: "guía impresa, todavía no se ha entregado",
+  ready_for_dropoff: "lista para dejar en la agencia",
+  dropped_off: "ya se entregó en la agencia",
+  in_pickup_list: "en lista de recogida",
+  ready_for_pickup: "lista para que la recoja el transportador",
+  on_route_to_pickup: "el transportador va en camino a recogerla",
+  picking_up: "el transportador está recogiendo la carga",
+  picked_up: "el transportador/domiciliario ya la recogió",
+  authorized_by_carrier: "autorizada por el transportador",
+  in_hub: "en centro de distribución de Mercado Libre",
+  in_warehouse: "en bodega de Mercado Libre",
+  in_transit: "en tránsito por la red de Mercado Libre",
+  delayed: "con demora",
+  waiting_for_withdrawal: "esperando que la retiren",
+  contact_with_carrier_required: "hay que contactar al transportador",
+  out_for_delivery: "el domiciliario va en camino al comprador",
+  at_the_door: "el domiciliario está en la puerta del comprador",
+  soon_deliver: "a punto de entregarse",
+  receiver_absent: "el destinatario no estaba",
+  refused_delivery: "el comprador rechazó la entrega",
+  bad_address: "dirección incorrecta",
+  changed_address: "el comprador cambió la dirección",
+  delivery_failed: "intento de entrega fallido",
+  delivery_blocked: "entrega bloqueada",
+  claimed_me: "con reclamo del comprador",
+  returning_to_sender: "regresando al remitente",
+  returning_to_hub: "regresando al centro de distribución",
+  returned_to_hub: "devuelto al centro de distribución",
+  returned_to_agency: "devuelto a la agencia",
+  returned: "devuelto al remitente",
+  destroyed: "destruido",
+  lost: "extraviado",
+  stolen: "robado",
+  damaged: "dañado",
+};
+
+export function etiquetaEstadoEnvio(status: string | null, substatus: string | null): string | null {
+  if (!status) return null;
+  const base = ESTADO_ENVIO_LABELS[status] ?? status.replace(/_/g, " ");
+  // No siempre el substatus agrega información útil (a veces repite el
+  // status) — solo se muestra si de verdad suma algo.
+  const sub = substatus ? SUBESTADO_ENVIO_LABELS[substatus] ?? substatus.replace(/_/g, " ") : null;
+  return sub ? `${base} — ${sub}` : base;
 }
 
 // Fase 1 de Despachos — issue "Despachos": las dos llamadas a Mercado
@@ -266,7 +332,7 @@ export function esFlex(logisticType: string | null): boolean {
   return logisticType === "self_service";
 }
 
-// Chip "Plazo: vie, 04:00 p. m." — hora de Bogotá, nunca la del
+// Chip "⏰ Plazo: vie, 04:00 p. m." — hora de Bogotá, nunca la del
 // servidor (Railway corre en UTC). Sin plazo (sla_expected_date
 // null): la tarjeta no muestra chip, nunca se inventa una hora.
 export function formatoPlazoChip(slaExpectedDate: Date | null): string | null {
@@ -278,11 +344,27 @@ export function formatoPlazoChip(slaExpectedDate: Date | null): string | null {
     minute: "2-digit",
     hour12: true,
   });
-  return `Plazo: ${texto}`;
+  return `⏰ Plazo: ${texto}`;
 }
 
 export function esPlazoVencido(slaExpectedDate: Date | null, ahora: Date): boolean {
   return slaExpectedDate != null && slaExpectedDate.getTime() < ahora.getTime();
+}
+
+const VENTANA_POR_VENCER_MS = 2 * 60 * 60 * 1000;
+
+// 3 estados para el color del chip: "vencido" (rojo, ya pasó),
+// "por_vencer" (ámbar, faltan menos de 2 horas — pedido explícito de
+// la tarea para que no agarre por sorpresa) y "normal" (plata, el
+// resto). null cuando no hay plazo (sin chip que colorear).
+export type EstadoPlazo = "vencido" | "por_vencer" | "normal";
+
+export function estadoPlazo(slaExpectedDate: Date | null, ahora: Date): EstadoPlazo | null {
+  if (!slaExpectedDate) return null;
+  const faltanMs = slaExpectedDate.getTime() - ahora.getTime();
+  if (faltanMs < 0) return "vencido";
+  if (faltanMs < VENTANA_POR_VENCER_MS) return "por_vencer";
+  return "normal";
 }
 
 const DIAS_SEMANA = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
@@ -294,21 +376,19 @@ function ymdBogota(fecha: Date): string {
 
 // Mismo algoritmo de diffDias por YMD que ya usa el Zilonix OS actual
 // (components/negocio/MercadoLibreDespachos.js: fechaColombiaYMD +
-// etiquetaFecha, confirmado contra ese código real) — extendido para
-// días FUTUROS porque acá se agrupa por el PLAZO (sla_expected_date),
-// que puede caer mañana o más adelante, no solo hoy/ayer/antier como
-// en OS (que agrupa por la fecha del pedido, ya pasada). Un plazo ya
-// vencido (diffDias negativo) va todo a un solo grupo "Vencidos": lo
-// que importa ahí no es CUÁNTO atrasado, sino despacharlo ya — cada
-// tarjeta ya muestra su propio chip rojo con el detalle.
-export function etiquetaDiaPlazo(slaExpectedDate: Date | null, ahora: Date): string {
-  if (!slaExpectedDate) return "Sin plazo definido";
+// etiquetaFecha, confirmado contra ese código real) — bug reportado
+// por Mateo en staging: la Fase 1 agrupaba por PLAZO
+// (sla_expected_date), así que un pedido viejo sin plazo caía en "Sin
+// plazo definido" sin importar hace cuánto se vendió. Ahora se agrupa
+// por la FECHA DE VENTA (pedidos.fecha), siempre en el pasado — mismo
+// criterio que OS, sin el caso "Mañana" (que ahí no existe).
+export function etiquetaDiaVenta(fecha: Date, ahora: Date): string {
   const hoyYmd = ymdBogota(ahora);
-  const ymd = ymdBogota(slaExpectedDate);
-  const diffDias = Math.round((Date.parse(`${ymd}T00:00:00Z`) - Date.parse(`${hoyYmd}T00:00:00Z`)) / 86_400_000);
-  if (diffDias < 0) return "Vencidos";
+  const ymd = ymdBogota(fecha);
+  const diffDias = Math.round((Date.parse(`${hoyYmd}T00:00:00Z`) - Date.parse(`${ymd}T00:00:00Z`)) / 86_400_000);
   if (diffDias === 0) return "Hoy";
-  if (diffDias === 1) return "Mañana";
+  if (diffDias === 1) return "Ayer";
+  if (diffDias === 2) return "Antier";
   const [anio, mes, dia] = ymd.split("-").map(Number);
   const diaSemana = DIAS_SEMANA[new Date(Date.UTC(anio, mes - 1, dia)).getUTCDay()];
   return `${diaSemana.charAt(0).toUpperCase()}${diaSemana.slice(1)} ${dia} de ${MESES[mes - 1]}`;
@@ -320,6 +400,14 @@ export type ItemTarjetaDespacho = {
   cantidad: number;
   skuCodigo: string | null;
   imagenUrl: string | null;
+  // "Vendido a: $129.000" — precio real de la venta (pedido_items.
+  // precio_unitario), no el de la publicación actual (que puede haber
+  // cambiado desde entonces). numeric de Postgres llega como string.
+  precioUnitario: string;
+  // Suma de stock_bodega.disponible en bodegas ACTIVAS para este SKU
+  // (WMS de Seller) — null si el ítem no tiene sku_id resuelto (ML no
+  // trajo SKU o no existe en la maestra), nunca 0 inventado.
+  stockDisponible: number | null;
 };
 
 export type TarjetaDespacho = {
@@ -340,11 +428,13 @@ export type TarjetaDespacho = {
   cuentaNickname: string;
   pedidoIdExterno: string;
   fechaPedido: Date;
-  // "Vendido a" (comprador): despachos_ml/pedidos no guardan ningún
-  // nickname de comprador hoy (confirmado: no existe esa columna en
-  // db/schema.ts) — nunca se inventa el dato, queda null hasta que
-  // una tarea aparte lo traiga y lo guarde de verdad.
+  // Comprador y bodega asignada: ninguna de las dos existe hoy en el
+  // esquema (confirmado: no hay nickname de comprador en pedidos/
+  // despachos_ml, y la asignación de bodega a un pedido es la fase 3,
+  // "Cambiar a mano…" todavía deshabilitado) — nunca se inventa el
+  // dato, quedan null hasta que esas tareas aparte las traigan.
   comprador: null;
+  bodegaAsignada: null;
   items: ItemTarjetaDespacho[];
 };
 
@@ -356,6 +446,21 @@ export type FiltroTarjetasDespacho = {
   pestaña?: PestañaDespachos; // default "pendientes"
 };
 
+// Bug real encontrado por Mateo en staging: la pantalla mostraba
+// pedidos ya ENTREGADOS (delivered, de meses atrás) en "Pendientes",
+// con "Sin plazo definido" — porque el único filtro era despachado_ts
+// IS NULL (columna nueva, siempre null en filas viejas). Confirmado
+// contra el Zilonix OS actual (lib/mercadolibre-despachos.js,
+// obtenerDespachosPendientes): ahí la búsqueda real contra Mercado
+// Libre es orders/search con shipping.status=ready_to_ship — "qué
+// está listo para despachar" es, literalmente, ready_to_ship, nunca
+// "lo que no esté marcado despachado en esta base". Se agrega ese
+// mismo filtro acá (sobre el status ya sincronizado en despachos_ml)
+// para la pestaña "pendientes" — "despachados_hoy" sigue sin filtrar
+// por status: una vez una persona lo marcó despachado acá, importa
+// poco qué diga ahora el status en vivo de Mercado Libre.
+const STATUS_PENDIENTES = "ready_to_ship";
+
 // Tarjetas de la Fase 1: a diferencia de listarDespachosPendientes
 // (que es "qué queda por IMPRIMIR"), esto es "qué queda por
 // DESPACHAR" — el criterio es despachado_ts, no etiqueta_impresa_ts.
@@ -363,8 +468,12 @@ export type FiltroTarjetasDespacho = {
 // sus items) en vez de un JOIN con pedido_items: un despacho puede
 // tener varias líneas y un solo JOIN duplicaría toda la fila del
 // despacho por cada línea — más simple traerlas aparte y acomodarlas.
+//
+// Orden: por fecha de VENTA descendente (pedido de Mateo, corrige la
+// Fase 1 que ordenaba por plazo) — lo más nuevo arriba, agrupado
+// luego por día de venta en la pantalla (etiquetaDiaVenta).
 export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTarjetasDespacho = {}): Promise<TarjetaDespacho[]> {
-  return dbComoEmpresa(empresaId, async (tx) => {
+  const tarjetas = await dbComoEmpresa(empresaId, async (tx) => {
     const condiciones = [eq(despachosMl.empresaId, empresaId), ne(despachosMl.logisticType, "fulfillment"), isNotNull(despachosMl.logisticType)];
 
     if (filtro.cuentaId) condiciones.push(eq(despachosMl.cuentaMlId, filtro.cuentaId));
@@ -376,7 +485,7 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       const { inicio, finExclusivo } = rangoDiaBogota(new Date());
       condiciones.push(isNotNull(despachosMl.despachadoTs), gte(despachosMl.despachadoTs, inicio), lt(despachosMl.despachadoTs, finExclusivo));
     } else {
-      condiciones.push(isNull(despachosMl.despachadoTs));
+      condiciones.push(isNull(despachosMl.despachadoTs), eq(despachosMl.status, STATUS_PENDIENTES));
     }
 
     const filas = await tx
@@ -401,7 +510,7 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       .innerJoin(pedidos, eq(despachosMl.pedidoId, pedidos.id))
       .innerJoin(cuentasMl, eq(despachosMl.cuentaMlId, cuentasMl.id))
       .where(and(...condiciones))
-      .orderBy(asc(despachosMl.slaExpectedDate), desc(despachosMl.actualizadoTs));
+      .orderBy(desc(pedidos.fecha), desc(despachosMl.id));
 
     if (filas.length === 0) return [];
 
@@ -413,15 +522,40 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
         titulo: pedidoItems.titulo,
         cantidad: pedidoItems.cantidad,
         skuCodigo: pedidoItems.skuCodigo,
+        skuId: pedidoItems.skuId,
         imagenUrl: pedidoItems.imagenUrl,
+        precioUnitario: pedidoItems.precioUnitario,
       })
       .from(pedidoItems)
       .where(and(eq(pedidoItems.empresaId, empresaId), inArray(pedidoItems.pedidoId, pedidoIds)));
 
+    // Stock real (WMS de Seller, issue #280) — sumado solo entre
+    // bodegas ACTIVAS: una bodega desactivada no debe seguir
+    // "aportando" unidades a lo que ve quien empaca.
+    const skuIds = [...new Set(items.map((i) => i.skuId).filter((id): id is string => id != null))];
+    const stockPorSku = new Map<string, number>();
+    if (skuIds.length > 0) {
+      const filasStock = await tx
+        .select({ skuId: stockBodega.skuId, total: sql<number>`sum(${stockBodega.disponible})`.mapWith(Number) })
+        .from(stockBodega)
+        .innerJoin(bodegas, eq(stockBodega.bodegaId, bodegas.id))
+        .where(and(eq(stockBodega.empresaId, empresaId), eq(bodegas.activa, true), inArray(stockBodega.skuId, skuIds)))
+        .groupBy(stockBodega.skuId);
+      for (const f of filasStock) stockPorSku.set(f.skuId, f.total);
+    }
+
     const itemsPorPedido = new Map<string, ItemTarjetaDespacho[]>();
     for (const item of items) {
       const lista = itemsPorPedido.get(item.pedidoId) ?? [];
-      lista.push({ itemIdExterno: item.itemIdExterno, titulo: item.titulo, cantidad: item.cantidad, skuCodigo: item.skuCodigo, imagenUrl: item.imagenUrl });
+      lista.push({
+        itemIdExterno: item.itemIdExterno,
+        titulo: item.titulo,
+        cantidad: item.cantidad,
+        skuCodigo: item.skuCodigo,
+        imagenUrl: item.imagenUrl,
+        precioUnitario: item.precioUnitario,
+        stockDisponible: item.skuId ? stockPorSku.get(item.skuId) ?? 0 : null,
+      });
       itemsPorPedido.set(item.pedidoId, lista);
     }
 
@@ -441,37 +575,66 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       pedidoIdExterno: f.pedidoIdExterno,
       fechaPedido: f.fechaPedido,
       comprador: null,
+      bodegaAsignada: null,
       items: itemsPorPedido.get(f.pedidoId) ?? [],
     }));
   });
+
+  // Backfill del plazo (punto 1 de la tarea) — FUERA de la transacción
+  // de arriba a propósito: llamar a Mercado Libre desde adentro de un
+  // dbComoEmpresa dejaría la conexión de Postgres abierta mientras se
+  // espera la red. Solo aplica a lo que está "listo para despachar" y
+  // todavía no tiene el plazo guardado (una fila sincronizada antes de
+  // que este campo existiera, o cuyo primer intento de SLA falló). Una
+  // cuenta con error (token vencido) no frena a las demás — ya sale en
+  // el aviso de arriba (listarCuentasConErrorDespacho).
+  await Promise.all(
+    tarjetas
+      .filter((t) => t.status === STATUS_PENDIENTES && t.slaExpectedDate === null)
+      .map(async (t) => {
+        try {
+          const token = await obtenerAccessTokenVigente(empresaId, t.cuentaMlId);
+          const sla = await obtenerSlaEnvioMl(t.shipmentIdExterno, token);
+          if (!sla.expectedDate) return;
+          const fecha = new Date(sla.expectedDate);
+          await dbComoEmpresa(empresaId, (tx) =>
+            tx.update(despachosMl).set({ slaExpectedDate: fecha }).where(and(eq(despachosMl.empresaId, empresaId), eq(despachosMl.id, t.id)))
+          );
+          t.slaExpectedDate = fecha;
+        } catch {
+          // Cuenta desconectada, candado de renovación, o el SLA no
+          // vino — no bloquea el resto de la lista.
+        }
+      })
+  );
+
+  return tarjetas;
 }
 
 export type GrupoTarjetasDespacho = { etiqueta: string; despachos: TarjetaDespacho[] };
 
-const ORDEN_GRUPOS_ESPECIALES = ["Vencidos", "Hoy", "Mañana"];
-
-// listarTarjetasDespacho ya ordena por slaExpectedDate ascendente —
-// agruparDespachosPorDia solo junta lo que ya viene en ese orden, el
-// primer elemento de cada grupo de días futuros alcanza para ordenar
-// los grupos entre sí.
+// listarTarjetasDespacho ya ordena por fecha de venta descendente — se
+// agrupa por día (etiquetaDiaVenta) conservando ese mismo orden: el
+// grupo de "Hoy" primero, el más viejo al final, y dentro de cada
+// grupo lo más nuevo arriba (igual que pidió Mateo, punto 3).
 export function agruparDespachosPorDia(despachos: TarjetaDespacho[], ahora: Date): GrupoTarjetasDespacho[] {
   const porEtiqueta = new Map<string, TarjetaDespacho[]>();
   for (const despacho of despachos) {
-    const etiqueta = etiquetaDiaPlazo(despacho.slaExpectedDate, ahora);
+    const etiqueta = etiquetaDiaVenta(despacho.fechaPedido, ahora);
     const lista = porEtiqueta.get(etiqueta) ?? [];
     lista.push(despacho);
     porEtiqueta.set(etiqueta, lista);
   }
 
+  // Los despachos ya llegan ordenados por fecha de venta descendente
+  // (la consulta de listarTarjetasDespacho) — el primer elemento de
+  // cada grupo es el más nuevo de ese día, así que ordenar los grupos
+  // por esa misma fecha alcanza para que el grupo más reciente quede
+  // primero, sin recalcular nada.
   const etiquetas = [...porEtiqueta.keys()].sort((a, b) => {
-    if (a === "Sin plazo definido") return 1;
-    if (b === "Sin plazo definido") return -1;
-    const ia = ORDEN_GRUPOS_ESPECIALES.indexOf(a);
-    const ib = ORDEN_GRUPOS_ESPECIALES.indexOf(b);
-    if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-    const fechaA = porEtiqueta.get(a)![0].slaExpectedDate!.getTime();
-    const fechaB = porEtiqueta.get(b)![0].slaExpectedDate!.getTime();
-    return fechaA - fechaB;
+    const fechaA = porEtiqueta.get(a)![0].fechaPedido.getTime();
+    const fechaB = porEtiqueta.get(b)![0].fechaPedido.getTime();
+    return fechaB - fechaA;
   });
 
   return etiquetas.map((etiqueta) => ({
@@ -568,13 +731,13 @@ export async function obtenerDespachoParaGuia(empresaId: string, despachoId: str
 export type CuentaConErrorDespacho = { cuentaId: string; nickname: string; motivo: string };
 
 // Aviso "cuentas que no se pudieron revisar" (punto 6, como en OS):
-// Despachos en esta plataforma nunca llama a Mercado Libre al cargar
-// la pantalla (los datos ya están sincronizados en despachos_ml,
-// punto 1) — así que el único error real y persistente que esta
-// pantalla puede detectar sin hacer una llamada nueva es una cuenta ya
-// desconectada (token vencido, confirmado por desconectada_ts, nunca
-// un dato en vivo). Errores transitorios de un solo sync quedan en el
-// log de esa sincronización, no acá.
+// desde la Fase 1-1 (rama mateo/feat-despachos-fase1-1), listar
+// tarjetas SÍ puede llamar a Mercado Libre (el backfill del plazo,
+// arriba) — pero esta función sigue siendo puramente local: una
+// cuenta desconectada (confirmado por desconectada_ts, nunca un dato
+// en vivo) ya es, por sí sola, el motivo más persistente y accionable
+// ("hay que reconectarla") — un fallo transitorio de un backfill
+// puntual no amerita bajarle el ánimo al aviso de arriba con ruido.
 export async function listarCuentasConErrorDespacho(empresaId: string): Promise<CuentaConErrorDespacho[]> {
   const cuentas = await listarCuentasConectadas(empresaId);
   return cuentas

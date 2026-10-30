@@ -1,10 +1,11 @@
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { db } from "@/db";
-import { crearCuentaMlDePrueba, crearVentaDePrueba } from "@/db/test-utils/venta";
-import { cuentasMl, despachosMl, empresas, pedidos, usuarios } from "@/db/schema";
+import { crearCuentaMlDePrueba, crearPedidoDePrueba, crearVentaDePrueba, lineaDePrueba } from "@/db/test-utils/venta";
+import { bodegas, cuentasMl, despachosMl, empresas, pedidoItems, pedidos, skus, stockBodega, usuarios } from "@/db/schema";
+import { crearBodega } from "@/lib/inventario/bodegas";
 import { cifrarToken } from "@/lib/cifrado";
 import { LARGO_MAXIMO_BUSQUEDA, normalizarParametro, PAGINA_MAXIMA } from "@/lib/filtros-listado";
 import {
@@ -14,7 +15,9 @@ import {
   DespachoNoEncontradoError,
   esFlex,
   esPlazoVencido,
-  etiquetaDiaPlazo,
+  estadoPlazo,
+  etiquetaDiaVenta,
+  etiquetaEstadoEnvio,
   EtiquetaNoImprimibleError,
   formatoPlazoChip,
   GuiaNoVistaError,
@@ -451,14 +454,14 @@ describe("listarDespachosFiltrados / contarDespachosPendientes — búsqueda, fi
   });
 });
 
-function tarjetaDePrueba(id: string, slaExpectedDate: Date | null, extra: Partial<TarjetaDespacho> = {}): TarjetaDespacho {
+function tarjetaDePrueba(id: string, fechaPedido: Date, extra: Partial<TarjetaDespacho> = {}): TarjetaDespacho {
   return {
     id,
     shipmentIdExterno: id,
     logisticType: "self_service",
-    status: "pending",
+    status: "ready_to_ship",
     substatus: null,
-    slaExpectedDate,
+    slaExpectedDate: null,
     guiaVistaTs: null,
     despachadoTs: null,
     imprimible: true,
@@ -466,16 +469,19 @@ function tarjetaDePrueba(id: string, slaExpectedDate: Date | null, extra: Partia
     cuentaMlId: "cuenta-de-prueba",
     cuentaNickname: "VENDEDOR_PRUEBA",
     pedidoIdExterno: "ORD-1",
-    fechaPedido: new Date("2026-03-10T15:00:00Z"),
+    fechaPedido,
     comprador: null,
+    bodegaAsignada: null,
     items: [],
     ...extra,
   };
 }
 
-// Fase 1 de Despachos (issue "Despachos") — plazo, agrupación por día
-// (America/Bogota) y detección de tipo: funciones puras, sin Postgres.
-describe("plazo, agrupación por día y detección de tipo (Fase 1 de Despachos)", () => {
+// Fase 1-1 de Despachos (rama mateo/feat-despachos-fase1-1) — plazo,
+// agrupación por día de VENTA (America/Bogota, corrige la Fase 1 que
+// agrupaba por plazo), detección de tipo y traducción de estados:
+// funciones puras, sin Postgres.
+describe("plazo, agrupación por día de venta, detección de tipo y traducción de estado (Fase 1-1 de Despachos)", () => {
   // 2026-03-10, 10:00 a.m. hora de Bogotá (15:00 UTC) — fijo para que
   // ninguna prueba dependa de en qué momento real se corra.
   const AHORA = new Date("2026-03-10T15:00:00Z");
@@ -495,59 +501,68 @@ describe("plazo, agrupación por día y detección de tipo (Fase 1 de Despachos)
     expect(esPlazoVencido(AHORA, AHORA)).toBe(false); // el instante exacto todavía no venció
   });
 
-  it("formatoPlazoChip: null sin plazo, texto con 'Plazo:' cuando sí hay", () => {
+  it("estadoPlazo: null sin plazo; 'vencido' si ya pasó; 'por_vencer' si faltan menos de 2h; 'normal' el resto", () => {
+    expect(estadoPlazo(null, AHORA)).toBeNull();
+    expect(estadoPlazo(new Date(AHORA.getTime() - 1), AHORA)).toBe("vencido");
+    expect(estadoPlazo(new Date(AHORA.getTime() + 60 * 60 * 1000), AHORA)).toBe("por_vencer"); // falta 1h
+    expect(estadoPlazo(new Date(AHORA.getTime() + 2 * 60 * 60 * 1000), AHORA)).toBe("normal"); // exacto 2h: ya no es "por vencer"
+    expect(estadoPlazo(new Date(AHORA.getTime() + 5 * 60 * 60 * 1000), AHORA)).toBe("normal");
+  });
+
+  it("formatoPlazoChip: null sin plazo, texto con '⏰ Plazo:' cuando sí hay", () => {
     expect(formatoPlazoChip(null)).toBeNull();
     const texto = formatoPlazoChip(new Date("2026-03-13T21:00:00Z")); // viernes 4pm Bogotá
-    expect(texto).toMatch(/^Plazo: /);
+    expect(texto).toMatch(/^⏰ Plazo: /);
   });
 
-  it("etiquetaDiaPlazo: sin slaExpectedDate es 'Sin plazo definido'", () => {
-    expect(etiquetaDiaPlazo(null, AHORA)).toBe("Sin plazo definido");
+  it("etiquetaDiaVenta: hoy/ayer/antier en Bogotá, sin importar la hora exacta", () => {
+    expect(etiquetaDiaVenta(new Date("2026-03-11T02:00:00Z"), AHORA)).toBe("Hoy"); // 2026-03-10, 9pm Bogotá
+    expect(etiquetaDiaVenta(new Date("2026-03-09T18:00:00Z"), AHORA)).toBe("Ayer"); // 2026-03-09, 1pm Bogotá
+    expect(etiquetaDiaVenta(new Date("2026-03-08T13:00:00Z"), AHORA)).toBe("Antier"); // 2026-03-08, 8am Bogotá
   });
 
-  it("etiquetaDiaPlazo: un plazo ya pasado (incluso del mismo día, antes de 'ahora') nunca es 'Hoy' si el DÍA de Bogotá ya quedó atrás", () => {
-    const ayerBogota = new Date("2026-03-09T18:00:00Z"); // 2026-03-09, 1pm Bogotá
-    expect(etiquetaDiaPlazo(ayerBogota, AHORA)).toBe("Vencidos");
+  it("etiquetaDiaVenta: más de 2 días atrás trae día de la semana + fecha", () => {
+    expect(etiquetaDiaVenta(new Date("2026-02-20T15:00:00Z"), AHORA)).toMatch(/^[A-ZÁÉÍÓÚ][a-záéíóúñ]+ 20 de febrero$/);
   });
 
-  it("etiquetaDiaPlazo: el mismo día de Bogotá que 'ahora' es 'Hoy', sin importar la hora exacta", () => {
-    const masTardeHoy = new Date("2026-03-11T02:00:00Z"); // 2026-03-10, 9pm Bogotá — mismo día que AHORA
-    expect(etiquetaDiaPlazo(masTardeHoy, AHORA)).toBe("Hoy");
+  it("etiquetaDiaVenta: un borde de 04:59 UTC vs 05:00 UTC cae en días de Bogotá distintos (medianoche de Bogotá = 05:00 UTC)", () => {
+    expect(etiquetaDiaVenta(new Date("2026-03-10T04:59:00Z"), AHORA)).toBe("Ayer"); // todavía 2026-03-09 en Bogotá
+    expect(etiquetaDiaVenta(new Date("2026-03-10T05:00:00Z"), AHORA)).toBe("Hoy"); // ya 2026-03-10 en Bogotá
   });
 
-  it("etiquetaDiaPlazo: el día de Bogotá siguiente es 'Mañana'", () => {
-    const mañana = new Date("2026-03-11T15:00:00Z"); // 2026-03-11, 10am Bogotá
-    expect(etiquetaDiaPlazo(mañana, AHORA)).toBe("Mañana");
-  });
-
-  it("etiquetaDiaPlazo: más de un día en el futuro trae día de la semana + fecha", () => {
-    const enCincoDias = new Date("2026-03-15T15:00:00Z"); // 2026-03-15 Bogotá
-    expect(etiquetaDiaPlazo(enCincoDias, AHORA)).toMatch(/^[A-ZÁÉÍÓÚ][a-záéíóúñ]+ 15 de marzo$/);
-  });
-
-  it("etiquetaDiaPlazo: un borde de 04:59 UTC vs 05:00 UTC cae en días de Bogotá distintos (medianoche de Bogotá = 05:00 UTC)", () => {
-    expect(etiquetaDiaPlazo(new Date("2026-03-11T04:59:00Z"), AHORA)).toBe("Hoy"); // todavía 2026-03-10 en Bogotá
-    expect(etiquetaDiaPlazo(new Date("2026-03-11T05:00:00Z"), AHORA)).toBe("Mañana"); // ya 2026-03-11 en Bogotá
-  });
-
-  it("agruparDespachosPorDia: 'Vencidos' siempre primero, 'Sin plazo definido' siempre al final, el resto en orden de fecha", () => {
+  it("agruparDespachosPorDia: agrupa por fecha de VENTA (no por plazo), el día más nuevo primero, lo más nuevo arriba dentro de cada grupo", () => {
+    // Ya vienen ordenados por fecha de venta descendente, como los
+    // devuelve listarTarjetasDespacho — la prueba respeta ese orden de
+    // entrada a propósito (agruparDespachosPorDia no reordena dentro
+    // de un grupo, solo junta).
     const grupos = agruparDespachosPorDia(
       [
-        tarjetaDePrueba("sin-plazo", null),
-        tarjetaDePrueba("futuro-lejano", new Date("2026-03-20T15:00:00Z")),
+        tarjetaDePrueba("hoy-2", new Date("2026-03-10T18:00:00Z")), // más nuevo
         tarjetaDePrueba("hoy-1", new Date("2026-03-10T16:00:00Z")),
-        tarjetaDePrueba("hoy-2", new Date("2026-03-10T18:00:00Z")),
-        tarjetaDePrueba("mañana", new Date("2026-03-11T15:00:00Z")),
-        tarjetaDePrueba("vencido", new Date("2026-03-08T15:00:00Z")),
+        tarjetaDePrueba("ayer-1", new Date("2026-03-09T16:00:00Z")),
+        tarjetaDePrueba("viejo", new Date("2026-02-20T15:00:00Z")),
       ],
       AHORA
     );
-    expect(grupos.map((g) => g.etiqueta)).toEqual(["Vencidos", "Hoy (2)", "Mañana", "Viernes 20 de marzo", "Sin plazo definido"]);
-    expect(grupos.find((g) => g.etiqueta === "Hoy (2)")!.despachos.map((d) => d.id)).toEqual(["hoy-1", "hoy-2"]);
+    expect(grupos.map((g) => g.etiqueta)).toEqual(["Hoy (2)", "Ayer", "Viernes 20 de febrero"]);
+    expect(grupos[0].despachos.map((d) => d.id)).toEqual(["hoy-2", "hoy-1"]);
   });
 
   it("agruparDespachosPorDia: una lista vacía da una lista de grupos vacía, nunca truena", () => {
     expect(agruparDespachosPorDia([], AHORA)).toEqual([]);
+  });
+
+  it("etiquetaEstadoEnvio: traduce status y substatus reales a español, uniendo los dos con '—'", () => {
+    expect(etiquetaEstadoEnvio("ready_to_ship", "ready_to_print")).toBe("Listo para despachar — listo para imprimir la guía");
+    expect(etiquetaEstadoEnvio("ready_to_ship", "printed")).toBe("Listo para despachar — guía impresa, todavía no se ha entregado");
+    expect(etiquetaEstadoEnvio("delivered", null)).toBe("Entregado");
+    expect(etiquetaEstadoEnvio("cancelled", null)).toBe("Cancelado");
+  });
+
+  it("etiquetaEstadoEnvio: null sin status; un status/substatus desconocido se muestra tal cual (sin inventar una traducción)", () => {
+    expect(etiquetaEstadoEnvio(null, null)).toBeNull();
+    expect(etiquetaEstadoEnvio("un_status_nuevo", null)).toBe("un status nuevo");
+    expect(etiquetaEstadoEnvio("ready_to_ship", "un_substatus_nuevo")).toBe("Listo para despachar — un substatus nuevo");
   });
 });
 
@@ -557,6 +572,20 @@ describe("plazo, agrupación por día y detección de tipo (Fase 1 de Despachos)
 // aislamiento por empresa). Todo contra Postgres real.
 describe("tarjetas de Despachos — Fase 1 (gate, marcar/deshacer, listarTarjetasDespacho)", () => {
   vi.setConfig({ testTimeout: 20_000 });
+
+  // El backfill del plazo (punto 1 de la Fase 1-1) llama a Mercado
+  // Libre por cualquier ready_to_ship sin slaExpectedDate — FLEX-1 y
+  // AGENCIA-1 (abajo) nacen así a propósito. Mock fijo, nunca la red
+  // real: una vez el backfill persiste el plazo en la primera
+  // llamada, las siguientes ya no lo necesitan (slaExpectedDate deja
+  // de ser null). beforeAll (no directo en el describe): tiene que
+  // correr en la fase de EJECUCIÓN, no en la de recolección — si no,
+  // el afterEach de "despachos (tarea 2.10)" (arriba) lo desharía
+  // antes de que esta descripción llegue a correr.
+  beforeAll(() => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ status: "on_time", expected_date: "2026-03-15T20:00:00Z" })));
+  });
+  afterAll(() => vi.unstubAllGlobals());
 
   const empresaId = randomUUID();
   const empresaBId = randomUUID();
@@ -590,9 +619,17 @@ describe("tarjetas de Despachos — Fase 1 (gate, marcar/deshacer, listarTarjeta
       const filas = await tx
         .insert(despachosMl)
         .values([
-          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "FLEX-1", logisticType: "self_service", status: "pending", imprimible: true },
-          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "FULL-1", logisticType: "fulfillment", status: "pending", imprimible: false },
-          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "AGENCIA-1", logisticType: "xd_drop_off", status: "pending", imprimible: true },
+          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "FLEX-1", logisticType: "self_service", status: "ready_to_ship", imprimible: true },
+          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "FULL-1", logisticType: "fulfillment", status: "ready_to_ship", imprimible: false },
+          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "AGENCIA-1", logisticType: "xd_drop_off", status: "ready_to_ship", imprimible: true },
+          // Bug real reportado por Mateo en staging: pedidos YA
+          // ENTREGADOS (de meses atrás) aparecían en "Pendientes" con
+          // "Sin plazo definido" — el único filtro era despachado_ts
+          // IS NULL (columna nueva, siempre null en filas viejas).
+          // Esta fila reproduce exactamente eso: delivered, sin
+          // despachar nunca (nadie lo va a marcar, ya se entregó).
+          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "ENTREGADO-VIEJO", logisticType: "self_service", status: "delivered", substatus: "dropped_off", imprimible: false },
+          { empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "CANCELADO-VIEJO", logisticType: "cross_docking", status: "cancelled", imprimible: false },
         ])
         .returning({ id: despachosMl.id });
       return filas.map((f) => f.id);
@@ -602,7 +639,14 @@ describe("tarjetas de Despachos — Fase 1 (gate, marcar/deshacer, listarTarjeta
   it("listarTarjetasDespacho: nunca incluye Full (fulfillment), sin importar el filtro de tipo", async () => {
     const todas = await listarTarjetasDespacho(empresaId);
     expect(todas.map((d) => d.shipmentIdExterno)).not.toContain("FULL-1");
-    expect(todas.map((d) => d.shipmentIdExterno).sort()).toEqual(["AGENCIA-1", "FLEX-1"]);
+  });
+
+  it("listarTarjetasDespacho (pendientes): bug real de staging — delivered/shipped/cancelled NUNCA aparecen, solo ready_to_ship", async () => {
+    const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    const ids = pendientes.map((d) => d.shipmentIdExterno);
+    expect(ids).not.toContain("ENTREGADO-VIEJO");
+    expect(ids).not.toContain("CANCELADO-VIEJO");
+    expect(ids.sort()).toEqual(["AGENCIA-1", "FLEX-1"]);
   });
 
   it("listarTarjetasDespacho: trae los items de pedido_items de la tarjeta (imagen, título, cantidad, SKU)", async () => {
@@ -714,5 +758,87 @@ describe("tarjetas de Despachos — Fase 1 (gate, marcar/deshacer, listarTarjeta
       tx.insert(empresas).values({ id: empresaSinErroresId, nombre: "Empresa sin errores", nit: `TEST-DESPE-${empresaSinErroresId.slice(0, 8)}` })
     );
     expect(await listarCuentasConErrorDespacho(empresaSinErroresId)).toEqual([]);
+  });
+});
+
+// Fase 1-1 de Despachos — "Vendido a: $precio" y "Stock: N" de la
+// línea 1 de la tarjeta (issue #280, WMS de Seller), y el orden real
+// por fecha de venta descendente entre VARIOS pedidos (punto 3 de la
+// tarea) — todo contra Postgres real, en una empresa propia para no
+// mezclarse con el fixture (fijo, un solo plazo) del describe de arriba.
+describe("tarjetas de Despachos — Fase 1-1 (stock, precio y orden por fecha de venta)", () => {
+  vi.setConfig({ testTimeout: 20_000 });
+  beforeAll(() => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ status: "on_time", expected_date: "2026-03-15T20:00:00Z" })));
+  });
+  afterAll(() => vi.unstubAllGlobals());
+
+  const empresaId = randomUUID();
+  const usuarioId = randomUUID();
+
+  it("items trae precioUnitario y la suma de stock_bodega.disponible SOLO entre bodegas activas", async () => {
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa stock despachos", nit: `TEST-DESPS-${empresaId.slice(0, 8)}` }));
+    await db.insert(usuarios).values({ id: usuarioId, email: `prueba-despachos-stock-${usuarioId.slice(0, 8)}@zilonix.test`, nombre: "Usuario de prueba" });
+
+    const { id: bodegaActivaId } = await crearBodega(empresaId, usuarioId, { nombre: "Principal", tipo: "propia" });
+    const { id: bodegaInactivaId } = await crearBodega(empresaId, usuarioId, { nombre: "Vieja", tipo: "propia" });
+    await dbComoEmpresa(empresaId, (tx) => tx.update(bodegas).set({ activa: false }).where(eq(bodegas.id, bodegaInactivaId)));
+
+    const [{ id: skuId }] = await dbComoEmpresa(empresaId, (tx) => tx.insert(skus).values({ empresaId, codigo: "REF-1", nombre: "Producto 1" }).returning({ id: skus.id }));
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(stockBodega).values([
+        { empresaId, bodegaId: bodegaActivaId, skuId, disponible: 6 },
+        { empresaId, bodegaId: bodegaInactivaId, skuId, disponible: 100 }, // nunca debe sumar — bodega inactiva
+      ])
+    );
+
+    const cuentaId = await crearCuentaMlDePrueba(empresaId);
+    const pedidoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(pedidoItems).values({ ...lineaDePrueba(empresaId, pedidoId, 1), skuId, precioUnitario: "129000.00" })
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(despachosMl).values({ empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "STOCK-1", logisticType: "self_service", status: "ready_to_ship", imprimible: true })
+    );
+
+    const [tarjeta] = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    expect(tarjeta.items[0].precioUnitario).toBe("129000.00");
+    expect(tarjeta.items[0].stockDisponible).toBe(6); // 6 de la activa, nunca los 100 de la inactiva
+  });
+
+  it("sin sku_id resuelto, stockDisponible es null — nunca 0 inventado", async () => {
+    const cuentaId = await crearCuentaMlDePrueba(empresaId);
+    const pedidoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values({ ...lineaDePrueba(empresaId, pedidoId, 1), skuId: null, skuCodigo: null }));
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(despachosMl).values({ empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "SIN-SKU-1", logisticType: "self_service", status: "ready_to_ship", imprimible: true })
+    );
+
+    const tarjetas = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    const tarjeta = tarjetas.find((t) => t.shipmentIdExterno === "SIN-SKU-1")!;
+    expect(tarjeta.items[0].stockDisponible).toBeNull();
+  });
+
+  it("orden real: lo más nuevo arriba, lo más viejo abajo, por fecha de VENTA (no por cuándo se sincronizó)", async () => {
+    const cuentaId = await crearCuentaMlDePrueba(empresaId);
+
+    const pedidoViejoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.update(pedidos).set({ fecha: new Date("2026-01-01T15:00:00Z") }).where(eq(pedidos.id, pedidoViejoId)));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoViejoId, 1)));
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(despachosMl).values({ empresaId, pedidoId: pedidoViejoId, cuentaMlId: cuentaId, shipmentIdExterno: "ORDEN-VIEJO", logisticType: "self_service", status: "ready_to_ship", imprimible: true })
+    );
+
+    const pedidoNuevoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.update(pedidos).set({ fecha: new Date("2026-06-01T15:00:00Z") }).where(eq(pedidos.id, pedidoNuevoId)));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoNuevoId, 1)));
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(despachosMl).values({ empresaId, pedidoId: pedidoNuevoId, cuentaMlId: cuentaId, shipmentIdExterno: "ORDEN-NUEVO", logisticType: "self_service", status: "ready_to_ship", imprimible: true })
+    );
+
+    const tarjetas = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes", cuentaId });
+    const indiceViejo = tarjetas.findIndex((t) => t.shipmentIdExterno === "ORDEN-VIEJO");
+    const indiceNuevo = tarjetas.findIndex((t) => t.shipmentIdExterno === "ORDEN-NUEVO");
+    expect(indiceNuevo).toBeLessThan(indiceViejo); // lo más nuevo, arriba
   });
 });
