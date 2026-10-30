@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
+import { eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { pedidos, pedidosFinanzas } from "@/db/schema";
+import { cuentasMl, pedidos, pedidosFinanzas, publicidadMetricasDiarias } from "@/db/schema";
 import { crearCuentaMlDePrueba } from "@/db/test-utils/venta";
 import { SinPermisoError } from "@/lib/permisos";
 import { crearEmpresaConPermisos } from "@/lib/test-utils/empresa-con-permiso";
@@ -9,8 +10,13 @@ import { guardarCostoSku } from "@/lib/costos-sku";
 import type { TotalesDetalle } from "./detalle-ventas";
 import { guardarVentaFinanzas } from "./guardar-venta";
 import {
+  armarPublicidadMes,
+  armarTableroPorCuenta,
+  leerPublicidadMes,
   leerTableroMes,
+  leerTableroPorCuenta,
   leerUtilidadMes,
+  participacion,
   promedioDiario,
   resumirUtilidadMes,
   textoVariacion,
@@ -365,5 +371,149 @@ describe("leerUtilidadMes (#143)", () => {
     const sinFinanzas = await crearEmpresaConPermisos("Utilidad sin finanzas", [{ modulo: "ventas", accion: "consultar" }]);
     await expect(leerUtilidadMes(sinFinanzas.empresaId, sinFinanzas.usuarioId, AHORA, [])).rejects.toBeInstanceOf(SinPermisoError);
     await expect(leerUtilidadMes(a.empresaId, sinFinanzas.usuarioId, AHORA, [])).rejects.toBeInstanceOf(SinPermisoError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inicio: por cuenta y publicidad del mes (#143)
+// ---------------------------------------------------------------------------
+
+describe("armarPublicidadMes, armarTableroPorCuenta y participacion (#143)", () => {
+  it("publicidad: sin filas es null (no 0); con filas suma en COP y ordena por gasto", () => {
+    expect(armarPublicidadMes([])).toEqual({ totalPorMoneda: null, porCuenta: [] });
+    const p = armarPublicidadMes([
+      { cuentaMlId: "a", nickname: "FMC", costo: "120000.5" },
+      { cuentaMlId: "b", nickname: "STORE", costo: "450000" },
+      { cuentaMlId: "c", nickname: "OTRA", costo: "0" },
+    ]);
+    expect(p.totalPorMoneda).toEqual([{ moneda: "COP", monto: "570000.50" }]);
+    expect(p.porCuenta.map((c) => [c.nickname, c.monto])).toEqual([
+      ["STORE", "450000.00"],
+      ["FMC", "120000.50"],
+      ["OTRA", "0.00"],
+    ]);
+  });
+
+  it("por cuenta: junta monedas, agrega cuentas que solo tienen publicidad y ordena por recaudo", () => {
+    const filas = armarTableroPorCuenta(
+      [
+        { cuentaMlId: "a", nickname: "FMC", moneda: "COP", ventas: 3, recaudo: "90000.00" },
+        { cuentaMlId: "b", nickname: "STORE", moneda: "USD", ventas: 1, recaudo: "50.00" },
+        { cuentaMlId: "b", nickname: "STORE", moneda: "COP", ventas: 4, recaudo: "200000.00" },
+      ],
+      armarPublicidadMes([
+        { cuentaMlId: "b", nickname: "STORE", costo: "30000" },
+        { cuentaMlId: "z", nickname: "SOLO_ADS", costo: "1000" },
+      ])
+    );
+    expect(filas).toEqual([
+      {
+        cuentaMlId: "b",
+        nickname: "STORE",
+        ventas: 5,
+        recaudoPorMoneda: [
+          { moneda: "COP", monto: "200000.00" },
+          { moneda: "USD", monto: "50.00" },
+        ],
+        publicidad: "30000.00",
+      },
+      { cuentaMlId: "a", nickname: "FMC", ventas: 3, recaudoPorMoneda: [{ moneda: "COP", monto: "90000.00" }], publicidad: null },
+      { cuentaMlId: "z", nickname: "SOLO_ADS", ventas: 0, recaudoPorMoneda: [], publicidad: "1000.00" },
+    ]);
+  });
+
+  it("participación con 1 decimal", () => {
+    expect(participacion(4, 7)).toBe("57.1");
+    expect(participacion(3, 7)).toBe("42.9");
+    expect(participacion(1, 1)).toBe("100.0");
+    expect(participacion(0, 0)).toBe("0.0");
+  });
+});
+
+describe("leerTableroPorCuenta y leerPublicidadMes (#143)", () => {
+  // 31-oct 10:00 en Bogotá: tramo actual 1–31 oct.
+  const AHORA = new Date("2026-10-31T15:00:00Z");
+
+  async function cuentaConNombre(empresaId: string, nickname: string): Promise<string> {
+    const id = await crearCuentaMlDePrueba(empresaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.update(cuentasMl).set({ nickname }).where(eq(cuentasMl.id, id)));
+    return id;
+  }
+
+  async function publicidad(empresaId: string, cuentaMlId: string, filas: { fecha: string; costo: string; nivel?: "cuenta" | "campana" }[]) {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(publicidadMetricasDiarias).values(
+        filas.map((f, i) => ({
+          empresaId,
+          cuentaMlId,
+          nivel: f.nivel ?? ("cuenta" as const),
+          entidadIdMl: f.nivel === "campana" ? `campana-${i}` : "anunciante",
+          fecha: f.fecha,
+          costo: f.costo,
+        }))
+      )
+    );
+  }
+
+  it("ventas y recaudo por cuenta con el criterio del tablero; publicidad solo nivel cuenta y del tramo", async () => {
+    const e = await crearEmpresaConPermisos("Inicio por cuenta", SOLO_CONSULTAR);
+    const store = await cuentaConNombre(e.empresaId, "STOREKINGSAS");
+    const fmc = await cuentaConNombre(e.empresaId, "FMCBIENESTAR");
+    await crearVentas(e.empresaId, store, [
+      { fecha: "2026-10-01T05:00:00Z", valor: "100000.00" },
+      { fecha: "2026-10-10T15:00:00Z", valor: "50000.00" },
+      { fecha: "2026-10-11T15:00:00Z", valor: null }, // cuenta, no suma
+      { fecha: "2026-10-12T15:00:00Z", valor: "99999.00", estado: "cancelled" },
+      { fecha: "2026-09-30T15:00:00Z", valor: "77777.00" }, // mes anterior
+    ]);
+    await crearVentas(e.empresaId, fmc, [{ fecha: "2026-10-15T15:00:00Z", valor: "20000.00", cancelada: false }]);
+    await publicidad(e.empresaId, store, [
+      { fecha: "2026-10-01", costo: "10000.00" },
+      { fecha: "2026-10-31", costo: "5000.50" },
+      { fecha: "2026-10-05", costo: "99999.00", nivel: "campana" }, // no se suma
+      { fecha: "2026-09-30", costo: "88888.00" }, // fuera del tramo
+    ]);
+
+    const pub = await leerPublicidadMes(e.empresaId, e.usuarioId, AHORA);
+    expect(pub).toEqual({
+      totalPorMoneda: [{ moneda: "COP", monto: "15000.50" }],
+      porCuenta: [{ cuentaMlId: store, nickname: "STOREKINGSAS", monto: "15000.50", moneda: "COP" }],
+    });
+
+    const filas = await leerTableroPorCuenta(e.empresaId, e.usuarioId, AHORA, pub);
+    expect(filas).toEqual([
+      { cuentaMlId: store, nickname: "STOREKINGSAS", ventas: 3, recaudoPorMoneda: [{ moneda: "COP", monto: "150000.00" }], publicidad: "15000.50" },
+      { cuentaMlId: fmc, nickname: "FMCBIENESTAR", ventas: 1, recaudoPorMoneda: [{ moneda: "COP", monto: "20000.00" }], publicidad: null },
+    ]);
+    // Sin pasarle la publicidad, la lee sola y da lo mismo.
+    expect(await leerTableroPorCuenta(e.empresaId, e.usuarioId, AHORA)).toEqual(filas);
+
+    // Cuadra con el tablero: misma cantidad de ventas y mismo recaudo.
+    const tablero = await leerTableroMes(e.empresaId, e.usuarioId, AHORA);
+    expect(tablero.ventas.actual).toBe(4);
+    expect(tablero.recaudo.map((r) => r.actual)).toEqual(["170000.00"]);
+  });
+
+  it("mes sin publicidad de cuenta: «Sin datos» (null), aunque haya campañas", async () => {
+    const e = await crearEmpresaConPermisos("Inicio sin ads", SOLO_CONSULTAR);
+    const c = await cuentaConNombre(e.empresaId, "SINADS");
+    await publicidad(e.empresaId, c, [{ fecha: "2026-10-05", costo: "5000.00", nivel: "campana" }]);
+    expect(await leerPublicidadMes(e.empresaId, e.usuarioId, AHORA)).toEqual({ totalPorMoneda: null, porCuenta: [] });
+  });
+
+  it("A/B y permiso: B no ve ventas ni publicidad de A; sin finanzas.consultar es SinPermisoError", async () => {
+    const a = await crearEmpresaConPermisos("Inicio A/B — A", SOLO_CONSULTAR);
+    const b = await crearEmpresaConPermisos("Inicio A/B — B", SOLO_CONSULTAR);
+    const cuentaA = await cuentaConNombre(a.empresaId, "DE_A");
+    await crearVentas(a.empresaId, cuentaA, [{ fecha: "2026-10-05T15:00:00Z", valor: "20000.00" }]);
+    await publicidad(a.empresaId, cuentaA, [{ fecha: "2026-10-05", costo: "1000.00" }]);
+
+    expect(await leerTableroPorCuenta(b.empresaId, b.usuarioId, AHORA)).toEqual([]);
+    expect(await leerPublicidadMes(b.empresaId, b.usuarioId, AHORA)).toEqual({ totalPorMoneda: null, porCuenta: [] });
+
+    const sinFinanzas = await crearEmpresaConPermisos("Inicio sin finanzas", [{ modulo: "ventas", accion: "consultar" }]);
+    await expect(leerTableroPorCuenta(sinFinanzas.empresaId, sinFinanzas.usuarioId, AHORA)).rejects.toBeInstanceOf(SinPermisoError);
+    await expect(leerPublicidadMes(sinFinanzas.empresaId, sinFinanzas.usuarioId, AHORA)).rejects.toBeInstanceOf(SinPermisoError);
+    await expect(leerPublicidadMes(a.empresaId, b.usuarioId, AHORA)).rejects.toBeInstanceOf(SinPermisoError);
   });
 });

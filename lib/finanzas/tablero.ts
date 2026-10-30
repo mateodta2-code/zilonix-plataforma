@@ -17,14 +17,24 @@
 //   la variación de recaudo y de promedio es null: nunca se compara
 //   contra un mes a medias.
 //
+// Inicio (#143, capturas de Zilonix OS de Sharel, 29-oct): por cuenta
+// (participación y comparativo) y publicidad invertida del tramo actual.
+// La publicidad suma SOLO publicidad_metricas_diarias de nivel «cuenta»
+// (el total diario de la cuenta; sumar también campañas lo duplicaría).
+// Ojo: la sincronización no guarda ese total cuando la respuesta de ML
+// es ambigua (AVISO_DAILY en sincronizarPublicidad.ts); ese mes sale
+// «Sin datos» aunque /panel/publicidad (que suma campañas) sí tenga
+// gasto. Decisión de Sharel, 29-oct. Moneda: las métricas no la traen;
+// Product Ads en Seller es COP en la práctica, así que va "COP" fijo.
+//
 // Utilidad antes de publicidad (#143): sale de listarVentasUtilidad, la
 // misma lectura de Finanzas → Ventas, para que cuadre al peso; no hay
 // otra fórmula ni otra suma en SQL. Sin publicidad (#135) ni variación
 // vs. mes anterior. El % de ventas con costo es sobre las sincronizadas.
 
-import { and, eq, gte, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, gte, lt, lte, notInArray, or, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { pedidos, pedidosFinanzas } from "@/db/schema";
+import { cuentasMl, pedidos, pedidosFinanzas, publicidadMetricasDiarias } from "@/db/schema";
 import { ESTADOS_QUE_NO_SON_VENTA } from "@/lib/estados-venta";
 import { limitesDiaBogota } from "@/lib/filtros-listado";
 import { requierePermiso } from "@/lib/permisos";
@@ -255,6 +265,164 @@ export async function leerUtilidadMes(empresaId: string, usuarioId: string, ahor
   const { actual } = tramosBogota(ahora);
   const res = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: null, desde: actual.inicio, hastaExclusivo: actual.finExclusivo });
   return resumirUtilidadMes(res.detalle.total, res.rechazadas.length, monedas);
+}
+
+// ---------------------------------------------------------------------------
+// Inicio: por cuenta y publicidad del mes (#143)
+// ---------------------------------------------------------------------------
+
+export const MONEDA_PUBLICIDAD = "COP";
+
+export type MontoMoneda = { moneda: string; monto: string };
+
+export type PublicidadCuenta = { cuentaMlId: string; nickname: string; monto: string; moneda: string };
+
+export type PublicidadMes = {
+  // null = ninguna fila de métricas de cuenta en el tramo («Sin datos»,
+  // nunca 0).
+  totalPorMoneda: MontoMoneda[] | null;
+  // Mayor gasto primero.
+  porCuenta: PublicidadCuenta[];
+};
+
+export type FilaCuentaTablero = {
+  cuentaMlId: string;
+  nickname: string;
+  ventas: number;
+  recaudoPorMoneda: MontoMoneda[];
+  // null = sin filas de publicidad de esa cuenta en el tramo.
+  publicidad: string | null;
+};
+
+export type FilaPublicidad = { cuentaMlId: string; nickname: string; costo: string };
+export type FilaVentasCuenta = { cuentaMlId: string; nickname: string; moneda: string; ventas: number; recaudo: string };
+
+function compararCentavos(a: bigint, b: bigint): number {
+  return a === b ? 0 : a > b ? 1 : -1;
+}
+
+export function armarPublicidadMes(filas: FilaPublicidad[]): PublicidadMes {
+  if (filas.length === 0) return { totalPorMoneda: null, porCuenta: [] };
+  const total = filas.reduce((suma, f) => suma + aCentavos(f.costo), CERO);
+  const porCuenta = filas
+    .map((f) => ({ cuentaMlId: f.cuentaMlId, nickname: f.nickname, monto: desdeCentavos(aCentavos(f.costo)), moneda: MONEDA_PUBLICIDAD }))
+    .sort((a, b) => compararCentavos(aCentavos(b.monto), aCentavos(a.monto)) || a.nickname.localeCompare(b.nickname));
+  return { totalPorMoneda: [{ moneda: MONEDA_PUBLICIDAD, monto: desdeCentavos(total) }], porCuenta };
+}
+
+// Una fila por cuenta con ventas o con publicidad en el tramo. Orden:
+// recaudo de mayor a menor (en centavos, sumando monedas solo para
+// ordenar), luego nickname.
+export function armarTableroPorCuenta(ventas: FilaVentasCuenta[], publicidad: PublicidadMes): FilaCuentaTablero[] {
+  const porCuenta = new Map<string, { fila: FilaCuentaTablero; orden: bigint }>();
+  const entrada = (cuentaMlId: string, nickname: string) => {
+    let actual = porCuenta.get(cuentaMlId);
+    if (!actual) {
+      actual = { fila: { cuentaMlId, nickname, ventas: 0, recaudoPorMoneda: [], publicidad: null }, orden: CERO };
+      porCuenta.set(cuentaMlId, actual);
+    }
+    return actual;
+  };
+  for (const v of ventas) {
+    const e = entrada(v.cuentaMlId, v.nickname);
+    e.fila.ventas += v.ventas;
+    e.fila.recaudoPorMoneda.push({ moneda: v.moneda, monto: desdeCentavos(aCentavos(v.recaudo)) });
+    e.orden += aCentavos(v.recaudo);
+  }
+  for (const p of publicidad.porCuenta) entrada(p.cuentaMlId, p.nickname).fila.publicidad = p.monto;
+  return [...porCuenta.values()]
+    .sort((a, b) => compararCentavos(b.orden, a.orden) || a.fila.nickname.localeCompare(b.fila.nickname))
+    .map(({ fila }) => ({ ...fila, recaudoPorMoneda: [...fila.recaudoPorMoneda].sort((a, b) => a.moneda.localeCompare(b.moneda)) }));
+}
+
+// Participación de una cuenta en el total, con 1 decimal ("57.1").
+export function participacion(parte: number, total: number): string {
+  if (total <= 0) return "0.0";
+  const decimas = dividirRedondeando(BigInt(parte) * MIL, BigInt(total));
+  return `${decimas / DIEZ}.${decimas % DIEZ}`;
+}
+
+// Postgres «undefined_table» / «undefined_object»: la migración de
+// publicidad (0011) todavía no está en ese entorno.
+function esObjetoInexistente(error: unknown): boolean {
+  for (let e: unknown = error; e; e = (e as { cause?: unknown }).cause) {
+    const codigo = (e as { code?: unknown }).code;
+    if (codigo === "42P01" || codigo === "42704") return true;
+  }
+  return false;
+}
+
+export async function leerPublicidadMes(empresaId: string, usuarioId: string, ahora: Date): Promise<PublicidadMes> {
+  await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
+  const { actual } = tramosBogota(ahora);
+  try {
+    // En su propia transacción: si la tabla no existe, el error no
+    // aborta ninguna otra lectura.
+    const filas = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .select({
+          cuentaMlId: publicidadMetricasDiarias.cuentaMlId,
+          nickname: cuentasMl.nickname,
+          costo: sql<string>`coalesce(sum(${publicidadMetricasDiarias.costo}), 0)::text`,
+        })
+        .from(publicidadMetricasDiarias)
+        .innerJoin(cuentasMl, and(eq(cuentasMl.id, publicidadMetricasDiarias.cuentaMlId), eq(cuentasMl.empresaId, empresaId)))
+        .where(
+          and(
+            eq(publicidadMetricasDiarias.empresaId, empresaId),
+            eq(publicidadMetricasDiarias.nivel, "cuenta"),
+            gte(publicidadMetricasDiarias.fecha, actual.desdeTexto),
+            lte(publicidadMetricasDiarias.fecha, actual.hastaTexto)
+          )
+        )
+        .groupBy(publicidadMetricasDiarias.cuentaMlId, cuentasMl.nickname)
+    );
+    return armarPublicidadMes(filas);
+  } catch (error) {
+    if (esObjetoInexistente(error)) return { totalPorMoneda: null, porCuenta: [] };
+    throw error;
+  }
+}
+
+// Ventas (cantidad, de pedidos) y recaudo (valor_venta) por cuenta del
+// tramo actual, con el mismo criterio de venta que leerTableroMes. Una
+// sola consulta, sin importar cuántas cuentas haya. `publicidad` se pasa
+// si ya se leyó (Inicio), para no consultarla dos veces.
+export async function leerTableroPorCuenta(
+  empresaId: string,
+  usuarioId: string,
+  ahora: Date,
+  publicidad?: PublicidadMes
+): Promise<FilaCuentaTablero[]> {
+  await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
+  const { actual } = tramosBogota(ahora);
+  const ventas = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({
+        cuentaMlId: pedidos.cuentaMlId,
+        nickname: cuentasMl.nickname,
+        moneda: pedidos.moneda,
+        ventas: sql<number>`count(*)`.mapWith(Number),
+        recaudo: sql<string>`coalesce(sum(${pedidosFinanzas.valorVenta}), 0)::text`,
+      })
+      .from(pedidos)
+      .innerJoin(cuentasMl, and(eq(cuentasMl.id, pedidos.cuentaMlId), eq(cuentasMl.empresaId, empresaId)))
+      .leftJoin(
+        pedidosFinanzas,
+        and(eq(pedidosFinanzas.empresaId, empresaId), eq(pedidosFinanzas.empresaId, pedidos.empresaId), eq(pedidosFinanzas.pedidoId, pedidos.id))
+      )
+      .where(
+        and(
+          eq(pedidos.empresaId, empresaId),
+          gte(pedidos.fecha, actual.inicio),
+          lt(pedidos.fecha, actual.finExclusivo),
+          notInArray(pedidos.estado, ESTADOS_QUE_NO_SON_VENTA),
+          sql`coalesce(${pedidosFinanzas.cancelada}, false) = false`
+        )
+      )
+      .groupBy(pedidos.cuentaMlId, cuentasMl.nickname, pedidos.moneda)
+  );
+  return armarTableroPorCuenta(ventas, publicidad ?? (await leerPublicidadMes(empresaId, usuarioId, ahora)));
 }
 
 // ---------------------------------------------------------------------------

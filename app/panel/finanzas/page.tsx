@@ -4,9 +4,16 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { formatearMonto } from "@/lib/panel-kpis";
-import { leerTableroMes, leerUtilidadMes, textoVariacion, type TableroMes, type UtilidadMes } from "@/lib/finanzas/tablero";
+import { leerTableroMes, leerUtilidadMes, textoVariacion } from "@/lib/finanzas/tablero";
 import { mostrarPorcentaje } from "@/components/finanzas/formato";
+import {
+  avisoFaltanVentas,
+  detalleUtilidadMes,
+  plural,
+  porMoneda,
+  valorUtilidad,
+  variacionesPorMoneda,
+} from "@/components/finanzas/textosTablero";
 import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -35,32 +42,9 @@ import styles from "./finanzas.module.css";
 // Siguiente parte de #143 — Utilidad del mes (antes de publicidad) y %
 // de ventas con costo, leídas con la misma función de Finanzas → Ventas
 // para que cuadren al peso. Sin variación vs. mes anterior.
-
-// "COP 1.234.000 · USD 50"; sin ventas, "COP 0" (mismo criterio que
-// Ventas del mes de /panel).
-function porMoneda(tablero: TableroMes, campo: "actual" | "promedioActual"): string {
-  if (tablero.recaudo.length === 0) return "COP 0";
-  return tablero.recaudo.map((r) => `${r.moneda} ${formatearMonto(r[campo])}`).join(" · ");
-}
-
-// Una línea de variación por moneda (con el código solo si hay varias).
-function variacionesPorMoneda(tablero: TableroMes, campo: "variacion" | "variacionPromedio"): string[] {
-  const sinSincronizarAntes = tablero.sinSincronizar.anterior > 0;
-  if (tablero.recaudo.length === 0) return [textoVariacion(null, sinSincronizarAntes)];
-  const varias = tablero.recaudo.length > 1;
-  return tablero.recaudo.map((r) => `${varias ? `${r.moneda}: ` : ""}${textoVariacion(r[campo], sinSincronizarAntes)}`);
-}
-
-// "COP 1.234.567" con la moneda del mes (sin ventas, COP); "—" si no se
-// puede sumar (sin costos o varias monedas).
-function valorUtilidad(tablero: TableroMes, utilidad: UtilidadMes): string {
-  if (utilidad.utilidad === null) return "—";
-  return `${tablero.recaudo[0]?.moneda ?? "COP"} ${formatearMonto(utilidad.utilidad)}`;
-}
-
-function plural(n: number, uno: string, varios: string): string {
-  return `${n} ${n === 1 ? uno : varios}`;
-}
+//
+// Los textos de las tarjetas viven en components/finanzas/textosTablero.ts:
+// los comparte el bloque de Finanzas de Inicio (#143).
 
 export default async function FinanzasPage() {
   const usuario = await obtenerOCrearUsuarioActual();
@@ -82,9 +66,8 @@ export default async function FinanzasPage() {
       ahora,
       tablero.recaudo.map((r) => r.moneda)
     );
-    const moneda = tablero.recaudo[0]?.moneda ?? "COP";
     const faltan = tablero.sinSincronizar.actual;
-    const avisoFaltan = faltan > 0 ? [`Faltan ${faltan} ${faltan === 1 ? "venta" : "ventas"} por sincronizar · usa “Traer ventas de este mes” en Finanzas → Ventas`] : [];
+    const avisoFaltan = avisoFaltanVentas(tablero);
     return (
       <>
         <EncabezadoPagina titulo="Finanzas" />
@@ -124,18 +107,7 @@ export default async function FinanzasPage() {
             <TarjetaKpi
               titulo="Utilidad del mes (antes de publicidad)"
               valor={valorUtilidad(tablero, utilidad)}
-              detalle={[
-                "Suma de la utilidad de cada venta con costo: recaudo − comisión ML − flete ML − costo − packing − envío. Sin restar publicidad.",
-                ...(utilidad.ventasSinCosto > 0
-                  ? [`${plural(utilidad.ventasSinCosto, "venta", "ventas")} sin costo (${moneda} ${formatearMonto(utilidad.recaudoSinCosto)}) no entran`]
-                  : []),
-                ...(utilidad.rechazadas > 0
-                  ? [`${plural(utilidad.rechazadas, "venta no se pudo", "ventas no se pudieron")} calcular · revisa Finanzas → Ventas`]
-                  : []),
-                ...(utilidad.variasMonedas ? ["Hay ventas en varias monedas: la utilidad por moneda llega después"] : []),
-                ...(!utilidad.variasMonedas && utilidad.utilidad === null ? ["Ninguna venta del mes tiene costo cargado"] : []),
-                ...avisoFaltan,
-              ]}
+              detalle={detalleUtilidadMes(tablero, utilidad)}
             />
             <TarjetaKpi
               titulo="% de ventas con costo"
