@@ -888,35 +888,35 @@ describe("backfill del plazo — no reintenta antes de 30 minutos (revisión de 
   afterEach(() => vi.unstubAllGlobals());
 
   it("una respuesta sin plazo (sin expected_date) no rompe, y una segunda carga inmediata no vuelve a pegarle a ML", async () => {
-    await despachoListoParaBackfill("SLA-SIN-PLAZO");
+    await despachoListoParaBackfill("910000001");
     const fetchMock = vi.fn(async () => respuestaJson({ status: "on_time" })); // sin expected_date
     vi.stubGlobal("fetch", fetchMock);
 
     const primeraCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
-    const tarjeta1 = primeraCarga.find((t) => t.shipmentIdExterno === "SLA-SIN-PLAZO")!;
+    const tarjeta1 = primeraCarga.find((t) => t.shipmentIdExterno === "910000001")!;
     expect(tarjeta1).toBeDefined(); // no rompió la lista
     expect(tarjeta1.slaExpectedDate).toBeNull();
     const llamadasTrasPrimera = fetchMock.mock.calls.length;
     expect(llamadasTrasPrimera).toBeGreaterThan(0); // sí intentó, al menos una vez
 
     const segundaCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
-    const tarjeta2 = segundaCarga.find((t) => t.shipmentIdExterno === "SLA-SIN-PLAZO")!;
+    const tarjeta2 = segundaCarga.find((t) => t.shipmentIdExterno === "910000001")!;
     expect(tarjeta2.slaExpectedDate).toBeNull();
     expect(fetchMock.mock.calls.length).toBe(llamadasTrasPrimera); // ninguna llamada nueva — todavía dentro del freno de 30 min
   });
 
   it("una vez el plazo se guardó con éxito, una segunda carga tampoco vuelve a pegarle a ML (ya no es candidato)", async () => {
-    await despachoListoParaBackfill("SLA-CON-PLAZO");
+    await despachoListoParaBackfill("910000002");
     const fetchMock = vi.fn(async () => respuestaJson({ status: "on_time", expected_date: "2026-03-15T20:00:00Z" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const primeraCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
-    const tarjeta1 = primeraCarga.find((t) => t.shipmentIdExterno === "SLA-CON-PLAZO")!;
+    const tarjeta1 = primeraCarga.find((t) => t.shipmentIdExterno === "910000002")!;
     expect(tarjeta1.slaExpectedDate).not.toBeNull();
     const llamadasTrasPrimera = fetchMock.mock.calls.length;
 
     const segundaCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
-    const tarjeta2 = segundaCarga.find((t) => t.shipmentIdExterno === "SLA-CON-PLAZO")!;
+    const tarjeta2 = segundaCarga.find((t) => t.shipmentIdExterno === "910000002")!;
     expect(tarjeta2.slaExpectedDate?.getTime()).toBe(tarjeta1.slaExpectedDate?.getTime());
     expect(fetchMock.mock.calls.length).toBe(llamadasTrasPrimera); // ninguna llamada nueva
   });
