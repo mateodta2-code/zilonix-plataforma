@@ -84,14 +84,17 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
     filasPorTabla.set(costosSku, []);
     listarTodosLosItemsActivosMock.mockResolvedValue({ ids: ["MCO1", "MCO2"], catalogoIncompleto: false });
     leerPromocionesDeItemMock.mockImplementation(async (itemId: string, cuentaMlId: string) => ({
-      itemId,
-      cuentaMlId,
-      nickname: "n",
-      tituloProducto: "Producto",
-      thumbnail: null,
-      skuCodigo: null,
-      tieneVariantes: false,
-      promociones: [{ type: "DEAL", status: "candidate" }],
+      estado: "con_promos",
+      item: {
+        itemId,
+        cuentaMlId,
+        nickname: "n",
+        tituloProducto: "Producto",
+        thumbnail: null,
+        skuCodigo: null,
+        tieneVariantes: false,
+        promociones: [{ type: "DEAL", status: "candidate" }],
+      },
     }));
     calcularCandidatosItemMock.mockImplementation((item: { itemId: string }) => [
       { itemId: item.itemId, tipoPromocion: "DEAL", cumpleReglas: true, accionSugerida: "participar" },
@@ -115,7 +118,7 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
       if (cuentaIdExterna === "111") throw new LimiteMercadoLibreError(1000);
       return { ids: ["MCO1"], catalogoIncompleto: false };
     });
-    leerPromocionesDeItemMock.mockResolvedValue(null);
+    leerPromocionesDeItemMock.mockResolvedValue({ estado: "sin_promos" });
 
     const jobId = iniciarBusquedaPromociones("empresa-2", [
       { cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" },
@@ -166,7 +169,7 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
     filasPorTabla.set(promocionesReglas, []);
     filasPorTabla.set(costosSku, []);
     listarTodosLosItemsActivosMock.mockResolvedValue({ ids: ["MCO1"], catalogoIncompleto: true });
-    leerPromocionesDeItemMock.mockResolvedValue(null);
+    leerPromocionesDeItemMock.mockResolvedValue({ estado: "sin_promos" });
 
     const jobId = iniciarBusquedaPromociones("empresa-4", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
     const trabajo = await esperarTrabajoTerminado(jobId, "empresa-4");
@@ -183,5 +186,102 @@ describe("iniciarBusquedaPromociones/obtenerTrabajoBusquedaPromociones — rama 
     const trabajo = await esperarTrabajoTerminado(jobId, "empresa-5");
 
     expect(trabajo?.cuentas[0]?.catalogoIncompleto).toBe(false);
+  });
+
+  // Bug real en staging (rama fix-promociones-buscar, Refs #44) — la
+  // sospecha fuerte era seller-promotions devolviendo 403 (sin el
+  // scope de Promociones) en silencio, terminando "Listo (0/N)" sin
+  // ningún aviso. Acá se confirma el arreglo: el umbral de 403 frena
+  // la cuenta con un mensaje claro, nunca termina "listo" en silencio.
+  it("umbral de 403 (sin_permiso) en seller-promotions: la cuenta queda 'error' con el mensaje de reconectar, nunca 'listo' en silencio", async () => {
+    filasPorTabla.set(promocionesReglas, []);
+    filasPorTabla.set(costosSku, []);
+    listarTodosLosItemsActivosMock.mockResolvedValue({
+      ids: Array.from({ length: 20 }, (_, i) => `MCO${i}`),
+      catalogoIncompleto: false,
+    });
+    leerPromocionesDeItemMock.mockResolvedValue({ estado: "sin_permiso" });
+
+    const jobId = iniciarBusquedaPromociones("empresa-6", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
+    const trabajo = await esperarTrabajoTerminado(jobId, "empresa-6");
+
+    const fila = trabajo?.cuentas[0];
+    expect(fila?.estado).toBe("error");
+    expect(fila?.error).toContain("Reconectá esta cuenta en Conectar Mercado Libre");
+    expect(fila?.error).toContain("Promociones");
+    expect(registroUpserts.length).toBe(0); // nunca llega a guardar candidatos de una cuenta que se frenó por falta de permiso
+    // Review de Pablo — productosRevisados cuenta lo que de verdad se
+    // pidió a Mercado Libre, nunca ids.length de entrada: con el umbral
+    // del módulo en 5 y 20 ids, el resumen nunca puede salir "inflado" a 20.
+    expect(fila?.productosRevisados).toBeGreaterThanOrEqual(5);
+    expect(fila?.productosRevisados).toBeLessThan(20);
+  });
+
+  // Review de Pablo — el primer diseño lanzaba PromocionesSinPermisoError
+  // desde CADA worker que cruzara el umbral; con varios workers
+  // concurrentes viendo el mismo contador compartido, más de uno podía
+  // cruzarlo casi al mismo tiempo y volver a lanzar — riesgo real de
+  // unhandledRejection entre los workers hermanos de conConcurrenciaLimitada.
+  // Ahora es un flag compartido que los workers solo LEEN (nunca lanzan).
+  it("al cruzar el umbral de 403, ningún worker hermano deja una unhandledRejection", async () => {
+    filasPorTabla.set(promocionesReglas, []);
+    filasPorTabla.set(costosSku, []);
+    listarTodosLosItemsActivosMock.mockResolvedValue({
+      ids: Array.from({ length: 20 }, (_, i) => `MCO${i}`),
+      catalogoIncompleto: false,
+    });
+    leerPromocionesDeItemMock.mockResolvedValue({ estado: "sin_permiso" });
+
+    const rechazosNoAtendidos: unknown[] = [];
+    const alRechazoNoAtendido = (razon: unknown) => rechazosNoAtendidos.push(razon);
+    process.on("unhandledRejection", alRechazoNoAtendido);
+
+    try {
+      const jobId = iniciarBusquedaPromociones("empresa-10", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
+      const trabajo = await esperarTrabajoTerminado(jobId, "empresa-10");
+      // Una vuelta extra del loop de eventos para darle tiempo a
+      // cualquier rejection tardía de un worker hermano a aparecer.
+      await esperar(50);
+
+      expect(trabajo?.cuentas[0]?.estado).toBe("error");
+      expect(rechazosNoAtendidos).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", alRechazoNoAtendido);
+    }
+  });
+
+  it("menos del umbral de 403: la cuenta sigue normal, un par de ítems puntuales nunca la frenan", async () => {
+    filasPorTabla.set(promocionesReglas, []);
+    filasPorTabla.set(costosSku, []);
+    listarTodosLosItemsActivosMock.mockResolvedValue({ ids: ["MCO1", "MCO2", "MCO3"], catalogoIncompleto: false });
+    let llamada = 0;
+    leerPromocionesDeItemMock.mockImplementation(async () => {
+      llamada += 1;
+      return llamada <= 2 ? { estado: "sin_permiso" } : { estado: "sin_promos" };
+    });
+
+    const jobId = iniciarBusquedaPromociones("empresa-7", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
+    const trabajo = await esperarTrabajoTerminado(jobId, "empresa-7");
+
+    expect(trabajo?.cuentas[0]?.estado).toBe("listo");
+    expect(trabajo?.cuentas[0]?.error).toBeNull();
+  });
+
+  it("no_autorizado (401) y otro_error nunca frenan la cuenta por sí solos (solo sin_permiso/403 lo hace)", async () => {
+    filasPorTabla.set(promocionesReglas, []);
+    filasPorTabla.set(costosSku, []);
+    listarTodosLosItemsActivosMock.mockResolvedValue({ ids: ["MCO1", "MCO2", "MCO3", "MCO4"], catalogoIncompleto: false });
+    let llamada = 0;
+    leerPromocionesDeItemMock.mockImplementation(async () => {
+      llamada += 1;
+      if (llamada === 1) return { estado: "no_autorizado" };
+      if (llamada === 2) return { estado: "otro_error" };
+      return { estado: "sin_promos" };
+    });
+
+    const jobId = iniciarBusquedaPromociones("empresa-8", [{ cuentaMlId: "c1", cuentaId: "c1", cuentaIdExterna: "111", nickname: "Cuenta 1" }]);
+    const trabajo = await esperarTrabajoTerminado(jobId, "empresa-8");
+
+    expect(trabajo?.cuentas[0]?.estado).toBe("listo");
   });
 });

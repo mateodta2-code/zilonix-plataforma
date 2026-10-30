@@ -86,6 +86,11 @@ export type ItemConPromociones = {
   thumbnail: string | null;
   skuCodigo: string | null;
   tieneVariantes: boolean;
+  // Review de Pablo (PR #304) — true cuando las variaciones de este
+  // ítem tienen SKU distinto entre sí (ver lib/ml/cliente.ts,
+  // leerItemParaPromocionMl): skuCodigo ya viene null en ese caso,
+  // nunca el de la primera variación a ciegas.
+  skuVariantesDistintas: boolean;
   promociones: PromocionCrudaMl[];
 };
 
@@ -194,6 +199,18 @@ export function calcularCandidatosItem(
     // (confirmado en vivo en zilonix-os-web: ajustar por item_id solo
     // tocaba una variante y dejaba otra desactualizada).
     if (item.tieneVariantes) {
+      // Review de Pablo (PR #304) — motivo más específico cuando el
+      // SKU no es el mismo entre variaciones (item.skuCodigo ya viene
+      // null en ese caso, lib/ml/cliente.ts): nunca se adivina cuál
+      // variación manda, así que tampoco hay piso que calcular — el
+      // chip de precio mínimo queda oculto solo (depende de que
+      // precioMinimo exista, y acá nunca existe).
+      if (item.skuVariantesDistintas) {
+        return {
+          ...base,
+          motivoRevisarManual: "Revisar a mano (variantes con SKU distinto) — cada variación tiene su propio SKU en Mercado Libre, no hay un único piso de Finanzas que calcular para todo el ítem.",
+        };
+      }
       return { ...base, motivoRevisarManual: "Este producto tiene variantes (colores/modelos) — Mercado Libre no deja ajustar todas por esta vía, se revisa a mano." };
     }
 
@@ -303,23 +320,46 @@ export async function listarTodosLosItemsActivos(cuentaIdExterna: string, token:
   return { ids, catalogoIncompleto: false };
 }
 
+// Code review real (rama fix-promociones-buscar, Refs #44) — antes
+// esta función devolvía `null` para "sin promos" Y para cualquier
+// fallo de leerPromocionesItemMl (403/401/5xx), exactamente igual —
+// río abajo (buscarPromocionesCuenta) no podía distinguir un catálogo
+// sano sin promociones activas de una cuenta sin el scope de
+// Promociones. Ahora el resultado trae el motivo real, para que el
+// llamador pueda contar cada caso y decidir si la cuenta entera hay
+// que frenarla (ver UMBRAL_SIN_PERMISO_PROMOCIONES).
+export type ResultadoItemConPromociones =
+  | { estado: "sin_promos" }
+  | { estado: "con_promos"; item: ItemConPromociones }
+  | { estado: "sin_permiso" }
+  | { estado: "no_autorizado" }
+  | { estado: "otro_error" };
+
 export async function leerPromocionesDeItem(
   itemId: string,
   cuentaMlId: string,
   nickname: string,
   token: string
-): Promise<ItemConPromociones | null> {
-  const promos = await leerPromocionesItemMl(itemId, token);
-  if (!promos || promos.length === 0) return null;
+): Promise<ResultadoItemConPromociones> {
+  const resultado = await leerPromocionesItemMl(itemId, token);
+  if (resultado.estado === "sin_permiso") return { estado: "sin_permiso" };
+  if (resultado.estado === "no_autorizado") return { estado: "no_autorizado" };
+  if (resultado.estado === "otro_error") return { estado: "otro_error" };
+  if (resultado.promociones.length === 0) return { estado: "sin_promos" };
+
   const detalle = await leerItemParaPromocionMl(itemId, token);
   return {
-    itemId,
-    cuentaMlId,
-    nickname,
-    tituloProducto: detalle?.title ?? null,
-    thumbnail: detalle?.thumbnail ?? null,
-    skuCodigo: detalle?.sellerCustomField ?? null,
-    tieneVariantes: detalle?.tieneVariantes ?? false,
-    promociones: promos,
+    estado: "con_promos",
+    item: {
+      itemId,
+      cuentaMlId,
+      nickname,
+      tituloProducto: detalle?.title ?? null,
+      thumbnail: detalle?.thumbnail ?? null,
+      skuCodigo: detalle?.skuCodigo ?? null,
+      tieneVariantes: detalle?.tieneVariantes ?? false,
+      skuVariantesDistintas: detalle?.skuVariantesDistintas ?? false,
+      promociones: resultado.promociones,
+    },
   };
 }

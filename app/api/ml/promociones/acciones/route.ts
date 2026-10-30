@@ -32,14 +32,43 @@ import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolver
 const TIPO_ACCION = ["participar", "modificar", "salir"] as const;
 type TipoAccion = (typeof TIPO_ACCION)[number];
 
-type Decision = { candidatoId: string; accion: TipoAccion };
+// Rama feat-promociones-aprobacion — "No" en una fila (o "Rechazar
+// seleccionados" en el lote) nunca necesitó un valor de enum nuevo:
+// `promocion_accion_estado` ya tenía "rechazada" desde la migración
+// 0017 (pensado para cuando algo no pasa la validación del motor).
+// Acá se reusa para una decisión humana explícita — nunca se valida
+// ni se toca Mercado Libre para un rechazo, pase lo que pase con el
+// motor; es una decisión final, no depende de si el motor seguiría
+// recomendándolo.
+const DECISION_HUMANA = ["aprobar", "rechazar"] as const;
+type DecisionHumana = (typeof DECISION_HUMANA)[number];
+
+type Decision = { candidatoId: string; accion: TipoAccion; decisionHumana: DecisionHumana };
 
 // MED 5 — ventana de idempotencia: un doble clic (o un reintento de
 // red del navegador) no puede crear dos filas de historial para la
 // misma cuenta+ítem+tipo+acción. 5 minutos es suficiente para cubrir
 // un doble clic real sin esconder una decisión nueva y deliberada
-// tomada minutos más tarde sobre el mismo producto.
+// tomada minutos más tarde sobre el mismo producto. Solo aplica a
+// "aprobar" — un rechazo nunca toca Mercado Libre, duplicarlo en el
+// historial no tiene el mismo riesgo real.
 const VENTANA_IDEMPOTENCIA_MS = 5 * 60 * 1000;
+
+// LOW (review de Pablo, PR #304) — rechazo duplicado por doble clic:
+// la UI ya deshabilita el botón "No" mientras responde, pero esto es
+// la segunda red de seguridad del lado del servidor (un reintento de
+// red, o dos pestañas abiertas). Ventana corta a propósito — nunca
+// esconde un rechazo nuevo y deliberado sobre el mismo producto
+// minutos después.
+const VENTANA_IDEMPOTENCIA_RECHAZO_MS = 10 * 1000;
+
+// Review de Pablo (PR #304) — un lote sin tope podía mandar miles de
+// decisiones en un solo POST: cada una dispara varias consultas/escrituras
+// reales (idempotencia, validarCandidatoParaEscritura, insert) — nunca
+// pensado para eso. 200 alcanza de sobra para "Aprobar seleccionados"
+// en una sola página de resultados; un lote más grande se divide en
+// tandas desde la UI.
+const TOPE_DECISIONES_POR_REQUEST = 200;
 
 function parsearDecisiones(cuerpo: unknown): Decision[] | null {
   const lista = (cuerpo as { decisiones?: unknown })?.decisiones;
@@ -48,9 +77,31 @@ function parsearDecisiones(cuerpo: unknown): Decision[] | null {
   for (const fila of lista) {
     const candidatoId = (fila as { candidatoId?: unknown })?.candidatoId;
     const accion = (fila as { accion?: unknown })?.accion;
+    const decisionCruda = (fila as { decision?: unknown })?.decision;
     if (typeof candidatoId !== "string" || !PATRON_UUID.test(candidatoId)) return null;
     if (typeof accion !== "string" || !(TIPO_ACCION as readonly string[]).includes(accion)) return null;
-    resultado.push({ candidatoId, accion: accion as TipoAccion });
+    if (decisionCruda !== undefined && !(DECISION_HUMANA as readonly string[]).includes(decisionCruda as string)) return null;
+    // Compatibilidad hacia atrás — "Aceptar todas las que cumplen" ya
+    // mandaba {candidatoId, accion} sin "decision"; eso sigue
+    // significando "aprobar", igual que siempre.
+    const decisionHumana: DecisionHumana = decisionCruda === "rechazar" ? "rechazar" : "aprobar";
+    resultado.push({ candidatoId, accion: accion as TipoAccion, decisionHumana });
+  }
+  return resultado;
+}
+
+// Review de Pablo — dedupe por candidatoId: un doble clic rápido en el
+// cliente (o un reintento de red) puede mandar el MISMO candidatoId
+// dos veces dentro de un mismo lote — se queda con la primera decisión
+// de cada uno, nunca procesa el mismo candidato dos veces en la misma
+// tanda (distinto de MED 5, que es entre requests separados).
+function dedupePorCandidatoId(decisiones: Decision[]): Decision[] {
+  const vistos = new Set<string>();
+  const resultado: Decision[] = [];
+  for (const decision of decisiones) {
+    if (vistos.has(decision.candidatoId)) continue;
+    vistos.add(decision.candidatoId);
+    resultado.push(decision);
   }
   return resultado;
 }
@@ -80,8 +131,18 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
   }
-  const decisiones = parsearDecisiones(cuerpo);
-  if (!decisiones) return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
+
+  const listaCruda = (cuerpo as { decisiones?: unknown })?.decisiones;
+  if (Array.isArray(listaCruda) && listaCruda.length > TOPE_DECISIONES_POR_REQUEST) {
+    return NextResponse.json(
+      { error: `No se pueden procesar más de ${TOPE_DECISIONES_POR_REQUEST} productos en un mismo lote — dividilo en tandas más chicas.` },
+      { status: 400 }
+    );
+  }
+
+  const decisionesParseadas = parsearDecisiones(cuerpo);
+  if (!decisionesParseadas) return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
+  const decisiones = dedupePorCandidatoId(decisionesParseadas);
 
   // MED 4 — "Salir de la promo" todavía no se confirmó contra una
   // cuenta real de Mercado Libre (ver lib/ml/cliente.ts,
@@ -90,7 +151,7 @@ export async function POST(request: Request) {
   if (decisiones.some((d) => d.accion === "salir")) {
     return NextResponse.json({ error: "Salir de una promoción todavía no está confirmado contra Mercado Libre real." }, { status: 501 });
   }
-  const decisionesEscribibles = decisiones as { candidatoId: string; accion: "participar" | "modificar" }[];
+  const decisionesEscribibles = decisiones as { candidatoId: string; accion: "participar" | "modificar"; decisionHumana: DecisionHumana }[];
   const modoSimulacion = (cuerpo as { modoSimulacion?: unknown })?.modoSimulacion === true;
 
   const candidatoIds = decisionesEscribibles.map((d) => d.candidatoId);
@@ -103,6 +164,61 @@ export async function POST(request: Request) {
   for (const decision of decisionesEscribibles) {
     const candidato = candidatoPorId.get(decision.candidatoId);
     if (!candidato) continue; // candidatoId que no existe o es de otra empresa (RLS) — se ignora, nunca rompe el resto
+
+    if (decision.decisionHumana === "rechazar") {
+      // LOW — no-op si ya existe un rechazo MUY reciente para
+      // exactamente esta combinación (ventana corta, ver arriba).
+      const cutoffRechazo = new Date(Date.now() - VENTANA_IDEMPOTENCIA_RECHAZO_MS);
+      const [rechazoExistente] = await dbComoEmpresa(empresa.id, (tx) =>
+        tx
+          .select()
+          .from(promocionesAcciones)
+          .where(
+            and(
+              eq(promocionesAcciones.cuentaMlId, candidato.cuentaMlId),
+              eq(promocionesAcciones.itemId, candidato.itemId),
+              eq(promocionesAcciones.tipoPromocion, candidato.tipoPromocion),
+              eq(promocionesAcciones.accion, decision.accion),
+              eq(promocionesAcciones.estado, "rechazada"),
+              gte(promocionesAcciones.creadoTs, cutoffRechazo)
+            )
+          )
+          .limit(1)
+      );
+      if (rechazoExistente) {
+        filasCreadas.push(rechazoExistente);
+        continue;
+      }
+
+      // Rechazo humano explícito ("No" en la fila, o "Rechazar
+      // seleccionados" en el lote): SIEMPRE "rechazada", sin pasar por
+      // validarCandidatoParaEscritura (no tiene sentido recalcular si
+      // "cumpliría" algo que la persona ya decidió que no quiere) y sin
+      // tocar Mercado Libre nunca.
+      const [fila] = await dbComoEmpresa(empresa.id, (tx) =>
+        tx
+          .insert(promocionesAcciones)
+          .values({
+            empresaId: empresa.id,
+            cuentaMlId: candidato.cuentaMlId,
+            itemId: candidato.itemId,
+            tituloProducto: candidato.tituloProducto,
+            tipoPromocion: candidato.tipoPromocion,
+            promotionIdMl: candidato.promotionIdMl,
+            accion: decision.accion,
+            precioAntes: candidato.precioActual,
+            precioDespues: null,
+            estado: "rechazada",
+            aprobadoPor: usuario.id,
+            aprobadoTs: new Date(),
+            modoSimulacion,
+            error: null,
+          })
+          .returning()
+      );
+      filasCreadas.push(fila);
+      continue;
+    }
 
     // MED 5 — no-op si ya existe una fila reciente aceptada/ejecutada
     // para exactamente esta combinación.
