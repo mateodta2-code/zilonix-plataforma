@@ -35,3 +35,19 @@
 | Cualquier otro tipo no listado | — | **No** (default) | Nunca se asume que un tipo nuevo o no investigado admite DELETE |
 
 **Duda real sin resolver, señalada a propósito**: la página oficial de "Daily Deal" usa `promotion_type=DOD` en sus ejemplos de DELETE, no `"DEAL"` (el valor que usa este código, confirmado real en producción desde zilonix-os-web para POST/PUT). Puede ser un alias viejo de la documentación. Como DEAL/LIGHTNING quedaron de todos modos marcados "Solo desde ML" (no se implementa pausar), esto no bloquea nada hoy — pero si algún día se agrega "pausar" para estos dos tipos, hay que confirmar primero cuál valor espera realmente la API en producción.
+
+- **2026-10-30 (Refs #44)** — Ajustes de la review 5708656719 de Pablo en el PR #311 (contenido OK, solo rama atrás de main + 3 menores).
+
+  **0) Rama puesta al día**: `git merge origin/main` (sin rebase, sin force-push) — trajo el PR #310 (Despachos, Fase 1-1), sin conflictos.
+
+  **(a) Tope de concurrencia de 4 en Participando** — `listarParticipandoCuenta` (`lib/ml/promocionesParticipando.ts`) le pegaba a Mercado Libre un ítem a la vez (secuencial); con una cuenta con muchas promociones activas, la pestaña tardaba segundos de más sin necesidad. Ahora usa `conConcurrenciaLimitada` (`lib/concurrencia.ts`, el mismo helper que ya usa `buscarPromocionesMultiCuenta.ts` — nada nuevo, reusado) con tope 4. Un ítem puntual que tira una excepción inesperada se atrapa ahí mismo (nunca tira abajo el resto del pool — `conConcurrenciaLimitada` no atrapa errores por su cuenta, a propósito).
+
+  **(b) Auditoría también cuando ML ya no participaba** — antes, si al revalidar fresco la promoción ya no estaba `started`/`pending` (la cuenta salió por otro lado, ej. desde la app de ML), la ruta respondía `{ok:true, yaNoParticipaba:true}` sin dejar ningún rastro en `promociones_acciones` — ni se sabía que alguien clickeó "Dejar de participar" sobre eso. Ahora esa fila también se guarda (`estado: "ejecutada"`, `resultadoMl: {yaNoParticipaba:true, llamoAMercadoLibre:false}`, sin `error`) — nunca se llamó a Mercado Libre en este caso, pero queda igual de visible en el historial que cualquier salida real.
+
+  **(c) El ítem tiene que estar registrado bajo esa cuenta, no solo "la cuenta es de la empresa"** — antes, el único chequeo era que `cuentaId` perteneciera a la empresa actual (ya lo exige RLS en el select de `cuentas_ml`); el `itemId` del body nunca se cruzaba contra nada. Ahora se exige que la combinación `(empresaId, cuentaId, itemId)` exista en `promociones_candidatos` (el mismo snapshot que ya alimenta Participando) ANTES de leer nada de Mercado Libre o intentar el DELETE — si no está registrado, 404 con un mensaje claro ("volvé a 'Buscar'"), nunca se intenta nada contra ML con una combinación que el sistema nunca vio.
+
+  **Pruebas nuevas/actualizadas**: `lib/ml/promocionesParticipando.test.ts` (1 nueva — nunca más de 4 llamadas en vuelo al mismo tiempo, con más de 1 a la vez de verdad), `app/api/ml/promociones/participando/salir/route.test.ts` (1 nueva — itemId no registrado bajo esa cuenta: 404, nunca llega a tocar Mercado Libre; la prueba de "ya no participaba" se actualizó para confirmar que SÍ queda en la auditoría).
+
+  Sigue sin probarse "Dejar de participar" contra una cuenta real — no se tocó esa decisión en esta ronda.
+
+  Verificado: `npm run typecheck` en verde. `npx vitest run`: 1940 pruebas en verde (mismo baseline de siempre). `npm run build`: compila y tipa en verde ("Linting and checking validity of types" limpio); el paso siguiente de Next ("Collecting page data") falla en este sandbox por la ausencia de `DATABASE_URL_APP` — no por este cambio.

@@ -145,4 +145,29 @@ describe("listarParticipandoCuenta — rama fix-promociones-aprobadas-participan
     // en una ruta separada (app/api/ml/promociones/participando/salir),
     // con su propio test, también con mocks.
   });
+
+  // Review de Pablo (PR #311) — tope de concurrencia de 4, nunca una
+  // llamada por vez (lento con muchos ítems activos) ni todas de una
+  // (puede pegarle muy fuerte a la API de Mercado Libre).
+  it("nunca más de 4 llamadas a leerPromocionesItemMl en vuelo al mismo tiempo", async () => {
+    const candidatos = Array.from({ length: 10 }, (_, i) => candidatoDescubierto({ itemId: `MCO${i}`, promotionIdMl: `PROMO-${i}` }));
+    filasPorTabla.set(promocionesCandidatos, candidatos);
+    filasPorTabla.set(promocionesReglas, []);
+    filasPorTabla.set(costosSku, []);
+
+    let enVuelo = 0;
+    let maximoEnVuelo = 0;
+    leerPromocionesItemMlMock.mockImplementation(async (itemId: string) => {
+      enVuelo++;
+      maximoEnVuelo = Math.max(maximoEnVuelo, enVuelo);
+      await new Promise((r) => setTimeout(r, 5));
+      enVuelo--;
+      return { estado: "ok", promociones: [promoCruda({ id: `PROMO-${itemId.replace("MCO", "")}` })] };
+    });
+
+    await listarParticipandoCuenta("empresa-1", "cuenta-1");
+    expect(leerPromocionesItemMlMock).toHaveBeenCalledTimes(10);
+    expect(maximoEnVuelo).toBeLessThanOrEqual(4);
+    expect(maximoEnVuelo).toBeGreaterThan(1); // de verdad corrió en paralelo, no uno por vez
+  });
 });

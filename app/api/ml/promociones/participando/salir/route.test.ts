@@ -58,7 +58,7 @@ vi.mock("@/lib/ml/cliente", async (importOriginal) => {
 });
 
 import { cookies } from "next/headers";
-import { cuentasMl } from "@/db/schema";
+import { cuentasMl, promocionesCandidatos } from "@/db/schema";
 import { requierePermiso } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { POST } from "./route";
@@ -90,6 +90,10 @@ function limpiar() {
   vi.mocked(requierePermiso).mockResolvedValue({} as never);
   obtenerAccessTokenVigenteMock.mockResolvedValue("token-falso");
   filasPorTabla.set(cuentasMl, [{ id: CUENTA_ID, empresaId: "empresa-1", nickname: "Cuenta de prueba" }]);
+  // Review de Pablo (PR #311) — el ítem tiene que estar registrado en
+  // el snapshot de ESTA cuenta para esta empresa (ver el comentario
+  // completo junto al chequeo real en route.ts).
+  filasPorTabla.set(promocionesCandidatos, [{ empresaId: "empresa-1", cuentaMlId: CUENTA_ID, itemId: "MCO1" }]);
 }
 
 describe("POST /api/ml/promociones/participando/salir — rama fix-promociones-aprobadas-participando, punto 3", () => {
@@ -132,7 +136,7 @@ describe("POST /api/ml/promociones/participando/salir — rama fix-promociones-a
     expect((insertsPromocionesAcciones[0].error as string)).toContain("422");
   });
 
-  it("ya no está started/pending al revalidar (ya salió por otro lado): ok, nunca llama al DELETE", async () => {
+  it("ya no está started/pending al revalidar (ya salió por otro lado): ok, nunca llama al DELETE, pero SÍ queda en la auditoría", async () => {
     leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [] });
 
     const res = await POST(peticion(cuerpoBase()));
@@ -140,7 +144,25 @@ describe("POST /api/ml/promociones/participando/salir — rama fix-promociones-a
     expect(res.status).toBe(200);
     expect(body.yaNoParticipaba).toBe(true);
     expect(salirDePromocionMlMock).not.toHaveBeenCalled();
-    expect(insertsPromocionesAcciones).toHaveLength(0);
+    // Review de Pablo (PR #311) — antes se perdía: ni rastro de que
+    // alguien clickeó "Dejar de participar" sobre algo que ya no
+    // estaba activo.
+    expect(insertsPromocionesAcciones).toHaveLength(1);
+    expect(insertsPromocionesAcciones[0]).toMatchObject({ accion: "salir", estado: "ejecutada", ejecutadoPor: "usuario-1" });
+    expect(insertsPromocionesAcciones[0].resultadoMl).toMatchObject({ yaNoParticipaba: true, llamoAMercadoLibre: false });
+  });
+
+  // Review de Pablo (PR #311) — nunca alcanza con que la cuenta sea de
+  // la empresa: el ítem puntual tiene que estar registrado bajo ESA
+  // cuenta en el snapshot de Promociones (promociones_candidatos) —
+  // nunca se confía en la combinación cuentaId+itemId del body a
+  // ciegas antes de intentar un DELETE real.
+  it("itemId que nunca se vio bajo esa cuenta (no está en el snapshot): 404, nunca llega a leer ni a llamar a Mercado Libre", async () => {
+    filasPorTabla.set(promocionesCandidatos, []); // ningún candidato conocido para esta combinación
+    const res = await POST(peticion(cuerpoBase()));
+    expect(res.status).toBe(404);
+    expect(leerPromocionesItemMlMock).not.toHaveBeenCalled();
+    expect(salirDePromocionMlMock).not.toHaveBeenCalled();
   });
 
   it("cuentaId con formato inválido: 400", async () => {

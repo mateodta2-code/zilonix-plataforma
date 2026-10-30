@@ -1,9 +1,19 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { promocionesCandidatos } from "@/db/schema";
+import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { leerPromocionesItemMl, type PromocionCrudaMl } from "@/lib/ml/cliente";
 import { calcularCandidatosItem, fechasParaParticipar, leerPisoYCostoFresco, leerReglasFrescasCuenta, puedeSalirPorApi, type ItemConPromociones } from "@/lib/ml/promociones";
+
+// Review de Pablo (PR #311) — las llamadas a Mercado Libre por ítem
+// iban una por una (secuenciales): con una cuenta que tiene muchas
+// promociones activas, esta pestaña tardaba segundos de más sin
+// necesidad. Mismo helper ya usado en
+// lib/trabajos/buscarPromocionesMultiCuenta.ts (lib/concurrencia.ts) —
+// un pool fijo de 4 "trabajadores", nunca una tanda de 4 esperando a
+// que termine toda la tanda para arrancar la siguiente.
+const TOPE_CONCURRENCIA_ML = 4;
 
 // Rama fix-promociones-aprobadas-participando, punto 3 — "Participando":
 // lista las promociones donde la cuenta YA participa en Mercado Libre
@@ -100,55 +110,74 @@ function promoQueCorresponde(promos: PromocionCrudaMl[], candidato: CandidatoDes
   );
 }
 
+async function filaParaCandidato(
+  empresaId: string,
+  cuentaMlId: string,
+  token: string,
+  reglas: Awaited<ReturnType<typeof leerReglasFrescasCuenta>>,
+  candidato: CandidatoDescubierto
+): Promise<FilaParticipando | null> {
+  const resultado = await leerPromocionesItemMl(candidato.itemId, token);
+  if (resultado.estado !== "ok") return null; // ítem con error puntual (403/401/5xx) — se omite, nunca rompe el resto
+
+  const promo = promoQueCorresponde(resultado.promociones, candidato);
+  if (!promo) return null; // ya no está started/pending (la cuenta salió desde otro lado, o cambió) — nunca se muestra como "participando" algo que ya no lo es
+
+  const { precioMinimo, costo } = await leerPisoYCostoFresco(empresaId, candidato.skuCodigo);
+
+  const item: ItemConPromociones = {
+    itemId: candidato.itemId,
+    cuentaMlId,
+    nickname: "",
+    tituloProducto: candidato.tituloProducto,
+    thumbnail: candidato.thumbnail,
+    skuCodigo: candidato.skuCodigo,
+    tieneVariantes: false,
+    skuVariantesDistintas: false,
+    promociones: [promo],
+  };
+  const [calculado] = calcularCandidatosItem(item, reglas, precioMinimo, costo);
+  const { fechaInicio, fechaFin } = fechasParaParticipar(promo);
+
+  return {
+    cuentaMlId,
+    itemId: candidato.itemId,
+    skuCodigo: candidato.skuCodigo,
+    tituloProducto: candidato.tituloProducto,
+    thumbnail: candidato.thumbnail,
+    tipoPromocion: calculado.tipoPromocion,
+    promotionIdMl: calculado.promotionIdMl,
+    estadoMl: calculado.estadoMl,
+    precioOriginal: calculado.precioOriginal,
+    precioActual: calculado.precioActual,
+    precioMinimo: calculado.precioMinimo,
+    maxDiscountedPrice: calculado.maxDiscountedPrice,
+    gananciaEstimada: calculado.gananciaEstimada,
+    cumpleReglas: calculado.cumpleReglas,
+    fechaInicio,
+    fechaFin,
+    puedeSalirApi: puedeSalirPorApi(calculado.tipoPromocion),
+  };
+}
+
 export async function listarParticipandoCuenta(empresaId: string, cuentaMlId: string): Promise<FilaParticipando[]> {
   const descubiertos = await descubrirCandidatosParticipando(empresaId, cuentaMlId);
   if (descubiertos.length === 0) return [];
 
   const [token, reglas] = await Promise.all([obtenerAccessTokenVigente(empresaId, cuentaMlId), leerReglasFrescasCuenta(empresaId, cuentaMlId)]);
 
-  const filas: FilaParticipando[] = [];
-  for (const candidato of descubiertos) {
-    const resultado = await leerPromocionesItemMl(candidato.itemId, token);
-    if (resultado.estado !== "ok") continue; // ítem con error puntual (403/401/5xx) — se omite, nunca rompe el resto
+  // conConcurrenciaLimitada nunca atrapa un error de la tarea por su
+  // cuenta (lib/concurrencia.ts) — un ítem puntual con un error
+  // inesperado (no uno "normal" de leerPromocionesItemMl, que ya
+  // devuelve un resultado en vez de lanzar) se atrapa ACÁ, nunca tira
+  // abajo el resto del pool.
+  const resultados = await conConcurrenciaLimitada(descubiertos, TOPE_CONCURRENCIA_ML, async (candidato) => {
+    try {
+      return await filaParaCandidato(empresaId, cuentaMlId, token, reglas, candidato);
+    } catch {
+      return null;
+    }
+  });
 
-    const promo = promoQueCorresponde(resultado.promociones, candidato);
-    if (!promo) continue; // ya no está started/pending (la cuenta salió desde otro lado, o cambió) — nunca se muestra como "participando" algo que ya no lo es
-
-    const { precioMinimo, costo } = await leerPisoYCostoFresco(empresaId, candidato.skuCodigo);
-
-    const item: ItemConPromociones = {
-      itemId: candidato.itemId,
-      cuentaMlId,
-      nickname: "",
-      tituloProducto: candidato.tituloProducto,
-      thumbnail: candidato.thumbnail,
-      skuCodigo: candidato.skuCodigo,
-      tieneVariantes: false,
-      skuVariantesDistintas: false,
-      promociones: [promo],
-    };
-    const [calculado] = calcularCandidatosItem(item, reglas, precioMinimo, costo);
-    const { fechaInicio, fechaFin } = fechasParaParticipar(promo);
-
-    filas.push({
-      cuentaMlId,
-      itemId: candidato.itemId,
-      skuCodigo: candidato.skuCodigo,
-      tituloProducto: candidato.tituloProducto,
-      thumbnail: candidato.thumbnail,
-      tipoPromocion: calculado.tipoPromocion,
-      promotionIdMl: calculado.promotionIdMl,
-      estadoMl: calculado.estadoMl,
-      precioOriginal: calculado.precioOriginal,
-      precioActual: calculado.precioActual,
-      precioMinimo: calculado.precioMinimo,
-      maxDiscountedPrice: calculado.maxDiscountedPrice,
-      gananciaEstimada: calculado.gananciaEstimada,
-      cumpleReglas: calculado.cumpleReglas,
-      fechaInicio,
-      fechaFin,
-      puedeSalirApi: puedeSalirPorApi(calculado.tipoPromocion),
-    });
-  }
-  return filas;
+  return resultados.filter((fila): fila is FilaParticipando => fila != null);
 }
