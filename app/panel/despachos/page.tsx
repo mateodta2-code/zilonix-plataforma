@@ -185,6 +185,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                   id={d.id}
                   logisticType={d.logisticType}
                   status={d.status}
+                  estadoTraducido={etiquetaEstadoEnvio(d.status, null)}
                   despachadoTs={d.despachadoTs}
                   guiaVistaTs={d.guiaVistaTs}
                   cuentaNickname={d.cuentaNickname}

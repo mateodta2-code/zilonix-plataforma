@@ -9,5 +9,11 @@
 - Encabezado de la página: "Órdenes ya pagas, listas para empacar — no incluye Full" + hora de la última actualización, encima del aviso de cuentas que no se pudieron revisar (sin cambios).
 - Sin migración — no hizo falta ninguna columna nueva para este alcance (comprador/bodega asignada/variante del producto quedan documentados como huecos reales del esquema, no inventados).
 
+## Revisión de Pablo (PR #310)
+- El backfill del plazo tenía 3 problemas reales: sin tope de concurrencia, sin tope por carga, y sin registrar el intento (reintentaba en CADA carga, aunque la cuenta tuviera el token vencido o el envío no tuviera SLA). Ahora: máximo 4 llamadas simultáneas, máximo 20 por carga (el resto se intenta en la siguiente), y un freno de 30 minutos por envío — en memoria del proceso, nunca persistido: ninguna columna existente de `despachos_ml` puede guardar "último intento de SLA" sin pisar el significado real de otra feature (confirmado con Mateo antes de elegir esta opción en vez de una migración nueva).
+- `linkPublicacion` se movió de `lib/ml/cliente.ts` a `lib/ml/permalink.ts` (sin dependencias de servidor) — el componente de cliente de las tarjetas ya no importa el cliente completo de la API de Mercado Libre. `lib/ml/cliente.ts` solo la re-exporta, para no tocar a los demás llamadores.
+- El chip de estado del encabezado de la tarjeta ahora muestra la traducción al español (`etiquetaEstadoEnvio`), nunca el inglés crudo de Mercado Libre.
+- El join de stock por bodega ahora incluye `bodegas.empresa_id` explícito (antes solo `stock_bodega.empresa_id` en el `WHERE`) — nunca depender solo de la FK compuesta para que el join quede correcto.
+
 ## Pendiente — no entró en este PR
 - Nickname del comprador y la variante vendida (ej. "Sabor: Vainilla"): ninguno de los dos existe hoy en `pedidos`/`pedido_items` — necesitarían su propia migración, fuera del alcance pedido para esta rama.

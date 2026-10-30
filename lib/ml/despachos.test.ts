@@ -856,3 +856,68 @@ describe("tarjetas de Despachos — Fase 1-1 (stock, precio y orden por fecha de
     expect(indiceNuevo).toBeLessThan(indiceViejo); // lo más nuevo, arriba
   });
 });
+
+// Revisión de Pablo (PR #310) — el backfill del plazo (lib/ml/
+// despachos.ts) nunca debe volver a llamar a Mercado Libre por un
+// envío que ya intentó hace menos de 30 minutos, sin importar si ese
+// intento trajo el plazo real o no. Cada test usa su propio despacho
+// (id único) para no pisar el freno en memoria de otro test del
+// archivo.
+describe("backfill del plazo — no reintenta antes de 30 minutos (revisión de Pablo, PR #310)", () => {
+  vi.setConfig({ testTimeout: 20_000 });
+  const empresaId = randomUUID();
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa backfill SLA", nit: `TEST-DESPB-${empresaId.slice(0, 8)}` }));
+  });
+
+  async function despachoListoParaBackfill(shipmentIdExterno: string): Promise<string> {
+    const cuentaId = await crearCuentaMlDePrueba(empresaId);
+    const pedidoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidosFinanzas).values({ empresaId, pedidoId, cuentaMlId: cuentaId, valorVenta: "100000.00" }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoId, 1)));
+    const [{ id: despachoId }] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(despachosMl)
+        .values({ empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno, logisticType: "self_service", status: "ready_to_ship", imprimible: true })
+        .returning({ id: despachosMl.id })
+    );
+    return despachoId;
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("una respuesta sin plazo (sin expected_date) no rompe, y una segunda carga inmediata no vuelve a pegarle a ML", async () => {
+    await despachoListoParaBackfill("SLA-SIN-PLAZO");
+    const fetchMock = vi.fn(async () => respuestaJson({ status: "on_time" })); // sin expected_date
+    vi.stubGlobal("fetch", fetchMock);
+
+    const primeraCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    const tarjeta1 = primeraCarga.find((t) => t.shipmentIdExterno === "SLA-SIN-PLAZO")!;
+    expect(tarjeta1).toBeDefined(); // no rompió la lista
+    expect(tarjeta1.slaExpectedDate).toBeNull();
+    const llamadasTrasPrimera = fetchMock.mock.calls.length;
+    expect(llamadasTrasPrimera).toBeGreaterThan(0); // sí intentó, al menos una vez
+
+    const segundaCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    const tarjeta2 = segundaCarga.find((t) => t.shipmentIdExterno === "SLA-SIN-PLAZO")!;
+    expect(tarjeta2.slaExpectedDate).toBeNull();
+    expect(fetchMock.mock.calls.length).toBe(llamadasTrasPrimera); // ninguna llamada nueva — todavía dentro del freno de 30 min
+  });
+
+  it("una vez el plazo se guardó con éxito, una segunda carga tampoco vuelve a pegarle a ML (ya no es candidato)", async () => {
+    await despachoListoParaBackfill("SLA-CON-PLAZO");
+    const fetchMock = vi.fn(async () => respuestaJson({ status: "on_time", expected_date: "2026-03-15T20:00:00Z" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const primeraCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    const tarjeta1 = primeraCarga.find((t) => t.shipmentIdExterno === "SLA-CON-PLAZO")!;
+    expect(tarjeta1.slaExpectedDate).not.toBeNull();
+    const llamadasTrasPrimera = fetchMock.mock.calls.length;
+
+    const segundaCarga = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    const tarjeta2 = segundaCarga.find((t) => t.shipmentIdExterno === "SLA-CON-PLAZO")!;
+    expect(tarjeta2.slaExpectedDate?.getTime()).toBe(tarjeta1.slaExpectedDate?.getTime());
+    expect(fetchMock.mock.calls.length).toBe(llamadasTrasPrimera); // ninguna llamada nueva
+  });
+});

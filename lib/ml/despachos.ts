@@ -538,7 +538,14 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       const filasStock = await tx
         .select({ skuId: stockBodega.skuId, total: sql<number>`sum(${stockBodega.disponible})`.mapWith(Number) })
         .from(stockBodega)
-        .innerJoin(bodegas, eq(stockBodega.bodegaId, bodegas.id))
+        // Revisión de Pablo — bodegas.empresa_id explícito en el join
+        // (no solo stock_bodega.empresa_id en el WHERE): aunque la FK
+        // compuesta stock_bodega_bodega_misma_empresa_fk ya garantiza
+        // que las dos empresa_id coinciden, el join mismo nunca debe
+        // depender de esa garantía implícita para quedar correcto —
+        // mismo criterio de "nunca confiar en una sola capa" del resto
+        // del repo.
+        .innerJoin(bodegas, and(eq(stockBodega.bodegaId, bodegas.id), eq(bodegas.empresaId, empresaId)))
         .where(and(eq(stockBodega.empresaId, empresaId), eq(bodegas.activa, true), inArray(stockBodega.skuId, skuIds)))
         .groupBy(stockBodega.skuId);
       for (const f of filasStock) stockPorSku.set(f.skuId, f.total);
@@ -580,35 +587,86 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
     }));
   });
 
-  // Backfill del plazo (punto 1 de la tarea) — FUERA de la transacción
-  // de arriba a propósito: llamar a Mercado Libre desde adentro de un
-  // dbComoEmpresa dejaría la conexión de Postgres abierta mientras se
-  // espera la red. Solo aplica a lo que está "listo para despachar" y
-  // todavía no tiene el plazo guardado (una fila sincronizada antes de
-  // que este campo existiera, o cuyo primer intento de SLA falló). Una
-  // cuenta con error (token vencido) no frena a las demás — ya sale en
-  // el aviso de arriba (listarCuentasConErrorDespacho).
-  await Promise.all(
-    tarjetas
-      .filter((t) => t.status === STATUS_PENDIENTES && t.slaExpectedDate === null)
-      .map(async (t) => {
-        try {
-          const token = await obtenerAccessTokenVigente(empresaId, t.cuentaMlId);
-          const sla = await obtenerSlaEnvioMl(t.shipmentIdExterno, token);
-          if (!sla.expectedDate) return;
-          const fecha = new Date(sla.expectedDate);
-          await dbComoEmpresa(empresaId, (tx) =>
-            tx.update(despachosMl).set({ slaExpectedDate: fecha }).where(and(eq(despachosMl.empresaId, empresaId), eq(despachosMl.id, t.id)))
-          );
-          t.slaExpectedDate = fecha;
-        } catch {
-          // Cuenta desconectada, candado de renovación, o el SLA no
-          // vino — no bloquea el resto de la lista.
-        }
-      })
-  );
+  await backfillSlaFaltante(empresaId, tarjetas);
 
   return tarjetas;
+}
+
+// Revisión de Pablo (PR #310) — 3 correcciones reales al backfill de
+// arriba:
+// 1) Sin tope, una carga con muchos "ready_to_ship" sin plazo podía
+//    disparar decenas de llamadas simultáneas a Mercado Libre. Ahora:
+//    máximo MAX_BACKFILL_SLA_POR_CARGA por carga (el resto se intenta
+//    en la siguiente), con a lo sumo CONCURRENCIA_BACKFILL_SLA en
+//    vuelo a la vez.
+// 2) Sin registrar el intento, una cuenta con error (o un envío sin
+//    SLA real) se reintentaba en CADA carga de la pantalla — ida y
+//    vuelta a Mercado Libre por nada. ultimoIntentoSla frena eso por
+//    COOLDOWN_INTENTO_SLA_MS. Es un Map en memoria del PROCESO, nunca
+//    persistido: ninguna columna existente de despachos_ml puede
+//    cargar "último intento de SLA" sin pisar el significado real de
+//    otra feature (guia_vista_ts/despachado_ts son el gate de Marcar
+//    despachado; etiqueta_impresa_ts es de impresión; actualizado_ts
+//    correría el filtro de fecha de la impresión masiva sin que nada
+//    real haya cambiado) — agregar una columna solo para esto es una
+//    migración nueva, decisión de Mateo, no de esta revisión. Se
+//    reinicia con cada redeploy: en ese lapso se reintenta una vez
+//    más de lo ideal, nunca rompe nada.
+const MAX_BACKFILL_SLA_POR_CARGA = 20;
+const CONCURRENCIA_BACKFILL_SLA = 4;
+const COOLDOWN_INTENTO_SLA_MS = 30 * 60 * 1000;
+const ultimoIntentoSla = new Map<string, number>();
+
+function puedeIntentarSla(despachoId: string, ahoraMs: number): boolean {
+  const ultimo = ultimoIntentoSla.get(despachoId);
+  return ultimo === undefined || ahoraMs - ultimo >= COOLDOWN_INTENTO_SLA_MS;
+}
+
+// Pool de trabajadores con tope de concurrencia — sin librería nueva:
+// cada "trabajador" toma el siguiente ítem disponible hasta que se
+// acaben, nunca más de `limite` promesas en vuelo a la vez.
+async function conLimiteDeConcurrencia<T>(items: T[], limite: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let indice = 0;
+  async function trabajador(): Promise<void> {
+    while (indice < items.length) {
+      const miIndice = indice++;
+      await fn(items[miIndice]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limite, items.length) }, () => trabajador()));
+}
+
+// FUERA de la transacción de listarTarjetasDespacho a propósito:
+// llamar a Mercado Libre desde adentro de un dbComoEmpresa dejaría la
+// conexión de Postgres abierta mientras se espera la red. Solo aplica
+// a lo que está "listo para despachar" y todavía no tiene el plazo
+// guardado. Una cuenta con error (token vencido) no frena a las
+// demás — ya sale en el aviso de arriba (listarCuentasConErrorDespacho).
+async function backfillSlaFaltante(empresaId: string, tarjetas: TarjetaDespacho[]): Promise<void> {
+  const ahoraMs = Date.now();
+  const candidatos = tarjetas
+    .filter((t) => t.status === STATUS_PENDIENTES && t.slaExpectedDate === null && puedeIntentarSla(t.id, ahoraMs))
+    .slice(0, MAX_BACKFILL_SLA_POR_CARGA);
+
+  await conLimiteDeConcurrencia(candidatos, CONCURRENCIA_BACKFILL_SLA, async (t) => {
+    // Se registra el intento ANTES de llamar — así una respuesta sin
+    // expected_date, un error, o una cuenta desconectada igual frenan
+    // el reintento por 30 minutos (el punto real de esta revisión).
+    ultimoIntentoSla.set(t.id, Date.now());
+    try {
+      const token = await obtenerAccessTokenVigente(empresaId, t.cuentaMlId);
+      const sla = await obtenerSlaEnvioMl(t.shipmentIdExterno, token);
+      if (!sla.expectedDate) return;
+      const fecha = new Date(sla.expectedDate);
+      await dbComoEmpresa(empresaId, (tx) =>
+        tx.update(despachosMl).set({ slaExpectedDate: fecha }).where(and(eq(despachosMl.empresaId, empresaId), eq(despachosMl.id, t.id)))
+      );
+      t.slaExpectedDate = fecha;
+    } catch {
+      // Cuenta desconectada, candado de renovación, o el SLA no vino
+      // — no bloquea el resto de la lista.
+    }
+  });
 }
 
 export type GrupoTarjetasDespacho = { etiqueta: string; despachos: TarjetaDespacho[] };

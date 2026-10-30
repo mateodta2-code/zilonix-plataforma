@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Boton } from "@/components/marco/Boton";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
-import { linkPublicacion } from "@/lib/ml/cliente";
+import { linkPublicacion } from "@/lib/ml/permalink";
 import type { EstadoPlazo } from "@/lib/ml/despachos";
 import { deshacerDespachadoAction, marcarDespachadoAction } from "./actions";
 import styles from "./page.module.css";
@@ -24,6 +24,10 @@ export type TarjetaDespachoProps = {
   id: string;
   logisticType: string | null;
   status: string | null;
+  // Chip del encabezado — revisión de Pablo (PR #310): el status real
+  // de Mercado Libre va traducido (etiquetaEstadoEnvio(status, null),
+  // lib/ml/despachos.ts), nunca el inglés crudo que manda la API.
+  estadoTraducido: string | null;
   despachadoTs: Date | null;
   guiaVistaTs: Date | null;
   cuentaNickname: string;
@@ -107,7 +111,7 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
 
           <div className={styles.encabezadoTarjeta}>
             <Chip estado="neutro">{props.etiquetaTipo}</Chip>
-            <Chip estado={colorEstado}>{props.status ?? "—"}</Chip>
+            <Chip estado={colorEstado}>{props.estadoTraducido ?? "—"}</Chip>
             {props.chipPlazo && (
               <span className={styles.chipPlazo} data-estado={props.estadoPlazo ?? "normal"}>
                 {props.chipPlazo}

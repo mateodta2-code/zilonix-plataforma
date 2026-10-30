@@ -771,13 +771,13 @@ export async function obtenerVendedor(sellerId: string, token: string): Promise<
   }
 }
 
-// Link real de la publicación — confirmado en producción (zilonix-os-web):
-// articulo.mercadolibre.com.co/MCO-{numero} redirige a la ficha exacta,
-// sin pasar por /items/{id} (que da 403 para publicaciones ajenas).
-export function linkPublicacion(itemId: string): string | null {
-  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  return `https://articulo.mercadolibre.com.co/${itemId.replace(/^MCO(\d+)$/, "MCO-$1")}`;
-}
+// Revisión de Pablo (PR #310) — se movió a lib/ml/permalink.ts (sin
+// dependencias de servidor) para que un componente "use client"
+// pueda importarla sin arrastrar este archivo completo. Re-exportada
+// acá para no tocar los demás llamadores que ya la importan de
+// "@/lib/ml/cliente" (app/panel/publicar/formulario-logica.ts,
+// lib/publicidad/consultas.ts, etc.).
+export { linkPublicacion } from "@/lib/ml/permalink";
 
 // ---------- Tarea 2.11 ("Publicar producto y clip") ----------
 //
