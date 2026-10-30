@@ -145,6 +145,12 @@ const RUTAS_PROTEGIDAS = new Set([
   // su propio requierePermiso("promociones","ejecutar"), nunca el
   // mismo "aprobar" que exige el POST combinado de arriba.
   "app/api/ml/promociones/acciones/ejecutar/route.ts",
+  // Rama fix-promociones-aprobadas-participando, punto 3 — "Participando".
+  // GET exige "consultar" (mismo criterio que .../candidatos); el POST
+  // de salir exige "ejecutar" (escribe de verdad en Mercado Libre, un
+  // DELETE real — mismo nivel que .../acciones/ejecutar, nunca "aprobar").
+  "app/api/ml/promociones/participando/route.ts",
+  "app/api/ml/promociones/participando/salir/route.ts",
   // Review de Pablo (PR #304) — count(*) real para "Lanzar aprobadas a
   // Mercado Libre (N)": mismo permiso de solo lectura que el resto de
   // lo que solo CONSULTA (buscar/trabajo/candidatos/historial).

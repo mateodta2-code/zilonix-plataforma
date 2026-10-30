@@ -22,19 +22,21 @@ import {
   precioDesdeDescuento,
   puedeEditarPrecio,
   rangoEdicion,
+  sinMargen,
 } from "./calculosFila";
 import { debeMostrarResumenBusquedaVacia, lineasResumenBusquedaVacia } from "./resumenBusquedaVacia";
 import type {
   AccionHistorialCliente,
   CandidatoClienteCliente,
   ConteosCandidatosCliente,
+  FilaParticipandoCliente,
   ReglasCuentaCliente,
   TrabajoBusquedaCliente,
 } from "./tipos-cliente";
 import styles from "./promociones.module.css";
 
 type Cuenta = { id: string; nickname: string };
-type Pestana = "buscar" | "historial" | "reglas";
+type Pestana = "buscar" | "historial" | "reglas" | "participando";
 // Rama feat-promociones-editar-precio, punto 2 — "todas" ya significaba
 // "pendientes" del lado del servidor (GET .../candidatos solo devuelve
 // filas sin decisión bajo este filtro); la etiqueta ahora lo dice.
@@ -129,6 +131,15 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
 
   const [historial, setHistorial] = useState<AccionHistorialCliente[]>([]);
   const [reglas, setReglas] = useState<ReglasCuentaCliente[]>([]);
+
+  // Rama fix-promociones-aprobadas-participando, punto 3 — pestaña
+  // "Participando". `salidaEnCursoKey` es `cuentaMlId:itemId:tipoPromocion`
+  // (único por fila, igual que la clave que usa el servidor para
+  // derivar decisiones) — deshabilita solo ESA fila mientras se manda
+  // el DELETE real.
+  const [participando, setParticipando] = useState<FilaParticipandoCliente[]>([]);
+  const [cargandoParticipando, setCargandoParticipando] = useState(false);
+  const [salidaEnCursoKey, setSalidaEnCursoKey] = useState<string | null>(null);
 
   // MED 7 / rama feat-promociones-aprobacion — "Lanzar aprobadas a
   // Mercado Libre (N)": N son las acciones "aceptada" pendientes de
@@ -237,11 +248,54 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     if (res.ok) setReglas((await res.json()).filas);
   }
 
+  async function cargarParticipando() {
+    setCargandoParticipando(true);
+    const params = new URLSearchParams();
+    if (cuentaSeleccionada !== "todas") params.set("cuentaId", cuentaSeleccionada);
+    const res = await fetch(`/api/ml/promociones/participando?${params.toString()}`);
+    if (res.ok) setParticipando((await res.json()).filas);
+    setCargandoParticipando(false);
+  }
+
   useEffect(() => {
     if (pestana === "historial") void cargarHistorial();
     if (pestana === "reglas") void cargarReglas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo nos importa reaccionar al cambio de pestaña
-  }, [pestana]);
+    if (pestana === "participando") void cargarParticipando();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo nos importa reaccionar al cambio de pestaña (y a la cuenta, para participando)
+  }, [pestana, cuentaSeleccionada]);
+
+  // Confirmación explícita antes de un DELETE real contra Mercado
+  // Libre (pedido de Mateo) — mismo patrón ya usado en este repo
+  // (marcarDespachado, app/panel/despachos) para acciones que no se
+  // deshacen fácil. Solo se prueba contra ML real con 1 ítem que
+  // Mateo elija — nunca en pruebas automáticas (route.test.ts, con
+  // mocks).
+  async function dejarDeParticipar(fila: FilaParticipandoCliente) {
+    if (!confirm(`¿Dejar de participar en "${fila.tituloProducto ?? fila.itemId}" (${fila.tipoPromocion})? Esto se manda de una a Mercado Libre, no se puede deshacer desde acá.`)) return;
+    const key = `${fila.cuentaMlId}:${fila.itemId}:${fila.tipoPromocion}`;
+    setSalidaEnCursoKey(key);
+    let res: Response;
+    let body: { error?: string; yaNoParticipaba?: boolean } = {};
+    try {
+      res = await fetch("/api/ml/promociones/participando/salir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cuentaId: fila.cuentaMlId, itemId: fila.itemId, promotionIdMl: fila.promotionIdMl, tipoPromocion: fila.tipoPromocion }),
+      });
+      body = await res.json().catch(() => ({}));
+    } catch {
+      setSalidaEnCursoKey(null);
+      mostrarToast("No se pudo conectar con el servidor — revisá tu conexión e intentá de nuevo.", "peligro");
+      return;
+    }
+    setSalidaEnCursoKey(null);
+    if (res.ok) {
+      setParticipando((actual) => actual.filter((f) => `${f.cuentaMlId}:${f.itemId}:${f.tipoPromocion}` !== key));
+      mostrarToast(body.yaNoParticipaba ? "Ya no estaba participando — nada que mandar a Mercado Libre." : "Listo — se salió de la promoción.", "exito");
+    } else {
+      mostrarToast(body.error || "No se pudo salir de la promoción.", "peligro");
+    }
+  }
 
   function chipEstado(candidato: CandidatoClienteCliente): { texto: string; estado: EstadoChip; title?: string } {
     if (candidato.soloEnMl) return { texto: "Solo en ML", estado: "neutro", title: candidato.motivoRevisarManual ?? undefined };
@@ -541,9 +595,9 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   return (
     <>
       <div className={styles.pestanas}>
-        {(["buscar", "historial", "reglas"] as Pestana[]).map((p) => (
+        {(["buscar", "participando", "historial", "reglas"] as Pestana[]).map((p) => (
           <Boton key={p} type="button" variante={pestana === p ? "primario" : "secundario"} chico onClick={() => setPestana(p)}>
-            {p === "buscar" ? "Buscar / Resultados" : p === "historial" ? "Historial" : "Reglas"}
+            {p === "buscar" ? "Buscar / Resultados" : p === "participando" ? "Participando" : p === "historial" ? "Historial" : "Reglas"}
           </Boton>
         ))}
       </div>
@@ -695,6 +749,9 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                   // en cada tecla era el bug real); acá solo se avisa y
                   // se bloquea "Sí" hasta que se corrija a mano.
                   const fueraDeRangoFila = editable && fueraDeRango(c, precioEditado(c));
+                  // Punto 2 — "sin margen" manda sobre "fuera de rango" en el
+                  // tooltip: distinto motivo, mensaje distinto (ver calculosFila.ts).
+                  const sinMargenFila = sinMargen(c);
                   return (
                     <FilaTabla key={c.id}>
                       <CeldaTabla>
@@ -732,24 +789,36 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                                 }
                               }}
                             />
-                            {rango && (
-                              <span style={{ fontSize: 11, color: fueraDeRangoFila ? "var(--kpi-peligro-texto)" : "var(--text-faint)" }}>
-                                {fueraDeRangoFila
-                                  ? `Tiene que estar entre ${formatoPesos(rango.min)} y ${formatoPesos(rango.max)}.`
-                                  : `mín ${formatoPesos(rango.min)} – máx ${formatoPesos(rango.max)}`}
+                            {sinMargenFila ? (
+                              <span style={{ fontSize: 11, color: "var(--kpi-peligro-texto)" }}>
+                                Sin margen: el mínimo ({formatoPesos(numero(c.precioMinimo))}) no deja descuento.
                               </span>
+                            ) : (
+                              rango && (
+                                <span style={{ fontSize: 11, color: fueraDeRangoFila ? "var(--kpi-peligro-texto)" : "var(--text-faint)" }}>
+                                  {fueraDeRangoFila
+                                    ? `Tiene que estar entre ${formatoPesos(rango.min)} y ${formatoPesos(rango.max)}.`
+                                    : `mín ${formatoPesos(rango.min)} – máx ${formatoPesos(rango.max)}`}
+                                </span>
+                              )
                             )}
                           </div>
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                             {formatoPesos(precioMostrado)}
-                            {c.soloEnMl && (
-                              <span
-                                style={{ fontSize: 11, color: "var(--text-faint)" }}
-                                title={`El tipo "${c.tipoPromocion}" no se puede escribir por la API de Mercado Libre — precio fijo de ML.`}
-                              >
-                                precio fijo de ML
+                            {sinMargenFila ? (
+                              <span style={{ fontSize: 11, color: "var(--kpi-peligro-texto)" }}>
+                                Sin margen: el mínimo ({formatoPesos(numero(c.precioMinimo))}) no deja descuento.
                               </span>
+                            ) : (
+                              c.soloEnMl && (
+                                <span
+                                  style={{ fontSize: 11, color: "var(--text-faint)" }}
+                                  title={`El tipo "${c.tipoPromocion}" no se puede escribir por la API de Mercado Libre — precio fijo de ML.`}
+                                >
+                                  precio fijo de ML
+                                </span>
+                              )
                             )}
                           </div>
                         )}
@@ -795,6 +864,9 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                           {filtro === "rechazadas" && c.motivoRechazo && (
                             <span style={{ fontSize: 11, color: "var(--kpi-peligro-texto)" }}>{c.motivoRechazo}</span>
                           )}
+                          {filtro === "aprobadas" && c.motivoFalla && (
+                            <span style={{ fontSize: 11, color: "var(--kpi-peligro-texto)" }}>{c.motivoFalla}</span>
+                          )}
                         </div>
                       </CeldaTabla>
                       {puedeAprobar && (
@@ -810,15 +882,30 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                               {decisionDirectaId === c.id ? "…" : "Volver a pendiente"}
                             </Boton>
                           ) : filtro === "aprobadas" ? (
-                            <span style={{ fontSize: 12, color: "var(--text-faint)" }}>—</span>
+                            // Bug real (rama fix-promociones-aprobadas-participando) —
+                            // antes esta celda era un "—" fijo sin importar qué pasó;
+                            // con Dueño/Gerente (permiso "ejecutar" por default) una
+                            // fila aprobada casi siempre pasa a "ejecutada"/"fallida"
+                            // casi de una, nunca se queda en "aceptada" — mostrar el
+                            // estado real acá es la única forma de que no parezca que
+                            // "se perdió".
+                            <Chip estado={c.estadoDecision === "ejecutada" ? "exito" : c.estadoDecision === "fallida" ? "peligro" : "aviso"}>
+                              {c.estadoDecision === "ejecutada" ? "Ejecutada en ML" : c.estadoDecision === "fallida" ? "Falló al ejecutar" : "Aprobada, por lanzar"}
+                            </Chip>
                           ) : (
                             <div style={{ display: "flex", gap: 4 }}>
                               <Boton
                                 type="button"
                                 variante="primario"
                                 chico
-                                disabled={decisionDirectaId === c.id || fueraDeRangoFila}
-                                title={fueraDeRangoFila ? "El precio editado quedó fuera del rango permitido — corregilo para poder aprobar." : undefined}
+                                disabled={decisionDirectaId === c.id || fueraDeRangoFila || sinMargenFila}
+                                title={
+                                  sinMargenFila
+                                    ? `Sin margen: el precio mínimo de Finanzas (${formatoPesos(numero(c.precioMinimo))}) no deja descuento.`
+                                    : fueraDeRangoFila
+                                      ? "El precio editado quedó fuera del rango permitido — corregilo para poder aprobar."
+                                      : undefined
+                                }
                                 onClick={() => enviarDecisionDirecta(c, "aprobar")}
                               >
                                 {decisionDirectaId === c.id ? "…" : "Sí"}
@@ -875,6 +962,74 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
           )}
           {!vistaPrevia && resultadoAplicar && <p style={{ fontSize: 13, marginTop: 10 }}>{resultadoAplicar}</p>}
           {!puedeAprobar && <p style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 10 }}>Tu rol solo puede consultar — no puede aceptar ni ejecutar acciones.</p>}
+        </Tarjeta>
+      )}
+
+      {pestana === "participando" && (
+        <Tarjeta className={styles.seccion}>
+          <p className="zx-etiqueta">PARTICIPANDO</p>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>
+            Promociones donde la cuenta ya está activa en Mercado Libre. Depende de haber corrido &quot;Buscar&quot; al menos una vez para esa cuenta — una promoción nueva no aparece
+            acá hasta la próxima búsqueda.
+          </p>
+          {cargandoParticipando ? (
+            <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 12 }}>Cargando…</p>
+          ) : participando.length === 0 ? (
+            <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 12 }}>Ninguna cuenta tiene promociones activas en este momento (o todavía no se corrió &quot;Buscar&quot;).</p>
+          ) : (
+            <div style={{ marginTop: 12 }}>
+              <Tabla encabezados={["Cuenta", "Producto", "SKU", "Tipo", "Precio con promo", "% desc.", "Desde", "Hasta", "Utilidad est.", "Piso", puedeEjecutar ? "Salir" : ""]}>
+                {participando.map((f) => {
+                  const key = `${f.cuentaMlId}:${f.itemId}:${f.tipoPromocion}`;
+                  const descuento = f.precioOriginal != null && f.precioActual != null && f.precioOriginal > 0 ? ((f.precioOriginal - f.precioActual) / f.precioOriginal) * 100 : null;
+                  const porDebajoDelPiso = f.precioMinimo != null && f.precioActual != null && f.precioActual < f.precioMinimo;
+                  return (
+                    <FilaTabla key={key}>
+                      <CeldaTabla>{f.nicknameCuenta}</CeldaTabla>
+                      <CeldaTabla>
+                        {f.thumbnail && <img src={f.thumbnail} alt="" width={28} height={28} style={{ objectFit: "cover", borderRadius: 4, marginRight: 6, verticalAlign: "middle" }} />}
+                        {f.tituloProducto ?? f.itemId}
+                      </CeldaTabla>
+                      <CeldaTabla>{f.skuCodigo ?? "—"}</CeldaTabla>
+                      <CeldaTabla>{f.tipoPromocion}</CeldaTabla>
+                      <CeldaTabla>{formatoPesos(f.precioActual)}</CeldaTabla>
+                      <CeldaTabla>{formatoPorcentaje(descuento)}</CeldaTabla>
+                      <CeldaTabla>{new Date(f.fechaInicio).toLocaleDateString("es-CO")}</CeldaTabla>
+                      <CeldaTabla>{new Date(f.fechaFin).toLocaleDateString("es-CO")}</CeldaTabla>
+                      <CeldaTabla>{formatoPesos(f.gananciaEstimada)}</CeldaTabla>
+                      <CeldaTabla>
+                        {f.precioMinimo == null ? (
+                          <span style={{ color: "var(--kpi-peligro-texto)", fontSize: 12 }}>Falta precio mínimo</span>
+                        ) : (
+                          <Chip estado={porDebajoDelPiso ? "peligro" : "exito"}>{porDebajoDelPiso ? "Queda por debajo" : "Cumple"}</Chip>
+                        )}
+                      </CeldaTabla>
+                      {puedeEjecutar && (
+                        <CeldaTabla>
+                          {f.puedeSalirApi ? (
+                            <Boton type="button" variante="secundario" chico disabled={salidaEnCursoKey === key} onClick={() => dejarDeParticipar(f)}>
+                              {salidaEnCursoKey === key ? "…" : "Dejar de participar"}
+                            </Boton>
+                          ) : (
+                            <a
+                              href="https://www.mercadolibre.com.co/promotions"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="zx-etiqueta"
+                              style={{ fontSize: 11 }}
+                              title={`El tipo "${f.tipoPromocion}" no se puede dejar por la API de Mercado Libre — hacelo desde la Central de Promociones.`}
+                            >
+                              Solo desde ML ↗
+                            </a>
+                          )}
+                        </CeldaTabla>
+                      )}
+                    </FilaTabla>
+                  );
+                })}
+              </Tabla>
+            </div>
+          )}
         </Tarjeta>
       )}
 

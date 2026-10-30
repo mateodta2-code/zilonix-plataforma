@@ -84,6 +84,26 @@ export function rangoEdicion(candidato: CandidatoClienteCliente): RangoEdicionPr
   return { min, max };
 }
 
+// Punto 2 (rama fix-promociones-aprobadas-participando) — bug real
+// reportado por Mateo: en las filas donde el techo real (lo que deja
+// Mercado Libre para esta promoción puntual, o el precio de hoy si no
+// hay techo propio) queda EN o POR DEBAJO del piso de Finanzas, "Sí"
+// quedaba gris sin ninguna explicación — no hay ningún precio por
+// encima del piso que además sea un descuento real, así que no hay
+// nada que aprobar. Distinto de "fuera de rango" (calculosFila.ts,
+// `fueraDeRango`): ahí existe un rango real y la persona escribió algo
+// afuera; acá el rango nunca existió (o es un solo punto) porque el
+// piso y el techo quedaron pegados.
+export function sinMargen(candidato: CandidatoClienteCliente): boolean {
+  const piso = numero(candidato.precioMinimo);
+  if (piso == null) return false; // eso es "Falta precio mínimo" — otro caso, otro mensaje
+  const techoMl = numero(candidato.maxDiscountedPrice);
+  const original = numero(candidato.precioOriginal);
+  const techos = [techoMl, original].filter((v): v is number => v != null);
+  if (techos.length === 0) return false;
+  return Math.min(...techos) <= piso;
+}
+
 // Punto 1 — "los tipos que ML no deja editar... se ven como solo
 // lectura": `soloEnMl` YA ES exactamente esa lista
 // (TIPOS_SIN_ESCRITURA_API, lib/ml/promociones.ts), calculada del

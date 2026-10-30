@@ -28,6 +28,68 @@ import { leerItemParaPromocionMl, leerPromocionesItemMl, listarItemsActivosMl, t
 // production — Mercado Libre puede haber cambiado esto.
 export const TIPOS_SIN_ESCRITURA_API = ["PRICE_DISCOUNT", "LIGHTNING", "SMART", "UNHEALTHY_STOCK"];
 
+// Rama fix-promociones-aprobadas-participando, punto 3 — "primero
+// investiga en la doc oficial de ML qué tipos permiten salir por API"
+// (DELETE /seller-promotions/items/{item_id}?promotion_type=...).
+// Investigado el 2026-10-30 contra developers.mercadolibre.com
+// ("Manage Promotions" → cada tipo tiene su propia página; la de
+// Daily Deal/Lightning Deal advierte un comportamiento DISTINTO del
+// que uno asumiría por la lista de arriba — confirmar de nuevo en vivo
+// si pasa mucho tiempo, Mercado Libre puede haber cambiado esto):
+//
+// - PRICE_DISCOUNT: su propia página ("price-discountt") documenta un
+//   DELETE real que borra la oferta completa — sí se puede salir por
+//   API, aunque (TIPOS_SIN_ESCRITURA_API) no se pueda UNIRSE/MODIFICAR
+//   por esta misma API. Son operaciones distintas, no es lo mismo.
+// - UNHEALTHY_STOCK y PRE_NEGOTIATED: documentados juntos
+//   ("pre-negotiated-discount-per-item"), con ejemplos reales de
+//   DELETE a nivel de ítem (promotion_id + offer_id) — sí se puede.
+// - SMART y PRICE_MATCHING: documentados juntos
+//   ("smart-campaigns" = "Automated co-participation and competitive
+//   pricing"), con DELETE a nivel de ítem — sí se puede, aunque SMART
+//   tampoco se pueda unir/modificar por API (mismo caso que PRICE_DISCOUNT).
+// - DEAL (Daily Deal) y LIGHTNING (Lightning Deal): sus páginas
+//   ESPECÍFICAS dicen textual "Once activated, offers cannot be
+//   deleted... if the seller does not want to maintain the offer,
+//   they can pause the item" — una vez activa (started/pending, que
+//   es justo el caso de la pestaña "Participando"), la API NO deja
+//   salir con DELETE, solo pausar (operación distinta, no
+//   implementada). La página genérica de "Traditional Campaigns" SÍ
+//   muestra un ejemplo de DELETE con promotion_type=DEAL, pero la
+//   página específica de Daily Deal (más autorizada para este tipo
+//   puntual) contradice eso para una oferta ya activa — se sigue la
+//   más específica, nunca la genérica. DUDA REAL sin resolver: esa
+//   página usa `promotion_type=DOD` en sus ejemplos (no "DEAL", que es
+//   el valor que este código usa y que zilonix-os-web confirmó real en
+//   producción) — puede ser un alias viejo de la doc. Confirmar antes
+//   de production si algún día se habilita pausar.
+// - SELLER_CAMPAIGN: su DELETE real (`seller-campaigns`) es a nivel de
+//   CAMPAÑA completa (`/seller-promotions/promotions/{promotion_id}`),
+//   no de un ítem puntual — borra la campaña entera, con TODOS sus
+//   ítems, no solo el que se está mirando en una fila. Queda afuera a
+//   propósito: el grado de esta operación no coincide con lo que
+//   promete el botón "Dejar de participar" de un solo producto, sería
+//   peligroso exponerlo así.
+// - Cualquier tipo no listado acá: por defecto NO se puede (nunca se
+//   asume que un tipo nuevo o no visto todavía admite DELETE).
+export const TIPOS_SALIR_API: Readonly<Record<string, boolean>> = {
+  PRICE_DISCOUNT: true,
+  UNHEALTHY_STOCK: true,
+  PRE_NEGOTIATED: true,
+  SMART: true,
+  PRICE_MATCHING: true,
+  VOLUME: true,
+  MARKETPLACE_CAMPAIGN: true,
+  SELLER_COUPON_CAMPAIGN: true,
+  DEAL: false,
+  LIGHTNING: false,
+  SELLER_CAMPAIGN: false,
+};
+
+export function puedeSalirPorApi(tipoPromocion: string): boolean {
+  return TIPOS_SALIR_API[tipoPromocion] === true;
+}
+
 export type ReglasCuentaPromocion = {
   descuentoMaximoPct: number;
   participarCompartidas: boolean;
