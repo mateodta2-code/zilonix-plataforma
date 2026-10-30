@@ -16,3 +16,15 @@
   No se tocó `lib/ml/cliente.ts` ni `db/schema.ts`. Ninguna llamada a Mercado Libre real durante esta tarea — "Lanzar aprobadas" no se usó.
 
   Verificado: `npm run typecheck` en verde. `npx vitest run`: mismo baseline de siempre (los únicos tests en rojo son los que ya dependían de `DATABASE_URL_APP`/Postgres real, ausente en este sandbox — sin relación con esta rama); todos los archivos de Promociones, incluidos los 4 nuevos/modificados de esta tarea, en verde. `npm run build`: compila y tipa en verde ("Linting and checking validity of types" pasa limpio); el paso siguiente de Next ("Collecting page data") falla en este sandbox por la misma ausencia de `DATABASE_URL_APP` en tiempo de build — no por este cambio.
+
+- **2026-10-30 (Refs #44)** — Ajustes de la review del PR #307.
+
+  **1) Techo real = el más chico entre `maxDiscountedPrice` y `precioOriginal` (`lib/ml/promocionesEjecucion.ts`)** — el servidor usaba `maxDiscountedPrice ?? precioOriginal`, que dejaba pasar un precio elegido por encima del precio de hoy cuando ML manda un `maxDiscountedPrice` más alto (promoción vieja, precio subido después) — exactamente el bug que ya se había evitado del lado de la UI (`rangoEdicion`, `calculosFila.ts`), pero no en el servidor, que es el que de verdad manda a Mercado Libre. Ahora usa el mismo criterio: `Math.min` de los que no sean `null`.
+
+  **2) Pesos enteros exigidos también en el servidor** — `precioElegido` llega de un input de texto en el navegador; un valor con decimales (ej. un parseo mal hecho) ahora se rechaza explícito (`!Number.isInteger(precioElegido)`), nunca se redondea ni se trunca en silencio antes de mandarlo a Mercado Libre.
+
+  **3) Qué pasa con una fila después de "Lanzar" — documentado, comportamiento intencional** — una acción `aceptada` que se lanza pasa a `ejecutada` (o `fallida` si Mercado Libre la rechazó al escribir). `GET .../candidatos` (`estadoDecision`) solo reconoce `"aceptada"` como "Aprobadas" — una vez que pasa a `ejecutada`/`fallida`, la fila sale de **todos** los filtros de la pantalla de Promociones (ni Pendientes ni Aprobadas la muestran más). Es intencional: el propósito de "Aprobadas" en esa pantalla es la cola de "por lanzar", no un historial — el registro completo y permanente de qué se lanzó, cuándo, con qué precio y si falló (con el motivo) ya existe en la pestaña **Historial** (`GET .../historial`), que sí muestra `ejecutada`/`fallida` con su propio chip. No se tocó nada de este comportamiento en esta ronda — queda documentado para que no se lea como un bug la próxima vez que alguien busque una fila recién lanzada y no la encuentre en Aprobadas.
+
+  **Pruebas nuevas**: `lib/ml/promocionesEjecucion.test.ts` — `maxDiscountedPrice` mayor que `precioOriginal` (rechazado por encima del techo real, que es el precio de hoy); precio elegido con decimales (rechazado, nunca redondeado).
+
+  Verificado: `npm run typecheck` en verde. `npx vitest run lib/ml/promocionesEjecucion.test.ts`: 36 pruebas en verde (34 + 2 nuevas).

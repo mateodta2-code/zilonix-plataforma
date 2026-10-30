@@ -228,6 +228,34 @@ describe("validarCandidatoParaEscritura — precioElegido (rama feat-promociones
     expect(resultado.ok).toBe(false);
   });
 
+  // Review de Pablo (PR #307) — maxDiscountedPrice puede venir MÁS ALTO
+  // que el precio de hoy (promoción vieja, precio subido después): el
+  // techo real tiene que ser el más chico entre los dos, igual que la
+  // UI (rangoEdicion, calculosFila.ts) — no maxDiscountedPrice ?? precioOriginal.
+  it("maxDiscountedPrice mayor que el precio de hoy: el techo real es el precio de hoy (el más chico de los dos), rechazado por encima de ese", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura(
+      "empresa-1",
+      candidato({ precioOriginal: "100000", maxDiscountedPrice: "120000" }),
+      "participar",
+      110000
+    );
+    expect(resultado.ok).toBe(false);
+    if (!resultado.ok) expect(resultado.motivo).toContain("máximo");
+  });
+
+  // Review de Pablo (PR #307) — un precio elegido con decimales (ej. un
+  // input de texto mal parseado) nunca se redondea en silencio antes de
+  // mandarlo a Mercado Libre.
+  it("precio elegido con decimales (no es un entero): rechazado, nunca se redondea en silencio", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato(), "participar", 95000.5);
+    expect(resultado.ok).toBe(false);
+    if (!resultado.ok) expect(resultado.motivo).toContain("pesos enteros");
+  });
+
   it("supera el tope de descuento de la cuenta: OK de todos modos — ese tope es para el flujo automático, no para una decisión humana explícita", async () => {
     filasPorTabla.set(promocionesReglas, reglasPorDefecto({ descuentoMaximoPct: 1 })); // 100000->91000 es 9%, muy por encima del 1%
     filasPorTabla.set(costosSku, costoFila()); // piso 90000

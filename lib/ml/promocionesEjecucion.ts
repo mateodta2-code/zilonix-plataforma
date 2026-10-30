@@ -122,10 +122,25 @@ export async function validarCandidatoParaEscritura(
     if (accionEsperada !== accionSolicitada) {
       return { ok: false, motivo: "La acción solicitada ya no corresponde al estado actual de esta promoción en Mercado Libre." };
     }
-    if (!Number.isFinite(precioElegido) || precioElegido <= 0 || precioElegido < piso) {
-      return { ok: false, motivo: "El precio elegido no es válido o quedó por debajo del piso de Finanzas — no se escribe en Mercado Libre." };
+    // Review de Pablo (PR #307) — "precio elegido" llega de un input de
+    // texto en el navegador; nunca se asume que es un entero solo porque
+    // el motor siempre redondea a pesos enteros del lado de la UI
+    // (`precioDesdeDescuento`, calculosFila.ts) — un decimal cargado a
+    // mano (ej. "90000.5") se rechaza explícito, nunca se trunca ni se
+    // redondea en silencio antes de mandarlo a Mercado Libre.
+    if (!Number.isFinite(precioElegido) || !Number.isInteger(precioElegido) || precioElegido <= 0 || precioElegido < piso) {
+      return { ok: false, motivo: "El precio elegido tiene que ser un número en pesos enteros, mayor que cero y nunca por debajo del piso de Finanzas." };
     }
-    const techo = recalculado.maxDiscountedPrice ?? recalculado.precioOriginal ?? null;
+    // Review de Pablo (PR #307) — mismo criterio que la UI (rangoEdicion,
+    // calculosFila.ts): el techo real es el MÁS CHICO entre lo que
+    // Mercado Libre permite para esta promoción puntual
+    // (maxDiscountedPrice) y el precio de hoy — antes se usaba
+    // maxDiscountedPrice ?? precioOriginal, que si ML manda un
+    // maxDiscountedPrice MÁS ALTO que el precio de hoy (promoción vieja,
+    // precio subido después) dejaba pasar un "descuento" más caro que el
+    // precio original.
+    const techos = [recalculado.maxDiscountedPrice, recalculado.precioOriginal].filter((v): v is number => v != null);
+    const techo = techos.length > 0 ? Math.min(...techos) : null;
     if (techo != null && precioElegido > techo) {
       return { ok: false, motivo: `El precio elegido supera el máximo que permite esta promoción puntual ($${Math.round(techo).toLocaleString("es-CO")}).` };
     }
