@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { db } from "@/db";
 import { crearCuentaMlDePrueba, crearPedidoDePrueba, crearVentaDePrueba, lineaDePrueba } from "@/db/test-utils/venta";
-import { bodegas, cuentasMl, despachosMl, empresas, pedidoItems, pedidos, skus, stockBodega, usuarios } from "@/db/schema";
+import { bodegas, cuentasMl, despachosMl, empresas, pedidoItems, pedidos, pedidosFinanzas, skus, stockBodega, usuarios } from "@/db/schema";
 import { crearBodega } from "@/lib/inventario/bodegas";
 import { cifrarToken } from "@/lib/cifrado";
 import { LARGO_MAXIMO_BUSQUEDA, normalizarParametro, PAGINA_MAXIMA } from "@/lib/filtros-listado";
@@ -776,6 +776,16 @@ describe("tarjetas de Despachos — Fase 1-1 (stock, precio y orden por fecha de
   const empresaId = randomUUID();
   const usuarioId = randomUUID();
 
+  // pedido_items exige una cabecera en pedidos_finanzas con el MISMO
+  // (empresa_id, pedido_id) — FK compuesta pedido_items_venta_misma_
+  // empresa_fk (db/schema.ts). crearPedidoDePrueba (a diferencia de
+  // crearVentaDePrueba) NO la crea — hace falta acá porque estas
+  // pruebas necesitan controlar fecha/skuId/precioUnitario a mano,
+  // cosa que crearVentaDePrueba(..., {lineas}) no permite.
+  async function crearCabeceraFinanzas(pedidoId: string, cuentaMlId: string): Promise<void> {
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidosFinanzas).values({ empresaId, pedidoId, cuentaMlId, valorVenta: "100000.00" }));
+  }
+
   it("items trae precioUnitario y la suma de stock_bodega.disponible SOLO entre bodegas activas", async () => {
     await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa stock despachos", nit: `TEST-DESPS-${empresaId.slice(0, 8)}` }));
     await db.insert(usuarios).values({ id: usuarioId, email: `prueba-despachos-stock-${usuarioId.slice(0, 8)}@zilonix.test`, nombre: "Usuario de prueba" });
@@ -794,6 +804,7 @@ describe("tarjetas de Despachos — Fase 1-1 (stock, precio y orden por fecha de
 
     const cuentaId = await crearCuentaMlDePrueba(empresaId);
     const pedidoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await crearCabeceraFinanzas(pedidoId, cuentaId);
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(pedidoItems).values({ ...lineaDePrueba(empresaId, pedidoId, 1), skuId, precioUnitario: "129000.00" })
     );
@@ -809,6 +820,7 @@ describe("tarjetas de Despachos — Fase 1-1 (stock, precio y orden por fecha de
   it("sin sku_id resuelto, stockDisponible es null — nunca 0 inventado", async () => {
     const cuentaId = await crearCuentaMlDePrueba(empresaId);
     const pedidoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await crearCabeceraFinanzas(pedidoId, cuentaId);
     await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values({ ...lineaDePrueba(empresaId, pedidoId, 1), skuId: null, skuCodigo: null }));
     await dbComoEmpresa(empresaId, (tx) =>
       tx.insert(despachosMl).values({ empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "SIN-SKU-1", logisticType: "self_service", status: "ready_to_ship", imprimible: true })
@@ -823,6 +835,7 @@ describe("tarjetas de Despachos — Fase 1-1 (stock, precio y orden por fecha de
     const cuentaId = await crearCuentaMlDePrueba(empresaId);
 
     const pedidoViejoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await crearCabeceraFinanzas(pedidoViejoId, cuentaId);
     await dbComoEmpresa(empresaId, (tx) => tx.update(pedidos).set({ fecha: new Date("2026-01-01T15:00:00Z") }).where(eq(pedidos.id, pedidoViejoId)));
     await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoViejoId, 1)));
     await dbComoEmpresa(empresaId, (tx) =>
@@ -830,6 +843,7 @@ describe("tarjetas de Despachos — Fase 1-1 (stock, precio y orden por fecha de
     );
 
     const pedidoNuevoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await crearCabeceraFinanzas(pedidoNuevoId, cuentaId);
     await dbComoEmpresa(empresaId, (tx) => tx.update(pedidos).set({ fecha: new Date("2026-06-01T15:00:00Z") }).where(eq(pedidos.id, pedidoNuevoId)));
     await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoNuevoId, 1)));
     await dbComoEmpresa(empresaId, (tx) =>
