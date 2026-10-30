@@ -34,6 +34,37 @@ export type CandidatoClienteCliente = {
   // (HTTP 200, "rechazo blando"), solo presente cuando estadoDecision
   // === "rechazada".
   motivoRechazo: string | null;
+  // Rama fix-promociones-aprobadas-participando — el motivo real de
+  // que Mercado Libre haya rechazado esta fila DESPUÉS de aprobada (al
+  // intentar lanzarla), solo presente cuando estadoDecision === "fallida".
+  motivoFalla: string | null;
+};
+
+// Rama fix-promociones-aprobadas-participando, punto 3 — pestaña
+// "Participando": lo que la cuenta YA tiene activo en Mercado Libre
+// (estado started/pending), con fechas reales (nunca guardadas en
+// promociones_candidatos — se leen en vivo, ver
+// lib/ml/promocionesParticipando.ts) y si se puede "Dejar de
+// participar" por API o solo desde Mercado Libre.
+export type FilaParticipandoCliente = {
+  cuentaMlId: string;
+  nicknameCuenta: string;
+  itemId: string;
+  skuCodigo: string | null;
+  tituloProducto: string | null;
+  thumbnail: string | null;
+  tipoPromocion: string;
+  promotionIdMl: string | null;
+  estadoMl: string;
+  precioOriginal: number | null;
+  precioActual: number | null;
+  precioMinimo: number | null;
+  maxDiscountedPrice: number | null;
+  gananciaEstimada: number | null;
+  cumpleReglas: boolean;
+  fechaInicio: string;
+  fechaFin: string;
+  puedeSalirApi: boolean;
 };
 
 // Rama feat-promociones-editar-precio, punto 2 — un número por cada
