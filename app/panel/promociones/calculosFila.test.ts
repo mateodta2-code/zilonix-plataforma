@@ -15,6 +15,7 @@ import {
   precioDesdeDescuento,
   puedeEditarPrecio,
   rangoEdicion,
+  sinMargen,
 } from "./calculosFila";
 import type { CandidatoClienteCliente } from "./tipos-cliente";
 
@@ -43,6 +44,7 @@ function candidato(overrides: Partial<CandidatoClienteCliente> = {}): CandidatoC
     actualizadoTs: new Date().toISOString(),
     estadoDecision: null,
     motivoRechazo: null,
+    motivoFalla: null,
     ...overrides,
   };
 }
@@ -289,5 +291,36 @@ describe("fueraDeRango — rama fix-promociones-edicion, punto 1 (ya NO se fuerz
     const c = candidato({ precioMinimo: "149900", maxDiscountedPrice: "169900", precioOriginal: "199900" });
     expect(fueraDeRango(c, 149900)).toBe(false);
     expect(fueraDeRango(c, 169900)).toBe(false);
+  });
+});
+
+// Punto 2 (rama fix-promociones-aprobadas-participando) — bug real:
+// "Sí" quedaba gris sin explicación cuando el techo real (maxDiscountedPrice
+// o precioOriginal) quedaba en o por debajo del piso de Finanzas —
+// literalmente no hay ningún descuento posible por encima del piso.
+describe("sinMargen", () => {
+  it("techo exactamente igual al piso (mínimo = máximo = precio mínimo de Finanzas, el caso real reportado): true", () => {
+    const c = candidato({ precioMinimo: "149900", maxDiscountedPrice: "149900", precioOriginal: "199900" });
+    expect(sinMargen(c)).toBe(true);
+  });
+
+  it("techo por debajo del piso: true", () => {
+    const c = candidato({ precioMinimo: "149900", maxDiscountedPrice: "140000", precioOriginal: "199900" });
+    expect(sinMargen(c)).toBe(true);
+  });
+
+  it("techo real por encima del piso (hay margen real): false", () => {
+    const c = candidato({ precioMinimo: "149900", maxDiscountedPrice: "169900", precioOriginal: "199900" });
+    expect(sinMargen(c)).toBe(false);
+  });
+
+  it("sin precio mínimo cargado: false — ese es otro caso, 'Falta precio mínimo'", () => {
+    const c = candidato({ precioMinimo: null, maxDiscountedPrice: "149900", precioOriginal: "199900" });
+    expect(sinMargen(c)).toBe(false);
+  });
+
+  it("sin ningún techo disponible: false, nada que comparar", () => {
+    const c = candidato({ precioMinimo: "149900", maxDiscountedPrice: null, precioOriginal: null });
+    expect(sinMargen(c)).toBe(false);
   });
 });

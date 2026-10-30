@@ -33,6 +33,7 @@ import {
   leerPisosYCostosFrescos,
   leerReglasFrescasCuenta,
   listarTodosLosItemsActivos,
+  puedeSalirPorApi,
   REGLAS_POR_DEFECTO,
   TIPOS_SIN_ESCRITURA_API,
   type ItemConPromociones,
@@ -258,6 +259,35 @@ describe("fechasParaParticipar — bug 3 (formato local Colombia, sin zona horar
     const resultado = fechasParaParticipar({});
     expect(resultado.fechaInicio).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00$/);
     expect(resultado.fechaFin).toMatch(/^\d{4}-\d{2}-\d{2}T23:59:59$/);
+  });
+});
+
+// Rama fix-promociones-aprobadas-participando, punto 3 — investigado
+// contra la doc oficial de ML (ver el comentario completo junto a
+// TIPOS_SALIR_API en promociones.ts).
+describe("puedeSalirPorApi — qué tipos permiten DELETE real (investigado contra la doc de ML)", () => {
+  it("tipos confirmados con DELETE a nivel de ítem: true", () => {
+    expect(puedeSalirPorApi("PRICE_DISCOUNT")).toBe(true);
+    expect(puedeSalirPorApi("UNHEALTHY_STOCK")).toBe(true);
+    expect(puedeSalirPorApi("PRE_NEGOTIATED")).toBe(true);
+    expect(puedeSalirPorApi("SMART")).toBe(true);
+    expect(puedeSalirPorApi("PRICE_MATCHING")).toBe(true);
+    expect(puedeSalirPorApi("VOLUME")).toBe(true);
+    expect(puedeSalirPorApi("MARKETPLACE_CAMPAIGN")).toBe(true);
+    expect(puedeSalirPorApi("SELLER_COUPON_CAMPAIGN")).toBe(true);
+  });
+
+  it("DEAL y LIGHTNING: false — una vez activa, la doc de ML dice que no se puede borrar, solo pausar", () => {
+    expect(puedeSalirPorApi("DEAL")).toBe(false);
+    expect(puedeSalirPorApi("LIGHTNING")).toBe(false);
+  });
+
+  it("SELLER_CAMPAIGN: false — su DELETE real borra la campaña entera, no un ítem puntual", () => {
+    expect(puedeSalirPorApi("SELLER_CAMPAIGN")).toBe(false);
+  });
+
+  it("un tipo no investigado/desconocido: false por default, nunca se asume que sí", () => {
+    expect(puedeSalirPorApi("ALGO_NUEVO_QUE_ML_INVENTE")).toBe(false);
   });
 });
 

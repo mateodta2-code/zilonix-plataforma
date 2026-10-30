@@ -114,6 +114,23 @@ export async function GET(request: Request) {
     if (!ultimaAccionPorClave.has(clave)) ultimaAccionPorClave.set(clave, { estado: accion.estado, error: accion.error });
   }
 
+  // Bug real (rama fix-promociones-aprobadas-participando) — reportado
+  // por Mateo en staging (cuenta sharel): "le doy Sí a una fila, queda
+  // aprobada, pero en Aprobadas no aparece". Causa real confirmada en
+  // el código: Dueño/Gerente tienen el permiso "ejecutar" por default
+  // (lib/roles-plantillas.ts) — para esos roles, aprobar una fila la
+  // manda DE UNA a ejecutarLoteDeAcciones (POST /acciones, MED 7,
+  // decisión de Mateo desde el PR #304), que cambia `estado` a
+  // "ejecutada" (o "fallida" si Mercado Libre la rechazó) casi al
+  // instante. Esta pestaña solo reconocía `estado === "aceptada"` como
+  // "aprobada" — una fila que pasó por las dos cosas de un saque
+  // (aprobar + ejecutar) nunca llegaba a quedarse en "aceptada" el
+  // tiempo suficiente para que el usuario la viera ahí: no aparecía en
+  // Pendientes (ya no lo es) NI en Aprobadas (ya no es "aceptada").
+  // "Aprobadas" ahora significa "alguien dijo que sí" sin importar si
+  // ya se lanzó o no — igual que lo espera Mateo.
+  const esAprobadaEnSentidoAmplio = (estado: EstadoDecision | null) => estado === "aceptada" || estado === "ejecutada" || estado === "fallida";
+
   const candidatosConDecision = candidatosCrudos.map((c) => {
     const ultima = ultimaAccionPorClave.get(`${c.cuentaMlId}:${c.itemId}:${c.tipoPromocion}`);
     const estadoDecision: EstadoDecision | null = ultima?.estado ?? null;
@@ -121,6 +138,11 @@ export async function GET(request: Request) {
       ...c,
       estadoDecision,
       motivoRechazo: estadoDecision === "rechazada" ? (ultima?.error ?? null) : null,
+      // Solo tiene sentido cuando Mercado Libre terminó rechazando una
+      // fila que ya se había aprobado (y, para un Dueño/Gerente, se
+      // intentó lanzar de una) — distinto de motivoRechazo, que es un
+      // rechazo humano o automático ANTES de llegar a Mercado Libre.
+      motivoFalla: estadoDecision === "fallida" ? (ultima?.error ?? null) : null,
     };
   });
 
@@ -132,13 +154,13 @@ export async function GET(request: Request) {
     revisar: candidatosConDecision.filter((c) => esPendiente(c) && !c.cumpleReglas && !c.soloEnMl).length,
     "sin-minimo": candidatosConDecision.filter((c) => esPendiente(c) && c.precioMinimo == null).length,
     "solo-ml": candidatosConDecision.filter((c) => esPendiente(c) && c.soloEnMl).length,
-    aprobadas: candidatosConDecision.filter((c) => c.estadoDecision === "aceptada").length,
+    aprobadas: candidatosConDecision.filter((c) => esAprobadaEnSentidoAmplio(c.estadoDecision)).length,
     rechazadas: candidatosConDecision.filter((c) => c.estadoDecision === "rechazada").length,
   };
 
   let filas = candidatosConDecision;
   if (filtro === "aprobadas") {
-    filas = filas.filter((c) => c.estadoDecision === "aceptada");
+    filas = filas.filter((c) => esAprobadaEnSentidoAmplio(c.estadoDecision));
   } else if (filtro === "rechazadas") {
     filas = filas.filter((c) => c.estadoDecision === "rechazada");
   } else {

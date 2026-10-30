@@ -275,3 +275,159 @@ describe("PaginaPromociones — punto 2 (rama fix-promociones-edicion): Sí es u
     await waitFor(() => expect(estaDeshabilitado("Sí")).toBe(false));
   });
 });
+
+// Bug real (rama fix-promociones-aprobadas-participando), reportado
+// por Mateo en staging (cuenta sharel): "le doy Sí, la fila queda
+// aprobada, pero en Aprobadas no aparece" — causa real: Dueño/Gerente
+// (permiso "ejecutar" por default) pasan de "aceptada" a
+// "ejecutada"/"fallida" casi al instante.
+describe("PaginaPromociones — punto 1 (rama fix-promociones-aprobadas-participando): Aprobadas muestra el estado real", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("una fila 'ejecutada' en la pestaña Aprobadas muestra 'Ejecutada en ML', nunca un '—' vacío", async () => {
+    const fetchMock = mockearFetchBase((url) => {
+      if (url.includes("filtro=aprobadas")) {
+        return respuestaCandidatos([candidatoRaw({ estadoDecision: "ejecutada" })], { aprobadas: 1 });
+      }
+      if (url.includes("/candidatos")) return respuestaCandidatos([], { aprobadas: 1 });
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Aprobadas/ }));
+
+    expect(await screen.findByText("Ejecutada en ML")).toBeTruthy();
+  });
+
+  it("una fila 'fallida' muestra 'Falló al ejecutar' y el motivo real", async () => {
+    const fetchMock = mockearFetchBase((url) => {
+      if (url.includes("filtro=aprobadas")) {
+        return respuestaCandidatos([candidatoRaw({ estadoDecision: "fallida", motivoFalla: "El precio elegido supera el máximo permitido." })], { aprobadas: 1 });
+      }
+      if (url.includes("/candidatos")) return respuestaCandidatos([], { aprobadas: 1 });
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Aprobadas/ }));
+
+    expect(await screen.findByText("Falló al ejecutar")).toBeTruthy();
+    expect(await screen.findByText("El precio elegido supera el máximo permitido.")).toBeTruthy();
+  });
+});
+
+// Bug real (rama fix-promociones-aprobadas-participando), reportado
+// por Mateo: "Sí" quedaba gris sin explicación cuando el techo real
+// queda en o por debajo del piso de Finanzas (sin margen real).
+describe("PaginaPromociones — punto 2 (rama fix-promociones-aprobadas-participando): 'Sin margen' explicado", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("mínimo = máximo = precio mínimo de Finanzas: Sí deshabilitado con el motivo visible, no un gris sin explicación", async () => {
+    const fetchMock = mockearFetchBase((url) =>
+      url.includes("/candidatos")
+        ? respuestaCandidatos([candidatoRaw({ precioMinimo: "149900", maxDiscountedPrice: "149900", precioOriginal: "199900", precioSugerido: "149900" })])
+        : null
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    await screen.findByText("Producto de prueba");
+
+    expect(estaDeshabilitado("Sí")).toBe(true);
+    expect(await screen.findByText(/Sin margen: el mínimo/)).toBeTruthy();
+  });
+});
+
+// Punto 3 (rama fix-promociones-aprobadas-participando): pestaña
+// "Participando". IMPORTANTE: el POST /salir real hace un DELETE
+// contra Mercado Libre — SIEMPRE mockeado acá, nunca real.
+function filaParticipandoRaw(overrides: Record<string, unknown> = {}) {
+  return {
+    cuentaMlId: "cuenta-1",
+    nicknameCuenta: "Cuenta 1",
+    itemId: "MCO1",
+    skuCodigo: "SKU-1",
+    tituloProducto: "Producto participando",
+    thumbnail: null,
+    tipoPromocion: "PRICE_DISCOUNT",
+    promotionIdMl: "PROMO-1",
+    estadoMl: "started",
+    precioOriginal: 100000,
+    precioActual: 90000,
+    precioMinimo: 85000,
+    maxDiscountedPrice: 92000,
+    gananciaEstimada: 30000,
+    cumpleReglas: true,
+    fechaInicio: "2026-11-01T00:00:00",
+    fechaFin: "2026-11-30T23:59:59",
+    puedeSalirApi: true,
+    ...overrides,
+  };
+}
+
+describe("PaginaPromociones — punto 3 (rama fix-promociones-aprobadas-participando): pestaña Participando", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("muestra 'Dejar de participar' cuando puedeSalirApi, y 'Solo desde ML' cuando no", async () => {
+    const fetchMock = mockearFetchBase((url) => {
+      if (url.includes("/participando") && !url.includes("/salir")) {
+        return new Response(JSON.stringify({ filas: [filaParticipandoRaw(), filaParticipandoRaw({ itemId: "MCO2", tipoPromocion: "DEAL", puedeSalirApi: false })] }), { status: 200 });
+      }
+      if (url.includes("/candidatos")) return respuestaCandidatos([]);
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Participando" }));
+
+    expect(await screen.findByRole("button", { name: "Dejar de participar" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: /Solo desde ML/ })).toBeTruthy();
+  });
+
+  it("Dejar de participar: pide confirmación, manda el POST (mockeado) y saca la fila de la lista con un toast", async () => {
+    let cuerpoEnviado: Record<string, unknown> | null = null;
+    const fetchMock = mockearFetchBase((url, init) => {
+      if (url.includes("/participando/salir") && init?.method === "POST") {
+        cuerpoEnviado = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (url.includes("/participando")) return new Response(JSON.stringify({ filas: [filaParticipandoRaw()] }), { status: 200 });
+      if (url.includes("/candidatos")) return respuestaCandidatos([]);
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Participando" }));
+    await screen.findByText("Producto participando");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dejar de participar" }));
+
+    await waitFor(() => expect(cuerpoEnviado).not.toBeNull());
+    expect(cuerpoEnviado).toMatchObject({ cuentaId: "cuenta-1", itemId: "MCO1", promotionIdMl: "PROMO-1", tipoPromocion: "PRICE_DISCOUNT" });
+    expect(await screen.findByText(/se salió de la promoción/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Producto participando")).toBeNull());
+  });
+
+  it("si la persona cancela la confirmación, nunca llama al POST", async () => {
+    const fetchMock = mockearFetchBase((url) => {
+      if (url.includes("/participando/salir")) throw new Error("no debería llamarse");
+      if (url.includes("/participando")) return new Response(JSON.stringify({ filas: [filaParticipandoRaw()] }), { status: 200 });
+      if (url.includes("/candidatos")) return respuestaCandidatos([]);
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => false));
+
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Participando" }));
+    await screen.findByText("Producto participando");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dejar de participar" }));
+    await screen.findByText("Producto participando"); // sigue ahí, nada se mandó
+  });
+});

@@ -141,6 +141,40 @@ describe("GET /api/ml/promociones/candidatos — estado de decisión derivado (r
     expect(bodyAprobadas.filas[0].estadoDecision).toBe("aceptada");
   });
 
+  // Bug real (rama fix-promociones-aprobadas-participando), reportado
+  // por Mateo en staging (cuenta sharel): "le doy Sí a una fila, queda
+  // aprobada, pero en Aprobadas no aparece". Causa real: Dueño/Gerente
+  // tienen el permiso "ejecutar" por default — aprobar manda la fila
+  // directo a ejecutarLoteDeAcciones, que la deja "ejecutada" (o
+  // "fallida") casi al instante, nunca se queda en "aceptada" el
+  // tiempo suficiente para verla. "Aprobadas" tiene que reconocer las
+  // tres.
+  it("candidato con una acción 'ejecutada' más reciente: SÍ aparece en 'aprobadas' (antes del fix, desaparecía de todos lados)", async () => {
+    filasPorTabla.set(promocionesCandidatos, [candidatoFila()]);
+    filasPorTabla.set(promocionesAcciones, [accionFila({ estado: "ejecutada", creadoTs: new Date() })]);
+
+    const resTodas = await GET(peticion("todas"));
+    expect((await resTodas.json()).filas).toHaveLength(0);
+
+    const resAprobadas = await GET(peticion("aprobadas"));
+    const bodyAprobadas = await resAprobadas.json();
+    expect(bodyAprobadas.filas).toHaveLength(1);
+    expect(bodyAprobadas.filas[0].estadoDecision).toBe("ejecutada");
+    expect(bodyAprobadas.conteos.aprobadas).toBe(1);
+  });
+
+  it("candidato con una acción 'fallida' más reciente: también aparece en 'aprobadas', con el motivo real en motivoFalla", async () => {
+    filasPorTabla.set(promocionesCandidatos, [candidatoFila()]);
+    filasPorTabla.set(promocionesAcciones, [accionFila({ estado: "fallida", error: "Mercado Libre rechazó el precio al ejecutar.", creadoTs: new Date() })]);
+
+    const resAprobadas = await GET(peticion("aprobadas"));
+    const bodyAprobadas = await resAprobadas.json();
+    expect(bodyAprobadas.filas).toHaveLength(1);
+    expect(bodyAprobadas.filas[0].estadoDecision).toBe("fallida");
+    expect(bodyAprobadas.filas[0].motivoFalla).toBe("Mercado Libre rechazó el precio al ejecutar.");
+    expect(bodyAprobadas.conteos.aprobadas).toBe(1);
+  });
+
   // Punto 2 — "Buscar de nuevo NO resucita como pendiente algo ya
   // rechazado de la misma promo e ítem": una búsqueda nueva solo
   // vuelve a upsertear promociones_candidatos (acá simulado con una
