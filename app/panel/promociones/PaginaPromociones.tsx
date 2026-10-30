@@ -6,11 +6,17 @@ import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Tabla, FilaTabla, CeldaTabla } from "@/components/marco/Tabla";
+import { Toast, type ItemToast } from "@/components/marco/Toast";
 import {
   accionParaCandidato,
   descuentoDesdePrecio,
+  formatoEnteroEsCo,
+  formatoPorcentaje,
+  formatoPorcentajeInput,
+  fueraDeRango,
   gananciaEstimadaParaPrecio,
   numero,
+  parsearNumeroEsCo,
   porcentajeDescuento,
   precioConPromo,
   precioDesdeDescuento,
@@ -73,8 +79,34 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   // promo/% desc. editados a mano, por candidatoId. Nunca se guarda
   // nada acá hasta que se aprueba esa fila (precioElegido viaja en el
   // POST a /acciones) — el servidor vuelve a validar todo fresco
-  // igual, esto es solo para la pantalla.
+  // igual, esto es solo para la pantalla. Ya NO se fuerza al rango acá
+  // (ver `fueraDeRango`, rama fix-promociones-edicion) — puede guardar
+  // un valor fuera de rango a propósito, para avisar en vez de pisarlo.
   const [preciosEditados, setPreciosEditados] = useState<Record<string, number>>({});
+  // Bug real (rama fix-promociones-edicion, punto 1) — los inputs
+  // clampeaban en CADA tecla (el onChange de antes llamaba de una al
+  // mismo setPreciosEditados con el valor a medio escribir): borrar un
+  // dígito o escribir algo más chico que el mínimo saltaba al instante
+  // al piso, nunca dejaba terminar de escribir. Ahora se escribe
+  // libre en un borrador de texto por campo/fila; el valor de verdad
+  // (preciosEditados) solo se actualiza al confirmar (blur/Enter, ver
+  // confirmarPrecioTexto/confirmarDescuentoTexto más abajo). `undefined`
+  // = no se está editando ese campo ahora mismo, se muestra el valor
+  // ya confirmado.
+  const [borradores, setBorradores] = useState<Record<string, { precio?: string; descuento?: string }>>({});
+
+  // Rama fix-promociones-edicion, punto 2 — "si el servidor rechaza,
+  // muestra el motivo... con un toast": un mensaje chico al final de la
+  // Tarjeta era fácil de no ver. Se auto-cierra solo.
+  const [toasts, setToasts] = useState<ItemToast[]>([]);
+  function mostrarToast(texto: string, estado: EstadoChip) {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((actual) => [...actual, { id, texto, estado }]);
+    setTimeout(() => setToasts((actual) => actual.filter((t) => t.id !== id)), 6000);
+  }
+  function cerrarToast(id: string) {
+    setToasts((actual) => actual.filter((t) => t.id !== id));
+  }
 
   const [modoSimulacion, setModoSimulacion] = useState(false);
   const [vistaPrevia, setVistaPrevia] = useState<{
@@ -225,21 +257,48 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     return precioConPromo(candidato) ?? numero(candidato.precioOriginal) ?? 0;
   }
 
-  function clamparAlRango(candidato: CandidatoClienteCliente, valor: number): number {
-    const rango = rangoEdicion(candidato);
-    if (!rango) return Math.round(valor);
-    return Math.round(Math.min(rango.max, Math.max(rango.min, valor)));
+  // Confirma el borrador de "Precio con promo" — SOLO corre en
+  // blur/Enter (nunca en cada tecla, ver el comentario de `borradores`
+  // más arriba). Un valor fuera de rango se guarda TAL CUAL (nunca se
+  // fuerza de vuelta al rango) — `fueraDeRango` más abajo es lo que
+  // avisa y bloquea "Sí".
+  function confirmarPrecioTexto(candidato: CandidatoClienteCliente) {
+    const texto = borradores[candidato.id]?.precio;
+    if (texto === undefined) return; // nunca se tocó este campo, nada que confirmar
+    setBorradores((actual) => {
+      const siguiente = { ...actual };
+      if (siguiente[candidato.id]) siguiente[candidato.id] = { ...siguiente[candidato.id], precio: undefined };
+      return siguiente;
+    });
+    const parsed = parsearNumeroEsCo(texto);
+    if (parsed == null) return; // vacío/inválido: se descarta, vuelve a mostrar el último valor confirmado
+    setPreciosEditados((actual) => ({ ...actual, [candidato.id]: Math.round(parsed) }));
   }
 
-  function editarPrecioFila(candidato: CandidatoClienteCliente, nuevoPrecio: number) {
-    if (!Number.isFinite(nuevoPrecio)) return;
-    setPreciosEditados((actual) => ({ ...actual, [candidato.id]: clamparAlRango(candidato, nuevoPrecio) }));
-  }
-
-  function editarDescuentoFila(candidato: CandidatoClienteCliente, nuevoDescuentoPct: number) {
+  // Mismo criterio para "% desc." — confirma convirtiendo a precio (la
+  // única fuente de verdad real, ver `precioEditado`), nunca al revés.
+  function confirmarDescuentoTexto(candidato: CandidatoClienteCliente) {
+    const texto = borradores[candidato.id]?.descuento;
+    if (texto === undefined) return;
+    setBorradores((actual) => {
+      const siguiente = { ...actual };
+      if (siguiente[candidato.id]) siguiente[candidato.id] = { ...siguiente[candidato.id], descuento: undefined };
+      return siguiente;
+    });
     const original = numero(candidato.precioOriginal);
-    if (original == null || !Number.isFinite(nuevoDescuentoPct)) return;
-    editarPrecioFila(candidato, precioDesdeDescuento(original, nuevoDescuentoPct));
+    const parsed = parsearNumeroEsCo(texto);
+    if (parsed == null || original == null) return;
+    setPreciosEditados((actual) => ({ ...actual, [candidato.id]: precioDesdeDescuento(original, parsed) }));
+  }
+
+  // Esc — "vuelve al valor anterior": descarta el borrador sin
+  // confirmar nada, el input vuelve a mostrar el valor ya confirmado.
+  function descartarBorrador(candidatoId: string, campo: "precio" | "descuento") {
+    setBorradores((actual) => {
+      const siguiente = { ...actual };
+      if (siguiente[candidatoId]) siguiente[candidatoId] = { ...siguiente[candidatoId], [campo]: undefined };
+      return siguiente;
+    });
   }
 
   // El precio que de verdad se va a mandar si se aprueba esta fila
@@ -308,21 +367,40 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     );
   }
 
-  // "No"/"Volver a pendiente" en una fila puntual — directo, sin vista
-  // previa (ver el comentario de `decisionDirectaId` más arriba).
-  async function enviarDecisionDirecta(candidato: CandidatoClienteCliente, decision: "rechazar" | "volver_a_pendiente") {
+  // Rama fix-promociones-edicion, punto 2 — causa real del bug
+  // reportado ("al dar Sí no pasa nada visible"): "Sí" en una fila
+  // puntual abría la misma vista previa + Confirmar que el lote (un
+  // producto, un botón más, una tarjeta nueva más abajo en la misma
+  // página) — con una sola fila esa vista previa no agrega nada que no
+  // se vea ya en la fila misma (precio, % y utilidad ya están ahí,
+  // editables), así que el clic en "Sí" se sentía como que no hacía
+  // nada: el cambio real pasaba en un cuadro aparte, fácil de no
+  // notar. Ahora "Sí" es una decisión directa, igual que "No"/"Volver
+  // a pendiente" — mismo botón, mismo estado de carga, un toast
+  // confirma el resultado apenas responde el servidor. La vista previa
+  // + Confirmar (con el detalle de cuántas cuentas/ganancia total)
+  // sigue existiendo SOLO para el lote (aceptarLasQueCumplen,
+  // aprobarSeleccionados, rechazarSeleccionados) — ahí sí vale la pena
+  // ver el resumen antes de confirmar varios productos de una.
+  async function enviarDecisionDirecta(candidato: CandidatoClienteCliente, decisionHumana: "aprobar" | "rechazar" | "volver_a_pendiente") {
     setDecisionDirectaId(candidato.id);
     setErrorDecisionDirecta(null);
+    const decisionBase = decisionHumana === "aprobar" ? decisionParaAprobar(candidato) : { candidatoId: candidato.id, accion: accionParaCandidato(candidato) };
     let res: Response;
+    let body: { error?: string; acciones?: { estado: string; error: string | null }[] } = {};
     try {
       res = await fetch("/api/ml/promociones/acciones", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decisiones: [{ candidatoId: candidato.id, accion: accionParaCandidato(candidato), decision }] }),
+        body: JSON.stringify({
+          decisiones: [{ ...decisionBase, decision: decisionHumana }],
+          modoSimulacion: decisionHumana === "aprobar" ? modoSimulacion : false,
+        }),
       });
+      body = await res.json().catch(() => ({}));
     } catch {
       setDecisionDirectaId(null);
-      setErrorDecisionDirecta("No se pudo guardar — revisá tu conexión e intentá de nuevo.");
+      mostrarToast("No se pudo guardar — revisá tu conexión e intentá de nuevo.", "peligro");
       return;
     }
     setDecisionDirectaId(null);
@@ -332,13 +410,30 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
         delete siguiente[candidato.id];
         return siguiente;
       });
+      if (decisionHumana === "aprobar") {
+        // Punto 4 (PR #307) + este bug — un rechazo blando (HTTP 200,
+        // la fila quedó "rechazada" al revalidar fresco) nunca puede
+        // verse como un "listo" silencioso.
+        const resultado = body.acciones?.[0];
+        if (resultado?.estado === "rechazada") {
+          mostrarToast(resultado.error || "El servidor rechazó este producto al revalidar — revisalo en Rechazadas.", "peligro");
+        } else {
+          mostrarToast("Aprobado — pasó a la pestaña Aprobadas.", "exito");
+        }
+      } else if (decisionHumana === "rechazar") {
+        mostrarToast("Rechazado — nunca se tocó Mercado Libre.", "neutro");
+      } else {
+        mostrarToast("Vuelve a Pendientes.", "neutro");
+      }
       void cargarCandidatos();
+      void cargarPendientesLanzar();
     } else {
       // Review de Pablo (PR #304) — antes, un fallo acá no se veía en
       // ningún lado: el botón volvía a "No" y la fila seguía igual,
       // sin ninguna pista de qué pasó.
-      const cuerpo = await res.json().catch(() => ({}));
-      setErrorDecisionDirecta(cuerpo.error || "No se pudo guardar este cambio.");
+      const texto = body.error || "No se pudo guardar este cambio.";
+      setErrorDecisionDirecta(texto);
+      mostrarToast(texto, "peligro");
     }
   }
 
@@ -377,26 +472,43 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     if (!vistaPrevia) return;
     setAplicando(true);
     const decision = vistaPrevia.tipo === "rechazar" ? "rechazar" : "aprobar";
-    const res = await fetch("/api/ml/promociones/acciones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        decisiones: vistaPrevia.decisiones.map((d) => ({ ...d, decision })),
-        modoSimulacion: vistaPrevia.tipo === "aprobar" ? modoSimulacion : false,
-      }),
-    });
-    const body = await res.json().catch(() => ({}));
+    let res: Response;
+    let body: { error?: string; ejecutado?: boolean; acciones?: { estado: string; error: string | null }[] } = {};
+    try {
+      res = await fetch("/api/ml/promociones/acciones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decisiones: vistaPrevia.decisiones.map((d) => ({ ...d, decision })),
+          modoSimulacion: vistaPrevia.tipo === "aprobar" ? modoSimulacion : false,
+        }),
+      });
+      body = await res.json().catch(() => ({}));
+    } catch {
+      // Bug real (rama fix-promociones-edicion, punto 2) — este fetch
+      // nunca tuvo un try/catch: si se caía la conexión a mitad de
+      // camino, `aplicando` se quedaba en true para siempre y nada se
+      // mostraba — el botón "Confirmar" quedaba trabado en "Aplicando…"
+      // sin ningún aviso, exactamente el síntoma de "no pasa nada
+      // visible" que reportó Mateo.
+      setAplicando(false);
+      mostrarToast("No se pudo conectar con el servidor — revisá tu conexión e intentá de nuevo.", "peligro");
+      return;
+    }
     setAplicando(false);
     if (res.ok) {
+      let texto: string;
+      let estadoToast: EstadoChip;
       if (vistaPrevia.tipo === "rechazar") {
-        setResultadoAplicar(`Rechazado: ${body.acciones.length} producto(s) — nunca se tocó Mercado Libre.`);
+        texto = `Rechazado: ${body.acciones?.length ?? 0} producto(s) — nunca se tocó Mercado Libre.`;
+        estadoToast = "neutro";
       } else {
-        // Punto 4 — cuando el servidor rechaza alguna en silencio al
-        // revalidar fresco (HTTP 200 con rechazo blando: el piso cambió,
-        // el precio editado ya no entra en el rango de ML, etc.), el
-        // motivo tiene que verse ACÁ, no solo quedar perdido en el
-        // historial.
-        const acciones: { estado: string; error: string | null }[] = body.acciones ?? [];
+        // Punto 4 (PR #307) — cuando el servidor rechaza alguna en
+        // silencio al revalidar fresco (HTTP 200 con rechazo blando: el
+        // piso cambió, el precio editado ya no entra en el rango de ML,
+        // etc.), el motivo tiene que verse, no solo quedar perdido en
+        // el historial.
+        const acciones = body.acciones ?? [];
         const aceptadas = acciones.filter((a) => a.estado === "aceptada" || a.estado === "ejecutada");
         const rechazadasAlValidar = acciones.filter((a) => a.estado === "rechazada");
         const partes: string[] = [
@@ -410,14 +522,19 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
           const motivos = [...new Set(rechazadasAlValidar.map((a) => a.error).filter((m): m is string => !!m))];
           partes.push(`${rechazadasAlValidar.length} producto(s) se rechazaron solos al revalidar: ${motivos.join(" / ")}`);
         }
-        setResultadoAplicar(partes.join(" "));
+        texto = partes.join(" ");
+        estadoToast = rechazadasAlValidar.length > 0 ? (aceptadas.length > 0 ? "aviso" : "peligro") : "exito";
       }
+      setResultadoAplicar(texto);
+      mostrarToast(texto, estadoToast);
       setVistaPrevia(null);
       setSeleccionados({});
       void cargarCandidatos();
       void cargarPendientesLanzar();
     } else {
-      setResultadoAplicar(body.error || "No se pudo aplicar.");
+      const texto = body.error || "No se pudo aplicar.";
+      setResultadoAplicar(texto);
+      mostrarToast(texto, "peligro");
     }
   }
 
@@ -570,11 +687,14 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                   const precioMostrado = editable ? precioEditado(c) : precioConPromo(c);
                   const descuentoMostrado = editable
                     ? precioHoy != null
-                      ? Math.round(descuentoDesdePrecio(precioHoy, precioEditado(c)) * 10) / 10
+                      ? descuentoDesdePrecio(precioHoy, precioEditado(c))
                       : null
                     : porcentajeDescuento(c);
-                  const minimo = numero(c.precioMinimo);
-                  const porDebajoDelPiso = minimo != null && precioMostrado != null && precioMostrado < minimo;
+                  // Punto 1 (rama fix-promociones-edicion) — ya NO se
+                  // fuerza de vuelta al rango (ese forzado automático
+                  // en cada tecla era el bug real); acá solo se avisa y
+                  // se bloquea "Sí" hasta que se corrija a mano.
+                  const fueraDeRangoFila = editable && fueraDeRango(c, precioEditado(c));
                   return (
                     <FilaTabla key={c.id}>
                       <CeldaTabla>
@@ -595,43 +715,68 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                         {editable ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                             <input
-                              type="number"
+                              type="text"
+                              inputMode="decimal"
                               className="zx-control"
-                              style={{ width: 110 }}
-                              value={Math.round(precioEditado(c))}
-                              min={rango?.min}
-                              max={rango?.max}
-                              step={1}
-                              onChange={(e) => editarPrecioFila(c, Number(e.target.value))}
+                              style={{ width: 120 }}
+                              value={borradores[c.id]?.precio ?? formatoEnteroEsCo(precioEditado(c))}
+                              onChange={(e) => setBorradores((actual) => ({ ...actual, [c.id]: { ...actual[c.id], precio: e.target.value } }))}
+                              onBlur={() => confirmarPrecioTexto(c)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  confirmarPrecioTexto(c);
+                                  e.currentTarget.blur();
+                                } else if (e.key === "Escape") {
+                                  descartarBorrador(c.id, "precio");
+                                  e.currentTarget.blur();
+                                }
+                              }}
                             />
                             {rango && (
-                              <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
-                                mín {formatoPesos(rango.min)} – máx {formatoPesos(rango.max)}
+                              <span style={{ fontSize: 11, color: fueraDeRangoFila ? "var(--kpi-peligro-texto)" : "var(--text-faint)" }}>
+                                {fueraDeRangoFila
+                                  ? `Tiene que estar entre ${formatoPesos(rango.min)} y ${formatoPesos(rango.max)}.`
+                                  : `mín ${formatoPesos(rango.min)} – máx ${formatoPesos(rango.max)}`}
                               </span>
                             )}
                           </div>
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                             {formatoPesos(precioMostrado)}
-                            {c.soloEnMl && <span style={{ fontSize: 11, color: "var(--text-faint)" }}>precio fijo de ML</span>}
+                            {c.soloEnMl && (
+                              <span
+                                style={{ fontSize: 11, color: "var(--text-faint)" }}
+                                title={`El tipo "${c.tipoPromocion}" no se puede escribir por la API de Mercado Libre — precio fijo de ML.`}
+                              >
+                                precio fijo de ML
+                              </span>
+                            )}
                           </div>
                         )}
                       </CeldaTabla>
                       <CeldaTabla>
                         {editable ? (
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
                             className="zx-control"
                             style={{ width: 70 }}
-                            value={descuentoMostrado ?? ""}
-                            step={0.1}
+                            value={borradores[c.id]?.descuento ?? (descuentoMostrado != null ? formatoPorcentajeInput(descuentoMostrado) : "")}
                             disabled={precioHoy == null}
-                            onChange={(e) => editarDescuentoFila(c, Number(e.target.value))}
+                            onChange={(e) => setBorradores((actual) => ({ ...actual, [c.id]: { ...actual[c.id], descuento: e.target.value } }))}
+                            onBlur={() => confirmarDescuentoTexto(c)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                confirmarDescuentoTexto(c);
+                                e.currentTarget.blur();
+                              } else if (e.key === "Escape") {
+                                descartarBorrador(c.id, "descuento");
+                                e.currentTarget.blur();
+                              }
+                            }}
                           />
-                        ) : descuentoMostrado == null ? (
-                          "—"
                         ) : (
-                          `${descuentoMostrado}%`
+                          formatoPorcentaje(descuentoMostrado)
                         )}
                       </CeldaTabla>
                       <CeldaTabla>{c.precioMinimo ? formatoPesos(numero(c.precioMinimo)) : <span style={{ color: "var(--kpi-peligro-texto)" }}>Falta precio mínimo</span>}</CeldaTabla>
@@ -672,11 +817,11 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                                 type="button"
                                 variante="primario"
                                 chico
-                                disabled={porDebajoDelPiso}
-                                title={porDebajoDelPiso ? "El precio quedó por debajo del precio mínimo de Finanzas — el servidor nunca lo deja pasar." : undefined}
-                                onClick={() => abrirVistaPrevia([decisionParaAprobar(c)], "aprobar")}
+                                disabled={decisionDirectaId === c.id || fueraDeRangoFila}
+                                title={fueraDeRangoFila ? "El precio editado quedó fuera del rango permitido — corregilo para poder aprobar." : undefined}
+                                onClick={() => enviarDecisionDirecta(c, "aprobar")}
                               >
-                                Sí
+                                {decisionDirectaId === c.id ? "…" : "Sí"}
                               </Boton>
                               <Boton type="button" variante="secundario" chico disabled={decisionDirectaId === c.id} onClick={() => enviarDecisionDirecta(c, "rechazar")}>
                                 {decisionDirectaId === c.id ? "…" : "No"}
@@ -763,6 +908,8 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
       )}
 
       {pestana === "reglas" && <PestanaReglas reglas={reglas} puedeAprobar={puedeAprobar} onGuardado={cargarReglas} />}
+
+      <Toast items={toasts} onCerrar={cerrarToast} />
     </>
   );
 }
