@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { bodegas, cuentasMl, despachosMl, pedidoItems, pedidos, stockBodega } from "@/db/schema";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
@@ -485,7 +485,23 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       const { inicio, finExclusivo } = rangoDiaBogota(new Date());
       condiciones.push(isNotNull(despachosMl.despachadoTs), gte(despachosMl.despachadoTs, inicio), lt(despachosMl.despachadoTs, finExclusivo));
     } else {
-      condiciones.push(isNull(despachosMl.despachadoTs), eq(despachosMl.status, STATUS_PENDIENTES));
+      // Bug real reportado por Mateo en staging: pedidos ya recogidos
+      // por el transportador (substatus picked_up/dropped_off/...)
+      // seguían en Pendientes porque el status guardado todavía decía
+      // ready_to_ship — confirmado contra Zilonix OS actual
+      // (yaSalioDeLaTienda, lib/mercadolibre-despachos.js): el
+      // substatus es lo que cambia primero, antes que el status.
+      // SUBESTADOS_YA_SALIO atrapa eso cuando la fila YA tiene el
+      // substatus correcto guardado; refrescarEstadoViejo (más abajo)
+      // cubre el caso en que ni siquiera eso es cierto todavía.
+      condiciones.push(
+        isNull(despachosMl.despachadoTs),
+        eq(despachosMl.status, STATUS_PENDIENTES),
+        // or() con 2 argumentos siempre definidos nunca devuelve
+        // undefined — el "!" es solo para el tipo de drizzle, que
+        // contempla un or() vacío.
+        or(isNull(despachosMl.substatus), notInArray(despachosMl.substatus, SUBESTADOS_YA_SALIO))!
+      );
     }
 
     const filas = await tx
@@ -587,9 +603,14 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
     }));
   });
 
-  await backfillSlaFaltante(empresaId, tarjetas);
+  // El refresco de estado corre ANTES del backfill de plazo: si un
+  // despacho resulta que ya salió de la tienda, no tiene sentido
+  // gastar una llamada de SLA en algo que está a punto de salir de la
+  // lista.
+  const vigentes = await refrescarEstadoViejo(empresaId, tarjetas);
+  await backfillSlaFaltante(empresaId, vigentes);
 
-  return tarjetas;
+  return vigentes;
 }
 
 // Revisión de Pablo (PR #310) — 3 correcciones reales al backfill de
@@ -634,6 +655,68 @@ async function conLimiteDeConcurrencia<T>(items: T[], limite: number, fn: (item:
     }
   }
   await Promise.all(Array.from({ length: Math.min(limite, items.length) }, () => trabajador()));
+}
+
+// Bug real reportado por Mateo en staging: pedidos del 22/23 de
+// octubre con status ready_to_ship y substatus "picked_up" (ya
+// recogidos por el transportador/domiciliario) seguían en Pendientes
+// — sincronizarDespacho corre UNA SOLA VEZ al importar el pedido,
+// nunca de nuevo, así que un despacho viejo puede tener guardado un
+// status/substatus que ya no es real. El filtro de SUBESTADOS_YA_SALIO
+// en la consulta (arriba) atrapa el caso en que la fila YA tiene el
+// substatus correcto guardado; esto cubre el caso en que ni siquiera
+// eso es cierto todavía — se refresca contra Mercado Libre (mismo
+// tope/concurrencia/freno de 30 min que backfillSlaFaltante, Map en
+// memoria del proceso aparte, mismo motivo de por qué no se persiste)
+// y, si el envío real ya no está ready_to_ship o su substatus real es
+// "ya salió" (yaSalioDeLaTienda, mismo criterio que Zilonix OS
+// actual), sale de la lista en esta misma carga.
+const MAX_REFRESCO_ESTADO_POR_CARGA = 20;
+const CONCURRENCIA_REFRESCO_ESTADO = 4;
+const COOLDOWN_REFRESCO_ESTADO_MS = 30 * 60 * 1000;
+const ultimoIntentoRefrescoEstado = new Map<string, number>();
+
+function puedeRefrescarEstado(despachoId: string, ahoraMs: number): boolean {
+  const ultimo = ultimoIntentoRefrescoEstado.get(despachoId);
+  return ultimo === undefined || ahoraMs - ultimo >= COOLDOWN_REFRESCO_ESTADO_MS;
+}
+
+async function refrescarEstadoViejo(empresaId: string, tarjetas: TarjetaDespacho[]): Promise<TarjetaDespacho[]> {
+  const ahoraMs = Date.now();
+  const candidatos = tarjetas
+    .filter((t) => t.status === STATUS_PENDIENTES && puedeRefrescarEstado(t.id, ahoraMs))
+    .slice(0, MAX_REFRESCO_ESTADO_POR_CARGA);
+
+  if (candidatos.length === 0) return tarjetas;
+  const idsExcluir = new Set<string>();
+
+  await conLimiteDeConcurrencia(candidatos, CONCURRENCIA_REFRESCO_ESTADO, async (t) => {
+    // Mismo criterio que backfillSlaFaltante: se registra el intento
+    // ANTES de llamar, así una cuenta con error también frena el
+    // reintento por 30 minutos.
+    ultimoIntentoRefrescoEstado.set(t.id, Date.now());
+    try {
+      const token = await obtenerAccessTokenVigente(empresaId, t.cuentaMlId);
+      const envio = await obtenerShipmentMl(t.shipmentIdExterno, token);
+      if (envio.status === t.status && envio.substatus === t.substatus) return; // sin cambios reales
+
+      const yaSalio = (envio.status != null && !ESTADOS_IMPRIMIBLES.includes(envio.status)) || (envio.substatus != null && SUBESTADOS_YA_SALIO.includes(envio.substatus));
+      await dbComoEmpresa(empresaId, (tx) =>
+        tx
+          .update(despachosMl)
+          .set({ status: envio.status, substatus: envio.substatus, imprimible: !yaSalio, actualizadoTs: new Date() })
+          .where(and(eq(despachosMl.empresaId, empresaId), eq(despachosMl.id, t.id)))
+      );
+      t.status = envio.status;
+      t.substatus = envio.substatus;
+      if (envio.status !== STATUS_PENDIENTES || yaSalio) idsExcluir.add(t.id);
+    } catch {
+      // Cuenta desconectada, candado de renovación, o la consulta
+      // falló — se queda como estaba, no bloquea el resto de la lista.
+    }
+  });
+
+  return idsExcluir.size === 0 ? tarjetas : tarjetas.filter((t) => !idsExcluir.has(t.id));
 }
 
 // FUERA de la transacción de listarTarjetasDespacho a propósito:
