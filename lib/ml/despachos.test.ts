@@ -2,8 +2,9 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
+import { db } from "@/db";
 import { crearCuentaMlDePrueba, crearVentaDePrueba } from "@/db/test-utils/venta";
-import { cuentasMl, despachosMl, empresas, pedidos } from "@/db/schema";
+import { cuentasMl, despachosMl, empresas, pedidos, usuarios } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
 import { LARGO_MAXIMO_BUSQUEDA, normalizarParametro, PAGINA_MAXIMA } from "@/lib/filtros-listado";
 import {
@@ -573,6 +574,11 @@ describe("tarjetas de Despachos — Fase 1 (gate, marcar/deshacer, listarTarjeta
     await dbComoEmpresa(empresaBId, (tx) =>
       tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B tarjetas despachos", nit: `TEST-DESPTB-${empresaBId.slice(0, 8)}` })
     );
+    // despachos_ml.despachado_por referencia usuarios.id — usuarios no
+    // es una tabla de empresa (no pasa por dbComoEmpresa), por eso va
+    // con el `db` crudo, igual que el resto de las pruebas que insertan
+    // un usuario de prueba (ej. lib/ml/transferencia.test.ts).
+    await db.insert(usuarios).values({ id: usuarioId, email: `prueba-despachos-${usuarioId.slice(0, 8)}@zilonix.test`, nombre: "Usuario de prueba Despachos" });
 
     // pedido_items exige una cabecera en pedidos_finanzas con el MISMO
     // (empresa_id, pedido_id) — FK compuesta pedido_items_venta_misma_

@@ -48,7 +48,12 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof EtiquetaNoImprimibleError) return NextResponse.json({ error: error.message }, { status: 409 });
-    const mensaje = error instanceof Error ? error.message : "Error desconocido.";
-    return NextResponse.json({ error: mensaje }, { status: 502 });
+    // Nunca error.message crudo al cliente (puede traer el texto real
+    // de la respuesta de Mercado Libre, ver obtenerEtiquetasPdf) —
+    // mismo criterio que app/api/ml/publicar/_ayudantes.ts
+    // (respuestaDeErrorMl): mensaje fijo afuera, el detalle real solo
+    // en el log del servidor.
+    console.warn(`[api/ml/despachos/etiqueta] no se pudo obtener la guía del despacho ${despachoId}:`, error instanceof Error ? error.message : String(error));
+    return NextResponse.json({ error: "No se pudo obtener la guía de Mercado Libre." }, { status: 502 });
   }
 }
