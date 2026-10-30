@@ -10,8 +10,9 @@ import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import {
   agruparDespachosPorDia,
   esFlex,
-  esPlazoVencido,
+  estadoPlazo,
   ETIQUETA_TIPO_DESPACHO,
+  etiquetaEstadoEnvio,
   formatoPlazoChip,
   listarCuentasConErrorDespacho,
   listarDespachosFiltrados,
@@ -41,6 +42,19 @@ function colorEstadoDespacho(estado: string | null): EstadoChip {
 function formatoFechaColombia(fecha: Date | string): string {
   return new Date(fecha).toLocaleString("es-CO", { timeZone: "America/Bogota" });
 }
+
+// Etiquetas de tarjeta (con emoji) — punto 5 de la tarea, confirmado
+// contra el Zilonix OS actual (LOGISTIC_LABELS en
+// components/negocio/MercadoLibreDespachos.js). Distinto de
+// ETIQUETA_TIPO_DESPACHO (lib/ml/despachos.ts, texto plano): esa sigue
+// siendo la del filtro y de la tabla compacta de impresión masiva,
+// esta es solo para el badge grande de la tarjeta.
+const ETIQUETA_TIPO_TARJETA: Record<string, string> = {
+  self_service: "⚡ Flex",
+  xd_drop_off: "📍 Agencia (Places)",
+  cross_docking: "🚚 Colecta",
+  otro: "Otro",
+};
 
 function hrefConFiltros(base: Record<string, string | undefined>, cambios: Record<string, string | undefined>): string {
   const params = new URLSearchParams();
@@ -87,13 +101,22 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
     listarCuentasConErrorDespacho(empresa.id),
     listarTarjetasDespacho(empresa.id, { cuentaId: cuentaFiltro, tipo: tipoFiltro, pestaña: pestañaFiltro }),
   ]);
-  const grupos = agruparDespachosPorDia(tarjetas, new Date());
+  const ahora = new Date();
+  const grupos = agruparDespachosPorDia(tarjetas, ahora);
 
   const filtrosBase = { cuenta: cuentaFiltro, tipo: tipoFiltro };
 
   return (
     <>
-      <EncabezadoPagina titulo="Despachos" />
+      <EncabezadoPagina
+        titulo="Despachos"
+        descripcion={
+          <>
+            Órdenes ya pagas, listas para empacar — no incluye Full.
+            <span className={styles.ultimaActualizacion}> Actualizado: {formatoFechaColombia(ahora)}.</span>
+          </>
+        }
+      />
 
       {cuentasConError.length > 0 && (
         <div className={styles.aviso}>
@@ -155,29 +178,27 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
         grupos.map((grupo) => (
           <section key={grupo.etiqueta} className={styles.grupoDia}>
             <h2 className={styles.tituloGrupo}>{grupo.etiqueta}</h2>
-            <div className={styles.grilla}>
+            <div className={styles.listaAncha}>
               {grupo.despachos.map((d) => (
                 <TarjetaDespachoCliente
                   key={d.id}
                   id={d.id}
-                  shipmentIdExterno={d.shipmentIdExterno}
                   logisticType={d.logisticType}
                   status={d.status}
-                  slaExpectedDate={d.slaExpectedDate}
-                  guiaVistaTs={d.guiaVistaTs}
+                  estadoTraducido={etiquetaEstadoEnvio(d.status, null)}
                   despachadoTs={d.despachadoTs}
-                  imprimible={d.imprimible}
-                  etiquetaImpresaTs={d.etiquetaImpresaTs}
+                  guiaVistaTs={d.guiaVistaTs}
                   cuentaNickname={d.cuentaNickname}
                   pedidoIdExterno={d.pedidoIdExterno}
                   fechaPedido={d.fechaPedido}
                   comprador={d.comprador}
+                  bodegaAsignada={d.bodegaAsignada}
                   items={d.items}
-                  etiquetaTipo={ETIQUETA_TIPO_DESPACHO[d.logisticType ?? "otro"] ?? "Otro"}
+                  etiquetaTipo={ETIQUETA_TIPO_TARJETA[d.logisticType ?? "otro"] ?? "Otro"}
                   esFlex={esFlex(d.logisticType)}
                   chipPlazo={formatoPlazoChip(d.slaExpectedDate)}
-                  plazoVencido={esPlazoVencido(d.slaExpectedDate, new Date())}
-                  colorEstado={colorEstadoDespacho(d.status)}
+                  estadoPlazo={estadoPlazo(d.slaExpectedDate, ahora)}
+                  estadoEnvioTexto={etiquetaEstadoEnvio(d.status, d.substatus)}
                   puedeModificar={puedeModificar}
                   ventanaDeshacerMs={VENTANA_DESHACER_MS}
                 />

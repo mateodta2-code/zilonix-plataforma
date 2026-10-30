@@ -152,9 +152,16 @@
   font-weight: 600;
 }
 
-.grilla {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+.ultimaActualizacion {
+  color: var(--texto-suave);
+}
+
+/* Fase 1-1 de Despachos (rama mateo/feat-despachos-fase1-1) —
+   tarjetas a lo ancho, una por fila (como en OS), en vez de la grilla
+   de la Fase 1: info a la izquierda, botones en columna a la derecha. */
+.listaAncha {
+  display: flex;
+  flex-direction: column;
   gap: 16px;
 }
 
@@ -165,70 +172,177 @@
   margin-bottom: 10px;
 }
 
-/* Flex resaltado (punto 3 de la tarea) — reusa el Chip estado="aviso"
-   ya existente (--acento/--acento-fuerte) en vez de un color naranja
-   nuevo: "sin paleta nueva" aplica también acá, no solo al fondo de
-   la tarjeta. */
-.avisoFlex {
+.tarjetaAncha {
+  position: relative;
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.columnaInfo {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.columnaAcciones {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 180px;
+}
+
+/* Flex resaltado (punto 5 de la tarea) — borde y fondo en ámbar
+   (--advertencia*, agregado en app/globals.css/Tarjeta.module.css:
+   hasta esta tarea no existía ningún token ámbar en el archivo). El
+   tinte de fondo es un div propio (no se toca el `background` que ya
+   declara .tarjeta en Tarjeta.module.css — pelearle la cascada a esa
+   regla es frágil; esto es un overlay encima, con z-index, sin mover
+   el layout). */
+.fondoFlex {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: var(--radio-tarjeta);
+  background: radial-gradient(160px 90px at 0% 0%, var(--advertencia-suave), transparent 70%);
+  box-shadow: inset 0 0 0 2px var(--advertencia-fuerte);
+}
+
+.tarjetaAncha {
+  z-index: 1;
+}
+
+.etiquetaFlex {
   margin: 0 0 10px;
-  font-size: 12.5px;
-  color: var(--acento-fuerte);
+  font-weight: 600;
+  color: var(--advertencia-fuerte);
 }
 
 .filaItems {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
 .filaItem {
   display: flex;
-  gap: 10px;
-  align-items: center;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* 110px (punto 4 de la tarea, "como OS") — bastante más grande que la
+   miniatura de 44px de la Fase 1, para que quien empaca reconozca el
+   producto sin tener que abrir el link. */
+.contenedorImagen {
+  position: relative;
+  flex-shrink: 0;
 }
 
 .imagenItem,
 .imagenItemVacia {
-  width: 44px;
-  height: 44px;
-  border-radius: 6px;
+  width: 110px;
+  height: 110px;
+  border-radius: 8px;
   object-fit: cover;
-  flex-shrink: 0;
   background: var(--superficie-2);
+  display: block;
+}
+
+/* Zoom accesible (punto 4): popover a ~2.5x, por hover O foco de
+   teclado (:focus-within en el contenedor, no solo :hover) — nunca
+   mueve el layout (position: absolute, no cambia el tamaño de
+   .imagenItem). Mismo archivo de imagen, solo a escala: no hay una
+   foto en mayor resolución guardada (pedido_items solo guarda la
+   miniatura). */
+.lupa {
+  position: absolute;
+  top: 0;
+  left: 118px;
+  width: 275px;
+  height: 275px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--borde-plata);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.lupa img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.contenedorImagen:hover .lupa,
+.contenedorImagen:focus-within .lupa {
+  opacity: 1;
+  visibility: visible;
+}
+
+.datosItem {
+  min-width: 0;
 }
 
 .tituloItem {
-  margin: 0;
-  font-size: 13.5px;
+  display: block;
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
 }
 
-.detalleItem {
-  margin: 0;
-  font-size: 12px;
-  color: var(--texto-suave);
+a.tituloItem:hover {
+  text-decoration: underline;
 }
 
-.datosTarjeta {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin: 0 0 14px;
+.lineaDatos {
+  margin: 0 0 4px;
   font-size: 12.5px;
-}
-
-.datosTarjeta dt {
   color: var(--texto-suave);
 }
 
-.datosTarjeta dd {
-  margin: 0;
+.stockAgotado {
+  color: var(--peligro-texto);
+  font-weight: 600;
 }
 
-.acciones {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.selectBodega {
+  display: inline-block;
+  width: auto;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+/* Chip de plazo (punto 6) — 3 colores, "por_vencer" es el único que
+   necesita el ámbar nuevo; "normal" se queda en la plata de siempre
+   (nunca un cuarto color inventado para el caso neutro). */
+.chipPlazo {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radio-chip);
+  border: 1px solid var(--borde-plata);
+  color: var(--plata-etiqueta);
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.chipPlazo[data-estado="vencido"] {
+  color: var(--peligro-texto);
+  border-color: var(--peligro-texto);
+}
+
+.chipPlazo[data-estado="por_vencer"] {
+  color: var(--advertencia-fuerte);
+  border-color: var(--advertencia);
 }
 
 .notaDespachado {
