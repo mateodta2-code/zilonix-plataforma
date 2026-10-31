@@ -2,6 +2,7 @@ import { redirect, RedirectType } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
+import { obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
@@ -196,7 +197,11 @@ export default async function SeguimientoPage({
     await procesarAgregarPorQuery(empresa.id, usuario.id, { tipo: "tienda", mlIdExterno: searchParams.agregar_tienda });
   }
 
-  const [alertasDelDia, seguimientos] = await Promise.all([listarAlertasDelDia(empresa.id), listarSeguimientosConUltimaFoto(empresa.id)]);
+  const [alertasDelDia, seguimientos, cuentaMlActiva] = await Promise.all([
+    listarAlertasDelDia(empresa.id),
+    listarSeguimientosConUltimaFoto(empresa.id),
+    obtenerCuentaMlActiva(empresa.id),
+  ]);
   // Issue #251 — dos pozos separados, nunca uno combinado (ver
   // LIMITE_TIENDAS_COMPETIDOR_POR_EMPRESA/LIMITE_PRODUCTOS_COMPETIDOR_POR_EMPRESA,
   // lib/seguimiento/seguimientos.ts).
@@ -236,6 +241,20 @@ export default async function SeguimientoPage({
         descripcion="Seguimiento diario de productos, tiendas y competidores de Mercado Libre — precio, inventario, ventas y alertas cuando algo cambia."
       />
 
+      {/* Refs #175 — diagnóstico real en staging: el cron corría bien
+      (procesados: 5, fallidos: 0) y las filas igual quedaban en "Sin
+      dato", sin ninguna pista en pantalla de que la causa era que la
+      empresa no tenía NINGUNA cuenta de Mercado Libre conectada (el
+      fallo de cada item solo quedaba en console.error del cron, nunca
+      visible acá). Chequeo barato (reusa obtenerCuentaMlActiva, sin
+      llamar a Mercado Libre ni agregar columna nueva) — solo avisa
+      cuando de verdad hay algo seguido que depende de eso. */}
+      {!cuentaMlActiva && seguimientos.length > 0 ? (
+        <p className={styles.aviso}>
+          Ninguno de tus seguimientos se está actualizando: no tenés ninguna cuenta de Mercado Libre conectada. Conectá una en{" "}
+          <Link href="/panel/conectar-ml">Conectar cuenta</Link> para que la revisión diaria vuelva a traer datos.
+        </p>
+      ) : null}
       {searchParams.error ? <EstadoVacio>{searchParams.error}</EstadoVacio> : null}
       {/* Issue #204 — antes decía "la primera foto llega con la
       próxima revisión diaria" (hasta una hora, el cron corre cada

@@ -8,23 +8,26 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { InsigniaExtension } from "@/components/marco/InsigniaExtension";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import {
+  actualizarSesion,
   aplicarVendidosConfirmados,
   calcularKpisMercado,
   calcularResumenBloque,
   calcularResumenLocalBloque,
-  cargarBloques,
+  cargarSesiones,
   clasificarSenalVentas,
   estimarAproximadosListado,
   facturacionEstimadaListado,
   generarEstrategiaListado,
   generarVeredictoListado,
-  guardarBloques,
+  guardarSesiones,
   linkHttpSeguro,
   mejorOpcionParaImportar,
+  obtenerBloquesDeSesion,
   ordenarProductos,
   type Bloque,
   type CriterioOrden,
   type ProductoListado,
+  type SesionBusqueda,
 } from "@/lib/ml/listadoCliente";
 import { ETIQUETA_APROXIMADO } from "@/lib/seguimiento/aproximados";
 import { generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
@@ -189,6 +192,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   const ahora = useMemo(() => new Date(), []);
   const [conExtension, setConExtension] = useState<boolean | null>(null);
   const [bloques, setBloques] = useState<Bloque[]>([]);
+  const [sesiones, setSesiones] = useState<SesionBusqueda[]>([]);
   const [cargado, setCargado] = useState(false);
 
   const [escaneoEnCurso, setEscaneoEnCurso] = useState(false);
@@ -229,19 +233,78 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   const limiteMlRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const limitePlataformaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queriesUsadasPlataformaRef = useRef<string[]>([]);
-
-  // Issue #227 — "persistencia ≥1h, sobrevive refresh": se carga UNA
-  // vez por término (localStorage, TTL 1h — lib/ml/listadoCliente.ts)
-  // y se vuelve a guardar cada vez que cambian los bloques.
+  // Issue #227 (fix cache) — "último valor real, sin re-disparar el
+  // efecto por cada cambio": refs en vez de deps, para que el efecto
+  // de abajo (el que cambia de término) pueda leer el bloques/sesiones
+  // de ESTE MISMO instante sin tenerlos en su array de deps (si los
+  // tuviera, correría también cuando bloques cambia DENTRO del mismo
+  // término, que ya tiene su propio efecto de guardado más abajo).
+  const terminoCargadoRef = useRef<string | null>(null);
+  const bloquesRef = useRef<Bloque[]>([]);
+  const sesionesRef = useRef<SesionBusqueda[]>([]);
   useEffect(() => {
-    setBloques(cargarBloques(termino));
+    bloquesRef.current = bloques;
+  }, [bloques]);
+  useEffect(() => {
+    sesionesRef.current = sesiones;
+  }, [sesiones]);
+
+  // Issue #227 (fix cache real, reportado en staging) — bug de
+  // carrera confirmado: con dos efectos separados (cargar por
+  // [termino], guardar por [termino, bloques]), al cambiar de término
+  // los dos corrían en la MISMA pasada — el de guardar leía los
+  // bloques del término VIEJO (los `setState` del de cargar no son
+  // sincrónicos en la misma pasada) pero ya con la clave del término
+  // NUEVO, escribiendo ahí los bloques viejos; recién en la pasada
+  // siguiente (con bloques=[] del término nuevo) se "corregía" solo —
+  // una carrera real, no cosmética, si la persona cambiaba de término
+  // dos veces rápido.
+  //
+  // Ahora es UN SOLO efecto: primero guarda lo del término VIEJO (si
+  // había uno cargado) bajo SU propia clave, recién DESPUÉS lee/arma
+  // el del término NUEVO — nunca al revés. `termino` es la única
+  // dependencia a propósito (bloquesRef/sesionesRef dan el valor real
+  // sin que un cambio de bloques dentro del MISMO término dispare esto).
+  useEffect(() => {
+    let todas: SesionBusqueda[];
+    if (terminoCargadoRef.current === null) {
+      todas = cargarSesiones();
+    } else {
+      todas = actualizarSesion(sesionesRef.current, terminoCargadoRef.current, bloquesRef.current);
+      guardarSesiones(todas);
+    }
+    setSesiones(todas);
+    setBloques(obtenerBloquesDeSesion(todas, termino));
+    terminoCargadoRef.current = termino;
     setCargado(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a propósito solo [termino], ver el comentario de arriba
   }, [termino]);
 
+  // Guardado dentro del MISMO término (ej. un bloque nuevo que llega
+  // de un escaneo, o "Eliminar" un bloque) — nunca compite con el
+  // efecto de arriba: ese ya deja `terminoCargadoRef.current` en el
+  // término correcto ANTES de que `bloques` cambie a los del término
+  // nuevo, así que este efecto (sin `termino` en sus deps) siempre
+  // guarda bajo la clave que de verdad le corresponde a `bloques`.
   useEffect(() => {
     if (!cargado) return;
-    guardarBloques(termino, bloques);
-  }, [termino, bloques, cargado]);
+    const terminoDeEstosBloques = terminoCargadoRef.current ?? termino;
+    const todas = actualizarSesion(sesionesRef.current, terminoDeEstosBloques, bloques);
+    guardarSesiones(todas);
+    setSesiones(todas);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a propósito sin `termino`, ver el comentario de arriba
+  }, [bloques, cargado]);
+
+  // Issue #227 (fix cache) — búsquedas anteriores (otro término, con
+  // al menos un bloque todavía vigente) para la lista de "volver a
+  // ellas" — nunca la del término actual (esa ya se muestra abajo).
+  const busquedasAnteriores = useMemo(() => {
+    const claveActual = termino.trim().toLowerCase();
+    const masReciente = (s: SesionBusqueda) => Math.max(0, ...s.bloques.map((b) => b.creadoTs));
+    return sesiones
+      .filter((s) => s.termino.trim().toLowerCase() !== claveActual)
+      .sort((a, b) => masReciente(b) - masReciente(a));
+  }, [sesiones, termino]);
 
   useEffect(() => {
     setConExtension(document.documentElement.hasAttribute("data-zilonix-extension"));
@@ -511,23 +574,49 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     [kpisMercado]
   );
 
+  // Issue #227 (fix cache) — "búsquedas anteriores... en una lista para
+  // volver a ellas, y al abrir una se restaura SIN volver a buscar ni
+  // escanear": un link de navegación normal (?termino=...) — cambia el
+  // prop `termino`, el efecto de arriba carga la sesión guardada, y
+  // como nunca se marca el "clic reciente en Analizar"
+  // (consumirClicAnalizarReciente), ningún escaneo se dispara solo.
+  // Se repite igual en las 3 pestañas (nunca solo en Demanda) porque
+  // las sesiones guardadas no son un dato de una pestaña puntual.
+  const busquedasAnterioresJsx =
+    busquedasAnteriores.length > 0 ? (
+      <div className={styles.insignia}>
+        <span className={styles.notaInsignia}>Búsquedas anteriores (hasta 1h, se restauran sin volver a escanear):</span>
+        {busquedasAnteriores.map((s) => (
+          <Link key={s.termino} href={`?termino=${encodeURIComponent(s.termino)}&tab=${tab}`} className={styles.enlaceSeguir}>
+            <Chip>
+              {s.termino} ({s.bloques.length})
+            </Chip>
+          </Link>
+        ))}
+      </div>
+    ) : null;
+
   if (tab === "mercado") {
     return (
-      <div className={styles.kpis}>
-        <TarjetaKpi titulo="PUBLICACIONES ENCONTRADAS" valor={kpisMercado.publicacionesEncontradas || undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="VENDEDORES DISTINTOS" valor={kpisMercado.vendedoresDistintos || undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="PRECIO MÍNIMO" valor={kpisMercado.precioMinimo != null ? money(kpisMercado.precioMinimo) : undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="PRECIO PROMEDIO (TICKET)" valor={kpisMercado.precioPromedio != null ? money(kpisMercado.precioPromedio) : undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="PRECIO MÁXIMO" valor={kpisMercado.precioMaximo != null ? money(kpisMercado.precioMaximo) : undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="% FULL" valor={kpisMercado.porcentajeFull != null ? `${kpisMercado.porcentajeFull}%` : undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="% ENVÍO GRATIS" valor={kpisMercado.porcentajeEnvioGratis != null ? `${kpisMercado.porcentajeEnvioGratis}%` : undefined} textoVacio="Sin dato" />
-      </div>
+      <>
+        {busquedasAnterioresJsx}
+        <div className={styles.kpis}>
+          <TarjetaKpi titulo="PUBLICACIONES ENCONTRADAS" valor={kpisMercado.publicacionesEncontradas || undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="VENDEDORES DISTINTOS" valor={kpisMercado.vendedoresDistintos || undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="PRECIO MÍNIMO" valor={kpisMercado.precioMinimo != null ? money(kpisMercado.precioMinimo) : undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="PRECIO PROMEDIO (TICKET)" valor={kpisMercado.precioPromedio != null ? money(kpisMercado.precioPromedio) : undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="PRECIO MÁXIMO" valor={kpisMercado.precioMaximo != null ? money(kpisMercado.precioMaximo) : undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="% FULL" valor={kpisMercado.porcentajeFull != null ? `${kpisMercado.porcentajeFull}%` : undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="% ENVÍO GRATIS" valor={kpisMercado.porcentajeEnvioGratis != null ? `${kpisMercado.porcentajeEnvioGratis}%` : undefined} textoVacio="Sin dato" />
+        </div>
+      </>
     );
   }
 
   if (tab === "estrategia") {
     return (
       <>
+        {busquedasAnterioresJsx}
         <div className={styles.bloque}>
           <p className={styles.tituloSeccion}>Veredicto</p>
           {veredictoListado ? <p className={styles.veredicto}>{veredictoListado}</p> : <p className={styles.notaInsignia}>Sin suficientes datos todavía para un veredicto.</p>}
@@ -551,6 +640,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   // --- Demanda ---
   return (
     <>
+      {busquedasAnterioresJsx}
       {fotoAmpliada ? (
         <div className={styles.lightbox} onClick={() => setFotoAmpliada(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element -- foto de un marketplace ajeno, mismo criterio que el resto del panel */}

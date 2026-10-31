@@ -513,37 +513,93 @@ export function generarVeredictoListado(args: { publicacionesEncontradas: number
 }
 
 // --- persistencia con TTL (issue #227: "sobrevive refresh", "TTL 1h borra") ---
+//
+// Fix real (Refs #227) — bug confirmado en staging: la clave de
+// localStorage era `zilonix:investigacion-stacks:${termino}` (una
+// clave DISTINTA por término, nunca compartida) — cambiar de producto
+// significaba leer/escribir una clave totalmente aparte, así que las
+// búsquedas anteriores quedaban "perdidas" (seguían en localStorage,
+// bajo su propia clave vieja, pero el panel nunca las volvía a leer ni
+// las mostraba en ningún lado). Encima, PanelInvestigacion.tsx tenía
+// dos efectos separados (cargar por [termino], guardar por
+// [termino, bloques]) que corrían en la MISMA pasada al cambiar de
+// término — el de guardar veía TODAVÍA los bloques del término VIEJO
+// (los state updates del efecto de cargar no son sincrónicos dentro de
+// la misma pasada) pero ya con el término NUEVO en sus deps: escribía
+// los bloques viejos bajo la clave nueva, para recién en la pasada
+// siguiente (ya con bloques=[] del término nuevo) corregirlo — una
+// carrera real, no solo cosmética, si la persona cambiaba de término
+// dos veces rápido o cerraba la pestaña entre medio.
+//
+// Ahora hay UNA sola lista (`SesionBusqueda[]`), bajo UNA sola clave de
+// localStorage, con una fila por término — nunca más una clave por
+// término. "Apilados por (plataforma, país, consulta)": la consulta
+// (término) es la clave de la sesión; plataforma (que para Mercado
+// Libre YA incluye el país — ver DOMINIOS_ML_PAIS en
+// extension/background.js, ej. "Mercado Libre Colombia") sigue siendo
+// la de cada Bloque dentro de esa sesión, sin cambios — un término
+// puede tener bloques de varias plataformas/países a la vez, como
+// siempre. El TTL (mínimo 1h, sin cambios) ahora se evalúa por sesión:
+// una sesión con TODOS sus bloques vencidos desaparece sola de la
+// lista — nunca queda una entrada vacía.
 export const TTL_BLOQUE_MS = 60 * 60 * 1000;
 
-function normalizarParaClave(texto: string): string {
-  return texto.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+export type SesionBusqueda = {
+  termino: string;
+  bloques: Bloque[];
+};
+
+const CLAVE_SESIONES = "zilonix:investigacion-sesiones";
+
+function normalizarTermino(termino: string): string {
+  return termino.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
-function claveStorage(termino: string): string {
-  return `zilonix:investigacion-stacks:${normalizarParaClave(termino)}`;
+function bloquesVigentes(bloques: Bloque[], ahora: number): Bloque[] {
+  return bloques.filter((b) => b && typeof b.creadoTs === "number" && ahora - b.creadoTs < TTL_BLOQUE_MS);
 }
 
 // localStorage (no sessionStorage): "sobrevive refresh" y también un
 // cierre de pestaña accidental dentro de la misma hora — el TTL real
-// es lo que borra, nunca el ciclo de vida de la pestaña.
-export function cargarBloques(termino: string): Bloque[] {
+// es lo que borra, nunca el ciclo de vida de la pestaña. Las vencidas
+// (ninguno de sus bloques sigue vigente) se descartan solas, acá —
+// nunca hace falta un borrado explícito aparte.
+export function cargarSesiones(): SesionBusqueda[] {
   try {
-    const crudo = localStorage.getItem(claveStorage(termino));
+    const crudo = localStorage.getItem(CLAVE_SESIONES);
     if (!crudo) return [];
-    const bloques = JSON.parse(crudo) as Bloque[];
-    if (!Array.isArray(bloques)) return [];
+    const sesiones = JSON.parse(crudo) as SesionBusqueda[];
+    if (!Array.isArray(sesiones)) return [];
     const ahora = Date.now();
-    return bloques.filter((b) => b && typeof b.creadoTs === "number" && ahora - b.creadoTs < TTL_BLOQUE_MS);
+    return sesiones
+      .filter((s): s is SesionBusqueda => Boolean(s) && typeof s.termino === "string" && Array.isArray(s.bloques))
+      .map((s) => ({ termino: s.termino, bloques: bloquesVigentes(s.bloques, ahora) }))
+      .filter((s) => s.bloques.length > 0);
   } catch {
     return [];
   }
 }
 
-export function guardarBloques(termino: string, bloques: Bloque[]): void {
+export function guardarSesiones(sesiones: SesionBusqueda[]): void {
   try {
-    localStorage.setItem(claveStorage(termino), JSON.stringify(bloques));
+    localStorage.setItem(CLAVE_SESIONES, JSON.stringify(sesiones));
   } catch {
-    // localStorage lleno/bloqueado (modo privado estricto) — los bloques
-    // igual quedan en memoria para esta sesión, solo no sobreviven un refresh.
+    // localStorage lleno/bloqueado (modo privado estricto) — las
+    // sesiones igual quedan en memoria para esta pestaña, solo no
+    // sobreviven un refresh.
   }
+}
+
+// Reemplaza (o agrega) la sesión de ESTE término dentro de la lista
+// COMPLETA — nunca toca las de los demás términos. bloques=[] borra la
+// sesión entera (nunca deja una fila vacía dando vueltas).
+export function actualizarSesion(sesiones: SesionBusqueda[], termino: string, bloques: Bloque[]): SesionBusqueda[] {
+  const clave = normalizarTermino(termino);
+  const resto = sesiones.filter((s) => normalizarTermino(s.termino) !== clave);
+  return bloques.length > 0 ? [...resto, { termino, bloques }] : resto;
+}
+
+export function obtenerBloquesDeSesion(sesiones: SesionBusqueda[], termino: string): Bloque[] {
+  const clave = normalizarTermino(termino);
+  return sesiones.find((s) => normalizarTermino(s.termino) === clave)?.bloques ?? [];
 }
