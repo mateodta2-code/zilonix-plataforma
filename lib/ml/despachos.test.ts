@@ -8,6 +8,7 @@ import { bodegas, cuentasMl, despachosMl, empresas, pedidoItems, pedidos, pedido
 import { crearBodega } from "@/lib/inventario/bodegas";
 import { cifrarToken } from "@/lib/cifrado";
 import { LARGO_MAXIMO_BUSQUEDA, normalizarParametro, PAGINA_MAXIMA } from "@/lib/filtros-listado";
+import { registrarEventoPedido } from "@/lib/ml/pedidos";
 import {
   agruparDespachosPorDia,
   contarDespachosPendientes,
@@ -19,6 +20,7 @@ import {
   etiquetaDiaVenta,
   etiquetaEstadoEnvio,
   EtiquetaNoImprimibleError,
+  fechaDespachoDe,
   formatoPlazoChip,
   GuiaNoVistaError,
   listarCuentasConErrorDespacho,
@@ -471,6 +473,7 @@ function tarjetaDePrueba(id: string, fechaPedido: Date, extra: Partial<TarjetaDe
     pedidoIdExterno: "ORD-1",
     fechaPedido,
     actualizadoTs: fechaPedido,
+    fechaEventoDespacho: null,
     comprador: null,
     bodegaAsignada: null,
     items: [],
@@ -1116,16 +1119,29 @@ describe("pestaña Despachados — 15 días, dos orígenes (fix mateo/feat-despa
   // despachadoTs/status/substatus/actualizadoTs todos explícitos, para
   // controlar exactamente en qué rama (marcado_en_seller vs.
   // recogido_transportadora) y dentro o fuera de la ventana cae cada
-  // despacho de prueba.
+  // despacho de prueba. fechaEventoDespacho (opcional) — issue "fechas
+  // equivocadas en Despachados": simula el evento real "despacho" en
+  // pedido_eventos (status_history.date_shipped de Mercado Libre, ver
+  // guardarOrdenMl en lib/ml/ventas-finanzas.ts), que es lo que de
+  // verdad decide ventana/orden/agrupación en esta pestaña ahora —
+  // actualizado_ts, a propósito, puede quedar en "ahora" (como en el
+  // bug real reportado por Mateo, que se pisa en cada sincronización)
+  // sin que eso cambie el resultado.
   async function crearDespacho(
     empresaIdDeLaPrueba: string,
     shipmentIdExterno: string,
-    datos: { status: string | null; substatus: string | null; despachadoTs: Date | null; actualizadoTs: Date }
+    datos: { status: string | null; substatus: string | null; despachadoTs: Date | null; actualizadoTs: Date; fechaEventoDespacho?: Date; fechaPedido?: Date }
   ): Promise<string> {
     const cuentaId = await crearCuentaMlDePrueba(empresaIdDeLaPrueba);
     const pedidoId = await crearPedidoDePrueba(empresaIdDeLaPrueba, cuentaId);
+    if (datos.fechaPedido) {
+      await dbComoEmpresa(empresaIdDeLaPrueba, (tx) => tx.update(pedidos).set({ fecha: datos.fechaPedido }).where(eq(pedidos.id, pedidoId)));
+    }
     await dbComoEmpresa(empresaIdDeLaPrueba, (tx) => tx.insert(pedidosFinanzas).values({ empresaId: empresaIdDeLaPrueba, pedidoId, cuentaMlId: cuentaId, valorVenta: "100000.00" }));
     await dbComoEmpresa(empresaIdDeLaPrueba, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaIdDeLaPrueba, pedidoId, 1)));
+    if (datos.fechaEventoDespacho) {
+      await registrarEventoPedido(empresaIdDeLaPrueba, pedidoId, "despacho", datos.fechaEventoDespacho);
+    }
     const [{ id: despachoId }] = await dbComoEmpresa(empresaIdDeLaPrueba, (tx) =>
       tx
         .insert(despachosMl)
@@ -1154,7 +1170,13 @@ describe("pestaña Despachados — 15 días, dos orígenes (fix mateo/feat-despa
   const haceNDias = (n: number) => new Date(AHORA - n * 24 * 60 * 60 * 1000);
 
   it("un envío picked_up que nadie marcó en Seller aparece como 'Recogido por la transportadora'", async () => {
-    const id = await crearDespacho(empresaId, "940000001", { status: "shipped", substatus: "picked_up", despachadoTs: null, actualizadoTs: haceNDias(3) });
+    const id = await crearDespacho(empresaId, "940000001", {
+      status: "shipped",
+      substatus: "picked_up",
+      despachadoTs: null,
+      actualizadoTs: haceNDias(3),
+      fechaEventoDespacho: haceNDias(3),
+    });
 
     const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
     const tarjeta = despachados.find((t) => t.id === id);
@@ -1173,7 +1195,16 @@ describe("pestaña Despachados — 15 días, dos orígenes (fix mateo/feat-despa
 
   it("uno de hace 16 días no aparece (fuera de la ventana de 15 días), marcado o recogido", async () => {
     const idMarcadoViejo = await crearDespacho(empresaId, "940000003", { status: "shipped", substatus: null, despachadoTs: haceNDias(16), actualizadoTs: haceNDias(16) });
-    const idRecogidoViejo = await crearDespacho(empresaId, "940000004", { status: "delivered", substatus: null, despachadoTs: null, actualizadoTs: haceNDias(16) });
+    const idRecogidoViejo = await crearDespacho(empresaId, "940000004", {
+      status: "delivered",
+      substatus: null,
+      despachadoTs: null,
+      // actualizadoTs a propósito distinto de la fecha real — mismo
+      // bug reportado por Mateo (se pisa en cada sincronización, nunca
+      // tiene que decidir si entra o no a la ventana de 15 días).
+      actualizadoTs: new Date(),
+      fechaEventoDespacho: haceNDias(16),
+    });
 
     const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
     const ids = despachados.map((t) => t.id);
@@ -1182,20 +1213,76 @@ describe("pestaña Despachados — 15 días, dos orígenes (fix mateo/feat-despa
   });
 
   it("uno de hace exactamente 14 días (dentro de los 15) sí aparece — el borde no se corta de más", async () => {
-    const id = await crearDespacho(empresaId, "940000005", { status: "delivered", substatus: null, despachadoTs: null, actualizadoTs: haceNDias(14) });
+    const id = await crearDespacho(empresaId, "940000005", {
+      status: "delivered",
+      substatus: null,
+      despachadoTs: null,
+      actualizadoTs: new Date(),
+      fechaEventoDespacho: haceNDias(14),
+    });
 
     const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
     expect(despachados.map((t) => t.id)).toContain(id);
   });
 
   it("aislamiento A/B: empresa B nunca ve los despachados de empresa A", async () => {
-    const idB = await crearDespacho(empresaBId, "940000006", { status: "shipped", substatus: "picked_up", despachadoTs: null, actualizadoTs: haceNDias(1) });
+    const idB = await crearDespacho(empresaBId, "940000006", {
+      status: "shipped",
+      substatus: "picked_up",
+      despachadoTs: null,
+      actualizadoTs: haceNDias(1),
+      fechaEventoDespacho: haceNDias(1),
+    });
 
     const despachadosA = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
     expect(despachadosA.map((t) => t.id)).not.toContain(idB);
 
     const despachadosB = await listarTarjetasDespacho(empresaBId, { pestaña: "despachados" });
     expect(despachadosB.map((t) => t.id)).toEqual([idB]); // solo la suya, nada de empresa A
+  });
+
+  // Issue "fechas equivocadas en Despachados" (fix mateo/fix-despachados-zoom-fechas)
+  // — bug real reportado por Mateo en staging: con actualizado_ts (se
+  // pisa en CADA sincronización) un envío ENTREGADO hace días salía
+  // agrupado en "Hoy". Acá actualizadoTs queda en "ahora" A PROPÓSITO
+  // (simula justo esa sincronización reciente) — la fecha real tiene
+  // que salir del evento "despacho" (fechaEventoDespacho), nunca de
+  // actualizadoTs.
+  it("un entregado de hace 7 días cae en su día real y no en 'Hoy'", async () => {
+    const id = await crearDespacho(empresaId, "940000008", {
+      status: "delivered",
+      substatus: null,
+      despachadoTs: null,
+      actualizadoTs: new Date(), // recién sincronizado — no es la fecha real.
+      fechaEventoDespacho: haceNDias(7),
+    });
+
+    const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
+    const tarjeta = despachados.find((t) => t.id === id);
+    expect(tarjeta).toBeDefined();
+    expect(fechaDespachoDe(tarjeta!).getTime()).toBe(haceNDias(7).getTime());
+
+    const grupos = agruparDespachosPorDia([tarjeta!], new Date(AHORA), fechaDespachoDe);
+    expect(grupos.map((g) => g.etiqueta)).not.toContain("Hoy (1)");
+    expect(etiquetaDiaVenta(fechaDespachoDe(tarjeta!), new Date(AHORA))).not.toBe("Hoy");
+  });
+
+  // Mismo bug: una orden de agosto (bien afuera de los 15 días) no
+  // tiene todavía evento "despacho" (nunca se volvió a sincronizar
+  // después de marcarse) — tiene que caer al último nivel, la fecha de
+  // la ORDEN, nunca a actualizado_ts (que el reporte real describía
+  // como "hoy" por la sincronización periódica).
+  it("una orden de agosto (sin evento de despacho todavía) no aparece en los 15 días", async () => {
+    const id = await crearDespacho(empresaId, "940000009", {
+      status: "shipped",
+      substatus: "picked_up",
+      despachadoTs: null,
+      actualizadoTs: new Date(), // recién tocado por la sincronización — no es la fecha real.
+      fechaPedido: new Date("2026-08-25T15:00:00Z"),
+    });
+
+    const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
+    expect(despachados.map((t) => t.id)).not.toContain(id);
   });
 
   it("un pedido Full (fulfillment) nunca aparece en Despachados, aunque esté delivered", async () => {

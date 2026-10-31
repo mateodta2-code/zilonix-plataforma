@@ -27,6 +27,7 @@ import {
 import { LimiteMercadoLibreError, PATRON_ID_PRODUCTO_O_ITEM, pedirLecturaMl, type RespuestaLecturaMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { sincronizarDespacho } from "@/lib/ml/despachos";
+import { registrarEventoPedido } from "@/lib/ml/pedidos";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
 
 const TAMANO_PAGINA = 50;
@@ -116,6 +117,26 @@ export async function guardarOrdenMl(
     await sincronizarInventarioPedido(empresaId, guardada.pedidoId);
   } catch (error) {
     console.error(`[inventario] el stock de la orden ${orden.id} no se pudo actualizar:`, error instanceof Error ? error.message : "error desconocido");
+  }
+  // Issue "fechas equivocadas en Despachados" — bug real: la
+  // importación inicial (lib/ml/importacion.ts) SÍ registraba estos dos
+  // eventos (pedido_eventos, con la fecha real de status_history), pero
+  // esta sincronización periódica nunca lo hacía — una venta sincronizada
+  // después de la importación inicial se quedaba sin la fecha real de
+  // despacho/entrega, y listarTarjetasDespacho (lib/ml/despachos.ts) no
+  // tenía de dónde sacarla. Mismo dato ya leído arriba (envio), ninguna
+  // llamada nueva a Mercado Libre. onConflictDoNothing (registrarEventoPedido)
+  // hace esto idempotente igual que la importación inicial. Un fallo acá
+  // no tumba la venta ya guardada: la próxima sincronización lo reintenta.
+  if (envio?.status_history?.date_shipped) {
+    await registrarEventoPedido(empresaId, guardada.pedidoId, "despacho", new Date(envio.status_history.date_shipped)).catch((error) => {
+      console.error(`[ventas-finanzas] no se pudo registrar el evento de despacho de la orden ${orden.id}:`, error instanceof Error ? error.message : "error desconocido");
+    });
+  }
+  if (envio?.status_history?.date_delivered) {
+    await registrarEventoPedido(empresaId, guardada.pedidoId, "entrega", new Date(envio.status_history.date_delivered)).catch((error) => {
+      console.error(`[ventas-finanzas] no se pudo registrar el evento de entrega de la orden ${orden.id}:`, error instanceof Error ? error.message : "error desconocido");
+    });
   }
   return guardada;
 }
