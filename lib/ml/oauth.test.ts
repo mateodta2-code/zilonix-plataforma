@@ -5,7 +5,7 @@ import {
   generarCodeVerifier,
   generarState,
   intercambiarCodigo,
-  obtenerNickname,
+  obtenerDatosVendedorMl,
   renovarToken,
 } from "./oauth";
 
@@ -94,16 +94,29 @@ describe("OAuth de Mercado Libre (tarea 2.3)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("obtenerNickname pide /users/me con el access_token", async () => {
+  it("obtenerDatosVendedorMl pide /users/me con el access_token", async () => {
     const fetchMock = vi.mocked(fetch);
-    fetchMock.mockResolvedValue(respuestaOk({ nickname: "VENDEDOR_TEST" }));
+    fetchMock.mockResolvedValue(respuestaOk({ nickname: "VENDEDOR_TEST", site_id: "MLM" }));
 
-    const nickname = await obtenerNickname("APP_USR-abc");
+    const datos = await obtenerDatosVendedorMl("APP_USR-abc");
 
-    expect(nickname).toBe("VENDEDOR_TEST");
+    expect(datos).toEqual({ nickname: "VENDEDOR_TEST", siteId: "MLM" });
     const [url, opciones] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.mercadolibre.com/users/me");
     expect((opciones!.headers as Record<string, string>).Authorization).toBe("Bearer APP_USR-abc");
+  });
+
+  // Issue #315 (Z-LATAM-01) — Mercado Libre puede no mandar site_id (o
+  // mandar algo que no sea texto) — nunca se inventa un valor acá,
+  // queda null y quien llama (guardarCuentaConectada) decide el
+  // default real (vía lib/ml/sitios.ts).
+  it("obtenerDatosVendedorMl sin site_id en la respuesta: siteId queda null, nunca inventa uno", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(respuestaOk({ nickname: "VENDEDOR_TEST" }));
+
+    const datos = await obtenerDatosVendedorMl("APP_USR-abc");
+
+    expect(datos).toEqual({ nickname: "VENDEDOR_TEST", siteId: null });
   });
 
   it("generarCodeVerifier da un string distinto cada vez, de al menos 43 caracteres (mínimo de RFC 7636)", () => {

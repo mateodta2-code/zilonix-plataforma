@@ -461,12 +461,32 @@ export const cuentasMl = pgTable(
     // nunca eliminada.
     desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    // Issue #315 (Z-LATAM-01) — sitio real de Mercado Libre de esta
+    // cuenta (MCO/MLM/MLB/MLA/MLC), para que Seller funcione en otros
+    // países de LATAM, no solo Colombia. Se llena al conectar/reconectar
+    // (GET /users/me, vía lib/ml/cliente.ts — nunca un fetch suelto) con
+    // el site_id real que devuelve Mercado Libre; las filas que ya
+    // existían quedan con el default (MCO) hasta que se reconecten.
+    // Acotado con un CHECK (texto, no un enum de Postgres: agregar un
+    // país nuevo más adelante es un ALTER TABLE simple, nunca el ALTER
+    // TYPE fuera de transacción que exige un enum real).
+    siteId: text("site_id").notNull().default("MCO"),
+    // ISO 4217 — derivada de site_id vía lib/ml/sitios.ts (SITIOS_ML), no
+    // algo que se vuelva a preguntar a Mercado Libre por separado.
+    moneda: text("moneda").notNull().default("COP"),
+    // Idioma/locale de la cuenta (formato BCP 47, ej. "es-CO", "pt-BR") —
+    // misma fuente que moneda, vía lib/ml/sitios.ts.
+    idioma: text("idioma").notNull().default("es-CO"),
   },
   (t) => ({
     // Una cuenta real de Mercado Libre no puede estar conectada a dos
     // empresas de Zilonix a la vez — evita ambigüedad de a quién le
     // pertenecen sus avisos y sus pedidos.
     cuentaUnica: uniqueIndex("cuentas_ml_cuenta_externa_unica").on(t.cuentaIdExterna),
+    // Issue #315 — criterio de aceptación explícito: site_id solo puede
+    // ser uno de los 5 sitios de Mercado Libre que de verdad opera
+    // Zilonix en LATAM (Colombia, México, Brasil, Argentina, Chile).
+    siteIdValido: check("cuentas_ml_site_id_valido", sql`${t.siteId} IN ('MCO', 'MLM', 'MLB', 'MLA', 'MLC')`),
     // MATCH SIMPLE (el default de Postgres): si titular_id es null, la
     // FK no se evalúa. Con valor, empresa_id + titular_id tienen que
     // existir juntos en titulares.
