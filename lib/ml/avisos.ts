@@ -26,7 +26,16 @@ export async function recibirAviso(aviso: AvisoMl): Promise<ResultadoRecibirAvis
 
   // No es una de nuestras cuentas conectadas (o ya se desconectó) —
   // Mercado Libre igual espera un 200, pero no hay nada que guardar.
-  if (!empresaId) return "cuenta_desconocida";
+  // Issue "ventas nuevas en segundos" (Refs #49), punto 4 — se ignora
+  // de verdad (nunca se guarda, nunca se procesa), pero queda
+  // registrado para poder ver en los logs si alguien le pega a esta
+  // URL pública con un user_id que no es ninguna cuenta nuestra —
+  // nunca el user_id crudo en el mensaje (no hace falta para esto, y
+  // menos tecleado en un log).
+  if (!empresaId) {
+    console.warn(`[lib/ml/avisos] aviso de un user_id desconocido (topic ${aviso.topic}) — ignorado.`);
+    return "cuenta_desconocida";
+  }
 
   const guardadas = await dbComoEmpresa(empresaId, (tx) =>
     tx
