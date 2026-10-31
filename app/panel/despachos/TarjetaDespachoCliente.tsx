@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Boton } from "@/components/marco/Boton";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
+import { FotoConZoom } from "@/components/marco/FotoConZoom";
 import { linkPublicacion } from "@/lib/ml/permalink";
 import type { EstadoPlazo } from "@/lib/ml/despachos";
 import { deshacerDespachadoAction, marcarDespachadoAction } from "./actions";
@@ -80,32 +81,6 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
     return () => clearInterval(intervalo);
   }, [props.despachadoTs, props.ventanaDeshacerMs]);
 
-  // Bug real reportado por Mateo en staging: el zoom de la foto solo se
-  // abría/cerraba con CSS (:hover/:focus-within) — en touch (sin hover
-  // real) un tap deja el foco puesto y el zoom se queda "pegado" encima
-  // del título/precio/datos hasta que algo más reciba el foco. Ahora es
-  // estado de React: abre con hover O click, cierra al salir del mouse,
-  // con click afuera o con Esc — nunca se queda abierto solo.
-  const [zoomAbierto, setZoomAbierto] = useState<string | null>(null);
-  const contenedoresImagenRef = useRef(new Map<string, HTMLDivElement>());
-
-  useEffect(() => {
-    if (!zoomAbierto) return;
-    function cerrarSiEsAfuera(evento: MouseEvent) {
-      const contenedor = contenedoresImagenRef.current.get(zoomAbierto!);
-      if (contenedor && !contenedor.contains(evento.target as Node)) setZoomAbierto(null);
-    }
-    function cerrarConEscape(evento: KeyboardEvent) {
-      if (evento.key === "Escape") setZoomAbierto(null);
-    }
-    document.addEventListener("mousedown", cerrarSiEsAfuera);
-    document.addEventListener("keydown", cerrarConEscape);
-    return () => {
-      document.removeEventListener("mousedown", cerrarSiEsAfuera);
-      document.removeEventListener("keydown", cerrarConEscape);
-    };
-  }, [zoomAbierto]);
-
   function abrirGuia(formato: "normal" | "sticker") {
     window.open(`/api/ml/despachos/etiqueta?despachoId=${props.id}&formato=${formato}`, "_blank");
     setGuiaVista(true);
@@ -161,39 +136,11 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
               const stockAgotado = item.stockDisponible != null && item.stockDisponible <= 0;
               return (
                 <div key={item.itemIdExterno} className={styles.filaItem}>
-                  <div
-                    className={styles.contenedorImagen}
-                    ref={(el) => {
-                      if (el) contenedoresImagenRef.current.set(item.itemIdExterno, el);
-                      else contenedoresImagenRef.current.delete(item.itemIdExterno);
-                    }}
-                    onMouseEnter={() => setZoomAbierto(item.itemIdExterno)}
-                    onMouseLeave={() => setZoomAbierto((actual) => (actual === item.itemIdExterno ? null : actual))}
-                  >
-                    {item.imagenUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- miniatura externa de Mercado Libre, no un asset propio del proyecto.
-                      <img
-                        src={item.imagenUrl}
-                        alt={item.titulo}
-                        className={styles.imagenItem}
-                        tabIndex={0}
-                        onClick={() => setZoomAbierto((actual) => (actual === item.itemIdExterno ? null : item.itemIdExterno))}
-                        onKeyDown={(evento) => {
-                          if (evento.key !== "Enter" && evento.key !== " ") return;
-                          evento.preventDefault();
-                          setZoomAbierto((actual) => (actual === item.itemIdExterno ? null : item.itemIdExterno));
-                        }}
-                      />
-                    ) : (
-                      <div className={styles.imagenItemVacia} aria-hidden="true" />
-                    )}
-                    {item.imagenUrl && (
-                      <div className={`${styles.lupa} ${zoomAbierto === item.itemIdExterno ? styles.lupaAbierta : ""}`} aria-hidden="true">
-                        {/* eslint-disable-next-line @next/next/no-img-element -- mismo archivo, solo a escala para el zoom */}
-                        <img src={item.imagenUrl} alt="" />
-                      </div>
-                    )}
-                  </div>
+                  {item.imagenUrl ? (
+                    <FotoConZoom src={item.imagenUrl} alt={item.titulo} claseMiniatura={styles.imagenItem} />
+                  ) : (
+                    <div className={styles.imagenItemVacia} aria-hidden="true" />
+                  )}
                   <div className={styles.datosItem}>
                     {href ? (
                       <a href={href} target="_blank" rel="noopener noreferrer" className={styles.tituloItem}>

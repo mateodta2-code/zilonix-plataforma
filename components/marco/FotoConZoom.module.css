@@ -1,0 +1,86 @@
+.disparador {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  display: block;
+  border-radius: 8px; /* mismo radio de la miniatura que pasa cada pantalla */
+  /* El disparador (sin wrapper, FotoConZoom no agrega ningún div
+     extra) es el ítem flex directo de quien lo use — nunca se
+     achica en un contenedor angosto (celular), igual que ya exigía
+     el viejo .contenedorImagen. */
+  flex-shrink: 0;
+}
+
+.disparador:focus-visible {
+  outline: 2px solid var(--acento-fuerte);
+  outline-offset: 2px;
+}
+
+/* position: fixed + inset: 0 + z-index alto — por encima de CUALQUIER
+   tarjeta de la página, sin importar su propio stacking context
+   (overflow/isolation de Tarjeta.module.css); portal a document.body
+   (FotoConZoom.tsx) para que tampoco quede recortado por el overflow:
+   hidden de la tarjeta que lo dispara. */
+.fondo {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(8, 10, 18, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.ventana {
+  max-width: 90vw;
+  max-height: 85vh;
+}
+
+/* <Tarjeta> ya trae el borde/degradado plata-azul de marca de /panel y
+   el fondo de zona oscura en los dos temas (Tarjeta.module.css) — se
+   reusa tal cual en vez de duplicar ese estilo acá. */
+.marco {
+  position: relative;
+  max-width: 90vw;
+  max-height: 85vh;
+}
+
+.cerrar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--borde-plata);
+  background: var(--superficie-2);
+  color: var(--texto);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cerrar:hover {
+  filter: brightness(1.2);
+}
+
+.cerrar:focus-visible {
+  outline: 2px solid var(--acento-fuerte);
+  outline-offset: 2px;
+}
+
+/* 90vw/85vh del punto 2 de la tarea, menos el padding de <Tarjeta>
+   (20px por lado) para que la foto nunca se salga del marco. */
+.imagenGrande {
+  display: block;
+  max-width: calc(90vw - 40px);
+  max-height: calc(85vh - 40px);
+  object-fit: contain;
+  border-radius: 6px;
+}
