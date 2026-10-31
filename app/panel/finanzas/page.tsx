@@ -146,6 +146,10 @@ export default async function FinanzasPage() {
         <BotonLink href="/panel/finanzas/proveedores" variante="secundario" chico>
           Proveedores y transportadores
         </BotonLink>{" "}
+        {/* Issue #126 (slice urgente) — valor Flex de la empresa. */}
+        <BotonLink href="/panel/finanzas/configuracion" variante="secundario" chico>
+          Configuración (valor Flex)
+        </BotonLink>{" "}
         <BotonLink href="/panel" variante="fantasma" chico>
           Volver al panel
         </BotonLink>
