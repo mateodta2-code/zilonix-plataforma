@@ -33,6 +33,7 @@ import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { ImpresionMasivaForm } from "./ImpresionMasivaForm";
+import { SincronizarAhoraCliente } from "./SincronizarAhoraCliente";
 import { TarjetaDespachoCliente } from "./TarjetaDespachoCliente";
 import styles from "./page.module.css";
 
@@ -97,6 +98,12 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
   }
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
   const puedeModificar = Boolean(miMembresia && tienePermiso(miMembresia.permisos, "ventas", "modificar"));
+  // Issue "pendientes no muestra venta nueva" — "Sincronizar ahora"
+  // (Pendientes) llama a traerVentasDelMes, que escribe en
+  // pedidos_finanzas: mismo permiso que ya exige esa función en
+  // Finanzas ("finanzas"/"modificar"), nunca "ventas"/"modificar"
+  // (eso es solo para marcar/deshacer despachado, acá mismo).
+  const puedeSincronizar = Boolean(miMembresia && tienePermiso(miMembresia.permisos, "finanzas", "modificar"));
 
   const cuentaFiltro = normalizarParametro(searchParams.cuenta);
   const tipoFiltro = normalizarParametro(searchParams.tipo);
@@ -159,6 +166,8 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
         <ImpresionMasiva empresaId={empresa.id} />
       ) : (
         <>
+          {pestañaFiltro === "pendientes" && puedeSincronizar && <SincronizarAhoraCliente />}
+
           <form method="get" className={styles.filtros}>
             <input type="hidden" name="pestaña" value={pestañaFiltro} />
             <Campo etiqueta="Cuenta">
