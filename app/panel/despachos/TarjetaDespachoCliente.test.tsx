@@ -1,12 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TarjetaDespachoCliente, type TarjetaDespachoProps } from "./TarjetaDespachoCliente";
 
 // Issue "fechas equivocadas en Despachados" (punto 3) — sin DOM de
 // navegador en el repo (mismo criterio que TablaDetalleAcordeon.test.tsx):
 // se renderiza a HTML estático y se mira qué botón salió. useState usa
 // su valor inicial (los props), useEffect no corre — alcanza porque el
-// botón se decide solo con props, nunca con un efecto.
+// botón se decide solo con props, nunca con un efecto. useRouter() sí
+// corre durante el render (no en un efecto) y revienta fuera de un App
+// Router montado de verdad ("invariant expected app router to be
+// mounted", bug real encontrado en CI) — se mockea, nunca se llama de
+// verdad en este archivo.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 function propsBase(extra: Partial<TarjetaDespachoProps> = {}): TarjetaDespachoProps {
   return {

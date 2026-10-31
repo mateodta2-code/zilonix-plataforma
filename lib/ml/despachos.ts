@@ -547,7 +547,17 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       // despachado_ts ya es null en este caso (por el isNull de abajo),
       // así que fechaRealDespacho se reduce a coalesce(evento, fecha
       // de la orden) — el mismo criterio de 3 niveles de más arriba.
-      const recogidoSinMarcar = and(isNull(despachosMl.despachadoTs), yaSalioDeLaTienda, sql`${fechaRealDespacho} >= ${inicio} and ${fechaRealDespacho} < ${finExclusivo}`)!;
+      // .toISOString(): a diferencia de gte()/lt() (que conocen el tipo
+      // de la columna y serializan el Date solas), un parámetro suelto
+      // dentro de un sql`` crudo se lo pasa tal cual al driver — postgres.js
+      // no acepta un Date ahí (bug real encontrado en CI: "Received an
+      // instance of Date"). Postgres igual lo castea bien a timestamptz
+      // por el contexto (se compara contra fechaRealDespacho, timestamptz).
+      const recogidoSinMarcar = and(
+        isNull(despachosMl.despachadoTs),
+        yaSalioDeLaTienda,
+        sql`${fechaRealDespacho} >= ${inicio.toISOString()} and ${fechaRealDespacho} < ${finExclusivo.toISOString()}`
+      )!;
       condiciones.push(or(marcadoEnSeller, recogidoSinMarcar)!);
     } else {
       // Bug real reportado por Mateo en staging: pedidos ya recogidos
