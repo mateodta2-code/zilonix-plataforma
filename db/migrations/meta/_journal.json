@@ -141,6 +141,13 @@
       "when": 1793332387294,
       "tag": "0019_icy_terror",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793407144265,
+      "tag": "0020_bizarre_arclight",
+      "breakpoints": true
     }
   ]
 }
