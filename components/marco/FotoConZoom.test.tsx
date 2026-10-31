@@ -5,7 +5,7 @@
 // nada de DB/acciones de servidor en FotoConZoom.tsx, así que esta
 // prueba corre con DOM real sin necesitar Postgres.
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { FotoConZoom } from "./FotoConZoom";
 
 afterEach(() => cleanup());
@@ -56,5 +56,25 @@ describe("FotoConZoom — modal (fix-despachos-zoom-modal)", () => {
     expect(screen.queryByRole("dialog")).not.toBeNull();
     fireEvent.click(dialogo.parentElement!); // el fondo oscuro mismo
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // Issue "zoom de despachos" (fix-zoom-tamano) — bug real reportado
+  // por Mateo: el modal usaba la MISMA url que la miniatura (chica a
+  // propósito en Mercado Libre), nunca una versión grande.
+  it("el modal usa srcAmpliada (alta resolución), nunca la miniatura (src)", () => {
+    const miniatura = "https://http2.mlstatic.com/D_NQ_NP_1-MCO1-I.jpg";
+    const grande = "https://http2.mlstatic.com/D_NQ_NP_1-MCO1-O.jpg";
+    render(<FotoConZoom src={miniatura} srcAmpliada={grande} alt={ALT} />);
+    abrir();
+    const imagenModal = within(screen.getByRole("dialog")).getByRole("img");
+    expect(imagenModal.getAttribute("src")).toBe(grande);
+    expect(imagenModal.getAttribute("src")).not.toBe(miniatura);
+  });
+
+  it("sin srcAmpliada, el modal cae a src en vez de no mostrar nada", () => {
+    render(<FotoConZoom src={SRC} alt={ALT} />);
+    abrir();
+    const imagenModal = within(screen.getByRole("dialog")).getByRole("img");
+    expect(imagenModal.getAttribute("src")).toBe(SRC);
   });
 });

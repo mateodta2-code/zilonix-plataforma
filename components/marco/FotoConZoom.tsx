@@ -11,6 +11,12 @@ export type FotoConZoomProps = {
   // Clase de la miniatura (tamaño/recorte) — la decide quien use este
   // componente; FotoConZoom solo agrega el disparador y el modal.
   claseMiniatura?: string;
+  // Bug real reportado por Mateo en staging: el modal usaba la MISMA
+  // URL que la miniatura (src) — que para Mercado Libre es chica a
+  // propósito (unos 100-200px) — así que ampliarla con CSS la dejaba
+  // borrosa/mínima. srcAmpliada es opcional (no todo llamador tiene
+  // una versión grande real); si no se pasa, el modal cae a `src`.
+  srcAmpliada?: string;
 };
 
 // Issue "zoom de despachos" (fix-despachos-zoom-fechas → fix-despachos-zoom-modal)
@@ -24,7 +30,7 @@ export type FotoConZoomProps = {
 // hoy solo lo usa TarjetaDespachoCliente (Pendientes y Despachados
 // comparten ese mismo componente), pero cualquier otra pantalla con
 // una miniatura de pedido_items lo puede reusar sin duplicar esto.
-export function FotoConZoom({ src, alt, claseMiniatura }: FotoConZoomProps) {
+export function FotoConZoom({ src, alt, claseMiniatura, srcAmpliada }: FotoConZoomProps) {
   const [abierta, setAbierta] = useState(false);
   const cerrarRef = useRef<HTMLButtonElement>(null);
 
@@ -70,8 +76,10 @@ export function FotoConZoom({ src, alt, claseMiniatura }: FotoConZoomProps) {
                 <button type="button" ref={cerrarRef} className={styles.cerrar} onClick={() => setAbierta(false)} aria-label="Cerrar">
                   ×
                 </button>
-                {/* eslint-disable-next-line @next/next/no-img-element -- misma foto, a tamaño completo dentro del modal */}
-                <img src={src} alt={alt} className={styles.imagenGrande} />
+                <div className={styles.contenedorFoto}>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- la de alta resolución (o, a falta de ella, la miniatura); nunca next/image, que exigiría dominios remotos en next.config para un ancho que de todos modos no se conoce de antemano. */}
+                  <img src={srcAmpliada ?? src} alt={alt} className={styles.imagenGrande} />
+                </div>
               </Tarjeta>
             </div>
           </div>,
