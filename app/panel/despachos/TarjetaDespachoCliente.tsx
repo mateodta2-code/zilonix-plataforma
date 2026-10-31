@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Boton } from "@/components/marco/Boton";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
+import { CopiarTexto } from "@/components/marco/CopiarTexto";
 import { FotoConZoom } from "@/components/marco/FotoConZoom";
 import { urlFotoGrandeMl } from "@/lib/ml/imagen-ml";
 import { linkPublicacion } from "@/lib/ml/permalink";
@@ -151,7 +152,13 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
                       <p className={styles.tituloItem}>{item.titulo}</p>
                     )}
                     <p className={styles.lineaDatos}>
-                      Cantidad: {item.cantidad} · SKU: {item.skuCodigo ?? "—"} · Vendido a: {formatoPrecio(item.precioUnitario)} ·{" "}
+                      Cantidad: {item.cantidad} · SKU:{" "}
+                      {item.skuCodigo ? (
+                        <CopiarTexto valor={item.skuCodigo} etiquetaAria={`Copiar SKU ${item.skuCodigo}`} mensajeCopiado="SKU copiado" />
+                      ) : (
+                        "—"
+                      )}{" "}
+                      · Vendido a: {formatoPrecio(item.precioUnitario)} ·{" "}
                       <span className={stockAgotado ? styles.stockAgotado : undefined}>Stock: {item.stockDisponible ?? "—"}</span>
                     </p>
                   </div>
