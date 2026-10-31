@@ -3,7 +3,7 @@ import { dbComoEmpresa, dbComoTransferenciaCuentaMl } from "@/db/empresa-context
 import { cuentasMl, empresas } from "@/db/schema";
 import { cifrarToken, descifrarToken } from "@/lib/cifrado";
 import { renovarToken, type TokensMl } from "@/lib/ml/oauth";
-import { datosSitioMl } from "@/lib/ml/sitios";
+import { datosSitioMl, type SitioMl } from "@/lib/ml/sitios";
 
 const SEGUNDOS_DE_MARGEN = 120; // renovar un poco antes de que venza, no justo al filo
 const CANDADO_ABANDONADO_MS = 30_000; // tarea 2.3: un candado de más de 30s se considera caído, se puede retomar
@@ -201,6 +201,19 @@ export async function obtenerAccessTokenVigente(empresaId: string, cuentaId: str
       console.warn(`[lib/ml/cuentas] no se pudo renovar el token de la cuenta ${cuentaId}:`, error instanceof Error ? error.name : String(error));
       throw new RenovacionTokenFallidaError();
     }
+  });
+}
+
+// Issue #315 (Z-LATAM-01) — para que Publicar/Promociones resuelvan el
+// site_id/moneda/idioma REALES de una cuenta puntual (nunca el "MCO"
+// fijo de lib/ml/cliente.ts) antes de pedirle algo a Mercado Libre.
+// Misma RLS que obtenerAccessTokenVigente (dbComoEmpresa) — nunca
+// filtra el sitio de una cuenta de otra empresa.
+export async function obtenerSitioDeCuenta(empresaId: string, cuentaId: string): Promise<SitioMl> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [cuenta] = await tx.select({ siteId: cuentasMl.siteId }).from(cuentasMl).where(eq(cuentasMl.id, cuentaId));
+    if (!cuenta) throw new CuentaMlNoEncontradaError();
+    return datosSitioMl(cuenta.siteId);
   });
 }
 

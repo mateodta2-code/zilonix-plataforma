@@ -90,7 +90,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-edicion): escribir
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await waitFor(() => expect(getCount).toBe(1));
     await screen.findByText("Producto de prueba");
 
@@ -109,7 +109,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-edicion): escribir
     const fetchMock = mockearFetchBase((url) => (url.includes("/candidatos") ? respuestaCandidatos([candidatoRaw()]) : null));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     const [inputPrecio] = screen.getAllByRole("textbox");
@@ -126,7 +126,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-edicion): escribir
     const fetchMock = mockearFetchBase((url) => (url.includes("/candidatos") ? respuestaCandidatos([candidatoRaw()]) : null));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     const [inputPrecio] = screen.getAllByRole("textbox");
@@ -142,7 +142,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-edicion): escribir
     const fetchMock = mockearFetchBase((url) => (url.includes("/candidatos") ? respuestaCandidatos([candidatoRaw()]) : null));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     const [inputPrecio] = screen.getAllByRole("textbox");
@@ -156,7 +156,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-edicion): escribir
     const fetchMock = mockearFetchBase((url) => (url.includes("/candidatos") ? respuestaCandidatos([candidatoRaw()]) : null));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     const [inputPrecio] = screen.getAllByRole("textbox");
@@ -174,7 +174,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-edicion): escribir
     const fetchMock = mockearFetchBase((url) => (url.includes("/candidatos") ? respuestaCandidatos([candidatoRaw()]) : null));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     const [inputPrecio, inputDescuento] = screen.getAllByRole("textbox");
@@ -196,7 +196,7 @@ describe("PaginaPromociones — punto 3 (rama fix-promociones-edicion): % redond
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     // (100000-93333)/100000*100 = 6.667...% -> "6,7%", nunca el crudo.
@@ -223,7 +223,7 @@ describe("PaginaPromociones — punto 2 (rama fix-promociones-edicion): Sí es u
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     fireEvent.click(screen.getByRole("button", { name: "Sí" }));
@@ -250,7 +250,7 @@ describe("PaginaPromociones — punto 2 (rama fix-promociones-edicion): Sí es u
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     fireEvent.click(screen.getByRole("button", { name: "Sí" }));
@@ -266,7 +266,7 @@ describe("PaginaPromociones — punto 2 (rama fix-promociones-edicion): Sí es u
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     fireEvent.click(screen.getByRole("button", { name: "Sí" }));
@@ -294,7 +294,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-aprobadas-particip
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     fireEvent.click(await screen.findByRole("button", { name: /Aprobadas/ }));
 
     expect(await screen.findByText("Ejecutada en ML")).toBeTruthy();
@@ -310,7 +310,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-aprobadas-particip
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     fireEvent.click(await screen.findByRole("button", { name: /Aprobadas/ }));
 
     expect(await screen.findByText("Falló al ejecutar")).toBeTruthy();
@@ -332,7 +332,7 @@ describe("PaginaPromociones — punto 2 (rama fix-promociones-aprobadas-particip
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     await screen.findByText("Producto de prueba");
 
     expect(estaDeshabilitado("Sí")).toBe(true);
@@ -380,7 +380,7 @@ describe("PaginaPromociones — punto 3 (rama fix-promociones-aprobadas-particip
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     fireEvent.click(await screen.findByRole("button", { name: "Participando" }));
 
     expect(await screen.findByRole("button", { name: "Dejar de participar" })).toBeTruthy();
@@ -401,7 +401,7 @@ describe("PaginaPromociones — punto 3 (rama fix-promociones-aprobadas-particip
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     fireEvent.click(await screen.findByRole("button", { name: "Participando" }));
     await screen.findByText("Producto participando");
 
@@ -423,7 +423,7 @@ describe("PaginaPromociones — punto 3 (rama fix-promociones-aprobadas-particip
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => false));
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     fireEvent.click(await screen.findByRole("button", { name: "Participando" }));
     await screen.findByText("Producto participando");
 
@@ -464,11 +464,15 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-aprobar-no-ejecuta
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     fireEvent.click(await screen.findByRole("button", { name: /Lanzar aprobadas a Mercado Libre \(1\)/ }));
 
     expect(await screen.findByText("VITALCARNITINA")).toBeTruthy();
-    expect(await screen.findByText("$69.900")).toBeTruthy();
+    // Issue #315 — formatoPesos ya no es "$"+toLocaleString("es-CO") a mano:
+    // Intl.NumberFormat("es-CO", {style:"currency"}) mete un espacio
+    // angosto (U+00A0) real entre el símbolo y el número — el
+    // normalizador de testing-library lo colapsa a un espacio normal.
+    expect(await screen.findByText("$ 69.900")).toBeTruthy();
     expect(estaDeshabilitado("Confirmar y lanzar")).toBe(true);
   });
 
@@ -485,7 +489,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-aprobar-no-ejecuta
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     fireEvent.click(await screen.findByRole("button", { name: /Lanzar aprobadas a Mercado Libre \(1\)/ }));
     await screen.findByText("VITALCARNITINA");
 
@@ -511,7 +515,7 @@ describe("PaginaPromociones — punto 1 (rama fix-promociones-aprobar-no-ejecuta
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1" }]} puedeAprobar={true} puedeEjecutar={true} />);
+    render(<PaginaPromociones cuentas={[{ id: "cuenta-1", nickname: "Cuenta 1", siteId: "MCO", moneda: "COP", idioma: "es-CO" }]} puedeAprobar={true} puedeEjecutar={true} />);
     fireEvent.click(await screen.findByRole("button", { name: /Lanzar aprobadas a Mercado Libre \(1\)/ }));
     await screen.findByText("VITALCARNITINA");
 

@@ -25,6 +25,7 @@ import {
   sinMargen,
 } from "./calculosFila";
 import { debeMostrarResumenBusquedaVacia, lineasResumenBusquedaVacia } from "./resumenBusquedaVacia";
+import { datosSitioMl, formatearMoneda, SITE_ID_DEFECTO } from "@/lib/ml/sitios";
 import type {
   AccionHistorialCliente,
   CandidatoClienteCliente,
@@ -35,7 +36,10 @@ import type {
 } from "./tipos-cliente";
 import styles from "./promociones.module.css";
 
-type Cuenta = { id: string; nickname: string };
+// Issue #315 — siteId/moneda/idioma reales de la cuenta (lib/ml/sitios.ts,
+// listarCuentasConectadas), para formatear precios/fechas de cada fila
+// con la cuenta real, nunca "$"/es-CO fijo.
+type Cuenta = { id: string; nickname: string; siteId: string; moneda: string; idioma: string };
 type Pestana = "buscar" | "historial" | "reglas" | "participando";
 // Rama feat-promociones-editar-precio, punto 2 — "todas" ya significaba
 // "pendientes" del lado del servidor (GET .../candidatos solo devuelve
@@ -55,14 +59,29 @@ const ETIQUETA_FILTRO: Record<Filtro, string> = {
 
 const ETIQUETA_ESTADO_CUENTA: Record<string, string> = { en_cola: "En cola", buscando: "Buscando…", listo: "Listo", error: "Error" };
 
-function formatoPesos(valor: number | null): string {
-  return valor == null ? "—" : `$${valor.toLocaleString("es-CO")}`;
+// Issue #315 — reemplaza el "$"+toLocaleString("es-CO") fijo: `siteId`
+// siempre lo resuelve el llamador con siteIdDeCuenta (cuentaMlId de ESA
+// fila → mapa de cuentas; sin match, SITE_ID_DEFECTO).
+function formatoPesos(valor: number | null, siteId: string): string {
+  return valor == null ? "—" : formatearMoneda(valor, siteId);
 }
 
 // Rama feat-promociones, punto 3 — la pantalla completa. Mismo diseño
 // de marca que /panel (Tarjeta, zx-control, Boton, Chip, Tabla) en los
 // dos temas, sin paleta nueva.
 export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cuentas: Cuenta[]; puedeAprobar: boolean; puedeEjecutar: boolean }) {
+  // Issue #315 — cuentaMlId de CADA fila (candidato/participando/
+  // historial/pendienteLanzar) → el siteId/idioma real de esa cuenta,
+  // nunca "MCO"/es-CO fijo. Sin match (cuenta ya desconectada/borrada),
+  // cae al default documentado en lib/ml/sitios.ts.
+  const cuentaPorId = new Map(cuentas.map((c) => [c.id, c]));
+  function siteIdDeCuenta(cuentaMlId: string): string {
+    return cuentaPorId.get(cuentaMlId)?.siteId ?? SITE_ID_DEFECTO;
+  }
+  function idiomaDeCuenta(cuentaMlId: string): string {
+    return datosSitioMl(siteIdDeCuenta(cuentaMlId)).idioma;
+  }
+
   const [pestana, setPestana] = useState<Pestana>("buscar");
   const [cuentaSeleccionada, setCuentaSeleccionada] = useState<string>("todas");
   const [filtro, setFiltro] = useState<Filtro>("todas");
@@ -117,6 +136,11 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     cantidad: number;
     cuentasAfectadas: string[];
     gananciaTotal: number;
+    // Issue #315 — siteId de la PRIMERA cuenta afectada, para mostrar
+    // gananciaTotal en su moneda real (mismo criterio que el resto de
+    // filas: una vista previa en lote puede mezclar cuentas/países,
+    // nunca hay una moneda "correcta" única — se usa la de la primera).
+    siteId: string;
   } | null>(null);
   const [aplicando, setAplicando] = useState(false);
   const [resultadoAplicar, setResultadoAplicar] = useState<string | null>(null);
@@ -413,7 +437,9 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     const porId = new Map(candidatos.map((c) => [c.id, c]));
     const cuentasAfectadas = [...new Set(decisiones.map((d) => porId.get(d.candidatoId)?.nicknameCuenta).filter((n): n is string => !!n))];
     const gananciaTotal = decisiones.reduce((acc, d) => acc + (numero(porId.get(d.candidatoId)?.gananciaEstimada ?? null) ?? 0), 0);
-    setVistaPrevia({ tipo, decisiones, cantidad: decisiones.length, cuentasAfectadas, gananciaTotal });
+    const primeraCuentaMlId = porId.get(decisiones[0]?.candidatoId)?.cuentaMlId;
+    const siteId = primeraCuentaMlId ? siteIdDeCuenta(primeraCuentaMlId) : SITE_ID_DEFECTO;
+    setVistaPrevia({ tipo, decisiones, cantidad: decisiones.length, cuentasAfectadas, gananciaTotal, siteId });
     setResultadoAplicar(null);
   }
 
@@ -737,8 +763,8 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                       <CeldaTabla>{f.nicknameCuenta}</CeldaTabla>
                       <CeldaTabla>{f.tituloProducto ?? f.itemId}</CeldaTabla>
                       <CeldaTabla>{f.tipoPromocion}</CeldaTabla>
-                      <CeldaTabla>{formatoPesos(numero(f.precioAntes))}</CeldaTabla>
-                      <CeldaTabla>{formatoPesos(numero(f.precioDespues))}</CeldaTabla>
+                      <CeldaTabla>{formatoPesos(numero(f.precioAntes), siteIdDeCuenta(f.cuentaMlId))}</CeldaTabla>
+                      <CeldaTabla>{formatoPesos(numero(f.precioDespues), siteIdDeCuenta(f.cuentaMlId))}</CeldaTabla>
                     </FilaTabla>
                   ))}
                 </Tabla>
@@ -827,6 +853,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                   // Punto 2 — "sin margen" manda sobre "fuera de rango" en el
                   // tooltip: distinto motivo, mensaje distinto (ver calculosFila.ts).
                   const sinMargenFila = sinMargen(c);
+                  const siteIdFila = siteIdDeCuenta(c.cuentaMlId);
                   return (
                     <FilaTabla key={c.id}>
                       <CeldaTabla>
@@ -842,7 +869,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                         {c.tituloProducto ?? c.itemId}
                       </CeldaTabla>
                       <CeldaTabla>{c.skuCodigo ?? "—"}</CeldaTabla>
-                      <CeldaTabla>{precioHoy == null ? "ML no envió precio" : formatoPesos(precioHoy)}</CeldaTabla>
+                      <CeldaTabla>{precioHoy == null ? "ML no envió precio" : formatoPesos(precioHoy, siteIdFila)}</CeldaTabla>
                       <CeldaTabla>
                         {editable ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -866,24 +893,24 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                             />
                             {sinMargenFila ? (
                               <span style={{ fontSize: 11, color: "var(--kpi-peligro-texto)" }}>
-                                Sin margen: el mínimo ({formatoPesos(numero(c.precioMinimo))}) no deja descuento.
+                                Sin margen: el mínimo ({formatoPesos(numero(c.precioMinimo), siteIdFila)}) no deja descuento.
                               </span>
                             ) : (
                               rango && (
                                 <span style={{ fontSize: 11, color: fueraDeRangoFila ? "var(--kpi-peligro-texto)" : "var(--text-faint)" }}>
                                   {fueraDeRangoFila
-                                    ? `Tiene que estar entre ${formatoPesos(rango.min)} y ${formatoPesos(rango.max)}.`
-                                    : `mín ${formatoPesos(rango.min)} – máx ${formatoPesos(rango.max)}`}
+                                    ? `Tiene que estar entre ${formatoPesos(rango.min, siteIdFila)} y ${formatoPesos(rango.max, siteIdFila)}.`
+                                    : `mín ${formatoPesos(rango.min, siteIdFila)} – máx ${formatoPesos(rango.max, siteIdFila)}`}
                                 </span>
                               )
                             )}
                           </div>
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                            {formatoPesos(precioMostrado)}
+                            {formatoPesos(precioMostrado, siteIdFila)}
                             {sinMargenFila ? (
                               <span style={{ fontSize: 11, color: "var(--kpi-peligro-texto)" }}>
-                                Sin margen: el mínimo ({formatoPesos(numero(c.precioMinimo))}) no deja descuento.
+                                Sin margen: el mínimo ({formatoPesos(numero(c.precioMinimo), siteIdFila)}) no deja descuento.
                               </span>
                             ) : (
                               c.soloEnMl && (
@@ -923,10 +950,10 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                           formatoPorcentaje(descuentoMostrado)
                         )}
                       </CeldaTabla>
-                      <CeldaTabla>{c.precioMinimo ? formatoPesos(numero(c.precioMinimo)) : <span style={{ color: "var(--kpi-peligro-texto)" }}>Falta precio mínimo</span>}</CeldaTabla>
+                      <CeldaTabla>{c.precioMinimo ? formatoPesos(numero(c.precioMinimo), siteIdFila) : <span style={{ color: "var(--kpi-peligro-texto)" }}>Falta precio mínimo</span>}</CeldaTabla>
                       <CeldaTabla>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {formatoPesos(gananciaEnVivo(c))}
+                          {formatoPesos(gananciaEnVivo(c), siteIdFila)}
                           {chipMinimo && <Chip estado={chipMinimo.estado}>{chipMinimo.texto}</Chip>}
                         </div>
                       </CeldaTabla>
@@ -976,7 +1003,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                                 disabled={decisionDirectaId === c.id || fueraDeRangoFila || sinMargenFila}
                                 title={
                                   sinMargenFila
-                                    ? `Sin margen: el precio mínimo de Finanzas (${formatoPesos(numero(c.precioMinimo))}) no deja descuento.`
+                                    ? `Sin margen: el precio mínimo de Finanzas (${formatoPesos(numero(c.precioMinimo), siteIdFila)}) no deja descuento.`
                                     : fueraDeRangoFila
                                       ? "El precio editado quedó fuera del rango permitido — corregilo para poder aprobar."
                                       : undefined
@@ -1011,7 +1038,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                 <>
                   <p style={{ fontSize: 13, marginTop: 8 }}>
                     {vistaPrevia.cantidad} producto(s), en {vistaPrevia.cuentasAfectadas.length} cuenta(s) ({vistaPrevia.cuentasAfectadas.join(", ")}) — ganancia total estimada{" "}
-                    <strong>${vistaPrevia.gananciaTotal.toLocaleString("es-CO")}</strong>.
+                    <strong>{formatearMoneda(vistaPrevia.gananciaTotal, vistaPrevia.siteId)}</strong>.
                   </p>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginTop: 8 }}>
                     <input type="checkbox" checked={modoSimulacion} onChange={(e) => setModoSimulacion(e.target.checked)} />
@@ -1058,6 +1085,8 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                   const key = `${f.cuentaMlId}:${f.itemId}:${f.tipoPromocion}`;
                   const descuento = f.precioOriginal != null && f.precioActual != null && f.precioOriginal > 0 ? ((f.precioOriginal - f.precioActual) / f.precioOriginal) * 100 : null;
                   const porDebajoDelPiso = f.precioMinimo != null && f.precioActual != null && f.precioActual < f.precioMinimo;
+                  const siteIdFila = siteIdDeCuenta(f.cuentaMlId);
+                  const idiomaFila = idiomaDeCuenta(f.cuentaMlId);
                   return (
                     <FilaTabla key={key}>
                       <CeldaTabla>{f.nicknameCuenta}</CeldaTabla>
@@ -1067,11 +1096,11 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                       </CeldaTabla>
                       <CeldaTabla>{f.skuCodigo ?? "—"}</CeldaTabla>
                       <CeldaTabla>{f.tipoPromocion}</CeldaTabla>
-                      <CeldaTabla>{formatoPesos(f.precioActual)}</CeldaTabla>
+                      <CeldaTabla>{formatoPesos(f.precioActual, siteIdFila)}</CeldaTabla>
                       <CeldaTabla>{formatoPorcentaje(descuento)}</CeldaTabla>
-                      <CeldaTabla>{new Date(f.fechaInicio).toLocaleDateString("es-CO")}</CeldaTabla>
-                      <CeldaTabla>{new Date(f.fechaFin).toLocaleDateString("es-CO")}</CeldaTabla>
-                      <CeldaTabla>{formatoPesos(f.gananciaEstimada)}</CeldaTabla>
+                      <CeldaTabla>{new Date(f.fechaInicio).toLocaleDateString(idiomaFila)}</CeldaTabla>
+                      <CeldaTabla>{new Date(f.fechaFin).toLocaleDateString(idiomaFila)}</CeldaTabla>
+                      <CeldaTabla>{formatoPesos(f.gananciaEstimada, siteIdFila)}</CeldaTabla>
                       <CeldaTabla>
                         {f.precioMinimo == null ? (
                           <span style={{ color: "var(--kpi-peligro-texto)", fontSize: 12 }}>Falta precio mínimo</span>
@@ -1121,14 +1150,14 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                     <CeldaTabla>{h.nicknameCuenta}</CeldaTabla>
                     <CeldaTabla>{h.tituloProducto ?? h.itemId}</CeldaTabla>
                     <CeldaTabla>{h.accion}</CeldaTabla>
-                    <CeldaTabla>{formatoPesos(numero(h.precioAntes))}</CeldaTabla>
-                    <CeldaTabla>{formatoPesos(numero(h.precioDespues))}</CeldaTabla>
+                    <CeldaTabla>{formatoPesos(numero(h.precioAntes), siteIdDeCuenta(h.cuentaMlId))}</CeldaTabla>
+                    <CeldaTabla>{formatoPesos(numero(h.precioDespues), siteIdDeCuenta(h.cuentaMlId))}</CeldaTabla>
                     <CeldaTabla>
                       <Chip estado={h.estado === "ejecutada" ? "exito" : h.estado === "fallida" || h.estado === "rechazada" ? "peligro" : "aviso"} title={h.error ?? undefined}>
                         {h.modoSimulacion ? "Simulado" : h.estado}
                       </Chip>
                     </CeldaTabla>
-                    <CeldaTabla>{new Date(h.creadoTs).toLocaleString("es-CO")}</CeldaTabla>
+                    <CeldaTabla>{new Date(h.creadoTs).toLocaleString(idiomaDeCuenta(h.cuentaMlId))}</CeldaTabla>
                   </FilaTabla>
                 ))}
               </Tabla>

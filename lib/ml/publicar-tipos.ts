@@ -105,5 +105,4 @@ export type ResultadoPublicacionFamilia = {
 
 export type ResultadoPublicacionCuenta = ResultadoPublicacionExito | ResultadoPublicacionFallo | ResultadoPublicacionFamilia;
 
-export const CURRENCY_POR_SITE: Record<string, string> = { MCO: "COP", MEC: "USD" };
 export const LISTING_TYPE_POR_DEFECTO = "gold_pro"; // Premium — regla de negocio fija (reunión 31/8)

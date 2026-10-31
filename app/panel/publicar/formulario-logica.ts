@@ -62,9 +62,9 @@ export function serializarClaveValor(valores: Record<string, string>): string {
 }
 
 // Mismo formato "siteId::título=categoryId" que ya lee nuevo/actions.ts
-// (categoriasOverride). `SITE_ID` siempre "MCO" en esta fase (único
-// país en alcance, ver lib/ml/cliente.ts) — nunca se pide a la persona
-// que lo escriba a mano.
+// (categoriasOverride). `siteId` es el site_id real de la cuenta de
+// referencia (issue #315, FormularioPublicar.tsx) — nunca se pide a la
+// persona que lo escriba a mano.
 export function serializarCategoriaOverride(siteId: string, titulo: string, categoryId: string): string {
   if (!titulo.trim() || !categoryId.trim()) return "";
   return `${siteId}::${titulo}=${categoryId}`;

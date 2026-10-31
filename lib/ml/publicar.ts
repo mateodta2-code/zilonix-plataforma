@@ -35,7 +35,6 @@ import {
   valorAutocompletadoSeguro,
 } from "@/lib/ml/publicar-reglas";
 import {
-  CURRENCY_POR_SITE,
   LISTING_TYPE_POR_DEFECTO,
   type AtributoAsumido,
   type DatosPorCuenta,
@@ -47,6 +46,7 @@ import {
   type ResultadoPublicacionFamilia,
   type VariantesProducto,
 } from "@/lib/ml/publicar-tipos";
+import { datosSitioMl } from "@/lib/ml/sitios";
 
 // Tarea 2.11 ("Publicar producto y clip") — orquestación real contra la
 // API de Mercado Libre. Cada paso numerado abajo corresponde 1:1 a la
@@ -398,7 +398,7 @@ async function publicarFamiliaUserProducts(
 
     const body: Record<string, unknown> = {
       category_id: categoryId,
-      currency_id: CURRENCY_POR_SITE[siteId] ?? "COP",
+      currency_id: datosSitioMl(siteId).moneda,
       buying_mode: "buy_it_now",
       condition: producto.condicion || "new",
       listing_type_id: LISTING_TYPE_POR_DEFECTO,
@@ -535,11 +535,12 @@ export async function publicarProductoEnCuenta(
     .slice(0, limiteFotos)
     .map((url) => ({ source: url }));
 
-  // 3.15 — bodyBase. listing_type_id/garantía/moneda son reglas de negocio fijas (reunión 31/8).
+  // 3.15 — bodyBase. listing_type_id/garantía son reglas de negocio fijas (reunión 31/8);
+  // la moneda ya no (issue #315) — sale de datosSitioMl(siteId), real por cuenta.
   const precioBase = Number(producto.precio);
   const bodyBase: Record<string, unknown> = {
     category_id: categoryId,
-    currency_id: CURRENCY_POR_SITE[siteId] ?? "COP",
+    currency_id: datosSitioMl(siteId).moneda,
     buying_mode: "buy_it_now",
     condition: producto.condicion || "new",
     listing_type_id: LISTING_TYPE_POR_DEFECTO,

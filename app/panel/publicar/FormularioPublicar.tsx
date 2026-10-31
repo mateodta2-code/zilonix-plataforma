@@ -18,9 +18,8 @@ import {
   serializarClaveValor,
   type EstadoInicialFormulario,
 } from "./formulario-logica";
+import { SITE_ID_DEFECTO } from "@/lib/ml/sitios";
 import styles from "./publicar.module.css";
-
-const SITE_ID = "MCO"; // único país en alcance — mismo criterio que lib/ml/cliente.ts
 
 type DatosCuenta = { titulo: string; descripcion: string; portadaUrl: string };
 type RespuestaCaracteristicas = {
@@ -83,6 +82,9 @@ export function FormularioPublicar({
 
   const cuentasMarcadas = useMemo(() => cuentas.filter((c) => incluidas[c.id]), [cuentas, incluidas]);
   const cuentaReferencia = cuentasMarcadas[0]?.id ?? null;
+  // Issue #315 — la categoría se detecta/guarda en el site_id REAL de
+  // la cuenta de referencia (la primera marcada), nunca "MCO" fijo.
+  const siteIdReferencia = cuentasMarcadas[0]?.siteId ?? SITE_ID_DEFECTO;
   const tituloReferencia = (cuentaReferencia ? datosPorCuenta[cuentaReferencia]?.titulo : "") || "";
 
   function actualizarCuenta(id: string, campo: keyof DatosCuenta, valor: string) {
@@ -121,7 +123,7 @@ export function FormularioPublicar({
   // entero (key) cuando cambia `inicial`, así que un mount real es
   // siempre "se cargó un producto distinto", nunca un re-render común.
   useEffect(() => {
-    const clave = cuentaReferencia ? `${SITE_ID}::${tituloReferencia}` : "";
+    const clave = cuentaReferencia ? `${siteIdReferencia}::${tituloReferencia}` : "";
     const categoriaYaConocida = clave ? inicial.categoriasOverride[clave] : undefined;
     if (categoriaYaConocida) void cargarCaracteristicas(categoriaYaConocida);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar, a propósito (ver comentario arriba)
@@ -133,7 +135,7 @@ export function FormularioPublicar({
 
   const candidatosVariante = caracteristicas ? [...caracteristicas.principales, ...caracteristicas.secundarias].filter((c) => c.permiteVariante) : [];
 
-  const categoriaOverrideTexto = categoriaElegida ? serializarCategoriaOverride(SITE_ID, tituloReferencia, categoriaElegida.categoryId) : "";
+  const categoriaOverrideTexto = categoriaElegida ? serializarCategoriaOverride(siteIdReferencia, tituloReferencia, categoriaElegida.categoryId) : "";
   const atributosExtraTexto = serializarClaveValor(atributosExtra);
   const variantesTexto =
     variantes && variantes.combinaciones.length > 0
