@@ -3,6 +3,8 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { configuracionFinanzas } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { enmascararCorreo, enmascararWhatsapp } from "@/lib/finanzas/enmascarar";
+import { MontoInvalidoError, validarMonto } from "@/lib/finanzas/montos";
+import { requierePermiso } from "@/lib/permisos";
 
 // Issue #125 — una fila por empresa. Sin fila, no hay configuración:
 // esta lectura devuelve null y no rellena 19 % de IVA, ni 3 días, ni
@@ -128,4 +130,32 @@ export async function guardarConfiguracionFinanzas(
     });
     return { id };
   });
+}
+
+// Issue #126 (slice urgente, Sharel 30-oct) — solo el valor Flex, desde
+// /panel/finanzas/configuracion. Sin él, las ventas Flex no se congelan
+// (alerta flex_sin_valor en congelar.ts). Guarda SOLO flex_valor: el
+// resto de la fila (IVA, plazo, avisos) queda como estaba. Sin fila, se
+// crea con el plazo por defecto de la columna (3) y lo demás vacío, igual
+// que un insert sin esos campos. Pide finanzas.modificar acá también
+// (no solo en la acción). No toca ventas ya congeladas: el valor aplica
+// a las que se congelen desde ahora.
+export async function guardarValorFlex(empresaId: string, usuarioId: string, flexValor: string): Promise<{ id: string }> {
+  await requierePermiso(usuarioId, empresaId, "finanzas", "modificar");
+  const valor = validarMonto(flexValor, "Valor Flex");
+  if (valor === null) throw new MontoInvalidoError("Valor Flex");
+  const previa = await leerConfiguracionFinanzas(empresaId);
+  const base: DatosConfiguracionFinanzas = previa
+    ? filaADatos(previa)
+    : {
+        flexValor: null,
+        ivaPublicidad: null,
+        plazoVencimientoDias: 3,
+        avisoDiasAntes: null,
+        avisoCorreoActivo: null,
+        avisoWhatsappActivo: null,
+        avisoCorreoDestino: null,
+        avisoWhatsappDestino: null,
+      };
+  return guardarConfiguracionFinanzas(empresaId, usuarioId, { ...base, flexValor: valor });
 }
