@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { marcarClicAnalizar, type PlataformaAnalizar } from "./analizarClic";
@@ -38,22 +39,44 @@ const PLATAFORMAS_ANALIZAR: { clave: PlataformaAnalizar; nombre: string }[] = [
   { clave: "alibaba", nombre: "Alibaba" },
 ];
 
-// Issue #221 — Client Component a propósito, SOLO para poder marcar
+// Issue #221 — Client Component a propósito, para poder marcar
 // (sessionStorage, ver analizarClic.ts) que el envío real de este
-// formulario vino de un clic real de la persona — justo antes de que
-// la navegación normal (GET, sin preventDefault) siga su curso. La
-// búsqueda en sí sigue siendo 100% Server Component (page.tsx): este
-// componente nunca intercepta ni cambia el submit, solo lo observa
-// para dejar la marca (issue #227: con el país elegido; issue #229:
-// con la plataforma de inicio elegida).
+// formulario vino de un clic real de la persona, con el país/
+// plataforma elegidos (issue #227/#229).
+//
+// Refs #227 (fix "se pierde la búsqueda anterior") — bug real
+// reportado en staging: esto era un <form method="get"> SIN
+// preventDefault, así que cada "Analizar" era una navegación COMPLETA
+// del navegador. Si esa navegación llegaba mientras el escaneo de la
+// búsqueda ANTERIOR todavía estaba en curso (la extensión no había
+// mandado "listado-importado" todavía), la pestaña entera se
+// destruía con su `window` — ese resultado nunca llegaba a existir,
+// ni en memoria ni en localStorage: no es una carrera de timing, es
+// que el contexto de JS que lo iba a guardar ya no estaba. Ahora el
+// submit se cancela (preventDefault) y navega con el router de
+// Next.js (transición de cliente, misma pestaña/`window` viva) —
+// PanelInvestigacion.tsx sigue montado, el listener de mensajes de la
+// extensión sigue vivo, y el efecto de guardado (ver el comentario de
+// `[termino]` ahí) persiste la búsqueda anterior ANTES de cambiar de
+// término, pase lo que pase con el escaneo que seguía en curso.
 export function FormularioAnalizar({ termino, tab }: { termino: string; tab: string }) {
+  const router = useRouter();
   const [pais, setPais] = useState("CO");
   const [plataforma, setPlataforma] = useState<PlataformaAnalizar>("ml");
+  const inputTerminoRef = useRef<HTMLInputElement>(null);
+
+  function alEnviar(evento: React.FormEvent<HTMLFormElement>) {
+    evento.preventDefault();
+    const valor = inputTerminoRef.current?.value.trim() ?? "";
+    if (!valor) return;
+    marcarClicAnalizar(pais, plataforma);
+    router.push(`/panel/investigacion?termino=${encodeURIComponent(valor)}&tab=${tab}`);
+  }
 
   return (
-    <form method="get" className={styles.filaFormulario} onSubmit={() => marcarClicAnalizar(pais, plataforma)}>
+    <form method="get" className={styles.filaFormulario} onSubmit={alEnviar}>
       <Campo etiqueta="Producto o nicho (hasta 3 palabras)">
-        <input type="search" name="termino" defaultValue={termino} placeholder='Ej: "reloj digital"' className="zx-control" required />
+        <input ref={inputTerminoRef} type="search" name="termino" defaultValue={termino} placeholder='Ej: "reloj digital"' className="zx-control" required />
       </Campo>
       <Campo etiqueta="Plataforma">
         <select className="zx-control" value={plataforma} onChange={(e) => setPlataforma(e.target.value as PlataformaAnalizar)}>

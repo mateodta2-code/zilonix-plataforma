@@ -233,6 +233,17 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   const limiteMlRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const limitePlataformaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queriesUsadasPlataformaRef = useRef<string[]>([]);
+  // Refs #227 — a qué término pertenece el escaneo en curso de CADA
+  // tipo (ML / multiplataforma), fijado cuando arranca (ver
+  // escanearMercadoLibre/analizarEnPlataforma). Con FormularioAnalizar
+  // ya sin recargar la página completa (ver su propio comentario), la
+  // persona puede arrancar la búsqueda B mientras el escaneo de A
+  // sigue en curso — si el resultado de A llega DESPUÉS de ese cambio,
+  // no es de la búsqueda que se ve ahora: usar el `termino` vivo lo
+  // mezclaría con los bloques de B. agregarBloque usa este valor para
+  // guardarlo bajo la sesión de A, nunca en pantalla por error.
+  const terminoEscaneoMlRef = useRef<string | null>(null);
+  const terminoEscaneoPlataformaRef = useRef<string | null>(null);
   // Issue #227 (fix cache) — "último valor real, sin re-disparar el
   // efecto por cada cambio": refs en vez de deps, para que el efecto
   // de abajo (el que cambia de término) pueda leer el bloques/sesiones
@@ -344,15 +355,38 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
       queries = generarVariantesBusqueda(termino);
     }
     if (!queries.length) return;
+    terminoEscaneoMlRef.current = termino;
     setQueriesUsadas(queries);
     window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo", payload: { terminos: queries, pais } }, window.location.origin);
     setEscaneoEnCurso(true);
     limiteMlRef.current = setTimeout(() => setEscaneoEnCurso(false), calcularTimeoutEscaneoMs(queries.length));
   }
 
-  function agregarBloque(plataforma: string, queriesUsadasBloque: string[], productos: ProductoListado[]) {
+  // Refs #227 — `terminoBloque` (default: el término vivo, para el
+  // caso normal de "Enviar a Zilonix" manual y cualquier otro llamado
+  // síncrono) puede venir de un escaneo que arrancó con OTRO término
+  // (ver los refs de arriba). Comparado contra `terminoCargadoRef`
+  // (nunca contra el `termino` cerrado en este closure — el listener
+  // de mensajes solo se vuelve a crear cuando cambia `queriesUsadas`,
+  // no `termino`, así que su copia de `termino` puede quedar vieja
+  // varios renders — `terminoCargadoRef` en cambio se actualiza en
+  // CADA cambio real de término, lo ponga el efecto que lo ponga).
+  // Si coincide con el que se está viendo AHORA, entra al stack
+  // visible de siempre; si no, se guarda directo en la sesión de ESE
+  // término — nunca en `bloques` (lo que se ve en pantalla es solo
+  // del término actual) y nunca pisa otras sesiones (actualizarSesion
+  // ya es por clave propia, ver listadoCliente.ts).
+  function agregarBloque(plataforma: string, queriesUsadasBloque: string[], productos: ProductoListado[], terminoBloque: string = termino) {
     if (!productos.length) return;
-    setBloques((actuales) => [...actuales, { id: idBloque(), plataforma, termino, queriesUsadas: queriesUsadasBloque, creadoTs: Date.now(), productos }]);
+    const terminoActual = terminoCargadoRef.current ?? termino;
+    const nuevoBloque: Bloque = { id: idBloque(), plataforma, termino: terminoBloque, queriesUsadas: queriesUsadasBloque, creadoTs: Date.now(), productos };
+    if (terminoBloque === terminoActual) {
+      setBloques((actuales) => [...actuales, nuevoBloque]);
+      return;
+    }
+    const todas = actualizarSesion(sesionesRef.current, terminoBloque, [...obtenerBloquesDeSesion(sesionesRef.current, terminoBloque), nuevoBloque]);
+    guardarSesiones(todas);
+    setSesiones(todas);
   }
 
   useEffect(() => {
@@ -388,7 +422,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
           // Issue #221/#227 — la persona ya autorizó esto con el clic
           // de Analizar: se agrega el bloque directo, sin confirmar.
           setEscaneoEnCurso(false);
-          agregarBloque(payload.plataforma, queriesUsadas, productos);
+          agregarBloque(payload.plataforma, queriesUsadas, productos, terminoEscaneoMlRef.current ?? termino);
           return;
         }
         // "Enviar a Zilonix" manual — sí pide confirmación, nunca se
@@ -411,7 +445,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
         const config = PLATAFORMAS_MULTIPLATAFORMA.find((p) => p.clave === payload.plataforma);
         const nombrePlataforma = config?.nombre ?? payload.plataforma;
         const productos = payload.productos.map((p) => construirProductoListado(nombrePlataforma, p));
-        agregarBloque(nombrePlataforma, queriesUsadasPlataformaRef.current, productos);
+        agregarBloque(nombrePlataforma, queriesUsadasPlataformaRef.current, productos, terminoEscaneoPlataformaRef.current ?? termino);
         return;
       }
 
@@ -456,6 +490,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
       return;
     }
     queriesUsadasPlataformaRef.current = queries;
+    terminoEscaneoPlataformaRef.current = termino;
     window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo-plataforma", payload: { plataforma: clave, terminos: queries } }, window.location.origin);
     limitePlataformaRef.current = setTimeout(() => setEscaneoPlataformaEnCurso(null), calcularTimeoutEscaneoMs(queries.length) + 120_000);
   }
@@ -574,32 +609,37 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     [kpisMercado]
   );
 
-  // Issue #227 (fix cache) — "búsquedas anteriores... en una lista para
-  // volver a ellas, y al abrir una se restaura SIN volver a buscar ni
-  // escanear": un link de navegación normal (?termino=...) — cambia el
-  // prop `termino`, el efecto de arriba carga la sesión guardada, y
-  // como nunca se marca el "clic reciente en Analizar"
-  // (consumirClicAnalizarReciente), ningún escaneo se dispara solo.
-  // Se repite igual en las 3 pestañas (nunca solo en Demanda) porque
-  // las sesiones guardadas no son un dato de una pestaña puntual.
-  const busquedasAnterioresJsx =
-    busquedasAnteriores.length > 0 ? (
-      <div className={styles.insignia}>
-        <span className={styles.notaInsignia}>Búsquedas anteriores (hasta 1h, se restauran sin volver a escanear):</span>
-        {busquedasAnteriores.map((s) => (
-          <Link key={s.termino} href={`?termino=${encodeURIComponent(s.termino)}&tab=${tab}`} className={styles.enlaceSeguir}>
-            <Chip>
-              {s.termino} ({s.bloques.length})
-            </Chip>
-          </Link>
-        ))}
-      </div>
-    ) : null;
+  // Refs #227 (fix "se pierde la búsqueda anterior") — "apiladas... o
+  // como pestañas/chips bien visibles encima de los resultados, no
+  // escondidas en texto pequeño": la actual (pestaña activa, sin link)
+  // + cada búsqueda anterior vigente (hasta 1h) como su propio link de
+  // navegación normal (?termino=...) — cambia el prop `termino`, el
+  // efecto de arriba carga la sesión guardada, y como nunca se marca
+  // el "clic reciente en Analizar" (consumirClicAnalizarReciente),
+  // ningún escaneo se dispara solo: restaura al instante lo que ya
+  // estaba guardado. Se muestra en las 3 pestañas (nunca solo en
+  // Demanda) porque las sesiones guardadas no son un dato de una
+  // pestaña puntual — siempre con al menos la actual, para que la
+  // franja nunca desaparezca sola apenas hay un término.
+  const bloquesActual = obtenerBloquesDeSesion(sesiones, termino);
+  const pestanasBusquedasJsx = (
+    <div className={styles.pestanasBusquedas}>
+      <span className={styles.etiquetaPestanas}>Búsquedas (hasta 1h, un clic restaura sin volver a escanear):</span>
+      <span className={styles.pestanaBusqueda} data-activa="true">
+        {termino} {bloquesActual.length > 0 ? <span className={styles.contadorPestana}>({bloquesActual.length})</span> : null}
+      </span>
+      {busquedasAnteriores.map((s) => (
+        <Link key={s.termino} href={`?termino=${encodeURIComponent(s.termino)}&tab=${tab}`} className={styles.pestanaBusqueda} data-activa="false">
+          {s.termino} <span className={styles.contadorPestana}>({s.bloques.length})</span>
+        </Link>
+      ))}
+    </div>
+  );
 
   if (tab === "mercado") {
     return (
       <>
-        {busquedasAnterioresJsx}
+        {pestanasBusquedasJsx}
         <div className={styles.kpis}>
           <TarjetaKpi titulo="PUBLICACIONES ENCONTRADAS" valor={kpisMercado.publicacionesEncontradas || undefined} textoVacio="Sin dato" />
           <TarjetaKpi titulo="VENDEDORES DISTINTOS" valor={kpisMercado.vendedoresDistintos || undefined} textoVacio="Sin dato" />
@@ -616,7 +656,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   if (tab === "estrategia") {
     return (
       <>
-        {busquedasAnterioresJsx}
+        {pestanasBusquedasJsx}
         <div className={styles.bloque}>
           <p className={styles.tituloSeccion}>Veredicto</p>
           {veredictoListado ? <p className={styles.veredicto}>{veredictoListado}</p> : <p className={styles.notaInsignia}>Sin suficientes datos todavía para un veredicto.</p>}
@@ -640,7 +680,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   // --- Demanda ---
   return (
     <>
-      {busquedasAnterioresJsx}
+      {pestanasBusquedasJsx}
       {fotoAmpliada ? (
         <div className={styles.lightbox} onClick={() => setFotoAmpliada(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element -- foto de un marketplace ajeno, mismo criterio que el resto del panel */}
