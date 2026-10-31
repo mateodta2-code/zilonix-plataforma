@@ -6,6 +6,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Boton } from "@/components/marco/Boton";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { FotoConZoom } from "@/components/marco/FotoConZoom";
+import { urlFotoGrandeMl } from "@/lib/ml/imagen-ml";
 import { linkPublicacion } from "@/lib/ml/permalink";
 import type { EstadoPlazo } from "@/lib/ml/despachos";
 import { deshacerDespachadoAction, marcarDespachadoAction } from "./actions";
@@ -137,7 +138,7 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
               return (
                 <div key={item.itemIdExterno} className={styles.filaItem}>
                   {item.imagenUrl ? (
-                    <FotoConZoom src={item.imagenUrl} alt={item.titulo} claseMiniatura={styles.imagenItem} />
+                    <FotoConZoom src={item.imagenUrl} srcAmpliada={urlFotoGrandeMl(item.imagenUrl)} alt={item.titulo} claseMiniatura={styles.imagenItem} />
                   ) : (
                     <div className={styles.imagenItemVacia} aria-hidden="true" />
                   )}

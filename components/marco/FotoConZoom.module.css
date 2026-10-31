@@ -75,12 +75,28 @@
   outline-offset: 2px;
 }
 
-/* 90vw/85vh del punto 2 de la tarea, menos el padding de <Tarjeta>
-   (20px por lado) para que la foto nunca se salga del marco. */
+/* Bug real reportado por Mateo en staging: la foto salía diminuta
+   (~60px) centrada en el modal. Causa real: .imagenGrande solo tenía
+   max-width/max-height, nunca un width/height propio — un <img> sin
+   tamaño explícito se queda en su tamaño INTRÍNSECO (acá, encima, el
+   de la miniatura real de Mercado Libre, ~100-200px), y max-width/
+   max-height nunca agranda, solo achica si hiciera falta. Esta caja
+   SÍ tiene tamaño real (nunca "auto"): 800px de tope en el ancho
+   (pedido explícito de la tarea; sin tope en px para el alto, solo en
+   vh), menos el padding de <Tarjeta> (20px por lado) para que nunca
+   se salga del marco. */
+.contenedorFoto {
+  width: min(calc(90vw - 40px), 800px);
+  height: calc(85vh - 40px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .imagenGrande {
   display: block;
-  max-width: calc(90vw - 40px);
-  max-height: calc(85vh - 40px);
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   border-radius: 6px;
 }
