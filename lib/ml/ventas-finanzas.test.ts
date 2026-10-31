@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { auditoria, pedidoItems, pedidos, pedidosFinanzas } from "@/db/schema";
+import { auditoria, despachosMl, pedidoItems, pedidos, pedidosFinanzas } from "@/db/schema";
 import { crearDosEmpresas } from "@/db/test-utils/aislamiento";
 import { crearCuentaMlDePrueba } from "@/db/test-utils/venta";
 import { guardarCostoSku } from "@/lib/costos-sku";
@@ -91,6 +91,32 @@ describe("sincronizarVentasCuenta (issue #130)", () => {
 
     // Sin token en la URL ni en las cabeceras de log: el token va solo en Authorization.
     expect(fetchMock.mock.calls.every(([u]) => !String(u).includes("access"))).toBe(true);
+  });
+
+  // Issue "Despachados (15 días)" — bug real: despachos_ml SOLO se
+  // llenaba en la importación inicial (lib/ml/importacion.ts, una
+  // vez al conectar la cuenta); una venta que llegara después, por
+  // esta sincronización periódica, nunca tenía fila en despachos_ml.
+  it("también sincroniza despachos_ml para la orden (antes solo lo hacía la importación inicial)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      if (u.pathname === "/orders/search") return json({ results: u.searchParams.get("offset") === "0" ? [orden(401)] : [] });
+      if (u.pathname === "/orders/401") return json(orden(401));
+      if (u.pathname === "/shipments/5401") return json({ status: "shipped", substatus: null, logistic_type: "self_service" });
+      if (u.pathname === "/shipments/5401/costs") return json({ senders: [{ cost: 0 }] });
+      if (u.pathname === "/shipments/5401/sla") return json({ status: "on_time", expected_date: "2026-10-25T20:00:00.000Z" });
+      if (u.pathname === "/items") return json([{ code: 200, body: { id: "MCO401" } }]);
+      throw new Error(`fetch no esperado: ${u.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await sincronizarVentasCuenta(empresaId, cuentaMlId, "123456", { desde: new Date("2026-10-20T00:00:00Z") }, sinEspera);
+    expect(resultado).toMatchObject({ leidas: 1, guardadas: 1, fallidas: 0 });
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(despachosMl).innerJoin(pedidos, eq(pedidos.id, despachosMl.pedidoId)).where(eq(pedidos.pedidoIdExterno, "401"))
+    );
+    expect(fila.despachos_ml).toMatchObject({ shipmentIdExterno: "5401", status: "shipped", logisticType: "self_service" });
   });
 
   it("sin foto en ML la venta se guarda igual con imagen vacía, y un error en una venta no corta las demás", async () => {

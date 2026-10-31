@@ -26,6 +26,7 @@ import {
 } from "@/lib/finanzas/venta-ml";
 import { LimiteMercadoLibreError, PATRON_ID_PRODUCTO_O_ITEM, pedirLecturaMl, type RespuestaLecturaMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { sincronizarDespacho } from "@/lib/ml/despachos";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
 
 const TAMANO_PAGINA = 50;
@@ -156,6 +157,22 @@ export async function sincronizarVentasCuenta(
           const guardada = await guardarOrdenMl(empresaId, cuentaMlId, token, orden, esperar);
           resultado.guardadas += 1;
           if (guardada.recienCongelada) resultado.congeladas += 1;
+          // Issue "Despachados (15 días)" — bug real: antes de esto,
+          // despachos_ml SOLO se llenaba en la importación inicial
+          // (lib/ml/importacion.ts, una sola vez al conectar la
+          // cuenta) — cualquier venta que llegara después, por esta
+          // sincronización periódica, nunca tenía fila en despachos_ml
+          // y por eso jamás aparecía ni en Pendientes ni en
+          // Despachados, sin importar su status real. Mismo patrón
+          // que ya usa la importación inicial en su propio call site
+          // (sincronizarDespacho, que SÍ guarda cualquier status,
+          // incluido shipped/delivered — nunca filtra por estado al
+          // guardar, solo al listar).
+          if (orden.shipping?.id) {
+            await sincronizarDespacho(empresaId, cuentaMlId, guardada.pedidoId, String(orden.shipping.id)).catch((error) => {
+              console.error(`[ventas-finanzas] no se pudo sincronizar el despacho de la orden ${orden.id}:`, error instanceof Error ? error.message : "error desconocido");
+            });
+          }
         } catch (error) {
           if (error instanceof LimiteMercadoLibreError) throw error;
           resultado.fallidas += 1;
