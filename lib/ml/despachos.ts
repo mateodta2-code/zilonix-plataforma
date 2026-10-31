@@ -3,7 +3,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { bodegas, cuentasMl, despachosMl, pedidoItems, pedidos, stockBodega } from "@/db/schema";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { obtenerEtiquetaPdfMl, obtenerShipmentMl, obtenerSlaEnvioMl } from "@/lib/ml/cliente";
-import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike, rangoDiaBogota } from "@/lib/filtros-listado";
+import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike, rangoUltimosNDiasBogota } from "@/lib/filtros-listado";
 
 // Tarea 2.10 — formato de petición y reglas de negocio confirmados
 // contra el código real ya en producción del Zilonix OS actual
@@ -16,6 +16,12 @@ const ESTADOS_IMPRIMIBLES = ["pending", "handling", "ready_to_ship"];
 // El "status" puede quedarse en ready_to_ship un buen rato DESPUÉS de
 // que ya lo recogieron — lo que cambia de inmediato es el substatus.
 const SUBESTADOS_YA_SALIO = ["picked_up", "dropped_off", "out_for_delivery", "at_the_door"];
+// Issue "Despachados" (15 días) — un envío puede llegar a estos dos
+// status SIN pasar antes por un substatus de SUBESTADOS_YA_SALIO (ej.
+// Full o una venta de acuerdo directo con el comprador) — "ya salió
+// de la tienda" también es cierto por status solo, no solo por
+// substatus.
+const STATUS_YA_SALIO = ["shipped", "delivered"];
 
 function calcularImprimible(status: string | null, substatus: string | null): boolean {
   if (status && !ESTADOS_IMPRIMIBLES.includes(status)) return false;
@@ -441,15 +447,26 @@ export type TarjetaDespacho = {
   comprador: null;
   bodegaAsignada: null;
   items: ItemTarjetaDespacho[];
+  // Solo tiene sentido en la pestaña "despachados" (null en
+  // "pendientes") — cuál de las dos cosas reales lo puso ahí: lo
+  // marcó una persona en Seller, o Mercado Libre ya confirmó que el
+  // transportador lo recogió, sin que nadie lo marcara acá todavía.
+  origenDespacho: "marcado_en_seller" | "recogido_transportadora" | null;
 };
 
-export type PestañaDespachos = "pendientes" | "despachados_hoy";
+export type PestañaDespachos = "pendientes" | "despachados";
 
 export type FiltroTarjetasDespacho = {
   cuentaId?: string; // undefined = todas las cuentas
   tipo?: string; // self_service/xd_drop_off/cross_docking — cualquier otro valor se ignora
   pestaña?: PestañaDespachos; // default "pendientes"
 };
+
+// Issue "Despachados" — Mateo pidió 15 días (antes era solo "hoy").
+// Exportada para que la prueba de "una fila de hace 16 días no
+// aparece" use el mismo número, nunca un literal aparte que se
+// pueda desincronizar del código real.
+export const DIAS_VENTANA_DESPACHADOS = 15;
 
 // Bug real encontrado por Mateo en staging: la pantalla mostraba
 // pedidos ya ENTREGADOS (delivered, de meses atrás) en "Pendientes",
@@ -461,9 +478,10 @@ export type FiltroTarjetasDespacho = {
 // está listo para despachar" es, literalmente, ready_to_ship, nunca
 // "lo que no esté marcado despachado en esta base". Se agrega ese
 // mismo filtro acá (sobre el status ya sincronizado en despachos_ml)
-// para la pestaña "pendientes" — "despachados_hoy" sigue sin filtrar
-// por status: una vez una persona lo marcó despachado acá, importa
-// poco qué diga ahora el status en vivo de Mercado Libre.
+// para la pestaña "pendientes" — "despachados" (antes "despachados
+// hoy") sigue sin filtrar por status: una vez algo deja de estar
+// ready_to_ship (lo marcó una persona o ya lo recogió el
+// transportador), importa poco qué diga ahora el status en vivo.
 const STATUS_PENDIENTES = "ready_to_ship";
 
 // Tarjetas de la Fase 1: a diferencia de listarDespachosPendientes
@@ -474,10 +492,19 @@ const STATUS_PENDIENTES = "ready_to_ship";
 // tener varias líneas y un solo JOIN duplicaría toda la fila del
 // despacho por cada línea — más simple traerlas aparte y acomodarlas.
 //
-// Orden: por fecha de VENTA descendente (pedido de Mateo, corrige la
-// Fase 1 que ordenaba por plazo) — lo más nuevo arriba, agrupado
-// luego por día de venta en la pantalla (etiquetaDiaVenta).
+// Orden en "pendientes": por fecha de VENTA descendente (pedido de
+// Mateo, corrige la Fase 1 que ordenaba por plazo). Orden en
+// "despachados": por la fecha REAL del despacho (despachado_ts si una
+// persona lo marcó, si no actualizado_ts — el momento en que se
+// confirmó que ya salió), también descendente — bug real reportado
+// por Mateo: pedidos que la transportadora ya recogió, pero que nadie
+// marcó en Seller, desaparecían por completo (ni Pendientes, que ya
+// los excluye por status/substatus, ni Despachados, que antes solo
+// miraba despachado_ts) — ahora entran a Despachados con su propia
+// etiqueta ("Recogido por la transportadora"), ventana de
+// DIAS_VENTANA_DESPACHADOS días en vez de solo "hoy".
 export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTarjetasDespacho = {}): Promise<TarjetaDespacho[]> {
+  const esDespachados = filtro.pestaña === "despachados";
   const tarjetas = await dbComoEmpresa(empresaId, async (tx) => {
     const condiciones = [eq(despachosMl.empresaId, empresaId), ne(despachosMl.logisticType, "fulfillment"), isNotNull(despachosMl.logisticType)];
 
@@ -486,9 +513,19 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       condiciones.push(eq(despachosMl.logisticType, filtro.tipo as TipoDespachoFiltro));
     }
 
-    if (filtro.pestaña === "despachados_hoy") {
-      const { inicio, finExclusivo } = rangoDiaBogota(new Date());
-      condiciones.push(isNotNull(despachosMl.despachadoTs), gte(despachosMl.despachadoTs, inicio), lt(despachosMl.despachadoTs, finExclusivo));
+    if (esDespachados) {
+      const { inicio, finExclusivo } = rangoUltimosNDiasBogota(new Date(), DIAS_VENTANA_DESPACHADOS);
+      // "!" en los or(): siempre se les pasan 2+ argumentos definidos,
+      // drizzle solo contempla undefined para un or() vacío.
+      const marcadoEnSeller = and(isNotNull(despachosMl.despachadoTs), gte(despachosMl.despachadoTs, inicio), lt(despachosMl.despachadoTs, finExclusivo))!;
+      const yaSalioDeLaTienda = or(inArray(despachosMl.substatus, SUBESTADOS_YA_SALIO), inArray(despachosMl.status, STATUS_YA_SALIO))!;
+      const recogidoSinMarcar = and(
+        isNull(despachosMl.despachadoTs),
+        yaSalioDeLaTienda,
+        gte(despachosMl.actualizadoTs, inicio),
+        lt(despachosMl.actualizadoTs, finExclusivo)
+      )!;
+      condiciones.push(or(marcadoEnSeller, recogidoSinMarcar)!);
     } else {
       // Bug real reportado por Mateo en staging: pedidos ya recogidos
       // por el transportador (substatus picked_up/dropped_off/...)
@@ -502,9 +539,6 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       condiciones.push(
         isNull(despachosMl.despachadoTs),
         eq(despachosMl.status, STATUS_PENDIENTES),
-        // or() con 2 argumentos siempre definidos nunca devuelve
-        // undefined — el "!" es solo para el tipo de drizzle, que
-        // contempla un or() vacío.
         or(isNull(despachosMl.substatus), notInArray(despachosMl.substatus, SUBESTADOS_YA_SALIO))!
       );
     }
@@ -532,7 +566,10 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       .innerJoin(pedidos, eq(despachosMl.pedidoId, pedidos.id))
       .innerJoin(cuentasMl, eq(despachosMl.cuentaMlId, cuentasMl.id))
       .where(and(...condiciones))
-      .orderBy(desc(pedidos.fecha), desc(despachosMl.id));
+      .orderBy(
+        esDespachados ? desc(sql`coalesce(${despachosMl.despachadoTs}, ${despachosMl.actualizadoTs})`) : desc(pedidos.fecha),
+        desc(despachosMl.id)
+      );
 
     if (filas.length === 0) return [];
 
@@ -607,6 +644,7 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       comprador: null,
       bodegaAsignada: null,
       items: itemsPorPedido.get(f.pedidoId) ?? [],
+      origenDespacho: (esDespachados ? (f.despachadoTs != null ? "marcado_en_seller" : "recogido_transportadora") : null) as TarjetaDespacho["origenDespacho"],
     }));
   });
 
@@ -699,6 +737,16 @@ async function refrescarEstadoViejo(empresaId: string, tarjetas: TarjetaDespacho
   const candidatos = tarjetas
     .filter(
       (t) =>
+        // Bug real encontrado al revisar la tarea "Despachados (15
+        // días)": esta función solo miraba el status, nunca
+        // despachado_ts — una fila que una persona YA marcó
+        // despachada, pero cuyo status seguía ready_to_ship (todavía
+        // sin refrescar), podía terminar excluida de la pestaña
+        // Despachados si Mercado Libre confirmaba que ya salió — el
+        // mismo evento que la persona ya había registrado a mano.
+        // despachado_ts, puesto por una persona, nunca se pisa con lo
+        // que diga el refresco en vivo.
+        t.despachadoTs === null &&
         t.status === STATUS_PENDIENTES &&
         ahoraMs - t.actualizadoTs.getTime() >= UMBRAL_VIEJO_MS &&
         puedeRefrescarEstado(t.id, ahoraMs)
@@ -746,7 +794,11 @@ async function refrescarEstadoViejo(empresaId: string, tarjetas: TarjetaDespacho
 async function backfillSlaFaltante(empresaId: string, tarjetas: TarjetaDespacho[]): Promise<void> {
   const ahoraMs = Date.now();
   const candidatos = tarjetas
-    .filter((t) => t.status === STATUS_PENDIENTES && t.slaExpectedDate === null && puedeIntentarSla(t.id, ahoraMs))
+    // despachado_ts === null: issue "Despachados (15 días)" — una fila
+    // que una persona ya marcó despachada no necesita (ni debe)
+    // seguir gastando una llamada de SLA; mismo criterio que el fix de
+    // refrescarEstadoViejo, más abajo.
+    .filter((t) => t.despachadoTs === null && t.status === STATUS_PENDIENTES && t.slaExpectedDate === null && puedeIntentarSla(t.id, ahoraMs))
     .slice(0, MAX_BACKFILL_SLA_POR_CARGA);
 
   await conLimiteDeConcurrencia(candidatos, CONCURRENCIA_BACKFILL_SLA, async (t) => {
@@ -776,23 +828,33 @@ export type GrupoTarjetasDespacho = { etiqueta: string; despachos: TarjetaDespac
 // agrupa por día (etiquetaDiaVenta) conservando ese mismo orden: el
 // grupo de "Hoy" primero, el más viejo al final, y dentro de cada
 // grupo lo más nuevo arriba (igual que pidió Mateo, punto 3).
-export function agruparDespachosPorDia(despachos: TarjetaDespacho[], ahora: Date): GrupoTarjetasDespacho[] {
+// obtenerFecha: por cuál fecha agrupar/ordenar — por defecto la de
+// venta (fechaPedido, Pendientes). Issue "Despachados" (15 días): esa
+// pestaña agrupa por la fecha REAL del despacho (fechaDespachoDe,
+// abajo), no por cuándo se vendió — un pedido vendido hace 10 días
+// pero despachado hoy tiene que caer en "Hoy", no en el grupo de
+// hace 10 días.
+export function agruparDespachosPorDia(
+  despachos: TarjetaDespacho[],
+  ahora: Date,
+  obtenerFecha: (d: TarjetaDespacho) => Date = (d) => d.fechaPedido
+): GrupoTarjetasDespacho[] {
   const porEtiqueta = new Map<string, TarjetaDespacho[]>();
   for (const despacho of despachos) {
-    const etiqueta = etiquetaDiaVenta(despacho.fechaPedido, ahora);
+    const etiqueta = etiquetaDiaVenta(obtenerFecha(despacho), ahora);
     const lista = porEtiqueta.get(etiqueta) ?? [];
     lista.push(despacho);
     porEtiqueta.set(etiqueta, lista);
   }
 
-  // Los despachos ya llegan ordenados por fecha de venta descendente
-  // (la consulta de listarTarjetasDespacho) — el primer elemento de
-  // cada grupo es el más nuevo de ese día, así que ordenar los grupos
-  // por esa misma fecha alcanza para que el grupo más reciente quede
-  // primero, sin recalcular nada.
+  // Los despachos ya llegan ordenados por esa misma fecha
+  // descendente (la consulta de listarTarjetasDespacho, según la
+  // pestaña) — el primer elemento de cada grupo es el más nuevo de
+  // ese día, así que ordenar los grupos por esa misma fecha alcanza
+  // para que el grupo más reciente quede primero, sin recalcular nada.
   const etiquetas = [...porEtiqueta.keys()].sort((a, b) => {
-    const fechaA = porEtiqueta.get(a)![0].fechaPedido.getTime();
-    const fechaB = porEtiqueta.get(b)![0].fechaPedido.getTime();
+    const fechaA = obtenerFecha(porEtiqueta.get(a)![0]).getTime();
+    const fechaB = obtenerFecha(porEtiqueta.get(b)![0]).getTime();
     return fechaB - fechaA;
   });
 
@@ -800,6 +862,12 @@ export function agruparDespachosPorDia(despachos: TarjetaDespacho[], ahora: Date
     etiqueta: etiqueta === "Hoy" ? `Hoy (${porEtiqueta.get(etiqueta)!.length})` : etiqueta,
     despachos: porEtiqueta.get(etiqueta)!,
   }));
+}
+
+// Fecha real del despacho — la que marcó la persona si lo marcó, si
+// no el momento en que se confirmó que ya salió (actualizado_ts).
+export function fechaDespachoDe(d: TarjetaDespacho): Date {
+  return d.despachadoTs ?? d.actualizadoTs;
 }
 
 // Gate "Abre la guía arriba primero" — Marcar despachado nunca llama a

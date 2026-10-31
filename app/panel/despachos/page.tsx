@@ -9,10 +9,12 @@ import { normalizarParametro } from "@/lib/filtros-listado";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import {
   agruparDespachosPorDia,
+  DIAS_VENTANA_DESPACHADOS,
   esFlex,
   estadoPlazo,
   ETIQUETA_TIPO_DESPACHO,
   etiquetaEstadoEnvio,
+  fechaDespachoDe,
   formatoPlazoChip,
   listarCuentasConErrorDespacho,
   listarDespachosFiltrados,
@@ -37,9 +39,9 @@ import styles from "./page.module.css";
 // Las 3 pestañas reales de la pantalla — "impresion" es nueva
 // (reportado por Mateo: la impresión masiva vivía adentro de
 // Pendientes, mezclada con las tarjetas). listarTarjetasDespacho solo
-// conoce "pendientes"/"despachados_hoy" (lib/ml/despachos.ts) — en
+// conoce "pendientes"/"despachados" (lib/ml/despachos.ts) — en
 // "impresion" ni siquiera se le llama, no hace falta esa data acá.
-type PestañaPagina = "pendientes" | "despachados_hoy" | "impresion";
+type PestañaPagina = "pendientes" | "despachados" | "impresion";
 
 function colorEstadoDespacho(estado: string | null): EstadoChip {
   if (estado === "ready_to_ship") return "exito";
@@ -81,7 +83,8 @@ function hrefConFiltros(base: Record<string, string | undefined>, cambios: Recor
 // Handler — pero reportado por Mateo tras el PR #312: mezclada con
 // las tarjetas de Pendientes se perdía de vista. Ahora vive en su
 // propia pestaña ("Impresión masiva de guías"), al lado de
-// "Despachados hoy".
+// "Despachados" (antes "Despachados hoy" — ahora muestra los últimos
+// DIAS_VENTANA_DESPACHADOS días, no solo hoy).
 export default async function DespachosPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -104,12 +107,12 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
   const cuentaFiltro = normalizarParametro(searchParams.cuenta);
   const tipoFiltro = normalizarParametro(searchParams.tipo);
   const valorPestaña = normalizarParametro(searchParams.pestaña);
-  const pestañaFiltro: PestañaPagina = valorPestaña === "despachados_hoy" ? "despachados_hoy" : valorPestaña === "impresion" ? "impresion" : "pendientes";
-  // listarTarjetasDespacho solo distingue pendientes/despachados_hoy
-  // — en la pestaña de impresión ni siquiera hace falta pedirle esa
-  // data (ni gastar el backfill de plazo/refresco de estado en vivo
-  // por algo que no se va a mostrar).
-  const pestañaParaTarjetas: PestañaDespachos = pestañaFiltro === "despachados_hoy" ? "despachados_hoy" : "pendientes";
+  const pestañaFiltro: PestañaPagina = valorPestaña === "despachados" ? "despachados" : valorPestaña === "impresion" ? "impresion" : "pendientes";
+  // listarTarjetasDespacho solo distingue pendientes/despachados — en
+  // la pestaña de impresión ni siquiera hace falta pedirle esa data
+  // (ni gastar el backfill de plazo/refresco de estado en vivo por
+  // algo que no se va a mostrar).
+  const pestañaParaTarjetas: PestañaDespachos = pestañaFiltro === "despachados" ? "despachados" : "pendientes";
 
   const [cuentas, cuentasConError, tarjetas] = await Promise.all([
     listarCuentasConectadas(empresa.id),
@@ -117,7 +120,11 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
     pestañaFiltro === "impresion" ? Promise.resolve([]) : listarTarjetasDespacho(empresa.id, { cuentaId: cuentaFiltro, tipo: tipoFiltro, pestaña: pestañaParaTarjetas }),
   ]);
   const ahora = new Date();
-  const grupos = agruparDespachosPorDia(tarjetas, ahora);
+  // Despachados agrupa por la fecha REAL del despacho (fechaDespachoDe:
+  // despachado_ts si una persona lo marcó, si no actualizado_ts), no
+  // por fecha de venta — un pedido vendido hace 10 días pero
+  // despachado hoy tiene que caer en "Hoy".
+  const grupos = agruparDespachosPorDia(tarjetas, ahora, pestañaFiltro === "despachados" ? fechaDespachoDe : undefined);
 
   const filtrosBase = { cuenta: cuentaFiltro, tipo: tipoFiltro };
 
@@ -149,7 +156,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
       <Pestanas
         pestanas={[
           { etiqueta: "Pendientes", href: hrefConFiltros(filtrosBase, { pestaña: undefined }), activa: pestañaFiltro === "pendientes" },
-          { etiqueta: "Despachados hoy", href: hrefConFiltros(filtrosBase, { pestaña: "despachados_hoy" }), activa: pestañaFiltro === "despachados_hoy" },
+          { etiqueta: "Despachados", href: hrefConFiltros(filtrosBase, { pestaña: "despachados" }), activa: pestañaFiltro === "despachados" },
           { etiqueta: "Impresión masiva de guías", href: hrefConFiltros(filtrosBase, { pestaña: "impresion" }), activa: pestañaFiltro === "impresion" },
         ]}
       />
@@ -193,7 +200,9 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
           </form>
 
           {tarjetas.length === 0 ? (
-            <EstadoVacio>{pestañaFiltro === "despachados_hoy" ? "Todavía no se despachó nada hoy." : "No hay despachos pendientes."}</EstadoVacio>
+            <EstadoVacio>
+              {pestañaFiltro === "despachados" ? `Nada despachado en los últimos ${DIAS_VENTANA_DESPACHADOS} días.` : "No hay despachos pendientes."}
+            </EstadoVacio>
           ) : (
             grupos.map((grupo) => (
               <section key={grupo.etiqueta} className={styles.grupoDia}>
@@ -219,6 +228,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                       chipPlazo={formatoPlazoChip(d.slaExpectedDate)}
                       estadoPlazo={estadoPlazo(d.slaExpectedDate, ahora)}
                       estadoEnvioTexto={etiquetaEstadoEnvio(d.status, d.substatus)}
+                      origenDespacho={d.origenDespacho}
                       puedeModificar={puedeModificar}
                       ventanaDeshacerMs={VENTANA_DESHACER_MS}
                     />

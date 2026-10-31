@@ -474,6 +474,7 @@ function tarjetaDePrueba(id: string, fechaPedido: Date, extra: Partial<TarjetaDe
     comprador: null,
     bodegaAsignada: null,
     items: [],
+    origenDespacho: null,
     ...extra,
   };
 }
@@ -680,7 +681,7 @@ describe("tarjetas de Despachos — Fase 1 (gate, marcar/deshacer, listarTarjeta
     expect(puedeMarcarDespachado(new Date())).toBe(true);
   });
 
-  it("marcarGuiaVista + marcarDespachado: abrir la guía habilita marcar, y la tarjeta pasa de 'pendientes' a 'despachados_hoy'", async () => {
+  it("marcarGuiaVista + marcarDespachado: abrir la guía habilita marcar, y la tarjeta pasa de 'pendientes' a 'despachados'", async () => {
     await marcarGuiaVista(empresaId, despachoFlexId);
     await marcarDespachado(empresaId, despachoFlexId, usuarioId);
 
@@ -691,8 +692,8 @@ describe("tarjetas de Despachos — Fase 1 (gate, marcar/deshacer, listarTarjeta
     const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
     expect(pendientes.map((d) => d.id)).not.toContain(despachoFlexId);
 
-    const despachadosHoy = await listarTarjetasDespacho(empresaId, { pestaña: "despachados_hoy" });
-    expect(despachadosHoy.map((d) => d.id)).toContain(despachoFlexId);
+    const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
+    expect(despachados.map((d) => d.id)).toContain(despachoFlexId);
   });
 
   it("marcarGuiaVista es idempotente: abrir la guía dos veces no corre guia_vista_ts hacia adelante", async () => {
@@ -1085,5 +1086,128 @@ describe("una cuenta con token vencido nunca oculta las filas de otra cuenta (fi
     const conError = await listarCuentasConErrorDespacho(empresaId);
     expect(conError.map((c) => c.cuentaId)).toContain(cuentaDesconectadaId);
     expect(conError.map((c) => c.cuentaId)).not.toContain(cuentaOkId);
+  });
+});
+
+// Issue "Despachados (15 días)" — reportado por Mateo: un envío que la
+// transportadora ya recogió, pero que nadie marcó despachado en
+// Seller, desaparecía por completo (Pendientes lo excluye por
+// status/substatus, y la vieja "Despachados hoy" solo miraba
+// despachado_ts). Ahora entra con su propia etiqueta, ventana de
+// DIAS_VENTANA_DESPACHADOS días.
+describe("pestaña Despachados — 15 días, dos orígenes (fix mateo/feat-despachados-15-dias)", () => {
+  vi.setConfig({ testTimeout: 20_000 });
+  const empresaId = randomUUID();
+  const empresaBId = randomUUID();
+  const usuarioId = randomUUID();
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa despachados 15 días", nit: `TEST-DESP15-${empresaId.slice(0, 8)}` }));
+    await dbComoEmpresa(empresaBId, (tx) => tx.insert(empresas).values({ id: empresaBId, nombre: "Empresa B despachados 15 días", nit: `TEST-DESP15B-${empresaBId.slice(0, 8)}` }));
+    await db.insert(usuarios).values({ id: usuarioId, email: `prueba-despachados15-${usuarioId.slice(0, 8)}@zilonix.test`, nombre: "Usuario de prueba" });
+    // Defensa de más: con despachado_ts ya puesto en los fixtures que
+    // lo necesitan, ni refrescarEstadoViejo ni backfillSlaFaltante
+    // deberían tocar la red para ninguna prueba de este describe — un
+    // mock fijo, nunca la red real, por si algún fixture cambia.
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ status: "ready_to_ship", substatus: null, logistic_type: "self_service" })));
+  });
+  afterAll(() => vi.unstubAllGlobals());
+
+  // despachadoTs/status/substatus/actualizadoTs todos explícitos, para
+  // controlar exactamente en qué rama (marcado_en_seller vs.
+  // recogido_transportadora) y dentro o fuera de la ventana cae cada
+  // despacho de prueba.
+  async function crearDespacho(
+    empresaIdDeLaPrueba: string,
+    shipmentIdExterno: string,
+    datos: { status: string | null; substatus: string | null; despachadoTs: Date | null; actualizadoTs: Date }
+  ): Promise<string> {
+    const cuentaId = await crearCuentaMlDePrueba(empresaIdDeLaPrueba);
+    const pedidoId = await crearPedidoDePrueba(empresaIdDeLaPrueba, cuentaId);
+    await dbComoEmpresa(empresaIdDeLaPrueba, (tx) => tx.insert(pedidosFinanzas).values({ empresaId: empresaIdDeLaPrueba, pedidoId, cuentaMlId: cuentaId, valorVenta: "100000.00" }));
+    await dbComoEmpresa(empresaIdDeLaPrueba, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaIdDeLaPrueba, pedidoId, 1)));
+    const [{ id: despachoId }] = await dbComoEmpresa(empresaIdDeLaPrueba, (tx) =>
+      tx
+        .insert(despachosMl)
+        .values({
+          empresaId: empresaIdDeLaPrueba,
+          pedidoId,
+          cuentaMlId: cuentaId,
+          shipmentIdExterno,
+          logisticType: "self_service",
+          status: datos.status,
+          substatus: datos.substatus,
+          imprimible: false,
+          despachadoTs: datos.despachadoTs,
+          despachadoPor: datos.despachadoTs ? usuarioId : null,
+        })
+        .returning({ id: despachosMl.id })
+    );
+    // actualizado_ts no se puede fijar en el insert inicial (tiene
+    // default now() en el esquema) — se corrige con un update aparte,
+    // igual que ya hacen las demás pruebas de este archivo.
+    await dbComoEmpresa(empresaIdDeLaPrueba, (tx) => tx.update(despachosMl).set({ actualizadoTs: datos.actualizadoTs }).where(eq(despachosMl.id, despachoId)));
+    return despachoId;
+  }
+
+  const AHORA = Date.now();
+  const haceNDias = (n: number) => new Date(AHORA - n * 24 * 60 * 60 * 1000);
+
+  it("un envío picked_up que nadie marcó en Seller aparece como 'Recogido por la transportadora'", async () => {
+    const id = await crearDespacho(empresaId, "940000001", { status: "shipped", substatus: "picked_up", despachadoTs: null, actualizadoTs: haceNDias(3) });
+
+    const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
+    const tarjeta = despachados.find((t) => t.id === id);
+    expect(tarjeta).toBeDefined();
+    expect(tarjeta?.origenDespacho).toBe("recogido_transportadora");
+  });
+
+  it("un envío marcado despachado en Seller aparece como 'Marcado en Seller'", async () => {
+    const id = await crearDespacho(empresaId, "940000002", { status: "ready_to_ship", substatus: null, despachadoTs: haceNDias(2), actualizadoTs: haceNDias(2) });
+
+    const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
+    const tarjeta = despachados.find((t) => t.id === id);
+    expect(tarjeta).toBeDefined();
+    expect(tarjeta?.origenDespacho).toBe("marcado_en_seller");
+  });
+
+  it("uno de hace 16 días no aparece (fuera de la ventana de 15 días), marcado o recogido", async () => {
+    const idMarcadoViejo = await crearDespacho(empresaId, "940000003", { status: "shipped", substatus: null, despachadoTs: haceNDias(16), actualizadoTs: haceNDias(16) });
+    const idRecogidoViejo = await crearDespacho(empresaId, "940000004", { status: "delivered", substatus: null, despachadoTs: null, actualizadoTs: haceNDias(16) });
+
+    const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
+    const ids = despachados.map((t) => t.id);
+    expect(ids).not.toContain(idMarcadoViejo);
+    expect(ids).not.toContain(idRecogidoViejo);
+  });
+
+  it("uno de hace exactamente 14 días (dentro de los 15) sí aparece — el borde no se corta de más", async () => {
+    const id = await crearDespacho(empresaId, "940000005", { status: "delivered", substatus: null, despachadoTs: null, actualizadoTs: haceNDias(14) });
+
+    const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
+    expect(despachados.map((t) => t.id)).toContain(id);
+  });
+
+  it("aislamiento A/B: empresa B nunca ve los despachados de empresa A", async () => {
+    const idB = await crearDespacho(empresaBId, "940000006", { status: "shipped", substatus: "picked_up", despachadoTs: null, actualizadoTs: haceNDias(1) });
+
+    const despachadosA = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
+    expect(despachadosA.map((t) => t.id)).not.toContain(idB);
+
+    const despachadosB = await listarTarjetasDespacho(empresaBId, { pestaña: "despachados" });
+    expect(despachadosB.map((t) => t.id)).toEqual([idB]); // solo la suya, nada de empresa A
+  });
+
+  it("un pedido Full (fulfillment) nunca aparece en Despachados, aunque esté delivered", async () => {
+    const cuentaId = await crearCuentaMlDePrueba(empresaId);
+    const pedidoId = await crearPedidoDePrueba(empresaId, cuentaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidosFinanzas).values({ empresaId, pedidoId, cuentaMlId: cuentaId, valorVenta: "100000.00" }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoId, 1)));
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(despachosMl).values({ empresaId, pedidoId, cuentaMlId: cuentaId, shipmentIdExterno: "940000007", logisticType: "fulfillment", status: "delivered", imprimible: false })
+    );
+
+    const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
+    expect(despachados.map((t) => t.shipmentIdExterno)).not.toContain("940000007");
   });
 });

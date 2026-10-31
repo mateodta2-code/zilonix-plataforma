@@ -72,6 +72,18 @@ export function rangoDiaBogota(ahora: Date): { inicio: Date; finExclusivo: Date 
   return limites;
 }
 
+// Issue "Despachados" (15 días) — mismo criterio que rangoDiaBogota,
+// pero una ventana de varios días de calendario de Bogotá en vez de
+// uno: el fin es el mismo (00:00 de hoy en Bogotá, exclusivo), el
+// inicio retrocede (dias - 1) días de calendario completos desde el
+// inicio de hoy, así "15 días" incluye HOY como uno de los 15, no
+// como un día 16 aparte.
+export function rangoUltimosNDiasBogota(ahora: Date, dias: number): { inicio: Date; finExclusivo: Date } {
+  const hoy = rangoDiaBogota(ahora);
+  const inicio = new Date(hoy.inicio.getTime() - (dias - 1) * 24 * 60 * 60 * 1000);
+  return { inicio, finExclusivo: hoy.finExclusivo };
+}
+
 // Issue #251 (corrección de Pablo, distinta de rangoDiaBogota de
 // arriba) — `rangoDiaBogota(ahora).inicio` es el INSTANTE real de la
 // medianoche de Bogotá (05:00 UTC), correcto para filtrar columnas

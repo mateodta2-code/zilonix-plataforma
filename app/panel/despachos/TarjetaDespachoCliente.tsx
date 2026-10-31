@@ -41,8 +41,17 @@ export type TarjetaDespachoProps = {
   chipPlazo: string | null;
   estadoPlazo: EstadoPlazo | null;
   estadoEnvioTexto: string | null;
+  // Issue "Despachados (15 días)" — solo en la pestaña Despachados:
+  // cuál de las dos cosas puso a este despacho ahí. null en
+  // Pendientes (no aplica).
+  origenDespacho: "marcado_en_seller" | "recogido_transportadora" | null;
   puedeModificar: boolean;
   ventanaDeshacerMs: number;
+};
+
+const ETIQUETA_ORIGEN_DESPACHO: Record<"marcado_en_seller" | "recogido_transportadora", string> = {
+  marcado_en_seller: "Marcado en Seller",
+  recogido_transportadora: "Recogido por la transportadora",
 };
 
 function formatoFechaColombia(fecha: Date): string {
@@ -112,6 +121,7 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
           <div className={styles.encabezadoTarjeta}>
             <Chip estado="neutro">{props.etiquetaTipo}</Chip>
             <Chip estado={colorEstado}>{props.estadoTraducido ?? "—"}</Chip>
+            {props.origenDespacho && <Chip estado={props.origenDespacho === "marcado_en_seller" ? "exito" : "aviso"}>{ETIQUETA_ORIGEN_DESPACHO[props.origenDespacho]}</Chip>}
             {props.chipPlazo && (
               <span className={styles.chipPlazo} data-estado={props.estadoPlazo ?? "normal"}>
                 {props.chipPlazo}
