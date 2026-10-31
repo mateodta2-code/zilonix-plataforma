@@ -47,7 +47,7 @@ npm run docs:permisos    # regenera docs/matriz-permisos.md desde lib/roles.ts
 
 ## Convenciones de código
 
-- **Comentarios y mensajes de commit en español.** Un comentario explica el POR QUÉ, no el qué — la mayoría cita el bug o la evidencia real que motivó la regla; borrarlo sin entender la causa suele reintroducirlo.
+- **Comentarios y mensajes de commit en español.** El código (nombres de función, variables) también, salvo términos técnicos sin traducción natural. Un comentario explica el POR QUÉ, no el qué — la mayoría cita el bug o la evidencia real que motivó la regla; borrarlo sin entender la causa suele reintroducirlo.
 - **Server Actions por defecto**; un Route Handler (`app/api/.../route.ts`) solo cuando hace falta devolver algo que una Server Action no puede (binario crudo, un webhook sin sesión).
 - **Toda ruta nueva de `app/` se clasifica en `scripts/verificar-permisos.test.ts`** — protegida, de superadmin, o exenta (con el motivo escrito). El CI falla si no.
 - **Toda llamada a la API de Mercado Libre pasa por `lib/ml/cliente.ts`**, y **toda tarea en segundo plano vive en `lib/trabajos/`** — nunca un `fetch` a Mercado Libre o un cron suelto en otro archivo.
@@ -87,7 +87,7 @@ Estas reglas aplican tanto a este repo (`zilonix-plataforma`) como al Zilonix OS
 - **Nunca commits directos a `main` sin pasar por Pull Request, con CI en verde antes de fusionar.** `main` tiene un ruleset de GitHub que lo fuerza.
 - **Nunca force-push**, ni a una rama con PR abierto ni a `main` — para actualizar una rama contra `main`, usar `git merge origin/main`.
 - **Commits y PRs referencian el issue con `Refs #N`, nunca `Closes #N`** — así el issue se cierra a mano, cuando de verdad se verificó, no solo al fusionar.
-- **Avisar antes de tocar `extension/` o `db/schema.ts`.** Ambos tienen consecuencias fuera del PR: `extension/` exige reinstalación completa del lado de cada usuario (nunca alcanza con "Recargar"), y `db/schema.ts` dispara una migración versionada con su propio turno (ver arriba).
+- **Avisar antes de tocar `extension/` o `db/schema.ts`.** Ambos tienen consecuencias fuera del PR: `extension/` exige reinstalación completa del lado de cada usuario (nunca alcanza con "Recargar") — bajar el ZIP solo después de confirmar que `version.json` ya muestra la versión nueva —, y `db/schema.ts` dispara una migración versionada con su propio turno (ver arriba).
 - **Todo módulo nuevo usa el diseño de marca de `/panel` (Inicio):** fondo oscuro, bordes con degradado plata-azul, esquinas redondeadas, títulos de sección pequeños en mayúscula, estilos y tokens existentes de `globals.css`/Tailwind, sin paleta nueva, y debe funcionar en tema claro y oscuro.
 
 ### Cómo se trabaja con Claude Code en este proyecto
