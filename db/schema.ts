@@ -464,7 +464,7 @@ export const cuentasMl = pgTable(
     // Issue #315 (Z-LATAM-01) — sitio real de Mercado Libre de esta
     // cuenta (MCO/MLM/MLB/MLA/MLC), para que Seller funcione en otros
     // países de LATAM, no solo Colombia. Se llena al conectar/reconectar
-    // (GET /users/me, vía lib/ml/cliente.ts — nunca un fetch suelto) con
+    // (GET /users/me, vía lib/ml/oauth.ts — obtenerDatosVendedorMl) con
     // el site_id real que devuelve Mercado Libre; las filas que ya
     // existían quedan con el default (MCO) hasta que se reconecten.
     // Acotado con un CHECK (texto, no un enum de Postgres: agregar un

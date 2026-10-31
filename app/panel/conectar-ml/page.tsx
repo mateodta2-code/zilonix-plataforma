@@ -7,6 +7,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { obtenerUltimaImportacion } from "@/lib/ml/importacion";
+import { datosSitioMl } from "@/lib/ml/sitios";
 import { BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
@@ -108,6 +109,10 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
         <ListaFilas>
           {cuentas.map((cuenta) => {
             const importacion = importaciones.find((i) => i.cuenta.id === cuenta.id)?.importacion;
+            // Issue #315 (Z-LATAM-01), parte 2 — país desde SITIOS_ML
+            // (lib/ml/sitios.ts), nunca un nombre fijo; cuenta.moneda e
+            // idioma ya vienen reales de la fila (listarCuentasConectadas).
+            const sitio = datosSitioMl(cuenta.siteId);
             return (
               <FilaLista key={cuenta.id}>
                 <div className={styles.filaCuenta}>
@@ -120,6 +125,9 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
                       Desconectar
                     </Link>
                   )}
+                </div>
+                <div className={styles.detalleSitio}>
+                  {sitio.nombre} · {cuenta.moneda} · {cuenta.idioma}
                 </div>
                 {importacion && !importacion.error && (
                   <div className={styles.detalleImportacion}>
