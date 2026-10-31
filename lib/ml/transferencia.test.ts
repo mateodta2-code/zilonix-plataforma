@@ -69,12 +69,14 @@ describe("confirmarTransferenciaCuentaMl (issue #181) — permiso real contra Po
       cuentaIdExterna,
       nickname: "VENDEDOR_A",
       tokens: tokensDePrueba(cuentaIdExterna, "a"),
+      siteId: null,
     });
 
     const resultado = await confirmarTransferenciaCuentaMl(usuarioBId, empresaBId, {
       cuentaIdExterna,
       nickname: "VENDEDOR_TRANSFERIDO",
       tokens: tokensDePrueba(cuentaIdExterna, "transferida"),
+      siteId: null,
     });
 
     expect(resultado.id).toBe(deEmpresaA.id);
@@ -89,6 +91,7 @@ describe("confirmarTransferenciaCuentaMl (issue #181) — permiso real contra Po
       cuentaIdExterna,
       nickname: "VENDEDOR_A_2",
       tokens: tokensDePrueba(cuentaIdExterna, "a2"),
+      siteId: null,
     });
 
     await expect(
@@ -96,6 +99,7 @@ describe("confirmarTransferenciaCuentaMl (issue #181) — permiso real contra Po
         cuentaIdExterna,
         nickname: "INTENTO_SIN_PERMISO",
         tokens: tokensDePrueba(cuentaIdExterna, "robo"),
+        siteId: null,
       })
     ).rejects.toThrow(SinPermisoError);
 
