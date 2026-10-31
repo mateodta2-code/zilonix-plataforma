@@ -238,6 +238,11 @@ export async function listarCuentasConectadas(empresaId: string) {
         nickname: cuentasMl.nickname,
         desconectadaTs: cuentasMl.desconectadaTs,
         creadoTs: cuentasMl.creadoTs,
+        // Issue #315 (Z-LATAM-01), parte 2 — para que /panel/conectar-ml
+        // muestre país/moneda reales por cuenta, nunca fijos.
+        siteId: cuentasMl.siteId,
+        moneda: cuentasMl.moneda,
+        idioma: cuentasMl.idioma,
       })
       .from(cuentasMl)
   );
