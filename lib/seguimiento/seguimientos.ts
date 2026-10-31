@@ -229,9 +229,31 @@ export type DatoPaginaSeguimiento =
 // lib/trabajos/revisionDiariaSeguimiento.ts para que las dos fuentes
 // compartan la MISMA fila (issue #251, punto 11): si una persona lee
 // una ficha a las 8pm en Colombia, con UTC eso ya sería "mañana".
-export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: DatoPaginaSeguimiento): Promise<void> {
+// Refs #175 — antes esta función devolvía `void` y los tres casos de
+// abajo (no es un seguimiento activo, tipo no coincide, guardado real)
+// quedaban indistinguibles para quien la llama: `guardarDatoPaginaSeguimientoAction`
+// (actions.ts) y, por ella, `EscuchaExtension.tsx` nunca podían saber si
+// la extensión SÍ guardó el dato o si se perdió en silencio — exactamente
+// el bug reportado ("productos seguidos sin datos" sin ningún error en
+// pantalla). El resultado tipado deja que quien llama decida qué mostrar.
+export type ResultadoGuardarDatoPagina =
+  | { ok: true }
+  | { ok: false; motivo: "seguimiento_inactivo" | "tipo_no_coincide" };
+
+export async function guardarDatoDePaginaSeguimiento(
+  empresaId: string,
+  dato: DatoPaginaSeguimiento
+): Promise<ResultadoGuardarDatoPagina> {
   const seguimiento = await buscarSeguimientoActivoPorMlId(empresaId, dato.mlIdExterno);
-  if (!seguimiento) return; // no es un seguimiento activo de esta empresa — nunca se inventa ni se cuela de otra
+  if (!seguimiento) {
+    // No es necesariamente un bug: pasa si el seguimiento se eliminó
+    // justo mientras la extensión tenía la pestaña abierta — se loguea
+    // para poder diferenciarlo de una pérdida real si se repite mucho.
+    console.warn(
+      `[lib/seguimiento/seguimientos] guardarDatoDePaginaSeguimiento: no hay seguimiento activo de esta empresa para ${dato.mlIdExterno} — se ignora.`
+    );
+    return { ok: false, motivo: "seguimiento_inactivo" };
+  }
 
   // Issue #251 (corrección de Pablo, punto 5) — un id de tienda
   // (seller_id, solo dígitos) y uno de producto podrían, en teoría,
@@ -242,7 +264,7 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
     console.warn(
       `[lib/seguimiento/seguimientos] guardarDatoDePaginaSeguimiento: tipo "${dato.tipoSeguimiento}" de la extensión no coincide con el seguimiento real (${seguimiento.tipo}) para ${dato.mlIdExterno} — se ignora.`
     );
-    return;
+    return { ok: false, motivo: "tipo_no_coincide" };
   }
 
   // Issue #252 (smoke de staging) — bug real: MCO452014269 se quedó
@@ -373,6 +395,7 @@ export async function guardarDatoDePaginaSeguimiento(empresaId: string, dato: Da
       .values({ empresaId, seguimientoId: seguimiento.id, fecha: hoy, ...camposPagina })
       .onConflictDoUpdate({ target: [seguimientoFotos.seguimientoId, seguimientoFotos.fecha], set: setDelConflicto })
   );
+  return { ok: true };
 }
 
 export type DatosNuevoSeguimiento = { tipo: "producto" | "tienda"; link: string; esCompetidor: boolean };
