@@ -12,6 +12,7 @@ import { registrarEventoPedido } from "@/lib/ml/pedidos";
 import {
   agruparDespachosPorDia,
   contarDespachosPendientes,
+  contarDespachosYaRecogidosSinImprimir,
   deshacerDespachado,
   DespachoNoEncontradoError,
   esFlex,
@@ -1296,5 +1297,57 @@ describe("pestaña Despachados — 15 días, dos orígenes (fix mateo/feat-despa
 
     const despachados = await listarTarjetasDespacho(empresaId, { pestaña: "despachados" });
     expect(despachados.map((t) => t.shipmentIdExterno)).not.toContain("940000007");
+  });
+});
+
+describe("contarDespachosYaRecogidosSinImprimir (issue 'ocultar imprimir en recogidas')", () => {
+  async function crearDespachoDePrueba(
+    empresaIdDeLaPrueba: string,
+    shipmentIdExterno: string,
+    extra: { imprimible?: boolean; status?: string; logisticType?: "self_service" | "xd_drop_off" | "cross_docking" | "fulfillment" | "otro"; etiquetaImpresaTs?: Date } = {}
+  ) {
+    const cuentaId = await crearCuentaMlDePrueba(empresaIdDeLaPrueba);
+    const pedidoId = await crearPedidoDePrueba(empresaIdDeLaPrueba, cuentaId);
+    await dbComoEmpresa(empresaIdDeLaPrueba, (tx) => tx.insert(pedidosFinanzas).values({ empresaId: empresaIdDeLaPrueba, pedidoId, cuentaMlId: cuentaId, valorVenta: "100000.00" }));
+    await dbComoEmpresa(empresaIdDeLaPrueba, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaIdDeLaPrueba, pedidoId, 1)));
+    await dbComoEmpresa(empresaIdDeLaPrueba, (tx) =>
+      tx.insert(despachosMl).values({
+        empresaId: empresaIdDeLaPrueba,
+        pedidoId,
+        cuentaMlId: cuentaId,
+        shipmentIdExterno,
+        logisticType: extra.logisticType ?? "self_service",
+        status: extra.status ?? "shipped",
+        imprimible: extra.imprimible ?? false,
+        etiquetaImpresaTs: extra.etiquetaImpresaTs ?? null,
+      })
+    );
+  }
+
+  it("cuenta las ventas ya recogidas (imprimible=false) sin etiqueta impresa todavía", async () => {
+    const empresaId = randomUUID();
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa saltadas 1", nit: `TEST-SALT1-${empresaId.slice(0, 8)}` }));
+    await crearDespachoDePrueba(empresaId, "SALT-1");
+    await crearDespachoDePrueba(empresaId, "SALT-2");
+    expect(await contarDespachosYaRecogidosSinImprimir(empresaId)).toBe(2);
+  });
+
+  it("nunca cuenta una ya impresa (etiqueta_impresa_ts puesto), ni una imprimible=true, ni un Full", async () => {
+    const empresaId = randomUUID();
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa saltadas 2", nit: `TEST-SALT2-${empresaId.slice(0, 8)}` }));
+    await crearDespachoDePrueba(empresaId, "SALT-NO-1", { etiquetaImpresaTs: new Date() });
+    await crearDespachoDePrueba(empresaId, "SALT-NO-2", { imprimible: true, status: "ready_to_ship" });
+    await crearDespachoDePrueba(empresaId, "SALT-NO-3", { logisticType: "fulfillment" });
+    expect(await contarDespachosYaRecogidosSinImprimir(empresaId)).toBe(0);
+  });
+
+  it("aislamiento: empresa B nunca cuenta las saltadas de empresa A", async () => {
+    const empresaA = randomUUID();
+    const empresaB = randomUUID();
+    await dbComoEmpresa(empresaA, (tx) => tx.insert(empresas).values({ id: empresaA, nombre: "Empresa saltadas A", nit: `TEST-SALTA-${empresaA.slice(0, 8)}` }));
+    await dbComoEmpresa(empresaB, (tx) => tx.insert(empresas).values({ id: empresaB, nombre: "Empresa saltadas B", nit: `TEST-SALTB-${empresaB.slice(0, 8)}` }));
+    await crearDespachoDePrueba(empresaA, "SALT-A1");
+    expect(await contarDespachosYaRecogidosSinImprimir(empresaB)).toBe(0);
+    expect(await contarDespachosYaRecogidosSinImprimir(empresaA)).toBe(1);
   });
 });

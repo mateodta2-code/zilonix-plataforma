@@ -159,6 +159,36 @@ export async function contarDespachosPendientes(empresaId: string): Promise<numb
   return total;
 }
 
+// Issue "ocultar imprimir en recogidas" — bug real reportado por
+// Mateo en staging: pedir la guía de un envío que la transportadora
+// YA recogió (imprimible=false, calcularImprimible/SUBESTADOS_YA_SALIO
+// de más arriba) hace que Mercado Libre responda NOT_PRINTABLE_STATUS
+// (EtiquetaNoImprimibleError) — listarDespachosFiltrados/
+// listarDespachosPendientes YA excluyen esas filas de la impresión
+// masiva (mismo filtro imprimible=true de contarDespachosPendientes,
+// arriba), pero sin avisar cuántas se quedaron afuera por ese motivo
+// — nunca se sabía si "no apareció" era porque ya se imprimió o
+// porque ya la recogieron. Mismo alcance que esa función (nunca
+// Full, nunca una que YA se marcó impresa): solo cambia el sentido
+// del filtro de imprimible.
+export async function contarDespachosYaRecogidosSinImprimir(empresaId: string): Promise<number> {
+  const [{ total }] = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ total: sql<number>`count(*)`.mapWith(Number) })
+      .from(despachosMl)
+      .where(
+        and(
+          eq(despachosMl.empresaId, empresaId),
+          ne(despachosMl.logisticType, "fulfillment"),
+          isNotNull(despachosMl.logisticType),
+          eq(despachosMl.imprimible, false),
+          isNull(despachosMl.etiquetaImpresaTs)
+        )
+      )
+  );
+  return total;
+}
+
 // Issue "tabla completa de despachos" — valores reales de
 // despachos_ml.status: son justo los 3 de ESTADOS_IMPRIMIBLES (arriba),
 // los únicos que puede tener un despacho que aparece en esta pantalla

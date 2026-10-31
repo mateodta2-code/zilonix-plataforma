@@ -9,6 +9,7 @@ import { normalizarParametro } from "@/lib/filtros-listado";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import {
   agruparDespachosPorDia,
+  contarDespachosYaRecogidosSinImprimir,
   DIAS_VENTANA_DESPACHADOS,
   esFlex,
   estadoPlazo,
@@ -26,13 +27,12 @@ import {
 } from "@/lib/ml/despachos";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
-import { Chip, type EstadoChip } from "@/components/marco/Chip";
-import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
+import { ImpresionMasivaForm } from "./ImpresionMasivaForm";
 import { TarjetaDespachoCliente } from "./TarjetaDespachoCliente";
 import styles from "./page.module.css";
 
@@ -42,12 +42,6 @@ import styles from "./page.module.css";
 // conoce "pendientes"/"despachados" (lib/ml/despachos.ts) — en
 // "impresion" ni siquiera se le llama, no hace falta esa data acá.
 type PestañaPagina = "pendientes" | "despachados" | "impresion";
-
-function colorEstadoDespacho(estado: string | null): EstadoChip {
-  if (estado === "ready_to_ship") return "exito";
-  if (estado === "handling" || estado === "pending") return "aviso";
-  return "neutro";
-}
 
 function formatoFechaColombia(fecha: Date | string): string {
   return new Date(fecha).toLocaleString("es-CO", { timeZone: "America/Bogota" });
@@ -229,6 +223,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                       estadoPlazo={estadoPlazo(d.slaExpectedDate, ahora)}
                       estadoEnvioTexto={etiquetaEstadoEnvio(d.status, d.substatus)}
                       origenDespacho={d.origenDespacho}
+                      imprimible={d.imprimible}
                       puedeModificar={puedeModificar}
                       ventanaDeshacerMs={VENTANA_DESHACER_MS}
                     />
@@ -248,48 +243,31 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
 }
 
 // Impresión masiva de siempre (tarea 2.10 / issue "tabla completa de
-// despachos") — sin tocar la funcionalidad (mismo alcance,
-// imprimible=true y sin etiqueta impresa; mismo Route Handler, que
-// nunca confía en lo que mande el formulario y revalida contra
-// listarDespachosPendientes de nuevo). Pedido de Mateo: su propia
-// pestaña, no mezclada con las tarjetas de Pendientes — <Tarjeta> le
-// da el mismo borde degradado plata-azul y fondo oscuro del resto de
-// /panel (sin paleta nueva, ya funciona en los dos temas).
+// despachos") — mismo alcance (imprimible=true y sin etiqueta
+// impresa; mismo Route Handler, que nunca confía en lo que mande el
+// formulario y revalida contra listarDespachosPendientes de nuevo).
+// <Tarjeta> le da el mismo borde degradado plata-azul y fondo oscuro
+// del resto de /panel. El form en sí (ImpresionMasivaForm) es
+// cliente — issue "ocultar imprimir en recogidas": antes era un
+// <form action=... target="_blank">, que al fallar (ej. una venta ya
+// recogida en el lote) abría una pestaña con el JSON crudo del error;
+// ahora pide con fetch y solo abre una pestaña (con un blob: URL
+// propio) si de verdad llegó un PDF.
 async function ImpresionMasiva({ empresaId }: { empresaId: string }) {
-  const resultado = await listarDespachosFiltrados(empresaId, {});
+  const [resultado, saltadas] = await Promise.all([listarDespachosFiltrados(empresaId, {}), contarDespachosYaRecogidosSinImprimir(empresaId)]);
   return (
     <Tarjeta>
       <h2 className={styles.tituloGrupo}>Impresión masiva de guías</h2>
+      {saltadas > 0 && (
+        <p className={styles.nota}>
+          {saltadas} {saltadas === 1 ? "venta no se incluye" : "ventas no se incluyen"} acá porque la transportadora ya las recogió (su guía ya no
+          está disponible).
+        </p>
+      )}
       {resultado.total === 0 ? (
         <EstadoVacio>No hay despachos pendientes de imprimir.</EstadoVacio>
       ) : (
-        <form action="/api/ml/despachos/etiquetas" method="POST" target="_blank" className={styles.form}>
-          <Tabla encabezados={["", "Envío", "Tipo", "Estado", "Actualizado"]}>
-            {resultado.despachos.map((d) => (
-              <FilaTabla key={d.id}>
-                <CeldaTabla>
-                  <input type="checkbox" name="shipmentId" value={d.shipmentIdExterno} defaultChecked aria-label={`Seleccionar envío ${d.shipmentIdExterno}`} />
-                </CeldaTabla>
-                <CeldaTabla>#{d.shipmentIdExterno}</CeldaTabla>
-                <CeldaTabla>{ETIQUETA_TIPO_DESPACHO[d.logisticType ?? "otro"] ?? d.logisticType}</CeldaTabla>
-                <CeldaTabla>
-                  <Chip estado={colorEstadoDespacho(d.status)}>{d.status ?? "—"}</Chip>
-                </CeldaTabla>
-                <CeldaTabla className={styles.celdaFecha}>{formatoFechaColombia(d.actualizadoTs)}</CeldaTabla>
-              </FilaTabla>
-            ))}
-          </Tabla>
-          <p className={styles.resumenPaginacion}>
-            Mostrando hasta {TAMANO_PAGINA_DESPACHOS} de {resultado.total} pendientes de imprimir.
-          </p>
-          <Boton type="submit" className={styles.botonImprimir}>
-            Imprimir etiquetas seleccionadas
-          </Boton>
-          <p className={styles.nota}>
-            Solo imprime lo seleccionado de esta lista. Si hay despachos de varias cuentas de Mercado Libre, selecciona primero los de una sola
-            cuenta.
-          </p>
-        </form>
+        <ImpresionMasivaForm filas={resultado.despachos} total={resultado.total} tamanoPagina={TAMANO_PAGINA_DESPACHOS} etiquetaTipo={ETIQUETA_TIPO_DESPACHO} />
       )}
     </Tarjeta>
   );

@@ -48,6 +48,17 @@ export type TarjetaDespachoProps = {
   // cuál de las dos cosas puso a este despacho ahí. null en
   // Pendientes (no aplica).
   origenDespacho: "marcado_en_seller" | "recogido_transportadora" | null;
+  // Issue "ocultar imprimir en recogidas" — bug real reportado por
+  // Mateo en staging: pedir la guía de un envío que la transportadora
+  // YA recogió (substatus en SUBESTADOS_YA_SALIO o status shipped/
+  // delivered) hace que Mercado Libre la rechace (NOT_PRINTABLE_STATUS)
+  // — ya calculado server-side (calcularImprimible, lib/ml/despachos.ts,
+  // la MISMA regla que decide si el despacho sigue en "pendientes de
+  // imprimir"), nunca recalculado acá. false ⟺ origenDespacho ===
+  // "recogido_transportadora" (misma fila, mismo UPDATE) — se usa esto,
+  // no ese campo, porque también cubre Pendientes si quedó una fila
+  // vieja sin refrescar todavía.
+  imprimible: boolean;
   puedeModificar: boolean;
   ventanaDeshacerMs: number;
 };
@@ -83,9 +94,35 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
     return () => clearInterval(intervalo);
   }, [props.despachadoTs, props.ventanaDeshacerMs]);
 
-  function abrirGuia(formato: "normal" | "sticker") {
-    window.open(`/api/ml/despachos/etiqueta?despachoId=${props.id}&formato=${formato}`, "_blank");
-    setGuiaVista(true);
+  // Bug real reportado por Mateo en staging: abrirGuia hacía
+  // window.open(url) directo sobre el Route Handler — cuando Mercado
+  // Libre rechaza la guía (ej. ya recogida), el Route Handler responde
+  // JSON (nunca un PDF), y esa pestaña nueva mostraba el JSON crudo.
+  // Ahora se pide primero con fetch: si falla, el error se muestra
+  // ACÁ (mismo párrafo de styles.errorTarjeta que ya usan marcar/
+  // deshacer), nunca una pestaña con el error. Solo si de verdad
+  // vino un PDF se abre la pestaña (con un blob: URL propio, nunca
+  // la URL del Route Handler — así esa pestaña nunca puede terminar
+  // mostrando un JSON aunque algo cambie del otro lado).
+  async function abrirGuia(formato: "normal" | "sticker") {
+    setEnCurso(true);
+    setError(null);
+    try {
+      const resp = await fetch(`/api/ml/despachos/etiqueta?despachoId=${props.id}&formato=${formato}`);
+      if (!resp.ok) {
+        const datos: unknown = await resp.json().catch(() => null);
+        const mensaje = datos && typeof datos === "object" && "error" in datos && typeof datos.error === "string" ? datos.error : "No se pudo obtener la guía de Mercado Libre.";
+        setError(mensaje);
+        return;
+      }
+      const pdf = await resp.blob();
+      window.open(URL.createObjectURL(pdf), "_blank");
+      setGuiaVista(true);
+    } catch {
+      setError("No se pudo obtener la guía de Mercado Libre.");
+    } finally {
+      setEnCurso(false);
+    }
   }
 
   async function marcar() {
@@ -187,29 +224,26 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
             ) : (
               <p className={styles.notaDespachado}>Despachado — ya no se puede deshacer.</p>
             )
-          ) : (
+          ) : props.imprimible ? (
             <>
-              <Boton variante="secundario" chico type="button" onClick={() => abrirGuia("normal")}>
+              <Boton variante="secundario" chico type="button" onClick={() => abrirGuia("normal")} disabled={enCurso}>
                 Ver guía (PDF)
               </Boton>
-              <Boton variante="secundario" chico type="button" onClick={() => abrirGuia("sticker")}>
+              <Boton variante="secundario" chico type="button" onClick={() => abrirGuia("sticker")} disabled={enCurso}>
                 Ver guía (sticker)
               </Boton>
-              {props.origenDespacho === "recogido_transportadora" ? (
-                // Punto 3 de la tarea: Mercado Libre ya confirmó que el
-                // transportador lo recogió (o lo entregó) sin que nadie
-                // lo marcara en Seller — "Marcar despachado" ya no tiene
-                // sentido acá (nunca llama a Mercado Libre, el task lo
-                // exige explícito), pero "Ver guía" sigue disponible.
-                <p className={styles.notaDespachado}>Ya salió.</p>
-              ) : (
-                props.puedeModificar && (
-                  <Boton chico type="button" onClick={marcar} disabled={!guiaVista || enCurso} title={guiaVista ? undefined : "Abre la guía arriba primero"}>
-                    Marcar despachado
-                  </Boton>
-                )
+              {props.puedeModificar && (
+                <Boton chico type="button" onClick={marcar} disabled={!guiaVista || enCurso} title={guiaVista ? undefined : "Abre la guía arriba primero"}>
+                  Marcar despachado
+                </Boton>
               )}
             </>
+          ) : (
+            // Issue "ocultar imprimir en recogidas": sin imprimible,
+            // Mercado Libre ya no deja pedir la guía (ni "Ver guía" ni
+            // "Marcar despachado" tienen sentido — nunca se llega a
+            // marcar algo que la transportadora ya recogió sola).
+            <p className={styles.notaDespachado}>Guía ya no disponible: la transportadora ya la recogió.</p>
           )}
           {error && <p className={styles.errorTarjeta}>{error}</p>}
         </div>
