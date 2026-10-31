@@ -170,6 +170,19 @@ export function IconoCuenta(props: IconoProps) {
   );
 }
 
+// Issue #318 — escudo con un check adentro, para "Mis datos
+// personales" (exportar/borrar) en el pie de la barra lateral, junto a
+// "Mi cuenta" — ninguno de los dos es un módulo de negocio de ninguna
+// empresa.
+export function IconoDatosPersonales(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 4 5 7v5.5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" />
+      <path d="M9.3 12.3 11.3 14.3 14.8 10.3" />
+    </Svg>
+  );
+}
+
 export function IconoCrearEmpresa(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -331,6 +344,7 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   avisosMl: IconoAvisosMl,
   cuenta: IconoCuenta,
   crearEmpresa: IconoCrearEmpresa,
+  datosPersonales: IconoDatosPersonales,
 };
 
 export function iconoDeClave(clave: keyof typeof MAPA_ICONOS, props?: IconoProps) {

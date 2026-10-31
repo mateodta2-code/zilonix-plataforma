@@ -215,6 +215,15 @@ const RUTAS_EXENTAS: Record<string, string> = {
   // redirect sigue existiendo solo por compatibilidad con un link
   // viejo, nunca lee ni escribe nada.
   "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#clip — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar y en las rutas nuevas de app/api/ml/clip/",
+  // Issue #318 (Ley 1581) — exportar o borrar los datos propios no es
+  // un permiso de MÓDULO que un rol pueda dar o quitar (como
+  // "inventario.crear"): es un derecho sobre los datos de la propia
+  // persona, el mismo para cualquier rol. El candado real es que
+  // ninguna de las dos funciones de lib/datos-personales.ts recibe un
+  // id de usuario del cliente — SIEMPRE usan el usuario de la sesión
+  // real (obtenerOCrearUsuarioActual), nunca el de otra persona.
+  "app/panel/mis-datos/page.tsx": "solo resuelve la sesión (redirige a /sign-in si no hay) y renderiza — exportar/borrar son un derecho sobre los datos propios, no un permiso de módulo; el candado real es que lib/datos-personales.ts nunca recibe un id de usuario ajeno",
+  "app/panel/mis-datos/actions.ts": "idem — las dos acciones resuelven el usuario con obtenerOCrearUsuarioActual(), nunca con un id que mande el cliente",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {
