@@ -27,6 +27,10 @@ export type TransferenciaPendiente = {
   cuentaIdExterna: string;
   nickname: string;
   tokens: TokensMl;
+  // Issue #315 (Z-LATAM-01) — el site_id real que devolvió Mercado
+  // Libre en esta misma autorización, para que la cuenta transferida
+  // también quede con su país/moneda/idioma reales, no con el default.
+  siteId: string | null;
 };
 
 export function cifrarTransferenciaPendiente(datos: TransferenciaPendiente): string {

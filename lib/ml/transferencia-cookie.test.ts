@@ -11,6 +11,7 @@ function pendienteDePrueba(): TransferenciaPendiente {
     cuentaIdExterna: "123456789",
     nickname: "VENDEDOR_TEST",
     tokens: { accessToken: "APP_USR-token-real", refreshToken: "TG-refresh-real", expiraEnSegundos: 21_600, cuentaIdExterna: "123456789" },
+    siteId: "MLM",
   };
 }
 
