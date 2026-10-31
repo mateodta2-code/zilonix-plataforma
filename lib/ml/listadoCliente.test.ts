@@ -1,9 +1,18 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+//
+// Issue #227 (fix cache) — jsdom (en vez del entorno por defecto de
+// este archivo, node) SOLO porque cargarSesiones/guardarSesiones/
+// actualizarSesion (describe nuevo, más abajo) tocan localStorage de
+// verdad — el resto de las funciones de este archivo son puras y no
+// les importa el entorno.
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  actualizarSesion,
   aplicarVendidosConfirmados,
   calcularKpisMercado,
   calcularResumenBloque,
   calcularResumenLocalBloque,
+  cargarSesiones,
   clasificarSenalVentas,
   esRelevanteAlTermino,
   estimarAproximadosListado,
@@ -11,10 +20,15 @@ import {
   fusionarProductos,
   generarEstrategiaListado,
   generarVeredictoListado,
+  guardarSesiones,
   linkHttpSeguro,
   mejorOpcionParaImportar,
+  obtenerBloquesDeSesion,
   ordenarProductos,
+  TTL_BLOQUE_MS,
+  type Bloque,
   type ProductoListado,
+  type SesionBusqueda,
 } from "./listadoCliente";
 import { ETIQUETA_APROXIMADO } from "@/lib/seguimiento/aproximados";
 
@@ -398,5 +412,110 @@ describe("calcularResumenLocalBloque — issue #235, punto 8, banner estilo Zilo
       Array.from({ length: 6 }, (_, i) => producto({ plataforma: "Amazon", titulo: `Prod ${i}`, senalVentas: { valor: 10, tipo: "mensual_piso" } }))
     );
     expect(validada.demandaValidada).toBe(true);
+  });
+});
+
+function bloque(parciales: Partial<Bloque> & { plataforma: string; termino: string }): Bloque {
+  return {
+    id: `b-${Math.random().toString(36).slice(2, 8)}`,
+    queriesUsadas: [],
+    creadoTs: Date.now(),
+    productos: [],
+    ...parciales,
+  };
+}
+
+// Issue #227 (fix cache) — persistencia con la clave real reportada en
+// staging: antes `zilonix:investigacion-stacks:${termino}` (una clave
+// POR término, sin plataforma ni país) hacía que cambiar de producto
+// perdiera la búsqueda anterior. Ahora una sola lista de sesiones
+// (SesionBusqueda[], una fila por término) bajo una sola clave.
+describe("persistencia de sesiones de investigación (fix cache, Refs #227)", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("la clave: dos términos normalizados igual (espacios, mayúsculas, tildes) son la MISMA sesión", () => {
+    let sesiones = actualizarSesion([], "Audífonos", [bloque({ plataforma: "Amazon", termino: "Audífonos" })]);
+    sesiones = actualizarSesion(sesiones, "  audífonos  ", [...obtenerBloquesDeSesion(sesiones, "Audífonos"), bloque({ plataforma: "Temu", termino: "audífonos" })]);
+    expect(sesiones).toHaveLength(1); // nunca dos sesiones para lo que es, en la práctica, el mismo término
+    expect(obtenerBloquesDeSesion(sesiones, "AUDÍFONOS")).toHaveLength(2);
+  });
+
+  it("el apilado: cambiar de producto nunca pisa ni pierde las búsquedas anteriores (bug real: antes sí)", () => {
+    let sesiones: SesionBusqueda[] = [];
+    sesiones = actualizarSesion(sesiones, "reloj", [bloque({ plataforma: "Mercado Libre Colombia", termino: "reloj" })]);
+    sesiones = actualizarSesion(sesiones, "zapatillas", [bloque({ plataforma: "Mercado Libre Colombia", termino: "zapatillas" })]);
+    sesiones = actualizarSesion(sesiones, "mochila", [bloque({ plataforma: "Amazon", termino: "mochila" })]);
+
+    expect(sesiones.map((s) => s.termino).sort()).toEqual(["mochila", "reloj", "zapatillas"]);
+    expect(obtenerBloquesDeSesion(sesiones, "reloj")).toHaveLength(1); // "reloj" sigue completo después de agregar zapatillas y mochila
+    expect(obtenerBloquesDeSesion(sesiones, "zapatillas")).toHaveLength(1);
+  });
+
+  it("el apilado: un mismo término apila bloques de VARIAS plataformas/países sin perder ninguno (plataforma ya incluye el país en Mercado Libre, ej. 'Mercado Libre Colombia')", () => {
+    let bloques = [bloque({ plataforma: "Mercado Libre Colombia", termino: "termo" })];
+    let sesiones = actualizarSesion([], "termo", bloques);
+    bloques = [...obtenerBloquesDeSesion(sesiones, "termo"), bloque({ plataforma: "Mercado Libre México", termino: "termo" })];
+    sesiones = actualizarSesion(sesiones, "termo", bloques);
+    bloques = [...obtenerBloquesDeSesion(sesiones, "termo"), bloque({ plataforma: "Amazon", termino: "termo" })];
+    sesiones = actualizarSesion(sesiones, "termo", bloques);
+
+    const finales = obtenerBloquesDeSesion(sesiones, "termo");
+    expect(finales.map((b) => b.plataforma).sort()).toEqual(["Amazon", "Mercado Libre Colombia", "Mercado Libre México"]);
+  });
+
+  it("la restauración: obtenerBloquesDeSesion devuelve EXACTO lo de ese término, sin mezclar con otros", () => {
+    const sesiones = [
+      { termino: "audifonos", bloques: [bloque({ plataforma: "Amazon", termino: "audifonos" }), bloque({ plataforma: "Temu", termino: "audifonos" })] },
+      { termino: "mouse", bloques: [bloque({ plataforma: "Mercado Libre Colombia", termino: "mouse" })] },
+    ];
+    expect(obtenerBloquesDeSesion(sesiones, "audifonos")).toHaveLength(2);
+    expect(obtenerBloquesDeSesion(sesiones, "mouse")).toHaveLength(1);
+    expect(obtenerBloquesDeSesion(sesiones, "nunca-existio")).toEqual([]); // nunca undefined/throw, un arreglo vacío
+  });
+
+  it("actualizarSesion con bloques=[] borra la sesión entera (nunca deja una fila vacía)", () => {
+    let sesiones = actualizarSesion([], "reloj", [bloque({ plataforma: "Amazon", termino: "reloj" })]);
+    expect(sesiones).toHaveLength(1);
+    sesiones = actualizarSesion(sesiones, "reloj", []);
+    expect(sesiones).toHaveLength(0);
+  });
+
+  it("el TTL: cargarSesiones descarta los bloques vencidos (>= 1h) y, si a una sesión no le queda ninguno vigente, la sesión entera desaparece", () => {
+    const ahora = Date.now();
+    const sesiones: SesionBusqueda[] = [
+      {
+        termino: "vieja",
+        bloques: [bloque({ plataforma: "Amazon", termino: "vieja", creadoTs: ahora - (TTL_BLOQUE_MS + 1_000) })], // vencido
+      },
+      {
+        termino: "mixta",
+        bloques: [
+          bloque({ plataforma: "Amazon", termino: "mixta", creadoTs: ahora - (TTL_BLOQUE_MS + 1_000) }), // vencido
+          bloque({ plataforma: "Temu", termino: "mixta", creadoTs: ahora - 1_000 }), // vigente
+        ],
+      },
+      {
+        termino: "nueva",
+        bloques: [bloque({ plataforma: "Mercado Libre Colombia", termino: "nueva", creadoTs: ahora - 1_000 })], // vigente
+      },
+    ];
+    guardarSesiones(sesiones);
+
+    const cargadas = cargarSesiones();
+    expect(cargadas.map((s) => s.termino).sort()).toEqual(["mixta", "nueva"]); // "vieja" desapareció sola, sin ningún bloque vigente
+    expect(obtenerBloquesDeSesion(cargadas, "mixta")).toHaveLength(1); // solo el bloque vigente de "mixta" sobrevive
+  });
+
+  it("TTL_BLOQUE_MS sigue siendo de al menos 1 hora (pedido explícito de la tarea)", () => {
+    expect(TTL_BLOQUE_MS).toBeGreaterThanOrEqual(60 * 60 * 1000);
+  });
+
+  it("cargarSesiones nunca revienta con localStorage corrupto/vacío/con forma rara", () => {
+    expect(cargarSesiones()).toEqual([]); // nada guardado todavía
+    localStorage.setItem("zilonix:investigacion-sesiones", "esto no es JSON válido {{{");
+    expect(cargarSesiones()).toEqual([]);
+    localStorage.setItem("zilonix:investigacion-sesiones", JSON.stringify({ no: "es un arreglo" }));
+    expect(cargarSesiones()).toEqual([]);
   });
 });

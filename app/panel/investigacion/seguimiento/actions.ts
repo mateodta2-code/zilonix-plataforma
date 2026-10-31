@@ -35,10 +35,22 @@ async function empresaActivaDe(usuarioId: string) {
 // ambiente. Nunca lanza (ver revisarAhoraUnSeguimiento) — si falla, se
 // devuelve el mensaje para avisar, pero el seguimiento ya agregado
 // nunca se deshace.
+// Refs #175 — un solo reintento (nunca más: esto corre adentro del
+// mismo request que agrega el seguimiento, antes del redirect; cada
+// intento ya hace su propia llamada a Mercado Libre con reintentos de
+// 429 — lib/trabajos/revisionDiariaSeguimiento.ts — así que encadenar
+// más acá solo alargaría el request sin agregar nada). Cubre el caso
+// real más común de un fallo transitorio (candado de renovación de
+// token ocupado por el cron, un 5xx puntual de ML) — un error de
+// cuenta/permiso de verdad (sin cuenta conectada, token vencido)
+// fallará igual la segunda vez, y ESE mensaje es el que termina en
+// pantalla.
 async function dispararPrimeraRevision(seguimiento: typeof seguimientosMl.$inferSelect): Promise<string | null> {
   const { revisarAhoraUnSeguimiento } = await import("@/lib/trabajos/revisionDiariaSeguimiento");
-  const resultado = await revisarAhoraUnSeguimiento(seguimiento);
-  return resultado.ok ? null : resultado.error;
+  const primerIntento = await revisarAhoraUnSeguimiento(seguimiento);
+  if (primerIntento.ok) return null;
+  const segundoIntento = await revisarAhoraUnSeguimiento(seguimiento);
+  return segundoIntento.ok ? null : segundoIntento.error;
 }
 
 // Issue #175 — mismo permiso que "Investigación" para ver (inventario,
@@ -163,33 +175,59 @@ export async function marcarAlertaLeidaAction(formData: FormData): Promise<void>
 // guard sync no podía exportarse de acá para probarlo directo con
 // vitest.
 
-// Issue #251 — mismo chequeo (usuario real + empresa activa + permiso)
-// que necesitan tanto el guardado individual como el de la cola en
-// lote (abajo) — nunca navega ni lanza hacia la UI, solo devuelve la
-// empresa o null.
-async function empresaConPermisoDeExtension() {
+// Refs #175 — antes las 3 ramas de abajo devolvían `null` en silencio
+// (bug reportado: ni un log). Ahora cada una loguea su motivo real del
+// lado del servidor (para diagnosticar sin adivinar) y lo devuelve
+// tipado, para que guardarDatoPaginaSeguimientoAction/
+// guardarVariosDatosPaginaSeguimientoAction puedan pasarle a
+// EscuchaExtension.tsx un motivo claro en vez de tragarse el fallo —
+// nunca navega ni lanza hacia la UI, sigue siendo una llamada de fondo.
+type ResultadoEmpresaExtension =
+  | { ok: true; empresa: Awaited<ReturnType<typeof empresaActivaDe>> }
+  | { ok: false; motivo: "sin_sesion" | "sin_empresa" | "sin_permiso" };
+
+async function empresaConPermisoDeExtension(): Promise<ResultadoEmpresaExtension> {
   const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) return null;
+  if (!usuario) {
+    console.warn("[app/panel/investigacion/seguimiento/actions] guardado de extensión: sin sesión activa.");
+    return { ok: false, motivo: "sin_sesion" };
+  }
   let empresa;
   try {
     empresa = await empresaActivaDe(usuario.id);
-  } catch {
-    return null;
+  } catch (error) {
+    console.warn(
+      "[app/panel/investigacion/seguimiento/actions] guardado de extensión: sin empresa activa:",
+      error instanceof Error ? error.message : error
+    );
+    return { ok: false, motivo: "sin_empresa" };
   }
   try {
     await requierePermiso(usuario.id, empresa.id, "inventario", "modificar");
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
-    return null; // sin permiso -> se ignora en silencio, nunca rompe la pantalla por un mensaje de fondo
+    console.warn(`[app/panel/investigacion/seguimiento/actions] guardado de extensión: sin permiso (empresa ${empresa.id}).`);
+    return { ok: false, motivo: "sin_permiso" };
   }
-  return empresa;
+  return { ok: true, empresa };
 }
 
-export async function guardarDatoPaginaSeguimientoAction(payload: unknown): Promise<void> {
-  if (!datoPaginaSeguimientoValido(payload)) return;
-  const empresa = await empresaConPermisoDeExtension();
-  if (!empresa) return;
-  await guardarDatoDePaginaSeguimiento(empresa.id, payload);
+// Refs #175 — motivo único para que EscuchaExtension.tsx muestre un
+// Toast con un mensaje claro en vez de ignorar el fallo (antes estas
+// dos acciones devolvían `void`, así que un guardado perdido era
+// indistinguible de uno exitoso del lado del cliente).
+export type ResultadoGuardadoExtension =
+  | { ok: true }
+  | {
+      ok: false;
+      motivo: "payload_invalido" | "sin_sesion" | "sin_empresa" | "sin_permiso" | "seguimiento_inactivo" | "tipo_no_coincide";
+    };
+
+export async function guardarDatoPaginaSeguimientoAction(payload: unknown): Promise<ResultadoGuardadoExtension> {
+  if (!datoPaginaSeguimientoValido(payload)) return { ok: false, motivo: "payload_invalido" };
+  const empresaResultado = await empresaConPermisoDeExtension();
+  if (!empresaResultado.ok) return empresaResultado;
+  return guardarDatoDePaginaSeguimiento(empresaResultado.empresa.id, payload);
 }
 
 // Issue #251 (corrección de Pablo, punto 7) — EscuchaExtension.tsx
@@ -202,10 +240,18 @@ export async function guardarDatoPaginaSeguimientoAction(payload: unknown): Prom
 // lecturas encoladas en orden cronológico — procesarlas en paralelo
 // podría hacer que una más vieja pise, por una carrera de escritura,
 // el resultado de una más nueva).
-export async function guardarVariosDatosPaginaSeguimientoAction(payloads: unknown): Promise<void> {
-  if (!Array.isArray(payloads) || payloads.length === 0) return;
-  const empresa = await empresaConPermisoDeExtension();
-  if (!empresa) return;
+// Refs #175 — el resultado acá es a nivel de LOTE, no por payload: un
+// item viejo de la cola que ya no tiene seguimiento activo
+// ("seguimiento_inactivo") es ruido esperado (se eliminó mientras la
+// cola tenía visitas pendientes), no un fallo que valga la pena
+// mostrar en pantalla — ese caso puntual solo se loguea (arriba, en
+// guardarDatoDePaginaSeguimiento). Lo que SÍ se avisa es que el LOTE
+// entero no se pudo ni empezar a guardar (sin sesión/empresa/permiso,
+// o ningún payload con formato válido).
+export async function guardarVariosDatosPaginaSeguimientoAction(payloads: unknown): Promise<ResultadoGuardadoExtension> {
+  if (!Array.isArray(payloads) || payloads.length === 0) return { ok: false, motivo: "payload_invalido" };
+  const empresaResultado = await empresaConPermisoDeExtension();
+  if (!empresaResultado.ok) return empresaResultado;
 
   // Corrección de Pablo (sobre 8474c60) — ordena por `leidoEn`
   // ASCENDENTE antes de guardar: el lote de la cola puede llegar
@@ -214,9 +260,11 @@ export async function guardarVariosDatosPaginaSeguimientoAction(payloads: unknow
   // viejo, al revés de "la lectura más reciente manda" (ver
   // guardarDatoDePaginaSeguimiento, lib/seguimiento/seguimientos.ts).
   const validos = payloads.filter(datoPaginaSeguimientoValido);
+  if (validos.length === 0) return { ok: false, motivo: "payload_invalido" };
   validos.sort((a, b) => new Date(a.leidoEn).getTime() - new Date(b.leidoEn).getTime());
 
   for (const payload of validos) {
-    await guardarDatoDePaginaSeguimiento(empresa.id, payload);
+    await guardarDatoDePaginaSeguimiento(empresaResultado.empresa.id, payload);
   }
+  return { ok: true };
 }

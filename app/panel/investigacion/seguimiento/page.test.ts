@@ -125,3 +125,112 @@ describe("?agregar / ?agregar_tienda — la extensión agrega un seguimiento al 
     expect(redirectsConReplace).toBe(totalRedirects);
   });
 });
+
+// Refs #175 — diagnóstico real: "productos seguidos sin datos" venía
+// de que empresaConPermisoDeExtension()/guardarDatoPaginaSeguimientoAction/
+// guardarVariosDatosPaginaSeguimientoAction devolvían `void` en
+// silencio (actions.ts, L170-193 en el reporte original) ante
+// cualquier fallo — sin sesión, sin empresa, sin permiso, payload
+// inválido, seguimiento ya no activo. Mismo criterio de prueba que el
+// resto de este archivo: chequeo estático de texto (Clerk/cookies no
+// son triviales de montar en un test unitario) — el comportamiento
+// real de guardarDatoDePaginaSeguimiento (la pieza con lógica de
+// negocio real) ya lo prueba lib/seguimiento/seguimientos.test.ts
+// contra Postgres real.
+describe("actions.ts — fallos de la extensión ya no se tragan en silencio (issue #175)", () => {
+  it("empresaConPermisoDeExtension: logea un motivo real (console.warn) en sus 3 ramas de fallo, nunca un return null mudo", () => {
+    const contenido = contenidoDe("actions.ts");
+    const inicio = contenido.indexOf("async function empresaConPermisoDeExtension");
+    const fin = contenido.indexOf("export type ResultadoGuardadoExtension");
+    expect(inicio).toBeGreaterThan(-1);
+    const bloque = contenido.slice(inicio, fin);
+
+    expect(bloque).toMatch(/motivo:\s*"sin_sesion"/);
+    expect(bloque).toMatch(/motivo:\s*"sin_empresa"/);
+    expect(bloque).toMatch(/motivo:\s*"sin_permiso"/);
+    // Las 3 ramas de fallo real (sin sesión / empresaActivaDe lanza /
+    // SinPermisoError) tienen su propio console.warn antes del return.
+    expect((bloque.match(/console\.warn\(/g) ?? []).length).toBe(3);
+  });
+
+  it("guardarDatoPaginaSeguimientoAction y guardarVariosDatosPaginaSeguimientoAction ya no devuelven void: cada rama devuelve un resultado tipado", () => {
+    const contenido = contenidoDe("actions.ts");
+    expect(contenido).toMatch(/export type ResultadoGuardadoExtension\s*=/);
+    expect(contenido).toMatch(/async function guardarDatoPaginaSeguimientoAction\(payload: unknown\): Promise<ResultadoGuardadoExtension>/);
+    expect(contenido).toMatch(/async function guardarVariosDatosPaginaSeguimientoAction\(payloads: unknown\): Promise<ResultadoGuardadoExtension>/);
+    // Nunca un `return;` desnudo dentro de estas dos funciones — todo
+    // return tiene que traer un valor (ok:true u ok:false + motivo).
+    const inicioUna = contenido.indexOf("export async function guardarDatoPaginaSeguimientoAction");
+    const inicioLote = contenido.indexOf("export async function guardarVariosDatosPaginaSeguimientoAction");
+    const bloqueAmbas = contenido.slice(inicioUna);
+    expect(inicioUna).toBeGreaterThan(-1);
+    expect(inicioLote).toBeGreaterThan(inicioUna);
+    expect(bloqueAmbas).not.toMatch(/return;\s*\n/);
+  });
+
+  it("dispararPrimeraRevision reintenta una vez si el primer intento falla (issue #175, punto 2: 'refuérzala si falla')", () => {
+    const contenido = contenidoDe("actions.ts");
+    const inicio = contenido.indexOf("async function dispararPrimeraRevision");
+    const fin = contenido.indexOf("export async function agregarSeguimientoAction");
+    expect(inicio).toBeGreaterThan(-1);
+    const bloque = contenido.slice(inicio, fin);
+    // Dos llamadas reales a revisarAhoraUnSeguimiento (primer intento +
+    // reintento), nunca solo una.
+    expect((bloque.match(/revisarAhoraUnSeguimiento\(seguimiento\)/g) ?? []).length).toBe(2);
+  });
+});
+
+// Refs #175 — EscuchaExtension.tsx es el componente que de verdad veía
+// el payload.ok/motivo que las Server Actions de arriba ahora
+// devuelven: antes ignoraba el resultado entero (`.then(() =>
+// router.refresh())`) así que un guardado fallido no dejaba NINGÚN
+// rastro visible. Chequeo estático (montar este componente necesita
+// jsdom + mocks de next/navigation; el contrato real que importa
+// mantener es "si falla, se ve un Toast").
+describe("EscuchaExtension.tsx — guardado fallido de la extensión ahora se ve en pantalla (issue #175)", () => {
+  function contenidoEscucha(): string {
+    return readFileSync(join(__dirname, "EscuchaExtension.tsx"), "utf8");
+  }
+
+  it("usa el componente Toast real (components/marco/Toast.tsx), no un aviso inventado", () => {
+    const contenido = contenidoEscucha();
+    expect(contenido).toMatch(/import\s*{\s*Toast,\s*type ItemToast\s*}\s*from\s*"@\/components\/marco\/Toast"/);
+    expect(contenido).toMatch(/<Toast items={toasts} onCerrar={cerrarToast} \/>/);
+  });
+
+  it("el guardado individual ('dato-pagina-seguimiento') avisa SIEMPRE que el resultado no sea ok", () => {
+    const contenido = contenidoEscucha();
+    const inicio = contenido.indexOf('datos.tipo === "dato-pagina-seguimiento"');
+    const fin = contenido.indexOf('datos.tipo === "cola-seguimiento"');
+    const bloque = contenido.slice(inicio, fin);
+    expect(bloque).toMatch(/if\s*\(!resultado\.ok\)\s*avisar\(MENSAJE_DE_MOTIVO\[resultado\.motivo\]\)/);
+  });
+
+  it("el guardado en lote ('cola-seguimiento') solo avisa fallos de LOTE, nunca por un item viejo puntual de la cola", () => {
+    const contenido = contenidoEscucha();
+    expect(contenido).toMatch(/MOTIVOS_DE_LOTE_PARA_AVISAR\s*=\s*new Set<MotivoFallo>\(\["sin_sesion",\s*"sin_empresa",\s*"sin_permiso"\]\)/);
+    expect(contenido).toMatch(/MOTIVOS_DE_LOTE_PARA_AVISAR\.has\(resultado\.motivo\)/);
+  });
+
+  it("todo motivo de ResultadoGuardadoExtension tiene un mensaje real en español, nunca un texto genérico", () => {
+    const contenido = contenidoEscucha();
+    for (const motivo of ["payload_invalido", "sin_sesion", "sin_empresa", "sin_permiso", "seguimiento_inactivo", "tipo_no_coincide"]) {
+      expect(contenido).toMatch(new RegExp(`${motivo}:\\s*"[^"]{20,}"`));
+    }
+  });
+});
+
+// Refs #175 — banner de página: diagnóstico real en staging (cron con
+// "procesados: 5, fallidos: 0" pero las filas en "Sin dato") sin
+// ninguna pista de que la causa era no tener NINGUNA cuenta de
+// Mercado Libre conectada. Reusa obtenerCuentaMlActiva (lib/ml/cuentas.ts)
+// — nunca una columna/migración nueva, nunca una llamada a Mercado
+// Libre desde la pantalla.
+describe("page.tsx — aviso de 'sin cuenta de Mercado Libre conectada' (issue #175)", () => {
+  it("solo avisa cuando hay seguimientos activos Y ninguna cuenta ML activa — reusa obtenerCuentaMlActiva, sin llamar a Mercado Libre", () => {
+    const contenido = contenidoDe("page.tsx");
+    expect(contenido).toMatch(/import\s*{\s*obtenerCuentaMlActiva\s*}\s*from\s*"@\/lib\/ml\/cuentas"/);
+    expect(contenido).toMatch(/!cuentaMlActiva\s*&&\s*seguimientos\.length\s*>\s*0/);
+    expect(contenido).toMatch(/href="\/panel\/conectar-ml"/);
+  });
+});
