@@ -119,6 +119,40 @@ describe("sincronizarVentasCuenta (issue #130)", () => {
     expect(fila.despachos_ml).toMatchObject({ shipmentIdExterno: "5401", status: "shipped", logisticType: "self_service" });
   });
 
+  // Issue "pendientes no muestra venta nueva" — bug real confirmado en
+  // staging (cuenta STOREKINGSAS, empresa sharel): 48 de 250 pedidos se
+  // quedaban sin fila en despachos_ml, de forma repetida en varias
+  // corridas de sincronización en varios días — nunca se autocorregía
+  // solo. Causa real: el código revisaba `orden.shipping?.id` de la
+  // orden del LISTADO (/orders/search) para decidir si llamaba a
+  // sincronizarDespacho, pero guardarOrdenMl reemplaza esa orden
+  // LOCALMENTE por la del DETALLE (GET /orders/{id}) — dos objetos
+  // distintos. Esta prueba reproduce exactamente eso: el listado NO
+  // trae shipping, el detalle SÍ.
+  it("usa el shipmentId del DETALLE para sincronizar despachos_ml, aunque el listado no traiga shipping.id", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      if (u.pathname === "/orders/search") {
+        return json({ results: u.searchParams.get("offset") === "0" ? [orden(501, { shipping: null })] : [] });
+      }
+      if (u.pathname === "/orders/501") return json(orden(501)); // el detalle SÍ trae shipping (id 5501)
+      if (u.pathname === "/shipments/5501") return json({ status: "ready_to_ship", substatus: null, logistic_type: "xd_drop_off" });
+      if (u.pathname === "/shipments/5501/costs") return json({ senders: [{ cost: 0 }] });
+      if (u.pathname === "/shipments/5501/sla") return json({ status: "on_time", expected_date: "2026-10-25T20:00:00.000Z" });
+      if (u.pathname === "/items") return json([{ code: 200, body: { id: "MCO501" } }]);
+      throw new Error(`fetch no esperado: ${u.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await sincronizarVentasCuenta(empresaId, cuentaMlId, "123456", { desde: new Date("2026-10-20T00:00:00Z") }, sinEspera);
+    expect(resultado).toMatchObject({ leidas: 1, guardadas: 1, fallidas: 0 });
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(despachosMl).innerJoin(pedidos, eq(pedidos.id, despachosMl.pedidoId)).where(eq(pedidos.pedidoIdExterno, "501"))
+    );
+    expect(fila.despachos_ml).toMatchObject({ shipmentIdExterno: "5501", status: "ready_to_ship", logisticType: "xd_drop_off" });
+  });
+
   it("sin foto en ML la venta se guarda igual con imagen vacía, y un error en una venta no corta las demás", async () => {
     vi.stubGlobal(
       "fetch",

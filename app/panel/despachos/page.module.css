@@ -56,6 +56,16 @@
   pointer-events: none;
 }
 
+/* Issue "pendientes no muestra venta nueva" — botón + mensaje de
+   "Sincronizar ahora", arriba de los filtros de Pendientes. Sin caja
+   propia (ya hay suficiente marco visual en .filtros justo abajo). */
+.sincronizarAhora {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
 .campoBusqueda {
   min-width: 200px;
 }

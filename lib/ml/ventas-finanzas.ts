@@ -87,6 +87,22 @@ async function leerDetalleOrden(token: string, orden: OrdenMl, esperar: Esperar)
   return orden;
 }
 
+// Issue "pendientes no muestra venta nueva" — bug real confirmado en
+// staging (cuenta STOREKINGSAS, empresa sharel: 48 de 250 pedidos sin
+// fila en despachos_ml, repetido igual en varias corridas de
+// sincronización en varios días — nunca se autocorregía solo, así que
+// no era una demora de Mercado Libre en generar el envío). guardarOrdenMl
+// SÍ resuelve bien el shipmentId (shipmentIdExterno, abajo) — lo prueban
+// las ventas de esta misma cuenta con forma_entrega/envío correctos — el
+// bug estaba en quien LLAMA a esta función (sincronizarVentasCuenta, más
+// abajo): revisaba `orden.shipping?.id` de la orden del LISTADO
+// (/orders/search), que esta función reasigna LOCALMENTE a la del
+// DETALLE (leerDetalleOrden, GET /orders/{id}) sin que ese cambio se
+// vea afuera — dos objetos distintos, solo uno confiable. Se expone el
+// shipmentId YA resuelto para que el llamador nunca tenga que adivinar
+// cuál de los dos usar.
+export type ResultadoGuardarOrdenMl = ResultadoGuardarVenta & { shipmentIdExterno: string | null };
+
 // Una orden del listado: primero su detalle (comisión real), después
 // su envío, los costos del envío y las publicaciones. La usan
 // sincronizarVentasCuenta y la importación inicial (lib/ml/importacion.ts).
@@ -96,7 +112,7 @@ export async function guardarOrdenMl(
   token: string,
   orden: OrdenMl,
   esperar: Esperar = esperarDeVerdad
-): Promise<ResultadoGuardarVenta> {
+): Promise<ResultadoGuardarOrdenMl> {
   orden = await leerDetalleOrden(token, orden, esperar);
   const shipmentId = orden.shipping?.id != null ? String(orden.shipping.id) : null;
   let envio: EnvioMl | null = null;
@@ -138,7 +154,7 @@ export async function guardarOrdenMl(
       console.error(`[ventas-finanzas] no se pudo registrar el evento de entrega de la orden ${orden.id}:`, error instanceof Error ? error.message : "error desconocido");
     });
   }
-  return guardada;
+  return { ...guardada, shipmentIdExterno: shipmentId };
 }
 
 export type ResultadoSyncVentas = {
@@ -189,8 +205,20 @@ export async function sincronizarVentasCuenta(
           // (sincronizarDespacho, que SÍ guarda cualquier status,
           // incluido shipped/delivered — nunca filtra por estado al
           // guardar, solo al listar).
-          if (orden.shipping?.id) {
-            await sincronizarDespacho(empresaId, cuentaMlId, guardada.pedidoId, String(orden.shipping.id)).catch((error) => {
+          //
+          // Issue "pendientes no muestra venta nueva" — bug real
+          // confirmado en staging: acá se usaba `orden.shipping?.id`
+          // (la orden del LISTADO, /orders/search), no el shipmentId
+          // que guardarOrdenMl de verdad resolvió con el DETALLE de
+          // la orden (ver el comentario completo junto a
+          // ResultadoGuardarOrdenMl) — 48 de 250 pedidos de una cuenta
+          // real se quedaban sin fila en despachos_ml por esto, de
+          // forma repetida en cada sincronización, nunca algo que se
+          // autocorrigiera solo. guardada.shipmentIdExterno es el
+          // mismo que ya se usó para traer envío/costos — nunca hay
+          // que volver a adivinar cuál orden mirar.
+          if (guardada.shipmentIdExterno) {
+            await sincronizarDespacho(empresaId, cuentaMlId, guardada.pedidoId, guardada.shipmentIdExterno).catch((error) => {
               console.error(`[ventas-finanzas] no se pudo sincronizar el despacho de la orden ${orden.id}:`, error instanceof Error ? error.message : "error desconocido");
             });
           }
