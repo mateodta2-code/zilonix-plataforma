@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { bodegas, cuentasMl, despachosMl, pedidoItems, pedidos, stockBodega } from "@/db/schema";
+import { bodegas, cuentasMl, despachosMl, pedidoEventos, pedidoItems, pedidos, stockBodega } from "@/db/schema";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { obtenerEtiquetaPdfMl, obtenerShipmentMl, obtenerSlaEnvioMl } from "@/lib/ml/cliente";
 import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike, rangoUltimosNDiasBogota } from "@/lib/filtros-listado";
@@ -452,6 +452,14 @@ export type TarjetaDespacho = {
   // marcó una persona en Seller, o Mercado Libre ya confirmó que el
   // transportador lo recogió, sin que nadie lo marcara acá todavía.
   origenDespacho: "marcado_en_seller" | "recogido_transportadora" | null;
+  // Issue "fechas equivocadas en Despachados" — fecha real en que
+  // Mercado Libre confirmó el despacho (pedido_eventos, paso
+  // "despacho", sourced from status_history.date_shipped — ver
+  // guardarOrdenMl en lib/ml/ventas-finanzas.ts). null si todavía no
+  // existe ese evento (p. ej. una venta que nunca se volvió a
+  // sincronizar después de marcarse). Solo lo usa fechaDespachoDe, más
+  // abajo — nunca actualizado_ts, que se pisa en cada sincronización.
+  fechaEventoDespacho: Date | null;
 };
 
 export type PestañaDespachos = "pendientes" | "despachados";
@@ -494,9 +502,11 @@ const STATUS_PENDIENTES = "ready_to_ship";
 //
 // Orden en "pendientes": por fecha de VENTA descendente (pedido de
 // Mateo, corrige la Fase 1 que ordenaba por plazo). Orden en
-// "despachados": por la fecha REAL del despacho (despachado_ts si una
-// persona lo marcó, si no actualizado_ts — el momento en que se
-// confirmó que ya salió), también descendente — bug real reportado
+// "despachados": por la fecha REAL del despacho (fechaRealDespacho,
+// más abajo — despachado_ts si una persona lo marcó, si no el evento
+// real de Mercado Libre, si no la fecha de la orden; nunca
+// actualizado_ts, que se pisa en cada sincronización), también
+// descendente — bug real reportado
 // por Mateo: pedidos que la transportadora ya recogió, pero que nadie
 // marcó en Seller, desaparecían por completo (ni Pendientes, que ya
 // los excluye por status/substatus, ni Despachados, que antes solo
@@ -513,17 +523,40 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       condiciones.push(eq(despachosMl.logisticType, filtro.tipo as TipoDespachoFiltro));
     }
 
+    // Issue "fechas equivocadas en Despachados" — bug real reportado por
+    // Mateo en staging: acá se usaba actualizado_ts (se pisa en CADA
+    // sincronización, incluida la periódica) como "fecha real de
+    // salida" — por eso un envío ENTREGADO hacía semanas podía aparecer
+    // agrupado en "Hoy", y una orden vieja caía en cualquier día según
+    // cuándo se refrescó por última vez. La fecha real es: despachado_ts
+    // si una persona lo marcó en Seller; si no, la fecha del evento
+    // "despacho" en pedido_eventos (status_history.date_shipped,
+    // confirmado real — ver guardarOrdenMl en lib/ml/ventas-finanzas.ts,
+    // escrito tanto por la importación inicial como por esta misma
+    // sincronización periódica); si tampoco existe ese evento todavía,
+    // la fecha de la orden. Nunca actualizado_ts.
+    const fechaRealDespacho = sql`coalesce(${despachosMl.despachadoTs}, ${pedidoEventos.ts}, ${pedidos.fecha})`;
+
     if (esDespachados) {
       const { inicio, finExclusivo } = rangoUltimosNDiasBogota(new Date(), DIAS_VENTANA_DESPACHADOS);
-      // "!" en los or(): siempre se les pasan 2+ argumentos definidos,
-      // drizzle solo contempla undefined para un or() vacío.
+      // "!" en los or()/and(): siempre se les pasan 2+ argumentos
+      // definidos, drizzle solo contempla undefined para un or()/and()
+      // vacío.
       const marcadoEnSeller = and(isNotNull(despachosMl.despachadoTs), gte(despachosMl.despachadoTs, inicio), lt(despachosMl.despachadoTs, finExclusivo))!;
       const yaSalioDeLaTienda = or(inArray(despachosMl.substatus, SUBESTADOS_YA_SALIO), inArray(despachosMl.status, STATUS_YA_SALIO))!;
+      // despachado_ts ya es null en este caso (por el isNull de abajo),
+      // así que fechaRealDespacho se reduce a coalesce(evento, fecha
+      // de la orden) — el mismo criterio de 3 niveles de más arriba.
+      // .toISOString(): a diferencia de gte()/lt() (que conocen el tipo
+      // de la columna y serializan el Date solas), un parámetro suelto
+      // dentro de un sql`` crudo se lo pasa tal cual al driver — postgres.js
+      // no acepta un Date ahí (bug real encontrado en CI: "Received an
+      // instance of Date"). Postgres igual lo castea bien a timestamptz
+      // por el contexto (se compara contra fechaRealDespacho, timestamptz).
       const recogidoSinMarcar = and(
         isNull(despachosMl.despachadoTs),
         yaSalioDeLaTienda,
-        gte(despachosMl.actualizadoTs, inicio),
-        lt(despachosMl.actualizadoTs, finExclusivo)
+        sql`${fechaRealDespacho} >= ${inicio.toISOString()} and ${fechaRealDespacho} < ${finExclusivo.toISOString()}`
       )!;
       condiciones.push(or(marcadoEnSeller, recogidoSinMarcar)!);
     } else {
@@ -561,15 +594,18 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
         pedidoIdExterno: pedidos.pedidoIdExterno,
         fechaPedido: pedidos.fecha,
         actualizadoTs: despachosMl.actualizadoTs,
+        fechaEventoDespacho: pedidoEventos.ts,
       })
       .from(despachosMl)
       .innerJoin(pedidos, eq(despachosMl.pedidoId, pedidos.id))
       .innerJoin(cuentasMl, eq(despachosMl.cuentaMlId, cuentasMl.id))
+      // Revisión de Pablo (PR #310, mismo criterio aplicado acá): el
+      // join nunca depende solo de la FK — empresa_id explícito también
+      // en la condición, aunque pedido_eventos_pedido_paso_unico ya
+      // garantiza a lo sumo una fila por (pedido, paso).
+      .leftJoin(pedidoEventos, and(eq(pedidoEventos.pedidoId, despachosMl.pedidoId), eq(pedidoEventos.paso, "despacho"), eq(pedidoEventos.empresaId, empresaId)))
       .where(and(...condiciones))
-      .orderBy(
-        esDespachados ? desc(sql`coalesce(${despachosMl.despachadoTs}, ${despachosMl.actualizadoTs})`) : desc(pedidos.fecha),
-        desc(despachosMl.id)
-      );
+      .orderBy(esDespachados ? desc(fechaRealDespacho) : desc(pedidos.fecha), desc(despachosMl.id));
 
     if (filas.length === 0) return [];
 
@@ -641,6 +677,7 @@ export async function listarTarjetasDespacho(empresaId: string, filtro: FiltroTa
       pedidoIdExterno: f.pedidoIdExterno,
       fechaPedido: f.fechaPedido,
       actualizadoTs: f.actualizadoTs,
+      fechaEventoDespacho: f.fechaEventoDespacho,
       comprador: null,
       bodegaAsignada: null,
       items: itemsPorPedido.get(f.pedidoId) ?? [],
@@ -864,10 +901,18 @@ export function agruparDespachosPorDia(
   }));
 }
 
-// Fecha real del despacho — la que marcó la persona si lo marcó, si
-// no el momento en que se confirmó que ya salió (actualizado_ts).
+// Fecha real del despacho — la que marcó la persona si lo marcó en
+// Seller; si no, la fecha en que Mercado Libre confirmó que salió
+// (pedido_eventos, paso "despacho" — status_history.date_shipped real,
+// ver guardarOrdenMl en lib/ml/ventas-finanzas.ts); si ninguna de las
+// dos existe todavía, la fecha de la orden. Nunca actualizado_ts (bug
+// real reportado por Mateo: esa columna se pisa en cada sincronización
+// y no tiene ninguna relación con cuándo salió de verdad el pedido —
+// por eso un entregado de hace semanas podía aparecer agrupado en
+// "Hoy"). Mismo criterio de 3 niveles que usa la consulta SQL de
+// listarTarjetasDespacho — ver fechaRealDespacho ahí.
 export function fechaDespachoDe(d: TarjetaDespacho): Date {
-  return d.despachadoTs ?? d.actualizadoTs;
+  return d.despachadoTs ?? d.fechaEventoDespacho ?? d.fechaPedido;
 }
 
 // Gate "Abre la guía arriba primero" — Marcar despachado nunca llama a

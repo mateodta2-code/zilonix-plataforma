@@ -250,12 +250,16 @@
   display: block;
 }
 
-/* Zoom accesible (punto 4): popover a ~2.5x, por hover O foco de
-   teclado (:focus-within en el contenedor, no solo :hover) — nunca
-   mueve el layout (position: absolute, no cambia el tamaño de
-   .imagenItem). Mismo archivo de imagen, solo a escala: no hay una
-   foto en mayor resolución guardada (pedido_items solo guarda la
-   miniatura). */
+/* Zoom accesible (punto 4 de la Fase 1; fix-despachados-zoom-fechas):
+   popover a ~2.5x — nunca mueve el layout (position: absolute, no
+   cambia el tamaño de .imagenItem). Mismo archivo de imagen, solo a
+   escala: no hay una foto en mayor resolución guardada (pedido_items
+   solo guarda la miniatura). Abrir/cerrar es un bug real reportado en
+   staging: con :hover/:focus-within puro, un tap en touch (sin hover
+   real) deja el foco puesto y el zoom se queda pegado encima del
+   título/precio/datos — por eso ahora es TarjetaDespachoCliente.tsx
+   quien decide (hover, click, click afuera o Esc) y solo pone/quita
+   .lupaAbierta; esta clase nunca se activa sola por CSS. */
 .lupa {
   position: absolute;
   top: 0;
@@ -278,8 +282,7 @@
   object-fit: cover;
 }
 
-.contenedorImagen:hover .lupa,
-.contenedorImagen:focus-within .lupa {
+.lupaAbierta {
   opacity: 1;
   visibility: visible;
 }
