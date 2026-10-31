@@ -138,9 +138,13 @@ function query(params: Record<string, string | undefined>): string {
 
 type Pagina<T> = { results?: T[]; paging?: { total?: unknown } };
 
-async function pagina<T>(ruta: string, token: string, q: string): Promise<Pagina<T>> {
+// null = 404 aceptado como «no hay resultados» (ver vacioSi404).
+async function pagina<T>(ruta: string, token: string, q: string, aceptar404 = false): Promise<Pagina<T> | null> {
   const resp = await pedirLecturaMl<Pagina<T>>(ruta, token, { cabeceras: CABECERA_ADS, query: q });
-  if (!resp.ok) throw new MlRespuestaInesperadaError(resp.status, ruta);
+  if (!resp.ok) {
+    if (aceptar404 && resp.status === 404) return null;
+    throw new MlRespuestaInesperadaError(resp.status, ruta);
+  }
   return resp.data ?? {};
 }
 
@@ -151,14 +155,20 @@ async function todasLasPaginas<T>(
   // Entre páginas, no antes de la primera: si el plazo ya venció, no
   // se arranca otra petición que el curl del workflow va a cortar a
   // la mitad. La primera igual corre: quien llama ya vigiló el plazo.
-  seguir?: () => void
+  seguir?: () => void,
+  // Un 404 en la PRIMERA página se toma como lista vacía (campaigns/search
+  // de STOREKINGSAS en staging, 30-oct: 404 con un filtro de estado sin
+  // campañas cortaba toda la sincronización). Un 404 a mitad de la
+  // paginación sigue siendo un error: ahí sí faltaría algo.
+  vacioSi404 = false
 ): Promise<T[]> {
   const acumulado: T[] = [];
   let offset = 0;
   while (offset < TOPE_PAGINACION) {
     if (offset > 0) seguir?.();
     const limit = Math.min(LIMITE_PAGINA, TOPE_PAGINACION - offset);
-    const data = await pagina<T>(ruta, token, query({ ...base, limit: String(limit), offset: String(offset) }));
+    const data = await pagina<T>(ruta, token, query({ ...base, limit: String(limit), offset: String(offset) }), vacioSi404 && offset === 0);
+    if (data === null) return [];
     const results = Array.isArray(data.results) ? data.results : [];
     acumulado.push(...results);
     const total = typeof data.paging?.total === "number" ? data.paging.total : null;
@@ -229,7 +239,9 @@ export async function listarCampanas(
       metrics: filtro.metricas,
       metrics_summary: filtro.metricas ? "true" : undefined,
     },
-    filtro.seguir
+    filtro.seguir,
+    // 404 = ninguna campaña en ese estado: lista vacía, no corta la sync.
+    true
   );
 }
 
@@ -270,7 +282,10 @@ export async function metricasDiariasCuenta(
       metrics: METRICAS_CAMPANA,
       aggregation_type: "DAILY",
     },
-    rango.seguir
+    rango.seguir,
+    // Misma ruta que listarCampanas: un 404 es «sin filas diarias», no
+    // un error que tire lo ya guardado de las campañas.
+    true
   );
 }
 
