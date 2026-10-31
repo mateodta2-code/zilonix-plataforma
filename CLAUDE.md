@@ -81,13 +81,14 @@ Estas reglas aplican tanto a este repo (`zilonix-plataforma`) como al Zilonix OS
 
 - **Nada pasa a producción sin pasar antes por staging.** La versión de `package.json` sube SOLO en el release a la rama `produccion`, nunca en un PR normal a `main`.
 - **Changelog: cada PR deja su propio fragmento en `docs/changelog/pendientes/<rama>.md`** — nunca editar `docs/CHANGELOG.md` directamente en un PR normal.
-- **Un solo PR con migración pendiente de fusionar a la vez; cada cambio de tablas va en una migración versionada.** Detalle y mecánica: `docs/claude/migraciones.md`.
+- **Una migración a la vez.** Antes de crear una, pregunta a Pablo de quién es el turno; Pablo lleva el turno en el diario del equipo. Si la tarea necesita migración, PARA y pregunta antes de escribirla. Detalle y mecánica: `docs/claude/migraciones.md`.
 - **Nombre de rama según el frente que toca** (`seguridad-`, `docs-`, `test-`, `feat-`, `fix-`, `ci-`, `chore-`…) **y fusión siempre por squash** — un commit por PR en `main`.
 - **Toda rama lista para revisar se abre como Pull Request (borrador) el mismo día.** Una rama sin PR abierto nunca corre CI.
 - **Nunca commits directos a `main` sin pasar por Pull Request, con CI en verde antes de fusionar.** `main` tiene un ruleset de GitHub que lo fuerza.
 - **Nunca force-push**, ni a una rama con PR abierto ni a `main` — para actualizar una rama contra `main`, usar `git merge origin/main`.
 - **Commits y PRs referencian el issue con `Refs #N`, nunca `Closes #N`** — así el issue se cierra a mano, cuando de verdad se verificó, no solo al fusionar.
 - **Avisar antes de tocar `extension/` o `db/schema.ts`.** Ambos tienen consecuencias fuera del PR: `extension/` exige reinstalación completa del lado de cada usuario (nunca alcanza con "Recargar"), y `db/schema.ts` dispara una migración versionada con su propio turno (ver arriba).
+- **Todo módulo nuevo usa el diseño de marca de `/panel` (Inicio):** fondo oscuro, bordes con degradado plata-azul, esquinas redondeadas, títulos de sección pequeños en mayúscula, estilos y tokens existentes de `globals.css`/Tailwind, sin paleta nueva, y debe funcionar en tema claro y oscuro.
 
 ### Cómo se trabaja con Claude Code en este proyecto
 
