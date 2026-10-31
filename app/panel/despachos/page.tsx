@@ -30,8 +30,16 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
+import { Tarjeta } from "@/components/marco/Tarjeta";
 import { TarjetaDespachoCliente } from "./TarjetaDespachoCliente";
 import styles from "./page.module.css";
+
+// Las 3 pestañas reales de la pantalla — "impresion" es nueva
+// (reportado por Mateo: la impresión masiva vivía adentro de
+// Pendientes, mezclada con las tarjetas). listarTarjetasDespacho solo
+// conoce "pendientes"/"despachados_hoy" (lib/ml/despachos.ts) — en
+// "impresion" ni siquiera se le llama, no hace falta esa data acá.
+type PestañaPagina = "pendientes" | "despachados_hoy" | "impresion";
 
 function colorEstadoDespacho(estado: string | null): EstadoChip {
   if (estado === "ready_to_ship") return "exito";
@@ -69,10 +77,11 @@ function hrefConFiltros(base: Record<string, string | undefined>, cambios: Recor
 // Fase 1 de Despachos (issue "Despachos") — tarjetas agrupadas por
 // plazo, en vez de la tabla simple de la tarea 2.10. La impresión
 // masiva de siempre (listarDespachosPendientes/obtenerEtiquetasPdf,
-// más abajo) se mantiene intacta, solo que ahora vive como una
-// sección aparte debajo de las tarjetas — "Mantén la impresión masiva
-// de PDF actual", pedido explícito de la tarea, nunca se rediseñó esa
-// parte.
+// más abajo) se mantiene intacta — mismo alcance, mismo Route
+// Handler — pero reportado por Mateo tras el PR #312: mezclada con
+// las tarjetas de Pendientes se perdía de vista. Ahora vive en su
+// propia pestaña ("Impresión masiva de guías"), al lado de
+// "Despachados hoy".
 export default async function DespachosPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -94,12 +103,18 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
 
   const cuentaFiltro = normalizarParametro(searchParams.cuenta);
   const tipoFiltro = normalizarParametro(searchParams.tipo);
-  const pestañaFiltro: PestañaDespachos = normalizarParametro(searchParams.pestaña) === "despachados_hoy" ? "despachados_hoy" : "pendientes";
+  const valorPestaña = normalizarParametro(searchParams.pestaña);
+  const pestañaFiltro: PestañaPagina = valorPestaña === "despachados_hoy" ? "despachados_hoy" : valorPestaña === "impresion" ? "impresion" : "pendientes";
+  // listarTarjetasDespacho solo distingue pendientes/despachados_hoy
+  // — en la pestaña de impresión ni siquiera hace falta pedirle esa
+  // data (ni gastar el backfill de plazo/refresco de estado en vivo
+  // por algo que no se va a mostrar).
+  const pestañaParaTarjetas: PestañaDespachos = pestañaFiltro === "despachados_hoy" ? "despachados_hoy" : "pendientes";
 
   const [cuentas, cuentasConError, tarjetas] = await Promise.all([
     listarCuentasConectadas(empresa.id),
     listarCuentasConErrorDespacho(empresa.id),
-    listarTarjetasDespacho(empresa.id, { cuentaId: cuentaFiltro, tipo: tipoFiltro, pestaña: pestañaFiltro }),
+    pestañaFiltro === "impresion" ? Promise.resolve([]) : listarTarjetasDespacho(empresa.id, { cuentaId: cuentaFiltro, tipo: tipoFiltro, pestaña: pestañaParaTarjetas }),
   ]);
   const ahora = new Date();
   const grupos = agruparDespachosPorDia(tarjetas, ahora);
@@ -135,80 +150,85 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
         pestanas={[
           { etiqueta: "Pendientes", href: hrefConFiltros(filtrosBase, { pestaña: undefined }), activa: pestañaFiltro === "pendientes" },
           { etiqueta: "Despachados hoy", href: hrefConFiltros(filtrosBase, { pestaña: "despachados_hoy" }), activa: pestañaFiltro === "despachados_hoy" },
+          { etiqueta: "Impresión masiva de guías", href: hrefConFiltros(filtrosBase, { pestaña: "impresion" }), activa: pestañaFiltro === "impresion" },
         ]}
       />
 
-      <form method="get" className={styles.filtros}>
-        <input type="hidden" name="pestaña" value={pestañaFiltro} />
-        <Campo etiqueta="Cuenta">
-          <select name="cuenta" defaultValue={cuentaFiltro ?? ""} className="zx-control">
-            <option value="">Todas</option>
-            {cuentas.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nickname}
-              </option>
-            ))}
-          </select>
-        </Campo>
-        <Campo etiqueta="Tipo">
-          <select name="tipo" defaultValue={tipoFiltro ?? ""} className="zx-control">
-            <option value="">Todos</option>
-            {TIPOS_DESPACHO_FILTRO.map((t) => (
-              <option key={t} value={t}>
-                {ETIQUETA_TIPO_DESPACHO[t]}
-              </option>
-            ))}
-          </select>
-        </Campo>
-        <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
-            Filtrar
-          </Boton>
-          {(cuentaFiltro || tipoFiltro) && (
-            <BotonLink href={hrefConFiltros({}, { pestaña: pestañaFiltro })} variante="fantasma" chico>
-              Limpiar filtros
-            </BotonLink>
-          )}
-        </div>
-      </form>
-
-      {tarjetas.length === 0 ? (
-        <EstadoVacio>{pestañaFiltro === "despachados_hoy" ? "Todavía no se despachó nada hoy." : "No hay despachos pendientes."}</EstadoVacio>
+      {pestañaFiltro === "impresion" ? (
+        <ImpresionMasiva empresaId={empresa.id} />
       ) : (
-        grupos.map((grupo) => (
-          <section key={grupo.etiqueta} className={styles.grupoDia}>
-            <h2 className={styles.tituloGrupo}>{grupo.etiqueta}</h2>
-            <div className={styles.listaAncha}>
-              {grupo.despachos.map((d) => (
-                <TarjetaDespachoCliente
-                  key={d.id}
-                  id={d.id}
-                  logisticType={d.logisticType}
-                  status={d.status}
-                  estadoTraducido={etiquetaEstadoEnvio(d.status, null)}
-                  despachadoTs={d.despachadoTs}
-                  guiaVistaTs={d.guiaVistaTs}
-                  cuentaNickname={d.cuentaNickname}
-                  pedidoIdExterno={d.pedidoIdExterno}
-                  fechaPedido={d.fechaPedido}
-                  comprador={d.comprador}
-                  bodegaAsignada={d.bodegaAsignada}
-                  items={d.items}
-                  etiquetaTipo={ETIQUETA_TIPO_TARJETA[d.logisticType ?? "otro"] ?? "Otro"}
-                  esFlex={esFlex(d.logisticType)}
-                  chipPlazo={formatoPlazoChip(d.slaExpectedDate)}
-                  estadoPlazo={estadoPlazo(d.slaExpectedDate, ahora)}
-                  estadoEnvioTexto={etiquetaEstadoEnvio(d.status, d.substatus)}
-                  puedeModificar={puedeModificar}
-                  ventanaDeshacerMs={VENTANA_DESHACER_MS}
-                />
-              ))}
+        <>
+          <form method="get" className={styles.filtros}>
+            <input type="hidden" name="pestaña" value={pestañaFiltro} />
+            <Campo etiqueta="Cuenta">
+              <select name="cuenta" defaultValue={cuentaFiltro ?? ""} className="zx-control">
+                <option value="">Todas</option>
+                {cuentas.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nickname}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <Campo etiqueta="Tipo">
+              <select name="tipo" defaultValue={tipoFiltro ?? ""} className="zx-control">
+                <option value="">Todos</option>
+                {TIPOS_DESPACHO_FILTRO.map((t) => (
+                  <option key={t} value={t}>
+                    {ETIQUETA_TIPO_DESPACHO[t]}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <div className={styles.accionesFiltro}>
+              <Boton type="submit" chico>
+                Filtrar
+              </Boton>
+              {(cuentaFiltro || tipoFiltro) && (
+                <BotonLink href={hrefConFiltros({}, { pestaña: pestañaFiltro })} variante="fantasma" chico>
+                  Limpiar filtros
+                </BotonLink>
+              )}
             </div>
-          </section>
-        ))
-      )}
+          </form>
 
-      {pestañaFiltro === "pendientes" && <ImpresionMasiva empresaId={empresa.id} />}
+          {tarjetas.length === 0 ? (
+            <EstadoVacio>{pestañaFiltro === "despachados_hoy" ? "Todavía no se despachó nada hoy." : "No hay despachos pendientes."}</EstadoVacio>
+          ) : (
+            grupos.map((grupo) => (
+              <section key={grupo.etiqueta} className={styles.grupoDia}>
+                <h2 className={styles.tituloGrupo}>{grupo.etiqueta}</h2>
+                <div className={styles.listaAncha}>
+                  {grupo.despachos.map((d) => (
+                    <TarjetaDespachoCliente
+                      key={d.id}
+                      id={d.id}
+                      logisticType={d.logisticType}
+                      status={d.status}
+                      estadoTraducido={etiquetaEstadoEnvio(d.status, null)}
+                      despachadoTs={d.despachadoTs}
+                      guiaVistaTs={d.guiaVistaTs}
+                      cuentaNickname={d.cuentaNickname}
+                      pedidoIdExterno={d.pedidoIdExterno}
+                      fechaPedido={d.fechaPedido}
+                      comprador={d.comprador}
+                      bodegaAsignada={d.bodegaAsignada}
+                      items={d.items}
+                      etiquetaTipo={ETIQUETA_TIPO_TARJETA[d.logisticType ?? "otro"] ?? "Otro"}
+                      esFlex={esFlex(d.logisticType)}
+                      chipPlazo={formatoPlazoChip(d.slaExpectedDate)}
+                      estadoPlazo={estadoPlazo(d.slaExpectedDate, ahora)}
+                      estadoEnvioTexto={etiquetaEstadoEnvio(d.status, d.substatus)}
+                      puedeModificar={puedeModificar}
+                      ventanaDeshacerMs={VENTANA_DESHACER_MS}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))
+          )}
+        </>
+      )}
 
       <BotonLink href="/panel/pedidos" variante="fantasma" chico className={styles.volver}>
         Volver a pedidos
@@ -218,43 +238,49 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
 }
 
 // Impresión masiva de siempre (tarea 2.10 / issue "tabla completa de
-// despachos") — sin tocar: mismo alcance (imprimible=true y sin
-// etiqueta impresa), mismo Route Handler, nunca confía en lo que
-// mande el formulario (ese Route Handler revalida contra
-// listarDespachosPendientes de nuevo).
+// despachos") — sin tocar la funcionalidad (mismo alcance,
+// imprimible=true y sin etiqueta impresa; mismo Route Handler, que
+// nunca confía en lo que mande el formulario y revalida contra
+// listarDespachosPendientes de nuevo). Pedido de Mateo: su propia
+// pestaña, no mezclada con las tarjetas de Pendientes — <Tarjeta> le
+// da el mismo borde degradado plata-azul y fondo oscuro del resto de
+// /panel (sin paleta nueva, ya funciona en los dos temas).
 async function ImpresionMasiva({ empresaId }: { empresaId: string }) {
   const resultado = await listarDespachosFiltrados(empresaId, {});
-  if (resultado.total === 0) return null;
   return (
-    <section className={styles.grupoDia}>
+    <Tarjeta>
       <h2 className={styles.tituloGrupo}>Impresión masiva de guías</h2>
-      <form action="/api/ml/despachos/etiquetas" method="POST" target="_blank" className={styles.form}>
-        <Tabla encabezados={["", "Envío", "Tipo", "Estado", "Actualizado"]}>
-          {resultado.despachos.map((d) => (
-            <FilaTabla key={d.id}>
-              <CeldaTabla>
-                <input type="checkbox" name="shipmentId" value={d.shipmentIdExterno} defaultChecked aria-label={`Seleccionar envío ${d.shipmentIdExterno}`} />
-              </CeldaTabla>
-              <CeldaTabla>#{d.shipmentIdExterno}</CeldaTabla>
-              <CeldaTabla>{ETIQUETA_TIPO_DESPACHO[d.logisticType ?? "otro"] ?? d.logisticType}</CeldaTabla>
-              <CeldaTabla>
-                <Chip estado={colorEstadoDespacho(d.status)}>{d.status ?? "—"}</Chip>
-              </CeldaTabla>
-              <CeldaTabla className={styles.celdaFecha}>{formatoFechaColombia(d.actualizadoTs)}</CeldaTabla>
-            </FilaTabla>
-          ))}
-        </Tabla>
-        <p className={styles.resumenPaginacion}>
-          Mostrando hasta {TAMANO_PAGINA_DESPACHOS} de {resultado.total} pendientes de imprimir.
-        </p>
-        <Boton type="submit" className={styles.botonImprimir}>
-          Imprimir etiquetas seleccionadas
-        </Boton>
-        <p className={styles.nota}>
-          Solo imprime lo seleccionado de esta lista. Si hay despachos de varias cuentas de Mercado Libre, selecciona primero los de una sola
-          cuenta.
-        </p>
-      </form>
-    </section>
+      {resultado.total === 0 ? (
+        <EstadoVacio>No hay despachos pendientes de imprimir.</EstadoVacio>
+      ) : (
+        <form action="/api/ml/despachos/etiquetas" method="POST" target="_blank" className={styles.form}>
+          <Tabla encabezados={["", "Envío", "Tipo", "Estado", "Actualizado"]}>
+            {resultado.despachos.map((d) => (
+              <FilaTabla key={d.id}>
+                <CeldaTabla>
+                  <input type="checkbox" name="shipmentId" value={d.shipmentIdExterno} defaultChecked aria-label={`Seleccionar envío ${d.shipmentIdExterno}`} />
+                </CeldaTabla>
+                <CeldaTabla>#{d.shipmentIdExterno}</CeldaTabla>
+                <CeldaTabla>{ETIQUETA_TIPO_DESPACHO[d.logisticType ?? "otro"] ?? d.logisticType}</CeldaTabla>
+                <CeldaTabla>
+                  <Chip estado={colorEstadoDespacho(d.status)}>{d.status ?? "—"}</Chip>
+                </CeldaTabla>
+                <CeldaTabla className={styles.celdaFecha}>{formatoFechaColombia(d.actualizadoTs)}</CeldaTabla>
+              </FilaTabla>
+            ))}
+          </Tabla>
+          <p className={styles.resumenPaginacion}>
+            Mostrando hasta {TAMANO_PAGINA_DESPACHOS} de {resultado.total} pendientes de imprimir.
+          </p>
+          <Boton type="submit" className={styles.botonImprimir}>
+            Imprimir etiquetas seleccionadas
+          </Boton>
+          <p className={styles.nota}>
+            Solo imprime lo seleccionado de esta lista. Si hay despachos de varias cuentas de Mercado Libre, selecciona primero los de una sola
+            cuenta.
+          </p>
+        </form>
+      )}
+    </Tarjeta>
   );
 }

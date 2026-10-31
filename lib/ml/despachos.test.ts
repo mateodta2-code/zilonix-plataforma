@@ -1033,3 +1033,57 @@ describe("Pendientes nunca incluye un envío que ya salió de la tienda (fix mat
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+// Reportado por Mateo (diagnóstico de la rama
+// mateo/feat-despachos-pestana-impresion): confirmar que una cuenta
+// con el token vencido (CuentaDesconectadaError al refrescar su
+// propio despacho viejo) nunca borra ni oculta las filas de OTRA
+// cuenta de la misma empresa — cada candidato de refrescarEstadoViejo
+// se procesa en su propio try/catch, independiente de los demás.
+describe("una cuenta con token vencido nunca oculta las filas de otra cuenta (fix mateo/feat-despachos-pestana-impresion)", () => {
+  vi.setConfig({ testTimeout: 20_000 });
+  const empresaId = randomUUID();
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre: "Empresa cuenta vencida", nit: `TEST-DESPV2-${empresaId.slice(0, 8)}` }));
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("ZILONIX desconectada con una fila vieja no afecta la fila fresca de otra cuenta conectada", async () => {
+    const cuentaDesconectadaId = await crearCuentaMlDePrueba(empresaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.update(cuentasMl).set({ desconectadaTs: new Date() }).where(eq(cuentasMl.id, cuentaDesconectadaId)));
+    const pedidoVencidoId = await crearPedidoDePrueba(empresaId, cuentaDesconectadaId);
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidosFinanzas).values({ empresaId, pedidoId: pedidoVencidoId, cuentaMlId: cuentaDesconectadaId, valorVenta: "100000.00" }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoVencidoId, 1)));
+    const [{ id: despachoVencidoId }] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(despachosMl)
+        .values({ empresaId, pedidoId: pedidoVencidoId, cuentaMlId: cuentaDesconectadaId, shipmentIdExterno: "930000001", logisticType: "self_service", status: "ready_to_ship", imprimible: true })
+        .returning({ id: despachosMl.id })
+    );
+    // "Vieja" (más de 1h sin sincronizar) — así refrescarEstadoViejo
+    // SÍ la toma como candidata y de verdad intenta renovar el token
+    // (CuentaDesconectadaError real, no simulada).
+    await dbComoEmpresa(empresaId, (tx) => tx.update(despachosMl).set({ actualizadoTs: new Date(Date.now() - 2 * 60 * 60 * 1000) }).where(eq(despachosMl.id, despachoVencidoId)));
+
+    const cuentaOkId = await crearCuentaMlDePrueba(empresaId);
+    const pedidoOkId = await crearPedidoDePrueba(empresaId, cuentaOkId);
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidosFinanzas).values({ empresaId, pedidoId: pedidoOkId, cuentaMlId: cuentaOkId, valorVenta: "100000.00" }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(pedidoItems).values(lineaDePrueba(empresaId, pedidoOkId, 1)));
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(despachosMl).values({ empresaId, pedidoId: pedidoOkId, cuentaMlId: cuentaOkId, shipmentIdExterno: "930000002", logisticType: "self_service", status: "ready_to_ship", imprimible: true })
+    );
+
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ status: "ready_to_ship", substatus: null, logistic_type: "self_service" })));
+
+    const pendientes = await listarTarjetasDespacho(empresaId, { pestaña: "pendientes" });
+    const ids = pendientes.map((t) => t.shipmentIdExterno);
+    expect(ids).toContain("930000001"); // la de la cuenta vencida sigue ahí — CuentaDesconectadaError no la borra, solo no la pudo refrescar
+    expect(ids).toContain("930000002"); // y la de la otra cuenta, intacta
+
+    const conError = await listarCuentasConErrorDespacho(empresaId);
+    expect(conError.map((c) => c.cuentaId)).toContain(cuentaDesconectadaId);
+    expect(conError.map((c) => c.cuentaId)).not.toContain(cuentaOkId);
+  });
+});
