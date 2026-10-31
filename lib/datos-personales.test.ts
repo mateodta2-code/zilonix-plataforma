@@ -24,9 +24,11 @@ describe.skipIf(!HAY_POSTGRES)("lib/datos-personales.ts (issue #318, Ley 1581)",
   let exportarDatosPropios: (typeof import("./datos-personales"))["exportarDatosPropios"];
   let anonimizarCuentaPropia: (typeof import("./datos-personales"))["anonimizarCuentaPropia"];
   let clerkClient: (typeof import("@clerk/nextjs/server"))["clerkClient"];
+  let dbComoEmpresa: (typeof import("@/db/empresa-context"))["dbComoEmpresa"];
 
   beforeAll(async () => {
     ({ db } = await import("@/db"));
+    ({ dbComoEmpresa } = await import("@/db/empresa-context"));
     ({ usuarios, membresias, roles, auditoria } = await import("@/db/schema"));
     ({ crearEmpresaConDueno } = await import("@/lib/empresas"));
     ({ exportarDatosPropios, anonimizarCuentaPropia } = await import("./datos-personales"));
@@ -82,10 +84,14 @@ describe.skipIf(!HAY_POSTGRES)("lib/datos-personales.ts (issue #318, Ley 1581)",
     expect(filaUsuario.email).not.toBe(usuario.email);
     expect(filaUsuario.clerkUserId).toBeNull();
 
-    const quedaMembresia = await db.select().from(membresias).where(and(eq(membresias.usuarioId, usuario.id), eq(membresias.empresaId, empresaId)));
+    const quedaMembresia = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(membresias).where(and(eq(membresias.usuarioId, usuario.id), eq(membresias.empresaId, empresaId)))
+    );
     expect(quedaMembresia).toHaveLength(0);
 
-    const filasAuditoria = await db.select().from(auditoria).where(and(eq(auditoria.empresaId, empresaId), eq(auditoria.entidadId, usuario.id)));
+    const filasAuditoria = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(auditoria).where(and(eq(auditoria.empresaId, empresaId), eq(auditoria.entidadId, usuario.id)))
+    );
     expect(filasAuditoria.map((f) => f.accion)).toContain("anonimizar");
   });
 
@@ -94,8 +100,8 @@ describe.skipIf(!HAY_POSTGRES)("lib/datos-personales.ts (issue #318, Ley 1581)",
     const empresaId = await crearEmpresaConDueno(usuario.id, "Empresa con equipo", `TEST-EQUIPO-${randomUUID().slice(0, 8)}`);
 
     const otraPersona = await crearUsuarioDePrueba();
-    const [rolOtro] = await db.insert(roles).values({ nombre: "Operador", empresaId }).returning({ id: roles.id });
-    await db.insert(membresias).values({ usuarioId: otraPersona.id, empresaId, rolId: rolOtro.id });
+    const [rolOtro] = await dbComoEmpresa(empresaId, (tx) => tx.insert(roles).values({ nombre: "Operador", empresaId }).returning({ id: roles.id }));
+    await dbComoEmpresa(empresaId, (tx) => tx.insert(membresias).values({ usuarioId: otraPersona.id, empresaId, rolId: rolOtro.id }));
 
     const resultado = await anonimizarCuentaPropia(usuario);
 
@@ -104,11 +110,13 @@ describe.skipIf(!HAY_POSTGRES)("lib/datos-personales.ts (issue #318, Ley 1581)",
     // Nada se tocó: ni el usuario ni la membresía.
     const [filaUsuario] = await db.select().from(usuarios).where(eq(usuarios.id, usuario.id));
     expect(filaUsuario.nombre).toBe(usuario.nombre);
-    const sigueLaMembresia = await db.select().from(membresias).where(and(eq(membresias.usuarioId, usuario.id), eq(membresias.empresaId, empresaId)));
+    const sigueLaMembresia = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select().from(membresias).where(and(eq(membresias.usuarioId, usuario.id), eq(membresias.empresaId, empresaId)))
+    );
     expect(sigueLaMembresia).toHaveLength(1);
   });
 
-  it("si Clerk falla, la anonimización en la base queda hecha y el error se registra en auditoria", async () => {
+  it("si Clerk falla, la anonimización en la base queda hecha (clerkUserId también en null) y el error se registra en auditoria", async () => {
     const clerkUserId = `clerk-falla-${randomUUID()}`;
     const usuario = await crearUsuarioDePrueba(clerkUserId);
     const empresaId = await crearEmpresaConDueno(usuario.id, "Empresa de prueba falla clerk", `TEST-FALLA-${randomUUID().slice(0, 8)}`);
@@ -123,11 +131,12 @@ describe.skipIf(!HAY_POSTGRES)("lib/datos-personales.ts (issue #318, Ley 1581)",
 
     const [filaUsuario] = await db.select().from(usuarios).where(eq(usuarios.id, usuario.id));
     expect(filaUsuario.nombre).toBe("Usuario eliminado");
-    // clerkUserId NUNCA se limpia si Clerk no confirmó el borrado —
-    // así queda la pista para reintentarlo después.
-    expect(filaUsuario.clerkUserId).toBe(clerkUserId);
+    // clerkUserId queda en null AUNQUE Clerk no confirmó el borrado —
+    // nunca se deja una sesión de Clerk usable que aterrice en esta
+    // fila ya anonimizada.
+    expect(filaUsuario.clerkUserId).toBeNull();
 
-    const filasError = await db.select().from(auditoria).where(and(eq(auditoria.empresaId, empresaId), eq(auditoria.accion, "error")));
+    const filasError = await dbComoEmpresa(empresaId, (tx) => tx.select().from(auditoria).where(and(eq(auditoria.empresaId, empresaId), eq(auditoria.accion, "error"))));
     expect(filasError).toHaveLength(1);
     expect(filasError[0].actorTipo).toBe("sistema");
     expect(filasError[0].detalle).toContain("Clerk no respondió");
