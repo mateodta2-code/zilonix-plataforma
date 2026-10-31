@@ -131,7 +131,7 @@ export default async function PublicarPage({
         descripcion="Elige las cuentas destino — cada una tiene su propio título, descripción y foto de portada. Precio, stock, SKU y el resto de fotos son iguales para todas. Publicación tipo Premium con garantía del vendedor de 30 días, siempre."
       />
       <PaginaPublicar
-        cuentas={cuentas.map((c) => ({ id: c.id, nickname: c.nickname }))}
+        cuentas={cuentas.map((c) => ({ id: c.id, nickname: c.nickname, siteId: c.siteId, moneda: c.moneda, idioma: c.idioma }))}
         historial={historial}
         prefillNuevo={prefillNuevo}
         clipHabilitado={clipHabilitado}

@@ -9,6 +9,7 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import type { Cuenta } from "./CuentasDestino";
 import { borrarProductoAction } from "./actions";
 import { enlacesPermalink, formatearFechaBogota, resumenEstadoProducto, type FilaProductoParaCargar } from "./formulario-logica";
+import { formatearMoneda, SITE_ID_DEFECTO } from "@/lib/ml/sitios";
 
 export type ProductoHistorial = FilaProductoParaCargar & {
   id: string;
@@ -23,6 +24,16 @@ const ETIQUETA_ESTADO: Record<string, string> = {
   publicado: "Publicado",
   con_errores: "Con errores",
 };
+
+// Issue #315 — el precio de la fila se formatea en la moneda real de
+// la primera cuenta seleccionada (todas las cuentas de una misma fila
+// comparten precio, nunca varias monedas a la vez); sin cuenta que
+// matchee (cuenta ya desconectada/borrada), cae al default documentado
+// en lib/ml/sitios.ts, nunca "$"/es-CO fijo.
+function siteIdDeFila(cuentasSeleccionadas: string[], cuentas: Cuenta[]): string {
+  const cuenta = cuentas.find((c) => c.id === cuentasSeleccionadas[0]);
+  return cuenta?.siteId ?? SITE_ID_DEFECTO;
+}
 
 function EstadoCelda({ producto }: { producto: ProductoHistorial }) {
   const resumen = resumenEstadoProducto(producto.resultado);
@@ -98,7 +109,7 @@ export function HistorialPublicaciones({
                     </div>
                   )}
                 </CeldaTabla>
-                <CeldaTabla>${Number(p.precio).toLocaleString("es-CO")}</CeldaTabla>
+                <CeldaTabla>{formatearMoneda(Number(p.precio), siteIdDeFila(p.cuentasSeleccionadas, cuentas))}</CeldaTabla>
                 <CeldaTabla>
                   <EstadoCelda producto={p} />
                 </CeldaTabla>

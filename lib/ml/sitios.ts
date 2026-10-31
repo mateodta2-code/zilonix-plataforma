@@ -40,3 +40,25 @@ export function datosSitioMl(siteId: unknown): SitioMl {
   if (esSiteIdValido(siteId)) return SITIOS_ML[siteId];
   return SITIOS_ML[SITE_ID_DEFECTO];
 }
+
+const IDIOMAS_VALIDOS: ReadonlySet<string> = new Set(Object.values(SITIOS_ML).map((s) => s.idioma));
+
+// Issue #315, parte "Publicar/Promociones dejan de asumir Colombia" —
+// reemplaza los `"$" + valor.toLocaleString("es-CO")` fijos de los
+// módulos de Mateo. La moneda y el locale salen SIEMPRE de
+// datosSitioMl (nunca un "$"/"es-CO" aparte) — así Intl pone el
+// símbolo real (MX$, R$, ARS$...) y el agrupado de miles de cada país.
+export function formatearMoneda(valor: number, siteId: unknown): string {
+  const sitio = datosSitioMl(siteId);
+  return new Intl.NumberFormat(sitio.idioma, { style: "currency", currency: sitio.moneda }).format(valor);
+}
+
+// Para números que no son plata (cantidades, porcentajes…) pero sí
+// necesitan el agrupado de miles del idioma real de la cuenta, nunca
+// "es-CO" fijo. Un idioma que no es ninguno de los 5 reales de
+// SITIOS_ML (nunca debería pasar) cae al idioma del default, nunca
+// lanza.
+export function formatearNumero(valor: number, idioma: unknown): string {
+  const locale = typeof idioma === "string" && IDIOMAS_VALIDOS.has(idioma) ? idioma : SITIOS_ML[SITE_ID_DEFECTO].idioma;
+  return new Intl.NumberFormat(locale).format(valor);
+}

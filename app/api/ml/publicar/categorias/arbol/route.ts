@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
-import { PATRON_ID_CATEGORIA, SITE_ID } from "@/lib/ml/cliente";
-import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { PATRON_ID_CATEGORIA } from "@/lib/ml/cliente";
+import { obtenerAccessTokenVigente, obtenerSitioDeCuenta } from "@/lib/ml/cuentas";
 import { leerArbolCategorias } from "@/lib/ml/publicar";
 import { respuestaDeErrorMl, respuestaSiCategoryIdInvalido, respuestaSiCuentaIdInvalido, respuestaSiSinPermiso } from "../../_ayudantes";
 
@@ -42,7 +42,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const token = await obtenerAccessTokenVigente(empresa.id, cuentaId as string);
-    const nodo = await leerArbolCategorias(SITE_ID, token, categoryId);
+    const { siteId } = await obtenerSitioDeCuenta(empresa.id, cuentaId as string);
+    const nodo = await leerArbolCategorias(siteId, token, categoryId);
     return NextResponse.json(nodo);
   } catch (error) {
     return respuestaDeErrorMl(error);

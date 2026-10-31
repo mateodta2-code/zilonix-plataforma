@@ -100,7 +100,11 @@ export function ImportarPorLink({
       </p>
       <form action={buscarImportacionPorLinkAction} onSubmit={alEnviar} style={{ marginTop: 12 }}>
         <Campo etiqueta="Link de la publicación">
-          <input name="link" type="url" placeholder="https://articulo.mercadolibre.com.co/MCO-..." required className="zx-control" />
+          {/* Issue #315 — ejemplo genérico (no solo Colombia): la
+          validación real de dominio (extension/background.js,
+          DOMINIOS_ML_PAIS) ya acepta mercadolibre.com.{co,mx,ar,...} de
+          cualquier país, esto es solo el texto de ayuda. */}
+          <input name="link" type="url" placeholder="https://articulo.mercadolibre.com.{co,mx,ar...}/..." required className="zx-control" />
         </Campo>
         <Boton type="submit" variante="secundario" chico style={{ marginTop: 8 }} disabled={estado === "leyendo"}>
           {estado === "leyendo" ? "Leyendo la publicación…" : "Traer datos de ese link"}

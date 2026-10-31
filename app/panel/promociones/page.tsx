@@ -41,7 +41,9 @@ export default async function PromocionesPage() {
   const puedeAprobar = tienePermiso(miMembresia?.permisos ?? [], "promociones", "aprobar");
   const puedeEjecutar = tienePermiso(miMembresia?.permisos ?? [], "promociones", "ejecutar");
 
-  const cuentas = (await listarCuentasConectadas(empresa.id)).filter((c) => !c.desconectadaTs).map((c) => ({ id: c.id, nickname: c.nickname }));
+  const cuentas = (await listarCuentasConectadas(empresa.id))
+    .filter((c) => !c.desconectadaTs)
+    .map((c) => ({ id: c.id, nickname: c.nickname, siteId: c.siteId, moneda: c.moneda, idioma: c.idioma }));
 
   return (
     <>

@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
-import { leerCategoriaMl, PATRON_ID_CATEGORIA, SITE_ID } from "@/lib/ml/cliente";
-import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { leerCategoriaMl, PATRON_ID_CATEGORIA } from "@/lib/ml/cliente";
+import { obtenerAccessTokenVigente, obtenerSitioDeCuenta } from "@/lib/ml/cuentas";
 import { obtenerCaracteristicasCategoria } from "@/lib/ml/publicar";
 import { respuestaDeErrorMl, respuestaSiCategoryIdInvalido, respuestaSiCuentaIdInvalido, respuestaSiSinPermiso } from "../_ayudantes";
 
@@ -45,7 +45,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const token = await obtenerAccessTokenVigente(empresa.id, cuentaId as string);
-    const datos = await obtenerCaracteristicasCategoria(SITE_ID, titulo, token, categoriaId);
+    const { siteId } = await obtenerSitioDeCuenta(empresa.id, cuentaId as string);
+    const datos = await obtenerCaracteristicasCategoria(siteId, titulo, token, categoriaId);
     // Punto 5 del ADENDO — "galería por URL: respetar max_pictures" —
     // mismo GET /categories/{id} que obtenerCaracteristicasCategoria ya
     // usó internamente (leerAtributosCategoriaMl pide /attributes, no
