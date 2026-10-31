@@ -45,6 +45,10 @@ const RUTAS_PROTEGIDAS = new Set([
   // finanzas.modificar, acá y en lib/finanzas/ (traer-ventas-mes.ts,
   // recalcular-costos.ts).
   "app/panel/finanzas/ventas/actions.ts",
+  // Issue #126 (slice urgente) — valor Flex: ver pide finanzas.consultar;
+  // guardar, finanzas.modificar (acá y en lib/configuracion-finanzas.ts).
+  "app/panel/finanzas/configuracion/page.tsx",
+  "app/panel/finanzas/configuracion/actions.ts",
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
   "app/panel/invitar/actions.ts",

@@ -5,7 +5,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { CuentaMlDeOtraEmpresaError, guardarCuentaConectada } from "@/lib/ml/cuentas";
-import { intercambiarCodigo, obtenerNickname } from "@/lib/ml/oauth";
+import { intercambiarCodigo, obtenerDatosVendedorMl } from "@/lib/ml/oauth";
 import { urlPublicaBase } from "@/lib/url-publica";
 import { NOMBRE_COOKIE_STATE, NOMBRE_COOKIE_VERIFIER } from "@/lib/ml/pkce-cookie";
 import { ejecutarImportacionInicial } from "@/lib/ml/importacion";
@@ -122,11 +122,11 @@ export async function GET(request: NextRequest) {
   try {
     const redirectUri = `${base}/api/ml/callback`;
     const tokens = await intercambiarCodigo(code, redirectUri, codeVerifier);
-    const nickname = await obtenerNickname(tokens.accessToken);
+    const { nickname, siteId } = await obtenerDatosVendedorMl(tokens.accessToken);
 
     let cuenta: { id: string };
     try {
-      cuenta = await guardarCuentaConectada(empresa.id, { cuentaIdExterna: tokens.cuentaIdExterna, nickname, tokens });
+      cuenta = await guardarCuentaConectada(empresa.id, { cuentaIdExterna: tokens.cuentaIdExterna, nickname, tokens, siteId });
     } catch (error) {
       // Issue #181 — ya no se corta con un error genérico: se ofrece
       // transferir. tokens/nickname recién se obtuvieron de Mercado
@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
       // interno, en vez de uno externo que no podría verlos todavía
       // asignados con certeza.
       if (error instanceof CuentaMlDeOtraEmpresaError) {
-        return volverATransferencia({ cuentaIdExterna: tokens.cuentaIdExterna, nickname, tokens });
+        return volverATransferencia({ cuentaIdExterna: tokens.cuentaIdExterna, nickname, tokens, siteId });
       }
       throw error;
     }

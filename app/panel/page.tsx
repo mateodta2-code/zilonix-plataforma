@@ -71,7 +71,7 @@ export default async function PanelPage() {
     const utilidad = await leerUtilidadMes(activa.id, usuario.id, ahora, tablero.recaudo.map((r) => r.moneda));
     const publicidad = await leerPublicidadMes(activa.id, usuario.id, ahora);
     const porCuenta = await leerTableroPorCuenta(activa.id, usuario.id, ahora, publicidad);
-    finanzas = { tablero, utilidad, porCuenta, publicidad, ventasDeHoy: vePedidosYDespachos ? kpis.ventasDeHoy : null };
+    finanzas = { tablero, utilidad, porCuenta, publicidad };
   }
 
   const pestanas: Pestana[] = [

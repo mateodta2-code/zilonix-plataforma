@@ -17,7 +17,7 @@ import { requierePermiso } from "@/lib/permisos";
 export async function confirmarTransferenciaCuentaMl(
   usuarioId: string,
   empresaId: string,
-  datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl }
+  datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl; siteId: string | null }
 ): Promise<{ id: string }> {
   await requierePermiso(usuarioId, empresaId, "configuracion", "crear");
 

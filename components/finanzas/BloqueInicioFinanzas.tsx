@@ -9,7 +9,7 @@ import {
   type TableroMes,
   type UtilidadMes,
 } from "@/lib/finanzas/tablero";
-import { detalleVentasDeHoy, formatearMonto, type VentasDeHoy } from "@/lib/panel-kpis";
+import { formatearMonto } from "@/lib/panel-kpis";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
@@ -30,18 +30,17 @@ import styles from "./inicio.module.css";
 // lo que ya leyó app/panel/page.tsx (y solo si el rol tiene
 // finanzas.consultar; si no, este componente ni se monta).
 //
-// Las tarjetas de cantidad dicen «Cantidad de ventas…» para no
-// confundirse con «Ventas de hoy» / «Ventas del mes» (en plata) de
-// arriba, que no cambian (Sharel, review de #306). Gráficas en
-// SVG y CSS, sin librería; colores de tokens existentes.
+// La tarjeta de cantidad dice «Cantidad de ventas del mes» para no
+// confundirse con «Ventas del mes» (en plata) de arriba (Sharel, review
+// de #306). La de hoy no va: repetía «Ventas de hoy» de arriba (smoke
+// del 30-oct). Gráficas en SVG y CSS, sin librería; colores de tokens
+// existentes.
 
 type Props = {
   tablero: TableroMes;
   utilidad: UtilidadMes;
   porCuenta: FilaCuentaTablero[];
   publicidad: PublicidadMes;
-  // null si el rol no ve ventas: la tarjeta no sale.
-  ventasDeHoy: VentasDeHoy | null;
 };
 
 // Paleta de las series: tokens de marca de app/globals.css (plateado y
@@ -52,7 +51,7 @@ function serie(i: number): string {
   return styles[`serie${i % SERIES}`];
 }
 
-export function BloqueInicioFinanzas({ tablero, utilidad, porCuenta, publicidad, ventasDeHoy }: Props) {
+export function BloqueInicioFinanzas({ tablero, utilidad, porCuenta, publicidad }: Props) {
   const avisoFaltan = avisoFaltanVentas(tablero);
   const totalPublicidad = publicidad.totalPorMoneda;
   return (
@@ -72,7 +71,6 @@ export function BloqueInicioFinanzas({ tablero, utilidad, porCuenta, publicidad,
 
       <div className={styles.gridKpi}>
         <TarjetaKpi titulo="Cantidad de ventas del mes" valor={String(tablero.ventas.actual)} detalle={[textoVariacion(tablero.ventas.variacion)]} />
-        {ventasDeHoy && <TarjetaKpi titulo="Cantidad de ventas de hoy" valor={ventasDeHoy.cantidad} detalle={detalleVentasDeHoy(ventasDeHoy)} />}
         <TarjetaKpi
           titulo="Recaudo del mes"
           valor={porMoneda(tablero, "actual")}

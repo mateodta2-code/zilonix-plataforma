@@ -212,6 +212,7 @@ describe("transferir una cuenta con titular (issue #125)", () => {
       cuentaIdExterna,
       nickname: "CUENTA_EN_B",
       tokens: { accessToken: "access-b", refreshToken: "refresh-b", expiraEnSegundos: 21_600, cuentaIdExterna },
+      siteId: null,
     });
 
     const [enB] = await dbComoEmpresa(empresaBId, (tx) =>
