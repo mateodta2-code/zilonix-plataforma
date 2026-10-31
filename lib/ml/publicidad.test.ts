@@ -186,3 +186,48 @@ describe("cliente de Product Ads, solo lectura (issue #254)", () => {
     );
   });
 });
+
+// Staging, 30-oct (STOREKINGSAS): campaigns/search respondió 404 y la
+// sincronización entera se cortaba sin guardar campañas.
+describe("campaigns/search con 404 (fix-publicidad-404-campanas)", () => {
+  const ctx = { token: "token-prueba", siteId: "MCO", advertiserId: "367254" };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("un 404 en un estado es lista vacía de ese estado; el otro estado sigue trayendo sus campañas", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      String(url).includes("filters%5Bstatus%5D=paused") || String(url).includes("filters[status]=paused")
+        ? respuesta(404, { message: "not found", status: 404 })
+        : respuesta(200, { paging: { total: 1 }, results: [{ id: 11, name: "Activa", status: "active" }] })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listarCampanas(ctx, { estado: "paused" })).resolves.toEqual([]);
+    await expect(listarCampanas(ctx, { estado: "active" })).resolves.toEqual([{ id: 11, name: "Activa", status: "active" }]);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/advertising/MCO/advertisers/367254/product_ads/campaigns/search");
+  });
+
+  it("las métricas diarias de cuenta con 404 son «sin filas», no un error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuesta(404, { message: "not found", status: 404 })));
+    await expect(metricasDiariasCuenta(ctx, { desde: "2026-10-01", hasta: "2026-10-30" })).resolves.toEqual([]);
+  });
+
+  it("un 404 a mitad de la paginación y cualquier otro error siguen cortando", async () => {
+    const llena = { paging: { total: 120 }, results: Array.from({ length: 50 }, (_, i) => ({ id: i + 1 })) };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(respuesta(200, llena)).mockResolvedValueOnce(respuesta(404, { status: 404 })));
+    await expect(listarCampanas(ctx, { estado: "active" })).rejects.toThrow(/404/);
+
+    // 400 y no 500: el cliente reintenta los 5xx y los reporta como timeout.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuesta(400, { status: 400 })));
+    await expect(listarCampanas(ctx, { estado: "active" })).rejects.toThrow(/400/);
+  });
+
+  it("los ad groups no cambian: un 404 sigue siendo error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuesta(404, { status: 404 })));
+    await expect(
+      adGroupsDeCampana(ctx, { campanas: ["11"], desde: "2026-10-01", hasta: "2026-10-30", estado: "active" })
+    ).rejects.toThrow(/404/);
+  });
+});
