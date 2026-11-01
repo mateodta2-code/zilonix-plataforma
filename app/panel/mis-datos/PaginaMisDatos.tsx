@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useClerk } from "@clerk/nextjs";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Tarjeta } from "@/components/marco/Tarjeta";
@@ -13,6 +14,7 @@ const PALABRA_CONFIRMACION = "BORRAR";
 // obliga a escribir la palabra a mano, nunca un solo clic, para una
 // acción que no tiene vuelta atrás.
 export function PaginaMisDatos({ nombre }: { nombre: string }) {
+  const { signOut } = useClerk();
   const [exportando, setExportando] = useState(false);
   const [errorExportar, setErrorExportar] = useState<string | null>(null);
 
@@ -45,8 +47,8 @@ export function PaginaMisDatos({ nombre }: { nombre: string }) {
     setResultadoBorrar(null);
     setBloqueadaPor(null);
     const resultado = await borrarMiCuentaAction();
-    setBorrando(false);
     if (!resultado.ok) {
+      setBorrando(false);
       if (resultado.motivo === "unico_dueno_con_mas_miembros") {
         setBloqueadaPor(resultado.empresas);
       } else {
@@ -54,13 +56,22 @@ export function PaginaMisDatos({ nombre }: { nombre: string }) {
       }
       return;
     }
-    setConfirmando(false);
-    setResultadoBorrar(
-      resultado.clerkBorrado
-        ? "Tu cuenta quedó anonimizada y tu acceso fue borrado. Vas a salir en unos segundos."
-        : "Tus datos quedaron anonimizados, pero no se pudo cerrar tu acceso de inicio de sesión — ya quedó registrado el error, escríbenos a soporte."
-    );
-    if (resultado.clerkBorrado) setTimeout(() => (window.location.href = "/"), 3000);
+
+    // Issue #318 (review 5725541731) — la anonimización en la base YA
+    // quedó confirmada acá (resultado.ok), pase lo que pase con Clerk.
+    // Si la sesión del navegador sigue viva, la siguiente petición
+    // (ej. abrir "/") vuelve a llamar obtenerOCrearUsuarioActual() con
+    // ese Clerk todavía activo y RECREA una fila de `usuarios` con el
+    // email y el nombre reales — por eso el signOut de acá nunca es
+    // opcional, ni cuando clerkBorrado quedó en false. El aviso de
+    // soporte se muestra DESPUÉS, ya fuera de sesión (home pública,
+    // ver app/page.tsx), nunca mientras la sesión sigue abierta.
+    const destino = resultado.clerkBorrado ? "/?salida=cuenta-borrada" : "/?salida=cuenta-borrada-soporte";
+    try {
+      await signOut({ redirectUrl: destino });
+    } catch {
+      window.location.href = destino;
+    }
   }
 
   return (

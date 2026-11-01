@@ -2,7 +2,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { auditoria, invitaciones, membresias, roles, usuarios } from "@/db/schema";
+import { auditoria, empresas, invitaciones, membresias, roles, usuarios } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 
@@ -26,6 +26,7 @@ export type UsuarioPropio = {
 };
 
 type MiembroEmpresa = { usuarioId: string; rolNombre: string };
+type EmpresaDelUsuario = { empresaId: string; empresaNombre: string };
 
 // Fija app.empresa_actual DENTRO de la transacción que ya está abierta
 // (a diferencia de dbComoEmpresa, que abre la suya propia) — todo el
@@ -35,6 +36,34 @@ type MiembroEmpresa = { usuarioId: string; rolNombre: string };
 // completo, o el usuario ya anonimizado sin ninguna membresía tocada.
 async function fijarEmpresaEnTx(tx: typeof db, empresaId: string): Promise<void> {
   await tx.execute(sql`SELECT set_config('app.empresa_actual', ${empresaId}, true)`);
+}
+
+// Mismo UUID sentinel que usa dbComoUsuario (db/empresa-context.ts, no
+// exportado): ninguna empresa real lo tiene (empresas.id usa
+// defaultRandom(), nunca genera puros ceros), así que la mitad
+// "empresa_actual" de cada política evalúa a "ninguna fila" en vez de
+// reventar, y la mitad "usuario_actual" es la que de verdad filtra.
+const SENTINEL_EMPRESA_ACTUAL = "00000000-0000-0000-0000-000000000000";
+
+// Review 5725541731 — listarEmpresasDeUsuario() de ANTES del BEGIN es
+// una foto que puede quedar vieja para cuando la transacción de verdad
+// hace algo con ella (alguien se va o lo suman a otra empresa justo en
+// el medio). Mismo patrón que dbComoUsuario, pero fijado a mano DENTRO
+// de esta transacción (dbComoUsuario abre la suya propia): set_config
+// con app.usuario_actual deja ver TODAS las membresías propias del
+// usuario, sin importar la empresa (política aislamiento_membresias) —
+// FOR UPDATE las bloquea ahí mismo, así nadie puede sacarlo de una
+// empresa (ni metérselo) entre esta lectura y el resto de la
+// transacción.
+async function membresiasPropiasConLock(tx: typeof db, usuarioId: string): Promise<EmpresaDelUsuario[]> {
+  await tx.execute(sql`SELECT set_config('app.empresa_actual', ${SENTINEL_EMPRESA_ACTUAL}, true)`);
+  await tx.execute(sql`SELECT set_config('app.usuario_actual', ${usuarioId}, true)`);
+  return tx
+    .select({ empresaId: membresias.empresaId, empresaNombre: empresas.nombre })
+    .from(membresias)
+    .innerJoin(empresas, eq(membresias.empresaId, empresas.id))
+    .where(eq(membresias.usuarioId, usuarioId))
+    .for("update");
 }
 
 // "Dueño" nace con TODO sobre TODO y nunca se puede editar/borrar desde
@@ -65,6 +94,13 @@ export type ResultadoAnonimizacion =
   | { ok: true; clerkBorrado: boolean }
   | { ok: false; motivo: "unico_dueno_con_mas_miembros"; empresas: string[] };
 
+// Resultado interno de la transacción — a diferencia de
+// ResultadoAnonimizacion (lo que de verdad devuelve la función), acá
+// el caso ok:true SÍ necesita llevarse la lista de empresas: el paso
+// de Clerk (después del commit) la vuelve a necesitar para auditar un
+// error, y para entonces ya no hay transacción de la que leerla.
+type ResultadoTransaccion = { ok: true; empresas: EmpresaDelUsuario[] } | ResultadoAnonimizacion;
+
 // Nunca borra la fila de `usuarios` (varias tablas de "quién hizo qué"
 // la referencian con onDelete "restrict" — accesos_temporales,
 // invitaciones, pedido_items, seguimientos_ml — un DELETE real
@@ -72,28 +108,30 @@ export type ResultadoAnonimizacion =
 // mismo título "Usuario eliminado" que ya usa auditoria.ts cuando el
 // join no encuentra a nadie — nunca se inventa un texto nuevo.
 export async function anonimizarCuentaPropia(usuario: UsuarioPropio): Promise<ResultadoAnonimizacion> {
-  const empresasDeUsuario = await listarEmpresasDeUsuario(usuario.id);
   // único por usuario.id (nunca choca con un borrado anterior).
   const emailAnonimo = `usuario-eliminado-${usuario.id}@eliminado.zilonix.app`;
 
-  const resultado = await db.transaction(async (txRaw) => {
+  const resultado: ResultadoTransaccion = await db.transaction(async (txRaw) => {
     // Mismo cast que dbComoEmpresa (db/empresa-context.ts): la
     // transacción de drizzle-orm no tiene el tipo exacto de `db`
     // (le falta `$client`), pero expone los mismos métodos de
     // consulta — es seguro tratarla como tal dentro de este archivo.
     const tx = txRaw as unknown as typeof db;
+
+    const empresasDeUsuario = await membresiasPropiasConLock(tx, usuario.id);
+
     const bloqueadas = new Map<string, string>(); // empresaId -> motivo (para el mensaje)
     for (const empresa of empresasDeUsuario) {
-      const miembros = await miembrosDeEmpresaConLock(tx, empresa.id);
+      const miembros = await miembrosDeEmpresaConLock(tx, empresa.empresaId);
       const duenos = miembros.filter((m) => m.rolNombre === ROL_DUENO);
       const esDuenoUnico = duenos.length === 1 && duenos[0].usuarioId === usuario.id;
-      if (esDuenoUnico && miembros.length > 1) bloqueadas.set(empresa.id, "unico_dueno_con_mas_miembros");
+      if (esDuenoUnico && miembros.length > 1) bloqueadas.set(empresa.empresaId, "unico_dueno_con_mas_miembros");
     }
     if (bloqueadas.size > 0) {
       return {
         ok: false as const,
         motivo: "unico_dueno_con_mas_miembros" as const,
-        empresas: empresasDeUsuario.filter((e) => bloqueadas.has(e.id)).map((e) => e.nombre),
+        empresas: empresasDeUsuario.filter((e) => bloqueadas.has(e.empresaId)).map((e) => e.empresaNombre),
       };
     }
 
@@ -109,14 +147,18 @@ export async function anonimizarCuentaPropia(usuario: UsuarioPropio): Promise<Re
       .where(eq(usuarios.id, usuario.id));
 
     for (const empresa of empresasDeUsuario) {
-      await fijarEmpresaEnTx(tx, empresa.id);
-      await tx.delete(membresias).where(and(eq(membresias.usuarioId, usuario.id), eq(membresias.empresaId, empresa.id)));
+      await fijarEmpresaEnTx(tx, empresa.empresaId);
+      await tx.delete(membresias).where(and(eq(membresias.usuarioId, usuario.id), eq(membresias.empresaId, empresa.empresaId)));
       // Invitaciones pendientes con este correo, en esta misma
       // empresa — no tiene sentido dejarlas vivas apuntando a un email
-      // que ya nadie puede volver a usar para aceptarlas.
-      await tx.delete(invitaciones).where(and(eq(invitaciones.empresaId, empresa.id), eq(invitaciones.email, usuario.email)));
+      // que ya nadie puede volver a usar para aceptarlas. Límite real
+      // (documentado en el changelog de esta rama): una invitación con
+      // este email en una empresa donde el usuario NUNCA tuvo
+      // membresía no se toca acá — RLS no deja fijar ese empresa_actual
+      // sin ya ser parte de ella, y no hay ningún bypass para esto.
+      await tx.delete(invitaciones).where(and(eq(invitaciones.empresaId, empresa.empresaId), eq(invitaciones.email, usuario.email)));
       await registrarAuditoria(tx, {
-        empresaId: empresa.id,
+        empresaId: empresa.empresaId,
         usuarioId: usuario.id,
         actorTipo: "persona",
         accion: "anonimizar",
@@ -126,7 +168,7 @@ export async function anonimizarCuentaPropia(usuario: UsuarioPropio): Promise<Re
       });
     }
 
-    return { ok: true as const };
+    return { ok: true as const, empresas: empresasDeUsuario };
   });
 
   if (!resultado.ok) return resultado;
@@ -145,10 +187,10 @@ export async function anonimizarCuentaPropia(usuario: UsuarioPropio): Promise<Re
     return { ok: true, clerkBorrado: true };
   } catch (error) {
     const mensaje = (error instanceof Error ? error.message : String(error)).slice(0, 300);
-    for (const empresa of empresasDeUsuario) {
-      await dbComoEmpresa(empresa.id, (tx) =>
+    for (const empresa of resultado.empresas) {
+      await dbComoEmpresa(empresa.empresaId, (tx) =>
         registrarAuditoria(tx, {
-          empresaId: empresa.id,
+          empresaId: empresa.empresaId,
           usuarioId: null,
           actorTipo: "sistema",
           accion: "error",
