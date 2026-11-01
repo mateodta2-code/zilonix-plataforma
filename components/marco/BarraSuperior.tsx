@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cambiarEmpresaActiva } from "@/app/panel/actions";
+import { BotonCerrarSesion } from "./BotonCerrarSesion";
 import { IconoBuscar, iconoDeClave } from "./iconos";
 import { SaludoHeader } from "./SaludoHeader";
 import { SelectorTema } from "./SelectorTema";
@@ -76,6 +77,7 @@ export function BarraSuperior({
           )}
           <span className={styles.nombreUsuario}>{usuario.nombre}</span>
         </Link>
+        <BotonCerrarSesion variante="barra" />
       </div>
     </header>
   );
