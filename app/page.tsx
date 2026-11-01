@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
-import { listarEmpresasDeUsuario } from "@/lib/empresas";
+import { redirect } from "next/navigation";
+import { SignedOut } from "@clerk/nextjs";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import styles from "./page.module.css";
 
@@ -10,12 +10,16 @@ import styles from "./page.module.css";
 // el pie de página global (app/layout.tsx) — no hace falta repetirla
 // acá.
 export default async function HomePage({ searchParams }: { searchParams: { salida?: string } }) {
-  // Tarea 1.6 — a dónde manda esta pantalla a alguien que ya inició
-  // sesión depende de si ya tiene una empresa o no. obtenerOCrearUsuarioActual()
+  // Tarea fix-login-directo-panel — con sesión, "/" nunca se pinta:
+  // redirect server-side antes de cualquier render (sin parpadeo de los
+  // botones "Ver mi cuenta"/"Ir al panel" que había antes). obtenerOCrearUsuarioActual()
   // devuelve null sola para un visitante sin sesión (no pega contra la
-  // base), así que es segura de llamar acá siempre.
+  // base), así que es segura de llamar acá siempre. El destino final
+  // (/panel o /crear-empresa si la empresa no existe todavía, /sign-in
+  // si por algo la sesión no resultó válida) lo decide /panel mismo —
+  // lib/panel-contexto.ts, misma lógica de siempre, no se duplica acá.
   const usuario = await obtenerOCrearUsuarioActual();
-  const empresas = usuario ? await listarEmpresasDeUsuario(usuario.id) : [];
+  if (usuario) redirect("/panel");
 
   // Issue #318 (review 5725541731) — destino del signOut que dispara
   // PaginaMisDatos tras borrar la cuenta propia (app/panel/mis-datos/
@@ -50,24 +54,6 @@ export default async function HomePage({ searchParams }: { searchParams: { salid
           </Link>
         </div>
       </SignedOut>
-
-      <SignedIn>
-        <div className={styles.sesionActiva}>
-          <UserButton afterSignOutUrl="/" />
-          <Link href="/cuenta" className={styles.enlaceSesion}>
-            Ver mi cuenta
-          </Link>
-          {empresas.length > 0 ? (
-            <Link href="/panel" className={styles.botonPrimario}>
-              Ir al panel
-            </Link>
-          ) : (
-            <Link href="/crear-empresa" className={styles.botonPrimario}>
-              Crear mi empresa
-            </Link>
-          )}
-        </div>
-      </SignedIn>
     </main>
   );
 }
