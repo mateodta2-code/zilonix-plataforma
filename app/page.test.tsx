@@ -35,12 +35,18 @@ describe("Portada (/) — tarea fix-login-directo-panel", () => {
     expect(redirectMock).toHaveBeenCalledWith("/panel");
   });
 
-  it("sin sesión: sigue mostrando la portada pública, sin redirigir", async () => {
+  it("sin sesión: muestra la página de venta completa, sin redirigir", async () => {
     obtenerOCrearUsuarioActualMock.mockResolvedValue(null);
     const html = renderToStaticMarkup(await HomePage({ searchParams: {} }));
     expect(redirectMock).not.toHaveBeenCalled();
     expect(html).toContain("Iniciar sesión");
-    expect(html).toContain("Crear cuenta");
+    expect(html).toContain("Empezar");
+    expect(html).toContain("Elegir plan");
+    // Los 9 módulos, los 3 planes y la garantía — tarea feat-portada-pagina-venta.
+    expect(html).toContain("Multiempresa y roles");
+    expect(html).toContain("Emprendedor");
+    expect(html).toContain("$69");
+    expect(html).toContain("Garantía de 14 días");
   });
 
   it("sin sesión, con ?salida=cuenta-borrada: muestra el aviso de salida", async () => {

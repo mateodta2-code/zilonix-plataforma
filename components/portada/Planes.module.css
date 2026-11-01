@@ -1,0 +1,62 @@
+.tarjeta {
+  display: flex;
+  flex-direction: column;
+}
+
+.destacado {
+  width: fit-content;
+  margin-bottom: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--acento-suave);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+}
+
+.precio {
+  margin: 10px 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.precioNumero {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--texto);
+}
+
+.precioMoneda {
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.incluye {
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.incluyeItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--texto-suave);
+}
+
+.check {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--acento-fuerte);
+}
+
+.tarjeta > a {
+  margin-top: 22px;
+  text-align: center;
+}
