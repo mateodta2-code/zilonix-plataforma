@@ -37,12 +37,18 @@ describe("pedidos (RLS, issue #320)", () => {
   // la prueba de arriba compara A contra B, pero nunca demuestra que
   // el candado es RLS y no "la app siempre se acuerda de filtrar". Acá
   // se consulta con `db` SIN pasar por dbComoEmpresa (sin ningún
-  // app.empresa_actual fijado) — ni siquiera la propia empresa dueña
-  // debería ver la fila. Si algún día se quitara la columna
-  // empresa_id o la política aislamiento_pedidos (db/rls-setup.sql),
-  // esta consulta SÍ traería la fila y el `toHaveLength(0)` de abajo
-  // reventaría.
-  it("consultar pedidos con `db` directo (sin dbComoEmpresa) no devuelve nada, aunque la fila exista", async () => {
+  // app.empresa_actual fijado). La política aislamiento_pedidos hace
+  // `current_setting('app.empresa_actual', true)::uuid` — sin
+  // contexto ese valor es `""`, y `''::uuid` revienta con "invalid
+  // input syntax for type uuid" (review 5725841190: con un
+  // `toHaveLength(0)` esa excepción nunca llegaba a evaluarse, el
+  // `await` del SELECT ya había reventado antes). Eso es justo lo que
+  // se prueba: sin contexto, la consulta falla CERRADA por el cast,
+  // nunca "silenciosamente vacía". Si algún día se quitara la columna
+  // empresa_id o la política entera, este SELECT ya no haría ningún
+  // cast y SÍ devolvería la fila sin tirar error — el `rejects` de
+  // abajo fallaría, dejando la regresión en rojo.
+  it("consultar pedidos con `db` directo (sin dbComoEmpresa) falla cerrado por el cast de la política, no devuelve nada en silencio", async () => {
     const contexto = await crearDosEmpresas();
     const cuentaMlId = await crearCuentaMlDePrueba(contexto.empresaAId);
 
@@ -61,11 +67,13 @@ describe("pedidos (RLS, issue #320)", () => {
         .returning({ id: pedidos.id })
     );
 
-    const sinContexto = await db.select({ id: pedidos.id }).from(pedidos).where(eq(pedidos.id, pedido.id));
-    expect(sinContexto, "sin app.empresa_actual, RLS tiene que bloquear hasta a la propia empresa dueña").toHaveLength(0);
+    await expect(
+      db.select({ id: pedidos.id }).from(pedidos).where(eq(pedidos.id, pedido.id)),
+      "sin app.empresa_actual, el cast de la política tiene que reventar, nunca devolver una lista vacía en silencio"
+    ).rejects.toThrow(/invalid input syntax for type uuid/);
 
     // La fila sí existe y es visible con el contexto correcto — así
-    // el `toHaveLength(0)` de arriba no pasa "por accidente" por un
+    // el `rejects.toThrow` de arriba no pasa "por accidente" por un
     // INSERT que en realidad falló.
     const conContexto = await dbComoEmpresa(contexto.empresaAId, (tx) =>
       tx.select({ id: pedidos.id }).from(pedidos).where(eq(pedidos.id, pedido.id))
