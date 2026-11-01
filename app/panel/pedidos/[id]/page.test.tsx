@@ -22,6 +22,8 @@ const {
   requierePermisoMock,
   SinPermisoErrorFalso,
   obtenerPedidoConEventosMock,
+  tienePermisoMock,
+  tieneVentaFinanzasMock,
 } = vi.hoisted(() => {
   class SinPermisoErrorFalso extends Error {}
   return {
@@ -39,6 +41,8 @@ const {
     requierePermisoMock: vi.fn(),
     SinPermisoErrorFalso,
     obtenerPedidoConEventosMock: vi.fn(),
+    tienePermisoMock: vi.fn(() => false),
+    tieneVentaFinanzasMock: vi.fn(),
   };
 });
 
@@ -48,8 +52,11 @@ vi.mock("@/lib/usuarios", () => ({ obtenerOCrearUsuarioActual: obtenerOCrearUsua
 vi.mock("@/lib/empresas", () => ({ listarEmpresasDeUsuario: listarEmpresasDeUsuarioMock }));
 vi.mock("@/lib/membresias", () => ({ obtenerMiMembresia: obtenerMiMembresiaMock }));
 vi.mock("@/lib/permisos", () => ({ requierePermiso: requierePermisoMock, SinPermisoError: SinPermisoErrorFalso }));
+vi.mock("@/lib/roles", () => ({ tienePermiso: tienePermisoMock }));
+vi.mock("@/lib/finanzas/ventas-consulta", () => ({ tieneVentaFinanzas: tieneVentaFinanzasMock }));
 vi.mock("@/lib/ml/pedidos", () => ({
   obtenerPedidoConEventos: obtenerPedidoConEventosMock,
+  etiquetaEstadoPedido: (estado: string) => estado,
   PASOS_PEDIDO: ["venta", "pago", "factura", "empaque", "despacho", "entrega", "novedades", "dinero_conciliado"],
 }));
 
