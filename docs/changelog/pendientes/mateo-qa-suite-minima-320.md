@@ -1,0 +1,20 @@
+- **2026-10-31** — Refs #320, rama `mateo/qa-suite-minima-320`: suite mínima de CI — aislamiento de `pedidos` + 3 humos automáticos (conectar ML, listar pedidos, despacho básico), todo contra el Postgres efímero que ya usa `build-and-test`.
+
+  **Hecho**
+  - `db/rls-pedidos.test.ts` (nuevo): extiende la plantilla A/B de #39 (`crearDosEmpresas` + `afirmarAislamiento`, `db/test-utils/aislamiento.ts`) a la tabla `pedidos` — hasta ahora solo `pedido_items` tenía su propia prueba de RLS. `cuentas_ml` ya estaba cubierta (`db/rls-cuentas-ml.test.ts`, tarea 2.3), no se tocó.
+  - Caso extra en `db/rls-pedidos.test.ts`, pedido explícito de Mateo: consultar `pedidos` con `db` directo (sin pasar por `dbComoEmpresa`, sin ningún `app.empresa_actual` fijado) no devuelve nada, aunque la fila exista — confirma que el candado es la política RLS (`aislamiento_pedidos`, `db/rls-setup.sql`) y no solo que el código de la app recuerde filtrar. Si se quitara la columna `empresa_id` o esa política, esta prueba revienta.
+  - `lib/ml/humo.test.ts` (nuevo): 3 humos, mismo job de CI, mismo Postgres efímero, CERO llamadas de red reales — mismo patrón de mock que ya usan `lib/ml/oauth.test.ts` y `lib/ml/despachos.test.ts` (interceptar `fetch` global, nunca `lib/ml/cliente.ts` ni `lib/ml/oauth.ts` tocan la red de verdad):
+    - **Conectar ML**: `intercambiarCodigo`/`obtenerDatosVendedorMl` (mock) → `guardarCuentaConectada` contra Postgres real.
+    - **Listar pedidos**: `listarPedidosFiltrados` sobre un pedido real de prueba — confirma además que esta función NUNCA llama a `fetch` (es lectura pura de la base).
+    - **Despacho básico**: `sincronizarDespacho` (mock de `obtenerShipmentMl`/`obtenerSlaEnvioMl`) → fila real en `despachos_ml`.
+  - Cada humo comprueba, con sus propios `expect` (pedido explícito de Mateo): (1) el `fetch` estubeado nunca recibe una URL distinta de `https://api.mercadolibre.com` — el mock mismo revienta si algo intentara llamar a otro lado; (2) ningún token/secreto falso (marcadores propios de cada test, nunca un valor real) aparece en `console.log`/`console.warn`/`console.error` (se espían los tres; `cliente.ts`/`cuentas.ts` usan `console.warn` para sus avisos).
+  - Si cualquiera de los 3 humos o la prueba de `pedidos` falla, `npm test` sale con código distinto de 0 y el job `build-and-test` queda en rojo — comportamiento ya existente de Vitest/CI, no se tocó `.github/workflows/ci.yml`.
+
+  **No se tocó**
+  - `extension/`, `lib/ml/cliente.ts`, `db/schema.ts` — sin necesidad de migración (`pedidos` y `cuentas_ml` ya existen con RLS desde antes).
+  - `.github/workflows/ci.yml` — el glob de Vitest ya recoge cualquier `*.test.ts` nuevo; las variables de entorno fake que ya existen (`ML_CLIENT_ID`, etc.) alcanzan, y estos humos además fijan sus propias `ML_CLIENT_ID`/`ML_CLIENT_SECRET` de prueba en su propio archivo (mismo criterio que `lib/ml/oauth.test.ts`), sin depender del workflow.
+  - `scripts/humo.sh` / `.github/workflows/humo.yml` (issue #45, humo manual de producción/staging vía `workflow_dispatch`, HTTP contra una URL real desplegada) — issue #320 lo complementa, nunca lo reemplaza: estos humos nuevos corren en CADA PR, contra código y Postgres real, pero sin tocar ningún ambiente desplegado.
+
+  **Verificado**
+  - `npx tsc --noEmit` limpio.
+  - `db/rls-pedidos.test.ts` y `lib/ml/humo.test.ts` fallan localmente solo por falta de `DATABASE_URL_APP` (sin Postgres local, por diseño — ver CLAUDE.md) — mismo comportamiento que el resto de `db/rls-*.test.ts` y `lib/ml/*.test.ts`; correrán de verdad en el Postgres efímero de CI.
