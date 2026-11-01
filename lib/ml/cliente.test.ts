@@ -77,7 +77,7 @@ describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)"
     expect(PATRON_ID_CATEGORIA.test(valor)).toBe(esperado);
   });
 
-  it("productId que no cumple ^MCO\\d+$ nunca llama a fetch (obtenerProducto)", async () => {
+  it("productId que no cumple el patrón de id de Mercado Libre nunca llama a fetch (obtenerProducto)", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const resultado = await obtenerProducto("'; DROP TABLE x; --", "token");
@@ -96,7 +96,7 @@ describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)"
   it("categoryId inválido nunca llama a fetch (obtenerMejoresProductosCategoria)", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const resultado = await obtenerMejoresProductosCategoria("MCO 1234", "token");
+    const resultado = await obtenerMejoresProductosCategoria("MCO", "MCO 1234", "token");
     expect(resultado).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -112,6 +112,16 @@ describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)"
   it("linkPublicacion con un itemId inválido devuelve null, nunca arma una URL", () => {
     expect(linkPublicacion("javascript:alert(1)")).toBeNull();
     expect(linkPublicacion("MCO111")).toBe("https://articulo.mercadolibre.com.co/MCO-111");
+  });
+
+  // Issue #315 — el dominio sale del propio prefijo del itemId
+  // (nunca de ".com.co" fijo): cada site_id real tiene su dominio, y
+  // Brasil además cambia de palabra (mercadoLIVRE, no mercadoLIBRE).
+  it("linkPublicacion arma el dominio real de cada país a partir del site_id del itemId, nunca fijo a Colombia", () => {
+    expect(linkPublicacion("MLM456")).toBe("https://articulo.mercadolibre.com.mx/MLM-456");
+    expect(linkPublicacion("MLB789")).toBe("https://articulo.mercadolivre.com.br/MLB-789");
+    expect(linkPublicacion("MLA1")).toBe("https://articulo.mercadolibre.com.ar/MLA-1");
+    expect(linkPublicacion("MLC1")).toBe("https://articulo.mercadolibre.cl/MLC-1");
   });
 
   it("ids válidos sí llaman a fetch, con el id pasado por encodeURIComponent", async () => {
@@ -416,12 +426,12 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
 
   it("401 en /products/search: MlNoAutorizadoError, nunca un Error genérico ni un 500 silencioso", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
-    await expect(buscarProductosCatalogo("reloj digital", "token")).rejects.toThrow(MlNoAutorizadoError);
+    await expect(buscarProductosCatalogo("MCO", "reloj digital", "token")).rejects.toThrow(MlNoAutorizadoError);
   });
 
   it("403 en /products/search: MlSinPermisoAppError, con el endpoint (sin query) adentro", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    const error = await buscarProductosCatalogo("reloj digital", "token").catch((e) => e);
+    const error = await buscarProductosCatalogo("MCO", "reloj digital", "token").catch((e) => e);
     expect(error).toBeInstanceOf(MlSinPermisoAppError);
     expect(error.endpoint).toBe("/products/search");
     expect(error.endpoint).not.toContain("reloj"); // nunca el término en el endpoint logueado
@@ -429,7 +439,7 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
 
   it("5xx: MlNoDisponibleError", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 503)));
-    await expect(buscarProductosCatalogo("reloj digital", "token")).rejects.toThrow(MlNoDisponibleError);
+    await expect(buscarProductosCatalogo("MCO", "reloj digital", "token")).rejects.toThrow(MlNoDisponibleError);
   });
 
   it("tiempo agotado (AbortError): MlNoDisponibleError, no un {ok:false} silencioso", async () => {
@@ -439,12 +449,12 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
         throw new DOMException("The operation was aborted.", "AbortError");
       })
     );
-    await expect(buscarProductosCatalogo("reloj digital", "token")).rejects.toThrow(MlNoDisponibleError);
+    await expect(buscarProductosCatalogo("MCO", "reloj digital", "token")).rejects.toThrow(MlNoDisponibleError);
   });
 
   it("404 sigue siendo 'vacío' (array vacío), no un error — una respuesta legítima", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
-    await expect(buscarProductosCatalogo("reloj digital", "token")).resolves.toEqual([]);
+    await expect(buscarProductosCatalogo("MCO", "reloj digital", "token")).resolves.toEqual([]);
   });
 
   // Issue #174 — bug real: antes esto era un Error genérico que
@@ -454,10 +464,19 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
   // diagnosticar por qué Investigación no devolvía resultados.
   it("un 4xx que no es 404 (ej. 400): MlRespuestaInesperadaError con el status real adentro, nunca un Error genérico", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 400)));
-    const error = await buscarProductosCatalogo("reloj digital", "token").catch((e) => e);
+    const error = await buscarProductosCatalogo("MCO", "reloj digital", "token").catch((e) => e);
     expect(error).toBeInstanceOf(MlRespuestaInesperadaError);
     expect(error.status).toBe(400);
     expect(error.message).toContain("400");
+  });
+
+  // Issue #315 — una cuenta MLM busca en SU catálogo, nunca en el de
+  // Colombia: site_id en la URL sale del parámetro siteId recibido.
+  it("buscarProductosCatalogo: cuenta MLM pide site_id=MLM, nunca MCO fijo", async () => {
+    const fetchMock = vi.fn(async (_url: string) => respuestaJson({ results: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await buscarProductosCatalogo("MLM", "reloj digital", "token");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("site_id=MLM");
   });
 
   it("obtenerOfertasProducto propaga 403 tal cual (nunca lo traga como 'sin ofertas') — investigacion.ts necesita distinguirlo", async () => {
@@ -580,17 +599,26 @@ describe("resolverCategoria — 3 intentos con 800ms*intento ante 403/5xx (issue
       .mockResolvedValueOnce(respuestaJson({}, 403))
       .mockResolvedValueOnce(respuestaJson([{ category_id: "MCO1234" }]));
     vi.stubGlobal("fetch", fetchMock);
-    const promesa = resolverCategoria("reloj digital", "token");
+    const promesa = resolverCategoria("MCO", "reloj digital", "token");
     await vi.runAllTimersAsync();
     const resultado = await promesa;
     expect(resultado).toEqual({ categoryId: "MCO1234" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  // Issue #315 — una cuenta MLM resuelve categoría en SU sitio.
+  it("cuenta MLM pide /sites/MLM/domain_discovery, nunca /sites/MCO fijo", async () => {
+    const fetchMock = vi.fn(async (_url: string) => respuestaJson([{ category_id: "MLM1234" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await resolverCategoria("MLM", "reloj digital", "token");
+    expect(resultado).toEqual({ categoryId: "MLM1234" });
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/sites/MLM/domain_discovery");
+  });
+
   it("403 los 3 intentos: devuelve null (enriquecimiento opcional), nunca lanza", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    const promesa = resolverCategoria("reloj digital", "token");
+    const promesa = resolverCategoria("MCO", "reloj digital", "token");
     await vi.runAllTimersAsync();
     await expect(promesa).resolves.toBeNull();
   });
@@ -598,7 +626,7 @@ describe("resolverCategoria — 3 intentos con 800ms*intento ante 403/5xx (issue
   it("401: nunca reintenta — propaga de una (el token no va a cambiar en el segundo intento)", async () => {
     const fetchMock = vi.fn(async () => respuestaJson({}, 401));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(resolverCategoria("reloj digital", "token")).rejects.toThrow(MlNoAutorizadoError);
+    await expect(resolverCategoria("MCO", "reloj digital", "token")).rejects.toThrow(MlNoAutorizadoError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
@@ -619,7 +647,7 @@ describe("obtenerMejoresProductosCategoria — highlights con type ITEM | PRODUC
         })
       )
     );
-    const resultado = await obtenerMejoresProductosCategoria("MCO1234", "token");
+    const resultado = await obtenerMejoresProductosCategoria("MCO", "MCO1234", "token");
     expect(resultado).toEqual([
       { id: "MCO1", tipo: "PRODUCT" },
       { id: "MCO2", tipo: "ITEM" },
@@ -629,10 +657,23 @@ describe("obtenerMejoresProductosCategoria — highlights con type ITEM | PRODUC
 
   it("tolera 403/5xx devolviendo [] (enriquecimiento), propaga 401", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    await expect(obtenerMejoresProductosCategoria("MCO1234", "token")).resolves.toEqual([]);
+    await expect(obtenerMejoresProductosCategoria("MCO", "MCO1234", "token")).resolves.toEqual([]);
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
-    await expect(obtenerMejoresProductosCategoria("MCO1234", "token")).rejects.toThrow(MlNoAutorizadoError);
+    await expect(obtenerMejoresProductosCategoria("MCO", "MCO1234", "token")).rejects.toThrow(MlNoAutorizadoError);
+  });
+
+  // Issue #315 — una cuenta MLM (México) pide sus destacados: la URL
+  // usa el siteId real recibido (nunca "MCO" fijo) y PATRON_ID_DESTACADO
+  // acepta el prefijo MLM, no solo MCO.
+  it("cuenta MLM: pide /highlights/MLM/... y acepta ids con prefijo MLM", async () => {
+    const fetchMock = vi.fn(async (_url: string) =>
+      respuestaJson({ content: [{ id: "MLM1", type: "PRODUCT" }] })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await obtenerMejoresProductosCategoria("MLM", "MLM1234", "token");
+    expect(resultado).toEqual([{ id: "MLM1", tipo: "PRODUCT" }]);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/highlights/MLM/category/MLM1234");
   });
 });
 

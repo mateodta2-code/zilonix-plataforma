@@ -5,8 +5,9 @@
 // que paga el vendedor es el estimado de una sola unidad (F9), no el
 // costo real de un despacho.
 
-import { MlRespuestaInesperadaError, PATRON_ID_PRODUCTO_O_ITEM, PATRON_ID_VENDEDOR, SITE_ID, pedirLecturaMl } from "@/lib/ml/cliente";
+import { MlRespuestaInesperadaError, PATRON_ID_PRODUCTO_O_ITEM, PATRON_ID_VENDEDOR, pedirLecturaMl } from "@/lib/ml/cliente";
 import { DecimalInvalidoError, aEscala, cabeEnNumeric, textoDeNumeroJson } from "@/lib/numeros/normalizar-decimal";
+import { SITE_ID_DEFECTO } from "@/lib/ml/sitios";
 
 export type CostoItemLeido = {
   itemId: string;
@@ -77,7 +78,7 @@ export async function costosDeItem(entrada: {
 }): Promise<CostoItemLeido> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId)) throw new Error("item_id inválido — no se llamó a Mercado Libre.");
   if (!PATRON_ID_VENDEDOR.test(entrada.userId)) throw new Error("user_id inválido — no se llamó a Mercado Libre.");
-  const site = entrada.siteId && /^[A-Z]{3}$/.test(entrada.siteId) ? entrada.siteId : SITE_ID;
+  const site = entrada.siteId && /^[A-Z]{3}$/.test(entrada.siteId) ? entrada.siteId : SITE_ID_DEFECTO;
 
   const itemResp = await pedirLecturaMl<ItemCrudo>(`/items/${entrada.itemId}`, entrada.token, {
     query: query({

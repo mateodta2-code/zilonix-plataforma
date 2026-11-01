@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { datosSitioMl, esSiteIdValido, formatearMoneda, formatearNumero, SITE_ID_DEFECTO, SITIOS_ML } from "./sitios";
+import { datosSitioMl, dominioMl, esSiteIdValido, formatearMoneda, formatearNumero, SITE_ID_DEFECTO, SITIOS_ML } from "./sitios";
 
 // Issue #315 (Z-LATAM-01) — mapa puro, sin ningún import de db/ ni de
 // Mercado Libre: se puede probar entero sin mocks.
@@ -81,6 +81,25 @@ describe("formatearMoneda — moneda e idioma reales por sitio, nunca $/es-CO fi
   it("siteId desconocido: cae al default (COP/es-CO), nunca lanza", () => {
     expect(formatearMoneda(150000, "algo-inventado")).toBe(formatearMoneda(150000, SITE_ID_DEFECTO));
     expect(formatearMoneda(150000, null)).toBe(formatearMoneda(150000, SITE_ID_DEFECTO));
+  });
+});
+
+// Issue #315 — dominio real del sitio público, para armar un
+// permalink sin fijar ".com.co" (lib/ml/permalink.ts).
+describe("dominioMl — dominio real por site_id, nunca mercadolibre.com.co fijo", () => {
+  it("cada uno de los 5 sitios reales, con el dominio real de Mercado Libre de ese país", () => {
+    expect(dominioMl("MCO")).toBe("mercadolibre.com.co");
+    expect(dominioMl("MLM")).toBe("mercadolibre.com.mx");
+    expect(dominioMl("MLB")).toBe("mercadolivre.com.br"); // Brasil: mercadoLIVRE, no mercadoLIBRE
+    expect(dominioMl("MLA")).toBe("mercadolibre.com.ar");
+    expect(dominioMl("MLC")).toBe("mercadolibre.cl"); // Chile: sin ".com"
+  });
+
+  it("site_id desconocido o inválido: cae al dominio del default, nunca lanza", () => {
+    expect(dominioMl("MLU")).toBe(dominioMl(SITE_ID_DEFECTO));
+    expect(dominioMl("algo-inventado")).toBe(dominioMl(SITE_ID_DEFECTO));
+    expect(dominioMl(null)).toBe(dominioMl(SITE_ID_DEFECTO));
+    expect(dominioMl(undefined)).toBe(dominioMl(SITE_ID_DEFECTO));
   });
 });
 

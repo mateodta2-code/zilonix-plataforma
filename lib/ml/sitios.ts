@@ -29,6 +29,28 @@ export const SITIOS_ML: Readonly<Record<string, SitioMl>> = {
 // — una sola fuente de verdad para "qué pasa si no sabemos el sitio".
 export const SITE_ID_DEFECTO = "MCO";
 
+// Issue #315 — dominio real del sitio público de Mercado Libre para
+// cada site_id (confirmado contra la lista oficial de sitios de
+// Mercado Libre): articulo.{dominio}/{ITEM-ID} es el link real de una
+// publicación (ver lib/ml/permalink.ts). Brasil es "mercadolivre" (en
+// portugués), no "mercadolibre" — nunca se arma a mano con un patrón
+// genérico tipo "mercadolibre.com.<sufijo>".
+const DOMINIOS_ML: Readonly<Record<string, string>> = {
+  MCO: "mercadolibre.com.co",
+  MLM: "mercadolibre.com.mx",
+  MLB: "mercadolivre.com.br",
+  MLA: "mercadolibre.com.ar",
+  MLC: "mercadolibre.cl",
+};
+
+// Nunca lanza: un site_id real pero todavía no operado por Zilonix (o
+// uno que no cumple el formato) cae al dominio del default — mismo
+// criterio que datosSitioMl.
+export function dominioMl(siteId: unknown): string {
+  if (typeof siteId === "string" && siteId in DOMINIOS_ML) return DOMINIOS_ML[siteId];
+  return DOMINIOS_ML[SITE_ID_DEFECTO];
+}
+
 export function esSiteIdValido(siteId: unknown): siteId is string {
   return typeof siteId === "string" && siteId in SITIOS_ML;
 }
