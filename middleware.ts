@@ -65,6 +65,29 @@ const LIMITE_WEBHOOKS_ML = 1200;
 const contadorWebhooksMl = creaContador();
 
 export default clerkMiddleware(async (auth, req) => {
+  // Opcional/deseable (digest 960283135, bug real en vivo en staging):
+  // Clerk completa ciertos pasos de login (SSO, verificación por link)
+  // navegando a "<ruta actual>/sso-callback" — si la "ruta actual" en
+  // ese momento es la página protegida a la que la persona quería
+  // volver (returnBackUrl, más abajo) en vez de /sign-in, ese
+  // "sso-callback" se cuela como si fuera un segmento real de esa ruta
+  // (ej. /panel/pedidos/sso-callback, donde [id] se lo come — eq() con
+  // ese valor contra una columna uuid revienta Postgres). La defensa de
+  // cada [id] (ver lib/validacion.ts) ya evita el 500; esto corrige la
+  // URL ANTES de llegar ahí, para que el handshake de Clerk termine de
+  // verdad en SU propia ruta (app/sign-in/[[...sign-in]], que sí sabe
+  // manejar /sso-callback) en vez de perderse en una página que no
+  // tiene nada que ver con el login.
+  if (
+    req.nextUrl.pathname.endsWith("/sso-callback") &&
+    !req.nextUrl.pathname.startsWith("/sign-in") &&
+    !req.nextUrl.pathname.startsWith("/sign-up")
+  ) {
+    const destino = new URL("/sign-in/sso-callback", req.url);
+    destino.search = req.nextUrl.search;
+    return NextResponse.redirect(destino);
+  }
+
   peticionesDesdeLimpieza += 1;
   if (peticionesDesdeLimpieza >= 500) {
     peticionesDesdeLimpieza = 0;

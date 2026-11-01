@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, ilike, lt, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { pedidoEventos, pedidos } from "@/db/schema";
 import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike } from "@/lib/filtros-listado";
+import { esUuid } from "@/lib/validacion";
 
 export type PasoPedido = (typeof pedidoEventos.$inferInsert)["paso"];
 
@@ -177,7 +178,16 @@ export type EventoPedido = { paso: PasoPedido; ts: Date; actorTipo: "persona" | 
 // integración ML" (mismo criterio de la tarea 1.9 — nunca se le
 // atribuye a una persona lo que confirmó la API sola). Las pantallas
 // nunca reciben el usuarioId crudo, solo lo ya resuelto acá.
+// Falla cerrada (bug real en vivo, digest 960283135, staging): pedidos.id
+// es una columna uuid — un pedidoId que no tiene forma de UUID (ej.
+// "sso-callback", colado por un redirect de Clerk sobre una ruta
+// dinámica) hace que eq(pedidos.id, pedidoId) reviente Postgres con
+// 22P02 en vez de simplemente no encontrar nada. La página de arriba ya
+// valida esto antes de llegar acá, pero esta función es la única fuente
+// de verdad real: cualquier otro caller futuro queda protegido igual,
+// sin tener que acordarse de repetir la validación en cada sitio.
 export async function obtenerPedidoConEventos(empresaId: string, pedidoId: string) {
+  if (!esUuid(pedidoId)) return null;
   return dbComoEmpresa(empresaId, async (tx) => {
     const [pedido] = await tx.select().from(pedidos).where(eq(pedidos.id, pedidoId));
     if (!pedido) return null;
