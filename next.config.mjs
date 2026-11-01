@@ -137,8 +137,13 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_CLERK_SIGN_IN_URL: "/sign-in",
     NEXT_PUBLIC_CLERK_SIGN_UP_URL: "/sign-up",
-    NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: "/",
-    NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: "/",
+    // Tarea fix-login-directo-panel — "FALLBACK" (nunca "FORCE"): Clerk
+    // solo usa esto cuando nadie pidió una ruta propia (ej. un
+    // ?redirect_url=/panel/pedidos/… de vuelta de una invitación,
+    // app/invitacion/[token]/page.tsx) — ese caso sigue ganando solo,
+    // sin tocar nada acá.
+    NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: "/panel",
+    NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: "/panel",
   },
   // Fix middleware (2026-10-21) — "/login" no existe como página (la
   // real es "/sign-in"), pero cualquiera que le pegue de todos modos
