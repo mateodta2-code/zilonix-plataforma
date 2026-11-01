@@ -15,10 +15,15 @@ import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 
 const BASE_URL = "https://api.mercadolibre.com";
 
-// Colombia, único país en alcance de esta tarea (Parte 1). Si algún
-// día se opera en otro país, esto pasa a depender del site_id de la
-// empresa, no antes — igual que DOMINIO_AUTORIZACION en lib/ml/oauth.ts.
-export const SITE_ID = "MCO";
+// Issue #315 (Z-LATAM-01) — pendiente, de Sharel, módulo de
+// Seguimiento: queda fijo SOLO para idsDePublicacionesDeVendedor/
+// obtenerPublicacionesVendedorAjenoMl (más abajo), que hoy no reciben
+// el site_id real de la cuenta desde lib/seguimiento/lector.ts ni
+// lib/trabajos/revisionDiariaSeguimiento.ts. El resto de usos de
+// SITE_ID en este archivo ya se migró a un parámetro siteId real
+// (obtenerSitioDeCuenta, lib/ml/cuentas.ts) — este queda como el único
+// hueco restante, documentado en docs/changelog/pendientes/.
+const SITE_ID_TEMPORAL_SEGUIMIENTO = "MCO";
 
 // Corrección de Pablo (PR #112): los id de producto/ítem y de
 // categoría de Mercado Libre siempre son 3 letras mayúsculas (el
@@ -358,8 +363,8 @@ export type ProductoCatalogoMl = { id: string; nombre: string | null; foto: stri
 // avanzar (es la primera llamada real de toda la cadena), así que sube
 // tal cual hasta la página — nunca "no se encontró nada", que sería
 // engañoso.
-export async function buscarProductosCatalogo(termino: string, token: string, offset = 0, limite = 20): Promise<ProductoCatalogoMl[]> {
-  const url = `${BASE_URL}/products/search?site_id=${SITE_ID}&q=${encodeURIComponent(termino)}&status=active&limit=${limite}&offset=${offset}`;
+export async function buscarProductosCatalogo(siteId: string, termino: string, token: string, offset = 0, limite = 20): Promise<ProductoCatalogoMl[]> {
+  const url = `${BASE_URL}/products/search?site_id=${encodeURIComponent(siteId)}&q=${encodeURIComponent(termino)}&status=active&limit=${limite}&offset=${offset}`;
   const resp = await pedir<{ results?: unknown[] }>(url, token);
   if (!resp.ok) {
     if (resp.status === 404) return [];
@@ -395,8 +400,8 @@ export type CategoriaMl = { categoryId: string };
 // categoría si el segundo o tercer intento sí responde. 401 (token
 // inválido de verdad) nunca se reintenta — no tiene sentido, el
 // siguiente intento fallaría igual.
-export async function resolverCategoria(termino: string, token: string): Promise<CategoriaMl | null> {
-  const url = `${BASE_URL}/sites/${SITE_ID}/domain_discovery/search?q=${encodeURIComponent(termino)}&limit=1`;
+export async function resolverCategoria(siteId: string, termino: string, token: string): Promise<CategoriaMl | null> {
+  const url = `${BASE_URL}/sites/${encodeURIComponent(siteId)}/domain_discovery/search?q=${encodeURIComponent(termino)}&limit=1`;
   for (let intento = 0; intento < 3; intento++) {
     if (intento > 0) await esperar(800 * intento);
     try {
@@ -441,12 +446,17 @@ export type ItemDestacadoMl = { id: string; tipo: string };
 // (estricto, el que de verdad protege la URL) sigue en obtenerProducto/
 // obtenerItemMl — cada id pasa por esa validación recién cuando se usa
 // de verdad, nunca antes. Acá solo se exige el mínimo sensato (un
-// string que empiece por "MCO" — nunca basura que ni eso cumple).
-const PATRON_ID_DESTACADO = /^MCO[A-Z0-9]+$/i;
+// string que empiece por el site_id real de la cuenta — nunca basura
+// que ni eso cumple).
+//
+// Issue #315 — igual que PATRON_ID_PRODUCTO_O_ITEM (PR #354), el
+// prefijo ya no fija "MCO": cualquier site_id real (3 letras
+// mayúsculas) cumple.
+const PATRON_ID_DESTACADO = /^[A-Z]{3}[A-Z0-9]+$/i;
 
-export async function obtenerMejoresProductosCategoria(categoryId: string, token: string): Promise<ItemDestacadoMl[]> {
+export async function obtenerMejoresProductosCategoria(siteId: string, categoryId: string, token: string): Promise<ItemDestacadoMl[]> {
   if (!PATRON_ID_CATEGORIA.test(categoryId)) return [];
-  const url = `${BASE_URL}/highlights/${SITE_ID}/category/${encodeURIComponent(categoryId)}`;
+  const url = `${BASE_URL}/highlights/${encodeURIComponent(siteId)}/category/${encodeURIComponent(categoryId)}`;
   try {
     const resp = await pedir<{ content?: unknown[] }>(url, token);
     if (!resp.ok) return [];
@@ -1121,7 +1131,10 @@ async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Pr
   } catch (e) {
     if (!(e instanceof MlSinPermisoAppError)) throw e;
   }
-  const urlPublico = `${BASE_URL}/sites/${SITE_ID}/search?seller_id=${encodeURIComponent(sellerId)}&limit=${TOPE_PUBLICACIONES_TIENDA}`;
+  // Pendiente (Refs #315, de Sharel): este site_id debería salir de la
+  // cuenta real (obtenerSitioDeCuenta), no fijo — ver
+  // SITE_ID_TEMPORAL_SEGUIMIENTO más arriba.
+  const urlPublico = `${BASE_URL}/sites/${SITE_ID_TEMPORAL_SEGUIMIENTO}/search?seller_id=${encodeURIComponent(sellerId)}&limit=${TOPE_PUBLICACIONES_TIENDA}`;
   try {
     const respPublico = await pedir<{ results?: unknown[] }>(urlPublico, token);
     if (!respPublico.ok) return null; // cualquier no-ok, no solo 403 — sin dato, nunca "cero publicaciones" inventado
