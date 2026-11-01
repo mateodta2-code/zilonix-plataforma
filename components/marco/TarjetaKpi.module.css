@@ -4,12 +4,18 @@
   /* Misma técnica que la tarjeta de identidad: el borde de 1px no
      acepta un degradado, así que el relleno sólido va a padding-box
      y --degradado-plata-borde al anillo transparente. El radial azul
-     es solo la esquina; la cifra queda sobre --superficie. */
+     es solo la esquina; la cifra queda sobre --kpi-fondo.
+     Issue #156 — --kpi-fondo es zona oscura en los dos temas (nunca
+     blanco en claro, nunca negro plano en oscuro); el radial de la
+     esquina pasa a --acento-resplandor-zona-oscura por el mismo
+     motivo — el color de abajo ya no depende de qué tema eligió la
+     persona. Los tokens de texto se redefinen más abajo, solo dentro
+     de esta tarjeta. */
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
-    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor), transparent 72%) padding-box,
-    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--kpi-fondo) padding-box,
     var(--degradado-plata-borde) border-box;
   padding: 16px 18px;
   display: flex;
@@ -17,6 +23,19 @@
   gap: 6px;
   overflow: hidden;
   transition: var(--transicion-color), var(--transicion-transform);
+
+  /* Issue #156 — el fondo ya es oscuro en los dos temas, así que el
+     texto de adentro tiene que ser el de "zona oscura" también en los
+     dos (mismo criterio ya usado por el header/sidebar/saludo —
+     fix-ui-claro-como-oscuro). Solo DENTRO de .tarjeta: nada fuera de
+     acá hereda estos valores, así que Tarjeta/EstadoVacio/tablas/
+     fondo de página quedan intactos. */
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
 }
 
 .tarjeta::before {
@@ -63,6 +82,13 @@
   font-size: 28px;
   line-height: 1.15;
   /* "COP 1.234.000 · USD 50" no cabe en una columna del grid a 28px. */
+  overflow-wrap: anywhere;
+}
+
+.detalle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--texto-suave);
   overflow-wrap: anywhere;
 }
 

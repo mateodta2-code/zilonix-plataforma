@@ -25,6 +25,30 @@ const APP_DIR = join(RAIZ, "app");
 const RUTAS_PROTEGIDAS = new Set([
   "app/panel/page.tsx",
   "app/panel/finanzas/page.tsx",
+  // Issue #128 (Z-FIN-06) — ver pide finanzas.consultar; crear, editar,
+  // desactivar e importar, finanzas.modificar (también en cada acción).
+  "app/panel/finanzas/proveedores/page.tsx",
+  "app/panel/finanzas/proveedores/actions.ts",
+  "app/panel/finanzas/proveedores/[id]/page.tsx",
+  "app/panel/finanzas/maestra-sku/page.tsx",
+  "app/panel/finanzas/maestra-sku/actions.ts",
+  "app/panel/finanzas/maestra-sku/editar/page.tsx",
+  "app/panel/finanzas/maestra-sku/alertas/page.tsx",
+  "app/panel/finanzas/maestra-sku/importar/page.tsx",
+  "app/panel/finanzas/maestra-sku/importar/actions.ts",
+  // Issue #131 Parte A — ventas y utilidad, solo lectura: las dos piden
+  // finanzas.consultar (y lib/finanzas/ventas-consulta.ts otra vez).
+  "app/panel/finanzas/ventas/page.tsx",
+  "app/panel/finanzas/ventas/[pedidoId]/page.tsx",
+  // «Traer ventas de este mes» (también en /panel/pedidos) y, Parte C,
+  // vista previa y confirmación del recálculo de costos: piden
+  // finanzas.modificar, acá y en lib/finanzas/ (traer-ventas-mes.ts,
+  // recalcular-costos.ts).
+  "app/panel/finanzas/ventas/actions.ts",
+  // Issue #126 (slice urgente) — valor Flex: ver pide finanzas.consultar;
+  // guardar, finanzas.modificar (acá y en lib/configuracion-finanzas.ts).
+  "app/panel/finanzas/configuracion/page.tsx",
+  "app/panel/finanzas/configuracion/actions.ts",
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
   "app/panel/invitar/actions.ts",
@@ -37,19 +61,111 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/conectar-ml/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/actions.ts",
+  "app/panel/conectar-ml/confirmar-transferencia/page.tsx",
   "app/panel/avisos-ml/page.tsx",
   "app/panel/sku/page.tsx",
   "app/panel/sku/actions.ts",
+  // Issue #280 (WMS Fase 1) — ver pide inventario.consultar; crear
+  // bodegas, ingresos, OC y recepciones, inventario.crear; ajustes,
+  // traslados y la alerta de última unidad, inventario.modificar;
+  // anular una OC, inventario.anular; la configuración y el envío a
+  // ML, inventario.autorizar.
+  "app/panel/bodegas/page.tsx",
+  "app/panel/bodegas/actions.ts",
+  "app/panel/inventario/page.tsx",
+  "app/panel/inventario/actions.ts",
+  "app/panel/inventario/kardex/page.tsx",
+  "app/panel/inventario/ingresos/page.tsx",
+  "app/panel/inventario/ingresos/actions.ts",
+  "app/panel/inventario/compras/page.tsx",
+  "app/panel/inventario/compras/actions.ts",
+  "app/panel/inventario/compras/[id]/page.tsx",
+  "app/panel/inventario/configuracion/page.tsx",
+  "app/panel/inventario/configuracion/actions.ts",
   "app/panel/sku/sin-vincular/page.tsx",
   "app/panel/sku/sin-vincular/actions.ts",
   "app/panel/sku/importar/page.tsx",
   "app/panel/pedidos/page.tsx",
   "app/panel/pedidos/[id]/page.tsx",
   "app/panel/despachos/page.tsx",
+  // Fase 1 de Despachos (issue "Despachos") — Marcar/Deshacer piden
+  // "ventas"/"modificar" (actions.ts); "Ver guía"/"Ver guía (sticker)"
+  // de una sola tarjeta piden solo "ventas"/"consultar" (ver el
+  // despacho no es la acción de "modificar" — eso es Marcar
+  // despachado), aunque de paso guarde guia_vista_ts.
+  "app/panel/despachos/actions.ts",
+  "app/api/ml/despachos/etiqueta/route.ts",
   "app/panel/investigacion/page.tsx",
+  "app/panel/investigacion/actions.ts",
+  "app/panel/investigacion/seguimiento/page.tsx",
+  "app/panel/investigacion/seguimiento/actions.ts",
+  "app/panel/investigacion/seguimiento/[id]/page.tsx",
   "app/api/ml/despachos/etiquetas/route.ts",
+  "app/panel/publicar/page.tsx",
+  "app/panel/publicar/actions.ts",
+  "app/panel/publicar/[id]/page.tsx",
+  // Parte 3 ("importadores + permalink + fotos Cloudinary + botón
+  // extensión") — buscarImportacionPorSkuAction/buscarImportacionPorLinkAction
+  // piden "inventario","consultar": solo TRAEN datos para precargar el
+  // formulario, nunca publican nada por su cuenta.
+  "app/panel/publicar/importadores/actions.ts",
+  // ADENDO UX de Publicar — mismo permiso que crear el producto en sí
+  // ("inventario","crear"): estas 3 solo AYUDAN a elegir categoría/
+  // atributos, nunca publican nada.
+  "app/api/ml/publicar/categorias/buscar/route.ts",
+  "app/api/ml/publicar/categorias/arbol/route.ts",
+  "app/api/ml/publicar/caracteristicas/route.ts",
+  // Parte 3, punto C — sube una foto (de la PC o una URL de Canva ya
+  // validada) a Cloudinary; mismo permiso que crear el producto en sí.
+  "app/api/ml/publicar/fotos/route.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
+  "app/api/ml/clip/route.ts",
+  // Rama feat-publicar-clip, punto 3/4/5 — las 5 rutas nuevas del
+  // sub-flujo de Clip. "modificar" para las que arrancan o cambian
+  // algo (subir, traer el video); "consultar" para las que solo LEEN
+  // (buscar por SKU, el polling del trabajo, el preview del video
+  // temporal, el estado de moderación) — mismo permiso real que ya
+  // usaban buscarItemAction/cambiarEstadoAction en clip/actions.ts.
+  "app/api/ml/clip/buscar-sku/route.ts",
+  "app/api/ml/clip/traer-video/route.ts",
+  "app/api/ml/clip/video-temp/[id]/route.ts",
+  "app/api/ml/clip/trabajo/[jobId]/route.ts",
+  "app/api/ml/clip/estado/route.ts",
+  "app/panel/publicidad/page.tsx",
+  "app/panel/publicidad/actions.ts",
+  // Rama feat-promociones — módulo nuevo "promociones"
+  // (consultar/aprobar/ejecutar, lib/roles-plantillas.ts). "consultar"
+  // para lo que solo LEE (buscar, el polling del trabajo, candidatos,
+  // historial); "aprobar" para decidir el lote y editar las reglas de
+  // una cuenta (ejecutar() mismo que decide, de una, también dentro
+  // del handler, si quien llama además tiene "ejecutar").
+  "app/api/ml/promociones/buscar/route.ts",
+  "app/api/ml/promociones/trabajo/[jobId]/route.ts",
+  "app/api/ml/promociones/candidatos/route.ts",
+  "app/api/ml/promociones/reglas/route.ts",
+  "app/api/ml/promociones/acciones/route.ts",
+  // MED 7 (review de Pablo) — paso separado de "ejecutar": requiere
+  // su propio requierePermiso("promociones","ejecutar"), nunca el
+  // mismo "aprobar" que exige el POST combinado de arriba.
+  "app/api/ml/promociones/acciones/ejecutar/route.ts",
+  // Rama fix-promociones-aprobadas-participando, punto 3 — "Participando".
+  // GET exige "consultar" (mismo criterio que .../candidatos); el POST
+  // de salir exige "ejecutar" (escribe de verdad en Mercado Libre, un
+  // DELETE real — mismo nivel que .../acciones/ejecutar, nunca "aprobar").
+  "app/api/ml/promociones/participando/route.ts",
+  "app/api/ml/promociones/participando/salir/route.ts",
+  // Review de Pablo (PR #304) — count(*) real para "Lanzar aprobadas a
+  // Mercado Libre (N)": mismo permiso de solo lectura que el resto de
+  // lo que solo CONSULTA (buscar/trabajo/candidatos/historial).
+  "app/api/ml/promociones/acciones/pendientes-lanzar/route.ts",
+  "app/api/ml/promociones/historial/route.ts",
+  "app/panel/promociones/page.tsx",
+  // "Conexión de IA" vive bajo el módulo "configuracion" que ya
+  // existe (consultar/modificar) — nunca un permiso nuevo solo para
+  // esto.
+  "app/api/configuracion/ia-conexion/route.ts",
+  "app/panel/configuracion/page.tsx",
 ]);
 
 // Tarea 1.11 — eje de autorización APARTE: "¿esta cuenta es
@@ -78,8 +194,36 @@ const RUTAS_EXENTAS: Record<string, string> = {
     "Mercado Libre llama esta ruta directo, sin sesión de usuario — el permiso real es dbComoAvisoWebhook() (db/empresa-context.ts), que solo deja ver la fila de cuentas_ml cuyo user_id coincide con el del aviso, nunca las de otra empresa",
   "app/api/ml/trabajador/route.ts":
     "la llama un cron, sin sesión de usuario — el permiso real es el secreto compartido x-trabajador-secret, y la conexión trabajador_user (db/trabajador-context.ts) solo puede tocar avisos_ml, ninguna otra tabla",
+  "app/api/trabajos/seguimiento/route.ts":
+    "la llama un cron, sin sesión de usuario (issue #175) — el permiso real es el secreto compartido x-seguimiento-trabajador-secret, y la conexión seguimiento_trabajador_user (db/trabajador-seguimiento-context.ts) solo puede tocar seguimientos_ml, ninguna otra tabla",
+  "app/api/trabajos/publicidad/route.ts":
+    "la llama un cron, sin sesión de usuario (issue #254) — el permiso real es el secreto compartido x-publicidad-trabajador-secret, y la conexión publicidad_trabajador_user (db/trabajador-publicidad-context.ts) solo puede listar columnas no secretas de cuentas_ml y leer publicidad_sincronizaciones, nunca los tokens",
   "app/panel/sku/importar/actions.ts":
     "el permiso real (requierePermiso('inventario','modificar')) vive en lib/ml/sku-importar.ts (previsualizarImportacionSkus/confirmarImportacionSkus), llamado ANTES de leer o escribir — este archivo solo adapta el formulario a esas dos funciones, nunca toca la base por su cuenta",
+  "app/panel/conectar-ml/confirmar-transferencia/actions.ts":
+    "el permiso real (requierePermiso('configuracion','crear')) vive en confirmarTransferenciaCuentaMl (lib/ml/transferencia.ts), llamado ANTES de transferir — este archivo solo resuelve usuario/empresa desde las cookies y borra el pendiente, nunca toca cuentas_ml por su cuenta",
+  // Parte 2 (página única, estructura de Zilonix OS) — estas dos rutas
+  // se retiraron a simples redirects hacia /panel/publicar (con el
+  // ancla de la sección): nunca leen ni escriben nada — siguen
+  // existiendo solo para no romper un link viejo guardado (el botón de
+  // Investigación, un bookmark, una notificación ya mandada).
+  "app/panel/publicar/nuevo/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#formulario-publicar (reenviando titulo/precio/foto) — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
+  // Rama feat-publicar-clip — reenviar cuentaId/sku/itemId/clipSubido/
+  // error ya no tiene efecto (SeccionClip.tsx busca/sube/consulta por
+  // su cuenta, con fetch del cliente a las rutas nuevas bajo
+  // app/api/ml/clip/, todas en RUTAS_PROTEGIDAS más arriba) — el
+  // redirect sigue existiendo solo por compatibilidad con un link
+  // viejo, nunca lee ni escribe nada.
+  "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#clip — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar y en las rutas nuevas de app/api/ml/clip/",
+  // Issue #318 (Ley 1581) — exportar o borrar los datos propios no es
+  // un permiso de MÓDULO que un rol pueda dar o quitar (como
+  // "inventario.crear"): es un derecho sobre los datos de la propia
+  // persona, el mismo para cualquier rol. El candado real es que
+  // ninguna de las dos funciones de lib/datos-personales.ts recibe un
+  // id de usuario del cliente — SIEMPRE usan el usuario de la sesión
+  // real (obtenerOCrearUsuarioActual), nunca el de otra persona.
+  "app/panel/mis-datos/page.tsx": "solo resuelve la sesión (redirige a /sign-in si no hay) y renderiza — exportar/borrar son un derecho sobre los datos propios, no un permiso de módulo; el candado real es que lib/datos-personales.ts nunca recibe un id de usuario ajeno",
+  "app/panel/mis-datos/actions.ts": "idem — las dos acciones resuelven el usuario con obtenerOCrearUsuarioActual(), nunca con un id que mande el cliente",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {
@@ -155,6 +299,8 @@ const RUTAS_DE_MAQUINA: Record<string, string> = {
   "app/api/ml/webhooks/route.ts": "/api/ml/webhooks",
   "app/api/ml/trabajador/route.ts": "/api/ml/trabajador",
   "app/api/salud/route.ts": "/api/salud",
+  "app/api/trabajos/seguimiento/route.ts": "/api/trabajos/seguimiento",
+  "app/api/trabajos/publicidad/route.ts": "/api/trabajos/publicidad",
 };
 
 // La única ruta pública en el middleware que NO está exenta de

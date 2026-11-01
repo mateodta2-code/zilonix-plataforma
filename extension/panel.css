@@ -1,0 +1,335 @@
+/* Issue #174 — mismos colores de marca de Zilonix Seller
+   (app/globals.css): negro/gris oscuro de base, plata del manual,
+   azul en lo interactivo. Se repiten los valores acá a mano (hex, no
+   var(--...)) porque esta hoja corre adentro de la extensión, sin
+   acceso al CSS de la app web. */
+
+.zx-panel {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  width: 320px;
+  max-height: 80vh;
+  overflow-y: auto;
+  z-index: 2147483647;
+  background: linear-gradient(180deg, #121214 0%, #0b0b0c 100%);
+  border: 1px solid #222225;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 12px 32px rgba(0, 0, 0, 0.55);
+  color: #f2f4f8;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.zx-panel * {
+  box-sizing: border-box;
+}
+
+.zx-panel__encabezado {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #222225;
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.14), transparent);
+}
+
+.zx-panel__titulo {
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #c0c0c0;
+  margin: 0;
+}
+
+.zx-panel__sitio {
+  font-size: 11px;
+  color: #939393;
+}
+
+.zx-panel__boton-icono {
+  background: transparent;
+  border: none;
+  color: #939393;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+.zx-panel__boton-icono:hover {
+  color: #e6e6e6;
+}
+
+/* Issue #273 (Mateo) — interruptor global Encendido/Apagado, visible
+   en los 3 tipos de panel (producto/tienda/listado, todos pasan por
+   renderizarEsqueleto en content.js). Fondo azul tenue para separarlo
+   visualmente del resto del encabezado sin salirse de los colores de
+   marca de arriba. */
+.zx-panel__interruptor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #222225;
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.zx-panel__interruptor-texto {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c0c0c0;
+}
+
+.zx-interruptor {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.zx-interruptor__input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.zx-interruptor__pista {
+  position: absolute;
+  inset: 0;
+  background: #3a3a3d;
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+
+.zx-interruptor__perilla {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e6e6e6;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.zx-interruptor__input:checked + .zx-interruptor__pista {
+  background: #3b82f6;
+}
+
+.zx-interruptor__input:checked + .zx-interruptor__pista .zx-interruptor__perilla {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.zx-interruptor__input:focus-visible + .zx-interruptor__pista {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+/* Issue #273 (revisión de Pablo, punto 2) — "Enviando a: Staging/Producción",
+   solo en Mercado Libre (único lector con config.js cargado, ver
+   renderizarEsqueleto en content.js). Texto chico, gris, nunca compite
+   con el resto del encabezado. */
+.zx-panel__ambiente {
+  margin: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid #222225;
+  font-size: 10px;
+  color: #6e6e6e;
+}
+
+.zx-panel__cuerpo {
+  padding: 10px 12px;
+}
+
+.zx-panel__cuerpo[hidden] {
+  display: none;
+}
+
+.zx-fila {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(34, 34, 37, 0.6);
+}
+
+.zx-fila:last-child {
+  border-bottom: none;
+}
+
+.zx-fila__etiqueta {
+  color: #939393;
+  flex-shrink: 0;
+}
+
+.zx-fila__valor {
+  color: #f2f4f8;
+  text-align: right;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.zx-fila__valor[data-sin-dato="true"] {
+  color: #6e6e6e;
+  font-weight: 400;
+  font-style: italic;
+}
+
+.zx-fila__valor--exito {
+  color: #4ade80;
+}
+
+.zx-fila__valor--chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.16);
+  color: #60a5fa;
+  font-size: 11px;
+}
+
+/* Issue #262 — encabezado del bloque "Análisis aprox." (vendidos
+   estimados/antigüedad/ventas-mes/facturación-mes), separado del resto
+   de las filas de la ficha con un margen/borde arriba, para que nunca
+   se confunda con un dato que Mercado Libre confirma directamente. */
+.zx-seccion-titulo {
+  margin: 10px 0 2px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(34, 34, 37, 0.6);
+  font-size: 12px;
+  font-weight: 700;
+  color: #60a5fa;
+}
+
+.zx-nota-aprox {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-style: italic;
+  color: #939393;
+}
+
+.zx-titulo-producto {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  color: #e6e6e6;
+}
+
+.zx-top10 {
+  margin: 8px 0 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.zx-top10 li {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(34, 34, 37, 0.6);
+  font-size: 12px;
+}
+
+.zx-top10 a {
+  color: #c0c0c0;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zx-top10 a:hover {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+.zx-top10__vendidos {
+  color: #4ade80;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.zx-panel__pie {
+  padding: 10px 12px;
+  border-top: 1px solid #222225;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.zx-boton-copiar {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+  color: #fff;
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.zx-boton-copiar:hover {
+  box-shadow: 0 0 0 1px #5b8def, 0 0 16px rgba(59, 130, 246, 0.45);
+}
+
+.zx-boton-copiar:active {
+  transform: scale(0.98);
+}
+
+.zx-boton-copiar[data-copiado="true"] {
+  background: linear-gradient(180deg, #22c55e, #16a34a);
+}
+
+/* Issue #174 — "Seguir en Zilonix": plateado, distinto del azul de
+   "Copiar datos" para separar las dos acciones a simple vista, con
+   los mismos colores de marca (oscuro + plateado). */
+.zx-boton-seguir {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #6e6e6e;
+  background: transparent;
+  color: #e6e6e6;
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.zx-boton-seguir:hover {
+  border-color: #c0c0c0;
+  box-shadow: 0 0 0 1px #c0c0c0;
+}
+
+.zx-boton-seguir:active {
+  transform: scale(0.98);
+}
+
+.zx-vacio {
+  color: #939393;
+  font-style: italic;
+  padding: 8px 0;
+}
+
+/* Issue #44 (anexo "Importar video a Clip") — varios videos
+   encontrados en la misma página: cada uno es un .zx-boton-seguir
+   (mismo estilo de siempre), solo que agrupados en este contenedor en
+   vez de ir directo en .zx-panel__pie (que ya hace flex-column con
+   gap, acá se repite para que el grupo se vea igual que un botón
+   suelto). */
+.zx-lista-videos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

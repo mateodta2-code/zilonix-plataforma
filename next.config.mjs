@@ -28,16 +28,72 @@ const cspClerk = dominioClerk
   ? [
       `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""} https://${dominioClerk} https://challenges.cloudflare.com https://*.protect.clerk.com`,
       `connect-src 'self' https://${dominioClerk} https://*.protect.clerk.com:*`,
-      `img-src 'self' data: https://img.clerk.com`,
       `style-src 'self' 'unsafe-inline'`,
       `frame-src 'self' https://challenges.cloudflare.com https://*.protect.clerk.com`,
       `worker-src 'self' blob:`,
     ]
   : [];
 
+// Issue #235 — causa real de "columna FOTO siempre en '—'" en
+// /panel/investigacion: NUNCA fue un selector roto en los lectores de
+// la extensión (confirmado — ver extension/LEEME.md). El CSP global
+// de esta app (tarea 1.10) solo permitía `img-src 'self' data:` + el
+// dominio de Clerk — cualquier <img> apuntando a una foto real
+// escaneada de un marketplace quedaba bloqueada por el NAVEGADOR
+// antes de intentar siquiera la petición de red (nunca daba un error
+// de red "normal" que se pudiera ver con onError — el navegador ni
+// llegaba a pedirla). `img-src` está separado de `cspClerk` a
+// propósito: son dominios de marketplaces, nada que ver con Clerk —
+// tienen que seguir permitidos aunque algún día `dominioClerk` sea
+// null (ej. en desarrollo local sin esas variables).
+//
+// Dominios reales, confirmados contra una captura real de cada sitio
+// (Wayback Machine — listado.mercadolibre.com.co bloquea el acceso
+// directo desde este sandbox, igual que en #229/#231/#233; esta fue
+// la forma de conseguir HTML real sin inventar nada):
+//   - Mercado Libre: http2.mlstatic.com (confirmado en un listado de
+//     hoy, "zapatillas", el mismo <img class="poly-component__picture">
+//     que ya lee mercadolibre.js) -> *.mlstatic.com (varios edges http1/http2/etc).
+//   - Amazon: m.media-amazon.com (confirmado en el <img class="s-image">
+//     real que ya lee amazon.js, captura de sept/2026) -> *.media-amazon.com.
+//   - Temu: img.kwcdn.com (confirmado en la home real, captura de
+//     oct/2026) -> *.kwcdn.com.
+//   - Alibaba: img.alicdn.com/i.alicdn.com (confirmado en la home
+//     real, captura de oct/2026) -> *.alicdn.com.
+//   - Shein: img.ltwebstatic.com (confirmado en la home real, captura
+//     de oct/2026) -> *.ltwebstatic.com.
+//
+// Parte 3, punto C ("fotos: PC + Canva → Cloudinary") — res.cloudinary.com
+// es el host FIJO real de toda `secure_url` que devuelve Cloudinary (no
+// depende del cloud_name, que va en el PATH, no en el host — confirmado
+// contra la forma real que ya devuelve lib/cloudinary.ts). Sin esto, la
+// miniatura de GaleriaFotos.tsx quedaría bloqueada por el navegador
+// (mismo bug real que el issue #235 de arriba, pero para un dominio
+// nuevo en vez de uno de un marketplace).
+const CLOUDINARY_HOST = "https://res.cloudinary.com";
+
+// Issue #237 — hotfix de smoke de fotos: "sigue sin aparecer" para
+// AliExpress (el único que #236 no alcanzó a tapar) — causa real
+// confirmada, nunca un selector roto: `it.image.imgUrl`
+// (lectores/aliexpress.js) sigue siendo la ruta JSON correcta
+// (confirmado, estructura sin cambios: `"image":{"imgUrl":"...",...}`),
+// pero el VALOR real del dominio migró. #236 asumió `ae01.alicdn.com`
+// (confirmado en una captura de 2023) — una captura real fresca
+// (agosto/2026) confirma que AliExpress movió sus fotos de producto a
+// un dominio propio nuevo, `ae-pic-a1.aliexpress-media.com`
+// (`aliexpress-media.com`, NUNCA un subdominio de `alicdn.com` — dominio
+// de marca completamente distinto, aunque siga siendo el mismo grupo
+// corporativo) — ese dominio nunca estuvo en `img-src`, así que el
+// navegador bloqueaba la foto antes de pedirla, igual que el bug
+// original de #236 mismo. Se suma *.aliexpress-media.com — se deja
+// *.alicdn.com sin tocar (Alibaba sigue ahí, confirmado aparte).
+const IMG_SRC_CSP =
+  `img-src 'self' data: https://img.clerk.com https://*.mlstatic.com https://*.media-amazon.com https://*.kwcdn.com https://*.alicdn.com https://*.aliexpress-media.com https://*.ltwebstatic.com ${CLOUDINARY_HOST}`;
+
 const csp = [
   "default-src 'self'",
   ...cspClerk,
+  IMG_SRC_CSP,
   "form-action 'self'",
   "frame-ancestors 'self'",
   "base-uri 'self'",

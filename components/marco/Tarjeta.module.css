@@ -1,20 +1,73 @@
-/* Tarea "marca unificada": mismo borde azul/plata y misma línea azul
-   superior que ya usa TarjetaKpi (components/marco/TarjetaKpi.module.css)
-   — formularios (ej. /panel/invitar), filtros y cualquier otro bloque
-   envuelto en <Tarjeta> dejan de verse "gris plano" en el tema claro.
+/* Tarea "marca unificada" + issue #186 (Sharel, Refs): mismo borde
+   azul/plata, misma línea azul superior y la MISMA superficie oscura
+   que ya usa TarjetaKpi (components/marco/TarjetaKpi.module.css,
+   issue #156) — formularios (ej. /panel/invitar), filtros y cualquier
+   otro bloque envuelto en <Tarjeta> dejan de verse "caja blanca" que
+   rompe la línea del resto del panel, en los dos temas.
    isolation/position relative: la línea de arriba es un ::before
    absoluto, necesita que esta caja sea su contenedor de referencia. */
 .tarjeta {
   position: relative;
   isolation: isolate;
-  /* Borde plata de 1px. Sin :hover: esta tarjeta no es clicable. */
+  /* Borde plata de 1px. Sin :hover: esta tarjeta no es clicable (a
+     propósito — nunca se le agrega el hover de TarjetaKpi). */
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
-    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
     var(--degradado-plata-borde) border-box;
   padding: 20px;
   overflow: hidden;
+
+  /* Mismo criterio que TarjetaKpi: el fondo ya es oscuro en los dos
+     temas, así que todo lo de ADENTRO usa los tokens de "zona oscura"
+     también en los dos — solo dentro de .tarjeta, nada fuera de acá
+     hereda esto.
+
+     color EXPLÍCITO (no solo redefinir la variable): un texto plano
+     de adentro sin ninguna regla propia de "color" (ej. un párrafo
+     suelto en algún formulario futuro) hereda el COLOR YA CALCULADO
+     del ancestro más cercano que lo fije — redefinir --texto acá
+     adentro no alcanza si nada vuelve a leer var(--texto) en este
+     nivel. Mismo bug real que ListaFilas.module.css tenía con
+     filaCuenta en /panel/conectar-ml (issue #186) — se corta de raíz
+     fijando color una sola vez acá. */
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  /* --exito-texto/--peligro-texto normales se oscurecen en claro
+     (pensados para fondo blanco, Chip.module.css los usa como color
+     de texto) — ilegibles acá. Mismos equivalentes AA que ya usa
+     TarjetaKpi, por si algún Chip/aviso de estado cae dentro de una
+     <Tarjeta> (ej. un filtro con un chip de estado). */
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
+  /* Issue #191 — Chip estado="aviso" (ej. "Competidor" en la tabla de
+     seguimiento) usa --acento/--acento-fuerte para texto y borde —
+     los normales se oscurecen en claro (pensados para fondo blanco),
+     ilegibles acá. Mismos equivalentes AA que ya usa oscuro para
+     estos dos (ver el comentario en app/globals.css). */
+  --acento: var(--acento-zona-oscura);
+  --acento-fuerte: var(--acento-fuerte-zona-oscura);
+  /* Fase 1-1 de Despachos — único consumidor de estos 3 (el resaltado
+     ámbar de la tarjeta Flex, app/panel/despachos/page.module.css):
+     no existe un --advertencia normal (fuera de <Tarjeta>) porque
+     hasta esta tarea no había NINGÚN token ámbar/warning en el
+     archivo — ver el comentario real en app/globals.css. */
+  --advertencia: var(--kpi-advertencia-texto);
+  --advertencia-fuerte: var(--kpi-advertencia-fuerte);
+  --advertencia-suave: var(--kpi-advertencia-suave);
+  /* Issue #191 — una <Tabla> (components/marco/Tabla.module.css) de
+     adentro tiene que dejar de pintar su PROPIO fondo claro de
+     siempre (--superficie/--superficie-2) — ya no combina con el
+     --texto de zona oscura que esta tarjeta le impone (bug real en
+     staging: /panel/investigacion/seguimiento, texto claro sobre
+     fondo claro, parecía vacía). */
+  --tabla-fondo: var(--tarjeta-fondo);
+  --tabla-encabezado-fondo: var(--superficie-2-zona-oscura);
 }
 
 .tarjeta::before {

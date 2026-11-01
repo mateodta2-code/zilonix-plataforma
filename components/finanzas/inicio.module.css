@@ -1,0 +1,228 @@
+/* Issue #143 — bloque de Finanzas de Inicio (BloqueInicioFinanzas.tsx).
+   Paneles con <Tarjeta> del marco: fondo oscuro de zona y borde
+   plateado, y sus tokens de zona oscura para la <Tabla> de adentro
+   (#191). Sin colores nuevos: las series de las gráficas usan tokens de
+   app/globals.css. */
+.bloque {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 28px;
+}
+
+.encabezado {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.titulo {
+  margin: 0;
+  font-size: 17px;
+}
+
+.rango {
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.ayuda {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+/* 6 tarjetas: 3 + 3 en escritorio, 2 en tablet, 1 en celular. */
+.gridKpi {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.gridGraficas {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1100px) {
+  .gridKpi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gridGraficas {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .gridKpi {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Dentro de la zona oscura, las líneas, la pista de las barras y el
+   fondo del anillo usan el borde de zona oscura: el --borde normal de
+   tema claro se vería blanco lavado. */
+.panel {
+  min-width: 0;
+  --borde: var(--borde-zona-oscura);
+}
+
+.subtitulo {
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+
+.numero {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.enlace {
+  align-self: flex-start;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.enlace:hover {
+  text-decoration: underline;
+}
+
+/* Series: plateado y azul de marca, en ciclo. */
+.serie0 {
+  --serie: var(--acento);
+}
+.serie1 {
+  --serie: var(--plata);
+}
+.serie2 {
+  --serie: var(--azul-metal-3);
+}
+.serie3 {
+  --serie: var(--plata-medio);
+}
+.serie4 {
+  --serie: var(--acento-fuerte);
+}
+.serie5 {
+  --serie: var(--plata-oscuro);
+}
+
+/* Participación: anillo + leyenda a la derecha. */
+.participacion {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.dona {
+  width: 168px;
+  height: 168px;
+  flex: none;
+}
+
+.donaFondo {
+  fill: none;
+  stroke: var(--borde);
+  stroke-width: 5;
+}
+
+.donaArco {
+  fill: none;
+  stroke: var(--serie);
+  stroke-width: 5;
+}
+
+.donaTotal {
+  fill: var(--texto);
+  font-size: 8px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.donaEtiqueta {
+  fill: var(--texto-suave);
+  font-size: 3.4px;
+  text-anchor: middle;
+}
+
+.leyenda {
+  flex: 1;
+  min-width: 180px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.leyenda li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.muestra {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+  background: var(--serie);
+}
+
+.leyendaNombre {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Publicidad: barras horizontales relativas al mayor gasto. */
+.barras {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.barraFila {
+  display: grid;
+  grid-template-columns: minmax(90px, 140px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.barraPista {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--borde);
+  overflow: hidden;
+}
+
+.barra {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--serie);
+}
+
+.tablaComparativo td {
+  font-size: 13px;
+}
+
+/* Encabezados de números a la derecha, como sus valores. */
+.tablaComparativo th:not(:first-child) {
+  text-align: right;
+}

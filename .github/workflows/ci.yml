@@ -61,6 +61,14 @@ jobs:
       # Tarea 2.4: tercer usuario de base, solo para avisos_ml — mismo
       # criterio, contraseña fija solo porque este Postgres es efímero.
       DATABASE_URL_TRABAJADOR: postgresql://trabajador_user:trabajador_user_ci@localhost:5432/railway
+      # Issue #175: cuarto usuario de base, solo para seguimientos_ml
+      # (revisión diaria de seguimiento) — mismo criterio, contraseña
+      # fija solo porque este Postgres es efímero.
+      DATABASE_URL_SEGUIMIENTO: postgresql://seguimiento_trabajador_user:seguimiento_trabajador_user_ci@localhost:5432/railway
+      # Issue #254: quinto usuario de base, solo para listar cuentas
+      # (sin tokens) y la bitácora de publicidad. Contraseña fija solo
+      # porque este Postgres es efímero.
+      DATABASE_URL_PUBLICIDAD: postgresql://publicidad_trabajador_user:publicidad_trabajador_user_ci@localhost:5432/railway
       # Tarea 2.3: clave de prueba para que las pruebas de cifrado de
       # tokens de Mercado Libre corran en CI — nunca la clave real.
       ML_TOKEN_KEY_V1: "DJLURtqf9klRrWnnPtWUqOgDqgqJ/K8aqMdatfdtzhk="
@@ -86,7 +94,7 @@ jobs:
         run: npm run db:migrate
       - name: Activar seguridad por fila (RLS) — contraseñas de prueba solo para este Postgres efímero
         run: |
-          sed -e 's/PONE_ACA_UNA_CONTRASEÑA_REAL/app_user_ci/' -e 's/PONE_ACA_OTRA_CONTRASEÑA_REAL/superadmin_user_ci/' -e 's/PONE_ACA_UNA_TERCERA_CONTRASEÑA_REAL/trabajador_user_ci/' db/rls-setup.sql > /tmp/rls-ci.sql
+          sed -e 's/PONE_ACA_UNA_CONTRASEÑA_REAL/app_user_ci/' -e 's/PONE_ACA_OTRA_CONTRASEÑA_REAL/superadmin_user_ci/' -e 's/PONE_ACA_UNA_TERCERA_CONTRASEÑA_REAL/trabajador_user_ci/' -e 's/PONE_ACA_UNA_CUARTA_CONTRASEÑA_REAL/seguimiento_trabajador_user_ci/' -e 's/PONE_ACA_UNA_QUINTA_CONTRASEÑA_REAL/publicidad_trabajador_user_ci/' db/rls-setup.sql > /tmp/rls-ci.sql
           PGPASSWORD=postgres_ci psql -h localhost -U postgres -d railway -f /tmp/rls-ci.sql
       - name: Verificar colisiones en el historial de migraciones (issue #36, Z-P0-08 S2)
         run: npx drizzle-kit check

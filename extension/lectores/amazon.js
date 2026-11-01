@@ -1,0 +1,178 @@
+// Issue #174 — lector de Amazon. Mismo criterio que mercadolibre.js:
+// varios selectores por campo (Amazon cambia de plantilla seguido),
+// y si ninguno funciona el campo queda en null ("no disponible" en el
+// panel) — nunca se inventa un valor.
+(function () {
+  "use strict";
+  // Issue #44 (anexo "Importar video a Clip") — mismo patrón dual que
+  // lectores/mercadolibre.js: en Node (vitest) no existe `window`, se
+  // usa utilidades.js/video-comun.js directo con require(); en el
+  // navegador (content script real) `window` sí existe. Hasta esta
+  // tarea `U` nunca tenía este guard porque este archivo no tenía
+  // ningún test que lo importara en Node — ahora leerVideoDesdeHtml
+  // (abajo) sí, así que hace falta.
+  const U = typeof window !== "undefined" ? window.ZilonixUtilidades : require("../utilidades.js");
+  const V = typeof window !== "undefined" ? window.ZilonixVideoComun : require("./video-comun.js");
+
+  function tipoDePagina(url) {
+    if (/\/(dp|gp\/product)\//i.test(url)) return "producto";
+    if (/\/s[?/]|[?&]k=/i.test(url)) return "listado";
+    return null;
+  }
+
+  function leerProducto(doc) {
+    const textoCalificacion = U.atributoDe(["#acrPopover"], "title", doc) || U.textoDe(["span.a-icon-alt"], doc);
+    // Amazon no siempre muestra "vendidos" — solo en algunos productos
+    // trae "X+ bought in past month" cerca del título/precio.
+    const textoVendidos = U.textoPorPatron(/bought in (the )?past month/i, doc);
+
+    return {
+      titulo: U.textoDe(["#productTitle"], doc),
+      precio: U.numeroDesdeTexto(
+        U.textoDe(
+          [
+            "#corePrice_feature_div .a-price .a-offscreen",
+            "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
+            "#priceblock_ourprice",
+            "#priceblock_dealprice",
+            ".a-price .a-offscreen",
+          ],
+          doc
+        )
+      ),
+      moneda: null, // Amazon ya incluye el símbolo adentro del precio (US$, MX$...), no hace falta aparte.
+      precioAnterior: U.numeroDesdeTexto(
+        U.textoDe([".basisPrice .a-price.a-text-price .a-offscreen", "span[data-a-strike='true'] .a-offscreen"], doc)
+      ),
+      descuentoPorcentaje: U.enteroDesdeTexto(U.textoDe([".savingsPercentage"], doc)),
+      vendidos: U.enteroDesdeTexto(textoVendidos),
+      vendedor: U.textoDe(["#sellerProfileTriggerId", "#bylineInfo"], doc),
+      calificacion: U.calificacionDesdeTexto(textoCalificacion),
+      numeroOpiniones: U.enteroDesdeTexto(U.textoDe(["#acrCustomerReviewText"], doc)),
+    };
+  }
+
+  // Issue #225 — "parity Zilonix OS": estructura real confirmada en
+  // vivo (Cowork, zilonix-os-web, chrome-extension-busqueda/scraper-amazon-search.js,
+  // "bluetooth headphones", 24 tarjetas / 8 patrocinadas) — NO adivinada:
+  //   div[data-component-type="s-search-result"][data-asin]  (ignorar data-asin vacío)
+  //     [data-cy="title-recipe"] h2                            (título)
+  //     [data-cy="price-recipe"] .a-price .a-offscreen          ("US$13.26")
+  //     [data-cy="reviews-block"] span.a-size-base.a-color-secondary  ("10 K+ comprados
+  //                                                                     el mes pasado")
+  // Link se arma con el ASIN (más confiable que leer el href real,
+  // que en patrocinados va por /sspa/…). "comprados el mes pasado" es
+  // el ÚNICO caso real confirmado donde un número de ventas SÍ es una
+  // tasa mensual de verdad (nunca un acumulado histórico) — se etiqueta
+  // así del lado del panel (lib/ml/importacionListadoCliente.ts,
+  // clasificarSenalVentas), nunca acá.
+  //
+  // A propósito NO se porta el scroll-para-cargar-más de OS (bug real
+  // que ahí hacía falta por el render virtual de Amazon) — esta
+  // extensión reintenta sola cada ~900ms (reescanearConRetardo,
+  // content.js) a medida que la página carga; solo se pierden las
+  // tarjetas que necesitan scroll manual, documentado en extension/LEEME.md.
+  function parsePrecioUSD(texto) {
+    if (!texto) return null;
+    const limpio = String(texto).replace(/[^\d.,]/g, "").replace(/,/g, "");
+    const n = parseFloat(limpio);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // "10 K+ comprados el mes pasado" -> 10000 · "200+ comprados…" -> 200.
+  // Es un PISO (la cifra real de Amazon es un rango) — mejor aproximación
+  // real disponible, nunca inventada.
+  function parseCompradosMes(texto) {
+    if (!texto) return null;
+    const m = String(texto).match(/([\d.,]+)\s*(K)?\+/i);
+    if (!m) return null;
+    const base = parseInt(m[1].replace(/[.,]/g, ""), 10);
+    if (!Number.isFinite(base)) return null;
+    return m[2] ? base * 1000 : base;
+  }
+
+  // Issue #227 — suma foto/estrellas/Prime, confirmados en el mismo
+  // scraper real (zilonix-os-web, scraper-amazon-search.js) que ya
+  // confirmó el resto — para fotos ampliables y el sort "Más
+  // calificación"/"Full" (Prime se mapea a esFull: mismo concepto de
+  // "envío rápido confirmado", nunca literalmente "Full" de ML).
+  function leerEstrellasAmazon(div) {
+    const el = U.primerElemento(['[data-cy="reviews-block"] a[aria-label*="de 5 estrellas"]'], div);
+    if (el) {
+      const m = (el.getAttribute("aria-label") || "").match(/([\d.,]+)\s*de\s*5\s*estrellas/i);
+      if (m) return parseFloat(m[1].replace(",", "."));
+    }
+    const iconEl = U.primerElemento(["i.a-icon-star-mini"], div);
+    const m2 = iconEl ? (iconEl.className || "").match(/a-star-mini-(\d)-(\d)/) : null;
+    return m2 ? parseFloat(`${m2[1]}.${m2[2]}`) : null;
+  }
+
+  function leerListado(doc) {
+    const tarjetas = doc.querySelectorAll('div[data-component-type="s-search-result"][data-asin]');
+    const productos = [];
+    tarjetas.forEach((div) => {
+      const asin = div.getAttribute("data-asin");
+      if (!asin) return;
+      const tituloEl = U.primerElemento(['[data-cy="title-recipe"] h2'], div);
+      const titulo = (tituloEl && tituloEl.textContent ? tituloEl.textContent.trim() : "") || null;
+      const precio = parsePrecioUSD(U.textoDe(['[data-cy="price-recipe"] .a-price .a-offscreen'], div));
+      const vendidos = parseCompradosMes(U.textoDe(['[data-cy="reviews-block"] span.a-size-base.a-color-secondary'], div));
+      const imgEl = U.primerElemento(["img.s-image"], div);
+      const foto = imgEl ? imgEl.getAttribute("src") || imgEl.getAttribute("data-src") : null;
+      if (titulo || precio != null) {
+        // Issue #231 — hotfix de smoke: "Full aparece en Amazon (Amazon
+        // no tiene Full)". Hasta esta tarea, acá se mapeaba el badge de
+        // Prime a `esFull` (comentario viejo: "mismo concepto de envío
+        // rápido confirmado") — Sharel confirmó que eso es confuso en
+        // la práctica, no solo un detalle de nombre: "Full" es un
+        // programa real y específico de Mercado Libre, y mostrar un
+        // chip "Full"/"No" en una fila de Amazon da a entender que
+        // Amazon tiene ese mismo programa, cosa que nunca fue cierta.
+        // Se saca el mapeo por completo — `esFull` queda siempre
+        // `null` para Amazon (mismo criterio que ya usa Alibaba con
+        // `calificacion`, issue #227: nunca inventar una equivalencia
+        // entre dos conceptos distintos). El panel además oculta la
+        // columna Full fuera de Mercado Libre (PanelInvestigacion.tsx).
+        //
+        // Issue #235, punto 8 — el banner estilo Zilonix OS para Amazon
+        // sí pide "% PRIME" como su propio KPI (nunca mezclado con
+        // Full): se reintroduce el selector real confirmado en #227
+        // (`i.a-icon-prime`, zilonix-os-web/scraper-amazon-search.js),
+        // esta vez con su propio nombre honesto (`esPrime`), nunca
+        // mapeado a `esFull`.
+        const esPrime = Boolean(U.primerElemento(["i.a-icon-prime"], div));
+        productos.push({ titulo, precio, vendidos, foto, calificacion: leerEstrellasAmazon(div), esFull: null, esPrime, link: `https://www.amazon.com/dp/${asin}` });
+      }
+    });
+    return { productos };
+  }
+
+  // Issue #44 (anexo "Importar video a Clip") — ver el comentario
+  // completo en extension/lectores/video-comun.js: heurística
+  // GENÉRICA compartida por las 7 plataformas, nunca selectores
+  // propios de Amazon (sin evidencia real confirmada de cómo Amazon
+  // embebe su video de producto). `leerVideoDesdeHtml` es pura (string
+  // -> objeto), probada con un HTML de ejemplo sin navegador — ver
+  // amazon.test.ts.
+  function leerVideoDesdeHtml(html) {
+    return V.extraerUrlsVideoDeHtml(html);
+  }
+
+  function leerVideo(doc) {
+    const html = doc && doc.documentElement && typeof doc.documentElement.outerHTML === "string" ? doc.documentElement.outerHTML : "";
+    return leerVideoDesdeHtml(html);
+  }
+
+  // Issue #44 (anexo) — mismo patrón dual module.exports/window.X que
+  // extension/lectores/mercadolibre.js, solo para lo que de verdad se
+  // puede probar sin DOM real.
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { leerVideoDesdeHtml };
+  }
+
+  // Issue #44 (anexo) — igual que mercadolibre.js: en Node (vitest,
+  // require() de leerVideoDesdeHtml) no existe `window` real.
+  if (typeof window !== "undefined") {
+    window.ZilonixLectorActivo = { sitio: "Amazon", tipoDePagina, leerProducto, leerListado, leerVideo };
+  }
+})();

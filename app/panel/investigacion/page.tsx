@@ -5,44 +5,39 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
-import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
-import {
-  buscarInvestigacionProducto,
-  LimiteBusquedasError,
-  SinCuentaMlError,
-  TerminoInvalidoError,
-  type ResultadoInvestigacion,
-} from "@/lib/ml/investigacion";
-import { Boton, BotonLink } from "@/components/marco/Boton";
-import { Campo } from "@/components/marco/Campo";
-import { Chip } from "@/components/marco/Chip";
-import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
+import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { FormularioAnalizar } from "./FormularioAnalizar";
+import { PanelInvestigacion } from "./PanelInvestigacion";
 import styles from "./page.module.css";
 
-// Nueva tarea: módulo "Investigación" de Zilonix OS, PARTE 1 (solo
-// Mercado Libre Colombia) — buscador de producto/nicho (2-3 palabras)
-// con datos reales de la API oficial de Mercado Libre, antes de
-// invertir en él. Todo el cálculo real vive en lib/ml/investigacion.ts;
-// esta página solo lee el término de la URL (?termino=, mismo patrón
-// que ?q= en /panel/pedidos) y pinta el resultado o el aviso.
+// Issue #174 (Parte 1) + #197/#221/#225 — módulo "Investigación".
 //
-// Amazon, Temu, AliExpress, Shein, Alibaba y la extensión de Chrome
-// (que en Zilonix OS es como se consigue "vendidos" real — ver el
-// comentario de ordenPublicaciones en lib/ml/investigacion.ts) quedan
-// pendientes a propósito, documentados en
-// docs/changelog/pendientes/feat-investigacion-ml.md — no se
-// construyen en esta Parte 1.
+// Issue #227 — "quitar API de Investigación": smoke real de Sharel
+// con "calzado" (Selltrix ~24 publicaciones con datos, Zilonix OS
+// ~40, esta plataforma ~6 casi todas "Sin dato") confirmó que la API
+// de catálogo de Mercado Libre (buscarInvestigacionProducto,
+// lib/ml/investigacion.ts — BORRADO en este PR, nada más lo importa)
+// no da volumen real. Demanda/Mercado/Estrategia dejan de depender de
+// ella por completo: esta página ya NO llama a Mercado Libre — solo
+// normaliza el término/pestaña de la URL y renderiza
+// PanelInvestigacion.tsx (Client Component), que calcula las 3
+// pestañas del lado del cliente a partir de bloques de listados
+// reales escaneados por la extensión (issue #221/#225, lib/ml/listadoCliente.ts).
+//
+// /panel/investigacion/seguimiento NO se tocó — sigue 100% con la API
+// de Mercado Libre, explícito en el pedido.
+type Tab = "demanda" | "mercado" | "estrategia";
 
-function money(n: number): string {
-  return `$${n.toLocaleString("es-CO")}`;
+function esTabValida(valor: string | undefined): Tab {
+  return valor === "mercado" || valor === "estrategia" ? valor : "demanda";
 }
 
-export default async function InvestigacionPage({ searchParams }: { searchParams: { termino?: string | string[] } }) {
+export default async function InvestigacionPage({ searchParams }: { searchParams: { termino?: string | string[]; tab?: string } }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
 
@@ -61,116 +56,45 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
 
   const terminoUrl = normalizarParametro(searchParams.termino);
   const termino = normalizarTextoBusqueda(terminoUrl) ?? "";
+  const tab = esTabValida(normalizarParametro(searchParams.tab));
 
-  let resultado: ResultadoInvestigacion | null = null;
-  let errorBusqueda: string | null = null;
-
-  if (termino) {
-    try {
-      resultado = await buscarInvestigacionProducto(empresa.id, termino);
-    } catch (error) {
-      if (
-        error instanceof TerminoInvalidoError ||
-        error instanceof LimiteBusquedasError ||
-        error instanceof SinCuentaMlError ||
-        error instanceof LimiteMercadoLibreError
-      ) {
-        errorBusqueda = error.message;
-      } else {
-        throw error;
-      }
-    }
-  }
+  const qsTab = (destino: Tab) => `?termino=${encodeURIComponent(termino)}&tab=${destino}`;
+  const pestanas: Pestana[] = [
+    { etiqueta: "Demanda", href: qsTab("demanda"), activa: tab === "demanda" },
+    { etiqueta: "Mercado", href: qsTab("mercado"), activa: tab === "mercado" },
+    { etiqueta: "Estrategia", href: qsTab("estrategia"), activa: tab === "estrategia" },
+  ];
 
   return (
     <>
       <EncabezadoPagina
         titulo="Investigación"
-        descripcion="Analiza un producto o nicho con datos reales de Mercado Libre Colombia antes de invertir en él."
+        descripcion="Analiza un producto o nicho con listados reales de Mercado Libre y otras plataformas antes de invertir en él."
+        accion={
+          <BotonLink href="/panel/investigacion/seguimiento" variante="secundario" chico>
+            Seguimiento diario
+          </BotonLink>
+        }
       />
 
       <Tarjeta className={styles.formulario}>
-        <form method="get" className={styles.filaFormulario}>
-          <Campo etiqueta="Producto o nicho (2-3 palabras)">
-            <input
-              type="search"
-              name="termino"
-              defaultValue={termino}
-              placeholder='Ej: "reloj digital"'
-              className="zx-control"
-              required
-            />
-          </Campo>
-          <Boton type="submit">Analizar</Boton>
-        </form>
+        <FormularioAnalizar termino={termino} tab={tab} />
         <p className={styles.ayuda}>
-          Solo Mercado Libre Colombia por ahora — Amazon, Temu, AliExpress, Shein y Alibaba quedan pendientes.
+          Con la extensión de Zilonix instalada: Analizar escanea el listado real de Mercado Libre (tu país elegido) — ya no depende de la API de
+          catálogo. Amazon, Temu, AliExpress, Shein y Alibaba se analizan con su propio botón, en la pestaña Demanda.
         </p>
       </Tarjeta>
 
-      {errorBusqueda ? <EstadoVacio>{errorBusqueda}</EstadoVacio> : null}
+      {!termino ? <EstadoVacio>Escribe un producto o nicho para analizar demanda, competencia y oportunidades.</EstadoVacio> : null}
 
-      {!termino && !errorBusqueda ? (
-        <EstadoVacio>Escribe un producto o nicho para analizar demanda, competencia y oportunidades.</EstadoVacio>
-      ) : null}
-
-      {resultado && resultado.aviso ? <EstadoVacio>{resultado.aviso}</EstadoVacio> : null}
-
-      {resultado && !resultado.aviso ? (
+      {termino ? (
         <div className={styles.resultado}>
+          <Pestanas pestanas={pestanas} />
           <p className={styles.alcance}>
-            Publicaciones de catálogo con oferta activa encontradas para &quot;{resultado.termino}&quot; — no es el total de
-            publicaciones del mercado (esa cifra no la expone la API oficial de Mercado Libre a esta aplicación).
+            Candidatos reales del listado de &quot;{termino}&quot; escaneado por la extensión — nunca el total del mercado (esa cifra no la expone
+            ninguna de estas plataformas).
           </p>
-
-          <div className={styles.kpis}>
-            <TarjetaKpi titulo="PUBLICACIONES ENCONTRADAS" valor={resultado.publicacionesEncontradas} />
-            <TarjetaKpi titulo="VENDEDORES DISTINTOS" valor={resultado.vendedoresDistintos} />
-            <TarjetaKpi titulo="PRECIO MÍNIMO" valor={resultado.precioMinimo != null ? money(resultado.precioMinimo) : undefined} />
-            <TarjetaKpi titulo="PRECIO PROMEDIO (TICKET)" valor={resultado.precioPromedio != null ? money(resultado.precioPromedio) : undefined} />
-            <TarjetaKpi titulo="PRECIO MÁXIMO" valor={resultado.precioMaximo != null ? money(resultado.precioMaximo) : undefined} />
-            <TarjetaKpi titulo="% FULL" valor={resultado.porcentajeFull != null ? `${resultado.porcentajeFull}%` : undefined} />
-            <TarjetaKpi titulo="% ENVÍO GRATIS" valor={resultado.porcentajeEnvioGratis != null ? `${resultado.porcentajeEnvioGratis}%` : undefined} />
-          </div>
-
-          <Tarjeta>
-            <p className={styles.tituloSeccion}>Estrategia sugerida</p>
-            {resultado.estrategiaSugerida.length ? (
-              <ul className={styles.listaEstrategia}>
-                {resultado.estrategiaSugerida.map((regla, i) => (
-                  <li key={i}>{regla.texto}</li>
-                ))}
-              </ul>
-            ) : (
-              <EstadoVacio>No hay suficientes datos reales todavía para sugerir una estrategia.</EstadoVacio>
-            )}
-          </Tarjeta>
-
-          <div>
-            <p className={styles.tituloSeccion}>
-              Publicaciones encontradas (hasta 10 — sin &quot;vendidos&quot;: la API oficial no lo expone para publicaciones
-              ajenas, ver el aviso de la tarea)
-            </p>
-            <Tabla encabezados={["Producto", "Precio", "Full", "Vendedor", "Enlace"]}>
-              {resultado.publicaciones.map((p) => (
-                <FilaTabla key={p.itemId}>
-                  <CeldaTabla>{p.titulo}</CeldaTabla>
-                  <CeldaTabla>{money(p.precio)}</CeldaTabla>
-                  <CeldaTabla>{p.esFull ? <Chip estado="exito">Full</Chip> : <Chip>—</Chip>}</CeldaTabla>
-                  <CeldaTabla>{p.vendedor ?? "—"}</CeldaTabla>
-                  <CeldaTabla>
-                    {p.link ? (
-                      <a href={p.link} target="_blank" rel="noreferrer">
-                        Ver en Mercado Libre
-                      </a>
-                    ) : (
-                      "—"
-                    )}
-                  </CeldaTabla>
-                </FilaTabla>
-              ))}
-            </Tabla>
-          </div>
+          <PanelInvestigacion termino={termino} tab={tab} />
         </div>
       ) : null}
 

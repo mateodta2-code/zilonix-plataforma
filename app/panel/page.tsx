@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
-import { formatearVentasDelMes, obtenerKpisPanel } from "@/lib/panel-kpis";
+import { detalleVentasDeHoy, formatearVentasDelMes, obtenerKpisPanel } from "@/lib/panel-kpis";
+import { leerPublicidadMes, leerTableroMes, leerTableroPorCuenta, leerUtilidadMes } from "@/lib/finanzas/tablero";
+import { BloqueInicioFinanzas } from "@/components/finanzas/BloqueInicioFinanzas";
 import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { iconoDeClave } from "@/components/marco/iconos";
@@ -32,10 +34,17 @@ import styles from "./page.module.css";
 // SinPermisoError: /panel es el resumen, un rol sin "ventas" igual
 // entra y simplemente no ve esas pestañas ni esas cifras. Un error de
 // verdad (la base no responde, un id mal formado) sí tiene que subir.
+//
+// Issue #143 — con finanzas.consultar, debajo de los KPI de siempre va
+// el bloque de Finanzas del mes (BloqueInicioFinanzas): KPIs,
+// participación, comparativo y publicidad por cuenta, como Zilonix OS.
+// Sin ese permiso no se lee ni se pinta nada de eso (ni utilidad ni
+// publicidad llegan al HTML), y cada lectura de lib/finanzas/tablero.ts
+// vuelve a pedir el permiso.
 async function puedeConsultarModulo(
   usuarioId: string,
   empresaId: string,
-  modulo: "ventas" | "inventario"
+  modulo: "ventas" | "inventario" | "finanzas"
 ): Promise<boolean> {
   try {
     await requierePermiso(usuarioId, empresaId, modulo, "consultar");
@@ -52,6 +61,18 @@ export default async function PanelPage() {
   const vePedidosYDespachos = await puedeConsultarModulo(usuario.id, activa.id, "ventas");
   const veSku = await puedeConsultarModulo(usuario.id, activa.id, "inventario");
   const kpis = await obtenerKpisPanel(usuario.id, activa.id);
+
+  const veFinanzas = await puedeConsultarModulo(usuario.id, activa.id, "finanzas");
+  let finanzas: React.ComponentProps<typeof BloqueInicioFinanzas> | null = null;
+  if (veFinanzas) {
+    // Un solo reloj: el mismo tramo en todas las lecturas.
+    const ahora = new Date();
+    const tablero = await leerTableroMes(activa.id, usuario.id, ahora);
+    const utilidad = await leerUtilidadMes(activa.id, usuario.id, ahora, tablero.recaudo.map((r) => r.moneda));
+    const publicidad = await leerPublicidadMes(activa.id, usuario.id, ahora);
+    const porCuenta = await leerTableroPorCuenta(activa.id, usuario.id, ahora, publicidad);
+    finanzas = { tablero, utilidad, porCuenta, publicidad };
+  }
 
   const pestanas: Pestana[] = [
     { etiqueta: "Resumen", href: "/panel", activa: true },
@@ -78,6 +99,9 @@ export default async function PanelPage() {
       <Pestanas pestanas={pestanas} />
 
       <div className={styles.gridKpi}>
+        {vePedidosYDespachos && kpis.ventasDeHoy !== null && (
+          <TarjetaKpi titulo="Ventas de hoy" valor={kpis.ventasDeHoy.cantidad} detalle={detalleVentasDeHoy(kpis.ventasDeHoy)} />
+        )}
         {vePedidosYDespachos && kpis.ventasDelMes !== null && (
           <TarjetaKpi titulo="Ventas del mes" valor={formatearVentasDelMes(kpis.ventasDelMes)} />
         )}
@@ -87,6 +111,8 @@ export default async function PanelPage() {
         )}
         {veSku && kpis.skuSinVincular !== null && <TarjetaKpi titulo="SKU sin vincular" valor={kpis.skuSinVincular} />}
       </div>
+
+      {finanzas && <BloqueInicioFinanzas {...finanzas} />}
 
       <Link href="/crear-empresa" className={styles.crearEmpresa}>
         {iconoDeClave("crearEmpresa", { size: 16 })}

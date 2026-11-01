@@ -1,0 +1,190 @@
+// Issue #174 — lector de AliExpress. Honestidad real: este sitio
+// genera buena parte de sus clases CSS en el build (cambian seguido),
+// así que acá se prioriza og:title/meta de producto (más estables)
+// sobre selectores visuales — y varios candidatos por campo, como en
+// los demás lectores. Si un campo no aparece, queda null ("no
+// disponible"), nunca un valor adivinado.
+(function () {
+  "use strict";
+  // Issue #44 (anexo "Importar video a Clip") — mismo patrón dual que
+  // lectores/mercadolibre.js: en Node (vitest) no existe `window`, se
+  // usa utilidades.js/video-comun.js directo con require(); en el
+  // navegador (content script real) `window` sí existe. Hasta esta
+  // tarea `U` nunca tenía este guard porque este archivo no tenía
+  // ningún test que lo importara en Node — ahora leerVideoDesdeHtml
+  // (abajo) sí, así que hace falta.
+  const U = typeof window !== "undefined" ? window.ZilonixUtilidades : require("../utilidades.js");
+  const V = typeof window !== "undefined" ? window.ZilonixVideoComun : require("./video-comun.js");
+
+  function tipoDePagina(url) {
+    if (/\/item\/[\d.]+\.html/i.test(url)) return "producto";
+    if (/\/wholesale|[?&]SearchText=|\/w\/wholesale/i.test(url)) return "listado";
+    return null;
+  }
+
+  function leerProducto(doc) {
+    const textoVendidos = U.textoPorPatron(/\d[\d.,]*\+?\s*(sold|vendidos)/i, doc);
+    return {
+      titulo: U.metaContenido(["og:title"]) || U.textoDe(["h1", "[data-pl='product-title']", ".product-title-text"], doc),
+      precio: U.numeroDesdeTexto(
+        U.metaContenido(["product:price:amount"]) ||
+          U.textoDe([".product-price-value", ".uniform-banner-box-price", "[class*='Price_c']"], doc)
+      ),
+      moneda: null,
+      precioAnterior: U.numeroDesdeTexto(U.textoDe(["[class*='Price_del']", "del"], doc)),
+      descuentoPorcentaje: U.enteroDesdeTexto(U.textoDe(["[class*='discount']"], doc)),
+      vendidos: U.enteroDesdeTexto(textoVendidos),
+      vendedor: U.textoDe(["[data-pl='store-name']", ".shop-name", "a[href*='/store/']"], doc),
+      calificacion: U.calificacionDesdeTexto(U.textoDe(["[class*='Rating']", ".overview-rating-average"], doc)),
+      numeroOpiniones: U.enteroDesdeTexto(U.textoDe(["[class*='ReviewRating'] [class*='count']", ".product-reviewer-reviews"], doc)),
+    };
+  }
+
+  // Issue #225 — "parity Zilonix OS": fuente real confirmada en vivo
+  // (Cowork, zilonix-os-web, chrome-extension-busqueda/scraper-aliexpress-search.js,
+  // "auriculares bluetooth"/"raquetas de badminton") — NO adivinada:
+  // window._dida_config_._init_data_.data.data.root.fields.mods.itemList.content
+  // — 60 productos, SIEMPRE completos (el DOM solo renderiza 18-24 de
+  // 60 sin scroll, por eso se lee del JSON directo, nunca del DOM).
+  // El JSON-LD de esta página existe pero viene con comillas mal
+  // escapadas y sin precio/ventas — no se usa.
+  //
+  // Bug real que esto evita (confirmado por Cowork): la asignación
+  // real tiene DOS sentencias en el mismo script
+  // ("window._dida_config_={...chico...}; window._dida_config_._init_data_={...grande...}")
+  // — buscar solo "_dida_config_" agarra la sentencia CHICA (parsea
+  // sin error, pero vacía de lo que hace falta). El marcador tiene que
+  // ser "_dida_config_._init_data_" específico. Además el valor real
+  // es "{ data: {...} }" con la clave "data" SIN comillas (literal de
+  // JS, no JSON puro) — hay que cortar el objeto de ADENTRO de "data:".
+  function extraerObjetoJsonDesde(texto, inicio) {
+    let profundidad = 0;
+    let dentroDeString = false;
+    let escapando = false;
+    for (let i = inicio; i < texto.length; i++) {
+      const c = texto[i];
+      if (dentroDeString) {
+        if (escapando) escapando = false;
+        else if (c === "\\") escapando = true;
+        else if (c === '"') dentroDeString = false;
+        continue;
+      }
+      if (c === '"') {
+        dentroDeString = true;
+        continue;
+      }
+      if (c === "{") profundidad++;
+      else if (c === "}") {
+        profundidad--;
+        if (profundidad === 0) return texto.slice(inicio, i + 1);
+      }
+    }
+    return null;
+  }
+
+  // "1.000+ vendidos"/"213 vendidos" -> el punto SÍ es separador de
+  // miles en ESTE campo puntual (formato distinto del precio, abajo —
+  // cada campo de AliExpress usa el suyo, confirmado por Cowork).
+  function parseVentasAliExpress(texto) {
+    if (!texto) return null;
+    const m = String(texto).match(/([\d.,]+)\+?\s*vendid/i);
+    if (!m) return null;
+    const limpio = m[1].replace(/\./g, "").replace(",", ".");
+    const n = Math.round(parseFloat(limpio));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function leerDidaConfig(doc) {
+    const marcador = "_dida_config_._init_data_";
+    const scripts = doc.querySelectorAll("script");
+    for (const s of scripts) {
+      const texto = s.textContent || "";
+      const idxMarcador = texto.indexOf(marcador);
+      if (idxMarcador === -1) continue;
+      const idxIgual = texto.indexOf("=", idxMarcador + marcador.length);
+      if (idxIgual === -1) continue;
+      const idxLlaveExterna = texto.indexOf("{", idxIgual);
+      if (idxLlaveExterna === -1) continue;
+      const prefijo = texto.slice(idxLlaveExterna, idxLlaveExterna + 30).match(/^\{\s*data\s*:\s*/);
+      if (!prefijo) continue;
+      const idxLlaveInterna = idxLlaveExterna + prefijo[0].length;
+      if (texto[idxLlaveInterna] !== "{") continue;
+      const jsonTexto = extraerObjetoJsonDesde(texto, idxLlaveInterna);
+      if (!jsonTexto) continue;
+      try {
+        const data = JSON.parse(jsonTexto);
+        // "data" ya es el contenido de "data:" (ver nota arriba) —
+        // ahí sigue habiendo OTRA clave "data" propia antes de "root"
+        // (confirmado por Cowork) — nunca data.root directo.
+        if (!data || !data.data || !data.data.root) continue;
+        return data;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  function leerListado(doc) {
+    const config = leerDidaConfig(doc);
+    const lista = (config && config.data && config.data.root && config.data.root.fields && config.data.root.fields.mods && config.data.root.fields.mods.itemList && config.data.root.fields.mods.itemList.content) || [];
+    // productType "ad" = patrocinado — se excluye, mismo criterio que las demás plataformas.
+    const productos = lista
+      .filter((it) => it && it.productType !== "ad")
+      .map((it) => {
+        const productId = it.productId ? String(it.productId) : null;
+        if (!productId) return null;
+        const precio = typeof (it.prices && it.prices.salePrice && it.prices.salePrice.minPrice) === "number"
+          ? it.prices.salePrice.minPrice
+          : U.numeroDesdeTexto(it.prices && it.prices.salePrice && it.prices.salePrice.formattedPrice);
+        const vendidos = parseVentasAliExpress((it.trade && it.trade.tradeDesc) || "");
+        // Issue #227 — foto/estrellas confirmados en el mismo objeto
+        // real (zilonix-os-web, scraper-aliexpress-search.js) que ya
+        // confirmó precio/ventas — para fotos ampliables y el sort
+        // "Más calificación". Issue #237 — la ruta JSON (`it.image.imgUrl`)
+        // nunca cambió (confirmado contra una captura real de hoy) —
+        // lo que cambió fue el DOMINIO del valor en sí: AliExpress
+        // movió las fotos de producto a `aliexpress-media.com`, ya no
+        // `alicdn.com` — la extensión nunca necesitó tocarse (no valida
+        // dominios, eso vive en el CSP de la app, ver next.config.mjs).
+        const fotoRaw = (it.image && it.image.imgUrl) || "";
+        const foto = fotoRaw ? (fotoRaw.indexOf("//") === 0 ? `https:${fotoRaw}` : fotoRaw) : null;
+        const calificacion = it.evaluation && it.evaluation.starRating != null ? Number(it.evaluation.starRating) : null;
+        return {
+          titulo: (it.title && it.title.displayTitle) || null,
+          precio,
+          vendidos,
+          foto,
+          calificacion: Number.isFinite(calificacion) ? calificacion : null,
+          link: `https://es.aliexpress.com/item/${productId}.html`,
+        };
+      })
+      .filter(Boolean);
+    return { productos };
+  }
+
+  // Issue #44 (anexo "Importar video a Clip") — ver el comentario
+  // completo en extension/lectores/video-comun.js: heurística
+  // GENÉRICA compartida por las 7 plataformas, nunca selectores
+  // propios de AliExpress (sin evidencia real confirmada de cómo
+  // AliExpress embebe su video de producto). Pura (string -> objeto),
+  // probada con un HTML de ejemplo sin navegador — ver aliexpress.test.ts.
+  function leerVideoDesdeHtml(html) {
+    return V.extraerUrlsVideoDeHtml(html);
+  }
+
+  function leerVideo(doc) {
+    const html = doc && doc.documentElement && typeof doc.documentElement.outerHTML === "string" ? doc.documentElement.outerHTML : "";
+    return leerVideoDesdeHtml(html);
+  }
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { leerVideoDesdeHtml };
+  }
+
+  // Issue #44 (anexo) — igual que mercadolibre.js: en Node (vitest,
+  // require() de leerVideoDesdeHtml) no existe `window` real.
+  if (typeof window !== "undefined") {
+    window.ZilonixLectorActivo = { sitio: "AliExpress", tipoDePagina, leerProducto, leerListado, leerVideo };
+  }
+})();

@@ -1,6 +1,7 @@
-/* Tarea "marca unificada": mismo borde azul/plata y línea azul
-   superior que <Tarjeta> (ver app/panel/pedidos/page.module.css, el
-   mismo bloque .filtros exacto) — nunca más "gris plano" en claro. */
+/* Tarea "marca unificada" + issue #186 (Sharel, Refs): mismo borde
+   azul/plata, línea azul superior y la MISMA superficie oscura que
+   <Tarjeta>/TarjetaKpi (ver app/panel/pedidos/page.module.css, el
+   mismo bloque .filtros exacto) — nunca más "caja blanca" en claro. */
 .filtros {
   position: relative;
   isolation: isolate;
@@ -13,9 +14,22 @@
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
-    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
     var(--degradado-plata-borde) border-box;
   overflow: hidden;
+
+  /* color explícito, no solo la variable — mismo motivo que
+     Tarjeta.module.css/ListaFilas.module.css (issue #186): un texto
+     plano sin su propia regla de color no recoge el --texto
+     redefinido abajo si nada vuelve a leerlo en este nivel. */
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
 }
 
 .filtros::before {
@@ -40,6 +54,16 @@
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
   pointer-events: none;
+}
+
+/* Issue "pendientes no muestra venta nueva" — botón + mensaje de
+   "Sincronizar ahora", arriba de los filtros de Pendientes. Sin caja
+   propia (ya hay suficiente marco visual en .filtros justo abajo). */
+.sincronizarAhora {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .campoBusqueda {
@@ -101,4 +125,210 @@
 .volver {
   align-self: flex-start;
   margin-top: 16px;
+}
+
+/* Fase 1 de Despachos (issue "Despachos") — tarjetas agrupadas por
+   día/plazo. El borde plata-azul y el fondo oscuro de cada tarjeta ya
+   los da <Tarjeta> (components/marco/Tarjeta.module.css) con los
+   tokens --degradado-plata-borde/--tarjeta-fondo que ya existen en
+   los dos temas — nada de paleta nueva acá, solo layout. */
+.aviso {
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie-2);
+}
+
+.avisoTitulo {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+}
+
+.avisoLista {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+}
+
+.grupoDia {
+  margin-bottom: 28px;
+}
+
+.tituloGrupo {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.ultimaActualizacion {
+  color: var(--texto-suave);
+}
+
+/* Fase 1-1 de Despachos (rama mateo/feat-despachos-fase1-1) —
+   tarjetas a lo ancho, una por fila (como en OS), en vez de la grilla
+   de la Fase 1: info a la izquierda, botones en columna a la derecha. */
+.listaAncha {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.encabezadoTarjeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.tarjetaAncha {
+  position: relative;
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.columnaInfo {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.columnaAcciones {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 180px;
+}
+
+/* Flex resaltado (punto 5 de la tarea) — borde y fondo en ámbar
+   (--advertencia*, agregado en app/globals.css/Tarjeta.module.css:
+   hasta esta tarea no existía ningún token ámbar en el archivo). El
+   tinte de fondo es un div propio (no se toca el `background` que ya
+   declara .tarjeta en Tarjeta.module.css — pelearle la cascada a esa
+   regla es frágil; esto es un overlay encima, con z-index, sin mover
+   el layout). */
+.fondoFlex {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: var(--radio-tarjeta);
+  background: radial-gradient(160px 90px at 0% 0%, var(--advertencia-suave), transparent 70%);
+  box-shadow: inset 0 0 0 2px var(--advertencia-fuerte);
+}
+
+.tarjetaAncha {
+  z-index: 1;
+}
+
+.etiquetaFlex {
+  margin: 0 0 10px;
+  font-weight: 600;
+  color: var(--advertencia-fuerte);
+}
+
+.filaItems {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.filaItem {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* 110px (punto 4 de la tarea, "como OS") — bastante más grande que la
+   miniatura de 44px de la Fase 1, para que quien empaca reconozca el
+   producto sin tener que abrir el link. Issue "zoom de despachos"
+   (fix-despachos-zoom-modal) — el zoom YA NO es un popover propio de
+   esta pantalla (ver el historial de este archivo si hace falta el
+   detalle): ahora es el modal reutilizable de components/marco/
+   FotoConZoom.tsx, que recibe esta misma clase para el tamaño de la
+   miniatura. */
+.imagenItem,
+.imagenItemVacia {
+  width: 110px;
+  height: 110px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--superficie-2);
+  display: block;
+}
+
+.datosItem {
+  min-width: 0;
+}
+
+.tituloItem {
+  display: block;
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+}
+
+a.tituloItem:hover {
+  text-decoration: underline;
+}
+
+.lineaDatos {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+.stockAgotado {
+  color: var(--peligro-texto);
+  font-weight: 600;
+}
+
+.selectBodega {
+  display: inline-block;
+  width: auto;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+/* Chip de plazo (punto 6) — 3 colores, "por_vencer" es el único que
+   necesita el ámbar nuevo; "normal" se queda en la plata de siempre
+   (nunca un cuarto color inventado para el caso neutro). */
+.chipPlazo {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radio-chip);
+  border: 1px solid var(--borde-plata);
+  color: var(--plata-etiqueta);
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.chipPlazo[data-estado="vencido"] {
+  color: var(--peligro-texto);
+  border-color: var(--peligro-texto);
+}
+
+.chipPlazo[data-estado="por_vencer"] {
+  color: var(--advertencia-fuerte);
+  border-color: var(--advertencia);
+}
+
+.notaDespachado {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+.errorTarjeta {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--peligro-texto);
 }

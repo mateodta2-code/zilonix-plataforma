@@ -64,6 +64,90 @@
       "when": 1792594237912,
       "tag": "0008_married_thunderbird",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792868777996,
+      "tag": "0009_jazzy_hannibal_king",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792875450089,
+      "tag": "0010_same_swarm",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793049702407,
+      "tag": "0011_publicidad_product_ads",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793149558098,
+      "tag": "0012_finanzas_base_titulares_config_auditoria",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793152864828,
+      "tag": "0013_finanzas_tabla_maestra_sku_proveedores",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793219689003,
+      "tag": "0014_finanzas_ventas_tablas",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1793233588902,
+      "tag": "0015_skus_empresa_id_unica",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793233678939,
+      "tag": "0016_wms_bodegas_stock_kardex",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793287671392,
+      "tag": "0017_promociones",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793301448658,
+      "tag": "0018_backfill_permisos_promociones",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793332387294,
+      "tag": "0019_icy_terror",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793407144265,
+      "tag": "0020_bizarre_arclight",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, empresas, pedidos } from "@/db/schema";
 import { cifrarToken } from "@/lib/cifrado";
-import { listarPedidosFiltrados, obtenerPedidoConEventos, PASOS_PEDIDO, registrarEventoPedido } from "./pedidos";
+import { etiquetaEstadoPedido, listarPedidosFiltrados, obtenerPedidoConEventos, PASOS_PEDIDO, registrarEventoPedido } from "./pedidos";
 
 // Tarea 2.7 — prueba real contra Postgres: los eventos de un pedido
 // respetan el aislamiento de siempre, nunca se duplica un paso, y la
@@ -408,5 +408,30 @@ describe("listarPedidosFiltrados — bordes de día en Bogotá y desempate por i
       const ids = (await listarPedidosFiltrados(empresaId, { orden })).pedidos.map((p) => p.id);
       expect(ids.indexOf(idBajo)).toBeLessThan(ids.indexOf(idAlto));
     }
+  });
+});
+
+// Bug real reportado en la tabla de Pedidos (columna ESTADO en inglés,
+// "PAID", en vez de la etiqueta en español que el filtro de "Estado"
+// ya usa, "Pagado") — pura, sin Postgres ni fetch, para poder probarla
+// con un valor inventado sin depender de un pedido real.
+describe("etiquetaEstadoPedido (traducción de estados, misma fuente que el filtro)", () => {
+  it("traduce cada valor real de ESTADOS_PEDIDO_FILTRO a su etiqueta en español", () => {
+    expect(etiquetaEstadoPedido("confirmed")).toBe("Confirmado");
+    expect(etiquetaEstadoPedido("payment_required")).toBe("Pago pendiente");
+    expect(etiquetaEstadoPedido("payment_in_process")).toBe("Pago en proceso");
+    expect(etiquetaEstadoPedido("paid")).toBe("Pagado");
+    expect(etiquetaEstadoPedido("cancelled")).toBe("Cancelado");
+    expect(etiquetaEstadoPedido("invalid")).toBe("Inválido");
+  });
+
+  it('sin importar mayúsculas/minúsculas — "PAID" traduce igual que "paid"', () => {
+    expect(etiquetaEstadoPedido("PAID")).toBe("Pagado");
+    expect(etiquetaEstadoPedido("Cancelled")).toBe("Cancelado");
+  });
+
+  it("un estado desconocido muestra el valor original tal cual, nunca rompe ni inventa una etiqueta", () => {
+    expect(etiquetaEstadoPedido("shipped")).toBe("shipped");
+    expect(etiquetaEstadoPedido("")).toBe("");
   });
 });

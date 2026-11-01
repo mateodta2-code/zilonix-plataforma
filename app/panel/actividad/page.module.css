@@ -11,3 +11,62 @@
 .volver {
   align-self: flex-start;
 }
+
+/* Issue #124 — mismo bloque de filtros que /panel/sku y /panel/pedidos
+   (borde azul/plata y filetes arriba y abajo). Issue #186 (Sharel,
+   Refs): misma superficie oscura que <Tarjeta>/TarjetaKpi (issue
+   #156), no --superficie (casi blanco en claro) — nunca más "caja
+   blanca" en claro. */
+.filtros {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 20px 0;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+
+  /* color explícito, no solo la variable — mismo motivo que
+     Tarjeta.module.css/ListaFilas.module.css (issue #186): un texto
+     plano sin su propia regla de color no recoge el --texto
+     redefinido abajo si nada vuelve a leerlo en este nivel. */
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
+}
+
+.filtros::before,
+.filtros::after {
+  content: "";
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}
+
+.filtros::before {
+  top: 0;
+}
+
+.filtros::after {
+  bottom: 0;
+}
+
+.accionesFiltro {
+  display: flex;
+  gap: 8px;
+}

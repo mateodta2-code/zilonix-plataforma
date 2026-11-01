@@ -56,6 +56,26 @@ export const ESTADOS_PEDIDO_FILTRO = [
   { valor: "invalid", etiqueta: "Inválido" },
 ] as const;
 
+// Bug real reportado en la tabla de Pedidos: la columna ESTADO
+// mostraba el valor crudo de Mercado Libre ("PAID") en vez de la
+// etiqueta en español que el filtro de arriba ya usa ("Pagado") — dos
+// fuentes de verdad para lo mismo. Una sola función, reusando
+// ESTADOS_PEDIDO_FILTRO tal cual (nunca una segunda lista de
+// traducciones que se pueda desincronizar). Comparación sin
+// mayúsculas/minúsculas a propósito: el valor real guardado en
+// pedidos.estado (texto plano, lo que haya mandado Mercado Libre en
+// ese pedido) no tiene garantía de casing consistente — "PAID"/"paid"
+// tienen que traducir igual. Un estado que de verdad no está en la
+// lista (ver el comentario de ESTADOS_PEDIDO_FILTRO, arriba: puede
+// pasar, esta lista no tiene precedente confirmado contra producción)
+// muestra el valor ORIGINAL tal cual llegó, nunca se rompe ni se
+// inventa una etiqueta.
+const ETIQUETAS_POR_ESTADO = new Map<string, string>(ESTADOS_PEDIDO_FILTRO.map((e) => [e.valor, e.etiqueta]));
+
+export function etiquetaEstadoPedido(estado: string): string {
+  return ETIQUETAS_POR_ESTADO.get(estado.toLowerCase()) ?? estado;
+}
+
 export const ORDENES_PEDIDO_FILTRO = ["fecha_desc", "fecha_asc", "total_desc", "total_asc"] as const;
 export type OrdenPedidos = (typeof ORDENES_PEDIDO_FILTRO)[number];
 

@@ -59,6 +59,28 @@ export function IconoSku(props: IconoProps) {
   );
 }
 
+// Issue #280 — bodega: galpón con portón.
+export function IconoBodegas(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 10 12 5l9 5v9H3z" />
+      <path d="M7 19v-6h10v6" />
+      <path d="M7 16h10" />
+    </Svg>
+  );
+}
+
+// Issue #280 — inventario: cajas apiladas.
+export function IconoInventario(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <rect x="4" y="12" width="7" height="7" rx="1" />
+      <rect x="13" y="12" width="7" height="7" rx="1" />
+      <rect x="8.5" y="5" width="7" height="7" rx="1" />
+    </Svg>
+  );
+}
+
 export function IconoFinanzas(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -148,6 +170,19 @@ export function IconoCuenta(props: IconoProps) {
   );
 }
 
+// Issue #318 — escudo con un check adentro, para "Mis datos
+// personales" (exportar/borrar) en el pie de la barra lateral, junto a
+// "Mi cuenta" — ninguno de los dos es un módulo de negocio de ninguna
+// empresa.
+export function IconoDatosPersonales(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 4 5 7v5.5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" />
+      <path d="M9.3 12.3 11.3 14.3 14.8 10.3" />
+    </Svg>
+  );
+}
+
 export function IconoCrearEmpresa(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -186,6 +221,16 @@ export function IconoContraer(props: IconoProps) {
   );
 }
 
+// Issue #131 — flecha del acordeón del detalle día a día (apunta a la
+// derecha cerrado; el que la usa la gira 90° al abrir).
+export function IconoChevron(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="m9 6 6 6-6 6" />
+    </Svg>
+  );
+}
+
 // Pedido de Pablo (tarea Investigación ML): lupa + barritas ascendentes
 // adentro, para distinguirla de IconoBuscar (lupa sola, ya usada en la
 // barra superior para el buscador de texto) y de IconoFinanzas (barras
@@ -197,6 +242,56 @@ export function IconoInvestigacion(props: IconoProps) {
       <circle cx="10" cy="10" r="6.5" />
       <path d="M7.3 11.5v-2.3M10 11.5V6.8M12.7 11.5V9" />
       <path d="M19 19l-4.3-4.3" />
+    </Svg>
+  );
+}
+
+// Issue #254 — megáfono chico, distinto de Finanzas (barras) y de
+// Investigación (lupa). La pantalla de campañas llega en la fase 2;
+// el ítem del menú ya tiene que reconocerse.
+export function IconoPublicidad(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 10v4l8 3V7L4 10z" />
+      <path d="M12 8.2c2.2.6 3.5 2 3.5 3.8S14.2 15.2 12 15.8" />
+      <path d="M6.5 14.2 7.8 18" />
+    </Svg>
+  );
+}
+
+// Rama feat-promociones — etiqueta de precio con un %, distinta de
+// Finanzas (barras) y Publicidad (megáfono).
+export function IconoPromociones(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3h6a1 1 0 0 1 1 1v6l-9.5 9.5a1 1 0 0 1-1.4 0L4 15.4a1 1 0 0 1 0-1.4L12 3z" />
+      <circle cx="16.5" cy="7.5" r="1.1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+// Rama feat-promociones — engranaje simple, para la sección de
+// Configuración (hoy solo "Conexión de IA").
+export function IconoConfiguracion(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="2.6" />
+      <path d="M12 4v2.2M12 17.8V20M4 12h2.2M17.8 12H20M6.3 6.3l1.6 1.6M16.1 16.1l1.6 1.6M6.3 17.7l1.6-1.6M16.1 7.9l1.6-1.6" />
+    </Svg>
+  );
+}
+
+// ADENDO UX de Publicar — caja (el producto) con una flecha hacia
+// arriba saliendo de ella (publicar = mandarlo hacia afuera, a
+// Mercado Libre) — distinta de IconoSku (una etiqueta/tag) y de
+// IconoPublicidad (megáfono), para que no se confundan en la barra
+// lateral.
+export function IconoPublicar(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 10.5h16v9H4z" />
+      <path d="M12 10.5V3.5" />
+      <path d="M8.5 7 12 3.5 15.5 7" />
     </Svg>
   );
 }
@@ -232,8 +327,14 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   pedidos: IconoPedidos,
   despachos: IconoDespachos,
   sku: IconoSku,
+  inventario: IconoInventario,
+  bodegas: IconoBodegas,
   investigacion: IconoInvestigacion,
+  publicar: IconoPublicar,
   finanzas: IconoFinanzas,
+  publicidad: IconoPublicidad,
+  promociones: IconoPromociones,
+  configuracion: IconoConfiguracion,
   actividad: IconoActividad,
   personas: IconoPersonas,
   invitar: IconoInvitar,
@@ -243,6 +344,7 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   avisosMl: IconoAvisosMl,
   cuenta: IconoCuenta,
   crearEmpresa: IconoCrearEmpresa,
+  datosPersonales: IconoDatosPersonales,
 };
 
 export function iconoDeClave(clave: keyof typeof MAPA_ICONOS, props?: IconoProps) {

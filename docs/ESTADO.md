@@ -27,7 +27,7 @@ Foto del proyecto al **2026-10-22**. Esto cambia después de cada tarea — la f
 
 ## Qué falta
 
-- **2.8 — Inventario por bodega**: pausada a propósito. El concepto de "bodega en tránsito" (traslados entre bodegas) que pide la tarea no existe en el Zilonix OS actual — se decidió no inventarlo y esperar a que Mateo lo hable con Franky antes de construir nada.
+- **2.8 — Inventario por bodega**: retomada como WMS Fase 1 (issue #280, rama `franky/wms-fase1-bodegas-stock-kardex`). Incluye bodegas, stock por SKU y bodega, kardex append-only, compras y reserva con los pedidos de ML. El traslado es instantáneo; `en_transito` queda listo para la 1.1. Supuestos y gaps en `docs/wms-fase1.md`. Pendiente: revisión, CI contra Postgres y `rls-setup.sql` en cada ambiente.
 - **2.11b/c** (Promociones, Programar Full): sin empezar. **2.11d / Z-NV-03a** (Alertas sanitarias): en borrador, solo las funciones puras; la parte con tablas y pantalla es Z-NV-03b y no se empezó.
 - **Panel de urgencias (tarea 2.13)**: sin empezar — hoy `/panel` es solo una lista de enlaces a módulos, no tiene ninguna vista de "lo que necesita atención ya".
 - **Comisión, envío y neto por pedido**: `pedidos` solo guarda `total` (ver nota en 2.7, arriba) — es de lo primero que pide un piloto real de Fase 3.
@@ -80,6 +80,8 @@ Solo los nombres — ningún valor real vive ni debe vivir en este repositorio. 
 | `DATABASE_URL_APP` | Usuario `app_user` (respeta RLS) — el que usa la app en tiempo real |
 | `DATABASE_URL_SUPERADMIN` | Usuario `superadmin_user` — solo lectura agregada, panel `/superadmin` |
 | `DATABASE_URL_TRABAJADOR` | Usuario `trabajador_user` — solo puede tocar `avisos_ml` |
+| `DATABASE_URL_PUBLICIDAD` | Usuario `publicidad_trabajador_user` (issue #254) — lista cuentas sin leer tokens y lee `publicidad_sincronizaciones` |
+| `PUBLICIDAD_TRABAJADOR_SECRET` | Secreto del cron `POST /api/trabajos/publicidad` (cabecera `x-publicidad-trabajador-secret`) |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk, lado del navegador |
 | `CLERK_SECRET_KEY` | Clerk, lado del servidor |
 | `ML_CLIENT_ID` / `ML_CLIENT_SECRET` | App de Mercado Libre (OAuth) — `ML_CLIENT_ID` además valida que un aviso que llega a `/api/ml/webhooks` sea de verdad nuestro |

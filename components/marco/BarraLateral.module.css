@@ -163,12 +163,24 @@ html .item {
   background: var(--superficie-2);
   color: var(--icono-hover);
   border-left-color: var(--azul-metal-3);
-  box-shadow: var(--sombra-marca-hover);
+  /* Issue #172 — --sombra-marca-hover (hacia afuera) se salía del
+     ítem y chocaba con el borde derecho de la barra. Marco y brillo
+     por DENTRO en vez de afuera. */
+  box-shadow: inset 0 0 0 1px var(--azul-metal-3), inset 0 0 14px color-mix(in srgb, var(--azul-metal-3) 35%, transparent);
+}
+
+/* En claro, el grupo principal cae sobre la franja oscura — el hover
+   normal (--superficie-2, blanco en claro) deja el texto invisible. */
+:root[data-tema="claro"] .grupo:first-of-type .item:hover {
+  background: var(--acento-suave-zona-oscura);
+  color: var(--texto-zona-oscura);
 }
 
 .item:focus-visible {
   outline: 2px solid var(--acento);
-  outline-offset: 2px;
+  /* Issue #172 — mismo problema que el hover: hacia afuera (2px)
+     chocaba con el borde derecho de la barra. Por dentro. */
+  outline-offset: -2px;
   box-shadow: var(--sombra-foco);
   border-left-color: var(--azul-metal-3);
 }
@@ -212,7 +224,7 @@ html .item {
 
 .piePrincipal {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 6px;
 }
 
@@ -247,10 +259,11 @@ html .item {
   transition: var(--transicion-color), var(--transicion-transform);
 }
 
-/* Pedido explícito: estos 3 botones (Mi cuenta / Tema / Contraer) se
-   suman al mismo brillo de marca que ya tiene el resto de lo
-   interactivo (azul metálico + plata) — el plateado de arriba se ve
-   siempre, el azul resalta ENCIMA al pasar el mouse. */
+/* Pedido explícito: estos botones (Mi cuenta / Mis datos / Tema /
+   Contraer — issue #318 agregó el segundo) se suman al mismo brillo de
+   marca que ya tiene el resto de lo interactivo (azul metálico +
+   plata) — el plateado de arriba se ve siempre, el azul resalta
+   ENCIMA al pasar el mouse. */
 .botonCuadrado:hover {
   color: var(--icono-hover);
   transform: translateY(-1px);

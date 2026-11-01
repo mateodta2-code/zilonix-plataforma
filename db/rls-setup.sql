@@ -27,9 +27,52 @@ END $$;
 GRANT CONNECT ON DATABASE railway TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-  empresas, usuarios, roles, membresias, permisos_rol, invitaciones, auditoria, accesos_temporales, cuentas_ml, avisos_ml,
-  pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml
+  empresas, usuarios, roles, membresias, permisos_rol, invitaciones, accesos_temporales, cuentas_ml, avisos_ml,
+  pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml, productos_ml,
+  seguimientos_ml, seguimiento_fotos, seguimiento_alertas,
+  titulares, configuracion_finanzas, metas_mensuales,
+  publicidad_anunciantes, publicidad_campanas, publicidad_anuncios, publicidad_metricas_diarias, publicidad_costos_item, publicidad_sincronizaciones
   TO app_user;
+-- Issue #127 (Z-FIN-05) — sin DELETE: un tercero se desactiva y una
+-- fila de la tabla maestra se corrige, ninguno se borra. Son tablas
+-- nuevas, así que no hay un DELETE viejo que revocar.
+GRANT SELECT, INSERT, UPDATE ON terceros, costos_sku TO app_user;
+-- Issue #129 (Z-FIN-07) — ventas: sin DELETE. La cabecera y las
+-- líneas solo se borran en cascada con su pedido. Una corrección no se
+-- edita ni se borra: el único UPDATE permitido es anularla
+-- (anulada_ts), y la política de abajo no deja des-anularla.
+GRANT SELECT, INSERT, UPDATE ON pedidos_finanzas, pedido_items TO app_user;
+GRANT SELECT, INSERT ON ventas_correcciones TO app_user;
+GRANT UPDATE (anulada_ts) ON ventas_correcciones TO app_user;
+-- Issue #280 (WMS Fase 1) — nada de inventario se borra: una bodega se
+-- desactiva, un saldo cambia solo por un movimiento y el kardex es de
+-- solo inserción (ni UPDATE ni DELETE: la historia no se reescribe).
+-- Una recepción tampoco se edita: si llegó mal, se corrige con un
+-- ajuste, que queda en el kardex.
+GRANT SELECT, INSERT, UPDATE ON bodegas, stock_bodega, ordenes_compra, orden_compra_items,
+  configuracion_inventario, sync_stock_ml, alertas_ultima_unidad TO app_user;
+GRANT SELECT, INSERT ON kardex_movimientos, recepciones, recepcion_items TO app_user;
+REVOKE UPDATE, DELETE ON kardex_movimientos, recepciones, recepcion_items FROM app_user;
+-- Issue #125 (Z-FIN-03) — auditoria queda de solo inserción para
+-- app_user: puede dejar el rastro y leer el de su empresa, no
+-- reescribirlo ni borrarlo. REVOKE porque este script es repetible:
+-- sacar la tabla de la lista de arriba no le quita un GRANT que ya
+-- se había corrido en staging o producción. La pregunta 8 del
+-- borrador (el issue la pone como condición) no aparece resuelta en
+-- docs/ ni en los issues enlazados — en #124 "pregunta 8" es la de
+-- los roles, ya contestada, y no habla de este GRANT. Se aplica igual
+-- porque es criterio de aceptación de #125; queda pendiente de
+-- confirmación de Sharel/Mateo.
+GRANT SELECT, INSERT ON auditoria TO app_user;
+REVOKE UPDATE, DELETE ON auditoria FROM app_user;
+-- Rama feat-promociones — promociones_candidatos es un snapshot que se
+-- UPSERTea (nunca se borra fila por fila, siempre ON CONFLICT DO
+-- UPDATE); promociones_acciones es historial/auditoría, solo se agrega
+-- y se actualiza su propio estado, nunca se borra. ia_conexiones sí
+-- necesita DELETE real: desconectar la IA de una empresa es una acción
+-- legítima de un clic, sin ningún motivo para guardar la fila vieja.
+GRANT SELECT, INSERT, UPDATE ON promociones_reglas, promociones_candidatos, promociones_acciones TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ia_conexiones TO app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
 -- "serial" en el esquema — no existe ninguna secuencia que otorgar.
@@ -65,6 +108,60 @@ GRANT CONNECT ON DATABASE railway TO trabajador_user;
 GRANT USAGE ON SCHEMA public TO trabajador_user;
 GRANT SELECT, UPDATE ON avisos_ml TO trabajador_user;
 
+-- 1d) Issue #175 — cuarto usuario de base, mismo criterio que
+-- trabajador_user (1c): la revisión diaria de seguimientos necesita
+-- ver seguimientos_ml de CUALQUIER empresa (no sabe de antemano cuál
+-- hasta leer la fila), pero nunca tiene que tocar cuentas_ml,
+-- seguimiento_fotos ni seguimiento_alertas directamente — esas
+-- escrituras de negocio pasan por dbComoEmpresa()/app_user una vez que
+-- ya se sabe a qué empresa pertenece el seguimiento (mismo patrón
+-- exacto que procesarUnAviso() en lib/ml/trabajador.ts, que tampoco usa
+-- trabajador_user para nada más que avisos_ml).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'seguimiento_trabajador_user') THEN
+    CREATE ROLE seguimiento_trabajador_user WITH LOGIN PASSWORD 'PONE_ACA_UNA_CUARTA_CONTRASEÑA_REAL';
+  END IF;
+END $$;
+GRANT CONNECT ON DATABASE railway TO seguimiento_trabajador_user;
+GRANT USAGE ON SCHEMA public TO seguimiento_trabajador_user;
+-- Mínimo privilegio real: SELECT de la fila completa (necesita ver
+-- tipo/recurso_ml/ml_id_externo para saber qué revisar), pero el único
+-- UPDATE que de verdad hace falta es marcar ultima_revision_ts — un
+-- GRANT de columna, no de la fila completa, para que ni un bug ni una
+-- consulta armada a mano con esta conexión pueda tocar nombre,
+-- es_competidor, eliminado_ts ni ninguna otra columna de negocio.
+GRANT SELECT ON seguimientos_ml TO seguimiento_trabajador_user;
+GRANT UPDATE (ultima_revision_ts) ON seguimientos_ml TO seguimiento_trabajador_user;
+
+-- 1e) Issue #254 — quinto usuario de base. El nombre es exacto:
+-- publicidad_trabajador_user. Lo crea Mateo a mano, después del merge,
+-- al correr este script contra el Postgres del ambiente (el deploy no
+-- lo crea). La contraseña la elige él al reemplazar el placeholder;
+-- nunca queda en el repo. Después carga DATABASE_URL_PUBLICIDAD en
+-- Railway. El cron de Product Ads
+-- lista las cuentas conectadas de CUALQUIER empresa (no
+-- sabe de antemano cuál) sin poder leer ni escribir tokens. El token
+-- y todas las escrituras de publicidad pasan por dbComoEmpresa()/
+-- app_user cuando ya se sabe la empresa. Las columnas del GRANT son
+-- exactamente las que usa el SELECT de lib/trabajos/sincronizarPublicidad.ts
+-- (id, empresa_id, desconectada_ts, creado_ts). La última sincronización
+-- sale de publicidad_sincronizaciones, que sí se lee entera. Sumar una
+-- columna de cuentas_ml a esa consulta sin sumarla acá hace fallar el
+-- cron con permission denied.
+-- publicidad_sincronizaciones sí se puede leer entera: es la bitácora
+-- técnica (estado, rango, texto corto de error). Nunca trae el token.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'publicidad_trabajador_user') THEN
+    CREATE ROLE publicidad_trabajador_user WITH LOGIN PASSWORD 'PONE_ACA_UNA_QUINTA_CONTRASEÑA_REAL';
+  END IF;
+END $$;
+GRANT CONNECT ON DATABASE railway TO publicidad_trabajador_user;
+GRANT USAGE ON SCHEMA public TO publicidad_trabajador_user;
+GRANT SELECT (id, empresa_id, desconectada_ts, creado_ts) ON cuentas_ml TO publicidad_trabajador_user;
+GRANT SELECT ON publicidad_sincronizaciones TO publicidad_trabajador_user;
+
 -- 2) Seguridad por fila — se activa por tabla, y se FUERZA también para
 -- el dueño de la tabla (sin el FORCE, el dueño de la tabla se salta la
 -- política igual que un superusuario, que es justo el agujero que
@@ -81,6 +178,56 @@ ALTER TABLE invitaciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invitaciones FORCE ROW LEVEL SECURITY;
 ALTER TABLE auditoria ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auditoria FORCE ROW LEVEL SECURITY;
+-- Issue #125 — mismas tres tablas nuevas. Sin FORCE, el dueño de la
+-- tabla se salta la política igual que un superusuario.
+ALTER TABLE titulares ENABLE ROW LEVEL SECURITY;
+ALTER TABLE titulares FORCE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_finanzas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_finanzas FORCE ROW LEVEL SECURITY;
+ALTER TABLE metas_mensuales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE metas_mensuales FORCE ROW LEVEL SECURITY;
+-- Issue #127.
+ALTER TABLE terceros ENABLE ROW LEVEL SECURITY;
+ALTER TABLE terceros FORCE ROW LEVEL SECURITY;
+ALTER TABLE costos_sku ENABLE ROW LEVEL SECURITY;
+ALTER TABLE costos_sku FORCE ROW LEVEL SECURITY;
+-- Issue #129.
+ALTER TABLE pedidos_finanzas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pedidos_finanzas FORCE ROW LEVEL SECURITY;
+ALTER TABLE pedido_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pedido_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE ventas_correcciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ventas_correcciones FORCE ROW LEVEL SECURITY;
+-- Issue #280.
+ALTER TABLE bodegas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bodegas FORCE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega FORCE ROW LEVEL SECURITY;
+ALTER TABLE kardex_movimientos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kardex_movimientos FORCE ROW LEVEL SECURITY;
+ALTER TABLE ordenes_compra ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ordenes_compra FORCE ROW LEVEL SECURITY;
+ALTER TABLE orden_compra_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orden_compra_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepciones FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_inventario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_inventario FORCE ROW LEVEL SECURITY;
+ALTER TABLE sync_stock_ml ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sync_stock_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE alertas_ultima_unidad ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alertas_ultima_unidad FORCE ROW LEVEL SECURITY;
+-- Rama feat-promociones.
+ALTER TABLE promociones_reglas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE promociones_reglas FORCE ROW LEVEL SECURITY;
+ALTER TABLE promociones_candidatos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE promociones_candidatos FORCE ROW LEVEL SECURITY;
+ALTER TABLE promociones_acciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE promociones_acciones FORCE ROW LEVEL SECURITY;
+ALTER TABLE ia_conexiones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ia_conexiones FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
@@ -101,6 +248,26 @@ ALTER TABLE pedido_eventos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedido_eventos FORCE ROW LEVEL SECURITY;
 ALTER TABLE despachos_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE despachos_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE productos_ml ENABLE ROW LEVEL SECURITY;
+ALTER TABLE productos_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE seguimientos_ml ENABLE ROW LEVEL SECURITY;
+ALTER TABLE seguimientos_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE seguimiento_fotos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE seguimiento_fotos FORCE ROW LEVEL SECURITY;
+ALTER TABLE seguimiento_alertas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE seguimiento_alertas FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_anunciantes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_anunciantes FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_campanas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_campanas FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_anuncios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_anuncios FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_metricas_diarias ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_metricas_diarias FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_costos_item ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_costos_item FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_sincronizaciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_sincronizaciones FORCE ROW LEVEL SECURITY;
 
 -- La tabla "usuarios" NO lleva RLS por empresa: una persona puede estar
 -- en varias empresas (decisión D2), así que no tiene una sola
@@ -135,6 +302,22 @@ CREATE POLICY aislamiento_empresas ON empresas
     OR id IN (
       SELECT empresa_id FROM membresias
       WHERE usuario_id = NULLIF(current_setting('app.usuario_actual', true), '')::uuid
+    )
+  );
+
+-- Issue #181 — la pantalla de confirmación de transferencia necesita
+-- mostrar el NOMBRE de la empresa que hoy tiene la cuenta de Mercado
+-- Libre ("ya está conectada a la empresa «sawii»"), antes de que quien
+-- confirma sea parte de esa empresa. El subselect sobre cuentas_ml
+-- queda sujeto, a su vez, a la política cuentas_ml_por_transferencia_leer
+-- de arriba (misma variable de sesión) — nunca expone más que la fila
+-- puntual que el propio OAuth ya confirmó.
+DROP POLICY IF EXISTS empresas_por_transferencia_cuenta_ml ON empresas;
+CREATE POLICY empresas_por_transferencia_cuenta_ml ON empresas FOR SELECT
+  USING (
+    id IN (
+      SELECT empresa_id FROM cuentas_ml
+      WHERE cuenta_id_externa = current_setting('app.cuenta_ml_transferencia_actual', true)
     )
   );
 
@@ -185,6 +368,103 @@ DROP POLICY IF EXISTS aislamiento_auditoria ON auditoria;
 CREATE POLICY aislamiento_auditoria ON auditoria
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
+-- Issue #125 — mismo patrón que el resto de las tablas de negocio.
+DROP POLICY IF EXISTS aislamiento_titulares ON titulares;
+CREATE POLICY aislamiento_titulares ON titulares
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_configuracion_finanzas ON configuracion_finanzas;
+CREATE POLICY aislamiento_configuracion_finanzas ON configuracion_finanzas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_metas_mensuales ON metas_mensuales;
+CREATE POLICY aislamiento_metas_mensuales ON metas_mensuales
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #127 — mismo patrón: una empresa nunca ve ni toca los
+-- proveedores ni la tabla maestra de otra.
+DROP POLICY IF EXISTS aislamiento_terceros ON terceros;
+CREATE POLICY aislamiento_terceros ON terceros
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_costos_sku ON costos_sku;
+CREATE POLICY aislamiento_costos_sku ON costos_sku
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #129 — mismo patrón para la cabecera y las líneas de venta.
+DROP POLICY IF EXISTS aislamiento_pedidos_finanzas ON pedidos_finanzas;
+CREATE POLICY aislamiento_pedidos_finanzas ON pedidos_finanzas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_pedido_items ON pedido_items;
+CREATE POLICY aislamiento_pedido_items ON pedido_items
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- ventas_correcciones: una política por comando. Se inserta activa
+-- (sin anulada_ts) y el UPDATE (que el GRANT ya limita a anulada_ts)
+-- solo toma una corrección activa y la deja anulada: no se des-anula
+-- ni se cambia la fecha de una ya anulada.
+DROP POLICY IF EXISTS aislamiento_ventas_correcciones ON ventas_correcciones;
+DROP POLICY IF EXISTS ventas_correcciones_ver ON ventas_correcciones;
+CREATE POLICY ventas_correcciones_ver ON ventas_correcciones FOR SELECT
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS ventas_correcciones_crear ON ventas_correcciones;
+CREATE POLICY ventas_correcciones_crear ON ventas_correcciones FOR INSERT
+  WITH CHECK (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NULL);
+DROP POLICY IF EXISTS ventas_correcciones_anular ON ventas_correcciones;
+CREATE POLICY ventas_correcciones_anular ON ventas_correcciones FOR UPDATE
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NULL)
+  WITH CHECK (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NOT NULL);
+
+-- Issue #280 — mismo patrón en las tablas de inventario: una empresa
+-- nunca ve ni mueve el stock, el kardex ni las compras de otra. Las
+-- FK compuestas (empresa_id, ...) cierran el otro hueco: una fila de A
+-- no puede apuntar a una bodega o un SKU de B.
+DROP POLICY IF EXISTS aislamiento_bodegas ON bodegas;
+CREATE POLICY aislamiento_bodegas ON bodegas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_stock_bodega ON stock_bodega;
+CREATE POLICY aislamiento_stock_bodega ON stock_bodega
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_kardex_movimientos ON kardex_movimientos;
+CREATE POLICY aislamiento_kardex_movimientos ON kardex_movimientos
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_ordenes_compra ON ordenes_compra;
+CREATE POLICY aislamiento_ordenes_compra ON ordenes_compra
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_orden_compra_items ON orden_compra_items;
+CREATE POLICY aislamiento_orden_compra_items ON orden_compra_items
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_recepciones ON recepciones;
+CREATE POLICY aislamiento_recepciones ON recepciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_recepcion_items ON recepcion_items;
+CREATE POLICY aislamiento_recepcion_items ON recepcion_items
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_configuracion_inventario ON configuracion_inventario;
+CREATE POLICY aislamiento_configuracion_inventario ON configuracion_inventario
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_sync_stock_ml ON sync_stock_ml;
+CREATE POLICY aislamiento_sync_stock_ml ON sync_stock_ml
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_alertas_ultima_unidad ON alertas_ultima_unidad;
+CREATE POLICY aislamiento_alertas_ultima_unidad ON alertas_ultima_unidad
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Rama feat-promociones.
+DROP POLICY IF EXISTS aislamiento_promociones_reglas ON promociones_reglas;
+CREATE POLICY aislamiento_promociones_reglas ON promociones_reglas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_promociones_candidatos ON promociones_candidatos;
+CREATE POLICY aislamiento_promociones_candidatos ON promociones_candidatos
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_promociones_acciones ON promociones_acciones;
+CREATE POLICY aislamiento_promociones_acciones ON promociones_acciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_ia_conexiones ON ia_conexiones;
+CREATE POLICY aislamiento_ia_conexiones ON ia_conexiones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
 DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;
 CREATE POLICY aislamiento_accesos_temporales ON accesos_temporales
   -- Tráfico normal (app_user, Dueño gestionando sus propios accesos
@@ -208,6 +488,26 @@ CREATE POLICY aislamiento_cuentas_ml ON cuentas_ml
 DROP POLICY IF EXISTS cuentas_ml_por_aviso_webhook ON cuentas_ml;
 CREATE POLICY cuentas_ml_por_aviso_webhook ON cuentas_ml FOR SELECT
   USING (cuenta_id_externa = current_setting('app.cuenta_ml_externa_actual', true));
+
+-- Issue #181 — transferir una cuenta ya conectada en OTRA empresa:
+-- política APARTE de la de aviso_webhook (trust boundary distinto —
+-- este camino sí exige sesión real + requierePermiso('configuracion',
+-- 'crear'), un webhook no tiene ninguno de los dos), con su propia
+-- variable de sesión (dbComoTransferenciaCuentaMl, db/empresa-context.ts).
+-- Mismo principio que siempre: el cuenta_id_externa puntual (que
+-- Mercado Libre ya confirmó real en el propio OAuth) ES el permiso
+-- para ver/actualizar esa fila nada más, nunca las de otra cuenta.
+-- FOR UPDATE sin WITH CHECK explícito: cuenta_id_externa nunca cambia
+-- en la transferencia (solo empresa_id, tokens, nickname), así que la
+-- fila nueva sigue cumpliendo el mismo USING — comportamiento estándar
+-- de Postgres (sin WITH CHECK, se reusa el USING también para la fila
+-- resultante).
+DROP POLICY IF EXISTS cuentas_ml_por_transferencia_leer ON cuentas_ml;
+CREATE POLICY cuentas_ml_por_transferencia_leer ON cuentas_ml FOR SELECT
+  USING (cuenta_id_externa = current_setting('app.cuenta_ml_transferencia_actual', true));
+DROP POLICY IF EXISTS cuentas_ml_por_transferencia_actualizar ON cuentas_ml;
+CREATE POLICY cuentas_ml_por_transferencia_actualizar ON cuentas_ml FOR UPDATE
+  USING (cuenta_id_externa = current_setting('app.cuenta_ml_transferencia_actual', true));
 
 DROP POLICY IF EXISTS aislamiento_avisos_ml ON avisos_ml;
 CREATE POLICY aislamiento_avisos_ml ON avisos_ml
@@ -240,6 +540,68 @@ CREATE POLICY aislamiento_pedido_eventos ON pedido_eventos
 DROP POLICY IF EXISTS aislamiento_despachos_ml ON despachos_ml;
 CREATE POLICY aislamiento_despachos_ml ON despachos_ml
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_productos_ml ON productos_ml;
+CREATE POLICY aislamiento_productos_ml ON productos_ml
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #175 — mismo patrón de siempre: tráfico normal de app_user,
+-- nunca ve ni toca el seguimiento/foto/alerta de otra empresa.
+DROP POLICY IF EXISTS aislamiento_seguimientos_ml ON seguimientos_ml;
+CREATE POLICY aislamiento_seguimientos_ml ON seguimientos_ml
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_seguimiento_fotos ON seguimiento_fotos;
+CREATE POLICY aislamiento_seguimiento_fotos ON seguimiento_fotos
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_seguimiento_alertas ON seguimiento_alertas;
+CREATE POLICY aislamiento_seguimiento_alertas ON seguimiento_alertas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #175 — política APARTE, con TO seguimiento_trabajador_user:
+-- la revisión diaria ve y marca ultima_revision_ts de CUALQUIER
+-- seguimiento, de cualquier empresa (mismo criterio que
+-- trabajador_procesa_avisos_ml más arriba) — nunca ninguna otra
+-- tabla (ver GRANT, solo seguimientos_ml). No reemplaza la política de
+-- arriba, que sigue aplicando igual al tráfico normal de app_user.
+DROP POLICY IF EXISTS seguimiento_trabajador_lee_seguimientos_ml ON seguimientos_ml;
+CREATE POLICY seguimiento_trabajador_lee_seguimientos_ml ON seguimientos_ml FOR SELECT TO seguimiento_trabajador_user USING (true);
+DROP POLICY IF EXISTS seguimiento_trabajador_marca_revision_seguimientos_ml ON seguimientos_ml;
+CREATE POLICY seguimiento_trabajador_marca_revision_seguimientos_ml ON seguimientos_ml FOR UPDATE TO seguimiento_trabajador_user USING (true);
+
+-- Issue #254 — app_user solo ve la publicidad de la empresa activa.
+DROP POLICY IF EXISTS aislamiento_publicidad_anunciantes ON publicidad_anunciantes;
+CREATE POLICY aislamiento_publicidad_anunciantes ON publicidad_anunciantes
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_campanas ON publicidad_campanas;
+CREATE POLICY aislamiento_publicidad_campanas ON publicidad_campanas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_anuncios ON publicidad_anuncios;
+CREATE POLICY aislamiento_publicidad_anuncios ON publicidad_anuncios
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_metricas_diarias ON publicidad_metricas_diarias;
+CREATE POLICY aislamiento_publicidad_metricas_diarias ON publicidad_metricas_diarias
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_costos_item ON publicidad_costos_item;
+CREATE POLICY aislamiento_publicidad_costos_item ON publicidad_costos_item
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_sincronizaciones ON publicidad_sincronizaciones;
+CREATE POLICY aislamiento_publicidad_sincronizaciones ON publicidad_sincronizaciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- El cron lista cuentas y la bitácora de cualquier empresa. No
+-- reemplaza el aislamiento de app_user: el TO limita estas políticas
+-- a publicidad_trabajador_user.
+DROP POLICY IF EXISTS publicidad_trabajador_lee_cuentas_ml ON cuentas_ml;
+CREATE POLICY publicidad_trabajador_lee_cuentas_ml ON cuentas_ml FOR SELECT TO publicidad_trabajador_user USING (true);
+DROP POLICY IF EXISTS publicidad_trabajador_lee_sincronizaciones ON publicidad_sincronizaciones;
+CREATE POLICY publicidad_trabajador_lee_sincronizaciones ON publicidad_sincronizaciones FOR SELECT TO publicidad_trabajador_user USING (true);
 
 -- Tarea 2.4 — política APARTE, con TO trabajador_user: el trabajador de
 -- cola ve y marca procesado cualquier aviso pendiente, de cualquier

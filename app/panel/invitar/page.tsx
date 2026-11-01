@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { NOMBRES_PLANTILLA } from "@/lib/roles";
+import { permisosDeRolesPorNombre, plantillasQuePuedeDar } from "@/lib/roles";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { crearInvitacionAction } from "./actions";
 import { Boton, BotonLink } from "@/components/marco/Boton";
@@ -27,11 +27,19 @@ export default async function InvitarPage() {
   const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) redirect("/crear-empresa");
 
+  let miMembresia;
   try {
-    await requierePermiso(usuario.id, empresa.id, "personas", "crear");
+    miMembresia = await requierePermiso(usuario.id, empresa.id, "personas", "crear");
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     return <SinAcceso mensaje={`Tu rol no puede invitar personas a ${empresa.nombre}.`} />;
+  }
+
+  // Issue #124 — solo se ofrecen los roles que esta persona puede dar
+  // (crearInvitacionAction lo vuelve a comprobar en el servidor).
+  const rolesQuePuedeDar = plantillasQuePuedeDar(miMembresia.permisos, await permisosDeRolesPorNombre(empresa.id));
+  if (rolesQuePuedeDar.length === 0) {
+    return <SinAcceso mensaje={`Tu rol (${miMembresia.rolNombre}) no tiene todos los permisos de ningún rol, así que no puede invitar a nadie.`} />;
   }
 
   return (
@@ -48,7 +56,7 @@ export default async function InvitarPage() {
           </Campo>
           <Campo etiqueta="Rol">
             <select name="rol" required className="zx-control">
-              {NOMBRES_PLANTILLA.map((nombre) => (
+              {rolesQuePuedeDar.map((nombre) => (
                 <option key={nombre} value={nombre}>
                   {nombre}
                 </option>

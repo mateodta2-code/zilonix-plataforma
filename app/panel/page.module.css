@@ -43,7 +43,7 @@
   border-radius: var(--radio-boton);
   background: linear-gradient(var(--acento-suave), var(--acento-suave)) padding-box, var(--degradado-plata-borde) border-box;
   border: 1px solid transparent;
-  color: var(--acento-fuerte);
+  color: #fff;
   text-decoration: none;
   font-size: 13.5px;
   font-weight: 500;

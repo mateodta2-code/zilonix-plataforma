@@ -1,9 +1,16 @@
+/* Issue #191 — --tabla-fondo/--tabla-encabezado-fondo (app/globals.css),
+   nunca --superficie/--superficie-2 directo: por defecto son el mismo
+   valor de siempre (una <Tabla> sola en la página se ve IGUAL que
+   antes), pero dentro de una <Tarjeta> (ahora oscura, issue #186) esos
+   dos tokens quedan redefinidos a oscuro — la tabla deja de pintar su
+   propio fondo claro de siempre, que quedaba ilegible con el --texto
+   zona-oscura que la tarjeta ya le imponía a todo lo de adentro. */
 .envoltura {
   overflow-x: auto;
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
-    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    linear-gradient(var(--tabla-fondo), var(--tabla-fondo)) padding-box,
     var(--degradado-plata-borde) border-box;
 }
 
@@ -16,7 +23,7 @@
 .th {
   text-align: left;
   padding: 10px 12px;
-  background: var(--superficie-2);
+  background: var(--tabla-encabezado-fondo);
   white-space: nowrap;
 }
 
@@ -32,4 +39,39 @@
 .td {
   padding: 10px 12px;
   vertical-align: middle;
+}
+
+/* El scroll es de la tabla, no de la página: el encabezado se pega
+   arriba de esta caja y no compite con BarraSuperior. */
+.scroll {
+  max-height: min(70vh, 720px);
+  overflow: auto;
+}
+
+.scroll .th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.numerica {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* En el celular la tabla se desplaza de costado y la primera columna
+   sigue visible. En escritorio no se pega a la izquierda. */
+@media (max-width: 760px) {
+  .tdFija {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--tabla-fondo);
+  }
+
+  .scroll .thFija {
+    left: 0;
+    z-index: 3;
+  }
 }

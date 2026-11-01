@@ -10,23 +10,29 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx db/migrate.ts",
-    "docs:permisos": "tsx scripts/generar-matriz-permisos.ts"
+    "docs:permisos": "tsx scripts/generar-matriz-permisos.ts",
+    "extension:zip": "node scripts/empaquetar-extension.js"
   },
   "dependencies": {
-    "next": "14.2.35",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
+    "@clerk/nextjs": "6.39.8",
+    "busboy": "^1.6.0",
     "drizzle-orm": "0.36.4",
+    "next": "14.2.35",
+    "pdf-lib": "^1.17.1",
     "postgres": "3.4.5",
-    "@clerk/nextjs": "6.39.8"
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
-    "typescript": "5.7.2",
+    "@testing-library/react": "^14.3.1",
+    "@types/busboy": "^1.5.5",
     "@types/node": "20.17.9",
     "@types/react": "18.3.17",
     "@types/react-dom": "18.3.5",
     "drizzle-kit": "0.28.1",
-    "tsx": "4.19.2",
-    "vitest": "2.1.8"
+    "jsdom": "^25.0.1",
+    "tsx": "4.23.15",
+    "typescript": "5.7.2",
+    "vitest": "2.1.9"
   }
 }

@@ -1,0 +1,150 @@
+/* ADENDO de diseño (Parte 2) — Mateo pidió que Publicar se vea con el
+   mismo diseño de marca que /panel (Inicio): borde plateado-azul con
+   degradado, esquinas redondeadas, fondo oscuro translúcido. Las
+   piezas GRANDES (cada sección) ya usan <Tarjeta> directo
+   (components/marco/Tarjeta.tsx) — nunca se reinventa ese borde para
+   ellas. .recuadroMarca es la MISMA receta exacta que ya usa
+   .zx-control (app/globals.css) — doble fondo con background-clip,
+   relleno sólido en padding-box y --degradado-plata-borde en
+   border-box — extraída acá para las piezas CHICAS que <Tarjeta> no
+   cubre (una fila de cuenta, una miniatura de foto, la tarjeta "+"),
+   para que el anillo plateado se vea igual en cualquier tamaño, sin
+   inventar una paleta nueva. Se combina con las demás clases de este
+   archivo en el className (nunca `composes`, para no pelear por
+   especificidad con las propiedades que cada una redefine, ej. el
+   borde punteado de .tarjetaAgregar). */
+.recuadroMarca {
+  border: 1px solid transparent;
+  border-radius: var(--radio-boton);
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  box-shadow: var(--filete-marca-arriba-abajo);
+  color: var(--texto-superficie-2);
+}
+
+.miniatura {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.miniaturaImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.miniaturaRota {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--texto-suave);
+}
+
+/* Code review de Pablo (sobre 768305e) — nunca un rgba()/hex suelto
+   nuevo: la base es --superficie-2-zona-oscura (app/globals.css), el
+   MISMO token "siempre oscuro, en los dos temas" que ya usan
+   Tarjeta/TarjetaKpi para su fondo — acá diluido con color-mix (no un
+   negro inventado) porque esto es un overlay SOBRE una foto
+   arbitraria, no una superficie propia; el texto usa su contraparte
+   real, --texto-zona-oscura. */
+.etiquetaPortada {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: color-mix(in srgb, var(--superficie-2-zona-oscura) 85%, transparent);
+  color: var(--texto-zona-oscura);
+  font-size: 10px;
+  text-align: center;
+  padding: 2px 0;
+}
+
+.botonQuitar {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: color-mix(in srgb, var(--superficie-2-zona-oscura) 80%, transparent);
+  color: var(--texto-zona-oscura);
+  border: none;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tarjetaAgregar {
+  width: 90px;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  cursor: pointer;
+  border-style: dashed !important;
+}
+
+.filaCuenta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.filaCuentaDetalle {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.portadaChica {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: var(--radio-boton);
+}
+
+.portadaChicaImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.resumenDetalle {
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--texto-superficie-2);
+}
+
+.cuerpoDetalle {
+  padding: 0 12px 12px;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.seccion {
+  margin-top: 20px;
+}
+
+.filaAccion {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}

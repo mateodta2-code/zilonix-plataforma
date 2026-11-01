@@ -7,12 +7,33 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { obtenerUltimaImportacion } from "@/lib/ml/importacion";
+import { datosSitioMl } from "@/lib/ml/sitios";
 import { BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "./page.module.css";
+
+// Bug real: antes esta pantalla mostraba `searchParams.error` tal
+// cual, y /api/ml/callback le pasaba ahí el `error.message` crudo de
+// cualquier falla (texto de Mercado Libre o de Postgres). Ahora el
+// Route Handler solo manda uno de estos códigos fijos — un mapa
+// cerrado, nunca el valor de la URL: cualquier código que no esté en
+// esta lista (incluido texto arbitrario) cae en el mensaje genérico.
+// Issue #181 — "cuenta_en_otra_empresa" ya no lo manda
+// /api/ml/callback (ahora redirige a /confirmar-transferencia en vez
+// de mostrar este error), pero el código fijo se mantiene para no
+// confundir un link viejo guardado (favorito, historial del
+// navegador) con el genérico.
+const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
+  cuenta_en_otra_empresa: "Esta cuenta de Mercado Libre ya está conectada a otra empresa en Zilonix. Desconéctala allá primero o escríbenos a soporte.",
+  estado_vencido: "La conexión tardó demasiado o se perdió el estado — empezá de nuevo con \"Conectar Mercado Libre\".",
+  ml_rechazo: "Mercado Libre no autorizó la conexión.",
+  sin_permiso: "No tenés permiso para conectar una cuenta de Mercado Libre.",
+  error_desconocido: "No se pudo conectar la cuenta — intentá de nuevo en un momento.",
+};
+const MENSAJE_ERROR_POR_DEFECTO = "No se pudo conectar la cuenta — intentá de nuevo en un momento.";
 
 // Tarea 2.3 — "Conectar ML en 1 clic". Regla de UX #1 del plan técnico
 // ("si el canal no está habilitado para ese plan/cuenta, avisarlo ANTES
@@ -74,7 +95,7 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
         // el error real y un botón para reintentar, nunca un
         // silencio.
         <div className={styles.avisoError}>
-          <p className={styles.avisoErrorTexto}>No se pudo conectar la cuenta: {searchParams.error}</p>
+          <p className={styles.avisoErrorTexto}>{MENSAJES_ERROR_CONECTAR[searchParams.error] ?? MENSAJE_ERROR_POR_DEFECTO}</p>
           {/* <a> normal, no next/link: /api/ml/conectar es un Route
               Handler que arranca el OAuth real, necesita una
               navegación de verdad del navegador. */}
@@ -88,6 +109,10 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
         <ListaFilas>
           {cuentas.map((cuenta) => {
             const importacion = importaciones.find((i) => i.cuenta.id === cuenta.id)?.importacion;
+            // Issue #315 (Z-LATAM-01), parte 2 — país desde SITIOS_ML
+            // (lib/ml/sitios.ts), nunca un nombre fijo; cuenta.moneda e
+            // idioma ya vienen reales de la fila (listarCuentasConectadas).
+            const sitio = datosSitioMl(cuenta.siteId);
             return (
               <FilaLista key={cuenta.id}>
                 <div className={styles.filaCuenta}>
@@ -100,6 +125,9 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
                       Desconectar
                     </Link>
                   )}
+                </div>
+                <div className={styles.detalleSitio}>
+                  {sitio.nombre} · {cuenta.moneda} · {cuenta.idioma}
                 </div>
                 {importacion && !importacion.error && (
                   <div className={styles.detalleImportacion}>
