@@ -79,13 +79,19 @@ describe("respuestaSiCategoryIdInvalido — ADENDO UX de Publicar, revisión", (
     expect(respuestaSiCategoryIdInvalido("MCO1234", PATRON_ID_CATEGORIA)).toBeNull();
   });
 
+  // Issue #315 — el patrón ya no fija "MCO": un categoryId de otro
+  // site_id real (3 letras mayúsculas + dígitos) también es válido.
+  it("categoryId real de otro site_id (MLAxxxx): null", () => {
+    expect(respuestaSiCategoryIdInvalido("MLA1234", PATRON_ID_CATEGORIA)).toBeNull();
+  });
+
   it("ausente/vacío: null — estas rutas aceptan sin categoryId (detección automática)", () => {
     expect(respuestaSiCategoryIdInvalido(null, PATRON_ID_CATEGORIA)).toBeNull();
     expect(respuestaSiCategoryIdInvalido("", PATRON_ID_CATEGORIA)).toBeNull();
   });
 
   it("formato inválido: 400", async () => {
-    const res = respuestaSiCategoryIdInvalido("MLA123", PATRON_ID_CATEGORIA); // prefijo de otro país, fuera de alcance (solo MCO)
+    const res = respuestaSiCategoryIdInvalido("MLA1/../users/me", PATRON_ID_CATEGORIA); // intento de path traversal, nunca un site_id real
     expect(res).not.toBeNull();
     expect(res!.status).toBe(400);
     expect((await res!.json()).error).toMatch(/categoryId/i);

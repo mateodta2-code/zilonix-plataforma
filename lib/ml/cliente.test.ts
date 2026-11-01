@@ -36,6 +36,8 @@ import {
   obtenerProducto,
   obtenerPublicacionesVendedorAjenoMl,
   obtenerVendedor,
+  PATRON_ID_CATEGORIA,
+  PATRON_ID_PRODUCTO_O_ITEM,
   resolverCategoria,
   salirDePromocionMl,
   subirClipMl,
@@ -52,6 +54,27 @@ function respuestaJson(data: unknown, status = 200) {
 describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  // Issue #315 — estos patrones ya no fijan "MCO": cubren cualquier
+  // site_id real de Mercado Libre (3 letras mayúsculas) + dígitos,
+  // pero siguen siendo un formato cerrado, nunca una validación débil.
+  it.each([
+    ["MCO123", true],
+    ["MLM456", true],
+    ["MLA1", true],
+    ["MLB999999", true],
+    ["MLC1", true],
+    ["mco123", false], // minúsculas: no es un site_id real
+    ["MC123", false], // 2 letras, no 3
+    ["MCOO123", false], // 4 letras, no 3
+    ["MCO", false], // sin dígitos
+    ["MCO1/../users/me", false], // intento de path traversal
+    ["MCO1; DROP TABLE x;--", false], // intento de inyección
+    ["", false],
+  ])("PATRON_ID_PRODUCTO_O_ITEM / PATRON_ID_CATEGORIA en %j → %j", (valor, esperado) => {
+    expect(PATRON_ID_PRODUCTO_O_ITEM.test(valor)).toBe(esperado);
+    expect(PATRON_ID_CATEGORIA.test(valor)).toBe(esperado);
   });
 
   it("productId que no cumple ^MCO\\d+$ nunca llama a fetch (obtenerProducto)", async () => {

@@ -21,18 +21,26 @@ const BASE_URL = "https://api.mercadolibre.com";
 export const SITE_ID = "MCO";
 
 // Corrección de Pablo (PR #112): los id de producto/ítem y de
-// categoría de Mercado Libre Colombia siempre son "MCO" + dígitos; el
-// id de vendedor (user_id) es solo dígitos. Cualquier otra cosa no
+// categoría de Mercado Libre siempre son 3 letras mayúsculas (el
+// site_id real de la cuenta — MCO, MLM, MLA, MLB, MLC...) + dígitos;
+// el id de vendedor (user_id) es solo dígitos. Cualquier otra cosa no
 // puede venir de verdad de la API — se descarta ANTES de armar la URL,
 // nunca se pega texto sin validar a un fetch.
+//
+// Issue #315: antes fijaba "MCO" a mano, lo que rompía cualquier
+// cuenta con otro site_id (MLM, MLA...). Generalizado a 3 letras
+// mayúsculas + dígitos — sigue siendo un formato cerrado (nunca una
+// validación débil), solo que ya no asume el país de la cuenta de
+// Mateo. El site_id real de una cuenta se obtiene con
+// obtenerSitioDeCuenta (lib/ml/cuentas.ts), nunca se adivina acá.
 //
 // Tarea 2.11, punto 3 — mismos patrones, reusados tal cual (nunca
 // reinventados) para validar itemId/categoryId (publicar.ts, clip.ts,
 // estado-item.ts) y cuentaIdExterna (clip.ts) antes de que lleguen a
 // las funciones de ESCRITURA de abajo — ej. "MCO1/../users/me" no
 // cumple ninguno de los dos y nunca llega a armar una URL.
-export const PATRON_ID_PRODUCTO_O_ITEM = /^MCO\d+$/;
-export const PATRON_ID_CATEGORIA = /^MCO\d+$/;
+export const PATRON_ID_PRODUCTO_O_ITEM = /^[A-Z]{3}\d+$/;
+export const PATRON_ID_CATEGORIA = /^[A-Z]{3}\d+$/;
 export const PATRON_ID_VENDEDOR = /^\d+$/;
 
 // Tiempo máximo real por llamada — sin esto, una llamada colgada a
