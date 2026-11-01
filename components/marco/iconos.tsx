@@ -322,6 +322,17 @@ export function IconoLogo(props: IconoProps) {
   );
 }
 
+// Tarea feat-portada-pagina-venta — checkmark simple, para listas de
+// "incluye" (planes de la página de venta) y cualquier otra lista corta
+// de confirmación.
+export function IconoCheck(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M5 12.5 9.5 17 19 7" />
+    </Svg>
+  );
+}
+
 export function IconoCerrarSesion(props: IconoProps) {
   return (
     <Svg {...props}>

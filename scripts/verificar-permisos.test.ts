@@ -224,6 +224,12 @@ const RUTAS_EXENTAS: Record<string, string> = {
   // real (obtenerOCrearUsuarioActual), nunca el de otra persona.
   "app/panel/mis-datos/page.tsx": "solo resuelve la sesión (redirige a /sign-in si no hay) y renderiza — exportar/borrar son un derecho sobre los datos propios, no un permiso de módulo; el candado real es que lib/datos-personales.ts nunca recibe un id de usuario ajeno",
   "app/panel/mis-datos/actions.ts": "idem — las dos acciones resuelven el usuario con obtenerOCrearUsuarioActual(), nunca con un id que mande el cliente",
+  // Tarea feat-portada-pagina-venta — páginas públicas estáticas
+  // ("En preparación"), enlazadas desde el pie de la página de venta;
+  // no leen ni escriben ninguna tabla.
+  "app/terminos/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
+  "app/privacidad/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
+  "app/cookies/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {
