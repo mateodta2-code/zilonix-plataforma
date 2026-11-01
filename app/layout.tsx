@@ -2,6 +2,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import localFont from "next/font/local";
 import "./globals.css";
 import { VERSION } from "@/lib/version";
+import { localizacionClerk } from "@/components/acceso/localizacionClerk";
 
 export const metadata = {
   title: "Zilonix",
@@ -56,7 +57,7 @@ const SCRIPT_TEMA = `
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ClerkProvider>
+    <ClerkProvider localization={localizacionClerk}>
       <html lang="es" suppressHydrationWarning className={montserrat.variable}>
         <head>
           <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA }} />

@@ -322,6 +322,16 @@ export function IconoLogo(props: IconoProps) {
   );
 }
 
+export function IconoCerrarSesion(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3" />
+      <path d="M14 16l5-4-5-4" />
+      <path d="M19 12H9" />
+    </Svg>
+  );
+}
+
 const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   inicio: IconoInicio,
   pedidos: IconoPedidos,

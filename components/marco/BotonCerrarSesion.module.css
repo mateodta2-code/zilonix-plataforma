@@ -1,0 +1,66 @@
+/* Dos variantes porque vive en dos fondos distintos: "barra" cae
+   directo sobre la franja oscura del header (igual que .usuario en
+   BarraSuperior.module.css, color de reposo --texto-zona-oscura) y
+   "cuenta" vive sobre la superficie normal de /cuenta (--texto,
+   respeta data-tema). El acento rojo (--peligro) solo aparece en
+   hover/focus, para que se note que es una acción distinta sin gritar
+   "peligro" en reposo. */
+.boton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: var(--radio-boton);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--fuente-texto);
+  cursor: pointer;
+  transition: var(--transicion-color), var(--transicion-transform);
+  white-space: nowrap;
+}
+
+.boton:hover {
+  border-color: var(--peligro);
+  color: var(--peligro-texto);
+  transform: translateY(-1px);
+  box-shadow: var(--sombra-marca-hover);
+}
+
+.boton:active {
+  transform: scale(0.97);
+}
+
+.boton:focus-visible {
+  outline: 2px solid var(--peligro);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+}
+
+.boton:disabled {
+  cursor: default;
+  opacity: 0.6;
+  transform: none;
+}
+
+.barra {
+  color: var(--texto-zona-oscura);
+}
+
+.cuenta {
+  color: var(--texto);
+  margin-top: 24px;
+}
+
+@media (max-width: 640px) {
+  /* Mismo criterio que .buscar/.nombreUsuario en BarraSuperior: en la
+     barra superior angosta solo queda el ícono. En la variante
+     "cuenta" (debajo de UserProfile, nunca dentro de la barra) el
+     texto se queda siempre, ahí sí hay espacio de sobra. */
+  .barra span {
+    display: none;
+  }
+}
