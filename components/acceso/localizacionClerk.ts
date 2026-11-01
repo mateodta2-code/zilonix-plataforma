@@ -11,6 +11,14 @@ import type { LocalizationResource } from "@clerk/types";
 // login/password, el medidor de fuerza de contraseña (zxcvbn, se ve en
 // registro y al cambiar contraseña en /cuenta) y los mensajes de
 // contraseña comprometida/no confiable.
+//
+// formFieldInputPlaceholder__signUpPassword (review 5726192613) no se
+// agrega acá: no existe ni en el tipo (@clerk/types 4.101.28, vía
+// @clerk/shared/types) ni en el runtime (@clerk/clerk-react 5.61.11
+// nunca la busca) con @clerk/localizations fijado en 3.37.10 — es una
+// clave de una versión de Clerk más nueva que la que usamos. En esta
+// versión el campo de contraseña de /sign-up usa el mismo
+// formFieldInputPlaceholder__password, que esES ya trae en español.
 export const localizacionClerk: LocalizationResource = {
   ...esES,
   signIn: {

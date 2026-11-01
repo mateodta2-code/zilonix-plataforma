@@ -1,7 +1,6 @@
 "use client";
 
 import { useClerk } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { IconoCerrarSesion } from "./iconos";
 import styles from "./BotonCerrarSesion.module.css";
@@ -12,14 +11,12 @@ import styles from "./BotonCerrarSesion.module.css";
 // BotonCerrarSesion.module.css).
 export function BotonCerrarSesion({ variante = "barra" }: { variante?: "barra" | "cuenta" }) {
   const { signOut } = useClerk();
-  const router = useRouter();
   const [saliendo, setSaliendo] = useState(false);
 
   async function manejarClic() {
     if (saliendo) return;
     setSaliendo(true);
     await signOut({ redirectUrl: "/" });
-    router.push("/");
   }
 
   return (
