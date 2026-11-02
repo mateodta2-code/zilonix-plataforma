@@ -4,3 +4,13 @@
   align-self: flex-start;
   margin-top: 16px;
 }
+
+/* Issue #323 — mismo patrón de /panel/sku (texto + botón en una fila)
+   para el estado vacío con el siguiente paso. */
+.vacioConAccion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}

@@ -11,6 +11,7 @@ import { datosSitioMl } from "@/lib/ml/sitios";
 import { BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "./page.module.css";
@@ -103,6 +104,13 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
             Reintentar
           </a>
         </div>
+      )}
+
+      {cuentas.length === 0 && (
+        // Issue #323 — siguiente paso concreto: conectar es justo lo
+        // que esta pantalla ya ofrece abajo, acá solo se explica para
+        // qué sirve antes del botón.
+        <EstadoVacio>Todavía no tienes ninguna cuenta conectada. Conecta tu cuenta de Mercado Libre para empezar a ver tus pedidos.</EstadoVacio>
       )}
 
       {cuentas.length > 0 && (

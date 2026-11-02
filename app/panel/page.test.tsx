@@ -18,6 +18,15 @@ vi.mock("@/lib/panel-contexto", () => ({
   obtenerContextoPanel: async () => ({ usuario: { id: sesion.usuarioId }, activa: { id: sesion.empresaId, nombre: "Empresa de prueba" } }),
 }));
 
+// ChecklistOnboarding (components/panel/ChecklistOnboarding.tsx) es un
+// Server Component async — renderToStaticMarkup no puede resolverlo
+// como hijo (solo sabe renderizar JSX ya sincrónico), así que se
+// mockea acá. Su propio comportamiento ya está cubierto por
+// ChecklistOnboardingCliente.test.tsx y lib/onboarding.test.ts.
+vi.mock("@/components/panel/ChecklistOnboarding", () => ({
+  ChecklistOnboarding: () => null,
+}));
+
 vi.mock("@/lib/finanzas/tablero", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/finanzas/tablero")>();
   return {
