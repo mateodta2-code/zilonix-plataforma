@@ -206,7 +206,21 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
 
           {tarjetas.length === 0 ? (
             <EstadoVacio>
-              {pestañaFiltro === "despachados" ? `Nada despachado en los últimos ${DIAS_VENTANA_DESPACHADOS} días.` : "No hay despachos pendientes."}
+              {cuentas.length === 0 ? (
+                // Issue #323 — el problema real no es "no hay despachos
+                // pendientes", es que todavía no hay ninguna cuenta de
+                // Mercado Libre conectada: sin eso nunca va a aparecer nada.
+                <span className={styles.vacioConAccion}>
+                  Para ver tus despachos, primero conecta tu cuenta de Mercado Libre.
+                  <BotonLink href="/panel/conectar-ml" variante="secundario" chico>
+                    Conectar Mercado Libre
+                  </BotonLink>
+                </span>
+              ) : pestañaFiltro === "despachados" ? (
+                `Nada despachado en los últimos ${DIAS_VENTANA_DESPACHADOS} días.`
+              ) : (
+                "No hay despachos pendientes por ahora. Aparecen solos acá cuando Mercado Libre marca un pedido como pago."
+              )}
             </EstadoVacio>
           ) : (
             grupos.map((grupo) => (

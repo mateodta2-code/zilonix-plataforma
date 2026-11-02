@@ -4,6 +4,7 @@ import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { detalleVentasDeHoy, formatearVentasDelMes, obtenerKpisPanel } from "@/lib/panel-kpis";
 import { leerPublicidadMes, leerTableroMes, leerTableroPorCuenta, leerUtilidadMes } from "@/lib/finanzas/tablero";
 import { BloqueInicioFinanzas } from "@/components/finanzas/BloqueInicioFinanzas";
+import { ChecklistOnboarding } from "@/components/panel/ChecklistOnboarding";
 import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { iconoDeClave } from "@/components/marco/iconos";
@@ -44,7 +45,7 @@ import styles from "./page.module.css";
 async function puedeConsultarModulo(
   usuarioId: string,
   empresaId: string,
-  modulo: "ventas" | "inventario" | "finanzas"
+  modulo: "ventas" | "inventario" | "finanzas" | "configuracion"
 ): Promise<boolean> {
   try {
     await requierePermiso(usuarioId, empresaId, modulo, "consultar");
@@ -63,6 +64,12 @@ export default async function PanelPage() {
   const kpis = await obtenerKpisPanel(usuario.id, activa.id);
 
   const veFinanzas = await puedeConsultarModulo(usuario.id, activa.id, "finanzas");
+  // Issue #323 — /panel/conectar-ml pide configuracion.consultar y
+  // /panel/pedidos pide ventas.consultar Y finanzas.consultar (muestra
+  // utilidad): el checklist solo ofrece el botón de un paso si el rol
+  // de esta persona puede entrar a esa pantalla, nunca manda a un
+  // "sin acceso".
+  const puedeConectarMl = await puedeConsultarModulo(usuario.id, activa.id, "configuracion");
   let finanzas: React.ComponentProps<typeof BloqueInicioFinanzas> | null = null;
   if (veFinanzas) {
     // Un solo reloj: el mismo tramo en todas las lecturas.
@@ -95,6 +102,8 @@ export default async function PanelPage() {
           cuenta" sigue en el link del header y en el botón del
           sidebar. Sin dos saludos. */}
       <p className={styles.subtitulo}>Este es el resumen de {activa.nombre}</p>
+
+      <ChecklistOnboarding empresaId={activa.id} puedeConectarMl={puedeConectarMl} puedeVerPedidos={vePedidosYDespachos && veFinanzas} />
 
       <Pestanas pestanas={pestanas} />
 

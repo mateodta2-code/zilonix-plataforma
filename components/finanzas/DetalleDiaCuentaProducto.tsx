@@ -88,9 +88,22 @@ type Props = {
   // Acciones extra en la franja de «Traer ventas» (Finanzas → Ventas:
   // recalcular costo, #131 Parte C). Pedidos no pasa nada.
   acciones?: React.ReactNode;
+  // Issue #323 — Pedidos pasa un mensaje con el siguiente paso en
+  // español neutro (onboarding de 5 minutos); sin esto, el texto por
+  // defecto de abajo ("foto financiera") sigue para Finanzas → Ventas.
+  mensajeVacio?: React.ReactNode;
 };
 
-export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchParams, ruta, extra = {}, mostrarResumen = true, acciones }: Props) {
+export async function DetalleDiaCuentaProducto({
+  empresaId,
+  usuarioId,
+  searchParams,
+  ruta,
+  extra = {},
+  mostrarResumen = true,
+  acciones,
+  mensajeVacio,
+}: Props) {
   const cuentas = await listarCuentasMlParaSelector(empresaId);
   let puedeTraerVentas = true;
   try {
@@ -221,8 +234,12 @@ export async function DetalleDiaCuentaProducto({ empresaId, usuarioId, searchPar
 
           {total.ventas === 0 ? (
             <EstadoVacio>
-              No hay ventas con foto financiera en este rango.
-              {puedeTraerVentas && " Si las ventas de este mes no aparecen, usa «Traer ventas de este mes»."}
+              {mensajeVacio ?? (
+                <>
+                  No hay ventas con foto financiera en este rango.
+                  {puedeTraerVentas && " Si las ventas de este mes no aparecen, usa «Traer ventas de este mes»."}
+                </>
+              )}
             </EstadoVacio>
           ) : (
             <>
