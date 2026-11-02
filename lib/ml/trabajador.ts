@@ -143,8 +143,18 @@ async function reclamarAviso(avisoId: string): Promise<boolean> {
 // cuando solo se pasa del tope de tiempo (ver intentarProcesarAvisoAhora,
 // Refs #319): el cron de respaldo lo vuelve a tomar con su propio
 // backoff de 429.
+// PR #360 (revisión de menores) — nunca propaga: la llama tanto el catch
+// síncrono (línea arriba de esta función en intentarProcesarAvisoAhora)
+// como el trabajo.catch() del trabajo huérfano que ya nadie espera. Si el
+// UPDATE mismo falla (ej. Postgres caído) y esto no lo atrapara acá, el
+// segundo caso quedaría como unhandled rejection suelto — nunca rompe el
+// proceso, pero sí hay que dejar el error en el log en vez de perderlo.
 async function liberarAviso(avisoId: string): Promise<void> {
-  await dbTrabajador.update(avisosMl).set({ procesadoTs: null }).where(eq(avisosMl.id, avisoId));
+  try {
+    await dbTrabajador.update(avisosMl).set({ procesadoTs: null }).where(eq(avisosMl.id, avisoId));
+  } catch (error) {
+    console.error(`No se pudo liberar el aviso ${avisoId} para reintento:`, error instanceof Error ? error.message : error);
+  }
 }
 
 // Issue "despachos no aparecen solos" (Refs #319) — la mitad síncrona:

@@ -373,6 +373,53 @@ describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solo
     expect(fetchMock.mock.calls.length).toBe(llamadasAntesDelSegundoCron);
   });
 
+  it("si el trabajo de fondo FALLA después del tope, libera el aviso (nunca se queda 'reclamado' para siempre) y el cron lo retoma", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa aviso falla tras timeout (webhook)");
+    const orderId = 703;
+    const DEMORA_MS = 200;
+    // Misma idea que la prueba de arriba (el trabajo de fondo sigue
+    // corriendo solo tras perder la carrera contra el tope) pero acá la
+    // llamada a Mercado Libre, cuando por fin responde, es un error real
+    // (500) — nunca un 429 (ese tiene su propio reintento, PR #360 no lo
+    // toca). El trabajo.catch() de intentarProcesarAvisoAhora es quien
+    // debe liberar el aviso en este caso (ver liberarAviso, ahora con su
+    // propio try/catch para nunca dejar una promesa sin manejar).
+    const fetchMock = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, DEMORA_MS));
+      return { ok: false, status: 500, json: async () => ({}), text: async () => "error interno" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [{ id: avisoId }] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(avisosMl)
+        .values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${orderId}`, enviadoTs: new Date() })
+        .returning({ id: avisosMl.id })
+    );
+
+    // Tope artificialmente chico (30ms, mucho menos que DEMORA_MS), igual
+    // que la prueba del caso feliz tras el timeout.
+    const resultado = await intentarProcesarAvisoAhora(avisoId, 30);
+    expect(resultado).toBe("pendiente");
+
+    // Justo al vencer el tope, sigue "reclamado" — todavía no terminó el
+    // trabajo de fondo.
+    const [filaTrasTimeout] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaTrasTimeout.procesadoTs).not.toBeNull();
+
+    // Deja terminar el trabajo de fondo (ya nadie lo espera) — cuando
+    // falle de verdad, debe liberar el aviso.
+    await new Promise((r) => setTimeout(r, DEMORA_MS + 150));
+
+    const [filaFinal] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaFinal.procesadoTs).toBeNull(); // liberado: el cron de respaldo debe poder retomarlo
+
+    // El cron, corriendo después, retoma este aviso (nunca se quedó huérfano).
+    const llamadasAntesDelCron = fetchMock.mock.calls.length;
+    await procesarAvisosPendientes(sinEspera);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(llamadasAntesDelCron);
+  });
+
   it("si la cuenta ya no está conectada a la empresa, nunca llama a Mercado Libre y deja el aviso pendiente", async () => {
     const { empresaId } = await empresaConCuenta("Empresa cuenta desconectada (webhook)");
     const fetchMock = vi.fn();
