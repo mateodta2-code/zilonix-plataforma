@@ -1,23 +1,36 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SignedOut } from "@clerk/nextjs";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import styles from "./page.module.css";
+import Encabezado from "@/components/portada/Encabezado";
+import Hero from "@/components/portada/Hero";
+import Problema from "@/components/portada/Problema";
+import Modulos from "@/components/portada/Modulos";
+import ComoFunciona from "@/components/portada/ComoFunciona";
+import Capturas from "@/components/portada/Capturas";
+import Planes from "@/components/portada/Planes";
+import Garantia from "@/components/portada/Garantia";
+import Faq from "@/components/portada/Faq";
+import LlamadoFinal from "@/components/portada/LlamadoFinal";
+import Pie from "@/components/portada/Pie";
+import styles from "@/components/portada/Portada.module.css";
+// Testimonios: desactivada hasta tener testimonios reales (mismo
+// criterio que zilonix-seller-web — sin ese componente acá a
+// propósito).
 
-// Tarea feat-ui-acceso — portada pública: logo oficial, una frase
-// corta y los dos botones de acceso. Sin textos inventados de precios
-// ni de clientes (no hay ninguno real todavía). La versión ya se ve en
-// el pie de página global (app/layout.tsx) — no hace falta repetirla
-// acá.
+// Tarea feat-portada-pagina-venta — la página de venta de Zilonix
+// Seller (antes en zilonix-seller-web, ahora dentro de la plataforma)
+// vive en "/" para quien no tiene sesión. Con sesión, "/" sigue
+// redirigiendo a /panel en el servidor (tarea fix-login-directo-panel,
+// sin tocar esa lógica).
 export default async function HomePage({ searchParams }: { searchParams: { salida?: string } }) {
   // Tarea fix-login-directo-panel — con sesión, "/" nunca se pinta:
-  // redirect server-side antes de cualquier render (sin parpadeo de los
-  // botones "Ver mi cuenta"/"Ir al panel" que había antes). obtenerOCrearUsuarioActual()
-  // devuelve null sola para un visitante sin sesión (no pega contra la
-  // base), así que es segura de llamar acá siempre. El destino final
-  // (/panel o /crear-empresa si la empresa no existe todavía, /sign-in
-  // si por algo la sesión no resultó válida) lo decide /panel mismo —
-  // lib/panel-contexto.ts, misma lógica de siempre, no se duplica acá.
+  // redirect server-side antes de cualquier render (sin parpadeo).
+  // obtenerOCrearUsuarioActual() devuelve null sola para un visitante
+  // sin sesión (no pega contra la base), así que es segura de llamar
+  // acá siempre. El destino final (/panel o /crear-empresa si la
+  // empresa no existe todavía, /sign-in si por algo la sesión no
+  // resultó válida) lo decide /panel mismo — lib/panel-contexto.ts,
+  // misma lógica de siempre, no se duplica acá.
   const usuario = await obtenerOCrearUsuarioActual();
   if (usuario) redirect("/panel");
 
@@ -33,27 +46,21 @@ export default async function HomePage({ searchParams }: { searchParams: { salid
         : null;
 
   return (
-    <main className={styles.portada}>
-      {/* SVG oficial del manual de marca, nunca redibujado — mismo
-          criterio que el logo de la barra lateral (feat-ui-marca):
-          mínimo 260px de ancho, sin estirar, rotar, recolorear ni
-          sombra/brillo. Plata sobre blanco permitido en los dos
-          temas para el logo completo. */}
-      <img src="/marca/zilonix-seller-logo.svg" alt="Zilonix Seller" className={styles.logo} width={260} height={94} />
-
-      {avisoSalida && <p style={{ fontSize: 14, color: "var(--texto-suave)", maxWidth: 440 }}>{avisoSalida}</p>}
-
-      <SignedOut>
-        <p className={styles.lema}>Gestiona tus ventas en Mercado Libre en un solo lugar.</p>
-        <div className={styles.botones}>
-          <Link href="/sign-in" className={styles.botonSecundario}>
-            Iniciar sesión
-          </Link>
-          <Link href="/sign-up" className={styles.botonPrimario}>
-            Crear cuenta
-          </Link>
-        </div>
-      </SignedOut>
-    </main>
+    <SignedOut>
+      {avisoSalida && <p className={styles.avisoSalida}>{avisoSalida}</p>}
+      <Encabezado />
+      <main>
+        <Hero />
+        <Problema />
+        <Modulos />
+        <ComoFunciona />
+        <Capturas />
+        <Planes />
+        <Garantia />
+        <Faq />
+        <LlamadoFinal />
+      </main>
+      <Pie />
+    </SignedOut>
   );
 }

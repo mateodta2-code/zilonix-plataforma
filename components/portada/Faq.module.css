@@ -1,0 +1,44 @@
+.tarjeta {
+  margin-top: 40px;
+}
+
+.detalle {
+  padding: 18px 0;
+}
+
+.detalle:not(:last-child) {
+  border-bottom: 1px solid var(--borde);
+}
+
+.resumen {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 500;
+  color: var(--texto);
+}
+
+.resumen::-webkit-details-marker {
+  display: none;
+}
+
+.mas {
+  flex-shrink: 0;
+  font-size: 20px;
+  color: var(--texto-suave);
+  transition: transform 0.15s ease;
+}
+
+.detalle[open] .mas {
+  transform: rotate(45deg);
+}
+
+.respuesta {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--texto-suave);
+}

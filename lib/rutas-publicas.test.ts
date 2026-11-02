@@ -27,6 +27,12 @@ describe("esRutaPublica (fix middleware, 2026-10-21)", () => {
     expect(esRutaPublica(peticion("/invitacion/un-token-cualquiera"))).toBe(true);
   });
 
+  it("las páginas legales de la página de venta son públicas (tarea feat-portada-pagina-venta)", () => {
+    expect(esRutaPublica(peticion("/terminos"))).toBe(true);
+    expect(esRutaPublica(peticion("/privacidad"))).toBe(true);
+    expect(esRutaPublica(peticion("/cookies"))).toBe(true);
+  });
+
   it("las rutas de negocio con datos reales de una empresa NUNCA son públicas", () => {
     expect(esRutaPublica(peticion("/panel"))).toBe(false);
     expect(esRutaPublica(peticion("/superadmin"))).toBe(false);
