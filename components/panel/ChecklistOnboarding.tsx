@@ -14,12 +14,14 @@ type Props = {
 // conectar 1 cuenta de Mercado Libre → ver 1 pedido") arriba de
 // /panel, mientras falte alguno. "Crear empresa" nunca se consulta:
 // si hay empresaId para preguntar esto es porque la empresa ya
-// existe, siempre sale hecho. Una vez completo deja de pintarse —
-// no hace falta guardar que "ya se mostró el cartel de listo" para
-// algo que no vuelve a faltar en el uso normal.
+// existe, siempre sale hecho. Una vez completo deja de pintarse por
+// defecto (no hace falta guardar que "ya se mostró el cartel de
+// listo" para algo que no vuelve a faltar en el uso normal), pero
+// issue #323 (ver guía) deja un enlace discreto para volver a verlo —
+// ChecklistOnboardingCliente decide ese estado, acá solo se le avisa
+// si ya está completo.
 export async function ChecklistOnboarding({ empresaId, puedeConectarMl, puedeVerPedidos }: Props) {
   const progreso = await obtenerProgresoOnboarding(empresaId);
-  if (progreso.completo) return null;
 
   const pasos: PasoChecklist[] = [
     { clave: "empresa", titulo: "Crea tu empresa", hecho: true },
@@ -39,5 +41,5 @@ export async function ChecklistOnboarding({ empresaId, puedeConectarMl, puedeVer
     },
   ];
 
-  return <ChecklistOnboardingCliente empresaId={empresaId} pasos={pasos} />;
+  return <ChecklistOnboardingCliente empresaId={empresaId} pasos={pasos} completo={progreso.completo} />;
 }

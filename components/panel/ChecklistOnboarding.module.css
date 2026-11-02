@@ -83,6 +83,12 @@
   flex-shrink: 0;
 }
 
+.mensajeCompleto {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--exito-texto);
+}
+
 .reabrir {
   align-self: flex-start;
   background: none;
