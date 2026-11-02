@@ -32,6 +32,7 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
+import { AutoRefrescoDespachos } from "./AutoRefrescoDespachos";
 import { ImpresionMasivaForm } from "./ImpresionMasivaForm";
 import { SincronizarAhoraCliente } from "./SincronizarAhoraCliente";
 import { TarjetaDespachoCliente } from "./TarjetaDespachoCliente";
@@ -166,6 +167,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
         <ImpresionMasiva empresaId={empresa.id} />
       ) : (
         <>
+          <AutoRefrescoDespachos />
           {pestañaFiltro === "pendientes" && puedeSincronizar && <SincronizarAhoraCliente />}
 
           <form method="get" className={styles.filtros}>

@@ -30,11 +30,21 @@ const PATRON_ID_NUMERICO = /^\d+$/;
 // real y accesible) — alcance de esta tarea, no todos los temas a la vez.
 const TOPICS_VENTA = new Set(["orders_v2", "shipments"]);
 
+// Issue "despachos no aparecen solos" (Refs #49) — el webhook corre el
+// intento síncrono con un solo intento (nunca el backoff de 429 de
+// abajo, pensado para el cron) y nunca más de este tiempo: Mercado
+// Libre espera un 200 rápido. Si se pasa, se deja el aviso pendiente
+// (liberarAviso) para que lo reintente el cron de respaldo con su
+// propio backoff.
+const TIMEOUT_PROCESO_WEBHOOK_MS = 5_000;
+
 export type ResultadoTrabajador = {
   recibidosPendientes: number;
   procesados: number;
   fallidos: number;
 };
+
+export type ResultadoProcesoInline = "procesado" | "pendiente" | "omitido";
 
 // Tarea 2.4 + issue "ventas nuevas en segundos" (Refs #49) — la otra
 // mitad del receptor de avisos (la primera, recibir y guardar rápido,
@@ -81,7 +91,7 @@ export async function procesarAvisosPendientes(esperar: Esperar = esperarDeVerda
   return { recibidosPendientes: pendientes.length, procesados, fallidos };
 }
 
-async function procesarUnAviso(aviso: typeof avisosMl.$inferSelect, esperar: Esperar): Promise<void> {
+async function resolverCuentaYToken(aviso: typeof avisosMl.$inferSelect): Promise<{ cuentaId: string; accessToken: string }> {
   const cuentaId = await dbComoEmpresa(aviso.empresaId, async (tx) => {
     const [cuenta] = await tx.select({ id: cuentasMl.id }).from(cuentasMl).where(eq(cuentasMl.cuentaIdExterna, aviso.cuentaIdExterna));
     return cuenta?.id ?? null;
@@ -89,6 +99,11 @@ async function procesarUnAviso(aviso: typeof avisosMl.$inferSelect, esperar: Esp
   if (!cuentaId) throw new Error("La cuenta de Mercado Libre ya no está conectada a esta empresa.");
 
   const accessToken = await obtenerAccessTokenVigente(aviso.empresaId, cuentaId);
+  return { cuentaId, accessToken };
+}
+
+async function procesarUnAviso(aviso: typeof avisosMl.$inferSelect, esperar: Esperar): Promise<void> {
+  const { cuentaId, accessToken } = await resolverCuentaYToken(aviso);
 
   // No te tragues un 429 en silencio: reintenta con espera creciente
   // (mismo patrón que leerConReintento en lib/ml/ventas-finanzas.ts).
@@ -106,6 +121,62 @@ async function procesarUnAviso(aviso: typeof avisosMl.$inferSelect, esperar: Esp
       if (!(error instanceof LimiteMercadoLibreError) || intento >= REINTENTOS_429) throw error;
       await esperar(msDeReintento429(ESPERA_BASE_429_MS * 2 ** intento, error.retryAfterMs ?? null));
     }
+  }
+}
+
+// Issue "despachos no aparecen solos" (Refs #49) — reclamo atómico:
+// el UPDATE solo afecta la fila si procesado_ts todavía es null, en la
+// misma instrucción que lo marca. Si el cron ya la reclamó (o ya la
+// procesó) entre que el webhook la insertó y la llamó, este UPDATE no
+// toca ninguna fila — nunca los dos procesan el mismo aviso.
+async function reclamarAviso(avisoId: string): Promise<boolean> {
+  const reclamadas = await dbTrabajador
+    .update(avisosMl)
+    .set({ procesadoTs: new Date() })
+    .where(and(eq(avisosMl.id, avisoId), isNull(avisosMl.procesadoTs)))
+    .returning({ id: avisosMl.id });
+  return reclamadas.length > 0;
+}
+
+// Devuelve el aviso a pendiente (nunca a medio camino) cuando el
+// intento síncrono del webhook falla o se pasa del tiempo — el cron de
+// respaldo lo vuelve a tomar con su propio backoff de 429.
+async function liberarAviso(avisoId: string): Promise<void> {
+  await dbTrabajador.update(avisosMl).set({ procesadoTs: null }).where(eq(avisosMl.id, avisoId));
+}
+
+// Issue "despachos no aparecen solos" (Refs #49) — la mitad síncrona:
+// llamada desde el webhook (app/api/ml/webhooks/route.ts) justo después
+// de guardar el aviso, para que una venta pagada se vea en Despachos en
+// segundos en vez de esperar al cron. Un solo intento (nunca el backoff
+// de 429, pensado para el cron) y acotado a TIMEOUT_PROCESO_WEBHOOK_MS
+// — si no alcanza o falla por cualquier motivo, se libera el aviso
+// (vuelve a pendiente) y el cron de respaldo lo reintenta; nunca deja
+// que el error se escape hacia el webhook (eso rompería el 200 rápido
+// que exige Mercado Libre).
+export async function intentarProcesarAvisoAhora(avisoId: string, timeoutMs: number = TIMEOUT_PROCESO_WEBHOOK_MS): Promise<ResultadoProcesoInline> {
+  const [aviso] = await dbTrabajador.select().from(avisosMl).where(eq(avisosMl.id, avisoId));
+  if (!aviso || !TOPICS_VENTA.has(aviso.topic)) return "omitido";
+
+  const reclamado = await reclamarAviso(avisoId);
+  if (!reclamado) return "omitido";
+
+  // El trabajo real nunca se cancela de verdad al perder la carrera
+  // contra el timeout (sigue corriendo en el event loop) — el .catch
+  // de abajo es solo para que, si termina fallando DESPUÉS de que ya
+  // se liberó el aviso, no quede como un unhandled rejection suelto.
+  const trabajo = resolverCuentaYToken(aviso).then(({ cuentaId, accessToken }) =>
+    sincronizarVentaDesdeAviso(aviso.empresaId, cuentaId, accessToken, aviso.topic, aviso.resource, esperarDeVerdad)
+  );
+
+  try {
+    await Promise.race([trabajo, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("tiempo agotado")), timeoutMs))]);
+    return "procesado";
+  } catch (error) {
+    await liberarAviso(avisoId);
+    console.error(`Aviso ${avisoId} (${aviso.topic}) no se pudo procesar al instante desde el webhook:`, error instanceof Error ? error.message : error);
+    trabajo.catch(() => {});
+    return "pendiente";
   }
 }
 
