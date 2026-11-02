@@ -62,6 +62,19 @@ const ETIQUETA_TIPO_TARJETA: Record<string, string> = {
   otro: "Otro",
 };
 
+// Issue #323 — igual que en Pedidos: el botón a /panel/conectar-ml
+// (pide configuracion.consultar) solo sale si el rol de esta persona
+// puede entrar ahí, nunca manda a un "sin acceso".
+async function puedeConsultarConfiguracion(usuarioId: string, empresaId: string): Promise<boolean> {
+  try {
+    await requierePermiso(usuarioId, empresaId, "configuracion", "consultar");
+    return true;
+  } catch (error) {
+    if (error instanceof SinPermisoError) return false;
+    throw error;
+  }
+}
+
 function hrefConFiltros(base: Record<string, string | undefined>, cambios: Record<string, string | undefined>): string {
   const params = new URLSearchParams();
   const combinados = { ...base, ...cambios };
@@ -116,10 +129,11 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
   // algo que no se va a mostrar).
   const pestañaParaTarjetas: PestañaDespachos = pestañaFiltro === "despachados" ? "despachados" : "pendientes";
 
-  const [cuentas, cuentasConError, tarjetas] = await Promise.all([
+  const [cuentas, cuentasConError, tarjetas, puedeConectarMl] = await Promise.all([
     listarCuentasConectadas(empresa.id),
     listarCuentasConErrorDespacho(empresa.id),
     pestañaFiltro === "impresion" ? Promise.resolve([]) : listarTarjetasDespacho(empresa.id, { cuentaId: cuentaFiltro, tipo: tipoFiltro, pestaña: pestañaParaTarjetas }),
+    puedeConsultarConfiguracion(usuario.id, empresa.id),
   ]);
   const ahora = new Date();
   // Despachados agrupa por la fecha REAL del despacho (fechaDespachoDe:
@@ -210,12 +224,17 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                 // Issue #323 — el problema real no es "no hay despachos
                 // pendientes", es que todavía no hay ninguna cuenta de
                 // Mercado Libre conectada: sin eso nunca va a aparecer nada.
-                <span className={styles.vacioConAccion}>
-                  Para ver tus despachos, primero conecta tu cuenta de Mercado Libre.
-                  <BotonLink href="/panel/conectar-ml" variante="secundario" chico>
-                    Conectar Mercado Libre
-                  </BotonLink>
-                </span>
+                // El botón solo sale con configuracion.consultar.
+                puedeConectarMl ? (
+                  <span className={styles.vacioConAccion}>
+                    Para ver tus despachos, primero conecta tu cuenta de Mercado Libre.
+                    <BotonLink href="/panel/conectar-ml" variante="secundario" chico>
+                      Conectar Mercado Libre
+                    </BotonLink>
+                  </span>
+                ) : (
+                  "Para ver tus despachos, antes hace falta conectar una cuenta de Mercado Libre."
+                )
               ) : pestañaFiltro === "despachados" ? (
                 `Nada despachado en los últimos ${DIAS_VENTANA_DESPACHADOS} días.`
               ) : (

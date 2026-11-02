@@ -18,3 +18,9 @@
   **No se tocó**: `extension/`, `lib/ml/cliente.ts`, `db/schema.ts` (sin migración), `lib/roles.ts`/`lib/roles-plantillas.ts`, ningún `es-CO`/`COP`/`$` a mano (el checklist no muestra montos ni fechas con moneda).
 
   Verificado: `npm run typecheck` en verde. `npx vitest run components/panel/ChecklistOnboardingCliente.test.tsx` en verde (5/5, sin Postgres). `lib/onboarding.test.ts` necesita `DATABASE_URL_APP` (no disponible en este entorno) — corre en CI con el Postgres efímero del PR.
+
+  **Ajustes del review (run 41386435617, CI en rojo)**:
+  - `app/panel/page.test.tsx` mockea `ChecklistOnboarding` (es un Server Component async; `renderToStaticMarkup` no sabe resolverlo como hijo) — su comportamiento ya está cubierto por `ChecklistOnboardingCliente.test.tsx` y `lib/onboarding.test.ts`.
+  - `/panel/pedidos` y `/panel/despachos`: el botón "Conectar Mercado Libre" del estado vacío ahora también respeta `configuracion.consultar` (antes solo el paso 2 del checklist de Inicio lo respetaba) — sin ese permiso, el mensaje queda sin botón.
+  - `lib/onboarding.test.ts`: 2 casos nuevos — aislamiento (empresa A no ve cuentas ni pedidos de empresa B) y una cuenta de Mercado Libre desconectada (no cuenta como paso hecho).
+  - `ChecklistOnboardingCliente.tsx`: el estado de "oculto" arranca en `null` ("todavía no se leyó localStorage") en vez de `false` — evita el parpadeo de pintar la tarjeta completa y recién después colapsarla al botón de "Ver los primeros pasos" cuando ya estaba saltada.

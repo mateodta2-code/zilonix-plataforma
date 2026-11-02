@@ -26,15 +26,24 @@ function claveOculto(empresaId: string): string {
 // distintos sin motivo de negocio) y nunca se rompe si el storage
 // está bloqueado (ventana privada), solo deja de recordarlo.
 export function ChecklistOnboardingCliente({ empresaId, pasos }: { empresaId: string; pasos: PasoChecklist[] }) {
-  const [oculto, setOculto] = useState(false);
+  // null = "todavía no se leyó localStorage" (nada de nada se pinta en
+  // ese instante) — si arrancara en false como el resto del estado,
+  // esta tarjeta completa saldría pintada un instante después de la
+  // hidratación aunque ya estuviera saltada, y recién ahí colapsaría
+  // al botón de "Ver los primeros pasos". Ese parpadeo es peor que el
+  // de SelectorTema.tsx (un ícono) porque es toda la tarjeta.
+  const [oculto, setOculto] = useState<boolean | null>(null);
 
   useEffect(() => {
     try {
       setOculto(localStorage.getItem(claveOculto(empresaId)) === "1");
     } catch {
       // Ventana privada o storage bloqueado — se muestra siempre.
+      setOculto(false);
     }
   }, [empresaId]);
+
+  if (oculto === null) return null;
 
   function saltar() {
     setOculto(true);
