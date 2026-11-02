@@ -275,7 +275,7 @@ describe("trabajador — orders_v2/shipments sincronizan pedidos/despachos_ml (i
   });
 });
 
-// Issue "despachos no aparecen solos" (Refs #49) — intentarProcesarAvisoAhora
+// Issue "despachos no aparecen solos" (Refs #319) — intentarProcesarAvisoAhora
 // es la mitad que llama el webhook (app/api/ml/webhooks/route.ts) justo
 // después de guardar el aviso, para que la venta se vea en Despachos en
 // segundos en vez de esperar al cron. Mismo motor real que
@@ -310,29 +310,27 @@ describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solo
     expect(filaAviso.procesadoTs).not.toBeNull();
   });
 
-  it("si Mercado Libre tarda más que el tope, el aviso queda pendiente para el cron de respaldo (nunca bloquea el 200)", async () => {
+  it("si Mercado Libre tarda más que el tope, el webhook responde 'pendiente' sin esperar — pero NUNCA libera el aviso (Refs #319): el trabajo de fondo termina solo, marca procesado_ts y el cron no lo reprocesa", async () => {
     const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa aviso lento (timeout webhook)");
     const orderId = 701;
     const shipmentId = 5701;
     const DEMORA_MS = 200;
     const respuestaDelMock = mockFetchOrdenYEnvio(orderId, shipmentId);
     let primeraLlamada = true;
-    vi.stubGlobal(
-      "fetch",
+    const fetchMock = vi.fn(async (url: string) => {
       // Solo la PRIMERA llamada (la que de verdad compite contra el
       // tope) se demora — así el trabajo de fondo (que sigue corriendo
       // sin que nadie lo espere tras el timeout) termina rápido después,
       // en vez de arrastrar la demora en cada una de sus llamadas
       // encadenadas (orden, envío, costos, SLA) y quedar corriendo
       // todavía cuando empiece la siguiente prueba.
-      vi.fn(async (url: string) => {
-        if (primeraLlamada) {
-          primeraLlamada = false;
-          await new Promise((r) => setTimeout(r, DEMORA_MS));
-        }
-        return respuestaDelMock(url);
-      })
-    );
+      if (primeraLlamada) {
+        primeraLlamada = false;
+        await new Promise((r) => setTimeout(r, DEMORA_MS));
+      }
+      return respuestaDelMock(url);
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     const [{ id: avisoId }] = await dbComoEmpresa(empresaId, (tx) =>
       tx
@@ -346,13 +344,33 @@ describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solo
     const resultado = await intentarProcesarAvisoAhora(avisoId, 30);
     expect(resultado).toBe("pendiente");
 
-    const [filaAviso] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
-    expect(filaAviso.procesadoTs).toBeNull(); // liberado, nunca se queda "a medias"
+    // Justo al vencer el tope, el aviso sigue "reclamado" (nunca
+    // liberado) — si se liberara acá, el cron lo reclamaría de nuevo y
+    // correría en paralelo contra el trabajo de fondo todavía vivo.
+    const [filaTrasTimeout] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaTrasTimeout.procesadoTs).not.toBeNull();
 
-    // Deja terminar el trabajo de fondo (ya nadie lo espera) antes de
-    // que acabe la prueba, para no dejarlo correr suelto hacia la
-    // siguiente (que ya tendría otro fetch mockeado con otra orden).
+    // El cron corre mientras el trabajo de fondo todavía no terminó —
+    // no debe tocar este aviso (sigue "reclamado").
+    const llamadasAntesDelCron = fetchMock.mock.calls.length;
+    await procesarAvisosPendientes(sinEspera);
+    expect(fetchMock.mock.calls.length).toBe(llamadasAntesDelCron); // el cron no volvió a llamar a ML por este aviso
+
+    // Deja terminar el trabajo de fondo (ya nadie lo espera).
     await new Promise((r) => setTimeout(r, DEMORA_MS + 150));
+
+    // El trabajo tardío terminó bien y el aviso quedó marcado procesado
+    // de verdad (no solo por el reclamo) — con pedido y despacho reales.
+    const [filaFinal] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaFinal.procesadoTs).not.toBeNull();
+    const [filaPedido] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, String(orderId))));
+    expect(filaPedido).toBeDefined();
+
+    // Y el cron, corriendo otra vez ya con el trabajo terminado, tampoco
+    // lo reprocesa (procesado_ts sigue sin ser null).
+    const llamadasAntesDelSegundoCron = fetchMock.mock.calls.length;
+    await procesarAvisosPendientes(sinEspera);
+    expect(fetchMock.mock.calls.length).toBe(llamadasAntesDelSegundoCron);
   });
 
   it("si la cuenta ya no está conectada a la empresa, nunca llama a Mercado Libre y deja el aviso pendiente", async () => {

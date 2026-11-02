@@ -30,12 +30,13 @@ const PATRON_ID_NUMERICO = /^\d+$/;
 // real y accesible) — alcance de esta tarea, no todos los temas a la vez.
 const TOPICS_VENTA = new Set(["orders_v2", "shipments"]);
 
-// Issue "despachos no aparecen solos" (Refs #49) — el webhook corre el
+// Issue "despachos no aparecen solos" (Refs #319) — el webhook corre el
 // intento síncrono con un solo intento (nunca el backoff de 429 de
 // abajo, pensado para el cron) y nunca más de este tiempo: Mercado
-// Libre espera un 200 rápido. Si se pasa, se deja el aviso pendiente
-// (liberarAviso) para que lo reintente el cron de respaldo con su
-// propio backoff.
+// Libre espera un 200 rápido. Si se pasa, el webhook responde igual —
+// el trabajo real sigue corriendo en segundo plano (ver
+// intentarProcesarAvisoAhora) y es él quien decide si marca el aviso
+// procesado o lo libera para el cron de respaldo.
 const TIMEOUT_PROCESO_WEBHOOK_MS = 5_000;
 
 export type ResultadoTrabajador = {
@@ -124,7 +125,7 @@ async function procesarUnAviso(aviso: typeof avisosMl.$inferSelect, esperar: Esp
   }
 }
 
-// Issue "despachos no aparecen solos" (Refs #49) — reclamo atómico:
+// Issue "despachos no aparecen solos" (Refs #319) — reclamo atómico:
 // el UPDATE solo afecta la fila si procesado_ts todavía es null, en la
 // misma instrucción que lo marca. Si el cron ya la reclamó (o ya la
 // procesó) entre que el webhook la insertó y la llamó, este UPDATE no
@@ -138,22 +139,32 @@ async function reclamarAviso(avisoId: string): Promise<boolean> {
   return reclamadas.length > 0;
 }
 
-// Devuelve el aviso a pendiente (nunca a medio camino) cuando el
-// intento síncrono del webhook falla o se pasa del tiempo — el cron de
-// respaldo lo vuelve a tomar con su propio backoff de 429.
+// Devuelve el aviso a pendiente cuando el trabajo real falla — nunca
+// cuando solo se pasa del tope de tiempo (ver intentarProcesarAvisoAhora,
+// Refs #319): el cron de respaldo lo vuelve a tomar con su propio
+// backoff de 429.
 async function liberarAviso(avisoId: string): Promise<void> {
   await dbTrabajador.update(avisosMl).set({ procesadoTs: null }).where(eq(avisosMl.id, avisoId));
 }
 
-// Issue "despachos no aparecen solos" (Refs #49) — la mitad síncrona:
+// Issue "despachos no aparecen solos" (Refs #319) — la mitad síncrona:
 // llamada desde el webhook (app/api/ml/webhooks/route.ts) justo después
 // de guardar el aviso, para que una venta pagada se vea en Despachos en
 // segundos en vez de esperar al cron. Un solo intento (nunca el backoff
-// de 429, pensado para el cron) y acotado a TIMEOUT_PROCESO_WEBHOOK_MS
-// — si no alcanza o falla por cualquier motivo, se libera el aviso
-// (vuelve a pendiente) y el cron de respaldo lo reintenta; nunca deja
-// que el error se escape hacia el webhook (eso rompería el 200 rápido
-// que exige Mercado Libre).
+// de 429, pensado para el cron) y acotado a TIMEOUT_PROCESO_WEBHOOK_MS —
+// si no alcanza, el webhook responde 200 igual, pero el trabajo real
+// SIGUE corriendo en segundo plano (nunca se cancela de verdad al
+// perder la carrera: sigue vivo en el event loop). Liberar el aviso acá
+// (como se hacía antes) era la causa de la carrera que reportó la
+// revisión del PR #360: el cron podía reclamarlo y procesarlo una
+// segunda vez en paralelo, y si el trabajo huérfano terminaba bien
+// DESPUÉS de liberarlo, nadie volvía a marcar procesado_ts — el cron lo
+// reprocesaba para siempre. Por eso ahora, al vencer el tope, nunca se
+// libera: el aviso se queda "reclamado" (procesado_ts, puesto por
+// reclamarAviso) y es el propio trabajo, cuando de verdad termine,
+// quien decide — si sale bien no hace falta nada más (procesado_ts ya
+// quedó puesto desde el reclamo); si falla, recién ahí se libera para
+// que el cron de respaldo lo reintente con su propio backoff de 429.
 export async function intentarProcesarAvisoAhora(avisoId: string, timeoutMs: number = TIMEOUT_PROCESO_WEBHOOK_MS): Promise<ResultadoProcesoInline> {
   const [aviso] = await dbTrabajador.select().from(avisosMl).where(eq(avisosMl.id, avisoId));
   if (!aviso || !TOPICS_VENTA.has(aviso.topic)) return "omitido";
@@ -161,23 +172,41 @@ export async function intentarProcesarAvisoAhora(avisoId: string, timeoutMs: num
   const reclamado = await reclamarAviso(avisoId);
   if (!reclamado) return "omitido";
 
-  // El trabajo real nunca se cancela de verdad al perder la carrera
-  // contra el timeout (sigue corriendo en el event loop) — el .catch
-  // de abajo es solo para que, si termina fallando DESPUÉS de que ya
-  // se liberó el aviso, no quede como un unhandled rejection suelto.
   const trabajo = resolverCuentaYToken(aviso).then(({ cuentaId, accessToken }) =>
     sincronizarVentaDesdeAviso(aviso.empresaId, cuentaId, accessToken, aviso.topic, aviso.resource, esperarDeVerdad)
   );
 
+  // El Promise executor corre sincrónico, así que timer siempre queda
+  // asignado antes de que el resto de la función lo use (TS no lo sabe).
+  let timer!: ReturnType<typeof setTimeout>;
+  const tiempoAgotado = new Promise<"tiempo_agotado">((resolve) => {
+    timer = setTimeout(() => resolve("tiempo_agotado"), timeoutMs);
+  });
+
+  let resultado: "listo" | "tiempo_agotado";
   try {
-    await Promise.race([trabajo, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("tiempo agotado")), timeoutMs))]);
-    return "procesado";
+    resultado = await Promise.race([trabajo.then((): "listo" => "listo"), tiempoAgotado]);
   } catch (error) {
+    clearTimeout(timer);
+    // El trabajo falló de verdad ANTES del tope — nunca hace falta
+    // esperar el resto del timeout para liberar el aviso.
     await liberarAviso(avisoId);
     console.error(`Aviso ${avisoId} (${aviso.topic}) no se pudo procesar al instante desde el webhook:`, error instanceof Error ? error.message : error);
-    trabajo.catch(() => {});
     return "pendiente";
   }
+  clearTimeout(timer);
+
+  if (resultado === "listo") return "procesado";
+
+  // Venció el tope: el aviso sigue "reclamado" (nunca se libera acá).
+  // Cuando el trabajo de fondo por fin termine, decide él mismo —
+  // nunca queda como unhandled rejection suelto porque este .catch lo
+  // cubre.
+  trabajo.catch(async (error) => {
+    await liberarAviso(avisoId);
+    console.error(`Aviso ${avisoId} (${aviso.topic}) no se pudo procesar en segundo plano tras el tope del webhook:`, error instanceof Error ? error.message : error);
+  });
+  return "pendiente";
 }
 
 // Comportamiento de siempre (tarea 2.4) para cualquier tema que no sea
