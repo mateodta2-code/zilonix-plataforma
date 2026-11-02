@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recibirAviso, type AvisoMl } from "@/lib/ml/avisos";
+import { intentarProcesarAvisoAhora } from "@/lib/ml/trabajador";
+
+// Issue "despachos no aparecen solos" (Refs #49) — mismos temas que
+// mueven pedidos/despachos_ml en lib/ml/trabajador.ts (TOPICS_VENTA);
+// solo esos vale la pena intentarlos al instante acá.
+const TOPICS_VENTA = new Set(["orders_v2", "shipments"]);
 
 // Tarea 2.4 (adelanto parcial, pedido real de Mateo 20/10 para poder
 // terminar de una vez la configuración de la app en Mercado Libre
@@ -11,10 +17,19 @@ import { recibirAviso, type AvisoMl } from "@/lib/ml/avisos";
 //
 // Mercado Libre espera un 200 RÁPIDO — si no le llega a tiempo,
 // reintenta y, después de varios fallos seguidos, puede desactivar el
-// callback por completo. Por eso acá SOLO se guarda el aviso (un
-// INSERT, rápido) y se responde — nunca se espera a procesarlo de
-// verdad (eso es el resto de la tarea 2.4, el trabajador, todavía sin
-// construir).
+// callback por completo. Por eso acá se guarda el aviso (un INSERT,
+// rápido) y recién después se intenta procesarlo.
+//
+// Issue "despachos no aparecen solos" (Refs #49) — el cron de
+// lib/ml/trabajador.ts (disparado por GitHub Actions) podía tardar
+// 3-5h en correr en staging (retraso real de `schedule`, no una
+// config rota), así que una venta pagada se quedaba invisible en
+// Despachos todo ese tiempo. Para "orders_v2"/"shipments" (los dos
+// temas que mueven pedidos/despachos_ml) ahora se intenta procesar
+// ACÁ MISMO, con un solo intento y un tope corto (intentarProcesarAvisoAhora,
+// lib/ml/trabajador.ts) — nunca más de ese tope, y nunca deja que un
+// error rompa el 200. Si falla o se pasa del tiempo, el aviso queda
+// pendiente para que el cron de respaldo lo reintente, igual que antes.
 //
 // Fix real (2026-10-21) — esta ruta es pública en el middleware (ver
 // lib/rutas-publicas.ts, nunca pasa por auth.protect()), así que
@@ -86,6 +101,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, motivo: "application_id ajeno" }, { status: 200 });
   }
 
-  const resultado = await recibirAviso(body);
-  return NextResponse.json({ ok: true, resultado });
+  const recepcion = await recibirAviso(body);
+
+  // Issue "despachos no aparecen solos" (Refs #49) — intento síncrono,
+  // SOLO si la fila es nueva de verdad (nunca sobre un duplicado o una
+  // cuenta ajena) y es un tema de venta. intentarProcesarAvisoAhora
+  // nunca deja escapar un error (siempre resuelve, nunca rechaza) — el
+  // 200 de abajo sale sin importar qué devuelva.
+  if (recepcion.resultado === "guardado" && recepcion.avisoId && TOPICS_VENTA.has(body.topic)) {
+    await intentarProcesarAvisoAhora(recepcion.avisoId).catch(() => {});
+  }
+
+  return NextResponse.json({ ok: true, resultado: recepcion.resultado });
 }
