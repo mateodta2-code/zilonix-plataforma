@@ -1,0 +1,52 @@
+.encabezado {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid var(--borde);
+  background: color-mix(in srgb, var(--fondo) 85%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.fila {
+  margin: 0 auto;
+  max-width: 1120px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+}
+
+.marca {
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  width: 150px;
+  height: auto;
+  display: block;
+}
+
+.acciones {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.enlaceSesion {
+  padding: 9px 14px;
+  border-radius: var(--radio-boton);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--texto-suave);
+  text-decoration: none;
+  transition: var(--transicion-color);
+}
+.enlaceSesion:hover {
+  color: var(--texto);
+}
+.enlaceSesion:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}

@@ -45,6 +45,14 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // ese token, no el middleware.
   "/invitacion(.*)",
 
+  // Tarea feat-portada-pagina-venta — pie de página de la página de
+  // venta ("/" sin sesión): hoy solo dicen "En preparación", sin
+  // texto legal real todavía. Páginas estáticas, nunca leen ni
+  // escriben nada (ver RUTAS_EXENTAS en scripts/verificar-permisos.test.ts).
+  "/terminos",
+  "/privacidad",
+  "/cookies",
+
   // Mercado Libre llama esta ruta directo, sin sesión de usuario, y
   // espera un 200 RÁPIDO (si no le llega a tiempo, reintenta y puede
   // acabar desactivando el callback). Nunca confía en el contenido: el

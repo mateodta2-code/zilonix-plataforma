@@ -1,0 +1,53 @@
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 72px 20px 88px;
+  background: radial-gradient(60% 50% at 50% 0%, var(--azul-metal-1) 0%, transparent 70%);
+}
+
+.contenido {
+  margin: 0 auto;
+  max-width: 760px;
+  text-align: center;
+}
+
+.etiqueta {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--acento-fuerte);
+}
+
+.titulo {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+@media (min-width: 640px) {
+  .titulo {
+    font-size: 48px;
+  }
+}
+
+.lema {
+  margin: 24px auto 0;
+  max-width: 560px;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--texto-suave);
+}
+
+@media (min-width: 640px) {
+  .lema {
+    font-size: 19px;
+  }
+}
+
+.botones {
+  margin-top: 40px;
+  display: flex;
+  justify-content: center;
+}

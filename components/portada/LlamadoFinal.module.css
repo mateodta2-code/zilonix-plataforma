@@ -1,0 +1,16 @@
+.seccion {
+  padding: 64px 20px;
+  border-top: 1px solid var(--borde);
+  text-align: center;
+  background: radial-gradient(60% 50% at 50% 0%, var(--azul-metal-1) 0%, transparent 70%);
+}
+
+.texto {
+  margin: 16px auto 0;
+  max-width: 440px;
+  color: var(--texto-suave);
+}
+
+.boton {
+  margin-top: 32px;
+}
