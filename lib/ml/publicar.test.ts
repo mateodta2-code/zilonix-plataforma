@@ -242,19 +242,19 @@ describe("buscarCategoriasPorNombre — fix Publicar/Buscar categoría a mano", 
   }
 
   it("'bell' encuentra 'Belleza y Cuidado Personal' (no es el predictor de título)", async () => {
-    mockArbolBelleza("MCOBELL1");
-    const resultados = await buscarCategoriasPorNombre("MCOBELL1", "bell", "token-real");
+    mockArbolBelleza("MCO");
+    const resultados = await buscarCategoriasPorNombre("MCO", "bell", "token-real");
     expect(resultados.map((r) => r.categoryName)).toContain("Belleza y Cuidado Personal");
   });
 
   it("'Belleza' (mayúscula inicial) también encuentra 'Belleza y Cuidado Personal'", async () => {
-    mockArbolBelleza("MCOBELL2");
-    const resultados = await buscarCategoriasPorNombre("MCOBELL2", "Belleza", "token-real");
+    mockArbolBelleza("MLM");
+    const resultados = await buscarCategoriasPorNombre("MLM", "Belleza", "token-real");
     expect(resultados.map((r) => r.categoryName)).toContain("Belleza y Cuidado Personal");
   });
 
   it("ignora tildes y mayúsculas al comparar nombres", async () => {
-    const siteId = "MLATILDE";
+    const siteId = "MLB";
     vi.stubGlobal(
       "fetch",
       enrutarFetch([
@@ -267,7 +267,7 @@ describe("buscarCategoriasPorNombre — fix Publicar/Buscar categoría a mano", 
   });
 
   it("usa el siteId recibido (el de la cuenta), no uno fijo", async () => {
-    const siteId = "MLBCUENTA";
+    const siteId = "MLA";
     let urlLlamada = "";
     vi.stubGlobal(
       "fetch",
@@ -287,7 +287,7 @@ describe("buscarCategoriasPorNombre — fix Publicar/Buscar categoría a mano", 
   });
 
   it("una categoría que no es hoja (children reales) viene marcada esHoja=false; la hoja real, esHoja=true", async () => {
-    const siteId = "MCOHOJA";
+    const siteId = "MLC";
     mockArbolBelleza(siteId);
     const resultados = await buscarCategoriasPorNombre(siteId, "manicure", "token-real");
     const manicure = resultados.find((r) => r.categoryName === "Manicure y Pedicure");

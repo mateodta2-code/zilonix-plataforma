@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, productosMl, publicaciones } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import {
   actualizarItemMl,
@@ -160,30 +161,42 @@ function normalizarNombreCategoria(texto: string): string {
 }
 
 const TTL_ARBOL_CATEGORIAS_MS = 24 * 60 * 60 * 1000;
-const LOTE_ARBOL_CATEGORIAS = 20;
+
+// Mismo tope ya usado para cualquier llamada concurrente a Mercado
+// Libre en el resto de lib/ml/ (ver lib/concurrencia.ts — clip.ts,
+// promocionesParticipando.ts, promocionesEjecucion.ts, despachos.ts,
+// todos entre 2 y 5). El árbol de un sitio real puede tener miles de
+// categorías: disparar 20 GET /categories/{id} a la vez (como antes)
+// es mucho más de lo que el resto del código considera seguro y puede
+// gatillar un 429 real de Mercado Libre, que corta TODA la búsqueda
+// (pedir(), lib/ml/cliente.ts). Un pool fijo de 4 "trabajadores" tarda
+// más en construir el árbol completo, pero eso solo pasa la PRIMERA
+// vez por sitio — después queda cacheado 24h (ver TTL arriba).
+const CONCURRENCIA_ARBOL_CATEGORIAS = 4;
 
 const cacheArbolCategoriasPorSitio = new Map<string, { entradas: EntradaArbolCategorias[]; expiraTs: number }>();
 const construccionArbolEnProgresoPorSitio = new Map<string, Promise<EntradaArbolCategorias[]>>();
 
-// Recorre TODO el árbol real del sitio (raíces → hojas) por niveles, en
-// lotes paralelos, para no hacerlo 100% secuencial. `pathFromRoot` de
+// Recorre TODO el árbol real del sitio (raíces → hojas) por niveles,
+// con concurrencia limitada dentro de cada nivel (conConcurrenciaLimitada,
+// lib/concurrencia.ts — nunca un Promise.all sin tope). `pathFromRoot` de
 // cada categoría sale directo de leerCategoriaMl (mismo GET
 // /categories/{id} de siempre) — nunca se arma a mano acumulando nombres
-// nivel por nivel.
+// nivel por nivel. Si Mercado Libre falla a mitad de camino (429/timeout),
+// esto rechaza tal cual (LimiteMercadoLibreError/MlNoDisponibleError,
+// lib/ml/cliente.ts) — el llamador (la ruta) ya traduce esos tipos a un
+// mensaje claro en español, nunca se traga el error acá.
 async function construirArbolPlanoDelSitio(siteId: string, token: string): Promise<EntradaArbolCategorias[]> {
   const raices = await leerCategoriasRaizMl(siteId, token);
   const entradas: EntradaArbolCategorias[] = [];
   let nivelActual = raices.map((r) => r.id);
   while (nivelActual.length > 0) {
+    const detalles = await conConcurrenciaLimitada(nivelActual, CONCURRENCIA_ARBOL_CATEGORIAS, (id) => leerCategoriaMl(id));
     const siguienteNivel: string[] = [];
-    for (let i = 0; i < nivelActual.length; i += LOTE_ARBOL_CATEGORIAS) {
-      const lote = nivelActual.slice(i, i + LOTE_ARBOL_CATEGORIAS);
-      const detalles = await Promise.all(lote.map((id) => leerCategoriaMl(id)));
-      for (const cat of detalles) {
-        const esHoja = cat.childrenCategories.length === 0;
-        entradas.push({ categoryId: cat.categoryId, categoryName: cat.categoryName, esHoja, pathFromRoot: cat.pathFromRoot });
-        if (!esHoja) siguienteNivel.push(...cat.childrenCategories.map((c) => c.id));
-      }
+    for (const cat of detalles) {
+      const esHoja = cat.childrenCategories.length === 0;
+      entradas.push({ categoryId: cat.categoryId, categoryName: cat.categoryName, esHoja, pathFromRoot: cat.pathFromRoot });
+      if (!esHoja) siguienteNivel.push(...cat.childrenCategories.map((c) => c.id));
     }
     nivelActual = siguienteNivel;
   }
@@ -354,9 +367,9 @@ export type CaracteristicaCategoria = {
 // ADENDO UX de Publicar, punto 2 — "árbol de categorías: UI + ruta que
 // liste raíces/hijos" (mismo patrón que app/api/ml/categorias-arbol
 // del Zilonix OS actual, portado acá). Solo para cuando ni la
-// predicción automática (resolverCategoria) ni la búsqueda de texto
-// (buscarCategorias) dan con la categoría correcta — navegación manual
-// nivel por nivel. Sin categoryId, trae la raíz real del sitio
+// predicción automática (resolverCategoria) ni la búsqueda por nombre
+// dan con la categoría correcta — navegación manual nivel por nivel.
+// Sin categoryId, trae la raíz real del sitio
 // (leerCategoriasRaizMl, nuevo); con categoryId, el siguiente nivel
 // (children de leerCategoriaMl) + el breadcrumb real (pathFromRoot).
 // `esHoja` nunca se adivina por otro campo — children vacío es la
