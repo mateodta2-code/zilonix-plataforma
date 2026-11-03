@@ -58,6 +58,22 @@ export function GaleriaFotos({
   // siguiente, para no pasarse de `limiteFotos` si se sueltan dos
   // tandas antes de que la primera termine.
   const fotosEnVueloRef = useRef(0);
+  // MEDIO 1, review 2 del PR #372 — `urls` (prop) queda vieja si una
+  // segunda tanda termina de subir antes de que el padre re-renderice
+  // con el resultado de la primera: dos lotes en vuelo comparten la
+  // misma `urls` cerrada al momento de soltarlos. `urlsRef` es la
+  // fuente de verdad real: se sincroniza con la prop en cada render Y
+  // se actualiza al toque cuando un lote termina, así el siguiente que
+  // termine ya ve lo que agregó el anterior.
+  const urlsRef = useRef(urls);
+  urlsRef.current = urls;
+
+  function agregarUrls(nuevas: string[]) {
+    const actualizado = [...urlsRef.current, ...nuevas];
+    urlsRef.current = actualizado;
+    onChange(actualizado);
+  }
+
   const {
     subiendo,
     error: errorSubida,
@@ -67,12 +83,12 @@ export function GaleriaFotos({
     subirCanvaUrl,
     subirDisenoCanva,
   } = usarSubidaFotoCloudinary(
-    (url) => onChange([...urls, url]),
+    (url) => agregarUrls([url]),
     // ALTO 1, review PR #372 — una sola llamada a onChange con todas
     // las URL del lote (ya en orden de selección, ver subirArchivos en
     // usarSubidaFotoCloudinary.ts), en vez de una por foto con el
     // `urls` viejo.
-    (nuevas) => onChange([...urls, ...nuevas])
+    (nuevas) => agregarUrls(nuevas)
   );
 
   // Code review de Pablo (PR #368, review 5757123834) — codigoError
@@ -102,21 +118,24 @@ export function GaleriaFotos({
   // fotos a propósito y merece saber que algunas no entraron.
   function subirRespetandoLimite(archivos: File[]) {
     setAvisoLimite(null);
-    if (limiteFotos == null) {
-      void subirArchivos(archivos);
-      return;
-    }
-    // MEDIO, review PR #372 — el cupo se cuenta contra las fotos ya
-    // puestas MÁS las que ya están en vuelo de un drop/selección
-    // anterior que todavía no terminó (fotosEnVueloRef), no solo
-    // contra `urls.length`.
-    const espacio = Math.max(0, limiteFotos - urls.length - fotosEnVueloRef.current);
-    const admitidos = archivos.slice(0, espacio);
-    const sobrantes = archivos.length - admitidos.length;
-    if (sobrantes > 0) {
-      setAvisoLimite(
-        `Esta categoría admite hasta ${limiteFotos} fotos — ${sobrantes} ${sobrantes === 1 ? "foto quedó" : "fotos quedaron"} fuera por el límite.`
-      );
+    // MEDIO 2, review 2 del PR #372 — `fotosEnVueloRef` se lleva
+    // siempre, haya o no `limiteFotos`: si no se lleva mientras no hay
+    // límite, un cambio posterior de categoría (que SÍ trae límite)
+    // mientras ese lote sin límite todavía está subiendo no se enteraría
+    // de esas fotos en vuelo y dejaría pasar de más.
+    let admitidos = archivos;
+    if (limiteFotos != null) {
+      // El cupo se cuenta contra las fotos ya puestas MÁS las que ya
+      // están en vuelo de un drop/selección anterior que todavía no
+      // terminó, no solo contra `urls.length`.
+      const espacio = Math.max(0, limiteFotos - urls.length - fotosEnVueloRef.current);
+      admitidos = archivos.slice(0, espacio);
+      const sobrantes = archivos.length - admitidos.length;
+      if (sobrantes > 0) {
+        setAvisoLimite(
+          `Esta categoría admite hasta ${limiteFotos} fotos — ${sobrantes} ${sobrantes === 1 ? "foto quedó" : "fotos quedaron"} fuera por el límite.`
+        );
+      }
     }
     if (admitidos.length > 0) {
       fotosEnVueloRef.current += admitidos.length;

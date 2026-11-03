@@ -93,7 +93,10 @@ describe("GaleriaFotos — subida en lote (ALTO 1, review PR #372)", () => {
   });
 
   it("filtra el drop para aceptar solo imágenes", () => {
-    const fetchMock = vi.fn(() => new Promise(() => {}));
+    // ALTO, review PR #372 — sin estos tipos en los parámetros, TS infiere
+    // la firma del mock como "() => Promise<never>" (sin argumentos) y
+    // `fetchMock.mock.calls[0][1]` deja de existir para el tipo.
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise(() => { void init; }));
     vi.stubGlobal("fetch", fetchMock);
 
     const onChange = vi.fn();
@@ -105,6 +108,6 @@ describe("GaleriaFotos — subida en lote (ALTO 1, review PR #372)", () => {
     fireEvent.drop(boton, { dataTransfer: { files: [pdf, foto] } });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(nombreDelArchivoSubido(fetchMock.mock.calls[0][1] as RequestInit)).toBe("foto.jpg");
+    expect(nombreDelArchivoSubido(fetchMock.mock.calls[0][1])).toBe("foto.jpg");
   });
 });

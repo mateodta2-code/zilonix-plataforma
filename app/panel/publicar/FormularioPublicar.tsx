@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Tarjeta } from "@/components/marco/Tarjeta";
@@ -61,6 +62,22 @@ export function FormularioPublicar({
   // route.ts), pero nadie los leía: la persona quedaba sin ningún aviso.
   const avisoErrorCanva = canva === "error" ? mensajeErrorConectarCanva(canvaCodigo || undefined) : null;
   const avisoExitoCanva = canva === "conectado";
+
+  // BAJO, review 2 del PR #372 — una vez mostrado el aviso (error o
+  // éxito), se limpia `canva`/`codigo` de la URL para que no quede
+  // colgado ahí (un refresh de la página no debe repetir el aviso).
+  // router.replace con la misma ruta, sin navegación completa.
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (canva !== "error" && canva !== "conectado") return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("canva");
+    params.delete("codigo");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [canva, pathname, router, searchParams]);
   const [incluidas, setIncluidas] = useState<Record<string, boolean>>(() => {
     const mapa: Record<string, boolean> = {};
     for (const id of inicial.cuentasIncluidas) mapa[id] = true;

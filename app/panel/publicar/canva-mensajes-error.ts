@@ -14,7 +14,13 @@ export const MENSAJES_ERROR_CANVA: Record<string, string> = {
 };
 const MENSAJE_ERROR_GENERICO = "No pudimos conectar con Canva. Intenta de nuevo o escríbenos.";
 
-export function mensajeErrorConectarCanva(codigo: string | undefined): string | null {
-  if (!codigo) return null;
+// BAJO, review 2 del PR #372 — el único caller ya filtra por
+// `canva === "error"` antes de llamar esta función (ver
+// FormularioPublicar.tsx), así que llegar sin `codigo` significa
+// "hubo error pero sin código concreto", no "no hubo error": antes
+// devolvía null acá y la persona se quedaba sin ningún aviso, igual
+// que el bug original que arregló el ALTO 2.
+export function mensajeErrorConectarCanva(codigo: string | undefined): string {
+  if (!codigo) return MENSAJE_ERROR_GENERICO;
   return MENSAJES_ERROR_CANVA[codigo] ?? MENSAJE_ERROR_GENERICO;
 }
