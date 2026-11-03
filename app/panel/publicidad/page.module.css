@@ -297,18 +297,24 @@
   width: 100%;
 }
 
+@media (min-width: 1280px) {
+  .anuncios table {
+    table-layout: fixed;
+  }
+}
+
 .tarjetaTabla th {
   white-space: normal;
   letter-spacing: 0;
   line-height: 1.2;
   vertical-align: bottom;
-  padding: 8px 4px;
+  padding: 8px 2px;
   font-size: 10px;
 }
 
 .tarjetaTabla td {
-  padding: 6px 4px;
-  font-size: 12px;
+  padding: 6px 2px;
+  font-size: 11px;
   vertical-align: middle;
 }
 
@@ -328,20 +334,30 @@
     overflow: hidden;
   }
 
-  .tarjetaTabla > div > table th:nth-child(1) { width: 7%; }
-  .tarjetaTabla > div > table th:nth-child(2) { width: 8%; }
-  .tarjetaTabla > div > table th:nth-child(3) { width: 9%; }
-  .tarjetaTabla > div > table th:nth-child(4) { width: 9%; }
-  .tarjetaTabla > div > table th:nth-child(5) { width: 9%; }
-  .tarjetaTabla > div > table th:nth-child(6) { width: 9%; }
-  .tarjetaTabla > div > table th:nth-child(7) { width: 6%; }
-  .tarjetaTabla > div > table th:nth-child(8) { width: 6%; }
-  .tarjetaTabla > div > table th:nth-child(9) { width: 6%; }
-  .tarjetaTabla > div > table th:nth-child(10) { width: 5%; }
-  .tarjetaTabla > div > table th:nth-child(11) { width: 5%; }
-  .tarjetaTabla > div > table th:nth-child(12) { width: 7%; }
-  .tarjetaTabla > div > table th:nth-child(13) { width: 5%; }
-  .tarjetaTabla > div > table th:nth-child(14) { width: 9%; }
+  /* A 1280 la tabla mide ~895 px. Campaña queda en ~150 px y Estado
+     en ~130 px para que el nombre y la frase partan en palabras, no
+     a la mitad. El ancho sale de Inversión, las tres Ventas y
+     Presupuesto, sin dejar de entrar $447.109, $5.127.743 ni 400.756. */
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 16.8%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(2) { width: 14.6%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(3) { width: 6.8%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 7.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(5) { width: 7.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(6) { width: 7.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(7) { width: 4.8%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(8) { width: 5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(9) { width: 4.4%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(10) { width: 4.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(11) { width: 4.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(12) { width: 5.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(13) { width: 4.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(14) { width: 8.2%; }
+}
+
+.anuncios td:first-child,
+.anuncios th:first-child {
+  white-space: nowrap;
+  width: 9.5em;
 }
 
 .orden:hover,
@@ -390,9 +406,13 @@
 }
 
 .nombreCampana {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .pausada,

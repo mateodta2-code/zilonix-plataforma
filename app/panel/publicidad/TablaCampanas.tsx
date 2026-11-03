@@ -63,7 +63,9 @@ function FilaGrupo({
           >
             <span className={styles.chevron} aria-hidden="true" />
             <span>
-              <span className={styles.nombreCampana}>{campana.nombre}</span>
+              <span className={styles.nombreCampana} title={campana.nombre}>
+                {campana.nombre}
+              </span>
               {campana.pausada ? <span className={styles.pausada}>{ROTULO_PERIODO.pausada}</span> : null}
             </span>
           </button>
