@@ -139,6 +139,27 @@ describe("subirPaginasACloudinary — descarga cada página y la sube con el flu
     await expect(subirPaginasACloudinary(["https://media.canva.com/v2/export/pagina-rota.png"])).rejects.toThrow();
   });
 
+  // Issue #366 — caso feliz real: Canva Connect devuelve la URL de
+  // descarga en export-download.canva.com (no en media.canva.com).
+  it("descarga una página servida en export-download.canva.com y la sube a Cloudinary", async () => {
+    process.env.CLOUDINARY_CLOUD_NAME = "cloud-de-prueba";
+    process.env.CLOUDINARY_API_KEY = "key-de-prueba";
+    process.env.CLOUDINARY_API_SECRET = "secret-de-prueba";
+    lookupMock.mockResolvedValue([{ address: "151.101.1.140" }]);
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("cloudinary.com")) {
+        return respuestaJson({ secure_url: "https://res.cloudinary.com/cloud-de-prueba/image/upload/canva.png" });
+      }
+      return respuestaImagenPng();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const urls = await subirPaginasACloudinary(["https://export-download.canva.com/v2/export/pagina1.png"]);
+
+    expect(urls).toEqual(["https://res.cloudinary.com/cloud-de-prueba/image/upload/canva.png"]);
+  });
+
   // Hallazgo del review (PR #368) — las URLs las manda la respuesta de
   // la API de Canva; si alguna viniera fuera de la allowlist de Canva
   // (bug o respuesta comprometida), nunca se descarga a ciegas.
