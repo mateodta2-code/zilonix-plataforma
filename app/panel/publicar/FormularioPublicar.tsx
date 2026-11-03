@@ -5,6 +5,7 @@ import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { crearYPublicarProductoAction } from "./actions";
+import { ConectarCanva } from "./ConectarCanva";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
 import { GaleriaFotos } from "./GaleriaFotos";
 import { PortadaCuenta } from "./PortadaCuenta";
@@ -181,6 +182,21 @@ export function FormularioPublicar({
 
   return (
     <form id="formulario-publicar" action={crearYPublicarProductoAction} onSubmit={onSubmit}>
+      {/* --- Primer paso visible: conectar Canva (antes vivía dentro de
+      GaleriaFotos.tsx, debajo de las miniaturas — se mueve arriba
+      porque resuelve de dónde van a salir las fotos antes de armar el
+      resto de la publicación). Gateado por cloudinaryConfigurado: sin
+      Cloudinary no hay forma de traer lo que Canva exporte. --- */}
+      {cloudinaryConfigurado && (
+        <Tarjeta className={styles.seccion}>
+          <p className="zx-etiqueta">Conectar Canva</p>
+          <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Conecta tu Canva para traer tus diseños como fotos.</p>
+          <div style={{ marginTop: 10 }}>
+            <ConectarCanva />
+          </div>
+        </Tarjeta>
+      )}
+
       {/* --- Punto 3: Cuentas destino --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Cuentas destino</p>
@@ -254,7 +270,7 @@ export function FormularioPublicar({
         el envío si nadie la completaba); la tarjeta "+" de
         GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
         agregar nada. */}
-        <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} />
+        <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} limiteFotos={maxFotos} />
         {maxFotos != null && (
           <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
             Esta categoría admite hasta {maxFotos} fotos en Mercado Libre

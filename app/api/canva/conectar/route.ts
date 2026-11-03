@@ -21,21 +21,29 @@ export async function GET() {
     throw error;
   }
 
-  const codeVerifier = generarCodeVerifier();
-  const codeChallenge = calcularCodeChallenge(codeVerifier);
-  const state = generarState();
-  const redirectUri = `${urlPublicaBase()}/api/canva/callback`;
-  const urlAutorizacion = construirUrlAutorizacion(redirectUri, codeChallenge, state);
+  try {
+    const codeVerifier = generarCodeVerifier();
+    const codeChallenge = calcularCodeChallenge(codeVerifier);
+    const state = generarState();
+    const redirectUri = `${urlPublicaBase()}/api/canva/callback`;
+    const urlAutorizacion = construirUrlAutorizacion(redirectUri, codeChallenge, state);
 
-  const respuesta = NextResponse.redirect(urlAutorizacion);
-  const opcionesCookie = {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax" as const,
-    maxAge: 600,
-    path: "/api/canva",
-  };
-  respuesta.cookies.set(NOMBRE_COOKIE_VERIFIER, codeVerifier, opcionesCookie);
-  respuesta.cookies.set(NOMBRE_COOKIE_STATE, state, opcionesCookie);
-  return respuesta;
+    const respuesta = NextResponse.redirect(urlAutorizacion);
+    const opcionesCookie = {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax" as const,
+      maxAge: 600,
+      path: "/api/canva",
+    };
+    respuesta.cookies.set(NOMBRE_COOKIE_VERIFIER, codeVerifier, opcionesCookie);
+    respuesta.cookies.set(NOMBRE_COOKIE_STATE, state, opcionesCookie);
+    return respuesta;
+  } catch (error) {
+    // Nunca el error real tal cual (puede venir de requerirVariable con
+    // detalles del entorno) — a diferencia de /api/canva/callback, acá
+    // ni siquiera se llegó a pedir nada a Canva.
+    console.error("[api/canva/conectar] no se pudo iniciar la conexión:", error instanceof Error ? error.name : String(error));
+    return NextResponse.redirect(`${urlPublicaBase()}/panel/publicar?canva=error&codigo=error_desconocido`);
+  }
 }

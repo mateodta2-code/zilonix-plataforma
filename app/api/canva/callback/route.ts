@@ -20,9 +20,9 @@ function coincideState(recibido: string, esperado: string): boolean {
 export async function GET(request: NextRequest) {
   const base = urlPublicaBase();
   // Vuelve a Publicar (no a Configuración) — el botón "Conectar Canva"
-  // vive ahí (ConectarCanva.tsx, dentro de GaleriaFotos.tsx), gateado
-  // por el mismo permiso "inventario" que ya usa esa pantalla — a
-  // diferencia de Configuración, que exige el módulo "configuracion"
+  // vive ahí (ConectarCanva.tsx, arriba del todo en FormularioPublicar.tsx),
+  // gateado por el mismo permiso "inventario" que ya usa esa pantalla —
+  // a diferencia de Configuración, que exige el módulo "configuracion"
   // (un Auxiliar/Operador puede publicar sin tener ese permiso).
   const volver = (query: string) => {
     const respuesta = NextResponse.redirect(`${base}/panel/publicar?${query}`);

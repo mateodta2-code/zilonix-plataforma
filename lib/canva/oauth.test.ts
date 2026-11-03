@@ -81,6 +81,17 @@ describe("OAuth de Canva", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // Error 500 real en staging (GET /api/canva/conectar) — Railway puede
+  // dejar la variable puesta pero vacía o solo con espacios; antes
+  // pasaba el chequeo `if (!valor)` y tronaba más adelante igual.
+  it("con CANVA_CLIENT_ID puesta pero vacía o solo espacios, falla igual que si no existiera", async () => {
+    process.env.CANVA_CLIENT_ID = "   ";
+    const fetchMock = vi.mocked(fetch);
+
+    await expect(intercambiarCodigo("code", "https://x/callback", "verifier")).rejects.toThrow(/CANVA_CLIENT_ID/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("generarCodeVerifier da un string distinto cada vez, de al menos 43 caracteres (mínimo de RFC 7636)", () => {
     const a = generarCodeVerifier();
     const b = generarCodeVerifier();
