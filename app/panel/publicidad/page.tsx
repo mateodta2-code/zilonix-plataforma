@@ -48,19 +48,21 @@ function primero(valor: ParametroUrl): string | undefined {
   return undefined;
 }
 
-const COLUMNAS: { clave: ColumnaOrden | "estado"; lineas: string[]; fija?: boolean }[] = [
-  { clave: "campana", lineas: [ROTULO_COLUMNA_CAMPANA.campana], fija: true },
+const COLUMNAS: { clave: string; lineas: string[]; fija?: boolean; orden?: ColumnaOrden }[] = [
+  { clave: "campana", lineas: [ROTULO_COLUMNA_CAMPANA.campana], fija: true, orden: "campana" },
   { clave: "estado", lineas: [ROTULO_COLUMNA_CAMPANA.estado] },
-  { clave: "inversion", lineas: [ROTULO_COLUMNA_CAMPANA.inversion] },
-  { clave: "ventas_publicidad", lineas: ["Ventas con", "publicidad"] },
-  { clave: "ventas_totales", lineas: ["Ventas", "totales"] },
-  { clave: "roas", lineas: [ROTULO_COLUMNA_CAMPANA.roas] },
-  { clave: "acos", lineas: [ROTULO_COLUMNA_CAMPANA.acos] },
-  { clave: "tacos", lineas: [ROTULO_COLUMNA_CAMPANA.tacos] },
-  { clave: "cpc", lineas: [ROTULO_COLUMNA_CAMPANA.cpc] },
-  { clave: "clics", lineas: [ROTULO_COLUMNA_CAMPANA.clics] },
-  { clave: "impresiones", lineas: [ROTULO_COLUMNA_CAMPANA.impresiones] },
-  { clave: "presupuesto", lineas: ["Presupuesto", "diario"] },
+  { clave: "inversion", lineas: [ROTULO_COLUMNA_CAMPANA.inversion], orden: "inversion" },
+  { clave: "ventas_publicidad", lineas: ["Ventas con", "publicidad"], orden: "ventas_publicidad" },
+  { clave: "ventas_sin_publicidad", lineas: ["Ventas sin", "publicidad"] },
+  { clave: "ventas_totales", lineas: ["Ventas", "totales"], orden: "ventas_totales" },
+  { clave: "roas", lineas: [ROTULO_COLUMNA_CAMPANA.roas], orden: "roas" },
+  { clave: "acos", lineas: [ROTULO_COLUMNA_CAMPANA.acos], orden: "acos" },
+  { clave: "tacos", lineas: [ROTULO_COLUMNA_CAMPANA.tacos], orden: "tacos" },
+  { clave: "cpc", lineas: [ROTULO_COLUMNA_CAMPANA.cpc], orden: "cpc" },
+  { clave: "clics", lineas: [ROTULO_COLUMNA_CAMPANA.clics], orden: "clics" },
+  { clave: "impresiones", lineas: [ROTULO_COLUMNA_CAMPANA.impresiones], orden: "impresiones" },
+  { clave: "unidades", lineas: [ROTULO_COLUMNA_CAMPANA.unidades] },
+  { clave: "presupuesto", lineas: ["Presupuesto", "diario"], orden: "presupuesto" },
 ];
 
 export default async function PublicidadPage({
@@ -232,7 +234,7 @@ function Cuerpo({
 
   const opciones = opcionesDeMes(ahora, periodo.mes);
   const kpis = kpisDelResumen(tablero);
-  const campanas = tablero.campanas.map(pintarCampana);
+  const campanas = tablero.campanas.map((campana) => pintarCampana(campana, tablero.diasRango));
   const sinMetricas = tablero.resumen.actual.gasto === null && tablero.resumen.actual.clicks === null;
   const momento = tablero.ultimaActualizacion?.terminadaTs ?? tablero.ultimaActualizacion?.iniciadaTs ?? null;
   const actualizado = momento ? fechaHoraBogota(momento) : "—";
@@ -249,7 +251,7 @@ function Cuerpo({
         ),
       };
     }
-    if (columna.clave === "presupuesto") {
+    if (columna.orden === "presupuesto") {
       return {
         clave: "presupuesto",
         ariaSort: orden === "presupuesto" ? (dir === "asc" ? "ascending" : "descending") : "none",
@@ -261,12 +263,15 @@ function Cuerpo({
         ),
       };
     }
-    const activa = orden === columna.clave;
+    if (!columna.orden) {
+      return { clave: columna.clave, contenido: <RotuloLineas lineas={columna.lineas} /> };
+    }
+    const activa = orden === columna.orden;
     return {
       clave: columna.clave,
       fija: columna.fija,
       ariaSort: activa ? (dir === "asc" ? "ascending" : "descending") : "none",
-      contenido: <LinkOrden hrefBase={hrefBase} columna={columna.clave} orden={orden} dir={dir} lineas={columna.lineas} />,
+      contenido: <LinkOrden hrefBase={hrefBase} columna={columna.orden} orden={orden} dir={dir} lineas={columna.lineas} />,
     };
   });
 

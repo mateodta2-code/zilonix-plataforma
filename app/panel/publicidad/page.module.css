@@ -207,29 +207,91 @@
   color: var(--texto-suave);
 }
 
-/* El chip de estado es nowrap en Chip.module.css. Acá se parte en
-   dos líneas para que la columna no empuje el resto de la tabla. */
-.tarjetaTabla [data-estado] {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  max-width: 100%;
-  letter-spacing: 0.03em;
-  line-height: 1.15;
-  padding: 2px 4px;
-  font-size: 10px;
-  text-align: center;
-}
-
-.celdaEstado {
+.tarjetaTabla .celdaEstado,
+.tarjetaTabla .celdaPresupuesto {
   vertical-align: top;
+  white-space: normal;
 }
 
-/* Cabe en el ancho del panel (viewport 1024 con la barra de 287px,
-   y de sobra desde 1280). El scroll horizontal de <Tabla> queda para
-   el celular, donde las columnas fijas se volverían ilegibles. */
-.tarjetaTabla > div > table,
+.estado {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  column-gap: 6px;
+  row-gap: 4px;
+  align-items: start;
+}
+
+.punto {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--plata);
+}
+
+.punto[data-tono="exito"] {
+  background: var(--exito-texto);
+}
+
+.punto[data-tono="peligro"] {
+  background: var(--peligro-texto);
+}
+
+.punto[data-tono="acento"] {
+  background: var(--acento);
+}
+
+.frase {
+  font-size: 12px;
+  line-height: 1.25;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pista {
+  grid-column: 2 / -1;
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--plata) 45%, transparent);
+  overflow: hidden;
+}
+
+.pista > span {
+  display: block;
+  height: 100%;
+  background: var(--gradiente-azul-metal);
+}
+
+.usado {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--texto-suave);
+}
+
+.iconoMl {
+  display: inline-flex;
+  color: var(--acento-fuerte);
+}
+
+.iconoMl:hover,
+.iconoMl:focus-visible {
+  color: var(--acento);
+}
+
+/* Por debajo de 1280 la tabla se desplaza adentro de la tarjeta.
+   Desde 1280 las columnas fijas caben sin ese scroll. */
+.tarjetaTabla > div > table {
+  width: max-content;
+  min-width: 100%;
+}
+
 .anuncios table {
-  table-layout: fixed;
   width: 100%;
 }
 
@@ -239,68 +301,39 @@
   line-height: 1.2;
   vertical-align: bottom;
   padding: 8px 3px;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .tarjetaTabla td {
   padding: 6px 3px;
-  font-size: 10px;
+  font-size: 12px;
 }
-
-/* Sin esto, un nowrap o una palabra larga (Aprendiendo) estira la
-   tabla por encima del 100% y vuelve el scroll horizontal. */
-.tarjetaTabla > div > table th,
-.tarjetaTabla > div > table td {
-  overflow: hidden;
-}
-
-.tarjetaTabla > div > table th:nth-child(1) { width: 8%; }
-.tarjetaTabla > div > table th:nth-child(2) { width: 9%; }
-.tarjetaTabla > div > table th:nth-child(3) { width: 9%; }
-.tarjetaTabla > div > table th:nth-child(4) { width: 10%; }
-.tarjetaTabla > div > table th:nth-child(5) { width: 9%; }
-.tarjetaTabla > div > table th:nth-child(6) { width: 7%; }
-.tarjetaTabla > div > table th:nth-child(7) { width: 7%; }
-.tarjetaTabla > div > table th:nth-child(8) { width: 7%; }
-.tarjetaTabla > div > table th:nth-child(9) { width: 6%; }
-.tarjetaTabla > div > table th:nth-child(10) { width: 6%; }
-.tarjetaTabla > div > table th:nth-child(11) { width: 11%; }
-.tarjetaTabla > div > table th:nth-child(12) { width: 11%; }
-
-.anuncios th:nth-child(1) { width: 12%; }
-.anuncios th:nth-child(2) { width: 16%; }
-.anuncios th:nth-child(3),
-.anuncios th:nth-child(4) { width: 7%; }
-.anuncios th:nth-child(5),
-.anuncios th:nth-child(6) { width: 9%; }
-.anuncios th:nth-child(7),
-.anuncios th:nth-child(8),
-.anuncios th:nth-child(10) { width: 6%; }
-.anuncios th:nth-child(9) { width: 11%; }
-.anuncios th:nth-child(11) { width: 11%; }
 
 @media (min-width: 1280px) {
-  .tarjetaTabla th {
-    font-size: 10px;
+  .tarjetaTabla > div > table {
+    table-layout: fixed;
+    width: 100%;
   }
 
-  .tarjetaTabla td {
-    padding: 8px 4px;
-    font-size: 12px;
+  .tarjetaTabla > div > table th,
+  .tarjetaTabla > div > table td {
+    overflow: hidden;
   }
 
-  .tarjetaTabla > div > table th:nth-child(1) { width: 15%; }
-  .tarjetaTabla > div > table th:nth-child(2) { width: 11%; }
-  .tarjetaTabla > div > table th:nth-child(3),
-  .tarjetaTabla > div > table th:nth-child(4),
-  .tarjetaTabla > div > table th:nth-child(5) { width: 9%; }
-  .tarjetaTabla > div > table th:nth-child(6) { width: 9%; }
-  .tarjetaTabla > div > table th:nth-child(7),
-  .tarjetaTabla > div > table th:nth-child(8) { width: 6%; }
-  .tarjetaTabla > div > table th:nth-child(9) { width: 6%; }
+  .tarjetaTabla > div > table th:nth-child(1) { width: 11%; }
+  .tarjetaTabla > div > table th:nth-child(2) { width: 13%; }
+  .tarjetaTabla > div > table th:nth-child(3) { width: 7%; }
+  .tarjetaTabla > div > table th:nth-child(4) { width: 8%; }
+  .tarjetaTabla > div > table th:nth-child(5) { width: 8%; }
+  .tarjetaTabla > div > table th:nth-child(6) { width: 7%; }
+  .tarjetaTabla > div > table th:nth-child(7) { width: 7%; }
+  .tarjetaTabla > div > table th:nth-child(8) { width: 5%; }
+  .tarjetaTabla > div > table th:nth-child(9) { width: 5%; }
   .tarjetaTabla > div > table th:nth-child(10) { width: 5%; }
-  .tarjetaTabla > div > table th:nth-child(11) { width: 8%; }
-  .tarjetaTabla > div > table th:nth-child(12) { width: 7%; }
+  .tarjetaTabla > div > table th:nth-child(11) { width: 5%; }
+  .tarjetaTabla > div > table th:nth-child(12) { width: 6%; }
+  .tarjetaTabla > div > table th:nth-child(13) { width: 5%; }
+  .tarjetaTabla > div > table th:nth-child(14) { width: 8%; }
 }
 
 .orden:hover,
@@ -383,18 +416,6 @@
 @media (max-width: 760px) {
   .gridKpi {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .tarjetaTabla > div > table,
-  .anuncios table {
-    table-layout: auto;
-    width: max-content;
-    min-width: 100%;
-  }
-
-  .tarjetaTabla > div > table th:nth-child(n),
-  .anuncios th:nth-child(n) {
-    width: auto;
   }
 }
 

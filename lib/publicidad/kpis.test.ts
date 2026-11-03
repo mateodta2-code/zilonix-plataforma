@@ -12,6 +12,9 @@ import {
 import {
   compararOrden,
   diagnosticarCampana,
+  fraseEstado,
+  unidadesConPublicidad,
+  usoPresupuestoDiario,
   resolverDireccion,
   resolverOrden,
   resolverPeriodo,
@@ -251,6 +254,71 @@ describe("diagnóstico de campaña", () => {
     });
     expect(diag.tipo).toBe("sin_datos");
     expect(rotuloDiagnostico(diag)).toBe("Sin datos");
+  });
+});
+
+describe("frase de estado y datos nuevos del rango (issue #255)", () => {
+  it("compara el ROAS real contra el objetivo, en puntos enteros", () => {
+    const bajo = fraseEstado({
+      diagnostico: { tipo: "bajo_objetivo", dias: 0 },
+      roas: "9.85",
+      roasObjetivo: "12.00",
+      diasAprendizaje: 7,
+    });
+    expect(bajo.frase).toBe("Debajo del objetivo, falta 18 %");
+    expect(bajo.tono).toBe("peligro");
+    expect(bajo.avance).toBe(82);
+
+    const arriba = fraseEstado({
+      diagnostico: { tipo: "en_objetivo", dias: 0 },
+      roas: "14.04",
+      roasObjetivo: "12.00",
+      diasAprendizaje: 7,
+    });
+    expect(arriba.frase).toBe("Cumple el objetivo, 17 % arriba");
+    expect(arriba.tono).toBe("exito");
+    expect(arriba.avance).toBe(100);
+  });
+
+  it("aprender cuenta el día desde 1, y sin datos no inventa una barra", () => {
+    const aprendiendo = fraseEstado({
+      diagnostico: { tipo: "aprendiendo", dias: 0 },
+      roas: null,
+      roasObjetivo: "12.00",
+      diasAprendizaje: 7,
+    });
+    expect(aprendiendo.frase).toBe("Aprendiendo, día 1 de 7, no tocar todavía");
+    expect(aprendiendo.tono).toBe("acento");
+    expect(aprendiendo.avance).toBeNull();
+    expect(fraseEstado({ diagnostico: { tipo: "sin_datos", dias: 0 }, roas: null, roasObjetivo: null, diasAprendizaje: 7 }).frase).toBe(
+      "Sin datos"
+    );
+  });
+
+  it("unidades con publicidad usa el total, y si no vino suma directas e indirectas", () => {
+    expect(
+      unidadesConPublicidad([
+        dia({ unidadesTotal: 2 }),
+        dia({ unidadesTotal: 3, unidadesDirectas: 99 }),
+      ])
+    ).toBe("5");
+    expect(unidadesConPublicidad([dia({ unidadesDirectas: 1, unidadesIndirectas: 4 }), dia({ unidadesIndirectas: 2 })])).toBe("7");
+    expect(unidadesConPublicidad([dia({}), dia({ unidadesTotal: null })])).toBeNull();
+    expect(totalesDeDias([dia({ costo: "10.00", unidadesTotal: 4 })]).unidadesVendidas).toBe("4");
+  });
+
+  it("el % usado es el gasto del rango partido por los días, contra el presupuesto diario", () => {
+    expect(
+      usoPresupuestoDiario({ gasto: "310.00", dias: 31, presupuestoDiario: "20.00", automatico: false })
+    ).toMatchObject({ tipo: "ok", porcentaje: "50", avance: 50 });
+    expect(usoPresupuestoDiario({ gasto: "100.00", dias: 1, presupuestoDiario: "40.00", automatico: null })).toMatchObject({
+      tipo: "ok",
+      porcentaje: "250",
+      avance: 100,
+    });
+    expect(usoPresupuestoDiario({ gasto: "10.00", dias: 2, presupuestoDiario: "50.00", automatico: true }).tipo).toBe("automatico");
+    expect(usoPresupuestoDiario({ gasto: "10.00", dias: 2, presupuestoDiario: null, automatico: false }).tipo).toBe("sin_presupuesto");
+    expect(usoPresupuestoDiario({ gasto: null, dias: 2, presupuestoDiario: "50.00", automatico: false }).tipo).toBe("sin_gasto");
   });
 });
 

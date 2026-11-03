@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { Chip } from "@/components/marco/Chip";
 import { Ayuda } from "@/components/marco/Ayuda";
+import { URL_PUBLICIDAD_ML } from "@/lib/publicidad/config";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
-import { URL_PUBLICIDAD_ML } from "@/lib/publicidad/config";
 import {
   AYUDA_SEMAFORO,
   COLUMNAS_CAMPANA,
@@ -69,14 +69,20 @@ function FilaGrupo({
           </button>
         </CeldaTabla>
         <CeldaTabla className={styles.celdaEstado}>
-          <Chip estado={campana.chipEstado} title={campana.chipTitle}>
-            {campana.chipRotulo}
-          </Chip>
-          {campana.nota ? <span className={styles.chipNota}>{campana.nota}</span> : null}
-          {campana.verificar ? <VerificarMl /> : null}
+          <span className={styles.estado}>
+            <span className={styles.punto} data-tono={campana.estadoTono} aria-hidden="true" />
+            <span className={styles.frase}>{campana.estadoFrase}</span>
+            {campana.verificar ? <VerificarMl /> : null}
+            {campana.estadoAvance !== null ? (
+              <span className={styles.pista} aria-hidden="true">
+                <span style={{ width: `${campana.estadoAvance}%` }} />
+              </span>
+            ) : null}
+          </span>
         </CeldaTabla>
         <CeldaTabla numerica>{campana.inversion}</CeldaTabla>
         <CeldaTabla numerica>{campana.ventasPublicidad}</CeldaTabla>
+        <CeldaTabla numerica>{campana.ventasSinPublicidad}</CeldaTabla>
         <CeldaTabla numerica>{campana.ventasTotales}</CeldaTabla>
         <CeldaTabla numerica className={styles.celdaRoas}>
           <span>{campana.roas}</span>
@@ -87,7 +93,16 @@ function FilaGrupo({
         <CeldaTabla numerica>{campana.cpc}</CeldaTabla>
         <CeldaTabla numerica>{campana.clics}</CeldaTabla>
         <CeldaTabla numerica>{campana.impresiones}</CeldaTabla>
-        <CeldaTabla numerica>{campana.presupuesto}</CeldaTabla>
+        <CeldaTabla numerica>{campana.unidades}</CeldaTabla>
+        <CeldaTabla numerica className={styles.celdaPresupuesto}>
+          <span>{campana.presupuesto}</span>
+          {campana.presupuestoUsado ? <span className={styles.usado}>{campana.presupuestoUsado}</span> : null}
+          {campana.presupuestoAvance !== null ? (
+            <span className={styles.pista} aria-hidden="true">
+              <span style={{ width: `${campana.presupuestoAvance}%` }} />
+            </span>
+          ) : null}
+        </CeldaTabla>
       </FilaTabla>
       {abierta ? (
         <FilaTabla id={panelId}>
@@ -102,6 +117,7 @@ function FilaGrupo({
                     ROTULO_COLUMNA_ANUNCIO.titulo,
                     ROTULO_COLUMNA_ANUNCIO.cpc,
                     ROTULO_COLUMNA_ANUNCIO.clics,
+                    ROTULO_COLUMNA_ANUNCIO.unidades,
                     ROTULO_COLUMNA_ANUNCIO.gasto,
                     {
                       clave: `vpub-${campana.id}`,
@@ -152,6 +168,7 @@ function FilaGrupo({
                       <CeldaTabla>{anuncio.titulo}</CeldaTabla>
                       <CeldaTabla numerica>{anuncio.cpc}</CeldaTabla>
                       <CeldaTabla numerica>{anuncio.clics}</CeldaTabla>
+                      <CeldaTabla numerica>{anuncio.unidades}</CeldaTabla>
                       <CeldaTabla numerica>{anuncio.gasto}</CeldaTabla>
                       <CeldaTabla numerica>{anuncio.ventasPublicidad}</CeldaTabla>
                       <CeldaTabla numerica>{anuncio.roas}</CeldaTabla>
@@ -175,17 +192,27 @@ function FilaGrupo({
   );
 }
 
+function IconoExterno() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M2.5 3.5h4M8 3.5H2.5V11H10V7" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M7.5 2.2H12v4.5M12 2.2 6.8 7.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 function VerificarMl() {
+  const etiqueta = NOTA_DIAGNOSTICO.verificarMl;
   if (URL_PUBLICIDAD_ML) {
     return (
-      <a className={styles.enlace} href={URL_PUBLICIDAD_ML} target="_blank" rel="noopener noreferrer">
-        {NOTA_DIAGNOSTICO.verificarMl}
+      <a className={styles.iconoMl} href={URL_PUBLICIDAD_ML} target="_blank" rel="noopener noreferrer" aria-label={etiqueta} title={etiqueta}>
+        <IconoExterno />
       </a>
     );
   }
   return (
-    <span className={styles.enlacePendiente} title="Pendiente de confirmar con Mateo la URL del panel de Product Ads.">
-      {NOTA_DIAGNOSTICO.verificarMl}
+    <span className={styles.iconoMl} role="img" aria-label={etiqueta} title="Pendiente de confirmar con Mateo la URL del panel de Product Ads.">
+      <IconoExterno />
     </span>
   );
 }

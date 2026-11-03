@@ -18,6 +18,7 @@ export const ROTULO_KPI = {
   cpc: "CPC promedio",
   clics: "Clics",
   impresiones: "Impresiones",
+  unidades: "Unidades vendidas",
 } as const;
 
 export const ROTULO_COLUMNA_CAMPANA = {
@@ -25,6 +26,7 @@ export const ROTULO_COLUMNA_CAMPANA = {
   estado: "Estado",
   inversion: "Inversión",
   ventasPublicidad: "Ventas con publicidad",
+  ventasSinPublicidad: "Ventas sin publicidad",
   ventasTotales: "Ventas totales",
   roas: "ROAS",
   acos: "ACOS",
@@ -32,6 +34,7 @@ export const ROTULO_COLUMNA_CAMPANA = {
   cpc: "CPC",
   clics: "Clics",
   impresiones: "Impresiones",
+  unidades: "Unidades",
   presupuesto: "Presupuesto diario",
 } as const;
 
@@ -40,6 +43,7 @@ export const ROTULO_COLUMNA_ANUNCIO = {
   titulo: "Título",
   cpc: "CPC",
   clics: "Clics",
+  unidades: "Unidades",
   gasto: "Gasto",
   ventasPublicidad: "Ventas con publicidad",
   roas: "ROAS",
@@ -97,7 +101,9 @@ export const AYUDA_SEMAFORO =
   "Calculado por Zilonix con el ACOS del anuncio o, si no vendió, con el gasto contra el precio. No viene de Mercado Libre.";
 
 export const AYUDA_PRESUPUESTO =
-  "Es el promedio diario del presupuesto del mes. Un día puede gastar más usando el saldo de días anteriores. No es una alerta.";
+  "El monto es el presupuesto diario. El % usado es el gasto del rango dividido por los días del rango, contra ese presupuesto. Un día puede gastar más usando el saldo de otros. No es una alerta. Si es automático, o no vino un monto, no se calcula un %.";
+
+export const NOTA_UNIDADES = "Con publicidad.";
 
 export const NOTA_ATRIBUCION =
   "Mercado Libre actualiza las métricas a diario (cerca de las 8:00 a. m., hora de Bogotá) y una venta puede atribuirse hasta 14 días después del clic. Las cifras de los últimos 14 días pueden seguir cambiando.";
@@ -113,7 +119,7 @@ export const ROTULO_PERIODO = {
   pausada: "Pausada en Mercado Libre",
 } as const;
 
-export const COLUMNAS_CAMPANA = 12;
+export const COLUMNAS_CAMPANA = 14;
 
 export function rotuloDiagnostico(diagnostico: Diagnostico): string {
   if (diagnostico.tipo === "aprendiendo") {

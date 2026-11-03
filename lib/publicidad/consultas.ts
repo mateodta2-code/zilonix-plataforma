@@ -16,6 +16,7 @@ import {
 import { PREFIJO_CORTE_TIEMPO } from "@/lib/publicidad/actualizacion";
 import { obtenerConfigPublicidad, type ConfigPublicidad } from "@/lib/publicidad/config";
 import { linkPublicacion } from "@/lib/ml/cliente";
+import { diasEntreInclusive } from "@/lib/publicidad/plan";
 import {
   compararOrden,
   diagnosticarCampana,
@@ -60,6 +61,8 @@ export type CampanaCalculada = FilaOrdenable & {
   estadoMl: string | null;
   activa: boolean;
   roasObjetivo: string | null;
+  presupuestoAutomatico: boolean | null;
+  diasAprendizaje: number;
   diagnostico: Diagnostico;
   totales: TotalesRango;
   anuncios: AnuncioCalculado[];
@@ -75,6 +78,7 @@ export type TableroPublicidad = {
   campanas: CampanaCalculada[];
   cantidadActivas: number;
   cantidadPausadas: number;
+  diasRango: number;
 };
 
 type FilaSuma = {
@@ -85,6 +89,9 @@ type FilaSuma = {
   ventasOrganicasMonto: string | null;
   clicks: string | null;
   impresiones: string | null;
+  unidadesTotal: string | null;
+  unidadesDirectas: string | null;
+  unidadesIndirectas: string | null;
 };
 
 function diaDeSuma(fila: FilaSuma | undefined): DiaMetrica {
@@ -94,6 +101,9 @@ function diaDeSuma(fila: FilaSuma | undefined): DiaMetrica {
     ventasOrganicasMonto: fila?.ventasOrganicasMonto ?? null,
     clicks: fila?.clicks ?? null,
     impresiones: fila?.impresiones ?? null,
+    unidadesTotal: fila?.unidadesTotal ?? null,
+    unidadesDirectas: fila?.unidadesDirectas ?? null,
+    unidadesIndirectas: fila?.unidadesIndirectas ?? null,
   };
 }
 
@@ -194,6 +204,7 @@ export async function consultarTableroPublicidad(
         nombre: publicidadCampanas.nombre,
         estado: publicidadCampanas.estado,
         presupuestoDiario: publicidadCampanas.presupuestoDiario,
+        presupuestoAutomatico: publicidadCampanas.presupuestoAutomatico,
         roasObjetivo: publicidadCampanas.roasObjetivo,
         creadaMlTs: publicidadCampanas.creadaMlTs,
         actualizadaMlTs: publicidadCampanas.actualizadaMlTs,
@@ -241,6 +252,9 @@ export async function consultarTableroPublicidad(
           ventasOrganicasMonto: sum(publicidadMetricasDiarias.ventasOrganicasMonto),
           clicks: sum(publicidadMetricasDiarias.clicks),
           impresiones: sum(publicidadMetricasDiarias.impresiones),
+          unidadesTotal: sum(publicidadMetricasDiarias.unidadesTotal),
+          unidadesDirectas: sum(publicidadMetricasDiarias.unidadesDirectas),
+          unidadesIndirectas: sum(publicidadMetricasDiarias.unidadesIndirectas),
         })
         .from(publicidadMetricasDiarias)
         .where(
@@ -265,6 +279,9 @@ export async function consultarTableroPublicidad(
           ventasOrganicasMonto: sum(publicidadMetricasDiarias.ventasOrganicasMonto),
           clicks: sum(publicidadMetricasDiarias.clicks),
           impresiones: sum(publicidadMetricasDiarias.impresiones),
+          unidadesTotal: sum(publicidadMetricasDiarias.unidadesTotal),
+          unidadesDirectas: sum(publicidadMetricasDiarias.unidadesDirectas),
+          unidadesIndirectas: sum(publicidadMetricasDiarias.unidadesIndirectas),
         })
         .from(publicidadMetricasDiarias)
         .where(
@@ -285,6 +302,9 @@ export async function consultarTableroPublicidad(
           ventasOrganicasMonto: fila?.ventasOrganicasMonto ?? null,
           clicks: fila?.clicks ?? null,
           impresiones: fila?.impresiones ?? null,
+          unidadesTotal: fila?.unidadesTotal ?? null,
+          unidadesDirectas: fila?.unidadesDirectas ?? null,
+          unidadesIndirectas: fila?.unidadesIndirectas ?? null,
         }),
       ]);
     }
@@ -372,6 +392,8 @@ export async function consultarTableroPublicidad(
         clicks: totales.clicks,
         impresiones: totales.impresiones,
         presupuestoDiario: campana.presupuestoDiario,
+        presupuestoAutomatico: campana.presupuestoAutomatico,
+        diasAprendizaje: config.diasAprendizaje,
         roasObjetivo: campana.roasObjetivo,
         diagnostico: diagnosticarCampana({
           ahora: opciones.ahora,
@@ -398,6 +420,7 @@ export async function consultarTableroPublicidad(
       campanas: visibles,
       cantidadActivas: calculadas.filter((c) => c.activa).length,
       cantidadPausadas: calculadas.filter((c) => !c.activa).length,
+      diasRango: diasEntreInclusive(periodo.desde, periodo.hasta),
     };
   });
 }
