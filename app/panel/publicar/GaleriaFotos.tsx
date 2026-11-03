@@ -8,6 +8,15 @@ import { esLinkDeDisenoCanva } from "./canva-link";
 import styles from "./publicar.module.css";
 
 const TIPOS_IMAGEN_ACEPTADOS = "image/jpeg,image/png,image/webp";
+const LISTA_TIPOS_IMAGEN_ACEPTADOS = TIPOS_IMAGEN_ACEPTADOS.split(",");
+
+// BAJO, review PR #372 — el input de archivo ya filtra con `accept`,
+// pero un drop desde el escritorio no respeta ese atributo (el SO deja
+// soltar cualquier cosa). Se filtra acá para no mandar un .pdf o un
+// .docx a la ruta de subida.
+function soloImagenes(archivos: File[]): File[] {
+  return archivos.filter((archivo) => LISTA_TIPOS_IMAGEN_ACEPTADOS.includes(archivo.type));
+}
 
 // Feedback real de Mateo probando en staging — la tarjeta "+" dejó de
 // ser "escribir una URL a mano" y pasó a ser "subir un archivo de la
@@ -44,6 +53,11 @@ export function GaleriaFotos({
 
   const [canvaUrl, setCanvaUrl] = useState("");
   const inputArchivoRef = useRef<HTMLInputElement>(null);
+  // MEDIO, review PR #372 — cuántas fotos están en vuelo (ya aceptadas
+  // por el cupo pero todavía subiendo) entre un drop/selección y el
+  // siguiente, para no pasarse de `limiteFotos` si se sueltan dos
+  // tandas antes de que la primera termine.
+  const fotosEnVueloRef = useRef(0);
   const {
     subiendo,
     error: errorSubida,
@@ -52,7 +66,14 @@ export function GaleriaFotos({
     subirArchivos,
     subirCanvaUrl,
     subirDisenoCanva,
-  } = usarSubidaFotoCloudinary((url) => onChange([...urls, url]));
+  } = usarSubidaFotoCloudinary(
+    (url) => onChange([...urls, url]),
+    // ALTO 1, review PR #372 — una sola llamada a onChange con todas
+    // las URL del lote (ya en orden de selección, ver subirArchivos en
+    // usarSubidaFotoCloudinary.ts), en vez de una por foto con el
+    // `urls` viejo.
+    (nuevas) => onChange([...urls, ...nuevas])
+  );
 
   // Code review de Pablo (PR #368, review 5757123834) — codigoError
   // llegaba del servidor pero no se usaba para nada: la persona veía
@@ -85,7 +106,11 @@ export function GaleriaFotos({
       void subirArchivos(archivos);
       return;
     }
-    const espacio = Math.max(0, limiteFotos - urls.length);
+    // MEDIO, review PR #372 — el cupo se cuenta contra las fotos ya
+    // puestas MÁS las que ya están en vuelo de un drop/selección
+    // anterior que todavía no terminó (fotosEnVueloRef), no solo
+    // contra `urls.length`.
+    const espacio = Math.max(0, limiteFotos - urls.length - fotosEnVueloRef.current);
     const admitidos = archivos.slice(0, espacio);
     const sobrantes = archivos.length - admitidos.length;
     if (sobrantes > 0) {
@@ -93,7 +118,12 @@ export function GaleriaFotos({
         `Esta categoría admite hasta ${limiteFotos} fotos — ${sobrantes} ${sobrantes === 1 ? "foto quedó" : "fotos quedaron"} fuera por el límite.`
       );
     }
-    if (admitidos.length > 0) void subirArchivos(admitidos);
+    if (admitidos.length > 0) {
+      fotosEnVueloRef.current += admitidos.length;
+      void subirArchivos(admitidos).finally(() => {
+        fotosEnVueloRef.current -= admitidos.length;
+      });
+    }
   }
 
   function alElegirArchivos(e: React.ChangeEvent<HTMLInputElement>) {
@@ -130,7 +160,7 @@ export function GaleriaFotos({
   // cosa con la otra.
   function alSoltar(e: React.DragEvent, indiceDestino: number) {
     e.preventDefault();
-    const archivos = Array.from(e.dataTransfer.files ?? []);
+    const archivos = soloImagenes(Array.from(e.dataTransfer.files ?? []));
     if (archivos.length > 0) {
       subirRespetandoLimite(archivos);
       return;
@@ -142,7 +172,7 @@ export function GaleriaFotos({
 
   function alSoltarEnAgregar(e: React.DragEvent) {
     e.preventDefault();
-    const archivos = Array.from(e.dataTransfer.files ?? []);
+    const archivos = soloImagenes(Array.from(e.dataTransfer.files ?? []));
     if (archivos.length > 0) subirRespetandoLimite(archivos);
   }
 

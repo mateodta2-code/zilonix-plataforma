@@ -8,4 +8,6 @@
 
   **Tests**: `lib/canva/oauth.test.ts` — nuevo caso para `CANVA_CLIENT_ID` puesta pero vacía/con espacios.
 
+  **Code review del PR**: el lote de fotos llamaba `onChange` una vez por cada foto que terminaba, con el `urls` de cuando empezó el lote — con 2+ fotos solo quedaba la última. `usarSubidaFotoCloudinary.ts` ahora espera a que todas terminen (o fallen), junta las URL exitosas en el orden de selección (no el de llegada de la red) y avisa una sola vez; mismo arreglo para las páginas de un diseño de Canva con varias páginas. `GaleriaFotos.tsx`: el cupo de `maxFotos` ahora se cuenta contra las fotos ya puestas MÁS las que están en vuelo (si se suelta dos tandas antes de que la primera termine, no se pasa del límite); un drop filtra para aceptar solo imágenes. El error de `/api/canva/conectar` (`?canva=error&codigo=...`) y el éxito (`?canva=conectado`) ahora se leen en `page.tsx` y se muestran junto a "Conectar Canva" (`canva-mensajes-error.ts`, nuevo) — antes la página no los leía y la persona no veía ningún aviso.
+
   **No se tocó**: `extension/`, `lib/ml/cliente.ts`, `db/schema.ts` — sin migración. Refs #366.

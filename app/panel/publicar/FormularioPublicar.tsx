@@ -6,6 +6,7 @@ import { Campo } from "@/components/marco/Campo";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { crearYPublicarProductoAction } from "./actions";
 import { ConectarCanva } from "./ConectarCanva";
+import { mensajeErrorConectarCanva } from "./canva-mensajes-error";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
 import { GaleriaFotos } from "./GaleriaFotos";
 import { PortadaCuenta } from "./PortadaCuenta";
@@ -46,11 +47,20 @@ export function FormularioPublicar({
   cuentas,
   inicial,
   cloudinaryConfigurado,
+  canva,
+  canvaCodigo,
 }: {
   cuentas: Cuenta[];
   inicial: EstadoInicialFormulario;
   cloudinaryConfigurado: boolean;
+  canva: string;
+  canvaCodigo: string;
 }) {
+  // ALTO 2, review PR #372 — /api/canva/conectar y /api/canva/callback
+  // redirigen con ?canva=error&codigo=... o ?canva=conectado (ver esos
+  // route.ts), pero nadie los leía: la persona quedaba sin ningún aviso.
+  const avisoErrorCanva = canva === "error" ? mensajeErrorConectarCanva(canvaCodigo || undefined) : null;
+  const avisoExitoCanva = canva === "conectado";
   const [incluidas, setIncluidas] = useState<Record<string, boolean>>(() => {
     const mapa: Record<string, boolean> = {};
     for (const id of inicial.cuentasIncluidas) mapa[id] = true;
@@ -191,6 +201,8 @@ export function FormularioPublicar({
         <Tarjeta className={styles.seccion}>
           <p className="zx-etiqueta">Conectar Canva</p>
           <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Conecta tu Canva para traer tus diseños como fotos.</p>
+          {avisoErrorCanva && <p style={{ fontSize: 13, color: "var(--kpi-peligro-texto)", marginTop: 8 }}>{avisoErrorCanva}</p>}
+          {avisoExitoCanva && <p style={{ fontSize: 13, color: "var(--kpi-exito-texto)", marginTop: 8 }}>Canva conectado correctamente.</p>}
           <div style={{ marginTop: 10 }}>
             <ConectarCanva />
           </div>

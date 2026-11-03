@@ -45,6 +45,8 @@ export default async function PublicarPage({
     importarOrigen?: string;
     importarSkuNoEncontrado?: string;
     importarLinkError?: string;
+    canva?: string;
+    codigo?: string;
   };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
@@ -141,6 +143,8 @@ export default async function PublicarPage({
         importarLinkError={searchParams.importarLinkError ?? ""}
         importarNoDisponible={importarNoDisponible}
         cloudinaryConfigurado={cloudinaryConfigurado()}
+        canva={searchParams.canva ?? ""}
+        canvaCodigo={searchParams.codigo ?? ""}
       />
     </>
   );
