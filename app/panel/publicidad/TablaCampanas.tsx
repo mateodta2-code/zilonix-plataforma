@@ -124,9 +124,8 @@ function FilaGrupo({
                     {
                       clave: `vpub-${campana.id}`,
                       contenido: (
-                        <span className={styles.rotuloColumna}>
-                          <span>Ventas con</span>
-                          <span>publicidad</span>
+                        <span className={styles.rotuloColumna} title={ROTULO_COLUMNA_ANUNCIO.ventasPublicidad} aria-label={ROTULO_COLUMNA_ANUNCIO.ventasPublicidad}>
+                          <span>Con publ.</span>
                         </span>
                       ),
                     },
@@ -136,9 +135,8 @@ function FilaGrupo({
                       clave: `organicas-${campana.id}`,
                       contenido: (
                         <span className={styles.thConAyuda}>
-                          <span className={styles.rotuloColumna}>
-                            <span>Ventas sin</span>
-                            <span>publicidad</span>
+                          <span className={styles.rotuloColumna} title="Ventas sin publicidad" aria-label="Ventas sin publicidad">
+                            <span>Sin publ.</span>
                           </span>
                           <Ayuda id={`ayuda-organicas-${campana.id}`}>{NOTA_VENTAS_ORGANICAS}</Ayuda>
                         </span>

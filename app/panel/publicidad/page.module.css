@@ -334,15 +334,14 @@
     overflow: hidden;
   }
 
-  /* A 1280 la tabla mide ~895 px. Campaña queda en ~150 px y Estado
-     en ~130 px para que el nombre y la frase partan en palabras, no
-     a la mitad. El ancho sale de Inversión, las tres Ventas y
-     Presupuesto, sin dejar de entrar $447.109, $5.127.743 ni 400.756. */
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 16.8%; }
+  /* A 1280 la tabla mide ~895 px. Campaña ~135 px, Estado ~130 px.
+     Con publ. y Sin publ. llevan ~8 px más para no cortarse ni pegarse
+     a Ventas totales. */
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 15.1%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(2) { width: 14.6%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(3) { width: 6.8%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 7.2%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(5) { width: 7.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 8.05%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(5) { width: 8.05%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(6) { width: 7.2%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(7) { width: 4.8%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(8) { width: 5%; }
@@ -358,6 +357,12 @@
 .anuncios th:first-child {
   white-space: nowrap;
   width: 9.5em;
+  padding-left: 12px;
+}
+
+.anuncios td:last-child,
+.anuncios th:last-child {
+  padding-right: 12px;
 }
 
 .orden:hover,
