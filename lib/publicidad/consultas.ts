@@ -3,7 +3,7 @@
 // No llama a Mercado Libre. El único camino a la API sigue siendo el
 // botón "Actualizar ahora".
 
-import { and, asc, desc, eq, gte, isNotNull, lte, sum } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, like, lte, or, sum } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import {
   publicidadAnunciantes,
@@ -13,6 +13,7 @@ import {
   publicidadMetricasDiarias,
   publicidadSincronizaciones,
 } from "@/db/schema";
+import { PREFIJO_CORTE_TIEMPO } from "@/lib/publicidad/actualizacion";
 import { obtenerConfigPublicidad, type ConfigPublicidad } from "@/lib/publicidad/config";
 import { linkPublicacion } from "@/lib/ml/cliente";
 import {
@@ -66,7 +67,9 @@ export type CampanaCalculada = FilaOrdenable & {
 
 export type TableroPublicidad = {
   anunciante: AnuncianteTablero | null;
-  ultimaOk: SincronizacionOk | null;
+  // Última sync que dejó datos (ok, parcial o corte de tiempo). No es
+  // solo estado ok: ese recién aparece cuando cierra el backfill.
+  ultimaActualizacion: SincronizacionOk | null;
   enCurso: boolean;
   resumen: { actual: TotalesRango; anterior: TotalesRango };
   campanas: CampanaCalculada[];
@@ -147,7 +150,10 @@ export async function consultarTableroPublicidad(
       .from(publicidadAnunciantes)
       .where(and(eq(publicidadAnunciantes.empresaId, empresaId), eq(publicidadAnunciantes.cuentaMlId, cuentaMlId)));
 
-    const [ultimaOk] = await tx
+    // Mismo criterio que syncActualizoDatos: ok, parcial, o un error
+    // que empieza por CorridaIncompletaError. Un error real no pisa
+    // la fecha de la última que sí guardó.
+    const [ultimaActualizacion] = await tx
       .select({
         terminadaTs: publicidadSincronizaciones.terminadaTs,
         iniciadaTs: publicidadSincronizaciones.iniciadaTs,
@@ -157,7 +163,13 @@ export async function consultarTableroPublicidad(
         and(
           eq(publicidadSincronizaciones.empresaId, empresaId),
           eq(publicidadSincronizaciones.cuentaMlId, cuentaMlId),
-          eq(publicidadSincronizaciones.estado, "ok")
+          or(
+            inArray(publicidadSincronizaciones.estado, ["ok", "parcial"]),
+            and(
+              eq(publicidadSincronizaciones.estado, "error"),
+              like(publicidadSincronizaciones.error, `${PREFIJO_CORTE_TIEMPO}%`)
+            )
+          )
         )
       )
       .orderBy(desc(publicidadSincronizaciones.iniciadaTs))
@@ -380,7 +392,7 @@ export async function consultarTableroPublicidad(
 
     return {
       anunciante: anunciante ?? null,
-      ultimaOk: ultimaOk ?? null,
+      ultimaActualizacion: ultimaActualizacion ?? null,
       enCurso: Boolean(enCursoFila),
       resumen: { actual: resumenActual, anterior: resumenAnterior },
       campanas: visibles,

@@ -10,6 +10,7 @@ import { porcentajeDeRazon, type Diagnostico, type Semaforo, type TipoDiagnostic
 export const ROTULO_KPI = {
   inversion: "Inversión",
   ventasPublicidad: "Ventas con publicidad",
+  ventasSinPublicidad: "Ventas sin publicidad",
   ventasTotales: "Ventas totales",
   roas: "ROAS",
   acos: "ACOS",
@@ -79,6 +80,9 @@ export const ROTULO_SEMAFORO = {
 
 export const NOTA_VENTAS_ORGANICAS =
   "Ventas de las publicaciones promocionadas que no vinieron de un clic. No es el total orgánico de la tienda.";
+
+export const NOTA_VENTAS_TOTALES =
+  "Ventas de las publicaciones promocionadas: las que vinieron de un clic más las que no. No es el total de la tienda.";
 
 export const NOTA_TACOS_PROMOCIONADAS = "De publicaciones promocionadas.";
 

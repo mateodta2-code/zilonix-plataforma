@@ -48,19 +48,19 @@ function primero(valor: ParametroUrl): string | undefined {
   return undefined;
 }
 
-const COLUMNAS: { clave: ColumnaOrden | "estado"; rotulo: string; fija?: boolean }[] = [
-  { clave: "campana", rotulo: ROTULO_COLUMNA_CAMPANA.campana, fija: true },
-  { clave: "estado", rotulo: ROTULO_COLUMNA_CAMPANA.estado },
-  { clave: "inversion", rotulo: ROTULO_COLUMNA_CAMPANA.inversion },
-  { clave: "ventas_publicidad", rotulo: ROTULO_COLUMNA_CAMPANA.ventasPublicidad },
-  { clave: "ventas_totales", rotulo: ROTULO_COLUMNA_CAMPANA.ventasTotales },
-  { clave: "roas", rotulo: ROTULO_COLUMNA_CAMPANA.roas },
-  { clave: "acos", rotulo: ROTULO_COLUMNA_CAMPANA.acos },
-  { clave: "tacos", rotulo: ROTULO_COLUMNA_CAMPANA.tacos },
-  { clave: "cpc", rotulo: ROTULO_COLUMNA_CAMPANA.cpc },
-  { clave: "clics", rotulo: ROTULO_COLUMNA_CAMPANA.clics },
-  { clave: "impresiones", rotulo: ROTULO_COLUMNA_CAMPANA.impresiones },
-  { clave: "presupuesto", rotulo: ROTULO_COLUMNA_CAMPANA.presupuesto },
+const COLUMNAS: { clave: ColumnaOrden | "estado"; lineas: string[]; fija?: boolean }[] = [
+  { clave: "campana", lineas: [ROTULO_COLUMNA_CAMPANA.campana], fija: true },
+  { clave: "estado", lineas: [ROTULO_COLUMNA_CAMPANA.estado] },
+  { clave: "inversion", lineas: [ROTULO_COLUMNA_CAMPANA.inversion] },
+  { clave: "ventas_publicidad", lineas: ["Ventas con", "publicidad"] },
+  { clave: "ventas_totales", lineas: ["Ventas", "totales"] },
+  { clave: "roas", lineas: [ROTULO_COLUMNA_CAMPANA.roas] },
+  { clave: "acos", lineas: [ROTULO_COLUMNA_CAMPANA.acos] },
+  { clave: "tacos", lineas: [ROTULO_COLUMNA_CAMPANA.tacos] },
+  { clave: "cpc", lineas: [ROTULO_COLUMNA_CAMPANA.cpc] },
+  { clave: "clics", lineas: [ROTULO_COLUMNA_CAMPANA.clics] },
+  { clave: "impresiones", lineas: [ROTULO_COLUMNA_CAMPANA.impresiones] },
+  { clave: "presupuesto", lineas: ["Presupuesto", "diario"] },
 ];
 
 export default async function PublicidadPage({
@@ -210,7 +210,8 @@ function Cuerpo({
   const sinPermiso = tablero.anunciante?.estadoAcceso === "sin_permiso_app";
   const sinProductAds = tablero.anunciante?.estadoAcceso === "sin_product_ads";
   const sinAnunciante = !tablero.anunciante;
-  const primeraSync = tablero.enCurso && !tablero.ultimaOk && tablero.cantidadActivas + tablero.cantidadPausadas === 0;
+  const primeraSync =
+    tablero.enCurso && !tablero.ultimaActualizacion && tablero.cantidadActivas + tablero.cantidadPausadas === 0;
 
   if (sinPermiso) {
     return <EstadoVacio>{SUGERENCIA_RECONECTAR_PUBLICIDAD}</EstadoVacio>;
@@ -233,9 +234,8 @@ function Cuerpo({
   const kpis = kpisDelResumen(tablero);
   const campanas = tablero.campanas.map(pintarCampana);
   const sinMetricas = tablero.resumen.actual.gasto === null && tablero.resumen.actual.clicks === null;
-  const actualizado = tablero.ultimaOk
-    ? fechaHoraBogota(tablero.ultimaOk.terminadaTs ?? tablero.ultimaOk.iniciadaTs)
-    : "—";
+  const momento = tablero.ultimaActualizacion?.terminadaTs ?? tablero.ultimaActualizacion?.iniciadaTs ?? null;
+  const actualizado = momento ? fechaHoraBogota(momento) : "—";
 
   const encabezados: EncabezadoTabla[] = COLUMNAS.map((columna) => {
     if (columna.clave === "estado") {
@@ -243,7 +243,7 @@ function Cuerpo({
         clave: "estado",
         contenido: (
           <span className={styles.thConAyuda}>
-            {columna.rotulo}
+            <RotuloLineas lineas={columna.lineas} />
             <Ayuda id="ayuda-diagnostico">{AYUDA_DIAGNOSTICO}</Ayuda>
           </span>
         ),
@@ -255,7 +255,7 @@ function Cuerpo({
         ariaSort: orden === "presupuesto" ? (dir === "asc" ? "ascending" : "descending") : "none",
         contenido: (
           <span className={styles.thConAyuda}>
-            <LinkOrden hrefBase={hrefBase} columna="presupuesto" orden={orden} dir={dir} rotulo={columna.rotulo} />
+            <LinkOrden hrefBase={hrefBase} columna="presupuesto" orden={orden} dir={dir} lineas={columna.lineas} />
             <Ayuda id="ayuda-presupuesto">{AYUDA_PRESUPUESTO}</Ayuda>
           </span>
         ),
@@ -266,7 +266,7 @@ function Cuerpo({
       clave: columna.clave,
       fija: columna.fija,
       ariaSort: activa ? (dir === "asc" ? "ascending" : "descending") : "none",
-      contenido: <LinkOrden hrefBase={hrefBase} columna={columna.clave} orden={orden} dir={dir} rotulo={columna.rotulo} />,
+      contenido: <LinkOrden hrefBase={hrefBase} columna={columna.clave} orden={orden} dir={dir} lineas={columna.lineas} />,
     };
   });
 
@@ -340,12 +340,22 @@ function Cuerpo({
   );
 }
 
+function RotuloLineas({ lineas }: { lineas: string[] }) {
+  return (
+    <span className={styles.rotuloColumna}>
+      {lineas.map((linea) => (
+        <span key={linea}>{linea}</span>
+      ))}
+    </span>
+  );
+}
+
 function LinkOrden({
   hrefBase,
   columna,
   orden,
   dir,
-  rotulo,
+  lineas,
 }: {
   hrefBase: {
     cuenta: string | null;
@@ -357,7 +367,7 @@ function LinkOrden({
   columna: ColumnaOrden;
   orden: ColumnaOrden;
   dir: DireccionOrden;
-  rotulo: string;
+  lineas: string[];
 }) {
   const activa = orden === columna;
   const siguiente: DireccionOrden = activa ? (dir === "desc" ? "asc" : "desc") : columna === "campana" ? "asc" : "desc";
@@ -366,8 +376,8 @@ function LinkOrden({
       href={hrefPublicidad({ ...hrefBase, orden: columna, dir: siguiente })}
       className={activa ? `${styles.orden} ${styles.ordenActivo}` : styles.orden}
     >
-      {rotulo}
-      {activa ? (dir === "desc" ? " ↓" : " ↑") : ""}
+      <RotuloLineas lineas={lineas} />
+      {activa ? <span className={styles.flechaOrden}>{dir === "desc" ? "↓" : "↑"}</span> : null}
     </Link>
   );
 }

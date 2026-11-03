@@ -170,11 +170,137 @@
 }
 
 .orden {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 4px;
   color: inherit;
   font: inherit;
   letter-spacing: inherit;
   text-transform: inherit;
   text-decoration: none;
+  white-space: normal;
+}
+
+.rotuloColumna {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+}
+
+.flechaOrden {
+  line-height: 1;
+}
+
+.tarjetaTabla .celdaRoas {
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.roasObjetivo {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--texto-suave);
+}
+
+/* El chip de estado es nowrap en Chip.module.css. Acá se parte en
+   dos líneas para que la columna no empuje el resto de la tabla. */
+.tarjetaTabla [data-estado] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  letter-spacing: 0.03em;
+  line-height: 1.15;
+  padding: 2px 4px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.celdaEstado {
+  vertical-align: top;
+}
+
+/* Cabe en el ancho del panel (viewport 1024 con la barra de 287px,
+   y de sobra desde 1280). El scroll horizontal de <Tabla> queda para
+   el celular, donde las columnas fijas se volverían ilegibles. */
+.tarjetaTabla > div > table,
+.anuncios table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.tarjetaTabla th {
+  white-space: normal;
+  letter-spacing: 0;
+  line-height: 1.2;
+  vertical-align: bottom;
+  padding: 8px 3px;
+  font-size: 9px;
+}
+
+.tarjetaTabla td {
+  padding: 6px 3px;
+  font-size: 10px;
+}
+
+/* Sin esto, un nowrap o una palabra larga (Aprendiendo) estira la
+   tabla por encima del 100% y vuelve el scroll horizontal. */
+.tarjetaTabla > div > table th,
+.tarjetaTabla > div > table td {
+  overflow: hidden;
+}
+
+.tarjetaTabla > div > table th:nth-child(1) { width: 8%; }
+.tarjetaTabla > div > table th:nth-child(2) { width: 9%; }
+.tarjetaTabla > div > table th:nth-child(3) { width: 9%; }
+.tarjetaTabla > div > table th:nth-child(4) { width: 10%; }
+.tarjetaTabla > div > table th:nth-child(5) { width: 9%; }
+.tarjetaTabla > div > table th:nth-child(6) { width: 7%; }
+.tarjetaTabla > div > table th:nth-child(7) { width: 7%; }
+.tarjetaTabla > div > table th:nth-child(8) { width: 7%; }
+.tarjetaTabla > div > table th:nth-child(9) { width: 6%; }
+.tarjetaTabla > div > table th:nth-child(10) { width: 6%; }
+.tarjetaTabla > div > table th:nth-child(11) { width: 11%; }
+.tarjetaTabla > div > table th:nth-child(12) { width: 11%; }
+
+.anuncios th:nth-child(1) { width: 12%; }
+.anuncios th:nth-child(2) { width: 16%; }
+.anuncios th:nth-child(3),
+.anuncios th:nth-child(4) { width: 7%; }
+.anuncios th:nth-child(5),
+.anuncios th:nth-child(6) { width: 9%; }
+.anuncios th:nth-child(7),
+.anuncios th:nth-child(8),
+.anuncios th:nth-child(10) { width: 6%; }
+.anuncios th:nth-child(9) { width: 11%; }
+.anuncios th:nth-child(11) { width: 11%; }
+
+@media (min-width: 1280px) {
+  .tarjetaTabla th {
+    font-size: 10px;
+  }
+
+  .tarjetaTabla td {
+    padding: 8px 4px;
+    font-size: 12px;
+  }
+
+  .tarjetaTabla > div > table th:nth-child(1) { width: 15%; }
+  .tarjetaTabla > div > table th:nth-child(2) { width: 11%; }
+  .tarjetaTabla > div > table th:nth-child(3),
+  .tarjetaTabla > div > table th:nth-child(4),
+  .tarjetaTabla > div > table th:nth-child(5) { width: 9%; }
+  .tarjetaTabla > div > table th:nth-child(6) { width: 9%; }
+  .tarjetaTabla > div > table th:nth-child(7),
+  .tarjetaTabla > div > table th:nth-child(8) { width: 6%; }
+  .tarjetaTabla > div > table th:nth-child(9) { width: 6%; }
+  .tarjetaTabla > div > table th:nth-child(10) { width: 5%; }
+  .tarjetaTabla > div > table th:nth-child(11) { width: 8%; }
+  .tarjetaTabla > div > table th:nth-child(12) { width: 7%; }
 }
 
 .orden:hover,
@@ -193,8 +319,8 @@
 .expandir {
   display: inline-flex;
   align-items: flex-start;
-  gap: 8px;
-  max-width: 280px;
+  gap: 6px;
+  max-width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
@@ -223,7 +349,9 @@
 }
 
 .nombreCampana {
+  display: block;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .pausada,
@@ -231,7 +359,8 @@
 .enlacePendiente {
   display: block;
   margin-top: 4px;
-  font-size: 12px;
+  overflow-wrap: anywhere;
+  font-size: 11px;
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -254,6 +383,18 @@
 @media (max-width: 760px) {
   .gridKpi {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tarjetaTabla > div > table,
+  .anuncios table {
+    table-layout: auto;
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .tarjetaTabla > div > table th:nth-child(n),
+  .anuncios th:nth-child(n) {
+    width: auto;
   }
 }
 

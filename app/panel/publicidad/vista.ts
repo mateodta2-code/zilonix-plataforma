@@ -4,12 +4,12 @@
 import type { EstadoChip } from "@/components/marco/Chip";
 import type { CampanaCalculada, TableroPublicidad } from "@/lib/publicidad/consultas";
 import {
-  mostrarDinero,
+  mostrarDineroCompacto,
   mostrarDineroTarjeta,
   mostrarEntero,
   mostrarFraccion,
-  mostrarObjetivoRoas,
   mostrarRoas,
+  textoObjetivoRoas,
 } from "@/lib/publicidad/formato";
 import { variacionPorcentual, type TotalesRango } from "@/lib/publicidad/kpis";
 import {
@@ -18,6 +18,7 @@ import {
   NOTA_DIAGNOSTICO,
   NOTA_TACOS_PROMOCIONADAS,
   NOTA_VENTAS_ORGANICAS,
+  NOTA_VENTAS_TOTALES,
   ROTULO_KPI,
   rotuloDiagnostico,
   rotuloSemaforo,
@@ -58,6 +59,7 @@ export type CampanaPintada = {
   ventasPublicidad: string;
   ventasTotales: string;
   roas: string;
+  roasObjetivo: string | null;
   acos: string;
   tacos: string;
   cpc: string;
@@ -91,28 +93,29 @@ export function pintarCampana(campana: CampanaCalculada): CampanaPintada {
     chipTitle: AYUDA_DIAGNOSTICO,
     nota,
     verificar: campana.diagnostico.tipo === "aprendiendo",
-    inversion: mostrarDinero(campana.totales.gasto),
-    ventasPublicidad: mostrarDinero(campana.totales.ventasPublicidad),
-    ventasTotales: mostrarDinero(campana.totales.ventasTotales),
-    roas: mostrarObjetivoRoas(campana.totales.roas, campana.roasObjetivo),
+    inversion: mostrarDineroCompacto(campana.totales.gasto),
+    ventasPublicidad: mostrarDineroCompacto(campana.totales.ventasPublicidad),
+    ventasTotales: mostrarDineroCompacto(campana.totales.ventasTotales),
+    roas: mostrarRoas(campana.totales.roas),
+    roasObjetivo: textoObjetivoRoas(campana.roasObjetivo),
     acos: mostrarFraccion(campana.totales.acos),
     tacos: mostrarFraccion(campana.totales.tacos),
-    cpc: mostrarDinero(campana.totales.cpc),
+    cpc: mostrarDineroCompacto(campana.totales.cpc),
     clics: mostrarEntero(campana.totales.clicks),
     impresiones: mostrarEntero(campana.totales.impresiones),
-    presupuesto: mostrarDinero(campana.presupuestoDiario),
+    presupuesto: mostrarDineroCompacto(campana.presupuestoDiario),
     anuncios: campana.anuncios.map((anuncio) => ({
       clave: anuncio.id,
       itemId: anuncio.itemId,
       titulo: anuncio.titulo ?? "Sin título",
       href: anuncio.href,
-      cpc: mostrarDinero(anuncio.totales.cpc),
+      cpc: mostrarDineroCompacto(anuncio.totales.cpc),
       clics: mostrarEntero(anuncio.totales.clicks),
-      gasto: mostrarDinero(anuncio.totales.gasto),
-      ventasPublicidad: mostrarDinero(anuncio.totales.ventasPublicidad),
+      gasto: mostrarDineroCompacto(anuncio.totales.gasto),
+      ventasPublicidad: mostrarDineroCompacto(anuncio.totales.ventasPublicidad),
       roas: mostrarRoas(anuncio.totales.roas),
       acos: mostrarFraccion(anuncio.totales.acos),
-      ventasOrganicas: mostrarDinero(anuncio.totales.ventasOrganicas),
+      ventasOrganicas: mostrarDineroCompacto(anuncio.totales.ventasOrganicas),
       tacos: mostrarFraccion(anuncio.totales.tacos),
       semaforoEstado: anuncio.semaforo.estado,
       semaforoRotulo: rotuloSemaforo(anuncio.semaforo),
@@ -137,10 +140,17 @@ export function kpisDelResumen(tablero: Pick<TableroPublicidad, "resumen">): Kpi
       variacion: linea(actual, anterior, "ventasPublicidad"),
     },
     {
+      clave: "ventasSinPublicidad",
+      titulo: ROTULO_KPI.ventasSinPublicidad,
+      valor: mostrarDineroTarjeta(actual.ventasOrganicas),
+      detalle: [NOTA_VENTAS_ORGANICAS],
+      variacion: linea(actual, anterior, "ventasOrganicas"),
+    },
+    {
       clave: "ventasTotales",
       titulo: ROTULO_KPI.ventasTotales,
       valor: mostrarDineroTarjeta(actual.ventasTotales),
-      detalle: [NOTA_VENTAS_ORGANICAS],
+      detalle: [NOTA_VENTAS_TOTALES],
       variacion: linea(actual, anterior, "ventasTotales"),
     },
     { clave: "roas", titulo: ROTULO_KPI.roas, valor: mostrarRoas(actual.roas), detalle: [], variacion: linea(actual, anterior, "roas") },

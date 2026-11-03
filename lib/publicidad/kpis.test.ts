@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { obtenerConfigPublicidad } from "@/lib/publicidad/config";
 import {
+  mostrarDineroCompacto,
   mostrarDineroTarjeta,
+  textoObjetivoRoas,
   mostrarEntero,
   mostrarFraccion,
   mostrarRoas,
@@ -372,6 +374,11 @@ describe("formato es-CO", () => {
   it("dinero sin decimales en tarjeta, ROAS con x, porcentaje con 1 decimal y miles", () => {
     expect(mostrarDineroTarjeta("1234567.40")).toBe("$ 1.234.567");
     expect(mostrarDineroTarjeta(null)).toBe("—");
+    expect(mostrarDineroCompacto("447108.61")).toBe("$447.109");
+    expect(mostrarDineroCompacto("0.40")).toBe("$0");
+    expect(mostrarDineroCompacto(null)).toBe("—");
+    expect(textoObjetivoRoas("12.00")).toBe("objetivo 12,00x");
+    expect(textoObjetivoRoas(null)).toBeNull();
     expect(mostrarRoas("4.25")).toBe("4,25x");
     expect(mostrarRoas(null)).toBe("—");
     expect(mostrarFraccion("0.1840")).toBe("18,4 %");

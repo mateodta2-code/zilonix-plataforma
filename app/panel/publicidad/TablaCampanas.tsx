@@ -68,7 +68,7 @@ function FilaGrupo({
             </span>
           </button>
         </CeldaTabla>
-        <CeldaTabla>
+        <CeldaTabla className={styles.celdaEstado}>
           <Chip estado={campana.chipEstado} title={campana.chipTitle}>
             {campana.chipRotulo}
           </Chip>
@@ -78,7 +78,10 @@ function FilaGrupo({
         <CeldaTabla numerica>{campana.inversion}</CeldaTabla>
         <CeldaTabla numerica>{campana.ventasPublicidad}</CeldaTabla>
         <CeldaTabla numerica>{campana.ventasTotales}</CeldaTabla>
-        <CeldaTabla numerica>{campana.roas}</CeldaTabla>
+        <CeldaTabla numerica className={styles.celdaRoas}>
+          <span>{campana.roas}</span>
+          {campana.roasObjetivo ? <span className={styles.roasObjetivo}>{campana.roasObjetivo}</span> : null}
+        </CeldaTabla>
         <CeldaTabla numerica>{campana.acos}</CeldaTabla>
         <CeldaTabla numerica>{campana.tacos}</CeldaTabla>
         <CeldaTabla numerica>{campana.cpc}</CeldaTabla>
@@ -100,14 +103,25 @@ function FilaGrupo({
                     ROTULO_COLUMNA_ANUNCIO.cpc,
                     ROTULO_COLUMNA_ANUNCIO.clics,
                     ROTULO_COLUMNA_ANUNCIO.gasto,
-                    ROTULO_COLUMNA_ANUNCIO.ventasPublicidad,
+                    {
+                      clave: `vpub-${campana.id}`,
+                      contenido: (
+                        <span className={styles.rotuloColumna}>
+                          <span>Ventas con</span>
+                          <span>publicidad</span>
+                        </span>
+                      ),
+                    },
                     ROTULO_COLUMNA_ANUNCIO.roas,
                     ROTULO_COLUMNA_ANUNCIO.acos,
                     {
                       clave: `organicas-${campana.id}`,
                       contenido: (
                         <span className={styles.thConAyuda}>
-                          {ROTULO_COLUMNA_ANUNCIO.ventasSinPublicidad}
+                          <span className={styles.rotuloColumna}>
+                            <span>Ventas sin</span>
+                            <span>publicidad</span>
+                          </span>
                           <Ayuda id={`ayuda-organicas-${campana.id}`}>{NOTA_VENTAS_ORGANICAS}</Ayuda>
                         </span>
                       ),
