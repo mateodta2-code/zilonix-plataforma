@@ -165,14 +165,17 @@
 
 .thConAyuda {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
 }
 
 .orden {
   display: inline-flex;
-  align-items: flex-end;
-  gap: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
   color: inherit;
   font: inherit;
   letter-spacing: inherit;
@@ -209,7 +212,7 @@
 
 .tarjetaTabla .celdaEstado,
 .tarjetaTabla .celdaPresupuesto {
-  vertical-align: top;
+  vertical-align: middle;
   white-space: normal;
 }
 
@@ -218,13 +221,12 @@
   grid-template-columns: 8px minmax(0, 1fr) auto;
   column-gap: 6px;
   row-gap: 4px;
-  align-items: start;
+  align-items: center;
 }
 
 .punto {
   width: 8px;
   height: 8px;
-  margin-top: 4px;
   border-radius: 50%;
   background: var(--plata);
 }
@@ -300,13 +302,14 @@
   letter-spacing: 0;
   line-height: 1.2;
   vertical-align: bottom;
-  padding: 8px 3px;
+  padding: 8px 4px;
   font-size: 10px;
 }
 
 .tarjetaTabla td {
-  padding: 6px 3px;
+  padding: 6px 4px;
   font-size: 12px;
+  vertical-align: middle;
 }
 
 @media (min-width: 1280px) {
@@ -315,25 +318,30 @@
     width: 100%;
   }
 
-  .tarjetaTabla > div > table th,
+  /* El encabezado no se recorta: el ⓘ abre hacia abajo y tiene que
+     poder salir de la celda. El número, si no entra, no ensancha la tabla. */
+  .tarjetaTabla > div > table th {
+    overflow: visible;
+  }
+
   .tarjetaTabla > div > table td {
     overflow: hidden;
   }
 
-  .tarjetaTabla > div > table th:nth-child(1) { width: 11%; }
-  .tarjetaTabla > div > table th:nth-child(2) { width: 13%; }
-  .tarjetaTabla > div > table th:nth-child(3) { width: 7%; }
-  .tarjetaTabla > div > table th:nth-child(4) { width: 8%; }
-  .tarjetaTabla > div > table th:nth-child(5) { width: 8%; }
-  .tarjetaTabla > div > table th:nth-child(6) { width: 7%; }
-  .tarjetaTabla > div > table th:nth-child(7) { width: 7%; }
-  .tarjetaTabla > div > table th:nth-child(8) { width: 5%; }
-  .tarjetaTabla > div > table th:nth-child(9) { width: 5%; }
+  .tarjetaTabla > div > table th:nth-child(1) { width: 7%; }
+  .tarjetaTabla > div > table th:nth-child(2) { width: 8%; }
+  .tarjetaTabla > div > table th:nth-child(3) { width: 9%; }
+  .tarjetaTabla > div > table th:nth-child(4) { width: 9%; }
+  .tarjetaTabla > div > table th:nth-child(5) { width: 9%; }
+  .tarjetaTabla > div > table th:nth-child(6) { width: 9%; }
+  .tarjetaTabla > div > table th:nth-child(7) { width: 6%; }
+  .tarjetaTabla > div > table th:nth-child(8) { width: 6%; }
+  .tarjetaTabla > div > table th:nth-child(9) { width: 6%; }
   .tarjetaTabla > div > table th:nth-child(10) { width: 5%; }
   .tarjetaTabla > div > table th:nth-child(11) { width: 5%; }
-  .tarjetaTabla > div > table th:nth-child(12) { width: 6%; }
+  .tarjetaTabla > div > table th:nth-child(12) { width: 7%; }
   .tarjetaTabla > div > table th:nth-child(13) { width: 5%; }
-  .tarjetaTabla > div > table th:nth-child(14) { width: 8%; }
+  .tarjetaTabla > div > table th:nth-child(14) { width: 9%; }
 }
 
 .orden:hover,

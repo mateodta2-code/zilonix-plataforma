@@ -48,7 +48,7 @@ function primero(valor: ParametroUrl): string | undefined {
   return undefined;
 }
 
-const COLUMNAS: { clave: string; lineas: string[]; fija?: boolean; orden?: ColumnaOrden }[] = [
+const COLUMNAS: { clave: string; lineas: string[]; titulo?: string; fija?: boolean; orden?: ColumnaOrden }[] = [
   { clave: "campana", lineas: [ROTULO_COLUMNA_CAMPANA.campana], fija: true, orden: "campana" },
   { clave: "estado", lineas: [ROTULO_COLUMNA_CAMPANA.estado] },
   { clave: "inversion", lineas: [ROTULO_COLUMNA_CAMPANA.inversion], orden: "inversion" },
@@ -60,9 +60,9 @@ const COLUMNAS: { clave: string; lineas: string[]; fija?: boolean; orden?: Colum
   { clave: "tacos", lineas: [ROTULO_COLUMNA_CAMPANA.tacos], orden: "tacos" },
   { clave: "cpc", lineas: [ROTULO_COLUMNA_CAMPANA.cpc], orden: "cpc" },
   { clave: "clics", lineas: [ROTULO_COLUMNA_CAMPANA.clics], orden: "clics" },
-  { clave: "impresiones", lineas: [ROTULO_COLUMNA_CAMPANA.impresiones], orden: "impresiones" },
-  { clave: "unidades", lineas: [ROTULO_COLUMNA_CAMPANA.unidades] },
-  { clave: "presupuesto", lineas: ["Presupuesto", "diario"], orden: "presupuesto" },
+  { clave: "impresiones", lineas: ["Impr."], titulo: ROTULO_COLUMNA_CAMPANA.impresiones, orden: "impresiones" },
+  { clave: "unidades", lineas: ["Unid."], titulo: ROTULO_COLUMNA_CAMPANA.unidades },
+  { clave: "presupuesto", lineas: ["Presup.", "diario"], titulo: ROTULO_COLUMNA_CAMPANA.presupuesto, orden: "presupuesto" },
 ];
 
 export default async function PublicidadPage({
@@ -245,7 +245,7 @@ function Cuerpo({
         clave: "estado",
         contenido: (
           <span className={styles.thConAyuda}>
-            <RotuloLineas lineas={columna.lineas} />
+            <RotuloLineas lineas={columna.lineas} titulo={columna.titulo} />
             <Ayuda id="ayuda-diagnostico">{AYUDA_DIAGNOSTICO}</Ayuda>
           </span>
         ),
@@ -257,21 +257,23 @@ function Cuerpo({
         ariaSort: orden === "presupuesto" ? (dir === "asc" ? "ascending" : "descending") : "none",
         contenido: (
           <span className={styles.thConAyuda}>
-            <LinkOrden hrefBase={hrefBase} columna="presupuesto" orden={orden} dir={dir} lineas={columna.lineas} />
+            <LinkOrden hrefBase={hrefBase} columna="presupuesto" orden={orden} dir={dir} lineas={columna.lineas} titulo={columna.titulo} />
             <Ayuda id="ayuda-presupuesto">{AYUDA_PRESUPUESTO}</Ayuda>
           </span>
         ),
       };
     }
     if (!columna.orden) {
-      return { clave: columna.clave, contenido: <RotuloLineas lineas={columna.lineas} /> };
+      return { clave: columna.clave, contenido: <RotuloLineas lineas={columna.lineas} titulo={columna.titulo} /> };
     }
     const activa = orden === columna.orden;
     return {
       clave: columna.clave,
       fija: columna.fija,
       ariaSort: activa ? (dir === "asc" ? "ascending" : "descending") : "none",
-      contenido: <LinkOrden hrefBase={hrefBase} columna={columna.orden} orden={orden} dir={dir} lineas={columna.lineas} />,
+      contenido: (
+        <LinkOrden hrefBase={hrefBase} columna={columna.orden} orden={orden} dir={dir} lineas={columna.lineas} titulo={columna.titulo} />
+      ),
     };
   });
 
@@ -345,9 +347,9 @@ function Cuerpo({
   );
 }
 
-function RotuloLineas({ lineas }: { lineas: string[] }) {
+function RotuloLineas({ lineas, titulo }: { lineas: string[]; titulo?: string }) {
   return (
-    <span className={styles.rotuloColumna}>
+    <span className={styles.rotuloColumna} title={titulo} aria-label={titulo}>
       {lineas.map((linea) => (
         <span key={linea}>{linea}</span>
       ))}
@@ -361,6 +363,7 @@ function LinkOrden({
   orden,
   dir,
   lineas,
+  titulo,
 }: {
   hrefBase: {
     cuenta: string | null;
@@ -373,6 +376,7 @@ function LinkOrden({
   orden: ColumnaOrden;
   dir: DireccionOrden;
   lineas: string[];
+  titulo?: string;
 }) {
   const activa = orden === columna;
   const siguiente: DireccionOrden = activa ? (dir === "desc" ? "asc" : "desc") : columna === "campana" ? "asc" : "desc";
@@ -380,6 +384,8 @@ function LinkOrden({
     <Link
       href={hrefPublicidad({ ...hrefBase, orden: columna, dir: siguiente })}
       className={activa ? `${styles.orden} ${styles.ordenActivo}` : styles.orden}
+      title={titulo}
+      aria-label={titulo}
     >
       <RotuloLineas lineas={lineas} />
       {activa ? <span className={styles.flechaOrden}>{dir === "desc" ? "↓" : "↑"}</span> : null}

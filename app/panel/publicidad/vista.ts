@@ -85,7 +85,7 @@ function textoPresupuesto(campana: CampanaCalculada, diasRango: number): Pick<Ca
     automatico: campana.presupuestoAutomatico,
   });
   if (uso.tipo === "automatico") return { presupuesto: "Automático", presupuestoUsado: null, presupuestoAvance: null };
-  if (uso.tipo === "sin_presupuesto") return { presupuesto: "Sin presupuesto", presupuestoUsado: null, presupuestoAvance: null };
+  if (uso.tipo === "sin_presupuesto") return { presupuesto: "Sin dato", presupuestoUsado: null, presupuestoAvance: null };
   if (uso.tipo === "sin_gasto") {
     return { presupuesto: mostrarDineroCompacto(uso.presupuestoDiario), presupuestoUsado: "Sin gasto en el rango", presupuestoAvance: null };
   }
