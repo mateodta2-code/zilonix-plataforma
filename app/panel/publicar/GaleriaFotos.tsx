@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { moverFoto } from "./formulario-logica";
 import { usarSubidaFotoCloudinary } from "./usarSubidaFotoCloudinary";
+import { ConectarCanva } from "./ConectarCanva";
 import styles from "./publicar.module.css";
 
 const TIPOS_IMAGEN_ACEPTADOS = "image/jpeg,image/png,image/webp";
@@ -40,7 +41,13 @@ export function GaleriaFotos({
 
   const [canvaUrl, setCanvaUrl] = useState("");
   const inputArchivoRef = useRef<HTMLInputElement>(null);
-  const { subiendo, error: errorSubida, subirArchivo, subirCanvaUrl } = usarSubidaFotoCloudinary((url) => onChange([...urls, url]));
+  const {
+    subiendo,
+    error: errorSubida,
+    subirArchivo,
+    subirCanvaUrl,
+    subirDisenoCanva,
+  } = usarSubidaFotoCloudinary((url) => onChange([...urls, url]));
 
   function confirmarAgregarUrlManual() {
     const limpia = urlNueva.trim();
@@ -55,10 +62,29 @@ export function GaleriaFotos({
     if (archivo) subirArchivo(archivo);
   }
 
+  // Dos caminos bien distintos bajo el mismo campo: el link de
+  // "Compartir"/edición de un DISEÑO (canva.link/... o
+  // canva.com/design/<id>/...) trae TODAS sus páginas vía la cuenta de
+  // Canva conectada del usuario; cualquier otro link (media.canva.com,
+  // *.canvausercontent.com — una exportación ya hecha) sigue el camino
+  // de siempre, sin cambios.
+  function esLinkDeDisenoCanva(valor: string): boolean {
+    try {
+      const h = new URL(valor).hostname.toLowerCase();
+      return h === "canva.link" || h === "canva.com" || h.endsWith(".canva.com");
+    } catch {
+      return false;
+    }
+  }
+
   function confirmarCanvaUrl() {
     const limpia = canvaUrl.trim();
     if (!limpia) return;
-    subirCanvaUrl(limpia, () => setCanvaUrl(""));
+    if (esLinkDeDisenoCanva(limpia)) {
+      void subirDisenoCanva(limpia, () => setCanvaUrl(""));
+    } else {
+      subirCanvaUrl(limpia, () => setCanvaUrl(""));
+    }
   }
 
   function quitar(i: number) {
@@ -167,7 +193,7 @@ export function GaleriaFotos({
           blanca de hosts + anti-SSRF + magic bytes). Ancho moderado a
           propósito (nunca ocupa todo el ancho de la tarjeta) — es un
           campo secundario, el camino principal es la tarjeta "+". */}
-          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <input
               value={canvaUrl}
               onChange={(e) => setCanvaUrl(e.target.value)}
@@ -182,6 +208,7 @@ export function GaleriaFotos({
             <Boton type="button" variante="secundario" chico onClick={confirmarCanvaUrl} disabled={subiendo || !canvaUrl.trim()}>
               Traer
             </Boton>
+            <ConectarCanva />
           </div>
           {errorSubida && <p style={{ fontSize: 12, color: "var(--kpi-peligro-texto)", marginTop: 6 }}>{errorSubida}</p>}
         </>

@@ -120,6 +120,17 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/publicar/fotos/route.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
+  // Tarea "Publicar — conectar Canva" — cada usuario conecta SU propia
+  // cuenta de Canva (OAuth+PKCE, mismo patrón que /api/ml/conectar y
+  // /api/ml/callback); mismo permiso que ya exige GaleriaFotos.tsx
+  // ("inventario","crear") — es parte del mismo flujo de Publicar, no
+  // de Configuración (un Auxiliar/Operador puede publicar sin tener el
+  // módulo "configuracion").
+  "app/api/canva/conectar/route.ts",
+  "app/api/canva/callback/route.ts",
+  "app/api/canva/desconectar/route.ts",
+  "app/api/canva/estado/route.ts",
+  "app/api/canva/exportar-diseno/route.ts",
   "app/api/ml/clip/route.ts",
   // Rama feat-publicar-clip, punto 3/4/5 — las 5 rutas nuevas del
   // sub-flujo de Clip. "modificar" para las que arrancan o cambian
@@ -318,6 +329,8 @@ const RUTAS_DE_MAQUINA: Record<string, string> = {
 const PUBLICAS_CON_AUTENTICACION_PROPIA: Record<string, string> = {
   "app/api/ml/callback/route.ts":
     'pública en el middleware (la abre el navegador al volver del OAuth de Mercado Libre, con o sin las cabeceras que dispararían el bug del rewrite) pero sigue protegida de verdad dentro de su propio handler: state+PKCE (lib/ml/pkce-cookie.ts) contra CSRF, sesión real de Clerk (redirige a /sign-in si falta) y requierePermiso("configuracion","crear") antes de guardar nada — por eso además sigue en RUTAS_PROTEGIDAS, no en RUTAS_EXENTAS.',
+  "app/api/canva/callback/route.ts":
+    'mismo motivo exacto que app/api/ml/callback/route.ts, mismo mecanismo (lib/canva/pkce-cookie.ts) — la abre el navegador al volver del OAuth de Canva; sigue protegida dentro de su propio handler: state+PKCE, sesión real de Clerk y requierePermiso("inventario","crear") antes de guardar nada.',
 };
 
 describe("fix middleware (2026-10-21) — coherencia entre RUTAS_EXENTAS, RUTAS_DE_MAQUINA y lib/rutas-publicas.ts", () => {
