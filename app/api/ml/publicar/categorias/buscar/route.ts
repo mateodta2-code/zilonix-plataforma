@@ -4,12 +4,14 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
 import { obtenerAccessTokenVigente, obtenerSitioDeCuenta } from "@/lib/ml/cuentas";
-import { buscarCategorias } from "@/lib/ml/publicar";
+import { buscarCategoriasPorNombre } from "@/lib/ml/publicar";
 import { respuestaDeErrorMl, respuestaSiCuentaIdInvalido, respuestaSiSinPermiso } from "../../_ayudantes";
 
 // ADENDO UX de Publicar, punto 2 — "buscador de categoría sobre
-// buscarCategorias de lib/ml/publicar.ts" (ya existía como función,
-// solo le faltaba una ruta para que el formulario la pudiera llamar).
+// buscarCategoriasPorNombre de lib/ml/publicar.ts". Fix: antes llamaba
+// al predictor de título (domain_discovery) con el texto tal cual, y
+// devolvía dominios sin relación para nombres cortos de categoría (ej.
+// "Belleza"). Ahora busca por NOMBRE real dentro del árbol del sitio.
 // Mismo permiso que crear el producto en sí ("inventario","crear") —
 // esto solo AYUDA a elegir la categoría, nunca publica nada. `cuentaId`
 // decide de qué cuenta sale el token (obtenerAccessTokenVigente, nunca
@@ -45,7 +47,7 @@ export async function GET(request: NextRequest) {
   try {
     const token = await obtenerAccessTokenVigente(empresa.id, cuentaId as string);
     const { siteId } = await obtenerSitioDeCuenta(empresa.id, cuentaId as string);
-    const resultados = await buscarCategorias(siteId, texto, token);
+    const resultados = await buscarCategoriasPorNombre(siteId, texto, token);
     return NextResponse.json({ resultados });
   } catch (error) {
     return respuestaDeErrorMl(error);
