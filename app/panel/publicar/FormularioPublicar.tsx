@@ -121,7 +121,7 @@ export function FormularioPublicar({
 
   async function cargarCaracteristicas(categoriaIdManual?: string) {
     if (!cuentaReferencia || !tituloReferencia.trim()) {
-      setErrorCategoria("Elegí al menos una cuenta y escribí un título para esa cuenta antes de detectar la categoría.");
+      setErrorCategoria("Elige al menos una cuenta y escribe un título para esa cuenta antes de detectar la categoría.");
       return;
     }
     setCargando(true);
@@ -196,7 +196,7 @@ export function FormularioPublicar({
     setErrorEnvio(null);
     if (cuentasMarcadas.length === 0) {
       e.preventDefault();
-      setErrorEnvio("Elegí al menos una cuenta de Mercado Libre donde publicar.");
+      setErrorEnvio("Elige al menos una cuenta de Mercado Libre donde publicar.");
       return;
     }
     if (esRellenoFalsoDimensiones(dimensiones)) {
@@ -307,7 +307,7 @@ export function FormularioPublicar({
           </p>
         )}
         <p style={{ fontSize: 12, color: "var(--texto-suave)" }}>
-          La primera es la portada si ninguna cuenta tiene una propia. Podés pegar una URL externa, subir un archivo de tu PC, o traer una exportación de Canva.
+          La primera es la portada si ninguna cuenta tiene una propia. Puedes pegar una URL externa, subir un archivo de tu PC, o traer una exportación de Canva.
         </p>
         <textarea name="imagenes" value={fotosDentroDelLimite(imagenes.filter(Boolean), maxFotos).join("\n")} readOnly hidden />
       </Tarjeta>
@@ -323,7 +323,7 @@ export function FormularioPublicar({
           )}
         </div>
         {cuentasMarcadas.length === 0 ? (
-          <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Elegí al menos una cuenta destino arriba para completar su título y descripción.</p>
+          <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Elige al menos una cuenta destino arriba para completar su título y descripción.</p>
         ) : (
           <div style={{ marginTop: 10 }}>
             {cuentasMarcadas.map((c) => (
