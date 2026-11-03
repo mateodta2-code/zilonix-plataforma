@@ -1841,3 +1841,47 @@ export const iaConexiones = pgTable(
     unaPorEmpresa: unique("ia_conexiones_empresa_unica").on(t.empresaId),
   })
 );
+
+// Tarea "Publicar — conectar Canva" — a diferencia de ia_conexiones
+// (una por empresa) y, sobre todo, a diferencia de zilonix-os-web
+// (lib/canva.js: UNA fila fija id=1, una sola cuenta de Canva
+// compartida por TODO el negocio, tokens en texto plano — confirmado
+// leyendo ese código real) acá cada USUARIO conecta su propia cuenta de
+// Canva, por empresa (docs/mapa-sistema.md de zilonix-os-web ya
+// documenta que ese diseño de fila única no se debe copiar: "en la
+// plataforma cada empresa necesita las suyas o ninguna" — se va un
+// paso más allá, cada PERSONA la suya, porque el link de "Compartir"
+// de un diseño de Canva es personal, no de la empresa).
+//
+// Tokens cifrados con el mismo mecanismo que cuentas_ml/ia_conexiones
+// (lib/cifrado.ts, AES-256-GCM versionado) — nunca en texto plano.
+// Nullable (a diferencia de cuentas_ml): al desconectar, los tokens se
+// borran de verdad (se dejan en null), no solo se marca la fecha —
+// decisión explícita de Pablo/Mateo, nunca queda un token viejo dando
+// vueltas en la base después de que el usuario pidió desconectar.
+export const canvaConexiones = pgTable(
+  "canva_conexiones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    usuarioId: uuid("usuario_id").notNull().references(() => usuarios.id, { onDelete: "cascade" }),
+    accessTokenCifrado: jsonb("access_token_cifrado").$type<TokenCifrado>(),
+    refreshTokenCifrado: jsonb("refresh_token_cifrado").$type<TokenCifrado>(),
+    tokenExpiraTs: timestamp("token_expira_ts", { withTimezone: true }),
+    // Candado contra renovaciones dobles — mismo criterio que
+    // cuentas_ml.renovando_ts (lib/ml/cuentas.ts): un candado de más de
+    // 30s se considera abandonado y se puede volver a tomar.
+    renovandoTs: timestamp("renovando_ts", { withTimezone: true }),
+    // Desconectar SÍ borra los tokens (ver nota arriba) — esta marca de
+    // tiempo queda como histórico de "hubo una conexión y se cerró",
+    // nunca se borra la fila entera.
+    desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Una conexión de Canva por persona, por empresa — reconectar
+    // reactiva la misma fila (mismo criterio que cuentas_ml), nunca
+    // crea una segunda.
+    empresaUsuarioUnica: unique("canva_conexiones_empresa_usuario_unica").on(t.empresaId, t.usuarioId),
+  })
+);

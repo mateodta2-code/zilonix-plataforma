@@ -77,6 +77,28 @@ export async function dbComoUsuario<T>(usuarioId: string, fn: (tx: typeof db) =>
   });
 }
 
+// Tarea "Publicar — conectar Canva" — canva_conexiones es la primera
+// tabla que necesita AMBOS valores reales a la vez (empresa_id Y
+// usuario_id — una persona nunca ve la conexión de Canva de otra
+// persona de la MISMA empresa, pedido explícito de Pablo/Mateo).
+// dbComoEmpresa() solo fija empresa_actual; dbComoUsuario() fija
+// usuario_actual pero con el EMPRESA_SENTINEL (pensado para "en qué
+// empresas estoy", antes de elegir una) — ninguno de los dos sirve
+// acá. Esta fija los dos de verdad, dentro de la MISMA transacción.
+export async function dbComoEmpresaYUsuario<T>(empresaId: string, usuarioId: string, fn: (tx: typeof db) => Promise<T>): Promise<T> {
+  if (!UUID_RE.test(empresaId)) {
+    throw new Error(`empresaId inválido: "${empresaId}" no es un UUID.`);
+  }
+  if (!UUID_RE.test(usuarioId)) {
+    throw new Error(`usuarioId inválido: "${usuarioId}" no es un UUID.`);
+  }
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.empresa_actual', ${empresaId}, true)`);
+    await tx.execute(sql`SELECT set_config('app.usuario_actual', ${usuarioId}, true)`);
+    return fn(tx as unknown as typeof db);
+  });
+}
+
 // Tarea 1.7 — quien recibe una invitación por correo todavía NO es
 // miembro de esa empresa (es justo lo que está por decidir). No hay
 // forma de leer su fila de `invitaciones` con dbComoEmpresa() (no tiene
