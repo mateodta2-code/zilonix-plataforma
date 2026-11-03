@@ -132,14 +132,104 @@ export async function resolverCategoria(siteId: string, titulo: string, token: s
   throw new Error(ultimoError);
 }
 
+// Fix Publicar/"Buscar categoría a mano" — domain_discovery (arriba, en
+// resolverCategoria) es un predictor de TÍTULO de producto, no un buscador
+// por nombre de categoría: "Belleza" devolvía dominios sin relación (sets
+// de belleza para niños, pinturas corporales, postes de barbero…), porque
+// le pasábamos el texto como si fuera el título de un producto. El
+// buscador a mano necesita lo contrario: coincidencias reales por NOMBRE
+// de categoría del sitio de la cuenta, mostrando toda la ruta y marcando
+// cuáles son hoja — mismo criterio que leerArbolCategorias (children
+// vacío), nunca un campo adivinado.
+export type EntradaArbolCategorias = {
+  categoryId: string;
+  categoryName: string;
+  esHoja: boolean;
+  pathFromRoot: NodoCategoriaMl[];
+};
+
+// Quita tildes/mayúsculas para comparar nombres de categoría sin
+// depender de cómo el usuario los escriba ("bell", "Belleza", "BELLEZA"
+// deben encontrar lo mismo).
+function normalizarNombreCategoria(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+}
+
+const TTL_ARBOL_CATEGORIAS_MS = 24 * 60 * 60 * 1000;
+const LOTE_ARBOL_CATEGORIAS = 20;
+
+const cacheArbolCategoriasPorSitio = new Map<string, { entradas: EntradaArbolCategorias[]; expiraTs: number }>();
+const construccionArbolEnProgresoPorSitio = new Map<string, Promise<EntradaArbolCategorias[]>>();
+
+// Recorre TODO el árbol real del sitio (raíces → hojas) por niveles, en
+// lotes paralelos, para no hacerlo 100% secuencial. `pathFromRoot` de
+// cada categoría sale directo de leerCategoriaMl (mismo GET
+// /categories/{id} de siempre) — nunca se arma a mano acumulando nombres
+// nivel por nivel.
+async function construirArbolPlanoDelSitio(siteId: string, token: string): Promise<EntradaArbolCategorias[]> {
+  const raices = await leerCategoriasRaizMl(siteId, token);
+  const entradas: EntradaArbolCategorias[] = [];
+  let nivelActual = raices.map((r) => r.id);
+  while (nivelActual.length > 0) {
+    const siguienteNivel: string[] = [];
+    for (let i = 0; i < nivelActual.length; i += LOTE_ARBOL_CATEGORIAS) {
+      const lote = nivelActual.slice(i, i + LOTE_ARBOL_CATEGORIAS);
+      const detalles = await Promise.all(lote.map((id) => leerCategoriaMl(id)));
+      for (const cat of detalles) {
+        const esHoja = cat.childrenCategories.length === 0;
+        entradas.push({ categoryId: cat.categoryId, categoryName: cat.categoryName, esHoja, pathFromRoot: cat.pathFromRoot });
+        if (!esHoja) siguienteNivel.push(...cat.childrenCategories.map((c) => c.id));
+      }
+    }
+    nivelActual = siguienteNivel;
+  }
+  return entradas;
+}
+
+// Caché en memoria por sitio (MCO, MLA, MLB…) con expiración — el árbol
+// de categorías de Mercado Libre cambia muy poco, no hace falta
+// recorrerlo entero en cada tecla. Si dos pedidos llegan mientras se está
+// construyendo (típico del buscador con debounce), comparten la MISMA
+// promesa en vez de recorrer el árbol dos veces en paralelo.
+async function obtenerArbolPlanoDelSitio(siteId: string, token: string): Promise<EntradaArbolCategorias[]> {
+  const cacheado = cacheArbolCategoriasPorSitio.get(siteId);
+  if (cacheado && Date.now() < cacheado.expiraTs) return cacheado.entradas;
+  const enProgreso = construccionArbolEnProgresoPorSitio.get(siteId);
+  if (enProgreso) return enProgreso;
+  const promesa = construirArbolPlanoDelSitio(siteId, token)
+    .then((entradas) => {
+      cacheArbolCategoriasPorSitio.set(siteId, { entradas, expiraTs: Date.now() + TTL_ARBOL_CATEGORIAS_MS });
+      return entradas;
+    })
+    .finally(() => construccionArbolEnProgresoPorSitio.delete(siteId));
+  construccionArbolEnProgresoPorSitio.set(siteId, promesa);
+  return promesa;
+}
+
 // §4, función hermana — búsqueda manual para cuando la detección
-// automática por título se equivoca (confirmado en vivo: la misma
-// familia de producto cayó en categorías distintas solo por cómo
-// estaba redactado el título).
-export async function buscarCategorias(siteId: string, texto: string, token: string, limite = 8): Promise<CategoriaResuelta[]> {
-  const r = await domainDiscoveryMl(siteId, texto, token, limite);
-  if (!r.ok) throw new Error(`No se pudo buscar categorías (HTTP ${r.status}).`);
-  return r.resultados.map((c) => ({ categoryId: c.categoryId, categoryName: c.categoryName, domainName: c.domainName }));
+// automática por título (resolverCategoria, domain_discovery) se
+// equivoca. Busca por NOMBRE real de categoría dentro del árbol del
+// sitio, sin tildes/mayúsculas, devolviendo la ruta completa — las
+// categorías que no son hoja también se devuelven (se puede "entrar" a
+// ellas desde el buscador, igual que navegando el árbol a mano).
+export async function buscarCategoriasPorNombre(siteId: string, texto: string, token: string, limite = 30): Promise<EntradaArbolCategorias[]> {
+  const consulta = normalizarNombreCategoria(texto);
+  if (!consulta) return [];
+  const entradas = await obtenerArbolPlanoDelSitio(siteId, token);
+  const coincidencias = entradas.filter((e) => normalizarNombreCategoria(e.categoryName).includes(consulta));
+  coincidencias.sort((a, b) => {
+    const nombreA = normalizarNombreCategoria(a.categoryName);
+    const nombreB = normalizarNombreCategoria(b.categoryName);
+    const prefijoA = nombreA.startsWith(consulta) ? 0 : 1;
+    const prefijoB = nombreB.startsWith(consulta) ? 0 : 1;
+    if (prefijoA !== prefijoB) return prefijoA - prefijoB;
+    return nombreA.length - nombreB.length;
+  });
+  return coincidencias.slice(0, limite);
 }
 
 // §6 — GET /categories/{id}, max_pictures_per_item. Error real evitado:
