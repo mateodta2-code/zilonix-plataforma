@@ -14,7 +14,20 @@ export const ETIQUETA_ESTADO_ITEM_ML: Readonly<Record<string, string>> = {
 
 export function etiquetaEstadoItemMl(status: string | null | undefined): string {
   if (!status) return "Estado desconocido";
-  return ETIQUETA_ESTADO_ITEM_ML[status] ?? `Otro estado (${status})`;
+  return ETIQUETA_ESTADO_ITEM_ML[status] ?? "Otro estado";
+}
+
+// Mismo criterio que ETIQUETA_ESTADO_ITEM_ML, pero para `sub_status`
+// (detalle adicional de Mercado Libre sobre un ítem activo, ej. sin
+// stock o con una advertencia de calidad) — nunca el código en inglés.
+export const ETIQUETA_SUB_STATUS_ITEM_ML: Readonly<Record<string, string>> = {
+  out_of_stock: "Sin stock",
+  warning: "Con advertencia",
+};
+
+export function etiquetaSubStatusItemMl(subStatus: string | null | undefined): string | null {
+  if (!subStatus) return null;
+  return ETIQUETA_SUB_STATUS_ITEM_ML[subStatus] ?? "Otro detalle";
 }
 
 // Mismo criterio que textoEstado() de zilonix-os-web

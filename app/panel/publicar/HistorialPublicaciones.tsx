@@ -17,7 +17,7 @@ import {
   type FilaProductoParaCargar,
 } from "./formulario-logica";
 import { formatearMoneda, SITE_ID_DEFECTO } from "@/lib/ml/sitios";
-import { etiquetaPublicacionCuenta } from "@/lib/ml/estado-publicacion";
+import { etiquetaEstadoItemMl, etiquetaPublicacionCuenta, etiquetaSubStatusItemMl } from "@/lib/ml/estado-publicacion";
 
 const CANTIDAD_COLUMNAS = 6; // Título, Precio, Estado, "", Fecha, Acciones — ancho del <td colSpan> del detalle desplegado.
 
@@ -56,32 +56,43 @@ function EstadoCelda({ producto }: { producto: ProductoHistorial }) {
   );
 }
 
-type EstadoRealCuenta = { cargando: boolean; status: string | null; error: string | null };
+type EstadoRealCuenta = { cargando: boolean; status: string | null; subStatus: string | null; error: string | null };
 
 // Issue "historial de Publicar — detalle en español, in-place" — una
 // cuenta por línea, dentro del <td colSpan> desplegado. `etiquetaPublicacionCuenta`
 // distingue "Publicado (sin verificar)" (status guardado al publicar,
 // nunca confirmado de nuevo) de "Publicado y activo" (después de
 // apretar "Ver estado real") — mismo criterio que zilonix-os-web.
+// `fila.statusGuardado` se muestra como dato de referencia MIENTRAS no
+// se verificó (nunca reemplaza al estado real: pudo cambiar después,
+// directo en Mercado Libre — ese es justamente el motivo de este
+// botón).
 function DetalleCuentaFila({ fila }: { fila: FilaDetalleCuenta }) {
-  const [estadoReal, setEstadoReal] = useState<EstadoRealCuenta>({ cargando: false, status: null, error: null });
+  const [estadoReal, setEstadoReal] = useState<EstadoRealCuenta>({ cargando: false, status: null, subStatus: null, error: null });
 
   async function verEstadoReal() {
     if (!fila.itemId) return;
-    setEstadoReal({ cargando: true, status: null, error: null });
+    setEstadoReal({ cargando: true, status: null, subStatus: null, error: null });
     try {
       const params = new URLSearchParams({ cuentaId: fila.cuentaMlId, itemId: fila.itemId });
       const resp = await fetch(`/api/ml/publicar/estado-item?${params.toString()}`);
-      const datos = (await resp.json().catch(() => null)) as { status?: unknown; error?: unknown } | null;
+      const datos = (await resp.json().catch(() => null)) as { status?: unknown; subStatus?: unknown; error?: unknown } | null;
       if (!resp.ok || !datos) {
-        setEstadoReal({ cargando: false, status: null, error: typeof datos?.error === "string" ? datos.error : "No se pudo consultar el estado real." });
+        setEstadoReal({ cargando: false, status: null, subStatus: null, error: typeof datos?.error === "string" ? datos.error : "No se pudo consultar el estado real." });
         return;
       }
-      setEstadoReal({ cargando: false, status: typeof datos.status === "string" ? datos.status : null, error: null });
+      setEstadoReal({
+        cargando: false,
+        status: typeof datos.status === "string" ? datos.status : null,
+        subStatus: typeof datos.subStatus === "string" ? datos.subStatus : null,
+        error: null,
+      });
     } catch {
-      setEstadoReal({ cargando: false, status: null, error: "No se pudo consultar el estado real — revisá tu conexión." });
+      setEstadoReal({ cargando: false, status: null, subStatus: null, error: "No se pudo consultar el estado real — revisa tu conexión." });
     }
   }
+
+  const etiquetaSubStatus = etiquetaSubStatusItemMl(estadoReal.subStatus);
 
   return (
     <li style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--borde)", fontSize: 13 }}>
@@ -92,6 +103,10 @@ function DetalleCuentaFila({ fila }: { fila: FilaDetalleCuenta }) {
       ) : (
         <>
           <span>{etiquetaPublicacionCuenta(estadoReal.status)}</span>
+          {estadoReal.status === null && fila.statusGuardado && (
+            <span style={{ opacity: 0.6, fontSize: 12 }}>(guardado: {etiquetaEstadoItemMl(fila.statusGuardado)})</span>
+          )}
+          {etiquetaSubStatus && <span style={{ opacity: 0.7, fontSize: 12 }}>· {etiquetaSubStatus}</span>}
           {fila.permalink && (
             <a href={fila.permalink} target="_blank" rel="noreferrer">
               Ver publicación ↗
@@ -149,6 +164,7 @@ export function HistorialPublicaciones({
               const tituloTexto = p.titulo || "(sin título)";
               const expandido = expandidoId === p.id;
               const detalleCuentas = expandido ? detalleCuentasProducto(p.resultado, cuentas) : [];
+              const idDetalle = `detalle-publicacion-${p.id}`;
               return (
               <Fragment key={p.id}>
               <FilaTabla>
@@ -194,6 +210,7 @@ export function HistorialPublicaciones({
                     type="button"
                     onClick={() => setExpandidoId(expandido ? null : p.id)}
                     aria-expanded={expandido}
+                    aria-controls={idDetalle}
                     style={{ background: "none", border: "none", padding: 0, color: "inherit", textDecoration: "underline", cursor: "pointer", font: "inherit" }}
                   >
                     {expandido ? "ocultar" : "ver detalle"}
@@ -229,7 +246,7 @@ export function HistorialPublicaciones({
                 </CeldaTabla>
               </FilaTabla>
               {expandido && (
-                <FilaTabla>
+                <FilaTabla id={idDetalle}>
                   <CeldaTabla colSpan={CANTIDAD_COLUMNAS}>
                     {detalleCuentas.length === 0 ? (
                       <p style={{ fontSize: 13, opacity: 0.7, margin: 0 }}>Publicando en Mercado Libre, un momento…</p>

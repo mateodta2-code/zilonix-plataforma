@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { etiquetaEstadoItemMl, etiquetaPublicacionCuenta } from "./estado-publicacion";
+import { etiquetaEstadoItemMl, etiquetaPublicacionCuenta, etiquetaSubStatusItemMl } from "./estado-publicacion";
 
 describe("etiquetaEstadoItemMl — traducción de status de Mercado Libre", () => {
   it("traduce los 5 estados documentados", () => {
@@ -11,14 +11,28 @@ describe("etiquetaEstadoItemMl — traducción de status de Mercado Libre", () =
   });
 
   it("nunca muestra el código crudo en inglés para un estado no mapeado", () => {
-    const etiqueta = etiquetaEstadoItemMl("payment_required");
-    expect(etiqueta).not.toBe("payment_required");
-    expect(etiqueta).toContain("payment_required"); // visible para diagnóstico, pero no SOLO el código
+    expect(etiquetaEstadoItemMl("payment_required")).toBe("Otro estado");
   });
 
   it("sin status (null/undefined): texto genérico, nunca lanza", () => {
     expect(etiquetaEstadoItemMl(null)).toBe("Estado desconocido");
     expect(etiquetaEstadoItemMl(undefined)).toBe("Estado desconocido");
+  });
+});
+
+describe("etiquetaSubStatusItemMl — traducción del sub_status de Mercado Libre", () => {
+  it("traduce los sub_status documentados", () => {
+    expect(etiquetaSubStatusItemMl("out_of_stock")).toBe("Sin stock");
+    expect(etiquetaSubStatusItemMl("warning")).toBe("Con advertencia");
+  });
+
+  it("sin sub_status (null/undefined): null, nunca lanza", () => {
+    expect(etiquetaSubStatusItemMl(null)).toBeNull();
+    expect(etiquetaSubStatusItemMl(undefined)).toBeNull();
+  });
+
+  it("sub_status no mapeado: texto genérico, nunca el código en inglés", () => {
+    expect(etiquetaSubStatusItemMl("deleted")).toBe("Otro detalle");
   });
 });
 

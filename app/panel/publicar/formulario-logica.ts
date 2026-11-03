@@ -357,6 +357,26 @@ export type FilaDetalleCuenta = {
   subEtiqueta: string | null;
 };
 
+// Revisión del PR #371 (hallazgo IMPORTANTE) — antes de que
+// estado-item/route.ts llame a Mercado Libre, confirma que el itemId
+// pedido salió de verdad de un resultado de publicación de ESTA
+// empresa, para esa misma cuenta — nunca se consulta a Mercado Libre
+// (ni se filtra nada) a partir de un itemId/cuentaId que alguien
+// adivinó. Misma forma de `resultado` que detalleCuentasProducto, pero
+// solo responde sí/no, sin reconstruir filas para la UI.
+export function resultadoContieneItemDeCuenta(resultado: ResultadoPublicacionCuenta[] | null | undefined, itemId: string, cuentaMlId: string): boolean {
+  if (!resultado) return false;
+  for (const r of resultado) {
+    if (r.cuentaMlId !== cuentaMlId) continue;
+    if ("familia" in r) {
+      if (r.familia.items.some((item) => item.ok && item.itemId === itemId)) return true;
+    } else if (r.ok && r.itemId === itemId) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function detalleCuentasProducto(
   resultado: ResultadoPublicacionCuenta[] | null | undefined,
   cuentas: { id: string; nickname: string }[]
