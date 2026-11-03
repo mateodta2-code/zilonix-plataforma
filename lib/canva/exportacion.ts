@@ -106,7 +106,16 @@ async function descargarPaginaSegura(urlPng: string): Promise<Buffer> {
     throw e;
   }
 
-  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(15_000) });
+  // redirect: "error" — mismo motivo que validar-url-externa.ts: un
+  // redirect podría mandar a una IP/host distinto del que ya se validó
+  // arriba (el mismo truco que un SSRF clásico usa para esquivar el
+  // chequeo de DNS); mejor rechazar que seguirlo a ciegas.
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), { signal: AbortSignal.timeout(15_000), redirect: "error" });
+  } catch {
+    throw new Error("No se pudo descargar una página exportada de Canva a tiempo.");
+  }
   if (!res.ok) throw new Error(`No se pudo descargar una página exportada de Canva (HTTP ${res.status}).`);
   const buffer = Buffer.from(await res.arrayBuffer());
   if (buffer.byteLength > TAMANO_MAXIMO_PAGINA_BYTES) {

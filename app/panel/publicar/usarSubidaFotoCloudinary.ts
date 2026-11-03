@@ -24,7 +24,7 @@ export function usarSubidaFotoCloudinary(alSubir: (url: string) => void) {
       }
       alSubir(data.url);
     } catch {
-      setError("No se pudo subir la imagen — revisá tu conexión e intentá de nuevo.");
+      setError("No se pudo subir la imagen — revisa tu conexión e intenta de nuevo.");
     } finally {
       setSubiendo(false);
     }

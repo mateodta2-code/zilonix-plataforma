@@ -26,6 +26,14 @@ describe("esLinkDeDisenoCanva", () => {
     expect(esLinkDeDisenoCanva("https://www.canva.com/p/alguna-otra-pagina")).toBe(false);
   });
 
+  // Ajuste opcional del review (PR #368) — mismo chequeo de ID que el
+  // servidor (lib/canva/enlace.ts): un /design/ sin ningún id con el
+  // prefijo DA tampoco cuenta como diseño acá, para no mandar al
+  // servidor un link que de todas formas va a rechazar.
+  it("canva.com/design/ SIN un id con el prefijo DA tampoco es un diseño", () => {
+    expect(esLinkDeDisenoCanva("https://www.canva.com/design/sin-id-real")).toBe(false);
+  });
+
   it("un host que no es de Canva no es un diseño", () => {
     expect(esLinkDeDisenoCanva("https://atacante.ejemplo.com/design/DAxyz/edit")).toBe(false);
   });

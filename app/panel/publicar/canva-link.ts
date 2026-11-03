@@ -12,6 +12,14 @@
 // importa lib/canva/enlace.ts: ese archivo usa dns/promises, que no
 // existe en el navegador) — solo decide qué camino de subida tomar en
 // GaleriaFotos.tsx.
+//
+// Mismo patrón de ID que el servidor (lib/canva/enlace.ts) — un
+// canva.com/design/... SIN un id con el prefijo DA tampoco es un
+// diseño válido para este camino (ajuste opcional del review, PR
+// #368): nunca manda al flujo de exportar-diseño un link que el
+// servidor de todas formas va a rechazar con "sin design_id".
+const REGEX_DESIGN_ID = /DA[A-Za-z0-9_-]+/;
+
 export function esLinkDeDisenoCanva(valor: string): boolean {
   let url: URL;
   try {
@@ -21,6 +29,8 @@ export function esLinkDeDisenoCanva(valor: string): boolean {
   }
   const h = url.hostname.toLowerCase();
   if (h === "canva.link") return true;
-  if ((h === "canva.com" || h === "www.canva.com") && url.pathname.startsWith("/design/")) return true;
+  if ((h === "canva.com" || h === "www.canva.com") && url.pathname.startsWith("/design/")) {
+    return REGEX_DESIGN_ID.test(url.pathname);
+  }
   return false;
 }

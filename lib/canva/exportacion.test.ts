@@ -115,6 +115,20 @@ describe("subirPaginasACloudinary — descarga cada página y la sube con el flu
     const urls = await subirPaginasACloudinary(["https://media.canva.com/v2/export/pagina1.png"]);
 
     expect(urls).toEqual(["https://res.cloudinary.com/cloud-de-prueba/image/upload/canva.png"]);
+    const [, opcionesDescarga] = fetchMock.mock.calls[0];
+    expect(opcionesDescarga?.redirect).toBe("error");
+  });
+
+  // Ajuste del review (PR #368) — mismo motivo que validar-url-externa.ts:
+  // un redirect podría mandar a un host/IP distinto del que ya se
+  // validó contra la allowlist + DNS; con redirect:"error", fetch
+  // rechaza la promesa en vez de seguirlo a ciegas.
+  it("si la página exportada redirige, se rechaza en vez de seguir la redirección", async () => {
+    lookupMock.mockResolvedValue([{ address: "151.101.1.140" }]);
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch — redirect prohibido"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(subirPaginasACloudinary(["https://media.canva.com/v2/export/pagina1.png"])).rejects.toThrow();
   });
 
   it("si la descarga de una página falla, no llega a subir nada a Cloudinary", async () => {
