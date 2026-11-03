@@ -338,6 +338,84 @@ export function enlacesPermalink(
   return enlaces;
 }
 
+// Historial de Publicar — "ver detalle" ahora despliega EN LA MISMA
+// FILA una línea por cuenta (nunca navega a /panel/publicar/[id], esa
+// pantalla sigue existiendo solo para links viejos guardados). Una
+// sola forma por línea para los 3 tipos de resultado (éxito clásico,
+// fallo, familia/User Products con N ítems) — igual que enlacesPermalink,
+// pero sin descartar los fallos (acá SÍ hace falta mostrar el motivo).
+// `itemId` es el dato que permite consultar el estado real sin
+// recargar (botón "Ver estado real", vía lib/ml/cliente.ts); queda
+// null en un fallo, que nunca llegó a tener un ítem en Mercado Libre.
+export type FilaDetalleCuenta = {
+  cuentaMlId: string;
+  nickname: string;
+  itemId: string | null;
+  permalink: string | null;
+  statusGuardado: string | null;
+  error: string | null;
+  subEtiqueta: string | null;
+};
+
+// Revisión del PR #371 (hallazgo IMPORTANTE) — antes de que
+// estado-item/route.ts llame a Mercado Libre, confirma que el itemId
+// pedido salió de verdad de un resultado de publicación de ESTA
+// empresa, para esa misma cuenta — nunca se consulta a Mercado Libre
+// (ni se filtra nada) a partir de un itemId/cuentaId que alguien
+// adivinó. Misma forma de `resultado` que detalleCuentasProducto, pero
+// solo responde sí/no, sin reconstruir filas para la UI.
+export function resultadoContieneItemDeCuenta(resultado: ResultadoPublicacionCuenta[] | null | undefined, itemId: string, cuentaMlId: string): boolean {
+  if (!resultado) return false;
+  for (const r of resultado) {
+    if (r.cuentaMlId !== cuentaMlId) continue;
+    if ("familia" in r) {
+      if (r.familia.items.some((item) => item.ok && item.itemId === itemId)) return true;
+    } else if (r.ok && r.itemId === itemId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function detalleCuentasProducto(
+  resultado: ResultadoPublicacionCuenta[] | null | undefined,
+  cuentas: { id: string; nickname: string }[]
+): FilaDetalleCuenta[] {
+  if (!resultado) return [];
+  const nicknamePorCuenta = new Map(cuentas.map((c) => [c.id, c.nickname]));
+  const filas: FilaDetalleCuenta[] = [];
+  for (const r of resultado) {
+    const nickname = nicknamePorCuenta.get(r.cuentaMlId) ?? r.cuentaMlId;
+    if ("familia" in r) {
+      for (const item of r.familia.items) {
+        const sufijo = item.sku || (Object.values(item.valores).length ? Object.values(item.valores).join(" / ") : null);
+        filas.push({
+          cuentaMlId: r.cuentaMlId,
+          nickname,
+          itemId: item.itemId ?? null,
+          permalink: item.ok ? permalinkOArmado(item.permalink, item.itemId) : null,
+          statusGuardado: item.ok ? item.status ?? null : null,
+          error: item.ok ? null : item.error ?? null,
+          subEtiqueta: sufijo,
+        });
+      }
+    } else if (r.ok) {
+      filas.push({
+        cuentaMlId: r.cuentaMlId,
+        nickname,
+        itemId: r.itemId,
+        permalink: permalinkOArmado(r.permalink, r.itemId),
+        statusGuardado: r.status,
+        error: null,
+        subEtiqueta: null,
+      });
+    } else {
+      filas.push({ cuentaMlId: r.cuentaMlId, nickname, itemId: null, permalink: null, statusGuardado: null, error: r.error, subEtiqueta: null });
+    }
+  }
+  return filas;
+}
+
 // Punto A del pedido — forma común de "lo que se trajo de afuera" para
 // precargar el formulario, sin importar si vino de un SKU propio, de un
 // link, o del bookmarklet (las 3 vías del punto A llegan a esto mismo,

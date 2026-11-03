@@ -118,6 +118,10 @@ const RUTAS_PROTEGIDAS = new Set([
   // Parte 3, punto C — sube una foto (de la PC o una URL de Canva ya
   // validada) a Cloudinary; mismo permiso que crear el producto en sí.
   "app/api/ml/publicar/fotos/route.ts",
+  // Historial de Publicar — detalle in-place, botón "Ver estado real":
+  // solo LEE el status actual de un ítem ya publicado, nunca publica
+  // ni cambia nada; mismo permiso que ver el historial en sí.
+  "app/api/ml/publicar/estado-item/route.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
   // Tarea "Publicar — conectar Canva" — cada usuario conecta SU propia
