@@ -171,6 +171,10 @@
   max-width: 100%;
 }
 
+.anuncios .thConAyuda {
+  flex-wrap: nowrap;
+}
+
 .orden {
   display: inline-flex;
   flex-direction: column;
@@ -337,7 +341,7 @@
   /* A 1280 la tabla mide ~895 px. Campaña ~135 px, Estado ~130 px.
      Con publ. y Sin publ. llevan ~8 px más para no cortarse ni pegarse
      a Ventas totales. */
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 15.1%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 14%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(2) { width: 14.6%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(3) { width: 6.8%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 8.05%; }
@@ -345,12 +349,17 @@
   .tarjetaTabla > div > table > thead > tr > th:nth-child(6) { width: 7.2%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(7) { width: 4.8%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(8) { width: 5%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(9) { width: 4.4%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(10) { width: 4.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(9) { width: 4.4%; padding-right: 6px; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(10) { width: 4.2%; padding-left: 6px; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(11) { width: 4.2%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(12) { width: 5.2%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(13) { width: 4.2%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(14) { width: 8.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(14) { width: 9.3%; }
+}
+
+.tarjetaTabla > div > table > thead > tr > th:last-child,
+.tarjetaTabla > div > table > tbody > tr > td:last-child:not([colspan]) {
+  padding-right: 12px;
 }
 
 .anuncios td:first-child,
@@ -363,6 +372,7 @@
 .anuncios td:last-child,
 .anuncios th:last-child {
   padding-right: 12px;
+  padding-left: 8px;
 }
 
 .orden:hover,
