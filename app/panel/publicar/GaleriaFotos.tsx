@@ -4,11 +4,19 @@ import { useRef, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { moverFoto } from "./formulario-logica";
 import { usarSubidaFotoCloudinary } from "./usarSubidaFotoCloudinary";
-import { ConectarCanva } from "./ConectarCanva";
 import { esLinkDeDisenoCanva } from "./canva-link";
 import styles from "./publicar.module.css";
 
 const TIPOS_IMAGEN_ACEPTADOS = "image/jpeg,image/png,image/webp";
+const LISTA_TIPOS_IMAGEN_ACEPTADOS = TIPOS_IMAGEN_ACEPTADOS.split(",");
+
+// BAJO, review PR #372 — el input de archivo ya filtra con `accept`,
+// pero un drop desde el escritorio no respeta ese atributo (el SO deja
+// soltar cualquier cosa). Se filtra acá para no mandar un .pdf o un
+// .docx a la ruta de subida.
+function soloImagenes(archivos: File[]): File[] {
+  return archivos.filter((archivo) => LISTA_TIPOS_IMAGEN_ACEPTADOS.includes(archivo.type));
+}
 
 // Feedback real de Mateo probando en staging — la tarjeta "+" dejó de
 // ser "escribir una URL a mano" y pasó a ser "subir un archivo de la
@@ -30,36 +38,69 @@ export function GaleriaFotos({
   urls,
   onChange,
   cloudinaryConfigurado,
+  limiteFotos,
 }: {
   urls: string[];
   onChange: (urls: string[]) => void;
   cloudinaryConfigurado: boolean;
+  limiteFotos: number | null;
 }) {
   const [agregandoUrlManual, setAgregandoUrlManual] = useState(false);
   const [urlNueva, setUrlNueva] = useState("");
   const [indiceArrastrado, setIndiceArrastrado] = useState<number | null>(null);
   const [fotoRota, setFotoRota] = useState<Record<number, boolean>>({});
+  const [avisoLimite, setAvisoLimite] = useState<string | null>(null);
 
   const [canvaUrl, setCanvaUrl] = useState("");
   const inputArchivoRef = useRef<HTMLInputElement>(null);
+  // MEDIO, review PR #372 — cuántas fotos están en vuelo (ya aceptadas
+  // por el cupo pero todavía subiendo) entre un drop/selección y el
+  // siguiente, para no pasarse de `limiteFotos` si se sueltan dos
+  // tandas antes de que la primera termine.
+  const fotosEnVueloRef = useRef(0);
+  // MEDIO 1, review 2 del PR #372 — `urls` (prop) queda vieja si una
+  // segunda tanda termina de subir antes de que el padre re-renderice
+  // con el resultado de la primera: dos lotes en vuelo comparten la
+  // misma `urls` cerrada al momento de soltarlos. `urlsRef` es la
+  // fuente de verdad real: se sincroniza con la prop en cada render Y
+  // se actualiza al toque cuando un lote termina, así el siguiente que
+  // termine ya ve lo que agregó el anterior.
+  const urlsRef = useRef(urls);
+  urlsRef.current = urls;
+
+  function agregarUrls(nuevas: string[]) {
+    const actualizado = [...urlsRef.current, ...nuevas];
+    urlsRef.current = actualizado;
+    onChange(actualizado);
+  }
+
   const {
     subiendo,
     error: errorSubida,
     codigoError,
-    subirArchivo,
+    progreso,
+    subirArchivos,
     subirCanvaUrl,
     subirDisenoCanva,
-  } = usarSubidaFotoCloudinary((url) => onChange([...urls, url]));
+  } = usarSubidaFotoCloudinary(
+    (url) => agregarUrls([url]),
+    // ALTO 1, review PR #372 — una sola llamada a onChange con todas
+    // las URL del lote (ya en orden de selección, ver subirArchivos en
+    // usarSubidaFotoCloudinary.ts), en vez de una por foto con el
+    // `urls` viejo.
+    (nuevas) => agregarUrls(nuevas)
+  );
 
   // Code review de Pablo (PR #368, review 5757123834) — codigoError
   // llegaba del servidor pero no se usaba para nada: la persona veía
   // el error crudo sin ninguna indicación de qué hacer. "no_conectado"
-  // tiene una acción concreta (el botón ConectarCanva, al lado del
-  // campo); cualquier otro código que llegue a futuro, sin una acción
-  // propia todavía, al menos dice qué intentar en vez de quedar mudo.
+  // tiene una acción concreta (el botón ConectarCanva, ahora arriba del
+  // todo en Publicar — ver FormularioPublicar.tsx); cualquier otro
+  // código que llegue a futuro, sin una acción propia todavía, al menos
+  // dice qué intentar en vez de quedar mudo.
   function textoDeAccionPorCodigo(codigo: string | null): string | null {
     if (!codigo) return null;
-    if (codigo === "no_conectado") return "Usa el botón \"Conectar Canva\", al lado de este campo.";
+    if (codigo === "no_conectado") return "Usa el botón \"Conectar Canva\", arriba de esta sección.";
     return "Intenta de nuevo en unos segundos; si sigue pasando, avisa a soporte.";
   }
 
@@ -70,10 +111,44 @@ export function GaleriaFotos({
     setAgregandoUrlManual(false);
   }
 
-  function alElegirArchivo(e: React.ChangeEvent<HTMLInputElement>) {
-    const archivo = e.target.files?.[0];
-    e.target.value = ""; // permite elegir el MISMO archivo dos veces seguidas
-    if (archivo) subirArchivo(archivo);
+  // Respeta el límite de fotos de la categoría (maxFotos, detectado en
+  // FormularioPublicar): si el lote se pasa, sube solo hasta llenar el
+  // cupo y avisa cuántas quedaron fuera — a diferencia del límite al
+  // publicar (que solo recorta en silencio), acá la persona eligió esas
+  // fotos a propósito y merece saber que algunas no entraron.
+  function subirRespetandoLimite(archivos: File[]) {
+    setAvisoLimite(null);
+    // MEDIO 2, review 2 del PR #372 — `fotosEnVueloRef` se lleva
+    // siempre, haya o no `limiteFotos`: si no se lleva mientras no hay
+    // límite, un cambio posterior de categoría (que SÍ trae límite)
+    // mientras ese lote sin límite todavía está subiendo no se enteraría
+    // de esas fotos en vuelo y dejaría pasar de más.
+    let admitidos = archivos;
+    if (limiteFotos != null) {
+      // El cupo se cuenta contra las fotos ya puestas MÁS las que ya
+      // están en vuelo de un drop/selección anterior que todavía no
+      // terminó, no solo contra `urls.length`.
+      const espacio = Math.max(0, limiteFotos - urls.length - fotosEnVueloRef.current);
+      admitidos = archivos.slice(0, espacio);
+      const sobrantes = archivos.length - admitidos.length;
+      if (sobrantes > 0) {
+        setAvisoLimite(
+          `Esta categoría admite hasta ${limiteFotos} fotos — ${sobrantes} ${sobrantes === 1 ? "foto quedó" : "fotos quedaron"} fuera por el límite.`
+        );
+      }
+    }
+    if (admitidos.length > 0) {
+      fotosEnVueloRef.current += admitidos.length;
+      void subirArchivos(admitidos).finally(() => {
+        fotosEnVueloRef.current -= admitidos.length;
+      });
+    }
+  }
+
+  function alElegirArchivos(e: React.ChangeEvent<HTMLInputElement>) {
+    const archivos = Array.from(e.target.files ?? []);
+    e.target.value = ""; // permite elegir los MISMOS archivos dos veces seguidas
+    if (archivos.length > 0) subirRespetandoLimite(archivos);
   }
 
   // Dos caminos bien distintos bajo el mismo campo: el link de
@@ -104,9 +179,9 @@ export function GaleriaFotos({
   // cosa con la otra.
   function alSoltar(e: React.DragEvent, indiceDestino: number) {
     e.preventDefault();
-    const archivo = e.dataTransfer.files?.[0];
-    if (archivo) {
-      subirArchivo(archivo);
+    const archivos = soloImagenes(Array.from(e.dataTransfer.files ?? []));
+    if (archivos.length > 0) {
+      subirRespetandoLimite(archivos);
       return;
     }
     if (indiceArrastrado == null) return;
@@ -116,8 +191,8 @@ export function GaleriaFotos({
 
   function alSoltarEnAgregar(e: React.DragEvent) {
     e.preventDefault();
-    const archivo = e.dataTransfer.files?.[0];
-    if (archivo) subirArchivo(archivo);
+    const archivos = soloImagenes(Array.from(e.dataTransfer.files ?? []));
+    if (archivos.length > 0) subirRespetandoLimite(archivos);
   }
 
   function alHacerClicEnAgregar() {
@@ -152,7 +227,7 @@ export function GaleriaFotos({
           </div>
         ))}
 
-        <input ref={inputArchivoRef} type="file" accept={TIPOS_IMAGEN_ACEPTADOS} onChange={alElegirArchivo} hidden />
+        <input ref={inputArchivoRef} type="file" accept={TIPOS_IMAGEN_ACEPTADOS} multiple onChange={alElegirArchivos} hidden />
 
         {agregandoUrlManual ? (
           <div className={`${styles.recuadroMarca} ${styles.miniatura}`} style={{ cursor: "default", display: "flex", flexDirection: "column", padding: 4, gap: 4 }}>
@@ -185,7 +260,11 @@ export function GaleriaFotos({
             disabled={subiendo}
             aria-label={cloudinaryConfigurado ? "Subir foto desde la PC" : "Agregar foto"}
           >
-            {subiendo ? <span style={{ fontSize: 11 }}>Subiendo…</span> : "+"}
+            {subiendo ? (
+              <span style={{ fontSize: 11 }}>{progreso ? `Subiendo ${Math.min(progreso.completados + 1, progreso.total)} de ${progreso.total}` : "Subiendo…"}</span>
+            ) : (
+              "+"
+            )}
           </button>
         )}
       </div>
@@ -213,7 +292,6 @@ export function GaleriaFotos({
             <Boton type="button" variante="secundario" chico onClick={confirmarCanvaUrl} disabled={subiendo || !canvaUrl.trim()}>
               Traer
             </Boton>
-            <ConectarCanva />
           </div>
           {errorSubida && (
             <p style={{ fontSize: 12, color: "var(--kpi-peligro-texto)", marginTop: 6 }}>
@@ -221,6 +299,7 @@ export function GaleriaFotos({
               {textoDeAccionPorCodigo(codigoError) && <> {textoDeAccionPorCodigo(codigoError)}</>}
             </p>
           )}
+          {avisoLimite && <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 6 }}>{avisoLimite}</p>}
         </>
       ) : (
         <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 10 }}>

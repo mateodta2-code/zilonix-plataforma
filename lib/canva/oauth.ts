@@ -26,7 +26,7 @@ const TOKEN_URL = "https://api.canva.com/rest/v1/oauth/token";
 const SCOPES = "design:content:read design:meta:read asset:read";
 
 function requerirVariable(nombre: string): string {
-  const valor = process.env[nombre];
+  const valor = process.env[nombre]?.trim();
   if (!valor) throw new Error(`Falta la variable de entorno ${nombre}.`);
   return valor;
 }
