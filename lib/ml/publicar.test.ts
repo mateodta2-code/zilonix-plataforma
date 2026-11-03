@@ -5,7 +5,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { auditoria, cuentasMl, empresas, productosMl, publicaciones } from "@/db/schema";
 import { afirmarAislamiento, crearDosEmpresas } from "@/db/test-utils/aislamiento";
 import { cifrarToken } from "@/lib/cifrado";
-import { leerArbolCategorias, publicarProductoEnCuentas } from "./publicar";
+import { buscarCategoriasPorNombre, leerArbolCategorias, publicarProductoEnCuentas } from "./publicar";
 
 // Tarea 2.11 ("Publicar producto y clip") — pruebas de integración
 // contra Postgres real (RLS incluido) con `fetch` mockeado, mismo
@@ -181,6 +181,121 @@ describe("leerArbolCategorias — ADENDO UX de Publicar", () => {
     const nodo = await leerArbolCategorias("MCO", "token-real", "MCO1234");
     expect(nodo.esHoja).toBe(true);
     expect(nodo.children).toEqual([]);
+  });
+});
+
+// Fix Publicar/"Buscar categoría a mano" — domain_discovery (resolverCategoria)
+// es un predictor de TÍTULO, no un buscador por nombre de categoría: texto
+// corto como "Belleza" devolvía dominios sin relación. buscarCategoriasPorNombre
+// recorre el árbol real del sitio (mismo criterio de esHoja que
+// leerArbolCategorias: children_categories vacío) y busca por nombre. Cada
+// prueba usa un siteId distinto para no compartir la caché en memoria del
+// módulo entre pruebas.
+describe("buscarCategoriasPorNombre — fix Publicar/Buscar categoría a mano", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function mockArbolBelleza(siteId: string) {
+    vi.stubGlobal(
+      "fetch",
+      enrutarFetch([
+        [new RegExp(`/sites/${siteId}/categories$`), () => jsonRes(200, [{ id: `${siteId}1`, name: "Belleza y Cuidado Personal" }, { id: `${siteId}2`, name: "Hogar" }])],
+        [
+          new RegExp(`/categories/${siteId}1$`),
+          () =>
+            jsonRes(200, {
+              id: `${siteId}1`,
+              name: "Belleza y Cuidado Personal",
+              children_categories: [{ id: `${siteId}11`, name: "Manicure y Pedicure" }],
+              path_from_root: [{ id: `${siteId}1`, name: "Belleza y Cuidado Personal" }],
+            }),
+        ],
+        [new RegExp(`/categories/${siteId}2$`), () => jsonRes(200, { id: `${siteId}2`, name: "Hogar", children_categories: [], path_from_root: [{ id: `${siteId}2`, name: "Hogar" }] })],
+        [
+          new RegExp(`/categories/${siteId}11$`),
+          () =>
+            jsonRes(200, {
+              id: `${siteId}11`,
+              name: "Manicure y Pedicure",
+              children_categories: [{ id: `${siteId}111`, name: "Nail Art" }],
+              path_from_root: [
+                { id: `${siteId}1`, name: "Belleza y Cuidado Personal" },
+                { id: `${siteId}11`, name: "Manicure y Pedicure" },
+              ],
+            }),
+        ],
+        [
+          new RegExp(`/categories/${siteId}111$`),
+          () =>
+            jsonRes(200, {
+              id: `${siteId}111`,
+              name: "Nail Art",
+              children_categories: [],
+              path_from_root: [
+                { id: `${siteId}1`, name: "Belleza y Cuidado Personal" },
+                { id: `${siteId}11`, name: "Manicure y Pedicure" },
+                { id: `${siteId}111`, name: "Nail Art" },
+              ],
+            }),
+        ],
+      ])
+    );
+  }
+
+  it("'bell' encuentra 'Belleza y Cuidado Personal' (no es el predictor de título)", async () => {
+    mockArbolBelleza("MCO");
+    const resultados = await buscarCategoriasPorNombre("MCO", "bell", "token-real");
+    expect(resultados.map((r) => r.categoryName)).toContain("Belleza y Cuidado Personal");
+  });
+
+  it("'Belleza' (mayúscula inicial) también encuentra 'Belleza y Cuidado Personal'", async () => {
+    mockArbolBelleza("MLM");
+    const resultados = await buscarCategoriasPorNombre("MLM", "Belleza", "token-real");
+    expect(resultados.map((r) => r.categoryName)).toContain("Belleza y Cuidado Personal");
+  });
+
+  it("ignora tildes y mayúsculas al comparar nombres", async () => {
+    const siteId = "MLB";
+    vi.stubGlobal(
+      "fetch",
+      enrutarFetch([
+        [new RegExp(`/sites/${siteId}/categories$`), () => jsonRes(200, [{ id: `${siteId}1`, name: "Decoración" }])],
+        [new RegExp(`/categories/${siteId}1$`), () => jsonRes(200, { id: `${siteId}1`, name: "Decoración", children_categories: [], path_from_root: [{ id: `${siteId}1`, name: "Decoración" }] })],
+      ])
+    );
+    const resultados = await buscarCategoriasPorNombre(siteId, "DECORACION", "token-real");
+    expect(resultados.map((r) => r.categoryName)).toContain("Decoración");
+  });
+
+  it("usa el siteId recibido (el de la cuenta), no uno fijo", async () => {
+    const siteId = "MLA";
+    let urlLlamada = "";
+    vi.stubGlobal(
+      "fetch",
+      enrutarFetch([
+        [
+          new RegExp(`/sites/${siteId}/categories$`),
+          (u) => {
+            urlLlamada = u;
+            return jsonRes(200, [{ id: `${siteId}1`, name: "Belleza y Cuidado Personal" }]);
+          },
+        ],
+        [new RegExp(`/categories/${siteId}1$`), () => jsonRes(200, { id: `${siteId}1`, name: "Belleza y Cuidado Personal", children_categories: [], path_from_root: [{ id: `${siteId}1`, name: "Belleza y Cuidado Personal" }] })],
+      ])
+    );
+    await buscarCategoriasPorNombre(siteId, "belleza", "token-real");
+    expect(urlLlamada).toContain(`/sites/${siteId}/categories`);
+  });
+
+  it("una categoría que no es hoja (children reales) viene marcada esHoja=false; la hoja real, esHoja=true", async () => {
+    const siteId = "MLC";
+    mockArbolBelleza(siteId);
+    const resultados = await buscarCategoriasPorNombre(siteId, "manicure", "token-real");
+    const manicure = resultados.find((r) => r.categoryName === "Manicure y Pedicure");
+    expect(manicure?.esHoja).toBe(false);
+
+    const resultadosNail = await buscarCategoriasPorNombre(siteId, "nail art", "token-real");
+    const nailArt = resultadosNail.find((r) => r.categoryName === "Nail Art");
+    expect(nailArt?.esHoja).toBe(true);
   });
 });
 

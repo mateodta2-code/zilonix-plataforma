@@ -327,7 +327,7 @@ export function FormularioPublicar({
         <p className="zx-etiqueta">Características de la categoría</p>
         <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>
           Mercado Libre exige elegir una categoría real y completar sus atributos antes de poder publicar — detectamos la categoría según el
-          título de la primera cuenta elegida; si se equivoca, podés buscarla a mano o navegar el árbol real.
+          título de la primera cuenta elegida; si se equivoca, puedes buscarla a mano o navegar el árbol real.
         </p>
         <p style={{ fontSize: 13, marginTop: 8 }}>
           {categoriaElegida ? (
