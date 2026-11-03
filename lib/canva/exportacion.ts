@@ -1,4 +1,5 @@
-import { tipoImagenPorMagicBytes } from "@/app/panel/publicar/fotos/validar-url-externa";
+import { hostPermitidoCanva, tipoImagenPorMagicBytes } from "@/app/panel/publicar/fotos/validar-url-externa";
+import { HostnameNoResueltoError, HostnamePrivadoError, exigirHostnamePublico } from "@/lib/seguridad/ssrf";
 import { subirACloudinary } from "@/lib/cloudinary";
 
 // Export de un diseño a PNG + polling — forma del payload y de la
@@ -7,10 +8,6 @@ import { subirACloudinary } from "@/lib/cloudinary";
 const EXPORTS_URL = "https://api.canva.com/rest/v1/exports";
 const INTENTOS_MAX = 15;
 const ESPERA_MS = 1_500;
-// Cada página exportada se descarga de la URL temporal que devuelve
-// Canva (su propio CDN, no un host puesto por el usuario) — no hace
-// falta todo el aparato anti-SSRF de validar-url-externa.ts para esto,
-// pero sí el mismo tope de tamaño, por las dudas.
 const TAMANO_MAXIMO_PAGINA_BYTES = 10 * 1024 * 1024;
 
 export class ExportacionCanvaFallidaError extends Error {}
@@ -26,6 +23,18 @@ export class ExportacionCanvaSinAccesoError extends Error {
     this.name = "ExportacionCanvaSinAccesoError";
   }
 }
+
+// Code review de Pablo (PR #368, review 5757123834) — las URLs que
+// devuelve el job de exportación vienen de la respuesta JSON de la API
+// de Canva, no de un host fijo que este archivo controle: un bug o una
+// respuesta comprometida ahí podría mandar a descargar cualquier
+// URL/IP (el mismo riesgo de SSRF que ya se cerró para el link que
+// pega el usuario, validar-url-externa.ts). Se valida cada una contra
+// la MISMA allowlist de hosts de Canva (media.canva.com,
+// *.canvausercontent.com) y las mismas defensas anti-SSRF
+// (lib/seguridad/ssrf.ts: DNS real, rechaza IP privada/metadata) —
+// nunca se descarga a ciegas solo porque "la mandó la API de Canva".
+export class ExportacionCanvaUrlNoPermitidaError extends Error {}
 
 type JobCanva = { id: string; status: string; urls?: string[]; error?: { message?: string; code?: string } };
 
@@ -78,18 +87,41 @@ export async function exportarDisenoPng(accessToken: string, designId: string): 
   throw new ExportacionCanvaDemoradaError();
 }
 
+async function descargarPaginaSegura(urlPng: string): Promise<Buffer> {
+  let url: URL;
+  try {
+    url = new URL(urlPng);
+  } catch {
+    throw new ExportacionCanvaUrlNoPermitidaError("Canva devolvió una URL de exportación inválida.");
+  }
+  if (url.protocol !== "https:" || !hostPermitidoCanva(url.hostname)) {
+    throw new ExportacionCanvaUrlNoPermitidaError(`Canva devolvió una URL de exportación fuera de su allowlist ("${url.hostname}").`);
+  }
+  try {
+    await exigirHostnamePublico(url.hostname);
+  } catch (e) {
+    if (e instanceof HostnameNoResueltoError || e instanceof HostnamePrivadoError) {
+      throw new ExportacionCanvaUrlNoPermitidaError("No se pudo validar la URL de exportación de Canva.");
+    }
+    throw e;
+  }
+
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`No se pudo descargar una página exportada de Canva (HTTP ${res.status}).`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  if (buffer.byteLength > TAMANO_MAXIMO_PAGINA_BYTES) {
+    throw new Error("Una página exportada de Canva superó el tamaño máximo permitido.");
+  }
+  return buffer;
+}
+
 // Descarga cada página exportada y la sube a Cloudinary con el mismo
 // flujo "signed" ya existente (lib/cloudinary.ts) — nunca expone la URL
 // temporal de Canva en pictures.source de Mercado Libre.
 export async function subirPaginasACloudinary(urlsPng: string[]): Promise<string[]> {
   const urls: string[] = [];
   for (const urlPng of urlsPng) {
-    const res = await fetch(urlPng, { signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) throw new Error(`No se pudo descargar una página exportada de Canva (HTTP ${res.status}).`);
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.byteLength > TAMANO_MAXIMO_PAGINA_BYTES) {
-      throw new Error("Una página exportada de Canva superó el tamaño máximo permitido.");
-    }
+    const buffer = await descargarPaginaSegura(urlPng);
     const tipoReal = tipoImagenPorMagicBytes(buffer) ?? "image/png";
     const { url } = await subirACloudinary(buffer, "canva.png", tipoReal);
     urls.push(url);

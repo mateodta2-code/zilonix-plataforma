@@ -12,4 +12,4 @@
 
   **Tests nuevos**: `lib/canva/oauth.test.ts`, `lib/canva/enlace.test.ts` (enlace corto/largo, rechazo de host fuera de `canva.com`, IP privada), `lib/canva/exportacion.test.ts` (export+polling: éxito/fallo/timeout/403, subida a Cloudinary) — corridos en local, en verde. `lib/canva/conexiones.test.ts`, `db/rls-canva-conexiones.test.ts` (candado de renovación, token de un usuario nunca sirve para otro, aislamiento por empresa+usuario contra Postgres real) — necesitan `DATABASE_URL_APP`/`ML_TOKEN_KEY_V1` reales, los corre el CI.
 
-  **No se tocó**: `extension/`, `lib/ml/cliente.ts`, ninguna versión de `next`/`react`/`@clerk/*`/`drizzle`. Refs #N (pendiente — Pablo/Mateo: completar con el número real del issue antes de abrir el PR).
+  **No se tocó**: `extension/`, `lib/ml/cliente.ts`, ninguna versión de `next`/`react`/`@clerk/*`/`drizzle`. Refs #366.

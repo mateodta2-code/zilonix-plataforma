@@ -59,7 +59,7 @@ export async function resolverDesignId(enlaceCrudo: string): Promise<string> {
   }
 
   if (!hostEsCanvaCom(url.hostname) && !hostEsCanvaLink(url.hostname)) {
-    throw new EnlaceCanvaNoPermitidoError(`"${url.hostname}" no es un link de Canva — pegá el link de "Compartir" o el de edición del diseño.`);
+    throw new EnlaceCanvaNoPermitidoError(`"${url.hostname}" no es un link de Canva — pega el link de "Compartir" o el de edición del diseño.`);
   }
 
   // Link largo: el design_id ya está en la URL, nunca hace falta

@@ -67,7 +67,7 @@ export function usarSubidaFotoCloudinary(alSubir: (url: string) => void) {
       }
       data.urls.forEach((url) => alSubir(url));
     } catch {
-      setError("No se pudo traer el diseño de Canva — revisá tu conexión e intentá de nuevo.");
+      setError("No se pudo traer el diseño de Canva — revisa tu conexión e intenta de nuevo.");
     } finally {
       setSubiendo(false);
       alTerminar?.();

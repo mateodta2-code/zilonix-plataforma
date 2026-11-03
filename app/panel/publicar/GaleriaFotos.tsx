@@ -5,6 +5,7 @@ import { Boton } from "@/components/marco/Boton";
 import { moverFoto } from "./formulario-logica";
 import { usarSubidaFotoCloudinary } from "./usarSubidaFotoCloudinary";
 import { ConectarCanva } from "./ConectarCanva";
+import { esLinkDeDisenoCanva } from "./canva-link";
 import styles from "./publicar.module.css";
 
 const TIPOS_IMAGEN_ACEPTADOS = "image/jpeg,image/png,image/webp";
@@ -44,10 +45,23 @@ export function GaleriaFotos({
   const {
     subiendo,
     error: errorSubida,
+    codigoError,
     subirArchivo,
     subirCanvaUrl,
     subirDisenoCanva,
   } = usarSubidaFotoCloudinary((url) => onChange([...urls, url]));
+
+  // Code review de Pablo (PR #368, review 5757123834) — codigoError
+  // llegaba del servidor pero no se usaba para nada: la persona veía
+  // el error crudo sin ninguna indicación de qué hacer. "no_conectado"
+  // tiene una acción concreta (el botón ConectarCanva, al lado del
+  // campo); cualquier otro código que llegue a futuro, sin una acción
+  // propia todavía, al menos dice qué intentar en vez de quedar mudo.
+  function textoDeAccionPorCodigo(codigo: string | null): string | null {
+    if (!codigo) return null;
+    if (codigo === "no_conectado") return "Usa el botón \"Conectar Canva\", al lado de este campo.";
+    return "Intenta de nuevo en unos segundos; si sigue pasando, avisa a soporte.";
+  }
 
   function confirmarAgregarUrlManual() {
     const limpia = urlNueva.trim();
@@ -67,16 +81,7 @@ export function GaleriaFotos({
   // canva.com/design/<id>/...) trae TODAS sus páginas vía la cuenta de
   // Canva conectada del usuario; cualquier otro link (media.canva.com,
   // *.canvausercontent.com — una exportación ya hecha) sigue el camino
-  // de siempre, sin cambios.
-  function esLinkDeDisenoCanva(valor: string): boolean {
-    try {
-      const h = new URL(valor).hostname.toLowerCase();
-      return h === "canva.link" || h === "canva.com" || h.endsWith(".canva.com");
-    } catch {
-      return false;
-    }
-  }
-
+  // de siempre, sin cambios — ver canva-link.ts para el criterio exacto.
   function confirmarCanvaUrl() {
     const limpia = canvaUrl.trim();
     if (!limpia) return;
@@ -210,7 +215,12 @@ export function GaleriaFotos({
             </Boton>
             <ConectarCanva />
           </div>
-          {errorSubida && <p style={{ fontSize: 12, color: "var(--kpi-peligro-texto)", marginTop: 6 }}>{errorSubida}</p>}
+          {errorSubida && (
+            <p style={{ fontSize: 12, color: "var(--kpi-peligro-texto)", marginTop: 6 }}>
+              {errorSubida}
+              {textoDeAccionPorCodigo(codigoError) && <> {textoDeAccionPorCodigo(codigoError)}</>}
+            </p>
+          )}
         </>
       ) : (
         <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 10 }}>

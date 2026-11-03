@@ -19,6 +19,7 @@ import {
   ExportacionCanvaDemoradaError,
   ExportacionCanvaFallidaError,
   ExportacionCanvaSinAccesoError,
+  ExportacionCanvaUrlNoPermitidaError,
   exportarDisenoPng,
   subirPaginasACloudinary,
 } from "@/lib/canva/exportacion";
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
 
   const body = (await request.json().catch(() => null)) as { link?: string } | null;
   const link = body?.link?.trim();
-  if (!link) return NextResponse.json({ error: "Mandá el link de Canva." }, { status: 400 });
+  if (!link) return NextResponse.json({ error: "Manda el link de Canva." }, { status: 400 });
 
   try {
     const designId = await resolverDesignId(link);
@@ -82,6 +83,10 @@ export async function POST(request: NextRequest) {
     }
     if (error instanceof ExportacionCanvaFallidaError) {
       return NextResponse.json({ error: "Canva no pudo exportar ese diseño." }, { status: 502 });
+    }
+    if (error instanceof ExportacionCanvaUrlNoPermitidaError) {
+      console.error("[api/canva/exportar-diseno] Canva devolvió una URL de exportación fuera de la allowlist:", error.message.slice(0, 300));
+      return NextResponse.json({ error: "Canva devolvió una página fuera de lo permitido." }, { status: 502 });
     }
     if (
       error instanceof EnlaceCanvaInvalidoError ||

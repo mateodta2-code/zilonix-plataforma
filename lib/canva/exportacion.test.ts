@@ -4,8 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // motivo que lib/cloudinary.test.ts) — sin este mock, vitest revienta
 // con "This module cannot be imported from a Client Component module".
 vi.mock("server-only", () => ({}));
+// descargarPaginaSegura usa exigirHostnamePublico (lib/seguridad/ssrf.ts),
+// que hace un lookup de DNS real — mismo mock que validar-url-externa.test.ts.
+vi.mock("dns/promises", () => ({ lookup: vi.fn() }));
 
-import { ExportacionCanvaDemoradaError, ExportacionCanvaFallidaError, ExportacionCanvaSinAccesoError, exportarDisenoPng, subirPaginasACloudinary } from "./exportacion";
+import { lookup } from "dns/promises";
+import {
+  ExportacionCanvaDemoradaError,
+  ExportacionCanvaFallidaError,
+  ExportacionCanvaSinAccesoError,
+  ExportacionCanvaUrlNoPermitidaError,
+  exportarDisenoPng,
+  subirPaginasACloudinary,
+} from "./exportacion";
+
+const lookupMock = lookup as unknown as ReturnType<typeof vi.fn>;
 
 function respuestaJson(data: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => JSON.stringify(data) } as Response;
@@ -82,12 +95,14 @@ describe("subirPaginasACloudinary — descarga cada página y la sube con el flu
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    lookupMock.mockReset();
   });
 
   it("descarga las páginas y las sube a Cloudinary, devolviendo las URLs de Cloudinary", async () => {
     process.env.CLOUDINARY_CLOUD_NAME = "cloud-de-prueba";
     process.env.CLOUDINARY_API_KEY = "key-de-prueba";
     process.env.CLOUDINARY_API_SECRET = "secret-de-prueba";
+    lookupMock.mockResolvedValue([{ address: "151.101.1.140" }]); // IP pública de prueba
 
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("cloudinary.com")) {
@@ -97,15 +112,37 @@ describe("subirPaginasACloudinary — descarga cada página y la sube con el flu
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const urls = await subirPaginasACloudinary(["https://canva.cdn/pagina1.png"]);
+    const urls = await subirPaginasACloudinary(["https://media.canva.com/v2/export/pagina1.png"]);
 
     expect(urls).toEqual(["https://res.cloudinary.com/cloud-de-prueba/image/upload/canva.png"]);
   });
 
   it("si la descarga de una página falla, no llega a subir nada a Cloudinary", async () => {
+    lookupMock.mockResolvedValue([{ address: "151.101.1.140" }]);
     const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 502 } as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(subirPaginasACloudinary(["https://canva.cdn/pagina-rota.png"])).rejects.toThrow();
+    await expect(subirPaginasACloudinary(["https://media.canva.com/v2/export/pagina-rota.png"])).rejects.toThrow();
+  });
+
+  // Hallazgo del review (PR #368) — las URLs las manda la respuesta de
+  // la API de Canva; si alguna viniera fuera de la allowlist de Canva
+  // (bug o respuesta comprometida), nunca se descarga a ciegas.
+  it("rechaza una URL de exportación fuera de la allowlist de Canva, sin llegar a pedirla", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(subirPaginasACloudinary(["https://atacante.ejemplo.com/pagina.png"])).rejects.toThrow(ExportacionCanvaUrlNoPermitidaError);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it("rechaza una URL de exportación que resuelve a una IP privada", async () => {
+    lookupMock.mockResolvedValue([{ address: "169.254.169.254" }]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(subirPaginasACloudinary(["https://media.canva.com/v2/export/pagina1.png"])).rejects.toThrow(ExportacionCanvaUrlNoPermitidaError);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

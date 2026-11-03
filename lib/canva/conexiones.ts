@@ -27,14 +27,14 @@ export class ConexionCanvaDesconectadaError extends Error {
 
 export class CandadoDeRenovacionCanvaError extends Error {
   constructor() {
-    super("Ya se está renovando la conexión con Canva — reintentá en unos segundos.");
+    super("Ya se está renovando la conexión con Canva — intenta de nuevo en unos segundos.");
     this.name = "CandadoDeRenovacionCanvaError";
   }
 }
 
 export class RenovacionTokenCanvaFallidaError extends Error {
   constructor() {
-    super("No se pudo renovar la conexión con Canva — reconectá tu cuenta.");
+    super("No se pudo renovar la conexión con Canva — reconecta tu cuenta.");
     this.name = "RenovacionTokenCanvaFallidaError";
   }
 }
@@ -137,17 +137,22 @@ export async function obtenerAccessTokenVigente(empresaId: string, usuarioId: st
 // deja en null — pedido explícito de Pablo/Mateo, a diferencia de
 // cuentas_ml que solo marca la fecha) e intenta revocar en Canva. La
 // fila nunca se borra (histórico de "hubo una conexión").
+//
+// Code review de Pablo (PR #368, review 5757123834) — la llamada HTTP
+// de revocarTokenSiEsPosible vivía ANTES adentro de la misma
+// transacción que borra los tokens: una red lenta o caída contra Canva
+// mantenía la transacción (y el candado/fila) abierta más de lo
+// necesario, bloqueando innecesariamente otras consultas sobre la
+// misma fila. Ahora: primero se borran los tokens en la base (el
+// usuario YA está desconectado, de verdad, apenas termina el UPDATE),
+// y recién DESPUÉS de confirmada esa transacción se intenta revocar en
+// Canva — best-effort, nunca bloquea ni deshace la desconexión si falla.
 export async function desconectarConexion(empresaId: string, usuarioId: string): Promise<void> {
-  await dbComoEmpresaYUsuario(empresaId, usuarioId, async (tx) => {
+  const refreshTokenPlano = await dbComoEmpresaYUsuario(empresaId, usuarioId, async (tx) => {
     const [conexion] = await tx
       .select({ refreshTokenCifrado: canvaConexiones.refreshTokenCifrado })
       .from(canvaConexiones)
       .where(and(eq(canvaConexiones.empresaId, empresaId), eq(canvaConexiones.usuarioId, usuarioId)));
-
-    if (conexion?.refreshTokenCifrado) {
-      // Best-effort — nunca bloquea la desconexión (ver revocarTokenSiEsPosible).
-      await revocarTokenSiEsPosible(descifrarToken(conexion.refreshTokenCifrado));
-    }
 
     await tx
       .update(canvaConexiones)
@@ -159,5 +164,11 @@ export async function desconectarConexion(empresaId: string, usuarioId: string):
         renovandoTs: null,
       })
       .where(and(eq(canvaConexiones.empresaId, empresaId), eq(canvaConexiones.usuarioId, usuarioId)));
+
+    return conexion?.refreshTokenCifrado ? descifrarToken(conexion.refreshTokenCifrado) : null;
   });
+
+  if (refreshTokenPlano) {
+    await revocarTokenSiEsPosible(refreshTokenPlano);
+  }
 }

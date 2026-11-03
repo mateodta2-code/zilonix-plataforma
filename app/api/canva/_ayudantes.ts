@@ -23,7 +23,7 @@ export async function resolverSesionYEmpresa(): Promise<SesionYEmpresa | NextRes
 }
 
 export function respuestaSiSinPermiso(error: unknown): NextResponse | null {
-  if (error instanceof SinPermisoError) return NextResponse.json({ error: "No tenés permiso para esto." }, { status: 403 });
+  if (error instanceof SinPermisoError) return NextResponse.json({ error: "No tienes permiso para esto." }, { status: 403 });
   return null;
 }
 
