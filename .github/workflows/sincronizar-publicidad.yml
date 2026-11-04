@@ -1,6 +1,6 @@
 name: Sincronizar Product Ads (staging)
 
-# Issue #254 — apunta a STAGING. El permiso de la app Zilonix
+# Issue #254 / #255 — apunta a STAGING. El permiso de la app Zilonix
 # Plataforma y la reconexión de MTTIENDA ya están. Producción queda
 # comentada hasta las pruebas reales en staging (totales, DAILY, ruta).
 # El secreto de GitHub para staging ya existe, con este nombre exacto:
@@ -10,43 +10,83 @@ name: Sincronizar Product Ads (staging)
 # (solo el nombre; el paso de producción sigue comentado).
 # Nunca el valor en este archivo.
 #
-# 14:00 UTC = 09:00 en Bogotá (UTC-5), después de las 08:30. Las métricas
-# de Product Ads se actualizan cerca de las 10:00 GMT-3, así que una
-# corrida de la mañana puede ir un día atrás — es el atraso documentado
-# de la API, no un fallo del cron. workflow_dispatch queda para retomar
-# el backfill de 62 días: cada corrida guarda un tramo y la siguiente
-# sigue hacia atrás.
+# Cada hora, no una vez al día: el backfill de 62 días se corta a los
+# 240 s por tanda y, si se espera al día siguiente, octubre no cierra.
+# La respuesta trae `sigue`. Mientras sea true se encadena otra tanda.
+# El cron hace hasta 8 (cabe en la hora). "Run workflow" hace hasta 36
+# (~3 h) para cerrar el mes en una sola corrida. concurrency evita dos
+# corridas a la vez contra Mercado Libre.
+#
+# Con el backfill cerrado, la app no llama a Mercado Libre si la cuenta
+# ya quedó ok hace menos de 20 h: el cron horario sale en una petición
+# vacía. Las métricas de la API se refrescan cerca de las 10:00 GMT-3;
+# una corrida de antes puede ir un día atrás — es el atraso documentado
+# de la API, no un fallo del cron.
 #
 # La app corta a los 240 s para cerrar la fila antes de este curl
-# (--max-time 300). Si pendientes no es 0, se encadenan hasta 4 tandas.
-# El orden es la última sincronización más vieja.
+# (--max-time 300). El orden es la última sincronización más vieja.
 on:
   schedule:
-    - cron: "0 14 * * *"
+    - cron: "0 * * * *"
   workflow_dispatch: {}
+
+concurrency:
+  group: sincronizar-publicidad-staging
+  cancel-in-progress: false
 
 jobs:
   sincronizar:
     runs-on: ubuntu-latest
+    # 36 tandas × 300 s ≈ 3 h. El tope queda por encima, con margen.
+    timeout-minutes: 210
     steps:
       - name: Sincronizar cuentas en staging, en tandas
         run: |
-          pendientes=1
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            max=36
+          else
+            max=8
+          fi
+          sigue=true
           tanda=0
-          while [ "$pendientes" != "0" ] && [ "$tanda" -lt 4 ]; do
+          while [ "$sigue" = "true" ] && [ "$tanda" -lt "$max" ]; do
             tanda=$((tanda + 1))
+            echo "Tanda ${tanda}/${max}"
             cuerpo=$(curl -sf -X POST "https://web-staging-d979.up.railway.app/api/trabajos/publicidad" \
               -H "x-publicidad-trabajador-secret: ${{ secrets.PUBLICIDAD_TRABAJADOR_SECRET_STAGING }}" \
               --max-time 300)
             echo "$cuerpo"
             pendientes=$(printf '%s' "$cuerpo" | sed -n 's/.*"pendientes":\([0-9][0-9]*\).*/\1/p')
+            sigue=$(printf '%s' "$cuerpo" | sed -n 's/.*"sigue":\(true\|false\).*/\1/p')
             if [ -z "$pendientes" ]; then
               echo "La respuesta no trajo pendientes."
               exit 1
             fi
+            # App anterior a `sigue`: solo encadena si quedaron cuentas
+            # sin abrir. No falla el cron durante el deploy.
+            if [ -z "$sigue" ]; then
+              if [ "$pendientes" != "0" ]; then
+                sigue=true
+              else
+                sigue=false
+              fi
+            fi
+            if [ "$pendientes" != "0" ]; then
+              sigue=true
+            fi
+            if [ "$tanda" -lt "$max" ] && [ "$sigue" = "true" ]; then
+              sleep 5
+            fi
           done
+          echo "Listo. Tandas: ${tanda}. Sigue: ${sigue}. Pendientes: ${pendientes}."
+          if [ "$sigue" = "true" ]; then
+            echo "Quedó trabajo pendiente. El cron de la hora siguiente sigue, o volvé a usar Run workflow."
+          fi
 
-# Producción, cuando el checklist de la PR esté cerrado:
+# Producción, cuando el checklist de la PR esté cerrado. Mismo bucle
+# de tandas, contra el dominio y el secreto de producción, nunca este
+# URL de staging:
 # curl -sf -X POST "https://<dominio-produccion>/api/trabajos/publicidad" \
 #   -H "x-publicidad-trabajador-secret: ${{ secrets.PUBLICIDAD_TRABAJADOR_SECRET_PRODUCCION }}" \
 #   --max-time 300

@@ -165,16 +165,214 @@
 
 .thConAyuda {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+}
+
+.anuncios .thConAyuda {
+  flex-wrap: nowrap;
 }
 
 .orden {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
   color: inherit;
   font: inherit;
   letter-spacing: inherit;
   text-transform: inherit;
   text-decoration: none;
+  white-space: normal;
+}
+
+.rotuloColumna {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+}
+
+.flechaOrden {
+  line-height: 1;
+}
+
+.tarjetaTabla .celdaRoas {
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.roasObjetivo {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--texto-suave);
+}
+
+.tarjetaTabla .celdaEstado,
+.tarjetaTabla .celdaPresupuesto {
+  vertical-align: middle;
+  white-space: normal;
+}
+
+.estado {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  column-gap: 6px;
+  row-gap: 4px;
+  align-items: center;
+}
+
+.punto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--plata);
+}
+
+.punto[data-tono="exito"] {
+  background: var(--exito-texto);
+}
+
+.punto[data-tono="peligro"] {
+  background: var(--peligro-texto);
+}
+
+.punto[data-tono="acento"] {
+  background: var(--acento);
+}
+
+.frase {
+  font-size: 12px;
+  line-height: 1.25;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pista {
+  grid-column: 2 / -1;
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--plata) 45%, transparent);
+  overflow: hidden;
+}
+
+.pista > span {
+  display: block;
+  height: 100%;
+  background: var(--gradiente-azul-metal);
+}
+
+.usado {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--texto-suave);
+}
+
+.iconoMl {
+  display: inline-flex;
+  color: var(--acento-fuerte);
+}
+
+.iconoMl:hover,
+.iconoMl:focus-visible {
+  color: var(--acento);
+}
+
+/* Por debajo de 1280 la tabla se desplaza adentro de la tarjeta.
+   Desde 1280 las columnas fijas caben sin ese scroll. */
+.tarjetaTabla > div > table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.anuncios table {
+  width: 100%;
+}
+
+@media (min-width: 1280px) {
+  .anuncios table {
+    table-layout: fixed;
+  }
+}
+
+.tarjetaTabla th {
+  white-space: normal;
+  letter-spacing: 0;
+  line-height: 1.2;
+  vertical-align: bottom;
+  padding: 8px 2px;
+  font-size: 10px;
+}
+
+.tarjetaTabla td {
+  padding: 6px 2px;
+  font-size: 11px;
+  vertical-align: middle;
+}
+
+@media (min-width: 1280px) {
+  .tarjetaTabla > div > table {
+    table-layout: fixed;
+    width: 100%;
+  }
+
+  /* El encabezado no se recorta: el ⓘ abre hacia abajo y tiene que
+     poder salir de la celda. El número, si no entra, no ensancha la tabla. */
+  .tarjetaTabla > div > table th {
+    overflow: visible;
+  }
+
+  .tarjetaTabla > div > table td {
+    overflow: hidden;
+  }
+
+  /* A 1280 la tabla mide ~895 px. Campaña ~135 px, Estado ~130 px.
+     Con publ. y Sin publ. llevan ~8 px más para no cortarse ni pegarse
+     a Ventas totales. */
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 14%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(2) { width: 14.6%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(3) { width: 6.8%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 8.05%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(5) { width: 8.05%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(6) { width: 7.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(7) { width: 4.8%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(8) { width: 5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(9) { width: 4.4%; padding-right: 6px; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(10) { width: 4.2%; padding-left: 6px; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(11) { width: 4.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(12) { width: 5.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(13) { width: 4.2%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(14) { width: 9.3%; }
+}
+
+.tarjetaTabla > div > table > thead > tr > th:last-child,
+.tarjetaTabla > div > table > tbody > tr > td:last-child:not([colspan]) {
+  padding-right: 12px;
+}
+
+.anuncios td:first-child,
+.anuncios th:first-child {
+  white-space: nowrap;
+  width: 9.5em;
+  padding-left: 12px;
+}
+
+.anuncios td:last-child,
+.anuncios th:last-child {
+  padding-right: 12px;
+  padding-left: 8px;
 }
 
 .orden:hover,
@@ -193,8 +391,8 @@
 .expandir {
   display: inline-flex;
   align-items: flex-start;
-  gap: 8px;
-  max-width: 280px;
+  gap: 6px;
+  max-width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
@@ -223,7 +421,13 @@
 }
 
 .nombreCampana {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   font-weight: 600;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .pausada,
@@ -231,7 +435,8 @@
 .enlacePendiente {
   display: block;
   margin-top: 4px;
-  font-size: 12px;
+  overflow-wrap: anywhere;
+  font-size: 11px;
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
