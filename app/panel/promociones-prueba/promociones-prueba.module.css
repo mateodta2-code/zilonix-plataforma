@@ -1,0 +1,284 @@
+.letrero {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radio-tarjeta);
+  border: 1px solid var(--kpi-advertencia-fuerte);
+  background: var(--kpi-advertencia-suave);
+  color: var(--kpi-advertencia-texto);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.seccion {
+  margin-top: 16px;
+}
+
+.reglas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.filaRegla {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.listaPublicaciones {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tarjetaPublicacion {
+  padding: 14px 16px;
+}
+
+.filaResumen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.foto {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--superficie-2-zona-oscura);
+  color: var(--texto-suave);
+}
+
+.infoPublicacion {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.titulo {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtitulo {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.chevron[data-abierto="true"] {
+  transform: rotate(180deg);
+}
+
+.avisoError {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--kpi-peligro-texto);
+}
+
+.detalle {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--degradado-plata-borde);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.filaPromocion {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--degradado-plata-borde);
+}
+
+.filaPromocion:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.encabezadoPromocion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.nombrePromocion {
+  font-weight: 700;
+}
+
+.datosPromocion {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+.variantes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filaVariante {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.avisoVariantes {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--kpi-advertencia-texto);
+}
+
+/* Modal "Confirma los detalles de la promoción" — <dialog> nativo,
+   centrado (a diferencia de PanelLateral.module.css, que lo pega al
+   borde derecho: acá es una confirmación, no un panel lateral). */
+.dialogo {
+  margin: auto;
+  padding: 0;
+  border: none;
+  border-radius: var(--radio-tarjeta);
+  max-width: min(480px, 92vw);
+  width: 100%;
+  background: transparent;
+}
+
+.dialogo::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.panelModal {
+  background: var(--tarjeta-fondo);
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background-clip: padding-box, border-box;
+  background-image: linear-gradient(var(--tarjeta-fondo), var(--tarjeta-fondo)), var(--degradado-plata-borde);
+  background-origin: border-box;
+  padding: 22px;
+  color: var(--texto-zona-oscura);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tituloModal {
+  margin: 0 0 4px;
+  font-family: var(--fuente-titulos);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.resumenProducto {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--texto-suave-zona-oscura);
+}
+
+.filaDato {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.filaDatoFinal {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  padding-top: 8px;
+  border-top: 1px solid var(--degradado-plata-borde);
+}
+
+.aporteMl {
+  color: var(--kpi-exito-texto);
+}
+
+.bloqueAjuste {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+}
+
+.tipoAjuste {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.tipoAjuste label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filaValor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.unidad {
+  font-size: 12.5px;
+  color: var(--texto-suave-zona-oscura);
+}
+
+.linkSugerido {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--acento-zona-oscura);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.avisoMinimo {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--kpi-peligro-texto);
+}
+
+.accionesModal {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}

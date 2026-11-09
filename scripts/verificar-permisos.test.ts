@@ -245,6 +245,14 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/terminos/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
   "app/privacidad/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
   "app/cookies/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
+  // Rama mateo/promociones-visual-prueba — maqueta aislada del
+  // rediseño de Promociones para que Débora la revise. Igual criterio
+  // que app/panel/mis-datos/page.tsx: solo resuelve sesión (redirige a
+  // /sign-in si falta); todos los datos (cuentas, publicaciones, tabla
+  // maestra) son fijos en memoria (./datosEjemplo.ts), nunca de
+  // Mercado Libre ni de la base — no hay ningún permiso de MÓDULO que
+  // pedir porque no hay ninguna tabla de negocio de por medio.
+  "app/panel/promociones-prueba/page.tsx": "maqueta de datos de ejemplo fijos en memoria (./datosEjemplo.ts) — no lee ni escribe ninguna tabla, solo resuelve la sesión",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {
