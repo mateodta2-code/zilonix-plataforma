@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { crearYPublicarProductoAction } from "./actions";
+import { ConectarCanva } from "./ConectarCanva";
+import { mensajeErrorConectarCanva } from "./canva-mensajes-error";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
 import { GaleriaFotos } from "./GaleriaFotos";
 import { PortadaCuenta } from "./PortadaCuenta";
@@ -45,11 +48,36 @@ export function FormularioPublicar({
   cuentas,
   inicial,
   cloudinaryConfigurado,
+  canva,
+  canvaCodigo,
 }: {
   cuentas: Cuenta[];
   inicial: EstadoInicialFormulario;
   cloudinaryConfigurado: boolean;
+  canva: string;
+  canvaCodigo: string;
 }) {
+  // ALTO 2, review PR #372 — /api/canva/conectar y /api/canva/callback
+  // redirigen con ?canva=error&codigo=... o ?canva=conectado (ver esos
+  // route.ts), pero nadie los leía: la persona quedaba sin ningún aviso.
+  const avisoErrorCanva = canva === "error" ? mensajeErrorConectarCanva(canvaCodigo || undefined) : null;
+  const avisoExitoCanva = canva === "conectado";
+
+  // BAJO, review 2 del PR #372 — una vez mostrado el aviso (error o
+  // éxito), se limpia `canva`/`codigo` de la URL para que no quede
+  // colgado ahí (un refresh de la página no debe repetir el aviso).
+  // router.replace con la misma ruta, sin navegación completa.
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (canva !== "error" && canva !== "conectado") return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("canva");
+    params.delete("codigo");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [canva, pathname, router, searchParams]);
   const [incluidas, setIncluidas] = useState<Record<string, boolean>>(() => {
     const mapa: Record<string, boolean> = {};
     for (const id of inicial.cuentasIncluidas) mapa[id] = true;
@@ -93,7 +121,7 @@ export function FormularioPublicar({
 
   async function cargarCaracteristicas(categoriaIdManual?: string) {
     if (!cuentaReferencia || !tituloReferencia.trim()) {
-      setErrorCategoria("Elegí al menos una cuenta y escribí un título para esa cuenta antes de detectar la categoría.");
+      setErrorCategoria("Elige al menos una cuenta y escribe un título para esa cuenta antes de detectar la categoría.");
       return;
     }
     setCargando(true);
@@ -168,7 +196,7 @@ export function FormularioPublicar({
     setErrorEnvio(null);
     if (cuentasMarcadas.length === 0) {
       e.preventDefault();
-      setErrorEnvio("Elegí al menos una cuenta de Mercado Libre donde publicar.");
+      setErrorEnvio("Elige al menos una cuenta de Mercado Libre donde publicar.");
       return;
     }
     if (esRellenoFalsoDimensiones(dimensiones)) {
@@ -181,6 +209,23 @@ export function FormularioPublicar({
 
   return (
     <form id="formulario-publicar" action={crearYPublicarProductoAction} onSubmit={onSubmit}>
+      {/* --- Primer paso visible: conectar Canva (antes vivía dentro de
+      GaleriaFotos.tsx, debajo de las miniaturas — se mueve arriba
+      porque resuelve de dónde van a salir las fotos antes de armar el
+      resto de la publicación). Gateado por cloudinaryConfigurado: sin
+      Cloudinary no hay forma de traer lo que Canva exporte. --- */}
+      {cloudinaryConfigurado && (
+        <Tarjeta className={styles.seccion}>
+          <p className="zx-etiqueta">Conectar Canva</p>
+          <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Conecta tu Canva para traer tus diseños como fotos.</p>
+          {avisoErrorCanva && <p style={{ fontSize: 13, color: "var(--kpi-peligro-texto)", marginTop: 8 }}>{avisoErrorCanva}</p>}
+          {avisoExitoCanva && <p style={{ fontSize: 13, color: "var(--kpi-exito-texto)", marginTop: 8 }}>Canva conectado correctamente.</p>}
+          <div style={{ marginTop: 10 }}>
+            <ConectarCanva />
+          </div>
+        </Tarjeta>
+      )}
+
       {/* --- Punto 3: Cuentas destino --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Cuentas destino</p>
@@ -254,7 +299,7 @@ export function FormularioPublicar({
         el envío si nadie la completaba); la tarjeta "+" de
         GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
         agregar nada. */}
-        <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} />
+        <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} limiteFotos={maxFotos} />
         {maxFotos != null && (
           <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
             Esta categoría admite hasta {maxFotos} fotos en Mercado Libre
@@ -262,7 +307,7 @@ export function FormularioPublicar({
           </p>
         )}
         <p style={{ fontSize: 12, color: "var(--texto-suave)" }}>
-          La primera es la portada si ninguna cuenta tiene una propia. Podés pegar una URL externa, subir un archivo de tu PC, o traer una exportación de Canva.
+          La primera es la portada si ninguna cuenta tiene una propia. Puedes pegar una URL externa, subir un archivo de tu PC, o traer una exportación de Canva.
         </p>
         <textarea name="imagenes" value={fotosDentroDelLimite(imagenes.filter(Boolean), maxFotos).join("\n")} readOnly hidden />
       </Tarjeta>
@@ -278,7 +323,7 @@ export function FormularioPublicar({
           )}
         </div>
         {cuentasMarcadas.length === 0 ? (
-          <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Elegí al menos una cuenta destino arriba para completar su título y descripción.</p>
+          <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Elige al menos una cuenta destino arriba para completar su título y descripción.</p>
         ) : (
           <div style={{ marginTop: 10 }}>
             {cuentasMarcadas.map((c) => (
@@ -327,7 +372,7 @@ export function FormularioPublicar({
         <p className="zx-etiqueta">Características de la categoría</p>
         <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>
           Mercado Libre exige elegir una categoría real y completar sus atributos antes de poder publicar — detectamos la categoría según el
-          título de la primera cuenta elegida; si se equivoca, podés buscarla a mano o navegar el árbol real.
+          título de la primera cuenta elegida; si se equivoca, puedes buscarla a mano o navegar el árbol real.
         </p>
         <p style={{ fontSize: 13, marginTop: 8 }}>
           {categoriaElegida ? (

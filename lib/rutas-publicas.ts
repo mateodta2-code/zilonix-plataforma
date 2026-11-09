@@ -85,6 +85,14 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // exigirla, solo deja de exigirla con un mecanismo que se cuelga.
   "/api/ml/callback",
 
+  // Tarea "Publicar — conectar Canva" — mismo motivo exacto que
+  // /api/ml/callback arriba, mismo mecanismo (lib/canva/pkce-cookie.ts
+  // en vez de lib/ml/pkce-cookie.ts): la abre el navegador al volver
+  // del OAuth de Canva. Sigue en RUTAS_PROTEGIDAS en
+  // scripts/verificar-permisos.test.ts — pública solo del middleware,
+  // nunca sin sesión real ni sin permiso dentro de su propio handler.
+  "/api/canva/callback",
+
   // Z-MT-10 (issue #45) — sonda de salud para el monitor externo y
   // scripts/humo.sh, llamada sin sesión cada minuto. Pública a
   // propósito: solo devuelve números (select 1, edad del último

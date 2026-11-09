@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { Fragment, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
@@ -8,8 +8,18 @@ import { Chip } from "@/components/marco/Chip";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import type { Cuenta } from "./CuentasDestino";
 import { borrarProductoAction } from "./actions";
-import { enlacesPermalink, formatearFechaBogota, resumenEstadoProducto, type FilaProductoParaCargar } from "./formulario-logica";
+import {
+  detalleCuentasProducto,
+  enlacesPermalink,
+  formatearFechaBogota,
+  resumenEstadoProducto,
+  type FilaDetalleCuenta,
+  type FilaProductoParaCargar,
+} from "./formulario-logica";
 import { formatearMoneda, SITE_ID_DEFECTO } from "@/lib/ml/sitios";
+import { etiquetaEstadoItemMl, etiquetaPublicacionCuenta, etiquetaSubStatusItemMl } from "@/lib/ml/estado-publicacion";
+
+const CANTIDAD_COLUMNAS = 6; // Título, Precio, Estado, "", Fecha, Acciones — ancho del <td colSpan> del detalle desplegado.
 
 export type ProductoHistorial = FilaProductoParaCargar & {
   id: string;
@@ -46,16 +56,87 @@ function EstadoCelda({ producto }: { producto: ProductoHistorial }) {
   );
 }
 
+type EstadoRealCuenta = { cargando: boolean; status: string | null; subStatus: string | null; error: string | null };
+
+// Issue "historial de Publicar — detalle en español, in-place" — una
+// cuenta por línea, dentro del <td colSpan> desplegado. `etiquetaPublicacionCuenta`
+// distingue "Publicado (sin verificar)" (status guardado al publicar,
+// nunca confirmado de nuevo) de "Publicado y activo" (después de
+// apretar "Ver estado real") — mismo criterio que zilonix-os-web.
+// `fila.statusGuardado` se muestra como dato de referencia MIENTRAS no
+// se verificó (nunca reemplaza al estado real: pudo cambiar después,
+// directo en Mercado Libre — ese es justamente el motivo de este
+// botón).
+function DetalleCuentaFila({ fila }: { fila: FilaDetalleCuenta }) {
+  const [estadoReal, setEstadoReal] = useState<EstadoRealCuenta>({ cargando: false, status: null, subStatus: null, error: null });
+
+  async function verEstadoReal() {
+    if (!fila.itemId) return;
+    setEstadoReal({ cargando: true, status: null, subStatus: null, error: null });
+    try {
+      const params = new URLSearchParams({ cuentaId: fila.cuentaMlId, itemId: fila.itemId });
+      const resp = await fetch(`/api/ml/publicar/estado-item?${params.toString()}`);
+      const datos = (await resp.json().catch(() => null)) as { status?: unknown; subStatus?: unknown; error?: unknown } | null;
+      if (!resp.ok || !datos) {
+        setEstadoReal({ cargando: false, status: null, subStatus: null, error: typeof datos?.error === "string" ? datos.error : "No se pudo consultar el estado real." });
+        return;
+      }
+      setEstadoReal({
+        cargando: false,
+        status: typeof datos.status === "string" ? datos.status : null,
+        subStatus: typeof datos.subStatus === "string" ? datos.subStatus : null,
+        error: null,
+      });
+    } catch {
+      setEstadoReal({ cargando: false, status: null, subStatus: null, error: "No se pudo consultar el estado real — revisa tu conexión." });
+    }
+  }
+
+  const etiquetaSubStatus = etiquetaSubStatusItemMl(estadoReal.subStatus);
+
+  return (
+    <li style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--borde)", fontSize: 13 }}>
+      <strong>{fila.nickname}</strong>
+      {fila.subEtiqueta && <span style={{ opacity: 0.7 }}>({fila.subEtiqueta})</span>}
+      {fila.error ? (
+        <span style={{ color: "var(--peligro-texto)" }}>{fila.error}</span>
+      ) : (
+        <>
+          <span>{etiquetaPublicacionCuenta(estadoReal.status)}</span>
+          {estadoReal.status === null && fila.statusGuardado && (
+            <span style={{ opacity: 0.6, fontSize: 12 }}>(guardado: {etiquetaEstadoItemMl(fila.statusGuardado)})</span>
+          )}
+          {etiquetaSubStatus && <span style={{ opacity: 0.7, fontSize: 12 }}>· {etiquetaSubStatus}</span>}
+          {fila.permalink && (
+            <a href={fila.permalink} target="_blank" rel="noreferrer">
+              Ver publicación ↗
+            </a>
+          )}
+          {fila.itemId && (
+            <Boton type="button" variante="fantasma" chico onClick={verEstadoReal} disabled={estadoReal.cargando}>
+              {estadoReal.cargando ? "Consultando…" : "Ver estado real"}
+            </Boton>
+          )}
+          {estadoReal.error && <span style={{ color: "var(--peligro-texto)" }}>{estadoReal.error}</span>}
+        </>
+      )}
+    </li>
+  );
+}
+
 // Punto 8 del pedido — "Productos publicados recientemente en la
 // misma página" con Título/Precio/Estado/"ver detalle"/Fecha y los 3
-// botones (Cargar/Reintentar, Duplicar, Borrar). "ver detalle" enlaza
-// a /panel/publicar/[id] (sin cambios de esa pantalla — "lo que sea
-// más simple sin romper enlaces", mismo criterio que pidió Mateo para
-// esa ruta) en vez de duplicar el render del resultado por cuenta acá
-// mismo. Borrar pide confirmación real (nunca silenciosa) y aclara
-// "no borra nada en Mercado Libre" — el mensaje exacto que pidió
-// Mateo, para que nadie piense que también pausa/elimina la
-// publicación real.
+// botones (Cargar/Reintentar, Duplicar, Borrar).
+//
+// Feedback real de Mateo (este issue) — "ver detalle" NUNCA navega a
+// otra página: despliega EN LA MISMA FILA una línea por cuenta (toggle
+// con "ocultar"), igual que la tabla equivalente de Zilonix OS
+// (components/negocio/MercadoLibrePublicar.js). /panel/publicar/[id]
+// sigue existiendo sin cambios para quien tenga ese link viejo
+// guardado, pero el historial ya no enlaza ahí. Borrar pide
+// confirmación real (nunca silenciosa) y aclara "no borra nada en
+// Mercado Libre" — el mensaje exacto que pidió Mateo, para que nadie
+// piense que también pausa/elimina la publicación real.
 export function HistorialPublicaciones({
   productos,
   cuentas,
@@ -67,6 +148,8 @@ export function HistorialPublicaciones({
   onCargar: (producto: ProductoHistorial) => void;
   onDuplicar: (producto: ProductoHistorial) => void;
 }) {
+  const [expandidoId, setExpandidoId] = useState<string | null>(null);
+
   return (
     <Tarjeta>
       <div id="historial">
@@ -79,8 +162,12 @@ export function HistorialPublicaciones({
             {productos.map((p) => {
               const enlaces = enlacesPermalink(p.resultado, cuentas);
               const tituloTexto = p.titulo || "(sin título)";
+              const expandido = expandidoId === p.id;
+              const detalleCuentas = expandido ? detalleCuentasProducto(p.resultado, cuentas) : [];
+              const idDetalle = `detalle-publicacion-${p.id}`;
               return (
-              <FilaTabla key={p.id}>
+              <Fragment key={p.id}>
+              <FilaTabla>
                 <CeldaTabla>
                   {/* Feedback real de Mateo (staging) — el TÍTULO en sí
                   tiene que ser el link clicable a la publicación
@@ -114,7 +201,20 @@ export function HistorialPublicaciones({
                   <EstadoCelda producto={p} />
                 </CeldaTabla>
                 <CeldaTabla>
-                  <Link href={`/panel/publicar/${p.id}`}>ver detalle</Link>
+                  {/* Feedback real de Mateo — "ver detalle" NUNCA
+                  navega a otra página: despliega la lista por cuenta
+                  EN LA MISMA FILA (ver <Fragment> de abajo), con
+                  "ocultar" para cerrarla. <button> en vez de <a>/<Link>
+                  a propósito — esto no es una navegación real. */}
+                  <button
+                    type="button"
+                    onClick={() => setExpandidoId(expandido ? null : p.id)}
+                    aria-expanded={expandido}
+                    aria-controls={idDetalle}
+                    style={{ background: "none", border: "none", padding: 0, color: "inherit", textDecoration: "underline", cursor: "pointer", font: "inherit" }}
+                  >
+                    {expandido ? "ocultar" : "ver detalle"}
+                  </button>
                 </CeldaTabla>
                 <CeldaTabla>{formatearFechaBogota(p.creadoTs)}</CeldaTabla>
                 <CeldaTabla>
@@ -145,6 +245,22 @@ export function HistorialPublicaciones({
                   </div>
                 </CeldaTabla>
               </FilaTabla>
+              {expandido && (
+                <FilaTabla id={idDetalle}>
+                  <CeldaTabla colSpan={CANTIDAD_COLUMNAS}>
+                    {detalleCuentas.length === 0 ? (
+                      <p style={{ fontSize: 13, opacity: 0.7, margin: 0 }}>Publicando en Mercado Libre, un momento…</p>
+                    ) : (
+                      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                        {detalleCuentas.map((fila, i) => (
+                          <DetalleCuentaFila key={`${fila.cuentaMlId}-${i}`} fila={fila} />
+                        ))}
+                      </ul>
+                    )}
+                  </CeldaTabla>
+                </FilaTabla>
+              )}
+              </Fragment>
               );
             })}
           </Tabla>

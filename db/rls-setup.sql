@@ -73,6 +73,11 @@ REVOKE UPDATE, DELETE ON auditoria FROM app_user;
 -- legítima de un clic, sin ningún motivo para guardar la fila vieja.
 GRANT SELECT, INSERT, UPDATE ON promociones_reglas, promociones_candidatos, promociones_acciones TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ia_conexiones TO app_user;
+-- Tarea "Publicar — conectar Canva" — a diferencia de ia_conexiones,
+-- desconectar Canva NUNCA borra la fila (decisión explícita de
+-- Pablo/Mateo: queda desconectada_ts como histórico, los tokens se
+-- limpian con UPDATE, no con DELETE) — por eso sin DELETE acá.
+GRANT SELECT, INSERT, UPDATE ON canva_conexiones TO app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
 -- "serial" en el esquema — no existe ninguna secuencia que otorgar.
@@ -228,6 +233,8 @@ ALTER TABLE promociones_acciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE promociones_acciones FORCE ROW LEVEL SECURITY;
 ALTER TABLE ia_conexiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ia_conexiones FORCE ROW LEVEL SECURITY;
+ALTER TABLE canva_conexiones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE canva_conexiones FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
@@ -464,6 +471,23 @@ CREATE POLICY aislamiento_promociones_acciones ON promociones_acciones
 DROP POLICY IF EXISTS aislamiento_ia_conexiones ON ia_conexiones;
 CREATE POLICY aislamiento_ia_conexiones ON ia_conexiones
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Tarea "Publicar — conectar Canva" — a diferencia de TODAS las demás
+-- políticas de arriba (que filtran solo por empresa_id), esta filtra
+-- por empresa_id Y usuario_id a la vez: una persona de la empresa
+-- nunca ve ni usa la conexión de Canva de otra persona de la MISMA
+-- empresa, aunque comparta rol o permisos (pedido explícito — el link
+-- de "Compartir" de un diseño de Canva es personal). Requiere el
+-- contexto nuevo dbComoEmpresaYUsuario (db/empresa-context.ts), que
+-- fija los dos current_setting reales a la vez — dbComoEmpresa() solo
+-- fija empresa_actual, así que con ese contexto esta política nunca
+-- deja ver ninguna fila (usuario_actual queda sin fijar → NULL).
+DROP POLICY IF EXISTS aislamiento_canva_conexiones ON canva_conexiones;
+CREATE POLICY aislamiento_canva_conexiones ON canva_conexiones
+  USING (
+    empresa_id = current_setting('app.empresa_actual', true)::uuid
+    AND usuario_id = NULLIF(current_setting('app.usuario_actual', true), '')::uuid
+  );
 
 DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;
 CREATE POLICY aislamiento_accesos_temporales ON accesos_temporales
