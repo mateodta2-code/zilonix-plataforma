@@ -27,7 +27,7 @@ vi.mock("@/lib/url-publica", () => ({ urlPublicaBase: () => "https://staging.tes
 import { cookies } from "next/headers";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { obtenerClipsMl } from "@/lib/ml/cliente";
+import { LimiteMercadoLibreError, obtenerClipsMl } from "@/lib/ml/cliente";
 import { POST } from "./route";
 
 function mockearCookies() {
@@ -87,6 +87,15 @@ describe("POST /api/ml/clip/estado — rama feat-publicar-clip, punto 5 ('Actual
 
     expect(res.status).toBe(200);
     expect(body.filas).toEqual([{ cuentaId: CUENTA_1, itemId: "MCO1", clips: [{ clipUuid: "clip-1", moderationStatus: "PUBLISHED", motivoRechazo: null }] }]);
+  });
+
+  it("429 real de Mercado Libre: la fila dice limiteMl+retryAfterMs, nunca se confunde con 'sin clips todavía'", async () => {
+    vi.mocked(obtenerClipsMl).mockRejectedValueOnce(new LimiteMercadoLibreError(30_000));
+    const res = await POST(peticion());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.filas).toEqual([{ cuentaId: CUENTA_1, itemId: "MCO1", clips: null, limiteMl: true, retryAfterMs: 30_000 }]);
   });
 
   it("una cuenta pedida que no está conectada: esa fila vuelve con clips:null, nunca rompe el resto", async () => {
