@@ -19,14 +19,20 @@ import { leerItemParaPromocionMl, leerPromocionesItemMl, listarItemsActivosMl, t
 //   respaldo (al revés de la versión vieja de Zilonix OS, que sí lo
 //   hacía cuando no había piso).
 
-// Tipos que Mercado Libre rechaza al escribir por esta API — evidencia
-// real citada en docs/investigacion/promociones-mercado-libre.md
-// (§4.2 de ese documento): PRICE_DISCOUNT sin id propio ("Invalid
-// promotion type"), LIGHTNING con términos fijos no editables, SMART y
-// UNHEALTHY_STOCK con "Offer id is required" (48 y 399 intentos reales
-// fallidos respectivamente). Confirmar de nuevo en vivo antes de
-// production — Mercado Libre puede haber cambiado esto.
-export const TIPOS_SIN_ESCRITURA_API = ["PRICE_DISCOUNT", "LIGHTNING", "SMART", "UNHEALTHY_STOCK"];
+// Tarea "Promociones-Ajustes-1" — PRICE_DISCOUNT SALIÓ de esta lista
+// (antes estaba acá por un intento viejo mal diagnosticado como
+// "Invalid promotion type"): la doc oficial de Mercado Libre
+// ("price-discountt") sí documenta POST/PUT reales para este tipo —
+// descuento entre 5% y 80% del precio original, vigencia máxima de 14
+// días, mismo endpoint que el resto (seller-promotions/items).
+// `descuentoFueraDeRangoPriceDiscount` (más abajo) y
+// `fechasParaParticipar` (abajo del todo) aplican esos dos límites
+// propios del tipo. Quedan sin escritura: LIGHTNING (términos fijos no
+// editables), SMART y UNHEALTHY_STOCK ("Offer id is required", 48 y
+// 399 intentos reales fallidos respectivamente). Confirmar de nuevo en
+// vivo antes de production si pasa mucho tiempo — Mercado Libre puede
+// haber cambiado esto.
+export const TIPOS_SIN_ESCRITURA_API = ["LIGHTNING", "SMART", "UNHEALTHY_STOCK"];
 
 // Rama fix-promociones-aprobadas-participando, punto 3 — "primero
 // investiga en la doc oficial de ML qué tipos permiten salir por API"
@@ -39,30 +45,40 @@ export const TIPOS_SIN_ESCRITURA_API = ["PRICE_DISCOUNT", "LIGHTNING", "SMART", 
 //
 // - PRICE_DISCOUNT: su propia página ("price-discountt") documenta un
 //   DELETE real que borra la oferta completa — sí se puede salir por
-//   API, aunque (TIPOS_SIN_ESCRITURA_API) no se pueda UNIRSE/MODIFICAR
-//   por esta misma API. Son operaciones distintas, no es lo mismo.
+//   API (y, desde Promociones-Ajustes-1, también unirse/modificar por
+//   esta misma API — ver TIPOS_SIN_ESCRITURA_API, arriba).
 // - UNHEALTHY_STOCK y PRE_NEGOTIATED: documentados juntos
 //   ("pre-negotiated-discount-per-item"), con ejemplos reales de
 //   DELETE a nivel de ítem (promotion_id + offer_id) — sí se puede.
 // - SMART y PRICE_MATCHING: documentados juntos
 //   ("smart-campaigns" = "Automated co-participation and competitive
 //   pricing"), con DELETE a nivel de ítem — sí se puede, aunque SMART
-//   tampoco se pueda unir/modificar por API (mismo caso que PRICE_DISCOUNT).
-// - DEAL (Daily Deal) y LIGHTNING (Lightning Deal): sus páginas
-//   ESPECÍFICAS dicen textual "Once activated, offers cannot be
-//   deleted... if the seller does not want to maintain the offer,
-//   they can pause the item" — una vez activa (started/pending, que
-//   es justo el caso de la pestaña "Participando"), la API NO deja
-//   salir con DELETE, solo pausar (operación distinta, no
-//   implementada). La página genérica de "Traditional Campaigns" SÍ
-//   muestra un ejemplo de DELETE con promotion_type=DEAL, pero la
-//   página específica de Daily Deal (más autorizada para este tipo
-//   puntual) contradice eso para una oferta ya activa — se sigue la
-//   más específica, nunca la genérica. DUDA REAL sin resolver: esa
-//   página usa `promotion_type=DOD` en sus ejemplos (no "DEAL", que es
-//   el valor que este código usa y que zilonix-os-web confirmó real en
-//   producción) — puede ser un alias viejo de la doc. Confirmar antes
-//   de production si algún día se habilita pausar.
+//   tampoco se pueda unir/modificar por API (mismo caso que PRICE_DISCOUNT
+//   antes de este cambio).
+// - DEAL ("Traditional Campaigns" — campaña tradicional, NO es la
+//   "Oferta del día" real): corregido en Promociones-Ajustes-1, bug
+//   real de etiquetado (confirmado por Mateo en staging, cuenta
+//   sharel) — la pantalla llamaba "Oferta del día" a este tipo, y por
+//   esa confusión se bloqueó su salida por error. Su página SÍ muestra
+//   un ejemplo real de DELETE con promotion_type=DEAL — se puede salir
+//   por API. La "Oferta del día" REAL de Mercado Libre es "DOD" (Daily
+//   Deal), un tipo distinto que esta plataforma todavía no diferenciaba
+//   — ver DOD abajo.
+// - DOD (Daily Deal, la "Oferta del día" real) y LIGHTNING (Lightning
+//   Deal): sus páginas ESPECÍFICAS dicen textual "Once activated,
+//   offers cannot be deleted... if the seller does not want to
+//   maintain the offer, they can pause the item" — una vez activa
+//   (started/pending, que es justo el caso de la pestaña
+//   "Participando"), la API NO deja salir con DELETE, solo pausar
+//   (operación distinta, no implementada). DUDA REAL sin resolver: la
+//   doc de Daily Deal usa "DOD" en sus ejemplos de URL, pero el campo
+//   `type` que de verdad devuelve `GET /seller-promotions/items/{id}`
+//   para una oferta del día real NUNCA se confirmó en vivo contra una
+//   cuenta con una — si Mercado Libre en la práctica manda "DEAL" para
+//   esto también (alias viejo de la doc), este mapa fallaría sobre una
+//   Oferta del día real activa. Confirmar con Mateo apenas aparezca
+//   una cuenta con una oferta del día real antes de dar esto por
+//   cerrado.
 // - SELLER_CAMPAIGN: su DELETE real (`seller-campaigns`) es a nivel de
 //   CAMPAÑA completa (`/seller-promotions/promotions/{promotion_id}`),
 //   no de un ítem puntual — borra la campaña entera, con TODOS sus
@@ -81,7 +97,8 @@ export const TIPOS_SALIR_API: Readonly<Record<string, boolean>> = {
   VOLUME: true,
   MARKETPLACE_CAMPAIGN: true,
   SELLER_COUPON_CAMPAIGN: true,
-  DEAL: false,
+  DEAL: true,
+  DOD: false,
   LIGHTNING: false,
   SELLER_CAMPAIGN: false,
 };
@@ -206,10 +223,56 @@ function finDeMesLocalColombia(): string {
   return ultimoDia.toISOString().slice(0, 10) + "T23:59:59";
 }
 
+// PRICE_DISCOUNT tiene vigencia máxima de 14 días (doc oficial,
+// "price-discountt") — "fin de mes" por defecto (el respaldo de
+// siempre) puede superar eso fácil si se participa a principio de
+// mes. 13 días más hoy = 14 días contados completos.
+const DIAS_MAXIMOS_PRICE_DISCOUNT = 14;
+
+function finPriceDiscountLocalColombia(): string {
+  const ahora = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const fin = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth(), ahora.getUTCDate() + (DIAS_MAXIMOS_PRICE_DISCOUNT - 1)));
+  return fin.toISOString().slice(0, 10) + "T23:59:59";
+}
+
+// Tarea "Promociones-Ajustes-1" — el respaldo (cuando Mercado Libre no
+// mandó start_date/finish_date, el caso normal al participar por
+// primera vez) ahora depende del tipo: PRICE_DISCOUNT nunca puede usar
+// "fin de mes" sin arriesgarse a superar sus 14 días. Si ML SÍ mandó
+// fechas reales (una promoción ya activa), esas se respetan tal cual
+// — nunca se las recorta, son un dato real de ML, no algo que este
+// código adivine.
 export function fechasParaParticipar(promo: PromocionCrudaMl): { fechaInicio: string; fechaFin: string } {
   const inicio = typeof promo.start_date === "string" ? promo.start_date.slice(0, 19) : null;
   const fin = typeof promo.finish_date === "string" ? promo.finish_date.slice(0, 19) : null;
-  return { fechaInicio: inicio || ahoraLocalColombia(), fechaFin: fin || finDeMesLocalColombia() };
+  const tipoPromocion = typeof promo.type === "string" ? promo.type : "";
+  const finPorDefecto = tipoPromocion === "PRICE_DISCOUNT" ? finPriceDiscountLocalColombia() : finDeMesLocalColombia();
+  return { fechaInicio: inicio || ahoraLocalColombia(), fechaFin: fin || finPorDefecto };
+}
+
+// PRICE_DISCOUNT exige un descuento real entre 5% y 80% frente al
+// precio original (misma doc) — un precio mínimo de Finanzas que
+// implique menos de 5% o más de 80% de descuento, Mercado Libre lo
+// rechazaría al escribir; se frena acá ANTES de intentar, con un
+// motivo claro (nunca se manda a ciegas para "ver si Mercado Libre lo
+// acepta"). `nuevoPrecio` es el precio que se va a mandar como
+// deal_price (el piso de Finanzas en el camino automático, o el
+// precio elegido a mano en el camino manual — ver validarCalculado,
+// lib/ml/promocionesEjecucion.ts).
+export const DESCUENTO_MINIMO_PRICE_DISCOUNT = 5;
+export const DESCUENTO_MAXIMO_PRICE_DISCOUNT = 80;
+
+export function descuentoFueraDeRangoPriceDiscount(tipoPromocion: string, precioOriginal: number | null, nuevoPrecio: number): string | null {
+  if (tipoPromocion !== "PRICE_DISCOUNT" || precioOriginal == null || precioOriginal <= 0) return null;
+  const descuentoPct = ((precioOriginal - nuevoPrecio) / precioOriginal) * 100;
+  const descuentoRedondeado = Math.round(descuentoPct * 10) / 10;
+  if (descuentoPct < DESCUENTO_MINIMO_PRICE_DISCOUNT) {
+    return `Con el precio mínimo de Finanzas, el descuento quedaría en ${descuentoRedondeado}% — "Descuento de precio" exige un mínimo de ${DESCUENTO_MINIMO_PRICE_DISCOUNT}%, se revisa a mano.`;
+  }
+  if (descuentoPct > DESCUENTO_MAXIMO_PRICE_DISCOUNT) {
+    return `Con el precio mínimo de Finanzas, el descuento quedaría en ${descuentoRedondeado}% — "Descuento de precio" no permite más de ${DESCUENTO_MAXIMO_PRICE_DISCOUNT}%, se revisa a mano.`;
+  }
+  return null;
 }
 
 // El corazón de las reglas — calculado en código, NUNCA le toca a la
@@ -306,6 +369,10 @@ export function calcularCandidatosItem(
             motivoRevisarManual: `El piso (${precioMinimo}) está por encima del máximo que permite esta promoción puntual (${maxDiscountedPrice}) — no se puede ajustar sin quedar por encima de lo que Mercado Libre deja.`,
           };
         }
+        const motivoFueraDeRango = descuentoFueraDeRangoPriceDiscount(tipoPromocion, original, precioMinimo);
+        if (motivoFueraDeRango) {
+          return { ...base, precioSugerido: precioMinimo, gananciaEstimada, motivoRevisarManual: motivoFueraDeRango };
+        }
         return { ...base, cumpleReglas: true, accionSugerida: "modificar", precioSugerido: precioMinimo, gananciaEstimada };
       }
       return { ...base, cumpleReglas: true, precioSugerido: precioActual, gananciaEstimada: costo != null && precioActual != null ? precioActual - costo : null };
@@ -334,6 +401,10 @@ export function calcularCandidatosItem(
             motivoRevisarManual: `Igualar al piso implica ${Math.round(descuentoPct * 10) / 10}% de descuento, por encima del tope configurado para esta cuenta (${reglas.descuentoMaximoPct}%) — se revisa a mano.`,
           };
         }
+      }
+      const motivoFueraDeRango = descuentoFueraDeRangoPriceDiscount(tipoPromocion, original, precioMinimo);
+      if (motivoFueraDeRango) {
+        return { ...base, precioSugerido: precioMinimo, gananciaEstimada, motivoRevisarManual: motivoFueraDeRango };
       }
       return { ...base, cumpleReglas: true, accionSugerida: "participar", precioSugerido: precioMinimo, gananciaEstimada };
     }

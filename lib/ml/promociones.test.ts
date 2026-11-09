@@ -28,6 +28,7 @@ vi.mock("@/db/empresa-context", () => ({
 import { costosSku, promocionesReglas } from "@/db/schema";
 import {
   calcularCandidatosItem,
+  descuentoFueraDeRangoPriceDiscount,
   fechasParaParticipar,
   leerPisoYCostoFresco,
   leerPisosYCostosFrescos,
@@ -260,6 +261,46 @@ describe("fechasParaParticipar — bug 3 (formato local Colombia, sin zona horar
     expect(resultado.fechaInicio).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00$/);
     expect(resultado.fechaFin).toMatch(/^\d{4}-\d{2}-\d{2}T23:59:59$/);
   });
+
+  // Tarea "Promociones-Ajustes-1" — PRICE_DISCOUNT tiene vigencia
+  // máxima de 14 días (doc oficial): "fin de mes" por defecto podía
+  // superar eso fácil si se participa a principio de mes.
+  it("PRICE_DISCOUNT sin fechas reales: nunca más de 14 días desde hoy, nunca fin de mes", () => {
+    const resultado = fechasParaParticipar({ type: "PRICE_DISCOUNT" });
+    const inicio = new Date(resultado.fechaInicio + "Z");
+    const fin = new Date(resultado.fechaFin + "Z");
+    const dias = Math.round((fin.getTime() - inicio.getTime()) / (24 * 60 * 60 * 1000));
+    expect(dias).toBe(14); // hoy 00:00 hasta el día 14 a las 23:59:59 — 14 días de vigencia completos
+  });
+
+  it("PRICE_DISCOUNT con fechas reales de Mercado Libre: se respetan tal cual, nunca se recortan a 14 días", () => {
+    const resultado = fechasParaParticipar({ type: "PRICE_DISCOUNT", start_date: "2026-11-01T00:00:00-05:00", finish_date: "2026-11-30T23:59:59-05:00" });
+    expect(resultado.fechaFin).toBe("2026-11-30T23:59:59");
+  });
+});
+
+describe("descuentoFueraDeRangoPriceDiscount — PRICE_DISCOUNT exige 5%-80% de descuento real", () => {
+  it("tipos distintos de PRICE_DISCOUNT: nunca se frena (el rango 5-80% es propio de este tipo)", () => {
+    expect(descuentoFueraDeRangoPriceDiscount("DEAL", 100000, 50000)).toBeNull();
+  });
+
+  it("dentro de rango (10%): null, nunca se frena", () => {
+    expect(descuentoFueraDeRangoPriceDiscount("PRICE_DISCOUNT", 100000, 90000)).toBeNull();
+  });
+
+  it("por debajo del mínimo (2%): motivo claro, menciona el 5%", () => {
+    const motivo = descuentoFueraDeRangoPriceDiscount("PRICE_DISCOUNT", 100000, 98000);
+    expect(motivo).toContain("5%");
+  });
+
+  it("por encima del máximo (90%): motivo claro, menciona el 80%", () => {
+    const motivo = descuentoFueraDeRangoPriceDiscount("PRICE_DISCOUNT", 100000, 10000);
+    expect(motivo).toContain("80%");
+  });
+
+  it("sin precio original real: null, nunca inventa un porcentaje", () => {
+    expect(descuentoFueraDeRangoPriceDiscount("PRICE_DISCOUNT", null, 90000)).toBeNull();
+  });
 });
 
 // Rama fix-promociones-aprobadas-participando, punto 3 — investigado
@@ -277,8 +318,16 @@ describe("puedeSalirPorApi — qué tipos permiten DELETE real (investigado cont
     expect(puedeSalirPorApi("SELLER_COUPON_CAMPAIGN")).toBe(true);
   });
 
-  it("DEAL y LIGHTNING: false — una vez activa, la doc de ML dice que no se puede borrar, solo pausar", () => {
-    expect(puedeSalirPorApi("DEAL")).toBe(false);
+  // Tarea "Promociones-Ajustes-1" — bug real confirmado en staging:
+  // DEAL es la "Campaña tradicional" (su página SÍ muestra un DELETE
+  // real), no la Oferta del día real (que es DOD) — antes se
+  // confundían los dos y se bloqueaba la salida de DEAL por error.
+  it("DEAL (Campaña tradicional): true — su página de doc SÍ muestra un DELETE real", () => {
+    expect(puedeSalirPorApi("DEAL")).toBe(true);
+  });
+
+  it("DOD (Oferta del día real) y LIGHTNING: false — una vez activa, la doc de ML dice que no se puede borrar, solo pausar", () => {
+    expect(puedeSalirPorApi("DOD")).toBe(false);
     expect(puedeSalirPorApi("LIGHTNING")).toBe(false);
   });
 

@@ -141,11 +141,33 @@ describe("validarCandidatoParaEscritura — HIGH 2 (review de Pablo): nunca conf
     if (!resultado.ok) expect(resultado.motivo).toContain("variantes");
   });
 
-  it("tipo sin escritura por API (PRICE_DISCOUNT): rechazado, nunca se intenta", async () => {
+  it("tipo sin escritura por API (SMART): rechazado, nunca se intenta", async () => {
     filasPorTabla.set(promocionesReglas, reglasPorDefecto());
     filasPorTabla.set(costosSku, costoFila());
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato({ tipoPromocion: "SMART" }), "participar");
+    expect(resultado.ok).toBe(false);
+  });
+
+  // Tarea "Promociones-Ajustes-1" — bug real confirmado en staging:
+  // PRICE_DISCOUNT SÍ se puede escribir por API (ver TIPOS_SIN_ESCRITURA_API,
+  // lib/ml/promociones.ts) — antes se rechazaba acá por error.
+  it("PRICE_DISCOUNT dentro del rango 5%-80% de descuento: SÍ se acepta", async () => {
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto());
+    filasPorTabla.set(costosSku, costoFila()); // piso 90000 sobre original 100000 = 10% de descuento
+    const resultado = await validarCandidatoParaEscritura("empresa-1", candidato({ tipoPromocion: "PRICE_DISCOUNT" }), "participar");
+    expect(resultado.ok).toBe(true);
+    if (resultado.ok) expect(resultado.deal).toBe(90000);
+  });
+
+  it("PRICE_DISCOUNT fuera del rango 5%-80% (piso implica 85% de descuento): rechazado, con motivo claro", async () => {
+    // Tope de cuenta relajado a 90% a propósito, para que el motivo
+    // real de este rechazo sea el límite PROPIO de PRICE_DISCOUNT
+    // (80%) y no el tope configurado de la cuenta.
+    filasPorTabla.set(promocionesReglas, reglasPorDefecto({ descuentoMaximoPct: 90 }));
+    filasPorTabla.set(costosSku, costoFila({ precioMinimoUnidad: "15000" })); // 85% de descuento sobre 100000
     const resultado = await validarCandidatoParaEscritura("empresa-1", candidato({ tipoPromocion: "PRICE_DISCOUNT" }), "participar");
     expect(resultado.ok).toBe(false);
+    if (!resultado.ok) expect(resultado.motivo).toContain("80%");
   });
 
   it("el piso cambió a null desde la búsqueda (SKU sin precio mínimo AHORA): rechazado, nunca usa el precioMinimo del snapshot", async () => {

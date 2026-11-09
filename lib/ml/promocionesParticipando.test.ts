@@ -77,25 +77,31 @@ describe("listarParticipandoCuenta — rama fix-promociones-aprobadas-participan
     expect(leerPromocionesItemMlMock).not.toHaveBeenCalled();
   });
 
+  // Tarea "Promociones-Ajustes-1" — bug real confirmado en staging: DEAL
+  // es la "Campaña tradicional" y SÍ se puede dejar por API (antes se
+  // confundía con DOD, la Oferta del día real, que es la que la doc de
+  // ML dice que no se puede borrar una vez activa — ver TIPOS_SALIR_API,
+  // lib/ml/promociones.ts). Este caso usa DOD a propósito para seguir
+  // probando el camino "false".
   it("caso real: trae precio, %, fechas, utilidad y si se puede salir por API", async () => {
-    filasPorTabla.set(promocionesCandidatos, [candidatoDescubierto()]);
+    filasPorTabla.set(promocionesCandidatos, [candidatoDescubierto({ tipoPromocion: "DOD" })]);
     filasPorTabla.set(promocionesReglas, [{ descuentoMaximoPct: 20, participarCompartidas: false, igualarAlPiso: true }]);
     filasPorTabla.set(costosSku, [{ skuCodigo: "SKU-1", precioMinimoUnidad: "90000", costo: "60000" }]);
-    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [promoCruda()] });
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [promoCruda({ type: "DOD" })] });
 
     const filas = await listarParticipandoCuenta("empresa-1", "cuenta-1");
 
     expect(filas).toHaveLength(1);
     expect(filas[0]).toMatchObject({
       itemId: "MCO1",
-      tipoPromocion: "DEAL",
+      tipoPromocion: "DOD",
       estadoMl: "started",
       precioActual: 90000,
       precioMinimo: 90000,
       gananciaEstimada: 30000, // 90000 - 60000
       fechaInicio: "2026-11-01T00:00:00",
       fechaFin: "2026-11-30T23:59:59",
-      puedeSalirApi: false, // DEAL: una vez activa, la doc de ML no deja DELETE
+      puedeSalirApi: false, // DOD (Oferta del día real): una vez activa, la doc de ML no deja DELETE
     });
   });
 

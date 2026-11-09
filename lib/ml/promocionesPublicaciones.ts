@@ -176,13 +176,13 @@ export async function leerPublicacionConEstado(
   };
 
   if (resultadoPromos.estado === "sin_permiso") {
-    return { ...comun, estado: "error", promociones: [], motivoError: "La app no tiene permiso de Promociones para esta cuenta — reconectala desde Cuentas." };
+    return { ...comun, estado: "error", promociones: [], motivoError: "La app no tiene permiso de Promociones para esta cuenta — reconectarla desde Cuentas." };
   }
   if (resultadoPromos.estado === "no_autorizado") {
-    return { ...comun, estado: "error", promociones: [], motivoError: "El token de esta cuenta ya no es válido — reconectala." };
+    return { ...comun, estado: "error", promociones: [], motivoError: "El token de esta cuenta ya no es válido — reconectarla." };
   }
   if (resultadoPromos.estado === "otro_error") {
-    return { ...comun, estado: "error", promociones: [], motivoError: "Mercado Libre no respondió bien para esta publicación — probá de nuevo." };
+    return { ...comun, estado: "error", promociones: [], motivoError: "Mercado Libre no respondió bien para esta publicación — probar de nuevo." };
   }
   if (resultadoPromos.promociones.length === 0) {
     return { ...comun, estado: "sin_promocion", promociones: [], motivoError: null };
@@ -350,11 +350,11 @@ export async function participarEnPublicacionDirecto(
 
   const [detalle, resultadoPromos] = await Promise.all([leerItemParaPromocionMl(itemId, token), leerPromocionesItemMl(itemId, token)]);
   if (!detalle || resultadoPromos.estado !== "ok") {
-    return { ok: false, estado: "fallida", error: "No se pudo confirmar el estado real en Mercado Libre antes de participar — probá de nuevo.", accionId: null };
+    return { ok: false, estado: "fallida", error: "No se pudo confirmar el estado real en Mercado Libre antes de participar — probar de nuevo.", accionId: null };
   }
   const promoReal = resultadoPromos.promociones.find((p) => (promotionIdMl ? p.id === promotionIdMl : p.type === tipoPromocion));
   if (!promoReal) {
-    return { ok: false, estado: "fallida", error: "Esta promoción ya no está disponible para esta publicación — volvé a cargar la lista.", accionId: null };
+    return { ok: false, estado: "fallida", error: "Esta promoción ya no está disponible para esta publicación — volver a cargar la lista.", accionId: null };
   }
 
   const [reglas, piso] = await Promise.all([leerReglasFrescasCuenta(empresaId, cuentaMlId), leerPisoYCostoFresco(empresaId, detalle.skuCodigo)]);
@@ -371,7 +371,7 @@ export async function participarEnPublicacionDirecto(
   };
   const [recalculado] = calcularCandidatosItem(item, reglas, piso.precioMinimo, piso.costo);
   if (!recalculado) {
-    return { ok: false, estado: "fallida", error: "No se pudo recalcular esta publicación — probá de nuevo.", accionId: null };
+    return { ok: false, estado: "fallida", error: "No se pudo recalcular esta publicación — probar de nuevo.", accionId: null };
   }
 
   const accionSolicitada: AccionEscribible = recalculado.estadoMl === "candidate" ? "participar" : "modificar";

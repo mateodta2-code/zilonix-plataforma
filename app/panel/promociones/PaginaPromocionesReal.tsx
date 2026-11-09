@@ -25,8 +25,16 @@ const ETIQUETA_FILTRO: Record<FiltroPublicaciones, string> = {
 // Nombres reales de Mercado Libre — se muestran igual, acá solo se
 // traduce el rótulo visible; el tipo real (ej. "DEAL") siempre se ve
 // también, chico, al lado.
+//
+// Tarea "Promociones-Ajustes-1" — bug real confirmado en staging
+// (Mateo, cuenta sharel): DEAL es la "Campaña tradicional" de Mercado
+// Libre, NO la Oferta del día real (que es DOD/Daily Deal) — estaban
+// cambiados. Esta confusión fue justo la causa de que "Dejar de
+// participar" no apareciera en una DEAL ya aplicada (ver
+// TIPOS_SALIR_API, lib/ml/promociones.ts).
 const ETIQUETA_TIPO_PROMOCION: Record<string, string> = {
-  DEAL: "Oferta del día",
+  DEAL: "Campaña tradicional",
+  DOD: "Oferta del día",
   LIGHTNING: "Oferta relámpago",
   PRICE_DISCOUNT: "Descuento de precio",
   SMART: "Precio inteligente",
@@ -98,8 +106,8 @@ export function PaginaPromocionesReal({
   const [filas, setFilas] = useState<PublicacionConEstado[]>([]);
   const [conteos, setConteos] = useState<ConteosPublicaciones>({ todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 });
   const [cursor, setCursor] = useState<string | null>(null);
-  const [cargando, setCargando] = useState(false);
-  const [cargandoMas, setCargandoMas] = useState(false);
+  const [cargandoAuto, setCargandoAuto] = useState(false);
+  const [topeAlcanzado, setTopeAlcanzado] = useState(false);
   const [expandidaId, setExpandidaId] = useState<string | null>(null);
 
   const [toasts, setToasts] = useState<ItemToast[]>([]);
@@ -115,36 +123,86 @@ export function PaginaPromocionesReal({
     return () => clearTimeout(id);
   }, [buscarTexto]);
 
-  async function cargarPagina(cursorParaUsar: string | null, reiniciar: boolean) {
-    if (reiniciar) setCargando(true);
-    else setCargandoMas(true);
+  // Tarea "Promociones-Ajustes-1" — antes había que ir clickeando
+  // "Cargar más publicaciones" a mano, página por página (pedido
+  // explícito de Mateo: que cargue todo sola). Ahora pide página tras
+  // página en segundo plano, sin que la persona haga nada, con un tope
+  // de seguridad (nunca escanea un catálogo gigante sin límite de
+  // una), una pausa chica entre páginas, y un botón para detenerla.
+  const TOPE_CARGA_AUTOMATICA = 500;
+  const PAUSA_ENTRE_PAGINAS_MS = 150;
+
+  // Id de la carga en curso — cada cambio de cuenta/filtro/búsqueda
+  // arranca una carga NUEVA con un id distinto; si una respuesta
+  // tardía de la carga VIEJA llega después, se descarta (nunca pisa
+  // la vista con resultados que ya no corresponden a lo que se está
+  // mirando).
+  const idCargaRef = useRef(0);
+  const detenerRef = useRef(false);
+
+  function esperar(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function pedirPagina(cursorParaUsar: string | null): Promise<{ filas: PublicacionConEstado[]; conteosLote: ConteosPublicaciones; cursorSiguiente: string | null } | null> {
     const params = new URLSearchParams({ filtro, buscar: buscarAplicado });
     if (cuentaSeleccionada !== "todas") params.set("cuentaId", cuentaSeleccionada);
     if (cursorParaUsar) params.set("cursor", cursorParaUsar);
     try {
       const res = await fetch(`/api/ml/promociones/publicaciones?${params.toString()}`);
-      if (res.ok) {
-        const body: { filas: PublicacionConEstado[]; conteosLote: ConteosPublicaciones; cursorSiguiente: string | null } = await res.json();
-        setFilas((actual) => (reiniciar ? body.filas : [...actual, ...body.filas]));
-        setConteos((actual) => (reiniciar ? body.conteosLote : sumarConteos(actual, body.conteosLote)));
-        setCursor(body.cursorSiguiente);
-      } else {
+      if (!res.ok) {
         mostrarToast("No se pudo cargar la lista de publicaciones — probar de nuevo.", "peligro");
+        return null;
       }
+      return await res.json();
     } catch {
       mostrarToast("No se pudo conectar con el servidor — revisar la conexión e intentar de nuevo.", "peligro");
+      return null;
     }
-    setCargando(false);
-    setCargandoMas(false);
+  }
+
+  // `reiniciar=true` limpia lo ya cargado y arranca de cero (cambio de
+  // cuenta/filtro/búsqueda); `reiniciar=false` sigue desde el cursor
+  // actual (botón "Seguir cargando", después del tope o de detener).
+  async function cargarTodoAutomatico(reiniciar: boolean) {
+    const miId = ++idCargaRef.current;
+    detenerRef.current = false;
+    if (reiniciar) {
+      setFilas([]);
+      setConteos({ todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 });
+      setCursor(null);
+      setExpandidaId(null);
+    }
+    setTopeAlcanzado(false);
+    setCargandoAuto(true);
+
+    let cursorActual: string | null = reiniciar ? null : cursor;
+    let totalRevisado = reiniciar ? 0 : conteos.todas;
+
+    while (true) {
+      const resultado = await pedirPagina(cursorActual);
+      if (idCargaRef.current !== miId) return; // esta carga ya no es la vigente
+      if (!resultado) break;
+
+      setFilas((actual) => [...actual, ...resultado.filas]);
+      setConteos((actual) => sumarConteos(actual, resultado.conteosLote));
+      totalRevisado += resultado.conteosLote.todas;
+      cursorActual = resultado.cursorSiguiente;
+      setCursor(cursorActual);
+
+      if (!cursorActual || detenerRef.current) break;
+      if (totalRevisado >= TOPE_CARGA_AUTOMATICA) {
+        setTopeAlcanzado(true);
+        break;
+      }
+      await esperar(PAUSA_ENTRE_PAGINAS_MS);
+    }
+    if (idCargaRef.current === miId) setCargandoAuto(false);
   }
 
   useEffect(() => {
-    setFilas([]);
-    setConteos({ todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 });
-    setCursor(null);
-    setExpandidaId(null);
-    void cargarPagina(null, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cargarPagina se recrea cada render; solo importa reaccionar a estos 3
+    void cargarTodoAutomatico(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cargarTodoAutomatico se recrea cada render; solo importa reaccionar a estos 3 (cancela la carga vieja por idCargaRef)
   }, [cuentaSeleccionada, filtro, buscarAplicado]);
 
   function parcharPromo(itemId: string, cuentaMlId: string, tipoPromocion: string, promotionIdMl: string | null, mutar: (p: PromocionParaUi) => PromocionParaUi | null) {
@@ -331,7 +389,7 @@ export function PaginaPromocionesReal({
     setAplicandoRegla(false);
     setResultadoRegla(body as ResumenAplicarRegla);
     setPasoRegla("resultado");
-    void cargarPagina(null, true);
+    void cargarTodoAutomatico(true);
   }
 
   const nombreCuentaSeleccionada = cuentaSeleccionada === "todas" ? "todas las cuentas" : cuentaPorId.get(cuentaSeleccionada)?.nickname ?? "esta cuenta";
@@ -368,6 +426,36 @@ export function PaginaPromocionesReal({
           ))}
         </div>
         <p style={{ fontSize: 11.5, color: "var(--texto-suave)", marginTop: 6 }}>Los contadores son de las publicaciones ya revisadas en esta pantalla, no del catálogo completo.</p>
+
+        <div className={styles.progresoCarga}>
+          {cargandoAuto ? (
+            <>
+              <span>Cargando publicaciones… {formatearNumero(conteos.todas, "es")} revisadas hasta ahora.</span>
+              <Boton
+                type="button"
+                variante="secundario"
+                chico
+                onClick={() => {
+                  detenerRef.current = true;
+                }}
+              >
+                Detener carga
+              </Boton>
+            </>
+          ) : cursor ? (
+            <>
+              <span>
+                {topeAlcanzado ? `Se llegó al tope de ${formatearNumero(TOPE_CARGA_AUTOMATICA, "es")} publicaciones revisadas por carga.` : "La carga se detuvo."}{" "}
+                {formatearNumero(conteos.todas, "es")} revisadas hasta ahora.
+              </span>
+              <Boton type="button" variante="secundario" chico onClick={() => void cargarTodoAutomatico(false)}>
+                Seguir cargando
+              </Boton>
+            </>
+          ) : (
+            <span>Listo — {formatearNumero(conteos.todas, "es")} publicaciones revisadas.</span>
+          )}
+        </div>
       </Tarjeta>
 
       <Tarjeta className={styles.seccion}>
@@ -437,10 +525,8 @@ export function PaginaPromocionesReal({
       </Tarjeta>
 
       <div className={styles.listaPublicaciones}>
-        {cargando ? (
-          <p style={{ fontSize: 13, color: "var(--texto-suave)" }}>Cargando…</p>
-        ) : filas.length === 0 ? (
-          <p style={{ fontSize: 13, color: "var(--texto-suave)" }}>No hay publicaciones que coincidan con este filtro o búsqueda.</p>
+        {filas.length === 0 ? (
+          <p style={{ fontSize: 13, color: "var(--texto-suave)" }}>{cargandoAuto ? "Cargando…" : "No hay publicaciones que coincidan con este filtro o búsqueda."}</p>
         ) : (
           filas.map((fila) => {
             const expandida = expandidaId === fila.itemId;
@@ -539,14 +625,6 @@ export function PaginaPromocionesReal({
         )}
       </div>
 
-      {cursor && (
-        <div className={styles.cargarMas}>
-          <Boton type="button" variante="secundario" disabled={cargandoMas} onClick={() => cargarPagina(cursor, false)}>
-            {cargandoMas ? "Cargando…" : "Cargar más publicaciones"}
-          </Boton>
-        </div>
-      )}
-
       {/* Modal "Participar" */}
       <dialog
         ref={dialogParticiparRef}
@@ -595,6 +673,9 @@ export function PaginaPromocionesReal({
               <span>{formatearNumero(Math.round(calculoModal.descuentoVendedorPct * 10) / 10, idiomaDeCuenta(seleccion.fila.cuentaMlId))}%</span>
             </p>
             {seleccion.promocion.esCompartida && <p className={styles.avisoCompartida}>Promoción compartida con Mercado Libre (+Meli) — el aporte exacto de Mercado Libre no lo confirma esta API.</p>}
+            {seleccion.promocion.tipoPromocion === "PRICE_DISCOUNT" && (
+              <p className={styles.avisoCompartida}>Descuento de precio exige entre 5% y 80% de descuento, con una vigencia máxima de 14 días.</p>
+            )}
             <p className={styles.filaDatoFinal}>
               <span>Precio final</span>
               <span>{formatearMoneda(calculoModal.precioFinal, seleccion.fila.siteId)}</span>
