@@ -195,10 +195,21 @@
   color: var(--text-faint, var(--texto-suave));
 }
 
-.cargarMas {
+/* Tarea "Promociones-Ajustes-1" — barra de progreso de la carga
+   automática (reemplaza el botón manual "Cargar más publicaciones"). */
+.progresoCarga {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radio-tarjeta);
+  border: 1px solid var(--degradado-plata-borde);
+  background: var(--superficie-2);
+  color: var(--texto-suave);
+  font-size: 12.5px;
   display: flex;
-  justify-content: center;
-  margin-top: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
 }
 
 /* Modal "Confirma los detalles de la promoción" — <dialog> nativo,

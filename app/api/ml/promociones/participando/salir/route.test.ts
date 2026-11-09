@@ -58,7 +58,7 @@ vi.mock("@/lib/ml/cliente", async (importOriginal) => {
 });
 
 import { cookies } from "next/headers";
-import { cuentasMl, promocionesCandidatos } from "@/db/schema";
+import { cuentasMl } from "@/db/schema";
 import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
 import { requierePermiso } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
@@ -91,21 +91,30 @@ function limpiar() {
   vi.mocked(requierePermiso).mockResolvedValue({} as never);
   obtenerAccessTokenVigenteMock.mockResolvedValue("token-falso");
   filasPorTabla.set(cuentasMl, [{ id: CUENTA_ID, empresaId: "empresa-1", nickname: "Cuenta de prueba" }]);
-  // Review de Pablo (PR #311) — el ítem tiene que estar registrado en
-  // el snapshot de ESTA cuenta para esta empresa (ver el comentario
-  // completo junto al chequeo real en route.ts).
-  filasPorTabla.set(promocionesCandidatos, [{ empresaId: "empresa-1", cuentaMlId: CUENTA_ID, itemId: "MCO1" }]);
 }
 
 describe("POST /api/ml/promociones/participando/salir — rama fix-promociones-aprobadas-participando, punto 3", () => {
   beforeEach(limpiar);
   afterEach(() => vi.clearAllMocks());
 
-  it("tipo que NO se puede dejar por API (DEAL): 400, nunca llega a leer ni a llamar al DELETE", async () => {
-    const res = await POST(peticion(cuerpoBase({ tipoPromocion: "DEAL" })));
+  it("tipo que NO se puede dejar por API (DOD, la Oferta del día real): 400, nunca llega a leer ni a llamar al DELETE", async () => {
+    const res = await POST(peticion(cuerpoBase({ tipoPromocion: "DOD" })));
     expect(res.status).toBe(400);
     expect(leerPromocionesItemMlMock).not.toHaveBeenCalled();
     expect(salirDePromocionMlMock).not.toHaveBeenCalled();
+  });
+
+  // Tarea "Promociones-Ajustes-1" — bug real confirmado en staging:
+  // DEAL es la "Campaña tradicional" (no la Oferta del día real, que
+  // es DOD) y SÍ se puede dejar por API — antes se bloqueaba por una
+  // confusión de nombres entre los dos tipos.
+  it("DEAL (Campaña tradicional, no la Oferta del día real): SÍ se puede dejar por API", async () => {
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ id: "PROMO-1", type: "DEAL", status: "started", price: 90000 }] });
+    salirDePromocionMlMock.mockResolvedValue({ ok: true, status: 200, textoCrudo: "{}" });
+
+    const res = await POST(peticion(cuerpoBase({ tipoPromocion: "DEAL" })));
+    expect(res.status).toBe(200);
+    expect(salirDePromocionMlMock).toHaveBeenCalledWith("MCO1", "token-falso", "PROMO-1", "DEAL");
   });
 
   it("caso feliz: revalida fresco, llama a salirDePromocionMl (MOCKEADO) y guarda quién y cuándo", async () => {
@@ -153,17 +162,22 @@ describe("POST /api/ml/promociones/participando/salir — rama fix-promociones-a
     expect(insertsPromocionesAcciones[0].resultadoMl).toMatchObject({ yaNoParticipaba: true, llamoAMercadoLibre: false });
   });
 
-  // Review de Pablo (PR #311) — nunca alcanza con que la cuenta sea de
-  // la empresa: el ítem puntual tiene que estar registrado bajo ESA
-  // cuenta en el snapshot de Promociones (promociones_candidatos) —
-  // nunca se confía en la combinación cuentaId+itemId del body a
-  // ciegas antes de intentar un DELETE real.
-  it("itemId que nunca se vio bajo esa cuenta (no está en el snapshot): 404, nunca llega a leer ni a llamar a Mercado Libre", async () => {
-    filasPorTabla.set(promocionesCandidatos, []); // ningún candidato conocido para esta combinación
-    const res = await POST(peticion(cuerpoBase()));
-    expect(res.status).toBe(404);
-    expect(leerPromocionesItemMlMock).not.toHaveBeenCalled();
-    expect(salirDePromocionMlMock).not.toHaveBeenCalled();
+  // Tarea "Promociones-Ajustes-1" — bug real confirmado en staging: el
+  // flujo nuevo (lista en vivo) nunca escribe promociones_candidatos,
+  // así que exigir una fila ahí hacía que "Dejar de participar"
+  // SIEMPRE devolviera 404 "volvé a Buscar" — se sacó ese chequeo (ver
+  // comentario en route.ts). Un itemId que esta cuenta nunca vio en
+  // Mercado Libre sigue sin poder salir: simplemente no aparece como
+  // started/pending al revalidar fresco (caso "ya no participaba",
+  // probado arriba) — nunca llega a 404, llega a 200 con
+  // yaNoParticipaba:true.
+  it("itemId sin ninguna fila previa en promociones_candidatos: YA NO devuelve 404 — sigue con la revalidación fresca normal", async () => {
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ id: "PROMO-1", type: "PRICE_DISCOUNT", status: "started", price: 90000 }] });
+    salirDePromocionMlMock.mockResolvedValue({ ok: true, status: 200, textoCrudo: "{}" });
+
+    const res = await POST(peticion(cuerpoBase({ itemId: "MCO-NUNCA-VISTO" })));
+    expect(res.status).toBe(200);
+    expect(leerPromocionesItemMlMock).toHaveBeenCalledWith("MCO-NUNCA-VISTO", "token-falso");
   });
 
   // Tarea "Promociones real" (Refs #295) — 423 (Locked, visto real

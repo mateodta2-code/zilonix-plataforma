@@ -8,6 +8,7 @@ import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
 import {
   calcularCandidatosItem,
+  descuentoFueraDeRangoPriceDiscount,
   fechasParaParticipar,
   leerPisoYCostoFresco,
   leerReglasFrescasCuenta,
@@ -139,7 +140,19 @@ export function validarCalculado(
     const techos = [recalculado.maxDiscountedPrice, recalculado.precioOriginal].filter((v): v is number => v != null);
     const techo = techos.length > 0 ? Math.min(...techos) : null;
     if (techo != null && precioElegido > techo) {
-      return { ok: false, motivo: `El precio elegido supera el máximo que permite esta promoción puntual ($${Math.round(techo).toLocaleString("es-CO")}).` };
+      // Issue #315 (multipaís) — nunca "$"/es-CO fijo: esta función no
+      // conoce el siteId de la cuenta (solo recibe el CandidatoCalculado
+      // ya recalculado), así que el número se muestra sin símbolo de
+      // moneda, agrupado con un locale neutro ("es"), nunca es-CO.
+      return { ok: false, motivo: `El precio elegido supera el máximo que permite esta promoción puntual (${new Intl.NumberFormat("es").format(Math.round(techo))}).` };
+    }
+    // PRICE_DISCOUNT exige 5%-80% de descuento real frente al precio
+    // original, también cuando el precio lo elige una persona a mano
+    // (nunca solo en el camino automático, más abajo) — Mercado Libre
+    // rechazaría el PUT/POST igual si se manda fuera de rango.
+    const motivoFueraDeRango = descuentoFueraDeRangoPriceDiscount(recalculado.tipoPromocion, recalculado.precioOriginal, precioElegido);
+    if (motivoFueraDeRango) {
+      return { ok: false, motivo: motivoFueraDeRango };
     }
     return { ok: true, deal: precioElegido };
   }
@@ -308,9 +321,11 @@ export async function escribirPromocionMl(
       if (accion === "participar") {
         // El snapshot nunca guardó las fechas reales de la promoción de
         // Mercado Libre (solo lo que hace falta para decidir el precio)
-        // — fechasParaParticipar con un objeto vacío cae directo al
-        // respaldo real (hoy → fin de mes).
-        const { fechaInicio, fechaFin } = fechas ?? fechasParaParticipar({});
+        // — fechasParaParticipar cae al respaldo real (hoy → fin de mes,
+        // o hoy → 14 días para PRICE_DISCOUNT). Se le pasa `type` para
+        // que elija el respaldo correcto — un objeto vacío perdía esto
+        // y PRICE_DISCOUNT podía terminar con más de 14 días de vigencia.
+        const { fechaInicio, fechaFin } = fechas ?? fechasParaParticipar({ type: tipoPromocion });
         respuestaMl = await participarPromocionMl(itemId, token, {
           promotion_id: promotionIdMl ?? "",
           promotion_type: tipoPromocion,
@@ -327,7 +342,7 @@ export async function escribirPromocionMl(
         continue;
       }
       if (error instanceof LimiteMercadoLibreError) {
-        return { estado: "fallida", error: `Mercado Libre está limitando las peticiones ahora mismo (${error.message}) — probá de nuevo en unos segundos.`, resultadoMl: null };
+        return { estado: "fallida", error: `Mercado Libre está limitando las peticiones ahora mismo (${error.message}) — probar de nuevo en unos segundos.`, resultadoMl: null };
       }
       return { estado: "fallida", error: error instanceof Error ? error.message.slice(0, 400) : "No se pudo ejecutar.", resultadoMl: null };
     }
@@ -339,7 +354,7 @@ export async function escribirPromocionMl(
     if (respuestaMl.status === 423) {
       return {
         estado: "fallida",
-        error: "Mercado Libre bloqueó este producto por un momento (otra operación en curso) — probá de nuevo en unos segundos.",
+        error: "Mercado Libre bloqueó este producto por un momento (otra operación en curso) — probar de nuevo en unos segundos.",
         resultadoMl: { ok: false, status: 423, respuesta: respuestaMl.textoCrudo.slice(0, 500) },
       };
     }
