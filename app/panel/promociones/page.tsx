@@ -6,15 +6,21 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { leerResumenMaestraSku } from "@/lib/ml/promocionesPublicaciones";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
-import { PaginaPromociones } from "./PaginaPromociones";
+import { PaginaPromocionesReal } from "./PaginaPromocionesReal";
 
-// Rama feat-promociones, punto 3 — "una sola página /panel/promociones".
-// Server Component mínimo: resuelve sesión/empresa/permiso y las
-// cuentas conectadas; todo lo demás (buscar, candidatos, reglas,
-// historial, aplicar) lo hace el cliente con fetch a las rutas de
-// app/api/ml/promociones/ — mismo criterio que SeccionClip.tsx.
+// Tarea "Promociones real" (Refs #295) — reemplaza el diseño viejo
+// (cola de candidatos → aprobar → "Lanzar aprobadas") por la maqueta
+// que Mateo ya revisó y aprobó en /panel/promociones-prueba: lista por
+// publicación, con "Participar"/"Dejar de participar" directos. El
+// módulo viejo (PaginaPromociones.tsx y sus rutas de /api) queda
+// INTACTO en el repo — nunca se borra sin que Mateo lo autorice —
+// simplemente esta página ya no lo renderiza.
+// Server Component mínimo: resuelve sesión/empresa/permiso, las
+// cuentas conectadas y el resumen de la tabla maestra de SKU; todo lo
+// demás lo hace el cliente con fetch a app/api/ml/promociones/publicaciones/.
 export default async function PromocionesPage() {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -38,20 +44,22 @@ export default async function PromocionesPage() {
   }
 
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
-  const puedeAprobar = tienePermiso(miMembresia?.permisos ?? [], "promociones", "aprobar");
   const puedeEjecutar = tienePermiso(miMembresia?.permisos ?? [], "promociones", "ejecutar");
 
-  const cuentas = (await listarCuentasConectadas(empresa.id))
-    .filter((c) => !c.desconectadaTs)
-    .map((c) => ({ id: c.id, nickname: c.nickname, siteId: c.siteId, moneda: c.moneda, idioma: c.idioma }));
+  const [cuentasConectadas, resumenMaestraSku] = await Promise.all([listarCuentasConectadas(empresa.id), leerResumenMaestraSku(empresa.id)]);
+  const cuentas = cuentasConectadas.filter((c) => !c.desconectadaTs).map((c) => ({ id: c.id, nickname: c.nickname, siteId: c.siteId }));
 
   return (
     <>
       <EncabezadoPagina
         titulo="Promociones"
-        descripcion="Revisa las promociones reales de Mercado Libre y aplicá solo las que cumplen tus reglas — el precio mínimo de Finanzas siempre manda."
+        descripcion="Estado real de cada publicación en Mercado Libre — participar o salir de una promoción, siempre con el precio mínimo de Finanzas como límite."
       />
-      <PaginaPromociones cuentas={cuentas} puedeAprobar={puedeAprobar} puedeEjecutar={puedeEjecutar} />
+      <PaginaPromocionesReal
+        cuentas={cuentas}
+        puedeEjecutar={puedeEjecutar}
+        resumenMaestraSku={{ total: resumenMaestraSku.total, actualizadoTs: resumenMaestraSku.actualizadoTs?.toISOString() ?? null }}
+      />
     </>
   );
 }
