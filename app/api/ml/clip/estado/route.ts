@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requierePermiso } from "@/lib/permisos";
-import { PATRON_ID_PRODUCTO_O_ITEM } from "@/lib/ml/cliente";
+import { LimiteMercadoLibreError, PATRON_ID_PRODUCTO_O_ITEM } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente, listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { obtenerClipsMl, type ClipMl } from "@/lib/ml/cliente";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
@@ -18,7 +18,13 @@ import { PATRON_UUID, respuestaSiClipDeshabilitado, respuestaSiOrigenInvalido, r
 const CONCURRENCIA_CONSULTA_ESTADO = 5;
 
 type ItemPedido = { cuentaId: string; itemId: string };
-export type FilaEstadoClip = { cuentaId: string; itemId: string; clips: ClipMl[] | null };
+// Rama mateo/clip-estado-automatico — `limiteMl`/`retryAfterMs`: antes,
+// un 429 real de Mercado Libre se tragaba en el catch de abajo y volvía
+// IGUAL que "no hay clips todavía" (clips:null en los dos casos) — el
+// cliente no tenía forma de distinguir "esperá" de "vacío", así que el
+// polling automático (SeccionClip.tsx) podía reintentar a ciegas en
+// pleno límite. Ahora la fila dice de cuál de los dos casos se trata.
+export type FilaEstadoClip = { cuentaId: string; itemId: string; clips: ClipMl[] | null; limiteMl?: boolean; retryAfterMs?: number | null };
 
 function parsearItemsPedidos(cuerpo: unknown): ItemPedido[] | null {
   const items = (cuerpo as { items?: unknown })?.items;
@@ -75,7 +81,10 @@ export async function POST(request: Request) {
       const token = await obtenerAccessTokenVigente(empresa.id, pedido.cuentaId);
       const clips = await obtenerClipsMl(pedido.itemId, token);
       return { cuentaId: pedido.cuentaId, itemId: pedido.itemId, clips };
-    } catch {
+    } catch (error) {
+      if (error instanceof LimiteMercadoLibreError) {
+        return { cuentaId: pedido.cuentaId, itemId: pedido.itemId, clips: null, limiteMl: true, retryAfterMs: error.retryAfterMs };
+      }
       return { cuentaId: pedido.cuentaId, itemId: pedido.itemId, clips: null };
     }
   });
