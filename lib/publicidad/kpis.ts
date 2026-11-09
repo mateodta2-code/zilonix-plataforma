@@ -11,7 +11,7 @@
 
 import { aCentavos, desdeCentavos } from "@/lib/finanzas/utilidad-venta";
 import { aEscala } from "@/lib/numeros/normalizar-decimal";
-import { diasEntreInclusive, hoyBogota } from "@/lib/publicidad/plan";
+import { diasDelRango, diasEntreInclusive, hoyBogota } from "@/lib/publicidad/plan";
 import { ACOS_MAXIMO, FACTOR_EXCELENTE, TOPE_GASTO_SIN_VENTAS, type ConfigPublicidad } from "@/lib/publicidad/config";
 
 const CERO = BigInt(0);
@@ -25,6 +25,12 @@ export type DiaMetrica = {
   ventasOrganicasMonto: string | null;
   clicks: number | string | null;
   impresiones: number | string | null;
+  // Cantidad de ventas atribuidas a la publicidad (no es la plata).
+  ventasCantidad?: number | string | null;
+  // Opcionales: un día viejo del test no las trae. Null no es cero.
+  unidadesTotal?: number | string | null;
+  unidadesDirectas?: number | string | null;
+  unidadesIndirectas?: number | string | null;
 };
 
 export type TotalesRango = {
@@ -34,10 +40,12 @@ export type TotalesRango = {
   ventasTotales: string | null;
   clicks: string | null;
   impresiones: string | null;
+  ventasCantidad: string | null;
   cpc: string | null;
   roas: string | null;
   acos: string | null;
   tacos: string | null;
+  unidadesVendidas: string | null;
 };
 
 export type TipoDiagnostico = "aprendiendo" | "excelente" | "en_objetivo" | "bajo_objetivo" | "sin_objetivo" | "sin_datos";
@@ -194,11 +202,22 @@ export function totalesDeDias(dias: readonly DiaMetrica[]): TotalesRango {
     ventasTotales,
     clicks,
     impresiones,
+    ventasCantidad: sumarEnteros(dias.map((d) => d.ventasCantidad ?? null)),
     cpc: dividirMonto(gasto, clicks),
     roas: dividirRazon(ventasPublicidad, gasto, 2),
     acos: dividirRazon(gasto, ventasPublicidad, 4),
     tacos: dividirRazon(gasto, ventasTotales, 4),
+    unidadesVendidas: unidadesConPublicidad(dias),
   };
+}
+
+// units_quantity es el total que atribuye Mercado Libre a la
+// publicidad. Si esa columna no vino en ningún día, se suman directas
+// e indirectas. No se suman las dos cosas juntas: sería contar dos veces.
+export function unidadesConPublicidad(dias: readonly DiaMetrica[]): string | null {
+  const totales = sumarEnteros(dias.map((d) => d.unidadesTotal ?? null));
+  if (totales !== null) return totales;
+  return sumarEnteros(dias.flatMap((d) => [d.unidadesDirectas ?? null, d.unidadesIndirectas ?? null]));
 }
 
 // (actual − anterior) / anterior, en porcentaje con 1 decimal ("12.3" o "-4.1").
@@ -209,6 +228,21 @@ export function variacionPorcentual(actual: string | null, anterior: string | nu
   const b = unidades(anterior, ESCALA);
   if (b === CERO) return null;
   return dividir((a - b) * BigInt(100), b, 1);
+}
+
+// Ventas atribuidas / (atribuidas + otras) de las publicaciones
+// promocionadas, en porcentaje con 1 decimal. Si falta una pata, null:
+// no se completa con cero para poder decir un aporte.
+export function aportePorPublicidad(atribuidas: string | null, otras: string | null): string | null {
+  if (atribuidas === null || otras === null) return null;
+  return porcentajeDeRazon(atribuidas, sumarMontos([atribuidas, otras]));
+}
+
+// Días que faltan para salir del aprendizaje. `diasTranscurridos` es
+// el que ya calculó diagnosticarCampana (0 el día del último cambio).
+export function diasParaEstabilizar(diasTranscurridos: number, diasAprendizaje: number): number {
+  const restantes = diasAprendizaje - diasTranscurridos;
+  return restantes < 1 ? 1 : restantes;
 }
 
 export function porcentajeDeRazon(numerador: string | null, denominador: string | null): string | null {
@@ -303,6 +337,155 @@ export function diagnosticarCampana(entrada: {
   const enObjetivo = roasAlcanza(ventas, gasto, objetivo, "1");
   if (enObjetivo) return { tipo: "en_objetivo", dias: 0 };
   return { tipo: "bajo_objetivo", dias: 0 };
+}
+
+export type TonoEstado = "exito" | "peligro" | "acento" | "neutro";
+
+export type FraseEstado = {
+  tono: TonoEstado;
+  frase: string;
+  // 0–100. null si no hay ROAS real y objetivo para pintar la barra.
+  // Si el real pasa el objetivo, queda en 100: la barra no se desborda.
+  avance: number | null;
+};
+
+function avanceRoas(real: string, objetivo: string): number | null {
+  const o = unidades(objetivo, ESCALA);
+  if (o <= CERO) return null;
+  const pct = dividir(unidades(real, ESCALA) * BigInt(100), o, 0);
+  if (pct === null) return null;
+  const n = Number(pct);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(100, n);
+}
+
+// (real − objetivo) / objetivo, en puntos enteros. Positivo = arriba.
+function puntosContraObjetivo(real: string, objetivo: string): { puntos: string; arriba: boolean } | null {
+  const o = unidades(objetivo, ESCALA);
+  if (o <= CERO) return null;
+  const r = unidades(real, ESCALA);
+  const arriba = r >= o;
+  const diff = arriba ? r - o : o - r;
+  const puntos = dividir(diff * BigInt(100), o, 0);
+  if (puntos === null) return null;
+  return { puntos, arriba };
+}
+
+// El día que muestra la frase es 1 el mismo día de la última
+// modificación (diagnostico.dias empieza en 0). "día 0 de 7" no se entiende.
+export function fraseEstado(entrada: {
+  diagnostico: Diagnostico;
+  roas: string | null;
+  roasObjetivo: string | null;
+  diasAprendizaje: number;
+}): FraseEstado {
+  const avance =
+    entrada.roas !== null && entrada.roasObjetivo !== null ? avanceRoas(entrada.roas, entrada.roasObjetivo) : null;
+  if (entrada.diagnostico.tipo === "aprendiendo") {
+    const dia = entrada.diagnostico.dias + 1;
+    const tope = entrada.diasAprendizaje;
+    return {
+      tono: "acento",
+      frase: `Aprendiendo, día ${dia} de ${tope}, no tocar todavía`,
+      avance,
+    };
+  }
+  if (entrada.diagnostico.tipo === "sin_datos") return { tono: "neutro", frase: "Sin datos", avance: null };
+  if (entrada.diagnostico.tipo === "sin_objetivo") return { tono: "neutro", frase: "Sin objetivo de ROAS", avance: null };
+  if (entrada.roas === null || entrada.roasObjetivo === null) return { tono: "neutro", frase: "Sin datos", avance: null };
+  const distancia = puntosContraObjetivo(entrada.roas, entrada.roasObjetivo);
+  if (!distancia || distancia.puntos === "0") return { tono: "exito", frase: "Cumple el objetivo", avance: avance ?? 100 };
+  if (distancia.arriba) {
+    return { tono: "exito", frase: `Cumple el objetivo, ${distancia.puntos} % arriba`, avance: 100 };
+  }
+  return { tono: "peligro", frase: `Debajo del objetivo, falta ${distancia.puntos} %`, avance };
+}
+
+export type UsoPresupuesto =
+  | { tipo: "automatico" }
+  | { tipo: "sin_presupuesto" }
+  | { tipo: "sin_gasto"; presupuestoDiario: string }
+  | { tipo: "ok"; presupuestoDiario: string; porcentaje: string; avance: number };
+
+// % usado = gasto del rango / días del rango / presupuesto diario.
+// Es una suma partida por los días, no el promedio de un % de cada día.
+export function usoPresupuestoDiario(entrada: {
+  gasto: string | null;
+  dias: number;
+  presupuestoDiario: string | null;
+  automatico: boolean | null;
+}): UsoPresupuesto {
+  if (entrada.automatico === true) return { tipo: "automatico" };
+  const presupuesto = entrada.presupuestoDiario;
+  if (presupuesto === null || centavos(presupuesto) <= CERO || entrada.dias < 1) return { tipo: "sin_presupuesto" };
+  if (entrada.gasto === null) return { tipo: "sin_gasto", presupuestoDiario: presupuesto };
+  const porcentaje = dividir(centavos(entrada.gasto) * BigInt(100), centavos(presupuesto) * BigInt(entrada.dias), 0);
+  if (porcentaje === null) return { tipo: "sin_presupuesto" };
+  const n = Number(porcentaje);
+  const avance = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
+  return { tipo: "ok", presupuestoDiario: presupuesto, porcentaje, avance };
+}
+
+// 70 % del objetivo de ROAS. Una campaña en aprendizaje no se marca:
+// todavía no hay que sugerirle nada.
+export function alertaBajo70(entrada: { aprendiendo: boolean; roas: string | null; objetivo: string | null }): boolean {
+  if (entrada.aprendiendo) return false;
+  if (entrada.roas === null || entrada.objetivo === null) return false;
+  const objetivo = unidades(entrada.objetivo, ESCALA);
+  const umbral = unidades("0.70", ESCALA);
+  if (objetivo <= CERO || umbral <= CERO) return false;
+  const real = unidades(entrada.roas, ESCALA);
+  return real * FACTOR_ESCALA < objetivo * umbral;
+}
+
+// Gasto con plata y ninguna venta atribuida. Null en las ventas no es
+// un cero inventado al revés: si no vino el monto ni la cantidad, no
+// se afirma que vendió. Con gasto > 0 y ambos vacíos o en cero, no vendió.
+export function gastaSinVender(gasto: string | null, ingresos: string | null, ventasCantidad: string | null): boolean {
+  if (gasto === null || centavos(gasto) <= CERO) return false;
+  if (ventasCantidad !== null && ventasCantidad !== "0") return false;
+  if (ingresos !== null && centavos(ingresos) > CERO) return false;
+  return true;
+}
+
+export type PuntoDiario = {
+  fecha: string;
+  inversion: string | null;
+  ingresos: string | null;
+  roas: string | null;
+  acos: string | null;
+  tacos: string | null;
+  cpc: string | null;
+  clics: string | null;
+  impresiones: string | null;
+  unidades: string | null;
+  ventasSinPublicidad: string | null;
+  ventasTotales: string | null;
+};
+
+// Un punto por día del rango. El ROAS del día sale de las sumas de ese
+// día, no de promediar el ROAS que guardó la API. Un día sin filas
+// queda en null: no se dibuja un cero.
+export function armarSerieDiaria(desde: string, hasta: string, filas: readonly (DiaMetrica & { fecha: string })[]): PuntoDiario[] {
+  const porFecha = new Map(filas.map((fila) => [fila.fecha, fila]));
+  return diasDelRango(desde, hasta).map((fecha) => {
+    const dia = porFecha.get(fecha);
+    const totales = totalesDeDias(dia ? [dia] : []);
+    return {
+      fecha,
+      inversion: totales.gasto,
+      ingresos: totales.ventasPublicidad,
+      ventasTotales: totales.ventasTotales,
+      roas: totales.roas,
+      acos: totales.acos,
+      tacos: totales.tacos,
+      cpc: totales.cpc,
+      clics: totales.clicks,
+      impresiones: totales.impresiones,
+      unidades: totales.unidadesVendidas,
+      ventasSinPublicidad: totales.ventasOrganicas,
+    };
+  });
 }
 
 function partesIso(iso: string): { anio: number; mes: number; dia: number } {

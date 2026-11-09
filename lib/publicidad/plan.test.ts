@@ -3,10 +3,13 @@ import {
   DIAS_BACKFILL,
   DIAS_INCREMENTAL,
   DIAS_MAX_API,
+  HORAS_PAUSA_TRAS_OK,
   MAX_REINTENTOS_TRAMO,
+  MINUTOS_PAUSA_TRAS_ERROR,
   MIN_PRESUPUESTO_CUENTA_MS,
   alcanzaParaAbrirCuenta,
   backfillRealmenteCerrado,
+  convieneOtraTandaTrasCorte,
   contarReintentosMismoTramo,
   decisionAnteErrorDeCosto,
   decidirTramo,
@@ -15,6 +18,7 @@ import {
   evaluarRefrescoManual,
   hoyBogota,
   leerRetryAfterMs,
+  omitirSyncProgramada,
   ordenarCuentasParaSync,
   ordenDeTrabajo,
   partidaAlCortar,
@@ -256,5 +260,67 @@ describe("rango de sincronización de publicidad (issue #254)", () => {
   it("hoy en Bogotá no depende del huso del servidor", () => {
     expect(hoyBogota(new Date("2026-10-26T04:30:00Z"))).toBe("2026-10-25");
     expect(hoyBogota(new Date("2026-10-26T05:30:00Z"))).toBe("2026-10-26");
+  });
+
+  it("una cuenta ok hace menos de 20 h no vuelve a Mercado Libre; un parcial sí", () => {
+    const ahora = new Date("2026-10-26T15:00:00Z");
+    const ok = (horas: number) =>
+      omitirSyncProgramada(
+        { estado: "ok", rangoDesde: "2026-08-26", rangoHasta: hoy, iniciadaTs: new Date(ahora.getTime() - horas * 3_600_000) },
+        ahora
+      );
+    expect(HORAS_PAUSA_TRAS_OK).toBe(20);
+    expect(ok(19)).toBe(true);
+    expect(ok(20)).toBe(false);
+    expect(
+      omitirSyncProgramada(
+        { estado: "parcial", rangoDesde: "2026-10-20", rangoHasta: hoy, iniciadaTs: new Date(ahora.getTime() - 60_000) },
+        ahora
+      )
+    ).toBe(false);
+    expect(omitirSyncProgramada(null, ahora)).toBe(false);
+  });
+
+  it("un error real espera una hora y un corte de días sin avance espera 20 h, para no gastar los 3 intentos", () => {
+    const ahora = new Date("2026-10-26T15:00:00Z");
+    const hace = (minutos: number) => new Date(ahora.getTime() - minutos * 60_000);
+    const real = { estado: "error" as const, rangoDesde: "2026-10-20", rangoHasta: hoy, error: "Error: 500" };
+    expect(MINUTOS_PAUSA_TRAS_ERROR).toBe(60);
+    expect(omitirSyncProgramada({ ...real, iniciadaTs: hace(5) }, ahora)).toBe(true);
+    expect(omitirSyncProgramada({ ...real, iniciadaTs: hace(61) }, ahora)).toBe(false);
+
+    const corteDias = {
+      estado: "error" as const,
+      rangoDesde: "2026-10-20",
+      rangoHasta: hoy,
+      error: "CorridaIncompletaError: fase:dias. corte",
+      iniciadaTs: hace(5),
+    };
+    expect(omitirSyncProgramada(corteDias, ahora, 1)).toBe(true);
+    expect(omitirSyncProgramada(corteDias, ahora, 0)).toBe(false);
+    expect(
+      omitirSyncProgramada(
+        { ...corteDias, error: "CorridaIncompletaError: fase:pre-dias. corte", iniciadaTs: hace(5) },
+        ahora,
+        0
+      )
+    ).toBe(false);
+    expect(
+      omitirSyncProgramada(
+        { ...corteDias, error: "CorridaIncompletaError: fase:costos. corte" },
+        ahora,
+        0
+      )
+    ).toBe(false);
+    expect(omitirSyncProgramada({ estado: "en_curso", rangoDesde: hoy, rangoHasta: hoy, iniciadaTs: hace(5) }, ahora)).toBe(true);
+  });
+
+  it("otra tanda solo si el corte puede avanzar sin quemar el tramo", () => {
+    expect(convieneOtraTandaTrasCorte("pre-dias", null, null)).toBe(true);
+    expect(convieneOtraTandaTrasCorte("costos", "2026-10-26", "2026-10-26")).toBe(true);
+    expect(convieneOtraTandaTrasCorte("dias", null, "2026-10-20")).toBe(true);
+    expect(convieneOtraTandaTrasCorte("dias", "2026-10-20", "2026-10-22")).toBe(true);
+    expect(convieneOtraTandaTrasCorte("dias", "2026-10-20", "2026-10-20")).toBe(false);
+    expect(convieneOtraTandaTrasCorte("dias", "2026-10-20", null)).toBe(false);
   });
 });

@@ -159,9 +159,10 @@ describe("corte real de sincronizarCuenta (issue #254)", () => {
   it("un corte antes del bucle de días queda en fase pre-dias y no entra a los ad groups", async () => {
     vi.mocked(listarCampanas).mockResolvedValue([{ id: 11, name: "A", status: "active" }]);
 
-    const aviso = await sincronizarCuenta(EMPRESA, CUENTA, "programada", null, AHORA, 0);
+    const corrida = await sincronizarCuenta(EMPRESA, CUENTA, "programada", null, AHORA, 0);
 
-    expect(aviso).toMatch(/medias/);
+    expect(corrida.aviso).toMatch(/medias/);
+    expect(corrida.sigue).toBe(true);
     expect(metricasAdGroupsDelDia).not.toHaveBeenCalled();
     expect(cerrarSincronizacion).toHaveBeenCalledWith(
       EMPRESA,
@@ -188,8 +189,9 @@ describe("corte real de sincronizarCuenta (issue #254)", () => {
       return { results: [] };
     });
 
-    await sincronizarCuenta(EMPRESA, CUENTA, "programada", null, AHORA, base + 60_000);
+    const corrida = await sincronizarCuenta(EMPRESA, CUENTA, "programada", null, AHORA, base + 60_000);
 
+    expect(corrida.sigue).toBe(true);
     expect(metricasAdGroupsDelDia).toHaveBeenCalledTimes(1);
     expect(cerrarSincronizacion).toHaveBeenCalledWith(
       EMPRESA,
@@ -266,9 +268,10 @@ describe("corte real de sincronizarCuenta (issue #254)", () => {
       results: [{ date: "2026-10-26", clicks: 2147483648, cost: 10 }],
     });
 
-    const aviso = await sincronizarCuenta(EMPRESA, CUENTA, "programada", null, AHORA, Date.now() + 60_000);
+    const corrida = await sincronizarCuenta(EMPRESA, CUENTA, "programada", null, AHORA, Date.now() + 60_000);
 
-    expect(aviso).toMatch(/tramo/);
+    expect(corrida.aviso).toMatch(/tramo/);
+    expect(corrida.sigue).toBe(true);
     expect(cerrarSincronizacion).toHaveBeenCalledWith(
       EMPRESA,
       "sync-1",
@@ -303,6 +306,70 @@ describe("corte real de sincronizarCuenta (issue #254)", () => {
 
     expect(resultado.procesadas).toBe(1);
     expect(resultado.pendientes).toBe(1);
+    expect(resultado.sigue).toBe(true);
     expect(abrirSincronizacion).toHaveBeenCalledTimes(1);
+  });
+
+  it("un tramo que cabe en la corrida deja sigue en true para que el workflow pida el tramo anterior", async () => {
+    vi.mocked(dbTrabajadorPublicidad.select).mockImplementation(() => cadena([
+      { id: CUENTA, empresaId: EMPRESA, creadoTs: new Date(1), ultimaSyncTs: null },
+    ]) as never);
+
+    const resultado = await sincronizarPublicidadProgramada(AHORA);
+
+    expect(resultado.procesadas).toBe(1);
+    expect(resultado.pendientes).toBe(0);
+    expect(resultado.sigue).toBe(true);
+    expect(resultado.saltadas).toBe(0);
+  });
+
+  it("una cuenta ok hace menos de 20 h no llama a Mercado Libre", async () => {
+    vi.mocked(dbTrabajadorPublicidad.select).mockImplementation(() => cadena([
+      { id: CUENTA, empresaId: EMPRESA, creadoTs: new Date(1), ultimaSyncTs: new Date(AHORA.getTime() - 3_600_000) },
+    ]) as never);
+    vi.mocked(historialSync).mockResolvedValue({
+      ultima: {
+        estado: "ok",
+        rangoDesde: "2026-10-12",
+        rangoHasta: "2026-10-26",
+        iniciadaTs: new Date(AHORA.getTime() - 3_600_000),
+        error: null,
+        cierraBackfill: true,
+        reanudaDesde: null,
+      },
+      yaTerminoBackfill: true,
+      reintentosMismoTramo: 0,
+    });
+
+    const resultado = await sincronizarPublicidadProgramada(AHORA);
+
+    expect(resultado).toMatchObject({ procesadas: 0, saltadas: 1, pendientes: 0, sigue: false });
+    expect(abrirSincronizacion).not.toHaveBeenCalled();
+    expect(obtenerAnunciante).not.toHaveBeenCalled();
+  });
+
+  it("un ok de hace 21 h sí se sincroniza, y al cerrar el backfill no pide otra tanda", async () => {
+    vi.mocked(dbTrabajadorPublicidad.select).mockImplementation(() => cadena([
+      { id: CUENTA, empresaId: EMPRESA, creadoTs: new Date(1), ultimaSyncTs: new Date(AHORA.getTime() - 21 * 3_600_000) },
+    ]) as never);
+    vi.mocked(historialSync).mockResolvedValue({
+      ultima: {
+        estado: "ok",
+        rangoDesde: "2026-08-26",
+        rangoHasta: "2026-10-26",
+        iniciadaTs: new Date(AHORA.getTime() - 21 * 3_600_000),
+        error: null,
+        cierraBackfill: true,
+        reanudaDesde: null,
+      },
+      yaTerminoBackfill: true,
+      reintentosMismoTramo: 0,
+    });
+
+    const resultado = await sincronizarPublicidadProgramada(AHORA);
+
+    expect(abrirSincronizacion).toHaveBeenCalledTimes(1);
+    expect(resultado.procesadas).toBe(1);
+    expect(resultado.sigue).toBe(false);
   });
 });

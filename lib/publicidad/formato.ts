@@ -20,6 +20,20 @@ export function mostrarDineroTarjeta(monto: string | null): string {
   return mostrarMonto(aEscala(monto, 0));
 }
 
+// Tabla: el mismo redondeo, sin el espacio de mostrarMonto, para que
+// $447.108,61 quepa como $447.109 y la fila no pida scroll.
+export function mostrarDineroCompacto(monto: string | null): string {
+  if (monto === null) return GUION;
+  const entero = aEscala(monto, 0);
+  const miles = entero.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `$${miles}`;
+}
+
+export function textoObjetivoRoas(objetivo: string | null): string | null {
+  if (objetivo === null) return null;
+  return `objetivo ${mostrarRoas(objetivo)}`;
+}
+
 export function mostrarRoas(ratio: string | null): string {
   if (ratio === null) return GUION;
   return `${aEscala(ratio, 2).replace(".", ",")}x`;
