@@ -4,7 +4,7 @@ import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import {
   ClipDemasiadoGrandeError,
   ClipInvalidoError,
-  ClipReputacionRequeridaError,
+  ClipPermisoDeAppRequeridoError,
   ClipSinRespuestaError,
   subirClipItemDesdeArchivo,
 } from "@/lib/ml/clip";
@@ -47,6 +47,12 @@ export type ProgresoCuentaClip = {
   itemId: string;
   estado: EstadoCuentaClip;
   error: string | null;
+  // Caso real (STOREKINGSAS) — detalle técnico (HTTP + cuerpo crudo de
+  // Mercado Libre, hasta 800 caracteres) para un desplegable "Ver
+  // detalle" en la UI, separado del mensaje principal (error, arriba)
+  // que tiene que quedar corto y accionable. null salvo que el error
+  // sea ClipPermisoDeAppRequeridoError.
+  detalle: string | null;
   clipUuid: string | null;
 };
 
@@ -90,12 +96,20 @@ function podarTrabajosViejos(): void {
 // completo, hasta 800 caracteres, ya se logueó aparte dentro de
 // subirClipItemDesdeArchivo/subirClipMl si hiciera falta depurar).
 function mensajeDeErrorSubida(error: unknown): string {
-  if (error instanceof ClipReputacionRequeridaError) return error.message;
+  if (error instanceof ClipPermisoDeAppRequeridoError) return error.message;
   if (error instanceof ClipSinRespuestaError) return error.message;
   if (error instanceof ClipDemasiadoGrandeError) return error.message;
   if (error instanceof ClipInvalidoError) return error.message;
   if (error instanceof Error) return error.message.slice(0, 400);
   return "No se pudo subir el Clip — intenta de nuevo.";
+}
+
+// Solo ClipPermisoDeAppRequeridoError trae detalle técnico separado
+// (ver el comentario de ProgresoCuentaClip.detalle) — los demás ya
+// meten su detalle real dentro del mensaje principal (ej.
+// ClipRechazadoError, vía `error instanceof Error` arriba).
+function detalleDeErrorSubida(error: unknown): string | null {
+  return error instanceof ClipPermisoDeAppRequeridoError ? error.detalle : null;
 }
 
 async function subirAUnaCuenta(empresaId: string, cuenta: CuentaParaSubirClip, rutaPorDefecto: string, contentTypePorDefecto: string, fila: ProgresoCuentaClip): Promise<void> {
@@ -113,6 +127,7 @@ async function subirAUnaCuenta(empresaId: string, cuenta: CuentaParaSubirClip, r
   } catch (error) {
     fila.estado = "error";
     fila.error = mensajeDeErrorSubida(error);
+    fila.detalle = detalleDeErrorSubida(error);
   }
 }
 
@@ -135,7 +150,7 @@ export function iniciarTrabajoClip(
     empresaId,
     creadoTs: Date.now(),
     terminadoTs: null,
-    cuentas: cuentas.map((c) => ({ cuentaId: c.cuentaId, nickname: c.nickname, itemId: c.itemId, estado: "en_cola", error: null, clipUuid: null })),
+    cuentas: cuentas.map((c) => ({ cuentaId: c.cuentaId, nickname: c.nickname, itemId: c.itemId, estado: "en_cola", error: null, detalle: null, clipUuid: null })),
   };
   trabajos.set(id, trabajo);
 
@@ -159,6 +174,7 @@ export function iniciarTrabajoClip(
           // un bug real acá nunca tire abajo el resto de las cuentas.
           fila.estado = "error";
           fila.error = mensajeDeErrorSubida(error);
+          fila.detalle = detalleDeErrorSubida(error);
         }
       });
     } finally {
