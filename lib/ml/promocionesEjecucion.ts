@@ -3,15 +3,17 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { promocionesAcciones, promocionesCandidatos } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import type { PromocionCrudaMl } from "@/lib/ml/cliente";
-import { modificarPromocionMl, motivoErrorEscrituraMl, participarPromocionMl } from "@/lib/ml/cliente";
+import { LimiteMercadoLibreError, modificarPromocionMl, motivoErrorEscrituraMl, participarPromocionMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { msDeReintento429 } from "@/lib/ml/reintento-429";
 import {
   calcularCandidatosItem,
   fechasParaParticipar,
   leerPisoYCostoFresco,
   leerReglasFrescasCuenta,
-  TIPOS_SIN_ESCRITURA_API,
+  type CandidatoCalculado,
   type ItemConPromociones,
+  type ReglasCuentaPromocion,
 } from "@/lib/ml/promociones";
 
 // Code review de Pablo — HIGH 2: "nunca confiar en accion/precioSugerido
@@ -63,17 +65,22 @@ function candidatoComoItem(candidato: CandidatoFila): ItemConPromociones {
   };
 }
 
-// El corazón de HIGH 2 — recalcula TODO con el mismo motor que usa la
-// búsqueda, con reglas y piso leídos de la base en este mismo instante
-// (nunca el snapshot de promociones_candidatos, que puede ser de hace
-// horas). cumpleReglas===true ya cubre, dentro del motor: variantes,
-// tipos sin escritura por API, el gate de "compartida"/participarCompartidas,
-// el tope de descuento y el precio máximo de la promoción puntual — no
-// hace falta repetir esos checks acá, repetirlos sería la misma regla
-// escrita dos veces y con el tiempo una de las dos copias queda vieja.
-export async function validarCandidatoParaEscritura(
-  empresaId: string,
-  candidato: CandidatoFila,
+// Tarea "Promociones real" (Refs #295) — extraído de validarCandidatoParaEscritura
+// SIN cambiar una sola regla (mismo orden de checks, mismos mensajes):
+// esto es lo que de verdad decide si un precio se puede escribir en
+// Mercado Libre, a partir de un CandidatoCalculado YA recalculado con
+// reglas/piso frescos (candidatoComoItem + calcularCandidatosItem, más
+// abajo, o el cálculo en vivo de lib/ml/promocionesPublicaciones.ts —
+// a este punto da igual de dónde salió `recalculado`, ambos caminos
+// pasan por el MISMO motor, calcularCandidatosItem). Se separó para
+// que el flujo nuevo de "Participar" directo (sin pasar por el
+// snapshot promociones_candidatos) pueda reusar exactamente esta
+// misma validación, nunca una copia aparte que con el tiempo quede
+// desincronizada.
+export function validarCalculado(
+  recalculado: CandidatoCalculado,
+  piso: number | null,
+  reglas: ReglasCuentaPromocion,
   accionSolicitada: AccionEscribible,
   // Rama feat-promociones-editar-precio — precio elegido A MANO por un
   // humano para ESTE producto puntual (editando "Precio con promo" o
@@ -83,21 +90,13 @@ export async function validarCandidatoParaEscritura(
   // validar y mandar — nunca al revés, el motor nunca se entera de
   // "cuánto quiso" la persona, solo presta el piso/techo frescos.
   precioElegido?: number
-): Promise<ResultadoValidacion> {
-  if (candidato.tieneVariantes) {
+): ResultadoValidacion {
+  if (recalculado.tieneVariantes) {
     return { ok: false, motivo: "Este producto tiene variantes — se revisa a mano, nunca por esta vía." };
   }
-  if (TIPOS_SIN_ESCRITURA_API.includes(candidato.tipoPromocion)) {
-    return { ok: false, motivo: `El tipo "${candidato.tipoPromocion}" no se puede escribir por la API de Mercado Libre.` };
+  if (recalculado.soloEnMl) {
+    return { ok: false, motivo: `El tipo "${recalculado.tipoPromocion}" no se puede escribir por la API de Mercado Libre.` };
   }
-
-  const [reglas, pisoYCosto] = await Promise.all([
-    leerReglasFrescasCuenta(empresaId, candidato.cuentaMlId),
-    leerPisoYCostoFresco(empresaId, candidato.skuCodigo),
-  ]);
-
-  const [recalculado] = calcularCandidatosItem(candidatoComoItem(candidato), reglas, pisoYCosto.precioMinimo, pisoYCosto.costo);
-  const piso = pisoYCosto.precioMinimo;
 
   if (precioElegido !== undefined) {
     // Con un precio elegido a mano, los ÚNICOS frenos que siguen sin
@@ -110,16 +109,13 @@ export async function validarCandidatoParaEscritura(
     // sobre un producto puntual — por eso acá NO se repite ese check
     // (es la única diferencia real contra el camino de siempre, más
     // abajo).
-    if (!recalculado) {
-      return { ok: false, motivo: "No se pudo recalcular este producto — hace falta una búsqueda nueva." };
-    }
     if (piso == null) {
       return { ok: false, motivo: recalculado.motivoRevisarManual ?? "Falta precio mínimo para este SKU en Finanzas — no se puede participar ni ajustar hasta que se cargue." };
     }
     if (recalculado.esCompartida && !reglas.participarCompartidas) {
       return { ok: false, motivo: "Promoción compartida con Mercado Libre (+Meli) — esta cuenta no tiene habilitado participar en estas." };
     }
-    const accionEsperada: AccionEscribible = candidato.estadoMl === "candidate" ? "participar" : "modificar";
+    const accionEsperada: AccionEscribible = recalculado.estadoMl === "candidate" ? "participar" : "modificar";
     if (accionEsperada !== accionSolicitada) {
       return { ok: false, motivo: "La acción solicitada ya no corresponde al estado actual de esta promoción en Mercado Libre." };
     }
@@ -152,8 +148,8 @@ export async function validarCandidatoParaEscritura(
   // ya cubre, DENTRO del motor: variantes, tipos sin escritura, el
   // gate de "compartida", el tope de descuento y el precio máximo de
   // la promoción puntual — no hace falta repetir esos checks acá.
-  if (!recalculado || !recalculado.cumpleReglas) {
-    return { ok: false, motivo: recalculado?.motivoRevisarManual ?? "Ya no cumple las reglas de esta cuenta — hace falta una búsqueda nueva." };
+  if (!recalculado.cumpleReglas) {
+    return { ok: false, motivo: recalculado.motivoRevisarManual ?? "Ya no cumple las reglas de esta cuenta — hace falta una búsqueda nueva." };
   }
   if (recalculado.accionSugerida !== accionSolicitada) {
     return { ok: false, motivo: "La acción solicitada ya no corresponde al estado actual de esta promoción en Mercado Libre." };
@@ -168,6 +164,30 @@ export async function validarCandidatoParaEscritura(
   }
 
   return { ok: true, deal };
+}
+
+// El corazón de HIGH 2 — recalcula TODO con el mismo motor que usa la
+// búsqueda, con reglas y piso leídos de la base en este mismo instante
+// (nunca el snapshot de promociones_candidatos, que puede ser de hace
+// horas), y delega el veredicto a validarCalculado (arriba) — mismas
+// reglas, mismos mensajes, un solo lugar que las define.
+export async function validarCandidatoParaEscritura(
+  empresaId: string,
+  candidato: CandidatoFila,
+  accionSolicitada: AccionEscribible,
+  precioElegido?: number
+): Promise<ResultadoValidacion> {
+  const [reglas, pisoYCosto] = await Promise.all([
+    leerReglasFrescasCuenta(empresaId, candidato.cuentaMlId),
+    leerPisoYCostoFresco(empresaId, candidato.skuCodigo),
+  ]);
+
+  const [recalculado] = calcularCandidatosItem(candidatoComoItem(candidato), reglas, pisoYCosto.precioMinimo, pisoYCosto.costo);
+  if (!recalculado) {
+    return { ok: false, motivo: "No se pudo recalcular este producto — hace falta una búsqueda nueva." };
+  }
+
+  return validarCalculado(recalculado, pisoYCosto.precioMinimo, reglas, accionSolicitada, precioElegido);
 }
 
 // MED 6 — "no escribas si el precio actual cambió mucho frente al
@@ -247,47 +267,99 @@ async function resolverYEjecutar(empresaId: string, fila: AccionFila, token: str
     return { estado: "fallida", error: validacion.motivo, resultadoMl: null };
   }
 
-  let respuestaMl: { ok: boolean; status: number; textoCrudo: string };
-  try {
-    if (accion === "participar") {
-      // El snapshot nunca guardó las fechas reales de la promoción de
-      // Mercado Libre (solo lo que hace falta para decidir el precio)
-      // — fechasParaParticipar con un objeto vacío cae directo al
-      // respaldo real (hoy → fin de mes).
-      const { fechaInicio, fechaFin } = fechasParaParticipar({});
-      respuestaMl = await participarPromocionMl(fila.itemId, token, {
-        promotion_id: fila.promotionIdMl ?? "",
-        promotion_type: fila.tipoPromocion,
-        deal_price: validacion.deal,
-        start_date: fechaInicio,
-        finish_date: fechaFin,
-      });
-    } else {
-      respuestaMl = await modificarPromocionMl(fila.itemId, token, {
-        promotion_id: fila.promotionIdMl ?? "",
-        promotion_type: fila.tipoPromocion,
-        deal_price: validacion.deal,
-      });
-    }
-  } catch (error) {
-    return { estado: "fallida", error: error instanceof Error ? error.message.slice(0, 400) : "No se pudo ejecutar.", resultadoMl: null };
-  }
+  return escribirPromocionMl(fila.itemId, token, accion, fila.promotionIdMl, fila.tipoPromocion, validacion.deal);
+}
 
-  // Punto 4 (rama fix-promociones-aprobar-no-ejecuta) — bug real
-  // diagnosticado con el 400 de VITALCLOROFULL: el cuerpo real de la
-  // respuesta de Mercado Libre YA llegaba hasta acá (quedaba guardado
-  // en resultadoMl.respuesta), pero `error` — el único campo que
-  // muestra la UI (Historial, chip con title) — se llenaba con un
-  // genérico "Mercado Libre respondió 400.", inútil para diagnosticar
-  // nada. Ahora se extrae el motivo real (cause/message del cuerpo) y,
-  // si Mercado Libre no mandó ninguno de los dos, se cae al genérico
-  // de siempre (nunca deja `error` vacío en una fila fallida).
-  const motivoReal = respuestaMl.ok ? null : motivoErrorEscrituraMl(respuestaMl.textoCrudo);
-  return {
-    estado: respuestaMl.ok ? "ejecutada" : "fallida",
-    error: respuestaMl.ok ? null : motivoReal ?? `Mercado Libre respondió ${respuestaMl.status}.`,
-    resultadoMl: { ok: respuestaMl.ok, status: respuestaMl.status, respuesta: respuestaMl.textoCrudo.slice(0, 500) },
-  };
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Un solo reintento corto — esto corre detrás de un click humano
+// (Participar/Lanzar), nunca de un trabajo de fondo: más de un
+// reintento le trabaría el botón al usuario sin necesidad.
+const REINTENTOS_ESCRITURA_ML = 1;
+const ESPERA_BASE_429_ESCRITURA_MS = 1500;
+// Tarea "Promociones real" (Refs #295) — 423 (Locked) no está en la
+// doc pública de esta API, pero se vio real contra Mercado Libre: el
+// ítem tiene otra operación de precio/promoción en curso del lado de
+// ML. A diferencia del 429, ML no manda ningún Retry-After acá —
+// espera fija y corta.
+const ESPERA_423_MS = 1500;
+
+// Extraído de resolverYEjecutar — el ÚNICO lugar que de verdad manda
+// un POST/PUT de Promociones a Mercado Libre. Lo reusa tanto el lote
+// de "Lanzar aprobadas" (resolverYEjecutar, arriba) como el click
+// directo de "Participar" en la lista de publicaciones
+// (lib/ml/promocionesPublicaciones.ts) — mismo motivo de
+// validarCalculado/validarCandidatoParaEscritura: una sola copia de
+// la lógica que de verdad escribe, nunca dos que se puedan desalinear.
+export async function escribirPromocionMl(
+  itemId: string,
+  token: string,
+  accion: AccionEscribible,
+  promotionIdMl: string | null,
+  tipoPromocion: string,
+  deal: number,
+  fechas?: { fechaInicio: string; fechaFin: string }
+): Promise<ResultadoEjecucion> {
+  for (let intento = 0; ; intento++) {
+    let respuestaMl: { ok: boolean; status: number; textoCrudo: string };
+    try {
+      if (accion === "participar") {
+        // El snapshot nunca guardó las fechas reales de la promoción de
+        // Mercado Libre (solo lo que hace falta para decidir el precio)
+        // — fechasParaParticipar con un objeto vacío cae directo al
+        // respaldo real (hoy → fin de mes).
+        const { fechaInicio, fechaFin } = fechas ?? fechasParaParticipar({});
+        respuestaMl = await participarPromocionMl(itemId, token, {
+          promotion_id: promotionIdMl ?? "",
+          promotion_type: tipoPromocion,
+          deal_price: deal,
+          start_date: fechaInicio,
+          finish_date: fechaFin,
+        });
+      } else {
+        respuestaMl = await modificarPromocionMl(itemId, token, { promotion_id: promotionIdMl ?? "", promotion_type: tipoPromocion, deal_price: deal });
+      }
+    } catch (error) {
+      if (error instanceof LimiteMercadoLibreError && intento < REINTENTOS_ESCRITURA_ML) {
+        await esperar(msDeReintento429(ESPERA_BASE_429_ESCRITURA_MS, error.retryAfterMs));
+        continue;
+      }
+      if (error instanceof LimiteMercadoLibreError) {
+        return { estado: "fallida", error: `Mercado Libre está limitando las peticiones ahora mismo (${error.message}) — probá de nuevo en unos segundos.`, resultadoMl: null };
+      }
+      return { estado: "fallida", error: error instanceof Error ? error.message.slice(0, 400) : "No se pudo ejecutar.", resultadoMl: null };
+    }
+
+    if (respuestaMl.status === 423 && intento < REINTENTOS_ESCRITURA_ML) {
+      await esperar(ESPERA_423_MS);
+      continue;
+    }
+    if (respuestaMl.status === 423) {
+      return {
+        estado: "fallida",
+        error: "Mercado Libre bloqueó este producto por un momento (otra operación en curso) — probá de nuevo en unos segundos.",
+        resultadoMl: { ok: false, status: 423, respuesta: respuestaMl.textoCrudo.slice(0, 500) },
+      };
+    }
+
+    // Punto 4 (rama fix-promociones-aprobar-no-ejecuta) — bug real
+    // diagnosticado con el 400 de VITALCLOROFULL: el cuerpo real de la
+    // respuesta de Mercado Libre YA llegaba hasta acá (quedaba guardado
+    // en resultadoMl.respuesta), pero `error` — el único campo que
+    // muestra la UI (Historial, chip con title) — se llenaba con un
+    // genérico "Mercado Libre respondió 400.", inútil para diagnosticar
+    // nada. Ahora se extrae el motivo real (cause/message del cuerpo) y,
+    // si Mercado Libre no mandó ninguno de los dos, se cae al genérico
+    // de siempre (nunca deja `error` vacío en una fila fallida).
+    const motivoReal = respuestaMl.ok ? null : motivoErrorEscrituraMl(respuestaMl.textoCrudo);
+    return {
+      estado: respuestaMl.ok ? "ejecutada" : "fallida",
+      error: respuestaMl.ok ? null : motivoReal ?? `Mercado Libre respondió ${respuestaMl.status}.`,
+      resultadoMl: { ok: respuestaMl.ok, status: respuestaMl.status, respuesta: respuestaMl.textoCrudo.slice(0, 500) },
+    };
+  }
 }
 
 async function marcarResultado(empresaId: string, filaId: string, usuarioId: string, resultado: ResultadoEjecucion): Promise<void> {

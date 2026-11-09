@@ -1110,7 +1110,22 @@ describe("leerItemParaPromocionMl — rama feat-promociones", () => {
       skuCodigo: "SKU-1",
       tieneVariantes: true,
       skuVariantesDistintas: false,
+      precio: null,
+      stock: null,
     });
+  });
+
+  it("trae precio y stock reales del ítem cuando Mercado Libre los manda", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuestaJson({ title: "Producto", thumbnail: "https://x/thumb.jpg", price: 45000, available_quantity: 7, seller_custom_field: "sku-1" }))
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ precio: 45000, stock: 7 });
+  });
+
+  it("precio/stock quedan null si Mercado Libre no los manda o vienen inválidos", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", price: 0, available_quantity: -1, seller_custom_field: "sku-1" })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ precio: null, stock: null });
   });
 
   // Bug real (rama feat-promociones-aprobacion, confirmado en staging

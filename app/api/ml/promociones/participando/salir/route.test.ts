@@ -59,6 +59,7 @@ vi.mock("@/lib/ml/cliente", async (importOriginal) => {
 
 import { cookies } from "next/headers";
 import { cuentasMl, promocionesCandidatos } from "@/db/schema";
+import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
 import { requierePermiso } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { POST } from "./route";
@@ -163,6 +164,56 @@ describe("POST /api/ml/promociones/participando/salir — rama fix-promociones-a
     expect(res.status).toBe(404);
     expect(leerPromocionesItemMlMock).not.toHaveBeenCalled();
     expect(salirDePromocionMlMock).not.toHaveBeenCalled();
+  });
+
+  // Tarea "Promociones real" (Refs #295) — 423 (Locked, visto real
+  // contra Mercado Libre) reintenta una vez antes de rendirse, con un
+  // mensaje claro de qué pasó.
+  it("423 (Locked): reintenta una vez; si el reintento sale bien, queda 'ejecutada'", async () => {
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ id: "PROMO-1", type: "PRICE_DISCOUNT", status: "started", price: 90000 }] });
+    salirDePromocionMlMock.mockResolvedValueOnce({ ok: false, status: 423, textoCrudo: "" }).mockResolvedValueOnce({ ok: true, status: 200, textoCrudo: "{}" });
+
+    const res = await POST(peticion(cuerpoBase()));
+    expect(res.status).toBe(200);
+    expect(salirDePromocionMlMock).toHaveBeenCalledTimes(2);
+    expect(insertsPromocionesAcciones[0]).toMatchObject({ estado: "ejecutada" });
+  });
+
+  it("423 (Locked) persistente tras el reintento: 423, con mensaje claro de qué pasó", async () => {
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ id: "PROMO-1", type: "PRICE_DISCOUNT", status: "started", price: 90000 }] });
+    salirDePromocionMlMock.mockResolvedValue({ ok: false, status: 423, textoCrudo: "" });
+
+    const res = await POST(peticion(cuerpoBase()));
+    const body = await res.json();
+    expect(res.status).toBe(423);
+    expect(salirDePromocionMlMock).toHaveBeenCalledTimes(2);
+    expect(body.error).toMatch(/bloqueó este producto/i);
+    expect(insertsPromocionesAcciones[0]).toMatchObject({ estado: "fallida" });
+  });
+
+  // 429 (límite de peticiones real de Mercado Libre) — reintenta una
+  // vez; si sigue limitado, nunca se adivina si el DELETE pasó o no
+  // (no queda en la auditoría como "fallida", sería inventar un
+  // resultado sin confirmar).
+  it("429 persistente tras el reintento: 429, nunca queda en la auditoría como 'fallida' sin confirmar", async () => {
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ id: "PROMO-1", type: "PRICE_DISCOUNT", status: "started", price: 90000 }] });
+    salirDePromocionMlMock.mockRejectedValue(new LimiteMercadoLibreError(2000));
+
+    const res = await POST(peticion(cuerpoBase()));
+    const body = await res.json();
+    expect(res.status).toBe(429);
+    expect(salirDePromocionMlMock).toHaveBeenCalledTimes(2);
+    expect(body.error).toMatch(/limitando las peticiones/i);
+    expect(insertsPromocionesAcciones).toHaveLength(0);
+  });
+
+  it("429 en el primer intento, bien en el reintento: queda 'ejecutada'", async () => {
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ id: "PROMO-1", type: "PRICE_DISCOUNT", status: "started", price: 90000 }] });
+    salirDePromocionMlMock.mockRejectedValueOnce(new LimiteMercadoLibreError(100)).mockResolvedValueOnce({ ok: true, status: 200, textoCrudo: "{}" });
+
+    const res = await POST(peticion(cuerpoBase()));
+    expect(res.status).toBe(200);
+    expect(insertsPromocionesAcciones[0]).toMatchObject({ estado: "ejecutada" });
   });
 
   it("cuentaId con formato inválido: 400", async () => {

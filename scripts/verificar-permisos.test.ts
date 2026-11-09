@@ -176,6 +176,15 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/promociones/acciones/pendientes-lanzar/route.ts",
   "app/api/ml/promociones/historial/route.ts",
   "app/panel/promociones/page.tsx",
+  // Tarea "Promociones real" (Refs #295) — lista por publicación, con
+  // estado real leído en vivo. GET exige "consultar" (solo lee de
+  // Mercado Libre, nunca escribe); los dos POST escriben de verdad
+  // contra Mercado Libre (participar/modificar y el lote de reglas) —
+  // mismo nivel que .../participando/salir, "ejecutar", nunca "aprobar"
+  // (esta pantalla ya no tiene cola de aprobación separada).
+  "app/api/ml/promociones/publicaciones/route.ts",
+  "app/api/ml/promociones/publicaciones/participar/route.ts",
+  "app/api/ml/promociones/publicaciones/reglas-aplicar/route.ts",
   // "Conexión de IA" vive bajo el módulo "configuracion" que ya
   // existe (consultar/modificar) — nunca un permiso nuevo solo para
   // esto.

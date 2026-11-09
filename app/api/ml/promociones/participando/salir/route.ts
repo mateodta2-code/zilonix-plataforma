@@ -4,10 +4,48 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, promocionesAcciones, promocionesCandidatos } from "@/db/schema";
 import { requierePermiso } from "@/lib/permisos";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
-import { leerPromocionesItemMl, salirDePromocionMl } from "@/lib/ml/cliente";
+import { LimiteMercadoLibreError, leerPromocionesItemMl, salirDePromocionMl, type RespuestaPromocionMl } from "@/lib/ml/cliente";
 import { puedeSalirPorApi } from "@/lib/ml/promociones";
+import { msDeReintento429 } from "@/lib/ml/reintento-429";
 import { urlPublicaBase } from "@/lib/url-publica";
 import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../../_ayudantes";
+
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Tarea "Promociones real" (Refs #295) — un solo reintento corto para
+// 429 (con el Retry-After real de Mercado Libre si vino) y para 423
+// (Locked — no está en la doc pública de esta API, pero se vio real
+// contra Mercado Libre: el ítem tiene otra operación de precio/promoción
+// en curso del lado de ML; sin Retry-After, espera fija y corta).
+// Mismo criterio que escribirPromocionMl (lib/ml/promocionesEjecucion.ts)
+// — un reintento nada más, esto corre detrás de un click humano.
+const REINTENTOS_DELETE_ML = 1;
+const ESPERA_BASE_429_MS = 1500;
+const ESPERA_423_MS = 1500;
+
+async function salirDePromocionConReintento(itemId: string, token: string, promotionId: string, promotionType: string): Promise<RespuestaPromocionMl | { bloqueadoPorLimite: true; mensaje: string }> {
+  for (let intento = 0; ; intento++) {
+    try {
+      const respuesta = await salirDePromocionMl(itemId, token, promotionId, promotionType);
+      if (respuesta.status === 423 && intento < REINTENTOS_DELETE_ML) {
+        await esperar(ESPERA_423_MS);
+        continue;
+      }
+      return respuesta;
+    } catch (error) {
+      if (error instanceof LimiteMercadoLibreError && intento < REINTENTOS_DELETE_ML) {
+        await esperar(msDeReintento429(ESPERA_BASE_429_MS, error.retryAfterMs));
+        continue;
+      }
+      if (error instanceof LimiteMercadoLibreError) {
+        return { bloqueadoPorLimite: true, mensaje: `Mercado Libre está limitando las peticiones ahora mismo (${error.message}) — probá de nuevo en unos segundos.` };
+      }
+      throw error;
+    }
+  }
+}
 
 // Rama fix-promociones-aprobadas-participando, punto 3 — "Dejar de
 // participar". Mismo permiso que lanzar a Mercado Libre ("ejecutar":
@@ -129,7 +167,23 @@ export async function POST(request: Request) {
   }
 
   const precioAntes = typeof promoReal.price === "number" ? promoReal.price : null;
-  const respuestaMl = await salirDePromocionMl(itemId, token, promotionIdMl ?? String(promoReal.id ?? ""), tipoPromocion);
+  const resultado = await salirDePromocionConReintento(itemId, token, promotionIdMl ?? String(promoReal.id ?? ""), tipoPromocion);
+
+  if ("bloqueadoPorLimite" in resultado) {
+    // Mercado Libre nos frenó incluso después del reintento — nunca se
+    // adivina si el DELETE de verdad pasó o no, así que esto NO queda
+    // en la auditoría como "fallida" (sería inventar un resultado que
+    // no se confirmó); el mensaje claro le dice a la persona que
+    // pruebe de nuevo en un momento.
+    return NextResponse.json({ error: resultado.mensaje }, { status: 429 });
+  }
+  const respuestaMl = resultado;
+  const errorClaro =
+    respuestaMl.ok
+      ? null
+      : respuestaMl.status === 423
+        ? "Mercado Libre bloqueó este producto por un momento (otra operación en curso) — probá de nuevo en unos segundos."
+        : `Mercado Libre respondió HTTP ${respuestaMl.status}: ${respuestaMl.textoCrudo.slice(0, 400)}`;
 
   const [fila] = await dbComoEmpresa(empresa.id, (tx) =>
     tx
@@ -151,13 +205,13 @@ export async function POST(request: Request) {
         ejecutadoTs: new Date(),
         modoSimulacion: false,
         resultadoMl: { ok: respuestaMl.ok, status: respuestaMl.status },
-        error: respuestaMl.ok ? null : `Mercado Libre respondió HTTP ${respuestaMl.status}: ${respuestaMl.textoCrudo.slice(0, 400)}`,
+        error: errorClaro,
       })
       .returning()
   );
 
   if (!respuestaMl.ok) {
-    return NextResponse.json({ error: fila.error ?? "No se pudo salir de la promoción." }, { status: 502 });
+    return NextResponse.json({ error: fila.error ?? "No se pudo salir de la promoción." }, { status: respuestaMl.status === 423 ? 423 : 502 });
   }
   return NextResponse.json({ ok: true, accion: fila });
 }
