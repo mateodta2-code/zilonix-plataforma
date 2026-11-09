@@ -1347,6 +1347,13 @@ export type ItemParaPromocionMl = {
   // usa esto para dejar un motivo específico, distinto del genérico
   // "tiene variantes".
   skuVariantesDistintas: boolean;
+  // Tarea "Promociones real" (Refs #295) — precio y stock del ítem tal
+  // cual lo tiene Mercado Libre HOY, nunca el de una promoción (que ya
+  // viene en PromocionCrudaMl). Lo necesita la lista de publicaciones
+  // para mostrar "Sin promoción" con su precio/stock reales, sin tener
+  // que pedir el ítem una segunda vez.
+  precio: number | null;
+  stock: number | null;
 };
 
 type AtributoMl = { id?: unknown; value_name?: unknown };
@@ -1379,11 +1386,13 @@ function skuDeVariacion(variacion: VariacionMl | undefined): string | null {
 
 export async function leerItemParaPromocionMl(itemId: string, token: string): Promise<ItemParaPromocionMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,seller_custom_field,attributes,variations`;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,available_quantity,seller_custom_field,attributes,variations`;
   try {
     const resp = await pedir<{
       title?: unknown;
       thumbnail?: unknown;
+      price?: unknown;
+      available_quantity?: unknown;
       seller_custom_field?: unknown;
       attributes?: unknown;
       variations?: VariacionMl[];
@@ -1425,6 +1434,8 @@ export async function leerItemParaPromocionMl(itemId: string, token: string): Pr
       skuCodigo,
       tieneVariantes,
       skuVariantesDistintas,
+      precio: typeof resp.data.price === "number" && resp.data.price > 0 ? resp.data.price : null,
+      stock: typeof resp.data.available_quantity === "number" && resp.data.available_quantity >= 0 ? resp.data.available_quantity : null,
     };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
