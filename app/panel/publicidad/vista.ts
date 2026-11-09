@@ -1,29 +1,34 @@
 // Issue #255 — pasa los totales ya calculados a los textos de la
 // pantalla. No vuelve a calcular un ratio: solo formatea.
 
-import type { EstadoChip } from "@/components/marco/Chip";
+import { mostrarPorcentaje } from "@/components/finanzas/formato";
 import type { CampanaCalculada, TableroPublicidad } from "@/lib/publicidad/consultas";
 import {
-  mostrarDinero,
-  mostrarDineroTarjeta,
-  mostrarEntero,
-  mostrarFraccion,
-  mostrarObjetivoRoas,
-  mostrarRoas,
-} from "@/lib/publicidad/formato";
-import { variacionPorcentual, type TotalesRango } from "@/lib/publicidad/kpis";
+  alertaBajo70,
+  aportePorPublicidad,
+  fraseEstado,
+  gastaSinVender,
+  usoPresupuestoDiario,
+  variacionPorcentual,
+  type PuntoDiario,
+  type TonoEstado,
+  type TotalesRango,
+} from "@/lib/publicidad/kpis";
+import { formatearMoneda } from "@/lib/ml/sitios";
+import { aEscala } from "@/lib/numeros/normalizar-decimal";
+import { mostrarDineroCompacto, mostrarEntero, mostrarFraccion, mostrarRoas, textoObjetivoRoas } from "@/lib/publicidad/formato";
 import {
-  AYUDA_DIAGNOSTICO,
-  ESTADO_CHIP_DIAGNOSTICO,
-  NOTA_DIAGNOSTICO,
+  detalleDiagnostico,
   NOTA_TACOS_PROMOCIONADAS,
+  NOTA_UNIDADES,
   NOTA_VENTAS_ORGANICAS,
+  NOTA_VENTAS_TOTALES,
   ROTULO_KPI,
-  rotuloDiagnostico,
   rotuloSemaforo,
   subirEsMejor,
   textoVariacion,
   tituloSemaforo,
+  type DiagnosticoVisible,
   type VariacionPintada,
 } from "@/lib/publicidad/rotulos";
 
@@ -34,6 +39,7 @@ export type AnuncioPintado = {
   href: string | null;
   cpc: string;
   clics: string;
+  unidades: string;
   gasto: string;
   ventasPublicidad: string;
   roas: string;
@@ -43,28 +49,57 @@ export type AnuncioPintado = {
   semaforoEstado: "exito" | "peligro" | "neutro";
   semaforoRotulo: string;
   semaforoTitle: string;
+  estadoAnuncio: string | null;
+  gastaSinVender: boolean;
+  sinStock: boolean | null;
+  ventasCantidad: string;
+  ingresos: string;
 };
 
 export type CampanaPintada = {
   id: string;
   nombre: string;
   pausada: boolean;
-  chipEstado: EstadoChip;
-  chipRotulo: string;
-  chipTitle: string;
-  nota: string | null;
+  estadoTono: TonoEstado;
+  estadoFrase: string;
+  estadoAvance: number | null;
   verificar: boolean;
+  activa: boolean;
+  alertaBajo70: boolean;
+  anunciosSinVenta: number;
+  cantidadAnuncios: number;
+  ventasCantidad: string;
+  ingresos: string;
   inversion: string;
   ventasPublicidad: string;
+  ventasSinPublicidad: string;
   ventasTotales: string;
+  unidades: string;
   roas: string;
+  roasObjetivo: string | null;
   acos: string;
   tacos: string;
   cpc: string;
   clics: string;
   impresiones: string;
   presupuesto: string;
+  presupuestoUsado: string | null;
+  presupuestoAvance: number | null;
+  diagnostico: DiagnosticoVisible;
+  deltas: DeltasCampana;
   anuncios: AnuncioPintado[];
+};
+
+export type DeltaPintado = { texto: string; mejor: boolean | null };
+
+export type DeltasCampana = {
+  ventasAtribuidas: DeltaPintado | null;
+  roas: DeltaPintado | null;
+  acos: DeltaPintado | null;
+  inversion: DeltaPintado | null;
+  ingresos: DeltaPintado | null;
+  clics: DeltaPintado | null;
+  impresiones: DeltaPintado | null;
 };
 
 export type KpiPintado = {
@@ -73,50 +108,123 @@ export type KpiPintado = {
   valor: string;
   detalle: string[];
   variacion: VariacionPintada;
+  delta: DeltaPintado | null;
 };
 
-export function pintarCampana(campana: CampanaCalculada): CampanaPintada {
-  const nota =
-    campana.diagnostico.tipo === "aprendiendo"
-      ? NOTA_DIAGNOSTICO.aprendiendo
-      : campana.diagnostico.tipo === "excelente"
-        ? NOTA_DIAGNOSTICO.excelente
-        : null;
+export type PuntoGrafico = {
+  fecha: string;
+  ventasAtribuidas: number | null;
+  otras: number | null;
+  ingresos: number | null;
+  inversion: number | null;
+  roas: number | null;
+  acos: number | null;
+  tacos: number | null;
+  cpc: number | null;
+  clics: number | null;
+  impresiones: number | null;
+  unidades: number | null;
+};
+
+function textoPresupuesto(campana: CampanaCalculada, diasRango: number): Pick<CampanaPintada, "presupuesto" | "presupuestoUsado" | "presupuestoAvance"> {
+  const uso = usoPresupuestoDiario({
+    gasto: campana.totales.gasto,
+    dias: diasRango,
+    presupuestoDiario: campana.presupuestoDiario,
+    automatico: campana.presupuestoAutomatico,
+  });
+  if (uso.tipo === "automatico") return { presupuesto: "Automático", presupuestoUsado: null, presupuestoAvance: null };
+  if (uso.tipo === "sin_presupuesto") return { presupuesto: "Sin dato", presupuestoUsado: null, presupuestoAvance: null };
+  if (uso.tipo === "sin_gasto") {
+    return { presupuesto: mostrarDineroCompacto(uso.presupuestoDiario), presupuestoUsado: "Sin gasto en el rango", presupuestoAvance: null };
+  }
+  return {
+    presupuesto: mostrarDineroCompacto(uso.presupuestoDiario),
+    presupuestoUsado: `${mostrarEntero(uso.porcentaje)} % usado`,
+    presupuestoAvance: uso.avance,
+  };
+}
+
+export function pintarCampana(campana: CampanaCalculada, diasRango: number): CampanaPintada {
+  const estado = fraseEstado({
+    diagnostico: campana.diagnostico,
+    roas: campana.totales.roas,
+    roasObjetivo: campana.roasObjetivo,
+    diasAprendizaje: campana.diasAprendizaje,
+  });
   return {
     id: campana.id,
     nombre: campana.nombre,
     pausada: !campana.activa,
-    chipEstado: ESTADO_CHIP_DIAGNOSTICO[campana.diagnostico.tipo],
-    chipRotulo: rotuloDiagnostico(campana.diagnostico),
-    chipTitle: AYUDA_DIAGNOSTICO,
-    nota,
+    estadoTono: estado.tono,
+    estadoFrase: estado.frase,
+    estadoAvance: estado.avance,
     verificar: campana.diagnostico.tipo === "aprendiendo",
-    inversion: mostrarDinero(campana.totales.gasto),
-    ventasPublicidad: mostrarDinero(campana.totales.ventasPublicidad),
-    ventasTotales: mostrarDinero(campana.totales.ventasTotales),
-    roas: mostrarObjetivoRoas(campana.totales.roas, campana.roasObjetivo),
+    inversion: mostrarDineroCompacto(campana.totales.gasto),
+    ventasPublicidad: mostrarDineroCompacto(campana.totales.ventasPublicidad),
+    ventasSinPublicidad: mostrarDineroCompacto(campana.totales.ventasOrganicas),
+    ventasTotales: mostrarDineroCompacto(campana.totales.ventasTotales),
+    unidades: mostrarEntero(campana.totales.unidadesVendidas),
+    ventasCantidad: mostrarEntero(campana.totales.ventasCantidad),
+    ingresos: mostrarDineroCompacto(campana.totales.ventasTotales),
+    activa: campana.activa,
+    alertaBajo70: alertaBajo70({
+      aprendiendo: campana.diagnostico.tipo === "aprendiendo",
+      roas: campana.totales.roas,
+      objetivo: campana.roasObjetivo,
+    }),
+    anunciosSinVenta: campana.anuncios.filter((anuncio) =>
+      gastaSinVender(anuncio.totales.gasto, anuncio.totales.ventasPublicidad, anuncio.totales.ventasCantidad)
+    ).length,
+    cantidadAnuncios: campana.anuncios.length,
+    diagnostico: detalleDiagnostico({
+      diagnostico: campana.diagnostico,
+      diasAprendizaje: campana.diasAprendizaje,
+      alertaBajo70: alertaBajo70({
+        aprendiendo: campana.diagnostico.tipo === "aprendiendo",
+        roas: campana.totales.roas,
+        objetivo: campana.roasObjetivo,
+      }),
+    }),
+    deltas: {
+      ventasAtribuidas: deltaDe(campana.totales, campana.totalesAnterior, "ventasPublicidad"),
+      roas: deltaDe(campana.totales, campana.totalesAnterior, "roas"),
+      acos: deltaDe(campana.totales, campana.totalesAnterior, "acos"),
+      inversion: deltaDe(campana.totales, campana.totalesAnterior, "gasto"),
+      ingresos: deltaDe(campana.totales, campana.totalesAnterior, "ventasTotales"),
+      clics: deltaDe(campana.totales, campana.totalesAnterior, "clicks"),
+      impresiones: deltaDe(campana.totales, campana.totalesAnterior, "impresiones"),
+    },
+    roas: mostrarRoas(campana.totales.roas),
+    roasObjetivo: textoObjetivoRoas(campana.roasObjetivo),
     acos: mostrarFraccion(campana.totales.acos),
     tacos: mostrarFraccion(campana.totales.tacos),
-    cpc: mostrarDinero(campana.totales.cpc),
+    cpc: mostrarDineroCompacto(campana.totales.cpc),
     clics: mostrarEntero(campana.totales.clicks),
     impresiones: mostrarEntero(campana.totales.impresiones),
-    presupuesto: mostrarDinero(campana.presupuestoDiario),
+    ...textoPresupuesto(campana, diasRango),
     anuncios: campana.anuncios.map((anuncio) => ({
       clave: anuncio.id,
       itemId: anuncio.itemId,
       titulo: anuncio.titulo ?? "Sin título",
       href: anuncio.href,
-      cpc: mostrarDinero(anuncio.totales.cpc),
+      cpc: mostrarDineroCompacto(anuncio.totales.cpc),
       clics: mostrarEntero(anuncio.totales.clicks),
-      gasto: mostrarDinero(anuncio.totales.gasto),
-      ventasPublicidad: mostrarDinero(anuncio.totales.ventasPublicidad),
+      gasto: mostrarDineroCompacto(anuncio.totales.gasto),
+      ventasPublicidad: mostrarDineroCompacto(anuncio.totales.ventasPublicidad),
       roas: mostrarRoas(anuncio.totales.roas),
       acos: mostrarFraccion(anuncio.totales.acos),
-      ventasOrganicas: mostrarDinero(anuncio.totales.ventasOrganicas),
+      ventasOrganicas: mostrarDineroCompacto(anuncio.totales.ventasOrganicas),
       tacos: mostrarFraccion(anuncio.totales.tacos),
       semaforoEstado: anuncio.semaforo.estado,
       semaforoRotulo: rotuloSemaforo(anuncio.semaforo),
       semaforoTitle: tituloSemaforo(anuncio.semaforo),
+      estadoAnuncio: anuncio.estado,
+      gastaSinVender: gastaSinVender(anuncio.totales.gasto, anuncio.totales.ventasPublicidad, anuncio.totales.ventasCantidad),
+      sinStock: anuncio.sinStock,
+      ventasCantidad: mostrarEntero(anuncio.totales.ventasCantidad),
+      ingresos: mostrarDineroCompacto(anuncio.totales.ventasPublicidad),
+      unidades: mostrarEntero(anuncio.totales.unidadesVendidas),
     })),
   };
 }
@@ -125,41 +233,86 @@ function linea(actual: TotalesRango, anterior: TotalesRango, campo: keyof Totale
   return textoVariacion(variacionPorcentual(actual[campo], anterior[campo]), { subirEsMejor: subirEsMejor(campo) });
 }
 
-export function kpisDelResumen(tablero: Pick<TableroPublicidad, "resumen">): KpiPintado[] {
+function deltaDe(actual: TotalesRango, anterior: TotalesRango, campo: keyof TotalesRango): DeltaPintado | null {
+  const variacion = variacionPorcentual(actual[campo], anterior[campo]);
+  if (variacion === null) return null;
+  const pintada = textoVariacion(variacion, { subirEsMejor: subirEsMejor(campo) });
+  if (variacion === "0.0" || variacion === "-0.0") return { texto: "0 %", mejor: null };
+  const baja = variacion.startsWith("-");
+  const absoluto = mostrarPorcentaje(baja ? variacion.slice(1) : variacion);
+  return { texto: `${baja ? "−" : "+"}${absoluto}`, mejor: pintada.mejor };
+}
+
+function plataTarjeta(valor: string | null, siteId: string): string {
+  if (valor === null) return "—";
+  const sitio = siteId === "CLP" || siteId === "MLC" || siteId === "MCO" ? 0 : 2;
+  const n = Number(aEscala(valor, sitio));
+  if (!Number.isFinite(n)) return "—";
+  return formatearMoneda(n, siteId);
+}
+
+function tarjeta(
+  clave: string,
+  titulo: string,
+  valor: string,
+  detalle: string[],
+  actual: TotalesRango,
+  anterior: TotalesRango,
+  campo: keyof TotalesRango
+): KpiPintado {
+  return { clave, titulo, valor, detalle, variacion: linea(actual, anterior, campo), delta: deltaDe(actual, anterior, campo) };
+}
+
+// Una tarjeta por métrica. Ventas atribuidas es el dinero que antes
+// se llamaba "Ventas con publicidad". Otras ventas es "Ventas sin
+// publicidad". Ingresos es la suma de las dos (antes "Ventas totales"):
+// si falta una pata queda en —, y la nota de ventas totales va en esa
+// tarjeta. No se repiten con otro título.
+export function kpisDelResumen(tablero: Pick<TableroPublicidad, "resumen">, siteId = "MCO"): KpiPintado[] {
   const { actual, anterior } = tablero.resumen;
   return [
-    { clave: "inversion", titulo: ROTULO_KPI.inversion, valor: mostrarDineroTarjeta(actual.gasto), detalle: [], variacion: linea(actual, anterior, "gasto") },
-    {
-      clave: "ventasPublicidad",
-      titulo: ROTULO_KPI.ventasPublicidad,
-      valor: mostrarDineroTarjeta(actual.ventasPublicidad),
-      detalle: [],
-      variacion: linea(actual, anterior, "ventasPublicidad"),
-    },
-    {
-      clave: "ventasTotales",
-      titulo: ROTULO_KPI.ventasTotales,
-      valor: mostrarDineroTarjeta(actual.ventasTotales),
-      detalle: [NOTA_VENTAS_ORGANICAS],
-      variacion: linea(actual, anterior, "ventasTotales"),
-    },
-    { clave: "roas", titulo: ROTULO_KPI.roas, valor: mostrarRoas(actual.roas), detalle: [], variacion: linea(actual, anterior, "roas") },
-    { clave: "acos", titulo: ROTULO_KPI.acos, valor: mostrarFraccion(actual.acos), detalle: [], variacion: linea(actual, anterior, "acos") },
-    {
-      clave: "tacos",
-      titulo: ROTULO_KPI.tacos,
-      valor: mostrarFraccion(actual.tacos),
-      detalle: [NOTA_TACOS_PROMOCIONADAS],
-      variacion: linea(actual, anterior, "tacos"),
-    },
-    { clave: "cpc", titulo: ROTULO_KPI.cpc, valor: mostrarDineroTarjeta(actual.cpc), detalle: [], variacion: linea(actual, anterior, "cpc") },
-    { clave: "clics", titulo: ROTULO_KPI.clics, valor: mostrarEntero(actual.clicks), detalle: [], variacion: linea(actual, anterior, "clicks") },
-    {
-      clave: "impresiones",
-      titulo: ROTULO_KPI.impresiones,
-      valor: mostrarEntero(actual.impresiones),
-      detalle: [],
-      variacion: linea(actual, anterior, "impresiones"),
-    },
+    tarjeta("ventasAtribuidas", "Ventas atribuidas", plataTarjeta(actual.ventasPublicidad, siteId), [], actual, anterior, "ventasPublicidad"),
+    tarjeta("otrasVentas", "Otras ventas", plataTarjeta(actual.ventasOrganicas, siteId), [NOTA_VENTAS_ORGANICAS], actual, anterior, "ventasOrganicas"),
+    tarjeta("roas", ROTULO_KPI.roas, mostrarRoas(actual.roas), [], actual, anterior, "roas"),
+    tarjeta("ingresos", "Ingresos", plataTarjeta(actual.ventasTotales, siteId), [NOTA_VENTAS_TOTALES], actual, anterior, "ventasTotales"),
+    tarjeta("inversion", ROTULO_KPI.inversion, plataTarjeta(actual.gasto, siteId), [], actual, anterior, "gasto"),
+    tarjeta("acos", ROTULO_KPI.acos, mostrarFraccion(actual.acos), [], actual, anterior, "acos"),
+    tarjeta("tacos", ROTULO_KPI.tacos, mostrarFraccion(actual.tacos), [NOTA_TACOS_PROMOCIONADAS], actual, anterior, "tacos"),
+    tarjeta("cpc", ROTULO_KPI.cpc, plataTarjeta(actual.cpc, siteId), [], actual, anterior, "cpc"),
+    tarjeta("clics", ROTULO_KPI.clics, mostrarEntero(actual.clicks), [], actual, anterior, "clicks"),
+    tarjeta("impresiones", ROTULO_KPI.impresiones, mostrarEntero(actual.impresiones), [], actual, anterior, "impresiones"),
+    tarjeta("unidades", ROTULO_KPI.unidades, mostrarEntero(actual.unidadesVendidas), [NOTA_UNIDADES], actual, anterior, "unidadesVendidas"),
   ];
+}
+
+export function plataVisible(valor: string | null, siteId: string): string {
+  return plataTarjeta(valor, siteId);
+}
+
+export function textoAporte(tablero: Pick<TableroPublicidad, "resumen">): string | null {
+  const aporte = aportePorPublicidad(tablero.resumen.actual.ventasPublicidad, tablero.resumen.actual.ventasOrganicas);
+  return aporte === null ? null : mostrarPorcentaje(aporte);
+}
+
+function aNumero(valor: string | null): number | null {
+  if (valor === null) return null;
+  const n = Number(valor);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function serieParaGrafico(puntos: readonly PuntoDiario[]): PuntoGrafico[] {
+  return puntos.map((punto) => ({
+    fecha: punto.fecha,
+    ventasAtribuidas: aNumero(punto.ingresos),
+    otras: aNumero(punto.ventasSinPublicidad),
+    ingresos: aNumero(punto.ventasTotales),
+    inversion: aNumero(punto.inversion),
+    roas: aNumero(punto.roas),
+    acos: aNumero(punto.acos) === null ? null : aNumero(punto.acos)! * 100,
+    tacos: aNumero(punto.tacos) === null ? null : aNumero(punto.tacos)! * 100,
+    cpc: aNumero(punto.cpc),
+    clics: aNumero(punto.clics),
+    impresiones: aNumero(punto.impresiones),
+    unidades: aNumero(punto.unidades),
+  }));
 }

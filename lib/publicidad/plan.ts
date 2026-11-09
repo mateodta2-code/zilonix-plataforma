@@ -14,6 +14,12 @@ export const DIAS_TRAMO = 7;
 export const DIAS_MAX_API = 90;
 export const MINUTOS_REFRESCO_MANUAL = 10;
 export const MINUTOS_EN_CURSO_ABANDONADO = 30;
+// Con el cron horario, una cuenta ya ok no vuelve a Mercado Libre
+// hasta pasadas ~20 h: el ritmo queda diario aunque el workflow
+// despierte cada hora. Un error real espera una hora para no gastar
+// los 3 intentos del tramo en la misma tanda.
+export const HORAS_PAUSA_TRAS_OK = 20;
+export const MINUTOS_PAUSA_TRAS_ERROR = 60;
 // El curl del workflow corta a los 300 s. La corrida se detiene antes
 // para poder cerrar la fila; lo que no entró queda para la siguiente.
 export const PRESUPUESTO_CORRIDA_MS = 240_000;
@@ -64,6 +70,7 @@ export type UltimaSync = {
   rangoDesde: string | null;
   rangoHasta: string | null;
   iniciadaTs: Date;
+  error?: string | null;
 };
 
 export type Tramo = {
@@ -180,6 +187,46 @@ export function faseDeCorte(error: string | null): FaseCorte | null {
   if (error.includes("fase:costos")) return "costos";
   if (error.includes("fase:dias")) return "dias";
   return null;
+}
+
+// true: esta cuenta no pide nada a Mercado Libre en esta corrida.
+// Un ok reciente (backfill cerrado, o cuenta sin Product Ads) espera
+// 20 h. Un error que no es corte de tiempo espera 1 h. Un corte en el
+// bucle de días que no avanzó el cursor ya gastó un intento: otra
+// tanda a los pocos minutos gastaría los 3 y se saltearía el tramo.
+export function omitirSyncProgramada(ultima: UltimaSync | null, ahora: Date, reintentosMismoTramo = 0): boolean {
+  if (!ultima) return false;
+  const edad = ahora.getTime() - ultima.iniciadaTs.getTime();
+  if (edad < 0) return false;
+  if (ultima.estado === "en_curso" && edad < MINUTOS_EN_CURSO_ABANDONADO * 60_000) return true;
+  if (ultima.estado === "ok" && edad < HORAS_PAUSA_TRAS_OK * 3_600_000) return true;
+  if (ultima.estado === "error" && !esCorteDeTiempo(ultima.error ?? null) && edad < MINUTOS_PAUSA_TRAS_ERROR * 60_000) {
+    return true;
+  }
+  if (
+    ultima.estado === "error" &&
+    faseDeCorte(ultima.error ?? null) === "dias" &&
+    reintentosMismoTramo > 0 &&
+    edad < HORAS_PAUSA_TRAS_OK * 3_600_000
+  ) {
+    return true;
+  }
+  return false;
+}
+
+// El workflow solo encadena otra tanda si esta va a avanzar. Un corte
+// antes de los días o ya en costos se retoma enseguida (no gasta
+// intento). En el bucle de días, solo si el cursor se movió: si no, la
+// pausa de arriba cuida los 3 intentos.
+export function convieneOtraTandaTrasCorte(
+  fase: FaseCorte,
+  reanudaAntes: string | null,
+  reanudaDespues: string | null
+): boolean {
+  if (fase === "pre-dias" || fase === "costos") return true;
+  if (reanudaDespues == null) return false;
+  if (reanudaAntes == null) return true;
+  return reanudaDespues > reanudaAntes;
 }
 
 export function alcanzaParaAbrirCuenta(restanteMs: number): boolean {

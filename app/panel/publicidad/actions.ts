@@ -36,7 +36,11 @@ export async function actualizarPublicidadAction(formData: FormData) {
     if (typeof orden === "string" && (COLUMNAS_ORDEN as readonly string[]).includes(orden)) q.set("orden", orden);
     const dir = formData.get("dir");
     if (dir === "asc" || dir === "desc") q.set("dir", dir);
-    if (formData.get("pausadas") === "1") q.set("pausadas", "1");
+    const vista = formData.get("vista");
+    if (vista === "pausadas" || vista === "todas") q.set("vista", vista);
+    else if (formData.get("pausadas") === "1") q.set("pausadas", "1");
+    if (formData.get("comparar") === "ninguno") q.set("comparar", "ninguno");
+    if (formData.get("tab") === "anuncios") q.set("tab", "anuncios");
     return `/panel/publicidad?${q.toString()}`;
   };
 

@@ -78,8 +78,9 @@
 
 .gridKpi {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  min-width: 0;
 }
 
 /* Sin el overflow: visible !important de antes: el encabezado sticky
@@ -103,6 +104,8 @@
    tema (AA: --texto/--texto-suave/--plata-etiqueta sobre --superficie
    y --superficie-2 ya medidos en app/globals.css). */
 :global(:root[data-tema="claro"]) .tarjetaTabla,
+:global(:root[data-tema="claro"]) .tarjetaAnuncios,
+:global(:root[data-tema="claro"]) .miPresupuesto,
 :global(:root[data-tema="claro"]) .gridKpi > * {
   background:
     linear-gradient(var(--superficie), var(--superficie)) padding-box,
@@ -165,16 +168,212 @@
 
 .thConAyuda {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+}
+
+.anuncios .thConAyuda {
+  flex-wrap: nowrap;
 }
 
 .orden {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
   color: inherit;
   font: inherit;
   letter-spacing: inherit;
   text-transform: inherit;
   text-decoration: none;
+  white-space: normal;
+}
+
+.rotuloColumna {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+}
+
+.flechaOrden {
+  line-height: 1;
+}
+
+.tarjetaTabla .celdaRoas {
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.roasObjetivo {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--texto-suave);
+}
+
+.tarjetaTabla .celdaEstado,
+.tarjetaTabla .celdaPresupuesto {
+  vertical-align: middle;
+  white-space: normal;
+}
+
+.estado {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  column-gap: 6px;
+  row-gap: 4px;
+  align-items: center;
+}
+
+.punto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--plata);
+}
+
+.punto[data-tono="exito"] {
+  background: var(--exito-texto);
+}
+
+.punto[data-tono="peligro"] {
+  background: var(--peligro-texto);
+}
+
+.punto[data-tono="acento"] {
+  background: var(--acento);
+}
+
+.frase {
+  font-size: 12px;
+  line-height: 1.25;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pista {
+  grid-column: 2 / -1;
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--plata) 45%, transparent);
+  overflow: hidden;
+}
+
+.pista > span {
+  display: block;
+  height: 100%;
+  background: var(--gradiente-azul-metal);
+}
+
+.usado {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--texto-suave);
+}
+
+.iconoMl {
+  display: inline-flex;
+  color: var(--acento-fuerte);
+}
+
+.iconoMl:hover,
+.iconoMl:focus-visible {
+  color: var(--acento);
+}
+
+/* Por debajo de 1280 la tabla se desplaza adentro de la tarjeta.
+   Desde 1280 las columnas fijas caben sin ese scroll. */
+.tarjetaTabla > div > table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.anuncios table {
+  width: 100%;
+}
+
+@media (min-width: 1280px) {
+  .anuncios table {
+    table-layout: fixed;
+  }
+}
+
+.tarjetaTabla th {
+  white-space: normal;
+  letter-spacing: 0;
+  line-height: 1.2;
+  vertical-align: bottom;
+  padding: 8px 2px;
+  font-size: 10px;
+}
+
+.tarjetaTabla td {
+  padding: 6px 2px;
+  font-size: 11px;
+  vertical-align: middle;
+}
+
+@media (min-width: 1280px) {
+  .tarjetaTabla > div > table {
+    table-layout: fixed;
+    width: 100%;
+  }
+
+  /* El encabezado no se recorta: el ⓘ abre hacia abajo y tiene que
+     poder salir de la celda. El número, si no entra, no ensancha la tabla. */
+  .tarjetaTabla > div > table th {
+    overflow: visible;
+  }
+
+  .tarjetaTabla > div > table td {
+    overflow: hidden;
+  }
+
+  /* A 1280 la tabla mide ~895 px. Once columnas de la vista de
+     campañas: el nombre y el diagnóstico llevan el ancho largo; las
+     cifras cortas ceden. Ventas sin publicidad, TACOS y unidades van
+     en la fila desplegada. */
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 16.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(2) { width: 15%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(3) { width: 9.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 8%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(5) { width: 9%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(6) { width: 6.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(7) { width: 6.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(8) { width: 8.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(9) { width: 8.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(10) { width: 5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(11) { width: 7%; }
+}
+
+.tarjetaTabla > div > table > thead > tr > th:last-child,
+.tarjetaTabla > div > table > tbody > tr > td:last-child:not([colspan]) {
+  padding-right: 12px;
+}
+
+.anuncios td:first-child,
+.anuncios th:first-child {
+  white-space: nowrap;
+  width: 9.5em;
+  padding-left: 12px;
+}
+
+.anuncios td:last-child,
+.anuncios th:last-child {
+  padding-right: 12px;
+  padding-left: 8px;
 }
 
 .orden:hover,
@@ -193,8 +392,8 @@
 .expandir {
   display: inline-flex;
   align-items: flex-start;
-  gap: 8px;
-  max-width: 280px;
+  gap: 6px;
+  max-width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
@@ -223,7 +422,14 @@
 }
 
 .nombreCampana {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   font-weight: 600;
+  color: var(--acento-fuerte);
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .pausada,
@@ -231,7 +437,8 @@
 .enlacePendiente {
   display: block;
   margin-top: 4px;
-  font-size: 12px;
+  overflow-wrap: anywhere;
+  font-size: 11px;
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -249,6 +456,235 @@
 
 .anuncios {
   margin-top: 4px;
+}
+
+.pestanas {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--borde);
+}
+
+.pestana {
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  border-bottom: 2px solid transparent;
+  color: var(--texto-suave);
+  text-decoration: none;
+}
+
+.pestana[aria-current="page"] {
+  border-bottom-color: var(--acento);
+  color: var(--texto);
+  font-weight: 600;
+}
+
+.seccion {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--plata-etiqueta);
+}
+
+.miPresupuesto {
+  display: grid;
+  gap: 4px;
+}
+
+.presupuestoEtiqueta,
+.presupuestoValor,
+.aporte {
+  margin: 0;
+}
+
+.presupuestoEtiqueta {
+  color: var(--texto-suave);
+  font-size: 14px;
+}
+
+.presupuestoValor {
+  font-size: 28px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.tarjetaMetrica {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  min-width: 0;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--borde);
+  border-top: 3px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tarjetaMetrica[data-sel="1"] {
+  border-top-color: var(--acento);
+}
+
+.tarjetaMetrica[data-sel="2"] {
+  border-top-color: var(--exito);
+}
+
+.metricaTitulo,
+.metricaDetalle,
+.variacionMetrica {
+  overflow-wrap: anywhere;
+}
+
+.metricaTitulo {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.metricaValor {
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.metricaDetalle,
+.variacionMetrica {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--texto-suave);
+}
+
+.variacionMetrica[data-positiva="true"] {
+  color: var(--exito-texto);
+}
+
+.variacionMetrica[data-positiva="false"] {
+  color: var(--peligro-texto);
+}
+
+.delta {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+
+.delta[data-tono="mejor"] {
+  color: var(--exito-texto);
+  background: color-mix(in srgb, var(--exito) 18%, transparent);
+}
+
+.delta[data-tono="peor"] {
+  color: var(--peligro-texto);
+  background: color-mix(in srgb, var(--peligro) 18%, transparent);
+}
+
+.delta[data-tono="neutro"] {
+  color: var(--texto-suave);
+}
+
+.grafico {
+  margin: 8px 0 0;
+}
+
+.grafico svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.eje {
+  stroke: var(--borde);
+  stroke-width: 1;
+}
+
+.ejeTexto {
+  fill: var(--texto-suave);
+  font-size: 10px;
+}
+
+.leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--texto-suave);
+  font-size: 12px;
+}
+
+.muestra {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+}
+
+.toolbar,
+.filtro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.toolbar {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.filtro a {
+  color: var(--texto-suave);
+  text-decoration: none;
+}
+
+.filtro a[aria-current="page"] {
+  color: var(--acento-fuerte);
+  font-weight: 600;
+}
+
+.diagnostico {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.alertaFila {
+  display: block;
+  color: var(--peligro-texto);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.avisos {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 8px;
+  padding: 0 12px;
+  list-style: none;
+  font-size: 12px;
+}
+
+.tarjetaAnuncios {
+  min-width: 0;
 }
 
 @media (max-width: 760px) {

@@ -14,24 +14,50 @@ import {
 import { nombreMes } from "@/lib/publicidad/formato";
 import { ROTULO_PERIODO } from "@/lib/publicidad/rotulos";
 
+export type FiltroCampanas = "activas" | "pausadas" | "todas";
+
+export type ComparacionPublicidad = "anterior" | "ninguno";
+export type TabPublicidad = "campanas" | "anuncios";
+
 export type ParametrosPublicidad = {
   periodo: Periodo;
   orden: ColumnaOrden;
   dir: DireccionOrden;
+  filtro: FiltroCampanas;
   incluirPausadas: boolean;
+  comparar: ComparacionPublicidad;
+  tab: TabPublicidad;
 };
 
+function leerFiltro(vista: string | null | undefined, pausadas: string | null | undefined): FiltroCampanas {
+  if (vista === "activas" || vista === "pausadas" || vista === "todas") return vista;
+  if (pausadas === "1") return "todas";
+  return "activas";
+}
+
 export function leerParametrosPublicidad(
-  entrada: { mes?: string | null; orden?: string | null; dir?: string | null; pausadas?: string | null },
+  entrada: {
+    mes?: string | null;
+    orden?: string | null;
+    dir?: string | null;
+    pausadas?: string | null;
+    vista?: string | null;
+    comparar?: string | null;
+    tab?: string | null;
+  },
   ahora: Date
 ): ParametrosPublicidad {
   const periodo = resolverPeriodo(entrada.mes, ahora);
   const orden = resolverOrden(entrada.orden);
+  const filtro = leerFiltro(entrada.vista, entrada.pausadas);
   return {
     periodo,
     orden,
     dir: resolverDireccion(entrada.dir, orden),
-    incluirPausadas: entrada.pausadas === "1",
+    filtro,
+    incluirPausadas: filtro !== "activas",
+    comparar: entrada.comparar === "ninguno" ? "ninguno" : "anterior",
+    tab: entrada.tab === "anuncios" ? "anuncios" : "campanas",
   };
 }
 
@@ -41,6 +67,9 @@ export type HrefPublicidad = {
   orden?: ColumnaOrden | null;
   dir?: DireccionOrden | null;
   pausadas?: boolean;
+  vista?: FiltroCampanas | null;
+  comparar?: ComparacionPublicidad | null;
+  tab?: TabPublicidad | null;
   aviso?: string | null;
 };
 
@@ -52,7 +81,10 @@ export function hrefPublicidad(params: HrefPublicidad): string {
   if (params.mes) q.set("mes", params.mes);
   if (params.orden && params.orden !== "inversion") q.set("orden", params.orden);
   if (params.dir && params.dir !== dirPorDefecto) q.set("dir", params.dir);
-  if (params.pausadas) q.set("pausadas", "1");
+  if (params.vista === "pausadas" || params.vista === "todas") q.set("vista", params.vista);
+  else if (params.pausadas) q.set("vista", "todas");
+  if (params.comparar === "ninguno") q.set("comparar", "ninguno");
+  if (params.tab === "anuncios") q.set("tab", "anuncios");
   if (params.aviso) q.set("aviso", params.aviso);
   const texto = q.toString();
   return texto ? `/panel/publicidad?${texto}` : "/panel/publicidad";

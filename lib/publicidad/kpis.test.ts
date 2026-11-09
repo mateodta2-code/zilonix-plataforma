@@ -1,15 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { obtenerConfigPublicidad } from "@/lib/publicidad/config";
 import {
+  mostrarDineroCompacto,
   mostrarDineroTarjeta,
+  textoObjetivoRoas,
   mostrarEntero,
   mostrarFraccion,
   mostrarRoas,
   textoComparacion,
 } from "@/lib/publicidad/formato";
 import {
+  alertaBajo70,
+  aportePorPublicidad,
+  armarSerieDiaria,
+  diasParaEstabilizar,
   compararOrden,
   diagnosticarCampana,
+  fraseEstado,
+  gastaSinVender,
+  unidadesConPublicidad,
+  usoPresupuestoDiario,
   resolverDireccion,
   resolverOrden,
   resolverPeriodo,
@@ -23,7 +33,7 @@ import {
   type FilaOrdenable,
 } from "@/lib/publicidad/kpis";
 import { hrefPublicidad, leerParametrosPublicidad } from "@/lib/publicidad/params";
-import { NOTA_DIAGNOSTICO, rotuloDiagnostico, rotuloSemaforo, subirEsMejor, textoVariacion, tituloSemaforo } from "@/lib/publicidad/rotulos";
+import { detalleDiagnostico, NOTA_DIAGNOSTICO, rotuloDiagnostico, rotuloSemaforo, subirEsMejor, textoVariacion, tituloSemaforo } from "@/lib/publicidad/rotulos";
 
 const DIA: DiaMetrica = {
   costo: null,
@@ -252,6 +262,71 @@ describe("diagnóstico de campaña", () => {
   });
 });
 
+describe("frase de estado y datos nuevos del rango (issue #255)", () => {
+  it("compara el ROAS real contra el objetivo, en puntos enteros", () => {
+    const bajo = fraseEstado({
+      diagnostico: { tipo: "bajo_objetivo", dias: 0 },
+      roas: "9.85",
+      roasObjetivo: "12.00",
+      diasAprendizaje: 7,
+    });
+    expect(bajo.frase).toBe("Debajo del objetivo, falta 18 %");
+    expect(bajo.tono).toBe("peligro");
+    expect(bajo.avance).toBe(82);
+
+    const arriba = fraseEstado({
+      diagnostico: { tipo: "en_objetivo", dias: 0 },
+      roas: "14.04",
+      roasObjetivo: "12.00",
+      diasAprendizaje: 7,
+    });
+    expect(arriba.frase).toBe("Cumple el objetivo, 17 % arriba");
+    expect(arriba.tono).toBe("exito");
+    expect(arriba.avance).toBe(100);
+  });
+
+  it("aprender cuenta el día desde 1, y sin datos no inventa una barra", () => {
+    const aprendiendo = fraseEstado({
+      diagnostico: { tipo: "aprendiendo", dias: 0 },
+      roas: null,
+      roasObjetivo: "12.00",
+      diasAprendizaje: 7,
+    });
+    expect(aprendiendo.frase).toBe("Aprendiendo, día 1 de 7, no tocar todavía");
+    expect(aprendiendo.tono).toBe("acento");
+    expect(aprendiendo.avance).toBeNull();
+    expect(fraseEstado({ diagnostico: { tipo: "sin_datos", dias: 0 }, roas: null, roasObjetivo: null, diasAprendizaje: 7 }).frase).toBe(
+      "Sin datos"
+    );
+  });
+
+  it("unidades con publicidad usa el total, y si no vino suma directas e indirectas", () => {
+    expect(
+      unidadesConPublicidad([
+        dia({ unidadesTotal: 2 }),
+        dia({ unidadesTotal: 3, unidadesDirectas: 99 }),
+      ])
+    ).toBe("5");
+    expect(unidadesConPublicidad([dia({ unidadesDirectas: 1, unidadesIndirectas: 4 }), dia({ unidadesIndirectas: 2 })])).toBe("7");
+    expect(unidadesConPublicidad([dia({}), dia({ unidadesTotal: null })])).toBeNull();
+    expect(totalesDeDias([dia({ costo: "10.00", unidadesTotal: 4 })]).unidadesVendidas).toBe("4");
+  });
+
+  it("el % usado es el gasto del rango partido por los días, contra el presupuesto diario", () => {
+    expect(
+      usoPresupuestoDiario({ gasto: "310.00", dias: 31, presupuestoDiario: "20.00", automatico: false })
+    ).toMatchObject({ tipo: "ok", porcentaje: "50", avance: 50 });
+    expect(usoPresupuestoDiario({ gasto: "100.00", dias: 1, presupuestoDiario: "40.00", automatico: null })).toMatchObject({
+      tipo: "ok",
+      porcentaje: "250",
+      avance: 100,
+    });
+    expect(usoPresupuestoDiario({ gasto: "10.00", dias: 2, presupuestoDiario: "50.00", automatico: true }).tipo).toBe("automatico");
+    expect(usoPresupuestoDiario({ gasto: "10.00", dias: 2, presupuestoDiario: null, automatico: false }).tipo).toBe("sin_presupuesto");
+    expect(usoPresupuestoDiario({ gasto: null, dias: 2, presupuestoDiario: "50.00", automatico: false }).tipo).toBe("sin_gasto");
+  });
+});
+
 describe("periodo en Bogotá", () => {
   it("el mes en curso va del día 1 a hoy y se compara con el mismo tramo", () => {
     const periodo = resolverPeriodo(null, new Date("2026-10-29T15:00:00-05:00"));
@@ -322,6 +397,61 @@ describe("periodo en Bogotá", () => {
   });
 });
 
+describe("alertas de solo lectura (issue #255)", () => {
+  it("bajo el 70 % del objetivo no se muestra mientras aprende", () => {
+    expect(alertaBajo70({ aprendiendo: true, roas: "1.00", objetivo: "12.00" })).toBe(false);
+    expect(alertaBajo70({ aprendiendo: false, roas: "8.00", objetivo: "12.00" })).toBe(true);
+    expect(alertaBajo70({ aprendiendo: false, roas: "8.40", objetivo: "12.00" })).toBe(false);
+    expect(alertaBajo70({ aprendiendo: false, roas: "9.85", objetivo: "12.00" })).toBe(false);
+    expect(alertaBajo70({ aprendiendo: false, roas: null, objetivo: "12.00" })).toBe(false);
+  });
+
+  it("gasta sin vender solo si hay gasto y ninguna venta atribuida", () => {
+    expect(gastaSinVender("10.00", "0.00", "0")).toBe(true);
+    expect(gastaSinVender("10.00", null, null)).toBe(true);
+    expect(gastaSinVender("10.00", "5.00", null)).toBe(false);
+    expect(gastaSinVender("10.00", null, "2")).toBe(false);
+    expect(gastaSinVender("0.00", "0.00", "0")).toBe(false);
+    expect(gastaSinVender(null, "0.00", "0")).toBe(false);
+  });
+
+  it("el aporte es ventas atribuidas sobre el total de las promocionadas", () => {
+    expect(aportePorPublicidad("80.00", "20.00")).toBe("80.0");
+    expect(aportePorPublicidad("80.00", null)).toBeNull();
+    expect(aportePorPublicidad(null, "20.00")).toBeNull();
+  });
+
+  it("el diagnóstico visible no afirma una etiqueta que Mercado Libre no mandó", () => {
+    expect(diasParaEstabilizar(0, 7)).toBe(7);
+    expect(diasParaEstabilizar(6, 7)).toBe(1);
+    expect(detalleDiagnostico({ diagnostico: { tipo: "aprendiendo", dias: 6 }, diasAprendizaje: 7, alertaBajo70: false })).toEqual({
+      pill: "APRENDIENDO",
+      detalle: "Tu campaña se estabilizará en 1 día",
+      tono: "aviso",
+    });
+    expect(detalleDiagnostico({ diagnostico: { tipo: "aprendiendo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true }).detalle).toBe(
+      "Tu campaña se estabilizará en 7 días"
+    );
+    expect(detalleDiagnostico({ diagnostico: { tipo: "bajo_objetivo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true }).detalle).toBe(
+      "Bajo el 70 % del objetivo"
+    );
+    expect(detalleDiagnostico({ diagnostico: { tipo: "excelente", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).pill).toBe("Excelente");
+    expect(detalleDiagnostico({ diagnostico: { tipo: "sin_datos", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).detalle).toBe("Sin datos");
+  });
+
+  it("la serie diaria no promedia ratios y no inventa un cero", () => {
+    const serie = armarSerieDiaria("2026-10-01", "2026-10-02", [
+      { fecha: "2026-10-01", costo: "10.00", montoTotal: "40.00", ventasOrganicasMonto: null, clicks: 2, impresiones: 10 },
+    ]);
+    expect(serie.map((p) => p.fecha)).toEqual(["2026-10-01", "2026-10-02"]);
+    expect(serie[0].inversion).toBe("10.00");
+    expect(serie[0].ingresos).toBe("40.00");
+    expect(serie[0].roas).toBe("4.00");
+    expect(serie[1].inversion).toBeNull();
+    expect(serie[1].roas).toBeNull();
+  });
+});
+
 describe("orden y configuración", () => {
   it("la columna de la URL solo vale si está en la lista blanca", () => {
     expect(resolverOrden("roas")).toBe("roas");
@@ -372,6 +502,11 @@ describe("formato es-CO", () => {
   it("dinero sin decimales en tarjeta, ROAS con x, porcentaje con 1 decimal y miles", () => {
     expect(mostrarDineroTarjeta("1234567.40")).toBe("$ 1.234.567");
     expect(mostrarDineroTarjeta(null)).toBe("—");
+    expect(mostrarDineroCompacto("447108.61")).toBe("$447.109");
+    expect(mostrarDineroCompacto("0.40")).toBe("$0");
+    expect(mostrarDineroCompacto(null)).toBe("—");
+    expect(textoObjetivoRoas("12.00")).toBe("objetivo 12,00x");
+    expect(textoObjetivoRoas(null)).toBeNull();
     expect(mostrarRoas("4.25")).toBe("4,25x");
     expect(mostrarRoas(null)).toBe("—");
     expect(mostrarFraccion("0.1840")).toBe("18,4 %");

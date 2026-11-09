@@ -6,13 +6,21 @@ import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Tabla, FilaTabla, CeldaTabla } from "@/components/marco/Tabla";
+import { msDeReintento429 } from "@/lib/ml/reintento-429";
+import { etiquetaModeracionClip, INTERVALO_ESPACIADO_MODERACION_MS, proximoIntervaloModeracionMs, sigueConsultandoModeracion } from "./clip/estado-moderacion";
 import { leerMetadatosDeVideoElement } from "./clip/leerMetadatosVideo";
 import { mensajeErrorClip } from "./clip/mensajes-error";
+import { MENSAJE_LEYENDO_VIDEO_CLIP, razonesNoPuedeSubirClip } from "./clip/razon-no-subir";
 import { urlDeMensajeExtensionVideo } from "./clip/recibir-mensaje-extension";
-import type { EstadoCuentaClipCliente, FilaBusquedaClipCliente, TrabajoClipCliente } from "./clip/tipos-cliente";
-import { MENSAJES_PROBLEMA_VIDEO_CLIP, problemasDeVideoClip, type ProblemaVideoClip } from "./clip/validacion-video-cliente";
+import type { ClipMlCliente, EstadoCuentaClipCliente, FilaBusquedaClipCliente, FilaEstadoClipCliente, TrabajoClipCliente } from "./clip/tipos-cliente";
+import { formatoTamanoClip } from "./clip/validacion-video-cliente";
 import type { Cuenta } from "./CuentasDestino";
 import styles from "./publicar.module.css";
+
+// Rama mateo/clip-estado-automatico (Alcance A) — ritmo de polling
+// automático del estado de moderación, ver app/panel/publicar/clip/estado-moderacion.ts
+// para los números elegidos y por qué. CONCURRENCIA no aplica acá: cada
+// cuenta en moderación programa su propio setTimeout independiente.
 
 type OrigenVideo = "computador" | "link" | "sku-propio" | "extension" | "canva";
 
@@ -36,12 +44,6 @@ const CHIP_ESTADO_TRABAJO: Record<EstadoCuentaClipCliente, EstadoChip> = {
   publicado: "exito",
   rechazado: "peligro",
   error: "peligro",
-};
-
-const ETIQUETA_MODERACION: Record<string, { texto: string; estado: EstadoChip }> = {
-  PUBLISHED: { texto: "Publicado", estado: "exito" },
-  UNDER_REVIEW: { texto: "En moderación", estado: "aviso" },
-  REJECTED: { texto: "Rechazado", estado: "peligro" },
 };
 
 // Punto 1 del pedido — "Desde un link"/"por SKU propio"/"desde la
@@ -68,6 +70,16 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
   const previewUrlRef = useRef<string | null>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [metadatos, setMetadatos] = useState<{ duracionSegundos: number; ancho: number; alto: number } | null>(null);
+  // Alcance B — el navegador no pudo decodificar este video (onError
+  // del <video>, o pasó el timeout sin loadedmetadata). Antes de esta
+  // rama, ese caso dejaba metadatos en null PARA SIEMPRE: el botón
+  // quedaba apagado sin ningún aviso (causa real confirmada del caso de
+  // la captura — probable códec HEVC/H.265, que Chrome no decodifica).
+  const [errorCodec, setErrorCodec] = useState(false);
+  const metadatosRef = useRef(metadatos);
+  useEffect(() => {
+    metadatosRef.current = metadatos;
+  }, [metadatos]);
   const [errorOrigen, setErrorOrigen] = useState<string | null>(null);
   const [linkUrl, setLinkUrl] = useState("");
   const [trayendo, setTrayendo] = useState(false);
@@ -85,7 +97,15 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [trabajo, setTrabajo] = useState<TrabajoClipCliente | null>(null);
   const [actualizandoEstado, setActualizandoEstado] = useState(false);
-  const [estadoPorItem, setEstadoPorItem] = useState<Record<string, { texto: string; estado: EstadoChip } | null>>({});
+  // Alcance A — último clip conocido de Mercado Libre por item
+  // (cuentaId:itemId), o null mientras no se sabe nada todavía (nunca
+  // se inventa "Publicado" para ese caso, ver etiquetaModeracionClip).
+  const [moderacionPorItem, setModeracionPorItem] = useState<Record<string, ClipMlCliente | null>>({});
+  // Cuándo entró cada item a "en_moderacion" (para el ritmo de
+  // polling) y el setTimeout en vuelo de cada uno — en refs porque solo
+  // los lee el propio efecto de polling, nunca el render.
+  const entradaModeracionTsRef = useRef<Record<string, number>>({});
+  const timersModeracionRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // El video de "desde el computador" se previsualiza con un Object
   // URL local — se revoca siempre al reemplazarlo (otro origen, otro
@@ -97,7 +117,23 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
     setVideo(nuevo);
     setPreviewSrc(nuevoPreviewSrc);
     setMetadatos(null);
+    setErrorCodec(false);
   }
+
+  // Alcance B — si el <video> no dispara "loadedmetadata" en este
+  // tiempo (preview negra, códec que Chrome no decodifica — caso real
+  // confirmado por captura), se avisa en vez de dejar el botón apagado
+  // en silencio para siempre. Se reinicia cada vez que cambia el video
+  // (otro archivo, otro origen); si llega a cargar después, el propio
+  // onLoadedMetadata limpia errorCodec.
+  const TIMEOUT_CODEC_MS = 5000;
+  useEffect(() => {
+    if (!previewSrc) return;
+    const id = setTimeout(() => {
+      if (metadatosRef.current === null) setErrorCodec(true);
+    }, TIMEOUT_CODEC_MS);
+    return () => clearTimeout(id);
+  }, [previewSrc]);
 
   useEffect(
     () => () => {
@@ -157,8 +193,6 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
     fijarVideo({ tipo: "archivo", archivo, contentType: archivo.type, tamanoBytes: archivo.size }, url);
   }
 
-  const problemas: ProblemaVideoClip[] = metadatos && video ? problemasDeVideoClip({ ...metadatos, tamanoBytes: video.tamanoBytes }) : [];
-
   async function buscarSku() {
     if (!sku.trim()) return;
     setBuscando(true);
@@ -189,7 +223,26 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
   }
 
   const filasElegidas = filas.filter((f) => f.activo && marcadas[f.cuentaId]);
-  const puedeSubir = Boolean(video) && metadatos !== null && problemas.length === 0 && filasElegidas.length > 0 && !subiendo;
+
+  // Alcance B — una sola lista de razones por las que el botón sigue
+  // apagado (nunca en silencio, ver razon-no-subir.ts). `puedeSubir`
+  // sigue siendo su propio booleano explícito (no solo "razones.length
+  // === 0"): mientras `subiendo` es true, razonesNoPuedeSubirClip
+  // devuelve [] a propósito (el botón ya dice "Subiendo…", no hace
+  // falta otra razón) — pero el botón tiene que seguir deshabilitado.
+  // metadatos del estado no trae tamanoBytes (viene del <video>, nunca
+  // de File.size) — se completa acá con el del video elegido, mismo
+  // criterio que ya usaba el `problemas` original de esta pantalla.
+  const metadatosCompletos = metadatos && video ? { ...metadatos, tamanoBytes: video.tamanoBytes } : null;
+  const razonesNoPuedeSubir = razonesNoPuedeSubirClip({
+    tieneVideo: Boolean(video),
+    tamanoBytes: video?.tamanoBytes ?? null,
+    metadatos: metadatosCompletos,
+    errorCodec,
+    hayCuentaMarcada: filasElegidas.length > 0,
+    subiendo,
+  });
+  const puedeSubir = !subiendo && Boolean(video) && metadatos !== null && !errorCodec && filasElegidas.length > 0 && razonesNoPuedeSubir.length === 0;
 
   async function subir() {
     if (!video) return;
@@ -238,21 +291,107 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
     };
   }, [jobId]);
 
-  async function actualizarEstado() {
+  // Alcance A — una sola cuenta, una sola consulta a POST
+  // /api/ml/clip/estado. 429 real de Mercado Libre (limiteMl, ver
+  // app/api/ml/clip/estado/route.ts): nunca se reintenta a ciegas —
+  // msDeReintento429 combina el Retry-After real (si vino) con el
+  // backoff espaciado de siempre. PUBLISHED/REJECTED (sigueConsultandoModeracion
+  // en false): no se vuelve a programar nada, la cuenta queda quieta
+  // para siempre — así se cumple "detener el polling entero" en cuanto
+  // todas las cuentas de la sesión llegan a un estado final: ninguna
+  // vuelve a tener un timer pendiente.
+  function key(cuentaId: string, itemId: string): string {
+    return `${cuentaId}:${itemId}`;
+  }
+
+  function programarProximaConsultaModeracion(cuentaId: string, itemId: string, esperaMs: number) {
+    const k = key(cuentaId, itemId);
+    if (timersModeracionRef.current[k]) clearTimeout(timersModeracionRef.current[k]);
+    timersModeracionRef.current[k] = setTimeout(() => void consultarEstadoModeracion(cuentaId, itemId), esperaMs);
+  }
+
+  async function consultarEstadoModeracion(cuentaId: string, itemId: string) {
+    const k = key(cuentaId, itemId);
+    delete timersModeracionRef.current[k];
+    let res: Response;
+    try {
+      res = await fetch("/api/ml/clip/estado", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [{ cuentaId, itemId }] }),
+      });
+    } catch {
+      programarProximaConsultaModeracion(cuentaId, itemId, INTERVALO_ESPACIADO_MODERACION_MS);
+      return;
+    }
+    if (res.status === 429) {
+      const body = (await res.json().catch(() => ({}))) as { retryAfterMs?: number | null };
+      programarProximaConsultaModeracion(cuentaId, itemId, msDeReintento429(INTERVALO_ESPACIADO_MODERACION_MS, body.retryAfterMs ?? null));
+      return;
+    }
+    if (!res.ok) {
+      programarProximaConsultaModeracion(cuentaId, itemId, INTERVALO_ESPACIADO_MODERACION_MS);
+      return;
+    }
+    const body = await res.json();
+    const fila = (body.filas as FilaEstadoClipCliente[] | undefined)?.[0];
+    if (fila?.limiteMl) {
+      programarProximaConsultaModeracion(cuentaId, itemId, msDeReintento429(INTERVALO_ESPACIADO_MODERACION_MS, fila.retryAfterMs ?? null));
+      return;
+    }
+    const clip = fila?.clips?.[0] ?? null;
+    setModeracionPorItem((actual) => ({ ...actual, [k]: clip }));
+    if (!sigueConsultandoModeracion(clip?.moderationStatus ?? null)) return; // PUBLISHED/REJECTED — se para de consultar esta cuenta
+
+    const entrada = entradaModeracionTsRef.current[k] ?? Date.now();
+    const proximo = proximoIntervaloModeracionMs(Date.now() - entrada);
+    if (proximo == null) return; // tope de 48h alcanzado — se deja de consultar esta cuenta
+    programarProximaConsultaModeracion(cuentaId, itemId, proximo);
+  }
+
+  // Apenas el polling de progreso (arriba) ve una cuenta nueva en
+  // "en_moderacion", arranca su seguimiento — primera consulta
+  // inmediata, nunca espera los primeros 60s. `entradaModeracionTsRef`
+  // evita re-arrancar una cuenta que ya se está siguiendo (el objeto
+  // `trabajo` llega nuevo cada 3s, aunque nada haya cambiado).
+  useEffect(() => {
     if (!trabajo) return;
+    for (const c of trabajo.cuentas) {
+      if (c.estado !== "en_moderacion") continue;
+      const k = key(c.cuentaId, c.itemId);
+      if (entradaModeracionTsRef.current[k] != null) continue;
+      entradaModeracionTsRef.current[k] = Date.now();
+      void consultarEstadoModeracion(c.cuentaId, c.itemId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- consultarEstadoModeracion se recrea cada render; solo nos importa reaccionar a trabajo
+  }, [trabajo]);
+
+  // Limpia todo timer en vuelo al desmontar — nunca un setTimeout
+  // disparando fetch() sobre un componente que ya no existe.
+  useEffect(
+    () => () => {
+      for (const id of Object.values(timersModeracionRef.current)) clearTimeout(id);
+    },
+    []
+  );
+
+  // "Consultar ahora" (antes "Actualizar estado") — manual, opcional:
+  // el flujo normal ya no depende de este botón. Reusa la misma
+  // consultarEstadoModeracion (mismo manejo de 429), solo que la
+  // dispara ya mismo en vez de esperar su próximo horario.
+  async function consultarAhora() {
+    if (!trabajo) return;
+    const candidatos = trabajo.cuentas.filter((c) => c.estado === "en_moderacion" || c.estado === "publicado" || c.estado === "rechazado");
+    if (candidatos.length === 0) return;
     setActualizandoEstado(true);
     try {
-      const items = trabajo.cuentas.filter((c) => c.estado === "en_moderacion" || c.estado === "publicado" || c.estado === "rechazado").map((c) => ({ cuentaId: c.cuentaId, itemId: c.itemId }));
-      if (items.length === 0) return;
-      const res = await fetch("/api/ml/clip/estado", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) });
-      if (!res.ok) return;
-      const body = await res.json();
-      const nuevo: Record<string, { texto: string; estado: EstadoChip } | null> = {};
-      for (const fila of body.filas as { cuentaId: string; itemId: string; clips: { moderationStatus: string | null }[] | null }[]) {
-        const estadoReal = fila.clips?.[0]?.moderationStatus ?? null;
-        nuevo[`${fila.cuentaId}:${fila.itemId}`] = estadoReal ? ETIQUETA_MODERACION[estadoReal] ?? null : null;
-      }
-      setEstadoPorItem((actual) => ({ ...actual, ...nuevo }));
+      await Promise.all(
+        candidatos.map((c) => {
+          const k = key(c.cuentaId, c.itemId);
+          if (entradaModeracionTsRef.current[k] == null) entradaModeracionTsRef.current[k] = Date.now();
+          return consultarEstadoModeracion(c.cuentaId, c.itemId);
+        })
+      );
     } finally {
       setActualizandoEstado(false);
     }
@@ -308,7 +447,7 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
 
       {origen === "sku-propio" && (
         <p style={{ marginTop: 10, fontSize: 13, color: "var(--texto-suave)" }}>
-          Buscá el SKU abajo. Si alguna de tus cuentas ya tiene un Clip subido para esa publicación, la fila lo va a decir — Mercado Libre no
+          Busca el SKU abajo. Si alguna de tus cuentas ya tiene un Clip subido para esa publicación, la fila lo va a decir — Mercado Libre no
           entrega el archivo del video para reutilizarlo automáticamente, así que de todas formas hay que subirlo desde el computador o un
           link.
         </p>
@@ -320,26 +459,40 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
 
       {errorOrigen && <p style={{ marginTop: 10, color: "var(--kpi-peligro-texto)", fontSize: 14 }}>{errorOrigen}</p>}
 
+      {/* Alcance B — siempre visible apenas hay un video elegido, sin
+          esperar metadatos: File.size (tamanoBytes) ya está disponible
+          de una. */}
+      {video && <p style={{ marginTop: 10, fontSize: 13, color: "var(--texto-suave)" }}>{formatoTamanoClip(video.tamanoBytes)}</p>}
+
       {previewSrc && (
         <div style={{ marginTop: 14 }}>
           <video
             src={previewSrc}
             controls
             style={{ maxWidth: 220, maxHeight: 390, display: "block" }}
+            onError={() => setErrorCodec(true)}
             onLoadedMetadata={(e) => {
               if (!video) return;
+              setErrorCodec(false);
               const m = leerMetadatosDeVideoElement(e.currentTarget, video.tamanoBytes);
               setMetadatos({ duracionSegundos: m.duracionSegundos, ancho: m.ancho, alto: m.alto });
             }}
           />
-          {metadatos && problemas.length > 0 && (
-            <ul style={{ marginTop: 8, color: "var(--kpi-peligro-texto)", fontSize: 13 }}>
-              {problemas.map((p) => (
-                <li key={p}>{MENSAJES_PROBLEMA_VIDEO_CLIP[p]}</li>
-              ))}
-            </ul>
-          )}
         </div>
+      )}
+
+      {/* Alcance B — la razón exacta por la que el botón de abajo sigue
+          apagado (nunca en silencio). No se muestra mientras sube
+          (razonesNoPuedeSubir ya vuelve [] en ese caso). */}
+      {!subiendo && razonesNoPuedeSubir.length > 0 && razonesNoPuedeSubir[0] !== MENSAJE_LEYENDO_VIDEO_CLIP && (
+        <ul style={{ marginTop: 8, color: "var(--kpi-peligro-texto)", fontSize: 13 }}>
+          {razonesNoPuedeSubir.map((razon) => (
+            <li key={razon}>{razon}</li>
+          ))}
+        </ul>
+      )}
+      {!subiendo && razonesNoPuedeSubir[0] === MENSAJE_LEYENDO_VIDEO_CLIP && (
+        <p style={{ marginTop: 8, fontSize: 13, color: "var(--texto-suave)" }}>{MENSAJE_LEYENDO_VIDEO_CLIP}</p>
       )}
 
       {/* --- SKU y cuentas (punto 3) --- */}
@@ -364,7 +517,7 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
             </Boton>
           </div>
           <div style={{ marginTop: 10 }}>
-            <Tabla encabezados={["", "Cuenta", "Título", "MLA/MCO", "Estado", "Subir"]}>
+            <Tabla encabezados={["", "Cuenta", "Título", "ID de la publicación", "Estado", "Subir"]}>
               {filas.map((fila) => {
                 const estadoChip: { texto: string; estado: EstadoChip } = fila.activo
                   ? { texto: "Activa", estado: "exito" }
@@ -435,14 +588,28 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
         <div style={{ marginTop: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <p className="zx-etiqueta">Progreso de la subida</p>
-            <Boton type="button" variante="secundario" chico disabled={actualizandoEstado} onClick={actualizarEstado}>
-              {actualizandoEstado ? "Actualizando…" : "Actualizar estado"}
+            <Boton type="button" variante="secundario" chico disabled={actualizandoEstado} onClick={consultarAhora}>
+              {actualizandoEstado ? "Consultando…" : "Consultar ahora"}
             </Boton>
           </div>
+          {/* Alcance A — el estado de moderación de cada cuenta ya se
+              consulta solo (ver el useEffect de arriba); este aviso
+              es sobre el SEGUIMIENTO en pantalla, no sobre el clip en
+              sí (lib/trabajos/subirClipMultiCuenta.ts: Map en memoria,
+              un solo proceso). */}
+          <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 6 }}>
+            El estado de cada cuenta se consulta solo mientras esta pantalla sigue abierta. Si el servidor se reinicia o hay más de una
+            réplica corriendo, este seguimiento se pierde de vista — el clip que ya se subió a Mercado Libre no se pierde.
+          </p>
           <Tabla encabezados={["Cuenta", "Estado", "Detalle"]}>
             {trabajo.cuentas.map((c) => {
-              const estadoReal = estadoPorItem[`${c.cuentaId}:${c.itemId}`];
-              const chip = estadoReal ?? { texto: ETIQUETA_ESTADO_TRABAJO[c.estado], estado: CHIP_ESTADO_TRABAJO[c.estado] };
+              const clip = moderacionPorItem[key(c.cuentaId, c.itemId)];
+              const chip =
+                clip !== undefined
+                  ? etiquetaModeracionClip(clip?.moderationStatus ?? null, clip?.motivoRechazo ?? null)
+                  : c.estado === "en_moderacion"
+                    ? etiquetaModeracionClip(null, null)
+                    : { texto: ETIQUETA_ESTADO_TRABAJO[c.estado], estado: CHIP_ESTADO_TRABAJO[c.estado] };
               return (
                 <FilaTabla key={c.cuentaId}>
                   <CeldaTabla>{c.nickname}</CeldaTabla>

@@ -95,7 +95,7 @@ function mensajeDeErrorSubida(error: unknown): string {
   if (error instanceof ClipDemasiadoGrandeError) return error.message;
   if (error instanceof ClipInvalidoError) return error.message;
   if (error instanceof Error) return error.message.slice(0, 400);
-  return "No se pudo subir el Clip — intentá de nuevo.";
+  return "No se pudo subir el Clip — intenta de nuevo.";
 }
 
 async function subirAUnaCuenta(empresaId: string, cuenta: CuentaParaSubirClip, rutaPorDefecto: string, contentTypePorDefecto: string, fila: ProgresoCuentaClip): Promise<void> {
