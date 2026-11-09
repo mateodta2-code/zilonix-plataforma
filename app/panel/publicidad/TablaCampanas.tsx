@@ -98,9 +98,12 @@ function FilaGrupo({
               </span>
               <span className={styles.pausada}>{anuncios}</span>
               {campana.pausada ? <span className={styles.pausada}>Pausada</span> : null}
-              {campana.anunciosSinVenta > 0 ? (
-                <span className={styles.alertaFila}>Gasta sin vender · {campana.anunciosSinVenta}</span>
-              ) : null}
+              {campana.mayorGasto.map((ad) => (
+                <span key={ad.id} className={styles.mayorGasto} title={`${ad.nombre}. Inversión ${ad.inversion}. ${ad.parte ?? "—"} del gasto. Ventas ${ad.ventas}.`}>
+                  Mayor gasto: {ad.nombre} · {ad.inversion} · {ad.parte ?? "—"} · ventas {ad.ventas}
+                </span>
+              ))}
+              {campana.textoEnfriamiento ? <span className={styles.alertaFila}>{campana.textoEnfriamiento}</span> : null}
             </span>
           </button>
         </CeldaTabla>
@@ -128,6 +131,17 @@ function FilaGrupo({
       {abierta ? (
         <FilaTabla id={panelId}>
           <CeldaTabla colSpan={COLUMNAS_CAMPANA}>
+            <ListaRecomendaciones titulo="Recomendaciones" items={campana.recomendaciones} />
+            {campana.mayorGasto.length > 0 ? (
+              <ul className={styles.extras}>
+                {campana.mayorGasto.map((ad) => (
+                  <li key={ad.id}>
+                    Mayor gasto: {ad.nombre}. Inversión {ad.inversion}
+                    {ad.parte ? ` (${ad.parte} del gasto de la campaña)` : ""}. Ventas {ad.ventas}.
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <ul className={styles.extras}>
               <li>
                 Ventas sin publicidad: {campana.ventasSinPublicidad}
@@ -177,7 +191,10 @@ function FilaGrupo({
                           anuncio.itemId
                         )}
                       </CeldaTabla>
-                      <CeldaTabla>{anuncio.titulo}</CeldaTabla>
+                      <CeldaTabla>
+                        {anuncio.mayorGasto ? <span className={styles.marcaMayor}>Mayor gasto</span> : null}
+                        {anuncio.titulo}
+                      </CeldaTabla>
                       <CeldaTabla numerica>{anuncio.gasto}</CeldaTabla>
                       <CeldaTabla numerica>{anuncio.ingresos}</CeldaTabla>
                       <CeldaTabla numerica>{anuncio.ventasOrganicas}</CeldaTabla>
@@ -218,12 +235,58 @@ function CeldaNumero({ valor, delta }: { valor: string; delta: DeltaPintado | nu
 
 function AvisosAnuncio({ anuncio }: { anuncio: CampanaPintada["anuncios"][number] }) {
   const pausado = (anuncio.estadoAnuncio ?? "").toLowerCase() === "paused";
-  if (!anuncio.gastaSinVender && anuncio.sinStock !== true && !pausado) return null;
+  if (!anuncio.sugerencia && !anuncio.nota && anuncio.sinStock !== true && !pausado) return null;
   return (
     <span className={styles.avisos}>
-      {anuncio.gastaSinVender ? <span className={styles.alertaFila}>Gasta sin vender</span> : null}
+      {anuncio.sugerencia ? <span className={styles.alertaFila}>{anuncio.sugerencia}</span> : null}
+      {anuncio.nota ? <span className={styles.notaNeutra}>{anuncio.nota}</span> : null}
       {anuncio.sinStock === true ? <span className={styles.alertaFila}>Sin stock</span> : null}
       {pausado ? <span className={styles.pausada}>Anuncio pausado</span> : null}
     </span>
   );
+}
+
+export function ResumenRecomendaciones({ campanas }: { campanas: CampanaPintada[] }) {
+  const conAlgo = campanas.filter((campana) => campana.recomendaciones.length > 0);
+  return (
+    <section className={styles.recomendaciones} aria-label="Recomendaciones">
+      <p className={styles.seccion}>Recomendaciones</p>
+      {conAlgo.length === 0 ? (
+        <p className={styles.nota}>Ninguna campaña de este filtro tiene una recomendación.</p>
+      ) : (
+        <ul className={styles.listaRecomendaciones}>
+          {conAlgo.map((campana) => (
+            <li key={campana.id}>
+              <span className={styles.nombreResumen}>{campana.nombre}</span>
+              <ListaRecomendaciones items={campana.recomendaciones} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ListaRecomendaciones({ titulo, items }: { titulo?: string; items: CampanaPintada["recomendaciones"] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className={styles.bloqueRecomendacion}>
+      {titulo ? <p className={styles.seccion}>{titulo}</p> : null}
+      <ul className={styles.listaRecomendaciones}>
+        {items.map((item) => (
+          <li key={`${item.codigo}-${item.anuncioId ?? "campana"}`} data-tono={tonoRecomendacion(item.codigo)}>
+            {item.nombre ? <span className={styles.nombreResumen}>{item.nombre}. </span> : null}
+            <span>{item.texto}</span>
+            <span className={styles.motivo}> {item.motivo}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function tonoRecomendacion(codigo: CampanaPintada["recomendaciones"][number]["codigo"]): "peligro" | "acento" | "neutro" {
+  if (codigo === "nota_vende_bien" || codigo === "aprendizaje") return "neutro";
+  if (codigo === "subir_objetivo") return "acento";
+  return "peligro";
 }

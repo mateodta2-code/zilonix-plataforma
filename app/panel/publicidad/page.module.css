@@ -665,6 +665,71 @@
   color: var(--peligro-texto);
   font-size: 11px;
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.mayorGasto,
+.marcaMayor {
+  display: block;
+  margin-top: 2px;
+  color: var(--acento-fuerte);
+  font-size: 11px;
+  font-weight: 600;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.marcaMayor {
+  display: inline;
+  margin-right: 4px;
+}
+
+.notaNeutra {
+  display: block;
+  color: var(--texto-suave);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.recomendaciones,
+.bloqueRecomendacion {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 12px;
+}
+
+.listaRecomendaciones {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  min-width: 0;
+}
+
+.listaRecomendaciones li {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.listaRecomendaciones li[data-tono="peligro"] {
+  color: var(--peligro-texto);
+}
+
+.listaRecomendaciones li[data-tono="acento"] {
+  color: var(--acento-fuerte);
+}
+
+.listaRecomendaciones li[data-tono="neutro"] {
+  color: var(--texto-suave);
+}
+
+.nombreResumen {
+  font-weight: 600;
+}
+
+.motivo {
+  color: var(--texto-suave);
 }
 
 .avisos {

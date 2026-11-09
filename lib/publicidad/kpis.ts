@@ -12,7 +12,14 @@
 import { aCentavos, desdeCentavos } from "@/lib/finanzas/utilidad-venta";
 import { aEscala } from "@/lib/numeros/normalizar-decimal";
 import { diasDelRango, diasEntreInclusive, hoyBogota } from "@/lib/publicidad/plan";
-import { ACOS_MAXIMO, FACTOR_EXCELENTE, TOPE_GASTO_SIN_VENTAS, type ConfigPublicidad } from "@/lib/publicidad/config";
+import {
+  ACOS_MAXIMO,
+  CAMPANA_ENFRIAMIENTO,
+  FACTOR_EXCELENTE,
+  TOPE_GASTO_SIN_VENTAS,
+  UMBRAL_ROAS_BAJO,
+  type ConfigPublicidad,
+} from "@/lib/publicidad/config";
 
 const CERO = BigInt(0);
 const DOS = BigInt(2);
@@ -430,12 +437,25 @@ export function usoPresupuestoDiario(entrada: {
 // todavía no hay que sugerirle nada.
 export function alertaBajo70(entrada: { aprendiendo: boolean; roas: string | null; objetivo: string | null }): boolean {
   if (entrada.aprendiendo) return false;
-  if (entrada.roas === null || entrada.objetivo === null) return false;
-  const objetivo = unidades(entrada.objetivo, ESCALA);
-  const umbral = unidades("0.70", ESCALA);
-  if (objetivo <= CERO || umbral <= CERO) return false;
-  const real = unidades(entrada.roas, ESCALA);
-  return real * FACTOR_ESCALA < objetivo * umbral;
+  return roasFrenteA(entrada.roas, entrada.objetivo, UMBRAL_ROAS_BAJO) === "menor";
+}
+
+// `roas` contra `objetivo * factor`, sin float. null si falta un lado
+// o el objetivo no es positivo: no se afirma ni "bajo" ni "alcanza".
+export function roasFrenteA(
+  roas: string | null,
+  objetivo: string | null,
+  factor: string
+): "menor" | "igual" | "mayor" | null {
+  if (roas === null || objetivo === null) return null;
+  const o = unidades(objetivo, ESCALA);
+  const f = unidades(factor, ESCALA);
+  if (o <= CERO || f <= CERO) return null;
+  const izquierda = unidades(roas, ESCALA) * FACTOR_ESCALA;
+  const derecha = o * f;
+  if (izquierda < derecha) return "menor";
+  if (izquierda > derecha) return "mayor";
+  return "igual";
 }
 
 // Gasto con plata y ninguna venta atribuida. Null en las ventas no es
@@ -443,9 +463,110 @@ export function alertaBajo70(entrada: { aprendiendo: boolean; roas: string | nul
 // se afirma que vendió. Con gasto > 0 y ambos vacíos o en cero, no vendió.
 export function gastaSinVender(gasto: string | null, ingresos: string | null, ventasCantidad: string | null): boolean {
   if (gasto === null || centavos(gasto) <= CERO) return false;
-  if (ventasCantidad !== null && ventasCantidad !== "0") return false;
-  if (ingresos !== null && centavos(ingresos) > CERO) return false;
+  if (tieneVentaAtribuida(ingresos, ventasCantidad)) return false;
   return true;
+}
+
+export function tieneVentaAtribuida(ingresos: string | null, ventasCantidad: string | null): boolean {
+  if (ventasCantidad !== null && ventasCantidad !== "0") return true;
+  return ingresos !== null && centavos(ingresos) > CERO;
+}
+
+export type CandidatoGasto = {
+  id: string;
+  titulo: string | null;
+  itemId: string;
+  gasto: string | null;
+  ventas: string | null;
+};
+
+export type MayorGasto = {
+  id: string;
+  nombre: string;
+  gasto: string;
+  ventas: string | null;
+  parte: string | null;
+};
+
+function nombreVisible(titulo: string | null, itemId: string): string {
+  const texto = titulo?.trim() ?? "";
+  return texto === "" ? itemId : texto;
+}
+
+function mismaCampana(nombre: string, destino: string): boolean {
+  return nombre.trim().toLowerCase() === destino.trim().toLowerCase();
+}
+
+// El que más invierte en el periodo. Sin gasto positivo no hay uno.
+// Si dos empatan en centavos, los dos quedan: no se descarta un empate
+// por el orden en que llegaron. `parte` es su gasto sobre el de la
+// campaña; si ese total no vino o es 0, la parte es null.
+export function anunciosMayorGasto(anuncios: readonly CandidatoGasto[], gastoCampana: string | null): MayorGasto[] {
+  let maximo: bigint | null = null;
+  const positivos: { anuncio: CandidatoGasto; gasto: bigint }[] = [];
+  for (const anuncio of anuncios) {
+    if (anuncio.gasto === null) continue;
+    const gasto = centavos(anuncio.gasto);
+    if (gasto <= CERO) continue;
+    if (maximo === null || gasto > maximo) maximo = gasto;
+    positivos.push({ anuncio, gasto });
+  }
+  if (maximo === null) return [];
+  return positivos
+    .filter((item) => item.gasto === maximo)
+    .map((item) => ({
+      id: item.anuncio.id,
+      nombre: nombreVisible(item.anuncio.titulo, item.anuncio.itemId),
+      gasto: item.anuncio.gasto as string,
+      ventas: item.anuncio.ventas,
+      parte: porcentajeDeRazon(item.anuncio.gasto, gastoCampana),
+    }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+// Mayor inversión primero. Sin gasto, o gasto 0, al final. Empate de
+// plata: el item id, para que el orden no dependa de la base.
+export function ordenPorInversionDesc<T extends { itemId: string }>(anuncios: readonly T[], gastoDe: (anuncio: T) => string | null): T[] {
+  const centavosDe = (anuncio: T): bigint | null => {
+    const gasto = gastoDe(anuncio);
+    if (gasto === null) return null;
+    const valor = centavos(gasto);
+    return valor > CERO ? valor : null;
+  };
+  return [...anuncios].sort((a, b) => {
+    const gastoA = centavosDe(a);
+    const gastoB = centavosDe(b);
+    if (gastoA !== null && gastoB !== null && gastoA !== gastoB) return gastoA > gastoB ? -1 : 1;
+    if ((gastoA !== null) !== (gastoB !== null)) return gastoA !== null ? -1 : 1;
+    return a.itemId < b.itemId ? -1 : a.itemId > b.itemId ? 1 : 0;
+  });
+}
+
+export type AvisoGastoSinVenta = "sugerir" | "gasta_sin_vender";
+
+export function fraseSugerenciaEnfriamiento(destino = CAMPANA_ENFRIAMIENTO): string {
+  return `Pasar a ${destino}`;
+}
+
+export function fraseConteoEnfriamiento(cantidad: number, destino = CAMPANA_ENFRIAMIENTO): string {
+  return `${cantidad} ${cantidad === 1 ? "anuncio" : "anuncios"} para pasar a ${destino}`;
+}
+
+// Texto, nada más. En aprendizaje no se sugiere nada. En la campaña
+// destino tampoco: ahí el aviso sigue siendo "gasta sin vender".
+export function avisoGastoSinVenta(entrada: {
+  gasto: string | null;
+  ingresos: string | null;
+  ventasCantidad: string | null;
+  nombreCampana: string;
+  aprendiendo: boolean;
+  campanaDestino?: string;
+}): AvisoGastoSinVenta | null {
+  if (entrada.aprendiendo) return null;
+  if (!gastaSinVender(entrada.gasto, entrada.ingresos, entrada.ventasCantidad)) return null;
+  const destino = entrada.campanaDestino ?? CAMPANA_ENFRIAMIENTO;
+  if (mismaCampana(entrada.nombreCampana, destino)) return "gasta_sin_vender";
+  return "sugerir";
 }
 
 export type PuntoDiario = {

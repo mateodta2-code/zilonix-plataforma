@@ -32,7 +32,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { actualizarPublicidadAction } from "./actions";
 import styles from "./page.module.css";
 import { PanelMetricas } from "./GraficoPublicidad";
-import { TablaAnuncios, TablaCampanas } from "./TablaCampanas";
+import { ResumenRecomendaciones, TablaAnuncios, TablaCampanas } from "./TablaCampanas";
 import { kpisDelResumen, pintarCampana, plataVisible, serieParaGrafico, textoAporte } from "./vista";
 
 // Issue #255 — tablero de solo lectura. La fase 1 ya dejaba el estado
@@ -254,7 +254,7 @@ function Cuerpo({
   const opciones = opcionesDeMes(ahora, periodo.mes);
   const siteId = tablero.anunciante?.siteId ?? "MCO";
   const kpis = kpisDelResumen(tablero, siteId);
-  const campanas = tablero.campanas.map((campana) => pintarCampana(campana, tablero.diasRango));
+  const campanas = tablero.campanas.map((campana) => pintarCampana(campana, tablero.diasRango, tablero.nombresCampanas));
   const sinMetricas = tablero.resumen.actual.gasto === null && tablero.resumen.actual.clicks === null;
   const momento = tablero.ultimaActualizacion?.terminadaTs ?? tablero.ultimaActualizacion?.iniciadaTs ?? null;
   const actualizado = momento ? fechaHoraBogota(momento) : "—";
@@ -391,6 +391,7 @@ function Cuerpo({
           </span>
         </div>
         {sinMetricas ? <p className={styles.nota}>No hay métricas de Product Ads en este rango.</p> : null}
+        {tab === "campanas" && campanas.length > 0 ? <ResumenRecomendaciones campanas={campanas} /> : null}
         {tab === "anuncios" ? (
           <TablaAnuncios campanas={campanas} />
         ) : campanas.length === 0 ? (

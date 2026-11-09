@@ -11,7 +11,24 @@ export const TOPE_GASTO_SIN_VENTAS = "0.05";
 export const DIAS_APRENDIZAJE = 7;
 // Pendiente de confirmar con Melisa. 1,2× es el valor inicial de la tarea.
 export const FACTOR_EXCELENTE = "1.2";
+// ROAS bajo este factor del objetivo: apagar y crear otra. 8,40 sobre
+// 12,00 es justo el 70 % y no entra.
+export const UMBRAL_ROAS_BAJO = "0.70";
+// ROAS a esta altura del objetivo: el ACOS quedó holgado. La única
+// sugerencia es ajustar el objetivo, nunca subir presupuesto ni bajarlo.
+export const FACTOR_ROAS_HOLGADO = "1.3";
+// Un anuncio en este ROAS o más, respecto del objetivo de su campaña,
+// vende bien: se queda donde está. No se mueve a enfriamiento.
+export const FACTOR_ROAS_VENDE_BIEN = "1.5";
 export const PERIODO_POR_DEFECTO = "mes_en_curso" as const;
+
+// Campaña a la que la pantalla sugiere pasar un anuncio que gasta y no
+// vende. ANTÁRTIDA es el paso siguiente, con presupuesto mínimo y ACOS
+// alto, solo si ya está en enfriamiento y sigue sin vender. Texto nada
+// más: no hay botón ni llamada a Mercado Libre. El nombre se compara
+// sin mayúsculas ni acentos.
+export const CAMPANA_ENFRIAMIENTO = "ENFRIAMIENTO";
+export const CAMPANA_ANTARTIDA = "ANTÁRTIDA";
 
 // La URL del panel de Product Ads no está en el repo. No se inventa:
 // queda pendiente de confirmar con Mateo. Mientras sea null, la pantalla
