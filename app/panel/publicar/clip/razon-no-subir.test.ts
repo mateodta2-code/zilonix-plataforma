@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  advertenciaNoPuedeSubirClip,
   MENSAJE_CODEC_NO_LEGIBLE_CLIP,
   MENSAJE_LEYENDO_VIDEO_CLIP,
   MENSAJE_SIN_CUENTAS_CLIP,
@@ -34,13 +35,26 @@ describe("razonesNoPuedeSubirClip — Alcance B, caso real: botón apagado sin a
     expect(razonesNoPuedeSubirClip({ ...BASE, metadatos: null })).toEqual([MENSAJE_LEYENDO_VIDEO_CLIP]);
   });
 
-  it("caso real de la captura: códec que el navegador no puede leer -> mensaje H.264/AAC, incluso sin metadatos", () => {
-    expect(razonesNoPuedeSubirClip({ ...BASE, metadatos: null, errorCodec: true })).toEqual([MENSAJE_CODEC_NO_LEGIBLE_CLIP]);
+  it("caso real de staging (MP4 de Débora, 11MB): códec ilegible ya NO bloquea — sin metadatos, se puede subir igual", () => {
+    expect(razonesNoPuedeSubirClip({ ...BASE, metadatos: null, errorCodec: true })).toEqual([]);
   });
 
-  it("errorCodec gana sobre 'leyendo' incluso si después iba a resolver", () => {
-    const r = razonesNoPuedeSubirClip({ ...BASE, errorCodec: true });
-    expect(r).toEqual([MENSAJE_CODEC_NO_LEGIBLE_CLIP]);
+  it("códec ilegible sin ninguna cuenta marcada -> sigue bloqueando por falta de cuenta, no por el códec", () => {
+    const r = razonesNoPuedeSubirClip({ ...BASE, metadatos: null, errorCodec: true, hayCuentaMarcada: false });
+    expect(r).toEqual([MENSAJE_SIN_CUENTAS_CLIP]);
+  });
+
+  it("códec ilegible + 281MB: el tamaño SIGUE bloqueando (no depende de leer metadatos)", () => {
+    const tamano = 280 * 1024 * 1024 + 1;
+    const r = razonesNoPuedeSubirClip({ ...BASE, metadatos: null, errorCodec: true, tamanoBytes: tamano });
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatch(/281 MB/);
+  });
+
+  it("advertenciaNoPuedeSubirClip: aviso informativo solo cuando hay error de códec y nunca llegaron metadatos", () => {
+    expect(advertenciaNoPuedeSubirClip({ errorCodec: true, metadatos: null })).toBe(MENSAJE_CODEC_NO_LEGIBLE_CLIP);
+    expect(advertenciaNoPuedeSubirClip({ errorCodec: false, metadatos: null })).toBeNull();
+    expect(advertenciaNoPuedeSubirClip({ errorCodec: true, metadatos: BASE.metadatos })).toBeNull();
   });
 
   it("video de más de 280MB, SIN esperar metadatos: avisa con el tamaño real en MB", () => {
@@ -67,6 +81,12 @@ describe("razonesNoPuedeSubirClip — Alcance B, caso real: botón apagado sin a
     expect(r).toHaveLength(1);
     expect(r[0]).toMatch(/5 s/);
     expect(r[0]).toMatch(/10 y 61/);
+  });
+
+  it("metadatos SÍ se leyeron (5s de duración): sigue bloqueando aunque errorCodec quedara en true antes de resolver", () => {
+    const r = razonesNoPuedeSubirClip({ ...BASE, errorCodec: true, metadatos: { ...BASE.metadatos!, duracionSegundos: 5 } });
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatch(/5 s/);
   });
 
   it("no vertical con metadatos: valor real (AxB) + requisito", () => {
