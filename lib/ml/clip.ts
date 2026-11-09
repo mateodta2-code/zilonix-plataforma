@@ -186,7 +186,7 @@ export async function subirClipItemDesdeArchivo(token: string, itemId: string, r
     // status === 0 = tiempo agotado o falla de red subiendo el video —
     // textoCrudo queda vacío, nunca un HTTP real que mostrar.
     if (status === 0) {
-      throw new ClipSinRespuestaError("Mercado Libre no respondió a tiempo subiendo el video; revisá en Mercado Libre si el clip se subió antes de reintentar.");
+      throw new ClipSinRespuestaError("Mercado Libre no respondió a tiempo subiendo el video; revisa en Mercado Libre si el clip se subió antes de reintentar.");
     }
     throw new ClipRechazadoError(`Mercado Libre rechazó el video (HTTP ${status}): ${textoCrudo.slice(0, 800)}`);
   }

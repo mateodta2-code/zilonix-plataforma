@@ -37,3 +37,11 @@ export type TrabajoClipCliente = {
 };
 
 export type ClipMlCliente = { clipUuid: string | null; moderationStatus: string | null; motivoRechazo: string | null };
+
+// Rama mateo/clip-estado-automatico — espejo de FilaEstadoClip
+// (app/api/ml/clip/estado/route.ts). `limiteMl`/`retryAfterMs` nuevos:
+// distinguen un 429 real de Mercado Libre de "todavía no hay clips"
+// (clips:null también pasa en ese caso, antes de esta rama) — el
+// polling automático de SeccionClip.tsx los necesita para esperar en
+// vez de insistir a ciegas.
+export type FilaEstadoClipCliente = { cuentaId: string; itemId: string; clips: ClipMlCliente[] | null; limiteMl?: boolean; retryAfterMs?: number | null };
