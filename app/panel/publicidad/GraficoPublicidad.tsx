@@ -5,7 +5,7 @@ import type { KpiPintado, PuntoGrafico } from "./vista";
 import styles from "./page.module.css";
 
 const INICIAL = ["ventasAtribuidas", "roas"];
-const LINEA = new Set(["roas", "acos", "tacos"]);
+const LINEA = new Set(["roas", "acos", "tacos", "cpc"]);
 
 const CAMPO: Record<string, keyof PuntoGrafico> = {
   ventasAtribuidas: "ventasAtribuidas",
@@ -15,6 +15,10 @@ const CAMPO: Record<string, keyof PuntoGrafico> = {
   roas: "roas",
   acos: "acos",
   tacos: "tacos",
+  cpc: "cpc",
+  clics: "clics",
+  impresiones: "impresiones",
+  unidades: "unidades",
 };
 
 const COLOR: Record<string, string> = {
@@ -25,6 +29,10 @@ const COLOR: Record<string, string> = {
   roas: "var(--exito)",
   acos: "var(--peligro)",
   tacos: "var(--plata-oscuro)",
+  cpc: "var(--plata-oscuro)",
+  clics: "var(--acento)",
+  impresiones: "var(--plata)",
+  unidades: "var(--acento-fuerte)",
 };
 
 export function PanelMetricas({
@@ -68,11 +76,19 @@ export function PanelMetricas({
             >
               <span className={styles.metricaTitulo}>{kpi.titulo}</span>
               <span className={styles.metricaValor}>{kpi.valor}</span>
-              {comparar && kpi.delta ? (
-                <span className={styles.delta} data-tono={tonoDelta(kpi.delta.mejor)} title={kpi.variacion.texto}>
-                  {kpi.delta.texto}
+              {comparar ? (
+                <span
+                  className={styles.variacionMetrica}
+                  data-positiva={kpi.variacion.mejor === null ? undefined : kpi.variacion.mejor ? "true" : "false"}
+                >
+                  {kpi.variacion.texto}
                 </span>
               ) : null}
+              {kpi.detalle.map((linea) => (
+                <span key={linea} className={styles.metricaDetalle}>
+                  {linea}
+                </span>
+              ))}
             </button>
           );
         })}
@@ -86,11 +102,6 @@ export function PanelMetricas({
       </p>
     </div>
   );
-}
-
-function tonoDelta(mejor: boolean | null): "mejor" | "peor" | "neutro" {
-  if (mejor === null) return "neutro";
-  return mejor ? "mejor" : "peor";
 }
 
 function valorDe(punto: PuntoGrafico, clave: string): number | null {

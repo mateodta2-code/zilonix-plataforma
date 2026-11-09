@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CampanaCalculada } from "@/lib/publicidad/consultas";
-import { NOTA_VENTAS_ORGANICAS, NOTA_VENTAS_TOTALES } from "@/lib/publicidad/rotulos";
+import { NOTA_TACOS_PROMOCIONADAS, NOTA_UNIDADES, NOTA_VENTAS_ORGANICAS, NOTA_VENTAS_TOTALES } from "@/lib/publicidad/rotulos";
 
 // vista.ts importa consultas, y consultas importa la conexión. El
 // cliente no abre el socket hasta la primera consulta; esta URL no se
@@ -23,8 +23,22 @@ const vacio = {
 };
 
 describe("textos del tablero de publicidad (issue #255)", () => {
-  it("ventas totales describe la suma, y ventas sin publicidad es una tarjeta", async () => {
+  it("cada métrica sale una sola vez, con su nota y el sentido de la comparación", async () => {
     const { kpisDelResumen } = await import("./vista");
+    const anterior = {
+      ...vacio,
+      gasto: "10.00",
+      ventasPublicidad: "20.00",
+      ventasOrganicas: "10.00",
+      ventasTotales: "30.00",
+      clicks: "2",
+      impresiones: "8",
+      cpc: "5.00",
+      roas: "2.00",
+      acos: "0.1000",
+      tacos: "0.1000",
+      unidadesVendidas: "1",
+    };
     const kpis = kpisDelResumen({
       resumen: {
         actual: {
@@ -39,16 +53,41 @@ describe("textos del tablero de publicidad (issue #255)", () => {
           roas: "3.83",
           acos: "0.2612",
           tacos: "0.1888",
+          unidadesVendidas: "3",
         },
-        anterior: vacio,
+        anterior,
       },
     });
     const porClave = Object.fromEntries(kpis.map((kpi) => [kpi.clave, kpi]));
+    expect(kpis.map((kpi) => kpi.titulo)).toEqual([
+      "Ventas atribuidas",
+      "Otras ventas",
+      "ROAS",
+      "Ingresos",
+      "Inversión",
+      "ACOS",
+      "TACOS",
+      "CPC promedio",
+      "Clics",
+      "Impresiones",
+      "Unidades vendidas",
+    ]);
+    expect(new Set(kpis.map((kpi) => kpi.titulo)).size).toBe(kpis.length);
     expect(porClave.ingresos.detalle).toEqual([NOTA_VENTAS_TOTALES]);
     expect(porClave.otrasVentas.detalle).toEqual([NOTA_VENTAS_ORGANICAS]);
-    expect(porClave.otrasVentas.titulo).toBe("Otras ventas");
-    expect(porClave.ventasAtribuidas.titulo).toBe("Ventas atribuidas");
+    expect(porClave.tacos.detalle).toEqual([NOTA_TACOS_PROMOCIONADAS]);
+    expect(porClave.unidades.detalle).toEqual([NOTA_UNIDADES]);
+    expect(porClave.ventasPublicidad).toBeUndefined();
+    expect(porClave.ventasTotales).toBeUndefined();
+    expect(porClave.ventasSinPublicidad).toBeUndefined();
     expect(porClave.otrasVentas.valor).toContain("15");
+    expect(porClave.inversion.variacion.texto).toMatch(/^Sube .+ \(mejor\)$/);
+    expect(porClave.inversion.variacion.mejor).toBe(true);
+    expect(porClave.acos.variacion.texto).toMatch(/^Sube .+ \(peor\)$/);
+    expect(porClave.acos.variacion.mejor).toBe(false);
+    expect(porClave.tacos.variacion.mejor).toBe(false);
+    expect(porClave.cpc.variacion.texto).toMatch(/^Baja .+ \(mejor\)$/);
+    expect(porClave.cpc.variacion.mejor).toBe(true);
     expect(NOTA_VENTAS_TOTALES).toMatch(/clic más las que no/);
     expect(NOTA_VENTAS_TOTALES).not.toMatch(/no vinieron de un clic/);
   });

@@ -20,6 +20,7 @@ import { mostrarDineroCompacto, mostrarEntero, mostrarFraccion, mostrarRoas, tex
 import {
   detalleDiagnostico,
   NOTA_TACOS_PROMOCIONADAS,
+  NOTA_UNIDADES,
   NOTA_VENTAS_ORGANICAS,
   NOTA_VENTAS_TOTALES,
   ROTULO_KPI,
@@ -119,6 +120,10 @@ export type PuntoGrafico = {
   roas: number | null;
   acos: number | null;
   tacos: number | null;
+  cpc: number | null;
+  clics: number | null;
+  impresiones: number | null;
+  unidades: number | null;
 };
 
 function textoPresupuesto(campana: CampanaCalculada, diasRango: number): Pick<CampanaPintada, "presupuesto" | "presupuestoUsado" | "presupuestoAvance"> {
@@ -258,21 +263,25 @@ function tarjeta(
   return { clave, titulo, valor, detalle, variacion: linea(actual, anterior, campo), delta: deltaDe(actual, anterior, campo) };
 }
 
-// Ventas atribuidas y Otras ventas son plata, para poder apilarlas.
-// Ingresos es la suma de las dos (publicaciones promocionadas). Si
-// falta una pata, Ingresos queda en —: no se inventa un cero.
-// "Ventas sin publicidad" es el mismo número que Otras ventas, así que
-// no se repite como tarjeta.
+// Una tarjeta por métrica. Ventas atribuidas es el dinero que antes
+// se llamaba "Ventas con publicidad". Otras ventas es "Ventas sin
+// publicidad". Ingresos es la suma de las dos (antes "Ventas totales"):
+// si falta una pata queda en —, y la nota de ventas totales va en esa
+// tarjeta. No se repiten con otro título.
 export function kpisDelResumen(tablero: Pick<TableroPublicidad, "resumen">, siteId = "MCO"): KpiPintado[] {
   const { actual, anterior } = tablero.resumen;
   return [
-    tarjeta("ventasAtribuidas", "Ventas atribuidas", plataTarjeta(actual.ventasPublicidad, siteId), ["Dinero de las ventas atribuidas al anuncio."], actual, anterior, "ventasPublicidad"),
+    tarjeta("ventasAtribuidas", "Ventas atribuidas", plataTarjeta(actual.ventasPublicidad, siteId), [], actual, anterior, "ventasPublicidad"),
     tarjeta("otrasVentas", "Otras ventas", plataTarjeta(actual.ventasOrganicas, siteId), [NOTA_VENTAS_ORGANICAS], actual, anterior, "ventasOrganicas"),
     tarjeta("roas", ROTULO_KPI.roas, mostrarRoas(actual.roas), [], actual, anterior, "roas"),
     tarjeta("ingresos", "Ingresos", plataTarjeta(actual.ventasTotales, siteId), [NOTA_VENTAS_TOTALES], actual, anterior, "ventasTotales"),
     tarjeta("inversion", ROTULO_KPI.inversion, plataTarjeta(actual.gasto, siteId), [], actual, anterior, "gasto"),
     tarjeta("acos", ROTULO_KPI.acos, mostrarFraccion(actual.acos), [], actual, anterior, "acos"),
     tarjeta("tacos", ROTULO_KPI.tacos, mostrarFraccion(actual.tacos), [NOTA_TACOS_PROMOCIONADAS], actual, anterior, "tacos"),
+    tarjeta("cpc", ROTULO_KPI.cpc, plataTarjeta(actual.cpc, siteId), [], actual, anterior, "cpc"),
+    tarjeta("clics", ROTULO_KPI.clics, mostrarEntero(actual.clicks), [], actual, anterior, "clicks"),
+    tarjeta("impresiones", ROTULO_KPI.impresiones, mostrarEntero(actual.impresiones), [], actual, anterior, "impresiones"),
+    tarjeta("unidades", ROTULO_KPI.unidades, mostrarEntero(actual.unidadesVendidas), [NOTA_UNIDADES], actual, anterior, "unidadesVendidas"),
   ];
 }
 
@@ -301,5 +310,9 @@ export function serieParaGrafico(puntos: readonly PuntoDiario[]): PuntoGrafico[]
     roas: aNumero(punto.roas),
     acos: aNumero(punto.acos) === null ? null : aNumero(punto.acos)! * 100,
     tacos: aNumero(punto.tacos) === null ? null : aNumero(punto.tacos)! * 100,
+    cpc: aNumero(punto.cpc),
+    clics: aNumero(punto.clics),
+    impresiones: aNumero(punto.impresiones),
+    unidades: aNumero(punto.unidades),
   }));
 }

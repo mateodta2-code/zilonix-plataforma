@@ -455,6 +455,7 @@ export type PuntoDiario = {
   roas: string | null;
   acos: string | null;
   tacos: string | null;
+  cpc: string | null;
   clics: string | null;
   impresiones: string | null;
   unidades: string | null;
@@ -478,6 +479,7 @@ export function armarSerieDiaria(desde: string, hasta: string, filas: readonly (
       roas: totales.roas,
       acos: totales.acos,
       tacos: totales.tacos,
+      cpc: totales.cpc,
       clics: totales.clicks,
       impresiones: totales.impresiones,
       unidades: totales.unidadesVendidas,
