@@ -1,7 +1,7 @@
 import { openAsBlob } from "fs";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { buscarItemsPorSkuMl, leerItemBasicoMl, leerItemCompletoMl, subirClipMl } from "@/lib/ml/cliente";
-import { clipRequiereReputacion } from "@/lib/ml/publicar-reglas";
+import { clipRequierePermisoDeApp } from "@/lib/ml/publicar-reglas";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 
 // Tarea 2.11 ("Publicar producto y clip") — el clip es un SUB-FLUJO
@@ -133,7 +133,20 @@ export type ResultadoClip = { status: string; clipUuid: string | null; siteIds: 
 // el mensaje completo (hasta 800 caracteres del cuerpo real de ML, ver
 // más abajo) sigue existiendo para el log del servidor, nunca para la
 // URL.
-export class ClipReputacionRequeridaError extends Error {}
+// Caso real (Mateo, 9/11, STOREKINGSAS — Mercado Líder Gold): este
+// 403 NUNCA es reputación — ver el comentario de
+// clipRequierePermisoDeApp (lib/ml/publicar-reglas.ts). `detalle`
+// guarda el HTTP + cuerpo crudo de Mercado Libre (hasta 800
+// caracteres) para un desplegable "Ver detalle" en la UI — nunca
+// mezclado con el mensaje principal, que tiene que quedar corto y
+// accionable.
+export class ClipPermisoDeAppRequeridoError extends Error {
+  constructor(public readonly detalle: string) {
+    super(
+      "Mercado Libre rechazó el permiso de la aplicación para subir Clips en esta cuenta (403). Hay que revisar el permiso de Clips de la app en el DevCenter de Mercado Libre y volver a conectar la cuenta."
+    );
+  }
+}
 export class ClipSinRespuestaError extends Error {}
 export class ClipRechazadoError extends Error {}
 
@@ -174,14 +187,13 @@ export async function subirClipItemDesdeArchivo(token: string, itemId: string, r
 
   const { ok, status, textoCrudo } = await subirClipMl(itemId, token, form);
   if (!ok) {
-    // BUG real (Mateo, 28/9, comercio FullyLemon): una cuenta recién
-    // conectada sin ventas todavía no tiene "color de reputación"
-    // asignado, y Mercado Libre bloquea Clips para esa cuenta sin
-    // importar el token. No es cuestión de reintentar.
-    if (clipRequiereReputacion(textoCrudo)) {
-      throw new ClipReputacionRequeridaError(
-        "Mercado Libre no deja subir Clips en esta cuenta todavía — necesita tener un color de reputación asignado (se gana con ventas reales), y una cuenta recién conectada sin historial de ventas no lo tiene. No es un error nuestro; hay que esperar a que la cuenta tenga reputación."
-      );
+    // BUG real, corregido 9/11 (Mateo, STOREKINGSAS — Mercado Líder
+    // Gold): este código NUNCA es "sin reputación" — significa que la
+    // APLICACIÓN no tiene el permiso de Clips habilitado para esta
+    // cuenta (DevCenter), no que a la cuenta le falte historial de
+    // ventas. Reintentar el token no cambia nada acá.
+    if (clipRequierePermisoDeApp(textoCrudo)) {
+      throw new ClipPermisoDeAppRequeridoError(`HTTP ${status}: ${textoCrudo.slice(0, 800)}`);
     }
     // status === 0 = tiempo agotado o falla de red subiendo el video —
     // textoCrudo queda vacío, nunca un HTTP real que mostrar.

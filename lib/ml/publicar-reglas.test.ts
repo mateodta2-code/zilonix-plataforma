@@ -4,7 +4,7 @@ import {
   aplicarReglaSaleFormat,
   aplicarRespaldoDimensionesProducto,
   canonicalizarValorListaCerrada,
-  clipRequiereReputacion,
+  clipRequierePermisoDeApp,
   conUnidadSiHaceFalta,
   decidirAtributoGtin,
   detectarGeneroPorTitulo,
@@ -246,7 +246,8 @@ describe("detección de errores reales por regex sobre la respuesta cruda de Mer
   it("item bajo revisión, no se puede pausar/activar (Mateo 25/9)", () => {
     expect(itemNoModificablePorRevision("item.status.not_modifiable")).toBe(true);
   });
-  it("clip exige reputación (Mateo, 28/9, FullyLemon)", () => {
-    expect(clipRequiereReputacion("PA_UNAUTHORIZED_RESULT_FROM_POLICIES")).toBe(true);
+  it("clip rechazado por falta de permiso de la app (Mateo, 28/9 FullyLemon y 9/11 STOREKINGSAS Gold) — nunca es reputación", () => {
+    expect(clipRequierePermisoDeApp("PA_UNAUTHORIZED_RESULT_FROM_POLICIES")).toBe(true);
+    expect(clipRequierePermisoDeApp("otro error cualquiera")).toBe(false);
   });
 });
