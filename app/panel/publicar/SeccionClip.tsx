@@ -10,7 +10,7 @@ import { msDeReintento429 } from "@/lib/ml/reintento-429";
 import { etiquetaModeracionClip, INTERVALO_ESPACIADO_MODERACION_MS, proximoIntervaloModeracionMs, sigueConsultandoModeracion } from "./clip/estado-moderacion";
 import { leerMetadatosDeVideoElement } from "./clip/leerMetadatosVideo";
 import { mensajeErrorClip } from "./clip/mensajes-error";
-import { MENSAJE_LEYENDO_VIDEO_CLIP, razonesNoPuedeSubirClip } from "./clip/razon-no-subir";
+import { advertenciaNoPuedeSubirClip, MENSAJE_LEYENDO_VIDEO_CLIP, razonesNoPuedeSubirClip } from "./clip/razon-no-subir";
 import { urlDeMensajeExtensionVideo } from "./clip/recibir-mensaje-extension";
 import type { ClipMlCliente, EstadoCuentaClipCliente, FilaBusquedaClipCliente, FilaEstadoClipCliente, TrabajoClipCliente } from "./clip/tipos-cliente";
 import { formatoTamanoClip } from "./clip/validacion-video-cliente";
@@ -70,11 +70,13 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
   const previewUrlRef = useRef<string | null>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [metadatos, setMetadatos] = useState<{ duracionSegundos: number; ancho: number; alto: number } | null>(null);
-  // Alcance B — el navegador no pudo decodificar este video (onError
-  // del <video>, o pasó el timeout sin loadedmetadata). Antes de esta
-  // rama, ese caso dejaba metadatos en null PARA SIEMPRE: el botón
-  // quedaba apagado sin ningún aviso (causa real confirmada del caso de
-  // la captura — probable códec HEVC/H.265, que Chrome no decodifica).
+  // El navegador no pudo decodificar este video (onError del <video>,
+  // o pasó el timeout sin loadedmetadata) — metadatos queda en null
+  // PARA SIEMPRE en ese caso. Caso real (staging, cuenta de Débora): un
+  // MP4 de 11MB que Mercado Libre SÍ acepta pero Chrome no decodifica
+  // (códec ilegible) — esto ya NO bloquea subir (era un fallo nuestro,
+  // no de Mercado Libre); solo dispara un aviso informativo, ver
+  // advertenciaNoPuedeSubirClip.
   const [errorCodec, setErrorCodec] = useState(false);
   const metadatosRef = useRef(metadatos);
   useEffect(() => {
@@ -242,7 +244,11 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
     hayCuentaMarcada: filasElegidas.length > 0,
     subiendo,
   });
-  const puedeSubir = !subiendo && Boolean(video) && metadatos !== null && !errorCodec && filasElegidas.length > 0 && razonesNoPuedeSubir.length === 0;
+  // metadatos !== null || errorCodec: un códec ilegible nunca va a
+  // disparar loadedmetadata — no esperarlo para siempre (ver
+  // razonesNoPuedeSubirClip, que ya deja de bloquear en ese caso).
+  const puedeSubir = !subiendo && Boolean(video) && (metadatos !== null || errorCodec) && filasElegidas.length > 0 && razonesNoPuedeSubir.length === 0;
+  const advertenciaCodec = advertenciaNoPuedeSubirClip({ errorCodec, metadatos: metadatosCompletos });
 
   async function subir() {
     if (!video) return;
@@ -494,6 +500,8 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
       {!subiendo && razonesNoPuedeSubir[0] === MENSAJE_LEYENDO_VIDEO_CLIP && (
         <p style={{ marginTop: 8, fontSize: 13, color: "var(--texto-suave)" }}>{MENSAJE_LEYENDO_VIDEO_CLIP}</p>
       )}
+      {/* Aviso informativo, nunca bloqueante — ver advertenciaNoPuedeSubirClip */}
+      {!subiendo && advertenciaCodec && <p style={{ marginTop: 8, fontSize: 13, color: "var(--texto-suave)" }}>{advertenciaCodec}</p>}
 
       {/* --- SKU y cuentas (punto 3) --- */}
       <div style={{ marginTop: 20, display: "flex", gap: 8, alignItems: "flex-end" }}>
