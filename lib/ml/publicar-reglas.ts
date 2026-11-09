@@ -314,6 +314,16 @@ export function itemNoModificablePorRevision(textoRespuesta: string): boolean {
   return /item\.status\.not_modifiable/i.test(textoRespuesta);
 }
 
-export function clipRequiereReputacion(textoRespuesta: string): boolean {
+// Diagnóstico real (Mateo, caso STOREKINGSAS — Mercado Líder Gold):
+// este código SIEMPRE significa que la APLICACIÓN no tiene el permiso
+// funcional para este recurso habilitado en el DevCenter de Mercado
+// Libre, nunca que la cuenta/vendedor le falte reputación. El nombre
+// anterior de esta función (`clipRequiereReputacion`) y el mensaje que
+// armaba lib/ml/clip.ts con ella eran una interpretación nuestra,
+// nunca confirmada contra la documentación — la cuenta real de la
+// prueba (28/9, FullyLemon) pudo coincidir por casualidad con una
+// cuenta recién conectada, pero el código del error nunca distingue
+// eso.
+export function clipRequierePermisoDeApp(textoRespuesta: string): boolean {
   return /PA_UNAUTHORIZED_RESULT_FROM_POLICIES/.test(textoRespuesta);
 }

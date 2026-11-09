@@ -624,7 +624,16 @@ export function SeccionClip({ cuentas }: { cuentas: Cuenta[] }) {
                   <CeldaTabla>
                     <Chip estado={chip.estado}>{chip.texto}</Chip>
                   </CeldaTabla>
-                  <CeldaTabla>{c.error ?? "—"}</CeldaTabla>
+                  <CeldaTabla>
+                    {c.error ?? "—"}
+                    {/* Caso real STOREKINGSAS — detalle técnico de Mercado Libre, nunca mezclado con el mensaje principal */}
+                    {c.detalle && (
+                      <details style={{ marginTop: 4 }}>
+                        <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--texto-suave)" }}>Ver detalle</summary>
+                        <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 4, wordBreak: "break-word" }}>{c.detalle}</p>
+                      </details>
+                    )}
+                  </CeldaTabla>
                 </FilaTabla>
               );
             })}

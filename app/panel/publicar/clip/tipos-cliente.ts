@@ -25,6 +25,10 @@ export type ProgresoCuentaClipCliente = {
   itemId: string;
   estado: EstadoCuentaClipCliente;
   error: string | null;
+  // Caso real (STOREKINGSAS) — detalle técnico (HTTP + cuerpo crudo de
+  // Mercado Libre) para un desplegable "Ver detalle", separado del
+  // mensaje principal. null salvo el error de permiso de app rechazado.
+  detalle: string | null;
   clipUuid: string | null;
 };
 

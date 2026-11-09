@@ -10,6 +10,7 @@ import {
   buscarItemPorSku,
   buscarSkuEnTodasLasCuentas,
   ClipInvalidoError,
+  ClipPermisoDeAppRequeridoError,
   MENSAJES_PROBLEMA_VIDEO_CLIP,
   problemasDeVideoClip,
   subirClipItemDesdeArchivo,
@@ -207,10 +208,16 @@ describe("subirClipItemDesdeArchivo (rama feat-publicar-clip) — mismo endpoint
     expect(r.clipUuid).toBe("abc-123");
   });
 
-  it("avisa claro cuando la cuenta no tiene reputación todavía (Mateo, 28/9, FullyLemon)", async () => {
+  it("403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES -> permiso de la app rechazado, NUNCA 'reputación' (caso real: STOREKINGSAS es Mercado Líder Gold)", async () => {
     const ruta = archivoDePrueba();
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 403, text: async () => "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" }) as Response));
-    await expect(subirClipItemDesdeArchivo("token", "MCO111", ruta, "clip.mp4", "video/mp4")).rejects.toThrow(/color de reputación/);
+    const promesa = subirClipItemDesdeArchivo("token", "MCO111", ruta, "clip.mp4", "video/mp4");
+    await expect(promesa).rejects.toThrow(/permiso de la aplicación/);
+    await expect(promesa).rejects.not.toThrow(/reputación/);
+    const error = await promesa.catch((e) => e);
+    expect(error).toBeInstanceOf(ClipPermisoDeAppRequeridoError);
+    expect(error.detalle).toContain("403");
+    expect(error.detalle).toContain("PA_UNAUTHORIZED_RESULT_FROM_POLICIES");
   });
 
   // Tarea 2.11, punto 3 — itemId viene de formData/JSON (app/api/ml/clip/
