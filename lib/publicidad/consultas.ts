@@ -9,6 +9,7 @@ import {
   publicidadAnunciantes,
   publicidadAnuncios,
   publicidadCampanas,
+  publicaciones,
   publicidadCostosItem,
   publicidadMetricasDiarias,
   publicidadSincronizaciones,
@@ -16,9 +17,12 @@ import {
 import { PREFIJO_CORTE_TIEMPO } from "@/lib/publicidad/actualizacion";
 import { obtenerConfigPublicidad, type ConfigPublicidad } from "@/lib/publicidad/config";
 import { linkPublicacion } from "@/lib/ml/cliente";
+import { type FiltroCampanas } from "@/lib/publicidad/params";
 import { diasEntreInclusive } from "@/lib/publicidad/plan";
 import {
+  armarSerieDiaria,
   compararOrden,
+  sumarMontos,
   diagnosticarCampana,
   semaforoAnuncio,
   totalesDeDias,
@@ -27,6 +31,7 @@ import {
   type DireccionOrden,
   type FilaOrdenable,
   type Periodo,
+  type PuntoDiario,
   type TotalesRango,
   type Diagnostico,
   type Semaforo,
@@ -51,6 +56,9 @@ export type AnuncioCalculado = {
   titulo: string | null;
   href: string | null;
   precio: string | null;
+  estado: string | null;
+  // null = esta empresa no tiene la publicación importada, no se afirma stock.
+  sinStock: boolean | null;
   totales: TotalesRango;
   semaforo: Semaforo;
 };
@@ -65,6 +73,7 @@ export type CampanaCalculada = FilaOrdenable & {
   diasAprendizaje: number;
   diagnostico: Diagnostico;
   totales: TotalesRango;
+  totalesAnterior: TotalesRango;
   anuncios: AnuncioCalculado[];
 };
 
@@ -79,6 +88,8 @@ export type TableroPublicidad = {
   cantidadActivas: number;
   cantidadPausadas: number;
   diasRango: number;
+  serieDiaria: PuntoDiario[];
+  presupuestoDiarioTotal: string | null;
 };
 
 type FilaSuma = {
@@ -89,6 +100,7 @@ type FilaSuma = {
   ventasOrganicasMonto: string | null;
   clicks: string | null;
   impresiones: string | null;
+  ventasCantidad: string | null;
   unidadesTotal: string | null;
   unidadesDirectas: string | null;
   unidadesIndirectas: string | null;
@@ -101,6 +113,7 @@ function diaDeSuma(fila: FilaSuma | undefined): DiaMetrica {
     ventasOrganicasMonto: fila?.ventasOrganicasMonto ?? null,
     clicks: fila?.clicks ?? null,
     impresiones: fila?.impresiones ?? null,
+    ventasCantidad: fila?.ventasCantidad ?? null,
     unidadesTotal: fila?.unidadesTotal ?? null,
     unidadesDirectas: fila?.unidadesDirectas ?? null,
     unidadesIndirectas: fila?.unidadesIndirectas ?? null,
@@ -138,7 +151,8 @@ export async function consultarTableroPublicidad(
   cuentaMlId: string,
   periodo: Periodo,
   opciones: {
-    incluirPausadas: boolean;
+    incluirPausadas?: boolean;
+    filtro?: FiltroCampanas;
     orden: ColumnaOrden;
     dir: DireccionOrden;
     ahora: Date;
@@ -146,6 +160,7 @@ export async function consultarTableroPublicidad(
   }
 ): Promise<TableroPublicidad> {
   const config = opciones.config ?? obtenerConfigPublicidad(empresaId);
+  const filtro: FiltroCampanas = opciones.filtro ?? (opciones.incluirPausadas ? "todas" : "activas");
   return dbComoEmpresa(empresaId, async (tx) => {
     const filtroCuenta = (empresa: typeof publicidadCampanas.empresaId, cuenta: typeof publicidadCampanas.cuentaMlId) =>
       and(eq(empresa, empresaId), eq(cuenta, cuentaMlId));
@@ -221,6 +236,7 @@ export async function consultarTableroPublicidad(
         titulo: publicidadAnuncios.titulo,
         permalink: publicidadAnuncios.permalink,
         precio: publicidadAnuncios.precio,
+        estado: publicidadAnuncios.estado,
       })
       .from(publicidadAnuncios)
       .where(and(eq(publicidadAnuncios.empresaId, empresaId), eq(publicidadAnuncios.cuentaMlId, cuentaMlId)));
@@ -252,6 +268,7 @@ export async function consultarTableroPublicidad(
           ventasOrganicasMonto: sum(publicidadMetricasDiarias.ventasOrganicasMonto),
           clicks: sum(publicidadMetricasDiarias.clicks),
           impresiones: sum(publicidadMetricasDiarias.impresiones),
+          ventasCantidad: sum(publicidadMetricasDiarias.ventasPublicidad),
           unidadesTotal: sum(publicidadMetricasDiarias.unidadesTotal),
           unidadesDirectas: sum(publicidadMetricasDiarias.unidadesDirectas),
           unidadesIndirectas: sum(publicidadMetricasDiarias.unidadesIndirectas),
@@ -279,6 +296,7 @@ export async function consultarTableroPublicidad(
           ventasOrganicasMonto: sum(publicidadMetricasDiarias.ventasOrganicasMonto),
           clicks: sum(publicidadMetricasDiarias.clicks),
           impresiones: sum(publicidadMetricasDiarias.impresiones),
+          ventasCantidad: sum(publicidadMetricasDiarias.ventasPublicidad),
           unidadesTotal: sum(publicidadMetricasDiarias.unidadesTotal),
           unidadesDirectas: sum(publicidadMetricasDiarias.unidadesDirectas),
           unidadesIndirectas: sum(publicidadMetricasDiarias.unidadesIndirectas),
@@ -302,6 +320,7 @@ export async function consultarTableroPublicidad(
           ventasOrganicasMonto: fila?.ventasOrganicasMonto ?? null,
           clicks: fila?.clicks ?? null,
           impresiones: fila?.impresiones ?? null,
+          ventasCantidad: fila?.ventasCantidad ?? null,
           unidadesTotal: fila?.unidadesTotal ?? null,
           unidadesDirectas: fila?.unidadesDirectas ?? null,
           unidadesIndirectas: fila?.unidadesIndirectas ?? null,
@@ -312,21 +331,57 @@ export async function consultarTableroPublicidad(
     // En serie: es la misma transacción y la misma conexión. En paralelo
     // postgres.js puede mezclar las respuestas.
     const metricasCampana = await sumar("campana", periodo.desde, periodo.hasta);
+    const metricasPrevias = await sumar("campana", periodo.comparacionDesde, periodo.comparacionHasta);
     const metricasAnuncio = await sumar("anuncio", periodo.desde, periodo.hasta);
     const resumenActual = await sumarCuenta(periodo.desde, periodo.hasta);
     const resumenAnterior = await sumarCuenta(periodo.comparacionDesde, periodo.comparacionHasta);
+    const filasDia = await tx
+      .select({
+        fecha: publicidadMetricasDiarias.fecha,
+        costo: sum(publicidadMetricasDiarias.costo),
+        montoTotal: sum(publicidadMetricasDiarias.montoTotal),
+        ventasOrganicasMonto: sum(publicidadMetricasDiarias.ventasOrganicasMonto),
+        clicks: sum(publicidadMetricasDiarias.clicks),
+        impresiones: sum(publicidadMetricasDiarias.impresiones),
+        ventasCantidad: sum(publicidadMetricasDiarias.ventasPublicidad),
+        unidadesTotal: sum(publicidadMetricasDiarias.unidadesTotal),
+        unidadesDirectas: sum(publicidadMetricasDiarias.unidadesDirectas),
+        unidadesIndirectas: sum(publicidadMetricasDiarias.unidadesIndirectas),
+      })
+      .from(publicidadMetricasDiarias)
+      .where(
+        and(
+          eq(publicidadMetricasDiarias.empresaId, empresaId),
+          eq(publicidadMetricasDiarias.cuentaMlId, cuentaMlId),
+          eq(publicidadMetricasDiarias.nivel, "campana"),
+          gte(publicidadMetricasDiarias.fecha, periodo.desde),
+          lte(publicidadMetricasDiarias.fecha, periodo.hasta)
+        )
+      )
+      .groupBy(publicidadMetricasDiarias.fecha);
+    const stockPorItem = new Map(
+      (
+        await tx
+          .select({ item: publicaciones.publicacionIdExterno, stock: publicaciones.stock })
+          .from(publicaciones)
+          .where(and(eq(publicaciones.empresaId, empresaId), eq(publicaciones.cuentaMlId, cuentaMlId)))
+      ).map((fila) => [fila.item, fila.stock])
+    );
 
     const porCampana = new Map(metricasCampana.map((fila) => [fila.entidadIdMl, fila]));
+    const porPrevia = new Map(metricasPrevias.map((fila) => [fila.entidadIdMl, fila]));
     const porAnuncio = new Map(metricasAnuncio.map((fila) => [claveAnuncio(fila.entidadIdMl, fila.adGroupId), fila]));
     const precioPorItem = new Map(precios.map((fila) => [fila.itemId, fila.precio]));
 
     const calculadas: CampanaCalculada[] = campanas.map((campana) => {
       const totales = totalesDeDias([diaDeSuma(porCampana.get(campana.campanaIdMl))]);
+      const totalesAnterior = totalesDeDias([diaDeSuma(porPrevia.get(campana.campanaIdMl))]);
       const anunciosDeLaCampana = anuncios
         .filter((anuncio) => anuncio.campanaIdMl === campana.campanaIdMl)
         .map((anuncio): AnuncioCalculado => {
           const totalesAnuncio = totalesDeDias([diaDeSuma(porAnuncio.get(claveAnuncio(anuncio.itemId, anuncio.adGroupId)))]);
           const precio = anuncio.precio ?? precioPorItem.get(anuncio.itemId) ?? null;
+          const stock = stockPorItem.get(anuncio.itemId);
           return {
             id: anuncio.id,
             adGroupId: anuncio.adGroupId,
@@ -334,6 +389,8 @@ export async function consultarTableroPublicidad(
             titulo: anuncio.titulo,
             href: enlaceAnuncio(anuncio.permalink, anuncio.itemId),
             precio,
+            estado: anuncio.estado,
+            sinStock: stock === undefined ? null : stock <= 0,
             totales: totalesAnuncio,
             semaforo: semaforoAnuncio({
               gasto: totalesAnuncio.gasto,
@@ -404,12 +461,17 @@ export async function consultarTableroPublicidad(
           config,
         }),
         totales,
+        totalesAnterior,
         anuncios: anunciosDeLaCampana,
       };
     });
 
     const visibles = calculadas
-      .filter((campana) => opciones.incluirPausadas || campana.activa)
+      .filter((campana) => {
+        if (filtro === "todas") return true;
+        if (filtro === "pausadas") return !campana.activa;
+        return campana.activa;
+      })
       .sort((a, b) => compararOrden(a, b, opciones.orden, opciones.dir));
 
     return {
@@ -421,6 +483,23 @@ export async function consultarTableroPublicidad(
       cantidadActivas: calculadas.filter((c) => c.activa).length,
       cantidadPausadas: calculadas.filter((c) => !c.activa).length,
       diasRango: diasEntreInclusive(periodo.desde, periodo.hasta),
+      presupuestoDiarioTotal: sumarMontos(calculadas.filter((c) => c.activa).map((c) => c.presupuestoDiario)),
+      serieDiaria: armarSerieDiaria(
+        periodo.desde,
+        periodo.hasta,
+        filasDia.map((fila) => ({
+          fecha: fila.fecha,
+          costo: fila.costo,
+          montoTotal: fila.montoTotal,
+          ventasOrganicasMonto: fila.ventasOrganicasMonto,
+          clicks: fila.clicks,
+          impresiones: fila.impresiones,
+          ventasCantidad: fila.ventasCantidad,
+          unidadesTotal: fila.unidadesTotal,
+          unidadesDirectas: fila.unidadesDirectas,
+          unidadesIndirectas: fila.unidadesIndirectas,
+        }))
+      ),
     };
   });
 }

@@ -10,9 +10,14 @@ import {
   textoComparacion,
 } from "@/lib/publicidad/formato";
 import {
+  alertaBajo70,
+  aportePorPublicidad,
+  armarSerieDiaria,
+  diasParaEstabilizar,
   compararOrden,
   diagnosticarCampana,
   fraseEstado,
+  gastaSinVender,
   unidadesConPublicidad,
   usoPresupuestoDiario,
   resolverDireccion,
@@ -28,7 +33,7 @@ import {
   type FilaOrdenable,
 } from "@/lib/publicidad/kpis";
 import { hrefPublicidad, leerParametrosPublicidad } from "@/lib/publicidad/params";
-import { NOTA_DIAGNOSTICO, rotuloDiagnostico, rotuloSemaforo, subirEsMejor, textoVariacion, tituloSemaforo } from "@/lib/publicidad/rotulos";
+import { detalleDiagnostico, NOTA_DIAGNOSTICO, rotuloDiagnostico, rotuloSemaforo, subirEsMejor, textoVariacion, tituloSemaforo } from "@/lib/publicidad/rotulos";
 
 const DIA: DiaMetrica = {
   costo: null,
@@ -389,6 +394,61 @@ describe("periodo en Bogotá", () => {
       expect(resolverPeriodo(invalido, ahora).mes).toBe("2026-10");
     }
     expect(resolverPeriodo(undefined, ahora).esMesEnCurso).toBe(true);
+  });
+});
+
+describe("alertas de solo lectura (issue #255)", () => {
+  it("bajo el 70 % del objetivo no se muestra mientras aprende", () => {
+    expect(alertaBajo70({ aprendiendo: true, roas: "1.00", objetivo: "12.00" })).toBe(false);
+    expect(alertaBajo70({ aprendiendo: false, roas: "8.00", objetivo: "12.00" })).toBe(true);
+    expect(alertaBajo70({ aprendiendo: false, roas: "8.40", objetivo: "12.00" })).toBe(false);
+    expect(alertaBajo70({ aprendiendo: false, roas: "9.85", objetivo: "12.00" })).toBe(false);
+    expect(alertaBajo70({ aprendiendo: false, roas: null, objetivo: "12.00" })).toBe(false);
+  });
+
+  it("gasta sin vender solo si hay gasto y ninguna venta atribuida", () => {
+    expect(gastaSinVender("10.00", "0.00", "0")).toBe(true);
+    expect(gastaSinVender("10.00", null, null)).toBe(true);
+    expect(gastaSinVender("10.00", "5.00", null)).toBe(false);
+    expect(gastaSinVender("10.00", null, "2")).toBe(false);
+    expect(gastaSinVender("0.00", "0.00", "0")).toBe(false);
+    expect(gastaSinVender(null, "0.00", "0")).toBe(false);
+  });
+
+  it("el aporte es ventas atribuidas sobre el total de las promocionadas", () => {
+    expect(aportePorPublicidad("80.00", "20.00")).toBe("80.0");
+    expect(aportePorPublicidad("80.00", null)).toBeNull();
+    expect(aportePorPublicidad(null, "20.00")).toBeNull();
+  });
+
+  it("el diagnóstico visible no afirma una etiqueta que Mercado Libre no mandó", () => {
+    expect(diasParaEstabilizar(0, 7)).toBe(7);
+    expect(diasParaEstabilizar(6, 7)).toBe(1);
+    expect(detalleDiagnostico({ diagnostico: { tipo: "aprendiendo", dias: 6 }, diasAprendizaje: 7, alertaBajo70: false })).toEqual({
+      pill: "APRENDIENDO",
+      detalle: "Tu campaña se estabilizará en 1 día",
+      tono: "aviso",
+    });
+    expect(detalleDiagnostico({ diagnostico: { tipo: "aprendiendo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true }).detalle).toBe(
+      "Tu campaña se estabilizará en 7 días"
+    );
+    expect(detalleDiagnostico({ diagnostico: { tipo: "bajo_objetivo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true }).detalle).toBe(
+      "Bajo el 70 % del objetivo"
+    );
+    expect(detalleDiagnostico({ diagnostico: { tipo: "excelente", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).pill).toBe("Excelente");
+    expect(detalleDiagnostico({ diagnostico: { tipo: "sin_datos", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).detalle).toBe("Sin datos");
+  });
+
+  it("la serie diaria no promedia ratios y no inventa un cero", () => {
+    const serie = armarSerieDiaria("2026-10-01", "2026-10-02", [
+      { fecha: "2026-10-01", costo: "10.00", montoTotal: "40.00", ventasOrganicasMonto: null, clicks: 2, impresiones: 10 },
+    ]);
+    expect(serie.map((p) => p.fecha)).toEqual(["2026-10-01", "2026-10-02"]);
+    expect(serie[0].inversion).toBe("10.00");
+    expect(serie[0].ingresos).toBe("40.00");
+    expect(serie[0].roas).toBe("4.00");
+    expect(serie[1].inversion).toBeNull();
+    expect(serie[1].roas).toBeNull();
   });
 });
 

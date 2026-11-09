@@ -78,8 +78,8 @@
 
 .gridKpi {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
 }
 
 /* Sin el overflow: visible !important de antes: el encabezado sticky
@@ -103,6 +103,8 @@
    tema (AA: --texto/--texto-suave/--plata-etiqueta sobre --superficie
    y --superficie-2 ya medidos en app/globals.css). */
 :global(:root[data-tema="claro"]) .tarjetaTabla,
+:global(:root[data-tema="claro"]) .tarjetaAnuncios,
+:global(:root[data-tema="claro"]) .miPresupuesto,
 :global(:root[data-tema="claro"]) .gridKpi > * {
   background:
     linear-gradient(var(--superficie), var(--superficie)) padding-box,
@@ -338,23 +340,21 @@
     overflow: hidden;
   }
 
-  /* A 1280 la tabla mide ~895 px. Campaña ~135 px, Estado ~130 px.
-     Con publ. y Sin publ. llevan ~8 px más para no cortarse ni pegarse
-     a Ventas totales. */
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 14%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(2) { width: 14.6%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(3) { width: 6.8%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 8.05%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(5) { width: 8.05%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(6) { width: 7.2%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(7) { width: 4.8%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(8) { width: 5%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(9) { width: 4.4%; padding-right: 6px; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(10) { width: 4.2%; padding-left: 6px; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(11) { width: 4.2%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(12) { width: 5.2%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(13) { width: 4.2%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(14) { width: 9.3%; }
+  /* A 1280 la tabla mide ~895 px. Once columnas de la vista de
+     campañas: el nombre y el diagnóstico llevan el ancho largo; las
+     cifras cortas ceden. Ventas sin publicidad, TACOS y unidades van
+     en la fila desplegada. */
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 16.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(2) { width: 15%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(3) { width: 9.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 8%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(5) { width: 9%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(6) { width: 6.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(7) { width: 6.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(8) { width: 8.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(9) { width: 8.5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(10) { width: 5%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(11) { width: 7%; }
 }
 
 .tarjetaTabla > div > table > thead > tr > th:last-child,
@@ -426,6 +426,7 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
   font-weight: 600;
+  color: var(--acento-fuerte);
   overflow-wrap: break-word;
   word-break: normal;
 }
@@ -454,6 +455,211 @@
 
 .anuncios {
   margin-top: 4px;
+}
+
+.pestanas {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--borde);
+}
+
+.pestana {
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  border-bottom: 2px solid transparent;
+  color: var(--texto-suave);
+  text-decoration: none;
+}
+
+.pestana[aria-current="page"] {
+  border-bottom-color: var(--acento);
+  color: var(--texto);
+  font-weight: 600;
+}
+
+.seccion {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--plata-etiqueta);
+}
+
+.miPresupuesto {
+  display: grid;
+  gap: 4px;
+}
+
+.presupuestoEtiqueta,
+.presupuestoValor,
+.aporte {
+  margin: 0;
+}
+
+.presupuestoEtiqueta {
+  color: var(--texto-suave);
+  font-size: 14px;
+}
+
+.presupuestoValor {
+  font-size: 28px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.tarjetaMetrica {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--borde);
+  border-top: 3px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tarjetaMetrica[data-sel="1"] {
+  border-top-color: var(--acento);
+}
+
+.tarjetaMetrica[data-sel="2"] {
+  border-top-color: var(--exito);
+}
+
+.metricaTitulo {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.metricaValor {
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.delta {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+
+.delta[data-tono="mejor"] {
+  color: var(--exito-texto);
+  background: color-mix(in srgb, var(--exito) 18%, transparent);
+}
+
+.delta[data-tono="peor"] {
+  color: var(--peligro-texto);
+  background: color-mix(in srgb, var(--peligro) 18%, transparent);
+}
+
+.delta[data-tono="neutro"] {
+  color: var(--texto-suave);
+}
+
+.grafico {
+  margin: 8px 0 0;
+}
+
+.grafico svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.eje {
+  stroke: var(--borde);
+  stroke-width: 1;
+}
+
+.ejeTexto {
+  fill: var(--texto-suave);
+  font-size: 10px;
+}
+
+.leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--texto-suave);
+  font-size: 12px;
+}
+
+.muestra {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+}
+
+.toolbar,
+.filtro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.toolbar {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.filtro a {
+  color: var(--texto-suave);
+  text-decoration: none;
+}
+
+.filtro a[aria-current="page"] {
+  color: var(--acento-fuerte);
+  font-weight: 600;
+}
+
+.diagnostico {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.alertaFila {
+  display: block;
+  color: var(--peligro-texto);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.avisos {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 8px;
+  padding: 0 12px;
+  list-style: none;
+  font-size: 12px;
+}
+
+.tarjetaAnuncios {
+  min-width: 0;
 }
 
 @media (max-width: 760px) {

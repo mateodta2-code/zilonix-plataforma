@@ -5,7 +5,7 @@
 import { mostrarMonto } from "@/lib/finanzas/montos";
 import { mostrarPorcentaje } from "@/components/finanzas/formato";
 import type { EstadoChip } from "@/components/marco/Chip";
-import { porcentajeDeRazon, type Diagnostico, type Semaforo, type TipoDiagnostico } from "@/lib/publicidad/kpis";
+import { diasParaEstabilizar, porcentajeDeRazon, type Diagnostico, type Semaforo, type TipoDiagnostico } from "@/lib/publicidad/kpis";
 
 export const ROTULO_KPI = {
   inversion: "Inversión",
@@ -119,7 +119,39 @@ export const ROTULO_PERIODO = {
   pausada: "Pausada en Mercado Libre",
 } as const;
 
-export const COLUMNAS_CAMPANA = 14;
+export const COLUMNAS_CAMPANA = 11;
+
+export type DiagnosticoVisible = {
+  pill: string | null;
+  detalle: string | null;
+  tono: "exito" | "peligro" | "aviso" | "neutro";
+};
+
+// Mercado Libre no manda esta etiqueta en lo que ya guardamos. Esto es
+// lo que Zilonix puede derivar: aprendizaje por días, excelente si el
+// ROAS pasa 1,2 veces el objetivo, y la alerta propia del 70 %.
+export function detalleDiagnostico(entrada: {
+  diagnostico: Diagnostico;
+  diasAprendizaje: number;
+  alertaBajo70: boolean;
+}): DiagnosticoVisible {
+  if (entrada.diagnostico.tipo === "aprendiendo") {
+    const n = diasParaEstabilizar(entrada.diagnostico.dias, entrada.diasAprendizaje);
+    return {
+      pill: "APRENDIENDO",
+      detalle: `Tu campaña se estabilizará en ${n} ${n === 1 ? "día" : "días"}`,
+      tono: "aviso",
+    };
+  }
+  if (entrada.alertaBajo70) {
+    return { pill: null, detalle: "Bajo el 70 % del objetivo", tono: "peligro" };
+  }
+  if (entrada.diagnostico.tipo === "excelente") return { pill: "Excelente", detalle: null, tono: "exito" };
+  if (entrada.diagnostico.tipo === "en_objetivo") return { pill: "En objetivo", detalle: null, tono: "exito" };
+  if (entrada.diagnostico.tipo === "bajo_objetivo") return { pill: "Bajo objetivo", detalle: null, tono: "peligro" };
+  if (entrada.diagnostico.tipo === "sin_objetivo") return { pill: null, detalle: "Sin objetivo", tono: "neutro" };
+  return { pill: null, detalle: "Sin datos", tono: "neutro" };
+}
 
 export function rotuloDiagnostico(diagnostico: Diagnostico): string {
   if (diagnostico.tipo === "aprendiendo") {

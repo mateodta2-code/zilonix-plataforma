@@ -19,6 +19,7 @@ const vacio = {
   acos: null,
   tacos: null,
   unidadesVendidas: null,
+  ventasCantidad: null,
 };
 
 describe("textos del tablero de publicidad (issue #255)", () => {
@@ -43,10 +44,11 @@ describe("textos del tablero de publicidad (issue #255)", () => {
       },
     });
     const porClave = Object.fromEntries(kpis.map((kpi) => [kpi.clave, kpi]));
-    expect(porClave.ventasTotales.detalle).toEqual([NOTA_VENTAS_TOTALES]);
-    expect(porClave.ventasSinPublicidad.detalle).toEqual([NOTA_VENTAS_ORGANICAS]);
-    expect(porClave.ventasSinPublicidad.titulo).toBe("Ventas sin publicidad");
-    expect(porClave.ventasSinPublicidad.valor).toBe("$ 15");
+    expect(porClave.ingresos.detalle).toEqual([NOTA_VENTAS_TOTALES]);
+    expect(porClave.otrasVentas.detalle).toEqual([NOTA_VENTAS_ORGANICAS]);
+    expect(porClave.otrasVentas.titulo).toBe("Otras ventas");
+    expect(porClave.ventasAtribuidas.titulo).toBe("Ventas atribuidas");
+    expect(porClave.otrasVentas.valor).toContain("15");
     expect(NOTA_VENTAS_TOTALES).toMatch(/clic más las que no/);
     expect(NOTA_VENTAS_TOTALES).not.toMatch(/no vinieron de un clic/);
   });
@@ -83,6 +85,21 @@ describe("textos del tablero de publicidad (issue #255)", () => {
         acos: "0.1020",
         tacos: "0.0870",
         unidadesVendidas: "12",
+        ventasCantidad: "4",
+      },
+      totalesAnterior: {
+        gasto: null,
+        ventasPublicidad: null,
+        ventasOrganicas: null,
+        ventasTotales: null,
+        clicks: null,
+        impresiones: null,
+        cpc: null,
+        roas: null,
+        acos: null,
+        tacos: null,
+        unidadesVendidas: null,
+        ventasCantidad: null,
       },
       anuncios: [],
       presupuestoAutomatico: false,
