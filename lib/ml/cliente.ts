@@ -991,12 +991,38 @@ export async function leerItemBasicoMl(itemId: string, token: string): Promise<{
 }
 
 // POST /marketplace/items/{id}/clips/upload — multipart/form-data,
-// contrato real documentado por Mercado Libre ("Working with Clips").
+// contrato real documentado por Mercado Libre ("Working with Clips"),
+// pero esa documentación (y el "working with clips" de los sitios de
+// desarrolladores de Colombia/Argentina/México/Brasil, que da 404) es
+// SOLO para Global Selling (ítems CBT) — "the seller's local sites" de
+// la frase original se refiere a los sitios DESTINO de un ítem CBT,
+// nunca a un vendedor local vendiendo en su propio sitio. Caso real
+// (Mateo, 10/11, STOREKINGSAS — Mercado Líder Gold, publicación local
+// MCO4628184762): 403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES con los
+// permisos de la app ya en lectura/escritura — el problema nunca fue el
+// permiso, fue la ruta.
+//
+// `ruta: "local"` pega al mismo contrato SIN "marketplace/" —
+// POST /items/{id}/clips/upload — nunca documentado por Mercado Libre,
+// pero usado como reintento real por otras integraciones contra un
+// vendedor local (ver subirClipItemDesdeArchivo, lib/ml/clip.ts, que
+// decide cuándo reintentar). Sin confirmar en vivo todavía — esta tarea
+// lo deja listo para probarlo en staging.
+//
 // Video de hasta 280MB — usa TIMEOUT_SUBIDA_CLIP_MS, no el de
 // escritura normal.
-export async function subirClipMl(itemId: string, token: string, form: FormData): Promise<{ ok: boolean; status: number; textoCrudo: string }> {
+export async function subirClipMl(
+  itemId: string,
+  token: string,
+  form: FormData,
+  ruta: "marketplace" | "local" = "marketplace"
+): Promise<{ ok: boolean; status: number; textoCrudo: string }> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
-  const r = await escribir(`${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips/upload`, token, "POST", form, TIMEOUT_SUBIDA_CLIP_MS);
+  const base =
+    ruta === "marketplace"
+      ? `${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips/upload`
+      : `${BASE_URL}/items/${encodeURIComponent(itemId)}/clips/upload`;
+  const r = await escribir(base, token, "POST", form, TIMEOUT_SUBIDA_CLIP_MS);
   return { ok: r.ok, status: r.status, textoCrudo: r.textoCrudo };
 }
 
@@ -1291,21 +1317,45 @@ function clipsDesdeRespuesta(data: unknown): ClipMl[] {
   });
 }
 
-// null = Mercado Libre no dejó ver el estado (403/404/5xx) — distinto
-// de [] (sí respondió, de verdad no hay ningún clip todavía en esta
-// publicación). El llamador (lib/trabajos/subirClipMultiCuenta.ts)
-// nunca confunde los dos casos.
-export async function obtenerClipsMl(itemId: string, token: string): Promise<ClipMl[] | null> {
-  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips`;
+type ResultadoClipsRuta = { tipo: "ok"; clips: ClipMl[] } | { tipo: "no_encontrado" } | { tipo: "permiso" } | { tipo: "sin_dato" };
+
+async function clipsDeRuta(url: string, token: string): Promise<ResultadoClipsRuta> {
   try {
     const resp = await pedir<unknown>(url, token);
-    if (!resp.ok) return resp.status === 404 ? [] : null;
-    return clipsDesdeRespuesta(resp.data);
+    if (resp.ok) return { tipo: "ok", clips: clipsDesdeRespuesta(resp.data) };
+    return resp.status === 404 ? { tipo: "no_encontrado" } : { tipo: "sin_dato" };
   } catch (e) {
-    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
+    if (e instanceof MlSinPermisoAppError) return { tipo: "permiso" };
+    if (e instanceof MlNoDisponibleError) return { tipo: "sin_dato" };
     throw e;
   }
+}
+
+// null = Mercado Libre no dejó ver el estado (403/5xx en las dos rutas
+// intentadas) — distinto de [] (de verdad no hay ningún clip todavía en
+// esta publicación). El llamador (lib/trabajos/subirClipMultiCuenta.ts)
+// nunca confunde los dos casos.
+//
+// GET /marketplace/items/{id}/clips, documentado solo para Global
+// Selling (ver el comentario de subirClipMl, arriba): un 403 o 404 ahí
+// para un ítem LOCAL nunca confirma "sin clips todavía" — puede ser
+// simplemente que esa ruta no aplica a este ítem. Antes de concluir
+// nada, se reintenta contra GET /items/{id}/clips (mismo contrato, sin
+// "marketplace/"), nunca documentado pero coherente con el reintento de
+// subirClipMl. Recién cuando la ruta que SÍ corresponde responde (200,
+// aunque con lista vacía, o un 404 real) se puede decir "no hay clips".
+// Un 5xx en la primera ruta no dispara el reintento (no es señal de
+// "ruta inaplicable", es Mercado Libre caído) — sigue siendo null
+// directo, igual que antes.
+export async function obtenerClipsMl(itemId: string, token: string): Promise<ClipMl[] | null> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
+  const primero = await clipsDeRuta(`${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips`, token);
+  if (primero.tipo === "ok") return primero.clips;
+  if (primero.tipo === "sin_dato") return null;
+
+  const segundo = await clipsDeRuta(`${BASE_URL}/items/${encodeURIComponent(itemId)}/clips`, token);
+  if (segundo.tipo === "ok") return segundo.clips;
+  return segundo.tipo === "no_encontrado" ? [] : null;
 }
 
 // ---------- Rama feat-promociones (motor portado de zilonix-os-web,

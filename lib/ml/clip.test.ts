@@ -11,6 +11,7 @@ import {
   buscarSkuEnTodasLasCuentas,
   ClipInvalidoError,
   ClipPermisoDeAppRequeridoError,
+  ClipRechazadoError,
   MENSAJES_PROBLEMA_VIDEO_CLIP,
   problemasDeVideoClip,
   subirClipItemDesdeArchivo,
@@ -208,16 +209,79 @@ describe("subirClipItemDesdeArchivo (rama feat-publicar-clip) — mismo endpoint
     expect(r.clipUuid).toBe("abc-123");
   });
 
-  it("403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES -> permiso de la app rechazado, NUNCA 'reputación' (caso real: STOREKINGSAS es Mercado Líder Gold)", async () => {
+  // Investigación del 10/11 (Mateo, caso real STOREKINGSAS —
+  // MCO4628184762): POST /marketplace/items/{id}/clips/upload está
+  // documentado SOLO para Global Selling — un 403/404 ahí para un ítem
+  // LOCAL nunca confirma "sin permiso de la app" ni "sin reputación",
+  // solo que esa ruta no aplica. Mensaje nuevo: ya no sugiere revisar
+  // el DevCenter ni reconectar la cuenta (eso nunca fue la causa real).
+  it("403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES en LAS DOS rutas -> mensaje de 'solo Global Selling', nunca DevCenter/reconectar/reputación", async () => {
     const ruta = archivoDePrueba();
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 403, text: async () => "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" }) as Response));
+    const fetchMock = vi.fn(async (_url: unknown) => ({ ok: false, status: 403, text: async () => "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
     const promesa = subirClipItemDesdeArchivo("token", "MCO111", ruta, "clip.mp4", "video/mp4");
-    await expect(promesa).rejects.toThrow(/permiso de la aplicación/);
+    await expect(promesa).rejects.toThrow(/Global Selling/);
     await expect(promesa).rejects.not.toThrow(/reputación/);
+    await expect(promesa).rejects.not.toThrow(/DevCenter/);
+    await expect(promesa).rejects.not.toThrow(/reconectar/);
     const error = await promesa.catch((e) => e);
     expect(error).toBeInstanceOf(ClipPermisoDeAppRequeridoError);
     expect(error.detalle).toContain("403");
     expect(error.detalle).toContain("PA_UNAUTHORIZED_RESULT_FROM_POLICIES");
+    // Reintentó de verdad contra la ruta local, nunca se conformó con
+    // el primer 403.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/marketplace/items/");
+    expect(String(fetchMock.mock.calls[1][0])).not.toContain("/marketplace/items/");
+  });
+
+  // Punto 1 del pedido — "si sale 400, 403 o 404, reintentar el mismo
+  // video contra /items/{id}/clips/upload", con un FormData ARMADO DE
+  // NUEVO (el primero ya se consumió en el fetch anterior) y sin el
+  // campo "sites" (eso es de Global Selling).
+  it("/marketplace falla (403), /items/{id}/clips/upload responde bien -> sube sin error, con un FormData nuevo y sin 'sites'", async () => {
+    const ruta = archivoDePrueba();
+    const bodiesRecibidos: FormData[] = [];
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const u = String(url);
+      const body = init?.body as FormData;
+      bodiesRecibidos.push(body);
+      expect(body.get("sites")).toBeNull();
+      if (u.includes("/marketplace/items/")) {
+        expect(u).toBe("https://api.mercadolibre.com/marketplace/items/MCO111/clips/upload");
+        return { ok: false, status: 403, text: async () => "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" } as Response;
+      }
+      expect(u).toBe("https://api.mercadolibre.com/items/MCO111/clips/upload");
+      return { ok: true, status: 201, text: async () => JSON.stringify({ status: "accepted", clip_uuid: "abc-local", site_ids: ["MCO"] }) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const r = await subirClipItemDesdeArchivo("token", "MCO111", ruta, "clip.mp4", "video/mp4");
+    expect(r).toEqual({ status: "accepted", clipUuid: "abc-local", siteIds: ["MCO"] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Nunca el mismo FormData en las dos llamadas — se arma de nuevo.
+    expect(bodiesRecibidos[0]).not.toBe(bodiesRecibidos[1]);
+  });
+
+  // Punto 3 del pedido — si la ruta local falla con un error REAL de
+  // video (no 403/404/política), eso es ClipRechazadoError con el dato
+  // real, nunca el mensaje de "solo Global Selling".
+  it("/marketplace falla (403), /items/{id}/clips/upload rechaza el video (400 real) -> ClipRechazadoError con el detalle real", async () => {
+    const ruta = archivoDePrueba();
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/marketplace/items/")) return { ok: false, status: 403, text: async () => "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" } as Response;
+      return { ok: false, status: 400, text: async () => "invalid_video_format" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promesa = subirClipItemDesdeArchivo("token", "MCO111", ruta, "clip.mp4", "video/mp4");
+    await expect(promesa).rejects.toThrow(ClipRechazadoError);
+    await expect(promesa).rejects.not.toBeInstanceOf(ClipPermisoDeAppRequeridoError);
+    const error = await promesa.catch((e) => e);
+    expect(error.message).toContain("400");
+    expect(error.message).toContain("invalid_video_format");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   // Tarea 2.11, punto 3 — itemId viene de formData/JSON (app/api/ml/clip/

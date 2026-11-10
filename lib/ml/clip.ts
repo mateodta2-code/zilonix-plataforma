@@ -135,15 +135,22 @@ export type ResultadoClip = { status: string; clipUuid: string | null; siteIds: 
 // URL.
 // Caso real (Mateo, 9/11, STOREKINGSAS — Mercado Líder Gold): este
 // 403 NUNCA es reputación — ver el comentario de
-// clipRequierePermisoDeApp (lib/ml/publicar-reglas.ts). `detalle`
-// guarda el HTTP + cuerpo crudo de Mercado Libre (hasta 800
-// caracteres) para un desplegable "Ver detalle" en la UI — nunca
-// mezclado con el mensaje principal, que tiene que quedar corto y
-// accionable.
+// clipRequierePermisoDeApp (lib/ml/publicar-reglas.ts). Investigación
+// del 10/11 (mismo caso): tampoco es un permiso de la app mal
+// configurado en el DevCenter — es que POST /marketplace/items/{id}/
+// clips/upload está documentado SOLO para Global Selling (ver el
+// comentario de subirClipMl, lib/ml/cliente.ts). Este error ahora se
+// lanza únicamente cuando LAS DOS rutas (la de Global Selling y su
+// reintento local) fallaron por permiso/ruta inaplicable — nunca ya
+// sugiere revisar el DevCenter ni reconectar la cuenta, porque eso
+// nunca fue la causa real. `detalle` guarda el HTTP + cuerpo crudo de
+// las dos respuestas (hasta 800 caracteres en total) para un
+// desplegable "Ver detalle" en la UI — nunca mezclado con el mensaje
+// principal, que tiene que quedar corto y accionable.
 export class ClipPermisoDeAppRequeridoError extends Error {
   constructor(public readonly detalle: string) {
     super(
-      "Mercado Libre rechazó el permiso de la aplicación para subir Clips en esta cuenta (403). Hay que revisar el permiso de Clips de la app en el DevCenter de Mercado Libre y volver a conectar la cuenta."
+      "La API pública de Clips de Mercado Libre está documentada solo para Global Selling. Mercado Libre rechazó la subida por API en esta publicación — el Clip se puede subir directamente desde el panel de Mercado Libre."
     );
   }
 }
@@ -154,17 +161,19 @@ export class ClipRechazadoError extends Error {}
 // Mercado Libre ("Working with Clips"): POST .../clips/upload,
 // multipart/form-data, solo "file" + header Authorization (el boundary
 // lo pone `fetch` con FormData — nunca fijar content-type a mano).
-// Advertencia explícita heredada del código original: este es el ÚNICO
-// endpoint del flujo de publicar NUNCA confirmado contra una cuenta
-// real — si Mercado Libre responde distinto a lo documentado, el error
-// real queda visible tal cual, nunca se traga ni se adivina.
+// Advertencia explícita heredada del código original: ninguna de las
+// dos rutas de este módulo (ver subirClipMl, lib/ml/cliente.ts) se
+// confirmó todavía contra una cuenta real — si Mercado Libre responde
+// distinto a lo documentado, el error real queda visible tal cual,
+// nunca se traga ni se adivina.
 //
 // Decisión tomada a propósito sobre una ambigüedad real del sistema
 // actual (hallazgo §16.1): el comentario original documenta un campo
 // "sites" ([{site_id, logistic_type}], vacío = todos los sitios) que el
-// código nunca mandaba. Acá se omite explícitamente (equivalente
-// documentado a "todos los sitios disponibles"), igual que el
-// comportamiento real que ya corrió en producción.
+// código nunca mandaba. Acá se omite explícitamente en LAS DOS rutas
+// (equivalente documentado a "todos los sitios disponibles"), igual
+// que el comportamiento real que ya corrió en producción —
+// "sites" es del contrato de Global Selling, nunca de un vendedor local.
 // Tarea 2.11, punto 2/3: fetch directo movido a subirClipMl
 // (lib/ml/cliente.ts) — valida itemId con el mismo patrón de siempre,
 // ANTES de armar la URL.
@@ -180,33 +189,77 @@ export class ClipRechazadoError extends Error {}
 // Varias cuentas pueden llamar esto con la MISMA ruta al mismo tiempo
 // (concurrencia 2, ver el trabajo de arriba) sin pisarse: cada llamada
 // abre su propio handle de lectura, el archivo nunca se modifica.
-export async function subirClipItemDesdeArchivo(token: string, itemId: string, rutaArchivo: string, filename: string, contentType: string): Promise<ResultadoClip> {
+//
+// Investigación del 10/11 (caso STOREKINGSAS, Refs #380/#381) — la ruta
+// POST /marketplace/items/{id}/clips/upload está documentada SOLO para
+// Global Selling (ítems CBT); para un vendedor local da 400/403/404 sin
+// que eso diga nada sobre el permiso de la app ni el video. Se arma el
+// FormData DE NUEVO para el reintento porque un FormData ya pasado a
+// `fetch` no se puede reusar en una segunda llamada (el stream del Blob
+// que lo respalda ya se consumió) — `construirFormularioClip` vuelve a
+// abrir el mismo archivo por streaming, nunca lo carga completo en
+// memoria.
+async function construirFormularioClip(rutaArchivo: string, filename: string, contentType: string): Promise<FormData> {
   const blob = await openAsBlob(rutaArchivo, { type: contentType || "video/mp4" });
   const form = new FormData();
   form.append("file", blob, filename || "clip.mp4");
+  return form;
+}
 
-  const { ok, status, textoCrudo } = await subirClipMl(itemId, token, form);
-  if (!ok) {
-    // BUG real, corregido 9/11 (Mateo, STOREKINGSAS — Mercado Líder
-    // Gold): este código NUNCA es "sin reputación" — significa que la
-    // APLICACIÓN no tiene el permiso de Clips habilitado para esta
-    // cuenta (DevCenter), no que a la cuenta le falte historial de
-    // ventas. Reintentar el token no cambia nada acá.
-    if (clipRequierePermisoDeApp(textoCrudo)) {
-      throw new ClipPermisoDeAppRequeridoError(`HTTP ${status}: ${textoCrudo.slice(0, 800)}`);
+// 400, 403 o 404 en /marketplace/items/{id}/clips/upload: los tres
+// pueden significar "esta ruta no aplica a este ítem local", nunca
+// solo el 403 de política (PA_UNAUTHORIZED_RESULT_FROM_POLICIES) ya
+// conocido — se reintenta siempre contra la ruta local antes de decidir
+// nada.
+function requiereReintentoRutaLocal(status: number): boolean {
+  return status === 400 || status === 403 || status === 404;
+}
+
+// "Las dos rutas fallaron por permiso/ruta inaplicable" (nunca un error
+// real del video): 403/404 directos, o el código de política ya
+// conocido en el cuerpo de la respuesta — mismo criterio que
+// clipRequierePermisoDeApp, pero sumando el status real de cada ruta,
+// que acá sí se conoce.
+function esFalloDePermisoORutaInaplicable(status: number, textoCrudo: string): boolean {
+  return status === 403 || status === 404 || clipRequierePermisoDeApp(textoCrudo);
+}
+
+export async function subirClipItemDesdeArchivo(token: string, itemId: string, rutaArchivo: string, filename: string, contentType: string): Promise<ResultadoClip> {
+  const formMarketplace = await construirFormularioClip(rutaArchivo, filename, contentType);
+  const primero = await subirClipMl(itemId, token, formMarketplace);
+
+  let resultado = primero;
+  let intentoLocal: { ok: boolean; status: number; textoCrudo: string } | null = null;
+  if (!primero.ok && requiereReintentoRutaLocal(primero.status)) {
+    const formLocal = await construirFormularioClip(rutaArchivo, filename, contentType);
+    intentoLocal = await subirClipMl(itemId, token, formLocal, "local");
+    resultado = intentoLocal;
+  }
+
+  if (!resultado.ok) {
+    // Solo si LAS DOS rutas (la de Global Selling y su reintento local)
+    // fallaron por permiso/ruta inaplicable: nunca se sugiere ya
+    // revisar el DevCenter ni reconectar la cuenta, eso nunca fue la
+    // causa real (ver el comentario de ClipPermisoDeAppRequeridoError).
+    if (intentoLocal && esFalloDePermisoORutaInaplicable(primero.status, primero.textoCrudo) && esFalloDePermisoORutaInaplicable(intentoLocal.status, intentoLocal.textoCrudo)) {
+      const detalle = `Global Selling (HTTP ${primero.status}): ${primero.textoCrudo} | Local (HTTP ${intentoLocal.status}): ${intentoLocal.textoCrudo}`.slice(0, 800);
+      throw new ClipPermisoDeAppRequeridoError(detalle);
     }
     // status === 0 = tiempo agotado o falla de red subiendo el video —
     // textoCrudo queda vacío, nunca un HTTP real que mostrar.
-    if (status === 0) {
+    if (resultado.status === 0) {
       throw new ClipSinRespuestaError("Mercado Libre no respondió a tiempo subiendo el video; revisa en Mercado Libre si el clip se subió antes de reintentar.");
     }
-    throw new ClipRechazadoError(`Mercado Libre rechazó el video (HTTP ${status}): ${textoCrudo.slice(0, 800)}`);
+    // Otro rechazo real (ej. un 400 real de archivo en la ruta que sí
+    // corresponde) — el detalle real de la ruta que de verdad decidió,
+    // nunca el de la primera si hubo reintento.
+    throw new ClipRechazadoError(`Mercado Libre rechazó el video (HTTP ${resultado.status}): ${resultado.textoCrudo.slice(0, 800)}`);
   }
   let data: { status?: string; clip_uuid?: string; site_ids?: string[] };
   try {
-    data = JSON.parse(textoCrudo);
+    data = JSON.parse(resultado.textoCrudo);
   } catch {
-    throw new ClipRechazadoError(`Mercado Libre devolvió una respuesta inesperada: ${textoCrudo.slice(0, 400)}`);
+    throw new ClipRechazadoError(`Mercado Libre devolvió una respuesta inesperada: ${resultado.textoCrudo.slice(0, 400)}`);
   }
   // status: "accepted" = recibido, no publicado — Mercado Libre lo
   // modera (24-48h) antes de que quede visible.
