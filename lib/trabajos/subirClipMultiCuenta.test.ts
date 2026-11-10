@@ -93,8 +93,10 @@ describe("iniciarTrabajoClip/obtenerTrabajoClip — rama feat-publicar-clip, pun
     const filaC3 = trabajo?.cuentas.find((c) => c.cuentaId === "c3");
     expect(filaC1?.estado).toBe("en_moderacion");
     expect(filaC2?.estado).toBe("error");
-    expect(filaC2?.error).toContain("permiso de la aplicación");
+    expect(filaC2?.error).toContain("Global Selling");
     expect(filaC2?.error).not.toContain("reputación");
+    expect(filaC2?.error).not.toContain("DevCenter");
+    expect(filaC2?.error).not.toContain("reconectar");
     expect(filaC2?.detalle).toBe("HTTP 403: PA_UNAUTHORIZED_RESULT_FROM_POLICIES");
     expect(filaC3?.estado).toBe("en_moderacion");
     // El archivo se borra igual al final, aunque una cuenta haya fallado.

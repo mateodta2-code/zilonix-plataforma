@@ -268,6 +268,21 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
     expect(r.ok).toBe(true);
   });
 
+  // Investigación del 10/11 — ruta:"local" pega SIN "marketplace/"
+  // (reintento real contra un vendedor local, ver el comentario de
+  // subirClipMl). Default (sin 4to parámetro) sigue siendo "marketplace"
+  // — el test de arriba ya lo cubre sin pasar nada.
+  it("subirClipMl: ruta 'local' pega a /items/{id}/clips/upload, sin 'marketplace/'", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      expect(String(url)).toBe("https://api.mercadolibre.com/items/MCO111/clips/upload");
+      return respuestaJson({ status: "accepted" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await subirClipMl("MCO111", "token", new FormData(), "local");
+    expect(r.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("leerCategoriaMl/leerAtributosCategoriaMl: categoryId inválido nunca llama a fetch; endpoints públicos (sin Authorization)", async () => {
     const fetchMockInvalido = vi.fn();
     vi.stubGlobal("fetch", fetchMockInvalido);
@@ -1065,6 +1080,51 @@ describe("obtenerClipsMl — Parte Clip, punto 5 (estado de moderación)", () =>
   it("un campo con forma inesperada (ej. moderation_status numérico): null para ese campo, nunca lanza", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson([{ clip_uuid: "uuid-1", moderation_status: 123 }])));
     await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-1", moderationStatus: null, motivoRechazo: null }]);
+  });
+
+  // Investigación del 10/11 (Refs #380/#381) — GET /marketplace/items/
+  // {id}/clips está documentado solo para Global Selling. Un 403 o 404
+  // ahí para un ítem LOCAL ya no se traduce directo a null/[] — se
+  // reintenta contra GET /items/{id}/clips antes de concluir nada.
+  it("403 en /marketplace, /items/{id}/clips sí tiene clips reales -> los devuelve, nunca null de entrada", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        const u = String(url);
+        if (u.includes("/marketplace/items/")) return respuestaJson({}, 403);
+        expect(u).toBe("https://api.mercadolibre.com/items/MCO111/clips");
+        return respuestaJson([{ clip_uuid: "uuid-1", moderation_status: "PUBLISHED" }]);
+      })
+    );
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-1", moderationStatus: "PUBLISHED", motivoRechazo: null }]);
+  });
+
+  it("404 en /marketplace (ruta de Global Selling inaplicable a este ítem), /items/{id}/clips sí tiene clips reales -> los devuelve, nunca [] de entrada", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        const u = String(url);
+        if (u.includes("/marketplace/items/")) return respuestaJson({}, 404);
+        return respuestaJson({ results: [{ id: "uuid-2", status: "UNDER_REVIEW" }] });
+      })
+    );
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-2", moderationStatus: "UNDER_REVIEW", motivoRechazo: null }]);
+  });
+
+  it("404 en LAS DOS rutas: [] (la ruta que sí corresponde confirmó que de verdad no hay clips)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuestaJson({}, 404))
+    );
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([]);
+  });
+
+  it("403 en /marketplace, 403 también en /items/{id}/clips: null (ninguna de las dos rutas deja ver el estado)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuestaJson({}, 403))
+    );
+    await expect(obtenerClipsMl("MCO111", "token")).resolves.toBeNull();
   });
 });
 
