@@ -24,11 +24,9 @@ import { cloudinaryConfigurado } from "@/lib/cloudinary";
 // cuentas conectadas y el historial (últimos 50), y lee el único juego
 // de query params que todavía puede llegar de afuera: el prefill de
 // Investigación (titulo/precio/foto, reenviado por el redirect de
-// /nuevo — ver ese page.tsx). Rama feat-publicar-clip — el prefill de
-// Clip por query param (cuentaId/sku/itemId/clipSubido/error) se
-// retiró: SeccionClip.tsx ahora busca/sube/consulta estado por su
-// cuenta, con fetch del lado del cliente, nunca con un redirect de
-// vuelta acá. Todo el estado INTERACTIVO (qué cuenta está marcada, qué
+// /nuevo — ver ese page.tsx). El módulo de Clip se retiró por completo
+// (pedido de Mateo); /clip solo redirige acá para no romper links
+// viejos. Todo el estado INTERACTIVO (qué cuenta está marcada, qué
 // producto se cargó para reintentar...) vive en PaginaPublicar.tsx
 // ("use client"), porque "Cargar/Reintentar" y "Duplicar" necesitan
 // repoblar el formulario de arriba SIN navegar — no hay forma de hacer
@@ -105,16 +103,10 @@ export default async function PublicarPage({
     foto: linkHttpSeguro(searchParams.foto ?? null) ?? "",
   };
 
-  // Rama feat-publicar-clip — SeccionClip.tsx ahora busca por SKU,
-  // sube y consulta estado por su cuenta (fetch del cliente a los
-  // Route Handlers nuevos bajo app/api/ml/clip/), nunca con un
-  // query param resuelto acá del lado del servidor como antes.
-  const clipHabilitado = process.env.CLIP_HABILITADO === "true";
-
   // Parte 3, punto A — importarItemId/importarCuentaId llegan de
   // importadores/actions.ts (por SKU o por link, ver importarOrigen).
   // El lookup real (importarItemCompleto) sigue siendo SOLO del
-  // servidor (token de la cuenta) — mismo criterio que itemClip arriba.
+  // servidor (token de la cuenta).
   // null = Mercado Libre no deja traer ese ítem por la API (403/404,
   // típico de una publicación ajena) — la UI manda a usar el
   // bookmarklet/extensión en su lugar, nunca se reintenta scrapeando.
@@ -136,7 +128,6 @@ export default async function PublicarPage({
         cuentas={cuentas.map((c) => ({ id: c.id, nickname: c.nickname, siteId: c.siteId, moneda: c.moneda, idioma: c.idioma }))}
         historial={historial}
         prefillNuevo={prefillNuevo}
-        clipHabilitado={clipHabilitado}
         itemImportado={itemImportado}
         importarOrigen={searchParams.importarOrigen ?? ""}
         importarSkuNoEncontrado={searchParams.importarSkuNoEncontrado ?? ""}
