@@ -6,7 +6,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
-import { buscarItemPorSku } from "@/lib/ml/clip";
+import { buscarItemPorSku } from "@/lib/ml/buscar-item-por-sku";
 import { idItemDesdeLinkMl } from "../formulario-logica";
 
 async function empresaActivaDe(usuarioId: string) {

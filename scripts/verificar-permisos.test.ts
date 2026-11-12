@@ -135,18 +135,6 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/canva/desconectar/route.ts",
   "app/api/canva/estado/route.ts",
   "app/api/canva/exportar-diseno/route.ts",
-  "app/api/ml/clip/route.ts",
-  // Rama feat-publicar-clip, punto 3/4/5 — las 5 rutas nuevas del
-  // sub-flujo de Clip. "modificar" para las que arrancan o cambian
-  // algo (subir, traer el video); "consultar" para las que solo LEEN
-  // (buscar por SKU, el polling del trabajo, el preview del video
-  // temporal, el estado de moderación) — mismo permiso real que ya
-  // usaban buscarItemAction/cambiarEstadoAction en clip/actions.ts.
-  "app/api/ml/clip/buscar-sku/route.ts",
-  "app/api/ml/clip/traer-video/route.ts",
-  "app/api/ml/clip/video-temp/[id]/route.ts",
-  "app/api/ml/clip/trabajo/[jobId]/route.ts",
-  "app/api/ml/clip/estado/route.ts",
   "app/panel/publicidad/page.tsx",
   "app/panel/publicidad/actions.ts",
   // Rama feat-promociones — módulo nuevo "promociones"
@@ -232,13 +220,10 @@ const RUTAS_EXENTAS: Record<string, string> = {
   // existiendo solo para no romper un link viejo guardado (el botón de
   // Investigación, un bookmark, una notificación ya mandada).
   "app/panel/publicar/nuevo/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#formulario-publicar (reenviando titulo/precio/foto) — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
-  // Rama feat-publicar-clip — reenviar cuentaId/sku/itemId/clipSubido/
-  // error ya no tiene efecto (SeccionClip.tsx busca/sube/consulta por
-  // su cuenta, con fetch del cliente a las rutas nuevas bajo
-  // app/api/ml/clip/, todas en RUTAS_PROTEGIDAS más arriba) — el
+  // El módulo de Clip se retiró por completo (pedido de Mateo) — el
   // redirect sigue existiendo solo por compatibilidad con un link
   // viejo, nunca lee ni escribe nada.
-  "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#clip — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar y en las rutas nuevas de app/api/ml/clip/",
+  "app/panel/publicar/clip/page.tsx": "módulo de Clip retirado; queda solo un redirect hacia /panel/publicar — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
   // Issue #318 (Ley 1581) — exportar o borrar los datos propios no es
   // un permiso de MÓDULO que un rol pueda dar o quitar (como
   // "inventario.crear"): es un derecho sobre los datos de la propia
