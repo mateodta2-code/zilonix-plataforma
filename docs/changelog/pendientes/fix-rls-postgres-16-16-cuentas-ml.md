@@ -1,0 +1,5 @@
+- **fix-rls-postgres-16-16-cuentas-ml** — El CI quedó en rojo para todo PR desde el 2026-11-12: la imagen `postgres:16` pasó de 16.15 a 16.16 y, con RLS a FORCE, el choque de `guardarCuentaConectada` contra una cuenta de Mercado Libre ya conectada a OTRA empresa dejó de salir como `23505` (unique_violation) y ahora sale como `42501` "new row violates row-level security policy (USING expression) for table "cuentas_ml"". La fila ajena nunca se tocó (RLS siguió funcionando); solo el usuario habría visto el error crudo de Postgres en vez del mensaje de `CuentaMlDeOtraEmpresaError`.
+
+  **`lib/ml/cuentas.ts`**: nuevo `esChoqueRlsConFilaAjena` — reconoce ese `42501` solo si el mensaje es de política RLS sobre `cuentas_ml` (un `42501` por permisos mal configurados de `app_user` sigue propagando tal cual). El chequeo de `23505` se mantiene para Postgres ≤ 16.15 (Railway puede seguir en una versión anterior).
+
+  Cubierto por las 2 pruebas que fallaban: `lib/ml/cuentas.test.ts` ("cuenta_id_externa ya conectada a OTRA empresa") y `db/rls-cuentas-ml.test.ts` ("una cuenta ya conectada a OTRA empresa… bajo RLS a FORCE"). Sin migraciones.
