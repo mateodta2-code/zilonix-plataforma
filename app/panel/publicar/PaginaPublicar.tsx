@@ -6,7 +6,6 @@ import { FormularioPublicar } from "./FormularioPublicar";
 import { SeccionesImportar } from "./SeccionesImportar";
 import type { Cuenta } from "./CuentasDestino";
 import { HistorialPublicaciones, type ProductoHistorial } from "./HistorialPublicaciones";
-import { SeccionClip } from "./SeccionClip";
 import {
   construirEstadoInicial,
   construirEstadoInicialDesdeImportacion,
@@ -59,7 +58,6 @@ export function PaginaPublicar({
   cuentas,
   historial,
   prefillNuevo,
-  clipHabilitado,
   itemImportado,
   importarOrigen,
   importarSkuNoEncontrado,
@@ -72,7 +70,6 @@ export function PaginaPublicar({
   cuentas: Cuenta[];
   historial: ProductoHistorial[];
   prefillNuevo: { titulo: string; precio: string; foto: string };
-  clipHabilitado: boolean;
   itemImportado: ItemImportado | null;
   importarOrigen: string;
   importarSkuNoEncontrado: string;
@@ -185,9 +182,6 @@ export function PaginaPublicar({
         onCargar={(p) => cargarEnFormulario(p, "reintentar")}
         onDuplicar={(p) => cargarEnFormulario(p, "duplicar")}
       />
-
-      {/* --- Punto 9: Clip --- */}
-      {clipHabilitado && <SeccionClip cuentas={cuentas} />}
     </>
   );
 }

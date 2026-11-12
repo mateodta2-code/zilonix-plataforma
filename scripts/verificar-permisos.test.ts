@@ -232,13 +232,13 @@ const RUTAS_EXENTAS: Record<string, string> = {
   // existiendo solo para no romper un link viejo guardado (el botón de
   // Investigación, un bookmark, una notificación ya mandada).
   "app/panel/publicar/nuevo/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#formulario-publicar (reenviando titulo/precio/foto) — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
-  // Rama feat-publicar-clip — reenviar cuentaId/sku/itemId/clipSubido/
-  // error ya no tiene efecto (SeccionClip.tsx busca/sube/consulta por
-  // su cuenta, con fetch del cliente a las rutas nuevas bajo
-  // app/api/ml/clip/, todas en RUTAS_PROTEGIDAS más arriba) — el
+  // Quitar Clip de Publicar — la tarjeta de Clip (y su ancla #clip) se
+  // sacó por completo de /panel/publicar (Mercado Libre bloquea la
+  // subida de Clips por API para ítems locales). Reenviar
+  // cuentaId/sku/itemId/clipSubido/error ya no tiene ningún efecto — el
   // redirect sigue existiendo solo por compatibilidad con un link
   // viejo, nunca lee ni escribe nada.
-  "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#clip — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar y en las rutas nuevas de app/api/ml/clip/",
+  "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
   // Issue #318 (Ley 1581) — exportar o borrar los datos propios no es
   // un permiso de MÓDULO que un rol pueda dar o quitar (como
   // "inventario.crear"): es un derecho sobre los datos de la propia

@@ -105,12 +105,6 @@ export default async function PublicarPage({
     foto: linkHttpSeguro(searchParams.foto ?? null) ?? "",
   };
 
-  // Rama feat-publicar-clip — SeccionClip.tsx ahora busca por SKU,
-  // sube y consulta estado por su cuenta (fetch del cliente a los
-  // Route Handlers nuevos bajo app/api/ml/clip/), nunca con un
-  // query param resuelto acá del lado del servidor como antes.
-  const clipHabilitado = process.env.CLIP_HABILITADO === "true";
-
   // Parte 3, punto A — importarItemId/importarCuentaId llegan de
   // importadores/actions.ts (por SKU o por link, ver importarOrigen).
   // El lookup real (importarItemCompleto) sigue siendo SOLO del
@@ -136,7 +130,6 @@ export default async function PublicarPage({
         cuentas={cuentas.map((c) => ({ id: c.id, nickname: c.nickname, siteId: c.siteId, moneda: c.moneda, idioma: c.idioma }))}
         historial={historial}
         prefillNuevo={prefillNuevo}
-        clipHabilitado={clipHabilitado}
         itemImportado={itemImportado}
         importarOrigen={searchParams.importarOrigen ?? ""}
         importarSkuNoEncontrado={searchParams.importarSkuNoEncontrado ?? ""}
