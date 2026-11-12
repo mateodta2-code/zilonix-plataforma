@@ -224,13 +224,11 @@ async function cargarBackgroundFresco() {
   // background.js es un script clásico (Service Worker de Manifest V3
   // SIN `"type": "module"` en manifest.json, a propósito: nunca se le
   // agrega `export`, eso rompería la extensión real con un
-  // SyntaxError). Hasta la revisión de Pablo sobre a6fdcbd (HIGH 1),
-  // tsc lo trataba como "no es un módulo" para este `import()`
-  // dinámico — ahora que el archivo tiene un `require()` real (carga
-  // extension/lectores/video-comun.js en Node, ver el comentario junto
-  // a esRemitentePublicar/ZilonixVideoComun en background.js), tsc lo
-  // reconoce como CommonJS y el error desaparece solo — nunca hizo
-  // falta tocar este archivo a mano para eso.
+  // SyntaxError). tsc necesita verlo como CommonJS para este `import()`
+  // dinámico — background.js termina con el mismo patrón dual
+  // `module.exports = {}` que ya usan content.js/marcador-zilonix.js
+  // (nunca corre en el navegador real, ahí no existe `module`), solo
+  // para eso.
   await import("./background.js");
   // El script se ejecuta entero al importarlo — incluida la barrida
   // "al cargar" (cerrarPestanasActualizarTodoVencidas(), ver issue
@@ -964,152 +962,5 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
     await mandarImportarLink(LINK_CATALOGO, 1, null);
 
     expect(mockActual.llamadas.create).toEqual([]);
-  });
-});
-
-// Issue #44 (anexo 2, "Importar video a Clip") — mismo mecanismo de
-// abrir-o-enfocar-Publicar que "zilonix:importar-publicar" (arriba,
-// manejarAbrirOEnfocarPublicar), con su propio cooldown y un ancla
-// "#clip" cuando hace falta abrir una pestaña nueva. background.js
-// revalida la URL del video (última línea real de defensa) aunque
-// extension/lectores/video-comun.js ya la validó antes de mandar el
-// mensaje.
-describe('zilonix:importar-video — anexo "Importar video a Clip" (issue #44)', () => {
-  let mockActual: ReturnType<typeof crearChromeMock>;
-  const URL_PRODUCCION = "https://web-production-af270.up.railway.app";
-  const PAYLOAD_VIDEO = { url: "https://video.mercadolibre.com/MCO123/clip.mp4", origen: "Mercado Libre Colombia", paginaUrl: "https://articulo.mercadolibre.com.co/MCO-123" };
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockActual = crearChromeMock();
-    (globalThis as unknown as { chrome: unknown }).chrome = mockActual.chrome;
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    delete (globalThis as unknown as { chrome?: unknown }).chrome;
-  });
-
-  async function mandarImportarVideo(payload: unknown = PAYLOAD_VIDEO, remitenteTabId = 999) {
-    const respuestas: unknown[] = [];
-    mockActual.listeners.onMessage!({ tipo: "zilonix:importar-video", payload }, { tab: { id: remitenteTabId } }, (r) => respuestas.push(r));
-    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 10);
-    return respuestas;
-  }
-
-  it("sin ninguna pestaña de Publicar abierta -> abre una pestaña nueva en /panel/publicar#clip (nunca sin el ancla)", async () => {
-    await cargarBackgroundFresco();
-    mockActual.setPestanasAbiertas([]);
-
-    const respuestas = await mandarImportarVideo();
-
-    expect(mockActual.llamadas.create).toEqual([{ id: 100, url: `${URL_PRODUCCION}/panel/publicar#clip`, active: true }]);
-    expect(respuestas).toEqual([{ ok: true, abrioNueva: true }]);
-  });
-
-  it("con una pestaña de Publicar YA abierta -> la enfoca, nunca abre otra (mismo criterio que importar-publicar)", async () => {
-    await cargarBackgroundFresco();
-    mockActual.setPestanasAbiertas([{ id: 7, url: `${URL_PRODUCCION}/panel/publicar`, windowId: 3 }]);
-    mockActual.setRespuestasSendMessage({ 7: { ok: true, publicar: true } });
-
-    const respuestas = await mandarImportarVideo();
-
-    expect(mockActual.llamadas.create).toEqual([]);
-    expect(mockActual.llamadas.update).toEqual([{ tabId: 7, props: { active: true } }]);
-    expect(respuestas).toEqual([{ ok: true, abrioNueva: false }]);
-  });
-
-  it("rechaza una URL que no es https, un m3u8, un mpd, un blob: o un data: -- nunca abre ni enfoca nada, y avisa {ok:false} siempre (última línea real de defensa)", async () => {
-    await cargarBackgroundFresco();
-    mockActual.setPestanasAbiertas([]);
-    for (const urlMala of [
-      "http://video.mercadolibre.com/clip.mp4",
-      "https://video.mercadolibre.com/clip.m3u8",
-      "https://video.mercadolibre.com/clip.mpd",
-      "blob:https://articulo.mercadolibre.com.co/1234-5678",
-      "data:video/mp4;base64,AAAA",
-      "https://video.mercadolibre.com/clip.mp4.html",
-    ]) {
-      const respuestas = await mandarImportarVideo({ ...PAYLOAD_VIDEO, url: urlMala });
-      expect(respuestas).toEqual([{ ok: false, razon: "url_no_valida" }]);
-    }
-    expect(mockActual.llamadas.create).toEqual([]);
-  });
-
-  // Revisión de Pablo (sobre a6fdcbd, HIGH 1) — caso real reportado:
-  // las URLs firmadas del CDN de TikTok no siempre muestran ".mp4" en
-  // el path. background.js tiene que aceptarla igual que content.js
-  // ya la reconoce (misma función real, ZilonixVideoComun.esUrlVideoValida)
-  // — prueba end-to-end content->background con exactamente ese caso.
-  it("acepta una URL de video SIN extensión en un host de la allowlist (caso real de CDN de TikTok) -- prueba e2e content->background", async () => {
-    await cargarBackgroundFresco();
-    mockActual.setPestanasAbiertas([]);
-    const urlTikTokCdn = "https://v16-webapp.tiktok.com/abc123def456/?a=1988&br=1200000";
-
-    const respuestas = await mandarImportarVideo({ ...PAYLOAD_VIDEO, url: urlTikTokCdn, origen: "TikTok" });
-
-    expect(mockActual.llamadas.create).toEqual([{ id: 100, url: `${URL_PRODUCCION}/panel/publicar#clip`, active: true }]);
-    expect(respuestas).toEqual([{ ok: true, abrioNueva: true }]);
-  });
-
-  // Revisión de Pablo (sobre a6fdcbd, HIGH 1) — spoofing real: un host
-  // que SOLO se parece al de un CDN permitido (substring, prefijo o
-  // sufijo falso) nunca puede colarse por la rama "sin extensión".
-  it("rechaza spoofs de dominio sobre una URL sin extensión: tiktokcdn.com.evil.com y evil-tiktokcdn.com -- prueba e2e content->background", async () => {
-    await cargarBackgroundFresco();
-    mockActual.setPestanasAbiertas([]);
-    for (const urlSpoof of ["https://tiktokcdn.com.evil.com/video-sin-extension", "https://evil-tiktokcdn.com/video-sin-extension"]) {
-      const respuestas = await mandarImportarVideo({ ...PAYLOAD_VIDEO, url: urlSpoof, origen: "TikTok" });
-      expect(respuestas).toEqual([{ ok: false, razon: "url_no_valida" }]);
-    }
-    expect(mockActual.llamadas.create).toEqual([]);
-  });
-
-  it("sin payload -> avisa {ok:false}, nunca abre nada, nunca revienta", async () => {
-    await cargarBackgroundFresco();
-    const respuestas = await mandarImportarVideo(null);
-    expect(respuestas).toEqual([{ ok: false, razon: "url_no_valida" }]);
-    expect(mockActual.llamadas.create).toEqual([]);
-  });
-
-  it("doble clic en menos de 3s -> solo se abre UNA pestaña", async () => {
-    await cargarBackgroundFresco();
-    mockActual.setPestanasAbiertas([]);
-
-    await mandarImportarVideo(PAYLOAD_VIDEO, 1);
-    await mandarImportarVideo(PAYLOAD_VIDEO, 1);
-
-    expect(mockActual.llamadas.create.length).toBe(1);
-  });
-
-  it("el cooldown de 'importar video' es independiente del de 'importar a Publicar' -- uno no bloquea al otro", async () => {
-    await cargarBackgroundFresco();
-    mockActual.setPestanasAbiertas([]);
-
-    const respuestasPublicar: unknown[] = [];
-    mockActual.listeners.onMessage!(
-      { tipo: "zilonix:importar-publicar", payload: { titulo: "Reloj", precio: 1000, descripcion: null, imagenes: [] } },
-      { tab: { id: 1 } },
-      (r) => respuestasPublicar.push(r)
-    );
-    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 10);
-    await mandarImportarVideo(PAYLOAD_VIDEO, 1);
-
-    // 2 pestañas nuevas -- una para el formulario normal, otra (con
-    // #clip) para el video, ninguna bloqueada por el cooldown de la otra.
-    expect(mockActual.llamadas.create.length).toBe(2);
-    expect(mockActual.llamadas.create[1].url).toBe(`${URL_PRODUCCION}/panel/publicar#clip`);
-  });
-
-  it("el pendiente guardado viaja con tipo 'zilonix:importar-video' -- zilonix:pedir-importacion-pendiente lo entrega tal cual", async () => {
-    await cargarBackgroundFresco();
-    mockActual.setPestanasAbiertas([]); // nadie acepta en vivo -> queda pendiente
-    await mandarImportarVideo();
-
-    const respuestas: unknown[] = [];
-    mockActual.listeners.onMessage!({ tipo: "zilonix:pedir-importacion-pendiente" }, { tab: { id: 7, url: URL_PUBLICAR_PRODUCCION } }, (r) => respuestas.push(r));
-    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
-
-    expect(respuestas).toEqual([{ payload: PAYLOAD_VIDEO, tipo: "zilonix:importar-video" }]);
   });
 });

@@ -18,24 +18,6 @@
 // haya hecho clic en "Analizar" (ver más abajo).
 "use strict";
 
-// Revisión de Pablo (sobre a6fdcbd, HIGH 1) — bug real: hasta esta
-// corrección, la validación de URL de video vivía DUPLICADA (una
-// versión en extension/lectores/video-comun.js, otra a mano acá, más
-// estricta) y se desalinearon — video-comun.js SÍ confirmaba un
-// `<source type="video/mp4">` sin extensión real de TikTok, pero esta
-// copia lo rechazaba en silencio. Ahora es LA MISMA función real en
-// los 2 lados: `importScripts` (real en un Service Worker de
-// Manifest V3 sin `"type":"module"`, como este — carga un script
-// adicional de forma síncrona, sin bundler) deja `ZilonixVideoComun`
-// disponible acá igual que en un content script. En Node (vitest,
-// `import()` dinámico de este archivo) no existe `importScripts`, se
-// usa require() directo — mismo patrón dual que el resto de la
-// extensión (ver lectores/mercadolibre.js para U/CONFIG).
-if (typeof importScripts === "function") {
-  importScripts("lectores/video-comun.js");
-}
-const ZilonixVideoComun = typeof importScripts === "function" ? globalThis.ZilonixVideoComun : require("./lectores/video-comun.js");
-
 // Issue #251 — "zilonix:dato-pagina-seguimiento" suma al mismo relevo
 // genérico: Seguimiento no puede leer inventario/vendidos/publicaciones
 // de un recurso AJENO por la API de Mercado Libre (403/ausente,
@@ -91,18 +73,6 @@ const TIEMPO_MAX_IMPORTACION_PENDIENTE_MS = 2 * 60 * 1000;
 // variable en memoria, para sobrevivir un reciclado del Service Worker
 // entre el primer clic y el segundo).
 const COOLDOWN_IMPORTAR_PUBLICAR_MS = 3000;
-
-// Issue #44 (anexo "Importar video a Clip") — "zilonix:importar-video"
-// reutiliza EXACTAMENTE el mismo mecanismo de abrir-o-enfocar-Publicar
-// que "zilonix:importar-publicar" (ver manejarAbrirOEnfocarPublicar,
-// abajo) — mismo valor de cooldown (COOLDOWN_IMPORTAR_PUBLICAR_MS,
-// arriba), pero con su propia clave de storage.session: un clic en
-// "Importar a Publicar" y uno en "Importar video a Clip" casi al
-// mismo tiempo (desde 2 pestañas distintas, por ejemplo) no tienen por
-// qué pisarse entre sí. La validación real de la URL del video (última
-// línea real de defensa) vive ahora en `ZilonixVideoComun.esUrlVideoValida`
-// (ver el require()/importScripts al principio de este archivo) —
-// nunca una copia separada acá.
 
 // Issue #44 — misma idea que CONFIG.URL_APP (extension/config.js) pero
 // del lado del Service Worker, que nunca carga ese archivo (solo corre
@@ -1044,20 +1014,14 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
     return;
   }
 
-  // Issue #44 (revisión de Pablo sobre el PR #290; generalizado en el
-  // anexo "Importar video a Clip") — "Importar a Publicar abre o
-  // enfoca Publicar": bug real que Mateo reportó — hasta la tarea
-  // original, el botón solo mandaba el mensaje a una pestaña de
-  // /panel/publicar que YA estuviera abierta; sin ninguna, se perdía
-  // en silencio ("no pasó nada"). "Seguir en Zilonix" sí abre su
-  // propia pestaña con el clic — este manejador hace lo mismo, con el
-  // mismo criterio de "nunca navega sin un clic real" (el clic YA
-  // pasó, en content.js, antes de este mensaje). El anexo reutiliza
-  // ESTE MISMO manejador para "zilonix:importar-video" ("Importar
-  // video a Clip") — mismo mecanismo de abrir/enfocar/pendiente, solo
-  // cambia la clave del cooldown (independiente entre los 2 botones) y
-  // el ancla de la URL cuando hace falta abrir una pestaña nueva
-  // (`#clip` para el video, nada para el formulario normal).
+  // Issue #44 (revisión de Pablo sobre el PR #290) — "Importar a
+  // Publicar abre o enfoca Publicar": bug real que Mateo reportó —
+  // hasta la tarea original, el botón solo mandaba el mensaje a una
+  // pestaña de /panel/publicar que YA estuviera abierta; sin ninguna,
+  // se perdía en silencio ("no pasó nada"). "Seguir en Zilonix" sí
+  // abre su propia pestaña con el clic — este manejador hace lo
+  // mismo, con el mismo criterio de "nunca navega sin un clic real"
+  // (el clic YA pasó, en content.js, antes de este mensaje).
   function manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, opciones) {
     if (!mensaje.payload) return;
     // Evita el doble clic: un segundo mensaje del MISMO tipo dentro de
@@ -1143,28 +1107,6 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
 
   if (mensaje.tipo === "zilonix:importar-publicar") {
     return manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, { claveCooldown: "ultimoImportarPublicarMs", hashDestino: "" });
-  }
-
-  // Issue #44 (anexo "Importar video a Clip") — botón nuevo en
-  // Mercado Libre/Amazon/Temu/AliExpress/Alibaba/Shein/TikTok (ver
-  // extension/lectores/video-comun.js + content.js): la URL de video
-  // (CON la marca de agua del sitio, nunca se intenta quitarla) ya
-  // pasó por lector.leerVideo (y por ZilonixVideoComun.esUrlVideoValida
-  // acá mismo, última línea real de defensa) antes de llegar — se abre
-  // o enfoca /panel/publicar#clip con el MISMO mecanismo de arriba.
-  //
-  // Revisión de Pablo (sobre a6fdcbd, HIGH 1) — bug real: hasta esta
-  // corrección, una URL rechazada acá terminaba en un `return;` mudo
-  // — content.js nunca se enteraba de que background.js no hizo nada,
-  // y el botón terminaba mostrando "Enviado ✓" como si hubiera
-  // funcionado. Ahora se contesta `{ok:false}` siempre, para que
-  // content.js pueda mostrar un mensaje real en vez de fingir éxito.
-  if (mensaje.tipo === "zilonix:importar-video") {
-    if (!mensaje.payload || !ZilonixVideoComun.esUrlVideoValida(mensaje.payload.url)) {
-      if (typeof sendResponse === "function") sendResponse({ ok: false, razon: "url_no_valida" });
-      return;
-    }
-    return manejarAbrirOEnfocarPublicar(mensaje, remitente, sendResponse, { claveCooldown: "ultimoImportarVideoMs", hashDestino: "#clip" });
   }
 
   // Issue #44 — /panel/publicar (marcador-zilonix.js) lo pide apenas su
@@ -1419,3 +1361,13 @@ chrome.action.onClicked.addListener((tab) => {
     void chrome.runtime.lastError;
   });
 });
+
+// Nada que exportar de verdad (extension/background.test.ts lo carga
+// solo por sus efectos: registrar los listeners de arriba, nunca por
+// un valor de retorno) — mismo patrón dual que content.js/
+// marcador-zilonix.js, solo para que tsc reconozca este archivo como
+// CommonJS en el `import()` dinámico del test (nunca corre en el
+// navegador real: ahí no existe `module`).
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {};
+}

@@ -111,22 +111,14 @@
     // acá no hace falta ningún chequeo de ruta aparte, mismo criterio
     // que el resto de este mapa.
     "zilonix:importar-link-error": "importar-link-error",
-    // Issue #44 (anexo 2 "Importar video a Clip") — "Importar video a
-    // Clip" (Mercado Libre, Amazon, Temu, AliExpress, Alibaba, Shein,
-    // TikTok): mismo criterio exacto que "zilonix:importar-publicar",
-    // ver el ack especial más abajo (`TIPOS_QUE_NECESITAN_ACK_PUBLICAR`)
-    // — background.js necesita el mismo {ok:true, publicar:true/false}
-    // para decidir si enfoca esta pestaña o abre una nueva.
-    "zilonix:importar-video": "importar-video",
   };
 
-  // Issue #44 (anexo 2) — generalizado de "solo zilonix:importar-publicar"
-  // a un set: background.js necesita el MISMO ack real
-  // {ok:true, publicar:esPaginaPublicar()} para los 2 tipos que abren o
-  // enfocan /panel/publicar (ver manejarAbrirOEnfocarPublicar en
-  // background.js) — nunca el {ok:true} simple que alcanza para el
-  // resto de este mapa (vendidos/listado/resenas/seguimiento/cola).
-  const TIPOS_QUE_NECESITAN_ACK_PUBLICAR = new Set(["zilonix:importar-publicar", "zilonix:importar-video"]);
+  // background.js necesita el ack real {ok:true, publicar:esPaginaPublicar()}
+  // para los tipos que abren o enfocan /panel/publicar (ver
+  // manejarAbrirOEnfocarPublicar en background.js) — nunca el {ok:true}
+  // simple que alcanza para el resto de este mapa (vendidos/listado/
+  // resenas/seguimiento/cola).
+  const TIPOS_QUE_NECESITAN_ACK_PUBLICAR = new Set(["zilonix:importar-publicar"]);
 
   chrome.runtime.onMessage.addListener((mensaje, _remitente, sendResponse) => {
     if (!mensaje || !mensaje.payload) return;
@@ -138,12 +130,11 @@
     // Y /panel/publicar*, mismo content script — ver "matches" en
     // manifest.json), así que hasta esta corrección respondía
     // {ok:true} desde CUALQUIER ruta, con cualquier tipo de mensaje —
-    // background.js ("Importar a Publicar" nuevo, y "Importar video a
-    // Clip" desde el anexo 2) necesita distinguir de verdad si la
-    // pestaña que acaba de reenviar el postMessage es /panel/publicar
-    // (la única con algo real escuchando estos 2 tipos), nunca si
-    // cualquier otra pestaña de Seller simplemente reenvió el mensaje
-    // sin que nadie del otro lado hiciera algo útil con él. Para el
+    // background.js ("Importar a Publicar") necesita distinguir de
+    // verdad si la pestaña que acaba de reenviar el postMessage es
+    // /panel/publicar (la única con algo real escuchando este tipo),
+    // nunca si cualquier otra pestaña de Seller simplemente reenvió el
+    // mensaje sin que nadie del otro lado hiciera algo útil con él. Para el
     // resto de tipos (vendidos/listado/resenas/seguimiento/
     // cola-seguimiento), el ack sigue siendo {ok:true} a secas, sin
     // cambios — esos SÍ tienen sentido en cualquier ruta de Seller.
@@ -209,22 +200,17 @@
     });
   });
 
-  // Issue #44 — "Importar a Publicar"/"Importar video a Clip" (anexo
-  // 2) abren o enfocan /panel/publicar (background.js) y dejan el
-  // payload guardado como "importacionPendiente" cuando TODAVÍA no hay
-  // ninguna pestaña de Publicar escuchando — esta pestaña (recién
-  // cargada, o ya abierta) lo pide UNA vez que esté lista. background.js
-  // lo entrega una sola vez y lo borra — llamar esto más de una vez (el
-  // fallback de abajo) es seguro: sin nada pendiente, la respuesta
-  // simplemente no trae `payload`.
-  //
-  // Issue #44 (anexo 2) — generalizado: el pendiente ahora viaja con
-  // su propio `tipo` (antes siempre era "importar-publicar" a secas,
-  // hardcodeado) — se reenvía con el nombre externo correcto vía
-  // TIPOS_REENVIADOS, el MISMO mapa que ya traduce el broadcast en
-  // vivo (arriba), así que un pendiente de video nunca se posta como
-  // si fuera uno de publicar. `|| "importar-publicar"` es solo
-  // compatibilidad defensiva con un pendiente sin `tipo` (nunca
+  // Issue #44 — "Importar a Publicar" abre o enfoca /panel/publicar
+  // (background.js) y deja el payload guardado como
+  // "importacionPendiente" cuando TODAVÍA no hay ninguna pestaña de
+  // Publicar escuchando — esta pestaña (recién cargada, o ya abierta)
+  // lo pide UNA vez que esté lista. background.js lo entrega una sola
+  // vez y lo borra — llamar esto más de una vez (el fallback de abajo)
+  // es seguro: sin nada pendiente, la respuesta simplemente no trae
+  // `payload`. El pendiente viaja con su propio `tipo`, reenviado con
+  // el nombre externo correcto vía TIPOS_REENVIADOS (el MISMO mapa que
+  // ya traduce el broadcast en vivo, arriba). `|| "importar-publicar"`
+  // es solo compatibilidad defensiva con un pendiente sin `tipo` (nunca
   // debería pasar en la práctica — chrome.storage.session no sobrevive
   // un reinicio del navegador, así que no hay pendientes viejos reales
   // tras este deploy — pero nunca cuesta nada cubrir el caso).
