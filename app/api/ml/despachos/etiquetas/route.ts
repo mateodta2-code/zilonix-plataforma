@@ -4,6 +4,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
 import { listarDespachosPendientes, obtenerEtiquetasPdf, marcarEtiquetasImpresas, EtiquetaNoImprimibleError } from "@/lib/ml/despachos";
+import { quitarHojasDeLista } from "@/lib/pdf-etiqueta";
 
 // Tarea 2.10 — "imprimes etiquetas de 10 pedidos en un clic": un form
 // normal (no Server Action, que no puede devolver un PDF crudo) postea
@@ -47,7 +48,16 @@ export async function POST(request: NextRequest) {
       cuentaId,
       elegidos.map((d) => d.shipmentIdExterno)
     );
-    return new NextResponse(pdf, { headers: { "content-type": "application/pdf", "content-disposition": "inline; filename=etiquetas.pdf" } });
+    // Solo las guías, sin la hoja de lista de despacho (ver
+    // quitarHojasDeLista). Si eso falla, se entrega el PDF completo de
+    // Mercado Libre — nunca dejar el lote sin imprimir por un extra.
+    let soloGuias = pdf;
+    try {
+      soloGuias = await quitarHojasDeLista(pdf);
+    } catch (errorLista) {
+      console.warn("[api/ml/despachos/etiquetas] no se pudo quitar la lista de despacho, se entrega el PDF completo:", errorLista instanceof Error ? errorLista.message : String(errorLista));
+    }
+    return new NextResponse(soloGuias, { headers: { "content-type": "application/pdf", "content-disposition": "inline; filename=etiquetas.pdf" } });
   } catch (error) {
     if (error instanceof EtiquetaNoImprimibleError) return NextResponse.json({ error: error.message }, { status: 409 });
     const mensaje = error instanceof Error ? error.message : "Error desconocido.";

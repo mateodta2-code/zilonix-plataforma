@@ -1,6 +1,6 @@
 import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
-import { agregarContenidoAEtiqueta, reescalarEtiquetaASticker } from "./pdf-etiqueta";
+import { agregarContenidoAEtiqueta, quitarHojasDeLista, reescalarEtiquetaASticker } from "./pdf-etiqueta";
 
 // pdf-lib no deja incrustar una página sin contenido ("Can't embed
 // page with missing Contents") — una página en blanco de verdad no
@@ -105,5 +105,46 @@ describe("agregarContenidoAEtiqueta", () => {
     const { width, height } = salida.getPage(0).getSize();
     expect(width).toBeCloseTo(10 * PUNTOS_POR_CM, 1);
     expect(height).toBeCloseTo(15 * PUNTOS_POR_CM, 1);
+  });
+});
+
+// Tamaños reales del PDF de /shipment_labels (guía Flex, 2026-11-13):
+// guía 10x15cm y lista de despacho en A4.
+const GUIA: [number, number] = [283.4646, 425.1969];
+const A4: [number, number] = [595.2756, 841.8898];
+
+async function pdfConPaginas(tamanos: [number, number][]): Promise<ArrayBuffer> {
+  const doc = await PDFDocument.create();
+  for (const [ancho, alto] of tamanos) doc.addPage([ancho, alto]).drawRectangle({ x: 0, y: 0, width: ancho, height: alto });
+  const bytes = await doc.save();
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+describe("quitarHojasDeLista", () => {
+  it("deja solo las guías y quita las hojas A4 de lista de despacho", async () => {
+    const original = await pdfConPaginas([GUIA, GUIA, GUIA, A4]);
+    const salida = await PDFDocument.load(await quitarHojasDeLista(original));
+    expect(salida.getPageCount()).toBe(3);
+    for (const pagina of salida.getPages()) expect(pagina.getSize().width).toBeCloseTo(GUIA[0], 1);
+  });
+
+  it("si todas las hojas son A4, no quita nada (nunca un PDF vacío)", async () => {
+    const original = await pdfConPaginas([A4, A4]);
+    expect(await quitarHojasDeLista(original)).toBe(original);
+  });
+
+  it("sin hoja A4, el PDF vuelve tal cual", async () => {
+    const original = await pdfConPaginas([GUIA, GUIA]);
+    expect(await quitarHojasDeLista(original)).toBe(original);
+  });
+});
+
+describe("agregarContenidoAEtiqueta con lista de despacho", () => {
+  it("la franja va solo en la guía; la hoja A4 de lista queda del mismo tamaño", async () => {
+    const original = await pdfConPaginas([GUIA, A4]);
+    const salida = await PDFDocument.load(await agregarContenidoAEtiqueta(original, [{ titulo: "Gorra", cantidad: 1, skuCodigo: null }]));
+    expect(salida.getPage(0).getSize().height).toBeGreaterThan(GUIA[1]);
+    expect(salida.getPage(1).getSize().width).toBeCloseTo(A4[0], 1);
+    expect(salida.getPage(1).getSize().height).toBeCloseTo(A4[1], 1);
   });
 });
