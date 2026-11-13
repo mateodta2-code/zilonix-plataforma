@@ -83,7 +83,6 @@ En todos, la extensión solo corre en la página que el usuario tiene abierta y 
 | `aliexpress.com`, `aliexpress.us` | Igual: comparar el producto abierto como fuente de abastecimiento. |
 | `shein.com`, `shein.com.co` | Igual: comparar el producto abierto como fuente de abastecimiento. |
 | `alibaba.com` | Igual: comparar el producto abierto con proveedores mayoristas. |
-| `tiktok.com` | Traer el enlace de video de un clip que el usuario tiene abierto, para usarlo en la sección Publicar de Zilonix Seller. |
 | `web-production-af270.up.railway.app` y `web-staging-d979.up.railway.app` (solo `/panel/investigacion*` y `/panel/publicar*`) | Son las páginas de Zilonix Seller. Ahí la extensión marca que está instalada y entrega al panel del usuario los datos leídos. Staging es el ambiente de pruebas. |
 
 > Nota para el siguiente cambio del manifest: los dos últimos dominios son direcciones de Railway. Si la aplicación pasa a un dominio propio, hay que cambiarlos en `manifest.json`, en `extension/background.js`, en `extension/marcador-zilonix.js` y aquí.

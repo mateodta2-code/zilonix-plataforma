@@ -16,8 +16,11 @@ describe("/privacidad", () => {
     expect(html).toContain("no lee contraseñas");
   });
 
-  it("deja los campos {{DATO: …}} tal cual y no deja Markdown crudo", () => {
-    expect(html).toContain("{{DATO: razón social}}");
+  it("muestra los datos reales, deja los {{DATO: …}} pendientes tal cual, sin TikTok y sin Markdown crudo", () => {
+    expect(html).toContain("901578593-5");
+    expect(html).toContain("{{DATO: oficial de protección de datos}}");
+    expect(html).not.toContain("{{DATO: razón social}}");
+    expect(html).not.toContain("TikTok");
     expect(html).not.toContain("**");
     expect(html).not.toContain("## ");
   });
