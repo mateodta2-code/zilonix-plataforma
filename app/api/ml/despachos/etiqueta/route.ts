@@ -44,8 +44,15 @@ export async function GET(request: NextRequest) {
     await marcarEtiquetasImpresas(empresa.id, despacho.cuentaMlId, [despacho.shipmentIdExterno]);
     // Producto y cantidad debajo de la guía (ver
     // agregarContenidoAEtiqueta) — antes del sticker, para que el
-    // sticker de 10x15 también los traiga.
-    const conContenido = await agregarContenidoAEtiqueta(pdf, despacho.items);
+    // sticker de 10x15 también los traiga. Es un extra: si falla con
+    // algún PDF real de Mercado Libre, se entrega la guía original
+    // sin franja en vez de dejar al usuario sin poder imprimir.
+    let conContenido = pdf;
+    try {
+      conContenido = await agregarContenidoAEtiqueta(pdf, despacho.items);
+    } catch (errorFranja) {
+      console.warn(`[api/ml/despachos/etiqueta] no se pudo agregar el contenido a la guía del despacho ${despachoId}, se entrega sin franja:`, errorFranja instanceof Error ? errorFranja.message : String(errorFranja));
+    }
     const cuerpo = formato === "sticker" ? await reescalarEtiquetaASticker(conContenido) : conContenido;
     return new NextResponse(cuerpo, {
       headers: { "content-type": "application/pdf", "content-disposition": `inline; filename=guia-${despacho.shipmentIdExterno}${formato === "sticker" ? "-sticker" : ""}.pdf` },
