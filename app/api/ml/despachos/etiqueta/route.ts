@@ -4,7 +4,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
 import { EtiquetaNoImprimibleError, marcarEtiquetasImpresas, marcarGuiaVista, obtenerDespachoParaGuia, obtenerEtiquetasPdf } from "@/lib/ml/despachos";
-import { reescalarEtiquetaASticker } from "@/lib/pdf-etiqueta";
+import { agregarContenidoAEtiqueta, reescalarEtiquetaASticker } from "@/lib/pdf-etiqueta";
 
 // Fase 1 de Despachos (issue "Despachos", punto 4) — "Ver guía" y "Ver
 // guía (sticker)" de UNA sola tarjeta. Mismo PDF real de Mercado Libre
@@ -42,7 +42,11 @@ export async function GET(request: NextRequest) {
     const pdf = await obtenerEtiquetasPdf(empresa.id, despacho.cuentaMlId, [despacho.shipmentIdExterno]);
     await marcarGuiaVista(empresa.id, despachoId);
     await marcarEtiquetasImpresas(empresa.id, despacho.cuentaMlId, [despacho.shipmentIdExterno]);
-    const cuerpo = formato === "sticker" ? await reescalarEtiquetaASticker(pdf) : pdf;
+    // Producto y cantidad debajo de la guía (ver
+    // agregarContenidoAEtiqueta) — antes del sticker, para que el
+    // sticker de 10x15 también los traiga.
+    const conContenido = await agregarContenidoAEtiqueta(pdf, despacho.items);
+    const cuerpo = formato === "sticker" ? await reescalarEtiquetaASticker(conContenido) : conContenido;
     return new NextResponse(cuerpo, {
       headers: { "content-type": "application/pdf", "content-disposition": `inline; filename=guia-${despacho.shipmentIdExterno}${formato === "sticker" ? "-sticker" : ""}.pdf` },
     });

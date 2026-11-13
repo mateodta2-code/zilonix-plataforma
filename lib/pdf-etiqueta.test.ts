@@ -1,6 +1,6 @@
 import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
-import { reescalarEtiquetaASticker } from "./pdf-etiqueta";
+import { agregarContenidoAEtiqueta, reescalarEtiquetaASticker } from "./pdf-etiqueta";
 
 // pdf-lib no deja incrustar una página sin contenido ("Can't embed
 // page with missing Contents") — una página en blanco de verdad no
@@ -55,5 +55,55 @@ describe("reescalarEtiquetaASticker", () => {
     // distinta a la hoja de destino.
     expect(anchoSalida).toBeCloseTo(10 * PUNTOS_POR_CM, 1);
     expect(altoSalida).toBeCloseTo(15 * PUNTOS_POR_CM, 1);
+  });
+});
+
+describe("agregarContenidoAEtiqueta", () => {
+  const items = [
+    { titulo: "Camiseta negra talla M", cantidad: 2, skuCodigo: "CAM-NEG-M" },
+    { titulo: "Gorra azul", cantidad: 1, skuCodigo: null },
+  ];
+
+  it("sin ítems devuelve el PDF tal cual", async () => {
+    const original = await pdfDePrueba(288, 432);
+    expect(await agregarContenidoAEtiqueta(original, [])).toBe(original);
+  });
+
+  it("alarga cada página hacia abajo (mismo ancho, más alta) sin cambiar el número de páginas", async () => {
+    const doc = await PDFDocument.create();
+    for (let i = 0; i < 2; i++) doc.addPage([288, 432]).drawRectangle({ x: 0, y: 0, width: 288, height: 432 });
+    const bytes = await doc.save();
+    const original = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+
+    const salida = await PDFDocument.load(await agregarContenidoAEtiqueta(original, items));
+    expect(salida.getPageCount()).toBe(2);
+    for (const pagina of salida.getPages()) {
+      const { width, height } = pagina.getSize();
+      expect(width).toBeCloseTo(288, 1);
+      expect(height).toBeGreaterThan(432);
+    }
+  });
+
+  it("un título largo hace la franja más alta (parte en renglones, no se sale de la hoja)", async () => {
+    const original = await pdfDePrueba(288, 432);
+    const corto = await PDFDocument.load(await agregarContenidoAEtiqueta(original, [{ titulo: "Gorra", cantidad: 1, skuCodigo: null }]));
+    const largo = await PDFDocument.load(
+      await agregarContenidoAEtiqueta(original, [{ titulo: "Set de 3 pijamas de algodón para dama con estampado floral ".repeat(3), cantidad: 1, skuCodigo: "SKU-MUY-LARGO-SIN-ESPACIOS-0000000000000000000000" }])
+    );
+    expect(largo.getPage(0).getSize().height).toBeGreaterThan(corto.getPage(0).getSize().height);
+  });
+
+  it("un emoji o carácter raro en el título no rompe la guía", async () => {
+    const original = await pdfDePrueba(288, 432);
+    const salida = await agregarContenidoAEtiqueta(original, [{ titulo: "⭐ Oferta 🔥 Pijama — niña ñandú", cantidad: 3, skuCodigo: null }]);
+    expect((await PDFDocument.load(salida)).getPageCount()).toBe(1);
+  });
+
+  it("el sticker de 10x15 se sigue armando a partir de la guía con contenido", async () => {
+    const original = await pdfDePrueba(288, 432);
+    const salida = await PDFDocument.load(await reescalarEtiquetaASticker(await agregarContenidoAEtiqueta(original, items)));
+    const { width, height } = salida.getPage(0).getSize();
+    expect(width).toBeCloseTo(10 * PUNTOS_POR_CM, 1);
+    expect(height).toBeCloseTo(15 * PUNTOS_POR_CM, 1);
   });
 });
