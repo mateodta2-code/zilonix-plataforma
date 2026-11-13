@@ -4,7 +4,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
 import { listarDespachosPendientes, listarDespachosYaImpresos, obtenerEtiquetasPdf, marcarEtiquetasImpresas, EtiquetaNoImprimibleError } from "@/lib/ml/despachos";
-import { quitarHojasDeLista } from "@/lib/pdf-etiqueta";
+import { quitarHojasDeLista, recortarGuias, reescalarEtiquetaASticker } from "@/lib/pdf-etiqueta";
 
 // Tarea 2.10 — "imprimes etiquetas de 10 pedidos en un clic": un form
 // normal (no Server Action, que no puede devolver un PDF crudo) postea
@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
   // impresas (listarDespachosYaImpresos) — en los dos casos la lista
   // sale de la base, nunca de lo que mande el formulario.
   const reimprimir = formData.get("modo") === "reimprimir";
+  const sticker = formData.get("formato") === "sticker";
   const candidatos = reimprimir ? await listarDespachosYaImpresos(empresa.id) : await listarDespachosPendientes(empresa.id);
   const elegidos = candidatos.filter((d) => seleccionados.includes(d.shipmentIdExterno));
   if (elegidos.length === 0) {
@@ -55,15 +56,19 @@ export async function POST(request: NextRequest) {
       elegidos.map((d) => d.shipmentIdExterno)
     );
     // Solo las guías, sin la hoja de lista de despacho (ver
-    // quitarHojasDeLista). Si eso falla, se entrega el PDF completo de
-    // Mercado Libre — nunca dejar el lote sin imprimir por un extra.
-    let soloGuias = pdf;
+    // quitarHojasDeLista); con formato=sticker, además cada guía
+    // recortada a su propia hoja de 10x15 (ver recortarGuias). Si eso
+    // falla, se entrega el PDF completo de Mercado Libre — nunca dejar
+    // el lote sin imprimir por un extra.
+    let cuerpo = pdf;
     try {
-      soloGuias = await quitarHojasDeLista(pdf);
-    } catch (errorLista) {
-      console.warn("[api/ml/despachos/etiquetas] no se pudo quitar la lista de despacho, se entrega el PDF completo:", errorLista instanceof Error ? errorLista.message : String(errorLista));
+      cuerpo = await quitarHojasDeLista(pdf);
+      if (sticker) cuerpo = await reescalarEtiquetaASticker(await recortarGuias(cuerpo));
+    } catch (errorFormato) {
+      console.warn("[api/ml/despachos/etiquetas] no se pudo ajustar el PDF, se entrega el de Mercado Libre completo:", errorFormato instanceof Error ? errorFormato.message : String(errorFormato));
+      cuerpo = pdf;
     }
-    return new NextResponse(soloGuias, { headers: { "content-type": "application/pdf", "content-disposition": "inline; filename=etiquetas.pdf" } });
+    return new NextResponse(cuerpo, { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename=etiquetas${sticker ? "-sticker" : ""}.pdf` } });
   } catch (error) {
     if (error instanceof EtiquetaNoImprimibleError) return NextResponse.json({ error: error.message }, { status: 409 });
     const mensaje = error instanceof Error ? error.message : "Error desconocido.";

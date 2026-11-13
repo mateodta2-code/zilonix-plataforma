@@ -1,4 +1,4 @@
-import { PDFDocument, PDFFont, StandardFonts, rgb } from "pdf-lib";
+import { PDFArray, PDFDocument, PDFFont, PDFRawStream, StandardFonts, decodePDFRawStream, rgb } from "pdf-lib";
 
 // 1 cm = 28.3465 pt (72 pt/in ÷ 2.54 cm/in) — conversión estándar de
 // PDF, no una medida inventada.
@@ -162,6 +162,222 @@ export async function agregarContenidoAEtiqueta(pdfOriginal: ArrayBuffer, items:
     for (const r of renglones) {
       pagina.drawText(r.texto, { x: margen, y, size: tamano, font: r.font, color: rgb(0, 0, 0) });
       y -= interlineado;
+    }
+  }
+
+  const bytes = await salida.save();
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+// ── Sticker 10x15 recortando cada guía ──────────────────────────────
+//
+// Evidencia real (guía de Agencia/Places de /shipment_labels,
+// 2026-11-13): la guía NO viene en 10x15 sino en una hoja A4
+// horizontal, dibujada dentro de un marco de ~9x15cm
+// ("31.18 145.42 255.69 421.51 re" en el contenido de la página) en el
+// lado izquierdo — el resto de la hoja queda en blanco. Reescalar la
+// hoja entera a 10x15 (reescalarEtiquetaASticker) dejaría la guía
+// diminuta. En vez de adivinar en qué posiciones pone Mercado Libre la
+// 2da/3ra guía de un lote, se buscan en el contenido de la página los
+// rectángulos del tamaño de ese marco y cada uno se recorta a su
+// propia página. Si una hoja no trae ningún marco reconocible, se deja
+// completa (mismo resultado que antes de este cambio).
+
+type Matriz = [number, number, number, number, number, number];
+export type Caja = { izquierda: number; abajo: number; derecha: number; arriba: number };
+
+const IDENTIDAD: Matriz = [1, 0, 0, 1, 0, 0];
+
+// Mismo orden que el operador `cm` de PDF: la matriz nueva se aplica
+// ANTES de la actual (CTM' = M × CTM).
+function multiplicar(m: Matriz, n: Matriz): Matriz {
+  return [
+    m[0] * n[0] + m[1] * n[2],
+    m[0] * n[1] + m[1] * n[3],
+    m[2] * n[0] + m[3] * n[2],
+    m[2] * n[1] + m[3] * n[3],
+    m[4] * n[0] + m[5] * n[2] + n[4],
+    m[4] * n[1] + m[5] * n[3] + n[5],
+  ];
+}
+
+function transformarRect(x: number, y: number, w: number, h: number, ctm: Matriz): Caja {
+  const puntos = [
+    [x, y],
+    [x + w, y],
+    [x, y + h],
+    [x + w, y + h],
+  ].map(([px, py]) => [ctm[0] * px + ctm[2] * py + ctm[4], ctm[1] * px + ctm[3] * py + ctm[5]]);
+  const xs = puntos.map((p) => p[0]);
+  const ys = puntos.map((p) => p[1]);
+  return { izquierda: Math.min(...xs), abajo: Math.min(...ys), derecha: Math.max(...xs), arriba: Math.max(...ys) };
+}
+
+const BLANCOS = " \n\r\t\f\0";
+const DELIMITADORES = BLANCOS + "()<>[]{}/%";
+const PATRON_NUMERO = /^[+-]?(\d+\.?\d*|\.\d+)$/;
+
+// Lector mínimo del contenido de una página: solo sigue q/Q/cm (para
+// saber la posición real) y junta los `re` (rectángulos). Strings,
+// diccionarios y arreglos se saltan sin interpretarlos. Una imagen en
+// línea (BI…EI, binario) corta la lectura: se devuelve lo encontrado
+// hasta ahí, nunca se adivina el resto.
+export function rectangulosDelContenido(contenido: string): Caja[] {
+  const rects: Caja[] = [];
+  const pila: Matriz[] = [];
+  let ctm = IDENTIDAD;
+  let numeros: number[] = [];
+  let i = 0;
+  const n = contenido.length;
+
+  while (i < n) {
+    const c = contenido[i];
+    if (BLANCOS.includes(c)) {
+      i++;
+    } else if (c === "%") {
+      while (i < n && contenido[i] !== "\n" && contenido[i] !== "\r") i++;
+    } else if (c === "(") {
+      let profundidad = 1;
+      i++;
+      while (i < n && profundidad > 0) {
+        if (contenido[i] === "\\") i++;
+        else if (contenido[i] === "(") profundidad++;
+        else if (contenido[i] === ")") profundidad--;
+        i++;
+      }
+      numeros = [];
+    } else if (c === "<" || c === ">") {
+      // "<<"/">>" (diccionario) o "<...>" (string hexadecimal): nunca
+      // son operandos de q/Q/cm/re.
+      if (c === "<" && contenido[i + 1] !== "<") {
+        while (i < n && contenido[i] !== ">") i++;
+      }
+      i += c === contenido[i + 1] ? 2 : 1;
+      numeros = [];
+    } else if ("[]{}".includes(c)) {
+      i++;
+      numeros = [];
+    } else if (c === "/") {
+      i++;
+      while (i < n && !DELIMITADORES.includes(contenido[i])) i++;
+      numeros = [];
+    } else {
+      const inicio = i;
+      while (i < n && !DELIMITADORES.includes(contenido[i])) i++;
+      const token = contenido.slice(inicio, i);
+      if (token === "") {
+        // Un delimitador suelto (p.ej. un ")" sin su "(") — se salta;
+        // sin esto el ciclo nunca avanzaría.
+        i++;
+        numeros = [];
+        continue;
+      }
+      if (PATRON_NUMERO.test(token)) {
+        numeros.push(Number(token));
+        continue;
+      }
+      if (token === "q") pila.push(ctm);
+      else if (token === "Q") ctm = pila.pop() ?? IDENTIDAD;
+      else if (token === "cm" && numeros.length >= 6) ctm = multiplicar(numeros.slice(-6) as Matriz, ctm);
+      else if (token === "re" && numeros.length >= 4) {
+        const [x, y, w, h] = numeros.slice(-4);
+        rects.push(transformarRect(x, y, w, h, ctm));
+      } else if (token === "BI") break;
+      numeros = [];
+    }
+  }
+  return rects;
+}
+
+// Tamaño del marco real (255.69 x 421.51 pt ≈ 9x15cm) con holgura —
+// nunca un rectángulo cualquiera (un código de barras, una línea).
+function esMarcoDeGuia(caja: Caja): boolean {
+  const ancho = caja.derecha - caja.izquierda;
+  const alto = caja.arriba - caja.abajo;
+  return ancho >= 235 && ancho <= 300 && alto >= 395 && alto <= 450;
+}
+
+function seSolapanCasiTodo(a: Caja, b: Caja): boolean {
+  const ancho = Math.min(a.derecha, b.derecha) - Math.max(a.izquierda, b.izquierda);
+  const alto = Math.min(a.arriba, b.arriba) - Math.max(a.abajo, b.abajo);
+  if (ancho <= 0 || alto <= 0) return false;
+  const areaMenor = Math.min((a.derecha - a.izquierda) * (a.arriba - a.abajo), (b.derecha - b.izquierda) * (b.arriba - b.abajo));
+  return (ancho * alto) / areaMenor > 0.9;
+}
+
+// El marco se dibuja varias veces casi en el mismo lugar (borde,
+// fondo, recorte): se juntan en uno solo. Orden de lectura: de arriba
+// hacia abajo y de izquierda a derecha.
+export function marcosDeGuia(rects: Caja[]): Caja[] {
+  const marcos: Caja[] = [];
+  for (const r of rects.filter(esMarcoDeGuia)) {
+    const igual = marcos.findIndex((m) => seSolapanCasiTodo(m, r));
+    if (igual === -1) {
+      marcos.push({ ...r });
+      continue;
+    }
+    const m = marcos[igual];
+    marcos[igual] = {
+      izquierda: Math.min(m.izquierda, r.izquierda),
+      abajo: Math.min(m.abajo, r.abajo),
+      derecha: Math.max(m.derecha, r.derecha),
+      arriba: Math.max(m.arriba, r.arriba),
+    };
+  }
+  return marcos.sort((a, b) => (Math.abs(a.arriba - b.arriba) > 20 ? b.arriba - a.arriba : a.izquierda - b.izquierda));
+}
+
+function contenidoDePagina(doc: PDFDocument, indice: number): string | null {
+  try {
+    const contents = doc.getPage(indice).node.Contents();
+    if (!contents) return null;
+    const flujos = contents instanceof PDFArray ? contents.asArray().map((r) => doc.context.lookup(r)) : [contents];
+    let texto = "";
+    for (const flujo of flujos) {
+      if (!(flujo instanceof PDFRawStream)) return null;
+      texto += Buffer.from(decodePDFRawStream(flujo).decode()).toString("latin1");
+    }
+    return texto;
+  } catch {
+    return null;
+  }
+}
+
+// Una hoja que YA mide ~10x15 (la guía Flex) no se recorta.
+function yaEsTamanoSticker(ancho: number, alto: number): boolean {
+  return ancho <= ANCHO_STICKER_PT + 15 && alto <= ALTO_STICKER_PT + 15;
+}
+
+const MARGEN_RECORTE_PT = 4;
+
+// Cada guía encontrada pasa a ser su propia página (del tamaño de su
+// marco + un margen mínimo); las hojas sin marco reconocible, las ya
+// de tamaño sticker y la lista de despacho se copian tal cual.
+// Después, reescalarEtiquetaASticker lleva cada página a 10x15.
+export async function recortarGuias(pdfOriginal: ArrayBuffer): Promise<ArrayBuffer> {
+  const original = await PDFDocument.load(pdfOriginal);
+  const salida = await PDFDocument.create();
+
+  for (let i = 0; i < original.getPageCount(); i++) {
+    const pagina = original.getPage(i);
+    const { width, height } = pagina.getSize();
+    const contenido = yaEsTamanoSticker(width, height) || esHojaDeLista(width, height) ? null : contenidoDePagina(original, i);
+    const marcos = contenido ? marcosDeGuia(rectangulosDelContenido(contenido)) : [];
+
+    if (marcos.length === 0) {
+      const [copia] = await salida.copyPages(original, [i]);
+      salida.addPage(copia);
+      continue;
+    }
+    for (const marco of marcos) {
+      const caja = {
+        left: Math.max(0, marco.izquierda - MARGEN_RECORTE_PT),
+        bottom: Math.max(0, marco.abajo - MARGEN_RECORTE_PT),
+        right: Math.min(width, marco.derecha + MARGEN_RECORTE_PT),
+        top: Math.min(height, marco.arriba + MARGEN_RECORTE_PT),
+      };
+      const incrustada = await salida.embedPage(pagina, caja);
+      salida.addPage([caja.right - caja.left, caja.top - caja.bottom]).drawPage(incrustada, { x: 0, y: 0 });
     }
   }
 

@@ -1,6 +1,6 @@
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, concatTransformationMatrix, popGraphicsState, pushGraphicsState, rectangle, stroke } from "pdf-lib";
 import { describe, expect, it } from "vitest";
-import { agregarContenidoAEtiqueta, quitarHojasDeLista, reescalarEtiquetaASticker } from "./pdf-etiqueta";
+import { agregarContenidoAEtiqueta, marcosDeGuia, quitarHojasDeLista, recortarGuias, rectangulosDelContenido, reescalarEtiquetaASticker } from "./pdf-etiqueta";
 
 // pdf-lib no deja incrustar una página sin contenido ("Can't embed
 // page with missing Contents") — una página en blanco de verdad no
@@ -161,5 +161,87 @@ describe("agregarContenidoAEtiqueta con lista de despacho", () => {
     const original = await pdfConPaginas([GUIA_COLECTA, A4]);
     const salida = await PDFDocument.load(await agregarContenidoAEtiqueta(original, [{ titulo: "Gorra", cantidad: 1, skuCodigo: null }]));
     expect(salida.getPage(0).getSize().height).toBeGreaterThan(GUIA_COLECTA[1]);
+  });
+});
+
+// Marco real de la guía de Agencia (contenido de la página de
+// /shipment_labels, 2026-11-13): "31.1811 145.4173 255.6850 421.5118 re".
+const MARCO_REAL = { x: 31.1811, y: 145.4173, w: 255.685, h: 421.5118 };
+
+describe("rectangulosDelContenido / marcosDeGuia", () => {
+  it("lee el marco real y lo junta aunque Mercado Libre lo dibuje varias veces", () => {
+    const contenido = `${MARCO_REAL.x} ${MARCO_REAL.y} ${MARCO_REAL.w} ${MARCO_REAL.h} re
+31.4646 145.7008 255.1181 420.9449 re
+q
+31.4646 145.7008 255.1181 420.9449 re
+Q`;
+    const marcos = marcosDeGuia(rectangulosDelContenido(contenido));
+    expect(marcos).toHaveLength(1);
+    expect(marcos[0].izquierda).toBeCloseTo(MARCO_REAL.x, 1);
+  });
+
+  it("aplica cm dentro de q/Q y lo deshace al cerrar con Q", () => {
+    const rects = rectangulosDelContenido("q 1 0 0 1 300 0 cm 0 0 10 10 re Q 0 0 10 10 re");
+    expect(rects[0].izquierda).toBeCloseTo(300, 5);
+    expect(rects[1].izquierda).toBeCloseTo(0, 5);
+  });
+
+  it("un texto que dice 're' o trae paréntesis no se confunde con un rectángulo", () => {
+    const rects = rectangulosDelContenido("BT (1 2 3 4 re \) ( anidado ) fin) Tj [(re) 120 (x)] TJ ET <</MCID 0>> BDC EMC");
+    expect(rects).toHaveLength(0);
+  });
+
+  it("ignora rectángulos que no tienen tamaño de guía (código de barras, líneas)", () => {
+    expect(marcosDeGuia(rectangulosDelContenido("42.8 478.7 65.7 19.8 re 31.4 234.7 255.1 0.28 re"))).toHaveLength(0);
+  });
+
+  it("varias guías en la misma hoja: orden de lectura, de izquierda a derecha", () => {
+    const marcos = marcosDeGuia(rectangulosDelContenido("311 145 255 421 re 31 145 255 421 re"));
+    expect(marcos.map((m) => Math.round(m.izquierda))).toEqual([31, 311]);
+  });
+});
+
+async function hojaConMarcos(ancho: number, alto: number, xs: number[]): Promise<ArrayBuffer> {
+  const doc = await PDFDocument.create();
+  const pagina = doc.addPage([ancho, alto]);
+  for (const x of xs) {
+    pagina.pushOperators(pushGraphicsState(), concatTransformationMatrix(1, 0, 0, 1, x, 0), rectangle(0, MARCO_REAL.y, MARCO_REAL.w, MARCO_REAL.h), stroke(), popGraphicsState());
+  }
+  const bytes = await doc.save();
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+describe("recortarGuias", () => {
+  it("guía de Agencia (A4 horizontal, una guía): queda una página del tamaño del marco", async () => {
+    const salida = await PDFDocument.load(await recortarGuias(await hojaConMarcos(841.89, 595.28, [MARCO_REAL.x])));
+    expect(salida.getPageCount()).toBe(1);
+    const { width, height } = salida.getPage(0).getSize();
+    expect(width).toBeCloseTo(MARCO_REAL.w + 8, 0);
+    expect(height).toBeCloseTo(MARCO_REAL.h + 8, 0);
+  });
+
+  it("dos guías en la misma hoja A4 horizontal: una página por guía", async () => {
+    const salida = await PDFDocument.load(await recortarGuias(await hojaConMarcos(841.89, 595.28, [31, 311])));
+    expect(salida.getPageCount()).toBe(2);
+  });
+
+  it("una hoja sin marco reconocible se deja completa (nunca se pierde una guía)", async () => {
+    const original = await pdfDePrueba(841.89, 595.28);
+    const salida = await PDFDocument.load(await recortarGuias(original));
+    expect(salida.getPageCount()).toBe(1);
+    expect(salida.getPage(0).getSize().width).toBeCloseTo(841.89, 1);
+  });
+
+  it("la guía Flex (ya en 10x15) no se recorta", async () => {
+    const salida = await PDFDocument.load(await recortarGuias(await hojaConMarcos(GUIA[0], GUIA[1], [10])));
+    expect(salida.getPage(0).getSize().width).toBeCloseTo(GUIA[0], 1);
+    expect(salida.getPage(0).getSize().height).toBeCloseTo(GUIA[1], 1);
+  });
+
+  it("después de recortar, el sticker queda en 10x15 por guía", async () => {
+    const recortado = await recortarGuias(await hojaConMarcos(841.89, 595.28, [31, 311]));
+    const salida = await PDFDocument.load(await reescalarEtiquetaASticker(recortado));
+    expect(salida.getPageCount()).toBe(2);
+    for (const p of salida.getPages()) expect(p.getSize().height).toBeCloseTo(15 * PUNTOS_POR_CM, 1);
   });
 });
