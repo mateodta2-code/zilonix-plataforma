@@ -27,6 +27,7 @@ import {
   listarCuentasConErrorDespacho,
   listarDespachosFiltrados,
   listarDespachosPendientes,
+  listarDespachosYaImpresos,
   listarTarjetasDespacho,
   marcarDespachado,
   marcarEtiquetasImpresas,
@@ -160,6 +161,30 @@ describe("despachos (tarea 2.10)", () => {
   it("si Mercado Libre bloquea la impresión (ya recogido), se ve el error real explicado", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaErrorPdf("NOT_PRINTABLE_STATUS")));
     await expect(obtenerEtiquetasPdf(empresaId, cuentaId, ["222"])).rejects.toThrow(EtiquetaNoImprimibleError);
+  });
+
+  // "Reimprimir en lote" (2026-11-13) — depende de la prueba de
+  // impresión masiva de arriba, que deja "111" con etiqueta impresa.
+  it("listarDespachosYaImpresos trae la ya impresa (con el nickname de su cuenta), nunca una no imprimible", async () => {
+    const ya = await listarDespachosYaImpresos(empresaId);
+    const fila = ya.find((d) => d.shipmentIdExterno === "111");
+    expect(fila?.cuentaNickname).toBe("VENDEDOR_DESP");
+    expect(fila?.etiquetaImpresaTs).not.toBeNull();
+    expect(ya.map((d) => d.shipmentIdExterno)).not.toContain("222");
+    expect(ya.map((d) => d.shipmentIdExterno)).not.toContain("333");
+  });
+
+  it("listarDespachosYaImpresos: empresa B nunca ve las impresas de empresa A", async () => {
+    expect(await listarDespachosYaImpresos(empresaBId)).toHaveLength(0);
+  });
+
+  it("listarDespachosYaImpresos: una ya marcada como despachada no se ofrece para reimprimir", async () => {
+    await dbComoEmpresa(empresaId, (tx) => tx.update(despachosMl).set({ despachadoTs: new Date() }).where(eq(despachosMl.shipmentIdExterno, "111")));
+    try {
+      expect((await listarDespachosYaImpresos(empresaId)).map((d) => d.shipmentIdExterno)).not.toContain("111");
+    } finally {
+      await dbComoEmpresa(empresaId, (tx) => tx.update(despachosMl).set({ despachadoTs: null }).where(eq(despachosMl.shipmentIdExterno, "111")));
+    }
   });
 });
 
