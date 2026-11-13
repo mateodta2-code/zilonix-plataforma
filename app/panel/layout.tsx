@@ -2,6 +2,7 @@ import { tienePermiso } from "@/lib/roles";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { MarcoApp } from "@/components/marco/MarcoApp";
 import type { GrupoNav } from "@/components/marco/tipos";
+import { itemsAdministracion } from "@/components/marco/menuAdministracion";
 
 // Marco visual (issue de las subpáginas) — mueve acá la carga que
 // antes hacía SOLO app/panel/page.tsx para pintar el marco (usuario
@@ -74,24 +75,14 @@ export default async function PanelLayout({ children }: { children: React.ReactN
     ],
   };
 
-  // Tarea 2.3/1.7 — mismos 5 links que antes vivían sueltos abajo de
-  // la página, solo para el Dueño. Acá se agrupan como "Administración"
-  // en la barra lateral, en vez de una fila de texto.
-  const grupos: GrupoNav[] = esDueno
-    ? [
-        grupoPrincipal,
-        {
-          etiqueta: "Administración",
-          items: [
-            { etiqueta: "Invitar persona", href: "/panel/invitar", icono: "invitar" },
-            { etiqueta: "Ajustar roles", href: "/panel/roles", icono: "roles" },
-            { etiqueta: "Acceso de soporte", href: "/panel/soporte", icono: "soporte" },
-            { etiqueta: "Conectar Mercado Libre", href: "/panel/conectar-ml", icono: "conectarMl" },
-            { etiqueta: "Avisos de Mercado Libre", href: "/panel/avisos-ml", icono: "avisosMl" },
-          ],
-        },
-      ]
-    : [grupoPrincipal];
+  // Tarea 2.3/1.7 — los 5 links de "Administración". Antes salían solo
+  // si el rol se llamaba "Dueño", aunque cada página ya pide su propio
+  // permiso (tarea 1.8): un Gerente con esos permisos no veía el menú
+  // (Sharel, 13-nov). Ahora cada link sale con el MISMO permiso que
+  // exige su página, y el grupo solo si queda alguno.
+  const administracion = itemsAdministracion(permisos);
+  const grupos: GrupoNav[] =
+    administracion.length > 0 ? [grupoPrincipal, { etiqueta: "Administración", items: administracion }] : [grupoPrincipal];
 
   return (
     <MarcoApp
@@ -107,3 +98,4 @@ export default async function PanelLayout({ children }: { children: React.ReactN
     </MarcoApp>
   );
 }
+
