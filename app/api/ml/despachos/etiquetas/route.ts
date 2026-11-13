@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
-import { listarDespachosPendientes, obtenerEtiquetasPdf, marcarEtiquetasImpresas, EtiquetaNoImprimibleError } from "@/lib/ml/despachos";
+import { listarDespachosPendientes, listarDespachosYaImpresos, obtenerEtiquetasPdf, marcarEtiquetasImpresas, EtiquetaNoImprimibleError } from "@/lib/ml/despachos";
 import { quitarHojasDeLista } from "@/lib/pdf-etiqueta";
 
 // Tarea 2.10 — "imprimes etiquetas de 10 pedidos en un clic": un form
@@ -26,12 +26,18 @@ export async function POST(request: NextRequest) {
   const seleccionados = formData.getAll("shipmentId").map(String);
   if (seleccionados.length === 0) return NextResponse.json({ error: "No se eligió ningún despacho." }, { status: 400 });
 
+  // "Reimprimir en lote": mismo flujo, pero validando contra las ya
+  // impresas (listarDespachosYaImpresos) — en los dos casos la lista
+  // sale de la base, nunca de lo que mande el formulario.
+  const reimprimir = formData.get("modo") === "reimprimir";
+  const candidatos = reimprimir ? await listarDespachosYaImpresos(empresa.id) : await listarDespachosPendientes(empresa.id);
+  const elegidos = candidatos.filter((d) => seleccionados.includes(d.shipmentIdExterno));
+  if (elegidos.length === 0) {
+    return NextResponse.json({ error: reimprimir ? "Ninguna de las elegidas se puede reimprimir." : "Ninguno de los elegidos sigue pendiente." }, { status: 400 });
+  }
   // Todos los pendientes deben ser de la MISMA cuenta de Mercado Libre
   // para armar una sola llamada a /shipment_labels — si hay de varias
   // cuentas, se imprime por cuenta (la pantalla ya agrupa así).
-  const pendientes = await listarDespachosPendientes(empresa.id);
-  const elegidos = pendientes.filter((d) => seleccionados.includes(d.shipmentIdExterno));
-  if (elegidos.length === 0) return NextResponse.json({ error: "Ninguno de los elegidos sigue pendiente." }, { status: 400 });
   const cuentaId = elegidos[0].cuentaMlId;
   if (elegidos.some((d) => d.cuentaMlId !== cuentaId)) {
     return NextResponse.json({ error: "Elige despachos de una sola cuenta de Mercado Libre a la vez." }, { status: 400 });
