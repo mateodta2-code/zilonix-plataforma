@@ -31,7 +31,7 @@ import {
 } from "@/lib/ml/listadoCliente";
 import { ETIQUETA_APROXIMADO } from "@/lib/seguimiento/aproximados";
 import { generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
-import { consumirClicAnalizarReciente, type PlataformaAnalizar } from "./analizarClic";
+import { consumirClicAnalizarReciente, marcarClicAnalizar, type PlataformaAnalizar } from "./analizarClic";
 import { generarQueriesAnalizarAction, generarQueriesPlataformaAction } from "./actions";
 import styles from "./page.module.css";
 
@@ -69,6 +69,13 @@ function numero(n: number): string {
 // un timeout fijo de 90s sin importar cuántos términos hubiera — con
 // 5 términos a 23s cada uno eran 115s reales en el peor caso. Acá el
 // margen siempre depende de cuántas queries se escanean de verdad.
+const AVISO_EXTENSION_SIN_RESPUESTA = "La extensión no respondió. Recarga la pestaña de Mercado Libre o esta página y vuelve a intentar.";
+const AVISO_ESCANEO_TARDO = "El escaneo tardó demasiado y se detuvo. Vuelve a intentar en un momento.";
+// Sin ningún mensaje de la extensión tras este tiempo, se avisa (sin esperar el límite largo del escaneo).
+const ESPERA_RESPUESTA_EXTENSION_MS = 8_000;
+// Si el content script llega tarde, se reintenta este tiempo antes de rendirse.
+const ESPERA_ATRIBUTO_EXTENSION_MS = 3_000;
+
 function calcularTimeoutEscaneoMs(nTerminos: number): number {
   return nTerminos * 25_000 + 10_000;
 }
@@ -231,7 +238,26 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   // usaron en ESE escaneo (para etiquetar el bloque cuando el
   // resultado llegue — el mensaje de background.js no las repite).
   const limiteMlRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Aviso visible cuando la extensión no responde o no arranca el escaneo
+  // (nunca una pantalla vacía sin explicación). Los refs "recibido" dicen
+  // si llegó algún mensaje de la extensión antes de vencer el límite.
+  // Un aviso por origen ("extension", "ml" o la clave de la plataforma): el de
+  // una plataforma nunca pisa ni borra el de otra.
+  const [avisos, setAvisos] = useState<Record<string, string>>({});
+  const respondioRef = useRef<Record<string, boolean>>({});
+  function ponerAviso(origen: string, texto: string | null) {
+    setAvisos((actuales) => {
+      if (texto === null) {
+        if (!(origen in actuales)) return actuales;
+        const { [origen]: _quitado, ...resto } = actuales;
+        return resto;
+      }
+      return { ...actuales, [origen]: texto };
+    });
+  }
   const limitePlataformaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const avisoRapidoMlRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const avisoRapidoPlataformaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queriesUsadasPlataformaRef = useRef<string[]>([]);
   // Refs #227 — a qué término pertenece el escaneo en curso de CADA
   // tipo (ML / multiplataforma), fijado cuando arranca (ver
@@ -329,6 +355,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   // "Analizar también en: Mercado Libre" (issue #231, punto D — antes
   // esa fila nunca incluía ML) la llama igual que este efecto.
   useEffect(() => {
+    // Con `false` no se consume la marca: ver el reintento de abajo.
     if (conExtension !== true) return;
     const marca = consumirClicAnalizarReciente();
     if (!marca) return;
@@ -339,6 +366,29 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- escanearMercadoLibre/analizarEnPlataforma son estables (misma identidad por render)
   }, [conExtension, termino]);
+
+  // Si la extensión todavía no marcó la página (content script tardío), se
+  // reintenta unos segundos; si aparece, el efecto de arriba sigue su curso
+  // con la marca intacta. Si no aparece y había un clic real reciente, se
+  // avisa y la marca se vuelve a guardar para no perder ese clic.
+  useEffect(() => {
+    if (conExtension !== false) return;
+    const inicio = Date.now();
+    const id = setInterval(() => {
+      if (document.documentElement.hasAttribute("data-zilonix-extension")) {
+        clearInterval(id);
+        setConExtension(true);
+        return;
+      }
+      if (Date.now() - inicio < ESPERA_ATRIBUTO_EXTENSION_MS) return;
+      clearInterval(id);
+      const marca = consumirClicAnalizarReciente();
+      if (!marca) return;
+      marcarClicAnalizar(marca.pais, marca.plataforma);
+      ponerAviso("extension", AVISO_EXTENSION_SIN_RESPUESTA);
+    }, 250);
+    return () => clearInterval(id);
+  }, [conExtension]);
 
   // Issue #231 — extraído del efecto de arriba para poder llamarlo
   // también desde el botón secundario (ver PLATAFORMAS_SECUNDARIAS,
@@ -356,10 +406,21 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     }
     if (!queries.length) return;
     terminoEscaneoMlRef.current = termino;
+    respondioRef.current.ml = false;
+    ponerAviso("ml", null);
+    ponerAviso("extension", null);
     setQueriesUsadas(queries);
     window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo", payload: { terminos: queries, pais } }, window.location.origin);
     setEscaneoEnCurso(true);
-    limiteMlRef.current = setTimeout(() => setEscaneoEnCurso(false), calcularTimeoutEscaneoMs(queries.length));
+    if (avisoRapidoMlRef.current) clearTimeout(avisoRapidoMlRef.current);
+    avisoRapidoMlRef.current = setTimeout(() => {
+      if (!respondioRef.current.ml) ponerAviso("ml", AVISO_EXTENSION_SIN_RESPUESTA);
+    }, ESPERA_RESPUESTA_EXTENSION_MS);
+    limiteMlRef.current = setTimeout(() => {
+      setEscaneoEnCurso(false);
+      // Sin respuesta ya avisó el temporizador corto; con respuesta, el escaneo arrancó y se pasó de tiempo.
+      if (respondioRef.current.ml) ponerAviso("ml", AVISO_ESCANEO_TARDO);
+    }, calcularTimeoutEscaneoMs(queries.length));
   }
 
   // Refs #227 — `terminoBloque` (default: el término vivo, para el
@@ -417,6 +478,10 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
         if (!esMensajeListadoValido(datos.payload)) return;
         const payload = datos.payload;
         const productos = payload.productos.map((p) => construirProductoListado(payload.plataforma, p));
+        if (payload.origen === "escaneo-analizar") {
+          respondioRef.current.ml = true;
+          ponerAviso("ml", null);
+        }
         if (!productos.length) return;
         if (payload.origen === "escaneo-analizar") {
           // Issue #221/#227 — la persona ya autorizó esto con el clic
@@ -433,7 +498,11 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
 
       if (datos.tipo === "escaneo-plataforma-captcha") {
         const payload = datos.payload as { plataforma?: string } | null;
-        if (payload?.plataforma) setCaptchaPlataforma(payload.plataforma);
+        if (payload?.plataforma) {
+          setCaptchaPlataforma(payload.plataforma);
+          respondioRef.current[payload.plataforma] = true;
+          ponerAviso(payload.plataforma, null);
+        }
         return;
       }
 
@@ -442,6 +511,8 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
         setCaptchaPlataforma(null);
         if (!esMensajeListadoValido(datos.payload)) return;
         const payload = datos.payload;
+        respondioRef.current[payload.plataforma] = true;
+        ponerAviso(payload.plataforma, null);
         const config = PLATAFORMAS_MULTIPLATAFORMA.find((p) => p.clave === payload.plataforma);
         const nombrePlataforma = config?.nombre ?? payload.plataforma;
         const productos = payload.productos.map((p) => construirProductoListado(nombrePlataforma, p));
@@ -479,6 +550,9 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     if (limitePlataformaRef.current) clearTimeout(limitePlataformaRef.current);
     setEscaneoPlataformaEnCurso(clave);
     setCaptchaPlataforma(null);
+    respondioRef.current[clave] = false;
+    ponerAviso(clave, null);
+    ponerAviso("extension", null);
     let queries: string[];
     try {
       queries = await generarQueriesPlataformaAction(termino, clave);
@@ -492,7 +566,14 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     queriesUsadasPlataformaRef.current = queries;
     terminoEscaneoPlataformaRef.current = termino;
     window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo-plataforma", payload: { plataforma: clave, terminos: queries } }, window.location.origin);
-    limitePlataformaRef.current = setTimeout(() => setEscaneoPlataformaEnCurso(null), calcularTimeoutEscaneoMs(queries.length) + 120_000);
+    if (avisoRapidoPlataformaRef.current) clearTimeout(avisoRapidoPlataformaRef.current);
+    avisoRapidoPlataformaRef.current = setTimeout(() => {
+      if (!respondioRef.current[clave]) ponerAviso(clave, AVISO_EXTENSION_SIN_RESPUESTA);
+    }, ESPERA_RESPUESTA_EXTENSION_MS);
+    limitePlataformaRef.current = setTimeout(() => {
+      setEscaneoPlataformaEnCurso((actual) => (actual === clave ? null : actual));
+      if (respondioRef.current[clave]) ponerAviso(clave, AVISO_ESCANEO_TARDO);
+    }, calcularTimeoutEscaneoMs(queries.length) + 120_000);
   }
 
   // Issue #231, punto D — "Analizar también en…" tiene que listar
@@ -730,6 +811,12 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
           </p>
         </div>
       ) : null}
+
+      {Object.entries(avisos).map(([origen, texto]) => (
+        <div key={origen} className={styles.insignia} role="alert">
+          <Chip estado="peligro">{texto}</Chip>
+        </div>
+      ))}
 
       {escaneoEnCurso ? (
         <div className={styles.insignia}>
