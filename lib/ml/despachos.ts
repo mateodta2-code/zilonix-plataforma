@@ -1013,7 +1013,8 @@ export async function deshacerDespachado(empresaId: string, despachoId: string):
   });
 }
 
-export type DespachoParaGuia = { cuentaMlId: string; shipmentIdExterno: string; logisticType: string | null };
+export type ItemDeGuia = { titulo: string; cantidad: number; skuCodigo: string | null };
+export type DespachoParaGuia = { cuentaMlId: string; shipmentIdExterno: string; logisticType: string | null; items: ItemDeGuia[] };
 
 // Resuelve lo mínimo que necesita /api/ml/despachos/etiqueta (singular,
 // botones "Ver guía"/"Ver guía (sticker)" de una sola tarjeta) a partir
@@ -1021,13 +1022,26 @@ export type DespachoParaGuia = { cuentaMlId: string; shipmentIdExterno: string; 
 // URL/el cliente, para que no se pueda pedir la guía de un despacho de
 // otra empresa con solo adivinar un shipmentId.
 export async function obtenerDespachoParaGuia(empresaId: string, despachoId: string): Promise<DespachoParaGuia | null> {
-  const [fila] = await dbComoEmpresa(empresaId, (tx) =>
-    tx
-      .select({ cuentaMlId: despachosMl.cuentaMlId, shipmentIdExterno: despachosMl.shipmentIdExterno, logisticType: despachosMl.logisticType })
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [fila] = await tx
+      .select({ pedidoId: despachosMl.pedidoId, cuentaMlId: despachosMl.cuentaMlId, shipmentIdExterno: despachosMl.shipmentIdExterno, logisticType: despachosMl.logisticType })
       .from(despachosMl)
-      .where(and(eq(despachosMl.empresaId, empresaId), eq(despachosMl.id, despachoId)))
-  );
-  return fila ?? null;
+      .where(and(eq(despachosMl.empresaId, empresaId), eq(despachosMl.id, despachoId)));
+    if (!fila) return null;
+
+    // Producto y cantidad impresos en la franja que se agrega debajo de
+    // la guía (lib/pdf-etiqueta.ts, agregarContenidoAEtiqueta) — quien
+    // empaca ve qué va en el paquete sin abrir la tarjeta. Mismo
+    // criterio que listarTarjetasDespacho: empresa_id explícito además
+    // del pedido_id.
+    const items = await tx
+      .select({ titulo: pedidoItems.titulo, cantidad: pedidoItems.cantidad, skuCodigo: pedidoItems.skuCodigo })
+      .from(pedidoItems)
+      .where(and(eq(pedidoItems.empresaId, empresaId), eq(pedidoItems.pedidoId, fila.pedidoId)))
+      .orderBy(asc(pedidoItems.linea));
+
+    return { cuentaMlId: fila.cuentaMlId, shipmentIdExterno: fila.shipmentIdExterno, logisticType: fila.logisticType, items };
+  });
 }
 
 export type CuentaConErrorDespacho = { cuentaId: string; nickname: string; motivo: string };
