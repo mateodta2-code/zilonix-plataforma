@@ -108,9 +108,11 @@ describe("agregarContenidoAEtiqueta", () => {
   });
 });
 
-// Tamaños reales del PDF de /shipment_labels (guía Flex, 2026-11-13):
-// guía 10x15cm y lista de despacho en A4.
+// Tamaños reales del PDF de /shipment_labels (2026-11-13): guía Flex
+// 10x15cm, guía de colecta en A4 horizontal y lista de despacho en A4
+// vertical.
 const GUIA: [number, number] = [283.4646, 425.1969];
+const GUIA_COLECTA: [number, number] = [841.89, 595.28];
 const A4: [number, number] = [595.2756, 841.8898];
 
 async function pdfConPaginas(tamanos: [number, number][]): Promise<ArrayBuffer> {
@@ -128,7 +130,14 @@ describe("quitarHojasDeLista", () => {
     for (const pagina of salida.getPages()) expect(pagina.getSize().width).toBeCloseTo(GUIA[0], 1);
   });
 
-  it("si todas las hojas son A4, no quita nada (nunca un PDF vacío)", async () => {
+  it("colecta: la guía en A4 horizontal se queda y solo sale la lista en A4 vertical", async () => {
+    const original = await pdfConPaginas([GUIA_COLECTA, A4]);
+    const salida = await PDFDocument.load(await quitarHojasDeLista(original));
+    expect(salida.getPageCount()).toBe(1);
+    expect(salida.getPage(0).getSize().width).toBeCloseTo(GUIA_COLECTA[0], 1);
+  });
+
+  it("si todas las hojas parecen lista, no quita nada (nunca un PDF vacío)", async () => {
     const original = await pdfConPaginas([A4, A4]);
     expect(await quitarHojasDeLista(original)).toBe(original);
   });
@@ -146,5 +155,11 @@ describe("agregarContenidoAEtiqueta con lista de despacho", () => {
     expect(salida.getPage(0).getSize().height).toBeGreaterThan(GUIA[1]);
     expect(salida.getPage(1).getSize().width).toBeCloseTo(A4[0], 1);
     expect(salida.getPage(1).getSize().height).toBeCloseTo(A4[1], 1);
+  });
+
+  it("colecta: la guía en A4 horizontal sí lleva la franja", async () => {
+    const original = await pdfConPaginas([GUIA_COLECTA, A4]);
+    const salida = await PDFDocument.load(await agregarContenidoAEtiqueta(original, [{ titulo: "Gorra", cantidad: 1, skuCodigo: null }]));
+    expect(salida.getPage(0).getSize().height).toBeGreaterThan(GUIA_COLECTA[1]);
   });
 });
