@@ -91,7 +91,11 @@ export const PLANTILLAS: Record<NombrePlantilla, Permiso[]> = {
   Gerente: [
     ...permisosTodo(["ventas", "inventario", "finanzas"], ["consultar", "crear", "modificar", "anular", "autorizar"]),
     ...permisosTodo(["personas"], ["consultar", "crear", "modificar"]),
-    ...permisosTodo(["configuracion"], ["consultar", "modificar"]),
+    // Sharel, 13-nov — el Gerente administra la empresa: conecta otras
+    // cuentas de Mercado Libre (configuracion.crear) y ajusta roles
+    // (configuracion.autorizar, que también abre Acceso de soporte). En
+    // /panel/roles nadie puede agregar un permiso que no tiene.
+    ...permisosTodo(["configuracion"], ["consultar", "crear", "modificar", "autorizar"]),
     ...permisosTodo(["publicidad"], ["consultar"]),
     // Rama feat-promociones — Dueño y Gerente tienen todo (decisión de
     // Mateo); Gerente es quien de verdad usa el módulo día a día.
@@ -157,6 +161,21 @@ export function permisosQueNoPuedeDar(propios: PermisoComparable[], aConceder: P
   return aConceder.filter(
     (p) => !propios.some((q) => q.modulo === p.modulo && q.accion === p.accion && (q.alcance === p.alcance || q.alcance === "todo"))
   );
+}
+
+// /panel/roles (Sharel, 13-nov, el Gerente ya ajusta roles): de lo que
+// se va a guardar, los permisos NUEVOS que quien edita no podría dar.
+// Los que el rol ya tenía se conservan aunque quien edita no los tenga
+// (si no, guardar le borraría al rol algo que no tocó).
+export function permisosNuevosQueNoPuedeDar(
+  propios: PermisoComparable[],
+  actuales: PermisoComparable[],
+  propuestos: PermisoComparable[]
+): PermisoComparable[] {
+  const nuevos = propuestos.filter(
+    (p) => !actuales.some((a) => a.modulo === p.modulo && a.accion === p.accion && a.alcance === p.alcance)
+  );
+  return permisosQueNoPuedeDar(propios, nuevos);
 }
 
 // `permisosDeRolesExistentes` (por nombre): si la empresa ya tiene un
