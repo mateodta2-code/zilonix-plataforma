@@ -38,6 +38,39 @@ export async function reescalarEtiquetaASticker(pdfOriginal: ArrayBuffer): Promi
 
 export type ItemContenidoEtiqueta = { titulo: string; cantidad: number; skuCodigo: string | null };
 
+// Evidencia real (2 PDFs de /shipment_labels descargados de staging,
+// 2026-11-13): la guía Flex viene en 10x15cm (283.46 x 425.20 pt) y la
+// de colecta en A4 HORIZONTAL (841.89 x 595.28 pt); en los dos casos
+// la lista de despacho "Identificación / Productos" (el "manifiesto")
+// viene aparte en A4 VERTICAL (595.28 x 841.89 pt). Hoy la única forma
+// confirmada de distinguirlas es el tamaño y la orientación de la
+// hoja: A4 vertical = lista. Ojo: no basta "A4 = lista" — así se
+// colaba el manifiesto en colecta (guía y lista eran A4 las dos).
+const ANCHO_A4_PT = 595.28;
+const ALTO_A4_PT = 841.89;
+function esHojaDeLista(ancho: number, alto: number): boolean {
+  return Math.abs(ancho - ANCHO_A4_PT) < 3 && Math.abs(alto - ALTO_A4_PT) < 3;
+}
+
+// Impresión masiva "solo las guías, no el manifiesto" (pedido del
+// equipo, 2026-11-13): quita las hojas de lista de despacho y deja
+// solo las guías. Si TODAS las hojas parecen lista (un formato de guía
+// que todavía no hemos visto) o ninguna lo es, el PDF vuelve tal cual —
+// nunca se entrega un PDF vacío ni se quita una guía por adivinar.
+export async function quitarHojasDeLista(pdfOriginal: ArrayBuffer): Promise<ArrayBuffer> {
+  const original = await PDFDocument.load(pdfOriginal);
+  const indicesGuia = original.getPages().flatMap((p, i) => {
+    const { width, height } = p.getSize();
+    return esHojaDeLista(width, height) ? [] : [i];
+  });
+  if (indicesGuia.length === 0 || indicesGuia.length === original.getPageCount()) return pdfOriginal;
+
+  const salida = await PDFDocument.create();
+  for (const pagina of await salida.copyPages(original, indicesGuia)) salida.addPage(pagina);
+  const bytes = await salida.save();
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 // Las fuentes estándar de PDF (Helvetica) solo codifican WinAnsi:
 // pdf-lib TRUENA con un emoji o un carácter fuera de ese juego (un
 // título de Mercado Libre puede traer cualquiera, p.ej. "⭐ Oferta").
@@ -99,6 +132,12 @@ export async function agregarContenidoAEtiqueta(pdfOriginal: ArrayBuffer, items:
   const encabezado = `CONTENIDO (${unidades} ${unidades === 1 ? "unidad" : "unidades"})`;
 
   for (const incrustada of paginasIncrustadas) {
+    // La hoja de lista de despacho ya trae producto y cantidad
+    // (Mercado Libre los imprime ahí): se copia tal cual, sin franja.
+    if (esHojaDeLista(incrustada.width, incrustada.height)) {
+      salida.addPage([incrustada.width, incrustada.height]).drawPage(incrustada);
+      continue;
+    }
     const ancho = incrustada.width;
     // Letra proporcional al ancho de la guía: legible tanto en una
     // guía de 10cm como en una hoja carta, sin ocupar media página.

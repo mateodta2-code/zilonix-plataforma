@@ -46,3 +46,30 @@ describe("ImpresionMasivaForm — pide con fetch, nunca abre una pestaña con JS
     await vi.waitFor(() => expect(open).toHaveBeenCalledWith("blob:fake-url", "_blank"));
   });
 });
+
+describe("ImpresionMasivaForm — modo reimprimir (guías ya impresas)", () => {
+  const YA_IMPRESAS: FilaImpresionMasiva[] = [
+    { ...FILAS[0], cuentaNickname: "TIENDA_UNO", etiquetaImpresaTs: new Date("2026-11-13T20:00:00Z") },
+  ];
+
+  it("las casillas vienen desmarcadas, muestra la cuenta y el botón dice Reimprimir", () => {
+    render(<ImpresionMasivaForm modo="reimprimir" filas={YA_IMPRESAS} total={1} tamanoPagina={25} etiquetaTipo={{ self_service: "Flex" }} />);
+    expect((screen.getByLabelText("Seleccionar envío 9001") as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText("TIENDA_UNO")).not.toBeNull();
+    expect(screen.getByText("Reimprimir seleccionadas")).not.toBeNull();
+  });
+
+  it("manda modo=reimprimir al Route Handler junto con lo marcado", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: "x" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ImpresionMasivaForm modo="reimprimir" filas={YA_IMPRESAS} total={1} tamanoPagina={25} etiquetaTipo={{ self_service: "Flex" }} />);
+    fireEvent.click(screen.getByLabelText("Seleccionar envío 9001"));
+    fireEvent.click(screen.getByText("Reimprimir seleccionadas"));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const cuerpo = fetchMock.mock.calls[0][1].body as FormData;
+    expect(cuerpo.get("modo")).toBe("reimprimir");
+    expect(cuerpo.getAll("shipmentId")).toEqual(["9001"]);
+  });
+});

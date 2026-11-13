@@ -12,6 +12,9 @@ export type FilaImpresionMasiva = {
   logisticType: string | null;
   status: string | null;
   actualizadoTs: Date;
+  // Solo en modo "reimprimir": de qué cuenta es y cuándo se imprimió.
+  cuentaNickname?: string;
+  etiquetaImpresaTs?: Date | null;
 };
 
 export type ImpresionMasivaFormProps = {
@@ -19,6 +22,11 @@ export type ImpresionMasivaFormProps = {
   total: number;
   tamanoPagina: number;
   etiquetaTipo: Record<string, string>;
+  // "reimprimir" (2026-11-13): mismo form para las guías YA impresas —
+  // casillas desmarcadas (se elige qué volver a imprimir), columna de
+  // cuenta y fecha de impresión. El Route Handler valida contra
+  // listarDespachosYaImpresos en vez de los pendientes.
+  modo?: "pendientes" | "reimprimir";
 };
 
 function colorEstadoDespacho(estado: string | null): EstadoChip {
@@ -41,7 +49,8 @@ function formatoFechaColombia(fecha: Date): string {
 // el error se muestra ACÁ (mismo párrafo que usa TarjetaDespachoCliente),
 // nunca en una pestaña; solo si de verdad llegó un PDF se abre una
 // pestaña (con un blob: URL propio).
-export function ImpresionMasivaForm({ filas, total, tamanoPagina, etiquetaTipo }: ImpresionMasivaFormProps) {
+export function ImpresionMasivaForm({ filas, total, tamanoPagina, etiquetaTipo, modo = "pendientes" }: ImpresionMasivaFormProps) {
+  const reimprimir = modo === "reimprimir";
   const [enCurso, setEnCurso] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,30 +78,40 @@ export function ImpresionMasivaForm({ filas, total, tamanoPagina, etiquetaTipo }
 
   return (
     <form onSubmit={enviar} className={styles.form}>
-      <Tabla encabezados={["", "Envío", "Tipo", "Estado", "Actualizado"]}>
+      {reimprimir && <input type="hidden" name="modo" value="reimprimir" />}
+      <Tabla encabezados={reimprimir ? ["", "Envío", "Cuenta", "Tipo", "Impresa"] : ["", "Envío", "Tipo", "Estado", "Actualizado"]}>
         {filas.map((d) => (
           <FilaTabla key={d.id}>
             <CeldaTabla>
-              <input type="checkbox" name="shipmentId" value={d.shipmentIdExterno} defaultChecked aria-label={`Seleccionar envío ${d.shipmentIdExterno}`} />
+              <input type="checkbox" name="shipmentId" value={d.shipmentIdExterno} defaultChecked={!reimprimir} aria-label={`Seleccionar envío ${d.shipmentIdExterno}`} />
             </CeldaTabla>
             <CeldaTabla>#{d.shipmentIdExterno}</CeldaTabla>
+            {reimprimir && <CeldaTabla>{d.cuentaNickname ?? "—"}</CeldaTabla>}
             <CeldaTabla>{etiquetaTipo[d.logisticType ?? "otro"] ?? d.logisticType}</CeldaTabla>
-            <CeldaTabla>
-              <Chip estado={colorEstadoDespacho(d.status)}>{d.status ?? "—"}</Chip>
-            </CeldaTabla>
-            <CeldaTabla className={styles.celdaFecha}>{formatoFechaColombia(d.actualizadoTs)}</CeldaTabla>
+            {reimprimir ? (
+              <CeldaTabla className={styles.celdaFecha}>{d.etiquetaImpresaTs ? formatoFechaColombia(d.etiquetaImpresaTs) : "—"}</CeldaTabla>
+            ) : (
+              <>
+                <CeldaTabla>
+                  <Chip estado={colorEstadoDespacho(d.status)}>{d.status ?? "—"}</Chip>
+                </CeldaTabla>
+                <CeldaTabla className={styles.celdaFecha}>{formatoFechaColombia(d.actualizadoTs)}</CeldaTabla>
+              </>
+            )}
           </FilaTabla>
         ))}
       </Tabla>
       <p className={styles.resumenPaginacion}>
-        Mostrando hasta {tamanoPagina} de {total} pendientes de imprimir.
+        {reimprimir ? `Mostrando las ${Math.min(tamanoPagina, total)} impresas más recientes.` : `Mostrando hasta ${tamanoPagina} de ${total} pendientes de imprimir.`}
       </p>
       <Boton type="submit" className={styles.botonImprimir} disabled={enCurso}>
-        Imprimir etiquetas seleccionadas
+        {reimprimir ? "Reimprimir seleccionadas" : "Imprimir etiquetas seleccionadas"}
       </Boton>
       {error && <p className={styles.errorTarjeta}>{error}</p>}
       <p className={styles.nota}>
-        Solo imprime lo seleccionado de esta lista. Si hay despachos de varias cuentas de Mercado Libre, selecciona primero los de una sola cuenta.
+        {reimprimir
+          ? "Marca las guías que quieres volver a imprimir, todas de una sola cuenta de Mercado Libre. Solo aparecen las que Mercado Libre todavía deja imprimir y no se han marcado como despachadas."
+          : "Solo imprime lo seleccionado de esta lista. Si hay despachos de varias cuentas de Mercado Libre, selecciona primero los de una sola cuenta."}
       </p>
     </form>
   );
