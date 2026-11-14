@@ -157,7 +157,14 @@ const nextConfig = {
   // (confirmado con `git grep`), agregar un redirect sin uso real
   // sería adivinar.
   async redirects() {
-    return [{ source: "/login", destination: "/sign-in", permanent: false }];
+    // Dominio único seller.zilonix.com: rutas cortas en español que
+    // apuntan a las páginas reales de Clerk (/sign-in y /sign-up siguen
+    // existiendo, no se tocan).
+    return [
+      { source: "/login", destination: "/sign-in", permanent: false },
+      { source: "/iniciar-sesion", destination: "/sign-in", permanent: false },
+      { source: "/empezar", destination: "/sign-up", permanent: false },
+    ];
   },
   // Tarea 1.10 — blindaje web. Pendiente real antes de dar esto por
   // cerrado del todo: probar en vivo registro, login, 2FA y /cuenta
