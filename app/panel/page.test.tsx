@@ -83,4 +83,19 @@ describe("Inicio · bloque de Finanzas (#143)", () => {
     }
     for (const f of lecturas()) expect(f).not.toHaveBeenCalled();
   });
+
+  it("sin las pestañas Resumen · Pedidos · Despachos · SKU (pedido del equipo, 13-nov)", async () => {
+    const e = await crearEmpresaConPermisos("Inicio sin pestañas", [
+      { modulo: "ventas", accion: "consultar" },
+      { modulo: "inventario", accion: "consultar" },
+    ]);
+    const html = await pintarInicio(e.usuarioId, e.empresaId);
+    // Las tarjetas siguen; los links de pestaña, no.
+    expect(html).toContain("Ventas de hoy");
+    expect(html).toContain("SKU sin vincular");
+    for (const ruta of ["/panel/pedidos", "/panel/despachos", "/panel/sku"]) {
+      expect(html).not.toContain(`href="${ruta}"`);
+    }
+    expect(html).not.toContain(">Resumen<");
+  });
 });

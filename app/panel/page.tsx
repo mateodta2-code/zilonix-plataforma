@@ -5,7 +5,6 @@ import { detalleVentasDeHoy, formatearVentasDelMes, obtenerKpisPanel } from "@/l
 import { leerPublicidadMes, leerTableroMes, leerTableroPorCuenta, leerUtilidadMes } from "@/lib/finanzas/tablero";
 import { BloqueInicioFinanzas } from "@/components/finanzas/BloqueInicioFinanzas";
 import { ChecklistOnboarding } from "@/components/panel/ChecklistOnboarding";
-import { Pestanas, type Pestana } from "@/components/marco/Pestanas";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { iconoDeClave } from "@/components/marco/iconos";
 import styles from "./page.module.css";
@@ -15,13 +14,16 @@ import styles from "./page.module.css";
 // y el NIT de la empresa activa) y nunca mezclados. Las pantallas de
 // negocio de verdad (ventas, inventario) llegan en la Fase 2.
 //
-// Tarea 1.7 — las pestañas se filtran por lo que el rol de esta
-// persona puede consultar (ej. el Operador no ve "Finanzas").
+// Tarea 1.7 — las tarjetas se filtran por lo que el rol de esta
+// persona puede consultar (ej. el Operador no ve "Finanzas"). Las
+// pestañas Resumen · Pedidos · Despachos · SKU que había acá se
+// quitaron (pedido del equipo, 13-nov): repetían links que ya están en
+// la barra lateral.
 //
 // Marco visual (issue de las subpáginas) — el marco (barra lateral +
 // barra superior) ya no se pinta acá: lo pone app/panel/layout.tsx,
 // que envuelve TODA la sección /panel. Esta página queda solo con su
-// propio contenido (saludo, tarjeta de identidad, pestañas, KPIs).
+// propio contenido (saludo, tarjeta de identidad, KPIs).
 //
 // obtenerContextoPanel() (lib/panel-contexto.ts) es la misma consulta
 // que ya pidió app/panel/layout.tsx para pintar el marco — cache() de
@@ -33,7 +35,7 @@ import styles from "./page.module.css";
 // donde obtenerKpisPanel vuelve a hacer la misma pregunta (y es lo que
 // cubre la prueba contra Postgres). Las dos tienen que atrapar solo
 // SinPermisoError: /panel es el resumen, un rol sin "ventas" igual
-// entra y simplemente no ve esas pestañas ni esas cifras. Un error de
+// entra y simplemente no ve esas cifras. Un error de
 // verdad (la base no responde, un id mal formado) sí tiene que subir.
 //
 // Issue #143 — con finanzas.consultar, debajo de los KPI de siempre va
@@ -81,17 +83,6 @@ export default async function PanelPage() {
     finanzas = { tablero, utilidad, porCuenta, publicidad };
   }
 
-  const pestanas: Pestana[] = [
-    { etiqueta: "Resumen", href: "/panel", activa: true },
-    ...(vePedidosYDespachos
-      ? [
-          { etiqueta: "Pedidos", href: "/panel/pedidos", activa: false },
-          { etiqueta: "Despachos", href: "/panel/despachos", activa: false },
-        ]
-      : []),
-    ...(veSku ? [{ etiqueta: "SKU", href: "/panel/sku", activa: false }] : []),
-  ];
-
   return (
     <>
       {/* Corrección (fix-ui-claro-fade-abajo, punto 5): el saludo
@@ -104,8 +95,6 @@ export default async function PanelPage() {
       <p className={styles.subtitulo}>Este es el resumen de {activa.nombre}</p>
 
       <ChecklistOnboarding empresaId={activa.id} puedeConectarMl={puedeConectarMl} puedeVerPedidos={vePedidosYDespachos && veFinanzas} />
-
-      <Pestanas pestanas={pestanas} />
 
       <div className={styles.gridKpi}>
         {vePedidosYDespachos && kpis.ventasDeHoy !== null && (
