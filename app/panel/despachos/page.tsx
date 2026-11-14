@@ -11,6 +11,7 @@ import {
   agruparDespachosPorDia,
   contarDespachosYaRecogidosSinImprimir,
   listarDespachosYaImpresos,
+  listarItemsPorEnvio,
   DIAS_VENTANA_DESPACHADOS,
   esFlex,
   estadoPlazo,
@@ -299,11 +300,23 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
 // ahora pide con fetch y solo abre una pestaña (con un blob: URL
 // propio) si de verdad llegó un PDF.
 async function ImpresionMasiva({ empresaId }: { empresaId: string }) {
-  const [resultado, saltadas, yaImpresas] = await Promise.all([
+  const [resultado, saltadas, yaImpresas, cuentas] = await Promise.all([
     listarDespachosFiltrados(empresaId, {}),
     contarDespachosYaRecogidosSinImprimir(empresaId),
     listarDespachosYaImpresos(empresaId, TAMANO_PAGINA_DESPACHOS),
+    listarCuentasConectadas(empresaId),
   ]);
+  const itemsPorEnvio = await listarItemsPorEnvio(empresaId, [...resultado.despachos, ...yaImpresas].map((d) => d.shipmentIdExterno));
+  const nicknamePorCuenta = new Map(cuentas.map((c) => [c.id, c.nickname]));
+
+  const aFila = <T extends { shipmentIdExterno: string; status: string | null }>(d: T) => ({
+    ...d,
+    producto: itemsPorEnvio.get(d.shipmentIdExterno)?.map((i) => `${i.cantidad} x ${i.titulo}`).join(" · ") || null,
+    estado: etiquetaEstadoEnvio(d.status, null),
+  });
+  const pendientesPorCuenta = agruparPorCuenta(resultado.despachos.map(aFila));
+  const impresasPorCuenta = agruparPorCuenta(yaImpresas.map(aFila));
+
   return (
     <Tarjeta>
       <h2 className={styles.tituloGrupo}>Impresión masiva de guías</h2>
@@ -313,23 +326,44 @@ async function ImpresionMasiva({ empresaId }: { empresaId: string }) {
           está disponible).
         </p>
       )}
+      {resultado.total > TAMANO_PAGINA_DESPACHOS && (
+        <p className={styles.nota}>
+          Hay {resultado.total} pendientes de imprimir; acá salen las {TAMANO_PAGINA_DESPACHOS} más recientes. Al imprimirlas aparecen las siguientes.
+        </p>
+      )}
       {resultado.total === 0 ? (
         <EstadoVacio>No hay despachos pendientes de imprimir.</EstadoVacio>
       ) : (
-        <ImpresionMasivaForm filas={resultado.despachos} total={resultado.total} tamanoPagina={TAMANO_PAGINA_DESPACHOS} etiquetaTipo={ETIQUETA_TIPO_DESPACHO} />
+        pendientesPorCuenta.map(([cuentaId, filas]) => (
+          <section key={cuentaId}>
+            <h3 className={styles.tituloCuenta}>
+              Cuenta {nicknamePorCuenta.get(cuentaId) ?? "—"} ({filas.length})
+            </h3>
+            <ImpresionMasivaForm filas={filas} etiquetaTipo={ETIQUETA_TIPO_DESPACHO} />
+          </section>
+        ))
       )}
-      {yaImpresas.length > 0 && (
+      {impresasPorCuenta.length > 0 && (
         <>
           <h2 className={styles.tituloGrupo}>Ya impresas — reimprimir</h2>
-          <ImpresionMasivaForm
-            modo="reimprimir"
-            filas={yaImpresas}
-            total={yaImpresas.length}
-            tamanoPagina={TAMANO_PAGINA_DESPACHOS}
-            etiquetaTipo={ETIQUETA_TIPO_DESPACHO}
-          />
+          {impresasPorCuenta.map(([cuentaId, filas]) => (
+            <section key={cuentaId}>
+              <h3 className={styles.tituloCuenta}>
+                Cuenta {nicknamePorCuenta.get(cuentaId) ?? "—"} ({filas.length})
+              </h3>
+              <ImpresionMasivaForm modo="reimprimir" filas={filas} etiquetaTipo={ETIQUETA_TIPO_DESPACHO} />
+            </section>
+          ))}
         </>
       )}
     </Tarjeta>
   );
+}
+
+// Un grupo por cuenta de Mercado Libre, en el orden en que aparece cada
+// cuenta por primera vez (la lista ya viene ordenada por fecha).
+function agruparPorCuenta<T extends { cuentaMlId: string }>(filas: T[]): [string, T[]][] {
+  const grupos = new Map<string, T[]>();
+  for (const fila of filas) grupos.set(fila.cuentaMlId, [...(grupos.get(fila.cuentaMlId) ?? []), fila]);
+  return [...grupos.entries()];
 }
