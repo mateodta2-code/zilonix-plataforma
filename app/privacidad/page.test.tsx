@@ -16,10 +16,10 @@ describe("/privacidad", () => {
     expect(html).toContain("no lee contraseñas");
   });
 
-  it("muestra los datos reales, sin {{DATO}} pendientes, con la fecha 2026-11-XX, sin TikTok y sin Markdown crudo", () => {
+  it("muestra los datos reales, sin {{DATO}} pendientes, con la fecha de entrada en vigor, sin TikTok y sin Markdown crudo", () => {
     expect(html).toContain("901578593-5");
     expect(html).toContain("Medellín");
-    expect(html).toContain("2026-11-XX");
+    expect(html).toContain("13 de noviembre de 2026");
     expect(html).not.toContain("{{DATO: razón social}}");
     expect(html).not.toContain("TikTok");
     expect(html).not.toContain("**");
