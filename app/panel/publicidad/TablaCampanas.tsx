@@ -296,5 +296,6 @@ function ListaRecomendaciones({ titulo, items }: { titulo?: string; items: Campa
 function tonoRecomendacion(codigo: CampanaPintada["recomendaciones"][number]["codigo"]): "peligro" | "acento" | "neutro" {
   if (codigo === "aprendizaje" || codigo === "nota_vende_bien" || codigo === "nota_vende_antartida") return "neutro";
   if (codigo === "subir_objetivo" || codigo === "renombrar_vendedor") return "acento";
+  if (codigo === "campana_repetida") return "peligro";
   return "peligro";
 }

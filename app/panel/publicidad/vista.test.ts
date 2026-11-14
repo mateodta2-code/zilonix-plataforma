@@ -165,7 +165,7 @@ describe("textos del tablero de publicidad (issue #255)", () => {
       estado: "active",
       sinStock: null,
       totales: { ...vacio, gasto: "10.00", ventasPublicidad: "0.00", ventasCantidad: "0" },
-      ultimosDias: { ...vacio },
+      ultimosDias: { ...vacio, gasto: "10.00", ventasPublicidad: "0.00", ventasCantidad: "0" },
       semaforo: { estado: "neutro" as const, motivo: "sin_precio" as const },
     };
     const base = {
@@ -191,8 +191,8 @@ describe("textos del tablero de publicidad (issue #255)", () => {
       diasAprendizaje: 7,
     };
 
-    const normal = pintarCampana({ ...base, nombre: "Campaña 1", diagnostico: { tipo: "bajo_objetivo", dias: 0 } } as CampanaCalculada, 31, [
-      "Campaña 1",
+    const normal = pintarCampana({ ...base, nombre: "VENDEDOR", diagnostico: { tipo: "bajo_objetivo", dias: 0 } } as CampanaCalculada, 31, [
+      "VENDEDOR",
       "ENFRIAMIENTO",
     ]);
     expect(normal.anuncios[0].sugerencia).toBe("Pasar a ENFRIAMIENTO");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CAMPANA_ANTARTIDA, CAMPANA_ENFRIAMIENTO, CAMPANA_VENDEDOR } from "@/lib/publicidad/config";
-import { hayCampanaNombrada, recomendarCampana, type AnuncioRecomendable } from "@/lib/publicidad/recomendaciones";
+import { hayCampanaNombrada, recomendarCampana, tipoDeCampana, type AnuncioRecomendable } from "@/lib/publicidad/recomendaciones";
 
 const anuncio = (parcial: Partial<AnuncioRecomendable> & Pick<AnuncioRecomendable, "id">): AnuncioRecomendable => ({
   titulo: "Producto",
@@ -19,8 +19,8 @@ const anuncio = (parcial: Partial<AnuncioRecomendable> & Pick<AnuncioRecomendabl
 
 const base = {
   aprendiendo: false,
-  nombreCampana: "Campaña 1",
-  nombresCampanas: ["Campaña 1"],
+  nombreCampana: "VENDEDOR",
+  nombresCampanas: ["VENDEDOR"],
   roas: "9.85",
   objetivo: "12.00",
   anuncios: [] as AnuncioRecomendable[],
@@ -56,14 +56,30 @@ describe("recomendaciones de publicidad (issue #255)", () => {
     expect(unidos).not.toMatch(/compartir presupuesto/i);
   });
 
-  it("el que gasta sin vender pasa a enfriamiento, con el monto real", () => {
+  it("tipos de campaña: ENFRIAMIENTO y ANTÁRTIDA exactas, VENDEDOR por el comienzo", () => {
+    expect(tipoDeCampana("enfriamiento")).toBe("enfriamiento");
+    expect(tipoDeCampana("Antartida")).toBe("antartida");
+    expect(tipoDeCampana("VENDEDOR")).toBe("vendedor");
+    expect(tipoDeCampana("Vendedor 2 - Fajas")).toBe("vendedor");
+    expect(tipoDeCampana("ENFRIAMIENTO 2")).toBe("otra");
+    expect(tipoDeCampana("vendidos 06-08")).toBe("otra");
+  });
+
+  it("una campaña con otro nombre: renombrar a VENDEDOR y aplicarle las reglas de VENDEDOR", () => {
     const recs = recomendarCampana({
       ...base,
-      nombresCampanas: ["Campaña 1", "Enfriamiento"],
-      anuncios: [anuncio({ id: "1", gasto: "10.00", ingresos: "0.00", ventasCantidad: "0" })],
+      nombreCampana: "vendidos 06-08",
+      nombresCampanas: ["vendidos 06-08", "ENFRIAMIENTO"],
+      anuncios: [anuncio({ id: "1", gasto: "4000.00", gastoUltimosDias: "4000.00", vendioUltimosDias: false })],
     });
-    expect(recs.map((item) => item.texto)).toEqual([`Pasar a ${CAMPANA_ENFRIAMIENTO}`]);
-    expect(recs[0].motivo).toBe("Gastó $10 sin ventas");
+    expect(recs.map((item) => item.codigo)).toEqual(["renombrar_vendedor", "pasar_enfriamiento"]);
+  });
+
+  it("si hay dos ENFRIAMIENTO o dos ANTÁRTIDA, avisa que debe haber una sola", () => {
+    const recs = recomendarCampana({ ...base, nombreCampana: "ENFRIAMIENTO", nombresCampanas: ["ENFRIAMIENTO", "Enfriamiento", "VENDEDOR"] });
+    expect(recs.map((item) => item.texto)).toEqual([`Debe haber una sola campaña ${CAMPANA_ENFRIAMIENTO}`]);
+    expect(recs[0].motivo).toBe("La cuenta tiene 2 campañas con ese nombre.");
+    expect(recomendarCampana({ ...base, nombreCampana: "VENDEDOR", nombresCampanas: ["VENDEDOR", "VENDEDOR"] })).toEqual([]);
   });
 
   it("en enfriamiento, sin antártida, pide crearla; si ya existe, mover", () => {
@@ -91,7 +107,7 @@ describe("recomendaciones de publicidad (issue #255)", () => {
   it("sin campaña ENFRIAMIENTO en la cuenta, sugiere crearla (regla del 14-nov)", () => {
     const recs = recomendarCampana({
       ...base,
-      anuncios: [anuncio({ id: "1", gasto: "10.00", ingresos: "0.00", ventasCantidad: "0" })],
+      anuncios: [anuncio({ id: "1", gasto: "10.00", ingresos: "0.00", ventasCantidad: "0", gastoUltimosDias: "10.00" })],
     });
     expect(recs.map((item) => item.codigo)).toEqual(["crear_enfriamiento"]);
     expect(recs[0].texto).toBe(`Crear la campaña ${CAMPANA_ENFRIAMIENTO} y mover este anuncio`);

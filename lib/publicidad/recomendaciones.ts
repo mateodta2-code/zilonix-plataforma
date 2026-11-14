@@ -4,9 +4,15 @@
 // Enfriamiento es solo para anuncios que gastan sin vender. El que
 // vende bien se queda en la campaña donde ya funciona.
 //
-// Reglas del negocio (14-nov):
-// - Campaña normal: el que gasta sin vender pasa a ENFRIAMIENTO. Si la
-//   cuenta no tiene esa campaña, se sugiere crearla.
+// Reglas del negocio (14-nov). Solo hay tres tipos de campaña:
+// - ENFRIAMIENTO y ANTÁRTIDA: una sola de cada una, con ese nombre
+//   exacto. Si hay dos con el mismo nombre, se avisa.
+// - VENDEDOR: puede haber varias; cuenta toda campaña cuyo nombre
+//   EMPIEZA por VENDEDOR. Una campaña con cualquier otro nombre también
+//   es VENDEDOR: se sugiere renombrarla y se le aplican esas reglas.
+// El camino de un producto: entra a ENFRIAMIENTO; si vende, la campaña
+// pasa a VENDEDOR; si deja de vender, vuelve a ENFRIAMIENTO; el que no
+// vende en ENFRIAMIENTO va a ANTÁRTIDA.
 // - ENFRIAMIENTO con algún anuncio que vende: la campaña se renombra a
 //   VENDEDOR y se quitan solo los que no venden y PASAN el tope de
 //   consumo. Los que consumen poquito se pueden dejar.
@@ -44,6 +50,7 @@ export type CodigoRecomendacion =
   | "mover_antartida"
   | "crear_antartida"
   | "renombrar_vendedor"
+  | "campana_repetida"
   | "quitar_de_campana"
   | "pausar_antartida"
   | "nota_vende_bien"
@@ -101,6 +108,23 @@ export function normalizarNombreCampana(nombre: string): string {
 export function hayCampanaNombrada(nombres: readonly string[], buscado: string): boolean {
   const clave = normalizarNombreCampana(buscado);
   return nombres.some((nombre) => normalizarNombreCampana(nombre) === clave);
+}
+
+export type TipoCampana = "enfriamiento" | "antartida" | "vendedor" | "otra";
+
+// ENFRIAMIENTO y ANTÁRTIDA por nombre exacto; VENDEDOR por el comienzo
+// ("VENDEDOR", "Vendedor 2", "VENDEDOR - Fajas"). Sin mayúsculas ni tildes.
+export function tipoDeCampana(nombre: string): TipoCampana {
+  const clave = normalizarNombreCampana(nombre);
+  if (clave === normalizarNombreCampana(CAMPANA_ENFRIAMIENTO)) return "enfriamiento";
+  if (clave === normalizarNombreCampana(CAMPANA_ANTARTIDA)) return "antartida";
+  if (clave.startsWith(normalizarNombreCampana(CAMPANA_VENDEDOR))) return "vendedor";
+  return "otra";
+}
+
+function cuantasConNombre(nombres: readonly string[], buscado: string): number {
+  const clave = normalizarNombreCampana(buscado);
+  return nombres.filter((nombre) => normalizarNombreCampana(nombre) === clave).length;
 }
 
 function motivoGastoSinVentas(gasto: string): string {
@@ -201,11 +225,36 @@ export function recomendarCampana(entrada: {
     });
   }
 
-  const enEnfriamiento = hayCampanaNombrada([entrada.nombreCampana], CAMPANA_ENFRIAMIENTO);
-  const enAntartida = hayCampanaNombrada([entrada.nombreCampana], CAMPANA_ANTARTIDA);
+  const tipo = tipoDeCampana(entrada.nombreCampana);
+  const enEnfriamiento = tipo === "enfriamiento";
+  const enAntartida = tipo === "antartida";
+  // Una campaña con otro nombre se trata como VENDEDOR.
+  const enVendedor = tipo === "vendedor" || tipo === "otra";
   const hayEnfriamiento = hayCampanaNombrada(entrada.nombresCampanas, CAMPANA_ENFRIAMIENTO);
   const hayAntartida = hayCampanaNombrada(entrada.nombresCampanas, CAMPANA_ANTARTIDA);
-  const enVendedor = hayCampanaNombrada([entrada.nombreCampana], CAMPANA_VENDEDOR);
+
+  if (tipo === "otra") {
+    salida.push({
+      codigo: "renombrar_vendedor",
+      anuncioId: null,
+      nombre: null,
+      texto: TEXTO_RENOMBRAR,
+      motivo: `Fuera de ${CAMPANA_ENFRIAMIENTO} y ${CAMPANA_ANTARTIDA}, toda campaña es ${CAMPANA_VENDEDOR}.`,
+    });
+  }
+  if (enEnfriamiento || enAntartida) {
+    const unica = enEnfriamiento ? CAMPANA_ENFRIAMIENTO : CAMPANA_ANTARTIDA;
+    const cuantas = cuantasConNombre(entrada.nombresCampanas, unica);
+    if (cuantas > 1) {
+      salida.push({
+        codigo: "campana_repetida",
+        anuncioId: null,
+        nombre: null,
+        texto: `Debe haber una sola campaña ${unica}`,
+        motivo: `La cuenta tiene ${cuantas} campañas con ese nombre.`,
+      });
+    }
+  }
   const vendedores = entrada.anuncios.filter((anuncio) => tieneVentaAtribuida(anuncio.ingresos, anuncio.ventasCantidad));
 
   // ENFRIAMIENTO con algún anuncio que vende: la campaña pasa a ser
@@ -257,20 +306,17 @@ export function recomendarCampana(entrada: {
         });
         continue;
       }
-      const motivo = motivoGastoSinVentas(anuncio.gasto ?? "0");
-      if (enEnfriamiento) {
-        salida.push({
-          codigo: hayAntartida ? "mover_antartida" : "crear_antartida",
-          anuncioId: anuncio.id,
-          nombre,
-          texto: hayAntartida
-            ? `Mover a ${CAMPANA_ANTARTIDA}`
-            : `Crear la campaña ${CAMPANA_ANTARTIDA} (presupuesto mínimo, ACOS alto) y mover este anuncio`,
-          motivo,
-        });
-      } else {
-        salida.push({ ...textoAEnfriamiento(hayEnfriamiento), anuncioId: anuncio.id, nombre, motivo });
-      }
+      // Acá solo llega ENFRIAMIENTO: VENDEDOR (y otro nombre) ya se
+      // resolvió arriba, ANTÁRTIDA también.
+      salida.push({
+        codigo: hayAntartida ? "mover_antartida" : "crear_antartida",
+        anuncioId: anuncio.id,
+        nombre,
+        texto: hayAntartida
+          ? `Mover a ${CAMPANA_ANTARTIDA}`
+          : `Crear la campaña ${CAMPANA_ANTARTIDA} (presupuesto mínimo, ACOS alto) y mover este anuncio`,
+        motivo: motivoGastoSinVentas(anuncio.gasto ?? "0"),
+      });
       continue;
     }
     if (!tieneVentaAtribuida(anuncio.ingresos, anuncio.ventasCantidad)) continue;
