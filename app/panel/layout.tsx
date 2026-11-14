@@ -71,7 +71,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       // "configuracion","consultar"). Primera pantalla real bajo este
       // módulo.
       ...(veActividad ? [{ etiqueta: "Configuración", href: "/panel/configuracion", icono: "configuracion" as const }] : []),
-      { etiqueta: "Personas", href: "#", icono: "personas", deshabilitada: true, titulo: "Próximamente" },
+      // Issue #370 — Personas (miembros, invitaciones, cambiar rol), mismo
+      // permiso que pide la página ("personas","consultar").
+      ...(tienePermiso(permisos, "personas", "consultar") ? [{ etiqueta: "Personas", href: "/panel/personas", icono: "personas" as const }] : []),
     ],
   };
 
