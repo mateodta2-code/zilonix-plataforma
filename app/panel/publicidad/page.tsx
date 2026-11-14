@@ -29,7 +29,7 @@ import {
   ROTULO_COLUMNA_CAMPANA,
 } from "@/lib/publicidad/rotulos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { actualizarPublicidadAction } from "./actions";
+import { FormActualizar } from "./FormActualizar";
 import styles from "./page.module.css";
 import { PanelMetricas } from "./GraficoPublicidad";
 import { TablaAnuncios, TablaCampanas } from "./TablaCampanas";
@@ -140,7 +140,7 @@ export default async function PublicidadPage({
         descripcion="Product Ads de la cuenta, leídos de lo que ya está guardado. Esta pantalla no modifica campañas en Mercado Libre."
         accion={
           cuentaId ? (
-            <form action={actualizarPublicidadAction}>
+            <FormActualizar>
               <input type="hidden" name="cuentaMlId" value={cuentaId} />
               <input type="hidden" name="mes" value={params.periodo.mes} />
               <input type="hidden" name="orden" value={params.orden} />
@@ -148,8 +148,7 @@ export default async function PublicidadPage({
               {params.filtro !== "activas" ? <input type="hidden" name="vista" value={params.filtro} /> : null}
               {params.comparar === "ninguno" ? <input type="hidden" name="comparar" value="ninguno" /> : null}
               {params.tab === "anuncios" ? <input type="hidden" name="tab" value="anuncios" /> : null}
-              <Boton type="submit">Actualizar ahora</Boton>
-            </form>
+            </FormActualizar>
           ) : null
         }
       />

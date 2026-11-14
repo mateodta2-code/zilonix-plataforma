@@ -63,6 +63,7 @@ import {
 } from "@/lib/publicidad/metricas";
 import { aEscala, cabeEnNumeric, textoDeNumeroJson } from "@/lib/numeros/normalizar-decimal";
 import {
+  AVISO_REFRESCO_FALLIDO,
   PRESUPUESTO_CORRIDA_MS,
   alcanzaParaAbrirCuenta,
   convieneOtraTandaTrasCorte,
@@ -650,6 +651,9 @@ export async function refrescarPublicidadManual(
     return { ok: true, aviso };
   } catch (error) {
     if (error instanceof SyncEnCursoError || error instanceof SyncMuyRecienteError) return { ok: false, aviso: error.message };
-    return { ok: false, aviso: textoErrorCorto(error) };
+    // El detalle técnico va al log (sincronizarCuenta ya lo escribió);
+    // a la persona nunca le llega el texto crudo del error.
+    console.error(`[publicidad] refresco manual, cuenta ${cuentaMlId}:`, textoErrorCorto(error));
+    return { ok: false, aviso: AVISO_REFRESCO_FALLIDO };
   }
 }

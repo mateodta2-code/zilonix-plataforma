@@ -6,7 +6,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { COLUMNAS_ORDEN } from "@/lib/publicidad/kpis";
-import { textoErrorCorto } from "@/lib/publicidad/plan";
+import { AVISO_REFRESCO_FALLIDO, textoErrorCorto } from "@/lib/publicidad/plan";
 
 // Issue #254 — refresco manual, mínimo para probar la capa de datos
 // antes de la pantalla de la fase 2. El permiso es consultar: esta
@@ -61,10 +61,12 @@ export async function actualizarPublicidadAction(formData: FormData) {
     const resultado = await refrescarPublicidadManual(empresa.id, cuentaMlId, usuario.id);
     aviso = resultado.aviso;
   } catch (error) {
+    // El texto crudo solo al log. A la persona, un aviso fijo.
     const texto = textoErrorCorto(error);
+    console.error("[app/panel/publicidad] Actualizar ahora falló:", texto);
     aviso = texto.includes("DATABASE_URL_PUBLICIDAD")
       ? "Falta configurar el cron de publicidad en este ambiente."
-      : texto;
+      : AVISO_REFRESCO_FALLIDO;
   }
   redirect(destino(aviso));
 }

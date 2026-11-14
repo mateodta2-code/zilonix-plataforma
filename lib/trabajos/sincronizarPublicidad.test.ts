@@ -80,7 +80,8 @@ import {
   itemsSincronizadosDesde,
 } from "@/lib/publicidad/guardar";
 import { AVISO_FUERA_DE_RANGO } from "@/lib/publicidad/metricas";
-import { sincronizarCuenta, sincronizarPublicidadProgramada } from "./sincronizarPublicidad";
+import { AVISO_REFRESCO_FALLIDO } from "@/lib/publicidad/plan";
+import { refrescarPublicidadManual, sincronizarCuenta, sincronizarPublicidadProgramada } from "./sincronizarPublicidad";
 
 const EMPRESA = "22222222-2222-2222-2222-222222222222";
 const CUENTA = "11111111-1111-1111-1111-111111111111";
@@ -371,5 +372,14 @@ describe("corte real de sincronizarCuenta (issue #254)", () => {
     expect(abrirSincronizacion).toHaveBeenCalledTimes(1);
     expect(resultado.procesadas).toBe(1);
     expect(resultado.sigue).toBe(false);
+  });
+  it("Actualizar ahora: un error técnico nunca llega con su texto a la pantalla, solo al log", async () => {
+    vi.mocked(obtenerAccessTokenVigente).mockRejectedValue(new Error("connect postgres://usuario:secreto@host/base"));
+
+    const resultado = await refrescarPublicidadManual(EMPRESA, CUENTA, "usuario-1", AHORA);
+
+    expect(resultado).toEqual({ ok: false, aviso: AVISO_REFRESCO_FALLIDO });
+    expect(resultado.aviso).not.toMatch(/postgres|secreto|Error/);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("refresco manual"), expect.stringContaining("Error"));
   });
 });
