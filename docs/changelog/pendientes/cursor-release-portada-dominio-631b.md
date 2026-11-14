@@ -12,7 +12,7 @@
   - `scripts/verificar-permisos.test.ts`: no se clasificaron rutas de mis-datos (no existen acá). `/privacidad` mantiene el motivo de producción. Se agregaron `/terminos` y `/cookies`.
   - `lib/rutas-publicas.ts`: `/privacidad` queda una sola vez.
   - `.env.example` en #405: se agregaron `APP_URL`, `PUBLIC_APP_URL` y `NEXT_PUBLIC_APP_URL` vacías. No se trajeron `CANVA_CLIENT_ID` ni `CANVA_CLIENT_SECRET` (ese módulo no está en este release).
-  - Íconos: la portada nombra `inventario` y `promociones`, que no están en producción. No se trajeron esos PRs. Solo se copió el dibujo de los dos íconos para que la página compile.
+  - Íconos: la portada nombra `inventario` y `promociones`, y la garantía usa `IconoDatosPersonales` (#352, datos personales, no incluido). Esos módulos no están en producción y no se trajeron. Solo se copió el dibujo de esos tres íconos para que la página compile.
 
   **Texto legal que no está:** `/terminos` y `/cookies` no tienen texto real ni en producción ni en estos cuatro PRs. Siguen como los dejó #359. No se inventó un texto legal.
 

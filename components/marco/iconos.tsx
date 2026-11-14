@@ -288,6 +288,17 @@ export function IconoPromociones(props: IconoProps) {
   );
 }
 
+// La sección de garantía de la portada usa este dibujo. El módulo de
+// datos personales (#352) no entra en este release.
+export function IconoDatosPersonales(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 4 5 7v5.5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" />
+      <path d="M9.3 12.3 11.3 14.3 14.8 10.3" />
+    </Svg>
+  );
+}
+
 const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   inicio: IconoInicio,
   pedidos: IconoPedidos,
