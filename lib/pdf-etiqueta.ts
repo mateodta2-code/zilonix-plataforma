@@ -384,3 +384,25 @@ export async function recortarGuias(pdfOriginal: ArrayBuffer): Promise<ArrayBuff
   const bytes = await salida.save();
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
+
+// Una guía de la impresión masiva, ya lista: sin la hoja de lista de
+// despacho, con su franja CONTENIDO y, en sticker, recortada a su
+// marco y llevada a 10x15. Mismo orden que "Ver guía (sticker)": el
+// recorte va antes de la franja para que quede pegada a la guía.
+export async function prepararGuiaDeLote(pdf: ArrayBuffer, items: ItemContenidoEtiqueta[], sticker: boolean): Promise<ArrayBuffer> {
+  let guia = await quitarHojasDeLista(pdf);
+  if (sticker) guia = await recortarGuias(guia);
+  guia = await agregarContenidoAEtiqueta(guia, items);
+  return sticker ? reescalarEtiquetaASticker(guia) : guia;
+}
+
+// Junta los PDFs de cada guía, en el mismo orden, en uno solo.
+export async function unirPdfs(pdfs: ArrayBuffer[]): Promise<ArrayBuffer> {
+  const salida = await PDFDocument.create();
+  for (const pdf of pdfs) {
+    const doc = await PDFDocument.load(pdf);
+    for (const pagina of await salida.copyPages(doc, doc.getPageIndices())) salida.addPage(pagina);
+  }
+  const bytes = await salida.save();
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}

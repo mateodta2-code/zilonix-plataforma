@@ -4,6 +4,7 @@ import { bodegas, cuentasMl, despachosMl, pedidoEventos, pedidoItems, pedidos, s
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { obtenerEtiquetaPdfMl, obtenerShipmentMl, obtenerSlaEnvioMl } from "@/lib/ml/cliente";
 import { acotarPagina, limitesDiaBogota, parsearPagina, patronBusquedaLike, rangoUltimosNDiasBogota } from "@/lib/filtros-listado";
+import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 
 // Tarea 2.10 — formato de petición y reglas de negocio confirmados
 // contra el código real ya en producción del Zilonix OS actual
@@ -342,7 +343,10 @@ export class EtiquetaNoImprimibleError extends Error {
 // tenía esta función se movió para allá.
 export async function obtenerEtiquetasPdf(empresaId: string, cuentaId: string, shipmentIdsExternos: string[]): Promise<ArrayBuffer> {
   const accessToken = await obtenerAccessTokenVigente(empresaId, cuentaId);
-  const resp = await obtenerEtiquetaPdfMl(shipmentIdsExternos, accessToken);
+  return interpretarRespuestaEtiqueta(await obtenerEtiquetaPdfMl(shipmentIdsExternos, accessToken));
+}
+
+function interpretarRespuestaEtiqueta(resp: Awaited<ReturnType<typeof obtenerEtiquetaPdfMl>>): ArrayBuffer {
   if (!resp.ok) {
     let datos: { failed_shipments?: { cause?: string }[]; cause?: string } | null = null;
     try {
@@ -355,6 +359,57 @@ export async function obtenerEtiquetasPdf(empresaId: string, cuentaId: string, s
     throw new Error(`No se pudo traer la guía (HTTP ${resp.status}): ${resp.textoCrudo.slice(0, 300)}`);
   }
   return resp.data;
+}
+
+// Impresión masiva con el detalle del pedido (CONTENIDO) en cada guía
+// (pedido del equipo, 2026-11-13): el PDF de un lote no dice qué hoja
+// es de qué envío, y adivinar el orden podría poner el producto de un
+// pedido en la guía de otro. Pidiendo cada guía por separado (la misma
+// llamada de un solo envío que ya usa "Ver guía") se sabe con certeza
+// de quién es cada una. El token se pide UNA vez para todo el lote:
+// N llamadas a obtenerAccessTokenVigente en paralelo con el token
+// vencido podrían disparar N renovaciones a la vez.
+export class EtiquetaDeEnvioNoImprimibleError extends EtiquetaNoImprimibleError {
+  constructor(public readonly shipmentIdExterno: string) {
+    super();
+    this.message = `La guía del envío #${shipmentIdExterno} ya no se puede imprimir porque el transportador ya la recogió — desmárcala y vuelve a intentar.`;
+  }
+}
+
+const CONCURRENCIA_ETIQUETAS = 4;
+
+export async function obtenerEtiquetasPdfPorEnvio(empresaId: string, cuentaId: string, shipmentIdsExternos: string[]): Promise<ArrayBuffer[]> {
+  const accessToken = await obtenerAccessTokenVigente(empresaId, cuentaId);
+  return conConcurrenciaLimitada(shipmentIdsExternos, CONCURRENCIA_ETIQUETAS, async (shipmentId) => {
+    try {
+      return interpretarRespuestaEtiqueta(await obtenerEtiquetaPdfMl([shipmentId], accessToken));
+    } catch (error) {
+      if (error instanceof EtiquetaNoImprimibleError) throw new EtiquetaDeEnvioNoImprimibleError(shipmentId);
+      throw error;
+    }
+  });
+}
+
+// Producto y cantidad de cada envío, para la franja CONTENIDO del lote
+// — mismo criterio que obtenerDespachoParaGuia (empresa_id explícito
+// en las dos tablas, orden por línea del pedido).
+export async function listarItemsPorEnvio(empresaId: string, shipmentIdsExternos: string[]): Promise<Map<string, ItemDeGuia[]>> {
+  const porEnvio = new Map<string, ItemDeGuia[]>();
+  if (shipmentIdsExternos.length === 0) return porEnvio;
+  const filas = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ shipmentIdExterno: despachosMl.shipmentIdExterno, titulo: pedidoItems.titulo, cantidad: pedidoItems.cantidad, skuCodigo: pedidoItems.skuCodigo })
+      .from(despachosMl)
+      .innerJoin(pedidoItems, and(eq(pedidoItems.pedidoId, despachosMl.pedidoId), eq(pedidoItems.empresaId, empresaId)))
+      .where(and(eq(despachosMl.empresaId, empresaId), inArray(despachosMl.shipmentIdExterno, shipmentIdsExternos)))
+      .orderBy(asc(pedidoItems.linea))
+  );
+  for (const { shipmentIdExterno, ...item } of filas) {
+    const lista = porEnvio.get(shipmentIdExterno) ?? [];
+    lista.push(item);
+    porEnvio.set(shipmentIdExterno, lista);
+  }
+  return porEnvio;
 }
 
 export async function marcarEtiquetasImpresas(empresaId: string, cuentaId: string, shipmentIdsExternos: string[]): Promise<void> {

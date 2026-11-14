@@ -1,6 +1,6 @@
 import { PDFDocument, concatTransformationMatrix, popGraphicsState, pushGraphicsState, rectangle, stroke } from "pdf-lib";
 import { describe, expect, it } from "vitest";
-import { agregarContenidoAEtiqueta, marcosDeGuia, quitarHojasDeLista, recortarGuias, rectangulosDelContenido, reescalarEtiquetaASticker } from "./pdf-etiqueta";
+import { agregarContenidoAEtiqueta, marcosDeGuia, prepararGuiaDeLote, quitarHojasDeLista, recortarGuias, rectangulosDelContenido, reescalarEtiquetaASticker, unirPdfs } from "./pdf-etiqueta";
 
 // pdf-lib no deja incrustar una página sin contenido ("Can't embed
 // page with missing Contents") — una página en blanco de verdad no
@@ -243,5 +243,28 @@ describe("recortarGuias", () => {
     const salida = await PDFDocument.load(await reescalarEtiquetaASticker(recortado));
     expect(salida.getPageCount()).toBe(2);
     for (const p of salida.getPages()) expect(p.getSize().height).toBeCloseTo(15 * PUNTOS_POR_CM, 1);
+  });
+});
+
+describe("prepararGuiaDeLote / unirPdfs (impresión masiva con detalle)", () => {
+  const items = [{ titulo: "Gorra azul", cantidad: 2, skuCodigo: "GOR-1" }];
+
+  it("formato Mercado Libre: quita la lista y la guía lleva su franja", async () => {
+    const salida = await PDFDocument.load(await prepararGuiaDeLote(await pdfConPaginas([GUIA, A4]), items, false));
+    expect(salida.getPageCount()).toBe(1);
+    expect(salida.getPage(0).getSize().width).toBeCloseTo(GUIA[0], 1);
+    expect(salida.getPage(0).getSize().height).toBeGreaterThan(GUIA[1]);
+  });
+
+  it("sticker: guía de Agencia recortada, con franja, en 10x15", async () => {
+    const salida = await PDFDocument.load(await prepararGuiaDeLote(await hojaConMarcos(841.89, 595.28, [MARCO_REAL.x]), items, true));
+    expect(salida.getPageCount()).toBe(1);
+    expect(salida.getPage(0).getSize().width).toBeCloseTo(10 * PUNTOS_POR_CM, 1);
+    expect(salida.getPage(0).getSize().height).toBeCloseTo(15 * PUNTOS_POR_CM, 1);
+  });
+
+  it("unirPdfs junta todas las páginas en el mismo orden", async () => {
+    const unido = await PDFDocument.load(await unirPdfs([await pdfConPaginas([GUIA]), await pdfConPaginas([A4, GUIA_COLECTA])]));
+    expect(unido.getPages().map((p) => Math.round(p.getSize().width))).toEqual([283, 595, 842]);
   });
 });
