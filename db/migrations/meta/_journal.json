@@ -155,6 +155,20 @@
       "when": 1793721488427,
       "tag": "0021_charming_stardust",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794673866179,
+      "tag": "0022_tranquil_inertia",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794679209810,
+      "tag": "0023_chief_sister_grimm",
+      "breakpoints": true
     }
   ]
 }

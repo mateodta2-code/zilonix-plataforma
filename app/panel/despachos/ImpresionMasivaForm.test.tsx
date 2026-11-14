@@ -26,7 +26,7 @@ describe("ImpresionMasivaForm — pide con fetch, nunca abre una pestaña con JS
       vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: "Mercado Libre ya no deja imprimir esta guía porque el transportador ya la recogió — es un bloqueo de Mercado Libre, no hay forma de saltarlo." }) })
     );
 
-    render(<ImpresionMasivaForm filas={FILAS} total={1} tamanoPagina={25} etiquetaTipo={{ self_service: "Flex" }} />);
+    render(<ImpresionMasivaForm filas={FILAS} etiquetaTipo={{ self_service: "Flex" }} />);
     fireEvent.click(screen.getByText("Imprimir etiquetas seleccionadas"));
 
     expect(await screen.findByText("Mercado Libre ya no deja imprimir esta guía porque el transportador ya la recogió — es un bloqueo de Mercado Libre, no hay forma de saltarlo.")).not.toBeNull();
@@ -40,9 +40,62 @@ describe("ImpresionMasivaForm — pide con fetch, nunca abre una pestaña con JS
     const pdf = new Blob(["%PDF-fake"], { type: "application/pdf" });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, blob: async () => pdf }));
 
-    render(<ImpresionMasivaForm filas={FILAS} total={1} tamanoPagina={25} etiquetaTipo={{ self_service: "Flex" }} />);
+    render(<ImpresionMasivaForm filas={FILAS} etiquetaTipo={{ self_service: "Flex" }} />);
     fireEvent.click(screen.getByText("Imprimir etiquetas seleccionadas"));
 
     await vi.waitFor(() => expect(open).toHaveBeenCalledWith("blob:fake-url", "_blank"));
+  });
+});
+
+describe("ImpresionMasivaForm — modo reimprimir (guías ya impresas)", () => {
+  const YA_IMPRESAS: FilaImpresionMasiva[] = [
+    { ...FILAS[0], producto: "2 x Gorra azul", etiquetaImpresaTs: new Date("2026-11-13T20:00:00Z") },
+  ];
+
+  it("las casillas vienen desmarcadas, muestra el producto y el botón dice Reimprimir", () => {
+    render(<ImpresionMasivaForm modo="reimprimir" filas={YA_IMPRESAS} etiquetaTipo={{ self_service: "Flex" }} />);
+    expect((screen.getByLabelText("Seleccionar envío 9001") as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText("2 x Gorra azul")).not.toBeNull();
+    expect(screen.getByText("Reimprimir seleccionadas")).not.toBeNull();
+  });
+
+  it("manda modo=reimprimir al Route Handler junto con lo marcado", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: "x" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ImpresionMasivaForm modo="reimprimir" filas={YA_IMPRESAS} etiquetaTipo={{ self_service: "Flex" }} />);
+    fireEvent.click(screen.getByLabelText("Seleccionar envío 9001"));
+    fireEvent.click(screen.getByText("Reimprimir seleccionadas"));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const cuerpo = fetchMock.mock.calls[0][1].body as FormData;
+    expect(cuerpo.get("modo")).toBe("reimprimir");
+    expect(cuerpo.getAll("shipmentId")).toEqual(["9001"]);
+  });
+});
+
+describe("ImpresionMasivaForm — formato de impresión", () => {
+  it("'Imprimir en sticker 10x15' manda formato=sticker; el botón normal manda formato=normal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: "x" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ImpresionMasivaForm filas={FILAS} etiquetaTipo={{ self_service: "Flex" }} />);
+    fireEvent.click(screen.getByText("Imprimir en sticker 10x15"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect((fetchMock.mock.calls[0][1].body as FormData).get("formato")).toBe("sticker");
+    // Los botones quedan deshabilitados mientras corre el primer envío.
+    await screen.findByText("x");
+
+    fireEvent.click(screen.getByText("Imprimir etiquetas seleccionadas"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect((fetchMock.mock.calls[1][1].body as FormData).get("formato")).toBe("normal");
+  });
+});
+
+describe("ImpresionMasivaForm — estado traducido", () => {
+  it("muestra el estado en español cuando viene traducido, nunca 'ready_to_ship'", () => {
+    render(<ImpresionMasivaForm filas={[{ ...FILAS[0], estado: "Listo para despachar" }]} etiquetaTipo={{ self_service: "Flex" }} />);
+    expect(screen.getByText("Listo para despachar")).not.toBeNull();
+    expect(screen.queryByText("ready_to_ship")).toBeNull();
   });
 });

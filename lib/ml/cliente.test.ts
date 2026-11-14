@@ -28,7 +28,6 @@ import {
   MlNoDisponibleError,
   MlRespuestaInesperadaError,
   MlSinPermisoAppError,
-  obtenerClipsMl,
   obtenerFotoItemMl,
   obtenerItemMl,
   obtenerMejoresProductosCategoria,
@@ -40,7 +39,6 @@ import {
   PATRON_ID_PRODUCTO_O_ITEM,
   resolverCategoria,
   salirDePromocionMl,
-  subirClipMl,
 } from "./cliente";
 
 function respuestaJson(data: unknown, status = 200) {
@@ -248,26 +246,6 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
     expect(r).toEqual({ title: "Producto", thumbnail: "https://x/thumb.jpg" });
   });
 
-  it("subirClipMl: itemId inválido nunca llama a fetch; válido manda multipart sin content-type a mano", async () => {
-    const fetchMockInvalido = vi.fn();
-    vi.stubGlobal("fetch", fetchMockInvalido);
-    const form = new FormData();
-    await expect(subirClipMl("MCO1/../users/me", "token", form)).rejects.toThrow(/inválido/);
-    expect(fetchMockInvalido).not.toHaveBeenCalled();
-
-    vi.unstubAllGlobals();
-    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      // FormData pone su propio content-type (con boundary) — nunca se
-      // fija "application/json" a mano para una subida multipart.
-      expect((init?.headers as Record<string, string>)["content-type"]).toBeUndefined();
-      expect(init?.body).toBeInstanceOf(FormData);
-      return respuestaJson({ status: "accepted" });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const r = await subirClipMl("MCO111", "token", form);
-    expect(r.ok).toBe(true);
-  });
-
   it("leerCategoriaMl/leerAtributosCategoriaMl: categoryId inválido nunca llama a fetch; endpoints públicos (sin Authorization)", async () => {
     const fetchMockInvalido = vi.fn();
     vi.stubGlobal("fetch", fetchMockInvalido);
@@ -381,11 +359,9 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
   });
 
   // Bug real: escribir() usaba el TIMEOUT_MS de 8s de LECTURA para toda
-  // escritura — corta un POST /items (o una subida de clip) antes de
-  // que Mercado Libre termine, con riesgo real de ítem duplicado al
-  // reintentar. crearItemMl usa TIMEOUT_ESCRITURA_MS (30s); subirClipMl
-  // (video de hasta 280MB) usa TIMEOUT_SUBIDA_CLIP_MS (300s) — ninguno
-  // de los dos usa el de 8s de pedir().
+  // escritura — corta un POST /items antes de que Mercado Libre
+  // termine, con riesgo real de ítem duplicado al reintentar.
+  // crearItemMl usa TIMEOUT_ESCRITURA_MS (30s), nunca el de 8s de pedir().
   it("crearItemMl: usa el timeout de escritura (30s), no el de lectura (8s)", async () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "MCOITEM1" }, 201)));
@@ -394,25 +370,6 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
     timeoutSpy.mockRestore();
   });
 
-  it("subirClipMl: usa el timeout de subida de clip (300s), bien más largo que el de escritura normal", async () => {
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ status: "accepted" })));
-    await subirClipMl("MCO111", "token", new FormData());
-    expect(timeoutSpy).toHaveBeenCalledWith(300_000);
-    timeoutSpy.mockRestore();
-  });
-
-  it("subirClipMl: tiempo agotado / falla de red devuelve status:0 (nunca una excepción sin capturar), igual que crearItemMl", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new DOMException("The operation was aborted.", "AbortError");
-      })
-    );
-    const r = await subirClipMl("MCO111", "token", new FormData());
-    expect(r.ok).toBe(false);
-    expect(r.status).toBe(0);
-  });
 });
 
 // Issue #147 — bug real: un 401/403/5xx de Mercado Libre caía en el
@@ -1011,63 +968,6 @@ describe("leerItemCompletoMl/leerDescripcionItemMl — Parte 3, punto A (importa
   });
 });
 
-// Rama feat-publicar-clip, punto 5 — avisado antes de tocar
-// lib/ml/cliente.ts. Advertencia explícita (ver el comentario completo
-// junto a obtenerClipsMl): la forma exacta de GET .../clips nunca se
-// confirmó contra una cuenta real con un clip ya moderado — se prueba
-// parseando de forma defensiva las 2 formas razonables (array suelto
-// o {results:[...]}), nunca asumiendo una sola.
-describe("obtenerClipsMl — Parte Clip, punto 5 (estado de moderación)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("itemId inválido: null, nunca llama a fetch", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    await expect(obtenerClipsMl("no-es-un-id", "token")).resolves.toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("array suelto: parsea clip_uuid/moderation_status/rejection_reason", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        respuestaJson([
-          { clip_uuid: "uuid-1", moderation_status: "REJECTED", rejection_reason: "Audio con copyright" },
-          { clip_uuid: "uuid-2", moderation_status: "PUBLISHED" },
-        ])
-      )
-    );
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([
-      { clipUuid: "uuid-1", moderationStatus: "REJECTED", motivoRechazo: "Audio con copyright" },
-      { clipUuid: "uuid-2", moderationStatus: "PUBLISHED", motivoRechazo: null },
-    ]);
-  });
-
-  it("forma {results:[...]}: misma lectura", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ results: [{ id: "uuid-3", status: "UNDER_REVIEW" }] })));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-3", moderationStatus: "UNDER_REVIEW", motivoRechazo: null }]);
-  });
-
-  it("404 (nunca se subió ningún clip todavía): [], nunca null (distingue 'sin dato' de 'de verdad no hay nada')", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([]);
-  });
-
-  it("403/5xx: null (sin dato de la API, nunca [] inventado)", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toBeNull();
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 503)));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toBeNull();
-  });
-
-  it("un campo con forma inesperada (ej. moderation_status numérico): null para ese campo, nunca lanza", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson([{ clip_uuid: "uuid-1", moderation_status: 123 }])));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-1", moderationStatus: null, motivoRechazo: null }]);
-  });
-});
-
 describe("listarItemsActivosMl — rama feat-promociones, una página", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -1110,7 +1010,22 @@ describe("leerItemParaPromocionMl — rama feat-promociones", () => {
       skuCodigo: "SKU-1",
       tieneVariantes: true,
       skuVariantesDistintas: false,
+      precio: null,
+      stock: null,
     });
+  });
+
+  it("trae precio y stock reales del ítem cuando Mercado Libre los manda", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuestaJson({ title: "Producto", thumbnail: "https://x/thumb.jpg", price: 45000, available_quantity: 7, seller_custom_field: "sku-1" }))
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ precio: 45000, stock: 7 });
+  });
+
+  it("precio/stock quedan null si Mercado Libre no los manda o vienen inválidos", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", price: 0, available_quantity: -1, seller_custom_field: "sku-1" })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ precio: null, stock: null });
   });
 
   // Bug real (rama feat-promociones-aprobacion, confirmado en staging

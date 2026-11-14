@@ -1885,3 +1885,56 @@ export const canvaConexiones = pgTable(
     empresaUsuarioUnica: unique("canva_conexiones_empresa_usuario_unica").on(t.empresaId, t.usuarioId),
   })
 );
+
+// Foro de la comunidad — los vendedores de TODAS las empresas preguntan
+// y se responden entre ellos (decisión del 14-nov). A propósito SIN
+// empresa_id ni RLS por empresa, igual que `usuarios`: el contenido es
+// compartido por diseño, no pertenece a ninguna empresa. Por eso mismo
+// nunca se guarda ni se muestra de qué empresa es quien escribe — solo
+// su nombre (usuarios.nombre); un dato de negocio nunca entra acá.
+//
+// app_user solo tiene SELECT/INSERT (db/rls-setup.sql): nadie edita ni
+// borra lo publicado desde /panel. Moderar es solo del superadmin, y
+// esconder nunca borra: oculta_ts/oculta_por quedan como rastro de
+// quién y cuándo (superadmin_user solo puede UPDATE de esas columnas).
+export const foroPreguntas = pgTable(
+  "foro_preguntas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    autorId: uuid("autor_id").notNull().references(() => usuarios.id),
+    titulo: text("titulo").notNull(),
+    cuerpo: text("cuerpo").notNull(),
+    // Una imagen opcional, siempre subida por /api/foro/imagen a la
+    // carpeta zilonix-foro de nuestro Cloudinary — nunca un link a otro
+    // sitio (lib/foro-validacion.ts, esUrlImagenForo).
+    imagenUrl: text("imagen_url"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    ocultaTs: timestamp("oculta_ts", { withTimezone: true }),
+    ocultaPor: uuid("oculta_por").references(() => usuarios.id),
+  },
+  (t) => ({
+    creadoIdx: index("foro_preguntas_creado_idx").on(t.creadoTs),
+  })
+);
+
+export const foroRespuestas = pgTable(
+  "foro_respuestas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    preguntaId: uuid("pregunta_id")
+      .notNull()
+      .references(() => foroPreguntas.id, { onDelete: "cascade" }),
+    autorId: uuid("autor_id").notNull().references(() => usuarios.id),
+    cuerpo: text("cuerpo").notNull(),
+    // Una imagen opcional, siempre subida por /api/foro/imagen a la
+    // carpeta zilonix-foro de nuestro Cloudinary — nunca un link a otro
+    // sitio (lib/foro-validacion.ts, esUrlImagenForo).
+    imagenUrl: text("imagen_url"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    ocultaTs: timestamp("oculta_ts", { withTimezone: true }),
+    ocultaPor: uuid("oculta_por").references(() => usuarios.id),
+  },
+  (t) => ({
+    preguntaIdx: index("foro_respuestas_pregunta_idx").on(t.preguntaId, t.creadoTs),
+  })
+);

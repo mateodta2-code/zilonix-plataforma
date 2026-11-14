@@ -52,6 +52,13 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
   "app/panel/invitar/actions.ts",
+  // Inicio (13-nov) — fijar la meta del mes: finanzas.modificar y
+  // requiereDueno (acá y en lib/finanzas/meta-mes.ts).
+  "app/panel/meta/actions.ts",
+  // Issue #370 — ver pide personas.consultar; cambiar rol,
+  // personas.modificar (acá y en lib/personas.ts).
+  "app/panel/personas/page.tsx",
+  "app/panel/personas/actions.ts",
   "app/panel/roles/page.tsx",
   "app/panel/roles/[rolId]/page.tsx",
   "app/panel/roles/[rolId]/actions.ts",
@@ -135,18 +142,6 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/canva/desconectar/route.ts",
   "app/api/canva/estado/route.ts",
   "app/api/canva/exportar-diseno/route.ts",
-  "app/api/ml/clip/route.ts",
-  // Rama feat-publicar-clip, punto 3/4/5 — las 5 rutas nuevas del
-  // sub-flujo de Clip. "modificar" para las que arrancan o cambian
-  // algo (subir, traer el video); "consultar" para las que solo LEEN
-  // (buscar por SKU, el polling del trabajo, el preview del video
-  // temporal, el estado de moderación) — mismo permiso real que ya
-  // usaban buscarItemAction/cambiarEstadoAction en clip/actions.ts.
-  "app/api/ml/clip/buscar-sku/route.ts",
-  "app/api/ml/clip/traer-video/route.ts",
-  "app/api/ml/clip/video-temp/[id]/route.ts",
-  "app/api/ml/clip/trabajo/[jobId]/route.ts",
-  "app/api/ml/clip/estado/route.ts",
   "app/panel/publicidad/page.tsx",
   "app/panel/publicidad/actions.ts",
   // Rama feat-promociones — módulo nuevo "promociones"
@@ -176,6 +171,15 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/promociones/acciones/pendientes-lanzar/route.ts",
   "app/api/ml/promociones/historial/route.ts",
   "app/panel/promociones/page.tsx",
+  // Tarea "Promociones real" (Refs #295) — lista por publicación, con
+  // estado real leído en vivo. GET exige "consultar" (solo lee de
+  // Mercado Libre, nunca escribe); los dos POST escriben de verdad
+  // contra Mercado Libre (participar/modificar y el lote de reglas) —
+  // mismo nivel que .../participando/salir, "ejecutar", nunca "aprobar"
+  // (esta pantalla ya no tiene cola de aprobación separada).
+  "app/api/ml/promociones/publicaciones/route.ts",
+  "app/api/ml/promociones/publicaciones/participar/route.ts",
+  "app/api/ml/promociones/publicaciones/reglas-aplicar/route.ts",
   // "Conexión de IA" vive bajo el módulo "configuracion" que ya
   // existe (consultar/modificar) — nunca un permiso nuevo solo para
   // esto.
@@ -187,7 +191,13 @@ const RUTAS_PROTEGIDAS = new Set([
 // superadmin?" (plataforma entera, no un módulo de una empresa). Toda
 // ruta bajo /superadmin tiene que llamar requiereSuperadmin(), nunca
 // requierePermiso() — son preguntas distintas.
-const RUTAS_SUPERADMIN = new Set(["app/superadmin/page.tsx", "app/superadmin/[empresaId]/page.tsx"]);
+const RUTAS_SUPERADMIN = new Set([
+  "app/superadmin/page.tsx",
+  "app/superadmin/[empresaId]/page.tsx",
+  // Foro (14-nov) — moderar: esconder/mostrar publicaciones.
+  "app/superadmin/foro/page.tsx",
+  "app/superadmin/foro/actions.ts",
+]);
 
 // Rutas exentas, cada una con el motivo real por el que no necesita
 // preguntar "¿puede [acción] en [módulo]?".
@@ -223,13 +233,10 @@ const RUTAS_EXENTAS: Record<string, string> = {
   // existiendo solo para no romper un link viejo guardado (el botón de
   // Investigación, un bookmark, una notificación ya mandada).
   "app/panel/publicar/nuevo/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#formulario-publicar (reenviando titulo/precio/foto) — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
-  // Rama feat-publicar-clip — reenviar cuentaId/sku/itemId/clipSubido/
-  // error ya no tiene efecto (SeccionClip.tsx busca/sube/consulta por
-  // su cuenta, con fetch del cliente a las rutas nuevas bajo
-  // app/api/ml/clip/, todas en RUTAS_PROTEGIDAS más arriba) — el
+  // El módulo de Clip se retiró por completo (pedido de Mateo) — el
   // redirect sigue existiendo solo por compatibilidad con un link
   // viejo, nunca lee ni escribe nada.
-  "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#clip — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar y en las rutas nuevas de app/api/ml/clip/",
+  "app/panel/publicar/clip/page.tsx": "módulo de Clip retirado; queda solo un redirect hacia /panel/publicar — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
   // Issue #318 (Ley 1581) — exportar o borrar los datos propios no es
   // un permiso de MÓDULO que un rol pueda dar o quitar (como
   // "inventario.crear"): es un derecho sobre los datos de la propia
@@ -245,6 +252,17 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/terminos/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
   "app/privacidad/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
   "app/cookies/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
+  // Foro de la comunidad (14-nov) — compartido entre TODAS las
+  // empresas (foro_preguntas/foro_respuestas no tienen empresa_id), así
+  // que no hay un módulo de empresa al que pedirle permiso. El candado
+  // real es tener al menos una empresa: obtenerContextoPanel() redirige
+  // a /crear-empresa en las páginas, y requiereMiembroDeAlgunaEmpresa
+  // (lib/foro.ts) en cada escritura, siempre con el usuario de la sesión.
+  "app/panel/foro/page.tsx": "foro compartido entre empresas, sin datos de negocio — el candado es obtenerContextoPanel() (exige tener una empresa)",
+  "app/panel/foro/[preguntaId]/page.tsx": "idem",
+  "app/panel/foro/actions.ts": "idem — cada escritura pasa por requiereMiembroDeAlgunaEmpresa (lib/foro.ts) con el usuario de la sesión",
+  "app/api/foro/imagen/route.ts":
+    "sube la imagen adjunta del foro (compartido entre empresas, sin datos de negocio) — el candado es requiereMiembroDeAlgunaEmpresa con el usuario de la sesión, más chequeo de origen y freno por usuario",
   // Rama mateo/promociones-visual-prueba — maqueta aislada del
   // rediseño de Promociones para que Débora la revise. Igual criterio
   // que app/panel/mis-datos/page.tsx: solo resuelve sesión (redirige a

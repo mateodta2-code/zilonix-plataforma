@@ -53,7 +53,7 @@ export const PATRON_ID_VENDEDOR = /^\d+$/;
 // cargando para siempre; con el AbortSignal, a los 8s se corta y se
 // trata como una respuesta no-ok (nunca una excepción no capturada).
 // Solo para LECTURA (pedir()) — una escritura necesita más tiempo, ver
-// TIMEOUT_ESCRITURA_MS/TIMEOUT_SUBIDA_CLIP_MS más abajo.
+// TIMEOUT_ESCRITURA_MS más abajo.
 const TIMEOUT_MS = 8_000;
 
 // Bug real: escribir() usaba el mismo TIMEOUT_MS de 8s de pedir() para
@@ -62,10 +62,8 @@ const TIMEOUT_MS = 8_000;
 // como fallida aunque el ítem SÍ se haya creado del otro lado (riesgo
 // real de publicación duplicada al reintentar). crearItemMl/
 // actualizarItemMl/agregarDescripcionItemMl usan este tiempo más
-// generoso; subirClipMl (video de hasta 280MB) usa
-// TIMEOUT_SUBIDA_CLIP_MS, bastante más largo todavía.
+// generoso.
 const TIMEOUT_ESCRITURA_MS = 30_000;
-const TIMEOUT_SUBIDA_CLIP_MS = 300_000;
 
 export class LimiteMercadoLibreError extends Error {
   readonly retryAfterMs: number | null;
@@ -978,7 +976,7 @@ export async function buscarItemsPorSkuMl(cuentaIdExterna: string, sku: string, 
 // GET /items/{id}?attributes=id,title,thumbnail — detalle mínimo de
 // una publicación ya encontrada (por sku o por itemId directo). null
 // si Mercado Libre no puede traerlo — el llamador decide el respaldo
-// (ej. clip.ts cae al propio itemId como título).
+// (ej. buscar-item-por-sku.ts cae al propio itemId como título).
 export async function leerItemBasicoMl(itemId: string, token: string): Promise<{ title: string | null; thumbnail: string | null } | null> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
   const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail`;
@@ -988,16 +986,6 @@ export async function leerItemBasicoMl(itemId: string, token: string): Promise<{
     title: typeof resp.data.title === "string" ? resp.data.title : null,
     thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
   };
-}
-
-// POST /marketplace/items/{id}/clips/upload — multipart/form-data,
-// contrato real documentado por Mercado Libre ("Working with Clips").
-// Video de hasta 280MB — usa TIMEOUT_SUBIDA_CLIP_MS, no el de
-// escritura normal.
-export async function subirClipMl(itemId: string, token: string, form: FormData): Promise<{ ok: boolean; status: number; textoCrudo: string }> {
-  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
-  const r = await escribir(`${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips/upload`, token, "POST", form, TIMEOUT_SUBIDA_CLIP_MS);
-  return { ok: r.ok, status: r.status, textoCrudo: r.textoCrudo };
 }
 
 // Issue #175 — lector real del seguimiento diario. Confirmado en vivo
@@ -1264,50 +1252,6 @@ export async function leerDescripcionItemMl(itemId: string, token: string): Prom
   }
 }
 
-// Rama feat-publicar-clip, punto 5 ("estado de moderación") — avisado
-// antes de tocar este archivo (CLAUDE.md). GET /marketplace/items/{id}/clips,
-// documentado por Mercado Libre ("Working with Clips"): devuelve
-// moderation_status (UNDER_REVIEW, PUBLISHED o REJECTED) por clip.
-// Advertencia explícita heredada de subirClipMl (ESTE módulo nunca se
-// confirmó contra una cuenta real con un clip de verdad ya moderado):
-// la forma exacta del cuerpo (¿un array suelto? ¿{results:[...]}?
-// ¿el motivo de un REJECTED viene en `rejection_reason`, `reason` o no
-// viene?) está documentada acá tal como la da la documentación
-// oficial, nunca confirmada en vivo — se parsea TODO de forma
-// defensiva (unknown -> tipo, nunca un cast ciego) para que un campo
-// real distinto al esperado nunca tire un 500, solo deje ese campo en
-// null.
-export type EstadoModeracionClip = "UNDER_REVIEW" | "PUBLISHED" | "REJECTED" | string;
-export type ClipMl = { clipUuid: string | null; moderationStatus: EstadoModeracionClip | null; motivoRechazo: string | null };
-
-function clipsDesdeRespuesta(data: unknown): ClipMl[] {
-  const lista = Array.isArray(data) ? data : Array.isArray((data as { results?: unknown[] })?.results) ? (data as { results: unknown[] }).results : [];
-  return lista.map((crudo) => {
-    const c = crudo as { clip_uuid?: unknown; id?: unknown; moderation_status?: unknown; status?: unknown; rejection_reason?: unknown; reason?: unknown };
-    const clipUuid = typeof c.clip_uuid === "string" ? c.clip_uuid : typeof c.id === "string" ? c.id : null;
-    const moderationStatus = typeof c.moderation_status === "string" ? c.moderation_status : typeof c.status === "string" ? c.status : null;
-    const motivoRechazo = typeof c.rejection_reason === "string" ? c.rejection_reason : typeof c.reason === "string" ? c.reason : null;
-    return { clipUuid, moderationStatus, motivoRechazo };
-  });
-}
-
-// null = Mercado Libre no dejó ver el estado (403/404/5xx) — distinto
-// de [] (sí respondió, de verdad no hay ningún clip todavía en esta
-// publicación). El llamador (lib/trabajos/subirClipMultiCuenta.ts)
-// nunca confunde los dos casos.
-export async function obtenerClipsMl(itemId: string, token: string): Promise<ClipMl[] | null> {
-  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips`;
-  try {
-    const resp = await pedir<unknown>(url, token);
-    if (!resp.ok) return resp.status === 404 ? [] : null;
-    return clipsDesdeRespuesta(resp.data);
-  } catch (e) {
-    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
-    throw e;
-  }
-}
-
 // ---------- Rama feat-promociones (motor portado de zilonix-os-web,
 // lib/mercadolibre-promo.js — ver docs/investigacion/promociones-mercado-libre.md
 // de ese repo para la evidencia real citada en cada regla) ----------
@@ -1347,6 +1291,13 @@ export type ItemParaPromocionMl = {
   // usa esto para dejar un motivo específico, distinto del genérico
   // "tiene variantes".
   skuVariantesDistintas: boolean;
+  // Tarea "Promociones real" (Refs #295) — precio y stock del ítem tal
+  // cual lo tiene Mercado Libre HOY, nunca el de una promoción (que ya
+  // viene en PromocionCrudaMl). Lo necesita la lista de publicaciones
+  // para mostrar "Sin promoción" con su precio/stock reales, sin tener
+  // que pedir el ítem una segunda vez.
+  precio: number | null;
+  stock: number | null;
 };
 
 type AtributoMl = { id?: unknown; value_name?: unknown };
@@ -1379,11 +1330,13 @@ function skuDeVariacion(variacion: VariacionMl | undefined): string | null {
 
 export async function leerItemParaPromocionMl(itemId: string, token: string): Promise<ItemParaPromocionMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,seller_custom_field,attributes,variations`;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,available_quantity,seller_custom_field,attributes,variations`;
   try {
     const resp = await pedir<{
       title?: unknown;
       thumbnail?: unknown;
+      price?: unknown;
+      available_quantity?: unknown;
       seller_custom_field?: unknown;
       attributes?: unknown;
       variations?: VariacionMl[];
@@ -1425,6 +1378,8 @@ export async function leerItemParaPromocionMl(itemId: string, token: string): Pr
       skuCodigo,
       tieneVariantes,
       skuVariantesDistintas,
+      precio: typeof resp.data.price === "number" && resp.data.price > 0 ? resp.data.price : null,
+      stock: typeof resp.data.available_quantity === "number" && resp.data.available_quantity >= 0 ? resp.data.available_quantity : null,
     };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;

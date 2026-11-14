@@ -4,7 +4,6 @@ import {
   aplicarReglaSaleFormat,
   aplicarRespaldoDimensionesProducto,
   canonicalizarValorListaCerrada,
-  clipRequiereReputacion,
   conUnidadSiHaceFalta,
   decidirAtributoGtin,
   detectarGeneroPorTitulo,
@@ -245,8 +244,5 @@ describe("detección de errores reales por regex sobre la respuesta cruda de Mer
   });
   it("item bajo revisión, no se puede pausar/activar (Mateo 25/9)", () => {
     expect(itemNoModificablePorRevision("item.status.not_modifiable")).toBe(true);
-  });
-  it("clip exige reputación (Mateo, 28/9, FullyLemon)", () => {
-    expect(clipRequiereReputacion("PA_UNAUTHORIZED_RESULT_FROM_POLICIES")).toBe(true);
   });
 });

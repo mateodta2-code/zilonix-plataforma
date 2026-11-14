@@ -1,0 +1,34 @@
+.pagina {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 32px 16px 64px;
+}
+.logo {
+  width: 220px;
+  max-width: 70%;
+  height: auto;
+  display: block;
+  margin: 0 0 28px;
+}
+.titulo {
+  margin: 0 0 20px;
+  font-family: var(--fuente-titulos);
+  font-size: 26px;
+  line-height: 1.25;
+  font-weight: 600;
+  color: var(--texto);
+}
+.volver {
+  display: inline-block;
+  margin-top: 36px;
+  color: var(--acento-fuerte);
+  font-weight: 600;
+  text-decoration: none;
+}
+.volver:hover {
+  text-decoration: underline;
+}
+@media (min-width: 640px) {
+  .pagina { padding: 56px 24px 96px; }
+  .titulo { font-size: 32px; }
+}

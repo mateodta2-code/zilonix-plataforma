@@ -116,6 +116,21 @@
   align-self: flex-start;
 }
 
+.tituloCuenta {
+  margin: 16px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.botonesImpresion {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .nota {
   margin: 0;
   font-size: 12px;

@@ -27,6 +27,10 @@ import {
   listarCuentasConErrorDespacho,
   listarDespachosFiltrados,
   listarDespachosPendientes,
+  listarDespachosYaImpresos,
+  listarItemsPorEnvio,
+  obtenerEtiquetasPdfPorEnvio,
+  EtiquetaDeEnvioNoImprimibleError,
   listarTarjetasDespacho,
   marcarDespachado,
   marcarEtiquetasImpresas,
@@ -160,6 +164,62 @@ describe("despachos (tarea 2.10)", () => {
   it("si Mercado Libre bloquea la impresión (ya recogido), se ve el error real explicado", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaErrorPdf("NOT_PRINTABLE_STATUS")));
     await expect(obtenerEtiquetasPdf(empresaId, cuentaId, ["222"])).rejects.toThrow(EtiquetaNoImprimibleError);
+  });
+
+  // "Reimprimir en lote" (2026-11-13) — depende de la prueba de
+  // impresión masiva de arriba, que deja "111" con etiqueta impresa.
+  it("listarDespachosYaImpresos trae la ya impresa (con el nickname de su cuenta), nunca una no imprimible", async () => {
+    const ya = await listarDespachosYaImpresos(empresaId);
+    const fila = ya.find((d) => d.shipmentIdExterno === "111");
+    expect(fila?.cuentaNickname).toBe("VENDEDOR_DESP");
+    expect(fila?.etiquetaImpresaTs).not.toBeNull();
+    expect(ya.map((d) => d.shipmentIdExterno)).not.toContain("222");
+    expect(ya.map((d) => d.shipmentIdExterno)).not.toContain("333");
+  });
+
+  it("obtenerEtiquetasPdfPorEnvio pide cada guía por separado y respeta el orden", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const id = /shipment_ids=([^&]+)/.exec(url)?.[1] ?? "";
+      expect(id).not.toContain(",");
+      return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(Number(id)) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const pdfs = await obtenerEtiquetasPdfPorEnvio(empresaId, cuentaId, ["111", "5", "22"]);
+    expect(pdfs.map((p) => p.byteLength)).toEqual([111, 5, 22]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("obtenerEtiquetasPdfPorEnvio: si una ya la recogieron, el error dice CUÁL envío es", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => (url.includes("shipment_ids=222") ? respuestaErrorPdf("NOT_PRINTABLE_STATUS") : ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(1) } as Response))));
+    const error = await obtenerEtiquetasPdfPorEnvio(empresaId, cuentaId, ["111", "222"]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EtiquetaDeEnvioNoImprimibleError);
+    expect(error).toBeInstanceOf(EtiquetaNoImprimibleError);
+    expect((error as Error).message).toContain("#222");
+  });
+
+  it("listarItemsPorEnvio trae producto y cantidad de cada envío; nunca los de otra empresa", async () => {
+    // pedido_items cuelga de la cabecera de la venta
+    // (pedido_items_venta_misma_empresa_fk): la cabecera va primero.
+    await dbComoEmpresa(empresaId, async (tx) => {
+      await tx.insert(pedidosFinanzas).values({ empresaId, pedidoId, cuentaMlId: cuentaId, valorVenta: "10000.00" });
+      await tx.insert(pedidoItems).values({ empresaId, pedidoId, linea: 1, itemIdExterno: "MCO-ITEM-1", titulo: "Gorra azul", cantidad: 2, skuCodigo: "GOR-1", precioUnitario: "5000", valorLinea: "10000" });
+    });
+    const porEnvio = await listarItemsPorEnvio(empresaId, ["111"]);
+    expect(porEnvio.get("111")).toEqual([{ titulo: "Gorra azul", cantidad: 2, skuCodigo: "GOR-1" }]);
+    expect((await listarItemsPorEnvio(empresaBId, ["111"])).size).toBe(0);
+  });
+
+  it("listarDespachosYaImpresos: empresa B nunca ve las impresas de empresa A", async () => {
+    expect(await listarDespachosYaImpresos(empresaBId)).toHaveLength(0);
+  });
+
+  it("listarDespachosYaImpresos: una ya marcada como despachada no se ofrece para reimprimir", async () => {
+    await dbComoEmpresa(empresaId, (tx) => tx.update(despachosMl).set({ despachadoTs: new Date() }).where(eq(despachosMl.shipmentIdExterno, "111")));
+    try {
+      expect((await listarDespachosYaImpresos(empresaId)).map((d) => d.shipmentIdExterno)).not.toContain("111");
+    } finally {
+      await dbComoEmpresa(empresaId, (tx) => tx.update(despachosMl).set({ despachadoTs: null }).where(eq(despachosMl.shipmentIdExterno, "111")));
+    }
   });
 });
 

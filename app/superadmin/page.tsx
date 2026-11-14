@@ -27,6 +27,9 @@ export default async function SuperadminPage() {
       <p style={{ opacity: 0.7, fontSize: 13 }}>
         Solo cifras agregadas — nunca el detalle de una empresa sin que ella te conceda un acceso temporal.
       </p>
+      <p style={{ fontSize: 13 }}>
+        <Link href="/superadmin/foro">Moderar el foro →</Link>
+      </p>
 
       {empresas.length === 0 ? (
         <p style={{ opacity: 0.6, fontSize: 13, marginTop: 24 }}>Todavía no hay ninguna empresa registrada.</p>
