@@ -8,27 +8,30 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { InsigniaExtension } from "@/components/marco/InsigniaExtension";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import {
+  actualizarSesion,
   aplicarVendidosConfirmados,
   calcularKpisMercado,
   calcularResumenBloque,
   calcularResumenLocalBloque,
-  cargarBloques,
+  cargarSesiones,
   clasificarSenalVentas,
   estimarAproximadosListado,
   facturacionEstimadaListado,
   generarEstrategiaListado,
   generarVeredictoListado,
-  guardarBloques,
+  guardarSesiones,
   linkHttpSeguro,
   mejorOpcionParaImportar,
+  obtenerBloquesDeSesion,
   ordenarProductos,
   type Bloque,
   type CriterioOrden,
   type ProductoListado,
+  type SesionBusqueda,
 } from "@/lib/ml/listadoCliente";
 import { ETIQUETA_APROXIMADO } from "@/lib/seguimiento/aproximados";
 import { generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
-import { consumirClicAnalizarReciente, type PlataformaAnalizar } from "./analizarClic";
+import { consumirClicAnalizarReciente, marcarClicAnalizar, type PlataformaAnalizar } from "./analizarClic";
 import { generarQueriesAnalizarAction, generarQueriesPlataformaAction } from "./actions";
 import styles from "./page.module.css";
 
@@ -66,6 +69,13 @@ function numero(n: number): string {
 // un timeout fijo de 90s sin importar cuántos términos hubiera — con
 // 5 términos a 23s cada uno eran 115s reales en el peor caso. Acá el
 // margen siempre depende de cuántas queries se escanean de verdad.
+const AVISO_EXTENSION_SIN_RESPUESTA = "La extensión no respondió. Recarga la pestaña de Mercado Libre o esta página y vuelve a intentar.";
+const AVISO_ESCANEO_TARDO = "El escaneo tardó demasiado y se detuvo. Vuelve a intentar en un momento.";
+// Sin ningún mensaje de la extensión tras este tiempo, se avisa (sin esperar el límite largo del escaneo).
+const ESPERA_RESPUESTA_EXTENSION_MS = 8_000;
+// Si el content script llega tarde, se reintenta este tiempo antes de rendirse.
+const ESPERA_ATRIBUTO_EXTENSION_MS = 3_000;
+
 function calcularTimeoutEscaneoMs(nTerminos: number): number {
   return nTerminos * 25_000 + 10_000;
 }
@@ -189,6 +199,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   const ahora = useMemo(() => new Date(), []);
   const [conExtension, setConExtension] = useState<boolean | null>(null);
   const [bloques, setBloques] = useState<Bloque[]>([]);
+  const [sesiones, setSesiones] = useState<SesionBusqueda[]>([]);
   const [cargado, setCargado] = useState(false);
 
   const [escaneoEnCurso, setEscaneoEnCurso] = useState(false);
@@ -227,21 +238,110 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   // usaron en ESE escaneo (para etiquetar el bloque cuando el
   // resultado llegue — el mensaje de background.js no las repite).
   const limiteMlRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Aviso visible cuando la extensión no responde o no arranca el escaneo
+  // (nunca una pantalla vacía sin explicación). Los refs "recibido" dicen
+  // si llegó algún mensaje de la extensión antes de vencer el límite.
+  // Un aviso por origen ("extension", "ml" o la clave de la plataforma): el de
+  // una plataforma nunca pisa ni borra el de otra.
+  const [avisos, setAvisos] = useState<Record<string, string>>({});
+  const respondioRef = useRef<Record<string, boolean>>({});
+  function ponerAviso(origen: string, texto: string | null) {
+    setAvisos((actuales) => {
+      if (texto === null) {
+        if (!(origen in actuales)) return actuales;
+        const { [origen]: _quitado, ...resto } = actuales;
+        return resto;
+      }
+      return { ...actuales, [origen]: texto };
+    });
+  }
   const limitePlataformaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const avisoRapidoMlRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const avisoRapidoPlataformaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queriesUsadasPlataformaRef = useRef<string[]>([]);
-
-  // Issue #227 — "persistencia ≥1h, sobrevive refresh": se carga UNA
-  // vez por término (localStorage, TTL 1h — lib/ml/listadoCliente.ts)
-  // y se vuelve a guardar cada vez que cambian los bloques.
+  // Refs #227 — a qué término pertenece el escaneo en curso de CADA
+  // tipo (ML / multiplataforma), fijado cuando arranca (ver
+  // escanearMercadoLibre/analizarEnPlataforma). Con FormularioAnalizar
+  // ya sin recargar la página completa (ver su propio comentario), la
+  // persona puede arrancar la búsqueda B mientras el escaneo de A
+  // sigue en curso — si el resultado de A llega DESPUÉS de ese cambio,
+  // no es de la búsqueda que se ve ahora: usar el `termino` vivo lo
+  // mezclaría con los bloques de B. agregarBloque usa este valor para
+  // guardarlo bajo la sesión de A, nunca en pantalla por error.
+  const terminoEscaneoMlRef = useRef<string | null>(null);
+  const terminoEscaneoPlataformaRef = useRef<string | null>(null);
+  // Issue #227 (fix cache) — "último valor real, sin re-disparar el
+  // efecto por cada cambio": refs en vez de deps, para que el efecto
+  // de abajo (el que cambia de término) pueda leer el bloques/sesiones
+  // de ESTE MISMO instante sin tenerlos en su array de deps (si los
+  // tuviera, correría también cuando bloques cambia DENTRO del mismo
+  // término, que ya tiene su propio efecto de guardado más abajo).
+  const terminoCargadoRef = useRef<string | null>(null);
+  const bloquesRef = useRef<Bloque[]>([]);
+  const sesionesRef = useRef<SesionBusqueda[]>([]);
   useEffect(() => {
-    setBloques(cargarBloques(termino));
+    bloquesRef.current = bloques;
+  }, [bloques]);
+  useEffect(() => {
+    sesionesRef.current = sesiones;
+  }, [sesiones]);
+
+  // Issue #227 (fix cache real, reportado en staging) — bug de
+  // carrera confirmado: con dos efectos separados (cargar por
+  // [termino], guardar por [termino, bloques]), al cambiar de término
+  // los dos corrían en la MISMA pasada — el de guardar leía los
+  // bloques del término VIEJO (los `setState` del de cargar no son
+  // sincrónicos en la misma pasada) pero ya con la clave del término
+  // NUEVO, escribiendo ahí los bloques viejos; recién en la pasada
+  // siguiente (con bloques=[] del término nuevo) se "corregía" solo —
+  // una carrera real, no cosmética, si la persona cambiaba de término
+  // dos veces rápido.
+  //
+  // Ahora es UN SOLO efecto: primero guarda lo del término VIEJO (si
+  // había uno cargado) bajo SU propia clave, recién DESPUÉS lee/arma
+  // el del término NUEVO — nunca al revés. `termino` es la única
+  // dependencia a propósito (bloquesRef/sesionesRef dan el valor real
+  // sin que un cambio de bloques dentro del MISMO término dispare esto).
+  useEffect(() => {
+    let todas: SesionBusqueda[];
+    if (terminoCargadoRef.current === null) {
+      todas = cargarSesiones();
+    } else {
+      todas = actualizarSesion(sesionesRef.current, terminoCargadoRef.current, bloquesRef.current);
+      guardarSesiones(todas);
+    }
+    setSesiones(todas);
+    setBloques(obtenerBloquesDeSesion(todas, termino));
+    terminoCargadoRef.current = termino;
     setCargado(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a propósito solo [termino], ver el comentario de arriba
   }, [termino]);
 
+  // Guardado dentro del MISMO término (ej. un bloque nuevo que llega
+  // de un escaneo, o "Eliminar" un bloque) — nunca compite con el
+  // efecto de arriba: ese ya deja `terminoCargadoRef.current` en el
+  // término correcto ANTES de que `bloques` cambie a los del término
+  // nuevo, así que este efecto (sin `termino` en sus deps) siempre
+  // guarda bajo la clave que de verdad le corresponde a `bloques`.
   useEffect(() => {
     if (!cargado) return;
-    guardarBloques(termino, bloques);
-  }, [termino, bloques, cargado]);
+    const terminoDeEstosBloques = terminoCargadoRef.current ?? termino;
+    const todas = actualizarSesion(sesionesRef.current, terminoDeEstosBloques, bloques);
+    guardarSesiones(todas);
+    setSesiones(todas);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a propósito sin `termino`, ver el comentario de arriba
+  }, [bloques, cargado]);
+
+  // Issue #227 (fix cache) — búsquedas anteriores (otro término, con
+  // al menos un bloque todavía vigente) para la lista de "volver a
+  // ellas" — nunca la del término actual (esa ya se muestra abajo).
+  const busquedasAnteriores = useMemo(() => {
+    const claveActual = termino.trim().toLowerCase();
+    const masReciente = (s: SesionBusqueda) => Math.max(0, ...s.bloques.map((b) => b.creadoTs));
+    return sesiones
+      .filter((s) => s.termino.trim().toLowerCase() !== claveActual)
+      .sort((a, b) => masReciente(b) - masReciente(a));
+  }, [sesiones, termino]);
 
   useEffect(() => {
     setConExtension(document.documentElement.hasAttribute("data-zilonix-extension"));
@@ -255,6 +355,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   // "Analizar también en: Mercado Libre" (issue #231, punto D — antes
   // esa fila nunca incluía ML) la llama igual que este efecto.
   useEffect(() => {
+    // Con `false` no se consume la marca: ver el reintento de abajo.
     if (conExtension !== true) return;
     const marca = consumirClicAnalizarReciente();
     if (!marca) return;
@@ -265,6 +366,29 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- escanearMercadoLibre/analizarEnPlataforma son estables (misma identidad por render)
   }, [conExtension, termino]);
+
+  // Si la extensión todavía no marcó la página (content script tardío), se
+  // reintenta unos segundos; si aparece, el efecto de arriba sigue su curso
+  // con la marca intacta. Si no aparece y había un clic real reciente, se
+  // avisa y la marca se vuelve a guardar para no perder ese clic.
+  useEffect(() => {
+    if (conExtension !== false) return;
+    const inicio = Date.now();
+    const id = setInterval(() => {
+      if (document.documentElement.hasAttribute("data-zilonix-extension")) {
+        clearInterval(id);
+        setConExtension(true);
+        return;
+      }
+      if (Date.now() - inicio < ESPERA_ATRIBUTO_EXTENSION_MS) return;
+      clearInterval(id);
+      const marca = consumirClicAnalizarReciente();
+      if (!marca) return;
+      marcarClicAnalizar(marca.pais, marca.plataforma);
+      ponerAviso("extension", AVISO_EXTENSION_SIN_RESPUESTA);
+    }, 250);
+    return () => clearInterval(id);
+  }, [conExtension]);
 
   // Issue #231 — extraído del efecto de arriba para poder llamarlo
   // también desde el botón secundario (ver PLATAFORMAS_SECUNDARIAS,
@@ -281,15 +405,49 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
       queries = generarVariantesBusqueda(termino);
     }
     if (!queries.length) return;
+    terminoEscaneoMlRef.current = termino;
+    respondioRef.current.ml = false;
+    ponerAviso("ml", null);
+    ponerAviso("extension", null);
     setQueriesUsadas(queries);
     window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo", payload: { terminos: queries, pais } }, window.location.origin);
     setEscaneoEnCurso(true);
-    limiteMlRef.current = setTimeout(() => setEscaneoEnCurso(false), calcularTimeoutEscaneoMs(queries.length));
+    if (avisoRapidoMlRef.current) clearTimeout(avisoRapidoMlRef.current);
+    avisoRapidoMlRef.current = setTimeout(() => {
+      if (!respondioRef.current.ml) ponerAviso("ml", AVISO_EXTENSION_SIN_RESPUESTA);
+    }, ESPERA_RESPUESTA_EXTENSION_MS);
+    limiteMlRef.current = setTimeout(() => {
+      setEscaneoEnCurso(false);
+      // Sin respuesta ya avisó el temporizador corto; con respuesta, el escaneo arrancó y se pasó de tiempo.
+      if (respondioRef.current.ml) ponerAviso("ml", AVISO_ESCANEO_TARDO);
+    }, calcularTimeoutEscaneoMs(queries.length));
   }
 
-  function agregarBloque(plataforma: string, queriesUsadasBloque: string[], productos: ProductoListado[]) {
+  // Refs #227 — `terminoBloque` (default: el término vivo, para el
+  // caso normal de "Enviar a Zilonix" manual y cualquier otro llamado
+  // síncrono) puede venir de un escaneo que arrancó con OTRO término
+  // (ver los refs de arriba). Comparado contra `terminoCargadoRef`
+  // (nunca contra el `termino` cerrado en este closure — el listener
+  // de mensajes solo se vuelve a crear cuando cambia `queriesUsadas`,
+  // no `termino`, así que su copia de `termino` puede quedar vieja
+  // varios renders — `terminoCargadoRef` en cambio se actualiza en
+  // CADA cambio real de término, lo ponga el efecto que lo ponga).
+  // Si coincide con el que se está viendo AHORA, entra al stack
+  // visible de siempre; si no, se guarda directo en la sesión de ESE
+  // término — nunca en `bloques` (lo que se ve en pantalla es solo
+  // del término actual) y nunca pisa otras sesiones (actualizarSesion
+  // ya es por clave propia, ver listadoCliente.ts).
+  function agregarBloque(plataforma: string, queriesUsadasBloque: string[], productos: ProductoListado[], terminoBloque: string = termino) {
     if (!productos.length) return;
-    setBloques((actuales) => [...actuales, { id: idBloque(), plataforma, termino, queriesUsadas: queriesUsadasBloque, creadoTs: Date.now(), productos }]);
+    const terminoActual = terminoCargadoRef.current ?? termino;
+    const nuevoBloque: Bloque = { id: idBloque(), plataforma, termino: terminoBloque, queriesUsadas: queriesUsadasBloque, creadoTs: Date.now(), productos };
+    if (terminoBloque === terminoActual) {
+      setBloques((actuales) => [...actuales, nuevoBloque]);
+      return;
+    }
+    const todas = actualizarSesion(sesionesRef.current, terminoBloque, [...obtenerBloquesDeSesion(sesionesRef.current, terminoBloque), nuevoBloque]);
+    guardarSesiones(todas);
+    setSesiones(todas);
   }
 
   useEffect(() => {
@@ -320,12 +478,16 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
         if (!esMensajeListadoValido(datos.payload)) return;
         const payload = datos.payload;
         const productos = payload.productos.map((p) => construirProductoListado(payload.plataforma, p));
+        if (payload.origen === "escaneo-analizar") {
+          respondioRef.current.ml = true;
+          ponerAviso("ml", null);
+        }
         if (!productos.length) return;
         if (payload.origen === "escaneo-analizar") {
           // Issue #221/#227 — la persona ya autorizó esto con el clic
           // de Analizar: se agrega el bloque directo, sin confirmar.
           setEscaneoEnCurso(false);
-          agregarBloque(payload.plataforma, queriesUsadas, productos);
+          agregarBloque(payload.plataforma, queriesUsadas, productos, terminoEscaneoMlRef.current ?? termino);
           return;
         }
         // "Enviar a Zilonix" manual — sí pide confirmación, nunca se
@@ -336,7 +498,11 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
 
       if (datos.tipo === "escaneo-plataforma-captcha") {
         const payload = datos.payload as { plataforma?: string } | null;
-        if (payload?.plataforma) setCaptchaPlataforma(payload.plataforma);
+        if (payload?.plataforma) {
+          setCaptchaPlataforma(payload.plataforma);
+          respondioRef.current[payload.plataforma] = true;
+          ponerAviso(payload.plataforma, null);
+        }
         return;
       }
 
@@ -345,10 +511,12 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
         setCaptchaPlataforma(null);
         if (!esMensajeListadoValido(datos.payload)) return;
         const payload = datos.payload;
+        respondioRef.current[payload.plataforma] = true;
+        ponerAviso(payload.plataforma, null);
         const config = PLATAFORMAS_MULTIPLATAFORMA.find((p) => p.clave === payload.plataforma);
         const nombrePlataforma = config?.nombre ?? payload.plataforma;
         const productos = payload.productos.map((p) => construirProductoListado(nombrePlataforma, p));
-        agregarBloque(nombrePlataforma, queriesUsadasPlataformaRef.current, productos);
+        agregarBloque(nombrePlataforma, queriesUsadasPlataformaRef.current, productos, terminoEscaneoPlataformaRef.current ?? termino);
         return;
       }
 
@@ -382,6 +550,9 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     if (limitePlataformaRef.current) clearTimeout(limitePlataformaRef.current);
     setEscaneoPlataformaEnCurso(clave);
     setCaptchaPlataforma(null);
+    respondioRef.current[clave] = false;
+    ponerAviso(clave, null);
+    ponerAviso("extension", null);
     let queries: string[];
     try {
       queries = await generarQueriesPlataformaAction(termino, clave);
@@ -393,8 +564,16 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
       return;
     }
     queriesUsadasPlataformaRef.current = queries;
+    terminoEscaneoPlataformaRef.current = termino;
     window.postMessage({ fuente: "zilonix-panel", tipo: "iniciar-escaneo-plataforma", payload: { plataforma: clave, terminos: queries } }, window.location.origin);
-    limitePlataformaRef.current = setTimeout(() => setEscaneoPlataformaEnCurso(null), calcularTimeoutEscaneoMs(queries.length) + 120_000);
+    if (avisoRapidoPlataformaRef.current) clearTimeout(avisoRapidoPlataformaRef.current);
+    avisoRapidoPlataformaRef.current = setTimeout(() => {
+      if (!respondioRef.current[clave]) ponerAviso(clave, AVISO_EXTENSION_SIN_RESPUESTA);
+    }, ESPERA_RESPUESTA_EXTENSION_MS);
+    limitePlataformaRef.current = setTimeout(() => {
+      setEscaneoPlataformaEnCurso((actual) => (actual === clave ? null : actual));
+      if (respondioRef.current[clave]) ponerAviso(clave, AVISO_ESCANEO_TARDO);
+    }, calcularTimeoutEscaneoMs(queries.length) + 120_000);
   }
 
   // Issue #231, punto D — "Analizar también en…" tiene que listar
@@ -511,23 +690,54 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     [kpisMercado]
   );
 
+  // Refs #227 (fix "se pierde la búsqueda anterior") — "apiladas... o
+  // como pestañas/chips bien visibles encima de los resultados, no
+  // escondidas en texto pequeño": la actual (pestaña activa, sin link)
+  // + cada búsqueda anterior vigente (hasta 1h) como su propio link de
+  // navegación normal (?termino=...) — cambia el prop `termino`, el
+  // efecto de arriba carga la sesión guardada, y como nunca se marca
+  // el "clic reciente en Analizar" (consumirClicAnalizarReciente),
+  // ningún escaneo se dispara solo: restaura al instante lo que ya
+  // estaba guardado. Se muestra en las 3 pestañas (nunca solo en
+  // Demanda) porque las sesiones guardadas no son un dato de una
+  // pestaña puntual — siempre con al menos la actual, para que la
+  // franja nunca desaparezca sola apenas hay un término.
+  const bloquesActual = obtenerBloquesDeSesion(sesiones, termino);
+  const pestanasBusquedasJsx = (
+    <div className={styles.pestanasBusquedas}>
+      <span className={styles.etiquetaPestanas}>Búsquedas (hasta 1h, un clic restaura sin volver a escanear):</span>
+      <span className={styles.pestanaBusqueda} data-activa="true">
+        {termino} {bloquesActual.length > 0 ? <span className={styles.contadorPestana}>({bloquesActual.length})</span> : null}
+      </span>
+      {busquedasAnteriores.map((s) => (
+        <Link key={s.termino} href={`?termino=${encodeURIComponent(s.termino)}&tab=${tab}`} className={styles.pestanaBusqueda} data-activa="false">
+          {s.termino} <span className={styles.contadorPestana}>({s.bloques.length})</span>
+        </Link>
+      ))}
+    </div>
+  );
+
   if (tab === "mercado") {
     return (
-      <div className={styles.kpis}>
-        <TarjetaKpi titulo="PUBLICACIONES ENCONTRADAS" valor={kpisMercado.publicacionesEncontradas || undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="VENDEDORES DISTINTOS" valor={kpisMercado.vendedoresDistintos || undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="PRECIO MÍNIMO" valor={kpisMercado.precioMinimo != null ? money(kpisMercado.precioMinimo) : undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="PRECIO PROMEDIO (TICKET)" valor={kpisMercado.precioPromedio != null ? money(kpisMercado.precioPromedio) : undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="PRECIO MÁXIMO" valor={kpisMercado.precioMaximo != null ? money(kpisMercado.precioMaximo) : undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="% FULL" valor={kpisMercado.porcentajeFull != null ? `${kpisMercado.porcentajeFull}%` : undefined} textoVacio="Sin dato" />
-        <TarjetaKpi titulo="% ENVÍO GRATIS" valor={kpisMercado.porcentajeEnvioGratis != null ? `${kpisMercado.porcentajeEnvioGratis}%` : undefined} textoVacio="Sin dato" />
-      </div>
+      <>
+        {pestanasBusquedasJsx}
+        <div className={styles.kpis}>
+          <TarjetaKpi titulo="PUBLICACIONES ENCONTRADAS" valor={kpisMercado.publicacionesEncontradas || undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="VENDEDORES DISTINTOS" valor={kpisMercado.vendedoresDistintos || undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="PRECIO MÍNIMO" valor={kpisMercado.precioMinimo != null ? money(kpisMercado.precioMinimo) : undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="PRECIO PROMEDIO (TICKET)" valor={kpisMercado.precioPromedio != null ? money(kpisMercado.precioPromedio) : undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="PRECIO MÁXIMO" valor={kpisMercado.precioMaximo != null ? money(kpisMercado.precioMaximo) : undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="% FULL" valor={kpisMercado.porcentajeFull != null ? `${kpisMercado.porcentajeFull}%` : undefined} textoVacio="Sin dato" />
+          <TarjetaKpi titulo="% ENVÍO GRATIS" valor={kpisMercado.porcentajeEnvioGratis != null ? `${kpisMercado.porcentajeEnvioGratis}%` : undefined} textoVacio="Sin dato" />
+        </div>
+      </>
     );
   }
 
   if (tab === "estrategia") {
     return (
       <>
+        {pestanasBusquedasJsx}
         <div className={styles.bloque}>
           <p className={styles.tituloSeccion}>Veredicto</p>
           {veredictoListado ? <p className={styles.veredicto}>{veredictoListado}</p> : <p className={styles.notaInsignia}>Sin suficientes datos todavía para un veredicto.</p>}
@@ -551,6 +761,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   // --- Demanda ---
   return (
     <>
+      {pestanasBusquedasJsx}
       {fotoAmpliada ? (
         <div className={styles.lightbox} onClick={() => setFotoAmpliada(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element -- foto de un marketplace ajeno, mismo criterio que el resto del panel */}
@@ -600,6 +811,12 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
           </p>
         </div>
       ) : null}
+
+      {Object.entries(avisos).map(([origen, texto]) => (
+        <div key={origen} className={styles.insignia} role="alert">
+          <Chip estado="peligro">{texto}</Chip>
+        </div>
+      ))}
 
       {escaneoEnCurso ? (
         <div className={styles.insignia}>

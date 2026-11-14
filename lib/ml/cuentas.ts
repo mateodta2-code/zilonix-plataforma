@@ -40,6 +40,19 @@ function esViolacionDeUnicidad(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "23505");
 }
 
+// Bug real (CI, 2026-11-12): desde Postgres 16.16 el mismo choque con
+// una fila de OTRA empresa ya no sale como 23505 sino como 42501 "new
+// row violates row-level security policy (USING expression) for table
+// "cuentas_ml"" — la fila ajena sigue sin tocarse (RLS hace su
+// trabajo), solo cambió el código del error. Se acota a ese mensaje y a
+// esta tabla: un 42501 de otra causa (permisos de app_user mal
+// configurados) nunca se disfraza de "conectada a otra empresa".
+function esChoqueRlsConFilaAjena(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error) || error.code !== "42501") return false;
+  const mensaje = "message" in error && typeof error.message === "string" ? error.message : "";
+  return mensaje.includes("row-level security policy") && mensaje.includes("cuentas_ml");
+}
+
 export async function guardarCuentaConectada(
   empresaId: string,
   datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl }
@@ -83,7 +96,7 @@ export async function guardarCuentaConectada(
     // decidir el UPDATE — Postgres corta con el 23505 de siempre en
     // vez de dejar que el RETURNING vuelva vacío. Mismo resultado para
     // quien llama: nunca el error crudo de Postgres en pantalla.
-    if (esViolacionDeUnicidad(error)) throw new CuentaMlDeOtraEmpresaError();
+    if (esViolacionDeUnicidad(error) || esChoqueRlsConFilaAjena(error)) throw new CuentaMlDeOtraEmpresaError();
     throw error;
   }
 }

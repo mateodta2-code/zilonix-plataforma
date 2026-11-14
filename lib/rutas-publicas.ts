@@ -44,6 +44,9 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // token contra la base (lib/invitaciones.ts) — el permiso real es
   // ese token, no el middleware.
   "/invitacion(.*)",
+  // Política de privacidad: texto legal estático, sin datos de ninguna
+  // empresa; la Chrome Web Store exige una URL pública sin login.
+  "/privacidad",
 
   // Mercado Libre llama esta ruta directo, sin sesión de usuario, y
   // espera un 200 RÁPIDO (si no le llega a tiempo, reintenta y puede

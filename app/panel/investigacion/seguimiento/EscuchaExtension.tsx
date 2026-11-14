@@ -1,8 +1,36 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { guardarDatoPaginaSeguimientoAction, guardarVariosDatosPaginaSeguimientoAction } from "./actions";
+import { Toast, type ItemToast } from "@/components/marco/Toast";
+import {
+  guardarDatoPaginaSeguimientoAction,
+  guardarVariosDatosPaginaSeguimientoAction,
+  type ResultadoGuardadoExtension,
+} from "./actions";
+
+// Refs #175 — bug reportado: un guardado de la extensión que fallaba
+// (sin cuenta/permiso, payload inválido) no dejaba NINGÚN rastro en
+// pantalla — la fila simplemente se quedaba en "Sin dato" para
+// siempre, sin pista de por qué. Un mensaje por motivo, en vez de uno
+// genérico, para que la persona sepa si tiene que volver a iniciar
+// sesión, pedir un permiso, o si fue solo ruido inofensivo (un item
+// viejo de la cola que ya no está en seguimiento).
+type MotivoFallo = Exclude<ResultadoGuardadoExtension, { ok: true }>["motivo"];
+
+const MENSAJE_DE_MOTIVO: Record<MotivoFallo, string> = {
+  payload_invalido: "La extensión mandó un dato con un formato que no se pudo leer — probá recargar la página de Mercado Libre.",
+  sin_sesion: "Tu sesión no está activa — iniciá sesión de nuevo para que la extensión pueda guardar lo que lee.",
+  sin_empresa: "No se encontró tu empresa activa — recargá el panel e intentá de nuevo.",
+  sin_permiso: "No tenés permiso para actualizar seguimientos — pedí el permiso de modificar inventario.",
+  seguimiento_inactivo: "Esa página ya no corresponde a un seguimiento activo — se ignoró.",
+  tipo_no_coincide: "El tipo de página no coincide con el seguimiento guardado — se ignoró.",
+};
+
+// Las fallas de LOTE (cola de visitas encoladas) nunca avisan por un
+// item viejo puntual (eso ya se loguea del lado del servidor, ver
+// actions.ts) — solo por algo que impidió guardar el lote entero.
+const MOTIVOS_DE_LOTE_PARA_AVISAR = new Set<MotivoFallo>(["sin_sesion", "sin_empresa", "sin_permiso"]);
 
 // Issue #251 — mismo puente que ya usa /panel/investigacion
 // (PanelInvestigacion.tsx, "vendidos-completados"/"listado-importado"):
@@ -16,15 +44,26 @@ import { guardarDatoPaginaSeguimientoAction, guardarVariosDatosPaginaSeguimiento
 // "dato-pagina-seguimiento" — las otras páginas de la app lo ignoran
 // sin romper nada.
 //
-// Nunca pinta nada por su cuenta: guarda con la Server Action (que
-// revalida sesión/permiso/empresa SIEMPRE del lado del servidor,
-// nunca confía en nada del mensaje más que el payload) y pide un
-// refresh de la página — si el guardado de verdad escribió algo
-// nuevo, el usuario lo ve en la tabla en el próximo render; si no
-// (ej. todavía no hay foto de hoy, o el id no es un seguimiento
-// activo), el refresh no cambia nada visible, tampoco rompe nada.
+// Guarda con la Server Action (que revalida sesión/permiso/empresa
+// SIEMPRE del lado del servidor, nunca confía en nada del mensaje más
+// que el payload) y pide un refresh de la página — si el guardado de
+// verdad escribió algo nuevo, el usuario lo ve en la tabla en el
+// próximo render. Refs #175 — antes, si el guardado fallaba (sin
+// cuenta/permiso, payload inválido) el refresh no cambiaba nada y la
+// persona nunca se enteraba por qué; ahora un fallo real (no un item
+// viejo puntual, ver MOTIVOS_DE_LOTE_PARA_AVISAR) muestra un Toast.
 export function EscuchaExtension() {
   const router = useRouter();
+  const [toasts, setToasts] = useState<ItemToast[]>([]);
+
+  function avisar(texto: string) {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((actual) => [...actual, { id, texto, estado: "peligro" }]);
+    setTimeout(() => setToasts((actual) => actual.filter((t) => t.id !== id)), 8000);
+  }
+  function cerrarToast(id: string) {
+    setToasts((actual) => actual.filter((t) => t.id !== id));
+  }
 
   useEffect(() => {
     function alRecibirMensaje(evento: MessageEvent) {
@@ -32,7 +71,10 @@ export function EscuchaExtension() {
       const datos = evento.data as { fuente?: string; tipo?: string; payload?: unknown } | null;
       if (!datos || datos.fuente !== "zilonix-extension") return;
       if (datos.tipo === "dato-pagina-seguimiento") {
-        void guardarDatoPaginaSeguimientoAction(datos.payload).then(() => router.refresh());
+        void guardarDatoPaginaSeguimientoAction(datos.payload).then((resultado) => {
+          if (!resultado.ok) avisar(MENSAJE_DE_MOTIVO[resultado.motivo]);
+          router.refresh();
+        });
         return;
       }
       // Issue #251 (corrección de Pablo, punto 7) — "vacía la cola en
@@ -45,7 +87,12 @@ export function EscuchaExtension() {
       if (datos.tipo === "cola-seguimiento") {
         const payloads = (datos.payload as { payloads?: unknown } | null)?.payloads;
         if (Array.isArray(payloads) && payloads.length > 0) {
-          void guardarVariosDatosPaginaSeguimientoAction(payloads).then(() => router.refresh());
+          void guardarVariosDatosPaginaSeguimientoAction(payloads).then((resultado) => {
+            if (!resultado.ok && MOTIVOS_DE_LOTE_PARA_AVISAR.has(resultado.motivo)) {
+              avisar(MENSAJE_DE_MOTIVO[resultado.motivo]);
+            }
+            router.refresh();
+          });
         }
       }
     }
@@ -65,5 +112,5 @@ export function EscuchaExtension() {
     return () => window.removeEventListener("message", alRecibirMensaje);
   }, [router]);
 
-  return null;
+  return <Toast items={toasts} onCerrar={cerrarToast} />;
 }

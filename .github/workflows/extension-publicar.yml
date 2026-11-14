@@ -1,0 +1,133 @@
+# Publicación automática de la extensión en la Chrome Web Store.
+# Se dispara al subir un cambio de extension/manifest.json a la rama
+# produccion, o a mano. Pasos de una sola vez (cuenta, OAuth, secretos):
+# docs/extension-web-store.md.
+#
+# Si falta alguno de los 5 secretos CWS_*, termina en verde con un aviso.
+# Nunca imprime secretos ni tokens.
+
+name: Extensión · publicar en la Chrome Web Store
+
+on:
+  push:
+    branches: [produccion]
+    paths:
+      - extension/manifest.json
+  workflow_dispatch:
+
+concurrency:
+  group: extension-publicar
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    env:
+      CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+      CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+      CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+      CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+      CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Revisar los secretos
+        id: secretos
+        run: |
+          faltan=""
+          for nombre in CWS_CLIENT_ID CWS_CLIENT_SECRET CWS_REFRESH_TOKEN CWS_PUBLISHER_ID CWS_EXTENSION_ID; do
+            if [ -z "${!nombre}" ]; then faltan="$faltan $nombre"; fi
+          done
+          if [ -n "$faltan" ]; then
+            echo "completos=no" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Faltan secretos de la Chrome Web Store::No se publica nada. Faltan:$faltan. Los pasos para crearlos están en docs/extension-web-store.md."
+          else
+            echo "completos=si" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: npm ci
+
+      - name: Pruebas de la extensión
+        run: npx vitest run extension
+
+      - name: Armar el ZIP
+        run: npm run extension:zip
+
+      - name: Subir y mandar a revisión
+        if: steps.secretos.outputs.completos == 'si'
+        run: |
+          set -euo pipefail
+          set +x
+
+          # Aunque GitHub ya enmascara los secretos, se enmascara también
+          # cada valor derivado antes de usarlo.
+          version="$(jq -r .version extension/manifest.json)"
+          zip="dist/extension/zilonix-investigacion-v${version}.zip"
+          [ -f "$zip" ] || { echo "::error::No existe $zip"; exit 1; }
+
+          api="https://chromewebstore.googleapis.com"
+          item="publishers/${CWS_PUBLISHER_ID}/items/${CWS_EXTENSION_ID}"
+
+          respuesta="$(curl -sS -X POST https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=${CWS_CLIENT_ID}" \
+            --data-urlencode "client_secret=${CWS_CLIENT_SECRET}" \
+            --data-urlencode "refresh_token=${CWS_REFRESH_TOKEN}" \
+            --data-urlencode "grant_type=refresh_token")"
+          token="$(printf '%s' "$respuesta" | jq -r '.access_token // empty')"
+          if [ -z "$token" ]; then
+            # Solo el código y la descripción del error, nunca la respuesta completa.
+            echo "::error::Google no entregó el token: $(printf '%s' "$respuesta" | jq -r '[.error, .error_description] | map(select(. != null)) | join(" · ")')"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          unset respuesta
+
+          estado="$(curl -sS -H "Authorization: Bearer $token" "$api/v2/$item:fetchStatus")"
+          if printf '%s' "$estado" | jq -e '.error' >/dev/null; then
+            echo "::error::fetchStatus falló: $(printf '%s' "$estado" | jq -c '.error')"
+            exit 1
+          fi
+
+          # Versión ya publicada o ya enviada a revisión: no se sube nada.
+          ya="$(printf '%s' "$estado" | jq -r --arg v "$version" '
+            [ .publishedItemRevisionStatus?.distributionChannels[]?.crxVersion,
+              .submittedItemRevisionStatus?.distributionChannels[]?.crxVersion ]
+            | map(select(. == $v)) | length')"
+          if [ "$ya" != "0" ]; then
+            echo "La versión $version ya está publicada o en revisión. No se sube nada."
+            echo "### Sin cambios: la versión $version ya estaba en la Chrome Web Store" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "Subiendo la versión $version…"
+          subida="$(curl -sS -X POST -H "Authorization: Bearer $token" -T "$zip" "$api/upload/v2/$item:upload")"
+          est="$(printf '%s' "$subida" | jq -r '.uploadState // "DESCONOCIDO"')"
+
+          intentos=0
+          while [ "$est" = "IN_PROGRESS" ] && [ "$intentos" -lt 30 ]; do
+            intentos=$((intentos + 1))
+            sleep 10
+            consulta="$(curl -sS -H "Authorization: Bearer $token" "$api/v2/$item:fetchStatus")"
+            est="$(printf '%s' "$consulta" | jq -r '.lastAsyncUploadState // "DESCONOCIDO"')"
+          done
+
+          if [ "$est" != "SUCCEEDED" ]; then
+            echo "::error::La subida terminó en $est. Respuesta: $(printf '%s' "$subida" | jq -c '.')"
+            exit 1
+          fi
+
+          echo "Subida lista. Mandando a revisión…"
+          pub="$(curl -sS -X POST -H "Authorization: Bearer $token" -H "Content-Length: 0" "$api/v2/$item:publish")"
+          if printf '%s' "$pub" | jq -e '.error' >/dev/null; then
+            echo "::error::publish falló: $(printf '%s' "$pub" | jq -c '.error')"
+            exit 1
+          fi
+          echo "### Versión $version enviada a revisión: $(printf '%s' "$pub" | jq -r '.state // "ok"')" >> "$GITHUB_STEP_SUMMARY"

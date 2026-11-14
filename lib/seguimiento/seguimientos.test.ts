@@ -781,7 +781,11 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
   // mayoría de estos tests, que no están probando ESE campo puntual.
   const leidoAhora = () => new Date().toISOString();
 
-  it("seguimiento no activo (mlIdExterno sin seguir): no hace nada, nunca inventa una fila", async () => {
+  // Refs #175 — antes esta función devolvía `void` sin distinguir "no
+  // hizo nada porque no hay seguimiento" de "guardó bien" — quien la
+  // llama (actions.ts) no podía avisar nada claro en pantalla. Ahora
+  // el resultado tipado lo distingue (ok:false, motivo).
+  it("seguimiento no activo (mlIdExterno sin seguir): no hace nada, nunca inventa una fila, y avisa el motivo", async () => {
     const { empresaId } = await crearEmpresaConUsuario();
     await expect(
       guardarDatoDePaginaSeguimiento(empresaId, {
@@ -795,7 +799,7 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
         precio: null,
         leidoEn: leidoAhora(),
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ ok: false, motivo: "seguimiento_inactivo" });
 
     const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoFotos));
     expect(filas).toHaveLength(0);
@@ -811,13 +815,15 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: true });
     vi.unstubAllGlobals();
 
-    await guardarDatoDePaginaSeguimiento(empresaId, {
-      tipoSeguimiento: "tienda", // el seguimiento real es "producto"
-      mlIdExterno: "MCO111",
-      totalPublicaciones: 10,
-      idsVisibles: ["MCO1"],
-      leidoEn: leidoAhora(),
-    });
+    await expect(
+      guardarDatoDePaginaSeguimiento(empresaId, {
+        tipoSeguimiento: "tienda", // el seguimiento real es "producto"
+        mlIdExterno: "MCO111",
+        totalPublicaciones: 10,
+        idsVisibles: ["MCO1"],
+        leidoEn: leidoAhora(),
+      })
+    ).resolves.toEqual({ ok: false, motivo: "tipo_no_coincide" });
 
     const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(seguimientoFotos).where(eq(seguimientoFotos.seguimientoId, seguimiento.id)));
     expect(filas).toHaveLength(0);
@@ -855,6 +861,31 @@ describe("guardarDatoDePaginaSeguimiento (issue #251)", () => {
     // definitivo, y revisionDiariaSeguimiento.ts puede reemplazarlo en
     // cuanto la API confirme uno real — ver ese archivo de pruebas.
     expect(actualizado.nombre).toBe("Cargador HP 65W original (aproximado)");
+  });
+
+  // Refs #175 — confirma el otro lado del resultado tipado: un
+  // guardado que sí aplica devuelve { ok: true }, para que
+  // EscuchaExtension.tsx sepa que NO tiene que avisar nada.
+  it("guardado real (seguimiento activo, tipo correcto): devuelve { ok: true }", async () => {
+    const { empresaId, usuarioId } = await crearEmpresaConUsuario();
+    await conectarCuentaMl(empresaId);
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "X", title: "X", status: "active" })));
+    const seguimiento = await agregarSeguimiento(empresaId, usuarioId, { tipo: "producto", link: "MCO111", esCompetidor: false });
+    vi.unstubAllGlobals();
+
+    await expect(
+      guardarDatoDePaginaSeguimiento(empresaId, {
+        tipoSeguimiento: "producto",
+        mlIdExterno: seguimiento.mlIdExterno,
+        inventario: 10,
+        inventarioAproximado: false,
+        vendidos: 5,
+        vendidosExacto: true,
+        titulo: null,
+        precio: null,
+        leidoEn: leidoAhora(),
+      })
+    ).resolves.toEqual({ ok: true });
   });
 
   it("producto con nombre pendiente, DOS lecturas de la extensión (título distinto la segunda vez): el respaldo se actualiza, siempre con el sufijo", async () => {
