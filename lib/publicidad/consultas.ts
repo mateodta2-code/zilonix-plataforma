@@ -90,6 +90,7 @@ export type TableroPublicidad = {
   diasRango: number;
   serieDiaria: PuntoDiario[];
   presupuestoDiarioTotal: string | null;
+  nombresCampanas: string[];
 };
 
 type FilaSuma = {
@@ -480,6 +481,7 @@ export async function consultarTableroPublicidad(
       enCurso: Boolean(enCursoFila),
       resumen: { actual: resumenActual, anterior: resumenAnterior },
       campanas: visibles,
+      nombresCampanas: calculadas.map((c) => c.nombre),
       cantidadActivas: calculadas.filter((c) => c.activa).length,
       cantidadPausadas: calculadas.filter((c) => !c.activa).length,
       diasRango: diasEntreInclusive(periodo.desde, periodo.hasta),

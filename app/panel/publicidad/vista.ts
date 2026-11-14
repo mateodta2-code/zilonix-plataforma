@@ -5,9 +5,12 @@ import { mostrarPorcentaje } from "@/components/finanzas/formato";
 import type { CampanaCalculada, TableroPublicidad } from "@/lib/publicidad/consultas";
 import {
   alertaBajo70,
+  anunciosMayorGasto,
   aportePorPublicidad,
+  fraseConteoEnfriamiento,
   fraseEstado,
   gastaSinVender,
+  ordenPorInversionDesc,
   usoPresupuestoDiario,
   variacionPorcentual,
   type PuntoDiario,
@@ -17,6 +20,7 @@ import {
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { aEscala } from "@/lib/numeros/normalizar-decimal";
 import { mostrarDineroCompacto, mostrarEntero, mostrarFraccion, mostrarRoas, textoObjetivoRoas } from "@/lib/publicidad/formato";
+import { recomendarCampana, type CodigoRecomendacion } from "@/lib/publicidad/recomendaciones";
 import {
   detalleDiagnostico,
   NOTA_TACOS_PROMOCIONADAS,
@@ -51,6 +55,9 @@ export type AnuncioPintado = {
   semaforoTitle: string;
   estadoAnuncio: string | null;
   gastaSinVender: boolean;
+  sugerencia: string | null;
+  nota: string | null;
+  mayorGasto: boolean;
   sinStock: boolean | null;
   ventasCantidad: string;
   ingresos: string;
@@ -67,6 +74,10 @@ export type CampanaPintada = {
   activa: boolean;
   alertaBajo70: boolean;
   anunciosSinVenta: number;
+  anunciosEnfriamiento: number;
+  textoEnfriamiento: string | null;
+  mayorGasto: MayorGastoPintado[];
+  recomendaciones: RecomendacionPintada[];
   cantidadAnuncios: number;
   ventasCantidad: string;
   ingresos: string;
@@ -88,6 +99,22 @@ export type CampanaPintada = {
   diagnostico: DiagnosticoVisible;
   deltas: DeltasCampana;
   anuncios: AnuncioPintado[];
+};
+
+export type RecomendacionPintada = {
+  codigo: CodigoRecomendacion;
+  anuncioId: string | null;
+  nombre: string | null;
+  texto: string;
+  motivo: string;
+};
+
+export type MayorGastoPintado = {
+  id: string;
+  nombre: string;
+  inversion: string;
+  parte: string | null;
+  ventas: string;
 };
 
 export type DeltaPintado = { texto: string; mejor: boolean | null };
@@ -145,13 +172,42 @@ function textoPresupuesto(campana: CampanaCalculada, diasRango: number): Pick<Ca
   };
 }
 
-export function pintarCampana(campana: CampanaCalculada, diasRango: number): CampanaPintada {
+export function pintarCampana(campana: CampanaCalculada, diasRango: number, nombresCampanas: readonly string[] = []): CampanaPintada {
   const estado = fraseEstado({
     diagnostico: campana.diagnostico,
     roas: campana.totales.roas,
     roasObjetivo: campana.roasObjetivo,
     diasAprendizaje: campana.diasAprendizaje,
   });
+  const aprendiendo = campana.diagnostico.tipo === "aprendiendo";
+  const tops = anunciosMayorGasto(
+    campana.anuncios.map((anuncio) => ({
+      id: anuncio.id,
+      titulo: anuncio.titulo,
+      itemId: anuncio.itemId,
+      gasto: anuncio.totales.gasto,
+      ventas: anuncio.totales.ventasPublicidad,
+    })),
+    campana.totales.gasto
+  );
+  const idsMayorGasto = new Set(tops.map((top) => top.id));
+  const recomendaciones = recomendarCampana({
+    aprendiendo,
+    nombreCampana: campana.nombre,
+    nombresCampanas,
+    roas: campana.totales.roas,
+    objetivo: campana.roasObjetivo,
+    anuncios: campana.anuncios.map((anuncio) => ({
+      id: anuncio.id,
+      titulo: anuncio.titulo,
+      itemId: anuncio.itemId,
+      gasto: anuncio.totales.gasto,
+      ingresos: anuncio.totales.ventasPublicidad,
+      ventasCantidad: anuncio.totales.ventasCantidad,
+      roas: anuncio.totales.roas,
+    })),
+  });
+  const anunciosEnfriamiento = recomendaciones.filter((item) => item.codigo === "pasar_enfriamiento").length;
   return {
     id: campana.id,
     nombre: campana.nombre,
@@ -173,9 +229,22 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number): Cam
       roas: campana.totales.roas,
       objetivo: campana.roasObjetivo,
     }),
+    // El hecho "gasta sin vender" se cuenta siempre, también en
+    // aprendizaje o en ANTÁRTIDA, donde no se recomienda mover nada:
+    // la recomendación calla, el dato no.
     anunciosSinVenta: campana.anuncios.filter((anuncio) =>
       gastaSinVender(anuncio.totales.gasto, anuncio.totales.ventasPublicidad, anuncio.totales.ventasCantidad)
     ).length,
+    recomendaciones,
+    anunciosEnfriamiento,
+    textoEnfriamiento: anunciosEnfriamiento > 0 ? fraseConteoEnfriamiento(anunciosEnfriamiento) : null,
+    mayorGasto: tops.map((top) => ({
+      id: top.id,
+      nombre: top.nombre,
+      inversion: mostrarDineroCompacto(top.gasto),
+      parte: top.parte === null ? null : mostrarPorcentaje(top.parte),
+      ventas: mostrarDineroCompacto(top.ventas),
+    })),
     cantidadAnuncios: campana.anuncios.length,
     diagnostico: detalleDiagnostico({
       diagnostico: campana.diagnostico,
@@ -203,7 +272,10 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number): Cam
     clics: mostrarEntero(campana.totales.clicks),
     impresiones: mostrarEntero(campana.totales.impresiones),
     ...textoPresupuesto(campana, diasRango),
-    anuncios: campana.anuncios.map((anuncio) => ({
+    anuncios: ordenPorInversionDesc(campana.anuncios, (anuncio) => anuncio.totales.gasto).map((anuncio) => {
+      const recomendacion = recomendaciones.find((item) => item.anuncioId === anuncio.id);
+      const esNota = recomendacion?.codigo === "nota_vende_bien";
+      return {
       clave: anuncio.id,
       itemId: anuncio.itemId,
       titulo: anuncio.titulo ?? "Sin título",
@@ -221,11 +293,15 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number): Cam
       semaforoTitle: tituloSemaforo(anuncio.semaforo),
       estadoAnuncio: anuncio.estado,
       gastaSinVender: gastaSinVender(anuncio.totales.gasto, anuncio.totales.ventasPublicidad, anuncio.totales.ventasCantidad),
+      sugerencia: recomendacion && !esNota ? recomendacion.texto : null,
+      nota: esNota ? recomendacion.texto : null,
+      mayorGasto: idsMayorGasto.has(anuncio.id),
       sinStock: anuncio.sinStock,
       ventasCantidad: mostrarEntero(anuncio.totales.ventasCantidad),
       ingresos: mostrarDineroCompacto(anuncio.totales.ventasPublicidad),
       unidades: mostrarEntero(anuncio.totales.unidadesVendidas),
-    })),
+    };
+    }),
   };
 }
 
