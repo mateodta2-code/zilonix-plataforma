@@ -10,6 +10,7 @@ import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import {
   agruparDespachosPorDia,
   contarDespachosYaRecogidosSinImprimir,
+  listarDespachosYaImpresos,
   DIAS_VENTANA_DESPACHADOS,
   esFlex,
   estadoPlazo,
@@ -298,7 +299,11 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
 // ahora pide con fetch y solo abre una pestaña (con un blob: URL
 // propio) si de verdad llegó un PDF.
 async function ImpresionMasiva({ empresaId }: { empresaId: string }) {
-  const [resultado, saltadas] = await Promise.all([listarDespachosFiltrados(empresaId, {}), contarDespachosYaRecogidosSinImprimir(empresaId)]);
+  const [resultado, saltadas, yaImpresas] = await Promise.all([
+    listarDespachosFiltrados(empresaId, {}),
+    contarDespachosYaRecogidosSinImprimir(empresaId),
+    listarDespachosYaImpresos(empresaId, TAMANO_PAGINA_DESPACHOS),
+  ]);
   return (
     <Tarjeta>
       <h2 className={styles.tituloGrupo}>Impresión masiva de guías</h2>
@@ -312,6 +317,18 @@ async function ImpresionMasiva({ empresaId }: { empresaId: string }) {
         <EstadoVacio>No hay despachos pendientes de imprimir.</EstadoVacio>
       ) : (
         <ImpresionMasivaForm filas={resultado.despachos} total={resultado.total} tamanoPagina={TAMANO_PAGINA_DESPACHOS} etiquetaTipo={ETIQUETA_TIPO_DESPACHO} />
+      )}
+      {yaImpresas.length > 0 && (
+        <>
+          <h2 className={styles.tituloGrupo}>Ya impresas — reimprimir</h2>
+          <ImpresionMasivaForm
+            modo="reimprimir"
+            filas={yaImpresas}
+            total={yaImpresas.length}
+            tamanoPagina={TAMANO_PAGINA_DESPACHOS}
+            etiquetaTipo={ETIQUETA_TIPO_DESPACHO}
+          />
+        </>
       )}
     </Tarjeta>
   );

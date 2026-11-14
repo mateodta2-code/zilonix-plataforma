@@ -144,6 +144,36 @@ export async function listarDespachosPendientes(empresaId: string) {
   );
 }
 
+// "Reimprimir en lote" (pedido del equipo, 2026-11-13): una guía ya
+// impresa desaparecía de la impresión masiva (que solo muestra las
+// que nunca se imprimieron) y si la hoja se perdía o la impresora se
+// trababa había que ir tarjeta por tarjeta. Mismo criterio de
+// "Mercado Libre todavía deja imprimirla" (imprimible=true, ver
+// calcularImprimible), pero con la etiqueta YA impresa y sin marcar
+// despachado (una vez entregada al transportador no tiene sentido
+// reimprimirla). Sin `limite` devuelve todas — así la valida
+// /api/ml/despachos/etiquetas, nunca contra lo que mande el form.
+export async function listarDespachosYaImpresos(empresaId: string, limite?: number) {
+  return dbComoEmpresa(empresaId, (tx) => {
+    const consulta = tx
+      .select({
+        id: despachosMl.id,
+        shipmentIdExterno: despachosMl.shipmentIdExterno,
+        cuentaMlId: despachosMl.cuentaMlId,
+        cuentaNickname: cuentasMl.nickname,
+        logisticType: despachosMl.logisticType,
+        status: despachosMl.status,
+        actualizadoTs: despachosMl.actualizadoTs,
+        etiquetaImpresaTs: despachosMl.etiquetaImpresaTs,
+      })
+      .from(despachosMl)
+      .innerJoin(cuentasMl, and(eq(despachosMl.cuentaMlId, cuentasMl.id), eq(cuentasMl.empresaId, empresaId)))
+      .where(and(eq(despachosMl.empresaId, empresaId), eq(despachosMl.imprimible, true), isNotNull(despachosMl.etiquetaImpresaTs), isNull(despachosMl.despachadoTs)))
+      .orderBy(desc(despachosMl.etiquetaImpresaTs), desc(despachosMl.id));
+    return limite ? consulta.limit(limite) : consulta;
+  });
+}
+
 // Issue "tabla completa de despachos" — count(*) con EXACTAMENTE el
 // mismo WHERE que listarDespachosPendientes(), para el KPI del panel
 // (lib/panel-kpis.ts): ese solo necesita el número, nunca las filas
