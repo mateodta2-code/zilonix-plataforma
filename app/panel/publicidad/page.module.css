@@ -89,6 +89,20 @@
   color: var(--texto-suave);
 }
 
+.avisoActualizarOk,
+.avisoActualizarError {
+  font-size: 13px;
+  max-width: 420px;
+}
+
+.avisoActualizarOk {
+  color: var(--exito-texto);
+}
+
+.avisoActualizarError {
+  color: var(--peligro-texto);
+}
+
 .gridKpi {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

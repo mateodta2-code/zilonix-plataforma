@@ -140,15 +140,7 @@ export default async function PublicidadPage({
         descripcion="Product Ads de la cuenta, leídos de lo que ya está guardado. Esta pantalla no modifica campañas en Mercado Libre."
         accion={
           cuentaId ? (
-            <FormActualizar>
-              <input type="hidden" name="cuentaMlId" value={cuentaId} />
-              <input type="hidden" name="mes" value={params.periodo.mes} />
-              <input type="hidden" name="orden" value={params.orden} />
-              <input type="hidden" name="dir" value={params.dir} />
-              {params.filtro !== "activas" ? <input type="hidden" name="vista" value={params.filtro} /> : null}
-              {params.comparar === "ninguno" ? <input type="hidden" name="comparar" value="ninguno" /> : null}
-              {params.tab === "anuncios" ? <input type="hidden" name="tab" value="anuncios" /> : null}
-            </FormActualizar>
+            <FormActualizar cuentaMlId={cuentaId} />
           ) : null
         }
       />
