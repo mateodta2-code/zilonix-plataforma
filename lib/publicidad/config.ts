@@ -29,6 +29,12 @@ export const PERIODO_POR_DEFECTO = "mes_en_curso" as const;
 // sin mayúsculas ni acentos.
 export const CAMPANA_ENFRIAMIENTO = "ENFRIAMIENTO";
 export const CAMPANA_ANTARTIDA = "ANTÁRTIDA";
+// ENFRIAMIENTO donde algún anuncio empezó a vender se renombra así
+// (regla del negocio, 14-nov).
+export const CAMPANA_VENDEDOR = "VENDEDOR";
+// En ANTÁRTIDA, el que no vende y pasa el tope de consumo se pausa o se
+// saca estos días y después vuelve.
+export const DIAS_PAUSA_ANTARTIDA = 7;
 
 // La URL del panel de Product Ads no está en el repo. No se inventa:
 // queda pendiente de confirmar con Mateo. Mientras sea null, la pantalla

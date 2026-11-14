@@ -20,7 +20,7 @@ import {
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { aEscala } from "@/lib/numeros/normalizar-decimal";
 import { mostrarDineroCompacto, mostrarEntero, mostrarFraccion, mostrarRoas, textoObjetivoRoas } from "@/lib/publicidad/formato";
-import { recomendarCampana, type CodigoRecomendacion } from "@/lib/publicidad/recomendaciones";
+import { CODIGOS_NOTA, recomendarCampana, type CodigoRecomendacion } from "@/lib/publicidad/recomendaciones";
 import {
   detalleDiagnostico,
   NOTA_TACOS_PROMOCIONADAS,
@@ -205,9 +205,13 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number, nomb
       ingresos: anuncio.totales.ventasPublicidad,
       ventasCantidad: anuncio.totales.ventasCantidad,
       roas: anuncio.totales.roas,
+      pasaTopeConsumo: anuncio.semaforo.motivo === "gasto" ? anuncio.semaforo.estado === "peligro" : null,
+      topeConsumo: anuncio.semaforo.motivo === "gasto" ? anuncio.semaforo.topeGasto : null,
     })),
   });
-  const anunciosEnfriamiento = recomendaciones.filter((item) => item.codigo === "pasar_enfriamiento").length;
+  const anunciosEnfriamiento = recomendaciones.filter(
+    (item) => item.codigo === "pasar_enfriamiento" || item.codigo === "crear_enfriamiento"
+  ).length;
   return {
     id: campana.id,
     nombre: campana.nombre,
@@ -274,7 +278,7 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number, nomb
     ...textoPresupuesto(campana, diasRango),
     anuncios: ordenPorInversionDesc(campana.anuncios, (anuncio) => anuncio.totales.gasto).map((anuncio) => {
       const recomendacion = recomendaciones.find((item) => item.anuncioId === anuncio.id);
-      const esNota = recomendacion?.codigo === "nota_vende_bien";
+      const esNota = recomendacion ? CODIGOS_NOTA.includes(recomendacion.codigo) : false;
       return {
       clave: anuncio.id,
       itemId: anuncio.itemId,
@@ -294,7 +298,7 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number, nomb
       estadoAnuncio: anuncio.estado,
       gastaSinVender: gastaSinVender(anuncio.totales.gasto, anuncio.totales.ventasPublicidad, anuncio.totales.ventasCantidad),
       sugerencia: recomendacion && !esNota ? recomendacion.texto : null,
-      nota: esNota ? recomendacion.texto : null,
+      nota: esNota && recomendacion ? recomendacion.texto : null,
       mayorGasto: idsMayorGasto.has(anuncio.id),
       sinStock: anuncio.sinStock,
       ventasCantidad: mostrarEntero(anuncio.totales.ventasCantidad),

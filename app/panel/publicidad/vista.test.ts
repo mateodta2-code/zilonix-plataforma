@@ -190,7 +190,10 @@ describe("textos del tablero de publicidad (issue #255)", () => {
       diasAprendizaje: 7,
     };
 
-    const normal = pintarCampana({ ...base, nombre: "Campaña 1", diagnostico: { tipo: "bajo_objetivo", dias: 0 } } as CampanaCalculada, 31);
+    const normal = pintarCampana({ ...base, nombre: "Campaña 1", diagnostico: { tipo: "bajo_objetivo", dias: 0 } } as CampanaCalculada, 31, [
+      "Campaña 1",
+      "ENFRIAMIENTO",
+    ]);
     expect(normal.anuncios[0].sugerencia).toBe("Pasar a ENFRIAMIENTO");
     expect(normal.textoEnfriamiento).toBe("1 anuncio para pasar a ENFRIAMIENTO");
 

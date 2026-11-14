@@ -294,7 +294,7 @@ function ListaRecomendaciones({ titulo, items }: { titulo?: string; items: Campa
 }
 
 function tonoRecomendacion(codigo: CampanaPintada["recomendaciones"][number]["codigo"]): "peligro" | "acento" | "neutro" {
-  if (codigo === "nota_vende_bien" || codigo === "aprendizaje") return "neutro";
-  if (codigo === "subir_objetivo") return "acento";
+  if (codigo === "aprendizaje" || codigo === "nota_vende_bien" || codigo === "nota_vende_antartida") return "neutro";
+  if (codigo === "subir_objetivo" || codigo === "renombrar_vendedor") return "acento";
   return "peligro";
 }
