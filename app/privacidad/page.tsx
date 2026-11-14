@@ -8,8 +8,7 @@ export const metadata: Metadata = {
   title: "Política de privacidad · Zilonix Seller",
 };
 
-// Pública, sin sesión. Los campos {{DATO: …}} del texto se completan
-// cuando se entreguen los datos reales de la empresa.
+// Pública, sin sesión.
 export default function PrivacidadPage() {
   const [titulo, ...resto] = TEXTO_PRIVACIDAD.split("\n");
   return (
