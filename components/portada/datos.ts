@@ -5,9 +5,8 @@ import type { iconoDeClave } from "@/components/marco/iconos";
 
 type ClaveIcono = Parameters<typeof iconoDeClave>[0];
 
-// Número de WhatsApp pendiente de confirmar — no inventar uno (mismo
-// criterio que zilonix-seller-web/src/data/enlaces.ts).
-export const WHATSAPP_NUMERO = "POR_DEFINIR";
+// Número de WhatsApp de ventas (código de país + número, sin + ni espacios).
+export const WHATSAPP_NUMERO = "573195647519";
 export const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMERO}`;
 
 export type Plan = {
