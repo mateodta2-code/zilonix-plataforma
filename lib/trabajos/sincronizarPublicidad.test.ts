@@ -162,7 +162,8 @@ describe("corte real de sincronizarCuenta (issue #254)", () => {
 
     const corrida = await sincronizarCuenta(EMPRESA, CUENTA, "programada", null, AHORA, 0);
 
-    expect(corrida.aviso).toMatch(/medias/);
+    expect(corrida.aviso).toMatch(/Se guardó una parte/);
+    expect(corrida.incompleta).toBe(true);
     expect(corrida.sigue).toBe(true);
     expect(metricasAdGroupsDelDia).not.toHaveBeenCalled();
     expect(cerrarSincronizacion).toHaveBeenCalledWith(
@@ -271,7 +272,8 @@ describe("corte real de sincronizarCuenta (issue #254)", () => {
 
     const corrida = await sincronizarCuenta(EMPRESA, CUENTA, "programada", null, AHORA, Date.now() + 60_000);
 
-    expect(corrida.aviso).toMatch(/tramo/);
+    expect(corrida.aviso).toMatch(/Se guardó una parte/);
+    expect(corrida.incompleta).toBe(true);
     expect(corrida.sigue).toBe(true);
     expect(cerrarSincronizacion).toHaveBeenCalledWith(
       EMPRESA,

@@ -1,0 +1,4 @@
+- **fix-publicidad-aviso-parcial** — En **Publicidad**, cuando "Actualizar ahora" se queda a medias, el aviso ya no sale en **verde** como si todo hubiera terminado. Pasa cuando se acaban los 240 s, o cuando se guardó solo un tramo del historial de 62 días. Ahora sale en **amarillo** con un texto sin jerga: «Se guardó una parte. El resto se completa solo en la próxima sincronización automática; no tenés que hacer nada.» (antes: «La actualización quedó a medias y se retoma en la próxima corrida.»).
+  - `sincronizarCuenta` devuelve `incompleta`, que pasa por `refrescarPublicidadManual` y `actualizarPublicidadAction`.
+  - `FormActualizar` usa tres tonos: verde (terminó), amarillo (a medias, o no llegó la respuesta) y rojo (no se pudo).
+  - Sin migración.
