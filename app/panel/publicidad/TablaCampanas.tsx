@@ -103,7 +103,11 @@ function FilaGrupo({
                   Mayor gasto: {ad.nombre} · {ad.inversion} · {ad.parte ?? "—"} · ventas {ad.ventas}
                 </span>
               ))}
-              {campana.textoEnfriamiento ? <span className={styles.alertaFila}>{campana.textoEnfriamiento}</span> : null}
+              {campana.textoEnfriamiento ? (
+                <span className={styles.alertaFila}>{campana.textoEnfriamiento}</span>
+              ) : campana.anunciosSinVenta > 0 ? (
+                <span className={styles.alertaFila}>Gasta sin vender · {campana.anunciosSinVenta}</span>
+              ) : null}
             </span>
           </button>
         </CeldaTabla>
@@ -235,10 +239,14 @@ function CeldaNumero({ valor, delta }: { valor: string; delta: DeltaPintado | nu
 
 function AvisosAnuncio({ anuncio }: { anuncio: CampanaPintada["anuncios"][number] }) {
   const pausado = (anuncio.estadoAnuncio ?? "").toLowerCase() === "paused";
-  if (!anuncio.sugerencia && !anuncio.nota && anuncio.sinStock !== true && !pausado) return null;
+  if (!anuncio.sugerencia && !anuncio.gastaSinVender && !anuncio.nota && anuncio.sinStock !== true && !pausado) return null;
   return (
     <span className={styles.avisos}>
-      {anuncio.sugerencia ? <span className={styles.alertaFila}>{anuncio.sugerencia}</span> : null}
+      {anuncio.sugerencia ? (
+        <span className={styles.alertaFila}>{anuncio.sugerencia}</span>
+      ) : anuncio.gastaSinVender ? (
+        <span className={styles.alertaFila}>Gasta sin vender</span>
+      ) : null}
       {anuncio.nota ? <span className={styles.notaNeutra}>{anuncio.nota}</span> : null}
       {anuncio.sinStock === true ? <span className={styles.alertaFila}>Sin stock</span> : null}
       {pausado ? <span className={styles.pausada}>Anuncio pausado</span> : null}

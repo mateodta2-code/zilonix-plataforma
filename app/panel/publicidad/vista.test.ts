@@ -153,4 +153,55 @@ describe("textos del tablero de publicidad (issue #255)", () => {
     expect(pintada.ventasSinPublicidad).toBe("$724.084");
     expect(pintada.unidades).toBe("12");
   });
+  it("gasta sin vender se sigue viendo en ANTÁRTIDA y en aprendizaje, aunque ahí no se recomiende mover", async () => {
+    const { pintarCampana } = await import("./vista");
+    const anuncio = {
+      id: "a1",
+      adGroupId: "g1",
+      itemId: "MCO1",
+      titulo: "Producto",
+      href: null,
+      precio: null,
+      estado: "active",
+      sinStock: null,
+      totales: { ...vacio, gasto: "10.00", ventasPublicidad: "0.00", ventasCantidad: "0" },
+      semaforo: { estado: "neutro" as const, motivo: "sin_precio" as const },
+    };
+    const base = {
+      id: "1",
+      campanaIdMl: "c",
+      estadoMl: "active",
+      activa: true,
+      roasObjetivo: "12.00",
+      gasto: "10.00",
+      ventasPublicidad: null,
+      ventasTotales: null,
+      roas: null,
+      acos: null,
+      tacos: null,
+      cpc: null,
+      clicks: null,
+      impresiones: null,
+      presupuestoDiario: null,
+      totales: { ...vacio, gasto: "10.00" },
+      totalesAnterior: vacio,
+      anuncios: [anuncio],
+      presupuestoAutomatico: false,
+      diasAprendizaje: 7,
+    };
+
+    const normal = pintarCampana({ ...base, nombre: "Campaña 1", diagnostico: { tipo: "bajo_objetivo", dias: 0 } } as CampanaCalculada, 31);
+    expect(normal.anuncios[0].sugerencia).toBe("Pasar a ENFRIAMIENTO");
+    expect(normal.textoEnfriamiento).toBe("1 anuncio para pasar a ENFRIAMIENTO");
+
+    const antartida = pintarCampana({ ...base, nombre: "Antártida", diagnostico: { tipo: "bajo_objetivo", dias: 0 } } as CampanaCalculada, 31);
+    expect(antartida.anuncios[0].sugerencia).toBeNull();
+    expect(antartida.anuncios[0].gastaSinVender).toBe(true);
+    expect(antartida.anunciosSinVenta).toBe(1);
+
+    const aprendiendo = pintarCampana({ ...base, nombre: "Campaña 2", diagnostico: { tipo: "aprendiendo", dias: 3 } } as CampanaCalculada, 31);
+    expect(aprendiendo.recomendaciones.map((item) => item.codigo)).toEqual(["aprendizaje"]);
+    expect(aprendiendo.anuncios[0].gastaSinVender).toBe(true);
+    expect(aprendiendo.anunciosSinVenta).toBe(1);
+  });
 });

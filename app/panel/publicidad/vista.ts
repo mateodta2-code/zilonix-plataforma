@@ -9,6 +9,7 @@ import {
   aportePorPublicidad,
   fraseConteoEnfriamiento,
   fraseEstado,
+  gastaSinVender,
   ordenPorInversionDesc,
   usoPresupuestoDiario,
   variacionPorcentual,
@@ -228,7 +229,12 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number, nomb
       roas: campana.totales.roas,
       objetivo: campana.roasObjetivo,
     }),
-    anunciosSinVenta: recomendaciones.filter((item) => item.codigo === "mover_antartida" || item.codigo === "crear_antartida").length,
+    // El hecho "gasta sin vender" se cuenta siempre, también en
+    // aprendizaje o en ANTÁRTIDA, donde no se recomienda mover nada:
+    // la recomendación calla, el dato no.
+    anunciosSinVenta: campana.anuncios.filter((anuncio) =>
+      gastaSinVender(anuncio.totales.gasto, anuncio.totales.ventasPublicidad, anuncio.totales.ventasCantidad)
+    ).length,
     recomendaciones,
     anunciosEnfriamiento,
     textoEnfriamiento: anunciosEnfriamiento > 0 ? fraseConteoEnfriamiento(anunciosEnfriamiento) : null,
@@ -286,7 +292,7 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number, nomb
       semaforoRotulo: rotuloSemaforo(anuncio.semaforo),
       semaforoTitle: tituloSemaforo(anuncio.semaforo),
       estadoAnuncio: anuncio.estado,
-      gastaSinVender: false,
+      gastaSinVender: gastaSinVender(anuncio.totales.gasto, anuncio.totales.ventasPublicidad, anuncio.totales.ventasCantidad),
       sugerencia: recomendacion && !esNota ? recomendacion.texto : null,
       nota: esNota ? recomendacion.texto : null,
       mayorGasto: idsMayorGasto.has(anuncio.id),

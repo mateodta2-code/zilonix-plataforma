@@ -493,10 +493,6 @@ function nombreVisible(titulo: string | null, itemId: string): string {
   return texto === "" ? itemId : texto;
 }
 
-function mismaCampana(nombre: string, destino: string): boolean {
-  return nombre.trim().toLowerCase() === destino.trim().toLowerCase();
-}
-
 // El que más invierte en el periodo. Sin gasto positivo no hay uno.
 // Si dos empatan en centavos, los dos quedan: no se descarta un empate
 // por el orden en que llegaron. `parte` es su gasto sobre el de la
@@ -542,31 +538,8 @@ export function ordenPorInversionDesc<T extends { itemId: string }>(anuncios: re
   });
 }
 
-export type AvisoGastoSinVenta = "sugerir" | "gasta_sin_vender";
-
-export function fraseSugerenciaEnfriamiento(destino = CAMPANA_ENFRIAMIENTO): string {
-  return `Pasar a ${destino}`;
-}
-
 export function fraseConteoEnfriamiento(cantidad: number, destino = CAMPANA_ENFRIAMIENTO): string {
   return `${cantidad} ${cantidad === 1 ? "anuncio" : "anuncios"} para pasar a ${destino}`;
-}
-
-// Texto, nada más. En aprendizaje no se sugiere nada. En la campaña
-// destino tampoco: ahí el aviso sigue siendo "gasta sin vender".
-export function avisoGastoSinVenta(entrada: {
-  gasto: string | null;
-  ingresos: string | null;
-  ventasCantidad: string | null;
-  nombreCampana: string;
-  aprendiendo: boolean;
-  campanaDestino?: string;
-}): AvisoGastoSinVenta | null {
-  if (entrada.aprendiendo) return null;
-  if (!gastaSinVender(entrada.gasto, entrada.ingresos, entrada.ventasCantidad)) return null;
-  const destino = entrada.campanaDestino ?? CAMPANA_ENFRIAMIENTO;
-  if (mismaCampana(entrada.nombreCampana, destino)) return "gasta_sin_vender";
-  return "sugerir";
 }
 
 export type PuntoDiario = {
