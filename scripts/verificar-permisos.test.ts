@@ -52,6 +52,9 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
   "app/panel/invitar/actions.ts",
+  // Inicio (13-nov) — fijar la meta del mes: finanzas.modificar y
+  // requiereDueno (acá y en lib/finanzas/meta-mes.ts).
+  "app/panel/meta/actions.ts",
   // Issue #370 — ver pide personas.consultar; cambiar rol,
   // personas.modificar (acá y en lib/personas.ts).
   "app/panel/personas/page.tsx",

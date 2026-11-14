@@ -262,10 +262,23 @@ export function resumirUtilidadMes(total: TotalesDetalle, rechazadas: number, mo
 // Tramo actual de tramosBogota, todas las cuentas. `monedas` viene de
 // leerTableroMes (recaudo por moneda), para no hacer otra consulta.
 export async function leerUtilidadMes(empresaId: string, usuarioId: string, ahora: Date, monedas: string[]): Promise<UtilidadMes> {
+  return (await leerUtilidadTramo(empresaId, usuarioId, tramosBogota(ahora).actual, monedas)).resumen;
+}
+
+// Inicio (13-nov): la misma lectura para cualquier tramo (hoy, el mes o
+// el rango del filtro; hasta 31 días, el tope de listarVentasUtilidad).
+// `margen` = porcentaje_utilidad del detalle: utilidad ÷ recaudo de las
+// ventas CON costo, el mismo «% util» de Finanzas → Ventas.
+export async function leerUtilidadTramo(
+  empresaId: string,
+  usuarioId: string,
+  tramo: Tramo,
+  monedas: string[]
+): Promise<{ resumen: UtilidadMes; margen: string | null }> {
   await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
-  const { actual } = tramosBogota(ahora);
-  const res = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: null, desde: actual.inicio, hastaExclusivo: actual.finExclusivo });
-  return resumirUtilidadMes(res.detalle.total, res.rechazadas.length, monedas);
+  const res = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: null, desde: tramo.inicio, hastaExclusivo: tramo.finExclusivo });
+  const resumen = resumirUtilidadMes(res.detalle.total, res.rechazadas.length, monedas);
+  return { resumen, margen: resumen.utilidad === null ? null : res.detalle.total.porcentaje_utilidad };
 }
 
 // ---------------------------------------------------------------------------
@@ -354,8 +367,11 @@ function esObjetoInexistente(error: unknown): boolean {
 }
 
 export async function leerPublicidadMes(empresaId: string, usuarioId: string, ahora: Date): Promise<PublicidadMes> {
+  return leerPublicidadTramo(empresaId, usuarioId, tramosBogota(ahora).actual);
+}
+
+export async function leerPublicidadTramo(empresaId: string, usuarioId: string, actual: Tramo): Promise<PublicidadMes> {
   await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
-  const { actual } = tramosBogota(ahora);
   try {
     // En su propia transacción: si la tabla no existe, el error no
     // aborta ninguna otra lectura.
@@ -395,8 +411,16 @@ export async function leerTableroPorCuenta(
   ahora: Date,
   publicidad?: PublicidadMes
 ): Promise<FilaCuentaTablero[]> {
+  return leerPorCuentaTramo(empresaId, usuarioId, tramosBogota(ahora).actual, publicidad);
+}
+
+export async function leerPorCuentaTramo(
+  empresaId: string,
+  usuarioId: string,
+  actual: Tramo,
+  publicidad?: PublicidadMes
+): Promise<FilaCuentaTablero[]> {
   await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
-  const { actual } = tramosBogota(ahora);
   const ventas = await dbComoEmpresa(empresaId, (tx) =>
     tx
       .select({
@@ -423,7 +447,7 @@ export async function leerTableroPorCuenta(
       )
       .groupBy(pedidos.cuentaMlId, cuentasMl.nickname, pedidos.moneda)
   );
-  return armarTableroPorCuenta(ventas, publicidad ?? (await leerPublicidadMes(empresaId, usuarioId, ahora)));
+  return armarTableroPorCuenta(ventas, publicidad ?? (await leerPublicidadTramo(empresaId, usuarioId, actual)));
 }
 
 // ---------------------------------------------------------------------------

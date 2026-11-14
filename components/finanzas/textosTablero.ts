@@ -2,8 +2,8 @@ import { formatearMonto } from "@/lib/panel-kpis";
 import { textoVariacion, type MontoMoneda, type TableroMes, type UtilidadMes } from "@/lib/finanzas/tablero";
 
 // Issue #143 — textos de las tarjetas del tablero del mes, compartidos
-// por /panel/finanzas y el bloque de Finanzas de Inicio
-// (BloqueInicioFinanzas.tsx): las mismas cifras se dicen igual en las
+// por /panel/finanzas y el tablero de Inicio
+// (InicioFinanzas.tsx): las mismas cifras se dicen igual en las
 // dos pantallas.
 
 export function plural(n: number, uno: string, varios: string): string {
