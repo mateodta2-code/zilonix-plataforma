@@ -73,3 +73,21 @@ describe("ImpresionMasivaForm — modo reimprimir (guías ya impresas)", () => {
     expect(cuerpo.getAll("shipmentId")).toEqual(["9001"]);
   });
 });
+
+describe("ImpresionMasivaForm — formato de impresión", () => {
+  it("'Imprimir en sticker 10x15' manda formato=sticker; el botón normal manda formato=normal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: "x" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ImpresionMasivaForm filas={FILAS} total={1} tamanoPagina={25} etiquetaTipo={{ self_service: "Flex" }} />);
+    fireEvent.click(screen.getByText("Imprimir en sticker 10x15"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect((fetchMock.mock.calls[0][1].body as FormData).get("formato")).toBe("sticker");
+    // Los botones quedan deshabilitados mientras corre el primer envío.
+    await screen.findByText("x");
+
+    fireEvent.click(screen.getByText("Imprimir etiquetas seleccionadas"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect((fetchMock.mock.calls[1][1].body as FormData).get("formato")).toBe("normal");
+  });
+});
