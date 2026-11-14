@@ -132,6 +132,12 @@ export function decidirTramo(
   return { desde, hasta: hoy, cierraBackfill: desde <= inicioObjetivo };
 }
 
+// Lo que ve la persona cuando "Actualizar ahora" falla por algo que no
+// es suyo (Mercado Libre, la base, un bug). textoErrorCorto queda solo
+// para el log: nunca llega a la pantalla.
+export const AVISO_REFRESCO_FALLIDO =
+  "No se pudo actualizar la publicidad de esta cuenta. Volvé a intentar en unos minutos; si sigue igual, avisale al equipo de Zilonix.";
+
 export function textoErrorCorto(error: unknown): string {
   const nombre = error instanceof Error ? error.name : "Error";
   const mensaje = error instanceof Error ? error.message : "";

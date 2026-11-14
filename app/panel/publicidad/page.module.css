@@ -76,6 +76,19 @@
   font-size: 14px;
 }
 
+.formActualizar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.notaActualizando {
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
 .gridKpi {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
