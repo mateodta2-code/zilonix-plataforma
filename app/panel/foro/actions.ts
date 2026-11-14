@@ -23,17 +23,17 @@ async function publicar(fn: (usuarioId: string) => Promise<EstadoForo>): Promise
   }
 }
 
-export async function crearPreguntaAction(titulo: string, cuerpo: string): Promise<EstadoForo> {
+export async function crearPreguntaAction(titulo: string, cuerpo: string, imagenUrl: string | null): Promise<EstadoForo> {
   return publicar(async (usuarioId) => {
-    const preguntaId = await crearPregunta(usuarioId, titulo, cuerpo);
+    const preguntaId = await crearPregunta(usuarioId, titulo, cuerpo, imagenUrl);
     revalidatePath("/panel/foro");
     return { ok: true, preguntaId };
   });
 }
 
-export async function crearRespuestaAction(preguntaId: string, cuerpo: string): Promise<EstadoForo> {
+export async function crearRespuestaAction(preguntaId: string, cuerpo: string, imagenUrl: string | null): Promise<EstadoForo> {
   return publicar(async (usuarioId) => {
-    await crearRespuesta(usuarioId, preguntaId, cuerpo);
+    await crearRespuesta(usuarioId, preguntaId, cuerpo, imagenUrl);
     revalidatePath(`/panel/foro/${preguntaId}`);
     revalidatePath("/panel/foro");
     return { ok: true };

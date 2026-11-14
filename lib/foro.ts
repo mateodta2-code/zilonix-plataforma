@@ -5,7 +5,7 @@ import { foroPreguntas, foroRespuestas, usuarios } from "@/db/schema";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { creaContador, limpiarVencidos, superaLimite } from "@/lib/limite-peticiones";
 import { requiereSuperadmin } from "@/lib/superadmin";
-import { ForoError, patronBusqueda, validarPregunta, validarRespuesta } from "@/lib/foro-validacion";
+import { ForoError, patronBusqueda, validarImagenForo, validarPregunta, validarRespuesta } from "@/lib/foro-validacion";
 
 export { ForoError } from "@/lib/foro-validacion";
 
@@ -34,6 +34,19 @@ function frenarSpam(usuarioId: string): void {
   if (publicacionesPorUsuario.size > 1000) limpiarVencidos(publicacionesPorUsuario, VENTANA_PUBLICAR_MS);
   if (superaLimite(publicacionesPorUsuario, usuarioId, LIMITE_PUBLICAR, VENTANA_PUBLICAR_MS)) {
     throw new ForoError("Publicaste muchas veces seguidas. Espera unos minutos y vuelve a intentar.");
+  }
+}
+
+// Subir una imagen tiene su propio freno (aparte del de publicar):
+// alguien puede adjuntar, cambiar de idea y volver a adjuntar antes de
+// publicar, pero 20 subidas en 10 minutos ya no es un uso normal.
+const LIMITE_SUBIR_IMAGEN = 20;
+const subidasPorUsuario = creaContador();
+
+export function frenarSubidasDeImagen(usuarioId: string): void {
+  if (subidasPorUsuario.size > 1000) limpiarVencidos(subidasPorUsuario, VENTANA_PUBLICAR_MS);
+  if (superaLimite(subidasPorUsuario, usuarioId, LIMITE_SUBIR_IMAGEN, VENTANA_PUBLICAR_MS)) {
+    throw new ForoError("Subiste muchas imágenes seguidas. Espera unos minutos y vuelve a intentar.");
   }
 }
 
@@ -70,11 +83,12 @@ export async function listarPreguntas(opciones: { busqueda?: string; limite?: nu
     .limit(opciones.limite ?? TAMANO_PAGINA_FORO);
 }
 
-export type RespuestaForo = { id: string; cuerpo: string; autorNombre: string; creadoTs: Date };
+export type RespuestaForo = { id: string; cuerpo: string; imagenUrl: string | null; autorNombre: string; creadoTs: Date };
 export type PreguntaDetalle = {
   id: string;
   titulo: string;
   cuerpo: string;
+  imagenUrl: string | null;
   autorNombre: string;
   creadoTs: Date;
   respuestas: RespuestaForo[];
@@ -89,6 +103,7 @@ export async function obtenerPregunta(preguntaId: string): Promise<PreguntaDetal
       id: foroPreguntas.id,
       titulo: foroPreguntas.titulo,
       cuerpo: foroPreguntas.cuerpo,
+      imagenUrl: foroPreguntas.imagenUrl,
       autorNombre: usuarios.nombre,
       creadoTs: foroPreguntas.creadoTs,
     })
@@ -98,7 +113,7 @@ export async function obtenerPregunta(preguntaId: string): Promise<PreguntaDetal
   if (!pregunta) return null;
 
   const respuestas = await db
-    .select({ id: foroRespuestas.id, cuerpo: foroRespuestas.cuerpo, autorNombre: usuarios.nombre, creadoTs: foroRespuestas.creadoTs })
+    .select({ id: foroRespuestas.id, cuerpo: foroRespuestas.cuerpo, imagenUrl: foroRespuestas.imagenUrl, autorNombre: usuarios.nombre, creadoTs: foroRespuestas.creadoTs })
     .from(foroRespuestas)
     .innerJoin(usuarios, eq(usuarios.id, foroRespuestas.autorId))
     .where(and(eq(foroRespuestas.preguntaId, preguntaId), isNull(foroRespuestas.ocultaTs)))
@@ -107,16 +122,17 @@ export async function obtenerPregunta(preguntaId: string): Promise<PreguntaDetal
   return { ...pregunta, respuestas };
 }
 
-export async function crearPregunta(autorId: string, titulo: unknown, cuerpo: unknown): Promise<string> {
-  const datos = validarPregunta(titulo, cuerpo);
+export async function crearPregunta(autorId: string, titulo: unknown, cuerpo: unknown, imagenUrl?: unknown): Promise<string> {
+  const datos = { ...validarPregunta(titulo, cuerpo), imagenUrl: validarImagenForo(imagenUrl, process.env.CLOUDINARY_CLOUD_NAME) };
   await requiereMiembroDeAlgunaEmpresa(autorId);
   frenarSpam(autorId);
   const [fila] = await db.insert(foroPreguntas).values({ autorId, ...datos }).returning({ id: foroPreguntas.id });
   return fila.id;
 }
 
-export async function crearRespuesta(autorId: string, preguntaId: string, cuerpo: unknown): Promise<void> {
+export async function crearRespuesta(autorId: string, preguntaId: string, cuerpo: unknown, imagenUrl?: unknown): Promise<void> {
   const texto = validarRespuesta(cuerpo);
+  const imagen = validarImagenForo(imagenUrl, process.env.CLOUDINARY_CLOUD_NAME);
   await requiereMiembroDeAlgunaEmpresa(autorId);
   if (!esUuid(preguntaId)) throw new ForoError("Esa pregunta ya no está disponible.");
   const [pregunta] = await db
@@ -125,7 +141,7 @@ export async function crearRespuesta(autorId: string, preguntaId: string, cuerpo
     .where(and(eq(foroPreguntas.id, preguntaId), isNull(foroPreguntas.ocultaTs)));
   if (!pregunta) throw new ForoError("Esa pregunta ya no está disponible.");
   frenarSpam(autorId);
-  await db.insert(foroRespuestas).values({ preguntaId, autorId, cuerpo: texto });
+  await db.insert(foroRespuestas).values({ preguntaId, autorId, cuerpo: texto, imagenUrl: imagen });
 }
 
 function esUuid(valor: string): boolean {
@@ -143,6 +159,7 @@ export type PublicacionParaModerar = {
   preguntaId: string;
   titulo: string;
   cuerpo: string;
+  imagenUrl: string | null;
   autorNombre: string;
   autorEmail: string;
   creadoTs: Date;
@@ -157,6 +174,7 @@ export async function listarParaModerar(superadminUsuarioId: string, limite = 10
       id: foroPreguntas.id,
       titulo: foroPreguntas.titulo,
       cuerpo: foroPreguntas.cuerpo,
+      imagenUrl: foroPreguntas.imagenUrl,
       autorNombre: usuarios.nombre,
       autorEmail: usuarios.email,
       creadoTs: foroPreguntas.creadoTs,
@@ -173,6 +191,7 @@ export async function listarParaModerar(superadminUsuarioId: string, limite = 10
       preguntaId: foroRespuestas.preguntaId,
       titulo: foroPreguntas.titulo,
       cuerpo: foroRespuestas.cuerpo,
+      imagenUrl: foroRespuestas.imagenUrl,
       autorNombre: usuarios.nombre,
       autorEmail: usuarios.email,
       creadoTs: foroRespuestas.creadoTs,

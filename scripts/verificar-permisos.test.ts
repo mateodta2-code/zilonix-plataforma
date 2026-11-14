@@ -261,6 +261,8 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/panel/foro/page.tsx": "foro compartido entre empresas, sin datos de negocio — el candado es obtenerContextoPanel() (exige tener una empresa)",
   "app/panel/foro/[preguntaId]/page.tsx": "idem",
   "app/panel/foro/actions.ts": "idem — cada escritura pasa por requiereMiembroDeAlgunaEmpresa (lib/foro.ts) con el usuario de la sesión",
+  "app/api/foro/imagen/route.ts":
+    "sube la imagen adjunta del foro (compartido entre empresas, sin datos de negocio) — el candado es requiereMiembroDeAlgunaEmpresa con el usuario de la sesión, más chequeo de origen y freno por usuario",
   // Rama mateo/promociones-visual-prueba — maqueta aislada del
   // rediseño de Promociones para que Débora la revise. Igual criterio
   // que app/panel/mis-datos/page.tsx: solo resuelve sesión (redirige a

@@ -211,7 +211,7 @@ export type ExportacionDatosPersonales = {
   auditoria: { empresa: string; ts: string; accion: string; entidad: string; detalle: string | null }[];
   // Foro de la comunidad (14-nov) — lo que la persona publicó, incluso
   // lo escondido por moderación: también es un dato suyo.
-  foro: { tipo: "pregunta" | "respuesta"; ts: string; titulo: string | null; texto: string }[];
+  foro: { tipo: "pregunta" | "respuesta"; ts: string; titulo: string | null; texto: string; imagenUrl: string | null }[];
 };
 
 // JSON, nunca CSV/Excel — issue #318 solo pide "exportación", y un JSON
@@ -257,12 +257,12 @@ export async function exportarDatosPropios(usuario: UsuarioPropio): Promise<Expo
   // El foro no es de ninguna empresa (sin empresa_id): se lee con la
   // conexión normal, filtrado por el usuario de la sesión.
   const [preguntasForo, respuestasForo] = await Promise.all([
-    db.select({ ts: foroPreguntas.creadoTs, titulo: foroPreguntas.titulo, texto: foroPreguntas.cuerpo }).from(foroPreguntas).where(eq(foroPreguntas.autorId, usuario.id)),
-    db.select({ ts: foroRespuestas.creadoTs, texto: foroRespuestas.cuerpo }).from(foroRespuestas).where(eq(foroRespuestas.autorId, usuario.id)),
+    db.select({ ts: foroPreguntas.creadoTs, titulo: foroPreguntas.titulo, texto: foroPreguntas.cuerpo, imagenUrl: foroPreguntas.imagenUrl }).from(foroPreguntas).where(eq(foroPreguntas.autorId, usuario.id)),
+    db.select({ ts: foroRespuestas.creadoTs, texto: foroRespuestas.cuerpo, imagenUrl: foroRespuestas.imagenUrl }).from(foroRespuestas).where(eq(foroRespuestas.autorId, usuario.id)),
   ]);
   const foroExport: ExportacionDatosPersonales["foro"] = [
-    ...preguntasForo.map((p) => ({ tipo: "pregunta" as const, ts: p.ts.toISOString(), titulo: p.titulo, texto: p.texto })),
-    ...respuestasForo.map((r) => ({ tipo: "respuesta" as const, ts: r.ts.toISOString(), titulo: null, texto: r.texto })),
+    ...preguntasForo.map((p) => ({ tipo: "pregunta" as const, ts: p.ts.toISOString(), titulo: p.titulo, texto: p.texto, imagenUrl: p.imagenUrl })),
+    ...respuestasForo.map((r) => ({ tipo: "respuesta" as const, ts: r.ts.toISOString(), titulo: null, texto: r.texto, imagenUrl: r.imagenUrl })),
   ].sort((a, b) => b.ts.localeCompare(a.ts));
 
   return {

@@ -52,3 +52,27 @@ export function validarRespuesta(cuerpo: unknown): string {
 export function patronBusqueda(texto: string): string {
   return `%${texto.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
+
+// Carpeta de Cloudinary donde /api/foro/imagen guarda las imágenes del
+// foro — separada de las fotos de Publicar (zilonix-plataforma).
+export const CARPETA_IMAGENES_FORO = "zilonix-foro";
+
+// Solo se acepta una imagen que salió de /api/foro/imagen: nuestro
+// Cloudinary, carpeta zilonix-foro, sin parámetros. Un link a otro
+// sitio permitiría rastrear quién abre la pregunta (la imagen se pide a
+// ese servidor) o cambiarla después de moderada (decisión del 14-nov:
+// solo "Adjuntar imagen", nunca pegar un link).
+export function esUrlImagenForo(url: string, cloudName: string | undefined): boolean {
+  if (!cloudName || !/^[A-Za-z0-9_-]+$/.test(cloudName)) return false;
+  const patron = new RegExp(String.raw`^https://res\.cloudinary\.com/${cloudName}/image/upload/(v\d+/)?${CARPETA_IMAGENES_FORO}/[A-Za-z0-9_-]+\.(jpg|jpeg|png|webp)$`);
+  return patron.test(url);
+}
+
+// null = sin imagen. Una URL que no es nuestra se rechaza con un
+// mensaje, nunca se guarda en silencio sin la imagen.
+export function validarImagenForo(url: unknown, cloudName: string | undefined): string | null {
+  const texto = String(url ?? "").trim();
+  if (!texto) return null;
+  if (!esUrlImagenForo(texto, cloudName)) throw new ForoError("La imagen no es válida. Vuelve a adjuntarla.");
+  return texto;
+}
