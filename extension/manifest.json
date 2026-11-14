@@ -126,7 +126,9 @@
         "*://web-production-af270.up.railway.app/panel/investigacion*",
         "*://web-staging-d979.up.railway.app/panel/investigacion*",
         "*://web-production-af270.up.railway.app/panel/publicar*",
-        "*://web-staging-d979.up.railway.app/panel/publicar*"
+        "*://web-staging-d979.up.railway.app/panel/publicar*",
+        "*://seller.zilonix.com/panel/investigacion*",
+        "*://seller.zilonix.com/panel/publicar*"
       ],
       "js": [
         "marcador-zilonix.js"

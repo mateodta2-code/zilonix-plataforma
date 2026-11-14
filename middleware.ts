@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { creaContador, limpiarVencidos, superaLimite } from "@/lib/limite-peticiones";
 import { esRutaPublica } from "@/lib/rutas-publicas";
+import { urlPublicaDesdeEnv } from "@/lib/url-publica-env";
 
 // Tarea 1.5 — toda ruta cerrada por defecto (regla de CLAUDE.md), salvo
 // las que se listan explícitamente en lib/rutas-publicas.ts (se saca a
@@ -37,6 +38,8 @@ let peticionesDesdeLimpieza = 0;
 // Next.js ya resolvió para este request (protocolo + host juntos),
 // nunca un valor que llegue sin pasar por su propio parseo.
 function urlPublicaBaseDesdeMiddleware(req: NextRequest): string {
+  const configurada = urlPublicaDesdeEnv();
+  if (configurada) return configurada;
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
     return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
   }

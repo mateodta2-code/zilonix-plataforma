@@ -31,7 +31,7 @@ export default function Planes() {
                 ))}
               </ul>
 
-              <Link href="/sign-up" className={plan.destacado ? styles.botonPrimario : styles.botonSecundario}>
+              <Link href="/empezar" className={plan.destacado ? styles.botonPrimario : styles.botonSecundario}>
                 Elegir plan
               </Link>
             </Tarjeta>

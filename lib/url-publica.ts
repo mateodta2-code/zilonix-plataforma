@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { urlPublicaDesdeEnv } from "@/lib/url-publica-env";
 
 // Tarea 1.12 — bug real encontrado en vivo en staging: la cabecera
 // "host" que llega a Next.js detrás del proxy de Railway resultó ser
@@ -11,7 +12,10 @@ import { headers } from "next/headers";
 // a un helper aparte en la tarea 2.3, al necesitarlo por segunda vez
 // (la ruta de callback de Mercado Libre tiene que registrar exactamente
 // la misma URL que esta función arma).
+
 export function urlPublicaBase(): string {
+  const configurada = urlPublicaDesdeEnv();
+  if (configurada) return configurada;
   const encabezados = headers();
   const dominio = process.env.RAILWAY_PUBLIC_DOMAIN ?? encabezados.get("x-forwarded-host") ?? encabezados.get("host");
   const proto = process.env.RAILWAY_PUBLIC_DOMAIN ? "https" : encabezados.get("x-forwarded-proto") ?? "http";

@@ -39,6 +39,8 @@ export const PATRONES_RUTAS_PUBLICAS = [
   "/api/version",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/iniciar-sesion(.*)",
+  "/empezar(.*)",
   // Tarea 1.7 — quien recibe una invitación por correo todavía no
   // tiene sesión (puede ni tener cuenta). La propia página valida el
   // token contra la base (lib/invitaciones.ts) — el permiso real es

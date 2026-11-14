@@ -46,7 +46,7 @@ const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix
 // permiso real de abrir pestañas, así que es la última línea real de
 // defensa (mismo criterio que PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO,
 // abajo, para "Actualizar todo").
-const ORIGENES_SELLER_PERMITIDOS_PUBLICAR = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app"];
+const ORIGENES_SELLER_PERMITIDOS_PUBLICAR = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app", "https://seller.zilonix.com"];
 const URL_APP_PRODUCCION_DEFAULT = "https://web-production-af270.up.railway.app";
 
 // Revisión de Pablo (sobre a6fdcbd, MED 2/LOW 4) — mismo criterio real
@@ -1233,7 +1233,8 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
     const urlRemitente = remitente && remitente.tab && typeof remitente.tab.url === "string" ? remitente.tab.url : "";
     const esPestanaDeSeguimiento =
       urlRemitente.startsWith("https://web-production-af270.up.railway.app/panel/investigacion/seguimiento") ||
-      urlRemitente.startsWith("https://web-staging-d979.up.railway.app/panel/investigacion/seguimiento");
+      urlRemitente.startsWith("https://web-staging-d979.up.railway.app/panel/investigacion/seguimiento") ||
+      urlRemitente.startsWith("https://seller.zilonix.com/panel/investigacion/seguimiento");
     if (!esPestanaDeSeguimiento) return;
 
     // Corrección de Pablo — cooldown real de 30s entre lotes: evita

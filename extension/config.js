@@ -19,7 +19,7 @@
   // así (sin volver a chequear del lado que LEE) es la clase de
   // supuesto que este archivo ya documentó como bug real para URL_APP
   // fijo — nunca una segunda vez.
-  const ORIGENES_SELLER_PERMITIDOS = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app"];
+  const ORIGENES_SELLER_PERMITIDOS = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app", "https://seller.zilonix.com"];
 
   // `api.URL_APP` arranca en producción — comportamiento de siempre —
   // y se actualiza EN EL MISMO OBJETO (nunca se reemplaza `api`
