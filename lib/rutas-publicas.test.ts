@@ -24,6 +24,8 @@ describe("esRutaPublica (fix middleware, 2026-10-21)", () => {
     expect(esRutaPublica(peticion("/api/version"))).toBe(true);
     expect(esRutaPublica(peticion("/sign-in"))).toBe(true);
     expect(esRutaPublica(peticion("/sign-up"))).toBe(true);
+    expect(esRutaPublica(peticion("/iniciar-sesion"))).toBe(true);
+    expect(esRutaPublica(peticion("/empezar"))).toBe(true);
     expect(esRutaPublica(peticion("/invitacion/un-token-cualquiera"))).toBe(true);
   });
 

@@ -35,7 +35,7 @@
   // script (manifest.json) — nunca un host nuevo sin que el manifest
   // ya lo autorizara primero. `location.origin` lo pone el navegador
   // mismo, nunca algo que la página pueda falsificar desde JS.
-  const ORIGENES_SELLER_PERMITIDOS = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app"];
+  const ORIGENES_SELLER_PERMITIDOS = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app", "https://seller.zilonix.com"];
   const CLAVE_URL_APP = "zilonixUrlApp";
 
   // Puro — separado a propósito, para poder probarlo sin chrome/DOM

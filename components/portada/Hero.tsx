@@ -15,7 +15,7 @@ export default function Hero() {
           publicaciones, promociones, publicidad y la utilidad real de cada venta.
         </p>
         <div className={styles.botones}>
-          <Link href="/sign-up" className={portada.botonPrimario}>
+          <Link href="/empezar" className={portada.botonPrimario}>
             Empezar
           </Link>
         </div>

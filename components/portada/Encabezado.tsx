@@ -16,10 +16,10 @@ export default function Encabezado() {
         </Link>
 
         <div className={styles.acciones}>
-          <Link href="/sign-in" className={styles.enlaceSesion}>
+          <Link href="/iniciar-sesion" className={styles.enlaceSesion}>
             Iniciar sesión
           </Link>
-          <Link href="/sign-up" className={portada.botonPrimario}>
+          <Link href="/empezar" className={portada.botonPrimario}>
             Empezar
           </Link>
         </div>
