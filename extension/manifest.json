@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Zilonix Seller — Investigación",
   "short_name": "Zilonix Investigación",
-  "version": "0.3.43",
+  "version": "0.3.44",
   "background": {
     "service_worker": "background.js"
   },
@@ -17,7 +17,7 @@
       "128": "icons/icon-128.png"
     }
   },
-  "description": "Analiza productos y nichos de Mercado Libre, Amazon, Temu, AliExpress, Shein y Alibaba desde la página que ya tienes abierta.",
+  "description": "Resumen de productos de Mercado Libre para vendedores de Zilonix Seller, desde la página que tienes abierta.",
   "content_scripts": [
     {
       "matches": [
