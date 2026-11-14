@@ -15,10 +15,10 @@ import {
   publicidadSincronizaciones,
 } from "@/db/schema";
 import { PREFIJO_CORTE_TIEMPO } from "@/lib/publicidad/actualizacion";
-import { obtenerConfigPublicidad, type ConfigPublicidad } from "@/lib/publicidad/config";
+import { DIAS_SIN_VENDER_VENDEDOR, obtenerConfigPublicidad, type ConfigPublicidad } from "@/lib/publicidad/config";
 import { linkPublicacion } from "@/lib/ml/cliente";
 import { type FiltroCampanas } from "@/lib/publicidad/params";
-import { diasEntreInclusive } from "@/lib/publicidad/plan";
+import { diasEntreInclusive, hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
 import {
   armarSerieDiaria,
   compararOrden,
@@ -60,6 +60,9 @@ export type AnuncioCalculado = {
   // null = esta empresa no tiene la publicación importada, no se afirma stock.
   sinStock: boolean | null;
   totales: TotalesRango;
+  // Los últimos DIAS_SIN_VENDER_VENDEDOR días completos (hasta ayer),
+  // sin importar el mes elegido: la regla de VENDEDOR mira el presente.
+  ultimosDias: TotalesRango;
   semaforo: Semaforo;
 };
 
@@ -334,6 +337,8 @@ export async function consultarTableroPublicidad(
     const metricasCampana = await sumar("campana", periodo.desde, periodo.hasta);
     const metricasPrevias = await sumar("campana", periodo.comparacionDesde, periodo.comparacionHasta);
     const metricasAnuncio = await sumar("anuncio", periodo.desde, periodo.hasta);
+    const hoy = hoyBogota(opciones.ahora);
+    const metricasAnuncioRecientes = await sumar("anuncio", restarDiasIso(hoy, DIAS_SIN_VENDER_VENDEDOR), restarDiasIso(hoy, 1));
     const resumenActual = await sumarCuenta(periodo.desde, periodo.hasta);
     const resumenAnterior = await sumarCuenta(periodo.comparacionDesde, periodo.comparacionHasta);
     const filasDia = await tx
@@ -372,6 +377,7 @@ export async function consultarTableroPublicidad(
     const porCampana = new Map(metricasCampana.map((fila) => [fila.entidadIdMl, fila]));
     const porPrevia = new Map(metricasPrevias.map((fila) => [fila.entidadIdMl, fila]));
     const porAnuncio = new Map(metricasAnuncio.map((fila) => [claveAnuncio(fila.entidadIdMl, fila.adGroupId), fila]));
+    const porAnuncioReciente = new Map(metricasAnuncioRecientes.map((fila) => [claveAnuncio(fila.entidadIdMl, fila.adGroupId), fila]));
     const precioPorItem = new Map(precios.map((fila) => [fila.itemId, fila.precio]));
 
     const calculadas: CampanaCalculada[] = campanas.map((campana) => {
@@ -393,6 +399,7 @@ export async function consultarTableroPublicidad(
             estado: anuncio.estado,
             sinStock: stock === undefined ? null : stock <= 0,
             totales: totalesAnuncio,
+            ultimosDias: totalesDeDias([diaDeSuma(porAnuncioReciente.get(claveAnuncio(anuncio.itemId, anuncio.adGroupId)))]),
             semaforo: semaforoAnuncio({
               gasto: totalesAnuncio.gasto,
               ventasPublicidad: totalesAnuncio.ventasPublicidad,

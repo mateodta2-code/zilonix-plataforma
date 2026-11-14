@@ -10,7 +10,9 @@ import {
   fraseConteoEnfriamiento,
   fraseEstado,
   gastaSinVender,
+  gastoPositivo,
   ordenPorInversionDesc,
+  tieneVentaAtribuida,
   usoPresupuestoDiario,
   variacionPorcentual,
   type PuntoDiario,
@@ -207,6 +209,9 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number, nomb
       roas: anuncio.totales.roas,
       pasaTopeConsumo: anuncio.semaforo.motivo === "gasto" ? anuncio.semaforo.estado === "peligro" : null,
       topeConsumo: anuncio.semaforo.motivo === "gasto" ? anuncio.semaforo.topeGasto : null,
+      acosSobreMaximo: anuncio.semaforo.motivo === "acos" && anuncio.semaforo.estado === "peligro" ? anuncio.semaforo.acos : null,
+      gastoUltimosDias: gastoPositivo(anuncio.ultimosDias.gasto),
+      vendioUltimosDias: tieneVentaAtribuida(anuncio.ultimosDias.ventasPublicidad, anuncio.ultimosDias.ventasCantidad),
     })),
   });
   const anunciosEnfriamiento = recomendaciones.filter(

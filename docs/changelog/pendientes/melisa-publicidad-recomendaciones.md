@@ -6,3 +6,7 @@
   - **ENFRIAMIENTO sin ninguna venta:** igual que antes, los que gastan sin vender pasan a ANTÁRTIDA, o se sugiere crearla.
   - **ANTÁRTIDA:** el que vende recibe la nota **"Vende, dejar en ANTÁRTIDA"**. El que no vende y pasa el tope recibe **"Pausar o sacar de la campaña 7 días; después, volver a ANTÁRTIDA"**. El que consume poquito se deja.
   Constantes nuevas en `lib/publicidad/config.ts`: `CAMPANA_VENDEDOR` y `DIAS_PAUSA_ANTARTIDA`. Sigue sin botones y sin llamadas a Mercado Libre.
+- **2026-11-14** — Regla de **VENDEDOR** (confirmada por el usuario): un anuncio en la campaña VENDEDOR vuelve a ENFRIAMIENTO (o se sugiere crearla) si cumple cualquiera de estas dos condiciones:
+  - **Lleva 7 días sin vender:** gastó en los últimos 7 días completos (de hace 7 días hasta ayer, sin contar hoy, que está incompleto) y no tuvo ninguna venta atribuida. Si no gastó en esos días (pausado), no se mueve.
+  - **Su ACOS supera el 20 %:** el mismo máximo del semáforo (`ACOS_MAXIMO`), en el periodo elegido.
+  Los 7 días se miran desde hoy, sin importar el mes elegido en la pantalla. `consultarTableroPublicidad` suma esos días por anuncio (`ultimosDias`). Constante nueva: `DIAS_SIN_VENDER_VENDEDOR`.

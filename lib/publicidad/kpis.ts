@@ -467,6 +467,11 @@ export function gastaSinVender(gasto: string | null, ingresos: string | null, ve
   return true;
 }
 
+// El gasto si es mayor que cero; si no, null (sin gasto no se juzga).
+export function gastoPositivo(gasto: string | null): string | null {
+  return gasto !== null && centavos(gasto) > CERO ? gasto : null;
+}
+
 export function tieneVentaAtribuida(ingresos: string | null, ventasCantidad: string | null): boolean {
   if (ventasCantidad !== null && ventasCantidad !== "0") return true;
   return ingresos !== null && centavos(ingresos) > CERO;

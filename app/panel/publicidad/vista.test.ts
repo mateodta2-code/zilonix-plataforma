@@ -165,6 +165,7 @@ describe("textos del tablero de publicidad (issue #255)", () => {
       estado: "active",
       sinStock: null,
       totales: { ...vacio, gasto: "10.00", ventasPublicidad: "0.00", ventasCantidad: "0" },
+      ultimosDias: { ...vacio },
       semaforo: { estado: "neutro" as const, motivo: "sin_precio" as const },
     };
     const base = {

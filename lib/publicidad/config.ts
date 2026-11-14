@@ -35,6 +35,9 @@ export const CAMPANA_VENDEDOR = "VENDEDOR";
 // En ANTÁRTIDA, el que no vende y pasa el tope de consumo se pausa o se
 // saca estos días y después vuelve.
 export const DIAS_PAUSA_ANTARTIDA = 7;
+// En VENDEDOR, un anuncio que gastó en estos últimos días completos
+// (hasta ayer) sin ninguna venta vuelve a ENFRIAMIENTO.
+export const DIAS_SIN_VENDER_VENDEDOR = 7;
 
 // La URL del panel de Product Ads no está en el repo. No se inventa:
 // queda pendiente de confirmar con Mateo. Mientras sea null, la pantalla

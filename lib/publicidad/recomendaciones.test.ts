@@ -11,6 +11,9 @@ const anuncio = (parcial: Partial<AnuncioRecomendable> & Pick<AnuncioRecomendabl
   roas: null,
   pasaTopeConsumo: null,
   topeConsumo: null,
+  acosSobreMaximo: null,
+  gastoUltimosDias: null,
+  vendioUltimosDias: false,
   ...parcial,
 });
 
@@ -121,6 +124,35 @@ describe("recomendaciones de publicidad (issue #255)", () => {
     expect(recs[0].texto).toBe(`Pausar o sacar de la campaña 7 días; después, volver a ${CAMPANA_ANTARTIDA}`);
     expect(recs[0].motivo).toContain("más que el tope de");
     expect(recs[1].texto).toBe(`Vende, dejar en ${CAMPANA_ANTARTIDA}`);
+  });
+
+  it("en VENDEDOR: 7 días sin vender o ACOS sobre el 20 % vuelve a ENFRIAMIENTO; el que vende se queda", () => {
+    const recs = recomendarCampana({
+      ...base,
+      nombreCampana: "Vendedor",
+      nombresCampanas: ["Vendedor", "ENFRIAMIENTO"],
+      anuncios: [
+        anuncio({ id: "1", titulo: "SieteDias", gasto: "9000.00", ingresos: "50000.00", ventasCantidad: "1", gastoUltimosDias: "4000.00", vendioUltimosDias: false }),
+        anuncio({ id: "2", titulo: "AcosAlto", gasto: "30000.00", ingresos: "100000.00", ventasCantidad: "2", acosSobreMaximo: "0.3000", gastoUltimosDias: "5000.00", vendioUltimosDias: true }),
+        anuncio({ id: "3", titulo: "Bien", gasto: "5000.00", ingresos: "100000.00", ventasCantidad: "3", gastoUltimosDias: "2000.00", vendioUltimosDias: true }),
+        anuncio({ id: "4", titulo: "Pausado", gasto: "5000.00", ingresos: "0.00", ventasCantidad: "0", gastoUltimosDias: null, vendioUltimosDias: false }),
+      ],
+    });
+    const porAnuncio = recs.filter((item) => item.anuncioId !== null);
+    expect(porAnuncio.map((item) => [item.anuncioId, item.codigo])).toEqual([
+      ["1", "pasar_enfriamiento"],
+      ["2", "pasar_enfriamiento"],
+    ]);
+    expect(porAnuncio[0].motivo).toBe("Gastó $4.000 en los últimos 7 días sin ventas");
+    expect(porAnuncio[1].motivo).toBe("ACOS 30 %, más que el máximo de 20 %");
+
+    const sinEnfriamiento = recomendarCampana({
+      ...base,
+      nombreCampana: "VENDEDOR",
+      nombresCampanas: ["VENDEDOR"],
+      anuncios: [anuncio({ id: "1", gasto: "4000.00", gastoUltimosDias: "4000.00", vendioUltimosDias: false })],
+    });
+    expect(sinEnfriamiento.map((item) => item.codigo)).toEqual(["crear_enfriamiento"]);
   });
 
   it("en enfriamiento con un vendedor: renombrar a VENDEDOR y quitar solo los que pasan el tope", () => {

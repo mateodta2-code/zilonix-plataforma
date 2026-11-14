@@ -14,16 +14,21 @@
 //   ANTÁRTIDA (o se crea).
 // - ANTÁRTIDA: el que vende se queda. El que no vende y pasa el tope se
 //   pausa o se saca 7 días y después vuelve a ANTÁRTIDA.
+// - VENDEDOR: el que lleva 7 días sin vender (gastó en esos días, hasta
+//   ayer) o pasó el ACOS máximo (20 %, el del semáforo) vuelve a
+//   ENFRIAMIENTO (o se sugiere crearla).
 // El tope de consumo es el del semáforo del anuncio (gasto sin ventas
 // sobre el 5 % del precio, TOPE_GASTO_SIN_VENTAS). Sin precio no se
 // sabe: no se sugiere quitar ni pausar.
 
 import { mostrarDineroCompacto, mostrarRoas } from "@/lib/publicidad/formato";
 import {
+  ACOS_MAXIMO,
   CAMPANA_ANTARTIDA,
   CAMPANA_ENFRIAMIENTO,
   CAMPANA_VENDEDOR,
   DIAS_PAUSA_ANTARTIDA,
+  DIAS_SIN_VENDER_VENDEDOR,
   FACTOR_ROAS_HOLGADO,
   FACTOR_ROAS_VENDE_BIEN,
   UMBRAL_ROAS_BAJO,
@@ -68,6 +73,12 @@ export type AnuncioRecomendable = {
   // precio, o el anuncio vende y se juzga por ACOS).
   pasaTopeConsumo: boolean | null;
   topeConsumo: string | null;
+  // Semáforo por ACOS (el anuncio vende): el ACOS real si pasa el
+  // máximo, null si está dentro o no se juzga por ACOS.
+  acosSobreMaximo: string | null;
+  // Últimos DIAS_SIN_VENDER_VENDEDOR días completos, hasta ayer.
+  gastoUltimosDias: string | null;
+  vendioUltimosDias: boolean;
 };
 
 const TEXTO_APRENDIZAJE = "En aprendizaje, no tocar todavía";
@@ -96,6 +107,29 @@ function motivoGastoSinVentas(gasto: string): string {
   return `Gastó ${mostrarDineroCompacto(gasto)} sin ventas`;
 }
 
+function textoAEnfriamiento(hayEnfriamiento: boolean): { codigo: CodigoRecomendacion; texto: string } {
+  return hayEnfriamiento
+    ? { codigo: "pasar_enfriamiento", texto: `Pasar a ${CAMPANA_ENFRIAMIENTO}` }
+    : { codigo: "crear_enfriamiento", texto: `Crear la campaña ${CAMPANA_ENFRIAMIENTO} y mover este anuncio` };
+}
+
+function porcentaje(fraccion: string): string {
+  const [entera, decimales = ""] = fraccion.split(".");
+  const centesimas = `${entera}${decimales.padEnd(2, "0").slice(0, 2)}`.replace(/^0+(?=\d)/, "");
+  return `${centesimas} %`;
+}
+
+// VENDEDOR: null si el anuncio se queda.
+function motivoSalirDeVendedor(anuncio: AnuncioRecomendable): string | null {
+  if (anuncio.acosSobreMaximo !== null) {
+    return `ACOS ${porcentaje(anuncio.acosSobreMaximo)}, más que el máximo de ${porcentaje(ACOS_MAXIMO)}`;
+  }
+  if (anuncio.gastoUltimosDias !== null && !anuncio.vendioUltimosDias) {
+    return `Gastó ${mostrarDineroCompacto(anuncio.gastoUltimosDias)} en los últimos ${DIAS_SIN_VENDER_VENDEDOR} días sin ventas`;
+  }
+  return null;
+}
+
 function motivoPasaTope(anuncio: AnuncioRecomendable): string {
   const base = motivoGastoSinVentas(anuncio.gasto ?? "0");
   return anuncio.topeConsumo ? `${base}, más que el tope de ${mostrarDineroCompacto(anuncio.topeConsumo)}` : base;
@@ -110,11 +144,6 @@ function alcanza(roas: string | null, objetivo: string | null, factor: string): 
   return frente === "igual" || frente === "mayor";
 }
 
-function umbralVisible(): string {
-  const [entera, fraccion = ""] = UMBRAL_ROAS_BAJO.split(".");
-  const porcentaje = `${entera}${fraccion.padEnd(2, "0").slice(0, 2)}`.replace(/^0+/, "") || "0";
-  return `${porcentaje} %`;
-}
 
 function veces(factor: string): string {
   return `${factor.replace(".", ",")} veces`;
@@ -156,7 +185,7 @@ export function recomendarCampana(entrada: {
       anuncioId: null,
       nombre: null,
       texto: TEXTO_APAGAR,
-      motivo: motivoRoas(entrada.roas, entrada.objetivo, `bajo el ${umbralVisible()} de`),
+      motivo: motivoRoas(entrada.roas, entrada.objetivo, `bajo el ${porcentaje(UMBRAL_ROAS_BAJO)} de`),
     });
   } else if (
     alcanza(entrada.roas, entrada.objetivo, FACTOR_ROAS_HOLGADO) &&
@@ -176,6 +205,7 @@ export function recomendarCampana(entrada: {
   const enAntartida = hayCampanaNombrada([entrada.nombreCampana], CAMPANA_ANTARTIDA);
   const hayEnfriamiento = hayCampanaNombrada(entrada.nombresCampanas, CAMPANA_ENFRIAMIENTO);
   const hayAntartida = hayCampanaNombrada(entrada.nombresCampanas, CAMPANA_ANTARTIDA);
+  const enVendedor = hayCampanaNombrada([entrada.nombreCampana], CAMPANA_VENDEDOR);
   const vendedores = entrada.anuncios.filter((anuncio) => tieneVentaAtribuida(anuncio.ingresos, anuncio.ventasCantidad));
 
   // ENFRIAMIENTO con algún anuncio que vende: la campaña pasa a ser
@@ -206,7 +236,15 @@ export function recomendarCampana(entrada: {
 
   for (const anuncio of entrada.anuncios) {
     const nombre = nombreAnuncio(anuncio);
-    if (gastaSinVender(anuncio.gasto, anuncio.ingresos, anuncio.ventasCantidad)) {
+    if (enVendedor) {
+      // Mira los últimos 7 días, no el mes: un anuncio que vendió a
+      // principio de mes y ya no vende igual vuelve a ENFRIAMIENTO.
+      const motivo = motivoSalirDeVendedor(anuncio);
+      if (motivo !== null) {
+        salida.push({ ...textoAEnfriamiento(hayEnfriamiento), anuncioId: anuncio.id, nombre, motivo });
+        continue;
+      }
+    } else if (gastaSinVender(anuncio.gasto, anuncio.ingresos, anuncio.ventasCantidad)) {
       if (enAntartida) {
         // Consume poquito: se deja. Sin precio no se sabe: no se pausa.
         if (anuncio.pasaTopeConsumo !== true) continue;
@@ -231,13 +269,7 @@ export function recomendarCampana(entrada: {
           motivo,
         });
       } else {
-        salida.push({
-          codigo: hayEnfriamiento ? "pasar_enfriamiento" : "crear_enfriamiento",
-          anuncioId: anuncio.id,
-          nombre,
-          texto: hayEnfriamiento ? `Pasar a ${CAMPANA_ENFRIAMIENTO}` : `Crear la campaña ${CAMPANA_ENFRIAMIENTO} y mover este anuncio`,
-          motivo,
-        });
+        salida.push({ ...textoAEnfriamiento(hayEnfriamiento), anuncioId: anuncio.id, nombre, motivo });
       }
       continue;
     }
