@@ -141,6 +141,16 @@ export function IconoSoporte(props: IconoProps) {
   );
 }
 
+// Dos globos de conversación — foro de la comunidad.
+export function IconoForo(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 5h11v8H9l-3 3v-3H4z" />
+      <path d="M15 9h5v8h-2v3l-3-3h-5v-4" />
+    </Svg>
+  );
+}
+
 export function IconoConectarMl(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -361,6 +371,7 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   invitar: IconoInvitar,
   roles: IconoRoles,
   soporte: IconoSoporte,
+  foro: IconoForo,
   conectarMl: IconoConectarMl,
   avisosMl: IconoAvisosMl,
   cuenta: IconoCuenta,

@@ -1,0 +1,13 @@
+- **feat-foro-comunidad** — Nuevo **Foro de vendedores** en `/panel/foro` (ítem "Foro" en el menú): los vendedores de TODAS las empresas de Zilonix hacen preguntas y se responden entre ellos. Lista de preguntas recientes con buscador y conteo de respuestas, y una página por pregunta con sus respuestas y el formulario para responder.
+
+  **Privacidad**: solo se muestra el nombre de la persona (`usuarios.nombre`), nunca su empresa ni ningún dato de negocio. Las tablas `foro_preguntas` y `foro_respuestas` no tienen `empresa_id` a propósito (el contenido es compartido por diseño, igual que `usuarios`), así que no llevan política de RLS por empresa. El candado es tener al menos una empresa: `obtenerContextoPanel()` en las páginas y `requiereMiembroDeAlgunaEmpresa` (`lib/foro.ts`) en cada escritura, siempre con el usuario de la sesión. Las tres rutas quedan en `RUTAS_EXENTAS` de `scripts/verificar-permisos.test.ts` con ese motivo.
+
+  **Nadie edita ni borra desde la app**: `app_user` solo tiene SELECT/INSERT en las dos tablas (`db/rls-setup.sql`, con REVOKE de UPDATE/DELETE). **Moderación** en `/superadmin/foro` (enlace desde `/superadmin`): esconder o volver a mostrar preguntas y respuestas, sin borrar nunca. `superadmin_user` tiene SELECT y solo `UPDATE (oculta_ts, oculta_por)`. Lo escondido desaparece del foro, no cuenta en las respuestas y da 404.
+
+  **Anti-spam**: máximo 10 publicaciones por persona cada 10 minutos (memoria del proceso, `lib/limite-peticiones.ts`), con límites de largo en título, pregunta y respuesta. El texto se pinta como texto plano (nunca HTML). Un error que no sea de validación nunca llega al cliente con su texto crudo.
+
+  **Mis datos (Ley 1581)**: la exportación de datos personales ahora incluye lo que la persona publicó en el foro (campo `foro`). Al anonimizar una cuenta, sus publicaciones quedan con el nombre ya anonimizado.
+
+  **Migración `0022_tranquil_inertia.sql`** (turno confirmado con Pablo) + `db/rls-setup.sql` actualizado. Antes de fusionar hay que correr las dos contra staging (y en el release, contra producción). Mientras no se corran, `/panel/foro` y la exportación de Mis datos fallan.
+
+  Verificado: `npm run typecheck` en verde; `npx vitest run lib/foro-validacion.test.ts scripts/verificar-permisos.test.ts components/marco` en verde, con 265 pruebas. `db/foro.test.ts` y `lib/datos-personales.test.ts` necesitan Postgres real y quedan para el CI. `db/foro.test.ts` prueba que dos vendedores de empresas distintas se ven y se responden, que quien no tiene empresa no publica, que la app no puede editar ni borrar, y que solo el superadmin esconde y nunca reescribe el texto.

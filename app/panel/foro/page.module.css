@@ -1,0 +1,98 @@
+.formulario {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.acciones {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.contador {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--peligro-texto);
+}
+
+.buscador {
+  display: flex;
+  gap: 8px;
+}
+
+.buscador input {
+  flex: 1;
+  min-width: 0;
+}
+
+.tituloSeccion {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.tituloPregunta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--texto-suave);
+}
+
+.respuestas {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--texto-suave);
+  white-space: nowrap;
+}
+
+.cuerpo {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.respuesta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.volver {
+  align-self: flex-start;
+}
+
+.aviso {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--texto-suave);
+}

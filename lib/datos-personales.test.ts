@@ -51,7 +51,8 @@ describe.skipIf(!HAY_POSTGRES)("lib/datos-personales.ts (issue #318, Ley 1581)",
 
     const exportacion = await exportarDatosPropios(usuario);
 
-    expect(Object.keys(exportacion).sort()).toEqual(["auditoria", "generadoTs", "membresias", "perfil"]);
+    expect(Object.keys(exportacion).sort()).toEqual(["auditoria", "foro", "generadoTs", "membresias", "perfil"]);
+    expect(exportacion.foro).toEqual([]);
     expect(exportacion.perfil).toEqual({ id: usuario.id, nombre: usuario.nombre, email: usuario.email, creadoTs: usuario.creadoTs.toISOString() });
     expect(exportacion.membresias).toEqual([{ empresa: "Empresa de prueba export", rol: "Dueño", desde: expect.any(String) }]);
     // crearEmpresaConDueno ya registró una fila de auditoria ("crear
