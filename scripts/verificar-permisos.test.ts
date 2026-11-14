@@ -107,6 +107,7 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/cuenta/[[...cuenta]]/page.tsx": "solo monta <UserProfile/> de Clerk; no lee ninguna tabla propia",
   "app/sign-in/[[...sign-in]]/page.tsx": "solo monta <SignIn/> de Clerk",
   "app/sign-up/[[...sign-up]]/page.tsx": "solo monta <SignUp/> de Clerk",
+  "app/privacidad/page.tsx": "política de privacidad pública (texto estático), sin ningún dato de negocio",
   "app/api/version/route.ts": "expone solo el número de versión, nunca datos de ninguna empresa",
   "app/api/salud/route.ts":
     "monitoreo público: solo un select 1 y, cuando exista la cola, números de trabajos — nunca datos de negocio, nombres de empresa, cadenas de conexión ni el error del driver",
