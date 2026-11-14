@@ -1,0 +1,1 @@
+- **fix-publicidad-quitar-aviso-url** — **Publicidad** ya no lee `?aviso=` de la URL. Desde #403 el aviso de "Actualizar ahora" sale junto al botón, y nada produce ya ese parámetro. Un link viejo con `?aviso=` mostraba el mismo aviso repetido debajo del selector de cuenta (visto en staging el 14-nov). También se quita la clase `.aviso`, que ya no se usa. Sin migración.
