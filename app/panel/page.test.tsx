@@ -103,12 +103,14 @@ describe("Inicio (#143; Hoy · Meta · Período, 13-nov)", () => {
       "Participación por cuenta (ventas)",
       "Comparativo por cuenta (equipo)",
       "Operación",
-      "Pedidos",
+      "Despachos pendientes",
     ]) {
       expect(html).toContain(texto);
     }
-    // Las tarjetas viejas de arriba no se repiten.
+    // Las tarjetas viejas de arriba no se repiten, y «Pedidos» (todos los
+    // guardados desde siempre) ya no sale.
     expect(html).not.toContain("Ventas de hoy");
+    expect(html).not.toContain(">Pedidos<");
     expect(html).not.toContain("Guardar meta");
     // Hoy + mes (el período ES el mes: no se lee dos veces), más la variación.
     expect(lecturas().indicadores).toHaveBeenCalledTimes(2);
@@ -151,6 +153,8 @@ describe("Inicio (#143; Hoy · Meta · Período, 13-nov)", () => {
     const e = await crearEmpresaConPermisos("Inicio sin finanzas", permisos);
     const html = await pintarInicio(e, permisos);
     expect(html).toContain("Ventas de hoy");
+    expect(html).toContain("Despachos pendientes");
+    expect(html).not.toContain(">Pedidos<");
     for (const texto of ["Meta del mes", "Número de ventas", "Utilidad", "Publicidad", "Participación por cuenta", "Recaudo"]) {
       expect(html).not.toContain(texto);
     }

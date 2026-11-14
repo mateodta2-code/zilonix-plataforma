@@ -22,7 +22,9 @@ import styles from "./page.module.css";
 // persona puede consultar (ej. el Operador no ve "Finanzas"). Las
 // pestañas Resumen · Pedidos · Despachos · SKU que había acá se
 // quitaron (pedido del equipo, 13-nov): repetían links que ya están en
-// la barra lateral.
+// la barra lateral. La tarjeta «Pedidos» también salió (Sharel, 13-nov):
+// contaba TODOS los pedidos guardados desde siempre, con cancelados, y
+// confundía al lado de «Número de ventas».
 //
 // Marco visual (issue de las subpáginas) — el marco (barra lateral +
 // barra superior) ya no se pinta acá: lo pone app/panel/layout.tsx,
@@ -116,7 +118,6 @@ export default async function PanelPage({ searchParams = {} }: { searchParams?: 
 
   const operacion = (
     <div className={styles.gridKpi}>
-      {vePedidosYDespachos && kpis.pedidos !== null && <TarjetaKpi titulo="Pedidos" valor={kpis.pedidos} />}
       {vePedidosYDespachos && kpis.despachosPendientes !== null && <TarjetaKpi titulo="Despachos pendientes" valor={kpis.despachosPendientes} />}
       {veSku && kpis.skuSinVincular !== null && <TarjetaKpi titulo="SKU sin vincular" valor={kpis.skuSinVincular} />}
     </div>
@@ -145,7 +146,6 @@ export default async function PanelPage({ searchParams = {} }: { searchParams?: 
           {vePedidosYDespachos && kpis.ventasDelMes !== null && (
             <TarjetaKpi titulo="Ventas del mes" valor={formatearVentasDelMes(kpis.ventasDelMes)} />
           )}
-          {vePedidosYDespachos && kpis.pedidos !== null && <TarjetaKpi titulo="Pedidos" valor={kpis.pedidos} />}
           {vePedidosYDespachos && kpis.despachosPendientes !== null && (
             <TarjetaKpi titulo="Despachos pendientes" valor={kpis.despachosPendientes} />
           )}
