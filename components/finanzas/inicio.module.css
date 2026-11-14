@@ -226,3 +226,142 @@
 .tablaComparativo th:not(:first-child) {
   text-align: right;
 }
+
+/* Inicio (13-nov) — Hoy, Meta del mes y Período con filtro. Mismas
+   superficies de zona oscura; sin colores nuevos. */
+.seccion {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 8 tarjetas del período: 4 + 4 en escritorio. */
+.gridKpi4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1280px) {
+  .gridKpi4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .gridKpi4 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.filtro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.avisoError,
+.avisoExito {
+  margin: 8px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+}
+
+.avisoError {
+  border: 1px solid var(--peligro, #c0392b);
+  background: color-mix(in srgb, var(--peligro, #c0392b) 18%, transparent);
+}
+
+.avisoExito {
+  border: 1px solid var(--exito, #2e7d32);
+  background: color-mix(in srgb, var(--exito, #2e7d32) 18%, transparent);
+}
+
+/* Meta del mes. */
+.metaEncabezado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+}
+
+.metaVacia {
+  margin: 4px 0 12px;
+  font-size: 14px;
+}
+
+.metaCifras {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.metaEtiqueta {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.metaValor {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.metaPista {
+  height: 14px;
+  border-radius: 7px;
+  background: var(--borde);
+  overflow: hidden;
+}
+
+.metaBarra {
+  display: block;
+  height: 100%;
+  border-radius: 7px;
+  background: var(--acento);
+}
+
+.metaLineas {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13.5px;
+  max-width: 720px;
+}
+
+.metaLineas li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--borde);
+}
+
+.metaTotal {
+  font-weight: 700;
+}
+
+.metaForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .metaCifras {
+    grid-template-columns: 1fr;
+  }
+}
