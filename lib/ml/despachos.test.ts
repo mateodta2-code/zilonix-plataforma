@@ -198,9 +198,12 @@ describe("despachos (tarea 2.10)", () => {
   });
 
   it("listarItemsPorEnvio trae producto y cantidad de cada envío; nunca los de otra empresa", async () => {
-    await dbComoEmpresa(empresaId, (tx) =>
-      tx.insert(pedidoItems).values({ empresaId, pedidoId, linea: 1, itemIdExterno: "MCO-ITEM-1", titulo: "Gorra azul", cantidad: 2, skuCodigo: "GOR-1", precioUnitario: "5000", valorLinea: "10000" })
-    );
+    // pedido_items cuelga de la cabecera de la venta
+    // (pedido_items_venta_misma_empresa_fk): la cabecera va primero.
+    await dbComoEmpresa(empresaId, async (tx) => {
+      await tx.insert(pedidosFinanzas).values({ empresaId, pedidoId, cuentaMlId: cuentaId, valorVenta: "10000.00" });
+      await tx.insert(pedidoItems).values({ empresaId, pedidoId, linea: 1, itemIdExterno: "MCO-ITEM-1", titulo: "Gorra azul", cantidad: 2, skuCodigo: "GOR-1", precioUnitario: "5000", valorLinea: "10000" });
+    });
     const porEnvio = await listarItemsPorEnvio(empresaId, ["111"]);
     expect(porEnvio.get("111")).toEqual([{ titulo: "Gorra azul", cantidad: 2, skuCodigo: "GOR-1" }]);
     expect((await listarItemsPorEnvio(empresaBId, ["111"])).size).toBe(0);
