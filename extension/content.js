@@ -465,7 +465,7 @@
   // Issue #273 (revisión de Pablo, punto 2) — puro (string -> string),
   // para poder probarlo sin chrome/DOM real. "Enviando a: Staging" vs.
   // "Enviando a: Producción" — el único marcador real que distingue los
-  // 2 hosts de Seller (ver ORIGENES_SELLER_PERMITIDOS, extension/marcador-zilonix.js)
+  // hosts de Seller (ver ORIGENES_SELLER_PERMITIDOS, extension/marcador-zilonix.js)
   // es la palabra "staging" en el subdominio — nunca hace falta una
   // lista aparte acá, alcanza con ese substring.
   function etiquetaAmbienteDeUrlApp(urlApp) {
