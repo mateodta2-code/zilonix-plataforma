@@ -52,6 +52,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
   "app/panel/invitar/actions.ts",
+  // Issue #370 — ver pide personas.consultar; cambiar rol,
+  // personas.modificar (acá y en lib/personas.ts).
+  "app/panel/personas/page.tsx",
+  "app/panel/personas/actions.ts",
   "app/panel/roles/page.tsx",
   "app/panel/roles/[rolId]/page.tsx",
   "app/panel/roles/[rolId]/actions.ts",
