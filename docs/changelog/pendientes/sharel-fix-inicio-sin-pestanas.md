@@ -1,0 +1,1 @@
+- **2026-11-13** — Inicio: se quitan las pestañas **Resumen · Pedidos · Despachos · SKU** de arriba del resumen (pedido del equipo vía Sharel; **sin migración**). Repetían links que ya están en la barra lateral. Todo lo demás de Inicio queda igual: la guía de inicio, las tarjetas de siempre y el bloque de Finanzas del mes.
