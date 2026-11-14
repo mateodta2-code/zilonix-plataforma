@@ -34,6 +34,8 @@ vi.mock("./actions", () => ({
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  sessionStorage.clear();
+  vi.useRealTimers();
   document.documentElement.removeAttribute("data-zilonix-extension");
 });
 
@@ -109,5 +111,48 @@ describe("PanelInvestigacion — una búsqueda no debe desaparecer al buscar otr
     // volver a escanear (no se dispara ningún mensaje nuevo acá).
     rerender(<PanelInvestigacion termino="zapatos" tab="demanda" />);
     await waitFor(() => expect(aparece("Zapato Tardio")).toBe(true));
+  });
+});
+
+describe("PanelInvestigacion — aviso cuando la extensión no responde", () => {
+  const TEXTO_AVISO = /La extensión no respondió\. Recarga la pestaña de Mercado Libre/i;
+
+  async function avanzar(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  it("sin extensión al darle Analizar: muestra el aviso y deja la marca del clic guardada", async () => {
+    vi.useFakeTimers();
+    marcarClicAnalizar("CO", "ml");
+    render(<PanelInvestigacion termino="zapatos" tab="demanda" />);
+    await avanzar(3500);
+    expect(aparece(TEXTO_AVISO)).toBe(true);
+    expect(sessionStorage.getItem("zilonix:analizar-clic")).not.toBeNull();
+  });
+
+  it("si el resultado llega a tiempo no hay aviso", async () => {
+    vi.useFakeTimers();
+    document.documentElement.setAttribute("data-zilonix-extension", "true");
+    marcarClicAnalizar("CO", "ml");
+    render(<PanelInvestigacion termino="zapatos" tab="demanda" />);
+    await avanzar(2000);
+    dispatchListadoImportado("Mercado Libre Colombia", [productoWire("Zapato A")]);
+    await avanzar(20_000);
+    expect(aparece("Zapato A")).toBe(true);
+    expect(aparece(TEXTO_AVISO)).toBe(false);
+  });
+
+  it("sin mensajes de la extensión tras unos segundos muestra el aviso, y se limpia al llegar el listado", async () => {
+    vi.useFakeTimers();
+    document.documentElement.setAttribute("data-zilonix-extension", "true");
+    marcarClicAnalizar("CO", "ml");
+    render(<PanelInvestigacion termino="zapatos" tab="demanda" />);
+    await avanzar(9000);
+    expect(aparece(TEXTO_AVISO)).toBe(true);
+    dispatchListadoImportado("Mercado Libre Colombia", [productoWire("Zapato A")]);
+    await avanzar(10);
+    expect(aparece(TEXTO_AVISO)).toBe(false);
   });
 });

@@ -26,7 +26,7 @@
 // lib/ml/variantesBusqueda.ts, lib/ml/listadoCliente.ts y la decisión
 // de fusionar en PanelInvestigacion.tsx.
 const CLAVE = "zilonix:analizar-clic";
-const VENTANA_MS = 8000;
+const VENTANA_MS = 30000;
 
 export type PlataformaAnalizar = "ml" | "amazon" | "temu" | "aliexpress" | "shein" | "alibaba";
 const PLATAFORMAS_VALIDAS: readonly PlataformaAnalizar[] = ["ml", "amazon", "temu", "aliexpress", "shein", "alibaba"];

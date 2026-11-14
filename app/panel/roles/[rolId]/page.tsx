@@ -26,8 +26,9 @@ export default async function EditarRolPage({ params }: { params: { rolId: strin
   const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) redirect("/crear-empresa");
 
+  let propios: { modulo: string; accion: string; alcance: string }[];
   try {
-    await requierePermiso(usuario.id, empresa.id, "configuracion", "autorizar");
+    propios = (await requierePermiso(usuario.id, empresa.id, "configuracion", "autorizar")).permisos;
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     return <SinAcceso mensaje="Tu rol no puede ajustar permisos." />;
@@ -39,6 +40,14 @@ export default async function EditarRolPage({ params }: { params: { rolId: strin
 
   const valorActual = (modulo: string, accion: string) =>
     rol.permisos.find((p) => p.modulo === modulo && p.accion === accion)?.alcance ?? "no";
+  // Lo que quien edita puede dar (Sharel, 13-nov — el Gerente ajusta
+  // roles): sin el permiso, la celda queda bloqueada con su valor
+  // actual; con solo "propio", no puede subirlo a "todo". La acción lo
+  // vuelve a revisar en el servidor.
+  const miAlcance = (modulo: string, accion: string) =>
+    propios.find((p) => p.modulo === modulo && p.accion === accion && p.alcance === "todo")?.alcance ??
+    propios.find((p) => p.modulo === modulo && p.accion === accion)?.alcance ??
+    "no";
 
   return (
     <>
@@ -60,15 +69,26 @@ export default async function EditarRolPage({ params }: { params: { rolId: strin
               <CeldaTabla className={styles.celdaModulo}>{modulo}</CeldaTabla>
               {ACCIONES.map((accion) => {
                 const peligroso = esPeligroso(modulo, accion);
+                const nombre = `permiso__${modulo}__${accion}`;
+                const actual = valorActual(modulo, accion);
+                const mio = miAlcance(modulo, accion);
+                const bloqueada = mio === "no";
                 return (
                   <CeldaTabla key={accion}>
+                    {/* Un <select> deshabilitado no se envía: el valor
+                        actual va en un campo oculto para no borrarlo. */}
+                    {bloqueada && <input type="hidden" name={nombre} value={actual} />}
                     <select
-                      name={`permiso__${modulo}__${accion}`}
-                      defaultValue={valorActual(modulo, accion)}
+                      name={bloqueada ? undefined : nombre}
+                      defaultValue={actual}
+                      disabled={bloqueada}
+                      title={bloqueada ? "Tu rol no tiene este permiso: no lo puedes dar ni quitar." : undefined}
                       className={`zx-control ${styles.select} ${peligroso ? styles.selectPeligroso : ""}`}
                     >
                       <option value="no">No</option>
-                      <option value="todo">Todo</option>
+                      <option value="todo" disabled={mio !== "todo" && actual !== "todo"}>
+                        Todo
+                      </option>
                       <option value="propio">Propio</option>
                     </select>
                   </CeldaTabla>

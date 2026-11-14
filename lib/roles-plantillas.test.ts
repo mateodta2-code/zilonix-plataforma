@@ -6,6 +6,7 @@ import {
   NOMBRES_PLANTILLA,
   PLANTILLAS,
   permisosDeDueno,
+  permisosNuevosQueNoPuedeDar,
   permisosQueNoPuedeDar,
   plantillasQuePuedeDar,
   type Permiso,
@@ -24,7 +25,7 @@ function sinDuplicados(permisos: Permiso[]): boolean {
 }
 
 describe("roles nuevos de Zilonix Seller (issue #124)", () => {
-  it("Gerente: todo en ventas/inventario/finanzas; personas sin anular ni autorizar; configuracion solo consultar y modificar", () => {
+  it("Gerente: todo en ventas/inventario/finanzas; personas sin anular ni autorizar; configuracion sin anular (conecta ML y ajusta roles, Sharel 13-nov)", () => {
     expect(claves(PLANTILLAS.Gerente)).toEqual(
       [
         "ventas.consultar.todo",
@@ -46,7 +47,9 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
         "personas.crear.todo",
         "personas.modificar.todo",
         "configuracion.consultar.todo",
+        "configuracion.crear.todo",
         "configuracion.modificar.todo",
+        "configuracion.autorizar.todo",
         "publicidad.consultar.todo",
         "promociones.consultar.todo",
         "promociones.aprobar.todo",
@@ -219,5 +222,29 @@ describe("qué roles puede dar quien invita (issue #124)", () => {
     const propio = [{ modulo: "ventas", accion: "crear", alcance: "propio" }];
     expect(permisosQueNoPuedeDar(todo, propio)).toEqual([]);
     expect(permisosQueNoPuedeDar(propio, todo)).toEqual(todo);
+  });
+});
+
+describe("qué puede agregar quien ajusta un rol en /panel/roles (Sharel, 13-nov)", () => {
+  const gerente = PLANTILLAS.Gerente;
+  const auxiliar = PLANTILLAS.Auxiliar;
+
+  it("el Gerente no puede agregar un permiso que no tiene (ni a otro rol ni al suyo)", () => {
+    const conAutorizarPersonas = [...auxiliar, { modulo: "personas" as const, accion: "autorizar" as const, alcance: "todo" as const }];
+    expect(permisosNuevosQueNoPuedeDar(gerente, auxiliar, conAutorizarPersonas)).toEqual([{ modulo: "personas", accion: "autorizar", alcance: "todo" }]);
+    const gerenteConMas = [...gerente, { modulo: "publicidad" as const, accion: "modificar" as const, alcance: "todo" as const }];
+    expect(permisosNuevosQueNoPuedeDar(gerente, gerente, gerenteConMas)).toEqual([{ modulo: "publicidad", accion: "modificar", alcance: "todo" }]);
+  });
+
+  it("sí puede agregar lo que tiene, y conservar lo que el rol ya tenía aunque él no lo tenga", () => {
+    const conAnular = [...auxiliar, { modulo: "finanzas" as const, accion: "anular" as const, alcance: "todo" as const }];
+    expect(permisosNuevosQueNoPuedeDar(gerente, auxiliar, conAnular)).toEqual([]);
+    const rolConExtra = [...auxiliar, { modulo: "publicidad" as const, accion: "modificar" as const, alcance: "todo" as const }];
+    expect(permisosNuevosQueNoPuedeDar(gerente, rolConExtra, rolConExtra)).toEqual([]);
+  });
+
+  it("el Dueño puede agregar cualquier cosa", () => {
+    const todo = permisosDeDueno();
+    expect(permisosNuevosQueNoPuedeDar(todo, [], todo)).toEqual([]);
   });
 });
