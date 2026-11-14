@@ -1904,6 +1904,10 @@ export const foroPreguntas = pgTable(
     autorId: uuid("autor_id").notNull().references(() => usuarios.id),
     titulo: text("titulo").notNull(),
     cuerpo: text("cuerpo").notNull(),
+    // Una imagen opcional, siempre subida por /api/foro/imagen a la
+    // carpeta zilonix-foro de nuestro Cloudinary — nunca un link a otro
+    // sitio (lib/foro-validacion.ts, esUrlImagenForo).
+    imagenUrl: text("imagen_url"),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
     ocultaTs: timestamp("oculta_ts", { withTimezone: true }),
     ocultaPor: uuid("oculta_por").references(() => usuarios.id),
@@ -1922,6 +1926,10 @@ export const foroRespuestas = pgTable(
       .references(() => foroPreguntas.id, { onDelete: "cascade" }),
     autorId: uuid("autor_id").notNull().references(() => usuarios.id),
     cuerpo: text("cuerpo").notNull(),
+    // Una imagen opcional, siempre subida por /api/foro/imagen a la
+    // carpeta zilonix-foro de nuestro Cloudinary — nunca un link a otro
+    // sitio (lib/foro-validacion.ts, esUrlImagenForo).
+    imagenUrl: text("imagen_url"),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
     ocultaTs: timestamp("oculta_ts", { withTimezone: true }),
     ocultaPor: uuid("oculta_por").references(() => usuarios.id),

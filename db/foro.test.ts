@@ -95,6 +95,24 @@ describe("foro de la comunidad", () => {
     expect((await listarPreguntas({ busqueda: `Conteo ${marca}` }))[0].respuestas).toBe(1);
   });
 
+  it("guarda la imagen adjunta (pregunta y respuesta) y rechaza una que no salió de nuestro Cloudinary", async () => {
+    const nubeAntes = process.env.CLOUDINARY_CLOUD_NAME;
+    process.env.CLOUDINARY_CLOUD_NAME = "zilonix-prueba";
+    try {
+      const imagen = "https://res.cloudinary.com/zilonix-prueba/image/upload/v1/zilonix-foro/captura.png";
+      const preguntaId = await crearPregunta(vendedorA, `Con imagen ${marca}`, "Miren esta captura del error.", imagen);
+      await crearRespuesta(vendedorB, preguntaId, "Ese error sale por esto:", imagen);
+      const detalle = await obtenerPregunta(preguntaId);
+      expect(detalle?.imagenUrl).toBe(imagen);
+      expect(detalle?.respuestas[0].imagenUrl).toBe(imagen);
+
+      await expect(crearPregunta(vendedorA, `Imagen ajena ${marca}`, "Con una imagen de otro sitio.", "https://ejemplo.com/rastreo.gif")).rejects.toBeInstanceOf(ForoError);
+      expect(await listarPreguntas({ busqueda: `Imagen ajena ${marca}` })).toHaveLength(0);
+    } finally {
+      process.env.CLOUDINARY_CLOUD_NAME = nubeAntes;
+    }
+  });
+
   it("superadmin_user solo puede marcar oculta_ts/oculta_por, nunca reescribir el texto ni borrar", async () => {
     const preguntaId = await crearPregunta(vendedorB, `Intacta ${marca}`, "El superadmin no puede cambiar este texto.");
     await expect(dbSuperadmin.update(foroPreguntas).set({ cuerpo: "reescrito" }).where(eq(foroPreguntas.id, preguntaId))).rejects.toThrow();

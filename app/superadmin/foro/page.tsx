@@ -56,6 +56,11 @@ export default async function ModerarForoPage() {
                 {p.titulo}
               </p>
               <p style={{ margin: "4px 0 0", fontSize: 13, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{p.cuerpo}</p>
+              {p.imagenUrl && (
+                <a href={p.imagenUrl} target="_blank" rel="noopener noreferrer">
+                  <img src={p.imagenUrl} alt="Imagen adjunta" style={{ marginTop: 8, maxWidth: 240, maxHeight: 180, objectFit: "contain", borderRadius: 4 }} />
+                </a>
+              )}
             </li>
           ))}
         </ul>

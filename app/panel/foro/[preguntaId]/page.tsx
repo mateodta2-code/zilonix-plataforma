@@ -4,6 +4,7 @@ import { obtenerPregunta } from "@/lib/foro";
 import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { FotoConZoom } from "@/components/marco/FotoConZoom";
 import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { formatoFechaForo } from "../formato";
@@ -23,6 +24,7 @@ export default async function PreguntaForoPage({ params }: { params: { preguntaI
 
       <Tarjeta>
         <p className={styles.cuerpo}>{pregunta.cuerpo}</p>
+        {pregunta.imagenUrl && <FotoConZoom src={pregunta.imagenUrl} alt={`Imagen de la pregunta: ${pregunta.titulo}`} claseMiniatura={styles.imagenPublicacion} />}
       </Tarjeta>
 
       <div>
@@ -40,6 +42,7 @@ export default async function PreguntaForoPage({ params }: { params: { preguntaI
                     {r.autorNombre} · {formatoFechaForo(r.creadoTs)}
                   </span>
                   <p className={styles.cuerpo}>{r.cuerpo}</p>
+                  {r.imagenUrl && <FotoConZoom src={r.imagenUrl} alt={`Imagen de la respuesta de ${r.autorNombre}`} claseMiniatura={styles.imagenPublicacion} />}
                 </div>
               </FilaLista>
             ))}
