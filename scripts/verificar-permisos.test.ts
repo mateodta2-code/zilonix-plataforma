@@ -191,7 +191,13 @@ const RUTAS_PROTEGIDAS = new Set([
 // superadmin?" (plataforma entera, no un módulo de una empresa). Toda
 // ruta bajo /superadmin tiene que llamar requiereSuperadmin(), nunca
 // requierePermiso() — son preguntas distintas.
-const RUTAS_SUPERADMIN = new Set(["app/superadmin/page.tsx", "app/superadmin/[empresaId]/page.tsx"]);
+const RUTAS_SUPERADMIN = new Set([
+  "app/superadmin/page.tsx",
+  "app/superadmin/[empresaId]/page.tsx",
+  // Foro (14-nov) — moderar: esconder/mostrar publicaciones.
+  "app/superadmin/foro/page.tsx",
+  "app/superadmin/foro/actions.ts",
+]);
 
 // Rutas exentas, cada una con el motivo real por el que no necesita
 // preguntar "¿puede [acción] en [módulo]?".
@@ -246,6 +252,15 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/terminos/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
   "app/privacidad/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
   "app/cookies/page.tsx": "página estática pública ('En preparación'), no lee ni escribe ninguna tabla",
+  // Foro de la comunidad (14-nov) — compartido entre TODAS las
+  // empresas (foro_preguntas/foro_respuestas no tienen empresa_id), así
+  // que no hay un módulo de empresa al que pedirle permiso. El candado
+  // real es tener al menos una empresa: obtenerContextoPanel() redirige
+  // a /crear-empresa en las páginas, y requiereMiembroDeAlgunaEmpresa
+  // (lib/foro.ts) en cada escritura, siempre con el usuario de la sesión.
+  "app/panel/foro/page.tsx": "foro compartido entre empresas, sin datos de negocio — el candado es obtenerContextoPanel() (exige tener una empresa)",
+  "app/panel/foro/[preguntaId]/page.tsx": "idem",
+  "app/panel/foro/actions.ts": "idem — cada escritura pasa por requiereMiembroDeAlgunaEmpresa (lib/foro.ts) con el usuario de la sesión",
   // Rama mateo/promociones-visual-prueba — maqueta aislada del
   // rediseño de Promociones para que Débora la revise. Igual criterio
   // que app/panel/mis-datos/page.tsx: solo resuelve sesión (redirige a

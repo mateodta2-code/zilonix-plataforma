@@ -2,7 +2,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { auditoria, empresas, invitaciones, membresias, roles, usuarios } from "@/db/schema";
+import { auditoria, empresas, foroPreguntas, foroRespuestas, invitaciones, membresias, roles, usuarios } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 
@@ -209,6 +209,9 @@ export type ExportacionDatosPersonales = {
   perfil: { id: string; nombre: string; email: string; creadoTs: string };
   membresias: { empresa: string; rol: string; desde: string }[];
   auditoria: { empresa: string; ts: string; accion: string; entidad: string; detalle: string | null }[];
+  // Foro de la comunidad (14-nov) — lo que la persona publicó, incluso
+  // lo escondido por moderación: también es un dato suyo.
+  foro: { tipo: "pregunta" | "respuesta"; ts: string; titulo: string | null; texto: string }[];
 };
 
 // JSON, nunca CSV/Excel — issue #318 solo pide "exportación", y un JSON
@@ -251,10 +254,22 @@ export async function exportarDatosPropios(usuario: UsuarioPropio): Promise<Expo
     });
   }
 
+  // El foro no es de ninguna empresa (sin empresa_id): se lee con la
+  // conexión normal, filtrado por el usuario de la sesión.
+  const [preguntasForo, respuestasForo] = await Promise.all([
+    db.select({ ts: foroPreguntas.creadoTs, titulo: foroPreguntas.titulo, texto: foroPreguntas.cuerpo }).from(foroPreguntas).where(eq(foroPreguntas.autorId, usuario.id)),
+    db.select({ ts: foroRespuestas.creadoTs, texto: foroRespuestas.cuerpo }).from(foroRespuestas).where(eq(foroRespuestas.autorId, usuario.id)),
+  ]);
+  const foroExport: ExportacionDatosPersonales["foro"] = [
+    ...preguntasForo.map((p) => ({ tipo: "pregunta" as const, ts: p.ts.toISOString(), titulo: p.titulo, texto: p.texto })),
+    ...respuestasForo.map((r) => ({ tipo: "respuesta" as const, ts: r.ts.toISOString(), titulo: null, texto: r.texto })),
+  ].sort((a, b) => b.ts.localeCompare(a.ts));
+
   return {
     generadoTs: new Date().toISOString(),
     perfil: { id: usuario.id, nombre: usuario.nombre, email: usuario.email, creadoTs: usuario.creadoTs.toISOString() },
     membresias: membresiasExport,
     auditoria: auditoriaExport,
+    foro: foroExport,
   };
 }

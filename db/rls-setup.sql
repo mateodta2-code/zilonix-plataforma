@@ -78,6 +78,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ia_conexiones TO app_user;
 -- Pablo/Mateo: queda desconectada_ts como histórico, los tokens se
 -- limpian con UPDATE, no con DELETE) — por eso sin DELETE acá.
 GRANT SELECT, INSERT, UPDATE ON canva_conexiones TO app_user;
+-- Foro de la comunidad (14-nov) — compartido entre TODAS las empresas
+-- por diseño (sin empresa_id ni política por empresa, igual que
+-- usuarios). Desde /panel solo se lee y se publica: nadie edita ni
+-- borra lo de otro, ni lo propio. REVOKE porque el script es repetible.
+GRANT SELECT, INSERT ON foro_preguntas, foro_respuestas TO app_user;
+REVOKE UPDATE, DELETE ON foro_preguntas, foro_respuestas FROM app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
 -- "serial" en el esquema — no existe ninguna secuencia que otorgar.
@@ -98,6 +104,11 @@ GRANT CONNECT ON DATABASE railway TO superadmin_user;
 GRANT USAGE ON SCHEMA public TO superadmin_user;
 GRANT SELECT ON empresas, membresias, roles, usuarios, accesos_temporales TO superadmin_user;
 GRANT INSERT ON auditoria TO superadmin_user;
+-- Foro (14-nov) — moderar es esconder, nunca borrar ni reescribir: el
+-- superadmin solo puede marcar oculta_ts/oculta_por. El foro no es
+-- dato de negocio de ninguna empresa, así que verlo no rompe D8.
+GRANT SELECT ON foro_preguntas, foro_respuestas TO superadmin_user;
+GRANT UPDATE (oculta_ts, oculta_por) ON foro_preguntas, foro_respuestas TO superadmin_user;
 
 -- 1c) Tarea 2.4 — tercer usuario de base, el más limitado de los tres:
 -- el trabajador de cola necesita ver avisos de CUALQUIER empresa (no

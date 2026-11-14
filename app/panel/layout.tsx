@@ -74,6 +74,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       // Issue #370 — Personas (miembros, invitaciones, cambiar rol), mismo
       // permiso que pide la página ("personas","consultar").
       ...(tienePermiso(permisos, "personas", "consultar") ? [{ etiqueta: "Personas", href: "/panel/personas", icono: "personas" as const }] : []),
+      // Foro (14-nov) — comunidad de TODAS las empresas, no un módulo
+      // de una: lo ve cualquiera que ya tenga empresa, sin permiso.
+      { etiqueta: "Foro", href: "/panel/foro", icono: "foro" as const },
     ],
   };
 

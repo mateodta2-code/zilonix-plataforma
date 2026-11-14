@@ -21,6 +21,7 @@ export type ClaveIcono =
   | "invitar"
   | "roles"
   | "soporte"
+  | "foro"
   | "conectarMl"
   | "avisosMl"
   | "cuenta"
