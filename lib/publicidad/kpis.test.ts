@@ -11,6 +11,7 @@ import {
 } from "@/lib/publicidad/formato";
 import {
   alertaBajo70,
+  anunciosMayorGasto,
   aportePorPublicidad,
   armarSerieDiaria,
   diasParaEstabilizar,
@@ -18,6 +19,7 @@ import {
   diagnosticarCampana,
   fraseEstado,
   gastaSinVender,
+  ordenPorInversionDesc,
   unidadesConPublicidad,
   usoPresupuestoDiario,
   resolverDireccion,
@@ -413,6 +415,33 @@ describe("alertas de solo lectura (issue #255)", () => {
     expect(gastaSinVender("10.00", null, "2")).toBe(false);
     expect(gastaSinVender("0.00", "0.00", "0")).toBe(false);
     expect(gastaSinVender(null, "0.00", "0")).toBe(false);
+  });
+
+  it("el mayor gasto es el anuncio que más invierte, y el empate no se descarta", () => {
+    const base = { titulo: "Uno", ventas: "0.00" };
+    expect(anunciosMayorGasto([{ ...base, id: "b", itemId: "MCO2", gasto: "30.00" }, { ...base, id: "a", itemId: "MCO1", gasto: "10.00" }], "40.00").map((a) => a.id)).toEqual(["b"]);
+    const empate = anunciosMayorGasto(
+      [
+        { id: "b", titulo: "B", itemId: "MCO2", gasto: "20.00", ventas: "1.00" },
+        { id: "a", titulo: null, itemId: "MCO1", gasto: "20.00", ventas: null },
+        { id: "c", titulo: "C", itemId: "MCO3", gasto: "5.00", ventas: null },
+      ],
+      "45.00"
+    );
+    expect(empate.map((a) => a.id)).toEqual(["a", "b"]);
+    expect(empate[0].nombre).toBe("MCO1");
+    expect(empate[0].parte).toBe("44.4");
+    expect(anunciosMayorGasto([{ ...base, id: "z", itemId: "MCO9", gasto: "0.00" }, { ...base, id: "y", itemId: "MCO8", gasto: null }], "0.00")).toEqual([]);
+  });
+
+  it("los anuncios se ordenan por inversión descendente y el gasto vacío queda al final", () => {
+    const filas = [
+      { itemId: "B", gasto: null },
+      { itemId: "A", gasto: "10.00" },
+      { itemId: "C", gasto: "30.00" },
+      { itemId: "D", gasto: "0.00" },
+    ];
+    expect(ordenPorInversionDesc(filas, (fila) => fila.gasto).map((fila) => fila.itemId)).toEqual(["C", "A", "B", "D"]);
   });
 
   it("el aporte es ventas atribuidas sobre el total de las promocionadas", () => {
