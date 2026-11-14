@@ -4,7 +4,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
 import { EtiquetaNoImprimibleError, marcarEtiquetasImpresas, marcarGuiaVista, obtenerDespachoParaGuia, obtenerEtiquetasPdf } from "@/lib/ml/despachos";
-import { agregarContenidoAEtiqueta, reescalarEtiquetaASticker } from "@/lib/pdf-etiqueta";
+import { agregarContenidoAEtiqueta, recortarGuias, reescalarEtiquetaASticker } from "@/lib/pdf-etiqueta";
 
 // Fase 1 de Despachos (issue "Despachos", punto 4) — "Ver guía" y "Ver
 // guía (sticker)" de UNA sola tarjeta. Mismo PDF real de Mercado Libre
@@ -47,9 +47,21 @@ export async function GET(request: NextRequest) {
     // sticker de 10x15 también los traiga. Es un extra: si falla con
     // algún PDF real de Mercado Libre, se entrega la guía original
     // sin franja en vez de dejar al usuario sin poder imprimir.
-    let conContenido = pdf;
+    // En sticker, primero se recorta la guía a su marco (ver
+    // recortarGuias: la de Agencia viene en A4 horizontal con la guía
+    // en un tercio de la hoja) y DESPUÉS va la franja, para que la
+    // franja quede pegada a la guía y no al pie de la hoja A4.
+    let base = pdf;
+    if (formato === "sticker") {
+      try {
+        base = await recortarGuias(pdf);
+      } catch (errorRecorte) {
+        console.warn(`[api/ml/despachos/etiqueta] no se pudo recortar la guía del despacho ${despachoId}, se reescala la hoja completa:`, errorRecorte instanceof Error ? errorRecorte.message : String(errorRecorte));
+      }
+    }
+    let conContenido = base;
     try {
-      conContenido = await agregarContenidoAEtiqueta(pdf, despacho.items);
+      conContenido = await agregarContenidoAEtiqueta(base, despacho.items);
     } catch (errorFranja) {
       console.warn(`[api/ml/despachos/etiqueta] no se pudo agregar el contenido a la guía del despacho ${despachoId}, se entrega sin franja:`, errorFranja instanceof Error ? errorFranja.message : String(errorFranja));
     }

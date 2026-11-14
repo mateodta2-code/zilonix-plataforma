@@ -28,6 +28,9 @@ import {
   listarDespachosFiltrados,
   listarDespachosPendientes,
   listarDespachosYaImpresos,
+  listarItemsPorEnvio,
+  obtenerEtiquetasPdfPorEnvio,
+  EtiquetaDeEnvioNoImprimibleError,
   listarTarjetasDespacho,
   marcarDespachado,
   marcarEtiquetasImpresas,
@@ -172,6 +175,38 @@ describe("despachos (tarea 2.10)", () => {
     expect(fila?.etiquetaImpresaTs).not.toBeNull();
     expect(ya.map((d) => d.shipmentIdExterno)).not.toContain("222");
     expect(ya.map((d) => d.shipmentIdExterno)).not.toContain("333");
+  });
+
+  it("obtenerEtiquetasPdfPorEnvio pide cada guía por separado y respeta el orden", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const id = /shipment_ids=([^&]+)/.exec(url)?.[1] ?? "";
+      expect(id).not.toContain(",");
+      return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(Number(id)) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const pdfs = await obtenerEtiquetasPdfPorEnvio(empresaId, cuentaId, ["111", "5", "22"]);
+    expect(pdfs.map((p) => p.byteLength)).toEqual([111, 5, 22]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("obtenerEtiquetasPdfPorEnvio: si una ya la recogieron, el error dice CUÁL envío es", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => (url.includes("shipment_ids=222") ? respuestaErrorPdf("NOT_PRINTABLE_STATUS") : ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(1) } as Response))));
+    const error = await obtenerEtiquetasPdfPorEnvio(empresaId, cuentaId, ["111", "222"]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EtiquetaDeEnvioNoImprimibleError);
+    expect(error).toBeInstanceOf(EtiquetaNoImprimibleError);
+    expect((error as Error).message).toContain("#222");
+  });
+
+  it("listarItemsPorEnvio trae producto y cantidad de cada envío; nunca los de otra empresa", async () => {
+    // pedido_items cuelga de la cabecera de la venta
+    // (pedido_items_venta_misma_empresa_fk): la cabecera va primero.
+    await dbComoEmpresa(empresaId, async (tx) => {
+      await tx.insert(pedidosFinanzas).values({ empresaId, pedidoId, cuentaMlId: cuentaId, valorVenta: "10000.00" });
+      await tx.insert(pedidoItems).values({ empresaId, pedidoId, linea: 1, itemIdExterno: "MCO-ITEM-1", titulo: "Gorra azul", cantidad: 2, skuCodigo: "GOR-1", precioUnitario: "5000", valorLinea: "10000" });
+    });
+    const porEnvio = await listarItemsPorEnvio(empresaId, ["111"]);
+    expect(porEnvio.get("111")).toEqual([{ titulo: "Gorra azul", cantidad: 2, skuCodigo: "GOR-1" }]);
+    expect((await listarItemsPorEnvio(empresaBId, ["111"])).size).toBe(0);
   });
 
   it("listarDespachosYaImpresos: empresa B nunca ve las impresas de empresa A", async () => {

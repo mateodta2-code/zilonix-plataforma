@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
@@ -51,6 +51,10 @@ function formatoFechaColombia(fecha: Date): string {
 // pestaña (con un blob: URL propio).
 export function ImpresionMasivaForm({ filas, total, tamanoPagina, etiquetaTipo, modo = "pendientes" }: ImpresionMasivaFormProps) {
   const reimprimir = modo === "reimprimir";
+  // Qué botón se usó: "Imprimir" (formato de Mercado Libre) o
+  // "Imprimir en sticker 10x15" — se guarda al hacer clic porque el
+  // FormData del submit no trae el botón que lo disparó.
+  const formato = useRef<"normal" | "sticker">("normal");
   const [enCurso, setEnCurso] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +64,7 @@ export function ImpresionMasivaForm({ filas, total, tamanoPagina, etiquetaTipo, 
     setError(null);
     try {
       const datosForm = new FormData(evento.currentTarget);
+      datosForm.set("formato", formato.current);
       const resp = await fetch("/api/ml/despachos/etiquetas", { method: "POST", body: datosForm });
       if (!resp.ok) {
         const datos: unknown = await resp.json().catch(() => null);
@@ -104,9 +109,14 @@ export function ImpresionMasivaForm({ filas, total, tamanoPagina, etiquetaTipo, 
       <p className={styles.resumenPaginacion}>
         {reimprimir ? `Mostrando las ${Math.min(tamanoPagina, total)} impresas más recientes.` : `Mostrando hasta ${tamanoPagina} de ${total} pendientes de imprimir.`}
       </p>
-      <Boton type="submit" className={styles.botonImprimir} disabled={enCurso}>
-        {reimprimir ? "Reimprimir seleccionadas" : "Imprimir etiquetas seleccionadas"}
-      </Boton>
+      <div className={styles.botonesImpresion}>
+        <Boton type="submit" className={styles.botonImprimir} disabled={enCurso} onClick={() => (formato.current = "normal")}>
+          {reimprimir ? "Reimprimir seleccionadas" : "Imprimir etiquetas seleccionadas"}
+        </Boton>
+        <Boton type="submit" variante="secundario" className={styles.botonImprimir} disabled={enCurso} onClick={() => (formato.current = "sticker")}>
+          {reimprimir ? "Reimprimir en sticker 10x15" : "Imprimir en sticker 10x15"}
+        </Boton>
+      </div>
       {error && <p className={styles.errorTarjeta}>{error}</p>}
       <p className={styles.nota}>
         {reimprimir

@@ -116,6 +116,12 @@
   align-self: flex-start;
 }
 
+.botonesImpresion {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .nota {
   margin: 0;
   font-size: 12px;
