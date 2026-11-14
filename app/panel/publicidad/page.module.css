@@ -71,11 +71,6 @@
   color: var(--texto-suave);
 }
 
-.aviso {
-  margin: 0;
-  font-size: 14px;
-}
-
 .formActualizar {
   display: flex;
   flex-wrap: wrap;

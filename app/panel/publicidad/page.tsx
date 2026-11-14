@@ -66,7 +66,6 @@ export default async function PublicidadPage({
 }: {
   searchParams?: {
     cuenta?: ParametroUrl;
-    aviso?: ParametroUrl;
     mes?: ParametroUrl;
     orden?: ParametroUrl;
     dir?: ParametroUrl;
@@ -99,7 +98,6 @@ export default async function PublicidadPage({
 
   const ahora = new Date();
   const cuentaParam = primero(searchParams?.cuenta);
-  const aviso = primero(searchParams?.aviso);
   const params = leerParametrosPublicidad(
     {
       mes: primero(searchParams?.mes),
@@ -156,10 +154,8 @@ export default async function PublicidadPage({
               ...(params.filtro !== "activas" ? { vista: params.filtro } : {}),
               ...(params.comparar === "ninguno" ? { comparar: "ninguno" } : {}),
               ...(params.tab === "anuncios" ? { tab: "anuncios" } : {}),
-              ...(aviso ? { aviso } : {}),
             }}
           />
-          {aviso ? <p className={styles.aviso}>{aviso}</p> : null}
         </div>
         {cuentas.length === 0 ? (
           <EstadoVacio>
