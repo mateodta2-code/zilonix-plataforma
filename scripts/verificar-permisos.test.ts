@@ -136,6 +136,11 @@ const RUTAS_EXENTAS: Record<string, string> = {
   // redirect sigue existiendo solo por compatibilidad con un link
   // viejo, nunca lee ni escribe nada.
   "app/panel/publicar/clip/page.tsx": "se retiró a un simple redirect hacia /panel/publicar#clip — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar y en las rutas nuevas de app/api/ml/clip/",
+  // Tarea feat-portada-pagina-venta — páginas estáticas del pie de la
+  // portada. No leen ni escriben ninguna tabla. /privacidad ya está
+  // arriba, con el texto legal real de #391.
+  "app/terminos/page.tsx": "página estática pública del pie de la portada, no lee ni escribe ninguna tabla",
+  "app/cookies/page.tsx": "página estática pública del pie de la portada, no lee ni escribe ninguna tabla",
 };
 
 function listarArchivosDeRuta(dir: string): string[] {

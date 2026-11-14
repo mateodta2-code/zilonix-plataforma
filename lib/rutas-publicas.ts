@@ -39,14 +39,23 @@ export const PATRONES_RUTAS_PUBLICAS = [
   "/api/version",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/iniciar-sesion",
+  "/empezar",
   // Tarea 1.7 — quien recibe una invitación por correo todavía no
   // tiene sesión (puede ni tener cuenta). La propia página valida el
   // token contra la base (lib/invitaciones.ts) — el permiso real es
   // ese token, no el middleware.
   "/invitacion(.*)",
-  // Política de privacidad: texto legal estático, sin datos de ninguna
-  // empresa; la Chrome Web Store exige una URL pública sin login.
+  // Política de privacidad: texto legal real (lib/legal/privacidad-texto.ts),
+  // estático, sin datos de ninguna empresa. Llegó con #391; la Chrome
+  // Web Store exige una URL pública sin login.
   "/privacidad",
+
+  // Tarea feat-portada-pagina-venta — pie de la portada. Páginas
+  // estáticas, nunca leen ni escriben nada. No hay texto de términos
+  // ni de cookies en producción (el de #391 es solo la privacidad).
+  "/terminos",
+  "/cookies",
 
   // Mercado Libre llama esta ruta directo, sin sesión de usuario, y
   // espera un 200 RÁPIDO (si no le llega a tiempo, reintenta y puede

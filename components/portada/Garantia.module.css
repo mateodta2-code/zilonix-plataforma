@@ -1,0 +1,26 @@
+.tarjeta {
+  margin: 0 auto;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 36px 28px !important; /* mismo motivo que Capturas.module.css: empatar especificidad con <Tarjeta> */
+}
+
+.icono {
+  color: var(--acento-fuerte);
+}
+
+.titulo {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.texto {
+  margin: 0;
+  max-width: 380px;
+  color: var(--texto-suave);
+}
