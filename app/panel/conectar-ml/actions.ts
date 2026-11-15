@@ -8,6 +8,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
 import { ConectorFalabella } from "@/lib/conectores/falabella";
 import { CuentaFalabellaDeOtraEmpresaError } from "@/lib/falabella/cuentas";
+import { ClaveCifradoError } from "@/lib/cifrado";
 import * as cuentasFalabella from "@/lib/falabella/cuentas";
 import * as pedidosFalabella from "@/lib/falabella/pedidos";
 import { FalabellaApiError, FalabellaNoDisponibleError, SELLER_ID_VALIDO } from "@/lib/falabella/cliente";
@@ -69,6 +70,13 @@ export async function conectarCuentaFalabella(formData: FormData) {
   } catch (error) {
     if (error instanceof CuentaFalabellaDeOtraEmpresaError) {
       redirect("/panel/conectar-ml?error=falabella_cuenta_en_otra_empresa");
+    }
+    // Issue #422: falta o es inválida FALABELLA_TOKEN_KEY_V1 en el
+    // servidor — culpa de Zilonix, no del comercio. Se registra como error
+    // (no warn) porque alguien del equipo tiene que arreglarlo.
+    if (error instanceof ClaveCifradoError) {
+      console.error("[conectar-ml/falabella] problema de configuración:", error.message);
+      redirect("/panel/conectar-ml?error=falabella_configuracion");
     }
     // Falabella falló (5xx, no-JSON, timeout): no es culpa de la key.
     if (error instanceof FalabellaNoDisponibleError) {

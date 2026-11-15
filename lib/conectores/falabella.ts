@@ -2,6 +2,7 @@ import type { Conector, ConectorCuenta, ConectorMensaje, ConectorPedido, Conecto
 import * as cuentasFalabella from "@/lib/falabella/cuentas";
 import * as pedidosFalabella from "@/lib/falabella/pedidos";
 import { verificarCredenciales } from "@/lib/falabella/cliente";
+import { verificarClaveFalabella } from "@/lib/cifrado";
 
 // Primer caso REAL del contrato de la tarea 2.2 (hasta ahora solo probado
 // contra ConectorFalso, lib/conectores/falso.ts) — adelanta la tarea 5.1
@@ -18,6 +19,9 @@ export class ConectorFalabella implements Conector {
 
   async conectar(credenciales: unknown): Promise<ConectorCuenta> {
     const datos = credenciales as { userId: string; apiKey: string; sellerId: string; nickname: string };
+    // Issue #422: sin una clave de cifrado válida no se podría guardar la
+    // API Key — se corta acá, antes de llamar a Falabella.
+    verificarClaveFalabella();
     // Revisión del PR #415 (bloqueante 1): nunca se guarda una cuenta
     // sin que Falabella acepte antes una llamada firmada con esa key.
     await verificarCredenciales(datos);

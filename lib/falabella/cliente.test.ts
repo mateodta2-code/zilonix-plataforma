@@ -84,6 +84,14 @@ describe("llamarFalabella / verificarCredenciales", () => {
     expect(opciones.redirect).toBe("error");
   });
 
+  it("el User-Agent sigue el formato SELLER_ID/TECNOLOGÍA/VERSIÓN/TIPO_INTEGRACIÓN/CÓDIGO_PAÍS", async () => {
+    const fetchFalso = vi.fn().mockResolvedValue(respuestaJson({ SuccessResponse: { Body: {} } }));
+    vi.stubGlobal("fetch", fetchFalso);
+    await verificarCredenciales({ ...credenciales, sellerId: "SC0170C" });
+    const mayor = process.versions.node.split(".")[0];
+    expect(fetchFalso.mock.calls[0][1].headers["User-Agent"]).toBe(`SC0170C/Node/${mayor}/ZILONIX/FACO`);
+  });
+
   it("un Seller ID con caracteres raros nunca llega al header (ni a la red)", async () => {
     const fetchFalso = vi.fn();
     vi.stubGlobal("fetch", fetchFalso);

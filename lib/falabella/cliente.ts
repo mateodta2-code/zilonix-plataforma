@@ -31,6 +31,10 @@ const CODIGO_PAIS = "FACO";
 
 const TIMEOUT_MS = 15_000;
 
+// Versión mayor del Node que corre el servidor (ej. "20"), para el
+// User-Agent que pide Falabella.
+const VERSION_MAYOR_NODE = process.versions.node.split(".")[0];
+
 // Solo letras, números, "_", "." y "-" — el Seller ID va en el header
 // User-Agent (revisión del PR #415).
 export const SELLER_ID_VALIDO = /^[A-Za-z0-9_.-]{1,100}$/;
@@ -109,8 +113,10 @@ export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, ver
     res = await fetch(`${BASE_URL}?${query.toString()}`, {
     method: "GET",
     headers: {
-      // Formato exigido por la documentación: SELLER_ID/TECNOLOGIA/VERSION/TIPO_INTEGRACION/CODIGO_PAIS
-      "User-Agent": `${sellerId}/ZilonixSeller/1.0/API/${CODIGO_PAIS}`,
+      // Formato exigido por developers.falabella.com/docs/signing-requests:
+      // SELLER_ID/TECNOLOGÍA/VERSIÓN/TIPO_INTEGRACIÓN/CÓDIGO_PAÍS (issue
+      // #422 — antes iba "ZilonixSeller/1.0/API", que no sigue ese orden).
+      "User-Agent": `${sellerId}/Node/${VERSION_MAYOR_NODE}/ZILONIX/${CODIGO_PAIS}`,
     },
     signal: AbortSignal.timeout(TIMEOUT_MS),
     redirect: "error",
