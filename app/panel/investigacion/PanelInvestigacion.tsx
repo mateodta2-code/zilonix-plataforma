@@ -33,8 +33,6 @@ import { ETIQUETA_APROXIMADO } from "@/lib/seguimiento/aproximados";
 import { generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
 import { consumirClicAnalizarReciente, marcarClicAnalizar, type PlataformaAnalizar } from "./analizarClic";
 import { generarQueriesAnalizarAction, generarQueriesPlataformaAction } from "./actions";
-import { TablaNicho } from "./TablaNicho";
-import type { FilaNicho } from "@/lib/ml/tablaNicho";
 import { INTERRUPTORES_EXTENSION } from "@/lib/extension/configuracion";
 import styles from "./page.module.css";
 
@@ -641,22 +639,6 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     setAvisoBloqueado(abiertas < candidatos.length);
   }
 
-  // Tabla consolidada del nicho — mismo comportamiento que el botón por
-  // bloque (tope MAX_CANDIDATOS_COMPLETAR), sobre las filas ya deduplicadas.
-  function completarVendidosFilas(filas: FilaNicho[]) {
-    const candidatos = filas.filter((f) => f.link).slice(0, MAX_CANDIDATOS_COMPLETAR);
-    let abiertas = 0;
-    for (const c of candidatos) {
-      const ventana = window.open(c.link as string, "_blank");
-      if (ventana) {
-        ventana.opener = null;
-        abiertas++;
-      }
-    }
-    setYaAbrioCompletar((actual) => ({ ...actual, ...Object.fromEntries(bloques.map((b) => [b.id, true])) }));
-    setAvisoBloqueado(abiertas < candidatos.length);
-  }
-
   // Issue #231, punto C — sort/colapso/borrado por bloque.
   function ordenDeBloque(id: string): CriterioOrden {
     return ordenPorBloque[id] ?? "facturacion";
@@ -914,8 +896,6 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
       ) : null}
 
       {!bloques.length ? <p className={styles.notaInsignia}>Todavía no hay ningún bloque — analizá un término para empezar.</p> : null}
-
-      <TablaNicho bloques={bloques} ahora={ahora} hayExtension={conExtension === true} onCompletarVendidos={completarVendidosFilas} />
 
       {bloques.length ? (
         <details className={styles.bloque}>

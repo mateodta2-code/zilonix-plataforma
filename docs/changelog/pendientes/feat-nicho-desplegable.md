@@ -1,0 +1,1 @@
+- **Investigación:** la tabla "Análisis del nicho" sale de la página de Investigación; queda solo en la extensión (Refs #414).
