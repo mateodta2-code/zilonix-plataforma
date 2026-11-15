@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // suma el comportamiento DINÁMICO: URL_APP arranca en producción (el
 // default de siempre) y se actualiza con lo que chrome.storage.local
 // tenga guardado en "zilonixUrlApp" (lo escribe marcador-zilonix.js).
-const URL_APP_PRODUCCION = "https://web-production-af270.up.railway.app";
+const URL_APP_PRODUCCION = "https://seller.zilonix.com";
 const URL_APP_STAGING = "https://web-staging-d979.up.railway.app";
 
 async function cargarConfigFresco(chromeMock?: unknown) {
@@ -139,5 +139,62 @@ describe("config.js — URL_APP dinámico (issue #273, revisión de Pablo)", () 
     const mod = await cargarConfigFresco(chromeMock);
     onChangedCb!({ zilonixUrlApp: { newValue: "https://evil.com" } }, "local");
     expect(mod.URL_APP).toBe(URL_APP_PRODUCCION);
+  });
+});
+
+describe("config.js — configuración remota (issue #414)", () => {
+  type Cfg = {
+    URL_APP: string;
+    interruptor: (c: string) => boolean;
+    texto: (c: string) => string;
+    sanearConfigRemota: (c: unknown) => { interruptores: { alibaba: boolean }; textos: { avisoSinSesion: string }; urlApp: string | null };
+  };
+  const conStorage = (guardado: Record<string, unknown>) => ({
+    storage: {
+      local: { get: (d: Record<string, unknown>, cb: (x: Record<string, unknown>) => void) => cb({ ...d, ...guardado }) },
+      onChanged: { addListener: () => {} },
+    },
+  });
+
+  afterEach(() => {
+    delete (globalThis as unknown as { chrome?: unknown }).chrome;
+  });
+
+  it("sin nada guardado: Alibaba apagado, interruptor desconocido apagado, texto por defecto", async () => {
+    const mod = (await cargarConfigFresco(conStorage({}))) as unknown as Cfg;
+    expect(mod.interruptor("alibaba")).toBe(false);
+    expect(mod.interruptor("inventado")).toBe(false);
+    expect(mod.texto("avisoSinSesion")).toBe("Inicia sesión en Zilonix Seller para analizar");
+  });
+
+  it("aplica la config remota guardada (interruptor y texto)", async () => {
+    const mod = (await cargarConfigFresco(
+      conStorage({ zilonixConfigRemota: { interruptores: { alibaba: true }, textos: { avisoSinSesion: "Entra" }, urlApp: null } }),
+    )) as unknown as Cfg;
+    expect(mod.interruptor("alibaba")).toBe(true);
+    expect(mod.texto("avisoSinSesion")).toBe("Entra");
+  });
+
+  it("la pestaña real de Seller (zilonixUrlApp) manda sobre la urlApp remota", async () => {
+    const mod = (await cargarConfigFresco(
+      conStorage({
+        zilonixUrlApp: URL_APP_STAGING,
+        zilonixConfigRemota: { interruptores: {}, textos: {}, urlApp: "https://seller.zilonix.com" },
+      }),
+    )) as unknown as Cfg;
+    expect(mod.URL_APP).toBe(URL_APP_STAGING);
+  });
+
+  it("sanearConfigRemota descarta basura: tipos malos, urlApp fuera de la allowlist, texto largo", async () => {
+    const mod = (await cargarConfigFresco()) as unknown as Cfg;
+    expect(mod.sanearConfigRemota("hola")).toEqual({
+      interruptores: { alibaba: false },
+      textos: { avisoSinSesion: "Inicia sesión en Zilonix Seller para analizar" },
+      urlApp: null,
+    });
+    const c = mod.sanearConfigRemota({ interruptores: { alibaba: 1 }, textos: { avisoSinSesion: "y".repeat(201) }, urlApp: "https://evil.com" });
+    expect(c.interruptores.alibaba).toBe(false);
+    expect(c.textos.avisoSinSesion).toBe("Inicia sesión en Zilonix Seller para analizar");
+    expect(c.urlApp).toBeNull();
   });
 });
