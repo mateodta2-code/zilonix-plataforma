@@ -104,6 +104,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/despachos/etiqueta/route.ts",
   "app/panel/investigacion/page.tsx",
   "app/panel/investigacion/actions.ts",
+  "app/api/extension/nicho/route.ts",
   "app/panel/investigacion/seguimiento/page.tsx",
   "app/panel/investigacion/seguimiento/actions.ts",
   "app/panel/investigacion/seguimiento/[id]/page.tsx",
