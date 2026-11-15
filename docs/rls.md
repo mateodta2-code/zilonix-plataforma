@@ -18,7 +18,7 @@ Confirmado en vivo (prueba de aislamiento, tarea 1.4): si una consulta pasa por 
 
 `publicidad_trabajador_user` (`DATABASE_URL_PUBLICIDAD`) lista las cuentas conectadas de cualquier empresa para saber a cuál sincronizar. El GRANT de `cuentas_ml` es solo `id`, `empresa_id`, `desconectada_ts` y `creado_ts`: no puede leer los tokens. También puede leer `publicidad_sincronizaciones`. No puede escribir. El token y las filas de campañas, métricas y costos se leen y se escriben con `app_user` dentro de `dbComoEmpresa`, cuando ya se sabe la empresa.
 
-Ese rol se crea en `db/rls-setup.sql` (placeholder `PONE_ACA_UNA_QUINTA_CONTRASEÑA_REAL`). No viaja en la migración de Drizzle. Hay que correr el script a mano, por el túnel, en cada ambiente, y cargar la URL en Railway. La contraseña no se pega en un chat ni en un commit.
+Ese rol se crea en `db/rls-setup.sql` (placeholder `PONE_ACA_UNA_QUINTA_CONTRASEÑA_REAL`). No viaja dentro de una migración de Drizzle. En staging, el deploy de `main` aplica `db/rls-setup.sql` junto con las migraciones pendientes (`scripts/migrar-al-desplegar.mjs`). Si falta un rol, el deploy se detiene: los roles se crean una sola vez a mano, con contraseña real, porque el script no usa el placeholder. En staging los cinco roles ya existen. En producción, las migraciones y `db/rls-setup.sql` las aplica a mano solo Mateo, en el release por la rama `produccion`, por el túnel privado. La contraseña no se pega en un chat ni en un commit. Carga `DATABASE_URL_PUBLICIDAD` en Railway cuando el rol ya exista.
 
 Las seis tablas de publicidad tienen la misma política de aislamiento que el resto: `empresa_id` igual a `app.empresa_actual`. La prueba es `db/rls-publicidad.test.ts`. Las claves únicas incluyen `empresa_id`: si la cuenta se transfiere, el historial se queda en la empresa anterior y la nueva no lo ve. Hay un índice único parcial de `publicidad_sincronizaciones` para una sola fila `en_curso` por empresa y cuenta; el tope de 10 minutos del refresco manual además toma `pg_advisory_xact_lock` dentro de la transacción.
 
@@ -26,7 +26,9 @@ Las seis tablas de publicidad tienen la misma política de aislamiento que el re
 
 Este mecanismo ya está escrito en el código (`db/rls-setup.sql`, `db/empresa-context.ts`, `db/index.ts`) y ya se corrió contra la base real de Railway (Cowork, 14/10/2026) — `app_user` creado, RLS activa y forzada en las 6 tablas, `DATABASE_URL_APP` configurada. La prueba automática (`db/rls.test.ts`, tarea 1.4) confirma el aislamiento real en cada Pull Request.
 
-### Instrucciones para Cowork (referencia — ya se corrieron una vez; sirven de nuevo si se rearma la base desde cero)
+### Instrucciones para crear los roles la primera vez (o si se rearma la base)
+
+En staging, el día a día no usa este túnel: el deploy aplica `db/rls-setup.sql`. Estos pasos sirven para crear los roles con contraseña real la primera vez, o para producción (solo Mateo, en el release por la rama `produccion`).
 
 1. Abrir el túnel privado a la base (ver `README.md`, sección de migraciones).
 2. Conectarse con `psql` a la URL que imprime el túnel.
