@@ -32,8 +32,9 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { FormActualizar } from "./FormActualizar";
 import styles from "./page.module.css";
 import { PanelMetricas } from "./GraficoPublicidad";
+import { RentabilidadAds } from "./RentabilidadAds";
 import { ResumenRecomendaciones, TablaAnuncios, TablaCampanas } from "./TablaCampanas";
-import { kpisDelResumen, pintarCampana, plataVisible, serieParaGrafico, textoAporte } from "./vista";
+import { kpisDelResumen, pintarCampana, pintarRentabilidad, plataVisible, serieParaGrafico, textoAporte } from "./vista";
 
 // Issue #255 — tablero de solo lectura. La fase 1 ya dejaba el estado
 // del anunciante y el botón "Actualizar ahora"; esta pantalla suma los
@@ -356,6 +357,8 @@ function Cuerpo({
           {NOTA_TACOS_TIENDA} <Ayuda id="ayuda-tacos-tienda">{AYUDA_TACOS_TIENDA}</Ayuda>
         </p>
       </section>
+
+      {tab === "campanas" ? <RentabilidadAds datos={pintarRentabilidad(tablero)} /> : null}
 
       <Tarjeta className={tab === "campanas" ? styles.tarjetaTabla : styles.tarjetaAnuncios}>
         <div className={styles.toolbar}>
