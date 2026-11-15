@@ -11,6 +11,7 @@ import { CuentaFalabellaDeOtraEmpresaError } from "@/lib/falabella/cuentas";
 import { ClaveCifradoError } from "@/lib/cifrado";
 import * as cuentasFalabella from "@/lib/falabella/cuentas";
 import * as pedidosFalabella from "@/lib/falabella/pedidos";
+import { MontoFalabellaInvalidoError } from "@/lib/falabella/montos";
 import { FalabellaApiError, FalabellaNoDisponibleError, SELLER_ID_VALIDO } from "@/lib/falabella/cliente";
 
 // Revisión del PR #415: validación en el servidor, no solo el
@@ -117,8 +118,13 @@ export async function sincronizarPedidosFalabella(cuentaId: string) {
     // Nunca el texto crudo a la URL (mismo criterio de arriba). El
     // código de Falabella sí va al log: es lo que hace falta para
     // confirmar los parámetros de GetOrders con la primera cuenta real.
+    // Issue #422: el OrderId del pedido que falló va al log (solo el id,
+    // nunca datos del comprador) para poder revisarlo en Seller Center.
+    const orderId =
+      error instanceof pedidosFalabella.PedidoFalabellaError || error instanceof MontoFalabellaInvalidoError ? error.orderId : null;
     console.warn(
       "[conectar-ml/falabella] no se pudo sincronizar:",
+      orderId ? `OrderId ${orderId} —` : "",
       error instanceof FalabellaApiError ? `${error.codigo} — ${error.message}` : error instanceof Error ? error.message : String(error)
     );
     redirect("/panel/conectar-ml?error=falabella_sincronizar_fallo");
