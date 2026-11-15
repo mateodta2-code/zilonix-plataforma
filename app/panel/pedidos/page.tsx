@@ -9,6 +9,13 @@ import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { DetalleDiaCuentaProducto } from "@/components/finanzas/DetalleDiaCuentaProducto";
+import { Boton } from "@/components/marco/Boton";
+import { Campo } from "@/components/marco/Campo";
+import estilosVentas from "@/components/finanzas/ventasUtilidad.module.css";
+import { normalizarParametro } from "@/lib/filtros-listado";
+import { resolverRangoVentas } from "@/lib/finanzas/ventas-pantalla";
+import { MARKETPLACES, PARAM_MARKETPLACE, parsearMarketplace, seccionesDeMarketplace, type Marketplace } from "@/lib/pedidos/marketplace";
+import { PedidosFalabella } from "./PedidosFalabella";
 import styles from "./page.module.css";
 
 // Issue #131 — Pedidos es el «Detalle día a día · cuenta · producto»,
@@ -21,6 +28,24 @@ import styles from "./page.module.css";
 // solo filtros, «Traer ventas de este mes» y la tabla. Los indicadores
 // van a Inicio (#143/#163).
 // Cualquier ?vista= viejo (lista o detalle) cae acá mismo.
+//
+// Issue #422 — filtro de marketplace (?marketplace=todos|ml|falabella,
+// lista blanca en lib/pedidos/marketplace.ts). Mercado Libre sigue siendo
+// el detalle día a día de siempre (componente compartido con Finanzas,
+// sin tocarlo); Falabella es una tabla aparte, del mismo rango de fechas.
+
+// Href de cada opción del filtro: conserva fechas, cuenta y costo, y deja
+// fuera la página (cambiar de marketplace vuelve a la primera).
+function hrefMarketplace(searchParams: Record<string, string | string[] | undefined>, marketplace: Marketplace): string {
+  const params = new URLSearchParams();
+  for (const nombre of ["cuenta", "desde", "hasta", "costo"]) {
+    const valor = normalizarParametro(searchParams[nombre]);
+    if (valor) params.set(nombre, valor);
+  }
+  if (marketplace !== "todos") params.set(PARAM_MARKETPLACE, marketplace);
+  const query = params.toString();
+  return query ? `/panel/pedidos?${query}` : "/panel/pedidos";
+}
 async function puedeConsultarConfiguracion(usuarioId: string, empresaId: string): Promise<boolean> {
   try {
     await requierePermiso(usuarioId, empresaId, "configuracion", "consultar");
@@ -75,6 +100,15 @@ export default async function PedidosPage({ searchParams }: { searchParams: Reco
     "Para ver tus pedidos, antes hace falta conectar una cuenta de Mercado Libre."
   );
 
+  const marketplace = parsearMarketplace(searchParams[PARAM_MARKETPLACE]);
+  const secciones = seccionesDeMarketplace(marketplace);
+  const extra: Record<string, string> = marketplace === "todos" ? {} : { [PARAM_MARKETPLACE]: marketplace };
+  // Mismo rango (y mismo default: el mes actual) que usa el detalle de
+  // Mercado Libre, para que los dos marketplaces muestren el mismo período.
+  const desde = normalizarParametro(searchParams.desde);
+  const hasta = normalizarParametro(searchParams.hasta);
+  const rango = resolverRangoVentas(desde, hasta, new Date());
+
   return (
     <>
       <EncabezadoPagina
@@ -86,15 +120,61 @@ export default async function PedidosPage({ searchParams }: { searchParams: Reco
         }
       />
 
-      <DetalleDiaCuentaProducto
-        empresaId={empresa.id}
-        usuarioId={usuario.id}
-        searchParams={searchParams}
-        ruta="/panel/pedidos"
-        extra={{}}
-        mostrarResumen={false}
-        mensajeVacio={mensajeVacioPedidos}
-      />
+      <nav className={styles.filtroMarketplace} aria-label="Marketplace">
+        {MARKETPLACES.map((m) => (
+          <BotonLink
+            key={m.valor}
+            href={hrefMarketplace(searchParams, m.valor)}
+            variante={m.valor === marketplace ? "secundario" : "fantasma"}
+            chico
+            aria-current={m.valor === marketplace ? "page" : undefined}
+          >
+            {m.etiqueta}
+          </BotonLink>
+        ))}
+      </nav>
+
+      {secciones.mercadoLibre && (
+        <>
+          {secciones.falabella && <h2 className={styles.tituloMarketplace}>Pedidos de Mercado Libre</h2>}
+          <DetalleDiaCuentaProducto
+            empresaId={empresa.id}
+            usuarioId={usuario.id}
+            searchParams={searchParams}
+            ruta="/panel/pedidos"
+            extra={extra}
+            mostrarResumen={false}
+            mensajeVacio={mensajeVacioPedidos}
+          />
+        </>
+      )}
+
+      {/* Solo Falabella: el formulario de fechas del detalle de Mercado
+          Libre no se pinta, así que va uno propio con el mismo rango. */}
+      {!secciones.mercadoLibre && (
+        <form method="get" action="/panel/pedidos" className={estilosVentas.filtros}>
+          <input type="hidden" name={PARAM_MARKETPLACE} value={marketplace} />
+          <Campo etiqueta="Desde">
+            <input type="date" name="desde" defaultValue={rango.rango?.desde ?? desde ?? ""} className="zx-control" />
+          </Campo>
+          <Campo etiqueta="Hasta">
+            <input type="date" name="hasta" defaultValue={rango.rango?.hasta ?? hasta ?? ""} className="zx-control" />
+          </Campo>
+          <div className={estilosVentas.accionesFiltro}>
+            <Boton type="submit" chico>
+              Filtrar
+            </Boton>
+            <BotonLink href={`/panel/pedidos?${PARAM_MARKETPLACE}=${marketplace}`} variante="fantasma" chico>
+              Mes actual
+            </BotonLink>
+          </div>
+        </form>
+      )}
+      {!secciones.mercadoLibre && rango.error && <p className={estilosVentas.avisoError}>{rango.error}</p>}
+
+      {secciones.falabella && rango.rango && (
+        <PedidosFalabella empresaId={empresa.id} rango={{ desde: rango.rango.inicio, hastaExclusivo: rango.rango.finExclusivo }} />
+      )}
 
       <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
         Volver al panel

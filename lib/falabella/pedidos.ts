@@ -1,6 +1,6 @@
-import { count, eq } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { pedidosFalabella } from "@/db/schema";
+import { cuentasFalabella, pedidosFalabella } from "@/db/schema";
 import { llamarFalabella } from "@/lib/falabella/cliente";
 import { obtenerCredenciales } from "@/lib/falabella/cuentas";
 import { parsearFechaFalabella } from "@/lib/falabella/fechas";
@@ -190,6 +190,51 @@ export async function listarPedidos(empresaId: string, cuentaFalabellaId?: strin
       .where(cuentaFalabellaId ? eq(pedidosFalabella.cuentaFalabellaId, cuentaFalabellaId) : undefined)
       .orderBy(pedidosFalabella.fecha)
   );
+}
+
+// Issue #422 — lo que pinta /panel/pedidos: los pedidos de un rango
+// [desde, hastaExclusivo) (el mismo filtro de mes del detalle de Mercado
+// Libre), el más nuevo primero, con el nickname de su cuenta. Lee con
+// dbComoEmpresa: RLS deja ver solo los pedidos y cuentas de ESTA empresa.
+// Tope de filas para que un rango enorme no cargue miles de JSONB de una
+// vez; si se llega, la pantalla lo avisa (nunca corta en silencio).
+export const TOPE_PEDIDOS_PANTALLA = 500;
+
+export async function listarPedidosParaPantalla(
+  empresaId: string,
+  rango: { desde: Date; hastaExclusivo: Date }
+): Promise<{
+  pedidos: {
+    id: string;
+    pedidoIdExterno: string;
+    fecha: Date;
+    total: string;
+    moneda: string;
+    estado: string;
+    items: unknown;
+    cuenta: string;
+  }[];
+  truncado: boolean;
+}> {
+  const filas = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({
+        id: pedidosFalabella.id,
+        pedidoIdExterno: pedidosFalabella.pedidoIdExterno,
+        fecha: pedidosFalabella.fecha,
+        total: pedidosFalabella.total,
+        moneda: pedidosFalabella.moneda,
+        estado: pedidosFalabella.estado,
+        items: pedidosFalabella.items,
+        cuenta: cuentasFalabella.nickname,
+      })
+      .from(pedidosFalabella)
+      .innerJoin(cuentasFalabella, eq(cuentasFalabella.id, pedidosFalabella.cuentaFalabellaId))
+      .where(and(gte(pedidosFalabella.fecha, rango.desde), lt(pedidosFalabella.fecha, rango.hastaExclusivo)))
+      .orderBy(desc(pedidosFalabella.fecha), desc(pedidosFalabella.pedidoIdExterno))
+      .limit(TOPE_PEDIDOS_PANTALLA + 1)
+  );
+  return { pedidos: filas.slice(0, TOPE_PEDIDOS_PANTALLA), truncado: filas.length > TOPE_PEDIDOS_PANTALLA };
 }
 
 // Revisión del PR #415: la pantalla solo necesita cuántos pedidos tiene
