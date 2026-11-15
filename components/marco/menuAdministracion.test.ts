@@ -7,7 +7,7 @@ import { itemsAdministracion } from "./menuAdministracion";
 
 const etiquetas = (permisos: { modulo: string; accion: string }[]) => itemsAdministracion(permisos).map((i) => i.etiqueta);
 
-const TODAS = ["Invitar persona", "Ajustar roles", "Acceso de soporte", "Conectar Mercado Libre", "Avisos de Mercado Libre"];
+const TODAS = ["Invitar persona", "Ajustar roles", "Acceso de soporte", "Conectar marketplace", "Avisos de Mercado Libre"];
 
 describe("itemsAdministracion", () => {
   it("el Dueño y el Gerente (plantilla nueva) ven las 5 opciones", () => {
@@ -22,7 +22,7 @@ describe("itemsAdministracion", () => {
       { modulo: "configuracion", accion: "consultar" },
       { modulo: "configuracion", accion: "modificar" },
     ];
-    expect(etiquetas(gerenteViejo)).toEqual(["Invitar persona", "Conectar Mercado Libre", "Avisos de Mercado Libre"]);
+    expect(etiquetas(gerenteViejo)).toEqual(["Invitar persona", "Conectar marketplace", "Avisos de Mercado Libre"]);
     expect(etiquetas([{ modulo: "configuracion", accion: "autorizar" }])).toEqual(["Ajustar roles", "Acceso de soporte"]);
   });
 

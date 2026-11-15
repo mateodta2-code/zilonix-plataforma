@@ -169,6 +169,13 @@
       "when": 1794679209810,
       "tag": "0023_chief_sister_grimm",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794777420896,
+      "tag": "0024_curious_loa",
+      "breakpoints": true
     }
   ]
 }

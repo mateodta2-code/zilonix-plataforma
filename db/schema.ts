@@ -563,6 +563,68 @@ export const pedidos = pgTable(
   })
 );
 
+// Conector Falabella (issue pedido por Mateo/Debora, 15/11 — adelanta la
+// tarea 5.1 del plan técnico, fuera de secuencia, decisión ya confirmada
+// con ellos). Mismo patrón que cuentasMl/pedidos, pero PARALELO: Falabella
+// no usa OAuth (API Key estática firmada con HMAC-SHA256, sin refresh
+// token — ver lib/falabella/cliente.ts), así que no tiene sentido forzarla
+// dentro de cuentasMl. No se generaliza cuentasMl/pedidos para los dos
+// marketplaces a la vez en este cambio — esa es una migración de esquema
+// mucho más grande, sobre tablas que ya tienen RLS, despachos y finanzas
+// reales encima, y ni siquiera lib/ml/ implementa hoy el contrato genérico
+// de lib/conectores/tipos.ts (solo se probó contra un conector falso).
+export const cuentasFalabella = pgTable(
+  "cuentas_falabella",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // El "UserID" de Falabella Seller Center es el correo del usuario —
+    // se guarda en claro (es un identificador, no un secreto); la API Key
+    // sí es el secreto y va cifrada.
+    userId: text("user_id").notNull(),
+    apiKeyCifrada: jsonb("api_key_cifrada").$type<TokenCifrado>().notNull(),
+    // Para el header User-Agent obligatorio de cada llamada
+    // (SELLER_ID/TECNOLOGIA/VERSION/TIPO_INTEGRACION/FACO) — lo pide la
+    // documentación de Falabella, no es un dato nuestro.
+    sellerId: text("seller_id").notNull(),
+    nickname: text("nickname").notNull(),
+    desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Mismo criterio que cuentas_ml_cuenta_externa_unica: una cuenta real
+    // de Falabella (un mismo UserID) no puede estar conectada a dos
+    // empresas de Zilonix a la vez.
+    cuentaUnica: uniqueIndex("cuentas_falabella_user_id_unica").on(t.userId),
+  })
+);
+
+export const pedidosFalabella = pgTable(
+  "pedidos_falabella",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaFalabellaId: uuid("cuenta_falabella_id").notNull().references(() => cuentasFalabella.id, { onDelete: "cascade" }),
+    pedidoIdExterno: text("pedido_id_externo").notNull(),
+    fecha: timestamp("fecha", { withTimezone: true }).notNull(),
+    total: numeric("total", { precision: 14, scale: 2 }).notNull(),
+    moneda: text("moneda").notNull(),
+    estado: text("estado").notNull(),
+    // Detalle por línea (SKU, precio, estado de ítem) de GetOrderItems —
+    // se guarda crudo en JSONB en este primer corte, igual que el
+    // "conector falso" de prueba; una tabla de líneas aparte (como
+    // publicaciones/pedidos_finanzas de ML) queda para cuando haga falta
+    // reportar por SKU, no es parte de este MVP.
+    items: jsonb("items").notNull(),
+    importadoTs: timestamp("importado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pedidoUnico: uniqueIndex("pedidos_falabella_empresa_pedido_externo_unico").on(t.empresaId, t.pedidoIdExterno),
+    // Revisión del PR #415: la pantalla cuenta y filtra pedidos por cuenta.
+    porCuenta: index("pedidos_falabella_cuenta_idx").on(t.cuentaFalabellaId),
+  })
+);
+
 export const publicaciones = pgTable(
   "publicaciones",
   {
