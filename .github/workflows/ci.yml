@@ -72,6 +72,9 @@ jobs:
       # Tarea 2.3: clave de prueba para que las pruebas de cifrado de
       # tokens de Mercado Libre corran en CI — nunca la clave real.
       ML_TOKEN_KEY_V1: "DJLURtqf9klRrWnnPtWUqOgDqgqJ/K8aqMdatfdtzhk="
+      # Conector Falabella (15/11): mismo criterio — clave de prueba propia,
+      # nunca la clave real (esa vive solo en Railway, por cuenta).
+      FALABELLA_TOKEN_KEY_V1: "DdH5McEX4IeTRehIH0b3/HuTlXfoPfIhwnR1hxZH1oQ="
       # Tarea 1.5: llaves de Clerk ficticias, solo para que el build
       # compile en CI — no son cuentas reales, no sirven para nada fuera
       # de esta corrida. Las reales viven en Railway.
