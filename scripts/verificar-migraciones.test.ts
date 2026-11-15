@@ -14,7 +14,7 @@ const RAIZ = process.cwd();
 const DIR_MIGRACIONES = join(RAIZ, "db/migrations");
 const RUTA_JOURNAL = join(DIR_MIGRACIONES, "meta/_journal.json");
 
-type EntradaJournal = { idx: number; tag: string };
+type EntradaJournal = { idx: number; tag: string; when?: number };
 type Journal = { entries: EntradaJournal[] };
 
 // Función pura, sin tocar el disco — recibe el journal ya parseado y
@@ -71,6 +71,24 @@ export function verificarHistorialMigraciones(journal: Journal, archivosSql: str
     if (archivos.length > 1) {
       problemas.push(
         `El prefijo ${prefijo} se repite en ${archivos.length} archivos (${archivos.sort().join(", ")}) — dos ramas generaron cada una su propia migración con el mismo número; hay que renumerar una de las dos al fusionar, nunca a mano sin regenerar.`
+      );
+    }
+  }
+
+  // 5) `when` estrictamente creciente según idx. El migrador de
+  // drizzle-orm (pg-core/dialect.js) solo aplica una migración si su
+  // `when` es MAYOR que el created_at de la última ya aplicada en la
+  // base. Si una rama vieja genera su migración antes que otra que se
+  // fusiona primero, la suya queda con un `when` menor y el migrador la
+  // salta EN SILENCIO (sin error). Con migraciones automáticas al
+  // desplegar en staging eso sería un esquema a medias sin aviso.
+  const conWhen = [...journal.entries].filter((e) => typeof e.when === "number").sort((a, b) => a.idx - b.idx);
+  for (let i = 1; i < conWhen.length; i++) {
+    const anterior = conWhen[i - 1];
+    const actual = conWhen[i];
+    if ((actual.when as number) <= (anterior.when as number)) {
+      problemas.push(
+        `La migración idx=${actual.idx} ("${actual.tag}") tiene when=${actual.when}, que no es mayor que el de idx=${anterior.idx} ("${anterior.tag}", when=${anterior.when}). Drizzle la saltaría sin avisar: actualiza tu rama con main y vuelve a generar la migración con npm run db:generate.`
       );
     }
   }
@@ -142,6 +160,29 @@ describe("verificarHistorialMigraciones (función pura) — casos de ejemplo en 
     expect(
       problemas.some((p) => p.includes("0008") && p.includes("0008_married_thunderbird.sql") && p.includes("0008_useful_skreet.sql"))
     ).toBe(true);
+  });
+
+  it("una migración con `when` menor que la anterior (rama vieja) -> falla, porque drizzle la saltaría en silencio", () => {
+    const journal: Journal = {
+      entries: [
+        { idx: 0, tag: "0000_a", when: 1000 },
+        { idx: 1, tag: "0001_b", when: 3000 },
+        { idx: 2, tag: "0002_c", when: 2000 },
+      ],
+    };
+    const archivos = ["0000_a.sql", "0001_b.sql", "0002_c.sql"];
+    const problemas = verificarHistorialMigraciones(journal, archivos);
+    expect(problemas.some((p) => p.includes("idx=2") && p.includes("0002_c"))).toBe(true);
+  });
+
+  it("`when` estrictamente creciente -> sin problemas", () => {
+    const journal: Journal = {
+      entries: [
+        { idx: 0, tag: "0000_a", when: 1000 },
+        { idx: 1, tag: "0001_b", when: 2000 },
+      ],
+    };
+    expect(verificarHistorialMigraciones(journal, ["0000_a.sql", "0001_b.sql"])).toEqual([]);
   });
 
   it("journal y lista de archivos vacíos -> sin problemas (proyecto nuevo, sin migraciones todavía)", () => {

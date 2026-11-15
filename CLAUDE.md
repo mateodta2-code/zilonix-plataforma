@@ -43,7 +43,7 @@ npm run docs:permisos    # regenera docs/matriz-permisos.md desde lib/roles.ts
 
 - Dos ambientes, `staging` y `production`, cada uno su propio servicio `web` y su propio Postgres — nunca comparten base de datos.
 - **Nunca `railway up`.** Deploy solo vía `git push` a `main` (auto-deploy) o `railway redeploy`. Verificar siempre contra `/api/version` antes de dar una tarea por cerrada.
-- Las migraciones y `db/rls-setup.sql` se corren a mano contra cada ambiente por un túnel privado — nunca exponiendo la base a internet. Detalle: `docs/claude/migraciones.md`.
+- En producción, las migraciones y `db/rls-setup.sql` se corren a mano por un túnel privado, nunca exponiendo la base a internet. En staging se pueden aplicar solas al desplegar (`docs/migraciones-al-desplegar.md`). Detalle: `docs/claude/migraciones.md`.
 
 ## Convenciones de código
 
