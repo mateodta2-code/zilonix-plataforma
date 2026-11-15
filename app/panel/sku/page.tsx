@@ -13,6 +13,7 @@ import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { PestanasProductos } from "@/components/productos/PestanasProductos";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
@@ -85,6 +86,7 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
           </BotonLink>
         }
       />
+      <PestanasProductos actual="/panel/sku" />
 
       {publicacionesSinSku.length > 0 && (
         <div className={styles.avisoSinVincular}>

@@ -10,7 +10,7 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
-import { SeccionesInventario } from "@/components/inventario/Avisos";
+import { PestanasProductos } from "@/components/productos/PestanasProductos";
 import styles from "../inventario.module.css";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -58,7 +58,7 @@ export default async function KardexPage({ searchParams }: { searchParams: Recor
   return (
     <>
       <EncabezadoPagina titulo="Kardex" descripcion="Cada movimiento de stock, con quién lo hizo y el saldo que dejó. No se edita ni se borra." />
-      <SeccionesInventario actual="/panel/inventario/kardex" />
+      <PestanasProductos actual="/panel/inventario/kardex" />
 
       <form method="get" className={styles.filtros}>
         <Campo etiqueta="SKU">

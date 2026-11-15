@@ -12,6 +12,7 @@ import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { PestanasProductos } from "@/components/productos/PestanasProductos";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "./page.module.css";
@@ -73,6 +74,7 @@ export default async function PublicacionesSinSkuPage({ searchParams }: { search
   return (
     <>
       <EncabezadoPagina titulo="Publicaciones sin SKU" />
+      <PestanasProductos actual="/panel/sku" />
 
       <form method="get" className={styles.filtros}>
         <Campo etiqueta="Buscar">

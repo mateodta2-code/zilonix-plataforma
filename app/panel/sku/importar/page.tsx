@@ -6,6 +6,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
+import { PestanasProductos } from "@/components/productos/PestanasProductos";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { ImportarCsvSkusClient } from "./ImportarCsvSkusClient";
 import styles from "./page.module.css";
@@ -41,6 +42,7 @@ export default async function ImportarCsvSkusPage() {
   return (
     <>
       <EncabezadoPagina titulo="Importar SKUs desde CSV" />
+      <PestanasProductos actual="/panel/sku" />
 
       <div className={styles.contenedor}>
         <ImportarCsvSkusClient />

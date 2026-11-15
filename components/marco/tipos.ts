@@ -8,6 +8,7 @@ export type ClaveIcono =
   | "pedidos"
   | "despachos"
   | "sku"
+  | "productos"
   | "inventario"
   | "bodegas"
   | "investigacion"
@@ -37,6 +38,10 @@ export type ItemNav = {
   icono: ClaveIcono;
   deshabilitada?: boolean;
   titulo?: string;
+  // Otras rutas que también marcan este ítem como activo. Un módulo
+  // que agrupa pantallas con rutas propias (Productos: /panel/sku,
+  // /panel/inventario, /panel/bodegas) sigue resaltado en todas.
+  rutasExtra?: string[];
 };
 
 export type GrupoNav = {

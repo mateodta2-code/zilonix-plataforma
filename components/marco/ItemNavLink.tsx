@@ -32,7 +32,7 @@ export function ItemNavLink({ item, colapsada }: { item: ItemNav; colapsada: boo
     <Link
       href={item.href}
       className={styles.item}
-      data-activo={esRutaActiva(pathname, item.href) ? "true" : "false"}
+      data-activo={[item.href, ...(item.rutasExtra ?? [])].some((ruta) => esRutaActiva(pathname, ruta)) ? "true" : "false"}
       title={colapsada ? item.etiqueta : undefined}
     >
       {iconoDeClave(item.icono, { size: 18 })}

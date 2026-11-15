@@ -16,7 +16,8 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { AvisosUrl, SeccionesInventario } from "@/components/inventario/Avisos";
+import { AvisosUrl } from "@/components/inventario/Avisos";
+import { PestanasProductos } from "@/components/productos/PestanasProductos";
 import styles from "../inventario.module.css";
 
 const FILAS = 8;
@@ -46,7 +47,7 @@ export default async function ComprasPage({ searchParams }: { searchParams: Reco
   return (
     <>
       <EncabezadoPagina titulo="Órdenes de compra" descripcion="Lo que le pediste a un proveedor. Al recibir, el stock sube y la orden se cierra sola." />
-      <SeccionesInventario actual="/panel/inventario/compras" />
+      <PestanasProductos actual="/panel/inventario/compras" />
       <AvisosUrl searchParams={searchParams} />
 
       {puedeCrear && lista.length > 0 && skusSimples.length > 0 && (

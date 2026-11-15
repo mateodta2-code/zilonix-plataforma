@@ -8,7 +8,8 @@ import { Campo } from "@/components/marco/Campo";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { AvisosUrl, SeccionesInventario } from "@/components/inventario/Avisos";
+import { AvisosUrl } from "@/components/inventario/Avisos";
+import { PestanasProductos } from "@/components/productos/PestanasProductos";
 import styles from "../inventario.module.css";
 
 // Issue #280 — configuración de inventario de la empresa. Ver pide
@@ -29,7 +30,7 @@ export default async function ConfiguracionInventarioPage({ searchParams }: { se
   return (
     <>
       <EncabezadoPagina titulo="Configuración de inventario" descripcion="Cómo se conecta el stock de Seller con Mercado Libre." />
-      <SeccionesInventario actual="/panel/inventario/configuracion" />
+      <PestanasProductos actual="/panel/inventario/configuracion" />
       <AvisosUrl searchParams={searchParams} />
 
       <Tarjeta>
