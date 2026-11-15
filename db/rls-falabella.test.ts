@@ -4,6 +4,7 @@ import { dbComoEmpresa } from "./empresa-context";
 import { cuentasFalabella, pedidosFalabella } from "./schema";
 import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { CuentaFalabellaDeOtraEmpresaError, guardarCuentaConectada, listarCuentasConectadas } from "../lib/falabella/cuentas";
+import { listarPedidosParaPantalla } from "../lib/falabella/pedidos";
 
 // Conector Falabella (15/11) — mismo criterio de aislamiento que
 // cuentas_ml/pedidos (db/rls-cuentas-ml.test.ts), sin las políticas de
@@ -85,5 +86,28 @@ describe("cuentas_falabella / pedidos_falabella (RLS)", () => {
         })
       )
     ).rejects.toThrow();
+  });
+
+  // Issue #422 — la lectura que usa /panel/pedidos: B nunca ve los
+  // pedidos (ni el nickname de la cuenta) de A, y solo entra el rango.
+  it("listarPedidosParaPantalla: B no ve los pedidos de A; A ve solo los del rango, con su cuenta", async () => {
+    const dentro = `pantalla-dentro-${randomUUID()}`;
+    const fuera = `pantalla-fuera-${randomUUID()}`;
+    await dbComoEmpresa(contexto.empresaAId, (tx) =>
+      tx.insert(pedidosFalabella).values([
+        { empresaId: contexto.empresaAId, cuentaFalabellaId: cuentaAId, pedidoIdExterno: dentro, fecha: new Date("2026-11-10T15:00:00Z"), total: "78000.00", moneda: "COP", estado: "pending", items: [{ Name: "Lámpara", Sku: "LAMP-1" }] },
+        { empresaId: contexto.empresaAId, cuentaFalabellaId: cuentaAId, pedidoIdExterno: fuera, fecha: new Date("2026-10-10T15:00:00Z"), total: "1.00", moneda: "COP", estado: "pending", items: [] },
+      ])
+    );
+    const rango = { desde: new Date("2026-11-01T05:00:00Z"), hastaExclusivo: new Date("2026-12-01T05:00:00Z") };
+
+    const desdeA = await listarPedidosParaPantalla(contexto.empresaAId, rango);
+    const propio = desdeA.pedidos.find((p) => p.pedidoIdExterno === dentro);
+    expect(propio?.cuenta).toBe("Tienda A");
+    expect(desdeA.pedidos.find((p) => p.pedidoIdExterno === fuera)).toBeUndefined();
+
+    const desdeB = await listarPedidosParaPantalla(contexto.empresaBId, rango);
+    expect(desdeB.pedidos.find((p) => p.pedidoIdExterno === dentro)).toBeUndefined();
+    expect(desdeB.pedidos.some((p) => p.cuenta === "Tienda A")).toBe(false);
   });
 });

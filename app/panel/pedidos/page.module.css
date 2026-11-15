@@ -14,3 +14,31 @@
   justify-content: center;
   gap: 10px;
 }
+
+/* Issue #422 — filtro de marketplace (Todos / Mercado Libre / Falabella)
+   y títulos de sección: pequeños y en mayúscula, como Inicio. */
+.filtroMarketplace {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tituloMarketplace {
+  margin: 24px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.marketplace {
+  font-weight: 600;
+}
+
+.productos {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
