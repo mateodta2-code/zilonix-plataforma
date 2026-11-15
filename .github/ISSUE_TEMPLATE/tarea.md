@@ -44,9 +44,9 @@ labels: ""
 
 Motivo:
 
-## Turno de migración
+## Migración
 
-<!-- Solo si toca `db/schema.ts`, `db/migrations/**` o `db/rls-setup.sql`. Si no aplica, dejar "no aplica". No renumerar ni editar a mano una migración. -->
+<!-- Solo si toca `db/schema.ts`, `db/migrations/**` o `db/rls-setup.sql`. Si no aplica, dejar "no aplica". Ya no hay turnos: mergea cuando el CI esté verde. Antes, actualiza la rama con main; si el número ya está ocupado o el CI marca números repetidos o `when` fuera de orden, borra la migración y vuélvela a generar con drizzle-kit. Nunca un COMMIT dentro del .sql. -->
 
 no aplica
 

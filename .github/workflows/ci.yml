@@ -93,6 +93,13 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npm run typecheck
+      # Antes de tocar Postgres, para que el error sea claro: dos
+      # migraciones con el mismo número, journal que no calza con los
+      # .sql, o un `when` que drizzle saltaría en silencio. Cubre el
+      # caso de dos personas que fusionan migraciones a la vez ahora
+      # que staging migra solo al desplegar.
+      - name: Verificar historial de migraciones (número, journal y orden)
+        run: npx vitest run scripts/verificar-migraciones.test.ts
       - name: Aplicar migraciones (db/migrations/)
         run: npm run db:migrate
       - name: Activar seguridad por fila (RLS) — contraseñas de prueba solo para este Postgres efímero
@@ -101,5 +108,16 @@ jobs:
           PGPASSWORD=postgres_ci psql -h localhost -U postgres -d railway -f /tmp/rls-ci.sql
       - name: Verificar colisiones en el historial de migraciones (issue #36, Z-P0-08 S2)
         run: npx drizzle-kit check
+      # Mismo script que corre el Pre-deploy command de staging en
+      # Railway. Se corre dos veces seguidas sobre una base que ya tiene
+      # todo aplicado: si alguna migración o db/rls-setup.sql deja de ser
+      # repetible, el CI falla aquí y no en el deploy de staging.
+      - name: Migrar al desplegar (como en staging) — dos veces, tiene que ser repetible
+        env:
+          MIGRAR_AL_DESPLEGAR: "1"
+          RAILWAY_ENVIRONMENT_NAME: staging
+        run: |
+          node scripts/migrar-al-desplegar.mjs
+          node scripts/migrar-al-desplegar.mjs
       - run: npm test
       - run: npm run build
