@@ -15,7 +15,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { SUGERENCIA_RECONECTAR_PUBLICIDAD } from "@/lib/ml/publicidad";
 import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { consultarTableroPublicidad } from "@/lib/publicidad/consultas";
+import { consultarTableroPublicidad, DIAS_HISTORIAL_CAMBIOS } from "@/lib/publicidad/consultas";
 import { textoComparacion } from "@/lib/publicidad/formato";
 import type { ColumnaOrden, DireccionOrden } from "@/lib/publicidad/kpis";
 import { hrefPublicidad, leerParametrosPublicidad, opcionesDeMes, type ComparacionPublicidad, type FiltroCampanas, type TabPublicidad } from "@/lib/publicidad/params";
@@ -33,8 +33,9 @@ import { FormActualizar } from "./FormActualizar";
 import styles from "./page.module.css";
 import { PanelMetricas } from "./GraficoPublicidad";
 import { RentabilidadAds } from "./RentabilidadAds";
+import { CambiosCampanas } from "./CambiosCampanas";
 import { ResumenRecomendaciones, TablaAnuncios, TablaCampanas } from "./TablaCampanas";
-import { kpisDelResumen, pintarCampana, pintarRentabilidad, plataVisible, serieParaGrafico, textoAporte } from "./vista";
+import { kpisDelResumen, pintarCambios, pintarCampana, pintarRentabilidad, plataVisible, serieParaGrafico, textoAporte } from "./vista";
 
 // Issue #255 — tablero de solo lectura. La fase 1 ya dejaba el estado
 // del anunciante y el botón "Actualizar ahora"; esta pantalla suma los
@@ -371,6 +372,7 @@ function Cuerpo({
       </section>
 
       {tab === "campanas" ? <RentabilidadAds datos={pintarRentabilidad(tablero)} /> : null}
+      {tab === "campanas" ? <CambiosCampanas cambios={pintarCambios(tablero.cambios)} dias={DIAS_HISTORIAL_CAMBIOS} /> : null}
 
       <Tarjeta className={tab === "campanas" ? styles.tarjetaTabla : styles.tarjetaAnuncios}>
         <div className={styles.toolbar}>

@@ -11,10 +11,12 @@ import {
   publicidadAnunciantes,
   publicidadAnuncios,
   publicidadCampanas,
+  publicidadCampanasCambios,
   publicidadCostosItem,
   publicidadMetricasDiarias,
   publicidadSincronizaciones,
 } from "@/db/schema";
+import { detectarCambios } from "@/lib/publicidad/cambios";
 import type { MetricasNormalizadas } from "@/lib/publicidad/metricas";
 import { MINUTOS_EN_CURSO_ABANDONADO, MINUTOS_REFRESCO_MANUAL, contarReintentosMismoTramo } from "@/lib/publicidad/plan";
 
@@ -89,6 +91,32 @@ export async function guardarCampanas(empresaId: string, filas: CampanaGuardada[
 }
 
 async function upsertCampana(tx: Tx, empresaId: string, fila: CampanaGuardada): Promise<void> {
+  // Antes de pisar: si cambió el presupuesto diario o el ROAS objetivo,
+  // queda anotado con el valor anterior (historial del tablero).
+  const [anterior] = await tx
+    .select({ presupuestoDiario: publicidadCampanas.presupuestoDiario, roasObjetivo: publicidadCampanas.roasObjetivo })
+    .from(publicidadCampanas)
+    .where(
+      and(
+        eq(publicidadCampanas.empresaId, empresaId),
+        eq(publicidadCampanas.cuentaMlId, fila.cuentaMlId),
+        eq(publicidadCampanas.campanaIdMl, fila.campanaIdMl)
+      )
+    );
+  const cambios = detectarCambios(anterior ?? null, { presupuestoDiario: fila.presupuestoDiario, roasObjetivo: fila.roasObjetivo });
+  if (cambios.length > 0) {
+    await tx.insert(publicidadCampanasCambios).values(
+      cambios.map((cambio) => ({
+        empresaId,
+        cuentaMlId: fila.cuentaMlId,
+        campanaIdMl: fila.campanaIdMl,
+        campo: cambio.campo,
+        valorAnterior: cambio.valorAnterior,
+        valorNuevo: cambio.valorNuevo,
+      }))
+    );
+  }
+
   await tx
     .insert(publicidadCampanas)
     .values({ ...fila, empresaId, sincronizadaTs: new Date() })

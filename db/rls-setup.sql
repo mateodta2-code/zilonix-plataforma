@@ -32,7 +32,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml, productos_ml,
   seguimientos_ml, seguimiento_fotos, seguimiento_alertas,
   titulares, configuracion_finanzas, metas_mensuales,
-  publicidad_anunciantes, publicidad_campanas, publicidad_anuncios, publicidad_metricas_diarias, publicidad_costos_item, publicidad_sincronizaciones
+  publicidad_anunciantes, publicidad_campanas, publicidad_anuncios, publicidad_metricas_diarias, publicidad_costos_item, publicidad_sincronizaciones,
+  publicidad_campanas_cambios
   TO app_user;
 -- Issue #127 (Z-FIN-05) — sin DELETE: un tercero se desactiva y una
 -- fila de la tabla maestra se corrige, ninguno se borra. Son tablas
@@ -294,6 +295,8 @@ ALTER TABLE publicidad_costos_item ENABLE ROW LEVEL SECURITY;
 ALTER TABLE publicidad_costos_item FORCE ROW LEVEL SECURITY;
 ALTER TABLE publicidad_sincronizaciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE publicidad_sincronizaciones FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_campanas_cambios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_campanas_cambios FORCE ROW LEVEL SECURITY;
 
 -- La tabla "usuarios" NO lleva RLS por empresa: una persona puede estar
 -- en varias empresas (decisión D2), así que no tiene una sola
@@ -644,6 +647,10 @@ CREATE POLICY aislamiento_publicidad_costos_item ON publicidad_costos_item
 
 DROP POLICY IF EXISTS aislamiento_publicidad_sincronizaciones ON publicidad_sincronizaciones;
 CREATE POLICY aislamiento_publicidad_sincronizaciones ON publicidad_sincronizaciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_campanas_cambios ON publicidad_campanas_cambios;
+CREATE POLICY aislamiento_publicidad_campanas_cambios ON publicidad_campanas_cambios
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- El cron lista cuentas y la bitácora de cualquier empresa. No
