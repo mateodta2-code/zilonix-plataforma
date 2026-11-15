@@ -231,14 +231,12 @@
     const precios = productos.map((p) => p.precio).filter((p) => typeof p === "number" && Number.isFinite(p));
     const vendidosConDato = productos.filter((p) => typeof p.vendidos === "number");
     const sumaVendidos = vendidosConDato.reduce((acc, p) => acc + p.vendidos, 0);
-    const top10 = [...vendidosConDato].sort((a, b) => b.vendidos - a.vendidos).slice(0, 10);
     return {
       total: productos.length,
       precioMinimo: precios.length ? Math.min(...precios) : null,
       precioPromedio: precios.length ? Math.round((precios.reduce((a, b) => a + b, 0) / precios.length) * 100) / 100 : null,
       precioMaximo: precios.length ? Math.max(...precios) : null,
       sumaVendidos: vendidosConDato.length ? sumaVendidos : null,
-      top10,
     };
   }
 
@@ -667,25 +665,6 @@
       html += filaHtml("Full detectados", `${estadisticasFull.conFull}/${estadisticasFull.totalTarjetas}`, false);
     }
 
-    if (resumen.top10.length) {
-      html += `<p class="zx-titulo-producto" style="margin-top:10px">Top ${resumen.top10.length} por vendidos</p><ul class="zx-top10">`;
-      html += resumen.top10
-        .map((p) => {
-          // Issue #174, revisión de Pablo — el link del Top 10 solo se
-          // usa si es de verdad http(s) (ZilonixSeguridad.linkSeguro,
-          // con new URL real) — nunca un javascript:/data: disfrazado.
-          // Si no es seguro, el producto igual aparece, solo que como
-          // texto suelto, sin link.
-          const urlSegura = ZS.linkSeguro(p.link);
-          return urlSegura
-            ? `<li><a href="${ZS.escaparHtml(urlSegura)}" target="_blank" rel="noreferrer">${textoCampo(p.titulo)}</a><span class="zx-top10__vendidos">${p.vendidos}</span></li>`
-            : `<li><span>${textoCampo(p.titulo)}</span><span class="zx-top10__vendidos">${p.vendidos}</span></li>`;
-        })
-        .join("");
-      html += "</ul>";
-    } else {
-      html += '<p class="zx-vacio">Ninguno de los productos visibles muestra "vendidos" en este sitio.</p>';
-    }
     cuerpo.innerHTML = html;
 
     const boton = panel.querySelector(".zx-boton-copiar");
@@ -707,11 +686,12 @@
     { clave: "titulo", etiqueta: "Publicación" },
     { clave: "precio", etiqueta: "Precio" },
     { clave: "origen", etiqueta: "Origen" },
+    { clave: "full", etiqueta: "Full", ordenable: false },
     { clave: "antiguedad", etiqueta: "Antigüedad" },
     { clave: "ventasMes", etiqueta: "Ventas/mes" },
     { clave: "factMes", etiqueta: "Fact./mes" },
   ];
-  const nicho = { contenedor: null, ordenActual: { columna: "factMes", direccion: "desc" }, ultimosProductos: [] };
+  const nicho = { ocupado: false, contenedor: null, ordenActual: { columna: "factMes", direccion: "desc" }, ultimosProductos: [] };
 
   function elemento(etiqueta, clase, texto) {
     const e = document.createElement(etiqueta);
@@ -720,32 +700,94 @@
     return e;
   }
 
-  function productosParaNicho(productos) {
-    return ordenarProductosListado(productos)
-      .filter((p) => p.titulo && typeof p.precio === "number" && Number.isFinite(p.precio))
-      .slice(0, TOPE_PRODUCTOS_ENVIO_LISTADO)
-      .map((p) => ({
-        titulo: p.titulo,
-        precio: p.precio,
-        vendidos: typeof p.vendidos === "number" ? p.vendidos : null,
-        foto: resolverLinkListadoSeguro(p.foto),
-        esFull: typeof p.esFull === "boolean" ? p.esFull : null,
-        itemId: typeof p.itemId === "string" && p.itemId ? p.itemId : null,
-        productId: typeof p.productId === "string" && p.productId ? p.productId : null,
-        link: resolverLinkListadoSeguro(p.link),
-      }));
+  // Hasta 3 páginas del listado (la visible + 2 más), máximo 150 productos
+  // (el servidor valida el mismo tope).
+  const TOPE_PRODUCTOS_NICHO = 150;
+  const PAGINAS_NICHO = 3;
+  const PAUSA_PAGINAS_NICHO_MS = 1000;
+
+  function productoParaNicho(p) {
+    if (!p || !p.titulo || typeof p.precio !== "number" || !Number.isFinite(p.precio)) return null;
+    return {
+      titulo: p.titulo,
+      precio: p.precio,
+      vendidos: typeof p.vendidos === "number" ? p.vendidos : null,
+      foto: resolverLinkListadoSeguro(p.foto),
+      esFull: typeof p.esFull === "boolean" ? p.esFull : null,
+      itemId: typeof p.itemId === "string" && p.itemId ? p.itemId : null,
+      productId: typeof p.productId === "string" && p.productId ? p.productId : null,
+      link: resolverLinkListadoSeguro(p.link),
+      vendedor: typeof p.vendedor === "string" && p.vendedor ? p.vendedor.slice(0, 120) : null,
+      internacional: typeof p.internacional === "boolean" ? p.internacional : null,
+      tiendaOficial: typeof p.tiendaOficial === "boolean" ? p.tiendaOficial : null,
+    };
   }
 
-  function pedirNicho(productos, orden) {
+  function claveProductoNicho(p) {
+    return p.itemId || (p.productId ? "p:" + p.productId : p.link || p.titulo);
+  }
+
+  // Une sin repetir (la misma publicación puede salir en dos páginas) y
+  // corta en el tope.
+  function unirProductosNicho(acumulados, nuevos) {
+    const vistos = new Set(acumulados.map(claveProductoNicho));
+    const salida = [...acumulados];
+    for (const n of nuevos) {
+      if (salida.length >= TOPE_PRODUCTOS_NICHO) break;
+      const k = claveProductoNicho(n);
+      if (vistos.has(k)) continue;
+      vistos.add(k);
+      salida.push(n);
+    }
+    return salida;
+  }
+
+  // Solo se sigue un enlace https del mismo sitio que la pestaña.
+  function urlPaginaNichoSegura(href, baseUrl, hostname) {
+    if (typeof href !== "string" || !href) return null;
+    try {
+      const u = new URL(href, baseUrl);
+      return u.protocol === "https:" && u.hostname === hostname ? u.href : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Página visible + páginas 2 y 3 por el enlace público "Siguiente",
+  // una a la vez, con pausa corta entre cada una. Si una falla, se sigue
+  // con lo que ya hay.
+  async function recolectarProductosNicho(productosVisibles) {
+    let acumulados = unirProductosNicho([], productosVisibles.map(productoParaNicho).filter(Boolean));
+    let doc = document;
+    for (let pagina = 2; pagina <= PAGINAS_NICHO && acumulados.length < TOPE_PRODUCTOS_NICHO; pagina++) {
+      const url = urlPaginaNichoSegura(lector.urlSiguientePagina ? lector.urlSiguientePagina(doc) : null, location.href, location.hostname);
+      if (!url) break;
+      dibujarNicho({ estado: "cargando", pagina });
+      await esperar(PAUSA_PAGINAS_NICHO_MS);
+      try {
+        const respuesta = await fetch(url, { credentials: "same-origin" });
+        if (!respuesta.ok) break;
+        doc = new DOMParser().parseFromString(await respuesta.text(), "text/html");
+        acumulados = unirProductosNicho(acumulados, lector.leerListado(doc).productos.map(productoParaNicho).filter(Boolean));
+      } catch {
+        break;
+      }
+    }
+    return acumulados;
+  }
+
+  function pedirNicho(productosWire, orden) {
     if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
-    nicho.ultimosProductos = productos;
+    nicho.ultimosProductos = productosWire;
     nicho.ordenActual = orden;
     dibujarNicho({ estado: "cargando" });
     try {
       chrome.runtime.sendMessage(
         {
           tipo: "zilonix:analizar-nicho",
-          payload: { host: location.hostname, productos: productosParaNicho(productos), columna: orden.columna, direccion: orden.direccion },
+          payload: { host: location.hostname, productos: productosWire, columna: orden.columna, direccion: orden.direccion },
         },
         (respuesta) => {
           if (chrome.runtime.lastError || !respuesta) {
@@ -760,14 +802,58 @@
     }
   }
 
-  function abrirTablaNicho(productos) {
+  async function abrirTablaNicho(productos) {
     if (nicho.contenedor && nicho.contenedor.isConnected) {
       nicho.contenedor.hidden = false; // reabrir lo ya calculado, sin pedir de nuevo
       return;
     }
+    if (nicho.ocupado) return;
+    nicho.ocupado = true;
     nicho.contenedor = elemento("div", "zx-nicho");
     document.body.appendChild(nicho.contenedor);
-    pedirNicho(productos, { columna: "factMes", direccion: "desc" });
+    dibujarNicho({ estado: "cargando", pagina: 1 });
+    let todos = [];
+    try {
+      todos = await recolectarProductosNicho(productos);
+    } finally {
+      nicho.ocupado = false;
+    }
+    pedirNicho(todos, { columna: "factMes", direccion: "desc" });
+  }
+
+  // CSV con las mismas columnas que se ven (sin imágenes). UTF-8 con BOM
+  // para que Excel lo abra bien; todo entre comillas; los títulos que
+  // empiezan con = + - @ llevan un apóstrofo para que no se ejecuten como
+  // fórmula.
+  const ENCABEZADO_CSV_NICHO = ["#", "Publicación", "Precio", "Origen", "Full", "Antigüedad", "Ventas/mes", "Fact./mes"];
+  function celdaCsv(v) {
+    return '"' + String(v == null ? "—" : v).replace(/"/g, '""') + '"';
+  }
+  function csvNicho(filas) {
+    const lineas = [
+      ENCABEZADO_CSV_NICHO,
+      ...filas.map((f) => [
+        f.n,
+        /^[=+\-@\t\r]/.test(f.titulo) ? "'" + f.titulo : f.titulo,
+        f.precio,
+        f.origen,
+        f.esFull ? "Sí" : "No",
+        f.antiguedad,
+        f.ventasMes,
+        f.factMes,
+      ]),
+    ];
+    return "﻿" + lineas.map((l) => l.map(celdaCsv).join(",")).join("\r\n");
+  }
+  function descargarCsvNicho(filas) {
+    const url = URL.createObjectURL(new Blob([csvNicho(filas)], { type: "text/csv;charset=utf-8" }));
+    const a = elemento("a");
+    a.href = url;
+    a.download = `analisis-nicho-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function dibujarNicho(resultado) {
@@ -788,7 +874,7 @@
     caja.appendChild(encabezado);
 
     if (resultado.estado === "cargando") {
-      caja.appendChild(elemento("p", "zx-vacio", "Analizando…"));
+      caja.appendChild(elemento("p", "zx-vacio", resultado.pagina ? `Analizando página ${resultado.pagina} de ${PAGINAS_NICHO}…` : "Analizando…"));
       return;
     }
     if (resultado.estado === "sin-sesion") {
@@ -832,22 +918,61 @@
     caja.appendChild(cifras);
     if (d.totales.aviso) caja.appendChild(elemento("p", "zx-nicho__nota", d.totales.aviso));
 
+    // Puntaje, concentración y precio recomendado: todo calculado en el
+    // servidor (lib/ml/tablaNicho.ts); acá solo se dibuja.
+    const an = d.analisis || {};
+    const bloque = elemento("div", "zx-nicho__analisis");
+    const puntaje = elemento("div", "zx-nicho__cifra");
+    puntaje.appendChild(elemento("span", "zx-nicho__cifra-etq", "Puntaje del nicho"));
+    if (an.puntaje) {
+      const linea = elemento("strong", null, `${an.puntaje.valor}/10 · ${an.puntaje.frase} `);
+      const info = elemento("span", "zx-nicho__info", "ⓘ");
+      info.title = an.puntaje.explicacion;
+      info.tabIndex = 0;
+      info.setAttribute("aria-label", an.puntaje.explicacion);
+      linea.appendChild(info);
+      puntaje.appendChild(linea);
+    } else {
+      puntaje.appendChild(elemento("strong", null, "Datos insuficientes"));
+    }
+    bloque.appendChild(puntaje);
+    const conc = elemento("div", "zx-nicho__cifra");
+    conc.appendChild(elemento("span", "zx-nicho__cifra-etq", "Concentración (3 primeros)"));
+    conc.appendChild(elemento("strong", null, an.concentracion ? `${an.concentracion.porcentaje} % de las ventas/mes` : "—"));
+    if (an.concentracion && an.concentracion.aviso) conc.appendChild(elemento("span", "zx-nicho__aviso", an.concentracion.aviso));
+    bloque.appendChild(conc);
+    caja.appendChild(bloque);
+    if (an.precioRecomendado) caja.appendChild(elemento("p", "zx-nicho__recomendado", an.precioRecomendado.texto));
+
+    const barra = elemento("div", "zx-nicho__barra");
+    const csv = elemento("button", "zx-boton-seguir", "Descargar CSV");
+    csv.type = "button";
+    csv.onclick = () => descargarCsvNicho(d.filas);
+    barra.appendChild(csv);
+    caja.appendChild(barra);
+
     const tabla = elemento("table", "zx-nicho__tabla");
     const filaEnc = elemento("tr");
     COLUMNAS_NICHO.forEach((c) => {
       const th = elemento("th");
-      const b = elemento("button", "zx-nicho__orden", c.etiqueta + (d.orden.columna === c.clave ? (d.orden.direccion === "asc" ? " ▲" : " ▼") : ""));
+      if (c.ordenable === false) {
+        th.textContent = c.etiqueta;
+        filaEnc.appendChild(th);
+        return;
+      }
+      const activa = d.orden.columna === c.clave;
+      th.setAttribute("aria-sort", activa ? (d.orden.direccion === "asc" ? "ascending" : "descending") : "none");
+      const b = elemento("button", "zx-nicho__orden", c.etiqueta + (activa ? (d.orden.direccion === "asc" ? " ▲" : " ▼") : ""));
       b.type = "button";
       b.onclick = () => {
-        const misma = d.orden.columna === c.clave;
         const textual = c.clave === "titulo" || c.clave === "origen" || c.clave === "orden";
-        pedirNicho(nicho.ultimosProductos, { columna: c.clave, direccion: misma ? (d.orden.direccion === "asc" ? "desc" : "asc") : textual ? "asc" : "desc" });
+        pedirNicho(nicho.ultimosProductos, { columna: c.clave, direccion: activa ? (d.orden.direccion === "asc" ? "desc" : "asc") : textual ? "asc" : "desc" });
       };
       th.appendChild(b);
       filaEnc.appendChild(th);
     });
     tabla.appendChild(filaEnc);
-    const dato = (v, sufijo) => (v == null ? "—" : sufijo ? `${v} ${sufijo}` : v);
+    const dato = (v) => (v == null ? "—" : v);
     d.filas.forEach((f) => {
       const tr = elemento("tr");
       tr.appendChild(elemento("td", null, String(f.n)));
@@ -875,17 +1000,18 @@
         tdTit.textContent = f.titulo;
       }
       tr.appendChild(tdTit);
-      tr.appendChild(elemento("td", null, (f.esFull ? "⚡ " : "") + f.precio));
+      tr.appendChild(elemento("td", null, f.precio));
       tr.appendChild(elemento("td", null, dato(f.origen)));
-      tr.appendChild(elemento("td", null, dato(f.antiguedad, "aprox.")));
-      tr.appendChild(elemento("td", null, dato(f.ventasMes, "aprox.")));
-      tr.appendChild(elemento("td", null, dato(f.factMes, "aprox.")));
+      tr.appendChild(elemento("td", null, f.esFull ? "⚡ Full" : ""));
+      tr.appendChild(elemento("td", null, dato(f.antiguedad)));
+      tr.appendChild(elemento("td", null, dato(f.ventasMes)));
+      tr.appendChild(elemento("td", null, dato(f.factMes)));
       tabla.appendChild(tr);
     });
     const envoltura = elemento("div", "zx-nicho__scroll");
     envoltura.appendChild(tabla);
     caja.appendChild(envoltura);
-    caja.appendChild(elemento("p", "zx-nicho__nota", "Origen: solo se confirma «Full»; lo demás sale «—». La antigüedad es aproximada (se calcula con el id de la publicación)."));
+    caja.appendChild(elemento("p", "zx-nicho__nota", d.analisis && d.analisis.nota ? d.analisis.nota : "Ventas/mes, antigüedad y facturación son estimados"));
   }
 
   function agregarBotonAnalizarNicho(panel, productos) {
@@ -1807,6 +1933,12 @@
       esMensajeDePropiaExtension,
       etiquetaAmbienteDeUrlApp,
       esPaginaDeCuentasMl,
+      // Análisis del nicho — puras (sin DOM ni chrome).
+      csvNicho,
+      urlPaginaNichoSegura,
+      unirProductosNicho,
+      productoParaNicho,
+      TOPE_PRODUCTOS_NICHO,
     };
   }
 })();

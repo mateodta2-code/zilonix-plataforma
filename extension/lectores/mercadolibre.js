@@ -1146,6 +1146,38 @@
     return doc.querySelectorAll("li.ui-search-layout__item").length;
   }
 
+  // Origen y tienda oficial: SOLO lo que la tarjeta del listado ya muestra
+  // como texto (etiqueta "Internacional", envío desde el exterior, insignia
+  // "Tienda oficial"). Se quita el título para que una palabra del título
+  // ("adaptador internacional") no cuente como etiqueta. Sin texto en la
+  // tarjeta → null (no se sabe). Con texto y sin etiqueta → false (la
+  // página marca las compras internacionales de forma explícita, así que su
+  // ausencia se toma como "Local"). Nunca una API de Mercado Libre.
+  const REGEX_INTERNACIONAL = /internacional|international|(?:env[ií]o|enviado)\s+desde\s+(?:el\s+)?(?:exterior|china|estados\s+unidos|ee\.?\s?uu)|do\s+exterior|importad[oa]\s+de/i;
+  const REGEX_TIENDA_OFICIAL = /tienda\s+oficial|loja\s+oficial|official\s+store/i;
+  function textoSinTitulo(textoTarjeta, titulo) {
+    if (typeof textoTarjeta !== "string") return "";
+    const t = textoTarjeta.replace(/\s+/g, " ").trim();
+    const tit = typeof titulo === "string" ? titulo.replace(/\s+/g, " ").trim() : "";
+    return tit ? t.replace(tit, " ") : t;
+  }
+  function detectarInternacionalEnTexto(textoTarjeta, titulo) {
+    const t = textoSinTitulo(textoTarjeta, titulo);
+    if (!t.trim()) return null;
+    return REGEX_INTERNACIONAL.test(t);
+  }
+  function detectarTiendaOficialEnTexto(textoTarjeta, titulo) {
+    const t = textoSinTitulo(textoTarjeta, titulo);
+    return t.trim() ? REGEX_TIENDA_OFICIAL.test(t) : null;
+  }
+
+  // Enlace público "Siguiente" de la paginación del listado (nunca se
+  // construye una URL a mano: se usa la que la página ya ofrece).
+  function urlSiguientePagina(doc) {
+    const a = U.primerElemento(['li.andes-pagination__button--next a', 'a.andes-pagination__link[title="Siguiente"]', 'a.andes-pagination__link[title="Seguinte"]'], doc);
+    return a ? a.getAttribute("href") : null;
+  }
+
   function leerListado(doc) {
     // Issue #248 (vuelta 2) — ver filtroFullActivoEnUrl arriba: si el
     // filtro Full de la URL está puesto, se calcula UNA vez por
@@ -1196,6 +1228,8 @@
         calificacion: estrellas,
         vendidos,
         esFull,
+        internacional: detectarInternacionalEnTexto(tarjeta.textContent, linkEl ? linkEl.textContent : ""),
+        tiendaOficial: detectarTiendaOficialEnTexto(tarjeta.textContent, linkEl ? linkEl.textContent : ""),
         // Solo un link de tipo "item" (publicación real) da un itemId
         // real — catálogo/user_product quedan sin itemId, nunca
         // inventado (ver clasificarLinkListadoMl arriba).
@@ -1327,6 +1361,9 @@
     tipoDePagina,
     leerProducto,
     leerListado,
+    urlSiguientePagina,
+    detectarInternacionalEnTexto,
+    detectarTiendaOficialEnTexto,
     contarTarjetasListado,
     leerTienda,
     leerDatosIncrustados,
@@ -1399,6 +1436,7 @@
       tipoDePagina,
       leerProducto,
       leerListado,
+      urlSiguientePagina,
       leerTienda,
       leerResenas,
       // Issue #248 (vuelta 5) — ver el comentario completo arriba de
