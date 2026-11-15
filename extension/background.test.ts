@@ -1007,9 +1007,9 @@ describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)"
 
   it("sin sesión (401 o redirección) -> estado sin-sesion con el link de inicio de sesión", async () => {
     fetchMock.mockResolvedValue({ type: "basic", ok: false, status: 401, json: async () => ({}) });
-    expect((await analizar()).respuestas).toEqual([{ estado: "sin-sesion", url: "https://seller.zilonix.com/sign-in" }]);
+    expect((await analizar()).respuestas).toEqual([{ estado: "sin-sesion", url: "https://seller.zilonix.com/iniciar-sesion" }]);
     fetchMock.mockResolvedValue({ type: "opaqueredirect", ok: false, status: 0 });
-    expect((await analizar()).respuestas).toEqual([{ estado: "sin-sesion", url: "https://seller.zilonix.com/sign-in" }]);
+    expect((await analizar()).respuestas).toEqual([{ estado: "sin-sesion", url: "https://seller.zilonix.com/iniciar-sesion" }]);
   });
 
   it("403 -> sin-permiso; error de red -> error; país no soportado -> error con motivo pais", async () => {

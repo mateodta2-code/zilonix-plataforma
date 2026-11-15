@@ -93,7 +93,7 @@ function resolverOrigenNicho(callback) {
 
 function analizarNicho(payload, responder) {
   resolverOrigenNicho(async (origen) => {
-    const urlLogin = `${origen}/sign-in`;
+    const urlLogin = `${origen}/iniciar-sesion`;
     try {
       const respuesta = await fetch(`${origen}/api/extension/nicho`, {
         method: "POST",
