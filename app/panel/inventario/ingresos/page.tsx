@@ -11,7 +11,7 @@ import { Campo } from "@/components/marco/Campo";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { AvisosUrl, SeccionesInventario } from "@/components/inventario/Avisos";
+import { AvisosUrl } from "@/components/inventario/Avisos";
 import styles from "../inventario.module.css";
 
 const FILAS = 10;
@@ -33,7 +33,6 @@ export default async function IngresosPage({ searchParams }: { searchParams: Rec
   return (
     <>
       <EncabezadoPagina titulo="Ingresos" descripcion="Registra mercancía que llegó. Cada línea entra al kardex como entrada." />
-      <SeccionesInventario actual="/panel/inventario/ingresos" />
       <AvisosUrl searchParams={searchParams} />
 
       {!puedeCrear ? (
