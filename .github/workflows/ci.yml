@@ -90,12 +90,19 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npm run typecheck
+      - name: Verificar historial de migraciones (números repetidos / journal)
+        run: npm run db:verificar
       - name: Aplicar migraciones (db/migrations/)
         run: npm run db:migrate
       - name: Activar seguridad por fila (RLS) — contraseñas de prueba solo para este Postgres efímero
         run: |
           sed -e 's/PONE_ACA_UNA_CONTRASEÑA_REAL/app_user_ci/' -e 's/PONE_ACA_OTRA_CONTRASEÑA_REAL/superadmin_user_ci/' -e 's/PONE_ACA_UNA_TERCERA_CONTRASEÑA_REAL/trabajador_user_ci/' -e 's/PONE_ACA_UNA_CUARTA_CONTRASEÑA_REAL/seguimiento_trabajador_user_ci/' -e 's/PONE_ACA_UNA_QUINTA_CONTRASEÑA_REAL/publicidad_trabajador_user_ci/' db/rls-setup.sql > /tmp/rls-ci.sql
           PGPASSWORD=postgres_ci psql -h localhost -U postgres -d railway -f /tmp/rls-ci.sql
+      - name: Probar el migrador de staging (2da corrida sobre la base ya armada = prueba de idempotencia)
+        run: npm run db:migrar-staging
+        env:
+          MIGRAR_AL_DESPLEGAR: staging
+          RAILWAY_ENVIRONMENT_NAME: staging
       - name: Verificar colisiones en el historial de migraciones (issue #36, Z-P0-08 S2)
         run: npx drizzle-kit check
       - run: npm test
