@@ -38,6 +38,19 @@ DATABASE_URL_APP=... npx tsx scripts/probar-escritura-publicidad.ts \
 
 Con `--nombre="vendedor 2"` el nombre temporal es ese, en vez del sufijo " (prueba)". Sirve para probar un nombre real de las reglas (VENDEDOR). Igual se verifica y **se revierte** al original. Tiene que ser distinto del nombre actual y tener como máximo 100 caracteres: la doc de ML no dice el máximo.
 
+## Resultado del 14/11/2026
+
+Se corrió en staging con FMCBIENESTAR, campaña 358458617, con la autorización de Mateo Barrientos.
+- La lectura funcionó.
+- El `PUT` respondió **401 `UnauthorizedException · User does not have permission to write`**.
+- La campaña no cambió.
+
+Antes de pedirle respuesta a Mercado Libre, se descartan dos causas sin probar rutas nuevas:
+1. **Token viejo:** reconectar FMCBIENESTAR (Conectar Mercado Libre → volver a autorizar) y repetir la misma prueba.
+2. **Usuario sin permiso:** la reconexión la tiene que hacer el **titular** de la cuenta en Mercado Libre, no un colaborador u operador. Un colaborador puede no tener permiso de publicidad.
+
+Si con la cuenta reconectada por el titular sigue el 401, la pregunta va a Mercado Libre (ver `api-research.md` §3).
+
 ## Qué hacer con el resultado
 
 - **Salió bien** (código 0): el script imprime tres líneas para pegar en `api-research.md` §3. Con eso, la ruta queda verificada para MCO y se puede seguir con el paso 1 del issue #257.

@@ -117,6 +117,18 @@ Glosario oficial (F1), mapeado a los KPIs del tablero:
 | Agregar, mover o quitar anuncios de una campaña | F2 los lista ("Add, move and update ads in campaign", su versión bulk, "Delete ad from campaign"), con rutas del tipo `.../product_ads/campaigns/{CAMPAIGN_ID}/ad_groups/...` | 🟡 F2; **fuera de alcance** de este módulo | F2 |
 | Pujas manuales | No existen en Product Ads: la doc solo expone `strategy` + `roas_target` + `budget`. | ✅ (por ausencia en F1 y F2) | F1, F2 |
 
+**Prueba real en MCO (14/11/2026, Fase 4 paso 0, `scripts/probar-escritura-publicidad.ts`).** Se hizo en staging, con la cuenta FMCBIENESTAR y la campaña pausada 358458617. La autorizó Mateo Barrientos y la corrió su sesión de Claude.
+- La lectura `GET /advertising/MCO/product_ads/campaigns/{id}` (`api-version: 2`) funcionó.
+- `PUT /marketplace/advertising/MCO/product_ads/campaigns/{id}` (`api-version: 2`, body `{ "name": ... }`) respondió **HTTP 401** `UnauthorizedException · User does not have permission to write`.
+- La campaña no cambió y no se probaron otras rutas.
+
+Todavía no se sabe cuál de estas es la causa:
+1. el token de la cuenta se emitió antes de activar la escritura en la app (26/10);
+2. quien autorizó la cuenta en Seller es un colaborador u operador, no el titular, y no tiene permiso de publicidad;
+3. la escritura de Product Ads no está habilitada para vendedores de Colombia o para esta app.
+
+Antes de concluir 3, se descartan 1 y 2 (reconectar la cuenta con el titular y repetir la misma ruta) y se le pregunta a Mercado Libre. Mientras tanto, Publicidad sigue solo de lectura.
+
 Datos útiles de F2:
 - Cambiar el presupuesto a mitad de mes reinicia el cálculo.
 - Pausar una campaña todo el mes hace que no se consuma presupuesto.
@@ -165,7 +177,7 @@ El repo ya tiene `LimiteMercadoLibreError` en `lib/ml/cliente.ts` y `lib/trabajo
 ## 8. Discrepancias y cosas a verificar en staging antes de construir encima
 
 1. **Prefijo y versión.** F1 (CO, vigente) documenta `GET /advertising/{SITE}/...` con `api-version: 2`. `zilonix-os/lib/ads-ml.js` (en producción) usa `/marketplace/advertising/{SITE}/...` con `Api-Version: 1`. F2 (Global Selling) usa `/marketplace/...` con `api-version: 2`. → Implementar las rutas de F1 para leer y **confirmar con una cuenta real (MTTIENDA, solo lectura)** antes de cerrar la Fase 1.
-2. **Escritura para MCO local** (§3): solo está documentada en Global Selling. → Probarla **solo** en Fase 4, con aprobación explícita y sobre una campaña del piloto. Si no funciona, se pausa y se le pregunta a Mercado Libre: **nunca adivinar otra ruta**.
+2. **Escritura para MCO local** (§3): solo está documentada en Global Selling. → Probarla **solo** en Fase 4, con aprobación explícita y sobre una campaña del piloto. Si no funciona, se pausa y se le pregunta a Mercado Libre: **nunca adivinar otra ruta**. **14/11/2026: probada, 401 "User does not have permission to write"** (ver §3). Pendiente: descartar el token viejo o un usuario sin permiso, y la respuesta de Mercado Libre.
 3. **Forma de `aggregation_type=DAILY`** en `campaigns/search` (¿total de la cuenta o por campaña?). Según el comentario de `zilonix-os/lib/ads-ml.js`, "Mercado Ads solo da un TOTAL para el rango pedido", así que allá se pide un día a la vez. Puede ser que nunca hayan probado `aggregation_type`. → Confirmarlo.
 4. **`automatic_budget`**: no tiene definición en la doc. ¿Sirve para saber si el presupuesto es "compartido"? → Sin confirmar.
 5. **`acos_target`** puede ya no venir (la doc lo daba hasta el 30/03/2026). → Calcularlo desde `roas_target`.

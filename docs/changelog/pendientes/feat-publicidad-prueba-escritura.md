@@ -7,4 +7,4 @@
   - Guía para el equipo: `docs/publicidad/prueba-escritura.md`.
   - **No cambia la aplicación:** la pantalla sigue siendo solo lectura y `lib/ml/publicidad.ts` sigue sin escribir. Sin migración.
 
-  Verificado: `tsc --noEmit` y `scripts/probar-escritura-publicidad-logica.test.ts` (argumentos, nombre de prueba, cambios inesperados, error resumido). **No se corrió contra Mercado Libre:** eso lo hace el equipo con la autorización del responsable de la cuenta piloto.
+  Verificado: `tsc --noEmit` y `scripts/probar-escritura-publicidad-logica.test.ts` (argumentos, nombre de prueba, cambios inesperados, error resumido). **Corrida real (14/11, staging, FMCBIENESTAR, autorizó Mateo Barrientos):** la lectura funcionó y el `PUT` respondió **401** `User does not have permission to write`. La campaña no cambió. El resultado y los pasos siguientes quedaron anotados en `docs/publicidad/api-research.md` §3 y en `prueba-escritura.md`.
