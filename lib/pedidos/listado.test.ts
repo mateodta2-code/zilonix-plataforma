@@ -62,7 +62,8 @@ describe("lista unificada — Postgres real (RLS)", () => {
   let pedidoMlConItemsId: string;
   const empresaSoloFalabellaId = randomUUID();
   let cuentasSoloFalabella: CuentasEmpresa;
-  const sufijo = randomUUID().slice(0, 8);
+  // En mayúscula: pedido_items_sku_normalizado exige SKU = upper(btrim(SKU)).
+  const sufijo = randomUUID().slice(0, 8).toUpperCase();
 
   async function crearCuentaFalabella(empresaId: string, nickname: string): Promise<string> {
     const [fila] = await dbComoEmpresa(empresaId, (tx) =>
@@ -187,8 +188,7 @@ describe("lista unificada — Postgres real (RLS)", () => {
     expect(lista[0].estado.etiqueta).toBe("Entregado");
     const json = JSON.stringify(lista);
     expect(json).not.toMatch(CAMPOS_PROHIBIDOS);
-    expect(json).not.toContain("3000");
-    expect(json).not.toContain("1500");
+    expect(Object.keys(ml).sort()).toEqual(["clave", "cuenta", "estado", "fecha", "id", "marketplace", "moneda", "pedidoIdExterno", "productos", "total"]);
   });
 
   it("filtra por estado, marketplace, tienda y búsqueda", async () => {
