@@ -8,7 +8,11 @@ import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { obtenerUltimaImportacion } from "@/lib/ml/importacion";
 import { datosSitioMl } from "@/lib/ml/sitios";
+import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
+import { listarPedidos as listarPedidosFalabella } from "@/lib/falabella/pedidos";
+import { conectarCuentaFalabella, desconectarCuentaFalabella, sincronizarPedidosFalabella } from "./actions";
 import { BotonLink, clasesBoton } from "@/components/marco/Boton";
+import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
@@ -33,6 +37,14 @@ const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
   ml_rechazo: "Mercado Libre no autorizó la conexión.",
   sin_permiso: "No tenés permiso para conectar una cuenta de Mercado Libre.",
   error_desconocido: "No se pudo conectar la cuenta — intentá de nuevo en un momento.",
+  // Conector Falabella (15/11) — pantalla unificada "Conectar marketplace"
+  // (pedido de Sharel/Pablo, PR #415): prefijo "falabella_" para que un
+  // código de error de este canal nunca pise el significado de uno de
+  // Mercado Libre (ej. "cuenta_en_otra_empresa" ya significa otra cosa
+  // del lado de ML).
+  falabella_faltan_datos: "Faltan datos — UserID (correo), API Key y Seller ID son obligatorios.",
+  falabella_cuenta_en_otra_empresa: "Esta cuenta de Falabella ya está conectada a otra empresa en Zilonix. Desconéctala allá primero o escríbenos a soporte.",
+  falabella_error_desconocido: "No se pudo conectar la cuenta de Falabella — revisá el UserID y la API Key e intentá de nuevo.",
 };
 const MENSAJE_ERROR_POR_DEFECTO = "No se pudo conectar la cuenta — intentá de nuevo en un momento.";
 
@@ -46,7 +58,11 @@ const MENSAJE_ERROR_POR_DEFECTO = "No se pudo conectar la cuenta — intentá de
 // deshabilitados, ese chequeo se agrega acá mismo, antes de construir
 // el link de abajo — no se inventa un candado falso hoy solo para
 // simular que la regla ya está resuelta.
-export default async function ConectarMlPage({ searchParams }: { searchParams: { conectado?: string; error?: string } }) {
+export default async function ConectarMlPage({
+  searchParams,
+}: {
+  searchParams: { conectado?: string; conectado_falabella?: string; error?: string };
+}) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
 
@@ -62,13 +78,15 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
     return (
       <>
-        <EncabezadoPagina titulo="Conectar Mercado Libre" />
+        <EncabezadoPagina titulo="Conectar marketplace" />
         <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />
       </>
     );
   }
 
   const cuentas = await listarCuentasConectadas(empresa.id);
+  const cuentasFalabella = await listarCuentasFalabella(empresa.id);
+  const pedidosFalabella = await listarPedidosFalabella(empresa.id);
   // Bug real (PKCE): el link de autorización ya no se arma acá — cada
   // intento necesita un code_verifier NUEVO (de un solo uso), así que
   // /api/ml/conectar lo genera recién al hacer clic, no de antemano en
@@ -86,9 +104,10 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
   return (
     <>
       {hayImportacionEnCurso && <meta httpEquiv="refresh" content="5" />}
-      <EncabezadoPagina titulo="Conectar Mercado Libre" />
+      <EncabezadoPagina titulo="Conectar marketplace" />
 
       {searchParams.conectado && <div className={styles.avisoExito}>Cuenta conectada.</div>}
+      {searchParams.conectado_falabella && <div className={styles.avisoExito}>Cuenta de Falabella conectada.</div>}
       {searchParams.error && (
         // Regla de UX #2 del plan técnico (evidencia real contra
         // Multivende: si el canje del code por el token falla, se
@@ -105,6 +124,8 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
           </a>
         </div>
       )}
+
+      <h3 className={styles.tituloCanal}>Mercado Libre</h3>
 
       {cuentas.length === 0 && (
         // Issue #323 — siguiente paso concreto: conectar es justo lo
@@ -163,6 +184,69 @@ export default async function ConectarMlPage({ searchParams }: { searchParams: {
       <a href={urlConectar} className={clasesBoton("primario")}>
         Conectar Mercado Libre
       </a>
+
+      <h3 className={styles.tituloCanal}>Falabella</h3>
+
+      <div className={styles.avisoInfo}>
+        Falabella no usa un botón de 1 clic como Mercado Libre — hay que entrar a Falabella Seller Center (
+        <a href="https://sellercenter.falabella.com" target="_blank" rel="noreferrer">
+          sellercenter.falabella.com
+        </a>
+        ), ir a «Mi cuenta → Usuarios» y copiar el correo (UserID) y la API Key de ahí.
+      </div>
+
+      {cuentasFalabella.length === 0 && <EstadoVacio>Todavía no tienes ninguna cuenta de Falabella conectada.</EstadoVacio>}
+
+      {cuentasFalabella.length > 0 && (
+        <ListaFilas>
+          {cuentasFalabella.map((cuenta) => {
+            const pedidosDeLaCuenta = pedidosFalabella.filter((p) => p.cuentaFalabellaId === cuenta.id);
+            return (
+              <FilaLista key={cuenta.id}>
+                <div className={styles.filaCuenta}>
+                  <span>
+                    Conectado como <strong>{cuenta.nickname}</strong> ({cuenta.userId})
+                    {cuenta.desconectadaTs && <Chip>Desconectada</Chip>}
+                  </span>
+                  {!cuenta.desconectadaTs && (
+                    <form action={desconectarCuentaFalabella.bind(null, cuenta.id)}>
+                      <button type="submit" className={styles.desconectar}>
+                        Desconectar
+                      </button>
+                    </form>
+                  )}
+                </div>
+                {!cuenta.desconectadaTs && (
+                  <form action={sincronizarPedidosFalabella.bind(null, cuenta.id)} className={styles.formSincronizar}>
+                    <button type="submit" className={clasesBoton("secundario")}>
+                      Sincronizar pedidos (últimos 60 días)
+                    </button>
+                  </form>
+                )}
+                <div className={styles.detalleImportacion}>{pedidosDeLaCuenta.length} pedido(s) importado(s).</div>
+              </FilaLista>
+            );
+          })}
+        </ListaFilas>
+      )}
+
+      <form action={conectarCuentaFalabella} className={styles.formConectar}>
+        <Campo etiqueta="UserID (correo de Seller Center)">
+          <input type="email" name="userId" required className="zx-control" />
+        </Campo>
+        <Campo etiqueta="API Key">
+          <input type="password" name="apiKey" required className="zx-control" />
+        </Campo>
+        <Campo etiqueta="Seller ID (nombre de tu tienda en Seller Center)">
+          <input type="text" name="sellerId" required className="zx-control" />
+        </Campo>
+        <Campo etiqueta="Nombre para identificarla en Zilonix (opcional)">
+          <input type="text" name="nickname" className="zx-control" />
+        </Campo>
+        <button type="submit" className={clasesBoton("primario")}>
+          Conectar Falabella
+        </button>
+      </form>
 
       <BotonLink href="/panel" variante="fantasma" chico>
         Volver al panel
