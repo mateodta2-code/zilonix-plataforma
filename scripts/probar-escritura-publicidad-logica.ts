@@ -6,6 +6,8 @@ const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const PATRON_ID_NUM = /^\d+$/;
 
 export const SUFIJO_PRUEBA = " (prueba)";
+// Tope prudente para el nombre libre: la doc no dice el máximo de ML.
+export const LARGO_MAXIMO_NOMBRE = 100;
 
 export type Argumentos = {
   empresaId: string;
@@ -13,6 +15,9 @@ export type Argumentos = {
   campanaId: string;
   aplicar: boolean;
   autorizadoPor: string | null;
+  // --nombre: nombre temporal libre (ej. "vendedor 2") en vez del
+  // sufijo. Igual se revierte al original.
+  nombreLibre: string | null;
 };
 
 function valor(argv: readonly string[], nombre: string): string | null {
@@ -29,6 +34,7 @@ export function leerArgumentos(argv: readonly string[]): Argumentos {
   const campanaId = valor(argv, "campana") ?? "";
   const aplicar = argv.includes("--aplicar");
   const autorizadoPor = valor(argv, "autorizado-por");
+  const nombreLibre = valor(argv, "nombre");
 
   if (!PATRON_UUID.test(empresaId)) throw new Error("--empresa=<uuid de la empresa> es obligatorio.");
   if (!PATRON_UUID.test(cuentaMlId)) throw new Error("--cuenta=<uuid de cuentas_ml> es obligatorio.");
@@ -36,13 +42,20 @@ export function leerArgumentos(argv: readonly string[]): Argumentos {
   if (aplicar && !autorizadoPor) {
     throw new Error('--aplicar exige --autorizado-por="Nombre de quien autorizó por escrito" (el responsable de la cuenta).');
   }
-  return { empresaId, cuentaMlId, campanaId, aplicar, autorizadoPor: autorizadoPor || null };
+  if (nombreLibre !== null && (nombreLibre === "" || nombreLibre.length > LARGO_MAXIMO_NOMBRE)) {
+    throw new Error(`--nombre necesita entre 1 y ${LARGO_MAXIMO_NOMBRE} caracteres.`);
+  }
+  return { empresaId, cuentaMlId, campanaId, aplicar, autorizadoPor: autorizadoPor || null, nombreLibre };
 }
 
 // El nombre temporal. Si la campaña ya termina en el sufijo, una
 // prueba anterior no se revirtió: se frena para no apilar sufijos y
 // para que alguien mire qué pasó.
-export function nombreDePrueba(original: string): string {
+export function nombreDePrueba(original: string, nombreLibre: string | null = null): string {
+  if (nombreLibre !== null) {
+    if (nombreLibre === original) throw new Error(`La campaña ya se llama "${original}": elegí otro --nombre para que haya un cambio que verificar.`);
+    return nombreLibre;
+  }
   if (original.endsWith(SUFIJO_PRUEBA)) {
     throw new Error(`La campaña ya se llama "${original}": parece una prueba anterior sin revertir. Revisala antes de seguir.`);
   }

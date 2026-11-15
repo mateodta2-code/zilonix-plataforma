@@ -7,7 +7,7 @@ const CUENTA = "11111111-1111-1111-1111-111111111111";
 describe("prueba de escritura de Publicidad (issue #257, paso 0)", () => {
   it("sin --aplicar es solo lectura; con --aplicar exige quién autorizó", () => {
     const base = [`--empresa=${EMPRESA}`, `--cuenta=${CUENTA}`, "--campana=123456"];
-    expect(leerArgumentos(base)).toEqual({ empresaId: EMPRESA, cuentaMlId: CUENTA, campanaId: "123456", aplicar: false, autorizadoPor: null });
+    expect(leerArgumentos(base)).toEqual({ empresaId: EMPRESA, cuentaMlId: CUENTA, campanaId: "123456", aplicar: false, autorizadoPor: null, nombreLibre: null });
     expect(() => leerArgumentos([...base, "--aplicar"])).toThrow(/autorizado-por/);
     expect(leerArgumentos([...base, "--aplicar", "--autorizado-por=Ana Pérez"]).autorizadoPor).toBe("Ana Pérez");
   });
@@ -20,6 +20,15 @@ describe("prueba de escritura de Publicidad (issue #257, paso 0)", () => {
   it("el nombre de prueba agrega un sufijo y no se apila sobre una prueba sin revertir", () => {
     expect(nombreDePrueba("VENDEDOR")).toBe("VENDEDOR (prueba)");
     expect(() => nombreDePrueba("VENDEDOR (prueba)")).toThrow(/sin revertir/);
+  });
+
+  it("--nombre usa un nombre libre (ej. vendedor 2), distinto del actual y con largo razonable", () => {
+    const base = [`--empresa=${EMPRESA}`, `--cuenta=${CUENTA}`, "--campana=1"];
+    expect(leerArgumentos([...base, "--nombre=vendedor 2"]).nombreLibre).toBe("vendedor 2");
+    expect(() => leerArgumentos([...base, "--nombre="])).toThrow(/--nombre/);
+    expect(() => leerArgumentos([...base, `--nombre=${"x".repeat(101)}`])).toThrow(/--nombre/);
+    expect(nombreDePrueba("suplemento", "vendedor 2")).toBe("vendedor 2");
+    expect(() => nombreDePrueba("vendedor 2", "vendedor 2")).toThrow(/otro --nombre/);
   });
 
   it("detecta cualquier cambio fuera del nombre", () => {

@@ -34,6 +34,10 @@ DATABASE_URL_APP=... npx tsx scripts/probar-escritura-publicidad.ts \
   --aplicar --autorizado-por="Nombre de quien autorizó"
 ```
 
+### Nombre libre
+
+Con `--nombre="vendedor 2"` el nombre temporal es ese, en vez del sufijo " (prueba)". Sirve para probar un nombre real de las reglas (VENDEDOR). Igual se verifica y **se revierte** al original. Tiene que ser distinto del nombre actual y tener como máximo 100 caracteres: la doc de ML no dice el máximo.
+
 ## Qué hacer con el resultado
 
 - **Salió bien** (código 0): el script imprime tres líneas para pegar en `api-research.md` §3. Con eso, la ruta queda verificada para MCO y se puede seguir con el paso 1 del issue #257.

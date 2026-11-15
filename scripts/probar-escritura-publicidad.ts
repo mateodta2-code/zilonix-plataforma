@@ -21,6 +21,7 @@
 //   DATABASE_URL_APP=... npx tsx scripts/probar-escritura-publicidad.ts --empresa=<uuid> --cuenta=<uuid> --campana=<id>
 //   DATABASE_URL_APP=... npx tsx scripts/probar-escritura-publicidad.ts --empresa=<uuid> --cuenta=<uuid> --campana=<id> \
 //     --aplicar --autorizado-por="Nombre"
+//   ... --nombre="vendedor 2"   # nombre temporal libre en vez del sufijo; igual se revierte
 //
 // Código 0 si la prueba salió bien (o el plan en modo lectura); 1 si
 // algo falló. Si la reversión falla, lo grita con el nombre original
@@ -97,7 +98,7 @@ async function main(): Promise<number> {
     linea("La campaña no trae nombre en la lectura. No se intentó nada.");
     return 1;
   }
-  const temporal = nombreDePrueba(antes.name);
+  const temporal = nombreDePrueba(antes.name, args.nombreLibre);
 
   linea(`Campaña ${args.campanaId} (${site}): "${antes.name}", estado ${antes.status ?? "—"}, presupuesto ${antes.budget ?? "—"}, ROAS objetivo ${antes.roas_target ?? "—"}.`);
   linea(`Plan: renombrar a "${temporal}", verificar, y volver a "${antes.name}".`);
