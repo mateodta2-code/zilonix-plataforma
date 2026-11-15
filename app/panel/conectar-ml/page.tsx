@@ -37,7 +37,7 @@ const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
   ml_rechazo: "Mercado Libre no autorizó la conexión.",
   sin_permiso: "No tienes permiso para conectar una cuenta de Mercado Libre.",
   error_desconocido: "No se pudo conectar la cuenta — intenta de nuevo en un momento.",
-  // Conector Falabella (15/11) — pantalla unificada "Conectar marketplace"
+  // Conector Falabella (15/11) — pantalla unificada "Conectar marketplaces"
   // (pedido de Sharel/Pablo, PR #415): prefijo "falabella_" para que un
   // código de error de este canal nunca pise el significado de uno de
   // Mercado Libre (ej. "cuenta_en_otra_empresa" ya significa otra cosa
@@ -48,6 +48,7 @@ const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
   falabella_credenciales_invalidas: "Falabella no aceptó esas credenciales. Revisa que el UserID, la API Key y el Seller ID sean los de tu cuenta en Seller Center.",
   falabella_no_disponible: "Falabella no respondió bien en este momento (puede estar caído o lento). Tus datos no se cambiaron; intenta de nuevo en unos minutos.",
   falabella_sincronizar_fallo: "No se pudieron traer los pedidos de Falabella. Intenta de nuevo en un momento.",
+  falabella_configuracion: "No pudimos conectar por un problema de configuración de Zilonix, no de tus datos. Intenta más tarde o avísanos.",
   falabella_error_desconocido: "No se pudo conectar la cuenta de Falabella — revisa el UserID y la API Key e intenta de nuevo.",
 };
 const MENSAJE_ERROR_POR_DEFECTO = "No se pudo conectar la cuenta — intenta de nuevo en un momento.";
@@ -93,7 +94,7 @@ export default async function ConectarMlPage({
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
     return (
       <>
-        <EncabezadoPagina titulo="Conectar marketplace" />
+        <EncabezadoPagina titulo="Conectar marketplaces" />
         <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />
       </>
     );
@@ -124,7 +125,7 @@ export default async function ConectarMlPage({
   return (
     <>
       {hayImportacionEnCurso && <meta httpEquiv="refresh" content="5" />}
-      <EncabezadoPagina titulo="Conectar marketplace" />
+      <EncabezadoPagina titulo="Conectar marketplaces" />
 
       {searchParams.conectado && <div className={styles.avisoExito}>Cuenta conectada.</div>}
       {searchParams.conectado_falabella && <div className={styles.avisoExito}>Cuenta de Falabella conectada.</div>}
@@ -219,11 +220,22 @@ export default async function ConectarMlPage({
       <h3 className={styles.tituloCanal}>Falabella</h3>
 
       <div className={styles.avisoInfo}>
-        Falabella no usa un botón de 1 clic como Mercado Libre — hay que entrar a Falabella Seller Center (
-        <a href="https://sellercenter.falabella.com" target="_blank" rel="noreferrer">
-          sellercenter.falabella.com
-        </a>
-        ), ir a «Mi cuenta → Usuarios» y copiar el correo (UserID) y la API Key de ahí.
+        <ol className={styles.pasosFalabella}>
+          <li>
+            Entra a{" "}
+            <a href="https://sellercenter.falabella.com" target="_blank" rel="noreferrer">
+              sellercenter.falabella.com
+            </a>
+            .
+          </li>
+          <li>Ve a Mi cuenta → Usuarios. Tu correo es el UserID y la API Key está en la columna «Api Key».</li>
+          <li>
+            Tu usuario necesita un rol con acceso a la API (Seller Full Access o Seller API Access). Si no lo tiene, pídeselo al
+            administrador de tu tienda.
+          </li>
+          <li>El Seller ID está en Mi cuenta → Mi perfil.</li>
+          <li>Pega los tres datos aquí y dale Conectar Falabella.</li>
+        </ol>
       </div>
 
       {cuentasFalabella.length === 0 && <EstadoVacio>Todavía no tienes ninguna cuenta de Falabella conectada.</EstadoVacio>}
@@ -269,7 +281,7 @@ export default async function ConectarMlPage({
           <Campo etiqueta="API Key">
             <input type="password" name="apiKey" required maxLength={256} autoComplete="off" className="zx-control" />
           </Campo>
-          <Campo etiqueta="Seller ID (nombre de tu tienda en Seller Center)">
+          <Campo etiqueta="Seller ID (código de vendedor, empieza por SC, ej. SC0170C)">
             <input type="text" name="sellerId" required maxLength={100} pattern="[A-Za-z0-9_.\-]+" className="zx-control" />
           </Campo>
           <Campo etiqueta="Nombre para identificarla en Zilonix (opcional)">
