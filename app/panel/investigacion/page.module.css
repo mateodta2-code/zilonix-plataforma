@@ -232,18 +232,3 @@
   flex-wrap: wrap;
   gap: 8px;
 }
-
-.encabezadoOrden {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  cursor: pointer;
-}
-
-.encabezadoOrden:hover {
-  color: var(--acento);
-}
