@@ -65,6 +65,11 @@ export type ProductoListado = {
   esEnvioGratis: boolean | null;
   calificacion: number | null;
   vendedor: string | null;
+  // Lo que la tarjeta del listado de ML ya muestra (etiqueta de compra
+  // internacional / envío desde el exterior; insignia de tienda oficial).
+  // null o ausente = no se pudo saber. Solo la extensión los manda.
+  internacional?: boolean | null;
+  tiendaOficial?: boolean | null;
   link: string | null;
   // Fecha real de creación (`date_created`) — un listado nunca la trae;
   // solo llega al completar vendidos desde la ficha. Opcional: sin ella

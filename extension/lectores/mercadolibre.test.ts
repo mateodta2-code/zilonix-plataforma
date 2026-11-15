@@ -12,6 +12,9 @@ import {
   construirPublicacionesTienda,
   deduplicarFotosMl,
   detectarFullEnHtmlFicha,
+  detectarInternacionalEnTexto,
+  detectarTiendaOficialEnTexto,
+  urlSiguientePagina,
   detectarFullEnHtmlTarjeta,
   elegirInventarioPrincipal,
   elegirVendidosPrincipal,
@@ -1263,5 +1266,30 @@ describe("urlFotoGrande/idNumericoDeArchivo/esUrlFotoMlValida/deduplicarFotosMl 
   it("deduplicarFotosMl: respeta el array vacío/ausente, nunca lanza", () => {
     expect(deduplicarFotosMl([])).toEqual([]);
     expect(deduplicarFotosMl(undefined)).toEqual([]);
+  });
+});
+
+describe("origen y tienda oficial leídos del texto de la tarjeta (Análisis del nicho)", () => {
+  it("etiqueta Internacional o envío desde el exterior -> true", () => {
+    expect(detectarInternacionalEnTexto("Tetero $ 30.000 Compra Internacional Llega en 10 días", "Tetero")).toBe(true);
+    expect(detectarInternacionalEnTexto("Reloj Enviado desde Estados Unidos $ 90.000", "Reloj")).toBe(true);
+    expect(detectarInternacionalEnTexto("Relógio Enviado do exterior R$ 50", "Relógio")).toBe(true);
+  });
+  it("una palabra del TÍTULO no cuenta como etiqueta", () => {
+    expect(detectarInternacionalEnTexto("Adaptador Internacional Universal $ 20.000 Llega mañana", "Adaptador Internacional Universal")).toBe(false);
+  });
+  it("tarjeta con texto y sin etiqueta -> false (Local); sin texto -> null (no se sabe)", () => {
+    expect(detectarInternacionalEnTexto("Tetero $ 30.000 Llega gratis mañana", "Tetero")).toBe(false);
+    expect(detectarInternacionalEnTexto("", "Tetero")).toBeNull();
+    expect(detectarInternacionalEnTexto(null as unknown as string, "x")).toBeNull();
+  });
+  it("tienda oficial solo si la tarjeta lo dice", () => {
+    expect(detectarTiendaOficialEnTexto("Samsung Tienda oficial $ 1.000", "Celular")).toBe(true);
+    expect(detectarTiendaOficialEnTexto("Celular $ 1.000 Por Pepe", "Celular")).toBe(false);
+  });
+  it("urlSiguientePagina lee el enlace público 'Siguiente'", () => {
+    const doc = { querySelector: (sel: string) => (sel.includes("andes-pagination__button--next") ? { getAttribute: () => "https://listado.mercadolibre.com.co/x_Desde_49" } : null) };
+    expect(urlSiguientePagina(doc)).toBe("https://listado.mercadolibre.com.co/x_Desde_49");
+    expect(urlSiguientePagina({ querySelector: () => null })).toBeNull();
   });
 });
