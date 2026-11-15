@@ -17,6 +17,7 @@ import {
   CAMPANA_ENFRIAMIENTO,
   FACTOR_EXCELENTE,
   TOPE_GASTO_SIN_VENTAS,
+  UMBRAL_EN_OBJETIVO,
   UMBRAL_ROAS_BAJO,
   type ConfigPublicidad,
 } from "@/lib/publicidad/config";
@@ -55,7 +56,14 @@ export type TotalesRango = {
   unidadesVendidas: string | null;
 };
 
-export type TipoDiagnostico = "aprendiendo" | "excelente" | "en_objetivo" | "bajo_objetivo" | "sin_objetivo" | "sin_datos";
+export type TipoDiagnostico =
+  | "aprendiendo"
+  | "excelente"
+  | "en_objetivo"
+  | "bajo_objetivo"
+  | "muy_bajo"
+  | "sin_objetivo"
+  | "sin_datos";
 
 export type Diagnostico = {
   tipo: TipoDiagnostico;
@@ -341,12 +349,14 @@ export function diagnosticarCampana(entrada: {
   if (objetivo === null || centavos(aEscala(objetivo, 2)) <= CERO) return { tipo: "sin_objetivo", dias: 0 };
   const excelente = roasAlcanza(ventas, gasto, objetivo, entrada.config.factorExcelente);
   if (excelente) return { tipo: "excelente", dias: 0 };
-  const enObjetivo = roasAlcanza(ventas, gasto, objetivo, "1");
-  if (enObjetivo) return { tipo: "en_objetivo", dias: 0 };
-  return { tipo: "bajo_objetivo", dias: 0 };
+  // Semáforo: verde desde el 90 % del objetivo, naranja entre 70 % y
+  // 90 %, rojo bajo el 70 % (el mismo 70 % de "Apagar y crear una nueva").
+  if (roasAlcanza(ventas, gasto, objetivo, UMBRAL_EN_OBJETIVO)) return { tipo: "en_objetivo", dias: 0 };
+  if (roasAlcanza(ventas, gasto, objetivo, UMBRAL_ROAS_BAJO)) return { tipo: "bajo_objetivo", dias: 0 };
+  return { tipo: "muy_bajo", dias: 0 };
 }
 
-export type TonoEstado = "exito" | "peligro" | "acento" | "neutro";
+export type TonoEstado = "exito" | "advertencia" | "peligro" | "acento" | "neutro";
 
 export type FraseEstado = {
   tono: TonoEstado;
@@ -405,7 +415,16 @@ export function fraseEstado(entrada: {
   if (distancia.arriba) {
     return { tono: "exito", frase: `Cumple el objetivo, ${distancia.puntos} % arriba`, avance: 100 };
   }
-  return { tono: "peligro", frase: `Debajo del objetivo, falta ${distancia.puntos} %`, avance };
+  // Mismos tres colores que el diagnóstico (UMBRAL_EN_OBJETIVO, UMBRAL_ROAS_BAJO).
+  const frente90 = roasFrenteA(entrada.roas, entrada.roasObjetivo, UMBRAL_EN_OBJETIVO);
+  if (frente90 === "igual" || frente90 === "mayor") {
+    return { tono: "exito", frase: `En objetivo, falta ${distancia.puntos} %`, avance };
+  }
+  const frente70 = roasFrenteA(entrada.roas, entrada.roasObjetivo, UMBRAL_ROAS_BAJO);
+  if (frente70 === "igual" || frente70 === "mayor") {
+    return { tono: "advertencia", frase: `Bajo objetivo, falta ${distancia.puntos} %`, avance };
+  }
+  return { tono: "peligro", frase: `Muy bajo, falta ${distancia.puntos} %`, avance };
 }
 
 export type UsoPresupuesto =

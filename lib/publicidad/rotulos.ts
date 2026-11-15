@@ -57,6 +57,7 @@ export const ROTULO_DIAGNOSTICO: Record<Exclude<TipoDiagnostico, "aprendiendo">,
   excelente: "Excelente",
   en_objetivo: "En objetivo",
   bajo_objetivo: "Bajo objetivo",
+  muy_bajo: "Muy bajo",
   sin_objetivo: "Sin objetivo",
   sin_datos: "Sin datos",
 };
@@ -71,7 +72,8 @@ export const ESTADO_CHIP_DIAGNOSTICO: Record<TipoDiagnostico, EstadoChip> = {
   aprendiendo: "aviso",
   excelente: "exito",
   en_objetivo: "exito",
-  bajo_objetivo: "peligro",
+  bajo_objetivo: "advertencia",
+  muy_bajo: "peligro",
   sin_objetivo: "neutro",
   sin_datos: "neutro",
 };
@@ -124,12 +126,13 @@ export const COLUMNAS_CAMPANA = 11;
 export type DiagnosticoVisible = {
   pill: string | null;
   detalle: string | null;
-  tono: "exito" | "peligro" | "aviso" | "neutro";
+  tono: "exito" | "advertencia" | "peligro" | "aviso" | "neutro";
 };
 
 // Mercado Libre no manda esta etiqueta en lo que ya guardamos. Esto es
 // lo que Zilonix puede derivar: aprendizaje por días, excelente si el
-// ROAS pasa 1,2 veces el objetivo, y la alerta propia del 70 %.
+// ROAS pasa 1,2 veces el objetivo, y el semáforo de tres colores:
+// en objetivo desde el 90 %, bajo entre 70 % y 90 %, muy bajo bajo el 70 %.
 export function detalleDiagnostico(entrada: {
   diagnostico: Diagnostico;
   diasAprendizaje: number;
@@ -143,12 +146,14 @@ export function detalleDiagnostico(entrada: {
       tono: "aviso",
     };
   }
-  if (entrada.alertaBajo70) {
-    return { pill: null, detalle: "Bajo el 70 % del objetivo", tono: "peligro" };
+  if (entrada.alertaBajo70 || entrada.diagnostico.tipo === "muy_bajo") {
+    return { pill: "Muy bajo", detalle: "Bajo el 70 % del objetivo", tono: "peligro" };
   }
   if (entrada.diagnostico.tipo === "excelente") return { pill: "Excelente", detalle: null, tono: "exito" };
   if (entrada.diagnostico.tipo === "en_objetivo") return { pill: "En objetivo", detalle: null, tono: "exito" };
-  if (entrada.diagnostico.tipo === "bajo_objetivo") return { pill: "Bajo objetivo", detalle: null, tono: "peligro" };
+  if (entrada.diagnostico.tipo === "bajo_objetivo") {
+    return { pill: "Bajo objetivo", detalle: "Entre el 70 % y el 90 % del objetivo", tono: "advertencia" };
+  }
   if (entrada.diagnostico.tipo === "sin_objetivo") return { pill: null, detalle: "Sin objetivo", tono: "neutro" };
   return { pill: null, detalle: "Sin datos", tono: "neutro" };
 }
