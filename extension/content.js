@@ -690,7 +690,211 @@
 
     const boton = panel.querySelector(".zx-boton-copiar");
     boton.onclick = () => copiarAlPortapapeles(csvDeListado(productos), boton);
+    agregarBotonAnalizarNicho(panel, productos);
     agregarBotonEnviarListado(panel, productos);
+  }
+
+  // "Analizar esta página" — tabla "Análisis del nicho". Solo Mercado
+  // Libre. Esta función no calcula nada: manda lo que ya se leyó del
+  // listado a la plataforma (background.js -> /api/extension/nicho) y
+  // dibuja lo que vuelve — totales, filas, orden y formato salen de
+  // lib/ml/tablaNicho.ts. Todo se construye con createElement/
+  // textContent (nunca innerHTML con datos de la página o del servidor).
+  // Se abre SOLO con el clic del botón, nunca sola.
+  const COLUMNAS_NICHO = [
+    { clave: "orden", etiqueta: "#" },
+    { clave: "foto", etiqueta: "Img" },
+    { clave: "titulo", etiqueta: "Publicación" },
+    { clave: "precio", etiqueta: "Precio" },
+    { clave: "origen", etiqueta: "Origen" },
+    { clave: "antiguedad", etiqueta: "Antigüedad" },
+    { clave: "ventasMes", etiqueta: "Ventas/mes" },
+    { clave: "factMes", etiqueta: "Fact./mes" },
+  ];
+  const nicho = { contenedor: null, ordenActual: { columna: "factMes", direccion: "desc" }, ultimosProductos: [] };
+
+  function elemento(etiqueta, clase, texto) {
+    const e = document.createElement(etiqueta);
+    if (clase) e.className = clase;
+    if (texto != null) e.textContent = texto;
+    return e;
+  }
+
+  function productosParaNicho(productos) {
+    return ordenarProductosListado(productos)
+      .filter((p) => p.titulo && typeof p.precio === "number" && Number.isFinite(p.precio))
+      .slice(0, TOPE_PRODUCTOS_ENVIO_LISTADO)
+      .map((p) => ({
+        titulo: p.titulo,
+        precio: p.precio,
+        vendidos: typeof p.vendidos === "number" ? p.vendidos : null,
+        foto: resolverLinkListadoSeguro(p.foto),
+        esFull: typeof p.esFull === "boolean" ? p.esFull : null,
+        itemId: typeof p.itemId === "string" && p.itemId ? p.itemId : null,
+        productId: typeof p.productId === "string" && p.productId ? p.productId : null,
+        link: resolverLinkListadoSeguro(p.link),
+      }));
+  }
+
+  function pedirNicho(productos, orden) {
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    nicho.ultimosProductos = productos;
+    nicho.ordenActual = orden;
+    dibujarNicho({ estado: "cargando" });
+    try {
+      chrome.runtime.sendMessage(
+        {
+          tipo: "zilonix:analizar-nicho",
+          payload: { host: location.hostname, productos: productosParaNicho(productos), columna: orden.columna, direccion: orden.direccion },
+        },
+        (respuesta) => {
+          if (chrome.runtime.lastError || !respuesta) {
+            dibujarNicho({ estado: "error", motivo: "red" });
+            return;
+          }
+          dibujarNicho(respuesta);
+        }
+      );
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe el panel.
+    }
+  }
+
+  function abrirTablaNicho(productos) {
+    if (nicho.contenedor && nicho.contenedor.isConnected) {
+      nicho.contenedor.hidden = false; // reabrir lo ya calculado, sin pedir de nuevo
+      return;
+    }
+    nicho.contenedor = elemento("div", "zx-nicho");
+    document.body.appendChild(nicho.contenedor);
+    pedirNicho(productos, { columna: "factMes", direccion: "desc" });
+  }
+
+  function dibujarNicho(resultado) {
+    const caja = nicho.contenedor;
+    if (!caja) return;
+    caja.textContent = "";
+    const encabezado = elemento("div", "zx-nicho__encabezado");
+    encabezado.appendChild(elemento("p", "zx-panel__titulo", "Zilonix · Análisis del nicho"));
+    const cerrar = elemento("button", "zx-panel__boton-icono", "✕");
+    cerrar.type = "button";
+    cerrar.title = "Cerrar (se vuelve a abrir con «Ver análisis del nicho»)";
+    cerrar.onclick = () => {
+      caja.hidden = true;
+      const b = document.querySelector(".zx-boton-analizar");
+      if (b) b.textContent = "Ver análisis del nicho";
+    };
+    encabezado.appendChild(cerrar);
+    caja.appendChild(encabezado);
+
+    if (resultado.estado === "cargando") {
+      caja.appendChild(elemento("p", "zx-vacio", "Analizando…"));
+      return;
+    }
+    if (resultado.estado === "sin-sesion") {
+      const p = elemento("p", "zx-vacio", "");
+      const url = ZS.linkSeguro(resultado.url);
+      if (url) {
+        const a = elemento("a", null, "Inicia sesión en Zilonix Seller para analizar");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noreferrer";
+        p.appendChild(a);
+      } else {
+        p.textContent = "Inicia sesión en Zilonix Seller para analizar";
+      }
+      caja.appendChild(p);
+      return;
+    }
+    if (resultado.estado !== "ok") {
+      const texto =
+        resultado.estado === "sin-permiso"
+          ? "Tu usuario no tiene permiso para ver Investigación en Zilonix Seller."
+          : resultado.motivo === "pais"
+            ? "Este país todavía no está soportado en Zilonix Seller."
+            : "No se pudo analizar la página. Intenta de nuevo en un momento.";
+      caja.appendChild(elemento("p", "zx-vacio", texto));
+      return;
+    }
+
+    const d = resultado.datos;
+    const cifras = elemento("div", "zx-nicho__cifras");
+    [
+      ["Vendidos (histórico)", d.totales.vendidos],
+      ["Ventas/mes est.", d.totales.ventasMes],
+      ["Facturación mensual est.", d.totales.factMes],
+    ].forEach(([etiqueta, valor]) => {
+      const c = elemento("div", "zx-nicho__cifra");
+      c.appendChild(elemento("span", "zx-nicho__cifra-etq", etiqueta));
+      c.appendChild(elemento("strong", null, valor == null ? "—" : valor));
+      cifras.appendChild(c);
+    });
+    caja.appendChild(cifras);
+    if (d.totales.aviso) caja.appendChild(elemento("p", "zx-nicho__nota", d.totales.aviso));
+
+    const tabla = elemento("table", "zx-nicho__tabla");
+    const filaEnc = elemento("tr");
+    COLUMNAS_NICHO.forEach((c) => {
+      const th = elemento("th");
+      const b = elemento("button", "zx-nicho__orden", c.etiqueta + (d.orden.columna === c.clave ? (d.orden.direccion === "asc" ? " ▲" : " ▼") : ""));
+      b.type = "button";
+      b.onclick = () => {
+        const misma = d.orden.columna === c.clave;
+        const textual = c.clave === "titulo" || c.clave === "origen" || c.clave === "orden";
+        pedirNicho(nicho.ultimosProductos, { columna: c.clave, direccion: misma ? (d.orden.direccion === "asc" ? "desc" : "asc") : textual ? "asc" : "desc" });
+      };
+      th.appendChild(b);
+      filaEnc.appendChild(th);
+    });
+    tabla.appendChild(filaEnc);
+    const dato = (v, sufijo) => (v == null ? "—" : sufijo ? `${v} ${sufijo}` : v);
+    d.filas.forEach((f) => {
+      const tr = elemento("tr");
+      tr.appendChild(elemento("td", null, String(f.n)));
+      const tdImg = elemento("td");
+      const foto = ZS.linkSeguro(f.foto);
+      if (foto) {
+        const img = elemento("img", "zx-nicho__foto");
+        img.src = foto;
+        img.alt = "";
+        img.referrerPolicy = "no-referrer";
+        tdImg.appendChild(img);
+      } else {
+        tdImg.textContent = "—";
+      }
+      tr.appendChild(tdImg);
+      const tdTit = elemento("td", "zx-nicho__titulo");
+      const link = ZS.linkSeguro(f.link);
+      if (link) {
+        const a = elemento("a", null, f.titulo);
+        a.href = link;
+        a.target = "_blank";
+        a.rel = "noreferrer";
+        tdTit.appendChild(a);
+      } else {
+        tdTit.textContent = f.titulo;
+      }
+      tr.appendChild(tdTit);
+      tr.appendChild(elemento("td", null, (f.esFull ? "⚡ " : "") + f.precio));
+      tr.appendChild(elemento("td", null, dato(f.origen)));
+      tr.appendChild(elemento("td", null, dato(f.antiguedad, "aprox.")));
+      tr.appendChild(elemento("td", null, dato(f.ventasMes, "aprox.")));
+      tr.appendChild(elemento("td", null, dato(f.factMes, "aprox.")));
+      tabla.appendChild(tr);
+    });
+    const envoltura = elemento("div", "zx-nicho__scroll");
+    envoltura.appendChild(tabla);
+    caja.appendChild(envoltura);
+    caja.appendChild(elemento("p", "zx-nicho__nota", "Origen: solo se confirma «Full»; lo demás sale «—». La antigüedad es aproximada (se calcula con el id de la publicación)."));
+  }
+
+  function agregarBotonAnalizarNicho(panel, productos) {
+    if (!lector.sitio || !lector.sitio.startsWith("Mercado Libre")) return;
+    const pie = panel.querySelector(".zx-panel__pie");
+    const boton = elemento("button", "zx-boton-seguir zx-boton-analizar", nicho.contenedor && nicho.contenedor.isConnected ? "Ver análisis del nicho" : "Analizar esta página");
+    boton.type = "button";
+    boton.onclick = () => abrirTablaNicho(productos);
+    pie.appendChild(boton);
   }
 
   // Issue #213 — "Enviar a Zilonix": mismo estilo que "Seguir en

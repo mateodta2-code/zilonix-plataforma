@@ -1,6 +1,6 @@
 # Issue #43 (Z-P0-04b) — gitleaks en CI con las reglas por defecto
 # (useDefault = true, el set completo que mantiene el proyecto
-# gitleaks). El único allowlist de abajo es para los 3 valores
+# gitleaks). El único allowlist de abajo es para los 4 valores
 # FALSOS de .github/workflows/ci.yml que existen solo para que el
 # build compile contra el Postgres efímero de CI — nunca secretos
 # reales (las credenciales reales viven en Railway, nunca en este
@@ -19,8 +19,7 @@ regexes = [
   # ML_TOKEN_KEY_V1 ficticia (job build-and-test) — detectada por la
   # regla "generic-api-key".
   '''DJLURtqf9klRrWnnPtWUqOgDqgqJ/K8aqMdatfdtzhk=''',
-  # FALABELLA_TOKEN_KEY_V1 ficticia (job build-and-test, conector
-  # Falabella 15/11) — mismo criterio, detectada por "generic-api-key".
+  # FALABELLA_TOKEN_KEY_V1 ficticia (conector Falabella, PR #415).
   '''DdH5McEX4IeTRehIH0b3/HuTlXfoPfIhwnR1hxZH1oQ=''',
   # NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ficticia — detectada por
   # "generic-api-key".
