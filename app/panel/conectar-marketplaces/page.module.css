@@ -1,0 +1,24 @@
+.rejilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.tarjeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px;
+}
+
+.nombre {
+  margin: 0;
+  font-size: 18px;
+}
+
+.estado {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--texto-suave, inherit);
+}

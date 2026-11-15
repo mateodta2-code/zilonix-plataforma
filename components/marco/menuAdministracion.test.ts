@@ -7,7 +7,7 @@ import { itemsAdministracion } from "./menuAdministracion";
 
 const etiquetas = (permisos: { modulo: string; accion: string }[]) => itemsAdministracion(permisos).map((i) => i.etiqueta);
 
-const TODAS = ["Invitar persona", "Ajustar roles", "Acceso de soporte", "Conectar marketplace", "Avisos de Mercado Libre"];
+const TODAS = ["Invitar persona", "Ajustar roles", "Acceso de soporte", "Conectar marketplaces", "Avisos de Mercado Libre"];
 
 describe("itemsAdministracion", () => {
   it("el Dueño y el Gerente (plantilla nueva) ven las 5 opciones", () => {
@@ -22,12 +22,19 @@ describe("itemsAdministracion", () => {
       { modulo: "configuracion", accion: "consultar" },
       { modulo: "configuracion", accion: "modificar" },
     ];
-    expect(etiquetas(gerenteViejo)).toEqual(["Invitar persona", "Conectar marketplace", "Avisos de Mercado Libre"]);
+    expect(etiquetas(gerenteViejo)).toEqual(["Invitar persona", "Conectar marketplaces", "Avisos de Mercado Libre"]);
     expect(etiquetas([{ modulo: "configuracion", accion: "autorizar" }])).toEqual(["Ajustar roles", "Acceso de soporte"]);
   });
 
   it("sin ninguno de esos permisos no sale nada (el grupo no se pinta)", () => {
     expect(etiquetas(PLANTILLAS.Operador)).toEqual([]);
     expect(etiquetas(PLANTILLAS.Auxiliar)).toEqual([]);
+  });
+});
+
+describe("Conectar marketplaces", () => {
+  it("lleva a la portada nueva, con el permiso configuracion · consultar", () => {
+    const item = itemsAdministracion([{ modulo: "configuracion", accion: "consultar" }]).find((i) => i.etiqueta === "Conectar marketplaces");
+    expect(item?.href).toBe("/panel/conectar-marketplaces");
   });
 });

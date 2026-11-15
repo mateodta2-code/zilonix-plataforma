@@ -126,3 +126,11 @@
   max-width: 420px;
   margin: 20px 0;
 }
+
+.volver {
+  display: inline-block;
+  margin-bottom: 8px;
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+  text-decoration: none;
+}

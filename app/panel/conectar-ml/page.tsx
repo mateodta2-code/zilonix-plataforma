@@ -124,6 +124,9 @@ export default async function ConectarMlPage({
   return (
     <>
       {hayImportacionEnCurso && <meta httpEquiv="refresh" content="5" />}
+      <Link href="/panel/conectar-marketplaces" className={styles.volver}>
+        ← Conectar marketplaces
+      </Link>
       <EncabezadoPagina titulo="Conectar marketplace" />
 
       {searchParams.conectado && <div className={styles.avisoExito}>Cuenta conectada.</div>}
