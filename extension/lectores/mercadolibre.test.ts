@@ -49,7 +49,7 @@ const LINK_TIENDA_OFICIAL_SIN_SELLER =
 // URL_APP real de extension/config.js (producción) — se repite el
 // literal acá a propósito: si alguien cambia config.js sin querer,
 // esta prueba lo nota.
-const URL_APP = "https://web-production-af270.up.railway.app";
+const URL_APP = "https://seller.zilonix.com";
 
 // Issue #174, corrección real: la página de UN producto trae en el
 // mismo JSON los datos de OTROS productos (recomendados). Este HTML

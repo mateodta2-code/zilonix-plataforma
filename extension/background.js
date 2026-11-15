@@ -46,8 +46,8 @@ const TIPOS_RELEVADOS = new Set(["zilonix:vendidos", "zilonix:listado", "zilonix
 // permiso real de abrir pestañas, así que es la última línea real de
 // defensa (mismo criterio que PATRON_DOMINIO_SEGUIMIENTO_PERMITIDO,
 // abajo, para "Actualizar todo").
-const ORIGENES_SELLER_PERMITIDOS_PUBLICAR = ["https://web-production-af270.up.railway.app", "https://web-staging-d979.up.railway.app", "https://seller.zilonix.com"];
-const URL_APP_PRODUCCION_DEFAULT = "https://web-production-af270.up.railway.app";
+const ORIGENES_SELLER_PERMITIDOS_PUBLICAR = ["https://seller.zilonix.com", "https://web-staging-d979.up.railway.app", "https://web-production-af270.up.railway.app"];
+const URL_APP_PRODUCCION_DEFAULT = "https://seller.zilonix.com";
 
 // Revisión de Pablo (sobre a6fdcbd, MED 2/LOW 4) — mismo criterio real
 // que "zilonix:abrir-seguimientos" (más abajo): "zilonix:importar-link"
@@ -84,6 +84,49 @@ const COOLDOWN_IMPORTAR_PUBLICAR_MS = 3000;
 // nunca es la URL vieja de Railway de producción.
 const ORIGEN_NICHO_PRODUCCION = "https://seller.zilonix.com";
 const ORIGEN_NICHO_STAGING = "https://web-staging-d979.up.railway.app";
+
+// Issue #414 — configuración remota (servidor, textos, interruptores).
+// background.js la descarga de GET /api/extension/config (ruta pública,
+// sin sesión) y la guarda YA validada en chrome.storage.local
+// ("zilonixConfigRemota"); extension/config.js la lee de ahí. Si falla
+// la red, la ruta o la validación, no se toca nada: la extensión sigue
+// con lo último guardado o con sus valores por defecto seguros
+// (Alibaba apagado). Se refresca como máximo cada 6 horas.
+const CLAVE_CONFIG_REMOTA = "zilonixConfigRemota";
+const CLAVE_CONFIG_REMOTA_TS = "zilonixConfigRemotaTs";
+const REFRESCO_CONFIG_REMOTA_MS = 6 * 60 * 60 * 1000;
+
+function sanearConfigRemotaBackground(cruda) {
+  // Misma validación que extension/config.js (sanearConfigRemota) —
+  // este Service Worker no carga ese archivo, así que se repite acá lo
+  // mínimo: claves conocidas, booleanos y strings cortos.
+  const limpia = { interruptores: { alibaba: false }, textos: { avisoSinSesion: "Inicia sesión en Zilonix Seller para analizar" }, urlApp: null };
+  if (!cruda || typeof cruda !== "object") return limpia;
+  if (cruda.interruptores && typeof cruda.interruptores.alibaba === "boolean") limpia.interruptores.alibaba = cruda.interruptores.alibaba;
+  const aviso = cruda.textos && cruda.textos.avisoSinSesion;
+  if (typeof aviso === "string" && aviso.trim() && aviso.length <= 200) limpia.textos.avisoSinSesion = aviso;
+  if (typeof cruda.urlApp === "string" && ORIGENES_SELLER_PERMITIDOS_PUBLICAR.includes(cruda.urlApp)) limpia.urlApp = cruda.urlApp;
+  return limpia;
+}
+
+function refrescarConfigRemota() {
+  try {
+    chrome.storage.local.get({ zilonixUrlApp: null, [CLAVE_CONFIG_REMOTA_TS]: 0 }, async (datos) => {
+      if (Date.now() - (Number(datos[CLAVE_CONFIG_REMOTA_TS]) || 0) < REFRESCO_CONFIG_REMOTA_MS) return;
+      const origen = ORIGENES_SELLER_PERMITIDOS_PUBLICAR.includes(datos.zilonixUrlApp) ? datos.zilonixUrlApp : URL_APP_PRODUCCION_DEFAULT;
+      try {
+        const respuesta = await fetch(`${origen}/api/extension/config`, { credentials: "omit", redirect: "error", cache: "no-store" });
+        if (!respuesta.ok) return;
+        const cuerpo = await respuesta.json();
+        chrome.storage.local.set({ [CLAVE_CONFIG_REMOTA]: sanearConfigRemotaBackground(cuerpo), [CLAVE_CONFIG_REMOTA_TS]: Date.now() });
+      } catch {
+        // Sin red o respuesta inválida: se queda con lo que ya hay.
+      }
+    });
+  } catch {
+    // Contexto invalidado — nunca rompe nada.
+  }
+}
 
 function resolverOrigenNicho(callback) {
   chrome.storage.local.get({ zilonixUrlApp: null }, (datos) => {
@@ -441,6 +484,7 @@ function cerrarPestanasActualizarTodoVencidas() {
 // eventos), así que esta llamada suelta YA cubre ese caso sin falta.
 cerrarPestanasActualizarTodoVencidas();
 chrome.runtime.onStartup.addListener(() => cerrarPestanasActualizarTodoVencidas());
+refrescarConfigRemota();
 
 // Corrección de Pablo (revisión del PR #260, punto 2) — si la persona
 // cierra a mano una de estas pestañas ANTES de que llegue su lectura o
