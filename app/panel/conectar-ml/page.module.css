@@ -115,6 +115,14 @@
   margin-bottom: 14px;
 }
 
+.pasosFalabella {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .formSincronizar {
   margin-top: 8px;
 }
