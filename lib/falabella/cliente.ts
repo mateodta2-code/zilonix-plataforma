@@ -29,6 +29,12 @@ const BASE_URL = "https://sellercenter-api.falabella.com/";
 // país, nunca adivinar un código nuevo.
 const CODIGO_PAIS = "FACO";
 
+const TIMEOUT_MS = 15_000;
+
+// Solo letras, números, "_", "." y "-" — el Seller ID va en el header
+// User-Agent (revisión del PR #415).
+export const SELLER_ID_VALIDO = /^[A-Za-z0-9_.-]{1,100}$/;
+
 export class FalabellaApiError extends Error {
   codigo: string;
   constructor(codigo: string, mensaje: string) {
@@ -74,12 +80,26 @@ export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, ver
   const signature = firmarSolicitud(base, apiKey);
   const query = new URLSearchParams({ ...base, Signature: signature });
 
+  // Revisión del PR #415: el sellerId lo escribe el usuario y va dentro
+  // de una cabecera — se revalida acá también (no solo en la Server
+  // Action) para que ningún llamador futuro pueda colar caracteres raros.
+  if (!SELLER_ID_VALIDO.test(sellerId)) {
+    throw new FalabellaApiError("seller_id_invalido", "El Seller ID tiene caracteres no permitidos.");
+  }
+
+  // Revisión del PR #415 (bloqueante 2): sin timeout, un Falabella lento
+  // dejaba la petición colgada sin límite. 15 s por llamada, y sin seguir
+  // redirecciones — la BASE_URL es fija y una redirección nunca es
+  // esperada (evita que la firma y el User-Agent viajen a otro host).
   const res = await fetch(`${BASE_URL}?${query.toString()}`, {
     method: "GET",
     headers: {
       // Formato exigido por la documentación: SELLER_ID/TECNOLOGIA/VERSION/TIPO_INTEGRACION/CODIGO_PAIS
       "User-Agent": `${sellerId}/ZilonixSeller/1.0/API/${CODIGO_PAIS}`,
     },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    redirect: "error",
+    cache: "no-store",
   });
 
   const cuerpo = await res.json().catch(() => null);
@@ -90,5 +110,28 @@ export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, ver
     const err = cuerpo.ErrorResponse;
     throw new FalabellaApiError(String(err.ErrorCode ?? "desconocido"), String(err.ErrorMessage ?? "Error desconocido de Falabella."));
   }
-  return cuerpo.SuccessResponse?.Body as T;
+  if (!cuerpo.SuccessResponse) {
+    throw new FalabellaApiError("respuesta_invalida", `Falabella respondió ${res.status} sin SuccessResponse ni ErrorResponse.`);
+  }
+  return cuerpo.SuccessResponse.Body as T;
+}
+
+// Revisión del PR #415 (bloqueante 1): antes se guardaba la cuenta sin
+// comprobar nada, y como user_id es único global, cualquiera podía
+// "apartar" el correo de otro vendedor con una key inventada. Ahora,
+// antes de guardar, se hace la llamada firmada más barata posible
+// (GetOrders con Limit=1): si Falabella la acepta, la API Key es de
+// verdad de ese UserID. Lanza FalabellaApiError si Falabella la rechaza;
+// cualquier otro error (timeout, red) se propaga tal cual para no
+// confundir "Falabella caído" con "credenciales malas".
+export async function verificarCredenciales(credenciales: { userId: string; apiKey: string; sellerId: string }): Promise<void> {
+  await llamarFalabella({
+    ...credenciales,
+    action: "GetOrders",
+    version: "2.0",
+    // CreatedAfter incluido porque en la familia Seller Center GetOrders
+    // exige CreatedAfter o UpdatedAfter — se pide 1 día para que la
+    // respuesta sea mínima.
+    parametros: { CreatedAfter: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), Limit: "1" },
+  });
 }

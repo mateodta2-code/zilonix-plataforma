@@ -1,6 +1,7 @@
 import type { Conector, ConectorCuenta, ConectorMensaje, ConectorPedido, ConectorProducto } from "./tipos";
 import * as cuentasFalabella from "@/lib/falabella/cuentas";
 import * as pedidosFalabella from "@/lib/falabella/pedidos";
+import { verificarCredenciales } from "@/lib/falabella/cliente";
 
 // Primer caso REAL del contrato de la tarea 2.2 (hasta ahora solo probado
 // contra ConectorFalso, lib/conectores/falso.ts) — adelanta la tarea 5.1
@@ -17,6 +18,9 @@ export class ConectorFalabella implements Conector {
 
   async conectar(credenciales: unknown): Promise<ConectorCuenta> {
     const datos = credenciales as { userId: string; apiKey: string; sellerId: string; nickname: string };
+    // Revisión del PR #415 (bloqueante 1): nunca se guarda una cuenta
+    // sin que Falabella acepte antes una llamada firmada con esa key.
+    await verificarCredenciales(datos);
     const { id } = await cuentasFalabella.guardarCuentaConectada(this.empresaId, datos);
     this.cuentaId = id;
     return { cuentaIdExterna: datos.userId, nickname: datos.nickname };
@@ -25,7 +29,9 @@ export class ConectorFalabella implements Conector {
   async traerPedidos(desde: Date): Promise<ConectorPedido[]> {
     this.requerirConexion();
     await pedidosFalabella.importarPedidos(this.empresaId, this.cuentaId!, desde);
-    const filas = await pedidosFalabella.listarPedidos(this.empresaId);
+    // Revisión del PR #415: solo los pedidos de ESTA cuenta, no los de
+    // todas las cuentas de Falabella de la empresa.
+    const filas = await pedidosFalabella.listarPedidos(this.empresaId, this.cuentaId!);
     return filas.map((p) => ({
       idExterno: p.pedidoIdExterno,
       estado: p.estado,

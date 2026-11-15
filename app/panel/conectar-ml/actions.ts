@@ -10,6 +10,14 @@ import { ConectorFalabella } from "@/lib/conectores/falabella";
 import { CuentaFalabellaDeOtraEmpresaError } from "@/lib/falabella/cuentas";
 import * as cuentasFalabella from "@/lib/falabella/cuentas";
 import * as pedidosFalabella from "@/lib/falabella/pedidos";
+import { FalabellaApiError, SELLER_ID_VALIDO } from "@/lib/falabella/cliente";
+
+// Revisión del PR #415: validación en el servidor, no solo el
+// `type="email"` del navegador (que cualquiera se salta).
+const CORREO_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_CORREO = 254;
+const MAX_API_KEY = 256;
+const MAX_NICKNAME = 100;
 
 // Pedido de Sharel/Pablo (15/11): "Conectar marketplace" (antes "Conectar
 // Mercado Libre", mismo page.tsx/ruta /panel/conectar-ml, ver Pablo en el
@@ -45,6 +53,15 @@ export async function conectarCuentaFalabella(formData: FormData) {
   if (!userId || !apiKey || !sellerId) {
     redirect("/panel/conectar-ml?error=falabella_faltan_datos");
   }
+  if (
+    userId.length > MAX_CORREO ||
+    !CORREO_VALIDO.test(userId) ||
+    apiKey.length > MAX_API_KEY ||
+    !SELLER_ID_VALIDO.test(sellerId) ||
+    nickname.length > MAX_NICKNAME
+  ) {
+    redirect("/panel/conectar-ml?error=falabella_datos_invalidos");
+  }
 
   try {
     const conector = new ConectorFalabella(empresa.id);
@@ -52,6 +69,12 @@ export async function conectarCuentaFalabella(formData: FormData) {
   } catch (error) {
     if (error instanceof CuentaFalabellaDeOtraEmpresaError) {
       redirect("/panel/conectar-ml?error=falabella_cuenta_en_otra_empresa");
+    }
+    // Falabella rechazó la llamada de prueba firmada con esa key
+    // (bloqueante 1 de la revisión del PR #415) — no se guardó nada.
+    if (error instanceof FalabellaApiError) {
+      console.warn("[conectar-ml/falabella] Falabella rechazó las credenciales:", error.codigo);
+      redirect("/panel/conectar-ml?error=falabella_credenciales_invalidas");
     }
     console.warn("[conectar-ml/falabella] no se pudo conectar:", error instanceof Error ? error.message : String(error));
     redirect("/panel/conectar-ml?error=falabella_error_desconocido");
@@ -63,12 +86,25 @@ export async function conectarCuentaFalabella(formData: FormData) {
 
 export async function sincronizarPedidosFalabella(cuentaId: string) {
   const { usuario, empresa } = await empresaActualOFalla();
-  await requierePermiso(usuario.id, empresa.id, "ventas", "consultar");
+  // Revisión del PR #415: sincronizar escribe pedidos y llama a la API
+  // externa — exige el mismo permiso que conectar, no uno de lectura.
+  await requierePermiso(usuario.id, empresa.id, "configuracion", "crear");
 
   // Últimos 60 días — mismo criterio que la importación inicial de
   // Mercado Libre (tarea 2.5).
   const desde = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-  await pedidosFalabella.importarPedidos(empresa.id, cuentaId, desde);
+  try {
+    await pedidosFalabella.importarPedidos(empresa.id, cuentaId, desde);
+  } catch (error) {
+    // Nunca el texto crudo a la URL (mismo criterio de arriba). El
+    // código de Falabella sí va al log: es lo que hace falta para
+    // confirmar los parámetros de GetOrders con la primera cuenta real.
+    console.warn(
+      "[conectar-ml/falabella] no se pudo sincronizar:",
+      error instanceof FalabellaApiError ? `${error.codigo} — ${error.message}` : error instanceof Error ? error.message : String(error)
+    );
+    redirect("/panel/conectar-ml?error=falabella_sincronizar_fallo");
+  }
   revalidatePath("/panel/conectar-ml");
 }
 

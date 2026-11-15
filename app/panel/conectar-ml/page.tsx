@@ -9,7 +9,7 @@ import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { obtenerUltimaImportacion } from "@/lib/ml/importacion";
 import { datosSitioMl } from "@/lib/ml/sitios";
 import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
-import { listarPedidos as listarPedidosFalabella } from "@/lib/falabella/pedidos";
+import { contarPedidosPorCuenta as contarPedidosFalabella } from "@/lib/falabella/pedidos";
 import { conectarCuentaFalabella, desconectarCuentaFalabella, sincronizarPedidosFalabella } from "./actions";
 import { BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -33,10 +33,10 @@ import styles from "./page.module.css";
 // navegador) con el genérico.
 const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
   cuenta_en_otra_empresa: "Esta cuenta de Mercado Libre ya está conectada a otra empresa en Zilonix. Desconéctala allá primero o escríbenos a soporte.",
-  estado_vencido: "La conexión tardó demasiado o se perdió el estado — empezá de nuevo con \"Conectar Mercado Libre\".",
+  estado_vencido: "La conexión tardó demasiado o se perdió el estado — empieza de nuevo con \"Conectar Mercado Libre\".",
   ml_rechazo: "Mercado Libre no autorizó la conexión.",
-  sin_permiso: "No tenés permiso para conectar una cuenta de Mercado Libre.",
-  error_desconocido: "No se pudo conectar la cuenta — intentá de nuevo en un momento.",
+  sin_permiso: "No tienes permiso para conectar una cuenta de Mercado Libre.",
+  error_desconocido: "No se pudo conectar la cuenta — intenta de nuevo en un momento.",
   // Conector Falabella (15/11) — pantalla unificada "Conectar marketplace"
   // (pedido de Sharel/Pablo, PR #415): prefijo "falabella_" para que un
   // código de error de este canal nunca pise el significado de uno de
@@ -44,9 +44,23 @@ const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
   // del lado de ML).
   falabella_faltan_datos: "Faltan datos — UserID (correo), API Key y Seller ID son obligatorios.",
   falabella_cuenta_en_otra_empresa: "Esta cuenta de Falabella ya está conectada a otra empresa en Zilonix. Desconéctala allá primero o escríbenos a soporte.",
-  falabella_error_desconocido: "No se pudo conectar la cuenta de Falabella — revisá el UserID y la API Key e intentá de nuevo.",
+  falabella_datos_invalidos: "Revisa los datos: el UserID debe ser un correo válido y el Seller ID solo puede tener letras, números, «_», «.» y «-».",
+  falabella_credenciales_invalidas: "Falabella no aceptó esas credenciales. Revisa que el UserID, la API Key y el Seller ID sean los de tu cuenta en Seller Center.",
+  falabella_sincronizar_fallo: "No se pudieron traer los pedidos de Falabella. Intenta de nuevo en un momento.",
+  falabella_error_desconocido: "No se pudo conectar la cuenta de Falabella — revisa el UserID y la API Key e intenta de nuevo.",
 };
-const MENSAJE_ERROR_POR_DEFECTO = "No se pudo conectar la cuenta — intentá de nuevo en un momento.";
+const MENSAJE_ERROR_POR_DEFECTO = "No se pudo conectar la cuenta — intenta de nuevo en un momento.";
+
+// true si el usuario tiene el permiso; false si no (nunca traga otro error).
+async function tienePermiso(...args: Parameters<typeof requierePermiso>): Promise<boolean> {
+  try {
+    await requierePermiso(...args);
+    return true;
+  } catch (error) {
+    if (error instanceof SinPermisoError) return false;
+    throw error;
+  }
+}
 
 // Tarea 2.3 — "Conectar ML en 1 clic". Regla de UX #1 del plan técnico
 // ("si el canal no está habilitado para ese plan/cuenta, avisarlo ANTES
@@ -86,7 +100,12 @@ export default async function ConectarMlPage({
 
   const cuentas = await listarCuentasConectadas(empresa.id);
   const cuentasFalabella = await listarCuentasFalabella(empresa.id);
-  const pedidosFalabella = await listarPedidosFalabella(empresa.id);
+  const pedidosPorCuentaFalabella = await contarPedidosFalabella(empresa.id);
+  // Revisión del PR #415: el servidor ya bloquea estas acciones, pero no
+  // se muestran botones que van a fallar.
+  const puedeConectar = await tienePermiso(usuario.id, empresa.id, "configuracion", "crear");
+  const puedeDesconectar = await tienePermiso(usuario.id, empresa.id, "configuracion", "modificar");
+  const esErrorFalabella = searchParams.error?.startsWith("falabella_") ?? false;
   // Bug real (PKCE): el link de autorización ya no se arma acá — cada
   // intento necesita un code_verifier NUEVO (de un solo uso), así que
   // /api/ml/conectar lo genera recién al hacer clic, no de antemano en
@@ -119,9 +138,14 @@ export default async function ConectarMlPage({
           {/* <a> normal, no next/link: /api/ml/conectar es un Route
               Handler que arranca el OAuth real, necesita una
               navegación de verdad del navegador. */}
-          <a href={urlConectar} className={styles.reintentar}>
-            Reintentar
-          </a>
+          {/* Revisión del PR #415: con un error de Falabella, "Reintentar"
+              abría el OAuth de Mercado Libre — ahí el formulario de abajo
+              ya es el reintento. */}
+          {!esErrorFalabella && (
+            <a href={urlConectar} className={styles.reintentar}>
+              Reintentar
+            </a>
+          )}
         </div>
       )}
 
@@ -200,7 +224,7 @@ export default async function ConectarMlPage({
       {cuentasFalabella.length > 0 && (
         <ListaFilas>
           {cuentasFalabella.map((cuenta) => {
-            const pedidosDeLaCuenta = pedidosFalabella.filter((p) => p.cuentaFalabellaId === cuenta.id);
+            const pedidosDeLaCuenta = pedidosPorCuentaFalabella.get(cuenta.id) ?? 0;
             return (
               <FilaLista key={cuenta.id}>
                 <div className={styles.filaCuenta}>
@@ -208,7 +232,7 @@ export default async function ConectarMlPage({
                     Conectado como <strong>{cuenta.nickname}</strong> ({cuenta.userId})
                     {cuenta.desconectadaTs && <Chip>Desconectada</Chip>}
                   </span>
-                  {!cuenta.desconectadaTs && (
+                  {!cuenta.desconectadaTs && puedeDesconectar && (
                     <form action={desconectarCuentaFalabella.bind(null, cuenta.id)}>
                       <button type="submit" className={styles.desconectar}>
                         Desconectar
@@ -216,37 +240,39 @@ export default async function ConectarMlPage({
                     </form>
                   )}
                 </div>
-                {!cuenta.desconectadaTs && (
+                {!cuenta.desconectadaTs && puedeConectar && (
                   <form action={sincronizarPedidosFalabella.bind(null, cuenta.id)} className={styles.formSincronizar}>
                     <button type="submit" className={clasesBoton("secundario")}>
                       Sincronizar pedidos (últimos 60 días)
                     </button>
                   </form>
                 )}
-                <div className={styles.detalleImportacion}>{pedidosDeLaCuenta.length} pedido(s) importado(s).</div>
+                <div className={styles.detalleImportacion}>{pedidosDeLaCuenta} pedido(s) importado(s).</div>
               </FilaLista>
             );
           })}
         </ListaFilas>
       )}
 
-      <form action={conectarCuentaFalabella} className={styles.formConectar}>
-        <Campo etiqueta="UserID (correo de Seller Center)">
-          <input type="email" name="userId" required className="zx-control" />
-        </Campo>
-        <Campo etiqueta="API Key">
-          <input type="password" name="apiKey" required className="zx-control" />
-        </Campo>
-        <Campo etiqueta="Seller ID (nombre de tu tienda en Seller Center)">
-          <input type="text" name="sellerId" required className="zx-control" />
-        </Campo>
-        <Campo etiqueta="Nombre para identificarla en Zilonix (opcional)">
-          <input type="text" name="nickname" className="zx-control" />
-        </Campo>
-        <button type="submit" className={clasesBoton("primario")}>
-          Conectar Falabella
-        </button>
-      </form>
+      {puedeConectar && (
+        <form action={conectarCuentaFalabella} className={styles.formConectar}>
+          <Campo etiqueta="UserID (correo de Seller Center)">
+            <input type="email" name="userId" required maxLength={254} className="zx-control" />
+          </Campo>
+          <Campo etiqueta="API Key">
+            <input type="password" name="apiKey" required maxLength={256} autoComplete="off" className="zx-control" />
+          </Campo>
+          <Campo etiqueta="Seller ID (nombre de tu tienda en Seller Center)">
+            <input type="text" name="sellerId" required maxLength={100} pattern="[A-Za-z0-9_.\-]+" className="zx-control" />
+          </Campo>
+          <Campo etiqueta="Nombre para identificarla en Zilonix (opcional)">
+            <input type="text" name="nickname" maxLength={100} className="zx-control" />
+          </Campo>
+          <button type="submit" className={clasesBoton("primario")}>
+            Conectar Falabella
+          </button>
+        </form>
+      )}
 
       <BotonLink href="/panel" variante="fantasma" chico>
         Volver al panel
