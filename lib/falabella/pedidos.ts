@@ -4,28 +4,25 @@ import { pedidosFalabella } from "@/db/schema";
 import { llamarFalabella } from "@/lib/falabella/cliente";
 import { obtenerCredenciales } from "@/lib/falabella/cuentas";
 import { parsearFechaFalabella } from "@/lib/falabella/fechas";
+import { parsearMontoFalabella } from "@/lib/falabella/montos";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 
 // GetOrders v2.0 / GetOrderItems v1.0 — confirmado contra
 // developers.falabella.com/docs/orders/getordersv2 y
 // .../docs/orders/getorderitems (15/11).
 //
-// INCÓGNITA REAL, pendiente de confirmar contra una cuenta real antes de
-// dar este archivo por cerrado: la tabla de parámetros de filtro de
-// GetOrders queda colapsada ("Ver 11 más") en la documentación pública
-// sin credenciales — no se pudo leer el nombre exacto de cada uno.
-// `CreatedAfter`/`CreatedBefore` y `Offset`/`Limit` abajo son los nombres
-// que usa toda la familia de API "Seller Center" de la que Falabella es
-// un despliegue más (el mismo origen de Lazada/Linio/Daraz comparte este
-// contrato) — es la hipótesis mejor fundada, NO una confirmación directa
-// de la página de Falabella. Primer uso real: si Falabella responde un
-// ErrorResponse rechazando alguno de estos nombres, el mensaje de error
-// de Falabella dice cuál — se ajusta ahí, no se insiste a ciegas.
+// Parámetros de GetOrders: `CreatedAfter`, `Limit` y `Offset` ya se
+// confirmaron con una cuenta real en staging (15/11, issue #422) —
+// GetOrders v2 y GetOrderItems respondieron bien con estos nombres.
+// `CreatedBefore` sigue sin usarse ni confirmarse.
+//
+// Los montos llegan como texto con coma de miles ("78,000.00"): se
+// normalizan con parsearMontoFalabella antes de guardar (issue #422).
 type OrdenFalabella = {
   OrderId: string;
   CreatedAt: string;
-  Price: string;
-  GrandTotal?: string;
+  Price: string | number;
+  GrandTotal?: string | number;
   Statuses?: { Status: string | string[] };
 };
 
@@ -33,8 +30,8 @@ type ItemOrdenFalabella = {
   OrderItemId: string;
   Sku: string;
   Name: string;
-  ItemPrice: string;
-  PaidPrice: string;
+  ItemPrice: string | number;
+  PaidPrice: string | number;
   Status: string;
   Currency: string;
 };
@@ -43,6 +40,18 @@ function estadoDeOrden(orden: OrdenFalabella): string {
   const statuses = orden.Statuses?.Status;
   if (!statuses) return "desconocido";
   return Array.isArray(statuses) ? statuses[0] : statuses;
+}
+
+// Error al guardar un pedido puntual: lleva el OrderId para el log (nunca
+// datos del comprador).
+export class PedidoFalabellaError extends Error {
+  constructor(
+    public readonly orderId: string,
+    causa: unknown
+  ) {
+    super(`No se pudo guardar el pedido de Falabella ${orderId}: ${causa instanceof Error ? causa.message : String(causa)}`, { cause: causa });
+    this.name = "PedidoFalabellaError";
+  }
 }
 
 type Credenciales = { userId: string; apiKey: string; sellerId: string };
@@ -123,28 +132,51 @@ export async function importarPedidos(
   const { ordenes, truncado } = await obtenerOrdenes(credenciales, desde);
   const itemsPorOrden = await itemsDeTodas(credenciales, ordenes);
 
+  // Issue #422: los montos se normalizan ANTES de abrir la transacción —
+  // un formato no reconocido corta acá, con campo y OrderId, sin haber
+  // tocado la base.
+  const filas = ordenes.map((orden) => {
+    const orderId = orden.OrderId;
+    const items = (itemsPorOrden.get(orderId) ?? []).map((item) => ({
+      ...item,
+      ItemPrice: parsearMontoFalabella(item.ItemPrice, { campo: "ItemPrice", orderId }),
+      PaidPrice: parsearMontoFalabella(item.PaidPrice, { campo: "PaidPrice", orderId }),
+    }));
+    const campoTotal = orden.GrandTotal != null ? "GrandTotal" : "Price";
+    return {
+      orderId,
+      fecha: parsearFechaFalabella(orden.CreatedAt),
+      total: parsearMontoFalabella(orden.GrandTotal ?? orden.Price, { campo: campoTotal, orderId }),
+      moneda: items[0]?.Currency ?? "COP",
+      estado: estadoDeOrden(orden),
+      items,
+    };
+  });
+
   await dbComoEmpresa(empresaId, async (tx) => {
-    for (const orden of ordenes) {
-      const items = itemsPorOrden.get(orden.OrderId) ?? [];
-      const moneda = items[0]?.Currency ?? "COP";
-      const estado = estadoDeOrden(orden);
-      const total = orden.GrandTotal ?? orden.Price;
-      await tx
-        .insert(pedidosFalabella)
-        .values({
-          empresaId,
-          cuentaFalabellaId,
-          pedidoIdExterno: orden.OrderId,
-          fecha: parsearFechaFalabella(orden.CreatedAt),
-          total,
-          moneda,
-          estado,
-          items,
-        })
-        .onConflictDoUpdate({
-          target: [pedidosFalabella.empresaId, pedidosFalabella.pedidoIdExterno],
-          set: { estado, total, items },
-        });
+    for (const { orderId, fecha, total, moneda, estado, items } of filas) {
+      try {
+        await tx
+          .insert(pedidosFalabella)
+          .values({
+            empresaId,
+            cuentaFalabellaId,
+            pedidoIdExterno: orderId,
+            fecha,
+            total,
+            moneda,
+            estado,
+            items,
+          })
+          .onConflictDoUpdate({
+            target: [pedidosFalabella.empresaId, pedidosFalabella.pedidoIdExterno],
+            set: { estado, total, items },
+          });
+      } catch (error) {
+        // Issue #422: sin el OrderId, el log solo decía "invalid input
+        // syntax" y no había cómo saber qué pedido revisar.
+        throw new PedidoFalabellaError(orderId, error);
+      }
     }
   });
   return { importados: ordenes.length, truncado };

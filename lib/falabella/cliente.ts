@@ -15,10 +15,10 @@
 //   en hex minúsculas de esa cadena es la firma.
 // - No hay ambiente de pruebas (sandbox) — la propia documentación
 //   recomienda probar con productos de bajo valor directo en producción.
-// - Incógnita real, no resuelta por la documentación pública: los
-//   nombres exactos de los parámetros de filtro de fecha/paginación de
-//   GetOrders (la tabla de parámetros queda colapsada sin credenciales
-//   reales) — se confirman en el primer uso contra una cuenta real.
+// - Parámetros de filtro/paginación de GetOrders (la tabla queda
+//   colapsada en la documentación pública): `CreatedAfter`, `Limit` y
+//   `Offset` ya se confirmaron con una cuenta real en staging (15/11,
+//   issue #422).
 
 import { createHmac } from "crypto";
 
