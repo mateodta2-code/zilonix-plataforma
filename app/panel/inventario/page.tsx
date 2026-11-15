@@ -19,7 +19,6 @@ import { SinAcceso } from "@/components/marco/SinAcceso";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { AvisosUrl } from "@/components/inventario/Avisos";
-import { PestanasProductos } from "@/components/productos/PestanasProductos";
 import styles from "./inventario.module.css";
 
 // Issue #280 — stock por SKU y bodega (WMS Fase 1). Seller es la fuente
@@ -58,7 +57,6 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
         titulo="Inventario"
         descripcion={`Stock por bodega. "Para ML" es lo que se publica: disponible de las bodegas que suman, menos un colchón de ${config.bufferMl}.`}
       />
-      <PestanasProductos actual="/panel/inventario" />
       <AvisosUrl searchParams={searchParams} />
 
       {alertas.length > 0 && (

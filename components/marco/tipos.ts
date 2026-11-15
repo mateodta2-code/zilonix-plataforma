@@ -38,11 +38,13 @@ export type ItemNav = {
   icono: ClaveIcono;
   deshabilitada?: boolean;
   titulo?: string;
-  // Otras rutas que también marcan este ítem como activo. Un módulo
-  // que agrupa pantallas con rutas propias (Productos: /panel/sku,
-  // /panel/inventario, /panel/bodegas) sigue resaltado en todas.
-  rutasExtra?: string[];
+  // Un módulo que agrupa varias pantallas (Productos) se despliega en
+  // el menú con estas secciones. Con barra contraída o pantalla
+  // angosta no hay lugar para la lista: el ítem lleva a `href`.
+  hijos?: SubitemNav[];
 };
+
+export type SubitemNav = { etiqueta: string; href: string };
 
 export type GrupoNav = {
   // Sin etiqueta = grupo principal, sin encabezado. Con etiqueta

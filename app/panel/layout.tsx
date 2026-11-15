@@ -3,6 +3,7 @@ import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { MarcoApp } from "@/components/marco/MarcoApp";
 import type { GrupoNav } from "@/components/marco/tipos";
 import { itemsAdministracion } from "@/components/marco/menuAdministracion";
+import { SECCIONES_PRODUCTOS } from "@/components/productos/secciones";
 
 // Marco visual (issue de las subpáginas) — mueve acá la carga que
 // antes hacía SOLO app/panel/page.tsx para pintar el marco (usuario
@@ -43,18 +44,12 @@ export default async function PanelLayout({ children }: { children: React.ReactN
           ]
         : []),
       // Productos — un solo módulo para SKU, inventario, bodegas,
-      // kardex, ingresos y compras (pedido de Franky, 15-nov), con
-      // pestañas compartidas (components/productos/PestanasProductos.tsx).
-      // Las rutas no cambian; todas piden ("inventario","consultar").
+      // kardex, ingresos y compras (pedido de Franky, 15-nov): se
+      // despliega en el menú con sus secciones
+      // (components/productos/secciones.ts). Las rutas no cambian;
+      // todas piden ("inventario","consultar").
       ...(veSku
-        ? [
-            {
-              etiqueta: "Productos",
-              href: "/panel/inventario",
-              icono: "productos" as const,
-              rutasExtra: ["/panel/sku", "/panel/bodegas"],
-            },
-          ]
+        ? [{ etiqueta: "Productos", href: "/panel/inventario", icono: "productos" as const, hijos: SECCIONES_PRODUCTOS }]
         : []),
       // Mismo permiso que SKU ("inventario","consultar") — Investigación
       // también decide qué traer/revender, no vende ni despacha nada.

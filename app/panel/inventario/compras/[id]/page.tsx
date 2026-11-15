@@ -15,7 +15,6 @@ import { SinAcceso } from "@/components/marco/SinAcceso";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { AvisosUrl } from "@/components/inventario/Avisos";
-import { PestanasProductos } from "@/components/productos/PestanasProductos";
 import { ESTADO_OC } from "@/components/inventario/estados";
 import styles from "../../inventario.module.css";
 
@@ -51,7 +50,6 @@ export default async function OrdenCompraPage({
         descripcion={`${orden.proveedor ?? "Sin proveedor"} · llega a ${orden.bodega}${orden.nota ? ` · ${orden.nota}` : ""}`}
         accion={<Chip estado={ESTADO_OC[orden.estado]?.estado ?? "neutro"}>{ESTADO_OC[orden.estado]?.texto ?? orden.estado}</Chip>}
       />
-      <PestanasProductos actual="/panel/inventario/compras" />
       <AvisosUrl searchParams={searchParams} />
 
       {puedeRecibir ? (
