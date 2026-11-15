@@ -20,6 +20,11 @@
   // se usa para mostrar a qué ambiente (staging/producción) se manda
   // "Seguir en Zilonix", ver el texto chico en renderizarEsqueleto.
   const CONFIG = window.ZilonixConfig;
+  // Issue #414 — textos que vienen de la plataforma (config remota);
+  // sin CONFIG (otros sitios) o sin el texto, queda el por defecto.
+  function textoConfig(clave, porDefecto) {
+    return CONFIG && typeof CONFIG.texto === "function" ? CONFIG.texto(clave) || porDefecto : porDefecto;
+  }
 
   const SIN_DATO = "No disponible";
   const PANEL_ID = "zilonix-panel-investigacion-174";
@@ -881,13 +886,13 @@
       const p = elemento("p", "zx-vacio", "");
       const url = ZS.linkSeguro(resultado.url);
       if (url) {
-        const a = elemento("a", null, "Inicia sesión en Zilonix Seller para analizar");
+        const a = elemento("a", null, textoConfig("avisoSinSesion", "Inicia sesión en Zilonix Seller para analizar"));
         a.href = url;
         a.target = "_blank";
         a.rel = "noreferrer";
         p.appendChild(a);
       } else {
-        p.textContent = "Inicia sesión en Zilonix Seller para analizar";
+        p.textContent = textoConfig("avisoSinSesion", "Inicia sesión en Zilonix Seller para analizar");
       }
       caja.appendChild(p);
       return;
