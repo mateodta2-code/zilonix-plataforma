@@ -9,6 +9,8 @@ export type EncabezadoTabla = {
   contenido: ReactNode;
   ariaSort?: "ascending" | "descending" | "none";
   fija?: boolean;
+  // Alinea el título a la derecha, encima de celdas `numerica`.
+  numerica?: boolean;
 };
 
 // Tabla real (no la lista "celular primero" de ListaFilas) — para
@@ -45,7 +47,9 @@ export function Tabla({
               return (
                 <th
                   key={encabezado.clave}
-                  className={`zx-etiqueta ${styles.th} ${encabezado.fija ? styles.thFija : ""}`}
+                  className={[`zx-etiqueta ${styles.th}`, encabezado.fija ? styles.thFija : "", encabezado.numerica ? styles.numerica : ""]
+                    .filter(Boolean)
+                    .join(" ")}
                   aria-sort={encabezado.ariaSort}
                 >
                   {encabezado.contenido}

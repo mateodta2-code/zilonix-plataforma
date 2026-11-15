@@ -5,9 +5,9 @@ import styles from "./page.module.css";
 
 const ENCABEZADOS: EncabezadoTabla[] = [
   { clave: "campana", contenido: "Campaña", fija: true },
-  { clave: "roas", contenido: "ROAS actual" },
-  { clave: "equilibrio", contenido: "ROAS equilibrio" },
-  { clave: "margen", contenido: "Margen después de Ads" },
+  { clave: "roas", contenido: "ROAS actual", numerica: true },
+  { clave: "equilibrio", contenido: "ROAS equilibrio", numerica: true },
+  { clave: "margen", contenido: "Margen después de Ads", numerica: true },
   { clave: "estado", contenido: "Estado" },
 ];
 
