@@ -5,3 +5,5 @@ Cada pull request agrega un archivo `<rama>.md` en esta carpeta con sus líneas 
 En cada release se juntan esos fragmentos en `docs/CHANGELOG.md` y después se borran de acá.
 
 Así se evitan los conflictos de "## Sin publicar" entre pull requests abiertos al mismo tiempo.
+
+Un fragmento viejo que dice «turno de migración», o que hay que correr el SQL a mano en staging, describe ese PR en esa fecha. La regla vigente está en `CLAUDE.md`.

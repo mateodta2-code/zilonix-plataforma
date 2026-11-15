@@ -11,7 +11,7 @@ app/              Next.js App Router — una carpeta por ruta real
 db/
   schema.ts       Única fuente de verdad del modelo de datos (Drizzle)
   migrations/     Generadas con `npm run db:generate`, nunca escritas a mano
-  rls-setup.sql   Usuarios de base + políticas de RLS — script repetible, corrido a mano (tiene contraseñas)
+  rls-setup.sql   Usuarios de base + políticas de RLS (contraseñas de ejemplo). En staging lo aplica el deploy; en producción, solo Mateo, a mano
   empresa-context.ts / superadmin-context.ts / trabajador-context.ts   Los únicos puntos de entrada a Postgres
   *.test.ts       Pruebas de aislamiento/RLS contra Postgres real
 lib/
