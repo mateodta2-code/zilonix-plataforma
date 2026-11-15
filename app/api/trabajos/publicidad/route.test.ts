@@ -66,12 +66,21 @@ describe("POST /api/trabajos/publicidad (issue #254)", () => {
       saltadas: 1,
       fallidas: 0,
       pendientes: 3,
+      sigue: true,
     });
 
     const res = await POST(peticion({ "x-publicidad-trabajador-secret": "secreto-real" }));
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, revisadas: 2, procesadas: 1, saltadas: 1, fallidas: 0, pendientes: 3 });
+    expect(await res.json()).toEqual({
+      ok: true,
+      revisadas: 2,
+      procesadas: 1,
+      saltadas: 1,
+      fallidas: 0,
+      pendientes: 3,
+      sigue: true,
+    });
   });
 
   it("un fallo al correr: 503 genérico, sin el detalle crudo", async () => {

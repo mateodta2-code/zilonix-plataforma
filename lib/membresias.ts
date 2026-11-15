@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { membresias, permisosRol, roles } from "@/db/schema";
+import { permisosDeDueno } from "@/lib/roles-plantillas";
 
 export type MiMembresia = {
   rolId: string;
@@ -24,6 +25,20 @@ export async function obtenerMiMembresia(usuarioId: string, empresaId: string): 
 
     if (filas.length === 0) return null;
     const { rolId, rolNombre } = filas[0];
+
+    // Diagnóstico real (Mateo, caso STOREKINGSAS/Publicidad): en
+    // /panel/roles el Dueño dice "Siempre todo", pero esa etiqueta
+    // nunca garantizó nada — permisosRol solo guarda la FOTO fija de
+    // permisosDeDueno() que lib/empresas.ts copió una sola vez, al
+    // crear la empresa. Cuando MODULOS/ACCIONES crece después (ej.
+    // "publicidad", "promociones" llegaron en ramas posteriores), las
+    // empresas con Dueño ya creado se quedan con menos filas que el
+    // rol dice tener — sin ningún backfill de datos, el Dueño nunca
+    // ve el módulo nuevo. En vez de confiar en lo guardado, el Dueño
+    // SIEMPRE calcula el permiso completo en caliente — así "Siempre
+    // todo" es verdad de verdad, para tienePermiso/requierePermiso y
+    // para el menú, los tres leen este mismo `permisos`.
+    if (rolNombre === "Dueño") return { rolId, rolNombre, permisos: permisosDeDueno() };
 
     const permisos = await tx
       .select({ modulo: permisosRol.modulo, accion: permisosRol.accion, alcance: permisosRol.alcance })

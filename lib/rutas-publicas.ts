@@ -46,15 +46,13 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // token contra la base (lib/invitaciones.ts) — el permiso real es
   // ese token, no el middleware.
   "/invitacion(.*)",
-  // Política de privacidad: texto legal real (lib/legal/privacidad-texto.ts),
-  // estático, sin datos de ninguna empresa. Llegó con #391; la Chrome
-  // Web Store exige una URL pública sin login.
-  "/privacidad",
 
-  // Tarea feat-portada-pagina-venta — pie de la portada. Páginas
-  // estáticas, nunca leen ni escriben nada. No hay texto de términos
-  // ni de cookies en producción (el de #391 es solo la privacidad).
+  // Tarea feat-portada-pagina-venta — pie de página de la página de
+  // venta ("/" sin sesión): hoy solo dicen "En preparación", sin
+  // texto legal real todavía. Páginas estáticas, nunca leen ni
+  // escriben nada (ver RUTAS_EXENTAS en scripts/verificar-permisos.test.ts).
   "/terminos",
+  "/privacidad",
   "/cookies",
 
   // Mercado Libre llama esta ruta directo, sin sesión de usuario, y
@@ -88,6 +86,14 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // de depender del middleware para la sesión no significa dejar de
   // exigirla, solo deja de exigirla con un mecanismo que se cuelga.
   "/api/ml/callback",
+
+  // Tarea "Publicar — conectar Canva" — mismo motivo exacto que
+  // /api/ml/callback arriba, mismo mecanismo (lib/canva/pkce-cookie.ts
+  // en vez de lib/ml/pkce-cookie.ts): la abre el navegador al volver
+  // del OAuth de Canva. Sigue en RUTAS_PROTEGIDAS en
+  // scripts/verificar-permisos.test.ts — pública solo del middleware,
+  // nunca sin sesión real ni sin permiso dentro de su propio handler.
+  "/api/canva/callback",
 
   // Z-MT-10 (issue #45) — sonda de salud para el monitor externo y
   // scripts/humo.sh, llamada sin sesión cada minuto. Pública a

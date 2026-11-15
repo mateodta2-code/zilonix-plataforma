@@ -1,0 +1,5 @@
+- **2026-10-30** — Inicio, bloque de Finanzas (Refs #143; tras el smoke de Sharel en staging; **sin migración**):
+  - **Publicidad invertida** y las barras de **Publicidad · inversión por cuenta** ahora traen todas las cuentas, incluida STOREKINGSAS. Se suma el costo de **nivel campaña**, la misma regla de `/panel/publicidad`, así que las dos pantallas cuadran.
+    - Antes se sumaba solo el total de nivel cuenta, y la sincronización no siempre lo guarda (cuando la respuesta de Mercado Libre es ambigua); esas cuentas quedaban afuera.
+    - Los dos niveles no se suman juntos, para no duplicar.
+  - Se quitó la tarjeta **«Cantidad de ventas de hoy»** del bloque: repetía «Ventas de hoy» de arriba, que sigue igual. «Cantidad de ventas del mes» se queda.

@@ -1,0 +1,9 @@
+- **2026-10-30** — Finanzas: nueva pantalla **Configuración de Finanzas** (`/panel/finanzas/configuracion`) para que cada empresa ponga su **valor fijo de envío Flex** por paquete (Refs #126, slice urgente; **sin migración**).
+  - **El problema:** sin ese valor, las ventas Flex no se congelan, ni siquiera el costo del producto. Salían «sin costo» y fuera de la utilidad aunque el SKU estuviera en la maestra (caso de Sharel en staging, 30-oct: el mismo Secador Iónico congelaba $42.900 por Agencia y salía «sin costo» por Flex).
+  - **La pantalla:**
+    - muestra el valor actual (o «sin configurar», con el aviso de qué pasa) y la regla de cada forma de entrega: Full $0, Agencia por SKU y Flex fijo;
+    - acepta montos como en la tabla maestra (10.000, $ 10.000, 9.999,50);
+    - guarda **solo** el valor Flex: IVA, plazo y avisos quedan como estaban, y el cambio queda en la bitácora con el valor anterior y el nuevo.
+  - **Permisos:** se ve con `finanzas.consultar` y se guarda con `finanzas.modificar` (Gerente, Auxiliar y Contador). La acción y la función de guardado lo vuelven a pedir.
+  - **A qué ventas aplica:** solo a las que se congelen desde ahora; las ya congeladas no cambian. Las Flex que hoy salen «sin costo» se congelan con este valor al usar «Traer ventas de este mes».
+  - Se llega desde un botón nuevo en `/panel/finanzas`.

@@ -11,27 +11,41 @@
 // donde corresponde.
 
 import { leerRetryAfterMs } from "@/lib/ml/reintento-429";
+import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 
 const BASE_URL = "https://api.mercadolibre.com";
 
-// Colombia, único país en alcance de esta tarea (Parte 1). Si algún
-// día se opera en otro país, esto pasa a depender del site_id de la
-// empresa, no antes — igual que DOMINIO_AUTORIZACION en lib/ml/oauth.ts.
-export const SITE_ID = "MCO";
+// Issue #315 (Z-LATAM-01) — pendiente, de Sharel, módulo de
+// Seguimiento: queda fijo SOLO para idsDePublicacionesDeVendedor/
+// obtenerPublicacionesVendedorAjenoMl (más abajo), que hoy no reciben
+// el site_id real de la cuenta desde lib/seguimiento/lector.ts ni
+// lib/trabajos/revisionDiariaSeguimiento.ts. El resto de usos de
+// SITE_ID en este archivo ya se migró a un parámetro siteId real
+// (obtenerSitioDeCuenta, lib/ml/cuentas.ts) — este queda como el único
+// hueco restante, documentado en docs/changelog/pendientes/.
+const SITE_ID_TEMPORAL_SEGUIMIENTO = "MCO";
 
 // Corrección de Pablo (PR #112): los id de producto/ítem y de
-// categoría de Mercado Libre Colombia siempre son "MCO" + dígitos; el
-// id de vendedor (user_id) es solo dígitos. Cualquier otra cosa no
+// categoría de Mercado Libre siempre son 3 letras mayúsculas (el
+// site_id real de la cuenta — MCO, MLM, MLA, MLB, MLC...) + dígitos;
+// el id de vendedor (user_id) es solo dígitos. Cualquier otra cosa no
 // puede venir de verdad de la API — se descarta ANTES de armar la URL,
 // nunca se pega texto sin validar a un fetch.
+//
+// Issue #315: antes fijaba "MCO" a mano, lo que rompía cualquier
+// cuenta con otro site_id (MLM, MLA...). Generalizado a 3 letras
+// mayúsculas + dígitos — sigue siendo un formato cerrado (nunca una
+// validación débil), solo que ya no asume el país de la cuenta de
+// Mateo. El site_id real de una cuenta se obtiene con
+// obtenerSitioDeCuenta (lib/ml/cuentas.ts), nunca se adivina acá.
 //
 // Tarea 2.11, punto 3 — mismos patrones, reusados tal cual (nunca
 // reinventados) para validar itemId/categoryId (publicar.ts, clip.ts,
 // estado-item.ts) y cuentaIdExterna (clip.ts) antes de que lleguen a
 // las funciones de ESCRITURA de abajo — ej. "MCO1/../users/me" no
 // cumple ninguno de los dos y nunca llega a armar una URL.
-export const PATRON_ID_PRODUCTO_O_ITEM = /^MCO\d+$/;
-export const PATRON_ID_CATEGORIA = /^MCO\d+$/;
+export const PATRON_ID_PRODUCTO_O_ITEM = /^[A-Z]{3}\d+$/;
+export const PATRON_ID_CATEGORIA = /^[A-Z]{3}\d+$/;
 export const PATRON_ID_VENDEDOR = /^\d+$/;
 
 // Tiempo máximo real por llamada — sin esto, una llamada colgada a
@@ -39,7 +53,7 @@ export const PATRON_ID_VENDEDOR = /^\d+$/;
 // cargando para siempre; con el AbortSignal, a los 8s se corta y se
 // trata como una respuesta no-ok (nunca una excepción no capturada).
 // Solo para LECTURA (pedir()) — una escritura necesita más tiempo, ver
-// TIMEOUT_ESCRITURA_MS/TIMEOUT_SUBIDA_CLIP_MS más abajo.
+// TIMEOUT_ESCRITURA_MS más abajo.
 const TIMEOUT_MS = 8_000;
 
 // Bug real: escribir() usaba el mismo TIMEOUT_MS de 8s de pedir() para
@@ -48,10 +62,8 @@ const TIMEOUT_MS = 8_000;
 // como fallida aunque el ítem SÍ se haya creado del otro lado (riesgo
 // real de publicación duplicada al reintentar). crearItemMl/
 // actualizarItemMl/agregarDescripcionItemMl usan este tiempo más
-// generoso; subirClipMl (video de hasta 280MB) usa
-// TIMEOUT_SUBIDA_CLIP_MS, bastante más largo todavía.
+// generoso.
 const TIMEOUT_ESCRITURA_MS = 30_000;
-const TIMEOUT_SUBIDA_CLIP_MS = 300_000;
 
 export class LimiteMercadoLibreError extends Error {
   readonly retryAfterMs: number | null;
@@ -349,8 +361,8 @@ export type ProductoCatalogoMl = { id: string; nombre: string | null; foto: stri
 // avanzar (es la primera llamada real de toda la cadena), así que sube
 // tal cual hasta la página — nunca "no se encontró nada", que sería
 // engañoso.
-export async function buscarProductosCatalogo(termino: string, token: string, offset = 0, limite = 20): Promise<ProductoCatalogoMl[]> {
-  const url = `${BASE_URL}/products/search?site_id=${SITE_ID}&q=${encodeURIComponent(termino)}&status=active&limit=${limite}&offset=${offset}`;
+export async function buscarProductosCatalogo(siteId: string, termino: string, token: string, offset = 0, limite = 20): Promise<ProductoCatalogoMl[]> {
+  const url = `${BASE_URL}/products/search?site_id=${encodeURIComponent(siteId)}&q=${encodeURIComponent(termino)}&status=active&limit=${limite}&offset=${offset}`;
   const resp = await pedir<{ results?: unknown[] }>(url, token);
   if (!resp.ok) {
     if (resp.status === 404) return [];
@@ -386,8 +398,8 @@ export type CategoriaMl = { categoryId: string };
 // categoría si el segundo o tercer intento sí responde. 401 (token
 // inválido de verdad) nunca se reintenta — no tiene sentido, el
 // siguiente intento fallaría igual.
-export async function resolverCategoria(termino: string, token: string): Promise<CategoriaMl | null> {
-  const url = `${BASE_URL}/sites/${SITE_ID}/domain_discovery/search?q=${encodeURIComponent(termino)}&limit=1`;
+export async function resolverCategoria(siteId: string, termino: string, token: string): Promise<CategoriaMl | null> {
+  const url = `${BASE_URL}/sites/${encodeURIComponent(siteId)}/domain_discovery/search?q=${encodeURIComponent(termino)}&limit=1`;
   for (let intento = 0; intento < 3; intento++) {
     if (intento > 0) await esperar(800 * intento);
     try {
@@ -432,12 +444,17 @@ export type ItemDestacadoMl = { id: string; tipo: string };
 // (estricto, el que de verdad protege la URL) sigue en obtenerProducto/
 // obtenerItemMl — cada id pasa por esa validación recién cuando se usa
 // de verdad, nunca antes. Acá solo se exige el mínimo sensato (un
-// string que empiece por "MCO" — nunca basura que ni eso cumple).
-const PATRON_ID_DESTACADO = /^MCO[A-Z0-9]+$/i;
+// string que empiece por el site_id real de la cuenta — nunca basura
+// que ni eso cumple).
+//
+// Issue #315 — igual que PATRON_ID_PRODUCTO_O_ITEM (PR #354), el
+// prefijo ya no fija "MCO": cualquier site_id real (3 letras
+// mayúsculas) cumple.
+const PATRON_ID_DESTACADO = /^[A-Z]{3}[A-Z0-9]+$/i;
 
-export async function obtenerMejoresProductosCategoria(categoryId: string, token: string): Promise<ItemDestacadoMl[]> {
+export async function obtenerMejoresProductosCategoria(siteId: string, categoryId: string, token: string): Promise<ItemDestacadoMl[]> {
   if (!PATRON_ID_CATEGORIA.test(categoryId)) return [];
-  const url = `${BASE_URL}/highlights/${SITE_ID}/category/${encodeURIComponent(categoryId)}`;
+  const url = `${BASE_URL}/highlights/${encodeURIComponent(siteId)}/category/${encodeURIComponent(categoryId)}`;
   try {
     const resp = await pedir<{ content?: unknown[] }>(url, token);
     if (!resp.ok) return [];
@@ -770,13 +787,13 @@ export async function obtenerVendedor(sellerId: string, token: string): Promise<
   }
 }
 
-// Link real de la publicación — confirmado en producción (zilonix-os-web):
-// articulo.mercadolibre.com.co/MCO-{numero} redirige a la ficha exacta,
-// sin pasar por /items/{id} (que da 403 para publicaciones ajenas).
-export function linkPublicacion(itemId: string): string | null {
-  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  return `https://articulo.mercadolibre.com.co/${itemId.replace(/^MCO(\d+)$/, "MCO-$1")}`;
-}
+// Revisión de Pablo (PR #310) — se movió a lib/ml/permalink.ts (sin
+// dependencias de servidor) para que un componente "use client"
+// pueda importarla sin arrastrar este archivo completo. Re-exportada
+// acá para no tocar los demás llamadores que ya la importan de
+// "@/lib/ml/cliente" (app/panel/publicar/formulario-logica.ts,
+// lib/publicidad/consultas.ts, etc.).
+export { linkPublicacion } from "@/lib/ml/permalink";
 
 // ---------- Tarea 2.11 ("Publicar producto y clip") ----------
 //
@@ -959,7 +976,7 @@ export async function buscarItemsPorSkuMl(cuentaIdExterna: string, sku: string, 
 // GET /items/{id}?attributes=id,title,thumbnail — detalle mínimo de
 // una publicación ya encontrada (por sku o por itemId directo). null
 // si Mercado Libre no puede traerlo — el llamador decide el respaldo
-// (ej. clip.ts cae al propio itemId como título).
+// (ej. buscar-item-por-sku.ts cae al propio itemId como título).
 export async function leerItemBasicoMl(itemId: string, token: string): Promise<{ title: string | null; thumbnail: string | null } | null> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
   const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail`;
@@ -969,16 +986,6 @@ export async function leerItemBasicoMl(itemId: string, token: string): Promise<{
     title: typeof resp.data.title === "string" ? resp.data.title : null,
     thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
   };
-}
-
-// POST /marketplace/items/{id}/clips/upload — multipart/form-data,
-// contrato real documentado por Mercado Libre ("Working with Clips").
-// Video de hasta 280MB — usa TIMEOUT_SUBIDA_CLIP_MS, no el de
-// escritura normal.
-export async function subirClipMl(itemId: string, token: string, form: FormData): Promise<{ ok: boolean; status: number; textoCrudo: string }> {
-  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
-  const r = await escribir(`${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips/upload`, token, "POST", form, TIMEOUT_SUBIDA_CLIP_MS);
-  return { ok: r.ok, status: r.status, textoCrudo: r.textoCrudo };
 }
 
 // Issue #175 — lector real del seguimiento diario. Confirmado en vivo
@@ -1112,7 +1119,10 @@ async function idsDePublicacionesDeVendedor(sellerId: string, token: string): Pr
   } catch (e) {
     if (!(e instanceof MlSinPermisoAppError)) throw e;
   }
-  const urlPublico = `${BASE_URL}/sites/${SITE_ID}/search?seller_id=${encodeURIComponent(sellerId)}&limit=${TOPE_PUBLICACIONES_TIENDA}`;
+  // Pendiente (Refs #315, de Sharel): este site_id debería salir de la
+  // cuenta real (obtenerSitioDeCuenta), no fijo — ver
+  // SITE_ID_TEMPORAL_SEGUIMIENTO más arriba.
+  const urlPublico = `${BASE_URL}/sites/${SITE_ID_TEMPORAL_SEGUIMIENTO}/search?seller_id=${encodeURIComponent(sellerId)}&limit=${TOPE_PUBLICACIONES_TIENDA}`;
   try {
     const respPublico = await pedir<{ results?: unknown[] }>(urlPublico, token);
     if (!respPublico.ok) return null; // cualquier no-ok, no solo 403 — sin dato, nunca "cero publicaciones" inventado
@@ -1242,46 +1252,395 @@ export async function leerDescripcionItemMl(itemId: string, token: string): Prom
   }
 }
 
-// Rama feat-publicar-clip, punto 5 ("estado de moderación") — avisado
-// antes de tocar este archivo (CLAUDE.md). GET /marketplace/items/{id}/clips,
-// documentado por Mercado Libre ("Working with Clips"): devuelve
-// moderation_status (UNDER_REVIEW, PUBLISHED o REJECTED) por clip.
-// Advertencia explícita heredada de subirClipMl (ESTE módulo nunca se
-// confirmó contra una cuenta real con un clip de verdad ya moderado):
-// la forma exacta del cuerpo (¿un array suelto? ¿{results:[...]}?
-// ¿el motivo de un REJECTED viene en `rejection_reason`, `reason` o no
-// viene?) está documentada acá tal como la da la documentación
-// oficial, nunca confirmada en vivo — se parsea TODO de forma
-// defensiva (unknown -> tipo, nunca un cast ciego) para que un campo
-// real distinto al esperado nunca tire un 500, solo deje ese campo en
-// null.
-export type EstadoModeracionClip = "UNDER_REVIEW" | "PUBLISHED" | "REJECTED" | string;
-export type ClipMl = { clipUuid: string | null; moderationStatus: EstadoModeracionClip | null; motivoRechazo: string | null };
+// ---------- Rama feat-promociones (motor portado de zilonix-os-web,
+// lib/mercadolibre-promo.js — ver docs/investigacion/promociones-mercado-libre.md
+// de ese repo para la evidencia real citada en cada regla) ----------
 
-function clipsDesdeRespuesta(data: unknown): ClipMl[] {
-  const lista = Array.isArray(data) ? data : Array.isArray((data as { results?: unknown[] })?.results) ? (data as { results: unknown[] }).results : [];
-  return lista.map((crudo) => {
-    const c = crudo as { clip_uuid?: unknown; id?: unknown; moderation_status?: unknown; status?: unknown; rejection_reason?: unknown; reason?: unknown };
-    const clipUuid = typeof c.clip_uuid === "string" ? c.clip_uuid : typeof c.id === "string" ? c.id : null;
-    const moderationStatus = typeof c.moderation_status === "string" ? c.moderation_status : typeof c.status === "string" ? c.status : null;
-    const motivoRechazo = typeof c.rejection_reason === "string" ? c.rejection_reason : typeof c.reason === "string" ? c.reason : null;
-    return { clipUuid, moderationStatus, motivoRechazo };
-  });
+// GET /users/{cuentaIdExterna}/items/search?status=active — UNA página
+// (el llamador, lib/trabajos/buscarPromocionesMultiCuenta.ts, pagina él
+// mismo para poder reportar progreso real y nunca con un tope fijo de
+// antemano, al revés de la versión vieja de Zilonix OS que paraba en
+// 250 productos).
+export type PaginaItemsActivosMl = { ids: string[]; totalCatalogo: number };
+
+export async function listarItemsActivosMl(cuentaIdExterna: string, token: string, offset: number, limite = 50): Promise<PaginaItemsActivosMl> {
+  exigirId(cuentaIdExterna, PATRON_ID_VENDEDOR, "cuentaIdExterna");
+  const url = `${BASE_URL}/users/${encodeURIComponent(cuentaIdExterna)}/items/search?status=active&limit=${limite}&offset=${offset}`;
+  const resp = await pedir<{ results?: unknown[]; paging?: { total?: unknown } }>(url, token);
+  if (!resp.ok) throw new Error(`No se pudo listar publicaciones activas de Mercado Libre (HTTP ${resp.status}).`);
+  const ids = Array.isArray(resp.data.results) ? resp.data.results.filter((r): r is string => typeof r === "string") : [];
+  const totalCatalogo = typeof resp.data.paging?.total === "number" ? resp.data.paging.total : ids.length;
+  return { ids, totalCatalogo };
 }
 
-// null = Mercado Libre no dejó ver el estado (403/404/5xx) — distinto
-// de [] (sí respondió, de verdad no hay ningún clip todavía en esta
-// publicación). El llamador (lib/trabajos/subirClipMultiCuenta.ts)
-// nunca confunde los dos casos.
-export async function obtenerClipsMl(itemId: string, token: string): Promise<ClipMl[] | null> {
+// Detalle mínimo que necesita Promociones de un item — NO reusa
+// leerItemCompletoMl (nunca se le agrega `variations` a esa función
+// compartida solo para esto, para no cambiarle el contrato a sus
+// llamadores ya existentes y probados) — mismo criterio que
+// buscarItemParaClip en su momento, un wrapper propio en vez de tocar
+// uno compartido.
+export type ItemParaPromocionMl = {
+  title: string | null;
+  thumbnail: string | null;
+  skuCodigo: string | null;
+  tieneVariantes: boolean;
+  // Review de Pablo (PR #304) — true cuando el ítem tiene variaciones
+  // con SKU distinto entre sí: no hay forma honesta de elegir "la"
+  // variación para calcular un solo piso, así que skuCodigo queda
+  // null (nunca se toma la primera a ciegas) y el motor (lib/ml/promociones.ts)
+  // usa esto para dejar un motivo específico, distinto del genérico
+  // "tiene variantes".
+  skuVariantesDistintas: boolean;
+  // Tarea "Promociones real" (Refs #295) — precio y stock del ítem tal
+  // cual lo tiene Mercado Libre HOY, nunca el de una promoción (que ya
+  // viene en PromocionCrudaMl). Lo necesita la lista de publicaciones
+  // para mostrar "Sin promoción" con su precio/stock reales, sin tener
+  // que pedir el ítem una segunda vez.
+  precio: number | null;
+  stock: number | null;
+};
+
+type AtributoMl = { id?: unknown; value_name?: unknown };
+type VariacionMl = { attributes?: unknown; seller_custom_field?: unknown };
+
+// Bug real (rama feat-promociones-aprobacion): esta función solo leía
+// `seller_custom_field` — muchas empresas (confirmado en staging,
+// sharel/FMCBIENESTAR) cargan el SKU como atributo `SELLER_SKU`, no en
+// ese campo, y el precio mínimo de Finanzas nunca se encontraba
+// ("Falta precio mínimo" aunque el SKU sí existiera en la maestra).
+// Mismo criterio ya confirmado real en lib/ml/costos-item.ts:55-63
+// (skuDe): `attributes` con id `SELLER_SKU` manda sobre
+// `seller_custom_field`, nunca al revés.
+function skuDeAtributos(atributos: unknown): string | null {
+  if (!Array.isArray(atributos)) return null;
+  for (const atributo of atributos) {
+    if (!atributo || typeof atributo !== "object") continue;
+    const fila = atributo as AtributoMl;
+    if (fila.id === "SELLER_SKU" && typeof fila.value_name === "string" && fila.value_name.trim()) return fila.value_name.trim();
+  }
+  return null;
+}
+
+function skuDeVariacion(variacion: VariacionMl | undefined): string | null {
+  if (!variacion) return null;
+  const deAtributos = skuDeAtributos(variacion.attributes);
+  if (deAtributos) return deAtributos;
+  return typeof variacion.seller_custom_field === "string" && variacion.seller_custom_field.trim() ? variacion.seller_custom_field.trim() : null;
+}
+
+export async function leerItemParaPromocionMl(itemId: string, token: string): Promise<ItemParaPromocionMl | null> {
   if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return null;
-  const url = `${BASE_URL}/marketplace/items/${encodeURIComponent(itemId)}/clips`;
+  const url = `${BASE_URL}/items/${encodeURIComponent(itemId)}?attributes=id,title,thumbnail,price,available_quantity,seller_custom_field,attributes,variations`;
   try {
-    const resp = await pedir<unknown>(url, token);
-    if (!resp.ok) return resp.status === 404 ? [] : null;
-    return clipsDesdeRespuesta(resp.data);
+    const resp = await pedir<{
+      title?: unknown;
+      thumbnail?: unknown;
+      price?: unknown;
+      available_quantity?: unknown;
+      seller_custom_field?: unknown;
+      attributes?: unknown;
+      variations?: VariacionMl[];
+    }>(url, token);
+    if (!resp.ok) return null;
+    const variaciones = Array.isArray(resp.data.variations) ? resp.data.variations : [];
+    const tieneVariantes = variaciones.length > 0;
+
+    // Review de Pablo (PR #304) — bug real evitado acá: con variaciones,
+    // el vendedor puede cargar un SELLER_SKU DISTINTO por cada una —
+    // tomar "la primera que tenga uno" a ciegas podía calcular el piso
+    // con el SKU de una variante y mostrarlo como si fuera de todo el
+    // ítem. Se normalizan TODAS las que traen un SKU propio y se
+    // comparan: si son todas la misma, se usa esa (sigue normal); si
+    // hay más de una distinta, skuCodigo queda null (nunca se adivina
+    // cuál es "la" correcta) y skuVariantesDistintas avisa por qué.
+    const skusDeVariaciones = new Set(
+      variaciones
+        .map((variacion) => skuDeVariacion(variacion))
+        .filter((s): s is string => s !== null)
+        .map((s) => normalizarSkuCodigo(s))
+    );
+    let skuCodigo: string | null = null;
+    let skuVariantesDistintas = false;
+    if (skusDeVariaciones.size > 1) {
+      skuVariantesDistintas = true;
+    } else if (skusDeVariaciones.size === 1) {
+      skuCodigo = [...skusDeVariaciones][0]!;
+    } else {
+      // Ninguna variación trae SKU propio — cae al mismo fallback que
+      // un ítem sin variantes (SKU del ítem padre).
+      const skuCrudo = skuDeAtributos(resp.data.attributes) ?? (typeof resp.data.seller_custom_field === "string" && resp.data.seller_custom_field.trim() ? resp.data.seller_custom_field.trim() : null);
+      skuCodigo = skuCrudo ? normalizarSkuCodigo(skuCrudo) : null;
+    }
+
+    return {
+      title: typeof resp.data.title === "string" ? resp.data.title : null,
+      thumbnail: typeof resp.data.thumbnail === "string" ? resp.data.thumbnail : null,
+      skuCodigo,
+      tieneVariantes,
+      skuVariantesDistintas,
+      precio: typeof resp.data.price === "number" && resp.data.price > 0 ? resp.data.price : null,
+      stock: typeof resp.data.available_quantity === "number" && resp.data.available_quantity >= 0 ? resp.data.available_quantity : null,
+    };
   } catch (e) {
     if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return null;
     throw e;
   }
+}
+
+// GET /seller-promotions/items/{itemId}?app_version=v2 — confirmado
+// contra el código real de zilonix-os-web.
+export type PromocionCrudaMl = {
+  type?: unknown;
+  status?: unknown;
+  id?: unknown;
+  price?: unknown;
+  original_price?: unknown;
+  suggested_discounted_price?: unknown;
+  meli_percentage?: unknown;
+  max_discounted_price?: unknown;
+  start_date?: unknown;
+  finish_date?: unknown;
+};
+
+// Bug real en vivo (rama fix-promociones-buscar, Refs #44): en staging,
+// una empresa dio "Buscar" y la búsqueda terminó "Listo (0/N)" sin
+// ningún candidato, sin ningún error visible — la sospecha fuerte
+// (confirmada acá) es que la versión vieja de esta función devolvía
+// `null` para CUALQUIER caso que no fuera un array real: una
+// publicación sin promociones aplicables (404 — legítimo), un 403 de
+// la app sin el scope de Promociones, un 401 de la cuenta, o cualquier
+// otro !ok — los 4 casos se veían EXACTAMENTE igual río abajo
+// (ítem saltado, sin candidato, sin rastro). Ahora cada caso se
+// distingue de verdad:
+// - "ok": respondió bien (200 con array real, o 404 — una publicación
+//   sin ninguna promoción aplicable es una respuesta legítima de este
+//   endpoint, confirmado real, nunca un fallo).
+// - "sin_permiso": 403 (MlSinPermisoAppError) — la APP no tiene el
+//   scope de Promociones para esta cuenta. Si se repite en varios
+//   ítems de la misma cuenta, es la causa real de un "Listo (0/N)"
+//   silencioso (ver buscarPromocionesCuenta, que cuenta esto y frena
+//   la cuenta en vez de recorrer todo el catálogo a ciegas).
+// - "no_autorizado": 401 (MlNoAutorizadoError) — el token ya no es
+//   válido (no debería pasar, obtenerAccessTokenVigente ya lo
+//   refresca antes de llegar acá; si pasa, es señal real de que la
+//   cuenta hay que reconectarla).
+// - "otro_error": 5xx (MlNoDisponibleError, sin status propio) o
+//   cualquier otro !ok inesperado (con su status real).
+export type ResultadoPromocionesItemMl =
+  | { estado: "ok"; promociones: PromocionCrudaMl[] }
+  | { estado: "sin_permiso" }
+  | { estado: "no_autorizado" }
+  | { estado: "otro_error"; status: number | null };
+
+export async function leerPromocionesItemMl(itemId: string, token: string): Promise<ResultadoPromocionesItemMl> {
+  if (!PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return { estado: "ok", promociones: [] };
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
+  try {
+    const resp = await pedir<unknown>(url, token);
+    if (!resp.ok) {
+      if (resp.status === 404) return { estado: "ok", promociones: [] };
+      return { estado: "otro_error", status: resp.status };
+    }
+    return { estado: "ok", promociones: Array.isArray(resp.data) ? (resp.data as PromocionCrudaMl[]) : [] };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError) return { estado: "sin_permiso" };
+    if (e instanceof MlNoAutorizadoError) return { estado: "no_autorizado" };
+    if (e instanceof MlNoDisponibleError) return { estado: "otro_error", status: null };
+    throw e;
+  }
+}
+
+export type RespuestaPromocionMl = { ok: boolean; status: number; textoCrudo: string };
+
+// Rama fix-promociones-aprobar-no-ejecuta, punto 4 — bug real
+// encontrado al diagnosticar el 400 de VITALCLOROFULL (cuenta
+// sharel): cuando Mercado Libre rechaza un POST/PUT de Promociones,
+// el cuerpo real de la respuesta SÍ llegaba hasta acá (`textoCrudo`),
+// pero el llamador (lib/ml/promocionesEjecucion.ts) lo descartaba y
+// solo guardaba "Mercado Libre respondió 400." — un mensaje inútil
+// para diagnosticar nada. Las respuestas de error reales de Mercado
+// Libre suelen traer `message`/`error` sueltos o un array `cause` con
+// el detalle real por campo (ej. `[{"code":"...", "message":"deal_price
+// must be..."}]`) — se prefiere `cause` cuando existe (más específico),
+// cae a `message`/`error` si no.
+export function motivoErrorEscrituraMl(textoCrudo: string): string | null {
+  if (!textoCrudo) return null;
+  try {
+    const json = JSON.parse(textoCrudo) as { message?: unknown; error?: unknown; cause?: unknown };
+    if (Array.isArray(json.cause) && json.cause.length > 0) {
+      const motivos = json.cause
+        .map((c) => (c && typeof c === "object" ? (c as { message?: unknown; description?: unknown }).message ?? (c as { description?: unknown }).description : null))
+        .filter((m): m is string => typeof m === "string" && m.length > 0);
+      if (motivos.length > 0) return motivos.join(" / ").slice(0, 400);
+    }
+    if (typeof json.message === "string" && json.message) return json.message.slice(0, 400);
+    if (typeof json.error === "string" && json.error) return json.error.slice(0, 400);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// "participar" (unirse por primera vez) — POST, confirmado real en
+// zilonix-os-web (una promoción pasó a "started"). `top_deal_price`
+// nunca se manda (bug real ya corregido ahí: se creía obligatorio,
+// una prueba real confirmó que es opcional y activa un precio
+// exclusivo "Meli+" no deseado).
+export async function participarPromocionMl(
+  itemId: string,
+  token: string,
+  body: { promotion_id: string; promotion_type: string; deal_price: number; start_date: string; finish_date: string }
+): Promise<RespuestaPromocionMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
+  const { ok, status, textoCrudo } = await escribir<unknown>(url, token, "POST", body);
+  return { ok, status, textoCrudo };
+}
+
+// "modificar" (ya participaba, solo cambia el precio) — PUT,
+// confirmado real en zilonix-os-web (probado 12/12 exitosas).
+export async function modificarPromocionMl(
+  itemId: string,
+  token: string,
+  body: { promotion_id: string; promotion_type: string; deal_price: number }
+): Promise<RespuestaPromocionMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2`;
+  const { ok, status, textoCrudo } = await escribir<unknown>(url, token, "PUT", body);
+  return { ok, status, textoCrudo };
+}
+
+// "salir" (dejar una promoción activa) — **SIN CONFIRMAR contra una
+// cuenta real** (al revés de participar/modificar, que sí vienen
+// probados en producción de zilonix-os-web — ese sistema nunca tuvo
+// esta acción). Se intenta con DELETE sobre el mismo endpoint, mismo
+// patrón real de la API de Promociones que ya confirmaron POST/PUT —
+// es la forma más consistente con el resto del contrato, pero NUNCA
+// se trató como un hecho confirmado: si Mercado Libre responde algo
+// inesperado, el error real queda visible tal cual (nunca se traga ni
+// se adivina otra forma por detrás). Antes de ir a producción con
+// esta acción habilitada, confirmar en vivo contra una cuenta de
+// prueba.
+export async function salirDePromocionMl(itemId: string, token: string, promotionId: string, promotionType: string): Promise<RespuestaPromocionMl> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const url = `${BASE_URL}/seller-promotions/items/${encodeURIComponent(itemId)}?app_version=v2&promotion_id=${encodeURIComponent(promotionId)}&promotion_type=${encodeURIComponent(promotionType)}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_ESCRITURA_MS) });
+  } catch {
+    return { ok: false, status: 0, textoCrudo: "" };
+  }
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
+  const textoCrudo = await res.text().catch(() => "");
+  return { ok: res.ok, status: res.status, textoCrudo };
+}
+
+// ---------- Fase 1 de Despachos (issue "Despachos") ----------
+//
+// Hasta esta tarea, lib/ml/despachos.ts tenía sus propios fetch
+// sueltos contra api.mercadolibre.com (GET /shipments/{id} y GET
+// /shipment_labels) — regla de CLAUDE.md incumplida, igual que
+// publicar.ts/clip.ts/estado-item.ts antes de la tarea 2.11. Se
+// centralizan acá, reusando pedirLecturaMl() (ya existente) para las
+// 2 lecturas JSON y un helper nuevo (pedirBinarioMl) para el PDF, que
+// NUNCA es JSON — pedir()/pedirLecturaMl() siempre hacen
+// `await res.json()`, así que no sirven para esto.
+//
+// Shipment id: siempre solo dígitos (BIGINT real de Mercado Libre,
+// confirmado en despachos_ml.shipment_id_externo) — mismo criterio
+// que PATRON_ID_VENDEDOR, nunca se reusa ese porque son conceptos
+// distintos (un vendedor vs. un envío), aunque el patrón sea igual.
+export const PATRON_ID_ENVIO = /^\d+$/;
+
+export type ShipmentMl = { status: string | null; substatus: string | null; logisticType: string | null };
+
+// GET /shipments/{id} — confirmado contra el código real ya en
+// producción (zilonix-os-web, lib/mercadolibre-despachos.js): trae el
+// estado real del envío (status/substatus) y el tipo de logística
+// (self_service=Flex, xd_drop_off=Agencia/Places, cross_docking=Colecta,
+// fulfillment=Full, excluido de Despachos). Se llama al sincronizar un
+// pedido nuevo o un aviso de envío — nunca en vivo en cada carga de la
+// pantalla de Despachos (eso lee despachos_ml, ya sincronizado).
+export async function obtenerShipmentMl(shipmentIdExterno: string, token: string): Promise<ShipmentMl> {
+  const id = exigirId(shipmentIdExterno, PATRON_ID_ENVIO, "shipmentId");
+  const resp = await pedirLecturaMl<{ status?: unknown; substatus?: unknown; logistic_type?: unknown }>(`/shipments/${encodeURIComponent(id)}`, token);
+  if (!resp.ok) throw new Error(`No se pudo leer el envío ${id} en Mercado Libre (HTTP ${resp.status}).`);
+  return {
+    status: typeof resp.data.status === "string" ? resp.data.status : null,
+    substatus: typeof resp.data.substatus === "string" ? resp.data.substatus : null,
+    logisticType: typeof resp.data.logistic_type === "string" ? resp.data.logistic_type : null,
+  };
+}
+
+export type SlaEnvioMl = { status: string | null; expectedDate: string | null };
+
+// GET /shipments/{id}/sla — confirmado contra el código real ya en
+// producción: "expected_date" es la hora límite real para dejarlo en
+// la agencia/recogida; "status" es "on_time" o "delayed" si ya se
+// pasó. No todo envío tiene SLA (ej. un acuerdo directo con el
+// comprador, o un tipo de logística sin plazo) — se tolera cualquier
+// fallo (404 o lo que sea) devolviendo los 2 campos en null, nunca se
+// lanza: el SLA es un dato COMPLEMENTARIO, nunca bloquea sincronizar
+// el resto del envío.
+export async function obtenerSlaEnvioMl(shipmentIdExterno: string, token: string): Promise<SlaEnvioMl> {
+  const id = exigirId(shipmentIdExterno, PATRON_ID_ENVIO, "shipmentId");
+  try {
+    const resp = await pedirLecturaMl<{ status?: unknown; expected_date?: unknown }>(`/shipments/${encodeURIComponent(id)}/sla`, token);
+    if (!resp.ok) return { status: null, expectedDate: null };
+    return {
+      status: typeof resp.data.status === "string" ? resp.data.status : null,
+      expectedDate: typeof resp.data.expected_date === "string" ? resp.data.expected_date : null,
+    };
+  } catch (e) {
+    if (e instanceof MlSinPermisoAppError || e instanceof MlNoDisponibleError) return { status: null, expectedDate: null };
+    throw e;
+  }
+}
+
+export type RespuestaBinarioMl = { ok: true; data: ArrayBuffer } | { ok: false; status: number; textoCrudo: string };
+
+// Hermano de pedirLecturaMl, para una respuesta que NUNCA es JSON (el
+// PDF real de la guía) — mismo chequeo de ruta/429/timeout, pero
+// devuelve el ArrayBuffer crudo en éxito, o el texto crudo del error
+// (que SÍ suele ser JSON con el motivo real de Mercado Libre, ej.
+// "NOT_PRINTABLE_STATUS") para que el llamador decida qué significa,
+// sin que este cliente genérico tenga que conocer esa semántica.
+export async function pedirBinarioMl(ruta: string, token: string, query?: string): Promise<RespuestaBinarioMl> {
+  if (!ruta.startsWith("/") || ruta.includes("..") || ruta.includes("://") || ruta.includes("?")) {
+    throw new Error("Ruta de Mercado Libre inválida — no se llamó a la API.");
+  }
+  if (query && !query.startsWith("?")) {
+    throw new Error("Query de Mercado Libre inválida — no se llamó a la API.");
+  }
+  const url = `${BASE_URL}${ruta}${query ?? ""}`;
+  const endpoint = endpointSinQuery(url);
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch {
+    console.warn(`[lib/ml/cliente] ${endpoint} — tiempo agotado o falla de red`);
+    throw new MlNoDisponibleError();
+  }
+  if (res.status === 429) throw new LimiteMercadoLibreError(retryAfterDe(res));
+  if (res.status === 401) {
+    console.warn(`[lib/ml/cliente] ${endpoint} — 401`);
+    throw new MlNoAutorizadoError();
+  }
+  if (!res.ok) {
+    const textoCrudo = await res.text().catch(() => "");
+    return { ok: false, status: res.status, textoCrudo };
+  }
+  return { ok: true, data: await res.arrayBuffer() };
+}
+
+// GET /shipment_labels?shipment_ids=X,Y,Z&response_type=pdf — confirmado
+// en producción: acepta varios shipment_ids de una vez (la impresión
+// masiva de siempre), y ES el mismo PDF que se usa para "Ver guía" de
+// un solo envío (un arreglo de un elemento). Nunca se llama para un
+// envío de tipo "fulfillment" (Full) — Mercado Libre lo rechaza con
+// "INVALID_SHIPMENT_FF_PUBLIC", confirmado en producción; el llamador
+// (lib/ml/despachos.ts) nunca deja llegar un Full hasta acá.
+export async function obtenerEtiquetaPdfMl(shipmentIdsExternos: string[], token: string): Promise<RespuestaBinarioMl> {
+  const ids = shipmentIdsExternos.map((id) => exigirId(id, PATRON_ID_ENVIO, "shipmentId"));
+  return pedirBinarioMl("/shipment_labels", token, `?shipment_ids=${ids.join(",")}&response_type=pdf`);
 }

@@ -82,6 +82,13 @@ export function BarraLateral({ grupos }: { grupos: GrupoNav[] }) {
           {iconoDeClave("cuenta", { size: 16 })}
           {!colapsada && <span className={styles.etiquetaCuadrado}>Mi cuenta</span>}
         </Link>
+        {/* Issue #318 — exportar/borrar los datos propios (Ley 1581),
+        junto a "Mi cuenta": ninguno de los dos es un módulo de negocio
+        de ninguna empresa. */}
+        <Link href="/panel/mis-datos" className={styles.botonCuadrado} title="Mis datos personales">
+          {iconoDeClave("datosPersonales", { size: 16 })}
+          {!colapsada && <span className={styles.etiquetaCuadrado}>Mis datos</span>}
+        </Link>
         <SelectorTema variante="cuadrado" />
         <button type="button" onClick={alternarColapso} className={styles.botonCuadrado} title={colapsada ? "Expandir" : "Contraer"}>
           <IconoContraer size={16} />

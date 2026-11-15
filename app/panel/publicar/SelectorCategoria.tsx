@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 
 export type CategoriaElegida = { categoryId: string; categoryName: string };
-type ResultadoBusqueda = { categoryId: string; categoryName: string; domainName: string | null };
+type ResultadoBusqueda = { categoryId: string; categoryName: string; esHoja: boolean; pathFromRoot: { id: string; name: string }[] };
 type NodoArbol = {
   categoryId: string;
   categoryName: string;
@@ -16,14 +16,17 @@ type NodoArbol = {
 };
 
 // ADENDO UX de Publicar, punto 2 — "buscador de categoría sobre
-// buscarCategorias de lib/ml/publicar.ts + override manual. Árbol de
-// categorías: UI + ruta que liste raíces/hijos". Dos caminos, el mismo
-// que ya usa Zilonix OS actual cuando la detección automática
+// buscarCategoriasPorNombre de lib/ml/publicar.ts + override manual.
+// Árbol de categorías: UI + ruta que liste raíces/hijos". Dos caminos,
+// el mismo que ya usa Zilonix OS actual cuando la detección automática
 // (resolverCategoria, que corre sola al pedir "Detectar") se equivoca:
-// 1) buscar por texto propio, 2) navegar el árbol real nivel por
-// nivel. Elegir cualquiera de los dos dispara `onElegir`, que el
-// formulario usa para refrescar las características de ESA categoría
-// (nunca mezclado con la detección automática en silencio).
+// 1) buscar por NOMBRE real de categoría (con debounce mientras se
+// escribe), 2) navegar el árbol real nivel por nivel. Elegir cualquiera
+// de los dos dispara `onElegir`, que el formulario usa para refrescar
+// las características de ESA categoría (nunca mezclado con la
+// detección automática en silencio).
+const DEBOUNCE_BUSQUEDA_MS = 350;
+
 export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | null; onElegir: (categoria: CategoriaElegida) => void }) {
   const [modo, setModo] = useState<"cerrado" | "buscar" | "arbol">("cerrado");
   const [texto, setTexto] = useState("");
@@ -31,13 +34,17 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
   const [nodo, setNodo] = useState<NodoArbol | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const timerDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function buscar() {
-    if (!cuentaId || !texto.trim()) return;
+  async function buscar(textoBuscado: string) {
+    if (!cuentaId || !textoBuscado.trim()) {
+      setResultados(null);
+      return;
+    }
     setCargando(true);
     setError(null);
     try {
-      const resp = await fetch(`/api/ml/publicar/categorias/buscar?cuentaId=${encodeURIComponent(cuentaId)}&texto=${encodeURIComponent(texto)}`);
+      const resp = await fetch(`/api/ml/publicar/categorias/buscar?cuentaId=${encodeURIComponent(cuentaId)}&texto=${encodeURIComponent(textoBuscado)}`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error ?? "No se pudo buscar.");
       setResultados(data.resultados);
@@ -47,6 +54,24 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
       setCargando(false);
     }
   }
+
+  // Búsqueda mientras se escribe, con debounce — la primera búsqueda
+  // por sitio puede tardar porque recorre el árbol real una sola vez
+  // (después queda cacheada, lib/ml/publicar.ts), así que no conviene
+  // disparar una llamada por cada tecla.
+  useEffect(() => {
+    if (modo !== "buscar") return;
+    if (timerDebounce.current) clearTimeout(timerDebounce.current);
+    if (!texto.trim()) {
+      setResultados(null);
+      return;
+    }
+    timerDebounce.current = setTimeout(() => void buscar(texto), DEBOUNCE_BUSQUEDA_MS);
+    return () => {
+      if (timerDebounce.current) clearTimeout(timerDebounce.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [texto, modo, cuentaId]);
 
   async function navegarArbol(categoryId?: string) {
     if (!cuentaId) return;
@@ -97,12 +122,12 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
           Navegar el árbol de categorías
         </Boton>
       </div>
-      {!cuentaId && <p style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Elegí al menos una cuenta primero.</p>}
+      {!cuentaId && <p style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Elige al menos una cuenta primero.</p>}
       {error && <p style={{ fontSize: 13, color: "#b00020", marginTop: 8 }}>{error}</p>}
 
       {modo === "buscar" && (
         <div style={{ marginTop: 10 }}>
-          <Campo etiqueta="Texto a buscar (ej. 'reloj digital hombre')">
+          <Campo etiqueta="Nombre de la categoría (ej. 'Belleza')">
             <div style={{ display: "flex", gap: 8 }}>
               <input
                 className="zx-control"
@@ -111,26 +136,49 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    void buscar();
+                    void buscar(texto);
                   }
                 }}
               />
-              <Boton type="button" chico onClick={buscar} disabled={cargando}>
+              <Boton type="button" chico onClick={() => void buscar(texto)} disabled={cargando}>
                 {cargando ? "Buscando…" : "Buscar"}
               </Boton>
             </div>
           </Campo>
           {resultados && (
             <ul style={{ listStyle: "none", padding: 0, marginTop: 8 }}>
-              {resultados.length === 0 && <li style={{ fontSize: 13, opacity: 0.7 }}>Sin resultados para ese texto.</li>}
+              {resultados.length === 0 && <li style={{ fontSize: 13, opacity: 0.7 }}>No se encontraron categorías con ese nombre.</li>}
               {resultados.map((r) => (
                 <li key={r.categoryId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: 13 }}>
                   <span>
-                    {r.categoryName} <span style={{ opacity: 0.6 }}>({r.categoryId})</span>
+                    {r.pathFromRoot.length > 0
+                      ? r.pathFromRoot.map((p, i) => (
+                          <span key={p.id}>
+                            {i > 0 && " › "}
+                            {p.name}
+                          </span>
+                        ))
+                      : r.categoryName}{" "}
+                    <span style={{ opacity: 0.6 }}>({r.categoryId})</span>
                   </span>
-                  <Boton type="button" chico variante="secundario" onClick={() => onElegir({ categoryId: r.categoryId, categoryName: r.categoryName })}>
-                    Elegir
-                  </Boton>
+                  {r.esHoja ? (
+                    <Boton type="button" chico variante="secundario" onClick={() => onElegir({ categoryId: r.categoryId, categoryName: r.categoryName })}>
+                      Elegir
+                    </Boton>
+                  ) : (
+                    <Boton
+                      type="button"
+                      chico
+                      variante="secundario"
+                      onClick={() => {
+                        setModo("arbol");
+                        setResultados(null);
+                        void navegarArbol(r.categoryId);
+                      }}
+                    >
+                      Entrar ›
+                    </Boton>
+                  )}
                 </li>
               ))}
             </ul>

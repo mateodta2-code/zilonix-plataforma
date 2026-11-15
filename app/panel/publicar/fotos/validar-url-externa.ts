@@ -7,7 +7,12 @@ import { HostnameNoResueltoError, HostnamePrivadoError, exigirHostnamePublico } 
 // EXPORTACIÓN real (PNG/JPG) o el CDN de medios de Canva — lista
 // cerrada y conservadora, documentada en el changelog; se ajusta solo
 // con evidencia real de otro host necesario, nunca "por si acaso".
-const HOSTS_EXACTOS_PERMITIDOS = new Set(["media.canva.com"]);
+//
+// export-download.canva.com — confirmado en logs de staging (#366):
+// el job de exportación de Canva Connect (lib/canva/exportacion.ts)
+// devuelve la URL de descarga real en este host, no en media.canva.com.
+// Se agrega exacto, nunca un comodín de *.canva.com.
+const HOSTS_EXACTOS_PERMITIDOS = new Set(["media.canva.com", "export-download.canva.com"]);
 const SUFIJOS_HOST_PERMITIDOS = [".canvausercontent.com"];
 
 export function hostPermitidoCanva(hostname: string): boolean {

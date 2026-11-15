@@ -4,6 +4,7 @@ import {
   construirEstadoInicial,
   construirEstadoInicialDesdeImportacion,
   cuentasFallidas,
+  detalleCuentasProducto,
   enlacesPermalink,
   esRellenoFalsoDimensiones,
   formatearFechaBogota,
@@ -442,6 +443,87 @@ describe("enlacesPermalink — Parte 3, punto B (permalink en el historial)", ()
       { cuentaMlId: "c2", ok: true, familia: { familyName: "Remera", items: [{ valores: { TALLA: "S" }, sku: "REM-S", ok: true, permalink: "javascript:alert(1)" }] } },
     ];
     expect(enlacesPermalink(resultado, cuentas)).toEqual([]);
+  });
+});
+
+describe("detalleCuentasProducto — accordion del historial de Publicar (ver/ocultar detalle in-place)", () => {
+  const cuentas = [
+    { id: "c1", nickname: "Tienda Uno" },
+    { id: "c2", nickname: "Tienda Dos" },
+  ];
+
+  it("sin resultado todavía: []", () => {
+    expect(detalleCuentasProducto(null, cuentas)).toEqual([]);
+    expect(detalleCuentasProducto(undefined, cuentas)).toEqual([]);
+  });
+
+  it("éxito clásico: una fila con itemId/permalink/status guardado, sin error", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c1",
+        ok: true,
+        itemId: "MCO1",
+        permalink: "https://articulo.mercadolibre.com.co/MCO-1",
+        categoria: "MCO123",
+        atributosAsumidos: [],
+        status: "paused",
+        modoPrueba: false,
+        avisoFotosVariante: null,
+        avisoMarca: null,
+        avisoDescripcion: null,
+      },
+    ];
+    expect(detalleCuentasProducto(resultado, cuentas)).toEqual([
+      {
+        cuentaMlId: "c1",
+        nickname: "Tienda Uno",
+        itemId: "MCO1",
+        permalink: "https://articulo.mercadolibre.com.co/MCO-1",
+        statusGuardado: "paused",
+        error: null,
+        subEtiqueta: null,
+      },
+    ]);
+  });
+
+  it("fallo (ok:false): la fila SÍ aparece (a diferencia de enlacesPermalink), con el motivo y sin itemId", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [{ cuentaMlId: "c2", ok: false, error: "Mercado Libre rechazó la publicación" }];
+    expect(detalleCuentasProducto(resultado, cuentas)).toEqual([
+      { cuentaMlId: "c2", nickname: "Tienda Dos", itemId: null, permalink: null, statusGuardado: null, error: "Mercado Libre rechazó la publicación", subEtiqueta: null },
+    ]);
+  });
+
+  it("familia (User Products): una fila por ítem, mezclando ok y fallo bajo la misma cuenta", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [
+      {
+        cuentaMlId: "c2",
+        ok: true,
+        familia: {
+          familyName: "Remera",
+          items: [
+            { valores: { TALLA: "S" }, sku: "REM-S", ok: true, itemId: "MCO2", permalink: "https://articulo.mercadolibre.com.co/MCO-2", status: "active" },
+            { valores: { TALLA: "M" }, ok: false, error: "rechazado" },
+          ],
+        },
+      },
+    ];
+    expect(detalleCuentasProducto(resultado, cuentas)).toEqual([
+      {
+        cuentaMlId: "c2",
+        nickname: "Tienda Dos",
+        itemId: "MCO2",
+        permalink: "https://articulo.mercadolibre.com.co/MCO-2",
+        statusGuardado: "active",
+        error: null,
+        subEtiqueta: "REM-S",
+      },
+      { cuentaMlId: "c2", nickname: "Tienda Dos", itemId: null, permalink: null, statusGuardado: null, error: "rechazado", subEtiqueta: "M" },
+    ]);
+  });
+
+  it("cuentaMlId sin match en la lista de cuentas: usa el id crudo como nickname, nunca lanza", () => {
+    const resultado: ResultadoPublicacionCuenta[] = [{ cuentaMlId: "c-desconocida", ok: false, error: "x" }];
+    expect(detalleCuentasProducto(resultado, cuentas)[0].nickname).toBe("c-desconocida");
   });
 });
 

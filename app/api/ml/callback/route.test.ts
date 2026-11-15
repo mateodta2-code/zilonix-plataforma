@@ -40,7 +40,9 @@ vi.mock("@/lib/ml/cuentas", () => {
 });
 vi.mock("@/lib/ml/oauth", () => ({
   intercambiarCodigo: vi.fn(async () => ({ accessToken: "tok", refreshToken: "ref", expiraEnSegundos: 21600, cuentaIdExterna: "123" })),
-  obtenerNickname: vi.fn(async () => "VENDEDOR_TEST"),
+  // Issue #315 (Z-LATAM-01) — antes "obtenerNickname" devolvía solo el
+  // string; ahora devuelve también el site_id real de /users/me.
+  obtenerDatosVendedorMl: vi.fn(async () => ({ nickname: "VENDEDOR_TEST", siteId: "MCO" })),
 }));
 vi.mock("@/lib/url-publica", () => ({ urlPublicaBase: () => "https://staging.test" }));
 vi.mock("@/lib/ml/importacion", () => ({ ejecutarImportacionInicial: vi.fn(async () => {}) }));
@@ -105,6 +107,19 @@ describe("GET /api/ml/callback — validación de state (fix middleware, 2026-10
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("conectado=1");
     expect(intercambiarCodigo).toHaveBeenCalledWith("un-code", "https://staging.test/api/ml/callback", "un-verifier-real");
+  });
+
+  // Issue #315 (Z-LATAM-01) — el site_id real que trae /users/me
+  // (vía obtenerDatosVendedorMl) tiene que llegar hasta
+  // guardarCuentaConectada, nunca perderse en el camino.
+  it("el site_id real de /users/me viaja hasta guardarCuentaConectada", async () => {
+    const stateReal = "el-state-que-de-verdad-coincide";
+    mockearCookies({ [NOMBRE_COOKIE_VERIFIER]: "un-verifier-real", [NOMBRE_COOKIE_STATE]: stateReal });
+    await GET(peticion(`code=un-code&state=${stateReal}`));
+    expect(guardarCuentaConectada).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ siteId: "MCO", nickname: "VENDEDOR_TEST" })
+    );
   });
 
   // Bug real: antes iba error.message tal cual a la URL — mismo molde

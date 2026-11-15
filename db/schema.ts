@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, foreignKey, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, foreignKey, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
 import type {
   DatosPorCuenta,
@@ -15,7 +15,14 @@ import type {
 // Todavía SIN seguridad por fila (RLS) ni usuario de base sin privilegios
 // — eso es la tarea 1.3, a propósito la siguiente, no esta.
 
-export const accionEnum = pgEnum("accion", ["consultar", "crear", "modificar", "anular", "autorizar"]);
+// Rama feat-promociones — "aprobar"/"ejecutar" se agregan para el
+// módulo promociones (decisión de Mateo: son 2 pasos reales distintos
+// de un humano antes de que algo cambie de verdad en Mercado Libre,
+// nunca el mismo permiso que "modificar" de otros módulos). Agregar un
+// valor a un enum de Postgres SIEMPRE necesita su propia migración
+// (ALTER TYPE ... ADD VALUE) — drizzle-kit la genera solo al correr
+// `npm run db:generate` sobre este cambio, nunca a mano.
+export const accionEnum = pgEnum("accion", ["consultar", "crear", "modificar", "anular", "autorizar", "aprobar", "ejecutar"]);
 // "todo" = ve/toca cualquier registro del módulo; "propio" = solo lo que
 // esa persona creó. Idea real tomada de Effi (docs/investigacion/effi.md,
 // sección D) — ahí solo aplica a "Consultar"; acá se generaliza para
@@ -454,12 +461,32 @@ export const cuentasMl = pgTable(
     // nunca eliminada.
     desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    // Issue #315 (Z-LATAM-01) — sitio real de Mercado Libre de esta
+    // cuenta (MCO/MLM/MLB/MLA/MLC), para que Seller funcione en otros
+    // países de LATAM, no solo Colombia. Se llena al conectar/reconectar
+    // (GET /users/me, vía lib/ml/oauth.ts — obtenerDatosVendedorMl) con
+    // el site_id real que devuelve Mercado Libre; las filas que ya
+    // existían quedan con el default (MCO) hasta que se reconecten.
+    // Acotado con un CHECK (texto, no un enum de Postgres: agregar un
+    // país nuevo más adelante es un ALTER TABLE simple, nunca el ALTER
+    // TYPE fuera de transacción que exige un enum real).
+    siteId: text("site_id").notNull().default("MCO"),
+    // ISO 4217 — derivada de site_id vía lib/ml/sitios.ts (SITIOS_ML), no
+    // algo que se vuelva a preguntar a Mercado Libre por separado.
+    moneda: text("moneda").notNull().default("COP"),
+    // Idioma/locale de la cuenta (formato BCP 47, ej. "es-CO", "pt-BR") —
+    // misma fuente que moneda, vía lib/ml/sitios.ts.
+    idioma: text("idioma").notNull().default("es-CO"),
   },
   (t) => ({
     // Una cuenta real de Mercado Libre no puede estar conectada a dos
     // empresas de Zilonix a la vez — evita ambigüedad de a quién le
     // pertenecen sus avisos y sus pedidos.
     cuentaUnica: uniqueIndex("cuentas_ml_cuenta_externa_unica").on(t.cuentaIdExterna),
+    // Issue #315 — criterio de aceptación explícito: site_id solo puede
+    // ser uno de los 5 sitios de Mercado Libre que de verdad opera
+    // Zilonix en LATAM (Colombia, México, Brasil, Argentina, Chile).
+    siteIdValido: check("cuentas_ml_site_id_valido", sql`${t.siteId} IN ('MCO', 'MLM', 'MLB', 'MLA', 'MLC')`),
     // MATCH SIMPLE (el default de Postgres): si titular_id es null, la
     // FK no se evalúa. Con valor, empresa_id + titular_id tienen que
     // existir juntos en titulares.
@@ -468,6 +495,15 @@ export const cuentasMl = pgTable(
       columns: [t.empresaId, t.titularId],
       foreignColumns: [titulares.empresaId, titulares.id],
     }).onDelete("restrict"),
+    // Code review de Pablo (rama feat-promociones) — igual que
+    // skus_empresa_id_unica (0015) y bodegas_empresa_id_unica (0016):
+    // Postgres exige que la columna referenciada por una FK compuesta
+    // tenga su propio UNIQUE — promociones_reglas/candidatos/acciones
+    // (migración 0017) referencian (empresa_id, cuenta_ml_id) contra
+    // esto mismo. Sin este constraint, la migración 0017 fallaba de
+    // verdad al correr contra Postgres real (nunca se notó local
+    // porque drizzle-kit solo genera el SQL, no lo ejecuta).
+    empresaIdUnica: unique("cuentas_ml_empresa_id_unica").on(t.empresaId, t.id),
   })
 );
 
@@ -519,6 +555,11 @@ export const pedidos = pgTable(
   },
   (t) => ({
     pedidoUnico: uniqueIndex("pedidos_empresa_pedido_externo_unico").on(t.empresaId, t.pedidoIdExterno),
+    // Issue #129 — destino de la FK compuesta de pedidos_finanzas: la
+    // cabecera financiera de la empresa A nunca apunta a un pedido de
+    // B. Constraint y no índice: drizzle-kit crea los índices después
+    // de las claves foráneas.
+    empresaIdUnica: unique("pedidos_empresa_id_unica").on(t.empresaId, t.id),
   })
 );
 
@@ -580,6 +621,11 @@ export const skus = pgTable(
     // Un código de SKU tiene que ser único DENTRO de una empresa —
     // nunca entre empresas distintas, cada una arma su propio catálogo.
     codigoUnico: uniqueIndex("skus_empresa_codigo_unico").on(t.empresaId, t.codigo),
+    // Issue #280 — destino de las FK compuestas de stock_bodega,
+    // kardex_movimientos y compras: una fila de inventario de la
+    // empresa A nunca apunta a un SKU de B. Constraint y no índice:
+    // drizzle-kit crea los índices después de las claves foráneas.
+    empresaIdUnica: unique("skus_empresa_id_unica").on(t.empresaId, t.id),
   })
 );
 
@@ -643,10 +689,213 @@ export const despachosMl = pgTable(
     substatus: text("substatus"),
     imprimible: boolean("imprimible").notNull().default(false),
     etiquetaImpresaTs: timestamp("etiqueta_impresa_ts", { withTimezone: true }),
+    // Fase 1 de Despachos (issue "Despachos") — "expected_date" real de
+    // GET /shipments/{id}/sla (lib/ml/cliente.ts) — la hora límite para
+    // dejarlo en la agencia/recogida. Se guarda al sincronizar, nunca
+    // se pide en vivo en cada carga de la pantalla (ese SLA no cambia
+    // una vez el envío está armado, confirmado contra el código real
+    // de zilonix-os-web).
+    slaExpectedDate: timestamp("sla_expected_date", { withTimezone: true }),
+    // "Ver guía" (normal o sticker) tiene que abrirse al menos una vez
+    // antes de poder marcar despachado — gate real pedido en esta
+    // tarea, nunca al revés. null = todavía no se abrió ninguna.
+    guiaVistaTs: timestamp("guia_vista_ts", { withTimezone: true }),
+    // "Marcar despachado" NUNCA llama a Mercado Libre (a propósito,
+    // ver lib/ml/despachos.ts) — solo registra que ESTA persona, en
+    // ESTE momento, confirmó que el paquete salió. "Deshacer" (10 min)
+    // limpia los dos campos, nunca se guarda un historial de deshacer.
+    despachadoTs: timestamp("despachado_ts", { withTimezone: true }),
+    despachadoPor: uuid("despachado_por").references(() => usuarios.id, { onDelete: "set null" }),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     shipmentUnico: uniqueIndex("despachos_ml_empresa_shipment_unico").on(t.empresaId, t.shipmentIdExterno),
+  })
+);
+
+// Issue #129 (Z-FIN-07) — datos financieros de cada venta. `pedidos`
+// no se toca (sigue siendo la Venta, solo con el total): lo de acá lo
+// llena la sincronización de #130 y lo lee el motor de utilidad.
+//
+// Congelado: al sincronizar una venta por primera vez con costo
+// completo se fijan costo, empaque y envío y no se recalculan; comisión
+// y flete de ML sí se actualizan en cada sincronización. Una corrección
+// manual activa (ventas_correcciones) siempre gana.
+//
+// Ceros: un costo, empaque o envío vacío es "sin dato"; 0.00 es $0
+// real. Ningún monto es float.
+//
+// forma_entrega sale de la logística de ML (fulfillment → full_ml,
+// self_service → flex, cross_docking / xd_drop_off / drop_off →
+// agencia, otro → desconocida), nunca del prefijo del SKU.
+export const formaEntregaEnum = pgEnum("forma_entrega", ["full_ml", "flex", "agencia", "desconocida"]);
+export const estadoCosteoEnum = pgEnum("estado_costeo", ["completo", "parcial", "sin_costo"]);
+
+// Cabecera financiera, 1:1 con `pedidos`. Sin DELETE para app_user: se
+// borra solo en cascada con su pedido.
+export const pedidosFinanzas = pgTable(
+  "pedidos_finanzas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // FK compuesta (empresa_id, pedido_id) → pedidos, abajo.
+    pedidoId: uuid("pedido_id").notNull(),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    formaEntrega: formaEntregaEnum("forma_entrega").notNull().default("desconocida"),
+    // Se guarda como dato; la vista de detalle agrupa por pedidos.fecha
+    // (date_created de ML) y, más adelante, por fecha_despacho.
+    fechaPagoAprobado: timestamp("fecha_pago_aprobado", { withTimezone: true }),
+    // Lo que pagó el cliente (pagos aprobados), SIN restar reembolsos
+    // (Sharel, 24-oct-2026). "Con devolución" = reembolsos > 0, se
+    // calcula.
+    valorVenta: numeric("valor_venta", { precision: 14, scale: 2 }).notNull(),
+    reembolsos: numeric("reembolsos", { precision: 14, scale: 2 }).notNull().default("0.00"),
+    comisionMl: numeric("comision_ml", { precision: 14, scale: 2 }),
+    fleteMl: numeric("flete_ml", { precision: 14, scale: 2 }),
+    // La parte de esta orden del cargo de su paquete (uno solo por
+    // paquete, el mayor de sus SKU). Tiene que dar la suma de sus
+    // líneas (lo valida el motor, #162). En Full el empaque se cobra y
+    // el envío es $0.
+    empaqueCongelado: numeric("empaque_congelado", { precision: 14, scale: 2 }),
+    envioAgenciaCongelado: numeric("envio_agencia_congelado", { precision: 14, scale: 2 }),
+    estadoCosteo: estadoCosteoEnum("estado_costeo").notNull().default("sin_costo"),
+    // Vacío = todavía no se congeló.
+    congeladoTs: timestamp("congelado_ts", { withTimezone: true }),
+    cancelada: boolean("cancelada").notNull().default(false),
+    sincronizadoTs: timestamp("sincronizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    // Paquete = el envío de ML (shipping.id, el mismo shipment_id de
+    // despachos_ml). Un carrito puede ser varias órdenes con el mismo
+    // envío, así que no es único. pack_id es solo dato: ML puede partir
+    // un carrito en varios envíos. Llave del paquete (se calcula):
+    // shipment, si no pack, si no pedido_id.
+    shipmentIdExterno: text("shipment_id_externo"),
+    packIdExterno: text("pack_id_externo"),
+    // status_history.date_shipped / date_delivered del envío.
+    fechaDespacho: timestamp("fecha_despacho", { withTimezone: true }),
+    fechaEntrega: timestamp("fecha_entrega", { withTimezone: true }),
+  },
+  (t) => ({
+    pedidoUnico: unique("pedidos_finanzas_pedido_unico").on(t.pedidoId),
+    delPedido: foreignKey({
+      name: "pedidos_finanzas_pedido_misma_empresa_fk",
+      columns: [t.empresaId, t.pedidoId],
+      foreignColumns: [pedidos.empresaId, pedidos.id],
+    }).onDelete("cascade"),
+    // Destino de las FK compuestas de pedido_items y
+    // ventas_correcciones: una línea o corrección de la empresa A nunca
+    // cuelga de una venta de B.
+    empresaPedidoUnico: unique("pedidos_finanzas_empresa_pedido_unico").on(t.empresaId, t.pedidoId),
+    porShipment: index("pedidos_finanzas_empresa_shipment_idx").on(t.empresaId, t.shipmentIdExterno),
+    porFechaDespacho: index("pedidos_finanzas_empresa_fecha_despacho_idx").on(t.empresaId, t.fechaDespacho),
+    valorVentaNoNegativo: check("pedidos_finanzas_valor_venta_no_negativo", sql`${t.valorVenta} >= 0`),
+    reembolsosNoNegativos: check("pedidos_finanzas_reembolsos_no_negativos", sql`${t.reembolsos} >= 0`),
+    comisionNoNegativa: check("pedidos_finanzas_comision_ml_no_negativa", sql`${t.comisionMl} >= 0`),
+    fleteNoNegativo: check("pedidos_finanzas_flete_ml_no_negativo", sql`${t.fleteMl} >= 0`),
+    empaqueNoNegativo: check("pedidos_finanzas_empaque_no_negativo", sql`${t.empaqueCongelado} >= 0`),
+    envioNoNegativo: check("pedidos_finanzas_envio_agencia_no_negativo", sql`${t.envioAgenciaCongelado} >= 0`),
+  })
+);
+
+// Líneas de la venta, con su foto congelada. Sin DELETE para app_user.
+export const pedidoItems = pgTable(
+  "pedido_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    pedidoId: uuid("pedido_id").notNull(),
+    linea: integer("linea").notNull(),
+    publicacionId: uuid("publicacion_id").references(() => publicaciones.id, { onDelete: "set null" }),
+    itemIdExterno: text("item_id_externo").notNull(),
+    // SKU de la publicación de ML normalizado (trim + mayúsculas): es la
+    // llave para buscar el costo en costos_sku. Vacío si ML no trae SKU.
+    skuCodigo: text("sku_codigo"),
+    // Solo informativo: se llena si el código existe en `skus`.
+    skuId: uuid("sku_id").references(() => skus.id, { onDelete: "set null" }),
+    cantidad: integer("cantidad").notNull(),
+    precioUnitario: numeric("precio_unitario", { precision: 14, scale: 2 }).notNull(),
+    valorLinea: numeric("valor_linea", { precision: 14, scale: 2 }).notNull(),
+    // Reparto de la línea de lo que cobra ML a la orden.
+    comisionMl: numeric("comision_ml", { precision: 14, scale: 2 }),
+    fleteMl: numeric("flete_ml", { precision: 14, scale: 2 }),
+    // Vacío = sin costo; 0.00 = costo real de $0.
+    costoCongelado: numeric("costo_congelado", { precision: 14, scale: 2 }),
+    // order_item.item.title al vender: no cambia si cambia la publicación.
+    titulo: text("titulo").notNull(),
+    // Dirección de la miniatura de la publicación (no se guarda la imagen).
+    imagenUrl: text("imagen_url"),
+    // La parte de la línea del empaque y el envío del paquete (reparto
+    // por peso, solo para que las filas sumen). Vacío = sin dato.
+    empaqueCongelado: numeric("empaque_congelado", { precision: 14, scale: 2 }),
+    envioCongelado: numeric("envio_congelado", { precision: 14, scale: 2 }),
+  },
+  (t) => ({
+    lineaUnica: unique("pedido_items_pedido_linea_unica").on(t.pedidoId, t.linea),
+    deLaVenta: foreignKey({
+      name: "pedido_items_venta_misma_empresa_fk",
+      columns: [t.empresaId, t.pedidoId],
+      foreignColumns: [pedidosFinanzas.empresaId, pedidosFinanzas.pedidoId],
+    }).onDelete("cascade"),
+    lineaPositiva: check("pedido_items_linea_positiva", sql`${t.linea} >= 1`),
+    cantidadPositiva: check("pedido_items_cantidad_positiva", sql`${t.cantidad} > 0`),
+    skuNormalizado: check("pedido_items_sku_normalizado", sql`${t.skuCodigo} = upper(btrim(${t.skuCodigo})) AND ${t.skuCodigo} <> ''`),
+    precioNoNegativo: check("pedido_items_precio_unitario_no_negativo", sql`${t.precioUnitario} >= 0`),
+    valorNoNegativo: check("pedido_items_valor_linea_no_negativo", sql`${t.valorLinea} >= 0`),
+    comisionNoNegativa: check("pedido_items_comision_ml_no_negativa", sql`${t.comisionMl} >= 0`),
+    fleteNoNegativo: check("pedido_items_flete_ml_no_negativo", sql`${t.fleteMl} >= 0`),
+    costoNoNegativo: check("pedido_items_costo_no_negativo", sql`${t.costoCongelado} >= 0`),
+    empaqueNoNegativo: check("pedido_items_empaque_no_negativo", sql`${t.empaqueCongelado} >= 0`),
+    envioNoNegativo: check("pedido_items_envio_no_negativo", sql`${t.envioCongelado} >= 0`),
+  })
+);
+
+// Correcciones manuales: no se editan ni se borran. Corregir de nuevo =
+// anular la activa y crear otra fila. app_user solo puede hacer UPDATE
+// de anulada_ts, y solo para anular (db/rls-setup.sql).
+export const CAMPOS_CORRECCION_VENTA = ["costo_producto", "empaque", "envio_agencia", "comision_ml", "flete_ml"] as const;
+export type CampoCorreccionVenta = (typeof CAMPOS_CORRECCION_VENTA)[number];
+
+export const ventasCorrecciones = pgTable(
+  "ventas_correcciones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    pedidoId: uuid("pedido_id").notNull(),
+    // Vacío = toda la orden.
+    linea: integer("linea"),
+    campo: text("campo").$type<CampoCorreccionVenta>().notNull(),
+    valorNuevo: numeric("valor_nuevo", { precision: 14, scale: 2 }).notNull(),
+    nota: text("nota").notNull(),
+    creadoPor: uuid("creado_por")
+      .notNull()
+      .references(() => usuarios.id, { onDelete: "restrict" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    anuladaTs: timestamp("anulada_ts", { withTimezone: true }),
+  },
+  (t) => ({
+    deLaVenta: foreignKey({
+      name: "ventas_correcciones_venta_misma_empresa_fk",
+      columns: [t.empresaId, t.pedidoId],
+      foreignColumns: [pedidosFinanzas.empresaId, pedidosFinanzas.pedidoId],
+    }).onDelete("cascade"),
+    // MATCH SIMPLE: con linea vacía (toda la orden) no se evalúa.
+    deLaLinea: foreignKey({
+      name: "ventas_correcciones_linea_fk",
+      columns: [t.pedidoId, t.linea],
+      foreignColumns: [pedidoItems.pedidoId, pedidoItems.linea],
+    }).onDelete("cascade"),
+    // Lista cerrada en la base, no solo en la app.
+    campoValido: check(
+      "ventas_correcciones_campo_valido",
+      sql`${t.campo} IN ('costo_producto', 'empaque', 'envio_agencia', 'comision_ml', 'flete_ml')`
+    ),
+    valorNoNegativo: check("ventas_correcciones_valor_no_negativo", sql`${t.valorNuevo} >= 0`),
+    notaConTexto: check("ventas_correcciones_nota_con_texto", sql`btrim(${t.nota}) <> ''`),
+    // Una sola corrección activa por (pedido, linea, campo). coalesce
+    // para que dos correcciones de toda la orden (linea vacía) también
+    // choquen: en un índice único dos NULL no son iguales.
+    unaActiva: uniqueIndex("ventas_correcciones_una_activa")
+      .on(t.pedidoId, sql`coalesce(${t.linea}, 0)`, t.campo)
+      .where(sql`${t.anuladaTs} IS NULL`),
   })
 );
 
@@ -1034,3 +1283,658 @@ export const publicidadSincronizaciones = pgTable("publicidad_sincronizaciones",
     .on(t.empresaId, t.cuentaMlId)
     .where(sql`${t.estado} = 'en_curso'`),
 }));
+
+// ---------------------------------------------------------------------
+// Issue #280 — WMS Fase 1: bodegas, stock por SKU y bodega, kardex y
+// compras. Seller es la fuente de verdad del inventario (no Fulfy).
+// Todo en unidades enteras: no hay fracciones de producto. Sin
+// ubicaciones dentro de la bodega (fuera de Fase 1).
+//
+// Una sola puerta de escritura: lib/inventario/movimientos.ts
+// (aplicarMovimientos). Ninguna otra parte del código actualiza
+// stock_bodega a mano: cada cambio deja su fila en el kardex en la
+// misma transacción, y el kardex nunca se edita ni se borra (app_user
+// solo tiene SELECT e INSERT, db/rls-setup.sql).
+// ---------------------------------------------------------------------
+
+// fulfillment_ml = el stock que Mercado Libre guarda en Full. No se
+// suma al disponible que se publica (ML ya lo conoce por su lado) y no
+// se reserva para pedidos: Full despacha solo.
+export const tipoBodegaEnum = pgEnum("tipo_bodega", ["propia", "fulfillment_ml", "tercero"]);
+
+export const bodegas = pgTable(
+  "bodegas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    nombre: text("nombre").notNull(),
+    tipo: tipoBodegaEnum("tipo").notNull().default("propia"),
+    // La primera que se intenta para reservar un pedido de ML.
+    esPrincipal: boolean("es_principal").notNull().default(false),
+    // Una bodega se desactiva, nunca se borra: su kardex sigue siendo
+    // historia real.
+    activa: boolean("activa").notNull().default(true),
+    // Si su disponible cuenta para lo que se publica en ML. Nace en
+    // false para fulfillment_ml (lib/inventario/bodegas.ts).
+    sumaAlPublicado: boolean("suma_al_publicado").notNull().default(true),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    empresaIdUnica: unique("bodegas_empresa_id_unica").on(t.empresaId, t.id),
+    nombreUnico: unique("bodegas_empresa_nombre_unico").on(t.empresaId, t.nombre),
+    // A lo sumo una principal por empresa.
+    principalUnica: uniqueIndex("bodegas_principal_unica").on(t.empresaId).where(sql`${t.esPrincipal}`),
+    nombreNoVacio: check("bodegas_nombre_no_vacio", sql`btrim(${t.nombre}) <> ''`),
+  })
+);
+
+// Saldo actual de un SKU en una bodega. Los kits no tienen fila acá:
+// su stock se deriva de sus componentes (lib/inventario/calculos.ts).
+// en_transito queda en 0 en Fase 1 (el traslado es instantáneo); la
+// columna existe para la 1.1 sin otra migración.
+export const stockBodega = pgTable(
+  "stock_bodega",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    bodegaId: uuid("bodega_id").notNull(),
+    skuId: uuid("sku_id").notNull(),
+    disponible: integer("disponible").notNull().default(0),
+    reservado: integer("reservado").notNull().default(0),
+    enTransito: integer("en_transito").notNull().default(0),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    skuBodegaUnico: unique("stock_bodega_sku_bodega_unico").on(t.empresaId, t.bodegaId, t.skuId),
+    deLaBodega: foreignKey({
+      name: "stock_bodega_bodega_misma_empresa_fk",
+      columns: [t.empresaId, t.bodegaId],
+      foreignColumns: [bodegas.empresaId, bodegas.id],
+    }).onDelete("restrict"),
+    delSku: foreignKey({
+      name: "stock_bodega_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("restrict"),
+    porSku: index("stock_bodega_empresa_sku_idx").on(t.empresaId, t.skuId),
+    // La última defensa contra vender lo que no hay: aunque un bug se
+    // saltara la validación de aplicarMovimientos, la base no deja un
+    // saldo negativo.
+    disponibleNoNegativo: check("stock_bodega_disponible_no_negativo", sql`${t.disponible} >= 0`),
+    reservadoNoNegativo: check("stock_bodega_reservado_no_negativo", sql`${t.reservado} >= 0`),
+    enTransitoNoNegativo: check("stock_bodega_en_transito_no_negativo", sql`${t.enTransito} >= 0`),
+  })
+);
+
+// Qué hace cada tipo con el saldo (lib/inventario/calculos.ts):
+// entrada +disponible · salida −disponible · ajuste ±disponible ·
+// traslado −disponible en origen y +disponible en destino (dos filas,
+// mismo grupo) · reserva −disponible +reservado · liberacion
+// −reservado +disponible · confirmacion −reservado (la unidad salió).
+export const tipoMovimientoEnum = pgEnum("tipo_movimiento", [
+  "entrada",
+  "salida",
+  "ajuste",
+  "traslado",
+  "reserva",
+  "liberacion",
+  "confirmacion",
+]);
+// De dónde viene el movimiento: lo que dispara un pedido de ML nunca
+// se confunde con un ajuste a mano.
+export const origenMovimientoEnum = pgEnum("origen_movimiento", ["manual", "recepcion", "pedido_ml", "traslado"]);
+
+// Kardex append-only. Cada fila guarda el cambio (delta) y el saldo que
+// quedó después, así una auditoría no tiene que recalcular nada.
+export const kardexMovimientos = pgTable(
+  "kardex_movimientos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+    // Las filas de una misma operación (las dos puntas de un traslado,
+    // las líneas de una recepción o de un pedido) comparten grupo.
+    grupoId: uuid("grupo_id").notNull(),
+    linea: integer("linea").notNull(),
+    // Idempotencia: la misma operación nunca se aplica dos veces (un
+    // aviso de ML repetido, un doble clic). Ej. "pedido:<id>:reserva".
+    claveIdempotencia: text("clave_idempotencia").notNull(),
+    tipo: tipoMovimientoEnum("tipo").notNull(),
+    origen: origenMovimientoEnum("origen").notNull(),
+    bodegaId: uuid("bodega_id").notNull(),
+    skuId: uuid("sku_id").notNull(),
+    deltaDisponible: integer("delta_disponible").notNull(),
+    deltaReservado: integer("delta_reservado").notNull(),
+    deltaEnTransito: integer("delta_en_transito").notNull().default(0),
+    saldoDisponible: integer("saldo_disponible").notNull(),
+    saldoReservado: integer("saldo_reservado").notNull(),
+    saldoEnTransito: integer("saldo_en_transito").notNull().default(0),
+    // Id de lo que lo originó (pedido, recepción). Texto: puede ser un
+    // uuid propio o, en el futuro, un id externo.
+    referenciaId: text("referencia_id"),
+    // Se separa siempre la persona del sistema (mismo criterio que
+    // auditoria y pedido_eventos).
+    actorTipo: actorTipoEnum("actor_tipo").notNull(),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    nota: text("nota"),
+  },
+  (t) => ({
+    claveUnica: unique("kardex_movimientos_clave_linea_unica").on(t.empresaId, t.claveIdempotencia, t.linea),
+    deLaBodega: foreignKey({
+      name: "kardex_movimientos_bodega_misma_empresa_fk",
+      columns: [t.empresaId, t.bodegaId],
+      foreignColumns: [bodegas.empresaId, bodegas.id],
+    }).onDelete("restrict"),
+    delSku: foreignKey({
+      name: "kardex_movimientos_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("restrict"),
+    porSkuTs: index("kardex_movimientos_empresa_sku_ts_idx").on(t.empresaId, t.skuId, t.ts),
+    porBodegaTs: index("kardex_movimientos_empresa_bodega_ts_idx").on(t.empresaId, t.bodegaId, t.ts),
+    porReferencia: index("kardex_movimientos_empresa_referencia_idx").on(t.empresaId, t.referenciaId),
+    lineaPositiva: check("kardex_movimientos_linea_positiva", sql`${t.linea} >= 1`),
+    claveNoVacia: check("kardex_movimientos_clave_no_vacia", sql`btrim(${t.claveIdempotencia}) <> ''`),
+    // Un movimiento que no mueve nada no es un movimiento.
+    mueveAlgo: check(
+      "kardex_movimientos_mueve_algo",
+      sql`${t.deltaDisponible} <> 0 OR ${t.deltaReservado} <> 0 OR ${t.deltaEnTransito} <> 0`
+    ),
+    saldosNoNegativos: check(
+      "kardex_movimientos_saldos_no_negativos",
+      sql`${t.saldoDisponible} >= 0 AND ${t.saldoReservado} >= 0 AND ${t.saldoEnTransito} >= 0`
+    ),
+  })
+);
+
+// Orden de compra simple: a quién, a qué bodega llega y qué SKUs. El
+// estado parcial/recibida lo calcula la recepción, nunca se escribe a
+// mano.
+export const estadoOrdenCompraEnum = pgEnum("estado_orden_compra", ["abierta", "parcial", "recibida", "anulada"]);
+
+export const ordenesCompra = pgTable(
+  "ordenes_compra",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // Consecutivo legible por empresa (OC-1, OC-2...), lo asigna lib/inventario/compras.ts.
+    numero: integer("numero").notNull(),
+    // Proveedor de la tabla de terceros (opcional: una compra de
+    // contado puede no tener tercero creado todavía).
+    terceroId: uuid("tercero_id"),
+    bodegaDestinoId: uuid("bodega_destino_id").notNull(),
+    estado: estadoOrdenCompraEnum("estado").notNull().default("abierta"),
+    nota: text("nota"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    empresaIdUnica: unique("ordenes_compra_empresa_id_unica").on(t.empresaId, t.id),
+    numeroUnico: unique("ordenes_compra_empresa_numero_unico").on(t.empresaId, t.numero),
+    delTercero: foreignKey({
+      name: "ordenes_compra_tercero_misma_empresa_fk",
+      columns: [t.empresaId, t.terceroId],
+      foreignColumns: [terceros.empresaId, terceros.id],
+    }).onDelete("restrict"),
+    deLaBodega: foreignKey({
+      name: "ordenes_compra_bodega_misma_empresa_fk",
+      columns: [t.empresaId, t.bodegaDestinoId],
+      foreignColumns: [bodegas.empresaId, bodegas.id],
+    }).onDelete("restrict"),
+    numeroPositivo: check("ordenes_compra_numero_positivo", sql`${t.numero} >= 1`),
+  })
+);
+
+export const ordenCompraItems = pgTable(
+  "orden_compra_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    ordenCompraId: uuid("orden_compra_id").notNull(),
+    skuId: uuid("sku_id").notNull(),
+    cantidadPedida: integer("cantidad_pedida").notNull(),
+    // La suma de lo recibido contra esta línea. Puede pasarse de lo
+    // pedido (el proveedor mandó de más): se recibe lo que llegó.
+    cantidadRecibida: integer("cantidad_recibida").notNull().default(0),
+    // Vacío = sin dato. El costo oficial sigue en costos_sku (finanzas).
+    costoUnitario: numeric("costo_unitario", { precision: 14, scale: 2 }),
+  },
+  (t) => ({
+    empresaIdUnica: unique("orden_compra_items_empresa_id_unica").on(t.empresaId, t.id),
+    skuUnicoPorOrden: unique("orden_compra_items_orden_sku_unico").on(t.ordenCompraId, t.skuId),
+    deLaOrden: foreignKey({
+      name: "orden_compra_items_orden_misma_empresa_fk",
+      columns: [t.empresaId, t.ordenCompraId],
+      foreignColumns: [ordenesCompra.empresaId, ordenesCompra.id],
+    }).onDelete("cascade"),
+    delSku: foreignKey({
+      name: "orden_compra_items_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("restrict"),
+    pedidaPositiva: check("orden_compra_items_pedida_positiva", sql`${t.cantidadPedida} > 0`),
+    recibidaNoNegativa: check("orden_compra_items_recibida_no_negativa", sql`${t.cantidadRecibida} >= 0`),
+    costoNoNegativo: check("orden_compra_items_costo_no_negativo", sql`${t.costoUnitario} >= 0`),
+  })
+);
+
+// Una recepción es lo que de verdad llegó, contra una OC o directo
+// (orden_compra_id vacío). Cada línea entra al kardex como "entrada".
+export const recepciones = pgTable(
+  "recepciones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    ordenCompraId: uuid("orden_compra_id"),
+    bodegaId: uuid("bodega_id").notNull(),
+    nota: text("nota"),
+    recibidoTs: timestamp("recibido_ts", { withTimezone: true }).notNull().defaultNow(),
+    recibidoPor: uuid("recibido_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    empresaIdUnica: unique("recepciones_empresa_id_unica").on(t.empresaId, t.id),
+    deLaOrden: foreignKey({
+      name: "recepciones_orden_misma_empresa_fk",
+      columns: [t.empresaId, t.ordenCompraId],
+      foreignColumns: [ordenesCompra.empresaId, ordenesCompra.id],
+    }).onDelete("restrict"),
+    deLaBodega: foreignKey({
+      name: "recepciones_bodega_misma_empresa_fk",
+      columns: [t.empresaId, t.bodegaId],
+      foreignColumns: [bodegas.empresaId, bodegas.id],
+    }).onDelete("restrict"),
+  })
+);
+
+export const recepcionItems = pgTable(
+  "recepcion_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    recepcionId: uuid("recepcion_id").notNull(),
+    skuId: uuid("sku_id").notNull(),
+    // Vacío en un ingreso directo.
+    ordenCompraItemId: uuid("orden_compra_item_id"),
+    cantidad: integer("cantidad").notNull(),
+  },
+  (t) => ({
+    deLaRecepcion: foreignKey({
+      name: "recepcion_items_recepcion_misma_empresa_fk",
+      columns: [t.empresaId, t.recepcionId],
+      foreignColumns: [recepciones.empresaId, recepciones.id],
+    }).onDelete("cascade"),
+    delSku: foreignKey({
+      name: "recepcion_items_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("restrict"),
+    deLaLineaOc: foreignKey({
+      name: "recepcion_items_linea_oc_misma_empresa_fk",
+      columns: [t.empresaId, t.ordenCompraItemId],
+      foreignColumns: [ordenCompraItems.empresaId, ordenCompraItems.id],
+    }).onDelete("restrict"),
+    cantidadPositiva: check("recepcion_items_cantidad_positiva", sql`${t.cantidad} > 0`),
+  })
+);
+
+// Regla de la última unidad: qué hacer cuando el disponible publicado de
+// un SKU baja al umbral (por defecto 1) y la publicación tiene promos.
+// preguntar = banner con Aplicar / No aplicar. quitar_promos y
+// vender_sin_promo también pasan por el banner en Fase 1: la API de
+// promociones no está en lib/ml/cliente.ts (ver docs/wms-fase1.md).
+export const reglaUltimaUnidadEnum = pgEnum("regla_ultima_unidad", ["preguntar", "quitar_promos", "vender_sin_promo"]);
+
+export const configuracionInventario = pgTable(
+  "configuracion_inventario",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    reglaUltimaUnidad: reglaUltimaUnidadEnum("regla_ultima_unidad").notNull().default("preguntar"),
+    umbralUltimaUnidad: integer("umbral_ultima_unidad").notNull().default(1),
+    // Unidades que se guardan sin publicar (colchón contra sobreventa).
+    bufferMl: integer("buffer_ml").notNull().default(0),
+    // Apagado por defecto: nada se escribe en ML hasta que la empresa
+    // lo prenda a propósito, después de cargar su stock real.
+    syncMlActivo: boolean("sync_ml_activo").notNull().default(false),
+    // Solo los pedidos de ML creados desde este momento reservan stock.
+    // Vacío = todavía no se reserva nada. Sin esto, la importación
+    // inicial (60 días de pedidos ya despachados) descontaría del stock
+    // real unidades que salieron antes de contarlo.
+    reservaPedidosDesdeTs: timestamp("reserva_pedidos_desde_ts", { withTimezone: true }),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaPor: uuid("actualizada_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    unaPorEmpresa: unique("configuracion_inventario_empresa_unica").on(t.empresaId),
+    umbralNoNegativo: check("configuracion_inventario_umbral_no_negativo", sql`${t.umbralUltimaUnidad} >= 0`),
+    bufferNoNegativo: check("configuracion_inventario_buffer_no_negativo", sql`${t.bufferMl} >= 0`),
+  })
+);
+
+// Estado del envío de stock a ML por SKU. Sirve de cola con espera
+// (debounce): cada movimiento marca pendiente_desde, y el trabajo solo
+// envía los que llevan quietos un rato, así diez movimientos seguidos
+// del mismo SKU son un solo PUT a ML.
+export const syncStockMl = pgTable(
+  "sync_stock_ml",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    skuId: uuid("sku_id").notNull(),
+    pendienteDesdeTs: timestamp("pendiente_desde_ts", { withTimezone: true }),
+    ultimoEnvioTs: timestamp("ultimo_envio_ts", { withTimezone: true }),
+    ultimaCantidadEnviada: integer("ultima_cantidad_enviada"),
+    // Texto corto para la pantalla. Nunca un token ni el cuerpo crudo de ML.
+    ultimoResultado: text("ultimo_resultado"),
+  },
+  (t) => ({
+    skuUnico: unique("sync_stock_ml_empresa_sku_unico").on(t.empresaId, t.skuId),
+    delSku: foreignKey({
+      name: "sync_stock_ml_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("cascade"),
+    porPendiente: index("sync_stock_ml_empresa_pendiente_idx").on(t.empresaId, t.pendienteDesdeTs),
+  })
+);
+
+export const estadoAlertaUltimaUnidadEnum = pgEnum("estado_alerta_ultima_unidad", ["pendiente", "aplicada", "descartada"]);
+
+// Banner de la última unidad. Una sola alerta pendiente por SKU: si
+// vuelve a bajar mientras sigue pendiente, no se apila otra.
+export const alertasUltimaUnidad = pgTable(
+  "alertas_ultima_unidad",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    skuId: uuid("sku_id").notNull(),
+    disponibleAlCrear: integer("disponible_al_crear").notNull(),
+    regla: reglaUltimaUnidadEnum("regla").notNull(),
+    estado: estadoAlertaUltimaUnidadEnum("estado").notNull().default("pendiente"),
+    creadaTs: timestamp("creada_ts", { withTimezone: true }).notNull().defaultNow(),
+    resueltaTs: timestamp("resuelta_ts", { withTimezone: true }),
+    resueltaPor: uuid("resuelta_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    delSku: foreignKey({
+      name: "alertas_ultima_unidad_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("cascade"),
+    pendienteUnica: uniqueIndex("alertas_ultima_unidad_pendiente_unica")
+      .on(t.empresaId, t.skuId)
+      .where(sql`${t.estado} = 'pendiente'`),
+    resueltaConFecha: check(
+      "alertas_ultima_unidad_resuelta_con_fecha",
+      sql`(${t.estado} = 'pendiente') = (${t.resueltaTs} IS NULL)`
+    ),
+  })
+);
+
+// Rama feat-promociones — motor portado de zilonix-os-web
+// (lib/mercadolibre-promo.js, docs/investigacion/promociones-mercado-libre.md
+// de ese repo), generalizado para cualquier empresa: nunca una app de
+// Mercado Libre aparte (reusa el token normal de cuentas_ml), nunca
+// una regla global ni la clasificación suplemento/importación —
+// reglas por cuenta, piso siempre desde costos_sku (Finanzas).
+
+// Reglas del agente, UNA fila por cuenta de Mercado Libre conectada —
+// nunca una sola regla global para toda la empresa (decisión de
+// Mateo, al revés de zilonix-os-web). "Usar las mismas reglas para
+// todas las cuentas" (la UI) es una COPIA explícita de un clic, no un
+// vínculo que las mantenga sincronizadas después — por eso no hay
+// ninguna columna acá para eso, cada fila sigue siendo independiente.
+export const promocionesReglas = pgTable(
+  "promociones_reglas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    descuentoMaximoPct: integer("descuento_maximo_pct").notNull().default(20),
+    participarCompartidas: boolean("participar_compartidas").notNull().default(false),
+    igualarAlPiso: boolean("igualar_al_piso").notNull().default(true),
+    // "HH:MM" en hora de Colombia, o NULL = apagada (nunca corre sola).
+    // Validado en código, no acá — mismo criterio que el resto del
+    // repo para evitar un tipo de columna exótico sin precedente.
+    busquedaAutomaticaHora: text("busqueda_automatica_hora"),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    unaPorCuenta: unique("promociones_reglas_cuenta_unica").on(t.cuentaMlId),
+    descuentoEnRango: check("promociones_reglas_descuento_rango", sql`${t.descuentoMaximoPct} > 0 AND ${t.descuentoMaximoPct} <= 100`),
+    cuentaDeLaEmpresa: foreignKey({
+      name: "promociones_reglas_empresa_cuenta_fk",
+      columns: [t.empresaId, t.cuentaMlId],
+      foreignColumns: [cuentasMl.empresaId, cuentasMl.id],
+    }).onDelete("cascade"),
+  })
+);
+
+// Snapshot de la última búsqueda real contra Mercado Libre — se
+// sobreescribe (upsert) cada vez que se vuelve a buscar, nunca se
+// acumula historial acá (el historial real de decisiones/ejecución es
+// `promociones_acciones`, abajo). "precio_minimo" NULL = sin SKU o sin
+// precio mínimo en costos_sku — ese producto queda bloqueado para
+// participar, nunca se inventa un piso (regla no negociable de Mateo).
+export const promocionesCandidatos = pgTable(
+  "promociones_candidatos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    itemId: text("item_id").notNull(),
+    skuCodigo: text("sku_codigo"),
+    tituloProducto: text("titulo_producto"),
+    thumbnail: text("thumbnail"),
+    tieneVariantes: boolean("tiene_variantes").notNull().default(false),
+    // Tipo real de Mercado Libre (DEAL, PRICE_DISCOUNT, LIGHTNING,
+    // SMART, UNHEALTHY_STOCK...) — texto libre a propósito, nunca un
+    // enum de Postgres: la lista la controla Mercado Libre, no
+    // nosotros (ver TIPOS_SIN_ESCRITURA_API en lib/ml/promociones.ts).
+    tipoPromocion: text("tipo_promocion").notNull(),
+    promotionIdMl: text("promotion_id_ml"),
+    // Estado real que da Mercado Libre: "started"/"pending"/"candidate".
+    estadoMl: text("estado_ml").notNull(),
+    esCompartida: boolean("es_compartida").notNull().default(false),
+    // true si tipoPromocion está en TIPOS_SIN_ESCRITURA_API — Mercado
+    // Libre nunca deja escribir este tipo por la API de Promociones.
+    soloEnMl: boolean("solo_en_ml").notNull().default(false),
+    precioOriginal: numeric("precio_original", { precision: 14, scale: 2 }),
+    precioActual: numeric("precio_actual", { precision: 14, scale: 2 }),
+    precioMinimo: numeric("precio_minimo", { precision: 14, scale: 2 }),
+    precioSugerido: numeric("precio_sugerido", { precision: 14, scale: 2 }),
+    maxDiscountedPrice: numeric("max_discounted_price", { precision: 14, scale: 2 }),
+    gananciaEstimada: numeric("ganancia_estimada", { precision: 14, scale: 2 }),
+    cumpleReglas: boolean("cumple_reglas").notNull().default(false),
+    motivoRevisarManual: text("motivo_revisar_manual"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    candidatoUnico: unique("promociones_candidatos_unico").on(t.cuentaMlId, t.itemId, t.tipoPromocion),
+    cuentaDeLaEmpresa: foreignKey({
+      name: "promociones_candidatos_empresa_cuenta_fk",
+      columns: [t.empresaId, t.cuentaMlId],
+      foreignColumns: [cuentasMl.empresaId, cuentasMl.id],
+    }).onDelete("cascade"),
+    porEmpresa: index("promociones_candidatos_empresa_idx").on(t.empresaId),
+  })
+);
+
+export const promocionAccionTipoEnum = pgEnum("promocion_accion_tipo", ["participar", "modificar", "salir"]);
+export const promocionAccionEstadoEnum = pgEnum("promocion_accion_estado", ["pendiente", "aceptada", "rechazada", "ejecutada", "fallida"]);
+
+// Historial real y auditoría — quién aprobó, cuándo, precio antes y
+// después, resultado real de Mercado Libre. Nunca se borra ni se
+// sobreescribe (al revés de promociones_candidatos): cada intento deja
+// su propia fila.
+export const promocionesAcciones = pgTable(
+  "promociones_acciones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+    itemId: text("item_id").notNull(),
+    tituloProducto: text("titulo_producto"),
+    tipoPromocion: text("tipo_promocion").notNull(),
+    promotionIdMl: text("promotion_id_ml"),
+    accion: promocionAccionTipoEnum("accion").notNull(),
+    precioAntes: numeric("precio_antes", { precision: 14, scale: 2 }),
+    precioDespues: numeric("precio_despues", { precision: 14, scale: 2 }),
+    estado: promocionAccionEstadoEnum("estado").notNull().default("pendiente"),
+    aprobadoPor: uuid("aprobado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    aprobadoTs: timestamp("aprobado_ts", { withTimezone: true }),
+    ejecutadoPor: uuid("ejecutado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    ejecutadoTs: timestamp("ejecutado_ts", { withTimezone: true }),
+    // true = esto corrió en modo simulación (nunca tocó Mercado
+    // Libre) — queda en el historial igual, para que se vea qué se
+    // habría hecho, pero nunca se confunde con una ejecución real.
+    modoSimulacion: boolean("modo_simulacion").notNull().default(false),
+    // {ok, status, respuesta} — nunca el token, nunca más de 500
+    // caracteres del cuerpo crudo de Mercado Libre (mismo criterio que
+    // zilonix-os-web).
+    resultadoMl: jsonb("resultado_ml"),
+    error: text("error"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    cuentaDeLaEmpresa: foreignKey({
+      name: "promociones_acciones_empresa_cuenta_fk",
+      columns: [t.empresaId, t.cuentaMlId],
+      foreignColumns: [cuentasMl.empresaId, cuentasMl.id],
+    }).onDelete("cascade"),
+    porEmpresaYEstado: index("promociones_acciones_empresa_estado_idx").on(t.empresaId, t.estado),
+  })
+);
+
+// Rama feat-promociones, punto 6 — "Conexión de IA" por empresa,
+// pensada como pieza COMÚN (lib/ia/) para que cualquier módulo futuro
+// la use, no solo Promociones. Una sola fila por empresa por ahora
+// (unique en empresaId) — si algún día hace falta más de una conexión
+// por empresa, se agrega ahí, no se adivina acá. La API key se cifra
+// con el MISMO mecanismo que los tokens de Mercado Libre
+// (lib/cifrado.ts, AES-256-GCM versionado) — mismo criterio de
+// CLAUDE.md ("tokens de marketplaces y credenciales... siempre
+// cifrados"), reusado a propósito en vez de armar un segundo sistema
+// de cifrado solo para esto.
+export const proveedorIaEnum = pgEnum("proveedor_ia", ["anthropic", "openai", "google", "xai", "otro_compatible_openai"]);
+
+export const iaConexiones = pgTable(
+  "ia_conexiones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    proveedor: proveedorIaEnum("proveedor").notNull(),
+    // Solo tiene sentido para "otro_compatible_openai" — cualquier
+    // servidor que hable el mismo formato que la API de OpenAI.
+    baseUrl: text("base_url"),
+    modelo: text("modelo").notNull(),
+    apiKeyCifrada: jsonb("api_key_cifrada").$type<TokenCifrado>().notNull(),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    unaPorEmpresa: unique("ia_conexiones_empresa_unica").on(t.empresaId),
+  })
+);
+
+// Tarea "Publicar — conectar Canva" — a diferencia de ia_conexiones
+// (una por empresa) y, sobre todo, a diferencia de zilonix-os-web
+// (lib/canva.js: UNA fila fija id=1, una sola cuenta de Canva
+// compartida por TODO el negocio, tokens en texto plano — confirmado
+// leyendo ese código real) acá cada USUARIO conecta su propia cuenta de
+// Canva, por empresa (docs/mapa-sistema.md de zilonix-os-web ya
+// documenta que ese diseño de fila única no se debe copiar: "en la
+// plataforma cada empresa necesita las suyas o ninguna" — se va un
+// paso más allá, cada PERSONA la suya, porque el link de "Compartir"
+// de un diseño de Canva es personal, no de la empresa).
+//
+// Tokens cifrados con el mismo mecanismo que cuentas_ml/ia_conexiones
+// (lib/cifrado.ts, AES-256-GCM versionado) — nunca en texto plano.
+// Nullable (a diferencia de cuentas_ml): al desconectar, los tokens se
+// borran de verdad (se dejan en null), no solo se marca la fecha —
+// decisión explícita de Pablo/Mateo, nunca queda un token viejo dando
+// vueltas en la base después de que el usuario pidió desconectar.
+export const canvaConexiones = pgTable(
+  "canva_conexiones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    usuarioId: uuid("usuario_id").notNull().references(() => usuarios.id, { onDelete: "cascade" }),
+    accessTokenCifrado: jsonb("access_token_cifrado").$type<TokenCifrado>(),
+    refreshTokenCifrado: jsonb("refresh_token_cifrado").$type<TokenCifrado>(),
+    tokenExpiraTs: timestamp("token_expira_ts", { withTimezone: true }),
+    // Candado contra renovaciones dobles — mismo criterio que
+    // cuentas_ml.renovando_ts (lib/ml/cuentas.ts): un candado de más de
+    // 30s se considera abandonado y se puede volver a tomar.
+    renovandoTs: timestamp("renovando_ts", { withTimezone: true }),
+    // Desconectar SÍ borra los tokens (ver nota arriba) — esta marca de
+    // tiempo queda como histórico de "hubo una conexión y se cerró",
+    // nunca se borra la fila entera.
+    desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Una conexión de Canva por persona, por empresa — reconectar
+    // reactiva la misma fila (mismo criterio que cuentas_ml), nunca
+    // crea una segunda.
+    empresaUsuarioUnica: unique("canva_conexiones_empresa_usuario_unica").on(t.empresaId, t.usuarioId),
+  })
+);
+
+// Foro de la comunidad — los vendedores de TODAS las empresas preguntan
+// y se responden entre ellos (decisión del 14-nov). A propósito SIN
+// empresa_id ni RLS por empresa, igual que `usuarios`: el contenido es
+// compartido por diseño, no pertenece a ninguna empresa. Por eso mismo
+// nunca se guarda ni se muestra de qué empresa es quien escribe — solo
+// su nombre (usuarios.nombre); un dato de negocio nunca entra acá.
+//
+// app_user solo tiene SELECT/INSERT (db/rls-setup.sql): nadie edita ni
+// borra lo publicado desde /panel. Moderar es solo del superadmin, y
+// esconder nunca borra: oculta_ts/oculta_por quedan como rastro de
+// quién y cuándo (superadmin_user solo puede UPDATE de esas columnas).
+export const foroPreguntas = pgTable(
+  "foro_preguntas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    autorId: uuid("autor_id").notNull().references(() => usuarios.id),
+    titulo: text("titulo").notNull(),
+    cuerpo: text("cuerpo").notNull(),
+    // Una imagen opcional, siempre subida por /api/foro/imagen a la
+    // carpeta zilonix-foro de nuestro Cloudinary — nunca un link a otro
+    // sitio (lib/foro-validacion.ts, esUrlImagenForo).
+    imagenUrl: text("imagen_url"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    ocultaTs: timestamp("oculta_ts", { withTimezone: true }),
+    ocultaPor: uuid("oculta_por").references(() => usuarios.id),
+  },
+  (t) => ({
+    creadoIdx: index("foro_preguntas_creado_idx").on(t.creadoTs),
+  })
+);
+
+export const foroRespuestas = pgTable(
+  "foro_respuestas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    preguntaId: uuid("pregunta_id")
+      .notNull()
+      .references(() => foroPreguntas.id, { onDelete: "cascade" }),
+    autorId: uuid("autor_id").notNull().references(() => usuarios.id),
+    cuerpo: text("cuerpo").notNull(),
+    // Una imagen opcional, siempre subida por /api/foro/imagen a la
+    // carpeta zilonix-foro de nuestro Cloudinary — nunca un link a otro
+    // sitio (lib/foro-validacion.ts, esUrlImagenForo).
+    imagenUrl: text("imagen_url"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    ocultaTs: timestamp("oculta_ts", { withTimezone: true }),
+    ocultaPor: uuid("oculta_por").references(() => usuarios.id),
+  },
+  (t) => ({
+    preguntaIdx: index("foro_respuestas_pregunta_idx").on(t.preguntaId, t.creadoTs),
+  })
+);

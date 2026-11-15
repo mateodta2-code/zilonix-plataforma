@@ -4,6 +4,13 @@ import { costosSku, terceros } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { esCero, validarMonto } from "@/lib/finanzas/montos";
 import { TerceroNoEncontradoError } from "@/lib/terceros";
+// Extraída a un módulo propio (rama feat-promociones-aprobacion) para
+// que lib/ml/cliente.ts también pueda normalizar sin arrastrar
+// DATABASE_URL_APP a un archivo que hoy no toca Postgres — reexportado
+// acá para que nada de lo que ya importaba esto desde este archivo
+// tenga que cambiar.
+export { normalizarSkuCodigo, SkuCodigoInvalidoError } from "@/lib/sku-normalizar";
+import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 
 // Issue #127 (Z-FIN-05) — tabla maestra por SKU. La pantalla y la
 // importación son de #128: acá no hay ruta. Cada cambio queda en
@@ -29,21 +36,6 @@ export type DatosCostoSku = {
   precioVenta?: Monto;
   terceroId?: string | null;
 };
-
-export class SkuCodigoInvalidoError extends Error {
-  constructor() {
-    super("El código de SKU no puede estar vacío.");
-    this.name = "SkuCodigoInvalidoError";
-  }
-}
-
-// La llave de la maestra. Mismo criterio en los dos lados del cruce:
-// el SKU de la publicación de ML y el de la importación.
-export function normalizarSkuCodigo(codigo: string): string {
-  const normalizado = codigo.trim().toUpperCase();
-  if (!normalizado) throw new SkuCodigoInvalidoError();
-  return normalizado;
-}
 
 function precioMinimo(valor: Monto | undefined, campo: string): string | null | undefined {
   if (valor === undefined) return undefined;

@@ -1,0 +1,155 @@
+/* Issue #128 — estilos compartidos de Proveedores y Tabla maestra.
+   .filtros es el mismo bloque de app/panel/sku/page.module.css (issue
+   #186: superficie oscura de <Tarjeta>, nunca "caja blanca"). */
+.filtros {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 20px 0;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
+}
+
+.campoBusqueda {
+  min-width: 220px;
+}
+
+.casilla {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.accionesFiltro,
+.acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.acciones {
+  margin-top: 8px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.grilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.ayuda {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.aviso,
+.avisoError,
+.avisoExito {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+}
+
+.aviso {
+  background: var(--acento-suave);
+  border: 1px solid var(--acento);
+}
+
+.avisoError {
+  border: 1px solid var(--peligro, #c0392b);
+  background: color-mix(in srgb, var(--peligro, #c0392b) 18%, transparent);
+}
+
+.avisoExito {
+  border: 1px solid var(--exito, #2e7d32);
+  background: color-mix(in srgb, var(--exito, #2e7d32) 18%, transparent);
+}
+
+.enlace {
+  font-weight: 600;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.enlace:hover {
+  text-decoration: underline;
+}
+
+.suave {
+  color: var(--texto-suave);
+  font-size: 12.5px;
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.seccion {
+  margin-top: 24px;
+}
+
+.tituloSeccion {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.volver {
+  margin-top: 20px;
+}
+
+/* Issue #163 — tablero de /panel/finanzas: tarjetas del mes. */
+.tablero {
+  margin-bottom: 24px;
+}
+
+.gridKpi {
+  display: grid;
+  /* 5 tarjetas: 3 + 2 en escritorio, 2 en tablet, 1 en móvil. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+@media (max-width: 1100px) {
+  .gridKpi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .gridKpi {
+    grid-template-columns: 1fr;
+  }
+}

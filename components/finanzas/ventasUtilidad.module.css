@@ -1,0 +1,441 @@
+/* Issue #131 (Parte A) — ventas y utilidad, compartido por
+   Finanzas → Ventas, el detalle de una venta y Pedidos → Detalle día a
+   día (components/finanzas/DetalleDiaCuentaProducto.tsx). Las tablas
+   usan <Tabla> del marco; acá los niveles de fila (día, cuenta,
+   producto), la grilla de tarjetas y el bloque de filtros, que es el
+   mismo de app/panel/finanzas/finanzas.module.css (issue #186:
+   superficie oscura de <Tarjeta>, borde plateado-azul, nunca "caja
+   blanca"). */
+.filtros {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 20px 0;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
+}
+
+.accionesFiltro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.avisoError {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+  border: 1px solid var(--peligro, #c0392b);
+  background: color-mix(in srgb, var(--peligro, #c0392b) 18%, transparent);
+}
+
+.enlace {
+  font-weight: 600;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.enlace:hover {
+  text-decoration: underline;
+}
+
+.suave {
+  color: var(--texto-suave);
+  font-size: 12.5px;
+}
+
+.seccion {
+  margin-top: 24px;
+}
+
+.tituloSeccion {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.gridKpi {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 16px 0 24px;
+}
+
+.filaDia {
+  border-top: 2px solid var(--borde);
+  background: var(--tabla-encabezado-fondo);
+  font-weight: 700;
+}
+
+.filaCuenta {
+  border-top: 1px solid var(--borde);
+  font-weight: 600;
+}
+
+.filaProducto {
+  border-top: 1px solid var(--borde);
+}
+
+.filaProducto:hover {
+  background: var(--fila-hover);
+}
+
+.numero {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.sangriaCuenta {
+  padding-left: 24px !important;
+}
+
+.sangriaProducto {
+  padding-left: 40px !important;
+  min-width: 240px;
+}
+
+.marcas {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.listaSimple {
+  margin: 8px 0;
+  padding-left: 20px;
+  font-size: 13.5px;
+}
+
+.anulada {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.miniatura {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  vertical-align: middle;
+}
+
+/* Issue #131 — «Traer ventas de este mes», debajo de los filtros. */
+.traerVentas {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -8px 0 16px;
+}
+
+.avisoExito {
+  margin: 8px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+  border: 1px solid var(--exito, #2e7d32);
+  background: color-mix(in srgb, var(--exito, #2e7d32) 18%, transparent);
+}
+
+/* Issue #131 — tabla del detalle compacta, estilo DETALLE DÍA A DÍA de
+   Zilonix OS (Pedidos y Finanzas → Ventas), que CABE en el ancho del
+   panel sin desplazar de lado desde ~1100px de ventana. Solo dentro de
+   esta envoltura: <Tabla> del marco (13px, padding 10×12, th nowrap) no
+   cambia en el resto de las pantallas. Los selectores llevan elemento
+   (th/td) para ganarle a .th/.td del marco y a .zx-etiqueta sin
+   !important.
+
+   Ancho real disponible: barra lateral de 287px y contenido con
+   max-width 1480px y 28px de padding (MarcoApp.module.css) → la tabla
+   tiene ~755px a 1100px de ventana, ~855px a 1200, ~935px a 1280,
+   ~1097px a 1440 y ~1424px de 1767 en adelante.
+
+   table-layout queda en auto a propósito (no fixed): con anchos fijos
+   un total grande del día («$ 12.345.678») se cortaría o se montaría
+   sobre la columna de al lado. En auto cada columna de montos mide lo
+   que mide su número más largo, nunca menos, y la 1ª columna tiene un
+   ancho fijo (--ancho-col1) porque todo lo de adentro es un bloque de
+   ese ancho con overflow hidden: es lo único que cede.
+
+   29-oct (Sharel, tras el acordeón): el título del producto se cortaba
+   a tres palabras. La 1ª columna pasa a 300px, el producto va en dos
+   líneas (título y chips; debajo SKU y #pedido), los montos a 12px y
+   los % sin decimales. Prioriza leer el producto: cabe sin desplazar
+   de lado desde ~1440px de ventana; a 1280 se desplaza un poco.
+
+   Sin columna fija (sticky): existía porque había scroll de lado; ya
+   no hace falta. En pantallas angostas la envoltura del marco sigue
+   con overflow-x: auto y se desplaza todo junto. */
+.tablaCompacta {
+  --ancho-col1: 300px;
+}
+
+.tablaCompacta table {
+  font-size: 12px;
+}
+
+.tablaCompacta th {
+  padding: 5px 5px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+/* Encabezados de montos a la derecha, como sus números. */
+.tablaCompacta th:not(:first-child) {
+  text-align: right;
+}
+
+.tablaCompacta td {
+  padding: 4px 5px;
+  line-height: 1.35;
+}
+
+.tablaCompacta .numero {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Día, cuenta y producto: un bloque de ancho fijo que corta con «…»;
+   el texto entero va en el title. La sangría se descuenta del ancho
+   para que las tres filas midan lo mismo. */
+.textoNivel {
+  display: block;
+  width: var(--ancho-col1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tablaCompacta .sangriaCuenta {
+  padding-left: 14px !important;
+}
+
+.tablaCompacta .sangriaCuenta .textoNivel {
+  width: calc(var(--ancho-col1) - 9px);
+}
+
+.tablaCompacta .sangriaProducto {
+  /* Bajo el texto de la cuenta: 14px de su sangría + la flecha del
+     acordeón (12px + 3px). */
+  padding-left: 29px !important;
+  min-width: 0;
+}
+
+/* Chips del detalle más chicos (Agencia/Flex/Full, sin costo,
+   devolución). */
+.tablaCompacta [data-estado] {
+  padding: 0 4px;
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  line-height: 1.5;
+}
+
+.tablaCompacta .suave {
+  font-size: 10.5px;
+}
+
+.lineaProducto {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: calc(var(--ancho-col1) - 24px);
+  overflow: hidden;
+}
+
+/* Línea 1: el título usa todo lo que dejan los chips; los chips no
+   ceden y van pegados al título. */
+.filaTituloProducto {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.filaTituloProducto > * {
+  flex: none;
+}
+
+.filaTituloProducto > .tituloProducto {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.tituloProducto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* Línea 2: SKU y número de pedido, chicos y suaves. */
+.filaDatosProducto {
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Issue #131 — acordeón del detalle (TablaDetalleAcordeon.tsx), como
+   Zilonix OS: el día y la cuenta son botones con una flecha que se gira
+   al abrir. Las tres filas miden lo mismo (--ancho-col1 + ~9px): la
+   flecha (12px + 3px de espacio) sale del ancho del texto, y el
+   producto corre su sangría para quedar alineado bajo el texto de la
+   cuenta. */
+.controlNivel {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.controlNivel:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+.chevron {
+  flex: none;
+  color: var(--texto-suave);
+  transition: transform 0.15s ease;
+}
+
+.controlNivel[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+}
+
+.tablaCompacta .controlNivel .textoNivel {
+  width: calc(var(--ancho-col1) - 15px);
+}
+
+.tablaCompacta .sangriaCuenta .controlNivel .textoNivel {
+  width: calc(var(--ancho-col1) - 24px);
+}
+
+/* Día: el más marcado (fondo de encabezado y 700 de .filaDia). */
+.tablaCompacta .filaDia .textoNivel {
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+}
+
+.tablaCompacta .filaDia .chevron {
+  color: var(--texto);
+}
+
+/* Producto: el título manda; SKU y número de pedido, más chicos y
+   suaves. */
+.tablaCompacta .datoProducto {
+  color: var(--texto-suave);
+  font-size: 10px;
+}
+
+/* Issue #131 (Parte C) — «Recalcular costo con la tabla maestra»
+   (PanelRecalculoCostos.tsx). Misma superficie de zona oscura y borde
+   plateado que el bloque de filtros; sin colores nuevos. */
+.recalculo {
+  composes: filtros;
+  display: block;
+  /* Igual que <Tarjeta> (issue #191): la <Tabla> y los enlaces de
+     adentro usan los tokens de zona oscura; si no, en tema claro la
+     tabla pinta su fondo claro con el texto claro de la zona. */
+  --acento: var(--acento-zona-oscura);
+  --acento-fuerte: var(--acento-fuerte-zona-oscura);
+  --borde: var(--borde-zona-oscura);
+  --tabla-fondo: var(--tarjeta-fondo);
+  --tabla-encabezado-fondo: var(--superficie-2-zona-oscura);
+}
+
+.recalculo .suave {
+  margin: 0 0 6px;
+  max-width: 900px;
+}
+
+.formRecalculo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+
+.vistaRecalculo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.resumenRecalculo {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tablaRecalculo td {
+  padding: 6px 10px;
+  font-size: 12.5px;
+}
+
+.tablaRecalculo .numero {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.omitidos summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+/* En el celular: SKU y antes → después; Pedido, Línea y Origen se ocultan. */
+@media (max-width: 640px) {
+  .tablaRecalculo th:nth-child(1),
+  .tablaRecalculo td:nth-child(1),
+  .tablaRecalculo th:nth-child(2),
+  .tablaRecalculo td:nth-child(2),
+  .tablaRecalculo th:nth-child(6),
+  .tablaRecalculo td:nth-child(6) {
+    display: none;
+  }
+}

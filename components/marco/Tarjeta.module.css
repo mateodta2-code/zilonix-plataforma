@@ -52,6 +52,14 @@
      estos dos (ver el comentario en app/globals.css). */
   --acento: var(--acento-zona-oscura);
   --acento-fuerte: var(--acento-fuerte-zona-oscura);
+  /* Fase 1-1 de Despachos — único consumidor de estos 3 (el resaltado
+     ámbar de la tarjeta Flex, app/panel/despachos/page.module.css):
+     no existe un --advertencia normal (fuera de <Tarjeta>) porque
+     hasta esta tarea no había NINGÚN token ámbar/warning en el
+     archivo — ver el comentario real en app/globals.css. */
+  --advertencia: var(--kpi-advertencia-texto);
+  --advertencia-fuerte: var(--kpi-advertencia-fuerte);
+  --advertencia-suave: var(--kpi-advertencia-suave);
   /* Issue #191 — una <Tabla> (components/marco/Tabla.module.css) de
      adentro tiene que dejar de pintar su PROPIO fondo claro de
      siempre (--superficie/--superficie-2) — ya no combina con el

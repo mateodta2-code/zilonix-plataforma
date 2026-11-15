@@ -1,0 +1,1 @@
+ALTER TABLE "skus" ADD CONSTRAINT "skus_empresa_id_unica" UNIQUE("empresa_id","id");

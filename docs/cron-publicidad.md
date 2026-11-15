@@ -1,6 +1,6 @@
 # Cron de Product Ads (issue #254)
 
-`POST /api/trabajos/publicidad` (`app/api/trabajos/publicidad/route.ts`) sincroniza las cuentas conectadas que entren en el presupuesto de la corrida (240 segundos, por debajo del `--max-time 300` del curl). El orden es la última sincronización más vieja; las que nunca corrieron van primero. La respuesta trae `pendientes`: las cuentas que no alcanzaron a entrar. El workflow encadena hasta 4 tandas mientras `pendientes` no sea 0. Lee Product Ads con el OAuth de cada vendedor y guarda anunciante, campañas, métricas diarias, anuncios y el costo vigente del ítem. No escribe campañas en Mercado Libre.
+`POST /api/trabajos/publicidad` (`app/api/trabajos/publicidad/route.ts`) sincroniza las cuentas conectadas que entren en el presupuesto de la corrida (240 segundos, por debajo del `--max-time 300` del curl). El orden es la última sincronización más vieja; las que nunca corrieron van primero. La respuesta trae `pendientes` (cuentas que no alcanzaron a entrar) y `sigue` (hay que llamar otra vez: backfill a medias, corte que avanzó, o `pendientes` distinto de 0). El workflow encadena tandas mientras `sigue` sea true. Lee Product Ads con el OAuth de cada vendedor y guarda anunciante, campañas, métricas diarias, anuncios y el costo vigente del ítem. No escribe campañas en Mercado Libre. Una cuenta que ya terminó `ok` hace menos de 20 horas se salta sin llamar a Mercado Libre.
 
 Lo llama un cron, sin sesión de Clerk. La puerta es `PUBLICIDAD_TRABAJADOR_SECRET` en la cabecera `x-publicidad-trabajador-secret`, comparada con `crypto.timingSafeEqual`. La conexión de base es `DATABASE_URL_PUBLICIDAD` (`publicidad_trabajador_user`, creado en `db/rls-setup.sql`): solo puede listar `id`, `empresa_id`, `desconectada_ts` y `creado_ts` de `cuentas_ml`, y leer `publicidad_sincronizaciones`. El token y las escrituras pasan por `dbComoEmpresa` / `app_user`.
 
@@ -8,7 +8,7 @@ Lo llama un cron, sin sesión de Clerk. La puerta es `PUBLICIDAD_TRABAJADOR_SECR
 
 ## Horario
 
-`.github/workflows/sincronizar-publicidad.yml` corre una vez por día a las 14:00 UTC (09:00 en Bogotá, después de las 08:30) y, dentro de esa corrida, hasta 4 tandas de 240 segundos. Las métricas de la API se refrescan cerca de las 10:00 GMT-3, así que el total del día puede ir atrasado respecto de la Central de vendedores. `workflow_dispatch` sirve para seguir el backfill: la primera vez pide 62 días en tramos de 7, y cada corrida retoma donde quedó. Un `ok` de cuenta sin Product Ads o sin permiso de la app no cierra el backfill: `cierra_backfill` queda en false y al día siguiente se vuelve a preguntar. Después de un tramo `ok` con `cierra_backfill`, las siguientes piden los últimos 15 días (14 de atribución más uno).
+`.github/workflows/sincronizar-publicidad.yml` corre cada hora (`0 * * * *`) con hasta 8 tandas de 240 segundos, para que el backfill no espere al día siguiente. `workflow_dispatch` ("Run workflow") usa el mismo endpoint y encadena hasta 36 tandas (~3 horas): es la forma de cerrar un mes (octubre 1-31 entra en los 62 días) en una sola corrida, después de que staging haya desplegado este cambio. Una segunda corrida no se superpone (`concurrency`). Las métricas de la API se refrescan cerca de las 10:00 GMT-3, así que el total del día puede ir atrasado respecto de la Central de vendedores. La primera vez pide 62 días en tramos de 7, y cada tanda retoma donde quedó (`reanudaDesde`). Un `ok` de cuenta sin Product Ads o sin permiso de la app no cierra el backfill: `cierra_backfill` queda en false y, pasadas 20 horas, se vuelve a preguntar. Después de un tramo `ok` con `cierra_backfill`, las siguientes piden los últimos 15 días (14 de atribución más uno), como mucho una vez cada 20 horas.
 
 ## Qué hace falta para que corra en staging
 
@@ -24,4 +24,4 @@ Producción usa los mismos pasos con su propio Postgres, su propio secreto (`PUB
 
 - No llamar a este endpoint con un `--max-time` menor a unos minutos: un tramo con muchas campañas y anuncios puede tardar.
 - No pegar el secreto en el comando que queda en el historial de la shell.
-- Una segunda corrida el mismo día, si la anterior ya terminó `ok`, se salta. Una corrida `parcial` del mismo día no se salta: es el backfill que hay que retomar.
+- Una corrida con la anterior ya `ok` hace menos de 20 horas se salta, sin llamar a Mercado Libre. Una corrida `parcial`, o un corte de tiempo que avanzó el día, no se salta: el workflow la retoma en la tanda siguiente.

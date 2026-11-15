@@ -1,0 +1,361 @@
+.filtrosFila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-top: 4px;
+}
+
+.buscador {
+  min-width: 220px;
+  flex: 1;
+}
+
+.chipsFiltro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.seccion {
+  margin-top: 16px;
+}
+
+.bannerMaestra {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radio-tarjeta);
+  border: 1px solid var(--degradado-plata-borde);
+  background: var(--superficie-2);
+  color: var(--texto-suave);
+  font-size: 12.5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bannerMaestraFalta {
+  border-color: var(--kpi-advertencia-fuerte);
+  background: var(--kpi-advertencia-suave);
+  color: var(--kpi-advertencia-texto);
+  font-weight: 600;
+}
+
+.reglas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.filaRegla {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  flex-wrap: wrap;
+}
+
+.accionesRegla {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.listaPublicaciones {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tarjetaPublicacion {
+  padding: 14px 16px;
+}
+
+.filaResumen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.foto {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--superficie-2-zona-oscura);
+  color: var(--texto-suave);
+  object-fit: cover;
+}
+
+.infoPublicacion {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.titulo {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtitulo {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.chevron[data-abierto="true"] {
+  transform: rotate(180deg);
+}
+
+.avisoError {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--kpi-peligro-texto);
+}
+
+.detalle {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--degradado-plata-borde);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.filaPromocion {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--degradado-plata-borde);
+}
+
+.filaPromocion:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.encabezadoPromocion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.nombrePromocion {
+  font-weight: 700;
+}
+
+.datosPromocion {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+.accionesPromocion {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.sinPromociones {
+  font-size: 13px;
+  color: var(--text-faint, var(--texto-suave));
+}
+
+/* Tarea "Promociones-Ajustes-1" — barra de progreso de la carga
+   automática (reemplaza el botón manual "Cargar más publicaciones"). */
+.progresoCarga {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radio-tarjeta);
+  border: 1px solid var(--degradado-plata-borde);
+  background: var(--superficie-2);
+  color: var(--texto-suave);
+  font-size: 12.5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Modal "Confirma los detalles de la promoción" — <dialog> nativo,
+   centrado.
+
+   ARREGLO (Refs #295) — bug real confirmado en staging: la versión
+   anterior (app/panel/promociones-prueba) ponía
+   `background: var(--tarjeta-fondo)` (shorthand) y, en la MISMA
+   regla, `background-image: linear-gradient(var(--tarjeta-fondo),
+   var(--tarjeta-fondo)), var(--degradado-plata-borde)`. --tarjeta-fondo
+   (app/globals.css, --kpi-fondo) es EN SÍ un linear-gradient(...) —
+   meter un gradient como argumento de OTRO linear-gradient() es
+   sintaxis inválida (un color-stop tiene que ser un color, nunca una
+   función de gradiente). El navegador descarta esa declaración
+   completa y el panel queda sin ningún fondo: transparente, se mezcla
+   con las tarjetas de atrás.
+
+   El patrón correcto YA existe y está probado en producción en
+   components/marco/Tarjeta.module.css: un solo `background:` con
+   capas separadas por coma, cada una con su propio `padding-box`/
+   `border-box` — nunca un gradient anidado dentro de otro. Por eso
+   acá el panel se arma envolviendo el contenido en <Tarjeta> (mismo
+   componente real que usa el resto de la app) en vez de reinventar el
+   truco del borde plata. */
+.dialogo {
+  margin: auto;
+  padding: 0;
+  border: none;
+  border-radius: var(--radio-tarjeta);
+  max-width: min(520px, 92vw);
+  width: 100%;
+  background: transparent;
+  z-index: 1000; /* por si algún ancestro rompiera la capa superior nativa del <dialog> */
+}
+
+.dialogo::backdrop {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.panelModal {
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tituloModal {
+  margin: 0 0 4px;
+  font-family: var(--fuente-titulos);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.resumenProducto {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--texto-suave-zona-oscura);
+}
+
+.filaDato {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.filaDatoFinal {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  padding-top: 8px;
+  border-top: 1px solid var(--degradado-plata-borde);
+}
+
+.bloqueAjuste {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+}
+
+.tipoAjuste {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.tipoAjuste label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filaValor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.unidad {
+  font-size: 12.5px;
+  color: var(--texto-suave-zona-oscura);
+}
+
+.avisoMinimo {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--kpi-peligro-texto);
+}
+
+.avisoCompartida {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--texto-suave-zona-oscura);
+}
+
+.accionesModal {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.errorModal {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--kpi-peligro-texto);
+}
+
+/* Modal de confirmación de "Aplicar regla" y de "Dejar de participar"
+   — mismo arreglo, mismo criterio: <Tarjeta> adentro de un <dialog>
+   simple, nunca un fondo propio reinventado. */
+.resumenAplicar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13.5px;
+}
+
+.tablaResumen {
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 8px;
+}

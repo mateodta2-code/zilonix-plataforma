@@ -6,7 +6,6 @@ import { FormularioPublicar } from "./FormularioPublicar";
 import { SeccionesImportar } from "./SeccionesImportar";
 import type { Cuenta } from "./CuentasDestino";
 import { HistorialPublicaciones, type ProductoHistorial } from "./HistorialPublicaciones";
-import { SeccionClip } from "./SeccionClip";
 import {
   construirEstadoInicial,
   construirEstadoInicialDesdeImportacion,
@@ -59,24 +58,26 @@ export function PaginaPublicar({
   cuentas,
   historial,
   prefillNuevo,
-  clipHabilitado,
   itemImportado,
   importarOrigen,
   importarSkuNoEncontrado,
   importarLinkError,
   importarNoDisponible,
   cloudinaryConfigurado,
+  canva,
+  canvaCodigo,
 }: {
   cuentas: Cuenta[];
   historial: ProductoHistorial[];
   prefillNuevo: { titulo: string; precio: string; foto: string };
-  clipHabilitado: boolean;
   itemImportado: ItemImportado | null;
   importarOrigen: string;
   importarSkuNoEncontrado: string;
   importarLinkError: string;
   importarNoDisponible: boolean;
   cloudinaryConfigurado: boolean;
+  canva: string;
+  canvaCodigo: string;
 }) {
   const [formInicial, setFormInicial] = useState<EstadoInicialFormulario>(() => {
     // Parte 3, punto A — un ítem importado (por SKU o por link, ya
@@ -165,7 +166,14 @@ export function PaginaPublicar({
       </Tarjeta>
 
       {/* --- Puntos 3-7: el formulario (cuentas, datos, por cuenta, categoría, publicar) --- */}
-      <FormularioPublicar key={formKey} cuentas={cuentas} inicial={formInicial} cloudinaryConfigurado={cloudinaryConfigurado} />
+      <FormularioPublicar
+        key={formKey}
+        cuentas={cuentas}
+        inicial={formInicial}
+        cloudinaryConfigurado={cloudinaryConfigurado}
+        canva={canva}
+        canvaCodigo={canvaCodigo}
+      />
 
       {/* --- Punto 8: historial (y, Parte 3 punto B, el permalink real por cuenta) --- */}
       <HistorialPublicaciones
@@ -174,9 +182,6 @@ export function PaginaPublicar({
         onCargar={(p) => cargarEnFormulario(p, "reintentar")}
         onDuplicar={(p) => cargarEnFormulario(p, "duplicar")}
       />
-
-      {/* --- Punto 9: Clip --- */}
-      {clipHabilitado && <SeccionClip cuentas={cuentas} />}
     </>
   );
 }

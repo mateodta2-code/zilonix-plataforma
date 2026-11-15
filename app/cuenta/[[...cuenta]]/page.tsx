@@ -1,4 +1,5 @@
 import { UserProfile } from "@clerk/nextjs";
+import { BotonCerrarSesion } from "@/components/marco/BotonCerrarSesion";
 
 // Ruta protegida (middleware.ts la bloquea sin sesión). UserProfile es
 // el componente de Clerk para administrar la cuenta — ahí mismo, en
@@ -12,8 +13,9 @@ import { UserProfile } from "@clerk/nextjs";
 // Mismo patrón que ya se usó bien en /sign-in y /sign-up.
 export default function CuentaPage() {
   return (
-    <main style={{ display: "flex", justifyContent: "center", padding: "48px 24px" }}>
+    <main style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "48px 24px" }}>
       <UserProfile />
+      <BotonCerrarSesion variante="cuenta" />
     </main>
   );
 }

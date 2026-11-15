@@ -3,7 +3,10 @@
 import { Boton } from "@/components/marco/Boton";
 import styles from "./publicar.module.css";
 
-export type Cuenta = { id: string; nickname: string };
+// Issue #315 — siteId/moneda/idioma reales de la cuenta (lib/ml/sitios.ts,
+// listarCuentasConectadas), para que el resto de Publicar (precio del
+// historial, categoría por defecto…) nunca asuma Colombia.
+export type Cuenta = { id: string; nickname: string; siteId: string; moneda: string; idioma: string };
 // Punto 3 del pedido — "dejá el componente preparado para mostrar
 // grupos con título y contador '(N elegidas)', pero por ahora un solo
 // grupo 'Cuentas' (los grupos reales por empresa vienen en la Parte 4;

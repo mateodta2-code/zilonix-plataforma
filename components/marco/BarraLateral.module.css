@@ -224,7 +224,7 @@ html .item {
 
 .piePrincipal {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 6px;
 }
 
@@ -259,10 +259,11 @@ html .item {
   transition: var(--transicion-color), var(--transicion-transform);
 }
 
-/* Pedido explícito: estos 3 botones (Mi cuenta / Tema / Contraer) se
-   suman al mismo brillo de marca que ya tiene el resto de lo
-   interactivo (azul metálico + plata) — el plateado de arriba se ve
-   siempre, el azul resalta ENCIMA al pasar el mouse. */
+/* Pedido explícito: estos botones (Mi cuenta / Mis datos / Tema /
+   Contraer — issue #318 agregó el segundo) se suman al mismo brillo de
+   marca que ya tiene el resto de lo interactivo (azul metálico +
+   plata) — el plateado de arriba se ve siempre, el azul resalta
+   ENCIMA al pasar el mouse. */
 .botonCuadrado:hover {
   color: var(--icono-hover);
   transform: translateY(-1px);

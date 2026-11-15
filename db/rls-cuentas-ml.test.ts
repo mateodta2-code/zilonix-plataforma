@@ -105,6 +105,7 @@ describe("guardarCuentaConectada — RLS real (issue reconectar, tarea 2.3)", ()
       cuentaIdExterna,
       nickname: "VENDEDOR_INICIAL",
       tokens: tokensDePrueba(cuentaIdExterna, "inicial"),
+      siteId: null,
     });
     await desconectarCuenta(empresaAId, primera.id);
 
@@ -112,6 +113,7 @@ describe("guardarCuentaConectada — RLS real (issue reconectar, tarea 2.3)", ()
       cuentaIdExterna,
       nickname: "VENDEDOR_RECONECTADO",
       tokens: tokensDePrueba(cuentaIdExterna, "reconectado"),
+      siteId: null,
     });
 
     expect(reconectada.id).toBe(primera.id);
@@ -132,6 +134,7 @@ describe("guardarCuentaConectada — RLS real (issue reconectar, tarea 2.3)", ()
       cuentaIdExterna,
       nickname: "VENDEDOR_A",
       tokens: tokensDePrueba(cuentaIdExterna, "a"),
+      siteId: null,
     });
 
     await expect(
@@ -139,6 +142,7 @@ describe("guardarCuentaConectada — RLS real (issue reconectar, tarea 2.3)", ()
         cuentaIdExterna,
         nickname: "INTENTO_DESDE_B",
         tokens: tokensDePrueba(cuentaIdExterna, "robo"),
+        siteId: null,
       })
     ).rejects.toThrow(CuentaMlDeOtraEmpresaError);
 
@@ -171,6 +175,7 @@ describe("transferir una cuenta de Mercado Libre a otra empresa (issue #181) —
       cuentaIdExterna,
       nickname: "VENDEDOR_A",
       tokens: tokensDePrueba(cuentaIdExterna, "a"),
+      siteId: null,
     });
 
     const dueña = await obtenerEmpresaDueñaDeCuentaMl(cuentaIdExterna);
@@ -199,12 +204,14 @@ describe("transferir una cuenta de Mercado Libre a otra empresa (issue #181) —
       cuentaIdExterna,
       nickname: "VENDEDOR_A",
       tokens: tokensDePrueba(cuentaIdExterna, "a"),
+      siteId: null,
     });
 
     const transferida = await transferirCuentaMlAOtraEmpresa(empresaBId, {
       cuentaIdExterna,
       nickname: "VENDEDOR_TRANSFERIDO",
       tokens: tokensDePrueba(cuentaIdExterna, "transferida"),
+      siteId: null,
     });
 
     // Mismo id — es la MISMA fila, nunca una nueva.
@@ -236,6 +243,7 @@ describe("transferir una cuenta de Mercado Libre a otra empresa (issue #181) —
       cuentaIdExterna,
       nickname: "VENDEDOR_A",
       tokens: tokensDePrueba(cuentaIdExterna, "a"),
+      siteId: null,
     });
     await desconectarCuenta(empresaAId, deEmpresaA.id);
 
@@ -243,6 +251,7 @@ describe("transferir una cuenta de Mercado Libre a otra empresa (issue #181) —
       cuentaIdExterna,
       nickname: "VENDEDOR_TRANSFERIDO",
       tokens: tokensDePrueba(cuentaIdExterna, "transferida"),
+      siteId: null,
     });
 
     const [filaB] = await dbComoEmpresa(empresaBId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, transferida.id)));
@@ -257,6 +266,7 @@ describe("transferir una cuenta de Mercado Libre a otra empresa (issue #181) —
       cuentaIdExterna,
       nickname: "VENDEDOR_A",
       tokens: tokensDePrueba(cuentaIdExterna, "a"),
+      siteId: null,
     });
 
     // Mismo UPDATE que transferirCuentaMlAOtraEmpresa hace de verdad,

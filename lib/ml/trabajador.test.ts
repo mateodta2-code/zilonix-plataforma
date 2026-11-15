@@ -2,9 +2,10 @@ import { randomUUID } from "crypto";
 import { and, eq, isNull, like } from "drizzle-orm";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { avisosMl, cuentasMl, empresas } from "@/db/schema";
+import { avisosMl, cuentasMl, despachosMl, empresas, pedidos } from "@/db/schema";
+import { crearCuentaMlDePrueba } from "@/db/test-utils/venta";
 import { cifrarToken } from "@/lib/cifrado";
-import { procesarAvisosPendientes } from "./trabajador";
+import { intentarProcesarAvisoAhora, procesarAvisosPendientes } from "./trabajador";
 
 function respuestaOk(data: unknown = {}) {
   return { ok: true, status: 200, json: async () => data, text: async () => JSON.stringify(data) } as Response;
@@ -13,11 +14,19 @@ function respuesta404() {
   return { ok: false, status: 404, json: async () => ({}), text: async () => "not found" } as Response;
 }
 
+const sinEspera = async () => {};
+
 // Tarea 2.4 — prueba real contra Postgres: el trabajador lee avisos
 // pendientes de CUALQUIER empresa (trabajador_user, cross-empresa a
 // propósito), vuelve a pedirle el dato real a la API (acá, simulada con
 // fetch mockeado — la prueba de carga de verdad contra la API real de
 // Mercado Libre la corre Mateo en staging, no CI) y marca procesado_ts.
+// Tema "items" (nunca "orders_v2"/"shipments") a propósito en este
+// describe: issue "ventas nuevas en segundos" (Refs #49) — esos dos SÍ
+// escriben pedidos/despachos_ml ahora (su propio describe, más abajo);
+// "items" (y cualquier otro tema) sigue con el comportamiento de
+// siempre, el que prueba este describe: solo confirma que el recurso
+// es real y accesible.
 describe("trabajador de avisos de Mercado Libre (tarea 2.4)", () => {
   const empresaId = randomUUID();
   const cuentaExterna = `ml-user-trabajador-${randomUUID()}`;
@@ -56,20 +65,20 @@ describe("trabajador de avisos de Mercado Libre (tarea 2.4)", () => {
       tx.insert(avisosMl).values({
         empresaId,
         cuentaIdExterna: cuentaExterna,
-        topic: "orders_v2",
-        resource: "/orders/111",
+        topic: "items",
+        resource: "/items/111",
         enviadoTs: new Date(),
       })
     );
 
-    const resultado = await procesarAvisosPendientes();
+    const resultado = await procesarAvisosPendientes(sinEspera);
     expect(resultado.procesados).toBeGreaterThanOrEqual(1);
     expect(resultado.fallidos).toBe(0);
 
     const fetchMock = vi.mocked(fetch);
-    expect(fetchMock).toHaveBeenCalledWith("https://api.mercadolibre.com/orders/111", expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith("https://api.mercadolibre.com/items/111", expect.anything());
 
-    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.resource, "/orders/111")));
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.resource, "/items/111")));
     expect(fila.procesadoTs).not.toBeNull();
   });
 
@@ -79,16 +88,16 @@ describe("trabajador de avisos de Mercado Libre (tarea 2.4)", () => {
       tx.insert(avisosMl).values({
         empresaId,
         cuentaIdExterna: cuentaExterna,
-        topic: "orders_v2",
-        resource: "/orders/no-existe",
+        topic: "items",
+        resource: "/items/no-existe",
         enviadoTs: new Date(),
       })
     );
 
-    const resultado = await procesarAvisosPendientes();
+    const resultado = await procesarAvisosPendientes(sinEspera);
     expect(resultado.fallidos).toBe(0);
 
-    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.resource, "/orders/no-existe")));
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.resource, "/items/no-existe")));
     expect(fila.procesadoTs).not.toBeNull();
   });
 
@@ -101,16 +110,16 @@ describe("trabajador de avisos de Mercado Libre (tarea 2.4)", () => {
       tx.insert(avisosMl).values({
         empresaId,
         cuentaIdExterna: cuentaExterna,
-        topic: "orders_v2",
-        resource: "/orders/con-error",
+        topic: "items",
+        resource: "/items/con-error",
         enviadoTs: new Date(),
       })
     );
 
-    const resultado = await procesarAvisosPendientes();
+    const resultado = await procesarAvisosPendientes(sinEspera);
     expect(resultado.fallidos).toBeGreaterThanOrEqual(1);
 
-    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.resource, "/orders/con-error")));
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.resource, "/items/con-error")));
     expect(fila.procesadoTs).toBeNull(); // sigue pendiente, no se perdió
   });
 
@@ -119,8 +128,8 @@ describe("trabajador de avisos de Mercado Libre (tarea 2.4)", () => {
     const valores = Array.from({ length: 1000 }, (_, i) => ({
       empresaId,
       cuentaIdExterna: cuentaExterna,
-      topic: "orders_v2",
-      resource: `/orders/${PREFIJO}${i}`,
+      topic: "items",
+      resource: `/items/${PREFIJO}${i}`,
       enviadoTs: new Date(Date.now() - i), // cada uno con un momento de envío distinto, por el índice único
     }));
     // Insertar de a 100 — un solo INSERT de 1.000 filas es más lento de
@@ -140,18 +149,320 @@ describe("trabajador de avisos de Mercado Libre (tarea 2.4)", () => {
     // confirmar puntualmente que ESTOS 1.000 (por el prefijo único)
     // quedaron todos procesados.
     for (let pasada = 0; pasada < 25; pasada++) {
-      const resultado = await procesarAvisosPendientes();
+      const resultado = await procesarAvisosPendientes(sinEspera);
       if (resultado.recibidosPendientes === 0) break;
     }
 
     const pendientesDeEstaCarga = await dbComoEmpresa(empresaId, (tx) =>
-      tx.select({ id: avisosMl.id }).from(avisosMl).where(and(isNull(avisosMl.procesadoTs), like(avisosMl.resource, `/orders/${PREFIJO}%`)))
+      tx.select({ id: avisosMl.id }).from(avisosMl).where(and(isNull(avisosMl.procesadoTs), like(avisosMl.resource, `/items/${PREFIJO}%`)))
     );
     expect(pendientesDeEstaCarga).toHaveLength(0); // 0 perdidos, de los 1.000 propios
 
     const procesadosDeEstaCarga = await dbComoEmpresa(empresaId, (tx) =>
-      tx.select({ id: avisosMl.id }).from(avisosMl).where(like(avisosMl.resource, `/orders/${PREFIJO}%`))
+      tx.select({ id: avisosMl.id }).from(avisosMl).where(like(avisosMl.resource, `/items/${PREFIJO}%`))
     );
     expect(procesadosDeEstaCarga).toHaveLength(1000); // los 1.000 están, ninguno se perdió en el camino
   }, 120_000);
+});
+
+// Issue "ventas nuevas en segundos" (Refs #49) — helpers compartidos
+// por este describe y por el de intentarProcesarAvisoAhora, más abajo
+// (mismo tipo de orden/envío simulados, nada propio de cada uno).
+async function empresaConCuenta(nombre: string) {
+  const empresaId = randomUUID();
+  await dbComoEmpresa(empresaId, (tx) => tx.insert(empresas).values({ id: empresaId, nombre, nit: `TEST-AVTX-${empresaId.slice(0, 8)}` }));
+  const cuentaId = await crearCuentaMlDePrueba(empresaId);
+  const [cuenta] = await dbComoEmpresa(empresaId, (tx) => tx.select({ cuentaIdExterna: cuentasMl.cuentaIdExterna }).from(cuentasMl).where(eq(cuentasMl.id, cuentaId)));
+  return { empresaId, cuentaId, cuentaExterna: cuenta.cuentaIdExterna };
+}
+
+function orden(id: number, shipmentId: number) {
+  return {
+    id,
+    date_created: "2026-10-30T10:00:00.000-05:00",
+    status: "paid",
+    total_amount: 80000,
+    currency_id: "COP",
+    shipping: { id: shipmentId },
+    payments: [{ status: "approved", date_approved: "2026-10-30T10:05:00.000-05:00", transaction_amount: 80000 }],
+    order_items: [{ item: { id: `MCO${id}`, title: `Producto ${id}`, seller_sku: "AVISO-1" }, quantity: 1, unit_price: 80000 }],
+  };
+}
+
+function mockFetchOrdenYEnvio(orderId: number, shipmentId: number) {
+  return vi.fn(async (url: string) => {
+    const u = new URL(url);
+    if (u.pathname === `/orders/${orderId}`) return respuestaOk(orden(orderId, shipmentId));
+    if (u.pathname === `/shipments/${shipmentId}`) return respuestaOk({ order_id: orderId, status: "ready_to_ship", substatus: null, logistic_type: "xd_drop_off" });
+    if (u.pathname === `/shipments/${shipmentId}/costs`) return respuestaOk({ senders: [{ cost: 0 }] });
+    if (u.pathname === `/shipments/${shipmentId}/sla`) return respuestaOk({ status: "on_time", expected_date: "2026-10-31T20:00:00.000Z" });
+    if (u.pathname === "/items") return respuestaOk([{ code: 200, body: { id: `MCO${orderId}` } }]);
+    throw new Error(`fetch no esperado en la prueba: ${u.pathname}`);
+  });
+}
+
+// Issue "ventas nuevas en segundos" (Refs #49) — "orders_v2"/"shipments"
+// ahora SÍ escriben pedidos/despachos_ml, con la misma lógica real que
+// sincronizarVentasCuenta (lib/ml/ventas-finanzas.ts) y el fix del
+// PR #345 (shipmentId resuelto por guardarOrdenMl, nunca adivinado con
+// el contenido del aviso).
+describe("trabajador — orders_v2/shipments sincronizan pedidos/despachos_ml (issue 'ventas nuevas en segundos')", () => {
+  vi.setConfig({ testTimeout: 15_000 });
+
+  it("aviso 'orders_v2' de una orden nueva crea el pedido Y su despacho (shipmentId resuelto por guardarOrdenMl, nunca adivinado)", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa aviso orders_v2");
+    const orderId = 601;
+    const shipmentId = 5601;
+    vi.stubGlobal("fetch", mockFetchOrdenYEnvio(orderId, shipmentId));
+
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${orderId}`, enviadoTs: new Date() })
+    );
+
+    const resultado = await procesarAvisosPendientes(sinEspera);
+    expect(resultado).toMatchObject({ procesados: 1, fallidos: 0 });
+
+    const [filaPedido] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, String(orderId))));
+    expect(filaPedido).toBeDefined();
+
+    const [filaDespacho] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.pedidoId, filaPedido.id)));
+    expect(filaDespacho).toMatchObject({ shipmentIdExterno: String(shipmentId), status: "ready_to_ship", logisticType: "xd_drop_off" });
+
+    const [filaAviso] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.resource, `/orders/${orderId}`)));
+    expect(filaAviso.procesadoTs).not.toBeNull();
+  });
+
+  it("aviso 'shipments' resuelve el order_id real (del envío, nunca del contenido del aviso) y sincroniza lo mismo", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa aviso shipments");
+    const orderId = 602;
+    const shipmentId = 5602;
+    vi.stubGlobal("fetch", mockFetchOrdenYEnvio(orderId, shipmentId));
+
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "shipments", resource: `/shipments/${shipmentId}`, enviadoTs: new Date() })
+    );
+
+    const resultado = await procesarAvisosPendientes(sinEspera);
+    expect(resultado).toMatchObject({ procesados: 1, fallidos: 0 });
+
+    const [filaPedido] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, String(orderId))));
+    expect(filaPedido).toBeDefined();
+    const [filaDespacho] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.pedidoId, filaPedido.id)));
+    expect(filaDespacho.shipmentIdExterno).toBe(String(shipmentId));
+  });
+
+  it("dos avisos de la MISMA orden (ej. creada y actualizada) nunca duplican el pedido ni el despacho", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa aviso duplicado");
+    const orderId = 603;
+    const shipmentId = 5603;
+    vi.stubGlobal("fetch", mockFetchOrdenYEnvio(orderId, shipmentId));
+
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values([
+        { empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${orderId}`, enviadoTs: new Date(Date.now() - 2000) },
+        { empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${orderId}`, enviadoTs: new Date() },
+      ])
+    );
+
+    const resultado = await procesarAvisosPendientes(sinEspera);
+    expect(resultado).toMatchObject({ recibidosPendientes: 2, procesados: 2, fallidos: 0 });
+
+    const filasPedido = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, String(orderId))));
+    expect(filasPedido).toHaveLength(1); // nunca dos pedidos por la misma orden
+
+    const filasDespacho = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.pedidoId, filasPedido[0].id)));
+    expect(filasDespacho).toHaveLength(1); // nunca dos despachos tampoco
+  });
+});
+
+// Issue "despachos no aparecen solos" (Refs #319) — intentarProcesarAvisoAhora
+// es la mitad que llama el webhook (app/api/ml/webhooks/route.ts) justo
+// después de guardar el aviso, para que la venta se vea en Despachos en
+// segundos en vez de esperar al cron. Mismo motor real que
+// procesarAvisosPendientes (sincronizarVentaDesdeAviso) — lo propio de
+// acá es el reclamo atómico (nunca procesa dos veces el mismo aviso) y
+// el tope de tiempo (nunca bloquea el 200 que espera Mercado Libre).
+describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solos')", () => {
+  vi.setConfig({ testTimeout: 15_000 });
+
+  it("procesa 'orders_v2' al instante: pedido y despacho quedan listos antes de responder", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa aviso instantaneo (webhook)");
+    const orderId = 700;
+    const shipmentId = 5700;
+    vi.stubGlobal("fetch", mockFetchOrdenYEnvio(orderId, shipmentId));
+
+    const [{ id: avisoId }] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(avisosMl)
+        .values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${orderId}`, enviadoTs: new Date() })
+        .returning({ id: avisosMl.id })
+    );
+
+    const resultado = await intentarProcesarAvisoAhora(avisoId);
+    expect(resultado).toBe("procesado");
+
+    const [filaPedido] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, String(orderId))));
+    expect(filaPedido).toBeDefined();
+    const [filaDespacho] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(despachosMl).where(eq(despachosMl.pedidoId, filaPedido.id)));
+    expect(filaDespacho).toMatchObject({ shipmentIdExterno: String(shipmentId) });
+
+    const [filaAviso] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaAviso.procesadoTs).not.toBeNull();
+  });
+
+  it("si Mercado Libre tarda más que el tope, el webhook responde 'pendiente' sin esperar — pero NUNCA libera el aviso (Refs #319): el trabajo de fondo termina solo, marca procesado_ts y el cron no lo reprocesa", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa aviso lento (timeout webhook)");
+    const orderId = 701;
+    const shipmentId = 5701;
+    const DEMORA_MS = 200;
+    const respuestaDelMock = mockFetchOrdenYEnvio(orderId, shipmentId);
+    let primeraLlamada = true;
+    const fetchMock = vi.fn(async (url: string) => {
+      // Solo la PRIMERA llamada (la que de verdad compite contra el
+      // tope) se demora — así el trabajo de fondo (que sigue corriendo
+      // sin que nadie lo espere tras el timeout) termina rápido después,
+      // en vez de arrastrar la demora en cada una de sus llamadas
+      // encadenadas (orden, envío, costos, SLA) y quedar corriendo
+      // todavía cuando empiece la siguiente prueba.
+      if (primeraLlamada) {
+        primeraLlamada = false;
+        await new Promise((r) => setTimeout(r, DEMORA_MS));
+      }
+      return respuestaDelMock(url);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [{ id: avisoId }] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(avisosMl)
+        .values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${orderId}`, enviadoTs: new Date() })
+        .returning({ id: avisosMl.id })
+    );
+
+    // Tope artificialmente chico (30ms, mucho menos que DEMORA_MS) solo
+    // para la prueba — en producción es TIMEOUT_PROCESO_WEBHOOK_MS (5s).
+    const resultado = await intentarProcesarAvisoAhora(avisoId, 30);
+    expect(resultado).toBe("pendiente");
+
+    // Justo al vencer el tope, el aviso sigue "reclamado" (nunca
+    // liberado) — si se liberara acá, el cron lo reclamaría de nuevo y
+    // correría en paralelo contra el trabajo de fondo todavía vivo.
+    const [filaTrasTimeout] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaTrasTimeout.procesadoTs).not.toBeNull();
+
+    // El cron corre mientras el trabajo de fondo todavía no terminó —
+    // no debe tocar este aviso (sigue "reclamado").
+    const llamadasAntesDelCron = fetchMock.mock.calls.length;
+    await procesarAvisosPendientes(sinEspera);
+    expect(fetchMock.mock.calls.length).toBe(llamadasAntesDelCron); // el cron no volvió a llamar a ML por este aviso
+
+    // Deja terminar el trabajo de fondo (ya nadie lo espera).
+    await new Promise((r) => setTimeout(r, DEMORA_MS + 150));
+
+    // El trabajo tardío terminó bien y el aviso quedó marcado procesado
+    // de verdad (no solo por el reclamo) — con pedido y despacho reales.
+    const [filaFinal] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaFinal.procesadoTs).not.toBeNull();
+    const [filaPedido] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, String(orderId))));
+    expect(filaPedido).toBeDefined();
+
+    // Y el cron, corriendo otra vez ya con el trabajo terminado, tampoco
+    // lo reprocesa (procesado_ts sigue sin ser null).
+    const llamadasAntesDelSegundoCron = fetchMock.mock.calls.length;
+    await procesarAvisosPendientes(sinEspera);
+    expect(fetchMock.mock.calls.length).toBe(llamadasAntesDelSegundoCron);
+  });
+
+  it("si el trabajo de fondo FALLA después del tope, libera el aviso (nunca se queda 'reclamado' para siempre) y el cron lo retoma", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa aviso falla tras timeout (webhook)");
+    const orderId = 703;
+    const DEMORA_MS = 200;
+    // Misma idea que la prueba de arriba (el trabajo de fondo sigue
+    // corriendo solo tras perder la carrera contra el tope) pero acá la
+    // llamada a Mercado Libre, cuando por fin responde, es un error real
+    // (500) — nunca un 429 (ese tiene su propio reintento, PR #360 no lo
+    // toca). El trabajo.catch() de intentarProcesarAvisoAhora es quien
+    // debe liberar el aviso en este caso (ver liberarAviso, ahora con su
+    // propio try/catch para nunca dejar una promesa sin manejar).
+    const fetchMock = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, DEMORA_MS));
+      return { ok: false, status: 500, json: async () => ({}), text: async () => "error interno" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [{ id: avisoId }] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(avisosMl)
+        .values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${orderId}`, enviadoTs: new Date() })
+        .returning({ id: avisosMl.id })
+    );
+
+    // Tope artificialmente chico (30ms, mucho menos que DEMORA_MS), igual
+    // que la prueba del caso feliz tras el timeout.
+    const resultado = await intentarProcesarAvisoAhora(avisoId, 30);
+    expect(resultado).toBe("pendiente");
+
+    // Justo al vencer el tope, sigue "reclamado" — todavía no terminó el
+    // trabajo de fondo.
+    const [filaTrasTimeout] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaTrasTimeout.procesadoTs).not.toBeNull();
+
+    // Deja terminar el trabajo de fondo (ya nadie lo espera) — cuando
+    // falle de verdad, debe liberar el aviso.
+    await new Promise((r) => setTimeout(r, DEMORA_MS + 150));
+
+    const [filaFinal] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaFinal.procesadoTs).toBeNull(); // liberado: el cron de respaldo debe poder retomarlo
+
+    // El cron, corriendo después, retoma este aviso (nunca se quedó huérfano).
+    const llamadasAntesDelCron = fetchMock.mock.calls.length;
+    await procesarAvisosPendientes(sinEspera);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(llamadasAntesDelCron);
+  });
+
+  it("si la cuenta ya no está conectada a la empresa, nunca llama a Mercado Libre y deja el aviso pendiente", async () => {
+    const { empresaId } = await empresaConCuenta("Empresa cuenta desconectada (webhook)");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cuentaIdExternaAjena = `ml-user-ajena-${randomUUID()}`; // nunca se conectó a esta empresa
+    const [{ id: avisoId }] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(avisosMl)
+        .values({ empresaId, cuentaIdExterna: cuentaIdExternaAjena, topic: "orders_v2", resource: "/orders/999999", enviadoTs: new Date() })
+        .returning({ id: avisosMl.id })
+    );
+
+    const resultado = await intentarProcesarAvisoAhora(avisoId);
+    expect(resultado).toBe("pendiente");
+    expect(fetchMock).not.toHaveBeenCalled(); // nunca confía en el aviso, y sin cuenta no hay con qué pedirle nada a ML
+
+    const [filaAviso] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
+    expect(filaAviso.procesadoTs).toBeNull();
+  });
+
+  it("si el aviso ya fue reclamado (ej. el cron llegó primero), el webhook nunca lo vuelve a procesar", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa aviso ya reclamado (idempotencia)");
+    const orderId = 702;
+    const shipmentId = 5702;
+    const fetchMock = mockFetchOrdenYEnvio(orderId, shipmentId);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [{ id: avisoId }] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(avisosMl)
+        .values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${orderId}`, enviadoTs: new Date() })
+        .returning({ id: avisosMl.id })
+    );
+    // Simula al cron reclamando el aviso primero — mismo UPDATE atómico
+    // que usa intentarProcesarAvisoAhora (reclamarAviso).
+    await dbComoEmpresa(empresaId, (tx) => tx.update(avisosMl).set({ procesadoTs: new Date() }).where(eq(avisosMl.id, avisoId)));
+
+    const resultado = await intentarProcesarAvisoAhora(avisoId);
+    expect(resultado).toBe("omitido");
+    expect(fetchMock).not.toHaveBeenCalled(); // nunca vuelve a pedirle nada a Mercado Libre
+
+    const [filaPedido] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, String(orderId))));
+    expect(filaPedido).toBeUndefined(); // el webhook no creó nada por su cuenta
+  });
 });

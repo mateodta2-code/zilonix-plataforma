@@ -37,6 +37,22 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
 -- fila de la tabla maestra se corrige, ninguno se borra. Son tablas
 -- nuevas, así que no hay un DELETE viejo que revocar.
 GRANT SELECT, INSERT, UPDATE ON terceros, costos_sku TO app_user;
+-- Issue #129 (Z-FIN-07) — ventas: sin DELETE. La cabecera y las
+-- líneas solo se borran en cascada con su pedido. Una corrección no se
+-- edita ni se borra: el único UPDATE permitido es anularla
+-- (anulada_ts), y la política de abajo no deja des-anularla.
+GRANT SELECT, INSERT, UPDATE ON pedidos_finanzas, pedido_items TO app_user;
+GRANT SELECT, INSERT ON ventas_correcciones TO app_user;
+GRANT UPDATE (anulada_ts) ON ventas_correcciones TO app_user;
+-- Issue #280 (WMS Fase 1) — nada de inventario se borra: una bodega se
+-- desactiva, un saldo cambia solo por un movimiento y el kardex es de
+-- solo inserción (ni UPDATE ni DELETE: la historia no se reescribe).
+-- Una recepción tampoco se edita: si llegó mal, se corrige con un
+-- ajuste, que queda en el kardex.
+GRANT SELECT, INSERT, UPDATE ON bodegas, stock_bodega, ordenes_compra, orden_compra_items,
+  configuracion_inventario, sync_stock_ml, alertas_ultima_unidad TO app_user;
+GRANT SELECT, INSERT ON kardex_movimientos, recepciones, recepcion_items TO app_user;
+REVOKE UPDATE, DELETE ON kardex_movimientos, recepciones, recepcion_items FROM app_user;
 -- Issue #125 (Z-FIN-03) — auditoria queda de solo inserción para
 -- app_user: puede dejar el rastro y leer el de su empresa, no
 -- reescribirlo ni borrarlo. REVOKE porque este script es repetible:
@@ -49,6 +65,25 @@ GRANT SELECT, INSERT, UPDATE ON terceros, costos_sku TO app_user;
 -- confirmación de Sharel/Mateo.
 GRANT SELECT, INSERT ON auditoria TO app_user;
 REVOKE UPDATE, DELETE ON auditoria FROM app_user;
+-- Rama feat-promociones — promociones_candidatos es un snapshot que se
+-- UPSERTea (nunca se borra fila por fila, siempre ON CONFLICT DO
+-- UPDATE); promociones_acciones es historial/auditoría, solo se agrega
+-- y se actualiza su propio estado, nunca se borra. ia_conexiones sí
+-- necesita DELETE real: desconectar la IA de una empresa es una acción
+-- legítima de un clic, sin ningún motivo para guardar la fila vieja.
+GRANT SELECT, INSERT, UPDATE ON promociones_reglas, promociones_candidatos, promociones_acciones TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ia_conexiones TO app_user;
+-- Tarea "Publicar — conectar Canva" — a diferencia de ia_conexiones,
+-- desconectar Canva NUNCA borra la fila (decisión explícita de
+-- Pablo/Mateo: queda desconectada_ts como histórico, los tokens se
+-- limpian con UPDATE, no con DELETE) — por eso sin DELETE acá.
+GRANT SELECT, INSERT, UPDATE ON canva_conexiones TO app_user;
+-- Foro de la comunidad (14-nov) — compartido entre TODAS las empresas
+-- por diseño (sin empresa_id ni política por empresa, igual que
+-- usuarios). Desde /panel solo se lee y se publica: nadie edita ni
+-- borra lo de otro, ni lo propio. REVOKE porque el script es repetible.
+GRANT SELECT, INSERT ON foro_preguntas, foro_respuestas TO app_user;
+REVOKE UPDATE, DELETE ON foro_preguntas, foro_respuestas FROM app_user;
 -- No hay GRANT de secuencias a propósito: todas las tablas usan uuid()
 -- con defaultRandom() como llave primaria, no hay ninguna columna
 -- "serial" en el esquema — no existe ninguna secuencia que otorgar.
@@ -69,6 +104,11 @@ GRANT CONNECT ON DATABASE railway TO superadmin_user;
 GRANT USAGE ON SCHEMA public TO superadmin_user;
 GRANT SELECT ON empresas, membresias, roles, usuarios, accesos_temporales TO superadmin_user;
 GRANT INSERT ON auditoria TO superadmin_user;
+-- Foro (14-nov) — moderar es esconder, nunca borrar ni reescribir: el
+-- superadmin solo puede marcar oculta_ts/oculta_por. El foro no es
+-- dato de negocio de ninguna empresa, así que verlo no rompe D8.
+GRANT SELECT ON foro_preguntas, foro_respuestas TO superadmin_user;
+GRANT UPDATE (oculta_ts, oculta_por) ON foro_preguntas, foro_respuestas TO superadmin_user;
 
 -- 1c) Tarea 2.4 — tercer usuario de base, el más limitado de los tres:
 -- el trabajador de cola necesita ver avisos de CUALQUIER empresa (no
@@ -167,6 +207,45 @@ ALTER TABLE terceros ENABLE ROW LEVEL SECURITY;
 ALTER TABLE terceros FORCE ROW LEVEL SECURITY;
 ALTER TABLE costos_sku ENABLE ROW LEVEL SECURITY;
 ALTER TABLE costos_sku FORCE ROW LEVEL SECURITY;
+-- Issue #129.
+ALTER TABLE pedidos_finanzas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pedidos_finanzas FORCE ROW LEVEL SECURITY;
+ALTER TABLE pedido_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pedido_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE ventas_correcciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ventas_correcciones FORCE ROW LEVEL SECURITY;
+-- Issue #280.
+ALTER TABLE bodegas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bodegas FORCE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega FORCE ROW LEVEL SECURITY;
+ALTER TABLE kardex_movimientos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kardex_movimientos FORCE ROW LEVEL SECURITY;
+ALTER TABLE ordenes_compra ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ordenes_compra FORCE ROW LEVEL SECURITY;
+ALTER TABLE orden_compra_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orden_compra_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepciones FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_inventario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_inventario FORCE ROW LEVEL SECURITY;
+ALTER TABLE sync_stock_ml ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sync_stock_ml FORCE ROW LEVEL SECURITY;
+ALTER TABLE alertas_ultima_unidad ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alertas_ultima_unidad FORCE ROW LEVEL SECURITY;
+-- Rama feat-promociones.
+ALTER TABLE promociones_reglas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE promociones_reglas FORCE ROW LEVEL SECURITY;
+ALTER TABLE promociones_candidatos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE promociones_candidatos FORCE ROW LEVEL SECURITY;
+ALTER TABLE promociones_acciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE promociones_acciones FORCE ROW LEVEL SECURITY;
+ALTER TABLE ia_conexiones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ia_conexiones FORCE ROW LEVEL SECURITY;
+ALTER TABLE canva_conexiones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE canva_conexiones FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
@@ -329,6 +408,97 @@ CREATE POLICY aislamiento_terceros ON terceros
 DROP POLICY IF EXISTS aislamiento_costos_sku ON costos_sku;
 CREATE POLICY aislamiento_costos_sku ON costos_sku
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #129 — mismo patrón para la cabecera y las líneas de venta.
+DROP POLICY IF EXISTS aislamiento_pedidos_finanzas ON pedidos_finanzas;
+CREATE POLICY aislamiento_pedidos_finanzas ON pedidos_finanzas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_pedido_items ON pedido_items;
+CREATE POLICY aislamiento_pedido_items ON pedido_items
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- ventas_correcciones: una política por comando. Se inserta activa
+-- (sin anulada_ts) y el UPDATE (que el GRANT ya limita a anulada_ts)
+-- solo toma una corrección activa y la deja anulada: no se des-anula
+-- ni se cambia la fecha de una ya anulada.
+DROP POLICY IF EXISTS aislamiento_ventas_correcciones ON ventas_correcciones;
+DROP POLICY IF EXISTS ventas_correcciones_ver ON ventas_correcciones;
+CREATE POLICY ventas_correcciones_ver ON ventas_correcciones FOR SELECT
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS ventas_correcciones_crear ON ventas_correcciones;
+CREATE POLICY ventas_correcciones_crear ON ventas_correcciones FOR INSERT
+  WITH CHECK (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NULL);
+DROP POLICY IF EXISTS ventas_correcciones_anular ON ventas_correcciones;
+CREATE POLICY ventas_correcciones_anular ON ventas_correcciones FOR UPDATE
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NULL)
+  WITH CHECK (empresa_id = current_setting('app.empresa_actual', true)::uuid AND anulada_ts IS NOT NULL);
+
+-- Issue #280 — mismo patrón en las tablas de inventario: una empresa
+-- nunca ve ni mueve el stock, el kardex ni las compras de otra. Las
+-- FK compuestas (empresa_id, ...) cierran el otro hueco: una fila de A
+-- no puede apuntar a una bodega o un SKU de B.
+DROP POLICY IF EXISTS aislamiento_bodegas ON bodegas;
+CREATE POLICY aislamiento_bodegas ON bodegas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_stock_bodega ON stock_bodega;
+CREATE POLICY aislamiento_stock_bodega ON stock_bodega
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_kardex_movimientos ON kardex_movimientos;
+CREATE POLICY aislamiento_kardex_movimientos ON kardex_movimientos
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_ordenes_compra ON ordenes_compra;
+CREATE POLICY aislamiento_ordenes_compra ON ordenes_compra
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_orden_compra_items ON orden_compra_items;
+CREATE POLICY aislamiento_orden_compra_items ON orden_compra_items
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_recepciones ON recepciones;
+CREATE POLICY aislamiento_recepciones ON recepciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_recepcion_items ON recepcion_items;
+CREATE POLICY aislamiento_recepcion_items ON recepcion_items
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_configuracion_inventario ON configuracion_inventario;
+CREATE POLICY aislamiento_configuracion_inventario ON configuracion_inventario
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_sync_stock_ml ON sync_stock_ml;
+CREATE POLICY aislamiento_sync_stock_ml ON sync_stock_ml
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_alertas_ultima_unidad ON alertas_ultima_unidad;
+CREATE POLICY aislamiento_alertas_ultima_unidad ON alertas_ultima_unidad
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Rama feat-promociones.
+DROP POLICY IF EXISTS aislamiento_promociones_reglas ON promociones_reglas;
+CREATE POLICY aislamiento_promociones_reglas ON promociones_reglas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_promociones_candidatos ON promociones_candidatos;
+CREATE POLICY aislamiento_promociones_candidatos ON promociones_candidatos
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_promociones_acciones ON promociones_acciones;
+CREATE POLICY aislamiento_promociones_acciones ON promociones_acciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_ia_conexiones ON ia_conexiones;
+CREATE POLICY aislamiento_ia_conexiones ON ia_conexiones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Tarea "Publicar — conectar Canva" — a diferencia de TODAS las demás
+-- políticas de arriba (que filtran solo por empresa_id), esta filtra
+-- por empresa_id Y usuario_id a la vez: una persona de la empresa
+-- nunca ve ni usa la conexión de Canva de otra persona de la MISMA
+-- empresa, aunque comparta rol o permisos (pedido explícito — el link
+-- de "Compartir" de un diseño de Canva es personal). Requiere el
+-- contexto nuevo dbComoEmpresaYUsuario (db/empresa-context.ts), que
+-- fija los dos current_setting reales a la vez — dbComoEmpresa() solo
+-- fija empresa_actual, así que con ese contexto esta política nunca
+-- deja ver ninguna fila (usuario_actual queda sin fijar → NULL).
+DROP POLICY IF EXISTS aislamiento_canva_conexiones ON canva_conexiones;
+CREATE POLICY aislamiento_canva_conexiones ON canva_conexiones
+  USING (
+    empresa_id = current_setting('app.empresa_actual', true)::uuid
+    AND usuario_id = NULLIF(current_setting('app.usuario_actual', true), '')::uuid
+  );
 
 DROP POLICY IF EXISTS aislamiento_accesos_temporales ON accesos_temporales;
 CREATE POLICY aislamiento_accesos_temporales ON accesos_temporales

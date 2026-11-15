@@ -15,14 +15,19 @@ import {
   leerDescripcionItemMl,
   leerItemBasicoMl,
   leerItemCompletoMl,
+  leerItemParaPromocionMl,
+  leerPromocionesItemMl,
   LimiteMercadoLibreError,
+  listarItemsActivosMl,
+  modificarPromocionMl,
+  motivoErrorEscrituraMl,
+  participarPromocionMl,
   pedirLecturaMl,
   linkPublicacion,
   MlNoAutorizadoError,
   MlNoDisponibleError,
   MlRespuestaInesperadaError,
   MlSinPermisoAppError,
-  obtenerClipsMl,
   obtenerFotoItemMl,
   obtenerItemMl,
   obtenerMejoresProductosCategoria,
@@ -30,8 +35,10 @@ import {
   obtenerProducto,
   obtenerPublicacionesVendedorAjenoMl,
   obtenerVendedor,
+  PATRON_ID_CATEGORIA,
+  PATRON_ID_PRODUCTO_O_ITEM,
   resolverCategoria,
-  subirClipMl,
+  salirDePromocionMl,
 } from "./cliente";
 
 function respuestaJson(data: unknown, status = 200) {
@@ -47,7 +54,28 @@ describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)"
     vi.unstubAllGlobals();
   });
 
-  it("productId que no cumple ^MCO\\d+$ nunca llama a fetch (obtenerProducto)", async () => {
+  // Issue #315 — estos patrones ya no fijan "MCO": cubren cualquier
+  // site_id real de Mercado Libre (3 letras mayúsculas) + dígitos,
+  // pero siguen siendo un formato cerrado, nunca una validación débil.
+  it.each([
+    ["MCO123", true],
+    ["MLM456", true],
+    ["MLA1", true],
+    ["MLB999999", true],
+    ["MLC1", true],
+    ["mco123", false], // minúsculas: no es un site_id real
+    ["MC123", false], // 2 letras, no 3
+    ["MCOO123", false], // 4 letras, no 3
+    ["MCO", false], // sin dígitos
+    ["MCO1/../users/me", false], // intento de path traversal
+    ["MCO1; DROP TABLE x;--", false], // intento de inyección
+    ["", false],
+  ])("PATRON_ID_PRODUCTO_O_ITEM / PATRON_ID_CATEGORIA en %j → %j", (valor, esperado) => {
+    expect(PATRON_ID_PRODUCTO_O_ITEM.test(valor)).toBe(esperado);
+    expect(PATRON_ID_CATEGORIA.test(valor)).toBe(esperado);
+  });
+
+  it("productId que no cumple el patrón de id de Mercado Libre nunca llama a fetch (obtenerProducto)", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const resultado = await obtenerProducto("'; DROP TABLE x; --", "token");
@@ -66,7 +94,7 @@ describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)"
   it("categoryId inválido nunca llama a fetch (obtenerMejoresProductosCategoria)", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const resultado = await obtenerMejoresProductosCategoria("MCO 1234", "token");
+    const resultado = await obtenerMejoresProductosCategoria("MCO", "MCO 1234", "token");
     expect(resultado).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -82,6 +110,16 @@ describe("lib/ml/cliente — validación de ids, tiempo máximo y 429 (PR #112)"
   it("linkPublicacion con un itemId inválido devuelve null, nunca arma una URL", () => {
     expect(linkPublicacion("javascript:alert(1)")).toBeNull();
     expect(linkPublicacion("MCO111")).toBe("https://articulo.mercadolibre.com.co/MCO-111");
+  });
+
+  // Issue #315 — el dominio sale del propio prefijo del itemId
+  // (nunca de ".com.co" fijo): cada site_id real tiene su dominio, y
+  // Brasil además cambia de palabra (mercadoLIVRE, no mercadoLIBRE).
+  it("linkPublicacion arma el dominio real de cada país a partir del site_id del itemId, nunca fijo a Colombia", () => {
+    expect(linkPublicacion("MLM456")).toBe("https://articulo.mercadolibre.com.mx/MLM-456");
+    expect(linkPublicacion("MLB789")).toBe("https://articulo.mercadolivre.com.br/MLB-789");
+    expect(linkPublicacion("MLA1")).toBe("https://articulo.mercadolibre.com.ar/MLA-1");
+    expect(linkPublicacion("MLC1")).toBe("https://articulo.mercadolibre.cl/MLC-1");
   });
 
   it("ids válidos sí llaman a fetch, con el id pasado por encodeURIComponent", async () => {
@@ -208,26 +246,6 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
     expect(r).toEqual({ title: "Producto", thumbnail: "https://x/thumb.jpg" });
   });
 
-  it("subirClipMl: itemId inválido nunca llama a fetch; válido manda multipart sin content-type a mano", async () => {
-    const fetchMockInvalido = vi.fn();
-    vi.stubGlobal("fetch", fetchMockInvalido);
-    const form = new FormData();
-    await expect(subirClipMl("MCO1/../users/me", "token", form)).rejects.toThrow(/inválido/);
-    expect(fetchMockInvalido).not.toHaveBeenCalled();
-
-    vi.unstubAllGlobals();
-    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      // FormData pone su propio content-type (con boundary) — nunca se
-      // fija "application/json" a mano para una subida multipart.
-      expect((init?.headers as Record<string, string>)["content-type"]).toBeUndefined();
-      expect(init?.body).toBeInstanceOf(FormData);
-      return respuestaJson({ status: "accepted" });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const r = await subirClipMl("MCO111", "token", form);
-    expect(r.ok).toBe(true);
-  });
-
   it("leerCategoriaMl/leerAtributosCategoriaMl: categoryId inválido nunca llama a fetch; endpoints públicos (sin Authorization)", async () => {
     const fetchMockInvalido = vi.fn();
     vi.stubGlobal("fetch", fetchMockInvalido);
@@ -341,11 +359,9 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
   });
 
   // Bug real: escribir() usaba el TIMEOUT_MS de 8s de LECTURA para toda
-  // escritura — corta un POST /items (o una subida de clip) antes de
-  // que Mercado Libre termine, con riesgo real de ítem duplicado al
-  // reintentar. crearItemMl usa TIMEOUT_ESCRITURA_MS (30s); subirClipMl
-  // (video de hasta 280MB) usa TIMEOUT_SUBIDA_CLIP_MS (300s) — ninguno
-  // de los dos usa el de 8s de pedir().
+  // escritura — corta un POST /items antes de que Mercado Libre
+  // termine, con riesgo real de ítem duplicado al reintentar.
+  // crearItemMl usa TIMEOUT_ESCRITURA_MS (30s), nunca el de 8s de pedir().
   it("crearItemMl: usa el timeout de escritura (30s), no el de lectura (8s)", async () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ id: "MCOITEM1" }, 201)));
@@ -354,25 +370,6 @@ describe("lib/ml/cliente — escritura (POST/PUT) y funciones nuevas de la tarea
     timeoutSpy.mockRestore();
   });
 
-  it("subirClipMl: usa el timeout de subida de clip (300s), bien más largo que el de escritura normal", async () => {
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ status: "accepted" })));
-    await subirClipMl("MCO111", "token", new FormData());
-    expect(timeoutSpy).toHaveBeenCalledWith(300_000);
-    timeoutSpy.mockRestore();
-  });
-
-  it("subirClipMl: tiempo agotado / falla de red devuelve status:0 (nunca una excepción sin capturar), igual que crearItemMl", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new DOMException("The operation was aborted.", "AbortError");
-      })
-    );
-    const r = await subirClipMl("MCO111", "token", new FormData());
-    expect(r.ok).toBe(false);
-    expect(r.status).toBe(0);
-  });
 });
 
 // Issue #147 — bug real: un 401/403/5xx de Mercado Libre caía en el
@@ -386,12 +383,12 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
 
   it("401 en /products/search: MlNoAutorizadoError, nunca un Error genérico ni un 500 silencioso", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
-    await expect(buscarProductosCatalogo("reloj digital", "token")).rejects.toThrow(MlNoAutorizadoError);
+    await expect(buscarProductosCatalogo("MCO", "reloj digital", "token")).rejects.toThrow(MlNoAutorizadoError);
   });
 
   it("403 en /products/search: MlSinPermisoAppError, con el endpoint (sin query) adentro", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    const error = await buscarProductosCatalogo("reloj digital", "token").catch((e) => e);
+    const error = await buscarProductosCatalogo("MCO", "reloj digital", "token").catch((e) => e);
     expect(error).toBeInstanceOf(MlSinPermisoAppError);
     expect(error.endpoint).toBe("/products/search");
     expect(error.endpoint).not.toContain("reloj"); // nunca el término en el endpoint logueado
@@ -399,7 +396,7 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
 
   it("5xx: MlNoDisponibleError", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 503)));
-    await expect(buscarProductosCatalogo("reloj digital", "token")).rejects.toThrow(MlNoDisponibleError);
+    await expect(buscarProductosCatalogo("MCO", "reloj digital", "token")).rejects.toThrow(MlNoDisponibleError);
   });
 
   it("tiempo agotado (AbortError): MlNoDisponibleError, no un {ok:false} silencioso", async () => {
@@ -409,12 +406,12 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
         throw new DOMException("The operation was aborted.", "AbortError");
       })
     );
-    await expect(buscarProductosCatalogo("reloj digital", "token")).rejects.toThrow(MlNoDisponibleError);
+    await expect(buscarProductosCatalogo("MCO", "reloj digital", "token")).rejects.toThrow(MlNoDisponibleError);
   });
 
   it("404 sigue siendo 'vacío' (array vacío), no un error — una respuesta legítima", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
-    await expect(buscarProductosCatalogo("reloj digital", "token")).resolves.toEqual([]);
+    await expect(buscarProductosCatalogo("MCO", "reloj digital", "token")).resolves.toEqual([]);
   });
 
   // Issue #174 — bug real: antes esto era un Error genérico que
@@ -424,10 +421,19 @@ describe("lib/ml/cliente — errores tipados por estado HTTP (issue #147)", () =
   // diagnosticar por qué Investigación no devolvía resultados.
   it("un 4xx que no es 404 (ej. 400): MlRespuestaInesperadaError con el status real adentro, nunca un Error genérico", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 400)));
-    const error = await buscarProductosCatalogo("reloj digital", "token").catch((e) => e);
+    const error = await buscarProductosCatalogo("MCO", "reloj digital", "token").catch((e) => e);
     expect(error).toBeInstanceOf(MlRespuestaInesperadaError);
     expect(error.status).toBe(400);
     expect(error.message).toContain("400");
+  });
+
+  // Issue #315 — una cuenta MLM busca en SU catálogo, nunca en el de
+  // Colombia: site_id en la URL sale del parámetro siteId recibido.
+  it("buscarProductosCatalogo: cuenta MLM pide site_id=MLM, nunca MCO fijo", async () => {
+    const fetchMock = vi.fn(async (_url: string) => respuestaJson({ results: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await buscarProductosCatalogo("MLM", "reloj digital", "token");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("site_id=MLM");
   });
 
   it("obtenerOfertasProducto propaga 403 tal cual (nunca lo traga como 'sin ofertas') — investigacion.ts necesita distinguirlo", async () => {
@@ -550,17 +556,26 @@ describe("resolverCategoria — 3 intentos con 800ms*intento ante 403/5xx (issue
       .mockResolvedValueOnce(respuestaJson({}, 403))
       .mockResolvedValueOnce(respuestaJson([{ category_id: "MCO1234" }]));
     vi.stubGlobal("fetch", fetchMock);
-    const promesa = resolverCategoria("reloj digital", "token");
+    const promesa = resolverCategoria("MCO", "reloj digital", "token");
     await vi.runAllTimersAsync();
     const resultado = await promesa;
     expect(resultado).toEqual({ categoryId: "MCO1234" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  // Issue #315 — una cuenta MLM resuelve categoría en SU sitio.
+  it("cuenta MLM pide /sites/MLM/domain_discovery, nunca /sites/MCO fijo", async () => {
+    const fetchMock = vi.fn(async (_url: string) => respuestaJson([{ category_id: "MLM1234" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await resolverCategoria("MLM", "reloj digital", "token");
+    expect(resultado).toEqual({ categoryId: "MLM1234" });
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/sites/MLM/domain_discovery");
+  });
+
   it("403 los 3 intentos: devuelve null (enriquecimiento opcional), nunca lanza", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    const promesa = resolverCategoria("reloj digital", "token");
+    const promesa = resolverCategoria("MCO", "reloj digital", "token");
     await vi.runAllTimersAsync();
     await expect(promesa).resolves.toBeNull();
   });
@@ -568,7 +583,7 @@ describe("resolverCategoria — 3 intentos con 800ms*intento ante 403/5xx (issue
   it("401: nunca reintenta — propaga de una (el token no va a cambiar en el segundo intento)", async () => {
     const fetchMock = vi.fn(async () => respuestaJson({}, 401));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(resolverCategoria("reloj digital", "token")).rejects.toThrow(MlNoAutorizadoError);
+    await expect(resolverCategoria("MCO", "reloj digital", "token")).rejects.toThrow(MlNoAutorizadoError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
@@ -589,7 +604,7 @@ describe("obtenerMejoresProductosCategoria — highlights con type ITEM | PRODUC
         })
       )
     );
-    const resultado = await obtenerMejoresProductosCategoria("MCO1234", "token");
+    const resultado = await obtenerMejoresProductosCategoria("MCO", "MCO1234", "token");
     expect(resultado).toEqual([
       { id: "MCO1", tipo: "PRODUCT" },
       { id: "MCO2", tipo: "ITEM" },
@@ -599,10 +614,23 @@ describe("obtenerMejoresProductosCategoria — highlights con type ITEM | PRODUC
 
   it("tolera 403/5xx devolviendo [] (enriquecimiento), propaga 401", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    await expect(obtenerMejoresProductosCategoria("MCO1234", "token")).resolves.toEqual([]);
+    await expect(obtenerMejoresProductosCategoria("MCO", "MCO1234", "token")).resolves.toEqual([]);
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
-    await expect(obtenerMejoresProductosCategoria("MCO1234", "token")).rejects.toThrow(MlNoAutorizadoError);
+    await expect(obtenerMejoresProductosCategoria("MCO", "MCO1234", "token")).rejects.toThrow(MlNoAutorizadoError);
+  });
+
+  // Issue #315 — una cuenta MLM (México) pide sus destacados: la URL
+  // usa el siteId real recibido (nunca "MCO" fijo) y PATRON_ID_DESTACADO
+  // acepta el prefijo MLM, no solo MCO.
+  it("cuenta MLM: pide /highlights/MLM/... y acepta ids con prefijo MLM", async () => {
+    const fetchMock = vi.fn(async (_url: string) =>
+      respuestaJson({ content: [{ id: "MLM1", type: "PRODUCT" }] })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await obtenerMejoresProductosCategoria("MLM", "MLM1234", "token");
+    expect(resultado).toEqual([{ id: "MLM1", tipo: "PRODUCT" }]);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/highlights/MLM/category/MLM1234");
   });
 });
 
@@ -940,59 +968,349 @@ describe("leerItemCompletoMl/leerDescripcionItemMl — Parte 3, punto A (importa
   });
 });
 
-// Rama feat-publicar-clip, punto 5 — avisado antes de tocar
-// lib/ml/cliente.ts. Advertencia explícita (ver el comentario completo
-// junto a obtenerClipsMl): la forma exacta de GET .../clips nunca se
-// confirmó contra una cuenta real con un clip ya moderado — se prueba
-// parseando de forma defensiva las 2 formas razonables (array suelto
-// o {results:[...]}), nunca asumiendo una sola.
-describe("obtenerClipsMl — Parte Clip, punto 5 (estado de moderación)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
+describe("listarItemsActivosMl — rama feat-promociones, una página", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("cuentaIdExterna inválida nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listarItemsActivosMl("no-es-numerico", "token", 0)).rejects.toThrow(/inválido/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("devuelve ids y el total real del catálogo", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ results: ["MCO1", "MCO2"], paging: { total: 137 } })));
+    await expect(listarItemsActivosMl("123", "token", 0)).resolves.toEqual({ ids: ["MCO1", "MCO2"], totalCatalogo: 137 });
+  });
+
+  it("status >= 500 lanza (nunca devuelve una página vacía en silencio)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 500)));
+    await expect(listarItemsActivosMl("123", "token", 0)).rejects.toThrow();
+  });
+});
+
+describe("leerItemParaPromocionMl — rama feat-promociones", () => {
+  afterEach(() => vi.unstubAllGlobals());
 
   it("itemId inválido: null, nunca llama a fetch", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await expect(obtenerClipsMl("no-es-un-id", "token")).resolves.toBeNull();
+    await expect(leerItemParaPromocionMl("no-es-un-id", "token")).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("array suelto: parsea clip_uuid/moderation_status/rejection_reason", async () => {
+  it("sin SELLER_SKU en attributes: cae a seller_custom_field, normalizado", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuestaJson({ title: "Producto", thumbnail: "https://x/thumb.jpg", seller_custom_field: "  sku-1 ", variations: [{ id: 1 }, { id: 2 }] }))
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toEqual({
+      title: "Producto",
+      thumbnail: "https://x/thumb.jpg",
+      skuCodigo: "SKU-1",
+      tieneVariantes: true,
+      skuVariantesDistintas: false,
+      precio: null,
+      stock: null,
+    });
+  });
+
+  it("trae precio y stock reales del ítem cuando Mercado Libre los manda", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuestaJson({ title: "Producto", thumbnail: "https://x/thumb.jpg", price: 45000, available_quantity: 7, seller_custom_field: "sku-1" }))
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ precio: 45000, stock: 7 });
+  });
+
+  it("precio/stock quedan null si Mercado Libre no los manda o vienen inválidos", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", price: 0, available_quantity: -1, seller_custom_field: "sku-1" })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ precio: null, stock: null });
+  });
+
+  // Bug real (rama feat-promociones-aprobacion, confirmado en staging
+  // con sharel/FMCBIENESTAR): el SKU vive en `attributes` (id
+  // SELLER_SKU), no en `seller_custom_field` — mismo criterio ya
+  // confirmado real en lib/ml/costos-item.ts (skuDe). Antes de este
+  // arreglo, estos ítems siempre salían "Falta precio mínimo" aunque
+  // el SKU existiera en la maestra de Finanzas.
+  it("SELLER_SKU en attributes manda sobre seller_custom_field, nunca al revés", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
-        respuestaJson([
-          { clip_uuid: "uuid-1", moderation_status: "REJECTED", rejection_reason: "Audio con copyright" },
-          { clip_uuid: "uuid-2", moderation_status: "PUBLISHED" },
-        ])
+        respuestaJson({
+          title: "Producto",
+          seller_custom_field: "otro-campo-viejo",
+          attributes: [{ id: "COLOR", value_name: "Azul" }, { id: "SELLER_SKU", value_name: "sku-real" }],
+          variations: [],
+        })
       )
     );
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([
-      { clipUuid: "uuid-1", moderationStatus: "REJECTED", motivoRechazo: "Audio con copyright" },
-      { clipUuid: "uuid-2", moderationStatus: "PUBLISHED", motivoRechazo: null },
-    ]);
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-REAL" });
   });
 
-  it("forma {results:[...]}: misma lectura", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ results: [{ id: "uuid-3", status: "UNDER_REVIEW" }] })));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-3", moderationStatus: "UNDER_REVIEW", motivoRechazo: null }]);
+  // El vendedor puede cargar un SELLER_SKU distinto por variante — se
+  // usa el de la variación, nunca el del ítem padre, para que el piso
+  // de Finanzas salga del SKU real de esa variante puntual.
+  it("con variaciones: usa el SELLER_SKU de la primera variación que lo tenga, no el del ítem padre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          attributes: [{ id: "SELLER_SKU", value_name: "sku-padre" }],
+          variations: [
+            { id: 1, attributes: [] },
+            { id: 2, attributes: [{ id: "SELLER_SKU", value_name: "sku-variante-2" }] },
+          ],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-VARIANTE-2", tieneVariantes: true });
   });
 
-  it("404 (nunca se subió ningún clip todavía): [], nunca null (distingue 'sin dato' de 'de verdad no hay nada')", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([]);
+  // Review de Pablo (PR #304) — bug real evitado: tomar "la primera
+  // variación que tenga SKU" a ciegas podía calcular el piso de
+  // Finanzas con el SKU de UNA sola variante y mostrarlo como si
+  // aplicara a todo el ítem. Con SKUs distintos entre variaciones,
+  // skuCodigo tiene que quedar null y skuVariantesDistintas=true —
+  // nunca se adivina cuál variación "manda".
+  it("variaciones con SKU DISTINTO entre sí: skuCodigo null, skuVariantesDistintas=true — nunca toma una a ciegas", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          variations: [
+            { id: 1, attributes: [{ id: "SELLER_SKU", value_name: "sku-a" }] },
+            { id: 2, attributes: [{ id: "SELLER_SKU", value_name: "sku-b" }] },
+          ],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: null, tieneVariantes: true, skuVariantesDistintas: true });
   });
 
-  it("403/5xx: null (sin dato de la API, nunca [] inventado)", async () => {
+  it("variaciones con el MISMO SKU (solo cambia mayúsculas/espacios): se normaliza y sigue normal, nunca 'distintas'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          variations: [
+            { id: 1, attributes: [{ id: "SELLER_SKU", value_name: "sku-1" }] },
+            { id: 2, attributes: [{ id: "SELLER_SKU", value_name: "  SKU-1  " }] },
+            { id: 3, attributes: [] },
+          ],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-1", tieneVariantes: true, skuVariantesDistintas: false });
+  });
+
+  it("item SIN variaciones: skuVariantesDistintas siempre false", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", seller_custom_field: "sku-1", variations: [] })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuVariantesDistintas: false, tieneVariantes: false });
+  });
+
+  it("con variaciones pero ninguna trae SELLER_SKU: cae al SKU del ítem padre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          attributes: [{ id: "SELLER_SKU", value_name: "sku-padre" }],
+          variations: [{ id: 1, attributes: [] }],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-PADRE", tieneVariantes: true });
+  });
+
+  it("una variación trae seller_custom_field propio (sin attributes): también se usa, mismo criterio que el ítem padre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        respuestaJson({
+          title: "Producto",
+          variations: [{ id: 1, seller_custom_field: "sku-de-la-variante" }],
+        })
+      )
+    );
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: "SKU-DE-LA-VARIANTE" });
+  });
+
+  it("sin ningún SKU en ningún lado: skuCodigo null, nunca lanza SkuCodigoInvalidoError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", variations: [] })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ skuCodigo: null });
+  });
+
+  it("sin variations (o vacío): tieneVariantes false", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ title: "Producto", variations: [] })));
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toMatchObject({ tieneVariantes: false });
+  });
+
+  it("403/404/5xx: null, nunca lanza", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toBeNull();
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 503)));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toBeNull();
+    await expect(leerItemParaPromocionMl("MCO111", "token")).resolves.toBeNull();
+  });
+});
+
+describe("leerPromocionesItemMl — rama feat-promociones / fix-promociones-buscar", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("itemId inválido: ok con array vacío, nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(leerPromocionesItemMl("no-es-un-id", "token")).resolves.toEqual({ estado: "ok", promociones: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("un campo con forma inesperada (ej. moderation_status numérico): null para ese campo, nunca lanza", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson([{ clip_uuid: "uuid-1", moderation_status: 123 }])));
-    await expect(obtenerClipsMl("MCO111", "token")).resolves.toEqual([{ clipUuid: "uuid-1", moderationStatus: null, motivoRechazo: null }]);
+  it("array real de promociones: estado ok, se devuelve tal cual, crudo", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson([{ type: "DEAL", status: "candidate" }])));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate" }] });
+  });
+
+  it("404 (publicación sin ninguna promoción aplicable): estado ok con array vacío — nunca se confunde con un fallo", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 404)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "ok", promociones: [] });
+  });
+
+  // Bug real (Refs #44) — antes esto se devolvía como `null`, EXACTAMENTE
+  // igual que el 404 de arriba. Río abajo (leerPromocionesDeItem,
+  // buscarPromocionesCuenta) ya no puede distinguir "esta publicación no
+  // tiene promos" de "la app no tiene permiso para consultar esto" — una
+  // cuenta entera podía terminar "Listo (0/N)" sin ningún aviso.
+  it("403 (la app sin el scope de Promociones): estado sin_permiso, nunca se confunde con 'sin promos'", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 403)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "sin_permiso" });
+  });
+
+  it("401 (token ya no válido): estado no_autorizado, nunca lanza ni se confunde con 'sin promos'", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 401)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "no_autorizado" });
+  });
+
+  it("5xx: estado otro_error con status null (MlNoDisponibleError no guarda el status real)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 500)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "otro_error", status: null });
+  });
+
+  it("otro !ok inesperado (ej. 400): estado otro_error con el status real", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 400)));
+    await expect(leerPromocionesItemMl("MCO111", "token")).resolves.toEqual({ estado: "otro_error", status: 400 });
+  });
+});
+
+describe("participarPromocionMl/modificarPromocionMl — rama feat-promociones", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("participar — POST real, el body nunca incluye top_deal_price (bug real ya corregido en zilonix-os-web)", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ status: "accepted" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = { promotion_id: "p1", promotion_type: "DEAL", deal_price: 90000, start_date: "2026-11-01T00:00:00", finish_date: "2026-11-30T23:59:59" };
+    const resultado = await participarPromocionMl("MCO111", "token", body);
+    expect(resultado.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain("/seller-promotions/items/MCO111");
+    expect(init?.method).toBe("POST");
+    const bodyEnviado = JSON.parse(init?.body as string);
+    expect(bodyEnviado).not.toHaveProperty("top_deal_price");
+    expect(bodyEnviado).toEqual(body);
+  });
+
+  it("modificar — PUT real, mismo endpoint", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ status: "accepted" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await modificarPromocionMl("MCO111", "token", { promotion_id: "p1", promotion_type: "DEAL", deal_price: 80000 });
+    expect(resultado.ok).toBe(true);
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init?.method).toBe("PUT");
+  });
+
+  it("itemId inválido: nunca llama a fetch (participar y modificar)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(participarPromocionMl("no-es-un-id", "token", { promotion_id: "p1", promotion_type: "DEAL", deal_price: 1, start_date: "x", finish_date: "y" })).rejects.toThrow(/inválido/);
+    await expect(modificarPromocionMl("no-es-un-id", "token", { promotion_id: "p1", promotion_type: "DEAL", deal_price: 1 })).rejects.toThrow(/inválido/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("429: lanza LimiteMercadoLibreError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 429)));
+    await expect(
+      participarPromocionMl("MCO111", "token", { promotion_id: "p1", promotion_type: "DEAL", deal_price: 1, start_date: "x", finish_date: "y" })
+    ).rejects.toBeInstanceOf(LimiteMercadoLibreError);
+  });
+});
+
+// Rama fix-promociones-aprobar-no-ejecuta, punto 4 — bug real
+// encontrado al diagnosticar el 400 de VITALCLOROFULL: el cuerpo real
+// del error de ML llegaba hasta el código, pero se descartaba antes
+// de guardarse — esta función es la que ahora lo extrae.
+describe("motivoErrorEscrituraMl — rama fix-promociones-aprobar-no-ejecuta, punto 4", () => {
+  it("prefiere 'cause' (más específico) cuando existe", () => {
+    const texto = JSON.stringify({ message: "Bad request", cause: [{ code: "deal_price.invalid", message: "deal_price must be between 1000 and 2000" }] });
+    expect(motivoErrorEscrituraMl(texto)).toBe("deal_price must be between 1000 and 2000");
+  });
+
+  it("junta varios motivos de 'cause' si hay más de uno", () => {
+    const texto = JSON.stringify({ cause: [{ message: "motivo uno" }, { message: "motivo dos" }] });
+    expect(motivoErrorEscrituraMl(texto)).toBe("motivo uno / motivo dos");
+  });
+
+  it("'cause' con 'description' en vez de 'message'", () => {
+    const texto = JSON.stringify({ cause: [{ code: "x", description: "item not eligible" }] });
+    expect(motivoErrorEscrituraMl(texto)).toBe("item not eligible");
+  });
+
+  it("sin 'cause' útil: cae a 'message'", () => {
+    expect(motivoErrorEscrituraMl(JSON.stringify({ message: "Invalid promotion type" }))).toBe("Invalid promotion type");
+  });
+
+  it("sin 'message': cae a 'error'", () => {
+    expect(motivoErrorEscrituraMl(JSON.stringify({ error: "bad_request" }))).toBe("bad_request");
+  });
+
+  it("texto vacío o no-JSON: null, nunca lanza", () => {
+    expect(motivoErrorEscrituraMl("")).toBeNull();
+    expect(motivoErrorEscrituraMl("<html>no es json</html>")).toBeNull();
+  });
+
+  it("JSON válido sin ninguno de los 3 campos: null", () => {
+    expect(motivoErrorEscrituraMl(JSON.stringify({ status: 400 }))).toBeNull();
+  });
+});
+
+describe("salirDePromocionMl — rama feat-promociones (SIN CONFIRMAR contra Mercado Libre real)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("DELETE real al mismo endpoint, con promotion_id/promotion_type en la query", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({}, 200));
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await salirDePromocionMl("MCO111", "token", "p1", "DEAL");
+    expect(resultado.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain("/seller-promotions/items/MCO111");
+    expect(String(url)).toContain("promotion_id=p1");
+    expect(String(url)).toContain("promotion_type=DEAL");
+    expect(init?.method).toBe("DELETE");
+  });
+
+  it("itemId inválido nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(salirDePromocionMl("no-es-un-id", "token", "p1", "DEAL")).rejects.toThrow(/inválido/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("429: lanza LimiteMercadoLibreError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({}, 429)));
+    await expect(salirDePromocionMl("MCO111", "token", "p1", "DEAL")).rejects.toBeInstanceOf(LimiteMercadoLibreError);
+  });
+
+  it("falla de red: {ok:false, status:0}, nunca lanza", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("red caída"); }));
+    await expect(salirDePromocionMl("MCO111", "token", "p1", "DEAL")).resolves.toEqual({ ok: false, status: 0, textoCrudo: "" });
   });
 });

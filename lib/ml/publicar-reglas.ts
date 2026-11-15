@@ -313,7 +313,3 @@ export function faltanDimensionesPaquete(textoRespuesta: string): boolean {
 export function itemNoModificablePorRevision(textoRespuesta: string): boolean {
   return /item\.status\.not_modifiable/i.test(textoRespuesta);
 }
-
-export function clipRequiereReputacion(textoRespuesta: string): boolean {
-  return /PA_UNAUTHORIZED_RESULT_FROM_POLICIES/.test(textoRespuesta);
-}

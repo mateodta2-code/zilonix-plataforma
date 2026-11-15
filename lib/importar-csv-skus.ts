@@ -96,14 +96,14 @@ function resumenSinFilas(): ResumenImportacionCsv {
 // BOM de Excel (U+FEFF) al principio del archivo — Excel lo agrega
 // solo al exportar CSV como "UTF-8 con BOM"; si no se quita, el primer
 // encabezado (normalmente "sku") nunca hace match.
-function quitarBom(texto: string): string {
+export function quitarBom(texto: string): string {
   return texto.length > 0 && texto.charCodeAt(0) === 0xfeff ? texto.slice(1) : texto;
 }
 
 // UTF-8. Si el string ya es más largo que el tope, cada unidad pesa al
 // menos un byte y no hace falta codificar (un archivo de decenas de MB
 // no debería asignar otro buffer del mismo tamaño solo para medirlo).
-function excedeTamanoMaximo(texto: string): boolean {
+export function excedeTamanoMaximo(texto: string): boolean {
   if (texto.length > TAMANO_MAXIMO_BYTES) return true;
   return new TextEncoder().encode(texto).length > TAMANO_MAXIMO_BYTES;
 }
@@ -113,7 +113,7 @@ function excedeTamanoMaximo(texto: string): boolean {
 // es texto (si no, un encabezado separado por comas con un ";" citado
 // se leería como si el delimitador fuera ";" y toda la fila quedaría
 // en una sola columna).
-function detectarDelimitador(lineaEncabezado: string): string {
+export function detectarDelimitador(lineaEncabezado: string): string {
   let dentroDeComillas = false;
   for (let i = 0; i < lineaEncabezado.length; i++) {
     const c = lineaEncabezado[i];
@@ -138,7 +138,7 @@ type FilaLogica = { raw: string; numeroFila: number };
 // solo separador de fila (no dos). Si el archivo se pasa de
 // FILAS_MAXIMAS se corta ahí y se devuelve la fila que ya no cabe — no
 // se sigue leyendo ni se lanza.
-function partirFilasLogicas(texto: string): { ok: true; filas: FilaLogica[] } | { ok: false; numeroFila: number } {
+export function partirFilasLogicas(texto: string): { ok: true; filas: FilaLogica[] } | { ok: false; numeroFila: number } {
   const filas: FilaLogica[] = [];
   let inicio = 0;
   let numeroFila = 1;
@@ -192,7 +192,7 @@ function partirFilasLogicas(texto: string): { ok: true; filas: FilaLogica[] } | 
 // de línea adentro de un campo citado: esos ya no separan filas). Un
 // campo entre comillas puede contener el delimitador, y "" dentro de
 // comillas es una comilla literal escapada (RFC 4180).
-function separarCamposCsv(linea: string, delimitador: string): string[] {
+export function separarCamposCsv(linea: string, delimitador: string): string[] {
   const campos: string[] = [];
   let actual = "";
   let dentroDeComillas = false;

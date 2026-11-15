@@ -10,8 +10,10 @@
 // se comen la única corrida del día y el resto nunca corre.
 //
 // El presupuesto es de la corrida entera (240 s), alineado con el
-// curl de 300 s del workflow. Lo que no entra queda en `pendientes`
-// para la tanda siguiente.
+// curl de 300 s del workflow. Lo que no entra queda en `pendientes`.
+// `sigue` le dice al workflow que encadene otra tanda: tramo parcial
+// del backfill, corte que sí avanza, o cuentas que no se abrieron.
+// Una cuenta ok hace menos de 20 h se salta sin llamar a Mercado Libre.
 
 import { and, eq, isNull, max } from "drizzle-orm";
 import { dbTrabajadorPublicidad } from "@/db/trabajador-publicidad-context";
@@ -61,9 +63,10 @@ import {
 } from "@/lib/publicidad/metricas";
 import { aEscala, cabeEnNumeric, textoDeNumeroJson } from "@/lib/numeros/normalizar-decimal";
 import {
-  MINUTOS_EN_CURSO_ABANDONADO,
+  AVISO_REFRESCO_FALLIDO,
   PRESUPUESTO_CORRIDA_MS,
   alcanzaParaAbrirCuenta,
+  convieneOtraTandaTrasCorte,
   decisionAnteErrorDeCosto,
   decidirTramo,
   diasARetomar,
@@ -71,6 +74,7 @@ import {
   faseDeCorte,
   hoyBogota,
   marcaDeFase,
+  omitirSyncProgramada,
   ordenarCuentasParaSync,
   textoErrorCorto,
   type FaseCorte,
@@ -97,8 +101,17 @@ export type ResultadoLote = {
   saltadas: number;
   fallidas: number;
   pendientes: number;
+  // true si otra llamada inmediata tiene trabajo (backfill, corte que
+  // avanza, o cuentas que no entraron en estos 240 s).
+  sigue: boolean;
 };
-export type ResultadoManual = { ok: boolean; aviso: string };
+// incompleta: se guardó una parte y el resto lo trae la sincronización
+// automática. No es un error: la pantalla lo pinta en amarillo, no en verde.
+export type ResultadoCuenta = { aviso: string; sigue: boolean; incompleta: boolean };
+export type ResultadoManual = { ok: boolean; aviso: string; incompleta?: boolean };
+
+const AVISO_INCOMPLETA =
+  "Se guardó una parte. El resto se completa solo en la próxima sincronización automática; no tenés que hacer nada.";
 
 function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -228,7 +241,7 @@ export async function sincronizarCuenta(
   solicitadaPor: string | null,
   ahora: Date,
   deadline: number
-): Promise<string> {
+): Promise<ResultadoCuenta> {
   const hoy = hoyBogota(ahora);
   const historial = await historialSync(empresaId, cuentaMlId);
   const ultima: UltimaSync | null = historial.ultima
@@ -304,7 +317,7 @@ export async function sincronizarCuenta(
         console.warn(`[publicidad] cuenta ${cuentaMlId} sin_permiso_app. ${SUGERENCIA_RECONECTAR_PUBLICIDAD}`);
       }
       // ok de clasificación, no de backfill: cierraBackfill queda en
-      // false para que mañana se vuelva a preguntar si ya tiene ads.
+      // false para volver a preguntar pasadas las 20 h si ya tiene ads.
       await cerrarSincronizacion(empresaId, syncId, {
         estado: "ok",
         llamadas: contador.n,
@@ -312,9 +325,16 @@ export async function sincronizarCuenta(
         cierraBackfill: false,
       });
       cerrado = true;
-      return anunciante.estado === "sin_permiso_app"
-        ? SUGERENCIA_RECONECTAR_PUBLICIDAD
-        : "Esta cuenta no tiene Product Ads activo en Mercado Libre.";
+      return {
+        aviso:
+          anunciante.estado === "sin_permiso_app"
+            ? SUGERENCIA_RECONECTAR_PUBLICIDAD
+            : "Esta cuenta no tiene Product Ads activo en Mercado Libre.",
+        // ok de clasificación: se vuelve a preguntar pasadas las 20 h,
+        // no en la tanda siguiente.
+        sigue: false,
+        incompleta: false,
+      };
     }
 
     await guardarAnunciante(empresaId, {
@@ -489,7 +509,13 @@ export async function sincronizarCuenta(
       cierraBackfill: estado === "ok" && tramo.cierraBackfill,
     });
     cerrado = true;
-    return estado === "ok" ? "Publicidad actualizada." : "Se guardó un tramo del historial. La próxima corrida sigue con los días anteriores.";
+    return {
+      // parcial: se guardó un tramo del historial de 62 días; los días
+      // anteriores los trae la sincronización automática.
+      aviso: estado === "ok" ? "Publicidad actualizada." : AVISO_INCOMPLETA,
+      sigue: estado === "parcial",
+      incompleta: estado === "parcial",
+    };
   } catch (error) {
     errorCierre = error;
     console.error(`[publicidad] cuenta ${cuentaMlId} no se pudo sincronizar:`, textoErrorCorto(error));
@@ -516,16 +542,15 @@ export async function sincronizarCuenta(
       }
     }
   }
-  if (errorCierre instanceof CorridaIncompletaError) return "La actualización quedó a medias y se retoma en la próxima corrida.";
+  if (errorCierre instanceof CorridaIncompletaError) {
+    return {
+      // Corte a los 240 s: lo leído ya quedó guardado (volcar).
+      aviso: AVISO_INCOMPLETA,
+      sigue: convieneOtraTandaTrasCorte(errorCierre.fase, reanudaInicial, reanuda),
+      incompleta: true,
+    };
+  }
   throw errorCierre;
-}
-
-function debeSaltar(ultima: UltimaSync | null, ahora: Date): boolean {
-  if (!ultima) return false;
-  const edad = ahora.getTime() - ultima.iniciadaTs.getTime();
-  if (ultima.estado === "en_curso" && edad < MINUTOS_EN_CURSO_ABANDONADO * 60_000) return true;
-  if (ultima.estado === "ok" && hoyBogota(ultima.iniciadaTs) === hoyBogota(ahora)) return true;
-  return false;
 }
 
 export async function sincronizarPublicidadProgramada(ahora = new Date()): Promise<ResultadoLote> {
@@ -563,11 +588,13 @@ export async function sincronizarPublicidadProgramada(ahora = new Date()): Promi
     saltadas: 0,
     fallidas: 0,
     pendientes: 0,
+    sigue: false,
   };
   const deadline = Date.now() + PRESUPUESTO_CORRIDA_MS;
   for (let i = 0; i < ordenadas.length; i++) {
     if (!alcanzaParaAbrirCuenta(deadline - Date.now())) {
       resultado.pendientes = ordenadas.length - i;
+      resultado.sigue = true;
       break;
     }
     const cuenta = ordenadas[i];
@@ -578,15 +605,17 @@ export async function sincronizarPublicidadProgramada(ahora = new Date()): Promi
           rangoDesde: historial.ultima.rangoDesde,
           rangoHasta: historial.ultima.rangoHasta,
           iniciadaTs: historial.ultima.iniciadaTs,
+          error: historial.ultima.error,
         }
       : null;
-    if (debeSaltar(ultima, ahora)) {
+    if (omitirSyncProgramada(ultima, ahora, historial.reintentosMismoTramo)) {
       resultado.saltadas += 1;
       continue;
     }
     try {
-      await sincronizarCuenta(cuenta.empresaId, cuenta.id, "programada", null, ahora, deadline);
+      const corrida = await sincronizarCuenta(cuenta.empresaId, cuenta.id, "programada", null, ahora, deadline);
       resultado.procesadas += 1;
+      if (corrida.sigue) resultado.sigue = true;
     } catch (error) {
       if (error instanceof SyncEnCursoError || error instanceof SyncMuyRecienteError) {
         resultado.saltadas += 1;
@@ -626,10 +655,13 @@ export async function refrescarPublicidadManual(
   if (!decision.permitir) return { ok: false, aviso: decision.aviso };
 
   try {
-    const aviso = await sincronizarCuenta(empresaId, cuentaMlId, "manual", usuarioId, ahora, Date.now() + PRESUPUESTO_CORRIDA_MS);
-    return { ok: true, aviso };
+    const { aviso, incompleta } = await sincronizarCuenta(empresaId, cuentaMlId, "manual", usuarioId, ahora, Date.now() + PRESUPUESTO_CORRIDA_MS);
+    return { ok: true, aviso, incompleta };
   } catch (error) {
     if (error instanceof SyncEnCursoError || error instanceof SyncMuyRecienteError) return { ok: false, aviso: error.message };
-    return { ok: false, aviso: textoErrorCorto(error) };
+    // El detalle técnico va al log (sincronizarCuenta ya lo escribió);
+    // a la persona nunca le llega el texto crudo del error.
+    console.error(`[publicidad] refresco manual, cuenta ${cuentaMlId}:`, textoErrorCorto(error));
+    return { ok: false, aviso: AVISO_REFRESCO_FALLIDO };
   }
 }
