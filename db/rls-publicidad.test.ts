@@ -8,6 +8,7 @@ import {
   publicidadAnunciantes,
   publicidadAnuncios,
   publicidadCampanas,
+  publicidadCampanasCambios,
   publicidadCostosItem,
   publicidadMetricasDiarias,
   publicidadSincronizaciones,
@@ -16,10 +17,10 @@ import {
 import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { cifrarToken } from "../lib/cifrado";
 import { SQL_BACKFILL_PERMISOS_PUBLICIDAD } from "../lib/publicidad/backfill-permisos";
-import { guardarMetricas } from "../lib/publicidad/guardar";
+import { guardarCampanas, guardarMetricas, type CampanaGuardada } from "../lib/publicidad/guardar";
 import { metricasDesdeApi } from "../lib/publicidad/metricas";
 
-// Issue #254 — las seis tablas de Product Ads. Empresa B nunca ve,
+// Issue #254 — las tablas de Product Ads. Empresa B nunca ve,
 // edita ni borra una fila de empresa A. El cron
 // (publicidad_trabajador_user) puede listar la cuenta sin leer el token.
 describe("aislamiento por empresa — publicidad (issue #254)", () => {
@@ -112,6 +113,51 @@ describe("aislamiento por empresa — publicidad (issue #254)", () => {
         .values({ empresaId, cuentaMlId: cuentaAId, origen: "programada", estado: "ok" })
         .returning({ id: publicidadSincronizaciones.id })
     );
+  });
+
+  it("empresa B nunca ve, edita ni borra un cambio de presupuesto de empresa A", async () => {
+    await afirmarAislamiento(contexto, publicidadCampanasCambios, (tx, empresaId) =>
+      tx
+        .insert(publicidadCampanasCambios)
+        .values({ empresaId, cuentaMlId: cuentaAId, campanaIdMl: "9100", campo: "presupuesto_diario", valorAnterior: "10.00", valorNuevo: "20.00" })
+        .returning({ id: publicidadCampanasCambios.id })
+    );
+  });
+
+  it("guardar la campaña con otro presupuesto anota el cambio una sola vez", async () => {
+    const campanaIdMl = `hist-${randomUUID().slice(0, 8)}`;
+    const base: CampanaGuardada = {
+      cuentaMlId: cuentaAId,
+      campanaIdMl,
+      nombre: "VENDEDOR",
+      estado: "active",
+      estrategia: null,
+      presupuesto: null,
+      presupuestoDiario: "50000",
+      presupuestoAutomatico: false,
+      roasObjetivo: "8",
+      acosObjetivo: null,
+      acosObjetivoCalculado: false,
+      moneda: "COP",
+      creadaMlTs: null,
+      actualizadaMlTs: null,
+    };
+    await guardarCampanas(contexto.empresaAId, [base]);
+    await guardarCampanas(contexto.empresaAId, [base]);
+    await guardarCampanas(contexto.empresaAId, [{ ...base, presupuestoDiario: "60000" }]);
+    await guardarCampanas(contexto.empresaAId, [{ ...base, presupuestoDiario: "60000" }]);
+
+    const filas = await dbComoEmpresa(contexto.empresaAId, (tx) =>
+      tx
+        .select({
+          campo: publicidadCampanasCambios.campo,
+          valorAnterior: publicidadCampanasCambios.valorAnterior,
+          valorNuevo: publicidadCampanasCambios.valorNuevo,
+        })
+        .from(publicidadCampanasCambios)
+        .where(eq(publicidadCampanasCambios.campanaIdMl, campanaIdMl))
+    );
+    expect(filas).toEqual([{ campo: "presupuesto_diario", valorAnterior: "50000.00", valorNuevo: "60000.00" }]);
   });
 
   it("la misma campaña en la misma cuenta no se inserta dos veces", async () => {
