@@ -45,11 +45,13 @@ describe("recepción de avisos de Mercado Libre (tarea 2.4)", () => {
       topic: "orders_v2",
       sent: "2026-10-20T10:00:00.000Z",
     });
-    expect(resultado).toBe("guardado");
+    expect(resultado.resultado).toBe("guardado");
+    expect(resultado.avisoId).not.toBeNull();
 
     const filas = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.resource, "/orders/123")));
     expect(filas).toHaveLength(1);
     expect(filas[0].procesadoTs).toBeNull();
+    expect(resultado.avisoId).toBe(filas[0].id);
   });
 
   it("empresa B nunca ve el aviso de empresa A", async () => {
@@ -64,7 +66,8 @@ describe("recepción de avisos de Mercado Libre (tarea 2.4)", () => {
       topic: "orders_v2",
       sent: "2026-10-20T10:00:00.000Z", // mismo "sent" exacto = el mismo aviso
     });
-    expect(resultado).toBe("duplicado");
+    expect(resultado.resultado).toBe("duplicado");
+    expect(resultado.avisoId).toBeNull();
 
     const filas = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.resource, "/orders/123")));
     expect(filas).toHaveLength(1); // sigue siendo uno solo
@@ -77,7 +80,8 @@ describe("recepción de avisos de Mercado Libre (tarea 2.4)", () => {
       topic: "orders_v2",
       sent: "2026-10-20T10:05:00.000Z",
     });
-    expect(resultado).toBe("cuenta_desconocida");
+    expect(resultado.resultado).toBe("cuenta_desconocida");
+    expect(resultado.avisoId).toBeNull();
   });
 
   // Issue #39 — plantilla genérica (db/test-utils/aislamiento.ts) sobre

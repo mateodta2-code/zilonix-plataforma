@@ -69,12 +69,14 @@ describe("confirmarTransferenciaCuentaMl (issue #181) — permiso real contra Po
       cuentaIdExterna,
       nickname: "VENDEDOR_A",
       tokens: tokensDePrueba(cuentaIdExterna, "a"),
+      siteId: null,
     });
 
     const resultado = await confirmarTransferenciaCuentaMl(usuarioBId, empresaBId, {
       cuentaIdExterna,
       nickname: "VENDEDOR_TRANSFERIDO",
       tokens: tokensDePrueba(cuentaIdExterna, "transferida"),
+      siteId: null,
     });
 
     expect(resultado.id).toBe(deEmpresaA.id);
@@ -83,12 +85,39 @@ describe("confirmarTransferenciaCuentaMl (issue #181) — permiso real contra Po
     expect(ejecutarImportacionInicial).toHaveBeenCalledWith(empresaBId, deEmpresaA.id, cuentaIdExterna);
   });
 
+  // Issue #315 (Z-LATAM-01) — mismo criterio que guardarCuentaConectada
+  // (lib/ml/cuentas.test.ts): la transferencia también guarda el
+  // site_id real que trae la nueva autorización, no se queda con el
+  // default de la fila vieja.
+  it("con permiso y site_id real (MLM, México): la cuenta transferida guarda site_id/moneda/idioma reales, no el default", async () => {
+    const cuentaIdExterna = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+    const deEmpresaA = await guardarCuentaConectada(empresaAId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_A_MX",
+      tokens: tokensDePrueba(cuentaIdExterna, "a-mx"),
+      siteId: null,
+    });
+
+    await confirmarTransferenciaCuentaMl(usuarioBId, empresaBId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_TRANSFERIDO_MX",
+      tokens: tokensDePrueba(cuentaIdExterna, "transferida-mx"),
+      siteId: "MLM",
+    });
+
+    const [filaB] = await dbComoEmpresa(empresaBId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, deEmpresaA.id)));
+    expect(filaB.siteId).toBe("MLM");
+    expect(filaB.moneda).toBe("MXN");
+    expect(filaB.idioma).toBe("es-MX");
+  });
+
   it("sin permiso: SinPermisoError, y la fila se queda intacta en la empresa anterior", async () => {
     const cuentaIdExterna = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
     const deEmpresaA = await guardarCuentaConectada(empresaAId, {
       cuentaIdExterna,
       nickname: "VENDEDOR_A_2",
       tokens: tokensDePrueba(cuentaIdExterna, "a2"),
+      siteId: null,
     });
 
     await expect(
@@ -96,6 +125,7 @@ describe("confirmarTransferenciaCuentaMl (issue #181) — permiso real contra Po
         cuentaIdExterna,
         nickname: "INTENTO_SIN_PERMISO",
         tokens: tokensDePrueba(cuentaIdExterna, "robo"),
+        siteId: null,
       })
     ).rejects.toThrow(SinPermisoError);
 

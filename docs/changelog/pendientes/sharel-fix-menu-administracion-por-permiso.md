@@ -1,0 +1,7 @@
+- **2026-11-13** — Administración para Gerentes (pedido de Sharel; Refs #124; **sin migración**):
+  - **Menú «Administración» por permiso:** antes salía solo si el rol se llamaba «Dueño». Ahora cada opción sale con el mismo permiso que pide su pantalla, y el grupo solo aparece si queda alguna:
+    - «Invitar persona»: personas · crear;
+    - «Ajustar roles» y «Acceso de soporte»: configuración · autorizar;
+    - «Conectar Mercado Libre» y «Avisos de Mercado Libre»: configuración · consultar.
+  - **Plantilla del Gerente:** suma configuración · crear (conectar otras cuentas de Mercado Libre) y configuración · autorizar (ajustar roles; abre también Acceso de soporte). Aplica a los roles Gerente que se creen desde ahora. En las empresas que ya existen, el Dueño se los da desde «Ajustar roles» (sin migración).
+  - **Candado en «Ajustar roles»:** nadie puede **agregarle** a un rol (ni al suyo) un permiso que no tiene, igual que al invitar (#124). Lo que el rol ya tenía se conserva al guardar. En pantalla, esas casillas quedan bloqueadas con su valor actual, y el servidor lo vuelve a revisar al guardar y al confirmar. Al Dueño no le cambia nada.

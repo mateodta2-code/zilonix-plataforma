@@ -20,6 +20,7 @@ export function TarjetaKpi({
   variacionPorcentaje,
   puntos,
   detalle,
+  variacion,
   textoVacio = "Pendiente de conectar",
 }: {
   titulo: string;
@@ -27,6 +28,9 @@ export function TarjetaKpi({
   variacionPorcentaje?: number;
   puntos?: number[];
   detalle?: string[];
+  // Texto ya armado (con "mejor" o "peor"). `mejor` null = sin juicio
+  // (igual, o sin datos): no se pinta verde ni rojo.
+  variacion?: { texto: string; mejor: boolean | null };
   textoVacio?: string;
 }) {
   const tieneValor = valor !== undefined;
@@ -38,6 +42,14 @@ export function TarjetaKpi({
       {tieneValor ? (
         <>
           <p className={`${styles.valor} zx-texto-plata`}>{valor}</p>
+          {variacion ? (
+            <p
+              className={styles.variacion}
+              data-positiva={variacion.mejor === null ? undefined : variacion.mejor ? "true" : "false"}
+            >
+              {variacion.texto}
+            </p>
+          ) : null}
           {detalle?.map((linea, i) => (
             <p key={i} className={styles.detalle}>
               {linea}

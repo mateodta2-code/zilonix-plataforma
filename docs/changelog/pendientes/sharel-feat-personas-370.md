@@ -1,0 +1,8 @@
+- **2026-11-13** — Nueva pantalla **Personas** (`/panel/personas`) (Refs #370, Refs #124; pedido de Sharel; **sin migración**). El ítem «Personas» del menú deja de decir «Próximamente» y sale con `personas.consultar` (Dueño, Gerente y Tecnología de fábrica).
+  - **Miembros:** nombre, correo, rol actual y desde cuándo está cada persona en la empresa.
+  - **Invitaciones sin aceptar:** correo, rol ofrecido, vencimiento y estado (pendiente o vencida). No se reenvía ningún correo.
+  - **Cambiar rol** sin volver a invitar (con `personas.modificar`): por ejemplo, de Operador a Gerente; se nota en el menú de esa persona al recargar. Antes, una segunda invitación con otro rol no cambiaba nada.
+    - Solo salen los roles que quien edita puede dar (#124: nada con permisos que él no tenga).
+    - «Dueño» no se asigna ni se quita desde acá, y nadie se cambia su propio rol.
+    - Cada cambio queda en Actividad: quién lo hizo y de qué rol a cuál.
+  - Las rutas quedan registradas en la prueba de permisos.

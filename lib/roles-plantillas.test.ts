@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   ACCIONES,
+  esPeligroso,
   MODULOS,
   NOMBRES_PLANTILLA,
   PLANTILLAS,
   permisosDeDueno,
+  permisosNuevosQueNoPuedeDar,
   permisosQueNoPuedeDar,
   plantillasQuePuedeDar,
   type Permiso,
@@ -23,7 +25,7 @@ function sinDuplicados(permisos: Permiso[]): boolean {
 }
 
 describe("roles nuevos de Zilonix Seller (issue #124)", () => {
-  it("Gerente: todo en ventas/inventario/finanzas; personas sin anular ni autorizar; configuracion solo consultar y modificar", () => {
+  it("Gerente: todo en ventas/inventario/finanzas; personas sin anular ni autorizar; configuracion sin anular (conecta ML y ajusta roles, Sharel 13-nov)", () => {
     expect(claves(PLANTILLAS.Gerente)).toEqual(
       [
         "ventas.consultar.todo",
@@ -45,8 +47,13 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
         "personas.crear.todo",
         "personas.modificar.todo",
         "configuracion.consultar.todo",
+        "configuracion.crear.todo",
         "configuracion.modificar.todo",
+        "configuracion.autorizar.todo",
         "publicidad.consultar.todo",
+        "promociones.consultar.todo",
+        "promociones.aprobar.todo",
+        "promociones.ejecutar.todo",
       ].sort()
     );
     expect(sinDuplicados(PLANTILLAS.Gerente)).toBe(true);
@@ -110,8 +117,8 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
     }
   });
 
-  it("publicidad es el único módulo nuevo y las plantillas solo dan consultar (issue #254)", () => {
-    expect([...MODULOS]).toEqual(["ventas", "inventario", "finanzas", "personas", "configuracion", "publicidad"]);
+  it("publicidad y promociones son los módulos nuevos; publicidad solo da consultar en las plantillas (issue #254)", () => {
+    expect([...MODULOS]).toEqual(["ventas", "inventario", "finanzas", "personas", "configuracion", "publicidad", "promociones"]);
     for (const nombre of ["Gerente", "Auxiliar", "Operaciones"] as const) {
       expect(PLANTILLAS[nombre].filter((p) => p.modulo === "publicidad")).toEqual([
         { modulo: "publicidad", accion: "consultar", alcance: "todo" },
@@ -121,12 +128,35 @@ describe("roles nuevos de Zilonix Seller (issue #124)", () => {
       expect(PLANTILLAS[nombre].some((p) => p.modulo === "publicidad")).toBe(false);
     }
   });
+
+  it("promociones — solo Gerente (todo) y Operador (solo consultar) reciben algo de fábrica; el resto, nada", () => {
+    expect(claves(PLANTILLAS.Gerente.filter((p) => p.modulo === "promociones"))).toEqual(
+      ["promociones.consultar.todo", "promociones.aprobar.todo", "promociones.ejecutar.todo"].sort()
+    );
+    expect(PLANTILLAS.Operador.filter((p) => p.modulo === "promociones")).toEqual([{ modulo: "promociones", accion: "consultar", alcance: "todo" }]);
+    for (const nombre of ["Auxiliar", "Tecnología", "Operaciones", "Contador", "Proveedor", "Domiciliario"] as const) {
+      expect(PLANTILLAS[nombre].some((p) => p.modulo === "promociones")).toBe(false);
+    }
+  });
+
+  it("promociones.ejecutar está en PERMISOS_PELIGROSOS (cambia precios reales en Mercado Libre)", () => {
+    expect(esPeligroso("promociones", "ejecutar")).toBe(true);
+    expect(esPeligroso("promociones", "consultar")).toBe(false);
+    expect(esPeligroso("promociones", "aprobar")).toBe(false);
+  });
 });
 
 describe("los roles que ya existían no cambiaron (issue #124)", () => {
-  it("Operador", () => {
+  it("Operador — más 'promociones.consultar' (rama feat-promociones)", () => {
     expect(claves(PLANTILLAS.Operador)).toEqual(
-      ["ventas.consultar.todo", "ventas.crear.todo", "ventas.modificar.todo", "inventario.consultar.todo", "inventario.modificar.todo"].sort()
+      [
+        "ventas.consultar.todo",
+        "ventas.crear.todo",
+        "ventas.modificar.todo",
+        "inventario.consultar.todo",
+        "inventario.modificar.todo",
+        "promociones.consultar.todo",
+      ].sort()
     );
   });
 
@@ -192,5 +222,29 @@ describe("qué roles puede dar quien invita (issue #124)", () => {
     const propio = [{ modulo: "ventas", accion: "crear", alcance: "propio" }];
     expect(permisosQueNoPuedeDar(todo, propio)).toEqual([]);
     expect(permisosQueNoPuedeDar(propio, todo)).toEqual(todo);
+  });
+});
+
+describe("qué puede agregar quien ajusta un rol en /panel/roles (Sharel, 13-nov)", () => {
+  const gerente = PLANTILLAS.Gerente;
+  const auxiliar = PLANTILLAS.Auxiliar;
+
+  it("el Gerente no puede agregar un permiso que no tiene (ni a otro rol ni al suyo)", () => {
+    const conAutorizarPersonas = [...auxiliar, { modulo: "personas" as const, accion: "autorizar" as const, alcance: "todo" as const }];
+    expect(permisosNuevosQueNoPuedeDar(gerente, auxiliar, conAutorizarPersonas)).toEqual([{ modulo: "personas", accion: "autorizar", alcance: "todo" }]);
+    const gerenteConMas = [...gerente, { modulo: "publicidad" as const, accion: "modificar" as const, alcance: "todo" as const }];
+    expect(permisosNuevosQueNoPuedeDar(gerente, gerente, gerenteConMas)).toEqual([{ modulo: "publicidad", accion: "modificar", alcance: "todo" }]);
+  });
+
+  it("sí puede agregar lo que tiene, y conservar lo que el rol ya tenía aunque él no lo tenga", () => {
+    const conAnular = [...auxiliar, { modulo: "finanzas" as const, accion: "anular" as const, alcance: "todo" as const }];
+    expect(permisosNuevosQueNoPuedeDar(gerente, auxiliar, conAnular)).toEqual([]);
+    const rolConExtra = [...auxiliar, { modulo: "publicidad" as const, accion: "modificar" as const, alcance: "todo" as const }];
+    expect(permisosNuevosQueNoPuedeDar(gerente, rolConExtra, rolConExtra)).toEqual([]);
+  });
+
+  it("el Dueño puede agregar cualquier cosa", () => {
+    const todo = permisosDeDueno();
+    expect(permisosNuevosQueNoPuedeDar(todo, [], todo)).toEqual([]);
   });
 });

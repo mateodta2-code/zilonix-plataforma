@@ -1,0 +1,4 @@
+- **2026-10-30** — Publicidad: un **404** de Mercado Libre en la búsqueda de campañas ya no corta la sincronización (Refs #143; **sin migración**).
+  - **Qué pasaba:** en staging, STOREKINGSAS tenía ~COP 935 mil de inversión en octubre según Ads Manager, pero `/panel/publicidad` quedaba en «—» después de «Actualizar ahora», y Mercado Libre respondía 404 en `campaigns/search`. La sincronización pide las campañas activas y las pausadas por separado; un 404 en uno de los dos estados abortaba todo, no se guardaba ninguna campaña e Inicio tampoco podía sumar esa cuenta.
+  - **Ahora:** un 404 en la **primera página** de `campaigns/search` cuenta como «no hay resultados» de ese pedido: lista vacía de ese estado, o sin filas diarias de cuenta. Lo demás sigue y se guarda.
+  - Un 404 a mitad de la paginación, y cualquier otro error, siguen cortando como antes, igual que los 404 de ad groups y anuncios.

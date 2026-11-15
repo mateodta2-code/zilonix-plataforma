@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { MontoInvalidoError, validarMonto } from "./montos";
+import { MontoInvalidoError, mostrarMonto, validarMonto } from "./montos";
+
+describe("mostrarMonto (issue #128)", () => {
+  it("formatea con punto de miles y coma decimal, sin pasar por Number", () => {
+    expect(mostrarMonto("3000.00")).toBe("$ 3.000");
+    expect(mostrarMonto("1234.5")).toBe("$ 1.234,50");
+    expect(mostrarMonto("0.00")).toBe("$ 0");
+    expect(mostrarMonto("999999999999.99")).toBe("$ 999.999.999.999,99");
+    expect(mostrarMonto(null)).toBe("—");
+  });
+});
 
 describe("validarMonto (issue #127)", () => {
   it("vacío es null; cero es un valor real", () => {

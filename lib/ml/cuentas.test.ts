@@ -137,12 +137,75 @@ describe("guardarCuentaConectada — reconectar con INSERT ... ON CONFLICT DO UP
       cuentaIdExterna,
       nickname: "VENDEDOR_NUEVO",
       tokens: tokensDePrueba(cuentaIdExterna, "nueva"),
+      siteId: null,
     });
 
     const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, resultado.id)));
     expect(fila.cuentaIdExterna).toBe(cuentaIdExterna);
     expect(fila.empresaId).toBe(empresaId);
     expect(fila.desconectadaTs).toBeNull();
+  });
+
+  // Issue #315 (Z-LATAM-01) — una cuenta nueva guarda el site_id real
+  // que trae Mercado Libre, y deriva moneda/idioma de ahí (lib/ml/sitios.ts),
+  // nunca el default a ciegas cuando sí hay un dato real.
+  it("cuenta nueva con site_id real (ej. MLM, México): guarda site_id/moneda/idioma reales, no el default", async () => {
+    const empresaId = await crearEmpresa("GUARDAR-SITE-ID-REAL");
+    const cuentaIdExterna = cuentaIdExternaDePrueba();
+
+    const resultado = await guardarCuentaConectada(empresaId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_MEXICO",
+      tokens: tokensDePrueba(cuentaIdExterna, "mx"),
+      siteId: "MLM",
+    });
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, resultado.id)));
+    expect(fila.siteId).toBe("MLM");
+    expect(fila.moneda).toBe("MXN");
+    expect(fila.idioma).toBe("es-MX");
+  });
+
+  it("cuenta nueva SIN site_id (Mercado Libre no lo mandó): cae al default MCO/COP/es-CO, nunca null ni vacío", async () => {
+    const empresaId = await crearEmpresa("GUARDAR-SITE-ID-DEFECTO");
+    const cuentaIdExterna = cuentaIdExternaDePrueba();
+
+    const resultado = await guardarCuentaConectada(empresaId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_SIN_SITE_ID",
+      tokens: tokensDePrueba(cuentaIdExterna, "sin-site"),
+      siteId: null,
+    });
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, resultado.id)));
+    expect(fila.siteId).toBe("MCO");
+    expect(fila.moneda).toBe("COP");
+    expect(fila.idioma).toBe("es-CO");
+  });
+
+  it("reconectar con un site_id distinto al guardado (la cuenta cambió de país real): se actualiza, nunca se queda con el viejo", async () => {
+    const empresaId = await crearEmpresa("RECONECTAR-SITE-ID-DISTINTO");
+    const cuentaIdExterna = cuentaIdExternaDePrueba();
+
+    const primera = await guardarCuentaConectada(empresaId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_INICIAL",
+      tokens: tokensDePrueba(cuentaIdExterna, "inicial"),
+      siteId: "MCO",
+    });
+    await desconectarCuenta(empresaId, primera.id);
+
+    await guardarCuentaConectada(empresaId, {
+      cuentaIdExterna,
+      nickname: "VENDEDOR_RECONECTADO",
+      tokens: tokensDePrueba(cuentaIdExterna, "reconectado"),
+      siteId: "MLB",
+    });
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, primera.id)));
+    expect(fila.siteId).toBe("MLB");
+    expect(fila.moneda).toBe("BRL");
+    expect(fila.idioma).toBe("pt-BR");
   });
 
   it("conectar, desconectar y reconectar la MISMA cuenta deja una sola fila activa con el mismo id (se conserva el histórico)", async () => {
@@ -153,6 +216,7 @@ describe("guardarCuentaConectada — reconectar con INSERT ... ON CONFLICT DO UP
       cuentaIdExterna,
       nickname: "VENDEDOR_INICIAL",
       tokens: tokensDePrueba(cuentaIdExterna, "inicial"),
+      siteId: null,
     });
 
     await desconectarCuenta(empresaId, primera.id);
@@ -163,6 +227,7 @@ describe("guardarCuentaConectada — reconectar con INSERT ... ON CONFLICT DO UP
       cuentaIdExterna,
       nickname: "VENDEDOR_RECONECTADO",
       tokens: tokensDePrueba(cuentaIdExterna, "reconectado"),
+      siteId: null,
     });
 
     // Mismo id — es justo lo que el INSERT simple de antes no podía
@@ -188,12 +253,14 @@ describe("guardarCuentaConectada — reconectar con INSERT ... ON CONFLICT DO UP
       cuentaIdExterna,
       nickname: "VENDEDOR_A",
       tokens: tokensDePrueba(cuentaIdExterna, "a"),
+      siteId: null,
     });
 
     const segunda = await guardarCuentaConectada(empresaId, {
       cuentaIdExterna,
       nickname: "VENDEDOR_B",
       tokens: tokensDePrueba(cuentaIdExterna, "b"),
+      siteId: null,
     });
 
     expect(segunda.id).toBe(primera.id);
@@ -210,6 +277,7 @@ describe("guardarCuentaConectada — reconectar con INSERT ... ON CONFLICT DO UP
       cuentaIdExterna,
       nickname: "VENDEDOR_A",
       tokens: tokensDePrueba(cuentaIdExterna, "a"),
+      siteId: null,
     });
 
     await expect(
@@ -217,6 +285,7 @@ describe("guardarCuentaConectada — reconectar con INSERT ... ON CONFLICT DO UP
         cuentaIdExterna,
         nickname: "INTENTO_DESDE_B",
         tokens: tokensDePrueba(cuentaIdExterna, "robo"),
+        siteId: null,
       })
     ).rejects.toThrow(CuentaMlDeOtraEmpresaError);
 
@@ -225,6 +294,7 @@ describe("guardarCuentaConectada — reconectar con INSERT ... ON CONFLICT DO UP
       cuentaIdExterna,
       nickname: "INTENTO_DESDE_B",
       tokens: tokensDePrueba(cuentaIdExterna, "robo"),
+      siteId: null,
     }).catch((e) => e);
     expect(error.message).not.toContain(empresaAId);
     expect(error.message).not.toContain("OTRA-A");

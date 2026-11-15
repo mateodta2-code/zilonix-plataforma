@@ -1,0 +1,18 @@
+- **2026-11-13** — Inicio rediseñado como tablero del negocio (pedido del equipo vía Sharel; Refs #143, Refs #125, Refs #126; **sin migración**). Con `finanzas.consultar`:
+  - **Hoy** (día de Bogotá), arriba: número de ventas, recaudo, ticket promedio, utilidad (antes de publicidad), margen y ventas por cuenta.
+  - **Meta del mes**, en la mitad: la meta de utilidad **después de publicidad** del mes en curso, con su avance:
+    - qué tanto llevas, el % y una barra;
+    - el desglose: utilidad antes de publicidad, − publicidad (con IVA si está configurado), = utilidad después;
+    - lo que falta, el ritmo diario actual contra el que se necesita en los días que quedan, y la proyección al cierre.
+    - Solo el **Dueño** la fija o la cambia, desde ahí mismo. Los demás la ven, y si no hay meta dice «Sin meta para este mes». Cada cambio queda en Actividad.
+  - **Mes en curso o período elegido**, abajo: los mismos indicadores, más publicidad y utilidad después de publicidad.
+    - Con un **filtro de fechas** (hasta 31 días) que actualiza las cifras.
+    - En el mes en curso, la variación de ventas y recaudo contra los mismos días del mes anterior.
+    - Siguen la participación por cuenta, la publicidad por cuenta y el comparativo.
+  - **Operación**, al final: pedidos, despachos pendientes y SKU sin vincular (estado de ahora).
+  - **De dónde salen las cifras:** de las mismas lecturas de Finanzas.
+    - Recaudo: el valor de venta de las ventas sincronizadas.
+    - Ticket promedio: recaudo ÷ ventas sincronizadas.
+    - Margen: utilidad ÷ recaudo de las ventas con costo, el «% util» de Finanzas → Ventas.
+    - Publicidad: el costo de las campañas, igual que en Publicidad.
+  - Sin `finanzas.consultar`, Inicio queda con las tarjetas de siempre.

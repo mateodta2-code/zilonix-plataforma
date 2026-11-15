@@ -12,6 +12,7 @@ import {
   decodificarPermisos,
   esPeligroso,
   obtenerRolDeEmpresa,
+  permisosNuevosQueNoPuedeDar,
   reemplazarPermisosDeRol,
   type Permiso,
 } from "@/lib/roles";
@@ -40,12 +41,28 @@ async function empresaYPermisoDeQuienLlama(formData: FormData) {
   if (!empresa) throw new Error("No se encontró tu empresa activa.");
 
   // Tarea 1.8 — ajustar permisos es "autorizar" en "configuracion".
-  await requierePermiso(usuario.id, empresa.id, "configuracion", "autorizar");
+  const miMembresia = await requierePermiso(usuario.id, empresa.id, "configuracion", "autorizar");
 
   const rolId = String(formData.get("rolId") ?? "");
   if (!rolId) throw new Error("Falta el rol.");
 
-  return { empresa, rolId, usuarioId: usuario.id };
+  return { empresa, rolId, usuarioId: usuario.id, propios: miMembresia.permisos };
+}
+
+// Mismo candado que al invitar (#124): quien ajusta un rol no puede
+// AGREGARLE permisos que él mismo no tiene. Desde que el Gerente ajusta
+// roles (Sharel, 13-nov), sin esto podía darse a sí mismo, o a otro
+// rol, cualquier permiso. Al Dueño no le cambia nada (tiene todo). Se
+// revisa en los dos pasos, guardar y confirmar, porque el segundo trae
+// los permisos en la URL. La pantalla ya bloquea esas casillas; esto
+// es la defensa del servidor.
+type PermisoSimple = { modulo: string; accion: string; alcance: string };
+
+function exigirQuePuedaDar(propios: PermisoSimple[], actuales: PermisoSimple[], propuestos: PermisoSimple[]): void {
+  const fuera = permisosNuevosQueNoPuedeDar(propios, actuales, propuestos);
+  if (fuera.length > 0) {
+    throw new Error(`No puedes dar permisos que tu rol no tiene: ${fuera.map((p) => `${p.modulo} · ${p.accion}`).join(", ")}.`);
+  }
 }
 
 // Tarea 1.8 — si el formulario agrega un permiso PELIGROSO que el rol
@@ -54,12 +71,13 @@ async function empresaYPermisoDeQuienLlama(formData: FormData) {
 // concedido sin aviso le dio a una "Vendedora" el poder de cambiar la
 // numeración DIAN). Si no hay nada nuevo peligroso, se guarda de una.
 export async function guardarPermisosAction(formData: FormData) {
-  const { empresa, rolId, usuarioId } = await empresaYPermisoDeQuienLlama(formData);
+  const { empresa, rolId, usuarioId, propios } = await empresaYPermisoDeQuienLlama(formData);
 
   const rolActual = await obtenerRolDeEmpresa(empresa.id, rolId);
   if (!rolActual) throw new Error("Rol no encontrado en esta empresa.");
 
   const propuestos = leerPermisosDelFormulario(formData);
+  exigirQuePuedaDar(propios, rolActual.permisos, propuestos);
   const nuevosPeligrosos = propuestos.filter(
     (p) =>
       esPeligroso(p.modulo, p.accion) &&
@@ -79,10 +97,14 @@ export async function guardarPermisosAction(formData: FormData) {
 // permiso (nunca confía en que "ya se mostró la pantalla antes" como
 // si fuera el permiso real) y guarda tal cual lo que venía pendiente.
 export async function confirmarPermisosAction(formData: FormData) {
-  const { empresa, rolId, usuarioId } = await empresaYPermisoDeQuienLlama(formData);
+  const { empresa, rolId, usuarioId, propios } = await empresaYPermisoDeQuienLlama(formData);
+
+  const rolActual = await obtenerRolDeEmpresa(empresa.id, rolId);
+  if (!rolActual) throw new Error("Rol no encontrado en esta empresa.");
 
   const pendiente = String(formData.get("pendiente") ?? "");
   const permisos = decodificarPermisos(pendiente);
+  exigirQuePuedaDar(propios, rolActual.permisos, permisos);
 
   await reemplazarPermisosDeRol(empresa.id, rolId, permisos, usuarioId);
   revalidatePath(`/panel/roles/${rolId}`);

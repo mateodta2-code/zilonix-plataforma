@@ -3,6 +3,7 @@ import { dbComoEmpresa, dbComoTransferenciaCuentaMl } from "@/db/empresa-context
 import { cuentasMl, empresas } from "@/db/schema";
 import { cifrarToken, descifrarToken } from "@/lib/cifrado";
 import { renovarToken, type TokensMl } from "@/lib/ml/oauth";
+import { datosSitioMl, type SitioMl } from "@/lib/ml/sitios";
 
 const SEGUNDOS_DE_MARGEN = 120; // renovar un poco antes de que venza, no justo al filo
 const CANDADO_ABANDONADO_MS = 30_000; // tarea 2.3: un candado de más de 30s se considera caído, se puede retomar
@@ -55,8 +56,13 @@ function esChoqueRlsConFilaAjena(error: unknown): boolean {
 
 export async function guardarCuentaConectada(
   empresaId: string,
-  datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl }
+  // Issue #315 (Z-LATAM-01) — `siteId` es lo que Mercado Libre devolvió
+  // de verdad en /users/me (puede ser null si no lo mandó); nunca se
+  // guarda tal cual, siempre pasa por datosSitioMl (lib/ml/sitios.ts),
+  // que decide el default (MCO/COP/es-CO) cuando no hay dato real.
+  datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl; siteId: string | null }
 ): Promise<{ id: string }> {
+  const sitio = datosSitioMl(datos.siteId);
   try {
     return await dbComoEmpresa(empresaId, async (tx) => {
       const [fila] = await tx
@@ -68,6 +74,9 @@ export async function guardarCuentaConectada(
           accessTokenCifrado: cifrarToken(datos.tokens.accessToken),
           refreshTokenCifrado: cifrarToken(datos.tokens.refreshToken),
           tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
+          siteId: sitio.siteId,
+          moneda: sitio.moneda,
+          idioma: sitio.idioma,
         })
         .onConflictDoUpdate({
           target: cuentasMl.cuentaIdExterna,
@@ -78,6 +87,12 @@ export async function guardarCuentaConectada(
             tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
             desconectadaTs: null,
             renovandoTs: null,
+            // Reconectar vuelve a leer el sitio real — por si la cuenta
+            // cambió de país desde la última vez (caso raro, pero nunca
+            // se deja un site_id viejo pisado sobre uno nuevo real).
+            siteId: sitio.siteId,
+            moneda: sitio.moneda,
+            idioma: sitio.idioma,
           },
           // Referencia a la fila YA existente (la que choca), no a los
           // valores nuevos — por eso compara contra `empresaId`
@@ -202,6 +217,19 @@ export async function obtenerAccessTokenVigente(empresaId: string, cuentaId: str
   });
 }
 
+// Issue #315 (Z-LATAM-01) — para que Publicar/Promociones resuelvan el
+// site_id/moneda/idioma REALES de una cuenta puntual (nunca el "MCO"
+// fijo de lib/ml/cliente.ts) antes de pedirle algo a Mercado Libre.
+// Misma RLS que obtenerAccessTokenVigente (dbComoEmpresa) — nunca
+// filtra el sitio de una cuenta de otra empresa.
+export async function obtenerSitioDeCuenta(empresaId: string, cuentaId: string): Promise<SitioMl> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [cuenta] = await tx.select({ siteId: cuentasMl.siteId }).from(cuentasMl).where(eq(cuentasMl.id, cuentaId));
+    if (!cuenta) throw new CuentaMlNoEncontradaError();
+    return datosSitioMl(cuenta.siteId);
+  });
+}
+
 // Desconectar nunca borra la fila ni el histórico que ya se importó
 // (evidencia real de UpSeller, tarea 2.3) — solo marca `desconectadaTs`.
 export async function desconectarCuenta(empresaId: string, cuentaId: string): Promise<void> {
@@ -236,6 +264,11 @@ export async function listarCuentasConectadas(empresaId: string) {
         nickname: cuentasMl.nickname,
         desconectadaTs: cuentasMl.desconectadaTs,
         creadoTs: cuentasMl.creadoTs,
+        // Issue #315 (Z-LATAM-01), parte 2 — para que /panel/conectar-ml
+        // muestre país/moneda reales por cuenta, nunca fijos.
+        siteId: cuentasMl.siteId,
+        moneda: cuentasMl.moneda,
+        idioma: cuentasMl.idioma,
       })
       .from(cuentasMl)
   );
@@ -269,8 +302,9 @@ export async function obtenerEmpresaDueñaDeCuentaMl(cuentaIdExterna: string): P
 // arriba, nunca borra nada).
 export async function transferirCuentaMlAOtraEmpresa(
   empresaDestinoId: string,
-  datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl }
+  datos: { cuentaIdExterna: string; nickname: string; tokens: TokensMl; siteId: string | null }
 ): Promise<{ id: string }> {
+  const sitio = datosSitioMl(datos.siteId);
   return dbComoTransferenciaCuentaMl(datos.cuentaIdExterna, async (tx) => {
     const [fila] = await tx
       .update(cuentasMl)
@@ -282,6 +316,12 @@ export async function transferirCuentaMlAOtraEmpresa(
         tokenExpiraTs: expiraTsDesdeAhora(datos.tokens),
         desconectadaTs: null,
         renovandoTs: null,
+        // Issue #315 (Z-LATAM-01) — misma autorización nueva que
+        // guardarCuentaConectada: el site_id real viaja con la
+        // transferencia, nunca se deja el default pisando uno real.
+        siteId: sitio.siteId,
+        moneda: sitio.moneda,
+        idioma: sitio.idioma,
         // Issue #125 — el titular es de la empresa anterior. La FK
         // compuesta (empresa_id, titular_id) rechaza el cambio de
         // empresa con el titular viejo puesto.

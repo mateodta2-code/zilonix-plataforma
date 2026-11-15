@@ -2,6 +2,7 @@ import { tienePermiso } from "@/lib/roles";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { MarcoApp } from "@/components/marco/MarcoApp";
 import type { GrupoNav } from "@/components/marco/tipos";
+import { itemsAdministracion } from "@/components/marco/menuAdministracion";
 
 // Marco visual (issue de las subpáginas) — mueve acá la carga que
 // antes hacía SOLO app/panel/page.tsx para pintar el marco (usuario
@@ -29,6 +30,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const veSku = tienePermiso(permisos, "inventario", "consultar");
   const veFinanzas = tienePermiso(permisos, "finanzas", "consultar");
   const vePublicidad = tienePermiso(permisos, "publicidad", "consultar");
+  const vePromociones = tienePermiso(permisos, "promociones", "consultar");
   const veActividad = tienePermiso(permisos, "configuracion", "consultar");
 
   const grupoPrincipal: GrupoNav = {
@@ -41,6 +43,13 @@ export default async function PanelLayout({ children }: { children: React.ReactN
           ]
         : []),
       ...(veSku ? [{ etiqueta: "SKU", href: "/panel/sku", icono: "sku" as const }] : []),
+      // Issue #280 — WMS Fase 1, mismo permiso que SKU.
+      ...(veSku
+        ? [
+            { etiqueta: "Inventario", href: "/panel/inventario", icono: "inventario" as const },
+            { etiqueta: "Bodegas", href: "/panel/bodegas", icono: "bodegas" as const },
+          ]
+        : []),
       // Mismo permiso que SKU ("inventario","consultar") — Investigación
       // también decide qué traer/revender, no vende ni despacha nada.
       ...(veSku ? [{ etiqueta: "Investigación", href: "/panel/investigacion", icono: "investigacion" as const }] : []),
@@ -49,31 +58,36 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       // sin grupos de empresa hardcodeados: cualquier empresa con ese
       // permiso ve el ítem, nunca una lista fija de nombres.
       ...(veSku ? [{ etiqueta: "Publicar", href: "/panel/publicar", icono: "publicar" as const }] : []),
+      // Rama fix-promociones-permisos-dueno — movida a justo debajo de
+      // "Publicar" (antes vivía después de Publicidad): mismo permiso
+      // de módulo de siempre ("promociones","consultar"), sin ninguna
+      // lista fija de cuentas/empresas; solo cambia el orden en el menú.
+      ...(vePromociones ? [{ etiqueta: "Promociones", href: "/panel/promociones", icono: "promociones" as const }] : []),
       ...(veFinanzas ? [{ etiqueta: "Finanzas", href: "/panel/finanzas", icono: "finanzas" as const }] : []),
       ...(vePublicidad ? [{ etiqueta: "Publicidad", href: "/panel/publicidad", icono: "publicidad" as const }] : []),
       ...(veActividad ? [{ etiqueta: "Actividad", href: "/panel/actividad", icono: "actividad" as const }] : []),
-      { etiqueta: "Personas", href: "#", icono: "personas", deshabilitada: true, titulo: "Próximamente" },
+      // Rama feat-promociones, punto 6 — "Conexión de IA" vive en
+      // Configuración, mismo permiso que Actividad (ambos leen
+      // "configuracion","consultar"). Primera pantalla real bajo este
+      // módulo.
+      ...(veActividad ? [{ etiqueta: "Configuración", href: "/panel/configuracion", icono: "configuracion" as const }] : []),
+      // Issue #370 — Personas (miembros, invitaciones, cambiar rol), mismo
+      // permiso que pide la página ("personas","consultar").
+      ...(tienePermiso(permisos, "personas", "consultar") ? [{ etiqueta: "Personas", href: "/panel/personas", icono: "personas" as const }] : []),
+      // Foro (14-nov) — comunidad de TODAS las empresas, no un módulo
+      // de una: lo ve cualquiera que ya tenga empresa, sin permiso.
+      { etiqueta: "Foro", href: "/panel/foro", icono: "foro" as const },
     ],
   };
 
-  // Tarea 2.3/1.7 — mismos 5 links que antes vivían sueltos abajo de
-  // la página, solo para el Dueño. Acá se agrupan como "Administración"
-  // en la barra lateral, en vez de una fila de texto.
-  const grupos: GrupoNav[] = esDueno
-    ? [
-        grupoPrincipal,
-        {
-          etiqueta: "Administración",
-          items: [
-            { etiqueta: "Invitar persona", href: "/panel/invitar", icono: "invitar" },
-            { etiqueta: "Ajustar roles", href: "/panel/roles", icono: "roles" },
-            { etiqueta: "Acceso de soporte", href: "/panel/soporte", icono: "soporte" },
-            { etiqueta: "Conectar Mercado Libre", href: "/panel/conectar-ml", icono: "conectarMl" },
-            { etiqueta: "Avisos de Mercado Libre", href: "/panel/avisos-ml", icono: "avisosMl" },
-          ],
-        },
-      ]
-    : [grupoPrincipal];
+  // Tarea 2.3/1.7 — los 5 links de "Administración". Antes salían solo
+  // si el rol se llamaba "Dueño", aunque cada página ya pide su propio
+  // permiso (tarea 1.8): un Gerente con esos permisos no veía el menú
+  // (Sharel, 13-nov). Ahora cada link sale con el MISMO permiso que
+  // exige su página, y el grupo solo si queda alguno.
+  const administracion = itemsAdministracion(permisos);
+  const grupos: GrupoNav[] =
+    administracion.length > 0 ? [grupoPrincipal, { etiqueta: "Administración", items: administracion }] : [grupoPrincipal];
 
   return (
     <MarcoApp
@@ -89,3 +103,4 @@ export default async function PanelLayout({ children }: { children: React.ReactN
     </MarcoApp>
   );
 }
+

@@ -3,20 +3,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
-import { SITE_ID } from "@/lib/ml/cliente";
-import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
-import { buscarCategorias } from "@/lib/ml/publicar";
+import { obtenerAccessTokenVigente, obtenerSitioDeCuenta } from "@/lib/ml/cuentas";
+import { buscarCategoriasPorNombre } from "@/lib/ml/publicar";
 import { respuestaDeErrorMl, respuestaSiCuentaIdInvalido, respuestaSiSinPermiso } from "../../_ayudantes";
 
 // ADENDO UX de Publicar, punto 2 — "buscador de categoría sobre
-// buscarCategorias de lib/ml/publicar.ts" (ya existía como función,
-// solo le faltaba una ruta para que el formulario la pudiera llamar).
+// buscarCategoriasPorNombre de lib/ml/publicar.ts". Fix: antes llamaba
+// al predictor de título (domain_discovery) con el texto tal cual, y
+// devolvía dominios sin relación para nombres cortos de categoría (ej.
+// "Belleza"). Ahora busca por NOMBRE real dentro del árbol del sitio.
 // Mismo permiso que crear el producto en sí ("inventario","crear") —
 // esto solo AYUDA a elegir la categoría, nunca publica nada. `cuentaId`
 // decide de qué cuenta sale el token (obtenerAccessTokenVigente, nunca
 // un token de vendedor nuevo ni refrescado fuera de ese helper ya
-// probado) — site_id es siempre SITE_ID ("MCO", único país en alcance,
-// ver lib/ml/cliente.ts).
+// probado) — issue #315: el site_id ya no es fijo, se resuelve de ESA
+// cuenta (obtenerSitioDeCuenta, lib/ml/cuentas.ts), nunca el "MCO" de
+// lib/ml/cliente.ts.
 export async function GET(request: NextRequest) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) return NextResponse.json({ error: "Sin sesión." }, { status: 401 });
@@ -44,7 +46,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const token = await obtenerAccessTokenVigente(empresa.id, cuentaId as string);
-    const resultados = await buscarCategorias(SITE_ID, texto, token);
+    const { siteId } = await obtenerSitioDeCuenta(empresa.id, cuentaId as string);
+    const resultados = await buscarCategoriasPorNombre(siteId, texto, token);
     return NextResponse.json({ resultados });
   } catch (error) {
     return respuestaDeErrorMl(error);

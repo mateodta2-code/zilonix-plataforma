@@ -78,6 +78,16 @@ describe("pedidos y línea de tiempo (tarea 2.7)", () => {
     const resultado = await obtenerPedidoConEventos(empresaBId, pedidoId);
     expect(resultado).toBeNull(); // RLS: el pedido de A ni existe bajo el contexto de B
   });
+
+  // Bug real en vivo (digest 960283135, staging): "sso-callback" colado
+  // por Clerk como si fuera el [id] de /panel/pedidos/[id] reventaba
+  // Postgres (22P02, invalid input syntax for type uuid) al llegar a
+  // eq(pedidos.id, pedidoId) con un valor que no tiene forma de UUID.
+  // Falla cerrada: devuelve null sin tocar la base, para cualquier
+  // caller, no solo para esta página puntual.
+  it("un pedidoId sin forma de UUID (ej. \"sso-callback\") devuelve null, nunca revienta Postgres", async () => {
+    await expect(obtenerPedidoConEventos(empresaAId, "sso-callback")).resolves.toBeNull();
+  });
 });
 
 // Issue "tabla completa de pedidos" — prueba real contra Postgres de

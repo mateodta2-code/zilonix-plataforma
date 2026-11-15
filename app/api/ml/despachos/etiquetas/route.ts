@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
-import { listarDespachosPendientes, obtenerEtiquetasPdf, marcarEtiquetasImpresas, EtiquetaNoImprimibleError } from "@/lib/ml/despachos";
+import { EtiquetaNoImprimibleError, listarDespachosPendientes, listarDespachosYaImpresos, listarItemsPorEnvio, marcarEtiquetasImpresas, obtenerEtiquetasPdfPorEnvio } from "@/lib/ml/despachos";
+import { prepararGuiaDeLote, unirPdfs } from "@/lib/pdf-etiqueta";
 
 // Tarea 2.10 — "imprimes etiquetas de 10 pedidos en un clic": un form
 // normal (no Server Action, que no puede devolver un PDF crudo) postea
@@ -25,32 +26,55 @@ export async function POST(request: NextRequest) {
   const seleccionados = formData.getAll("shipmentId").map(String);
   if (seleccionados.length === 0) return NextResponse.json({ error: "No se eligió ningún despacho." }, { status: 400 });
 
+  // "Reimprimir en lote": mismo flujo, pero validando contra las ya
+  // impresas (listarDespachosYaImpresos) — en los dos casos la lista
+  // sale de la base, nunca de lo que mande el formulario.
+  const reimprimir = formData.get("modo") === "reimprimir";
+  const sticker = formData.get("formato") === "sticker";
+  const candidatos = reimprimir ? await listarDespachosYaImpresos(empresa.id) : await listarDespachosPendientes(empresa.id);
+  const elegidos = candidatos.filter((d) => seleccionados.includes(d.shipmentIdExterno));
+  if (elegidos.length === 0) {
+    return NextResponse.json({ error: reimprimir ? "Ninguna de las elegidas se puede reimprimir." : "Ninguno de los elegidos sigue pendiente." }, { status: 400 });
+  }
   // Todos los pendientes deben ser de la MISMA cuenta de Mercado Libre
   // para armar una sola llamada a /shipment_labels — si hay de varias
   // cuentas, se imprime por cuenta (la pantalla ya agrupa así).
-  const pendientes = await listarDespachosPendientes(empresa.id);
-  const elegidos = pendientes.filter((d) => seleccionados.includes(d.shipmentIdExterno));
-  if (elegidos.length === 0) return NextResponse.json({ error: "Ninguno de los elegidos sigue pendiente." }, { status: 400 });
   const cuentaId = elegidos[0].cuentaMlId;
   if (elegidos.some((d) => d.cuentaMlId !== cuentaId)) {
     return NextResponse.json({ error: "Elige despachos de una sola cuenta de Mercado Libre a la vez." }, { status: 400 });
   }
 
   try {
-    const pdf = await obtenerEtiquetasPdf(
-      empresa.id,
-      cuentaId,
-      elegidos.map((d) => d.shipmentIdExterno)
+    // Cada guía se pide por separado (ver obtenerEtiquetasPdfPorEnvio)
+    // para saber con certeza de qué pedido es y ponerle SU franja
+    // CONTENIDO — nunca adivinando el orden de las hojas de un lote.
+    const shipmentIds = elegidos.map((d) => d.shipmentIdExterno);
+    const [pdfs, itemsPorEnvio] = await Promise.all([obtenerEtiquetasPdfPorEnvio(empresa.id, cuentaId, shipmentIds), listarItemsPorEnvio(empresa.id, shipmentIds)]);
+    await marcarEtiquetasImpresas(empresa.id, cuentaId, shipmentIds);
+
+    // Sin la hoja de lista de despacho, con la franja y, en sticker,
+    // recortada a 10x15 (prepararGuiaDeLote). Si eso falla con alguna
+    // guía, va el PDF de Mercado Libre de ESA guía tal cual — nunca se
+    // deja el lote sin imprimir por un extra.
+    const guias = await Promise.all(
+      pdfs.map(async (pdf, i) => {
+        try {
+          return await prepararGuiaDeLote(pdf, itemsPorEnvio.get(shipmentIds[i]) ?? [], sticker);
+        } catch (errorFormato) {
+          console.warn(`[api/ml/despachos/etiquetas] no se pudo ajustar la guía del envío ${shipmentIds[i]}, va la de Mercado Libre tal cual:`, errorFormato instanceof Error ? errorFormato.message : String(errorFormato));
+          return pdf;
+        }
+      })
     );
-    await marcarEtiquetasImpresas(
-      empresa.id,
-      cuentaId,
-      elegidos.map((d) => d.shipmentIdExterno)
-    );
-    return new NextResponse(pdf, { headers: { "content-type": "application/pdf", "content-disposition": "inline; filename=etiquetas.pdf" } });
+    const cuerpo = guias.length === 1 ? guias[0] : await unirPdfs(guias);
+    return new NextResponse(cuerpo, { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename=etiquetas${sticker ? "-sticker" : ""}.pdf` } });
   } catch (error) {
     if (error instanceof EtiquetaNoImprimibleError) return NextResponse.json({ error: error.message }, { status: 409 });
-    const mensaje = error instanceof Error ? error.message : "Error desconocido.";
-    return NextResponse.json({ error: mensaje }, { status: 502 });
+    // Nunca error.message crudo al cliente (puede traer el texto real
+    // de la respuesta de Mercado Libre) — mismo criterio que
+    // /api/ml/despachos/etiqueta: mensaje fijo afuera, el detalle real
+    // solo en el log del servidor.
+    console.warn("[api/ml/despachos/etiquetas] no se pudo imprimir el lote:", error instanceof Error ? error.message : String(error));
+    return NextResponse.json({ error: "No se pudieron obtener las guías de Mercado Libre." }, { status: 502 });
   }
 }

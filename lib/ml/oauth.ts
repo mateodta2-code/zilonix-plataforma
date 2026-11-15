@@ -121,13 +121,20 @@ export function calcularCodeChallenge(codeVerifier: string): string {
   return createHash("sha256").update(codeVerifier).digest("base64url");
 }
 
-export async function obtenerNickname(accessToken: string): Promise<string> {
+// Issue #315 (Z-LATAM-01) — antes solo se leía `nickname` de esta
+// misma respuesta; GET /users/me ya trae `site_id` real del vendedor
+// (MCO/MLM/MLB/MLA/MLC) en el mismo cuerpo — se extrae acá mismo, sin
+// agregar ninguna llamada nueva a Mercado Libre. `siteId` queda
+// `null` si Mercado Libre no lo manda o no es un string (nunca se
+// inventa uno) — guardarCuentaConectada (lib/ml/cuentas.ts) decide el
+// default ahí, vía lib/ml/sitios.ts.
+export async function obtenerDatosVendedorMl(accessToken: string): Promise<{ nickname: string; siteId: string | null }> {
   const res = await fetch("https://api.mercadolibre.com/users/me", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Mercado Libre respondió ${res.status} al pedir los datos del vendedor.`);
   const data = await res.json();
-  return data.nickname;
+  return { nickname: data.nickname, siteId: typeof data.site_id === "string" ? data.site_id : null };
 }
 
 function requerirVariable(nombre: string): string {

@@ -1,0 +1,1 @@
+- **2026-11-13** — Inicio: se quita la tarjeta **«Pedidos»** (pedido de Sharel). Contaba todos los pedidos guardados de la empresa desde siempre, incluidos cancelados e inválidos, sin filtro de fechas, y confundía al lado de «Número de ventas». Se va de «Operación» y de la vista sin Finanzas. Despachos pendientes y SKU sin vincular siguen igual. Sin migración.

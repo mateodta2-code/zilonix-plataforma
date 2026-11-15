@@ -1,0 +1,212 @@
+import { eq } from "drizzle-orm";
+import { NextResponse } from "next/server";
+import { dbComoEmpresa } from "@/db/empresa-context";
+import { cuentasMl, promocionesAcciones } from "@/db/schema";
+import { requierePermiso } from "@/lib/permisos";
+import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { LimiteMercadoLibreError, leerPromocionesItemMl, salirDePromocionMl, type RespuestaPromocionMl } from "@/lib/ml/cliente";
+import { puedeSalirPorApi } from "@/lib/ml/promociones";
+import { msDeReintento429 } from "@/lib/ml/reintento-429";
+import { urlPublicaBase } from "@/lib/url-publica";
+import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../../_ayudantes";
+
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Tarea "Promociones real" (Refs #295) — un solo reintento corto para
+// 429 (con el Retry-After real de Mercado Libre si vino) y para 423
+// (Locked — no está en la doc pública de esta API, pero se vio real
+// contra Mercado Libre: el ítem tiene otra operación de precio/promoción
+// en curso del lado de ML; sin Retry-After, espera fija y corta).
+// Mismo criterio que escribirPromocionMl (lib/ml/promocionesEjecucion.ts)
+// — un reintento nada más, esto corre detrás de un click humano.
+const REINTENTOS_DELETE_ML = 1;
+const ESPERA_BASE_429_MS = 1500;
+const ESPERA_423_MS = 1500;
+
+async function salirDePromocionConReintento(itemId: string, token: string, promotionId: string, promotionType: string): Promise<RespuestaPromocionMl | { bloqueadoPorLimite: true; mensaje: string }> {
+  for (let intento = 0; ; intento++) {
+    try {
+      const respuesta = await salirDePromocionMl(itemId, token, promotionId, promotionType);
+      if (respuesta.status === 423 && intento < REINTENTOS_DELETE_ML) {
+        await esperar(ESPERA_423_MS);
+        continue;
+      }
+      return respuesta;
+    } catch (error) {
+      if (error instanceof LimiteMercadoLibreError && intento < REINTENTOS_DELETE_ML) {
+        await esperar(msDeReintento429(ESPERA_BASE_429_MS, error.retryAfterMs));
+        continue;
+      }
+      if (error instanceof LimiteMercadoLibreError) {
+        return { bloqueadoPorLimite: true, mensaje: `Mercado Libre está limitando las peticiones ahora mismo (${error.message}) — probar de nuevo en unos segundos.` };
+      }
+      throw error;
+    }
+  }
+}
+
+// Rama fix-promociones-aprobadas-participando, punto 3 — "Dejar de
+// participar". Mismo permiso que lanzar a Mercado Libre ("ejecutar":
+// esto SÍ escribe de verdad, un DELETE real) — nunca "aprobar", que es
+// para decisiones humanas sobre candidatos nuevos, un concepto
+// distinto.
+//
+// IMPORTANTE (instrucción explícita de Mateo): esta ruta NUNCA se
+// ejercita contra Mercado Libre real en pruebas automáticas (ver
+// route.test.ts, con mocks) y no se prueba en real hasta que Mateo
+// elija un solo ítem puntual para la primera prueba — salirDePromocionMl
+// (lib/ml/cliente.ts) ya estaba escrita desde antes pero DOCUMENTADA
+// como "sin confirmar contra una cuenta real", igual que esta ruta.
+type CuerpoSalir = { cuentaId?: unknown; itemId?: unknown; promotionIdMl?: unknown; tipoPromocion?: unknown };
+
+export async function POST(request: Request) {
+  const base = urlPublicaBase();
+  const respuestaOrigen = respuestaSiOrigenInvalido(request, new URL(base).origin);
+  if (respuestaOrigen) return respuestaOrigen;
+
+  const sesion = await resolverSesionYEmpresa();
+  if (sesion instanceof NextResponse) return sesion;
+  const { usuario, empresa } = sesion;
+
+  try {
+    await requierePermiso(usuario.id, empresa.id, "promociones", "ejecutar");
+  } catch (error) {
+    const respuestaPermiso = respuestaSiSinPermiso(error);
+    if (respuestaPermiso) return respuestaPermiso;
+    throw error;
+  }
+
+  let cuerpo: CuerpoSalir;
+  try {
+    cuerpo = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
+  }
+  const { cuentaId, itemId, promotionIdMl, tipoPromocion } = cuerpo;
+  if (typeof cuentaId !== "string" || !PATRON_UUID.test(cuentaId)) return NextResponse.json({ error: "Falta la cuenta." }, { status: 400 });
+  if (typeof itemId !== "string" || !itemId) return NextResponse.json({ error: "Falta el producto." }, { status: 400 });
+  if (typeof tipoPromocion !== "string" || !tipoPromocion) return NextResponse.json({ error: "Falta el tipo de promoción." }, { status: 400 });
+  if (promotionIdMl !== null && typeof promotionIdMl !== "string") return NextResponse.json({ error: "Falta el identificador de la promoción." }, { status: 400 });
+
+  // Punto 3 — investigado contra la doc oficial de ML, nunca se asume
+  // (TIPOS_SALIR_API, lib/ml/promociones.ts). El cliente ya debería
+  // tener el botón deshabilitado para estos tipos — esta es la
+  // segunda red de seguridad, del lado del servidor, igual que el
+  // resto del módulo nunca confía solo en lo que manda el cliente.
+  if (!puedeSalirPorApi(tipoPromocion)) {
+    return NextResponse.json({ error: `El tipo "${tipoPromocion}" no se puede dejar por la API de Mercado Libre — hacerlo desde la Central de Promociones en Mercado Libre.` }, { status: 400 });
+  }
+
+  const [cuenta] = await dbComoEmpresa(empresa.id, (tx) => tx.select().from(cuentasMl).where(eq(cuentasMl.id, cuentaId)));
+  if (!cuenta) return NextResponse.json({ error: "Cuenta no encontrada." }, { status: 404 });
+
+  // Tarea "Promociones-Ajustes-1" — ANTES esto exigía una fila en
+  // promociones_candidatos para esta combinación (cuenta+itemId), bug
+  // real confirmado por Mateo en staging: el flujo nuevo de la lista
+  // en vivo (lib/ml/promocionesPublicaciones.ts) nunca escribe esa
+  // tabla, así que "Dejar de participar" siempre devolvía 404 "volvé a
+  // Buscar", aunque el botón apareciera. La autorización real sigue
+  // intacta sin ese chequeo: `cuenta` arriba ya exige RLS (la cuenta
+  // es de ESTA empresa), `obtenerAccessTokenVigente` abajo exige lo
+  // mismo, y el DELETE nunca se manda a ciegas — se relee fresco de
+  // Mercado Libre (más abajo) y solo sigue si ese itemId de verdad
+  // tiene esa promoción activa para ESA cuenta; un itemId ajeno no
+  // tiene cómo "aparecer" ahí, lo confirma Mercado Libre mismo.
+  const token = await obtenerAccessTokenVigente(empresa.id, cuentaId);
+
+  // Nunca se confía en que sigue started/pending solo porque la
+  // pantalla lo mostraba hace un momento — se vuelve a leer fresco
+  // justo antes de mandar el DELETE (mismo criterio HIGH 2 de todo el
+  // módulo: nunca escribir en Mercado Libre contra un dato que puede
+  // estar viejo).
+  const resultadoLectura = await leerPromocionesItemMl(itemId, token);
+  if (resultadoLectura.estado !== "ok") {
+    return NextResponse.json({ error: "No se pudo confirmar el estado real en Mercado Libre antes de salir — probar de nuevo." }, { status: 502 });
+  }
+  const promoReal = resultadoLectura.promociones.find(
+    (p) => (promotionIdMl ? p.id === promotionIdMl : p.type === tipoPromocion) && (p.status === "started" || p.status === "pending")
+  );
+  if (!promoReal) {
+    // Review de Pablo (PR #311) — "ya no participaba" también queda
+    // en la auditoría (antes se perdía: ni rastro de que alguien
+    // clickeó "Dejar de participar" sobre algo que, al revalidar
+    // fresco, ya no estaba activo). Nunca se llamó a Mercado Libre en
+    // este caso — por eso resultadoMl lo deja explícito.
+    const [filaSinDelete] = await dbComoEmpresa(empresa.id, (tx) =>
+      tx
+        .insert(promocionesAcciones)
+        .values({
+          empresaId: empresa.id,
+          cuentaMlId: cuentaId,
+          itemId,
+          tituloProducto: null,
+          tipoPromocion,
+          promotionIdMl: promotionIdMl ?? null,
+          accion: "salir",
+          precioAntes: null,
+          precioDespues: null,
+          estado: "ejecutada",
+          aprobadoPor: usuario.id,
+          aprobadoTs: new Date(),
+          ejecutadoPor: usuario.id,
+          ejecutadoTs: new Date(),
+          modoSimulacion: false,
+          resultadoMl: { ok: true, yaNoParticipaba: true, llamoAMercadoLibre: false },
+          error: null,
+        })
+        .returning()
+    );
+    return NextResponse.json({ ok: true, yaNoParticipaba: true, accion: filaSinDelete });
+  }
+
+  const precioAntes = typeof promoReal.price === "number" ? promoReal.price : null;
+  const resultado = await salirDePromocionConReintento(itemId, token, promotionIdMl ?? String(promoReal.id ?? ""), tipoPromocion);
+
+  if ("bloqueadoPorLimite" in resultado) {
+    // Mercado Libre nos frenó incluso después del reintento — nunca se
+    // adivina si el DELETE de verdad pasó o no, así que esto NO queda
+    // en la auditoría como "fallida" (sería inventar un resultado que
+    // no se confirmó); el mensaje claro le dice a la persona que
+    // pruebe de nuevo en un momento.
+    return NextResponse.json({ error: resultado.mensaje }, { status: 429 });
+  }
+  const respuestaMl = resultado;
+  const errorClaro =
+    respuestaMl.ok
+      ? null
+      : respuestaMl.status === 423
+        ? "Mercado Libre bloqueó este producto por un momento (otra operación en curso) — probar de nuevo en unos segundos."
+        : `Mercado Libre respondió HTTP ${respuestaMl.status}: ${respuestaMl.textoCrudo.slice(0, 400)}`;
+
+  const [fila] = await dbComoEmpresa(empresa.id, (tx) =>
+    tx
+      .insert(promocionesAcciones)
+      .values({
+        empresaId: empresa.id,
+        cuentaMlId: cuentaId,
+        itemId,
+        tituloProducto: null,
+        tipoPromocion,
+        promotionIdMl: promotionIdMl ?? (typeof promoReal.id === "string" ? promoReal.id : null),
+        accion: "salir",
+        precioAntes: precioAntes != null ? String(precioAntes) : null,
+        precioDespues: null,
+        estado: respuestaMl.ok ? "ejecutada" : "fallida",
+        aprobadoPor: usuario.id,
+        aprobadoTs: new Date(),
+        ejecutadoPor: usuario.id,
+        ejecutadoTs: new Date(),
+        modoSimulacion: false,
+        resultadoMl: { ok: respuestaMl.ok, status: respuestaMl.status },
+        error: errorClaro,
+      })
+      .returning()
+  );
+
+  if (!respuestaMl.ok) {
+    return NextResponse.json({ error: fila.error ?? "No se pudo salir de la promoción." }, { status: respuestaMl.status === 423 ? 423 : 502 });
+  }
+  return NextResponse.json({ ok: true, accion: fila });
+}

@@ -81,6 +81,17 @@ describe("hostPermitidoCanva — Parte 3, punto C (allowlist de Canva)", () => {
     expect(hostPermitidoCanva("export-download.canvausercontent.com")).toBe(true);
   });
 
+  // Issue #366 — confirmado en logs de staging: el job de exportación
+  // de Canva Connect devuelve la URL de descarga real en este host,
+  // no en media.canva.com.
+  it("acepta el host exacto de descarga de exportaciones (export-download.canva.com)", () => {
+    expect(hostPermitidoCanva("export-download.canva.com")).toBe(true);
+  });
+
+  it("rechaza un comodín de *.canva.com (ej. otro-sub.canva.com, nunca solo por terminar en canva.com)", () => {
+    expect(hostPermitidoCanva("otro-sub.canva.com")).toBe(false);
+  });
+
   it("rechaza el dominio de compartir el diseño (canva.com, sin el subdominio de medios)", () => {
     expect(hostPermitidoCanva("www.canva.com")).toBe(false);
     expect(hostPermitidoCanva("canva.com")).toBe(false);

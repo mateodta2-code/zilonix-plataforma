@@ -1,0 +1,563 @@
+import { describe, expect, it } from "vitest";
+import { obtenerConfigPublicidad } from "@/lib/publicidad/config";
+import {
+  mostrarDineroCompacto,
+  mostrarDineroTarjeta,
+  textoObjetivoRoas,
+  mostrarEntero,
+  mostrarFraccion,
+  mostrarRoas,
+  textoComparacion,
+} from "@/lib/publicidad/formato";
+import {
+  alertaBajo70,
+  anunciosMayorGasto,
+  aportePorPublicidad,
+  armarSerieDiaria,
+  diasParaEstabilizar,
+  compararOrden,
+  diagnosticarCampana,
+  fraseEstado,
+  gastaSinVender,
+  ordenPorInversionDesc,
+  unidadesConPublicidad,
+  usoPresupuestoDiario,
+  resolverDireccion,
+  resolverOrden,
+  resolverPeriodo,
+  semaforoAnuncio,
+  sumarEnteros,
+  sumarMontos,
+  tacosDeLaTienda,
+  totalesDeDias,
+  variacionPorcentual,
+  type DiaMetrica,
+  type FilaOrdenable,
+} from "@/lib/publicidad/kpis";
+import { hrefPublicidad, leerParametrosPublicidad } from "@/lib/publicidad/params";
+import { detalleDiagnostico, NOTA_DIAGNOSTICO, rotuloDiagnostico, rotuloSemaforo, subirEsMejor, textoVariacion, tituloSemaforo } from "@/lib/publicidad/rotulos";
+
+const DIA: DiaMetrica = {
+  costo: null,
+  montoTotal: null,
+  ventasOrganicasMonto: null,
+  clicks: null,
+  impresiones: null,
+};
+
+function dia(parcial: Partial<DiaMetrica>): DiaMetrica {
+  return { ...DIA, ...parcial };
+}
+
+const config = obtenerConfigPublicidad("empresa-de-prueba");
+
+describe("sumas y ratios del rango", () => {
+  it("suma montos y enteros, y un rango todo null no se vuelve 0", () => {
+    expect(sumarMontos(["10.00", "2.50", null])).toBe("12.50");
+    expect(sumarMontos([null, null])).toBeNull();
+    expect(sumarMontos([])).toBeNull();
+    expect(sumarEnteros([null, null])).toBeNull();
+    expect(sumarEnteros([4, "6", null])).toBe("10");
+    const vacio = totalesDeDias([dia({}), dia({})]);
+    expect(vacio.gasto).toBeNull();
+    expect(vacio.ventasPublicidad).toBeNull();
+    expect(vacio.ventasTotales).toBeNull();
+    expect(vacio.clicks).toBeNull();
+    expect(vacio.roas).toBeNull();
+  });
+
+  it("CPC, ROAS, ACOS y TACOS salen de las sumas, y un denominador 0 es null", () => {
+    const totales = totalesDeDias([
+      dia({ costo: "10.00", montoTotal: "40.00", ventasOrganicasMonto: "10.00", clicks: 4, impresiones: 100 }),
+    ]);
+    expect(totales.cpc).toBe("2.50");
+    expect(totales.roas).toBe("4.00");
+    expect(totales.acos).toBe("0.2500");
+    expect(totales.ventasOrganicas).toBe("10.00");
+    expect(totales.ventasTotales).toBe("50.00");
+    expect(totales.tacos).toBe("0.2000");
+    expect(totales.ventasOrganicas).toBe(sumarMontos([totales.ventasTotales, `-${totales.ventasPublicidad}`]));
+
+    const cero = totalesDeDias([dia({ costo: "0.00", montoTotal: "10.00", ventasOrganicasMonto: "0.00", clicks: 0, impresiones: 1 })]);
+    expect(cero.roas).toBeNull();
+    expect(cero.cpc).toBeNull();
+    expect(cero.acos).toBe("0.0000");
+
+    const sinVentas = totalesDeDias([dia({ costo: "10.00", montoTotal: "0.00", ventasOrganicasMonto: "0.00", clicks: 2, impresiones: 3 })]);
+    expect(sinVentas.acos).toBeNull();
+    expect(sinVentas.roas).toBe("0.00");
+    expect(sinVentas.tacos).toBeNull();
+  });
+
+  it("no promedia los ratios diarios", () => {
+    const dias = [
+      dia({ costo: "10.00", montoTotal: "100.00", ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 }),
+      dia({ costo: "90.00", montoTotal: "90.00", ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 }),
+    ];
+    const totales = totalesDeDias(dias);
+    expect(totales.gasto).toBe("100.00");
+    expect(totales.ventasPublicidad).toBe("190.00");
+    expect(totales.roas).toBe("1.90");
+    expect(totales.acos).toBe("0.5263");
+  });
+
+  it("el TACOS del rango no es el promedio del tacos de cada día", () => {
+    const totales = totalesDeDias([
+      dia({ costo: "10.00", montoTotal: "40.00", ventasOrganicasMonto: "60.00", clicks: 1, impresiones: 1 }),
+      dia({ costo: "90.00", montoTotal: "10.00", ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 }),
+    ]);
+    expect(totales.tacos).toBe("0.9091");
+    expect(totales.tacos).not.toBe("4.5500");
+  });
+
+  it("la variación es null si el tramo anterior es 0 o no existe", () => {
+    expect(variacionPorcentual("120.00", "100.00")).toBe("20.0");
+    expect(variacionPorcentual("80.00", "100.00")).toBe("-20.0");
+    expect(variacionPorcentual("10.00", "0.00")).toBeNull();
+    expect(variacionPorcentual(null, "10.00")).toBeNull();
+    expect(variacionPorcentual("10.00", null)).toBeNull();
+    expect(textoVariacion(null)).toEqual({ texto: "Sin datos para comparar", mejor: null });
+    expect(textoVariacion("0.0")).toEqual({ texto: "Igual que el periodo anterior", mejor: null });
+  });
+
+  it("en ACOS, TACOS y CPC subir es peor; en el resto, subir es mejor", () => {
+    expect(subirEsMejor("acos")).toBe(false);
+    expect(subirEsMejor("tacos")).toBe(false);
+    expect(subirEsMejor("cpc")).toBe(false);
+    for (const campo of ["gasto", "ventasPublicidad", "ventasTotales", "roas", "clicks", "impresiones"]) {
+      expect(subirEsMejor(campo)).toBe(true);
+    }
+    expect(textoVariacion("12.3", { subirEsMejor: true })).toEqual({ texto: "Sube 12,3 % (mejor)", mejor: true });
+    expect(textoVariacion("-4.1", { subirEsMejor: true })).toEqual({ texto: "Baja 4,1 % (peor)", mejor: false });
+    expect(textoVariacion("12.3", { subirEsMejor: false })).toEqual({ texto: "Sube 12,3 % (peor)", mejor: false });
+    expect(textoVariacion("-4.1", { subirEsMejor: false })).toEqual({ texto: "Baja 4,1 % (mejor)", mejor: true });
+  });
+});
+
+describe("semáforo por anuncio", () => {
+  it("con ventas, verde hasta 20 % de ACOS y rojo si lo pasa", () => {
+    const bajo = semaforoAnuncio({ gasto: "10.00", ventasPublicidad: "100.00", precio: "50000.00", config });
+    expect(bajo.estado).toBe("exito");
+    expect(tituloSemaforo(bajo)).toBe("ACOS 10,0% ≤ tope 20%");
+
+    const alto = semaforoAnuncio({ gasto: "274.00", ventasPublicidad: "1000.00", precio: "50000.00", config });
+    expect(alto.estado).toBe("peligro");
+    expect(tituloSemaforo(alto)).toBe("ACOS 27,4% > tope 20%");
+  });
+
+  it("sin ventas, compara el gasto contra el 5 % del precio", () => {
+    const dentro = semaforoAnuncio({ gasto: "4000.00", ventasPublicidad: "0.00", precio: "100000.00", config });
+    expect(dentro.estado).toBe("exito");
+    expect(tituloSemaforo(dentro)).toBe("Gasto $ 4.000 ≤ 5% del precio ($ 100.000)");
+
+    const fuera = semaforoAnuncio({ gasto: "6000.00", ventasPublicidad: null, precio: "100000.00", config });
+    expect(fuera.estado).toBe("peligro");
+    expect(tituloSemaforo(fuera)).toBe("Gasto $ 6.000 > 5% del precio ($ 100.000)");
+  });
+
+  it("sin precio o sin gasto queda en neutro", () => {
+    const sinPrecio = semaforoAnuncio({ gasto: "1000.00", ventasPublicidad: "0.00", precio: null, config });
+    expect(sinPrecio).toEqual({ estado: "neutro", motivo: "sin_precio" });
+    expect(tituloSemaforo(sinPrecio)).toBe("Sin precio vigente");
+
+    const sinGasto = semaforoAnuncio({ gasto: null, ventasPublicidad: null, precio: "100000.00", config });
+    expect(sinGasto).toEqual({ estado: "neutro", motivo: "sin_gasto" });
+    expect(tituloSemaforo(sinGasto)).toBe("Sin gasto en el rango");
+    expect(rotuloSemaforo(sinGasto)).toBe("—");
+  });
+
+  it("gasto 0 o null queda neutro aunque haya ventas con publicidad", () => {
+    const cero = semaforoAnuncio({ gasto: "0.00", ventasPublicidad: "100.00", precio: "50000.00", config });
+    expect(cero).toEqual({ estado: "neutro", motivo: "sin_gasto" });
+    expect(rotuloSemaforo(cero)).toBe("—");
+    expect(tituloSemaforo(cero)).toBe("Sin gasto en el rango");
+
+    const nulo = semaforoAnuncio({ gasto: null, ventasPublicidad: "80.00", precio: "50000.00", config });
+    expect(nulo).toEqual({ estado: "neutro", motivo: "sin_gasto" });
+    expect(rotuloSemaforo(nulo)).toBe("—");
+  });
+});
+
+describe("diagnóstico de campaña", () => {
+  const ahora = new Date("2026-10-29T15:00:00-05:00");
+  const conGasto = totalesDeDias([
+    dia({ costo: "100.00", montoTotal: "420.00", ventasOrganicasMonto: "0.00", clicks: 10, impresiones: 100 }),
+  ]);
+
+  it("a los 7 días justos ya no está aprendiendo", () => {
+    const enElDia7 = diagnosticarCampana({
+      ahora,
+      creadaMlTs: new Date("2026-10-01T12:00:00-05:00"),
+      actualizadaMlTs: new Date("2026-10-22T15:00:00-05:00"),
+      roasObjetivo: "2.00",
+      totales: conGasto,
+      config,
+    });
+    expect(enElDia7.tipo).not.toBe("aprendiendo");
+    expect(enElDia7.tipo).toBe("excelente");
+
+    const todavia = diagnosticarCampana({
+      ahora,
+      creadaMlTs: new Date("2026-10-01T12:00:00-05:00"),
+      actualizadaMlTs: new Date("2026-10-23T15:00:00-05:00"),
+      roasObjetivo: "2.00",
+      totales: conGasto,
+      config,
+    });
+    expect(todavia).toEqual({ tipo: "aprendiendo", dias: 6 });
+    expect(rotuloDiagnostico(todavia)).toBe("Aprendiendo · 6 días");
+    expect(NOTA_DIAGNOSTICO.aprendiendo).toBe("No tocar, en aprendizaje");
+    expect(NOTA_DIAGNOSTICO.excelente).toBe("No tocar, en revisión");
+  });
+
+  it("excelente, en objetivo y bajo objetivo comparan el ROAS real contra el objetivo", () => {
+    const base = {
+      ahora,
+      creadaMlTs: new Date("2026-09-01T12:00:00-05:00"),
+      actualizadaMlTs: new Date("2026-09-01T12:00:00-05:00"),
+      config,
+    };
+    expect(
+      diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conGasto }).tipo
+    ).toBe("excelente");
+    const justo = totalesDeDias([
+      dia({ costo: "100.00", montoTotal: "200.00", ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 }),
+    ]);
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: justo }).tipo).toBe("en_objetivo");
+    // Semáforo de tres colores: 90 % y 70 % del objetivo (2,00x).
+    const conMonto = (monto: string) =>
+      totalesDeDias([dia({ costo: "100.00", montoTotal: monto, ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 })]);
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("199.00") }).tipo).toBe("en_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("180.00") }).tipo).toBe("en_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("179.00") }).tipo).toBe("bajo_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("140.00") }).tipo).toBe("bajo_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("139.00") }).tipo).toBe("muy_bajo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: null, totales: conGasto }).tipo).toBe("sin_objetivo");
+  });
+
+  it("sin gasto en el rango es sin datos, aunque haya objetivo", () => {
+    const vacio = diagnosticarCampana({
+      ahora,
+      creadaMlTs: new Date("2026-09-01T12:00:00-05:00"),
+      actualizadaMlTs: new Date("2026-09-01T12:00:00-05:00"),
+      roasObjetivo: "4.00",
+      totales: totalesDeDias([dia({ costo: "0.00", montoTotal: "0.00", ventasOrganicasMonto: "0.00", clicks: 0, impresiones: 0 })]),
+      config,
+    });
+    expect(vacio.tipo).toBe("sin_datos");
+    expect(rotuloDiagnostico(vacio)).toBe("Sin datos");
+  });
+
+  it("con gasto pero ventas con publicidad null en todos los días es sin datos, no bajo objetivo", () => {
+    const totales = totalesDeDias([
+      dia({ costo: "100.00", montoTotal: null, ventasOrganicasMonto: "0.00", clicks: 4, impresiones: 10 }),
+      dia({ costo: "50.00", montoTotal: null, ventasOrganicasMonto: null, clicks: 1, impresiones: 2 }),
+    ]);
+    expect(totales.gasto).toBe("150.00");
+    expect(totales.ventasPublicidad).toBeNull();
+    const diag = diagnosticarCampana({
+      ahora,
+      creadaMlTs: new Date("2026-09-01T12:00:00-05:00"),
+      actualizadaMlTs: new Date("2026-09-01T12:00:00-05:00"),
+      roasObjetivo: "2.00",
+      totales,
+      config,
+    });
+    expect(diag.tipo).toBe("sin_datos");
+    expect(rotuloDiagnostico(diag)).toBe("Sin datos");
+  });
+});
+
+describe("frase de estado y datos nuevos del rango (issue #255)", () => {
+  it("compara el ROAS real contra el objetivo, en puntos enteros", () => {
+    const bajo = fraseEstado({
+      diagnostico: { tipo: "bajo_objetivo", dias: 0 },
+      roas: "9.85",
+      roasObjetivo: "12.00",
+      diasAprendizaje: 7,
+    });
+    expect(bajo.frase).toBe("Bajo objetivo, falta 18 %");
+    expect(bajo.tono).toBe("advertencia");
+    expect(bajo.avance).toBe(82);
+
+    const casi = fraseEstado({ diagnostico: { tipo: "en_objetivo", dias: 0 }, roas: "11.00", roasObjetivo: "12.00", diasAprendizaje: 7 });
+    expect(casi.frase).toBe("En objetivo, falta 8 %");
+    expect(casi.tono).toBe("exito");
+    const muyBajo = fraseEstado({ diagnostico: { tipo: "muy_bajo", dias: 0 }, roas: "6.87", roasObjetivo: "12.00", diasAprendizaje: 7 });
+    expect(muyBajo.frase).toBe("Muy bajo, falta 43 %");
+    expect(muyBajo.tono).toBe("peligro");
+
+    const arriba = fraseEstado({
+      diagnostico: { tipo: "en_objetivo", dias: 0 },
+      roas: "14.04",
+      roasObjetivo: "12.00",
+      diasAprendizaje: 7,
+    });
+    expect(arriba.frase).toBe("Cumple el objetivo, 17 % arriba");
+    expect(arriba.tono).toBe("exito");
+    expect(arriba.avance).toBe(100);
+  });
+
+  it("aprender cuenta el día desde 1, y sin datos no inventa una barra", () => {
+    const aprendiendo = fraseEstado({
+      diagnostico: { tipo: "aprendiendo", dias: 0 },
+      roas: null,
+      roasObjetivo: "12.00",
+      diasAprendizaje: 7,
+    });
+    expect(aprendiendo.frase).toBe("Aprendiendo, día 1 de 7, no tocar todavía");
+    expect(aprendiendo.tono).toBe("acento");
+    expect(aprendiendo.avance).toBeNull();
+    expect(fraseEstado({ diagnostico: { tipo: "sin_datos", dias: 0 }, roas: null, roasObjetivo: null, diasAprendizaje: 7 }).frase).toBe(
+      "Sin datos"
+    );
+  });
+
+  it("unidades con publicidad usa el total, y si no vino suma directas e indirectas", () => {
+    expect(
+      unidadesConPublicidad([
+        dia({ unidadesTotal: 2 }),
+        dia({ unidadesTotal: 3, unidadesDirectas: 99 }),
+      ])
+    ).toBe("5");
+    expect(unidadesConPublicidad([dia({ unidadesDirectas: 1, unidadesIndirectas: 4 }), dia({ unidadesIndirectas: 2 })])).toBe("7");
+    expect(unidadesConPublicidad([dia({}), dia({ unidadesTotal: null })])).toBeNull();
+    expect(totalesDeDias([dia({ costo: "10.00", unidadesTotal: 4 })]).unidadesVendidas).toBe("4");
+  });
+
+  it("el % usado es el gasto del rango partido por los días, contra el presupuesto diario", () => {
+    expect(
+      usoPresupuestoDiario({ gasto: "310.00", dias: 31, presupuestoDiario: "20.00", automatico: false })
+    ).toMatchObject({ tipo: "ok", porcentaje: "50", avance: 50 });
+    expect(usoPresupuestoDiario({ gasto: "100.00", dias: 1, presupuestoDiario: "40.00", automatico: null })).toMatchObject({
+      tipo: "ok",
+      porcentaje: "250",
+      avance: 100,
+    });
+    expect(usoPresupuestoDiario({ gasto: "10.00", dias: 2, presupuestoDiario: "50.00", automatico: true }).tipo).toBe("automatico");
+    expect(usoPresupuestoDiario({ gasto: "10.00", dias: 2, presupuestoDiario: null, automatico: false }).tipo).toBe("sin_presupuesto");
+    expect(usoPresupuestoDiario({ gasto: null, dias: 2, presupuestoDiario: "50.00", automatico: false }).tipo).toBe("sin_gasto");
+  });
+});
+
+describe("periodo en Bogotá", () => {
+  it("el mes en curso va del día 1 a hoy y se compara con el mismo tramo", () => {
+    const periodo = resolverPeriodo(null, new Date("2026-10-29T15:00:00-05:00"));
+    expect(periodo).toMatchObject({
+      mes: "2026-10",
+      desde: "2026-10-01",
+      hasta: "2026-10-29",
+      comparacionDesde: "2026-09-01",
+      comparacionHasta: "2026-09-29",
+      incluyeHoy: true,
+      esMesEnCurso: true,
+    });
+    expect(resolverPeriodo("2026-10", new Date("2026-10-01T08:00:00-05:00"))).toMatchObject({
+      desde: "2026-10-01",
+      hasta: "2026-10-01",
+      comparacionDesde: "2026-09-01",
+      comparacionHasta: "2026-09-01",
+    });
+  });
+
+  it("un mes más corto corta la comparación en su último día, también al cruzar el año", () => {
+    expect(resolverPeriodo(null, new Date("2026-03-31T12:00:00-05:00"))).toMatchObject({
+      desde: "2026-03-01",
+      hasta: "2026-03-31",
+      comparacionDesde: "2026-02-01",
+      comparacionHasta: "2026-02-28",
+    });
+    expect(resolverPeriodo(null, new Date("2024-03-31T12:00:00-05:00")).comparacionHasta).toBe("2024-02-29");
+    expect(resolverPeriodo(null, new Date("2026-05-31T12:00:00-05:00")).comparacionHasta).toBe("2026-04-30");
+    expect(resolverPeriodo(null, new Date("2026-01-15T12:00:00-05:00"))).toMatchObject({
+      desde: "2026-01-01",
+      hasta: "2026-01-15",
+      comparacionDesde: "2025-12-01",
+      comparacionHasta: "2025-12-15",
+    });
+  });
+
+  it("el corte del día es el calendario de Bogotá, no el UTC del servidor", () => {
+    expect(resolverPeriodo(null, new Date("2026-10-29T04:30:00Z")).hasta).toBe("2026-10-28");
+    expect(resolverPeriodo(null, new Date("2026-10-29T05:00:00Z")).hasta).toBe("2026-10-29");
+  });
+
+  it("un mes ya cerrado se compara con el mes anterior completo, y un valor inválido cae al mes en curso", () => {
+    const cerrado = resolverPeriodo("2026-09", new Date("2026-10-29T15:00:00-05:00"));
+    expect(cerrado).toMatchObject({
+      mes: "2026-09",
+      desde: "2026-09-01",
+      hasta: "2026-09-30",
+      comparacionDesde: "2026-08-01",
+      comparacionHasta: "2026-08-31",
+      incluyeHoy: false,
+      esMesEnCurso: false,
+    });
+    expect(textoComparacion(cerrado)).toContain("mes anterior completo");
+    expect(resolverPeriodo("2026-02", new Date("2026-10-29T15:00:00-05:00"))).toMatchObject({
+      desde: "2026-02-01",
+      hasta: "2026-02-28",
+      comparacionDesde: "2026-01-01",
+      comparacionHasta: "2026-01-31",
+    });
+    const enCurso = resolverPeriodo(null, new Date("2026-10-29T15:00:00-05:00"));
+    expect(textoComparacion(enCurso)).toContain("mismo tramo del mes anterior");
+    const ahora = new Date("2026-10-29T15:00:00-05:00");
+    for (const invalido of ["no", "2026-13", "2026-00", "2026-10-01", "2026-12", "1999-01", ""]) {
+      expect(resolverPeriodo(invalido, ahora).mes).toBe("2026-10");
+    }
+    expect(resolverPeriodo(undefined, ahora).esMesEnCurso).toBe(true);
+  });
+});
+
+describe("alertas de solo lectura (issue #255)", () => {
+  it("bajo el 70 % del objetivo no se muestra mientras aprende", () => {
+    expect(alertaBajo70({ aprendiendo: true, roas: "1.00", objetivo: "12.00" })).toBe(false);
+    expect(alertaBajo70({ aprendiendo: false, roas: "8.00", objetivo: "12.00" })).toBe(true);
+    expect(alertaBajo70({ aprendiendo: false, roas: "8.40", objetivo: "12.00" })).toBe(false);
+    expect(alertaBajo70({ aprendiendo: false, roas: "9.85", objetivo: "12.00" })).toBe(false);
+    expect(alertaBajo70({ aprendiendo: false, roas: null, objetivo: "12.00" })).toBe(false);
+  });
+
+  it("gasta sin vender solo si hay gasto y ninguna venta atribuida", () => {
+    expect(gastaSinVender("10.00", "0.00", "0")).toBe(true);
+    expect(gastaSinVender("10.00", null, null)).toBe(true);
+    expect(gastaSinVender("10.00", "5.00", null)).toBe(false);
+    expect(gastaSinVender("10.00", null, "2")).toBe(false);
+    expect(gastaSinVender("0.00", "0.00", "0")).toBe(false);
+    expect(gastaSinVender(null, "0.00", "0")).toBe(false);
+  });
+
+  it("el mayor gasto es el anuncio que más invierte, y el empate no se descarta", () => {
+    const base = { titulo: "Uno", ventas: "0.00" };
+    expect(anunciosMayorGasto([{ ...base, id: "b", itemId: "MCO2", gasto: "30.00" }, { ...base, id: "a", itemId: "MCO1", gasto: "10.00" }], "40.00").map((a) => a.id)).toEqual(["b"]);
+    const empate = anunciosMayorGasto(
+      [
+        { id: "b", titulo: "B", itemId: "MCO2", gasto: "20.00", ventas: "1.00" },
+        { id: "a", titulo: null, itemId: "MCO1", gasto: "20.00", ventas: null },
+        { id: "c", titulo: "C", itemId: "MCO3", gasto: "5.00", ventas: null },
+      ],
+      "45.00"
+    );
+    expect(empate.map((a) => a.id)).toEqual(["a", "b"]);
+    expect(empate[0].nombre).toBe("MCO1");
+    expect(empate[0].parte).toBe("44.4");
+    expect(anunciosMayorGasto([{ ...base, id: "z", itemId: "MCO9", gasto: "0.00" }, { ...base, id: "y", itemId: "MCO8", gasto: null }], "0.00")).toEqual([]);
+  });
+
+  it("los anuncios se ordenan por inversión descendente y el gasto vacío queda al final", () => {
+    const filas = [
+      { itemId: "B", gasto: null },
+      { itemId: "A", gasto: "10.00" },
+      { itemId: "C", gasto: "30.00" },
+      { itemId: "D", gasto: "0.00" },
+    ];
+    expect(ordenPorInversionDesc(filas, (fila) => fila.gasto).map((fila) => fila.itemId)).toEqual(["C", "A", "B", "D"]);
+  });
+
+  it("el aporte es ventas atribuidas sobre el total de las promocionadas", () => {
+    expect(aportePorPublicidad("80.00", "20.00")).toBe("80.0");
+    expect(aportePorPublicidad("80.00", null)).toBeNull();
+    expect(aportePorPublicidad(null, "20.00")).toBeNull();
+  });
+
+  it("el diagnóstico visible no afirma una etiqueta que Mercado Libre no mandó", () => {
+    expect(diasParaEstabilizar(0, 7)).toBe(7);
+    expect(diasParaEstabilizar(6, 7)).toBe(1);
+    expect(detalleDiagnostico({ diagnostico: { tipo: "aprendiendo", dias: 6 }, diasAprendizaje: 7, alertaBajo70: false })).toEqual({
+      pill: "APRENDIENDO",
+      detalle: "Tu campaña se estabilizará en 1 día",
+      tono: "aviso",
+    });
+    expect(detalleDiagnostico({ diagnostico: { tipo: "aprendiendo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true }).detalle).toBe(
+      "Tu campaña se estabilizará en 7 días"
+    );
+    expect(detalleDiagnostico({ diagnostico: { tipo: "muy_bajo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true })).toEqual({
+      pill: "Muy bajo",
+      detalle: "Bajo el 70 % del objetivo",
+      tono: "peligro",
+    });
+    expect(detalleDiagnostico({ diagnostico: { tipo: "bajo_objetivo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false })).toEqual({
+      pill: "Bajo objetivo",
+      detalle: "Entre el 70 % y el 90 % del objetivo",
+      tono: "advertencia",
+    });
+    expect(detalleDiagnostico({ diagnostico: { tipo: "excelente", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).pill).toBe("Excelente");
+    expect(detalleDiagnostico({ diagnostico: { tipo: "sin_datos", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).detalle).toBe("Sin datos");
+  });
+
+  it("la serie diaria no promedia ratios y no inventa un cero", () => {
+    const serie = armarSerieDiaria("2026-10-01", "2026-10-02", [
+      { fecha: "2026-10-01", costo: "10.00", montoTotal: "40.00", ventasOrganicasMonto: null, clicks: 2, impresiones: 10 },
+    ]);
+    expect(serie.map((p) => p.fecha)).toEqual(["2026-10-01", "2026-10-02"]);
+    expect(serie[0].inversion).toBe("10.00");
+    expect(serie[0].ingresos).toBe("40.00");
+    expect(serie[0].roas).toBe("4.00");
+    expect(serie[1].inversion).toBeNull();
+    expect(serie[1].roas).toBeNull();
+  });
+});
+
+describe("orden y configuración", () => {
+  it("la columna de la URL solo vale si está en la lista blanca", () => {
+    expect(resolverOrden("roas")).toBe("roas");
+    expect(resolverOrden("costo; drop table")).toBe("inversion");
+    expect(resolverOrden(null)).toBe("inversion");
+    expect(resolverDireccion(null, "inversion")).toBe("desc");
+    expect(resolverDireccion("asc", "inversion")).toBe("asc");
+    expect(resolverDireccion("lado", "campana")).toBe("asc");
+    const leidos = leerParametrosPublicidad({ mes: "basura", orden: "acos", dir: "asc", pausadas: "1" }, new Date("2026-10-29T15:00:00-05:00"));
+    expect(leidos.periodo.mes).toBe("2026-10");
+    expect(leidos.orden).toBe("acos");
+    expect(leidos.dir).toBe("asc");
+    expect(leidos.incluirPausadas).toBe(true);
+    expect(hrefPublicidad({ cuenta: "abc", orden: "inversion", dir: "desc" })).toBe("/panel/publicidad?cuenta=abc");
+  });
+
+  it("los vacíos van al final aunque el orden sea descendente", () => {
+    const fila = (nombre: string, gasto: string | null): FilaOrdenable => ({
+      nombre,
+      gasto,
+      ventasPublicidad: null,
+      ventasTotales: null,
+      roas: null,
+      acos: null,
+      tacos: null,
+      cpc: null,
+      clicks: null,
+      impresiones: null,
+      presupuestoDiario: null,
+    });
+    const filas = [fila("B", null), fila("A", "10.00"), fila("C", "30.00")];
+    const ordenadas = [...filas].sort((a, b) => compararOrden(a, b, "inversion", "desc"));
+    expect(ordenadas.map((f) => f.nombre)).toEqual(["C", "A", "B"]);
+  });
+
+  it("los overrides por empresa pisan el defecto y el TACOS de la tienda no se calcula", () => {
+    expect(config.acosMaximo).toBe("0.20");
+    expect(config.diasAprendizaje).toBe(7);
+    expect(config.factorExcelente).toBe("1.2");
+    const propia = obtenerConfigPublicidad("otra", { acosMaximo: "0.15" });
+    expect(propia.acosMaximo).toBe("0.15");
+    expect(propia.topeGastoSinVentas).toBe("0.05");
+    expect(tacosDeLaTienda()).toBeNull();
+  });
+});
+
+describe("formato es-CO", () => {
+  it("dinero sin decimales en tarjeta, ROAS con x, porcentaje con 1 decimal y miles", () => {
+    expect(mostrarDineroTarjeta("1234567.40")).toBe("$ 1.234.567");
+    expect(mostrarDineroTarjeta(null)).toBe("—");
+    expect(mostrarDineroCompacto("447108.61")).toBe("$447.109");
+    expect(mostrarDineroCompacto("0.40")).toBe("$0");
+    expect(mostrarDineroCompacto(null)).toBe("—");
+    expect(textoObjetivoRoas("12.00")).toBe("objetivo 12,00x");
+    expect(textoObjetivoRoas(null)).toBeNull();
+    expect(mostrarRoas("4.25")).toBe("4,25x");
+    expect(mostrarRoas(null)).toBe("—");
+    expect(mostrarFraccion("0.1840")).toBe("18,4 %");
+    expect(mostrarEntero("1234567")).toBe("1.234.567");
+    expect(mostrarEntero(null)).toBe("—");
+  });
+});

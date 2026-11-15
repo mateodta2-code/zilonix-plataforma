@@ -155,6 +155,20 @@
   --kpi-fondo: linear-gradient(180deg, #2b2f36 0%, #1f2228 55%, #16171a 100%);
   --kpi-exito-texto: #4ade80;
   --kpi-peligro-texto: #f87171;
+  /* Fase 1-1 de Despachos — Flex (self_service) resaltado en ámbar
+     (pedido explícito de Mateo, "sin paleta nueva"): hasta esta tarea
+     no existía NINGÚN token ámbar/warning en todo el archivo, solo
+     azul (--acento), verde y rojo. Valor igual al --amber del Zilonix
+     OS actual (components/negocio/MercadoLibreDespachos.js,
+     "2px solid var(--amber,#d9a441)") — mismo criterio de "kpi-*":
+     se usa SOLO dentro de <Tarjeta> (zona oscura siempre), nunca en
+     los dos temas por separado, Tarjeta.module.css lo expone como
+     --advertencia/--advertencia-fuerte/--advertencia-suave. #d9a441
+     sobre el degradado oscuro de --kpi-fondo mide 7.3:1 en el peor
+     caso (misma familia de paradas que arriba) — pasa AA con margen.*/
+  --kpi-advertencia-texto: #d9a441;
+  --kpi-advertencia-fuerte: #f0c674;
+  --kpi-advertencia-suave: rgba(217, 164, 65, 0.14);
   /* Issue #186 — Sharel: "Inicio se ve bien (TarjetaKpi, #156), el
      resto del panel tiene cajas blancas que rompen la línea" — MISMA
      superficie oscura, con nombre genérico (Tarjeta/EstadoVacio/

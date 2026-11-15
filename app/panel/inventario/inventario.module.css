@@ -1,0 +1,242 @@
+/* Issue #186 (Sharel, Refs): este aviso cae justo debajo del
+   encabezado, directo sobre la franja oscura del degradado de fondo
+   (igual que .avisoExito de /panel/conectar-ml, issue #181/#185) — su
+   fondo (--acento-suave) es translúcido, se ve el degradado de atrás
+   igual. --texto normal es negro en claro — ilegible ahí. */
+.avisoSinVincular {
+  padding: 10px 14px;
+  background: var(--acento-suave);
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+}
+
+.enlaceAviso {
+  font-weight: 600;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+  transition: var(--transicion-color);
+}
+
+.enlaceAviso:hover {
+  text-decoration: underline;
+  color: var(--azul-metal-3);
+}
+
+.enlaceAviso:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.botonCrear {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.detalleSku {
+  color: var(--texto-suave);
+}
+
+/* Tarea "marca unificada" + issue #186 (Sharel, Refs): mismo borde
+   azul/plata, línea azul superior y la MISMA superficie oscura que
+   <Tarjeta>/TarjetaKpi (ver app/panel/pedidos/page.module.css, el
+   mismo bloque .filtros exacto) — nunca más "caja blanca" en claro. */
+.filtros {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 20px 0;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+
+  /* color explícito, no solo la variable — mismo motivo que
+     Tarjeta.module.css/ListaFilas.module.css (issue #186): un texto
+     plano sin su propia regla de color no recoge el --texto
+     redefinido abajo si nada vuelve a leerlo en este nivel. */
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+  --exito-texto: var(--kpi-exito-texto);
+  --peligro-texto: var(--kpi-peligro-texto);
+}
+
+.filtros::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}
+
+/* Corrección (fix-ui-claro-sidebar-marca, punto 3): "azul arriba Y
+   abajo" — antes solo el filete de arriba. Mismo filete, espejado. */
+.filtros::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}
+
+.campoBusqueda {
+  min-width: 200px;
+}
+
+.accionesFiltro {
+  display: flex;
+  gap: 8px;
+}
+
+.vacioConAccion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.resumenPaginacion {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.botonesPaginacion {
+  display: flex;
+  gap: 8px;
+}
+
+.volver {
+  align-self: flex-start;
+  margin-top: 16px;
+}
+
+/* Issue #280 — piezas propias de las pantallas de inventario. */
+.subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.avisoError {
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--peligro, #c0392b);
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+  background: var(--acento-suave);
+}
+
+.avisoOk {
+  composes: avisoSinVincular;
+  margin-bottom: 12px;
+}
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.alerta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-boton);
+  background: var(--acento-suave);
+  color: var(--texto-zona-oscura);
+  font-size: 13.5px;
+}
+
+.accionesAlerta {
+  display: flex;
+  gap: 8px;
+}
+
+.gridForms {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 760px) {
+  .gridForms {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tituloSeccion {
+  margin: 0 0 8px 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.filaForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.numero {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.detalle {
+  color: var(--texto-suave);
+  font-size: 12.5px;
+}
+
+.lineasOc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+}

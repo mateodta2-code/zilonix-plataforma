@@ -20,6 +20,7 @@ export {
   PERMISOS_PELIGROSOS,
   permisosDeDueno,
   permisosQueNoPuedeDar,
+  permisosNuevosQueNoPuedeDar,
   PLANTILLAS,
   plantillasQuePuedeDar,
   tienePermiso,

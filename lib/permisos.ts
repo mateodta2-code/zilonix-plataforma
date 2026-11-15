@@ -31,3 +31,21 @@ export async function requierePermiso(
   }
   return miMembresia;
 }
+
+// Issue #126 — algunas cosas las decide solo el Dueño de la empresa (la
+// meta mensual de utilidad, Sharel 24-oct y 13-nov). Tener
+// finanzas.modificar no alcanza: Gerente, Auxiliar y Contador también lo
+// tienen. "Dueño" es el rol que crea crearEmpresaConDueno (lib/empresas.ts):
+// no se edita en /panel/roles ni se da por invitación o en Personas.
+export class SoloDuenoError extends Error {
+  constructor() {
+    super("Solo el Dueño de la empresa puede hacer esto.");
+    this.name = "SoloDuenoError";
+  }
+}
+
+export async function requiereDueno(usuarioId: string, empresaId: string): Promise<MiMembresia> {
+  const miMembresia = await obtenerMiMembresia(usuarioId, empresaId);
+  if (!miMembresia || miMembresia.rolNombre !== "Dueño") throw new SoloDuenoError();
+  return miMembresia;
+}

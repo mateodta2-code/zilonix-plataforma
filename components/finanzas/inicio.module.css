@@ -1,0 +1,367 @@
+/* Issue #143 — bloque de Finanzas de Inicio (BloqueInicioFinanzas.tsx).
+   Paneles con <Tarjeta> del marco: fondo oscuro de zona y borde
+   plateado, y sus tokens de zona oscura para la <Tabla> de adentro
+   (#191). Sin colores nuevos: las series de las gráficas usan tokens de
+   app/globals.css. */
+.bloque {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 28px;
+}
+
+.encabezado {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.titulo {
+  margin: 0;
+  font-size: 17px;
+}
+
+.rango {
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.ayuda {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+/* 6 tarjetas: 3 + 3 en escritorio, 2 en tablet, 1 en celular. */
+.gridKpi {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.gridGraficas {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1100px) {
+  .gridKpi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gridGraficas {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .gridKpi {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Dentro de la zona oscura, las líneas, la pista de las barras y el
+   fondo del anillo usan el borde de zona oscura: el --borde normal de
+   tema claro se vería blanco lavado. */
+.panel {
+  min-width: 0;
+  --borde: var(--borde-zona-oscura);
+}
+
+.subtitulo {
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+
+.numero {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.enlace {
+  align-self: flex-start;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.enlace:hover {
+  text-decoration: underline;
+}
+
+/* Series: plateado y azul de marca, en ciclo. */
+.serie0 {
+  --serie: var(--acento);
+}
+.serie1 {
+  --serie: var(--plata);
+}
+.serie2 {
+  --serie: var(--azul-metal-3);
+}
+.serie3 {
+  --serie: var(--plata-medio);
+}
+.serie4 {
+  --serie: var(--acento-fuerte);
+}
+.serie5 {
+  --serie: var(--plata-oscuro);
+}
+
+/* Participación: anillo + leyenda a la derecha. */
+.participacion {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.dona {
+  width: 168px;
+  height: 168px;
+  flex: none;
+}
+
+.donaFondo {
+  fill: none;
+  stroke: var(--borde);
+  stroke-width: 5;
+}
+
+.donaArco {
+  fill: none;
+  stroke: var(--serie);
+  stroke-width: 5;
+}
+
+.donaTotal {
+  fill: var(--texto);
+  font-size: 8px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.donaEtiqueta {
+  fill: var(--texto-suave);
+  font-size: 3.4px;
+  text-anchor: middle;
+}
+
+.leyenda {
+  flex: 1;
+  min-width: 180px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.leyenda li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.muestra {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+  background: var(--serie);
+}
+
+.leyendaNombre {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Publicidad: barras horizontales relativas al mayor gasto. */
+.barras {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.barraFila {
+  display: grid;
+  grid-template-columns: minmax(90px, 140px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.barraPista {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--borde);
+  overflow: hidden;
+}
+
+.barra {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--serie);
+}
+
+.tablaComparativo td {
+  font-size: 13px;
+}
+
+/* Encabezados de números a la derecha, como sus valores. */
+.tablaComparativo th:not(:first-child) {
+  text-align: right;
+}
+
+/* Inicio (13-nov) — Hoy, Meta del mes y Período con filtro. Mismas
+   superficies de zona oscura; sin colores nuevos. */
+.seccion {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 8 tarjetas del período: 4 + 4 en escritorio. */
+.gridKpi4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1280px) {
+  .gridKpi4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .gridKpi4 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.filtro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.avisoError,
+.avisoExito {
+  margin: 8px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+}
+
+.avisoError {
+  border: 1px solid var(--peligro, #c0392b);
+  background: color-mix(in srgb, var(--peligro, #c0392b) 18%, transparent);
+}
+
+.avisoExito {
+  border: 1px solid var(--exito, #2e7d32);
+  background: color-mix(in srgb, var(--exito, #2e7d32) 18%, transparent);
+}
+
+/* Meta del mes. */
+.metaEncabezado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+}
+
+.metaVacia {
+  margin: 4px 0 12px;
+  font-size: 14px;
+}
+
+.metaCifras {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.metaEtiqueta {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.metaValor {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.metaPista {
+  height: 14px;
+  border-radius: 7px;
+  background: var(--borde);
+  overflow: hidden;
+}
+
+.metaBarra {
+  display: block;
+  height: 100%;
+  border-radius: 7px;
+  background: var(--acento);
+}
+
+.metaLineas {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13.5px;
+  max-width: 720px;
+}
+
+.metaLineas li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--borde);
+}
+
+.metaTotal {
+  font-weight: 700;
+}
+
+.metaForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .metaCifras {
+    grid-template-columns: 1fr;
+  }
+}

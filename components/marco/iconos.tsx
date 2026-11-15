@@ -59,6 +59,28 @@ export function IconoSku(props: IconoProps) {
   );
 }
 
+// Issue #280 — bodega: galpón con portón.
+export function IconoBodegas(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 10 12 5l9 5v9H3z" />
+      <path d="M7 19v-6h10v6" />
+      <path d="M7 16h10" />
+    </Svg>
+  );
+}
+
+// Issue #280 — inventario: cajas apiladas.
+export function IconoInventario(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <rect x="4" y="12" width="7" height="7" rx="1" />
+      <rect x="13" y="12" width="7" height="7" rx="1" />
+      <rect x="8.5" y="5" width="7" height="7" rx="1" />
+    </Svg>
+  );
+}
+
 export function IconoFinanzas(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -119,6 +141,16 @@ export function IconoSoporte(props: IconoProps) {
   );
 }
 
+// Dos globos de conversación — foro de la comunidad.
+export function IconoForo(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 5h11v8H9l-3 3v-3H4z" />
+      <path d="M15 9h5v8h-2v3l-3-3h-5v-4" />
+    </Svg>
+  );
+}
+
 export function IconoConectarMl(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -144,6 +176,19 @@ export function IconoCuenta(props: IconoProps) {
     <Svg {...props}>
       <circle cx="12" cy="8.5" r="3.3" />
       <path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6" />
+    </Svg>
+  );
+}
+
+// Issue #318 — escudo con un check adentro, para "Mis datos
+// personales" (exportar/borrar) en el pie de la barra lateral, junto a
+// "Mi cuenta" — ninguno de los dos es un módulo de negocio de ninguna
+// empresa.
+export function IconoDatosPersonales(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 4 5 7v5.5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" />
+      <path d="M9.3 12.3 11.3 14.3 14.8 10.3" />
     </Svg>
   );
 }
@@ -186,6 +231,16 @@ export function IconoContraer(props: IconoProps) {
   );
 }
 
+// Issue #131 — flecha del acordeón del detalle día a día (apunta a la
+// derecha cerrado; el que la usa la gira 90° al abrir).
+export function IconoChevron(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="m9 6 6 6-6 6" />
+    </Svg>
+  );
+}
+
 // Pedido de Pablo (tarea Investigación ML): lupa + barritas ascendentes
 // adentro, para distinguirla de IconoBuscar (lupa sola, ya usada en la
 // barra superior para el buscador de texto) y de IconoFinanzas (barras
@@ -210,6 +265,28 @@ export function IconoPublicidad(props: IconoProps) {
       <path d="M4 10v4l8 3V7L4 10z" />
       <path d="M12 8.2c2.2.6 3.5 2 3.5 3.8S14.2 15.2 12 15.8" />
       <path d="M6.5 14.2 7.8 18" />
+    </Svg>
+  );
+}
+
+// Rama feat-promociones — etiqueta de precio con un %, distinta de
+// Finanzas (barras) y Publicidad (megáfono).
+export function IconoPromociones(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3h6a1 1 0 0 1 1 1v6l-9.5 9.5a1 1 0 0 1-1.4 0L4 15.4a1 1 0 0 1 0-1.4L12 3z" />
+      <circle cx="16.5" cy="7.5" r="1.1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+// Rama feat-promociones — engranaje simple, para la sección de
+// Configuración (hoy solo "Conexión de IA").
+export function IconoConfiguracion(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="2.6" />
+      <path d="M12 4v2.2M12 17.8V20M4 12h2.2M17.8 12H20M6.3 6.3l1.6 1.6M16.1 16.1l1.6 1.6M6.3 17.7l1.6-1.6M16.1 7.9l1.6-1.6" />
     </Svg>
   );
 }
@@ -266,35 +343,12 @@ export function IconoCheck(props: IconoProps) {
   );
 }
 
-// La portada (#359) nombra estas dos claves. Los módulos de inventario
-// (WMS) y promociones no entran en este release; solo el dibujo, para
-// que la página de venta pueda mostrarlos.
-export function IconoInventario(props: IconoProps) {
+export function IconoCerrarSesion(props: IconoProps) {
   return (
     <Svg {...props}>
-      <rect x="4" y="12" width="7" height="7" rx="1" />
-      <rect x="13" y="12" width="7" height="7" rx="1" />
-      <rect x="8.5" y="5" width="7" height="7" rx="1" />
-    </Svg>
-  );
-}
-
-export function IconoPromociones(props: IconoProps) {
-  return (
-    <Svg {...props}>
-      <path d="M12 3h6a1 1 0 0 1 1 1v6l-9.5 9.5a1 1 0 0 1-1.4 0L4 15.4a1 1 0 0 1 0-1.4L12 3z" />
-      <circle cx="16.5" cy="7.5" r="1.1" fill="currentColor" stroke="none" />
-    </Svg>
-  );
-}
-
-// La sección de garantía de la portada usa este dibujo. El módulo de
-// datos personales (#352) no entra en este release.
-export function IconoDatosPersonales(props: IconoProps) {
-  return (
-    <Svg {...props}>
-      <path d="M12 4 5 7v5.5c0 4.2 3 7 7 8.5 4-1.5 7-4.3 7-8.5V7z" />
-      <path d="M9.3 12.3 11.3 14.3 14.8 10.3" />
+      <path d="M9 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3" />
+      <path d="M14 16l5-4-5-4" />
+      <path d="M19 12H9" />
     </Svg>
   );
 }
@@ -305,20 +359,24 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   despachos: IconoDespachos,
   sku: IconoSku,
   inventario: IconoInventario,
+  bodegas: IconoBodegas,
   investigacion: IconoInvestigacion,
   publicar: IconoPublicar,
   finanzas: IconoFinanzas,
   publicidad: IconoPublicidad,
   promociones: IconoPromociones,
+  configuracion: IconoConfiguracion,
   actividad: IconoActividad,
   personas: IconoPersonas,
   invitar: IconoInvitar,
   roles: IconoRoles,
   soporte: IconoSoporte,
+  foro: IconoForo,
   conectarMl: IconoConectarMl,
   avisosMl: IconoAvisosMl,
   cuenta: IconoCuenta,
   crearEmpresa: IconoCrearEmpresa,
+  datosPersonales: IconoDatosPersonales,
 };
 
 export function iconoDeClave(clave: keyof typeof MAPA_ICONOS, props?: IconoProps) {

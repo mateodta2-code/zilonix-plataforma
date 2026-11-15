@@ -17,6 +17,11 @@
   border-color: var(--exito-texto);
 }
 
+.chip[data-estado="advertencia"] {
+  color: var(--advertencia-fuerte);
+  border-color: var(--advertencia);
+}
+
 .chip[data-estado="peligro"] {
   color: var(--peligro-texto);
   border-color: var(--peligro-texto);

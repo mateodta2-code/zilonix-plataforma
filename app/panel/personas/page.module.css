@@ -1,0 +1,55 @@
+/* Issue #370 — Personas. Las secciones son <Tarjeta> del marco (zona
+   oscura y borde plateado, con sus tokens para la <Tabla> de adentro);
+   los avisos, iguales a los de Finanzas. Sin colores nuevos. */
+.seccion {
+  margin-bottom: 20px;
+  /* Líneas de la tabla con el borde de zona oscura: el --borde normal
+     de tema claro se ve blanco sobre la tarjeta. */
+  --borde: var(--borde-zona-oscura);
+}
+
+.titulo {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.suave {
+  color: var(--texto-suave);
+  font-size: 12.5px;
+}
+
+.ayuda {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.formRol {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.formRol select {
+  width: auto;
+  min-width: 150px;
+}
+
+.avisoError,
+.avisoExito {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: var(--radio-boton);
+  font-size: 13.5px;
+  color: var(--texto-zona-oscura);
+}
+
+.avisoError {
+  border: 1px solid var(--peligro, #c0392b);
+  background: color-mix(in srgb, var(--peligro, #c0392b) 18%, transparent);
+}
+
+.avisoExito {
+  border: 1px solid var(--exito, #2e7d32);
+  background: color-mix(in srgb, var(--exito, #2e7d32) 18%, transparent);
+}

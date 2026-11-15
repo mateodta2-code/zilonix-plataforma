@@ -11,12 +11,19 @@ export type AvisoMl = {
 
 export type ResultadoRecibirAviso = "guardado" | "duplicado" | "cuenta_desconocida";
 
+// Issue "despachos no aparecen solos" (Refs #49) — el webhook necesita
+// el id de la fila para poder reclamarla e intentar procesarla al
+// instante (lib/ml/trabajador.ts, intentarProcesarAvisoAhora). Solo
+// viene presente cuando resultado es "guardado" — un duplicado o una
+// cuenta desconocida no tienen fila propia que procesar.
+export type RecepcionAviso = { resultado: ResultadoRecibirAviso; avisoId: string | null };
+
 // Tarea 2.4 — RECIBE y GUARDA el aviso tal cual llega, rápido (un solo
 // INSERT), para poder responderle 200 a Mercado Libre sin demora. El
 // trabajador que lo procesa de verdad (lib/ml/trabajador.ts) corre
 // aparte, disparado por un cron — marca procesado_ts cuando confirma el
 // dato real contra la API.
-export async function recibirAviso(aviso: AvisoMl): Promise<ResultadoRecibirAviso> {
+export async function recibirAviso(aviso: AvisoMl): Promise<RecepcionAviso> {
   const cuentaIdExterna = String(aviso.user_id);
 
   const empresaId = await dbComoAvisoWebhook(cuentaIdExterna, async (tx) => {
@@ -26,7 +33,16 @@ export async function recibirAviso(aviso: AvisoMl): Promise<ResultadoRecibirAvis
 
   // No es una de nuestras cuentas conectadas (o ya se desconectó) —
   // Mercado Libre igual espera un 200, pero no hay nada que guardar.
-  if (!empresaId) return "cuenta_desconocida";
+  // Issue "ventas nuevas en segundos" (Refs #49), punto 4 — se ignora
+  // de verdad (nunca se guarda, nunca se procesa), pero queda
+  // registrado para poder ver en los logs si alguien le pega a esta
+  // URL pública con un user_id que no es ninguna cuenta nuestra —
+  // nunca el user_id crudo en el mensaje (no hace falta para esto, y
+  // menos tecleado en un log).
+  if (!empresaId) {
+    console.warn(`[lib/ml/avisos] aviso de un user_id desconocido (topic ${aviso.topic}) — ignorado.`);
+    return { resultado: "cuenta_desconocida", avisoId: null };
+  }
 
   const guardadas = await dbComoEmpresa(empresaId, (tx) =>
     tx
@@ -42,7 +58,7 @@ export async function recibirAviso(aviso: AvisoMl): Promise<ResultadoRecibirAvis
       .returning({ id: avisosMl.id })
   );
 
-  return guardadas.length > 0 ? "guardado" : "duplicado";
+  return guardadas.length > 0 ? { resultado: "guardado", avisoId: guardadas[0].id } : { resultado: "duplicado", avisoId: null };
 }
 
 export type ConteoAvisos = { recibidos: number; procesados: number; pendientes: number };
