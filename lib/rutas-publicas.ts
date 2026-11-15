@@ -37,6 +37,9 @@ import { createRouteMatcher } from "@clerk/nextjs/server";
 export const PATRONES_RUTAS_PUBLICAS = [
   "/",
   "/api/version",
+
+  // Configuración de la extensión de Chrome (solo valores no sensibles).
+  "/api/extension/config",
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/iniciar-sesion",
