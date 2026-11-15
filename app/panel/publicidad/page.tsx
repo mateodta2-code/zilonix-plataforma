@@ -249,7 +249,9 @@ function Cuerpo({
   const totalCampanas = tablero.cantidadActivas + tablero.cantidadPausadas;
   const conComparacion = comparar === "anterior";
 
-  const encabezados: EncabezadoTabla[] = COLUMNAS.map((columna) => {
+  const encabezados: EncabezadoTabla[] = COLUMNAS.map((columna): EncabezadoTabla => {
+    // Todo menos el nombre y el diagnóstico es número: título a la derecha.
+    const numerica = columna.clave !== "campana" && columna.clave !== "diagnostico";
     if (columna.clave === "diagnostico") {
       return {
         clave: "diagnostico",
@@ -264,25 +266,35 @@ function Cuerpo({
     if (columna.orden === "presupuesto") {
       return {
         clave: "presupuesto",
+        numerica,
         ariaSort: orden === "presupuesto" ? (dir === "asc" ? "ascending" : "descending") : "none",
         contenido: (
           <span className={styles.thConAyuda}>
-            <LinkOrden hrefBase={hrefBase} columna="presupuesto" orden={orden} dir={dir} lineas={columna.lineas} titulo={columna.titulo} />
+            <LinkOrden hrefBase={hrefBase} columna="presupuesto" orden={orden} dir={dir} lineas={columna.lineas} titulo={columna.titulo} derecha />
             <Ayuda id="ayuda-presupuesto">{AYUDA_PRESUPUESTO}</Ayuda>
           </span>
         ),
       };
     }
     if (!columna.orden) {
-      return { clave: columna.clave, contenido: <RotuloLineas lineas={columna.lineas} titulo={columna.titulo} /> };
+      return { clave: columna.clave, numerica, contenido: <RotuloLineas lineas={columna.lineas} titulo={columna.titulo} derecha={numerica} /> };
     }
     const activa = orden === columna.orden;
     return {
       clave: columna.clave,
       fija: columna.fija,
+      numerica,
       ariaSort: activa ? (dir === "asc" ? "ascending" : "descending") : "none",
       contenido: (
-        <LinkOrden hrefBase={hrefBase} columna={columna.orden} orden={orden} dir={dir} lineas={columna.lineas} titulo={columna.titulo} />
+        <LinkOrden
+          hrefBase={hrefBase}
+          columna={columna.orden}
+          orden={orden}
+          dir={dir}
+          lineas={columna.lineas}
+          titulo={columna.titulo}
+          derecha={numerica}
+        />
       ),
     };
   });
@@ -402,9 +414,9 @@ function Cuerpo({
   );
 }
 
-function RotuloLineas({ lineas, titulo }: { lineas: string[]; titulo?: string }) {
+function RotuloLineas({ lineas, titulo, derecha }: { lineas: string[]; titulo?: string; derecha?: boolean }) {
   return (
-    <span className={styles.rotuloColumna} title={titulo} aria-label={titulo}>
+    <span className={derecha ? `${styles.rotuloColumna} ${styles.alDerecha}` : styles.rotuloColumna} title={titulo} aria-label={titulo}>
       {lineas.map((linea) => (
         <span key={linea}>{linea}</span>
       ))}
@@ -419,6 +431,7 @@ function LinkOrden({
   dir,
   lineas,
   titulo,
+  derecha,
 }: {
   hrefBase: HrefBase;
   columna: ColumnaOrden;
@@ -426,17 +439,18 @@ function LinkOrden({
   dir: DireccionOrden;
   lineas: string[];
   titulo?: string;
+  derecha?: boolean;
 }) {
   const activa = orden === columna;
   const siguiente: DireccionOrden = activa ? (dir === "desc" ? "asc" : "desc") : columna === "campana" ? "asc" : "desc";
   return (
     <Link
       href={hrefPublicidad({ ...hrefBase, orden: columna, dir: siguiente })}
-      className={activa ? `${styles.orden} ${styles.ordenActivo}` : styles.orden}
+      className={[styles.orden, activa ? styles.ordenActivo : "", derecha ? styles.alDerecha : ""].filter(Boolean).join(" ")}
       title={titulo}
       aria-label={titulo}
     >
-      <RotuloLineas lineas={lineas} />
+      <RotuloLineas lineas={lineas} derecha={derecha} />
       {activa ? <span className={styles.flechaOrden}>{dir === "desc" ? "↓" : "↑"}</span> : null}
     </Link>
   );
