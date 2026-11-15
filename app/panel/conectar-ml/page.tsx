@@ -37,7 +37,7 @@ const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
   ml_rechazo: "Mercado Libre no autorizó la conexión.",
   sin_permiso: "No tienes permiso para conectar una cuenta de Mercado Libre.",
   error_desconocido: "No se pudo conectar la cuenta — intenta de nuevo en un momento.",
-  // Conector Falabella (15/11) — pantalla unificada "Conectar marketplace"
+  // Conector Falabella (15/11) — pantalla unificada "Conectar marketplaces"
   // (pedido de Sharel/Pablo, PR #415): prefijo "falabella_" para que un
   // código de error de este canal nunca pise el significado de uno de
   // Mercado Libre (ej. "cuenta_en_otra_empresa" ya significa otra cosa
@@ -93,7 +93,7 @@ export default async function ConectarMlPage({
     const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
     return (
       <>
-        <EncabezadoPagina titulo="Conectar marketplace" />
+        <EncabezadoPagina titulo="Conectar marketplaces" />
         <SinAcceso mensaje={`Tu rol (${miMembresia?.rolNombre ?? "sin rol"}) no tiene acceso a esta pantalla.`} />
       </>
     );
@@ -124,7 +124,7 @@ export default async function ConectarMlPage({
   return (
     <>
       {hayImportacionEnCurso && <meta httpEquiv="refresh" content="5" />}
-      <EncabezadoPagina titulo="Conectar marketplace" />
+      <EncabezadoPagina titulo="Conectar marketplaces" />
 
       {searchParams.conectado && <div className={styles.avisoExito}>Cuenta conectada.</div>}
       {searchParams.conectado_falabella && <div className={styles.avisoExito}>Cuenta de Falabella conectada.</div>}

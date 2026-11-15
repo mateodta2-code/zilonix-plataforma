@@ -20,7 +20,7 @@ export function itemsAdministracion(permisos: { modulo: string; accion: string }
           // Pedido de Sharel/Pablo (15/11): la pantalla ya no es solo
           // Mercado Libre, unifica los dos canales (ver conector
           // Falabella) — ruta y permiso sin cambios, solo la etiqueta.
-          { etiqueta: "Conectar marketplace", href: "/panel/conectar-ml", icono: "conectarMl" as const },
+          { etiqueta: "Conectar marketplaces", href: "/panel/conectar-ml", icono: "conectarMl" as const },
           { etiqueta: "Avisos de Mercado Libre", href: "/panel/avisos-ml", icono: "avisosMl" as const },
         ]
       : []),
