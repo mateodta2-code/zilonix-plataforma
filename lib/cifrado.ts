@@ -47,3 +47,39 @@ export function descifrarToken(token: TokenCifrado): string {
   const textoPlano = Buffer.concat([decipher.update(Buffer.from(token.datos, "base64")), decipher.final()]);
   return textoPlano.toString("utf8");
 }
+
+// Conector Falabella (15/11) — misma mecánica AES-256-GCM con versión de
+// clave que arriba, pero con su propia variable de entorno
+// (`FALABELLA_TOKEN_KEY_V1`): la API Key de Falabella es un secreto de un
+// marketplace distinto al de Mercado Libre, nunca comparte clave de
+// cifrado con `ML_TOKEN_KEY_V1` — si una de las dos se filtra o hay que
+// rotarla, la otra no se ve afectada.
+const CLAVE_ACTUAL_FALABELLA = 1;
+
+function claveFalabellaPorVersion(version: number): Buffer {
+  const variable = `FALABELLA_TOKEN_KEY_V${version}`;
+  const valor = process.env[variable];
+  if (!valor) throw new Error(`Falta la variable de entorno ${variable} para descifrar/cifrar la API Key de Falabella.`);
+  const clave = Buffer.from(valor, "base64");
+  if (clave.length !== 32) throw new Error(`${variable} debe ser una clave de 32 bytes en base64.`);
+  return clave;
+}
+
+export function cifrarTokenFalabella(textoPlano: string): TokenCifrado {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", claveFalabellaPorVersion(CLAVE_ACTUAL_FALABELLA), iv);
+  const datos = Buffer.concat([cipher.update(textoPlano, "utf8"), cipher.final()]);
+  return {
+    version: CLAVE_ACTUAL_FALABELLA,
+    iv: iv.toString("base64"),
+    authTag: cipher.getAuthTag().toString("base64"),
+    datos: datos.toString("base64"),
+  };
+}
+
+export function descifrarTokenFalabella(token: TokenCifrado): string {
+  const decipher = createDecipheriv("aes-256-gcm", claveFalabellaPorVersion(token.version), Buffer.from(token.iv, "base64"));
+  decipher.setAuthTag(Buffer.from(token.authTag, "base64"));
+  const textoPlano = Buffer.concat([decipher.update(Buffer.from(token.datos, "base64")), decipher.final()]);
+  return textoPlano.toString("utf8");
+}

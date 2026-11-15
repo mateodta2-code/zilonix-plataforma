@@ -69,6 +69,8 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/conectar-ml/[cuentaId]/desconectar/page.tsx",
   "app/panel/conectar-ml/[cuentaId]/desconectar/actions.ts",
   "app/panel/conectar-ml/confirmar-transferencia/page.tsx",
+  "app/panel/conectar-falabella/page.tsx",
+  "app/panel/conectar-falabella/actions.ts",
   "app/panel/avisos-ml/page.tsx",
   "app/panel/sku/page.tsx",
   "app/panel/sku/actions.ts",
