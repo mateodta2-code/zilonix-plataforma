@@ -4,6 +4,7 @@ import { pedidosFalabella } from "@/db/schema";
 import { llamarFalabella } from "@/lib/falabella/cliente";
 import { obtenerCredenciales } from "@/lib/falabella/cuentas";
 import { parsearFechaFalabella } from "@/lib/falabella/fechas";
+import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 
 // GetOrders v2.0 / GetOrderItems v1.0 — confirmado contra
 // developers.falabella.com/docs/orders/getordersv2 y
@@ -53,7 +54,10 @@ type Credenciales = { userId: string; apiKey: string; sellerId: string };
 const TAMANO_PAGINA = 100;
 const MAX_PAGINAS = 100;
 
-async function obtenerOrdenes(credenciales: Credenciales, desde: Date): Promise<OrdenFalabella[]> {
+// Tope = MAX_PAGINAS × TAMANO_PAGINA = 10.000 órdenes por sincronización.
+export const TOPE_ORDENES = MAX_PAGINAS * TAMANO_PAGINA;
+
+async function obtenerOrdenes(credenciales: Credenciales, desde: Date): Promise<{ ordenes: OrdenFalabella[]; truncado: boolean }> {
   const todas: OrdenFalabella[] = [];
   for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
     const cuerpo = await llamarFalabella<{ TotalCount?: string | number; Orders?: { Order: OrdenFalabella | OrdenFalabella[] } }>({
@@ -70,10 +74,13 @@ async function obtenerOrdenes(credenciales: Credenciales, desde: Date): Promise<
     const lote = !orden ? [] : Array.isArray(orden) ? orden : [orden];
     todas.push(...lote);
     const total = Number(cuerpo?.TotalCount);
-    if (lote.length < TAMANO_PAGINA) break;
-    if (Number.isFinite(total) && total > 0 && todas.length >= total) break;
+    if (lote.length < TAMANO_PAGINA) return { ordenes: todas, truncado: false };
+    if (Number.isFinite(total) && total > 0 && todas.length >= total) return { ordenes: todas, truncado: false };
   }
-  return todas;
+  // Revisión del PR #415: si se llegó al tope y la última página vino
+  // llena, puede haber más órdenes — se avisa en pantalla, nunca se corta
+  // en silencio.
+  return { ordenes: todas, truncado: true };
 }
 
 async function obtenerItemsOrden(credenciales: Credenciales, orderId: string): Promise<ItemOrdenFalabella[]> {
@@ -93,16 +100,8 @@ async function obtenerItemsOrden(credenciales: Credenciales, orderId: string): P
 const CONCURRENCIA_ITEMS = 5;
 
 async function itemsDeTodas(credenciales: Credenciales, ordenes: OrdenFalabella[]): Promise<Map<string, ItemOrdenFalabella[]>> {
-  const resultado = new Map<string, ItemOrdenFalabella[]>();
-  let siguiente = 0;
-  async function trabajador() {
-    while (siguiente < ordenes.length) {
-      const orden = ordenes[siguiente++];
-      resultado.set(orden.OrderId, await obtenerItemsOrden(credenciales, orden.OrderId));
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCIA_ITEMS, ordenes.length) }, trabajador));
-  return resultado;
+  const items = await conConcurrenciaLimitada(ordenes, CONCURRENCIA_ITEMS, (orden) => obtenerItemsOrden(credenciales, orden.OrderId));
+  return new Map(ordenes.map((orden, i) => [orden.OrderId, items[i]]));
 }
 
 // Importa los pedidos de una cuenta desde una fecha dada — mismo criterio
@@ -115,9 +114,13 @@ async function itemsDeTodas(credenciales: Credenciales, ordenes: OrdenFalabella[
 // un Falabella lento dejaba la transacción y la conexión del pool
 // abiertas. Ahora todo lo de red va primero, por fuera; la transacción
 // solo hace los upsert.
-export async function importarPedidos(empresaId: string, cuentaFalabellaId: string, desde: Date): Promise<{ importados: number }> {
+export async function importarPedidos(
+  empresaId: string,
+  cuentaFalabellaId: string,
+  desde: Date
+): Promise<{ importados: number; truncado: boolean }> {
   const credenciales = await obtenerCredenciales(empresaId, cuentaFalabellaId);
-  const ordenes = await obtenerOrdenes(credenciales, desde);
+  const { ordenes, truncado } = await obtenerOrdenes(credenciales, desde);
   const itemsPorOrden = await itemsDeTodas(credenciales, ordenes);
 
   await dbComoEmpresa(empresaId, async (tx) => {
@@ -144,7 +147,7 @@ export async function importarPedidos(empresaId: string, cuentaFalabellaId: stri
         });
     }
   });
-  return { importados: ordenes.length };
+  return { importados: ordenes.length, truncado };
 }
 
 export async function listarPedidos(empresaId: string, cuentaFalabellaId?: string) {

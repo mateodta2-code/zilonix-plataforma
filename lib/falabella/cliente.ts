@@ -35,6 +35,17 @@ const TIMEOUT_MS = 15_000;
 // User-Agent (revisión del PR #415).
 export const SELLER_ID_VALIDO = /^[A-Za-z0-9_.-]{1,100}$/;
 
+// Revisión del PR #415: "Falabella no respondió bien" (5xx, algo que no
+// es JSON, timeout, red caída) es un problema distinto de "Falabella
+// rechazó las credenciales" — nunca se le dice al usuario que su key es
+// mala cuando el que falló fue Falabella.
+export class FalabellaNoDisponibleError extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = "FalabellaNoDisponibleError";
+  }
+}
+
 export class FalabellaApiError extends Error {
   codigo: string;
   constructor(codigo: string, mensaje: string) {
@@ -44,9 +55,11 @@ export class FalabellaApiError extends Error {
   }
 }
 
-// RFC 3986: encodeURIComponent no escapa !'()* — Falabella exige que sí
-// se escapen (confirmado contra el ejemplo de referencia de la
-// documentación, que da un vector de firma esperado para comprobarlo).
+// RFC 3986: encodeURIComponent no escapa !'()*, y la documentación de
+// firma de Falabella (/reference/signing-requests) pide codificar según
+// RFC 3986. OJO: todavía NO se comprobó contra el vector oficial de firma
+// de la documentación (queda pendiente, ver PR #415) — solo contra el
+// texto de la especificación.
 function codificarRfc3986(valor: string): string {
   return encodeURIComponent(valor).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 }
@@ -91,7 +104,9 @@ export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, ver
   // dejaba la petición colgada sin límite. 15 s por llamada, y sin seguir
   // redirecciones — la BASE_URL es fija y una redirección nunca es
   // esperada (evita que la firma y el User-Agent viajen a otro host).
-  const res = await fetch(`${BASE_URL}?${query.toString()}`, {
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}?${query.toString()}`, {
     method: "GET",
     headers: {
       // Formato exigido por la documentación: SELLER_ID/TECNOLOGIA/VERSION/TIPO_INTEGRACION/CODIGO_PAIS
@@ -100,18 +115,25 @@ export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, ver
     signal: AbortSignal.timeout(TIMEOUT_MS),
     redirect: "error",
     cache: "no-store",
-  });
+    });
+  } catch (error) {
+    // Timeout (AbortSignal), redirección rechazada o red caída.
+    throw new FalabellaNoDisponibleError(`No se pudo hablar con Falabella: ${error instanceof Error ? error.name : "error de red"}.`);
+  }
 
+  if (res.status >= 500) {
+    throw new FalabellaNoDisponibleError(`Falabella respondió ${res.status}.`);
+  }
   const cuerpo = await res.json().catch(() => null);
-  if (!cuerpo) {
-    throw new FalabellaApiError("respuesta_invalida", `Falabella respondió ${res.status} sin cuerpo JSON legible.`);
+  if (!cuerpo || typeof cuerpo !== "object") {
+    throw new FalabellaNoDisponibleError(`Falabella respondió ${res.status} sin cuerpo JSON legible.`);
   }
   if (cuerpo.ErrorResponse) {
     const err = cuerpo.ErrorResponse;
     throw new FalabellaApiError(String(err.ErrorCode ?? "desconocido"), String(err.ErrorMessage ?? "Error desconocido de Falabella."));
   }
   if (!cuerpo.SuccessResponse) {
-    throw new FalabellaApiError("respuesta_invalida", `Falabella respondió ${res.status} sin SuccessResponse ni ErrorResponse.`);
+    throw new FalabellaNoDisponibleError( `Falabella respondió ${res.status} sin SuccessResponse ni ErrorResponse.`);
   }
   return cuerpo.SuccessResponse.Body as T;
 }
@@ -121,9 +143,9 @@ export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, ver
 // "apartar" el correo de otro vendedor con una key inventada. Ahora,
 // antes de guardar, se hace la llamada firmada más barata posible
 // (GetOrders con Limit=1): si Falabella la acepta, la API Key es de
-// verdad de ese UserID. Lanza FalabellaApiError si Falabella la rechaza;
-// cualquier otro error (timeout, red) se propaga tal cual para no
-// confundir "Falabella caído" con "credenciales malas".
+// verdad de ese UserID. Lanza FalabellaApiError si Falabella la rechaza
+// y FalabellaNoDisponibleError si Falabella falla (5xx, no-JSON, timeout)
+// — para no confundir "Falabella caído" con "credenciales malas".
 export async function verificarCredenciales(credenciales: { userId: string; apiKey: string; sellerId: string }): Promise<void> {
   await llamarFalabella({
     ...credenciales,

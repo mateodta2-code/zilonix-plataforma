@@ -1,5 +1,5 @@
 {
-  "id": "1cd09951-626b-4aae-8076-7c32fdd0568b",
+  "id": "7b86a909-5bb1-4bb2-a00c-e71281a50036",
   "prevId": "ef9173bc-087c-463f-b1da-ff014f9a2d47",
   "version": "7",
   "dialect": "postgresql",
@@ -3649,6 +3649,21 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pedidos_falabella_cuenta_idx": {
+          "name": "pedidos_falabella_cuenta_idx",
+          "columns": [
+            {
+              "expression": "cuenta_falabella_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}

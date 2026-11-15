@@ -20,8 +20,15 @@ export type TokenCifrado = {
   datos: string;
 };
 
-function clavePorVersion(version: number): Buffer {
-  const variable = `ML_TOKEN_KEY_V${version}`;
+// Revisión del PR #415: un solo helper AES-256-GCM, parametrizado por el
+// prefijo de la variable de entorno. Cada marketplace usa su PROPIA clave
+// (ML_TOKEN_KEY_Vn, FALABELLA_TOKEN_KEY_Vn): si una se filtra o hay que
+// rotarla, la otra no se ve afectada. Formato de cada clave: 32 bytes
+// aleatorios en base64 (ej. `openssl rand -base64 32`).
+type PrefijoClave = "ML_TOKEN_KEY" | "FALABELLA_TOKEN_KEY";
+
+function clavePorVersion(prefijo: PrefijoClave, version: number): Buffer {
+  const variable = `${prefijo}_V${version}`;
   const valor = process.env[variable];
   if (!valor) throw new Error(`Falta la variable de entorno ${variable} para descifrar/cifrar tokens.`);
   const clave = Buffer.from(valor, "base64");
@@ -29,9 +36,9 @@ function clavePorVersion(version: number): Buffer {
   return clave;
 }
 
-export function cifrarToken(textoPlano: string): TokenCifrado {
+function cifrarCon(prefijo: PrefijoClave, textoPlano: string): TokenCifrado {
   const iv = randomBytes(12); // GCM: 12 bytes es el tamaño recomendado
-  const cipher = createCipheriv("aes-256-gcm", clavePorVersion(CLAVE_ACTUAL), iv);
+  const cipher = createCipheriv("aes-256-gcm", clavePorVersion(prefijo, CLAVE_ACTUAL), iv);
   const datos = Buffer.concat([cipher.update(textoPlano, "utf8"), cipher.final()]);
   return {
     version: CLAVE_ACTUAL,
@@ -41,45 +48,26 @@ export function cifrarToken(textoPlano: string): TokenCifrado {
   };
 }
 
-export function descifrarToken(token: TokenCifrado): string {
-  const decipher = createDecipheriv("aes-256-gcm", clavePorVersion(token.version), Buffer.from(token.iv, "base64"));
+function descifrarCon(prefijo: PrefijoClave, token: TokenCifrado): string {
+  const decipher = createDecipheriv("aes-256-gcm", clavePorVersion(prefijo, token.version), Buffer.from(token.iv, "base64"));
   decipher.setAuthTag(Buffer.from(token.authTag, "base64"));
   const textoPlano = Buffer.concat([decipher.update(Buffer.from(token.datos, "base64")), decipher.final()]);
   return textoPlano.toString("utf8");
 }
 
-// Conector Falabella (15/11) — misma mecánica AES-256-GCM con versión de
-// clave que arriba, pero con su propia variable de entorno
-// (`FALABELLA_TOKEN_KEY_V1`): la API Key de Falabella es un secreto de un
-// marketplace distinto al de Mercado Libre, nunca comparte clave de
-// cifrado con `ML_TOKEN_KEY_V1` — si una de las dos se filtra o hay que
-// rotarla, la otra no se ve afectada.
-const CLAVE_ACTUAL_FALABELLA = 1;
-
-function claveFalabellaPorVersion(version: number): Buffer {
-  const variable = `FALABELLA_TOKEN_KEY_V${version}`;
-  const valor = process.env[variable];
-  if (!valor) throw new Error(`Falta la variable de entorno ${variable} para descifrar/cifrar la API Key de Falabella.`);
-  const clave = Buffer.from(valor, "base64");
-  if (clave.length !== 32) throw new Error(`${variable} debe ser una clave de 32 bytes en base64.`);
-  return clave;
+export function cifrarToken(textoPlano: string): TokenCifrado {
+  return cifrarCon("ML_TOKEN_KEY", textoPlano);
 }
 
+export function descifrarToken(token: TokenCifrado): string {
+  return descifrarCon("ML_TOKEN_KEY", token);
+}
+
+// Conector Falabella: misma mecánica, clave propia FALABELLA_TOKEN_KEY_Vn.
 export function cifrarTokenFalabella(textoPlano: string): TokenCifrado {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", claveFalabellaPorVersion(CLAVE_ACTUAL_FALABELLA), iv);
-  const datos = Buffer.concat([cipher.update(textoPlano, "utf8"), cipher.final()]);
-  return {
-    version: CLAVE_ACTUAL_FALABELLA,
-    iv: iv.toString("base64"),
-    authTag: cipher.getAuthTag().toString("base64"),
-    datos: datos.toString("base64"),
-  };
+  return cifrarCon("FALABELLA_TOKEN_KEY", textoPlano);
 }
 
 export function descifrarTokenFalabella(token: TokenCifrado): string {
-  const decipher = createDecipheriv("aes-256-gcm", claveFalabellaPorVersion(token.version), Buffer.from(token.iv, "base64"));
-  decipher.setAuthTag(Buffer.from(token.authTag, "base64"));
-  const textoPlano = Buffer.concat([decipher.update(Buffer.from(token.datos, "base64")), decipher.final()]);
-  return textoPlano.toString("utf8");
+  return descifrarCon("FALABELLA_TOKEN_KEY", token);
 }

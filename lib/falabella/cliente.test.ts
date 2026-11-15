@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FalabellaApiError, firmarSolicitud, verificarCredenciales } from "./cliente";
+import { FalabellaApiError, FalabellaNoDisponibleError, firmarSolicitud, verificarCredenciales } from "./cliente";
 
 // No se usa el vector de referencia de la documentación de Falabella
 // (PHP, Timestamp=2015-07-01T11:11:11+00:00) porque el texto capturado de
@@ -60,7 +60,19 @@ describe("llamarFalabella / verificarCredenciales", () => {
 
   it("una respuesta sin SuccessResponse ni ErrorResponse no se toma como éxito", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuestaJson({})));
-    await expect(verificarCredenciales(credenciales)).rejects.toBeInstanceOf(FalabellaApiError);
+    await expect(verificarCredenciales(credenciales)).rejects.toBeInstanceOf(FalabellaNoDisponibleError);
+  });
+
+  it("un 5xx o algo que no es JSON es 'Falabella no disponible', nunca 'credenciales inválidas'", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>502 Bad Gateway</html>", { status: 502 })));
+    await expect(verificarCredenciales(credenciales)).rejects.toBeInstanceOf(FalabellaNoDisponibleError);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>mantenimiento</html>", { status: 200 })));
+    await expect(verificarCredenciales(credenciales)).rejects.toBeInstanceOf(FalabellaNoDisponibleError);
+  });
+
+  it("un timeout o error de red también es 'Falabella no disponible'", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("tiempo agotado", "TimeoutError")));
+    await expect(verificarCredenciales(credenciales)).rejects.toBeInstanceOf(FalabellaNoDisponibleError);
   });
 
   it("cada llamada lleva timeout y no sigue redirecciones", async () => {

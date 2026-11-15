@@ -1,6 +1,6 @@
 import { randomBytes } from "crypto";
 import { beforeEach, describe, expect, it } from "vitest";
-import { cifrarToken, descifrarToken } from "./cifrado";
+import { cifrarToken, cifrarTokenFalabella, descifrarToken, descifrarTokenFalabella } from "./cifrado";
 
 function claveDePrueba(): string {
   return randomBytes(32).toString("base64");
@@ -45,5 +45,29 @@ describe("cifrado de tokens (tarea 2.3)", () => {
     token.version = 2;
     process.env.ML_TOKEN_KEY_V2 = claveDePrueba(); // clave distinta a la v1
     expect(() => descifrarToken(token)).toThrow();
+  });
+});
+
+describe("cifrado de la API Key de Falabella (PR #415)", () => {
+  beforeEach(() => {
+    process.env.ML_TOKEN_KEY_V1 = claveDePrueba();
+    process.env.FALABELLA_TOKEN_KEY_V1 = claveDePrueba();
+  });
+
+  it("cifra y descifra con FALABELLA_TOKEN_KEY_V1", () => {
+    const token = cifrarTokenFalabella("api-key-de-falabella");
+    expect(token.datos).not.toContain("api-key");
+    expect(descifrarTokenFalabella(token)).toBe("api-key-de-falabella");
+  });
+
+  it("nunca usa la clave de Mercado Libre: lo cifrado para Falabella no se descifra con ML_TOKEN_KEY_V1", () => {
+    const token = cifrarTokenFalabella("api-key-de-falabella");
+    expect(() => descifrarToken(token)).toThrow();
+  });
+
+  it("sin FALABELLA_TOKEN_KEY_V1 falla, aunque exista la clave de ML", () => {
+    delete process.env.FALABELLA_TOKEN_KEY_V1;
+    expect(() => cifrarTokenFalabella("algo")).toThrow(/FALABELLA_TOKEN_KEY_V1/);
+    expect(() => cifrarToken("algo")).not.toThrow();
   });
 });

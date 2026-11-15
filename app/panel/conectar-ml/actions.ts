@@ -10,7 +10,7 @@ import { ConectorFalabella } from "@/lib/conectores/falabella";
 import { CuentaFalabellaDeOtraEmpresaError } from "@/lib/falabella/cuentas";
 import * as cuentasFalabella from "@/lib/falabella/cuentas";
 import * as pedidosFalabella from "@/lib/falabella/pedidos";
-import { FalabellaApiError, SELLER_ID_VALIDO } from "@/lib/falabella/cliente";
+import { FalabellaApiError, FalabellaNoDisponibleError, SELLER_ID_VALIDO } from "@/lib/falabella/cliente";
 
 // Revisión del PR #415: validación en el servidor, no solo el
 // `type="email"` del navegador (que cualquiera se salta).
@@ -70,6 +70,11 @@ export async function conectarCuentaFalabella(formData: FormData) {
     if (error instanceof CuentaFalabellaDeOtraEmpresaError) {
       redirect("/panel/conectar-ml?error=falabella_cuenta_en_otra_empresa");
     }
+    // Falabella falló (5xx, no-JSON, timeout): no es culpa de la key.
+    if (error instanceof FalabellaNoDisponibleError) {
+      console.warn("[conectar-ml/falabella] Falabella no disponible al verificar:", error.message);
+      redirect("/panel/conectar-ml?error=falabella_no_disponible");
+    }
     // Falabella rechazó la llamada de prueba firmada con esa key
     // (bloqueante 1 de la revisión del PR #415) — no se guardó nada.
     if (error instanceof FalabellaApiError) {
@@ -93,9 +98,14 @@ export async function sincronizarPedidosFalabella(cuentaId: string) {
   // Últimos 60 días — mismo criterio que la importación inicial de
   // Mercado Libre (tarea 2.5).
   const desde = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  let truncado = false;
   try {
-    await pedidosFalabella.importarPedidos(empresa.id, cuentaId, desde);
+    ({ truncado } = await pedidosFalabella.importarPedidos(empresa.id, cuentaId, desde));
   } catch (error) {
+    if (error instanceof FalabellaNoDisponibleError) {
+      console.warn("[conectar-ml/falabella] Falabella no disponible al sincronizar:", error.message);
+      redirect("/panel/conectar-ml?error=falabella_no_disponible");
+    }
     // Nunca el texto crudo a la URL (mismo criterio de arriba). El
     // código de Falabella sí va al log: es lo que hace falta para
     // confirmar los parámetros de GetOrders con la primera cuenta real.
@@ -106,6 +116,8 @@ export async function sincronizarPedidosFalabella(cuentaId: string) {
     redirect("/panel/conectar-ml?error=falabella_sincronizar_fallo");
   }
   revalidatePath("/panel/conectar-ml");
+  // Revisión del PR #415: llegar al tope de órdenes se avisa en pantalla.
+  if (truncado) redirect("/panel/conectar-ml?aviso=falabella_tope_ordenes");
 }
 
 export async function desconectarCuentaFalabella(cuentaId: string) {

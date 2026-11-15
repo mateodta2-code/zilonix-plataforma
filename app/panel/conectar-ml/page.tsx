@@ -9,7 +9,7 @@ import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { obtenerUltimaImportacion } from "@/lib/ml/importacion";
 import { datosSitioMl } from "@/lib/ml/sitios";
 import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
-import { contarPedidosPorCuenta as contarPedidosFalabella } from "@/lib/falabella/pedidos";
+import { contarPedidosPorCuenta as contarPedidosFalabella, TOPE_ORDENES as TOPE_ORDENES_FALABELLA } from "@/lib/falabella/pedidos";
 import { conectarCuentaFalabella, desconectarCuentaFalabella, sincronizarPedidosFalabella } from "./actions";
 import { BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -46,6 +46,7 @@ const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
   falabella_cuenta_en_otra_empresa: "Esta cuenta de Falabella ya está conectada a otra empresa en Zilonix. Desconéctala allá primero o escríbenos a soporte.",
   falabella_datos_invalidos: "Revisa los datos: el UserID debe ser un correo válido y el Seller ID solo puede tener letras, números, «_», «.» y «-».",
   falabella_credenciales_invalidas: "Falabella no aceptó esas credenciales. Revisa que el UserID, la API Key y el Seller ID sean los de tu cuenta en Seller Center.",
+  falabella_no_disponible: "Falabella no respondió bien en este momento (puede estar caído o lento). Tus datos no se cambiaron; intenta de nuevo en unos minutos.",
   falabella_sincronizar_fallo: "No se pudieron traer los pedidos de Falabella. Intenta de nuevo en un momento.",
   falabella_error_desconocido: "No se pudo conectar la cuenta de Falabella — revisa el UserID y la API Key e intenta de nuevo.",
 };
@@ -75,7 +76,7 @@ async function tienePermiso(...args: Parameters<typeof requierePermiso>): Promis
 export default async function ConectarMlPage({
   searchParams,
 }: {
-  searchParams: { conectado?: string; conectado_falabella?: string; error?: string };
+  searchParams: { conectado?: string; conectado_falabella?: string; error?: string; aviso?: string };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -127,6 +128,12 @@ export default async function ConectarMlPage({
 
       {searchParams.conectado && <div className={styles.avisoExito}>Cuenta conectada.</div>}
       {searchParams.conectado_falabella && <div className={styles.avisoExito}>Cuenta de Falabella conectada.</div>}
+      {searchParams.aviso === "falabella_tope_ordenes" && (
+        <div className={styles.avisoInfo}>
+          Se importaron los primeros {TOPE_ORDENES_FALABELLA.toLocaleString("es-CO")} pedidos de Falabella de los últimos 60 días, que es el
+          máximo por sincronización. Puede haber más pedidos que todavía no se trajeron.
+        </div>
+      )}
       {searchParams.error && (
         // Regla de UX #2 del plan técnico (evidencia real contra
         // Multivende: si el canje del code por el token falla, se

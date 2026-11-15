@@ -41,4 +41,5 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "cuentas_falabella_user_id_unica" ON "cuentas_falabella" USING btree ("user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "pedidos_falabella_empresa_pedido_externo_unico" ON "pedidos_falabella" USING btree ("empresa_id","pedido_id_externo");
+CREATE UNIQUE INDEX IF NOT EXISTS "pedidos_falabella_empresa_pedido_externo_unico" ON "pedidos_falabella" USING btree ("empresa_id","pedido_id_externo");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "pedidos_falabella_cuenta_idx" ON "pedidos_falabella" USING btree ("cuenta_falabella_id");

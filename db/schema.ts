@@ -620,6 +620,8 @@ export const pedidosFalabella = pgTable(
   },
   (t) => ({
     pedidoUnico: uniqueIndex("pedidos_falabella_empresa_pedido_externo_unico").on(t.empresaId, t.pedidoIdExterno),
+    // Revisión del PR #415: la pantalla cuenta y filtra pedidos por cuenta.
+    porCuenta: index("pedidos_falabella_cuenta_idx").on(t.cuentaFalabellaId),
   })
 );
 
