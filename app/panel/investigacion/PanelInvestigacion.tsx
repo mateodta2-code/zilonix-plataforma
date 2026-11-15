@@ -897,11 +897,6 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
 
       {!bloques.length ? <p className={styles.notaInsignia}>Todavía no hay ningún bloque — analizá un término para empezar.</p> : null}
 
-      {bloques.length ? (
-        <details className={styles.bloque}>
-          <summary className={styles.tituloSeccion} style={{ cursor: "pointer" }}>
-            Ver detalle por término
-          </summary>
       {bloques.map((bloque) => {
         const esMl = bloque.plataforma.startsWith("Mercado Libre");
         const criterioBloque = ordenDeBloque(bloque.id);
@@ -1192,8 +1187,6 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
           </div>
         );
       })}
-        </details>
-      ) : null}
     </>
   );
 }
