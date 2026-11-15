@@ -4,10 +4,14 @@ import { clasificarSenalVentas, linkHttpSeguro, type Bloque, type ProductoListad
 import { datosSitioMl, formatearMoneda, formatearNumero, siteIdDeHost } from "@/lib/ml/sitios";
 import {
   COLUMNA_ORDEN_DEFECTO,
+  concentracionTop3,
   construirFilasNicho,
   direccionInicial,
+  EXPLICACION_PUNTAJE,
   formatearAntiguedad,
   ordenarFilasNicho,
+  precioRecomendado,
+  puntajeNicho,
   totalesNicho,
   type ColumnaNicho,
   type DireccionOrden,
@@ -27,7 +31,8 @@ import { respuestaSiSinPermiso, resolverSesionYEmpresa } from "../../ml/promocio
 // la respuesta no es legible desde otro sitio sin CORS.
 export const dynamic = "force-dynamic";
 
-const MAX_PRODUCTOS = 60;
+// La extensión lee hasta 3 páginas del listado; el servidor valida el máximo.
+const MAX_PRODUCTOS = 150;
 const COLUMNAS: readonly ColumnaNicho[] = ["orden", "foto", "titulo", "precio", "origen", "antiguedad", "ventasMes", "factMes"];
 
 type Wire = Record<string, unknown>;
@@ -56,7 +61,9 @@ function aProducto(w: Wire): ProductoListado | null {
     esPrime: null,
     esEnvioGratis: null,
     calificacion: null,
-    vendedor: null,
+    vendedor: texto(w.vendedor, 120),
+    internacional: typeof w.internacional === "boolean" ? w.internacional : null,
+    tiendaOficial: typeof w.tiendaOficial === "boolean" ? w.tiendaOficial : null,
     link: linkHttpSeguro(texto(w.link, 800)),
   };
 }
@@ -102,6 +109,9 @@ export async function POST(request: Request) {
   const filas = ordenarFilasNicho(construirFilasNicho([bloque], ahora, null).map((f) => ({ ...f, siteId })), columna, direccion);
   const totales = totalesNicho(filas);
   const sitio = datosSitioMl(siteId);
+  const puntaje = puntajeNicho(filas);
+  const concentracion = concentracionTop3(filas);
+  const recomendado = precioRecomendado(filas);
   const moneda = (n: number | null, s: string) => (n != null ? formatearMoneda(n, s) : null);
   const numero = (n: number | null, s: string) => (n != null ? formatearNumero(Math.round(n), datosSitioMl(s).idioma) : null);
 
@@ -115,13 +125,23 @@ export async function POST(request: Request) {
       factMes: moneda(totales.factMes, siteId),
       aviso: totales.hayOtrosPaises ? `Los totales suman solo ${datosSitioMl(totales.siteId).nombre}.` : null,
     },
+    analisis: {
+      puntaje: puntaje ? { valor: puntaje.valor, frase: puntaje.frase, explicacion: EXPLICACION_PUNTAJE } : null,
+      concentracion: concentracion
+        ? { porcentaje: concentracion.porcentaje, aviso: concentracion.concentrado ? "Nicho concentrado en pocos vendedores" : null }
+        : null,
+      precioRecomendado: recomendado
+        ? { desde: formatearMoneda(recomendado.desde, siteId), hasta: formatearMoneda(recomendado.hasta, siteId), texto: `Precio donde más se vende: ${formatearMoneda(recomendado.desde, siteId)} a ${formatearMoneda(recomendado.hasta, siteId)}` }
+        : null,
+      nota: "Ventas/mes, antigüedad y facturación son estimados",
+    },
     filas: filas.map((f, i) => ({
       n: i + 1,
       foto: f.foto,
       titulo: f.titulo,
       link: f.link,
       precio: formatearMoneda(f.precio, siteId),
-      esFull: f.origen === "Full",
+      esFull: f.esFull,
       origen: f.origen,
       antiguedad: f.antiguedadDias != null ? formatearAntiguedad(f.antiguedadDias, sitio.idioma) : null,
       ventasMes: numero(f.ventasMes, siteId),
