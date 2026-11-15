@@ -260,6 +260,45 @@ export function diasParaEstabilizar(diasTranscurridos: number, diasAprendizaje: 
   return restantes < 1 ? 1 : restantes;
 }
 
+// ROAS con el que la publicidad se come justo el margen: 1 / margen.
+// Con margen 0,30 da 3,33. null si el margen no es positivo.
+export function roasEquilibrio(margen: string): string | null {
+  const m = unidades(margen, ESCALA);
+  if (m <= CERO) return null;
+  return dividir(FACTOR_ESCALA, m, 2);
+}
+
+export type EstadoRentabilidad = "rentable" | "margen_bajo" | "pierde";
+
+export type Rentabilidad = {
+  // Fracción (0.2190 = 21,9 %). null si gastó sin ninguna venta: no hay
+  // ACOS, y la publicidad se comió todo lo invertido.
+  margenPostAds: string | null;
+  estado: EstadoRentabilidad;
+};
+
+// Margen después de publicidad = margen del producto − ACOS. Rentable
+// si queda al menos el mínimo, margen bajo si queda menos pero no
+// negativo, pierde si la publicidad cuesta más que el margen. null si
+// no gastó (no hay nada que juzgar). Sin float.
+export function rentabilidadCampana(entrada: {
+  gasto: string | null;
+  ventasPublicidad: string | null;
+  margen: string;
+  minimo: string;
+}): Rentabilidad | null {
+  if (entrada.gasto === null || centavos(entrada.gasto) <= CERO) return null;
+  if (entrada.ventasPublicidad === null || centavos(entrada.ventasPublicidad) <= CERO) {
+    return { margenPostAds: null, estado: "pierde" };
+  }
+  const acos = dividir(centavos(entrada.gasto), centavos(entrada.ventasPublicidad), ESCALA);
+  if (acos === null) return null;
+  const post = unidades(entrada.margen, ESCALA) - unidades(acos, ESCALA);
+  const margenPostAds = dividir(post, FACTOR_ESCALA, ESCALA);
+  const estado: EstadoRentabilidad = post < CERO ? "pierde" : post < unidades(entrada.minimo, ESCALA) ? "margen_bajo" : "rentable";
+  return { margenPostAds, estado };
+}
+
 export function porcentajeDeRazon(numerador: string | null, denominador: string | null): string | null {
   if (numerador === null || denominador === null) return null;
   const n = unidades(numerador, ESCALA);

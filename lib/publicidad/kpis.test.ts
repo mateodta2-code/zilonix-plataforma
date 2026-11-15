@@ -561,3 +561,29 @@ describe("formato es-CO", () => {
     expect(mostrarEntero(null)).toBe("—");
   });
 });
+
+describe("rentabilidad por margen (14-nov)", () => {
+  it("el ROAS de equilibrio es 1 / margen", async () => {
+    const { roasEquilibrio } = await import("@/lib/publicidad/kpis");
+    expect(roasEquilibrio("0.30")).toBe("3.33");
+    expect(roasEquilibrio("0.25")).toBe("4.00");
+    expect(roasEquilibrio("0")).toBeNull();
+  });
+
+  it("margen después de Ads = margen − ACOS; rentable desde el mínimo, como el tablero de referencia", async () => {
+    const { rentabilidadCampana } = await import("@/lib/publicidad/kpis");
+    const con = (gasto: string, ventas: string | null) => rentabilidadCampana({ gasto, ventasPublicidad: ventas, margen: "0.30", minimo: "0.20" });
+    // vendidos 06-08: ACOS 8,1 % -> 21,9 % rentable
+    expect(con("81.00", "1000.00")).toEqual({ margenPostAds: "0.2190", estado: "rentable" });
+    // suplementos: ACOS 10,5 % -> 19,5 % margen bajo
+    expect(con("105.00", "1000.00")).toEqual({ margenPostAds: "0.1950", estado: "margen_bajo" });
+    // justo en el mínimo
+    expect(con("100.00", "1000.00")?.estado).toBe("rentable");
+    // ACOS 35 % > margen 30 %: pierde
+    expect(con("350.00", "1000.00")).toEqual({ margenPostAds: "-0.0500", estado: "pierde" });
+    // gastó sin vender: pierde, sin margen que mostrar
+    expect(con("50.00", "0.00")).toEqual({ margenPostAds: null, estado: "pierde" });
+    // sin gasto: nada que juzgar
+    expect(rentabilidadCampana({ gasto: null, ventasPublicidad: "10.00", margen: "0.30", minimo: "0.20" })).toBeNull();
+  });
+});

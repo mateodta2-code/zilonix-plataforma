@@ -25,6 +25,12 @@ export const FACTOR_ROAS_HOLGADO = "1.3";
 // vende bien: se queda donde está. No se mueve a enfriamiento.
 export const FACTOR_ROAS_VENDE_BIEN = "1.5";
 export const PERIODO_POR_DEFECTO = "mes_en_curso" as const;
+// Rentabilidad (14-nov, como el tablero de referencia de Melisa):
+// margen del producto ANTES de publicidad, y el mínimo que tiene que
+// quedar DESPUÉS de pagarla. Fijos por ahora: no hay tabla de ajustes.
+// Con 30 %, el ROAS de equilibrio es 1 / 0,30 = 3,33x.
+export const MARGEN_PRODUCTO = "0.30";
+export const MARGEN_MINIMO_POST_ADS = "0.20";
 
 // Campaña a la que la pantalla sugiere pasar un anuncio que gasta y no
 // vende. ANTÁRTIDA es el paso siguiente, con presupuesto mínimo y ACOS
@@ -54,6 +60,8 @@ export type ConfigPublicidad = {
   diasAprendizaje: number;
   factorExcelente: string;
   periodoPorDefecto: typeof PERIODO_POR_DEFECTO;
+  margenProducto: string;
+  margenMinimoPostAds: string;
 };
 
 const DEFECTO: ConfigPublicidad = {
@@ -62,6 +70,8 @@ const DEFECTO: ConfigPublicidad = {
   diasAprendizaje: DIAS_APRENDIZAJE,
   factorExcelente: FACTOR_EXCELENTE,
   periodoPorDefecto: PERIODO_POR_DEFECTO,
+  margenProducto: MARGEN_PRODUCTO,
+  margenMinimoPostAds: MARGEN_MINIMO_POST_ADS,
 };
 
 // Hoy no existe una tabla de ajustes de publicidad.

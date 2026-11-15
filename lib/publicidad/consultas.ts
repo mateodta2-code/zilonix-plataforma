@@ -94,6 +94,9 @@ export type TableroPublicidad = {
   serieDiaria: PuntoDiario[];
   presupuestoDiarioTotal: string | null;
   nombresCampanas: string[];
+  // Margen del producto y mínimo después de Ads (config). La vista
+  // calcula con esto la rentabilidad de cada campaña.
+  rentabilidad: { margen: string; minimo: string };
 };
 
 type FilaSuma = {
@@ -493,6 +496,7 @@ export async function consultarTableroPublicidad(
       cantidadPausadas: calculadas.filter((c) => !c.activa).length,
       diasRango: diasEntreInclusive(periodo.desde, periodo.hasta),
       presupuestoDiarioTotal: sumarMontos(calculadas.filter((c) => c.activa).map((c) => c.presupuestoDiario)),
+      rentabilidad: { margen: config.margenProducto, minimo: config.margenMinimoPostAds },
       serieDiaria: armarSerieDiaria(
         periodo.desde,
         periodo.hasta,

@@ -12,6 +12,9 @@ import {
   gastaSinVender,
   gastoPositivo,
   ordenPorInversionDesc,
+  rentabilidadCampana,
+  roasEquilibrio,
+  type EstadoRentabilidad,
   tieneVentaAtribuida,
   usoPresupuestoDiario,
   variacionPorcentual,
@@ -400,4 +403,62 @@ export function serieParaGrafico(puntos: readonly PuntoDiario[]): PuntoGrafico[]
     impresiones: aNumero(punto.impresiones),
     unidades: aNumero(punto.unidades),
   }));
+}
+
+export type FilaRentabilidad = {
+  id: string;
+  nombre: string;
+  roas: string;
+  margenPostAds: string;
+  rotulo: string;
+  tono: "exito" | "advertencia" | "peligro" | "neutro";
+};
+
+export type RentabilidadPintada = {
+  margen: string;
+  minimo: string;
+  roasEquilibrio: string;
+  acosMaximo: string;
+  filas: FilaRentabilidad[];
+};
+
+const ROTULO_RENTABILIDAD: Record<EstadoRentabilidad, { rotulo: string; tono: FilaRentabilidad["tono"] }> = {
+  rentable: { rotulo: "Rentable", tono: "exito" },
+  margen_bajo: { rotulo: "Margen bajo", tono: "advertencia" },
+  pierde: { rotulo: "Pierde plata", tono: "peligro" },
+};
+
+// "30,0 %" -> "30 %" para los parámetros, que son redondos.
+function porcentajeRedondo(fraccion: string): string {
+  return mostrarFraccion(fraccion).replace(/,0 %$/, " %");
+}
+
+// Rentabilidad por campaña con el margen fijo de la config (30 %, mínimo
+// 20 % después de Ads). El ACOS máximo es el margen: más que eso, la
+// publicidad se come toda la ganancia.
+export function pintarRentabilidad(tablero: Pick<TableroPublicidad, "campanas" | "rentabilidad">): RentabilidadPintada {
+  const { margen, minimo } = tablero.rentabilidad;
+  return {
+    margen: porcentajeRedondo(margen),
+    minimo: porcentajeRedondo(minimo),
+    roasEquilibrio: mostrarRoas(roasEquilibrio(margen)),
+    acosMaximo: porcentajeRedondo(margen),
+    filas: tablero.campanas.map((campana) => {
+      const calculo = rentabilidadCampana({
+        gasto: campana.totales.gasto,
+        ventasPublicidad: campana.totales.ventasPublicidad,
+        margen,
+        minimo,
+      });
+      const visible = calculo ? ROTULO_RENTABILIDAD[calculo.estado] : { rotulo: "Sin gasto", tono: "neutro" as const };
+      return {
+        id: campana.id,
+        nombre: campana.nombre,
+        roas: mostrarRoas(campana.totales.roas),
+        margenPostAds: calculo?.margenPostAds ? mostrarFraccion(calculo.margenPostAds) : calculo ? "Sin ventas" : "—",
+        rotulo: visible.rotulo,
+        tono: visible.tono,
+      };
+    }),
+  };
 }
