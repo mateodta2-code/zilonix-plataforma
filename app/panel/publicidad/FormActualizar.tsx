@@ -11,6 +11,14 @@ import styles from "./page.module.css";
 const AVISO_SIN_RESPUESTA =
   "No llegó la respuesta del servidor. La actualización puede seguir corriendo: recargá la página en unos minutos.";
 
+// Verde: terminó. Amarillo: se guardó una parte y el resto llega solo
+// (o no llegó la respuesta). Rojo: no se pudo.
+const CLASE_AVISO = {
+  ok: styles.avisoActualizarOk,
+  pendiente: styles.avisoActualizarPendiente,
+  error: styles.avisoActualizarError,
+} as const;
+
 // "Actualizar ahora" puede tardar hasta 4 minutos (el mismo presupuesto
 // de 240 s que el cron). Mientras corre, el botón queda desactivado y
 // dice qué está pasando. Al terminar muestra el aviso que devuelve la
@@ -19,7 +27,7 @@ const AVISO_SIN_RESPUESTA =
 export function FormActualizar({ cuentaMlId }: { cuentaMlId: string }) {
   const router = useRouter();
   const [actualizando, startTransition] = useTransition();
-  const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [aviso, setAviso] = useState<{ tono: "ok" | "pendiente" | "error"; texto: string } | null>(null);
 
   function enviar(evento: React.FormEvent<HTMLFormElement>) {
     evento.preventDefault();
@@ -29,10 +37,11 @@ export function FormActualizar({ cuentaMlId }: { cuentaMlId: string }) {
     startTransition(async () => {
       try {
         const resultado = await actualizarPublicidadAction(datos);
-        setAviso({ ok: resultado.ok, texto: resultado.aviso });
+        const tono = !resultado.ok ? "error" : resultado.incompleta ? "pendiente" : "ok";
+        setAviso({ tono, texto: resultado.aviso });
         router.refresh();
       } catch {
-        setAviso({ ok: false, texto: AVISO_SIN_RESPUESTA });
+        setAviso({ tono: "pendiente", texto: AVISO_SIN_RESPUESTA });
       }
     });
   }
@@ -48,7 +57,7 @@ export function FormActualizar({ cuentaMlId }: { cuentaMlId: string }) {
           Puede tardar unos minutos. No cierres esta página.
         </span>
       ) : aviso ? (
-        <span className={aviso.ok ? styles.avisoActualizarOk : styles.avisoActualizarError} role="status">
+        <span className={CLASE_AVISO[aviso.tono]} role="status">
           {aviso.texto}
         </span>
       ) : null}

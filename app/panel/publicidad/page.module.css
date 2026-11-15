@@ -85,6 +85,7 @@
 }
 
 .avisoActualizarOk,
+.avisoActualizarPendiente,
 .avisoActualizarError {
   font-size: 13px;
   max-width: 420px;
@@ -92,6 +93,10 @@
 
 .avisoActualizarOk {
   color: var(--exito-texto);
+}
+
+.avisoActualizarPendiente {
+  color: var(--advertencia-fuerte);
 }
 
 .avisoActualizarError {

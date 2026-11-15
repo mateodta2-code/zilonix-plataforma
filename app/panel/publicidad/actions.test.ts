@@ -50,6 +50,11 @@ describe("actualizarPublicidadAction devuelve el aviso, no redirige", () => {
     expect(refrescar).toHaveBeenCalledWith("empresa-1", CUENTA, "usuario-1");
   });
 
+  it("una actualización a medias llega marcada como incompleta (amarillo, no verde)", async () => {
+    refrescar.mockResolvedValue({ ok: true, aviso: "Se guardó una parte.", incompleta: true });
+    await expect(actualizarPublicidadAction(formulario(CUENTA))).resolves.toEqual({ ok: true, aviso: "Se guardó una parte.", incompleta: true });
+  });
+
   it("sin permiso o sin cuenta válida avisa y no llama a Mercado Libre", async () => {
     estado.conPermiso = false;
     await expect(actualizarPublicidadAction(formulario(CUENTA))).resolves.toMatchObject({ ok: false, aviso: expect.stringMatching(/permiso/) });

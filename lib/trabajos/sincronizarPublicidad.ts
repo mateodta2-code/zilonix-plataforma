@@ -105,8 +105,13 @@ export type ResultadoLote = {
   // avanza, o cuentas que no entraron en estos 240 s).
   sigue: boolean;
 };
-export type ResultadoCuenta = { aviso: string; sigue: boolean };
-export type ResultadoManual = { ok: boolean; aviso: string };
+// incompleta: se guardó una parte y el resto lo trae la sincronización
+// automática. No es un error: la pantalla lo pinta en amarillo, no en verde.
+export type ResultadoCuenta = { aviso: string; sigue: boolean; incompleta: boolean };
+export type ResultadoManual = { ok: boolean; aviso: string; incompleta?: boolean };
+
+const AVISO_INCOMPLETA =
+  "Se guardó una parte. El resto se completa solo en la próxima sincronización automática; no tenés que hacer nada.";
 
 function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -328,6 +333,7 @@ export async function sincronizarCuenta(
         // ok de clasificación: se vuelve a preguntar pasadas las 20 h,
         // no en la tanda siguiente.
         sigue: false,
+        incompleta: false,
       };
     }
 
@@ -504,11 +510,11 @@ export async function sincronizarCuenta(
     });
     cerrado = true;
     return {
-      aviso:
-        estado === "ok"
-          ? "Publicidad actualizada."
-          : "Se guardó un tramo del historial. La próxima corrida sigue con los días anteriores.",
+      // parcial: se guardó un tramo del historial de 62 días; los días
+      // anteriores los trae la sincronización automática.
+      aviso: estado === "ok" ? "Publicidad actualizada." : AVISO_INCOMPLETA,
       sigue: estado === "parcial",
+      incompleta: estado === "parcial",
     };
   } catch (error) {
     errorCierre = error;
@@ -538,8 +544,10 @@ export async function sincronizarCuenta(
   }
   if (errorCierre instanceof CorridaIncompletaError) {
     return {
-      aviso: "La actualización quedó a medias y se retoma en la próxima corrida.",
+      // Corte a los 240 s: lo leído ya quedó guardado (volcar).
+      aviso: AVISO_INCOMPLETA,
       sigue: convieneOtraTandaTrasCorte(errorCierre.fase, reanudaInicial, reanuda),
+      incompleta: true,
     };
   }
   throw errorCierre;
@@ -647,8 +655,8 @@ export async function refrescarPublicidadManual(
   if (!decision.permitir) return { ok: false, aviso: decision.aviso };
 
   try {
-    const { aviso } = await sincronizarCuenta(empresaId, cuentaMlId, "manual", usuarioId, ahora, Date.now() + PRESUPUESTO_CORRIDA_MS);
-    return { ok: true, aviso };
+    const { aviso, incompleta } = await sincronizarCuenta(empresaId, cuentaMlId, "manual", usuarioId, ahora, Date.now() + PRESUPUESTO_CORRIDA_MS);
+    return { ok: true, aviso, incompleta };
   } catch (error) {
     if (error instanceof SyncEnCursoError || error instanceof SyncMuyRecienteError) return { ok: false, aviso: error.message };
     // El detalle técnico va al log (sincronizarCuenta ya lo escribió);

@@ -19,7 +19,8 @@ import { AVISO_REFRESCO_FALLIDO, textoErrorCorto } from "@/lib/publicidad/plan";
 // staging el aviso no aparecía al terminar. FormActualizar lo muestra
 // él mismo y refresca los datos, sin depender de que la redirección
 // llegue al navegador después de varios minutos.
-export type ResultadoActualizar = { ok: boolean; aviso: string };
+// incompleta: se guardó una parte (amarillo en la pantalla, no verde).
+export type ResultadoActualizar = { ok: boolean; aviso: string; incompleta?: boolean };
 
 const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
