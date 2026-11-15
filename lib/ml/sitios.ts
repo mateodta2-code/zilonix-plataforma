@@ -84,3 +84,16 @@ export function formatearNumero(valor: number, idioma: unknown): string {
   const locale = typeof idioma === "string" && IDIOMAS_VALIDOS.has(idioma) ? idioma : SITIOS_ML[SITE_ID_DEFECTO].idioma;
   return new Intl.NumberFormat(locale).format(valor);
 }
+
+// Sitio de Mercado Libre a partir del host de la página de búsqueda
+// (mercadolibre.com.co → MCO). Solo los 5 sitios que Zilonix opera;
+// cualquier otro host (o un subdominio, ej. listado.mercadolibre.com.co)
+// que no coincida devuelve null — nunca se asume el default.
+export function siteIdDeHost(host: unknown): string | null {
+  if (typeof host !== "string") return null;
+  const h = host.toLowerCase();
+  for (const [siteId, dominio] of Object.entries(DOMINIOS_ML)) {
+    if (h === dominio || h.endsWith(`.${dominio}`)) return siteId;
+  }
+  return null;
+}

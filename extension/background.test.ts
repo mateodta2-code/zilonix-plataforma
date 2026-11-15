@@ -125,6 +125,9 @@ function crearChromeMock() {
           for (const key of Object.keys(defaults)) resultado[key] = key in storageLocal ? storageLocal[key] : defaults[key];
           cb(resultado);
         },
+        set: (obj: Record<string, unknown>) => {
+          Object.assign(storageLocal, obj);
+        },
       },
     },
     tabs: {
@@ -201,6 +204,10 @@ function crearChromeMock() {
     setRespuestasSendMessage: (respuestas: Record<number, unknown>) => {
       respuestasSendMessage = respuestas;
     },
+    leerLocal: (clave: string) => storageLocal[clave],
+    limpiarLocal: () => {
+      for (const k of Object.keys(storageLocal)) delete storageLocal[k];
+    },
     setZilonixUrlApp: (url: string | null) => {
       if (url === null) delete storageLocal.zilonixUrlApp;
       else storageLocal.zilonixUrlApp = url;
@@ -213,7 +220,7 @@ const URL_SEGUIMIENTO_STAGING = "https://web-staging-d979.up.railway.app/panel/i
 // URL_SEGUIMIENTO_STAGING: el remitente REAL (tab.url) que
 // esRemitentePublicar exige para "zilonix:importar-link" y
 // "zilonix:pedir-importacion-pendiente".
-const URL_PUBLICAR_PRODUCCION = "https://web-production-af270.up.railway.app/panel/publicar";
+const URL_PUBLICAR_PRODUCCION = "https://seller.zilonix.com/panel/publicar";
 
 function lecturaTienda(mlIdExterno = "145150422") {
   return { tipoSeguimiento: "tienda" as const, mlIdExterno, totalPublicaciones: 23, idsVisibles: [], leidoEn: new Date().toISOString() };
@@ -522,7 +529,7 @@ describe("chrome.action.onClicked — issue #273 (interruptor del panel)", () =>
 // propia pestaña con el clic — background.js ahora hace lo mismo acá.
 describe("zilonix:importar-publicar — issue #44 (abre o enfoca Publicar)", () => {
   let mockActual: ReturnType<typeof crearChromeMock>;
-  const URL_PRODUCCION = "https://web-production-af270.up.railway.app";
+  const URL_PRODUCCION = "https://seller.zilonix.com";
   const URL_STAGING = "https://web-staging-d979.up.railway.app";
   const PAYLOAD = { titulo: "Cojín antiescaras", precio: 50_000, descripcion: null, imagenes: [] };
 
@@ -956,5 +963,132 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
     await mandarImportarLink(LINK_CATALOGO, 1, null);
 
     expect(mockActual.llamadas.create).toEqual([]);
+  });
+});
+
+describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)", () => {
+  let mockActual: ReturnType<typeof crearChromeMock>;
+  const fetchMock = vi.fn();
+  const payload = { host: "www.mercadolibre.com.co", productos: [{ titulo: "x", precio: 1 }], columna: "factMes", direccion: "desc" };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockActual = crearChromeMock();
+    (globalThis as unknown as { chrome: unknown }).chrome = mockActual.chrome;
+    fetchMock.mockReset();
+    (globalThis as unknown as { fetch: unknown }).fetch = fetchMock;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (globalThis as unknown as { chrome?: unknown }).chrome;
+  });
+
+  // Issue #414 — background.js también pide /api/extension/config al
+  // cargar; estas pruebas miran solo las llamadas del nicho.
+  const llamadasNicho = () => fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/api/extension/nicho"));
+
+  async function analizar() {
+    await cargarBackgroundFresco();
+    const respuestas: unknown[] = [];
+    const devuelve = mockActual.listeners.onMessage!({ tipo: "zilonix:analizar-nicho", payload }, { tab: { id: 1 } }, (r) => respuestas.push(r));
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+    return { devuelve, respuestas };
+  }
+
+  it("llama a seller.zilonix.com con la sesión del navegador (credentials: include), sin token ni cabeceras de auth", async () => {
+    fetchMock.mockResolvedValue({ type: "basic", ok: true, status: 200, json: async () => ({ ok: true, filas: [] }) });
+    const { devuelve, respuestas } = await analizar();
+    expect(devuelve).toBe(true);
+    const [url, init] = llamadasNicho()[0];
+    expect(url).toBe("https://seller.zilonix.com/api/extension/nicho");
+    expect(init.credentials).toBe("include");
+    expect(Object.keys(init.headers)).toEqual(["Content-Type"]);
+    expect(respuestas).toEqual([{ estado: "ok", datos: { ok: true, filas: [] } }]);
+  });
+
+  it("usa staging solo si es el ambiente guardado; cualquier otro valor cae a seller.zilonix.com", async () => {
+    fetchMock.mockResolvedValue({ type: "basic", ok: true, status: 200, json: async () => ({ ok: true }) });
+    mockActual.setZilonixUrlApp("https://web-staging-d979.up.railway.app");
+    await analizar();
+    expect(llamadasNicho()[0][0]).toBe("https://web-staging-d979.up.railway.app/api/extension/nicho");
+    mockActual.setZilonixUrlApp("https://web-production-af270.up.railway.app");
+    await analizar();
+    expect(llamadasNicho()[1][0]).toBe("https://seller.zilonix.com/api/extension/nicho");
+  });
+
+  it("sin sesión (401 o redirección) -> estado sin-sesion con el link de inicio de sesión", async () => {
+    fetchMock.mockResolvedValue({ type: "basic", ok: false, status: 401, json: async () => ({}) });
+    expect((await analizar()).respuestas).toEqual([{ estado: "sin-sesion", url: "https://seller.zilonix.com/iniciar-sesion" }]);
+    fetchMock.mockResolvedValue({ type: "opaqueredirect", ok: false, status: 0 });
+    expect((await analizar()).respuestas).toEqual([{ estado: "sin-sesion", url: "https://seller.zilonix.com/iniciar-sesion" }]);
+  });
+
+  it("403 -> sin-permiso; error de red -> error; país no soportado -> error con motivo pais", async () => {
+    fetchMock.mockResolvedValue({ type: "basic", ok: false, status: 403, json: async () => ({}) });
+    expect((await analizar()).respuestas).toEqual([{ estado: "sin-permiso" }]);
+    fetchMock.mockRejectedValue(new Error("red"));
+    expect((await analizar()).respuestas).toEqual([{ estado: "error", motivo: "red" }]);
+    fetchMock.mockResolvedValue({ type: "basic", ok: false, status: 400, json: async () => ({ error: "pais_no_soportado" }) });
+    expect((await analizar()).respuestas).toEqual([{ estado: "error", motivo: "pais" }]);
+  });
+
+  describe("configuración remota (issue #414)", () => {
+    const CLAVE = "zilonixConfigRemota";
+
+    beforeEach(() => mockActual.limpiarLocal());
+
+    it("pide /api/extension/config sin credenciales y guarda SOLO lo validado", async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          interruptores: { alibaba: true, otro: true },
+          textos: { avisoSinSesion: "Entra a Zilonix", otro: "x" },
+          urlApp: "https://seller.zilonix.com",
+        }),
+      });
+      await cargarBackgroundFresco();
+      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe("https://seller.zilonix.com/api/extension/config");
+      expect(init.credentials).toBe("omit");
+      expect(mockActual.leerLocal(CLAVE)).toEqual({
+        interruptores: { alibaba: true },
+        textos: { avisoSinSesion: "Entra a Zilonix" },
+        urlApp: "https://seller.zilonix.com",
+      });
+    });
+
+    it("urlApp fuera de la allowlist, texto enorme o JSON raro -> valores por defecto seguros (Alibaba apagado)", async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ interruptores: { alibaba: "si" }, textos: { avisoSinSesion: "x".repeat(500) }, urlApp: "https://evil.com" }),
+      });
+      await cargarBackgroundFresco();
+      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+      expect(mockActual.leerLocal(CLAVE)).toEqual({
+        interruptores: { alibaba: false },
+        textos: { avisoSinSesion: "Inicia sesión en Zilonix Seller para analizar" },
+        urlApp: null,
+      });
+    });
+
+    it("si la red o la ruta fallan, no guarda nada (la extensión sigue con lo último o con los valores por defecto)", async () => {
+      fetchMock.mockRejectedValue(new Error("red"));
+      await cargarBackgroundFresco();
+      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+      expect(mockActual.leerLocal(CLAVE)).toBeUndefined();
+      fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+      await cargarBackgroundFresco();
+      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+      expect(mockActual.leerLocal(CLAVE)).toBeUndefined();
+    });
+  });
+
+  it("manifest: host_permissions solo seller.zilonix.com y staging, versión 0.3.45", async () => {
+    const m = (await import("./manifest.json")).default as { host_permissions: string[]; version: string };
+    expect(m.host_permissions).toEqual(["https://seller.zilonix.com/*", "https://web-staging-d979.up.railway.app/*"]);
+    expect(m.version).toBe("0.3.45");
   });
 });

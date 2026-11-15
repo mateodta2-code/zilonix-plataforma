@@ -104,6 +104,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/despachos/etiqueta/route.ts",
   "app/panel/investigacion/page.tsx",
   "app/panel/investigacion/actions.ts",
+  "app/api/extension/nicho/route.ts",
   "app/panel/investigacion/seguimiento/page.tsx",
   "app/panel/investigacion/seguimiento/actions.ts",
   "app/panel/investigacion/seguimiento/[id]/page.tsx",
@@ -213,6 +214,8 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/sign-in/[[...sign-in]]/page.tsx": "solo monta <SignIn/> de Clerk",
   "app/sign-up/[[...sign-up]]/page.tsx": "solo monta <SignUp/> de Clerk",
   "app/api/version/route.ts": "expone solo el número de versión, nunca datos de ninguna empresa",
+  "app/api/extension/config/route.ts":
+    "pública a propósito: la extensión la pide sin sesión; solo devuelve interruptores y textos no sensibles (lib/extension/configuracion.ts), nunca datos de una empresa",
   "app/api/salud/route.ts":
     "monitoreo público: solo un select 1 y, cuando exista la cola, números de trabajos — nunca datos de negocio, nombres de empresa, cadenas de conexión ni el error del driver",
   "app/api/ml/webhooks/route.ts":
@@ -346,6 +349,7 @@ const RUTAS_DE_MAQUINA: Record<string, string> = {
   "app/api/ml/webhooks/route.ts": "/api/ml/webhooks",
   "app/api/ml/trabajador/route.ts": "/api/ml/trabajador",
   "app/api/salud/route.ts": "/api/salud",
+  "app/api/extension/config/route.ts": "/api/extension/config",
   "app/api/trabajos/seguimiento/route.ts": "/api/trabajos/seguimiento",
   "app/api/trabajos/publicidad/route.ts": "/api/trabajos/publicidad",
 };

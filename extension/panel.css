@@ -321,3 +321,41 @@
   font-style: italic;
   padding: 8px 0;
 }
+
+/* Tabla "Análisis del nicho" (botón "Analizar esta página") */
+.zx-nicho {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  width: min(760px, calc(100vw - 380px));
+  max-height: 80vh;
+  overflow: auto;
+  z-index: 2147483646;
+  background: linear-gradient(180deg, #121214 0%, #0b0b0c 100%);
+  border: 1px solid #222225;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 12px 32px rgba(0, 0, 0, 0.55);
+  color: #f2f4f8;
+  font: 12.5px/1.4 system-ui, sans-serif;
+  padding: 10px 12px;
+}
+.zx-nicho[hidden] { display: none; }
+.zx-nicho__encabezado { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.zx-nicho__cifras { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.zx-nicho__cifra { flex: 1 1 140px; border: 1px solid #222225; border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; }
+.zx-nicho__cifra-etq { font-size: 10.5px; text-transform: uppercase; color: #9aa0aa; }
+.zx-nicho__scroll { overflow-x: auto; }
+.zx-nicho__tabla { width: 100%; border-collapse: collapse; }
+.zx-nicho__tabla th, .zx-nicho__tabla td { padding: 4px 6px; border-bottom: 1px solid #222225; text-align: left; vertical-align: middle; }
+.zx-nicho__orden { background: none; border: 0; color: #9aa0aa; font: inherit; font-weight: 600; cursor: pointer; padding: 0; white-space: nowrap; }
+.zx-nicho__orden:hover { color: #f2f4f8; }
+.zx-nicho__titulo { max-width: 260px; }
+.zx-nicho__titulo a, .zx-vacio a { color: #7db4ff; text-decoration: none; }
+.zx-nicho__foto { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; display: block; }
+.zx-nicho__analisis { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.zx-nicho__analisis .zx-nicho__cifra { flex: 1 1 200px; }
+.zx-nicho__info { cursor: help; color: #7db4ff; }
+.zx-nicho__aviso { font-size: 11px; color: #f5b14c; margin-top: 2px; }
+.zx-nicho__recomendado { margin: 0 0 8px; font-weight: 600; }
+.zx-nicho__barra { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.zx-nicho__nota { margin: 8px 0 0; font-size: 11px; color: #9aa0aa; }

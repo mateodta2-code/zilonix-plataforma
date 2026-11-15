@@ -1,0 +1,1 @@
+- Investigación: los bloques por término vuelven a mostrarse directo, sin el desplegable Ver detalle por término.
