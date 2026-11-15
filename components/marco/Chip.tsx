@@ -1,6 +1,6 @@
 import styles from "./Chip.module.css";
 
-export type EstadoChip = "neutro" | "exito" | "peligro" | "aviso";
+export type EstadoChip = "neutro" | "exito" | "advertencia" | "peligro" | "aviso";
 
 // Etiqueta chica de estado — MAYÚSCULAS, borde de 1px, color según el
 // estado. Reemplaza los <span style={{opacity:...}}> sueltos que cada

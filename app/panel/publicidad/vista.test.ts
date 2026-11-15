@@ -149,7 +149,7 @@ describe("textos del tablero de publicidad (issue #255)", () => {
     expect(pintada.cpc).toBe("$339");
     expect(pintada.roas).toBe("9,85x");
     expect(pintada.roasObjetivo).toBe("objetivo 12,00x");
-    expect(pintada.estadoFrase).toBe("Debajo del objetivo, falta 18 %");
+    expect(pintada.estadoFrase).toBe("Bajo objetivo, falta 18 %");
     expect(pintada.ventasSinPublicidad).toBe("$724.084");
     expect(pintada.unidades).toBe("12");
   });
