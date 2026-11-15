@@ -74,6 +74,59 @@ const TIEMPO_MAX_IMPORTACION_PENDIENTE_MS = 2 * 60 * 1000;
 // entre el primer clic y el segundo).
 const COOLDOWN_IMPORTAR_PUBLICAR_MS = 3000;
 
+// "Analizar esta página" (tabla "Análisis del nicho") — la extensión
+// solo manda lo que ya leyó del listado y dibuja lo que devuelve
+// /api/extension/nicho (todo el cálculo vive en la plataforma). La
+// llamada sale de ESTE Service Worker, con la sesión de Clerk que la
+// persona ya tiene en el navegador (credentials: "include") — nunca un
+// token guardado en la extensión. host_permissions del manifest cubre
+// SOLO estos dos orígenes (producción nueva y staging), por eso la base
+// nunca es la URL vieja de Railway de producción.
+const ORIGEN_NICHO_PRODUCCION = "https://seller.zilonix.com";
+const ORIGEN_NICHO_STAGING = "https://web-staging-d979.up.railway.app";
+
+function resolverOrigenNicho(callback) {
+  chrome.storage.local.get({ zilonixUrlApp: null }, (datos) => {
+    callback(datos.zilonixUrlApp === ORIGEN_NICHO_STAGING ? ORIGEN_NICHO_STAGING : ORIGEN_NICHO_PRODUCCION);
+  });
+}
+
+function analizarNicho(payload, responder) {
+  resolverOrigenNicho(async (origen) => {
+    const urlLogin = `${origen}/sign-in`;
+    try {
+      const respuesta = await fetch(`${origen}/api/extension/nicho`, {
+        method: "POST",
+        credentials: "include",
+        redirect: "manual",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: payload && payload.host,
+          productos: payload && payload.productos,
+          columna: payload && payload.columna,
+          direccion: payload && payload.direccion,
+        }),
+      });
+      if (respuesta.type === "opaqueredirect" || respuesta.status === 401 || (respuesta.status >= 300 && respuesta.status < 400)) {
+        responder({ estado: "sin-sesion", url: urlLogin });
+        return;
+      }
+      if (respuesta.status === 403) {
+        responder({ estado: "sin-permiso" });
+        return;
+      }
+      const cuerpo = await respuesta.json().catch(() => null);
+      if (!respuesta.ok || !cuerpo || cuerpo.ok !== true) {
+        responder({ estado: "error", motivo: cuerpo && cuerpo.error === "pais_no_soportado" ? "pais" : "servidor" });
+        return;
+      }
+      responder({ estado: "ok", datos: cuerpo });
+    } catch {
+      responder({ estado: "error", motivo: "red" });
+    }
+  });
+}
+
 // Issue #44 — misma idea que CONFIG.URL_APP (extension/config.js) pero
 // del lado del Service Worker, que nunca carga ese archivo (solo corre
 // en páginas de Mercado Libre) — lee "zilonixUrlApp" directo de
@@ -970,6 +1023,11 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
   // que algo despertara al Service Worker para poder cerrarla.
   cerrarPestanasActualizarTodoVencidas();
   if (!mensaje) return;
+
+  if (mensaje.tipo === "zilonix:analizar-nicho") {
+    analizarNicho(mensaje.payload, sendResponse);
+    return true; // respuesta asíncrona
+  }
 
   if (mensaje.tipo === "zilonix:iniciar-escaneo") {
     if (!remitente.tab?.id) return;
