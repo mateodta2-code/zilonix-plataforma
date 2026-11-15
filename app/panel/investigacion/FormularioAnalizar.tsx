@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { marcarClicAnalizar, type PlataformaAnalizar } from "./analizarClic";
+import { INTERRUPTORES_EXTENSION } from "@/lib/extension/configuracion";
 import styles from "./page.module.css";
 
 // Issue #227 — selector de país ML: Colombia es el default real de
@@ -37,7 +38,7 @@ const PLATAFORMAS_ANALIZAR: { clave: PlataformaAnalizar; nombre: string }[] = [
   { clave: "aliexpress", nombre: "AliExpress" },
   { clave: "shein", nombre: "Shein" },
   { clave: "alibaba", nombre: "Alibaba" },
-];
+].filter((p) => p.clave !== "alibaba" || INTERRUPTORES_EXTENSION.alibaba) as { clave: PlataformaAnalizar; nombre: string }[];
 
 // Issue #221 — Client Component a propósito, para poder marcar
 // (sessionStorage, ver analizarClic.ts) que el envío real de este

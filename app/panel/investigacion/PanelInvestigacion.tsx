@@ -35,6 +35,7 @@ import { consumirClicAnalizarReciente, marcarClicAnalizar, type PlataformaAnaliz
 import { generarQueriesAnalizarAction, generarQueriesPlataformaAction } from "./actions";
 import { TablaNicho } from "./TablaNicho";
 import type { FilaNicho } from "@/lib/ml/tablaNicho";
+import { INTERRUPTORES_EXTENSION } from "@/lib/extension/configuracion";
 import styles from "./page.module.css";
 
 // Issue #227 — "quitar API de Investigación": Demanda/Mercado/Estrategia
@@ -87,8 +88,9 @@ const PLATAFORMAS_MULTIPLATAFORMA: { clave: "amazon" | "temu" | "aliexpress" | "
   { clave: "temu", nombre: "Temu" },
   { clave: "aliexpress", nombre: "AliExpress" },
   { clave: "shein", nombre: "Shein" },
+  // Alibaba está en pausa: sin botón hasta encender el interruptor.
   { clave: "alibaba", nombre: "Alibaba" },
-];
+].filter((p) => p.clave !== "alibaba" || INTERRUPTORES_EXTENSION.alibaba) as { clave: "amazon" | "temu" | "aliexpress" | "shein" | "alibaba"; nombre: string }[];
 
 const CRITERIOS_ORDEN: { clave: CriterioOrden; etiqueta: string }[] = [
   { clave: "facturacion", etiqueta: "Facturación est." },

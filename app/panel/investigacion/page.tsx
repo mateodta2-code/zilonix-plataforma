@@ -13,6 +13,7 @@ import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { FormularioAnalizar } from "./FormularioAnalizar";
 import { PanelInvestigacion } from "./PanelInvestigacion";
+import { INTERRUPTORES_EXTENSION } from "@/lib/extension/configuracion";
 import styles from "./page.module.css";
 
 // Issue #174 (Parte 1) + #197/#221/#225 — módulo "Investigación".
@@ -81,7 +82,7 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
         <FormularioAnalizar termino={termino} tab={tab} />
         <p className={styles.ayuda}>
           Con la extensión de Zilonix instalada: Analizar escanea el listado real de Mercado Libre (tu país elegido) — ya no depende de la API de
-          catálogo. Amazon, Temu, AliExpress, Shein y Alibaba se analizan con su propio botón, en la pestaña Demanda.
+          catálogo. {INTERRUPTORES_EXTENSION.alibaba ? "Amazon, Temu, AliExpress, Shein y Alibaba" : "Amazon, Temu, AliExpress y Shein"} se analizan con su propio botón, en la pestaña Demanda.
         </p>
       </Tarjeta>
 
