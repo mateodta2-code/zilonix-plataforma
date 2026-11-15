@@ -1,0 +1,1 @@
+- **Investigación:** la tabla "Análisis del nicho" ahora es un desplegable, abierto por defecto, que se puede ocultar con un clic (Refs #414).

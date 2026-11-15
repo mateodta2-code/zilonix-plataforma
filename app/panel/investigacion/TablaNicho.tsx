@@ -86,11 +86,11 @@ export function TablaNicho({
   const sinDato = <span title="Sin dato real: no se estima">—</span>;
 
   return (
-    <div className={styles.bloque}>
+    <details className={styles.bloque} open>
+      <summary className={styles.tituloSeccion} style={{ cursor: "pointer" }}>
+        Análisis del nicho ({filas.length})
+      </summary>
       <div className={styles.encabezadoBloque}>
-        <p className={styles.tituloSeccion} style={{ margin: 0 }}>
-          Análisis del nicho ({filas.length})
-        </p>
         <select className="zx-control" aria-label="Término" value={terminoActivo} onChange={(e) => setTermino(e.target.value)}>
           <option value={TODOS}>Todos los términos</option>
           {terminos.map((t) => (
@@ -162,6 +162,6 @@ export function TablaNicho({
           </FilaTabla>
         ))}
       </Tabla>
-    </div>
+    </details>
   );
 }
