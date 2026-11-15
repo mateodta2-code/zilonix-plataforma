@@ -40,6 +40,10 @@ export const PATRONES_RUTAS_PUBLICAS = [
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/iniciar-sesion",
+  // Login APARTE del superadmin (solo esta ruta, no /superadmin
+  // entero). Sin sesión de Clerk la página solo muestra <SignIn/>;
+  // el acceso real lo decide requiereSesionSuperadmin().
+  "/superadmin/iniciar-sesion(.*)",
   "/empezar",
   // Tarea 1.7 — quien recibe una invitación por correo todavía no
   // tiene sesión (puede ni tener cuenta). La propia página valida el
