@@ -352,4 +352,10 @@
 .zx-nicho__titulo { max-width: 260px; }
 .zx-nicho__titulo a, .zx-vacio a { color: #7db4ff; text-decoration: none; }
 .zx-nicho__foto { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; display: block; }
+.zx-nicho__analisis { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.zx-nicho__analisis .zx-nicho__cifra { flex: 1 1 200px; }
+.zx-nicho__info { cursor: help; color: #7db4ff; }
+.zx-nicho__aviso { font-size: 11px; color: #f5b14c; margin-top: 2px; }
+.zx-nicho__recomendado { margin: 0 0 8px; font-weight: 600; }
+.zx-nicho__barra { display: flex; justify-content: flex-end; margin-bottom: 6px; }
 .zx-nicho__nota { margin: 8px 0 0; font-size: 11px; color: #9aa0aa; }

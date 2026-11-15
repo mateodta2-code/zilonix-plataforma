@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bloque, ProductoListado } from "@/lib/ml/listadoCliente";
-import { construirFilasNicho, formatearAntiguedad, ordenarFilasNicho, siteIdDeItemId, terminosDeBloques, totalesNicho } from "@/lib/ml/tablaNicho";
+import { concentracionTop3, construirFilasNicho, precioRecomendado, puntajeNicho, formatearAntiguedad, ordenarFilasNicho, siteIdDeItemId, terminosDeBloques, totalesNicho } from "@/lib/ml/tablaNicho";
 
 const AHORA = new Date("2026-11-15T00:00:00Z");
 const hace = (dias: number) => new Date(AHORA.getTime() - dias * 86_400_000).toISOString();
@@ -76,7 +76,7 @@ describe("construirFilasNicho", () => {
   it("usa date_created real para la antigüedad y marca Full", () => {
     const [f] = construirFilasNicho([bloque("a", [prod({ itemId: "MCO1", esFull: true, dateCreated: hace(60) })])], AHORA);
     expect(Math.round(f.antiguedadDias!)).toBe(60);
-    expect(f.origen).toBe("Full");
+    expect(f.esFull).toBe(true);
     expect(f.ventasMes).not.toBeNull();
   });
 });
@@ -116,5 +116,104 @@ describe("ordenarFilasNicho y totales", () => {
     expect(t.siteId).toBe("MCO");
     expect(t.vendidos).toBe(200);
     expect(t.hayOtrosPaises).toBe(true);
+  });
+});
+
+// Filas sintéticas con ventas/mes y precio controlados (misma antigüedad
+// para todas → ventasMes proporcional a `v`).
+function filasDe(especs: { v: number; precio: number; esFull?: boolean; vendedor?: string; oficial?: boolean; internacional?: boolean | null }[]) {
+  return construirFilasNicho(
+    [
+      bloque(
+        "t",
+        especs.map((e, i) =>
+          prod({
+            itemId: "MCO" + (1000 + i),
+            precio: e.precio,
+            senalVentas: { valor: e.v, tipo: "acumulado_sin_periodo" },
+            esFull: e.esFull ?? false,
+            vendedor: e.vendedor ?? `v${i}`,
+            tiendaOficial: e.oficial ?? false,
+            internacional: e.internacional ?? null,
+            dateCreated: hace(300),
+          })
+        )
+      ),
+    ],
+    AHORA
+  );
+}
+
+describe("origen Internacional / Local / —", () => {
+  it("toma el dato de la tarjeta; sin dato queda null y Full va aparte", () => {
+    const f = filasDe([{ v: 10, precio: 5, internacional: true, esFull: true }, { v: 10, precio: 5, internacional: false }, { v: 10, precio: 5 }]);
+    expect(f.map((x) => x.origen)).toEqual(["Internacional", "Local", null]);
+    expect(f[0].esFull).toBe(true);
+  });
+});
+
+describe("puntajeNicho", () => {
+  const variado = (n: number, v: number, precio: number) => Array.from({ length: n }, () => ({ v, precio }));
+  it("sin datos suficientes devuelve null", () => {
+    expect(puntajeNicho(filasDe(variado(4, 100, 80_000)))).toBeNull();
+  });
+  it("siempre entero entre 1 y 10", () => {
+    for (const [n, v, p] of [[5, 1, 1], [100, 100_000, 5_000_000], [20, 500, 80_000]] as const) {
+      const r = puntajeNicho(filasDe(variado(n, v, p)))!;
+      expect(Number.isInteger(r.valor)).toBe(true);
+      expect(r.valor).toBeGreaterThanOrEqual(1);
+      expect(r.valor).toBeLessThanOrEqual(10);
+    }
+  });
+  it("más demanda sube la parte de demanda", () => {
+    const bajo = puntajeNicho(filasDe(variado(8, 5, 80_000)))!;
+    const alto = puntajeNicho(filasDe(variado(8, 5_000, 80_000)))!;
+    expect(alto.demanda).toBeGreaterThan(bajo.demanda);
+    expect(alto.valor).toBeGreaterThanOrEqual(bajo.valor);
+  });
+  it("más Full y tiendas oficiales bajan la parte de competencia", () => {
+    const libre = puntajeNicho(filasDe(variado(10, 200, 80_000)))!;
+    const fuerte = puntajeNicho(filasDe(Array.from({ length: 10 }, (_, i) => ({ v: 200, precio: 80_000, esFull: i % 2 === 0, oficial: i % 2 === 1 }))))!;
+    expect(fuerte.competencia).toBeLessThan(libre.competencia);
+  });
+  it("más vendedores distintos bajan la parte de competencia", () => {
+    const pocos = puntajeNicho(filasDe(Array.from({ length: 12 }, () => ({ v: 200, precio: 80_000, vendedor: "mismo" }))))!;
+    const muchos = puntajeNicho(filasDe(Array.from({ length: 12 }, (_, i) => ({ v: 200, precio: 80_000, vendedor: "x" + i }))))!;
+    expect(muchos.competencia).toBeLessThan(pocos.competencia);
+  });
+  it("precio más alto suma más en la parte de precio; frase válida", () => {
+    expect(puntajeNicho(filasDe(variado(6, 100, 320_000)))!.precio).toBeGreaterThan(puntajeNicho(filasDe(variado(6, 100, 20_000)))!.precio);
+    const r = puntajeNicho(filasDe(variado(6, 100, 80_000)))!;
+    expect(["Buena oportunidad", "Oportunidad moderada", "Competido", "Difícil"]).toContain(r.frase);
+  });
+});
+
+describe("concentracionTop3", () => {
+  it("porcentaje de ventas/mes de los 3 primeros y aviso sobre 60 %", () => {
+    const c = concentracionTop3(filasDe([{ v: 700, precio: 1 }, { v: 100, precio: 1 }, { v: 100, precio: 1 }, { v: 50, precio: 1 }, { v: 50, precio: 1 }]))!;
+    expect(c.porcentaje).toBe(90);
+    expect(c.concentrado).toBe(true);
+    const repartido = concentracionTop3(filasDe(Array.from({ length: 10 }, () => ({ v: 100, precio: 1 }))))!;
+    expect(repartido.porcentaje).toBe(30);
+    expect(repartido.concentrado).toBe(false);
+  });
+  it("con 3 o menos publicaciones con ventas devuelve null", () => {
+    expect(concentracionTop3(filasDe([{ v: 5, precio: 1 }, { v: 5, precio: 1 }, { v: 5, precio: 1 }]))).toBeNull();
+  });
+});
+
+describe("precioRecomendado", () => {
+  it("elige el tramo de precio con más ventas/mes", () => {
+    const espec = [
+      ...Array.from({ length: 12 }, (_, i) => ({ v: 10, precio: 10 + i })),
+      ...Array.from({ length: 6 }, (_, i) => ({ v: 1000, precio: 100 + i })),
+      ...Array.from({ length: 12 }, (_, i) => ({ v: 10, precio: 200 + i })),
+    ];
+    const r = precioRecomendado(filasDe(espec))!;
+    expect(r.desde).toBeGreaterThanOrEqual(90);
+    expect(r.hasta).toBeLessThanOrEqual(130);
+  });
+  it("sin datos suficientes devuelve null", () => {
+    expect(precioRecomendado(filasDe([{ v: 5, precio: 10 }]))).toBeNull();
   });
 });
