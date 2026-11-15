@@ -958,3 +958,72 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
     expect(mockActual.llamadas.create).toEqual([]);
   });
 });
+
+describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)", () => {
+  let mockActual: ReturnType<typeof crearChromeMock>;
+  const fetchMock = vi.fn();
+  const payload = { host: "www.mercadolibre.com.co", productos: [{ titulo: "x", precio: 1 }], columna: "factMes", direccion: "desc" };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockActual = crearChromeMock();
+    (globalThis as unknown as { chrome: unknown }).chrome = mockActual.chrome;
+    fetchMock.mockReset();
+    (globalThis as unknown as { fetch: unknown }).fetch = fetchMock;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (globalThis as unknown as { chrome?: unknown }).chrome;
+  });
+
+  async function analizar() {
+    await cargarBackgroundFresco();
+    const respuestas: unknown[] = [];
+    const devuelve = mockActual.listeners.onMessage!({ tipo: "zilonix:analizar-nicho", payload }, { tab: { id: 1 } }, (r) => respuestas.push(r));
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+    return { devuelve, respuestas };
+  }
+
+  it("llama a seller.zilonix.com con la sesión del navegador (credentials: include), sin token ni cabeceras de auth", async () => {
+    fetchMock.mockResolvedValue({ type: "basic", ok: true, status: 200, json: async () => ({ ok: true, filas: [] }) });
+    const { devuelve, respuestas } = await analizar();
+    expect(devuelve).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://seller.zilonix.com/api/extension/nicho");
+    expect(init.credentials).toBe("include");
+    expect(Object.keys(init.headers)).toEqual(["Content-Type"]);
+    expect(respuestas).toEqual([{ estado: "ok", datos: { ok: true, filas: [] } }]);
+  });
+
+  it("usa staging solo si es el ambiente guardado; cualquier otro valor cae a seller.zilonix.com", async () => {
+    fetchMock.mockResolvedValue({ type: "basic", ok: true, status: 200, json: async () => ({ ok: true }) });
+    mockActual.setZilonixUrlApp("https://web-staging-d979.up.railway.app");
+    await analizar();
+    expect(fetchMock.mock.calls[0][0]).toBe("https://web-staging-d979.up.railway.app/api/extension/nicho");
+    mockActual.setZilonixUrlApp("https://web-production-af270.up.railway.app");
+    await analizar();
+    expect(fetchMock.mock.calls[1][0]).toBe("https://seller.zilonix.com/api/extension/nicho");
+  });
+
+  it("sin sesión (401 o redirección) -> estado sin-sesion con el link de inicio de sesión", async () => {
+    fetchMock.mockResolvedValue({ type: "basic", ok: false, status: 401, json: async () => ({}) });
+    expect((await analizar()).respuestas).toEqual([{ estado: "sin-sesion", url: "https://seller.zilonix.com/iniciar-sesion" }]);
+    fetchMock.mockResolvedValue({ type: "opaqueredirect", ok: false, status: 0 });
+    expect((await analizar()).respuestas).toEqual([{ estado: "sin-sesion", url: "https://seller.zilonix.com/iniciar-sesion" }]);
+  });
+
+  it("403 -> sin-permiso; error de red -> error; país no soportado -> error con motivo pais", async () => {
+    fetchMock.mockResolvedValue({ type: "basic", ok: false, status: 403, json: async () => ({}) });
+    expect((await analizar()).respuestas).toEqual([{ estado: "sin-permiso" }]);
+    fetchMock.mockRejectedValue(new Error("red"));
+    expect((await analizar()).respuestas).toEqual([{ estado: "error", motivo: "red" }]);
+    fetchMock.mockResolvedValue({ type: "basic", ok: false, status: 400, json: async () => ({ error: "pais_no_soportado" }) });
+    expect((await analizar()).respuestas).toEqual([{ estado: "error", motivo: "pais" }]);
+  });
+
+  it("manifest: host_permissions solo seller.zilonix.com y staging, versión sin cambios", async () => {
+    const m = (await import("./manifest.json")).default as { host_permissions: string[]; version: string };
+    expect(m.host_permissions).toEqual(["https://seller.zilonix.com/*", "https://web-staging-d979.up.railway.app/*"]);
+    expect(m.version).toBe("0.3.44");
+  });
+});

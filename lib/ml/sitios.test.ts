@@ -116,3 +116,15 @@ describe("formatearNumero — agrupado de miles del idioma real, nunca es-CO fij
     expect(formatearNumero(12345, undefined)).toBe(formatearNumero(12345, SITIOS_ML[SITE_ID_DEFECTO].idioma));
   });
 });
+
+describe("siteIdDeHost", () => {
+  it("resuelve el sitio por dominio y subdominio; null si no es uno operado", async () => {
+    const { siteIdDeHost } = await import("./sitios");
+    expect(siteIdDeHost("www.mercadolibre.com.co")).toBe("MCO");
+    expect(siteIdDeHost("listado.mercadolivre.com.br")).toBe("MLB");
+    expect(siteIdDeHost("mercadolibre.cl")).toBe("MLC");
+    expect(siteIdDeHost("www.mercadolibre.com.uy")).toBeNull();
+    expect(siteIdDeHost("evilmercadolibre.com.co")).toBeNull();
+    expect(siteIdDeHost(undefined)).toBeNull();
+  });
+});

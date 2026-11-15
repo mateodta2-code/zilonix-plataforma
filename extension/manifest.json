@@ -9,6 +9,10 @@
   "permissions": [
     "storage"
   ],
+  "host_permissions": [
+    "https://seller.zilonix.com/*",
+    "https://web-staging-d979.up.railway.app/*"
+  ],
   "action": {
     "default_title": "Zilonix · abrir el panel en esta página",
     "default_icon": {
