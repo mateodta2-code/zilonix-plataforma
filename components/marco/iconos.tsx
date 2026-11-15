@@ -358,6 +358,9 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   pedidos: IconoPedidos,
   despachos: IconoDespachos,
   sku: IconoSku,
+  // Productos (módulo que agrupa SKU, inventario y bodegas) usa las
+  // cajas apiladas de inventario.
+  productos: IconoInventario,
   inventario: IconoInventario,
   bodegas: IconoBodegas,
   investigacion: IconoInvestigacion,
