@@ -57,6 +57,14 @@
   color: var(--texto-suave);
   text-decoration: none;
   flex-shrink: 0;
+  /* Se reusa en <button> (Falabella, formulario de desconectar) además
+     del <a> de Mercado Libre — reset para que no se vea como botón del
+     navegador en ese caso. */
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .desconectar:hover {
@@ -85,4 +93,44 @@
   margin-top: 6px;
   font-size: 12px;
   color: var(--peligro);
+}
+
+/* Conector Falabella (15/11) — pantalla unificada "Conectar marketplace"
+   (pedido de Sharel/Pablo, PR #415): una sección por canal, mismos
+   tokens/clases de arriba para las que ya existían. */
+.tituloCanal {
+  margin: 24px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.avisoInfo {
+  padding: 10px 14px;
+  border-radius: var(--radio-boton);
+  background: var(--superficie);
+  font-size: 13px;
+  color: var(--texto-suave);
+  margin-bottom: 14px;
+}
+
+.pasosFalabella {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.formSincronizar {
+  margin-top: 8px;
+}
+
+.formConectar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 420px;
+  margin: 20px 0;
 }

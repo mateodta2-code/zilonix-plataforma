@@ -1,7 +1,8 @@
 // Issue #255 — pasa los totales ya calculados a los textos de la
 // pantalla. No vuelve a calcular un ratio: solo formatea.
 
-import { mostrarPorcentaje } from "@/components/finanzas/formato";
+import { fechaHoraBogota, mostrarPorcentaje } from "@/components/finanzas/formato";
+import { direccionCambio } from "@/lib/publicidad/cambios";
 import type { CampanaCalculada, TableroPublicidad } from "@/lib/publicidad/consultas";
 import {
   alertaBajo70,
@@ -461,4 +462,38 @@ export function pintarRentabilidad(tablero: Pick<TableroPublicidad, "campanas" |
       };
     }),
   };
+}
+
+export type CambioPintado = {
+  id: string;
+  fecha: string;
+  campana: string;
+  que: string;
+  antes: string;
+  ahora: string;
+  direccion: string;
+  tono: "exito" | "advertencia" | "neutro";
+};
+
+// Historial de presupuesto diario y ROAS objetivo. Subir el presupuesto
+// o bajar el ROAS objetivo = la campaña puede gastar más; se marca en
+// amarillo para que se note, no como algo malo.
+export function pintarCambios(cambios: TableroPublicidad["cambios"]): CambioPintado[] {
+  return cambios.map((cambio) => {
+    const esPresupuesto = cambio.campo === "presupuesto_diario";
+    const mostrar = (valor: string | null) =>
+      valor === null ? (esPresupuesto ? "Automático o sin dato" : "Sin objetivo") : esPresupuesto ? mostrarDineroCompacto(valor) : mostrarRoas(valor);
+    const direccion = direccionCambio(cambio.valorAnterior, cambio.valorNuevo);
+    const gastaMas = esPresupuesto ? direccion === "subio" : direccion === "bajo";
+    return {
+      id: cambio.id,
+      fecha: fechaHoraBogota(cambio.detectadoTs),
+      campana: cambio.nombre,
+      que: esPresupuesto ? "Presupuesto diario" : "ROAS objetivo",
+      antes: mostrar(cambio.valorAnterior),
+      ahora: mostrar(cambio.valorNuevo),
+      direccion: direccion === "subio" ? "Subió" : direccion === "bajo" ? "Bajó" : "Cambió",
+      tono: direccion === "otro" ? "neutro" : gastaMas ? "advertencia" : "exito",
+    };
+  });
 }
