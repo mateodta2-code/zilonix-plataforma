@@ -98,7 +98,7 @@ describe("requiereSesionSuperadmin", () => {
 
 describe("cada ruta de /superadmin rechaza sin sesión", () => {
   const rutas: [string, () => Promise<unknown>][] = [
-    ["page", async () => (await import("@/app/superadmin/page")).default()],
+    ["page", async () => (await import("@/app/superadmin/page")).default({ searchParams: {} })],
     ["[empresaId]", async () => (await import("@/app/superadmin/[empresaId]/page")).default({ params: { empresaId: "x" } })],
     ["foro/page", async () => (await import("@/app/superadmin/foro/page")).default()],
     ["foro/actions", async () => (await import("@/app/superadmin/foro/actions")).cambiarVisibilidadAction(new FormData())],

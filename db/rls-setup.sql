@@ -106,6 +106,14 @@ GRANT CONNECT ON DATABASE railway TO superadmin_user;
 GRANT USAGE ON SCHEMA public TO superadmin_user;
 GRANT SELECT ON empresas, membresias, roles, usuarios, accesos_temporales TO superadmin_user;
 GRANT INSERT ON auditoria TO superadmin_user;
+-- PR B (Empresas y planes) — plan/estado/suspensión/notas son de Zilonix,
+-- no de la empresa: UPDATE por columna, solo para superadmin_user. app_user
+-- conserva UPDATE únicamente sobre nombre y nit (REVOKE de tabla primero:
+-- un REVOKE por columna no le quita un GRANT que se dio sobre la tabla
+-- entera). Script repetible: ambos pasos son idempotentes.
+REVOKE UPDATE ON empresas FROM app_user;
+GRANT UPDATE (nombre, nit) ON empresas TO app_user;
+GRANT UPDATE (plan, estado, suspendida_motivo, suspendida_ts, notas_internas) ON empresas TO superadmin_user;
 -- Foro (14-nov) — moderar es esconder, nunca borrar ni reescribir: el
 -- superadmin solo puede marcar oculta_ts/oculta_por. El foro no es
 -- dato de negocio de ninguna empresa, así que verlo no rompe D8.
@@ -685,6 +693,31 @@ CREATE POLICY trabajador_marca_procesado_avisos_ml ON avisos_ml FOR UPDATE TO tr
 -- lista hasta que se decida cómo aplica el acceso temporal sobre ella).
 DROP POLICY IF EXISTS superadmin_ve_empresas ON empresas;
 CREATE POLICY superadmin_ve_empresas ON empresas FOR SELECT TO superadmin_user USING (true);
+
+-- PR B — la única política de UPDATE de superadmin_user; lo que puede
+-- tocar lo limita el GRANT por columna de arriba, no esta política.
+DROP POLICY IF EXISTS superadmin_edita_empresas ON empresas;
+CREATE POLICY superadmin_edita_empresas ON empresas FOR UPDATE TO superadmin_user USING (true);
+
+-- PR B — conteos por empresa para la lista de /superadmin. superadmin_user
+-- NO tiene SELECT sobre cuentas_ml, cuentas_falabella ni auditoria (y no
+-- se le da): esta función SECURITY DEFINER devuelve SOLO números y una
+-- fecha por empresa — nunca una fila de cuenta, de pedido ni de comprador.
+-- search_path fijo: sin eso una función SECURITY DEFINER es secuestrable
+-- con un objeto del mismo nombre en otro esquema.
+CREATE OR REPLACE FUNCTION superadmin_resumen_empresas()
+RETURNS TABLE (empresa_id uuid, miembros bigint, cuentas_ml bigint, cuentas_falabella bigint, ultima_actividad timestamptz)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT e.id,
+    (SELECT count(*) FROM membresias m WHERE m.empresa_id = e.id),
+    (SELECT count(*) FROM cuentas_ml c WHERE c.empresa_id = e.id AND c.desconectada_ts IS NULL),
+    (SELECT count(*) FROM cuentas_falabella f WHERE f.empresa_id = e.id AND f.desconectada_ts IS NULL),
+    (SELECT max(a.ts) FROM auditoria a WHERE a.empresa_id = e.id)
+  FROM empresas e
+$fn$;
+REVOKE ALL ON FUNCTION superadmin_resumen_empresas() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION superadmin_resumen_empresas() TO superadmin_user;
 
 DROP POLICY IF EXISTS superadmin_ve_membresias ON membresias;
 CREATE POLICY superadmin_ve_membresias ON membresias FOR SELECT TO superadmin_user USING (true);

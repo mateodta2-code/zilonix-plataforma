@@ -1,12 +1,16 @@
 import { and, eq } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { membresias, permisosRol, roles } from "@/db/schema";
+import { empresas, membresias, permisosRol, roles } from "@/db/schema";
 import { permisosDeDueno } from "@/lib/roles-plantillas";
 
 export type MiMembresia = {
   rolId: string;
   rolNombre: string;
   permisos: { modulo: string; accion: string; alcance: string }[];
+  // PR B — la empresa fue suspendida por Zilonix: sus miembros siguen
+  // siendo miembros pero con CERO permisos, así que requierePermiso()
+  // les niega todos los módulos y el layout de /panel muestra el aviso.
+  empresaSuspendida?: boolean;
 };
 
 // Tarea 1.7 — lo que necesita cualquier pantalla para decidir qué
@@ -25,6 +29,11 @@ export async function obtenerMiMembresia(usuarioId: string, empresaId: string): 
 
     if (filas.length === 0) return null;
     const { rolId, rolNombre } = filas[0];
+
+    // Misma transacción: no cuesta una consulta más de conexión. Toda
+    // ruta de negocio pasa por aquí (requierePermiso/requiereDueno).
+    const [empresa] = await tx.select({ estado: empresas.estado }).from(empresas).where(eq(empresas.id, empresaId));
+    if (empresa?.estado === "suspendida") return { rolId, rolNombre, permisos: [], empresaSuspendida: true };
 
     // Diagnóstico real (Mateo, caso STOREKINGSAS/Publicidad): en
     // /panel/roles el Dueño dice "Siempre todo", pero esa etiqueta

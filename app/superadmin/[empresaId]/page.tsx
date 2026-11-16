@@ -5,7 +5,10 @@ import {
   listarEmpresasConConteo,
   obtenerMiembrosConAcceso,
   SinAccesoTemporalError,
+  PLANES,
 } from "@/lib/superadmin";
+import { FormConfirmar } from "@/components/superadmin/FormConfirmar";
+import { cambiarPlanAction, editarNotasAction, reactivarAction, suspenderAction } from "./actions";
 
 // Tarea 1.11 (decisión D8) — el criterio de "listo" de esta tarea,
 // literal: como superadmin ves "Empresa X — N miembros" siempre, pero
@@ -38,6 +41,47 @@ export default async function SuperadminEmpresaPage({ params }: { params: { empr
       <p style={{ opacity: 0.7, fontSize: 13 }}>
         NIT {empresa.nit} · {empresa.miembros} miembro{empresa.miembros === 1 ? "" : "s"}
       </p>
+
+      <p style={{ fontSize: 13, marginTop: 8 }}>
+        Plan: <strong>{empresa.plan}</strong> · Estado: <strong>{empresa.estado}</strong>
+        {empresa.estado === "suspendida" && empresa.suspendidaMotivo ? ` — ${empresa.suspendidaMotivo}` : ""}
+      </p>
+
+      <section style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+        <FormConfirmar action={cambiarPlanAction} mensaje="¿Cambiar el plan de esta empresa?">
+          <input type="hidden" name="empresaId" value={empresa.id} />
+          <label>
+            Plan{" "}
+            <select name="plan" defaultValue={empresa.plan}>
+              {PLANES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit">Cambiar plan</button>
+        </FormConfirmar>
+
+        {empresa.estado === "activa" ? (
+          <FormConfirmar action={suspenderAction} mensaje="¿Suspender esta empresa? Sus miembros no podrán usar ningún módulo.">
+            <input type="hidden" name="empresaId" value={empresa.id} />
+            <textarea name="motivo" required placeholder="Motivo de la suspensión (obligatorio)" rows={2} />
+            <button type="submit">Suspender</button>
+          </FormConfirmar>
+        ) : (
+          <FormConfirmar action={reactivarAction} mensaje="¿Reactivar esta empresa?">
+            <input type="hidden" name="empresaId" value={empresa.id} />
+            <button type="submit">Reactivar</button>
+          </FormConfirmar>
+        )}
+
+        <FormConfirmar action={editarNotasAction} mensaje="¿Guardar las notas internas?">
+          <input type="hidden" name="empresaId" value={empresa.id} />
+          <textarea name="notas" defaultValue={empresa.notasInternas ?? ""} placeholder="Notas internas (solo Zilonix)" rows={4} />
+          <button type="submit">Guardar notas</button>
+        </FormConfirmar>
+      </section>
 
       {sinAcceso ? (
         <p style={{ marginTop: 24, fontSize: 14, opacity: 0.8 }}>

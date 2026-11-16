@@ -30,8 +30,9 @@ export const obtenerContextoPanel = cache(async () => {
   const miMembresia = await obtenerMiMembresia(usuario.id, activa.id);
   const permisos = miMembresia?.permisos ?? [];
   const rolNombre = miMembresia?.rolNombre ?? "sin rol";
+  const suspendida = miMembresia?.empresaSuspendida === true;
 
   const clerkUser = await currentUser();
 
-  return { usuario, propias, activa, permisos, rolNombre, clerkUser };
+  return { usuario, propias, activa, permisos, rolNombre, suspendida, clerkUser };
 });
