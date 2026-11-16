@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { cambiarEmpresaActiva } from "@/app/panel/actions";
 import { BotonCerrarSesion } from "./BotonCerrarSesion";
@@ -12,11 +13,13 @@ export function BarraSuperior({
   empresasPropias,
   usuario,
   mostrarCampana,
+  cerrarSesion,
 }: {
-  empresaActivaId: string;
+  empresaActivaId?: string;
   empresasPropias: EmpresaSelector[];
   usuario: DatosUsuario;
   mostrarCampana: boolean;
+  cerrarSesion?: ReactNode;
 }) {
   return (
     <header className={styles.barra}>
@@ -77,7 +80,7 @@ export function BarraSuperior({
           )}
           <span className={styles.nombreUsuario}>{usuario.nombre}</span>
         </Link>
-        <BotonCerrarSesion variante="barra" />
+        {cerrarSesion ?? <BotonCerrarSesion variante="barra" />}
       </div>
     </header>
   );

@@ -98,10 +98,15 @@ describe("requiereSesionSuperadmin", () => {
 
 describe("cada ruta de /superadmin rechaza sin sesión", () => {
   const rutas: [string, () => Promise<unknown>][] = [
-    ["page", async () => (await import("@/app/superadmin/page")).default({ searchParams: {} })],
-    ["[empresaId]", async () => (await import("@/app/superadmin/[empresaId]/page")).default({ params: { empresaId: "x" } })],
-    ["foro/page", async () => (await import("@/app/superadmin/foro/page")).default()],
-    ["foro/actions", async () => (await import("@/app/superadmin/foro/actions")).cambiarVisibilidadAction(new FormData())],
+    ["inicio", async () => (await import("@/app/superadmin/(panel)/page")).default()],
+    ["empresas", async () => (await import("@/app/superadmin/(panel)/empresas/page")).default({ searchParams: {} })],
+    ["equipo", async () => (await import("@/app/superadmin/(panel)/equipo/page")).default()],
+    ["auditoria", async () => (await import("@/app/superadmin/(panel)/auditoria/page")).default()],
+    ["configuracion", async () => (await import("@/app/superadmin/(panel)/configuracion/page")).default()],
+    ["layout", async () => (await import("@/app/superadmin/(panel)/layout")).default({ children: null })],
+    ["[empresaId]", async () => (await import("@/app/superadmin/(panel)/[empresaId]/page")).default({ params: { empresaId: "x" } })],
+    ["foro/page", async () => (await import("@/app/superadmin/(panel)/foro/page")).default()],
+    ["foro/actions", async () => (await import("@/app/superadmin/(panel)/foro/actions")).cambiarVisibilidadAction(new FormData())],
     ["entrar", async () => {
       const res = await (await import("@/app/superadmin/entrar/route")).GET(new Request("https://x.test/superadmin/entrar") as never);
       expect(res.headers.get("location")).toContain("/superadmin/iniciar-sesion");
