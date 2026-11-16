@@ -572,7 +572,14 @@
       color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
       transparent 25%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 18%, #333333 30%, #666666 42%, #999999 54%, #cccccc 66%, #ffffff 78%);
+    /* 16-nov (Santiago): en px, no en % de la pantalla. Antes el gris
+       iba del ~30 % al ~78 % de la altura y todo texto suelto que caía
+       ahí no se leía (ni claro ni oscuro). Ahora: negro hasta 170px
+       (barra superior de 64px + título y descripción de la página),
+       blanco desde 270px. Mismos pasos de gris, en 100px. Los cruces
+       del menú lateral (BarraLateral.tsx, CRUCE_ZONA_CLARA_PX) siguen
+       estos valores. */
+    linear-gradient(180deg, #000000 0px, #000000 170px, #333333 190px, #666666 210px, #999999 230px, #cccccc 250px, #ffffff 270px);
   --fondo-app-medio:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
     linear-gradient(
@@ -583,7 +590,7 @@
       color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
       transparent 50%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 20%, #333333 33%, #666666 46%, #999999 58%, #cccccc 71%, #ffffff 84%);
+    linear-gradient(180deg, #000000 0px, #000000 190px, #333333 210px, #666666 230px, #999999 250px, #cccccc 270px, #ffffff 290px);
   --fondo-app-intenso:
     linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
     radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
@@ -596,7 +603,7 @@
       color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
       transparent 70%
     ),
-    linear-gradient(180deg, #000000 0%, #000000 22%, #333333 36%, #666666 50%, #999999 64%, #cccccc 78%, #ffffff 92%);
+    linear-gradient(180deg, #000000 0px, #000000 210px, #333333 230px, #666666 250px, #999999 270px, #cccccc 290px, #ffffff 310px);
   /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
      arriba: sin atributo data-fondo, gana el suave. */
   --fondo-app: var(--fondo-app-suave);
