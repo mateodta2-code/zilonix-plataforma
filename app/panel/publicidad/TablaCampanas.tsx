@@ -45,6 +45,7 @@ export function TablaAnuncios({ campanas }: { campanas: CampanaPintada[] }) {
         num("ingresos", "Ingresos"),
         num("roas", "ROAS"),
         num("acos", "ACOS"),
+        num("margen", "Margen"),
         "Aviso",
       ]}
       scroll
@@ -66,12 +67,24 @@ export function TablaAnuncios({ campanas }: { campanas: CampanaPintada[] }) {
           <CeldaTabla numerica>{anuncio.ingresos}</CeldaTabla>
           <CeldaTabla numerica>{anuncio.roas}</CeldaTabla>
           <CeldaTabla numerica>{anuncio.acos}</CeldaTabla>
+          <CeldaTabla numerica>
+            <CeldaMargen anuncio={anuncio} />
+          </CeldaTabla>
           <CeldaTabla>
             <AvisosAnuncio anuncio={anuncio} />
           </CeldaTabla>
         </FilaTabla>
       ))}
     </Tabla>
+  );
+}
+
+// Semáforo de productos: margen de ganancia real contra la meta.
+function CeldaMargen({ anuncio }: { anuncio: Pick<CampanaPintada["anuncios"][number], "margen" | "margenTono" | "margenTitulo"> }) {
+  return (
+    <Chip estado={anuncio.margenTono} title={anuncio.margenTitulo}>
+      {anuncio.margen}
+    </Chip>
   );
 }
 
@@ -187,6 +200,7 @@ function FilaGrupo({
                     num(`unid-${campana.id}`, <span title="Unidades con publicidad">Unid.</span>),
                     num(`roas-${campana.id}`, "ROAS"),
                     num(`acos-${campana.id}`, "ACOS"),
+                    num(`margen-${campana.id}`, "Margen"),
                     {
                       clave: `aviso-${campana.id}`,
                       contenido: (
@@ -220,6 +234,9 @@ function FilaGrupo({
                       <CeldaTabla numerica>{anuncio.unidades}</CeldaTabla>
                       <CeldaTabla numerica>{anuncio.roas}</CeldaTabla>
                       <CeldaTabla numerica>{anuncio.acos}</CeldaTabla>
+                      <CeldaTabla numerica>
+                        <CeldaMargen anuncio={anuncio} />
+                      </CeldaTabla>
                       <CeldaTabla>
                         <AvisosAnuncio anuncio={anuncio} />
                         <Chip estado={anuncio.semaforoEstado} title={anuncio.semaforoTitle}>
@@ -308,8 +325,16 @@ function ListaRecomendaciones({ titulo, items }: { titulo?: string; items: Campa
 }
 
 function tonoRecomendacion(codigo: CampanaPintada["recomendaciones"][number]["codigo"]): "peligro" | "acento" | "neutro" {
-  if (codigo === "aprendizaje" || codigo === "nota_vende_bien" || codigo === "nota_vende_antartida") return "neutro";
-  if (codigo === "subir_objetivo" || codigo === "renombrar_vendedor") return "acento";
+  if (
+    codigo === "aprendizaje" ||
+    codigo === "dejar_igual" ||
+    codigo === "vigilar" ||
+    codigo === "nota_vende_bien" ||
+    codigo === "nota_vende_antartida"
+  ) {
+    return "neutro";
+  }
+  if (codigo === "renombrar_vendedor") return "acento";
   if (codigo === "campana_repetida") return "peligro";
   return "peligro";
 }

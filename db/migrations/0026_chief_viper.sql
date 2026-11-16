@@ -1,0 +1,2 @@
+ALTER TABLE "configuracion_finanzas" ADD COLUMN "meta_margen_publicidad" numeric(5, 4);--> statement-breakpoint
+ALTER TABLE "configuracion_finanzas" ADD CONSTRAINT "configuracion_finanzas_meta_margen_rango" CHECK ("configuracion_finanzas"."meta_margen_publicidad" IS NULL OR ("configuracion_finanzas"."meta_margen_publicidad" > 0 AND "configuracion_finanzas"."meta_margen_publicidad" < 1));

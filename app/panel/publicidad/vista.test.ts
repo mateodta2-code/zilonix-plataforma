@@ -149,7 +149,7 @@ describe("textos del tablero de publicidad (issue #255)", () => {
     expect(pintada.cpc).toBe("$339");
     expect(pintada.roas).toBe("9,85x");
     expect(pintada.roasObjetivo).toBe("objetivo 12,00x");
-    expect(pintada.estadoFrase).toBe("Bajo objetivo, falta 18 %");
+    expect(pintada.estadoFrase).toBe("Vigilar, falta 18 %");
     expect(pintada.ventasSinPublicidad).toBe("$724.084");
     expect(pintada.unidades).toBe("12");
   });
@@ -167,6 +167,7 @@ describe("textos del tablero de publicidad (issue #255)", () => {
       totales: { ...vacio, gasto: "10.00", ventasPublicidad: "0.00", ventasCantidad: "0" },
       ultimosDias: { ...vacio, gasto: "10.00", ventasPublicidad: "0.00", ventasCantidad: "0" },
       semaforo: { estado: "neutro" as const, motivo: "sin_precio" as const },
+      margen: { tipo: "sin_costo" as const },
     };
     const base = {
       id: "1",

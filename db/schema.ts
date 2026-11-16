@@ -272,6 +272,10 @@ export const configuracionFinanzas = pgTable(
     avisoWhatsappActivo: boolean("aviso_whatsapp_activo"),
     avisoCorreoDestino: text("aviso_correo_destino"),
     avisoWhatsappDestino: text("aviso_whatsapp_destino"),
+    // Semáforo de productos de Publicidad (16-nov): meta de margen de
+    // ganancia real, en fracción (0.3000 = 30 %). Vacío = la de
+    // lib/publicidad/config.ts (META_MARGEN_DEFECTO).
+    metaMargenPublicidad: numeric("meta_margen_publicidad", { precision: 5, scale: 4 }),
     actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadaPor: uuid("actualizada_por").references(() => usuarios.id, { onDelete: "set null" }),
   },
@@ -281,6 +285,10 @@ export const configuracionFinanzas = pgTable(
     ivaRango: check(
       "configuracion_finanzas_iva_rango",
       sql`${t.ivaPublicidad} IS NULL OR (${t.ivaPublicidad} >= 0 AND ${t.ivaPublicidad} <= 100)`
+    ),
+    metaMargenRango: check(
+      "configuracion_finanzas_meta_margen_rango",
+      sql`${t.metaMargenPublicidad} IS NULL OR (${t.metaMargenPublicidad} > 0 AND ${t.metaMargenPublicidad} < 1)`
     ),
   })
 );

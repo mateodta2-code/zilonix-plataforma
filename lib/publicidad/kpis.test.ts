@@ -224,12 +224,12 @@ describe("diagnóstico de campaña", () => {
       dia({ costo: "100.00", montoTotal: "200.00", ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 }),
     ]);
     expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: justo }).tipo).toBe("en_objetivo");
-    // Semáforo de tres colores: 90 % y 70 % del objetivo (2,00x).
+    // Semáforo de tres colores: 100 % y 70 % del objetivo (2,00x).
     const conMonto = (monto: string) =>
       totalesDeDias([dia({ costo: "100.00", montoTotal: monto, ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 })]);
-    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("199.00") }).tipo).toBe("en_objetivo");
-    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("180.00") }).tipo).toBe("en_objetivo");
-    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("179.00") }).tipo).toBe("bajo_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("200.00") }).tipo).toBe("en_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("199.00") }).tipo).toBe("bajo_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("180.00") }).tipo).toBe("bajo_objetivo");
     expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("140.00") }).tipo).toBe("bajo_objetivo");
     expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("139.00") }).tipo).toBe("muy_bajo");
     expect(diagnosticarCampana({ ...base, roasObjetivo: null, totales: conGasto }).tipo).toBe("sin_objetivo");
@@ -276,13 +276,14 @@ describe("frase de estado y datos nuevos del rango (issue #255)", () => {
       roasObjetivo: "12.00",
       diasAprendizaje: 7,
     });
-    expect(bajo.frase).toBe("Bajo objetivo, falta 18 %");
+    expect(bajo.frase).toBe("Vigilar, falta 18 %");
     expect(bajo.tono).toBe("advertencia");
     expect(bajo.avance).toBe(82);
 
-    const casi = fraseEstado({ diagnostico: { tipo: "en_objetivo", dias: 0 }, roas: "11.00", roasObjetivo: "12.00", diasAprendizaje: 7 });
-    expect(casi.frase).toBe("En objetivo, falta 8 %");
-    expect(casi.tono).toBe("exito");
+    // Al 92 % ya no es verde: el verde empieza en el 100 % del objetivo.
+    const casi = fraseEstado({ diagnostico: { tipo: "bajo_objetivo", dias: 0 }, roas: "11.00", roasObjetivo: "12.00", diasAprendizaje: 7 });
+    expect(casi.frase).toBe("Vigilar, falta 8 %");
+    expect(casi.tono).toBe("advertencia");
     const muyBajo = fraseEstado({ diagnostico: { tipo: "muy_bajo", dias: 0 }, roas: "6.87", roasObjetivo: "12.00", diasAprendizaje: 7 });
     expect(muyBajo.frase).toBe("Muy bajo, falta 43 %");
     expect(muyBajo.tono).toBe("peligro");
@@ -306,7 +307,7 @@ describe("frase de estado y datos nuevos del rango (issue #255)", () => {
       diasAprendizaje: 7,
     });
     expect(aprendiendo.frase).toBe("Aprendiendo, día 1 de 7, no tocar todavía");
-    expect(aprendiendo.tono).toBe("acento");
+    expect(aprendiendo.tono).toBe("neutro");
     expect(aprendiendo.avance).toBeNull();
     expect(fraseEstado({ diagnostico: { tipo: "sin_datos", dias: 0 }, roas: null, roasObjetivo: null, diasAprendizaje: 7 }).frase).toBe(
       "Sin datos"
@@ -467,19 +468,19 @@ describe("alertas de solo lectura (issue #255)", () => {
     expect(detalleDiagnostico({ diagnostico: { tipo: "aprendiendo", dias: 6 }, diasAprendizaje: 7, alertaBajo70: false })).toEqual({
       pill: "APRENDIENDO",
       detalle: "Tu campaña se estabilizará en 1 día",
-      tono: "aviso",
+      tono: "neutro",
     });
     expect(detalleDiagnostico({ diagnostico: { tipo: "aprendiendo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true }).detalle).toBe(
       "Tu campaña se estabilizará en 7 días"
     );
     expect(detalleDiagnostico({ diagnostico: { tipo: "muy_bajo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true })).toEqual({
       pill: "Muy bajo",
-      detalle: "Bajo el 70 % del objetivo",
+      detalle: "Bajo el 70 % del objetivo: apagar y crear una nueva",
       tono: "peligro",
     });
     expect(detalleDiagnostico({ diagnostico: { tipo: "bajo_objetivo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false })).toEqual({
       pill: "Bajo objetivo",
-      detalle: "Entre el 70 % y el 90 % del objetivo",
+      detalle: "Entre el 70 % y el 100 % del objetivo: vigilar",
       tono: "advertencia",
     });
     expect(detalleDiagnostico({ diagnostico: { tipo: "excelente", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).pill).toBe("Excelente");
@@ -507,11 +508,14 @@ describe("orden y configuración", () => {
     expect(resolverDireccion(null, "inversion")).toBe("desc");
     expect(resolverDireccion("asc", "inversion")).toBe("asc");
     expect(resolverDireccion("lado", "campana")).toBe("asc");
-    const leidos = leerParametrosPublicidad({ mes: "basura", orden: "acos", dir: "asc", pausadas: "1" }, new Date("2026-10-29T15:00:00-05:00"));
+    // Siempre lo corrido del mes y solo activas: ?mes= y ?pausadas= se ignoran.
+    const leidos = leerParametrosPublicidad({ mes: "2026-08", orden: "acos", dir: "asc", pausadas: "1", vista: "todas" }, new Date("2026-10-29T15:00:00-05:00"));
     expect(leidos.periodo.mes).toBe("2026-10");
+    expect(leidos.periodo.desde).toBe("2026-10-01");
     expect(leidos.orden).toBe("acos");
     expect(leidos.dir).toBe("asc");
-    expect(leidos.incluirPausadas).toBe(true);
+    expect(leidos.incluirPausadas).toBe(false);
+    expect(leidos.filtro).toBe("activas");
     expect(hrefPublicidad({ cuenta: "abc", orden: "inversion", dir: "desc" })).toBe("/panel/publicidad?cuenta=abc");
   });
 

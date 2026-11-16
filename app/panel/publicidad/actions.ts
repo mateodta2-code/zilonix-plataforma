@@ -6,6 +6,9 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { AVISO_REFRESCO_FALLIDO, textoErrorCorto } from "@/lib/publicidad/plan";
+import { dbComoEmpresa } from "@/db/empresa-context";
+import { configuracionFinanzas } from "@/db/schema";
+import { leerMetaMargen, META_MAXIMA_PCT, META_MINIMA_PCT } from "@/lib/publicidad/meta-margen";
 
 // Issue #254 — refresco manual, mínimo para probar la capa de datos
 // antes de la pantalla de la fase 2. El permiso es consultar: esta
@@ -60,4 +63,47 @@ export async function actualizarPublicidadAction(formData: FormData): Promise<Re
         : AVISO_REFRESCO_FALLIDO,
     };
   }
+}
+
+export type ResultadoMeta = { ok: boolean; aviso: string };
+
+// Semáforo de productos (16-nov): cada comercio fija su meta de margen.
+// Solo quien puede modificar Publicidad. No toca Mercado Libre.
+export async function guardarMetaMargenAction(formData: FormData): Promise<ResultadoMeta> {
+  const usuario = await obtenerOCrearUsuarioActual();
+  if (!usuario) redirect("/sign-in");
+
+  const propias = await listarEmpresasDeUsuario(usuario.id);
+  const empresaIdCookie = cookies().get("empresa_actual")?.value;
+  const empresa = propias.find((e) => e.id === empresaIdCookie) ?? propias[0];
+  if (!empresa) redirect("/crear-empresa");
+
+  try {
+    await requierePermiso(usuario.id, empresa.id, "publicidad", "modificar");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
+    return { ok: false, aviso: "No tenés permiso para cambiar la meta de margen." };
+  }
+
+  const texto = formData.get("meta");
+  const meta = typeof texto === "string" ? leerMetaMargen(texto) : null;
+  if (meta === null) {
+    return { ok: false, aviso: `Escribí un porcentaje entre ${META_MINIMA_PCT} y ${META_MAXIMA_PCT}.` };
+  }
+
+  try {
+    await dbComoEmpresa(empresa.id, (tx) =>
+      tx
+        .insert(configuracionFinanzas)
+        .values({ empresaId: empresa.id, metaMargenPublicidad: meta, actualizadaPor: usuario.id })
+        .onConflictDoUpdate({
+          target: configuracionFinanzas.empresaId,
+          set: { metaMargenPublicidad: meta, actualizadaTs: new Date(), actualizadaPor: usuario.id },
+        })
+    );
+  } catch (error) {
+    console.error("[app/panel/publicidad] Guardar meta de margen falló:", textoErrorCorto(error));
+    return { ok: false, aviso: "No se pudo guardar la meta. Probá de nuevo en un momento." };
+  }
+  return { ok: true, aviso: "Meta guardada. El semáforo de productos ya usa la nueva meta." };
 }
