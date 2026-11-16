@@ -19,6 +19,14 @@ No toca presupuesto, estado, ROAS objetivo ni anuncios. Si otro campo aparece ca
 
 ## Cómo se corre
 
+Para sacar los uuid de `--empresa` y `--cuenta` (solo lectura):
+
+```bash
+npx tsx scripts/buscar-cuenta-ml.ts --nickname=FMCBIENESTAR
+```
+
+En staging se puede correr dentro del servicio web, que ya tiene las variables: `railway ssh --environment staging --service "web " -- npx tsx scripts/...` (el nombre del servicio lleva un espacio al final).
+
 Primero en modo lectura. No cambia nada: muestra la campaña y el plan.
 
 ```bash
