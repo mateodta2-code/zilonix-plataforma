@@ -154,7 +154,8 @@ describe("middleware — coincidencia de rutas tras @clerk/nextjs 6.39.8 (CVE-20
       if (redirectToSignIn.mock.calls.length > 0) return "bloqueada";
       if (respuesta && respuesta.status >= 400) return "bloqueada";
       // /superadmin tiene su login aparte: sin sesión redirige ahí, no a redirectToSignIn.
-      if (respuesta?.headers.get("location")?.includes("/superadmin/iniciar-sesion")) return "bloqueada";
+      // Igual /bodega y /domiciliario: cada uno con su login.
+      if (/\/(superadmin|bodega|domiciliario)\/iniciar-sesion/.test(respuesta?.headers.get("location") ?? "")) return "bloqueada";
       return "pasa";
     } catch (error) {
       // No solo new NextRequest(...) puede tirar esto: el matcher
@@ -205,6 +206,9 @@ describe("middleware — coincidencia de rutas tras @clerk/nextjs 6.39.8 (CVE-20
       "/cuenta",
       "/crear-empresa",
       "/superadmin",
+      "/bodega",
+      "/bodega/personas",
+      "/domiciliario",
       "/api/ml/conectar",
       "/api/ml/despachos/etiquetas",
       "/PANEL",
@@ -264,5 +268,41 @@ describe("middleware — redirecciones de /superadmin con la base pública", () 
     const { auth } = authFalso(null);
     const res = await middleware(auth, peticion("http://localhost:8080/superadmin"));
     expect(res?.headers.get("location")).toBe("https://staging.zilonix.test/superadmin/iniciar-sesion");
+  });
+});
+
+describe("middleware — /bodega y /domiciliario cerrados por defecto, con login propio", () => {
+  const envOriginal = { ...process.env };
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...envOriginal, RAILWAY_PUBLIC_DOMAIN: "staging.zilonix.test" };
+    delete process.env.APP_URL;
+    delete process.env.PUBLIC_APP_URL;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+  });
+  afterEach(() => {
+    process.env = { ...envOriginal };
+  });
+
+  it.each([
+    ["/bodega", "/bodega/iniciar-sesion"],
+    ["/bodega/personas", "/bodega/iniciar-sesion"],
+    ["/domiciliario", "/domiciliario/iniciar-sesion"],
+  ])("sin sesión, %s redirige a su login en el dominio público (nunca req.url ni /sign-in)", async (ruta, login) => {
+    const middleware = await cargarMiddleware();
+    const { auth, redirectToSignIn } = authFalso(null);
+    const res = await middleware(auth, peticion(`http://localhost:8080${ruta}`));
+    expect(res?.headers.get("location")).toBe(`https://staging.zilonix.test${login}`);
+    expect(redirectToSignIn).not.toHaveBeenCalled();
+  });
+
+  it("los logins y la invitación son públicos", async () => {
+    const middleware = await cargarMiddleware();
+    for (const ruta of ["/bodega/iniciar-sesion", "/domiciliario/iniciar-sesion/factor-uno", "/invitacion-bodega/un-token"]) {
+      const { auth, redirectToSignIn } = authFalso(null);
+      const res = await middleware(auth, peticion(`https://staging.zilonix.test${ruta}`));
+      expect(res?.status ?? 200, ruta).not.toBe(307);
+      expect(redirectToSignIn, ruta).not.toHaveBeenCalled();
+    }
   });
 });

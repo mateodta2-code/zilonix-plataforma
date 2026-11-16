@@ -47,6 +47,12 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // entero). Sin sesión de Clerk la página solo muestra <SignIn/>;
   // el acceso real lo decide requiereSesionSuperadmin().
   "/superadmin/iniciar-sesion(.*)",
+  // Logins APARTE de bodega y domiciliario (solo estas rutas, no
+  // /bodega ni /domiciliario enteros — esos siguen cerrados) y la
+  // página de aceptar invitación: el token en la URL es el permiso.
+  "/bodega/iniciar-sesion(.*)",
+  "/domiciliario/iniciar-sesion(.*)",
+  "/invitacion-bodega(.*)",
   "/empezar",
   // Tarea 1.7 — quien recibe una invitación por correo todavía no
   // tiene sesión (puede ni tener cuenta). La propia página valida el

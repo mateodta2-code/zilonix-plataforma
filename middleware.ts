@@ -73,6 +73,15 @@ const RUTA_WEBHOOKS_ML = "/api/ml/webhooks";
 const LIMITE_WEBHOOKS_ML = 1200;
 const contadorWebhooksMl = creaContador();
 
+// /bodega y /domiciliario (y solo ellos: segmento completo) mandan al
+// login propio de su panel, nunca a /sign-in.
+function rutaLoginPropia(pathname: string): string | null {
+  for (const panel of ["bodega", "domiciliario"]) {
+    if (pathname === `/${panel}` || pathname.startsWith(`/${panel}/`)) return `/${panel}/iniciar-sesion`;
+  }
+  return null;
+}
+
 export default clerkMiddleware(async (auth, req) => {
   // Opcional/deseable (digest 960283135, bug real en vivo en staging):
   // Clerk completa ciertos pasos de login (SSO, verificación por link)
@@ -91,7 +100,9 @@ export default clerkMiddleware(async (auth, req) => {
     req.nextUrl.pathname.endsWith("/sso-callback") &&
     !req.nextUrl.pathname.startsWith("/sign-in") &&
     !req.nextUrl.pathname.startsWith("/sign-up") &&
-    !req.nextUrl.pathname.startsWith("/superadmin/iniciar-sesion")
+    !req.nextUrl.pathname.startsWith("/superadmin/iniciar-sesion") &&
+    !req.nextUrl.pathname.startsWith("/bodega/iniciar-sesion") &&
+    !req.nextUrl.pathname.startsWith("/domiciliario/iniciar-sesion")
   ) {
     const destino = new URL("/sign-in/sso-callback", urlPublicaBaseDesdeMiddleware(req));
     destino.search = req.nextUrl.search;
@@ -146,6 +157,11 @@ export default clerkMiddleware(async (auth, req) => {
     // El panel superadmin tiene su login aparte: nunca /sign-in.
     if (req.nextUrl.pathname.startsWith("/superadmin")) {
       return NextResponse.redirect(new URL("/superadmin/iniciar-sesion", urlPublicaBaseDesdeMiddleware(req)));
+    }
+    // Bodega y domiciliario también tienen login aparte.
+    const loginPropio = rutaLoginPropia(req.nextUrl.pathname);
+    if (loginPropio) {
+      return NextResponse.redirect(new URL(loginPropio, urlPublicaBaseDesdeMiddleware(req)));
     }
     return sesion.redirectToSignIn({ returnBackUrl: `${urlPublicaBaseDesdeMiddleware(req)}${req.nextUrl.pathname}${req.nextUrl.search}` });
   }
