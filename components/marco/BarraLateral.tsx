@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { iconoDeClave, IconoContraer } from "./iconos";
 import { ItemNavLink } from "./ItemNavLink";
 import { SelectorTema } from "./SelectorTema";
@@ -9,6 +9,12 @@ import styles from "./BarraLateral.module.css";
 import type { GrupoNav } from "./tipos";
 
 const CLAVE_COLAPSADA = "zilonix-barra-colapsada";
+
+// Tema claro: el fondo de la barra es el degradado fijo de la página,
+// negro arriba y blanco abajo. Altura (fracción de la pantalla) desde la
+// que el texto oscuro lee mejor que el claro, por intensidad de fondo:
+// el gris medio (#777) cae ahí en cada rampa de --fondo-app-* de claro.
+const CRUCE_ZONA_CLARA: Record<string, number> = { suave: 0.47, medio: 0.51, intenso: 0.55 };
 
 export function BarraLateral({
   grupos,
@@ -25,6 +31,7 @@ export function BarraLateral({
   // cambia, no colores de toda la pantalla, así que no hace falta el
   // script en <head> que sí necesita el tema.
   const [colapsada, setColapsada] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     try {
@@ -33,6 +40,49 @@ export function BarraLateral({
       // Storage bloqueado — se queda expandida.
     }
   }, []);
+
+  // Cada ítem del menú marca data-zona ("oscura" o "clara") según dónde
+  // cae DE VERDAD sobre el degradado, no por grupo: con muchos módulos o
+  // una pantalla baja, los últimos del grupo principal bajaban a la zona
+  // blanca con texto claro y no se leían (16-nov). Se recalcula al
+  // desplazar el menú, al cambiar el tamaño, el tema o el fondo, y al
+  // abrir un submenú. En oscuro no se marca nada.
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const raiz = document.documentElement;
+    const selector = `.${styles.item}, .${styles.subitem}, .${styles.etiquetaGrupo}`;
+    let pendiente = 0;
+    function marcar() {
+      pendiente = 0;
+      const elementos = nav!.querySelectorAll<HTMLElement>(selector);
+      if (raiz.dataset.tema !== "claro") {
+        elementos.forEach((el) => el.removeAttribute("data-zona"));
+        return;
+      }
+      const cruce = CRUCE_ZONA_CLARA[raiz.dataset.fondo ?? "suave"] ?? CRUCE_ZONA_CLARA.suave;
+      const alto = window.innerHeight || 1;
+      elementos.forEach((el) => {
+        const caja = el.getBoundingClientRect();
+        el.dataset.zona = (caja.top + caja.bottom) / 2 / alto < cruce ? "oscura" : "clara";
+      });
+    }
+    function programar() {
+      if (!pendiente) pendiente = window.requestAnimationFrame(marcar);
+    }
+    marcar();
+    nav.addEventListener("scroll", programar, { passive: true });
+    window.addEventListener("resize", programar);
+    const observador = new MutationObserver(programar);
+    observador.observe(raiz, { attributes: true, attributeFilter: ["data-tema", "data-fondo"] });
+    observador.observe(nav, { childList: true, subtree: true });
+    return () => {
+      nav.removeEventListener("scroll", programar);
+      window.removeEventListener("resize", programar);
+      observador.disconnect();
+      if (pendiente) window.cancelAnimationFrame(pendiente);
+    };
+  }, [colapsada, grupos]);
 
   function alternarColapso() {
     const siguiente = !colapsada;
@@ -75,7 +125,7 @@ export function BarraLateral({
       </div>
       {etiquetaPanel && !colapsada && <p className={`zx-etiqueta ${styles.tipoPanel}`}>{etiquetaPanel}</p>}
 
-      <nav className={styles.nav}>
+      <nav ref={navRef} className={styles.nav}>
         {grupos.map((grupo, indice) => (
           <div key={grupo.etiqueta ?? `grupo-${indice}`} className={styles.grupo}>
             {grupo.etiqueta && !colapsada && <p className={`zx-etiqueta ${styles.etiquetaGrupo}`}>{grupo.etiqueta}</p>}

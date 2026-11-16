@@ -433,3 +433,47 @@ html .subitem {
     display: none !important;
   }
 }
+
+/* Tema claro, por POSICIÓN (16-nov): BarraLateral.tsx marca cada ítem
+   con data-zona según dónde cae de verdad sobre el degradado (negro
+   arriba, blanco abajo). Reemplaza la aproximación por grupo de arriba,
+   que dejaba texto claro sobre blanco cuando el grupo principal bajaba
+   a la zona clara (pantalla baja, muchos módulos). Van al final para
+   ganarle a esas reglas con la misma especificidad. */
+:root[data-tema="claro"] .nav .item[data-zona="oscura"],
+:root[data-tema="claro"] .nav .subitem[data-zona="oscura"] {
+  color: var(--icono-hover-zona-oscura);
+}
+
+:root[data-tema="claro"] .nav .etiquetaGrupo[data-zona="oscura"] {
+  color: var(--texto-suave-zona-oscura);
+}
+
+:root[data-tema="claro"] .nav .item[data-zona="oscura"]:hover,
+:root[data-tema="claro"] .nav .subitem[data-zona="oscura"]:hover {
+  background: var(--acento-suave-zona-oscura);
+  color: var(--texto-zona-oscura);
+}
+
+:root[data-tema="claro"] .nav .item[data-zona="oscura"][data-activo="true"],
+:root[data-tema="claro"] .nav .subitem[data-zona="oscura"][data-activo="true"] {
+  color: var(--icono-activo-zona-oscura);
+}
+
+:root[data-tema="claro"] .nav .item[data-zona="clara"],
+:root[data-tema="claro"] .nav .subitem[data-zona="clara"],
+:root[data-tema="claro"] .nav .etiquetaGrupo[data-zona="clara"] {
+  color: var(--texto);
+}
+
+:root[data-tema="claro"] .nav .item[data-zona="clara"]:hover,
+:root[data-tema="claro"] .nav .subitem[data-zona="clara"]:hover {
+  background: var(--superficie-2);
+  color: var(--icono-hover);
+}
+
+:root[data-tema="claro"] .nav .item[data-zona="clara"][data-activo="true"],
+:root[data-tema="claro"] .nav .subitem[data-zona="clara"][data-activo="true"] {
+  color: var(--icono-activo);
+}
+
