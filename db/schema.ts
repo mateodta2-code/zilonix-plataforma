@@ -98,7 +98,19 @@ export const empresas = pgTable("empresas", {
   // este comentario y deja la confirmación de la lectura en Mateo.
   nit: text("nit").notNull().unique(),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
-});
+  // PR B (Empresas y planes) — el plan es SOLO una etiqueta que pone
+  // Zilonix a mano: no hay tabla de planes, precios, límites ni cobros.
+  // Solo superadmin_user puede cambiar estas 5 columnas (GRANT UPDATE por
+  // columna en db/rls-setup.sql); app_user no.
+  plan: text("plan").notNull().default("prueba"),
+  estado: text("estado").notNull().default("activa"),
+  suspendidaMotivo: text("suspendida_motivo"),
+  suspendidaTs: timestamp("suspendida_ts", { withTimezone: true }),
+  notasInternas: text("notas_internas"),
+}, (t) => ({
+  planValido: check("empresas_plan_valido", sql`${t.plan} in ('prueba', 'basico', 'pro', 'empresarial')`),
+  estadoValido: check("empresas_estado_valido", sql`${t.estado} in ('activa', 'suspendida')`),
+}));
 
 // No pertenecen a una sola empresa — un mismo usuario puede estar en
 // varias (D2: "un login, varias empresas, cambio en 1 clic").

@@ -24,7 +24,18 @@ import { SECCIONES_PRODUCTOS } from "@/components/productos/secciones";
 // para que layout y page, pintándose juntos en la misma petición, hagan
 // esta consulta UNA sola vez en vez de dos.
 export default async function PanelLayout({ children }: { children: React.ReactNode }) {
-  const { usuario, propias, activa, permisos, rolNombre, clerkUser } = await obtenerContextoPanel();
+  const { usuario, propias, activa, permisos, rolNombre, suspendida, clerkUser } = await obtenerContextoPanel();
+
+  // PR B — empresa suspendida por Zilonix: ningún módulo, solo el aviso.
+  // Los children (las páginas) ni se renderizan, y además
+  // requierePermiso() les niega todo (lib/membresias.ts).
+  if (suspendida) {
+    return (
+      <main style={{ maxWidth: 480, margin: "0 auto", padding: "96px 24px", textAlign: "center" }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Tu cuenta está suspendida. Escríbenos a soporte.</h1>
+      </main>
+    );
+  }
   const esDueno = rolNombre === "Dueño";
 
   const vePedidosYDespachos = tienePermiso(permisos, "ventas", "consultar");

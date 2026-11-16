@@ -37,25 +37,62 @@ export async function requiereSuperadmin(usuarioId: string): Promise<void> {
   if (!fila?.esSuperadmin) throw new NoEsSuperadminError();
 }
 
-export type EmpresaConConteo = { id: string; nombre: string; nit: string; creadoTs: Date; miembros: number };
+export const PLANES = ["prueba", "basico", "pro", "empresarial"] as const;
+export type Plan = (typeof PLANES)[number];
+export const ESTADOS_EMPRESA = ["activa", "suspendida"] as const;
+export type EstadoEmpresa = (typeof ESTADOS_EMPRESA)[number];
+
+export type EmpresaConConteo = {
+  id: string;
+  nombre: string;
+  nit: string;
+  creadoTs: Date;
+  plan: Plan;
+  estado: EstadoEmpresa;
+  suspendidaMotivo: string | null;
+  suspendidaTs: Date | null;
+  notasInternas: string | null;
+  miembros: number;
+  cuentasMl: number;
+  cuentasFalabella: number;
+  ultimaActividad: Date | null;
+};
 
 // Lo único que el superadmin ve SIEMPRE, sin pedir nada a nadie: las
-// cifras agregadas (decisión D8). Hoy "agregado" es cuántos miembros
-// tiene cada empresa — no hay todavía ventas/pedidos reales (llegan
-// en Fase 2); cuando lleguen, se suman a esta misma lista sin cambiar
-// el mecanismo.
+// cifras agregadas (decisión D8). Los conteos de cuentas y la última
+// actividad salen de superadmin_resumen_empresas() (db/rls-setup.sql, SECURITY
+// DEFINER): superadmin_user no tiene SELECT sobre cuentas_ml, cuentas_falabella
+// ni auditoria, así que la base solo le entrega números y una fecha.
 export async function listarEmpresasConConteo(): Promise<EmpresaConConteo[]> {
-  return dbSuperadmin
-    .select({
-      id: empresas.id,
-      nombre: empresas.nombre,
-      nit: empresas.nit,
-      creadoTs: empresas.creadoTs,
-      miembros: sql<number>`count(${membresias.id})`.mapWith(Number),
+  const filas = await dbSuperadmin.select().from(empresas);
+  const resumen = (await dbSuperadmin.execute(sql`select * from superadmin_resumen_empresas()`)) as unknown as {
+    empresa_id: string;
+    miembros: string | number;
+    cuentas_ml: string | number;
+    cuentas_falabella: string | number;
+    ultima_actividad: Date | string | null;
+  }[];
+  const porEmpresa = new Map(resumen.map((r) => [r.empresa_id, r]));
+  return filas
+    .map((e) => {
+      const r = porEmpresa.get(e.id);
+      return {
+        id: e.id,
+        nombre: e.nombre,
+        nit: e.nit,
+        creadoTs: e.creadoTs,
+        plan: e.plan as Plan,
+        estado: e.estado as EstadoEmpresa,
+        suspendidaMotivo: e.suspendidaMotivo,
+        suspendidaTs: e.suspendidaTs,
+        notasInternas: e.notasInternas,
+        miembros: Number(r?.miembros ?? 0),
+        cuentasMl: Number(r?.cuentas_ml ?? 0),
+        cuentasFalabella: Number(r?.cuentas_falabella ?? 0),
+        ultimaActividad: r?.ultima_actividad ? new Date(r.ultima_actividad) : null,
+      };
     })
-    .from(empresas)
-    .leftJoin(membresias, eq(membresias.empresaId, empresas.id))
-    .groupBy(empresas.id, empresas.nombre, empresas.nit, empresas.creadoTs);
+    .sort((a, b) => b.creadoTs.getTime() - a.creadoTs.getTime());
 }
 
 export type MiembroDeEmpresa = { nombre: string; email: string; rolNombre: string };
