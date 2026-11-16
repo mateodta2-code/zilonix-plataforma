@@ -2,15 +2,13 @@
    azul metálico de la página (body::before, --fondo-app) tiene que
    asomar desde el borde de arriba, y estos elementos flotan encima,
    transparentes. body::before es fixed al viewport (nunca se mueve
-   con el scroll), así que esto puede seguir sticky sin perder el
-   azul detrás en ningún momento del scroll. Cada hijo (botón, select,
+   con el scroll). La barra ya NO es sticky: queda en el flujo normal,
+   arriba de la página, y sube con el contenido al hacer scroll para
+   que nunca se monte encima de las tarjetas. Cada hijo (botón, select,
    el buscador) sigue con su propio fondo opaco (--superficie-2) — por
    eso siguen viéndose como controles, solo que ya no hay una barra
    entera pintada debajo de ellos. */
 .barra {
-  position: sticky;
-  top: 0;
-  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -33,7 +31,7 @@
    dos tamaños), así que esta clase puede ser directamente el tamaño
    grande, sin un segundo "modo compacto". 32px (dentro del rango
    28-36px pedido), mismo peso/degradado de siempre — esta barra
-   siempre cae sobre la franja oscura del degradado (sticky, mide lo
+   siempre cae sobre la franja oscura del degradado (arriba de la página, mide lo
    mismo que el pseudo fijo del fondo): degradado plata de zona
    oscura, legible en los dos temas sin condicionar por
    [data-tema="claro"] — en oscuro ya era ese degradado. 32px entra
