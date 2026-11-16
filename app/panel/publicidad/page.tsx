@@ -80,7 +80,7 @@ const COLUMNAS: { clave: string; lineas: string[]; titulo?: string; fija?: boole
   { clave: "ventas", lineas: ["Ventas"], titulo: "Ventas atribuidas (cantidad)" },
   { clave: "inversion", lineas: ["Inversión"], titulo: "Inversión", orden: "inversion" },
   { clave: "ingresos", lineas: ["Ingresos"], titulo: "Ingresos atribuidos a la publicidad", orden: "ventas_publicidad" },
-  { clave: "presupuesto", lineas: ["Presupuesto/día"], titulo: ROTULO_COLUMNA_CAMPANA.presupuesto, orden: "presupuesto" },
+  { clave: "presupuesto", lineas: ["Presupuesto", "por día"], titulo: ROTULO_COLUMNA_CAMPANA.presupuesto, orden: "presupuesto" },
 ];
 
 export default async function PublicidadPage({

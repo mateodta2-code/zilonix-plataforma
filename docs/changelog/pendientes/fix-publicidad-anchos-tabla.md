@@ -1,0 +1,1 @@
+- Publicidad: anchos de la tabla de campañas ajustados a las 10 columnas nuevas; "Presupuesto por día" en dos líneas. Ya no aparece scroll de costado ni la columna Campaña tapa el Estado.

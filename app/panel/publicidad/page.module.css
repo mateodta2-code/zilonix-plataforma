@@ -375,21 +375,21 @@
     overflow: hidden;
   }
 
-  /* A 1280 la tabla mide ~895 px. Once columnas de la vista de
-     campañas: el nombre y el diagnóstico llevan el ancho largo; las
-     cifras cortas ceden. Ventas sin publicidad, TACOS y unidades van
-     en la fila desplegada. */
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 16.5%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(2) { width: 15%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(3) { width: 9.5%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 8%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(5) { width: 9%; }
+  /* Diez columnas de la vista de campañas (16-nov, tablero de
+     referencia): Campaña, Estado, Diagnóstico, Anuncios, ROAS / obj.,
+     ACOS, Ventas, Inversión, Ingresos, Presupuesto/día. El nombre y el
+     diagnóstico llevan el ancho largo; suman 100 % para que la tabla
+     entre sin scroll de costado y la columna fija no tape el Estado. */
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(1) { width: 16%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(2) { width: 11%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(3) { width: 16%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(4) { width: 7%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(5) { width: 10%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(6) { width: 6.5%; }
   .tarjetaTabla > div > table > thead > tr > th:nth-child(7) { width: 6.5%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(8) { width: 8.5%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(9) { width: 8.5%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(10) { width: 5%; }
-  .tarjetaTabla > div > table > thead > tr > th:nth-child(11) { width: 7%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(8) { width: 9%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(9) { width: 9%; }
+  .tarjetaTabla > div > table > thead > tr > th:nth-child(10) { width: 9%; }
 }
 
 .tarjetaTabla > div > table > thead > tr > th:last-child,
