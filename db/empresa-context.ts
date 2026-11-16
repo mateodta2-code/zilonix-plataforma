@@ -64,7 +64,7 @@ export async function dbComoEmpresa<T>(empresaId: string, fn: (tx: typeof db) =>
 // que nunca genera el UUID de puros ceros — así esa mitad de la política
 // evalúa a "ninguna fila" en vez de tronar, y la mitad "usuario_actual"
 // es la que de verdad filtra.
-const EMPRESA_SENTINEL = "00000000-0000-0000-0000-000000000000";
+export const EMPRESA_SENTINEL = "00000000-0000-0000-0000-000000000000";
 
 export async function dbComoUsuario<T>(usuarioId: string, fn: (tx: typeof db) => Promise<T>): Promise<T> {
   if (!UUID_RE.test(usuarioId)) {

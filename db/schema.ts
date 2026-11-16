@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, foreignKey, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, boolean, check, date, foreignKey, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
 import type {
   DatosPorCuenta,
@@ -236,6 +236,10 @@ export const auditoria = pgTable("auditoria", {
   valorAnterior: text("valor_anterior"),
   valorNuevo: text("valor_nuevo"),
   detalle: text("detalle"),
+  // PR login-bodega-domiciliario — acciones de una bodega 3PL (no de una
+  // empresa de vendedores): empresa_id queda vacío y se llena esta
+  // columna. Su RLS es aparte (db/rls-setup.sql, app.bodega_id).
+  bodegaId: uuid("bodega_id").references((): AnyPgColumn => bodegas3pl.id, { onDelete: "set null" }),
   ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -2040,3 +2044,50 @@ export const foroRespuestas = pgTable(
     preguntaIdx: index("foro_respuestas_pregunta_idx").on(t.preguntaId, t.creadoTs),
   })
 );
+
+// PR login-bodega-domiciliario — identidad y membresía de BODEGAS 3PL
+// (operador logístico) y sus domiciliarios. NO es `empresas` ni
+// `bodegas` (esa es la bodega propia de un vendedor dentro de Productos):
+// por eso el sufijo _3pl. Solo identidad, membresía, invitaciones y
+// roles — nada de pedidos, inventario, rutas ni dinero todavía.
+export const estadoBodega3plEnum = pgEnum("estado_bodega_3pl", ["activa", "suspendida"]);
+export const rolBodega3plEnum = pgEnum("rol_bodega_3pl", ["admin_bodega", "operario", "domiciliario"]);
+
+export const bodegas3pl = pgTable("bodegas_3pl", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nombre: text("nombre").notNull(),
+  nit: text("nit"),
+  estado: estadoBodega3plEnum("estado").notNull().default("activa"),
+  creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const miembrosBodega3pl = pgTable(
+  "miembros_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    usuarioId: uuid("usuario_id").notNull().references(() => usuarios.id, { onDelete: "cascade" }),
+    rol: rolBodega3plEnum("rol").notNull(),
+    activo: boolean("activo").notNull().default(true),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    unicaPorBodega: uniqueIndex("miembros_bodega_3pl_usuario_bodega_unica").on(t.usuarioId, t.bodegaId),
+  })
+);
+
+// Mismo patrón que `invitaciones` (token aleatorio, 7 días, un solo uso,
+// link mostrado en pantalla). bodega_nombre es copia al invitar: quien
+// aún no es miembro no puede leer bodegas_3pl por RLS.
+export const invitacionesBodega3pl = pgTable("invitaciones_bodega_3pl", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  rol: rolBodega3plEnum("rol").notNull(),
+  bodegaNombre: text("bodega_nombre").notNull(),
+  token: text("token").notNull().unique(),
+  invitadoPor: uuid("invitado_por").notNull().references(() => usuarios.id),
+  expiraTs: timestamp("expira_ts", { withTimezone: true }).notNull(),
+  aceptadaTs: timestamp("aceptada_ts", { withTimezone: true }),
+  creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+});

@@ -204,6 +204,29 @@ const RUTAS_SUPERADMIN = new Set([
   // Foro (14-nov) — moderar: esconder/mostrar publicaciones.
   "app/superadmin/(panel)/foro/page.tsx",
   "app/superadmin/(panel)/foro/actions.ts",
+  // Bodegas 3PL (PR login-bodega-domiciliario) — alta, invitar admin, suspender.
+  "app/superadmin/(panel)/bodegas/page.tsx",
+  "app/superadmin/(panel)/bodegas/actions.ts",
+  "app/superadmin/(panel)/bodegas/[bodegaId]/page.tsx",
+]);
+
+// PR login-bodega-domiciliario — eje de autorización PROPIO de las
+// bodegas 3PL: "¿esta persona es miembro activo de una bodega activa con
+// el rol que pide esta pantalla?" Toda página y acción de /bodega y
+// /domiciliario llama accesoBodega() (lib/bodega/contexto.ts), nunca
+// requierePermiso() (empresa de vendedor) ni requiereSesionSuperadmin().
+const RUTAS_BODEGA = new Set([
+  "app/bodega/(panel)/page.tsx",
+  "app/bodega/(panel)/domiciliarios/page.tsx",
+  "app/bodega/(panel)/invitar/page.tsx",
+  "app/bodega/(panel)/invitar/actions.ts",
+  "app/bodega/(panel)/invitar/listo/page.tsx",
+  "app/bodega/(panel)/personas/page.tsx",
+  "app/bodega/(panel)/personas/actions.ts",
+  "app/bodega/(panel)/permisos/page.tsx",
+  "app/bodega/(panel)/configuracion/page.tsx",
+  "app/bodega/(panel)/configuracion/actions.ts",
+  "app/domiciliario/(panel)/page.tsx",
 ]);
 
 // Rutas exentas, cada una con el motivo real por el que no necesita
@@ -222,6 +245,10 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/superadmin/iniciar-sesion/[[...iniciar-sesion]]/page.tsx": "solo monta <SignIn/> de Clerk (login aparte del superadmin); no lee datos de negocio",
   "app/superadmin/entrar/route.ts": "emite la cookie zx_superadmin SOLO tras repetir todos los chequeos de entrada (evaluarAccesoSuperadmin); sin ellos redirige al login",
   "app/superadmin/actions.ts": "cerrar sesión de superadmin: borra la cookie y la sesión de Clerk; debe funcionar también con la sesión vencida, no lee datos",
+  "app/bodega/iniciar-sesion/[[...iniciar-sesion]]/page.tsx": "solo monta <SignIn/> de Clerk (login aparte de la bodega); no lee datos de negocio",
+  "app/domiciliario/iniciar-sesion/[[...iniciar-sesion]]/page.tsx": "solo monta <SignIn/> de Clerk (login aparte del domiciliario); no lee datos de negocio",
+  "app/invitacion-bodega/[token]/page.tsx": "el token en la URL es el permiso real (db/bodega-context.ts, dbComoInvitacionBodega) — todavía no hay membresía que comprobar",
+  "app/invitacion-bodega/[token]/actions.ts": "idem — aceptar valida token vigente y no usado en la base (política miembro3pl_agregar_por_invitacion), con el usuario de la sesión",
   "app/api/version/route.ts": "expone solo el número de versión, nunca datos de ninguna empresa",
   "app/api/extension/config/route.ts":
     "pública a propósito: la extensión la pide sin sesión; solo devuelve interruptores y textos no sensibles (lib/extension/configuracion.ts), nunca datos de una empresa",
@@ -302,8 +329,8 @@ const archivos = listarArchivosDeRuta(APP_DIR).map((a) => relative(RAIZ, a).repl
 
 describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candado que dice usar", () => {
   for (const relPath of archivos) {
-    it(`${relPath} está en RUTAS_PROTEGIDAS, RUTAS_SUPERADMIN o RUTAS_EXENTAS`, () => {
-      const clasificada = RUTAS_PROTEGIDAS.has(relPath) || RUTAS_SUPERADMIN.has(relPath) || relPath in RUTAS_EXENTAS;
+    it(`${relPath} está en RUTAS_PROTEGIDAS, RUTAS_SUPERADMIN, RUTAS_BODEGA o RUTAS_EXENTAS`, () => {
+      const clasificada = RUTAS_PROTEGIDAS.has(relPath) || RUTAS_SUPERADMIN.has(relPath) || RUTAS_BODEGA.has(relPath) || relPath in RUTAS_EXENTAS;
       expect(
         clasificada,
         `${relPath} no está clasificada en scripts/verificar-permisos.test.ts — agrégala a RUTAS_PROTEGIDAS (requierePermiso), RUTAS_SUPERADMIN (requiereSuperadmin) o RUTAS_EXENTAS con el motivo real.`
@@ -325,9 +352,16 @@ describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candad
     });
   }
 
+  for (const relPath of RUTAS_BODEGA) {
+    it(`${relPath} (bodega) llama accesoBodega() de verdad`, () => {
+      const contenido = readFileSync(join(RAIZ, relPath), "utf8");
+      expect(/accesoBodega\(/.test(contenido), `${relPath} está en RUTAS_BODEGA pero no llama accesoBodega()`).toBe(true);
+    });
+  }
+
   it("ninguna ruta listada (protegida, superadmin o exenta) quedó de un archivo que ya no existe", () => {
     const vigentes = new Set(archivos);
-    for (const ruta of [...RUTAS_PROTEGIDAS, ...RUTAS_SUPERADMIN, ...Object.keys(RUTAS_EXENTAS)]) {
+    for (const ruta of [...RUTAS_PROTEGIDAS, ...RUTAS_SUPERADMIN, ...RUTAS_BODEGA, ...Object.keys(RUTAS_EXENTAS)]) {
       expect(vigentes.has(ruta), `${ruta} está listada pero el archivo ya no existe — bórrala de scripts/verificar-permisos.test.ts`).toBe(true);
     }
   });
