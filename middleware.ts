@@ -93,7 +93,7 @@ export default clerkMiddleware(async (auth, req) => {
     !req.nextUrl.pathname.startsWith("/sign-up") &&
     !req.nextUrl.pathname.startsWith("/superadmin/iniciar-sesion")
   ) {
-    const destino = new URL("/sign-in/sso-callback", req.url);
+    const destino = new URL("/sign-in/sso-callback", urlPublicaBaseDesdeMiddleware(req));
     destino.search = req.nextUrl.search;
     return NextResponse.redirect(destino);
   }
@@ -145,7 +145,7 @@ export default clerkMiddleware(async (auth, req) => {
     // el request del middleware, que ya trae sus propias cabeceras.
     // El panel superadmin tiene su login aparte: nunca /sign-in.
     if (req.nextUrl.pathname.startsWith("/superadmin")) {
-      return NextResponse.redirect(new URL("/superadmin/iniciar-sesion", req.url));
+      return NextResponse.redirect(new URL("/superadmin/iniciar-sesion", urlPublicaBaseDesdeMiddleware(req)));
     }
     return sesion.redirectToSignIn({ returnBackUrl: `${urlPublicaBaseDesdeMiddleware(req)}${req.nextUrl.pathname}${req.nextUrl.search}` });
   }
