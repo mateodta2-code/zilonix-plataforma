@@ -11,10 +11,11 @@ import type { GrupoNav } from "./tipos";
 const CLAVE_COLAPSADA = "zilonix-barra-colapsada";
 
 // Tema claro: el fondo de la barra es el degradado fijo de la página,
-// negro arriba y blanco abajo. Altura (fracción de la pantalla) desde la
-// que el texto oscuro lee mejor que el claro, por intensidad de fondo:
-// el gris medio (#777) cae ahí en cada rampa de --fondo-app-* de claro.
-const CRUCE_ZONA_CLARA: Record<string, number> = { suave: 0.47, medio: 0.51, intenso: 0.55 };
+// negro arriba y blanco abajo. Altura (px desde arriba de la pantalla)
+// desde la que el texto oscuro lee mejor que el claro, por intensidad de
+// fondo: el gris medio (#777) de cada rampa de --fondo-app-* de claro
+// en app/globals.css (negro hasta 170/190/210px, blanco desde 270/290/310px).
+const CRUCE_ZONA_CLARA_PX: Record<string, number> = { suave: 217, medio: 237, intenso: 257 };
 
 export function BarraLateral({
   grupos,
@@ -60,11 +61,10 @@ export function BarraLateral({
         elementos.forEach((el) => el.removeAttribute("data-zona"));
         return;
       }
-      const cruce = CRUCE_ZONA_CLARA[raiz.dataset.fondo ?? "suave"] ?? CRUCE_ZONA_CLARA.suave;
-      const alto = window.innerHeight || 1;
+      const cruce = CRUCE_ZONA_CLARA_PX[raiz.dataset.fondo ?? "suave"] ?? CRUCE_ZONA_CLARA_PX.suave;
       elementos.forEach((el) => {
         const caja = el.getBoundingClientRect();
-        el.dataset.zona = (caja.top + caja.bottom) / 2 / alto < cruce ? "oscura" : "clara";
+        el.dataset.zona = (caja.top + caja.bottom) / 2 < cruce ? "oscura" : "clara";
       });
     }
     function programar() {

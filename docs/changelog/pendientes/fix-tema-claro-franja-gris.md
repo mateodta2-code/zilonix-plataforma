@@ -1,0 +1,1 @@
+- Tema claro: el fondo pasa de negro a blanco en una franja corta (170 px a 270 px desde arriba) en vez de dejar media pantalla en gris; el texto suelto de cualquier módulo ya no cae sobre gris. El menú lateral ajusta su punto de cambio a esas medidas.
