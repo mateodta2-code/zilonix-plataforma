@@ -5,8 +5,8 @@
 // ROAS para gastar más.
 //
 // Semáforo de campaña (16-nov): gris aprendiendo = no se propone nada;
-// verde (ROAS en el objetivo o más) = se deja igual; amarillo (70 % a
-// 100 %) = vigilar, y puede sugerir sacar anuncios que gastan sin
+// verde (ROAS desde el 90 % del objetivo) = se deja igual; amarillo
+// (70 % a 90 %) = vigilar, y puede sugerir sacar anuncios que gastan sin
 // vender; rojo (bajo el 70 %) = apagar y crear una nueva.
 // Enfriamiento es solo para anuncios que gastan sin vender. El que
 // vende bien se queda en la campaña donde ya funciona.
@@ -224,7 +224,7 @@ export function recomendarCampana(entrada: {
       anuncioId: null,
       nombre: null,
       texto: TEXTO_APAGAR,
-      motivo: motivoRoas(entrada.roas, entrada.objetivo, `bajo el ${porcentaje(UMBRAL_ROAS_BAJO)} de`),
+      motivo: `ROAS ${mostrarRoas(entrada.roas)}, bajo el ${porcentaje(UMBRAL_ROAS_BAJO)} del objetivo ${mostrarRoas(entrada.objetivo)}`,
     });
   } else if (alcanza(entrada.roas, entrada.objetivo, UMBRAL_EN_OBJETIVO) && entrada.roas !== null && entrada.objetivo !== null) {
     salida.push({
@@ -232,7 +232,7 @@ export function recomendarCampana(entrada: {
       anuncioId: null,
       nombre: null,
       texto: TEXTO_DEJAR_IGUAL,
-      motivo: motivoRoas(entrada.roas, entrada.objetivo, "en o sobre"),
+      motivo: `ROAS ${mostrarRoas(entrada.roas)}, desde el ${porcentaje(UMBRAL_EN_OBJETIVO)} del objetivo ${mostrarRoas(entrada.objetivo)}`,
     });
   } else if (entrada.roas !== null && entrada.objetivo !== null) {
     salida.push({
@@ -240,7 +240,7 @@ export function recomendarCampana(entrada: {
       anuncioId: null,
       nombre: null,
       texto: TEXTO_VIGILAR,
-      motivo: `ROAS ${mostrarRoas(entrada.roas)}, entre el ${porcentaje(UMBRAL_ROAS_BAJO)} y el 100 % del objetivo ${mostrarRoas(entrada.objetivo)}`,
+      motivo: `ROAS ${mostrarRoas(entrada.roas)}, entre el ${porcentaje(UMBRAL_ROAS_BAJO)} y el ${porcentaje(UMBRAL_EN_OBJETIVO)} del objetivo ${mostrarRoas(entrada.objetivo)}`,
     });
   }
 

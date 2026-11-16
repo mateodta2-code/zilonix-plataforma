@@ -18,6 +18,9 @@ export type FiltroCampanas = "activas" | "pausadas" | "todas";
 
 export type ComparacionPublicidad = "anterior" | "ninguno";
 export type TabPublicidad = "campanas" | "anuncios";
+// Botones de la tabla de campañas: todas o solo las bajo el objetivo
+// (amarillo y rojo).
+export type EstadoFiltro = "todas" | "bajo";
 
 export type ParametrosPublicidad = {
   periodo: Periodo;
@@ -27,8 +30,8 @@ export type ParametrosPublicidad = {
   incluirPausadas: boolean;
   comparar: ComparacionPublicidad;
   tab: TabPublicidad;
+  estado: EstadoFiltro;
 };
-
 
 export function leerParametrosPublicidad(
   entrada: {
@@ -39,6 +42,7 @@ export function leerParametrosPublicidad(
     vista?: string | null;
     comparar?: string | null;
     tab?: string | null;
+    estado?: string | null;
   },
   ahora: Date
 ): ParametrosPublicidad {
@@ -56,6 +60,7 @@ export function leerParametrosPublicidad(
     incluirPausadas: filtro !== "activas",
     comparar: entrada.comparar === "ninguno" ? "ninguno" : "anterior",
     tab: entrada.tab === "anuncios" ? "anuncios" : "campanas",
+    estado: entrada.estado === "bajo" ? "bajo" : "todas",
   };
 }
 
@@ -68,6 +73,7 @@ export type HrefPublicidad = {
   vista?: FiltroCampanas | null;
   comparar?: ComparacionPublicidad | null;
   tab?: TabPublicidad | null;
+  estado?: EstadoFiltro | null;
   aviso?: string | null;
 };
 
@@ -83,6 +89,7 @@ export function hrefPublicidad(params: HrefPublicidad): string {
   else if (params.pausadas) q.set("vista", "todas");
   if (params.comparar === "ninguno") q.set("comparar", "ninguno");
   if (params.tab === "anuncios") q.set("tab", "anuncios");
+  if (params.estado === "bajo") q.set("estado", "bajo");
   if (params.aviso) q.set("aviso", params.aviso);
   const texto = q.toString();
   return texto ? `/panel/publicidad?${texto}` : "/panel/publicidad";

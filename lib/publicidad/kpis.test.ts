@@ -224,12 +224,12 @@ describe("diagnóstico de campaña", () => {
       dia({ costo: "100.00", montoTotal: "200.00", ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 }),
     ]);
     expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: justo }).tipo).toBe("en_objetivo");
-    // Semáforo de tres colores: 100 % y 70 % del objetivo (2,00x).
+    // Semáforo de tres colores: 90 % y 70 % del objetivo (2,00x).
     const conMonto = (monto: string) =>
       totalesDeDias([dia({ costo: "100.00", montoTotal: monto, ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 })]);
-    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("200.00") }).tipo).toBe("en_objetivo");
-    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("199.00") }).tipo).toBe("bajo_objetivo");
-    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("180.00") }).tipo).toBe("bajo_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("199.00") }).tipo).toBe("en_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("180.00") }).tipo).toBe("en_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("179.00") }).tipo).toBe("bajo_objetivo");
     expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("140.00") }).tipo).toBe("bajo_objetivo");
     expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("139.00") }).tipo).toBe("muy_bajo");
     expect(diagnosticarCampana({ ...base, roasObjetivo: null, totales: conGasto }).tipo).toBe("sin_objetivo");
@@ -280,10 +280,10 @@ describe("frase de estado y datos nuevos del rango (issue #255)", () => {
     expect(bajo.tono).toBe("advertencia");
     expect(bajo.avance).toBe(82);
 
-    // Al 92 % ya no es verde: el verde empieza en el 100 % del objetivo.
-    const casi = fraseEstado({ diagnostico: { tipo: "bajo_objetivo", dias: 0 }, roas: "11.00", roasObjetivo: "12.00", diasAprendizaje: 7 });
-    expect(casi.frase).toBe("Vigilar, falta 8 %");
-    expect(casi.tono).toBe("advertencia");
+    // Al 92 % ya es verde: el verde empieza en el 90 % del objetivo.
+    const casi = fraseEstado({ diagnostico: { tipo: "en_objetivo", dias: 0 }, roas: "11.00", roasObjetivo: "12.00", diasAprendizaje: 7 });
+    expect(casi.frase).toBe("En objetivo, falta 8 %");
+    expect(casi.tono).toBe("exito");
     const muyBajo = fraseEstado({ diagnostico: { tipo: "muy_bajo", dias: 0 }, roas: "6.87", roasObjetivo: "12.00", diasAprendizaje: 7 });
     expect(muyBajo.frase).toBe("Muy bajo, falta 43 %");
     expect(muyBajo.tono).toBe("peligro");
@@ -480,7 +480,7 @@ describe("alertas de solo lectura (issue #255)", () => {
     });
     expect(detalleDiagnostico({ diagnostico: { tipo: "bajo_objetivo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false })).toEqual({
       pill: "Bajo objetivo",
-      detalle: "Entre el 70 % y el 100 % del objetivo: vigilar",
+      detalle: "Entre el 70 % y el 90 % del objetivo: vigilar",
       tono: "advertencia",
     });
     expect(detalleDiagnostico({ diagnostico: { tipo: "excelente", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).pill).toBe("Excelente");

@@ -445,11 +445,27 @@ export function diagnosticarCampana(entrada: {
   if (objetivo === null || centavos(aEscala(objetivo, 2)) <= CERO) return { tipo: "sin_objetivo", dias: 0 };
   const excelente = roasAlcanza(ventas, gasto, objetivo, entrada.config.factorExcelente);
   if (excelente) return { tipo: "excelente", dias: 0 };
-  // Semáforo: verde desde el 100 % del objetivo, amarillo entre 70 % y
-  // 100 %, rojo bajo el 70 % (el mismo 70 % de "Apagar y crear una nueva").
+  // Semáforo: verde desde el 90 % del objetivo, amarillo entre 70 % y
+  // 90 %, rojo bajo el 70 % (el mismo 70 % de "Apagar y crear una nueva").
   if (roasAlcanza(ventas, gasto, objetivo, UMBRAL_EN_OBJETIVO)) return { tipo: "en_objetivo", dias: 0 };
   if (roasAlcanza(ventas, gasto, objetivo, UMBRAL_ROAS_BAJO)) return { tipo: "bajo_objetivo", dias: 0 };
   return { tipo: "muy_bajo", dias: 0 };
+}
+
+// Columna Estado de la tabla (16-nov, tablero de referencia): el color
+// sale solo del ROAS real frente al objetivo, también mientras la
+// campaña aprende. El aprendizaje va aparte, en Diagnóstico, y frena las
+// recomendaciones (en aprendizaje no se propone nada).
+export type EstadoSemaforoCampana = "en_objetivo" | "bajo_objetivo" | "muy_bajo" | "sin_objetivo" | "sin_datos";
+
+export function semaforoCampana(roas: string | null, objetivo: string | null): EstadoSemaforoCampana {
+  if (objetivo === null || unidades(objetivo, ESCALA) <= CERO) return "sin_objetivo";
+  if (roas === null) return "sin_datos";
+  const verde = roasFrenteA(roas, objetivo, UMBRAL_EN_OBJETIVO);
+  if (verde === "igual" || verde === "mayor") return "en_objetivo";
+  const amarillo = roasFrenteA(roas, objetivo, UMBRAL_ROAS_BAJO);
+  if (amarillo === "igual" || amarillo === "mayor") return "bajo_objetivo";
+  return "muy_bajo";
 }
 
 export type TonoEstado = "exito" | "advertencia" | "peligro" | "acento" | "neutro";
