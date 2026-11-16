@@ -224,7 +224,7 @@ export function recomendarCampana(entrada: {
       anuncioId: null,
       nombre: null,
       texto: TEXTO_APAGAR,
-      motivo: motivoRoas(entrada.roas, entrada.objetivo, `bajo el ${porcentaje(UMBRAL_ROAS_BAJO)} de`),
+      motivo: `ROAS ${mostrarRoas(entrada.roas)}, bajo el ${porcentaje(UMBRAL_ROAS_BAJO)} del objetivo ${mostrarRoas(entrada.objetivo)}`,
     });
   } else if (alcanza(entrada.roas, entrada.objetivo, UMBRAL_EN_OBJETIVO) && entrada.roas !== null && entrada.objetivo !== null) {
     salida.push({

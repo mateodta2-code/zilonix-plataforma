@@ -6,10 +6,10 @@ import { Ayuda } from "@/components/marco/Ayuda";
 import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { AYUDA_SEMAFORO, COLUMNAS_CAMPANA, NOTA_UNIDADES, NOTA_VENTAS_ORGANICAS } from "@/lib/publicidad/rotulos";
-import type { CampanaPintada, DeltaPintado } from "./vista";
+import type { CampanaPintada } from "./vista";
 import styles from "./page.module.css";
 
-export function TablaCampanas({ campanas, comparar }: { campanas: CampanaPintada[]; comparar: boolean }) {
+export function TablaCampanas({ campanas }: { campanas: CampanaPintada[] }) {
   const [abiertas, setAbiertas] = useState<Record<string, boolean>>({});
 
   return (
@@ -22,7 +22,6 @@ export function TablaCampanas({ campanas, comparar }: { campanas: CampanaPintada
             key={campana.id}
             campana={campana}
             abierta={abierta}
-            comparar={comparar}
             panelId={panelId}
             onToggle={() => setAbiertas((prev) => ({ ...prev, [campana.id]: !prev[campana.id] }))}
           />
@@ -96,17 +95,14 @@ function num(clave: string, contenido: React.ReactNode): EncabezadoTabla {
 function FilaGrupo({
   campana,
   abierta,
-  comparar,
   panelId,
   onToggle,
 }: {
   campana: CampanaPintada;
   abierta: boolean;
-  comparar: boolean;
   panelId: string;
   onToggle: () => void;
 }) {
-  const anuncios = campana.cantidadAnuncios === 1 ? "1 anuncio" : `${campana.cantidadAnuncios} anuncios`;
   return (
     <>
       <FilaTabla>
@@ -119,45 +115,29 @@ function FilaGrupo({
             onClick={onToggle}
           >
             <span className={styles.chevron} aria-hidden="true" />
-            <span>
-              <span className={styles.nombreCampana} title={campana.nombre}>
-                {campana.nombre}
-              </span>
-              <span className={styles.pausada}>{anuncios}</span>
-              {campana.pausada ? <span className={styles.pausada}>Pausada</span> : null}
-              {campana.mayorGasto.map((ad) => (
-                <span key={ad.id} className={styles.mayorGasto} title={`${ad.nombre}. Inversión ${ad.inversion}. ${ad.parte ?? "—"} del gasto. Ventas ${ad.ventas}.`}>
-                  Mayor gasto: {ad.nombre} · {ad.inversion} · {ad.parte ?? "—"} · ventas {ad.ventas}
-                </span>
-              ))}
-              {campana.textoEnfriamiento ? (
-                <span className={styles.alertaFila}>{campana.textoEnfriamiento}</span>
-              ) : campana.anunciosSinVenta > 0 ? (
-                <span className={styles.alertaFila}>Gasta sin vender · {campana.anunciosSinVenta}</span>
-              ) : null}
+            <span className={styles.nombreCampana} title={campana.nombre}>
+              {campana.nombre}
             </span>
           </button>
         </CeldaTabla>
-        <CeldaTabla className={styles.celdaEstado}>
-          <span className={styles.diagnostico}>
-            {campana.diagnostico.pill ? (
-              <Chip estado={campana.diagnostico.tono === "aviso" ? "aviso" : campana.diagnostico.tono}>{campana.diagnostico.pill}</Chip>
-            ) : null}
-            {campana.diagnostico.detalle ? <span className={styles.frase}>{campana.diagnostico.detalle}</span> : null}
-          </span>
+        <CeldaTabla>
+          <Chip estado={campana.semaforo.tono} title={campana.semaforo.porcentaje ? `${campana.semaforo.porcentaje} del objetivo` : undefined}>
+            {campana.semaforo.rotulo}
+          </Chip>
         </CeldaTabla>
-        <CeldaTabla numerica className={styles.celdaPresupuesto}>
-          <span>{campana.presupuesto}</span>
-          {campana.presupuestoUsado ? <span className={styles.usado}>{campana.presupuestoUsado}</span> : null}
+        <CeldaTabla>
+          <span className={styles.frase}>{campana.diagnosticoTexto}</span>
         </CeldaTabla>
-        <CeldaTabla numerica>{campana.roasObjetivo ?? "—"}</CeldaTabla>
-        <CeldaNumero valor={campana.ventasPublicidad} delta={comparar ? campana.deltas.ventasAtribuidas : null} />
-        <CeldaNumero valor={campana.roas} delta={comparar ? campana.deltas.roas : null} />
-        <CeldaNumero valor={campana.acos} delta={comparar ? campana.deltas.acos : null} />
-        <CeldaNumero valor={campana.inversion} delta={comparar ? campana.deltas.inversion : null} />
-        <CeldaNumero valor={campana.ingresos} delta={comparar ? campana.deltas.ingresos : null} />
-        <CeldaNumero valor={campana.clics} delta={comparar ? campana.deltas.clics : null} />
-        <CeldaNumero valor={campana.impresiones} delta={comparar ? campana.deltas.impresiones : null} />
+        <CeldaTabla numerica>{campana.cantidadAnuncios}</CeldaTabla>
+        <CeldaTabla numerica>
+          <strong>{campana.roas}</strong>
+          {campana.roasObjetivoCorto ? <span className={styles.motivo}> / {campana.roasObjetivoCorto}</span> : null}
+        </CeldaTabla>
+        <CeldaTabla numerica>{campana.acos}</CeldaTabla>
+        <CeldaTabla numerica>{campana.ventasCantidad}</CeldaTabla>
+        <CeldaTabla numerica>{campana.inversion}</CeldaTabla>
+        <CeldaTabla numerica>{campana.ventasPublicidad}</CeldaTabla>
+        <CeldaTabla numerica>{campana.presupuesto}</CeldaTabla>
       </FilaTabla>
       {abierta ? (
         <FilaTabla id={panelId}>
@@ -252,19 +232,6 @@ function FilaGrupo({
         </FilaTabla>
       ) : null}
     </>
-  );
-}
-
-function CeldaNumero({ valor, delta }: { valor: string; delta: DeltaPintado | null }) {
-  return (
-    <CeldaTabla numerica>
-      <span>{valor}</span>
-      {delta ? (
-        <span className={styles.delta} data-tono={delta.mejor === null ? "neutro" : delta.mejor ? "mejor" : "peor"}>
-          {delta.texto}
-        </span>
-      ) : null}
-    </CeldaTabla>
   );
 }
 

@@ -121,7 +121,7 @@ export const ROTULO_PERIODO = {
   pausada: "Pausada en Mercado Libre",
 } as const;
 
-export const COLUMNAS_CAMPANA = 11;
+export const COLUMNAS_CAMPANA = 10;
 
 export type DiagnosticoVisible = {
   pill: string | null;

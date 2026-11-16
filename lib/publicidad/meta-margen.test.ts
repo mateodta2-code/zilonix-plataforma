@@ -69,3 +69,42 @@ describe("margen real por producto", () => {
     expect(semaforoMargen("0.1900", "0.40")).toBe("rojo");
   });
 });
+
+describe("columna Estado de campañas (semáforo por ROAS, aunque aprenda)", () => {
+  it("verde desde el 100 %, amarillo desde el 70 %, rojo abajo", async () => {
+    const { semaforoCampana } = await import("@/lib/publicidad/kpis");
+    expect(semaforoCampana("12.34", "12.00")).toBe("en_objetivo");
+    expect(semaforoCampana("12.00", "12.00")).toBe("en_objetivo");
+    expect(semaforoCampana("9.53", "12.00")).toBe("bajo_objetivo");
+    expect(semaforoCampana("8.40", "12.00")).toBe("bajo_objetivo");
+    expect(semaforoCampana("5.46", "13.00")).toBe("muy_bajo");
+    expect(semaforoCampana(null, "12.00")).toBe("sin_datos");
+    expect(semaforoCampana("5.00", null)).toBe("sin_objetivo");
+  });
+
+  it("el filtro Bajo objetivo viaja en la URL", async () => {
+    const { hrefPublicidad, leerParametrosPublicidad } = await import("@/lib/publicidad/params");
+    expect(hrefPublicidad({ cuenta: "abc", estado: "bajo" })).toBe("/panel/publicidad?cuenta=abc&estado=bajo");
+    expect(hrefPublicidad({ cuenta: "abc", estado: "todas" })).toBe("/panel/publicidad?cuenta=abc");
+    expect(leerParametrosPublicidad({ estado: "bajo" }, new Date("2026-11-15T12:00:00-05:00")).estado).toBe("bajo");
+    expect(leerParametrosPublicidad({ estado: "otra" }, new Date("2026-11-15T12:00:00-05:00")).estado).toBe("todas");
+  });
+
+  it("la nota de abajo dice cuáles aprenden y a cuánto del objetivo van las demás", async () => {
+    const { notaSemaforo } = await import("@/app/panel/publicidad/vista");
+    type C = Parameters<typeof notaSemaforo>[0][number];
+    const c = (nombre: string, dias: number | null, estado: C["semaforo"]["estado"], porcentaje: string | null) =>
+      ({ nombre, diasParaEstabilizar: dias, semaforo: { estado, rotulo: "", tono: "neutro", porcentaje } }) as C;
+    expect(
+      notaSemaforo([
+        c("agrupación", 7, "muy_bajo", "42 %"),
+        c("vendidos 06-08", 4, "en_objetivo", "103 %"),
+        c("ENFRIAMIENTO", null, "muy_bajo", "57 %"),
+        c("suplementos", null, "bajo_objetivo", "79 %"),
+        c("variados", null, "en_objetivo", "109 %"),
+      ])
+    ).toBe(
+      "agrupación (7 días), vendidos 06-08 (4 días) están en Aprendiendo y no se tocan. ENFRIAMIENTO en 57 % del objetivo. suplementos en 79 % del objetivo. En objetivo ≥100 % del ROAS objetivo · Bajo 70–100 % · Muy bajo <70 %."
+    );
+  });
+});

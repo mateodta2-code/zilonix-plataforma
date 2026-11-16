@@ -21,7 +21,14 @@ import { metaComoPorcentaje, mitadDeMeta } from "@/lib/publicidad/meta-margen";
 import { mostrarFraccion } from "@/lib/publicidad/formato";
 import { textoComparacion } from "@/lib/publicidad/formato";
 import type { ColumnaOrden, DireccionOrden } from "@/lib/publicidad/kpis";
-import { hrefPublicidad, leerParametrosPublicidad, type ComparacionPublicidad, type FiltroCampanas, type TabPublicidad } from "@/lib/publicidad/params";
+import {
+  hrefPublicidad,
+  leerParametrosPublicidad,
+  type ComparacionPublicidad,
+  type EstadoFiltro,
+  type FiltroCampanas,
+  type TabPublicidad,
+} from "@/lib/publicidad/params";
 import {
   AYUDA_DIAGNOSTICO,
   AYUDA_PRESUPUESTO,
@@ -39,7 +46,17 @@ import { RentabilidadAds } from "./RentabilidadAds";
 import { CambiosCampanas } from "./CambiosCampanas";
 import { MetaMargen } from "./MetaMargen";
 import { ResumenRecomendaciones, TablaAnuncios, TablaCampanas } from "./TablaCampanas";
-import { kpisDelResumen, pintarCambios, pintarCampana, pintarRentabilidad, plataVisible, serieParaGrafico, textoAporte } from "./vista";
+import {
+  esBajoObjetivo,
+  kpisDelResumen,
+  notaSemaforo,
+  pintarCambios,
+  pintarCampana,
+  pintarRentabilidad,
+  plataVisible,
+  serieParaGrafico,
+  textoAporte,
+} from "./vista";
 
 // Issue #255 — tablero de solo lectura. La fase 1 ya dejaba el estado
 // del anunciante y el botón "Actualizar ahora"; esta pantalla suma los
@@ -55,16 +72,15 @@ function primero(valor: ParametroUrl): string | undefined {
 
 const COLUMNAS: { clave: string; lineas: string[]; titulo?: string; fija?: boolean; orden?: ColumnaOrden }[] = [
   { clave: "campana", lineas: ["Campaña"], titulo: "Nombre de campaña", fija: true, orden: "campana" },
+  { clave: "estado", lineas: ["Estado"], titulo: "ROAS real frente al ROAS objetivo" },
   { clave: "diagnostico", lineas: ["Diagnóstico"], titulo: "Diagnóstico" },
-  { clave: "presupuesto", lineas: ["Presup.", "diario"], titulo: ROTULO_COLUMNA_CAMPANA.presupuesto, orden: "presupuesto" },
-  { clave: "roas_objetivo", lineas: ["ROAS", "objetivo"], titulo: "ROAS objetivo" },
-  { clave: "ventas_publicidad", lineas: ["Ventas", "atrib."], titulo: "Ventas atribuidas", orden: "ventas_publicidad" },
-  { clave: "roas", lineas: [ROTULO_COLUMNA_CAMPANA.roas], titulo: "ROAS", orden: "roas" },
-  { clave: "acos", lineas: [ROTULO_COLUMNA_CAMPANA.acos], titulo: "ACOS", orden: "acos" },
+  { clave: "anuncios", lineas: ["Anuncios"], titulo: "Cantidad de anuncios" },
+  { clave: "roas", lineas: ["ROAS / obj."], titulo: "ROAS real / ROAS objetivo", orden: "roas" },
+  { clave: "acos", lineas: ["ACOS"], titulo: "ACOS", orden: "acos" },
+  { clave: "ventas", lineas: ["Ventas"], titulo: "Ventas atribuidas (cantidad)" },
   { clave: "inversion", lineas: ["Inversión"], titulo: "Inversión", orden: "inversion" },
-  { clave: "ingresos", lineas: ["Ingresos"], titulo: "Ingresos", orden: "ventas_totales" },
-  { clave: "clics", lineas: [ROTULO_COLUMNA_CAMPANA.clics], titulo: "Clics", orden: "clics" },
-  { clave: "impresiones", lineas: ["Impr."], titulo: ROTULO_COLUMNA_CAMPANA.impresiones, orden: "impresiones" },
+  { clave: "ingresos", lineas: ["Ingresos"], titulo: "Ingresos atribuidos a la publicidad", orden: "ventas_publicidad" },
+  { clave: "presupuesto", lineas: ["Presupuesto/día"], titulo: ROTULO_COLUMNA_CAMPANA.presupuesto, orden: "presupuesto" },
 ];
 
 export default async function PublicidadPage({
@@ -79,6 +95,7 @@ export default async function PublicidadPage({
     vista?: ParametroUrl;
     comparar?: ParametroUrl;
     tab?: ParametroUrl;
+    estado?: ParametroUrl;
   };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
@@ -113,6 +130,7 @@ export default async function PublicidadPage({
       vista: primero(searchParams?.vista),
       comparar: primero(searchParams?.comparar),
       tab: primero(searchParams?.tab),
+      estado: primero(searchParams?.estado),
     },
     ahora
   );
@@ -137,6 +155,7 @@ export default async function PublicidadPage({
     vista: params.filtro,
     comparar: params.comparar,
     tab: params.tab,
+    estado: params.estado,
   };
 
   return (
@@ -200,6 +219,7 @@ type HrefBase = {
   vista: FiltroCampanas;
   comparar: ComparacionPublicidad;
   tab: TabPublicidad;
+  estado: EstadoFiltro;
 };
 
 function Cuerpo({
@@ -252,14 +272,15 @@ function Cuerpo({
     pintarCampana(campana, tablero.diasRango, tablero.nombresCampanas, tablero.metaMargen)
   );
   const mitadMeta = mitadDeMeta(tablero.metaMargen);
+  const visibles = hrefBase.estado === "bajo" ? campanas.filter(esBajoObjetivo) : campanas;
   const sinMetricas = tablero.resumen.actual.gasto === null && tablero.resumen.actual.clicks === null;
   const momento = tablero.ultimaActualizacion?.terminadaTs ?? tablero.ultimaActualizacion?.iniciadaTs ?? null;
   const actualizado = momento ? fechaHoraBogota(momento) : "—";
   const conComparacion = comparar === "anterior";
 
   const encabezados: EncabezadoTabla[] = COLUMNAS.map((columna): EncabezadoTabla => {
-    // Todo menos el nombre y el diagnóstico es número: título a la derecha.
-    const numerica = columna.clave !== "campana" && columna.clave !== "diagnostico";
+    // Todo menos el nombre, el estado y el diagnóstico es número: título a la derecha.
+    const numerica = columna.clave !== "campana" && columna.clave !== "estado" && columna.clave !== "diagnostico";
     if (columna.clave === "diagnostico") {
       return {
         clave: "diagnostico",
@@ -371,22 +392,35 @@ function Cuerpo({
 
       <Tarjeta className={tab === "campanas" ? styles.tarjetaTabla : styles.tarjetaAnuncios}>
         <div className={styles.toolbar}>
-          <span className={styles.nota}>
-            {tab === "campanas"
-              ? `${campanas.length} ${campanas.length === 1 ? "campaña activa" : "campañas activas"}`
-              : `${campanas.reduce((n, campana) => n + campana.cantidadAnuncios, 0)} anuncios`}
-          </span>
+          {tab === "campanas" ? (
+            <>
+              <p className={styles.seccion}>Campañas activas</p>
+              <span className={styles.filtro}>
+                <Link href={hrefPublicidad({ ...hrefBase, estado: "todas" })} aria-current={hrefBase.estado === "todas" ? "page" : undefined}>
+                  Todas
+                </Link>
+                <Link href={hrefPublicidad({ ...hrefBase, estado: "bajo" })} aria-current={hrefBase.estado === "bajo" ? "page" : undefined}>
+                  Bajo objetivo
+                </Link>
+              </span>
+            </>
+          ) : (
+            <span className={styles.nota}>{`${campanas.reduce((n, campana) => n + campana.cantidadAnuncios, 0)} anuncios`}</span>
+          )}
         </div>
         {sinMetricas ? <p className={styles.nota}>No hay métricas de Product Ads en este rango.</p> : null}
-        {tab === "campanas" && campanas.length > 0 ? <ResumenRecomendaciones campanas={campanas} /> : null}
+        {tab === "campanas" && visibles.length > 0 ? <ResumenRecomendaciones campanas={visibles} /> : null}
         {tab === "anuncios" ? (
           <TablaAnuncios campanas={campanas} />
-        ) : campanas.length === 0 ? (
-          <EstadoVacio>No hay campañas activas.</EstadoVacio>
+        ) : visibles.length === 0 ? (
+          <EstadoVacio>{hrefBase.estado === "bajo" ? "No hay campañas bajo el objetivo." : "No hay campañas activas."}</EstadoVacio>
         ) : (
-          <Tabla encabezados={encabezados} scroll>
-            <TablaCampanas campanas={campanas} comparar={conComparacion} />
-          </Tabla>
+          <>
+            <Tabla encabezados={encabezados} scroll>
+              <TablaCampanas campanas={visibles} />
+            </Tabla>
+            <p className={styles.nota}>{notaSemaforo(visibles)}</p>
+          </>
         )}
       </Tarjeta>
     </>

@@ -16,6 +16,10 @@ import {
   rentabilidadCampana,
   roasEquilibrio,
   semaforoMargen,
+  semaforoCampana,
+  porcentajeDeRazon,
+  diasParaEstabilizar,
+  type EstadoSemaforoCampana,
   type MargenProducto,
   type EstadoRentabilidad,
   tieneVentaAtribuida,
@@ -100,9 +104,36 @@ export function pintarMargen(margen: MargenProducto, meta: string): Pick<Anuncio
   };
 }
 
+export type SemaforoCampanaPintado = {
+  estado: EstadoSemaforoCampana;
+  rotulo: string;
+  tono: "exito" | "advertencia" | "peligro" | "neutro";
+  // "57 %" del objetivo. null sin ROAS u objetivo.
+  porcentaje: string | null;
+};
+
+const ROTULO_SEMAFORO_CAMPANA: Record<EstadoSemaforoCampana, Omit<SemaforoCampanaPintado, "estado" | "porcentaje">> = {
+  en_objetivo: { rotulo: "En objetivo", tono: "exito" },
+  bajo_objetivo: { rotulo: "Bajo objetivo", tono: "advertencia" },
+  muy_bajo: { rotulo: "Muy bajo", tono: "peligro" },
+  sin_objetivo: { rotulo: "Sin objetivo", tono: "neutro" },
+  sin_datos: { rotulo: "Sin datos", tono: "neutro" },
+};
+
+// "12,00x" -> "12x"; "11,62x" queda igual. Para el objetivo en "ROAS / obj.".
+function roasCorto(ratio: string | null): string | null {
+  return ratio === null ? null : mostrarRoas(ratio).replace(",00x", "x");
+}
+
 export type CampanaPintada = {
   id: string;
   nombre: string;
+  semaforo: SemaforoCampanaPintado;
+  // "Aprendiendo · estabiliza en 4 días" o "Estable".
+  diagnosticoTexto: string;
+  // Días que le faltan para salir de aprendizaje; null si ya salió.
+  diasParaEstabilizar: number | null;
+  roasObjetivoCorto: string | null;
   pausada: boolean;
   estadoTono: TonoEstado;
   estadoFrase: string;
@@ -257,8 +288,19 @@ export function pintarCampana(
   const anunciosEnfriamiento = recomendaciones.filter(
     (item) => item.codigo === "pasar_enfriamiento" || item.codigo === "crear_enfriamiento"
   ).length;
+  const estadoSemaforo = semaforoCampana(campana.totales.roas, campana.roasObjetivo);
+  const porcentajeObjetivo = porcentajeDeRazon(campana.totales.roas, campana.roasObjetivo);
+  const faltan = aprendiendo ? diasParaEstabilizar(campana.diagnostico.dias, campana.diasAprendizaje) : null;
   return {
     id: campana.id,
+    semaforo: {
+      estado: estadoSemaforo,
+      ...ROTULO_SEMAFORO_CAMPANA[estadoSemaforo],
+      porcentaje: porcentajeObjetivo === null ? null : `${aEscala(porcentajeObjetivo, 0)} %`,
+    },
+    diagnosticoTexto: faltan === null ? "Estable" : `Aprendiendo · estabiliza en ${faltan} ${faltan === 1 ? "día" : "días"}`,
+    diasParaEstabilizar: faltan,
+    roasObjetivoCorto: roasCorto(campana.roasObjetivo),
     nombre: campana.nombre,
     pausada: !campana.activa,
     estadoTono: estado.tono,
@@ -533,4 +575,29 @@ export function pintarCambios(cambios: TableroPublicidad["cambios"]): CambioPint
       tono: direccion === "otro" ? "neutro" : gastaMas ? "advertencia" : "exito",
     };
   });
+}
+
+export function esBajoObjetivo(campana: Pick<CampanaPintada, "semaforo">): boolean {
+  return campana.semaforo.estado === "bajo_objetivo" || campana.semaforo.estado === "muy_bajo";
+}
+
+// Nota debajo de la tabla de campañas (como el tablero de referencia):
+// cuáles aprenden y no se tocan, a cuánto del objetivo van las que están
+// bajo, y la leyenda de los colores.
+export function notaSemaforo(campanas: readonly CampanaPintada[]): string {
+  const partes: string[] = [];
+  const aprendiendo = campanas.filter((c) => c.diasParaEstabilizar !== null);
+  if (aprendiendo.length > 0) {
+    const lista = aprendiendo
+      .map((c) => `${c.nombre} (${c.diasParaEstabilizar} ${c.diasParaEstabilizar === 1 ? "día" : "días"})`)
+      .join(", ");
+    partes.push(aprendiendo.length === 1 ? `${lista} está en Aprendiendo y no se toca.` : `${lista} están en Aprendiendo y no se tocan.`);
+  }
+  for (const c of campanas) {
+    if (c.diasParaEstabilizar === null && esBajoObjetivo(c) && c.semaforo.porcentaje) {
+      partes.push(`${c.nombre} en ${c.semaforo.porcentaje} del objetivo.`);
+    }
+  }
+  partes.push("En objetivo ≥100 % del ROAS objetivo · Bajo 70–100 % · Muy bajo <70 %.");
+  return partes.join(" ");
 }
