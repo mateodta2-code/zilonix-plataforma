@@ -1,0 +1,48 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+import { gruposSuperadmin } from "@/components/marco/menuSuperadmin";
+
+vi.hoisted(() => {
+  process.env.DATABASE_URL_APP ||= "postgres://x:x@localhost:5432/x";
+  process.env.DATABASE_URL_SUPERADMIN ||= "postgres://x:x@localhost:5432/x";
+});
+
+vi.mock("@/lib/superadmin", () => ({ requiereSesionSuperadmin: async () => ({ usuarioId: "u", clerkUserId: "c" }) }));
+vi.mock("@clerk/nextjs/server", () => ({ currentUser: async () => ({ firstName: "Ana", lastName: "Prueba", imageUrl: null }) }));
+vi.mock("../actions", () => ({ cerrarSesionSuperadminAction: async () => {} }));
+
+describe("layout del panel superadmin", () => {
+  it("usa el marco del vendedor: logo, etiqueta de panel, secciones y cierre de sesión propio", async () => {
+    const Layout = (await import("./layout")).default;
+    const html = renderToStaticMarkup(await Layout({ children: <p>CONTENIDO</p> }));
+    expect(html).toContain("CONTENIDO");
+    expect(html).toContain("zilonix-seller-logo.svg");
+    expect(html).toContain("Superadmin");
+    expect(html).toContain("Administración");
+    expect(html).toContain("Equipo superadmin");
+    expect(html).toContain("Ana Prueba");
+    expect(html).toContain("Cerrar sesión");
+    expect(html).toContain("Mi cuenta");
+    expect(html).not.toContain('name="empresaId"'); // sin selector de empresa
+  });
+});
+
+describe("menú del superadmin", () => {
+  const items = gruposSuperadmin().flatMap((g) => g.items);
+  it("todo apunta a /superadmin", () => {
+    for (const i of items) expect(i.href.startsWith("/superadmin")).toBe(true);
+  });
+  it("no muestra ítems del vendedor", () => {
+    const etiquetas = items.map((i) => i.etiqueta);
+    for (const prohibido of ["Pedidos", "Despachos", "Productos", "Investigación", "Publicar", "Promociones", "Finanzas", "Publicidad", "Personas"]) {
+      expect(etiquetas).not.toContain(prohibido);
+    }
+  });
+  it("Soporte y Métricas quedan deshabilitados como Próximamente", () => {
+    for (const e of ["Soporte", "Métricas"]) {
+      const i = items.find((x) => x.etiqueta === e);
+      expect(i?.deshabilitada).toBe(true);
+      expect(i?.titulo).toBe("Próximamente");
+    }
+  });
+});

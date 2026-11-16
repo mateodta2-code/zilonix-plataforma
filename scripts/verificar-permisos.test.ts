@@ -194,12 +194,16 @@ const RUTAS_PROTEGIDAS = new Set([
 // ruta bajo /superadmin tiene que llamar requiereSesionSuperadmin(), nunca
 // requierePermiso() — son preguntas distintas.
 const RUTAS_SUPERADMIN = new Set([
-  "app/superadmin/page.tsx",
-  "app/superadmin/[empresaId]/page.tsx",
-  "app/superadmin/[empresaId]/actions.ts",
+  "app/superadmin/(panel)/page.tsx",
+  "app/superadmin/(panel)/empresas/page.tsx",
+  "app/superadmin/(panel)/equipo/page.tsx",
+  "app/superadmin/(panel)/auditoria/page.tsx",
+  "app/superadmin/(panel)/configuracion/page.tsx",
+  "app/superadmin/(panel)/[empresaId]/page.tsx",
+  "app/superadmin/(panel)/[empresaId]/actions.ts",
   // Foro (14-nov) — moderar: esconder/mostrar publicaciones.
-  "app/superadmin/foro/page.tsx",
-  "app/superadmin/foro/actions.ts",
+  "app/superadmin/(panel)/foro/page.tsx",
+  "app/superadmin/(panel)/foro/actions.ts",
 ]);
 
 // Rutas exentas, cada una con el motivo real por el que no necesita

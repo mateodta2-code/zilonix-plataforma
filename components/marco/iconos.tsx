@@ -353,6 +353,48 @@ export function IconoCerrarSesion(props: IconoProps) {
   );
 }
 
+// PR superadmin-marco-app — íconos del menú del superadmin.
+export function IconoEmpresas(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M5 20V5l8-2v17" />
+      <path d="M13 9h6v11" />
+      <path d="M3 20h18" />
+      <path d="M8.5 8.5h1M8.5 12h1M8.5 15.5h1" />
+    </Svg>
+  );
+}
+
+export function IconoMetricas(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 20V10" />
+      <path d="M10 20V4" />
+      <path d="M16 20v-7" />
+      <path d="M21 20H3" />
+    </Svg>
+  );
+}
+
+export function IconoAuditoria(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <rect x="5" y="4" width="14" height="17" rx="2" />
+      <path d="M9 4V3h6v1" />
+      <path d="M8.5 10h7M8.5 14h7M8.5 17.5h4" />
+    </Svg>
+  );
+}
+
+export function IconoEquipoAdmin(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z" />
+      <path d="m9 12 2.2 2.2L15.5 10" />
+    </Svg>
+  );
+}
+
 const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   inicio: IconoInicio,
   pedidos: IconoPedidos,
@@ -380,6 +422,10 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   cuenta: IconoCuenta,
   crearEmpresa: IconoCrearEmpresa,
   datosPersonales: IconoDatosPersonales,
+  empresas: IconoEmpresas,
+  metricas: IconoMetricas,
+  auditoria: IconoAuditoria,
+  equipoAdmin: IconoEquipoAdmin,
 };
 
 export function iconoDeClave(clave: keyof typeof MAPA_ICONOS, props?: IconoProps) {

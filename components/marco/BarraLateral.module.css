@@ -49,6 +49,16 @@
   padding: 8px 0;
 }
 
+/* Tipo de panel ("Superadmin", "Bodega"…) bajo el logo. Misma
+   etiqueta plateada de los encabezados de grupo (zx-etiqueta). */
+.tipoPanel {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .barra[data-colapsada="true"] .logo {
   padding: 8px 0;
 }
@@ -294,7 +304,8 @@ html .item {
   }
 
   .etiquetaItem,
-  .etiquetaGrupo {
+  .etiquetaGrupo,
+  .tipoPanel {
     display: none;
   }
 

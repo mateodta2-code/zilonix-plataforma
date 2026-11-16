@@ -719,6 +719,24 @@ $fn$;
 REVOKE ALL ON FUNCTION superadmin_resumen_empresas() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION superadmin_resumen_empresas() TO superadmin_user;
 
+-- Auditoría del superadmin (solo lectura en /superadmin/auditoria). superadmin_user
+-- no tiene SELECT sobre auditoria: esta función SECURITY DEFINER devuelve solo las
+-- filas cuyo autor es una cuenta superadmin, y solo ts/accion/entidad/nombre de
+-- empresa/detalle (nunca valor_anterior/valor_nuevo). Límite acotado a 1..200.
+CREATE OR REPLACE FUNCTION superadmin_acciones_recientes(limite integer DEFAULT 100)
+RETURNS TABLE (ts timestamptz, accion text, entidad text, empresa_nombre text, detalle text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT a.ts, a.accion, a.entidad, e.nombre, a.detalle
+  FROM auditoria a
+  JOIN usuarios u ON u.id = a.usuario_id AND u.es_superadmin
+  LEFT JOIN empresas e ON e.id = a.empresa_id
+  ORDER BY a.ts DESC
+  LIMIT greatest(1, least(coalesce(limite, 100), 200))
+$fn$;
+REVOKE ALL ON FUNCTION superadmin_acciones_recientes(integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION superadmin_acciones_recientes(integer) TO superadmin_user;
+
 DROP POLICY IF EXISTS superadmin_ve_membresias ON membresias;
 CREATE POLICY superadmin_ve_membresias ON membresias FOR SELECT TO superadmin_user USING (true);
 

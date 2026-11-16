@@ -5,6 +5,7 @@ import {
   requiereSuperadmin,
   listarEmpresasConConteo,
   obtenerMiembrosConAcceso,
+  listarAccionesSuperadmin,
   NoEsSuperadminError,
   SinAccesoTemporalError,
 } from "../lib/superadmin";
@@ -103,5 +104,18 @@ describe("panel superadmin (RLS + lib, tarea 1.11)", () => {
     ).rejects.toThrow();
     const real = await dbComoEmpresa(empresaId, (tx) => tx.select().from(empresas).where(eq(empresas.id, empresaId)));
     expect(real[0].nombre).toBe("Empresa Superadmin (prueba 1.11)");
+  });
+
+  it("la auditoría del superadmin solo devuelve acciones de cuentas superadmin, y superadmin_user no lee auditoria directo", async () => {
+    await dbSuperadmin.insert(auditoria).values({
+      id: randomUUID(), empresaId, usuarioId: superadminUsuarioId, actorTipo: "persona", accion: "accion_prueba_marco", entidad: "empresa",
+    });
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(auditoria).values({ id: randomUUID(), empresaId, usuarioId: duenoId, actorTipo: "persona", accion: "accion_de_empresa_marco", entidad: "x" })
+    );
+    const acciones = (await listarAccionesSuperadmin(200)).map((a) => a.accion);
+    expect(acciones).toContain("accion_prueba_marco");
+    expect(acciones).not.toContain("accion_de_empresa_marco");
+    await expect(dbSuperadmin.select().from(auditoria)).rejects.toThrow();
   });
 });
