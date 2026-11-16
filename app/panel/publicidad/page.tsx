@@ -330,19 +330,24 @@ function Cuerpo({
 
   return (
     <>
-      <nav className={styles.pestanas} aria-label="Vistas de publicidad">
-        <Link scroll={false} href={hrefPublicidad({ ...hrefBase, tab: "campanas" })} className={styles.pestana} aria-current={tab === "campanas" ? "page" : undefined}>
-          Campañas
-        </Link>
-        <Link scroll={false} href={hrefPublicidad({ ...hrefBase, tab: "anuncios" })} className={styles.pestana} aria-current={tab === "anuncios" ? "page" : undefined}>
-          Anuncios
-        </Link>
-      </nav>
+      {/* En tema claro, panelDatos es una tarjeta con fondo propio: las
+          pestañas y la nota caían sueltas sobre la franja gris del
+          degradado y no se leían (16-nov). En oscuro no cambia nada. */}
+      <div className={styles.panelDatos}>
+        <nav className={styles.pestanas} aria-label="Vistas de publicidad">
+          <Link scroll={false} href={hrefPublicidad({ ...hrefBase, tab: "campanas" })} className={styles.pestana} aria-current={tab === "campanas" ? "page" : undefined}>
+            Campañas
+          </Link>
+          <Link scroll={false} href={hrefPublicidad({ ...hrefBase, tab: "anuncios" })} className={styles.pestana} aria-current={tab === "anuncios" ? "page" : undefined}>
+            Anuncios
+          </Link>
+        </nav>
 
-      <p className={styles.nota}>
-        Datos de Mercado Libre actualizados: {actualizado}. {textoComparacion(periodo)}
-        {tablero.enCurso ? " Hay una actualización en curso." : ""}
-      </p>
+        <p className={styles.nota}>
+          Datos de Mercado Libre actualizados: {actualizado}. {textoComparacion(periodo)}
+          {tablero.enCurso ? " Hay una actualización en curso." : ""}
+        </p>
+      </div>
 
       <Tarjeta className={styles.miPresupuesto}>
         <p className={styles.seccion}>Mi presupuesto</p>

@@ -1,0 +1,1 @@
+- Publicidad, tema claro: las pestañas Campañas/Anuncios y la nota "Datos de Mercado Libre actualizados…" van dentro de una tarjeta (panelDatos); antes caían sobre la franja gris del fondo y no se leían.
