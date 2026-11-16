@@ -196,6 +196,7 @@ const RUTAS_PROTEGIDAS = new Set([
 const RUTAS_SUPERADMIN = new Set([
   "app/superadmin/page.tsx",
   "app/superadmin/[empresaId]/page.tsx",
+  "app/superadmin/[empresaId]/actions.ts",
   // Foro (14-nov) — moderar: esconder/mostrar publicaciones.
   "app/superadmin/foro/page.tsx",
   "app/superadmin/foro/actions.ts",

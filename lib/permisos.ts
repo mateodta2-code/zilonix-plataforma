@@ -46,6 +46,6 @@ export class SoloDuenoError extends Error {
 
 export async function requiereDueno(usuarioId: string, empresaId: string): Promise<MiMembresia> {
   const miMembresia = await obtenerMiMembresia(usuarioId, empresaId);
-  if (!miMembresia || miMembresia.rolNombre !== "Dueño") throw new SoloDuenoError();
+  if (!miMembresia || miMembresia.empresaSuspendida || miMembresia.rolNombre !== "Dueño") throw new SoloDuenoError();
   return miMembresia;
 }
