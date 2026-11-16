@@ -1,0 +1,1 @@
+- Publicidad: ordenar la tabla (clic en un título), cambiar de pestaña, Todas/Bajo objetivo y Comparado con ya no suben la página: se queda donde estabas.
