@@ -16,7 +16,7 @@ import { FotoConZoom } from "@/components/marco/FotoConZoom";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { ESTADOS_UNIFICADOS } from "@/lib/pedidos/estados";
-import { hrefPedidos, parsearFiltrosPedidos, PERIODOS, TAMANO_PAGINA_PEDIDOS, type CuentasEmpresa } from "@/lib/pedidos/filtros";
+import { hayCuentasActivas, hrefPedidos, parsearFiltrosPedidos, PERIODOS, TAMANO_PAGINA_PEDIDOS, type CuentasEmpresa } from "@/lib/pedidos/filtros";
 import { listarPedidosUnificados, type PedidoListado } from "@/lib/pedidos/listado";
 import { formatearFechaPedido, formatearMontoEnMoneda, MARKETPLACES } from "@/lib/pedidos/marketplace";
 import styles from "./page.module.css";
@@ -121,13 +121,15 @@ export default async function PedidosPage({ searchParams }: { searchParams: Reco
   }
 
   const [cuentasMl, cuentasFalabella] = await Promise.all([listarCuentasMl(empresa.id), listarCuentasFalabella(empresa.id)]);
+  // listarCuentasConectadas trae también las desconectadas (revisión de
+  // Pablo, PR #433): siguen en el filtro, pero no evitan el aviso de conectar.
   const cuentas: CuentasEmpresa = {
-    ml: cuentasMl.map((c) => ({ id: c.id, nickname: c.nickname })),
-    falabella: cuentasFalabella.map((c) => ({ id: c.id, nickname: c.nickname })),
+    ml: cuentasMl.map((c) => ({ id: c.id, nickname: c.nickname, desconectada: c.desconectadaTs != null })),
+    falabella: cuentasFalabella.map((c) => ({ id: c.id, nickname: c.nickname, desconectada: c.desconectadaTs != null })),
   };
   const filtros = parsearFiltrosPedidos(searchParams, cuentas, new Date());
   const { pedidos, hayMas } = await listarPedidosUnificados(empresa.id, filtros);
-  const sinCuentas = cuentas.ml.length === 0 && cuentas.falabella.length === 0;
+  const sinCuentas = !hayCuentasActivas(cuentas);
   const puedeConectar = sinCuentas && (await puedeConsultarConfiguracion(usuario.id, empresa.id));
   const hayFiltros = filtros.periodo !== "mes" || filtros.marketplace !== "todos" || filtros.tienda || filtros.estado || filtros.q;
   const primero = (filtros.pagina - 1) * TAMANO_PAGINA_PEDIDOS + 1;
@@ -174,12 +176,12 @@ export default async function PedidosPage({ searchParams }: { searchParams: Reco
             <option value="">Todas</option>
             {cuentas.ml.map((c) => (
               <option key={`ml:${c.id}`} value={`ml:${c.id}`}>
-                {c.nickname} · Mercado Libre
+                {c.nickname} · Mercado Libre{c.desconectada ? " (desconectada)" : ""}
               </option>
             ))}
             {cuentas.falabella.map((c) => (
               <option key={`falabella:${c.id}`} value={`falabella:${c.id}`}>
-                {c.nickname} · Falabella
+                {c.nickname} · Falabella{c.desconectada ? " (desconectada)" : ""}
               </option>
             ))}
           </select>

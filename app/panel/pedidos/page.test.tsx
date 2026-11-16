@@ -141,4 +141,13 @@ describe("PedidosPage — lista informativa (#422)", () => {
     expect(html).toContain('href="/panel/pedidos?marketplace=ml&amp;pagina=3"');
     expect(html).toContain('href="/panel/pedidos?marketplace=ml"');
   });
+
+  it("solo una cuenta desconectada: ve el aviso de conectar y la tienda marcada (revisión PR #433)", async () => {
+    cuentasMlMock.mockResolvedValue([]);
+    cuentasFalaMock.mockResolvedValue([{ id: "22222222-2222-2222-2222-222222222222", nickname: "vieja", desconectadaTs: new Date("2026-10-01T00:00:00Z") }]);
+    listarMock.mockResolvedValue({ pedidos: [], hayMas: false });
+    const html = await pintar();
+    expect(html).toContain("conectar una cuenta de Mercado Libre o de Falabella");
+    expect(html).toContain("vieja · Falabella (desconectada)");
+  });
 });

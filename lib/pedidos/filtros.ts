@@ -22,7 +22,9 @@ export const PERIODOS = [
 ] as const;
 export type Periodo = (typeof PERIODOS)[number]["valor"];
 
-export type CuentaFiltro = { id: string; nickname: string };
+// Una cuenta desconectada sigue en el filtro (sus pedidos viejos se
+// pueden consultar), pero no cuenta como «tiene cuentas».
+export type CuentaFiltro = { id: string; nickname: string; desconectada?: boolean };
 export type CuentasEmpresa = { ml: CuentaFiltro[]; falabella: CuentaFiltro[] };
 export type Tienda = { marketplace: "ml" | "falabella"; id: string };
 
@@ -43,11 +45,17 @@ type Params = Record<string, string | string[] | undefined>;
 
 const DIA_MS = 24 * 60 * 60 * 1000;
 
+// Revisión de Pablo (PR #433): el select «Fecha» siempre manda un valor
+// (por defecto "mes"), así que quien llena Desde/Hasta sin tocarlo
+// mandaba periodo=mes y sus fechas se ignoraban. Si llegan fechas, gana
+// el rango personalizado salvo que se haya elegido Hoy, Ayer o Esta
+// semana a propósito. También cubre los enlaces viejos con ?desde=&hasta=.
+const PERIODOS_FIJOS: readonly Periodo[] = ["hoy", "ayer", "semana"];
+
 function parsearPeriodo(valor: string | undefined, hayFechas: boolean): Periodo {
-  if (PERIODOS.some((p) => p.valor === valor)) return valor as Periodo;
-  // Un enlace viejo con ?desde=&hasta= (el detalle anterior) sigue
-  // funcionando como rango personalizado.
-  return hayFechas ? "personalizado" : "mes";
+  const valido = PERIODOS.some((p) => p.valor === valor) ? (valor as Periodo) : null;
+  if (hayFechas && !(valido && PERIODOS_FIJOS.includes(valido))) return "personalizado";
+  return valido ?? "mes";
 }
 
 // "Esta semana" empieza el lunes (calendario de Bogotá) e incluye hoy.
@@ -101,6 +109,10 @@ export function parsearFiltrosPedidos(params: Params, cuentas: CuentasEmpresa, a
     q: normalizarTextoBusqueda(normalizarParametro(params.q)),
     pagina: Math.min(parsearPagina(normalizarParametro(params.pagina)), PAGINA_MAXIMA_PEDIDOS),
   };
+}
+
+export function hayCuentasActivas(cuentas: CuentasEmpresa): boolean {
+  return [...cuentas.ml, ...cuentas.falabella].some((c) => !c.desconectada);
 }
 
 // Qué marketplaces se consultan, según marketplace y tienda.

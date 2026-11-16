@@ -33,6 +33,17 @@ describe("filtros de Pedidos (#422)", () => {
     expect(mal.error).toBeTruthy();
   });
 
+  it("Desde/Hasta con el select en «Este mes» se toman como rango personalizado (revisión PR #433)", () => {
+    const f = parsearFiltrosPedidos({ periodo: "mes", desde: "2026-10-01", hasta: "2026-10-15" }, cuentas, ahora);
+    expect(f.periodo).toBe("personalizado");
+    expect(f.rango?.inicio.toISOString()).toBe("2026-10-01T05:00:00.000Z");
+    expect(f.rango?.finExclusivo.toISOString()).toBe("2026-10-16T05:00:00.000Z");
+    // Hoy/Ayer/Esta semana elegidos a propósito siguen ganando.
+    expect(parsearFiltrosPedidos({ periodo: "hoy", desde: "2026-10-01" }, cuentas, ahora).periodo).toBe("hoy");
+    // Campos de fecha vacíos (el formulario los manda igual) no cambian nada.
+    expect(parsearFiltrosPedidos({ periodo: "mes", desde: "", hasta: "" }, cuentas, ahora).periodo).toBe("mes");
+  });
+
   it("lista blanca: valores desconocidos caen al defecto", () => {
     const f = parsearFiltrosPedidos(
       { periodo: "siempre", marketplace: "amazon", estado: "paid", tienda: "ml:otra-empresa", pagina: "1e20" },
