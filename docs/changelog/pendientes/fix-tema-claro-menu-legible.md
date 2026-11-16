@@ -1,0 +1,1 @@
+- Tema claro: las opciones del menú lateral eligen su color según dónde caen de verdad sobre el fondo (oscuro arriba, blanco abajo), en vez de por grupo. Ya no quedan letras claras sobre blanco en las últimas opciones (Actividad, Configuración, Personas, Foro) en pantallas bajas o con muchos módulos.
