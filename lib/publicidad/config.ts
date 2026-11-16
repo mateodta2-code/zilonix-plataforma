@@ -14,11 +14,11 @@ export const FACTOR_EXCELENTE = "1.2";
 // ROAS bajo este factor del objetivo: apagar y crear otra. 8,40 sobre
 // 12,00 es justo el 70 % y no entra.
 export const UMBRAL_ROAS_BAJO = "0.70";
-// Semáforo de campaña (16-nov, especificación del semáforo): verde
-// "En objetivo" desde el 100 % del ROAS objetivo (se deja igual),
-// amarillo "Bajo objetivo" entre 70 % y 100 % (vigilar), rojo "Muy
-// bajo" bajo el 70 % (apagar y crear una nueva). Gris si aprende.
-export const UMBRAL_EN_OBJETIVO = "1.00";
+// Semáforo de campaña (16-nov, confirmado por Santiago con el tablero
+// de referencia): verde "En objetivo" desde el 90 % del ROAS objetivo
+// (se deja igual), amarillo "Bajo objetivo" entre 70 % y 90 %
+// (vigilar), rojo "Muy bajo" bajo el 70 % (apagar y crear una nueva).
+export const UMBRAL_EN_OBJETIVO = "0.90";
 // ROAS a esta altura del objetivo: el ACOS quedó holgado. La única
 // sugerencia es ajustar el objetivo, nunca subir presupuesto ni bajarlo.
 export const FACTOR_ROAS_HOLGADO = "1.3";

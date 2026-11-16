@@ -154,7 +154,7 @@ export function detalleDiagnostico(entrada: {
   if (entrada.diagnostico.tipo === "excelente") return { pill: "Excelente", detalle: "Se deja igual", tono: "exito" };
   if (entrada.diagnostico.tipo === "en_objetivo") return { pill: "En objetivo", detalle: "Se deja igual", tono: "exito" };
   if (entrada.diagnostico.tipo === "bajo_objetivo") {
-    return { pill: "Bajo objetivo", detalle: "Entre el 70 % y el 100 % del objetivo: vigilar", tono: "advertencia" };
+    return { pill: "Bajo objetivo", detalle: "Entre el 70 % y el 90 % del objetivo: vigilar", tono: "advertencia" };
   }
   if (entrada.diagnostico.tipo === "sin_objetivo") return { pill: null, detalle: "Sin objetivo", tono: "neutro" };
   return { pill: null, detalle: "Sin datos", tono: "neutro" };

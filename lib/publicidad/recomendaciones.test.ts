@@ -46,16 +46,16 @@ describe("recomendaciones de publicidad (issue #255)", () => {
     expect(bajo[0].motivo).toContain("12,00x");
     const justo = recomendarCampana({ ...base, roas: "8.40", objetivo: "12.00" });
     expect(justo.map((item) => [item.codigo, item.texto])).toEqual([["vigilar", "Vigilar"]]);
-    expect(justo[0].motivo).toBe("ROAS 8,40x, entre el 70 % y el 100 % del objetivo 12,00x");
+    expect(justo[0].motivo).toBe("ROAS 8,40x, entre el 70 % y el 90 % del objetivo 12,00x");
   });
 
-  it("verde: en el objetivo o por encima se deja igual; nunca propone gastar más", () => {
-    for (const roas of ["12.00", "15.60", "40.00"]) {
+  it("verde: desde el 90 % del objetivo se deja igual; nunca propone gastar más", () => {
+    for (const roas of ["10.80", "12.00", "15.60", "40.00"]) {
       expect(recomendarCampana({ ...base, roas, objetivo: "12.00" }).map((item) => [item.codigo, item.texto])).toEqual([
         ["dejar_igual", "Se deja igual"],
       ]);
     }
-    expect(recomendarCampana({ ...base, roas: "11.99", objetivo: "12.00" }).map((item) => item.codigo)).toEqual(["vigilar"]);
+    expect(recomendarCampana({ ...base, roas: "10.79", objetivo: "12.00" }).map((item) => item.codigo)).toEqual(["vigilar"]);
     const todos = ["2.00", "8.40", "11.99", "12.00", "40.00"].flatMap((roas) => recomendarCampana({ ...base, roas, objetivo: "12.00" }));
     const unidos = todos.map((item) => `${item.texto} ${item.motivo}`).join(" ");
     expect(unidos).not.toMatch(/presupuesto/i);

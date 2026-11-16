@@ -445,8 +445,8 @@ export function diagnosticarCampana(entrada: {
   if (objetivo === null || centavos(aEscala(objetivo, 2)) <= CERO) return { tipo: "sin_objetivo", dias: 0 };
   const excelente = roasAlcanza(ventas, gasto, objetivo, entrada.config.factorExcelente);
   if (excelente) return { tipo: "excelente", dias: 0 };
-  // Semáforo: verde desde el 100 % del objetivo, amarillo entre 70 % y
-  // 100 %, rojo bajo el 70 % (el mismo 70 % de "Apagar y crear una nueva").
+  // Semáforo: verde desde el 90 % del objetivo, amarillo entre 70 % y
+  // 90 %, rojo bajo el 70 % (el mismo 70 % de "Apagar y crear una nueva").
   if (roasAlcanza(ventas, gasto, objetivo, UMBRAL_EN_OBJETIVO)) return { tipo: "en_objetivo", dias: 0 };
   if (roasAlcanza(ventas, gasto, objetivo, UMBRAL_ROAS_BAJO)) return { tipo: "bajo_objetivo", dias: 0 };
   return { tipo: "muy_bajo", dias: 0 };

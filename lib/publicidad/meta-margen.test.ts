@@ -71,10 +71,11 @@ describe("margen real por producto", () => {
 });
 
 describe("columna Estado de campañas (semáforo por ROAS, aunque aprenda)", () => {
-  it("verde desde el 100 %, amarillo desde el 70 %, rojo abajo", async () => {
+  it("verde desde el 90 %, amarillo desde el 70 %, rojo abajo", async () => {
     const { semaforoCampana } = await import("@/lib/publicidad/kpis");
     expect(semaforoCampana("12.34", "12.00")).toBe("en_objetivo");
-    expect(semaforoCampana("12.00", "12.00")).toBe("en_objetivo");
+    expect(semaforoCampana("10.80", "12.00")).toBe("en_objetivo");
+    expect(semaforoCampana("10.79", "12.00")).toBe("bajo_objetivo");
     expect(semaforoCampana("9.53", "12.00")).toBe("bajo_objetivo");
     expect(semaforoCampana("8.40", "12.00")).toBe("bajo_objetivo");
     expect(semaforoCampana("5.46", "13.00")).toBe("muy_bajo");
@@ -104,7 +105,7 @@ describe("columna Estado de campañas (semáforo por ROAS, aunque aprenda)", () 
         c("variados", null, "en_objetivo", "109 %"),
       ])
     ).toBe(
-      "agrupación (7 días), vendidos 06-08 (4 días) están en Aprendiendo y no se tocan. ENFRIAMIENTO en 57 % del objetivo. suplementos en 79 % del objetivo. En objetivo ≥100 % del ROAS objetivo · Bajo 70–100 % · Muy bajo <70 %."
+      "agrupación (7 días), vendidos 06-08 (4 días) están en Aprendiendo y no se tocan. ENFRIAMIENTO en 57 % del objetivo. suplementos en 79 % del objetivo. En objetivo ≥90 % del ROAS objetivo · Bajo 70–90 % · Muy bajo <70 %."
     );
   });
 });

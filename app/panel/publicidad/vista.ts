@@ -598,6 +598,6 @@ export function notaSemaforo(campanas: readonly CampanaPintada[]): string {
       partes.push(`${c.nombre} en ${c.semaforo.porcentaje} del objetivo.`);
     }
   }
-  partes.push("En objetivo ≥100 % del ROAS objetivo · Bajo 70–100 % · Muy bajo <70 %.");
+  partes.push("En objetivo ≥90 % del ROAS objetivo · Bajo 70–90 % · Muy bajo <70 %.");
   return partes.join(" ");
 }
