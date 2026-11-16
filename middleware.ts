@@ -3,6 +3,12 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
 import { creaContador, limpiarVencidos, superaLimite } from "@/lib/limite-peticiones";
 import { esRutaPublica } from "@/lib/rutas-publicas";
 import { urlPublicaDesdeEnv } from "@/lib/url-publica-env";
+import {
+  NOMBRE_COOKIE_SUPERADMIN,
+  firmarCookieSuperadmin,
+  opcionesCookieSuperadmin,
+  verificarCookieSuperadmin,
+} from "@/lib/superadmin-sesion";
 
 // Tarea 1.5 — toda ruta cerrada por defecto (regla de CLAUDE.md), salvo
 // las que se listan explícitamente en lib/rutas-publicas.ts (se saca a
@@ -84,7 +90,8 @@ export default clerkMiddleware(async (auth, req) => {
   if (
     req.nextUrl.pathname.endsWith("/sso-callback") &&
     !req.nextUrl.pathname.startsWith("/sign-in") &&
-    !req.nextUrl.pathname.startsWith("/sign-up")
+    !req.nextUrl.pathname.startsWith("/sign-up") &&
+    !req.nextUrl.pathname.startsWith("/superadmin/iniciar-sesion")
   ) {
     const destino = new URL("/sign-in/sso-callback", req.url);
     destino.search = req.nextUrl.search;
@@ -136,11 +143,29 @@ export default clerkMiddleware(async (auth, req) => {
     // middleware, otra etapa previa a los Route Handlers/Server
     // Components) — se recalcula el mismo criterio acá, directo contra
     // el request del middleware, que ya trae sus propias cabeceras.
+    // El panel superadmin tiene su login aparte: nunca /sign-in.
+    if (req.nextUrl.pathname.startsWith("/superadmin")) {
+      return NextResponse.redirect(new URL("/superadmin/iniciar-sesion", req.url));
+    }
     return sesion.redirectToSignIn({ returnBackUrl: `${urlPublicaBaseDesdeMiddleware(req)}${req.nextUrl.pathname}${req.nextUrl.search}` });
   }
 
   if (sesion.userId && superaLimite(contadorPorUsuario, sesion.userId, LIMITE_POR_USUARIO, VENTANA_MS)) {
     return new NextResponse("Demasiadas peticiones de tu cuenta — espera un minuto.", { status: 429 });
+  }
+
+  // Sesión propia del superadmin: vence por INACTIVIDAD, así que cada
+  // uso con cookie válida (de ESTE usuario) la reemite con 30 min
+  // nuevos. Aquí solo se renueva; el candado real es
+  // requiereSesionSuperadmin() en cada página y action.
+  const secretoSuperadmin = process.env.SUPERADMIN_SESION_SECRETO;
+  if (sesion.userId && secretoSuperadmin && req.nextUrl.pathname.startsWith("/superadmin")) {
+    const actual = req.cookies.get(NOMBRE_COOKIE_SUPERADMIN)?.value;
+    if (await verificarCookieSuperadmin(actual, sesion.userId, Date.now(), secretoSuperadmin)) {
+      const respuesta = NextResponse.next();
+      respuesta.cookies.set(NOMBRE_COOKIE_SUPERADMIN, await firmarCookieSuperadmin(sesion.userId, Date.now(), secretoSuperadmin), opcionesCookieSuperadmin());
+      return respuesta;
+    }
   }
 });
 

@@ -1,11 +1,9 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import {
-  requiereSuperadmin,
+  requiereSesionSuperadmin,
   listarEmpresasConConteo,
   obtenerMiembrosConAcceso,
-  NoEsSuperadminError,
   SinAccesoTemporalError,
 } from "@/lib/superadmin";
 
@@ -16,15 +14,7 @@ import {
 // (lib/superadmin.ts) — eso no se ve acá, lo prueba db/superadmin.test.ts
 // contra Postgres real.
 export default async function SuperadminEmpresaPage({ params }: { params: { empresaId: string } }) {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
-
-  try {
-    await requiereSuperadmin(usuario.id);
-  } catch (error) {
-    if (!(error instanceof NoEsSuperadminError)) throw error;
-    redirect("/panel");
-  }
+  const usuario = { id: (await requiereSesionSuperadmin()).usuarioId };
 
   const empresas = await listarEmpresasConConteo();
   const empresa = empresas.find((e) => e.id === params.empresaId);

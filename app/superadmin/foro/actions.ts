@@ -1,17 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { requiereSuperadmin } from "@/lib/superadmin";
+import { requiereSesionSuperadmin } from "@/lib/superadmin";
 import { cambiarVisibilidad } from "@/lib/foro";
 
 // Esconder / volver a mostrar una publicación del foro. requiereSuperadmin
 // se pide acá y otra vez en cambiarVisibilidad (lib/foro.ts).
 export async function cambiarVisibilidadAction(formData: FormData) {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
-  await requiereSuperadmin(usuario.id);
+  const usuario = { id: (await requiereSesionSuperadmin()).usuarioId };
 
   const tipo = formData.get("tipo") === "respuesta" ? "respuesta" : "pregunta";
   const id = String(formData.get("id") ?? "");

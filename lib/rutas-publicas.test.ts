@@ -50,4 +50,12 @@ describe("esRutaPublica (fix middleware, 2026-10-21)", () => {
     expect(esRutaPublica(peticion("/api/ml/webhooks/x"))).toBe(false);
     expect(esRutaPublica(peticion("/api/ml/callbackx"))).toBe(false);
   });
+
+  it("solo el login del superadmin es público, no /superadmin entero", () => {
+    expect(esRutaPublica(peticion("/superadmin/iniciar-sesion"))).toBe(true);
+    expect(esRutaPublica(peticion("/superadmin/iniciar-sesion/factor-one"))).toBe(true);
+    expect(esRutaPublica(peticion("/superadmin"))).toBe(false);
+    expect(esRutaPublica(peticion("/superadmin/foro"))).toBe(false);
+    expect(esRutaPublica(peticion("/superadmin/entrar"))).toBe(false);
+  });
 });
