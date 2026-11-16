@@ -1,12 +1,12 @@
-/* Issue #131 — /panel/pedidos es solo el detalle día a día; sus
-   estilos viven en components/finanzas/ventasUtilidad.module.css. */
+/* Issue #422 — Pedidos informativo: tarjetas amplias y filtros con el
+   mismo estilo de Despachos (app/panel/despachos/page.module.css), sin
+   paleta nueva: solo tokens de globals.css. */
 .volver {
   align-self: flex-start;
   margin-top: 16px;
 }
 
-/* Issue #323 — mismo patrón de /panel/sku (texto + botón en una fila)
-   para el estado vacío con el siguiente paso. */
+/* Issue #323 — texto + botón en una fila para el estado vacío. */
 .vacioConAccion {
   display: flex;
   flex-wrap: wrap;
@@ -15,30 +15,192 @@
   gap: 10px;
 }
 
-/* Issue #422 — filtro de marketplace (Todos / Mercado Libre / Falabella)
-   y títulos de sección: pequeños y en mayúscula, como Inicio. */
-.filtroMarketplace {
+.filtros {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+  /* Mismo motivo que Despachos (issue #186): el texto plano necesita su
+     propia regla de color para recoger las variables de zona oscura. */
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
 }
 
-.tituloMarketplace {
-  margin: 24px 0 8px;
-  font-size: 12px;
+.filtros::before,
+.filtros::after {
+  content: "";
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}
+
+.filtros::before {
+  top: 0;
+}
+
+.filtros::after {
+  bottom: 0;
+}
+
+.campoBusqueda {
+  min-width: 220px;
+}
+
+.accionesFiltro {
+  display: flex;
+  gap: 8px;
+}
+
+.avisoError {
+  margin: 0 0 16px;
+  color: var(--peligro-texto);
+  font-size: 13px;
+}
+
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tarjeta {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.columnaInfo {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.encabezadoTarjeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+/* Sello del marketplace: borde y texto con tokens existentes. */
+.sello {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radio-chip);
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sello[data-marketplace="ml"] {
+  color: var(--kpi-advertencia-texto);
+}
+
+.sello[data-marketplace="falabella"] {
+  color: var(--exito-texto);
+}
+
+.productos {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.producto {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.imagen,
+.imagenVacia {
+  width: 88px;
+  height: 88px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--superficie-2);
+  display: block;
+}
+
+.datosProducto {
+  min-width: 0;
+}
+
+.nombreProducto {
+  display: block;
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lineaDatos {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+.columnaValor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.etiquetaValor {
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--texto-suave);
 }
 
-.marketplace {
+.valor {
+  font-size: 18px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
-.productos {
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.resumenPaginacion {
   margin: 0;
-  padding: 0;
-  list-style: none;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.botonesPaginacion {
+  display: flex;
+  gap: 8px;
 }

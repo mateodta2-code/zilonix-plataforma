@@ -134,7 +134,9 @@ export default async function PanelPage({ searchParams = {} }: { searchParams?: 
           sidebar. Sin dos saludos. */}
       <p className={styles.subtitulo}>Este es el resumen de {activa.nombre}</p>
 
-      <ChecklistOnboarding empresaId={activa.id} puedeConectarMl={puedeConectarMl} puedeVerPedidos={vePedidosYDespachos && veFinanzas} />
+      {/* Issue #422 — Pedidos ya no muestra montos de utilidad y pide
+          solo ventas.consultar: el enlace del checklist sigue esa regla. */}
+      <ChecklistOnboarding empresaId={activa.id} puedeConectarMl={puedeConectarMl} puedeVerPedidos={vePedidosYDespachos} />
 
       {finanzas ? (
         <InicioFinanzas {...finanzas} operacion={operacion} />
