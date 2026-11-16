@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Chip } from "@/components/marco/Chip";
 import { Ayuda } from "@/components/marco/Ayuda";
-import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
+import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { AYUDA_SEMAFORO, COLUMNAS_CAMPANA, NOTA_UNIDADES, NOTA_VENTAS_ORGANICAS } from "@/lib/publicidad/rotulos";
 import type { CampanaPintada, DeltaPintado } from "./vista";
@@ -37,7 +37,16 @@ export function TablaAnuncios({ campanas }: { campanas: CampanaPintada[] }) {
   if (filas.length === 0) return <EstadoVacio>No hay anuncios en las campañas de este filtro.</EstadoVacio>;
   return (
     <Tabla
-      encabezados={["Campaña", "Publicación", "Título", "Inversión", "Ingresos", "ROAS", "ACOS", "Aviso"]}
+      encabezados={[
+        "Campaña",
+        "Publicación",
+        "Título",
+        num("inversion", "Inversión"),
+        num("ingresos", "Ingresos"),
+        num("roas", "ROAS"),
+        num("acos", "ACOS"),
+        "Aviso",
+      ]}
       scroll
     >
       {filas.map((anuncio) => (
@@ -64,6 +73,11 @@ export function TablaAnuncios({ campanas }: { campanas: CampanaPintada[] }) {
       ))}
     </Tabla>
   );
+}
+
+// Título de una columna de números: a la derecha, encima de su valor.
+function num(clave: string, contenido: React.ReactNode): EncabezadoTabla {
+  return { clave, contenido, numerica: true };
 }
 
 function FilaGrupo({
@@ -166,13 +180,13 @@ function FilaGrupo({
                   encabezados={[
                     "Publicación",
                     "Título",
-                    "Inversión",
-                    "Ingresos",
-                    { clave: `sin-${campana.id}`, contenido: <span title="Ventas sin publicidad">Sin publ.</span> },
-                    "TACOS",
-                    { clave: `unid-${campana.id}`, contenido: <span title="Unidades con publicidad">Unid.</span> },
-                    "ROAS",
-                    "ACOS",
+                    num(`inv-${campana.id}`, "Inversión"),
+                    num(`ing-${campana.id}`, "Ingresos"),
+                    num(`sin-${campana.id}`, <span title="Ventas sin publicidad">Sin publ.</span>),
+                    num(`tacos-${campana.id}`, "TACOS"),
+                    num(`unid-${campana.id}`, <span title="Unidades con publicidad">Unid.</span>),
+                    num(`roas-${campana.id}`, "ROAS"),
+                    num(`acos-${campana.id}`, "ACOS"),
                     {
                       clave: `aviso-${campana.id}`,
                       contenido: (

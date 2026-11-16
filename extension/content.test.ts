@@ -59,6 +59,11 @@ async function cargarContentFresco(hostname = "articulo.mercadolibre.com.co") {
     esMensajeDePropiaExtension: (remitente: { id?: string } | null | undefined, idPropio: string) => boolean;
     etiquetaAmbienteDeUrlApp: (urlApp: unknown) => string;
     esPaginaDeCuentasMl: () => boolean;
+    csvNicho: (filas: Record<string, unknown>[]) => string;
+    urlPaginaNichoSegura: (href: unknown, base: string, host: string) => string | null;
+    unirProductosNicho: (a: Record<string, unknown>[], b: Record<string, unknown>[]) => Record<string, unknown>[];
+    productoParaNicho: (p: Record<string, unknown>) => Record<string, unknown> | null;
+    TOPE_PRODUCTOS_NICHO: number;
   };
 }
 
@@ -492,5 +497,58 @@ describe("esPaginaDeCuentasMl — issue #44 (anexo, único marcador confirmable 
   it("accounts.mercadolibre.com.evil.com SÍ coincide en aislamiento (el patrón no ancla el final) -- inofensivo porque background.js ya filtró antes", async () => {
     const mod = await cargarContentFresco("accounts.mercadolibre.com.evil.com");
     expect(mod.esPaginaDeCuentasMl()).toBe(true);
+  });
+});
+
+describe("Análisis del nicho — CSV, páginas y tope de 150", () => {
+  const fila = (o: Record<string, unknown> = {}) => ({ n: 1, titulo: "Tetero", precio: "$ 30.000", origen: "Local", esFull: true, antiguedad: "4 m", ventasMes: "12", factMes: "$ 360.000", ...o });
+
+  it("CSV: BOM UTF-8, separado por comas, mismas columnas visibles y sin imágenes", async () => {
+    const { csvNicho } = await cargarContentFresco();
+    const csv = csvNicho([fila(), fila({ n: 2, origen: null, esFull: false, ventasMes: null })]);
+    expect(csv.charCodeAt(0)).toBe(0xfeff);
+    const [enc, l1, l2] = csv.slice(1).split("\r\n");
+    expect(enc).toBe('"#","Publicación","Precio","Origen","Full","Antigüedad","Ventas/mes","Fact./mes"');
+    expect(enc).not.toMatch(/Img/);
+    expect(l1).toBe('"1","Tetero","$ 30.000","Local","Sí","4 m","12","$ 360.000"');
+    expect(l2).toContain('"—","No","4 m","—"');
+  });
+
+  it("CSV: escapa comillas y neutraliza títulos que parecen fórmulas", async () => {
+    const { csvNicho } = await cargarContentFresco();
+    const csv = csvNicho([fila({ titulo: 'Tetero "XL"' }), fila({ titulo: "=HYPERLINK(1)" })]);
+    expect(csv).toContain('"Tetero ""XL"""');
+    expect(csv).toContain('"\'=HYPERLINK(1)"');
+  });
+
+  it("solo sigue enlaces https del mismo sitio", async () => {
+    const { urlPaginaNichoSegura } = await cargarContentFresco();
+    const base = "https://listado.mercadolibre.com.co/tetero";
+    const host = "listado.mercadolibre.com.co";
+    expect(urlPaginaNichoSegura("/tetero_Desde_49", base, host)).toBe("https://listado.mercadolibre.com.co/tetero_Desde_49");
+    expect(urlPaginaNichoSegura("https://malo.test/x", base, host)).toBeNull();
+    expect(urlPaginaNichoSegura("javascript:alert(1)", base, host)).toBeNull();
+    expect(urlPaginaNichoSegura("http://listado.mercadolibre.com.co/x", base, host)).toBeNull();
+    expect(urlPaginaNichoSegura(null, base, host)).toBeNull();
+  });
+
+  it("une páginas sin repetir y corta en 150", async () => {
+    const { unirProductosNicho, TOPE_PRODUCTOS_NICHO } = await cargarContentFresco();
+    expect(TOPE_PRODUCTOS_NICHO).toBe(150);
+    const lote = (desde: number, n: number) => Array.from({ length: n }, (_, i) => ({ itemId: "MCO" + (desde + i), titulo: "t", precio: 1 }));
+    const a = unirProductosNicho([], lote(1000, 60));
+    const b = unirProductosNicho(a, lote(1030, 60)); // 30 repetidos
+    expect(b).toHaveLength(90);
+    expect(unirProductosNicho(b, lote(5000, 200))).toHaveLength(150);
+  });
+
+  it("productoParaNicho manda origen, vendedor y tienda oficial; descarta lo sin título o precio", async () => {
+    const { productoParaNicho } = await cargarContentFresco();
+    const w = productoParaNicho({ titulo: "T", precio: 10, internacional: true, tiendaOficial: false, vendedor: "Pepe", itemId: "MCO1234" })!;
+    expect(w.internacional).toBe(true);
+    expect(w.tiendaOficial).toBe(false);
+    expect(w.vendedor).toBe("Pepe");
+    expect(productoParaNicho({ titulo: "", precio: 10 })).toBeNull();
+    expect(productoParaNicho({ titulo: "T", precio: NaN })).toBeNull();
   });
 });

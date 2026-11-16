@@ -11,7 +11,7 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { AvisosUrl, SeccionesInventario } from "@/components/inventario/Avisos";
+import { AvisosUrl } from "@/components/inventario/Avisos";
 import styles from "../inventario/inventario.module.css";
 
 // Issue #280 — bodegas de la empresa. Ver pide inventario.consultar;
@@ -36,7 +36,6 @@ export default async function BodegasPage({ searchParams }: { searchParams: Reco
         titulo="Bodegas"
         descripcion="Dónde está tu stock. La principal es la primera que se usa para reservar los pedidos de Mercado Libre."
       />
-      <SeccionesInventario actual="/panel/bodegas" />
       <AvisosUrl searchParams={searchParams} />
 
       {puedeCrear && (

@@ -224,10 +224,14 @@ describe("diagnóstico de campaña", () => {
       dia({ costo: "100.00", montoTotal: "200.00", ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 }),
     ]);
     expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: justo }).tipo).toBe("en_objetivo");
-    const bajo = totalesDeDias([
-      dia({ costo: "100.00", montoTotal: "199.00", ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 }),
-    ]);
-    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: bajo }).tipo).toBe("bajo_objetivo");
+    // Semáforo de tres colores: 90 % y 70 % del objetivo (2,00x).
+    const conMonto = (monto: string) =>
+      totalesDeDias([dia({ costo: "100.00", montoTotal: monto, ventasOrganicasMonto: "0.00", clicks: 1, impresiones: 1 })]);
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("199.00") }).tipo).toBe("en_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("180.00") }).tipo).toBe("en_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("179.00") }).tipo).toBe("bajo_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("140.00") }).tipo).toBe("bajo_objetivo");
+    expect(diagnosticarCampana({ ...base, roasObjetivo: "2.00", totales: conMonto("139.00") }).tipo).toBe("muy_bajo");
     expect(diagnosticarCampana({ ...base, roasObjetivo: null, totales: conGasto }).tipo).toBe("sin_objetivo");
   });
 
@@ -272,9 +276,16 @@ describe("frase de estado y datos nuevos del rango (issue #255)", () => {
       roasObjetivo: "12.00",
       diasAprendizaje: 7,
     });
-    expect(bajo.frase).toBe("Debajo del objetivo, falta 18 %");
-    expect(bajo.tono).toBe("peligro");
+    expect(bajo.frase).toBe("Bajo objetivo, falta 18 %");
+    expect(bajo.tono).toBe("advertencia");
     expect(bajo.avance).toBe(82);
+
+    const casi = fraseEstado({ diagnostico: { tipo: "en_objetivo", dias: 0 }, roas: "11.00", roasObjetivo: "12.00", diasAprendizaje: 7 });
+    expect(casi.frase).toBe("En objetivo, falta 8 %");
+    expect(casi.tono).toBe("exito");
+    const muyBajo = fraseEstado({ diagnostico: { tipo: "muy_bajo", dias: 0 }, roas: "6.87", roasObjetivo: "12.00", diasAprendizaje: 7 });
+    expect(muyBajo.frase).toBe("Muy bajo, falta 43 %");
+    expect(muyBajo.tono).toBe("peligro");
 
     const arriba = fraseEstado({
       diagnostico: { tipo: "en_objetivo", dias: 0 },
@@ -461,9 +472,16 @@ describe("alertas de solo lectura (issue #255)", () => {
     expect(detalleDiagnostico({ diagnostico: { tipo: "aprendiendo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true }).detalle).toBe(
       "Tu campaña se estabilizará en 7 días"
     );
-    expect(detalleDiagnostico({ diagnostico: { tipo: "bajo_objetivo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true }).detalle).toBe(
-      "Bajo el 70 % del objetivo"
-    );
+    expect(detalleDiagnostico({ diagnostico: { tipo: "muy_bajo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: true })).toEqual({
+      pill: "Muy bajo",
+      detalle: "Bajo el 70 % del objetivo",
+      tono: "peligro",
+    });
+    expect(detalleDiagnostico({ diagnostico: { tipo: "bajo_objetivo", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false })).toEqual({
+      pill: "Bajo objetivo",
+      detalle: "Entre el 70 % y el 90 % del objetivo",
+      tono: "advertencia",
+    });
     expect(detalleDiagnostico({ diagnostico: { tipo: "excelente", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).pill).toBe("Excelente");
     expect(detalleDiagnostico({ diagnostico: { tipo: "sin_datos", dias: 0 }, diasAprendizaje: 7, alertaBajo70: false }).detalle).toBe("Sin datos");
   });
@@ -541,5 +559,31 @@ describe("formato es-CO", () => {
     expect(mostrarFraccion("0.1840")).toBe("18,4 %");
     expect(mostrarEntero("1234567")).toBe("1.234.567");
     expect(mostrarEntero(null)).toBe("—");
+  });
+});
+
+describe("rentabilidad por margen (14-nov)", () => {
+  it("el ROAS de equilibrio es 1 / margen", async () => {
+    const { roasEquilibrio } = await import("@/lib/publicidad/kpis");
+    expect(roasEquilibrio("0.30")).toBe("3.33");
+    expect(roasEquilibrio("0.25")).toBe("4.00");
+    expect(roasEquilibrio("0")).toBeNull();
+  });
+
+  it("margen después de Ads = margen − ACOS; rentable desde el mínimo, como el tablero de referencia", async () => {
+    const { rentabilidadCampana } = await import("@/lib/publicidad/kpis");
+    const con = (gasto: string, ventas: string | null) => rentabilidadCampana({ gasto, ventasPublicidad: ventas, margen: "0.30", minimo: "0.20" });
+    // vendidos 06-08: ACOS 8,1 % -> 21,9 % rentable
+    expect(con("81.00", "1000.00")).toEqual({ margenPostAds: "0.2190", estado: "rentable" });
+    // suplementos: ACOS 10,5 % -> 19,5 % margen bajo
+    expect(con("105.00", "1000.00")).toEqual({ margenPostAds: "0.1950", estado: "margen_bajo" });
+    // justo en el mínimo
+    expect(con("100.00", "1000.00")?.estado).toBe("rentable");
+    // ACOS 35 % > margen 30 %: pierde
+    expect(con("350.00", "1000.00")).toEqual({ margenPostAds: "-0.0500", estado: "pierde" });
+    // gastó sin vender: pierde, sin margen que mostrar
+    expect(con("50.00", "0.00")).toEqual({ margenPostAds: null, estado: "pierde" });
+    // sin gasto: nada que juzgar
+    expect(rentabilidadCampana({ gasto: null, ventasPublicidad: "10.00", margen: "0.30", minimo: "0.20" })).toBeNull();
   });
 });

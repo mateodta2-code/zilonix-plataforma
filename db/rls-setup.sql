@@ -28,10 +28,12 @@ GRANT CONNECT ON DATABASE railway TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   empresas, usuarios, roles, membresias, permisos_rol, invitaciones, accesos_temporales, cuentas_ml, avisos_ml,
+  cuentas_falabella, pedidos_falabella,
   pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml, productos_ml,
   seguimientos_ml, seguimiento_fotos, seguimiento_alertas,
   titulares, configuracion_finanzas, metas_mensuales,
-  publicidad_anunciantes, publicidad_campanas, publicidad_anuncios, publicidad_metricas_diarias, publicidad_costos_item, publicidad_sincronizaciones
+  publicidad_anunciantes, publicidad_campanas, publicidad_anuncios, publicidad_metricas_diarias, publicidad_costos_item, publicidad_sincronizaciones,
+  publicidad_campanas_cambios
   TO app_user;
 -- Issue #127 (Z-FIN-05) — sin DELETE: un tercero se desactiva y una
 -- fila de la tabla maestra se corrige, ninguno se borra. Son tablas
@@ -250,6 +252,13 @@ ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales FORCE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_ml FORCE ROW LEVEL SECURITY;
+-- Conector Falabella (15/11) — mismo criterio simple que cuentas_ml/pedidos,
+-- sin las políticas de transferencia/webhook (no hay OAuth ni aviso
+-- entrante que resolver, es un primer corte más chico).
+ALTER TABLE cuentas_falabella ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cuentas_falabella FORCE ROW LEVEL SECURITY;
+ALTER TABLE pedidos_falabella ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pedidos_falabella FORCE ROW LEVEL SECURITY;
 ALTER TABLE avisos_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE avisos_ml FORCE ROW LEVEL SECURITY;
 ALTER TABLE pedidos ENABLE ROW LEVEL SECURITY;
@@ -286,6 +295,8 @@ ALTER TABLE publicidad_costos_item ENABLE ROW LEVEL SECURITY;
 ALTER TABLE publicidad_costos_item FORCE ROW LEVEL SECURITY;
 ALTER TABLE publicidad_sincronizaciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE publicidad_sincronizaciones FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_campanas_cambios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicidad_campanas_cambios FORCE ROW LEVEL SECURITY;
 
 -- La tabla "usuarios" NO lleva RLS por empresa: una persona puede estar
 -- en varias empresas (decisión D2), así que no tiene una sola
@@ -552,6 +563,14 @@ DROP POLICY IF EXISTS aislamiento_pedidos ON pedidos;
 CREATE POLICY aislamiento_pedidos ON pedidos
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
+DROP POLICY IF EXISTS aislamiento_cuentas_falabella ON cuentas_falabella;
+CREATE POLICY aislamiento_cuentas_falabella ON cuentas_falabella
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_pedidos_falabella ON pedidos_falabella;
+CREATE POLICY aislamiento_pedidos_falabella ON pedidos_falabella
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
 DROP POLICY IF EXISTS aislamiento_publicaciones ON publicaciones;
 CREATE POLICY aislamiento_publicaciones ON publicaciones
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
@@ -628,6 +647,10 @@ CREATE POLICY aislamiento_publicidad_costos_item ON publicidad_costos_item
 
 DROP POLICY IF EXISTS aislamiento_publicidad_sincronizaciones ON publicidad_sincronizaciones;
 CREATE POLICY aislamiento_publicidad_sincronizaciones ON publicidad_sincronizaciones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicidad_campanas_cambios ON publicidad_campanas_cambios;
+CREATE POLICY aislamiento_publicidad_campanas_cambios ON publicidad_campanas_cambios
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- El cron lista cuentas y la bitácora de cualquier empresa. No

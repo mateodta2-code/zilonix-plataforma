@@ -15,7 +15,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { SUGERENCIA_RECONECTAR_PUBLICIDAD } from "@/lib/ml/publicidad";
 import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { consultarTableroPublicidad } from "@/lib/publicidad/consultas";
+import { consultarTableroPublicidad, DIAS_HISTORIAL_CAMBIOS } from "@/lib/publicidad/consultas";
 import { textoComparacion } from "@/lib/publicidad/formato";
 import type { ColumnaOrden, DireccionOrden } from "@/lib/publicidad/kpis";
 import { hrefPublicidad, leerParametrosPublicidad, opcionesDeMes, type ComparacionPublicidad, type FiltroCampanas, type TabPublicidad } from "@/lib/publicidad/params";
@@ -32,8 +32,10 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { FormActualizar } from "./FormActualizar";
 import styles from "./page.module.css";
 import { PanelMetricas } from "./GraficoPublicidad";
+import { RentabilidadAds } from "./RentabilidadAds";
+import { CambiosCampanas } from "./CambiosCampanas";
 import { ResumenRecomendaciones, TablaAnuncios, TablaCampanas } from "./TablaCampanas";
-import { kpisDelResumen, pintarCampana, plataVisible, serieParaGrafico, textoAporte } from "./vista";
+import { kpisDelResumen, pintarCambios, pintarCampana, pintarRentabilidad, plataVisible, serieParaGrafico, textoAporte } from "./vista";
 
 // Issue #255 — tablero de solo lectura. La fase 1 ya dejaba el estado
 // del anunciante y el botón "Actualizar ahora"; esta pantalla suma los
@@ -248,7 +250,9 @@ function Cuerpo({
   const totalCampanas = tablero.cantidadActivas + tablero.cantidadPausadas;
   const conComparacion = comparar === "anterior";
 
-  const encabezados: EncabezadoTabla[] = COLUMNAS.map((columna) => {
+  const encabezados: EncabezadoTabla[] = COLUMNAS.map((columna): EncabezadoTabla => {
+    // Todo menos el nombre y el diagnóstico es número: título a la derecha.
+    const numerica = columna.clave !== "campana" && columna.clave !== "diagnostico";
     if (columna.clave === "diagnostico") {
       return {
         clave: "diagnostico",
@@ -263,25 +267,35 @@ function Cuerpo({
     if (columna.orden === "presupuesto") {
       return {
         clave: "presupuesto",
+        numerica,
         ariaSort: orden === "presupuesto" ? (dir === "asc" ? "ascending" : "descending") : "none",
         contenido: (
           <span className={styles.thConAyuda}>
-            <LinkOrden hrefBase={hrefBase} columna="presupuesto" orden={orden} dir={dir} lineas={columna.lineas} titulo={columna.titulo} />
+            <LinkOrden hrefBase={hrefBase} columna="presupuesto" orden={orden} dir={dir} lineas={columna.lineas} titulo={columna.titulo} derecha />
             <Ayuda id="ayuda-presupuesto">{AYUDA_PRESUPUESTO}</Ayuda>
           </span>
         ),
       };
     }
     if (!columna.orden) {
-      return { clave: columna.clave, contenido: <RotuloLineas lineas={columna.lineas} titulo={columna.titulo} /> };
+      return { clave: columna.clave, numerica, contenido: <RotuloLineas lineas={columna.lineas} titulo={columna.titulo} derecha={numerica} /> };
     }
     const activa = orden === columna.orden;
     return {
       clave: columna.clave,
       fija: columna.fija,
+      numerica,
       ariaSort: activa ? (dir === "asc" ? "ascending" : "descending") : "none",
       contenido: (
-        <LinkOrden hrefBase={hrefBase} columna={columna.orden} orden={orden} dir={dir} lineas={columna.lineas} titulo={columna.titulo} />
+        <LinkOrden
+          hrefBase={hrefBase}
+          columna={columna.orden}
+          orden={orden}
+          dir={dir}
+          lineas={columna.lineas}
+          titulo={columna.titulo}
+          derecha={numerica}
+        />
       ),
     };
   });
@@ -357,6 +371,9 @@ function Cuerpo({
         </p>
       </section>
 
+      {tab === "campanas" ? <RentabilidadAds datos={pintarRentabilidad(tablero)} /> : null}
+      {tab === "campanas" ? <CambiosCampanas cambios={pintarCambios(tablero.cambios)} dias={DIAS_HISTORIAL_CAMBIOS} /> : null}
+
       <Tarjeta className={tab === "campanas" ? styles.tarjetaTabla : styles.tarjetaAnuncios}>
         <div className={styles.toolbar}>
           <span className={styles.filtro}>
@@ -399,9 +416,9 @@ function Cuerpo({
   );
 }
 
-function RotuloLineas({ lineas, titulo }: { lineas: string[]; titulo?: string }) {
+function RotuloLineas({ lineas, titulo, derecha }: { lineas: string[]; titulo?: string; derecha?: boolean }) {
   return (
-    <span className={styles.rotuloColumna} title={titulo} aria-label={titulo}>
+    <span className={derecha ? `${styles.rotuloColumna} ${styles.alDerecha}` : styles.rotuloColumna} title={titulo} aria-label={titulo}>
       {lineas.map((linea) => (
         <span key={linea}>{linea}</span>
       ))}
@@ -416,6 +433,7 @@ function LinkOrden({
   dir,
   lineas,
   titulo,
+  derecha,
 }: {
   hrefBase: HrefBase;
   columna: ColumnaOrden;
@@ -423,17 +441,18 @@ function LinkOrden({
   dir: DireccionOrden;
   lineas: string[];
   titulo?: string;
+  derecha?: boolean;
 }) {
   const activa = orden === columna;
   const siguiente: DireccionOrden = activa ? (dir === "desc" ? "asc" : "desc") : columna === "campana" ? "asc" : "desc";
   return (
     <Link
       href={hrefPublicidad({ ...hrefBase, orden: columna, dir: siguiente })}
-      className={activa ? `${styles.orden} ${styles.ordenActivo}` : styles.orden}
+      className={[styles.orden, activa ? styles.ordenActivo : "", derecha ? styles.alDerecha : ""].filter(Boolean).join(" ")}
       title={titulo}
       aria-label={titulo}
     >
-      <RotuloLineas lineas={lineas} />
+      <RotuloLineas lineas={lineas} derecha={derecha} />
       {activa ? <span className={styles.flechaOrden}>{dir === "desc" ? "↓" : "↑"}</span> : null}
     </Link>
   );

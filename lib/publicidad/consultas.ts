@@ -9,12 +9,14 @@ import {
   publicidadAnunciantes,
   publicidadAnuncios,
   publicidadCampanas,
+  publicidadCampanasCambios,
   publicaciones,
   publicidadCostosItem,
   publicidadMetricasDiarias,
   publicidadSincronizaciones,
 } from "@/db/schema";
 import { PREFIJO_CORTE_TIEMPO } from "@/lib/publicidad/actualizacion";
+import { esCampoCambio, type CampoCambio } from "@/lib/publicidad/cambios";
 import { DIAS_SIN_VENDER_VENDEDOR, obtenerConfigPublicidad, type ConfigPublicidad } from "@/lib/publicidad/config";
 import { linkPublicacion } from "@/lib/ml/cliente";
 import { type FiltroCampanas } from "@/lib/publicidad/params";
@@ -94,7 +96,27 @@ export type TableroPublicidad = {
   serieDiaria: PuntoDiario[];
   presupuestoDiarioTotal: string | null;
   nombresCampanas: string[];
+  // Margen del producto y mínimo después de Ads (config). La vista
+  // calcula con esto la rentabilidad de cada campaña.
+  rentabilidad: { margen: string; minimo: string };
+  // Cambios de presupuesto diario y ROAS objetivo de los últimos
+  // DIAS_HISTORIAL_CAMBIOS días, el más nuevo primero.
+  cambios: CambioCampana[];
 };
+
+export type CambioCampana = {
+  id: string;
+  campanaIdMl: string;
+  nombre: string;
+  campo: CampoCambio;
+  valorAnterior: string | null;
+  valorNuevo: string | null;
+  detectadoTs: Date;
+};
+
+// Cuántos días y cuántos cambios muestra la sección del historial.
+export const DIAS_HISTORIAL_CAMBIOS = 30;
+export const LIMITE_HISTORIAL_CAMBIOS = 20;
 
 type FilaSuma = {
   entidadIdMl: string;
@@ -230,6 +252,32 @@ export async function consultarTableroPublicidad(
       })
       .from(publicidadCampanas)
       .where(filtroCuenta(publicidadCampanas.empresaId, publicidadCampanas.cuentaMlId));
+
+    const filasCambios = await tx
+      .select({
+        id: publicidadCampanasCambios.id,
+        campanaIdMl: publicidadCampanasCambios.campanaIdMl,
+        campo: publicidadCampanasCambios.campo,
+        valorAnterior: publicidadCampanasCambios.valorAnterior,
+        valorNuevo: publicidadCampanasCambios.valorNuevo,
+        detectadoTs: publicidadCampanasCambios.detectadoTs,
+      })
+      .from(publicidadCampanasCambios)
+      .where(
+        and(
+          eq(publicidadCampanasCambios.empresaId, empresaId),
+          eq(publicidadCampanasCambios.cuentaMlId, cuentaMlId),
+          gte(publicidadCampanasCambios.detectadoTs, new Date(opciones.ahora.getTime() - DIAS_HISTORIAL_CAMBIOS * 86_400_000))
+        )
+      )
+      .orderBy(desc(publicidadCampanasCambios.detectadoTs))
+      .limit(LIMITE_HISTORIAL_CAMBIOS);
+    const nombrePorCampana = new Map(campanas.map((c) => [c.campanaIdMl, c.nombre ?? "Campaña sin nombre"]));
+    const cambios: CambioCampana[] = filasCambios.flatMap((fila) =>
+      esCampoCambio(fila.campo)
+        ? [{ ...fila, campo: fila.campo, nombre: nombrePorCampana.get(fila.campanaIdMl) ?? "Campaña sin nombre" }]
+        : []
+    );
 
     const anuncios = await tx
       .select({
@@ -493,6 +541,8 @@ export async function consultarTableroPublicidad(
       cantidadPausadas: calculadas.filter((c) => !c.activa).length,
       diasRango: diasEntreInclusive(periodo.desde, periodo.hasta),
       presupuestoDiarioTotal: sumarMontos(calculadas.filter((c) => c.activa).map((c) => c.presupuestoDiario)),
+      rentabilidad: { margen: config.margenProducto, minimo: config.margenMinimoPostAds },
+      cambios,
       serieDiaria: armarSerieDiaria(
         periodo.desde,
         periodo.hasta,

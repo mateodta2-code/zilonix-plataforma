@@ -149,7 +149,7 @@ describe("textos del tablero de publicidad (issue #255)", () => {
     expect(pintada.cpc).toBe("$339");
     expect(pintada.roas).toBe("9,85x");
     expect(pintada.roasObjetivo).toBe("objetivo 12,00x");
-    expect(pintada.estadoFrase).toBe("Debajo del objetivo, falta 18 %");
+    expect(pintada.estadoFrase).toBe("Bajo objetivo, falta 18 %");
     expect(pintada.ventasSinPublicidad).toBe("$724.084");
     expect(pintada.unidades).toBe("12");
   });
@@ -207,5 +207,21 @@ describe("textos del tablero de publicidad (issue #255)", () => {
     expect(aprendiendo.recomendaciones.map((item) => item.codigo)).toEqual(["aprendizaje"]);
     expect(aprendiendo.anuncios[0].gastaSinVender).toBe(true);
     expect(aprendiendo.anunciosSinVenta).toBe(1);
+  });
+  it("rentabilidad: parámetros redondos y un estado por campaña", async () => {
+    const { pintarRentabilidad } = await import("./vista");
+    const campana = (id: string, gasto: string | null, ventas: string | null, roas: string | null) =>
+      ({ id, nombre: `C${id}`, totales: { ...vacio, gasto, ventasPublicidad: ventas, roas } }) as unknown as CampanaCalculada;
+    const datos = pintarRentabilidad({
+      rentabilidad: { margen: "0.30", minimo: "0.20" },
+      campanas: [campana("1", "81.00", "1000.00", "12.34"), campana("2", "105.00", "1000.00", "9.53"), campana("3", "50.00", "0.00", null), campana("4", null, null, null)],
+    });
+    expect([datos.margen, datos.minimo, datos.roasEquilibrio, datos.acosMaximo]).toEqual(["30 %", "20 %", "3,33x", "30 %"]);
+    expect(datos.filas.map((f) => [f.margenPostAds, f.rotulo, f.tono])).toEqual([
+      ["21,9 %", "Rentable", "exito"],
+      ["19,5 %", "Margen bajo", "advertencia"],
+      ["Sin ventas", "Pierde plata", "peligro"],
+      ["—", "Sin gasto", "neutro"],
+    ]);
   });
 });

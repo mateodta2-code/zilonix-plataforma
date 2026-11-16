@@ -225,6 +225,13 @@
   line-height: 1.2;
 }
 
+/* Títulos de columnas de números: las líneas y la flecha de orden a la
+   derecha, encima del valor. */
+.alDerecha {
+  align-items: flex-end;
+  text-align: right;
+}
+
 .flechaOrden {
   line-height: 1;
 }

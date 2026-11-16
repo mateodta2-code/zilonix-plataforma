@@ -3,6 +3,7 @@ import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { MarcoApp } from "@/components/marco/MarcoApp";
 import type { GrupoNav } from "@/components/marco/tipos";
 import { itemsAdministracion } from "@/components/marco/menuAdministracion";
+import { SECCIONES_PRODUCTOS } from "@/components/productos/secciones";
 
 // Marco visual (issue de las subpáginas) — mueve acá la carga que
 // antes hacía SOLO app/panel/page.tsx para pintar el marco (usuario
@@ -42,13 +43,13 @@ export default async function PanelLayout({ children }: { children: React.ReactN
             { etiqueta: "Despachos", href: "/panel/despachos", icono: "despachos" as const },
           ]
         : []),
-      ...(veSku ? [{ etiqueta: "SKU", href: "/panel/sku", icono: "sku" as const }] : []),
-      // Issue #280 — WMS Fase 1, mismo permiso que SKU.
+      // Productos — un solo módulo para SKU, inventario, bodegas,
+      // kardex, ingresos y compras (pedido de Franky, 15-nov): se
+      // despliega en el menú con sus secciones
+      // (components/productos/secciones.ts). Las rutas no cambian;
+      // todas piden ("inventario","consultar").
       ...(veSku
-        ? [
-            { etiqueta: "Inventario", href: "/panel/inventario", icono: "inventario" as const },
-            { etiqueta: "Bodegas", href: "/panel/bodegas", icono: "bodegas" as const },
-          ]
+        ? [{ etiqueta: "Productos", href: "/panel/inventario", icono: "productos" as const, hijos: SECCIONES_PRODUCTOS }]
         : []),
       // Mismo permiso que SKU ("inventario","consultar") — Investigación
       // también decide qué traer/revender, no vende ni despacha nada.

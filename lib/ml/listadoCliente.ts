@@ -65,7 +65,16 @@ export type ProductoListado = {
   esEnvioGratis: boolean | null;
   calificacion: number | null;
   vendedor: string | null;
+  // Lo que la tarjeta del listado de ML ya muestra (etiqueta de compra
+  // internacional / envío desde el exterior; insignia de tienda oficial).
+  // null o ausente = no se pudo saber. Solo la extensión los manda.
+  internacional?: boolean | null;
+  tiendaOficial?: boolean | null;
   link: string | null;
+  // Fecha real de creación (`date_created`) — un listado nunca la trae;
+  // solo llega al completar vendidos desde la ficha. Opcional: sin ella
+  // la antigüedad cae a la interpolación por id de siempre.
+  dateCreated?: string | null;
 };
 
 export type Bloque = {
@@ -101,8 +110,10 @@ export function aplicarVendidosConfirmados(
   datos: { itemId: string; sold_quantity: number; date_created: string | null; esFull: boolean; etiquetaMasN: boolean }
 ): ProductoListado[] {
   return productos.map((p) => {
-    if (p.itemId !== datos.itemId || p.senalVentas.tipo !== "ausente") return p;
-    return { ...p, senalVentas: { valor: datos.sold_quantity, tipo: "acumulado_sin_periodo" } };
+    if (p.itemId !== datos.itemId) return p;
+    const conFecha = p.dateCreated == null && datos.date_created ? { ...p, dateCreated: datos.date_created } : p;
+    if (p.senalVentas.tipo !== "ausente") return conFecha;
+    return { ...conFecha, senalVentas: { valor: datos.sold_quantity, tipo: "acumulado_sin_periodo" } };
   });
 }
 
@@ -171,7 +182,7 @@ export function estimarAproximadosListado(p: ProductoListado, ahora: Date, punto
   const recursoMlParaAntiguedad: "item" | "product" | null = p.itemId != null ? "item" : p.productId != null ? "product" : null;
   const dias =
     idParaAntiguedad != null && recursoMlParaAntiguedad != null
-      ? antiguedadDias({ dateCreated: null, mlId: idParaAntiguedad, recursoMl: recursoMlParaAntiguedad, ahora, puntos })
+      ? antiguedadDias({ dateCreated: p.dateCreated ?? null, mlId: idParaAntiguedad, recursoMl: recursoMlParaAntiguedad, ahora, puntos })
       : null;
   const ventasMesValor = ventasMes(vendidosEst, dias);
   const facturacionMesValor = facturacionMes(ventasMesValor, p.precio);

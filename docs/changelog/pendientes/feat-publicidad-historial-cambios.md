@@ -1,0 +1,1 @@
+- Publicidad: nueva sección "Cambios de presupuesto y ROAS" en la pestaña Campañas. La sincronización anota cada cambio del presupuesto diario o del ROAS objetivo con el valor de antes y el de ahora (últimos 30 días). Migración 0025 (tabla `publicidad_campanas_cambios`, con RLS por empresa).
