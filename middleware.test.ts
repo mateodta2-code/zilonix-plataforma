@@ -245,3 +245,24 @@ describe("middleware — coincidencia de rutas tras @clerk/nextjs 6.39.8 (CVE-20
     }
   });
 });
+
+describe("middleware — redirecciones de /superadmin con la base pública", () => {
+  const envOriginal = { ...process.env };
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...envOriginal, RAILWAY_PUBLIC_DOMAIN: "staging.zilonix.test" };
+    delete process.env.APP_URL;
+    delete process.env.PUBLIC_APP_URL;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+  });
+  afterEach(() => {
+    process.env = { ...envOriginal };
+  });
+
+  it("sin sesión, /superadmin redirige al login en el dominio público aunque req.url sea localhost:8080", async () => {
+    const middleware = await cargarMiddleware();
+    const { auth } = authFalso(null);
+    const res = await middleware(auth, peticion("http://localhost:8080/superadmin"));
+    expect(res?.headers.get("location")).toBe("https://staging.zilonix.test/superadmin/iniciar-sesion");
+  });
+});

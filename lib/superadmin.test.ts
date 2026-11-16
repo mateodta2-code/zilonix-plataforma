@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({ redirect: (u: string) => redirectMock(u) }))
 const estado = vi.hoisted(() => ({ cookie: undefined as string | undefined, clerk: null as unknown, fila: [] as unknown[] }));
 vi.mock("next/headers", () => ({
   cookies: () => ({ get: () => (estado.cookie ? { value: estado.cookie } : undefined), set: vi.fn() }),
+  headers: () => new Headers({ host: "x.test" }),
 }));
 vi.mock("@clerk/nextjs/server", () => ({
   currentUser: async () => estado.clerk,
