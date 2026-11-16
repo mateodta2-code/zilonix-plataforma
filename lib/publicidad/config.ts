@@ -14,10 +14,11 @@ export const FACTOR_EXCELENTE = "1.2";
 // ROAS bajo este factor del objetivo: apagar y crear otra. 8,40 sobre
 // 12,00 es justo el 70 % y no entra.
 export const UMBRAL_ROAS_BAJO = "0.70";
-// Semáforo de campaña (14-nov, como el tablero de referencia de
-// Melisa): verde "En objetivo" desde el 90 % del ROAS objetivo, naranja
-// "Bajo objetivo" entre 70 % y 90 %, rojo "Muy bajo" bajo el 70 %.
-export const UMBRAL_EN_OBJETIVO = "0.90";
+// Semáforo de campaña (16-nov, especificación del semáforo): verde
+// "En objetivo" desde el 100 % del ROAS objetivo (se deja igual),
+// amarillo "Bajo objetivo" entre 70 % y 100 % (vigilar), rojo "Muy
+// bajo" bajo el 70 % (apagar y crear una nueva). Gris si aprende.
+export const UMBRAL_EN_OBJETIVO = "1.00";
 // ROAS a esta altura del objetivo: el ACOS quedó holgado. La única
 // sugerencia es ajustar el objetivo, nunca subir presupuesto ni bajarlo.
 export const FACTOR_ROAS_HOLGADO = "1.3";
@@ -31,6 +32,11 @@ export const PERIODO_POR_DEFECTO = "mes_en_curso" as const;
 // Con 30 %, el ROAS de equilibrio es 1 / 0,30 = 3,33x.
 export const MARGEN_PRODUCTO = "0.30";
 export const MARGEN_MINIMO_POST_ADS = "0.20";
+// Semáforo de productos (16-nov): meta de margen de ganancia real por
+// defecto. Cada comercio la cambia en Publicidad
+// (configuracion_finanzas.meta_margen_publicidad). Verde desde la meta,
+// amarillo desde la mitad, rojo bajo la mitad.
+export const META_MARGEN_DEFECTO = "0.30";
 
 // Campaña a la que la pantalla sugiere pasar un anuncio que gasta y no
 // vende. ANTÁRTIDA es el paso siguiente, con presupuesto mínimo y ACOS

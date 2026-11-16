@@ -1,6 +1,13 @@
 // Issue #255 — textos de recomendación. No hay botón ni llamada a
-// Mercado Libre: la pantalla solo los muestra. Nunca se sugiere subir
-// el presupuesto, bajar el objetivo de ROAS ni compartir presupuesto.
+// Mercado Libre: la pantalla solo los muestra; todo cambio lo aprueba y
+// lo hace el comercio. Nunca se sugiere subir el presupuesto ni el
+// gasto total, mover presupuesto entre campañas ni bajar el objetivo de
+// ROAS para gastar más.
+//
+// Semáforo de campaña (16-nov): gris aprendiendo = no se propone nada;
+// verde (ROAS en el objetivo o más) = se deja igual; amarillo (70 % a
+// 100 %) = vigilar, y puede sugerir sacar anuncios que gastan sin
+// vender; rojo (bajo el 70 %) = apagar y crear una nueva.
 // Enfriamiento es solo para anuncios que gastan sin vender. El que
 // vende bien se queda en la campaña donde ya funciona.
 //
@@ -35,8 +42,8 @@ import {
   CAMPANA_VENDEDOR,
   DIAS_PAUSA_ANTARTIDA,
   DIAS_SIN_VENDER_VENDEDOR,
-  FACTOR_ROAS_HOLGADO,
   FACTOR_ROAS_VENDE_BIEN,
+  UMBRAL_EN_OBJETIVO,
   UMBRAL_ROAS_BAJO,
 } from "@/lib/publicidad/config";
 import { gastaSinVender, roasFrenteA, tieneVentaAtribuida } from "@/lib/publicidad/kpis";
@@ -44,7 +51,8 @@ import { gastaSinVender, roasFrenteA, tieneVentaAtribuida } from "@/lib/publicid
 export type CodigoRecomendacion =
   | "aprendizaje"
   | "apagar"
-  | "subir_objetivo"
+  | "dejar_igual"
+  | "vigilar"
   | "pasar_enfriamiento"
   | "crear_enfriamiento"
   | "mover_antartida"
@@ -57,7 +65,13 @@ export type CodigoRecomendacion =
   | "nota_vende_antartida";
 
 // Notas, no acciones: la pantalla las pinta en tono neutro.
-export const CODIGOS_NOTA: readonly CodigoRecomendacion[] = ["aprendizaje", "nota_vende_bien", "nota_vende_antartida"];
+export const CODIGOS_NOTA: readonly CodigoRecomendacion[] = [
+  "aprendizaje",
+  "dejar_igual",
+  "vigilar",
+  "nota_vende_bien",
+  "nota_vende_antartida",
+];
 
 export type Recomendacion = {
   codigo: CodigoRecomendacion;
@@ -90,7 +104,8 @@ export type AnuncioRecomendable = {
 
 const TEXTO_APRENDIZAJE = "En aprendizaje, no tocar todavía";
 const TEXTO_APAGAR = "Apagar y crear una nueva";
-const TEXTO_SUBIR_OBJETIVO = "Subir el objetivo de ROAS / bajar ACOS objetivo";
+const TEXTO_DEJAR_IGUAL = "Se deja igual";
+const TEXTO_VIGILAR = "Vigilar";
 const TEXTO_VENDE_BIEN = "Vende bien, dejar en esta campaña";
 const TEXTO_RENOMBRAR = `Cambiar el nombre de la campaña a ${CAMPANA_VENDEDOR}`;
 const TEXTO_QUITAR = "Quitar de la campaña";
@@ -211,17 +226,21 @@ export function recomendarCampana(entrada: {
       texto: TEXTO_APAGAR,
       motivo: motivoRoas(entrada.roas, entrada.objetivo, `bajo el ${porcentaje(UMBRAL_ROAS_BAJO)} de`),
     });
-  } else if (
-    alcanza(entrada.roas, entrada.objetivo, FACTOR_ROAS_HOLGADO) &&
-    entrada.roas !== null &&
-    entrada.objetivo !== null
-  ) {
+  } else if (alcanza(entrada.roas, entrada.objetivo, UMBRAL_EN_OBJETIVO) && entrada.roas !== null && entrada.objetivo !== null) {
     salida.push({
-      codigo: "subir_objetivo",
+      codigo: "dejar_igual",
       anuncioId: null,
       nombre: null,
-      texto: TEXTO_SUBIR_OBJETIVO,
-      motivo: motivoRoas(entrada.roas, entrada.objetivo, `al menos ${veces(FACTOR_ROAS_HOLGADO)}`),
+      texto: TEXTO_DEJAR_IGUAL,
+      motivo: motivoRoas(entrada.roas, entrada.objetivo, "en o sobre"),
+    });
+  } else if (entrada.roas !== null && entrada.objetivo !== null) {
+    salida.push({
+      codigo: "vigilar",
+      anuncioId: null,
+      nombre: null,
+      texto: TEXTO_VIGILAR,
+      motivo: `ROAS ${mostrarRoas(entrada.roas)}, entre el ${porcentaje(UMBRAL_ROAS_BAJO)} y el 100 % del objetivo ${mostrarRoas(entrada.objetivo)}`,
     });
   }
 

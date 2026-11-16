@@ -21,7 +21,9 @@ const base = {
   aprendiendo: false,
   nombreCampana: "VENDEDOR",
   nombresCampanas: ["VENDEDOR"],
-  roas: "9.85",
+  // Sin ROAS de campaña: las pruebas de anuncios no cargan la nota del
+  // semáforo de campaña. El semáforo se prueba aparte.
+  roas: null as string | null,
   objetivo: "12.00",
   anuncios: [] as AnuncioRecomendable[],
 };
@@ -37,23 +39,28 @@ describe("recomendaciones de publicidad (issue #255)", () => {
     expect(textos).toEqual(["En aprendizaje, no tocar todavía"]);
   });
 
-  it("bajo el 70 % del objetivo pide apagar, y el 70 % justo no", () => {
+  it("rojo: bajo el 70 % del objetivo pide apagar; el 70 % justo es amarillo (vigilar)", () => {
     const bajo = recomendarCampana({ ...base, roas: "8.00", objetivo: "12.00" });
     expect(bajo.map((item) => item.texto)).toEqual(["Apagar y crear una nueva"]);
     expect(bajo[0].motivo).toContain("8,00x");
     expect(bajo[0].motivo).toContain("12,00x");
-    expect(recomendarCampana({ ...base, roas: "8.40", objetivo: "12.00" })).toEqual([]);
+    const justo = recomendarCampana({ ...base, roas: "8.40", objetivo: "12.00" });
+    expect(justo.map((item) => [item.codigo, item.texto])).toEqual([["vigilar", "Vigilar"]]);
+    expect(justo[0].motivo).toBe("ROAS 8,40x, entre el 70 % y el 100 % del objetivo 12,00x");
   });
 
-  it("con ROAS holgado solo sugiere ajustar el objetivo, nunca el presupuesto", () => {
-    const holgado = recomendarCampana({ ...base, roas: "15.60", objetivo: "12.00" });
-    expect(holgado.map((item) => item.texto)).toEqual(["Subir el objetivo de ROAS / bajar ACOS objetivo"]);
-    expect(holgado[0].motivo).toContain("15,60x");
-    expect(recomendarCampana({ ...base, roas: "15.59", objetivo: "12.00" })).toEqual([]);
-    const unidos = holgado.map((item) => `${item.texto} ${item.motivo}`).join(" ");
+  it("verde: en el objetivo o por encima se deja igual; nunca propone gastar más", () => {
+    for (const roas of ["12.00", "15.60", "40.00"]) {
+      expect(recomendarCampana({ ...base, roas, objetivo: "12.00" }).map((item) => [item.codigo, item.texto])).toEqual([
+        ["dejar_igual", "Se deja igual"],
+      ]);
+    }
+    expect(recomendarCampana({ ...base, roas: "11.99", objetivo: "12.00" }).map((item) => item.codigo)).toEqual(["vigilar"]);
+    const todos = ["2.00", "8.40", "11.99", "12.00", "40.00"].flatMap((roas) => recomendarCampana({ ...base, roas, objetivo: "12.00" }));
+    const unidos = todos.map((item) => `${item.texto} ${item.motivo}`).join(" ");
     expect(unidos).not.toMatch(/presupuesto/i);
-    expect(unidos).not.toMatch(/bajar el objetivo de ROAS/i);
-    expect(unidos).not.toMatch(/compartir presupuesto/i);
+    expect(unidos).not.toMatch(/bajar el objetivo/i);
+    expect(unidos).not.toMatch(/subir el objetivo/i);
   });
 
   it("tipos de campaña: ENFRIAMIENTO y ANTÁRTIDA exactas, VENDEDOR por el comienzo", () => {

@@ -6,6 +6,8 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, like, lte, or, sum } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import {
+  configuracionFinanzas,
+  costosSku,
   publicidadAnunciantes,
   publicidadAnuncios,
   publicidadCampanas,
@@ -17,7 +19,7 @@ import {
 } from "@/db/schema";
 import { PREFIJO_CORTE_TIEMPO } from "@/lib/publicidad/actualizacion";
 import { esCampoCambio, type CampoCambio } from "@/lib/publicidad/cambios";
-import { DIAS_SIN_VENDER_VENDEDOR, obtenerConfigPublicidad, type ConfigPublicidad } from "@/lib/publicidad/config";
+import { DIAS_SIN_VENDER_VENDEDOR, META_MARGEN_DEFECTO, obtenerConfigPublicidad, type ConfigPublicidad } from "@/lib/publicidad/config";
 import { linkPublicacion } from "@/lib/ml/cliente";
 import { type FiltroCampanas } from "@/lib/publicidad/params";
 import { diasEntreInclusive, hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
@@ -26,6 +28,7 @@ import {
   compararOrden,
   sumarMontos,
   diagnosticarCampana,
+  margenRealProducto,
   semaforoAnuncio,
   totalesDeDias,
   type ColumnaOrden,
@@ -36,6 +39,7 @@ import {
   type PuntoDiario,
   type TotalesRango,
   type Diagnostico,
+  type MargenProducto,
   type Semaforo,
 } from "@/lib/publicidad/kpis";
 
@@ -66,6 +70,8 @@ export type AnuncioCalculado = {
   // sin importar el mes elegido: la regla de VENDEDOR mira el presente.
   ultimosDias: TotalesRango;
   semaforo: Semaforo;
+  // Semáforo de productos: ganancia real por unidad (sin publicidad).
+  margen: MargenProducto;
 };
 
 export type CampanaCalculada = FilaOrdenable & {
@@ -99,10 +105,17 @@ export type TableroPublicidad = {
   // Margen del producto y mínimo después de Ads (config). La vista
   // calcula con esto la rentabilidad de cada campaña.
   rentabilidad: { margen: string; minimo: string };
-  // Cambios de presupuesto diario y ROAS objetivo de los últimos
-  // DIAS_HISTORIAL_CAMBIOS días, el más nuevo primero.
+  // Cambios de presupuesto diario y ROAS objetivo de lo corrido del
+  // periodo, el más nuevo primero.
   cambios: CambioCampana[];
+  // Meta de margen del comercio (fracción) para el semáforo de productos.
+  metaMargen: string;
 };
+
+// SKU como lo guarda la tabla de costos (costos_sku_sku_normalizado).
+function normalizarSku(sku: string): string {
+  return sku.trim().toUpperCase();
+}
 
 export type CambioCampana = {
   id: string;
@@ -114,8 +127,7 @@ export type CambioCampana = {
   detectadoTs: Date;
 };
 
-// Cuántos días y cuántos cambios muestra la sección del historial.
-export const DIAS_HISTORIAL_CAMBIOS = 30;
+// Cuántos cambios muestra la sección del historial (lo corrido del mes).
 export const LIMITE_HISTORIAL_CAMBIOS = 20;
 
 type FilaSuma = {
@@ -267,7 +279,8 @@ export async function consultarTableroPublicidad(
         and(
           eq(publicidadCampanasCambios.empresaId, empresaId),
           eq(publicidadCampanasCambios.cuentaMlId, cuentaMlId),
-          gte(publicidadCampanasCambios.detectadoTs, new Date(opciones.ahora.getTime() - DIAS_HISTORIAL_CAMBIOS * 86_400_000))
+          // Desde el día 1 del periodo, hora de Bogotá.
+          gte(publicidadCampanasCambios.detectadoTs, new Date(`${periodo.desde}T00:00:00-05:00`))
         )
       )
       .orderBy(desc(publicidadCampanasCambios.detectadoTs))
@@ -297,6 +310,10 @@ export async function consultarTableroPublicidad(
       .selectDistinctOn([publicidadCostosItem.itemId], {
         itemId: publicidadCostosItem.itemId,
         precio: publicidadCostosItem.precioVentaVigente,
+        skuCodigo: publicidadCostosItem.skuCodigo,
+        comisionMl: publicidadCostosItem.comisionMl,
+        envioVendedorEstimado: publicidadCostosItem.envioVendedorEstimado,
+        compradorPagaEnvio: publicidadCostosItem.compradorPagaEnvio,
       })
       .from(publicidadCostosItem)
       .where(
@@ -307,6 +324,26 @@ export async function consultarTableroPublicidad(
         )
       )
       .orderBy(asc(publicidadCostosItem.itemId), desc(publicidadCostosItem.fecha));
+
+    // Costo, empaque y envío a agencia por SKU (tabla maestra de Finanzas).
+    const skusBuscados = [...new Set(precios.flatMap((fila) => (fila.skuCodigo ? [normalizarSku(fila.skuCodigo)] : [])))];
+    const costos =
+      skusBuscados.length === 0
+        ? []
+        : await tx
+            .select({
+              skuCodigo: costosSku.skuCodigo,
+              costo: costosSku.costo,
+              empaque: costosSku.empaque,
+              envioAgencia: costosSku.envioAgencia,
+            })
+            .from(costosSku)
+            .where(and(eq(costosSku.empresaId, empresaId), inArray(costosSku.skuCodigo, skusBuscados)));
+
+    const [ajustes] = await tx
+      .select({ meta: configuracionFinanzas.metaMargenPublicidad })
+      .from(configuracionFinanzas)
+      .where(eq(configuracionFinanzas.empresaId, empresaId));
 
     async function sumar(nivel: "campana" | "anuncio", desde: string, hasta: string) {
       // ad_group_id va en el GROUP BY porque también se selecciona.
@@ -427,6 +464,21 @@ export async function consultarTableroPublicidad(
     const porAnuncio = new Map(metricasAnuncio.map((fila) => [claveAnuncio(fila.entidadIdMl, fila.adGroupId), fila]));
     const porAnuncioReciente = new Map(metricasAnuncioRecientes.map((fila) => [claveAnuncio(fila.entidadIdMl, fila.adGroupId), fila]));
     const precioPorItem = new Map(precios.map((fila) => [fila.itemId, fila.precio]));
+    const costoItemPorItem = new Map(precios.map((fila) => [fila.itemId, fila]));
+    const costoPorSku = new Map(costos.map((fila) => [fila.skuCodigo, fila]));
+    const margenDe = (itemId: string): MargenProducto => {
+      const item = costoItemPorItem.get(itemId);
+      const sku = item?.skuCodigo ? costoPorSku.get(normalizarSku(item.skuCodigo)) : undefined;
+      return margenRealProducto({
+        precio: item?.precio ?? null,
+        costo: sku?.costo ?? null,
+        empaque: sku?.empaque ?? null,
+        envioAgencia: sku?.envioAgencia ?? null,
+        comisionMl: item?.comisionMl ?? null,
+        envioMl: item?.envioVendedorEstimado ?? null,
+        compradorPagaEnvio: item?.compradorPagaEnvio ?? null,
+      });
+    };
 
     const calculadas: CampanaCalculada[] = campanas.map((campana) => {
       const totales = totalesDeDias([diaDeSuma(porCampana.get(campana.campanaIdMl))]);
@@ -454,6 +506,7 @@ export async function consultarTableroPublicidad(
               precio,
               config,
             }),
+            margen: margenDe(anuncio.itemId),
           };
         })
         .sort((a, b) =>
@@ -543,6 +596,7 @@ export async function consultarTableroPublicidad(
       presupuestoDiarioTotal: sumarMontos(calculadas.filter((c) => c.activa).map((c) => c.presupuestoDiario)),
       rentabilidad: { margen: config.margenProducto, minimo: config.margenMinimoPostAds },
       cambios,
+      metaMargen: ajustes?.meta ?? META_MARGEN_DEFECTO,
       serieDiaria: armarSerieDiaria(
         periodo.desde,
         periodo.hasta,

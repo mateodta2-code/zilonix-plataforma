@@ -299,6 +299,63 @@ export function rentabilidadCampana(entrada: {
   return { margenPostAds, estado };
 }
 
+// Semáforo de productos (16-nov). Ganancia real por unidad = precio de
+// venta actual (con promoción, /items/{id}/sale_price) − costo −
+// empaque − envío a agencia − comisión de Mercado Libre − envío de
+// Mercado Libre (solo si lo paga el vendedor). Margen = ganancia /
+// precio. No incluye la publicidad: eso lo mide el ROAS.
+export type MargenProducto =
+  | { tipo: "ok"; ganancia: string; margen: string }
+  // El SKU no está en la tabla de costos de Finanzas, o no tiene costo.
+  | { tipo: "sin_costo" }
+  // Falta el precio, la comisión o el envío de Mercado Libre.
+  | { tipo: "sin_datos" };
+
+export function margenRealProducto(entrada: {
+  precio: string | null;
+  costo: string | null;
+  empaque: string | null;
+  envioAgencia: string | null;
+  comisionMl: string | null;
+  envioMl: string | null;
+  compradorPagaEnvio: boolean | null;
+}): MargenProducto {
+  if (entrada.precio === null || centavos(entrada.precio) <= CERO) return { tipo: "sin_datos" };
+  if (entrada.costo === null) return { tipo: "sin_costo" };
+  if (entrada.comisionMl === null) return { tipo: "sin_datos" };
+  // Si lo paga el comprador, al vendedor no le cuesta. Si lo paga el
+  // vendedor (o no se sabe quién) hace falta el monto.
+  let envio: bigint;
+  if (entrada.compradorPagaEnvio === true) envio = CERO;
+  else if (entrada.envioMl !== null) envio = centavos(entrada.envioMl);
+  else return { tipo: "sin_datos" };
+  // Empaque y envío a agencia vacíos = no cargados: cuentan como $0
+  // (en Finanzas, 0 ya es un $0 real).
+  const ganancia =
+    centavos(entrada.precio) -
+    centavos(entrada.costo) -
+    (entrada.empaque === null ? CERO : centavos(entrada.empaque)) -
+    (entrada.envioAgencia === null ? CERO : centavos(entrada.envioAgencia)) -
+    centavos(entrada.comisionMl) -
+    envio;
+  const margen = dividir(ganancia, centavos(entrada.precio), ESCALA);
+  const texto = dividir(ganancia, BigInt(100), 2);
+  if (margen === null || texto === null) return { tipo: "sin_datos" };
+  return { tipo: "ok", ganancia: texto, margen };
+}
+
+export type ColorMargen = "verde" | "amarillo" | "rojo";
+
+// Verde: margen igual o mayor a la meta. Amarillo: entre la mitad de la
+// meta y la meta. Rojo: bajo la mitad. Las franjas salen de la meta.
+export function semaforoMargen(margen: string, meta: string): ColorMargen {
+  const m = unidades(margen, ESCALA);
+  const t = unidades(meta, ESCALA);
+  if (m >= t) return "verde";
+  if (m * DOS >= t) return "amarillo";
+  return "rojo";
+}
+
 export function porcentajeDeRazon(numerador: string | null, denominador: string | null): string | null {
   if (numerador === null || denominador === null) return null;
   const n = unidades(numerador, ESCALA);
@@ -388,8 +445,8 @@ export function diagnosticarCampana(entrada: {
   if (objetivo === null || centavos(aEscala(objetivo, 2)) <= CERO) return { tipo: "sin_objetivo", dias: 0 };
   const excelente = roasAlcanza(ventas, gasto, objetivo, entrada.config.factorExcelente);
   if (excelente) return { tipo: "excelente", dias: 0 };
-  // Semáforo: verde desde el 90 % del objetivo, naranja entre 70 % y
-  // 90 %, rojo bajo el 70 % (el mismo 70 % de "Apagar y crear una nueva").
+  // Semáforo: verde desde el 100 % del objetivo, amarillo entre 70 % y
+  // 100 %, rojo bajo el 70 % (el mismo 70 % de "Apagar y crear una nueva").
   if (roasAlcanza(ventas, gasto, objetivo, UMBRAL_EN_OBJETIVO)) return { tipo: "en_objetivo", dias: 0 };
   if (roasAlcanza(ventas, gasto, objetivo, UMBRAL_ROAS_BAJO)) return { tipo: "bajo_objetivo", dias: 0 };
   return { tipo: "muy_bajo", dias: 0 };
@@ -440,8 +497,9 @@ export function fraseEstado(entrada: {
   if (entrada.diagnostico.tipo === "aprendiendo") {
     const dia = entrada.diagnostico.dias + 1;
     const tope = entrada.diasAprendizaje;
+    // Gris: en aprendizaje no se propone nada.
     return {
-      tono: "acento",
+      tono: "neutro",
       frase: `Aprendiendo, día ${dia} de ${tope}, no tocar todavía`,
       avance,
     };
@@ -455,13 +513,13 @@ export function fraseEstado(entrada: {
     return { tono: "exito", frase: `Cumple el objetivo, ${distancia.puntos} % arriba`, avance: 100 };
   }
   // Mismos tres colores que el diagnóstico (UMBRAL_EN_OBJETIVO, UMBRAL_ROAS_BAJO).
-  const frente90 = roasFrenteA(entrada.roas, entrada.roasObjetivo, UMBRAL_EN_OBJETIVO);
-  if (frente90 === "igual" || frente90 === "mayor") {
+  const frenteVerde = roasFrenteA(entrada.roas, entrada.roasObjetivo, UMBRAL_EN_OBJETIVO);
+  if (frenteVerde === "igual" || frenteVerde === "mayor") {
     return { tono: "exito", frase: `En objetivo, falta ${distancia.puntos} %`, avance };
   }
   const frente70 = roasFrenteA(entrada.roas, entrada.roasObjetivo, UMBRAL_ROAS_BAJO);
   if (frente70 === "igual" || frente70 === "mayor") {
-    return { tono: "advertencia", frase: `Bajo objetivo, falta ${distancia.puntos} %`, avance };
+    return { tono: "advertencia", frase: `Vigilar, falta ${distancia.puntos} %`, avance };
   }
   return { tono: "peligro", frase: `Muy bajo, falta ${distancia.puntos} %`, avance };
 }

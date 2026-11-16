@@ -29,11 +29,6 @@ export type ParametrosPublicidad = {
   tab: TabPublicidad;
 };
 
-function leerFiltro(vista: string | null | undefined, pausadas: string | null | undefined): FiltroCampanas {
-  if (vista === "activas" || vista === "pausadas" || vista === "todas") return vista;
-  if (pausadas === "1") return "todas";
-  return "activas";
-}
 
 export function leerParametrosPublicidad(
   entrada: {
@@ -47,9 +42,12 @@ export function leerParametrosPublicidad(
   },
   ahora: Date
 ): ParametrosPublicidad {
-  const periodo = resolverPeriodo(entrada.mes, ahora);
+  // Semáforo (16-nov): siempre lo corrido del mes (del día 1 a hoy) y
+  // solo campañas activas. ?mes=, ?vista= y ?pausadas= de un enlace
+  // viejo se ignoran.
+  const periodo = resolverPeriodo(null, ahora);
   const orden = resolverOrden(entrada.orden);
-  const filtro = leerFiltro(entrada.vista, entrada.pausadas);
+  const filtro: FiltroCampanas = "activas";
   return {
     periodo,
     orden,

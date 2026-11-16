@@ -15,6 +15,8 @@ import {
   ordenPorInversionDesc,
   rentabilidadCampana,
   roasEquilibrio,
+  semaforoMargen,
+  type MargenProducto,
   type EstadoRentabilidad,
   tieneVentaAtribuida,
   usoPresupuestoDiario,
@@ -26,6 +28,7 @@ import {
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { aEscala } from "@/lib/numeros/normalizar-decimal";
 import { mostrarDineroCompacto, mostrarEntero, mostrarFraccion, mostrarRoas, textoObjetivoRoas } from "@/lib/publicidad/formato";
+import { META_MARGEN_DEFECTO } from "@/lib/publicidad/config";
 import { CODIGOS_NOTA, recomendarCampana, type CodigoRecomendacion } from "@/lib/publicidad/recomendaciones";
 import {
   detalleDiagnostico,
@@ -67,7 +70,35 @@ export type AnuncioPintado = {
   sinStock: boolean | null;
   ventasCantidad: string;
   ingresos: string;
+  // Semáforo de productos (margen de ganancia real).
+  margen: string;
+  margenTono: "exito" | "advertencia" | "peligro" | "neutro";
+  margenTitulo: string;
 };
+
+// Verde desde la meta, amarillo desde la mitad, rojo bajo la mitad.
+export function pintarMargen(margen: MargenProducto, meta: string): Pick<AnuncioPintado, "margen" | "margenTono" | "margenTitulo"> {
+  if (margen.tipo === "sin_costo") {
+    return {
+      margen: "Sin costo",
+      margenTono: "neutro",
+      margenTitulo: "Este SKU no tiene costo en la tabla de costos de Finanzas. Cargalo para ver su margen.",
+    };
+  }
+  if (margen.tipo === "sin_datos") {
+    return {
+      margen: "—",
+      margenTono: "neutro",
+      margenTitulo: "Falta el precio, la comisión o el envío de Mercado Libre. Se completa en la próxima actualización.",
+    };
+  }
+  const color = semaforoMargen(margen.margen, meta);
+  return {
+    margen: mostrarFraccion(margen.margen),
+    margenTono: color === "verde" ? "exito" : color === "amarillo" ? "advertencia" : "peligro",
+    margenTitulo: `Ganancia real ${mostrarDineroCompacto(margen.ganancia)} por unidad, sin contar la publicidad. Meta ${mostrarFraccion(meta)}.`,
+  };
+}
 
 export type CampanaPintada = {
   id: string;
@@ -178,7 +209,12 @@ function textoPresupuesto(campana: CampanaCalculada, diasRango: number): Pick<Ca
   };
 }
 
-export function pintarCampana(campana: CampanaCalculada, diasRango: number, nombresCampanas: readonly string[] = []): CampanaPintada {
+export function pintarCampana(
+  campana: CampanaCalculada,
+  diasRango: number,
+  nombresCampanas: readonly string[] = [],
+  metaMargen: string = META_MARGEN_DEFECTO
+): CampanaPintada {
   const estado = fraseEstado({
     diagnostico: campana.diagnostico,
     roas: campana.totales.roas,
@@ -313,6 +349,7 @@ export function pintarCampana(campana: CampanaCalculada, diasRango: number, nomb
       ventasCantidad: mostrarEntero(anuncio.totales.ventasCantidad),
       ingresos: mostrarDineroCompacto(anuncio.totales.ventasPublicidad),
       unidades: mostrarEntero(anuncio.totales.unidadesVendidas),
+      ...pintarMargen(anuncio.margen, metaMargen),
     };
     }),
   };

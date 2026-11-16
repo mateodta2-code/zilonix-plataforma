@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { Ayuda } from "@/components/marco/Ayuda";
-import { Boton, BotonLink } from "@/components/marco/Boton";
+import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -15,10 +15,13 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { SUGERENCIA_RECONECTAR_PUBLICIDAD } from "@/lib/ml/publicidad";
 import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { consultarTableroPublicidad, DIAS_HISTORIAL_CAMBIOS } from "@/lib/publicidad/consultas";
+import { consultarTableroPublicidad } from "@/lib/publicidad/consultas";
+import { tienePermiso } from "@/lib/roles-plantillas";
+import { metaComoPorcentaje, mitadDeMeta } from "@/lib/publicidad/meta-margen";
+import { mostrarFraccion } from "@/lib/publicidad/formato";
 import { textoComparacion } from "@/lib/publicidad/formato";
 import type { ColumnaOrden, DireccionOrden } from "@/lib/publicidad/kpis";
-import { hrefPublicidad, leerParametrosPublicidad, opcionesDeMes, type ComparacionPublicidad, type FiltroCampanas, type TabPublicidad } from "@/lib/publicidad/params";
+import { hrefPublicidad, leerParametrosPublicidad, type ComparacionPublicidad, type FiltroCampanas, type TabPublicidad } from "@/lib/publicidad/params";
 import {
   AYUDA_DIAGNOSTICO,
   AYUDA_PRESUPUESTO,
@@ -34,6 +37,7 @@ import styles from "./page.module.css";
 import { PanelMetricas } from "./GraficoPublicidad";
 import { RentabilidadAds } from "./RentabilidadAds";
 import { CambiosCampanas } from "./CambiosCampanas";
+import { MetaMargen } from "./MetaMargen";
 import { ResumenRecomendaciones, TablaAnuncios, TablaCampanas } from "./TablaCampanas";
 import { kpisDelResumen, pintarCambios, pintarCampana, pintarRentabilidad, plataVisible, serieParaGrafico, textoAporte } from "./vista";
 
@@ -113,6 +117,8 @@ export default async function PublicidadPage({
     ahora
   );
   const { cuentas, cuentaId } = await leerCuentaMlDeQuery(empresa.id, cuentaParam);
+  const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
+  const puedeEditarMeta = miMembresia ? tienePermiso(miMembresia.permisos, "publicidad", "modificar") : false;
   const tablero = cuentaId
     ? await consultarTableroPublicidad(empresa.id, cuentaId, params.periodo, {
         incluirPausadas: params.incluirPausadas,
@@ -178,7 +184,7 @@ export default async function PublicidadPage({
             comparar={params.comparar}
             tab={params.tab}
             hrefBase={hrefBase}
-            ahora={ahora}
+            puedeEditarMeta={puedeEditarMeta}
           />
         )}
       </div>
@@ -205,7 +211,7 @@ function Cuerpo({
   comparar,
   tab,
   hrefBase,
-  ahora,
+  puedeEditarMeta,
 }: {
   tablero: NonNullable<Awaited<ReturnType<typeof consultarTableroPublicidad>>>;
   periodo: ReturnType<typeof leerParametrosPublicidad>["periodo"];
@@ -215,7 +221,7 @@ function Cuerpo({
   comparar: ComparacionPublicidad;
   tab: TabPublicidad;
   hrefBase: HrefBase;
-  ahora: Date;
+  puedeEditarMeta: boolean;
 }) {
   const sinPermiso = tablero.anunciante?.estadoAcceso === "sin_permiso_app";
   const sinProductAds = tablero.anunciante?.estadoAcceso === "sin_product_ads";
@@ -240,14 +246,15 @@ function Cuerpo({
     return <EstadoVacio>Todavía no hay una sincronización de esta cuenta. Usá Actualizar ahora.</EstadoVacio>;
   }
 
-  const opciones = opcionesDeMes(ahora, periodo.mes);
   const siteId = tablero.anunciante?.siteId ?? "MCO";
   const kpis = kpisDelResumen(tablero, siteId);
-  const campanas = tablero.campanas.map((campana) => pintarCampana(campana, tablero.diasRango, tablero.nombresCampanas));
+  const campanas = tablero.campanas.map((campana) =>
+    pintarCampana(campana, tablero.diasRango, tablero.nombresCampanas, tablero.metaMargen)
+  );
+  const mitadMeta = mitadDeMeta(tablero.metaMargen);
   const sinMetricas = tablero.resumen.actual.gasto === null && tablero.resumen.actual.clicks === null;
   const momento = tablero.ultimaActualizacion?.terminadaTs ?? tablero.ultimaActualizacion?.iniciadaTs ?? null;
   const actualizado = momento ? fechaHoraBogota(momento) : "—";
-  const totalCampanas = tablero.cantidadActivas + tablero.cantidadPausadas;
   const conComparacion = comparar === "anterior";
 
   const encabezados: EncabezadoTabla[] = COLUMNAS.map((columna): EncabezadoTabla => {
@@ -300,12 +307,6 @@ function Cuerpo({
     };
   });
 
-  const filtros: { valor: FiltroCampanas; rotulo: string }[] = [
-    { valor: "activas", rotulo: "Activas" },
-    { valor: "pausadas", rotulo: "Pausadas" },
-    { valor: "todas", rotulo: "Todas" },
-  ];
-
   return (
     <>
       <nav className={styles.pestanas} aria-label="Vistas de publicidad">
@@ -335,22 +336,10 @@ function Cuerpo({
           {hrefBase.cuenta ? <input type="hidden" name="cuenta" value={hrefBase.cuenta} /> : null}
           <input type="hidden" name="orden" value={orden} />
           <input type="hidden" name="dir" value={dir} />
-          {filtro !== "activas" ? <input type="hidden" name="vista" value={filtro} /> : null}
-          {comparar === "ninguno" ? <input type="hidden" name="comparar" value="ninguno" /> : null}
-          {tab === "anuncios" ? <input type="hidden" name="tab" value="anuncios" /> : null}
-          <label className={styles.campo}>
+          <div className={styles.campo}>
             <span className="zx-etiqueta">Periodo</span>
-            <select name="mes" className="zx-control" defaultValue={periodo.mes}>
-              {opciones.map((opcion) => (
-                <option key={opcion.valor} value={opcion.valor}>
-                  {opcion.rotulo}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Boton type="submit" variante="secundario" chico>
-            Ver
-          </Boton>
+            <span className={styles.nota}>Lo corrido del mes</span>
+          </div>
           <div className={styles.campo}>
             <span className="zx-etiqueta">Comparado con</span>
             <span className={styles.filtro}>
@@ -372,25 +361,19 @@ function Cuerpo({
       </section>
 
       {tab === "campanas" ? <RentabilidadAds datos={pintarRentabilidad(tablero)} /> : null}
-      {tab === "campanas" ? <CambiosCampanas cambios={pintarCambios(tablero.cambios)} dias={DIAS_HISTORIAL_CAMBIOS} /> : null}
+      {tab === "campanas" ? <CambiosCampanas cambios={pintarCambios(tablero.cambios)} /> : null}
+      <MetaMargen
+        meta={mostrarFraccion(tablero.metaMargen)}
+        mitad={mostrarFraccion(mitadMeta)}
+        valor={metaComoPorcentaje(tablero.metaMargen)}
+        puedeEditar={puedeEditarMeta}
+      />
 
       <Tarjeta className={tab === "campanas" ? styles.tarjetaTabla : styles.tarjetaAnuncios}>
         <div className={styles.toolbar}>
-          <span className={styles.filtro}>
-            <span className="zx-etiqueta">Filtrar</span>
-            {filtros.map((opcion) => (
-              <Link
-                key={opcion.valor}
-                href={hrefPublicidad({ ...hrefBase, vista: opcion.valor })}
-                aria-current={filtro === opcion.valor ? "page" : undefined}
-              >
-                {opcion.rotulo}
-              </Link>
-            ))}
-          </span>
           <span className={styles.nota}>
             {tab === "campanas"
-              ? `${campanas.length} de ${totalCampanas} campañas`
+              ? `${campanas.length} ${campanas.length === 1 ? "campaña activa" : "campañas activas"}`
               : `${campanas.reduce((n, campana) => n + campana.cantidadAnuncios, 0)} anuncios`}
           </span>
         </div>
@@ -399,13 +382,7 @@ function Cuerpo({
         {tab === "anuncios" ? (
           <TablaAnuncios campanas={campanas} />
         ) : campanas.length === 0 ? (
-          <EstadoVacio>
-            {filtro === "pausadas"
-              ? "No hay campañas pausadas."
-              : filtro === "todas"
-                ? "Esta cuenta no tiene campañas de Product Ads."
-                : "No hay campañas activas."}
-          </EstadoVacio>
+          <EstadoVacio>No hay campañas activas.</EstadoVacio>
         ) : (
           <Tabla encabezados={encabezados} scroll>
             <TablaCampanas campanas={campanas} comparar={conComparacion} />

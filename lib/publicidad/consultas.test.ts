@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { describe, expect, it, beforeAll } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import {
+  costosSku,
   cuentasMl,
   publicidadAnuncios,
   publicidadCampanas,
@@ -118,6 +119,20 @@ describe("consultas del tablero de publicidad (issue #255)", () => {
         itemId: "MCO123456",
         fecha: "2026-10-02",
         precioVentaVigente: "100000.00",
+        // SKU sin normalizar a propósito: la tabla de costos lo guarda en mayúsculas.
+        skuCodigo: " sku-a1 ",
+        comisionMl: "15000.00",
+        envioVendedorEstimado: "10000.00",
+        compradorPagaEnvio: false,
+      })
+    );
+    await dbComoEmpresa(contexto.empresaAId, (tx) =>
+      tx.insert(costosSku).values({
+        empresaId: contexto.empresaAId,
+        skuCodigo: "SKU-A1",
+        costo: "40000.00",
+        empaque: "2000.00",
+        envioAgencia: "3000.00",
       })
     );
 
@@ -219,6 +234,10 @@ describe("consultas del tablero de publicidad (issue #255)", () => {
     expect(anuncio.totales.gasto).toBe("4000.00");
     expect(anuncio.semaforo.estado).toBe("exito");
     expect(tablero.resumen.actual.gasto).toBe("25.00");
+    // Semáforo de productos: 100.000 − 40.000 − 2.000 − 3.000 − 15.000 − 10.000.
+    expect(anuncio.margen).toEqual({ tipo: "ok", ganancia: "30000.00", margen: "0.3000" });
+    // Sin meta guardada, la de la config.
+    expect(tablero.metaMargen).toBe("0.30");
   });
 
   it("con el conmutador apagado la pausada no sale; prendido, sí", async () => {
