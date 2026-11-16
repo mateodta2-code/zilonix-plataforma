@@ -719,6 +719,25 @@ $fn$;
 REVOKE ALL ON FUNCTION superadmin_resumen_empresas() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION superadmin_resumen_empresas() TO superadmin_user;
 
+-- Auditoría del superadmin (solo lectura en /superadmin/auditoria). superadmin_user
+-- no tiene SELECT sobre auditoria: esta función SECURITY DEFINER devuelve solo las
+-- filas cuyo autor es una cuenta superadmin, y solo ts/accion/entidad/nombre de
+-- empresa/detalle (nunca valor_anterior/valor_nuevo). Límite acotado a 1..200.
+CREATE OR REPLACE FUNCTION superadmin_acciones_recientes(limite integer DEFAULT 100)
+RETURNS TABLE (ts timestamptz, accion text, entidad text, empresa_nombre text, detalle text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT a.ts, a.accion, a.entidad, coalesce(e.nombre, b.nombre), a.detalle
+  FROM auditoria a
+  JOIN usuarios u ON u.id = a.usuario_id AND u.es_superadmin
+  LEFT JOIN empresas e ON e.id = a.empresa_id
+  LEFT JOIN bodegas_3pl b ON b.id = a.bodega_id
+  ORDER BY a.ts DESC
+  LIMIT greatest(1, least(coalesce(limite, 100), 200))
+$fn$;
+REVOKE ALL ON FUNCTION superadmin_acciones_recientes(integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION superadmin_acciones_recientes(integer) TO superadmin_user;
+
 DROP POLICY IF EXISTS superadmin_ve_membresias ON membresias;
 CREATE POLICY superadmin_ve_membresias ON membresias FOR SELECT TO superadmin_user USING (true);
 
@@ -740,3 +759,126 @@ CREATE POLICY superadmin_ve_accesos_temporales ON accesos_temporales FOR SELECT 
 -- ni borrarla después.
 DROP POLICY IF EXISTS superadmin_escribe_auditoria ON auditoria;
 CREATE POLICY superadmin_escribe_auditoria ON auditoria FOR INSERT TO superadmin_user WITH CHECK (true);
+
+-- ---------------------------------------------------------------------
+-- PR login-bodega-domiciliario — bodegas 3PL (operador logístico) y sus
+-- domiciliarios. Mundo APARTE de las empresas de vendedores: variables de
+-- sesión propias (app.bodega_id, app.bodega_usuario_id,
+-- app.bodega_invitacion_token, db/bodega-context.ts) que NINGÚN contexto
+-- de vendedor fija, y todas las políticas con NULLIF(...)::uuid: sin la
+-- variable no hay filas (nunca un error de cast). En el sentido
+-- contrario, db/bodega-context.ts fija app.empresa_actual al UUID
+-- centinela: una bodega no lee nada de empresas de vendedores.
+-- ---------------------------------------------------------------------
+ALTER TABLE bodegas_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bodegas_3pl FORCE ROW LEVEL SECURITY;
+ALTER TABLE miembros_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE miembros_bodega_3pl FORCE ROW LEVEL SECURITY;
+ALTER TABLE invitaciones_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invitaciones_bodega_3pl FORCE ROW LEVEL SECURITY;
+
+-- app_user: la bodega solo edita nombre y NIT de la suya; estado lo cambia
+-- únicamente el superadmin. Un miembro solo cambia rol/activo (nunca a qué
+-- bodega ni a qué persona pertenece); nada se borra.
+GRANT SELECT ON bodegas_3pl TO app_user;
+REVOKE INSERT, DELETE ON bodegas_3pl FROM app_user;
+REVOKE UPDATE ON bodegas_3pl FROM app_user;
+GRANT UPDATE (nombre, nit) ON bodegas_3pl TO app_user;
+GRANT SELECT, INSERT ON miembros_bodega_3pl TO app_user;
+REVOKE UPDATE, DELETE ON miembros_bodega_3pl FROM app_user;
+GRANT UPDATE (rol, activo) ON miembros_bodega_3pl TO app_user;
+GRANT SELECT, INSERT ON invitaciones_bodega_3pl TO app_user;
+REVOKE UPDATE, DELETE ON invitaciones_bodega_3pl FROM app_user;
+GRANT UPDATE (aceptada_ts) ON invitaciones_bodega_3pl TO app_user;
+
+-- bodegas_3pl: ve la bodega activa y aquellas donde es miembro (el selector).
+DROP POLICY IF EXISTS bodega3pl_ver ON bodegas_3pl;
+CREATE POLICY bodega3pl_ver ON bodegas_3pl FOR SELECT TO app_user
+  USING (
+    id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    OR id IN (
+      SELECT bodega_id FROM miembros_bodega_3pl
+      WHERE usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+    )
+  );
+DROP POLICY IF EXISTS bodega3pl_editar ON bodegas_3pl;
+CREATE POLICY bodega3pl_editar ON bodegas_3pl FOR UPDATE TO app_user
+  USING (id = NULLIF(current_setting('app.bodega_id', true), '')::uuid)
+  WITH CHECK (id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+
+-- miembros_bodega_3pl: ve los de la bodega activa y las filas propias; cambia
+-- rol/activo solo dentro de la bodega activa; se agrega UNA fila propia solo
+-- con el token de una invitación vigente, de esa bodega y de ese rol.
+DROP POLICY IF EXISTS miembro3pl_ver ON miembros_bodega_3pl;
+CREATE POLICY miembro3pl_ver ON miembros_bodega_3pl FOR SELECT TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    OR usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+  );
+DROP POLICY IF EXISTS miembro3pl_editar ON miembros_bodega_3pl;
+CREATE POLICY miembro3pl_editar ON miembros_bodega_3pl FOR UPDATE TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid)
+  WITH CHECK (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS miembro3pl_agregar_por_invitacion ON miembros_bodega_3pl;
+CREATE POLICY miembro3pl_agregar_por_invitacion ON miembros_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+    AND EXISTS (
+      SELECT 1 FROM invitaciones_bodega_3pl i
+      WHERE i.token = current_setting('app.bodega_invitacion_token', true)
+        AND i.bodega_id = miembros_bodega_3pl.bodega_id
+        AND i.rol = miembros_bodega_3pl.rol
+        AND i.aceptada_ts IS NULL
+        AND i.expira_ts > now()
+    )
+  );
+
+-- invitaciones_bodega_3pl: la bodega activa ve las suyas y quien tiene el
+-- token ve esa fila; el admin_bodega solo invita operario o domiciliario
+-- (admin_bodega lo invita el superadmin); aceptar = marcar aceptada_ts.
+DROP POLICY IF EXISTS inv3pl_ver ON invitaciones_bodega_3pl;
+CREATE POLICY inv3pl_ver ON invitaciones_bodega_3pl FOR SELECT TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    OR token = current_setting('app.bodega_invitacion_token', true)
+  );
+DROP POLICY IF EXISTS inv3pl_crear ON invitaciones_bodega_3pl;
+CREATE POLICY inv3pl_crear ON invitaciones_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND rol IN ('operario', 'domiciliario')
+  );
+DROP POLICY IF EXISTS inv3pl_aceptar ON invitaciones_bodega_3pl;
+CREATE POLICY inv3pl_aceptar ON invitaciones_bodega_3pl FOR UPDATE TO app_user
+  USING (token = current_setting('app.bodega_invitacion_token', true))
+  WITH CHECK (token = current_setting('app.bodega_invitacion_token', true));
+
+-- auditoria: las acciones de una bodega llevan bodega_id (empresa_id vacío).
+-- Solo se escribe y se lee dentro de la bodega activa; la política de
+-- empresas (aislamiento_auditoria) no ve estas filas porque su empresa_id
+-- es nulo.
+DROP POLICY IF EXISTS auditoria_bodega_escribir ON auditoria;
+CREATE POLICY auditoria_bodega_escribir ON auditoria FOR INSERT TO app_user
+  WITH CHECK (bodega_id IS NOT NULL AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS auditoria_bodega_leer ON auditoria;
+CREATE POLICY auditoria_bodega_leer ON auditoria FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+
+-- superadmin_user: crea y suspende/reactiva bodegas, ve sus miembros (conteos)
+-- e invita SOLO al admin_bodega. No edita miembros ni lee auditoria.
+GRANT SELECT, INSERT ON bodegas_3pl TO superadmin_user;
+GRANT UPDATE (estado) ON bodegas_3pl TO superadmin_user;
+GRANT SELECT ON miembros_bodega_3pl TO superadmin_user;
+GRANT SELECT, INSERT ON invitaciones_bodega_3pl TO superadmin_user;
+DROP POLICY IF EXISTS sa_bodegas_ver ON bodegas_3pl;
+CREATE POLICY sa_bodegas_ver ON bodegas_3pl FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS sa_bodegas_crear ON bodegas_3pl;
+CREATE POLICY sa_bodegas_crear ON bodegas_3pl FOR INSERT TO superadmin_user WITH CHECK (true);
+DROP POLICY IF EXISTS sa_bodegas_estado ON bodegas_3pl;
+CREATE POLICY sa_bodegas_estado ON bodegas_3pl FOR UPDATE TO superadmin_user USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS sa_miembros_bodega_ver ON miembros_bodega_3pl;
+CREATE POLICY sa_miembros_bodega_ver ON miembros_bodega_3pl FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS sa_inv_bodega_ver ON invitaciones_bodega_3pl;
+CREATE POLICY sa_inv_bodega_ver ON invitaciones_bodega_3pl FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS sa_inv_bodega_crear_admin ON invitaciones_bodega_3pl;
+CREATE POLICY sa_inv_bodega_crear_admin ON invitaciones_bodega_3pl FOR INSERT TO superadmin_user WITH CHECK (rol = 'admin_bodega');

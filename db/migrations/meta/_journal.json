@@ -197,6 +197,13 @@
       "when": 1794799095611,
       "tag": "0027_awesome_tyrannus",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794800947642,
+      "tag": "0028_curved_payback",
+      "breakpoints": true
     }
   ]
 }

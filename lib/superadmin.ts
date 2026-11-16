@@ -95,6 +95,23 @@ export async function listarEmpresasConConteo(): Promise<EmpresaConConteo[]> {
     .sort((a, b) => b.creadoTs.getTime() - a.creadoTs.getTime());
 }
 
+export type AccionSuperadmin = { ts: Date; accion: string; entidad: string; empresaNombre: string | null; detalle: string | null };
+
+// Últimas acciones hechas por cuentas superadmin. superadmin_user NO tiene
+// SELECT sobre auditoria (solo INSERT): la lectura pasa por
+// superadmin_acciones_recientes() (db/rls-setup.sql, SECURITY DEFINER), que
+// solo devuelve filas cuyo autor es superadmin y solo estas 5 columnas.
+export async function listarAccionesSuperadmin(limite = 100): Promise<AccionSuperadmin[]> {
+  const filas = (await dbSuperadmin.execute(sql`select * from superadmin_acciones_recientes(${limite})`)) as unknown as {
+    ts: Date | string;
+    accion: string;
+    entidad: string;
+    empresa_nombre: string | null;
+    detalle: string | null;
+  }[];
+  return filas.map((f) => ({ ts: new Date(f.ts), accion: f.accion, entidad: f.entidad, empresaNombre: f.empresa_nombre, detalle: f.detalle }));
+}
+
 export type MiembroDeEmpresa = { nombre: string; email: string; rolNombre: string };
 
 // El "detalle" que SÍ exige el acceso temporal explícito de la

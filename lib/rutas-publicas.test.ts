@@ -58,4 +58,13 @@ describe("esRutaPublica (fix middleware, 2026-10-21)", () => {
     expect(esRutaPublica(peticion("/superadmin/foro"))).toBe(false);
     expect(esRutaPublica(peticion("/superadmin/entrar"))).toBe(false);
   });
+
+  it("solo los logins de bodega/domiciliario y la invitación son públicos; los paneles siguen cerrados (PR login-bodega-domiciliario)", () => {
+    for (const ruta of ["/bodega/iniciar-sesion", "/bodega/iniciar-sesion/factor-uno", "/domiciliario/iniciar-sesion", "/invitacion-bodega/un-token"]) {
+      expect(esRutaPublica(peticion(ruta)), ruta).toBe(true);
+    }
+    for (const ruta of ["/bodega", "/bodega/personas", "/bodega/invitar", "/bodega/configuracion", "/domiciliario", "/domiciliario/entregas", "/superadmin/bodegas"]) {
+      expect(esRutaPublica(peticion(ruta)), ruta).toBe(false);
+    }
+  });
 });

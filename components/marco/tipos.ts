@@ -26,7 +26,11 @@ export type ClaveIcono =
   | "conectarMl"
   | "avisosMl"
   | "cuenta"
-  | "crearEmpresa";
+  | "crearEmpresa"
+  | "empresas"
+  | "metricas"
+  | "auditoria"
+  | "equipoAdmin";
 
 // "activa" no es un campo acá: el layout de servidor que construye
 // estos ítems no conoce la ruta real (se repiten en todas las

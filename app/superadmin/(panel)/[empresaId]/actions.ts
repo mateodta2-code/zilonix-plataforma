@@ -15,6 +15,7 @@ async function entrada(formData: FormData) {
 
 function refrescar(empresaId: string) {
   revalidatePath("/superadmin");
+  revalidatePath("/superadmin/empresas");
   revalidatePath(`/superadmin/${empresaId}`);
 }
 

@@ -10,7 +10,15 @@ import type { GrupoNav } from "./tipos";
 
 const CLAVE_COLAPSADA = "zilonix-barra-colapsada";
 
-export function BarraLateral({ grupos }: { grupos: GrupoNav[] }) {
+export function BarraLateral({
+  grupos,
+  etiquetaPanel,
+  mostrarMisDatos = true,
+}: {
+  grupos: GrupoNav[];
+  etiquetaPanel?: string;
+  mostrarMisDatos?: boolean;
+}) {
   // Igual que el tema: el primer render (servidor y cliente antes del
   // efecto) asume la barra expandida — si alguien la había contraído,
   // se corrige en el primer efecto. Acá sí es solo un ancho que
@@ -65,6 +73,7 @@ export function BarraLateral({ grupos }: { grupos: GrupoNav[] }) {
         <img src="/marca/icono-plata.png" alt="Zilonix Seller" className={styles.iconoColapsado} data-variante="plata" />
         <img src="/marca/icono-gris-oscuro.png" alt="Zilonix Seller" className={styles.iconoColapsado} data-variante="oscuro" />
       </div>
+      {etiquetaPanel && !colapsada && <p className={`zx-etiqueta ${styles.tipoPanel}`}>{etiquetaPanel}</p>}
 
       <nav className={styles.nav}>
         {grupos.map((grupo, indice) => (
@@ -85,10 +94,12 @@ export function BarraLateral({ grupos }: { grupos: GrupoNav[] }) {
         {/* Issue #318 — exportar/borrar los datos propios (Ley 1581),
         junto a "Mi cuenta": ninguno de los dos es un módulo de negocio
         de ninguna empresa. */}
-        <Link href="/panel/mis-datos" className={styles.botonCuadrado} title="Mis datos personales">
-          {iconoDeClave("datosPersonales", { size: 16 })}
-          {!colapsada && <span className={styles.etiquetaCuadrado}>Mis datos</span>}
-        </Link>
+        {mostrarMisDatos && (
+          <Link href="/panel/mis-datos" className={styles.botonCuadrado} title="Mis datos personales">
+            {iconoDeClave("datosPersonales", { size: 16 })}
+            {!colapsada && <span className={styles.etiquetaCuadrado}>Mis datos</span>}
+          </Link>
+        )}
         <SelectorTema variante="cuadrado" />
         <button type="button" onClick={alternarColapso} className={styles.botonCuadrado} title={colapsada ? "Expandir" : "Contraer"}>
           <IconoContraer size={16} />
