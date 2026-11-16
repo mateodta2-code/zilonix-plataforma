@@ -1228,6 +1228,26 @@ export const publicidadCampanas = pgTable("publicidad_campanas", {
   campanaUnica: uniqueIndex("publicidad_campanas_cuenta_campana_unica").on(t.empresaId, t.cuentaMlId, t.campanaIdMl),
 }));
 
+// Historial de cambios de presupuesto diario y ROAS objetivo (como el
+// tablero de referencia de Melisa: "cambios desde la lectura
+// anterior"). La campaña se pisa en cada sync; esta tabla guarda qué
+// valor tenía antes. Solo se anota cuando ya había una lectura previa y
+// el valor cambió: la primera sync no deja filas.
+export const publicidadCampanasCambios = pgTable("publicidad_campanas_cambios", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  cuentaMlId: uuid("cuenta_ml_id").notNull().references(() => cuentasMl.id, { onDelete: "cascade" }),
+  campanaIdMl: text("campana_id_ml").notNull(),
+  // "presupuesto_diario" | "roas_objetivo" (ver lib/publicidad/cambios.ts).
+  campo: text("campo").notNull(),
+  // null = Mercado Libre no mandaba el dato (p. ej. presupuesto automático).
+  valorAnterior: numeric("valor_anterior", { precision: 14, scale: 2 }),
+  valorNuevo: numeric("valor_nuevo", { precision: 14, scale: 2 }),
+  detectadoTs: timestamp("detectado_ts", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  porCuenta: index("publicidad_campanas_cambios_cuenta_ts").on(t.empresaId, t.cuentaMlId, t.detectadoTs),
+}));
+
 export const publicidadAnuncios = pgTable("publicidad_anuncios", {
   id: uuid("id").primaryKey().defaultRandom(),
   empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
