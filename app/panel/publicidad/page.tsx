@@ -331,10 +331,10 @@ function Cuerpo({
   return (
     <>
       <nav className={styles.pestanas} aria-label="Vistas de publicidad">
-        <Link href={hrefPublicidad({ ...hrefBase, tab: "campanas" })} className={styles.pestana} aria-current={tab === "campanas" ? "page" : undefined}>
+        <Link scroll={false} href={hrefPublicidad({ ...hrefBase, tab: "campanas" })} className={styles.pestana} aria-current={tab === "campanas" ? "page" : undefined}>
           Campañas
         </Link>
-        <Link href={hrefPublicidad({ ...hrefBase, tab: "anuncios" })} className={styles.pestana} aria-current={tab === "anuncios" ? "page" : undefined}>
+        <Link scroll={false} href={hrefPublicidad({ ...hrefBase, tab: "anuncios" })} className={styles.pestana} aria-current={tab === "anuncios" ? "page" : undefined}>
           Anuncios
         </Link>
       </nav>
@@ -364,10 +364,10 @@ function Cuerpo({
           <div className={styles.campo}>
             <span className="zx-etiqueta">Comparado con</span>
             <span className={styles.filtro}>
-              <Link href={hrefPublicidad({ ...hrefBase, comparar: "ninguno" })} aria-current={comparar === "ninguno" ? "page" : undefined}>
+              <Link scroll={false} href={hrefPublicidad({ ...hrefBase, comparar: "ninguno" })} aria-current={comparar === "ninguno" ? "page" : undefined}>
                 Ninguno
               </Link>
-              <Link href={hrefPublicidad({ ...hrefBase, comparar: "anterior" })} aria-current={comparar === "anterior" ? "page" : undefined}>
+              <Link scroll={false} href={hrefPublicidad({ ...hrefBase, comparar: "anterior" })} aria-current={comparar === "anterior" ? "page" : undefined}>
                 Periodo anterior
               </Link>
             </span>
@@ -396,10 +396,10 @@ function Cuerpo({
             <>
               <p className={styles.seccion}>Campañas activas</p>
               <span className={styles.filtro}>
-                <Link href={hrefPublicidad({ ...hrefBase, estado: "todas" })} aria-current={hrefBase.estado === "todas" ? "page" : undefined}>
+                <Link scroll={false} href={hrefPublicidad({ ...hrefBase, estado: "todas" })} aria-current={hrefBase.estado === "todas" ? "page" : undefined}>
                   Todas
                 </Link>
-                <Link href={hrefPublicidad({ ...hrefBase, estado: "bajo" })} aria-current={hrefBase.estado === "bajo" ? "page" : undefined}>
+                <Link scroll={false} href={hrefPublicidad({ ...hrefBase, estado: "bajo" })} aria-current={hrefBase.estado === "bajo" ? "page" : undefined}>
                   Bajo objetivo
                 </Link>
               </span>
@@ -457,7 +457,9 @@ function LinkOrden({
   const activa = orden === columna;
   const siguiente: DireccionOrden = activa ? (dir === "desc" ? "asc" : "desc") : columna === "campana" ? "asc" : "desc";
   return (
+    // scroll={false}: ordenar no sube la página; la tabla se queda donde estaba.
     <Link
+      scroll={false}
       href={hrefPublicidad({ ...hrefBase, orden: columna, dir: siguiente })}
       className={[styles.orden, activa ? styles.ordenActivo : "", derecha ? styles.alDerecha : ""].filter(Boolean).join(" ")}
       title={titulo}
