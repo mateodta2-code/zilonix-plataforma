@@ -241,6 +241,21 @@ async function cargarBackgroundFresco() {
   await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
 }
 
+// Issue #414 — al cargar, background.js llama refrescarConfigRemota(), que
+// hace un fetch a /api/extension/config. Los bloques que no mockean `fetch`
+// lo mandaban a la RED REAL: la respuesta llegaba tarde (tiempo real) y
+// escribía en el `chrome` mock de OTRA prueba, pisándole el storage. Por eso
+// "configuración remota" fallaba de forma intermitente (más con carga o red
+// lenta). Todo el archivo usa un fetch neutro que nunca sale a la red; los
+// bloques que necesitan su propio fetch lo reemplazan en su beforeEach.
+const fetchOriginal = globalThis.fetch;
+beforeEach(() => {
+  (globalThis as unknown as { fetch: unknown }).fetch = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+});
+afterEach(() => {
+  (globalThis as unknown as { fetch: unknown }).fetch = fetchOriginal;
+});
+
 describe("background.js — cierre automático de 'Actualizar todo' (issue #252, puntos 1/2/5)", () => {
   let mockActual: ReturnType<typeof crearChromeMock>;
 
@@ -1034,11 +1049,34 @@ describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)"
 
   describe("configuración remota (issue #414)", () => {
     const CLAVE = "zilonixConfigRemota";
+    // Estabilidad: refrescarConfigRemota() corre sola al cargar el script y
+    // usa `fetch`/`chrome` GLOBALES en el momento de cada llamada. Por eso
+    // este bloque NO comparte el fetchMock del bloque de arriba (cualquier
+    // cadena async rezagada de otra prueba podía responderle o pisarle el
+    // storage): cada prueba instala su propio fetch y su propio chrome,
+    // con hora fija, y espera al resultado real en vez de a un tiempo fijo.
+    let fetchConfig: ReturnType<typeof vi.fn>;
 
-    beforeEach(() => mockActual.limpiarLocal());
+    beforeEach(async () => {
+      // Deja terminar cualquier cadena async rezagada de pruebas anteriores
+      // ANTES de instalar el estado propio de esta.
+      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+      vi.setSystemTime(new Date("2026-01-01T12:00:00Z"));
+      mockActual = crearChromeMock();
+      (globalThis as unknown as { chrome: unknown }).chrome = mockActual.chrome;
+      fetchConfig = vi.fn();
+      (globalThis as unknown as { fetch: unknown }).fetch = fetchConfig;
+    });
+
+    const esperarConfigGuardada = () => vi.waitFor(() => expect(mockActual.leerLocal(CLAVE)).toBeDefined());
+    const dejarTerminarRefresco = async () => {
+      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+      await vi.waitFor(() => expect(fetchConfig).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+    };
 
     it("pide /api/extension/config sin credenciales y guarda SOLO lo validado", async () => {
-      fetchMock.mockResolvedValue({
+      fetchConfig.mockResolvedValue({
         ok: true,
         status: 200,
         json: async () => ({
@@ -1048,8 +1086,8 @@ describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)"
         }),
       });
       await cargarBackgroundFresco();
-      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
-      const [url, init] = fetchMock.mock.calls[0];
+      await esperarConfigGuardada();
+      const [url, init] = fetchConfig.mock.calls[0];
       expect(url).toBe("https://seller.zilonix.com/api/extension/config");
       expect(init.credentials).toBe("omit");
       expect(mockActual.leerLocal(CLAVE)).toEqual({
@@ -1060,13 +1098,13 @@ describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)"
     });
 
     it("urlApp fuera de la allowlist, texto enorme o JSON raro -> valores por defecto seguros (Alibaba apagado)", async () => {
-      fetchMock.mockResolvedValue({
+      fetchConfig.mockResolvedValue({
         ok: true,
         status: 200,
         json: async () => ({ interruptores: { alibaba: "si" }, textos: { avisoSinSesion: "x".repeat(500) }, urlApp: "https://evil.com" }),
       });
       await cargarBackgroundFresco();
-      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+      await esperarConfigGuardada();
       expect(mockActual.leerLocal(CLAVE)).toEqual({
         interruptores: { alibaba: false },
         textos: { avisoSinSesion: "Inicia sesión en Zilonix Seller para analizar" },
@@ -1075,12 +1113,14 @@ describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)"
     });
 
     it("si la red o la ruta fallan, no guarda nada (la extensión sigue con lo último o con los valores por defecto)", async () => {
-      fetchMock.mockRejectedValue(new Error("red"));
+      fetchConfig.mockRejectedValue(new Error("red"));
       await cargarBackgroundFresco();
-      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+      await dejarTerminarRefresco();
+      expect(fetchConfig).toHaveBeenCalledTimes(1);
       expect(mockActual.leerLocal(CLAVE)).toBeUndefined();
-      fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+      fetchConfig.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
       await cargarBackgroundFresco();
+      await vi.waitFor(() => expect(fetchConfig).toHaveBeenCalledTimes(2));
       await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
       expect(mockActual.leerLocal(CLAVE)).toBeUndefined();
     });
