@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import path from "path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasFalabella, despachosMl, empresas, pedidoItems, pedidos, pedidosFalabella } from "@/db/schema";
+import { cuentasFalabella, despachosMl, empresas, pedidoItems, pedidos, pedidosFalabella, pedidosFinanzas } from "@/db/schema";
 import { crearDosEmpresas } from "@/db/test-utils/aislamiento";
 import { crearCuentaMlDePrueba } from "@/db/test-utils/venta";
 import { parsearFiltrosPedidos, TAMANO_PAGINA_PEDIDOS, type CuentasEmpresa } from "./filtros";
@@ -102,6 +102,9 @@ describe("lista unificada — Postgres real (RLS)", () => {
     );
     pedidoMlConItemsId = filasMl.find((f) => f.pedidoIdExterno === `ML-${sufijo}-29`)!.id;
     await dbComoEmpresa(empresaAId, async (tx) => {
+      // pedido_items cuelga de la cabecera de venta (FK
+      // pedido_items_venta_misma_empresa_fk), no directo de pedidos.
+      await tx.insert(pedidosFinanzas).values({ empresaId: empresaAId, pedidoId: pedidoMlConItemsId, cuentaMlId, valorVenta: "10000.00" });
       await tx.insert(pedidoItems).values({
         empresaId: empresaAId,
         pedidoId: pedidoMlConItemsId,
