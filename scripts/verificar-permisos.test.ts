@@ -191,7 +191,7 @@ const RUTAS_PROTEGIDAS = new Set([
 
 // Tarea 1.11 — eje de autorización APARTE: "¿esta cuenta es
 // superadmin?" (plataforma entera, no un módulo de una empresa). Toda
-// ruta bajo /superadmin tiene que llamar requiereSuperadmin(), nunca
+// ruta bajo /superadmin tiene que llamar requiereSesionSuperadmin(), nunca
 // requierePermiso() — son preguntas distintas.
 const RUTAS_SUPERADMIN = new Set([
   "app/superadmin/page.tsx",
@@ -214,6 +214,9 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/cuenta/[[...cuenta]]/page.tsx": "solo monta <UserProfile/> de Clerk; no lee ninguna tabla propia",
   "app/sign-in/[[...sign-in]]/page.tsx": "solo monta <SignIn/> de Clerk",
   "app/sign-up/[[...sign-up]]/page.tsx": "solo monta <SignUp/> de Clerk",
+  "app/superadmin/iniciar-sesion/[[...iniciar-sesion]]/page.tsx": "solo monta <SignIn/> de Clerk (login aparte del superadmin); no lee datos de negocio",
+  "app/superadmin/entrar/route.ts": "emite la cookie zx_superadmin SOLO tras repetir todos los chequeos de entrada (evaluarAccesoSuperadmin); sin ellos redirige al login",
+  "app/superadmin/actions.ts": "cerrar sesión de superadmin: borra la cookie y la sesión de Clerk; debe funcionar también con la sesión vencida, no lee datos",
   "app/api/version/route.ts": "expone solo el número de versión, nunca datos de ninguna empresa",
   "app/api/extension/config/route.ts":
     "pública a propósito: la extensión la pide sin sesión; solo devuelve interruptores y textos no sensibles (lib/extension/configuracion.ts), nunca datos de una empresa",
@@ -311,9 +314,9 @@ describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candad
   }
 
   for (const relPath of RUTAS_SUPERADMIN) {
-    it(`${relPath} (superadmin) llama requiereSuperadmin() de verdad`, () => {
+    it(`${relPath} (superadmin) llama requiereSesionSuperadmin() de verdad`, () => {
       const contenido = readFileSync(join(RAIZ, relPath), "utf8");
-      expect(/requiereSuperadmin\(/.test(contenido), `${relPath} está en RUTAS_SUPERADMIN pero no llama requiereSuperadmin()`).toBe(true);
+      expect(/requiereSesionSuperadmin\(/.test(contenido), `${relPath} está en RUTAS_SUPERADMIN pero no llama requiereSesionSuperadmin()`).toBe(true);
     });
   }
 

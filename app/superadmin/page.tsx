@@ -1,7 +1,5 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
-import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { requiereSuperadmin, listarEmpresasConConteo, NoEsSuperadminError } from "@/lib/superadmin";
+import { requiereSesionSuperadmin, listarEmpresasConConteo } from "@/lib/superadmin";
 
 // Tarea 1.11 (decisión D8) — "ve empresas, plan, salud, errores. No
 // ve datos de negocio." Hoy no hay plan/salud/errores todavía (eso
@@ -9,15 +7,7 @@ import { requiereSuperadmin, listarEmpresasConConteo, NoEsSuperadminError } from
 // ahora es la lista de empresas con su conteo de miembros, siempre
 // visible, nunca el detalle de quién es quién sin un acceso temporal.
 export default async function SuperadminPage() {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
-
-  try {
-    await requiereSuperadmin(usuario.id);
-  } catch (error) {
-    if (!(error instanceof NoEsSuperadminError)) throw error;
-    redirect("/panel");
-  }
+  await requiereSesionSuperadmin();
 
   const empresas = await listarEmpresasConConteo();
 
@@ -26,9 +16,6 @@ export default async function SuperadminPage() {
       <h1 style={{ fontSize: 24, fontWeight: 700 }}>Empresas en Zilonix</h1>
       <p style={{ opacity: 0.7, fontSize: 13 }}>
         Solo cifras agregadas — nunca el detalle de una empresa sin que ella te conceda un acceso temporal.
-      </p>
-      <p style={{ fontSize: 13 }}>
-        <Link href="/superadmin/foro">Moderar el foro →</Link>
       </p>
 
       {empresas.length === 0 ? (

@@ -1,5 +1,14 @@
 import { randomUUID } from "crypto";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { currentUser } from "@clerk/nextjs/server";
 import { eq, sql } from "drizzle-orm";
+import {
+  NOMBRE_COOKIE_SUPERADMIN,
+  correoEstaAutorizado,
+  parsearCorreosSuperadmin,
+  verificarCookieSuperadmin,
+} from "@/lib/superadmin-sesion";
 import { db } from "@/db";
 import { dbSuperadmin } from "@/db/superadmin-context";
 import { accesosTemporales, auditoria, empresas, membresias, roles, usuarios } from "@/db/schema";
@@ -80,4 +89,60 @@ export async function obtenerMiembrosConAcceso(empresaId: string, superadminUsua
   });
 
   return filas;
+}
+
+export const RUTA_LOGIN_SUPERADMIN = "/superadmin/iniciar-sesion";
+
+export type MotivoRechazoSuperadmin = "cerrado" | "no-autorizado" | "2fa" | "sin-sesion";
+
+export type AccesoSuperadmin =
+  | { ok: true; usuarioId: string; clerkUserId: string }
+  | { ok: false; motivo: MotivoRechazoSuperadmin };
+
+// Los chequeos de ENTRADA (sin mirar la cookie). Nunca crea filas:
+// un correo fuera de la lista ni siquiera llega a consultar `usuarios`,
+// y aunque llegara, acá solo se lee — jamás obtenerOCrearUsuarioActual().
+// Cerrado por defecto: sin SUPERADMIN_SESION_SECRETO o sin lista, nadie entra.
+export async function evaluarAccesoSuperadmin(): Promise<AccesoSuperadmin> {
+  if (!process.env.SUPERADMIN_SESION_SECRETO) return { ok: false, motivo: "cerrado" };
+  const lista = parsearCorreosSuperadmin(process.env.SUPERADMIN_CORREOS);
+  if (lista.length === 0) return { ok: false, motivo: "cerrado" };
+
+  const clerkUser = await currentUser();
+  if (!clerkUser) return { ok: false, motivo: "sin-sesion" };
+
+  // Solo el correo PRINCIPAL y solo si Clerk lo marca verificado.
+  const principal = clerkUser.primaryEmailAddress;
+  if (!principal || principal.verification?.status !== "verified" || !correoEstaAutorizado(principal.emailAddress, lista)) {
+    return { ok: false, motivo: "no-autorizado" };
+  }
+
+  const [fila] = await db
+    .select({ id: usuarios.id, esSuperadmin: usuarios.esSuperadmin })
+    .from(usuarios)
+    .where(eq(usuarios.clerkUserId, clerkUser.id));
+  if (!fila?.esSuperadmin) return { ok: false, motivo: "no-autorizado" };
+
+  // 2FA: apagado por defecto. No activa nada de pago en Clerk, solo
+  // exige que la cuenta ya lo tenga.
+  if (process.env.SUPERADMIN_EXIGIR_2FA === "true" && !clerkUser.twoFactorEnabled) {
+    return { ok: false, motivo: "2fa" };
+  }
+
+  return { ok: true, usuarioId: fila.id, clerkUserId: clerkUser.id };
+}
+
+// La ÚNICA función que protege toda ruta de /superadmin (páginas y
+// server actions). Exige chequeos de entrada + cookie propia
+// "zx_superadmin" firmada y emitida para este mismo usuario de Clerk.
+// Sin eso, redirige al login aparte (nunca a /sign-in ni a /panel).
+export async function requiereSesionSuperadmin(): Promise<{ usuarioId: string; clerkUserId: string }> {
+  const acceso = await evaluarAccesoSuperadmin();
+  if (!acceso.ok) {
+    redirect(acceso.motivo === "sin-sesion" ? RUTA_LOGIN_SUPERADMIN : `${RUTA_LOGIN_SUPERADMIN}?motivo=${acceso.motivo}`);
+  }
+  const valor = cookies().get(NOMBRE_COOKIE_SUPERADMIN)?.value;
+  const valida = await verificarCookieSuperadmin(valor, acceso.clerkUserId, Date.now(), process.env.SUPERADMIN_SESION_SECRETO);
+  if (!valida) redirect(RUTA_LOGIN_SUPERADMIN);
+  return { usuarioId: acceso.usuarioId, clerkUserId: acceso.clerkUserId };
 }

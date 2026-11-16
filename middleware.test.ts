@@ -153,6 +153,8 @@ describe("middleware — coincidencia de rutas tras @clerk/nextjs 6.39.8 (CVE-20
       const respuesta = await middleware(auth, req);
       if (redirectToSignIn.mock.calls.length > 0) return "bloqueada";
       if (respuesta && respuesta.status >= 400) return "bloqueada";
+      // /superadmin tiene su login aparte: sin sesión redirige ahí, no a redirectToSignIn.
+      if (respuesta?.headers.get("location")?.includes("/superadmin/iniciar-sesion")) return "bloqueada";
       return "pasa";
     } catch (error) {
       // No solo new NextRequest(...) puede tirar esto: el matcher

@@ -1,7 +1,5 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
-import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { requiereSuperadmin, NoEsSuperadminError } from "@/lib/superadmin";
+import { requiereSesionSuperadmin } from "@/lib/superadmin";
 import { listarParaModerar } from "@/lib/foro";
 import { cambiarVisibilidadAction } from "./actions";
 
@@ -9,15 +7,7 @@ import { cambiarVisibilidadAction } from "./actions";
 // respuestas juntas, incluso lo escondido. Esconder nunca borra: se
 // puede volver a mostrar. Mismo estilo simple que /superadmin.
 export default async function ModerarForoPage() {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
-
-  try {
-    await requiereSuperadmin(usuario.id);
-  } catch (error) {
-    if (!(error instanceof NoEsSuperadminError)) throw error;
-    redirect("/panel");
-  }
+  const usuario = { id: (await requiereSesionSuperadmin()).usuarioId };
 
   const publicaciones = await listarParaModerar(usuario.id);
 

@@ -20,8 +20,8 @@ export type EncabezadoTabla = {
 // empuje el resto de la página en un celular.
 //
 // `scroll` limita la altura y pega el encabezado adentro de ESA caja.
-// Si el sticky fuera contra la página, quedaría debajo de BarraSuperior,
-// que también es sticky.
+// BarraSuperior ya no es sticky (sube con el contenido), pero el
+// encabezado pegado sigue siendo contra esa caja, no contra la página.
 export function Tabla({
   encabezados,
   children,
