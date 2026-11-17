@@ -1,4 +1,0 @@
-- **Tema claro: la franja negra termina justo debajo del título de la página.** Antes iba hasta 170px y se volvía blanca a los 270px, así que lo primero de cada página (avisos, pestañas, títulos de sección, notas) caía sobre negro o gris y no se leía. Ahora es negra hasta 130px y blanca desde 160px (suave; medio e intenso, 10 y 20px más abajo).
-  - El título y la descripción de la página (`EncabezadoPagina`) cambian de color solos si caen en la parte blanca, igual que las pestañas y el menú lateral (`useZonaFondo`).
-  - Los avisos que usaban colores de "franja negra" (Conectar ML, SKU, Inventario, Finanzas, Personas, Inicio, Ventas y utilidad, confirmar transferencia) pasan al color normal del tema.
-  - Toca el diseño de marca: revisar en staging antes de producción.

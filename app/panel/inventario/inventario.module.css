@@ -1,14 +1,15 @@
-/* 17-nov: desde que la franja negra del tema claro termina justo
-   debajo del título de la página (globals.css, --fondo-app-*), este
-   texto cae sobre blanco y usa el color normal del tema. Antes usaba
-   el token -zona-oscura porque caía sobre la franja negra. */
+/* Issue #186 (Sharel, Refs): este aviso cae justo debajo del
+   encabezado, directo sobre la franja oscura del degradado de fondo
+   (igual que .avisoExito de /panel/conectar-ml, issue #181/#185) — su
+   fondo (--acento-suave) es translúcido, se ve el degradado de atrás
+   igual. --texto normal es negro en claro — ilegible ahí. */
 .avisoSinVincular {
   padding: 10px 14px;
   background: var(--acento-suave);
   border: 1px solid var(--acento);
   border-radius: var(--radio-boton);
   font-size: 13.5px;
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
 }
 
 .enlaceAviso {
@@ -149,7 +150,7 @@
   border: 1px solid var(--peligro, #c0392b);
   border-radius: var(--radio-boton);
   font-size: 13.5px;
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
   background: var(--acento-suave);
 }
 
@@ -175,7 +176,7 @@
   border: 1px solid var(--acento);
   border-radius: var(--radio-boton);
   background: var(--acento-suave);
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
   font-size: 13.5px;
 }
 
