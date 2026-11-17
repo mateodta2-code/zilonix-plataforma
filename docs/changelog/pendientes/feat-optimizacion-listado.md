@@ -1,0 +1,13 @@
+- **feat-optimizacion-listado** — Módulo «Optimización», Parte 1 de 3: listado de publicaciones con métricas y pausar/activar.
+
+  **Qué hay**: ítem «Optimización» en el menú, justo entre «Investigación» y «Publicar», con el mismo permiso ("inventario","consultar"). La página `/panel/optimizacion` lista las publicaciones activas y pausadas de UNA cuenta (selector de cuenta si hay varias), con filtro por estado, búsqueda por título/ID/SKU y páginas de 50. Por fila: foto con zoom, título, ID con link, SKU, precio y precio con promoción, tipo de publicación, envío gratis y Full, visitas, ventas y conversión de los últimos 7 días, calidad (score, nivel y objetivos pendientes al pasar el mouse), competencia en catálogo, estado y el botón Pausar/Activar (pide "inventario","modificar", confirma antes de pausar y avisa con un aviso; si Mercado Libre está revisando la publicación muestra su mensaje tal cual). La fila se expande con «Desglose (próximamente)».
+
+  **Cómo carga**: primero la lista base (`items/search` + multiget de 20). Visitas, promoción, calidad y competencia se piden después, solo para la página visible, con 4 llamadas en paralelo como máximo por métrica y reintento ante 429; si una falla, esa celda dice «No disponible» y la fila sigue. Las ventas se leen primero de la base (`pedido_items` + `pedidos_finanzas`, sin canceladas) con una sola consulta por cuenta; solo si la cuenta no tiene ventas sincronizadas se usa `GET /orders/search`. Visitas nunca se estiman: con 0 visitas la conversión es «—».
+
+  **Multi-país**: moneda, idioma y sitio salen de la cuenta (`formatearMoneda`, `formatearNumero`, `obtenerSitioDeCuenta`); hay una prueba que falla si aparece un sitio, moneda o idioma fijo en los archivos nuevos.
+
+  **Código**: funciones nuevas en `lib/ml/cliente.ts` (`listarItemsVendedorMl`, `leerItemsListadoMl`, `leerPrecioPromocionMl`, `leerVisitasItemMl`, `leerCalidadItemMl` —ruta `/item/…/performance`—, `leerPriceToWinMl`, `buscarOrdenesVendedorMl`); cálculos puros reutilizables en `lib/ml/optimizacion.ts` (conversión, objetivos pendientes, competencia, ventas por ítem en un rango cualquiera) para la página de detalle de la Parte 2; carga de datos en `lib/ml/optimizacion-datos.ts`.
+
+  Sin migraciones ni variables nuevas. `extension/` y `db/schema.ts` sin tocar. Fuera de alcance (Partes 2 y 3): editar precio/fotos/título y el desglose con competidores.
+
+  Por verificar en staging: la búsqueda por título usa el parámetro `q` de `users/{id}/items/search` (la de SKU usa `seller_sku`, igual que Importar por SKU); la lectura de `performance` y `price_to_win` es defensiva, pero conviene mirar una cuenta real.

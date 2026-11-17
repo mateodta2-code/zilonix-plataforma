@@ -12,6 +12,7 @@ export type ClaveIcono =
   | "inventario"
   | "bodegas"
   | "investigacion"
+  | "optimizacion"
   | "publicar"
   | "finanzas"
   | "publicidad"

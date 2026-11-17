@@ -1644,3 +1644,190 @@ export async function obtenerEtiquetaPdfMl(shipmentIdsExternos: string[], token:
   const ids = shipmentIdsExternos.map((id) => exigirId(id, PATRON_ID_ENVIO, "shipmentId"));
   return pedirBinarioMl("/shipment_labels", token, `?shipment_ids=${ids.join(",")}&response_type=pdf`);
 }
+
+// ---------- Módulo Optimización, Parte 1 (listado + pausar/activar) ----------
+//
+// Solo endpoints DOCUMENTADOS de Mercado Libre; cada función valida sus
+// ids con exigirId() antes de armar la ruta (nunca llega un id mal
+// formado a la API). Todas usan pedirLecturaMl: 401/403/5xx/429 lanzan
+// sus errores tipados, y un 4xx "normal" (404 sin dato) vuelve como
+// null para que el llamador muestre "No disponible" sin romper la fila.
+
+const PATRON_SITE_ID = /^[A-Z]{3}$/;
+
+function textoONull(valor: unknown): string | null {
+  return typeof valor === "string" && valor.trim() ? valor : null;
+}
+
+export type EstadoListadoMl = "active" | "paused";
+export type PaginaItemsVendedorMl = { ids: string[]; total: number };
+
+// GET /users/{id}/items/search?status=active|paused&offset&limit —
+// hermana de listarItemsActivosMl (que sigue igual para sus llamadores
+// de Promociones). `sku` usa seller_sku (mismo parámetro que ya usa
+// buscarItemsPorSkuMl); `titulo` usa `q`.
+export async function listarItemsVendedorMl(
+  cuentaIdExterna: string,
+  token: string,
+  opciones: { estado: EstadoListadoMl; offset: number; limite?: number; sku?: string; titulo?: string }
+): Promise<PaginaItemsVendedorMl> {
+  exigirId(cuentaIdExterna, PATRON_ID_VENDEDOR, "cuentaIdExterna");
+  const params = new URLSearchParams({
+    status: opciones.estado,
+    offset: String(Math.max(0, Math.trunc(opciones.offset))),
+    limit: String(Math.min(50, Math.max(1, Math.trunc(opciones.limite ?? 50)))),
+  });
+  if (opciones.sku) params.set("seller_sku", opciones.sku);
+  if (opciones.titulo) params.set("q", opciones.titulo);
+  const resp = await pedirLecturaMl<{ results?: unknown[]; paging?: { total?: unknown } }>(
+    `/users/${encodeURIComponent(cuentaIdExterna)}/items/search`,
+    token,
+    { query: `?${params.toString()}` }
+  );
+  if (!resp.ok) throw new MlRespuestaInesperadaError(resp.status, "listar las publicaciones del vendedor");
+  const ids = Array.isArray(resp.data.results) ? resp.data.results.filter((r): r is string => typeof r === "string") : [];
+  const total = typeof resp.data.paging?.total === "number" ? resp.data.paging.total : ids.length;
+  return { ids, total };
+}
+
+export type ItemListadoMl = {
+  itemId: string;
+  // seller_id de la publicación: el multiget acepta ids de CUALQUIER
+  // vendedor, así que el llamador descarta los que no son de la cuenta.
+  vendedorId: string | null;
+  titulo: string | null;
+  precio: number | null;
+  thumbnail: string | null;
+  permalink: string | null;
+  status: string | null;
+  subStatus: string | null;
+  listingTypeId: string | null;
+  envioGratis: boolean | null;
+  esFull: boolean;
+  esCatalogo: boolean;
+  sku: string | null;
+};
+
+export const MAX_IDS_MULTIGET_ML = 20;
+
+// GET /items?ids=ID1,...,ID20&attributes=... (multiget, máximo 20 por
+// llamada). Cada elemento viene como {code, body}; los que no son 200
+// se omiten (la fila queda sin detalle, nunca se inventa).
+export async function leerItemsListadoMl(itemIds: string[], token: string): Promise<ItemListadoMl[]> {
+  if (itemIds.length === 0) return [];
+  if (itemIds.length > MAX_IDS_MULTIGET_ML) throw new Error(`Máximo ${MAX_IDS_MULTIGET_ML} ids por llamada — no se llamó a Mercado Libre.`);
+  const ids = itemIds.map((id) => exigirId(id, PATRON_ID_PRODUCTO_O_ITEM, "itemId"));
+  const atributos = "id,seller_id,title,price,thumbnail,secure_thumbnail,permalink,status,sub_status,listing_type_id,shipping,catalog_listing,seller_custom_field,attributes";
+  const resp = await pedirLecturaMl<unknown>("/items", token, { query: `?ids=${ids.join(",")}&attributes=${atributos}` });
+  if (!resp.ok) throw new MlRespuestaInesperadaError(resp.status, "leer varias publicaciones");
+  if (!Array.isArray(resp.data)) return [];
+  const resultado: ItemListadoMl[] = [];
+  for (const elemento of resp.data) {
+    if (!elemento || typeof elemento !== "object") continue;
+    const { code, body } = elemento as { code?: unknown; body?: unknown };
+    if (code !== 200 || !body || typeof body !== "object") continue;
+    const item = body as Record<string, unknown>;
+    const itemId = textoONull(item.id);
+    if (!itemId || !PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) continue;
+    const envio = item.shipping && typeof item.shipping === "object" ? (item.shipping as { free_shipping?: unknown; logistic_type?: unknown }) : null;
+    // Mismo criterio de SKU que Promociones: el atributo SELLER_SKU
+    // manda sobre seller_custom_field (ver skuDeAtributos).
+    const sku = skuDeAtributos(item.attributes) ?? textoONull(item.seller_custom_field)?.trim() ?? null;
+    resultado.push({
+      itemId,
+      vendedorId: typeof item.seller_id === "number" || typeof item.seller_id === "string" ? String(item.seller_id) : null,
+      titulo: textoONull(item.title),
+      precio: numeroONull(item.price),
+      thumbnail: textoONull(item.secure_thumbnail) ?? textoONull(item.thumbnail),
+      permalink: textoONull(item.permalink),
+      status: textoONull(item.status),
+      subStatus: Array.isArray(item.sub_status) ? textoONull(item.sub_status[0]) : textoONull(item.sub_status),
+      listingTypeId: textoONull(item.listing_type_id),
+      envioGratis: typeof envio?.free_shipping === "boolean" ? envio.free_shipping : null,
+      esFull: envio?.logistic_type === "fulfillment",
+      esCatalogo: item.catalog_listing === true,
+      sku,
+    });
+  }
+  return resultado;
+}
+
+export type PrecioPromocionMl = { monto: number | null; regular: number | null };
+
+// GET /items/{id}/sale_price?context=channel_marketplace — precio con
+// promoción (amount) frente al regular (regular_amount). null si el
+// ítem no devuelve dato (4xx).
+export async function leerPrecioPromocionMl(itemId: string, token: string): Promise<PrecioPromocionMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const resp = await pedirLecturaMl<{ amount?: unknown; regular_amount?: unknown }>(`/items/${encodeURIComponent(itemId)}/sale_price`, token, {
+    query: "?context=channel_marketplace",
+  });
+  if (!resp.ok) return null;
+  return { monto: numeroONull(resp.data.amount), regular: numeroONull(resp.data.regular_amount) };
+}
+
+// GET /items/{id}/visits/time_window?last=N&unit=day — visitas totales
+// del ítem en los últimos N días (una sola cifra, nunca estimada).
+export async function leerVisitasItemMl(itemId: string, token: string, dias = 7): Promise<number | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const ultimos = Math.min(150, Math.max(1, Math.trunc(dias)));
+  const resp = await pedirLecturaMl<{ total_visits?: unknown; results?: unknown }>(`/items/${encodeURIComponent(itemId)}/visits/time_window`, token, {
+    query: `?last=${ultimos}&unit=day`,
+  });
+  if (!resp.ok) return null;
+  const total = numeroONull(resp.data.total_visits);
+  if (total != null) return total;
+  if (!Array.isArray(resp.data.results)) return null;
+  let suma = 0;
+  for (const dia of resp.data.results) {
+    const valor = dia && typeof dia === "object" ? numeroONull((dia as { total?: unknown }).total) : null;
+    if (valor == null) return null;
+    suma += valor;
+  }
+  return suma;
+}
+
+// GET /item/{id}/performance (OJO: /item/ en singular) — calidad de la
+// publicación: score, level_wording y buckets → variables → rules. Se
+// devuelve crudo (unknown); lib/ml/optimizacion.ts lo lee de forma
+// defensiva. La vieja /items/{id}/health está descontinuada: no se usa.
+export async function leerCalidadItemMl(itemId: string, token: string): Promise<unknown | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const resp = await pedirLecturaMl<unknown>(`/item/${encodeURIComponent(itemId)}/performance`, token);
+  return resp.ok ? resp.data : null;
+}
+
+// GET /items/{id}/price_to_win?siteId=..&version=v2 — SOLO ítems de
+// catálogo (para los demás da 4xx: el llamador no lo invoca). El siteId
+// sale de la cuenta (obtenerSitioDeCuenta), nunca fijo.
+export async function leerPriceToWinMl(itemId: string, siteId: string, token: string): Promise<unknown | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  exigirId(siteId, PATRON_SITE_ID, "siteId");
+  const resp = await pedirLecturaMl<unknown>(`/items/${encodeURIComponent(itemId)}/price_to_win`, token, { query: `?siteId=${siteId}&version=v2` });
+  return resp.ok ? resp.data : null;
+}
+
+// GET /orders/search?seller=..&order.date_created.from/to — UNA página
+// de órdenes del vendedor (respaldo cuando la cuenta no tiene ventas
+// sincronizadas en la base). Devuelve las órdenes crudas y el total.
+export async function buscarOrdenesVendedorMl(
+  cuentaIdExterna: string,
+  token: string,
+  rango: { desde: Date; hasta: Date },
+  offset: number,
+  limite = 50
+): Promise<{ ordenes: unknown[]; total: number }> {
+  exigirId(cuentaIdExterna, PATRON_ID_VENDEDOR, "cuentaIdExterna");
+  const params = new URLSearchParams({
+    seller: cuentaIdExterna,
+    "order.date_created.from": rango.desde.toISOString(),
+    "order.date_created.to": rango.hasta.toISOString(),
+    offset: String(Math.max(0, Math.trunc(offset))),
+    limit: String(Math.min(50, Math.max(1, Math.trunc(limite)))),
+  });
+  const resp = await pedirLecturaMl<{ results?: unknown[]; paging?: { total?: unknown } }>("/orders/search", token, { query: `?${params.toString()}` });
+  if (!resp.ok) throw new MlRespuestaInesperadaError(resp.status, "buscar las órdenes del vendedor");
+  const ordenes = Array.isArray(resp.data.results) ? resp.data.results : [];
+  const total = typeof resp.data.paging?.total === "number" ? resp.data.paging.total : ordenes.length;
+  return { ordenes, total };
+}

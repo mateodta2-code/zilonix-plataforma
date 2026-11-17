@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   actualizarItemMl,
+  buscarOrdenesVendedorMl,
+  leerCalidadItemMl,
+  leerItemsListadoMl,
+  leerPrecioPromocionMl,
+  leerPriceToWinMl,
+  leerVisitasItemMl,
+  listarItemsVendedorMl,
   agregarDescripcionItemMl,
   buscarEnSitioMl,
   buscarItemsPorSkuMl,
@@ -1312,5 +1319,136 @@ describe("salirDePromocionMl — rama feat-promociones (SIN CONFIRMAR contra Mer
   it("falla de red: {ok:false, status:0}, nunca lanza", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("red caída"); }));
     await expect(salirDePromocionMl("MCO111", "token", "p1", "DEAL")).resolves.toEqual({ ok: false, status: 0, textoCrudo: "" });
+  });
+});
+
+// ---------- Módulo Optimización, Parte 1 ----------
+describe("lib/ml/cliente — Optimización (listado y métricas)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stub(respuesta: Response | ((url: string) => Response)) {
+    const fn = vi.fn(async (url: string) => (typeof respuesta === "function" ? respuesta(url) : respuesta));
+    vi.stubGlobal("fetch", fn);
+    return fn;
+  }
+
+  it("listarItemsVendedorMl: URL con status/offset/limit y validación del vendedor", async () => {
+    const fn = stub(respuestaJson({ results: ["MCO1", "MCO2"], paging: { total: 7 } }));
+    const r = await listarItemsVendedorMl("123", "tok", { estado: "paused", offset: 50, limite: 50, sku: "AB 1" });
+    expect(r).toEqual({ ids: ["MCO1", "MCO2"], total: 7 });
+    const url = new URL(fn.mock.calls[0][0]);
+    expect(url.pathname).toBe("/users/123/items/search");
+    expect(url.searchParams.get("status")).toBe("paused");
+    expect(url.searchParams.get("offset")).toBe("50");
+    expect(url.searchParams.get("seller_sku")).toBe("AB 1");
+    await expect(listarItemsVendedorMl("12/../3", "tok", { estado: "active", offset: 0 })).rejects.toThrow(/inválido/);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("listarItemsVendedorMl: 4xx → error con el status; 429 → LimiteMercadoLibreError", async () => {
+    stub(respuestaJson({}, 400));
+    await expect(listarItemsVendedorMl("123", "tok", { estado: "active", offset: 0 })).rejects.toBeInstanceOf(MlRespuestaInesperadaError);
+    stub(respuestaJson({}, 429));
+    await expect(listarItemsVendedorMl("123", "tok", { estado: "active", offset: 0 })).rejects.toBeInstanceOf(LimiteMercadoLibreError);
+  });
+
+  it("leerItemsListadoMl: multiget, normaliza y omite lo que no es 200", async () => {
+    const fn = stub(
+      respuestaJson([
+        {
+          code: 200,
+          body: {
+            id: "MCO1",
+            seller_id: 123,
+            title: "Taza",
+            price: 100,
+            thumbnail: "http://x/t.jpg",
+            permalink: "https://x/p",
+            status: "active",
+            sub_status: ["out_of_stock"],
+            listing_type_id: "gold_special",
+            shipping: { free_shipping: true, logistic_type: "fulfillment" },
+            catalog_listing: true,
+            seller_custom_field: "VIEJO",
+            attributes: [{ id: "SELLER_SKU", value_name: " SKU-1 " }],
+          },
+        },
+        { code: 404, body: { id: "MCO2" } },
+      ])
+    );
+    const r = await leerItemsListadoMl(["MCO1", "MCO2"], "tok");
+    expect(new URL(fn.mock.calls[0][0]).searchParams.get("ids")).toBe("MCO1,MCO2");
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ itemId: "MCO1", vendedorId: "123", sku: "SKU-1", subStatus: "out_of_stock", envioGratis: true, esFull: true, esCatalogo: true, precio: 100 });
+  });
+
+  it("leerItemsListadoMl: más de 20 ids o un id inválido no llaman a la API", async () => {
+    const fn = stub(respuestaJson([]));
+    await expect(leerItemsListadoMl(Array.from({ length: 21 }, (_, i) => `MCO${i}`), "tok")).rejects.toThrow(/Máximo 20/);
+    await expect(leerItemsListadoMl(["MCO1,../x"], "tok")).rejects.toThrow(/inválido/);
+    expect(fn).not.toHaveBeenCalled();
+    stub(respuestaJson({ no: "es lista" }));
+    expect(await leerItemsListadoMl(["MCO1"], "tok")).toEqual([]);
+  });
+
+  it("leerPrecioPromocionMl: URL con context y lectura de amount/regular_amount; 404 → null", async () => {
+    const fn = stub(respuestaJson({ amount: 80, regular_amount: 100 }));
+    expect(await leerPrecioPromocionMl("MCO1", "tok")).toEqual({ monto: 80, regular: 100 });
+    const url = new URL(fn.mock.calls[0][0]);
+    expect(url.pathname).toBe("/items/MCO1/sale_price");
+    expect(url.searchParams.get("context")).toBe("channel_marketplace");
+    stub(respuestaJson({}, 404));
+    expect(await leerPrecioPromocionMl("MCO1", "tok")).toBeNull();
+    await expect(leerPrecioPromocionMl("../x", "tok")).rejects.toThrow(/inválido/);
+  });
+
+  it("leerVisitasItemMl: time_window last=7&unit=day, total_visits o suma de días", async () => {
+    const fn = stub(respuestaJson({ total_visits: 42 }));
+    expect(await leerVisitasItemMl("MCO1", "tok")).toBe(42);
+    const url = new URL(fn.mock.calls[0][0]);
+    expect(url.pathname).toBe("/items/MCO1/visits/time_window");
+    expect(url.searchParams.get("last")).toBe("7");
+    expect(url.searchParams.get("unit")).toBe("day");
+    stub(respuestaJson({ results: [{ total: 2 }, { total: 3 }] }));
+    expect(await leerVisitasItemMl("MCO1", "tok")).toBe(5);
+    stub(respuestaJson({ results: [{ total: "x" }] }));
+    expect(await leerVisitasItemMl("MCO1", "tok")).toBeNull();
+    stub(respuestaJson({}, 403));
+    await expect(leerVisitasItemMl("MCO1", "tok")).rejects.toBeInstanceOf(MlSinPermisoAppError);
+  });
+
+  it("leerCalidadItemMl: usa /item/ en singular (no la /health descontinuada)", async () => {
+    const fn = stub(respuestaJson({ score: 80 }));
+    expect(await leerCalidadItemMl("MCO1", "tok")).toEqual({ score: 80 });
+    expect(new URL(fn.mock.calls[0][0]).pathname).toBe("/item/MCO1/performance");
+    stub(respuestaJson({}, 404));
+    expect(await leerCalidadItemMl("MCO1", "tok")).toBeNull();
+  });
+
+  it("leerPriceToWinMl: siteId y version=v2, ambos validados", async () => {
+    const fn = stub(respuestaJson({ status: "winning" }));
+    expect(await leerPriceToWinMl("MCO1", "MLM", "tok")).toEqual({ status: "winning" });
+    const url = new URL(fn.mock.calls[0][0]);
+    expect(url.pathname).toBe("/items/MCO1/price_to_win");
+    expect(url.searchParams.get("siteId")).toBe("MLM");
+    expect(url.searchParams.get("version")).toBe("v2");
+    await expect(leerPriceToWinMl("MCO1", "mlm?x=1", "tok")).rejects.toThrow(/inválido/);
+    stub(respuestaJson({}, 400));
+    expect(await leerPriceToWinMl("MCO1", "MLM", "tok")).toBeNull();
+  });
+
+  it("buscarOrdenesVendedorMl: fechas, vendedor validado y respuesta inesperada", async () => {
+    const fn = stub(respuestaJson({ results: [{ id: 1 }], paging: { total: 1 } }));
+    const r = await buscarOrdenesVendedorMl("123", "tok", { desde: new Date("2026-11-10T00:00:00Z"), hasta: new Date("2026-11-17T00:00:00Z") }, 0);
+    expect(r).toEqual({ ordenes: [{ id: 1 }], total: 1 });
+    const url = new URL(fn.mock.calls[0][0]);
+    expect(url.pathname).toBe("/orders/search");
+    expect(url.searchParams.get("seller")).toBe("123");
+    expect(url.searchParams.get("order.date_created.from")).toBe("2026-11-10T00:00:00.000Z");
+    await expect(buscarOrdenesVendedorMl("x", "tok", { desde: new Date(), hasta: new Date() }, 0)).rejects.toThrow(/inválido/);
+    stub(respuestaJson({}, 400));
+    await expect(buscarOrdenesVendedorMl("123", "tok", { desde: new Date(), hasta: new Date() }, 0)).rejects.toBeInstanceOf(MlRespuestaInesperadaError);
   });
 });

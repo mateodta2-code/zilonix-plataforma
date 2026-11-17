@@ -109,6 +109,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/investigacion/seguimiento/page.tsx",
   "app/panel/investigacion/seguimiento/actions.ts",
   "app/panel/investigacion/seguimiento/[id]/page.tsx",
+  // Módulo Optimización, Parte 1 — la página pide "inventario","consultar";
+  // la Server Action de pausar/activar pide "inventario","modificar".
+  "app/panel/optimizacion/page.tsx",
+  "app/panel/optimizacion/actions.ts",
   "app/api/ml/despachos/etiquetas/route.ts",
   "app/panel/publicar/page.tsx",
   "app/panel/publicar/actions.ts",
