@@ -7,6 +7,7 @@ export type ClaveIcono =
   | "inicio"
   | "pedidos"
   | "despachos"
+  | "preguntas"
   | "sku"
   | "productos"
   | "inventario"

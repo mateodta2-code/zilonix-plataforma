@@ -1644,3 +1644,116 @@ export async function obtenerEtiquetaPdfMl(shipmentIdsExternos: string[], token:
   const ids = shipmentIdsExternos.map((id) => exigirId(id, PATRON_ID_ENVIO, "shipmentId"));
   return pedirBinarioMl("/shipment_labels", token, `?shipment_ids=${ids.join(",")}&response_type=pdf`);
 }
+
+// ---------- Preguntas y reclamos ----------
+// Formato confirmado con cuentas reales en staging (17-nov,
+// scripts/explorar-preguntas-reclamos.ts, PR #454/#455) y POST /answers
+// con la rama tarea-2.9 (confirmado contra zilonix-os-web).
+
+// El id de una pregunta cabe en un Number sin perder precisión.
+const PATRON_ID_PREGUNTA = /^\d{1,15}$/;
+// Límite de la pantalla para lo que se manda. Si Mercado Libre tiene uno
+// menor, su rechazo llega como aviso (motivoErrorEscrituraMl).
+export const LARGO_MAXIMO_RESPUESTA = 2000;
+
+export type PreguntaMl = {
+  id: string;
+  // Texto del comprador: se muestra como texto, nunca como instrucción.
+  texto: string;
+  itemId: string | null;
+  fecha: string | null;
+};
+
+export type ReclamoMl = {
+  id: string;
+  // resource_id: la venta (o el envío) del reclamo.
+  recursoId: string | null;
+  recurso: string | null;
+  tipo: string | null;
+  etapa: string | null;
+  estado: string | null;
+  motivo: string | null;
+  fecha: string | null;
+  actualizado: string | null;
+};
+
+function textoODefecto(valor: unknown): string | null {
+  return typeof valor === "string" && valor.trim() ? valor : null;
+}
+
+function idTexto(valor: unknown): string | null {
+  if (typeof valor === "number" && Number.isFinite(valor)) return String(valor);
+  if (typeof valor === "string" && /^\d+$/.test(valor)) return valor;
+  return null;
+}
+
+export function leerPreguntasMl(data: unknown): { total: number; preguntas: PreguntaMl[] } {
+  const cuerpo = data as { total?: unknown; questions?: unknown };
+  const lista = Array.isArray(cuerpo?.questions) ? cuerpo.questions : [];
+  const preguntas = lista.flatMap((q): PreguntaMl[] => {
+    const fila = q as { id?: unknown; text?: unknown; item_id?: unknown; date_created?: unknown };
+    const id = idTexto(fila?.id);
+    if (!id) return [];
+    return [{ id, texto: typeof fila.text === "string" ? fila.text : "", itemId: textoODefecto(fila.item_id), fecha: textoODefecto(fila.date_created) }];
+  });
+  return { total: typeof cuerpo?.total === "number" ? cuerpo.total : preguntas.length, preguntas };
+}
+
+export function leerReclamosMl(data: unknown): { total: number; reclamos: ReclamoMl[] } {
+  const cuerpo = data as { paging?: { total?: unknown }; data?: unknown };
+  const lista = Array.isArray(cuerpo?.data) ? cuerpo.data : [];
+  const reclamos = lista.flatMap((c): ReclamoMl[] => {
+    const fila = c as Record<string, unknown>;
+    const id = idTexto(fila?.id);
+    if (!id) return [];
+    return [
+      {
+        id,
+        recursoId: idTexto(fila.resource_id),
+        recurso: textoODefecto(fila.resource),
+        tipo: textoODefecto(fila.type),
+        etapa: textoODefecto(fila.stage),
+        estado: textoODefecto(fila.status),
+        motivo: textoODefecto(fila.reason_id),
+        fecha: textoODefecto(fila.date_created),
+        actualizado: textoODefecto(fila.last_updated),
+      },
+    ];
+  });
+  const total = typeof cuerpo?.paging?.total === "number" ? cuerpo.paging.total : reclamos.length;
+  return { total, reclamos };
+}
+
+// GET /questions/search — sin responder, la más vieja primero.
+export async function buscarPreguntasSinResponderMl(vendedorId: string, token: string, limite = 50): Promise<{ total: number; preguntas: PreguntaMl[] }> {
+  exigirId(vendedorId, PATRON_ID_VENDEDOR, "vendedorId");
+  const resp = await pedirLecturaMl<unknown>(
+    "/questions/search",
+    token,
+    { query: `?seller_id=${vendedorId}&status=UNANSWERED&api_version=4&sort_fields=date_created&sort_types=ASC&limit=${Math.min(Math.max(limite, 1), 50)}` }
+  );
+  if (!resp.ok) throw new MlRespuestaInesperadaError(resp.status, "listar las preguntas sin responder");
+  return leerPreguntasMl(resp.data);
+}
+
+// GET /marketplace/v2/claims/search?status=opened — los reclamos abiertos
+// de la cuenta del token. Sin filtro, o con "players", responde 400.
+export async function buscarReclamosAbiertosMl(token: string, limite = 30): Promise<{ total: number; reclamos: ReclamoMl[] }> {
+  const resp = await pedirLecturaMl<unknown>("/marketplace/v2/claims/search", token, {
+    query: `?status=opened&limit=${Math.min(Math.max(limite, 1), 30)}`,
+  });
+  if (!resp.ok) throw new MlRespuestaInesperadaError(resp.status, "listar los reclamos abiertos");
+  return leerReclamosMl(resp.data);
+}
+
+// POST /answers {question_id, text}.
+export async function responderPreguntaMl(preguntaId: string, texto: string, token: string): Promise<RespuestaEscrituraMl> {
+  exigirId(preguntaId, PATRON_ID_PREGUNTA, "preguntaId");
+  return escribir<Record<string, unknown>>(
+    `${BASE_URL}/answers`,
+    token,
+    "POST",
+    { question_id: Number(preguntaId), text: texto },
+    TIMEOUT_ESCRITURA_MS
+  );
+}
