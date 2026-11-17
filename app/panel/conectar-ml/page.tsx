@@ -18,6 +18,7 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
+import { RefrescarImportacion } from "@/components/panel/RefrescarImportacion";
 import styles from "./page.module.css";
 
 // Bug real: antes esta pantalla mostraba `searchParams.error` tal
@@ -124,7 +125,7 @@ export default async function ConectarMlPage({
 
   return (
     <>
-      {hayImportacionEnCurso && <meta httpEquiv="refresh" content="5" />}
+      {hayImportacionEnCurso && <RefrescarImportacion />}
       <EncabezadoPagina titulo="Conectar marketplaces" />
 
       {searchParams.conectado && <div className={styles.avisoExito}>Cuenta conectada.</div>}
