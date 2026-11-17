@@ -39,6 +39,8 @@
      se redefine adentro de ninguna tarjeta, así que .zx-control/
      .secundario siguen leyendo bien sin importar qué los envuelva. */
   --texto-superficie-2: #f2f4f8;
+  --texto-suave-superficie-2: #c0c0c0;
+  --plata-etiqueta-superficie-2: #c0c0c0;
   /* Plata, no gris azulado: sobre el azul del fondo #8a909c bajaba de
      4.5:1. #C0C0C0 mide 11.54:1 sobre negro y 5.26:1 sobre el azul más
      vivo de la variante intenso. */
@@ -341,6 +343,8 @@
   --texto: #f2f4f8;
   /* Issue #186 — mismo motivo que el bloque :root de arriba. */
   --texto-superficie-2: #f2f4f8;
+  --texto-suave-superficie-2: #c0c0c0;
+  --plata-etiqueta-superficie-2: #c0c0c0;
   --texto-suave: #c0c0c0;
   --plata: #c0c0c0;
   --plata-2: var(--plata-medio);
@@ -434,6 +438,11 @@
      nunca hereden el --texto de zona oscura que Tarjeta/.filtros
      redefinen localmente. */
   --texto-superficie-2: #000000;
+  /* Lo mismo para la letra suave y las etiquetas de un recuadro que
+     pinta --superficie-2 dentro de una Tarjeta (Publicar, por cuenta):
+     Tarjeta las pasa a zona oscura y sobre #ececee no se leían. */
+  --texto-suave-superficie-2: #5b6270;
+  --plata-etiqueta-superficie-2: #686868;
   /* Revertido a su valor original (fix-ui-claro-como-oscuro): las dos
      correcciones anteriores lo habían oscurecido a #333843 para
      "desbloquear" cuánto azul podía llevar el degradado, porque en

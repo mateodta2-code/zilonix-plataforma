@@ -20,11 +20,11 @@ const ETIQUETA_ESTADO: Record<string, string> = {
 function ResultadoCuenta({ resultado, nickname }: { resultado: ResultadoPublicacionCuenta; nickname: string }) {
   if ("familia" in resultado) {
     return (
-      <li style={{ padding: "10px 0", borderBottom: "1px solid #eee", fontSize: 14 }}>
+      <li style={{ padding: "10px 0", borderBottom: "1px solid var(--borde)", fontSize: 14 }}>
         <strong>{nickname}</strong> — familia &quot;{resultado.familia.familyName}&quot; (esta categoría no admite variantes clásicas)
         <ul style={{ marginTop: 6 }}>
           {resultado.familia.items.map((item, i) => (
-            <li key={i} style={{ fontSize: 13, opacity: item.ok ? 1 : 0.8, color: item.ok ? undefined : "#b00020" }}>
+            <li key={i} style={{ fontSize: 13, opacity: item.ok ? 1 : 0.8, color: item.ok ? undefined : "var(--peligro-texto)" }}>
               {JSON.stringify(item.valores)} {item.sku ? `(SKU ${item.sku})` : ""} —{" "}
               {item.ok ? (
                 <a href={item.permalink} target="_blank" rel="noreferrer">
@@ -41,7 +41,7 @@ function ResultadoCuenta({ resultado, nickname }: { resultado: ResultadoPublicac
   }
   if (resultado.ok) {
     return (
-      <li style={{ padding: "10px 0", borderBottom: "1px solid #eee", fontSize: 14 }}>
+      <li style={{ padding: "10px 0", borderBottom: "1px solid var(--borde)", fontSize: 14 }}>
         <strong>{nickname}</strong> —{" "}
         <a href={resultado.permalink} target="_blank" rel="noreferrer">
           publicado ({resultado.status})
@@ -66,8 +66,8 @@ function ResultadoCuenta({ resultado, nickname }: { resultado: ResultadoPublicac
     );
   }
   return (
-    <li style={{ padding: "10px 0", borderBottom: "1px solid #eee", fontSize: 14 }}>
-      <strong>{nickname}</strong> — <span style={{ color: "#b00020" }}>{resultado.error}</span>
+    <li style={{ padding: "10px 0", borderBottom: "1px solid var(--borde)", fontSize: 14 }}>
+      <strong>{nickname}</strong> — <span style={{ color: "var(--peligro-texto)" }}>{resultado.error}</span>
       {resultado.bodyEnviado !== undefined && (
         <details style={{ marginTop: 6, fontSize: 12 }}>
           <summary>Ver atributos enviados (diagnóstico)</summary>

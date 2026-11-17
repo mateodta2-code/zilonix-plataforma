@@ -1,0 +1,2 @@
+- En tema claro, en **Publicar**, los recuadros de cada cuenta (título, descripción y portada) ya se leen: las etiquetas eran plateadas sobre fondo claro. Tokens nuevos `--texto-suave-superficie-2` y `--plata-etiqueta-superficie-2`, mismo criterio que `--texto-superficie-2` (#186).
+- En **Publicar**, el árbol de categorías y la búsqueda de categoría ya se leen en los dos temas: los nombres salían en negro sobre la tarjeta oscura y las líneas eran blancas fijas. Los errores y el asterisco de obligatorio usan `--peligro-texto` en vez de un rojo fijo.
