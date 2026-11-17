@@ -21,6 +21,12 @@
     var(--degradado-plata-borde) border-box;
   box-shadow: var(--filete-marca-arriba-abajo);
   color: var(--texto-superficie-2);
+  /* Pinta su propio --superficie-2: el texto, las etiquetas (Campo) y
+     la letra suave usan los colores de ESE fondo, no los de zona
+     oscura que redefine la Tarjeta que lo rodea (tema claro). */
+  --texto: var(--texto-superficie-2);
+  --texto-suave: var(--texto-suave-superficie-2);
+  --plata-etiqueta: var(--plata-etiqueta-superficie-2);
 }
 
 .miniatura {

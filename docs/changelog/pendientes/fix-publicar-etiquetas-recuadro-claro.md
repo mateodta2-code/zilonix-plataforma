@@ -1,0 +1,1 @@
+- En tema claro, en **Publicar**, los recuadros de cada cuenta (título, descripción y portada) ya se leen: las etiquetas eran plateadas sobre fondo claro. Tokens nuevos `--texto-suave-superficie-2` y `--plata-etiqueta-superficie-2`, mismo criterio que `--texto-superficie-2` (#186).
