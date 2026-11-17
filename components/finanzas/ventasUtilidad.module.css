@@ -43,7 +43,7 @@
   padding: 10px 14px;
   border-radius: var(--radio-boton);
   font-size: 13.5px;
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
   border: 1px solid var(--peligro, #c0392b);
   background: color-mix(in srgb, var(--peligro, #c0392b) 18%, transparent);
 }
@@ -161,7 +161,7 @@
   padding: 10px 14px;
   border-radius: var(--radio-boton);
   font-size: 13.5px;
-  color: var(--texto);
+  color: var(--texto-zona-oscura);
   border: 1px solid var(--exito, #2e7d32);
   background: color-mix(in srgb, var(--exito, #2e7d32) 18%, transparent);
 }

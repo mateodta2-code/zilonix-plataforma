@@ -31,15 +31,3 @@
 .accion {
   flex-shrink: 0;
 }
-
-/* 17-nov: si cae en la parte blanca del degradado (tema claro), los
-   colores normales del tema (ver EncabezadoPagina.tsx y zonaFondo.ts). */
-:root[data-tema="claro"] .titulo[data-zona="clara"] {
-  background: var(--degradado-plata-texto);
-  -webkit-background-clip: text;
-  background-clip: text;
-}
-
-:root[data-tema="claro"] .descripcion[data-zona="clara"] {
-  color: var(--texto-suave);
-}
