@@ -299,49 +299,79 @@ export function rentabilidadCampana(entrada: {
   return { margenPostAds, estado };
 }
 
-// Semáforo de productos (16-nov). Ganancia real por unidad = precio de
-// venta actual (con promoción, /items/{id}/sale_price) − costo −
-// empaque − envío a agencia − comisión de Mercado Libre − envío de
-// Mercado Libre (solo si lo paga el vendedor). Margen = ganancia /
-// precio. No incluye la publicidad: eso lo mide el ROAS.
+// Semáforo de productos (16-nov) y pestaña "Ganancia real por producto"
+// (#256). Ganancia por unidad = precio vigente (con promoción,
+// /items/{id}/sale_price) − costo total − comisión de Mercado Libre −
+// envío de Mercado Libre (solo si lo paga el vendedor). Costo total =
+// costo + empaque + envío a agencia, de la tabla de costos de Finanzas.
+// Margen = ganancia / precio. No incluye la publicidad: eso lo mide el
+// ROAS. Un dato que falta nunca cuenta como $0.
 export type MargenProducto =
-  | { tipo: "ok"; ganancia: string; margen: string }
-  // El SKU no está en la tabla de costos de Finanzas, o no tiene costo.
+  | { tipo: "ok"; costoTotal: string; envio: string; ganancia: string; margen: string }
+  // La publicación no tiene SKU en Mercado Libre: no hay con qué cruzar.
+  | { tipo: "sin_sku" }
+  // Tiene SKU, pero no está en la tabla de costos de Finanzas o no tiene costo.
   | { tipo: "sin_costo" }
-  // Falta el precio, la comisión o el envío de Mercado Libre.
+  // Falta el empaque, el envío a agencia, el precio, la comisión o el envío de ML.
   | { tipo: "sin_datos" };
 
-export function margenRealProducto(entrada: {
-  precio: string | null;
+export type EntradaCostoTotal = {
   costo: string | null;
   empaque: string | null;
   envioAgencia: string | null;
-  comisionMl: string | null;
-  envioMl: string | null;
-  compradorPagaEnvio: boolean | null;
-}): MargenProducto {
-  if (entrada.precio === null || centavos(entrada.precio) <= CERO) return { tipo: "sin_datos" };
+  // Full (logistic_type fulfillment): Mercado Libre despacha, el envío
+  // a agencia vale $0 (#256, Melisa 26-oct; igual que utilidad-venta.ts).
+  full: boolean;
+};
+
+// costo + empaque + envío a agencia, en texto con 2 decimales. null si
+// falta alguno (salvo el envío a agencia en Full).
+export function costoTotalProducto(entrada: EntradaCostoTotal): string | null {
+  if (entrada.costo === null || entrada.empaque === null) return null;
+  if (!entrada.full && entrada.envioAgencia === null) return null;
+  const envioAgencia = entrada.full || entrada.envioAgencia === null ? CERO : centavos(entrada.envioAgencia);
+  return dividir(centavos(entrada.costo) + centavos(entrada.empaque) + envioAgencia, BigInt(100), 2);
+}
+
+// Envío de Mercado Libre que paga el vendedor. "0.00" si lo paga el
+// comprador; null si lo paga el vendedor (o no se sabe) y falta el monto.
+export function envioVendedor(compradorPagaEnvio: boolean | null, envioMl: string | null): string | null {
+  if (compradorPagaEnvio === true) return "0.00";
+  if (envioMl === null) return null;
+  return dividir(centavos(envioMl), BigInt(100), 2);
+}
+
+export function margenRealProducto(
+  entrada: EntradaCostoTotal & {
+    // SKU de la publicación en Mercado Libre. null = la publicación no tiene.
+    sku: string | null;
+    precio: string | null;
+    comisionMl: string | null;
+    envioMl: string | null;
+    compradorPagaEnvio: boolean | null;
+  }
+): MargenProducto {
+  if (entrada.sku === null) return { tipo: "sin_sku" };
   if (entrada.costo === null) return { tipo: "sin_costo" };
-  if (entrada.comisionMl === null) return { tipo: "sin_datos" };
-  // Si lo paga el comprador, al vendedor no le cuesta. Si lo paga el
-  // vendedor (o no se sabe quién) hace falta el monto.
-  let envio: bigint;
-  if (entrada.compradorPagaEnvio === true) envio = CERO;
-  else if (entrada.envioMl !== null) envio = centavos(entrada.envioMl);
-  else return { tipo: "sin_datos" };
-  // Empaque y envío a agencia vacíos = no cargados: cuentan como $0
-  // (en Finanzas, 0 ya es un $0 real).
-  const ganancia =
-    centavos(entrada.precio) -
-    centavos(entrada.costo) -
-    (entrada.empaque === null ? CERO : centavos(entrada.empaque)) -
-    (entrada.envioAgencia === null ? CERO : centavos(entrada.envioAgencia)) -
-    centavos(entrada.comisionMl) -
-    envio;
-  const margen = dividir(ganancia, centavos(entrada.precio), ESCALA);
+  if (entrada.precio === null || centavos(entrada.precio) <= CERO) return { tipo: "sin_datos" };
+  const costoTotal = costoTotalProducto(entrada);
+  const envio = envioVendedor(entrada.compradorPagaEnvio, entrada.envioMl);
+  if (costoTotal === null || entrada.comisionMl === null || envio === null) return { tipo: "sin_datos" };
+  const precio = centavos(entrada.precio);
+  const ganancia = precio - centavos(costoTotal) - centavos(entrada.comisionMl) - centavos(envio);
+  const margen = dividir(ganancia, precio, ESCALA);
   const texto = dividir(ganancia, BigInt(100), 2);
   if (margen === null || texto === null) return { tipo: "sin_datos" };
-  return { tipo: "ok", ganancia: texto, margen };
+  return { tipo: "ok", costoTotal, envio, ganancia: texto, margen };
+}
+
+// Promedio simple de decimales en texto ("12.50", "-0.2000"), con
+// `decimales` en el resultado. null si la lista está vacía.
+export function promedioDecimales(valores: readonly string[], decimales: number): string | null {
+  if (valores.length === 0) return null;
+  const total = valores.reduce((suma, valor) => suma + unidades(valor, decimales), CERO);
+  const promedio = dividir(total, BigInt(valores.length), 0);
+  return promedio === null ? null : dividir(BigInt(promedio), BigInt(10) ** BigInt(decimales), decimales);
 }
 
 export type ColorMargen = "verde" | "amarillo" | "rojo";

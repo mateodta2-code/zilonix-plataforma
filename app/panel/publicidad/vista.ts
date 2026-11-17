@@ -82,6 +82,13 @@ export type AnuncioPintado = {
 
 // Verde desde la meta, amarillo desde la mitad, rojo bajo la mitad.
 export function pintarMargen(margen: MargenProducto, meta: string): Pick<AnuncioPintado, "margen" | "margenTono" | "margenTitulo"> {
+  if (margen.tipo === "sin_sku") {
+    return {
+      margen: "Sin SKU",
+      margenTono: "neutro",
+      margenTitulo: "La publicación no tiene SKU en Mercado Libre: no hay con qué buscar su costo en Finanzas.",
+    };
+  }
   if (margen.tipo === "sin_costo") {
     return {
       margen: "Sin costo",
@@ -93,7 +100,7 @@ export function pintarMargen(margen: MargenProducto, meta: string): Pick<Anuncio
     return {
       margen: "—",
       margenTono: "neutro",
-      margenTitulo: "Falta el precio, la comisión o el envío de Mercado Libre. Se completa en la próxima actualización.",
+      margenTitulo: "Falta un dato: el empaque o el envío a agencia en Finanzas, o el precio, la comisión o el envío de Mercado Libre.",
     };
   }
   const color = semaforoMargen(margen.margen, meta);
