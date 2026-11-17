@@ -1,0 +1,1 @@
+- Script de solo lectura `scripts/explorar-preguntas-reclamos.ts`: confirma con una cuenta real cómo responde Mercado Libre al listar preguntas sin responder y reclamos, antes de construir el módulo. Solo imprime códigos, totales y nombres de campos.
