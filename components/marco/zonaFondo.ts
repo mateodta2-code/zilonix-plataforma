@@ -6,15 +6,15 @@ import { useEffect, type RefObject } from "react";
 // negro arriba y blanco abajo. Altura (px desde arriba de la pantalla)
 // desde la que el texto oscuro lee mejor que el claro, por intensidad de
 // fondo: el gris medio (#777) de cada rampa de --fondo-app-* de claro
-// en app/globals.css (negro hasta 170/190/210px, blanco desde 270/290/310px).
-export const CRUCE_ZONA_CLARA_PX: Record<string, number> = { suave: 217, medio: 237, intenso: 257 };
+// en app/globals.css (negro hasta 130/140/150px, blanco desde 160/170/180px).
+export const CRUCE_ZONA_CLARA_PX: Record<string, number> = { suave: 145, medio: 155, intenso: 165 };
 
 // Marca data-zona ("oscura" o "clara") en los elementos de `selector`
 // dentro de `ref` (o en `ref` mismo si no hay selector), según dónde caen
 // DE VERDAD sobre el degradado. Se recalcula al desplazar cualquier caja
 // de la página, al cambiar el tamaño, el tema o el fondo, y cuando cambia
-// el contenido. En oscuro no se marca nada. Lo usan BarraLateral y
-// Pestanas.
+// el contenido. En oscuro no se marca nada. Lo usan BarraLateral,
+// Pestanas y EncabezadoPagina.
 export function useZonaFondo(ref: RefObject<HTMLElement>, selector: string | null, deps: readonly unknown[]) {
   useEffect(() => {
     const contenedor = ref.current;

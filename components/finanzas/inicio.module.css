@@ -268,7 +268,7 @@
   padding: 10px 14px;
   border-radius: var(--radio-boton);
   font-size: 13.5px;
-  color: var(--texto-zona-oscura);
+  color: var(--texto);
 }
 
 .avisoError {

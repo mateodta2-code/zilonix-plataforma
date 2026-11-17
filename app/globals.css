@@ -581,14 +581,15 @@
       color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
       transparent 25%
     ),
-    /* 16-nov (Santiago): en px, no en % de la pantalla. Antes el gris
-       iba del ~30 % al ~78 % de la altura y todo texto suelto que caía
-       ahí no se leía (ni claro ni oscuro). Ahora: negro hasta 170px
-       (barra superior de 64px + título y descripción de la página),
-       blanco desde 270px. Mismos pasos de gris, en 100px. Los cruces
-       del menú lateral (BarraLateral.tsx, CRUCE_ZONA_CLARA_PX) siguen
-       estos valores. */
-    linear-gradient(180deg, #000000 0px, #000000 170px, #333333 190px, #666666 210px, #999999 230px, #cccccc 250px, #ffffff 270px);
+    /* 16-nov (Santiago): en px, no en % de la pantalla. 17-nov: el
+       negro termina justo debajo del título de la página (barra
+       superior de 64px + 32px de margen + título ≈ 126px) y a 160px ya
+       es blanco: lo primero de cada página (avisos, pestañas, texto
+       suelto) cae sobre blanco con su color normal. El título, su
+       descripción, las pestañas y el menú lateral cambian de color
+       solos según dónde caen (components/marco/zonaFondo.ts, que usa
+       estos mismos cruces). */
+    linear-gradient(180deg, #000000 0px, #000000 130px, #333333 136px, #666666 142px, #999999 148px, #cccccc 154px, #ffffff 160px);
   --fondo-app-medio:
     linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
     linear-gradient(
@@ -599,7 +600,7 @@
       color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
       transparent 50%
     ),
-    linear-gradient(180deg, #000000 0px, #000000 190px, #333333 210px, #666666 230px, #999999 250px, #cccccc 270px, #ffffff 290px);
+    linear-gradient(180deg, #000000 0px, #000000 140px, #333333 146px, #666666 152px, #999999 158px, #cccccc 164px, #ffffff 170px);
   --fondo-app-intenso:
     linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
     radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
@@ -612,7 +613,7 @@
       color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
       transparent 70%
     ),
-    linear-gradient(180deg, #000000 0px, #000000 210px, #333333 230px, #666666 250px, #999999 270px, #cccccc 290px, #ffffff 310px);
+    linear-gradient(180deg, #000000 0px, #000000 150px, #333333 156px, #666666 162px, #999999 168px, #cccccc 174px, #ffffff 180px);
   /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
      arriba: sin atributo data-fondo, gana el suave. */
   --fondo-app: var(--fondo-app-suave);
