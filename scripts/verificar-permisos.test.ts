@@ -102,6 +102,10 @@ const RUTAS_PROTEGIDAS = new Set([
   // despacho no es la acción de "modificar" — eso es Marcar
   // despachado), aunque de paso guarde guia_vista_ts.
   "app/panel/despachos/actions.ts",
+  // Preguntas y reclamos (Refs #51): ver pide ventas.consultar; responder,
+  // ventas.modificar.
+  "app/panel/preguntas/page.tsx",
+  "app/panel/preguntas/actions.ts",
   "app/api/ml/despachos/etiqueta/route.ts",
   "app/panel/investigacion/page.tsx",
   "app/panel/investigacion/actions.ts",

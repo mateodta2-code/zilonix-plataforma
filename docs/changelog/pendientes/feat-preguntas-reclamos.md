@@ -1,0 +1,6 @@
+- **feat-preguntas-reclamos** (Refs #51) — Módulo nuevo **Preguntas y reclamos** en el menú, para responder rápido: Mercado Libre califica el tiempo de respuesta.
+  - **Preguntas:** todas las preguntas sin responder de todas las cuentas, la más vieja primero, con cuánto llevan esperando (verde bajo 1 h, amarillo bajo 12 h, rojo desde 12 h). Junto a cada una, la publicación con precio y stock. Se responde en la misma fila: Enter envía, Shift+Enter salta de línea. Al enviar, la pregunta sale de la lista.
+  - **Reclamos:** los reclamos abiertos de cada cuenta, con tipo, etapa, motivo, venta y desde cuándo. Se resuelven en Mercado Libre.
+  - Se actualiza solo cada minuto mientras la pestaña está visible. Las cuentas que no se pudieron revisar (por ejemplo, token vencido) salen en un aviso arriba.
+  - Permisos: ver pide `ventas.consultar` y responder pide `ventas.modificar`. Cada respuesta queda en auditoría, sin el texto.
+  - Lee en vivo de Mercado Libre, sin tablas propias. Sin migración. Plantillas de respuesta: en una segunda parte.

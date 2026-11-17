@@ -1,0 +1,121 @@
+/* Preguntas y reclamos — tokens existentes, sin paleta nueva. La
+   lista vive dentro de una Tarjeta (zona oscura en los dos temas). */
+
+.aviso {
+  padding: 14px 16px;
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie-2);
+  color: var(--texto-superficie-2);
+}
+
+.avisoTitulo {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+}
+
+.avisoLista {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+}
+
+.lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.pregunta {
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--borde);
+}
+
+.pregunta:last-child {
+  border-bottom: none;
+}
+
+.cabeceraPregunta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.cuenta {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--plata-etiqueta);
+}
+
+.producto {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.enlace {
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.enlace:hover {
+  text-decoration: underline;
+}
+
+.dato {
+  color: var(--texto-suave);
+}
+
+.textoPregunta {
+  margin: 0;
+  font-size: 15px;
+  color: var(--texto);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.formRespuesta {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.formRespuesta textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+.nota {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.avisoOk,
+.avisoError {
+  margin: 0;
+  font-size: 13px;
+}
+
+.avisoOk {
+  color: var(--exito-texto);
+}
+
+.avisoError {
+  color: var(--peligro-texto);
+}
+
+@media (max-width: 640px) {
+  .formRespuesta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

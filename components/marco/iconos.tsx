@@ -142,6 +142,17 @@ export function IconoSoporte(props: IconoProps) {
 }
 
 // Dos globos de conversación — foro de la comunidad.
+// Globo de diálogo con un signo de pregunta (Preguntas y reclamos).
+export function IconoPreguntas(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 5h16v11H10l-4 4v-4H4z" />
+      <path d="M10 9a2 2 0 1 1 2.8 1.8c-.5.2-.8.7-.8 1.2" />
+      <path d="M12 14h.01" />
+    </Svg>
+  );
+}
+
 export function IconoForo(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -399,6 +410,7 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   inicio: IconoInicio,
   pedidos: IconoPedidos,
   despachos: IconoDespachos,
+  preguntas: IconoPreguntas,
   sku: IconoSku,
   // Productos (módulo que agrupa SKU, inventario y bodegas) usa las
   // cajas apiladas de inventario.
