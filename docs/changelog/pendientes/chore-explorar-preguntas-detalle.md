@@ -1,0 +1,1 @@
+- `scripts/explorar-preguntas-reclamos.ts`: opción `--estado=ANSWERED` y un nivel más de detalle en los campos, para ver la forma de una pregunta cuando la cuenta no tiene pendientes.
