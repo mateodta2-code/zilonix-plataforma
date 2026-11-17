@@ -64,9 +64,9 @@ export function Tabla({
   );
 }
 
-export function FilaTabla({ children, id }: { children: ReactNode; id?: string }) {
+export function FilaTabla({ children, id, className }: { children: ReactNode; id?: string; className?: string }) {
   return (
-    <tr id={id} className={styles.tr}>
+    <tr id={id} className={className ? `${styles.tr} ${className}` : styles.tr}>
       {children}
     </tr>
   );

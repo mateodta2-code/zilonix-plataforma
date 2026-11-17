@@ -25,37 +25,59 @@ describe("meta de margen (semáforo de productos)", () => {
 
 describe("margen real por producto", () => {
   const base = {
+    sku: "SKU-A1",
     precio: "100000.00",
     costo: "40000.00",
     empaque: "2000.00",
     envioAgencia: "3000.00",
+    full: false,
     comisionMl: "15000.00",
     envioMl: "10000.00",
     compradorPagaEnvio: false,
   };
 
-  it("resta costo, empaque, envío a agencia, comisión y envío de Mercado Libre", () => {
-    expect(margenRealProducto(base)).toEqual({ tipo: "ok", ganancia: "30000.00", margen: "0.3000" });
+  it("resta el costo total (costo + empaque + envío a agencia), la comisión y el envío de Mercado Libre", () => {
+    expect(margenRealProducto(base)).toEqual({
+      tipo: "ok",
+      costoTotal: "45000.00",
+      envio: "10000.00",
+      ganancia: "30000.00",
+      margen: "0.3000",
+    });
   });
 
   it("el envío de Mercado Libre solo cuenta si lo paga el vendedor", () => {
-    expect(margenRealProducto({ ...base, compradorPagaEnvio: true })).toEqual({ tipo: "ok", ganancia: "40000.00", margen: "0.4000" });
+    expect(margenRealProducto({ ...base, compradorPagaEnvio: true })).toMatchObject({ tipo: "ok", envio: "0.00", ganancia: "40000.00", margen: "0.4000" });
+    // Si lo paga el comprador no hace falta el monto.
+    expect(margenRealProducto({ ...base, compradorPagaEnvio: true, envioMl: null })).toMatchObject({ tipo: "ok", ganancia: "40000.00" });
   });
 
-  it("empaque y envío a agencia vacíos cuentan como $0; ganancia negativa se muestra", () => {
-    expect(margenRealProducto({ ...base, empaque: null, envioAgencia: null })).toEqual({
-      tipo: "ok",
-      ganancia: "35000.00",
-      margen: "0.3500",
-    });
-    expect(margenRealProducto({ ...base, costo: "90000.00" })).toEqual({ tipo: "ok", ganancia: "-20000.00", margen: "-0.2000" });
+  it("en Full el envío a agencia vale $0, aunque esté cargado o vacío", () => {
+    expect(margenRealProducto({ ...base, full: true })).toMatchObject({ tipo: "ok", costoTotal: "42000.00", ganancia: "33000.00", margen: "0.3300" });
+    expect(margenRealProducto({ ...base, full: true, envioAgencia: null })).toMatchObject({ tipo: "ok", costoTotal: "42000.00" });
   });
 
-  it("sin costo cargado o sin datos de Mercado Libre no inventa un margen", () => {
-    expect(margenRealProducto({ ...base, costo: null })).toEqual({ tipo: "sin_costo" });
-    expect(margenRealProducto({ ...base, precio: null })).toEqual({ tipo: "sin_datos" });
+  it("un dato que falta es sin dato, nunca $0", () => {
+    expect(margenRealProducto({ ...base, empaque: null })).toEqual({ tipo: "sin_datos" });
+    expect(margenRealProducto({ ...base, envioAgencia: null })).toEqual({ tipo: "sin_datos" });
     expect(margenRealProducto({ ...base, comisionMl: null })).toEqual({ tipo: "sin_datos" });
     expect(margenRealProducto({ ...base, envioMl: null })).toEqual({ tipo: "sin_datos" });
+    expect(margenRealProducto({ ...base, precio: null })).toEqual({ tipo: "sin_datos" });
+    expect(margenRealProducto({ ...base, precio: "0.00" })).toEqual({ tipo: "sin_datos" });
+  });
+
+  it("distingue Sin SKU de Sin costo", () => {
+    expect(margenRealProducto({ ...base, sku: null })).toEqual({ tipo: "sin_sku" });
+    expect(margenRealProducto({ ...base, costo: null })).toEqual({ tipo: "sin_costo" });
+  });
+
+  it("ganancia negativa se muestra; costo 0 es un $0 real", () => {
+    expect(margenRealProducto({ ...base, costo: "90000.00" })).toMatchObject({ tipo: "ok", ganancia: "-20000.00", margen: "-0.2000" });
+    expect(margenRealProducto({ ...base, costo: "0.00", empaque: "0.00", envioAgencia: "0.00" })).toMatchObject({
+      tipo: "ok",
+      costoTotal: "0.00",
+      ganancia: "75000.00",
+    });
   });
 
   it("franjas a partir de la meta: verde desde la meta, amarillo desde la mitad", () => {

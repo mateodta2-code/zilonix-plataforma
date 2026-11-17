@@ -797,3 +797,38 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Issue #256 — pestaña "Ganancia real por producto". Los fondos suaves
+   de las bandas se definen una sola vez acá, a partir de los colores
+   de estado del tema (sirven en claro y oscuro). */
+.tarjetaGanancia {
+  --banda-verde-suave: rgba(34, 197, 94, 0.1);
+  --banda-ambar-suave: var(--kpi-advertencia-suave);
+  --banda-roja-suave: rgba(239, 68, 68, 0.1);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.filtrosGanancia {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.bandaVerde > td {
+  background: var(--banda-verde-suave);
+}
+
+.bandaAmbar > td {
+  background: var(--banda-ambar-suave);
+}
+
+.bandaRoja > td {
+  background: var(--banda-roja-suave);
+}
+
+.productoTitulo {
+  display: block;
+  min-width: 220px;
+}

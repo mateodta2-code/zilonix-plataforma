@@ -7,7 +7,6 @@ import { and, asc, desc, eq, gte, inArray, isNotNull, like, lte, or, sum } from 
 import { dbComoEmpresa } from "@/db/empresa-context";
 import {
   configuracionFinanzas,
-  costosSku,
   publicidadAnunciantes,
   publicidadAnuncios,
   publicidadCampanas,
@@ -16,11 +15,14 @@ import {
   publicidadCostosItem,
   publicidadMetricasDiarias,
   publicidadSincronizaciones,
+  skus,
 } from "@/db/schema";
 import { PREFIJO_CORTE_TIEMPO } from "@/lib/publicidad/actualizacion";
 import { esCampoCambio, type CampoCambio } from "@/lib/publicidad/cambios";
 import { DIAS_SIN_VENDER_VENDEDOR, META_MARGEN_DEFECTO, obtenerConfigPublicidad, type ConfigPublicidad } from "@/lib/publicidad/config";
 import { linkPublicacion } from "@/lib/ml/cliente";
+import { leerCostosPorSku, skuDePublicacion } from "@/lib/publicidad/costos";
+import { LOGISTICA_FULL, calcularFilaGanancia, type FilaGanancia } from "@/lib/publicidad/ganancia";
 import { type FiltroCampanas } from "@/lib/publicidad/params";
 import { diasEntreInclusive, hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
 import {
@@ -113,10 +115,6 @@ export type TableroPublicidad = {
 };
 
 // SKU como lo guarda la tabla de costos (costos_sku_sku_normalizado).
-function normalizarSku(sku: string): string {
-  return sku.trim().toUpperCase();
-}
-
 export type CambioCampana = {
   id: string;
   campanaIdMl: string;
@@ -314,6 +312,7 @@ export async function consultarTableroPublicidad(
         comisionMl: publicidadCostosItem.comisionMl,
         envioVendedorEstimado: publicidadCostosItem.envioVendedorEstimado,
         compradorPagaEnvio: publicidadCostosItem.compradorPagaEnvio,
+        logisticType: publicidadCostosItem.logisticType,
       })
       .from(publicidadCostosItem)
       .where(
@@ -326,19 +325,14 @@ export async function consultarTableroPublicidad(
       .orderBy(asc(publicidadCostosItem.itemId), desc(publicidadCostosItem.fecha));
 
     // Costo, empaque y envío a agencia por SKU (tabla maestra de Finanzas).
-    const skusBuscados = [...new Set(precios.flatMap((fila) => (fila.skuCodigo ? [normalizarSku(fila.skuCodigo)] : [])))];
-    const costos =
-      skusBuscados.length === 0
-        ? []
-        : await tx
-            .select({
-              skuCodigo: costosSku.skuCodigo,
-              costo: costosSku.costo,
-              empaque: costosSku.empaque,
-              envioAgencia: costosSku.envioAgencia,
-            })
-            .from(costosSku)
-            .where(and(eq(costosSku.empresaId, empresaId), inArray(costosSku.skuCodigo, skusBuscados)));
+    const costoPorSku = await leerCostosPorSku(
+      tx,
+      empresaId,
+      precios.flatMap((fila) => {
+        const sku = skuDePublicacion(fila.skuCodigo);
+        return sku ? [sku] : [];
+      })
+    );
 
     const [ajustes] = await tx
       .select({ meta: configuracionFinanzas.metaMargenPublicidad })
@@ -465,15 +459,17 @@ export async function consultarTableroPublicidad(
     const porAnuncioReciente = new Map(metricasAnuncioRecientes.map((fila) => [claveAnuncio(fila.entidadIdMl, fila.adGroupId), fila]));
     const precioPorItem = new Map(precios.map((fila) => [fila.itemId, fila.precio]));
     const costoItemPorItem = new Map(precios.map((fila) => [fila.itemId, fila]));
-    const costoPorSku = new Map(costos.map((fila) => [fila.skuCodigo, fila]));
     const margenDe = (itemId: string): MargenProducto => {
       const item = costoItemPorItem.get(itemId);
-      const sku = item?.skuCodigo ? costoPorSku.get(normalizarSku(item.skuCodigo)) : undefined;
+      const sku = skuDePublicacion(item?.skuCodigo);
+      const costos = sku ? costoPorSku.get(sku) : undefined;
       return margenRealProducto({
+        sku,
         precio: item?.precio ?? null,
-        costo: sku?.costo ?? null,
-        empaque: sku?.empaque ?? null,
-        envioAgencia: sku?.envioAgencia ?? null,
+        costo: costos?.costo ?? null,
+        empaque: costos?.empaque ?? null,
+        envioAgencia: costos?.envioAgencia ?? null,
+        full: item?.logisticType === LOGISTICA_FULL,
         comisionMl: item?.comisionMl ?? null,
         envioMl: item?.envioVendedorEstimado ?? null,
         compradorPagaEnvio: item?.compradorPagaEnvio ?? null,
@@ -614,5 +610,104 @@ export async function consultarTableroPublicidad(
         }))
       ),
     };
+  });
+}
+
+// Issue #256 — pestaña "Ganancia real por producto". Todas las
+// publicaciones sincronizadas de la cuenta (anunciadas o no) más las
+// que tienen foto de precio y comisión aunque no estén importadas.
+// Precio, comisión y envío salen de la última foto de
+// publicidad_costos_item; los costos, de la tabla de Finanzas (solo
+// lectura). No llama a Mercado Libre.
+export type GananciaProductos = {
+  filas: FilaGanancia[];
+  metaMargen: string;
+  // Cuándo se consultaron a Mercado Libre los precios y comisiones de
+  // la foto más reciente. null si todavía no hay ninguna.
+  consultadoTs: Date | null;
+};
+
+export async function consultarGananciaProductos(empresaId: string, cuentaMlId: string): Promise<GananciaProductos> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const fotos = await tx
+      .selectDistinctOn([publicidadCostosItem.itemId], {
+        itemId: publicidadCostosItem.itemId,
+        skuCodigo: publicidadCostosItem.skuCodigo,
+        precio: publicidadCostosItem.precioVentaVigente,
+        precioRegular: publicidadCostosItem.precioRegular,
+        comisionMl: publicidadCostosItem.comisionMl,
+        envioVendedorEstimado: publicidadCostosItem.envioVendedorEstimado,
+        compradorPagaEnvio: publicidadCostosItem.compradorPagaEnvio,
+        logisticType: publicidadCostosItem.logisticType,
+        consultadoTs: publicidadCostosItem.consultadoTs,
+      })
+      .from(publicidadCostosItem)
+      .where(and(eq(publicidadCostosItem.empresaId, empresaId), eq(publicidadCostosItem.cuentaMlId, cuentaMlId)))
+      .orderBy(asc(publicidadCostosItem.itemId), desc(publicidadCostosItem.fecha), desc(publicidadCostosItem.consultadoTs));
+
+    const publicadas = await tx
+      .select({ itemId: publicaciones.publicacionIdExterno, titulo: publicaciones.titulo, skuCodigo: skus.codigo })
+      .from(publicaciones)
+      .leftJoin(skus, and(eq(skus.id, publicaciones.skuId), eq(skus.empresaId, publicaciones.empresaId)))
+      .where(and(eq(publicaciones.empresaId, empresaId), eq(publicaciones.cuentaMlId, cuentaMlId)));
+
+    const anunciados = await tx
+      .select({ itemId: publicidadAnuncios.itemId, titulo: publicidadAnuncios.titulo })
+      .from(publicidadAnuncios)
+      .where(and(eq(publicidadAnuncios.empresaId, empresaId), eq(publicidadAnuncios.cuentaMlId, cuentaMlId)));
+
+    const [ajustes] = await tx
+      .select({ meta: configuracionFinanzas.metaMargenPublicidad })
+      .from(configuracionFinanzas)
+      .where(eq(configuracionFinanzas.empresaId, empresaId));
+    const metaMargen = ajustes?.meta ?? META_MARGEN_DEFECTO;
+
+    const fotoPorItem = new Map(fotos.map((foto) => [foto.itemId, foto]));
+    const publicadaPorItem = new Map(publicadas.map((fila) => [fila.itemId, fila]));
+    const tituloAnuncio = new Map(anunciados.map((fila) => [fila.itemId, fila.titulo]));
+    const items = [...new Set([...publicadaPorItem.keys(), ...fotoPorItem.keys()])];
+
+    // Con foto, el SKU es el de la publicación en Mercado Libre (puede no
+    // tener). Sin foto todavía, el del SKU enlazado en Zilonix, si hay.
+    const skuDeItem = (itemId: string): string | null => {
+      const foto = fotoPorItem.get(itemId);
+      return foto ? foto.skuCodigo : (publicadaPorItem.get(itemId)?.skuCodigo ?? null);
+    };
+    const costoPorSku = await leerCostosPorSku(
+      tx,
+      empresaId,
+      items.flatMap((itemId) => {
+        const sku = skuDePublicacion(skuDeItem(itemId));
+        return sku ? [sku] : [];
+      })
+    );
+
+    const filas = items.map((itemId) => {
+      const foto = fotoPorItem.get(itemId);
+      const sku = skuDeItem(itemId);
+      const normalizado = skuDePublicacion(sku);
+      return calcularFilaGanancia(
+        {
+          itemId,
+          titulo: publicadaPorItem.get(itemId)?.titulo ?? tituloAnuncio.get(itemId) ?? null,
+          sku,
+          anunciado: tituloAnuncio.has(itemId),
+          precio: foto?.precio ?? null,
+          precioRegular: foto?.precioRegular ?? null,
+          comisionMl: foto?.comisionMl ?? null,
+          envioMl: foto?.envioVendedorEstimado ?? null,
+          compradorPagaEnvio: foto?.compradorPagaEnvio ?? null,
+          logisticType: foto?.logisticType ?? null,
+          costos: normalizado ? costoPorSku.get(normalizado) : undefined,
+        },
+        metaMargen
+      );
+    });
+
+    const consultadoTs = fotos.reduce<Date | null>(
+      (ultimo, foto) => (ultimo === null || foto.consultadoTs > ultimo ? foto.consultadoTs : ultimo),
+      null
+    );
+    return { filas, metaMargen, consultadoTs };
   });
 }

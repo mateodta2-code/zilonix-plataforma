@@ -8,10 +8,11 @@ import {
   publicidadCampanas,
   publicidadCostosItem,
   publicidadMetricasDiarias,
+  publicaciones,
 } from "@/db/schema";
 import { crearDosEmpresas, type ContextoDosEmpresas } from "@/db/test-utils/aislamiento";
 import { cifrarToken } from "@/lib/cifrado";
-import { consultarTableroPublicidad } from "@/lib/publicidad/consultas";
+import { consultarGananciaProductos, consultarTableroPublicidad } from "@/lib/publicidad/consultas";
 import { totalesDeDias, type Periodo } from "@/lib/publicidad/kpis";
 
 // Issue #255 — las consultas del tablero respetan el aislamiento y los
@@ -235,7 +236,7 @@ describe("consultas del tablero de publicidad (issue #255)", () => {
     expect(anuncio.semaforo.estado).toBe("exito");
     expect(tablero.resumen.actual.gasto).toBe("25.00");
     // Semáforo de productos: 100.000 − 40.000 − 2.000 − 3.000 − 15.000 − 10.000.
-    expect(anuncio.margen).toEqual({ tipo: "ok", ganancia: "30000.00", margen: "0.3000" });
+    expect(anuncio.margen).toEqual({ tipo: "ok", costoTotal: "45000.00", envio: "10000.00", ganancia: "30000.00", margen: "0.3000" });
     // Sin meta guardada, la de la config.
     expect(tablero.metaMargen).toBe("0.30");
   });
@@ -249,5 +250,60 @@ describe("consultas del tablero de publicidad (issue #255)", () => {
     });
     expect(conPausadas.campanas.map((c) => c.nombre).sort()).toEqual(["Activa", "Pausa"]);
     expect(conPausadas.campanas.find((c) => c.nombre === "Pausa")?.diagnostico.tipo).toBe("sin_datos");
+  });
+  it("ganancia real por producto (#256): incluye publicaciones sin anuncio y no ve las de otra empresa", async () => {
+    // Una publicación importada sin anuncio y sin foto de precios: sale
+    // en la tabla, con lo de Mercado Libre en sin dato.
+    await dbComoEmpresa(contexto.empresaAId, (tx) =>
+      tx.insert(publicaciones).values({
+        empresaId: contexto.empresaAId,
+        cuentaMlId: cuentaAId,
+        publicacionIdExterno: "MCO999",
+        titulo: "Sin anuncio",
+        precio: "50000.00",
+        stock: 3,
+      })
+    );
+    // Una con foto pero sin SKU en Mercado Libre.
+    await dbComoEmpresa(contexto.empresaAId, (tx) =>
+      tx.insert(publicidadCostosItem).values({
+        empresaId: contexto.empresaAId,
+        cuentaMlId: cuentaAId,
+        itemId: "MCO777",
+        fecha: "2026-10-02",
+        precioVentaVigente: "80000.00",
+        skuCodigo: null,
+        comisionMl: "12000.00",
+        compradorPagaEnvio: true,
+        consultadoTs: new Date("2026-10-02T09:30:00-05:00"),
+      })
+    );
+
+    const ganancia = await consultarGananciaProductos(contexto.empresaAId, cuentaAId);
+    const porItem = new Map(ganancia.filas.map((fila) => [fila.itemId, fila]));
+    expect([...porItem.keys()].sort()).toEqual(["MCO123456", "MCO777", "MCO999"]);
+
+    const anunciado = porItem.get("MCO123456")!;
+    expect(anunciado.anunciado).toBe(true);
+    expect(anunciado.titulo).toBe("Publicación A");
+    expect(anunciado.sku).toBe("SKU-A1");
+    expect(anunciado.costoTotal).toBe("45000.00");
+    expect(anunciado.resultado).toMatchObject({ tipo: "ok", ganancia: "30000.00", margen: "0.3000" });
+    expect(anunciado.banda).toBe("verde");
+
+    expect(porItem.get("MCO777")!.resultado).toEqual({ tipo: "sin_sku" });
+    expect(porItem.get("MCO777")!.envio).toEqual({ tipo: "comprador" });
+    const sinAnuncio = porItem.get("MCO999")!;
+    expect(sinAnuncio.anunciado).toBe(false);
+    expect(sinAnuncio.precio).toBeNull();
+    expect(sinAnuncio.banda).toBe("sin_dato");
+
+    expect(ganancia.metaMargen).toBe("0.30");
+    expect(ganancia.consultadoTs).not.toBeNull();
+
+    // La empresa B, aun con la cuenta de A, no ve nada.
+    const cruce = await consultarGananciaProductos(contexto.empresaBId, cuentaAId);
+    expect(cruce.filas).toEqual([]);
+    expect(cruce.consultadoTs).toBeNull();
   });
 });

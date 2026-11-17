@@ -12,12 +12,13 @@ import {
   type Periodo,
 } from "@/lib/publicidad/kpis";
 import { nombreMes } from "@/lib/publicidad/formato";
+import type { FiltroAnunciado, FiltroBanda } from "@/lib/publicidad/ganancia";
 import { ROTULO_PERIODO } from "@/lib/publicidad/rotulos";
 
 export type FiltroCampanas = "activas" | "pausadas" | "todas";
 
 export type ComparacionPublicidad = "anterior" | "ninguno";
-export type TabPublicidad = "campanas" | "anuncios";
+export type TabPublicidad = "campanas" | "anuncios" | "ganancia";
 // Botones de la tabla de campañas: todas o solo las bajo el objetivo
 // (amarillo y rojo).
 export type EstadoFiltro = "todas" | "bajo";
@@ -59,7 +60,7 @@ export function leerParametrosPublicidad(
     filtro,
     incluirPausadas: filtro !== "activas",
     comparar: entrada.comparar === "ninguno" ? "ninguno" : "anterior",
-    tab: entrada.tab === "anuncios" ? "anuncios" : "campanas",
+    tab: entrada.tab === "anuncios" || entrada.tab === "ganancia" ? entrada.tab : "campanas",
     estado: entrada.estado === "bajo" ? "bajo" : "todas",
   };
 }
@@ -75,6 +76,10 @@ export type HrefPublicidad = {
   tab?: TabPublicidad | null;
   estado?: EstadoFiltro | null;
   aviso?: string | null;
+  // Pestaña "Ganancia real por producto" (#256).
+  q?: string | null;
+  banda?: FiltroBanda | null;
+  anunciado?: FiltroAnunciado | null;
 };
 
 export function hrefPublicidad(params: HrefPublicidad): string {
@@ -88,9 +93,14 @@ export function hrefPublicidad(params: HrefPublicidad): string {
   if (params.vista === "pausadas" || params.vista === "todas") q.set("vista", params.vista);
   else if (params.pausadas) q.set("vista", "todas");
   if (params.comparar === "ninguno") q.set("comparar", "ninguno");
-  if (params.tab === "anuncios") q.set("tab", "anuncios");
+  if (params.tab === "anuncios" || params.tab === "ganancia") q.set("tab", params.tab);
   if (params.estado === "bajo") q.set("estado", "bajo");
   if (params.aviso) q.set("aviso", params.aviso);
+  if (params.tab === "ganancia") {
+    if (params.q) q.set("q", params.q);
+    if (params.banda && params.banda !== "todas") q.set("banda", params.banda);
+    if (params.anunciado && params.anunciado !== "todos") q.set("anunciado", params.anunciado);
+  }
   const texto = q.toString();
   return texto ? `/panel/publicidad?${texto}` : "/panel/publicidad";
 }

@@ -15,7 +15,8 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { SUGERENCIA_RECONECTAR_PUBLICIDAD } from "@/lib/ml/publicidad";
 import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { consultarTableroPublicidad } from "@/lib/publicidad/consultas";
+import { consultarGananciaProductos, consultarTableroPublicidad } from "@/lib/publicidad/consultas";
+import { leerFiltrosGanancia, type FiltrosGanancia } from "@/lib/publicidad/ganancia";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { metaComoPorcentaje, mitadDeMeta } from "@/lib/publicidad/meta-margen";
 import { mostrarFraccion } from "@/lib/publicidad/formato";
@@ -40,6 +41,7 @@ import {
 } from "@/lib/publicidad/rotulos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { FormActualizar } from "./FormActualizar";
+import { GananciaProductos } from "./GananciaProductos";
 import styles from "./page.module.css";
 import { PanelMetricas } from "./GraficoPublicidad";
 import { RentabilidadAds } from "./RentabilidadAds";
@@ -96,6 +98,9 @@ export default async function PublicidadPage({
     comparar?: ParametroUrl;
     tab?: ParametroUrl;
     estado?: ParametroUrl;
+    q?: ParametroUrl;
+    banda?: ParametroUrl;
+    anunciado?: ParametroUrl;
   };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
@@ -146,6 +151,12 @@ export default async function PublicidadPage({
         ahora,
       })
     : null;
+  const filtrosGanancia = leerFiltrosGanancia({
+    q: primero(searchParams?.q),
+    banda: primero(searchParams?.banda),
+    anunciado: primero(searchParams?.anunciado),
+  });
+  const ganancia = cuentaId && params.tab === "ganancia" ? await consultarGananciaProductos(empresa.id, cuentaId) : null;
 
   const hrefBase = {
     cuenta: cuentaId,
@@ -180,7 +191,7 @@ export default async function PublicidadPage({
               dir: params.dir,
               ...(params.filtro !== "activas" ? { vista: params.filtro } : {}),
               ...(params.comparar === "ninguno" ? { comparar: "ninguno" } : {}),
-              ...(params.tab === "anuncios" ? { tab: "anuncios" } : {}),
+              ...(params.tab !== "campanas" ? { tab: params.tab } : {}),
             }}
           />
         </div>
@@ -204,6 +215,8 @@ export default async function PublicidadPage({
             tab={params.tab}
             hrefBase={hrefBase}
             puedeEditarMeta={puedeEditarMeta}
+            ganancia={ganancia}
+            filtrosGanancia={filtrosGanancia}
           />
         )}
       </div>
@@ -232,6 +245,8 @@ function Cuerpo({
   tab,
   hrefBase,
   puedeEditarMeta,
+  ganancia,
+  filtrosGanancia,
 }: {
   tablero: NonNullable<Awaited<ReturnType<typeof consultarTableroPublicidad>>>;
   periodo: ReturnType<typeof leerParametrosPublicidad>["periodo"];
@@ -242,6 +257,8 @@ function Cuerpo({
   tab: TabPublicidad;
   hrefBase: HrefBase;
   puedeEditarMeta: boolean;
+  ganancia: Awaited<ReturnType<typeof consultarGananciaProductos>> | null;
+  filtrosGanancia: FiltrosGanancia;
 }) {
   const sinPermiso = tablero.anunciante?.estadoAcceso === "sin_permiso_app";
   const sinProductAds = tablero.anunciante?.estadoAcceso === "sin_product_ads";
@@ -328,7 +345,8 @@ function Cuerpo({
     };
   });
 
-  return (
+  // Las pestañas y la nota de actualización son las mismas en las tres vistas.
+  const cabecera = (
     <>
       {/* En tema claro, panelDatos es una tarjeta con fondo propio: las
           pestañas y la nota caían sueltas sobre la franja gris del
@@ -341,6 +359,9 @@ function Cuerpo({
           <Link scroll={false} href={hrefPublicidad({ ...hrefBase, tab: "anuncios" })} className={styles.pestana} aria-current={tab === "anuncios" ? "page" : undefined}>
             Anuncios
           </Link>
+          <Link scroll={false} href={hrefPublicidad({ ...hrefBase, tab: "ganancia" })} className={styles.pestana} aria-current={tab === "ganancia" ? "page" : undefined}>
+            Ganancia real por producto
+          </Link>
         </nav>
 
         <p className={styles.nota}>
@@ -348,6 +369,29 @@ function Cuerpo({
           {tablero.enCurso ? " Hay una actualización en curso." : ""}
         </p>
       </div>
+    </>
+  );
+
+  // Issue #256 — "Ganancia real por producto": solo lectura, sin las
+  // métricas ni el presupuesto de las campañas.
+  if (tab === "ganancia") {
+    return (
+      <>
+        {cabecera}
+        <MetaMargen
+          meta={mostrarFraccion(tablero.metaMargen)}
+          mitad={mostrarFraccion(mitadMeta)}
+          valor={metaComoPorcentaje(tablero.metaMargen)}
+          puedeEditar={puedeEditarMeta}
+        />
+        {ganancia ? <GananciaProductos datos={ganancia} filtros={filtrosGanancia} siteId={siteId} hrefBase={hrefBase} /> : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {cabecera}
 
       <Tarjeta className={styles.miPresupuesto}>
         <p className={styles.seccion}>Mi presupuesto</p>
