@@ -1,8 +1,8 @@
-/* Dos variantes porque vive en dos fondos distintos: "barra" cae
-   directo sobre la franja oscura del header (igual que .usuario en
-   BarraSuperior.module.css, color de reposo --texto-zona-oscura) y
-   "cuenta" vive sobre la superficie normal de /cuenta (--texto,
-   respeta data-tema). El acento rojo (--peligro) solo aparece en
+/* Dos variantes: "barra" (header) y "cuenta" (/cuenta). El botón
+   pinta su PROPIO fondo opaco (--superficie-2), así que la letra de
+   "barra" es --texto-superficie-2, nunca --texto-zona-oscura: en tema
+   claro --superficie-2 es casi blanco y la letra clara quedaba
+   invisible (mismo criterio que .zx-control, issue #186). El acento rojo (--peligro) solo aparece en
    hover/focus, para que se note que es una acción distinta sin gritar
    "peligro" en reposo. */
 .boton {
@@ -47,7 +47,7 @@
 }
 
 .barra {
-  color: var(--texto-zona-oscura);
+  color: var(--texto-superficie-2);
 }
 
 .cuenta {
