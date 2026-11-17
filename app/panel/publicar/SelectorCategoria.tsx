@@ -123,7 +123,7 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
         </Boton>
       </div>
       {!cuentaId && <p style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Elige al menos una cuenta primero.</p>}
-      {error && <p style={{ fontSize: 13, color: "#b00020", marginTop: 8 }}>{error}</p>}
+      {error && <p style={{ fontSize: 13, color: "var(--peligro-texto)", marginTop: 8 }}>{error}</p>}
 
       {modo === "buscar" && (
         <div style={{ marginTop: 10 }}>
@@ -149,7 +149,7 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
             <ul style={{ listStyle: "none", padding: 0, marginTop: 8 }}>
               {resultados.length === 0 && <li style={{ fontSize: 13, opacity: 0.7 }}>No se encontraron categorías con ese nombre.</li>}
               {resultados.map((r) => (
-                <li key={r.categoryId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: 13 }}>
+                <li key={r.categoryId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--borde)", fontSize: 13 }}>
                   <span>
                     {r.pathFromRoot.length > 0
                       ? r.pathFromRoot.map((p, i) => (
@@ -193,7 +193,7 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
               {nodo.pathFromRoot.map((p, i) => (
                 <span key={p.id}>
                   {i > 0 && " › "}
-                  <button type="button" onClick={() => navegarArbol(i === nodo.pathFromRoot.length - 1 ? undefined : nodo.pathFromRoot[i].id)} style={{ background: "none", border: "none", padding: 0, textDecoration: "underline", cursor: "pointer", font: "inherit" }}>
+                  <button type="button" onClick={() => navegarArbol(i === nodo.pathFromRoot.length - 1 ? undefined : nodo.pathFromRoot[i].id)} style={{ background: "none", border: "none", padding: 0, textDecoration: "underline", cursor: "pointer", font: "inherit", color: "inherit" }}>
                     {p.name}
                   </button>
                 </span>
@@ -210,8 +210,8 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
           ) : (
             <ul style={{ listStyle: "none", padding: 0 }}>
               {nodo.children.map((c) => (
-                <li key={c.id} style={{ padding: "6px 0", borderBottom: "1px solid #eee", fontSize: 13 }}>
-                  <button type="button" onClick={() => navegarArbol(c.id)} style={{ background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", font: "inherit" }}>
+                <li key={c.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--borde)", fontSize: 13 }}>
+                  <button type="button" onClick={() => navegarArbol(c.id)} style={{ background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit" }}>
                     {c.name} ›
                   </button>
                 </li>

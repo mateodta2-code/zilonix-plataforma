@@ -29,7 +29,7 @@ function FilaAtributo({ attr, valor, onCambiar }: { attr: CaracteristicaCategori
       etiqueta={
         <>
           {attr.nombre}
-          {attr.obligatorio && <span style={{ color: "#b00020" }}> *</span>}
+          {attr.obligatorio && <span style={{ color: "var(--peligro-texto)" }}> *</span>}
           {attr.permiteVariante && <span style={{ fontSize: 11, opacity: 0.6 }}> (puede ser eje de variante)</span>}
         </>
       }
