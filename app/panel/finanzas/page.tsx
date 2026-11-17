@@ -72,14 +72,19 @@ export default async function FinanzasPage() {
       <>
         <EncabezadoPagina titulo="Finanzas" />
         <section className={styles.tablero}>
-          <h2 className={styles.tituloSeccion}>
-            Indicadores del mes ({tablero.tramo.desde} a {tablero.tramo.hasta}) · vs. mismo tramo mes anterior ({tablero.tramoAnterior.desde} a{" "}
-            {tablero.tramoAnterior.hasta})
-          </h2>
-          <p className={styles.ayuda}>
-            Todas las cuentas de Mercado Libre de esta empresa · sin ventas canceladas ni inválidas · el recaudo es el de las ventas sincronizadas,
-            igual que en Ventas y utilidad · la utilidad es antes de publicidad.
-          </p>
+          {/* En tema claro el título y la nota caían sobre la parte negra
+              y gris del degradado (letra negra sobre negro, 17-nov): van
+              en una tarjeta con fondo propio. En oscuro no cambia nada. */}
+          <div className={styles.cabeceraTablero}>
+            <h2 className={styles.tituloSeccion}>
+              Indicadores del mes ({tablero.tramo.desde} a {tablero.tramo.hasta}) · vs. mismo tramo mes anterior ({tablero.tramoAnterior.desde} a{" "}
+              {tablero.tramoAnterior.hasta})
+            </h2>
+            <p className={styles.ayuda}>
+              Todas las cuentas de Mercado Libre de esta empresa · sin ventas canceladas ni inválidas · el recaudo es el de las ventas sincronizadas,
+              igual que en Ventas y utilidad · la utilidad es antes de publicidad.
+            </p>
+          </div>
           <div className={styles.gridKpi}>
             <TarjetaKpi
               titulo="Ventas del mes"

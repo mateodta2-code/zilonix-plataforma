@@ -1,0 +1,1 @@
+- En tema claro, en **Finanzas**, el título "Indicadores del mes…" y su nota ya se leen: caían sobre la parte negra y gris del fondo. En claro van en una tarjeta con fondo propio (mismo criterio que Publicidad, #445).
