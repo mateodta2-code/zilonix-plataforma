@@ -1,0 +1,1 @@
+- En tema claro, las pestañas (Despachos, Investigación) ya se leen cuando un aviso de arriba, como "Token vencido", las empuja a la parte blanca del fondo: pasan a letra oscura según dónde caen de verdad. La detección sale de `BarraLateral` a `components/marco/zonaFondo.ts` (`useZonaFondo`), compartida por el menú y las pestañas.

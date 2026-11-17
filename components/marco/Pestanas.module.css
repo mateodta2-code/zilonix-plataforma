@@ -65,3 +65,17 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* 17-nov: desde que la franja negra del tema claro es corta (en px),
+   un aviso arriba (ej. "Token vencido" en Despachos) empuja las
+   pestañas a la parte blanca y el texto de zona oscura no se leía.
+   zonaFondo.ts marca data-zona según dónde caen de verdad; en la zona
+   clara usan el texto normal del tema claro. */
+:root[data-tema="claro"] .contenedor[data-zona="clara"] .pestana {
+  color: var(--texto-suave);
+}
+
+:root[data-tema="claro"] .contenedor[data-zona="clara"] .pestana:hover,
+:root[data-tema="claro"] .contenedor[data-zona="clara"] .pestana[data-activa="true"] {
+  color: var(--texto);
+}
