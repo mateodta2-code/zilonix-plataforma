@@ -7,7 +7,7 @@
 // - No imprime el token, ni textos, ni nicknames, ni datos del
 //   comprador: solo códigos HTTP, totales y NOMBRES de campos.
 //
-//   npx tsx scripts/explorar-preguntas-reclamos.ts --empresa=<uuid> --cuenta=<uuid>
+//   npx tsx scripts/explorar-preguntas-reclamos.ts --empresa=<uuid> --cuenta=<uuid> [--estado=ANSWERED]
 //   (los uuid salen de scripts/buscar-cuenta-ml.ts --nickname=...)
 
 import { and, eq } from "drizzle-orm";
@@ -31,9 +31,9 @@ function argumento(nombre: string): string | null {
 // Describe la forma de un objeto sin mostrar valores personales.
 function forma(valor: unknown, profundidad = 0): string {
   if (valor === null) return "null";
-  if (Array.isArray(valor)) return `array(${valor.length})${valor.length > 0 && profundidad < 2 ? ` de ${forma(valor[0], profundidad + 1)}` : ""}`;
+  if (Array.isArray(valor)) return `array(${valor.length})${valor.length > 0 && profundidad < 3 ? ` de ${forma(valor[0], profundidad + 1)}` : ""}`;
   if (typeof valor !== "object") return typeof valor;
-  if (profundidad >= 2) return "objeto";
+  if (profundidad >= 3) return "objeto";
   const partes = Object.entries(valor as Record<string, unknown>).map(([clave, v]) => {
     if (CAMPOS_SEGUROS.has(clave) && (typeof v === "string" || typeof v === "boolean")) return `${clave}=${String(v)}`;
     if (CAMPOS_NUMERO.has(clave) && typeof v === "number") return `${clave}=${v}`;
@@ -72,6 +72,9 @@ async function main(): Promise<number> {
     console.log("No se encontró la cuenta en esa empresa.");
     return 1;
   }
+  // --estado=ANSWERED para ver la forma de una pregunta cuando la cuenta
+  // no tiene ninguna sin responder.
+  const estado = argumento("estado") === "ANSWERED" ? "ANSWERED" : "UNANSWERED";
   const token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
   const vendedor = cuenta.vendedor;
 
@@ -79,7 +82,7 @@ async function main(): Promise<number> {
   await probar(
     "preguntas v4",
     "/questions/search",
-    `?seller_id=${vendedor}&status=UNANSWERED&api_version=4&sort_fields=date_created&sort_types=ASC&limit=5`,
+    `?seller_id=${vendedor}&status=${estado}&api_version=4&sort_fields=date_created&sort_types=ASC&limit=5`,
     token
   );
   await probar("preguntas sin api_version", "/questions/search", `?seller_id=${vendedor}&status=UNANSWERED&limit=5`, token);
