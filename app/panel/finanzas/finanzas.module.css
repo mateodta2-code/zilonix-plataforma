@@ -134,6 +134,18 @@
   margin-bottom: 24px;
 }
 
+.cabeceraTablero {
+  margin-bottom: 12px;
+}
+
+:global(:root[data-tema="claro"]) .cabeceraTablero {
+  padding: 14px 16px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie);
+  color: var(--texto);
+}
+
 .gridKpi {
   display: grid;
   /* 5 tarjetas: 3 + 2 en escritorio, 2 en tablet, 1 en móvil. */
