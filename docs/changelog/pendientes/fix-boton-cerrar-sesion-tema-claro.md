@@ -1,0 +1,1 @@
+- En tema claro, el botón "Cerrar sesión" de la barra superior ya se lee: antes era letra clara sobre fondo claro.
