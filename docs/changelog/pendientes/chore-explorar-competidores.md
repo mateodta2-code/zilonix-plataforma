@@ -1,0 +1,1 @@
+- `scripts/explorar-optimizacion.ts`: lee los vendedores de un producto de catálogo y qué se puede ver de sus publicaciones (título, fotos, cuotas, descripción, video) y su reputación, antes de la Fase 4.

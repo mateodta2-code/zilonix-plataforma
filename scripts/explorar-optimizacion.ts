@@ -43,8 +43,12 @@ const TEXTO_SEGURO = new Set([
   "id",
   "title",
   "wording",
+  "level_id",
+  "power_seller_status",
+  "tag",
+  "currency_id",
 ]);
-const NUMERO_SEGURO = new Set(["total", "limit", "offset", "score", "total_visits", "visits", "code", "boosts", "last", "progress", "quantity", "order", "sold_quantity", "price", "available_quantity"]);
+const NUMERO_SEGURO = new Set(["total", "limit", "offset", "score", "total_visits", "visits", "code", "boosts", "last", "progress", "quantity", "order", "sold_quantity", "price", "available_quantity", "rate", "original_price"]);
 
 function argumento(nombre: string): string | null {
   const arg = process.argv.slice(2).find((a) => a.startsWith(`--${nombre}=`));
@@ -195,6 +199,36 @@ async function main(): Promise<number> {
   // 5. Competencia en el catálogo.
   await probar("competencia price_to_win", `/items/${itemCatalogo}/price_to_win`, `?siteId=${cuenta.siteId ?? ""}&version=v2`, token);
   console.log(`(competencia probada con una publicación ${deCatalogo.length > 0 ? "de catálogo" : "que NO es de catálogo"})`);
+
+  // 6. Fase 4 (competidores): vendedores del mismo producto de catálogo y
+  // qué se puede leer de SUS publicaciones (título, portada, cuotas,
+  // descripción, fotos, video/clips) y de su reputación.
+  if (deCatalogo.length > 0) {
+    const detalle = (await probar("item de catálogo", `/items/${itemCatalogo}`, "?attributes=id,catalog_product_id", token, undefined, 1)) as {
+      catalog_product_id?: unknown;
+    } | null;
+    const producto = typeof detalle?.catalog_product_id === "string" && /^[A-Z]{3}\d+$/.test(detalle.catalog_product_id) ? detalle.catalog_product_id : null;
+    if (producto) {
+      const ofertas = (await probar("ofertas del producto", `/products/${producto}/items`, "", token, undefined, 3)) as { results?: { item_id?: unknown; seller_id?: unknown }[] } | null;
+      const ajena = (ofertas?.results ?? []).find((o) => typeof o.item_id === "string" && o.item_id !== itemCatalogo);
+      if (ajena && typeof ajena.item_id === "string" && ID_ITEM.test(ajena.item_id)) {
+        await probar(
+          "competidor multiget",
+          "/items",
+          `?ids=${ajena.item_id}&attributes=id,title,thumbnail,price,original_price,shipping,pictures,video_id,installments,sale_terms,tags,seller_id,listing_type_id,catalog_listing`,
+          token,
+          undefined,
+          4
+        );
+        await probar("competidor descripción", `/items/${ajena.item_id}/description`, "", token, undefined, 1);
+        if (typeof ajena.seller_id === "number" || typeof ajena.seller_id === "string") {
+          await probar("competidor reputación", `/users/${String(ajena.seller_id)}`, "?attributes=id,seller_reputation", token, undefined, 3);
+        }
+      } else {
+        console.log("El producto no tiene otros vendedores para probar.");
+      }
+    }
+  }
   return 0;
 }
 
