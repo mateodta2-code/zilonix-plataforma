@@ -3,6 +3,7 @@ import { leerCalidadItem, leerItemOptimizacion } from "@/lib/ml/cliente";
 import {
   conversion,
   leerBusqueda,
+  leerDiasMetricas,
   leerFiltroEstado,
   leerPagina,
   rotuloCompetencia,
@@ -21,6 +22,15 @@ describe("filtros de la URL (lista blanca)", () => {
     expect(leerPagina("abc")).toBe(1);
     expect(leerBusqueda("  faja  ")).toBe("faja");
     expect(leerBusqueda("x".repeat(300))).toHaveLength(100);
+  });
+
+  it("período de visitas y ventas: solo 7, 14, 30 o 90", () => {
+    expect(leerDiasMetricas("14")).toBe(14);
+    expect(leerDiasMetricas("90")).toBe(90);
+    expect(leerDiasMetricas(30)).toBe(30);
+    expect(leerDiasMetricas("365")).toBe(7);
+    expect(leerDiasMetricas("7.5")).toBe(7);
+    expect(leerDiasMetricas(undefined)).toBe(7);
   });
 });
 

@@ -29,19 +29,21 @@ export type FilaTablaOptimizacion = {
 
 const LOTE = 10;
 
-const ENCABEZADOS = [
-  "",
-  "Publicación",
-  { clave: "precio", contenido: "Precio", numerica: true },
-  "Tipo",
-  "Envío",
-  { clave: "visitas", contenido: "Visitas 7 d", numerica: true },
-  { clave: "ventas", contenido: "Ventas 7 d", numerica: true },
-  { clave: "conversion", contenido: "Conversión", numerica: true },
-  "Calidad",
-  "Competencia",
-  "Estado",
-];
+function encabezados(dias: number) {
+  return [
+    "",
+    "Publicación",
+    { clave: "precio", contenido: "Precio", numerica: true },
+    "Tipo",
+    "Envío",
+    { clave: "visitas", contenido: `Visitas ${dias} d`, numerica: true },
+    { clave: "ventas", contenido: `Ventas ${dias} d`, numerica: true },
+    { clave: "conversion", contenido: "Conversión", numerica: true },
+    "Calidad",
+    "Competencia",
+    "Estado",
+  ];
+}
 
 export function TablaOptimizacion({
   filas,
@@ -49,12 +51,14 @@ export function TablaOptimizacion({
   siteId,
   idioma,
   puedeModificar,
+  dias,
 }: {
   filas: FilaTablaOptimizacion[];
   cuentaMlId: string;
   siteId: string;
   idioma: string;
   puedeModificar: boolean;
+  dias: number;
 }) {
   const [metricas, setMetricas] = useState<Record<string, MetricasPublicacion>>({});
   const [cargando, setCargando] = useState(true);
@@ -77,7 +81,7 @@ export function TablaOptimizacion({
         if (cancelado) return;
         const lote = filas.slice(i, i + LOTE).map((f) => ({ id: f.id, catalogo: f.catalogo }));
         try {
-          const r = await metricasPublicacionesAction({ cuentaMlId, items: lote });
+          const r = await metricasPublicacionesAction({ cuentaMlId, items: lote, dias });
           if (cancelado) return;
           if (!r.ok) {
             setAvisoMetricas(r.aviso);
@@ -94,7 +98,7 @@ export function TablaOptimizacion({
     return () => {
       cancelado = true;
     };
-  }, [filas, cuentaMlId]);
+  }, [filas, cuentaMlId, dias]);
 
   const plata = (valor: number | null) => (valor === null ? "—" : formatearMoneda(valor, siteId));
 
@@ -112,7 +116,7 @@ export function TablaOptimizacion({
     <>
       {avisoMetricas ? <p className={styles.avisoError}>{avisoMetricas}</p> : null}
       {cargando ? <p className={styles.nota}>Trayendo visitas, calidad y competencia de Mercado Libre…</p> : null}
-      <Tabla encabezados={ENCABEZADOS} scroll>
+      <Tabla encabezados={encabezados(dias)} scroll>
         {filas.map((fila) => {
           const m = metricas[fila.id];
           const visitas = m ? m.visitas : undefined;
@@ -222,7 +226,7 @@ export function TablaOptimizacion({
               </FilaTabla>
               {abiertaEsta ? (
                 <FilaTabla id={`desglose-${fila.id}`}>
-                  <CeldaTabla colSpan={ENCABEZADOS.length}>
+                  <CeldaTabla colSpan={encabezados(dias).length}>
                     <div className={styles.desglose}>
                       <p className={styles.seccion}>Competencia del mismo producto</p>
                       <DesgloseCompetencia cuentaMlId={cuentaMlId} itemId={fila.id} siteId={siteId} />

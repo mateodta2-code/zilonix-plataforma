@@ -13,7 +13,7 @@ import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { leerPaginaOptimizacion, MAXIMO_RESULTADOS_BUSQUEDA, type PaginaOptimizacion } from "@/lib/optimizacion/lista";
-import { DIAS_METRICAS, leerBusqueda, leerFiltroEstado, leerPagina, type FiltroEstado } from "@/lib/optimizacion/textos";
+import { DIAS_METRICAS, leerBusqueda, leerDiasMetricas, leerFiltroEstado, leerPagina, OPCIONES_DIAS_METRICAS, type DiasMetricas, type FiltroEstado } from "@/lib/optimizacion/textos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
@@ -21,7 +21,8 @@ import { TablaOptimizacion } from "./TablaOptimizacion";
 import styles from "./page.module.css";
 
 // Optimización, Fase 1 — lista de publicaciones de una cuenta, como las
-// muestra Mercado Libre, más visitas, ventas y conversión de 7 días,
+// muestra Mercado Libre, más visitas, ventas y conversión de 7, 14, 30
+// o 90 días (?dias=, 7 por defecto),
 // calidad y competencia en el catálogo. Ver pide inventario/consultar
 // (igual que Publicar e Investigación); pausar o activar,
 // inventario/modificar.
@@ -36,10 +37,11 @@ function primero(valor: ParametroUrl): string | undefined {
 
 const ROTULO_FILTRO: Record<FiltroEstado, string> = { activas: "Activas", pausadas: "Pausadas", todas: "Todas" };
 
-function hrefOptimizacion(params: { cuenta: string | null; estado: FiltroEstado; q: string; pagina: number }): string {
+function hrefOptimizacion(params: { cuenta: string | null; estado: FiltroEstado; q: string; pagina: number; dias: DiasMetricas }): string {
   const q = new URLSearchParams();
   if (params.cuenta) q.set("cuenta", params.cuenta);
   if (params.estado !== "activas") q.set("estado", params.estado);
+  if (params.dias !== DIAS_METRICAS) q.set("dias", String(params.dias));
   if (params.q) q.set("q", params.q);
   if (params.pagina > 1) q.set("pagina", String(params.pagina));
   const texto = q.toString();
@@ -49,7 +51,7 @@ function hrefOptimizacion(params: { cuenta: string | null; estado: FiltroEstado;
 export default async function OptimizacionPage({
   searchParams,
 }: {
-  searchParams?: { cuenta?: ParametroUrl; estado?: ParametroUrl; q?: ParametroUrl; pagina?: ParametroUrl };
+  searchParams?: { cuenta?: ParametroUrl; estado?: ParametroUrl; q?: ParametroUrl; pagina?: ParametroUrl; dias?: ParametroUrl };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -76,6 +78,7 @@ export default async function OptimizacionPage({
   const estado = leerFiltroEstado(primero(searchParams?.estado));
   const texto = leerBusqueda(primero(searchParams?.q));
   const pagina = leerPagina(primero(searchParams?.pagina));
+  const dias = leerDiasMetricas(primero(searchParams?.dias));
   const { cuentas, cuentaId } = await leerCuentaMlDeQuery(empresa.id, cuentaParam);
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
   const puedeModificar = miMembresia ? tienePermiso(miMembresia.permisos, "inventario", "modificar") : false;
@@ -85,23 +88,23 @@ export default async function OptimizacionPage({
   let aviso: string | null = null;
   if (conectada) {
     try {
-      datos = await leerPaginaOptimizacion(empresa.id, conectada, { estado, texto, pagina }, new Date());
+      datos = await leerPaginaOptimizacion(empresa.id, conectada, { estado, texto, pagina, dias }, new Date());
     } catch (error) {
       console.warn(`[app/panel/optimizacion] cuenta ${conectada.id}: ${error instanceof Error ? error.name : "error"}`);
       aviso = motivoCuentaSinRevisar(error);
     }
   }
-  const base = { cuenta: cuentaId, estado, q: texto, pagina: 1 };
+  const base = { cuenta: cuentaId, estado, q: texto, pagina: 1, dias };
 
   return (
     <>
       <EncabezadoPagina
         titulo="Optimización"
-        descripcion={`Tus publicaciones como las muestra Mercado Libre, con visitas, ventas y conversión de los últimos ${DIAS_METRICAS} días, su calidad y cómo vas en la competencia del catálogo.`}
+        descripcion={`Tus publicaciones como las muestra Mercado Libre, con visitas, ventas y conversión de los últimos ${dias} días, su calidad y cómo vas en la competencia del catálogo.`}
       />
 
       <div className={styles.panelDatos}>
-        <SelectorCuentaMl empresaId={empresa.id} cuenta={cuentaParam} parametros={{ ...(estado !== "activas" ? { estado } : {}), ...(texto ? { q: texto } : {}) }} />
+        <SelectorCuentaMl empresaId={empresa.id} cuenta={cuentaParam} parametros={{ ...(estado !== "activas" ? { estado } : {}), ...(texto ? { q: texto } : {}), ...(dias !== DIAS_METRICAS ? { dias: String(dias) } : {}) }} />
       </div>
 
       {cuentas.length === 0 ? (
@@ -126,6 +129,7 @@ export default async function OptimizacionPage({
             <form method="get" action="/panel/optimizacion" className={styles.buscador}>
               <input type="hidden" name="cuenta" value={cuentaId} />
               {estado !== "activas" ? <input type="hidden" name="estado" value={estado} /> : null}
+              {dias !== DIAS_METRICAS ? <input type="hidden" name="dias" value={dias} /> : null}
               <input
                 className="zx-control"
                 type="search"
@@ -139,6 +143,13 @@ export default async function OptimizacionPage({
                 Buscar
               </button>
             </form>
+            <span className={styles.filtro} role="group" aria-label="Período de visitas y ventas">
+              {OPCIONES_DIAS_METRICAS.map((opcion) => (
+                <Link key={opcion} scroll={false} href={hrefOptimizacion({ ...base, dias: opcion })} aria-current={dias === opcion ? "page" : undefined}>
+                  {`${opcion} d`}
+                </Link>
+              ))}
+            </span>
             <span className={styles.filtro}>
               {(Object.keys(ROTULO_FILTRO) as FiltroEstado[]).map((opcion) => (
                 <Link key={opcion} scroll={false} href={hrefOptimizacion({ ...base, estado: opcion })} aria-current={estado === opcion ? "page" : undefined}>
@@ -148,7 +159,7 @@ export default async function OptimizacionPage({
             </span>
           </div>
           <p className={styles.nota}>
-            {`${datos.total} ${datos.total === 1 ? "publicación" : "publicaciones"}`}
+            {`${datos.total} ${datos.total === 1 ? "publicación" : "publicaciones"}.`}
             {datos.busquedaLocal
               ? ` · la búsqueda por título usa las publicaciones ya importadas en Seller (hasta ${MAXIMO_RESULTADOS_BUSQUEDA}).`
               : ""}
@@ -168,6 +179,7 @@ export default async function OptimizacionPage({
               siteId={conectada.siteId}
               idioma={conectada.idioma}
               puedeModificar={puedeModificar}
+              dias={dias}
             />
           )}
           {datos.paginas > 1 ? (

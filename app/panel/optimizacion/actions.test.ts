@@ -99,6 +99,15 @@ describe("metricasPublicacionesAction (solo lectura)", () => {
     expect(ml.competencia).toHaveBeenCalledWith("MCO1", "token", "MCO");
   });
 
+  it("pide las visitas del período elegido; uno fuera de la lista cae a 7", async () => {
+    await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }], dias: 90 });
+    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 90);
+    await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }], dias: 500 });
+    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7);
+    await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }] });
+    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7);
+  });
+
   it("como máximo 10 publicaciones por pedido y descarta ids mal formados", async () => {
     const items = Array.from({ length: 15 }, (_, i) => ({ id: `MCO${i + 1}`, catalogo: false }));
     const r = await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "x/../y", catalogo: false }, ...items] });

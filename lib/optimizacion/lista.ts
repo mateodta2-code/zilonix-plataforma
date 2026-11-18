@@ -1,6 +1,6 @@
 // Optimización, Fase 1 — una página de la lista de publicaciones de una
 // cuenta. Lo de cada publicación sale de Mercado Libre (items/search y
-// /items?ids=); las ventas de los últimos 7 días, de lo que Seller ya
+// /items?ids=); las ventas de los últimos N días (7, 14, 30 o 90), de lo que Seller ya
 // guarda. Visitas, calidad y competencia van aparte (una llamada por
 // publicación): las pide la tabla después de mostrarse
 // (app/panel/optimizacion/actions.ts).
@@ -10,7 +10,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { publicaciones } from "@/db/schema";
 import { buscarItemsPorSkuMl, leerItemsOptimizacionMl, listarItemsVendedorMl, PATRON_ID_PRODUCTO_O_ITEM, type ItemOptimizacionMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
-import { DIAS_METRICAS, TAMANO_PAGINA, type FiltroEstado } from "@/lib/optimizacion/textos";
+import { TAMANO_PAGINA, type DiasMetricas, type FiltroEstado } from "@/lib/optimizacion/textos";
 import { ventasRecientesPorItem, type VentasItem } from "@/lib/optimizacion/ventas";
 
 export type FilaOptimizacion = ItemOptimizacionMl & { ventas: VentasItem | null };
@@ -62,7 +62,7 @@ async function idsDeBusqueda(empresaId: string, cuentaMlId: string, vendedorId: 
 export async function leerPaginaOptimizacion(
   empresaId: string,
   cuenta: { id: string; cuentaIdExterna: string },
-  filtros: { estado: FiltroEstado; texto: string; pagina: number },
+  filtros: { estado: FiltroEstado; texto: string; pagina: number; dias: DiasMetricas },
   ahora: Date
 ): Promise<PaginaOptimizacion> {
   const token = await obtenerAccessTokenVigente(empresaId, cuenta.id);
@@ -96,7 +96,7 @@ export async function leerPaginaOptimizacion(
     omitidas = pagina.ids.length - items.length;
   }
 
-  const desde = new Date(ahora.getTime() - DIAS_METRICAS * 86_400_000);
+  const desde = new Date(ahora.getTime() - filtros.dias * 86_400_000);
   const ventas = await ventasRecientesPorItem(
     empresaId,
     cuenta.id,
