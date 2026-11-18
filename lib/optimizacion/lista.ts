@@ -23,6 +23,9 @@ export type PaginaOptimizacion = {
   // La búsqueda por texto usa los títulos de las publicaciones ya
   // importadas en Seller.
   busquedaLocal: boolean;
+  // Publicaciones de la página que Mercado Libre no devolvió en el
+  // detalle (un lote que falló): se avisan, no se esconden en silencio.
+  omitidas: number;
 };
 
 export const MAXIMO_RESULTADOS_BUSQUEDA = 200;
@@ -65,12 +68,14 @@ export async function leerPaginaOptimizacion(
   const token = await obtenerAccessTokenVigente(empresaId, cuenta.id);
   let items: ItemOptimizacionMl[];
   let total: number;
+  let omitidas = 0;
 
   if (filtros.texto) {
     // Búsqueda: se traen todos los candidatos, se filtran por estado y
     // se pagina acá.
     const ids = await idsDeBusqueda(empresaId, cuenta.id, cuenta.cuentaIdExterna, token, filtros.texto);
     const todos = await leerItemsOptimizacionMl(ids, token);
+    omitidas = ids.length - todos.length;
     const estado = ESTADO_ML[filtros.estado];
     const filtrados = estado ? todos.filter((i) => i.estado === estado) : todos;
     total = filtrados.length;
@@ -88,6 +93,7 @@ export async function leerPaginaOptimizacion(
       const item = porId.get(id);
       return item ? [item] : [];
     });
+    omitidas = pagina.ids.length - items.length;
   }
 
   const desde = new Date(ahora.getTime() - DIAS_METRICAS * 86_400_000);
@@ -103,5 +109,6 @@ export async function leerPaginaOptimizacion(
     pagina: filtros.pagina,
     paginas: Math.max(1, Math.ceil(total / TAMANO_PAGINA)),
     busquedaLocal: Boolean(filtros.texto),
+    omitidas,
   };
 }

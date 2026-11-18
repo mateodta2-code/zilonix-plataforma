@@ -1,0 +1,1 @@
+- **Optimización:** la lista ya carga. El detalle en lote pedía `secure_thumbnail`, y con 20 publicaciones Mercado Libre respondía 403 y tumbaba la página. Ahora la foto sale de `thumbnail` en https, un lote que falla no tumba los demás y se avisa cuántas publicaciones faltaron. El aviso de permiso ya no habla de "preguntas".
