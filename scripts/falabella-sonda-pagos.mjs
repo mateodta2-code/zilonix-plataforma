@@ -150,7 +150,35 @@ function guardar(nombre, datos) {
 const iso = (ms) => new Date(ms).toISOString();
 const soloFecha = (ms) => iso(ms).slice(0, 10);
 
+// llamarFalabella solo reporta el NOMBRE del error de red ("TypeError"),
+// sin la causa. Primera corrida real (18/11): todas las llamadas dieron
+// "TypeError" sin más pista. Esta prueba previa, SIN credenciales ni
+// firma, repite las mismas opciones de fetch y muestra la causa real.
+async function diagnosticarRed() {
+  try {
+    const res = await fetch("https://sellercenter-api.falabella.com/", {
+      headers: { "User-Agent": `${sellerId}/Node/${process.versions.node.split(".")[0]}/ZILONIX/FACO` },
+      signal: AbortSignal.timeout(15_000),
+      redirect: "error",
+      cache: "no-store",
+    });
+    console.log(`Conexión con Falabella OK (respondió ${res.status}).`);
+    return true;
+  } catch (error) {
+    const causa = error?.cause;
+    console.error(
+      "No se pudo conectar con Falabella:",
+      error?.name,
+      "-",
+      error?.message,
+      causa ? `| causa: ${causa.code ?? ""} ${causa.message ?? ""}` : "",
+    );
+    return false;
+  }
+}
+
 async function main() {
+  if (!(await diagnosticarRed())) process.exit(1);
   mkdirSync(DIR_SALIDA, { recursive: true });
   const ahora = Date.now();
   const resumen = {};
