@@ -1,0 +1,1 @@
+- `scripts/explorar-optimizacion.ts`: prueba el detalle en lote de 20 publicaciones campo por campo (la página de Optimización recibió un 403).
