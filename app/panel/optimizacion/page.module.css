@@ -262,3 +262,17 @@
   display: flex;
   gap: 2px;
 }
+
+/* Fase 4 — competencia del mismo producto. */
+.alertas {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--peligro-texto);
+}
+
+.filaPropia > td {
+  background: var(--acento-suave);
+}

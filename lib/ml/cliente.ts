@@ -2011,3 +2011,130 @@ export async function tieneAutomatizacionPrecioMl(itemId: string, token: string)
     return null;
   }
 }
+
+// ---------- Optimización, Fase 4 (competidores del mismo producto) ----------
+// Confirmado en staging (18-nov, PR #466/#467):
+// - /products/{id}/items: los vendedores del producto de catálogo, con
+//   price, original_price, listing_type_id, shipping y seller_id.
+// - /items?ids= de publicaciones AJENAS: a veces code=200 (title,
+//   thumbnail, pictures, video_id) y a veces code=403 por publicación.
+// - /items/{id}/description: 200 o 404 (sin descripción).
+// - /users/{id}?attributes=seller_reputation: level_id y
+//   power_seller_status.
+// Cuotas, regalos y clips no vienen en ninguna de estas respuestas.
+
+export type OfertaCompetencia = {
+  itemId: string;
+  vendedorId: string | null;
+  precio: number | null;
+  precioOriginal: number | null;
+  tipoPublicacion: string | null;
+  envioGratis: boolean | null;
+  full: boolean | null;
+};
+
+export function leerOfertasCompetencia(data: unknown): OfertaCompetencia[] {
+  const resultados = (data as { results?: unknown })?.results;
+  return (Array.isArray(resultados) ? resultados : []).flatMap((fila): OfertaCompetencia[] => {
+    const o = fila as { item_id?: unknown; seller_id?: unknown; price?: unknown; original_price?: unknown; listing_type_id?: unknown; shipping?: { free_shipping?: unknown; logistic_type?: unknown } };
+    if (typeof o?.item_id !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(o.item_id)) return [];
+    const vendedor = o.seller_id != null ? String(o.seller_id) : null;
+    const precio = numeroONull(o.price);
+    const original = numeroONull(o.original_price);
+    return [
+      {
+        itemId: o.item_id,
+        vendedorId: vendedor && PATRON_ID_VENDEDOR.test(vendedor) ? vendedor : null,
+        precio,
+        precioOriginal: original !== null && precio !== null && original > precio ? original : null,
+        tipoPublicacion: typeof o.listing_type_id === "string" ? o.listing_type_id : null,
+        envioGratis: typeof o.shipping?.free_shipping === "boolean" ? o.shipping.free_shipping : null,
+        full: o.shipping ? o.shipping.logistic_type === "fulfillment" : null,
+      },
+    ];
+  });
+}
+
+export async function ofertasProductoCompetenciaMl(productoId: string, token: string): Promise<OfertaCompetencia[]> {
+  exigirId(productoId, PATRON_ID_PRODUCTO_O_ITEM, "productoId");
+  const resp = await pedirLecturaMl<unknown>(`/products/${productoId}/items`, token);
+  if (!resp.ok) throw new MlRespuestaInesperadaError(resp.status, "listar los vendedores del producto");
+  return leerOfertasCompetencia(resp.data);
+}
+
+export type FichaPublicacion = { titulo: string | null; foto: string | null; fotos: number | null; video: boolean | null };
+
+// Título, portada, cantidad de fotos y video de publicaciones (propias o
+// ajenas). Las que Mercado Libre no deja leer (403) no aparecen.
+export async function fichasPublicacionesMl(ids: string[], token: string): Promise<Map<string, FichaPublicacion>> {
+  const fichas = new Map<string, FichaPublicacion>();
+  const validos = ids.filter((id) => PATRON_ID_PRODUCTO_O_ITEM.test(id));
+  for (let i = 0; i < validos.length; i += TAMAÑO_LOTE_DETALLE_ITEMS) {
+    const lote = validos.slice(i, i + TAMAÑO_LOTE_DETALLE_ITEMS);
+    let resp: RespuestaLecturaMl<{ code?: unknown; body?: unknown }[]>;
+    try {
+      resp = await pedirLecturaMl<{ code?: unknown; body?: unknown }[]>("/items", token, {
+        query: `?ids=${lote.join(",")}&attributes=id,title,thumbnail,pictures,video_id`,
+      });
+    } catch (error) {
+      if (error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) continue;
+      throw error;
+    }
+    if (!resp.ok || !Array.isArray(resp.data)) continue;
+    for (const fila of resp.data) {
+      if (fila?.code !== 200) continue;
+      const b = fila.body as { id?: unknown; title?: unknown; thumbnail?: unknown; pictures?: unknown; video_id?: unknown };
+      if (typeof b?.id !== "string") continue;
+      const thumb = typeof b.thumbnail === "string" && b.thumbnail.startsWith("http") ? b.thumbnail.replace(/^http:\/\//, "https://") : null;
+      fichas.set(b.id, {
+        titulo: typeof b.title === "string" ? b.title : null,
+        foto: thumb,
+        fotos: Array.isArray(b.pictures) ? b.pictures.length : null,
+        video: b.video_id === null || b.video_id === undefined ? false : typeof b.video_id === "string" && b.video_id.length > 0,
+      });
+    }
+  }
+  return fichas;
+}
+
+// true = tiene descripción; false = no (404); null = no se pudo saber.
+export async function tieneDescripcionMl(itemId: string, token: string): Promise<boolean | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  try {
+    const resp = await pedirLecturaMl<{ plain_text?: unknown; text?: unknown }>(`/items/${itemId}/description`, token);
+    if (resp.ok) {
+      const texto = typeof resp.data.plain_text === "string" ? resp.data.plain_text : typeof resp.data.text === "string" ? resp.data.text : "";
+      return texto.trim().length > 0;
+    }
+    return resp.status === 404 ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+export type ReputacionMl = { nivel: string | null; lider: string | null };
+
+export async function reputacionVendedorMl(vendedorId: string, token: string): Promise<ReputacionMl | null> {
+  exigirId(vendedorId, PATRON_ID_VENDEDOR, "vendedorId");
+  try {
+    const resp = await pedirLecturaMl<{ seller_reputation?: { level_id?: unknown; power_seller_status?: unknown } }>(`/users/${vendedorId}`, token, {
+      query: "?attributes=id,seller_reputation",
+    });
+    if (!resp.ok) return null;
+    const r = resp.data.seller_reputation;
+    return {
+      nivel: typeof r?.level_id === "string" ? r.level_id : null,
+      lider: typeof r?.power_seller_status === "string" ? r.power_seller_status : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function productoCatalogoDeItemMl(itemId: string, token: string): Promise<string | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const resp = await pedirLecturaMl<{ catalog_product_id?: unknown }>(`/items/${itemId}`, token, { query: "?attributes=id,catalog_product_id" });
+  if (!resp.ok) return null;
+  const id = resp.data.catalog_product_id;
+  return typeof id === "string" && PATRON_ID_PRODUCTO_O_ITEM.test(id) ? id : null;
+}

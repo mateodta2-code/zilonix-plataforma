@@ -8,6 +8,7 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { formatearMoneda, formatearNumero } from "@/lib/ml/sitios";
 import { conversion, rotuloCompetencia, rotuloEstadoPublicacion, rotuloTipoPublicacion, tonoCalidad } from "@/lib/optimizacion/textos";
 import { cambiarEstadoPublicacionAction, metricasPublicacionesAction, type MetricasPublicacion } from "./actions";
+import { DesgloseCompetencia } from "./DesgloseCompetencia";
 import styles from "./page.module.css";
 
 export type FilaTablaOptimizacion = {
@@ -223,8 +224,8 @@ export function TablaOptimizacion({
                 <FilaTabla id={`desglose-${fila.id}`}>
                   <CeldaTabla colSpan={ENCABEZADOS.length}>
                     <div className={styles.desglose}>
-                      <p className={styles.seccion}>Desglose (próximamente)</p>
-                      <p className={styles.nota}>Aquí vendrá la comparación con los competidores del mismo producto. Las ventas, los costos y la ganancia real ya están en «Ver detalle».</p>
+                      <p className={styles.seccion}>Competencia del mismo producto</p>
+                      <DesgloseCompetencia cuentaMlId={cuentaMlId} itemId={fila.id} siteId={siteId} />
                       {m?.calidad && m.calidad.pendientes.length > 0 ? (
                         <>
                           <p className={styles.seccion}>Objetivos de calidad pendientes</p>
