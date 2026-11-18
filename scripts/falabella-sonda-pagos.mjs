@@ -23,7 +23,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 // Se reutiliza la firma y el cliente real del conector — nada de
 // duplicar el HMAC acá.
-import { llamarFalabella, FalabellaApiError, FalabellaNoDisponibleError } from "../lib/falabella/cliente.ts";
+import { llamarFalabella, firmarSolicitud, FalabellaApiError, FalabellaNoDisponibleError } from "../lib/falabella/cliente.ts";
 
 const DIR_SALIDA = join(process.cwd(), "tmp", "falabella-sonda");
 const DIA_MS = 24 * 60 * 60 * 1000;
@@ -44,7 +44,7 @@ const credenciales = { userId, apiKey, sellerId };
 // valor que parezca correo. "Name" a secas no se tapa: en los ítems es
 // el nombre del producto, que hace falta para entender la respuesta.
 const CAMPO_PERSONAL =
-  /customer|buyer|recipient|receiver|first.?name|last.?name|full.?name|address|street|phone|mobile|e.?mail|national|tax.?ident|document|cedula|ward|post.?code|zip|city|region|latitude|longitude/i;
+  /customer|buyer|recipient|receiver|first.?name|last.?name|full.?name|address|street|phone|mobile|e.?mail|national|tax.?ident|document|cedula|legal|fiscal|verifier|remarks|gift.?message|ward|post.?code|zip|city|region|latitude|longitude/i;
 const PARECE_CORREO = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 
 function redactar(valor) {
@@ -110,10 +110,33 @@ async function intentar(action, version, parametros) {
     const cuerpo = await llamarFalabella({ ...credenciales, action, version, parametros });
     return { ok: true, parametros, cuerpo: cuerpo ?? null };
   } catch (error) {
+    // Primera corrida real (18/11): GetPayoutStatus y GetTransactionDetails
+    // dieron FalabellaApiError "desconocido" — el ErrorResponse no traía
+    // ErrorCode/ErrorMessage donde cliente.ts los busca. Se repite la
+    // llamada en crudo (misma firma) para guardar el ErrorResponse tal cual.
+    if (error instanceof FalabellaApiError && error.codigo === "desconocido") {
+      return { ok: false, parametros, error: { tipo: error.name, codigo: null, mensaje: error.message }, errorCrudo: await errorCrudo(action, version, parametros) };
+    }
     if (error instanceof FalabellaApiError || error instanceof FalabellaNoDisponibleError) {
       return { ok: false, parametros, error: { tipo: error.name, codigo: error.codigo ?? null, mensaje: error.message } };
     }
     return { ok: false, parametros, error: { tipo: "inesperado", mensaje: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
+async function errorCrudo(action, version, parametros) {
+  const base = { Action: action, Format: "JSON", Timestamp: new Date().toISOString(), UserID: userId, Version: version, ...parametros };
+  const query = new URLSearchParams({ ...base, Signature: firmarSolicitud(base, apiKey) });
+  try {
+    const res = await fetch(`https://sellercenter-api.falabella.com/?${query}`, {
+      headers: { "User-Agent": `${sellerId}/Node/${process.versions.node.split(".")[0]}/ZILONIX/FACO` },
+      signal: AbortSignal.timeout(15_000),
+      redirect: "error",
+    });
+    const cuerpo = await res.json().catch(() => null);
+    return { status: res.status, ErrorResponse: cuerpo?.ErrorResponse ?? cuerpo };
+  } catch (e) {
+    return { fallo: e instanceof Error ? e.message : "error de red" };
   }
 }
 
@@ -188,7 +211,7 @@ async function main() {
     guardar(nombre, { intentos });
     resumen[nombre] = exitoso
       ? { estado: "OK", parametros: Object.keys(exitoso.parametros), ...resumir(exitoso.cuerpo) }
-      : { estado: "ERROR", errores: intentos.map((i) => i.error) };
+      : { estado: "ERROR", errores: intentos.map((i) => ({ ...i.error, ...(i.errorCrudo ? { crudo: i.errorCrudo } : {}) })) };
   }
 
   // 1) GetPayoutStatus — últimos 60 días.
@@ -250,7 +273,9 @@ async function main() {
   guardar("resumen", resumen);
   for (const [nombre, r] of Object.entries(resumen)) {
     console.log(`\n=== ${nombre}: ${r.estado}`);
-    if (r.estado === "ERROR") console.log("  errores:", r.errores.map((e) => `${e.codigo ?? e.tipo}: ${e.mensaje}`).join(" | "));
+    if (r.estado === "ERROR") {
+      for (const e of r.errores) console.log("  error:", e.crudo ? JSON.stringify(redactar(e.crudo)) : `${e.codigo ?? e.tipo}: ${e.mensaje}`);
+    }
     if (r.estado === "OK") {
       console.log(`  parámetros aceptados: ${r.parametros.join(", ")}`);
       console.log(`  campos (${r.campos.length}): ${r.campos.join(", ")}`);
