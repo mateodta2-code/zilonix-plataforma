@@ -142,6 +142,17 @@ export function IconoSoporte(props: IconoProps) {
 }
 
 // Dos globos de conversación — foro de la comunidad.
+// Gráfica que sube con una flecha (Optimización).
+export function IconoOptimizacion(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 19h16" />
+      <path d="M5 15l4-4 3 3 6-6" />
+      <path d="M14 8h4v4" />
+    </Svg>
+  );
+}
+
 // Globo de diálogo con un signo de pregunta (Preguntas y reclamos).
 export function IconoPreguntas(props: IconoProps) {
   return (
@@ -418,6 +429,7 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   inventario: IconoInventario,
   bodegas: IconoBodegas,
   investigacion: IconoInvestigacion,
+  optimizacion: IconoOptimizacion,
   publicar: IconoPublicar,
   finanzas: IconoFinanzas,
   publicidad: IconoPublicidad,

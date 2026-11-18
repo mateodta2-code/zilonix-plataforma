@@ -68,6 +68,10 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       // Mismo permiso que SKU ("inventario","consultar") — Investigación
       // también decide qué traer/revender, no vende ni despacha nada.
       ...(veSku ? [{ etiqueta: "Investigación", href: "/panel/investigacion", icono: "investigacion" as const }] : []),
+      // Optimización (módulo de Santiago): entre Investigación y Publicar,
+      // mismo permiso ("inventario","consultar"); pausar/activar pide
+      // modificar en la acción.
+      ...(veSku ? [{ etiqueta: "Optimización", href: "/panel/optimizacion", icono: "optimizacion" as const }] : []),
       // ADENDO UX de Publicar, punto 1 — mismo permiso que ya exige
       // app/panel/publicar/page.tsx ("inventario","consultar") —
       // sin grupos de empresa hardcodeados: cualquier empresa con ese

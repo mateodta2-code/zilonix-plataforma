@@ -1,0 +1,162 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Optimización, Fase 1 — acciones. Sin base ni Mercado Libre: se simulan
+// la sesión, el permiso, la cuenta, el token y las llamadas.
+
+const estado = vi.hoisted(() => ({ conPermiso: true, cuentaExiste: true, permisosPedidos: [] as string[] }));
+const ml = vi.hoisted(() => ({
+  visitas: vi.fn(),
+  calidad: vi.fn(),
+  competencia: vi.fn(),
+  actualizar: vi.fn(),
+}));
+const auditorias = vi.hoisted(() => [] as unknown[]);
+
+vi.mock("@/lib/usuarios", () => ({ obtenerOCrearUsuarioActual: async () => ({ id: "usuario-1" }) }));
+vi.mock("@/lib/empresas", () => ({ listarEmpresasDeUsuario: async () => [{ id: "empresa-1" }] }));
+vi.mock("next/headers", () => ({ cookies: () => ({ get: () => ({ value: "empresa-1" }) }) }));
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => {
+    throw new Error(`REDIRECT:${url}`);
+  },
+}));
+vi.mock("@/lib/permisos", () => {
+  class SinPermisoError extends Error {}
+  return {
+    SinPermisoError,
+    requierePermiso: async (_u: string, _e: string, modulo: string, accion: string) => {
+      estado.permisosPedidos.push(`${modulo}.${accion}`);
+      if (!estado.conPermiso) throw new SinPermisoError("sin permiso");
+    },
+  };
+});
+vi.mock("@/db/empresa-context", () => ({
+  dbComoEmpresa: async (_empresaId: string, fn: (tx: unknown) => Promise<unknown>) =>
+    fn({
+      select: () => ({
+        from: () => ({
+          where: async () => (estado.cuentaExiste ? [{ id: CUENTA, nickname: "TIENDA", siteId: "MCO" }] : []),
+        }),
+      }),
+    }),
+}));
+vi.mock("@/lib/auditoria", () => ({ registrarAuditoria: async (_tx: unknown, entrada: unknown) => auditorias.push(entrada) }));
+vi.mock("@/lib/ml/cuentas", () => ({ obtenerAccessTokenVigente: async () => "token" }));
+vi.mock("@/lib/ml/preguntas", () => ({ motivoCuentaSinRevisar: () => "Token vencido — hay que reconectar la cuenta." }));
+vi.mock("@/lib/ml/cliente", async () => {
+  const real = await vi.importActual<typeof import("@/lib/ml/cliente")>("@/lib/ml/cliente");
+  return {
+    ...real,
+    visitasItemMl: ml.visitas,
+    calidadItemMl: ml.calidad,
+    competenciaItemMl: ml.competencia,
+    actualizarItemMl: ml.actualizar,
+  };
+});
+
+const CUENTA = "11111111-1111-1111-1111-111111111111";
+
+import { cambiarEstadoPublicacionAction, metricasPublicacionesAction } from "./actions";
+
+describe("metricasPublicacionesAction (solo lectura)", () => {
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.visitas.mockReset().mockResolvedValue(40);
+    ml.calidad.mockReset().mockResolvedValue({ puntaje: 78, nivel: "Profesional", pendientes: ["Agrega fotos"] });
+    ml.competencia.mockReset().mockResolvedValue({ estado: "winning", precioParaGanar: 1000 });
+  });
+
+  it("pide consultar inventario y trae visitas, calidad y, solo en catálogo, competencia", async () => {
+    const r = await metricasPublicacionesAction({
+      cuentaMlId: CUENTA,
+      items: [
+        { id: "MCO1", catalogo: true },
+        { id: "MCO2", catalogo: false },
+      ],
+    });
+    expect(estado.permisosPedidos).toEqual(["inventario.consultar"]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.metricas.MCO1.competencia?.estado).toBe("winning");
+    expect(r.metricas.MCO2.competencia).toBeNull();
+    expect(ml.competencia).toHaveBeenCalledTimes(1);
+    expect(ml.competencia).toHaveBeenCalledWith("MCO1", "token", "MCO");
+  });
+
+  it("como máximo 10 publicaciones por pedido y descarta ids mal formados", async () => {
+    const items = Array.from({ length: 15 }, (_, i) => ({ id: `MCO${i + 1}`, catalogo: false }));
+    const r = await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "x/../y", catalogo: false }, ...items] });
+    expect(r.ok && Object.keys(r.metricas)).toHaveLength(10);
+    expect(ml.visitas).not.toHaveBeenCalledWith("x/../y", expect.anything(), expect.anything());
+  });
+
+  it("una publicación que falla queda en null sin tumbar las demás", async () => {
+    ml.visitas.mockImplementation(async (id: string) => {
+      if (id === "MCO1") throw new Error("ML caído");
+      return 5;
+    });
+    const r = await metricasPublicacionesAction({
+      cuentaMlId: CUENTA,
+      items: [
+        { id: "MCO1", catalogo: false },
+        { id: "MCO2", catalogo: false },
+      ],
+    });
+    expect(r.ok && r.metricas.MCO1.visitas).toBeNull();
+    expect(r.ok && r.metricas.MCO2.visitas).toBe(5);
+  });
+
+  it("sin permiso o con cuenta ajena no llama a Mercado Libre", async () => {
+    estado.conPermiso = false;
+    expect((await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: true }] })).ok).toBe(false);
+    estado.conPermiso = true;
+    estado.cuentaExiste = false;
+    expect((await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: true }] })).ok).toBe(false);
+    expect(ml.visitas).not.toHaveBeenCalled();
+  });
+});
+
+describe("cambiarEstadoPublicacionAction (escribe en Mercado Libre)", () => {
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.actualizar.mockReset();
+    auditorias.length = 0;
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("pausa con inventario.modificar y deja auditoría", async () => {
+    ml.actualizar.mockResolvedValue({ ok: true, status: 200, data: { status: "paused" }, textoCrudo: "" });
+    const r = await cambiarEstadoPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO1", activar: false });
+    expect(estado.permisosPedidos).toEqual(["inventario.modificar"]);
+    expect(ml.actualizar).toHaveBeenCalledWith("MCO1", "token", { status: "paused" });
+    expect(r).toEqual({ ok: true, aviso: "Publicación pausada.", estado: "paused" });
+    expect(auditorias).toHaveLength(1);
+  });
+
+  it("sin permiso de modificar no toca Mercado Libre", async () => {
+    estado.conPermiso = false;
+    const r = await cambiarEstadoPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO1", activar: true });
+    expect(r.ok).toBe(false);
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("publicación en revisión: aviso claro; otro rechazo: sin el error crudo", async () => {
+    ml.actualizar.mockResolvedValue({ ok: false, status: 400, data: null, textoCrudo: '{"cause":[{"code":"item.status.not_modifiable"}]}' });
+    expect((await cambiarEstadoPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO1", activar: true })).aviso).toContain("revisando");
+    ml.actualizar.mockResolvedValue({ ok: false, status: 400, data: null, textoCrudo: '{"message":"detalle interno de ML"}' });
+    const r = await cambiarEstadoPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO1", activar: true });
+    expect(r.ok).toBe(false);
+    expect(r.aviso).not.toContain("detalle interno");
+    expect(auditorias).toHaveLength(0);
+  });
+
+  it("rechaza un itemId mal formado", async () => {
+    const r = await cambiarEstadoPublicacionAction({ cuentaMlId: CUENTA, itemId: "../users/1", activar: true });
+    expect(r.ok).toBe(false);
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+});

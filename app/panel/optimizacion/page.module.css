@@ -1,0 +1,198 @@
+/* Optimización — tokens existentes, sin paleta nueva. La tabla vive en
+   una Tarjeta (zona oscura en los dos temas). */
+
+/* Selector de cuenta: en tema claro, tarjeta con fondo propio para que
+   no dependa del degradado de atrás (mismo criterio que Publicidad). */
+.panelDatos {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+:global(:root[data-tema="claro"]) .panelDatos {
+  padding: 14px 16px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie);
+  color: var(--texto);
+}
+
+.aviso {
+  padding: 14px 16px;
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie-2);
+  color: var(--texto-superficie-2);
+}
+
+.avisoTitulo {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+}
+
+.avisoTexto {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.tarjeta {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.barra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.buscador {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 240px;
+  max-width: 520px;
+}
+
+.buscador input {
+  flex: 1;
+  min-width: 0;
+}
+
+.filtro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.filtro a,
+.paginas a {
+  color: var(--texto-suave);
+  text-decoration: none;
+}
+
+.filtro a[aria-current="page"] {
+  color: var(--acento-fuerte);
+  font-weight: 600;
+}
+
+.paginas a:hover,
+.filtro a:hover {
+  color: var(--acento-fuerte);
+}
+
+.nota {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.notaNeutra {
+  display: block;
+  font-size: 11px;
+  color: var(--texto-suave);
+  overflow-wrap: anywhere;
+}
+
+.seccion {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--plata-etiqueta);
+}
+
+.expandir {
+  border: none;
+  background: none;
+  padding: 2px 6px;
+  color: var(--texto-suave);
+  font: inherit;
+  cursor: pointer;
+}
+
+.expandir:hover,
+.expandir:focus-visible {
+  color: var(--acento-fuerte);
+}
+
+.publicacion {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 260px;
+}
+
+.foto {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: var(--radio-boton);
+  object-fit: cover;
+  background: var(--superficie-2);
+}
+
+.enlace {
+  color: var(--texto);
+  text-decoration: none;
+}
+
+.enlace:hover {
+  color: var(--acento-fuerte);
+  text-decoration: underline;
+}
+
+.precioAntes {
+  display: block;
+  font-size: 11px;
+  color: var(--texto-suave);
+  text-decoration: line-through;
+}
+
+.chips,
+.calidad,
+.estado {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.desglose {
+  display: grid;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.objetivos {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.paginas {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.avisoOk,
+.avisoError {
+  display: block;
+  margin: 0;
+  font-size: 12px;
+}
+
+.avisoOk {
+  color: var(--exito-texto);
+}
+
+.avisoError {
+  color: var(--peligro-texto);
+}
