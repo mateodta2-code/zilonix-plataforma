@@ -1,0 +1,1 @@
+- Script de solo lectura `scripts/explorar-optimizacion.ts`: confirma con una cuenta real cómo responde Mercado Libre (publicaciones pausadas, detalle en lote, visitas, calidad y competencia en el catálogo) antes de la Fase 1 de Optimización.
