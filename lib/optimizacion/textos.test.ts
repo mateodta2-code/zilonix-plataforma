@@ -79,6 +79,11 @@ describe("lectura de Mercado Libre (forma confirmada en staging, #457/#458)", ()
     });
   });
 
+  it("la foto sale de thumbnail pasada a https (sin secure_thumbnail, que da 403 en lote)", () => {
+    expect(leerItemOptimizacion({ id: "MCO1", thumbnail: "http://http2.mlstatic.com/D_1.jpg" })?.foto).toBe("https://http2.mlstatic.com/D_1.jpg");
+    expect(leerItemOptimizacion({ id: "MCO1", thumbnail: "javascript:x" })?.foto).toBeNull();
+  });
+
   it("sin promoción no hay precio original; un permalink raro no se usa", () => {
     const item = leerItemOptimizacion({ id: "MCO1", price: 50000, original_price: null, permalink: "javascript:alert(1)" });
     expect(item?.precioOriginal).toBeNull();

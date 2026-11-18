@@ -50,7 +50,7 @@ export function motivoCuentaSinRevisar(error: unknown): string {
   if (error instanceof CuentaDesconectadaError || error instanceof RenovacionTokenFallidaError || error instanceof MlNoAutorizadoError) {
     return "Token vencido — hay que reconectar la cuenta.";
   }
-  if (error instanceof MlSinPermisoAppError) return "Mercado Libre no da permiso para leer las preguntas de esta cuenta.";
+  if (error instanceof MlSinPermisoAppError) return "Mercado Libre no dio permiso para leer estos datos de la cuenta.";
   if (error instanceof LimiteMercadoLibreError) return "Mercado Libre pidió esperar un momento. Se reintenta al actualizar.";
   if (error instanceof MlNoDisponibleError) return "Mercado Libre no respondió a tiempo. Se reintenta al actualizar.";
   return "No se pudo consultar ahora. Se reintenta al actualizar.";

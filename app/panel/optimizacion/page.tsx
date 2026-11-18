@@ -154,6 +154,11 @@ export default async function OptimizacionPage({
               : ""}
             {" "}Las ventas salen de las ventas que Seller ya sincronizó; la conversión es ventas ÷ visitas.
           </p>
+          {datos.omitidas > 0 ? (
+            <p className={styles.avisoError}>
+              {`Mercado Libre no entregó el detalle de ${datos.omitidas} ${datos.omitidas === 1 ? "publicación" : "publicaciones"} de esta página. Actualiza para reintentar.`}
+            </p>
+          ) : null}
           {datos.filas.length === 0 ? (
             <EstadoVacio>{texto ? "Ninguna publicación coincide con la búsqueda." : "No hay publicaciones con este filtro."}</EstadoVacio>
           ) : (

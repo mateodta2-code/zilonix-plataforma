@@ -1809,8 +1809,18 @@ export type ItemOptimizacionMl = {
   sku: string | null;
 };
 
+// Sin secure_thumbnail: con 20 ids ese campo hace que /items?ids=
+// responda 403 (probado campo por campo en staging, 17-nov, PR #460).
+// La foto sale de thumbnail, pasada a https.
 const ATRIBUTOS_ITEM_OPTIMIZACION =
-  "id,title,thumbnail,secure_thumbnail,permalink,status,price,original_price,listing_type_id,shipping,catalog_listing,available_quantity,seller_custom_field,attributes";
+  "id,title,thumbnail,permalink,status,price,original_price,listing_type_id,shipping,catalog_listing,available_quantity,seller_custom_field,attributes";
+
+function fotoHttps(valor: unknown): string | null {
+  if (typeof valor !== "string") return null;
+  if (valor.startsWith("https://")) return valor;
+  if (valor.startsWith("http://")) return `https://${valor.slice("http://".length)}`;
+  return null;
+}
 
 export function leerItemOptimizacion(body: unknown): ItemOptimizacionMl | null {
   const d = body as Record<string, unknown> & { shipping?: { free_shipping?: unknown; logistic_type?: unknown } };
@@ -1821,7 +1831,7 @@ export function leerItemOptimizacion(body: unknown): ItemOptimizacionMl | null {
   return {
     id: d.id,
     titulo: typeof d.title === "string" ? d.title : null,
-    foto: typeof d.secure_thumbnail === "string" ? d.secure_thumbnail : typeof d.thumbnail === "string" ? d.thumbnail : null,
+    foto: fotoHttps(d.secure_thumbnail) ?? fotoHttps(d.thumbnail),
     enlace: typeof d.permalink === "string" && d.permalink.startsWith("https://") ? d.permalink : null,
     estado: typeof d.status === "string" ? d.status : null,
     precio,
@@ -1835,16 +1845,23 @@ export function leerItemOptimizacion(body: unknown): ItemOptimizacionMl | null {
   };
 }
 
-// /items?ids= en lotes de 20. Un lote que falla no tumba los demás: sus
-// publicaciones quedan fuera y el llamador lo ve en el conteo.
+// /items?ids= en lotes de 20. Un lote que falla (incluso con 403) no
+// tumba los demás: sus publicaciones quedan fuera y el llamador lo ve
+// porque devuelve menos de las que pidió.
 export async function leerItemsOptimizacionMl(ids: string[], token: string): Promise<ItemOptimizacionMl[]> {
   const validos = ids.filter((id) => PATRON_ID_PRODUCTO_O_ITEM.test(id));
   const items: ItemOptimizacionMl[] = [];
   for (let i = 0; i < validos.length; i += TAMAÑO_LOTE_DETALLE_ITEMS) {
     const lote = validos.slice(i, i + TAMAÑO_LOTE_DETALLE_ITEMS);
-    const resp = await pedirLecturaMl<{ code?: unknown; body?: unknown }[]>("/items", token, {
-      query: `?ids=${lote.join(",")}&attributes=${ATRIBUTOS_ITEM_OPTIMIZACION}`,
-    });
+    let resp: RespuestaLecturaMl<{ code?: unknown; body?: unknown }[]>;
+    try {
+      resp = await pedirLecturaMl<{ code?: unknown; body?: unknown }[]>("/items", token, {
+        query: `?ids=${lote.join(",")}&attributes=${ATRIBUTOS_ITEM_OPTIMIZACION}`,
+      });
+    } catch (error) {
+      if (error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) continue;
+      throw error;
+    }
     if (!resp.ok || !Array.isArray(resp.data)) continue;
     for (const fila of resp.data) {
       if (fila?.code !== 200) continue;
