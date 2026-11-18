@@ -11,6 +11,11 @@ const ml = vi.hoisted(() => ({
   actualizar: vi.fn(),
   itemEdicion: vi.fn(),
   automatizacion: vi.fn(),
+  producto: vi.fn(),
+  ofertas: vi.fn(),
+  fichas: vi.fn(),
+  descripcion: vi.fn(),
+  reputacion: vi.fn(),
 }));
 const auditorias = vi.hoisted(() => [] as unknown[]);
 
@@ -55,12 +60,17 @@ vi.mock("@/lib/ml/cliente", async () => {
     actualizarItemMl: ml.actualizar,
     leerItemEdicionMl: ml.itemEdicion,
     tieneAutomatizacionPrecioMl: ml.automatizacion,
+    productoCatalogoDeItemMl: ml.producto,
+    ofertasProductoCompetenciaMl: ml.ofertas,
+    fichasPublicacionesMl: ml.fichas,
+    tieneDescripcionMl: ml.descripcion,
+    reputacionVendedorMl: ml.reputacion,
   };
 });
 
 const CUENTA = "11111111-1111-1111-1111-111111111111";
 
-import { cambiarEstadoPublicacionAction, editarFotosAction, editarPrecioAction, editarTituloAction, metricasPublicacionesAction } from "./actions";
+import { cambiarEstadoPublicacionAction, competenciaPublicacionAction, editarFotosAction, editarPrecioAction, editarTituloAction, metricasPublicacionesAction } from "./actions";
 
 describe("metricasPublicacionesAction (solo lectura)", () => {
   beforeEach(() => {
@@ -223,5 +233,41 @@ describe("Fase 3: editar precio, título y fotos", () => {
     ml.actualizar.mockClear();
     expect((await editarTituloAction({ cuentaMlId: CUENTA, itemId: "MCO1", titulo: "X" })).ok).toBe(false);
     expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+});
+
+describe("Fase 4: competencia del mismo producto", () => {
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.producto.mockReset().mockResolvedValue("MCO999");
+    ml.ofertas.mockReset().mockResolvedValue([
+      { itemId: "MCO1", vendedorId: "1", precio: 110000, precioOriginal: null, tipoPublicacion: "gold_pro", envioGratis: true, full: false },
+      { itemId: "MCO2", vendedorId: "2", precio: 100000, precioOriginal: null, tipoPublicacion: "gold_pro", envioGratis: true, full: true },
+    ]);
+    ml.fichas.mockReset().mockResolvedValue(new Map([["MCO2", { titulo: "Otra", foto: null, fotos: 9, video: true }]]));
+    ml.descripcion.mockReset().mockResolvedValue(true);
+    ml.reputacion.mockReset().mockResolvedValue({ nivel: "5_green", lider: "gold" });
+  });
+
+  it("compara contra los otros vendedores (solo lectura, consultar)", async () => {
+    const r = await competenciaPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO1" });
+    expect(estado.permisosPedidos).toEqual(["inventario.consultar"]);
+    expect(r.ok && r.catalogo).toBe(true);
+    if (!r.ok || !r.catalogo) return;
+    expect(r.propia).toMatchObject({ itemId: "MCO1", propia: true, precio: 110000 });
+    expect(r.competidores.map((c) => c.itemId)).toEqual(["MCO2"]);
+    expect(r.competidores[0]).toMatchObject({ titulo: "Otra", fotos: 9, reputacion: { nivel: "5_green", lider: "gold" } });
+    expect(r.total).toBe(1);
+    expect(r.alertas).toContain("Tu precio está 10 % arriba del más barato.");
+    expect(r.alertas).toContain("Te falta Full (1 de 1 lo tienen).");
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("fuera del catálogo avisa que necesita la extensión", async () => {
+    ml.producto.mockResolvedValue(null);
+    expect(await competenciaPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO1" })).toEqual({ ok: true, catalogo: false });
+    expect(ml.ofertas).not.toHaveBeenCalled();
   });
 });

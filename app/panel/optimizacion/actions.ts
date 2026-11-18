@@ -11,6 +11,11 @@ import {
   actualizarItemMl,
   calidadItemMl,
   competenciaItemMl,
+  fichasPublicacionesMl,
+  ofertasProductoCompetenciaMl,
+  productoCatalogoDeItemMl,
+  reputacionVendedorMl,
+  tieneDescripcionMl,
   leerItemEdicionMl,
   LimiteMercadoLibreError,
   motivoErrorEscrituraMl,
@@ -24,6 +29,7 @@ import {
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
+import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/lib/optimizacion/competencia";
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { DIAS_METRICAS } from "@/lib/optimizacion/textos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
@@ -104,6 +110,83 @@ export async function metricasPublicacionesAction(entrada: {
     await Promise.all(items.slice(i, i + EN_PARALELO).map(una));
   }
   return { ok: true, metricas };
+}
+
+export type ResultadoCompetencia =
+  | { ok: true; catalogo: false }
+  | { ok: true; catalogo: true; propia: FilaComparacion; competidores: FilaComparacion[]; total: number; alertas: string[] }
+  | { ok: false; aviso: string };
+
+// Fase 4 — hasta 10 vendedores del mismo producto de catálogo, comparados
+// contra la publicación. Solo lectura. Las publicaciones fuera del
+// catálogo devuelven catalogo=false (su comparación necesita la extensión).
+export async function competenciaPublicacionAction(entrada: { cuentaMlId: string; itemId: string }): Promise<ResultadoCompetencia> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene acceso a Optimización." };
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId)) return { ok: false, aviso: "No se reconoce la publicación." };
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
+  if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  try {
+    const token = await obtenerAccessTokenVigente(ctx.empresaId, cuenta.id);
+    const producto = await productoCatalogoDeItemMl(entrada.itemId, token);
+    if (!producto) return { ok: true, catalogo: false };
+    const ofertas = await ofertasProductoCompetenciaMl(producto, token);
+    const propiaOferta = ofertas.find((o) => o.itemId === entrada.itemId);
+    const elegidas = elegirCompetidores(
+      ofertas.filter((o) => o.itemId !== entrada.itemId).map((o) => ({ ...o, propia: false, titulo: null, foto: null, fotos: null, video: null, descripcion: null, reputacion: null }))
+    );
+    const ids = [entrada.itemId, ...elegidas.map((f) => f.itemId)];
+    const fichas = await fichasPublicacionesMl(ids, token);
+    // Descripción y reputación: una llamada por publicación o vendedor,
+    // de a pocas a la vez.
+    const descripciones = new Map<string, boolean | null>();
+    for (let i = 0; i < ids.length; i += EN_PARALELO) {
+      await Promise.all(ids.slice(i, i + EN_PARALELO).map(async (id) => descripciones.set(id, await tieneDescripcionMl(id, token))));
+    }
+    const vendedores = [...new Set(elegidas.map((f) => f.vendedorId).filter((v): v is string => v !== null))];
+    const reputaciones = new Map<string, { nivel: string | null; lider: string | null } | null>();
+    for (let i = 0; i < vendedores.length; i += EN_PARALELO) {
+      await Promise.all(vendedores.slice(i, i + EN_PARALELO).map(async (v) => reputaciones.set(v, await reputacionVendedorMl(v, token))));
+    }
+    const completar = (fila: FilaComparacion & { vendedorId?: string | null }): FilaComparacion => {
+      const ficha = fichas.get(fila.itemId);
+      return {
+        itemId: fila.itemId,
+        propia: fila.propia,
+        titulo: ficha?.titulo ?? null,
+        foto: ficha?.foto ?? null,
+        precio: fila.precio,
+        precioOriginal: fila.precioOriginal,
+        tipoPublicacion: fila.tipoPublicacion,
+        envioGratis: fila.envioGratis,
+        full: fila.full,
+        fotos: ficha?.fotos ?? null,
+        video: ficha?.video ?? null,
+        descripcion: descripciones.get(fila.itemId) ?? null,
+        reputacion: fila.vendedorId ? (reputaciones.get(fila.vendedorId) ?? null) : null,
+      };
+    };
+    const propia = completar({
+      itemId: entrada.itemId,
+      propia: true,
+      titulo: null,
+      foto: null,
+      precio: propiaOferta?.precio ?? null,
+      precioOriginal: propiaOferta?.precioOriginal ?? null,
+      tipoPublicacion: propiaOferta?.tipoPublicacion ?? null,
+      envioGratis: propiaOferta?.envioGratis ?? null,
+      full: propiaOferta?.full ?? null,
+      fotos: null,
+      video: null,
+      descripcion: null,
+      reputacion: null,
+    });
+    const competidores = elegidas.map(completar);
+    return { ok: true, catalogo: true, propia, competidores, total: ofertas.length - (propiaOferta ? 1 : 0), alertas: alertasComparacion(propia, competidores) };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] competencia ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: motivoCuentaSinRevisar(error) };
+  }
 }
 
 export type ResultadoEstado = { ok: boolean; aviso: string; estado?: "active" | "paused" };
