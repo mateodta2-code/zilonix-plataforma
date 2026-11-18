@@ -202,33 +202,37 @@ async function main(): Promise<number> {
 
   // 6. Fase 4 (competidores): vendedores del mismo producto de catálogo y
   // qué se puede leer de SUS publicaciones (título, portada, cuotas,
-  // descripción, fotos, video/clips) y de su reputación.
-  if (deCatalogo.length > 0) {
-    const detalle = (await probar("item de catálogo", `/items/${itemCatalogo}`, "?attributes=id,catalog_product_id", token, undefined, 1)) as {
-      catalog_product_id?: unknown;
-    } | null;
-    const producto = typeof detalle?.catalog_product_id === "string" && /^[A-Z]{3}\d+$/.test(detalle.catalog_product_id) ? detalle.catalog_product_id : null;
-    if (producto) {
-      const ofertas = (await probar("ofertas del producto", `/products/${producto}/items`, "", token, undefined, 3)) as { results?: { item_id?: unknown; seller_id?: unknown }[] } | null;
-      const ajena = (ofertas?.results ?? []).find((o) => typeof o.item_id === "string" && o.item_id !== itemCatalogo);
-      if (ajena && typeof ajena.item_id === "string" && ID_ITEM.test(ajena.item_id)) {
-        await probar(
-          "competidor multiget",
-          "/items",
-          `?ids=${ajena.item_id}&attributes=id,title,thumbnail,price,original_price,shipping,pictures,video_id,installments,sale_terms,tags,seller_id,listing_type_id,catalog_listing`,
-          token,
-          undefined,
-          4
-        );
-        await probar("competidor descripción", `/items/${ajena.item_id}/description`, "", token, undefined, 1);
-        if (typeof ajena.seller_id === "number" || typeof ajena.seller_id === "string") {
-          await probar("competidor reputación", `/users/${String(ajena.seller_id)}`, "?attributes=id,seller_reputation", token, undefined, 3);
-        }
-      } else {
-        console.log("El producto no tiene otros vendedores para probar.");
-      }
+  // descripción, fotos, video/clips) y de su reputación. Se recorren las
+  // publicaciones de catálogo hasta dar con un producto con otros vendedores.
+  const catalogo20 = (await probar("items de catálogo (20)", `/users/${vendedor}/items/search`, "?catalog_listing=true&limit=20", token, undefined, 0)) as {
+    results?: unknown[];
+  } | null;
+  let probado = false;
+  for (const propio of (catalogo20?.results ?? []).filter((r): r is string => typeof r === "string" && ID_ITEM.test(r))) {
+    const det = await pedirLecturaMl<{ catalog_product_id?: unknown }>(`/items/${propio}`, token, { query: "?attributes=id,catalog_product_id" }).catch(() => null);
+    const producto = det?.ok && typeof det.data.catalog_product_id === "string" && /^[A-Z]{3}\d+$/.test(det.data.catalog_product_id) ? det.data.catalog_product_id : null;
+    if (!producto) continue;
+    const ofertas = await pedirLecturaMl<{ results?: { item_id?: unknown; seller_id?: unknown }[] }>(`/products/${producto}/items`, token).catch(() => null);
+    const ajena = ofertas?.ok ? (ofertas.data.results ?? []).find((o) => typeof o.item_id === "string" && o.item_id !== propio) : undefined;
+    if (!ajena || typeof ajena.item_id !== "string" || !ID_ITEM.test(ajena.item_id)) continue;
+    console.log(`producto con ${(ofertas?.ok ? ofertas.data.results?.length : 0) ?? 0} vendedores`);
+    await probar("ofertas del producto", `/products/${producto}/items`, "", token, undefined, 3);
+    await probar(
+      "competidor multiget",
+      "/items",
+      `?ids=${ajena.item_id}&attributes=id,title,thumbnail,price,original_price,shipping,pictures,video_id,installments,sale_terms,tags,seller_id,listing_type_id,catalog_listing`,
+      token,
+      undefined,
+      4
+    );
+    await probar("competidor descripción", `/items/${ajena.item_id}/description`, "", token, undefined, 1);
+    if (typeof ajena.seller_id === "number" || typeof ajena.seller_id === "string") {
+      await probar("competidor reputación", `/users/${String(ajena.seller_id)}`, "?attributes=id,seller_reputation", token, undefined, 3);
     }
+    probado = true;
+    break;
   }
+  if (!probado) console.log("Ningún producto de catálogo de esta cuenta tiene otros vendedores.");
   return 0;
 }
 
