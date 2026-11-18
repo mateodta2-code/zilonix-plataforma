@@ -150,6 +150,12 @@ async function main(): Promise<number> {
   // 3. Visitas de los últimos 7 días.
   await probar("visitas por rango (lote)", "/items/visits", `?ids=${ids.slice(0, 3).join(",")}&date_from=${hace(7)}&date_to=${hace(0)}`, token);
   await probar("visitas ventana 7 días", `/items/${item}/visits/time_window`, "?last=7&unit=day", token);
+  // Fase 2 (detalle): hasta cuántos días hacia atrás da visitas por día,
+  // para el selector de período (90 días + el período anterior = 180).
+  for (const dias of [30, 90, 150, 180, 365]) {
+    await probar(`visitas ventana ${dias} días`, `/items/${item}/visits/time_window`, `?last=${dias}&unit=day`, token, undefined, 1);
+  }
+  await probar("visitas rango un ítem", "/items/visits", `?ids=${item}&date_from=${hace(60)}&date_to=${hace(30)}`, token, undefined, 1);
 
   // Variantes en lote: con fecha y hora completas, y la ruta /visits/items.
   const desde = `${hace(7)}T00:00:00.000-00:00`;
