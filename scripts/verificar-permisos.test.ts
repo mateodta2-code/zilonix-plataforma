@@ -106,6 +106,10 @@ const RUTAS_PROTEGIDAS = new Set([
   // ventas.modificar.
   "app/panel/preguntas/page.tsx",
   "app/panel/preguntas/actions.ts",
+  // Optimización (Fase 1): ver pide inventario.consultar; pausar o
+  // activar, inventario.modificar.
+  "app/panel/optimizacion/page.tsx",
+  "app/panel/optimizacion/actions.ts",
   "app/api/ml/despachos/etiqueta/route.ts",
   "app/panel/investigacion/page.tsx",
   "app/panel/investigacion/actions.ts",

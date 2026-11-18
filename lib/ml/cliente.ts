@@ -1757,3 +1757,155 @@ export async function responderPreguntaMl(preguntaId: string, texto: string, tok
     TIMEOUT_ESCRITURA_MS
   );
 }
+
+// ---------- Optimización, Fase 1 (lista de publicaciones) ----------
+// Formatos confirmados con FMCBIENESTAR en staging (17-nov,
+// scripts/explorar-optimizacion.ts, PR #457/#458):
+// - items/search acepta status=active|paused (sin status trae todas).
+// - /items?ids= (hasta 20) trae price y original_price (precio con y
+//   sin promoción), listing_type_id, shipping.free_shipping,
+//   shipping.logistic_type y catalog_listing.
+// - Visitas: SOLO por ítem (/items/{id}/visits/time_window). En lote
+//   (/items/visits y /visits/items) responde 400.
+// - Calidad: /item/{id}/performance (score, level_wording,
+//   buckets[].variables[] con status y title). /items/{id}/health da 404.
+// - Competencia: /items/{id}/price_to_win?siteId=&version=v2 (status).
+
+export type EstadoListadoMl = "active" | "paused";
+
+export async function listarItemsVendedorMl(
+  vendedorId: string,
+  token: string,
+  opciones: { estado: EstadoListadoMl | null; offset: number; limite: number }
+): Promise<{ ids: string[]; total: number }> {
+  exigirId(vendedorId, PATRON_ID_VENDEDOR, "vendedorId");
+  const limite = Math.min(Math.max(opciones.limite, 1), 50);
+  const offset = Math.max(opciones.offset, 0);
+  const estado = opciones.estado ? `status=${opciones.estado}&` : "";
+  const resp = await pedirLecturaMl<{ results?: unknown; paging?: { total?: unknown } }>(`/users/${vendedorId}/items/search`, token, {
+    query: `?${estado}limit=${limite}&offset=${offset}`,
+  });
+  if (!resp.ok) throw new MlRespuestaInesperadaError(resp.status, "listar las publicaciones");
+  const ids = Array.isArray(resp.data.results) ? resp.data.results.filter((r): r is string => typeof r === "string" && PATRON_ID_PRODUCTO_O_ITEM.test(r)) : [];
+  const total = typeof resp.data.paging?.total === "number" ? resp.data.paging.total : ids.length;
+  return { ids, total };
+}
+
+export type ItemOptimizacionMl = {
+  id: string;
+  titulo: string | null;
+  foto: string | null;
+  enlace: string | null;
+  estado: string | null;
+  // Precio vigente (con la promoción, si hay).
+  precio: number | null;
+  // Precio antes de la promoción; null sin promoción.
+  precioOriginal: number | null;
+  tipoPublicacion: string | null;
+  envioGratis: boolean | null;
+  full: boolean | null;
+  catalogo: boolean;
+  stock: number | null;
+  sku: string | null;
+};
+
+const ATRIBUTOS_ITEM_OPTIMIZACION =
+  "id,title,thumbnail,secure_thumbnail,permalink,status,price,original_price,listing_type_id,shipping,catalog_listing,available_quantity,seller_custom_field,attributes";
+
+export function leerItemOptimizacion(body: unknown): ItemOptimizacionMl | null {
+  const d = body as Record<string, unknown> & { shipping?: { free_shipping?: unknown; logistic_type?: unknown } };
+  if (!d || typeof d.id !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(d.id)) return null;
+  const precio = numeroONull(d.price);
+  const original = numeroONull(d.original_price);
+  const sku = skuDeAtributos(d.attributes) ?? (typeof d.seller_custom_field === "string" && d.seller_custom_field.trim() ? d.seller_custom_field.trim() : null);
+  return {
+    id: d.id,
+    titulo: typeof d.title === "string" ? d.title : null,
+    foto: typeof d.secure_thumbnail === "string" ? d.secure_thumbnail : typeof d.thumbnail === "string" ? d.thumbnail : null,
+    enlace: typeof d.permalink === "string" && d.permalink.startsWith("https://") ? d.permalink : null,
+    estado: typeof d.status === "string" ? d.status : null,
+    precio,
+    precioOriginal: original !== null && precio !== null && original > precio ? original : null,
+    tipoPublicacion: typeof d.listing_type_id === "string" ? d.listing_type_id : null,
+    envioGratis: typeof d.shipping?.free_shipping === "boolean" ? d.shipping.free_shipping : null,
+    full: d.shipping ? d.shipping.logistic_type === "fulfillment" : null,
+    catalogo: d.catalog_listing === true,
+    stock: numeroONull(d.available_quantity),
+    sku,
+  };
+}
+
+// /items?ids= en lotes de 20. Un lote que falla no tumba los demás: sus
+// publicaciones quedan fuera y el llamador lo ve en el conteo.
+export async function leerItemsOptimizacionMl(ids: string[], token: string): Promise<ItemOptimizacionMl[]> {
+  const validos = ids.filter((id) => PATRON_ID_PRODUCTO_O_ITEM.test(id));
+  const items: ItemOptimizacionMl[] = [];
+  for (let i = 0; i < validos.length; i += TAMAÑO_LOTE_DETALLE_ITEMS) {
+    const lote = validos.slice(i, i + TAMAÑO_LOTE_DETALLE_ITEMS);
+    const resp = await pedirLecturaMl<{ code?: unknown; body?: unknown }[]>("/items", token, {
+      query: `?ids=${lote.join(",")}&attributes=${ATRIBUTOS_ITEM_OPTIMIZACION}`,
+    });
+    if (!resp.ok || !Array.isArray(resp.data)) continue;
+    for (const fila of resp.data) {
+      if (fila?.code !== 200) continue;
+      const item = leerItemOptimizacion(fila.body);
+      if (item) items.push(item);
+    }
+  }
+  return items;
+}
+
+// Visitas de los últimos `dias` días de una publicación.
+export async function visitasItemMl(itemId: string, token: string, dias = 7): Promise<number | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const resp = await pedirLecturaMl<{ total_visits?: unknown }>(`/items/${itemId}/visits/time_window`, token, {
+    query: `?last=${Math.min(Math.max(dias, 1), 150)}&unit=day`,
+  });
+  if (!resp.ok) return null;
+  return numeroONull(resp.data.total_visits);
+}
+
+export type CalidadItemMl = {
+  puntaje: number | null;
+  // "Profesional", "Estándar"... tal cual lo dice Mercado Libre.
+  nivel: string | null;
+  // Títulos de los objetivos que todavía no están completos.
+  pendientes: string[];
+};
+
+export function leerCalidadItem(data: unknown): CalidadItemMl {
+  const d = data as { score?: unknown; level_wording?: unknown; buckets?: unknown };
+  const pendientes: string[] = [];
+  for (const grupo of Array.isArray(d?.buckets) ? d.buckets : []) {
+    const variables = (grupo as { variables?: unknown })?.variables;
+    for (const variable of Array.isArray(variables) ? variables : []) {
+      const v = variable as { status?: unknown; title?: unknown };
+      if (v?.status !== "COMPLETED" && typeof v?.title === "string" && v.title.trim()) pendientes.push(v.title.trim());
+    }
+  }
+  return {
+    puntaje: numeroONull(d?.score),
+    nivel: typeof d?.level_wording === "string" ? d.level_wording : null,
+    pendientes,
+  };
+}
+
+export async function calidadItemMl(itemId: string, token: string): Promise<CalidadItemMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const resp = await pedirLecturaMl<unknown>(`/item/${itemId}/performance`, token);
+  if (!resp.ok) return null;
+  return leerCalidadItem(resp.data);
+}
+
+export type CompetenciaItemMl = { estado: string | null; precioParaGanar: number | null };
+
+// Solo tiene sentido para publicaciones de catálogo.
+export async function competenciaItemMl(itemId: string, token: string, siteId: string): Promise<CompetenciaItemMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  exigirId(siteId, /^[A-Z]{3}$/, "siteId");
+  const resp = await pedirLecturaMl<{ status?: unknown; price_to_win?: unknown }>(`/items/${itemId}/price_to_win`, token, {
+    query: `?siteId=${siteId}&version=v2`,
+  });
+  if (!resp.ok) return null;
+  return { estado: typeof resp.data.status === "string" ? resp.data.status : null, precioParaGanar: numeroONull(resp.data.price_to_win) };
+}

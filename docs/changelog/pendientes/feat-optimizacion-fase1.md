@@ -1,0 +1,8 @@
+- **feat-optimizacion-fase1** — Módulo nuevo **Optimización** en el menú, entre Investigación y Publicar. Fase 1: lista de publicaciones de una cuenta.
+  - Cada publicación (activas, pausadas o todas) como la muestra Mercado Libre: foto, título, código, SKU, precio con y sin promoción, tipo (Premium o Clásica), envío gratis y Full.
+  - Visitas, ventas y conversión de los últimos 7 días. Las ventas salen de las ventas que Seller ya sincronizó (mismo criterio que Finanzas); las visitas, de Mercado Libre.
+  - La calidad de Mercado Libre (puntaje y objetivos pendientes) y, en publicaciones de catálogo, el estado en la competencia: Ganando, Compitiendo o Compartiendo.
+  - Botón para pausar o activar (permiso modificar Inventario, queda en auditoría) y una fila que se despliega con «Desglose (próximamente)» y los objetivos de calidad pendientes.
+  - Búsqueda por título, SKU o código; filtro por estado; páginas de 50.
+  - Visitas, calidad y competencia se piden por publicación (Mercado Libre no las da en lote) de a 10, después de mostrar la lista.
+  - Sin migración.
