@@ -136,6 +136,17 @@ async function main(): Promise<number> {
     token
   );
 
+  // 2b. La página pide 20 a la vez y más campos que el multiget de
+  // arriba, y Mercado Libre respondió 403 (17-nov). Se prueban 20 ids con
+  // cada campo extra por separado para ver cuál lo provoca.
+  const veinte = (await probar("items activas (20)", `/users/${vendedor}/items/search`, "?status=active&limit=20", token)) as { results?: unknown[] } | null;
+  const ids20 = (veinte?.results ?? []).filter((r): r is string => typeof r === "string" && ID_ITEM.test(r));
+  const base = "id,status,price,original_price,listing_type_id,shipping,catalog_listing,available_quantity,thumbnail";
+  for (const extra of ["", "title", "secure_thumbnail", "permalink", "seller_custom_field", "attributes"]) {
+    await probar(`multiget 20 +${extra || "nada"}`, "/items", `?ids=${ids20.join(",")}&attributes=${base}${extra ? `,${extra}` : ""}`, token, undefined, 0);
+  }
+  await probar("multiget 3 completo", "/items", `?ids=${ids20.slice(0, 3).join(",")}&attributes=${base},title,secure_thumbnail,permalink,seller_custom_field,attributes`, token, undefined, 0);
+
   // 3. Visitas de los últimos 7 días.
   await probar("visitas por rango (lote)", "/items/visits", `?ids=${ids.slice(0, 3).join(",")}&date_from=${hace(7)}&date_to=${hace(0)}`, token);
   await probar("visitas ventana 7 días", `/items/${item}/visits/time_window`, "?last=7&unit=day", token);
