@@ -1,0 +1,148 @@
+// Solo lectura. Antes de construir la Fase 1 de "Optimización" se
+// confirma con una cuenta real cómo responde Mercado Libre (CLAUDE.md:
+// nunca se adivina la API): publicaciones pausadas, detalle en lote,
+// visitas de 7 días, calidad de la publicación y competencia en el
+// catálogo.
+//
+// - Solo GET, todo por lib/ml/cliente.ts (pedirLecturaMl).
+// - No imprime el token ni textos libres: códigos HTTP, nombres de
+//   campos y solo los valores de una lista blanca (estados, puntajes,
+//   totales).
+//
+//   npx tsx scripts/explorar-optimizacion.ts --empresa=<uuid> --cuenta=<uuid>
+
+import { and, eq } from "drizzle-orm";
+import { dbComoEmpresa } from "@/db/empresa-context";
+import { cuentasMl } from "@/db/schema";
+import { pedirLecturaMl } from "@/lib/ml/cliente";
+import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ID_VENDEDOR = /^\d{1,20}$/;
+const ID_ITEM = /^[A-Z]{3}\d{6,15}$/;
+// Valores que se pueden mostrar: estados, tipos y puntajes. Nada que
+// identifique a una persona.
+const TEXTO_SEGURO = new Set([
+  "status",
+  "sub_status",
+  "listing_type_id",
+  "logistic_type",
+  "mode",
+  "level",
+  "level_wording",
+  "bucket",
+  "condition",
+  "catalog_listing",
+  "free_shipping",
+  "unit",
+  "type",
+  "key",
+  "mode_type",
+  "competition_status",
+  "visit_share",
+]);
+const NUMERO_SEGURO = new Set(["total", "limit", "offset", "score", "total_visits", "visits", "code", "boosts", "last", "progress"]);
+
+function argumento(nombre: string): string | null {
+  const arg = process.argv.slice(2).find((a) => a.startsWith(`--${nombre}=`));
+  return arg ? arg.slice(nombre.length + 3).trim() : null;
+}
+
+function forma(valor: unknown, profundidad = 0): string {
+  if (valor === null) return "null";
+  if (Array.isArray(valor)) return `array(${valor.length})${valor.length > 0 && profundidad < 4 ? ` de ${forma(valor[0], profundidad + 1)}` : ""}`;
+  if (typeof valor !== "object") return typeof valor;
+  if (profundidad >= 4) return "objeto";
+  const partes = Object.entries(valor as Record<string, unknown>).map(([clave, v]) => {
+    if (TEXTO_SEGURO.has(clave) && (typeof v === "string" || typeof v === "boolean")) return `${clave}=${String(v)}`;
+    if (NUMERO_SEGURO.has(clave) && typeof v === "number") return `${clave}=${v}`;
+    return `${clave}: ${forma(v, profundidad + 1)}`;
+  });
+  return `{ ${partes.join(", ")} }`;
+}
+
+async function probar(etiqueta: string, ruta: string, query: string, token: string, cabeceras?: Record<string, string>): Promise<unknown> {
+  try {
+    const resp = await pedirLecturaMl<unknown>(ruta, token, { query, cabeceras });
+    if (!resp.ok) {
+      console.log(`${etiqueta}: HTTP ${resp.status}${resp.error.code ? ` (${resp.error.code})` : ""}`);
+      return null;
+    }
+    console.log(`${etiqueta}: OK ${forma(resp.data)}`);
+    return resp.data;
+  } catch (error) {
+    console.log(`${etiqueta}: ${error instanceof Error ? error.name : "error"}`);
+    return null;
+  }
+}
+
+function hace(dias: number): string {
+  return new Date(Date.now() - dias * 86_400_000).toISOString().slice(0, 10);
+}
+
+async function main(): Promise<number> {
+  const empresaId = argumento("empresa");
+  const cuentaMlId = argumento("cuenta");
+  if (!empresaId || !cuentaMlId || !UUID.test(empresaId) || !UUID.test(cuentaMlId)) {
+    console.log("Uso: --empresa=<uuid> --cuenta=<uuid> (ver scripts/buscar-cuenta-ml.ts).");
+    return 1;
+  }
+  const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ vendedor: cuentasMl.cuentaIdExterna, siteId: cuentasMl.siteId })
+      .from(cuentasMl)
+      .where(and(eq(cuentasMl.id, cuentaMlId), eq(cuentasMl.empresaId, empresaId)))
+  );
+  if (!cuenta || !ID_VENDEDOR.test(cuenta.vendedor)) {
+    console.log("No se encontró la cuenta en esa empresa.");
+    return 1;
+  }
+  const token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
+  const vendedor = cuenta.vendedor;
+
+  // 1. Publicaciones activas y pausadas.
+  const activas = (await probar("items activas", `/users/${vendedor}/items/search`, "?status=active&limit=5", token)) as { results?: unknown[] } | null;
+  await probar("items pausadas", `/users/${vendedor}/items/search`, "?status=paused&limit=5", token);
+  await probar("items sin filtro de estado", `/users/${vendedor}/items/search`, "?limit=5", token);
+  // Una de catálogo, si hay, para probar la competencia.
+  const catalogo = (await probar("items de catálogo", `/users/${vendedor}/items/search`, "?status=active&catalog_listing=true&limit=1", token)) as {
+    results?: unknown[];
+  } | null;
+
+  const ids = (activas?.results ?? []).filter((r): r is string => typeof r === "string" && ID_ITEM.test(r));
+  const deCatalogo = (catalogo?.results ?? []).filter((r): r is string => typeof r === "string" && ID_ITEM.test(r));
+  if (ids.length === 0) {
+    console.log("La cuenta no tiene publicaciones activas: no se pueden probar las demás llamadas.");
+    return 0;
+  }
+  const item = ids[0];
+  const itemCatalogo = deCatalogo[0] ?? item;
+
+  // 2. Detalle en lote (multiget), solo los campos de la lista.
+  await probar(
+    "multiget",
+    "/items",
+    `?ids=${ids.slice(0, 3).join(",")}&attributes=id,status,sub_status,price,original_price,listing_type_id,shipping,catalog_listing,catalog_product_id,available_quantity,thumbnail,secure_thumbnail,health,tags`,
+    token
+  );
+
+  // 3. Visitas de los últimos 7 días.
+  await probar("visitas por rango (lote)", "/items/visits", `?ids=${ids.slice(0, 3).join(",")}&date_from=${hace(7)}&date_to=${hace(0)}`, token);
+  await probar("visitas ventana 7 días", `/items/${item}/visits/time_window`, "?last=7&unit=day", token);
+
+  // 4. Calidad de la publicación.
+  await probar("calidad /performance", `/item/${item}/performance`, "", token);
+  await probar("calidad /health (vieja)", `/items/${item}/health`, "", token);
+
+  // 5. Competencia en el catálogo.
+  await probar("competencia price_to_win", `/items/${itemCatalogo}/price_to_win`, `?siteId=${cuenta.siteId ?? ""}&version=v2`, token);
+  console.log(`(competencia probada con una publicación ${deCatalogo.length > 0 ? "de catálogo" : "que NO es de catálogo"})`);
+  return 0;
+}
+
+main()
+  .then((codigo) => process.exit(codigo))
+  .catch((error: unknown) => {
+    console.error(`Error: ${error instanceof Error ? error.message : "desconocido"}`);
+    process.exit(1);
+  });
