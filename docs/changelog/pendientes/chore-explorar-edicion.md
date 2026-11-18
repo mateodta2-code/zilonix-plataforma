@@ -1,0 +1,1 @@
+- `scripts/explorar-optimizacion.ts`: lee ventas, variantes, fotos y la automatización de precios de una publicación, antes de la Fase 3 (editar).

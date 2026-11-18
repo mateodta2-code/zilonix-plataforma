@@ -44,7 +44,7 @@ const TEXTO_SEGURO = new Set([
   "title",
   "wording",
 ]);
-const NUMERO_SEGURO = new Set(["total", "limit", "offset", "score", "total_visits", "visits", "code", "boosts", "last", "progress", "quantity", "order"]);
+const NUMERO_SEGURO = new Set(["total", "limit", "offset", "score", "total_visits", "visits", "code", "boosts", "last", "progress", "quantity", "order", "sold_quantity", "price", "available_quantity"]);
 
 function argumento(nombre: string): string | null {
   const arg = process.argv.slice(2).find((a) => a.startsWith(`--${nombre}=`));
@@ -146,6 +146,30 @@ async function main(): Promise<number> {
     await probar(`multiget 20 +${extra || "nada"}`, "/items", `?ids=${ids20.join(",")}&attributes=${base}${extra ? `,${extra}` : ""}`, token, undefined, 0);
   }
   await probar("multiget 3 completo", "/items", `?ids=${ids20.slice(0, 3).join(",")}&attributes=${base},title,secure_thumbnail,permalink,seller_custom_field,attributes`, token, undefined, 0);
+
+  // 2c. Fase 3 (editar): ventas de la publicación (el título solo se
+  // cambia sin ventas), variantes, fotos y si tiene la automatización de
+  // precios de Mercado Libre activa (con ella no se cambia el precio).
+  await probar(
+    "item para editar",
+    `/items/${item}`,
+    "?attributes=id,status,price,sold_quantity,title,variations,pictures,tags,deal_ids,catalog_listing",
+    token,
+    undefined,
+    2
+  );
+  await probar("automatización de precio", `/pricing-automation/items/${item}/automation`, "", token, undefined, 3);
+  await probar("reglas de automatización", `/pricing-automation/items/${item}/rules`, "", token, undefined, 3);
+  for (const id of ids20.slice(0, 20)) {
+    const d = (await pedirLecturaMl<{ variations?: unknown[] }>(`/items/${id}`, token, { query: "?attributes=id,variations" }).catch(() => null)) as {
+      ok: boolean;
+      data?: { variations?: unknown[] };
+    } | null;
+    if (d?.ok && Array.isArray(d.data?.variations) && d.data.variations.length > 0) {
+      await probar("item con variantes", `/items/${id}`, "?attributes=id,price,variations", token, undefined, 3);
+      break;
+    }
+  }
 
   // 3. Visitas de los últimos 7 días.
   await probar("visitas por rango (lote)", "/items/visits", `?ids=${ids.slice(0, 3).join(",")}&date_from=${hace(7)}&date_to=${hace(0)}`, token);
