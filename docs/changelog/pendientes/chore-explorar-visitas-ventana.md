@@ -1,0 +1,1 @@
+- `scripts/explorar-optimizacion.ts`: prueba cuántos días hacia atrás entrega Mercado Libre las visitas por día (para el selector de período del detalle).
