@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Fragment, useEffect, useState, useTransition } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
@@ -145,6 +146,9 @@ export function TablaOptimizacion({
                         <span>{fila.titulo ?? fila.id}</span>
                       )}
                       <span className={styles.notaNeutra}>{[fila.id, fila.sku ? `SKU ${fila.sku}` : "Sin SKU"].join(" · ")}</span>
+                      <Link className={styles.verDetalle} href={`/panel/optimizacion/${fila.id}?cuenta=${cuentaMlId}`}>
+                        Ver detalle →
+                      </Link>
                     </div>
                   </div>
                 </CeldaTabla>
@@ -220,7 +224,7 @@ export function TablaOptimizacion({
                   <CeldaTabla colSpan={ENCABEZADOS.length}>
                     <div className={styles.desglose}>
                       <p className={styles.seccion}>Desglose (próximamente)</p>
-                      <p className={styles.nota}>Aquí vendrán las ventas, los costos, la ganancia real y la comparación con la competencia de esta publicación.</p>
+                      <p className={styles.nota}>Aquí vendrá la comparación con los competidores del mismo producto. Las ventas, los costos y la ganancia real ya están en «Ver detalle».</p>
                       {m?.calidad && m.calidad.pendientes.length > 0 ? (
                         <>
                           <p className={styles.seccion}>Objetivos de calidad pendientes</p>

@@ -1926,3 +1926,31 @@ export async function competenciaItemMl(itemId: string, token: string, siteId: s
   if (!resp.ok) return null;
   return { estado: typeof resp.data.status === "string" ? resp.data.status : null, precioParaGanar: numeroONull(resp.data.price_to_win) };
 }
+
+// ---------- Optimización, Fase 2 (detalle de una publicación) ----------
+// Visitas por día: /items/{id}/visits/time_window responde hasta 150
+// días; con 180 o 365 da 400 (probado en staging, 17-nov, PR #462). Los
+// días sin visitas no vienen en `results`.
+export const MAXIMO_DIAS_VISITAS = 150;
+
+// "2026-11-10T00:00:00Z" -> visitas de ese día (YYYY-MM-DD).
+export function leerVisitasPorDia(data: unknown): Map<string, number> {
+  const resultados = (data as { results?: unknown })?.results;
+  const porDia = new Map<string, number>();
+  for (const fila of Array.isArray(resultados) ? resultados : []) {
+    const f = fila as { date?: unknown; total?: unknown };
+    const total = numeroONull(f?.total);
+    if (typeof f?.date !== "string" || !/^\d{4}-\d{2}-\d{2}/.test(f.date) || total === null) continue;
+    const dia = f.date.slice(0, 10);
+    porDia.set(dia, (porDia.get(dia) ?? 0) + total);
+  }
+  return porDia;
+}
+
+export async function visitasPorDiaMl(itemId: string, token: string, ultimosDias: number): Promise<Map<string, number> | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const dias = Math.min(Math.max(Math.round(ultimosDias), 1), MAXIMO_DIAS_VISITAS);
+  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}/visits/time_window`, token, { query: `?last=${dias}&unit=day` });
+  if (!resp.ok) return null;
+  return leerVisitasPorDia(resp.data);
+}
