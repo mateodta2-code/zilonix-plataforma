@@ -1,0 +1,6 @@
+- **feat-optimizacion-fase2** — **Optimización**, Fase 2: detalle de cada publicación (enlace «Ver detalle» en la lista).
+  - Período: últimos 7, 30 o 90 días, este mes o uno de los 3 anteriores, comparado con el período anterior.
+  - Tarjetas con su cambio en %: ventas brutas (con canceladas), ventas concretadas, unidades, precio promedio, visitas y conversión. «Compradores únicos» sale «—» porque Seller no guarda quién compró.
+  - Gráficas por día de unidades vendidas y visitas. Mercado Libre entrega visitas hasta 150 días atrás.
+  - Con permiso de Finanzas, costos en total o por unidad (comisión, envío, publicidad, costo del producto y empaque) y «Lo que Mercado Libre no te muestra»: ganancia real por unidad y en %, precio mínimo para no perder, ACOS, TACOS y días de inventario. Los costos salen del mismo motor de «Ventas y utilidad» de Finanzas. Impuestos y retenciones: próximamente.
+  - Sin migración.

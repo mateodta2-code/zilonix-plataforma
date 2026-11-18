@@ -196,3 +196,16 @@
 .avisoError {
   color: var(--peligro-texto);
 }
+
+.verDetalle {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.verDetalle:hover {
+  text-decoration: underline;
+}
