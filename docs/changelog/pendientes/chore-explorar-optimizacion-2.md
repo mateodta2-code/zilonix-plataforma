@@ -1,0 +1,1 @@
+- `scripts/explorar-optimizacion.ts`: prueba visitas en lote con fecha y hora, y muestra el detalle de los objetivos de calidad.
