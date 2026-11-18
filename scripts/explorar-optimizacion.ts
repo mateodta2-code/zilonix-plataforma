@@ -40,35 +40,45 @@ const TEXTO_SEGURO = new Set([
   "mode_type",
   "competition_status",
   "visit_share",
+  "id",
+  "title",
+  "wording",
 ]);
-const NUMERO_SEGURO = new Set(["total", "limit", "offset", "score", "total_visits", "visits", "code", "boosts", "last", "progress"]);
+const NUMERO_SEGURO = new Set(["total", "limit", "offset", "score", "total_visits", "visits", "code", "boosts", "last", "progress", "quantity", "order"]);
 
 function argumento(nombre: string): string | null {
   const arg = process.argv.slice(2).find((a) => a.startsWith(`--${nombre}=`));
   return arg ? arg.slice(nombre.length + 3).trim() : null;
 }
 
-function forma(valor: unknown, profundidad = 0): string {
+function forma(valor: unknown, profundidad = 0, maximo = 4): string {
   if (valor === null) return "null";
-  if (Array.isArray(valor)) return `array(${valor.length})${valor.length > 0 && profundidad < 4 ? ` de ${forma(valor[0], profundidad + 1)}` : ""}`;
+  if (Array.isArray(valor)) return `array(${valor.length})${valor.length > 0 && profundidad < maximo ? ` de ${forma(valor[0], profundidad + 1, maximo)}` : ""}`;
   if (typeof valor !== "object") return typeof valor;
-  if (profundidad >= 4) return "objeto";
+  if (profundidad >= maximo) return "objeto";
   const partes = Object.entries(valor as Record<string, unknown>).map(([clave, v]) => {
     if (TEXTO_SEGURO.has(clave) && (typeof v === "string" || typeof v === "boolean")) return `${clave}=${String(v)}`;
     if (NUMERO_SEGURO.has(clave) && typeof v === "number") return `${clave}=${v}`;
-    return `${clave}: ${forma(v, profundidad + 1)}`;
+    return `${clave}: ${forma(v, profundidad + 1, maximo)}`;
   });
   return `{ ${partes.join(", ")} }`;
 }
 
-async function probar(etiqueta: string, ruta: string, query: string, token: string, cabeceras?: Record<string, string>): Promise<unknown> {
+async function probar(
+  etiqueta: string,
+  ruta: string,
+  query: string,
+  token: string,
+  cabeceras?: Record<string, string>,
+  maximo = 4
+): Promise<unknown> {
   try {
     const resp = await pedirLecturaMl<unknown>(ruta, token, { query, cabeceras });
     if (!resp.ok) {
       console.log(`${etiqueta}: HTTP ${resp.status}${resp.error.code ? ` (${resp.error.code})` : ""}`);
       return null;
     }
-    console.log(`${etiqueta}: OK ${forma(resp.data)}`);
+    console.log(`${etiqueta}: OK ${forma(resp.data, 0, maximo)}`);
     return resp.data;
   } catch (error) {
     console.log(`${etiqueta}: ${error instanceof Error ? error.name : "error"}`);
@@ -130,8 +140,15 @@ async function main(): Promise<number> {
   await probar("visitas por rango (lote)", "/items/visits", `?ids=${ids.slice(0, 3).join(",")}&date_from=${hace(7)}&date_to=${hace(0)}`, token);
   await probar("visitas ventana 7 días", `/items/${item}/visits/time_window`, "?last=7&unit=day", token);
 
-  // 4. Calidad de la publicación.
-  await probar("calidad /performance", `/item/${item}/performance`, "", token);
+  // Variantes en lote: con fecha y hora completas, y la ruta /visits/items.
+  const desde = `${hace(7)}T00:00:00.000-00:00`;
+  const hasta = `${hace(0)}T00:00:00.000-00:00`;
+  await probar("visitas lote fecha-hora", "/items/visits", `?ids=${ids.slice(0, 3).join(",")}&date_from=${encodeURIComponent(desde)}&date_to=${encodeURIComponent(hasta)}`, token);
+  await probar("visitas lote /visits/items", "/visits/items", `?ids=${ids.slice(0, 3).join(",")}&date_from=${hace(7)}&date_to=${hace(0)}`, token);
+  await probar("visitas usuario 7 días", `/users/${vendedor}/items_visits/time_window`, "?last=7&unit=day", token);
+
+  // 4. Calidad de la publicación (con todo el detalle de los objetivos).
+  await probar("calidad /performance", `/item/${item}/performance`, "", token, undefined, 7);
   await probar("calidad /health (vieja)", `/items/${item}/health`, "", token);
 
   // 5. Competencia en el catálogo.
