@@ -1,0 +1,1 @@
+- `scripts/explorar-optimizacion.ts`: recorre las publicaciones de catálogo hasta encontrar un producto con otros vendedores.
