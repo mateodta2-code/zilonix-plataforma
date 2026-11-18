@@ -11,15 +11,20 @@ import {
   actualizarItemMl,
   calidadItemMl,
   competenciaItemMl,
+  leerItemEdicionMl,
   LimiteMercadoLibreError,
+  motivoErrorEscrituraMl,
   PATRON_ID_PRODUCTO_O_ITEM,
+  tieneAutomatizacionPrecioMl,
   visitasItemMl,
   type CalidadItemMl,
   type CompetenciaItemMl,
+  type ItemEdicionMl,
 } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
+import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { DIAS_METRICAS } from "@/lib/optimizacion/textos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
@@ -150,4 +155,145 @@ export async function cambiarEstadoPublicacionAction(entrada: { cuentaMlId: stri
     console.error(`[app/panel/optimizacion] Auditoría del cambio de estado falló: ${error instanceof Error ? error.name : "error"}`);
   });
   return { ok: true, aviso: activar ? "Publicación activada." : "Publicación pausada.", estado: activar ? "active" : "paused" };
+}
+
+// ---------- Fase 3: editar precio, título y fotos ----------
+// Cada acción vuelve a leer la publicación en Mercado Libre justo antes
+// de escribir (ventas, variantes, automatización): nunca decide con un
+// dato viejo de la pantalla.
+
+const LARGO_MAXIMO_TITULO = 100;
+const LARGO_MAXIMO_URL = 500;
+
+export type ResultadoEdicion = { ok: boolean; aviso: string };
+
+type Preparada = {
+  ctx: { empresaId: string; usuarioId: string };
+  cuenta: { nickname: string; siteId: string };
+  token: string;
+  item: ItemEdicionMl;
+};
+
+async function prepararEdicion(cuentaMlId: string, itemId: string): Promise<Preparada | { error: string }> {
+  const ctx = await contexto("modificar");
+  if (!ctx) return { error: "Tu rol no tiene permiso para editar publicaciones." };
+  if (typeof itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(itemId)) return { error: "No se reconoce la publicación. Actualiza la página." };
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, cuentaMlId);
+  if (!cuenta) return { error: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  let token: string;
+  try {
+    token = await obtenerAccessTokenVigente(ctx.empresaId, cuenta.id);
+  } catch (error) {
+    return { error: motivoCuentaSinRevisar(error) };
+  }
+  const item = await leerItemEdicionMl(itemId, token).catch(() => null);
+  if (!item) return { error: "Mercado Libre no devolvió la publicación. Intenta de nuevo." };
+  return { ctx, cuenta, token, item };
+}
+
+async function escribirYAuditar(
+  prep: Preparada,
+  cambios: Record<string, unknown>,
+  auditoria: { accion: string; detalle: string; valorAnterior?: string; valorNuevo?: string },
+  avisoOk: string
+): Promise<ResultadoEdicion> {
+  let respuesta;
+  try {
+    respuesta = await actualizarItemMl(prep.item.id, prep.token, cambios);
+  } catch (error) {
+    if (error instanceof LimiteMercadoLibreError) return { ok: false, aviso: "Mercado Libre pidió esperar un momento. Intenta de nuevo." };
+    throw error;
+  }
+  if (!respuesta.ok) {
+    console.warn(`[app/panel/optimizacion] PUT /items (${auditoria.accion}) respondió ${respuesta.status}`);
+    if (itemNoModificablePorRevision(respuesta.textoCrudo)) {
+      return { ok: false, aviso: "Mercado Libre todavía está revisando esta publicación y no deja cambiarla. Intenta en un rato." };
+    }
+    if (respuesta.status === 0) return { ok: false, aviso: "Mercado Libre no respondió a tiempo. Revisa en Mercado Libre si el cambio se aplicó antes de reintentar." };
+    if (respuesta.status === 401 || respuesta.status === 403) return { ok: false, aviso: "Mercado Libre no dejó cambiar esta publicación con esta cuenta." };
+    const motivo = motivoErrorEscrituraMl(respuesta.textoCrudo);
+    return { ok: false, aviso: motivo ? `Mercado Libre no aceptó el cambio: ${motivo}` : "Mercado Libre no aceptó el cambio." };
+  }
+  await dbComoEmpresa(prep.ctx.empresaId, (tx) =>
+    registrarAuditoria(tx, {
+      empresaId: prep.ctx.empresaId,
+      usuarioId: prep.ctx.usuarioId,
+      actorTipo: "persona",
+      accion: auditoria.accion,
+      entidad: "publicacion_ml",
+      entidadId: prep.item.id,
+      detalle: auditoria.detalle,
+      valorAnterior: auditoria.valorAnterior,
+      valorNuevo: auditoria.valorNuevo,
+    })
+  ).catch((error: unknown) => {
+    console.error(`[app/panel/optimizacion] Auditoría de ${auditoria.accion} falló: ${error instanceof Error ? error.name : "error"}`);
+  });
+  return { ok: true, aviso: avisoOk };
+}
+
+export async function editarPrecioAction(entrada: { cuentaMlId: string; itemId: string; precio: string }): Promise<ResultadoEdicion> {
+  const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
+  if ("error" in prep) return { ok: false, aviso: prep.error };
+  const precio = typeof entrada.precio === "string" ? leerPrecioEscrito(entrada.precio, prep.cuenta.siteId) : null;
+  if (precio === null) return { ok: false, aviso: "Escribe un precio válido, mayor que cero." };
+  if (prep.item.tieneVariantes) return { ok: false, aviso: "Esta publicación tiene variantes: el precio se cambia por variante en Mercado Libre." };
+  const automatizada = await tieneAutomatizacionPrecioMl(prep.item.id, prep.token);
+  if (automatizada === true) {
+    return { ok: false, aviso: "Esta publicación tiene la automatización de precios de Mercado Libre activa: Mercado Libre no deja cambiar el precio a mano." };
+  }
+  return escribirYAuditar(
+    prep,
+    { price: Number(precio) },
+    {
+      accion: "cambiar_precio_publicacion",
+      detalle: `Cambió el precio de ${prep.item.id} (${prep.cuenta.nickname}).`,
+      valorAnterior: prep.item.precio === null ? undefined : String(prep.item.precio),
+      valorNuevo: precio,
+    },
+    "Precio actualizado en Mercado Libre."
+  );
+}
+
+export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: string; titulo: string }): Promise<ResultadoEdicion> {
+  const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
+  if ("error" in prep) return { ok: false, aviso: prep.error };
+  const titulo = typeof entrada.titulo === "string" ? entrada.titulo.trim().replace(/\s+/g, " ") : "";
+  if (!titulo) return { ok: false, aviso: "Escribe un título." };
+  if (titulo.length > LARGO_MAXIMO_TITULO) return { ok: false, aviso: `El título es muy largo (máximo ${LARGO_MAXIMO_TITULO} caracteres).` };
+  if (prep.item.vendidas > 0) return { ok: false, aviso: "Mercado Libre solo deja cambiar el título de publicaciones sin ventas." };
+  return escribirYAuditar(
+    prep,
+    { title: titulo },
+    {
+      accion: "cambiar_titulo_publicacion",
+      detalle: `Cambió el título de ${prep.item.id} (${prep.cuenta.nickname}).`,
+      valorAnterior: prep.item.titulo ?? undefined,
+      valorNuevo: titulo,
+    },
+    "Título actualizado en Mercado Libre."
+  );
+}
+
+// Fotos: el orden de las que ya tiene (por id) y fotos nuevas por enlace
+// https. La primera es la portada.
+export async function editarFotosAction(entrada: { cuentaMlId: string; itemId: string; orden: string[]; nuevas: string[] }): Promise<ResultadoEdicion> {
+  const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
+  if ("error" in prep) return { ok: false, aviso: prep.error };
+  const actuales = new Set(prep.item.fotos.map((f) => f.id));
+  const orden = [...new Set((Array.isArray(entrada.orden) ? entrada.orden : []).filter((id) => typeof id === "string" && actuales.has(id)))];
+  const nuevas = (Array.isArray(entrada.nuevas) ? entrada.nuevas : [])
+    .filter((u): u is string => typeof u === "string")
+    .map((u) => u.trim())
+    .filter((u) => u.startsWith("https://") && u.length <= LARGO_MAXIMO_URL && !/\s/.test(u));
+  if (orden.length + nuevas.length === 0) return { ok: false, aviso: "La publicación necesita al menos una foto." };
+  return escribirYAuditar(
+    prep,
+    { pictures: [...orden.map((id) => ({ id })), ...nuevas.map((source) => ({ source }))] },
+    {
+      accion: "cambiar_fotos_publicacion",
+      detalle: `Cambió las fotos de ${prep.item.id} (${prep.cuenta.nickname}): ${orden.length} existentes, ${nuevas.length} nuevas.`,
+    },
+    "Fotos actualizadas en Mercado Libre. Pueden tardar unos minutos en verse."
+  );
 }

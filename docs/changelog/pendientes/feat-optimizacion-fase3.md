@@ -1,0 +1,5 @@
+- **feat-optimizacion-fase3** — **Optimización**, Fase 3: editar desde Seller, en el detalle de cada publicación (permiso modificar Inventario, queda en auditoría con el valor anterior y el nuevo).
+  - **Precio** con simulador en vivo: «si lo dejas en X, ganas Y por unidad y quedas Ganando o Compitiendo» (costos del período elegido; competencia solo en catálogo). Bloqueado si la publicación tiene variantes o la automatización de precios de Mercado Libre activa.
+  - **Título**: solo si la publicación no tiene ventas (regla de Mercado Libre).
+  - **Fotos**: cambiar el orden y la portada, quitar y agregar por enlace https.
+  - Antes de escribir se vuelve a leer la publicación en Mercado Libre. Sin migración.

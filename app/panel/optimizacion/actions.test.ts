@@ -9,6 +9,8 @@ const ml = vi.hoisted(() => ({
   calidad: vi.fn(),
   competencia: vi.fn(),
   actualizar: vi.fn(),
+  itemEdicion: vi.fn(),
+  automatizacion: vi.fn(),
 }));
 const auditorias = vi.hoisted(() => [] as unknown[]);
 
@@ -51,12 +53,14 @@ vi.mock("@/lib/ml/cliente", async () => {
     calidadItemMl: ml.calidad,
     competenciaItemMl: ml.competencia,
     actualizarItemMl: ml.actualizar,
+    leerItemEdicionMl: ml.itemEdicion,
+    tieneAutomatizacionPrecioMl: ml.automatizacion,
   };
 });
 
 const CUENTA = "11111111-1111-1111-1111-111111111111";
 
-import { cambiarEstadoPublicacionAction, metricasPublicacionesAction } from "./actions";
+import { cambiarEstadoPublicacionAction, editarFotosAction, editarPrecioAction, editarTituloAction, metricasPublicacionesAction } from "./actions";
 
 describe("metricasPublicacionesAction (solo lectura)", () => {
   beforeEach(() => {
@@ -157,6 +161,67 @@ describe("cambiarEstadoPublicacionAction (escribe en Mercado Libre)", () => {
   it("rechaza un itemId mal formado", async () => {
     const r = await cambiarEstadoPublicacionAction({ cuentaMlId: CUENTA, itemId: "../users/1", activar: true });
     expect(r.ok).toBe(false);
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+});
+
+describe("Fase 3: editar precio, título y fotos", () => {
+  const item = { id: "MCO1", titulo: "Faja", precio: 100000, vendidas: 0, tieneVariantes: false, estado: "active", fotos: [{ id: "f1", url: "https://a" }, { id: "f2", url: "https://b" }] };
+
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.actualizar.mockReset().mockResolvedValue({ ok: true, status: 200, data: {}, textoCrudo: "" });
+    ml.itemEdicion.mockReset().mockResolvedValue(item);
+    ml.automatizacion.mockReset().mockResolvedValue(false);
+    auditorias.length = 0;
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("precio: lee el texto según el sitio, pide modificar y audita antes/después", async () => {
+    const r = await editarPrecioAction({ cuentaMlId: CUENTA, itemId: "MCO1", precio: "95.000" });
+    expect(r.ok).toBe(true);
+    expect(estado.permisosPedidos).toEqual(["inventario.modificar"]);
+    expect(ml.actualizar).toHaveBeenCalledWith("MCO1", "token", { price: 95000 });
+    expect(auditorias[0]).toMatchObject({ accion: "cambiar_precio_publicacion", valorAnterior: "100000", valorNuevo: "95000.00" });
+  });
+
+  it("precio: no escribe con variantes, con automatización de ML o con un precio inválido", async () => {
+    ml.itemEdicion.mockResolvedValue({ ...item, tieneVariantes: true });
+    expect((await editarPrecioAction({ cuentaMlId: CUENTA, itemId: "MCO1", precio: "95000" })).aviso).toContain("variantes");
+    ml.itemEdicion.mockResolvedValue(item);
+    ml.automatizacion.mockResolvedValue(true);
+    expect((await editarPrecioAction({ cuentaMlId: CUENTA, itemId: "MCO1", precio: "95000" })).aviso).toContain("automatización");
+    ml.automatizacion.mockResolvedValue(false);
+    expect((await editarPrecioAction({ cuentaMlId: CUENTA, itemId: "MCO1", precio: "-1" })).ok).toBe(false);
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("título: solo sin ventas (lo vuelve a leer en ML), con espacios limpios", async () => {
+    expect((await editarTituloAction({ cuentaMlId: CUENTA, itemId: "MCO1", titulo: "  Faja   reductora  " })).ok).toBe(true);
+    expect(ml.actualizar).toHaveBeenCalledWith("MCO1", "token", { title: "Faja reductora" });
+    ml.actualizar.mockClear();
+    ml.itemEdicion.mockResolvedValue({ ...item, vendidas: 3 });
+    expect((await editarTituloAction({ cuentaMlId: CUENTA, itemId: "MCO1", titulo: "Otro" })).aviso).toContain("sin ventas");
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("fotos: solo ids que ya tiene la publicación y enlaces https", async () => {
+    await editarFotosAction({ cuentaMlId: CUENTA, itemId: "MCO1", orden: ["f2", "f1", "ajena"], nuevas: ["https://nueva.jpg", "http://insegura.jpg", "javascript:x"] });
+    expect(ml.actualizar).toHaveBeenCalledWith("MCO1", "token", { pictures: [{ id: "f2" }, { id: "f1" }, { source: "https://nueva.jpg" }] });
+    ml.actualizar.mockClear();
+    expect((await editarFotosAction({ cuentaMlId: CUENTA, itemId: "MCO1", orden: [], nuevas: [] })).ok).toBe(false);
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("si Mercado Libre rechaza, muestra su motivo y no audita; sin permiso no toca nada", async () => {
+    ml.actualizar.mockResolvedValue({ ok: false, status: 400, data: null, textoCrudo: JSON.stringify({ message: "price is invalid" }) });
+    expect((await editarPrecioAction({ cuentaMlId: CUENTA, itemId: "MCO1", precio: "95000" })).aviso).toBe("Mercado Libre no aceptó el cambio: price is invalid");
+    expect(auditorias).toHaveLength(0);
+    estado.conPermiso = false;
+    ml.actualizar.mockClear();
+    expect((await editarTituloAction({ cuentaMlId: CUENTA, itemId: "MCO1", titulo: "X" })).ok).toBe(false);
     expect(ml.actualizar).not.toHaveBeenCalled();
   });
 });

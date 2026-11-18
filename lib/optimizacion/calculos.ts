@@ -139,16 +139,26 @@ export function porUnidad(monto: string | null, unidades: number): string | null
   return desdeCentavos(aCentavos(monto) / BigInt(unidades));
 }
 
+// Lo que cuesta cada unidad sin contar la comisión: costo del producto,
+// empaque, envío y publicidad del período, dividido por las unidades.
+// null si falta el costo o no hubo ventas.
+export function costoFijoPorUnidad(resumen: ResumenPeriodo): string | null {
+  const c = resumen.costos;
+  if (!c || c.costoProducto === null || resumen.unidades <= 0) return null;
+  const fijos = aCentavos(c.costoProducto) + aCentavos(c.empaque) + aCentavos(c.envio) + aCentavos(resumen.inversion);
+  return desdeCentavos(fijos / BigInt(resumen.unidades));
+}
+
 // Precio mínimo para no perder, con los costos del período: lo fijo por
 // unidad (costo, empaque, envío y publicidad) dividido por lo que queda
 // después de la comisión (que es un % del precio). Aproximado.
 export function precioMinimo(resumen: ResumenPeriodo): string | null {
+  const fijo = costoFijoPorUnidad(resumen);
   const c = resumen.costos;
-  if (!c || c.costoProducto === null || resumen.unidades <= 0) return null;
+  if (fijo === null || !c) return null;
   const concretadas = aCentavos(resumen.ventasConcretadas);
   if (concretadas <= CERO) return null;
-  const fijos = aCentavos(c.costoProducto) + aCentavos(c.empaque) + aCentavos(c.envio) + aCentavos(resumen.inversion);
-  const fijoPorUnidad = fijos / BigInt(resumen.unidades);
+  const fijoPorUnidad = aCentavos(fijo);
   const comision = aCentavos(c.comision);
   // precio = fijo / (1 − comisión/ventas) = fijo × ventas / (ventas − comisión)
   const resto = concretadas - comision;

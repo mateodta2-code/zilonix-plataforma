@@ -12,11 +12,11 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
-import { PATRON_ID_PRODUCTO_O_ITEM } from "@/lib/ml/cliente";
-import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { competenciaItemMl, leerItemEdicionMl, PATRON_ID_PRODUCTO_O_ITEM, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
+import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { formatearMoneda } from "@/lib/ml/sitios";
-import { diasInventario, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
+import { costoFijoPorUnidad, diasInventario, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
 import { leerDatosDetalle, type DatosDetalle } from "@/lib/optimizacion/detalle";
 import { opcionesPeriodo, resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
 import { rotuloTipoPublicacion } from "@/lib/optimizacion/textos";
@@ -25,6 +25,7 @@ import { restarDiasIso } from "@/lib/publicidad/plan";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import styles from "../page.module.css";
+import { EditarPublicacion, type DatosEdicion } from "./EditarPublicacion";
 
 // Optimización, Fase 2 — detalle de una publicación. Ver pide
 // inventario/consultar; los costos, la ganancia y el precio mínimo,
@@ -73,6 +74,7 @@ export default async function DetalleOptimizacionPage({
   const porUnidadModo = primero(searchParams?.costos) === "unidad";
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
   const conFinanzas = miMembresia ? tienePermiso(miMembresia.permisos, "finanzas", "consultar") : false;
+  const puedeEditar = miMembresia ? tienePermiso(miMembresia.permisos, "inventario", "modificar") : false;
   const volver = <BotonLink href={`/panel/optimizacion${UUID.test(cuentaId) ? `?cuenta=${cuentaId}` : ""}`} chico>← Volver a la lista</BotonLink>;
 
   const cuenta =
@@ -127,6 +129,45 @@ export default async function DetalleOptimizacionPage({
   const enCostos = (v: string | null) => (porUnidadModo ? porUnidad(v, actual.unidades) : v);
   const minimo = precioMinimo(actual);
   const diasStock = diasInventario(datos.item.stock, actual.unidades, periodo.dias);
+  // Fase 3 — edición: datos frescos de ML (ventas, variantes, fotos,
+  // automatización y precio para ganar) y la base del simulador con los
+  // costos del período elegido. Solo para quien puede modificar.
+  let edicion: DatosEdicion | null = null;
+  if (puedeEditar) {
+    try {
+      const token = await obtenerAccessTokenVigente(empresa.id, cuenta.id);
+      const [itemEdicion, automatizada, competencia] = await Promise.all([
+        leerItemEdicionMl(datos.item.id, token),
+        tieneAutomatizacionPrecioMl(datos.item.id, token),
+        datos.item.catalogo ? competenciaItemMl(datos.item.id, token, siteId).catch(() => null) : Promise.resolve(null),
+      ]);
+      // Sin permiso de Finanzas el simulador no muestra ganancia.
+      const c = conFinanzas ? actual.costos : null;
+      if (itemEdicion) {
+        edicion = {
+          itemId: itemEdicion.id,
+          cuentaMlId: cuenta.id,
+          siteId,
+          idioma,
+          precio: itemEdicion.precio,
+          titulo: itemEdicion.titulo,
+          vendidas: itemEdicion.vendidas,
+          tieneVariantes: itemEdicion.tieneVariantes,
+          automatizada,
+          fotos: itemEdicion.fotos,
+          base: {
+            fijoPorUnidad: c ? costoFijoPorUnidad(actual) : null,
+            comision: c ? c.comision : null,
+            ventas: c ? actual.ventasConcretadas : null,
+            precioParaGanar: typeof competencia?.precioParaGanar === "number" ? competencia.precioParaGanar.toFixed(2) : null,
+          },
+        };
+      }
+    } catch (error) {
+      console.warn(`[app/panel/optimizacion] edición ${itemId}: ${error instanceof Error ? error.name : "error"}`);
+    }
+  }
+
   const href = (cambios: { periodo?: string; costos?: string }) => {
     const q = new URLSearchParams({ cuenta: cuenta.id, periodo: cambios.periodo ?? periodo.clave });
     const costos = cambios.costos ?? (porUnidadModo ? "unidad" : "total");
@@ -171,6 +212,13 @@ export default async function DetalleOptimizacionPage({
           <p className={styles.nota}>{`Mercado Libre entrega visitas solo desde el ${datos.visitasDesde}: lo anterior sale "—".`}</p>
         ) : null}
       </Tarjeta>
+
+      {edicion ? (
+        <Tarjeta className={styles.tarjeta}>
+          <p className={styles.seccion}>Editar en Mercado Libre</p>
+          <EditarPublicacion datos={edicion} />
+        </Tarjeta>
+      ) : null}
 
       {conFinanzas ? (
         <>

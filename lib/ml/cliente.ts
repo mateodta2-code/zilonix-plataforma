@@ -1954,3 +1954,60 @@ export async function visitasPorDiaMl(itemId: string, token: string, ultimosDias
   if (!resp.ok) return null;
   return leerVisitasPorDia(resp.data);
 }
+
+// ---------- Optimización, Fase 3 (editar desde Seller) ----------
+// Confirmado en staging (17-nov, PR #464): /items/{id} trae
+// sold_quantity, variations y pictures; /pricing-automation/items/{id}/
+// automation responde 404 cuando la publicación NO tiene automatización
+// de precios. Las escrituras van por actualizarItemMl (PUT /items/{id}).
+
+export type FotoItemEdicion = { id: string; url: string };
+
+export type ItemEdicionMl = {
+  id: string;
+  titulo: string | null;
+  precio: number | null;
+  vendidas: number;
+  tieneVariantes: boolean;
+  estado: string | null;
+  fotos: FotoItemEdicion[];
+};
+
+export function leerItemEdicion(data: unknown): ItemEdicionMl | null {
+  const d = data as Record<string, unknown>;
+  if (!d || typeof d.id !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(d.id)) return null;
+  const fotos = (Array.isArray(d.pictures) ? d.pictures : []).flatMap((p): FotoItemEdicion[] => {
+    const f = p as { id?: unknown; secure_url?: unknown; url?: unknown };
+    const url = typeof f?.secure_url === "string" && f.secure_url.startsWith("https://") ? f.secure_url : typeof f?.url === "string" && f.url.startsWith("http") ? f.url.replace(/^http:\/\//, "https://") : null;
+    return typeof f?.id === "string" && url ? [{ id: f.id, url }] : [];
+  });
+  return {
+    id: d.id,
+    titulo: typeof d.title === "string" ? d.title : null,
+    precio: numeroONull(d.price),
+    vendidas: numeroONull(d.sold_quantity) ?? 0,
+    tieneVariantes: Array.isArray(d.variations) && d.variations.length > 0,
+    estado: typeof d.status === "string" ? d.status : null,
+    fotos,
+  };
+}
+
+export async function leerItemEdicionMl(itemId: string, token: string): Promise<ItemEdicionMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}`, token, { query: "?attributes=id,status,price,sold_quantity,title,variations,pictures" });
+  if (!resp.ok) return null;
+  return leerItemEdicion(resp.data);
+}
+
+// true = tiene automatización de precios (ML no deja cambiar el precio a
+// mano); false = no tiene (404); null = no se pudo saber.
+export async function tieneAutomatizacionPrecioMl(itemId: string, token: string): Promise<boolean | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  try {
+    const resp = await pedirLecturaMl<unknown>(`/pricing-automation/items/${itemId}/automation`, token);
+    if (resp.ok) return true;
+    return resp.status === 404 ? false : null;
+  } catch {
+    return null;
+  }
+}
