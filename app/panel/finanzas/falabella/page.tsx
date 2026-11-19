@@ -4,7 +4,7 @@ import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCortesFalabella, SIN_CORTE } from "@/lib/falabella/conciliacion";
 import { mostrarMontoIso } from "@/components/finanzas/formato";
 import { BotonLink } from "@/components/marco/Boton";
-import { Chip } from "@/components/marco/Chip";
+import { ChipsEstadoPago } from "@/components/finanzas/ChipEstadoPago";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -83,13 +83,7 @@ export default async function ConciliacionFalabellaPage() {
                   <CeldaTabla>{c.cuenta}</CeldaTabla>
                   <CeldaTabla>{rango(c.desde, c.hasta)}</CeldaTabla>
                   <CeldaTabla>
-                    {c.estadosPago.length === 0
-                      ? "—"
-                      : c.estadosPago.map((e) => (
-                          <Chip key={e} estado={/pagad/i.test(e) ? "exito" : "aviso"}>
-                            {e}
-                          </Chip>
-                        ))}
+                    <ChipsEstadoPago estados={c.estadosPago} />
                   </CeldaTabla>
                   <CeldaTabla>{c.ordenes}</CeldaTabla>
                   <CeldaTabla numerica>{mostrarMontoIso(c.total, c.moneda)}</CeldaTabla>

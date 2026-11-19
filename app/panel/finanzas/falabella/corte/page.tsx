@@ -1,6 +1,7 @@
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { leerCorteFalabella, type TotalesCategoria } from "@/lib/falabella/conciliacion";
+import { ChipsEstadoPago } from "@/components/finanzas/ChipEstadoPago";
 import { mostrarMontoIso } from "@/components/finanzas/formato";
 import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
@@ -76,7 +77,12 @@ export default async function CorteFalabellaPage({ searchParams }: { searchParam
       <EncabezadoPagina titulo={detalle.estadoCuenta ?? "Líneas sin estado de cuenta"} descripcion={`Cuenta de Falabella: ${detalle.cuenta}`} />
       <section className={styles.tablero}>
         <div className={styles.gridKpi}>
-          <TarjetaKpi titulo="Pagado" valor={m(detalle.pagado)} detalle={["Suma de todas las líneas del corte: lo que Falabella te paga."]} />
+          <TarjetaKpi
+            titulo="Pago a recibir"
+            junto={<ChipsEstadoPago estados={detalle.estadosPago} />}
+            valor={m(detalle.pagoARecibir)}
+            detalle={["Suma de todas las líneas del corte: lo que Falabella te paga o te va a pagar."]}
+          />
           <TarjetaKpi
             titulo="Neto antes de retenciones"
             valor={m(detalle.netoAntesDeRetenciones)}
@@ -113,10 +119,10 @@ export default async function CorteFalabellaPage({ searchParams }: { searchParam
           </FilaTabla>
           <FilaTabla>
             <CeldaTabla>
-              <strong>Pagado</strong>
+              <strong>Pago a recibir</strong>
             </CeldaTabla>
             <CeldaTabla numerica>
-              <strong>{m(detalle.pagado)}</strong>
+              <strong>{m(detalle.pagoARecibir)}</strong>
             </CeldaTabla>
           </FilaTabla>
         </Tabla>
@@ -124,6 +130,9 @@ export default async function CorteFalabellaPage({ searchParams }: { searchParam
 
       <Tarjeta>
         <h2 className={styles.tituloSeccion}>Por orden</h2>
+        <p className={styles.ayuda}>
+          Las órdenes en $0 con solo retenciones se vendieron en un corte anterior; Falabella les aplicó la retención en este corte.
+        </p>
         <p className={styles.ayuda}>
           Cobró Falabella: comisiones, envíos, promociones, publicidad y demás cobros. Las líneas sin Nº de orden (publicidad y otros servicios) van
           juntas al final.
@@ -134,7 +143,7 @@ export default async function CorteFalabellaPage({ searchParams }: { searchParam
             { clave: "vendido", contenido: "Vendió", numerica: true },
             { clave: "cobrado", contenido: "Cobró Falabella", numerica: true },
             { clave: "retenciones", contenido: "Retenciones", numerica: true },
-            { clave: "pagado", contenido: "Pagado", numerica: true },
+            { clave: "neto", contenido: "Neto del corte", numerica: true },
           ]}
         >
           {detalle.ordenes.map((o) => (
@@ -143,7 +152,7 @@ export default async function CorteFalabellaPage({ searchParams }: { searchParam
               <CeldaTabla numerica>{m(o.vendido)}</CeldaTabla>
               <CeldaTabla numerica>{m(o.cobradoFalabella)}</CeldaTabla>
               <CeldaTabla numerica>{m(o.retenciones)}</CeldaTabla>
-              <CeldaTabla numerica>{m(o.pagado)}</CeldaTabla>
+              <CeldaTabla numerica>{m(o.netoCorte)}</CeldaTabla>
             </FilaTabla>
           ))}
         </Tabla>

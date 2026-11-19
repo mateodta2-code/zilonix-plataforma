@@ -74,6 +74,13 @@
   margin: 0;
 }
 
+.tituloConJunto {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .valor {
   margin: 0;
   font-family: var(--fuente-titulos);
