@@ -29,7 +29,16 @@ import {
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary } from "@/lib/cloudinary";
 import { obtenerConexionIAConClave } from "@/lib/ia/conexion";
-import { descargarFotoBase, ErrorImagenIA, generarImagenDesdeFoto, leerTipoImagenIA, limpiarIndicaciones, promptImagenIA } from "@/lib/ia/imagen";
+import {
+  descargarFotoBase,
+  ErrorImagenIA,
+  generarImagenDesdeFoto,
+  leerTipoImagenIA,
+  leerVariante,
+  limpiarIndicaciones,
+  MAXIMO_FOTOS_REFERENCIA,
+  promptImagenIA,
+} from "@/lib/ia/imagen";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
 import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/lib/optimizacion/competencia";
@@ -417,8 +426,12 @@ export async function generarImagenIAAction(entrada: {
   cuentaMlId: string;
   itemId: string;
   fotoUrl: string;
+  // Otras fotos de la galería como referencia (detalles, lo que incluye).
+  referencias?: string[];
   tipo: string;
   indicaciones?: string;
+  // Portada: cuál de las composiciones (cada una distinta).
+  variante?: number;
 }): Promise<ResultadoImagenIA> {
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
@@ -427,10 +440,18 @@ export async function generarImagenIAAction(entrada: {
   if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta OpenAI o Google en Configuración → IA." };
   const tipo = leerTipoImagenIA(entrada.tipo);
   try {
-    const base = await descargarFotoBase(typeof entrada.fotoUrl === "string" ? entrada.fotoUrl : "");
-    const prompt = promptImagenIA(tipo, prep.item.titulo, limpiarIndicaciones(entrada.indicaciones));
-    const imagen = await generarImagenDesdeFoto(conexion, base, prompt);
-    const { url } = await subirACloudinary(imagen.buffer, `ia-${tipo}-${prep.item.id}`, imagen.tipo, "zilonix-optimizacion-ia");
+    const fotoUrl = typeof entrada.fotoUrl === "string" ? entrada.fotoUrl : "";
+    const base = await descargarFotoBase(fotoUrl);
+    // Una referencia que no baja no frena la imagen: se usa la base sola.
+    const otras = (Array.isArray(entrada.referencias) ? entrada.referencias : [])
+      .filter((u): u is string => typeof u === "string" && u !== fotoUrl)
+      .slice(0, MAXIMO_FOTOS_REFERENCIA - 1);
+    const referencias = (await Promise.all(otras.map((u) => descargarFotoBase(u).catch(() => null)))).filter((f) => f !== null);
+    const variante = leerVariante(entrada.variante);
+    const prompt = promptImagenIA(tipo, prep.item.titulo, limpiarIndicaciones(entrada.indicaciones), variante);
+    const imagen = await generarImagenDesdeFoto(conexion, [base, ...referencias], prompt);
+    const nombre = tipo === "portada" ? `ia-portada-${variante + 1}-${prep.item.id}` : `ia-${tipo}-${prep.item.id}`;
+    const { url } = await subirACloudinary(imagen.buffer, nombre, imagen.tipo, "zilonix-optimizacion-ia");
     return { ok: true, url, aviso: "Imagen creada. Revísala: si te gusta, agrégala y guarda las fotos." };
   } catch (error) {
     if (error instanceof ErrorImagenIA) return { ok: false, aviso: error.message };
