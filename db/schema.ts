@@ -620,6 +620,11 @@ export const cuentasFalabella = pgTable(
     // de Falabella (un mismo UserID) no puede estar conectada a dos
     // empresas de Zilonix a la vez.
     cuentaUnica: uniqueIndex("cuentas_falabella_user_id_unica").on(t.userId),
+    // Issue #422 (conciliación) — para la FK compuesta de
+    // movimientos_marketplace: Postgres exige un unique sobre las columnas
+    // referenciadas. Así una empresa nunca cuelga un movimiento de la
+    // cuenta de otra aunque conozca su uuid (el chequeo de FK no pasa por RLS).
+    empresaIdUnica: unique("cuentas_falabella_empresa_id_unica").on(t.empresaId, t.id),
   })
 );
 
@@ -646,6 +651,82 @@ export const pedidosFalabella = pgTable(
     pedidoUnico: uniqueIndex("pedidos_falabella_empresa_pedido_externo_unico").on(t.empresaId, t.pedidoIdExterno),
     // Revisión del PR #415: la pantalla cuenta y filtra pedidos por cuenta.
     porCuenta: index("pedidos_falabella_cuenta_idx").on(t.cuentaFalabellaId),
+  })
+);
+
+// Issue #422 — conciliación de pagos de Falabella. La API no da pagos
+// (E008 en GetPayoutStatus y GetTransactionDetails, PRs #469 y #470): la
+// fuente es el «Reporte de transacciones» de Seller Center (Pagos →
+// Estado de cuenta). Tabla genérica de movimientos de marketplace: hoy
+// solo Falabella; Mercado Pago entra después con su propia columna de
+// cuenta (cuenta_ml_id) y otro valor en el CHECK de marketplace.
+//
+// El monto que suma al pago es SIEMPRE «Monto con IVA» (columna monto):
+// hay líneas que no traen el monto sin IVA ni el IVA. 4 decimales porque
+// Falabella reparte IVA y retenciones con más de 2 y la suma del corte
+// tiene que dar exacto el «Pago a recibir».
+export const CATEGORIAS_MOVIMIENTO = [
+  "precio",
+  "comision",
+  "envio",
+  "promocion",
+  "retencion",
+  "publicidad",
+  "fulfillment",
+  "devolucion",
+  "ajuste",
+  "otro",
+] as const;
+export type CategoriaMovimiento = (typeof CATEGORIAS_MOVIMIENTO)[number];
+
+export const movimientosMarketplace = pgTable(
+  "movimientos_marketplace",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    marketplace: text("marketplace").notNull(),
+    cuentaFalabellaId: uuid("cuenta_falabella_id"),
+    // La publicidad y otros servicios llegan sin Nº de orden.
+    numeroOrden: text("numero_orden"),
+    sku: text("sku"),
+    idArticulo: text("id_articulo"),
+    // Texto original del reporte («Comisión», «Retención ICA»…) y la
+    // categoría normalizada que usa la pantalla (lib/falabella/reporte-transacciones.ts).
+    tipoTransaccion: text("tipo_transaccion").notNull(),
+    categoria: text("categoria").$type<CategoriaMovimiento>().notNull(),
+    moneda: text("moneda").notNull(),
+    montoSinIva: numeric("monto_sin_iva", { precision: 16, scale: 4 }),
+    iva: numeric("iva", { precision: 16, scale: 4 }),
+    monto: numeric("monto", { precision: 16, scale: 4 }).notNull(),
+    fechaTransaccion: date("fecha_transaccion", { mode: "string" }),
+    estadoPago: text("estado_pago"),
+    estadoCuenta: text("estado_cuenta"),
+    referenciaPago: text("referencia_pago"),
+    documentoTributario: text("documento_tributario"),
+    // Huella de la línea (lib/falabella/reporte-transacciones.ts): mismos
+    // datos de la línea + su número de aparición en el archivo. Reimportar
+    // el mismo reporte (o el del periodo que la contiene) no la duplica:
+    // solo actualiza el estado de pago y el estado de cuenta.
+    huella: text("huella").notNull(),
+    creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    lineaUnica: uniqueIndex("movimientos_marketplace_linea_unica").on(t.empresaId, t.marketplace, t.huella),
+    porEstadoCuenta: index("movimientos_marketplace_estado_cuenta_idx").on(t.empresaId, t.estadoCuenta),
+    marketplaceValido: check("movimientos_marketplace_marketplace_valido", sql`${t.marketplace} in ('falabella')`),
+    cuentaSegunMarketplace: check(
+      "movimientos_marketplace_cuenta_segun_marketplace",
+      sql`${t.marketplace} <> 'falabella' OR ${t.cuentaFalabellaId} IS NOT NULL`
+    ),
+    categoriaValida: check(
+      "movimientos_marketplace_categoria_valida",
+      sql`${t.categoria} in ('precio', 'comision', 'envio', 'promocion', 'retencion', 'publicidad', 'fulfillment', 'devolucion', 'ajuste', 'otro')`
+    ),
+    cuentaFalabellaMismaEmpresa: foreignKey({
+      name: "movimientos_marketplace_cuenta_falabella_misma_empresa_fk",
+      columns: [t.empresaId, t.cuentaFalabellaId],
+      foreignColumns: [cuentasFalabella.empresaId, cuentasFalabella.id],
+    }).onDelete("cascade"),
   })
 );
 

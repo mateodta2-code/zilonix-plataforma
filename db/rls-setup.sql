@@ -80,6 +80,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ia_conexiones TO app_user;
 -- Pablo/Mateo: queda desconectada_ts como histórico, los tokens se
 -- limpian con UPDATE, no con DELETE) — por eso sin DELETE acá.
 GRANT SELECT, INSERT, UPDATE ON canva_conexiones TO app_user;
+-- Issue #422 (conciliación Falabella) — los movimientos del reporte de
+-- transacciones se UPSERTean al reimportar (solo cambian estado de pago
+-- y estado de cuenta) y nunca se borran: sin DELETE.
+GRANT SELECT, INSERT, UPDATE ON movimientos_marketplace TO app_user;
 -- Foro de la comunidad (14-nov) — compartido entre TODAS las empresas
 -- por diseño (sin empresa_id ni política por empresa, igual que
 -- usuarios). Desde /panel solo se lee y se publica: nadie edita ni
@@ -267,6 +271,8 @@ ALTER TABLE cuentas_falabella ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_falabella FORCE ROW LEVEL SECURITY;
 ALTER TABLE pedidos_falabella ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedidos_falabella FORCE ROW LEVEL SECURITY;
+ALTER TABLE movimientos_marketplace ENABLE ROW LEVEL SECURITY;
+ALTER TABLE movimientos_marketplace FORCE ROW LEVEL SECURITY;
 ALTER TABLE avisos_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE avisos_ml FORCE ROW LEVEL SECURITY;
 ALTER TABLE pedidos ENABLE ROW LEVEL SECURITY;
@@ -577,6 +583,10 @@ CREATE POLICY aislamiento_cuentas_falabella ON cuentas_falabella
 
 DROP POLICY IF EXISTS aislamiento_pedidos_falabella ON pedidos_falabella;
 CREATE POLICY aislamiento_pedidos_falabella ON pedidos_falabella
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_movimientos_marketplace ON movimientos_marketplace;
+CREATE POLICY aislamiento_movimientos_marketplace ON movimientos_marketplace
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 DROP POLICY IF EXISTS aislamiento_publicaciones ON publicaciones;

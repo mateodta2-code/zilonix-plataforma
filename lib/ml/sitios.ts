@@ -75,6 +75,17 @@ export function formatearMoneda(valor: number, siteId: unknown): string {
   return new Intl.NumberFormat(sitio.idioma, { style: "currency", currency: sitio.moneda }).format(valor);
 }
 
+// Issue #422 — para montos que no vienen de una cuenta de Mercado Libre
+// sino con su divisa ISO (el «Reporte de transacciones» de Falabella trae
+// la columna Divisa). El locale sale del sitio que usa esa moneda; una
+// moneda que Zilonix no opera se formatea igual con su código y el
+// idioma del default, nunca se cambia por otra moneda.
+export function formatearMonedaIso(valor: number, moneda: unknown): string {
+  const codigo = typeof moneda === "string" && /^[A-Z]{3}$/.test(moneda) ? moneda : SITIOS_ML[SITE_ID_DEFECTO].moneda;
+  const sitio = Object.values(SITIOS_ML).find((s) => s.moneda === codigo) ?? SITIOS_ML[SITE_ID_DEFECTO];
+  return new Intl.NumberFormat(sitio.idioma, { style: "currency", currency: codigo }).format(valor);
+}
+
 // Para números que no son plata (cantidades, porcentajes…) pero sí
 // necesitan el agrupado de miles del idioma real de la cuenta, nunca
 // "es-CO" fijo. Un idioma que no es ninguno de los 5 reales de

@@ -49,6 +49,13 @@ const RUTAS_PROTEGIDAS = new Set([
   // guardar, finanzas.modificar (acá y en lib/configuracion-finanzas.ts).
   "app/panel/finanzas/configuracion/page.tsx",
   "app/panel/finanzas/configuracion/actions.ts",
+  // Issue #422 — conciliación Falabella: ver la lista y un corte pide
+  // finanzas.consultar; cargar el reporte, finanzas.modificar (acá y en
+  // lib/falabella/conciliacion.ts).
+  "app/panel/finanzas/falabella/page.tsx",
+  "app/panel/finanzas/falabella/corte/page.tsx",
+  "app/panel/finanzas/falabella/importar/page.tsx",
+  "app/panel/finanzas/falabella/importar/actions.ts",
   "app/panel/actividad/page.tsx",
   "app/panel/invitar/page.tsx",
   "app/panel/invitar/actions.ts",
