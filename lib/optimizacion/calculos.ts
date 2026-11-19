@@ -172,6 +172,43 @@ export function diasInventario(stock: number | null, unidades: number, dias: num
   return Math.floor((stock * dias) / unidades);
 }
 
+export type UtilidadAcumulada = {
+  // Utilidad de las ventas con costos completos, menos TODA la
+  // publicidad de la publicación. null si ninguna venta tiene costos.
+  ganancia: string | null;
+  margen: string | null;
+  ventas: string;
+  unidades: number;
+  pedidos: number;
+  // Ventas válidas que no suman a la ganancia (sin foto de Finanzas o
+  // sin costo del producto): se avisan, nunca se cuentan como 0.
+  pedidosSinCosto: number;
+  primerDia: string | null;
+};
+
+// Toda la historia que Seller tiene de la publicación. A diferencia del
+// período (que sale "—" si falta un costo), acá se suma lo que sí tiene
+// costos y se dice cuántas ventas quedaron afuera.
+export function utilidadAcumulada(lineas: LineaVendida[], publicidad: DiaPublicidad[], conFinanzas: boolean): UtilidadAcumulada {
+  const validas = lineas.filter((l) => l.valida);
+  const conCosto = validas.filter((l) => l.costos?.utilidad != null);
+  const sinCosto = new Set(validas.filter((l) => l.costos?.utilidad == null).map((l) => l.pedidoId));
+  const ventas = sumar(validas.map((l) => l.valor));
+  const inversion = sumar(publicidad.map((p) => p.inversion));
+  const ganancia = conFinanzas && conCosto.length > 0 ? sumar(conCosto.map((l) => l.costos!.utilidad as string)) - inversion : null;
+  const ventasConCosto = sumar(conCosto.map((l) => l.valor));
+  const dias = validas.map((l) => l.dia).sort();
+  return {
+    ganancia: ganancia === null ? null : desdeCentavos(ganancia),
+    margen: ganancia === null || ventasConCosto <= CERO ? null : porcentaje(ganancia, ventasConCosto),
+    ventas: desdeCentavos(ventas),
+    unidades: validas.reduce((n, l) => n + l.cantidad, 0),
+    pedidos: new Set(validas.map((l) => l.pedidoId)).size,
+    pedidosSinCosto: conFinanzas ? sinCosto.size : 0,
+    primerDia: dias[0] ?? null,
+  };
+}
+
 export type PuntoDia = { dia: string; ventas: number; visitas: number | null };
 
 // Una fila por día del período, con ceros donde no hubo ventas.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { leerVisitasPorDia } from "@/lib/ml/cliente";
-import { diasInventario, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, variacion, type LineaVendida } from "@/lib/optimizacion/calculos";
+import { diasInventario, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, utilidadAcumulada, variacion, type LineaVendida } from "@/lib/optimizacion/calculos";
 import { opcionesPeriodo, resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
 
 const AHORA = new Date("2026-11-17T15:00:00-05:00");
@@ -122,5 +122,43 @@ describe("indicadores", () => {
       { dia: "2026-11-11", ventas: 0, visitas: 0 },
       { dia: "2026-11-12", ventas: 2, visitas: 7 },
     ]);
+  });
+});
+
+describe("utilidad total de la publicación (toda la historia)", () => {
+  const linea = (pedidoId: string, dia: string, utilidad: string | null, extra: Partial<LineaVendida> = {}): LineaVendida => ({
+    pedidoId,
+    dia,
+    cantidad: 1,
+    valor: "100000.00",
+    valida: true,
+    costos: utilidad === undefined ? null : { comision: "15000.00", envio: "10000.00", costoProducto: "50000.00", empaque: "2000.00", utilidad },
+    ...extra,
+  });
+
+  it("suma lo que tiene costos, resta TODA la publicidad y avisa cuántas ventas no suman", () => {
+    const r = utilidadAcumulada(
+      [
+        linea("p1", "2026-06-01", "23000.00"),
+        linea("p2", "2026-09-10", "23000.00", { cantidad: 2, valor: "200000.00" }),
+        linea("p3", "2026-10-01", null), // sin costo del producto
+        linea("p4", "2026-11-01", null, { costos: null }), // sin foto de Finanzas
+        linea("p5", "2026-11-02", "99999.00", { valida: false }), // cancelada: no cuenta
+      ],
+      [
+        { dia: "2026-06-01", inversion: "1000.00", ingresos: "0.00" },
+        { dia: "2026-11-01", inversion: "5000.00", ingresos: "0.00" },
+      ],
+      true
+    );
+    expect(r).toMatchObject({ ganancia: "40000.00", unidades: 5, pedidos: 4, pedidosSinCosto: 2, primerDia: "2026-06-01", ventas: "500000.00" });
+    // margen sobre lo vendido que SÍ tiene costos (300.000)
+    expect(r.margen).toBe("13.33");
+  });
+
+  it("sin permiso de Finanzas o sin ninguna venta con costos: sin ganancia (nunca un 0 inventado)", () => {
+    expect(utilidadAcumulada([linea("p1", "2026-06-01", "23000.00")], [], false)).toMatchObject({ ganancia: null, pedidosSinCosto: 0, unidades: 1 });
+    expect(utilidadAcumulada([linea("p1", "2026-06-01", null, { costos: null })], [], true).ganancia).toBeNull();
+    expect(utilidadAcumulada([], [], true)).toMatchObject({ ganancia: null, pedidos: 0, primerDia: null });
   });
 });

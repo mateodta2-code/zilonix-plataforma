@@ -8,7 +8,7 @@
 // - Publicidad: publicidad_metricas_diarias de nivel "anuncio".
 // - Visitas por día: Mercado Libre (hasta 150 días hacia atrás).
 
-import { and, eq, gte, inArray, lt, lte } from "drizzle-orm";
+import { and, eq, inArray, lt, lte } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { pedidoItems, pedidos, pedidosFinanzas, publicidadMetricasDiarias, ventasCorrecciones } from "@/db/schema";
 import { ESTADOS_QUE_NO_SON_VENTA } from "@/lib/estados-venta";
@@ -45,9 +45,13 @@ export async function leerDatosDetalle(
   const [item] = await leerItemsOptimizacionMl([itemId], token);
   if (!item) return null;
 
-  const inicio = limitesDiaBogota(periodo.anteriorDesde)?.inicio;
-  const fin = limitesDiaBogota(periodo.hasta)?.finExclusivo;
-  if (!inicio || !fin) return null;
+  // Toda la historia de la publicación hasta hoy (no solo el período):
+  // la tarjeta «Utilidad total» suma todo lo vendido. Los resúmenes del
+  // período filtran por fecha en resumirPeriodo.
+  const hoy = hoyBogota(opciones.ahora);
+  const ultimoDia = periodo.hasta > hoy ? periodo.hasta : hoy;
+  const fin = limitesDiaBogota(ultimoDia)?.finExclusivo;
+  if (!fin) return null;
 
   const { filas, cabeceras, lineasPedido, correcciones, publicidad } = await dbComoEmpresa(empresaId, async (tx) => {
     const filas = await tx
@@ -69,7 +73,6 @@ export async function leerDatosDetalle(
           eq(pedidoItems.empresaId, empresaId),
           eq(pedidos.cuentaMlId, cuenta.id),
           eq(pedidoItems.itemIdExterno, itemId),
-          gte(pedidos.fecha, inicio),
           lt(pedidos.fecha, fin)
         )
       );
@@ -136,8 +139,7 @@ export async function leerDatosDetalle(
           eq(publicidadMetricasDiarias.cuentaMlId, cuenta.id),
           eq(publicidadMetricasDiarias.nivel, "anuncio"),
           eq(publicidadMetricasDiarias.entidadIdMl, itemId),
-          gte(publicidadMetricasDiarias.fecha, periodo.anteriorDesde),
-          lte(publicidadMetricasDiarias.fecha, periodo.hasta)
+          lte(publicidadMetricasDiarias.fecha, ultimoDia)
         )
       );
     return { filas, cabeceras, lineasPedido, correcciones, publicidad };
@@ -179,7 +181,6 @@ export async function leerDatosDetalle(
 
   // Visitas: una sola llamada que cubra el período anterior y el actual
   // (hasta 150 días hacia atrás desde hoy).
-  const hoy = hoyBogota(opciones.ahora);
   const necesarios = diasEntreInclusive(periodo.anteriorDesde, hoy);
   const ultimos = Math.min(necesarios, MAXIMO_DIAS_VISITAS);
   const visitasPorDia = await visitasPorDiaMl(itemId, token, ultimos).catch(() => null);

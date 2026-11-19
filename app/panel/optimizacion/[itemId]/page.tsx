@@ -20,7 +20,7 @@ import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cue
 import { linkPublicacion } from "@/lib/ml/permalink";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { formatearMoneda } from "@/lib/ml/sitios";
-import { costoFijoPorUnidad, diasInventario, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
+import { costoFijoPorUnidad, diasInventario, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, utilidadAcumulada, variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
 import { leerDatosDetalle, type DatosDetalle } from "@/lib/optimizacion/detalle";
 import { opcionesPeriodo, resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
 import { rotuloTipoPublicacion } from "@/lib/optimizacion/textos";
@@ -137,6 +137,7 @@ export default async function DetalleOptimizacionPage({
   const enCostos = (v: string | null) => (porUnidadModo ? porUnidad(v, actual.unidades) : v);
   const minimo = precioMinimo(actual);
   const diasStock = diasInventario(datos.item.stock, actual.unidades, periodo.dias);
+  const historia = utilidadAcumulada(datos.lineas, datos.publicidad, conFinanzas);
   // Fase 3 — edición: datos frescos de ML (ventas, variantes, fotos,
   // automatización y precio para ganar) y la base del simulador con los
   // costos del período elegido. Solo para quien puede modificar.
@@ -275,6 +276,10 @@ export default async function DetalleOptimizacionPage({
               <p className={styles.nota}>Faltan ventas por sincronizar en Finanzas: los costos de este período no están completos.</p>
             ) : (
               <Tabla encabezados={["Concepto", { clave: "valor", contenido: porUnidadModo ? "Por unidad" : "Total", numerica: true }]}>
+                <FilaTabla>
+                  <CeldaTabla>Ventas</CeldaTabla>
+                  <CeldaTabla numerica>{plata(enCostos(actual.ventasConcretadas))}</CeldaTabla>
+                </FilaTabla>
                 {[
                   ["Comisión de Mercado Libre", enCostos(actual.costos.comision)],
                   ["Envío", enCostos(actual.costos.envio)],
@@ -293,6 +298,20 @@ export default async function DetalleOptimizacionPage({
                     <span className={styles.notaNeutra}>Próximamente</span>
                   </CeldaTabla>
                 </FilaTabla>
+                {/* Ventas − todo lo de arriba (sin impuestos todavía). */}
+                <FilaTabla className={styles.filaUtilidad}>
+                  <CeldaTabla>
+                    <strong>Utilidad</strong>
+                    {actual.margen !== null ? <span className={styles.notaNeutra}>{` · ${pct(actual.margen)} de lo vendido`}</span> : null}
+                  </CeldaTabla>
+                  <CeldaTabla numerica>
+                    {actual.ganancia === null ? (
+                      <span className={styles.notaNeutra}>Falta algún costo</span>
+                    ) : (
+                      <strong className={Number(actual.ganancia) < 0 ? styles.negativo : styles.positivo}>{plata(enCostos(actual.ganancia))}</strong>
+                    )}
+                  </CeldaTabla>
+                </FilaTabla>
               </Tabla>
             )}
           </Tarjeta>
@@ -304,6 +323,18 @@ export default async function DetalleOptimizacionPage({
                 titulo="Ganancia real por unidad"
                 valor={plata(porUnidad(actual.ganancia, actual.unidades))}
                 detalle={[actual.margen === null ? "Falta algún costo." : `${pct(actual.margen)} de lo vendido · ${plata(actual.ganancia)} en el período`, "Después de comisión, envío, publicidad, costo y empaque. Sin impuestos todavía."]}
+              />
+              <TarjetaKpi
+                titulo="Utilidad total de la publicación"
+                valor={plata(historia.ganancia)}
+                detalle={[
+                  historia.pedidos === 0
+                    ? "Seller todavía no tiene ventas de esta publicación."
+                    : `${num(historia.unidades)} ${historia.unidades === 1 ? "unidad" : "unidades"} en ${num(historia.pedidos)} ${historia.pedidos === 1 ? "venta" : "ventas"} desde el ${historia.primerDia}${historia.margen !== null ? ` · ${pct(historia.margen)} de lo vendido` : ""}.`,
+                  historia.pedidosSinCosto > 0
+                    ? `${num(historia.pedidosSinCosto)} ${historia.pedidosSinCosto === 1 ? "venta no suma" : "ventas no suman"}: falta sincronizarlas en Finanzas o el costo del producto.`
+                    : "Todo lo vendido, menos comisión, envío, publicidad, costo y empaque.",
+                ]}
               />
               <TarjetaKpi titulo="Precio mínimo para no perder" valor={plata(minimo)} detalle={["Aproximado, con los costos de este período."]} />
               <TarjetaKpi titulo="ACOS" valor={pct(actual.acos)} detalle={["Publicidad ÷ ventas por publicidad."]} />
