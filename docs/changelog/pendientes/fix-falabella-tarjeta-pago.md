@@ -1,0 +1,5 @@
+- **2026-11-19** — Conciliación Falabella: el detalle del corte ya no dice "Pagado" cuando el corte sigue Abierto o con Pago programado (Refs #422). Ajuste del PR #473, sin migración.
+  - La primera tarjeta pasa a **"Pago a recibir"** y muestra al lado el estado del corte (Pagado, Pago programado, Abierto, No pagado) con el mismo chip de la lista de cortes. La fila final del "Detalle del corte" también dice "Pago a recibir".
+  - En "Por orden", la columna "Pagado" pasa a **"Neto del corte"**, con una nota: las órdenes en $0 con solo retenciones se vendieron en un corte anterior.
+  - Chip compartido `components/finanzas/ChipEstadoPago.tsx`. De paso corrige la lista de cortes, que pintaba "No pagado" de verde (`/pagad/i`); ahora va en rojo.
+  - `leerCorteFalabella` devuelve `estadosPago`; `pagado` pasa a `pagoARecibir` y, por orden, a `netoCorte`.
