@@ -1,0 +1,1 @@
+- **fix-graficas-globo-posicion** — **Gráficas por día:** el punto marcado y el globo no caían bajo el cursor. El SVG se dibuja centrado (`preserveAspectRatio` "meet"), con margen vacío a los lados en tarjetas anchas, y se calculaba como si ocupara todo el ancho. `puntoBajoCursor` (puro, con pruebas) usa la misma escala y el mismo margen. Afecta Optimización y Seguimiento.
