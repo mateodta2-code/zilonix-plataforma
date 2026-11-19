@@ -204,6 +204,12 @@ const RUTAS_PROTEGIDAS = new Set([
   // existe (consultar/modificar) — nunca un permiso nuevo solo para
   // esto.
   "app/api/configuracion/ia-conexion/route.ts",
+  // «Buscar por foto» de Investigación — mismo permiso que la página
+  // (inventario/consultar); las 2 rutas llaman requierePermiso() desde
+  // el helper compartido _ayudantes.ts (autorizar) y no leen la imagen
+  // ni llaman a la IA sin pasar por él.
+  "app/api/investigacion/buscar-por-foto/route.ts",
+  "app/api/investigacion/buscar-por-foto/comparar/route.ts",
   "app/panel/configuracion/page.tsx",
 ]);
 
