@@ -495,6 +495,23 @@ refrescarConfigRemota();
 // normal de siempre).
 chrome.tabs.onRemoved.addListener((tabId) => {
   desregistrarPestanaActualizarTodo(tabId);
+  // Optimización — si se cierra Optimización, se corta la búsqueda; si
+  // la persona cierra la pestaña de lectura, se devuelve lo leído hasta
+  // ahí.
+  if (competidoresActivos.has(tabId)) {
+    const estado = competidoresActivos.get(tabId);
+    limpiarEsperaCompetidor(estado);
+    competidoresActivos.delete(tabId);
+    if (estado.tabId != null) chrome.tabs.remove(estado.tabId, () => void chrome.runtime.lastError);
+  } else {
+    const tabIdPanel = competidoresDePestanaLectura(tabId);
+    if (tabIdPanel != null) {
+      const estado = competidoresActivos.get(tabIdPanel);
+      estado.tabId = null;
+      if (estado.fase === "ficha" && estado.resultados.length > 0) finalizarCompetidores(tabIdPanel);
+      else terminarCompetidores(tabIdPanel, errorCompetidores(estado, "cerrada"));
+    }
+  }
   // Issue #44 — mismo criterio: si la persona cierra a mano la
   // pestaña de Publicar que pidió un link (o la propia pestaña de
   // LECTURA, por cualquier motivo), se limpia la lectura activa
@@ -1060,6 +1077,213 @@ function finalizarEscaneoPlataforma(tabIdPanel) {
   chrome.tabs.update(tabIdPanel, { active: true }, () => void chrome.runtime.lastError);
 }
 
+// Optimización, Fase 4 (fuera del catálogo) — "Buscar 10 competidores
+// con la extensión" (/panel/optimizacion). Mercado Libre no enlaza por
+// API las publicaciones del mismo producto fuera del catálogo, así que
+// la extensión hace lo mismo que una persona: busca el producto en el
+// listado real, toma los 10 primeros resultados (sin la publicación
+// propia) y abre la ficha de cada uno para leer lo mismo que muestra el
+// panel flotante al analizar un producto (lector.leerProducto + la
+// galería + el análisis aprox.). Junta "Analizar" (el listado, con el
+// marcador _zilonix_escaneo=1) y "Traer datos de ese link" (la ficha,
+// leída por pedido de background por el id de la pestaña).
+//
+// UNA sola pestaña para todo (listado y después cada ficha, con
+// chrome.tabs.update), activa como la de "Analizar": el listado de
+// Mercado Libre no se pinta bien en una pestaña de fondo (#221). Se
+// cierra siempre al terminar (con datos, captcha, timeout o si la
+// persona la cierra) y se devuelve el foco a Optimización. Sigue
+// colgando de un clic real: el botón de la página.
+const TOPE_COMPETIDORES_EXTENSION = 10;
+const TIEMPO_MAX_LISTADO_COMPETIDORES_MS = 20_000;
+const TIEMPO_MAX_FICHA_COMPETIDOR_MS = 15_000;
+const PAUSA_ENTRE_FICHAS_COMPETIDOR_MS = 500;
+const COOLDOWN_COMPETIDORES_MS = 10_000;
+const LARGO_MAXIMO_TERMINO_COMPETIDORES = 120;
+const PATRON_ITEM_ID_ML = /^[A-Z]{3}\d{6,15}$/;
+
+// Mismo criterio que esRemitentePublicar: el remitente real (tab.url lo
+// pone Chrome) tiene que ser /panel/optimizacion de Seller.
+function esRemitenteOptimizacion(remitente) {
+  const urlRemitente = remitente && remitente.tab && typeof remitente.tab.url === "string" ? remitente.tab.url : "";
+  return ORIGENES_SELLER_PERMITIDOS_PUBLICAR.some((origen) => urlRemitente.startsWith(`${origen}/panel/optimizacion`));
+}
+
+// Puro — del listado escaneado a los candidatos: solo links reales de
+// Mercado Libre (mismo allowlist anclado de "Traer datos de ese link"),
+// sin la publicación propia, sin repetidos, como máximo 10.
+function elegirCandidatosCompetidores(productos, excluirItemId) {
+  const vistos = new Set();
+  const candidatos = [];
+  for (const p of Array.isArray(productos) ? productos : []) {
+    if (!p || typeof p.link !== "string" || !esUrlFinalDeMercadoLibre(p.link)) continue;
+    const itemId = typeof p.itemId === "string" && PATRON_ITEM_ID_ML.test(p.itemId) ? p.itemId : null;
+    if (itemId && itemId === excluirItemId) continue;
+    const clave = itemId || p.link;
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    candidatos.push({ link: p.link, itemId, desdeListado: p });
+    if (candidatos.length >= TOPE_COMPETIDORES_EXTENSION) break;
+  }
+  return candidatos;
+}
+
+function conMarcadorCompetidor(urlCruda) {
+  try {
+    const url = new URL(urlCruda);
+    url.searchParams.set("_zilonix_competidor", "1");
+    return url.toString();
+  } catch {
+    return urlCruda;
+  }
+}
+
+// Una búsqueda activa por pestaña de Optimización — un pedido nuevo
+// desde la misma pestaña reemplaza al anterior. En memoria, mismo
+// límite conocido que el resto de escaneos (#221).
+const competidoresActivos = new Map(); // tabIdPanel -> { tabId, fase, termino, excluirItemId, candidatos, indice, resultados, timeoutId, listener }
+
+function limpiarEsperaCompetidor(estado) {
+  clearTimeout(estado.timeoutId);
+  estado.timeoutId = null;
+  if (estado.listener) {
+    chrome.tabs.onUpdated.removeListener(estado.listener);
+    estado.listener = null;
+  }
+}
+
+function terminarCompetidores(tabIdPanel, mensaje) {
+  const estado = competidoresActivos.get(tabIdPanel);
+  if (!estado) return;
+  limpiarEsperaCompetidor(estado);
+  competidoresActivos.delete(tabIdPanel);
+  if (estado.tabId != null) chrome.tabs.remove(estado.tabId, () => void chrome.runtime.lastError);
+  chrome.tabs.sendMessage(tabIdPanel, mensaje, () => void chrome.runtime.lastError);
+  chrome.tabs.update(tabIdPanel, { active: true }, () => void chrome.runtime.lastError);
+}
+
+function errorCompetidores(estado, razon) {
+  return { tipo: "zilonix:competidores-error", payload: { razon, excluirItemId: estado.excluirItemId, termino: estado.termino } };
+}
+
+function finalizarCompetidores(tabIdPanel) {
+  const estado = competidoresActivos.get(tabIdPanel);
+  if (!estado) return;
+  terminarCompetidores(tabIdPanel, {
+    tipo: "zilonix:competidores-resultado",
+    payload: {
+      excluirItemId: estado.excluirItemId,
+      termino: estado.termino,
+      candidatos: estado.candidatos.length,
+      competidores: estado.resultados,
+    },
+  });
+}
+
+function iniciarCompetidores(tabIdPanel, termino, pais, excluirItemId) {
+  const anterior = competidoresActivos.get(tabIdPanel);
+  if (anterior) {
+    limpiarEsperaCompetidor(anterior);
+    competidoresActivos.delete(tabIdPanel);
+    if (anterior.tabId != null) chrome.tabs.remove(anterior.tabId, () => void chrome.runtime.lastError);
+  }
+  const paisValido = typeof pais === "string" && DOMINIOS_ML_PAIS[pais] ? pais : "CO";
+  const estado = { tabId: null, fase: "listado", termino, excluirItemId, candidatos: [], indice: 0, resultados: [], timeoutId: null, listener: null };
+  competidoresActivos.set(tabIdPanel, estado);
+  chrome.tabs.create({ url: urlListadoMl(termino, paisValido), active: true }, (tab) => {
+    if (competidoresActivos.get(tabIdPanel) !== estado) {
+      if (tab && tab.id != null) chrome.tabs.remove(tab.id, () => void chrome.runtime.lastError);
+      return;
+    }
+    if (chrome.runtime.lastError || !tab || tab.id == null) {
+      terminarCompetidores(tabIdPanel, errorCompetidores(estado, "no_se_pudo_abrir"));
+      return;
+    }
+    estado.tabId = tab.id;
+    estado.timeoutId = setTimeout(() => terminarCompetidores(tabIdPanel, errorCompetidores(estado, "sin_resultados")), TIEMPO_MAX_LISTADO_COMPETIDORES_MS);
+  });
+}
+
+// El listado llegó (content.js lo manda solo por el marcador
+// _zilonix_escaneo=1, igual que en "Analizar").
+function recibirListadoCompetidores(tabIdPanel, payload) {
+  const estado = competidoresActivos.get(tabIdPanel);
+  if (!estado || estado.fase !== "listado") return;
+  limpiarEsperaCompetidor(estado);
+  if (payload && payload.captcha) {
+    terminarCompetidores(tabIdPanel, errorCompetidores(estado, "captcha"));
+    return;
+  }
+  estado.candidatos = elegirCandidatosCompetidores(payload && payload.productos, estado.excluirItemId);
+  if (estado.candidatos.length === 0) {
+    terminarCompetidores(tabIdPanel, errorCompetidores(estado, "sin_resultados"));
+    return;
+  }
+  estado.fase = "ficha";
+  leerSiguienteCompetidor(tabIdPanel);
+}
+
+function leerSiguienteCompetidor(tabIdPanel) {
+  const estado = competidoresActivos.get(tabIdPanel);
+  if (!estado) return;
+  if (estado.indice >= estado.candidatos.length) {
+    finalizarCompetidores(tabIdPanel);
+    return;
+  }
+  const candidato = estado.candidatos[estado.indice];
+  // Se le pide leer en cada carga completa que termine en Mercado Libre
+  // (un link de listado puede pasar por un redirect). Si la página
+  // todavía no es una ficha, content.js contesta vacío y se espera la
+  // siguiente carga o el tope de 15 s.
+  function alActualizar(idActualizado, cambioInfo, tabActualizada) {
+    if (idActualizado !== estado.tabId || cambioInfo.status !== "complete") return;
+    const urlFinal = tabActualizada && typeof tabActualizada.url === "string" ? tabActualizada.url : "";
+    if (!esUrlFinalDeMercadoLibre(urlFinal)) return;
+    chrome.tabs.sendMessage(estado.tabId, { tipo: "zilonix:leer-competidor" }, () => void chrome.runtime.lastError);
+  }
+  estado.listener = alActualizar;
+  chrome.tabs.onUpdated.addListener(alActualizar);
+  estado.timeoutId = setTimeout(() => avanzarCompetidor(tabIdPanel, null), TIEMPO_MAX_FICHA_COMPETIDOR_MS);
+  chrome.tabs.update(estado.tabId, { url: conMarcadorCompetidor(candidato.link) }, () => void chrome.runtime.lastError);
+}
+
+// datos = lo leído de la ficha, o null (timeout / no se pudo leer):
+// igual se devuelve lo que el listado ya mostraba de ese candidato,
+// nunca se esconde en silencio.
+function avanzarCompetidor(tabIdPanel, datos) {
+  const estado = competidoresActivos.get(tabIdPanel);
+  if (!estado || estado.fase !== "ficha") return;
+  limpiarEsperaCompetidor(estado);
+  const candidato = estado.candidatos[estado.indice];
+  const l = candidato.desdeListado || {};
+  estado.resultados.push(
+    datos
+      ? { ...datos, link: candidato.link, itemId: datos.itemId || candidato.itemId, foto: datos.foto || l.foto || null, leidoDeFicha: true }
+      : {
+          titulo: typeof l.titulo === "string" ? l.titulo : null,
+          precio: typeof l.precio === "number" ? l.precio : null,
+          vendidos: typeof l.vendidos === "number" ? l.vendidos : null,
+          calificacion: typeof l.calificacion === "number" ? l.calificacion : null,
+          esFull: typeof l.esFull === "boolean" ? l.esFull : null,
+          envioGratis: typeof l.esEnvioGratis === "boolean" ? l.esEnvioGratis : null,
+          vendedor: typeof l.vendedor === "string" ? l.vendedor : null,
+          foto: typeof l.foto === "string" ? l.foto : null,
+          itemId: candidato.itemId,
+          link: candidato.link,
+          leidoDeFicha: false,
+        }
+  );
+  estado.indice++;
+  setTimeout(() => leerSiguienteCompetidor(tabIdPanel), PAUSA_ENTRE_FICHAS_COMPETIDOR_MS);
+}
+
+function competidoresDePestanaLectura(tabId) {
+  for (const [tabIdPanel, estado] of competidoresActivos) {
+    if (estado.tabId === tabId) return tabIdPanel;
+  }
+  return null;
+}
+
 chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
   // Corrección de Pablo (revisión del PR #260, punto 2) — "el worker
   // despertó", sin importar qué mensaje sea: barre el registro de
@@ -1100,6 +1324,11 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
         return;
       }
     }
+    const tabIdPanelCompetidores = competidoresDePestanaLectura(remitente.tab?.id);
+    if (tabIdPanelCompetidores != null) {
+      recibirListadoCompetidores(tabIdPanelCompetidores, mensaje.payload);
+      return;
+    }
     return; // ninguna variante activa esperaba esto (ej. llegó tarde, después del timeout) — nunca rompe nada
   }
 
@@ -1107,6 +1336,49 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
     if (!remitente.tab?.id) return;
     const payload = mensaje.payload || {};
     iniciarEscaneoPlataforma(remitente.tab.id, payload.plataforma, payload.terminos, payload.preview);
+    return;
+  }
+
+  // Optimización — "Buscar 10 competidores": solo desde
+  // /panel/optimizacion (tab.url real), con cooldown contra el doble
+  // clic, término acotado y un itemId propio bien formado.
+  if (mensaje.tipo === "zilonix:iniciar-competidores") {
+    if (!remitente.tab?.id || !esRemitenteOptimizacion(remitente)) return;
+    const tabIdPanel = remitente.tab.id;
+    const payload = mensaje.payload || {};
+    const termino = typeof payload.termino === "string" ? payload.termino.trim().slice(0, LARGO_MAXIMO_TERMINO_COMPETIDORES) : "";
+    const excluirItemId = typeof payload.excluirItemId === "string" && PATRON_ITEM_ID_ML.test(payload.excluirItemId) ? payload.excluirItemId : null;
+    if (!termino || !excluirItemId) return;
+    chrome.storage.session.get({ ultimoCompetidoresMs: 0 }, (datosCooldown) => {
+      const ahoraMs = Date.now();
+      const ultimoMs = typeof datosCooldown.ultimoCompetidoresMs === "number" ? datosCooldown.ultimoCompetidoresMs : 0;
+      if (ahoraMs - ultimoMs < COOLDOWN_COMPETIDORES_MS) return;
+      chrome.storage.session.set({ ultimoCompetidoresMs: ahoraMs });
+      iniciarCompetidores(tabIdPanel, termino, payload.pais, excluirItemId);
+    });
+    return;
+  }
+
+  // content.js (en la pestaña que abrió la búsqueda de competidores)
+  // contesta a "zilonix:leer-competidor". Solo cuenta si viene de esa
+  // pestaña puntual; vacío = la página todavía no es una ficha, se
+  // espera la siguiente carga o el tope.
+  if (mensaje.tipo === "zilonix:resultado-leer-competidor") {
+    const tabIdPanel = competidoresDePestanaLectura(remitente.tab?.id);
+    if (tabIdPanel == null) return;
+    const payload = mensaje.payload || {};
+    if (payload.captcha) {
+      const estado = competidoresActivos.get(tabIdPanel);
+      terminarCompetidores(tabIdPanel, errorCompetidores(estado, "captcha"));
+      return;
+    }
+    // Solo mientras se espera ESTA ficha: una segunda respuesta de la
+    // misma carga (Mercado Libre puede terminar de cargar dos veces)
+    // llegaría en la pausa y se anotaría al candidato siguiente.
+    const estadoFicha = competidoresActivos.get(tabIdPanel);
+    if (payload.datos && typeof payload.datos === "object" && estadoFicha.fase === "ficha" && estadoFicha.timeoutId !== null) {
+      avanzarCompetidor(tabIdPanel, payload.datos);
+    }
     return;
   }
 
@@ -1388,6 +1660,11 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
   }
 
   if (!TIPOS_RELEVADOS.has(mensaje.tipo) || !mensaje.payload) return;
+  // Optimización — las fichas que abre "Buscar 10 competidores" no son
+  // una visita de la persona a un competidor que sigue: nunca alimentan
+  // Seguimiento (content.js ya lo corta con _zilonix_competidor=1; esto
+  // cubre un redirect que pierda el marcador).
+  if (mensaje.tipo === "zilonix:dato-pagina-seguimiento" && competidoresDePestanaLectura(remitente.tab?.id) != null) return;
   chrome.tabs.query({}, (pestanas) => {
     // Issue #251 (revisión de Pablo, punto 4) — si NINGUNA pestaña
     // abierta ahora mismo es la de Seguimiento, se encola para

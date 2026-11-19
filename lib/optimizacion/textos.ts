@@ -1,7 +1,17 @@
 // Optimización, Fase 1 — textos y cálculos puros de la lista. Sin
 // base de datos ni Mercado Libre: lo usan la página y el cliente.
 
-export const DIAS_METRICAS = 7;
+// Ventana de visitas, ventas y conversión de la lista. Lista blanca:
+// cualquier otro valor de la URL cae a 7. Visitas aguanta hasta 150 días
+// en Mercado Libre (scripts de #462).
+export const OPCIONES_DIAS_METRICAS = [7, 14, 30, 90] as const;
+export type DiasMetricas = (typeof OPCIONES_DIAS_METRICAS)[number];
+export const DIAS_METRICAS: DiasMetricas = 7;
+
+export function leerDiasMetricas(valor: unknown): DiasMetricas {
+  const n = typeof valor === "string" ? Number(valor) : typeof valor === "number" ? valor : NaN;
+  return OPCIONES_DIAS_METRICAS.find((d) => d === n) ?? DIAS_METRICAS;
+}
 export const TAMANO_PAGINA = 50;
 
 export type FiltroEstado = "activas" | "pausadas" | "todas";

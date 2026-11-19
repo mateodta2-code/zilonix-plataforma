@@ -981,6 +981,136 @@ describe('zilonix:importar-link — anexo "Traer datos de ese link" (issue #44/#
   });
 });
 
+describe("zilonix:iniciar-competidores — Optimización, competidores fuera del catálogo", () => {
+  let mockActual: ReturnType<typeof crearChromeMock>;
+  const URL_OPTIMIZACION = "https://web-staging-d979.up.railway.app/panel/optimizacion?cuenta=x";
+  const PROPIA = "MCO1342632705";
+  const TAB_PANEL = 7;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockActual = crearChromeMock();
+    (globalThis as unknown as { chrome: unknown }).chrome = mockActual.chrome;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (globalThis as unknown as { chrome?: unknown }).chrome;
+  });
+
+  async function pedir(payload: unknown, urlRemitente = URL_OPTIMIZACION) {
+    mockActual.listeners.onMessage!({ tipo: "zilonix:iniciar-competidores", payload }, { tab: { id: TAB_PANEL, url: urlRemitente } });
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 4);
+  }
+
+  async function desdePestana(tabId: number, mensaje: unknown) {
+    mockActual.listeners.onMessage!(mensaje, { tab: { id: tabId } });
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+  }
+
+  function aPanel(tipo: string) {
+    return mockActual.llamadas.sendMessage.filter((m) => m.tabId === TAB_PANEL && (m.mensaje as { tipo?: string }).tipo === tipo) as Array<{
+      mensaje: { payload: Record<string, unknown> };
+    }>;
+  }
+
+  function producto(n: number, itemId = `MCO${100000000 + n}`) {
+    return { titulo: `Producto ${n}`, precio: 1000 * n, itemId, link: `https://articulo.mercadolibre.com.co/MCO-${100000000 + n}-x-_JM` };
+  }
+
+  it("solo desde /panel/optimizacion, con término y un itemId propio válido", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ termino: "tijera", excluirItemId: PROPIA, pais: "CO" }, "https://web-staging-d979.up.railway.app/panel/publicar");
+    await pedir({ termino: "tijera", excluirItemId: PROPIA, pais: "CO" }, "https://evil.com/panel/optimizacion");
+    await pedir({ termino: "   ", excluirItemId: PROPIA });
+    await pedir({ termino: "tijera", excluirItemId: "x/../y" });
+    expect(mockActual.llamadas.create).toEqual([]);
+  });
+
+  it("busca en el listado, lee 10 fichas (sin la propia) en la misma pestaña y devuelve todo a Optimización", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ termino: "tijera ingletiadora", excluirItemId: PROPIA, pais: "CO" });
+    expect(mockActual.llamadas.create).toHaveLength(1);
+    const lectura = mockActual.llamadas.create[0];
+    expect(lectura.url).toBe("https://listado.mercadolibre.com.co/tijera-ingletiadora?_zilonix_escaneo=1");
+
+    const productos = [producto(1, PROPIA), ...Array.from({ length: 12 }, (_, i) => producto(i + 2)), producto(2)];
+    await desdePestana(lectura.id, { tipo: "zilonix:escaneo-resultado", payload: { productos, captcha: false } });
+
+    for (let i = 0; i < 10; i++) {
+      const navegacion = mockActual.llamadas.update.filter((u) => u.tabId === lectura.id).at(-1)!.props as { url: string };
+      expect(navegacion.url).toContain("_zilonix_competidor=1");
+      expect(navegacion.url).not.toContain(PROPIA.slice(3));
+      mockActual.dispararTabActualizada(lectura.id, navegacion.url);
+      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+      expect(mockActual.llamadas.sendMessage.at(-1)).toEqual({ tabId: lectura.id, mensaje: { tipo: "zilonix:leer-competidor" } });
+      await desdePestana(lectura.id, { tipo: "zilonix:resultado-leer-competidor", payload: { datos: { titulo: `Ficha ${i}`, precio: 5000 + i, ventasMes: 3 } } });
+      // Una segunda respuesta de la misma carga (en la pausa) no se anota al siguiente.
+      await desdePestana(lectura.id, { tipo: "zilonix:resultado-leer-competidor", payload: { datos: { titulo: "Duplicada", precio: 1 } } });
+      await vi.advanceTimersByTimeAsync(600);
+    }
+
+    const resultado = aPanel("zilonix:competidores-resultado");
+    expect(resultado).toHaveLength(1);
+    const competidores = resultado[0].mensaje.payload.competidores as Array<{ titulo: string; leidoDeFicha: boolean; link: string }>;
+    expect(competidores).toHaveLength(10);
+    expect(competidores.every((c) => c.leidoDeFicha && c.link.startsWith("https://articulo.mercadolibre.com.co/"))).toBe(true);
+    expect(competidores.map((c) => c.titulo)).toEqual(Array.from({ length: 10 }, (_, i) => `Ficha ${i}`));
+    expect(resultado[0].mensaje.payload.excluirItemId).toBe(PROPIA);
+    expect(mockActual.llamadas.remove).toContain(lectura.id);
+    expect(mockActual.cantidadListenersOnUpdated()).toBe(0);
+  });
+
+  it("una ficha que no contesta en 15 s queda con los datos del listado y se sigue con la próxima", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ termino: "tijera", excluirItemId: PROPIA });
+    const lectura = mockActual.llamadas.create[0];
+    await desdePestana(lectura.id, { tipo: "zilonix:escaneo-resultado", payload: { productos: [producto(2), producto(3)] } });
+    await vi.advanceTimersByTimeAsync(15_000 + 600);
+    await desdePestana(lectura.id, { tipo: "zilonix:resultado-leer-competidor", payload: { datos: { titulo: "Leída", precio: 1 } } });
+    await vi.advanceTimersByTimeAsync(600);
+    const competidores = aPanel("zilonix:competidores-resultado")[0].mensaje.payload.competidores as Array<{ titulo: string; leidoDeFicha: boolean }>;
+    expect(competidores.map((c) => [c.titulo, c.leidoDeFicha])).toEqual([
+      ["Producto 2", false],
+      ["Leída", true],
+    ]);
+  });
+
+  it("captcha en el listado o búsqueda vacía: avisa a Optimización y cierra la pestaña", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ termino: "tijera", excluirItemId: PROPIA });
+    await desdePestana(mockActual.llamadas.create[0].id, { tipo: "zilonix:escaneo-resultado", payload: { productos: [], captcha: true } });
+    expect(aPanel("zilonix:competidores-error")[0].mensaje.payload.razon).toBe("captcha");
+    expect(mockActual.llamadas.remove).toContain(mockActual.llamadas.create[0].id);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pedir({ termino: "nada", excluirItemId: PROPIA });
+    await desdePestana(mockActual.llamadas.create[1].id, { tipo: "zilonix:escaneo-resultado", payload: { productos: [producto(1, PROPIA)] } });
+    expect(aPanel("zilonix:competidores-error")[1].mensaje.payload.razon).toBe("sin_resultados");
+  });
+
+  it("descarta links que no son de Mercado Libre y respeta el cooldown contra el doble clic", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ termino: "tijera", excluirItemId: PROPIA });
+    await pedir({ termino: "tijera", excluirItemId: PROPIA });
+    expect(mockActual.llamadas.create).toHaveLength(1);
+    await desdePestana(mockActual.llamadas.create[0].id, {
+      tipo: "zilonix:escaneo-resultado",
+      payload: { productos: [{ ...producto(2), link: "https://mercadolibre.com.co.evil.com/MCO-1" }] },
+    });
+    expect(aPanel("zilonix:competidores-error")[0].mensaje.payload.razon).toBe("sin_resultados");
+  });
+
+  it("una ficha de competidores nunca alimenta Seguimiento", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ termino: "tijera", excluirItemId: PROPIA });
+    const lectura = mockActual.llamadas.create[0];
+    const enviosAntes = mockActual.llamadas.sendMessage.length;
+    mockActual.setPestanasAbiertas([{ id: 50, url: URL_SEGUIMIENTO_STAGING }]);
+    await desdePestana(lectura.id, { tipo: "zilonix:dato-pagina-seguimiento", payload: lecturaTienda() });
+    expect(mockActual.llamadas.sendMessage.slice(enviosAntes).filter((m) => m.tabId === 50)).toEqual([]);
+  });
+});
+
 describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)", () => {
   let mockActual: ReturnType<typeof crearChromeMock>;
   const fetchMock = vi.fn();
@@ -1126,9 +1256,9 @@ describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)"
     });
   });
 
-  it("manifest: host_permissions solo seller.zilonix.com y staging, versión 0.3.45", async () => {
+  it("manifest: host_permissions solo seller.zilonix.com y staging, versión 0.3.46", async () => {
     const m = (await import("./manifest.json")).default as { host_permissions: string[]; version: string };
     expect(m.host_permissions).toEqual(["https://seller.zilonix.com/*", "https://web-staging-d979.up.railway.app/*"]);
-    expect(m.version).toBe("0.3.45");
+    expect(m.version).toBe("0.3.46");
   });
 });

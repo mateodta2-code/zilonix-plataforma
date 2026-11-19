@@ -39,11 +39,15 @@ export function GaleriaFotos({
   onChange,
   cloudinaryConfigurado,
   limiteFotos,
+  conCanva = true,
 }: {
   urls: string[];
   onChange: (urls: string[]) => void;
   cloudinaryConfigurado: boolean;
   limiteFotos: number | null;
+  // Optimización usa la misma galería sin el campo de Canva (allá no
+  // está el botón "Conectar Canva" que ese campo necesita).
+  conCanva?: boolean;
 }) {
   const [agregandoUrlManual, setAgregandoUrlManual] = useState(false);
   const [urlNueva, setUrlNueva] = useState("");
@@ -277,6 +281,7 @@ export function GaleriaFotos({
           blanca de hosts + anti-SSRF + magic bytes). Ancho moderado a
           propósito (nunca ocupa todo el ancho de la tarjeta) — es un
           campo secundario, el camino principal es la tarjeta "+". */}
+          {conCanva ? (
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <input
               value={canvaUrl}
@@ -293,6 +298,7 @@ export function GaleriaFotos({
               Traer
             </Boton>
           </div>
+          ) : null}
           {errorSubida && (
             <p style={{ fontSize: 12, color: "var(--kpi-peligro-texto)", marginTop: 6 }}>
               {errorSubida}

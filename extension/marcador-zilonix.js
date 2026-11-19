@@ -111,6 +111,10 @@
     // acá no hace falta ningún chequeo de ruta aparte, mismo criterio
     // que el resto de este mapa.
     "zilonix:importar-link-error": "importar-link-error",
+    // Optimización — resultado de "Buscar 10 competidores" (o su error),
+    // mandado directo a la pestaña de /panel/optimizacion que lo pidió.
+    "zilonix:competidores-resultado": "competidores-leidos",
+    "zilonix:competidores-error": "competidores-error",
   };
 
   // Issue #44 (anexo 2) — generalizado de "solo zilonix:importar-publicar"
@@ -179,6 +183,9 @@
     // el clic real manda el link acá; background.js valida el dominio
     // de nuevo, aplica el cooldown y abre la pestaña de lectura.
     "importar-link": "zilonix:importar-link",
+    // Optimización — clic real en "Buscar 10 competidores"; background.js
+    // revalida el remitente, el término y el cooldown.
+    "iniciar-competidores": "zilonix:iniciar-competidores",
   };
 
   window.addEventListener("message", (evento) => {
