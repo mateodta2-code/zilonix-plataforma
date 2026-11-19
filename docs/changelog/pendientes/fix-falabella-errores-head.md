@@ -1,0 +1,1 @@
+- Conector Falabella: los errores de la API ahora muestran su código y mensaje reales (vienen dentro de `ErrorResponse.Head`), en vez de "Error desconocido de Falabella".
