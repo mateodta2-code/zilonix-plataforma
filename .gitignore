@@ -17,3 +17,7 @@ tsconfig.tsbuildinfo
 *.pfx
 *.key
 certificados/
+
+# Issue #422 — respuestas de la sonda de Falabella (datos reales de
+# pedidos/pagos, aunque redactados): nunca se versionan.
+tmp/falabella-sonda/
