@@ -326,6 +326,12 @@
   gap: 8px;
 }
 
+.iaResultados {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
 /* Fase 4 — competencia del mismo producto. */
 .alertas {
   margin: 0;

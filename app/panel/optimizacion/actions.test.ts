@@ -328,11 +328,28 @@ describe("crear imagen con IA (no toca Mercado Libre)", () => {
     expect(estado.permisosPedidos).toEqual(["inventario.modificar"]);
     expect(ia.descargar).toHaveBeenCalledWith("https://http2.mlstatic.com/a.jpg");
     const prompt = ia.generar.mock.calls[0][2] as string;
-    expect(prompt).toMatch(/fondo blanco/);
+    expect(prompt).toMatch(/blanco puro/);
     expect(prompt).toContain("Tijera");
     expect(prompt).toContain("mango naranja");
-    expect(ia.subir).toHaveBeenCalledWith(Buffer.from("y"), "ia-portada-MCO1", "image/png", "zilonix-optimizacion-ia");
+    expect(ia.subir).toHaveBeenCalledWith(Buffer.from("y"), "ia-portada-1-MCO1", "image/png", "zilonix-optimizacion-ia");
     expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("manda hasta 2 fotos más de referencia; una que no baja no frena la imagen", async () => {
+    ia.descargar.mockImplementation(async (url: string) => {
+      if (url.endsWith("c.jpg")) throw new ErrorImagenIA("no baja");
+      return { buffer: Buffer.from(url), tipo: "image/jpeg" };
+    });
+    const r = await generarImagenIAAction({
+      ...ENTRADA,
+      referencias: ["https://http2.mlstatic.com/a.jpg", "https://http2.mlstatic.com/b.jpg", "https://http2.mlstatic.com/c.jpg", "https://http2.mlstatic.com/d.jpg"],
+      variante: 4,
+    });
+    expect(r.ok).toBe(true);
+    // la base no se repite; solo 2 extra (b, c) y c falló
+    expect(ia.descargar.mock.calls.map((c) => c[0])).toEqual(["https://http2.mlstatic.com/a.jpg", "https://http2.mlstatic.com/b.jpg", "https://http2.mlstatic.com/c.jpg"]);
+    expect((ia.generar.mock.calls[0][1] as unknown[]).length).toBe(2);
+    expect(ia.subir.mock.calls[0][1]).toBe("ia-portada-5-MCO1");
   });
 
   it("sin permiso, sin IA conectada o sin Cloudinary: avisa y no llama a la IA", async () => {
