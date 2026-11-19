@@ -27,6 +27,9 @@ import {
   type ItemEdicionMl,
 } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary } from "@/lib/cloudinary";
+import { obtenerConexionIAConClave } from "@/lib/ia/conexion";
+import { descargarFotoBase, ErrorImagenIA, generarImagenDesdeFoto, leerTipoImagenIA, limpiarIndicaciones, promptImagenIA } from "@/lib/ia/imagen";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
 import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/lib/optimizacion/competencia";
@@ -400,4 +403,39 @@ export async function editarFotosAction(entrada: {
     },
     "Fotos actualizadas en Mercado Libre. Pueden tardar unos minutos en verse."
   );
+}
+
+export type ResultadoImagenIA = { ok: true; url: string; aviso: string } | { ok: false; aviso: string };
+
+// Crea una foto con la IA de la empresa a partir de una foto real de la
+// publicación (o una recién subida a Cloudinary) y la sube a Cloudinary.
+// NO toca Mercado Libre: la imagen entra a la galería y solo se publica
+// cuando la persona revisa y aprieta «Guardar fotos». Pide el mismo
+// permiso que editar (inventario.modificar); el costo es de la cuenta
+// de IA de la empresa.
+export async function generarImagenIAAction(entrada: {
+  cuentaMlId: string;
+  itemId: string;
+  fotoUrl: string;
+  tipo: string;
+  indicaciones?: string;
+}): Promise<ResultadoImagenIA> {
+  const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
+  if ("error" in prep) return { ok: false, aviso: prep.error };
+  if (!cloudinaryConfigurado()) return { ok: false, aviso: "Falta configurar Cloudinary en este ambiente: no hay dónde guardar la imagen." };
+  const conexion = await obtenerConexionIAConClave(prep.ctx.empresaId);
+  if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta OpenAI o Google en Configuración → IA." };
+  const tipo = leerTipoImagenIA(entrada.tipo);
+  try {
+    const base = await descargarFotoBase(typeof entrada.fotoUrl === "string" ? entrada.fotoUrl : "");
+    const prompt = promptImagenIA(tipo, prep.item.titulo, limpiarIndicaciones(entrada.indicaciones));
+    const imagen = await generarImagenDesdeFoto(conexion, base, prompt);
+    const { url } = await subirACloudinary(imagen.buffer, `ia-${tipo}-${prep.item.id}`, imagen.tipo, "zilonix-optimizacion-ia");
+    return { ok: true, url, aviso: "Imagen creada. Revísala: si te gusta, agrégala y guarda las fotos." };
+  } catch (error) {
+    if (error instanceof ErrorImagenIA) return { ok: false, aviso: error.message };
+    if (error instanceof CloudinaryNoConfiguradoError) return { ok: false, aviso: "Falta configurar Cloudinary en este ambiente." };
+    console.warn(`[app/panel/optimizacion] imagen IA ${prep.item.id}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: "No se pudo crear la imagen. Intenta de nuevo." };
+  }
 }

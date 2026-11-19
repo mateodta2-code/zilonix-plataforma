@@ -6,6 +6,7 @@ import { Boton } from "@/components/marco/Boton";
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { leerPrecioEscrito, simularPrecio, type BaseSimulacion } from "@/lib/optimizacion/simulador";
 import { GaleriaFotos } from "../../publicar/GaleriaFotos";
+import { CrearImagenIA, type EstadoIAImagen } from "./CrearImagenIA";
 import { editarFotosAction, editarPrecioAction, editarTituloAction } from "../actions";
 import styles from "../page.module.css";
 
@@ -23,6 +24,8 @@ export type DatosEdicion = {
   fotos: { id: string; url: string }[];
   // Sin Cloudinary, la galería vuelve a pedir enlaces (no hay dónde subir).
   cloudinaryConfigurado: boolean;
+  // Crear imagen con IA: depende de la conexión de IA de la empresa.
+  iaImagen: EstadoIAImagen;
   base: BaseSimulacion;
 };
 
@@ -137,6 +140,15 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
           La primera es la portada. Arrastra las fotos para cambiar el orden, quita con ×, y agrega con + (o soltando archivos de tu equipo). Después guarda.
         </p>
         <GaleriaFotos urls={fotos} onChange={setFotos} cloudinaryConfigurado={datos.cloudinaryConfigurado} limiteFotos={null} conCanva={false} />
+        {datos.cloudinaryConfigurado && fotos.length > 0 ? (
+          <CrearImagenIA
+            cuentaMlId={datos.cuentaMlId}
+            itemId={datos.itemId}
+            fotos={fotos}
+            estado={datos.iaImagen}
+            onAgregar={(url, comoPortada) => setFotos((actuales) => (comoPortada ? [url, ...actuales] : [...actuales, url]))}
+          />
+        ) : null}
         <Boton
           type="button"
           chico

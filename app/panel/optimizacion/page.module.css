@@ -235,6 +235,76 @@
   color: var(--texto);
 }
 
+/* Crear imagen con IA (detalle, editar fotos). */
+.iaImagen {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--borde);
+}
+
+.iaBases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.iaBase {
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radio-boton);
+  background: none;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.iaBase img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: calc(var(--radio-boton) - 2px);
+}
+
+.iaBaseElegida {
+  border-color: var(--acento);
+}
+
+.iaTipo {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--texto-suave);
+  cursor: pointer;
+}
+
+.iaTipo[aria-checked="true"] {
+  color: var(--acento-fuerte);
+  font-weight: 600;
+}
+
+.iaResultado {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* Fondo blanco a propósito: así se juzga una portada de ML (fondo #FFF). */
+.iaResultado img {
+  width: 200px;
+  height: 200px;
+  object-fit: contain;
+  border-radius: var(--radio-boton);
+  background: #fff;
+}
+
+.iaAcciones {
+  display: grid;
+  gap: 8px;
+}
+
 /* Fase 4 — competencia del mismo producto. */
 .alertas {
   margin: 0;

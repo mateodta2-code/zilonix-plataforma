@@ -12,6 +12,8 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { cloudinaryConfigurado } from "@/lib/cloudinary";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
+import { obtenerConexionIA } from "@/lib/ia/conexion";
+import { proveedorGeneraImagenes } from "@/lib/ia/imagen";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { competenciaItemMl, leerItemEdicionMl, PATRON_ID_PRODUCTO_O_ITEM, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
@@ -142,10 +144,11 @@ export default async function DetalleOptimizacionPage({
   if (puedeEditar) {
     try {
       const token = await obtenerAccessTokenVigente(empresa.id, cuenta.id);
-      const [itemEdicion, automatizada, competencia] = await Promise.all([
+      const [itemEdicion, automatizada, competencia, conexionIA] = await Promise.all([
         leerItemEdicionMl(datos.item.id, token),
         tieneAutomatizacionPrecioMl(datos.item.id, token),
         datos.item.catalogo ? competenciaItemMl(datos.item.id, token, siteId).catch(() => null) : Promise.resolve(null),
+        obtenerConexionIA(empresa.id).catch(() => null),
       ]);
       // Sin permiso de Finanzas el simulador no muestra ganancia.
       const c = conFinanzas ? actual.costos : null;
@@ -162,6 +165,7 @@ export default async function DetalleOptimizacionPage({
           automatizada,
           fotos: itemEdicion.fotos,
           cloudinaryConfigurado: cloudinaryConfigurado(),
+          iaImagen: !conexionIA ? "sin_conexion" : proveedorGeneraImagenes(conexionIA.proveedor) ? "lista" : "sin_imagenes",
           base: {
             fijoPorUnidad: c ? costoFijoPorUnidad(actual) : null,
             comision: c ? c.comision : null,

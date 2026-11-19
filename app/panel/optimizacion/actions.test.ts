@@ -18,6 +18,7 @@ const ml = vi.hoisted(() => ({
   reputacion: vi.fn(),
 }));
 const auditorias = vi.hoisted(() => [] as unknown[]);
+const ia = vi.hoisted(() => ({ conexion: vi.fn(), descargar: vi.fn(), generar: vi.fn(), subir: vi.fn(), cloudinary: { configurado: true } }));
 
 vi.mock("@/lib/usuarios", () => ({ obtenerOCrearUsuarioActual: async () => ({ id: "usuario-1" }) }));
 vi.mock("@/lib/empresas", () => ({ listarEmpresasDeUsuario: async () => [{ id: "empresa-1" }] }));
@@ -49,6 +50,16 @@ vi.mock("@/db/empresa-context", () => ({
 }));
 vi.mock("@/lib/auditoria", () => ({ registrarAuditoria: async (_tx: unknown, entrada: unknown) => auditorias.push(entrada) }));
 vi.mock("@/lib/ml/cuentas", () => ({ obtenerAccessTokenVigente: async () => "token" }));
+vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAConClave: ia.conexion }));
+vi.mock("@/lib/cloudinary", () => ({
+  CloudinaryNoConfiguradoError: class extends Error {},
+  cloudinaryConfigurado: () => ia.cloudinary.configurado,
+  subirACloudinary: ia.subir,
+}));
+vi.mock("@/lib/ia/imagen", async () => {
+  const real = await vi.importActual<typeof import("@/lib/ia/imagen")>("@/lib/ia/imagen");
+  return { ...real, descargarFotoBase: ia.descargar, generarImagenDesdeFoto: ia.generar };
+});
 vi.mock("@/lib/ml/preguntas", () => ({ motivoCuentaSinRevisar: () => "Token vencido — hay que reconectar la cuenta." }));
 vi.mock("@/lib/ml/cliente", async () => {
   const real = await vi.importActual<typeof import("@/lib/ml/cliente")>("@/lib/ml/cliente");
@@ -70,7 +81,16 @@ vi.mock("@/lib/ml/cliente", async () => {
 
 const CUENTA = "11111111-1111-1111-1111-111111111111";
 
-import { cambiarEstadoPublicacionAction, competenciaPublicacionAction, editarFotosAction, editarPrecioAction, editarTituloAction, metricasPublicacionesAction } from "./actions";
+import {
+  cambiarEstadoPublicacionAction,
+  competenciaPublicacionAction,
+  editarFotosAction,
+  editarPrecioAction,
+  editarTituloAction,
+  generarImagenIAAction,
+  metricasPublicacionesAction,
+} from "./actions";
+import { ErrorImagenIA } from "@/lib/ia/imagen";
 
 describe("metricasPublicacionesAction (solo lectura)", () => {
   beforeEach(() => {
@@ -283,5 +303,53 @@ describe("Fase 4: competencia del mismo producto", () => {
     ml.producto.mockResolvedValue(null);
     expect(await competenciaPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO1" })).toEqual({ ok: true, catalogo: false });
     expect(ml.ofertas).not.toHaveBeenCalled();
+  });
+});
+
+describe("crear imagen con IA (no toca Mercado Libre)", () => {
+  const ENTRADA = { cuentaMlId: CUENTA, itemId: "MCO1", fotoUrl: "https://http2.mlstatic.com/a.jpg", tipo: "portada", indicaciones: "mango naranja" };
+
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ia.cloudinary.configurado = true;
+    ml.itemEdicion.mockReset().mockResolvedValue({ id: "MCO1", titulo: "Tijera", precio: 1, vendidas: 0, tieneVariantes: false, fotos: [] });
+    ml.actualizar.mockReset();
+    ia.conexion.mockReset().mockResolvedValue({ id: "c", proveedor: "openai", baseUrl: null, modelo: "x", actualizadoTs: new Date(), apiKey: "k" });
+    ia.descargar.mockReset().mockResolvedValue({ buffer: Buffer.from("x"), tipo: "image/jpeg" });
+    ia.generar.mockReset().mockResolvedValue({ buffer: Buffer.from("y"), tipo: "image/png" });
+    ia.subir.mockReset().mockResolvedValue({ url: "https://res.cloudinary.com/zx/ia.png" });
+  });
+
+  it("pide modificar inventario, genera desde la foto base y la sube a Cloudinary; nunca escribe en ML", async () => {
+    const r = await generarImagenIAAction(ENTRADA);
+    expect(r).toEqual({ ok: true, url: "https://res.cloudinary.com/zx/ia.png", aviso: expect.any(String) });
+    expect(estado.permisosPedidos).toEqual(["inventario.modificar"]);
+    expect(ia.descargar).toHaveBeenCalledWith("https://http2.mlstatic.com/a.jpg");
+    const prompt = ia.generar.mock.calls[0][2] as string;
+    expect(prompt).toMatch(/fondo blanco/);
+    expect(prompt).toContain("Tijera");
+    expect(prompt).toContain("mango naranja");
+    expect(ia.subir).toHaveBeenCalledWith(Buffer.from("y"), "ia-portada-MCO1", "image/png", "zilonix-optimizacion-ia");
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("sin permiso, sin IA conectada o sin Cloudinary: avisa y no llama a la IA", async () => {
+    estado.conPermiso = false;
+    expect((await generarImagenIAAction(ENTRADA)).ok).toBe(false);
+    estado.conPermiso = true;
+    ia.conexion.mockResolvedValue(null);
+    expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Configuración → IA/);
+    ia.cloudinary.configurado = false;
+    expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Cloudinary/);
+    expect(ia.generar).not.toHaveBeenCalled();
+  });
+
+  it("un error de la IA llega con su texto; uno inesperado, genérico", async () => {
+    ia.generar.mockRejectedValueOnce(new ErrorImagenIA("OpenAI rechazó la clave de IA de la empresa (revisa Configuración → IA)."));
+    expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/rechazó la clave/);
+    ia.generar.mockRejectedValueOnce(new Error("detalle interno con datos"));
+    expect((await generarImagenIAAction(ENTRADA)).aviso).toBe("No se pudo crear la imagen. Intenta de nuevo.");
   });
 });
