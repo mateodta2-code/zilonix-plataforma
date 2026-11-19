@@ -25,9 +25,10 @@ const ETIQUETA_ESTADO: Record<EstadoUtilidadFalabella, { texto: string; chip: Es
   calculada: { texto: "Calculada", chip: "exito" },
   falta_costo: { texto: "Falta costo", chip: "advertencia" },
   sin_reporte: { texto: "Sin reporte de Falabella", chip: "aviso" },
+  conflicto: { texto: "Nº de orden repetido", chip: "peligro" },
 };
 
-const FILTROS_ESTADO = ["falta_costo", "sin_reporte"] as const;
+const FILTROS_ESTADO = ["falta_costo", "sin_reporte", "conflicto"] as const;
 
 type Props = {
   empresaId: string;
@@ -89,6 +90,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
           <option value="">Todas</option>
           <option value="falta_costo">Solo con «Falta costo»</option>
           <option value="sin_reporte">Solo «Sin reporte de Falabella»</option>
+          <option value="conflicto">Solo «Nº de orden repetido»</option>
         </select>
       </Campo>
       <div className={estilos.accionesFiltro}>
@@ -150,7 +152,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
       {recortado && <p className={estilos.avisoError}>Hay demasiadas órdenes en este rango: acorta las fechas para ver todas.</p>}
 
       <div className={estilos.gridKpi}>
-        <TarjetaKpi titulo="Ventas" valor={m(t.ventas)} detalle={[`${t.ordenes - t.ordenesSinReporte} órdenes con reporte · ${t.cantidad} unidades`]} />
+        <TarjetaKpi titulo="Ventas" valor={m(t.ventas)} detalle={[`${t.ordenesCalculadas + t.ordenesFaltaCosto} órdenes con reporte · ${t.cantidad} unidades`]} />
         <TarjetaKpi
           titulo="Utilidad del periodo"
           valor={m(t.utilidadPeriodo)}
@@ -173,6 +175,13 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
           detalle={t.ordenesSinReporte > 0 ? ["Carga el reporte de transacciones para calcularlas"] : undefined}
         />
       </div>
+
+      {t.ordenesConflicto > 0 && (
+        <p className={estilos.avisoError}>
+          {t.ordenesConflicto} {t.ordenesConflicto === 1 ? "orden comparte" : "órdenes comparten"} el Nº de orden con otro pedido de la misma cuenta.
+          No se calculan para no contar dos veces los mismos cobros: revísalas en Pedidos.
+        </p>
+      )}
 
       {skusSinCosto.length > 0 && (
         <p className={estilos.suave}>
@@ -205,7 +214,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
               ]}
             >
               {ordenesPagina.map((o) => {
-                const sinReporte = o.estado === "sin_reporte";
+                const sinReporte = o.estado === "sin_reporte" || o.estado === "conflicto";
                 const montoOrden = (valor: string | null) => (sinReporte ? "—" : m(valor));
                 return (
                   <FilaTabla key={o.pedidoId}>
@@ -223,7 +232,13 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                     <CeldaTabla numerica>{sinReporte ? "—" : mostrarPorcentaje(o.porcentajeUtilidad)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.retenciones)}</CeldaTabla>
                     <CeldaTabla>
-                      <Chip estado={ETIQUETA_ESTADO[o.estado].chip} title={o.skusSinCosto.length > 0 ? `Sin costo: ${o.skusSinCosto.join(", ")}` : undefined}>
+                      <Chip estado={ETIQUETA_ESTADO[o.estado].chip} title={
+                          o.numerosRepetidos.length > 0
+                            ? `Repetido: ${o.numerosRepetidos.join(", ")}`
+                            : o.skusSinCosto.length > 0
+                              ? `Sin costo: ${o.skusSinCosto.join(", ")}`
+                              : undefined
+                        }>
                         {ETIQUETA_ESTADO[o.estado].texto}
                       </Chip>
                     </CeldaTabla>

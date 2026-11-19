@@ -142,6 +142,22 @@ describe("calcularUtilidadFalabella — casos", () => {
     expect(ordenes[1].estado).toBe("sin_reporte");
   });
 
+  it("dos pedidos de la misma cuenta con el mismo OrderNumber quedan en conflicto y no suman dos veces", () => {
+    const uno = pedido("1104089001", { numeros: ["1104089001", "3000001"] });
+    const otro = pedido("1104089777", { numeros: ["1104089777", "3000001"] });
+    // Mismo número en otra cuenta: no es conflicto.
+    const otraCuenta = pedido("3000001", { cuentaId: "otra-cuenta" });
+    const { ordenes, totales } = calcularUtilidadFalabella({
+      pedidos: [uno, otro, otraCuenta, pedido("3000002")],
+      movimientos: movimientosDelCorte(),
+      maestra: MAESTRA,
+    });
+    expect(ordenes[0]).toMatchObject({ estado: "conflicto", utilidad: null, ventas: "0.00", numerosRepetidos: ["3000001"] });
+    expect(ordenes[1]).toMatchObject({ estado: "conflicto", numerosRepetidos: ["3000001"] });
+    expect(ordenes[2].estado).toBe("sin_reporte");
+    expect(totales).toMatchObject({ ordenesConflicto: 2, ordenesCalculadas: 1, ventas: "25000.00" });
+  });
+
   it("aDiezmilesimas lee los 4 decimales de numeric(16,4)", () => {
     expect(aDiezmilesimas("-3530.0200")).toBe(BigInt(-35300200));
     expect(aDiezmilesimas("185800")).toBe(BigInt(1858000000));

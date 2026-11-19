@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa } from "./empresa-context";
-import { costosSku, cuentasFalabella, pedidosFalabella } from "./schema";
+import { costosSku, cuentasFalabella, movimientosMarketplace, pedidosFalabella } from "./schema";
 import { SinPermisoError } from "../lib/permisos";
 import { crearEmpresaConPermisos } from "../lib/test-utils/empresa-con-permiso";
 import { crearReporteDePrueba, SELLER_ID_PRUEBA } from "../lib/test-utils/reporte-falabella";
@@ -74,6 +74,28 @@ describe("utilidad de Falabella (RLS)", () => {
     expect(ordenes.find((o) => o.numero === "1104089002")).toMatchObject({ estado: "falta_costo", ventas: "25000.00" });
     expect(ordenes.find((o) => o.numero === "3000099")!.estado).toBe("sin_reporte");
     expect(totales).toMatchObject({ ordenesFaltaCosto: 1, ordenesSinReporte: 1 });
+  });
+
+  it("la publicidad sin orden del último día del rango entra (fecha_transaccion es date) y la del día siguiente no", async () => {
+    const [cuenta] = await dbComoEmpresa(a.empresaId, (tx) => tx.select({ id: cuentasFalabella.id }).from(cuentasFalabella));
+    const publicidad = (fecha: string, monto: string) => ({
+      empresaId: a.empresaId,
+      marketplace: "falabella",
+      cuentaFalabellaId: cuenta.id,
+      numeroOrden: null,
+      tipoTransaccion: "Cobro publicidad",
+      categoria: "publicidad" as const,
+      moneda: "COP",
+      monto,
+      fechaTransaccion: fecha,
+      huella: `prueba-borde-${fecha}-${randomUUID()}`,
+    });
+    await dbComoEmpresa(a.empresaId, (tx) =>
+      tx.insert(movimientosMarketplace).values([publicidad("2026-11-30", "-11900"), publicidad("2026-12-01", "-5000")])
+    );
+    const consulta = await listarUtilidadFalabella(a.empresaId, a.usuarioId, RANGO);
+    if (!consulta.ok) throw new Error(consulta.error);
+    expect(consulta.resultado.totales.cargosSinOrden).toBe("-11900.00");
   });
 
   it("otra empresa no ve los cobros ni los costos de la primera", async () => {

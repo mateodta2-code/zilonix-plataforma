@@ -23,6 +23,10 @@
 // - Cantidad: Falabella manda una línea de precio por unidad vendida
 //   (GetOrderItems no tiene campo de cantidad: un OrderItem = una unidad),
 //   así que cada línea de precio positiva es una unidad de su SKU.
+// - Dos pedidos de la misma cuenta que reclaman el mismo número (OrderId
+//   u OrderNumber, revisión de Pablo en #475) → «conflicto» en los dos:
+//   no se sabe de cuál son las líneas del reporte y sumarlas en ambos
+//   contaría la misma plata dos veces. Quedan fuera de los totales.
 
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import type { CategoriaMovimiento } from "@/db/schema";
@@ -76,7 +80,7 @@ export interface MovimientoEntrada {
   monto: string;
 }
 
-export type EstadoUtilidadFalabella = "calculada" | "falta_costo" | "sin_reporte";
+export type EstadoUtilidadFalabella = "calculada" | "falta_costo" | "sin_reporte" | "conflicto";
 
 export interface OrdenUtilidadFalabella {
   pedidoId: string;
@@ -87,7 +91,8 @@ export interface OrdenUtilidadFalabella {
   moneda: string;
   estado: EstadoUtilidadFalabella;
   cantidad: number;
-  // Montos en texto con 2 decimales. Con «sin_reporte» todos van en 0.00.
+  // Montos en texto con 2 decimales. Con «sin_reporte» o «conflicto»
+  // todos van en 0.00.
   ventas: string;
   comisiones: string;
   envios: string;
@@ -102,6 +107,8 @@ export interface OrdenUtilidadFalabella {
   porcentajeUtilidad: string | null;
   // SKU (como vienen del reporte) sin costo en la maestra.
   skusSinCosto: string[];
+  // Con «conflicto»: los números que comparte con otro pedido.
+  numerosRepetidos: string[];
 }
 
 export interface TotalesUtilidadFalabella {
@@ -109,6 +116,7 @@ export interface TotalesUtilidadFalabella {
   ordenesCalculadas: number;
   ordenesFaltaCosto: number;
   ordenesSinReporte: number;
+  ordenesConflicto: number;
   cantidad: number;
   // Ventas de las órdenes con reporte (con y sin costo).
   ventas: string;
@@ -193,6 +201,7 @@ export function calcularUtilidadFalabella(entrada: {
     calculadas: 0,
     faltaCosto: 0,
     sinReporte: 0,
+    conflicto: 0,
     cantidad: 0,
     ventas: CERO,
     ventasFaltaCosto: CERO,
@@ -206,10 +215,34 @@ export function calcularUtilidadFalabella(entrada: {
     retenciones: aCentavosRedondeado(sinOrden.retencion),
   };
 
+  // Una orden puede encontrarse por su OrderId o su OrderNumber: se
+  // juntan las dos (sin contar dos veces la misma clave del mismo pedido).
+  const clavesDe = (p: PedidoFalabellaEntrada) => [...new Set(p.numeros.filter((n) => n.trim()).map((n) => clave(p.cuentaId, n)))];
+  const pedidosPorClave = new Map<string, Set<string>>();
+  for (const p of entrada.pedidos) {
+    for (const k of clavesDe(p)) {
+      const dueños = pedidosPorClave.get(k) ?? new Set<string>();
+      dueños.add(p.pedidoId);
+      pedidosPorClave.set(k, dueños);
+    }
+  }
+
+  const vacia = {
+    cantidad: 0,
+    ventas: "0.00",
+    comisiones: "0.00",
+    envios: "0.00",
+    promociones: "0.00",
+    otros: "0.00",
+    retenciones: "0.00",
+    costo: null,
+    utilidad: null,
+    porcentajeUtilidad: null,
+    skusSinCosto: [],
+  };
+
   const ordenes = entrada.pedidos.map((p): OrdenUtilidadFalabella => {
-    // Una orden puede encontrarse por su OrderId o su OrderNumber: se
-    // juntan las dos (sin contar dos veces la misma clave).
-    const claves = [...new Set(p.numeros.filter((n) => n.trim()).map((n) => clave(p.cuentaId, n)))];
+    const claves = clavesDe(p);
     const suma = sumaVacia();
     const skusVendidos: (string | null)[] = [];
     for (const k of claves) {
@@ -220,23 +253,15 @@ export function calcularUtilidadFalabella(entrada: {
     }
     const base = { pedidoId: p.pedidoId, numero: p.numeroVisible, cuentaId: p.cuentaId, cuenta: p.cuenta, fecha: p.fecha, moneda: p.moneda };
 
+    const repetidas = claves.filter((k) => (pedidosPorClave.get(k)?.size ?? 0) > 1);
+    if (repetidas.length > 0) {
+      t.conflicto += 1;
+      return { ...base, ...vacia, estado: "conflicto", numerosRepetidos: repetidas.map((k) => k.slice(k.indexOf("|") + 1)) };
+    }
+
     if (skusVendidos.length === 0) {
       t.sinReporte += 1;
-      return {
-        ...base,
-        estado: "sin_reporte",
-        cantidad: 0,
-        ventas: "0.00",
-        comisiones: "0.00",
-        envios: "0.00",
-        promociones: "0.00",
-        otros: "0.00",
-        retenciones: "0.00",
-        costo: null,
-        utilidad: null,
-        porcentajeUtilidad: null,
-        skusSinCosto: [],
-      };
+      return { ...base, ...vacia, estado: "sin_reporte", numerosRepetidos: [] };
     }
 
     const ventas = aCentavosRedondeado(suma.precio);
@@ -287,6 +312,7 @@ export function calcularUtilidadFalabella(entrada: {
       utilidad: sinCosto ? null : desdeCentavos(utilidad),
       porcentajeUtilidad: sinCosto ? null : porcentaje(utilidad, ventas),
       skusSinCosto: [...new Set(skusSinCosto)],
+      numerosRepetidos: [],
     };
   });
 
@@ -313,6 +339,7 @@ export function calcularUtilidadFalabella(entrada: {
       ordenesCalculadas: t.calculadas,
       ordenesFaltaCosto: t.faltaCosto,
       ordenesSinReporte: t.sinReporte,
+      ordenesConflicto: t.conflicto,
       cantidad: t.cantidad,
       ventas: desdeCentavos(t.ventas),
       ventasFaltaCosto: desdeCentavos(t.ventasFaltaCosto),
