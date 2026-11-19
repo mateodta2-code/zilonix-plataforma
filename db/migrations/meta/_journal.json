@@ -211,6 +211,13 @@
       "when": 1795103125138,
       "tag": "0029_mushy_pixie",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795131405368,
+      "tag": "0030_plain_rhodey",
+      "breakpoints": true
     }
   ]
 }
