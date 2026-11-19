@@ -61,11 +61,13 @@ function aCentavosRedondeado(diezmilesimas: bigint): bigint {
 
 export interface PedidoFalabellaEntrada {
   pedidoId: string;
-  // El número con el que se busca la orden en el reporte: el OrderId que
-  // guardamos y el OrderNumber de sus ítems, si vino (ver consulta).
+  // El número con el que se busca la orden en el reporte: el OrderNumber
+  // de GetOrders (numero_orden) y el OrderId de respaldo (ver consulta).
   numeros: string[];
-  // Lo que se muestra como «Orden».
+  // Lo que se muestra como «Orden»: el OrderNumber, que ve el cliente.
   numeroVisible: string;
+  // El OrderId interno, para mostrarlo en gris; null si no hay OrderNumber.
+  numeroInterno?: string | null;
   cuentaId: string;
   cuenta: string;
   fecha: Date;
@@ -85,6 +87,7 @@ export type EstadoUtilidadFalabella = "calculada" | "falta_costo" | "sin_reporte
 export interface OrdenUtilidadFalabella {
   pedidoId: string;
   numero: string;
+  numeroInterno: string | null;
   cuentaId: string;
   cuenta: string;
   fecha: Date;
@@ -251,7 +254,7 @@ export function calcularUtilidadFalabella(entrada: {
       for (const c of Object.keys(suma) as CategoriaMovimiento[]) suma[c] += grupo.suma[c];
       skusVendidos.push(...grupo.skusVendidos);
     }
-    const base = { pedidoId: p.pedidoId, numero: p.numeroVisible, cuentaId: p.cuentaId, cuenta: p.cuenta, fecha: p.fecha, moneda: p.moneda };
+    const base = { pedidoId: p.pedidoId, numero: p.numeroVisible, numeroInterno: p.numeroInterno ?? null, cuentaId: p.cuentaId, cuenta: p.cuenta, fecha: p.fecha, moneda: p.moneda };
 
     const repetidas = claves.filter((k) => (pedidosPorClave.get(k)?.size ?? 0) > 1);
     if (repetidas.length > 0) {

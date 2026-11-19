@@ -218,7 +218,10 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                 const montoOrden = (valor: string | null) => (sinReporte ? "—" : m(valor));
                 return (
                   <FilaTabla key={o.pedidoId}>
-                    <CeldaTabla>#{o.numero}</CeldaTabla>
+                    <CeldaTabla>
+                      #{o.numero}
+                      {o.numeroInterno && <div className={estilos.suave}>ID {o.numeroInterno}</div>}
+                    </CeldaTabla>
                     <CeldaTabla>{fechaHoraBogota(o.fecha)}</CeldaTabla>
                     <CeldaTabla>{o.cuenta}</CeldaTabla>
                     <CeldaTabla>{sinReporte ? "—" : o.cantidad}</CeldaTabla>

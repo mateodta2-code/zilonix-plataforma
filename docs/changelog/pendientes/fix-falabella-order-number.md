@@ -1,0 +1,3 @@
+- Finanzas → Ventas y utilidad → Falabella: las órdenes se cruzan con el Reporte de transacciones por el OrderNumber de GetOrders (el «Nº de orden» que ve el cliente), no por el OrderId. Antes todas salían «Sin reporte de Falabella» (Refs #422).
+- Migración `0030`: columna `numero_orden` en `pedidos_falabella`, con índice por cuenta. Las órdenes ya importadas la llenan con la próxima sincronización de pedidos.
+- La tabla muestra el OrderNumber y, debajo en gris, el ID interno de la orden.

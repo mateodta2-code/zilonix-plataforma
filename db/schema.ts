@@ -645,10 +645,18 @@ export const pedidosFalabella = pgTable(
     // publicaciones/pedidos_finanzas de ML) queda para cuando haga falta
     // reportar por SKU, no es parte de este MVP.
     items: jsonb("items").notNull(),
+    // Issue #422: el «Nº de orden» del Reporte de transacciones y el que ve
+    // el comprador es el OrderNumber de GetOrders (ej. 3260783999), no el
+    // OrderId que va en pedido_id_externo (ej. 8002135931) — confirmado
+    // por fecha y hora con el corte de noviembre. GetOrderItems no lo trae.
+    // Nulo en filas viejas hasta que la próxima sincronización lo llene.
+    numeroOrden: text("numero_orden"),
     importadoTs: timestamp("importado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     pedidoUnico: uniqueIndex("pedidos_falabella_empresa_pedido_externo_unico").on(t.empresaId, t.pedidoIdExterno),
+    // La conciliación busca por (cuenta, OrderNumber).
+    porCuentaNumeroOrden: index("pedidos_falabella_cuenta_numero_orden_idx").on(t.cuentaFalabellaId, t.numeroOrden),
     // Revisión del PR #415: la pantalla cuenta y filtra pedidos por cuenta.
     porCuenta: index("pedidos_falabella_cuenta_idx").on(t.cuentaFalabellaId),
   })

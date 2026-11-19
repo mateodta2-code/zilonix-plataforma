@@ -61,12 +61,11 @@ export async function listarUtilidadFalabella(
       .select({
         id: p.id,
         pedidoIdExterno: p.pedidoIdExterno,
-        // [SUPUESTO, issue #422] El «Nº de orden» del reporte puede ser el
-        // OrderId (lo que guardamos) o el OrderNumber que la documentación
-        // de GetOrderItems pone en cada ítem (developers.falabella.com,
-        // 19/11): se busca por los dos. Guardamos el ítem completo en
-        // `items`, así que no hace falta migración.
-        numerosOrden: sql<string[]>`coalesce((select array_agg(distinct i->>'OrderNumber') from jsonb_array_elements(case when jsonb_typeof(${p.items}) = 'array' then ${p.items} else '[]'::jsonb end) i where coalesce(i->>'OrderNumber', '') <> ''), '{}')`,
+        // Issue #422: el «Nº de orden» del reporte es el OrderNumber de
+        // GetOrders (columna numero_orden), no el OrderId. Se busca por
+        // los dos: el OrderId queda de respaldo para filas que todavía no
+        // tienen numero_orden (importadas antes de la columna).
+        numeroOrden: p.numeroOrden,
         cuentaId: p.cuentaFalabellaId,
         cuenta: cuentasFalabella.nickname,
         fecha: p.fecha,
@@ -93,7 +92,7 @@ export async function listarUtilidadFalabella(
     }
     const moneda = pedidos[0]?.moneda ?? null;
 
-    const numeros = [...new Set(pedidos.flatMap((x) => [x.pedidoIdExterno, ...x.numerosOrden]))];
+    const numeros = [...new Set(pedidos.flatMap((x) => [x.pedidoIdExterno, x.numeroOrden].filter((n): n is string => !!n)))];
     const movimientos = await tx
       .select({ cuentaId: m.cuentaFalabellaId, numeroOrden: m.numeroOrden, sku: m.sku, categoria: m.categoria, monto: m.monto, moneda: m.moneda })
       .from(m)
@@ -148,8 +147,10 @@ export async function listarUtilidadFalabella(
     const resultado = calcularUtilidadFalabella({
       pedidos: pedidos.map((x) => ({
         pedidoId: x.id,
-        numeros: [x.pedidoIdExterno, ...x.numerosOrden],
-        numeroVisible: x.pedidoIdExterno,
+        numeros: [x.pedidoIdExterno, x.numeroOrden].filter((n): n is string => !!n),
+        // Se muestra el número que ve el cliente; el OrderId, en gris.
+        numeroVisible: x.numeroOrden ?? x.pedidoIdExterno,
+        numeroInterno: x.numeroOrden ? x.pedidoIdExterno : null,
         cuentaId: x.cuentaId,
         cuenta: x.cuenta,
         fecha: x.fecha,

@@ -134,7 +134,22 @@ describe("calcularUtilidadFalabella — casos", () => {
     expect(totales).toMatchObject({ ordenes: 9, ordenesSinReporte: 1, ventas: "185800.00", utilidadPeriodo: "104631.00" });
   });
 
-  it("encuentra la orden por el OrderNumber de sus ítems y solo en su cuenta", () => {
+  // Issue #422: caso real del corte del 11/11 — la orden 8002135931
+  // (OrderId) es la 3260783999 del reporte (OrderNumber de GetOrders).
+  it("cruza la orden 3260783999 del reporte con su OrderId 8002135931", () => {
+    const movimientos = movimientosDelCorte().map((m) => (m.numeroOrden === "3000001" ? { ...m, numeroOrden: "3260783999" } : m));
+    const real = pedido("3260783999", { numeros: ["8002135931", "3260783999"], numeroInterno: "8002135931" });
+    const { ordenes } = calcularUtilidadFalabella({ pedidos: [real], movimientos, maestra: MAESTRA });
+    expect(ordenes[0]).toMatchObject({ numero: "3260783999", numeroInterno: "8002135931", estado: "calculada", utilidad: "3992.00" });
+  });
+
+  it("sin OrderNumber guardado (solo OrderId) la orden queda sin reporte", () => {
+    const movimientos = movimientosDelCorte().map((m) => (m.numeroOrden === "3000001" ? { ...m, numeroOrden: "3260783999" } : m));
+    const { ordenes } = calcularUtilidadFalabella({ pedidos: [pedido("8002135931")], movimientos, maestra: MAESTRA });
+    expect(ordenes[0]).toMatchObject({ numero: "8002135931", numeroInterno: null, estado: "sin_reporte" });
+  });
+
+  it("encuentra la orden por su OrderNumber y solo en su cuenta", () => {
     const porOrderNumber = pedido("1104089001", { numeros: ["1104089001", "3000001"] });
     const otraCuenta = pedido("3000002", { cuentaId: "otra-cuenta" });
     const { ordenes } = calcularUtilidadFalabella({ pedidos: [porOrderNumber, otraCuenta], movimientos: movimientosDelCorte(), maestra: MAESTRA });
