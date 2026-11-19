@@ -2019,13 +2019,37 @@ export const iaConexiones = pgTable(
     // servidor que hable el mismo formato que la API de OpenAI.
     baseUrl: text("base_url"),
     modelo: text("modelo").notNull(),
+    nombre: text("nombre").notNull().default("IA principal"),
+    esPrincipal: boolean("es_principal").notNull().default(false),
     apiKeyCifrada: jsonb("api_key_cifrada").$type<TokenCifrado>().notNull(),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
   },
   (t) => ({
-    unaPorEmpresa: unique("ia_conexiones_empresa_unica").on(t.empresaId),
+    // Varias IA por empresa (máx. 5, forzado por el trigger de la
+    // migración 0031). Una sola principal por empresa; el par
+    // (empresa_id, id) permite la FK compuesta de ia_conexion_modulos.
+    empresaIdUnica: unique("ia_conexiones_empresa_id_unica").on(t.empresaId, t.id),
+    unaPrincipal: uniqueIndex("ia_conexiones_una_principal").on(t.empresaId).where(sql`${t.esPrincipal}`),
+  })
+);
+
+// Qué IA usa cada módulo. Un módulo apunta a UNA sola conexión; lo que
+// no tiene fila usa la principal. La lista de módulos vive en
+// lib/ia/modulos.ts (y en el CHECK de la migración 0031).
+export const iaConexionModulos = pgTable(
+  "ia_conexion_modulos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    conexionId: uuid("conexion_id").notNull(),
+    modulo: text("modulo").notNull(),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    moduloUnico: unique("ia_conexion_modulos_empresa_modulo_unico").on(t.empresaId, t.modulo),
+    conexionFk: foreignKey({ columns: [t.empresaId, t.conexionId], foreignColumns: [iaConexiones.empresaId, iaConexiones.id], name: "ia_conexion_modulos_conexion_fk" }).onDelete("cascade"),
   })
 );
 

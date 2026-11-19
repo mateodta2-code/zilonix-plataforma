@@ -50,7 +50,7 @@ vi.mock("@/db/empresa-context", () => ({
 }));
 vi.mock("@/lib/auditoria", () => ({ registrarAuditoria: async (_tx: unknown, entrada: unknown) => auditorias.push(entrada) }));
 vi.mock("@/lib/ml/cuentas", () => ({ obtenerAccessTokenVigente: async () => "token" }));
-vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAConClave: ia.conexion }));
+vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAParaModulo: ia.conexion }));
 vi.mock("@/lib/cloudinary", () => ({
   CloudinaryNoConfiguradoError: class extends Error {},
   cloudinaryConfigurado: () => ia.cloudinary.configurado,
@@ -357,7 +357,7 @@ describe("crear imagen con IA (no toca Mercado Libre)", () => {
     expect((await generarImagenIAAction(ENTRADA)).ok).toBe(false);
     estado.conPermiso = true;
     ia.conexion.mockResolvedValue(null);
-    expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Configuración → IA/);
+    expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Conectar IA/);
     ia.cloudinary.configurado = false;
     expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Cloudinary/);
     expect(ia.generar).not.toHaveBeenCalled();

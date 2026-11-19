@@ -19,7 +19,7 @@ const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a
 const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(32)]);
 
 function conexion(proveedor: ConexionIAConClave["proveedor"]): ConexionIAConClave {
-  return { id: "c1", proveedor, baseUrl: null, modelo: "texto", actualizadoTs: new Date(), apiKey: "clave-secreta" };
+  return { id: "c1", nombre: "IA", esPrincipal: true, proveedor, baseUrl: null, modelo: "texto", actualizadoTs: new Date(), apiKey: "clave-secreta" };
 }
 
 const fetchOriginal = globalThis.fetch;

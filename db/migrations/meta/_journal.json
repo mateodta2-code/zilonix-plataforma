@@ -211,6 +211,13 @@
       "when": 1795103125138,
       "tag": "0029_mushy_pixie",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795131848110,
+      "tag": "0031_conectar_ia_varias",
+      "breakpoints": true
     }
   ]
 }

@@ -149,7 +149,7 @@ export default async function DetalleOptimizacionPage({
         leerItemEdicionMl(datos.item.id, token),
         tieneAutomatizacionPrecioMl(datos.item.id, token),
         datos.item.catalogo ? competenciaItemMl(datos.item.id, token, siteId).catch(() => null) : Promise.resolve(null),
-        obtenerConexionIA(empresa.id).catch(() => null),
+        obtenerConexionIA(empresa.id, "optimizacion").catch(() => null),
       ]);
       // Sin permiso de Finanzas el simulador no muestra ganancia.
       const c = conFinanzas ? actual.costos : null;

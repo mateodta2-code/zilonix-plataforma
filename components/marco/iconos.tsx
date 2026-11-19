@@ -183,6 +183,15 @@ export function IconoConectarMl(props: IconoProps) {
   );
 }
 
+export function IconoConectarIa(props: IconoProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18l-1.8-5.4L4.5 10.8 10.2 9z" />
+      <path d="M18.5 3v3M17 4.5h3" />
+    </Svg>
+  );
+}
+
 export function IconoAvisosMl(props: IconoProps) {
   return (
     <Svg {...props}>
@@ -442,6 +451,7 @@ const MAPA_ICONOS: Record<string, (props: IconoProps) => React.ReactElement> = {
   soporte: IconoSoporte,
   foro: IconoForo,
   conectarMl: IconoConectarMl,
+  conectarIa: IconoConectarIa,
   avisosMl: IconoAvisosMl,
   cuenta: IconoCuenta,
   crearEmpresa: IconoCrearEmpresa,

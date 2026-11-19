@@ -54,8 +54,8 @@ export function CrearImagenIA({
     return (
       <p className={styles.notaNeutra}>
         {estado === "sin_conexion"
-          ? "Para crear imágenes con IA, conecta OpenAI o Google en Configuración → IA (lo paga la cuenta de IA de tu empresa)."
-          : "La IA conectada en Configuración → IA no crea imágenes. Conecta OpenAI o Google para usar esto."}
+          ? "Para crear imágenes con IA, conecta OpenAI o Google en Administración → Conectar IA (lo paga la cuenta de IA de tu empresa)."
+          : "La IA conectada en Administración → Conectar IA no crea imágenes. Conecta OpenAI o Google para usar esto."}
       </p>
     );
   }
