@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { datosSitioMl, dominioMl, esSiteIdValido, formatearMoneda, formatearNumero, SITE_ID_DEFECTO, SITIOS_ML } from "./sitios";
+import { datosSitioMl, dominioMl, esSiteIdValido, formatearMoneda, formatearMonedaIso, formatearNumero, SITE_ID_DEFECTO, SITIOS_ML } from "./sitios";
 
 // Issue #315 (Z-LATAM-01) — mapa puro, sin ningún import de db/ ni de
 // Mercado Libre: se puede probar entero sin mocks.
@@ -126,5 +126,17 @@ describe("siteIdDeHost", () => {
     expect(siteIdDeHost("www.mercadolibre.com.uy")).toBeNull();
     expect(siteIdDeHost("evilmercadolibre.com.co")).toBeNull();
     expect(siteIdDeHost(undefined)).toBeNull();
+  });
+});
+
+// Issue #422 — montos con divisa ISO (reporte de Falabella).
+describe("formatearMonedaIso", () => {
+  it("usa el locale del país de esa moneda", () => {
+    expect(formatearMonedaIso(117830.94, "COP")).toBe(new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP" }).format(117830.94));
+    expect(formatearMonedaIso(1000, "CLP")).toBe(new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP" }).format(1000));
+  });
+
+  it("una moneda que Zilonix no opera conserva su código", () => {
+    expect(formatearMonedaIso(10, "PEN")).toContain("PEN");
   });
 });

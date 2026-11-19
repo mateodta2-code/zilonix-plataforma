@@ -1,3 +1,4 @@
+import { formatearMonedaIso } from "@/lib/ml/sitios";
 import type { FormaEntrega, OrigenValor } from "@/lib/finanzas/utilidad-venta";
 import type { AvisoVenta } from "@/lib/finanzas/utilidad-venta";
 import type { AvisoArmado } from "@/lib/finanzas/ventas-pantalla";
@@ -59,4 +60,11 @@ export const ETIQUETA_CAMPO: Record<string, string> = {
 // corre en UTC).
 export function fechaHoraBogota(fecha: Date): string {
   return fecha.toLocaleString("es-CO", { timeZone: "America/Bogota", dateStyle: "medium", timeStyle: "short" });
+}
+
+// Issue #422 — monto en texto (numeric de Postgres, "117830.9400") con su
+// divisa ISO, para la conciliación de Falabella. Number solo para
+// pintarlo: la suma ya la hizo Postgres en numeric.
+export function mostrarMontoIso(valor: string, moneda: string): string {
+  return formatearMonedaIso(Number(valor), moneda);
 }

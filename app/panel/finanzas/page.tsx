@@ -151,6 +151,10 @@ export default async function FinanzasPage() {
         <BotonLink href="/panel/finanzas/proveedores" variante="secundario" chico>
           Proveedores y transportadores
         </BotonLink>{" "}
+        {/* Issue #422 — pagos de Falabella desde el reporte de transacciones. */}
+        <BotonLink href="/panel/finanzas/falabella" variante="secundario" chico>
+          Conciliación Falabella
+        </BotonLink>{" "}
         {/* Issue #126 (slice urgente) — valor Flex de la empresa. */}
         <BotonLink href="/panel/finanzas/configuracion" variante="secundario" chico>
           Configuración (valor Flex)
