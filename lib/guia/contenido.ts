@@ -12,7 +12,26 @@ export type SeccionGuia = {
   otrasRutas?: string[];
   paraQue: string;
   pasos: string[];
+  // Apartados con su propio paso a paso (ej. «Cómo conectar la IA»).
+  apartados?: ApartadoGuia[];
   consejos?: string[];
+};
+
+export type ApartadoGuia = { titulo: string; pasos: string[] };
+
+// Mismo apartado en Optimización (donde se usa) y Configuración (donde
+// se conecta).
+const CONECTAR_IA: ApartadoGuia = {
+  titulo: "Cómo conectar la IA (para crear imágenes)",
+  pasos: [
+    "Saca una API key de OpenAI o de Google (Anthropic/Claude no crea imágenes).",
+    "OpenAI: entra a platform.openai.com → API keys → «Create new secret key» y cópiala. La cuenta necesita saldo en Billing; para imágenes, OpenAI puede pedir verificar la organización en Settings → Organization.",
+    "Google: entra a aistudio.google.com → «Get API key» → «Create API key» y cópiala. Para imágenes, la cuenta necesita la facturación activa.",
+    "En Zilonix ve a Configuración (necesitas permiso para modificar la configuración).",
+    "En «Conexión de IA» elige el proveedor (OpenAI o Google), escribe un modelo de texto (por ejemplo gpt-5-mini o gemini-2.5-flash) y pega la API key.",
+    "Guarda. Arriba queda la conexión activa; la clave se guarda cifrada y no se vuelve a mostrar.",
+    "Vuelve a Optimización → entra a una publicación → «Crear imagen con IA».",
+  ],
 };
 
 export type GrupoGuia = { titulo: string; secciones: SeccionGuia[] };
@@ -139,8 +158,9 @@ export const GUIA: GrupoGuia[] = [
           "Desde el detalle puedes cambiar precio, título y fotos (subir, arrastrar para ordenar, elegir portada). Nada llega a Mercado Libre hasta que guardas.",
           "Con «Crear imagen con IA» generas portadas de venta o imágenes informativas a partir de tus fotos reales.",
         ],
+        apartados: [CONECTAR_IA],
         consejos: [
-          "Para crear imágenes con IA, conecta OpenAI o Google en Configuración → IA. Lo cobra la cuenta de IA de tu empresa.",
+          "Cada imagen la cobra la cuenta de IA de tu empresa (unos centavos de dólar). Cambiar el proveedor también cambia la IA de los textos (Promociones).",
           "Revisa cada imagen creada: si no se entiende o se ve genérica, descártala y crea otra.",
         ],
       },
@@ -223,6 +243,7 @@ export const GUIA: GrupoGuia[] = [
           "Configuración → Conexión de IA: elige el proveedor (OpenAI, Google, Anthropic u otro), el modelo y pega la API key.",
           "Actividad muestra cada cambio con la persona y la hora.",
         ],
+        apartados: [CONECTAR_IA],
         consejos: ["Solo OpenAI y Google crean imágenes. La API key se guarda cifrada y nunca se vuelve a mostrar."],
       },
       {

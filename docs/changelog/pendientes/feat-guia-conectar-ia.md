@@ -1,0 +1,1 @@
+- **feat-guia-conectar-ia** — Las guías de Optimización y Configuración traen el apartado «Cómo conectar la IA (para crear imágenes)»: sacar la API key de OpenAI o Google, pegarla en Configuración → Conexión de IA y volver a «Crear imagen con IA». Las guías ahora admiten `apartados`, cada uno con su propio paso a paso.
