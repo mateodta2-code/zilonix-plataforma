@@ -12,12 +12,17 @@ import { leerItemParaPromocionMl, leerPromocionesItemMl, listarItemsActivosMl, t
 //   cuenta (lib/ml/cuentas.ts), vía lib/trabajos/buscarPromocionesMultiCuenta.ts.
 // - Nunca una regla global ni la clasificación suplemento/importación
 //   de Zilonix OS — reglas por cuenta (promociones_reglas).
-// - El piso SIEMPRE sale de costos_sku (decisión de Mateo, "el freno
-//   no se puede apagar"): sin SKU o sin precio mínimo cargado, un
-//   producto queda bloqueado para participar O modificar — nunca se
-//   inventa un precio ni se usa el sugerido de Mercado Libre como
-//   respaldo (al revés de la versión vieja de Zilonix OS, que sí lo
-//   hacía cuando no había piso).
+// - Por defecto el piso SALE de costos_sku (aplicarPiso = true): sin SKU
+//   o sin precio mínimo cargado, un producto queda bloqueado para
+//   participar O modificar — nunca se inventa un precio. Excepción
+//   explícita y única, decisión de Mateo: la regla «Participar en todas
+//   las promociones disponibles» (lib/ml/promocionesPublicaciones.ts)
+//   llama con aplicarPiso = false — ahí NO se exige piso y el precio es
+//   el que Mercado Libre ya sugiere en la promoción (nunca uno
+//   inventado: sin precio sugerido, la fila se omite). Esto PUEDE
+//   dejar un producto vendiéndose bajo su costo; el resto de los
+//   caminos (tabla maestra, máximo %, flujo viejo de Buscar/aprobar,
+//   Participar individual) siguen siempre con piso.
 
 // Tarea "Promociones-Ajustes-1" — PRICE_DISCOUNT SALIÓ de esta lista
 // (antes estaba acá por un intento viejo mal diagnosticado como
@@ -262,17 +267,68 @@ export function fechasParaParticipar(promo: PromocionCrudaMl): { fechaInicio: st
 export const DESCUENTO_MINIMO_PRICE_DISCOUNT = 5;
 export const DESCUENTO_MAXIMO_PRICE_DISCOUNT = 80;
 
-export function descuentoFueraDeRangoPriceDiscount(tipoPromocion: string, precioOriginal: number | null, nuevoPrecio: number): string | null {
+export function descuentoFueraDeRangoPriceDiscount(
+  tipoPromocion: string,
+  precioOriginal: number | null,
+  nuevoPrecio: number,
+  // Sin piso (regla «todas») el precio sale del sugerido de Mercado
+  // Libre, no del piso de Finanzas — el motivo tiene que decirlo bien.
+  origenPrecio: "piso" | "sugerido-ml" = "piso"
+): string | null {
   if (tipoPromocion !== "PRICE_DISCOUNT" || precioOriginal == null || precioOriginal <= 0) return null;
   const descuentoPct = ((precioOriginal - nuevoPrecio) / precioOriginal) * 100;
   const descuentoRedondeado = Math.round(descuentoPct * 10) / 10;
+  const inicio = origenPrecio === "piso" ? "Con el precio mínimo de Finanzas" : "Con el precio sugerido por Mercado Libre";
   if (descuentoPct < DESCUENTO_MINIMO_PRICE_DISCOUNT) {
-    return `Con el precio mínimo de Finanzas, el descuento quedaría en ${descuentoRedondeado}% — "Descuento de precio" exige un mínimo de ${DESCUENTO_MINIMO_PRICE_DISCOUNT}%, se revisa a mano.`;
+    return `${inicio}, el descuento quedaría en ${descuentoRedondeado}% — "Descuento de precio" exige un mínimo de ${DESCUENTO_MINIMO_PRICE_DISCOUNT}%, se revisa a mano.`;
   }
   if (descuentoPct > DESCUENTO_MAXIMO_PRICE_DISCOUNT) {
-    return `Con el precio mínimo de Finanzas, el descuento quedaría en ${descuentoRedondeado}% — "Descuento de precio" no permite más de ${DESCUENTO_MAXIMO_PRICE_DISCOUNT}%, se revisa a mano.`;
+    return `${inicio}, el descuento quedaría en ${descuentoRedondeado}% — "Descuento de precio" no permite más de ${DESCUENTO_MAXIMO_PRICE_DISCOUNT}%, se revisa a mano.`;
   }
   return null;
+}
+
+// Modo «sin piso» (regla «Participar en todas») — se llama DESPUÉS de
+// los frenos 1 (variantes) y 2 (tipos sin escritura), que no dependen
+// del piso. No hay "modificar": una promoción ya activa se deja como
+// está (igualar al piso no aplica sin piso). Para una candidata el
+// precio es el que Mercado Libre ya devuelve en la promoción
+// (precioFinal: price, o suggested_discounted_price); si ML no da
+// ninguno, se omite con motivo claro — NUNCA se inventa un precio.
+function calcularSinPiso(base: CandidatoCalculado, promo: PromocionCrudaMl, estadoMl: string, esCompartida: boolean, reglas: ReglasCuentaPromocion, costo: number | null): CandidatoCalculado {
+  const { maxDiscountedPrice, precioOriginal, tipoPromocion } = base;
+  // Candidata: primero el sugerido explícito de ML; si no vino, el precio que
+  // ya devuelve la promoción (precioFinal). Activa: el precio actual.
+  const precioActual = estadoMl === "candidate" ? numeroOrNull(promo.suggested_discounted_price) ?? base.precioActual : base.precioActual;
+  const gananciaEn = (precio: number | null) => (costo != null && precio != null ? precio - costo : null);
+
+  if (estadoMl === "started" || estadoMl === "pending") {
+    return { ...base, cumpleReglas: true, precioSugerido: precioActual, gananciaEstimada: gananciaEn(precioActual) };
+  }
+  if (estadoMl !== "candidate") {
+    return { ...base, motivoRevisarManual: `Estado de Mercado Libre no reconocido ("${estadoMl}") — se revisa a mano.` };
+  }
+  // El gate de "compartida" SÍ se respeta sin piso (decisión pendiente
+  // de confirmar por Mateo).
+  if (esCompartida && !reglas.participarCompartidas) {
+    return { ...base, motivoRevisarManual: "Promoción compartida con Mercado Libre (+Meli) — esta cuenta no tiene habilitado participar en estas. Se revisa a mano." };
+  }
+  if (precioActual == null) {
+    return { ...base, motivoRevisarManual: "Mercado Libre no sugiere un precio para esta promoción — no se puede participar sin elegir el precio a mano." };
+  }
+  if (maxDiscountedPrice != null && precioActual > maxDiscountedPrice) {
+    return {
+      ...base,
+      precioSugerido: precioActual,
+      gananciaEstimada: gananciaEn(precioActual),
+      motivoRevisarManual: `El precio sugerido por Mercado Libre (${precioActual}) supera el máximo que permite esta promoción puntual (${maxDiscountedPrice}) — se revisa a mano.`,
+    };
+  }
+  const motivoFueraDeRango = descuentoFueraDeRangoPriceDiscount(tipoPromocion, precioOriginal, precioActual, "sugerido-ml");
+  if (motivoFueraDeRango) {
+    return { ...base, precioSugerido: precioActual, gananciaEstimada: gananciaEn(precioActual), motivoRevisarManual: motivoFueraDeRango };
+  }
+  return { ...base, cumpleReglas: true, accionSugerida: "participar", precioSugerido: precioActual, gananciaEstimada: gananciaEn(precioActual) };
 }
 
 // El corazón de las reglas — calculado en código, NUNCA le toca a la
@@ -284,7 +340,12 @@ export function calcularCandidatosItem(
   item: ItemConPromociones,
   reglas: ReglasCuentaPromocion,
   precioMinimo: number | null,
-  costo: number | null
+  costo: number | null,
+  // true (por defecto) = el piso de costos_sku manda, como siempre.
+  // false = modo «sin piso» (solo la regla «todas», ver el comentario
+  // de arriba): no se exige SKU ni precio mínimo, no se aplica el tope
+  // de % de la cuenta, y el precio es el que Mercado Libre sugiere.
+  aplicarPiso: boolean = true
 ): CandidatoCalculado[] {
   const original = numeroOrNull(item.promociones.find((p) => numeroOrNull(p.original_price))?.original_price);
 
@@ -344,10 +405,12 @@ export function calcularCandidatosItem(
       return { ...base, motivoRevisarManual: `El tipo "${tipoPromocion}" no se puede ajustar por la API de Mercado Libre — solo se puede desde la Central de Promociones ("Solo en ML").` };
     }
 
-    // 3) Precio mínimo — freno real de Mateo, nunca se apaga: sin un
-    // piso real de costos_sku, ni "participar" ni "modificar" se
-    // calculan — nunca se inventa un precio con el sugerido de
-    // Mercado Libre como respaldo.
+    if (!aplicarPiso) return calcularSinPiso(base, promo, estadoMl, esCompartida, reglas, costo);
+
+    // 3) Precio mínimo — freno real de Mateo: sin un piso real de
+    // costos_sku, ni "participar" ni "modificar" se calculan — nunca se
+    // inventa un precio con el sugerido de Mercado Libre como respaldo
+    // (salvo en el modo explícito aplicarPiso=false, arriba).
     if (precioMinimo == null) {
       return { ...base, motivoRevisarManual: "Falta precio mínimo para este SKU en Finanzas — no se puede participar ni ajustar hasta que se cargue." };
     }

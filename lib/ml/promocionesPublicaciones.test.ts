@@ -269,18 +269,82 @@ describe("aplicarReglaALote", () => {
     filasPorTabla.set(cuentasMl, [{ id: "cuenta-1", cuentaIdExterna: "123", nickname: "Mi Tienda", siteId: "MCO" }]);
   }
 
-  it("regla 'todas': participa en cada candidato que cumple reglas", async () => {
+  it("regla 'todas': participa SIN piso, con el precio sugerido por ML, aunque no haya fila en costos_sku", async () => {
     prepararCuenta();
-    filasPorTabla.set(costosSku, [{ skuCodigo: "SKU-1", precioMinimoUnidad: "90000", costo: "50000" }]);
+    // Sin ninguna fila en costos_sku: con piso esto se bloquearía; «todas» no lo exige.
     listarItemsActivosMlMock.mockResolvedValueOnce({ ids: ["MCO1"], totalCatalogo: 1 });
     leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
-    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000 }] });
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, suggested_discounted_price: 60000 }] });
 
     const resumen = await aplicarReglaALote("empresa-1", "usuario-1", "todas", { tipo: "todas" });
 
     expect(resumen.participadas).toBe(1);
     expect(resumen.fallidas).toBe(0);
     expect(participarPromocionMlMock).toHaveBeenCalledTimes(1);
+    expect(participarPromocionMlMock).toHaveBeenCalledWith("MCO1", "token-falso", expect.objectContaining({ deal_price: 60000 }));
+  });
+
+  it("regla 'todas': ni siquiera lee costos_sku (no hay piso que leer)", async () => {
+    prepararCuenta();
+    // Si se leyera, un piso de 90.000 forzaría ese precio; el sugerido de ML (60.000) tiene que ganar.
+    filasPorTabla.set(costosSku, [{ skuCodigo: "SKU-1", precioMinimoUnidad: "90000", costo: "50000" }]);
+    listarItemsActivosMlMock.mockResolvedValueOnce({ ids: ["MCO1"], totalCatalogo: 1 });
+    leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, suggested_discounted_price: 60000 }] });
+
+    await aplicarReglaALote("empresa-1", "usuario-1", "todas", { tipo: "todas" });
+
+    expect(participarPromocionMlMock).toHaveBeenCalledWith("MCO1", "token-falso", expect.objectContaining({ deal_price: 60000 }));
+  });
+
+  it("regla 'todas': si ML no sugiere precio, la fila se omite con su motivo (nunca se inventa un precio)", async () => {
+    prepararCuenta();
+    listarItemsActivosMlMock.mockResolvedValueOnce({ ids: ["MCO1"], totalCatalogo: 1 });
+    leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000 }] });
+
+    const resumen = await aplicarReglaALote("empresa-1", "usuario-1", "todas", { tipo: "todas" });
+
+    expect(resumen.participadas).toBe(0);
+    expect(resumen.omitidas).toBe(1);
+    expect(resumen.filas[0].error).toContain("no sugiere un precio");
+    expect(participarPromocionMlMock).not.toHaveBeenCalled();
+  });
+
+  it("regla 'todas': el gate de «compartida» sigue activo", async () => {
+    prepararCuenta();
+    listarItemsActivosMlMock.mockResolvedValueOnce({ ids: ["MCO1"], totalCatalogo: 1 });
+    leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, suggested_discounted_price: 60000, meli_percentage: 10 }] });
+
+    const resumen = await aplicarReglaALote("empresa-1", "usuario-1", "todas", { tipo: "todas" });
+
+    expect(participarPromocionMlMock).not.toHaveBeenCalled();
+    expect(resumen.omitidas).toBe(1);
+  });
+
+  it("regla 'tabla-maestra': SÍ exige piso — sin fila en costos_sku no participa; con piso, manda el piso", async () => {
+    prepararCuenta();
+    listarItemsActivosMlMock.mockResolvedValue({ ids: ["MCO1"], totalCatalogo: 1 });
+    leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, suggested_discounted_price: 60000 }] });
+
+    await aplicarReglaALote("empresa-1", "usuario-1", "todas", { tipo: "tabla-maestra" });
+    expect(participarPromocionMlMock).not.toHaveBeenCalled();
+
+    filasPorTabla.set(costosSku, [{ skuCodigo: "SKU-1", precioMinimoUnidad: "90000", costo: "50000" }]);
+    await aplicarReglaALote("empresa-1", "usuario-1", "todas", { tipo: "tabla-maestra" });
+    expect(participarPromocionMlMock).toHaveBeenCalledWith("MCO1", "token-falso", expect.objectContaining({ deal_price: 90000 }));
+  });
+
+  it("regla 'maximo': también exige piso (sin fila en costos_sku no participa)", async () => {
+    prepararCuenta();
+    listarItemsActivosMlMock.mockResolvedValueOnce({ ids: ["MCO1"], totalCatalogo: 1 });
+    leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, suggested_discounted_price: 60000 }] });
+
+    await aplicarReglaALote("empresa-1", "usuario-1", "todas", { tipo: "maximo", maximoPct: 50 });
+    expect(participarPromocionMlMock).not.toHaveBeenCalled();
   });
 
   it("regla 'maximo': descarta candidatos cuyo descuento supera el tope elegido, sin llamar a Mercado Libre para esos", async () => {

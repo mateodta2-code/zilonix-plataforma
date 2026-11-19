@@ -99,7 +99,7 @@ const ESPERA_BASE_429_LECTURA_MS = 1200;
 // para la LECTURA en vivo, nunca compartido con el de escritura (otro
 // presupuesto de tiempo: esto corre detrás de un scroll/página, no de
 // un solo click).
-async function conReintento429Lectura<T>(tarea: () => Promise<T>): Promise<T> {
+export async function conReintento429Lectura<T>(tarea: () => Promise<T>): Promise<T> {
   for (let intento = 0; ; intento++) {
     try {
       return await tarea();
@@ -241,9 +241,9 @@ export function codificarCursor(cursor: CursorPublicaciones): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
-type CuentaParaListar = { id: string; cuentaIdExterna: string; nickname: string; siteId: string };
+export type CuentaParaListar = { id: string; cuentaIdExterna: string; nickname: string; siteId: string };
 
-async function listarCuentasParaPublicaciones(empresaId: string, cuentaId: string | "todas"): Promise<CuentaParaListar[]> {
+export async function listarCuentasParaPublicaciones(empresaId: string, cuentaId: string | "todas"): Promise<CuentaParaListar[]> {
   const filas = await dbComoEmpresa(empresaId, (tx) =>
     tx
       .select({ id: cuentasMl.id, cuentaIdExterna: cuentasMl.cuentaIdExterna, nickname: cuentasMl.nickname, siteId: cuentasMl.siteId })
@@ -260,7 +260,7 @@ async function leerPisoYCostoFrescoDeEmpresa(empresaId: string, skuCodigo: strin
   return leerPisoYCostoFresco(empresaId, skuCodigo);
 }
 
-const TAMANO_LOTE_ML = 20; // publicaciones crudas que se piden a ML por vuelta de la paginación
+export const TAMANO_LOTE_ML = 20; // publicaciones crudas que se piden a ML por vuelta de la paginación
 const TOPE_CONCURRENCIA_ML = 4; // nunca más de 4 llamadas de lectura en paralelo (tope pedido por Mateo)
 
 export type ConteosPublicaciones = { todas: number; enPromocion: number; sinPromocion: number; conError: number };
@@ -418,7 +418,7 @@ export type FilaResumenAplicarRegla = { itemId: string; tituloProducto: string |
 
 export type ResumenAplicarRegla = { revisadas: number; participadas: number; fallidas: number; omitidas: number; filas: FilaResumenAplicarRegla[] };
 
-const TOPE_CONCURRENCIA_APLICAR_REGLA = 4;
+export const TOPE_CONCURRENCIA_APLICAR_REGLA = 4;
 
 // Descuento a cargo del vendedor implícito en el precio que el motor
 // sugiere — "a cargo del vendedor" porque deal_price es lo único que
@@ -429,15 +429,12 @@ function descuentoVendedorPct(c: CandidatoCalculado): number | null {
   return ((c.precioOriginal - c.precioSugerido) / c.precioOriginal) * 100;
 }
 
-// "todas" y "tabla-maestra" son el mismo comportamiento de fondo: el
-// piso de Finanzas (costos_sku) NUNCA se puede apagar en este motor
-// (lib/ml/promociones.ts, calcularCandidatosItem) — ya es la regla
-// real para TODO lo que pasa por acá, sea cual sea el radio-button
-// elegido. "tabla-maestra" existe como opción separada solo para que
-// la persona pueda elegirla explícitamente sin un tope de % adicional
-// (a diferencia de "maximo"), nunca porque el piso se pueda prender o
-// apagar — avisar esto en el texto de la UI en vez de fingir una
-// regla nueva que el motor no tiene.
+// Decisión de Mateo: «todas» NO aplica ningún piso (es literalmente
+// todas) — usa el modo sin piso del motor (calcularCandidatosItem con
+// aplicarPiso=false) y el precio que Mercado Libre sugiere; PUEDE
+// vender bajo el costo. «tabla-maestra» y «maximo» SÍ siguen con el
+// piso de Finanzas (costos_sku); «maximo» además descarta lo que supere
+// su tope de % a cargo del vendedor.
 function cumpleRegla(c: CandidatoCalculado, regla: ReglaAplicable): boolean {
   if (!c.cumpleReglas || !c.accionSugerida) return false;
   if (regla.tipo !== "maximo") return true;
@@ -448,6 +445,7 @@ function cumpleRegla(c: CandidatoCalculado, regla: ReglaAplicable): boolean {
 export async function aplicarReglaALote(empresaId: string, usuarioId: string, cuentaId: string | "todas", regla: ReglaAplicable): Promise<ResumenAplicarRegla> {
   const cuentas = await listarCuentasParaPublicaciones(empresaId, cuentaId);
   const resumen: ResumenAplicarRegla = { revisadas: 0, participadas: 0, fallidas: 0, omitidas: 0, filas: [] };
+  const aplicarPiso = regla.tipo !== "todas";
 
   for (const cuenta of cuentas) {
     let token: string;
@@ -469,7 +467,8 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, cu
           conReintento429Lectura(() => leerPromocionesItemMl(itemId, token)),
         ]);
         if (!detalle || resultadoPromos.estado !== "ok" || resultadoPromos.promociones.length === 0) return [];
-        const { precioMinimo, costo } = await leerPisoYCostoFresco(empresaId, detalle.skuCodigo);
+        // «todas»: no se lee ni se exige el piso (costos_sku).
+        const { precioMinimo, costo } = aplicarPiso ? await leerPisoYCostoFresco(empresaId, detalle.skuCodigo) : { precioMinimo: null, costo: null };
         const item: ItemConPromociones = {
           itemId,
           cuentaMlId: cuenta.id,
@@ -481,17 +480,25 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, cu
           skuVariantesDistintas: detalle.skuVariantesDistintas,
           promociones: resultadoPromos.promociones,
         };
-        return calcularCandidatosItem(item, reglasCuenta, precioMinimo, costo).map((c) => ({ c, precioMinimo }));
+        return calcularCandidatosItem(item, reglasCuenta, precioMinimo, costo, aplicarPiso).map((c) => ({ c, precioMinimo }));
       });
 
       const porAplicar = candidatosPorItem.flat().filter(({ c }) => {
         resumen.revisadas += 1;
+        // Sin piso, una candidata que el motor frena (ej. ML no dio
+        // precio sugerido, o es compartida sin habilitar) queda visible
+        // en el resumen con su motivo, nunca omitida en silencio.
+        if (!aplicarPiso && c.estadoMl === "candidate" && !c.tieneVariantes && !c.soloEnMl && !c.cumpleReglas && c.motivoRevisarManual) {
+          resumen.omitidas += 1;
+          resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: c.motivoRevisarManual });
+          return false;
+        }
         return cumpleRegla(c, regla);
       });
 
       await conConcurrenciaLimitada(porAplicar, TOPE_CONCURRENCIA_APLICAR_REGLA, async ({ c, precioMinimo }) => {
         const accionSolicitada: AccionEscribible = c.accionSugerida === "modificar" ? "modificar" : "participar";
-        const validacion = validarCalculado(c, precioMinimo, reglasCuenta, accionSolicitada);
+        const validacion = validarCalculado(c, precioMinimo, reglasCuenta, accionSolicitada, undefined, aplicarPiso);
         if (!validacion.ok) {
           resumen.omitidas += 1;
           resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: validacion.motivo });

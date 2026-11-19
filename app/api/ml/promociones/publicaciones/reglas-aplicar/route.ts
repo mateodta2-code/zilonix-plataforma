@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { requierePermiso } from "@/lib/permisos";
 import { aplicarReglaALote, type ReglaAplicable } from "@/lib/ml/promocionesPublicaciones";
+import { salirDeTodasLasPromociones, vistaPreviaSalirTodas } from "@/lib/ml/promocionesSalirTodas";
 import { urlPublicaBase } from "@/lib/url-publica";
 import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../../_ayudantes";
 
 // Tarea "Promociones real" (Refs #295) — "Aplicar regla a las
 // publicaciones": las 3 reglas de la maqueta aprobada (a. todas, b.
-// máximo % a cargo del vendedor, c. tabla maestra de SKU). El piso de
-// la tabla maestra (costos_sku) NUNCA se puede apagar en el motor
-// (lib/ml/promociones.ts) — "todas" y "tabla-maestra" son el MISMO
-// comportamiento de fondo, ver el comentario en
+// máximo % a cargo del vendedor, c. tabla maestra de SKU) + d. "salir-todas"
+// (dejar de participar en todas, con vista previa y confirmación).
+// Decisión de Mateo: "todas" NO aplica piso (puede vender bajo el costo);
+// solo "tabla-maestra" y "maximo" respetan el piso de costos_sku — ver
 // lib/ml/promocionesPublicaciones.ts (cumpleRegla). Escribe de verdad
 // contra Mercado Libre — permiso "ejecutar".
-type Cuerpo = { cuentaId?: unknown; regla?: unknown; maximoPct?: unknown };
+type Cuerpo = { cuentaId?: unknown; regla?: unknown; maximoPct?: unknown; vistaPrevia?: unknown; confirmado?: unknown };
 
 export async function POST(request: Request) {
   const base = urlPublicaBase();
@@ -37,12 +38,27 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
   }
-  const { cuentaId, regla, maximoPct } = cuerpo;
+  const { cuentaId, regla, maximoPct, vistaPrevia, confirmado } = cuerpo;
   if (cuentaId !== "todas" && (typeof cuentaId !== "string" || !PATRON_UUID.test(cuentaId))) {
     return NextResponse.json({ error: "Cuenta inválida." }, { status: 400 });
   }
-  if (regla !== "todas" && regla !== "maximo" && regla !== "tabla-maestra") {
+  if (regla !== "todas" && regla !== "maximo" && regla !== "tabla-maestra" && regla !== "salir-todas") {
     return NextResponse.json({ error: "Regla inválida." }, { status: 400 });
+  }
+
+  // «Dejar de participar en todas» — mismo permiso ("ejecutar") que el
+  // resto de esta ruta. Con vistaPrevia:true SOLO LEE y cuenta (nada se
+  // escribe); sin ella, exige confirmado:true — nunca sale de todas las
+  // promociones sin que el cliente haya pasado por el paso de
+  // confirmación con el conteo.
+  if (regla === "salir-todas") {
+    if (vistaPrevia === true) {
+      return NextResponse.json(await vistaPreviaSalirTodas(empresa.id, cuentaId as string));
+    }
+    if (confirmado !== true) {
+      return NextResponse.json({ error: "Falta la confirmación para dejar de participar en todas las promociones." }, { status: 400 });
+    }
+    return NextResponse.json(await salirDeTodasLasPromociones(empresa.id, usuario.id, cuentaId as string));
   }
 
   let reglaAplicable: ReglaAplicable;
