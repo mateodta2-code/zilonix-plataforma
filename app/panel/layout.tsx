@@ -4,6 +4,7 @@ import { MarcoApp } from "@/components/marco/MarcoApp";
 import type { GrupoNav } from "@/components/marco/tipos";
 import { itemsAdministracion } from "@/components/marco/menuAdministracion";
 import { SECCIONES_PRODUCTOS } from "@/components/productos/secciones";
+import { GuiaModulo } from "@/components/guia/GuiaModulo";
 
 // Marco visual (issue de las subpáginas) — mueve acá la carga que
 // antes hacía SOLO app/panel/page.tsx para pintar el marco (usuario
@@ -118,6 +119,8 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       usuario={{ nombre: usuario.nombre, imagenUrl: clerkUser?.imageUrl ?? null }}
       mostrarCampana={esDueno}
     >
+      {/* Guía de cada módulo (19-nov), arriba de su pantalla. */}
+      <GuiaModulo />
       {children}
     </MarcoApp>
   );
