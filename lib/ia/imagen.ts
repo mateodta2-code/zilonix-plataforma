@@ -51,7 +51,8 @@ export function limpiarIndicaciones(valor: unknown): string {
 // repitan. Informativa: el mismo producto con textos cortos. En las dos
 // se pide no cambiar el producto ni inventar sellos o promociones.
 export const COMPOSICIONES_PORTADA = [
-  "Producto en vista frontal tres cuartos, centrado a la izquierda; escena de uso en un círculo integrado arriba a la derecha; un acercamiento de un detalle real en un círculo abajo a la derecha; lo que incluye ordenado en la franja inferior.",
+  // La distribución de referencia que mandó el equipo (esquema, no diseño final).
+  "Producto en vista frontal tres cuartos, grande, ocupando el centro y la izquierda del cuadro; un círculo grande con la escena de uso arriba a la derecha, parcialmente detrás del producto; un círculo pequeño con un detalle funcional real a la derecha, a media altura bajo la escena; lo que incluye (o, si no trae nada, otra característica real) ordenado en una franja horizontal en la parte inferior.",
   "Producto girado levemente hacia la izquierda en primer plano; detrás, la escena de uso real desenfocada que se funde suavemente con el fondo blanco por la derecha.",
   "Producto visto desde arriba en ángulo de 45 grados; en un círculo a la izquierda, unas manos usándolo en una situación cotidiana; un detalle de material o textura en una ventana pequeña.",
   "Producto a la derecha, grande y nítido; a la izquierda, una persona usándolo en su entorno real, con una transición de luz suave hacia el blanco.",
