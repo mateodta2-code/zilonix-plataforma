@@ -90,7 +90,13 @@ export function validarCalculado(
   // reemplaza el precioSugerido automático del motor como el número a
   // validar y mandar — nunca al revés, el motor nunca se entera de
   // "cuánto quiso" la persona, solo presta el piso/techo frescos.
-  precioElegido?: number
+  precioElegido?: number,
+  // false = modo «sin piso» (solo la regla «Participar en todas»): se
+  // omite ÚNICAMENTE el check contra el piso de Finanzas. Siguen firmes
+  // variantes, tipos sin escritura, techo de la promoción
+  // (max_discounted_price), rango 5–80 % de PRICE_DISCOUNT, gate de
+  // «compartida» y la acción vigente.
+  aplicarPiso: boolean = true
 ): ResultadoValidacion {
   if (recalculado.tieneVariantes) {
     return { ok: false, motivo: "Este producto tiene variantes — se revisa a mano, nunca por esta vía." };
@@ -110,7 +116,7 @@ export function validarCalculado(
     // sobre un producto puntual — por eso acá NO se repite ese check
     // (es la única diferencia real contra el camino de siempre, más
     // abajo).
-    if (piso == null) {
+    if (aplicarPiso && piso == null) {
       return { ok: false, motivo: recalculado.motivoRevisarManual ?? "Falta precio mínimo para este SKU en Finanzas — no se puede participar ni ajustar hasta que se cargue." };
     }
     if (recalculado.esCompartida && !reglas.participarCompartidas) {
@@ -126,7 +132,7 @@ export function validarCalculado(
     // (`precioDesdeDescuento`, calculosFila.ts) — un decimal cargado a
     // mano (ej. "90000.5") se rechaza explícito, nunca se trunca ni se
     // redondea en silencio antes de mandarlo a Mercado Libre.
-    if (!Number.isFinite(precioElegido) || !Number.isInteger(precioElegido) || precioElegido <= 0 || precioElegido < piso) {
+    if (!Number.isFinite(precioElegido) || !Number.isInteger(precioElegido) || precioElegido <= 0 || (aplicarPiso && piso != null && precioElegido < piso)) {
       return { ok: false, motivo: "El precio elegido tiene que ser un número en pesos enteros, mayor que cero y nunca por debajo del piso de Finanzas." };
     }
     // Review de Pablo (PR #307) — mismo criterio que la UI (rangoEdicion,
@@ -172,7 +178,13 @@ export function validarCalculado(
   // LOW 10 — guard explícito y final, nunca implícito en el tipo: sin
   // importar qué devolvió el motor, un NaN/0/negativo o por debajo del
   // piso jamás sale hacia un POST/PUT a Mercado Libre.
-  if (piso == null || deal == null || !Number.isFinite(deal) || deal <= 0 || deal < piso) {
+  if (deal == null || !Number.isFinite(deal) || deal <= 0) {
+    return {
+      ok: false,
+      motivo: aplicarPiso ? "El precio calculado no es válido o quedó por debajo del piso — no se escribe en Mercado Libre." : "El precio sugerido por Mercado Libre no es válido — no se escribe.",
+    };
+  }
+  if (aplicarPiso && (piso == null || deal < piso)) {
     return { ok: false, motivo: "El precio calculado no es válido o quedó por debajo del piso — no se escribe en Mercado Libre." };
   }
 

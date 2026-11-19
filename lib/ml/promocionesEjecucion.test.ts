@@ -47,7 +47,8 @@ vi.mock("@/lib/ml/cliente", async (importOriginal) => {
 });
 
 import { costosSku, promocionesAcciones, promocionesCandidatos, promocionesReglas } from "@/db/schema";
-import { ejecutarLoteDeAcciones, precioCambioDemasiado, validarCandidatoParaEscritura } from "./promocionesEjecucion";
+import { calcularCandidatosItem, type ReglasCuentaPromocion } from "./promociones";
+import { ejecutarLoteDeAcciones, precioCambioDemasiado, validarCalculado, validarCandidatoParaEscritura } from "./promocionesEjecucion";
 
 type CandidatoFila = typeof promocionesCandidatos.$inferSelect;
 type AccionFila = typeof promocionesAcciones.$inferSelect;
@@ -531,5 +532,57 @@ describe("ejecutarLoteDeAcciones — HIGH 2 / MED 6 / LOW 11 (review de Pablo)",
     expect(participarPromocionMlMock).toHaveBeenCalledTimes(1);
     expect(updatesRegistrados).toHaveLength(1);
     expect(updatesRegistrados[0]!.estado).toBe("fallida");
+  });
+});
+
+describe("validarCalculado — modo sin piso (fix-promociones-todas-sin-piso)", () => {
+  const reglas: ReglasCuentaPromocion = { descuentoMaximoPct: 20, participarCompartidas: false, igualarAlPiso: true };
+  const calcular = (promo: Record<string, unknown>, piso: number | null = 90000, aplicarPiso = true) =>
+    calcularCandidatosItem(
+      { itemId: "MCO1", cuentaMlId: "c1", nickname: "", tituloProducto: "P", thumbnail: null, skuCodigo: "SKU-1", tieneVariantes: false, skuVariantesDistintas: false, promociones: [{ type: "DEAL", status: "candidate", id: "p1", original_price: 100000, ...promo }] },
+      reglas,
+      piso,
+      50000,
+      aplicarPiso
+    )[0];
+
+  it("sin piso: acepta un precio bajo el costo/piso (ML sugiere 40.000, piso 90.000)", () => {
+    const c = calcular({ suggested_discounted_price: 40000 }, 90000, false);
+    expect(validarCalculado(c, 90000, reglas, "participar", undefined, false)).toEqual({ ok: true, deal: 40000 });
+    expect(validarCalculado(c, null, reglas, "participar", undefined, false)).toEqual({ ok: true, deal: 40000 });
+  });
+
+  it("con piso: rechaza un precio por debajo del piso (igual que antes)", () => {
+    const c = { ...calcular({ suggested_discounted_price: 40000 }, 90000, false) };
+    const resultado = validarCalculado(c, 90000, reglas, "participar");
+    expect(resultado.ok).toBe(false);
+  });
+
+  it("sin piso: el resto de frenos siguen — variantes, tipo sin escritura, no cumple reglas, acción vieja", () => {
+    const base = calcular({ suggested_discounted_price: 70000 }, null, false);
+    expect(validarCalculado({ ...base, tieneVariantes: true }, null, reglas, "participar", undefined, false).ok).toBe(false);
+    expect(validarCalculado({ ...base, soloEnMl: true }, null, reglas, "participar", undefined, false).ok).toBe(false);
+    expect(validarCalculado({ ...base, cumpleReglas: false, motivoRevisarManual: "x" }, null, reglas, "participar", undefined, false)).toEqual({ ok: false, motivo: "x" });
+    expect(validarCalculado(base, null, reglas, "modificar", undefined, false).ok).toBe(false);
+  });
+
+  it("sin piso: un precio no válido (NaN / 0) nunca sale hacia Mercado Libre", () => {
+    const base = calcular({ suggested_discounted_price: 70000 }, null, false);
+    expect(validarCalculado({ ...base, precioSugerido: 0 }, null, reglas, "participar", undefined, false).ok).toBe(false);
+    expect(validarCalculado({ ...base, precioSugerido: Number.NaN }, null, reglas, "participar", undefined, false).ok).toBe(false);
+    expect(validarCalculado({ ...base, precioSugerido: null }, null, reglas, "participar", undefined, false).ok).toBe(false);
+  });
+
+  it("sin piso: PRICE_DISCOUNT fuera de 5–80% sigue frenado en la validación final", () => {
+    const base = calcular({ type: "PRICE_DISCOUNT", suggested_discounted_price: 70000 }, null, false);
+    // El motor ya lo dio por válido (30%); si el precio llegara a 99.000 (1%), la validación manual lo frena.
+    const resultado = validarCalculado(base, null, reglas, "participar", 99000, false);
+    expect(resultado.ok).toBe(false);
+  });
+
+  it("sin piso con precio elegido a mano: respeta el techo de la promoción pero no el piso", () => {
+    const base = calcular({ suggested_discounted_price: 70000, max_discounted_price: 95000 }, null, false);
+    expect(validarCalculado(base, null, reglas, "participar", 40000, false)).toEqual({ ok: true, deal: 40000 });
+    expect(validarCalculado(base, null, reglas, "participar", 96000, false).ok).toBe(false);
   });
 });
