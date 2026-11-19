@@ -1,5 +1,7 @@
 "use client";
 
+import { Boton } from "@/components/marco/Boton";
+
 // Issue #147 — red de seguridad: app/panel/investigacion/page.tsx ya
 // atrapa todos los errores conocidos (término inválido, límite de
 // búsquedas, sin cuenta conectada, 401/403/5xx de Mercado Libre,
@@ -17,9 +19,9 @@ export default function InvestigacionError({ reset }: { error: Error; reset: () 
       <p style={{ opacity: 0.8, fontSize: 14 }}>
         No se pudo completar la búsqueda. Puede ser algo pasajero — intentá de nuevo en un momento.
       </p>
-      <button onClick={() => reset()} style={{ padding: "10px 16px", marginTop: 16 }}>
+      <Boton onClick={() => reset()} style={{ marginTop: 16 }}>
         Volver a intentar
-      </button>
+      </Boton>
     </div>
   );
 }

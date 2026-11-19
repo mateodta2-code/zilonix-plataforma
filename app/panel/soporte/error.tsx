@@ -1,5 +1,7 @@
 "use client";
 
+import { Boton } from "@/components/marco/Boton";
+
 export default function SoporteError({ error, reset }: { error: Error; reset: () => void }) {
   return (
     // div, no <main> — esto ya renderiza adentro del <main> del marco
@@ -7,9 +9,9 @@ export default function SoporteError({ error, reset }: { error: Error; reset: ()
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
       <h1 style={{ fontSize: 20, fontWeight: 700 }}>No se pudo completar</h1>
       <p style={{ opacity: 0.8, fontSize: 14 }}>{error.message}</p>
-      <button onClick={() => reset()} style={{ padding: "10px 16px", marginTop: 16 }}>
+      <Boton onClick={() => reset()} style={{ marginTop: 16 }}>
         Volver a intentar
-      </button>
+      </Boton>
     </div>
   );
 }

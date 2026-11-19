@@ -1,3 +1,4 @@
+import { Boton } from "@/components/marco/Boton";
 import { redirect } from "next/navigation";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
@@ -54,9 +55,9 @@ export default async function CrearEmpresaPage() {
             style={{ display: "block", width: "100%", padding: 8, marginTop: 4, boxSizing: "border-box" }}
           />
         </label>
-        <button type="submit" style={{ padding: "10px 16px", marginTop: 8 }}>
+        <Boton type="submit" style={{ marginTop: 8 }}>
           Crear empresa
-        </button>
+        </Boton>
       </form>
 
       {propias.length > 0 && (

@@ -1,3 +1,4 @@
+import { Boton } from "@/components/marco/Boton";
 import Link from "next/link";
 import { Ayuda } from "@/components/marco/Ayuda";
 import { Chip } from "@/components/marco/Chip";
@@ -109,9 +110,9 @@ export function GananciaProductos({
             placeholder="Título, SKU o código de la publicación"
           />
         </label>
-        <button type="submit" className="zx-control">
+        <Boton type="submit">
           Buscar
-        </button>
+        </Boton>
       </form>
 
       <div className={styles.filtrosGanancia}>
