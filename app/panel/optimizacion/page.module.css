@@ -63,6 +63,14 @@
   min-width: 0;
 }
 
+/* .zx-control trae width:100%: el botón se comía todo el ancho y dejaba
+   la caja de búsqueda aplastada. El botón mide lo que su texto. */
+.buscador button {
+  flex: 0 0 auto;
+  width: auto;
+  padding-inline: 18px;
+}
+
 .filtro {
   display: flex;
   flex-wrap: wrap;
