@@ -78,7 +78,8 @@ describe("movimientos_marketplace (RLS y conciliación Falabella)", () => {
     expect(limpio(detalle!.totales.comision)).toBe("-28869");
     expect(limpio(detalle!.totales.envio)).toBe("-12300");
     expect(limpio(detalle!.totales.retencion)).toBe("-26800.06");
-    expect(limpio(detalle!.pagado)).toBe("117830.94");
+    expect(limpio(detalle!.pagoARecibir)).toBe("117830.94");
+    expect(detalle!.estadosPago).toEqual(["Pagado"]);
     // Las retenciones no bajan la utilidad: 185800 - 28869 - 12300.
     expect(limpio(detalle!.netoAntesDeRetenciones)).toBe("144631");
     expect(detalle!.ordenes).toHaveLength(8);
@@ -87,7 +88,7 @@ describe("movimientos_marketplace (RLS y conciliación Falabella)", () => {
     expect(limpio(primeraOrden.vendido)).toBe("20000");
     expect(limpio(primeraOrden.cobradoFalabella)).toBe("-11008");
     expect(limpio(primeraOrden.retenciones)).toBe("-8933.35");
-    expect(limpio(primeraOrden.pagado)).toBe("58.65");
+    expect(limpio(primeraOrden.netoCorte)).toBe("58.65");
   });
 
   it("el reporte del periodo y luego el del corte son las mismas líneas: solo cambia el estado", async () => {

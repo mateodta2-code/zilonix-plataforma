@@ -22,6 +22,7 @@ export function TarjetaKpi({
   detalle,
   variacion,
   textoVacio = "Pendiente de conectar",
+  junto,
 }: {
   titulo: string;
   valor?: string | number;
@@ -32,12 +33,21 @@ export function TarjetaKpi({
   // (igual, o sin datos): no se pinta verde ni rojo.
   variacion?: { texto: string; mejor: boolean | null };
   textoVacio?: string;
+  // Algo chico al lado del título (ej. el chip de estado de un corte).
+  junto?: React.ReactNode;
 }) {
   const tieneValor = valor !== undefined;
 
   return (
     <div className={styles.tarjeta}>
-      <p className={`zx-etiqueta ${styles.titulo}`}>{titulo}</p>
+      {junto ? (
+        <div className={styles.tituloConJunto}>
+          <p className={`zx-etiqueta ${styles.titulo}`}>{titulo}</p>
+          {junto}
+        </div>
+      ) : (
+        <p className={`zx-etiqueta ${styles.titulo}`}>{titulo}</p>
+      )}
 
       {tieneValor ? (
         <>

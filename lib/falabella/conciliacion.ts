@@ -204,8 +204,9 @@ export type OrdenConciliada = {
   // retenciones).
   cobradoFalabella: string;
   retenciones: string;
-  // Lo que se pagó: la suma de todas las líneas, igual que el corte.
-  pagado: string;
+  // Neto de la orden en este corte: la suma de todas sus líneas. Puede
+  // ser negativo o solo retenciones si la venta cayó en un corte anterior.
+  netoCorte: string;
 };
 
 export type DetalleCorteFalabella = {
@@ -213,8 +214,13 @@ export type DetalleCorteFalabella = {
   estadoCuenta: string | null;
   moneda: string;
   totales: TotalesCategoria;
-  pagado: string;
-  // Pagado sin restar las retenciones: las retenciones son un saldo a
+  // Estados de pago de las líneas (Pagado, Pago programado, Abierto, No
+  // pagado): el corte puede no estar pagado todavía.
+  estadosPago: string[];
+  // Suma de todas las líneas: lo que Falabella paga o va a pagar. No se
+  // llama "pagado" porque el corte puede seguir Abierto o programado.
+  pagoARecibir: string;
+  // Pago a recibir sin restar las retenciones: las retenciones son un saldo a
   // favor en impuestos, no un costo, así que no bajan la utilidad.
   netoAntesDeRetenciones: string;
   ordenes: OrdenConciliada[];
@@ -259,7 +265,7 @@ export async function leerCorteFalabella(
         vendido: suma(["precio"]),
         cobradoFalabella: suma("cobros"),
         retenciones: suma(["retencion"]),
-        pagado: suma("todas"),
+        netoCorte: suma("todas"),
       })
       .from(m)
       .where(condicion)
@@ -268,7 +274,8 @@ export async function leerCorteFalabella(
 
     const [totalesGenerales] = await tx
       .select({
-        pagado: suma("todas"),
+        pagoARecibir: suma("todas"),
+        estadosPago: sql<string[]>`coalesce(array_agg(distinct ${m.estadoPago}) filter (where ${m.estadoPago} is not null), '{}')`,
         netoAntesDeRetenciones: sql<string>`coalesce(sum(${m.monto}) filter (where ${m.categoria} <> 'retencion'), 0)::text`,
       })
       .from(m)
@@ -286,7 +293,8 @@ export async function leerCorteFalabella(
       estadoCuenta: filtro.estadoCuenta === SIN_CORTE ? null : filtro.estadoCuenta,
       moneda: filtro.moneda,
       totales,
-      pagado: totalesGenerales.pagado,
+      estadosPago: totalesGenerales.estadosPago,
+      pagoARecibir: totalesGenerales.pagoARecibir,
       netoAntesDeRetenciones: totalesGenerales.netoAntesDeRetenciones,
       ordenes,
     };
