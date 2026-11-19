@@ -165,3 +165,8 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Issue #422 — una sección por marketplace en Ventas y utilidad. */
+.seccionMarketplace {
+  margin-top: 16px;
+}
