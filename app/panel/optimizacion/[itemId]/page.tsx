@@ -112,6 +112,10 @@ export default async function DetalleOptimizacionPage({
   const plata = (v: string | null) => (v === null ? "—" : formatearMoneda(Number(v), siteId));
   const pct = (v: string | null) => (v === null ? "—" : `${Number(v).toLocaleString(idioma, { maximumFractionDigits: 1 })} %`);
   const num = (v: number | null) => (v === null ? "—" : v.toLocaleString(idioma));
+  // "2026-11-18" -> "mar, 18 nov". Mediodía UTC para que ninguna zona
+  // horaria lo corra al día anterior.
+  const diaLargo = (dia: string) =>
+    new Date(`${dia}T12:00:00Z`).toLocaleDateString(idioma, { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   const cambio = (v: string | null) =>
     v === null ? undefined : { texto: `${Number(v) > 0 ? "+" : ""}${Number(v).toLocaleString(idioma, { maximumFractionDigits: 1 })} % vs. período anterior`, mejor: Number(v) === 0 ? null : Number(v) > 0 };
 
@@ -206,8 +210,29 @@ export default async function DetalleOptimizacionPage({
 
       <Tarjeta className={styles.tarjeta}>
         <p className={styles.seccion}>Por día</p>
-        <GraficaLineas titulo="Unidades vendidas" puntos={serie.map((p) => ({ etiqueta: p.dia.slice(5), valor: p.ventas }))} formatoValor={(n) => n.toLocaleString(idioma)} />
-        <GraficaLineas titulo="Visitas" puntos={serie.map((p) => ({ etiqueta: p.dia.slice(5), valor: p.dia >= datos!.visitasDesde ? p.visitas : null }))} formatoValor={(n) => n.toLocaleString(idioma)} />
+        {/* Al pasar el mouse: el día, su valor y el de la otra gráfica. */}
+        <GraficaLineas
+          titulo="Unidades vendidas"
+          nombreValor="Unidades vendidas"
+          puntos={serie.map((p) => ({
+            etiqueta: p.dia.slice(5),
+            etiquetaLarga: diaLargo(p.dia),
+            valor: p.ventas,
+            extra: [`Visitas: ${p.dia >= datos!.visitasDesde && p.visitas !== null ? num(p.visitas) : "—"}`],
+          }))}
+          formatoValor={(n) => n.toLocaleString(idioma)}
+        />
+        <GraficaLineas
+          titulo="Visitas"
+          nombreValor="Visitas"
+          puntos={serie.map((p) => ({
+            etiqueta: p.dia.slice(5),
+            etiquetaLarga: diaLargo(p.dia),
+            valor: p.dia >= datos!.visitasDesde ? p.visitas : null,
+            extra: [`Unidades vendidas: ${num(p.ventas)}`],
+          }))}
+          formatoValor={(n) => n.toLocaleString(idioma)}
+        />
         {periodo.anteriorDesde < datos.visitasDesde ? (
           <p className={styles.nota}>{`Mercado Libre entrega visitas solo desde el ${datos.visitasDesde}: lo anterior sale "—".`}</p>
         ) : null}

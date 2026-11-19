@@ -1,16 +1,35 @@
 // Issue #175 — gráfica de línea simple, SVG servido desde el propio
-// Server Component (sin "use client", sin ninguna librería nueva: el
-// repo no tiene ninguna todavía — ver package.json). Pensada para
-// pocos puntos (historial diario de un seguimiento, nunca miles de
-// filas), no para un dashboard de series de tiempo pesado.
-export type PuntoGrafica = { etiqueta: string; valor: number | null };
+// Server Component (sin ninguna librería nueva: el repo no tiene
+// ninguna todavía — ver package.json). Pensada para pocos puntos
+// (historial diario de un seguimiento, nunca miles de filas), no para
+// un dashboard de series de tiempo pesado. Optimización: el globo al
+// pasar el mouse lo dibuja GraficaInteractiva (cliente); acá se calcula
+// y se formatea todo, porque formatoValor es una función y no puede
+// viajar al navegador.
+import { GraficaInteractiva } from "./GraficaInteractiva";
+
+// etiquetaLarga: lo que dice el globo (ej. "mar 18 nov"); sin ella, la
+// etiqueta corta. extra: líneas de más bajo el valor (ej. las visitas
+// de ese día en la gráfica de ventas).
+export type PuntoGrafica = { etiqueta: string; valor: number | null; etiquetaLarga?: string; extra?: string[] };
 
 const ANCHO = 600;
 const ALTO = 160;
 const MARGEN = 24;
 
-export function GraficaLineas({ titulo, puntos, formatoValor }: { titulo: string; puntos: PuntoGrafica[]; formatoValor?: (n: number) => string }) {
-  const conDato = puntos.filter((p): p is { etiqueta: string; valor: number } => p.valor != null);
+export function GraficaLineas({
+  titulo,
+  puntos,
+  formatoValor,
+  nombreValor,
+}: {
+  titulo: string;
+  puntos: PuntoGrafica[];
+  formatoValor?: (n: number) => string;
+  // Delante del valor en el globo (ej. "Unidades vendidas: 3").
+  nombreValor?: string;
+}) {
+  const conDato = puntos.filter((p): p is PuntoGrafica & { valor: number } => p.valor != null);
   if (conDato.length < 2) {
     return (
       <div>
@@ -28,28 +47,19 @@ export function GraficaLineas({ titulo, puntos, formatoValor }: { titulo: string
   const rango = maximo - minimo || 1;
 
   const paso = (ANCHO - MARGEN * 2) / (conDato.length - 1);
-  const coordenadas = conDato.map((p, i) => {
-    const x = MARGEN + i * paso;
-    const y = ALTO - MARGEN - ((p.valor - minimo) / rango) * (ALTO - MARGEN * 2);
-    return { x, y, punto: p };
-  });
-
-  const puntos_ = coordenadas.map((c) => `${c.x},${c.y}`).join(" ");
   const formato = formatoValor ?? ((n: number) => String(n));
+  const coordenadas = conDato.map((p, i) => ({
+    x: MARGEN + i * paso,
+    y: ALTO - MARGEN - ((p.valor - minimo) / rango) * (ALTO - MARGEN * 2),
+    titulo: p.etiquetaLarga ?? p.etiqueta,
+    valor: nombreValor ? `${nombreValor}: ${formato(p.valor)}` : formato(p.valor),
+    extra: p.extra ?? [],
+  }));
 
   return (
     <div>
       <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13 }}>{titulo}</p>
-      <svg viewBox={`0 0 ${ANCHO} ${ALTO}`} width="100%" height={ALTO} role="img" aria-label={titulo}>
-        <polyline points={puntos_} fill="none" stroke="var(--acento)" strokeWidth={2} />
-        {coordenadas.map((c, i) => (
-          <circle key={i} cx={c.x} cy={c.y} r={3} fill="var(--acento)">
-            <title>
-              {c.punto.etiqueta}: {formato(c.punto.valor)}
-            </title>
-          </circle>
-        ))}
-      </svg>
+      <GraficaInteractiva titulo={titulo} ancho={ANCHO} alto={ALTO} puntos={coordenadas} />
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--texto-suave)" }}>
         <span>{conDato[0].etiqueta}</span>
         <span>{conDato[conDato.length - 1].etiqueta}</span>
