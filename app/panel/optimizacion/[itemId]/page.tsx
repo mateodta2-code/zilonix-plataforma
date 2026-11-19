@@ -10,10 +10,12 @@ import { SinAcceso } from "@/components/marco/SinAcceso";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { cloudinaryConfigurado } from "@/lib/cloudinary";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { competenciaItemMl, leerItemEdicionMl, PATRON_ID_PRODUCTO_O_ITEM, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { linkPublicacion } from "@/lib/ml/permalink";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { costoFijoPorUnidad, diasInventario, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
@@ -159,6 +161,7 @@ export default async function DetalleOptimizacionPage({
           tieneVariantes: itemEdicion.tieneVariantes,
           automatizada,
           fotos: itemEdicion.fotos,
+          cloudinaryConfigurado: cloudinaryConfigurado(),
           base: {
             fijoPorUnidad: c ? costoFijoPorUnidad(actual) : null,
             comision: c ? c.comision : null,
@@ -188,6 +191,11 @@ export default async function DetalleOptimizacionPage({
       />
 
       <div className={styles.panelDatos}>
+        {linkPublicacion(datos.item.id) ? (
+          <a href={linkPublicacion(datos.item.id)!} target="_blank" rel="noopener noreferrer" className={styles.enlace}>
+            Ver publicación en Mercado Libre ↗
+          </a>
+        ) : null}
         <span className={styles.filtro} aria-label="Período">
           {opcionesPeriodo(ahora).map((o) => (
             <Link key={o.clave} scroll={false} href={href({ periodo: o.clave })} aria-current={o.clave === periodo.clave ? "page" : undefined}>

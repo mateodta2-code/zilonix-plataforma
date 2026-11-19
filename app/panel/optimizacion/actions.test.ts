@@ -227,10 +227,15 @@ describe("Fase 3: editar precio, título y fotos", () => {
   });
 
   it("fotos: solo ids que ya tiene la publicación y enlaces https", async () => {
-    await editarFotosAction({ cuentaMlId: CUENTA, itemId: "MCO1", orden: ["f2", "f1", "ajena"], nuevas: ["https://nueva.jpg", "http://insegura.jpg", "javascript:x"] });
-    expect(ml.actualizar).toHaveBeenCalledWith("MCO1", "token", { pictures: [{ id: "f2" }, { id: "f1" }, { source: "https://nueva.jpg" }] });
+    await editarFotosAction({
+      cuentaMlId: CUENTA,
+      itemId: "MCO1",
+      fotos: [{ url: "https://nueva.jpg" }, { id: "f2" }, { id: "ajena" }, { url: "http://insegura.jpg" }, { id: "f1" }, { url: "javascript:x" }, { id: "f2" }],
+    });
+    // La nueva puede quedar de portada; ids ajenos, http y repetidos se descartan.
+    expect(ml.actualizar).toHaveBeenCalledWith("MCO1", "token", { pictures: [{ source: "https://nueva.jpg" }, { id: "f2" }, { id: "f1" }] });
     ml.actualizar.mockClear();
-    expect((await editarFotosAction({ cuentaMlId: CUENTA, itemId: "MCO1", orden: [], nuevas: [] })).ok).toBe(false);
+    expect((await editarFotosAction({ cuentaMlId: CUENTA, itemId: "MCO1", fotos: [] })).ok).toBe(false);
     expect(ml.actualizar).not.toHaveBeenCalled();
   });
 

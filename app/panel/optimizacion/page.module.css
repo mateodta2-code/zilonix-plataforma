@@ -235,34 +235,6 @@
   color: var(--texto);
 }
 
-.fotosEdicion {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.fotosEdicion li {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-}
-
-.fotoEdicion {
-  width: 72px;
-  height: 72px;
-  object-fit: cover;
-  border-radius: var(--radio-boton);
-  background: var(--superficie-2);
-}
-
-.accionesFoto {
-  display: flex;
-  gap: 2px;
-}
-
 /* Fase 4 — competencia del mismo producto. */
 .alertas {
   margin: 0;

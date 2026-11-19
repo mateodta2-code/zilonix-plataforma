@@ -363,22 +363,40 @@ export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: 
 
 // Fotos: el orden de las que ya tiene (por id) y fotos nuevas por enlace
 // https. La primera es la portada.
-export async function editarFotosAction(entrada: { cuentaMlId: string; itemId: string; orden: string[]; nuevas: string[] }): Promise<ResultadoEdicion> {
+// El orden completo, la primera es la portada: las actuales por su id
+// (solo ids que de verdad tiene la publicación) y las nuevas por su
+// enlace https (subidas a Cloudinary desde la galería). Mezcladas, así
+// una foto nueva puede quedar de portada.
+export async function editarFotosAction(entrada: {
+  cuentaMlId: string;
+  itemId: string;
+  fotos: ({ id: string } | { url: string })[];
+}): Promise<ResultadoEdicion> {
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
   const actuales = new Set(prep.item.fotos.map((f) => f.id));
-  const orden = [...new Set((Array.isArray(entrada.orden) ? entrada.orden : []).filter((id) => typeof id === "string" && actuales.has(id)))];
-  const nuevas = (Array.isArray(entrada.nuevas) ? entrada.nuevas : [])
-    .filter((u): u is string => typeof u === "string")
-    .map((u) => u.trim())
-    .filter((u) => u.startsWith("https://") && u.length <= LARGO_MAXIMO_URL && !/\s/.test(u));
-  if (orden.length + nuevas.length === 0) return { ok: false, aviso: "La publicación necesita al menos una foto." };
+  const vistas = new Set<string>();
+  const pictures: ({ id: string } | { source: string })[] = [];
+  for (const f of Array.isArray(entrada.fotos) ? entrada.fotos : []) {
+    if (f && typeof f === "object" && "id" in f && typeof f.id === "string" && actuales.has(f.id)) {
+      if (vistas.has(`id:${f.id}`)) continue;
+      vistas.add(`id:${f.id}`);
+      pictures.push({ id: f.id });
+    } else if (f && typeof f === "object" && "url" in f && typeof f.url === "string") {
+      const url = f.url.trim();
+      if (!url.startsWith("https://") || url.length > LARGO_MAXIMO_URL || /\s/.test(url) || vistas.has(`url:${url}`)) continue;
+      vistas.add(`url:${url}`);
+      pictures.push({ source: url });
+    }
+  }
+  if (pictures.length === 0) return { ok: false, aviso: "La publicación necesita al menos una foto." };
+  const nuevas = pictures.filter((p) => "source" in p).length;
   return escribirYAuditar(
     prep,
-    { pictures: [...orden.map((id) => ({ id })), ...nuevas.map((source) => ({ source }))] },
+    { pictures },
     {
       accion: "cambiar_fotos_publicacion",
-      detalle: `Cambió las fotos de ${prep.item.id} (${prep.cuenta.nickname}): ${orden.length} existentes, ${nuevas.length} nuevas.`,
+      detalle: `Cambió las fotos de ${prep.item.id} (${prep.cuenta.nickname}): ${pictures.length - nuevas} existentes, ${nuevas} nuevas.`,
     },
     "Fotos actualizadas en Mercado Libre. Pueden tardar unos minutos en verse."
   );

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { leerPrecioEscrito, simularPrecio, type BaseSimulacion } from "@/lib/optimizacion/simulador";
+import { GaleriaFotos } from "../../publicar/GaleriaFotos";
 import { editarFotosAction, editarPrecioAction, editarTituloAction } from "../actions";
 import styles from "../page.module.css";
 
@@ -20,6 +21,8 @@ export type DatosEdicion = {
   // true = automatización de precios de ML activa; null = no se supo.
   automatizada: boolean | null;
   fotos: { id: string; url: string }[];
+  // Sin Cloudinary, la galería vuelve a pedir enlaces (no hay dónde subir).
+  cloudinaryConfigurado: boolean;
   base: BaseSimulacion;
 };
 
@@ -50,11 +53,12 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
   const [titulo, setTitulo] = useState(datos.titulo ?? "");
   const [avisoTitulo, setAvisoTitulo] = useState<Aviso>(null);
 
-  // Fotos: orden de las actuales y enlaces nuevos.
-  const [fotos, setFotos] = useState(datos.fotos);
-  const [nuevaUrl, setNuevaUrl] = useState("");
-  const [nuevas, setNuevas] = useState<string[]>([]);
+  // Fotos: la misma galería de Publicar (portada marcada, subir desde el
+  // equipo, arrastrar para ordenar). Trabaja con URLs; al guardar, las
+  // que ya tenía la publicación vuelven a su id de Mercado Libre.
+  const [fotos, setFotos] = useState(() => datos.fotos.map((f) => f.url));
   const [avisoFotos, setAvisoFotos] = useState<Aviso>(null);
+  const idPorUrl = new Map(datos.fotos.map((f) => [f.url, f.id]));
 
   function guardar(accion: () => Promise<{ ok: boolean; aviso: string }>, setAviso: (a: Aviso) => void) {
     iniciar(async () => {
@@ -62,14 +66,6 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
       setAviso({ ok: r.ok, texto: r.aviso });
       if (r.ok) router.refresh();
     });
-  }
-
-  function mover(indice: number, hacia: number) {
-    const destino = indice + hacia;
-    if (destino < 0 || destino >= fotos.length) return;
-    const copia = [...fotos];
-    [copia[indice], copia[destino]] = [copia[destino], copia[indice]];
-    setFotos(copia);
   }
 
   return (
@@ -137,58 +133,25 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
 
       <section className={styles.bloqueEdicion} aria-label="Fotos">
         <p className={styles.seccion}>Fotos</p>
-        <p className={styles.notaNeutra}>La primera es la portada. Cambia el orden, quita o agrega por enlace (https) y guarda.</p>
-        <ul className={styles.fotosEdicion}>
-          {fotos.map((foto, i) => (
-            <li key={foto.id}>
-              <img src={foto.url} alt="" width={72} height={72} loading="lazy" className={styles.fotoEdicion} />
-              <span className={styles.accionesFoto}>
-                <button type="button" className={styles.expandir} aria-label="Mover antes" onClick={() => mover(i, -1)} disabled={i === 0}>
-                  ←
-                </button>
-                <button type="button" className={styles.expandir} aria-label="Mover después" onClick={() => mover(i, 1)} disabled={i === fotos.length - 1}>
-                  →
-                </button>
-                <button type="button" className={styles.expandir} aria-label="Quitar foto" onClick={() => setFotos(fotos.filter((f) => f.id !== foto.id))}>
-                  ✕
-                </button>
-              </span>
-            </li>
-          ))}
-          {nuevas.map((url) => (
-            <li key={url}>
-              <img src={url} alt="" width={72} height={72} loading="lazy" className={styles.fotoEdicion} />
-              <span className={styles.accionesFoto}>
-                <button type="button" className={styles.expandir} aria-label="Quitar foto nueva" onClick={() => setNuevas(nuevas.filter((u) => u !== url))}>
-                  ✕
-                </button>
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className={styles.buscador}>
-          <input className="zx-control" type="url" placeholder="https://…" value={nuevaUrl} onChange={(e) => setNuevaUrl(e.target.value)} aria-label="Enlace de una foto nueva" />
-          <Boton
-            type="button"
-            variante="secundario"
-            chico
-            disabled={!nuevaUrl.trim().startsWith("https://")}
-            onClick={() => {
-              const url = nuevaUrl.trim();
-              if (url.startsWith("https://") && !nuevas.includes(url)) setNuevas([...nuevas, url]);
-              setNuevaUrl("");
-            }}
-          >
-            Agregar
-          </Boton>
-        </div>
+        <p className={styles.notaNeutra}>
+          La primera es la portada. Arrastra las fotos para cambiar el orden, quita con ×, y agrega con + (o soltando archivos de tu equipo). Después guarda.
+        </p>
+        <GaleriaFotos urls={fotos} onChange={setFotos} cloudinaryConfigurado={datos.cloudinaryConfigurado} limiteFotos={null} conCanva={false} />
         <Boton
           type="button"
           chico
-          disabled={enviando || fotos.length + nuevas.length === 0}
+          disabled={enviando || fotos.length === 0}
           onClick={() =>
             guardar(
-              () => editarFotosAction({ cuentaMlId: datos.cuentaMlId, itemId: datos.itemId, orden: fotos.map((f) => f.id), nuevas }),
+              () =>
+                editarFotosAction({
+                  cuentaMlId: datos.cuentaMlId,
+                  itemId: datos.itemId,
+                  fotos: fotos.map((url) => {
+                    const id = idPorUrl.get(url);
+                    return id ? { id } : { url };
+                  }),
+                }),
               setAvisoFotos
             )
           }
