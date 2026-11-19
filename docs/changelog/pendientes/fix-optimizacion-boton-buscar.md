@@ -1,0 +1,1 @@
+- **fix-optimizacion-boton-buscar** — Optimización: «Buscar» pasa a ser el botón del sistema (`Boton`, primario y chico), igual que «Aplicar» del selector de cuenta (#480).
