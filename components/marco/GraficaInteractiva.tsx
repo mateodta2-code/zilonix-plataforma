@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // La parte del navegador de GraficaLineas: al pasar el mouse (o el
 // dedo) por la gráfica se marca el día más cercano y se muestra su
@@ -31,17 +31,44 @@ export function puntoBajoCursor(
   return { indice: cercano, izquierdaPx, haciaIzquierda: izquierdaPx > anchoCaja * 0.7 };
 }
 
+// Los puntos llegan calculados para un dibujo de `ancho` (600). Para que
+// la gráfica ocupe todo el ancho de la tarjeta, se mide el contenedor y
+// se reparten los x en ese ancho real (mismo margen a los lados); el alto
+// no cambia, así que los puntos siguen redondos (nunca se estira el SVG).
+export function escalarX(x: number, ancho: number, anchoReal: number, margen: number): number {
+  if (anchoReal <= 0 || ancho <= margen * 2) return x;
+  return margen + ((x - margen) * (anchoReal - margen * 2)) / (ancho - margen * 2);
+}
+
 export function GraficaInteractiva({
   titulo,
   ancho,
   alto,
-  puntos,
+  margen,
+  puntos: puntosBase,
 }: {
   titulo: string;
   ancho: number;
   alto: number;
+  margen: number;
   puntos: PuntoInteractivo[];
 }) {
+  const contenedor = useRef<HTMLDivElement>(null);
+  // null hasta medir (en el servidor y el primer pintado se ve como antes).
+  const [anchoReal, setAnchoReal] = useState<number | null>(null);
+  useEffect(() => {
+    const nodo = contenedor.current;
+    if (!nodo) return;
+    const medir = () => setAnchoReal(Math.round(nodo.getBoundingClientRect().width) || null);
+    medir();
+    if (typeof ResizeObserver === "undefined") return;
+    const observador = new ResizeObserver(medir);
+    observador.observe(nodo);
+    return () => observador.disconnect();
+  }, []);
+  const anchoDibujo = anchoReal ?? ancho;
+  const puntos = anchoReal === null ? puntosBase : puntosBase.map((p) => ({ ...p, x: escalarX(p.x, ancho, anchoReal, margen) }));
+
   // activo = índice del punto; izquierdaPx = dónde cae ese punto en
   // pantalla, para poner el globo justo ahí.
   const [activo, setActivo] = useState<{ indice: number; izquierdaPx: number; haciaIzquierda: boolean } | null>(null);
@@ -53,15 +80,15 @@ export function GraficaInteractiva({
   // coincide con el cursor (bug visto en staging).
   function alMover(evento: React.PointerEvent<SVGSVGElement>) {
     const caja = evento.currentTarget.getBoundingClientRect();
-    setActivo(puntoBajoCursor(evento.clientX - caja.left, caja.width, caja.height, ancho, alto, puntos));
+    setActivo(puntoBajoCursor(evento.clientX - caja.left, caja.width, caja.height, anchoDibujo, alto, puntos));
   }
 
   const p = activo === null ? null : puntos[activo.indice];
 
   return (
-    <div style={{ position: "relative" }}>
+    <div ref={contenedor} style={{ position: "relative" }}>
       <svg
-        viewBox={`0 0 ${ancho} ${alto}`}
+        viewBox={`0 0 ${anchoDibujo} ${alto}`}
         width="100%"
         height={alto}
         role="img"
