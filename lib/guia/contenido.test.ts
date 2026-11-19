@@ -31,10 +31,18 @@ describe("guía de uso", () => {
     expect(seccionDeRuta("/panel/meta")).toBeNull();
   });
 
+  it("Optimización y Configuración explican cómo conectar la IA", () => {
+    for (const id of ["optimizacion", "configuracion"]) {
+      const s = secciones.find((x) => x.id === id);
+      expect(s?.apartados?.[0].titulo, id).toMatch(/conectar la IA/);
+    }
+  });
+
   it("ninguna sección queda vacía", () => {
     for (const s of secciones) {
       expect(s.paraQue.length, s.id).toBeGreaterThan(10);
       expect(s.pasos.length, s.id).toBeGreaterThan(0);
+      for (const a of s.apartados ?? []) expect(a.pasos.length, `${s.id}: ${a.titulo}`).toBeGreaterThan(0);
     }
   });
 });
