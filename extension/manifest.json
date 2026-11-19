@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Zilonix Seller — Investigación",
   "short_name": "Zilonix Investigación",
-  "version": "0.3.45",
+  "version": "0.3.46",
   "background": {
     "service_worker": "background.js"
   },
@@ -132,7 +132,10 @@
         "*://web-production-af270.up.railway.app/panel/publicar*",
         "*://web-staging-d979.up.railway.app/panel/publicar*",
         "https://seller.zilonix.com/panel/investigacion*",
-        "https://seller.zilonix.com/panel/publicar*"
+        "https://seller.zilonix.com/panel/publicar*",
+        "*://web-production-af270.up.railway.app/panel/optimizacion*",
+        "*://web-staging-d979.up.railway.app/panel/optimizacion*",
+        "https://seller.zilonix.com/panel/optimizacion*"
       ],
       "js": [
         "marcador-zilonix.js"

@@ -299,3 +299,32 @@ describe('"importar-link" / "zilonix:importar-link-error" — issue #44 (anexo, 
     expect(mensajesPostMessage).toEqual([]);
   });
 });
+
+describe('"iniciar-competidores" / "zilonix:competidores-*" — Optimización, competidores fuera del catálogo', () => {
+  it('la página manda "iniciar-competidores" -> se reenvía a background.js como "zilonix:iniciar-competidores"', async () => {
+    const sendMessageImpl = vi.fn();
+    const { enviarDesdeLaPagina } = await cargarMarcadorFresco("https://web-staging-d979.up.railway.app", { pathname: "/panel/optimizacion", sendMessageImpl });
+    const payload = { termino: "tijera", pais: "CO", excluirItemId: "MCO1342632705" };
+    enviarDesdeLaPagina({ fuente: "zilonix-panel", tipo: "iniciar-competidores", payload });
+    expect(sendMessageImpl).toHaveBeenCalledWith({ tipo: "zilonix:iniciar-competidores", payload }, expect.any(Function));
+  });
+
+  it("el resultado y el error vuelven a la página con sus nombres externos", async () => {
+    const { enviarDesdeBackground, mensajesPostMessage } = await cargarMarcadorFresco("https://web-staging-d979.up.railway.app", { pathname: "/panel/optimizacion" });
+    enviarDesdeBackground({ tipo: "zilonix:competidores-resultado", payload: { excluirItemId: "MCO1", competidores: [] } });
+    enviarDesdeBackground({ tipo: "zilonix:competidores-error", payload: { excluirItemId: "MCO1", razon: "captcha" } });
+    expect(mensajesPostMessage).toEqual([
+      { fuente: "zilonix-extension", tipo: "competidores-leidos", payload: { excluirItemId: "MCO1", competidores: [] } },
+      { fuente: "zilonix-extension", tipo: "competidores-error", payload: { excluirItemId: "MCO1", razon: "captcha" } },
+    ]);
+  });
+
+  it("el manifest carga el puente en /panel/optimizacion de los 3 dominios de Seller", async () => {
+    const { readFileSync } = await import("node:fs");
+    const manifest = JSON.parse(readFileSync(new URL("./manifest.json", import.meta.url), "utf8")) as { content_scripts: Array<{ js: string[]; matches: string[] }> };
+    const puente = manifest.content_scripts.find((c) => c.js.includes("marcador-zilonix.js"))!;
+    for (const host of ["web-production-af270.up.railway.app", "web-staging-d979.up.railway.app", "seller.zilonix.com"]) {
+      expect(puente.matches.some((m) => m.includes(host) && m.endsWith("/panel/optimizacion*"))).toBe(true);
+    }
+  });
+});

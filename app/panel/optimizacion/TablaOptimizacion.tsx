@@ -229,7 +229,22 @@ export function TablaOptimizacion({
                   <CeldaTabla colSpan={encabezados(dias).length}>
                     <div className={styles.desglose}>
                       <p className={styles.seccion}>Competencia del mismo producto</p>
-                      <DesgloseCompetencia cuentaMlId={cuentaMlId} itemId={fila.id} siteId={siteId} />
+                      <DesgloseCompetencia
+                        cuentaMlId={cuentaMlId}
+                        itemId={fila.id}
+                        siteId={siteId}
+                        idioma={idioma}
+                        propia={{
+                          itemId: fila.id,
+                          titulo: fila.titulo,
+                          foto: fila.foto,
+                          enlace: fila.enlace,
+                          precio: fila.precio,
+                          precioOriginal: fila.precioOriginal,
+                          envioGratis: fila.envioGratis,
+                          full: fila.full,
+                        }}
+                      />
                       {m?.calidad && m.calidad.pendientes.length > 0 ? (
                         <>
                           <p className={styles.seccion}>Objetivos de calidad pendientes</p>

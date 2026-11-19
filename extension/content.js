@@ -557,20 +557,29 @@
   // caen solas a "Sin dato" (ya lo hacían) porque dias/ventasMesEst/
   // facturacionMesEst quedan en null cuando no hay vendidosEst de
   // dónde partir.
-  function bloqueAnalisisAproximado(datos) {
-    if (!APROX || !CAL) return ""; // sitio sin estos globales cargados (solo Mercado Libre los trae, ver manifest.json) — nunca pasa en Mercado Libre, así que "" acá nunca es el bug de arriba
-
+  // Optimización — mismo cálculo que el bloque "Análisis aprox." del
+  // panel, sin dibujar: lo reusa la lectura de competidores
+  // (leerCompetidor, abajo) para mandar exactamente lo que el panel
+  // muestra. null en sitios sin APROX/CAL (solo Mercado Libre los carga).
+  function calcularAnalisisAproximado(datos) {
+    if (!APROX || !CAL) return null;
     const vendidosEst =
       typeof datos.vendidos === "number"
         ? APROX.vendidosEstimados(datos.vendidos, { exacto: datos.vendidosExacto === true, esFull: datos.esFull === true }, CAL)
         : null;
-
     const dias =
       vendidosEst != null
         ? APROX.antiguedadDias({ dateCreated: datos.dateCreated, mlId: datos.itemId, tipo: tipoIdDePagina(), ahoraMs: Date.now() }, CAL)
         : null;
     const ventasMesEst = vendidosEst != null ? APROX.ventasMes(vendidosEst, dias) : null;
     const facturacionMesEst = ventasMesEst != null ? APROX.facturacionMes(ventasMesEst, datos.precio) : null;
+    return { vendidosEst, dias, ventasMesEst, facturacionMesEst };
+  }
+
+  function bloqueAnalisisAproximado(datos) {
+    const analisis = calcularAnalisisAproximado(datos);
+    if (!analisis) return ""; // sitio sin estos globales cargados (solo Mercado Libre los trae, ver manifest.json) — nunca pasa en Mercado Libre, así que "" acá nunca es el bug de arriba
+    const { vendidosEst, dias, ventasMesEst, facturacionMesEst } = analisis;
 
     const etiquetaMl = datos.vendidosExacto === false ? ` <span class="zx-fila__valor--chip">+${textoCampo(datos.vendidos)} en ML</span>` : "";
 
@@ -1201,6 +1210,18 @@
       return false;
     }
   }
+  // Optimización — marca puesta por background.js (conMarcadorCompetidor)
+  // en cada ficha que abre "Buscar 10 competidores". Mismo criterio que
+  // _zilonix_resena: la abrió la extensión, no la persona, así que no
+  // alimenta Seguimiento y no dibuja el panel.
+  function esPaginaDeLecturaCompetidor() {
+    try {
+      return new URL(location.href).searchParams.get("_zilonix_competidor") === "1";
+    } catch {
+      return false;
+    }
+  }
+
   // Issue #225 — aviso de captcha, UN solo uso por carga de página —
   // a propósito NUNCA bloquea que, más adelante en la MISMA carga, se
   // mande el resultado real una vez que el captcha se resuelva (ese
@@ -1615,7 +1636,8 @@
     }
     if (!tipo) return; // ni producto ni listado reconocido — nada que leer ni dibujar
 
-    const dibujarPanel = Boolean(forzado) || debeDibujarPanel(interruptorEncendido, leerPanelCerrado(storageDeSesion()));
+    const dibujarPanel =
+      Boolean(forzado) || (!esPaginaDeLecturaCompetidor() && debeDibujarPanel(interruptorEncendido, leerPanelCerrado(storageDeSesion())));
     const panel = dibujarPanel ? obtenerOCrearPanel() : null;
 
     try {
@@ -1646,7 +1668,7 @@
         // panel sin dibujarse (interruptor apagado o pestaña cerrada):
         // "Completar vendidos" nunca depende de que el panel esté a
         // la vista.
-        if (!esPaginaDeEscaneoAutomatico() && !esPaginaDeLecturaResenas()) {
+        if (!esPaginaDeEscaneoAutomatico() && !esPaginaDeLecturaResenas() && !esPaginaDeLecturaCompetidor()) {
           enviarInventarioFichaAZilonix(datos);
         }
         // Issue #225 — se intenta SIEMPRE que haya un itemId confirmado
@@ -1696,7 +1718,7 @@
         // Issue #251 (revisión de Pablo, punto 4) — mismo criterio que
         // el bloque "producto", arriba — y, desde esta revisión,
         // también independiente de `dibujarPanel`.
-        if (!esPaginaDeEscaneoAutomatico() && !esPaginaDeLecturaResenas()) {
+        if (!esPaginaDeEscaneoAutomatico() && !esPaginaDeLecturaResenas() && !esPaginaDeLecturaCompetidor()) {
           enviarPublicacionesTiendaAZilonix(datosTienda);
         }
       }
@@ -1853,6 +1875,75 @@
     });
   }
 
+  function enviarResultadoLeerCompetidor(payload) {
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    try {
+      chrome.runtime.sendMessage({ tipo: "zilonix:resultado-leer-competidor", payload }, () => void chrome.runtime.lastError);
+    } catch {
+      // Contexto de la extensión invalidado — nunca rompe nada.
+    }
+  }
+
+  // Optimización — background.js lo pide por el id de esta pestaña
+  // (la que abrió "Buscar 10 competidores"). Lee lo mismo que el panel
+  // muestra al analizar un producto (leerProducto + análisis aprox.),
+  // más la cantidad de fotos y si tiene descripción (galería). Vacío si
+  // la página todavía no es una ficha (redirect): background espera la
+  // siguiente carga. Nunca reintenta un login/captcha.
+  function leerCompetidor() {
+    sacarPanelSiExiste();
+    if (esPaginaDeCuentasMl()) {
+      enviarResultadoLeerCompetidor({ captcha: true });
+      return;
+    }
+    let datos = null;
+    try {
+      if (lector.tipoDePagina(location.href, document) === "producto") datos = lector.leerProducto(document);
+    } catch {
+      datos = null;
+    }
+    if (!datos || !datos.titulo) {
+      enviarResultadoLeerCompetidor({});
+      return;
+    }
+    let galeria = null;
+    if (typeof lector.leerGaleriaYDescripcion === "function") {
+      try {
+        galeria = lector.leerGaleriaYDescripcion(document);
+      } catch {
+        galeria = null;
+      }
+    }
+    const imagenes = galeria && Array.isArray(galeria.imagenes) ? galeria.imagenes : null;
+    const analisis = calcularAnalisisAproximado(datos);
+    enviarResultadoLeerCompetidor({
+      datos: {
+        titulo: datos.titulo,
+        precio: datos.precio ?? null,
+        precioAnterior: datos.precioAnterior ?? null,
+        descuentoPorcentaje: datos.descuentoPorcentaje ?? null,
+        vendidos: datos.vendidos ?? null,
+        vendidosExacto: typeof datos.vendidosExacto === "boolean" ? datos.vendidosExacto : null,
+        vendedor: datos.vendedor ?? null,
+        calificacion: datos.calificacion ?? null,
+        numeroOpiniones: datos.numeroOpiniones ?? null,
+        esCatalogo: typeof datos.esCatalogo === "boolean" ? datos.esCatalogo : null,
+        esFull: typeof datos.esFull === "boolean" ? datos.esFull : null,
+        envioGratis: typeof datos.envioGratis === "boolean" ? datos.envioGratis : null,
+        itemId: datos.itemId ?? null,
+        inventario: datos.inventarioMaximo ?? null,
+        inventarioAproximado: Boolean(datos.inventarioMaximoAproximado),
+        fotos: imagenes ? imagenes.length : null,
+        foto: imagenes && imagenes.length > 0 ? imagenes[0] : null,
+        descripcion: galeria ? Boolean(galeria.descripcion) : null,
+        vendidosEstimados: analisis && analisis.vendidosEst != null ? Math.round(analisis.vendidosEst) : null,
+        antiguedadDias: analisis && analisis.dias != null ? Math.round(analisis.dias) : null,
+        ventasMes: analisis && analisis.ventasMesEst != null ? Math.round(analisis.ventasMesEst) : null,
+        facturacionMes: analisis && analisis.facturacionMesEst != null ? Math.round(analisis.facturacionMesEst) : null,
+      },
+    });
+  }
+
   // Issue #273 — registrados ANTES de leerInterruptorInicial (abajo) a
   // propósito: un clic en el ícono, o un cambio del interruptor desde
   // OTRA pestaña, tienen que funcionar aunque la lectura inicial de
@@ -1866,6 +1957,7 @@
       if (!esMensajeDePropiaExtension(remitente, chrome.runtime.id)) return;
       if (mensaje && mensaje.tipo === "zilonix:mostrar-panel") mostrarPanelPorIcono();
       if (mensaje && mensaje.tipo === "zilonix:leer-para-importar") setTimeout(leerParaImportar, RETARDO_REESCANEO_MS);
+      if (mensaje && mensaje.tipo === "zilonix:leer-competidor") setTimeout(leerCompetidor, RETARDO_REESCANEO_MS);
     });
   }
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {
@@ -1928,6 +2020,7 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
       bloqueAnalisisAproximado,
+      calcularAnalisisAproximado,
       tipoIdDePagina,
       valorInterruptorDesdeStorage,
       debeDibujarPanel,

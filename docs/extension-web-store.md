@@ -83,9 +83,9 @@ En todos, la extensión solo corre en la página que el usuario tiene abierta y 
 | `aliexpress.com`, `aliexpress.us` | Igual: comparar el producto abierto como fuente de abastecimiento. |
 | `shein.com`, `shein.com.co` | Igual: comparar el producto abierto como fuente de abastecimiento. |
 | `alibaba.com` | Igual: comparar el producto abierto con proveedores mayoristas. |
-| `seller.zilonix.com`, `web-staging-d979.up.railway.app` y `web-production-af270.up.railway.app` (solo `/panel/investigacion*` y `/panel/publicar*`) | Son las páginas de Zilonix Seller. Ahí la extensión marca que está instalada y entrega al panel del usuario los datos leídos. Staging es el ambiente de pruebas; la dirección vieja de Railway se conserva solo por compatibilidad. |
+| `seller.zilonix.com`, `web-staging-d979.up.railway.app` y `web-production-af270.up.railway.app` (solo `/panel/investigacion*`, `/panel/publicar*` y `/panel/optimizacion*`) | Son las páginas de Zilonix Seller. Ahí la extensión marca que está instalada y entrega al panel del usuario los datos leídos. Staging es el ambiente de pruebas; la dirección vieja de Railway se conserva solo por compatibilidad. |
 
-> Nota: producción es `https://seller.zilonix.com` (v0.3.45). Si cambia un dominio hay que actualizarlo en `manifest.json`, `extension/config.js`, `extension/background.js`, `extension/marcador-zilonix.js` y aquí.
+> Nota: producción es `https://seller.zilonix.com` (v0.3.46). Si cambia un dominio hay que actualizarlo en `manifest.json`, `extension/config.js`, `extension/background.js`, `extension/marcador-zilonix.js` y aquí.
 
 ### Recursos accesibles (`web_accessible_resources`)
 El archivo `panel.css` se expone solo en los dominios listados arriba, para dar estilo al panel flotante que la extensión muestra en esas páginas.

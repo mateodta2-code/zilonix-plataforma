@@ -7,6 +7,7 @@ import { formatearMoneda } from "@/lib/ml/sitios";
 import { rotuloReputacion, type FilaComparacion } from "@/lib/optimizacion/competencia";
 import { rotuloTipoPublicacion } from "@/lib/optimizacion/textos";
 import { competenciaPublicacionAction, type ResultadoCompetencia } from "./actions";
+import { CompetidoresExtension, type PropiaCompetidores } from "./CompetidoresExtension";
 import styles from "./page.module.css";
 
 const ENCABEZADOS = [
@@ -27,7 +28,21 @@ function siNo(valor: boolean | null): string {
 
 // Fase 4 — los vendedores del mismo producto de catálogo, contra la
 // publicación. Se pide al desplegar la fila (son varias llamadas a ML).
-export function DesgloseCompetencia({ cuentaMlId, itemId, siteId }: { cuentaMlId: string; itemId: string; siteId: string }) {
+// Fuera del catálogo, la comparación la hace la extensión
+// (CompetidoresExtension).
+export function DesgloseCompetencia({
+  cuentaMlId,
+  itemId,
+  siteId,
+  idioma,
+  propia,
+}: {
+  cuentaMlId: string;
+  itemId: string;
+  siteId: string;
+  idioma: string;
+  propia: PropiaCompetidores;
+}) {
   const [resultado, setResultado] = useState<ResultadoCompetencia | null>(null);
 
   useEffect(() => {
@@ -46,14 +61,7 @@ export function DesgloseCompetencia({ cuentaMlId, itemId, siteId }: { cuentaMlId
 
   if (resultado === null) return <p className={styles.nota}>Buscando a los vendedores del mismo producto…</p>;
   if (!resultado.ok) return <p className={styles.avisoError}>{resultado.aviso}</p>;
-  if (!resultado.catalogo) {
-    return (
-      <p className={styles.nota}>
-        Esta publicación no está en el catálogo de Mercado Libre. La comparación con publicaciones del mismo producto fuera del catálogo (por código de barras o
-        marca y modelo) llegará con la extensión.
-      </p>
-    );
-  }
+  if (!resultado.catalogo) return <CompetidoresExtension propia={propia} siteId={siteId} idioma={idioma} />;
   if (resultado.competidores.length === 0) return <p className={styles.nota}>Nadie más vende este producto en el catálogo. ¡Vas solo!</p>;
 
   const plata = (v: number | null) => (v === null ? "—" : formatearMoneda(v, siteId));
