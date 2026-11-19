@@ -31,6 +31,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/finanzas/proveedores/actions.ts",
   "app/panel/finanzas/proveedores/[id]/page.tsx",
   "app/panel/finanzas/maestra-sku/page.tsx",
+  "app/panel/finanzas/inventario/page.tsx",
   "app/panel/finanzas/maestra-sku/actions.ts",
   "app/panel/finanzas/maestra-sku/editar/page.tsx",
   "app/panel/finanzas/maestra-sku/alertas/page.tsx",

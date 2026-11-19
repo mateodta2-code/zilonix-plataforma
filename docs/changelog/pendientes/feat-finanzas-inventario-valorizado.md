@@ -1,0 +1,3 @@
+### Agregado
+
+- Finanzas → **Inventario valorizado** (`/panel/finanzas/inventario`, permiso `finanzas.consultar`): cuánta plata hay en mercancía. Tarjetas con el total, el valor en bodegas propias y 3PL, en Full (con la fecha del último movimiento, porque ese stock se carga a mano) y en Falabella («Sin datos todavía»), más los SKU sin costo. Tabla por producto y ubicación con filtros de tienda y ubicación. Las unidades (disponible + reservado) se valorizan con la Tabla maestra de SKU, con la misma regla de combos X2/X3; un SKU sin costo va como «Falta costo» y no suma. Sección «Mercancía en camino» con lo pedido y aún no recibido de las órdenes de compra abiertas o parciales, al costo de la orden o, si no lo trae, al de la maestra. Sin migración. (Refs #422)

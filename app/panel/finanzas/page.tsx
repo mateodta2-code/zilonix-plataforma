@@ -148,6 +148,10 @@ export default async function FinanzasPage() {
         <BotonLink href="/panel/finanzas/maestra-sku" variante="secundario" chico>
           Tabla maestra de SKU
         </BotonLink>{" "}
+        {/* Issue #422 — cuánta plata hay en mercancía. */}
+        <BotonLink href="/panel/finanzas/inventario" variante="secundario" chico>
+          Inventario valorizado
+        </BotonLink>{" "}
         <BotonLink href="/panel/finanzas/proveedores" variante="secundario" chico>
           Proveedores y transportadores
         </BotonLink>{" "}
