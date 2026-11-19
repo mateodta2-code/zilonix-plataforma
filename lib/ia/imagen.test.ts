@@ -3,7 +3,9 @@ import {
   descargarFotoBase,
   esUrlFotoBasePermitida,
   generarImagenDesdeFoto,
+  COMPOSICIONES_PORTADA,
   leerTipoImagenIA,
+  leerVariante,
   limpiarIndicaciones,
   MODELO_IMAGEN_GOOGLE,
   MODELO_IMAGEN_OPENAI,
@@ -26,12 +28,26 @@ afterEach(() => {
 });
 
 describe("qué se le pide a la IA", () => {
-  it("portada: mismo producto, fondo blanco, sin textos", () => {
-    const p = promptImagenIA("portada", "Tijera ingletiadora", "");
-    expect(p).toMatch(/fondo blanco puro/);
-    expect(p).toMatch(/Sin textos/);
+  it("portada de venta: mismo producto, fondo blanco, escena de uso, lo que incluye, sin textos", () => {
+    const p = promptImagenIA("portada", "Tijera ingletiadora", "incluye 2 cuchillas de repuesto");
+    expect(p).toMatch(/blanco puro #FFFFFF/);
+    expect(p).toMatch(/PROHIBIDO: textos/);
+    expect(p).toMatch(/afirmaciones de salud/);
     expect(p).toMatch(/EXACTAMENTE el mismo producto/);
+    expect(p).toMatch(/escena secundaria real/);
+    expect(p).toMatch(/no agregues nada que no esté incluido/);
     expect(p).toContain("Tijera ingletiadora");
+    expect(p).toContain("incluye 2 cuchillas de repuesto");
+  });
+
+  it("cada variante de portada pide otra composición (10 distintas)", () => {
+    expect(new Set(COMPOSICIONES_PORTADA).size).toBe(10);
+    const prompts = COMPOSICIONES_PORTADA.map((_, i) => promptImagenIA("portada", null, "", i));
+    expect(new Set(prompts).size).toBe(10);
+    expect(prompts[3]).toContain(COMPOSICIONES_PORTADA[3]);
+    expect(leerVariante(12)).toBe(2);
+    expect(leerVariante(-1)).toBe(0);
+    expect(leerVariante("3")).toBe(0);
   });
 
   it("informativa: textos en español, sin inventar promociones; usa las indicaciones", () => {
@@ -45,7 +61,7 @@ describe("qué se le pide a la IA", () => {
     expect(leerTipoImagenIA("informativa")).toBe("informativa");
     expect(leerTipoImagenIA("otra")).toBe("portada");
     expect(limpiarIndicaciones("  a\n\nb  ")).toBe("a b");
-    expect(limpiarIndicaciones("x".repeat(500))).toHaveLength(300);
+    expect(limpiarIndicaciones("x".repeat(900))).toHaveLength(600);
     expect(limpiarIndicaciones(42)).toBe("");
   });
 
@@ -89,7 +105,7 @@ describe("generarImagenDesdeFoto", () => {
   it("OpenAI: /v1/images/edits multipart con gpt-image y b64_json", async () => {
     const f = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] }), { status: 200 }));
     globalThis.fetch = f as unknown as typeof fetch;
-    const r = await generarImagenDesdeFoto(conexion("openai"), base, "prompt");
+    const r = await generarImagenDesdeFoto(conexion("openai"), [base], "prompt");
     expect(r.tipo).toBe("image/png");
     const [url, init] = f.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.openai.com/v1/images/edits");
@@ -100,12 +116,21 @@ describe("generarImagenDesdeFoto", () => {
     expect(form.get("image")).toBeInstanceOf(Blob);
   });
 
+  it("OpenAI con varias fotos de referencia: image[] (máximo 3)", async () => {
+    const f = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] }), { status: 200 }));
+    globalThis.fetch = f as unknown as typeof fetch;
+    await generarImagenDesdeFoto(conexion("openai"), [base, base, base, base], "prompt");
+    const form = (f.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+    expect(form.getAll("image[]")).toHaveLength(3);
+    expect(form.get("image")).toBeNull();
+  });
+
   it("Google: generateContent con la foto en inline_data; lee inlineData de la respuesta", async () => {
     const f = vi
       .fn()
       .mockResolvedValue(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "listo" }, { inlineData: { mimeType: "image/png", data: PNG.toString("base64") } }] } }] }), { status: 200 }));
     globalThis.fetch = f as unknown as typeof fetch;
-    const r = await generarImagenDesdeFoto(conexion("google"), base, "prompt");
+    const r = await generarImagenDesdeFoto(conexion("google"), [base, base], "prompt");
     expect(r.tipo).toBe("image/png");
     const [url, init] = f.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO_IMAGEN_GOOGLE}:generateContent`);
@@ -113,15 +138,17 @@ describe("generarImagenDesdeFoto", () => {
     expect((init.headers as Record<string, string>)["x-goog-api-key"]).toBe("clave-secreta");
     const cuerpo = JSON.parse(init.body as string) as { contents: { parts: { inline_data?: { mime_type: string } }[] }[] };
     expect(cuerpo.contents[0].parts[1].inline_data?.mime_type).toBe("image/jpeg");
+    expect(cuerpo.contents[0].parts).toHaveLength(3);
   });
 
   it("errores legibles: clave rechazada, sin imagen, proveedor que no genera, respuesta que no es imagen", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 401 })) as unknown as typeof fetch;
-    await expect(generarImagenDesdeFoto(conexion("openai"), base, "p")).rejects.toThrow(/rechazó la clave/);
+    await expect(generarImagenDesdeFoto(conexion("openai"), [base], "p")).rejects.toThrow(/rechazó la clave/);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "no" }] } }] }), { status: 200 })) as unknown as typeof fetch;
-    await expect(generarImagenDesdeFoto(conexion("google"), base, "p")).rejects.toThrow(/no devolvió una imagen/);
-    await expect(generarImagenDesdeFoto(conexion("anthropic"), base, "p")).rejects.toThrow(/no genera imágenes/);
+    await expect(generarImagenDesdeFoto(conexion("google"), [base], "p")).rejects.toThrow(/no devolvió una imagen/);
+    await expect(generarImagenDesdeFoto(conexion("anthropic"), [base], "p")).rejects.toThrow(/no genera imágenes/);
+    await expect(generarImagenDesdeFoto(conexion("openai"), [], "p")).rejects.toThrow(/Falta la foto base/);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: Buffer.from("hola").toString("base64") }] }), { status: 200 })) as unknown as typeof fetch;
-    await expect(generarImagenDesdeFoto(conexion("openai"), base, "p")).rejects.toThrow(/no es una imagen válida/);
+    await expect(generarImagenDesdeFoto(conexion("openai"), [base], "p")).rejects.toThrow(/no es una imagen válida/);
   });
 });
