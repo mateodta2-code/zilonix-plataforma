@@ -59,7 +59,7 @@ export function GraficaLineas({
   return (
     <div>
       <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13 }}>{titulo}</p>
-      <GraficaInteractiva titulo={titulo} ancho={ANCHO} alto={ALTO} puntos={coordenadas} />
+      <GraficaInteractiva titulo={titulo} ancho={ANCHO} alto={ALTO} margen={MARGEN} puntos={coordenadas} />
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--texto-suave)" }}>
         <span>{conDato[0].etiqueta}</span>
         <span>{conDato[conDato.length - 1].etiqueta}</span>
