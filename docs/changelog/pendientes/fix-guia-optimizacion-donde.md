@@ -1,0 +1,1 @@
+- **fix-guia-optimizacion-donde** — Guía de Optimización: dice dónde está «Crear imagen con IA» (en «Ver detalle →», debajo de las fotos), qué significa el aviso «conecta OpenAI o Google» y menciona el enlace «Ver publicación en Mercado Libre ↗» y el globo de las gráficas.
