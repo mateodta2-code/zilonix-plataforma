@@ -165,7 +165,7 @@ describe("leerLiberacionPago", () => {
 
   it("un 404 es sin_dato, un id inválido no llama y un 429 se propaga", async () => {
     const noExiste = (async () => ({ ok: false, status: 404, error: { code: null, message: null } })) as LectorMl;
-    expect(await leerLiberacionPago(noExiste, "1", "cuenta-1")).toEqual({ tipo: "sin_dato" });
+    expect(await leerLiberacionPago(noExiste, "1", "cuenta-1")).toEqual({ tipo: "sin_dato", status: 404 });
     expect(await leerLiberacionPago(noExiste, "abc", "cuenta-1")).toEqual({ tipo: "sin_dato" });
     const limite = (async () => {
       throw new LimiteMercadoLibreError(null);
