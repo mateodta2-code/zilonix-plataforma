@@ -21,5 +21,30 @@
     - Sin IA, se muestra el enlace a Administración → Conectar IA.
     - Sin límite de uso (decisión de Mateo, 19-nov). Solo hay un freno de concurrencia: máximo 4 llamadas de texto al mismo tiempo por empresa; las demás esperan en fila y arrancan solas, nunca se rechazan (`lib/publicaciones/freno.ts`, en memoria).
   - **Guía:** la de Publicar explica «Crear con IA» paso a paso, y «Cómo conectar la IA» incluye asignar la IA al módulo.
-- **PR2 (pendiente, con migración — se mostrará el SQL a Mateo antes de crearla):** imágenes (catálogo de tipos, estilos «Experto ML» y «Prompt Zilonix», paralelo de a 2, regenerar una, diagnóstico de Mercado Libre, agregar a la galería, historial por empresa y freno en base).
+- **feat/publicaciones-generador-ia · PR2 (imágenes, migración 0034 aprobada por Mateo el 19-nov-2026)** — **Publicar → zona de fotos → «Generar con IA»**, junto a «Subir mis fotos», que sigue igual. Las imágenes usan la IA del módulo «generacion_imagenes» de Conectar IA, que deja de estar «próximamente». Solo OpenAI y Google generan imágenes; con Claude sale el aviso claro.
+  - **Tres estilos** (`lib/ia/prompts/`):
+    - **«Portadas Zilonix»** y **«Contenido Zilonix»** usan los textos de Mateo copiados TAL CUAL. Una prueba los compara con sus fixtures, y los ajustes de Zilonix Seller van al final, nunca editando el texto.
+    - **«Estilo experto ML»** usa texto propio y un catálogo de 11 tipos, con 6 marcados por defecto.
+    - **Foto sobre blanco:** opcional, apagada por defecto.
+  - **Portadas:**
+    - Una por cada cuenta destino, todas distintas: 14 composiciones × 8 escenas (`asignarComposiciones`, `otraComposicion`).
+    - Cada una queda como portada de su cuenta.
+  - **Contenido:**
+    - Los 10 tipos, en el orden de su texto.
+    - **Imagen 9 = «Opiniones reales» (decisión de Mateo):** solo usa opiniones verdaderas que pega el vendedor; la IA nunca escribe reseñas, y sin opiniones esa imagen se salta.
+    - El prompt final copiable es la plantilla del punto 6 del texto de Mateo.
+    - El copy se revisa con `revisarCopySeguro` en pantalla y en el servidor; la regla de «curar» ahora cubre conjugaciones como «curó».
+  - **Flujo:**
+    - Propuestas sin costo («Preparar»), y luego «Crear», «Ajustar», «Regenerar» o «Crear todas las aprobadas».
+    - Las elegidas pasan a la misma galería con «Agregar a mis fotos», respetando el máximo de fotos de la categoría.
+    - Se pueden descargar.
+  - **Tamaño:** 500 × 500 con Cloudinary al subir (`TRANSFORMACION_500`, `c_pad`), sin librería nueva. La carpeta es `zilonix-publicaciones-ia`.
+  - **Diagnóstico de Mercado Libre** (`diagnosticarImagenMl`, `thumbnail` para la foto 1 y `other` para las demás): solo informa. En staging respondió 429, así que hoy sale «No se pudo validar la imagen» y nunca bloquea.
+  - **Historial y cola** (`lib/publicaciones/cola.ts`, migración `0034_slim_hiroim`):
+    - Tablas `publicaciones_ia_trabajos` y `publicaciones_ia_imagenes`, con RLS por empresa y sin DELETE.
+    - Máximo 2 imágenes «generando» por empresa, con candado por empresa; la tercera queda en cola y la pantalla la vuelve a pedir sola.
+    - Una imagen atascada más de 5 minutos pasa a «error».
+    - Sin límite por hora, día ni mes. Nunca se guarda la llave ni el prompt completo.
+  - **Staging:** la migración se aplica sola al desplegar. **Producción:** Mateo aplica la 0034 y `db/rls-setup.sql` a mano en el release.
+  - **Guía:** la de Publicar explica «Generar imágenes con IA».
 - **PR3 (después, no ahora):** manual de marca guardado por empresa y quitar fondo con la llave propia de la empresa (sin servicio pago de plataforma sin el sí de Mateo).

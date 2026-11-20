@@ -187,7 +187,7 @@ function Modulos({ conexion, onCambio }: { conexion: ConexionIAVista; onCambio: 
             onChange={(e) => guardar(e.target.checked ? [...marcados, m.id] : marcados.filter((x) => x !== m.id))}
           />
           {m.etiqueta}
-          {"proximamente" in m && m.proximamente && <span className={styles.nota}> — Próximamente: aún no genera imágenes; solo dejas elegida la IA</span>}
+          {(m as { proximamente?: boolean }).proximamente === true && <span className={styles.nota}> — Próximamente: aún no genera imágenes; solo dejas elegida la IA</span>}
         </label>
       ))}
       <span className={styles.nota}>

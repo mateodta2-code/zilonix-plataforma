@@ -61,13 +61,25 @@ export class CloudinaryRechazoError extends Error {
 // máximo 1600px, calidad automática, nunca agranda una foto más chica)
 // — Cloudinary guarda YA comprimida la imagen como el archivo
 // principal, no una copia derivada aparte.
-export async function subirACloudinary(buffer: Buffer | ArrayBuffer, filename: string, contentType: string, carpeta = "zilonix-plataforma"): Promise<{ url: string }> {
+// Imágenes de «Crear con IA» en Publicar: cuadradas de 500 × 500 (decisión
+// de Mateo, 19-nov-2026). Cloudinary las reescala al subir: no hace falta
+// una librería de imágenes en el servidor. Las de la IA ya llegan
+// cuadradas; c_pad con fondo blanco nunca recorta el producto.
+export const TRANSFORMACION_500 = "c_pad,w_500,h_500,b_white,q_auto";
+const TRANSFORMACION_POR_DEFECTO = "q_auto,w_1600,c_limit";
+
+export async function subirACloudinary(
+  buffer: Buffer | ArrayBuffer,
+  filename: string,
+  contentType: string,
+  carpeta = "zilonix-plataforma",
+  transformacion: string = TRANSFORMACION_POR_DEFECTO
+): Promise<{ url: string }> {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiKey = process.env.CLOUDINARY_API_KEY;
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
   if (!cloudName || !apiKey || !apiSecret) throw new CloudinaryNoConfiguradoError();
 
-  const transformacion = "q_auto,w_1600,c_limit";
   const timestamp = Math.floor(Date.now() / 1000);
   const signature = firmarCloudinary({ timestamp, folder: carpeta, transformation: transformacion }, apiSecret);
 

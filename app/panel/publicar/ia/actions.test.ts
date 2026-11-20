@@ -144,7 +144,10 @@ describe("nunca la IA de la plataforma", () => {
     const archivos = [
       ...readdirSync(join(raiz, "lib/publicaciones")).map((a) => join(raiz, "lib/publicaciones", a)),
       join(raiz, "app/panel/publicar/ia/actions.ts"),
+      join(raiz, "app/panel/publicar/ia/imagenes/actions.ts"),
       join(raiz, "app/panel/publicar/CrearConIA.tsx"),
+      join(raiz, "app/panel/publicar/GenerarConIA.tsx"),
+      ...readdirSync(join(raiz, "lib/ia/prompts")).filter((a) => a.endsWith(".ts")).map((a) => join(raiz, "lib/ia/prompts", a)),
     ].filter((a) => !a.endsWith(".test.ts"));
     for (const a of archivos) expect(readFileSync(a, "utf8"), a).not.toMatch(/ANTHROPIC_API_KEY|process\.env/);
   });

@@ -227,3 +227,69 @@
   gap: 4px;
   margin-right: 10px;
 }
+
+/* «Generar con IA» (PR2, imágenes). */
+.filtroIA {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+
+.tiposIA {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+}
+
+.tipoIA {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.tarjetasIA {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.tarjetaIA {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 12px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-boton);
+}
+
+.miniaturaIA {
+  width: 180px;
+  height: 180px;
+  object-fit: contain;
+  border-radius: var(--radio-boton);
+  background: var(--fondo-foto);
+}
+
+.promptIA {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.promptIA summary {
+  cursor: pointer;
+  color: var(--acento-fuerte);
+  font-weight: 600;
+}
+
+.promptIA p {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.enlaceIA {
+  font-size: 13px;
+  color: var(--acento-fuerte);
+}

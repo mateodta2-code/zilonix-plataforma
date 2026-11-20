@@ -62,3 +62,11 @@ describe("contenido de la imagen", () => {
     expect(promptImagenContenido({ ...LISTO, tipo: "comparacion" }, null)).toMatch(/«Este producto» y «Otras opciones»/);
   });
 });
+
+describe("palabras prohibidas conjugadas", () => {
+  it("«me curó», «curaron», «curativo» también cuentan", () => {
+    expect(palabrasProhibidas(["Me curó la piel"])).toEqual(["cura / curar"]);
+    expect(palabrasProhibidas(["Las curaron rápido"])).toEqual(["cura / curar"]);
+    expect(palabrasProhibidas(["Curso de cocina", "Curvas suaves"])).toEqual([]);
+  });
+});

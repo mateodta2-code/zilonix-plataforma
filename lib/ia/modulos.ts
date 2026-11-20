@@ -10,9 +10,9 @@ export const MODULOS_IA = [
   { id: "publicidad", etiqueta: "Publicidad" },
   // Lo usará el generador de imágenes de Publicar.
   { id: "publicaciones", etiqueta: "Publicaciones" },
-  // Solo espacio de asignación: la generación real de imágenes NO está
-  // construida en esta rama (la conexión hoy solo maneja texto).
-  { id: "generacion_imagenes", etiqueta: "Generación de imágenes", proximamente: true },
+  // Imágenes de «Crear con IA» en Publicar (PR2). Solo OpenAI y Google
+  // generan imágenes desde fotos (lib/ia/imagen.ts).
+  { id: "generacion_imagenes", etiqueta: "Generación de imágenes" },
 ] as const satisfies readonly { id: string; etiqueta: string; proximamente?: boolean }[];
 
 export type ModuloIA = (typeof MODULOS_IA)[number]["id"];

@@ -1,4 +1,7 @@
 :root {
+  /* Fondo de las vistas previas de fotos de producto: blanco en los dos
+     temas, porque así juzga Mercado Libre la foto (fondo #FFFFFF). */
+  --fondo-foto: #ffffff;
   /* Bug real reportado en Pedidos: los <select> (Estado, Ordenar por)
      mostraban las opciones del desplegable con texto blanco sobre
      fondo blanco, ilegibles salvo la resaltada. Causa: "light dark"

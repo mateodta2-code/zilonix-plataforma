@@ -239,6 +239,13 @@
       "when": 1795137955851,
       "tag": "0033_handy_eddie_brock",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795144218976,
+      "tag": "0034_slim_hiroim",
+      "breakpoints": true
     }
   ]
 }

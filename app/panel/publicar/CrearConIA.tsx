@@ -44,11 +44,14 @@ export function CrearConIA({
   fotos,
   onUsarTitulo,
   onUsarDescripcion,
+  onFicha,
 }: {
   cuentas: Cuenta[];
   fotos: string[];
   onUsarTitulo: (cuentaId: string, titulo: string) => void;
   onUsarDescripcion: (cuentaId: string, descripcion: string) => void;
+  // La ficha confirmada (o null si se desconfirma): la usa «Generar con IA».
+  onFicha?: (dato: { ficha: Ficha; categoriaId: string | null } | null) => void;
 }) {
   const [cuentaId, setCuentaId] = useState(cuentas[0]?.id ?? "");
   const [info, setInfo] = useState("");
@@ -89,6 +92,7 @@ export function CrearConIA({
       if (!r.ok) return;
       setFicha(r.ficha);
       setCategoria(r.categoria);
+      onFicha?.(null);
       setLeyoFotos(r.leyoFotos);
       setConfirmada(false);
       setTitulos(null);
@@ -102,6 +106,7 @@ export function CrearConIA({
     const valor = esLista ? texto.split("\n") : texto.trim() ? texto : null;
     setFicha({ ...ficha, [clave]: { valor, origen: "vendedor" } } as Ficha);
     setConfirmada(false);
+    onFicha?.(null);
   }
 
   function aceptar(clave: ClaveFicha) {
@@ -119,6 +124,7 @@ export function CrearConIA({
     }
     setFicha(limpia as Ficha);
     setConfirmada(true);
+    onFicha?.({ ficha: limpia as Ficha, categoriaId: categoria?.id ?? null });
   }
 
   function pedirTitulos() {

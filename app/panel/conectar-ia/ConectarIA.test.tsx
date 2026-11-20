@@ -18,7 +18,8 @@ describe("ConectarIA (pantalla)", () => {
     expect(screen.getAllByText(/Guardada/).length).toBe(2);
     expect(screen.getByText("Principal")).toBeTruthy();
     expect(screen.getAllByText("Probar conexión").length).toBe(2);
-    expect(screen.getAllByText(/Próximamente: aún no genera imágenes/).length).toBeGreaterThan(0);
+    // «Generación de imágenes» ya funciona (Publicar → «Crear con IA», PR2): sin aviso de próximamente.
+    expect(screen.queryByText(/Próximamente: aún no genera imágenes/)).toBeNull();
     expect(container.querySelector('input[type="password"]')).toBeNull();
   });
   it("«Agregar IA» se deshabilita en 5 y avisa", () => {

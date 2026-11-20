@@ -194,11 +194,25 @@ export const GUIA: GrupoGuia[] = [
               "Si das garantía, escríbela; después pulsa «Escribir descripción», revísala y úsala con «Usar en la publicación».",
             ],
           },
+          {
+            titulo: "Generar imágenes con IA",
+            pasos: [
+              "Primero confirma la ficha en «Crear con IA» y sube al menos una foto real del producto.",
+              "En la zona de fotos pulsa «Generar con IA» y elige el estilo: Portadas Zilonix (una portada distinta por cada cuenta marcada), Contenido Zilonix (las 10 imágenes de contenido) o Estilo experto ML.",
+              "Pulsa «Preparar propuestas (sin costo)». Revisa en cada tarjeta el título, el copy y el prompt final; corrige lo que quieras o escribe qué cambiar y pulsa «Ajustar».",
+              "Pulsa «Crear» en cada imagen o «Crear todas las aprobadas». Se crean de a 2 a la vez; las demás esperan su turno solas.",
+              "Cada portada queda como foto 1 de su cuenta. Las de contenido márcalas y pulsa «Agregar a mis fotos»: entran a la misma galería y las ordenas como siempre.",
+              "Si una no te gusta, «Regenerar» (o «Otra composición» en las portadas) la rehace sin tocar las demás.",
+            ],
+          },
         ],
         consejos: [
           "Necesitas una IA conectada en Administración → Conectar IA, asignada a Publicaciones o como principal. Lo cobra la cuenta de IA de tu empresa.",
           "La IA no inventa: medidas, tiempos, garantía o lo que incluye solo salen si están en tus fotos o en lo que escribiste y los confirmaste.",
           "Nada se publica desde «Crear con IA»: solo llena el título y la descripción de la cuenta elegida.",
+          "Para imágenes necesitas ChatGPT (OpenAI) o Gemini (Google) en el módulo Generación de imágenes de Conectar IA: Claude no genera imágenes.",
+          "La imagen «Opiniones reales» usa solo opiniones verdaderas que pegues de tus compradores; si no tienes, se salta. La IA nunca escribe reseñas.",
+          "Las imágenes salen en 500 × 500. Mercado Libre recomienda la primera foto sobre fondo blanco: el diagnóstico te avisa si la modera, pero no bloquea.",
         ],
       },
       {
