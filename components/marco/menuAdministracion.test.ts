@@ -7,10 +7,10 @@ import { itemsAdministracion } from "./menuAdministracion";
 
 const etiquetas = (permisos: { modulo: string; accion: string }[]) => itemsAdministracion(permisos).map((i) => i.etiqueta);
 
-const TODAS = ["Invitar persona", "Ajustar roles", "Acceso de soporte", "Conectar marketplaces", "Avisos de Mercado Libre"];
+const TODAS = ["Invitar persona", "Ajustar roles", "Acceso de soporte", "Conectar marketplaces", "Conectar IA", "Avisos de Mercado Libre"];
 
 describe("itemsAdministracion", () => {
-  it("el Dueño y el Gerente (plantilla nueva) ven las 5 opciones", () => {
+  it("el Dueño y el Gerente (plantilla nueva) ven las 6 opciones", () => {
     expect(etiquetas(permisosDeDueno())).toEqual(TODAS);
     expect(etiquetas(PLANTILLAS.Gerente)).toEqual(TODAS);
   });
@@ -22,12 +22,21 @@ describe("itemsAdministracion", () => {
       { modulo: "configuracion", accion: "consultar" },
       { modulo: "configuracion", accion: "modificar" },
     ];
-    expect(etiquetas(gerenteViejo)).toEqual(["Invitar persona", "Conectar marketplaces", "Avisos de Mercado Libre"]);
+    expect(etiquetas(gerenteViejo)).toEqual(["Invitar persona", "Conectar marketplaces", "Conectar IA", "Avisos de Mercado Libre"]);
     expect(etiquetas([{ modulo: "configuracion", accion: "autorizar" }])).toEqual(["Ajustar roles", "Acceso de soporte"]);
   });
 
   it("sin ninguno de esos permisos no sale nada (el grupo no se pinta)", () => {
     expect(etiquetas(PLANTILLAS.Operador)).toEqual([]);
     expect(etiquetas(PLANTILLAS.Auxiliar)).toEqual([]);
+  });
+});
+
+describe("itemsAdministracion — Conectar IA", () => {
+  it("sale justo después de «Conectar marketplaces», solo con configuracion/consultar", () => {
+    const e = etiquetas([{ modulo: "configuracion", accion: "consultar" }]);
+    expect(e).toEqual(["Conectar marketplaces", "Conectar IA", "Avisos de Mercado Libre"]);
+    expect(itemsAdministracion([{ modulo: "configuracion", accion: "consultar" }]).find((i) => i.etiqueta === "Conectar IA")?.href).toBe("/panel/conectar-ia");
+    expect(etiquetas([{ modulo: "configuracion", accion: "modificar" }])).not.toContain("Conectar IA");
   });
 });

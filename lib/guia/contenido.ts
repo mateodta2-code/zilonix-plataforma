@@ -20,17 +20,17 @@ export type SeccionGuia = {
 export type ApartadoGuia = { titulo: string; pasos: string[] };
 
 // Mismo apartado en Optimización (donde se usa) y Configuración (donde
-// se conecta).
+// se avisa que ahora se conecta en Administración → Conectar IA).
 const CONECTAR_IA: ApartadoGuia = {
   titulo: "Cómo conectar la IA (para crear imágenes)",
   pasos: [
     "Saca una API key de OpenAI o de Google (Anthropic/Claude no crea imágenes).",
     "OpenAI: entra a platform.openai.com → API keys → «Create new secret key» y cópiala. La cuenta necesita saldo en Billing; para imágenes, OpenAI puede pedir verificar la organización en Settings → Organization.",
     "Google: entra a aistudio.google.com → «Get API key» → «Create API key» y cópiala. Para imágenes, la cuenta necesita la facturación activa.",
-    "En Zilonix ve a Configuración (necesitas permiso para modificar la configuración).",
-    "En «Conexión de IA» elige el proveedor (OpenAI o Google), escribe un modelo de texto (por ejemplo gpt-5-mini o gemini-2.5-flash) y pega la API key.",
-    "Guarda. Arriba queda la conexión activa; la clave se guarda cifrada y no se vuelve a mostrar.",
-    "Vuelve a Optimización → entra a una publicación → «Crear imagen con IA».",
+    "En Zilonix ve a Administración → Conectar IA (necesitas permiso para modificar la configuración).",
+    "Pulsa «Agregar IA», elige el proveedor (OpenAI o Google), escribe un nombre y un modelo de texto (por ejemplo gpt-5-mini o gemini-2.5-flash) y pega la API key.",
+    "Guarda y usa «Probar conexión». La clave se guarda cifrada y no se vuelve a mostrar.",
+    "Vuelve a Optimización → «Ver detalle →» de una publicación → debajo de las fotos aparece «Crear imagen con IA» (recarga la página si ya la tenías abierta).",
   ],
 };
 
@@ -154,14 +154,15 @@ export const GUIA: GrupoGuia[] = [
         pasos: [
           "Elige el período (7, 14, 30 o 90 días) y busca la publicación.",
           "Despliega una fila para ver tus competidores. Si no es de catálogo, «Buscar 10 competidores» lo hace con la extensión.",
-          "Entra al detalle para ver gráficas por día, costos con utilidad y la utilidad total de la publicación.",
+          "Haz clic en «Ver detalle →» (debajo del nombre de la publicación) para ver las gráficas por día (pasa el cursor para ver el día y las ventas), los costos con su utilidad (y el % que representa cada costo sobre las ventas), la utilidad total de la publicación y el enlace «Ver publicación en Mercado Libre ↗».",
           "Desde el detalle puedes cambiar precio, título y fotos (subir, arrastrar para ordenar, elegir portada). Nada llega a Mercado Libre hasta que guardas.",
-          "Con «Crear imagen con IA» generas portadas de venta (1, 4 o 10, cada una distinta) a partir de tus fotos reales. Escribe antes la ficha técnica del producto.",
+          "En el detalle, debajo de las fotos, está «Crear imagen con IA». Ahí eliges la foto base, escribes la ficha técnica del producto y creas portadas de venta (1, 4 o 10, cada una distinta).",
           "Para una imagen informativa, elige cuál de las 10 quieres (modo de uso, características, beneficios, qué incluye, comparación, preguntas frecuentes…), pide la propuesta, revisa y corrige el título y el copy, y solo entonces aprieta «CREAR imagen».",
         ],
         apartados: [CONECTAR_IA],
         consejos: [
           "Cada imagen la cobra la cuenta de IA de tu empresa (unos centavos de dólar). Cambiar el proveedor también cambia la IA de los textos (Promociones).",
+          "Si debajo de las fotos solo ves el aviso «Para crear imágenes con IA, conecta OpenAI o Google…», la empresa todavía no tiene IA conectada: sigue «Cómo conectar la IA».",
           "Revisa cada imagen creada: si no se entiende, se ve genérica o el texto salió con errores, descártala y crea otra.",
           "Si el copy trae palabras que Mercado Libre no permite (curar, tratar, garantizado, expertos, antes/después…), Zilonix no deja crear la imagen hasta que las cambies.",
           "Las opiniones deben ser de compradores reales: cópialas de tus calificaciones. La IA nunca las inventa.",
@@ -243,7 +244,7 @@ export const GUIA: GrupoGuia[] = [
         otrasRutas: ["/panel/actividad"],
         paraQue: "Ajustes de la empresa (como la conexión de IA) y el registro de quién hizo qué.",
         pasos: [
-          "Configuración → Conexión de IA: elige el proveedor (OpenAI, Google, Anthropic u otro), el modelo y pega la API key.",
+          "Administración → Conectar IA: agrega hasta 5 IA (OpenAI, Google, Anthropic, xAI u otra), con su modelo y API key; marca una como principal y elige qué IA usa cada módulo.",
           "Actividad muestra cada cambio con la persona y la hora.",
         ],
         apartados: [CONECTAR_IA],

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
+import { BuscarPorFoto } from "./BuscarPorFoto";
 import { marcarClicAnalizar, type PlataformaAnalizar } from "./analizarClic";
 import { INTERRUPTORES_EXTENSION } from "@/lib/extension/configuracion";
 import styles from "./page.module.css";
@@ -75,6 +76,7 @@ export function FormularioAnalizar({ termino, tab }: { termino: string; tab: str
   }
 
   return (
+    <>
     <form method="get" className={styles.filaFormulario} onSubmit={alEnviar}>
       <Campo etiqueta="Producto o nicho (hasta 3 palabras)">
         <input ref={inputTerminoRef} type="search" name="termino" defaultValue={termino} placeholder='Ej: "reloj digital"' className="zx-control" required />
@@ -104,5 +106,8 @@ export function FormularioAnalizar({ termino, tab }: { termino: string; tab: str
       <input type="hidden" name="tab" value={tab} />
       <Boton type="submit">Analizar</Boton>
     </form>
+    {/* «Buscar por foto»: primer corte solo Mercado Libre, usa el mismo país. */}
+    {plataforma === "ml" ? <BuscarPorFoto pais={pais} tab="demanda" /> : null}
+    </>
   );
 }

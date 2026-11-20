@@ -198,6 +198,12 @@ const RUTAS_PROTEGIDAS = new Set([
   // contra Mercado Libre (participar/modificar y el lote de reglas) —
   // mismo nivel que .../participando/salir, "ejecutar", nunca "aprobar"
   // (esta pantalla ya no tiene cola de aprobación separada).
+  // PR 2 (feat-promociones-reglas-texto) — «Reglas adicionales».
+  // interpretar: "aprobar" (no escribe nada, pero gasta la IA de la
+  // empresa); GET: "consultar"; PUT: "aprobar" (guarda las reglas de la
+  // cuenta, solo con confirmado:true).
+  "app/api/ml/promociones/reglas-adicionales/interpretar/route.ts",
+  "app/api/ml/promociones/reglas-adicionales/route.ts",
   "app/api/ml/promociones/publicaciones/route.ts",
   "app/api/ml/promociones/publicaciones/participar/route.ts",
   "app/api/ml/promociones/publicaciones/reglas-aplicar/route.ts",
@@ -205,6 +211,19 @@ const RUTAS_PROTEGIDAS = new Set([
   // existe (consultar/modificar) — nunca un permiso nuevo solo para
   // esto.
   "app/api/configuracion/ia-conexion/route.ts",
+  // Conectar IA (Administración): consultar = GET y la página; modificar
+  // = crear, editar, borrar, principal, módulos y probar.
+  "app/api/configuracion/ia-conexion/[id]/route.ts",
+  "app/api/configuracion/ia-conexion/[id]/principal/route.ts",
+  "app/api/configuracion/ia-conexion/[id]/modulos/route.ts",
+  "app/api/configuracion/ia-conexion/[id]/probar/route.ts",
+  "app/panel/conectar-ia/page.tsx",
+  // «Buscar por foto» de Investigación — mismo permiso que la página
+  // (inventario/consultar); las 2 rutas llaman requierePermiso() desde
+  // el helper compartido _ayudantes.ts (autorizar) y no leen la imagen
+  // ni llaman a la IA sin pasar por él.
+  "app/api/investigacion/buscar-por-foto/route.ts",
+  "app/api/investigacion/buscar-por-foto/comparar/route.ts",
   "app/panel/configuracion/page.tsx",
 ]);
 

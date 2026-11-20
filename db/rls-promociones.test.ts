@@ -116,7 +116,7 @@ describe("promociones_reglas/candidatos/acciones + ia_conexiones (RLS, rama feat
     expect(editadaPorA).toEqual([{ estado: "aceptada" }]);
   });
 
-  it("ia_conexiones — aislamiento genérico (SELECT/UPDATE/DELETE), y una sola conexión por empresa", async () => {
+  it("ia_conexiones — aislamiento genérico entre empresas (SELECT/UPDATE/DELETE); el límite de 5 por empresa se prueba en db/rls-conectar-ia.test.ts", async () => {
     const contexto: ContextoDosEmpresas = await crearDosEmpresas();
     await afirmarAislamiento(contexto, iaConexiones, (tx, empresaId) =>
       tx
@@ -130,12 +130,6 @@ describe("promociones_reglas/candidatos/acciones + ia_conexiones (RLS, rama feat
         tx.insert(iaConexiones).values({ empresaId: contexto.empresaBId, proveedor: "openai", modelo: "gpt-5", apiKeyCifrada: cifrarToken("sk-prueba") })
       )
     ).resolves.toBeDefined();
-
-    await expect(
-      dbComoEmpresa(contexto.empresaBId, (tx) =>
-        tx.insert(iaConexiones).values({ empresaId: contexto.empresaBId, proveedor: "google", modelo: "gemini", apiKeyCifrada: cifrarToken("otra-key") })
-      )
-    ).rejects.toThrow();
   });
 
   it("ia_conexiones — la api_key_cifrada nunca viaja en texto plano en la fila guardada", async () => {

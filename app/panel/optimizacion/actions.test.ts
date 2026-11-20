@@ -51,7 +51,7 @@ vi.mock("@/db/empresa-context", () => ({
 }));
 vi.mock("@/lib/auditoria", () => ({ registrarAuditoria: async (_tx: unknown, entrada: unknown) => auditorias.push(entrada) }));
 vi.mock("@/lib/ml/cuentas", () => ({ obtenerAccessTokenVigente: async () => "token" }));
-vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAConClave: ia.conexion }));
+vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAParaModulo: ia.conexion }));
 vi.mock("@/lib/cloudinary", () => ({
   CloudinaryNoConfiguradoError: class extends Error {},
   cloudinaryConfigurado: () => ia.cloudinary.configurado,
@@ -364,14 +364,14 @@ describe("crear imagen con IA (no toca Mercado Libre)", () => {
     expect((await generarImagenIAAction(ENTRADA)).ok).toBe(false);
     estado.conPermiso = true;
     ia.conexion.mockResolvedValue(null);
-    expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Configuración → IA/);
+    expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Conectar IA/);
     ia.cloudinary.configurado = false;
     expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Cloudinary/);
     expect(ia.generar).not.toHaveBeenCalled();
   });
 
   it("un error de la IA llega con su texto; uno inesperado, genérico", async () => {
-    ia.generar.mockRejectedValueOnce(new ErrorImagenIA("OpenAI rechazó la clave de IA de la empresa (revisa Configuración → IA)."));
+    ia.generar.mockRejectedValueOnce(new ErrorImagenIA("OpenAI rechazó la clave de IA de la empresa (revisa Administración → Conectar IA)."));
     expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/rechazó la clave/);
     ia.generar.mockRejectedValueOnce(new Error("detalle interno con datos"));
     expect((await generarImagenIAAction(ENTRADA)).aviso).toBe("No se pudo crear la imagen. Intenta de nuevo.");

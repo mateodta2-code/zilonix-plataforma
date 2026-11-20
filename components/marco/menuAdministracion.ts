@@ -4,7 +4,7 @@ import type { ItemNav } from "./tipos";
 // Tarea 2.3/1.7 — links del grupo "Administración" de la barra lateral
 // (app/panel/layout.tsx). Cada link sale con el mismo permiso que pide
 // su página (requierePermiso en app/panel/invitar, roles, soporte,
-// conectar-ml y avisos-ml): si una página cambia de permiso, este
+// conectar-ml, conectar-ia y avisos-ml): si una página cambia de permiso, este
 // cambio va con ella.
 export function itemsAdministracion(permisos: { modulo: string; accion: string }[]): ItemNav[] {
   return [
@@ -21,6 +21,9 @@ export function itemsAdministracion(permisos: { modulo: string; accion: string }
           // Mercado Libre, unifica los dos canales (ver conector
           // Falabella) — ruta y permiso sin cambios, solo la etiqueta.
           { etiqueta: "Conectar marketplaces", href: "/panel/conectar-ml", icono: "conectarMl" as const },
+          // Varias IA por empresa (máx. 5) y qué IA usa cada módulo; antes
+          // vivía escondida en Configuración.
+          { etiqueta: "Conectar IA", href: "/panel/conectar-ia", icono: "conectarIa" as const },
           { etiqueta: "Avisos de Mercado Libre", href: "/panel/avisos-ml", icono: "avisosMl" as const },
         ]
       : []),
