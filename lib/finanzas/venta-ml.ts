@@ -37,6 +37,9 @@ export type OrdenMl = {
   pack_id?: number | string | null;
   shipping?: { id?: number | string | null } | null;
   payments?: {
+    // id y money_release_status: para la fecha de liberación (lib/ml/liberacion.ts).
+    id?: number | string | null;
+    money_release_status?: string | null;
     status?: string;
     date_approved?: string | null;
     transaction_amount?: number | null;

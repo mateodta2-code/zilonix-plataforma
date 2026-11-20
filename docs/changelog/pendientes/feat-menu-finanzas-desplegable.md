@@ -1,0 +1,1 @@
+- Menú lateral: Finanzas ahora se despliega como Productos (mismo componente), con Resumen, Ventas y utilidad, Por cobrar, Inventario, Conciliación Falabella, Tabla maestra de SKU, Proveedores y Configuración. Cada sección sale solo con el permiso que pide su página. Los desplegables se abren al estar dentro de su módulo y se cierran al salir. Refs #422
