@@ -152,7 +152,8 @@ export const GUIA: GrupoGuia[] = [
         ruta: "/panel/optimizacion",
         paraQue: "Mejorar tus publicaciones: visitas, ventas, conversión, calidad y cómo vas frente a la competencia.",
         pasos: [
-          "Elige el período (7, 14, 30 o 90 días) y busca la publicación.",
+          "Elige la cuenta y el período (7, 14, 30 o 90 días). Arriba de la lista ves el resumen de toda la tienda: ventas brutas, unidades, precios promedio, visitas, conversión, canceladas y devueltas, cada uno comparado con el período anterior.",
+          "Busca la publicación por título, SKU o código.",
           "Despliega una fila para ver tus competidores. Si no es de catálogo, «Buscar 10 competidores» lo hace con la extensión.",
           "Haz clic en «Ver detalle →» (debajo del nombre de la publicación) para ver las gráficas por día (pasa el cursor para ver el día y las ventas), los costos con su utilidad (y el % que representa cada costo sobre las ventas), la utilidad total de la publicación y el enlace «Ver publicación en Mercado Libre ↗».",
           "Desde el detalle puedes cambiar precio, título y fotos (subir, arrastrar para ordenar, elegir portada). Nada llega a Mercado Libre hasta que guardas.",
@@ -162,6 +163,7 @@ export const GUIA: GrupoGuia[] = [
         apartados: [CONECTAR_IA],
         consejos: [
           "Cada imagen la cobra la cuenta de IA de tu empresa (unos centavos de dólar). Cambiar el proveedor también cambia la IA de los textos (Promociones).",
+          "El resumen de la tienda cuenta las ventas que Seller ya sincronizó (si una venta todavía no está en Finanzas, sus unidades no suman) y las visitas que da Mercado Libre; los días son de Colombia, así que puede variar un poco frente a Métricas de Mercado Libre.",
           "Si debajo de las fotos solo ves el aviso «Para crear imágenes con IA, conecta OpenAI o Google…», la empresa todavía no tiene IA conectada: sigue «Cómo conectar la IA».",
           "Revisa cada imagen creada: si no se entiende, se ve genérica o el texto salió con errores, descártala y crea otra.",
           "Si el copy trae palabras que Mercado Libre no permite (curar, tratar, garantizado, expertos, antes/después…), Zilonix no deja crear la imagen hasta que las cambies.",
