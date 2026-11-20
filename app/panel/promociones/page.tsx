@@ -6,6 +6,8 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { dbComoEmpresa } from "@/db/empresa-context";
+import { promocionesReglas } from "@/db/schema";
 import { leerResumenMaestraSku } from "@/lib/ml/promocionesPublicaciones";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -45,9 +47,13 @@ export default async function PromocionesPage() {
 
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
   const puedeEjecutar = tienePermiso(miMembresia?.permisos ?? [], "promociones", "ejecutar");
+  const puedeAprobar = tienePermiso(miMembresia?.permisos ?? [], "promociones", "aprobar");
 
   const [cuentasConectadas, resumenMaestraSku] = await Promise.all([listarCuentasConectadas(empresa.id), leerResumenMaestraSku(empresa.id)]);
   const cuentas = cuentasConectadas.filter((c) => !c.desconectadaTs).map((c) => ({ id: c.id, nickname: c.nickname, siteId: c.siteId }));
+  // «Reglas adicionales» ya guardadas (solo el texto; el JSON lo lee el servidor al aplicar).
+  const filasReglas = await dbComoEmpresa(empresa.id, (tx) => tx.select({ cuentaMlId: promocionesReglas.cuentaMlId, texto: promocionesReglas.reglasAdicionalesTexto }).from(promocionesReglas));
+  const reglasAdicionalesIniciales = filasReglas.filter((f) => f.texto).map((f) => ({ cuentaId: f.cuentaMlId, texto: f.texto as string }));
 
   return (
     <>
@@ -58,6 +64,8 @@ export default async function PromocionesPage() {
       <PaginaPromocionesReal
         cuentas={cuentas}
         puedeEjecutar={puedeEjecutar}
+        puedeAprobar={puedeAprobar}
+        reglasAdicionalesIniciales={reglasAdicionalesIniciales}
         resumenMaestraSku={{ total: resumenMaestraSku.total, actualizadoTs: resumenMaestraSku.actualizadoTs?.toISOString() ?? null }}
       />
     </>
