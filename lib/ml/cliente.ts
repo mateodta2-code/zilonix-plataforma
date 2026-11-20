@@ -1918,9 +1918,10 @@ async function leerItemOptimizacionUnoMl(id: string, token: string): Promise<Ite
 // Tendencias de búsqueda de una categoría (Publicar → «Crear con IA»,
 // títulos SEO). Documentado por Mercado Libre:
 // https://developers.mercadolibre.com.ar/es_ar/tendencias
-// GET /trends/{SITE_ID}/{CATEGORY_ID} → [{ keyword, url }]. Todavía no
-// se confirmó en staging: si falla o cambia de forma, devuelve null y
-// los títulos siguen sin tendencias (la pantalla lo avisa).
+// GET /trends/{SITE_ID}/{CATEGORY_ID} → [{ keyword, url }]. Confirmado en
+// staging el 19-nov (scripts/explorar-publicar-ia.ts): MCO8830 → 50
+// palabras; MCO113531 → 404 (hay categorías sin tendencias). Si falla,
+// devuelve null y los títulos siguen sin tendencias (la pantalla lo avisa).
 export async function tendenciasCategoriaMl(siteId: string, categoriaId: string, token: string): Promise<string[] | null> {
   if (!/^[A-Z]{3}$/.test(siteId) || !PATRON_ID_CATEGORIA.test(categoriaId) || !categoriaId.startsWith(siteId)) return null;
   try {
@@ -1935,6 +1936,8 @@ export async function tendenciasCategoriaMl(siteId: string, categoriaId: string,
     if (error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) return null;
     throw error;
   }
+}
+
 // Diagnóstico de imágenes de Mercado Libre (Publicar → «Crear con IA»,
 // PR2). Documentado: https://developers.mercadolibre.com.ar/diagnostico-imagenes
 // POST /moderations/pictures/diagnostic con { picture_url, context:
