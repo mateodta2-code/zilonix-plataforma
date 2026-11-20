@@ -19,7 +19,7 @@ function respuestaJson(data: unknown, status = 200): Response {
 }
 
 function conexion(overrides: Partial<ConexionIAConClave> = {}): ConexionIAConClave {
-  return { id: "c1", proveedor: "anthropic", baseUrl: null, modelo: "claude-sonnet-5", actualizadoTs: new Date(), apiKey: "clave-real", ...overrides };
+  return { id: "c1", nombre: "IA", esPrincipal: true, proveedor: "anthropic", baseUrl: null, modelo: "claude-sonnet-5", actualizadoTs: new Date(), apiKey: "clave-real", ...overrides };
 }
 
 // Rama feat-promociones, punto 6 — cada proveedor habla el contrato

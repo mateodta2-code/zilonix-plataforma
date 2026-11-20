@@ -681,7 +681,7 @@ export function PaginaPromocionesReal({
               )}
               {faltaIA && (
                 <p className={styles.errorModal}>
-                  <a href="/panel/configuracion" className="zx-link">
+                  <a href="/panel/conectar-ia" className="zx-link">
                     Conecta tu IA en Administración → Conectar IA
                   </a>{" "}
                   para interpretar reglas.

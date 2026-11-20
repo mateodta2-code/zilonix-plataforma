@@ -20,16 +20,16 @@ export type SeccionGuia = {
 export type ApartadoGuia = { titulo: string; pasos: string[] };
 
 // Mismo apartado en Optimización (donde se usa) y Configuración (donde
-// se conecta).
+// se avisa que ahora se conecta en Administración → Conectar IA).
 const CONECTAR_IA: ApartadoGuia = {
   titulo: "Cómo conectar la IA (para crear imágenes)",
   pasos: [
     "Saca una API key de OpenAI o de Google (Anthropic/Claude no crea imágenes).",
     "OpenAI: entra a platform.openai.com → API keys → «Create new secret key» y cópiala. La cuenta necesita saldo en Billing; para imágenes, OpenAI puede pedir verificar la organización en Settings → Organization.",
     "Google: entra a aistudio.google.com → «Get API key» → «Create API key» y cópiala. Para imágenes, la cuenta necesita la facturación activa.",
-    "En Zilonix ve a Configuración (necesitas permiso para modificar la configuración).",
-    "En «Conexión de IA» elige el proveedor (OpenAI o Google), escribe un modelo de texto (por ejemplo gpt-5-mini o gemini-2.5-flash) y pega la API key.",
-    "Guarda. Arriba queda la conexión activa; la clave se guarda cifrada y no se vuelve a mostrar.",
+    "En Zilonix ve a Administración → Conectar IA (necesitas permiso para modificar la configuración).",
+    "Pulsa «Agregar IA», elige el proveedor (OpenAI o Google), escribe un nombre y un modelo de texto (por ejemplo gpt-5-mini o gemini-2.5-flash) y pega la API key.",
+    "Guarda y usa «Probar conexión». La clave se guarda cifrada y no se vuelve a mostrar.",
     "Vuelve a Optimización → «Ver detalle →» de una publicación → debajo de las fotos aparece «Crear imagen con IA» (recarga la página si ya la tenías abierta).",
   ],
 };
@@ -244,7 +244,7 @@ export const GUIA: GrupoGuia[] = [
         otrasRutas: ["/panel/actividad"],
         paraQue: "Ajustes de la empresa (como la conexión de IA) y el registro de quién hizo qué.",
         pasos: [
-          "Configuración → Conexión de IA: elige el proveedor (OpenAI, Google, Anthropic u otro), el modelo y pega la API key.",
+          "Administración → Conectar IA: agrega hasta 5 IA (OpenAI, Google, Anthropic, xAI u otra), con su modelo y API key; marca una como principal y elige qué IA usa cada módulo.",
           "Actividad muestra cada cambio con la persona y la hora.",
         ],
         apartados: [CONECTAR_IA],

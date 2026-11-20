@@ -218,6 +218,13 @@
       "when": 1795131832002,
       "tag": "0030_sparkling_doorman",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795131848110,
+      "tag": "0031_conectar_ia_varias",
+      "breakpoints": true
     }
   ]
 }

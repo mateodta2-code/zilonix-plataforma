@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 // El módulo importa la conexión real (base de datos) y el proveedor real
 // como valores por defecto; en estas pruebas todo se inyecta.
-vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAConClave: vi.fn() }));
+vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAParaModulo: vi.fn() }));
 vi.mock("@/lib/ia/proveedores", () => ({ llamarIA: vi.fn() }));
 
 import type { ConexionIAConClave } from "@/lib/ia/tipos";

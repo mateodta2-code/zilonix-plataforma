@@ -1,20 +1,17 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { tienePermiso } from "@/lib/roles-plantillas";
-import { obtenerConexionIA } from "@/lib/ia/conexion";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
-import { ConfiguracionIA } from "./ConfiguracionIA";
+import { Tarjeta } from "@/components/marco/Tarjeta";
 
-// Rama feat-promociones, punto 6 — "En Configuración, una sección
-// 'Conexión de IA' por empresa". Página mínima: no existía ninguna
-// pantalla de Configuración todavía (solo "Actividad" usa ese
-// permiso), así que esta es la primera — con una sola sección, sin
-// pretender ser una pantalla de ajustes general todavía.
+// La conexión de IA se movió a Administración → Conectar IA
+// (/panel/conectar-ia): ahora son varias IA por empresa. Esta página
+// queda con el aviso y el enlace.
 export default async function ConfiguracionPage() {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -37,14 +34,14 @@ export default async function ConfiguracionPage() {
     );
   }
 
-  const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
-  const puedeModificar = tienePermiso(miMembresia?.permisos ?? [], "configuracion", "modificar");
-  const conexion = await obtenerConexionIA(empresa.id);
-
   return (
     <>
       <EncabezadoPagina titulo="Configuración" descripcion="Ajustes generales de la empresa." />
-      <ConfiguracionIA conexionInicial={conexion ? { ...conexion, actualizadoTs: conexion.actualizadoTs.toISOString() } : null} puedeModificar={puedeModificar} />
+      <Tarjeta>
+        <p style={{ fontSize: 14 }}>
+          La conexión de IA ahora está en <Link href="/panel/conectar-ia">Administración → Conectar IA</Link>.
+        </p>
+      </Tarjeta>
     </>
   );
 }

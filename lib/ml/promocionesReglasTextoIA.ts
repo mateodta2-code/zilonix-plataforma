@@ -1,4 +1,4 @@
-import { obtenerConexionIAConClave } from "@/lib/ia/conexion";
+import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import type { ConexionIAConClave } from "@/lib/ia/tipos";
 import { llamarIA } from "@/lib/ia/proveedores";
 import { describirReglas, extraerJson, LARGO_MAXIMO_REGLAS_TEXTO, validarReglasAdicionales, type ReglasAdicionales } from "@/lib/ml/promocionesReglasTexto";
@@ -6,14 +6,13 @@ import { describirReglas, extraerJson, LARGO_MAXIMO_REGLAS_TEXTO, validarReglasA
 // PR 2 de Promociones — interpreta UNA vez el texto libre de «Reglas
 // adicionales» (al guardar, nunca por ítem: así el costo queda acotado)
 // y lo convierte en el JSON estricto de promocionesReglasTexto.ts. La
-// IA es la de la EMPRESA (obtenerConexionIAConClave) — el costo no
+// IA es la de la EMPRESA (obtenerConexionIAParaModulo, módulo promociones) — el costo no
 // recae en Zilonix. La IA solo PROPONE: lo que devuelve se valida y se
 // le muestra a la persona («Entendí esto» / «No entendí»); sin
 // confirmación no se guarda nada.
 
-// La pantalla de conexión de IA hoy vive en /panel/configuracion (otra
-// rama la está moviendo a Administración → Conectar IA): el texto ya dice
-// el destino final y la UI enlaza a la ruta que exista hoy.
+// La conexión de IA vive en Administración → Conectar IA
+// (/panel/conectar-ia): la UI enlaza a esa ruta.
 export const MENSAJE_SIN_IA = "Conecta tu IA en Administración → Conectar IA";
 
 export type DependenciasInterpretacion = {
@@ -21,7 +20,7 @@ export type DependenciasInterpretacion = {
   llamar: (conexion: ConexionIAConClave, prompt: string, opciones: { maxTokens: number }) => Promise<string>;
 };
 
-const DEPENDENCIAS_REALES: DependenciasInterpretacion = { obtenerConexion: obtenerConexionIAConClave, llamar: llamarIA };
+const DEPENDENCIAS_REALES: DependenciasInterpretacion = { obtenerConexion: (empresaId) => obtenerConexionIAParaModulo(empresaId, "promociones"), llamar: llamarIA };
 
 export type ResultadoInterpretacion =
   | { estado: "ok"; reglas: ReglasAdicionales; entendido: string[]; noEntendido: string[] }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requierePermiso } from "@/lib/permisos";
-import { obtenerConexionIAConClave } from "@/lib/ia/conexion";
+import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { ErrorIASinVision, ErrorProveedorIA, llamarIAConImagenes, type ImagenIA } from "@/lib/ia/proveedores";
 import { creaContador, limpiarVencidos, superaLimite } from "@/lib/limite-peticiones";
 import {
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Llegaste al límite de comparaciones por hora. Intenta más tarde." }, { status: 429 });
   }
 
-  const conexion = await obtenerConexionIAConClave(sesion.empresaId);
+  const conexion = await obtenerConexionIAParaModulo(sesion.empresaId, "investigacion");
   if (!conexion) return NextResponse.json({ error: MENSAJE_SIN_IA, codigo: "sin_ia" }, { status: 400 });
 
   let form: FormData;

@@ -233,7 +233,7 @@ describe("PaginaPromocionesReal — «Reglas adicionales» (PR 2)", () => {
     fireEvent.change(screen.getByLabelText(ETIQUETA), { target: { value: "algo" } });
     fireEvent.click(screen.getByRole("button", { name: "Interpretar" }));
     await waitFor(() => expect(screen.getByText("Conecta tu IA en Administración → Conectar IA")).toBeTruthy());
-    expect(screen.getByText("Conecta tu IA en Administración → Conectar IA").getAttribute("href")).toBe("/panel/configuracion");
+    expect(screen.getByText("Conecta tu IA en Administración → Conectar IA").getAttribute("href")).toBe("/panel/conectar-ia");
   });
 
   it("sin permiso 'aprobar': no hay botón Interpretar y el recuadro queda deshabilitado", () => {

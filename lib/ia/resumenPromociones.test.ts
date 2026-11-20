@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAConClave: vi.fn() }));
+vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAParaModulo: vi.fn() }));
 vi.mock("@/lib/ia/proveedores", () => ({ llamarIA: vi.fn() }));
 
-import { obtenerConexionIAConClave } from "@/lib/ia/conexion";
+import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { llamarIA } from "@/lib/ia/proveedores";
 import type { CandidatoCalculado } from "@/lib/ml/promociones";
 import { resumenPromocionesIA } from "./resumenPromociones";
@@ -41,18 +41,20 @@ function candidato(overrides: Partial<CandidatoCalculado> = {}): CandidatoCalcul
 describe("resumenPromocionesIA — rama feat-promociones", () => {
   it("sin candidatos: null, nunca llama a la conexión", async () => {
     await expect(resumenPromocionesIA("empresa-1", [])).resolves.toBeNull();
-    expect(obtenerConexionIAConClave).not.toHaveBeenCalled();
+    expect(obtenerConexionIAParaModulo).not.toHaveBeenCalled();
   });
 
   it("sin conexión de IA configurada: null, nunca lanza", async () => {
-    vi.mocked(obtenerConexionIAConClave).mockResolvedValueOnce(null);
+    vi.mocked(obtenerConexionIAParaModulo).mockResolvedValueOnce(null);
     await expect(resumenPromocionesIA("empresa-1", [candidato()])).resolves.toBeNull();
     expect(llamarIA).not.toHaveBeenCalled();
   });
 
   it("con conexión real: llama a llamarIA con el JSON de los candidatos ya calculados y devuelve su texto", async () => {
-    vi.mocked(obtenerConexionIAConClave).mockResolvedValueOnce({
+    vi.mocked(obtenerConexionIAParaModulo).mockResolvedValueOnce({
       id: "ia-1",
+      nombre: "IA",
+      esPrincipal: true,
       proveedor: "anthropic",
       baseUrl: null,
       modelo: "claude-sonnet-5",
@@ -68,8 +70,10 @@ describe("resumenPromocionesIA — rama feat-promociones", () => {
   });
 
   it("si la IA falla (clave vencida, proveedor caído): null, nunca rompe el módulo", async () => {
-    vi.mocked(obtenerConexionIAConClave).mockResolvedValueOnce({
+    vi.mocked(obtenerConexionIAParaModulo).mockResolvedValueOnce({
       id: "ia-1",
+      nombre: "IA",
+      esPrincipal: true,
       proveedor: "anthropic",
       baseUrl: null,
       modelo: "claude-sonnet-5",

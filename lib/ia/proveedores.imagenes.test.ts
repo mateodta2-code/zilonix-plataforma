@@ -13,7 +13,7 @@ function res(data: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, type: "basic", json: async () => data } as Response;
 }
 function conexion(o: Partial<ConexionIAConClave> = {}): ConexionIAConClave {
-  return { id: "c", proveedor: "anthropic", baseUrl: null, modelo: "m", actualizadoTs: new Date(), apiKey: "k", ...o };
+  return { id: "c", nombre: "IA", esPrincipal: true, proveedor: "anthropic", baseUrl: null, modelo: "m", actualizadoTs: new Date(), apiKey: "k", ...o };
 }
 
 describe("llamarIAConImagenes", () => {
