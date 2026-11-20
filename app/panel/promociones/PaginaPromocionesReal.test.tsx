@@ -15,9 +15,16 @@ const CON_MAESTRA = { total: 12, actualizadoTs: null };
 
 type LlamadaRegla = Record<string, unknown>;
 let llamadasRegla: LlamadaRegla[];
+let llamadasTexto: { url: string; metodo: string; cuerpo: LlamadaRegla }[];
+let respuestaInterpretar: { status: number; body: unknown };
 
 beforeEach(() => {
   llamadasRegla = [];
+  llamadasTexto = [];
+  respuestaInterpretar = {
+    status: 200,
+    body: { entendido: ["no entrar en promociones cuyo nombre contenga «black friday»"], noEntendido: ["que sea bonito"], json: { version: 1 } },
+  };
   // jsdom no implementa <dialog>.showModal/close.
   // (hay que marcar `open`: sin eso jsdom oculta el contenido a las consultas por rol).
   HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
@@ -56,13 +63,18 @@ beforeEach(() => {
         }
         return { ok: true, json: async () => ({ revisadas: 0, participadas: 0, fallidas: 0, omitidas: 0, filas: [] }) };
       }
+      if (String(url).startsWith("/api/ml/promociones/reglas-adicionales")) {
+        llamadasTexto.push({ url: String(url), metodo: (init as { method?: string })?.method ?? "GET", cuerpo: JSON.parse(init?.body ?? "{}") as LlamadaRegla });
+        if (String(url).endsWith("/interpretar")) return { ok: respuestaInterpretar.status === 200, json: async () => respuestaInterpretar.body };
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
       return { ok: false, json: async () => ({}) };
     })
   );
 });
 
-function montar(maestra = CON_MAESTRA) {
-  return render(<PaginaPromocionesReal cuentas={CUENTAS} puedeEjecutar resumenMaestraSku={maestra} />);
+function montar(maestra = CON_MAESTRA, puedeAprobar = true) {
+  return render(<PaginaPromocionesReal cuentas={CUENTAS} puedeEjecutar puedeAprobar={puedeAprobar} resumenMaestraSku={maestra} />);
 }
 
 function botonAplicar(nombre = "Aplicar regla a las publicaciones") {
@@ -154,5 +166,80 @@ describe("PaginaPromocionesReal — «Dejar de participar en todas»", () => {
     await waitFor(() => screen.getByRole("button", { name: "Sí, dejar de participar" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Cancelar" })[0]);
     expect(llamadasRegla.every((l) => l.confirmado === undefined)).toBe(true);
+  });
+});
+
+describe("PaginaPromocionesReal — «Reglas adicionales» (PR 2)", () => {
+  const ETIQUETA = "Reglas adicionales";
+
+  it("el recuadro solo aparece con «Respetar siempre la tabla maestra»", () => {
+    montar();
+    expect(screen.queryByLabelText(ETIQUETA)).toBeNull();
+    fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
+    expect(screen.getByLabelText(ETIQUETA)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Participar en todas las promociones disponibles"));
+    expect(screen.queryByLabelText(ETIQUETA)).toBeNull();
+    fireEvent.click(screen.getByLabelText("Dejar de participar en todas las promociones"));
+    expect(screen.queryByLabelText(ETIQUETA)).toBeNull();
+  });
+
+  it("Interpretar muestra «Entendí esto» y «No entendí», y NO guarda nada hasta confirmar", async () => {
+    montar();
+    fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
+    fireEvent.change(screen.getByLabelText(ETIQUETA), { target: { value: "no entrar en Black Friday, que sea bonito" } });
+    fireEvent.click(screen.getByRole("button", { name: "Interpretar" }));
+
+    await waitFor(() => expect(screen.getByText("Entendí esto:")).toBeTruthy());
+    expect(screen.getByText("no entrar en promociones cuyo nombre contenga «black friday»")).toBeTruthy();
+    expect(screen.getByText("No entendí:")).toBeTruthy();
+    expect(screen.getByText("que sea bonito")).toBeTruthy();
+    expect(llamadasTexto.map((l) => l.metodo)).toEqual(["POST"]); // solo interpretó
+    expect(llamadasTexto.some((l) => l.metodo === "PUT")).toBe(false);
+  });
+
+  it("Descartar no guarda; Confirmar y guardar manda confirmado:true con el JSON interpretado", async () => {
+    montar();
+    fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
+    fireEvent.change(screen.getByLabelText(ETIQUETA), { target: { value: "no entrar en Black Friday" } });
+    fireEvent.click(screen.getByRole("button", { name: "Interpretar" }));
+    await waitFor(() => screen.getByText("Entendí esto:"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+    expect(screen.queryByText("Entendí esto:")).toBeNull();
+    expect(llamadasTexto.some((l) => l.metodo === "PUT")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Interpretar" }));
+    await waitFor(() => screen.getByText("Entendí esto:"));
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar y guardar" }));
+    await waitFor(() => expect(llamadasTexto.some((l) => l.metodo === "PUT")).toBe(true));
+    const put = llamadasTexto.find((l) => l.metodo === "PUT")!;
+    expect(put.cuerpo).toMatchObject({ cuentaId: "todas", texto: "no entrar en Black Friday", json: { version: 1 }, confirmado: true });
+  });
+
+  it("si lo escrito cambia después de interpretar, la interpretación se descarta (nunca se guarda un texto distinto)", async () => {
+    montar();
+    fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
+    fireEvent.change(screen.getByLabelText(ETIQUETA), { target: { value: "uno" } });
+    fireEvent.click(screen.getByRole("button", { name: "Interpretar" }));
+    await waitFor(() => screen.getByText("Entendí esto:"));
+    fireEvent.change(screen.getByLabelText(ETIQUETA), { target: { value: "otro texto" } });
+    expect(screen.queryByText("Entendí esto:")).toBeNull();
+  });
+
+  it("sin IA conectada: mensaje claro con enlace, nada falla en silencio", async () => {
+    respuestaInterpretar = { status: 409, body: { error: "Conecta tu IA en Administración → Conectar IA", codigo: "sin_ia" } };
+    montar();
+    fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
+    fireEvent.change(screen.getByLabelText(ETIQUETA), { target: { value: "algo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Interpretar" }));
+    await waitFor(() => expect(screen.getByText("Conecta tu IA en Administración → Conectar IA")).toBeTruthy());
+    expect(screen.getByText("Conecta tu IA en Administración → Conectar IA").getAttribute("href")).toBe("/panel/configuracion");
+  });
+
+  it("sin permiso 'aprobar': no hay botón Interpretar y el recuadro queda deshabilitado", () => {
+    montar(CON_MAESTRA, false);
+    fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
+    expect(screen.queryByRole("button", { name: "Interpretar" })).toBeNull();
+    expect((screen.getByLabelText(ETIQUETA) as HTMLTextAreaElement).disabled).toBe(true);
   });
 });

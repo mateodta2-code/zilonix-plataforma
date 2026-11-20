@@ -1400,6 +1400,9 @@ export type PromocionCrudaMl = {
   max_discounted_price?: unknown;
   start_date?: unknown;
   finish_date?: unknown;
+  // Nombre de la promoción — NO confirmado que /seller-promotions/items
+  // lo mande (verificar en staging); si no viene, leerNombrePromocionMl.
+  name?: unknown;
 };
 
 // Bug real en vivo (rama fix-promociones-buscar, Refs #44): en staging,
@@ -1447,6 +1450,25 @@ export async function leerPromocionesItemMl(itemId: string, token: string): Prom
     if (e instanceof MlNoAutorizadoError) return { estado: "no_autorizado" };
     if (e instanceof MlNoDisponibleError) return { estado: "otro_error", status: null };
     throw e;
+  }
+}
+
+// PR 2 de Promociones (reglas adicionales por nombre) — nombre de UNA
+// promoción: GET /seller-promotions/promotions/{promotion_id}?promotion_type=..
+// (documentado en "Gestiona promociones"). Nunca lanza salvo 429 (que
+// el llamador reintenta): cualquier otro fallo, o una respuesta sin
+// `name` de texto, es null — quien lo usa NUNCA adivina el nombre, y
+// ante null excluye con «no se pudo leer el nombre».
+export async function leerNombrePromocionMl(promotionId: string, promotionType: string, token: string): Promise<string | null> {
+  if (!promotionId || !promotionType) return null;
+  const url = `${BASE_URL}/seller-promotions/promotions/${encodeURIComponent(promotionId)}?promotion_type=${encodeURIComponent(promotionType)}&app_version=v2`;
+  try {
+    const resp = await pedir<{ name?: unknown }>(url, token);
+    if (!resp.ok) return null;
+    return typeof resp.data?.name === "string" && resp.data.name.trim() ? resp.data.name : null;
+  } catch (e) {
+    if (e instanceof LimiteMercadoLibreError) throw e;
+    return null;
   }
 }
 

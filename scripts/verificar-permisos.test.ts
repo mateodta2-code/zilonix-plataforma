@@ -197,6 +197,12 @@ const RUTAS_PROTEGIDAS = new Set([
   // contra Mercado Libre (participar/modificar y el lote de reglas) —
   // mismo nivel que .../participando/salir, "ejecutar", nunca "aprobar"
   // (esta pantalla ya no tiene cola de aprobación separada).
+  // PR 2 (feat-promociones-reglas-texto) — «Reglas adicionales».
+  // interpretar: "aprobar" (no escribe nada, pero gasta la IA de la
+  // empresa); GET: "consultar"; PUT: "aprobar" (guarda las reglas de la
+  // cuenta, solo con confirmado:true).
+  "app/api/ml/promociones/reglas-adicionales/interpretar/route.ts",
+  "app/api/ml/promociones/reglas-adicionales/route.ts",
   "app/api/ml/promociones/publicaciones/route.ts",
   "app/api/ml/promociones/publicaciones/participar/route.ts",
   "app/api/ml/promociones/publicaciones/reglas-aplicar/route.ts",

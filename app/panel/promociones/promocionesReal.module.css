@@ -359,3 +359,46 @@
   overflow-y: auto;
   margin-top: 8px;
 }
+
+/* PR 2 — «Reglas adicionales» (texto libre bajo «Respetar la tabla maestra») */
+.reglasAdicionales {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 0 26px;
+}
+
+.textareaReglas {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  font: inherit;
+}
+
+.contadorReglas {
+  font-size: 11.5px;
+  color: var(--texto-suave);
+}
+
+.interpretacion {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.interpretacion ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.noEntendidoLista {
+  color: var(--kpi-peligro-texto);
+}
+
+.accionesInterpretacion {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
