@@ -61,9 +61,12 @@ function ItemConHijos({ item, hijos, colapsada, pathname }: { item: ItemNav; hij
   const activo = hijoActivo(pathname, hijos);
   const [abierto, setAbierto] = useState(activo !== null);
 
-  // Al entrar a una de sus pantallas desde otro lado del menú, se abre.
+  // Al entrar a una de sus pantallas desde otro lado del menú, se abre;
+  // al salir del módulo, se cierra (abierto solo dentro de su ruta). Si
+  // la persona lo abre a mano desde afuera, `activo` no cambia y queda
+  // abierto.
   useEffect(() => {
-    if (activo !== null) setAbierto(true);
+    setAbierto(activo !== null);
   }, [activo]);
 
   const idLista = `submenu-${item.href.replace(/\W+/g, "-")}`;
