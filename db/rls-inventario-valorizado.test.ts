@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa } from "./empresa-context";
-import { skus } from "./schema";
+import { membresias, roles, skus } from "./schema";
 import { crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { guardarCostoSku } from "../lib/costos-sku";
 import { crearBodega } from "../lib/inventario/bodegas";
@@ -18,6 +18,16 @@ async function crearSku(empresaId: string, codigo: string): Promise<string> {
   return f.id;
 }
 
+// leerInventarioValorizado exige finanzas.consultar: cada usuario de
+// prueba entra como Dueño de su propia empresa (y de ninguna otra).
+async function hacerDueno(empresaId: string, usuarioId: string) {
+  const rolId = randomUUID();
+  await dbComoEmpresa(empresaId, async (tx) => {
+    await tx.insert(roles).values({ id: rolId, nombre: "Dueño", empresaId });
+    await tx.insert(membresias).values({ id: randomUUID(), usuarioId, empresaId, rolId });
+  });
+}
+
 async function entrada(empresaId: string, usuarioId: string, bodegaId: string, skuId: string, cantidad: number) {
   await aplicarMovimientos(empresaId, {
     claveIdempotencia: `prueba:${randomUUID()}`,
@@ -32,6 +42,8 @@ describe("inventario valorizado (RLS, issue #422)", () => {
 
   beforeAll(async () => {
     c = await crearDosEmpresas();
+    await hacerDueno(c.empresaAId, c.usuarioAId);
+    await hacerDueno(c.empresaBId, c.usuarioBId);
 
     // Empresa A: mismo código de SKU que B, con otro costo y otro stock.
     const { id: principalA } = await crearBodega(c.empresaAId, c.usuarioAId, { nombre: "Principal", tipo: "propia" });
