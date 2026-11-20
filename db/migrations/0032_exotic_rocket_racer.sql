@@ -1,0 +1,2 @@
+ALTER TABLE "pedidos_falabella" ADD COLUMN "numero_orden" text;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "pedidos_falabella_cuenta_numero_orden_idx" ON "pedidos_falabella" USING btree ("cuenta_falabella_id","numero_orden");
