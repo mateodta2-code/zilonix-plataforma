@@ -1915,6 +1915,28 @@ async function leerItemOptimizacionUnoMl(id: string, token: string): Promise<Ite
   }
 }
 
+// Tendencias de búsqueda de una categoría (Publicar → «Crear con IA»,
+// títulos SEO). Documentado por Mercado Libre:
+// https://developers.mercadolibre.com.ar/es_ar/tendencias
+// GET /trends/{SITE_ID}/{CATEGORY_ID} → [{ keyword, url }]. Todavía no
+// se confirmó en staging: si falla o cambia de forma, devuelve null y
+// los títulos siguen sin tendencias (la pantalla lo avisa).
+export async function tendenciasCategoriaMl(siteId: string, categoriaId: string, token: string): Promise<string[] | null> {
+  if (!/^[A-Z]{3}$/.test(siteId) || !PATRON_ID_CATEGORIA.test(categoriaId) || !categoriaId.startsWith(siteId)) return null;
+  try {
+    const resp = await pedirLecturaMl<unknown>(`/trends/${siteId}/${categoriaId}`, token);
+    if (!resp.ok || !Array.isArray(resp.data)) return null;
+    return resp.data
+      .map((t) => (t !== null && typeof t === "object" ? (t as { keyword?: unknown }).keyword : null))
+      .filter((k): k is string => typeof k === "string" && k.trim().length > 0)
+      .map((k) => k.trim().slice(0, 80))
+      .slice(0, 30);
+  } catch (error) {
+    if (error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) return null;
+    throw error;
+  }
+}
+
 // Visitas de TODA la tienda (todas las publicaciones de un vendedor)
 // entre dos días. Confirmado en staging el 19-nov con
 // scripts/explorar-visitas-cuenta.ts (FMCBIENESTAR y STOREKINGSAS):

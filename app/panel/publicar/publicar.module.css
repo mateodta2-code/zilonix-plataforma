@@ -154,3 +154,76 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* «Crear con IA» (PR1, textos). */
+.crearIA,
+.bloqueIA {
+  display: grid;
+  gap: 12px;
+}
+
+.bloqueIA {
+  padding-top: 14px;
+  border-top: 1px solid var(--borde);
+}
+
+.ayudaIA {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.avisoIA {
+  margin: 0;
+  font-size: 13px;
+  color: var(--peligro-texto);
+}
+
+.okIA {
+  margin: 0;
+  font-size: 13px;
+  color: var(--exito-texto, var(--acento-fuerte));
+}
+
+.fichaIA {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.etiquetaFichaIA {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tituloIA {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--borde);
+  font-size: 14px;
+}
+
+.contadorIA {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.accionesIA {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.palabraIA {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 10px;
+}
