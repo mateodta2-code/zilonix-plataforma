@@ -20,7 +20,7 @@ import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cue
 import { linkPublicacion } from "@/lib/ml/permalink";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { formatearMoneda } from "@/lib/ml/sitios";
-import { costoFijoPorUnidad, diasInventario, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, utilidadAcumulada, variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
+import { costoFijoPorUnidad, diasInventario, participacion, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, utilidadAcumulada, variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
 import { leerDatosDetalle, type DatosDetalle } from "@/lib/optimizacion/detalle";
 import { opcionesPeriodo, resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
 import { rotuloTipoPublicacion } from "@/lib/optimizacion/textos";
@@ -275,21 +275,30 @@ export default async function DetalleOptimizacionPage({
             {actual.costos === null ? (
               <p className={styles.nota}>Faltan ventas por sincronizar en Finanzas: los costos de este período no están completos.</p>
             ) : (
-              <Tabla encabezados={["Concepto", { clave: "valor", contenido: porUnidadModo ? "Por unidad" : "Total", numerica: true }]}>
+              <Tabla
+                encabezados={[
+                  "Concepto",
+                  { clave: "valor", contenido: porUnidadModo ? "Por unidad" : "Total", numerica: true },
+                  // Cuánto pesa cada costo sobre lo vendido (igual en total y por unidad).
+                  { clave: "pct", contenido: "% de ventas", numerica: true },
+                ]}
+              >
                 <FilaTabla>
                   <CeldaTabla>Ventas</CeldaTabla>
                   <CeldaTabla numerica>{plata(enCostos(actual.ventasConcretadas))}</CeldaTabla>
+                  <CeldaTabla numerica>{pct(participacion(actual.ventasConcretadas, actual.ventasConcretadas))}</CeldaTabla>
                 </FilaTabla>
                 {[
-                  ["Comisión de Mercado Libre", enCostos(actual.costos.comision)],
-                  ["Envío", enCostos(actual.costos.envio)],
-                  ["Publicidad", enCostos(actual.inversion)],
-                  ["Costo del producto", enCostos(actual.costos.costoProducto)],
-                  ["Empaque", enCostos(actual.costos.empaque)],
+                  ["Comisión de Mercado Libre", actual.costos.comision],
+                  ["Envío", actual.costos.envio],
+                  ["Publicidad", actual.inversion],
+                  ["Costo del producto", actual.costos.costoProducto],
+                  ["Empaque", actual.costos.empaque],
                 ].map(([concepto, valor]) => (
                   <FilaTabla key={concepto}>
                     <CeldaTabla>{concepto}</CeldaTabla>
-                    <CeldaTabla numerica>{plata(valor)}</CeldaTabla>
+                    <CeldaTabla numerica>{plata(enCostos(valor))}</CeldaTabla>
+                    <CeldaTabla numerica>{pct(participacion(valor, actual.ventasConcretadas))}</CeldaTabla>
                   </FilaTabla>
                 ))}
                 <FilaTabla>
@@ -297,12 +306,12 @@ export default async function DetalleOptimizacionPage({
                   <CeldaTabla numerica>
                     <span className={styles.notaNeutra}>Próximamente</span>
                   </CeldaTabla>
+                  <CeldaTabla numerica>—</CeldaTabla>
                 </FilaTabla>
                 {/* Ventas − todo lo de arriba (sin impuestos todavía). */}
                 <FilaTabla className={styles.filaUtilidad}>
                   <CeldaTabla>
                     <strong>Utilidad</strong>
-                    {actual.margen !== null ? <span className={styles.notaNeutra}>{` · ${pct(actual.margen)} de lo vendido`}</span> : null}
                   </CeldaTabla>
                   <CeldaTabla numerica>
                     {actual.ganancia === null ? (
@@ -310,6 +319,9 @@ export default async function DetalleOptimizacionPage({
                     ) : (
                       <strong className={Number(actual.ganancia) < 0 ? styles.negativo : styles.positivo}>{plata(enCostos(actual.ganancia))}</strong>
                     )}
+                  </CeldaTabla>
+                  <CeldaTabla numerica>
+                    {actual.margen === null ? "—" : <strong className={Number(actual.margen) < 0 ? styles.negativo : styles.positivo}>{pct(actual.margen)}</strong>}
                   </CeldaTabla>
                 </FilaTabla>
               </Tabla>

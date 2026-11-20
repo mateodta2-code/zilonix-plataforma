@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { leerVisitasPorDia } from "@/lib/ml/cliente";
-import { diasInventario, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, utilidadAcumulada, variacion, type LineaVendida } from "@/lib/optimizacion/calculos";
+import { diasInventario, type LineaVendida, participacion, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, utilidadAcumulada, variacion } from "@/lib/optimizacion/calculos";
 import { opcionesPeriodo, resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
 
 const AHORA = new Date("2026-11-17T15:00:00-05:00");
@@ -160,5 +160,19 @@ describe("utilidad total de la publicación (toda la historia)", () => {
     expect(utilidadAcumulada([linea("p1", "2026-06-01", "23000.00")], [], false)).toMatchObject({ ganancia: null, pedidosSinCosto: 0, unidades: 1 });
     expect(utilidadAcumulada([linea("p1", "2026-06-01", null, { costos: null })], [], true).ganancia).toBeNull();
     expect(utilidadAcumulada([], [], true)).toMatchObject({ ganancia: null, pedidos: 0, primerDia: null });
+  });
+});
+
+describe("participacion (% de cada costo sobre las ventas)", () => {
+  it("con los números de la captura: comisión 40.299 de 237.051 ventas = 17 %", () => {
+    expect(participacion("40299", "237051")).toBe("17.00");
+    expect(participacion("112000", "237051")).toBe("47.25");
+    expect(participacion("237051", "237051")).toBe("100.00");
+  });
+
+  it("sin ventas o sin el monto, no hay porcentaje (nunca un 0 inventado)", () => {
+    expect(participacion("100", "0")).toBeNull();
+    expect(participacion(null, "100")).toBeNull();
+    expect(participacion("100", null)).toBeNull();
   });
 });

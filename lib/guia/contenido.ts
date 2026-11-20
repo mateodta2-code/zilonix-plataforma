@@ -154,7 +154,7 @@ export const GUIA: GrupoGuia[] = [
         pasos: [
           "Elige el período (7, 14, 30 o 90 días) y busca la publicación.",
           "Despliega una fila para ver tus competidores. Si no es de catálogo, «Buscar 10 competidores» lo hace con la extensión.",
-          "Haz clic en «Ver detalle →» (debajo del nombre de la publicación) para ver las gráficas por día (pasa el cursor para ver el día y las ventas), los costos con su utilidad, la utilidad total de la publicación y el enlace «Ver publicación en Mercado Libre ↗».",
+          "Haz clic en «Ver detalle →» (debajo del nombre de la publicación) para ver las gráficas por día (pasa el cursor para ver el día y las ventas), los costos con su utilidad (y el % que representa cada costo sobre las ventas), la utilidad total de la publicación y el enlace «Ver publicación en Mercado Libre ↗».",
           "Desde el detalle puedes cambiar precio, título y fotos (subir, arrastrar para ordenar, elegir portada). Nada llega a Mercado Libre hasta que guardas.",
           "En el detalle, debajo de las fotos, está «Crear imagen con IA». Ahí eliges la foto base, escribes la ficha técnica del producto y creas portadas de venta (1, 4 o 10, cada una distinta).",
           "Para una imagen informativa, elige cuál de las 10 quieres (modo de uso, características, beneficios, qué incluye, comparación, preguntas frecuentes…), pide la propuesta, revisa y corrige el título y el copy, y solo entonces aprieta «CREAR imagen».",
