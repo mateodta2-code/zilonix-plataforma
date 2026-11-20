@@ -1,0 +1,87 @@
+Crear 14 portadas diferentes para una misma publicación de Mercado Libre.
+Las imágenes NO son infografías.
+Las imágenes NO son fichas técnicas.
+Las imágenes NO son imágenes con beneficios.
+Las imágenes son PORTADAS DE VENTA.
+Cada imagen debe explicar visualmente para qué sirve el producto en menos de 1 segundo.
+
+INFORMACIÓN NECESARIA DEL CLIENTE
+Para iniciar cualquier proyecto únicamente se solicitará:
+1. FOTO DEL PRODUCTO. Preferiblemente: PNG fondo transparente. Fotografía frontal. Fotografía en alta resolución.
+2. FICHA TÉCNICA O INFORMACIÓN DEL PRODUCTO: Ingredientes. Materiales. Uso principal. Público objetivo. Beneficios generales. Registro INVIMA (si aplica).
+No se requiere nada más.
+
+REGLAS OBLIGATORIAS
+FONDO: Siempre fondo blanco puro. No usar: fondos negros, fondos oscuros, fondos degradados, fondos de paisaje, fondos de color.
+PRODUCTO: El producto siempre debe ser protagonista. Debe ocupar una posición principal. La imagen debe construirse alrededor del producto.
+TEXTO: No agregar títulos, frases promocionales, beneficios, llamados a la acción ni etiquetas adicionales. La imagen debe comunicar sola.
+
+Actúa como un diseñador gráfico publicitario profesional, especializado en fotografía comercial hiperrealista, composición visual y creación de portadas de productos para e-commerce y Mercado Libre.
+Utiliza las fotografías del producto proporcionadas como referencia obligatoria.
+
+OBJETIVO DEL DISEÑO
+Crear una imagen publicitaria profesional donde el producto sea el protagonista absoluto y donde toda la composición explique visualmente su utilidad, sus beneficios, sus características y los elementos que incluye, sin depender de textos explicativos.
+
+1. PRODUCTO PRINCIPAL — PROTAGONISTA
+- Ubica el producto en primer plano, grande, nítido y visualmente dominante, ocupando aproximadamente entre el 50 % y el 65 % de la composición.
+- Utiliza una perspectiva tridimensional fotográfica que permita apreciar su forma, textura, materiales y detalles reales.
+- Conserva exactamente su diseño original, proporciones, estructura, color, accesorios y componentes.
+- No inventes piezas, no alteres su funcionamiento ni modifiques su estructura.
+- Aplica iluminación comercial profesional, sombras suaves y reflejos naturales que destaquen su calidad.
+- El producto debe captar inmediatamente la atención del comprador.
+
+2. FONDO VISUAL — MOSTRAR PARA QUÉ SIRVE
+El fondo debe comunicar visualmente el uso real del producto, no funcionar simplemente como decoración.
+- Incorpora una escena secundaria donde el producto se esté utilizando en una situación real y cotidiana.
+- La escena debe estar directamente relacionada con su función.
+- Puede aparecer una persona, un entorno, una actividad o elementos relacionados con el uso del producto.
+- Ubica esta escena detrás, a un costado o dentro de una composición circular integrada.
+- Utiliza desenfoques suaves, transiciones de luz o profundidad para separar visualmente el producto principal del fondo.
+- La escena de uso nunca debe competir con el producto protagonista.
+La imagen debe permitir que el comprador comprenda para qué sirve el producto con solo mirarla.
+
+3. CARACTERÍSTICAS — COMUNICACIÓN VISUAL
+Integra las características más importantes mediante recursos gráficos y fotográficos: acercamientos de detalles reales; vistas secundarias del producto; ampliaciones de materiales, texturas, conexiones o mecanismos; representaciones visuales de sus funciones; escenas que demuestren sus ventajas prácticas.
+Utiliza círculos, ventanas de detalle, perspectivas complementarias o recortes fotográficos integrados en la composición.
+No es necesario incluir todas las características. Selecciona únicamente las que aporten valor visual y ayuden a entender el producto.
+
+4. ACCESORIOS — QUÉ INCLUYE
+Si el producto incluye accesorios, componentes adicionales o elementos de instalación, muéstralos organizados visualmente.
+- Coloca los accesorios en una zona secundaria, preferiblemente inferior o lateral.
+- Mantén sus proporciones y colores reales.
+- Separa visualmente cada elemento para que pueda identificarse.
+- No agregues accesorios que no estén incluidos en el producto original.
+- Si no incluye accesorios, utiliza ese espacio para mostrar otro detalle funcional.
+
+5. COMPOSICIÓN PUBLICITARIA
+Crea una composición equilibrada, moderna, limpia y atractiva: producto principal grande en primer plano; fondo blanco puro o predominantemente blanco; escena de uso integrada visualmente detrás o alrededor del producto; detalles y características distribuidos estratégicamente; accesorios ordenados en un espacio secundario; profundidad mediante sombras naturales y transiciones suaves; elementos gráficos sutiles que ayuden a organizar la información.
+La composición no debe parecer un collage de fotografías independientes. Todos los elementos deben sentirse integrados dentro de un mismo diseño publicitario.
+
+6. ESTILO FOTOGRÁFICO
+Fotografía comercial hiperrealista de alta gama: iluminación profesional de estudio; materiales y texturas realistas; enfoque nítido en el producto principal; profundidad visual natural; colores fieles a las referencias; acabado premium de catálogo comercial; estética moderna, clara y atractiva; sin apariencia de ilustración, caricatura ni render 3D artificial.
+
+7. FORMATO Y RESTRICCIONES
+- Formato cuadrado 1:1.
+- Resolución de 500 × 500 píxeles.
+- Fondo predominantemente blanco #FFFFFF.
+- Una sola imagen final.
+- Sin collage de varias portadas.
+- Sin textos, títulos, marcas de agua ni elementos decorativos innecesarios.
+- No modificar el producto original.
+- No inventar funciones ni accesorios.
+
+RESULTADO ESPERADO
+Una portada publicitaria profesional donde el comprador pueda identificar inmediatamente: 1. Qué producto es. 2. Para qué sirve. 3. Cómo se utiliza. 4. Cuáles son sus características principales. 5. Qué elementos incluye.
+Todo mediante una composición fotográfica atractiva, donde el producto sea siempre el protagonista y la información visual secundaria refuerce su utilidad.
+
+OBJETIVO FINAL
+Las 10 imágenes deben verse diferentes entre sí, aumentar el CTR, comunicar visualmente para qué sirve el producto, cumplir las políticas de Mercado Libre y mantener fondo blanco y aspecto premium de e-commerce.
+Debes entregar las 10 imágenes en archivos diferentes en un mismo mensaje; prohibido hacer collage.
+
+REGLA OBLIGATORIA ADICIONAL PARA TODAS LAS PORTADAS (PRODUCTO + USO + INCLUYE) — instrucción Melissa / Zilonix 2026-10-24:
+1) Mostrar el PRODUCTO PRINCIPAL claro, completo y fiel a la foto de referencia.
+2) A TRAVÉS DE LA IMAGEN se debe entender PARA QUÉ SIRVE el producto: la escena de fondo muestra el uso, el diseño aplicado, el beneficio visual o el contexto de uso; NO basta el producto solo sobre fondo vacío o blanco sin contexto.
+3) Mostrar QUÉ INCLUYE / con qué viene cuando es kit o trae accesorios (piezas visibles y ordenadas).
+4) Portadas NO repetitivas: cada portada con ángulo, composición y escena de uso DISTINTOS.
+5) Exigir calidad premium: si el resultado es mediocre, genérico o no se entiende el uso, REGENERAR antes de entregar.
+Mantener siempre las políticas de Mercado Libre: sin claims de salud, sin curas ni tratamientos, sin promesas, sin textos ni logos inventados.
