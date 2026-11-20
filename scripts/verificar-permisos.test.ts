@@ -135,6 +135,8 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/publicar/actions.ts",
   // «Crear con IA» (PR1, textos): mismo permiso que publicar (inventario/crear).
   "app/panel/publicar/ia/actions.ts",
+  // «Generar con IA» (PR2, imágenes): mismo permiso que publicar.
+  "app/panel/publicar/ia/imagenes/actions.ts",
   "app/panel/publicar/[id]/page.tsx",
   // Parte 3 ("importadores + permalink + fotos Cloudinary + botón
   // extensión") — buscarImportacionPorSkuAction/buscarImportacionPorLinkAction

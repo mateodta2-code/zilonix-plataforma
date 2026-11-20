@@ -10,6 +10,8 @@ import { ConectarCanva } from "./ConectarCanva";
 import { mensajeErrorConectarCanva } from "./canva-mensajes-error";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
 import { CrearConIA } from "./CrearConIA";
+import { GenerarConIA } from "./GenerarConIA";
+import type { Ficha } from "@/lib/publicaciones/ficha";
 import { GaleriaFotos } from "./GaleriaFotos";
 import { PortadaCuenta } from "./PortadaCuenta";
 import { SelectorCategoria, type CategoriaElegida } from "./SelectorCategoria";
@@ -97,6 +99,9 @@ export function FormularioPublicar({
   const [categoriaElegida, setCategoriaElegida] = useState<CategoriaElegida | null>(null);
   const [caracteristicas, setCaracteristicas] = useState<{ principales: CaracteristicaCategoria[]; secundarias: CaracteristicaCategoria[] } | null>(null);
   const [maxFotos, setMaxFotos] = useState<number | null>(null);
+  // Zona de fotos: «Subir mis fotos» (lo de siempre) o «Generar con IA» (PR2).
+  const [zonaFotos, setZonaFotos] = useState<"subir" | "ia">("subir");
+  const [fichaIA, setFichaIA] = useState<{ ficha: Ficha; categoriaId: string | null } | null>(null);
   const [variantes, setVariantes] = useState<VariantesEditadas | null>(inicial.variantes);
   const [portadasPorVariante, setPortadasPorVariante] = useState<Record<string, string>>(inicial.portadasPorVariante);
   // Punto 7 del pedido — "ACTIVADO por defecto" en una publicación
@@ -300,7 +305,27 @@ export function FormularioPublicar({
         el envío si nadie la completaba); la tarjeta "+" de
         GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
         agregar nada. */}
+        <span className={styles.filtroIA} role="tablist" aria-label="Cómo agregar fotos">
+          <Boton type="button" chico variante={zonaFotos === "subir" ? "primario" : "secundario"} onClick={() => setZonaFotos("subir")} aria-selected={zonaFotos === "subir"}>
+            Subir mis fotos
+          </Boton>
+          <Boton type="button" chico variante={zonaFotos === "ia" ? "primario" : "secundario"} onClick={() => setZonaFotos("ia")} aria-selected={zonaFotos === "ia"}>
+            Generar con IA
+          </Boton>
+        </span>
+        {/* La galería se ve siempre: las imágenes generadas que elijas entran a esta misma lista. */}
         <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} limiteFotos={maxFotos} />
+        {zonaFotos === "ia" ? (
+          <GenerarConIA
+            cuentas={cuentasMarcadas}
+            ficha={fichaIA?.ficha ?? null}
+            categoriaId={categoriaElegida?.categoryId ?? fichaIA?.categoriaId ?? null}
+            fotos={imagenes.filter(Boolean)}
+            espacioLibre={maxFotos == null ? null : Math.max(0, maxFotos - imagenes.filter(Boolean).length)}
+            onAgregarFotos={(urls) => setImagenes((actuales) => [...actuales.filter(Boolean), ...urls.filter((u) => !actuales.includes(u))])}
+            onPortadaCuenta={(id, url) => actualizarCuenta(id, "portadaUrl", url)}
+          />
+        ) : null}
         {maxFotos != null && (
           <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
             Esta categoría admite hasta {maxFotos} fotos en Mercado Libre
@@ -322,6 +347,7 @@ export function FormularioPublicar({
           fotos={imagenes.filter(Boolean)}
           onUsarTitulo={(id, titulo) => actualizarCuenta(id, "titulo", titulo)}
           onUsarDescripcion={(id, descripcion) => actualizarCuenta(id, "descripcion", descripcion)}
+          onFicha={setFichaIA}
         />
       </Tarjeta>
 
