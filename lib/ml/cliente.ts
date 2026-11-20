@@ -1868,30 +1868,51 @@ export function leerItemOptimizacion(body: unknown): ItemOptimizacionMl | null {
 }
 
 // /items?ids= en lotes de 20. Un lote que falla (incluso con 403) no
-// tumba los demás: sus publicaciones quedan fuera y el llamador lo ve
-// porque devuelve menos de las que pidió.
+// tumba los demás. Mercado Libre a veces responde 403 a TODO el lote
+// aunque cada publicación se lea bien por separado (staging, 19-nov:
+// MCO1342632705 de STOREKINGSAS, /items?ids= → 403 y /items/{id} → 200),
+// así que las que faltaron se piden una por una. Si tampoco salen, el
+// llamador lo ve porque devuelve menos de las que pidió.
 export async function leerItemsOptimizacionMl(ids: string[], token: string): Promise<ItemOptimizacionMl[]> {
   const validos = ids.filter((id) => PATRON_ID_PRODUCTO_O_ITEM.test(id));
   const items: ItemOptimizacionMl[] = [];
   for (let i = 0; i < validos.length; i += TAMAÑO_LOTE_DETALLE_ITEMS) {
     const lote = validos.slice(i, i + TAMAÑO_LOTE_DETALLE_ITEMS);
-    let resp: RespuestaLecturaMl<{ code?: unknown; body?: unknown }[]>;
+    const leidos = new Set<string>();
     try {
-      resp = await pedirLecturaMl<{ code?: unknown; body?: unknown }[]>("/items", token, {
+      const resp = await pedirLecturaMl<{ code?: unknown; body?: unknown }[]>("/items", token, {
         query: `?ids=${lote.join(",")}&attributes=${ATRIBUTOS_ITEM_OPTIMIZACION}`,
       });
+      for (const fila of resp.ok && Array.isArray(resp.data) ? resp.data : []) {
+        if (fila?.code !== 200) continue;
+        const item = leerItemOptimizacion(fila.body);
+        if (item) {
+          items.push(item);
+          leidos.add(item.id);
+        }
+      }
     } catch (error) {
-      if (error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) continue;
-      throw error;
+      if (!(error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError)) throw error;
     }
-    if (!resp.ok || !Array.isArray(resp.data)) continue;
-    for (const fila of resp.data) {
-      if (fila?.code !== 200) continue;
-      const item = leerItemOptimizacion(fila.body);
+    for (const id of lote) {
+      if (leidos.has(id)) continue;
+      const item = await leerItemOptimizacionUnoMl(id, token);
       if (item) items.push(item);
     }
   }
   return items;
+}
+
+// Una sola publicación, mismos campos que el lote. null si Mercado Libre
+// no la devuelve (no existe, sin permiso o caído).
+async function leerItemOptimizacionUnoMl(id: string, token: string): Promise<ItemOptimizacionMl | null> {
+  try {
+    const resp = await pedirLecturaMl<unknown>(`/items/${id}`, token, { query: `?attributes=${ATRIBUTOS_ITEM_OPTIMIZACION}` });
+    return resp.ok ? leerItemOptimizacion(resp.data) : null;
+  } catch (error) {
+    if (error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) return null;
+    throw error;
+  }
 }
 
 // Visitas de los últimos `dias` días de una publicación.

@@ -494,7 +494,7 @@ export async function proponerContenidoIAAction(entrada: {
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
   const conexion = await obtenerConexionIAParaModulo(prep.ctx.empresaId, "optimizacion");
-  if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta OpenAI o Google en Configuración → IA." };
+  if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta tu IA en Administración → Conectar IA (OpenAI o Google generan imágenes)." };
   const descripcion = await leerDescripcionItemMl(prep.item.id, prep.token).catch(() => null);
   try {
     const contenido = await proponerContenido(conexion, tipo.id, prep.item.titulo, limpiarIndicaciones(entrada.ficha), descripcion);

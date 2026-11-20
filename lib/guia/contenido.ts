@@ -30,7 +30,7 @@ const CONECTAR_IA: ApartadoGuia = {
     "En Zilonix ve a Administración → Conectar IA (necesitas permiso para modificar la configuración).",
     "Pulsa «Agregar IA», elige el proveedor (OpenAI o Google), escribe un nombre y un modelo de texto (por ejemplo gpt-5-mini o gemini-2.5-flash) y pega la API key.",
     "Guarda y usa «Probar conexión». La clave se guarda cifrada y no se vuelve a mostrar.",
-    "Vuelve a Optimización → entra a una publicación → «Crear imagen con IA».",
+    "Vuelve a Optimización → «Ver detalle →» de una publicación → debajo de las fotos aparece «Crear imagen con IA» (recarga la página si ya la tenías abierta).",
   ],
 };
 
@@ -154,14 +154,15 @@ export const GUIA: GrupoGuia[] = [
         pasos: [
           "Elige el período (7, 14, 30 o 90 días) y busca la publicación.",
           "Despliega una fila para ver tus competidores. Si no es de catálogo, «Buscar 10 competidores» lo hace con la extensión.",
-          "Entra al detalle para ver gráficas por día, costos con utilidad y la utilidad total de la publicación.",
+          "Haz clic en «Ver detalle →» (debajo del nombre de la publicación) para ver las gráficas por día (pasa el cursor para ver el día y las ventas), los costos con su utilidad, la utilidad total de la publicación y el enlace «Ver publicación en Mercado Libre ↗».",
           "Desde el detalle puedes cambiar precio, título y fotos (subir, arrastrar para ordenar, elegir portada). Nada llega a Mercado Libre hasta que guardas.",
-          "Con «Crear imagen con IA» generas portadas de venta (1, 4 o 10, cada una distinta) a partir de tus fotos reales. Escribe antes la ficha técnica del producto.",
+          "En el detalle, debajo de las fotos, está «Crear imagen con IA». Ahí eliges la foto base, escribes la ficha técnica del producto y creas portadas de venta (1, 4 o 10, cada una distinta).",
           "Para una imagen informativa, elige cuál de las 10 quieres (modo de uso, características, beneficios, qué incluye, comparación, preguntas frecuentes…), pide la propuesta, revisa y corrige el título y el copy, y solo entonces aprieta «CREAR imagen».",
         ],
         apartados: [CONECTAR_IA],
         consejos: [
           "Cada imagen la cobra la cuenta de IA de tu empresa (unos centavos de dólar). Cambiar el proveedor también cambia la IA de los textos (Promociones).",
+          "Si debajo de las fotos solo ves el aviso «Para crear imágenes con IA, conecta OpenAI o Google…», la empresa todavía no tiene IA conectada: sigue «Cómo conectar la IA».",
           "Revisa cada imagen creada: si no se entiende, se ve genérica o el texto salió con errores, descártala y crea otra.",
           "Si el copy trae palabras que Mercado Libre no permite (curar, tratar, garantizado, expertos, antes/después…), Zilonix no deja crear la imagen hasta que las cambies.",
           "Las opiniones deben ser de compradores reales: cópialas de tus calificaciones. La IA nunca las inventa.",

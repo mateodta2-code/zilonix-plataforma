@@ -1,7 +1,7 @@
 // Optimización — crear una foto de la publicación con IA a partir de
 // fotos REALES del producto (decisión de producto: nunca desde texto solo,
 // para que el producto siga siendo el que se vende). Usa la conexión de
-// IA de cada empresa (Configuración → IA): solo OpenAI y Google generan
+// IA de cada empresa (Administración → Conectar IA): solo OpenAI y Google generan
 // imágenes; Anthropic y los compatibles con OpenAI no.
 //
 // Contratos públicos de cada proveedor (mismo criterio que
@@ -178,7 +178,7 @@ async function conGoogle(apiKey: string, fotos: FotoBase[], prompt: string): Pro
 }
 
 function mensajeHttp(proveedor: string, status: number): string {
-  if (status === 401 || status === 403) return `${proveedor} rechazó la clave de IA de la empresa (revisa Configuración → IA).`;
+  if (status === 401 || status === 403) return `${proveedor} rechazó la clave de IA de la empresa (revisa Administración → Conectar IA).`;
   if (status === 429) return `${proveedor} pidió esperar (límite o saldo de la cuenta de IA). Intenta más tarde.`;
   if (status === 400) return `${proveedor} no aceptó la foto o la instrucción. Prueba con otra foto.`;
   return `${proveedor} respondió con un error (${status}). Intenta de nuevo.`;
@@ -189,7 +189,7 @@ function mensajeHttp(proveedor: string, status: number): string {
 export async function generarImagenDesdeFoto(conexion: ConexionIAConClave, fotos: FotoBase[], prompt: string): Promise<FotoBase> {
   if (fotos.length === 0) throw new ErrorImagenIA("Falta la foto base.");
   if (!proveedorGeneraImagenes(conexion.proveedor)) {
-    throw new ErrorImagenIA("La IA conectada no genera imágenes. Conecta OpenAI o Google en Configuración → IA.");
+    throw new ErrorImagenIA("La IA conectada no genera imágenes. Conecta OpenAI o Google en Administración → Conectar IA.");
   }
   const buffer = conexion.proveedor === "openai" ? await conOpenAI(conexion.apiKey, fotos.slice(0, MAXIMO_FOTOS_REFERENCIA), prompt) : await conGoogle(conexion.apiKey, fotos.slice(0, MAXIMO_FOTOS_REFERENCIA), prompt);
   const tipo = tipoImagenPorMagicBytes(buffer);

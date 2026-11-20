@@ -371,7 +371,7 @@ describe("crear imagen con IA (no toca Mercado Libre)", () => {
   });
 
   it("un error de la IA llega con su texto; uno inesperado, genérico", async () => {
-    ia.generar.mockRejectedValueOnce(new ErrorImagenIA("OpenAI rechazó la clave de IA de la empresa (revisa Configuración → IA)."));
+    ia.generar.mockRejectedValueOnce(new ErrorImagenIA("OpenAI rechazó la clave de IA de la empresa (revisa Administración → Conectar IA)."));
     expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/rechazó la clave/);
     ia.generar.mockRejectedValueOnce(new Error("detalle interno con datos"));
     expect((await generarImagenIAAction(ENTRADA)).aviso).toBe("No se pudo crear la imagen. Intenta de nuevo.");

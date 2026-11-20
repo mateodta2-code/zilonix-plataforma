@@ -312,7 +312,7 @@ export function IconoPromociones(props: IconoProps) {
 }
 
 // Rama feat-promociones — engranaje simple, para la sección de
-// Configuración (hoy solo "Conexión de IA").
+// Configuración (hoy solo un aviso hacia Conectar IA).
 export function IconoConfiguracion(props: IconoProps) {
   return (
     <Svg {...props}>
