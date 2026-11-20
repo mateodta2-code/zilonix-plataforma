@@ -48,6 +48,9 @@ export type DefinicionAtributoMl = {
   name: string;
   value_type?: string | null;
   values?: ValorAtributoMl[];
+  // Solo para value_type "number_unit": unidades que acepta la categoría.
+  allowed_units?: { id: string; name: string }[];
+  default_unit?: string | null;
   tags?: {
     required?: boolean;
     catalog_required?: boolean;
