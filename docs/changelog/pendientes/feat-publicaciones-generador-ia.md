@@ -19,7 +19,7 @@
   - **Errores y freno:**
     - Mensajes fijos (`lib/publicaciones/errores.ts`): nunca el texto del proveedor ni la llave, tampoco en los logs.
     - Sin IA, se muestra el enlace a Administración → Conectar IA.
-    - Freno de 30 llamadas por minuto por empresa, en memoria (`lib/publicaciones/freno.ts`).
+    - Sin límite de uso (decisión de Mateo, 19-nov). Solo hay un freno de concurrencia: máximo 4 llamadas de texto al mismo tiempo por empresa; las demás esperan en fila y arrancan solas, nunca se rechazan (`lib/publicaciones/freno.ts`, en memoria).
   - **Guía:** la de Publicar explica «Crear con IA» paso a paso, y «Cómo conectar la IA» incluye asignar la IA al módulo.
 - **PR2 (pendiente, con migración — se mostrará el SQL a Mateo antes de crearla):** imágenes (catálogo de tipos, estilos «Experto ML» y «Prompt Zilonix», paralelo de a 2, regenerar una, diagnóstico de Mercado Libre, agregar a la galería, historial por empresa y freno en base).
 - **PR3 (después, no ahora):** manual de marca guardado por empresa y quitar fondo con la llave propia de la empresa (sin servicio pago de plataforma sin el sí de Mateo).

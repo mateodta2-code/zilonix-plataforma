@@ -40,7 +40,7 @@ vi.mock("@/lib/ml/cliente", () => ({ tendenciasCategoriaMl: ml.tendencias }));
 
 import { analizarProductoAction, escribirDescripcionAction, proponerTitulosAction } from "./actions";
 import { ErrorProveedorIA } from "@/lib/ia/proveedores";
-import { reiniciarFrenoTexto, MAXIMO_LLAMADAS_TEXTO_POR_MINUTO } from "@/lib/publicaciones/freno";
+import { conCupoDeTexto, llamadasDeTextoEnCurso, reiniciarFrenoTexto, MAXIMO_TEXTO_SIMULTANEO_POR_EMPRESA } from "@/lib/publicaciones/freno";
 
 const FICHA_OK = { nombre: { valor: "Garrafa térmica 1 L", origen: "vendedor" }, incluye: { valor: ["Garrafa"], origen: "foto" } };
 
@@ -89,10 +89,28 @@ describe("análisis", () => {
     expect(JSON.stringify(r)).not.toContain(LLAVE);
   });
 
-  it("freno anti-abuso por empresa", async () => {
+  it("sin límite de uso: muchas seguidas siguen funcionando", async () => {
     ia.texto.mockResolvedValue(JSON.stringify({ nombre: { valor: "Garrafa", origen: "vendedor" } }));
-    for (let i = 0; i < MAXIMO_LLAMADAS_TEXTO_POR_MINUTO; i++) await analizarProductoAction({ cuentaMlId: CUENTA, info: "Garrafa" });
-    expect(await analizarProductoAction({ cuentaMlId: CUENTA, info: "Garrafa" })).toMatchObject({ ok: false, aviso: expect.stringMatching(/minuto/) });
+    for (let i = 0; i < 40; i++) expect((await analizarProductoAction({ cuentaMlId: CUENTA, info: "Garrafa" })).ok).toBe(true);
+  });
+
+  it("freno de concurrencia: máximo 4 a la vez por empresa; las demás esperan y arrancan solas", async () => {
+    const liberar: (() => void)[] = [];
+    const tarea = () => new Promise<string>((ok) => liberar.push(() => ok("listo")));
+    const corriendo = Array.from({ length: 6 }, () => conCupoDeTexto("empresa-1", tarea));
+    const otra = conCupoDeTexto("empresa-2", async () => "otra");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(liberar).toHaveLength(MAXIMO_TEXTO_SIMULTANEO_POR_EMPRESA);
+    expect(await otra).toBe("otra"); // el cupo es por empresa
+    liberar.shift()!();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(liberar).toHaveLength(MAXIMO_TEXTO_SIMULTANEO_POR_EMPRESA); // la 5.ª arrancó sola
+    while (liberar.length) {
+      liberar.shift()!();
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(await Promise.all(corriendo)).toEqual(Array(6).fill("listo"));
+    expect(llamadasDeTextoEnCurso("empresa-1")).toBe(0);
   });
 });
 

@@ -11,9 +11,9 @@ import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cue
 import { resolverCategoria } from "@/lib/ml/publicar";
 import { analizarProducto, ErrorAnalisisIA } from "@/lib/publicaciones/analisis";
 import { armarDescripcion, leerPartesDescripcion, promptDescripcion } from "@/lib/publicaciones/descripcion";
-import { mensajeErrorIA, MENSAJE_FRENO, MENSAJE_SIN_IA } from "@/lib/publicaciones/errores";
+import { mensajeErrorIA, MENSAJE_SIN_IA } from "@/lib/publicaciones/errores";
 import { fichaConfirmada, fichaEnTexto, idiomaDeSitio, leerFicha, limpiarInfoVendedor, LARGO_GARANTIA, MAXIMO_FOTOS_ANALISIS, type Ficha } from "@/lib/publicaciones/ficha";
-import { permitirLlamadaTexto } from "@/lib/publicaciones/freno";
+import { conCupoDeTexto } from "@/lib/publicaciones/freno";
 import { leerPropuestaTitulos, promptTitulos, type PalabraClave } from "@/lib/publicaciones/titulos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
@@ -47,7 +47,6 @@ async function preparar(cuentaMlId: unknown): Promise<Contexto | Fallo> {
   if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
   const conexion = await obtenerConexionIAParaModulo(empresa.id, "publicaciones");
   if (!conexion) return { ok: false, aviso: MENSAJE_SIN_IA, conectarIA: true };
-  if (!permitirLlamadaTexto(empresa.id)) return { ok: false, aviso: MENSAJE_FRENO };
   const { idioma, pais } = idiomaDeSitio(cuenta.siteId);
   return { empresaId: empresa.id, conexion, cuenta: { id: cuenta.id, siteId: cuenta.siteId }, idioma, pais };
 }
@@ -73,7 +72,7 @@ export async function analizarProductoAction(entrada: { cuentaMlId: string; foto
   const info = limpiarInfoVendedor(entrada.info);
   if (fotos.length === 0 && !info) return { ok: false, aviso: "Agrega fotos del producto o escribe qué es en «Información del producto»." };
   try {
-    const { ficha, leyoFotos } = await analizarProducto(ctx.conexion, { idioma: ctx.idioma, pais: ctx.pais, info, fotos });
+    const { ficha, leyoFotos } = await conCupoDeTexto(ctx.empresaId, () => analizarProducto(ctx.conexion, { idioma: ctx.idioma, pais: ctx.pais, info, fotos }));
     let categoria: { id: string; nombre: string } | null = null;
     try {
       const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
@@ -116,7 +115,9 @@ export async function proponerTitulosAction(entrada: {
   const info = limpiarInfoVendedor(entrada.info);
   const categoria = typeof entrada.categoriaNombre === "string" ? entrada.categoriaNombre.slice(0, 120) : null;
   try {
-    const respuesta = await llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info }), { maxTokens: 800 });
+    const respuesta = await conCupoDeTexto(ctx.empresaId, () =>
+      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info }), { maxTokens: 800 })
+    );
     const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info });
     if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
     return { ok: true, ...propuesta, conTendencias: tendencias.length > 0 };
@@ -136,7 +137,7 @@ export async function escribirDescripcionAction(entrada: { cuentaMlId: string; f
   const ctx = await preparar(entrada.cuentaMlId);
   if ("ok" in ctx) return ctx;
   try {
-    const respuesta = await llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais }), { maxTokens: 1_500 });
+    const respuesta = await conCupoDeTexto(ctx.empresaId, () => llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais }), { maxTokens: 1_500 }));
     const partes = leerPartesDescripcion(respuesta, fichaEnTexto(ficha));
     if (!partes) return { ok: false, aviso: "La IA no devolvió una descripción usable. Intenta de nuevo." };
     const descripcion = armarDescripcion(partes, { ficha, garantia: limpiarInfoVendedor(entrada.garantia, LARGO_GARANTIA), idioma: ctx.idioma });

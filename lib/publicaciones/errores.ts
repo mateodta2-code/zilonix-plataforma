@@ -5,7 +5,6 @@ import { ErrorProveedorIA } from "@/lib/ia/proveedores";
 
 export const RUTA_CONECTAR_IA = "/panel/conectar-ia";
 export const MENSAJE_SIN_IA = "Conecta una IA en Administración → Conectar IA y asígnala al módulo Publicaciones (o márcala como principal).";
-export const MENSAJE_FRENO = "Hiciste muchas consultas seguidas a la IA. Espera un minuto e intenta de nuevo.";
 export const MENSAJE_GENERICO = "La IA no pudo responder. Intenta de nuevo en un momento.";
 
 // Los errores de lib/ia/proveedores.ts traen el estado HTTP entre
