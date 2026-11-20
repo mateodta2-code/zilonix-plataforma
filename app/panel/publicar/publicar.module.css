@@ -269,7 +269,7 @@
   height: 180px;
   object-fit: contain;
   border-radius: var(--radio-boton);
-  background: #fff;
+  background: var(--fondo-foto);
 }
 
 .promptIA {

@@ -78,7 +78,7 @@ export function promptFinalContenido(p: PropuestaContenido, datos: DatosProducto
     plantilla,
     "",
     "AJUSTES DE ZILONIX SELLER:",
-    `- País de esta publicación: ${datos.nombrePais}. Idioma de todo el texto: ${datos.idioma}, con tildes y ortografía correctas.`,
+    `- País de esta publicación: ${datos.nombrePais}. Ignora «Mercado Libre Colombia» del texto anterior: usa Mercado Libre ${datos.nombrePais}. Idioma de todo el texto: ${datos.idioma}, con tildes y ortografía correctas.`,
     `- Escribe EXACTAMENTE estos textos y ningún otro: título «${p.titulo}»; ${p.copy.map((c) => `«${c}»`).join(", ")}.`,
     "- Este fondo con degradado es para imágenes secundarias, nunca para la foto principal.",
     datos.registroSanitario ? `- Registro sanitario confirmado: ${datos.registroSanitario}.` : "- No muestres ningún registro, sello ni certificación.",
@@ -97,7 +97,7 @@ export function promptPropuestaContenidoZilonix(tipo: TipoContenidoZilonix, dato
       ? "En esta imagen el copy son SOLO las opiniones reales de abajo, copiadas tal cual (puedes acortarlas sin cambiar su sentido). Nunca escribas opiniones nuevas."
       : "",
     ajuste ? `El vendedor pidió AJUSTAR: «${ajuste.slice(0, 300)}».` : "",
-    `Idioma: ${datos.idioma}. País: ${datos.nombrePais}.`,
+    `Ignora «Mercado Libre Colombia» del texto anterior: esta publicación es de Mercado Libre ${datos.nombrePais}. Idioma: ${datos.idioma}.`,
     'Responde SOLO un JSON: {"titulo": "…", "copy": ["…", "…"], "composicion": "izquierda" | "derecha" | "centro"}',
   ]
     .filter(Boolean)

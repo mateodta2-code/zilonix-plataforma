@@ -236,9 +236,13 @@ export async function ajustarImagenAction(entrada: { imagenId: string; ajuste?: 
       if (trabajo.estilo === "zilonix_contenido") {
         const tipo = imagen.tipo as TipoContenidoZilonix;
         const opiniones = leerOpinionesReales(entrada.opiniones);
+        // Sin opiniones reales no se ajusta: la IA terminaría escribiéndolas.
+        if (tipo === "opiniones_reales" && opiniones.length === 0) {
+          return { ok: false, aviso: "Pega opiniones reales de tus compradores para ajustar esta imagen. La IA no las escribe." };
+        }
         const extra = tipo === "opiniones_reales" ? `\nOpiniones reales del vendedor:\n${opiniones.map((o) => `- ${o}`).join("\n")}` : "";
         const c = leerPropuestaContenidoZilonix(tipo, await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptPropuestaContenidoZilonix(tipo, datos, ajuste) + extra, { maxTokens: 700 })));
-        p = c ? { titulo: c.titulo, copy: tipo === "opiniones_reales" && opiniones.length > 0 ? opiniones : c.copy, composicion: c.composicion } : null;
+        p = c ? { titulo: c.titulo, copy: tipo === "opiniones_reales" ? opiniones : c.copy, composicion: c.composicion } : null;
       } else {
         p = leerTextosIA(await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptTextosExperto(imagen.tipo as TipoExpertoML, datos, ajuste), { maxTokens: 400 })));
       }

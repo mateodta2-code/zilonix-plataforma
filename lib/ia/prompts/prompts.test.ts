@@ -112,7 +112,8 @@ describe("Contenido Zilonix", () => {
     const p = promptFinalContenido({ tipo: "modo_uso", titulo: "Así se usa", copy: ["Limpia", "Aplica"], composicion: "derecha" }, DATOS);
     expect(p).toContain("Composición: producto a derecha.");
     expect(p).not.toContain("[bullets]");
-    expect(p).toContain("País de esta publicación: México. Idioma de todo el texto: es-MX");
+    expect(p).toContain("Ignora «Mercado Libre Colombia» del texto anterior: usa Mercado Libre México");
+    expect(p).toContain("Idioma de todo el texto: es-MX");
   });
 
   it("que_incluye pide lo incluido confirmado; la propuesta se lee sin confiar", () => {

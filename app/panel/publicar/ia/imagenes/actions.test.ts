@@ -146,6 +146,15 @@ describe("crear imagen", () => {
     expect(ml.diagnostico.mock.calls[0][2]).toBe("other");
   });
 
+  it("«Ajustar» «Opiniones reales» sin opiniones se rechaza (la IA nunca las escribe); con opiniones usa solo esas", async () => {
+    cola.leerImagen.mockResolvedValue({ id: IMG, trabajoId: "trabajo-1", tipo: "opiniones_reales", orden: 8, cuentaMlId: null, estado: "propuesta", url: null, propuesta: { titulo: "Opiniones", copy: ["Llegó bien"] } });
+    cola.leerTrabajo.mockResolvedValue({ id: "trabajo-1", siteId: "MCO", estilo: "zilonix_contenido", ficha: FICHA, cuentaMlId: C1 });
+    expect(await ajustarImagenAction({ imagenId: IMG, ajuste: "más cortas" })).toMatchObject({ ok: false, aviso: expect.stringMatching(/opiniones reales/) });
+    expect(ia.texto).not.toHaveBeenCalled();
+    const r = await ajustarImagenAction({ imagenId: IMG, ajuste: "más cortas", opiniones: "Buena calidad" });
+    expect(r.ok && (r.propuesta as { copy: string[] }).copy).toEqual(["Buena calidad"]);
+  });
+
   it("«Ajustar» una portada cambia la composición sin generar imagen ni repetir la de otra cuenta", async () => {
     const r = await ajustarImagenAction({ imagenId: IMG, asignadas: { [C2]: { composicion: 1, escena: 0 } } });
     if (!r.ok) throw new Error(r.aviso);
