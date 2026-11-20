@@ -27,7 +27,7 @@ import {
 import { LimiteMercadoLibreError, PATRON_ID_PRODUCTO_O_ITEM, pedirLecturaMl, type RespuestaLecturaMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { sincronizarDespacho } from "@/lib/ml/despachos";
-import { sincronizarLiberacion } from "@/lib/ml/liberacion";
+import { sincronizarLiberacion, type ResultadoLiberacion } from "@/lib/ml/liberacion";
 import { registrarEventoPedido } from "@/lib/ml/pedidos";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
 
@@ -102,7 +102,7 @@ async function leerDetalleOrden(token: string, orden: OrdenMl, esperar: Esperar)
 // vea afuera — dos objetos distintos, solo uno confiable. Se expone el
 // shipmentId YA resuelto para que el llamador nunca tenga que adivinar
 // cuál de los dos usar.
-export type ResultadoGuardarOrdenMl = ResultadoGuardarVenta & { shipmentIdExterno: string | null };
+export type ResultadoGuardarOrdenMl = ResultadoGuardarVenta & { shipmentIdExterno: string | null; liberacion: ResultadoLiberacion | "error" };
 
 // Una orden del listado: primero su detalle (comisión real), después
 // su envío, los costos del envío y las publicaciones. La usan
@@ -159,13 +159,14 @@ export async function guardarOrdenMl(
   // solo de los pagos que siguen sin liberar (lib/ml/liberacion.ts). Un
   // 429 persistente corta la cuenta como las demás llamadas; cualquier
   // otro fallo no tumba la venta ya guardada: la próxima sync reintenta.
+  let liberacion: ResultadoLiberacion | "error" = "error";
   try {
-    await sincronizarLiberacion(empresaId, cuentaMlId, guardada.pedidoId, orden, (ruta) => leerConReintento(ruta, token, undefined, esperar));
+    liberacion = await sincronizarLiberacion(empresaId, cuentaMlId, guardada.pedidoId, orden, (ruta) => leerConReintento(ruta, token, undefined, esperar));
   } catch (error) {
     if (error instanceof LimiteMercadoLibreError) throw error;
     console.error(`[ventas-finanzas] la liberación de la orden ${orden.id} no se pudo leer:`, error instanceof Error ? error.message : "error desconocido");
   }
-  return { ...guardada, shipmentIdExterno: shipmentId };
+  return { ...guardada, shipmentIdExterno: shipmentId, liberacion };
 }
 
 export type ResultadoSyncVentas = {
@@ -192,7 +193,11 @@ export async function sincronizarVentasCuenta(
   const token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
   const resultado: ResultadoSyncVentas = { leidas: 0, guardadas: 0, congeladas: 0, fallidas: 0, cortadaPorLimite: false };
 
-  const filtroHasta = rango.hasta ? `&order.date_last_updated.to=${encodeURIComponent(rango.hasta.toISOString())}` : "";
+  // Una línea por cuenta con lo que pasó con la liberación (bug de
+  // staging del 19-nov: por-cobrar en 0 sin ningún rastro en los logs).
+  const liberaciones = new Map<string, number>();
+
+  const filtroHasta = rango.hasta ?`&order.date_last_updated.to=${encodeURIComponent(rango.hasta.toISOString())}` : "";
   try {
     for (let offset = 0; ; offset += TAMANO_PAGINA) {
       const query = `?seller=${cuentaIdExterna}&order.date_last_updated.from=${encodeURIComponent(rango.desde.toISOString())}${filtroHasta}&sort=date_asc&limit=${TAMANO_PAGINA}&offset=${offset}`;
@@ -205,6 +210,7 @@ export async function sincronizarVentasCuenta(
           const guardada = await guardarOrdenMl(empresaId, cuentaMlId, token, orden, esperar);
           resultado.guardadas += 1;
           if (guardada.recienCongelada) resultado.congeladas += 1;
+          liberaciones.set(guardada.liberacion, (liberaciones.get(guardada.liberacion) ?? 0) + 1);
           // Issue "Despachados (15 días)" — bug real: antes de esto,
           // despachos_ml SOLO se llenaba en la importación inicial
           // (lib/ml/importacion.ts, una sola vez al conectar la
@@ -244,6 +250,10 @@ export async function sincronizarVentasCuenta(
   } catch (error) {
     if (!(error instanceof LimiteMercadoLibreError)) throw error;
     resultado.cortadaPorLimite = true;
+  }
+  if (liberaciones.size > 0) {
+    const resumen = [...liberaciones].map(([estado, n]) => `${estado} ${n}`).join(", ");
+    console.info(`[liberacion] cuenta ${cuentaMlId}: ${resumen}.`);
   }
 
   await dbComoEmpresa(empresaId, (tx) =>
