@@ -1,3 +1,4 @@
+import { Boton } from "@/components/marco/Boton";
 import { CUENTA_TODAS, leerCuentaMlDeQuery, PARAM_CUENTA } from "@/lib/ml/selector-cuenta";
 
 // Z-MT-08 — elige "Todas" o una cuenta de Mercado Libre de la empresa
@@ -61,7 +62,8 @@ export async function SelectorCuentaMl({
         name={PARAM_CUENTA}
         key={elegido}
         defaultValue={elegido}
-        style={{ flex: 1, padding: 8, minWidth: 180 }}
+        className="zx-control"
+        style={{ flex: 1, width: "auto", minWidth: 180 }}
       >
         <option value={CUENTA_TODAS}>Todas</option>
         {cuentas.map((c) => (
@@ -70,9 +72,10 @@ export async function SelectorCuentaMl({
           </option>
         ))}
       </select>
-      <button type="submit" style={{ padding: "8px 16px" }}>
+      {/* El botón del sistema, como el filtro de Actividad. */}
+      <Boton type="submit" chico>
         Aplicar
-      </button>
+      </Boton>
     </form>
   );
 }

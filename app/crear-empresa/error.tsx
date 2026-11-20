@@ -1,5 +1,7 @@
 "use client";
 
+import { Boton } from "@/components/marco/Boton";
+
 // Tarea 1.6 — límite de error propio para esta pantalla: sin esto, un
 // error esperable (nombre vacío, NIT repetido) cae en la pantalla
 // genérica de error de Next.js en vez de mostrarse como lo que es, un
@@ -9,9 +11,9 @@ export default function CrearEmpresaError({ error, reset }: { error: Error; rese
     <main style={{ maxWidth: 420, margin: "0 auto", padding: "48px 24px" }}>
       <h1 style={{ fontSize: 20, fontWeight: 700 }}>No se pudo crear la empresa</h1>
       <p style={{ opacity: 0.8, fontSize: 14 }}>{error.message}</p>
-      <button onClick={() => reset()} style={{ padding: "10px 16px", marginTop: 16 }}>
+      <Boton onClick={() => reset()} style={{ marginTop: 16 }}>
         Volver a intentar
-      </button>
+      </Boton>
     </main>
   );
 }

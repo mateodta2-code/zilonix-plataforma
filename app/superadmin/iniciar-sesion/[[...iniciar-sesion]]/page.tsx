@@ -1,3 +1,4 @@
+import { Boton } from "@/components/marco/Boton";
 import { redirect } from "next/navigation";
 import { SignIn } from "@clerk/nextjs";
 import { aparienciaClerk } from "@/components/acceso/aparienciaClerk";
@@ -21,7 +22,7 @@ export default async function IniciarSesionSuperadminPage({ searchParams }: { se
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>Acceso de superadmin</h1>
         <p style={{ fontSize: 14 }}>{MENSAJES[motivo] ?? MENSAJES["no-autorizado"]}</p>
         <form action={cerrarSesionSuperadminAction}>
-          <button type="submit">Cerrar sesión</button>
+          <Boton type="submit" variante="secundario">Cerrar sesión</Boton>
         </form>
       </main>
     );
