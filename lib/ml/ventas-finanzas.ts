@@ -27,6 +27,7 @@ import {
 import { LimiteMercadoLibreError, PATRON_ID_PRODUCTO_O_ITEM, pedirLecturaMl, type RespuestaLecturaMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { sincronizarDespacho } from "@/lib/ml/despachos";
+import { sincronizarLiberacion } from "@/lib/ml/liberacion";
 import { registrarEventoPedido } from "@/lib/ml/pedidos";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
 
@@ -153,6 +154,16 @@ export async function guardarOrdenMl(
     await registrarEventoPedido(empresaId, guardada.pedidoId, "entrega", new Date(envio.status_history.date_delivered)).catch((error) => {
       console.error(`[ventas-finanzas] no se pudo registrar el evento de entrega de la orden ${orden.id}:`, error instanceof Error ? error.message : "error desconocido");
     });
+  }
+  // Issue #422 (cuentas por cobrar) — fecha de liberación de la plata,
+  // solo de los pagos que siguen sin liberar (lib/ml/liberacion.ts). Un
+  // 429 persistente corta la cuenta como las demás llamadas; cualquier
+  // otro fallo no tumba la venta ya guardada: la próxima sync reintenta.
+  try {
+    await sincronizarLiberacion(empresaId, cuentaMlId, guardada.pedidoId, orden, (ruta) => leerConReintento(ruta, token, undefined, esperar));
+  } catch (error) {
+    if (error instanceof LimiteMercadoLibreError) throw error;
+    console.error(`[ventas-finanzas] la liberación de la orden ${orden.id} no se pudo leer:`, error instanceof Error ? error.message : "error desconocido");
   }
   return { ...guardada, shipmentIdExterno: shipmentId };
 }
