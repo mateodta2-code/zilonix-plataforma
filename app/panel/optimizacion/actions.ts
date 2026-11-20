@@ -29,7 +29,7 @@ import {
 } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary } from "@/lib/cloudinary";
-import { obtenerConexionIAConClave } from "@/lib/ia/conexion";
+import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { proponerContenido } from "@/lib/ia/contenido";
 import { faltaParaCrear, limpiarContenido, palabrasProhibidas, promptImagenContenido, tipoContenido, tipoLoEscribeLaIA, type ContenidoImagen } from "@/lib/ia/contenidoReglas";
 import { ErrorProveedorIA } from "@/lib/ia/proveedores";
@@ -442,8 +442,8 @@ export async function generarImagenIAAction(entrada: {
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
   if (!cloudinaryConfigurado()) return { ok: false, aviso: "Falta configurar Cloudinary en este ambiente: no hay dónde guardar la imagen." };
-  const conexion = await obtenerConexionIAConClave(prep.ctx.empresaId);
-  if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta OpenAI o Google en Configuración → IA." };
+  const conexion = await obtenerConexionIAParaModulo(prep.ctx.empresaId, "optimizacion");
+  if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta tu IA en Administración → Conectar IA (OpenAI o Google generan imágenes)." };
   const tipo = leerTipoImagenIA(entrada.tipo);
   // Informativa: solo con contenido aprobado, revisado otra vez acá
   // (palabras prohibidas, mínimo de líneas): nunca se confía en la pantalla.
@@ -493,8 +493,8 @@ export async function proponerContenidoIAAction(entrada: {
   if (!tipoLoEscribeLaIA(tipo.id)) return { ok: false, aviso: "Las opiniones las pegas tú, copiadas de compradores reales: la IA no las inventa." };
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
-  const conexion = await obtenerConexionIAConClave(prep.ctx.empresaId);
-  if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta OpenAI o Google en Configuración → IA." };
+  const conexion = await obtenerConexionIAParaModulo(prep.ctx.empresaId, "optimizacion");
+  if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta tu IA en Administración → Conectar IA (OpenAI o Google generan imágenes)." };
   const descripcion = await leerDescripcionItemMl(prep.item.id, prep.token).catch(() => null);
   try {
     const contenido = await proponerContenido(conexion, tipo.id, prep.item.titulo, limpiarIndicaciones(entrada.ficha), descripcion);

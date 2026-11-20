@@ -75,6 +75,7 @@ REVOKE UPDATE, DELETE ON auditoria FROM app_user;
 -- legítima de un clic, sin ningún motivo para guardar la fila vieja.
 GRANT SELECT, INSERT, UPDATE ON promociones_reglas, promociones_candidatos, promociones_acciones TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ia_conexiones TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ia_conexion_modulos TO app_user;
 -- Tarea "Publicar — conectar Canva" — a diferencia de ia_conexiones,
 -- desconectar Canva NUNCA borra la fila (decisión explícita de
 -- Pablo/Mateo: queda desconectada_ts como histórico, los tokens se
@@ -258,6 +259,8 @@ ALTER TABLE promociones_acciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE promociones_acciones FORCE ROW LEVEL SECURITY;
 ALTER TABLE ia_conexiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ia_conexiones FORCE ROW LEVEL SECURITY;
+ALTER TABLE ia_conexion_modulos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ia_conexion_modulos FORCE ROW LEVEL SECURITY;
 ALTER TABLE canva_conexiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE canva_conexiones FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
@@ -506,6 +509,9 @@ CREATE POLICY aislamiento_promociones_acciones ON promociones_acciones
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 DROP POLICY IF EXISTS aislamiento_ia_conexiones ON ia_conexiones;
 CREATE POLICY aislamiento_ia_conexiones ON ia_conexiones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_ia_conexion_modulos ON ia_conexion_modulos;
+CREATE POLICY aislamiento_ia_conexion_modulos ON ia_conexion_modulos
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- Tarea "Publicar — conectar Canva" — a diferencia de TODAS las demás

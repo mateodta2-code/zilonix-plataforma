@@ -9,6 +9,7 @@ import { Toast, type ItemToast } from "@/components/marco/Toast";
 import { datosSitioMl, formatearMoneda, formatearNumero, SITE_ID_DEFECTO } from "@/lib/ml/sitios";
 import type { ConteosPublicaciones, FiltroPublicaciones, PromocionParaUi, PublicacionConEstado, ResumenAplicarRegla } from "@/lib/ml/promocionesPublicaciones";
 import type { ResumenSalirTodas, VistaPreviaSalirTodas } from "@/lib/ml/promocionesSalirTodas";
+import { LARGO_MAXIMO_REGLAS_TEXTO } from "@/lib/ml/promocionesReglasTexto";
 import { calcularDesdePorcentaje, calcularDesdePrecioFinal, formatoEnteroInput, parsearNumeroLocal, superaMaximoConfigurado } from "./calculosPublicaciones";
 import styles from "./promocionesReal.module.css";
 
@@ -88,10 +89,14 @@ function FotoPlaceholder() {
 export function PaginaPromocionesReal({
   cuentas,
   puedeEjecutar,
+  puedeAprobar = false,
+  reglasAdicionalesIniciales = [],
   resumenMaestraSku,
 }: {
   cuentas: Cuenta[];
   puedeEjecutar: boolean;
+  puedeAprobar?: boolean;
+  reglasAdicionalesIniciales?: { cuentaId: string; texto: string }[];
   resumenMaestraSku: { total: number; actualizadoTs: string | null };
 }) {
   const cuentaPorId = new Map(cuentas.map((c) => [c.id, c]));
@@ -448,6 +453,85 @@ export function PaginaPromocionesReal({
     void cargarTodoAutomatico(true);
   }
 
+  // ---------- «Reglas adicionales» (texto libre, solo con «tabla-maestra») ----------
+  // Interpretar (IA, una vez) → «Entendí esto / No entendí» → confirmar →
+  // recién ahí se guarda. Sin confirmar no se guarda nada.
+  const [textosGuardados, setTextosGuardados] = useState<Record<string, string>>(() => Object.fromEntries(reglasAdicionalesIniciales.map((r) => [r.cuentaId, r.texto])));
+  const [textoReglas, setTextoReglas] = useState("");
+  const [interpretacion, setInterpretacion] = useState<{ entendido: string[]; noEntendido: string[]; json: unknown; textoInterpretado: string } | null>(null);
+  const [interpretando, setInterpretando] = useState(false);
+  const [guardandoReglas, setGuardandoReglas] = useState(false);
+  const [errorReglasTexto, setErrorReglasTexto] = useState<string | null>(null);
+  const [faltaIA, setFaltaIA] = useState(false);
+
+  // Texto guardado de lo que se está mirando: el de la cuenta, o —con «todas
+  // las tiendas»— el común si todas guardaron el mismo.
+  function textoGuardadoActual(): string {
+    if (cuentaSeleccionada !== "todas") return textosGuardados[cuentaSeleccionada] ?? "";
+    const distintos = new Set(cuentas.map((c) => textosGuardados[c.id] ?? ""));
+    return distintos.size === 1 ? [...distintos][0] : "";
+  }
+  const textoGuardado = textoGuardadoActual();
+
+  useEffect(() => {
+    setTextoReglas(textoGuardadoActual());
+    setInterpretacion(null);
+    setErrorReglasTexto(null);
+    setFaltaIA(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambiar de cuenta
+  }, [cuentaSeleccionada]);
+
+  async function interpretarReglas() {
+    setInterpretando(true);
+    setErrorReglasTexto(null);
+    setFaltaIA(false);
+    setInterpretacion(null);
+    try {
+      const res = await fetch("/api/ml/promociones/reglas-adicionales/interpretar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto: textoReglas }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; codigo?: string; entendido?: string[]; noEntendido?: string[]; json?: unknown };
+      if (!res.ok) {
+        if (body.codigo === "sin_ia") setFaltaIA(true);
+        else setErrorReglasTexto(body.error ?? "No se pudo interpretar el texto.");
+      } else {
+        setInterpretacion({ entendido: body.entendido ?? [], noEntendido: body.noEntendido ?? [], json: body.json, textoInterpretado: textoReglas });
+      }
+    } catch {
+      setErrorReglasTexto("No se pudo conectar con el servidor — revisar la conexión e intentar de nuevo.");
+    }
+    setInterpretando(false);
+  }
+
+  async function guardarReglasAdicionales(borrar: boolean) {
+    if (!borrar && !interpretacion) return;
+    setGuardandoReglas(true);
+    setErrorReglasTexto(null);
+    try {
+      const res = await fetch("/api/ml/promociones/reglas-adicionales", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cuentaId: cuentaSeleccionada, texto: borrar ? "" : interpretacion!.textoInterpretado, json: borrar ? undefined : interpretacion!.json, confirmado: true }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setErrorReglasTexto(body.error ?? "No se pudieron guardar las reglas adicionales.");
+      } else {
+        const nuevo = borrar ? "" : interpretacion!.textoInterpretado.trim();
+        const destino = cuentaSeleccionada === "todas" ? cuentas.map((c) => c.id) : [cuentaSeleccionada];
+        setTextosGuardados((actual) => ({ ...actual, ...Object.fromEntries(destino.map((id) => [id, nuevo])) }));
+        setTextoReglas(nuevo);
+        setInterpretacion(null);
+        mostrarToast(borrar ? "Se quitaron las reglas adicionales." : "Reglas adicionales guardadas.", "exito");
+      }
+    } catch {
+      setErrorReglasTexto("No se pudo conectar con el servidor — revisar la conexión e intentar de nuevo.");
+    }
+    setGuardandoReglas(false);
+  }
+
   const nombreCuentaSeleccionada = cuentaSeleccionada === "todas" ? "todas las cuentas" : cuentaPorId.get(cuentaSeleccionada)?.nickname ?? "esta cuenta";
 
   return (
@@ -564,6 +648,82 @@ export function PaginaPromocionesReal({
             <input type="radio" name="regla" checked={regla === "tabla-maestra"} onChange={() => setRegla("tabla-maestra")} />
             Respetar siempre la tabla maestra de SKU con precios mínimos
           </label>
+          {regla === "tabla-maestra" && (
+            <div className={styles.reglasAdicionales}>
+              <Campo etiqueta="Reglas adicionales">
+                <textarea
+                  className={`zx-control ${styles.textareaReglas}`}
+                  value={textoReglas}
+                  maxLength={LARGO_MAXIMO_REGLAS_TEXTO}
+                  disabled={!puedeAprobar}
+                  onChange={(e) => {
+                    setTextoReglas(e.target.value);
+                    setInterpretacion(null);
+                  }}
+                  placeholder="Ej. no entrar en Black Friday; máximo 20% en el SKU X; no entrar en promociones compartidas"
+                />
+              </Campo>
+              <span className={styles.contadorReglas}>
+                {formatearNumero(textoReglas.length, "es")} / {formatearNumero(LARGO_MAXIMO_REGLAS_TEXTO, "es")} caracteres. Solo aplican a «Respetar siempre la tabla maestra»; el precio mínimo de Finanzas siempre manda.
+              </span>
+              {textoGuardado && <span className={styles.contadorReglas}>Guardadas para {nombreCuentaSeleccionada}: «{textoGuardado}»</span>}
+              {puedeAprobar && (
+                <div className={styles.accionesInterpretacion}>
+                  <Boton type="button" variante="secundario" chico disabled={interpretando || textoReglas.trim() === ""} onClick={() => void interpretarReglas()}>
+                    {interpretando ? "Interpretando…" : "Interpretar"}
+                  </Boton>
+                  {textoGuardado && (
+                    <Boton type="button" variante="fantasma" chico disabled={guardandoReglas} onClick={() => void guardarReglasAdicionales(true)}>
+                      Quitar reglas adicionales
+                    </Boton>
+                  )}
+                </div>
+              )}
+              {faltaIA && (
+                <p className={styles.errorModal}>
+                  <a href="/panel/conectar-ia" className="zx-link">
+                    Conecta tu IA en Administración → Conectar IA
+                  </a>{" "}
+                  para interpretar reglas.
+                </p>
+              )}
+              {errorReglasTexto && <p className={styles.errorModal}>{errorReglasTexto}</p>}
+              {interpretacion && (
+                <div className={styles.interpretacion}>
+                  {interpretacion.entendido.length > 0 ? (
+                    <>
+                      <strong>Entendí esto:</strong>
+                      <ul>
+                        {interpretacion.entendido.map((linea, i) => (
+                          <li key={i}>{linea}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <strong>No entendí ninguna regla de ese texto.</strong>
+                  )}
+                  {interpretacion.noEntendido.length > 0 && (
+                    <>
+                      <strong className={styles.noEntendidoLista}>No entendí:</strong>
+                      <ul className={styles.noEntendidoLista}>
+                        {interpretacion.noEntendido.map((linea, i) => (
+                          <li key={i}>{linea}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  <div className={styles.accionesInterpretacion}>
+                    <Boton type="button" variante="primario" chico disabled={guardandoReglas || interpretacion.entendido.length === 0} onClick={() => void guardarReglasAdicionales(false)}>
+                      {guardandoReglas ? "Guardando…" : "Confirmar y guardar"}
+                    </Boton>
+                    <Boton type="button" variante="secundario" chico disabled={guardandoReglas} onClick={() => setInterpretacion(null)}>
+                      Descartar
+                    </Boton>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <label className={styles.filaRegla}>
             <input type="radio" name="regla" checked={regla === "salir-todas"} onChange={() => setRegla("salir-todas")} />
             Dejar de participar en todas las promociones
@@ -647,6 +807,7 @@ export function PaginaPromocionesReal({
                               <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>({promocion.tipoPromocion})</span>
                               {promocion.esCompartida && <Chip estado="neutro">Compartida con Mercado Libre (+Meli)</Chip>}
                               {superaMaximoRegla && <Chip estado="aviso">Supera el máximo configurado</Chip>}
+                              {regla === "tabla-maestra" && promocion.reglaAdicionalMotivo && <Chip estado="aviso">{promocion.reglaAdicionalMotivo}</Chip>}
                             </div>
                             <div className={styles.datosPromocion}>
                               {activa ? (
@@ -809,6 +970,7 @@ export function PaginaPromocionesReal({
                 <p>
                   {regla === "todas" ? "Sin precio mínimo: se entra a todas aunque quede bajo el costo." : "El precio mínimo de Finanzas nunca se salta."}
                 </p>
+                {regla === "tabla-maestra" && textoGuardado && <p>Se aplicarán también tus reglas adicionales guardadas: «{textoGuardado}».</p>}
               </div>
               {errorRegla && <p className={styles.errorModal}>{errorRegla}</p>}
               <div className={styles.accionesModal}>

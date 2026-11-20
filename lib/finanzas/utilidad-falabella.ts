@@ -61,11 +61,15 @@ function aCentavosRedondeado(diezmilesimas: bigint): bigint {
 
 export interface PedidoFalabellaEntrada {
   pedidoId: string;
-  // El número con el que se busca la orden en el reporte: el OrderId que
-  // guardamos y el OrderNumber de sus ítems, si vino (ver consulta).
+  // Los números con los que se busca la orden en el reporte, EN ORDEN DE
+  // PRIORIDAD: el OrderNumber de GetOrders (numero_orden) y después el
+  // OrderId de respaldo (ver consulta). Se usa uno solo: el primero que
+  // tenga líneas.
   numeros: string[];
-  // Lo que se muestra como «Orden».
+  // Lo que se muestra como «Orden»: el OrderNumber, que ve el cliente.
   numeroVisible: string;
+  // El OrderId interno, para mostrarlo en gris; null si no hay OrderNumber.
+  numeroInterno?: string | null;
   cuentaId: string;
   cuenta: string;
   fecha: Date;
@@ -85,6 +89,7 @@ export type EstadoUtilidadFalabella = "calculada" | "falta_costo" | "sin_reporte
 export interface OrdenUtilidadFalabella {
   pedidoId: string;
   numero: string;
+  numeroInterno: string | null;
   cuentaId: string;
   cuenta: string;
   fecha: Date;
@@ -215,16 +220,37 @@ export function calcularUtilidadFalabella(entrada: {
     retenciones: aCentavosRedondeado(sinOrden.retencion),
   };
 
-  // Una orden puede encontrarse por su OrderId o su OrderNumber: se
-  // juntan las dos (sin contar dos veces la misma clave del mismo pedido).
+  // Revisión de Pablo en #482: cada pedido usa UNA sola clave, la primera
+  // de `numeros` que tenga líneas — el OrderId de respaldo solo cuenta si
+  // el OrderNumber no encontró nada, así las mismas líneas no se suman
+  // dos veces. Y un respaldo nunca toma la clave que es el número
+  // principal de OTRO pedido de la cuenta (un OrderId que coincide con el
+  // OrderNumber ajeno): esas líneas son del otro.
   const clavesDe = (p: PedidoFalabellaEntrada) => [...new Set(p.numeros.filter((n) => n.trim()).map((n) => clave(p.cuentaId, n)))];
-  const pedidosPorClave = new Map<string, Set<string>>();
+  const principales = new Map<string, Set<string>>();
   for (const p of entrada.pedidos) {
-    for (const k of clavesDe(p)) {
-      const dueños = pedidosPorClave.get(k) ?? new Set<string>();
-      dueños.add(p.pedidoId);
-      pedidosPorClave.set(k, dueños);
+    const k = clavesDe(p)[0];
+    if (!k) continue;
+    const dueños = principales.get(k) ?? new Set<string>();
+    dueños.add(p.pedidoId);
+    principales.set(k, dueños);
+  }
+  const claveUsada = (p: PedidoFalabellaEntrada): string | null => {
+    for (const [i, k] of clavesDe(p).entries()) {
+      if (!porOrden.has(k)) continue;
+      const esPrincipalAjena = i > 0 && [...(principales.get(k) ?? [])].some((id) => id !== p.pedidoId);
+      if (!esPrincipalAjena) return k;
     }
+    return null;
+  };
+  const usadas = new Map(entrada.pedidos.map((p) => [p.pedidoId, claveUsada(p)]));
+  // Dos pedidos que terminan usando la misma clave → conflicto en los dos.
+  const pedidosPorClave = new Map<string, Set<string>>();
+  for (const [pedidoId, k] of usadas) {
+    if (!k) continue;
+    const dueños = pedidosPorClave.get(k) ?? new Set<string>();
+    dueños.add(pedidoId);
+    pedidosPorClave.set(k, dueños);
   }
 
   const vacia = {
@@ -242,18 +268,17 @@ export function calcularUtilidadFalabella(entrada: {
   };
 
   const ordenes = entrada.pedidos.map((p): OrdenUtilidadFalabella => {
-    const claves = clavesDe(p);
+    const usada = usadas.get(p.pedidoId) ?? null;
     const suma = sumaVacia();
     const skusVendidos: (string | null)[] = [];
-    for (const k of claves) {
-      const grupo = porOrden.get(k);
-      if (!grupo) continue;
+    const grupo = usada ? porOrden.get(usada) : undefined;
+    if (grupo) {
       for (const c of Object.keys(suma) as CategoriaMovimiento[]) suma[c] += grupo.suma[c];
       skusVendidos.push(...grupo.skusVendidos);
     }
-    const base = { pedidoId: p.pedidoId, numero: p.numeroVisible, cuentaId: p.cuentaId, cuenta: p.cuenta, fecha: p.fecha, moneda: p.moneda };
+    const base = { pedidoId: p.pedidoId, numero: p.numeroVisible, numeroInterno: p.numeroInterno ?? null, cuentaId: p.cuentaId, cuenta: p.cuenta, fecha: p.fecha, moneda: p.moneda };
 
-    const repetidas = claves.filter((k) => (pedidosPorClave.get(k)?.size ?? 0) > 1);
+    const repetidas = usada && (pedidosPorClave.get(usada)?.size ?? 0) > 1 ? [usada] : [];
     if (repetidas.length > 0) {
       t.conflicto += 1;
       return { ...base, ...vacia, estado: "conflicto", numerosRepetidos: repetidas.map((k) => k.slice(k.indexOf("|") + 1)) };

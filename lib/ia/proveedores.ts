@@ -114,3 +114,119 @@ export async function llamarIA(conexion: ConexionIAConClave, prompt: string, opc
       return llamarGoogle(conexion, prompt, maxTokens);
   }
 }
+
+// Rama feat-investigacion-buscar-por-foto — visión: misma conexión de IA
+// de cada empresa (nunca la llave de la plataforma), mismo fetch directo
+// sin SDK y la misma protección SSRF que llamarIA. Función APARTE a
+// propósito: llamarIA (solo texto) no cambia.
+export type ImagenIA = { mediaType: "image/jpeg" | "image/png" | "image/webp"; base64: string };
+
+// La IA conectada rechazó la imagen (modelo sin visión o formato no
+// aceptado). Clase propia para que la ruta responda el mensaje exacto
+// «no lee imágenes» sin confundirlo con una caída del proveedor.
+export class ErrorIASinVision extends ErrorProveedorIA {}
+
+// Cada proveedor contesta 400/415/422 cuando el modelo no acepta imágenes
+// (contrato público de cada API); 401/403/429/5xx son otra cosa y siguen
+// siendo un ErrorProveedorIA normal.
+const ESTADOS_SIN_VISION = [400, 415, 422];
+
+function errorPorEstado(res: Response, nombre: string): ErrorProveedorIA {
+  if (ESTADOS_SIN_VISION.includes(res.status)) return new ErrorIASinVision(`${nombre} no aceptó la imagen (${res.status}).`);
+  return new ErrorProveedorIA(`${nombre} respondió con error (${res.status}).`);
+}
+
+async function llamarAnthropicConImagenes(conexion: ConexionIAConClave, prompt: string, imagenes: ImagenIA[], maxTokens: number): Promise<string> {
+  const content = [
+    ...imagenes.map((i) => ({ type: "image", source: { type: "base64", media_type: i.mediaType, data: i.base64 } })),
+    { type: "text", text: prompt },
+  ];
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": conexion.apiKey, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: conexion.modelo, max_tokens: maxTokens, thinking: { type: "disabled" }, messages: [{ role: "user", content }] }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  }).catch(() => {
+    throw new ErrorProveedorIA("No se pudo conectar con Anthropic a tiempo.");
+  });
+  if (!res.ok) throw errorPorEstado(res, "Anthropic");
+  const data = (await res.json()) as { content?: { text?: string }[] };
+  return (data.content ?? []).map((c) => c.text || "").join("\n").trim();
+}
+
+async function llamarCompatibleOpenAIConImagenes(
+  baseUrl: string,
+  conexion: ConexionIAConClave,
+  prompt: string,
+  imagenes: ImagenIA[],
+  maxTokens: number,
+  opciones: { redirectManual?: boolean } = {}
+): Promise<string> {
+  const content = [
+    { type: "text", text: prompt },
+    ...imagenes.map((i) => ({ type: "image_url", image_url: { url: `data:${i.mediaType};base64,${i.base64}` } })),
+  ];
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${conexion.apiKey}` },
+    body: JSON.stringify({ model: conexion.modelo, max_tokens: maxTokens, messages: [{ role: "user", content }] }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    ...(opciones.redirectManual ? { redirect: "manual" as const } : {}),
+  }).catch(() => {
+    throw new ErrorProveedorIA("No se pudo conectar con el proveedor de IA a tiempo.");
+  });
+  // Mismo criterio SSRF que llamarCompatibleOpenAI: un redirect nunca se sigue.
+  if (opciones.redirectManual && (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400))) {
+    throw new ErrorProveedorIA("El proveedor de IA respondió con un redirect — no se sigue.");
+  }
+  if (!res.ok) throw errorPorEstado(res, "El proveedor de IA");
+  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  return (data.choices?.[0]?.message?.content ?? "").trim();
+}
+
+async function llamarGoogleConImagenes(conexion: ConexionIAConClave, prompt: string, imagenes: ImagenIA[], maxTokens: number): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(conexion.modelo)}:generateContent?key=${encodeURIComponent(conexion.apiKey)}`;
+  const parts = [{ text: prompt }, ...imagenes.map((i) => ({ inline_data: { mime_type: i.mediaType, data: i.base64 } }))];
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  }).catch(() => {
+    throw new ErrorProveedorIA("No se pudo conectar con Google a tiempo.");
+  });
+  if (!res.ok) throw errorPorEstado(res, "Google");
+  const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text || "").join("\n").trim();
+}
+
+export async function llamarIAConImagenes(
+  conexion: ConexionIAConClave,
+  prompt: string,
+  imagenes: ImagenIA[],
+  opciones: { maxTokens?: number } = {}
+): Promise<string> {
+  const maxTokens = opciones.maxTokens ?? 1024;
+  switch (conexion.proveedor) {
+    case "anthropic":
+      return llamarAnthropicConImagenes(conexion, prompt, imagenes, maxTokens);
+    case "openai":
+      return llamarCompatibleOpenAIConImagenes("https://api.openai.com/v1", conexion, prompt, imagenes, maxTokens);
+    case "xai":
+      return llamarCompatibleOpenAIConImagenes("https://api.x.ai/v1", conexion, prompt, imagenes, maxTokens);
+    case "otro_compatible_openai": {
+      if (!conexion.baseUrl) throw new ErrorProveedorIA("Falta la URL base del proveedor de IA compatible con OpenAI.");
+      // Misma revalidación justo antes del fetch que llamarIA (DNS rebinding).
+      let urlSegura: URL;
+      try {
+        urlSegura = await exigirUrlBaseIASegura(conexion.baseUrl);
+      } catch {
+        throw new ErrorProveedorIA("Esa URL base no se puede usar — no es https o no resuelve a una dirección pública.");
+      }
+      const baseNormalizada = (urlSegura.origin + urlSegura.pathname).replace(/\/$/, "");
+      return llamarCompatibleOpenAIConImagenes(baseNormalizada, conexion, prompt, imagenes, maxTokens, { redirectManual: true });
+    }
+    case "google":
+      return llamarGoogleConImagenes(conexion, prompt, imagenes, maxTokens);
+  }
+}

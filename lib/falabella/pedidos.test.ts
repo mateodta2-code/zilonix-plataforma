@@ -61,6 +61,20 @@ describe("importarPedidos", () => {
     dbComoEmpresa.mockClear();
   });
 
+  // Issue #422: el «Nº de orden» del Reporte de transacciones es el
+  // OrderNumber de GetOrders (3260783999), no el OrderId (8002135931).
+  it("guarda el OrderNumber de la orden en numeroOrden", async () => {
+    respuestas({ ...ordenBase, OrderId: "8002135931", OrderNumber: 3260783999 }, itemBase);
+    await importarPedidos("empresa-1", "cuenta-1", new Date("2026-09-16T00:00:00Z"));
+    expect(valoresGuardados[0]).toMatchObject({ pedidoIdExterno: "8002135931", numeroOrden: "3260783999" });
+  });
+
+  it("deja numeroOrden en null si la orden no trae OrderNumber", async () => {
+    respuestas(ordenBase, itemBase);
+    await importarPedidos("empresa-1", "cuenta-1", new Date("2026-09-16T00:00:00Z"));
+    expect(valoresGuardados[0]).toMatchObject({ numeroOrden: null });
+  });
+
   it("normaliza Price/GrandTotal/ItemPrice/PaidPrice con coma de miles y acepta una orden como objeto", async () => {
     respuestas(ordenBase, itemBase);
     const resultado = await importarPedidos("empresa-1", "cuenta-1", new Date("2026-09-16T00:00:00Z"));
