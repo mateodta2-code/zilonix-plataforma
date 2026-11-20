@@ -30,7 +30,8 @@ import {
   type SesionBusqueda,
 } from "@/lib/ml/listadoCliente";
 import { ETIQUETA_APROXIMADO } from "@/lib/seguimiento/aproximados";
-import { generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
+import { completarQueriesAnalizar, generarVariantesBusqueda } from "@/lib/ml/variantesBusqueda";
+import { ComparacionFoto } from "./ComparacionFoto";
 import { consumirClicAnalizarReciente, marcarClicAnalizar, type PlataformaAnalizar } from "./analizarClic";
 import { generarQueriesAnalizarAction, generarQueriesPlataformaAction } from "./actions";
 import { INTERRUPTORES_EXTENSION } from "@/lib/extension/configuracion";
@@ -362,7 +363,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     const marca = consumirClicAnalizarReciente();
     if (!marca) return;
     if (marca.plataforma === "ml") {
-      void escanearMercadoLibre(marca.pais);
+      void escanearMercadoLibre(marca.pais, marca.consultasFoto);
     } else {
       void analizarEnPlataforma(marca.plataforma);
     }
@@ -386,7 +387,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
       clearInterval(id);
       const marca = consumirClicAnalizarReciente();
       if (!marca) return;
-      marcarClicAnalizar(marca.pais, marca.plataforma);
+      marcarClicAnalizar(marca.pais, marca.plataforma, marca.consultasFoto);
       ponerAviso("extension", AVISO_EXTENSION_SIN_RESPUESTA);
     }, 250);
     return () => clearInterval(id);
@@ -398,13 +399,21 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   // de la versión anterior (que solo vivían dentro del efecto) — mismo
   // criterio que ya usa `limitePlataformaRef` para el escaneo
   // multiplataforma.
-  async function escanearMercadoLibre(pais: string) {
+  async function escanearMercadoLibre(pais: string, consultasFoto?: string[]) {
     if (limiteMlRef.current) clearTimeout(limiteMlRef.current);
     let queries: string[];
-    try {
-      queries = await generarQueriesAnalizarAction(termino);
-    } catch {
-      queries = generarVariantesBusqueda(termino);
+    if (consultasFoto?.length) {
+      // «Buscar por foto»: las consultas ya vienen de la IA de la empresa
+      // (editadas por la persona) — se mezclan con el término y el respaldo
+      // de reglas, tope TOPE_QUERIES_ANALIZAR, y NO se llama a la IA de la
+      // plataforma (generarQueriesAnalizarAction), que Zilonix pagaría.
+      queries = completarQueriesAnalizar(termino, consultasFoto);
+    } else {
+      try {
+        queries = await generarQueriesAnalizarAction(termino);
+      } catch {
+        queries = generarVariantesBusqueda(termino);
+      }
     }
     if (!queries.length) return;
     terminoEscaneoMlRef.current = termino;
@@ -896,6 +905,8 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
       ) : null}
 
       {!bloques.length ? <p className={styles.notaInsignia}>Todavía no hay ningún bloque — analizá un término para empezar.</p> : null}
+
+      <ComparacionFoto termino={termino} bloques={bloques} />
 
       {bloques.map((bloque) => {
         const esMl = bloque.plataforma.startsWith("Mercado Libre");

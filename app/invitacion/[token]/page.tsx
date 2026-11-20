@@ -1,3 +1,4 @@
+import { Boton } from "@/components/marco/Boton";
 import Link from "next/link";
 import { obtenerInvitacionPorToken } from "@/lib/invitaciones";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
@@ -51,9 +52,9 @@ export default async function InvitacionPage({ params }: { params: { token: stri
       {usuario ? (
         <form action={aceptarInvitacionAction} style={{ marginTop: 24 }}>
           <input type="hidden" name="token" value={params.token} />
-          <button type="submit" style={{ padding: "10px 16px" }}>
+          <Boton type="submit">
             Aceptar y entrar a {invitacion.empresaNombre}
-          </button>
+          </Boton>
         </form>
       ) : (
         <div style={{ display: "flex", gap: 12, marginTop: 24 }}>

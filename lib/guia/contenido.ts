@@ -156,12 +156,15 @@ export const GUIA: GrupoGuia[] = [
           "Despliega una fila para ver tus competidores. Si no es de catálogo, «Buscar 10 competidores» lo hace con la extensión.",
           "Entra al detalle para ver gráficas por día, costos con utilidad y la utilidad total de la publicación.",
           "Desde el detalle puedes cambiar precio, título y fotos (subir, arrastrar para ordenar, elegir portada). Nada llega a Mercado Libre hasta que guardas.",
-          "Con «Crear imagen con IA» generas portadas de venta o imágenes informativas a partir de tus fotos reales.",
+          "Con «Crear imagen con IA» generas portadas de venta (1, 4 o 10, cada una distinta) a partir de tus fotos reales. Escribe antes la ficha técnica del producto.",
+          "Para una imagen informativa, elige cuál de las 10 quieres (modo de uso, características, beneficios, qué incluye, comparación, preguntas frecuentes…), pide la propuesta, revisa y corrige el título y el copy, y solo entonces aprieta «CREAR imagen».",
         ],
         apartados: [CONECTAR_IA],
         consejos: [
           "Cada imagen la cobra la cuenta de IA de tu empresa (unos centavos de dólar). Cambiar el proveedor también cambia la IA de los textos (Promociones).",
-          "Revisa cada imagen creada: si no se entiende o se ve genérica, descártala y crea otra.",
+          "Revisa cada imagen creada: si no se entiende, se ve genérica o el texto salió con errores, descártala y crea otra.",
+          "Si el copy trae palabras que Mercado Libre no permite (curar, tratar, garantizado, expertos, antes/después…), Zilonix no deja crear la imagen hasta que las cambies.",
+          "Las opiniones deben ser de compradores reales: cópialas de tus calificaciones. La IA nunca las inventa.",
         ],
       },
       {

@@ -1,6 +1,6 @@
 {
   "id": "a48d3586-1379-4d7c-9803-ea14aace0dbb",
-  "prevId": "6af78358-cfd6-47c0-bb14-faefd109cdb0",
+  "prevId": "fef7a430-c2ca-4b2a-9223-1743bda6cb1a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5418,6 +5418,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "regla_participacion": {
+          "name": "regla_participacion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reglas_adicionales_texto": {
+          "name": "reglas_adicionales_texto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reglas_adicionales_json": {
+          "name": "reglas_adicionales_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "actualizado_ts": {
           "name": "actualizado_ts",
           "type": "timestamp with time zone",
@@ -5501,6 +5519,14 @@
       },
       "policies": {},
       "checkConstraints": {
+        "promociones_reglas_regla_participacion_valida": {
+          "name": "promociones_reglas_regla_participacion_valida",
+          "value": "\"promociones_reglas\".\"regla_participacion\" IS NULL OR \"promociones_reglas\".\"regla_participacion\" IN ('todas','maximo','tabla-maestra')"
+        },
+        "promociones_reglas_reglas_texto_largo": {
+          "name": "promociones_reglas_reglas_texto_largo",
+          "value": "\"promociones_reglas\".\"reglas_adicionales_texto\" IS NULL OR char_length(\"promociones_reglas\".\"reglas_adicionales_texto\") <= 1000"
+        },
         "promociones_reglas_descuento_rango": {
           "name": "promociones_reglas_descuento_rango",
           "value": "\"promociones_reglas\".\"descuento_maximo_pct\" > 0 AND \"promociones_reglas\".\"descuento_maximo_pct\" <= 100"

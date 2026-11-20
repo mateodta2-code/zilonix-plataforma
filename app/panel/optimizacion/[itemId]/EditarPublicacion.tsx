@@ -145,6 +145,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
             cuentaMlId={datos.cuentaMlId}
             itemId={datos.itemId}
             fotos={fotos}
+            tituloProducto={datos.titulo}
             estado={datos.iaImagen}
             onAgregar={(url, comoPortada) => setFotos((actuales) => (comoPortada ? [url, ...actuales] : [...actuales, url]))}
           />
