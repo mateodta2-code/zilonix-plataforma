@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { leerItemsOptimizacionMl } from "@/lib/ml/cliente";
+import { leerItemsOptimizacionMl, visitasCuentaMl } from "@/lib/ml/cliente";
 
 // Optimización — /items?ids= a veces responde 403 a todo el lote aunque
 // cada publicación se lea bien sola (staging, 19-nov). Las que faltaron
@@ -48,5 +48,21 @@ describe("leerItemsOptimizacionMl", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     globalThis.fetch = vi.fn(async () => json({ message: "forbidden" }, 403)) as unknown as typeof fetch;
     expect(await leerItemsOptimizacionMl(["MCO111111111"], "token")).toEqual([]);
+  });
+});
+
+describe("visitasCuentaMl (visitas de toda la tienda)", () => {
+  it("pide /users/{id}/items_visits con el rango y lee total_visits", async () => {
+    const f = vi.fn(async () => json({ user_id: 24484425, total_visits: 529 }));
+    globalThis.fetch = f as unknown as typeof fetch;
+    expect(await visitasCuentaMl("24484425", "token", "2026-11-13", "2026-11-20")).toBe(529);
+    expect(String((f.mock.calls[0] as unknown[])[0])).toContain("/users/24484425/items_visits?date_from=2026-11-13&date_to=2026-11-20");
+  });
+
+  it("si Mercado Libre falla o el dato es raro, null (nunca un 0 inventado)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    globalThis.fetch = vi.fn(async () => json({ message: "forbidden" }, 403)) as unknown as typeof fetch;
+    expect(await visitasCuentaMl("24484425", "token", "2026-11-13", "2026-11-20")).toBeNull();
+    expect(await visitasCuentaMl("abc", "token", "2026-11-13", "2026-11-20")).toBeNull();
   });
 });

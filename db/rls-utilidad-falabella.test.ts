@@ -39,11 +39,11 @@ async function prepararEmpresa(nombre: string, sellerId: string, conReporte: boo
         nickname: `Tienda ${sellerId}`,
       })
       .returning({ id: cuentasFalabella.id });
-    // Órdenes 3000001 (por OrderId) y 3000002 (por el OrderNumber del
-    // ítem); 3000099 sin reporte; una cancelada que no es venta.
+    // Órdenes 3000001 (por OrderId, fila vieja sin numero_orden) y
+    // 3000002 (por numero_orden = OrderNumber de GetOrders); 3000099 sin reporte; una cancelada que no es venta.
     await tx.insert(pedidosFalabella).values([
       { empresaId: empresa.empresaId, cuentaFalabellaId: cuenta.id, pedidoIdExterno: "3000001", fecha: new Date("2026-11-03T15:00:00Z"), total: "20000", moneda: "COP", estado: "delivered", items: [{ Sku: "SKU-PRUEBA-1" }] },
-      { empresaId: empresa.empresaId, cuentaFalabellaId: cuenta.id, pedidoIdExterno: "1104089002", fecha: new Date("2026-11-03T15:00:00Z"), total: "25000", moneda: "COP", estado: "delivered", items: [{ Sku: "SKU-PRUEBA-2", OrderNumber: "3000002" }] },
+      { empresaId: empresa.empresaId, cuentaFalabellaId: cuenta.id, pedidoIdExterno: "1104089002", numeroOrden: "3000002", fecha: new Date("2026-11-03T15:00:00Z"), total: "25000", moneda: "COP", estado: "delivered", items: [{ Sku: "SKU-PRUEBA-2" }] },
       { empresaId: empresa.empresaId, cuentaFalabellaId: cuenta.id, pedidoIdExterno: "3000099", fecha: new Date("2026-11-10T15:00:00Z"), total: "10000", moneda: "COP", estado: "shipped", items: [] },
       { empresaId: empresa.empresaId, cuentaFalabellaId: cuenta.id, pedidoIdExterno: "3000098", fecha: new Date("2026-11-10T15:00:00Z"), total: "10000", moneda: "COP", estado: "canceled", items: [] },
     ]);
@@ -69,9 +69,10 @@ describe("utilidad de Falabella (RLS)", () => {
     if (!consulta.ok) throw new Error(consulta.error);
     const { ordenes, totales } = consulta.resultado;
     expect(consulta.moneda).toBe("COP");
-    expect(ordenes.map((o) => o.numero).sort()).toEqual(["1104089002", "3000001", "3000099"]);
+    expect(ordenes.map((o) => o.numero).sort()).toEqual(["3000001", "3000002", "3000099"]);
     expect(ordenes.find((o) => o.numero === "3000001")).toMatchObject({ estado: "calculada", utilidad: "3992.00" });
-    expect(ordenes.find((o) => o.numero === "1104089002")).toMatchObject({ estado: "falta_costo", ventas: "25000.00" });
+    // Se muestra el OrderNumber; el OrderId va aparte, en gris.
+    expect(ordenes.find((o) => o.numero === "3000002")).toMatchObject({ numeroInterno: "1104089002", estado: "falta_costo", ventas: "25000.00" });
     expect(ordenes.find((o) => o.numero === "3000099")!.estado).toBe("sin_reporte");
     expect(totales).toMatchObject({ ordenesFaltaCosto: 1, ordenesSinReporte: 1 });
   });

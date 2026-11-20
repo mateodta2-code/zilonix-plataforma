@@ -375,3 +375,9 @@
 .filaPropia > td {
   background: var(--acento-suave);
 }
+
+/* Resumen global de la tienda, arriba de la lista. */
+.resumenTienda {
+  display: grid;
+  gap: 12px;
+}

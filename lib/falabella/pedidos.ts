@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, lt } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasFalabella, pedidosFalabella } from "@/db/schema";
 import { llamarFalabella } from "@/lib/falabella/cliente";
@@ -20,6 +20,8 @@ import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 // normalizan con parsearMontoFalabella antes de guardar (issue #422).
 type OrdenFalabella = {
   OrderId: string;
+  // El número que ve el comprador y el que usa el Reporte de transacciones.
+  OrderNumber?: string | number;
   CreatedAt: string;
   Price: string | number;
   GrandTotal?: string | number;
@@ -143,8 +145,10 @@ export async function importarPedidos(
       PaidPrice: parsearMontoFalabella(item.PaidPrice, { campo: "PaidPrice", orderId }),
     }));
     const campoTotal = orden.GrandTotal != null ? "GrandTotal" : "Price";
+    const numeroOrden = orden.OrderNumber != null && String(orden.OrderNumber).trim() !== "" ? String(orden.OrderNumber).trim() : null;
     return {
       orderId,
+      numeroOrden,
       fecha: parsearFechaFalabella(orden.CreatedAt),
       total: parsearMontoFalabella(orden.GrandTotal ?? orden.Price, { campo: campoTotal, orderId }),
       moneda: items[0]?.Currency ?? "COP",
@@ -154,7 +158,7 @@ export async function importarPedidos(
   });
 
   await dbComoEmpresa(empresaId, async (tx) => {
-    for (const { orderId, fecha, total, moneda, estado, items } of filas) {
+    for (const { orderId, numeroOrden, fecha, total, moneda, estado, items } of filas) {
       try {
         await tx
           .insert(pedidosFalabella)
@@ -162,6 +166,7 @@ export async function importarPedidos(
             empresaId,
             cuentaFalabellaId,
             pedidoIdExterno: orderId,
+            numeroOrden,
             fecha,
             total,
             moneda,
@@ -170,7 +175,11 @@ export async function importarPedidos(
           })
           .onConflictDoUpdate({
             target: [pedidosFalabella.empresaId, pedidosFalabella.pedidoIdExterno],
-            set: { estado, total, items },
+            // Issue #422: incluye numeroOrden para que re-sincronizar llene
+            // las órdenes importadas antes de existir la columna. Con
+            // coalesce (revisión de Pablo en #482): si una sync posterior
+            // no trae OrderNumber, se conserva el que ya estaba.
+            set: { estado, total, items, numeroOrden: sql`coalesce(excluded.numero_orden, ${pedidosFalabella.numeroOrden})` },
           });
       } catch (error) {
         // Issue #422: sin el OrderId, el log solo decía "invalid input

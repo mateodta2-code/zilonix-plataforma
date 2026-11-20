@@ -13,10 +13,12 @@ import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { leerPaginaOptimizacion, MAXIMO_RESULTADOS_BUSQUEDA, type PaginaOptimizacion } from "@/lib/optimizacion/lista";
+import { leerResumenTienda, type DatosResumenTienda } from "@/lib/optimizacion/resumenTiendaDatos";
 import { DIAS_METRICAS, leerBusqueda, leerDiasMetricas, leerFiltroEstado, leerPagina, OPCIONES_DIAS_METRICAS, type DiasMetricas, type FiltroEstado } from "@/lib/optimizacion/textos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
+import { ResumenTienda } from "./ResumenTienda";
 import { TablaOptimizacion } from "./TablaOptimizacion";
 import styles from "./page.module.css";
 
@@ -82,16 +84,32 @@ export default async function OptimizacionPage({
   const { cuentas, cuentaId } = await leerCuentaMlDeQuery(empresa.id, cuentaParam);
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
   const puedeModificar = miMembresia ? tienePermiso(miMembresia.permisos, "inventario", "modificar") : false;
+  // Los montos del resumen de la tienda, con el mismo permiso que Pedidos.
+  const verMontos = miMembresia ? tienePermiso(miMembresia.permisos, "ventas", "consultar") : false;
 
   const conectada = cuentaId ? (await listarCuentasConectadas(empresa.id)).find((c) => c.id === cuentaId && !c.desconectadaTs) : undefined;
   let datos: PaginaOptimizacion | null = null;
   let aviso: string | null = null;
+  let resumen: DatosResumenTienda | null = null;
   if (conectada) {
-    try {
-      datos = await leerPaginaOptimizacion(empresa.id, conectada, { estado, texto, pagina, dias }, new Date());
-    } catch (error) {
-      console.warn(`[app/panel/optimizacion] cuenta ${conectada.id}: ${error instanceof Error ? error.name : "error"}`);
-      aviso = motivoCuentaSinRevisar(error);
+    const ahora = new Date();
+    // El resumen de la tienda nunca tumba la lista: si falla, no se muestra.
+    const [lista, resumenLeido] = await Promise.all([
+      leerPaginaOptimizacion(empresa.id, conectada, { estado, texto, pagina, dias }, ahora).then(
+        (d) => ({ ok: true as const, datos: d }),
+        (error: unknown) => ({ ok: false as const, error })
+      ),
+      leerResumenTienda(empresa.id, conectada, dias, ahora).catch((error: unknown) => {
+        console.warn(`[app/panel/optimizacion] resumen ${conectada.id}: ${error instanceof Error ? error.name : "error"}`);
+        return null;
+      }),
+    ]);
+    resumen = resumenLeido;
+    if (lista.ok) {
+      datos = lista.datos;
+    } else {
+      console.warn(`[app/panel/optimizacion] cuenta ${conectada.id}: ${lista.error instanceof Error ? lista.error.name : "error"}`);
+      aviso = motivoCuentaSinRevisar(lista.error);
     }
   }
   const base = { cuenta: cuentaId, estado, q: texto, pagina: 1, dias };
@@ -106,6 +124,12 @@ export default async function OptimizacionPage({
       <div className={styles.panelDatos}>
         <SelectorCuentaMl empresaId={empresa.id} cuenta={cuentaParam} parametros={{ ...(estado !== "activas" ? { estado } : {}), ...(texto ? { q: texto } : {}), ...(dias !== DIAS_METRICAS ? { dias: String(dias) } : {}) }} />
       </div>
+
+      {conectada && resumen && !aviso ? (
+        <Tarjeta className={styles.tarjeta}>
+          <ResumenTienda datos={resumen} dias={dias} siteId={conectada.siteId} idioma={conectada.idioma} verMontos={verMontos} />
+        </Tarjeta>
+      ) : null}
 
       {cuentas.length === 0 ? (
         <EstadoVacio>

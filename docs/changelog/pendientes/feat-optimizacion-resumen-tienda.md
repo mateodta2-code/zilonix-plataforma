@@ -1,0 +1,15 @@
+- **feat-optimizacion-resumen-tienda** — **Optimización:** arriba de la lista hay un **resumen global de la tienda** (la cuenta elegida), como el «Resumen de desempeño» de Métricas de negocio de Mercado Libre. Usa el período elegido (7, 14, 30 o 90 días de Bogotá, contando hoy) y compara cada dato con el período anterior. Incluye:
+  - ventas brutas, unidades vendidas, cantidad de ventas;
+  - precio promedio por unidad y por venta;
+  - visitas y conversión (ventas ÷ visitas; la variación va en puntos);
+  - ventas canceladas y devueltas, con sus montos.
+- **feat-optimizacion-resumen-tienda** — **De dónde sale cada dato:**
+  - Ventas: de lo que Seller ya sincronizó (`lib/optimizacion/resumenTiendaDatos.ts`), con el mismo criterio de venta que Finanzas.
+  - Devuelta = venta con reembolsos > 0.
+  - Visitas: de `visitasCuentaMl` (`/users/{id}/items_visits`), confirmado en staging con `scripts/explorar-visitas-cuenta.ts` (#492).
+  - Cálculo puro en `resumirTienda`, con pruebas que cuadran con los números de una captura real de Mercado Libre.
+- **feat-optimizacion-resumen-tienda** — **Reglas de visibilidad:**
+  - Los montos solo se muestran con permiso `ventas/consultar`.
+  - Si el resumen falla, no tumba la lista.
+  - Si Mercado Libre no devuelve las visitas, la tarjeta lo dice y no inventa un 0.
+- **feat-optimizacion-resumen-tienda** — La guía de Optimización lo explica.
