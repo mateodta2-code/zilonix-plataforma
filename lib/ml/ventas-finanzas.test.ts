@@ -5,6 +5,7 @@ import { auditoria, despachosMl, pedidoItems, pedidos, pedidosFinanzas } from "@
 import { crearDosEmpresas } from "@/db/test-utils/aislamiento";
 import { crearCuentaMlDePrueba } from "@/db/test-utils/venta";
 import { guardarCostoSku } from "@/lib/costos-sku";
+import { olvidarPermisosLiberacion } from "./liberacion";
 import { sincronizarVentasCuenta } from "./ventas-finanzas";
 
 // Issue #130 (Z-FIN-08) — sincronización por cuenta con la API de ML
@@ -217,5 +218,62 @@ describe("sincronizarVentasCuenta (issue #130)", () => {
       tx.select().from(auditoria).where(and(eq(auditoria.empresaId, empresaId), eq(auditoria.accion, "sincronizar_ventas")))
     );
     expect(filas.some((f) => f.actorTipo === "sistema" && f.usuarioId === null && f.detalle?.includes("cortada por el límite"))).toBe(true);
+  });
+
+  // Bug real en staging (19-nov): «Traer ventas de este mes» guardaba la
+  // venta pero por-cobrar quedaba en 0, sin ningún log de la liberación.
+  // Una orden YA guardada sin fecha de liberación tiene que recibirla al
+  // volver a sincronizar (upsert), y cada salida deja rastro sin token.
+  it("una orden ya existente sin fecha_liberacion la recibe al volver a sincronizar", async () => {
+    olvidarPermisosLiberacion();
+    const pagoOrden = { id: 91234567801, status: "approved", date_approved: "2026-11-19T10:00:00.000-05:00", transaction_amount: 80000 };
+    let pagoDisponible = false;
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      if (u.pathname === "/orders/search") {
+        return json({ results: u.searchParams.get("offset") === "0" ? [orden(701, { shipping: null, payments: [pagoOrden] })] : [] });
+      }
+      if (u.pathname === "/orders/701") return json(orden(701, { shipping: null, payments: [pagoOrden] }));
+      if (u.pathname === "/items") return json([]);
+      if (u.pathname === "/v1/payments/91234567801") {
+        if (!pagoDisponible) return json({ message: "not_found" }, 404);
+        return json({ money_release_status: "pending", money_release_date: "2026-12-03T10:00:00.000-05:00", transaction_details: { net_received_amount: 66930.5 } });
+      }
+      throw new Error(`fetch no esperado: ${u.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const leerCabecera = async () => {
+      const [fila] = await dbComoEmpresa(empresaId, (tx) =>
+        tx
+          .select({ estado: pedidosFinanzas.estadoLiberacion, fecha: pedidosFinanzas.fechaLiberacion, monto: pedidosFinanzas.montoPorLiberar })
+          .from(pedidosFinanzas)
+          .innerJoin(pedidos, eq(pedidos.id, pedidosFinanzas.pedidoId))
+          .where(and(eq(pedidos.empresaId, empresaId), eq(pedidos.pedidoIdExterno, "701")))
+      );
+      return fila;
+    };
+    const rango = { desde: new Date("2026-11-01T05:00:00Z") };
+
+    // 1ª corrida: la venta se guarda; ML todavía no da el pago → sin fecha, pero con aviso.
+    await sincronizarVentasCuenta(empresaId, cuentaMlId, "123456", rango, sinEspera);
+    expect(await leerCabecera()).toEqual({ estado: null, fecha: null, monto: null });
+    expect(aviso.mock.calls.map((c) => String(c[0]))).toContain(
+      `[liberacion] cuenta ${cuentaMlId}, orden 701: Mercado Libre respondió 404 al pedir el pago; queda sin fecha y se reintenta en la próxima sync.`
+    );
+    expect(info.mock.calls.map((c) => String(c[0]))).toContain(`[liberacion] cuenta ${cuentaMlId}: sin_dato 1.`);
+
+    // 2ª corrida sobre la MISMA orden (ya existente, upsert): ahora sí recibe la fecha.
+    pagoDisponible = true;
+    await sincronizarVentasCuenta(empresaId, cuentaMlId, "123456", rango, sinEspera);
+    expect(await leerCabecera()).toEqual({ estado: "pending", fecha: new Date("2026-12-03T15:00:00.000Z"), monto: "66930.50" });
+    expect(info.mock.calls.map((c) => String(c[0]))).toContain(`[liberacion] cuenta ${cuentaMlId}: pendiente 1.`);
+
+    // Ningún log lleva el token.
+    const lineas = [...aviso.mock.calls, ...info.mock.calls].map((c) => c.join(" "));
+    expect(lineas.every((l) => !/token|Bearer|APP_USR/i.test(l))).toBe(true);
+    aviso.mockRestore();
+    info.mockRestore();
   });
 });

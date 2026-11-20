@@ -128,7 +128,8 @@ export function olvidarPermisosLiberacion(): void {
   permisosPorCuenta.clear();
 }
 
-export type ResultadoPago = { tipo: "ok"; liberacion: LiberacionPago } | { tipo: "sin_permiso" } | { tipo: "sin_dato" };
+// status: el HTTP no-ok que devolvió ML (404, 400…), para poder loguearlo.
+export type ResultadoPago = { tipo: "ok"; liberacion: LiberacionPago } | { tipo: "sin_permiso" } | { tipo: "sin_dato"; status?: number };
 
 // Un pago: /v1/payments/{id} (salvo que la cuenta ya dio 403 ahí); con
 // 401/403, /collections/{id}. Un 429 persistente se propaga (lo corta el
@@ -150,7 +151,7 @@ export async function leerLiberacionPago(
   for (const { ruta, v1 } of rutas) {
     try {
       const resp = await leer<unknown>(ruta);
-      if (!resp.ok) return { tipo: "sin_dato" };
+      if (!resp.ok) return { tipo: "sin_dato", status: resp.status };
       const liberacion = liberacionDesdePago(resp.data);
       return liberacion ? { tipo: "ok", liberacion } : { tipo: "sin_dato" };
     } catch (error) {
@@ -172,36 +173,78 @@ export async function leerLiberacionPago(
   return { tipo: "sin_permiso" };
 }
 
+// Qué pasó con la liberación de UNA orden. La sync de la cuenta los
+// cuenta y deja una línea de resumen (lib/ml/ventas-finanzas.ts).
+export type ResultadoLiberacion =
+  | "pendiente"
+  | "liberada"
+  | "ya_liberada"
+  | "cancelada"
+  | "sin_pagos"
+  | "sin_fila"
+  | "sin_permiso"
+  | "sin_dato";
+
 // Paso de la sync (guardarOrdenMl): consulta los pagos sin liberar de la
 // venta y guarda fecha, estado y monto. Un pago sin permiso o sin dato
 // deja la venta como estaba: la próxima sync lo reintenta.
+//
+// Bug real en staging (19-nov, commit 5bfe58f): «Traer ventas de este
+// mes» guardaba las ventas pero por-cobrar quedaba en 0 y en Railway no
+// había NI UNA línea de /v1/payments, /collections ni de este archivo:
+// tres salidas (sin fila, sin pagos aprobados con id, ML respondiendo un
+// 4xx distinto de 401/403) volvían sin dejar rastro. Ahora cada una deja
+// un aviso con solo el id de la cuenta y de la orden (nunca el token).
 export async function sincronizarLiberacion(
   empresaId: string,
   cuentaMlId: string,
   pedidoId: string,
   orden: { id: number | string; status: string; payments?: PagoOrden[] },
   leer: LectorMl
-): Promise<void> {
+): Promise<ResultadoLiberacion> {
+  const aviso = (texto: string) => console.warn(`[liberacion] cuenta ${cuentaMlId}, orden ${orden.id}: ${texto}`);
   const deLaVenta = and(eq(pedidosFinanzas.empresaId, empresaId), eq(pedidosFinanzas.pedidoId, pedidoId));
   const [actual] = await dbComoEmpresa(empresaId, (tx) =>
     tx.select({ estado: pedidosFinanzas.estadoLiberacion }).from(pedidosFinanzas).where(deLaVenta)
   );
-  if (!actual) return;
-  const ids = pagosPorConsultar(orden.status, orden.payments ?? [], actual.estado);
-  if (ids.length === 0) return;
+  if (!actual) {
+    aviso("la venta no tiene fila en pedidos_finanzas; no se consultó la liberación.");
+    return "sin_fila";
+  }
+  const pagos = orden.payments ?? [];
+  const ids = pagosPorConsultar(orden.status, pagos, actual.estado);
+  if (ids.length === 0) {
+    if (orden.status === "cancelled") return "cancelada";
+    if (actual.estado === ESTADO_LIBERADO) return "ya_liberada";
+    const aprobados = pagos.filter((p) => p.status === "approved");
+    if (aprobados.length > 0 && aprobados.every((p) => p.money_release_status === ESTADO_LIBERADO)) return "ya_liberada";
+    // Solo estados y cantidades: nada del comprador.
+    const estados = pagos.map((p) => `${p.status ?? "sin estado"}${PATRON_ID_NUMERICO.test(String(p.id ?? "")) ? "" : " sin id"}`);
+    aviso(`ningún pago aprobado con id para consultar (orden ${orden.status}, pagos: ${estados.join(", ") || "ninguno"}).`);
+    return "sin_pagos";
+  }
 
   const leidos: LiberacionPago[] = [];
   for (const id of ids) {
     const resultado = await leerLiberacionPago(leer, id, cuentaMlId);
-    if (resultado.tipo !== "ok") return;
+    if (resultado.tipo === "sin_permiso") return "sin_permiso";
+    if (resultado.tipo === "sin_dato") {
+      aviso(
+        resultado.status
+          ? `Mercado Libre respondió ${resultado.status} al pedir el pago; queda sin fecha y se reintenta en la próxima sync.`
+          : "el pago no trajo datos de liberación; queda sin fecha y se reintenta en la próxima sync."
+      );
+      return "sin_dato";
+    }
     leidos.push(resultado.liberacion);
   }
   const venta = combinarLiberaciones(leidos);
-  if (!venta) return;
+  if (!venta) return "sin_dato";
   await dbComoEmpresa(empresaId, (tx) =>
     tx
       .update(pedidosFinanzas)
       .set({ estadoLiberacion: venta.estado, fechaLiberacion: venta.fecha, montoPorLiberar: venta.montoPorLiberar })
       .where(deLaVenta)
   );
+  return venta.estado === ESTADO_LIBERADO ? "liberada" : "pendiente";
 }
