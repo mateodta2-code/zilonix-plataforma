@@ -139,6 +139,17 @@ export function porUnidad(monto: string | null, unidades: number): string | null
   return desdeCentavos(aCentavos(monto) / BigInt(unidades));
 }
 
+// Cuánto pesa un monto sobre las ventas, en porcentaje ("17.00" =
+// 17 %). Es el mismo en total y por unidad, así que se calcula con los
+// totales (sin el redondeo de dividir por unidades). null si falta el
+// monto o no hubo ventas.
+export function participacion(monto: string | null, ventas: string | null): string | null {
+  if (monto === null || ventas === null) return null;
+  const total = aCentavos(ventas);
+  if (total <= BigInt(0)) return null;
+  return porcentaje(aCentavos(monto), total);
+}
+
 // Lo que cuesta cada unidad sin contar la comisión: costo del producto,
 // empaque, envío y publicidad del período, dividido por las unidades.
 // null si falta el costo o no hubo ventas.
