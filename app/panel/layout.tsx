@@ -4,6 +4,7 @@ import { MarcoApp } from "@/components/marco/MarcoApp";
 import type { GrupoNav } from "@/components/marco/tipos";
 import { itemsAdministracion } from "@/components/marco/menuAdministracion";
 import { SECCIONES_PRODUCTOS } from "@/components/productos/secciones";
+import { seccionesFinanzas } from "@/components/finanzas/secciones";
 import { GuiaModulo } from "@/components/guia/GuiaModulo";
 
 // Marco visual (issue de las subpáginas) — mueve acá la carga que
@@ -83,7 +84,12 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       // de módulo de siempre ("promociones","consultar"), sin ninguna
       // lista fija de cuentas/empresas; solo cambia el orden en el menú.
       ...(vePromociones ? [{ etiqueta: "Promociones", href: "/panel/promociones", icono: "promociones" as const }] : []),
-      ...(veFinanzas ? [{ etiqueta: "Finanzas", href: "/panel/finanzas", icono: "finanzas" as const }] : []),
+      // Finanzas se despliega como Productos, con sus secciones
+      // filtradas por el mismo permiso que pide cada página
+      // (components/finanzas/secciones.ts).
+      ...(veFinanzas
+        ? [{ etiqueta: "Finanzas", href: "/panel/finanzas", icono: "finanzas" as const, hijos: seccionesFinanzas(permisos) }]
+        : []),
       ...(vePublicidad ? [{ etiqueta: "Publicidad", href: "/panel/publicidad", icono: "publicidad" as const }] : []),
       ...(veActividad ? [{ etiqueta: "Actividad", href: "/panel/actividad", icono: "actividad" as const }] : []),
       // Rama feat-promociones, punto 6 — "Conexión de IA" vive en

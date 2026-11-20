@@ -232,6 +232,13 @@
       "when": 1795137134486,
       "tag": "0032_exotic_rocket_racer",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795137955851,
+      "tag": "0033_handy_eddie_brock",
+      "breakpoints": true
     }
   ]
 }

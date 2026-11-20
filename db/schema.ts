@@ -949,6 +949,16 @@ export const pedidosFinanzas = pgTable(
     // status_history.date_shipped / date_delivered del envío.
     fechaDespacho: timestamp("fecha_despacho", { withTimezone: true }),
     fechaEntrega: timestamp("fecha_entrega", { withTimezone: true }),
+    // Issue #422 (cuentas por cobrar) — cuándo libera Mercado Libre la
+    // plata de esta venta. Sale de /v1/payments/{id} (o /collections/{id}
+    // si el token no tiene permiso), NO de /orders/{id}, que no siempre la
+    // trae (lib/ml/liberacion.ts). estado_liberacion es money_release_status
+    // tal cual («released», «pending»…); monto_por_liberar, el neto
+    // (net_received_amount) de los pagos aprobados que siguen sin liberar.
+    // Vacío = todavía no se consultó.
+    fechaLiberacion: timestamp("fecha_liberacion", { withTimezone: true }),
+    estadoLiberacion: text("estado_liberacion"),
+    montoPorLiberar: numeric("monto_por_liberar", { precision: 14, scale: 2 }),
   },
   (t) => ({
     pedidoUnico: unique("pedidos_finanzas_pedido_unico").on(t.pedidoId),

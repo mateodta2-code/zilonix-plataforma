@@ -1935,6 +1935,28 @@ export async function tendenciasCategoriaMl(siteId: string, categoriaId: string,
     if (error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) return null;
     throw error;
   }
+// Diagnóstico de imágenes de Mercado Libre (Publicar → «Crear con IA»,
+// PR2). Documentado: https://developers.mercadolibre.com.ar/diagnostico-imagenes
+// POST /moderations/pictures/diagnostic con { picture_url, context:
+// { category_id, picture_type } } (picture_type: thumbnail |
+// variation_thumbnail | other). Solo ANALIZA una foto: no toca ninguna
+// publicación. Todavía sin confirmar en staging (scripts/explorar-publicar-ia.ts):
+// devuelve el estado HTTP y el JSON crudo para que el llamador lo lea;
+// nunca lanza por un 4xx/5xx.
+export type TipoFotoDiagnostico = "thumbnail" | "variation_thumbnail" | "other";
+
+export async function diagnosticarImagenMl(
+  urlFoto: string,
+  categoriaId: string,
+  tipo: TipoFotoDiagnostico,
+  token: string
+): Promise<{ status: number; data: unknown }> {
+  if (!/^https:\/\//.test(urlFoto) || !PATRON_ID_CATEGORIA.test(categoriaId)) return { status: 0, data: null };
+  const r = await escribir<unknown>(`${BASE_URL}/moderations/pictures/diagnostic`, token, "POST", {
+    picture_url: urlFoto,
+    context: { category_id: categoriaId, picture_type: tipo },
+  });
+  return { status: r.status, data: r.data };
 }
 
 // Visitas de TODA la tienda (todas las publicaciones de un vendedor)
