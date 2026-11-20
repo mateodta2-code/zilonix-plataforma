@@ -1,3 +1,4 @@
+import { Boton } from "@/components/marco/Boton";
 import Link from "next/link";
 import { obtenerInvitacionBodegaPorToken } from "@/lib/bodega/invitaciones";
 import { NOMBRE_ROL_BODEGA } from "@/lib/bodega/roles";
@@ -51,9 +52,9 @@ export default async function InvitacionBodegaPage({ params, searchParams }: { p
       {usuario ? (
         <form action={aceptarInvitacionBodegaAction} style={{ marginTop: 24 }}>
           <input type="hidden" name="token" value={params.token} />
-          <button type="submit" style={{ padding: "10px 16px" }}>
+          <Boton type="submit">
             Aceptar y entrar a {invitacion.bodegaNombre}
-          </button>
+          </Boton>
         </form>
       ) : (
         <div style={{ display: "flex", gap: 12, marginTop: 24 }}>

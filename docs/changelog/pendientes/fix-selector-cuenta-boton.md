@@ -1,0 +1,1 @@
+- **fix-selector-cuenta-boton** — Selector «Cuenta de Mercado Libre» (Optimización y Publicidad): «Aplicar» pasa a ser el botón del sistema (`Boton`, primario y chico, como el filtro de Actividad) en vez de un `<button>` gris del navegador. La lista de cuentas toma el estilo `zx-control` de los demás campos.

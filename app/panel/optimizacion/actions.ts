@@ -16,6 +16,7 @@ import {
   productoCatalogoDeItemMl,
   reputacionVendedorMl,
   tieneDescripcionMl,
+  leerDescripcionItemMl,
   leerItemEdicionMl,
   LimiteMercadoLibreError,
   motivoErrorEscrituraMl,
@@ -29,6 +30,9 @@ import {
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary } from "@/lib/cloudinary";
 import { obtenerConexionIAConClave } from "@/lib/ia/conexion";
+import { proponerContenido } from "@/lib/ia/contenido";
+import { faltaParaCrear, limpiarContenido, palabrasProhibidas, promptImagenContenido, tipoContenido, tipoLoEscribeLaIA, type ContenidoImagen } from "@/lib/ia/contenidoReglas";
+import { ErrorProveedorIA } from "@/lib/ia/proveedores";
 import {
   descargarFotoBase,
   ErrorImagenIA,
@@ -432,6 +436,8 @@ export async function generarImagenIAAction(entrada: {
   indicaciones?: string;
   // Portada: cuál de las composiciones (cada una distinta).
   variante?: number;
+  // Informativa: el contenido ya aprobado (título, copy, composición).
+  contenido?: unknown;
 }): Promise<ResultadoImagenIA> {
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
@@ -439,6 +445,15 @@ export async function generarImagenIAAction(entrada: {
   const conexion = await obtenerConexionIAConClave(prep.ctx.empresaId);
   if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta OpenAI o Google en Configuración → IA." };
   const tipo = leerTipoImagenIA(entrada.tipo);
+  // Informativa: solo con contenido aprobado, revisado otra vez acá
+  // (palabras prohibidas, mínimo de líneas): nunca se confía en la pantalla.
+  let contenido: ContenidoImagen | null = null;
+  if (tipo === "informativa") {
+    contenido = limpiarContenido(entrada.contenido);
+    if (!contenido) return { ok: false, aviso: "Primero propón o escribe el contenido de la imagen y apruébalo." };
+    const falta = faltaParaCrear(contenido);
+    if (falta) return { ok: false, aviso: falta };
+  }
   try {
     const fotoUrl = typeof entrada.fotoUrl === "string" ? entrada.fotoUrl : "";
     const base = await descargarFotoBase(fotoUrl);
@@ -448,9 +463,9 @@ export async function generarImagenIAAction(entrada: {
       .slice(0, MAXIMO_FOTOS_REFERENCIA - 1);
     const referencias = (await Promise.all(otras.map((u) => descargarFotoBase(u).catch(() => null)))).filter((f) => f !== null);
     const variante = leerVariante(entrada.variante);
-    const prompt = promptImagenIA(tipo, prep.item.titulo, limpiarIndicaciones(entrada.indicaciones), variante);
+    const prompt = contenido ? promptImagenContenido(contenido, prep.item.titulo) : promptImagenIA("portada", prep.item.titulo, limpiarIndicaciones(entrada.indicaciones), variante);
     const imagen = await generarImagenDesdeFoto(conexion, [base, ...referencias], prompt);
-    const nombre = tipo === "portada" ? `ia-portada-${variante + 1}-${prep.item.id}` : `ia-${tipo}-${prep.item.id}`;
+    const nombre = contenido ? `ia-${contenido.tipo}-${prep.item.id}` : `ia-portada-${variante + 1}-${prep.item.id}`;
     const { url } = await subirACloudinary(imagen.buffer, nombre, imagen.tipo, "zilonix-optimizacion-ia");
     return { ok: true, url, aviso: "Imagen creada. Revísala: si te gusta, agrégala y guarda las fotos." };
   } catch (error) {
@@ -458,5 +473,36 @@ export async function generarImagenIAAction(entrada: {
     if (error instanceof CloudinaryNoConfiguradoError) return { ok: false, aviso: "Falta configurar Cloudinary en este ambiente." };
     console.warn(`[app/panel/optimizacion] imagen IA ${prep.item.id}: ${error instanceof Error ? error.name : "error"}`);
     return { ok: false, aviso: "No se pudo crear la imagen. Intenta de nuevo." };
+  }
+}
+
+export type ResultadoPropuestaContenido = { ok: true; contenido: ContenidoImagen; prohibidas: string[] } | { ok: false; aviso: string };
+
+// Paso 1 del flujo de aprobación: la IA de TEXTO de la empresa propone
+// título, copy y composición con la ficha técnica y la descripción de la
+// publicación. No crea ninguna imagen ni toca Mercado Libre. «Opiniones
+// reales» nunca la escribe la IA (inventar reseñas es engañoso).
+export async function proponerContenidoIAAction(entrada: {
+  cuentaMlId: string;
+  itemId: string;
+  tipoContenido: string;
+  ficha?: string;
+}): Promise<ResultadoPropuestaContenido> {
+  const tipo = tipoContenido(entrada.tipoContenido);
+  if (!tipo) return { ok: false, aviso: "Elige qué imagen quieres crear." };
+  if (!tipoLoEscribeLaIA(tipo.id)) return { ok: false, aviso: "Las opiniones las pegas tú, copiadas de compradores reales: la IA no las inventa." };
+  const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
+  if ("error" in prep) return { ok: false, aviso: prep.error };
+  const conexion = await obtenerConexionIAConClave(prep.ctx.empresaId);
+  if (!conexion) return { ok: false, aviso: "Esta empresa no tiene una IA conectada. Conecta OpenAI o Google en Configuración → IA." };
+  const descripcion = await leerDescripcionItemMl(prep.item.id, prep.token).catch(() => null);
+  try {
+    const contenido = await proponerContenido(conexion, tipo.id, prep.item.titulo, limpiarIndicaciones(entrada.ficha), descripcion);
+    if (!contenido) return { ok: false, aviso: "La IA no devolvió una propuesta usable. Intenta de nuevo o escríbela tú." };
+    return { ok: true, contenido, prohibidas: palabrasProhibidas([contenido.titulo, ...contenido.bullets]) };
+  } catch (error) {
+    if (error instanceof ErrorProveedorIA) return { ok: false, aviso: error.message };
+    console.warn(`[app/panel/optimizacion] propuesta IA ${prep.item.id}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: "No se pudo proponer el contenido. Intenta de nuevo." };
   }
 }

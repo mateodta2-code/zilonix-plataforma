@@ -1,0 +1,9 @@
+- **feat-optimizacion-imagenes-contenido** — **Optimización → Crear imagen con IA → Informativa:** usa el prompt de contenido de Melissa / Zilonix, con 10 tipos: modo de uso, características, beneficios, ventajas, qué incluye, cómo funciona, comparación sin marcas, contexto de uso, opiniones reales y preguntas frecuentes. Tiene **flujo de aprobación**:
+  - La IA de texto de la empresa (`llamarIA`) propone título, copy y composición a partir de la ficha técnica, el título y la descripción de la publicación (`leerDescripcionItemMl`).
+  - La persona lo revisa y lo edita; también puede ver y copiar el prompt final.
+  - La imagen solo se crea con «CREAR imagen».
+- **feat-optimizacion-imagenes-contenido** — **Palabras prohibidas** por las políticas de Mercado Libre (curar, tratar, prevenir, alivio, expertos, garantizado, elimina, antes/después…):
+  - Se revisan sin tildes y por palabra completa (`palabrasProhibidas`, en `lib/ia/contenidoReglas.ts`), así «compra segura» no cuenta como «cura».
+  - Bloquean el botón en pantalla, y el servidor las revisa otra vez antes de crear la imagen (`faltaParaCrear`).
+- **feat-optimizacion-imagenes-contenido** — **«Opiniones reales» nunca las escribe la IA.** Inventar reseñas, aunque digan solo «llegó bien», es publicidad engañosa: la persona pega opiniones reales de sus compradores.
+- **feat-optimizacion-imagenes-contenido** — La ficha técnica sube a 1500 caracteres y se comparte entre la portada y la informativa. El prompt viejo de informativa se retiró. La guía de Optimización explica el flujo nuevo.

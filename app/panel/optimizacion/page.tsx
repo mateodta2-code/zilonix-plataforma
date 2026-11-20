@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { BotonLink } from "@/components/marco/Boton";
+import { Boton, BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -139,9 +139,9 @@ export default async function OptimizacionPage({
                 placeholder="Buscar por título, SKU o código"
                 aria-label="Buscar publicación"
               />
-              <button type="submit" className="zx-control">
+              <Boton type="submit" chico>
                 Buscar
-              </button>
+              </Boton>
             </form>
             <span className={styles.filtro} role="group" aria-label="Período de visitas y ventas">
               {OPCIONES_DIAS_METRICAS.map((opcion) => (
