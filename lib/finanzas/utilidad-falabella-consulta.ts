@@ -147,7 +147,8 @@ export async function listarUtilidadFalabella(
     const resultado = calcularUtilidadFalabella({
       pedidos: pedidos.map((x) => ({
         pedidoId: x.id,
-        numeros: [x.pedidoIdExterno, x.numeroOrden].filter((n): n is string => !!n),
+        // En orden de prioridad: OrderNumber y, de respaldo, el OrderId.
+        numeros: [x.numeroOrden, x.pedidoIdExterno].filter((n): n is string => !!n),
         // Se muestra el número que ve el cliente; el OrderId, en gris.
         numeroVisible: x.numeroOrden ?? x.pedidoIdExterno,
         numeroInterno: x.numeroOrden ? x.pedidoIdExterno : null,

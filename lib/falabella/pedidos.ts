@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, lt } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasFalabella, pedidosFalabella } from "@/db/schema";
 import { llamarFalabella } from "@/lib/falabella/cliente";
@@ -176,8 +176,10 @@ export async function importarPedidos(
           .onConflictDoUpdate({
             target: [pedidosFalabella.empresaId, pedidosFalabella.pedidoIdExterno],
             // Issue #422: incluye numeroOrden para que re-sincronizar llene
-            // las órdenes importadas antes de existir la columna.
-            set: { estado, total, items, numeroOrden },
+            // las órdenes importadas antes de existir la columna. Con
+            // coalesce (revisión de Pablo en #482): si una sync posterior
+            // no trae OrderNumber, se conserva el que ya estaba.
+            set: { estado, total, items, numeroOrden: sql`coalesce(excluded.numero_orden, ${pedidosFalabella.numeroOrden})` },
           });
       } catch (error) {
         // Issue #422: sin el OrderId, el log solo decía "invalid input
