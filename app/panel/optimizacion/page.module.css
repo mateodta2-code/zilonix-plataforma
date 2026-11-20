@@ -381,3 +381,25 @@
   display: grid;
   gap: 12px;
 }
+
+/* Bitácora de cambios: chip del resultado + resumen. */
+.resultadoCambio {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+/* Lista: aviso de un cambio que ya cumplió 7 días. */
+.chipRevisar {
+  display: inline-block;
+  width: fit-content;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+  border: 1px solid var(--acento-fuerte);
+  border-radius: 999px;
+}

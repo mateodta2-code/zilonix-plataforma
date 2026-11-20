@@ -1,0 +1,6 @@
+- **feat-optimizacion-bitacora** — **Optimización → detalle → «Bitácora de cambios»:** cada cambio hecho desde Optimización (precio, título, fotos, pausar o activar), con fecha, quién lo hizo y el antes → después. Sale de la auditoría que ya se guardaba, sin migración (`lib/optimizacion/bitacora.ts`).
+  - Cuando el cambio cumple 7 días aparece su **resultado**: visitas, ventas, conversión y (con Finanzas) utilidad de la semana anterior contra la semana desde el cambio, con «Mejoró», «Empeoró» o «Igual» (`resultadoCambio`, puro, con pruebas). Antes de eso dice «En medición: faltan N días».
+  - Para medirlo, el detalle trae ahora siempre los 150 días de visitas que da Mercado Libre, en una sola llamada.
+  - **En la lista**, un aviso **«Revisar cambio»** sale en las publicaciones con un cambio de hace 7 a 14 días y lleva directo a la bitácora.
+  - La guía de Optimización lo explica.
+  - Pendiente, con la migración que debe aprobar Mateo: marcar cada cambio como «Revisado» con su resultado y las notas a mano para los cambios hechos fuera de Zilonix.

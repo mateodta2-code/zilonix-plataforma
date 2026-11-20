@@ -52,6 +52,7 @@ export function TablaOptimizacion({
   idioma,
   puedeModificar,
   dias,
+  paraRevisar = [],
 }: {
   filas: FilaTablaOptimizacion[];
   cuentaMlId: string;
@@ -59,6 +60,8 @@ export function TablaOptimizacion({
   idioma: string;
   puedeModificar: boolean;
   dias: number;
+  // Publicaciones con un cambio que ya cumplió 7 días (bitácora).
+  paraRevisar?: string[];
 }) {
   const [metricas, setMetricas] = useState<Record<string, MetricasPublicacion>>({});
   const [cargando, setCargando] = useState(true);
@@ -154,6 +157,11 @@ export function TablaOptimizacion({
                       <Link className={styles.verDetalle} href={`/panel/optimizacion/${fila.id}?cuenta=${cuentaMlId}`}>
                         Ver detalle →
                       </Link>
+                      {paraRevisar.includes(fila.id) ? (
+                        <Link href={`/panel/optimizacion/${fila.id}?cuenta=${cuentaMlId}#bitacora`} className={styles.chipRevisar} title="Un cambio de esta publicación ya cumplió 7 días: revisa en la bitácora si funcionó.">
+                          Revisar cambio
+                        </Link>
+                      ) : null}
                     </div>
                   </div>
                 </CeldaTabla>
