@@ -9,6 +9,7 @@ import { crearYPublicarProductoAction } from "./actions";
 import { ConectarCanva } from "./ConectarCanva";
 import { mensajeErrorConectarCanva } from "./canva-mensajes-error";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
+import { CrearConIA } from "./CrearConIA";
 import { GaleriaFotos } from "./GaleriaFotos";
 import { PortadaCuenta } from "./PortadaCuenta";
 import { SelectorCategoria, type CategoriaElegida } from "./SelectorCategoria";
@@ -310,6 +311,18 @@ export function FormularioPublicar({
           La primera es la portada si ninguna cuenta tiene una propia. Puedes pegar una URL externa, subir un archivo de tu PC, o traer una exportación de Canva.
         </p>
         <textarea name="imagenes" value={fotosDentroDelLimite(imagenes.filter(Boolean), maxFotos).join("\n")} readOnly hidden />
+      </Tarjeta>
+
+      {/* --- «Crear con IA» (PR1, textos): ficha, títulos y descripción con
+          la IA de la empresa; «Usar en la publicación» llena la cuenta de abajo. --- */}
+      <Tarjeta className={styles.seccion}>
+        <p className="zx-etiqueta">Crear con IA</p>
+        <CrearConIA
+          cuentas={cuentasMarcadas}
+          fotos={imagenes.filter(Boolean)}
+          onUsarTitulo={(id, titulo) => actualizarCuenta(id, "titulo", titulo)}
+          onUsarDescripcion={(id, descripcion) => actualizarCuenta(id, "descripcion", descripcion)}
+        />
       </Tarjeta>
 
       {/* --- Punto 5: título/descripción/portada por cuenta ELEGIDA --- */}

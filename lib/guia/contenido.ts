@@ -30,6 +30,7 @@ const CONECTAR_IA: ApartadoGuia = {
     "En Zilonix ve a Administración → Conectar IA (necesitas permiso para modificar la configuración).",
     "Pulsa «Agregar IA», elige el proveedor (OpenAI o Google), escribe un nombre y un modelo de texto (por ejemplo gpt-5-mini o gemini-2.5-flash) y pega la API key.",
     "Guarda y usa «Probar conexión». La clave se guarda cifrada y no se vuelve a mostrar.",
+    "Márcala como principal o asígnala al módulo que la va a usar (Optimización para imágenes, Publicaciones para «Crear con IA» en Publicar). Lo que no asignes usa la principal.",
     "Vuelve a Optimización → «Ver detalle →» de una publicación → debajo de las fotos aparece «Crear imagen con IA» (recarga la página si ya la tenías abierta).",
   ],
 };
@@ -178,7 +179,26 @@ export const GUIA: GrupoGuia[] = [
         pasos: [
           "Elige las cuentas destino. Cada una lleva su propio título, descripción y portada; precio, stock, SKU y demás fotos son iguales.",
           "Para no escribir todo desde cero, pega el link de una publicación y usa «Traer datos de ese link» (necesita la extensión).",
+          "O usa «Crear con IA»: con tus fotos y lo que escribas del producto, la IA arma la ficha, propone títulos y escribe la descripción.",
           "Revisa y publica. La publicación sale como Premium con garantía del vendedor de 30 días.",
+        ],
+        apartados: [
+          {
+            titulo: "Crear con IA (títulos y descripción)",
+            pasos: [
+              "Marca la cuenta destino y sube las fotos del producto en la galería (la IA mira hasta 5).",
+              "En «Crear con IA» escribe lo que sabes del producto: qué es, marca y modelo, material, medidas, qué incluye y cómo se usa.",
+              "Pulsa «Analizar producto». Cada dato de la ficha dice de dónde salió: «De la foto», «Del vendedor» o «Confirmar».",
+              "Revisa lo marcado «Confirmar»: corrígelo, bórralo o marca «Es correcto». Después pulsa «Confirmar ficha».",
+              "Pide los títulos (máximo 60 caracteres, con las búsquedas en tendencia de la categoría) y usa el que te guste con «Usar en la publicación».",
+              "Si das garantía, escríbela; después pulsa «Escribir descripción», revísala y úsala con «Usar en la publicación».",
+            ],
+          },
+        ],
+        consejos: [
+          "Necesitas una IA conectada en Administración → Conectar IA, asignada a Publicaciones o como principal. Lo cobra la cuenta de IA de tu empresa.",
+          "La IA no inventa: medidas, tiempos, garantía o lo que incluye solo salen si están en tus fotos o en lo que escribiste y los confirmaste.",
+          "Nada se publica desde «Crear con IA»: solo llena el título y la descripción de la cuenta elegida.",
         ],
       },
       {

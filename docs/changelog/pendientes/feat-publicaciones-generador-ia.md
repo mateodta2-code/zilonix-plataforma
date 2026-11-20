@@ -1,0 +1,25 @@
+- **feat/publicaciones-generador-ia · PR1 (textos, sin migración)** — **Publicar → «Crear con IA»**: con las fotos del borrador (hasta 5) y lo que escribe el vendedor, la IA de TEXTO de la empresa arma la ficha del producto, propone títulos SEO y escribe la descripción. Usa el módulo «publicaciones» de Conectar IA (`obtenerConexionIAParaModulo`); Zilonix no pone IA y nunca usa `ANTHROPIC_API_KEY`. Mismo permiso que publicar (`inventario/crear`). Nada se publica: «Usar en la publicación» solo llena el título o la descripción de la cuenta elegida.
+  - **Ficha** (`lib/publicaciones/ficha.ts`, `analisis.ts`):
+    - Lee las fotos con `llamarIAConImagenes`; si el modelo no lee imágenes, usa solo el texto y lo avisa.
+    - JSON estricto validado a mano (zod no está en el proyecto, no se agregó).
+    - Cada campo lleva su origen (foto, vendedor o supuesto); un origen inválido cuenta como «supuesto».
+    - «N/A», «desconocido» y similares quedan en null.
+    - Un «supuesto» con valor bloquea «Confirmar ficha»; el servidor lo vuelve a revisar.
+    - La categoría sale de Mercado Libre (`resolverCategoria`, domain_discovery), nunca de la IA.
+    - El idioma sale del país de la cuenta (`datosSitioMl`).
+  - **Títulos** (`lib/publicaciones/titulos.ts`):
+    - Tendencias de la categoría con `tendenciasCategoriaMl` (`GET /trends/{SITE_ID}/{CATEGORY_ID}`, documentado; **falta confirmarlo en staging**, y si falla sigue sin tendencias y lo dice).
+    - Las reglas se aplican en código: 60 caracteres (120 en catálogo) recortando por palabra, sin Mayúscula En Cada Palabra (respeta siglas, unidades y marca), sin promoción, precios ni símbolos.
+    - Se descarta cualquier título con una cifra que no esté en la ficha ni en el texto del vendedor.
+    - El origen de cada palabra clave (tendencia, vendedor o sugerida por la IA) lo calcula el código.
+  - **Descripción** (`lib/publicaciones/descripcion.ts`):
+    - La IA redacta solo con la ficha confirmada. El código arma el texto plano (sin HTML ni emojis) con encabezados en español o portugués.
+    - «Se entrega con» sale solo de «Qué incluye» confirmado; «Garantía» solo si el vendedor la escribió.
+    - Se quitan las líneas con días de prueba, garantías o devoluciones inventadas, palabras prohibidas o cifras que no están en la ficha.
+  - **Errores y freno:**
+    - Mensajes fijos (`lib/publicaciones/errores.ts`): nunca el texto del proveedor ni la llave, tampoco en los logs.
+    - Sin IA, se muestra el enlace a Administración → Conectar IA.
+    - Sin límite de uso (decisión de Mateo, 19-nov). Solo hay un freno de concurrencia: máximo 4 llamadas de texto al mismo tiempo por empresa; las demás esperan en fila y arrancan solas, nunca se rechazan (`lib/publicaciones/freno.ts`, en memoria).
+  - **Guía:** la de Publicar explica «Crear con IA» paso a paso, y «Cómo conectar la IA» incluye asignar la IA al módulo.
+- **PR2 (pendiente, con migración — se mostrará el SQL a Mateo antes de crearla):** imágenes (catálogo de tipos, estilos «Experto ML» y «Prompt Zilonix», paralelo de a 2, regenerar una, diagnóstico de Mercado Libre, agregar a la galería, historial por empresa y freno en base).
+- **PR3 (después, no ahora):** manual de marca guardado por empresa y quitar fondo con la llave propia de la empresa (sin servicio pago de plataforma sin el sí de Mateo).
