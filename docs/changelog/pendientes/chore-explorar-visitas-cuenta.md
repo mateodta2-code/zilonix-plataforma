@@ -1,0 +1,1 @@
+- **chore-explorar-visitas-cuenta** — `scripts/explorar-visitas-cuenta.ts` (solo lectura): prueba con una cuenta real `/users/{id}/items_visits` (por rango de fechas) y `/users/{id}/items_visits/time_window` antes de mostrar las visitas de toda la tienda en el resumen global de Optimización. Solo imprime códigos HTTP, nombres de campos y números.
