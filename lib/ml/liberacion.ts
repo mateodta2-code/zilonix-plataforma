@@ -8,9 +8,10 @@
 //
 // Solo se consulta lo que sigue sin liberar: una venta ya «released» no
 // vuelve a gastar llamadas. Toda llamada pasa por lib/ml/cliente.ts
-// (vía el lector con reintento de 429 que pasa quien llama).
+// (vía el lector con reintento de 429 que pasa quien llama). Ningún log
+// de este archivo lleva el token: solo ids de orden y de cuenta.
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { pedidosFinanzas } from "@/db/schema";
 import { aCentavos, desdeCentavos } from "@/lib/finanzas/utilidad-venta";
@@ -76,12 +77,13 @@ export function pagosPorConsultar(estadoOrden: string, pagos: PagoOrden[], estad
   ];
 }
 
-export type LiberacionVenta = { estado: string; fecha: Date | null; montoPorLiberar: string };
+// montoPorLiberar null = algún pago pendiente llegó sin neto: la venta
+// sigue por cobrar, pero el monto no se adivina.
+export type LiberacionVenta = { estado: string; fecha: Date | null; montoPorLiberar: string | null };
 
 // Une los pagos de una venta: liberada solo si TODOS están liberados.
 // Si falta alguno, la fecha es la más tardía de los pendientes (la plata
-// completa entra ese día) y el monto es el neto de los pendientes. Un
-// pendiente sin neto deja el monto en 0: no se adivina.
+// completa entra ese día) y el monto es el neto de los pendientes.
 export function combinarLiberaciones(pagos: LiberacionPago[]): LiberacionVenta | null {
   if (pagos.length === 0) return null;
   const pendientes = pagos.filter((p) => p.estado !== ESTADO_LIBERADO);
@@ -90,30 +92,82 @@ export function combinarLiberaciones(pagos: LiberacionPago[]): LiberacionVenta |
   if (pendientes.length === 0) {
     return { estado: ESTADO_LIBERADO, fecha: masTardia(fechas(pagos)), montoPorLiberar: "0.00" };
   }
-  const monto = pendientes.reduce((s, p) => s + (p.neto === null ? BigInt(0) : aCentavos(p.neto)), BigInt(0));
+  const sinNeto = pendientes.some((p) => p.neto === null);
   return {
     estado: pendientes.find((p) => p.estado)?.estado ?? "pending",
     fecha: masTardia(fechas(pendientes)),
-    montoPorLiberar: desdeCentavos(monto),
+    montoPorLiberar: sinNeto ? null : desdeCentavos(pendientes.reduce((s, p) => s + aCentavos(p.neto!), BigInt(0))),
   };
+}
+
+// ---------- Permisos recordados por cuenta ----------
+//
+// Revisión del PR #486 (Pablo): un 403 de /v1/payments es del permiso de
+// la app, no de la orden: se repite en TODAS. Se recuerda por cuenta para
+// ir directo a /collections y no gastar dos llamadas por orden; si las
+// dos rutas dan 403, la cuenta no se consulta más y queda UN solo log.
+// En memoria del proceso y por unas horas: si Mateo habilita el permiso,
+// la cuenta se vuelve a probar sola. Un 401 (token vencido) NO se
+// recuerda: es de ese momento, no del permiso.
+
+const OLVIDAR_PERMISO_MS = 6 * 60 * 60 * 1000;
+
+type PermisoCuenta = { v1Prohibido: boolean; sinPermiso: boolean; desde: number };
+const permisosPorCuenta = new Map<string, PermisoCuenta>();
+
+function permisoDe(cuentaMlId: string, ahora: number): PermisoCuenta {
+  const actual = permisosPorCuenta.get(cuentaMlId);
+  if (actual && ahora - actual.desde < OLVIDAR_PERMISO_MS) return actual;
+  const nuevo = { v1Prohibido: false, sinPermiso: false, desde: ahora };
+  permisosPorCuenta.set(cuentaMlId, nuevo);
+  return nuevo;
+}
+
+// Solo para pruebas.
+export function olvidarPermisosLiberacion(): void {
+  permisosPorCuenta.clear();
 }
 
 export type ResultadoPago = { tipo: "ok"; liberacion: LiberacionPago } | { tipo: "sin_permiso" } | { tipo: "sin_dato" };
 
-// Un pago: /v1/payments/{id}; con 401/403, /collections/{id}. Un 429
-// persistente se propaga (lo corta el lector de quien llama).
-export async function leerLiberacionPago(leer: LectorMl, pagoId: string): Promise<ResultadoPago> {
+// Un pago: /v1/payments/{id} (salvo que la cuenta ya dio 403 ahí); con
+// 401/403, /collections/{id}. Un 429 persistente se propaga (lo corta el
+// lector de quien llama).
+export async function leerLiberacionPago(
+  leer: LectorMl,
+  pagoId: string,
+  cuentaMlId: string,
+  ahora: number = Date.now()
+): Promise<ResultadoPago> {
   if (!PATRON_ID_NUMERICO.test(pagoId)) return { tipo: "sin_dato" };
-  for (const ruta of [`/v1/payments/${pagoId}`, `/collections/${pagoId}`]) {
+  const permiso = permisoDe(cuentaMlId, ahora);
+  if (permiso.sinPermiso) return { tipo: "sin_permiso" };
+
+  const rutas = [
+    ...(permiso.v1Prohibido ? [] : [{ ruta: `/v1/payments/${pagoId}`, v1: true }]),
+    { ruta: `/collections/${pagoId}`, v1: false },
+  ];
+  for (const { ruta, v1 } of rutas) {
     try {
       const resp = await leer<unknown>(ruta);
       if (!resp.ok) return { tipo: "sin_dato" };
       const liberacion = liberacionDesdePago(resp.data);
       return liberacion ? { tipo: "ok", liberacion } : { tipo: "sin_dato" };
     } catch (error) {
-      if (error instanceof MlNoAutorizadoError || error instanceof MlSinPermisoAppError) continue;
+      if (error instanceof MlSinPermisoAppError) {
+        if (v1) permiso.v1Prohibido = true;
+        continue;
+      }
+      if (error instanceof MlNoAutorizadoError) continue;
       throw error;
     }
+  }
+  // Las dos con 403 = permiso de la app: se recuerda y se avisa UNA vez.
+  if (permiso.v1Prohibido && !permiso.sinPermiso) {
+    permiso.sinPermiso = true;
+    console.warn(
+      `[liberacion] la cuenta ${cuentaMlId}: ni /v1/payments ni /collections dejan leer pagos con el token de Mercado Libre (depende de la app de Mercado Pago). No se consulta más por ${OLVIDAR_PERMISO_MS / 3_600_000} h.`
+    );
   }
   return { tipo: "sin_permiso" };
 }
@@ -123,12 +177,14 @@ export async function leerLiberacionPago(leer: LectorMl, pagoId: string): Promis
 // deja la venta como estaba: la próxima sync lo reintenta.
 export async function sincronizarLiberacion(
   empresaId: string,
+  cuentaMlId: string,
   pedidoId: string,
   orden: { id: number | string; status: string; payments?: PagoOrden[] },
   leer: LectorMl
 ): Promise<void> {
+  const deLaVenta = and(eq(pedidosFinanzas.empresaId, empresaId), eq(pedidosFinanzas.pedidoId, pedidoId));
   const [actual] = await dbComoEmpresa(empresaId, (tx) =>
-    tx.select({ estado: pedidosFinanzas.estadoLiberacion }).from(pedidosFinanzas).where(eq(pedidosFinanzas.pedidoId, pedidoId))
+    tx.select({ estado: pedidosFinanzas.estadoLiberacion }).from(pedidosFinanzas).where(deLaVenta)
   );
   if (!actual) return;
   const ids = pagosPorConsultar(orden.status, orden.payments ?? [], actual.estado);
@@ -136,14 +192,8 @@ export async function sincronizarLiberacion(
 
   const leidos: LiberacionPago[] = [];
   for (const id of ids) {
-    const resultado = await leerLiberacionPago(leer, id);
-    if (resultado.tipo === "sin_permiso") {
-      console.warn(
-        `[liberacion] la orden ${orden.id}: ni /v1/payments ni /collections dejan leer el pago con el token de Mercado Libre (depende de la app de Mercado Pago).`
-      );
-      return;
-    }
-    if (resultado.tipo === "sin_dato") return;
+    const resultado = await leerLiberacionPago(leer, id, cuentaMlId);
+    if (resultado.tipo !== "ok") return;
     leidos.push(resultado.liberacion);
   }
   const venta = combinarLiberaciones(leidos);
@@ -152,6 +202,6 @@ export async function sincronizarLiberacion(
     tx
       .update(pedidosFinanzas)
       .set({ estadoLiberacion: venta.estado, fechaLiberacion: venta.fecha, montoPorLiberar: venta.montoPorLiberar })
-      .where(eq(pedidosFinanzas.pedidoId, pedidoId))
+      .where(deLaVenta)
   );
 }

@@ -3,6 +3,7 @@ import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { leerPartidasPorCobrar } from "@/lib/finanzas/por-cobrar-consulta";
 import {
   agruparPorCuenta,
+  estaVencida,
   ETIQUETA_MARKETPLACE,
   filtrarPartidas,
   leerFiltrosPorCobrar,
@@ -42,7 +43,7 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
   let todas;
   try {
     await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
-    todas = await leerPartidasPorCobrar(empresa.id, usuario.id, ahora);
+    todas = await leerPartidasPorCobrar(empresa.id, usuario.id);
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     return <SinAcceso mensaje={`Tu rol (${rolNombre}) no tiene acceso a Finanzas.`} />;
@@ -60,6 +61,9 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
   );
   const hayFiltros = filtros.marketplace !== null || filtros.cuentaId !== null;
   const sinFecha = totales.filter((t) => t.sinFecha !== "0.00");
+  const vencido = totales.filter((t) => t.vencido !== "0.00");
+  const sinNeto = totales.reduce((n, t) => n + t.sinNeto, 0);
+  const montoDe = (monto: string | null, moneda: string) => (monto === null ? "Sin neto" : mostrarMontoIso(monto, moneda));
 
   return (
     <>
@@ -74,6 +78,10 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
           valor={porMoneda(totales, "total")}
           detalle={[
             `${partidas.length} ${partidas.length === 1 ? "partida" : "partidas"}.`,
+            ...(vencido.length
+              ? [`Vencido (la fecha de liberación ya pasó y no se ha liberado): ${vencido.map((t) => mostrarMontoIso(t.vencido, t.moneda)).join(" · ")}.`]
+              : []),
+            ...(sinNeto > 0 ? [`${sinNeto} ${sinNeto === 1 ? "venta pendiente llegó" : "ventas pendientes llegaron"} sin neto de Mercado Libre: no suman al total.`] : []),
             ...(sinFecha.length
               ? [`Sin fecha esperada (Falabella no la trae en el reporte): ${sinFecha.map((t) => mostrarMontoIso(t.sinFecha, t.moneda)).join(" · ")}.`]
               : []),
@@ -82,7 +90,7 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
         <TarjetaKpi
           titulo="Entra esta semana"
           valor={porMoneda(totales, "estaSemana")}
-          detalle={[`Fecha esperada hasta el domingo ${ventanas.semana.hasta} (día de Bogotá).`]}
+          detalle={[`Fecha esperada de hoy al domingo ${ventanas.semana.hasta} (día de Bogotá). No incluye lo vencido.`]}
         />
         <TarjetaKpi
           titulo="Entra el próximo mes"
@@ -138,6 +146,7 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
               "Cuenta",
               "Partidas",
               "Próxima fecha",
+              { clave: "vencido", contenido: "Vencido", numerica: true },
               { clave: "semana", contenido: "Esta semana", numerica: true },
               { clave: "mes", contenido: "Próximo mes", numerica: true },
               { clave: "total", contenido: "Total", numerica: true },
@@ -148,7 +157,11 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
                 <CeldaTabla>{ETIQUETA_MARKETPLACE[f.marketplace]}</CeldaTabla>
                 <CeldaTabla>{f.cuenta}</CeldaTabla>
                 <CeldaTabla>{f.partidas}</CeldaTabla>
-                <CeldaTabla>{f.proximaFecha ?? "Sin fecha"}</CeldaTabla>
+                <CeldaTabla>
+                  {f.proximaFecha ?? "Sin fecha"}
+                  {estaVencida({ fechaEsperada: f.proximaFecha }, ventanas) && <> · <strong>vencida</strong></>}
+                </CeldaTabla>
+                <CeldaTabla numerica>{mostrarMontoIso(f.vencido, f.moneda)}</CeldaTabla>
                 <CeldaTabla numerica>{mostrarMontoIso(f.estaSemana, f.moneda)}</CeldaTabla>
                 <CeldaTabla numerica>{mostrarMontoIso(f.proximoMes, f.moneda)}</CeldaTabla>
                 <CeldaTabla numerica>{mostrarMontoIso(f.total, f.moneda)}</CeldaTabla>
@@ -174,12 +187,15 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
           >
             {detalle.map((p) => (
               <FilaTabla key={`${p.marketplace}-${p.cuentaId}-${p.referencia}-${p.moneda}`}>
-                <CeldaTabla>{p.fechaEsperada ?? "Sin fecha"}</CeldaTabla>
+                <CeldaTabla>
+                  {p.fechaEsperada ?? "Sin fecha"}
+                  {estaVencida(p, ventanas) && <> · <strong>vencida</strong></>}
+                </CeldaTabla>
                 <CeldaTabla>{ETIQUETA_MARKETPLACE[p.marketplace]}</CeldaTabla>
                 <CeldaTabla>{p.cuenta}</CeldaTabla>
                 <CeldaTabla>{p.referencia}</CeldaTabla>
                 <CeldaTabla>{p.estado ?? "—"}</CeldaTabla>
-                <CeldaTabla numerica>{mostrarMontoIso(p.monto, p.moneda)}</CeldaTabla>
+                <CeldaTabla numerica>{montoDe(p.monto, p.moneda)}</CeldaTabla>
               </FilaTabla>
             ))}
           </Tabla>

@@ -3,6 +3,7 @@ import {
   agruparPorCuenta,
   aDiezmilesimas,
   aTextoMonto,
+  estaVencida,
   filtrarPartidas,
   leerFiltrosPorCobrar,
   ordenarPartidas,
@@ -71,14 +72,23 @@ describe("resumirPorMoneda", () => {
 
   it("separa por moneda y reparte semana, próximo mes y sin fecha", () => {
     expect(resumirPorMoneda(partidas, ventanasBogota(AHORA))).toEqual([
-      { moneda: "COP", partidas: 4, total: "268831.44", estaSemana: "100000.00", proximoMes: "50000.50", sinFecha: "117830.94" },
-      { moneda: "MXN", partidas: 1, total: "300.00", estaSemana: "300.00", proximoMes: "0.00", sinFecha: "0.00" },
+      { moneda: "COP", partidas: 4, total: "268831.44", estaSemana: "100000.00", proximoMes: "50000.50", sinFecha: "117830.94", vencido: "0.00", sinNeto: 0 },
+      { moneda: "MXN", partidas: 1, total: "300.00", estaSemana: "300.00", proximoMes: "0.00", sinFecha: "0.00", vencido: "0.00", sinNeto: 0 },
     ]);
   });
 
-  it("una fecha ya pasada que sigue por cobrar cuenta en esta semana", () => {
-    const [cop] = resumirPorMoneda([partida({ fechaEsperada: "2026-11-10" })], ventanasBogota(AHORA));
-    expect(cop.estaSemana).toBe("100000.00");
+  it("una fecha ya pasada se marca vencida y va aparte de esta semana (no se esconde)", () => {
+    const v = ventanasBogota(AHORA);
+    const vieja = partida({ fechaEsperada: "2026-11-10" });
+    expect(estaVencida(vieja, v)).toBe(true);
+    expect(estaVencida(partida({ fechaEsperada: "2026-11-19" }), v)).toBe(false);
+    const [cop] = resumirPorMoneda([vieja], v);
+    expect(cop).toMatchObject({ total: "100000.00", vencido: "100000.00", estaSemana: "0.00" });
+  });
+
+  it("una pendiente sin neto cuenta como partida pero no suma montos", () => {
+    const [cop] = resumirPorMoneda([partida({}), partida({ referencia: "2000009", monto: null })], ventanasBogota(AHORA));
+    expect(cop).toMatchObject({ partidas: 2, sinNeto: 1, total: "100000.00", estaSemana: "100000.00" });
   });
 
   it("agrupa por plataforma, cuenta y moneda, con la próxima fecha", () => {

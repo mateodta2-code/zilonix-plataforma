@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNotNull, ne, or, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasFalabella, cuentasMl, movimientosMarketplace, pedidos, pedidosFinanzas } from "@/db/schema";
 import { obtenerSitioDeCuenta } from "@/lib/ml/cuentas";
@@ -12,13 +12,18 @@ import { ESTADOS_FALABELLA_POR_COBRAR, type PartidaPorCobrar } from "./por-cobra
 // sin pasar por app/.
 //
 // Mercado Libre: ventas no canceladas con la plata sin liberar
-// (estado_liberacion distinto de «released») y fecha de liberación
-// futura o sin fecha. Una fecha ya pasada se da por liberada: ML libera
-// sola ese día y la orden no siempre vuelve a la sync después.
+// (estado_liberacion distinto de «released»). Revisión del PR #486: una
+// fecha ya pasada NO se esconde (la pantalla la marca «vencida») y una
+// pendiente sin neto tampoco (monto null, se muestra «sin neto»).
+//
+// Además de RLS, cada consulta filtra empresa_id explícito (también en los
+// joins): si un día la política se afloja por error, esto no mezcla
+// empresas igual.
+//
 // Falabella: líneas en Abierto / Procesando cierre / Pago programado,
 // sumadas por corte (cuenta + Nº de estado de cuenta + moneda).
 
-export async function leerPartidasPorCobrar(empresaId: string, usuarioId: string, ahora: Date): Promise<PartidaPorCobrar[]> {
+export async function leerPartidasPorCobrar(empresaId: string, usuarioId: string): Promise<PartidaPorCobrar[]> {
   await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
 
   const { ml, falabella } = await dbComoEmpresa(empresaId, async (tx) => {
@@ -30,18 +35,19 @@ export async function leerPartidasPorCobrar(empresaId: string, usuarioId: string
         referencia: pedidos.pedidoIdExterno,
         estado: pf.estadoLiberacion,
         fechaEsperada: sql<string | null>`(${pf.fechaLiberacion} at time zone 'America/Bogota')::date::text`,
-        monto: sql<string>`${pf.montoPorLiberar}::text`,
+        monto: sql<string | null>`${pf.montoPorLiberar}::text`,
       })
       .from(pf)
-      .innerJoin(pedidos, eq(pedidos.id, pf.pedidoId))
-      .innerJoin(cuentasMl, eq(cuentasMl.id, pf.cuentaMlId))
+      .innerJoin(pedidos, and(eq(pedidos.id, pf.pedidoId), eq(pedidos.empresaId, empresaId)))
+      .innerJoin(cuentasMl, and(eq(cuentasMl.id, pf.cuentaMlId), eq(cuentasMl.empresaId, empresaId)))
       .where(
         and(
+          eq(pf.empresaId, empresaId),
           eq(pf.cancelada, false),
           isNotNull(pf.estadoLiberacion),
           ne(pf.estadoLiberacion, ESTADO_LIBERADO),
-          gt(pf.montoPorLiberar, "0"),
-          or(isNull(pf.fechaLiberacion), gt(pf.fechaLiberacion, ahora))
+          // Una venta ya liberada del todo queda en 0.00: no es deuda.
+          sql`${pf.montoPorLiberar} is distinct from 0`
         )
       );
 
@@ -56,8 +62,8 @@ export async function leerPartidasPorCobrar(empresaId: string, usuarioId: string
         monto: sql<string>`sum(${m.monto})::text`,
       })
       .from(m)
-      .innerJoin(cuentasFalabella, eq(cuentasFalabella.id, m.cuentaFalabellaId))
-      .where(and(eq(m.marketplace, "falabella"), inArray(m.estadoPago, [...ESTADOS_FALABELLA_POR_COBRAR])))
+      .innerJoin(cuentasFalabella, and(eq(cuentasFalabella.id, m.cuentaFalabellaId), eq(cuentasFalabella.empresaId, empresaId)))
+      .where(and(eq(m.empresaId, empresaId), eq(m.marketplace, "falabella"), inArray(m.estadoPago, [...ESTADOS_FALABELLA_POR_COBRAR])))
       .groupBy(cuentasFalabella.id, cuentasFalabella.nickname, m.estadoCuenta, m.moneda)
       .having(sql`sum(${m.monto}) <> 0`);
 

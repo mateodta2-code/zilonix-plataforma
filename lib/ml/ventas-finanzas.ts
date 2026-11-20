@@ -160,7 +160,7 @@ export async function guardarOrdenMl(
   // 429 persistente corta la cuenta como las demás llamadas; cualquier
   // otro fallo no tumba la venta ya guardada: la próxima sync reintenta.
   try {
-    await sincronizarLiberacion(empresaId, guardada.pedidoId, orden, (ruta) => leerConReintento(ruta, token, undefined, esperar));
+    await sincronizarLiberacion(empresaId, cuentaMlId, guardada.pedidoId, orden, (ruta) => leerConReintento(ruta, token, undefined, esperar));
   } catch (error) {
     if (error instanceof LimiteMercadoLibreError) throw error;
     console.error(`[ventas-finanzas] la liberación de la orden ${orden.id} no se pudo leer:`, error instanceof Error ? error.message : "error desconocido");

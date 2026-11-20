@@ -31,7 +31,9 @@ export type PartidaPorCobrar = {
   // Día de Bogotá (AAAA-MM-DD) en que se espera la plata; null = sin fecha
   // (Falabella no la trae en el reporte).
   fechaEsperada: string | null;
-  monto: string;
+  // null = pendiente sin neto (ML no lo mandó): se muestra igual, pero no
+  // suma a los totales — el monto no se adivina.
+  monto: string | null;
 };
 
 // ---------- Montos (diezmilésimas, BigInt) ----------
@@ -81,9 +83,11 @@ export function ventanasBogota(ahora: Date): Ventanas {
   };
 }
 
-// Una fecha ya pasada que sigue por cobrar cuenta en «esta semana»: es
-// plata que debería estar entrando ya.
-const entraEstaSemana = (fecha: string | null, v: Ventanas) => fecha !== null && fecha <= v.semana.hasta;
+// Revisión del PR #486: una fecha ya pasada que sigue sin liberar no se
+// esconde: es «vencida» (debió entrar y no entró — reclamo, mediación o
+// la sync no volvió a pasar por esa venta). Va aparte de «esta semana».
+export const estaVencida = (p: Pick<PartidaPorCobrar, "fechaEsperada">, v: Ventanas) => p.fechaEsperada !== null && p.fechaEsperada < v.hoy;
+const entraEstaSemana = (fecha: string | null, v: Ventanas) => fecha !== null && fecha >= v.semana.desde && fecha <= v.semana.hasta;
 const entraProximoMes = (fecha: string | null, v: Ventanas) => fecha !== null && fecha >= v.proximoMes.desde && fecha <= v.proximoMes.hasta;
 
 // ---------- Resúmenes ----------
@@ -95,15 +99,23 @@ export type TotalesMoneda = {
   estaSemana: string;
   proximoMes: string;
   sinFecha: string;
+  vencido: string;
+  // Partidas pendientes sin neto: cuentan como partida, no en los montos.
+  sinNeto: number;
 };
 
-type Acumulado = { partidas: number; total: bigint; estaSemana: bigint; proximoMes: bigint; sinFecha: bigint };
-const nuevo = (): Acumulado => ({ partidas: 0, total: CERO, estaSemana: CERO, proximoMes: CERO, sinFecha: CERO });
+type Acumulado = { partidas: number; total: bigint; estaSemana: bigint; proximoMes: bigint; sinFecha: bigint; vencido: bigint; sinNeto: number };
+const nuevo = (): Acumulado => ({ partidas: 0, total: CERO, estaSemana: CERO, proximoMes: CERO, sinFecha: CERO, vencido: CERO, sinNeto: 0 });
 
 function acumular(a: Acumulado, p: PartidaPorCobrar, v: Ventanas): void {
-  const monto = aDiezmilesimas(p.monto);
   a.partidas += 1;
+  if (p.monto === null) {
+    a.sinNeto += 1;
+    return;
+  }
+  const monto = aDiezmilesimas(p.monto);
   a.total += monto;
+  if (estaVencida(p, v)) a.vencido += monto;
   if (entraEstaSemana(p.fechaEsperada, v)) a.estaSemana += monto;
   if (entraProximoMes(p.fechaEsperada, v)) a.proximoMes += monto;
   if (p.fechaEsperada === null) a.sinFecha += monto;
@@ -115,6 +127,8 @@ const textos = (a: Acumulado) => ({
   estaSemana: aTextoMonto(a.estaSemana),
   proximoMes: aTextoMonto(a.proximoMes),
   sinFecha: aTextoMonto(a.sinFecha),
+  vencido: aTextoMonto(a.vencido),
+  sinNeto: a.sinNeto,
 });
 
 export function resumirPorMoneda(partidas: PartidaPorCobrar[], v: Ventanas): TotalesMoneda[] {
@@ -156,7 +170,7 @@ export function agruparPorCuenta(partidas: PartidaPorCobrar[], v: Ventanas): Fil
     .sort((x, y) => orden(x.marketplace) - orden(y.marketplace) || x.cuenta.localeCompare(y.cuenta) || x.moneda.localeCompare(y.moneda));
 }
 
-// Detalle: primero lo que entra antes; lo sin fecha al final.
+// Detalle: primero lo vencido y lo que entra antes; lo sin fecha al final.
 export function ordenarPartidas(partidas: PartidaPorCobrar[]): PartidaPorCobrar[] {
   return [...partidas].sort((a, b) => {
     if (a.fechaEsperada !== b.fechaEsperada) {

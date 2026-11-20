@@ -13,7 +13,6 @@ import { sincronizarLiberacion, type LectorMl } from "../lib/ml/liberacion";
 // simula): una empresa nunca ve lo que le deben a otra, y la consulta
 // solo trae lo que sigue sin pagar.
 
-const AHORA = new Date("2026-11-19T15:00:00Z");
 const FUTURO = new Date("2026-11-24T14:00:00Z");
 
 async function crearCuentaFalabella(empresaId: string): Promise<string> {
@@ -64,10 +63,14 @@ describe("cuentas por cobrar (RLS)", () => {
     await dbComoEmpresa(a.empresaId, (tx) => tx.update(cuentasMl).set({ siteId: "MLM" }).where(eq(cuentasMl.id, cuentaA)));
     const pendiente = { estadoLiberacion: "pending", fechaLiberacion: FUTURO, montoPorLiberar: "850.50" };
     await crearVentaDePrueba(a.empresaId, { cuentaMlId: cuentaA, cabecera: pendiente });
-    // No cuentan: ya liberada, fecha ya pasada y cancelada.
+    // Sí cuentan (revisión del PR #486): vencida y pendiente sin neto.
+    const vencida = { ...pendiente, fechaLiberacion: new Date("2026-11-18T14:00:00Z"), montoPorLiberar: "10.00" };
+    await crearVentaDePrueba(a.empresaId, { cuentaMlId: cuentaA, cabecera: vencida });
+    await crearVentaDePrueba(a.empresaId, { cuentaMlId: cuentaA, cabecera: { ...pendiente, montoPorLiberar: null } });
+    // No cuentan: ya liberada, cancelada y sin consultar todavía.
     await crearVentaDePrueba(a.empresaId, { cuentaMlId: cuentaA, cabecera: { ...pendiente, estadoLiberacion: "released" } });
-    await crearVentaDePrueba(a.empresaId, { cuentaMlId: cuentaA, cabecera: { ...pendiente, fechaLiberacion: new Date("2026-11-18T14:00:00Z") } });
     await crearVentaDePrueba(a.empresaId, { cuentaMlId: cuentaA, cabecera: { ...pendiente, cancelada: true } });
+    await crearVentaDePrueba(a.empresaId, { cuentaMlId: cuentaA });
 
     const falabellaA = await crearCuentaFalabella(a.empresaId);
     await movimiento(a.empresaId, falabellaA, "Pago programado", "100000.0000", "EC-A");
@@ -81,23 +84,27 @@ describe("cuentas por cobrar (RLS)", () => {
   });
 
   it("cada empresa ve solo lo suyo, con la moneda de cada cuenta", async () => {
-    const deA = await leerPartidasPorCobrar(a.empresaId, a.usuarioId, AHORA);
-    expect(deA.map((p) => [p.marketplace, p.moneda, p.monto, p.fechaEsperada]).sort()).toEqual([
-      ["falabella", "COP", "84999.5000", null],
-      ["ml", "MXN", "850.50", "2026-11-24"],
+    const deA = await leerPartidasPorCobrar(a.empresaId, a.usuarioId);
+    const fila = (p: { marketplace: string; moneda: string; monto: string | null; fechaEsperada: string | null }) =>
+      [p.marketplace, p.moneda, p.monto ?? "sin neto", p.fechaEsperada ?? "sin fecha"].join(" ");
+    expect(deA.map(fila).sort()).toEqual([
+      "falabella COP 84999.5000 sin fecha",
+      "ml MXN 10.00 2026-11-18",
+      "ml MXN 850.50 2026-11-24",
+      "ml MXN sin neto 2026-11-24",
     ]);
     expect(deA.find((p) => p.marketplace === "falabella")).toMatchObject({ referencia: "EC-A", estado: "Pago programado" });
 
-    const deB = await leerPartidasPorCobrar(b.empresaId, b.usuarioId, AHORA);
+    const deB = await leerPartidasPorCobrar(b.empresaId, b.usuarioId);
     expect(deB.map((p) => p.monto).sort()).toEqual(["5555.0000", "7777.00"]);
   });
 
   it("un usuario de A no puede leer las de B", async () => {
-    await expect(leerPartidasPorCobrar(b.empresaId, a.usuarioId, AHORA)).rejects.toBeInstanceOf(SinPermisoError);
+    await expect(leerPartidasPorCobrar(b.empresaId, a.usuarioId)).rejects.toBeInstanceOf(SinPermisoError);
   });
 
   it("la sync guarda la liberación y no vuelve a consultar una venta liberada", async () => {
-    const { pedidoId } = await crearVentaDePrueba(a.empresaId);
+    const { pedidoId, cuentaMlId } = await crearVentaDePrueba(a.empresaId);
     const orden = { id: 2000001, status: "paid", payments: [{ id: 91234567890, status: "approved" }] };
     const rutas: string[] = [];
     const leer = (async (ruta: string) => {
@@ -105,7 +112,7 @@ describe("cuentas por cobrar (RLS)", () => {
       return { ok: true, data: { money_release_status: "released", money_release_date: "2026-11-12T10:00:00.000-04:00", transaction_details: { net_received_amount: 66930.5 } } };
     }) as LectorMl;
 
-    await sincronizarLiberacion(a.empresaId, pedidoId, orden, leer);
+    await sincronizarLiberacion(a.empresaId, cuentaMlId, pedidoId, orden, leer);
     const [fila] = await dbComoEmpresa(a.empresaId, (tx) =>
       tx
         .select({ estado: pedidosFinanzas.estadoLiberacion, fecha: pedidosFinanzas.fechaLiberacion, monto: pedidosFinanzas.montoPorLiberar })
@@ -114,11 +121,11 @@ describe("cuentas por cobrar (RLS)", () => {
     );
     expect(fila).toEqual({ estado: "released", fecha: new Date("2026-11-12T14:00:00.000Z"), monto: "0.00" });
 
-    await sincronizarLiberacion(a.empresaId, pedidoId, orden, leer);
+    await sincronizarLiberacion(a.empresaId, cuentaMlId, pedidoId, orden, leer);
     expect(rutas).toEqual(["/v1/payments/91234567890"]);
 
     // B no puede escribir la venta de A: RLS la deja invisible y no la toca.
-    await sincronizarLiberacion(b.empresaId, pedidoId, { ...orden, payments: [{ id: 1, status: "approved" }] }, leer);
+    await sincronizarLiberacion(b.empresaId, cuentaMlId, pedidoId, { ...orden, payments: [{ id: 1, status: "approved" }] }, leer);
     expect(rutas).toHaveLength(1);
   });
 });
