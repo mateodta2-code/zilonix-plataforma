@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MaestraSku } from "./combo-sku";
 import {
+  filtrarPorTienda,
   monedaDeEmpresa,
   totalEnCamino,
   totalizarInventario,
@@ -54,7 +55,37 @@ describe("valorizarStock y totalizarInventario", () => {
       porUbicacion: { bodegas: "9002.00", full: "10000.00", falabella: null },
       skusSinCosto: 0,
       unidadesSinCosto: 0,
+      saldosNegativos: 0,
     });
+  });
+
+  it("reservado no se cuenta dos veces: 2 disponibles + 1 reservado = 3 unidades", () => {
+    const [l] = valorizarStock([saldo({ skuId: "s1", codigo: "TAZA", disponible: 2, reservado: 1 })], maestra);
+    expect(l.unidades).toBe(3);
+  });
+
+  it("un combo X2 con su propia fila no se suma además al SKU base: cada fila vale sus unidades", () => {
+    const lineas = valorizarStock(
+      [saldo({ skuId: "base", codigo: "TAZA", disponible: 4 }), saldo({ skuId: "combo", codigo: "TAZAX2", disponible: 1 })],
+      maestra
+    );
+    expect(lineas.map((l) => [l.codigo, l.unidades, l.valor])).toEqual([
+      ["TAZA", 4, "20000.00"],
+      ["TAZAX2", 1, "10000.00"],
+    ]);
+    expect(totalizarInventario(lineas).total).toBe("30000.00");
+  });
+
+  it("un saldo negativo se muestra (no se oculta), se cuenta en el aviso y no resta del total", () => {
+    const lineas = valorizarStock(
+      [saldo({ skuId: "s1", codigo: "TAZA", disponible: 2 }), saldo({ skuId: "s2", codigo: "AGUJA", disponible: -3 })],
+      maestra
+    );
+    expect(lineas.map((l) => [l.codigo, l.unidades])).toEqual([
+      ["AGUJA", -3],
+      ["TAZA", 2],
+    ]);
+    expect(totalizarInventario(lineas)).toMatchObject({ total: "10000.00", saldosNegativos: 1, skusSinCosto: 0 });
   });
 
   it("combo X2/X3 sin fila propia usa el costo de la base multiplicado", () => {
@@ -97,6 +128,34 @@ describe("valorizarEnCamino", () => {
       [2, "AGUJA", 6, "orden", "5400.00"],
     ]);
     expect(totalEnCamino(lineas)).toEqual({ total: "20400.00", lineasSinCosto: 1 });
+  });
+});
+
+describe("valorizarEnCamino con costo de OC en 0", () => {
+  it("un 0 en la OC no es costo real: usa la maestra; sin maestra, falta costo", () => {
+    const lineas = valorizarEnCamino(
+      [
+        { ordenNumero: 1, skuId: "s1", codigo: "TAZA", nombre: "Taza", cantidadPedida: 2, cantidadRecibida: 0, costoOrden: "0.00" },
+        { ordenNumero: 1, skuId: "s2", codigo: "NOESTA", nombre: "X", cantidadPedida: 1, cantidadRecibida: 0, costoOrden: "0" },
+      ],
+      maestra
+    );
+    expect(lineas.map((l) => [l.codigo, l.origenCosto, l.valor])).toEqual([
+      ["NOESTA", null, null],
+      ["TAZA", "maestra", "10000.00"],
+    ]);
+  });
+});
+
+describe("filtrarPorTienda", () => {
+  it("sin tienda deja todo; con tienda, solo los SKU publicados en esa cuenta", () => {
+    const lineas = [{ skuId: "a" }, { skuId: "b" }, { skuId: "c" }];
+    const tiendas = new Map([
+      ["a", new Set(["t1"])],
+      ["b", new Set(["t1", "t2"])],
+    ]);
+    expect(filtrarPorTienda(lineas, tiendas, undefined)).toHaveLength(3);
+    expect(filtrarPorTienda(lineas, tiendas, "t2")).toEqual([{ skuId: "b" }]);
   });
 });
 

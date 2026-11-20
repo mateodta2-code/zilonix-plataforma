@@ -8,6 +8,7 @@ import { crearBodega } from "../lib/inventario/bodegas";
 import { crearOrdenCompra, registrarRecepcion } from "../lib/inventario/compras";
 import { aplicarMovimientos } from "../lib/inventario/movimientos";
 import { leerInventarioValorizado } from "../lib/finanzas/inventario-valorizado-db";
+import { SinPermisoError } from "../lib/permisos";
 
 // Issue #422 — el inventario valorizado de una empresa nunca suma stock,
 // costos ni órdenes de compra de otra, contra Postgres real con app_user.
@@ -63,13 +64,14 @@ describe("inventario valorizado (RLS, issue #422)", () => {
   });
 
   it("A ve solo su stock, sus costos y su OC pendiente", async () => {
-    const a = await leerInventarioValorizado(c.empresaAId);
+    const a = await leerInventarioValorizado(c.empresaAId, c.usuarioAId);
     // Recibir 4 de la OC sumó 4 a la Principal: 3 + 4 = 7 unidades × 1000.
     expect(a.totales).toEqual({
       total: "9000.00",
       porUbicacion: { bodegas: "7000.00", full: "2000.00", falabella: null },
       skusSinCosto: 1,
       unidadesSinCosto: 4,
+      saldosNegativos: 0,
     });
     expect(a.enCamino.lineas).toEqual([
       expect.objectContaining({ codigo: "REF-1", unidades: 6, origenCosto: "orden", valor: "4800.00" }),
@@ -79,11 +81,15 @@ describe("inventario valorizado (RLS, issue #422)", () => {
   });
 
   it("B no ve nada de A aunque comparta el código de SKU", async () => {
-    const b = await leerInventarioValorizado(c.empresaBId);
+    const b = await leerInventarioValorizado(c.empresaBId, c.usuarioBId);
     expect(b.lineas).toEqual([expect.objectContaining({ codigo: "REF-1", unidades: 1, valor: "99999.00" })]);
     expect(b.totales.total).toBe("99999.00");
     expect(b.totales.skusSinCosto).toBe(0);
     expect(b.enCamino.lineas).toEqual([]);
     expect(b.bodegasFull).toEqual([]);
+  });
+
+  it("un usuario de B no puede leer el inventario de A (requierePermiso adentro)", async () => {
+    await expect(leerInventarioValorizado(c.empresaAId, c.usuarioBId)).rejects.toBeInstanceOf(SinPermisoError);
   });
 });

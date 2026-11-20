@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { normalizarParametro } from "@/lib/filtros-listado";
-import { leerInventarioValorizado } from "@/lib/finanzas/inventario-valorizado-db";
-import { UBICACIONES, ubicacionValida, type Ubicacion } from "@/lib/finanzas/inventario-valorizado";
+import { leerInventarioValorizado, type InventarioValorizado } from "@/lib/finanzas/inventario-valorizado-db";
+import { UBICACIONES, filtrarPorTienda, totalEnCamino, totalizarInventario, ubicacionValida, type Ubicacion } from "@/lib/finanzas/inventario-valorizado";
 import { formatearFechaPedido, formatearMontoEnMoneda } from "@/lib/pedidos/marketplace";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { Boton, BotonLink } from "@/components/marco/Boton";
@@ -25,15 +25,18 @@ const ETIQUETA_UBICACION: Record<Ubicacion, string> = Object.fromEntries(UBICACI
 // llegó). El cálculo vive en lib/finanzas/inventario-valorizado.ts.
 export default async function InventarioValorizadoPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const { usuario, activa: empresa, rolNombre } = await obtenerContextoPanel();
+  // Doble candado: la página (lo exige scripts/verificar-permisos.test.ts)
+  // y la lectura por dentro (leerInventarioValorizado), por si otro lugar
+  // la llama.
+  let datos: InventarioValorizado;
   try {
     await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
+    datos = await leerInventarioValorizado(empresa.id, usuario.id);
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     return <SinAcceso mensaje={`Tu rol (${rolNombre}) no tiene acceso a Finanzas.`} />;
   }
-
-  const datos = await leerInventarioValorizado(empresa.id);
-  const { moneda, totales, enCamino } = datos;
+  const { moneda } = datos;
   const dinero = (valor: string) => formatearMontoEnMoneda(valor, moneda);
 
   // Lista blanca: la tienda tiene que ser una cuenta de esta empresa.
@@ -42,9 +45,13 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
   const ubicacion = ubicacionValida(normalizarParametro(searchParams.ubicacion));
   const hayFiltros = Boolean(tienda || ubicacion);
 
-  const filas = datos.lineas.filter(
-    (l) => (!ubicacion || l.ubicacion === ubicacion) && (!tienda || datos.tiendasPorSku.get(l.skuId)?.has(tienda.id))
-  );
+  // La tienda filtra tarjetas y tabla; la ubicación, solo la tabla (las
+  // tarjetas ya están separadas por ubicación).
+  const lineasTienda = filtrarPorTienda(datos.lineas, datos.tiendasPorSku, tienda?.id);
+  const enCaminoLineas = filtrarPorTienda(datos.enCamino.lineas, datos.tiendasPorSku, tienda?.id);
+  const totales = totalizarInventario(lineasTienda);
+  const enCamino = { lineas: enCaminoLineas, ...totalEnCamino(enCaminoLineas) };
+  const filas = lineasTienda.filter((l) => !ubicacion || l.ubicacion === ubicacion);
 
   const detalleFull =
     datos.bodegasFull.length === 0
@@ -92,6 +99,17 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
         </div>
       </section>
 
+      {tienda && (
+        <p className={styles.ayuda}>
+          Filtrado por la tienda {tienda.nombre}: tarjetas y tablas cuentan solo los SKU publicados en esa cuenta de Mercado Libre.
+        </p>
+      )}
+      {totales.saldosNegativos > 0 && (
+        <p className={styles.avisoError}>
+          Hay {totales.saldosNegativos} {totales.saldosNegativos === 1 ? "saldo negativo" : "saldos negativos"} en el inventario: se muestran en la tabla
+          con «Saldo negativo» y no suman al total. Revisa el kardex de ese SKU.
+        </p>
+      )}
       {totales.skusSinCosto > 0 && (
         <p className={styles.avisoError}>
           Hay {totales.skusSinCosto} SKU con stock y sin costo: van como «Falta costo» y no suman al total.{" "}
@@ -134,7 +152,6 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
           )}
         </div>
       </form>
-      {tienda && <p className={styles.ayuda}>Tienda: los SKU publicados en esa cuenta de Mercado Libre. El stock es de la empresa, no de la cuenta.</p>}
 
       {ubicacion === "falabella" ? (
         <EstadoVacio>Sin datos todavía: la plataforma no trae el stock de fulfillment de Falabella.</EstadoVacio>
@@ -153,7 +170,15 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
                 <br />
                 <span className={styles.suave}>{ETIQUETA_UBICACION[l.ubicacion]}</span>
               </CeldaTabla>
-              <CeldaTabla>{l.unidades}</CeldaTabla>
+              <CeldaTabla>
+                {l.unidades}
+                {l.unidades < 0 && (
+                  <>
+                    <br />
+                    <Chip estado="peligro">Saldo negativo</Chip>
+                  </>
+                )}
+              </CeldaTabla>
               <CeldaTabla>
                 {l.costoUnitario === null ? (
                   <Chip estado="peligro">Falta costo</Chip>
@@ -169,7 +194,7 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
                   </>
                 )}
               </CeldaTabla>
-              <CeldaTabla>{l.valor === null ? "—" : dinero(l.valor)}</CeldaTabla>
+              <CeldaTabla>{l.valor === null || l.unidades < 0 ? "—" : dinero(l.valor)}</CeldaTabla>
             </FilaTabla>
           ))}
         </Tabla>
@@ -185,7 +210,7 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
             titulo="Total en camino"
             valor={dinero(enCamino.total)}
             detalle={[
-              "Al costo de la orden de compra; si la línea no lo trae, al de la maestra.",
+              "Al costo de la orden de compra; si la línea no lo trae o está en 0, al de la maestra.",
               ...(enCamino.lineasSinCosto > 0 ? [`${enCamino.lineasSinCosto} líneas sin costo quedan fuera.`] : []),
             ]}
           />

@@ -68,6 +68,8 @@ export type TotalesInventario = {
   // SKU distintos con unidades y sin costo; y sus unidades.
   skusSinCosto: number;
   unidadesSinCosto: number;
+  // Líneas con saldo negativo: se muestran con aviso, fuera del total.
+  saldosNegativos: number;
 };
 
 // El código del SKU tal como lo guarda costos_sku (trim + mayúsculas).
@@ -86,8 +88,14 @@ function costoDeMaestra(codigo: string, maestra: ReadonlyMap<string, MaestraSku>
 export function valorizarStock(saldos: SaldoStock[], maestra: ReadonlyMap<string, MaestraSku>): LineaValorizada[] {
   const lineas: LineaValorizada[] = [];
   for (const s of saldos) {
+    // Sin doble conteo: una reserva pasa unidades de disponible a
+    // reservado (lib/inventario/calculos.ts, deltaDeMovimiento), así que
+    // los dos números nunca comparten unidades.
     const unidades = s.disponible + s.reservado;
-    if (unidades <= 0) continue;
+    // Un saldo negativo no se oculta: va a la tabla y a un aviso, fuera
+    // del total (la base lo impide con un CHECK; esto es la defensa si
+    // alguna vez se colara).
+    if (unidades === 0) continue;
     const { costoUnitario, origen } = costoDeMaestra(s.codigo, maestra);
     lineas.push({
       skuId: s.skuId,
@@ -109,7 +117,12 @@ export function totalizarInventario(lineas: LineaValorizada[]): TotalesInventari
   const porUbicacion = { bodegas: BigInt(0), full: BigInt(0) };
   const sinCosto = new Set<string>();
   let unidadesSinCosto = 0;
+  let saldosNegativos = 0;
   for (const l of lineas) {
+    if (l.unidades < 0) {
+      saldosNegativos += 1;
+      continue;
+    }
     if (l.valor === null) {
       sinCosto.add(l.skuId);
       unidadesSinCosto += l.unidades;
@@ -123,7 +136,19 @@ export function totalizarInventario(lineas: LineaValorizada[]): TotalesInventari
     porUbicacion: { bodegas: desdeCentavos(porUbicacion.bodegas), full: desdeCentavos(porUbicacion.full), falabella: null },
     skusSinCosto: sinCosto.size,
     unidadesSinCosto,
+    saldosNegativos,
   };
+}
+
+// Filtro de tienda: deja las líneas de los SKU publicados en esa cuenta
+// de ML. Sin tienda, todo. Lo usan la tabla y las tarjetas por igual.
+export function filtrarPorTienda<T extends { skuId: string }>(
+  lineas: T[],
+  tiendasPorSku: ReadonlyMap<string, ReadonlySet<string>>,
+  tiendaId: string | undefined
+): T[] {
+  if (!tiendaId) return lineas;
+  return lineas.filter((l) => tiendasPorSku.get(l.skuId)?.has(tiendaId));
 }
 
 export type LineaOrdenPendiente = {
@@ -156,7 +181,10 @@ export function valorizarEnCamino(lineas: LineaOrdenPendiente[], maestra: Readon
     const unidades = l.cantidadPedida - l.cantidadRecibida;
     // Recibido de más (llegó más de lo pedido): no queda nada en camino.
     if (unidades <= 0) continue;
-    let costoUnitario: string | null = l.costoOrden;
+    // Un costo de OC en 0 no es un costo real (línea cargada sin precio):
+    // se usa el de la maestra.
+    const costoOrdenReal = l.costoOrden !== null && aCentavos(l.costoOrden) > BigInt(0) ? l.costoOrden : null;
+    let costoUnitario: string | null = costoOrdenReal;
     let origenCosto: OrigenCostoEnCamino | null = costoUnitario === null ? null : "orden";
     if (costoUnitario === null) {
       costoUnitario = costoDeMaestra(l.codigo, maestra).costoUnitario;

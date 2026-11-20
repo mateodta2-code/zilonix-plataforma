@@ -13,6 +13,7 @@ import {
   type TotalesInventario,
 } from "./inventario-valorizado";
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
+import { requierePermiso } from "@/lib/permisos";
 
 // Issue #422 — lectura del inventario valorizado. Solo lee, siempre con
 // dbComoEmpresa (RLS): las filas de otra empresa no existen para esta
@@ -30,7 +31,8 @@ export type InventarioValorizado = {
   // Para mostrar que el stock de Full es cargado a mano.
   bodegasFull: BodegaFull[];
   tiendas: Tienda[];
-  // skuId → cuentas de ML donde está publicado (filtro de tienda).
+  // skuId → cuentas de ML donde está publicado (filtro de tienda), para
+  // el stock y para lo que viene en camino.
   tiendasPorSku: Map<string, Set<string>>;
 };
 
@@ -42,7 +44,13 @@ function codigoSeguro(codigo: string): string | null {
   }
 }
 
-export async function leerInventarioValorizado(empresaId: string): Promise<InventarioValorizado> {
+// totales y enCamino.total son de toda la empresa; con filtro de tienda
+// la pantalla los recalcula sobre las líneas filtradas.
+export async function leerInventarioValorizado(empresaId: string, usuarioId: string): Promise<InventarioValorizado> {
+  // El permiso también acá, no solo en la página: cualquier otro lugar
+  // que llame esta lectura queda cerrado por defecto. Lanza
+  // SinPermisoError.
+  await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
   return dbComoEmpresa(empresaId, async (tx) => {
     const saldos = await tx
       .select({
@@ -58,7 +66,11 @@ export async function leerInventarioValorizado(empresaId: string): Promise<Inven
       .from(stockBodega)
       .innerJoin(bodegas, and(eq(bodegas.empresaId, stockBodega.empresaId), eq(bodegas.id, stockBodega.bodegaId)))
       .innerJoin(skus, and(eq(skus.empresaId, stockBodega.empresaId), eq(skus.id, stockBodega.skuId)))
-      .where(eq(stockBodega.empresaId, empresaId));
+      // Un kit no tiene stock propio (se deriva de sus componentes): si
+      // alguna fila se colara, contaría dos veces las mismas unidades.
+      // Un combo X2/X3 que NO es kit tiene su propia fila con sus propias
+      // unidades físicas (paquetes ya armados), aparte de las del SKU base.
+      .where(and(eq(stockBodega.empresaId, empresaId), eq(skus.esKit, false)));
 
     const pendientes = await tx
       .select({
@@ -107,7 +119,7 @@ export async function leerInventarioValorizado(empresaId: string): Promise<Inven
       .where(eq(cuentasMl.empresaId, empresaId))
       .orderBy(cuentasMl.nickname);
 
-    const skuIds = [...new Set(saldos.map((s) => s.skuId))];
+    const skuIds = [...new Set([...saldos, ...pendientes].map((s) => s.skuId))];
     const publicadas = skuIds.length
       ? await tx
           .selectDistinct({ skuId: publicaciones.skuId, cuentaMlId: publicaciones.cuentaMlId })
