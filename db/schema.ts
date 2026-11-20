@@ -2229,3 +2229,67 @@ export const invitacionesBodega3pl = pgTable("invitaciones_bodega_3pl", {
   aceptadaTs: timestamp("aceptada_ts", { withTimezone: true }),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Publicar → «Crear con IA» (PR2, imágenes) — historial por empresa de
+// los trabajos de imágenes y de cada imagen, y cola de concurrencia
+// (máximo 2 imágenes «generando» a la vez por empresa: la tercera queda
+// «aprobada» y arranca sola). Migración aprobada por Mateo el
+// 19-nov-2026. Nunca guarda la llave de IA ni el prompt completo.
+// Sin DELETE para app_user (db/rls-setup.sql): el historial no se borra.
+export const publicacionesIaTrabajos = pgTable(
+  "publicaciones_ia_trabajos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    // Simple (no compuesta) para poder quedar en null si se borra la
+    // cuenta, igual que pedidos.cuenta_ml_id; RLS ya aísla por empresa.
+    cuentaMlId: uuid("cuenta_ml_id").references(() => cuentasMl.id, { onDelete: "set null" }),
+    siteId: text("site_id").notNull(),
+    estilo: text("estilo").notNull(),
+    // Ficha confirmada del producto (sin llaves ni datos de pago).
+    ficha: jsonb("ficha").notNull(),
+    proveedor: text("proveedor").notNull(),
+    modelo: text("modelo").notNull(),
+    estado: text("estado").notNull().default("abierto"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    estiloValido: check("publicaciones_ia_trabajos_estilo_valido", sql`${t.estilo} in ('zilonix_portadas', 'zilonix_contenido', 'experto_ml')`),
+    estadoValido: check("publicaciones_ia_trabajos_estado_valido", sql`${t.estado} in ('abierto', 'cerrado')`),
+    empresaIdUnica: unique("publicaciones_ia_trabajos_empresa_id_unica").on(t.empresaId, t.id),
+    porEmpresa: index("publicaciones_ia_trabajos_empresa_idx").on(t.empresaId, t.creadoTs),
+  })
+);
+
+export const publicacionesIaImagenes = pgTable(
+  "publicaciones_ia_imagenes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    trabajoId: uuid("trabajo_id").notNull(),
+    // portada | modo_uso | … | foto_principal (los ids de lib/ia/prompts).
+    tipo: text("tipo").notNull(),
+    orden: integer("orden").notNull().default(0),
+    // Solo portadas: la cuenta a la que va (una portada por cuenta).
+    cuentaMlId: uuid("cuenta_ml_id").references(() => cuentasMl.id, { onDelete: "set null" }),
+    urlCloudinary: text("url_cloudinary"),
+    estado: text("estado").notNull().default("propuesta"),
+    // Título, copy y composición propuestos (sin llaves ni el prompt completo).
+    propuesta: jsonb("propuesta"),
+    // Respuesta resumida del diagnóstico de Mercado Libre.
+    diagnostico: jsonb("diagnostico"),
+    inicioGeneracionTs: timestamp("inicio_generacion_ts", { withTimezone: true }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    estadoValido: check("publicaciones_ia_imagenes_estado_valido", sql`${t.estado} in ('propuesta', 'aprobada', 'generando', 'lista', 'error')`),
+    urlHttps: check("publicaciones_ia_imagenes_url_https", sql`${t.urlCloudinary} is null or ${t.urlCloudinary} like 'https://%'`),
+    trabajoFk: foreignKey({
+      columns: [t.empresaId, t.trabajoId],
+      foreignColumns: [publicacionesIaTrabajos.empresaId, publicacionesIaTrabajos.id],
+      name: "publicaciones_ia_imagenes_trabajo_fk",
+    }).onDelete("cascade"),
+    cola: index("publicaciones_ia_imagenes_cola_idx").on(t.empresaId, t.estado),
+  })
+);

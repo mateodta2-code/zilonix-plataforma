@@ -8,6 +8,7 @@ import { promptExpertoML, tipoExpertoDisponible, TIPOS_EXPERTO_ML } from "./esti
 import { FOTO_PRINCIPAL_POR_DEFECTO, promptFotoPrincipal } from "./fotoPrincipal";
 import { ESTILOS_PROMPT_IMAGEN, TAMANO_SALIDA_PX } from "./index";
 import {
+  leerOpinionesReales,
   leerPropuestaContenidoZilonix,
   plantillaContenido,
   promptFinalContenido,
@@ -76,8 +77,8 @@ describe("una portada por cuenta, nunca repetida", () => {
 });
 
 describe("Contenido Zilonix", () => {
-  it("los 10 tipos del texto en orden; testimonios bloqueado hasta la decisión de Mateo; opiniones reales apagada", () => {
-    expect(TIPOS_CONTENIDO_ZILONIX.map((t) => t.id).slice(0, 10)).toEqual([
+  it("los 10 tipos en orden y encendidos; la 9 es «Opiniones reales» (decisión de Mateo), nunca reseñas de la IA", () => {
+    expect(TIPOS_CONTENIDO_ZILONIX.map((t) => t.id)).toEqual([
       "modo_uso",
       "caracteristicas",
       "beneficios",
@@ -86,11 +87,17 @@ describe("Contenido Zilonix", () => {
       "como_funciona",
       "tabla_comparacion",
       "contexto_uso",
-      "testimonios",
+      "opiniones_reales",
       "preguntas_frecuentes",
     ]);
-    expect(tipoContenidoDisponible("testimonios", DATOS)).toMatchObject({ ok: false });
-    expect(TIPOS_CONTENIDO_ZILONIX.find((t) => t.id === "opiniones_reales")?.porDefecto).toBe(false);
+    expect(TIPOS_CONTENIDO_ZILONIX.every((t) => t.porDefecto)).toBe(true);
+    expect(tipoContenidoDisponible("opiniones_reales", DATOS)).toMatchObject({ ok: false }); // sin opiniones, se salta
+    expect(tipoContenidoDisponible("opiniones_reales", DATOS, ["Llegó rápido y bien empacado"])).toEqual({ ok: true });
+  });
+
+  it("las opiniones reales se limpian y se descartan las que prometen resultados", () => {
+    expect(leerOpinionesReales('- "Llegó rápido y bien empacado"\n\nMe curó la piel en una semana\n• Buena presentación')).toEqual(["Llegó rápido y bien empacado", "Buena presentación"]);
+    expect(leerOpinionesReales(42)).toEqual([]);
   });
 
   it("revisarCopySeguro bloquea «cura», «garantizado» y «antes/después»", () => {

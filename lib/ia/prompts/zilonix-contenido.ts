@@ -15,10 +15,11 @@ export { TEXTO_ORIGINAL_CONTENIDO };
 
 export const ESTILO_ZILONIX_CONTENIDO = { id: "zilonix_contenido", etiqueta: "Contenido Zilonix" } as const;
 
-// Los 10 tipos del punto 5 del texto de Mateo, en su orden. `testimonios`
-// queda APAGADO y bloqueado hasta que Mateo decida (ver mensaje del
-// 19-nov: reseñas escritas por la IA = publicidad engañosa). Extra:
-// `opiniones_reales` (opiniones verdaderas que pega el vendedor).
+// Los 10 tipos del punto 5 del texto de Mateo, en su orden. La 9
+// («Testimonios») la cambió Mateo el 19-nov-2026 por «Opiniones reales»
+// (opción A): la IA nunca escribe reseñas; el vendedor pega opiniones
+// verdaderas de sus compradores y la IA solo las diseña. Sin opiniones,
+// esa imagen se salta.
 export const TIPOS_CONTENIDO_ZILONIX = [
   { id: "modo_uso", nombre: "Modo de uso", porDefecto: true },
   { id: "caracteristicas", nombre: "Características", porDefecto: true },
@@ -28,10 +29,23 @@ export const TIPOS_CONTENIDO_ZILONIX = [
   { id: "como_funciona", nombre: "Qué hace / cómo funciona", porDefecto: true },
   { id: "tabla_comparacion", nombre: "Tabla de comparación", porDefecto: true },
   { id: "contexto_uso", nombre: "Contexto de uso", porDefecto: true },
-  { id: "testimonios", nombre: "Testimonios", porDefecto: false, bloqueado: "Pendiente de la decisión de Mateo: no se generan reseñas escritas por la IA." },
+  { id: "opiniones_reales", nombre: "Opiniones reales (las pegas tú)", porDefecto: true, requiere: "opiniones" },
   { id: "preguntas_frecuentes", nombre: "Preguntas frecuentes", porDefecto: true },
-  { id: "opiniones_reales", nombre: "Opiniones reales (las pegas tú)", porDefecto: false, soloVendedor: true },
-] as const satisfies readonly { id: string; nombre: string; porDefecto: boolean; requiere?: string; bloqueado?: string; soloVendedor?: boolean }[];
+] as const satisfies readonly { id: string; nombre: string; porDefecto: boolean; requiere?: "incluye" | "opiniones" }[];
+
+export const MAXIMO_OPINIONES = 5;
+export const LARGO_OPINION = 160;
+
+// Las opiniones que pega el vendedor (una por línea): limpias, sin
+// las que prometan resultados o usen palabras prohibidas.
+export function leerOpinionesReales(texto: unknown): string[] {
+  if (typeof texto !== "string") return [];
+  return texto
+    .split("\n")
+    .map((l) => l.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").replace(/^[-•*\s"“”«»]+|["“”«»\s]+$/g, "").trim().slice(0, LARGO_OPINION))
+    .filter((l) => l.length >= 3 && revisarCopySeguro([l]).length === 0)
+    .slice(0, MAXIMO_OPINIONES);
+}
 
 export type TipoContenidoZilonix = (typeof TIPOS_CONTENIDO_ZILONIX)[number]["id"];
 export type ComposicionContenido = "izquierda" | "derecha" | "centro";
@@ -79,6 +93,9 @@ export function promptPropuestaContenidoZilonix(tipo: TipoContenidoZilonix, dato
     bloqueDatosProducto(datos),
     "",
     `Prepara SOLO la propuesta de la imagen «${info?.nombre}» (no crees la imagen).`,
+    tipo === "opiniones_reales"
+      ? "En esta imagen el copy son SOLO las opiniones reales de abajo, copiadas tal cual (puedes acortarlas sin cambiar su sentido). Nunca escribas opiniones nuevas."
+      : "",
     ajuste ? `El vendedor pidió AJUSTAR: «${ajuste.slice(0, 300)}».` : "",
     `Idioma: ${datos.idioma}. País: ${datos.nombrePais}.`,
     'Responde SOLO un JSON: {"titulo": "…", "copy": ["…", "…"], "composicion": "izquierda" | "derecha" | "centro"}',
@@ -100,12 +117,12 @@ export function leerPropuestaContenidoZilonix(tipo: TipoContenidoZilonix, respue
   return titulo ? { tipo, titulo, copy, composicion } : null;
 }
 
-// Qué tipos se pueden crear con esta ficha: `que_incluye` pide lo
-// incluido confirmado; `testimonios` sigue bloqueado.
-export function tipoContenidoDisponible(tipo: TipoContenidoZilonix, datos: DatosProducto): { ok: true } | { ok: false; motivo: string } {
+// Qué tipos se pueden crear: `que_incluye` pide lo incluido confirmado;
+// `opiniones_reales`, al menos una opinión real pegada por el vendedor.
+export function tipoContenidoDisponible(tipo: TipoContenidoZilonix, datos: DatosProducto, opiniones: string[] = []): { ok: true } | { ok: false; motivo: string } {
   const info = TIPOS_CONTENIDO_ZILONIX.find((t) => t.id === tipo);
   if (!info) return { ok: false, motivo: "Tipo desconocido." };
-  if ("bloqueado" in info) return { ok: false, motivo: info.bloqueado };
   if ("requiere" in info && info.requiere === "incluye" && !datos.incluye) return { ok: false, motivo: "Confirma qué incluye para crear esta imagen." };
+  if ("requiere" in info && info.requiere === "opiniones" && opiniones.length === 0) return { ok: false, motivo: "Pega opiniones reales de tus compradores para crear esta imagen (si no tienes, se salta)." };
   return { ok: true };
 }

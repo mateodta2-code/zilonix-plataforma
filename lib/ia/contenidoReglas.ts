@@ -55,7 +55,7 @@ export function tipoContenido(id: unknown): (typeof TIPOS_CONTENIDO)[number] | n
 // Lista del prompt (cumplimiento de Mercado Libre). Se compara sin
 // tildes y por palabra completa: «segura» no es «cura».
 const PROHIBIDAS: { texto: string; patron: RegExp }[] = [
-  ["cura / curar", /\bcura(r|n|s|cion|tivo|tiva)?\b/],
+  ["cura / curar", /\bcur(a|ar|an|as|o|e|en|aron|acion|ativo|ativa|ara)\b/],
   ["tratar / tratamiento", /\btrat(a|ar|amiento|amientos)\b/],
   ["prevenir / prevención", /\bprevien\w*|\bpreven(ir|cion|tivo|tiva)\b/],
   ["alivio / alivia", /\bali(vio|via|viar)\b/],
