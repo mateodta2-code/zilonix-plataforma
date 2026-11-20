@@ -140,14 +140,29 @@ describe("llamarIA — dispatch por proveedor (rama feat-promociones)", () => {
     expect(url).toBe("https://mi-servidor.test/v1/chat/completions");
   });
 
-  it("google — generateContent, la key va en la query, nunca en un header", async () => {
+  it("google — generateContent, la key va en la cabecera x-goog-api-key, nunca en la URL", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ candidates: [{ content: { parts: [{ text: "Resumen Google." }] } }] }));
     vi.stubGlobal("fetch", fetchMock);
     const texto = await llamarIA(conexion({ proveedor: "google", modelo: "gemini-2.5" }), "hola");
     expect(texto).toBe("Resumen Google.");
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(String(url)).toContain("key=clave-real");
-    expect((init?.headers as Record<string, string> | undefined)?.["x-api-key"]).toBeUndefined();
+    expect(String(url)).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5:generateContent");
+    expect(String(url)).not.toContain("clave-real");
+    expect(String(url)).not.toContain("key=");
+    expect((init?.headers as Record<string, string> | undefined)?.["x-goog-api-key"]).toBe("clave-real");
+  });
+
+  it("google — un error o una caída nunca exponen la llave ni la URL en el mensaje", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ error: "API key not valid" }, 400)));
+    const errorDe = (p: Promise<unknown>) => p.then(() => new Error("no falló"), (e: unknown) => e as Error);
+    const e1 = await errorDe(llamarIA(conexion({ proveedor: "google" }), "hola"));
+    vi.stubGlobal("fetch", vi.fn(async (u: string) => { throw new Error(`fetch failed: ${u}`); }));
+    const e2 = await errorDe(llamarIA(conexion({ proveedor: "google" }), "hola"));
+    for (const e of [e1, e2]) {
+      expect(e).toBeInstanceOf(ErrorProveedorIA);
+      expect(e.message).not.toContain("clave-real");
+      expect(e.message).not.toContain("googleapis");
+    }
   });
 
   it("respuesta no-ok de cualquier proveedor: ErrorProveedorIA, nunca el texto crudo expuesto sin filtrar", async () => {
