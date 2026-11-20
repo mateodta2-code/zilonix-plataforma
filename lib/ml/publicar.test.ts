@@ -5,7 +5,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { auditoria, cuentasMl, empresas, productosMl, publicaciones } from "@/db/schema";
 import { afirmarAislamiento, crearDosEmpresas } from "@/db/test-utils/aislamiento";
 import { cifrarToken } from "@/lib/cifrado";
-import { buscarCategoriasPorNombre, leerArbolCategorias, publicarProductoEnCuentas } from "./publicar";
+import { buscarCategoriasPorNombre, leerArbolCategorias, MENSAJE_PUBLICACION_COLGADA, marcarPublicacionesColgadas, publicarProductoEnCuentas } from "./publicar";
 
 // Tarea 2.11 ("Publicar producto y clip") — pruebas de integración
 // contra Postgres real (RLS incluido) con `fetch` mockeado, mismo
@@ -568,5 +568,33 @@ describe("publicarProductoEnCuentas — dimensiones faltantes (Melissa, 22/9)", 
     const resultados = await publicarProductoEnCuentas(empresaId, producto.id);
     expect((resultados[0] as { ok: boolean; error: string }).ok).toBe(false);
     expect((resultados[0] as { error: string }).error).toContain("Faltan las dimensiones del paquete");
+  });
+});
+
+describe("marcarPublicacionesColgadas — filas «Publicando…» que nunca terminaron", () => {
+  it("cierra solo las de más de 10 min, de esa empresa, con el mensaje en español", async () => {
+    const a = randomUUID();
+    const b = randomUUID();
+    for (const [id, n] of [[a, "A"], [b, "B"]] as const) {
+      await dbComoEmpresa(id, (tx) => tx.insert(empresas).values({ id, nombre: `Empresa colgadas ${n}`, nit: `TEST-COL-${n}-${id.slice(0, 6)}` }));
+    }
+    const vieja = new Date(Date.now() - 30 * 60_000);
+    const insertar = (empresaId: string, creadoTs: Date) =>
+      dbComoEmpresa(empresaId, (tx) =>
+        tx.insert(productosMl).values({ empresaId, precio: "10", stock: 1, estado: "publicando", creadoTs }).returning({ id: productosMl.id })
+      );
+    const [vA] = await insertar(a, vieja);
+    const [nuevaA] = await insertar(a, new Date());
+    const [vB] = await insertar(b, vieja);
+
+    expect(await marcarPublicacionesColgadas(a)).toBe(1);
+
+    const leer = (empresaId: string, id: string) =>
+      dbComoEmpresa(empresaId, (tx) => tx.select().from(productosMl).where(eq(productosMl.id, id)).then((r) => r[0]));
+    const colgada = await leer(a, vA.id);
+    expect(colgada.estado).toBe("con_errores");
+    expect(JSON.stringify(colgada.resultado)).toContain(MENSAJE_PUBLICACION_COLGADA);
+    expect((await leer(a, nuevaA.id)).estado).toBe("publicando");
+    expect((await leer(b, vB.id)).estado).toBe("publicando"); // otra empresa, intacta
   });
 });

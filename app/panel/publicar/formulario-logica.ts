@@ -606,3 +606,13 @@ export function parseImportacionBookmarklet(texto: string): ItemImportado | null
     },
   };
 }
+
+// Título de la primera cuenta elegida que tenga uno — se guarda al crear
+// la fila para que el historial no muestre «(sin título)» mientras publica.
+export function tituloInicialPublicacion(porCuenta: Record<string, { titulo?: string }>, cuentasSeleccionadas: string[]): string | null {
+  for (const id of cuentasSeleccionadas) {
+    const t = porCuenta[id]?.titulo?.trim();
+    if (t) return t;
+  }
+  return null;
+}

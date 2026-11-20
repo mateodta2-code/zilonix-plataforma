@@ -27,7 +27,7 @@ export function esValorNumericoValido(valorTexto: string): boolean {
 // del producto, no del paquete) y a *_NUMBER (ej. SPEEDS_NUMBER,
 // "Recortador de Patas de Perro", 0/8).
 export const CAMPOS_NUMERICOS =
-  /_WEIGHT$|_VOLUME$|_NUMBER$|DIAMETER$|^WIDTH$|^HEIGHT$|^LENGTH$|^WEIGHT$|^DEPTH$|^POWER$|^MIN_RECOMMENDED_AGE$|^UNITS_PER_PACK$/;
+  /_WEIGHT$|_VOLUME$|_NUMBER$|DIAMETER$|^WIDTH$|^HEIGHT$|^LENGTH$|^WEIGHT$|^DEPTH$|^POWER$|^MIN_RECOMMENDED_AGE$|^MAX_RECOMMENDED_AGE$|^UNITS_PER_PACK$/;
 
 // BUG real ("Calostro En Polvo...", 0/2, item.attribute.number_invalid_format):
 // varios atributos numéricos son "number_unit" y exigen la unidad al
@@ -35,10 +35,12 @@ export const CAMPOS_NUMERICOS =
 // Grownsy", 4/8) y DIAMETER (Melissa, con el patrón DIAMETER$ para
 // cubrir también INNER_DIAMETER). _NUMBER y UNITS_PER_PACK están en
 // CAMPOS_NUMERICOS pero NO acá: son conteo puro, sin unidad.
+// Solo es respaldo: si la categoría trae allowed_units, manda
+// normalizarNumeroConUnidad (más abajo).
 const UNIDAD_POR_DEFECTO: { patron: RegExp; unidad: string }[] = [
   { patron: /_WEIGHT$/, unidad: "g" },
   { patron: /_VOLUME$/, unidad: "mL" },
-  { patron: /^MIN_RECOMMENDED_AGE$/, unidad: "años" },
+  { patron: /^(MIN|MAX)_RECOMMENDED_AGE$/, unidad: "años" },
   { patron: /^POWER$/, unidad: "W" },
   { patron: /DIAMETER$/, unidad: "cm" },
 ];
@@ -48,6 +50,47 @@ export function conUnidadSiHaceFalta(id: string, valorTexto: string): string {
   if (yaTieneUnidad) return valorTexto;
   const regla = UNIDAD_POR_DEFECTO.find((r) => r.patron.test(id));
   return regla ? `${valorTexto} ${regla.unidad}` : valorTexto;
+}
+
+export class UnidadInvalidaError extends Error {}
+
+function sinTildes(s: string): string {
+  return String(s ?? "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim();
+}
+
+// Sinónimos mínimos que la gente escribe (ML llama "años" a la unidad).
+function claveUnidad(s: string): string {
+  const k = sinTildes(s);
+  return k === "ano" || k === "anos" ? "anos" : k;
+}
+
+// BUG real (TIENDAMERCADOMAX, "Paracaídas Juguete…", Colombia):
+// MAX_RECOMMENDED_AGE llegaba como "18" sin unidad y ML respondía 400
+// number_invalid_format / "The provided unit is not valid". Para un
+// atributo number_unit la unidad válida sale de allowed_units de LA
+// categoría (no de una tabla fija). Devuelve null si hay que omitir el
+// atributo (texto sin número, ej. "N/A"); lanza UnidadInvalidaError si la
+// persona escribió una unidad que la categoría no acepta, ANTES de llamar
+// a Mercado Libre.
+export function normalizarNumeroConUnidad(def: DefinicionAtributoMl, texto: string): string | null {
+  const limpio = String(texto ?? "").trim();
+  const m = limpio.match(/^(\d+(?:[.,]\d+)?)\s*(.*)$/);
+  if (!m) return null;
+  const numero = m[1];
+  const unidadEscrita = m[2].trim();
+  const permitidas = def.allowed_units ?? [];
+  if (!unidadEscrita) {
+    const porDefecto = def.default_unit ? permitidas.find((u) => u.id === def.default_unit || u.name === def.default_unit)?.name ?? def.default_unit : permitidas[0]?.name;
+    return porDefecto ? `${numero} ${porDefecto}` : numero;
+  }
+  if (permitidas.length === 0) return `${numero} ${unidadEscrita}`; // sin lista real no hay con qué validar
+  const real = permitidas.find((u) => claveUnidad(u.name) === claveUnidad(unidadEscrita) || claveUnidad(u.id) === claveUnidad(unidadEscrita));
+  if (!real) {
+    throw new UnidadInvalidaError(
+      `La unidad "${unidadEscrita}" no es válida para "${def.name}" en Mercado Libre. Unidades permitidas: ${permitidas.map((u) => u.name).join(", ")}.`
+    );
+  }
+  return `${numero} ${real.name}`;
 }
 
 // BUG real (16/9, cuenta "juliana" — item.attribute.product_identifier.invalid_format):

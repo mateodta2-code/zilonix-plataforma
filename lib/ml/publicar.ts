@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, productosMl, publicaciones } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
@@ -22,6 +22,7 @@ import {
   CAMPOS_NUMERICOS,
   canonicalizarValorListaCerrada,
   conUnidadSiHaceFalta,
+  normalizarNumeroConUnidad,
   decidirAtributoGtin,
   detectarGeneroPorTitulo,
   esErrorDeFamilyName,
@@ -293,7 +294,13 @@ export async function resolverAtributosObligatorios(
     if (CAMPOS_NUMERICOS.test(id) && !esValorNumericoValido(texto)) continue; // ej. "N/A" en un campo numérico — se omite, nunca se manda basura
     const defAtributo = todos.find((a) => a.id === id);
     if (defAtributo) texto = canonicalizarValorListaCerrada(defAtributo, texto); // puede lanzar — lista cerrada real
-    texto = conUnidadSiHaceFalta(id, texto);
+    if (defAtributo?.value_type === "number_unit" && defAtributo.allowed_units?.length) {
+      const conUnidad = normalizarNumeroConUnidad(defAtributo, texto); // puede lanzar UnidadInvalidaError — antes de llamar a ML
+      if (conUnidad === null) continue; // texto sin número — se omite
+      texto = conUnidad;
+    } else {
+      texto = conUnidadSiHaceFalta(id, texto); // respaldo: la categoría no trae allowed_units
+    }
     finales.push({ id, value_name: texto });
     idsEnviados.add(id);
   }
@@ -362,6 +369,8 @@ export type CaracteristicaCategoria = {
   valueType: string | null;
   permiteVariante: boolean; // tags.allow_variations — pedido de Débora
   definePic: boolean; // tags.defines_picture — pedido de Débora, 16/9
+  unidades: string[]; // nombres de allowed_units (solo value_type "number_unit")
+  unidadPorDefecto: string | null;
 };
 
 // ADENDO UX de Publicar, punto 2 — "árbol de categorías: UI + ruta que
@@ -421,6 +430,8 @@ export async function obtenerCaracteristicasCategoria(
     valueType: a.value_type ?? null,
     permiteVariante: Boolean(a.tags?.allow_variations),
     definePic: Boolean(a.tags?.defines_picture),
+    unidades: (a.allowed_units ?? []).map((u) => u.name),
+    unidadPorDefecto: a.default_unit ? (a.allowed_units ?? []).find((u) => u.id === a.default_unit || u.name === a.default_unit)?.name ?? a.default_unit : (a.allowed_units?.[0]?.name ?? null),
   });
   const principales = relevantes.filter(esPrincipal).map(armar).sort((a, b) => (b.obligatorio ? 1 : 0) - (a.obligatorio ? 1 : 0));
   const secundarias = relevantes.filter((a) => !esPrincipal(a)).map(armar);
@@ -811,6 +822,28 @@ async function sincronizarPublicacionCreada(
       .values({ empresaId, cuentaMlId, publicacionIdExterno, titulo, precio, stock })
       .onConflictDoUpdate({ target: [publicaciones.empresaId, publicaciones.publicacionIdExterno], set: { titulo, precio, stock } })
   );
+}
+
+// Filas que quedaron en "publicando" para siempre (el servidor se
+// reinició o tardó de más y el fondo nunca escribió el resultado). Antes
+// de leer el historial se pasan a con_errores para que la persona pueda
+// reintentar en vez de ver "Publicando…" eternamente.
+export const MINUTOS_PUBLICANDO_COLGADO = 10;
+export const MENSAJE_PUBLICACION_COLGADA = "La publicación no terminó (el servidor se reinició o tardó demasiado). Intenta de nuevo.";
+
+export async function marcarPublicacionesColgadas(empresaId: string, ahora: Date = new Date()): Promise<number> {
+  const limite = new Date(ahora.getTime() - MINUTOS_PUBLICANDO_COLGADO * 60_000);
+  const filas = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .update(productosMl)
+      .set({
+        estado: "con_errores",
+        resultado: [{ cuentaMlId: "", ok: false, error: MENSAJE_PUBLICACION_COLGADA }] as ResultadoPublicacionCuenta[],
+      })
+      .where(and(eq(productosMl.empresaId, empresaId), eq(productosMl.estado, "publicando"), lt(productosMl.creadoTs, limite)))
+      .returning({ id: productosMl.id })
+  );
+  return filas.length;
 }
 
 // §2 — el orquestador. SECUENCIAL, no paralelo (igual que el original:

@@ -19,7 +19,7 @@ import {
   serializarCategoriaOverride,
   serializarClaveValor,
   type FilaProductoParaCargar,
-} from "./formulario-logica";
+ tituloInicialPublicacion } from "./formulario-logica";
 
 describe("esRellenoFalsoDimensiones — ADENDO UX de Publicar, punto 9", () => {
   it("las 4 medidas en 1 (relleno falso): true", () => {
@@ -785,5 +785,14 @@ describe("construirEstadoInicialDesdeImportacion — Parte 3, punto A (precargar
 
   it("sin ninguna cuenta: datosPorCuenta vacío, nunca lanza", () => {
     expect(construirEstadoInicialDesdeImportacion([], item).datosPorCuenta).toEqual({});
+  });
+});
+
+describe("tituloInicialPublicacion", () => {
+  it("toma el título de la primera cuenta elegida que tenga uno", () => {
+    expect(tituloInicialPublicacion({ a: {}, b: { titulo: " Hola " } }, ["a", "b"])).toBe("Hola");
+  });
+  it("sin títulos devuelve null", () => {
+    expect(tituloInicialPublicacion({}, ["a"])).toBeNull();
   });
 });
