@@ -1915,6 +1915,24 @@ async function leerItemOptimizacionUnoMl(id: string, token: string): Promise<Ite
   }
 }
 
+// Visitas de TODA la tienda (todas las publicaciones de un vendedor)
+// entre dos días. Confirmado en staging el 19-nov con
+// scripts/explorar-visitas-cuenta.ts (FMCBIENESTAR y STOREKINGSAS):
+// /users/{id}/items_visits?date_from=&date_to= → { total_visits }, con
+// date_to exclusivo (13 → 20 = 7 días). null si no se pudo saber.
+export async function visitasCuentaMl(vendedorId: string, token: string, desde: string, hastaExclusivo: string): Promise<number | null> {
+  if (!/^\d{1,20}$/.test(vendedorId) || !/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hastaExclusivo)) return null;
+  try {
+    const resp = await pedirLecturaMl<{ total_visits?: unknown }>(`/users/${vendedorId}/items_visits`, token, {
+      query: `?date_from=${desde}&date_to=${hastaExclusivo}`,
+    });
+    return resp.ok ? numeroONull(resp.data.total_visits) : null;
+  } catch (error) {
+    if (error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) return null;
+    throw error;
+  }
+}
+
 // Visitas de los últimos `dias` días de una publicación.
 export async function visitasItemMl(itemId: string, token: string, dias = 7): Promise<number | null> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");

@@ -33,6 +33,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/finanzas/maestra-sku/page.tsx",
   // Issue #422 — cuentas por cobrar: finanzas.consultar (página y consulta).
   "app/panel/finanzas/por-cobrar/page.tsx",
+  "app/panel/finanzas/inventario/page.tsx",
   "app/panel/finanzas/maestra-sku/actions.ts",
   "app/panel/finanzas/maestra-sku/editar/page.tsx",
   "app/panel/finanzas/maestra-sku/alertas/page.tsx",
