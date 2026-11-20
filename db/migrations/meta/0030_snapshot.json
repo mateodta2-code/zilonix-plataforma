@@ -1,5 +1,5 @@
 {
-  "id": "057eba30-3739-43e0-848e-e55a45957130",
+  "id": "fef7a430-c2ca-4b2a-9223-1743bda6cb1a",
   "prevId": "6af78358-cfd6-47c0-bb14-faefd109cdb0",
   "version": "7",
   "dialect": "postgresql",
@@ -4188,12 +4188,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "numero_orden": {
-          "name": "numero_orden",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "importado_ts": {
           "name": "importado_ts",
           "type": "timestamp with time zone",
@@ -4220,27 +4214,6 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pedidos_falabella_cuenta_numero_orden_idx": {
-          "name": "pedidos_falabella_cuenta_numero_orden_idx",
-          "columns": [
-            {
-              "expression": "cuenta_falabella_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "numero_orden",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5330,6 +5303,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "regla_participacion": {
+          "name": "regla_participacion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reglas_adicionales_texto": {
+          "name": "reglas_adicionales_texto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reglas_adicionales_json": {
+          "name": "reglas_adicionales_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "actualizado_ts": {
           "name": "actualizado_ts",
           "type": "timestamp with time zone",
@@ -5413,6 +5404,14 @@
       },
       "policies": {},
       "checkConstraints": {
+        "promociones_reglas_regla_participacion_valida": {
+          "name": "promociones_reglas_regla_participacion_valida",
+          "value": "\"promociones_reglas\".\"regla_participacion\" IS NULL OR \"promociones_reglas\".\"regla_participacion\" IN ('todas','maximo','tabla-maestra')"
+        },
+        "promociones_reglas_reglas_texto_largo": {
+          "name": "promociones_reglas_reglas_texto_largo",
+          "value": "\"promociones_reglas\".\"reglas_adicionales_texto\" IS NULL OR char_length(\"promociones_reglas\".\"reglas_adicionales_texto\") <= 1000"
+        },
         "promociones_reglas_descuento_rango": {
           "name": "promociones_reglas_descuento_rango",
           "value": "\"promociones_reglas\".\"descuento_maximo_pct\" > 0 AND \"promociones_reglas\".\"descuento_maximo_pct\" <= 100"

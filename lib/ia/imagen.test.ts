@@ -19,7 +19,7 @@ const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a
 const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(32)]);
 
 function conexion(proveedor: ConexionIAConClave["proveedor"]): ConexionIAConClave {
-  return { id: "c1", proveedor, baseUrl: null, modelo: "texto", actualizadoTs: new Date(), apiKey: "clave-secreta" };
+  return { id: "c1", nombre: "IA", esPrincipal: true, proveedor, baseUrl: null, modelo: "texto", actualizadoTs: new Date(), apiKey: "clave-secreta" };
 }
 
 const fetchOriginal = globalThis.fetch;
@@ -50,18 +50,15 @@ describe("qué se le pide a la IA", () => {
     expect(leerVariante("3")).toBe(0);
   });
 
-  it("informativa: textos en español, sin inventar promociones; usa las indicaciones", () => {
-    const p = promptImagenIA("informativa", null, "corta a 45°");
-    expect(p).toMatch(/textos cortos en español/);
-    expect(p).toMatch(/No inventes certificaciones/);
-    expect(p).toContain("corta a 45°");
+  it("la informativa no sale de acá: necesita su contenido aprobado", () => {
+    expect(() => promptImagenIA("informativa", null, "corta a 45°")).toThrow(/contenido aprobado/);
   });
 
   it("tipo e indicaciones con lista blanca y tope", () => {
     expect(leerTipoImagenIA("informativa")).toBe("informativa");
     expect(leerTipoImagenIA("otra")).toBe("portada");
     expect(limpiarIndicaciones("  a\n\nb  ")).toBe("a b");
-    expect(limpiarIndicaciones("x".repeat(900))).toHaveLength(600);
+    expect(limpiarIndicaciones("x".repeat(2000))).toHaveLength(1500);
     expect(limpiarIndicaciones(42)).toBe("");
   });
 

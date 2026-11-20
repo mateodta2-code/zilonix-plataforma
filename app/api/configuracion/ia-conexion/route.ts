@@ -1,100 +1,50 @@
-import { NextResponse } from "next/server";
 import { requierePermiso } from "@/lib/permisos";
-import { eliminarConexionIA, guardarConexionIA, obtenerConexionIA } from "@/lib/ia/conexion";
-import { exigirUrlBaseIASegura, UrlBaseIAInvalidaError } from "@/lib/ia/validarUrlBase";
-import { urlPublicaBase } from "@/lib/url-publica";
-import { respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../_ayudantes";
+import { respuestaSiSinPermiso } from "../_ayudantes";
+import { NextResponse } from "next/server";
+import { crearConexionIA, listarConexionesIA, MENSAJE_LIMITE_IA } from "@/lib/ia/conexion";
+import { MAX_CONEXIONES_IA } from "@/lib/ia/modulos";
+import { sesionIA, leerDatosConexion, respuestaSiErrorDominio } from "../_ia";
 
-// Rama feat-promociones, punto 6 — "En Configuración, una sección
-// 'Conexión de IA' por empresa". Vive bajo el módulo "configuracion"
-// que YA existe (consultar/modificar) — nunca un permiso nuevo solo
-// para esto, y nunca devuelve la API key (obtenerConexionIA, a
-// propósito, nunca obtenerConexionIAConClave — ver lib/ia/conexion.ts).
-const PROVEEDORES = ["anthropic", "openai", "google", "xai", "otro_compatible_openai"] as const;
-
+// «Conectar IA» (Administración): varias IA por empresa, máximo 5. Vive
+// bajo el módulo "configuracion" (consultar/modificar). Nunca devuelve
+// la API key.
 export async function GET() {
-  const sesion = await resolverSesionYEmpresa();
+  const sesion = await sesionIA(null);
   if (sesion instanceof NextResponse) return sesion;
-  const { usuario, empresa } = sesion;
-
   try {
-    await requierePermiso(usuario.id, empresa.id, "configuracion", "consultar");
+    await requierePermiso(sesion.usuario.id, sesion.empresa.id, "configuracion", "consultar");
   } catch (error) {
-    const respuestaPermiso = respuestaSiSinPermiso(error);
-    if (respuestaPermiso) return respuestaPermiso;
+    const sinPermiso = respuestaSiSinPermiso(error);
+    if (sinPermiso) return sinPermiso;
     throw error;
   }
-
-  const conexion = await obtenerConexionIA(empresa.id);
-  return NextResponse.json({ conexion });
+  const conexiones = await listarConexionesIA(sesion.empresa.id);
+  // `conexion` (la principal) se mantiene por compatibilidad con la
+  // respuesta vieja { conexion }.
+  const conexion = conexiones.find((c) => c.esPrincipal) ?? null;
+  return NextResponse.json({ conexiones, conexion });
 }
 
-export async function PUT(request: Request) {
-  const base = urlPublicaBase();
-  const respuestaOrigen = respuestaSiOrigenInvalido(request, new URL(base).origin);
-  if (respuestaOrigen) return respuestaOrigen;
-
-  const sesion = await resolverSesionYEmpresa();
+export async function POST(request: Request) {
+  const sesion = await sesionIA(request);
   if (sesion instanceof NextResponse) return sesion;
-  const { usuario, empresa } = sesion;
-
   try {
-    await requierePermiso(usuario.id, empresa.id, "configuracion", "modificar");
+    await requierePermiso(sesion.usuario.id, sesion.empresa.id, "configuracion", "modificar");
   } catch (error) {
-    const respuestaPermiso = respuestaSiSinPermiso(error);
-    if (respuestaPermiso) return respuestaPermiso;
+    const sinPermiso = respuestaSiSinPermiso(error);
+    if (sinPermiso) return sinPermiso;
     throw error;
   }
-
-  let cuerpo: unknown;
+  const datos = await leerDatosConexion(request, { exigirKey: true });
+  if (datos instanceof NextResponse) return datos;
   try {
-    cuerpo = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
-  }
-  const c = cuerpo as Record<string, unknown>;
-  const proveedor = typeof c?.proveedor === "string" && (PROVEEDORES as readonly string[]).includes(c.proveedor) ? c.proveedor : null;
-  const modelo = typeof c?.modelo === "string" ? c.modelo.trim() : "";
-  const apiKey = typeof c?.apiKey === "string" ? c.apiKey.trim() : "";
-  const baseUrl = typeof c?.baseUrl === "string" && c.baseUrl.trim() ? c.baseUrl.trim() : null;
-
-  if (!proveedor || !modelo || !apiKey) return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
-  if (proveedor === "otro_compatible_openai") {
-    if (!baseUrl) return NextResponse.json({ error: "Falta la URL base para un proveedor compatible con OpenAI." }, { status: 400 });
-    // Code review de Pablo — HIGH 3: una URL base arbitraria es
-    // exactamente lo que habilita un SSRF (contra la red interna de
-    // Railway, o contra la IP de metadata de la nube) — ver
-    // lib/ia/validarUrlBase.ts (misma función que revalida otra vez
-    // justo antes de cada llamada real en lib/ia/proveedores.ts).
-    try {
-      await exigirUrlBaseIASegura(baseUrl);
-    } catch (error) {
-      if (error instanceof UrlBaseIAInvalidaError) return NextResponse.json({ error: error.message }, { status: 400 });
-      throw error;
-    }
-  }
-
-  await guardarConexionIA(empresa.id, usuario.id, { proveedor: proveedor as (typeof PROVEEDORES)[number], baseUrl, modelo, apiKey });
-  return NextResponse.json({ ok: true });
-}
-
-export async function DELETE(request: Request) {
-  const base = urlPublicaBase();
-  const respuestaOrigen = respuestaSiOrigenInvalido(request, new URL(base).origin);
-  if (respuestaOrigen) return respuestaOrigen;
-
-  const sesion = await resolverSesionYEmpresa();
-  if (sesion instanceof NextResponse) return sesion;
-  const { usuario, empresa } = sesion;
-
-  try {
-    await requierePermiso(usuario.id, empresa.id, "configuracion", "modificar");
+    const conexiones = await listarConexionesIA(sesion.empresa.id);
+    if (conexiones.length >= MAX_CONEXIONES_IA) return NextResponse.json({ error: MENSAJE_LIMITE_IA }, { status: 409 });
+    const creada = await crearConexionIA(sesion.empresa.id, sesion.usuario.id, datos);
+    return NextResponse.json({ ok: true, conexion: creada }, { status: 201 });
   } catch (error) {
-    const respuestaPermiso = respuestaSiSinPermiso(error);
-    if (respuestaPermiso) return respuestaPermiso;
+    const r = respuestaSiErrorDominio(error);
+    if (r) return r;
     throw error;
   }
-
-  await eliminarConexionIA(empresa.id);
-  return NextResponse.json({ ok: true });
 }

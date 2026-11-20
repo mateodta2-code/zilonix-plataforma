@@ -35,9 +35,23 @@ function esPlataformaValida(valor: unknown): valor is PlataformaAnalizar {
   return typeof valor === "string" && (PLATAFORMAS_VALIDAS as readonly string[]).includes(valor);
 }
 
-export function marcarClicAnalizar(pais: string, plataforma: PlataformaAnalizar): void {
+// «Buscar por foto» — consultas extra que reconoció la IA (solo texto, nunca
+// la foto): viajan en la MISMA marca de un solo uso y 30 s, así
+// PanelInvestigacion las mezcla con las variantes sin otro estado compartido.
+const MAX_CONSULTAS_FOTO = 4;
+
+function limpiarConsultasFoto(valor: unknown): string[] {
+  if (!Array.isArray(valor)) return [];
+  return valor
+    .filter((c): c is string => typeof c === "string")
+    .map((c) => c.trim().slice(0, 60))
+    .filter(Boolean)
+    .slice(0, MAX_CONSULTAS_FOTO);
+}
+
+export function marcarClicAnalizar(pais: string, plataforma: PlataformaAnalizar, consultasFoto?: string[]): void {
   try {
-    sessionStorage.setItem(CLAVE, JSON.stringify({ ts: Date.now(), pais, plataforma }));
+    sessionStorage.setItem(CLAVE, JSON.stringify({ ts: Date.now(), pais, plataforma, ...(consultasFoto?.length ? { consultasFoto: limpiarConsultasFoto(consultasFoto) } : {}) }));
   } catch {
     // sessionStorage bloqueado (modo privado estricto, etc.) — el
     // escaneo automático de la extensión simplemente no se dispara;
@@ -46,7 +60,7 @@ export function marcarClicAnalizar(pais: string, plataforma: PlataformaAnalizar)
   }
 }
 
-export function consumirClicAnalizarReciente(): { pais: string; plataforma: PlataformaAnalizar } | null {
+export function consumirClicAnalizarReciente(): { pais: string; plataforma: PlataformaAnalizar; consultasFoto?: string[] } | null {
   let crudo: string | null = null;
   try {
     crudo = sessionStorage.getItem(CLAVE);
@@ -56,11 +70,12 @@ export function consumirClicAnalizarReciente(): { pais: string; plataforma: Plat
   }
   if (!crudo) return null;
   try {
-    const { ts, pais, plataforma } = JSON.parse(crudo) as { ts?: number; pais?: string; plataforma?: string };
+    const { ts, pais, plataforma, consultasFoto } = JSON.parse(crudo) as { ts?: number; pais?: string; plataforma?: string; consultasFoto?: unknown };
     if (typeof ts !== "number" || !Number.isFinite(ts) || Date.now() - ts > VENTANA_MS) return null;
     return {
       pais: typeof pais === "string" && pais ? pais : "CO",
       plataforma: esPlataformaValida(plataforma) ? plataforma : "ml",
+      ...(limpiarConsultasFoto(consultasFoto).length ? { consultasFoto: limpiarConsultasFoto(consultasFoto) } : {}),
     };
   } catch {
     return null;

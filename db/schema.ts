@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { type AnyPgColumn, boolean, check, date, foreignKey, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
+import type { ReglasAdicionales } from "@/lib/ml/promocionesReglasTexto";
 import type {
   DatosPorCuenta,
   DimensionesProducto,
@@ -1894,11 +1895,25 @@ export const promocionesReglas = pgTable(
     // Validado en código, no acá — mismo criterio que el resto del
     // repo para evitar un tipo de columna exótico sin precedente.
     busquedaAutomaticaHora: text("busqueda_automatica_hora"),
+    // PR 2 (feat-promociones-reglas-texto). Regla de participación
+    // elegida por la cuenta ("todas" | "maximo" | "tabla-maestra"), NULL =
+    // sin elegir. «Reglas adicionales»: el texto libre que escribió la
+    // persona (≤ 1000) y el JSON ya interpretado, validado y CONFIRMADO
+    // por ella (forma en lib/ml/promocionesReglasTexto.ts) — solo aplican
+    // a "tabla-maestra". Nunca se guarda nada sin confirmación.
+    reglaParticipacion: text("regla_participacion"),
+    reglasAdicionalesTexto: text("reglas_adicionales_texto"),
+    reglasAdicionalesJson: jsonb("reglas_adicionales_json").$type<ReglasAdicionales>(),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
   },
   (t) => ({
     unaPorCuenta: unique("promociones_reglas_cuenta_unica").on(t.cuentaMlId),
+    reglaParticipacionValida: check(
+      "promociones_reglas_regla_participacion_valida",
+      sql`${t.reglaParticipacion} IS NULL OR ${t.reglaParticipacion} IN ('todas','maximo','tabla-maestra')`
+    ),
+    reglasTextoLargo: check("promociones_reglas_reglas_texto_largo", sql`${t.reglasAdicionalesTexto} IS NULL OR char_length(${t.reglasAdicionalesTexto}) <= 1000`),
     descuentoEnRango: check("promociones_reglas_descuento_rango", sql`${t.descuentoMaximoPct} > 0 AND ${t.descuentoMaximoPct} <= 100`),
     cuentaDeLaEmpresa: foreignKey({
       name: "promociones_reglas_empresa_cuenta_fk",
@@ -2027,13 +2042,37 @@ export const iaConexiones = pgTable(
     // servidor que hable el mismo formato que la API de OpenAI.
     baseUrl: text("base_url"),
     modelo: text("modelo").notNull(),
+    nombre: text("nombre").notNull().default("IA principal"),
+    esPrincipal: boolean("es_principal").notNull().default(false),
     apiKeyCifrada: jsonb("api_key_cifrada").$type<TokenCifrado>().notNull(),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
   },
   (t) => ({
-    unaPorEmpresa: unique("ia_conexiones_empresa_unica").on(t.empresaId),
+    // Varias IA por empresa (máx. 5, forzado por el trigger de la
+    // migración 0031). Una sola principal por empresa; el par
+    // (empresa_id, id) permite la FK compuesta de ia_conexion_modulos.
+    empresaIdUnica: unique("ia_conexiones_empresa_id_unica").on(t.empresaId, t.id),
+    unaPrincipal: uniqueIndex("ia_conexiones_una_principal").on(t.empresaId).where(sql`${t.esPrincipal}`),
+  })
+);
+
+// Qué IA usa cada módulo. Un módulo apunta a UNA sola conexión; lo que
+// no tiene fila usa la principal. La lista de módulos vive en
+// lib/ia/modulos.ts (y en el CHECK de la migración 0031).
+export const iaConexionModulos = pgTable(
+  "ia_conexion_modulos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    conexionId: uuid("conexion_id").notNull(),
+    modulo: text("modulo").notNull(),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    moduloUnico: unique("ia_conexion_modulos_empresa_modulo_unico").on(t.empresaId, t.modulo),
+    conexionFk: foreignKey({ columns: [t.empresaId, t.conexionId], foreignColumns: [iaConexiones.empresaId, iaConexiones.id], name: "ia_conexion_modulos_conexion_fk" }).onDelete("cascade"),
   })
 );
 

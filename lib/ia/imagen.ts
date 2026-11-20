@@ -1,7 +1,7 @@
 // Optimización — crear una foto de la publicación con IA a partir de
 // fotos REALES del producto (decisión de producto: nunca desde texto solo,
 // para que el producto siga siendo el que se vende). Usa la conexión de
-// IA de cada empresa (Configuración → IA): solo OpenAI y Google generan
+// IA de cada empresa (Administración → Conectar IA): solo OpenAI y Google generan
 // imágenes; Anthropic y los compatibles con OpenAI no.
 //
 // Contratos públicos de cada proveedor (mismo criterio que
@@ -23,7 +23,8 @@ export const MODELO_IMAGEN_GOOGLE = "gemini-2.5-flash-image";
 const TIMEOUT_GENERAR_MS = 120_000;
 const TIMEOUT_DESCARGA_MS = 15_000;
 const TOPE_BYTES = 10 * 1024 * 1024;
-export const LARGO_MAXIMO_INDICACIONES = 600;
+// Ficha técnica / información del producto que escribe el vendedor.
+export const LARGO_MAXIMO_INDICACIONES = 1_500;
 // Fotos reales que se mandan como referencia (la elegida + otras de la
 // galería, para que la IA vea detalles y lo que incluye sin inventar).
 export const MAXIMO_FOTOS_REFERENCIA = 3;
@@ -48,8 +49,8 @@ export function limpiarIndicaciones(valor: unknown): string {
 // el producto protagonista sobre fondo blanco y, alrededor, la escena de
 // uso, detalles reales y lo que incluye, sin ningún texto. Cada variante
 // cambia ángulo, composición y escena para que las portadas no se
-// repitan. Informativa: el mismo producto con textos cortos. En las dos
-// se pide no cambiar el producto ni inventar sellos o promociones.
+// repitan. La informativa no sale de acá: usa el contenido aprobado
+// (lib/ia/contenidoReglas.ts, promptImagenContenido).
 export const COMPOSICIONES_PORTADA = [
   // La distribución de referencia que mandó el equipo (esquema, no diseño final).
   "Producto en vista frontal tres cuartos, grande, ocupando el centro y la izquierda del cuadro; un círculo grande con la escena de uso arriba a la derecha, parcialmente detrás del producto; un círculo pequeño con un detalle funcional real a la derecha, a media altura bajo la escena; lo que incluye (o, si no trae nada, otra característica real) ordenado en una franja horizontal en la parte inferior.",
@@ -95,16 +96,9 @@ export function promptImagenIA(tipo: TipoImagenIA, titulo: string | null, indica
       .filter(Boolean)
       .join(" ");
   }
-  return [
-    "Crea una imagen informativa para una publicación de Mercado Libre a partir de estas fotos.",
-    producto,
-    fiel,
-    "Agrega de 2 a 4 textos cortos en español, grandes y legibles, que destaquen características reales del producto, con un diseño limpio y profesional. Formato cuadrado.",
-    "No inventes certificaciones, garantías, precios, descuentos ni promociones.",
-    indicaciones ? `Destaca esto, según el vendedor: ${indicaciones}` : "Si no sabes una característica, destaca solo lo que se ve en la foto.",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  // La informativa se arma con el contenido aprobado
+  // (promptImagenContenido, lib/ia/contenidoReglas.ts).
+  throw new ErrorImagenIA("La imagen informativa necesita su contenido aprobado.");
 }
 
 // Solo fotos que ya son de la publicación (Mercado Libre) o que la
@@ -184,7 +178,7 @@ async function conGoogle(apiKey: string, fotos: FotoBase[], prompt: string): Pro
 }
 
 function mensajeHttp(proveedor: string, status: number): string {
-  if (status === 401 || status === 403) return `${proveedor} rechazó la clave de IA de la empresa (revisa Configuración → IA).`;
+  if (status === 401 || status === 403) return `${proveedor} rechazó la clave de IA de la empresa (revisa Administración → Conectar IA).`;
   if (status === 429) return `${proveedor} pidió esperar (límite o saldo de la cuenta de IA). Intenta más tarde.`;
   if (status === 400) return `${proveedor} no aceptó la foto o la instrucción. Prueba con otra foto.`;
   return `${proveedor} respondió con un error (${status}). Intenta de nuevo.`;
@@ -195,7 +189,7 @@ function mensajeHttp(proveedor: string, status: number): string {
 export async function generarImagenDesdeFoto(conexion: ConexionIAConClave, fotos: FotoBase[], prompt: string): Promise<FotoBase> {
   if (fotos.length === 0) throw new ErrorImagenIA("Falta la foto base.");
   if (!proveedorGeneraImagenes(conexion.proveedor)) {
-    throw new ErrorImagenIA("La IA conectada no genera imágenes. Conecta OpenAI o Google en Configuración → IA.");
+    throw new ErrorImagenIA("La IA conectada no genera imágenes. Conecta OpenAI o Google en Administración → Conectar IA.");
   }
   const buffer = conexion.proveedor === "openai" ? await conOpenAI(conexion.apiKey, fotos.slice(0, MAXIMO_FOTOS_REFERENCIA), prompt) : await conGoogle(conexion.apiKey, fotos.slice(0, MAXIMO_FOTOS_REFERENCIA), prompt);
   const tipo = tipoImagenPorMagicBytes(buffer);

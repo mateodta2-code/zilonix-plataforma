@@ -19,6 +19,12 @@ const { aplicarReglaALoteMock } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/ml/promocionesPublicaciones", () => ({ aplicarReglaALote: aplicarReglaALoteMock }));
 
+const { vistaPreviaSalirTodasMock, salirDeTodasLasPromocionesMock } = vi.hoisted(() => ({
+  vistaPreviaSalirTodasMock: vi.fn(async () => ({ revisadas: 3, publicaciones: 2, promociones: 3, salibles: 2, noPermitidas: 1, lecturasConError: 0, porTipo: {} })),
+  salirDeTodasLasPromocionesMock: vi.fn(async () => ({ revisadas: 3, salieron: 2, errores: 0, noPermitidas: 1, filas: [] })),
+}));
+vi.mock("@/lib/ml/promocionesSalirTodas", () => ({ vistaPreviaSalirTodas: vistaPreviaSalirTodasMock, salirDeTodasLasPromociones: salirDeTodasLasPromocionesMock }));
+
 import { cookies } from "next/headers";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { POST } from "./route";
@@ -90,5 +96,45 @@ describe("POST /api/ml/promociones/publicaciones/reglas-aplicar — Tarea Promoc
     const res = await POST(peticion({ cuentaId: "todas", regla: "todas" }));
     expect(res.status).toBe(403);
     expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
+  });
+
+  describe("regla 'salir-todas' (dejar de participar en todas)", () => {
+    it("vistaPrevia:true: solo cuenta (delega a la vista previa), NUNCA ejecuta ni escribe", async () => {
+      const res = await POST(peticion({ cuentaId: CUENTA_ID, regla: "salir-todas", vistaPrevia: true }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ publicaciones: 2, promociones: 3 });
+      expect(vistaPreviaSalirTodasMock).toHaveBeenCalledWith("empresa-1", CUENTA_ID);
+      expect(salirDeTodasLasPromocionesMock).not.toHaveBeenCalled();
+      expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
+    });
+
+    it("confirmado:true: ejecuta la salida masiva con el usuario real", async () => {
+      const res = await POST(peticion({ cuentaId: "todas", regla: "salir-todas", confirmado: true }));
+      expect(res.status).toBe(200);
+      expect(salirDeTodasLasPromocionesMock).toHaveBeenCalledWith("empresa-1", "usuario-1", "todas");
+      expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
+    });
+
+    it("sin confirmado (ni vistaPrevia): 400, nunca sale de nada sin el paso de confirmación", async () => {
+      const res = await POST(peticion({ cuentaId: "todas", regla: "salir-todas" }));
+      expect(res.status).toBe(400);
+      const res2 = await POST(peticion({ cuentaId: "todas", regla: "salir-todas", confirmado: "si" }));
+      expect(res2.status).toBe(400);
+      expect(salirDeTodasLasPromocionesMock).not.toHaveBeenCalled();
+    });
+
+    it("exige el mismo permiso 'ejecutar' que 'Aplicar regla' — también para la vista previa", async () => {
+      vi.mocked(requierePermiso).mockRejectedValueOnce(new SinPermisoError("promociones", "ejecutar"));
+      const res = await POST(peticion({ cuentaId: "todas", regla: "salir-todas", vistaPrevia: true }));
+      expect(res.status).toBe(403);
+      expect(vi.mocked(requierePermiso)).toHaveBeenCalledWith("usuario-1", "empresa-1", "promociones", "ejecutar");
+      expect(vistaPreviaSalirTodasMock).not.toHaveBeenCalled();
+    });
+
+    it("cuentaId inválido: 400 antes de tocar nada", async () => {
+      const res = await POST(peticion({ cuentaId: "no-es-un-uuid", regla: "salir-todas", confirmado: true }));
+      expect(res.status).toBe(400);
+      expect(salirDeTodasLasPromocionesMock).not.toHaveBeenCalled();
+    });
   });
 });

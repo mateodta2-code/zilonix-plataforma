@@ -24,6 +24,16 @@ export function GuiaModulo() {
             <li key={p}>{p}</li>
           ))}
         </ol>
+        {(seccion.apartados ?? []).map((a) => (
+          <div key={a.titulo}>
+            <p className={styles.subtitulo}>{a.titulo}</p>
+            <ol className={styles.pasos}>
+              {a.pasos.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ol>
+          </div>
+        ))}
         {seccion.consejos && seccion.consejos.length > 0 ? (
           <>
             <p className={styles.subtitulo}>Ten en cuenta</p>

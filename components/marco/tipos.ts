@@ -26,6 +26,7 @@ export type ClaveIcono =
   | "soporte"
   | "foro"
   | "conectarMl"
+  | "conectarIa"
   | "avisosMl"
   | "cuenta"
   | "crearEmpresa"

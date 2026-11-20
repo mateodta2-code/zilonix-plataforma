@@ -1,4 +1,4 @@
-import { obtenerConexionIAConClave } from "@/lib/ia/conexion";
+import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { llamarIA } from "@/lib/ia/proveedores";
 import type { CandidatoCalculado } from "@/lib/ml/promociones";
 
@@ -12,7 +12,7 @@ import type { CandidatoCalculado } from "@/lib/ml/promociones";
 // flujo de Promociones, que sigue funcionando solo con los números.
 export async function resumenPromocionesIA(empresaId: string, candidatos: CandidatoCalculado[]): Promise<string | null> {
   if (candidatos.length === 0) return null;
-  const conexion = await obtenerConexionIAConClave(empresaId);
+  const conexion = await obtenerConexionIAParaModulo(empresaId, "promociones");
   if (!conexion) return null;
 
   const lista = candidatos.map((c) => ({

@@ -15,10 +15,11 @@ const ml = vi.hoisted(() => ({
   ofertas: vi.fn(),
   fichas: vi.fn(),
   descripcion: vi.fn(),
+  leerDescripcion: vi.fn(),
   reputacion: vi.fn(),
 }));
 const auditorias = vi.hoisted(() => [] as unknown[]);
-const ia = vi.hoisted(() => ({ conexion: vi.fn(), descargar: vi.fn(), generar: vi.fn(), subir: vi.fn(), cloudinary: { configurado: true } }));
+const ia = vi.hoisted(() => ({ conexion: vi.fn(), descargar: vi.fn(), generar: vi.fn(), subir: vi.fn(), texto: vi.fn(), cloudinary: { configurado: true } }));
 
 vi.mock("@/lib/usuarios", () => ({ obtenerOCrearUsuarioActual: async () => ({ id: "usuario-1" }) }));
 vi.mock("@/lib/empresas", () => ({ listarEmpresasDeUsuario: async () => [{ id: "empresa-1" }] }));
@@ -50,7 +51,7 @@ vi.mock("@/db/empresa-context", () => ({
 }));
 vi.mock("@/lib/auditoria", () => ({ registrarAuditoria: async (_tx: unknown, entrada: unknown) => auditorias.push(entrada) }));
 vi.mock("@/lib/ml/cuentas", () => ({ obtenerAccessTokenVigente: async () => "token" }));
-vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAConClave: ia.conexion }));
+vi.mock("@/lib/ia/conexion", () => ({ obtenerConexionIAParaModulo: ia.conexion }));
 vi.mock("@/lib/cloudinary", () => ({
   CloudinaryNoConfiguradoError: class extends Error {},
   cloudinaryConfigurado: () => ia.cloudinary.configurado,
@@ -59,6 +60,10 @@ vi.mock("@/lib/cloudinary", () => ({
 vi.mock("@/lib/ia/imagen", async () => {
   const real = await vi.importActual<typeof import("@/lib/ia/imagen")>("@/lib/ia/imagen");
   return { ...real, descargarFotoBase: ia.descargar, generarImagenDesdeFoto: ia.generar };
+});
+vi.mock("@/lib/ia/proveedores", async () => {
+  const real = await vi.importActual<typeof import("@/lib/ia/proveedores")>("@/lib/ia/proveedores");
+  return { ...real, llamarIA: ia.texto };
 });
 vi.mock("@/lib/ml/preguntas", () => ({ motivoCuentaSinRevisar: () => "Token vencido — hay que reconectar la cuenta." }));
 vi.mock("@/lib/ml/cliente", async () => {
@@ -75,6 +80,7 @@ vi.mock("@/lib/ml/cliente", async () => {
     ofertasProductoCompetenciaMl: ml.ofertas,
     fichasPublicacionesMl: ml.fichas,
     tieneDescripcionMl: ml.descripcion,
+    leerDescripcionItemMl: ml.leerDescripcion,
     reputacionVendedorMl: ml.reputacion,
   };
 });
@@ -89,6 +95,7 @@ import {
   editarTituloAction,
   generarImagenIAAction,
   metricasPublicacionesAction,
+  proponerContenidoIAAction,
 } from "./actions";
 import { ErrorImagenIA } from "@/lib/ia/imagen";
 
@@ -357,16 +364,69 @@ describe("crear imagen con IA (no toca Mercado Libre)", () => {
     expect((await generarImagenIAAction(ENTRADA)).ok).toBe(false);
     estado.conPermiso = true;
     ia.conexion.mockResolvedValue(null);
-    expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Configuración → IA/);
+    expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Conectar IA/);
     ia.cloudinary.configurado = false;
     expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/Cloudinary/);
     expect(ia.generar).not.toHaveBeenCalled();
   });
 
   it("un error de la IA llega con su texto; uno inesperado, genérico", async () => {
-    ia.generar.mockRejectedValueOnce(new ErrorImagenIA("OpenAI rechazó la clave de IA de la empresa (revisa Configuración → IA)."));
+    ia.generar.mockRejectedValueOnce(new ErrorImagenIA("OpenAI rechazó la clave de IA de la empresa (revisa Administración → Conectar IA)."));
     expect((await generarImagenIAAction(ENTRADA)).aviso).toMatch(/rechazó la clave/);
     ia.generar.mockRejectedValueOnce(new Error("detalle interno con datos"));
     expect((await generarImagenIAAction(ENTRADA)).aviso).toBe("No se pudo crear la imagen. Intenta de nuevo.");
+  });
+});
+
+describe("imágenes informativas: proponer, aprobar y crear", () => {
+  const CONTENIDO = { tipo: "modo_uso", titulo: "Así se usa", bullets: ["Abre la tapa", "Aplica una capa", "Deja secar"], composicion: "derecha" };
+  const BASE = { cuentaMlId: CUENTA, itemId: "MCO1", fotoUrl: "https://http2.mlstatic.com/a.jpg", tipo: "informativa" };
+
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ia.cloudinary.configurado = true;
+    ml.itemEdicion.mockReset().mockResolvedValue({ id: "MCO1", titulo: "Crema 50 g", precio: 1, vendidas: 0, tieneVariantes: false, fotos: [] });
+    ml.leerDescripcion.mockReset().mockResolvedValue("Crema para uso diario");
+    ml.actualizar.mockReset();
+    ia.conexion.mockReset().mockResolvedValue({ id: "c", proveedor: "openai", baseUrl: null, modelo: "x", actualizadoTs: new Date(), apiKey: "k" });
+    ia.texto.mockReset().mockResolvedValue('{"titulo":"Así se usa","bullets":["Abre","Aplica","Alivio al instante"],"composicion":"centro"}');
+    ia.descargar.mockReset().mockResolvedValue({ buffer: Buffer.from("x"), tipo: "image/jpeg" });
+    ia.generar.mockReset().mockResolvedValue({ buffer: Buffer.from("y"), tipo: "image/png" });
+    ia.subir.mockReset().mockResolvedValue({ url: "https://res.cloudinary.com/zx/info.png" });
+  });
+
+  it("proponer usa la ficha, el título y la descripción; avisa las palabras prohibidas; no crea imagen", async () => {
+    const r = await proponerContenidoIAAction({ cuentaMlId: CUENTA, itemId: "MCO1", tipoContenido: "modo_uso", ficha: "Aplicar dos veces al día" });
+    expect(r).toEqual({ ok: true, contenido: { tipo: "modo_uso", titulo: "Así se usa", bullets: ["Abre", "Aplica", "Alivio al instante"], composicion: "centro" }, prohibidas: ["alivio / alivia"] });
+    const pedido = ia.texto.mock.calls[0][1] as string;
+    expect(pedido).toContain("Aplicar dos veces al día");
+    expect(pedido).toContain("Crema 50 g");
+    expect(pedido).toContain("Crema para uso diario");
+    expect(estado.permisosPedidos).toEqual(["inventario.modificar"]);
+    expect(ia.generar).not.toHaveBeenCalled();
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("las opiniones nunca las propone la IA", async () => {
+    const r = await proponerContenidoIAAction({ cuentaMlId: CUENTA, itemId: "MCO1", tipoContenido: "opiniones" });
+    expect(r.ok).toBe(false);
+    expect(ia.texto).not.toHaveBeenCalled();
+  });
+
+  it("crear exige el contenido aprobado y lo vuelve a revisar en el servidor", async () => {
+    expect((await generarImagenIAAction(BASE)).aviso).toMatch(/apruébalo/);
+    expect((await generarImagenIAAction({ ...BASE, contenido: { ...CONTENIDO, bullets: ["Abre", "Cura todo"] } })).aviso).toMatch(/cura/);
+    expect(ia.generar).not.toHaveBeenCalled();
+
+    const r = await generarImagenIAAction({ ...BASE, contenido: CONTENIDO });
+    expect(r.ok).toBe(true);
+    const prompt = ia.generar.mock.calls[0][2] as string;
+    expect(prompt).toContain('"Así se usa"');
+    expect(prompt).toContain("producto a la derecha");
+    expect(prompt).toContain("Crema 50 g");
+    expect(ia.subir.mock.calls[0][1]).toBe("ia-modo_uso-MCO1");
+    expect(ml.actualizar).not.toHaveBeenCalled();
   });
 });

@@ -8,11 +8,13 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Toast, type ItemToast } from "@/components/marco/Toast";
 import { datosSitioMl, formatearMoneda, formatearNumero, SITE_ID_DEFECTO } from "@/lib/ml/sitios";
 import type { ConteosPublicaciones, FiltroPublicaciones, PromocionParaUi, PublicacionConEstado, ResumenAplicarRegla } from "@/lib/ml/promocionesPublicaciones";
+import type { ResumenSalirTodas, VistaPreviaSalirTodas } from "@/lib/ml/promocionesSalirTodas";
+import { LARGO_MAXIMO_REGLAS_TEXTO } from "@/lib/ml/promocionesReglasTexto";
 import { calcularDesdePorcentaje, calcularDesdePrecioFinal, formatoEnteroInput, parsearNumeroLocal, superaMaximoConfigurado } from "./calculosPublicaciones";
 import styles from "./promocionesReal.module.css";
 
 type Cuenta = { id: string; nickname: string; siteId: string };
-type ReglaUi = "todas" | "maximo" | "tabla-maestra";
+type ReglaUi = "todas" | "maximo" | "tabla-maestra" | "salir-todas";
 type TipoAjuste = "porcentaje" | "valor";
 
 const ETIQUETA_FILTRO: Record<FiltroPublicaciones, string> = {
@@ -87,10 +89,14 @@ function FotoPlaceholder() {
 export function PaginaPromocionesReal({
   cuentas,
   puedeEjecutar,
+  puedeAprobar = false,
+  reglasAdicionalesIniciales = [],
   resumenMaestraSku,
 }: {
   cuentas: Cuenta[];
   puedeEjecutar: boolean;
+  puedeAprobar?: boolean;
+  reglasAdicionalesIniciales?: { cuentaId: string; texto: string }[];
   resumenMaestraSku: { total: number; actualizadoTs: string | null };
 }) {
   const cuentaPorId = new Map(cuentas.map((c) => [c.id, c]));
@@ -392,6 +398,140 @@ export function PaginaPromocionesReal({
     void cargarTodoAutomatico(true);
   }
 
+  // ---------- «Dejar de participar en todas» (vista previa → confirmar → resultado) ----------
+  const dialogSalirTodasRef = useRef<HTMLDialogElement>(null);
+  const [pasoSalirTodas, setPasoSalirTodas] = useState<"cargando" | "confirmar" | "ejecutando" | "resultado">("cargando");
+  const [vistaPreviaSalir, setVistaPreviaSalir] = useState<VistaPreviaSalirTodas | null>(null);
+  const [resultadoSalirTodas, setResultadoSalirTodas] = useState<ResumenSalirTodas | null>(null);
+  const [errorSalirTodas, setErrorSalirTodas] = useState<string | null>(null);
+
+  async function pedirReglaSalirTodas(extra: { vistaPrevia?: true; confirmado?: true }): Promise<{ ok: boolean; body: unknown }> {
+    try {
+      const res = await fetch("/api/ml/promociones/publicaciones/reglas-aplicar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cuentaId: cuentaSeleccionada, regla: "salir-todas", ...extra }),
+      });
+      return { ok: res.ok, body: await res.json().catch(() => ({})) };
+    } catch {
+      return { ok: false, body: {} };
+    }
+  }
+
+  async function abrirSalirTodas() {
+    setPasoSalirTodas("cargando");
+    setVistaPreviaSalir(null);
+    setResultadoSalirTodas(null);
+    setErrorSalirTodas(null);
+    bloquearScroll(true);
+    dialogSalirTodasRef.current?.showModal();
+    const { ok, body } = await pedirReglaSalirTodas({ vistaPrevia: true });
+    if (!ok) {
+      setErrorSalirTodas((body as { error?: string }).error ?? "No se pudo revisar las publicaciones — revisar la conexión e intentar de nuevo.");
+      return;
+    }
+    setVistaPreviaSalir(body as VistaPreviaSalirTodas);
+    setPasoSalirTodas("confirmar");
+  }
+
+  function cerrarSalirTodas() {
+    dialogSalirTodasRef.current?.close();
+    bloquearScroll(false);
+  }
+
+  async function confirmarSalirTodas() {
+    setPasoSalirTodas("ejecutando");
+    setErrorSalirTodas(null);
+    const { ok, body } = await pedirReglaSalirTodas({ confirmado: true });
+    if (!ok) {
+      setPasoSalirTodas("confirmar");
+      setErrorSalirTodas((body as { error?: string }).error ?? "No se pudo completar — revisar la conexión e intentar de nuevo.");
+      return;
+    }
+    setResultadoSalirTodas(body as ResumenSalirTodas);
+    setPasoSalirTodas("resultado");
+    void cargarTodoAutomatico(true);
+  }
+
+  // ---------- «Reglas adicionales» (texto libre, solo con «tabla-maestra») ----------
+  // Interpretar (IA, una vez) → «Entendí esto / No entendí» → confirmar →
+  // recién ahí se guarda. Sin confirmar no se guarda nada.
+  const [textosGuardados, setTextosGuardados] = useState<Record<string, string>>(() => Object.fromEntries(reglasAdicionalesIniciales.map((r) => [r.cuentaId, r.texto])));
+  const [textoReglas, setTextoReglas] = useState("");
+  const [interpretacion, setInterpretacion] = useState<{ entendido: string[]; noEntendido: string[]; json: unknown; textoInterpretado: string } | null>(null);
+  const [interpretando, setInterpretando] = useState(false);
+  const [guardandoReglas, setGuardandoReglas] = useState(false);
+  const [errorReglasTexto, setErrorReglasTexto] = useState<string | null>(null);
+  const [faltaIA, setFaltaIA] = useState(false);
+
+  // Texto guardado de lo que se está mirando: el de la cuenta, o —con «todas
+  // las tiendas»— el común si todas guardaron el mismo.
+  function textoGuardadoActual(): string {
+    if (cuentaSeleccionada !== "todas") return textosGuardados[cuentaSeleccionada] ?? "";
+    const distintos = new Set(cuentas.map((c) => textosGuardados[c.id] ?? ""));
+    return distintos.size === 1 ? [...distintos][0] : "";
+  }
+  const textoGuardado = textoGuardadoActual();
+
+  useEffect(() => {
+    setTextoReglas(textoGuardadoActual());
+    setInterpretacion(null);
+    setErrorReglasTexto(null);
+    setFaltaIA(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambiar de cuenta
+  }, [cuentaSeleccionada]);
+
+  async function interpretarReglas() {
+    setInterpretando(true);
+    setErrorReglasTexto(null);
+    setFaltaIA(false);
+    setInterpretacion(null);
+    try {
+      const res = await fetch("/api/ml/promociones/reglas-adicionales/interpretar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto: textoReglas }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; codigo?: string; entendido?: string[]; noEntendido?: string[]; json?: unknown };
+      if (!res.ok) {
+        if (body.codigo === "sin_ia") setFaltaIA(true);
+        else setErrorReglasTexto(body.error ?? "No se pudo interpretar el texto.");
+      } else {
+        setInterpretacion({ entendido: body.entendido ?? [], noEntendido: body.noEntendido ?? [], json: body.json, textoInterpretado: textoReglas });
+      }
+    } catch {
+      setErrorReglasTexto("No se pudo conectar con el servidor — revisar la conexión e intentar de nuevo.");
+    }
+    setInterpretando(false);
+  }
+
+  async function guardarReglasAdicionales(borrar: boolean) {
+    if (!borrar && !interpretacion) return;
+    setGuardandoReglas(true);
+    setErrorReglasTexto(null);
+    try {
+      const res = await fetch("/api/ml/promociones/reglas-adicionales", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cuentaId: cuentaSeleccionada, texto: borrar ? "" : interpretacion!.textoInterpretado, json: borrar ? undefined : interpretacion!.json, confirmado: true }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setErrorReglasTexto(body.error ?? "No se pudieron guardar las reglas adicionales.");
+      } else {
+        const nuevo = borrar ? "" : interpretacion!.textoInterpretado.trim();
+        const destino = cuentaSeleccionada === "todas" ? cuentas.map((c) => c.id) : [cuentaSeleccionada];
+        setTextosGuardados((actual) => ({ ...actual, ...Object.fromEntries(destino.map((id) => [id, nuevo])) }));
+        setTextoReglas(nuevo);
+        setInterpretacion(null);
+        mostrarToast(borrar ? "Se quitaron las reglas adicionales." : "Reglas adicionales guardadas.", "exito");
+      }
+    } catch {
+      setErrorReglasTexto("No se pudo conectar con el servidor — revisar la conexión e intentar de nuevo.");
+    }
+    setGuardandoReglas(false);
+  }
+
   const nombreCuentaSeleccionada = cuentaSeleccionada === "todas" ? "todas las cuentas" : cuentaPorId.get(cuentaSeleccionada)?.nickname ?? "esta cuenta";
 
   return (
@@ -462,7 +602,7 @@ export function PaginaPromocionesReal({
         <p className="zx-etiqueta">Reglas de participación</p>
         {resumenMaestraSku.total === 0 ? (
           <div className={`${styles.bannerMaestra} ${styles.bannerMaestraFalta}`}>
-            <span>El módulo de SKU todavía no tiene ninguna tabla maestra de precios mínimos cargada — sin esto, ninguna publicación puede participar.</span>
+            <span>El módulo de SKU todavía no tiene ninguna tabla maestra de precios mínimos cargada — sin esto, las reglas «Respetar la tabla maestra» y «máximo» no pueden participar en ninguna publicación (la regla «Participar en todas» no la necesita).</span>
             <BotonLink href="/panel/finanzas/maestra-sku/importar" variante="secundario" chico>
               Subir un archivo
             </BotonLink>
@@ -508,16 +648,103 @@ export function PaginaPromocionesReal({
             <input type="radio" name="regla" checked={regla === "tabla-maestra"} onChange={() => setRegla("tabla-maestra")} />
             Respetar siempre la tabla maestra de SKU con precios mínimos
           </label>
+          {regla === "tabla-maestra" && (
+            <div className={styles.reglasAdicionales}>
+              <Campo etiqueta="Reglas adicionales">
+                <textarea
+                  className={`zx-control ${styles.textareaReglas}`}
+                  value={textoReglas}
+                  maxLength={LARGO_MAXIMO_REGLAS_TEXTO}
+                  disabled={!puedeAprobar}
+                  onChange={(e) => {
+                    setTextoReglas(e.target.value);
+                    setInterpretacion(null);
+                  }}
+                  placeholder="Ej. no entrar en Black Friday; máximo 20% en el SKU X; no entrar en promociones compartidas"
+                />
+              </Campo>
+              <span className={styles.contadorReglas}>
+                {formatearNumero(textoReglas.length, "es")} / {formatearNumero(LARGO_MAXIMO_REGLAS_TEXTO, "es")} caracteres. Solo aplican a «Respetar siempre la tabla maestra»; el precio mínimo de Finanzas siempre manda.
+              </span>
+              {textoGuardado && <span className={styles.contadorReglas}>Guardadas para {nombreCuentaSeleccionada}: «{textoGuardado}»</span>}
+              {puedeAprobar && (
+                <div className={styles.accionesInterpretacion}>
+                  <Boton type="button" variante="secundario" chico disabled={interpretando || textoReglas.trim() === ""} onClick={() => void interpretarReglas()}>
+                    {interpretando ? "Interpretando…" : "Interpretar"}
+                  </Boton>
+                  {textoGuardado && (
+                    <Boton type="button" variante="fantasma" chico disabled={guardandoReglas} onClick={() => void guardarReglasAdicionales(true)}>
+                      Quitar reglas adicionales
+                    </Boton>
+                  )}
+                </div>
+              )}
+              {faltaIA && (
+                <p className={styles.errorModal}>
+                  <a href="/panel/conectar-ia" className="zx-link">
+                    Conecta tu IA en Administración → Conectar IA
+                  </a>{" "}
+                  para interpretar reglas.
+                </p>
+              )}
+              {errorReglasTexto && <p className={styles.errorModal}>{errorReglasTexto}</p>}
+              {interpretacion && (
+                <div className={styles.interpretacion}>
+                  {interpretacion.entendido.length > 0 ? (
+                    <>
+                      <strong>Entendí esto:</strong>
+                      <ul>
+                        {interpretacion.entendido.map((linea, i) => (
+                          <li key={i}>{linea}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <strong>No entendí ninguna regla de ese texto.</strong>
+                  )}
+                  {interpretacion.noEntendido.length > 0 && (
+                    <>
+                      <strong className={styles.noEntendidoLista}>No entendí:</strong>
+                      <ul className={styles.noEntendidoLista}>
+                        {interpretacion.noEntendido.map((linea, i) => (
+                          <li key={i}>{linea}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  <div className={styles.accionesInterpretacion}>
+                    <Boton type="button" variante="primario" chico disabled={guardandoReglas || interpretacion.entendido.length === 0} onClick={() => void guardarReglasAdicionales(false)}>
+                      {guardandoReglas ? "Guardando…" : "Confirmar y guardar"}
+                    </Boton>
+                    <Boton type="button" variante="secundario" chico disabled={guardandoReglas} onClick={() => setInterpretacion(null)}>
+                      Descartar
+                    </Boton>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <label className={styles.filaRegla}>
+            <input type="radio" name="regla" checked={regla === "salir-todas"} onChange={() => setRegla("salir-todas")} />
+            Dejar de participar en todas las promociones
+          </label>
         </div>
         <p style={{ fontSize: 11.5, color: "var(--texto-suave)", marginTop: 4 }}>
-          El precio mínimo de la tabla maestra nunca se puede saltar, sin importar la regla elegida — &quot;Respetar siempre la tabla maestra&quot; es el mismo comportamiento que
-          &quot;Participar en todas&quot;, sin un tope de porcentaje adicional.
+          &quot;Participar en todas&quot; entra en todas las promociones disponibles SIN precio mínimo — puede dejar productos vendiéndose bajo su costo. Solo &quot;Respetar siempre la tabla
+          maestra&quot; aplica el precio mínimo de Finanzas (y &quot;máximo&quot; lo conserva, además de su tope de porcentaje). &quot;Dejar de participar en todas&quot; quita las publicaciones
+          activas de sus promociones, con confirmación previa.
         </p>
 
         {puedeEjecutar && (
           <div className={styles.accionesRegla}>
-            <Boton type="button" variante="primario" chico onClick={abrirAplicarRegla} disabled={resumenMaestraSku.total === 0}>
-              Aplicar regla a las publicaciones
+            <Boton
+              type="button"
+              variante="primario"
+              chico
+              onClick={regla === "salir-todas" ? () => void abrirSalirTodas() : abrirAplicarRegla}
+              disabled={resumenMaestraSku.total === 0 && (regla === "tabla-maestra" || regla === "maximo")}
+            >
+              {regla === "salir-todas" ? "Revisar y dejar de participar…" : "Aplicar regla a las publicaciones"}
             </Boton>
             <span style={{ fontSize: 12, color: "var(--texto-suave)" }}>Se aplica sobre {nombreCuentaSeleccionada}.</span>
           </div>
@@ -580,6 +807,7 @@ export function PaginaPromocionesReal({
                               <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>({promocion.tipoPromocion})</span>
                               {promocion.esCompartida && <Chip estado="neutro">Compartida con Mercado Libre (+Meli)</Chip>}
                               {superaMaximoRegla && <Chip estado="aviso">Supera el máximo configurado</Chip>}
+                              {regla === "tabla-maestra" && promocion.reglaAdicionalMotivo && <Chip estado="aviso">{promocion.reglaAdicionalMotivo}</Chip>}
                             </div>
                             <div className={styles.datosPromocion}>
                               {activa ? (
@@ -739,7 +967,10 @@ export function PaginaPromocionesReal({
                   {regla === "todas" ? "todas las promociones disponibles" : regla === "maximo" ? `máximo ${maximoPct}% de descuento a cargo del vendedor` : "la tabla maestra de SKU"}
                   ), sin un paso de confirmación por producto.
                 </p>
-                <p>El precio mínimo de Finanzas nunca se salta, sin importar la regla.</p>
+                <p>
+                  {regla === "todas" ? "Sin precio mínimo: se entra a todas aunque quede bajo el costo." : "El precio mínimo de Finanzas nunca se salta."}
+                </p>
+                {regla === "tabla-maestra" && textoGuardado && <p>Se aplicarán también tus reglas adicionales guardadas: «{textoGuardado}».</p>}
               </div>
               {errorRegla && <p className={styles.errorModal}>{errorRegla}</p>}
               <div className={styles.accionesModal}>
@@ -774,6 +1005,75 @@ export function PaginaPromocionesReal({
               <div className={styles.accionesModal}>
                 <Boton type="button" variante="primario" chico onClick={cerrarDialogoRegla}>
                   Cerrar
+                </Boton>
+              </div>
+            </>
+          )}
+        </Tarjeta>
+      </dialog>
+
+      {/* «Dejar de participar en todas las promociones» */}
+      <dialog ref={dialogSalirTodasRef} className={styles.dialogo} onClose={() => bloquearScroll(false)} onClick={(e) => e.target === e.currentTarget && pasoSalirTodas !== "ejecutando" && cerrarSalirTodas()}>
+        <Tarjeta className={styles.panelModal}>
+          {pasoSalirTodas === "resultado" && resultadoSalirTodas ? (
+            <>
+              <p className={styles.tituloModal}>Resultado</p>
+              <div className={styles.resumenAplicar}>
+                <p>
+                  {formatearNumero(resultadoSalirTodas.salieron, "es")} salieron · {formatearNumero(resultadoSalirTodas.errores, "es")} con error · {formatearNumero(resultadoSalirTodas.noPermitidas, "es")} no se pueden
+                  por API
+                </p>
+                {resultadoSalirTodas.filas.length > 0 && (
+                  <div className={styles.tablaResumen}>
+                    {resultadoSalirTodas.filas.map((f, i) => (
+                      <p key={`${f.itemId}-${f.tipoPromocion}-${i}`} style={{ fontSize: 12.5, color: f.estado === "salio" ? "var(--kpi-exito-texto)" : f.estado === "error" ? "var(--kpi-peligro-texto)" : "var(--texto-suave)" }}>
+                        {f.itemId} · {f.tituloProducto ?? "—"} · {nombrePromocion(f.tipoPromocion)} —{" "}
+                        {f.estado === "salio" ? "Salió" : f.estado === "error" ? `Error: ${f.error ?? "sin detalle"}` : "No se puede por API, hay que hacerlo en la Central de Promociones de Mercado Libre"}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className={styles.accionesModal}>
+                <Boton type="button" variante="primario" chico onClick={cerrarSalirTodas}>
+                  Cerrar
+                </Boton>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className={styles.tituloModal}>Dejar de participar en todas las promociones</p>
+              {pasoSalirTodas === "cargando" && !errorSalirTodas && <p style={{ fontSize: 13.5 }}>Revisando las publicaciones activas de {nombreCuentaSeleccionada}… (no se cambia nada todavía)</p>}
+              {vistaPreviaSalir && (pasoSalirTodas === "confirmar" || pasoSalirTodas === "ejecutando") && (
+                <div className={styles.resumenAplicar}>
+                  <p>
+                    Saldrán <strong>{formatearNumero(vistaPreviaSalir.publicaciones, "es")}</strong> publicaciones de <strong>{formatearNumero(vistaPreviaSalir.promociones, "es")}</strong> promociones en total ({nombreCuentaSeleccionada}).
+                  </p>
+                  {vistaPreviaSalir.noPermitidas > 0 && (
+                    <p>
+                      De esas, {formatearNumero(vistaPreviaSalir.noPermitidas, "es")} no se pueden dejar por la API de Mercado Libre y se reportarán aparte (hay que hacerlo en la Central de Promociones).
+                    </p>
+                  )}
+                  {vistaPreviaSalir.lecturasConError > 0 && <p>{formatearNumero(vistaPreviaSalir.lecturasConError, "es")} publicaciones no se pudieron leer y no están en este conteo.</p>}
+                  <p>Esto quita todas tus publicaciones activas de las promociones. No se puede deshacer desde Seller.</p>
+                </div>
+              )}
+              {errorSalirTodas && <p className={styles.errorModal}>{errorSalirTodas}</p>}
+              <div className={styles.accionesModal}>
+                {vistaPreviaSalir && (pasoSalirTodas === "confirmar" || pasoSalirTodas === "ejecutando") && (
+                  <Boton
+                    type="button"
+                    variante="primario"
+                    chico
+                    style={{ background: "var(--kpi-peligro-texto)", borderColor: "var(--kpi-peligro-texto)", color: "#fff" }}
+                    disabled={pasoSalirTodas === "ejecutando" || vistaPreviaSalir.promociones === 0}
+                    onClick={() => void confirmarSalirTodas()}
+                  >
+                    {pasoSalirTodas === "ejecutando" ? "Saliendo…" : "Sí, dejar de participar"}
+                  </Boton>
+                )}
+                <Boton type="button" variante="secundario" chico disabled={pasoSalirTodas === "ejecutando"} onClick={cerrarSalirTodas}>
+                  Cancelar
                 </Boton>
               </div>
             </>

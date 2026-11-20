@@ -416,3 +416,78 @@ describe("leerReglasFrescasCuenta / leerPisosYCostosFrescos / leerPisoYCostoFres
     expect(resultado).toEqual({ precioMinimo: 90000, costo: 50000 });
   });
 });
+
+describe("calcularCandidatosItem — modo sin piso (regla «Participar en todas», fix-promociones-todas-sin-piso)", () => {
+  const candidata = (extra: Record<string, unknown> = {}) => item({ promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, ...extra }] });
+
+  it("sin piso y sin precio mínimo: candidato válido con el precio SUGERIDO por ML (no el piso)", () => {
+    const [c] = calcularCandidatosItem(candidata({ suggested_discounted_price: 70000 }), REGLAS_DEFECTO, null, null, false);
+    expect(c.cumpleReglas).toBe(true);
+    expect(c.accionSugerida).toBe("participar");
+    expect(c.precioSugerido).toBe(70000);
+  });
+
+  it("sin piso: no exige SKU — un ítem sin skuCodigo igual participa", () => {
+    const [c] = calcularCandidatosItem({ ...candidata({ suggested_discounted_price: 70000 }), skuCodigo: null }, REGLAS_DEFECTO, null, null, false);
+    expect(c.accionSugerida).toBe("participar");
+  });
+
+  it("sin piso y ML no da ningún precio sugerido: se omite con motivo claro, NUNCA se inventa un precio", () => {
+    const [c] = calcularCandidatosItem(candidata(), REGLAS_DEFECTO, null, null, false);
+    expect(c.cumpleReglas).toBe(false);
+    expect(c.accionSugerida).toBeNull();
+    expect(c.precioSugerido).toBeNull();
+    expect(c.motivoRevisarManual).toContain("no sugiere un precio");
+  });
+
+  it("sin piso: el precio puede quedar bajo el costo (es el riesgo aceptado de «todas»)", () => {
+    const [c] = calcularCandidatosItem(candidata({ suggested_discounted_price: 40000 }), REGLAS_DEFECTO, null, 50000, false);
+    expect(c.accionSugerida).toBe("participar");
+    expect(c.gananciaEstimada).toBe(-10000);
+  });
+
+  it("sin piso: no aplica el tope de % de la cuenta (descuento 60% con tope 20%)", () => {
+    const [c] = calcularCandidatosItem(candidata({ suggested_discounted_price: 40000 }), REGLAS_DEFECTO, null, null, false);
+    expect(c.cumpleReglas).toBe(true);
+  });
+
+  it("sin piso: el gate de «compartida» SÍ se respeta", () => {
+    const [bloqueada] = calcularCandidatosItem(candidata({ suggested_discounted_price: 70000, meli_percentage: 10 }), REGLAS_DEFECTO, null, null, false);
+    expect(bloqueada.cumpleReglas).toBe(false);
+    expect(bloqueada.motivoRevisarManual).toContain("compartida");
+    const [habilitada] = calcularCandidatosItem(candidata({ suggested_discounted_price: 70000, meli_percentage: 10 }), { ...REGLAS_DEFECTO, participarCompartidas: true }, null, null, false);
+    expect(habilitada.accionSugerida).toBe("participar");
+  });
+
+  it("sin piso: se conservan variantes, tipos sin escritura y el máximo de la promoción", () => {
+    const [variantes] = calcularCandidatosItem({ ...candidata({ suggested_discounted_price: 70000 }), tieneVariantes: true }, REGLAS_DEFECTO, null, null, false);
+    expect(variantes.cumpleReglas).toBe(false);
+    const [soloEnMl] = calcularCandidatosItem(item({ promociones: [{ type: "LIGHTNING", status: "candidate", original_price: 100000, suggested_discounted_price: 70000 }] }), REGLAS_DEFECTO, null, null, false);
+    expect(soloEnMl.soloEnMl).toBe(true);
+    expect(soloEnMl.cumpleReglas).toBe(false);
+    const [sobreMaximo] = calcularCandidatosItem(candidata({ suggested_discounted_price: 95000, max_discounted_price: 90000 }), REGLAS_DEFECTO, null, null, false);
+    expect(sobreMaximo.cumpleReglas).toBe(false);
+    expect(sobreMaximo.motivoRevisarManual).toContain("máximo");
+  });
+
+  it("sin piso: PRICE_DISCOUNT fuera de 5–80% se frena, con el motivo del precio sugerido (no del piso de Finanzas)", () => {
+    const [c] = calcularCandidatosItem(item({ promociones: [{ type: "PRICE_DISCOUNT", status: "candidate", original_price: 100000, suggested_discounted_price: 99000 }] }), REGLAS_DEFECTO, null, null, false);
+    expect(c.cumpleReglas).toBe(false);
+    expect(c.motivoRevisarManual).toContain("precio sugerido por Mercado Libre");
+    expect(c.motivoRevisarManual).not.toContain("Finanzas");
+  });
+
+  it("sin piso: una promoción ya activa se deja como está (sin 'modificar')", () => {
+    const [c] = calcularCandidatosItem(item({ promociones: [{ type: "DEAL", status: "started", price: 90000, original_price: 100000 }] }), REGLAS_DEFECTO, null, null, false);
+    expect(c.cumpleReglas).toBe(true);
+    expect(c.accionSugerida).toBeNull();
+  });
+
+  it("con piso (por defecto) todo sigue igual que antes: sin precio mínimo, bloquea; con piso, manda el piso", () => {
+    const [sinPiso] = calcularCandidatosItem(candidata({ suggested_discounted_price: 70000 }), REGLAS_DEFECTO, null, null);
+    expect(sinPiso.cumpleReglas).toBe(false);
+    expect(sinPiso.motivoRevisarManual).toContain("Falta precio mínimo");
+    const [conPiso] = calcularCandidatosItem(candidata({ suggested_discounted_price: 70000 }), REGLAS_DEFECTO, 90000, 50000, true);
+    expect(conPiso.precioSugerido).toBe(90000);
+  });
+});
