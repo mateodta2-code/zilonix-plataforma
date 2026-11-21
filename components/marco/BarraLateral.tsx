@@ -78,6 +78,7 @@ export function BarraLateral({
             temas, eso el manual lo permite explícitamente, el ícono
             solo no. */}
         <img src="/marca/zilonix-seller-logo.svg" alt="Zilonix Seller" className={styles.logoCompleto} width={260} height={94} />
+        <img src="/marca/zilonix-seller-logo-claro.svg" alt="Zilonix Seller" className={styles.logoCompletoClaro} width={260} height={94} />
         <img src="/marca/icono-plata.png" alt="Zilonix Seller" className={styles.iconoColapsado} data-variante="plata" />
         <img src="/marca/icono-gris-oscuro.png" alt="Zilonix Seller" className={styles.iconoColapsado} data-variante="oscuro" />
       </div>
