@@ -25,10 +25,13 @@ import { leerDatosDetalle, type DatosDetalle } from "@/lib/optimizacion/detalle"
 import { opcionesPeriodo, resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
 import { rotuloTipoPublicacion } from "@/lib/optimizacion/textos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { restarDiasIso } from "@/lib/publicidad/plan";
+import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
+import { leerCambiosPublicacion, type CambioBitacora } from "@/lib/optimizacion/bitacora";
+import { resultadoCambio, type ResultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import styles from "../page.module.css";
+import { BitacoraCambios } from "./BitacoraCambios";
 import { EditarPublicacion, type DatosEdicion } from "./EditarPublicacion";
 
 // Optimización, Fase 2 — detalle de una publicación. Ver pide
@@ -138,6 +141,15 @@ export default async function DetalleOptimizacionPage({
   const minimo = precioMinimo(actual);
   const diasStock = diasInventario(datos.item.stock, actual.unidades, periodo.dias);
   const historia = utilidadAcumulada(datos.lineas, datos.publicidad, conFinanzas);
+  // Bitácora: cambios hechos desde Optimización y su resultado a los 7 días.
+  const cambios: CambioBitacora[] = await leerCambiosPublicacion(empresa.id, datos.item.id).catch((error: unknown) => {
+    console.warn(`[app/panel/optimizacion] bitácora ${datos?.item.id}: ${error instanceof Error ? error.name : "error"}`);
+    return [];
+  });
+  const hoy = hoyBogota(ahora);
+  const resultados = new Map<string, ResultadoCambio>(
+    cambios.map((c) => [c.id, resultadoCambio(c.dia, hoy, { lineas: datos!.lineas, publicidad: datos!.publicidad, visitasPorDia: datos!.visitasPorDia, visitasDesde: datos!.visitasDesde, conFinanzas })])
+  );
   // Fase 3 — edición: datos frescos de ML (ventas, variantes, fotos,
   // automatización y precio para ganar) y la base del simulador con los
   // costos del período elegido. Solo para quien puede modificar.
@@ -249,6 +261,11 @@ export default async function DetalleOptimizacionPage({
         {periodo.anteriorDesde < datos.visitasDesde ? (
           <p className={styles.nota}>{`Mercado Libre entrega visitas solo desde el ${datos.visitasDesde}: lo anterior sale "—".`}</p>
         ) : null}
+      </Tarjeta>
+
+      <Tarjeta className={styles.tarjeta}>
+        <span id="bitacora" />
+        <BitacoraCambios cambios={cambios} resultados={resultados} plata={plata} num={num} pct={pct} idioma={idioma} conFinanzas={conFinanzas} />
       </Tarjeta>
 
       {edicion ? (

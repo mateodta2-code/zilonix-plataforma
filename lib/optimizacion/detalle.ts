@@ -19,7 +19,7 @@ import { leerItemsOptimizacionMl, MAXIMO_DIAS_VISITAS, visitasPorDiaMl, type Ite
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import type { CostosLinea, DiaPublicidad, LineaVendida } from "@/lib/optimizacion/calculos";
 import type { PeriodoDetalle } from "@/lib/optimizacion/periodo";
-import { diasEntreInclusive, hoyBogota } from "@/lib/publicidad/plan";
+import { hoyBogota } from "@/lib/publicidad/plan";
 
 export type DatosDetalle = {
   item: ItemOptimizacionMl;
@@ -179,10 +179,10 @@ export async function leerDatosDetalle(
     costos: costosPorLinea.get(`${f.pedidoId}:${f.linea}`) ?? null,
   }));
 
-  // Visitas: una sola llamada que cubra el período anterior y el actual
-  // (hasta 150 días hacia atrás desde hoy).
-  const necesarios = diasEntreInclusive(periodo.anteriorDesde, hoy);
-  const ultimos = Math.min(necesarios, MAXIMO_DIAS_VISITAS);
+  // Visitas: una sola llamada con los 150 días que da Mercado Libre. Cubre
+  // el período elegido, el anterior y la bitácora (semana antes y después
+  // de cada cambio).
+  const ultimos = MAXIMO_DIAS_VISITAS;
   const visitasPorDia = await visitasPorDiaMl(itemId, token, ultimos).catch(() => null);
   const visitasDesde = new Date(Date.parse(`${hoy}T00:00:00Z`) - (ultimos - 1) * 86_400_000).toISOString().slice(0, 10);
 

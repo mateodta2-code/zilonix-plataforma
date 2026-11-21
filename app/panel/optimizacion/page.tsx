@@ -14,6 +14,7 @@ import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { leerPaginaOptimizacion, MAXIMO_RESULTADOS_BUSQUEDA, type PaginaOptimizacion } from "@/lib/optimizacion/lista";
 import { leerResumenTienda, type DatosResumenTienda } from "@/lib/optimizacion/resumenTiendaDatos";
+import { publicacionesParaRevisar } from "@/lib/optimizacion/bitacora";
 import { DIAS_METRICAS, leerBusqueda, leerDiasMetricas, leerFiltroEstado, leerPagina, OPCIONES_DIAS_METRICAS, type DiasMetricas, type FiltroEstado } from "@/lib/optimizacion/textos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles-plantillas";
@@ -91,6 +92,7 @@ export default async function OptimizacionPage({
   let datos: PaginaOptimizacion | null = null;
   let aviso: string | null = null;
   let resumen: DatosResumenTienda | null = null;
+  let paraRevisar: string[] = [];
   if (conectada) {
     const ahora = new Date();
     // El resumen de la tienda nunca tumba la lista: si falla, no se muestra.
@@ -107,6 +109,12 @@ export default async function OptimizacionPage({
     resumen = resumenLeido;
     if (lista.ok) {
       datos = lista.datos;
+      // Bitácora: publicaciones con un cambio que ya cumplió 7 días.
+      paraRevisar = await publicacionesParaRevisar(
+        empresa.id,
+        lista.datos.filas.map((f) => f.id),
+        ahora
+      ).catch(() => []);
     } else {
       console.warn(`[app/panel/optimizacion] cuenta ${conectada.id}: ${lista.error instanceof Error ? lista.error.name : "error"}`);
       aviso = motivoCuentaSinRevisar(lista.error);
@@ -204,6 +212,7 @@ export default async function OptimizacionPage({
               idioma={conectada.idioma}
               puedeModificar={puedeModificar}
               dias={dias}
+              paraRevisar={paraRevisar}
             />
           )}
           {datos.paginas > 1 ? (
