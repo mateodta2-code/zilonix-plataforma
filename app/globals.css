@@ -554,8 +554,10 @@
   --borde-zona-oscura: #d3d6db;
   --superficie-2-zona-oscura: #f1f3f6;
   --degradado-plata-texto-zona-oscura: linear-gradient(100deg, #3f4651 0%, #656c77 46%, #2e343d 100%);
-  /* Quita el borde azul fijo de los campos; el azul queda solo en hover/foco. */
-  --filete-marca-arriba-abajo: none;
+  /* Quita el borde azul fijo de los campos; el azul queda solo en hover/foco.
+     Va como sombra transparente (no `none`) porque se usa dentro de una
+     lista de box-shadow en hover/foco, donde `none, …` sería CSS inválido. */
+  --filete-marca-arriba-abajo: inset 0 0 0 0 transparent;
 }
 
 :root[data-tema="claro"][data-fondo="suave"] {
