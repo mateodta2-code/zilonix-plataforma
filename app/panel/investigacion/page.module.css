@@ -9,6 +9,13 @@
   gap: 12px;
 }
 
+/* El botón compartido trae align-self: flex-start (para que no se estire
+   en columnas flex) y eso anulaba el flex-end de la fila: «Analizar»
+   quedaba pegado arriba, no con el borde de abajo de los campos. */
+.filaFormulario > button {
+  align-self: flex-end;
+}
+
 .ayuda {
   margin: 10px 0 0;
   font-size: 12px;
@@ -176,7 +183,7 @@
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--superficie-2);
-  border: 1px solid var(--borde);
+  border: 1px solid var(--acento);
 }
 
 .etiquetaPestanas {
