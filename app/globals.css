@@ -564,6 +564,11 @@
      box-shadow; para "apagado" se usa `inset 0 0 0 0 transparent`. */
   --filete-marca-arriba-abajo: inset 0 1px 0 0 color-mix(in srgb, var(--azul-metal-2) 55%, transparent),
     inset 0 -1px 0 0 color-mix(in srgb, var(--azul-metal-2) 55%, transparent);
+  /* Issue #518 — logo de la barra lateral en claro: el SVG plata (#6E→#E6)
+     se lavaba sobre fondo claro. Este filtro lo lleva a grafito (#31→#67)
+     conservando el brillo metálico del degradado, con un contorno oscuro
+     fino para el contraste. Solo existe en este bloque. */
+  --filtro-logo-claro: brightness(0.46) contrast(1.4) drop-shadow(0 0 0.5px rgba(31, 36, 43, 0.6));
 }
 
 :root[data-tema="claro"][data-fondo="suave"] {
