@@ -520,15 +520,19 @@
   /* Tema de día plateado (maqueta v3, aprobada por Mateo): blanco y plata
      con el mismo azul metálico del tema oscuro, SIN la franja negra ni
      el difuminado negro→blanco de antes. Suave/medio/intenso apuntan al
-     mismo fondo para que data-fondo no devuelva la franja negra. */
-  --fondo-app:
+     mismo fondo para que data-fondo no devuelva la franja negra. El
+     degradado vive en --fondo-app-dia: si --fondo-app-suave apuntara a
+     --fondo-app, las reglas de data-fondo crearían una referencia circular
+     y el fondo desaparecería. */
+  --fondo-app-dia:
     radial-gradient(1100px 320px at 60% -140px, color-mix(in srgb, var(--azul-metal-3) 14%, transparent), transparent 70%),
     radial-gradient(520px 900px at 100% 55%, color-mix(in srgb, var(--azul-metal-2) 6%, transparent), transparent 70%),
     linear-gradient(115deg, transparent 28%, rgba(255, 255, 255, 0.55) 44%, transparent 60%),
     linear-gradient(135deg, #f4f5f7 0%, #eceef1 45%, #e3e6ea 100%);
-  --fondo-app-suave: var(--fondo-app);
-  --fondo-app-medio: var(--fondo-app);
-  --fondo-app-intenso: var(--fondo-app);
+  --fondo-app: var(--fondo-app-dia);
+  --fondo-app-suave: var(--fondo-app-dia);
+  --fondo-app-medio: var(--fondo-app-dia);
+  --fondo-app-intenso: var(--fondo-app-dia);
   /* Variables nuevas del tema claro (las usan los componentes en el
      issue 2). */
   --resplandor-esquina-claro: color-mix(in srgb, var(--azul-metal-3) 9%, transparent);
