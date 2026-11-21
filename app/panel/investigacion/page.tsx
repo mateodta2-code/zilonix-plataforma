@@ -72,7 +72,7 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
         titulo="Investigación"
         descripcion="Analiza un producto o nicho con listados reales de Mercado Libre y otras plataformas antes de invertir en él."
         accion={
-          <BotonLink href="/panel/investigacion/seguimiento" variante="secundario" chico>
+          <BotonLink href="/panel/investigacion/seguimiento" variante="primario" chico>
             Seguimiento diario
           </BotonLink>
         }
