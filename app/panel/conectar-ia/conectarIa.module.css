@@ -4,7 +4,7 @@
 
 .texto {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--texto-suave);
   margin-top: 8px;
 }
 
@@ -87,7 +87,7 @@
   flex-direction: column;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--texto-suave);
 }
 
 .ayuda ol {
