@@ -1,0 +1,7 @@
+- **fix-ia-imagen-motivo-error** — **Imágenes con IA (OpenAI): decir el motivo real del error.** En staging, «Portadas Zilonix» → «Crear» mostraba en todas las cuentas «OpenAI no aceptó la foto o la instrucción», porque el código descartaba el motivo del 400. Ahora `lib/ia/imagen.ts` lee `error.code`/`error.type` (lista blanca de caracteres, nunca el texto crudo) y dice:
+  - organización de OpenAI sin verificar → cómo verificarla (platform.openai.com → Settings → Organization);
+  - filtro de contenido de OpenAI (`moderation_blocked`) → probar otra foto o una instrucción más simple;
+  - foto que OpenAI no puede leer → probar otra foto;
+  - sin saldo o límite de gasto → revisar Billing;
+  - otro 400 → «no aceptó la solicitud (código: …)».
+  - En el log queda solo el estado, el código y el tipo. Sin migración.
