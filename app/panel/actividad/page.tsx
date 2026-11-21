@@ -83,11 +83,11 @@ export default async function ActividadPage({ searchParams }: { searchParams: Re
           </select>
         </Campo>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {hayFiltrosActivos && (
-            <BotonLink href="/panel/actividad" variante="fantasma" chico>
+            <BotonLink href="/panel/actividad" variante="fantasma">
               Limpiar filtros
             </BotonLink>
           )}
@@ -111,7 +111,7 @@ export default async function ActividadPage({ searchParams }: { searchParams: Re
         </Tabla>
       )}
 
-      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel" variante="fantasma" className={styles.volver}>
         Volver al panel
       </BotonLink>
     </>

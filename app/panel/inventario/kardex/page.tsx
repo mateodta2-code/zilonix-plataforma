@@ -80,11 +80,11 @@ export default async function KardexPage({ searchParams }: { searchParams: Recor
           </select>
         </Campo>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {(skuId || bodegaId) && (
-            <BotonLink href="/panel/inventario/kardex" variante="fantasma" chico>
+            <BotonLink href="/panel/inventario/kardex" variante="fantasma">
               Limpiar
             </BotonLink>
           )}
@@ -119,12 +119,12 @@ export default async function KardexPage({ searchParams }: { searchParams: Recor
             <p className={styles.resumenPaginacion}>Página {resultado.pagina}</p>
             <div className={styles.botonesPaginacion}>
               {resultado.pagina > 1 && (
-                <BotonLink href={hrefPagina(resultado.pagina - 1)} chico>
+                <BotonLink href={hrefPagina(resultado.pagina - 1)} variante="secundario" chico>
                   Anterior
                 </BotonLink>
               )}
               {resultado.hayMas && (
-                <BotonLink href={hrefPagina(resultado.pagina + 1)} chico>
+                <BotonLink href={hrefPagina(resultado.pagina + 1)} variante="secundario" chico>
                   Siguiente
                 </BotonLink>
               )}

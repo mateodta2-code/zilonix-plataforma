@@ -97,7 +97,7 @@ export function FilaPregunta({ pregunta, puedeResponder, ahoraMs }: { pregunta: 
               }
             }}
           />
-          <Boton type="submit" chico disabled={enviando || !texto.trim()}>
+          <Boton type="submit" disabled={enviando || !texto.trim()}>
             {enviando ? "Enviando…" : "Responder"}
           </Boton>
         </form>

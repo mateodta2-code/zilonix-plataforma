@@ -62,7 +62,7 @@ export function ImportarCsvSkusClient() {
           <Boton type="button" onClick={volverAlInicio}>
             Importar otro archivo
           </Boton>
-          <BotonLink href="/panel/sku" variante="secundario">
+          <BotonLink href="/panel/sku" variante="primario">
             Ver SKU
           </BotonLink>
         </div>

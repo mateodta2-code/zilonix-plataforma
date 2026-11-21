@@ -216,8 +216,7 @@ export function TablaOptimizacion({
                     {puedeModificar && (estado === "active" || estado === "paused") ? (
                       <Boton
                         type="button"
-                        variante="secundario"
-                        chico
+                        variante="primario"
                         disabled={cambiando && itemCambiando === fila.id}
                         onClick={() => cambiarEstado(fila, estado === "paused")}
                       >

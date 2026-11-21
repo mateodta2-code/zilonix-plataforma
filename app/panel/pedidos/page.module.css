@@ -66,6 +66,8 @@
 .accionesFiltro {
   display: flex;
   gap: 8px;
+  align-self: flex-end; /* al fondo de la fila: el botón queda a la altura del campo, no del rótulo */
+  align-items: flex-end;
 }
 
 .avisoError {
@@ -203,4 +205,32 @@
 .botonesPaginacion {
   display: flex;
   gap: 8px;
+}
+
+/* Fila de filtros ordenada (#536): campos y botón en la misma línea,
+   cada campo crece parejo y las acciones van al final de la fila. El
+   align-self del .boton (flex-start) se anula dentro de las acciones
+   para que el contenedor defina la alineación. */
+.filtros > * {
+  flex: 1 1 170px;
+  min-width: 0;
+}
+
+.filtros > .campoBusqueda {
+  flex: 2 1 260px;
+}
+
+.filtros > .accionesFiltro {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.filtros > .accionesFiltro > * {
+  align-self: flex-end;
+}
+
+.columnaValor > * {
+  align-self: flex-end;
 }

@@ -103,7 +103,7 @@ export default async function ConfiguracionFinanzasPage({ searchParams }: { sear
         )}
       </Tarjeta>
 
-      <BotonLink href="/panel/finanzas" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
         Volver a Finanzas
       </BotonLink>
     </>

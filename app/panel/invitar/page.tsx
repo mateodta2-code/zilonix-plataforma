@@ -69,7 +69,7 @@ export default async function InvitarPage() {
         </form>
       </Tarjeta>
 
-      <BotonLink href="/panel/roles" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/roles" variante="fantasma" className={styles.volver}>
         Ajustar permisos de los roles →
       </BotonLink>
     </>

@@ -82,7 +82,7 @@ export function PaginaMisDatos({ nombre }: { nombre: string }) {
           Un archivo JSON con tu perfil, en qué empresas tienes membresía y con qué rol, y tu propia bitácora de actividad. Nunca incluye
           tokens ni claves de ninguna cuenta de Mercado Libre.
         </p>
-        <Boton type="button" variante="secundario" chico disabled={exportando} onClick={exportar} style={{ marginTop: 10 }}>
+        <Boton type="button" variante="primario" disabled={exportando} onClick={exportar} style={{ marginTop: 10 }}>
           {exportando ? "Generando…" : "Exportar mis datos"}
         </Boton>
         {errorExportar && <p style={{ fontSize: 13, color: "var(--kpi-peligro-texto)", marginTop: 8 }}>{errorExportar}</p>}
@@ -96,7 +96,7 @@ export function PaginaMisDatos({ nombre }: { nombre: string }) {
           atrás.
         </p>
         {!confirmando ? (
-          <Boton type="button" variante="fantasma" chico onClick={() => setConfirmando(true)} style={{ marginTop: 10 }}>
+          <Boton type="button" variante="fantasma" onClick={() => setConfirmando(true)} style={{ marginTop: 10 }}>
             Borrar mi cuenta
           </Boton>
         ) : (
@@ -129,7 +129,6 @@ export function PaginaMisDatos({ nombre }: { nombre: string }) {
                 <Boton
                   type="button"
                   variante="primario"
-                  chico
                   disabled={borrando || textoConfirmacion.trim().toUpperCase() !== PALABRA_CONFIRMACION}
                   onClick={confirmarBorrado}
                 >
@@ -139,7 +138,6 @@ export function PaginaMisDatos({ nombre }: { nombre: string }) {
               <Boton
                 type="button"
                 variante="secundario"
-                chico
                 disabled={borrando}
                 onClick={() => {
                   setConfirmando(false);

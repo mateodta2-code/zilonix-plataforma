@@ -250,7 +250,7 @@ export function GaleriaFotos({
               className="zx-control"
               style={{ fontSize: 10, padding: 3 }}
             />
-            <Boton type="button" variante="secundario" chico onClick={confirmarAgregarUrlManual} style={{ fontSize: 10, padding: "2px 4px" }}>
+            <Boton type="button" variante="primario" onClick={confirmarAgregarUrlManual} style={{ fontSize: 10, padding: "2px 4px" }}>
               Agregar
             </Boton>
           </div>
@@ -294,7 +294,7 @@ export function GaleriaFotos({
               style={{ fontSize: 12, width: 220 }}
               disabled={subiendo}
             />
-            <Boton type="button" variante="secundario" chico onClick={confirmarCanvaUrl} disabled={subiendo || !canvaUrl.trim()}>
+            <Boton type="button" variante="primario" onClick={confirmarCanvaUrl} disabled={subiendo || !canvaUrl.trim()}>
               Traer
             </Boton>
           </div>

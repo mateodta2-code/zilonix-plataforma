@@ -190,7 +190,7 @@ export function CrearConIA({
       </Campo>
       <p className={styles.ayudaIA}>{fotos.length > 0 ? `Se usarán ${Math.min(fotos.length, MAXIMO_FOTOS_ANALISIS)} foto(s) de la galería.` : "Sin fotos: agrega fotos arriba para que la IA las mire."}</p>
       <div>
-        <Boton type="button" chico onClick={analizar} disabled={ocupado !== null}>
+        <Boton type="button" onClick={analizar} disabled={ocupado !== null}>
           {ocupado === "analisis" ? "Analizando…" : ficha ? "Analizar de nuevo" : "Analizar producto"}
         </Boton>
       </div>
@@ -233,7 +233,7 @@ export function CrearConIA({
                       {c.etiqueta}
                       {texto ? <Chip estado={rotulo.estado}>{rotulo.texto}</Chip> : null}
                       {campo.origen === "supuesto" && texto ? (
-                        <Boton type="button" chico variante="fantasma" onClick={() => aceptar(c.clave)}>
+                        <Boton type="button" variante="fantasma" onClick={() => aceptar(c.clave)}>
                           Es correcto
                         </Boton>
                       ) : null}
@@ -255,7 +255,7 @@ export function CrearConIA({
             </p>
           ) : null}
           <div>
-            <Boton type="button" chico variante={confirmada ? "secundario" : "primario"} onClick={confirmar} disabled={ocupado !== null || pendientes.length > 0 || !ficha.nombre.valor}>
+            <Boton type="button" variante={confirmada ? "secundario" : "primario"} onClick={confirmar} disabled={ocupado !== null || pendientes.length > 0 || !ficha.nombre.valor}>
               {confirmada ? "Ficha confirmada ✓" : "Confirmar ficha"}
             </Boton>
           </div>
@@ -267,7 +267,7 @@ export function CrearConIA({
           <div className={styles.bloqueIA}>
             <p className="zx-etiqueta">2. Títulos</p>
             <div>
-              <Boton type="button" chico onClick={pedirTitulos} disabled={ocupado !== null}>
+              <Boton type="button" onClick={pedirTitulos} disabled={ocupado !== null}>
                 {ocupado === "titulos" ? "Proponiendo…" : titulos ? "Proponer otros" : "Proponer títulos"}
               </Boton>
             </div>
@@ -284,7 +284,7 @@ export function CrearConIA({
                     </span>
                     <span className={styles.accionesIA}>
                       {max === LARGO_TITULO ? (
-                        <Boton type="button" chico variante="secundario" onClick={() => usarTitulo(t)}>
+                        <Boton type="button" variante="primario" onClick={() => usarTitulo(t)}>
                           Usar en la publicación
                         </Boton>
                       ) : null}
@@ -311,7 +311,7 @@ export function CrearConIA({
               <input className="zx-control" maxLength={LARGO_GARANTIA} value={garantia} onChange={(e) => setGarantia(e.target.value)} placeholder="Ej.: Garantía del vendedor: 30 días por defectos de fábrica." />
             </Campo>
             <div>
-              <Boton type="button" chico onClick={pedirDescripcion} disabled={ocupado !== null}>
+              <Boton type="button" onClick={pedirDescripcion} disabled={ocupado !== null}>
                 {ocupado === "descripcion" ? "Escribiendo…" : descripcion ? "Regenerar" : "Escribir descripción"}
               </Boton>
             </div>
@@ -321,7 +321,6 @@ export function CrearConIA({
                 <span className={styles.accionesIA}>
                   <Boton
                     type="button"
-                    chico
                     variante="fantasma"
                     onClick={() => {
                       void navigator.clipboard.writeText(descripcion).then(
@@ -332,7 +331,7 @@ export function CrearConIA({
                   >
                     {copiada ? "Copiada ✓" : "Copiar"}
                   </Boton>
-                  <Boton type="button" chico variante="secundario" onClick={usarDescripcion}>
+                  <Boton type="button" variante="primario" onClick={usarDescripcion}>
                     Usar en la publicación
                   </Boton>
                 </span>

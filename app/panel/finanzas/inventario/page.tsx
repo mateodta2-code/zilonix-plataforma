@@ -142,11 +142,11 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
           </select>
         </Campo>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {hayFiltros && (
-            <BotonLink href="/panel/finanzas/inventario" variante="fantasma" chico>
+            <BotonLink href="/panel/finanzas/inventario" variante="fantasma">
               Limpiar filtros
             </BotonLink>
           )}
@@ -237,7 +237,7 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
       )}
 
       <div className={styles.accionesFiltro}>
-        <BotonLink href="/panel/finanzas" variante="fantasma" chico className={styles.volver}>
+        <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
           Volver a Finanzas
         </BotonLink>
       </div>

@@ -93,7 +93,7 @@ function TarjetaPedido({ pedido }: { pedido: PedidoListado }) {
           <span className={styles.etiquetaValor}>Valor de la venta</span>
           <span className={styles.valor}>{formatearMontoEnMoneda(pedido.total, pedido.moneda)}</span>
           {pedido.marketplace === "ml" && (
-            <BotonLink href={`/panel/pedidos/${pedido.id}`} variante="secundario" chico>
+            <BotonLink href={`/panel/pedidos/${pedido.id}`} variante="primario">
               Ver seguimiento
             </BotonLink>
           )}
@@ -140,7 +140,7 @@ export default async function PedidosPage({ searchParams }: { searchParams: Reco
         titulo="Pedidos"
         descripcion="Pedidos de Mercado Libre y Falabella, del más nuevo al más viejo."
         accion={
-          <BotonLink href="/panel/despachos" variante="secundario" chico>
+          <BotonLink href="/panel/despachos" variante="primario">
             Despachos
           </BotonLink>
         }
@@ -202,11 +202,11 @@ export default async function PedidosPage({ searchParams }: { searchParams: Reco
           </Campo>
         </div>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {hayFiltros && (
-            <BotonLink href="/panel/pedidos" variante="fantasma" chico>
+            <BotonLink href="/panel/pedidos" variante="fantasma">
               Limpiar filtros
             </BotonLink>
           )}
@@ -221,7 +221,7 @@ export default async function PedidosPage({ searchParams }: { searchParams: Reco
             puedeConectar ? (
               <span className={styles.vacioConAccion}>
                 Para ver tus pedidos, primero conecta una cuenta de Mercado Libre o de Falabella.
-                <BotonLink href="/panel/conectar-ml" variante="secundario" chico>
+                <BotonLink href="/panel/conectar-ml" variante="primario">
                   Conectar cuentas
                 </BotonLink>
               </span>
@@ -259,7 +259,7 @@ export default async function PedidosPage({ searchParams }: { searchParams: Reco
         </>
       )}
 
-      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel" variante="fantasma" className={styles.volver}>
         Volver al panel
       </BotonLink>
     </>

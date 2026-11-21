@@ -94,7 +94,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
         </select>
       </Campo>
       <div className={estilos.accionesFiltro}>
-        <Boton type="submit" chico>
+        <Boton type="submit">
           Filtrar
         </Boton>
         <BotonLink href={`${ruta}${Object.keys(extra).length > 0 ? `?${new URLSearchParams(extra).toString()}` : ""}`} variante="fantasma" chico>

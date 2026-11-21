@@ -50,7 +50,7 @@ export function ImportarPorSku({
         <Campo etiqueta="SKU propio ya publicado">
           <input name="sku" defaultValue={skuNoEncontrado} required className="zx-control" />
         </Campo>
-        <Boton type="submit" variante="secundario" chico style={{ marginTop: 8 }} disabled={cuentas.length === 0}>
+        <Boton type="submit" variante="primario" style={{ marginTop: 8 }} disabled={cuentas.length === 0}>
           Buscar SKU en las cuentas elegidas
         </Boton>
       </form>

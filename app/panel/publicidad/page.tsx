@@ -198,7 +198,7 @@ export default async function PublicidadPage({
         {cuentas.length === 0 ? (
           <EstadoVacio>
             No hay cuentas de Mercado Libre en esta empresa.{" "}
-            <BotonLink href="/panel/conectar-ml" chico>
+            <BotonLink href="/panel/conectar-ml">
               Conectar Mercado Libre
             </BotonLink>
           </EstadoVacio>

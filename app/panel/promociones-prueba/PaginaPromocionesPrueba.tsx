@@ -203,7 +203,7 @@ export function PaginaPromocionesPrueba() {
                           <span>Aporte de la plataforma: {formatearMoneda(aporteValor, cuenta.siteId)}</span>
                           <span>Precio final sugerido: {formatearMoneda(precioFinalSugerido, cuenta.siteId)}</span>
                         </div>
-                        <Boton type="button" variante="primario" chico onClick={() => abrirModal(publicacion, promocion)}>
+                        <Boton type="button" variante="primario" onClick={() => abrirModal(publicacion, promocion)}>
                           Participar
                         </Boton>
                       </div>
@@ -301,10 +301,10 @@ export function PaginaPromocionesPrueba() {
             )}
 
             <div className={styles.accionesModal}>
-              <Boton type="button" variante="primario" chico onClick={confirmarModal}>
+              <Boton type="button" variante="primario" onClick={confirmarModal}>
                 Confirmar
               </Boton>
-              <Boton type="button" variante="secundario" chico onClick={cerrarModal}>
+              <Boton type="button" variante="secundario" onClick={cerrarModal}>
                 Cancelar
               </Boton>
             </div>

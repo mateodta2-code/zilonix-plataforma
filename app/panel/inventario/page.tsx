@@ -69,10 +69,10 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
               {puedeMover && (
                 <form action={resolverAlertaAction} className={styles.accionesAlerta}>
                   <input type="hidden" name="alertaId" value={a.id} />
-                  <Boton type="submit" name="decision" value="aplicar" chico>
+                  <Boton type="submit" name="decision" value="aplicar">
                     Aplicar
                   </Boton>
-                  <Boton type="submit" name="decision" value="no_aplicar" variante="secundario" chico>
+                  <Boton type="submit" name="decision" value="no_aplicar" variante="secundario">
                     No aplicar
                   </Boton>
                 </form>
@@ -148,11 +148,11 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
           <input type="search" name="q" defaultValue={q ?? ""} placeholder="Código o nombre" className={`zx-control ${styles.campoBusqueda}`} />
         </Campo>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {q && (
-            <BotonLink href="/panel/inventario" variante="fantasma" chico>
+            <BotonLink href="/panel/inventario" variante="fantasma">
               Limpiar
             </BotonLink>
           )}
@@ -198,12 +198,12 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
             </p>
             <div className={styles.botonesPaginacion}>
               {resultado.pagina > 1 && (
-                <BotonLink href={hrefPagina(resultado.pagina - 1)} chico>
+                <BotonLink href={hrefPagina(resultado.pagina - 1)} variante="secundario" chico>
                   Anterior
                 </BotonLink>
               )}
               {resultado.pagina < resultado.totalPaginas && (
-                <BotonLink href={hrefPagina(resultado.pagina + 1)} chico>
+                <BotonLink href={hrefPagina(resultado.pagina + 1)} variante="secundario" chico>
                   Siguiente
                 </BotonLink>
               )}

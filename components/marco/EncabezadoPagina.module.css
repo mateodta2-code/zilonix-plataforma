@@ -1,6 +1,6 @@
 .encabezado {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
@@ -29,5 +29,12 @@
 }
 
 .accion {
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
+  margin-left: auto;
+}
+
+.accion > * {
+  align-self: center;
 }

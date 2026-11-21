@@ -88,7 +88,7 @@ export function PortadaCuenta({
             className="zx-control"
             style={{ fontSize: 9, padding: 2 }}
           />
-          <Boton type="button" variante="secundario" chico onClick={confirmarUrlManual} style={{ fontSize: 9, padding: "2px 3px" }}>
+          <Boton type="button" variante="primario" onClick={confirmarUrlManual} style={{ fontSize: 9, padding: "2px 3px" }}>
             Agregar
           </Boton>
         </div>
@@ -129,7 +129,7 @@ export function PortadaCuenta({
             style={{ fontSize: 9, padding: 2, width: "100%" }}
             disabled={subiendo}
           />
-          <Boton type="button" variante="secundario" chico onClick={confirmarCanvaUrl} disabled={subiendo || !canvaUrl.trim()} style={{ fontSize: 9, padding: "2px 3px" }}>
+          <Boton type="button" variante="primario" onClick={confirmarCanvaUrl} disabled={subiendo || !canvaUrl.trim()} style={{ fontSize: 9, padding: "2px 3px" }}>
             Traer
           </Boton>
         </div>

@@ -41,7 +41,7 @@ export function BotonActualizarTodo({ links }: { links: string[] }) {
   }
 
   return (
-    <Boton type="button" variante="secundario" chico onClick={actualizarTodo}>
+    <Boton type="button" variante="primario" onClick={actualizarTodo}>
       {yaAbrio ? `Actualizar todo de nuevo (${links.length})` : `Actualizar todo (${links.length})`}
     </Boton>
   );

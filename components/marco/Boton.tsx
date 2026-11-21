@@ -1,7 +1,7 @@
 import Link from "next/link";
 import styles from "./Boton.module.css";
 
-export type VarianteBoton = "primario" | "secundario" | "fantasma";
+export type VarianteBoton = "primario" | "secundario" | "peligro" | "fantasma";
 
 // Exportada porque algunos links tienen que ser <a> normales, no
 // next/link — ej. /api/ml/conectar (arranca el OAuth real de Mercado
@@ -26,7 +26,7 @@ export function Boton({
 // "Cancelar" al lado de un submit, o un link que hace de botón
 // primario como "Conectar Mercado Libre").
 export function BotonLink({
-  variante = "secundario",
+  variante = "primario",
   chico,
   className,
   href,

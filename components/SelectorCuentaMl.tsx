@@ -73,7 +73,7 @@ export async function SelectorCuentaMl({
         ))}
       </select>
       {/* El botón del sistema, como el filtro de Actividad. */}
-      <Boton type="submit" chico>
+      <Boton type="submit">
         Aplicar
       </Boton>
     </form>

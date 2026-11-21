@@ -84,7 +84,7 @@ export default async function SoportePage() {
                     {activo && (
                       <form action={revocarAccesoAction}>
                         <input type="hidden" name="accesoId" value={a.id} />
-                        <Boton type="submit" variante="secundario" chico>
+                        <Boton type="submit" variante="peligro">
                           Revocar
                         </Boton>
                       </form>
@@ -97,7 +97,7 @@ export default async function SoportePage() {
         )}
       </div>
 
-      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel" variante="fantasma" className={styles.volver}>
         Volver al panel
       </BotonLink>
     </>

@@ -182,7 +182,7 @@ export default async function ConectarMlPage({
                     {cuenta.desconectadaTs && <Chip>Desconectada</Chip>}
                   </span>
                   {!cuenta.desconectadaTs && (
-                    <Link href={`/panel/conectar-ml/${cuenta.id}/desconectar`} className={styles.desconectar}>
+                    <Link href={`/panel/conectar-ml/${cuenta.id}/desconectar`} className={clasesBoton("peligro")}>
                       Desconectar
                     </Link>
                   )}
@@ -253,7 +253,7 @@ export default async function ConectarMlPage({
                   </span>
                   {!cuenta.desconectadaTs && puedeDesconectar && (
                     <form action={desconectarCuentaFalabella.bind(null, cuenta.id)}>
-                      <button type="submit" className={styles.desconectar}>
+                      <button type="submit" className={clasesBoton("peligro")}>
                         Desconectar
                       </button>
                     </form>
@@ -261,7 +261,7 @@ export default async function ConectarMlPage({
                 </div>
                 {!cuenta.desconectadaTs && puedeConectar && (
                   <form action={sincronizarPedidosFalabella.bind(null, cuenta.id)} className={styles.formSincronizar}>
-                    <button type="submit" className={clasesBoton("secundario")}>
+                    <button type="submit" className={clasesBoton("primario")}>
                       Sincronizar pedidos (últimos 60 días)
                     </button>
                   </form>
@@ -293,7 +293,7 @@ export default async function ConectarMlPage({
         </form>
       )}
 
-      <BotonLink href="/panel" variante="fantasma" chico>
+      <BotonLink href="/panel" variante="fantasma">
         Volver al panel
       </BotonLink>
     </>

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { cambiarEmpresaActiva } from "@/app/panel/actions";
+import { Boton } from "./Boton";
 import { BotonCerrarSesion } from "./BotonCerrarSesion";
 import { IconoBuscar, iconoDeClave } from "./iconos";
 import { SaludoHeader } from "./SaludoHeader";
@@ -42,9 +43,7 @@ export function BarraSuperior({
                 </option>
               ))}
             </select>
-            <button type="submit" className={styles.botonCambiar}>
-              Cambiar
-            </button>
+            <Boton type="submit">Cambiar</Boton>
           </form>
         )}
       </div>

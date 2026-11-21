@@ -56,7 +56,7 @@ export function ConectarCanva() {
   }
 
   return (
-    <a href="/api/canva/conectar" className={clasesBoton("secundario", true)} style={{ fontSize: 11 }}>
+    <a href="/api/canva/conectar" className={clasesBoton("primario")}>
       Conectar Canva
     </a>
   );

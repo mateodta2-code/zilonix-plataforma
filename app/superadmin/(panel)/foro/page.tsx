@@ -37,7 +37,7 @@ export default async function ModerarForoPage() {
                 <input type="hidden" name="tipo" value={p.tipo} />
                 <input type="hidden" name="id" value={p.id} />
                 <input type="hidden" name="ocultar" value={p.ocultaTs ? "0" : "1"} />
-                <Boton type="submit" variante="secundario" chico>
+                <Boton type="submit" variante="primario">
                   {p.ocultaTs ? "Mostrar" : "Esconder"}
                 </Boton>
               </form>

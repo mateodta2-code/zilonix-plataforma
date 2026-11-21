@@ -103,11 +103,11 @@ export default async function PedidoDetallePage({ params }: { params: { id: stri
       </ol>
 
       {verUtilidad && (
-        <BotonLink href={`/panel/finanzas/ventas/${pedido.id}`} variante="secundario" chico className={styles.volver}>
+        <BotonLink href={`/panel/finanzas/ventas/${pedido.id}`} variante="primario" className={styles.volver}>
           Ver utilidad
         </BotonLink>
       )}{" "}
-      <BotonLink href="/panel/pedidos" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/pedidos" variante="fantasma" className={styles.volver}>
         Volver a pedidos
       </BotonLink>
     </>

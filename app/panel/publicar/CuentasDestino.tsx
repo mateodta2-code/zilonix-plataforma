@@ -37,10 +37,10 @@ export function CuentasDestino({
   return (
     <div>
       <div style={{ display: "flex", gap: 8 }}>
-        <Boton type="button" variante="secundario" chico onClick={() => marcarTodas(true)}>
+        <Boton type="button" variante="primario" onClick={() => marcarTodas(true)}>
           Marcar todas
         </Boton>
-        <Boton type="button" variante="secundario" chico onClick={() => marcarTodas(false)}>
+        <Boton type="button" variante="primario" onClick={() => marcarTodas(false)}>
           Desmarcar todas
         </Boton>
       </div>

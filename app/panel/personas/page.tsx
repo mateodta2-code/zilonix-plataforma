@@ -85,7 +85,7 @@ export default async function PersonasPage({ searchParams }: { searchParams: Rec
                             </option>
                           ))}
                         </select>
-                        <Boton type="submit" variante="secundario" chico>
+                        <Boton type="submit" variante="primario">
                           Cambiar
                         </Boton>
                       </form>
@@ -130,7 +130,7 @@ export default async function PersonasPage({ searchParams }: { searchParams: Rec
       </Tarjeta>
 
       {puedeInvitar && (
-        <BotonLink href="/panel/invitar" variante="secundario" chico>
+        <BotonLink href="/panel/invitar" variante="primario">
           Invitar persona
         </BotonLink>
       )}

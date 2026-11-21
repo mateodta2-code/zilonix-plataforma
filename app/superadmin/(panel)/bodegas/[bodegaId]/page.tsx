@@ -36,7 +36,7 @@ export default async function SuperadminBodegaPage({ params, searchParams }: { p
           <Campo etiqueta="Correo del administrador de la bodega">
             <input type="email" name="email" required className="zx-control" />
           </Campo>
-          <Boton type="submit" variante="secundario">
+          <Boton type="submit" variante="primario">
             Invitar administrador
           </Boton>
         </form>
@@ -55,7 +55,7 @@ export default async function SuperadminBodegaPage({ params, searchParams }: { p
             <Campo etiqueta="Motivo de la suspensión (obligatorio)">
               <textarea name="motivo" className="zx-control" required rows={2} />
             </Campo>
-            <Boton type="submit" variante="secundario">
+            <Boton type="submit" variante="peligro">
               Suspender
             </Boton>
           </FormConfirmar>

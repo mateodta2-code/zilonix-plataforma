@@ -43,7 +43,7 @@ export default async function AvisosMlPage() {
         <TarjetaKpi titulo="Pendientes" valor={conteo.pendientes} />
       </div>
 
-      <BotonLink href="/panel" variante="fantasma" chico>
+      <BotonLink href="/panel" variante="fantasma">
         Volver al panel
       </BotonLink>
     </>

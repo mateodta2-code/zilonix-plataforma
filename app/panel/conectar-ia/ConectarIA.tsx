@@ -113,18 +113,18 @@ export function ConectarIA({ conexiones, puedeModificar }: { conexiones: Conexio
                 <>
                   <Modulos conexion={c} onCambio={() => router.refresh()} />
                   <div className={styles.acciones}>
-                    <Boton type="button" variante="secundario" chico disabled={ocupado} onClick={() => setEditando(c.id)}>
+                    <Boton type="button" variante="primario" disabled={ocupado} onClick={() => setEditando(c.id)}>
                       Editar
                     </Boton>
-                    <Boton type="button" variante="secundario" chico disabled={ocupado} onClick={() => probar(c)}>
+                    <Boton type="button" variante="primario" disabled={ocupado} onClick={() => probar(c)}>
                       Probar conexión
                     </Boton>
                     {!c.esPrincipal && (
-                      <Boton type="button" variante="secundario" chico disabled={ocupado} onClick={() => hacerPrincipal(c)}>
+                      <Boton type="button" variante="primario" disabled={ocupado} onClick={() => hacerPrincipal(c)}>
                         Hacer principal
                       </Boton>
                     )}
-                    <Boton type="button" variante="secundario" chico disabled={ocupado} onClick={() => eliminar(c)}>
+                    <Boton type="button" variante="peligro" disabled={ocupado} onClick={() => eliminar(c)}>
                       Eliminar
                     </Boton>
                   </div>
@@ -142,7 +142,7 @@ export function ConectarIA({ conexiones, puedeModificar }: { conexiones: Conexio
           <FormularioConexion inicial={null} onListo={() => { setEditando(null); router.refresh(); }} onCancelar={() => setEditando(null)} />
         ) : (
           <div className={styles.acciones}>
-            <Boton type="button" variante="primario" chico disabled={lleno || ocupado} onClick={() => setEditando("nueva")}>
+            <Boton type="button" variante="primario" disabled={lleno || ocupado} onClick={() => setEditando("nueva")}>
               Agregar IA
             </Boton>
             {lleno && <span className={styles.nota}>Puedes conectar hasta {MAX_CONEXIONES_IA} IA</span>}
@@ -351,10 +351,10 @@ function FormularioConexion({ inicial, onListo, onCancelar }: { inicial: Conexio
       )}
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.acciones}>
-        <Boton type="submit" variante="primario" chico disabled={guardando || !nombre.trim() || !modelo.trim() || (!inicial && !apiKey.trim())}>
+        <Boton type="submit" variante="primario" disabled={guardando || !nombre.trim() || !modelo.trim() || (!inicial && !apiKey.trim())}>
           {guardando ? "Guardando…" : "Guardar"}
         </Boton>
-        <Boton type="button" variante="secundario" chico disabled={guardando} onClick={onCancelar}>
+        <Boton type="button" variante="secundario" disabled={guardando} onClick={onCancelar}>
           Cancelar
         </Boton>
       </div>

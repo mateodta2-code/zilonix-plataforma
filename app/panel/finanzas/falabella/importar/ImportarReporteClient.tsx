@@ -57,7 +57,7 @@ export function ImportarReporteClient() {
           <BotonLink href="/panel/finanzas/falabella">Ver la conciliación</BotonLink>
           <Boton
             type="button"
-            variante="secundario"
+            variante="primario"
             onClick={() => {
               setEstado({ paso: "inicial" });
               setArchivo(null);

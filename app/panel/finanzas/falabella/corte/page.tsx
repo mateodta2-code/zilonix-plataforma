@@ -43,7 +43,7 @@ export default async function CorteFalabellaPage({ searchParams }: { searchParam
   const moneda = texto(searchParams.moneda);
 
   const volver = (
-    <BotonLink href="/panel/finanzas/falabella" variante="fantasma" chico className={styles.volver}>
+    <BotonLink href="/panel/finanzas/falabella" variante="fantasma" className={styles.volver}>
       Volver a la conciliación
     </BotonLink>
   );

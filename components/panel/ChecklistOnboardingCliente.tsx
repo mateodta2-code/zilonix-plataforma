@@ -39,7 +39,7 @@ function ListaPasos({ pasos }: { pasos: PasoChecklist[] }) {
           </span>
           <span className={styles.textoPaso}>{paso.titulo}</span>
           {paso.href && (
-            <BotonLink href={paso.href} variante="secundario" chico className={styles.boton}>
+            <BotonLink href={paso.href} variante="primario" className={styles.boton}>
               {paso.etiquetaBoton}
             </BotonLink>
           )}

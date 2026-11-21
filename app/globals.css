@@ -41,6 +41,8 @@
      --texto de ESTE tema, declarada acá arriba de la cascada — nunca
      se redefine adentro de ninguna tarjeta, así que .zx-control/
      .secundario siguen leyendo bien sin importar qué los envuelva. */
+  /* Altura común de campos y botones: 9px+9px de padding + ~18px de línea + 2px de borde. */
+  --alto-control: 38px;
   --texto-superficie-2: #f2f4f8;
   --texto-suave-superficie-2: #c0c0c0;
   --plata-etiqueta-superficie-2: #c0c0c0;
@@ -703,6 +705,7 @@ button {
    Y al de abajo (no solo arriba, como las tarjetas). */
 .zx-control {
   width: 100%;
+  min-height: var(--alto-control);
   padding: 9px 11px;
   border-radius: var(--radio-boton);
   border: 1px solid transparent;

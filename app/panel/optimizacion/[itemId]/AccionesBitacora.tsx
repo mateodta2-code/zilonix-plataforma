@@ -46,16 +46,16 @@ export function NotaBitacora({ cuentaMlId, itemId, hoy }: { cuentaMlId: string; 
             <textarea className="zx-control" rows={2} maxLength={LARGO_NOTA} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Ej.: subí el presupuesto diario de la campaña" disabled={guardando} />
           </Campo>
           <span className={styles.accionesBitacora}>
-            <Boton type="button" chico onClick={guardar} disabled={guardando || !texto.trim()}>
+            <Boton type="button" onClick={guardar} disabled={guardando || !texto.trim()}>
               {guardando ? "Guardando…" : "Guardar nota"}
             </Boton>
-            <Boton type="button" chico variante="fantasma" onClick={() => setAbierta(false)} disabled={guardando}>
+            <Boton type="button" variante="fantasma" onClick={() => setAbierta(false)} disabled={guardando}>
               Cancelar
             </Boton>
           </span>
         </>
       ) : (
-        <Boton type="button" chico variante="secundario" onClick={() => setAbierta(true)}>
+        <Boton type="button" variante="primario" onClick={() => setAbierta(true)}>
           Anotar un cambio
         </Boton>
       )}
@@ -107,7 +107,7 @@ export function RevisarCambio({
 
   if (!abierta) {
     return (
-      <Boton type="button" chico variante={actual?.resultado ? "fantasma" : "secundario"} onClick={() => setAbierta(true)}>
+      <Boton type="button" variante={actual?.resultado ? "fantasma" : "secundario"} onClick={() => setAbierta(true)}>
         {actual?.resultado ? "Cambiar revisión" : "Revisar"}
       </Boton>
     );
@@ -116,17 +116,17 @@ export function RevisarCambio({
     <div className={styles.revisarCambio}>
       <span className={styles.accionesBitacora} role="radiogroup" aria-label="Resultado del cambio">
         {RESULTADOS_REVISION.map((r) => (
-          <Boton key={r.id} type="button" chico variante={resultado === r.id ? "primario" : "secundario"} onClick={() => setResultado(r.id)} aria-pressed={resultado === r.id} disabled={guardando}>
+          <Boton key={r.id} type="button" variante={resultado === r.id ? "primario" : "secundario"} onClick={() => setResultado(r.id)} aria-pressed={resultado === r.id} disabled={guardando}>
             {r.rotulo}
           </Boton>
         ))}
       </span>
       <input className="zx-control" maxLength={LARGO_NOTA} value={comentario} onChange={(e) => setComentario(e.target.value)} placeholder="Comentario (opcional)" aria-label="Comentario de la revisión" disabled={guardando} />
       <span className={styles.accionesBitacora}>
-        <Boton type="button" chico onClick={guardar} disabled={guardando || (!resultado && !comentario.trim())}>
+        <Boton type="button" onClick={guardar} disabled={guardando || (!resultado && !comentario.trim())}>
           {guardando ? "Guardando…" : resultado ? "Guardar revisión" : "Guardar comentario"}
         </Boton>
-        <Boton type="button" chico variante="fantasma" onClick={() => setAbierta(false)} disabled={guardando}>
+        <Boton type="button" variante="fantasma" onClick={() => setAbierta(false)} disabled={guardando}>
           Cancelar
         </Boton>
       </span>

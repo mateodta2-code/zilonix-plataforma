@@ -560,7 +560,7 @@ export function PaginaPromocionesReal({
 
         <div className={styles.chipsFiltro}>
           {(Object.keys(ETIQUETA_FILTRO) as FiltroPublicaciones[]).map((f) => (
-            <Boton key={f} type="button" variante={filtro === f ? "primario" : "secundario"} chico onClick={() => setFiltro(f)}>
+            <Boton key={f} type="button" variante={filtro === f ? "primario" : "secundario"} onClick={() => setFiltro(f)}>
               {ETIQUETA_FILTRO[f]} ({conteos[f === "todas" ? "todas" : f === "en-promocion" ? "enPromocion" : f === "sin-promocion" ? "sinPromocion" : "conError"]})
             </Boton>
           ))}
@@ -574,7 +574,6 @@ export function PaginaPromocionesReal({
               <Boton
                 type="button"
                 variante="secundario"
-                chico
                 onClick={() => {
                   detenerRef.current = true;
                 }}
@@ -588,7 +587,7 @@ export function PaginaPromocionesReal({
                 {topeAlcanzado ? `Se llegó al tope de ${formatearNumero(TOPE_CARGA_AUTOMATICA, "es")} publicaciones revisadas por carga.` : "La carga se detuvo."}{" "}
                 {formatearNumero(conteos.todas, "es")} revisadas hasta ahora.
               </span>
-              <Boton type="button" variante="secundario" chico onClick={() => void cargarTodoAutomatico(false)}>
+              <Boton type="button" variante="primario" onClick={() => void cargarTodoAutomatico(false)}>
                 Seguir cargando
               </Boton>
             </>
@@ -603,7 +602,7 @@ export function PaginaPromocionesReal({
         {resumenMaestraSku.total === 0 ? (
           <div className={`${styles.bannerMaestra} ${styles.bannerMaestraFalta}`}>
             <span>El módulo de SKU todavía no tiene ninguna tabla maestra de precios mínimos cargada — sin esto, las reglas «Respetar la tabla maestra» y «máximo» no pueden participar en ninguna publicación (la regla «Participar en todas» no la necesita).</span>
-            <BotonLink href="/panel/finanzas/maestra-sku/importar" variante="secundario" chico>
+            <BotonLink href="/panel/finanzas/maestra-sku/importar" variante="primario">
               Subir un archivo
             </BotonLink>
           </div>
@@ -669,11 +668,11 @@ export function PaginaPromocionesReal({
               {textoGuardado && <span className={styles.contadorReglas}>Guardadas para {nombreCuentaSeleccionada}: «{textoGuardado}»</span>}
               {puedeAprobar && (
                 <div className={styles.accionesInterpretacion}>
-                  <Boton type="button" variante="secundario" chico disabled={interpretando || textoReglas.trim() === ""} onClick={() => void interpretarReglas()}>
+                  <Boton type="button" variante="primario" disabled={interpretando || textoReglas.trim() === ""} onClick={() => void interpretarReglas()}>
                     {interpretando ? "Interpretando…" : "Interpretar"}
                   </Boton>
                   {textoGuardado && (
-                    <Boton type="button" variante="fantasma" chico disabled={guardandoReglas} onClick={() => void guardarReglasAdicionales(true)}>
+                    <Boton type="button" variante="fantasma" disabled={guardandoReglas} onClick={() => void guardarReglasAdicionales(true)}>
                       Quitar reglas adicionales
                     </Boton>
                   )}
@@ -713,10 +712,10 @@ export function PaginaPromocionesReal({
                     </>
                   )}
                   <div className={styles.accionesInterpretacion}>
-                    <Boton type="button" variante="primario" chico disabled={guardandoReglas || interpretacion.entendido.length === 0} onClick={() => void guardarReglasAdicionales(false)}>
+                    <Boton type="button" variante="primario" disabled={guardandoReglas || interpretacion.entendido.length === 0} onClick={() => void guardarReglasAdicionales(false)}>
                       {guardandoReglas ? "Guardando…" : "Confirmar y guardar"}
                     </Boton>
-                    <Boton type="button" variante="secundario" chico disabled={guardandoReglas} onClick={() => setInterpretacion(null)}>
+                    <Boton type="button" variante="secundario" disabled={guardandoReglas} onClick={() => setInterpretacion(null)}>
                       Descartar
                     </Boton>
                   </div>
@@ -740,7 +739,6 @@ export function PaginaPromocionesReal({
             <Boton
               type="button"
               variante="primario"
-              chico
               onClick={regla === "salir-todas" ? () => void abrirSalirTodas() : abrirAplicarRegla}
               disabled={resumenMaestraSku.total === 0 && (regla === "tabla-maestra" || regla === "maximo")}
             >
@@ -827,7 +825,7 @@ export function PaginaPromocionesReal({
                               {activa ? (
                                 puedeEjecutar &&
                                 (promocion.puedeSalirApi ? (
-                                  <Boton type="button" variante="secundario" chico onClick={() => abrirConfirmarSalir(fila, promocion)}>
+                                  <Boton type="button" variante="peligro" onClick={() => abrirConfirmarSalir(fila, promocion)}>
                                     Dejar de participar
                                   </Boton>
                                 ) : (
@@ -835,7 +833,7 @@ export function PaginaPromocionesReal({
                                 ))
                               ) : (
                                 puedeEjecutar && (
-                                  <Boton type="button" variante="primario" chico disabled={!promocion.cumpleReglas} onClick={() => abrirModalParticipar(fila, promocion)}>
+                                  <Boton type="button" variante="primario" disabled={!promocion.cumpleReglas} onClick={() => abrirModalParticipar(fila, promocion)}>
                                     Participar
                                   </Boton>
                                 )
@@ -914,10 +912,10 @@ export function PaginaPromocionesReal({
             {errorParticipar && <p className={styles.errorModal}>{errorParticipar}</p>}
 
             <div className={styles.accionesModal}>
-              <Boton type="button" variante="primario" chico disabled={enviandoParticipar || calculoModal.quedaBajoMinimo || calculoModal.precioFinal <= 0} onClick={confirmarParticipar}>
+              <Boton type="button" variante="primario" disabled={enviandoParticipar || calculoModal.quedaBajoMinimo || calculoModal.precioFinal <= 0} onClick={confirmarParticipar}>
                 {enviandoParticipar ? "Enviando…" : "Confirmar"}
               </Boton>
-              <Boton type="button" variante="secundario" chico onClick={cerrarModalParticipar}>
+              <Boton type="button" variante="secundario" onClick={cerrarModalParticipar}>
                 Cancelar
               </Boton>
             </div>
@@ -944,10 +942,10 @@ export function PaginaPromocionesReal({
             </p>
             {errorSalir && <p className={styles.errorModal}>{errorSalir}</p>}
             <div className={styles.accionesModal}>
-              <Boton type="button" variante="primario" chico disabled={enviandoSalir} onClick={confirmarSalir}>
+              <Boton type="button" variante="primario" disabled={enviandoSalir} onClick={confirmarSalir}>
                 {enviandoSalir ? "Enviando…" : "Confirmar"}
               </Boton>
-              <Boton type="button" variante="secundario" chico onClick={cerrarConfirmarSalir}>
+              <Boton type="button" variante="secundario" onClick={cerrarConfirmarSalir}>
                 Cancelar
               </Boton>
             </div>
@@ -974,10 +972,10 @@ export function PaginaPromocionesReal({
               </div>
               {errorRegla && <p className={styles.errorModal}>{errorRegla}</p>}
               <div className={styles.accionesModal}>
-                <Boton type="button" variante="primario" chico disabled={aplicandoRegla} onClick={confirmarAplicarRegla}>
+                <Boton type="button" variante="primario" disabled={aplicandoRegla} onClick={confirmarAplicarRegla}>
                   {aplicandoRegla ? "Aplicando…" : "Aplicar"}
                 </Boton>
-                <Boton type="button" variante="secundario" chico onClick={cerrarDialogoRegla}>
+                <Boton type="button" variante="secundario" onClick={cerrarDialogoRegla}>
                   Cancelar
                 </Boton>
               </div>
@@ -1003,7 +1001,7 @@ export function PaginaPromocionesReal({
                 </div>
               )}
               <div className={styles.accionesModal}>
-                <Boton type="button" variante="primario" chico onClick={cerrarDialogoRegla}>
+                <Boton type="button" variante="primario" onClick={cerrarDialogoRegla}>
                   Cerrar
                 </Boton>
               </div>
@@ -1035,7 +1033,7 @@ export function PaginaPromocionesReal({
                 )}
               </div>
               <div className={styles.accionesModal}>
-                <Boton type="button" variante="primario" chico onClick={cerrarSalirTodas}>
+                <Boton type="button" variante="primario" onClick={cerrarSalirTodas}>
                   Cerrar
                 </Boton>
               </div>
@@ -1064,7 +1062,6 @@ export function PaginaPromocionesReal({
                   <Boton
                     type="button"
                     variante="primario"
-                    chico
                     style={{ background: "var(--kpi-peligro-texto)", borderColor: "var(--kpi-peligro-texto)", color: "#fff" }}
                     disabled={pasoSalirTodas === "ejecutando" || vistaPreviaSalir.promociones === 0}
                     onClick={() => void confirmarSalirTodas()}
@@ -1072,7 +1069,7 @@ export function PaginaPromocionesReal({
                     {pasoSalirTodas === "ejecutando" ? "Saliendo…" : "Sí, dejar de participar"}
                   </Boton>
                 )}
-                <Boton type="button" variante="secundario" chico disabled={pasoSalirTodas === "ejecutando"} onClick={cerrarSalirTodas}>
+                <Boton type="button" variante="secundario" disabled={pasoSalirTodas === "ejecutando"} onClick={cerrarSalirTodas}>
                   Cancelar
                 </Boton>
               </div>

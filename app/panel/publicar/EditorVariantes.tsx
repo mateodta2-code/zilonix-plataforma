@@ -146,7 +146,7 @@ export function EditorVariantes({
           )}
 
           <div style={{ marginTop: 10 }}>
-            <Boton type="button" variante="secundario" chico onClick={generarCombinaciones} disabled={ejesElegidos.length === 0}>
+            <Boton type="button" variante="primario" onClick={generarCombinaciones} disabled={ejesElegidos.length === 0}>
               Generar combinaciones
             </Boton>
           </div>

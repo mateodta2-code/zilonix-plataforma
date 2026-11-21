@@ -94,7 +94,7 @@ export default async function EditarMaestraPage({ searchParams }: { searchParams
           </div>
         </form>
       </Tarjeta>
-      <BotonLink href="/panel/finanzas/maestra-sku" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/finanzas/maestra-sku" variante="fantasma" className={styles.volver}>
         Volver a la tabla maestra
       </BotonLink>
     </>

@@ -24,7 +24,7 @@ export default async function ImportarReporteFalabellaPage() {
       <Tarjeta>
         <ImportarReporteClient />
       </Tarjeta>
-      <BotonLink href="/panel/finanzas/falabella" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/finanzas/falabella" variante="fantasma" className={styles.volver}>
         Volver a la conciliación
       </BotonLink>
     </>

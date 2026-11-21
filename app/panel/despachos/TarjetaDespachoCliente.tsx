@@ -218,7 +218,7 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
         <div className={styles.columnaAcciones}>
           {props.despachadoTs ? (
             dentroDeVentana ? (
-              <Boton variante="secundario" chico onClick={deshacer} disabled={enCurso}>
+              <Boton variante="primario" onClick={deshacer} disabled={enCurso}>
                 Deshacer
               </Boton>
             ) : (
@@ -226,14 +226,14 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
             )
           ) : props.imprimible ? (
             <>
-              <Boton variante="secundario" chico type="button" onClick={() => abrirGuia("normal")} disabled={enCurso}>
+              <Boton variante="primario" type="button" onClick={() => abrirGuia("normal")} disabled={enCurso}>
                 Ver guía (PDF)
               </Boton>
-              <Boton variante="secundario" chico type="button" onClick={() => abrirGuia("sticker")} disabled={enCurso}>
+              <Boton variante="primario" type="button" onClick={() => abrirGuia("sticker")} disabled={enCurso}>
                 Ver guía (sticker)
               </Boton>
               {props.puedeModificar && (
-                <Boton chico type="button" onClick={marcar} disabled={!guiaVista || enCurso} title={guiaVista ? undefined : "Abre la guía arriba primero"}>
+                <Boton type="button" onClick={marcar} disabled={!guiaVista || enCurso} title={guiaVista ? undefined : "Abre la guía arriba primero"}>
                   Marcar despachado
                 </Boton>
               )}

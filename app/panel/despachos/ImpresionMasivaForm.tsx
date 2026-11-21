@@ -117,7 +117,7 @@ export function ImpresionMasivaForm({ filas, etiquetaTipo, modo = "pendientes" }
         <Boton type="submit" className={styles.botonImprimir} disabled={enCurso} onClick={() => (formato.current = "normal")}>
           {reimprimir ? "Reimprimir seleccionadas" : "Imprimir etiquetas seleccionadas"}
         </Boton>
-        <Boton type="submit" variante="secundario" className={styles.botonImprimir} disabled={enCurso} onClick={() => (formato.current = "sticker")}>
+        <Boton type="submit" variante="primario" className={styles.botonImprimir} disabled={enCurso} onClick={() => (formato.current = "sticker")}>
           {reimprimir ? "Reimprimir en sticker 10x15" : "Imprimir en sticker 10x15"}
         </Boton>
       </div>

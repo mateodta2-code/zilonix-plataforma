@@ -134,7 +134,7 @@ export function PanelRecalculoCostos() {
           <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="zx-control" />
         </Campo>
         <div className={estilos.accionesFiltro}>
-          <Boton type="submit" chico disabled={pendiente}>
+          <Boton type="submit" disabled={pendiente}>
             {pendiente && accion === "ver" ? "Buscando…" : "Ver cambios"}
           </Boton>
         </div>

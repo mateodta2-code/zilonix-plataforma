@@ -68,14 +68,14 @@ export default async function BodegaPersonasPage({ searchParams }: { searchParam
                             </option>
                           ))}
                         </select>
-                        <Boton type="submit" variante="secundario" chico>
+                        <Boton type="submit" variante="primario">
                           Cambiar
                         </Boton>
                       </form>
                       <form action={cambiarActivoAction}>
                         <input type="hidden" name="miembroId" value={m.miembroId} />
                         <input type="hidden" name="activo" value={m.activo ? "0" : "1"} />
-                        <Boton type="submit" variante="fantasma" chico>
+                        <Boton type="submit" variante="fantasma">
                           {m.activo ? "Desactivar" : "Reactivar"}
                         </Boton>
                       </form>

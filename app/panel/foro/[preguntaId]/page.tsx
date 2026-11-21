@@ -54,7 +54,7 @@ export default async function PreguntaForoPage({ params }: { params: { preguntaI
         <FormRespuesta preguntaId={pregunta.id} />
       </Tarjeta>
 
-      <BotonLink href="/panel/foro" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/foro" variante="fantasma" className={styles.volver}>
         Volver al foro
       </BotonLink>
     </>

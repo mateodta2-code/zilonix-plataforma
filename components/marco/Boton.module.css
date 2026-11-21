@@ -5,7 +5,10 @@
   justify-content: center;
   align-self: flex-start; /* el contenido de cada página es una columna flex (MarcoApp) que estira a sus hijos por defecto — un botón nunca debe estirarse a lo ancho solo */
   gap: 6px;
+  box-sizing: border-box;
+  min-height: var(--alto-control);
   padding: 9px 16px;
+  line-height: 1.35;
   border-radius: var(--radio-boton);
   font-size: 13.5px;
   font-weight: 500;
@@ -37,9 +40,10 @@
   pointer-events: none;
 }
 
+/* Ya no achica: todos los botones miden lo mismo que los campos
+   (.zx-control). Se conserva la prop por compatibilidad. */
 .chico {
-  padding: 6px 12px;
-  font-size: 12.5px;
+  min-height: var(--alto-control);
 }
 
 /* Corrección (fix-ui-claro-sidebar-marca, punto 4): "en reposo, borde
@@ -70,21 +74,26 @@
 }
 
 .secundario {
-  background: linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box, var(--degradado-plata-borde) border-box;
-  /* Issue #186 — --texto-superficie-2 (app/globals.css), no --texto:
-     este botón pinta su PROPIO --superficie-2, nunca el de lo que lo
-     rodea — un secundario dentro de una Tarjeta/.filtros (ahora
-     oscura) no debe heredar el --texto de zona oscura que esas cajas
-     redefinen localmente, o quedaría claro sobre claro. */
-  color: var(--texto-superficie-2);
+  /* Solo Cancelar/cerrar: borde azul de marca, mismo alto que el resto. */
+  background: linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box, linear-gradient(var(--acento), var(--acento)) border-box;
+  color: var(--acento);
 }
 
 .secundario:hover:not(:disabled) {
-  /* Mismo motivo que .primario:hover — cancela el border-color sólido
-     que pone zx-brillo-marca:hover para no tapar el degradado. */
   border-color: transparent;
-  color: var(--icono-hover);
+  background: linear-gradient(var(--acento-suave), var(--acento-suave)), linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box, linear-gradient(var(--acento), var(--acento)) border-box;
   box-shadow: var(--sombra-marca-hover);
+}
+
+.peligro {
+  background: linear-gradient(color-mix(in srgb, var(--peligro) 10%, transparent), color-mix(in srgb, var(--peligro) 10%, transparent)) padding-box, linear-gradient(var(--peligro-texto), var(--peligro-texto)) border-box;
+  color: var(--peligro-texto);
+}
+
+.peligro:hover:not(:disabled) {
+  border-color: transparent;
+  background: linear-gradient(color-mix(in srgb, var(--peligro) 20%, transparent), color-mix(in srgb, var(--peligro) 20%, transparent)) padding-box, linear-gradient(var(--peligro-texto), var(--peligro-texto)) border-box;
+  box-shadow: inset 0 0 0 0 transparent;
 }
 
 .fantasma {

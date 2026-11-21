@@ -249,7 +249,7 @@ function SeccionMeta({ meta, mes, puedeFijarMeta, avisoMeta }: Pick<Props, "meta
               className="zx-control"
             />
           </Campo>
-          <Boton type="submit" variante="secundario" chico>
+          <Boton type="submit" variante="primario">
             Guardar meta
           </Boton>
         </form>
@@ -289,11 +289,11 @@ export function InicioFinanzas(props: Props) {
             <Campo etiqueta="Hasta (incluido)">
               <input type="date" name="hasta" defaultValue={filtro.hasta} className="zx-control" />
             </Campo>
-            <Boton type="submit" chico>
+            <Boton type="submit">
               Actualizar
             </Boton>
             {!filtro.esMesActual && (
-              <BotonLink href="/panel" variante="fantasma" chico>
+              <BotonLink href="/panel" variante="fantasma">
                 Mes actual
               </BotonLink>
             )}

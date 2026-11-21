@@ -185,7 +185,7 @@ export function GenerarConIA({
     <div className={styles.crearIA}>
       <span className={styles.filtroIA} role="radiogroup" aria-label="Estilo de imagen">
         {ESTILOS.map((e) => (
-          <Boton key={e.id} type="button" chico variante={estilo === e.id ? "primario" : "secundario"} onClick={() => setEstilo(e.id)} disabled={preparando}>
+          <Boton key={e.id} type="button" variante={estilo === e.id ? "primario" : "secundario"} onClick={() => setEstilo(e.id)} disabled={preparando}>
             {e.nombre}
           </Boton>
         ))}
@@ -214,7 +214,7 @@ export function GenerarConIA({
         <input type="checkbox" checked={fotoBlanco} onChange={(e) => setFotoBlanco(e.target.checked)} disabled={preparando} /> Agregar también una foto del producto solo sobre blanco
       </label>
       <div>
-        <Boton type="button" chico onClick={preparar} disabled={preparando}>
+        <Boton type="button" onClick={preparar} disabled={preparando}>
           {preparando ? "Preparando propuestas…" : tarjetas.length > 0 ? "Preparar de nuevo" : "Preparar propuestas (sin costo)"}
         </Boton>
       </div>
@@ -228,11 +228,11 @@ export function GenerarConIA({
       {tarjetas.length > 0 ? (
         <>
           <div className={styles.accionesIA}>
-            <Boton type="button" chico onClick={crearTodas} disabled={tarjetas.some((t) => t.estado === "generando" || t.estado === "en_cola")}>
+            <Boton type="button" onClick={crearTodas} disabled={tarjetas.some((t) => t.estado === "generando" || t.estado === "en_cola")}>
               Crear todas las aprobadas
             </Boton>
             {listasParaAgregar > 0 ? (
-              <Boton type="button" chico variante="secundario" onClick={agregarElegidas}>
+              <Boton type="button" variante="primario" onClick={agregarElegidas}>
                 Agregar a mis fotos
               </Boton>
             ) : null}
@@ -271,7 +271,7 @@ export function GenerarConIA({
                   <details className={styles.promptIA}>
                     <summary>Ver el prompt final</summary>
                     <p>{t.prompt}</p>
-                    <Boton type="button" chico variante="fantasma" onClick={() => void navigator.clipboard.writeText(t.prompt).catch(() => undefined)}>
+                    <Boton type="button" variante="fantasma" onClick={() => void navigator.clipboard.writeText(t.prompt).catch(() => undefined)}>
                       Copiar prompt
                     </Boton>
                   </details>
@@ -290,7 +290,7 @@ export function GenerarConIA({
                         ) : (
                           <Chip estado="exito">Puesta como foto 1</Chip>
                         )}
-                        <Boton type="button" chico variante="secundario" onClick={() => (t.tipo === "portada" ? void ajustar({ ...t, estado: "propuesta" }).then(() => undefined) : void crear(t))}>
+                        <Boton type="button" variante="primario" onClick={() => (t.tipo === "portada" ? void ajustar({ ...t, estado: "propuesta" }).then(() => undefined) : void crear(t))}>
                           {t.tipo === "portada" ? "Otra composición" : "Regenerar"}
                         </Boton>
                         <a href={t.url} target="_blank" rel="noopener noreferrer" download className={styles.enlaceIA}>
@@ -299,11 +299,11 @@ export function GenerarConIA({
                       </>
                     ) : (
                       <>
-                        <Boton type="button" chico onClick={() => void crear(t)} disabled={ocupada || prohibidas.length > 0}>
+                        <Boton type="button" onClick={() => void crear(t)} disabled={ocupada || prohibidas.length > 0}>
                           {t.estado === "en_cola" ? "En cola…" : t.estado === "generando" ? "Creando…" : "Crear"}
                         </Boton>
                         {t.tipo !== "foto_principal" ? (
-                          <Boton type="button" chico variante="fantasma" onClick={() => void ajustar(t)} disabled={ocupada}>
+                          <Boton type="button" variante="fantasma" onClick={() => void ajustar(t)} disabled={ocupada}>
                             Ajustar
                           </Boton>
                         ) : null}

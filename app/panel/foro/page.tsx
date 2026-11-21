@@ -34,7 +34,7 @@ export default async function ForoPage({ searchParams }: { searchParams: { q?: s
 
       <form className={styles.buscador} role="search">
         <input name="q" defaultValue={busqueda} placeholder="Buscar en el foro" className="zx-control" maxLength={100} aria-label="Buscar en el foro" />
-        <Boton type="submit" variante="secundario">
+        <Boton type="submit" variante="primario">
           Buscar
         </Boton>
       </form>
