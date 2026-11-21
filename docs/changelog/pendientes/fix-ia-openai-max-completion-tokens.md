@@ -1,0 +1,4 @@
+- **fix-ia-openai-max-completion-tokens** — **Conectar IA con OpenAI gpt-5:** con el modelo `gpt-5-mini` (el que sugiere la guía), «Probar conexión» decía «No se pudo probar la conexión» y fallaban todas las funciones de texto con IA (Publicar → «Crear con IA», propuestas de Optimización, Promociones). Causa: se enviaba `max_tokens`, que los modelos de OpenAI que razonan (gpt-5…, o1/o3/o4…) rechazan con un 400.
+  - OpenAI ahora recibe `max_completion_tokens` (texto y texto con fotos); los modelos que razonan tienen un margen extra (`MARGEN_RAZONAMIENTO_TOKENS = 4000`) para que la respuesta no salga vacía. Es un tope: se cobra solo lo usado. xAI y «otro compatible» siguen con `max_tokens`.
+  - «Probar conexión»: un 400/422 del proveedor ahora dice «El proveedor rechazó la solicitud: revisa el nombre del modelo».
+  - Sin migración.

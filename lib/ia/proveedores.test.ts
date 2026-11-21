@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("dns/promises", () => ({ lookup: vi.fn() }));
 
 import { lookup } from "dns/promises";
-import { ErrorProveedorIA, llamarIA } from "./proveedores";
+import { ErrorProveedorIA, llamarIA, MARGEN_RAZONAMIENTO_TOKENS } from "./proveedores";
 import type { ConexionIAConClave } from "./tipos";
 
 const lookupMock = lookup as unknown as ReturnType<typeof vi.fn>;
@@ -51,6 +51,26 @@ describe("llamarIA — dispatch por proveedor (rama feat-promociones)", () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("https://api.openai.com/v1/chat/completions");
     expect((init?.headers as Record<string, string>).authorization).toBe("Bearer clave-real");
+  });
+
+  it("openai — max_completion_tokens (nunca max_tokens, que gpt-5 rechaza con 400) y margen para los modelos que razonan", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ choices: [{ message: { content: "ok" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await llamarIA(conexion({ proveedor: "openai", modelo: "gpt-5-mini" }), "hola", { maxTokens: 16 });
+    await llamarIA(conexion({ proveedor: "openai", modelo: "o4-mini" }), "hola", { maxTokens: 16 });
+    await llamarIA(conexion({ proveedor: "openai", modelo: "gpt-4.1-mini" }), "hola", { maxTokens: 16 });
+    const cuerpos = fetchMock.mock.calls.map(([, init]) => JSON.parse(init?.body as string));
+    for (const c of cuerpos) expect(c).not.toHaveProperty("max_tokens");
+    expect(cuerpos.map((c) => c.max_completion_tokens)).toEqual([16 + MARGEN_RAZONAMIENTO_TOKENS, 16 + MARGEN_RAZONAMIENTO_TOKENS, 16]);
+  });
+
+  it("xai y otro compatible siguen con max_tokens", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => respuestaJson({ choices: [{ message: { content: "ok" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await llamarIA(conexion({ proveedor: "xai", modelo: "grok" }), "hola", { maxTokens: 50 });
+    const cuerpo = JSON.parse(fetchMock.mock.calls[0]![1]?.body as string);
+    expect(cuerpo.max_tokens).toBe(50);
+    expect(cuerpo).not.toHaveProperty("max_completion_tokens");
   });
 
   it("xai — mismo formato que OpenAI, host distinto", async () => {

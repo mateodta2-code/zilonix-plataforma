@@ -26,6 +26,20 @@ async function llamarAnthropic(conexion: ConexionIAConClave, prompt: string, max
   return (data.content ?? []).map((c) => c.text || "").join("\n").trim();
 }
 
+// OpenAI (api.openai.com): los modelos que razonan (gpt-5…, o1/o3/o4…)
+// rechazan max_tokens con un 400 y gastan parte del tope razonando antes
+// de escribir. Se usa max_completion_tokens (lo aceptan todos los modelos
+// actuales de OpenAI) y, en los que razonan, un margen extra para que la
+// respuesta no salga vacía. xAI y los «compatibles» siguen con
+// max_tokens. Se cobra solo lo que se usa: el margen es un tope.
+export const MARGEN_RAZONAMIENTO_TOKENS = 4000;
+const MODELO_OPENAI_QUE_RAZONA = /^(gpt-5|o\d)/i;
+
+export function topeTokensChat(oficialOpenAI: boolean, modelo: string, maxTokens: number): Record<string, number> {
+  if (!oficialOpenAI) return { max_tokens: maxTokens };
+  return { max_completion_tokens: MODELO_OPENAI_QUE_RAZONA.test(modelo.trim()) ? maxTokens + MARGEN_RAZONAMIENTO_TOKENS : maxTokens };
+}
+
 // OpenAI, xAI (Grok) y cualquier "otro compatible con OpenAI" hablan
 // el MISMO formato de Chat Completions — un solo helper para los 3.
 // `redirectManual` solo lo pide otro_compatible_openai (ver llamarIA):
@@ -36,12 +50,12 @@ async function llamarCompatibleOpenAI(
   conexion: ConexionIAConClave,
   prompt: string,
   maxTokens: number,
-  opciones: { redirectManual?: boolean } = {}
+  opciones: { redirectManual?: boolean; oficialOpenAI?: boolean } = {}
 ): Promise<string> {
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${conexion.apiKey}` },
-    body: JSON.stringify({ model: conexion.modelo, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model: conexion.modelo, ...topeTokensChat(opciones.oficialOpenAI === true, conexion.modelo, maxTokens), messages: [{ role: "user", content: prompt }] }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
     ...(opciones.redirectManual ? { redirect: "manual" as const } : {}),
   }).catch(() => {
@@ -88,7 +102,7 @@ export async function llamarIA(conexion: ConexionIAConClave, prompt: string, opc
     case "anthropic":
       return llamarAnthropic(conexion, prompt, maxTokens);
     case "openai":
-      return llamarCompatibleOpenAI("https://api.openai.com/v1", conexion, prompt, maxTokens);
+      return llamarCompatibleOpenAI("https://api.openai.com/v1", conexion, prompt, maxTokens, { oficialOpenAI: true });
     case "xai":
       return llamarCompatibleOpenAI("https://api.x.ai/v1", conexion, prompt, maxTokens);
     case "otro_compatible_openai": {
@@ -163,7 +177,7 @@ async function llamarCompatibleOpenAIConImagenes(
   prompt: string,
   imagenes: ImagenIA[],
   maxTokens: number,
-  opciones: { redirectManual?: boolean } = {}
+  opciones: { redirectManual?: boolean; oficialOpenAI?: boolean } = {}
 ): Promise<string> {
   const content = [
     { type: "text", text: prompt },
@@ -172,7 +186,7 @@ async function llamarCompatibleOpenAIConImagenes(
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${conexion.apiKey}` },
-    body: JSON.stringify({ model: conexion.modelo, max_tokens: maxTokens, messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: conexion.modelo, ...topeTokensChat(opciones.oficialOpenAI === true, conexion.modelo, maxTokens), messages: [{ role: "user", content }] }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
     ...(opciones.redirectManual ? { redirect: "manual" as const } : {}),
   }).catch(() => {
@@ -217,7 +231,7 @@ export async function llamarIAConImagenes(
     case "anthropic":
       return llamarAnthropicConImagenes(conexion, prompt, imagenes, maxTokens);
     case "openai":
-      return llamarCompatibleOpenAIConImagenes("https://api.openai.com/v1", conexion, prompt, imagenes, maxTokens);
+      return llamarCompatibleOpenAIConImagenes("https://api.openai.com/v1", conexion, prompt, imagenes, maxTokens, { oficialOpenAI: true });
     case "xai":
       return llamarCompatibleOpenAIConImagenes("https://api.x.ai/v1", conexion, prompt, imagenes, maxTokens);
     case "otro_compatible_openai": {
