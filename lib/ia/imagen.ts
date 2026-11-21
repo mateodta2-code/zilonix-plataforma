@@ -182,29 +182,37 @@ async function conGoogle(apiKey: string, fotos: FotoBase[], prompt: string): Pro
 // muestra ni se registra: puede repetir la instrucción); el código y el
 // tipo sí, con lista blanca de caracteres, para que el vendedor sepa qué
 // pasó en vez de un «no aceptó la foto» genérico.
-const PATRON_CODIGO_ERROR = /^[a-z0-9_.-]{1,60}$/i;
+const PATRON_CODIGO_ERROR = /^[a-z0-9_.\[\]-]{1,60}$/i;
 
 export function mensajeErrorOpenAI(status: number, cuerpo: unknown): string {
-  const error = (cuerpo as { error?: { code?: unknown; type?: unknown; message?: unknown } } | null)?.error;
+  const error = (cuerpo as { error?: { code?: unknown; type?: unknown; param?: unknown; message?: unknown } } | null)?.error;
   const limpio = (v: unknown) => (typeof v === "string" && PATRON_CODIGO_ERROR.test(v) ? v : null);
   const codigo = limpio(error?.code);
   const tipo = limpio(error?.type);
+  const campo = limpio(error?.param);
   const texto = typeof error?.message === "string" ? error.message : "";
-  console.warn(`[lib/ia/imagen] OpenAI respondió ${status} (code=${codigo ?? "-"}, type=${tipo ?? "-"})`);
+  console.warn(`[lib/ia/imagen] OpenAI respondió ${status} (code=${codigo ?? "-"}, type=${tipo ?? "-"}, param=${campo ?? "-"})`);
+  // Siempre al final: el código y el campo que señala OpenAI, para que
+  // soporte sepa la causa exacta sin ver el texto crudo.
+  const detalle = [codigo && `código: ${codigo}`, campo && `campo: ${campo}`].filter(Boolean).join(", ");
+  const conDetalle = (mensaje: string) => (detalle ? `${mensaje} (${detalle})` : mensaje);
   if (/verif/i.test(texto) && /organi[sz]ation/i.test(texto)) {
-    return "Para crear imágenes, OpenAI exige verificar la organización: entra a platform.openai.com → Settings → Organization → «Verify Organization». Después puede tardar unos 15 minutos en activarse.";
+    return conDetalle("Para crear imágenes, OpenAI exige verificar la organización: entra a platform.openai.com → Settings → Organization → «Verify Organization». Después puede tardar unos 15 minutos en activarse.");
   }
   if (codigo === "moderation_blocked" || /safety system|moderation/i.test(texto)) {
-    return "El filtro de contenido de OpenAI bloqueó esta imagen. Prueba con otra foto o con una instrucción más simple (sin personas reales, marcas ni temas de salud).";
+    return conDetalle("El filtro de contenido de OpenAI bloqueó esta imagen. Prueba con otra foto o con una instrucción más simple (sin personas reales, marcas ni temas de salud).");
   }
   if (codigo === "insufficient_quota" || codigo === "billing_hard_limit_reached") {
-    return "La cuenta de OpenAI de la empresa no tiene saldo o llegó a su límite de gasto. Revisa Billing en platform.openai.com.";
+    return conDetalle("La cuenta de OpenAI de la empresa no tiene saldo o llegó a su límite de gasto. Revisa Billing en platform.openai.com.");
   }
-  if (status === 400 && (codigo?.startsWith("invalid_image") || codigo === "image_too_large" || /\bimage\b/i.test(texto))) {
-    return "OpenAI no pudo leer la foto base. Prueba con otra foto (JPG o PNG, de buena calidad).";
+  // Solo cuando OpenAI señala la foto (por código o por el campo «image»),
+  // nunca por la palabra «image» en el texto: el nombre del modelo
+  // (gpt-image-1) la trae en casi cualquier error.
+  if (status === 400 && (codigo?.startsWith("invalid_image") || codigo === "image_too_large" || campo?.startsWith("image"))) {
+    return conDetalle("OpenAI no pudo leer la foto base. Prueba con otra foto (JPG o PNG, de buena calidad).");
   }
-  if (status === 400) return `OpenAI no aceptó la solicitud${codigo ? ` (código: ${codigo})` : ""}. Prueba con otra foto; si se repite, avísale a soporte con ese código.`;
-  return mensajeHttp("OpenAI", status);
+  if (status === 400) return conDetalle("OpenAI no aceptó la solicitud. Prueba con otra foto; si se repite, avísale a soporte con este mensaje.");
+  return conDetalle(mensajeHttp("OpenAI", status));
 }
 
 function mensajeHttp(proveedor: string, status: number): string {

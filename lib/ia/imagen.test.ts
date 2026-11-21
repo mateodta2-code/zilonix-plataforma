@@ -155,6 +155,20 @@ describe("generarImagenDesdeFoto", () => {
     expect(String(error)).not.toMatch(/secreto/);
   });
 
+  it("OpenAI: un error que solo menciona el modelo gpt-image-1 no se confunde con «foto ilegible»; siempre trae código y campo", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "unsupported_value", type: "invalid_request_error", param: "quality", message: "Invalid value for quality with model gpt-image-1." } }), { status: 400 })
+    ) as unknown as typeof fetch;
+    const error = String(await generarImagenDesdeFoto(conexion("openai"), [base], "p").catch((e: Error) => e));
+    expect(error).not.toMatch(/no pudo leer la foto/);
+    expect(error).toMatch(/código: unsupported_value, campo: quality/);
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "invalid_value", type: "invalid_request_error", param: "image[]", message: "x" } }), { status: 400 })
+    ) as unknown as typeof fetch;
+    const deFoto = String(await generarImagenDesdeFoto(conexion("openai"), [base], "p").catch((e: Error) => e));
+    expect(deFoto).toMatch(/no pudo leer la foto base.*código: invalid_value, campo: image\[\]/);
+  });
+
   it("errores legibles: clave rechazada, sin imagen, proveedor que no genera, respuesta que no es imagen", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 401 })) as unknown as typeof fetch;
     await expect(generarImagenDesdeFoto(conexion("openai"), [base], "p")).rejects.toThrow(/rechazó la clave/);
