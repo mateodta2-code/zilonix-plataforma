@@ -1,0 +1,1 @@
+- Tema claro: las tarjetas, KPI, estados vacíos, la barra «Guía de este módulo» y el filtro de cuenta de Optimización vuelven a llevar el borde azul-plata de marca (con filetes azules arriba y abajo), con tonos más profundos para que se vean sobre fondo claro. El tema oscuro no cambia. Refs #518.

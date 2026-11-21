@@ -507,7 +507,12 @@
   /* El degradado oficial se apaga sobre blanco (la mitad clara no se
      distingue). El borde en claro usa el lado oscuro de la misma
      paleta para que el filo se vea. */
-  --degradado-plata-borde: linear-gradient(135deg, var(--azul-metal-3) 0%, #9aa0a9 14%, #e6e6e6 32%, #a9aeb6 50%, #e6e6e6 68%, #9aa0a9 86%, var(--azul-metal-3) 100%);
+  --degradado-plata-borde: linear-gradient(135deg, var(--azul-metal-2) 0%, #7d8594 16%, #c3c8d0 34%, #8c93a1 50%, #c3c8d0 66%, #7d8594 84%, var(--azul-metal-2) 100%);
+  /* Issue #518 — filete azul de las tarjetas en claro: azul más profundo
+     (--azul-metal-2) porque --azul-metal-3 pierde contraste sobre blanco.
+     Una sola fuente: Tarjeta, TarjetaKpi, EstadoVacio y GuiaModulo lo leen. */
+  --filete-marca-color: var(--azul-metal-2);
+  --filete-marca-gradiente: linear-gradient(90deg, transparent, var(--filete-marca-color), transparent);
   /* Tarea "marca unificada": títulos en gris metalizado (pedido:
      #3F4651 -> #8A93A0 -> #2E343D). El punto medio pedido (#8A93A0)
      se cambia a #656C77: contra --superficie-2 (#ececee, la tarjeta
@@ -554,10 +559,11 @@
   --borde-zona-oscura: #d3d6db;
   --superficie-2-zona-oscura: #f1f3f6;
   --degradado-plata-texto-zona-oscura: linear-gradient(100deg, #3f4651 0%, #656c77 46%, #2e343d 100%);
-  /* Quita el borde azul fijo de los campos; el azul queda solo en hover/foco.
-     Va como sombra transparente (no `none`) porque se usa dentro de una
-     lista de box-shadow en hover/foco, donde `none, …` sería CSS inválido. */
-  --filete-marca-arriba-abajo: inset 0 0 0 0 transparent;
+  /* Issue #518 — vuelve el filete azul sutil arriba y abajo de los campos
+     (lo había apagado #516). Nunca `none`: se usa dentro de listas de
+     box-shadow; para "apagado" se usa `inset 0 0 0 0 transparent`. */
+  --filete-marca-arriba-abajo: inset 0 1px 0 0 color-mix(in srgb, var(--azul-metal-2) 55%, transparent),
+    inset 0 -1px 0 0 color-mix(in srgb, var(--azul-metal-2) 55%, transparent);
 }
 
 :root[data-tema="claro"][data-fondo="suave"] {

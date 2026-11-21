@@ -11,9 +11,13 @@
 
 :global(:root[data-tema="claro"]) .panelDatos {
   padding: 14px 16px;
-  border: 1px solid var(--borde);
+  /* Issue #518 — borde azul-plata de marca (token claro compartido). */
+  border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
-  background: var(--superficie);
+  background:
+    var(--superficie) padding-box,
+    var(--degradado-plata-borde) border-box;
+  box-shadow: var(--sombra-tarjeta), var(--filete-marca-arriba-abajo);
   color: var(--texto);
 }
 
