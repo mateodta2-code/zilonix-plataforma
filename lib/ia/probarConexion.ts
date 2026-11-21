@@ -6,6 +6,7 @@ export type ResultadoProbarIA = { ok: true } | { ok: false; error: string };
 export const ERRORES_PROBAR_IA = {
   llave: "La llave no es válida o no tiene permiso.",
   modelo: "El modelo no existe para esta cuenta.",
+  solicitud: "El proveedor rechazó la solicitud: revisa el nombre del modelo.",
   tiempo: "La IA no respondió a tiempo.",
   noEncontrada: "No se encontró esa conexión.",
   generico: "No se pudo probar la conexión.",
@@ -24,6 +25,7 @@ export async function probarConexionIA(empresaId: string, id: string): Promise<R
       const estado = Number(/\((\d{3})\)/.exec(error.message)?.[1]);
       if (estado === 401 || estado === 403) return { ok: false, error: ERRORES_PROBAR_IA.llave };
       if (estado === 404) return { ok: false, error: ERRORES_PROBAR_IA.modelo };
+      if (estado === 400 || estado === 422) return { ok: false, error: ERRORES_PROBAR_IA.solicitud };
       if (/a tiempo/.test(error.message)) return { ok: false, error: ERRORES_PROBAR_IA.tiempo };
     }
     return { ok: false, error: ERRORES_PROBAR_IA.generico };
