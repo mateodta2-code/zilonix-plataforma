@@ -16,6 +16,11 @@ export type PropuestaTitulos = { titulos: string[]; catalogo: string | null; pal
 
 // Promoción y relleno que Mercado Libre no quiere en el título.
 const PROMOCION = [
+  // Solo porcentajes de descuento («20% off», «50 % dcto», «30% de
+  // descuento»); un porcentaje que describe el producto («100% algodón»)
+  // se queda. Va primero: si «descuento» se quitara antes, quedaría
+  // «30% de» suelto.
+  /\b\d+\s?%\s?(off|dcto|desc|descuento|de descuento|desconto)\b/gi,
   /env[ií]o\s+gr[aá]tis/gi,
   /\bfrete\s+gr[aá]tis\b/gi,
   /\bgr[aá]tis\b/gi,
@@ -27,7 +32,6 @@ const PROMOCION = [
   /\bprecio\b/gi,
   /\bpreço\b/gi,
   /[$€£]\s?\d[\d.,]*/g,
-  /\d+\s?%\s?(off|dcto|desc)?/gi,
 ];
 const SIMBOLOS = /[!¡*★☆✔✅❤|#@~^_=+<>{}[\]"“”«»]|\p{Extended_Pictographic}/gu;
 
