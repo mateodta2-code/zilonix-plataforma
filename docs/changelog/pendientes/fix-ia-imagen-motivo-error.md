@@ -5,3 +5,4 @@
   - sin saldo o límite de gasto → revisar Billing;
   - otro 400 → «no aceptó la solicitud (código: …)».
   - En el log queda solo el estado, el código y el tipo. Sin migración.
+  - **Ajuste:** «no pudo leer la foto base» solo sale cuando OpenAI señala la foto (código `invalid_image*`/`image_too_large` o campo `image`), no por la palabra «image» en el texto (el nombre del modelo, gpt-image-1, la trae en casi cualquier error). Todos los mensajes terminan con el código y el campo que señala OpenAI.
