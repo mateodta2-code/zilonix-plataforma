@@ -94,15 +94,18 @@
   pointer-events: none;
 }
 
-/* Tema de día (2/3): tarjeta blanca con sombra suave, sin los filetes
-   azules ni el borde en degradado. */
+/* Tema de día (issue #518): fondo claro y sombra suave, pero con el mismo
+   borde azul-plata y filetes de marca del oscuro (tokens claros). */
 :root[data-tema="claro"] .tarjeta {
-  border: 1px solid var(--borde);
-  background: var(--tarjeta-fondo);
+  border: 1px solid transparent;
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo) padding-box,
+    var(--degradado-plata-borde) border-box;
   box-shadow: var(--sombra-tarjeta);
 }
 
 :root[data-tema="claro"] .tarjeta::before,
 :root[data-tema="claro"] .tarjeta::after {
-  display: none;
+  background: var(--filete-marca-gradiente);
 }

@@ -125,17 +125,20 @@
   margin-top: 4px;
 }
 
-/* Tema de día (2/3): KPI blanco con sombra suave, sin los filetes
-   azules ni el borde en degradado. */
+/* Tema de día (issue #518): fondo claro y sombra suave, con el borde
+   azul-plata y los filetes de marca (tokens claros de globals.css). */
 :root[data-tema="claro"] .tarjeta {
-  border: 1px solid var(--borde);
-  background: var(--kpi-fondo);
+  border: 1px solid transparent;
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--kpi-fondo) padding-box,
+    var(--degradado-plata-borde) border-box;
   box-shadow: var(--sombra-tarjeta);
 }
 
 :root[data-tema="claro"] .tarjeta::before,
 :root[data-tema="claro"] .tarjeta::after {
-  display: none;
+  background: var(--filete-marca-gradiente);
 }
 
 :root[data-tema="claro"] .tarjeta:hover {

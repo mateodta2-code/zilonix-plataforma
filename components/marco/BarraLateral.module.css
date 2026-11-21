@@ -71,6 +71,12 @@
   flex-shrink: 0;
 }
 
+/* Issue #518: en claro el logo plata se ve lavado; grafito metalizado vía
+   token del bloque claro (el oscuro no define filtro ni cambia). */
+:root[data-tema="claro"] .logoCompleto {
+  filter: var(--filtro-logo-claro);
+}
+
 .iconoColapsado {
   width: 32px;
   height: auto;

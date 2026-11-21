@@ -4,6 +4,15 @@
   background: var(--tarjeta-fondo);
 }
 
+/* Issue #518 — en claro, mismo borde azul-plata de marca que las tarjetas. */
+:global(:root[data-tema="claro"]) .guia {
+  border: 1px solid transparent;
+  background:
+    var(--tarjeta-fondo) padding-box,
+    var(--degradado-plata-borde) border-box;
+  box-shadow: var(--sombra-tarjeta), var(--filete-marca-arriba-abajo);
+}
+
 .resumen {
   padding: 10px 14px;
   font-size: 13.5px;
