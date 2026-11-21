@@ -129,13 +129,13 @@ describe("bodegas 3PL (RLS + lib, PR login-bodega-domiciliario)", () => {
         const a = await dbComoBodega(bodegaA, (tx) => tx.update(miembrosBodega3pl).set({ activo: false }).where(eq(miembrosBodega3pl.id, objetivo)).returning({ id: miembrosBodega3pl.id }), rol);
         expect(a).toHaveLength(0);
       }
-      const [b] = await db.select().from(bodegas3pl).where(eq(bodegas3pl.id, bodegaA));
+      const [b] = await dbComoBodega(bodegaA, (tx) => tx.select().from(bodegas3pl).where(eq(bodegas3pl.id, bodegaA)));
       expect(b.nombre).toBe(`Bodega A ${sufijo}`);
     });
 
     it("el admin_bodega sí edita su bodega y sus miembros", async () => {
       await actualizarDatosBodega(bodegaA, adminId, { nombre: `Bodega A ${sufijo}`, nit: "900123" }, "admin_bodega");
-      const [b] = await db.select().from(bodegas3pl).where(eq(bodegas3pl.id, bodegaA));
+      const [b] = await dbComoBodega(bodegaA, (tx) => tx.select().from(bodegas3pl).where(eq(bodegas3pl.id, bodegaA)));
       expect(b.nit).toBe("900123");
     });
 
