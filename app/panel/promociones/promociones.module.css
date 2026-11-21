@@ -12,6 +12,7 @@
   display: flex;
   gap: 10px;
   align-items: flex-end;
+  --alinear-boton: flex-end; /* los botones hijos directos bajan al nivel de los campos (ver Boton.module.css) */
   flex-wrap: wrap;
 }
 
@@ -55,4 +56,8 @@
   gap: 8px;
   font-size: 13px;
   max-width: 320px;
+}
+
+.filaBuscar > * > * {
+  --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
 }

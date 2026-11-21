@@ -6,6 +6,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
+  --alinear-boton: flex-end; /* los botones hijos directos bajan al nivel de los campos (ver Boton.module.css) */
   gap: 12px;
 }
 
@@ -388,4 +389,8 @@
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.filaFormulario > * > * {
+  --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
 }

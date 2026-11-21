@@ -1,0 +1,1 @@
+- Botones: en las filas de filtros (Inicio «Actualizar», Actividad, Despachos, Pedidos, SKU, Inventario, Finanzas, Promociones, Publicidad, Investigación, Preguntas) el botón ya queda abajo, al nivel de los campos, y no arriba junto a las etiquetas. Sigue #540.

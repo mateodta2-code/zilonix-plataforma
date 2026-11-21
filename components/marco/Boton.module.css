@@ -3,7 +3,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  align-self: flex-start; /* el contenido de cada página es una columna flex (MarcoApp) que estira a sus hijos por defecto — un botón nunca debe estirarse a lo ancho solo */
+  align-self: var(--alinear-boton, flex-start); /* por defecto arriba; las filas de filtros definen --alinear-boton: flex-end.  el contenido de cada página es una columna flex (MarcoApp) que estira a sus hijos por defecto — un botón nunca debe estirarse a lo ancho solo */
   gap: 6px;
   box-sizing: border-box;
   min-height: var(--alto-control);
