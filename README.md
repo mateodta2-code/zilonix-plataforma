@@ -41,3 +41,22 @@ Para conectarte a la base real sin exponerla a internet: `railway connect Postgr
 
 Para el estado real y actualizado del proyecto (qué está terminado, qué está a medias, qué falta y los problemas conocidos) ver `docs/ESTADO.md` — esta sección no se mantiene al día, ese archivo sí.
 
+
+## Cómo pedirle trabajo a Claude
+
+Hay dos formas de trabajar con Claude:
+
+- **Desde Visual Studio Code:** una sola sesión; se usa `/clear` al terminar cada tarea.
+- **Desde GitHub:** se crea un issue que mencione `@claude`.
+
+Flujo con issues:
+
+1. Pablo crea el issue con la plantilla: Contexto, Tarea, Archivos probables, Criterios de aceptación, Reglas, Qué NO tocar y Ahorro de créditos.
+2. Claude lee el issue, trabaja en una rama nueva desde `main` y abre el PR.
+3. Pablo revisa el PR y Mateo lo aprueba.
+
+Reglas:
+
+- Cada issue debe ser pequeño y nombrar los archivos que se tocan.
+- El PR referencia el issue con `Refs #N`, nunca con `Closes #N`.
+- Producción (rama `produccion`) siempre necesita la aprobación de Mateo.
