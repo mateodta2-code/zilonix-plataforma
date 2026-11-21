@@ -14,11 +14,16 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // app.empresa_actual se fija al UUID centinela (el que ninguna empresa
 // real puede tener): una bodega no lee NADA de empresas de vendedores, y
 // las políticas de empresa no revientan por falta de variable.
-export async function dbComoBodega<T>(bodegaId: string, fn: (tx: typeof db) => Promise<T>): Promise<T> {
+//
+// app.bodega_rol (opcional) es el rol del miembro en la sesión: las políticas
+// de UPDATE de bodegas_3pl y miembros_bodega_3pl exigen 'admin_bodega'. Sin
+// rol vale cadena vacía y NO da permiso de edición (solo lectura).
+export async function dbComoBodega<T>(bodegaId: string, fn: (tx: typeof db) => Promise<T>, rol?: string): Promise<T> {
   if (!UUID_RE.test(bodegaId)) throw new Error(`bodegaId inválido: "${bodegaId}" no es un UUID.`);
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.empresa_actual', ${EMPRESA_SENTINEL}, true)`);
     await tx.execute(sql`SELECT set_config('app.bodega_id', ${bodegaId}, true)`);
+    await tx.execute(sql`SELECT set_config('app.bodega_rol', ${rol ?? ""}, true)`);
     return fn(tx as unknown as typeof db);
   });
 }

@@ -13,7 +13,7 @@ export async function guardarDatosBodegaAction(formData: FormData) {
   if (!decision.ok) throw new Error("No tienes permiso para editar la bodega.");
   let destino: string;
   try {
-    await actualizarDatosBodega(decision.membresia.bodegaId, usuario.id, { nombre: String(formData.get("nombre") ?? ""), nit: String(formData.get("nit") ?? "") });
+    await actualizarDatosBodega(decision.membresia.bodegaId, usuario.id, { nombre: String(formData.get("nombre") ?? ""), nit: String(formData.get("nit") ?? "") }, decision.membresia.rol);
     revalidatePath("/bodega", "layout");
     destino = conMensaje(RUTA, "ok", "Datos guardados.");
   } catch (error) {

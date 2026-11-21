@@ -15,7 +15,7 @@ export async function cambiarRolBodegaAction(formData: FormData) {
   if (!decision.ok) throw new Error("No tienes permiso para cambiar roles.");
   let destino: string;
   try {
-    const { antes, despues } = await cambiarRolDeMiembro(decision.membresia.bodegaId, usuario.id, String(formData.get("miembroId") ?? ""), String(formData.get("rol") ?? ""));
+    const { antes, despues } = await cambiarRolDeMiembro(decision.membresia.bodegaId, usuario.id, String(formData.get("miembroId") ?? ""), String(formData.get("rol") ?? ""), decision.membresia.rol);
     revalidatePath(RUTA);
     destino = conMensaje(RUTA, "ok", antes === despues ? `Ya tenía el rol ${despues}.` : `Rol cambiado de ${antes} a ${despues}.`);
   } catch (error) {
@@ -31,7 +31,7 @@ export async function cambiarActivoAction(formData: FormData) {
   const activo = String(formData.get("activo") ?? "") === "1";
   let destino: string;
   try {
-    await cambiarActivoDeMiembro(decision.membresia.bodegaId, usuario.id, String(formData.get("miembroId") ?? ""), activo);
+    await cambiarActivoDeMiembro(decision.membresia.bodegaId, usuario.id, String(formData.get("miembroId") ?? ""), activo, decision.membresia.rol);
     revalidatePath(RUTA);
     destino = conMensaje(RUTA, "ok", activo ? "Persona reactivada." : "Persona desactivada.");
   } catch (error) {
