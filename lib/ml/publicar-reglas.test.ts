@@ -5,6 +5,8 @@ import {
   aplicarRespaldoDimensionesProducto,
   canonicalizarValorListaCerrada,
   conUnidadSiHaceFalta,
+  normalizarNumeroConUnidad,
+  UnidadInvalidaError,
   decidirAtributoGtin,
   detectarGeneroPorTitulo,
   esErrorDeFamilyName,
@@ -244,5 +246,58 @@ describe("detección de errores reales por regex sobre la respuesta cruda de Mer
   });
   it("item bajo revisión, no se puede pausar/activar (Mateo 25/9)", () => {
     expect(itemNoModificablePorRevision("item.status.not_modifiable")).toBe(true);
+  });
+});
+
+// Datos tomados de la forma real que devuelve GET /categories/MCO191758/attributes.
+const EDAD_MAX: DefinicionAtributoMl = {
+  id: "MAX_RECOMMENDED_AGE",
+  name: "Edad máxima recomendada",
+  value_type: "number_unit",
+  default_unit: "años",
+  allowed_units: [
+    { id: "años", name: "años" },
+    { id: "meses", name: "meses" },
+  ],
+};
+const PESO: DefinicionAtributoMl = {
+  id: "WEIGHT",
+  name: "Peso",
+  value_type: "number_unit",
+  default_unit: "g",
+  allowed_units: [
+    { id: "g", name: "g" },
+    { id: "kg", name: "kg" },
+    { id: "mg", name: "mg" },
+  ],
+};
+
+describe("normalizarNumeroConUnidad — caso real TIENDAMERCADOMAX, «Paracaídas Juguete», MAX_RECOMMENDED_AGE", () => {
+  it("solo número: agrega la unidad por defecto de la categoría", () => {
+    expect(normalizarNumeroConUnidad(EDAD_MAX, "18")).toBe("18 años");
+    expect(normalizarNumeroConUnidad(PESO, "500")).toBe("500 g");
+    expect(normalizarNumeroConUnidad(PESO, "1,5")).toBe("1,5 g");
+  });
+  it("sin default_unit usa la primera allowed_unit; sin ninguna deja el número", () => {
+    expect(normalizarNumeroConUnidad({ ...PESO, default_unit: null }, "7")).toBe("7 g");
+    expect(normalizarNumeroConUnidad({ id: "X", name: "X", value_type: "number_unit" }, "7")).toBe("7");
+  });
+  it("respeta una unidad válida escrita (sin distinguir mayúsculas; años/anos)", () => {
+    expect(normalizarNumeroConUnidad(EDAD_MAX, "18 meses")).toBe("18 meses");
+    expect(normalizarNumeroConUnidad(EDAD_MAX, "18 ANOS")).toBe("18 años");
+    expect(normalizarNumeroConUnidad(PESO, "2 KG")).toBe("2 kg");
+  });
+  it("unidad que la categoría no acepta: error claro con las unidades permitidas", () => {
+    expect(() => normalizarNumeroConUnidad(EDAD_MAX, "18 kg")).toThrow(UnidadInvalidaError);
+    expect(() => normalizarNumeroConUnidad(EDAD_MAX, "18 kg")).toThrow(/años, meses/);
+  });
+  it("texto sin número («N/A») se omite", () => {
+    expect(normalizarNumeroConUnidad(EDAD_MAX, "N/A")).toBeNull();
+  });
+});
+
+describe("respaldo UNIDAD_POR_DEFECTO", () => {
+  it("MAX_RECOMMENDED_AGE → años cuando la categoría no trae allowed_units", () => {
+    expect(conUnidadSiHaceFalta("MAX_RECOMMENDED_AGE", "18")).toBe("18 años");
   });
 });

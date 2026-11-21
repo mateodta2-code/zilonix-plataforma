@@ -11,7 +11,7 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { productosMl } from "@/db/schema";
 import { publicarProductoEnCuentas } from "@/lib/ml/publicar";
 import type { DatosPorCuenta, VariantesProducto } from "@/lib/ml/publicar-tipos";
-import { esRellenoFalsoDimensiones } from "./formulario-logica";
+import { esRellenoFalsoDimensiones, tituloInicialPublicacion } from "./formulario-logica";
 
 // Code review de Pablo (sobre 768305e) — mismo patrón que ya usa el
 // resto del repo para un UUID real (columna `id`, Postgres
@@ -143,6 +143,8 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
       .insert(productosMl)
       .values({
         empresaId: empresa.id,
+        // Título de la primera cuenta, para que el historial no diga «(sin título)» mientras publica.
+        titulo: tituloInicialPublicacion(porCuenta, cuentasSeleccionadas),
         precio,
         stock,
         condicion,

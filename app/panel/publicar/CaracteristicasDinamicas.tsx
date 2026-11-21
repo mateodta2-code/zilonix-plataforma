@@ -11,9 +11,68 @@ export type CaracteristicaCategoria = {
   valueType: string | null;
   permiteVariante: boolean;
   definePic: boolean;
+  unidades?: string[]; // solo value_type "number_unit"
+  unidadPorDefecto?: string | null;
 };
 
 const OTRO = "__otro__";
+
+// Separa un valor guardado tipo «18 años» en número + unidad (así
+// funcionan Reintentar y Duplicar). Si la unidad guardada no está entre
+// las permitidas, se conserva igual para no perder lo que escribió la persona.
+export function separarNumeroUnidad(valor: string): { numero: string; unidad: string } {
+  const m = String(valor ?? "").trim().match(/^(\d+(?:[.,]\d+)?)\s*(.*)$/);
+  return m ? { numero: m[1], unidad: m[2].trim() } : { numero: String(valor ?? ""), unidad: "" };
+}
+
+export function combinarNumeroUnidad(numero: string, unidad: string): string {
+  const n = numero.trim();
+  return n === "" ? "" : unidad ? `${n} ${unidad}` : n;
+}
+
+function FilaNumeroUnidad({ attr, valor, onCambiar }: { attr: CaracteristicaCategoria; valor: string; onCambiar: (valor: string) => void }) {
+  const unidades = attr.unidades ?? [];
+  const guardado = separarNumeroUnidad(valor);
+  // La unidad elegida se recuerda aparte: si se elige antes de escribir el número, no se pierde.
+  const [unidadElegida, setUnidadElegida] = useState("");
+  const unidad = guardado.unidad || unidadElegida || attr.unidadPorDefecto || unidades[0] || "";
+  const opciones = unidad && !unidades.includes(unidad) ? [...unidades, unidad] : unidades;
+  return (
+    <Campo
+      etiqueta={
+        <>
+          {attr.nombre}
+          {attr.obligatorio && <span style={{ color: "var(--peligro-texto)" }}> *</span>}
+        </>
+      }
+    >
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          className="zx-control"
+          type="number"
+          inputMode="decimal"
+          step="any"
+          min="0"
+          value={guardado.numero.replace(",", ".")}
+          onChange={(e) => onCambiar(combinarNumeroUnidad(e.target.value, unidad))}
+          placeholder="Escribe el valor"
+          aria-label={`${attr.nombre} (número)`}
+        />
+        <select className="zx-control" value={unidad} onChange={(e) => {
+            setUnidadElegida(e.target.value);
+            onCambiar(combinarNumeroUnidad(guardado.numero, e.target.value));
+          }}
+          aria-label={`${attr.nombre} (unidad)`}>
+          {opciones.map((u) => (
+            <option key={u} value={u}>
+              {u}
+            </option>
+          ))}
+        </select>
+      </div>
+    </Campo>
+  );
+}
 
 // Un atributo: <select> con los valores reales de la categoría (≤60,
 // tal como los expone Mercado Libre) + "✏️ Otro (escribir)…" al final
@@ -23,6 +82,11 @@ const OTRO = "__otro__";
 // exige un valor cerrado, así que escribir algo que no exista en la
 // lista real avisa con las opciones válidas en vez de publicar mal.
 function FilaAtributo({ attr, valor, onCambiar }: { attr: CaracteristicaCategoria; valor: string; onCambiar: (valor: string) => void }) {
+  if (attr.valueType === "number_unit" && (attr.unidades?.length ?? 0) > 0) return <FilaNumeroUnidad attr={attr} valor={valor} onCambiar={onCambiar} />;
+  return <FilaTextoOLista attr={attr} valor={valor} onCambiar={onCambiar} />;
+}
+
+function FilaTextoOLista({ attr, valor, onCambiar }: { attr: CaracteristicaCategoria; valor: string; onCambiar: (valor: string) => void }) {
   const [modoLibre, setModoLibre] = useState(() => valor !== "" && !attr.valores.includes(valor));
   return (
     <Campo
@@ -57,7 +121,7 @@ function FilaAtributo({ attr, valor, onCambiar }: { attr: CaracteristicaCategori
         </select>
       ) : (
         <div style={{ display: "flex", gap: 8 }}>
-          <input className="zx-control" value={valor} onChange={(e) => onCambiar(e.target.value)} placeholder="Escribí el valor" />
+          <input className="zx-control" value={valor} onChange={(e) => onCambiar(e.target.value)} placeholder="Escribe el valor" />
           {attr.valores.length > 0 && (
             <button type="button" onClick={() => setModoLibre(false)} style={{ fontSize: 12, background: "none", border: "none", textDecoration: "underline", cursor: "pointer" }}>
               Elegir de la lista
