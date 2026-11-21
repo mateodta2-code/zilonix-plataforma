@@ -1,0 +1,1 @@
+- Tema de día (2/3): los tokens `--*-zona-oscura` valen texto oscuro sobre fondo claro (títulos, subtítulos, etiquetas, KPI, pestañas y menú legibles); tarjetas, KPI y estados vacíos blancos con sombra suave y sin líneas azules; campos sin borde azul en reposo. El tema oscuro no cambia. Refs #515
