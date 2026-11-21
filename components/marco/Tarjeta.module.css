@@ -93,3 +93,16 @@
   background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
   pointer-events: none;
 }
+
+/* Tema de día (2/3): tarjeta blanca con sombra suave, sin los filetes
+   azules ni el borde en degradado. */
+:root[data-tema="claro"] .tarjeta {
+  border: 1px solid var(--borde);
+  background: var(--tarjeta-fondo);
+  box-shadow: var(--sombra-tarjeta);
+}
+
+:root[data-tema="claro"] .tarjeta::before,
+:root[data-tema="claro"] .tarjeta::after {
+  display: none;
+}

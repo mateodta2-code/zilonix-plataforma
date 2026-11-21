@@ -124,3 +124,20 @@
   height: 28px;
   margin-top: 4px;
 }
+
+/* Tema de día (2/3): KPI blanco con sombra suave, sin los filetes
+   azules ni el borde en degradado. */
+:root[data-tema="claro"] .tarjeta {
+  border: 1px solid var(--borde);
+  background: var(--kpi-fondo);
+  box-shadow: var(--sombra-tarjeta);
+}
+
+:root[data-tema="claro"] .tarjeta::before,
+:root[data-tema="claro"] .tarjeta::after {
+  display: none;
+}
+
+:root[data-tema="claro"] .tarjeta:hover {
+  box-shadow: var(--sombra-tarjeta), var(--sombra-marca-hover);
+}

@@ -537,6 +537,25 @@
      issue 2). */
   --resplandor-esquina-claro: color-mix(in srgb, var(--azul-metal-3) 9%, transparent);
   --sombra-tarjeta: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 22px color-mix(in srgb, var(--azul-metal-1) 8%, transparent);
+  /* En el tema de día ya no existe ninguna zona oscura (ni franja negra
+     ni tarjetas oscuras): los tokens --*-zona-oscura valen lo mismo que
+     el texto normal del tema claro. Sin esto, títulos, etiquetas, KPI y
+     pestañas salían en gris casi blanco sobre fondo claro. */
+  --texto-zona-oscura: #1a1d23;
+  --texto-suave-zona-oscura: #5b6270;
+  --icono-zona-oscura: #686868;
+  --icono-hover-zona-oscura: #242424;
+  --icono-activo-zona-oscura: var(--azul-metal-2);
+  --plata-etiqueta-zona-oscura: #686868;
+  --acento-zona-oscura: #2563eb;
+  --acento-fuerte-zona-oscura: var(--azul-metal-2);
+  --acento-suave-zona-oscura: color-mix(in srgb, var(--azul-metal-3) 16%, transparent);
+  --acento-resplandor-zona-oscura: var(--resplandor-esquina-claro);
+  --borde-zona-oscura: #d3d6db;
+  --superficie-2-zona-oscura: #f1f3f6;
+  --degradado-plata-texto-zona-oscura: linear-gradient(100deg, #3f4651 0%, #656c77 46%, #2e343d 100%);
+  /* Quita el borde azul fijo de los campos; el azul queda solo en hover/foco. */
+  --filete-marca-arriba-abajo: none;
 }
 
 :root[data-tema="claro"][data-fondo="suave"] {
