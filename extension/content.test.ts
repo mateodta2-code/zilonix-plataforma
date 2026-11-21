@@ -50,6 +50,7 @@ async function cargarContentFresco(hostname = "articulo.mercadolibre.com.co") {
 
   return (await import("./content.js")) as unknown as {
     bloqueAnalisisAproximado: (datos: Record<string, unknown>) => string;
+    formatoPrecio: (valor: number | null | undefined, moneda: string | null | undefined) => string;
     valorInterruptorDesdeStorage: (valorGuardado: unknown) => boolean;
     debeDibujarPanel: (interruptorEncendido: boolean, panelCerrado: boolean) => boolean;
     leerPanelCerrado: (storage: StorageFake | null) => boolean;
