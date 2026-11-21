@@ -38,6 +38,9 @@ describe("llamarIAConImagenes", () => {
     expect(f.mock.calls[0]![0]).toBe(urlEsperada);
     const body = JSON.parse(f.mock.calls[0]![1]!.body as string);
     expect(body.messages[0].content[1]).toEqual({ type: "image_url", image_url: { url: "data:image/jpeg;base64,QUJD" } });
+    // OpenAI: max_completion_tokens; xAI: max_tokens.
+    expect(Object.keys(body)).toContain(proveedor === "openai" ? "max_completion_tokens" : "max_tokens");
+    expect(Object.keys(body)).not.toContain(proveedor === "openai" ? "max_tokens" : "max_completion_tokens");
   });
 
   it("compatible — redirect manual y un 3xx se rechaza", async () => {
