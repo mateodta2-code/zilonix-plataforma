@@ -81,3 +81,20 @@
   gap: 6px;
   font-size: 13px;
 }
+
+.ayuda {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ayuda ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ayuda a {
+  text-decoration: underline;
+}

@@ -1,0 +1,1 @@
+- Conectar IA: el formulario muestra, según el proveedor, el enlace oficial para crear la API key, pasos cortos, un modelo de ejemplo y la nota de que la suscripción mensual no sirve; la guía del módulo ya sale en `/panel/conectar-ia`.
