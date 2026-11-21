@@ -358,11 +358,15 @@ const RUTAS_EXENTAS: Record<string, string> = {
 };
 
 // Una directiva "use server" (de archivo o dentro de una función) en su
-// propia línea: ese archivo expone Server Actions, se llame como se llame.
-const PATRON_USE_SERVER = /^\s*["']use server["'];?\s*$/m;
+// propia línea (puede llevar un comentario al final): ese archivo expone
+// Server Actions, se llame como se llame.
+const PATRON_USE_SERVER = /^\s*["']use server["'];?\s*(\/\/.*|\/\*.*\*\/\s*)?$/m;
+// TypeScript y JavaScript: Next acepta los dos.
+const EXTENSION_CODIGO = /\.(tsx?|jsx?|mjs)$/;
+const EXTENSION_PRUEBA = /\.test\.(tsx?|jsx?|mjs)$/;
 
 function tieneUseServer(nombre: string, ruta: string): boolean {
-  return /\.tsx?$/.test(nombre) && !/\.test\.tsx?$/.test(nombre) && PATRON_USE_SERVER.test(readFileSync(ruta, "utf8"));
+  return EXTENSION_CODIGO.test(nombre) && !EXTENSION_PRUEBA.test(nombre) && PATRON_USE_SERVER.test(readFileSync(ruta, "utf8"));
 }
 
 function listarArchivosDeRuta(dir: string): string[] {
@@ -371,7 +375,7 @@ function listarArchivosDeRuta(dir: string): string[] {
     const ruta = join(dir, nombre);
     if (statSync(ruta).isDirectory()) {
       resultado = resultado.concat(listarArchivosDeRuta(ruta));
-    } else if (/^(page|route|actions)\.tsx?$/.test(nombre) || tieneUseServer(nombre, ruta)) {
+    } else if (/^(page|route|actions)\.(tsx?|jsx?|mjs)$/.test(nombre) || tieneUseServer(nombre, ruta)) {
       // Hueco visto en #498: un archivo de acciones que no se llama
       // actions.ts quedaba fuera de esta revisión. Ahora entra cualquier
       // archivo con "use server".
@@ -536,6 +540,12 @@ describe("Server Actions con cualquier nombre", () => {
     expect(PATRON_USE_SERVER.test('"use client";')).toBe(false);
   });
 
+  it("reconoce la directiva con un comentario en la misma línea", () => {
+    expect(PATRON_USE_SERVER.test('"use server"; // acciones de bodega\nexport async function a() {}')).toBe(true);
+    expect(PATRON_USE_SERVER.test("'use server' /* acciones */\nexport async function a() {}")).toBe(true);
+    expect(PATRON_USE_SERVER.test('const x = "use server"; // no es directiva')).toBe(false);
+  });
+
   it('un archivo con "use server" que no se llama actions.ts igual queda en la revisión', () => {
     const dir = mkdtempSync(join(tmpdir(), "zx-use-server-"));
     try {
@@ -543,8 +553,14 @@ describe("Server Actions con cualquier nombre", () => {
       writeFileSync(join(dir, "modulo", "imagenesActions.ts"), '"use server";\nexport async function x() {}\n');
       writeFileSync(join(dir, "modulo", "ayuda.ts"), "export const y = 1;\n");
       writeFileSync(join(dir, "modulo", "algo.test.ts"), '"use server";\n');
-      const vistos = listarArchivosDeRuta(dir).map((a) => relative(dir, a).split("\\").join("/"));
-      expect(vistos).toEqual(["modulo/imagenesActions.ts"]);
+      writeFileSync(join(dir, "modulo", "legado.js"), '"use server"; // acciones viejas\nexport async function z() {}\n');
+      writeFileSync(join(dir, "modulo", "otro.mjs"), "'use server'\nexport async function w() {}\n");
+      writeFileSync(join(dir, "modulo", "algo.test.js"), '"use server";\n');
+      writeFileSync(join(dir, "modulo", "page.jsx"), "export default function P() { return null; }\n");
+      const vistos = listarArchivosDeRuta(dir)
+        .map((a) => relative(dir, a).split("\\").join("/"))
+        .sort();
+      expect(vistos).toEqual(["modulo/imagenesActions.ts", "modulo/legado.js", "modulo/otro.mjs", "modulo/page.jsx"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
