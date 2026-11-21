@@ -612,6 +612,39 @@
     return { vendidos: null, exacto: null };
   }
 
+  // Moneda real de la página: priceCurrency del JSON-LD (Product/offers)
+  // si es un código ISO válido; si no, la del país según el host
+  // (U.sitioDeHost); si tampoco, null — nunca una moneda inventada.
+  function leerMonedaDePagina(doc, html) {
+    if (typeof html === "string" && html) {
+      const regexLd = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+      let bloque;
+      while ((bloque = regexLd.exec(html))) {
+        try {
+          const datos = JSON.parse(bloque[1]);
+          for (const item of Array.isArray(datos) ? datos : [datos]) {
+            if (!item || item["@type"] !== "Product") continue;
+            const ofertas = Array.isArray(item.offers) ? item.offers : [item.offers];
+            for (const oferta of ofertas) {
+              const c = oferta && oferta.priceCurrency;
+              if (typeof c === "string" && /^[A-Z]{3}$/.test(c)) return c;
+            }
+          }
+        } catch {
+          // JSON-LD cortado — se ignora, cae al mapa por host.
+        }
+      }
+    }
+    let host = null;
+    try {
+      host = new URL(doc && doc.URL).hostname;
+    } catch {
+      host = null;
+    }
+    const sitio = U.sitioDeHost(host);
+    return sitio ? sitio.moneda : null;
+  }
+
   function leerProducto(doc) {
     // Issue #243 — selectores reales confirmados contra una ficha real
     // (CDX/Wayback, mayo/2026); los viejos (.ui-pdp-shipping /
@@ -706,7 +739,7 @@
       precio: U.numeroDesdeTexto(
         U.textoDe([".ui-pdp-price__second-line .andes-money-amount__fraction", ".ui-pdp-price .andes-money-amount__fraction"], doc)
       ),
-      moneda: "COP",
+      moneda: leerMonedaDePagina(doc, htmlCompleto),
       precioAnterior: U.numeroDesdeTexto(U.textoDe([".ui-pdp-price__original-value .andes-money-amount__fraction", "s .andes-money-amount__fraction"], doc)),
       descuentoPorcentaje: U.enteroDesdeTexto(
         U.textoDe([".ui-pdp-price__second-line .andes-money-amount__discount-tag", ".ui-pdp-price__discount"], doc)
@@ -1366,6 +1399,7 @@
     detectarTiendaOficialEnTexto,
     contarTarjetasListado,
     leerTienda,
+    leerMonedaDePagina,
     leerDatosIncrustados,
     calcularVentasPromedioMes,
     extraerIdDeUrl,

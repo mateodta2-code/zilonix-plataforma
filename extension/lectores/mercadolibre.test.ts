@@ -28,6 +28,7 @@ import {
   idNumericoDeArchivo,
   leerDatosIncrustados,
   leerInventarioMaximoDeTexto,
+  leerMonedaDePagina,
   leerResenasDesdeScript,
   leerSellerIdDeTienda,
   tipoDePagina,
@@ -1291,5 +1292,30 @@ describe("origen y tienda oficial leídos del texto de la tarjeta (Análisis del
     const doc = { querySelector: (sel: string) => (sel.includes("andes-pagination__button--next") ? { getAttribute: () => "https://listado.mercadolibre.com.co/x_Desde_49" } : null) };
     expect(urlSiguientePagina(doc)).toBe("https://listado.mercadolibre.com.co/x_Desde_49");
     expect(urlSiguientePagina({ querySelector: () => null })).toBeNull();
+  });
+});
+
+describe("leerMonedaDePagina — multipaís (issue #520)", () => {
+  const hosts: Array<[string, string]> = [
+    ["articulo.mercadolibre.com.co", "COP"],
+    ["articulo.mercadolibre.com.ar", "ARS"],
+    ["produto.mercadolivre.com.br", "BRL"],
+    ["articulo.mercadolibre.com.mx", "MXN"],
+    ["articulo.mercadolibre.cl", "CLP"],
+    ["articulo.mercadolibre.com.uy", "UYU"],
+    ["articulo.mercadolibre.com.pe", "PEN"],
+  ];
+  it.each(hosts)("%s da %s por el mapa de hosts", (host, moneda) => {
+    expect(leerMonedaDePagina({ URL: `https://${host}/MCO-1-x` }, "")).toBe(moneda);
+  });
+  it("host desconocido o URL inválida da null sin romper", () => {
+    expect(leerMonedaDePagina({ URL: "https://ejemplo.com/x" }, "")).toBeNull();
+    expect(leerMonedaDePagina({ URL: "no-es-url" }, "")).toBeNull();
+    expect(leerMonedaDePagina(null, "")).toBeNull();
+  });
+  it("priceCurrency del JSON-LD manda sobre el host; uno inválido se ignora", () => {
+    const ld = (c: string) => `<script type="application/ld+json">{"@type":"Product","offers":{"priceCurrency":"${c}"}}</script>`;
+    expect(leerMonedaDePagina({ URL: "https://articulo.mercadolibre.com.co/x" }, ld("USD"))).toBe("USD");
+    expect(leerMonedaDePagina({ URL: "https://articulo.mercadolibre.com.co/x" }, ld("x"))).toBe("COP");
   });
 });
