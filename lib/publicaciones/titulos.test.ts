@@ -36,6 +36,10 @@ describe("reglas del título (en código, no solo pedidas a la IA)", () => {
     expect(limpiarTitulo("Camiseta algodón 50 % dcto", 60)).toBe("Camiseta algodón");
     expect(limpiarTitulo("Camiseta algodón 30% de descuento", 60)).toBe("Camiseta algodón");
     expect(limpiarTitulo("Camiseta algodão 15% desconto", 60)).toBe("Camiseta algodão");
+    expect(limpiarTitulo("Camiseta algodón 15% dto", 60)).toBe("Camiseta algodón");
+    expect(limpiarTitulo("Camiseta algodón 40% de dcto", 60)).toBe("Camiseta algodón");
+    expect(limpiarTitulo("Camiseta algodón 25  %  off", 60)).toBe("Camiseta algodón");
+    expect(limpiarTitulo("Camiseta 100%  algodón", 60)).toBe("Camiseta 100% algodón");
   });
 
   it("los nombres propios salen del nombre de la ficha, salvo si viene todo en Mayúscula Cada Palabra", () => {
