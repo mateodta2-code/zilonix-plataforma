@@ -82,7 +82,7 @@ export default async function DetalleOptimizacionPage({
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
   const conFinanzas = miMembresia ? tienePermiso(miMembresia.permisos, "finanzas", "consultar") : false;
   const puedeEditar = miMembresia ? tienePermiso(miMembresia.permisos, "inventario", "modificar") : false;
-  const volver = <BotonLink href={`/panel/optimizacion${UUID.test(cuentaId) ? `?cuenta=${cuentaId}` : ""}`}>← Volver a la lista</BotonLink>;
+  const volver = <BotonLink href={`/panel/optimizacion${UUID.test(cuentaId) ? `?cuenta=${cuentaId}` : ""}`} variante="fantasma">← Volver a la lista</BotonLink>;
 
   const cuenta =
     PATRON_ID_PRODUCTO_O_ITEM.test(itemId) && UUID.test(cuentaId)

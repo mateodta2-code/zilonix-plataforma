@@ -119,12 +119,12 @@ export default async function KardexPage({ searchParams }: { searchParams: Recor
             <p className={styles.resumenPaginacion}>Página {resultado.pagina}</p>
             <div className={styles.botonesPaginacion}>
               {resultado.pagina > 1 && (
-                <BotonLink href={hrefPagina(resultado.pagina - 1)} chico>
+                <BotonLink href={hrefPagina(resultado.pagina - 1)} variante="secundario" chico>
                   Anterior
                 </BotonLink>
               )}
               {resultado.hayMas && (
-                <BotonLink href={hrefPagina(resultado.pagina + 1)} chico>
+                <BotonLink href={hrefPagina(resultado.pagina + 1)} variante="secundario" chico>
                   Siguiente
                 </BotonLink>
               )}

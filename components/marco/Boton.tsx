@@ -26,7 +26,7 @@ export function Boton({
 // "Cancelar" al lado de un submit, o un link que hace de botón
 // primario como "Conectar Mercado Libre").
 export function BotonLink({
-  variante = "secundario",
+  variante = "primario",
   chico,
   className,
   href,

@@ -198,12 +198,12 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
             </p>
             <div className={styles.botonesPaginacion}>
               {resultado.pagina > 1 && (
-                <BotonLink href={hrefPagina(resultado.pagina - 1)} chico>
+                <BotonLink href={hrefPagina(resultado.pagina - 1)} variante="secundario" chico>
                   Anterior
                 </BotonLink>
               )}
               {resultado.pagina < resultado.totalPaginas && (
-                <BotonLink href={hrefPagina(resultado.pagina + 1)} chico>
+                <BotonLink href={hrefPagina(resultado.pagina + 1)} variante="secundario" chico>
                   Siguiente
                 </BotonLink>
               )}
