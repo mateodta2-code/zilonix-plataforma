@@ -740,6 +740,8 @@ input.zx-control,
 select.zx-control {
   height: var(--alto-control);
   padding-block: 0;
+  min-width: 0; /* un type="date" no empuja a sus vecinos en filas angostas */
+  max-width: 100%;
 }
 
 /* app/globals.css es CSS plano (no .module.css) — `composes` solo

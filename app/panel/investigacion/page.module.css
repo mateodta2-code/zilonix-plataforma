@@ -394,3 +394,19 @@
 .filaFormulario > * > * {
   --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
 }
+
+/* Celular: la fila pasa a columna; campos y botón al 100 % del ancho, sin encimarse (#544). */
+@media (max-width: 640px) {
+  .filaFormulario {
+    flex-direction: column;
+    align-items: stretch;
+    --alinear-boton: stretch;
+  }
+
+  .filaFormulario > * {
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+    margin-left: 0;
+  }
+}
