@@ -42,4 +42,20 @@ describe("Boton", () => {
   it("ningún box-shadow usa none", () => {
     expect(css).not.toMatch(/box-shadow:\s*[^;]*\bnone\b/);
   });
+
+  it(".boton ya no fija align-self: flex-start, usa la variable", () => {
+    const b = bloque(".boton");
+    expect(b).not.toMatch(/align-self:\s*flex-start/);
+    expect(b).toContain("align-self: var(--alinear-boton, flex-start)");
+  });
+
+  it("las filas de Inicio bajan sus botones al nivel de los campos", () => {
+    const inicio = readFileSync(join(__dirname, "../finanzas/inicio.module.css"), "utf8");
+    for (const c of [".filtro", ".metaForm"]) {
+      const m = inicio.match(new RegExp(`\\n\\${c} \\{([^}]*)\\}`))?.[1] ?? "";
+      expect(m).toContain("align-items: flex-end");
+      expect(m).toContain("--alinear-boton: flex-end");
+      expect(inicio).toMatch(new RegExp(`\\${c} > \\* > \\* \\{[^}]*--alinear-boton: flex-start`));
+    }
+  });
 });

@@ -258,6 +258,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
+  --alinear-boton: flex-end; /* los botones hijos directos bajan al nivel de los campos (ver Boton.module.css) */
   gap: 12px;
   margin-top: 8px;
 }
@@ -356,6 +357,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
+  --alinear-boton: flex-end; /* los botones hijos directos bajan al nivel de los campos (ver Boton.module.css) */
   gap: 12px;
   margin-top: 16px;
 }
@@ -364,4 +366,12 @@
   .metaCifras {
     grid-template-columns: 1fr;
   }
+}
+
+.filtro > * > * {
+  --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
+}
+
+.metaForm > * > * {
+  --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
 }

@@ -40,6 +40,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
+  --alinear-boton: flex-end; /* los botones hijos directos bajan al nivel de los campos (ver Boton.module.css) */
   gap: 12px;
 }
 
@@ -112,4 +113,8 @@
 .subdato {
   font-size: 11.5px;
   color: var(--texto-suave);
+}
+
+.filaFormulario > * > * {
+  --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
 }

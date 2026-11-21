@@ -3,6 +3,7 @@
   flex-wrap: wrap;
   gap: 10px;
   align-items: flex-end;
+  --alinear-boton: flex-end; /* los botones hijos directos bajan al nivel de los campos (ver Boton.module.css) */
   margin-top: 4px;
 }
 
@@ -401,4 +402,8 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 4px;
+}
+
+.filtrosFila > * > * {
+  --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
 }
