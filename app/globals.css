@@ -213,6 +213,11 @@
      [data-tema="claro"] los oscurece. */
   --exito-texto: #22c55e;
   --peligro-texto: #ef4444;
+  /* Botón peligro: colores OPACOS (una sola capa de fondo). */
+  --peligro-boton-fondo: #3a1517;
+  --peligro-boton-fondo-hover: #4a1a1d;
+  --peligro-boton-borde: #7f2d2d;
+  --peligro-boton-texto: #fca5a5;
 
   /* Íconos de la barra: inactivo #939393 (6.40:1 sobre #0b0b0c),
      hover #E6E6E6 (15.76:1), activo = --acento-fuerte. En claro el
@@ -513,6 +518,11 @@
      sobre #ececee. */
   --exito-texto: #166534;
   --peligro-texto: #991b1b;
+  /* Botón peligro: colores OPACOS (una sola capa de fondo). */
+  --peligro-boton-fondo: #fdecec;
+  --peligro-boton-fondo-hover: #fbd5d5;
+  --peligro-boton-borde: #e5a3a3;
+  --peligro-boton-texto: #b91c1c;
   /* El degradado oficial se apaga sobre blanco (la mitad clara no se
      distingue). El borde en claro usa el lado oscuro de la misma
      paleta para que el filo se vea. */
@@ -721,6 +731,15 @@ button {
   font-family: inherit;
   box-sizing: border-box;
   transition: var(--transicion-color), box-shadow 0.2s ease;
+}
+
+/* Altura exacta: input/select miden siempre --alto-control (cada
+   navegador da otra altura intrínseca a type="date"). El textarea
+   conserva min-height. */
+input.zx-control,
+select.zx-control {
+  height: var(--alto-control);
+  padding-block: 0;
 }
 
 /* app/globals.css es CSS plano (no .module.css) — `composes` solo

@@ -1,0 +1,2 @@
+- Botón `peligro`: ahora se lee en tema claro y oscuro (fondo opaco y tokens `--peligro-boton-*`, también en hover y foco).
+- Altura exacta de 38px para botones y para `input`/`select` de `.zx-control` (incluido `type="date"`), así «Actualizar» queda igual que los campos de fecha.
