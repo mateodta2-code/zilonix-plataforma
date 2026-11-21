@@ -150,7 +150,7 @@ async function conOpenAI(apiKey: string, fotos: FotoBase[], prompt: string): Pro
   }).catch(() => {
     throw new ErrorImagenIA("OpenAI no respondió a tiempo.");
   });
-  if (!res.ok) throw new ErrorImagenIA(mensajeHttp("OpenAI", res.status));
+  if (!res.ok) throw new ErrorImagenIA(mensajeErrorOpenAI(res.status, await res.json().catch(() => null)));
   const data = (await res.json().catch(() => null)) as { data?: { b64_json?: string }[] } | null;
   const b64 = data?.data?.[0]?.b64_json;
   if (!b64) throw new ErrorImagenIA("OpenAI no devolvió una imagen.");
@@ -175,6 +175,36 @@ async function conGoogle(apiKey: string, fotos: FotoBase[], prompt: string): Pro
   const b64 = parte?.inlineData?.data ?? parte?.inline_data?.data;
   if (!b64) throw new ErrorImagenIA("Google no devolvió una imagen (puede que la haya bloqueado por sus reglas de contenido).");
   return Buffer.from(b64, "base64");
+}
+
+// El error de OpenAI trae { error: { code, type, message } }. Del texto
+// crudo solo se mira si habla de verificar la organización (nunca se
+// muestra ni se registra: puede repetir la instrucción); el código y el
+// tipo sí, con lista blanca de caracteres, para que el vendedor sepa qué
+// pasó en vez de un «no aceptó la foto» genérico.
+const PATRON_CODIGO_ERROR = /^[a-z0-9_.-]{1,60}$/i;
+
+export function mensajeErrorOpenAI(status: number, cuerpo: unknown): string {
+  const error = (cuerpo as { error?: { code?: unknown; type?: unknown; message?: unknown } } | null)?.error;
+  const limpio = (v: unknown) => (typeof v === "string" && PATRON_CODIGO_ERROR.test(v) ? v : null);
+  const codigo = limpio(error?.code);
+  const tipo = limpio(error?.type);
+  const texto = typeof error?.message === "string" ? error.message : "";
+  console.warn(`[lib/ia/imagen] OpenAI respondió ${status} (code=${codigo ?? "-"}, type=${tipo ?? "-"})`);
+  if (/verif/i.test(texto) && /organi[sz]ation/i.test(texto)) {
+    return "Para crear imágenes, OpenAI exige verificar la organización: entra a platform.openai.com → Settings → Organization → «Verify Organization». Después puede tardar unos 15 minutos en activarse.";
+  }
+  if (codigo === "moderation_blocked" || /safety system|moderation/i.test(texto)) {
+    return "El filtro de contenido de OpenAI bloqueó esta imagen. Prueba con otra foto o con una instrucción más simple (sin personas reales, marcas ni temas de salud).";
+  }
+  if (codigo === "insufficient_quota" || codigo === "billing_hard_limit_reached") {
+    return "La cuenta de OpenAI de la empresa no tiene saldo o llegó a su límite de gasto. Revisa Billing en platform.openai.com.";
+  }
+  if (status === 400 && (codigo?.startsWith("invalid_image") || codigo === "image_too_large" || /\bimage\b/i.test(texto))) {
+    return "OpenAI no pudo leer la foto base. Prueba con otra foto (JPG o PNG, de buena calidad).";
+  }
+  if (status === 400) return `OpenAI no aceptó la solicitud${codigo ? ` (código: ${codigo})` : ""}. Prueba con otra foto; si se repite, avísale a soporte con ese código.`;
+  return mensajeHttp("OpenAI", status);
 }
 
 function mensajeHttp(proveedor: string, status: number): string {
