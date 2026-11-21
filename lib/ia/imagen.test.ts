@@ -109,6 +109,8 @@ describe("generarImagenDesdeFoto", () => {
     expect((init.headers as Record<string, string>).authorization).toBe("Bearer clave-secreta");
     const form = init.body as FormData;
     expect(form.get("model")).toBe(MODELO_IMAGEN_OPENAI);
+    // gpt-image-1 fue apagado por OpenAI el 23-oct-2026: nunca volver a él.
+    expect(MODELO_IMAGEN_OPENAI).not.toBe("gpt-image-1");
     expect(form.get("prompt")).toBe("prompt");
     expect(form.get("image")).toBeInstanceOf(Blob);
   });
