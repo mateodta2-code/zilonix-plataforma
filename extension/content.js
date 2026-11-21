@@ -163,10 +163,22 @@
 
   function formatoPrecio(valor, moneda) {
     if (valor === null || valor === undefined) return SIN_DATO;
-    const numero = valor.toLocaleString("es-CO", { maximumFractionDigits: 2 });
-    // moneda siempre es un literal fijo nuestro ("COP") o null, nunca
-    // texto de la página — no hace falta escaparlo.
-    return moneda ? `${moneda} ${numero}` : numero;
+    // Moneda y locale salen de los datos / del mapa por país
+    // (utilidades.js), nunca fijos. `moneda` puede venir de la página
+    // (JSON-LD), así que solo se usa si es un código ISO de 3 letras y
+    // el resultado sale de Intl (que no interpreta HTML) — luego se
+    // escapa igual por seguridad.
+    const locale = U && typeof U.localeDeMoneda === "function" ? U.localeDeMoneda(moneda) : null;
+    if (typeof moneda === "string" && /^[A-Z]{3}$/.test(moneda)) {
+      try {
+        return ZS.escaparHtml(
+          new Intl.NumberFormat(locale || undefined, { style: "currency", currency: moneda, currencyDisplay: "code", maximumFractionDigits: 2 }).format(valor)
+        );
+      } catch {
+        // moneda no reconocida por Intl — cae al número sin símbolo.
+      }
+    }
+    return ZS.escaparHtml(new Intl.NumberFormat(locale || undefined, { maximumFractionDigits: 2 }).format(valor));
   }
 
   // etiqueta siempre es un string fijo nuestro (ej. "Precio",
@@ -2019,6 +2031,7 @@
   // como parámetro, nunca leen sessionStorage/chrome.storage directo).
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
+      formatoPrecio,
       bloqueAnalisisAproximado,
       calcularAnalisisAproximado,
       tipoIdDePagina,

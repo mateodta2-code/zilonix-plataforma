@@ -1,0 +1,1 @@
+- Extensión 0.3.47: la moneda y el formato del precio (Precio, Precio anterior, Facturación/mes) ahora siguen el país de Mercado Libre (COP, ARS, BRL, MXN, CLP, UYU, PEN) en vez de Colombia fijo. La moneda sale del `priceCurrency` de la página o, si falta, del dominio; un dominio desconocido no muestra moneda inventada. Hay que reinstalar la extensión. Refs #520.

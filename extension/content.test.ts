@@ -34,7 +34,7 @@ async function cargarContentFresco(hostname = "articulo.mercadolibre.com.co") {
     }
   };
   (globalThis as unknown as { chrome: unknown }).chrome = undefined;
-  (globalThis as unknown as Record<string, unknown>).ZilonixUtilidades = {};
+  (globalThis as unknown as Record<string, unknown>).ZilonixUtilidades = await import("./utilidades.js");
   // Issue #174 — mismo patrón dual que seguridad.test.ts: se importa
   // el módulo real (no un mock) para que textoCampo() escape de
   // verdad, igual que en producción.
@@ -50,6 +50,7 @@ async function cargarContentFresco(hostname = "articulo.mercadolibre.com.co") {
 
   return (await import("./content.js")) as unknown as {
     bloqueAnalisisAproximado: (datos: Record<string, unknown>) => string;
+    formatoPrecio: (valor: number | null | undefined, moneda: string | null | undefined) => string;
     valorInterruptorDesdeStorage: (valorGuardado: unknown) => boolean;
     debeDibujarPanel: (interruptorEncendido: boolean, panelCerrado: boolean) => boolean;
     leerPanelCerrado: (storage: StorageFake | null) => boolean;
@@ -550,5 +551,33 @@ describe("Análisis del nicho — CSV, páginas y tope de 150", () => {
     expect(w.vendedor).toBe("Pepe");
     expect(productoParaNicho({ titulo: "", precio: 10 })).toBeNull();
     expect(productoParaNicho({ titulo: "T", precio: NaN })).toBeNull();
+  });
+});
+
+describe("formatoPrecio — moneda y locale según el país (issue #520)", () => {
+  const casos: Array<[string, string, string]> = [
+    ["COP", "50.000", "es-CO"],
+    ["ARS", "50.000", "es-AR"],
+    ["BRL", "50.000", "pt-BR"],
+    ["MXN", "50,000", "es-MX"],
+    ["CLP", "50.000", "es-CL"],
+    ["UYU", "50.000", "es-UY"],
+    ["PEN", "50,000", "es-PE"],
+  ];
+  it.each(casos)("%s lleva su código de moneda y número (%s)", async (moneda, numero) => {
+    const mod = await cargarContentFresco();
+    const texto = mod.formatoPrecio(50_000, moneda).replace(/\s/g, " ");
+    expect(texto).toContain(moneda);
+    expect(texto).toContain(numero);
+  });
+  it("sin moneda: solo el número, sin símbolo; sin valor: Sin dato", async () => {
+    const mod = await cargarContentFresco();
+    expect(mod.formatoPrecio(1500, null)).toMatch(/^1\D?500$/);
+    expect(mod.formatoPrecio(null, "COP")).not.toContain("COP");
+  });
+  it("moneda desconocida o inválida no rompe", async () => {
+    const mod = await cargarContentFresco();
+    expect(() => mod.formatoPrecio(10, "<x>")).not.toThrow();
+    expect(mod.formatoPrecio(10, "<x>")).not.toContain("<");
   });
 });

@@ -9,7 +9,8 @@ import { crearDosEmpresas } from "./test-utils/aislamiento";
 
 // Optimización → bitácora (migración 0035) contra Postgres real: cada
 // empresa solo ve sus notas y revisiones, no se borran, una revisión por
-// cambio y el aviso «Revisar cambio» se va cuando el cambio está revisado.
+// cambio y el aviso «Revisar cambio» se va cuando el cambio está revisado
+// (con resultado: un comentario solo no lo quita, migración 0036).
 
 const ITEM = "MCO1342632705";
 
@@ -87,6 +88,22 @@ describe("optimizacion_notas / optimizacion_revisiones (RLS y bitácora)", () =>
     const cuenta = await crearCuenta(empresaAId);
     await crearNotaBitacora(empresaAId, { usuarioId: usuarioAId, cuentaMlId: cuenta, itemId: ITEM, fechaCambio: new Date(Date.now() - 9 * 86_400_000), texto: "Cambio en Mercado Libre" });
     expect(await publicacionesParaRevisar(empresaAId, [ITEM], new Date())).toEqual([ITEM]);
+  });
+
+  it("solo comentario (0036): se guarda sin resultado, «Revisar cambio» sigue hasta elegir resultado", async () => {
+    const { empresaAId, usuarioAId } = await crearDosEmpresas();
+    const id = await cambioHaceDias(empresaAId, usuarioAId, 8);
+    const ref = `auditoria:${id}`;
+    await guardarRevisionCambio(empresaAId, { usuarioId: usuarioAId, ref, itemId: ITEM, resultado: null, comentario: "bajé el precio por la competencia" });
+    const cambio = (await leerCambiosPublicacion(empresaAId, ITEM)).find((c) => c.ref === ref);
+    expect(cambio?.revision).toMatchObject({ resultado: null, comentario: "bajé el precio por la competencia" });
+    expect(await publicacionesParaRevisar(empresaAId, [ITEM], new Date())).toEqual([ITEM]);
+    await guardarRevisionCambio(empresaAId, { usuarioId: usuarioAId, ref, itemId: ITEM, resultado: "sirvio", comentario: "bajé el precio por la competencia" });
+    expect(await publicacionesParaRevisar(empresaAId, [ITEM], new Date())).toEqual([]);
+    // Ni resultado ni comentario: la base no lo acepta.
+    await expect(
+      dbComoEmpresa(empresaAId, (tx) => tx.insert(optimizacionRevisiones).values({ empresaId: empresaAId, cambioRef: `auditoria:${randomUUID()}`, itemId: ITEM, resultado: null, comentario: null }))
+    ).rejects.toThrow();
   });
 
   it("los CHECK de la base: id de publicación, texto y resultado válidos", async () => {
