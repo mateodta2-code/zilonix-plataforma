@@ -531,16 +531,18 @@ export async function guardarNotaBitacoraAction(entrada: { cuentaMlId: string; i
 }
 
 // «Revisado»: el resultado de un cambio (sirvió / no sirvió / sin cambio)
-// con un comentario. Se puede volver a revisar (se actualiza).
+// con un comentario. Se puede volver a revisar (se actualiza). Sin
+// resultado se guarda solo el comentario y el cambio sigue sin revisar.
 export async function revisarCambioAction(entrada: { cuentaMlId: string; itemId: string; ref: string; resultado: string; comentario?: string }): Promise<ResultadoBitacora> {
   const ctx = await contexto("modificar");
   if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para revisar cambios." };
   if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId)) return { ok: false, aviso: "No se reconoce la publicación." };
   if (!(await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId))) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
-  const resultado = leerResultadoRevision(entrada.resultado);
-  if (!resultado) return { ok: false, aviso: "Elige si el cambio sirvió, no sirvió o no cambió nada." };
-  if (typeof entrada.ref !== "string" || !(await cambioEsDeLaPublicacion(ctx.empresaId, entrada.ref, entrada.itemId))) return { ok: false, aviso: "No se encontró ese cambio." };
+  const resultado = entrada.resultado ? leerResultadoRevision(entrada.resultado) : null;
+  if (entrada.resultado && !resultado) return { ok: false, aviso: "Elige si el cambio sirvió, no sirvió o no cambió nada." };
   const comentario = limpiarTextoBitacora(entrada.comentario) || null;
+  if (!resultado && !comentario) return { ok: false, aviso: "Elige un resultado o escribe un comentario." };
+  if (typeof entrada.ref !== "string" || !(await cambioEsDeLaPublicacion(ctx.empresaId, entrada.ref, entrada.itemId))) return { ok: false, aviso: "No se encontró ese cambio." };
   await guardarRevisionCambio(ctx.empresaId, { usuarioId: ctx.usuarioId, ref: entrada.ref, itemId: entrada.itemId, resultado, comentario });
-  return { ok: true, aviso: "Revisión guardada." };
+  return { ok: true, aviso: resultado ? "Revisión guardada." : "Comentario guardado. Elige un resultado para dar el cambio por revisado." };
 }

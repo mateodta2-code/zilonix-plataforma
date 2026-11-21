@@ -480,6 +480,14 @@ describe("bitácora: notas a mano y revisión", () => {
     expect(bitacora.guardarRevision.mock.calls[0][1]).toMatchObject({ ref: REF, resultado: "no_sirvio", comentario: "bajaron las visitas" });
   });
 
+  it("revisar: solo comentario (sin resultado) se guarda y avisa que sigue sin revisar; vacío no", async () => {
+    expect(await revisarCambioAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", ref: REF, resultado: "", comentario: "   " })).toMatchObject({ ok: false, aviso: expect.stringMatching(/resultado o escribe un comentario/) });
+    expect(bitacora.guardarRevision).not.toHaveBeenCalled();
+    const r = await revisarCambioAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", ref: REF, resultado: "", comentario: " bajé el precio por la competencia " });
+    expect(r).toMatchObject({ ok: true, aviso: expect.stringMatching(/Elige un resultado/) });
+    expect(bitacora.guardarRevision.mock.calls[0][1]).toMatchObject({ ref: REF, resultado: null, comentario: "bajé el precio por la competencia" });
+  });
+
   it("sin permiso de modificar: no anota ni revisa", async () => {
     estado.conPermiso = false;
     expect((await revisarCambioAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", ref: REF, resultado: "sirvio" })).ok).toBe(false);
