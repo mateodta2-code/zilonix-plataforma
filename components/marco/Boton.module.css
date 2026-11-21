@@ -7,8 +7,9 @@
   gap: 6px;
   box-sizing: border-box;
   min-height: var(--alto-control);
-  padding: 9px 16px;
-  line-height: 1.35;
+  padding: 0 16px;
+  line-height: 1.2;
+  white-space: nowrap;
   border-radius: var(--radio-boton);
   font-size: 13.5px;
   font-weight: 500;
@@ -86,14 +87,24 @@
 }
 
 .peligro {
-  background: linear-gradient(color-mix(in srgb, var(--peligro) 10%, transparent), color-mix(in srgb, var(--peligro) 10%, transparent)) padding-box, linear-gradient(var(--peligro-texto), var(--peligro-texto)) border-box;
-  color: var(--peligro-texto);
+  /* Una sola capa y opaca: el doble background-clip solo sirve con un
+     padding-box opaco (como .primario); con uno translúcido la capa de
+     border-box pintaba todo el botón del color del texto. */
+  background: var(--peligro-boton-fondo);
+  border-color: var(--peligro-boton-borde);
+  color: var(--peligro-boton-texto);
 }
 
 .peligro:hover:not(:disabled) {
-  border-color: transparent;
-  background: linear-gradient(color-mix(in srgb, var(--peligro) 20%, transparent), color-mix(in srgb, var(--peligro) 20%, transparent)) padding-box, linear-gradient(var(--peligro-texto), var(--peligro-texto)) border-box;
+  /* Mismo borde: anula el azul de zx-brillo-marca:hover. */
+  background: var(--peligro-boton-fondo-hover);
+  border-color: var(--peligro-boton-borde);
   box-shadow: inset 0 0 0 0 transparent;
+}
+
+.peligro:focus-visible {
+  outline: 2px solid var(--peligro-boton-borde);
+  border-color: var(--peligro-boton-borde);
 }
 
 .fantasma {
