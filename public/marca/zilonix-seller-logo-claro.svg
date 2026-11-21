@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="183 203 933 335" width="933" height="335">
 <title>ZILONIX SELLER</title>
 <defs>
-<linearGradient id="silver" gradientUnits="userSpaceOnUse" x1="223.157" y1="0" x2="1075.628" y2="0"><stop offset="0" stop-color="#2b3038"/><stop offset="0.2" stop-color="#4f5764"/><stop offset="0.38" stop-color="#8d95a2"/><stop offset="0.5" stop-color="#e9edf2"/><stop offset="0.62" stop-color="#8d95a2"/><stop offset="0.82" stop-color="#4a515c"/><stop offset="1" stop-color="#262a31"/></linearGradient>
+<linearGradient id="silver" gradientUnits="userSpaceOnUse" x1="223.157" y1="0" x2="1075.628" y2="0"><stop offset="0" stop-color="#1f242b"/><stop offset="0.2" stop-color="#3a414c"/><stop offset="0.38" stop-color="#5f6773"/><stop offset="0.5" stop-color="#a9b1ba"/><stop offset="0.62" stop-color="#5f6773"/><stop offset="0.82" stop-color="#363d47"/><stop offset="1" stop-color="#1c2026"/></linearGradient>
 <linearGradient id="sheen" gradientUnits="userSpaceOnUse" x1="0" y1="242.6" x2="0" y2="498.4">
-<stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28"/>
-<stop offset="0.30" stop-color="#FFFFFF" stop-opacity="0.10"/>
+<stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
+<stop offset="0.30" stop-color="#FFFFFF" stop-opacity="0.06"/>
 <stop offset="0.50" stop-color="#3C3C3C" stop-opacity="0.18"/>
 <stop offset="0.56" stop-color="#FFFFFF" stop-opacity="0.12"/>
 <stop offset="0.85" stop-color="#2E2E2E" stop-opacity="0.12"/>
