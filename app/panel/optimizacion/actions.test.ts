@@ -44,7 +44,7 @@ vi.mock("@/db/empresa-context", () => ({
     fn({
       select: () => ({
         from: () => ({
-          where: async () => (estado.cuentaExiste ? [{ id: CUENTA, nickname: "TIENDA", siteId: "MCO" }] : []),
+          where: async () => (estado.cuentaExiste ? [{ id: CUENTA, nickname: "TIENDA", siteId: "MCO", cuentaIdExterna: "123456" }] : []),
         }),
       }),
     }),
@@ -445,7 +445,7 @@ describe("bitácora: notas a mano y revisión", () => {
     estado.conPermiso = true;
     estado.cuentaExiste = true;
     estado.permisosPedidos = [];
-    ml.itemEdicion.mockReset().mockResolvedValue({ id: "MCO1342632705", titulo: "Tijera", precio: 1, vendidas: 0, tieneVariantes: false, fotos: [] });
+    ml.itemEdicion.mockReset().mockResolvedValue({ id: "MCO1342632705", titulo: "Tijera", precio: 1, vendidas: 0, tieneVariantes: false, sellerId: "123456", fotos: [] });
     bitacora.crearNota.mockReset().mockResolvedValue("nota-1");
     bitacora.guardarRevision.mockReset().mockResolvedValue(undefined);
     bitacora.esDeLaPublicacion.mockReset().mockResolvedValue(true);
@@ -461,6 +461,13 @@ describe("bitácora: notas a mano y revisión", () => {
     expect(r.ok).toBe(true);
     expect(bitacora.crearNota.mock.calls[0][1]).toMatchObject({ itemId: "MCO1342632705", texto: "Subí la campaña", cuentaMlId: CUENTA });
     expect(estado.permisosPedidos).toContain("inventario.modificar");
+  });
+
+  it("nota: rechaza una publicación de otra cuenta (seller_id distinto)", async () => {
+    ml.itemEdicion.mockResolvedValue({ id: "MCO1342632705", titulo: "Tijera", precio: 1, vendidas: 0, tieneVariantes: false, sellerId: "999", fotos: [] });
+    const hoy = new Date().toISOString().slice(0, 10);
+    expect(await guardarNotaBitacoraAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", fecha: hoy, texto: "Subí la campaña" })).toMatchObject({ ok: false, aviso: expect.stringMatching(/no es de esta cuenta/) });
+    expect(bitacora.crearNota).not.toHaveBeenCalled();
   });
 
   it("revisar: solo resultados válidos y solo cambios de esa publicación", async () => {

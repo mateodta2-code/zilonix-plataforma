@@ -2078,6 +2078,8 @@ export type ItemEdicionMl = {
   vendidas: number;
   tieneVariantes: boolean;
   estado: string | null;
+  // Dueño de la publicación (UserID de Mercado Libre); null si no vino.
+  sellerId: string | null;
   fotos: FotoItemEdicion[];
 };
 
@@ -2096,13 +2098,14 @@ export function leerItemEdicion(data: unknown): ItemEdicionMl | null {
     vendidas: numeroONull(d.sold_quantity) ?? 0,
     tieneVariantes: Array.isArray(d.variations) && d.variations.length > 0,
     estado: typeof d.status === "string" ? d.status : null,
+    sellerId: d.seller_id != null && PATRON_ID_VENDEDOR.test(String(d.seller_id)) ? String(d.seller_id) : null,
     fotos,
   };
 }
 
 export async function leerItemEdicionMl(itemId: string, token: string): Promise<ItemEdicionMl | null> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
-  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}`, token, { query: "?attributes=id,status,price,sold_quantity,title,variations,pictures" });
+  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}`, token, { query: "?attributes=id,status,price,sold_quantity,title,variations,pictures,seller_id" });
   if (!resp.ok) return null;
   return leerItemEdicion(resp.data);
 }

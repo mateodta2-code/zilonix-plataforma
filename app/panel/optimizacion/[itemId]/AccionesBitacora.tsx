@@ -43,7 +43,7 @@ export function NotaBitacora({ cuentaMlId, itemId, hoy }: { cuentaMlId: string; 
             <input type="date" className="zx-control" value={fecha} max={hoy} onChange={(e) => setFecha(e.target.value)} disabled={guardando} />
           </Campo>
           <Campo etiqueta="¿Qué cambiaste? (fuera de Zilonix: directo en Mercado Libre, publicidad, stock…)">
-            <textarea className="zx-control" rows={2} maxLength={LARGO_NOTA} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Ej.: subí el presupuesto de la campaña a $20.000 diarios" disabled={guardando} />
+            <textarea className="zx-control" rows={2} maxLength={LARGO_NOTA} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Ej.: subí el presupuesto diario de la campaña" disabled={guardando} />
           </Campo>
           <span className={styles.accionesBitacora}>
             <Boton type="button" chico onClick={guardar} disabled={guardando || !texto.trim()}>

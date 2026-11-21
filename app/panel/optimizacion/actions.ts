@@ -79,7 +79,7 @@ async function cuentaDeLaEmpresa(empresaId: string, cuentaMlId: string) {
   if (!UUID.test(cuentaMlId)) return null;
   const [cuenta] = await dbComoEmpresa(empresaId, (tx) =>
     tx
-      .select({ id: cuentasMl.id, nickname: cuentasMl.nickname, siteId: cuentasMl.siteId })
+      .select({ id: cuentasMl.id, nickname: cuentasMl.nickname, siteId: cuentasMl.siteId, cuentaIdExterna: cuentasMl.cuentaIdExterna })
       .from(cuentasMl)
       .where(and(eq(cuentasMl.id, cuentaMlId), eq(cuentasMl.empresaId, empresaId), isNull(cuentasMl.desconectadaTs)))
   );
@@ -274,7 +274,7 @@ export type ResultadoEdicion = { ok: boolean; aviso: string };
 
 type Preparada = {
   ctx: { empresaId: string; usuarioId: string };
-  cuenta: { nickname: string; siteId: string };
+  cuenta: { nickname: string; siteId: string; cuentaIdExterna: string };
   token: string;
   item: ItemEdicionMl;
 };
@@ -516,10 +516,12 @@ export type ResultadoBitacora = { ok: true; aviso: string } | { ok: false; aviso
 
 // Nota a mano para un cambio hecho fuera de Zilonix (directo en Mercado
 // Libre, publicidad…). Mismo permiso que editar; la publicación se
-// confirma con Mercado Libre (prepararEdicion).
+// confirma con Mercado Libre (prepararEdicion) y debe ser de esa cuenta
+// (seller_id = cuenta_id_externa).
 export async function guardarNotaBitacoraAction(entrada: { cuentaMlId: string; itemId: string; fecha: string; texto: string }): Promise<ResultadoBitacora> {
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
+  if (prep.item.sellerId !== prep.cuenta.cuentaIdExterna) return { ok: false, aviso: "Esa publicación no es de esta cuenta de Mercado Libre." };
   const texto = limpiarTextoBitacora(entrada.texto);
   if (!texto) return { ok: false, aviso: "Escribe qué cambiaste." };
   const fecha = leerFechaNota(entrada.fecha, hoyBogota(new Date()));
