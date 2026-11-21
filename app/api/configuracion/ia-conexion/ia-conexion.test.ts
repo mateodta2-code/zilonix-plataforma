@@ -196,7 +196,7 @@ describe("POST /modelos", () => {
   const pedir = (cuerpo: unknown) =>
     POST_MODELOS(new Request("https://staging.test/api/configuracion/ia-conexion/modelos", { method: "POST", headers: { origin: "https://staging.test" }, body: JSON.stringify(cuerpo) }));
   it("sin permiso → 403", async () => {
-    vi.mocked(requierePermiso).mockRejectedValueOnce(new SinPermisoError());
+    vi.mocked(requierePermiso).mockRejectedValueOnce(new SinPermisoError("configuracion", "modificar"));
     expect((await pedir({ proveedor: "openai", apiKey: KEY })).status).toBe(403);
   });
   it("conexionId ajeno → 404", async () => {
