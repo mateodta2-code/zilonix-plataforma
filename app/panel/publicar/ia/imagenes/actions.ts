@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary, TRANSFORMACION_500 } from "@/lib/cloudinary";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
-import { descargarFotoBase, ErrorImagenIA, generarImagenDesdeFoto, MAXIMO_FOTOS_REFERENCIA, proveedorGeneraImagenes } from "@/lib/ia/imagen";
+import { descargarFotoBase, ErrorImagenIA, generarImagenDesdeFoto, MAXIMO_FOTOS_REFERENCIA, MODELO_IMAGEN_GOOGLE, MODELO_IMAGEN_OPENAI, proveedorGeneraImagenes } from "@/lib/ia/imagen";
 import { asignarComposiciones, otraComposicion, type Asignacion } from "@/lib/ia/prompts/composiciones";
 import { datosProductoDesdeFicha } from "@/lib/ia/prompts/datosProducto";
 import { tipoExpertoDisponible, TIPOS_EXPERTO_ML, type TipoExpertoML } from "@/lib/ia/prompts/estiloExpertoML";
@@ -180,7 +180,7 @@ export async function prepararImagenesAction(entrada: {
     estilo,
     ficha,
     proveedor: conexionImagenes.proveedor,
-    modelo: conexionImagenes.proveedor === "openai" ? "gpt-image-1" : "gemini-2.5-flash-image",
+    modelo: conexionImagenes.proveedor === "openai" ? MODELO_IMAGEN_OPENAI : MODELO_IMAGEN_GOOGLE,
   });
   const ids = await crearImagenesIA(
     s.empresaId,
