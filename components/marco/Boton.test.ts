@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { clasesBoton } from "./Boton";
 
 const css = readFileSync(join(__dirname, "Boton.module.css"), "utf8");
-const bloque = (selector: string) => css.match(new RegExp(`(?:^|\\n)${selector.replace(".", "\\.")} \\{([^}]*)\\}`))?.[1] ?? "";
+const bloque = (selector: string) => css.match(new RegExp(`(?:^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
 
 describe("Boton", () => {
   it("clasesBoton('peligro') incluye la variante peligro", () => {
