@@ -295,6 +295,32 @@ function FormularioConexion({ inicial, onListo, onCancelar }: { inicial: Conexio
           ))}
         </select>
       </Campo>
+      {proveedor === "otro_compatible_openai" && (
+        <Campo etiqueta="URL base (compatible con OpenAI)">
+          <input className="zx-control" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://..." required />
+        </Campo>
+      )}
+      <Campo etiqueta={inicial ? "Nueva API key (déjala vacía para no cambiarla)" : "API key"}>
+        <input className="zx-control" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" placeholder={inicial ? "••••••••" : ""} />
+      </Campo>
+      <div className={styles.ayuda}>
+        {ayuda.url && (
+          <a href={ayuda.url} target="_blank" rel="noopener noreferrer">
+            {ayuda.etiquetaEnlace}
+          </a>
+        )}
+        {ayuda.url ? (
+          <ol>
+            {ayuda.pasos.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ol>
+        ) : (
+          <p>{ayuda.pasos[0]}</p>
+        )}
+        {proveedor === "openai" && <p>{NOTA_IMAGENES_OPENAI}</p>}
+        <p>{NOTA_SUSCRIPCION}</p>
+      </div>
       <Campo etiqueta="Modelo">
         {mostrarSelect ? (
           <select className="zx-control" value={modelo} onChange={(e) => setModelo(e.target.value)} required>
@@ -323,32 +349,6 @@ function FormularioConexion({ inicial, onListo, onCancelar }: { inicial: Conexio
           )}
         </p>
       )}
-      {proveedor === "otro_compatible_openai" && (
-        <Campo etiqueta="URL base (compatible con OpenAI)">
-          <input className="zx-control" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://..." required />
-        </Campo>
-      )}
-      <Campo etiqueta={inicial ? "Nueva API key (déjala vacía para no cambiarla)" : "API key"}>
-        <input className="zx-control" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" placeholder={inicial ? "••••••••" : ""} />
-      </Campo>
-      <div className={styles.ayuda}>
-        {ayuda.url && (
-          <a href={ayuda.url} target="_blank" rel="noopener noreferrer">
-            {ayuda.etiquetaEnlace}
-          </a>
-        )}
-        {ayuda.url ? (
-          <ol>
-            {ayuda.pasos.map((p) => (
-              <li key={p}>{p}</li>
-            ))}
-          </ol>
-        ) : (
-          <p>{ayuda.pasos[0]}</p>
-        )}
-        {proveedor === "openai" && <p>{NOTA_IMAGENES_OPENAI}</p>}
-        <p>{NOTA_SUSCRIPCION}</p>
-      </div>
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.acciones}>
         <Boton type="submit" variante="primario" chico disabled={guardando || !nombre.trim() || !modelo.trim() || (!inicial && !apiKey.trim())}>

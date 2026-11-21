@@ -4,8 +4,8 @@ import { obtenerConexionIAConClavePorId } from "@/lib/ia/conexion";
 import { elegirRecomendado, ERRORES_MODELOS_IA, listarModelosProveedor } from "@/lib/ia/modelos";
 import type { ProveedorIA } from "@/lib/ia/tipos";
 import { creaContador, superaLimite } from "@/lib/limite-peticiones";
-import { respuestaSiSinPermiso } from "../../../_ayudantes";
-import { idValido, PROVEEDORES_IA, respuestaNoEncontrada, sesionIA } from "../../../_ia";
+import { respuestaSiSinPermiso } from "../../_ayudantes";
+import { idValido, PROVEEDORES_IA, respuestaNoEncontrada, sesionIA } from "../../_ia";
 
 // Límite por empresa: 10 consultas por minuto (memoria del proceso).
 const consultas = creaContador();
