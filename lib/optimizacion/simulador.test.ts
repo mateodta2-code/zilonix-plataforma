@@ -54,6 +54,7 @@ describe("publicación para editar (forma confirmada en staging, #464)", () => {
       sold_quantity: 4,
       variations: [],
       status: "active",
+      seller_id: 123456,
       pictures: [
         { id: "123-MCO1_1", secure_url: "https://http2.mlstatic.com/a.jpg" },
         { id: "123-MCO1_2", url: "http://http2.mlstatic.com/b.jpg" },
@@ -67,6 +68,7 @@ describe("publicación para editar (forma confirmada en staging, #464)", () => {
       vendidas: 4,
       tieneVariantes: false,
       estado: "active",
+      sellerId: "123456",
       fotos: [
         { id: "123-MCO1_1", url: "https://http2.mlstatic.com/a.jpg" },
         { id: "123-MCO1_2", url: "https://http2.mlstatic.com/b.jpg" },

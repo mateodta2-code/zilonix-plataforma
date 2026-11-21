@@ -2293,3 +2293,52 @@ export const publicacionesIaImagenes = pgTable(
     cola: index("publicaciones_ia_imagenes_cola_idx").on(t.empresaId, t.estado),
   })
 );
+
+// Optimización → bitácora (migración aprobada por Mateo). Notas a mano
+// para los cambios hechos fuera de Zilonix (directo en Mercado Libre,
+// publicidad…) y la revisión de cada cambio a los 7 días. Los cambios
+// hechos desde Zilonix ya están en `auditoria`. Sin DELETE para app_user
+// (db/rls-setup.sql): es un historial.
+export const optimizacionNotas = pgTable(
+  "optimizacion_notas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").references(() => cuentasMl.id, { onDelete: "set null" }),
+    // Id de la publicación en Mercado Libre (ej. MCO1342632705).
+    itemId: text("item_id").notNull(),
+    // Cuándo se hizo el cambio (puede ser antes de anotarlo).
+    fechaCambio: timestamp("fecha_cambio", { withTimezone: true }).notNull().defaultNow(),
+    texto: text("texto").notNull(),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    itemValido: check("optimizacion_notas_item_valido", sql`${t.itemId} ~ '^[A-Z]{3}[0-9]{6,15}$'`),
+    textoLargo: check("optimizacion_notas_texto_largo", sql`char_length(${t.texto}) between 1 and 500`),
+    porItem: index("optimizacion_notas_empresa_item_idx").on(t.empresaId, t.itemId, t.fechaCambio),
+  })
+);
+
+export const optimizacionRevisiones = pgTable(
+  "optimizacion_revisiones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // Qué cambio se revisó: "auditoria:<uuid>" (hecho desde Zilonix) o
+    // "nota:<uuid>" (anotado a mano). Una revisión por cambio.
+    cambioRef: text("cambio_ref").notNull(),
+    itemId: text("item_id").notNull(),
+    resultado: text("resultado").notNull(),
+    comentario: text("comentario"),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    revisadoTs: timestamp("revisado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    refValida: check("optimizacion_revisiones_ref_valida", sql`${t.cambioRef} ~ '^(auditoria|nota):[0-9a-f-]{36}$'`),
+    resultadoValido: check("optimizacion_revisiones_resultado_valido", sql`${t.resultado} in ('sirvio', 'no_sirvio', 'sin_cambio')`),
+    comentarioLargo: check("optimizacion_revisiones_comentario_largo", sql`${t.comentario} is null or char_length(${t.comentario}) <= 500`),
+    unaPorCambio: unique("optimizacion_revisiones_empresa_cambio_unico").on(t.empresaId, t.cambioRef),
+    porItem: index("optimizacion_revisiones_empresa_item_idx").on(t.empresaId, t.itemId),
+  })
+);

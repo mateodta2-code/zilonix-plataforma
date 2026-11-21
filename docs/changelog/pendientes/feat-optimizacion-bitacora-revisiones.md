@@ -1,0 +1,7 @@
+- **feat-optimizacion-bitacora-revisiones** (migración **0035**, aprobada por Mateo) — **Bitácora de Optimización**: además de los cambios hechos desde Zilonix (#504), ahora hay:
+  - **«Anotar un cambio»:** una nota a mano, con su fecha, para lo que se cambia fuera de Zilonix (directo en Mercado Libre, publicidad, stock). También se mide a los 7 días. La publicación se confirma con Mercado Libre.
+  - **«Revisar»** en cada cambio: el resultado (sirvió, no sirvió o sin cambio) y un comentario, con quién y cuándo. Volver a revisarlo lo actualiza (una revisión por cambio).
+  - El aviso **«Revisar cambio»** de la lista ahora incluye las notas, se quita cuando el cambio está revisado y **cuenta en días de calendario de Bogotá**, igual que el detalle (la nota de Pablo en #504).
+  - Tablas `optimizacion_notas` y `optimizacion_revisiones`, con RLS por empresa y sin DELETE. Anotar y revisar piden el mismo permiso que editar (`inventario/modificar`).
+  - La guía de Optimización explica cómo revisar y anotar.
+  - **Staging:** la migración se aplica sola al desplegar. **Producción:** Mateo aplica a mano la 0035 y después `db/rls-setup.sql`.

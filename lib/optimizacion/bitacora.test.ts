@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACCIONES_BITACORA, resultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
+import { ACCIONES_BITACORA, leerFechaNota, leerResultadoRevision, limpiarTextoBitacora, listoParaRevisar, resultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
 import type { LineaVendida } from "@/lib/optimizacion/calculos";
 
 const linea = (dia: string, valor: string, cantidad = 1): LineaVendida => ({ pedidoId: `p-${dia}`, dia, cantidad, valor, valida: true, costos: null });
@@ -40,5 +40,29 @@ describe("bitácora: resultado de un cambio", () => {
 
   it("solo las acciones de Optimización entran a la bitácora", () => {
     expect(Object.keys(ACCIONES_BITACORA).sort()).toEqual(["activar_publicacion", "cambiar_fotos_publicacion", "cambiar_precio_publicacion", "cambiar_titulo_publicacion", "pausar_publicacion"]);
+  });
+});
+
+describe("bitácora: revisión y notas", () => {
+  it("resultado de la revisión con lista blanca; textos limpios con tope", () => {
+    expect(leerResultadoRevision("sirvio")).toBe("sirvio");
+    expect(leerResultadoRevision("genial")).toBeNull();
+    expect(limpiarTextoBitacora("  <b>Subí</b>   la campaña ")).toBe("Subí la campaña");
+    expect(limpiarTextoBitacora("x".repeat(900))).toHaveLength(500);
+  });
+
+  it("listo para revisar: terminó su semana y no tiene más de 14 días (días de calendario)", () => {
+    expect(listoParaRevisar("2026-11-12", "2026-11-18")).toBe(false); // aún en medición
+    expect(listoParaRevisar("2026-11-12", "2026-11-19")).toBe(true);
+    expect(listoParaRevisar("2026-11-05", "2026-11-19")).toBe(true); // 14 días
+    expect(listoParaRevisar("2026-11-04", "2026-11-19")).toBe(false); // más de 14
+  });
+
+  it("fecha de una nota: día real, no futura y de los últimos 150 días", () => {
+    expect(leerFechaNota("2026-11-10", "2026-11-20")?.toISOString()).toBe("2026-11-10T17:00:00.000Z");
+    expect(leerFechaNota("2026-11-21", "2026-11-20")).toBeNull();
+    expect(leerFechaNota("2026-02-30", "2026-11-20")).toBeNull();
+    expect(leerFechaNota("2026-01-01", "2026-11-20")).toBeNull();
+    expect(leerFechaNota(42, "2026-11-20")).toBeNull();
   });
 });
