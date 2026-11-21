@@ -9,7 +9,9 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { MAX_CONEXIONES_IA, MODULOS_IA, type ModuloIA } from "@/lib/ia/modulos";
 import styles from "./conectarIa.module.css";
 
-type Proveedor = "anthropic" | "openai" | "google" | "xai" | "otro_compatible_openai";
+import { AYUDA_PROVEEDOR, NOTA_SUSCRIPCION, type ProveedorIA } from "./ayudaProveedor";
+
+type Proveedor = ProveedorIA;
 export type ConexionIAVista = {
   id: string;
   nombre: string;
@@ -206,6 +208,7 @@ function FormularioConexion({ inicial, onListo, onCancelar }: { inicial: Conexio
   const [apiKey, setApiKey] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
+  const ayuda = AYUDA_PROVEEDOR[proveedor];
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
@@ -241,7 +244,7 @@ function FormularioConexion({ inicial, onListo, onCancelar }: { inicial: Conexio
         </select>
       </Campo>
       <Campo etiqueta="Modelo">
-        <input className="zx-control" value={modelo} onChange={(e) => setModelo(e.target.value)} placeholder="ej. claude-sonnet-5" required />
+        <input className="zx-control" value={modelo} onChange={(e) => setModelo(e.target.value)} placeholder={`ej. ${ayuda.modeloEjemplo}`} required />
       </Campo>
       {proveedor === "otro_compatible_openai" && (
         <Campo etiqueta="URL base (compatible con OpenAI)">
@@ -251,6 +254,23 @@ function FormularioConexion({ inicial, onListo, onCancelar }: { inicial: Conexio
       <Campo etiqueta={inicial ? "Nueva API key (déjala vacía para no cambiarla)" : "API key"}>
         <input className="zx-control" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" placeholder={inicial ? "••••••••" : ""} />
       </Campo>
+      <div className={styles.ayuda}>
+        {ayuda.url && (
+          <a href={ayuda.url} target="_blank" rel="noopener noreferrer">
+            {ayuda.etiquetaEnlace}
+          </a>
+        )}
+        {ayuda.url ? (
+          <ol>
+            {ayuda.pasos.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ol>
+        ) : (
+          <p>{ayuda.pasos[0]}</p>
+        )}
+        <p>{NOTA_SUSCRIPCION}</p>
+      </div>
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.acciones}>
         <Boton type="submit" variante="primario" chico disabled={guardando || !nombre.trim() || !modelo.trim() || (!inicial && !apiKey.trim())}>

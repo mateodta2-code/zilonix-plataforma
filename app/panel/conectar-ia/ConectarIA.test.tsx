@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -34,5 +34,31 @@ describe("ConectarIA (pantalla)", () => {
   it("textos sin voseo", () => {
     const { container } = render(<ConectarIA conexiones={[c(0)]} puedeModificar />);
     expect(container.textContent).not.toMatch(/\b(Conectá|tenés|Elegí|Agregá)\b/);
+  });
+  describe("ayuda para sacar la API key", () => {
+    const casos: [string, string][] = [
+      ["openai", "https://platform.openai.com/api-keys"],
+      ["anthropic", "https://platform.claude.com/settings/keys"],
+      ["google", "https://aistudio.google.com/app/apikey"],
+      ["xai", "https://console.x.ai"],
+    ];
+    it.each(casos)("%s muestra su enlace oficial en otra pestaña", (proveedor, url) => {
+      const { container } = render(<ConectarIA conexiones={[]} puedeModificar />);
+      fireEvent.click(screen.getByText("Agregar IA"));
+      fireEvent.change(container.querySelector("select")!, { target: { value: proveedor } });
+      const a = container.querySelector(`a[href="${url}"]`) as HTMLAnchorElement;
+      expect(a).toBeTruthy();
+      expect(a.target).toBe("_blank");
+      expect(a.rel).toContain("noopener");
+      expect(a.textContent).toMatch(/^Crear mi API key en .* ↗$/);
+      expect(container.querySelectorAll("ol li").length).toBeGreaterThanOrEqual(3);
+    });
+    it("«Otro compatible» no muestra enlace y la nota de suscripción aparece", () => {
+      const { container } = render(<ConectarIA conexiones={[]} puedeModificar />);
+      fireEvent.click(screen.getByText("Agregar IA"));
+      fireEvent.change(container.querySelector("select")!, { target: { value: "otro_compatible_openai" } });
+      expect(container.querySelector("a[target=_blank]")).toBeNull();
+      expect(screen.getByText(/no sirve aquí: la API se paga aparte/)).toBeTruthy();
+    });
   });
 });
