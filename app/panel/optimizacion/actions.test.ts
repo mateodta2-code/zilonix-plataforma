@@ -66,6 +66,12 @@ vi.mock("@/lib/ia/proveedores", async () => {
   return { ...real, llamarIA: ia.texto };
 });
 vi.mock("@/lib/ml/preguntas", () => ({ motivoCuentaSinRevisar: () => "Token vencido — hay que reconectar la cuenta." }));
+const bitacora = vi.hoisted(() => ({ crearNota: vi.fn(), guardarRevision: vi.fn(), esDeLaPublicacion: vi.fn() }));
+vi.mock("@/lib/optimizacion/bitacora", () => ({
+  crearNotaBitacora: bitacora.crearNota,
+  guardarRevisionCambio: bitacora.guardarRevision,
+  cambioEsDeLaPublicacion: bitacora.esDeLaPublicacion,
+}));
 vi.mock("@/lib/ml/cliente", async () => {
   const real = await vi.importActual<typeof import("@/lib/ml/cliente")>("@/lib/ml/cliente");
   return {
@@ -94,7 +100,9 @@ import {
   editarPrecioAction,
   editarTituloAction,
   generarImagenIAAction,
+  guardarNotaBitacoraAction,
   metricasPublicacionesAction,
+  revisarCambioAction,
   proponerContenidoIAAction,
 } from "./actions";
 import { ErrorImagenIA } from "@/lib/ia/imagen";
@@ -428,5 +436,48 @@ describe("imágenes informativas: proponer, aprobar y crear", () => {
     expect(prompt).toContain("Crema 50 g");
     expect(ia.subir.mock.calls[0][1]).toBe("ia-modo_uso-MCO1");
     expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+});
+
+describe("bitácora: notas a mano y revisión", () => {
+  const REF = "auditoria:11111111-2222-3333-4444-555555555555";
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.itemEdicion.mockReset().mockResolvedValue({ id: "MCO1342632705", titulo: "Tijera", precio: 1, vendidas: 0, tieneVariantes: false, fotos: [] });
+    bitacora.crearNota.mockReset().mockResolvedValue("nota-1");
+    bitacora.guardarRevision.mockReset().mockResolvedValue(undefined);
+    bitacora.esDeLaPublicacion.mockReset().mockResolvedValue(true);
+  });
+
+  it("nota: pide modificar, valida texto y fecha, y guarda con la publicación confirmada por Mercado Libre", async () => {
+    expect(await guardarNotaBitacoraAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", fecha: "2026-11-10", texto: "   " })).toMatchObject({ ok: false });
+    expect(await guardarNotaBitacoraAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", fecha: "2099-01-01", texto: "Subí la campaña" })).toMatchObject({ ok: false, aviso: expect.stringMatching(/fecha/) });
+    expect(bitacora.crearNota).not.toHaveBeenCalled();
+    const hoy = new Date().toISOString().slice(0, 10);
+    const ayer = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+    const r = await guardarNotaBitacoraAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", fecha: ayer <= hoy ? ayer : hoy, texto: " Subí la  campaña " });
+    expect(r.ok).toBe(true);
+    expect(bitacora.crearNota.mock.calls[0][1]).toMatchObject({ itemId: "MCO1342632705", texto: "Subí la campaña", cuentaMlId: CUENTA });
+    expect(estado.permisosPedidos).toContain("inventario.modificar");
+  });
+
+  it("revisar: solo resultados válidos y solo cambios de esa publicación", async () => {
+    expect(await revisarCambioAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", ref: REF, resultado: "genial" })).toMatchObject({ ok: false });
+    bitacora.esDeLaPublicacion.mockResolvedValue(false);
+    expect(await revisarCambioAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", ref: REF, resultado: "sirvio" })).toMatchObject({ ok: false, aviso: expect.stringMatching(/No se encontró/) });
+    expect(bitacora.guardarRevision).not.toHaveBeenCalled();
+    bitacora.esDeLaPublicacion.mockResolvedValue(true);
+    expect(await revisarCambioAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", ref: REF, resultado: "no_sirvio", comentario: " bajaron las visitas " })).toEqual({ ok: true, aviso: "Revisión guardada." });
+    expect(bitacora.guardarRevision.mock.calls[0][1]).toMatchObject({ ref: REF, resultado: "no_sirvio", comentario: "bajaron las visitas" });
+  });
+
+  it("sin permiso de modificar: no anota ni revisa", async () => {
+    estado.conPermiso = false;
+    expect((await revisarCambioAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", ref: REF, resultado: "sirvio" })).ok).toBe(false);
+    expect((await guardarNotaBitacoraAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", fecha: "2026-11-10", texto: "x" })).ok).toBe(false);
+    expect(bitacora.guardarRevision).not.toHaveBeenCalled();
+    expect(bitacora.crearNota).not.toHaveBeenCalled();
   });
 });

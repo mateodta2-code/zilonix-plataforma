@@ -148,7 +148,7 @@ export default async function DetalleOptimizacionPage({
   });
   const hoy = hoyBogota(ahora);
   const resultados = new Map<string, ResultadoCambio>(
-    cambios.map((c) => [c.id, resultadoCambio(c.dia, hoy, { lineas: datos!.lineas, publicidad: datos!.publicidad, visitasPorDia: datos!.visitasPorDia, visitasDesde: datos!.visitasDesde, conFinanzas })])
+    cambios.map((c) => [c.ref, resultadoCambio(c.dia, hoy, { lineas: datos!.lineas, publicidad: datos!.publicidad, visitasPorDia: datos!.visitasPorDia, visitasDesde: datos!.visitasDesde, conFinanzas })])
   );
   // Fase 3 — edición: datos frescos de ML (ventas, variantes, fotos,
   // automatización y precio para ganar) y la base del simulador con los
@@ -265,7 +265,19 @@ export default async function DetalleOptimizacionPage({
 
       <Tarjeta className={styles.tarjeta}>
         <span id="bitacora" />
-        <BitacoraCambios cambios={cambios} resultados={resultados} plata={plata} num={num} pct={pct} idioma={idioma} conFinanzas={conFinanzas} />
+        <BitacoraCambios
+          cambios={cambios}
+          resultados={resultados}
+          plata={plata}
+          num={num}
+          pct={pct}
+          idioma={idioma}
+          conFinanzas={conFinanzas}
+          cuentaMlId={cuenta.id}
+          itemId={datos.item.id}
+          hoy={hoy}
+          puedeEditar={puedeEditar}
+        />
       </Tarjeta>
 
       {edicion ? (

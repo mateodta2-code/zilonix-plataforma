@@ -48,6 +48,9 @@ import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
 import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/lib/optimizacion/competencia";
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { leerDiasMetricas } from "@/lib/optimizacion/textos";
+import { cambioEsDeLaPublicacion, crearNotaBitacora, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
+import { leerFechaNota, leerResultadoRevision, limpiarTextoBitacora } from "@/lib/optimizacion/bitacoraResultado";
+import { hoyBogota } from "@/lib/publicidad/plan";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 
@@ -505,4 +508,37 @@ export async function proponerContenidoIAAction(entrada: {
     console.warn(`[app/panel/optimizacion] propuesta IA ${prep.item.id}: ${error instanceof Error ? error.name : "error"}`);
     return { ok: false, aviso: "No se pudo proponer el contenido. Intenta de nuevo." };
   }
+}
+
+// ---------- Bitácora: notas a mano y revisión de cada cambio (0035) ----------
+
+export type ResultadoBitacora = { ok: true; aviso: string } | { ok: false; aviso: string };
+
+// Nota a mano para un cambio hecho fuera de Zilonix (directo en Mercado
+// Libre, publicidad…). Mismo permiso que editar; la publicación se
+// confirma con Mercado Libre (prepararEdicion).
+export async function guardarNotaBitacoraAction(entrada: { cuentaMlId: string; itemId: string; fecha: string; texto: string }): Promise<ResultadoBitacora> {
+  const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
+  if ("error" in prep) return { ok: false, aviso: prep.error };
+  const texto = limpiarTextoBitacora(entrada.texto);
+  if (!texto) return { ok: false, aviso: "Escribe qué cambiaste." };
+  const fecha = leerFechaNota(entrada.fecha, hoyBogota(new Date()));
+  if (!fecha) return { ok: false, aviso: "Elige una fecha de los últimos 150 días (no en el futuro)." };
+  await crearNotaBitacora(prep.ctx.empresaId, { usuarioId: prep.ctx.usuarioId, cuentaMlId: entrada.cuentaMlId, itemId: prep.item.id, fechaCambio: fecha, texto });
+  return { ok: true, aviso: "Nota guardada en la bitácora. A los 7 días verás su resultado." };
+}
+
+// «Revisado»: el resultado de un cambio (sirvió / no sirvió / sin cambio)
+// con un comentario. Se puede volver a revisar (se actualiza).
+export async function revisarCambioAction(entrada: { cuentaMlId: string; itemId: string; ref: string; resultado: string; comentario?: string }): Promise<ResultadoBitacora> {
+  const ctx = await contexto("modificar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para revisar cambios." };
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId)) return { ok: false, aviso: "No se reconoce la publicación." };
+  if (!(await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId))) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  const resultado = leerResultadoRevision(entrada.resultado);
+  if (!resultado) return { ok: false, aviso: "Elige si el cambio sirvió, no sirvió o no cambió nada." };
+  if (typeof entrada.ref !== "string" || !(await cambioEsDeLaPublicacion(ctx.empresaId, entrada.ref, entrada.itemId))) return { ok: false, aviso: "No se encontró ese cambio." };
+  const comentario = limpiarTextoBitacora(entrada.comentario) || null;
+  await guardarRevisionCambio(ctx.empresaId, { usuarioId: ctx.usuarioId, ref: entrada.ref, itemId: entrada.itemId, resultado, comentario });
+  return { ok: true, aviso: "Revisión guardada." };
 }

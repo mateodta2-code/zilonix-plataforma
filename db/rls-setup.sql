@@ -81,6 +81,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ia_conexion_modulos TO app_user;
 -- por Mateo el 19-nov-2026).
 GRANT SELECT, INSERT, UPDATE ON publicaciones_ia_trabajos TO app_user;
 GRANT SELECT, INSERT, UPDATE ON publicaciones_ia_imagenes TO app_user;
+-- Optimización → bitácora (migración 0035, aprobada por Mateo): notas a
+-- mano y revisión de cada cambio. Sin DELETE: es un historial.
+GRANT SELECT, INSERT, UPDATE ON optimizacion_notas TO app_user;
+GRANT SELECT, INSERT, UPDATE ON optimizacion_revisiones TO app_user;
 -- Tarea "Publicar — conectar Canva" — a diferencia de ia_conexiones,
 -- desconectar Canva NUNCA borra la fila (decisión explícita de
 -- Pablo/Mateo: queda desconectada_ts como histórico, los tokens se
@@ -270,6 +274,10 @@ ALTER TABLE publicaciones_ia_trabajos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE publicaciones_ia_trabajos FORCE ROW LEVEL SECURITY;
 ALTER TABLE publicaciones_ia_imagenes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE publicaciones_ia_imagenes FORCE ROW LEVEL SECURITY;
+ALTER TABLE optimizacion_notas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE optimizacion_notas FORCE ROW LEVEL SECURITY;
+ALTER TABLE optimizacion_revisiones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE optimizacion_revisiones FORCE ROW LEVEL SECURITY;
 ALTER TABLE canva_conexiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE canva_conexiones FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
@@ -529,6 +537,14 @@ CREATE POLICY aislamiento_publicaciones_ia_trabajos ON publicaciones_ia_trabajos
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 DROP POLICY IF EXISTS aislamiento_publicaciones_ia_imagenes ON publicaciones_ia_imagenes;
 CREATE POLICY aislamiento_publicaciones_ia_imagenes ON publicaciones_ia_imagenes
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Optimización → bitácora: cada empresa solo ve sus notas y revisiones.
+DROP POLICY IF EXISTS aislamiento_optimizacion_notas ON optimizacion_notas;
+CREATE POLICY aislamiento_optimizacion_notas ON optimizacion_notas
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_optimizacion_revisiones ON optimizacion_revisiones;
+CREATE POLICY aislamiento_optimizacion_revisiones ON optimizacion_revisiones
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- Tarea "Publicar — conectar Canva" — a diferencia de TODAS las demás

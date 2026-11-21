@@ -403,3 +403,19 @@
   border: 1px solid var(--acento-fuerte);
   border-radius: 999px;
 }
+
+/* Bitácora: anotar un cambio y revisar cada uno. */
+.notaBitacora,
+.revisarCambio {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.accionesBitacora,
+.revisionCelda {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
