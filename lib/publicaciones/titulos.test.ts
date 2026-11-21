@@ -29,6 +29,15 @@ describe("reglas del título (en código, no solo pedidas a la IA)", () => {
     expect(limpiarTitulo("x", 60)).toBeNull();
   });
 
+  it("conserva los porcentajes que describen el producto; quita solo los de descuento", () => {
+    expect(limpiarTitulo("Camiseta 100% Algodón Talla M", 60)).toBe("Camiseta 100% algodón talla M");
+    expect(limpiarTitulo("Crema 99 % Natural 50 g", 60)).toBe("Crema 99 % natural 50 g");
+    expect(limpiarTitulo("Camiseta algodón 20% off", 60)).toBe("Camiseta algodón");
+    expect(limpiarTitulo("Camiseta algodón 50 % dcto", 60)).toBe("Camiseta algodón");
+    expect(limpiarTitulo("Camiseta algodón 30% de descuento", 60)).toBe("Camiseta algodón");
+    expect(limpiarTitulo("Camiseta algodão 15% desconto", 60)).toBe("Camiseta algodão");
+  });
+
   it("los nombres propios salen del nombre de la ficha, salvo si viene todo en Mayúscula Cada Palabra", () => {
     expect(nombresPropios(leerFicha({ nombre: { valor: "Termo térmico Stanley Classic", origen: "vendedor" } }))).toEqual(["Stanley", "Classic"]);
     expect(nombresPropios(leerFicha({ nombre: { valor: "Termo Térmico Acero Inoxidable", origen: "vendedor" } }))).toEqual([]);
