@@ -15,7 +15,7 @@
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
-    var(--tarjeta-fondo) padding-box,
+    var(--tarjeta-fondo-capa) padding-box,
     var(--degradado-plata-borde) border-box;
   overflow: hidden;
 }
@@ -49,7 +49,7 @@
 :root[data-tema="claro"] .vacio {
   border: 1px solid transparent;
   background:
-    var(--tarjeta-fondo) padding-box,
+    var(--tarjeta-fondo-capa) padding-box,
     var(--degradado-plata-borde) border-box;
   box-shadow: var(--sombra-tarjeta);
 }

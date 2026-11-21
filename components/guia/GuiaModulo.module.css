@@ -8,7 +8,7 @@
 :global(:root[data-tema="claro"]) .guia {
   border: 1px solid transparent;
   background:
-    var(--tarjeta-fondo) padding-box,
+    var(--tarjeta-fondo-capa) padding-box,
     var(--degradado-plata-borde) border-box;
   box-shadow: var(--sombra-tarjeta), var(--filete-marca-arriba-abajo);
 }

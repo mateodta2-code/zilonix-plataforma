@@ -15,7 +15,7 @@
   border-radius: var(--radio-tarjeta);
   background:
     radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
-    var(--tarjeta-fondo) padding-box,
+    var(--tarjeta-fondo-capa) padding-box,
     var(--degradado-plata-borde) border-box;
   padding: 20px;
   overflow: hidden;
@@ -100,7 +100,7 @@
   border: 1px solid transparent;
   background:
     radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
-    var(--tarjeta-fondo) padding-box,
+    var(--tarjeta-fondo-capa) padding-box,
     var(--degradado-plata-borde) border-box;
   box-shadow: var(--sombra-tarjeta);
 }
