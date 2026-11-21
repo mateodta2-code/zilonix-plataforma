@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync, statSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join, relative } from "path";
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
@@ -356,20 +357,47 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/panel/promociones-prueba/page.tsx": "maqueta de datos de ejemplo fijos en memoria (./datosEjemplo.ts) — no lee ni escribe ninguna tabla, solo resuelve la sesión",
 };
 
+// Una directiva "use server" (de archivo o dentro de una función) en su
+// propia línea: ese archivo expone Server Actions, se llame como se llame.
+const PATRON_USE_SERVER = /^\s*["']use server["'];?\s*$/m;
+
+function tieneUseServer(nombre: string, ruta: string): boolean {
+  return /\.tsx?$/.test(nombre) && !/\.test\.tsx?$/.test(nombre) && PATRON_USE_SERVER.test(readFileSync(ruta, "utf8"));
+}
+
 function listarArchivosDeRuta(dir: string): string[] {
   let resultado: string[] = [];
   for (const nombre of readdirSync(dir)) {
     const ruta = join(dir, nombre);
     if (statSync(ruta).isDirectory()) {
       resultado = resultado.concat(listarArchivosDeRuta(ruta));
-    } else if (/^(page|route|actions)\.tsx?$/.test(nombre)) {
+    } else if (/^(page|route|actions)\.tsx?$/.test(nombre) || tieneUseServer(nombre, ruta)) {
+      // Hueco visto en #498: un archivo de acciones que no se llama
+      // actions.ts quedaba fuera de esta revisión. Ahora entra cualquier
+      // archivo con "use server".
       resultado.push(ruta);
     }
   }
   return resultado;
 }
 
-const archivos = listarArchivosDeRuta(APP_DIR).map((a) => relative(RAIZ, a).replace(/\\/g, "/"));
+// Server Actions fuera de app/ (lib/, components/): también tienen que
+// estar clasificadas.
+function listarUseServer(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  let resultado: string[] = [];
+  for (const nombre of readdirSync(dir)) {
+    if (nombre === "node_modules") continue;
+    const ruta = join(dir, nombre);
+    if (statSync(ruta).isDirectory()) resultado = resultado.concat(listarUseServer(ruta));
+    else if (tieneUseServer(nombre, ruta)) resultado.push(ruta);
+  }
+  return resultado;
+}
+
+const archivos = [...listarArchivosDeRuta(APP_DIR), ...listarUseServer(join(RAIZ, "lib")), ...listarUseServer(join(RAIZ, "components"))].map((a) =>
+  relative(RAIZ, a).replace(/\\/g, "/")
+);
 
 describe("tarea 1.8/1.11 — toda ruta de app/ está clasificada y usa el candado que dice usar", () => {
   for (const relPath of archivos) {
@@ -496,6 +524,29 @@ describe("fix middleware (2026-10-21) — coherencia entre RUTAS_EXENTAS, RUTAS_
   it("toda ruta de PUBLICAS_CON_AUTENTICACION_PROPIA sigue existiendo como archivo real", () => {
     for (const relPath of Object.keys(PUBLICAS_CON_AUTENTICACION_PROPIA)) {
       expect(archivos.includes(relPath), `${relPath} está en PUBLICAS_CON_AUTENTICACION_PROPIA pero el archivo ya no existe — bórrala de esta prueba.`).toBe(true);
+    }
+  });
+});
+
+describe("Server Actions con cualquier nombre", () => {
+  it("reconoce la directiva de archivo y la de función, con comillas simples o dobles", () => {
+    expect(PATRON_USE_SERVER.test('"use server";\n\nexport async function a() {}')).toBe(true);
+    expect(PATRON_USE_SERVER.test("export async function a() {\n  'use server'\n}")).toBe(true);
+    expect(PATRON_USE_SERVER.test('// usa "use server" en un comentario\nconst x = 1;')).toBe(false);
+    expect(PATRON_USE_SERVER.test('"use client";')).toBe(false);
+  });
+
+  it('un archivo con "use server" que no se llama actions.ts igual queda en la revisión', () => {
+    const dir = mkdtempSync(join(tmpdir(), "zx-use-server-"));
+    try {
+      mkdirSync(join(dir, "modulo"));
+      writeFileSync(join(dir, "modulo", "imagenesActions.ts"), '"use server";\nexport async function x() {}\n');
+      writeFileSync(join(dir, "modulo", "ayuda.ts"), "export const y = 1;\n");
+      writeFileSync(join(dir, "modulo", "algo.test.ts"), '"use server";\n');
+      const vistos = listarArchivosDeRuta(dir).map((a) => relative(dir, a).split("\\").join("/"));
+      expect(vistos).toEqual(["modulo/imagenesActions.ts"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
