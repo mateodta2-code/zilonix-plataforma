@@ -2329,7 +2329,9 @@ export const optimizacionRevisiones = pgTable(
     // "nota:<uuid>" (anotado a mano). Una revisión por cambio.
     cambioRef: text("cambio_ref").notNull(),
     itemId: text("item_id").notNull(),
-    resultado: text("resultado").notNull(),
+    // null = solo un comentario (migración 0036): el cambio sigue «sin
+    // revisar» hasta que alguien elija el resultado.
+    resultado: text("resultado"),
     comentario: text("comentario"),
     usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
     revisadoTs: timestamp("revisado_ts", { withTimezone: true }).notNull().defaultNow(),
@@ -2338,6 +2340,7 @@ export const optimizacionRevisiones = pgTable(
     refValida: check("optimizacion_revisiones_ref_valida", sql`${t.cambioRef} ~ '^(auditoria|nota):[0-9a-f-]{36}$'`),
     resultadoValido: check("optimizacion_revisiones_resultado_valido", sql`${t.resultado} in ('sirvio', 'no_sirvio', 'sin_cambio')`),
     comentarioLargo: check("optimizacion_revisiones_comentario_largo", sql`${t.comentario} is null or char_length(${t.comentario}) <= 500`),
+    resultadoOComentario: check("optimizacion_revisiones_resultado_o_comentario", sql`${t.resultado} is not null or ${t.comentario} is not null`),
     unaPorCambio: unique("optimizacion_revisiones_empresa_cambio_unico").on(t.empresaId, t.cambioRef),
     porItem: index("optimizacion_revisiones_empresa_item_idx").on(t.empresaId, t.itemId),
   })

@@ -1,0 +1,7 @@
+- **feat-bitacora-comentario-sin-resultado** (migración **0036**, aprobada por Mateo) — **Bitácora de Optimización: comentario sin resultado**:
+  - En «Revisar» ya se puede guardar **solo un comentario**, sin elegir Sirvió, No sirvió o Sin cambio (por ejemplo, mientras el cambio sigue en medición). El botón dice «Guardar comentario» y un aviso explica que el cambio sigue sin revisar.
+  - La tabla muestra «Comentario de …» sin ninguna etiqueta de resultado (nunca como «Sin cambio») y el cambio sigue en **«Sin revisar»**.
+  - El aviso **«Revisar cambio»** de la lista sigue saliendo hasta que alguien elija un resultado.
+  - `optimizacion_revisiones.resultado` pasa a aceptar NULL, con un CHECK nuevo que exige resultado o comentario. Las filas existentes no cambian; RLS y permisos, igual.
+  - La guía de Optimización explica cómo dejar solo un comentario.
+  - **Staging:** la migración se aplica sola al desplegar. **Producción:** Mateo aplica a mano la 0036, después de la 0035. No hace falta volver a correr `db/rls-setup.sql` (no hay tablas nuevas).
