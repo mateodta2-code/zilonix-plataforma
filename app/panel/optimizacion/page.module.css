@@ -15,7 +15,7 @@
   border: 1px solid transparent;
   border-radius: var(--radio-tarjeta);
   background:
-    var(--superficie) padding-box,
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
     var(--degradado-plata-borde) border-box;
   box-shadow: var(--sombra-tarjeta), var(--filete-marca-arriba-abajo);
   color: var(--texto);

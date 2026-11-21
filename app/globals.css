@@ -180,6 +180,11 @@
      filtros no son "KPI"), nunca un segundo degradado con los mismos
      números copiados a mano. */
   --tarjeta-fondo: var(--kpi-fondo);
+  /* Capa de fondo para listas de varias capas: en oscuro es el mismo
+     degradado; en claro se redefine como imagen (un color solo puede ir
+     en la última capa). */
+  --tarjeta-fondo-capa: var(--tarjeta-fondo);
+  --kpi-fondo-capa: var(--kpi-fondo);
 
   /* Issue #191 — bug real en staging (tema claro): <Tabla> (components/
      marco/Tabla.module.css) pintaba su fondo con --superficie/
@@ -468,6 +473,8 @@
   --acento-suave: color-mix(in srgb, var(--azul-metal-3) 16%, transparent);
   --kpi-fondo: #ffffff;
   --tarjeta-fondo: #ffffff;
+  --kpi-fondo-capa: linear-gradient(var(--kpi-fondo), var(--kpi-fondo));
+  --tarjeta-fondo-capa: linear-gradient(var(--tarjeta-fondo), var(--tarjeta-fondo));
   --acento-brillo: rgba(37, 99, 235, 0.35);
   --acento-resplandor: rgba(37, 99, 235, 0.12);
   --fila-hover: rgba(37, 99, 235, 0.08);
@@ -507,7 +514,11 @@
   /* El degradado oficial se apaga sobre blanco (la mitad clara no se
      distingue). El borde en claro usa el lado oscuro de la misma
      paleta para que el filo se vea. */
-  --degradado-plata-borde: linear-gradient(135deg, var(--azul-metal-2) 0%, #7d8594 16%, #c3c8d0 34%, #8c93a1 50%, #c3c8d0 66%, #7d8594 84%, var(--azul-metal-2) 100%);
+  --degradado-plata-borde: radial-gradient(circle at 0% 0%, var(--azul-metal-2) 0%, transparent 38%),
+    radial-gradient(circle at 100% 0%, var(--azul-metal-2) 0%, transparent 38%),
+    radial-gradient(circle at 0% 100%, var(--azul-metal-2) 0%, transparent 38%),
+    radial-gradient(circle at 100% 100%, var(--azul-metal-2) 0%, transparent 38%),
+    linear-gradient(135deg, var(--azul-metal-2) 0%, #7f9bd6 14%, #c3c8d0 30%, var(--azul-metal-3) 45%, #9aa6bd 55%, #c3c8d0 70%, #7f9bd6 86%, var(--azul-metal-2) 100%);
   /* Issue #518 — filete azul de las tarjetas en claro: azul más profundo
      (--azul-metal-2) porque --azul-metal-3 pierde contraste sobre blanco.
      Una sola fuente: Tarjeta, TarjetaKpi, EstadoVacio y GuiaModulo lo leen. */
@@ -564,11 +575,6 @@
      box-shadow; para "apagado" se usa `inset 0 0 0 0 transparent`. */
   --filete-marca-arriba-abajo: inset 0 1px 0 0 color-mix(in srgb, var(--azul-metal-2) 55%, transparent),
     inset 0 -1px 0 0 color-mix(in srgb, var(--azul-metal-2) 55%, transparent);
-  /* Issue #518 — logo de la barra lateral en claro: el SVG plata (#6E→#E6)
-     se lavaba sobre fondo claro. Este filtro lo lleva a grafito (#31→#67)
-     conservando el brillo metálico del degradado, con un contorno oscuro
-     fino para el contraste. Solo existe en este bloque. */
-  --filtro-logo-claro: brightness(0.46) contrast(1.4) drop-shadow(0 0 0.5px rgba(31, 36, 43, 0.6));
 }
 
 :root[data-tema="claro"][data-fondo="suave"] {

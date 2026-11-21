@@ -15,7 +15,7 @@
   border-radius: var(--radio-tarjeta);
   background:
     radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
-    var(--kpi-fondo) padding-box,
+    var(--kpi-fondo-capa) padding-box,
     var(--degradado-plata-borde) border-box;
   padding: 16px 18px;
   display: flex;
@@ -86,10 +86,11 @@
   font-family: var(--fuente-titulos);
   /* Manual de marca: ExtraBold (800) para cifras grandes. */
   font-weight: 800;
-  font-size: 28px;
+  /* Issue #525: las cifras largas («COP 16.059.595») se partían en dos líneas. */
+  font-size: clamp(20px, 1.6vw + 8px, 28px);
   line-height: 1.15;
-  /* "COP 1.234.000 · USD 50" no cabe en una columna del grid a 28px. */
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .detalle {
@@ -131,7 +132,7 @@
   border: 1px solid transparent;
   background:
     radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
-    var(--kpi-fondo) padding-box,
+    var(--kpi-fondo-capa) padding-box,
     var(--degradado-plata-borde) border-box;
   box-shadow: var(--sombra-tarjeta);
 }

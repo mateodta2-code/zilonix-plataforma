@@ -71,10 +71,18 @@
   flex-shrink: 0;
 }
 
-/* Issue #518: en claro el logo plata se ve lavado; grafito metalizado vía
-   token del bloque claro (el oscuro no define filtro ni cambia). */
+/* Issue #525: en claro se muestra la variante grafito→plata (SVG propio);
+   el oscuro queda idéntico. Nunca un filtro CSS: aplastaba el degradado. */
+.logoCompletoClaro {
+  display: none;
+}
+
 :root[data-tema="claro"] .logoCompleto {
-  filter: var(--filtro-logo-claro);
+  display: none;
+}
+
+:root[data-tema="claro"] .logoCompletoClaro {
+  display: block;
 }
 
 .iconoColapsado {
@@ -93,7 +101,8 @@
    <img> sigue en el DOM por si hace falta más adelante, nunca se
    borra el archivo). Nunca un filtro CSS sobre la plata, eso sería
    recolorear el archivo oficial. */
-.barra[data-colapsada="true"] .logoCompleto {
+.barra[data-colapsada="true"] .logoCompleto,
+:root[data-tema="claro"] .barra[data-colapsada="true"] .logoCompletoClaro {
   display: none;
 }
 
@@ -332,7 +341,8 @@ html .item {
     padding: 8px 0;
   }
 
-  .logoCompleto {
+  .logoCompleto,
+  :root[data-tema="claro"] .logoCompletoClaro {
     display: none;
   }
 
