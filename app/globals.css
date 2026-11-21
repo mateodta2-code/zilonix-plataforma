@@ -423,10 +423,10 @@
      de la página (fondo blanco, --texto negro de este bloque) sigue
      clara, el mismo bug reportado pero invertido. */
   color-scheme: light;
-  --fondo: #ffffff;
-  --superficie: #f5f5f6;
-  --superficie-2: #ececee;
-  --borde: #dcdcdf;
+  --fondo: #eceef1;
+  --superficie: #ffffff;
+  --superficie-2: #f1f3f6;
+  --borde: #d3d6db;
   /* Corrección (fix-ui-claro-sidebar-marca): Mateo Y Pablo rechazaron
      --velo-item-claro — "se ve sucio, tapa el fade" (mismo motivo por
      el que la tarea anterior ya había rechazado --pill-claro, blanco
@@ -434,7 +434,7 @@
      100% transparente, sin ningún fondo propio por ítem. Ver
      BarraLateral.module.css para cómo se resuelve ahora el contraste
      (texto zona-oscura arriba / claro abajo, por grupo, sin fondo). */
-  --texto: #000000;
+  --texto: #1a1d23;
   /* Issue #186 — mismo motivo que --texto-superficie-2 del bloque
      :root (arriba): copia fija del --texto de ESTE tema, para que
      .zx-control/.secundario (siempre sobre --superficie-2 propio)
@@ -465,7 +465,9 @@
   /* #1d4ed8 era un literal repetido — mismo valor exacto que
      --azul-metal-2, ahora sale de ahí (una sola fuente). */
   --acento-fuerte: var(--azul-metal-2);
-  --acento-suave: rgba(37, 99, 235, 0.1);
+  --acento-suave: color-mix(in srgb, var(--azul-metal-3) 16%, transparent);
+  --kpi-fondo: #ffffff;
+  --tarjeta-fondo: #ffffff;
   --acento-brillo: rgba(37, 99, 235, 0.35);
   --acento-resplandor: rgba(37, 99, 235, 0.12);
   --fila-hover: rgba(37, 99, 235, 0.08);
@@ -495,8 +497,8 @@
      sidebar, los dos usos reales contra el degradado, pasan a
      --plata-etiqueta-zona-oscura. */
   --plata-etiqueta: #686868;
-  --borde-plata: #6e6e6e;
-  --borde-hover: #6e6e6e;
+  --borde-plata: #cfd3d9;
+  --borde-hover: #c0c4cc;
   /* #22c55e sobre blanco mide 2.28:1; #166534 mide 6.04:1 sobre
      #ececee. #ef4444 sobre blanco mide 3.76:1; #991b1b mide 7.04:1
      sobre #ececee. */
@@ -505,7 +507,7 @@
   /* El degradado oficial se apaga sobre blanco (la mitad clara no se
      distingue). El borde en claro usa el lado oscuro de la misma
      paleta para que el filo se vea. */
-  --degradado-plata-borde: linear-gradient(90deg, #6e6e6e 0%, #939393 28%, #c0c0c0 50%, #939393 72%, #6e6e6e 100%);
+  --degradado-plata-borde: linear-gradient(135deg, var(--azul-metal-3) 0%, #9aa0a9 14%, #e6e6e6 32%, #a9aeb6 50%, #e6e6e6 68%, #9aa0a9 86%, var(--azul-metal-3) 100%);
   /* Tarea "marca unificada": títulos en gris metalizado (pedido:
      #3F4651 -> #8A93A0 -> #2E343D). El punto medio pedido (#8A93A0)
      se cambia a #656C77: contra --superficie-2 (#ececee, la tarjeta
@@ -515,110 +517,22 @@
      (esta clase NUNCA se usa en texto chico, ver .zx-texto-plata). Los
      dos extremos sí son los pedidos tal cual (9–12:1, de sobra). */
   --degradado-plata-texto: linear-gradient(100deg, #3f4651 0%, #656c77 46%, #2e343d 100%);
-  /* Corrección (fix-ui-claro-como-oscuro): los dos intentos anteriores
-     (fix-ui-claro-azul, fix-ui-claro-tono-oscuro) seguían siendo un
-     tinte azul sobre blanco — Mateo pidió, con capturas, que la franja
-     de arriba sea PRÁCTICAMENTE EL MISMO degradado que oscuro (azul
-     metálico -> negro, misma intensidad) y que SOLO abajo pase a
-     blanco. No se puede lograr eso con más alfa (la base siempre
-     termina siendo --fondo, blanco en claro) — hace falta una capa
-     opaca propia que vaya de negro a blanco, y encima, exactamente
-     la MISMA capa de azul-metal (con los MISMOS alfas, copiados tal
-     cual) que ya usa oscuro arriba en este archivo.
-
-     3 capas, de arriba hacia abajo (la primera listada es la que se
-     ve más arriba en el stack):
-     1) el mismo "sheen" gris que ya tenía oscuro (sin cambios).
-     2) la MISMA capa azul-metal-1/2/3 que usa oscuro, copiada literal
-        — mismos % de mezcla, mismas paradas. Donde esta capa es
-        transparente (desde 25%), se ve la capa 3 de abajo.
-     3) NUEVA: negro sólido de 0% a donde empieza a pedir Mateo
-        (~55-70%), después cruza a blanco. Mientras la capa 2 todavía
-        tiene algo de alfa (0-25%), el resultado es IDÉNTICO al de
-        oscuro (azul-metal sobre negro, mismo cálculo). De 25% en
-        adelante, sin capa 2, se ve esta capa 3 sola: negro liso hasta
-        el cruce, blanco limpio después — ni rastro de --fondo (blanco)
-        asomando antes de tiempo, porque esta capa es 100% opaca en
-        toda su extensión.
-
-     Corrección (fix-ui-claro-cruce-alto, ya revertida): Mateo pidió
-     subir el cruce (quedaba debajo de las KPI) y se angostó la banda
-     a 2 puntos para esquivar la "zona muerta" (ni el texto de zona
-     oscura ni el normal de claro pasan AA a mitad de un negro→blanco).
-     Mateo vio el resultado y lo rechazó: un corte así de angosto se ve
-     como un borde duro, no un difuminado — pidió explícitamente volver
-     a una banda ANCHA (negro → gris → blanco) aunque eso reabra la
-     zona muerta, y resolver el contraste ahí por otro lado en vez de
-     angostar la banda de nuevo.
-
-     Corrección (fix-ui-claro-fade-abajo, punto 1): Mateo vio #119 y
-     seguía viendo un "corte" gris→blanco — pidió alargar la banda
-     TODAVÍA más, con paradas de gris EXPLÍCITAS (no un blend de 2
-     puntos) y blanco limpio mucho más abajo (zona de KPIs/tablas). La
-     capa de azul-metal de arriba (la del medio, sin cambios) y el
-     punto donde esta 3ª capa empieza en negro sólido (18%/20%/22%)
-     tampoco se tocan — a propósito, para que el glow de arriba siga
-     exactamente igual. Lo único que cambia es qué pasa DESPUÉS de ese
-     punto: antes cruzaba a blanco en 24 puntos (18→42) con un blend de
-     2 paradas; ahora son 6 paradas, una rampa de gris LINEAL de verdad
-     (0, 51, 102, 153, 204, 255 — osea #000/#333/#666/#999/#ccc/#fff,
-     el mismo salto de 51 entre cada una) en una banda de 60 puntos
-     (18→78 en suave). Medio/intenso en la misma proporción (64/70
-     puntos de banda).
-
-     Zona muerta, confirmada con script (igual que #119, por el mismo
-     motivo: en el punto medio del gris, #999999, ningún texto plano
-     pasa AA — 2.59:1 contra el texto de zona oscura, 7.37:1 contra el
-     texto negro normal... pero ESE sí pasa de sobra, así que la "zona
-     muerta" real empieza más tarde). A propósito: "estética > AA en
-     el fondo; contraste en superficies/texto" — ver --velo-item-claro
-     arriba y BarraLateral.module.css/Pestanas.module.css, donde se
-     resuelve de verdad. */
-  --fondo-app-suave:
-    linear-gradient(180deg, rgba(230, 230, 230, 0) 12%, rgba(230, 230, 230, 0.07) 18%, rgba(230, 230, 230, 0) 26%),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--azul-metal-1) 55%, transparent) 0%,
-      color-mix(in srgb, var(--azul-metal-2) 38%, transparent) 6%,
-      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 12%,
-      color-mix(in srgb, var(--azul-metal-2) 8%, transparent) 18%,
-      transparent 25%
-    ),
-    /* 16-nov (Santiago): en px, no en % de la pantalla. Antes el gris
-       iba del ~30 % al ~78 % de la altura y todo texto suelto que caía
-       ahí no se leía (ni claro ni oscuro). Ahora: negro hasta 170px
-       (barra superior de 64px + título y descripción de la página),
-       blanco desde 270px. Mismos pasos de gris, en 100px. Los cruces
-       del menú lateral (BarraLateral.tsx, CRUCE_ZONA_CLARA_PX) siguen
-       estos valores. */
-    linear-gradient(180deg, #000000 0px, #000000 170px, #333333 190px, #666666 210px, #999999 230px, #cccccc 250px, #ffffff 270px);
-  --fondo-app-medio:
-    linear-gradient(180deg, rgba(230, 230, 230, 0) 18%, rgba(230, 230, 230, 0.08) 26%, rgba(230, 230, 230, 0) 36%),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
-      color-mix(in srgb, var(--azul-metal-2) 42%, transparent) 14%,
-      color-mix(in srgb, var(--azul-metal-3) 22%, transparent) 28%,
-      color-mix(in srgb, var(--azul-metal-1) 10%, transparent) 40%,
-      transparent 50%
-    ),
-    linear-gradient(180deg, #000000 0px, #000000 190px, #333333 210px, #666666 230px, #999999 250px, #cccccc 270px, #ffffff 290px);
-  --fondo-app-intenso:
-    linear-gradient(180deg, rgba(236, 236, 236, 0.14) 0%, rgba(236, 236, 236, 0.04) 5%, rgba(236, 236, 236, 0) 10%, rgba(210, 210, 210, 0.07) 34%, rgba(210, 210, 210, 0) 46%),
-    radial-gradient(72% 9% at 50% 0%, color-mix(in srgb, var(--azul-metal-3) 16%, transparent) 0%, transparent 70%),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--azul-metal-2) 58%, transparent) 0%,
-      color-mix(in srgb, var(--azul-metal-2) 46%, transparent) 18%,
-      color-mix(in srgb, var(--azul-metal-2) 30%, transparent) 34%,
-      color-mix(in srgb, var(--azul-metal-1) 18%, transparent) 48%,
-      color-mix(in srgb, var(--azul-metal-1) 8%, transparent) 58%,
-      transparent 70%
-    ),
-    linear-gradient(180deg, #000000 0px, #000000 210px, #333333 230px, #666666 250px, #999999 270px, #cccccc 290px, #ffffff 310px);
-  /* Mateo eligió el suave — mismo criterio que el bloque oscuro de
-     arriba: sin atributo data-fondo, gana el suave. */
-  --fondo-app: var(--fondo-app-suave);
+  /* Tema de día plateado (maqueta v3, aprobada por Mateo): blanco y plata
+     con el mismo azul metálico del tema oscuro, SIN la franja negra ni
+     el difuminado negro→blanco de antes. Suave/medio/intenso apuntan al
+     mismo fondo para que data-fondo no devuelva la franja negra. */
+  --fondo-app:
+    radial-gradient(1100px 320px at 60% -140px, color-mix(in srgb, var(--azul-metal-3) 14%, transparent), transparent 70%),
+    radial-gradient(520px 900px at 100% 55%, color-mix(in srgb, var(--azul-metal-2) 6%, transparent), transparent 70%),
+    linear-gradient(115deg, transparent 28%, rgba(255, 255, 255, 0.55) 44%, transparent 60%),
+    linear-gradient(135deg, #f4f5f7 0%, #eceef1 45%, #e3e6ea 100%);
+  --fondo-app-suave: var(--fondo-app);
+  --fondo-app-medio: var(--fondo-app);
+  --fondo-app-intenso: var(--fondo-app);
+  /* Variables nuevas del tema claro (las usan los componentes en el
+     issue 2). */
+  --resplandor-esquina-claro: color-mix(in srgb, var(--azul-metal-3) 9%, transparent);
+  --sombra-tarjeta: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 22px color-mix(in srgb, var(--azul-metal-1) 8%, transparent);
 }
 
 :root[data-tema="claro"][data-fondo="suave"] {
