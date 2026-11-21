@@ -4,10 +4,11 @@
 // - las notas a mano para cambios hechos fuera de Zilonix
 //   (optimizacion_notas, migración 0035);
 // - la revisión de cada uno (optimizacion_revisiones): sirvió, no sirvió
-//   o sin cambio, con un comentario.
+//   o sin cambio, con un comentario. Desde la 0036 puede ser solo un
+//   comentario (resultado null): ese cambio sigue «sin revisar».
 // El resultado a los 7 días se calcula en bitacoraResultado.ts.
 
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { auditoria, optimizacionNotas, optimizacionRevisiones, usuarios } from "@/db/schema";
 import { hoyBogota } from "@/lib/publicidad/plan";
@@ -17,7 +18,7 @@ export { ACCIONES_BITACORA, DIAS_AVISO_REVISION, DIAS_MEDICION };
 
 const ACCIONES = Object.keys(ACCIONES_BITACORA);
 
-export type RevisionCambio = { resultado: ResultadoRevision; comentario: string | null; usuario: string | null; ts: Date };
+export type RevisionCambio = { resultado: ResultadoRevision | null; comentario: string | null; usuario: string | null; ts: Date };
 
 export type CambioBitacora = {
   id: string;
@@ -73,7 +74,7 @@ export async function leerCambiosPublicacion(empresaId: string, itemId: string, 
         .where(and(eq(optimizacionRevisiones.empresaId, empresaId), eq(optimizacionRevisiones.itemId, itemId))),
     ])
   );
-  const porRef = new Map(revisiones.map((r) => [r.ref, { resultado: r.resultado as ResultadoRevision, comentario: r.comentario, usuario: r.usuario, ts: r.ts }]));
+  const porRef = new Map(revisiones.map((r) => [r.ref, { resultado: r.resultado as ResultadoRevision | null, comentario: r.comentario, usuario: r.usuario, ts: r.ts }]));
   const cambios: CambioBitacora[] = [
     ...desdeZilonix.map((f) => ({
       ...f,
@@ -102,7 +103,8 @@ export async function leerCambiosPublicacion(empresaId: string, itemId: string, 
 }
 
 // Publicaciones de la lista con algún cambio (de Zilonix o anotado) que
-// ya cumplió su semana de medición, todavía sin revisar y de hace no más
+// ya cumplió su semana de medición, todavía sin resultado (un comentario
+// solo no cuenta como revisado) y de hace no más
 // de 14 días. Cuenta en días de calendario de Bogotá, igual que el
 // detalle, para que «Revisar cambio» y «Mejoró/Empeoró» coincidan.
 export async function publicacionesParaRevisar(empresaId: string, itemIds: string[], ahora: Date): Promise<string[]> {
@@ -131,7 +133,7 @@ export async function publicacionesParaRevisar(empresaId: string, itemIds: strin
       tx
         .select({ ref: optimizacionRevisiones.cambioRef })
         .from(optimizacionRevisiones)
-        .where(and(eq(optimizacionRevisiones.empresaId, empresaId), inArray(optimizacionRevisiones.itemId, itemIds))),
+        .where(and(eq(optimizacionRevisiones.empresaId, empresaId), inArray(optimizacionRevisiones.itemId, itemIds), isNotNull(optimizacionRevisiones.resultado))),
     ])
   );
   const yaRevisadas = new Set(revisadas.map((r) => r.ref));
@@ -179,9 +181,10 @@ export async function crearNotaBitacora(
 }
 
 // Una revisión por cambio: si se vuelve a revisar, se actualiza.
+// resultado null = solo comentario (la base exige al menos uno de los dos).
 export async function guardarRevisionCambio(
   empresaId: string,
-  datos: { usuarioId: string; ref: string; itemId: string; resultado: ResultadoRevision; comentario: string | null }
+  datos: { usuarioId: string; ref: string; itemId: string; resultado: ResultadoRevision | null; comentario: string | null }
 ): Promise<void> {
   const ahora = new Date();
   await dbComoEmpresa(empresaId, (tx) =>

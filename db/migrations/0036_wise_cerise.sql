@@ -1,0 +1,2 @@
+ALTER TABLE "optimizacion_revisiones" ALTER COLUMN "resultado" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "optimizacion_revisiones" ADD CONSTRAINT "optimizacion_revisiones_resultado_o_comentario" CHECK ("optimizacion_revisiones"."resultado" is not null or "optimizacion_revisiones"."comentario" is not null);
