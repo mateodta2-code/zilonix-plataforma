@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -9,7 +9,10 @@ import { ConectarIA, type ConexionIAVista } from "./ConectarIA";
 const c = (n: number, extra: Partial<ConexionIAVista> = {}): ConexionIAVista => ({
   id: `id-${n}`, nombre: `IA ${n}`, proveedor: "openai", baseUrl: null, modelo: "gpt", esPrincipal: n === 0, modulos: [], ...extra,
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("ConectarIA (pantalla)", () => {
   it("muestra el contador, la llave enmascarada y las acciones", () => {
@@ -59,6 +62,31 @@ describe("ConectarIA (pantalla)", () => {
       fireEvent.change(container.querySelector("select")!, { target: { value: "otro_compatible_openai" } });
       expect(container.querySelector("a[target=_blank]")).toBeNull();
       expect(screen.getByText(/no sirve aquí: la API se paga aparte/)).toBeTruthy();
+    });
+  });
+  describe("lista de modelos de la cuenta", () => {
+    const abrir = (respuesta: unknown) => {
+      vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => respuesta })));
+      const r = render(<ConectarIA conexiones={[]} puedeModificar />);
+      fireEvent.click(screen.getByText("Agregar IA"));
+      fireEvent.change(r.container.querySelector("select")!, { target: { value: "openai" } });
+      fireEvent.change(r.container.querySelector('input[type="password"]')!, { target: { value: "sk-prueba" } });
+      return r.container;
+    };
+    it("muestra el select con el recomendado elegido y permite escribir otro", async () => {
+      const container = abrir({ ok: true, modelos: ["gpt-6.2-sol", "otro"], recomendado: "gpt-6.2-sol" });
+      await screen.findByText("gpt-6.2-sol (recomendado)", {}, { timeout: 3000 });
+      const selects = container.querySelectorAll("select");
+      expect((selects[1] as HTMLSelectElement).value).toBe("gpt-6.2-sol");
+      fireEvent.click(screen.getByText("Escribir otro modelo"));
+      expect(container.querySelectorAll("select").length).toBe(1);
+      expect(screen.getByText("Elegir de la lista")).toBeTruthy();
+    });
+    it("con error muestra el mensaje y deja el input libre", async () => {
+      const container = abrir({ ok: false, error: "La API key no es válida. Revisa que la copiaste completa." });
+      await waitFor(() => expect(screen.getByText(/La API key no es válida/)).toBeTruthy(), { timeout: 3000 });
+      expect(container.querySelectorAll("select").length).toBe(1);
+      expect(container.querySelector('input[placeholder^="ej."]')).toBeTruthy();
     });
   });
 });

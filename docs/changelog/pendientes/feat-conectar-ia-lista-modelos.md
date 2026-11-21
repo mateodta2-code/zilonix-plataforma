@@ -1,0 +1,1 @@
+- Conectar IA: al pegar la API key (o al editar una IA guardada) Seller consulta los modelos de texto de la cuenta y los muestra en una lista con el recomendado ya elegido, con «Escribir otro modelo» como alternativa; si falla, mensaje sencillo y campo libre. La clave va solo en cabeceras y nunca vuelve al navegador.

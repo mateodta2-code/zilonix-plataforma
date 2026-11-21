@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
@@ -9,7 +9,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { MAX_CONEXIONES_IA, MODULOS_IA, type ModuloIA } from "@/lib/ia/modulos";
 import styles from "./conectarIa.module.css";
 
-import { AYUDA_PROVEEDOR, NOTA_SUSCRIPCION, type ProveedorIA } from "./ayudaProveedor";
+import { AYUDA_PROVEEDOR, NOTA_IMAGENES_OPENAI, NOTA_SUSCRIPCION, type ProveedorIA } from "./ayudaProveedor";
 
 type Proveedor = ProveedorIA;
 export type ConexionIAVista = {
@@ -210,6 +210,58 @@ function FormularioConexion({ inicial, onListo, onCancelar }: { inicial: Conexio
   const [error, setError] = useState("");
   const ayuda = AYUDA_PROVEEDOR[proveedor];
 
+  // Lista de modelos de la cuenta (la consulta el servidor; la clave solo
+  // viaja en el cuerpo del POST a la ruta propia, nunca se guarda aquí).
+  const [lista, setLista] = useState<{ modelos: string[]; recomendado: string } | null>(null);
+  const [buscando, setBuscando] = useState(false);
+  const [errorModelos, setErrorModelos] = useState("");
+  const [escribirLibre, setEscribirLibre] = useState(false);
+  const conexionId = inicial?.id;
+  const proveedorGuardado = inicial?.proveedor;
+
+  useEffect(() => {
+    setLista(null);
+    setErrorModelos("");
+    const clave = apiKey.trim();
+    const sinClaveNueva = !clave;
+    // Sin clave nueva solo se consulta al editar y con el mismo proveedor
+    // guardado (el servidor usa la clave guardada de ese proveedor).
+    if (proveedor === "otro_compatible_openai" || (sinClaveNueva && (!conexionId || proveedor !== proveedorGuardado))) {
+      setBuscando(false);
+      return;
+    }
+    let vigente = true;
+    setBuscando(true);
+    const temporizador = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/configuracion/ia-conexion/modelos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sinClaveNueva ? { proveedor, conexionId } : { proveedor, apiKey: clave }),
+        });
+        const datos = (await res.json().catch(() => ({}))) as { ok?: boolean; modelos?: string[]; recomendado?: string; error?: string };
+        if (!vigente) return;
+        if (datos.ok && Array.isArray(datos.modelos) && datos.modelos.length > 0) {
+          const recomendado = datos.recomendado || datos.modelos[0];
+          setLista({ modelos: datos.modelos, recomendado });
+          setModelo((actual) => (datos.modelos!.includes(actual) ? actual : recomendado));
+        } else {
+          setErrorModelos(typeof datos.error === "string" ? datos.error : "No se pudo consultar la lista de modelos. Intenta de nuevo o escribe el modelo.");
+        }
+      } catch {
+        if (vigente) setErrorModelos("No se pudo consultar la lista de modelos. Intenta de nuevo o escribe el modelo.");
+      } finally {
+        if (vigente) setBuscando(false);
+      }
+    }, sinClaveNueva ? 0 : 600);
+    return () => {
+      vigente = false;
+      clearTimeout(temporizador);
+    };
+  }, [proveedor, apiKey, conexionId, proveedorGuardado]);
+
+  const mostrarSelect = !!lista && !escribirLibre && proveedor !== "otro_compatible_openai";
+
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     setGuardando(true);
@@ -243,9 +295,6 @@ function FormularioConexion({ inicial, onListo, onCancelar }: { inicial: Conexio
           ))}
         </select>
       </Campo>
-      <Campo etiqueta="Modelo">
-        <input className="zx-control" value={modelo} onChange={(e) => setModelo(e.target.value)} placeholder={`ej. ${ayuda.modeloEjemplo}`} required />
-      </Campo>
       {proveedor === "otro_compatible_openai" && (
         <Campo etiqueta="URL base (compatible con OpenAI)">
           <input className="zx-control" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://..." required />
@@ -269,8 +318,37 @@ function FormularioConexion({ inicial, onListo, onCancelar }: { inicial: Conexio
         ) : (
           <p>{ayuda.pasos[0]}</p>
         )}
+        {proveedor === "openai" && <p>{NOTA_IMAGENES_OPENAI}</p>}
         <p>{NOTA_SUSCRIPCION}</p>
       </div>
+      <Campo etiqueta="Modelo">
+        {mostrarSelect ? (
+          <select className="zx-control" value={modelo} onChange={(e) => setModelo(e.target.value)} required>
+            {lista!.modelos.map((m) => (
+              <option key={m} value={m}>
+                {m === lista!.recomendado ? `${m} (recomendado)` : m}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input className="zx-control" value={modelo} onChange={(e) => setModelo(e.target.value)} placeholder={`ej. ${ayuda.modeloEjemplo}`} required />
+        )}
+      </Campo>
+      {buscando && <p className={styles.nota}>Buscando modelos…</p>}
+      {errorModelos && <p className={styles.error}>{errorModelos}</p>}
+      {lista && (
+        <p className={styles.nota}>
+          {mostrarSelect ? (
+            <button type="button" className={styles.enlace} onClick={() => setEscribirLibre(true)}>
+              Escribir otro modelo
+            </button>
+          ) : (
+            <button type="button" className={styles.enlace} onClick={() => setEscribirLibre(false)}>
+              Elegir de la lista
+            </button>
+          )}
+        </p>
+      )}
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.acciones}>
         <Boton type="submit" variante="primario" chico disabled={guardando || !nombre.trim() || !modelo.trim() || (!inicial && !apiKey.trim())}>

@@ -17,6 +17,7 @@ vi.mock("@/lib/ia/validarUrlBase", () => {
     }),
   };
 });
+const modelosMock = vi.hoisted(() => ({ listar: vi.fn(), deConexion: vi.fn() }));
 const ia = vi.hoisted(() => ({
   lista: vi.fn(),
   crear: vi.fn(),
@@ -51,6 +52,10 @@ vi.mock("@/lib/ia/conexion", async () => {
     obtenerConexionIAConClavePorId: ia.porId,
   };
 });
+vi.mock("@/lib/ia/modelos", async () => {
+  const real = await vi.importActual<typeof import("@/lib/ia/modelos")>("@/lib/ia/modelos");
+  return { ...real, listarModelosProveedor: modelosMock.listar, listarModelosDeConexion: modelosMock.deConexion };
+});
 vi.mock("@/lib/ia/proveedores", () => {
   class ErrorProveedorIA extends Error {}
   return { ErrorProveedorIA, llamarIA: ia.llamar };
@@ -63,6 +68,7 @@ import { DELETE, PUT as PUT_ID } from "./[id]/route";
 import { PUT as PUT_MODULOS } from "./[id]/modulos/route";
 import { PUT as PUT_PRINCIPAL } from "./[id]/principal/route";
 import { POST as POST_PROBAR } from "./[id]/probar/route";
+import { POST as POST_MODELOS } from "./modelos/route";
 import { GET, POST } from "./route";
 
 const ID = "22222222-2222-2222-2222-222222222222";
@@ -183,5 +189,33 @@ describe("API Conectar IA", () => {
 
   it("marcar principal responde ok", async () => {
     expect((await PUT_PRINCIPAL(req("PUT"), params)).status).toBe(200);
+  });
+});
+
+describe("POST /modelos", () => {
+  const pedir = (cuerpo: unknown) =>
+    POST_MODELOS(new Request("https://staging.test/api/configuracion/ia-conexion/modelos", { method: "POST", headers: { origin: "https://staging.test" }, body: JSON.stringify(cuerpo) }));
+  it("sin permiso → 403", async () => {
+    vi.mocked(requierePermiso).mockRejectedValueOnce(new SinPermisoError("configuracion", "modificar"));
+    expect((await pedir({ proveedor: "openai", apiKey: KEY })).status).toBe(403);
+  });
+  it("conexionId ajeno → 404", async () => {
+    modelosMock.deConexion.mockResolvedValueOnce(null);
+    expect((await pedir({ proveedor: "openai", conexionId: ID })).status).toBe(404);
+  });
+  it("con conexionId usa la clave guardada y no la devuelve", async () => {
+    modelosMock.deConexion.mockResolvedValueOnce({ proveedor: "xai", resultado: { ok: true, modelos: ["grok-4.7", "otro"] } });
+    const res = await pedir({ proveedor: "openai", conexionId: ID });
+    expect(modelosMock.deConexion).toHaveBeenCalledWith(expect.any(String), ID);
+    expect(modelosMock.listar).not.toHaveBeenCalled();
+    expect(await res.json()).toEqual({ ok: true, modelos: ["grok-4.7", "otro"], recomendado: "grok-4.7" });
+  });
+  it("con apiKey la usa y el error es un mensaje fijo", async () => {
+    modelosMock.listar.mockResolvedValueOnce({ ok: false, error: "clave" });
+    const res = await pedir({ proveedor: "openai", apiKey: KEY });
+    expect(modelosMock.listar).toHaveBeenCalledWith("openai", KEY);
+    const texto = JSON.stringify(await res.json());
+    expect(texto).not.toContain(KEY);
+    expect(texto).toContain("La API key no es válida");
   });
 });

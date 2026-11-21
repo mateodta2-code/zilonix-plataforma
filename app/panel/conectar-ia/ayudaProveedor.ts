@@ -14,12 +14,15 @@ export type AyudaProveedor = {
 export const NOTA_SUSCRIPCION =
   "La suscripción mensual (ChatGPT Plus, Claude Pro, Gemini o SuperGrok) no sirve aquí: la API se paga aparte, según el uso.";
 
+export const NOTA_IMAGENES_OPENAI =
+  "Para \"Generación de imágenes\", la cuenta debe tener acceso a los modelos gpt-image; OpenAI puede pedir verificar la organización en Settings → Organization.";
+
 function pasosComunes(cargar: string, modeloEjemplo: string, entrada: string): string[] {
   return [
     `${entrada}`,
     cargar,
     "Crea una clave nueva y cópiala (se muestra una sola vez).",
-    `Pégala aquí, elige el modelo (por ejemplo ${modeloEjemplo}) y guarda.`,
+    `Pégala aquí, elige el modelo de la lista (ya viene el recomendado, por ejemplo ${modeloEjemplo}) y guarda.`,
   ];
 }
 
@@ -27,25 +30,25 @@ export const AYUDA_PROVEEDOR: Record<ProveedorIA, AyudaProveedor> = {
   openai: {
     url: "https://platform.openai.com/api-keys",
     etiquetaEnlace: "Crear mi API key en OpenAI ↗",
-    modeloEjemplo: "gpt-5-mini",
+    modeloEjemplo: "gpt-6.2-sol",
     saldo: true,
-    pasos: pasosComunes("Carga saldo en Billing: la API no funciona sin saldo.", "gpt-5-mini", "Crea tu cuenta en OpenAI o entra a la que ya tienes."),
+    pasos: pasosComunes("Carga saldo en Billing: la API no funciona sin saldo.", "gpt-6.2-sol", "Crea tu cuenta en OpenAI o entra a la que ya tienes."),
   },
   anthropic: {
     url: "https://platform.claude.com/settings/keys",
     etiquetaEnlace: "Crear mi API key en Anthropic ↗",
-    modeloEjemplo: "claude-sonnet-5",
+    modeloEjemplo: "claude-sonnet-5-5",
     saldo: true,
-    pasos: pasosComunes("Carga saldo en Billing: la API no funciona sin saldo.", "claude-sonnet-5", "Crea tu cuenta en Anthropic o entra a la que ya tienes."),
+    pasos: pasosComunes("Carga saldo en Billing: la API no funciona sin saldo.", "claude-sonnet-5-5", "Crea tu cuenta en Anthropic o entra a la que ya tienes."),
   },
   google: {
     url: "https://aistudio.google.com/app/apikey",
     etiquetaEnlace: "Crear mi API key en Google ↗",
-    modeloEjemplo: "gemini-2.5-flash",
+    modeloEjemplo: "gemini-3.8-flash",
     saldo: false,
     pasos: pasosComunes(
       "Tiene nivel gratuito; para uso mayor o para imágenes, activa la facturación.",
-      "gemini-2.5-flash",
+      "gemini-3.8-flash",
       "Entra a Google AI Studio con tu cuenta de Google."
     ),
   },
