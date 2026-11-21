@@ -74,7 +74,7 @@ async function miembroEditable(tx: Parameters<Parameters<typeof dbComoBodega>[1]
   return m;
 }
 
-export async function cambiarRolDeMiembro(bodegaId: string, actorId: string, miembroId: string, rolNuevo: string) {
+export async function cambiarRolDeMiembro(bodegaId: string, actorId: string, miembroId: string, rolNuevo: string, rolActor: string) {
   if (!esRolInvitablePorAdmin(rolNuevo)) throw new CambioBodegaInvalidoError("Elige un rol válido (operario o domiciliario).");
   return dbComoBodega(bodegaId, async (tx) => {
     const m = await miembroEditable(tx, bodegaId, actorId, miembroId);
@@ -92,10 +92,10 @@ export async function cambiarRolDeMiembro(bodegaId: string, actorId: string, mie
       });
     }
     return { antes: m.rol, despues: rolNuevo };
-  });
+  }, rolActor);
 }
 
-export async function cambiarActivoDeMiembro(bodegaId: string, actorId: string, miembroId: string, activo: boolean) {
+export async function cambiarActivoDeMiembro(bodegaId: string, actorId: string, miembroId: string, activo: boolean, rolActor: string) {
   return dbComoBodega(bodegaId, async (tx) => {
     const m = await miembroEditable(tx, bodegaId, actorId, miembroId);
     if (m.activo !== activo) {
@@ -109,10 +109,10 @@ export async function cambiarActivoDeMiembro(bodegaId: string, actorId: string, 
         detalle: activo ? "Reactivó a una persona." : "Desactivó a una persona.",
       });
     }
-  });
+  }, rolActor);
 }
 
-export async function actualizarDatosBodega(bodegaId: string, actorId: string, datos: { nombre: string; nit: string }) {
+export async function actualizarDatosBodega(bodegaId: string, actorId: string, datos: { nombre: string; nit: string }, rolActor: string) {
   const nombre = datos.nombre.trim();
   const nit = datos.nit.trim();
   if (!nombre) throw new CambioBodegaInvalidoError("El nombre de la bodega es obligatorio.");
@@ -130,5 +130,5 @@ export async function actualizarDatosBodega(bodegaId: string, actorId: string, d
       valorNuevo: `${nombre} | ${nit}`,
       detalle: "Editó el nombre o el NIT de la bodega.",
     });
-  });
+  }, rolActor);
 }

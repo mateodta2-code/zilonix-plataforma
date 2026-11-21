@@ -8,7 +8,7 @@ import { dbSuperadmin } from "./superadmin-context";
 import { auditoria, bodegas3pl, empresas, invitacionesBodega3pl, miembrosBodega3pl, usuarios } from "./schema";
 import { crearDosEmpresas } from "./test-utils/aislamiento";
 import { aceptarInvitacionBodega, crearInvitacionBodega, InvitacionBodegaInvalidaError, obtenerInvitacionBodegaPorToken } from "../lib/bodega/invitaciones";
-import { CambioBodegaInvalidoError, cambiarActivoDeMiembro, cambiarRolDeMiembro, listarMembresiasDeUsuario, listarMiembros } from "../lib/bodega/miembros";
+import { CambioBodegaInvalidoError, actualizarDatosBodega, cambiarActivoDeMiembro, cambiarRolDeMiembro, listarMembresiasDeUsuario, listarMiembros } from "../lib/bodega/miembros";
 import { crearBodega, invitarAdminBodega, listarBodegas, reactivarBodega, suspenderBodega } from "../lib/superadmin-bodegas";
 import { listarAccionesSuperadmin } from "../lib/superadmin";
 
@@ -87,17 +87,17 @@ describe("bodegas 3PL (RLS + lib, PR login-bodega-domiciliario)", () => {
     const operario = miembros.find((m) => m.usuarioId === operarioId)!;
     const admin = miembros.find((m) => m.usuarioId === adminId)!;
 
-    await cambiarRolDeMiembro(bodegaA, adminId, operario.miembroId, "domiciliario");
+    await cambiarRolDeMiembro(bodegaA, adminId, operario.miembroId, "domiciliario", "admin_bodega");
     expect((await listarMiembros(bodegaA)).find((m) => m.usuarioId === operarioId)?.rol).toBe("domiciliario");
-    await cambiarActivoDeMiembro(bodegaA, adminId, operario.miembroId, false);
+    await cambiarActivoDeMiembro(bodegaA, adminId, operario.miembroId, false, "admin_bodega");
     expect((await listarMembresiasDeUsuario(operarioId))[0].activo).toBe(false);
-    await cambiarActivoDeMiembro(bodegaA, adminId, operario.miembroId, true);
+    await cambiarActivoDeMiembro(bodegaA, adminId, operario.miembroId, true, "admin_bodega");
 
-    await expect(cambiarRolDeMiembro(bodegaA, adminId, admin.miembroId, "operario")).rejects.toBeInstanceOf(CambioBodegaInvalidoError);
-    await expect(cambiarRolDeMiembro(bodegaA, operarioId, operario.miembroId, "operario")).rejects.toBeInstanceOf(CambioBodegaInvalidoError);
-    await expect(cambiarRolDeMiembro(bodegaA, adminId, operario.miembroId, "admin_bodega")).rejects.toBeInstanceOf(CambioBodegaInvalidoError);
+    await expect(cambiarRolDeMiembro(bodegaA, adminId, admin.miembroId, "operario", "admin_bodega")).rejects.toBeInstanceOf(CambioBodegaInvalidoError);
+    await expect(cambiarRolDeMiembro(bodegaA, operarioId, operario.miembroId, "operario", "operario")).rejects.toBeInstanceOf(CambioBodegaInvalidoError);
+    await expect(cambiarRolDeMiembro(bodegaA, adminId, operario.miembroId, "admin_bodega", "admin_bodega")).rejects.toBeInstanceOf(CambioBodegaInvalidoError);
     // Una bodega ajena no puede editar a este miembro.
-    await expect(cambiarActivoDeMiembro(bodegaB, adminId, operario.miembroId, false)).rejects.toBeInstanceOf(CambioBodegaInvalidoError);
+    await expect(cambiarActivoDeMiembro(bodegaB, adminId, operario.miembroId, false, "admin_bodega")).rejects.toBeInstanceOf(CambioBodegaInvalidoError);
   });
 
   it("suspender y reactivar cambian el estado y quedan en auditoria", async () => {
@@ -112,6 +112,45 @@ describe("bodegas 3PL (RLS + lib, PR login-bodega-domiciliario)", () => {
     }
     const delSuperadmin = (await listarAccionesSuperadmin(200)).filter((a) => a.empresaNombre === `Bodega A ${sufijo}`).map((a) => a.accion);
     expect(delSuperadmin).toContain("suspender_bodega");
+  });
+
+  describe("solo admin_bodega edita la bodega y sus miembros (RLS)", () => {
+    async function miembroId(usuarioId: string) {
+      return (await listarMiembros(bodegaA)).find((m) => m.usuarioId === usuarioId)!.miembroId;
+    }
+
+    it("operario y domiciliario no cambian nombre/NIT, rol ni estado (0 filas)", async () => {
+      const objetivo = await miembroId(operarioId);
+      for (const rol of ["operario", "domiciliario", undefined]) {
+        const b = await dbComoBodega(bodegaA, (tx) => tx.update(bodegas3pl).set({ nombre: "Hackeada" }).where(eq(bodegas3pl.id, bodegaA)).returning({ id: bodegas3pl.id }), rol);
+        expect(b).toHaveLength(0);
+        const r = await dbComoBodega(bodegaA, (tx) => tx.update(miembrosBodega3pl).set({ rol: "domiciliario" }).where(eq(miembrosBodega3pl.id, objetivo)).returning({ id: miembrosBodega3pl.id }), rol);
+        expect(r).toHaveLength(0);
+        const a = await dbComoBodega(bodegaA, (tx) => tx.update(miembrosBodega3pl).set({ activo: false }).where(eq(miembrosBodega3pl.id, objetivo)).returning({ id: miembrosBodega3pl.id }), rol);
+        expect(a).toHaveLength(0);
+      }
+      const [b] = await dbComoBodega(bodegaA, (tx) => tx.select().from(bodegas3pl).where(eq(bodegas3pl.id, bodegaA)));
+      expect(b.nombre).toBe(`Bodega A ${sufijo}`);
+    });
+
+    it("el admin_bodega sí edita su bodega y sus miembros", async () => {
+      await actualizarDatosBodega(bodegaA, adminId, { nombre: `Bodega A ${sufijo}`, nit: "900123" }, "admin_bodega");
+      const [b] = await dbComoBodega(bodegaA, (tx) => tx.select().from(bodegas3pl).where(eq(bodegas3pl.id, bodegaA)));
+      expect(b.nit).toBe("900123");
+    });
+
+    it("una bodega no edita a otra, ni siendo admin", async () => {
+      const filas = await dbComoBodega(bodegaB, (tx) => tx.update(bodegas3pl).set({ nombre: "Ajena" }).where(eq(bodegas3pl.id, bodegaA)).returning({ id: bodegas3pl.id }), "admin_bodega");
+      expect(filas).toHaveLength(0);
+      const objetivo = await miembroId(operarioId);
+      const m = await dbComoBodega(bodegaB, (tx) => tx.update(miembrosBodega3pl).set({ activo: false }).where(eq(miembrosBodega3pl.id, objetivo)).returning({ id: miembrosBodega3pl.id }), "admin_bodega");
+      expect(m).toHaveLength(0);
+    });
+
+    it("el superadmin sigue suspendiendo y reactivando", async () => {
+      await suspenderBodega(superadminId, bodegaB, "Prueba");
+      await reactivarBodega(superadminId, bodegaB);
+    });
   });
 
   describe("aislamiento cruzado", () => {

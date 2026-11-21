@@ -841,6 +841,7 @@ REVOKE UPDATE, DELETE ON invitaciones_bodega_3pl FROM app_user;
 GRANT UPDATE (aceptada_ts) ON invitaciones_bodega_3pl TO app_user;
 
 -- bodegas_3pl: ve la bodega activa y aquellas donde es miembro (el selector).
+-- Editar nombre/NIT: solo admin_bodega (app.bodega_rol) de la bodega activa.
 DROP POLICY IF EXISTS bodega3pl_ver ON bodegas_3pl;
 CREATE POLICY bodega3pl_ver ON bodegas_3pl FOR SELECT TO app_user
   USING (
@@ -852,11 +853,18 @@ CREATE POLICY bodega3pl_ver ON bodegas_3pl FOR SELECT TO app_user
   );
 DROP POLICY IF EXISTS bodega3pl_editar ON bodegas_3pl;
 CREATE POLICY bodega3pl_editar ON bodegas_3pl FOR UPDATE TO app_user
-  USING (id = NULLIF(current_setting('app.bodega_id', true), '')::uuid)
-  WITH CHECK (id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+  USING (
+    id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  )
+  WITH CHECK (
+    id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  );
 
 -- miembros_bodega_3pl: ve los de la bodega activa y las filas propias; cambia
--- rol/activo solo dentro de la bodega activa; se agrega UNA fila propia solo
+-- rol/activo solo dentro de la bodega activa Y solo si la sesión declara
+-- app.bodega_rol = 'admin_bodega' (vacío = sin permiso); se agrega UNA fila propia solo
 -- con el token de una invitación vigente, de esa bodega y de ese rol.
 DROP POLICY IF EXISTS miembro3pl_ver ON miembros_bodega_3pl;
 CREATE POLICY miembro3pl_ver ON miembros_bodega_3pl FOR SELECT TO app_user
@@ -866,8 +874,14 @@ CREATE POLICY miembro3pl_ver ON miembros_bodega_3pl FOR SELECT TO app_user
   );
 DROP POLICY IF EXISTS miembro3pl_editar ON miembros_bodega_3pl;
 CREATE POLICY miembro3pl_editar ON miembros_bodega_3pl FOR UPDATE TO app_user
-  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid)
-  WITH CHECK (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  )
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  );
 DROP POLICY IF EXISTS miembro3pl_agregar_por_invitacion ON miembros_bodega_3pl;
 CREATE POLICY miembro3pl_agregar_por_invitacion ON miembros_bodega_3pl FOR INSERT TO app_user
   WITH CHECK (
