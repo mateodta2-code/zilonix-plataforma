@@ -30,7 +30,7 @@ const CONECTAR_IA: ApartadoGuia = {
     "En Zilonix ve a Administración → Conectar IA (necesitas permiso para modificar la configuración).",
     "Pulsa «Agregar IA», elige el proveedor (OpenAI o Google), escribe un nombre y un modelo de texto (por ejemplo gpt-5-mini o gemini-2.5-flash) y pega la API key.",
     "Guarda y usa «Probar conexión». La clave se guarda cifrada y no se vuelve a mostrar.",
-    "Márcala como principal o asígnala al módulo que la va a usar (Optimización para imágenes, Publicaciones para «Crear con IA» en Publicar). Lo que no asignes usa la principal.",
+    "Márcala como principal o asígnala al módulo que la va a usar (Optimización para las imágenes de Optimización; en Publicar, Publicaciones para los textos de «Crear con IA» y Generación de imágenes para «Generar con IA»). Lo que no asignes usa la principal.",
     "Vuelve a Optimización → «Ver detalle →» de una publicación → debajo de las fotos aparece «Crear imagen con IA» (recarga la página si ya la tenías abierta).",
   ],
 };
@@ -166,7 +166,7 @@ export const GUIA: GrupoGuia[] = [
         ],
         apartados: [CONECTAR_IA],
         consejos: [
-          "Cada imagen la cobra la cuenta de IA de tu empresa (unos centavos de dólar). Cambiar el proveedor también cambia la IA de los textos (Promociones).",
+          "Cada imagen la cobra la cuenta de IA de tu empresa (unos centavos de dólar). Optimización usa la IA asignada a su módulo en Administración → Conectar IA; si no le asignas ninguna, usa la principal.",
           "El resumen de la tienda cuenta las ventas que Seller ya sincronizó (si una venta todavía no está en Finanzas, sus unidades no suman) y las visitas que da Mercado Libre; los días son de Colombia, así que puede variar un poco frente a Métricas de Mercado Libre.",
           "Si debajo de las fotos solo ves el aviso «Para crear imágenes con IA, conecta OpenAI o Google…», la empresa todavía no tiene IA conectada: sigue «Cómo conectar la IA».",
           "Revisa cada imagen creada: si no se entiende, se ve genérica o el texto salió con errores, descártala y crea otra.",
