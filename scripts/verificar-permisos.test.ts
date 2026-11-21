@@ -224,6 +224,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/configuracion/ia-conexion/[id]/principal/route.ts",
   "app/api/configuracion/ia-conexion/[id]/modulos/route.ts",
   "app/api/configuracion/ia-conexion/[id]/probar/route.ts",
+  "app/api/configuracion/ia-conexion/modelos/route.ts",
   "app/panel/conectar-ia/page.tsx",
   // «Buscar por foto» de Investigación — mismo permiso que la página
   // (inventario/consultar); las 2 rutas llaman requierePermiso() desde

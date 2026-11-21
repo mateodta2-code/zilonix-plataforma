@@ -17,7 +17,7 @@ vi.mock("@/lib/ia/validarUrlBase", () => {
     }),
   };
 });
-const modelosMock = vi.hoisted(() => ({ listar: vi.fn() }));
+const modelosMock = vi.hoisted(() => ({ listar: vi.fn(), deConexion: vi.fn() }));
 const ia = vi.hoisted(() => ({
   lista: vi.fn(),
   crear: vi.fn(),
@@ -54,7 +54,7 @@ vi.mock("@/lib/ia/conexion", async () => {
 });
 vi.mock("@/lib/ia/modelos", async () => {
   const real = await vi.importActual<typeof import("@/lib/ia/modelos")>("@/lib/ia/modelos");
-  return { ...real, listarModelosProveedor: modelosMock.listar };
+  return { ...real, listarModelosProveedor: modelosMock.listar, listarModelosDeConexion: modelosMock.deConexion };
 });
 vi.mock("@/lib/ia/proveedores", () => {
   class ErrorProveedorIA extends Error {}
@@ -200,14 +200,14 @@ describe("POST /modelos", () => {
     expect((await pedir({ proveedor: "openai", apiKey: KEY })).status).toBe(403);
   });
   it("conexionId ajeno → 404", async () => {
-    ia.porId.mockResolvedValueOnce(null);
+    modelosMock.deConexion.mockResolvedValueOnce(null);
     expect((await pedir({ proveedor: "openai", conexionId: ID })).status).toBe(404);
   });
   it("con conexionId usa la clave guardada y no la devuelve", async () => {
-    ia.porId.mockResolvedValueOnce({ proveedor: "xai", apiKey: KEY });
-    modelosMock.listar.mockResolvedValueOnce({ ok: true, modelos: ["grok-4.7", "otro"] });
+    modelosMock.deConexion.mockResolvedValueOnce({ proveedor: "xai", resultado: { ok: true, modelos: ["grok-4.7", "otro"] } });
     const res = await pedir({ proveedor: "openai", conexionId: ID });
-    expect(modelosMock.listar).toHaveBeenCalledWith("xai", KEY);
+    expect(modelosMock.deConexion).toHaveBeenCalledWith(expect.any(String), ID);
+    expect(modelosMock.listar).not.toHaveBeenCalled();
     expect(await res.json()).toEqual({ ok: true, modelos: ["grok-4.7", "otro"], recomendado: "grok-4.7" });
   });
   it("con apiKey la usa y el error es un mensaje fijo", async () => {

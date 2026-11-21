@@ -1,3 +1,4 @@
+import { obtenerConexionIAConClavePorId } from "./conexion";
 import type { ProveedorIA } from "./tipos";
 
 // SOLO servidor. Lista los modelos de texto que tiene una cuenta, para que
@@ -113,4 +114,17 @@ export async function listarModelosProveedor(proveedor: ProveedorIA, apiKey: str
   }
   const modelos = ordenar(proveedor, ids);
   return modelos.length === 0 ? { ok: false, error: "vacia" } : { ok: true, modelos };
+}
+
+// Lista los modelos usando la clave GUARDADA de una conexión de la empresa.
+// La lectura de la clave vive aquí (como en probarConexionIA): quien llama
+// recibe solo el proveedor guardado y el resultado, nunca la clave.
+// null = la conexión no existe en esa empresa.
+export async function listarModelosDeConexion(
+  empresaId: string,
+  conexionId: string,
+): Promise<{ proveedor: ProveedorIA; resultado: ResultadoModelos } | null> {
+  const guardada = await obtenerConexionIAConClavePorId(empresaId, conexionId);
+  if (!guardada) return null;
+  return { proveedor: guardada.proveedor, resultado: await listarModelosProveedor(guardada.proveedor, guardada.apiKey) };
 }
