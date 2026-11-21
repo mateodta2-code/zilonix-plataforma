@@ -47,7 +47,7 @@ export default async function ConciliacionFalabellaPage() {
         descripcion="Cada corte de pago de Falabella con lo que vendiste, lo que cobró Falabella y lo que te pagó."
         accion={
           puedeCargar ? (
-            <BotonLink href="/panel/finanzas/falabella/importar" chico>
+            <BotonLink href="/panel/finanzas/falabella/importar">
               Cargar reporte
             </BotonLink>
           ) : undefined
@@ -93,7 +93,7 @@ export default async function ConciliacionFalabellaPage() {
           </Tabla>
         )}
       </Tarjeta>
-      <BotonLink href="/panel/finanzas" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
         Volver a Finanzas
       </BotonLink>
     </>

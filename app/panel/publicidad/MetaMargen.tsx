@@ -54,7 +54,7 @@ export function MetaMargen({
             <span className="zx-etiqueta">Meta de margen (%)</span>
             <input name="meta" className="zx-control" inputMode="decimal" defaultValue={valor} size={5} required />
           </label>
-          <Boton type="submit" variante="secundario" chico disabled={guardando}>
+          <Boton type="submit" variante="primario" disabled={guardando}>
             {guardando ? "Guardando…" : "Guardar meta"}
           </Boton>
           {aviso ? (

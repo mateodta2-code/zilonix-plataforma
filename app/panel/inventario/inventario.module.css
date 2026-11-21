@@ -109,6 +109,8 @@
 .accionesFiltro {
   display: flex;
   gap: 8px;
+  align-self: flex-end; /* al fondo de la fila: el botón queda a la altura del campo, no del rótulo */
+  align-items: flex-end;
 }
 
 .vacioConAccion {

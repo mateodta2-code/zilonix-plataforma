@@ -58,7 +58,7 @@ export default async function RolesPage() {
         ))}
       </ListaFilas>
 
-      <BotonLink href="/panel/invitar" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/invitar" variante="fantasma" className={styles.volver}>
         ← Invitar persona
       </BotonLink>
     </>

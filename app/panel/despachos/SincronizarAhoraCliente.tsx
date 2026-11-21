@@ -32,7 +32,7 @@ export function SincronizarAhoraCliente() {
 
   return (
     <div className={styles.sincronizarAhora}>
-      <Boton variante="secundario" chico type="button" onClick={sincronizar} disabled={enCurso}>
+      <Boton variante="primario" type="button" onClick={sincronizar} disabled={enCurso}>
         {enCurso ? "Sincronizando…" : "Sincronizar ahora"}
       </Boton>
       {mensaje && <p className={esError ? styles.errorTarjeta : styles.notaDespachado}>{mensaje}</p>}

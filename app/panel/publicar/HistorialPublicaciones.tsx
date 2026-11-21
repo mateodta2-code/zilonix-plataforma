@@ -113,7 +113,7 @@ function DetalleCuentaFila({ fila }: { fila: FilaDetalleCuenta }) {
             </a>
           )}
           {fila.itemId && (
-            <Boton type="button" variante="fantasma" chico onClick={verEstadoReal} disabled={estadoReal.cargando}>
+            <Boton type="button" variante="fantasma" onClick={verEstadoReal} disabled={estadoReal.cargando}>
               {estadoReal.cargando ? "Consultando…" : "Ver estado real"}
             </Boton>
           )}
@@ -219,10 +219,10 @@ export function HistorialPublicaciones({
                 <CeldaTabla>{formatearFechaBogota(p.creadoTs)}</CeldaTabla>
                 <CeldaTabla>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <Boton type="button" variante="secundario" chico onClick={() => onCargar(p)}>
+                    <Boton type="button" variante="primario" onClick={() => onCargar(p)}>
                       Cargar / Reintentar
                     </Boton>
-                    <Boton type="button" variante="secundario" chico onClick={() => onDuplicar(p)}>
+                    <Boton type="button" variante="primario" onClick={() => onDuplicar(p)}>
                       Duplicar
                     </Boton>
                     <form
@@ -238,7 +238,7 @@ export function HistorialPublicaciones({
                       }}
                     >
                       <input type="hidden" name="id" value={p.id} />
-                      <Boton type="submit" variante="fantasma" chico aria-label="Borrar">
+                      <Boton type="submit" variante="fantasma" aria-label="Borrar">
                         🗑
                       </Boton>
                     </form>

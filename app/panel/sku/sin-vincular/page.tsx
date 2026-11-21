@@ -93,11 +93,11 @@ export default async function PublicacionesSinSkuPage({ searchParams }: { search
           </select>
         </Campo>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {hayFiltrosActivos && (
-            <BotonLink href="/panel/sku/sin-vincular" variante="fantasma" chico>
+            <BotonLink href="/panel/sku/sin-vincular" variante="fantasma">
               Limpiar filtros
             </BotonLink>
           )}
@@ -109,7 +109,7 @@ export default async function PublicacionesSinSkuPage({ searchParams }: { search
           {hayFiltrosActivos ? (
             <span className={styles.vacioConAccion}>
               Ninguna publicación coincide con esos filtros.
-              <BotonLink href="/panel/sku/sin-vincular" variante="secundario" chico>
+              <BotonLink href="/panel/sku/sin-vincular" variante="fantasma">
                 Limpiar filtros
               </BotonLink>
             </span>
@@ -143,7 +143,7 @@ export default async function PublicacionesSinSkuPage({ searchParams }: { search
                         </option>
                       ))}
                     </select>
-                    <Boton type="submit" chico>
+                    <Boton type="submit">
                       Enlazar
                     </Boton>
                   </form>
@@ -180,7 +180,7 @@ export default async function PublicacionesSinSkuPage({ searchParams }: { search
         </>
       )}
 
-      <BotonLink href="/panel/sku" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/sku" variante="fantasma" className={styles.volver}>
         Volver a SKU
       </BotonLink>
     </>

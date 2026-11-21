@@ -128,12 +128,12 @@ export default async function FinanzasPage() {
           {(faltan > 0 || utilidad.ventasSinCosto > 0) && (
             <p className={styles.ayuda}>
               {faltan > 0 && (
-                <BotonLink href="/panel/finanzas/ventas" variante="secundario" chico>
+                <BotonLink href="/panel/finanzas/ventas" variante="primario">
                   Ir a Finanzas → Ventas para traer las ventas
                 </BotonLink>
               )}{" "}
               {utilidad.ventasSinCosto > 0 && (
-                <BotonLink href="/panel/finanzas/maestra-sku" variante="secundario" chico>
+                <BotonLink href="/panel/finanzas/maestra-sku" variante="primario">
                   Cargar costos en la Tabla maestra de SKU
                 </BotonLink>
               )}
@@ -142,32 +142,32 @@ export default async function FinanzasPage() {
         </section>
         {/* Issue #128 — primeras pantallas reales de la Fase 1. Issue #131
             (Parte A) — ventas y utilidad, solo lectura. */}
-        <BotonLink href="/panel/finanzas/ventas" variante="secundario" chico>
+        <BotonLink href="/panel/finanzas/ventas" variante="primario">
           Ventas y utilidad
         </BotonLink>{" "}
-        <BotonLink href="/panel/finanzas/maestra-sku" variante="secundario" chico>
+        <BotonLink href="/panel/finanzas/maestra-sku" variante="primario">
           Tabla maestra de SKU
         </BotonLink>{" "}
         {/* Issue #422 — cuánta plata hay en mercancía. */}
-        <BotonLink href="/panel/finanzas/inventario" variante="secundario" chico>
+        <BotonLink href="/panel/finanzas/inventario" variante="primario">
           Inventario valorizado
         </BotonLink>{" "}
-        <BotonLink href="/panel/finanzas/proveedores" variante="secundario" chico>
+        <BotonLink href="/panel/finanzas/proveedores" variante="primario">
           Proveedores y transportadores
         </BotonLink>{" "}
         {/* Issue #422 — pagos de Falabella desde el reporte de transacciones. */}
-        <BotonLink href="/panel/finanzas/falabella" variante="secundario" chico>
+        <BotonLink href="/panel/finanzas/falabella" variante="primario">
           Conciliación Falabella
         </BotonLink>{" "}
         {/* Issue #422 — lo que Mercado Libre y Falabella todavía no pagan. */}
-        <BotonLink href="/panel/finanzas/por-cobrar" variante="secundario" chico>
+        <BotonLink href="/panel/finanzas/por-cobrar" variante="primario">
           Cuentas por cobrar
         </BotonLink>{" "}
         {/* Issue #126 (slice urgente) — valor Flex de la empresa. */}
-        <BotonLink href="/panel/finanzas/configuracion" variante="secundario" chico>
+        <BotonLink href="/panel/finanzas/configuracion" variante="primario">
           Configuración (valor Flex)
         </BotonLink>{" "}
-        <BotonLink href="/panel" variante="fantasma" chico>
+        <BotonLink href="/panel" variante="fantasma">
           Volver al panel
         </BotonLink>
       </>

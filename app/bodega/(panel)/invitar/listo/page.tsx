@@ -17,7 +17,7 @@ export default async function BodegaInvitacionListaPage({ searchParams }: { sear
     <>
       <EncabezadoPagina titulo="Invitación generada" descripcion="Comparte este link con la persona — solo funciona una vez y vence en 7 días." />
       {link ? <input readOnly value={link} className={`zx-control ${styles.link}`} /> : <p>No se encontró el token.</p>}
-      <BotonLink href="/bodega/personas" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/bodega/personas" variante="fantasma" className={styles.volver}>
         Ver personas
       </BotonLink>
     </>

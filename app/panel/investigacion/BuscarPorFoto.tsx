@@ -228,7 +228,7 @@ export function BuscarPorFoto({ pais, tab = "demanda" }: { pais: string; tab?: s
             if (archivo) void procesar(archivo);
           }}
         />
-        <Boton type="button" variante="secundario" onClick={() => inputArchivoRef.current?.click()} disabled={estado === "reconociendo"}>
+        <Boton type="button" variante="primario" onClick={() => inputArchivoRef.current?.click()} disabled={estado === "reconociendo"}>
           Buscar por foto
         </Boton>
         <span className={styles.fotoEstado}>JPG, PNG o WebP hasta 5 MB. También puedes arrastrar la foto aquí o pegarla con Ctrl/Cmd+V.</span>
@@ -250,7 +250,7 @@ export function BuscarPorFoto({ pais, tab = "demanda" }: { pais: string; tab?: s
               if (videoRef.current) videoRef.current.currentTime = Number(e.target.value);
             }}
           />
-          <Boton type="button" variante="secundario" chico onClick={usarCuadroDeVideo} disabled={estado === "reconociendo"}>
+          <Boton type="button" variante="primario" onClick={usarCuadroDeVideo} disabled={estado === "reconociendo"}>
             Usar este cuadro
           </Boton>
         </div>

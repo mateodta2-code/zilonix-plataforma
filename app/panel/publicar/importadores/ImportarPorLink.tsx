@@ -106,7 +106,7 @@ export function ImportarPorLink({
           cualquier país, esto es solo el texto de ayuda. */}
           <input name="link" type="url" placeholder="https://articulo.mercadolibre.com.{co,mx,ar...}/..." required className="zx-control" />
         </Campo>
-        <Boton type="submit" variante="secundario" chico style={{ marginTop: 8 }} disabled={estado === "leyendo"}>
+        <Boton type="submit" variante="primario" style={{ marginTop: 8 }} disabled={estado === "leyendo"}>
           {estado === "leyendo" ? "Leyendo la publicación…" : "Traer datos de ese link"}
         </Boton>
       </form>

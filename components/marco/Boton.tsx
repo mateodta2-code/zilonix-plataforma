@@ -1,7 +1,7 @@
 import Link from "next/link";
 import styles from "./Boton.module.css";
 
-export type VarianteBoton = "primario" | "secundario" | "fantasma";
+export type VarianteBoton = "primario" | "secundario" | "peligro" | "fantasma";
 
 // Exportada porque algunos links tienen que ser <a> normales, no
 // next/link — ej. /api/ml/conectar (arranca el OAuth real de Mercado

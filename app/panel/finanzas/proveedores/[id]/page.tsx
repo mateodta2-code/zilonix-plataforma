@@ -43,7 +43,7 @@ export default async function EditarProveedorPage({
       ) : (
         <EstadoVacio>Ese tercero no está en esta empresa.</EstadoVacio>
       )}
-      <BotonLink href="/panel/finanzas/proveedores" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/finanzas/proveedores" variante="fantasma" className={styles.volver}>
         Volver a proveedores
       </BotonLink>
     </>

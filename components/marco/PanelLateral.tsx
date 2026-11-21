@@ -15,7 +15,7 @@ export function PanelLateral({ textoBoton, titulo, children }: { textoBoton: str
 
   return (
     <>
-      <Boton type="button" variante="secundario" chico onClick={() => dialogRef.current?.showModal()}>
+      <Boton type="button" variante="primario" onClick={() => dialogRef.current?.showModal()}>
         {textoBoton}
       </Boton>
       <dialog

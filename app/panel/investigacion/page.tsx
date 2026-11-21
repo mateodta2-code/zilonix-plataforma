@@ -72,7 +72,7 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
         titulo="Investigación"
         descripcion="Analiza un producto o nicho con listados reales de Mercado Libre y otras plataformas antes de invertir en él."
         accion={
-          <BotonLink href="/panel/investigacion/seguimiento" variante="primario" chico>
+          <BotonLink href="/panel/investigacion/seguimiento" variante="primario">
             Seguimiento diario
           </BotonLink>
         }
@@ -99,7 +99,7 @@ export default async function InvestigacionPage({ searchParams }: { searchParams
         </div>
       ) : null}
 
-      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel" variante="fantasma" className={styles.volver}>
         Volver al panel
       </BotonLink>
     </>

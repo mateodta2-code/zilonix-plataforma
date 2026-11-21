@@ -46,7 +46,7 @@ export default async function ImportarCsvSkusPage() {
         <ImportarCsvSkusClient />
       </div>
 
-      <BotonLink href="/panel/sku" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/sku" variante="fantasma" className={styles.volver}>
         Volver a SKU
       </BotonLink>
     </>

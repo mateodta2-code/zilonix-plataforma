@@ -330,7 +330,7 @@ export default async function DetalleSeguimientoPage({ params }: { params: { id:
         )}
       </Tarjeta>
 
-      <BotonLink href="/panel/investigacion/seguimiento" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/investigacion/seguimiento" variante="fantasma" className={styles.volver}>
         Volver al seguimiento
       </BotonLink>
     </>

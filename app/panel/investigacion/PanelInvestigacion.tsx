@@ -853,7 +853,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
           {plataformasPendientes.map(({ tipo, nombre }) => {
             const enCursoEsta = (tipo === "ml" && escaneoEnCurso) || escaneoPlataformaEnCurso === tipo;
             return (
-              <Boton key={tipo} type="button" variante="secundario" chico disabled={algoEnCurso} onClick={() => analizarSecundaria(tipo)}>
+              <Boton key={tipo} type="button" variante="primario" disabled={algoEnCurso} onClick={() => analizarSecundaria(tipo)}>
                 {enCursoEsta ? `Analizando ${nombre}…` : nombre}
               </Boton>
             );
@@ -887,10 +887,10 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
           <Chip estado="aviso">
             {pendiente.plataforma}: {pendiente.productos.length} candidatos recibidos
           </Chip>
-          <Boton type="button" variante="secundario" chico onClick={confirmarPendiente}>
+          <Boton type="button" variante="primario" onClick={confirmarPendiente}>
             Agregar como bloque nuevo
           </Boton>
-          <Boton type="button" variante="fantasma" chico onClick={descartarPendiente}>
+          <Boton type="button" variante="fantasma" onClick={descartarPendiente}>
             Descartar
           </Boton>
         </div>
@@ -898,7 +898,7 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
 
       {conExtension && top8ParaResenas.length > 0 ? (
         <div className={styles.insignia}>
-          <Boton type="button" variante="secundario" chico onClick={verResenas} disabled={resenasEnCurso}>
+          <Boton type="button" variante="primario" onClick={verResenas} disabled={resenasEnCurso}>
             {resenasEnCurso ? "Leyendo reseñas…" : `Ver reseñas (Top ${top8ParaResenas.length} ML)`}
           </Boton>
         </div>
@@ -948,14 +948,14 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
                 ))}
               </select>
               {hayAusentesMl ? (
-                <Boton type="button" variante="secundario" chico onClick={() => completarVendidosBloque(bloque)}>
+                <Boton type="button" variante="primario" onClick={() => completarVendidosBloque(bloque)}>
                   {yaAbrioCompletar[bloque.id] ? "Completar vendidos de nuevo" : "Completar vendidos"}
                 </Boton>
               ) : null}
-              <Boton type="button" variante="fantasma" chico onClick={() => toggleColapso(bloque.id)}>
+              <Boton type="button" variante="fantasma" onClick={() => toggleColapso(bloque.id)}>
                 {colapsado ? "Mostrar" : "Ocultar"}
               </Boton>
-              <Boton type="button" variante="fantasma" chico onClick={() => eliminarBloque(bloque.id)}>
+              <Boton type="button" variante="fantasma" onClick={() => eliminarBloque(bloque.id)}>
                 Eliminar
               </Boton>
             </div>

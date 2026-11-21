@@ -184,10 +184,10 @@ export async function DetalleDiaCuentaProducto({
           </select>
         </Campo>
         <div className={estilos.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
-          <BotonLink href={hrefMesActual} variante="fantasma" chico>
+          <BotonLink href={hrefMesActual} variante="fantasma">
             Mes actual
           </BotonLink>
         </div>
@@ -286,12 +286,12 @@ export async function DetalleDiaCuentaProducto({
                     </span>
                     <div className={estilos.accionesFiltro}>
                       {pagina > 1 && (
-                        <BotonLink href={hrefVentasUtilidad(ruta, extra, filtros, pagina - 1)} variante="fantasma" chico>
+                        <BotonLink href={hrefVentasUtilidad(ruta, extra, filtros, pagina - 1)} variante="fantasma">
                           Días más nuevos
                         </BotonLink>
                       )}
                       {pagina < totalPaginas && (
-                        <BotonLink href={hrefVentasUtilidad(ruta, extra, filtros, pagina + 1)} variante="fantasma" chico>
+                        <BotonLink href={hrefVentasUtilidad(ruta, extra, filtros, pagina + 1)} variante="fantasma">
                           Días más viejos
                         </BotonLink>
                       )}

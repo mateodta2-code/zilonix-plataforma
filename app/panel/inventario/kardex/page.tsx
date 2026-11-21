@@ -80,11 +80,11 @@ export default async function KardexPage({ searchParams }: { searchParams: Recor
           </select>
         </Campo>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {(skuId || bodegaId) && (
-            <BotonLink href="/panel/inventario/kardex" variante="fantasma" chico>
+            <BotonLink href="/panel/inventario/kardex" variante="fantasma">
               Limpiar
             </BotonLink>
           )}

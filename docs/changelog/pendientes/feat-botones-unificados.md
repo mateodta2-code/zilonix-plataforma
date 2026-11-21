@@ -1,0 +1,2 @@
+- Panel: botones unificados. Todos miden lo mismo que los campos (`--alto-control`), las acciones son azules, «Cancelar» tiene borde azul y las acciones destructivas (Eliminar, Desconectar, Suspender…) usan la nueva variante `peligro`. `chico` ya no achica. Los botones de las filas de filtros quedan alineados al fondo con los campos. Refs #536
+- Textos sin voseo en Publicidad, Publicar e Investigación («Elige una cuenta…»).

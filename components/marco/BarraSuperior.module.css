@@ -86,33 +86,6 @@
   box-shadow: var(--sombra-foco);
 }
 
-.botonCambiar {
-  font-size: 12px;
-  font-weight: 500;
-  padding: 5px 10px;
-  border-radius: var(--radio-boton);
-  border: none;
-  background: var(--acento-boton);
-  color: #fff;
-  cursor: pointer;
-  transition: var(--transicion-color), var(--transicion-transform);
-}
-
-.botonCambiar:hover {
-  background: var(--acento-boton-hover);
-  box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
-}
-
-.botonCambiar:active {
-  transform: scale(0.97);
-}
-
-.botonCambiar:focus-visible {
-  outline: 2px solid var(--acento-fuerte);
-  outline-offset: 2px;
-  box-shadow: var(--sombra-foco);
-}
-
 /* Corrección: antes era .centro (flex:1, justify-content:center),
    centrado en TODA la barra. Ahora el buscador vive dentro de
    .derecha, pegado a la izquierda de avisos/tema/usuario — más

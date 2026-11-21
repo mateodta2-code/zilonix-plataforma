@@ -289,7 +289,7 @@ export default async function SeguimientoPage({
                 ) : (
                   <form action={marcarAlertaLeidaAction}>
                     <input type="hidden" name="alertaId" value={alerta.id} />
-                    <Boton type="submit" variante="fantasma" chico>
+                    <Boton type="submit" variante="fantasma">
                       Marcar como leída
                     </Boton>
                   </form>
@@ -629,7 +629,7 @@ export default async function SeguimientoPage({
                   <CeldaTabla>
                     <form action={eliminarSeguimientoAction}>
                       <input type="hidden" name="seguimientoId" value={seguimiento.id} />
-                      <Boton type="submit" variante="fantasma" chico>
+                      <Boton type="submit" variante="fantasma">
                         Quitar
                       </Boton>
                     </form>
@@ -641,7 +641,7 @@ export default async function SeguimientoPage({
         )}
       </Tarjeta>
 
-      <BotonLink href="/panel/investigacion" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/investigacion" variante="fantasma" className={styles.volver}>
         Volver a Investigación
       </BotonLink>
     </>

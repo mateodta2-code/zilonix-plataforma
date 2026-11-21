@@ -45,6 +45,11 @@
   align-items: center;
 }
 
+.accionesFiltro {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
 .acciones {
   margin-top: 8px;
 }

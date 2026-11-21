@@ -60,7 +60,7 @@ export default async function SuperadminEmpresasPage({
               ))}
             </select>
           </Campo>
-          <Boton type="submit" variante="secundario">
+          <Boton type="submit" variante="primario">
             Filtrar
           </Boton>
         </form>
@@ -81,7 +81,7 @@ export default async function SuperadminEmpresasPage({
               <CeldaTabla>{e.cuentasFalabella}</CeldaTabla>
               <CeldaTabla>{fecha(e.ultimaActividad)}</CeldaTabla>
               <CeldaTabla>
-                <BotonLink href={`/superadmin/${e.id}`} chico>
+                <BotonLink href={`/superadmin/${e.id}`}>
                   Ver
                 </BotonLink>
               </CeldaTabla>

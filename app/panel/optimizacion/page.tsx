@@ -142,7 +142,7 @@ export default async function OptimizacionPage({
       {cuentas.length === 0 ? (
         <EstadoVacio>
           No hay cuentas de Mercado Libre en esta empresa.{" "}
-          <BotonLink href="/panel/conectar-ml" chico>
+          <BotonLink href="/panel/conectar-ml">
             Conectar Mercado Libre
           </BotonLink>
         </EstadoVacio>
@@ -171,7 +171,7 @@ export default async function OptimizacionPage({
                 placeholder="Buscar por título, SKU o código"
                 aria-label="Buscar publicación"
               />
-              <Boton type="submit" chico>
+              <Boton type="submit">
                 Buscar
               </Boton>
             </form>

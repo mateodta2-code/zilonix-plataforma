@@ -306,10 +306,10 @@ export function FormularioPublicar({
         GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
         agregar nada. */}
         <span className={styles.filtroIA} role="tablist" aria-label="Cómo agregar fotos">
-          <Boton type="button" chico variante={zonaFotos === "subir" ? "primario" : "secundario"} onClick={() => setZonaFotos("subir")} aria-selected={zonaFotos === "subir"}>
+          <Boton type="button" variante={zonaFotos === "subir" ? "primario" : "secundario"} onClick={() => setZonaFotos("subir")} aria-selected={zonaFotos === "subir"}>
             Subir mis fotos
           </Boton>
-          <Boton type="button" chico variante={zonaFotos === "ia" ? "primario" : "secundario"} onClick={() => setZonaFotos("ia")} aria-selected={zonaFotos === "ia"}>
+          <Boton type="button" variante={zonaFotos === "ia" ? "primario" : "secundario"} onClick={() => setZonaFotos("ia")} aria-selected={zonaFotos === "ia"}>
             Generar con IA
           </Boton>
         </span>
@@ -356,7 +356,7 @@ export function FormularioPublicar({
         <div className={styles.filaAccion}>
           <p className="zx-etiqueta">Título, descripción y portada por cuenta</p>
           {cuentasMarcadas.length >= 2 && (
-            <Boton type="button" variante="secundario" chico onClick={copiarPrimeroATodas}>
+            <Boton type="button" variante="primario" onClick={copiarPrimeroATodas}>
               Copiar el primero a todas
             </Boton>
           )}
@@ -422,7 +422,7 @@ export function FormularioPublicar({
             <span style={{ color: "var(--texto-suave)" }}>Todavía sin detectar.</span>
           )}
         </p>
-        <Boton type="button" variante="secundario" chico onClick={() => cargarCaracteristicas()} disabled={cargando || !cuentaReferencia}>
+        <Boton type="button" variante="primario" onClick={() => cargarCaracteristicas()} disabled={cargando || !cuentaReferencia}>
           {cargando ? "Detectando…" : "Detectar según el título"}
         </Boton>
         {errorCategoria && <p style={{ fontSize: 13, color: "var(--kpi-peligro-texto)", marginTop: 8 }}>{errorCategoria}</p>}

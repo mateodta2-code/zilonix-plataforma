@@ -57,7 +57,7 @@ export function ImportarPorBookmarklet({ onImportar }: { onImportar: (item: Item
           className="zx-control"
           style={{ width: "100%" }}
         />
-        <Boton type="button" variante="secundario" chico style={{ marginTop: 8 }} onClick={importar} disabled={!texto.trim()}>
+        <Boton type="button" variante="primario" style={{ marginTop: 8 }} onClick={importar} disabled={!texto.trim()}>
           Importar al formulario
         </Boton>
       </div>

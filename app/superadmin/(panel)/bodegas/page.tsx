@@ -45,7 +45,7 @@ export default async function SuperadminBodegasPage({ searchParams }: { searchPa
               <CeldaTabla>{b.operarios}</CeldaTabla>
               <CeldaTabla>{b.domiciliarios}</CeldaTabla>
               <CeldaTabla>
-                <BotonLink href={`/superadmin/bodegas/${b.id}`} chico>
+                <BotonLink href={`/superadmin/bodegas/${b.id}`}>
                   Ver
                 </BotonLink>
               </CeldaTabla>

@@ -90,7 +90,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
             }}
           >
             <input className="zx-control" inputMode="decimal" value={precioTexto} onChange={(e) => setPrecioTexto(e.target.value)} aria-label="Precio nuevo" />
-            <Boton type="submit" chico disabled={enviando || !precio}>
+            <Boton type="submit" disabled={enviando || !precio}>
               Guardar precio
             </Boton>
           </form>
@@ -126,7 +126,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
             }}
           >
             <input className="zx-control" value={titulo} maxLength={100} onChange={(e) => setTitulo(e.target.value)} aria-label="Título nuevo" />
-            <Boton type="submit" chico disabled={enviando || !titulo.trim()}>
+            <Boton type="submit" disabled={enviando || !titulo.trim()}>
               Guardar título
             </Boton>
           </form>
@@ -152,7 +152,6 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
         ) : null}
         <Boton
           type="button"
-          chico
           disabled={enviando || fotos.length === 0}
           onClick={() =>
             guardar(

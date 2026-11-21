@@ -63,12 +63,12 @@ export function AdjuntarImagen({
       {url ? (
         <div className={styles.vistaPrevia}>
           <img src={url} alt="Imagen adjunta" className={styles.miniatura} />
-          <Boton type="button" variante="fantasma" chico onClick={() => onCambio(null)}>
+          <Boton type="button" variante="fantasma" onClick={() => onCambio(null)}>
             Quitar imagen
           </Boton>
         </div>
       ) : (
-        <Boton type="button" variante="secundario" chico onClick={() => input.current?.click()} disabled={subiendo}>
+        <Boton type="button" variante="primario" onClick={() => input.current?.click()} disabled={subiendo}>
           {subiendo ? "Subiendo imagen…" : "Adjuntar imagen"}
         </Boton>
       )}

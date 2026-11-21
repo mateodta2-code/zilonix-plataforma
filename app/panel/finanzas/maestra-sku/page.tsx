@@ -71,10 +71,10 @@ export default async function MaestraSkuPage({ searchParams }: { searchParams: R
         accion={
           puedeModificar && (
             <div className={styles.accionesFiltro}>
-              <BotonLink href="/panel/finanzas/maestra-sku/importar" chico>
+              <BotonLink href="/panel/finanzas/maestra-sku/importar">
                 Cargar Excel o CSV
               </BotonLink>
-              <BotonLink href="/panel/finanzas/maestra-sku/editar" variante="secundario" chico>
+              <BotonLink href="/panel/finanzas/maestra-sku/editar" variante="primario">
                 Nuevo SKU
               </BotonLink>
             </div>
@@ -113,11 +113,11 @@ export default async function MaestraSkuPage({ searchParams }: { searchParams: R
           <input type="checkbox" name="sinCosto" value="1" defaultChecked={Boolean(aplicados.sinCosto)} /> Solo sin costo
         </label>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {hayFiltros && (
-            <BotonLink href="/panel/finanzas/maestra-sku" variante="fantasma" chico>
+            <BotonLink href="/panel/finanzas/maestra-sku" variante="fantasma">
               Limpiar filtros
             </BotonLink>
           )}
@@ -154,7 +154,7 @@ export default async function MaestraSkuPage({ searchParams }: { searchParams: R
                 <CeldaTabla>{mostrarMonto(f.precioMinimoComboX3)}</CeldaTabla>
                 <CeldaTabla>
                   {puedeModificar && (
-                    <BotonLink href={`/panel/finanzas/maestra-sku/editar?sku=${encodeURIComponent(f.skuCodigo)}`} variante="fantasma" chico>
+                    <BotonLink href={`/panel/finanzas/maestra-sku/editar?sku=${encodeURIComponent(f.skuCodigo)}`} variante="fantasma">
                       Editar
                     </BotonLink>
                   )}
@@ -183,10 +183,10 @@ export default async function MaestraSkuPage({ searchParams }: { searchParams: R
       )}
 
       <div className={styles.accionesFiltro}>
-        <BotonLink href="/panel/finanzas/proveedores" variante="fantasma" chico className={styles.volver}>
+        <BotonLink href="/panel/finanzas/proveedores" variante="fantasma" className={styles.volver}>
           Proveedores
         </BotonLink>
-        <BotonLink href="/panel/finanzas" variante="fantasma" chico className={styles.volver}>
+        <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
           Volver a Finanzas
         </BotonLink>
       </div>

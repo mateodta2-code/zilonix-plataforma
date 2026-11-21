@@ -117,13 +117,13 @@ export default async function OrdenCompraPage({
       )}
 
       <div className={styles.filaForm} style={{ marginTop: 16 }}>
-        <BotonLink href="/panel/inventario/compras" variante="fantasma" chico>
+        <BotonLink href="/panel/inventario/compras" variante="fantasma">
           Volver a órdenes
         </BotonLink>
         {puedeAnular && (
           <form action={anularOrdenCompraAction}>
             <input type="hidden" name="ordenCompraId" value={orden.id} />
-            <Boton type="submit" variante="secundario" chico>
+            <Boton type="submit" variante="peligro">
               Anular orden
             </Boton>
           </form>

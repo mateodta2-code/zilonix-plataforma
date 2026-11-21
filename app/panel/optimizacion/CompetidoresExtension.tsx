@@ -176,7 +176,7 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
           aria-label="Qué buscar en Mercado Libre"
           disabled={buscando}
         />
-        <Boton type="submit" chico disabled={buscando}>
+        <Boton type="submit" disabled={buscando}>
           {buscando ? "Buscando…" : resultado ? "Buscar de nuevo" : "Buscar 10 competidores"}
         </Boton>
       </form>

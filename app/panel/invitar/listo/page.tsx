@@ -29,7 +29,7 @@ export default function InvitacionListaPage({ searchParams }: { searchParams: { 
       ) : (
         <p>No se encontró el token.</p>
       )}
-      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel" variante="fantasma" className={styles.volver}>
         Volver al panel
       </BotonLink>
     </>

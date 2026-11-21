@@ -102,7 +102,7 @@ export default async function EditarRolPage({ params }: { params: { rolId: strin
         </Boton>
       </form>
 
-      <BotonLink href="/panel/roles" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/roles" variante="fantasma" className={styles.volver}>
         ← Volver a roles
       </BotonLink>
     </>

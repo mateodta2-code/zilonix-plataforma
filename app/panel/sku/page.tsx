@@ -80,7 +80,7 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
       <EncabezadoPagina
         titulo="SKU"
         accion={
-          <BotonLink href="/panel/publicar" variante="secundario" chico>
+          <BotonLink href="/panel/publicar" variante="primario">
             Publicar en Mercado Libre
           </BotonLink>
         }
@@ -137,11 +137,11 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
           </select>
         </Campo>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {hayFiltrosActivos && (
-            <BotonLink href="/panel/sku" variante="fantasma" chico>
+            <BotonLink href="/panel/sku" variante="fantasma">
               Limpiar filtros
             </BotonLink>
           )}
@@ -153,7 +153,7 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
           {hayFiltrosActivos ? (
             <span className={styles.vacioConAccion}>
               Ningún SKU coincide con esos filtros.
-              <BotonLink href="/panel/sku" variante="secundario" chico>
+              <BotonLink href="/panel/sku" variante="fantasma">
                 Limpiar filtros
               </BotonLink>
             </span>
@@ -206,7 +206,7 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
         </>
       )}
 
-      <BotonLink href="/panel" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel" variante="fantasma" className={styles.volver}>
         Volver al panel
       </BotonLink>
     </>

@@ -121,11 +121,11 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
           </select>
         </Campo>
         <div className={styles.accionesFiltro}>
-          <Boton type="submit" chico>
+          <Boton type="submit">
             Filtrar
           </Boton>
           {hayFiltros && (
-            <BotonLink href={RUTA} variante="fantasma" chico>
+            <BotonLink href={RUTA} variante="fantasma">
               Limpiar filtros
             </BotonLink>
           )}
@@ -202,7 +202,7 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
         </Tarjeta>
       )}
 
-      <BotonLink href="/panel/finanzas" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
         Volver a Finanzas
       </BotonLink>
     </>

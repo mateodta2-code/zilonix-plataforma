@@ -72,7 +72,7 @@ export function ImportarMaestraClient() {
           <Boton type="button" onClick={reiniciar}>
             Cargar otro archivo
           </Boton>
-          <BotonLink href="/panel/finanzas/maestra-sku" variante="secundario">
+          <BotonLink href="/panel/finanzas/maestra-sku" variante="primario">
             Ver la tabla maestra
           </BotonLink>
         </div>
@@ -118,7 +118,7 @@ export function ImportarMaestraClient() {
                 </Campo>
               ))}
             </div>
-            <Boton type="button" variante="secundario" chico onClick={() => ejecutar(previsualizarMaestraAction, mapeo)} disabled={cargando}>
+            <Boton type="button" variante="primario" onClick={() => ejecutar(previsualizarMaestraAction, mapeo)} disabled={cargando}>
               Revisar con estas columnas
             </Boton>
           </details>

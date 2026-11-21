@@ -97,8 +97,7 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
       <div style={{ display: "flex", gap: 8 }}>
         <Boton
           type="button"
-          variante="secundario"
-          chico
+          variante="primario"
           disabled={!cuentaId}
           onClick={() => {
             setModo(modo === "buscar" ? "cerrado" : "buscar");
@@ -109,8 +108,7 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
         </Boton>
         <Boton
           type="button"
-          variante="secundario"
-          chico
+          variante="primario"
           disabled={!cuentaId}
           onClick={() => {
             const abrir = modo !== "arbol";
@@ -140,7 +138,7 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
                   }
                 }}
               />
-              <Boton type="button" chico onClick={() => void buscar(texto)} disabled={cargando}>
+              <Boton type="button" onClick={() => void buscar(texto)} disabled={cargando}>
                 {cargando ? "Buscando…" : "Buscar"}
               </Boton>
             </div>
@@ -162,14 +160,13 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
                     <span style={{ opacity: 0.6 }}>({r.categoryId})</span>
                   </span>
                   {r.esHoja ? (
-                    <Boton type="button" chico variante="secundario" onClick={() => onElegir({ categoryId: r.categoryId, categoryName: r.categoryName })}>
+                    <Boton type="button" variante="primario" onClick={() => onElegir({ categoryId: r.categoryId, categoryName: r.categoryName })}>
                       Elegir
                     </Boton>
                   ) : (
                     <Boton
                       type="button"
-                      chico
-                      variante="secundario"
+                      variante="primario"
                       onClick={() => {
                         setModo("arbol");
                         setResultados(null);
@@ -203,7 +200,7 @@ export function SelectorCategoria({ cuentaId, onElegir }: { cuentaId: string | n
           {nodo.esHoja ? (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0" }}>
               <strong style={{ fontSize: 13 }}>{nodo.categoryName}</strong>
-              <Boton type="button" chico onClick={() => onElegir({ categoryId: nodo.categoryId, categoryName: nodo.categoryName })}>
+              <Boton type="button" onClick={() => onElegir({ categoryId: nodo.categoryId, categoryName: nodo.categoryName })}>
                 Elegir esta categoría
               </Boton>
             </div>

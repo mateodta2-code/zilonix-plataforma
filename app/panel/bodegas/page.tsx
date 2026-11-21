@@ -86,7 +86,7 @@ export default async function BodegasPage({ searchParams }: { searchParams: Reco
                     <label className={styles.check}>
                       <input type="checkbox" name="sumaAlPublicado" defaultChecked={b.sumaAlPublicado} /> Suma a ML
                     </label>
-                    <Boton type="submit" variante="secundario" chico>
+                    <Boton type="submit" variante="primario">
                       Guardar
                     </Boton>
                   </form>

@@ -41,7 +41,7 @@ export default async function ProveedoresPage({ searchParams }: { searchParams: 
         titulo="Proveedores y transportadores"
         descripcion="El packing se pone una vez aquí y cada SKU lo toma de su proveedor."
         accion={
-          <BotonLink href="/panel/finanzas/maestra-sku" variante="secundario" chico>
+          <BotonLink href="/panel/finanzas/maestra-sku" variante="primario">
             Tabla maestra de SKU
           </BotonLink>
         }
@@ -73,13 +73,13 @@ export default async function ProveedoresPage({ searchParams }: { searchParams: 
                 <CeldaTabla>
                   {puedeModificar && (
                     <div className={styles.accionesFiltro}>
-                      <BotonLink href={`/panel/finanzas/proveedores/${t.id}`} variante="fantasma" chico>
+                      <BotonLink href={`/panel/finanzas/proveedores/${t.id}`} variante="fantasma">
                         Editar
                       </BotonLink>
                       <form action={cambiarActivoProveedorAction}>
                         <input type="hidden" name="terceroId" value={t.id} />
                         <input type="hidden" name="activo" value={t.activo ? "0" : "1"} />
-                        <Boton type="submit" variante="fantasma" chico>
+                        <Boton type="submit" variante="fantasma">
                           {t.activo ? "Desactivar" : "Activar"}
                         </Boton>
                       </form>
@@ -101,7 +101,7 @@ export default async function ProveedoresPage({ searchParams }: { searchParams: 
         </section>
       )}
 
-      <BotonLink href="/panel/finanzas" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
         Volver a Finanzas
       </BotonLink>
     </>

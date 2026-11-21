@@ -248,11 +248,11 @@ export function CrearImagenIA({
           </span>
           <div className={styles.iaAcciones}>
             {progreso ? (
-              <Boton type="button" chico variante="secundario" onClick={() => (detener.current = true)}>
+              <Boton type="button" variante="secundario" onClick={() => (detener.current = true)}>
                 Detener después de esta
               </Boton>
             ) : (
-              <Boton type="button" chico onClick={crearPortadas} disabled={!base || ocupado}>
+              <Boton type="button" onClick={crearPortadas} disabled={!base || ocupado}>
                 {cantidad === 1 ? "Crear portada" : `Crear ${cantidad} portadas`}
               </Boton>
             )}
@@ -269,7 +269,7 @@ export function CrearImagenIA({
           </span>
           <p className={styles.notaNeutra}>{infoTipo?.guia}</p>
           <div className={styles.iaAcciones}>
-            <Boton type="button" chico variante={borrador ? "secundario" : "primario"} onClick={proponer} disabled={ocupado}>
+            <Boton type="button" variante={borrador ? "secundario" : "primario"} onClick={proponer} disabled={ocupado}>
               {proponiendo
                 ? "Proponiendo…"
                 : !tipoLoEscribeLaIA(tipoC)
@@ -333,7 +333,7 @@ export function CrearImagenIA({
                 <details className={styles.iaPrompt}>
                   <summary>Ver el prompt final</summary>
                   <p>{promptImagenContenido(contenido, tituloProducto)}</p>
-                  <Boton type="button" chico variante="fantasma" onClick={copiarPrompt}>
+                  <Boton type="button" variante="fantasma" onClick={copiarPrompt}>
                     {copiado ? "Copiado ✓" : "Copiar prompt"}
                   </Boton>
                 </details>
@@ -342,10 +342,10 @@ export function CrearImagenIA({
                 {falta ?? "¿Confirmas que cree la imagen? Si quieres cambiar algo, edítalo arriba o pide otra propuesta."}
               </p>
               <div className={styles.iaAcciones}>
-                <Boton type="button" chico onClick={crearInformativa} disabled={ocupado || !!falta || !base}>
+                <Boton type="button" onClick={crearInformativa} disabled={ocupado || !!falta || !base}>
                   {progreso ? "Creando imagen…" : "CREAR imagen"}
                 </Boton>
-                <Boton type="button" chico variante="fantasma" onClick={() => setBorrador(null)} disabled={ocupado}>
+                <Boton type="button" variante="fantasma" onClick={() => setBorrador(null)} disabled={ocupado}>
                   Descartar propuesta
                 </Boton>
               </div>
@@ -371,13 +371,13 @@ export function CrearImagenIA({
               <img src={c.url} alt={`Imagen creada con IA: ${c.rotulo}`} width={200} height={200} />
               <div className={styles.iaAcciones}>
                 <span className={styles.notaNeutra}>{c.rotulo}</span>
-                <Boton type="button" chico onClick={() => agregar(c, true)}>
+                <Boton type="button" onClick={() => agregar(c, true)}>
                   Agregar como portada
                 </Boton>
-                <Boton type="button" chico variante="secundario" onClick={() => agregar(c, false)}>
+                <Boton type="button" variante="primario" onClick={() => agregar(c, false)}>
                   Agregar al final
                 </Boton>
-                <Boton type="button" chico variante="fantasma" onClick={() => setCreadas((previas) => previas.filter((x) => x.url !== c.url))}>
+                <Boton type="button" variante="fantasma" onClick={() => setCreadas((previas) => previas.filter((x) => x.url !== c.url))}>
                   Descartar
                 </Boton>
               </div>

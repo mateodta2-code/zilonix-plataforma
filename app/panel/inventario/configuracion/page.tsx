@@ -86,7 +86,7 @@ export default async function ConfiguracionInventarioPage({ searchParams }: { se
 
       {puedeCambiar && config.syncMlActivo && (
         <form action={sincronizarStockAhoraAction} style={{ marginTop: 16 }}>
-          <Boton type="submit" variante="secundario">
+          <Boton type="submit" variante="primario">
             Sincronizar ahora con Mercado Libre
           </Boton>
         </form>

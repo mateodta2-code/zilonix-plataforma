@@ -202,10 +202,10 @@ export default async function DetalleVentaUtilidadPage({ params }: { params: { p
       </section>
 
       <div className={styles.accionesFiltro}>
-        <BotonLink href={`/panel/pedidos/${venta.pedidoId}`} variante="fantasma" chico className={styles.volver}>
+        <BotonLink href={`/panel/pedidos/${venta.pedidoId}`} variante="fantasma" className={styles.volver}>
           Ver el pedido
         </BotonLink>
-        <BotonLink href="/panel/finanzas/ventas" variante="fantasma" chico className={styles.volver}>
+        <BotonLink href="/panel/finanzas/ventas" variante="fantasma" className={styles.volver}>
           Volver a ventas y utilidad
         </BotonLink>
       </div>

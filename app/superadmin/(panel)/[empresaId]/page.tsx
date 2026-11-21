@@ -63,7 +63,7 @@ export default async function SuperadminEmpresaPage({ params }: { params: { empr
               ))}
             </select>
           </Campo>
-          <Boton type="submit" variante="secundario">
+          <Boton type="submit" variante="primario">
             Cambiar plan
           </Boton>
         </FormConfirmar>
@@ -76,7 +76,7 @@ export default async function SuperadminEmpresaPage({ params }: { params: { empr
             <Campo etiqueta="Motivo de la suspensión (obligatorio)">
               <textarea name="motivo" className="zx-control" required rows={2} />
             </Campo>
-            <Boton type="submit" variante="secundario">
+            <Boton type="submit" variante="peligro">
               Suspender
             </Boton>
           </FormConfirmar>
@@ -94,7 +94,7 @@ export default async function SuperadminEmpresaPage({ params }: { params: { empr
           <Campo etiqueta="Notas internas (solo Zilonix)">
             <textarea name="notas" className="zx-control" defaultValue={empresa.notasInternas ?? ""} rows={4} />
           </Campo>
-          <Boton type="submit" variante="secundario">
+          <Boton type="submit" variante="primario">
             Guardar notas
           </Boton>
         </FormConfirmar>

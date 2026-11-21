@@ -661,7 +661,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     <>
       <div className={styles.pestanas}>
         {(["buscar", "participando", "historial", "reglas"] as Pestana[]).map((p) => (
-          <Boton key={p} type="button" variante={pestana === p ? "primario" : "secundario"} chico onClick={() => setPestana(p)}>
+          <Boton key={p} type="button" variante={pestana === p ? "primario" : "secundario"} onClick={() => setPestana(p)}>
             {p === "buscar" ? "Buscar / Resultados" : p === "participando" ? "Participando" : p === "historial" ? "Historial" : "Reglas"}
           </Boton>
         ))}
@@ -680,7 +680,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                 ))}
               </select>
             </Campo>
-            <Boton type="button" variante="primario" chico disabled={buscando} onClick={buscar}>
+            <Boton type="button" variante="primario" disabled={buscando} onClick={buscar}>
               {buscando ? "Buscando…" : cuentaSeleccionada === "todas" ? "Buscar promociones en todas" : "Buscar promociones en esta cuenta"}
             </Boton>
           </div>
@@ -703,7 +703,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
 
           <div className={styles.filtros}>
             {(Object.keys(ETIQUETA_FILTRO) as Filtro[]).map((f) => (
-              <Boton key={f} type="button" variante={filtro === f ? "primario" : "secundario"} chico onClick={() => setFiltro(f)}>
+              <Boton key={f} type="button" variante={filtro === f ? "primario" : "secundario"} onClick={() => setFiltro(f)}>
                 {ETIQUETA_FILTRO[f]}
                 {conteos ? ` (${conteos[f]})` : ""}
               </Boton>
@@ -712,17 +712,17 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
 
           {puedeAprobar && (
             <div className={styles.accionesLote}>
-              <Boton type="button" variante="primario" chico disabled={!candidatos.some((c) => c.cumpleReglas)} onClick={aceptarLasQueCumplen}>
+              <Boton type="button" variante="primario" disabled={!candidatos.some((c) => c.cumpleReglas)} onClick={aceptarLasQueCumplen}>
                 Aceptar todas las que cumplen
               </Boton>
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
                 <input type="checkbox" checked={todosSeleccionados} onChange={alternarSeleccionarTodo} disabled={candidatos.length === 0} />
                 Seleccionar todo{candidatos.length > 0 ? ` (${candidatos.length})` : ""}
               </label>
-              <Boton type="button" variante="primario" chico disabled={!hayAlgunoSeleccionado} onClick={aprobarSeleccionados}>
+              <Boton type="button" variante="primario" disabled={!hayAlgunoSeleccionado} onClick={aprobarSeleccionados}>
                 Aprobar seleccionados
               </Boton>
-              <Boton type="button" variante="secundario" chico disabled={!hayAlgunoSeleccionado} onClick={rechazarSeleccionados}>
+              <Boton type="button" variante="primario" disabled={!hayAlgunoSeleccionado} onClick={rechazarSeleccionados}>
                 Rechazar seleccionados
               </Boton>
               {/* MED 4 (review de Pablo) — apagado a propósito: "salir de
@@ -730,14 +730,13 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                   cuenta real de Mercado Libre (lib/ml/cliente.ts,
                   salirDePromocionMl) y la ruta la rechaza con 501. Se
                   reactiva el día que se confirme en vivo. */}
-              <Boton type="button" variante="secundario" chico disabled title="Todavía no confirmado contra Mercado Libre real — deshabilitado a propósito.">
+              <Boton type="button" variante="peligro" disabled title="Todavía no confirmado contra Mercado Libre real — deshabilitado a propósito.">
                 Salir de la promo
               </Boton>
               {puedeEjecutar && (
                 <Boton
                   type="button"
-                  variante="secundario"
-                  chico
+                  variante="primario"
                   disabled={ejecutandoPendientes || pendientesLanzar === 0}
                   onClick={() => {
                     void cargarPendientesLanzar(); // refresca la lista justo antes de mostrarla — nunca confirmar sobre algo desactualizado
@@ -781,13 +780,12 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                 />
               </label>
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <Boton type="button" variante="primario" chico disabled={textoConfirmacionLanzar.trim().toUpperCase() !== PALABRA_CONFIRMACION_LANZAR} onClick={lanzarAprobadas}>
+                <Boton type="button" variante="primario" disabled={textoConfirmacionLanzar.trim().toUpperCase() !== PALABRA_CONFIRMACION_LANZAR} onClick={lanzarAprobadas}>
                   Confirmar y lanzar
                 </Boton>
                 <Boton
                   type="button"
                   variante="secundario"
-                  chico
                   onClick={() => {
                     setConfirmandoLanzar(false);
                     setTextoConfirmacionLanzar("");
@@ -976,8 +974,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                           {filtro === "rechazadas" ? (
                             <Boton
                               type="button"
-                              variante="secundario"
-                              chico
+                              variante="primario"
                               disabled={decisionDirectaId === c.id}
                               onClick={() => enviarDecisionDirecta(c, "volver_a_pendiente")}
                             >
@@ -999,7 +996,6 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                               <Boton
                                 type="button"
                                 variante="primario"
-                                chico
                                 disabled={decisionDirectaId === c.id || fueraDeRangoFila || sinMargenFila}
                                 title={
                                   sinMargenFila
@@ -1012,7 +1008,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                               >
                                 {decisionDirectaId === c.id ? "…" : "Sí"}
                               </Boton>
-                              <Boton type="button" variante="secundario" chico disabled={decisionDirectaId === c.id} onClick={() => enviarDecisionDirecta(c, "rechazar")}>
+                              <Boton type="button" variante="primario" disabled={decisionDirectaId === c.id} onClick={() => enviarDecisionDirecta(c, "rechazar")}>
                                 {decisionDirectaId === c.id ? "…" : "No"}
                               </Boton>
                             </div>
@@ -1052,10 +1048,10 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                 </>
               )}
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <Boton type="button" variante="primario" chico disabled={aplicando} onClick={confirmarVistaPrevia}>
+                <Boton type="button" variante="primario" disabled={aplicando} onClick={confirmarVistaPrevia}>
                   {aplicando ? "Aplicando…" : vistaPrevia.tipo === "rechazar" ? "Confirmar rechazo" : "Confirmar"}
                 </Boton>
-                <Boton type="button" variante="secundario" chico disabled={aplicando} onClick={() => setVistaPrevia(null)}>
+                <Boton type="button" variante="secundario" disabled={aplicando} onClick={() => setVistaPrevia(null)}>
                   Cancelar
                 </Boton>
               </div>
@@ -1111,7 +1107,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                       {puedeEjecutar && (
                         <CeldaTabla>
                           {f.puedeSalirApi ? (
-                            <Boton type="button" variante="secundario" chico disabled={salidaEnCursoKey === key} onClick={() => dejarDeParticipar(f)}>
+                            <Boton type="button" variante="primario" disabled={salidaEnCursoKey === key} onClick={() => dejarDeParticipar(f)}>
                               {salidaEnCursoKey === key ? "…" : "Dejar de participar"}
                             </Boton>
                           ) : (
@@ -1246,10 +1242,10 @@ function PestanaReglas({ reglas, puedeAprobar, onGuardado }: { reglas: ReglasCue
           </label>
           {puedeAprobar && (
             <div style={{ display: "flex", gap: 8 }}>
-              <Boton type="button" variante="primario" chico disabled={guardandoId === fila.cuentaId} onClick={() => guardar(fila, false)}>
+              <Boton type="button" variante="primario" disabled={guardandoId === fila.cuentaId} onClick={() => guardar(fila, false)}>
                 Guardar
               </Boton>
-              <Boton type="button" variante="secundario" chico disabled={guardandoId === fila.cuentaId} onClick={() => guardar(fila, true)} title="Copia estas reglas a todas las cuentas conectadas">
+              <Boton type="button" variante="primario" disabled={guardandoId === fila.cuentaId} onClick={() => guardar(fila, true)} title="Copia estas reglas a todas las cuentas conectadas">
                 Usar las mismas reglas para todas las cuentas
               </Boton>
             </div>

@@ -209,11 +209,11 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
               </select>
             </Campo>
             <div className={styles.accionesFiltro}>
-              <Boton type="submit" chico>
+              <Boton type="submit">
                 Filtrar
               </Boton>
               {(cuentaFiltro || tipoFiltro) && (
-                <BotonLink href={hrefConFiltros({}, { pestaña: pestañaFiltro })} variante="fantasma" chico>
+                <BotonLink href={hrefConFiltros({}, { pestaña: pestañaFiltro })} variante="fantasma">
                   Limpiar filtros
                 </BotonLink>
               )}
@@ -230,7 +230,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                 puedeConectarMl ? (
                   <span className={styles.vacioConAccion}>
                     Para ver tus despachos, primero conecta tu cuenta de Mercado Libre.
-                    <BotonLink href="/panel/conectar-ml" variante="secundario" chico>
+                    <BotonLink href="/panel/conectar-ml" variante="primario">
                       Conectar Mercado Libre
                     </BotonLink>
                   </span>
@@ -281,7 +281,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
         </>
       )}
 
-      <BotonLink href="/panel/pedidos" variante="fantasma" chico className={styles.volver}>
+      <BotonLink href="/panel/pedidos" variante="fantasma" className={styles.volver}>
         Volver a pedidos
       </BotonLink>
     </>

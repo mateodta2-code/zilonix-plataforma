@@ -29,7 +29,7 @@ export function BotonTraerVentasMes({ cuentaId }: { cuentaId: string | null }) {
   return (
     <div className={estilos.traerVentas}>
       <div className={estilos.accionesFiltro}>
-        <Boton type="button" variante="secundario" chico onClick={traer} disabled={pendiente}>
+        <Boton type="button" variante="primario" onClick={traer} disabled={pendiente}>
           {pendiente ? "Trayendo ventas…" : "Traer ventas de este mes"}
         </Boton>
         <span className={estilos.suave}>
