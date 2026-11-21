@@ -80,7 +80,7 @@ export const GUIA: GrupoGuia[] = [
           "Pulsa «Agregar IA» y elige el proveedor (OpenAI, Anthropic, Google o xAI).",
           "Crea tu cuenta en el proveedor o entra a la que ya tienes; si exige saldo, cárgalo.",
           "Crea una clave nueva con el enlace «Crear mi API key» y cópiala (se muestra una sola vez).",
-          "Pégala en el formulario, elige el modelo y guarda.",
+          "Pega la clave y elige el modelo de la lista (ya viene el recomendado); luego guarda.",
           "Usa «Probar conexión» para confirmar que funciona.",
           "Marca la IA como principal y asígnala a los módulos que la van a usar.",
         ],
