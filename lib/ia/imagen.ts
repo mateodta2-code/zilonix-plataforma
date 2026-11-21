@@ -16,7 +16,12 @@
 import { tipoImagenPorMagicBytes, type TipoImagenDetectado } from "@/app/panel/publicar/fotos/validar-url-externa";
 import type { ConexionIAConClave, ProveedorIA } from "./tipos";
 
-export const MODELO_IMAGEN_OPENAI = "gpt-image-1";
+// OpenAI apagó gpt-image-1 el 23-oct-2026 (desde entonces /images/edits
+// responde 400 invalid_value en «model»). Reemplazo que indica su
+// referencia de la API: gpt-image-2.5-sunburst o -flare (mismo precio por
+// token). Sunburst: pensado para editar conservando los detalles, que es
+// lo que pide «el mismo producto de la foto».
+export const MODELO_IMAGEN_OPENAI = "gpt-image-2.5-sunburst";
 export const MODELO_IMAGEN_GOOGLE = "gemini-2.5-flash-image";
 
 // Una imagen tarda bastante más que un texto.
@@ -131,7 +136,7 @@ export async function descargarFotoBase(url: string): Promise<{ buffer: Buffer; 
 
 export type FotoBase = { buffer: Buffer; tipo: TipoImagenDetectado };
 
-// Con más de una foto, gpt-image-1 las recibe como image[] (hasta 16).
+// Con más de una foto, los modelos gpt-image las reciben como image[] (hasta 16).
 async function conOpenAI(apiKey: string, fotos: FotoBase[], prompt: string): Promise<Buffer> {
   const form = new FormData();
   form.append("model", MODELO_IMAGEN_OPENAI);
