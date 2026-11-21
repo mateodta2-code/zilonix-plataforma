@@ -69,6 +69,7 @@ export function NotaBitacora({ cuentaMlId, itemId, hoy }: { cuentaMlId: string; 
 }
 
 // «Revisado»: el resultado del cambio y un comentario. Se puede cambiar.
+// Sin resultado se guarda solo el comentario; el cambio sigue sin revisar.
 export function RevisarCambio({
   cuentaMlId,
   itemId,
@@ -78,7 +79,7 @@ export function RevisarCambio({
   cuentaMlId: string;
   itemId: string;
   refCambio: string;
-  actual: { resultado: string; comentario: string | null } | null;
+  actual: { resultado: string | null; comentario: string | null } | null;
 }) {
   const router = useRouter();
   const [abierta, setAbierta] = useState(false);
@@ -106,8 +107,8 @@ export function RevisarCambio({
 
   if (!abierta) {
     return (
-      <Boton type="button" chico variante={actual ? "fantasma" : "secundario"} onClick={() => setAbierta(true)}>
-        {actual ? "Cambiar revisión" : "Revisar"}
+      <Boton type="button" chico variante={actual?.resultado ? "fantasma" : "secundario"} onClick={() => setAbierta(true)}>
+        {actual?.resultado ? "Cambiar revisión" : "Revisar"}
       </Boton>
     );
   }
@@ -122,13 +123,14 @@ export function RevisarCambio({
       </span>
       <input className="zx-control" maxLength={LARGO_NOTA} value={comentario} onChange={(e) => setComentario(e.target.value)} placeholder="Comentario (opcional)" aria-label="Comentario de la revisión" disabled={guardando} />
       <span className={styles.accionesBitacora}>
-        <Boton type="button" chico onClick={guardar} disabled={guardando || !resultado}>
-          {guardando ? "Guardando…" : "Guardar revisión"}
+        <Boton type="button" chico onClick={guardar} disabled={guardando || (!resultado && !comentario.trim())}>
+          {guardando ? "Guardando…" : resultado ? "Guardar revisión" : "Guardar comentario"}
         </Boton>
         <Boton type="button" chico variante="fantasma" onClick={() => setAbierta(false)} disabled={guardando}>
           Cancelar
         </Boton>
       </span>
+      {!resultado ? <p className={styles.notaNeutra}>Elige Sirvió, No sirvió o Sin cambio para dar el cambio por revisado. Sin resultado se guarda solo el comentario.</p> : null}
       {error ? <p className={styles.avisoError}>{error}</p> : null}
     </div>
   );

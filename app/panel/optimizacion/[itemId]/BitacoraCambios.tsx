@@ -92,17 +92,18 @@ export function BitacoraCambios({
                 </CeldaTabla>
                 <CeldaTabla>
                   <span className={styles.revisionCelda}>
-                    {c.revision && revision ? (
+                    {c.revision ? (
                       <span>
-                        <Chip estado={c.revision.resultado === "sirvio" ? "exito" : c.revision.resultado === "no_sirvio" ? "peligro" : "neutro"}>{revision.rotulo}</Chip>
+                        {/* Solo comentario (sin resultado): no se muestra ningún resultado. */}
+                        {revision ? <Chip estado={revision.id === "sirvio" ? "exito" : revision.id === "no_sirvio" ? "peligro" : "neutro"}>{revision.rotulo}</Chip> : null}
                         <span className={styles.notaNeutra}>
-                          {` ${c.revision.usuario ?? ""} · ${fecha(c.revision.ts)}`}
+                          {revision ? " " : "Comentario de "}
+                          {`${c.revision.usuario ?? ""} · ${fecha(c.revision.ts)}`}
                           {c.revision.comentario ? ` · «${c.revision.comentario}»` : ""}
                         </span>
                       </span>
-                    ) : r?.estado === "listo" ? (
-                      <span className={styles.notaNeutra}>Sin revisar</span>
                     ) : null}
+                    {!revision && r?.estado === "listo" ? <span className={styles.notaNeutra}>Sin revisar</span> : null}
                     {puedeEditar ? (
                       <RevisarCambio
                         cuentaMlId={cuentaMlId}

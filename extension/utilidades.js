@@ -115,7 +115,40 @@
     return null;
   }
 
+  // Multipaís — única tabla host → sitio/moneda/locale de la extensión
+  // (la extensión no puede importar lib/ml/sitios.ts: mantener ambas en
+  // sincronía; aquí además van MLU y MPE). Brasil es "mercadolivre".
+  const SITIOS_POR_DOMINIO = {
+    "mercadolibre.com.co": { sitio: "MCO", moneda: "COP", locale: "es-CO" },
+    "mercadolibre.com.ar": { sitio: "MLA", moneda: "ARS", locale: "es-AR" },
+    "mercadolivre.com.br": { sitio: "MLB", moneda: "BRL", locale: "pt-BR" },
+    "mercadolibre.com.mx": { sitio: "MLM", moneda: "MXN", locale: "es-MX" },
+    "mercadolibre.cl": { sitio: "MLC", moneda: "CLP", locale: "es-CL" },
+    "mercadolibre.com.uy": { sitio: "MLU", moneda: "UYU", locale: "es-UY" },
+    "mercadolibre.com.pe": { sitio: "MPE", moneda: "PEN", locale: "es-PE" },
+  };
+
+  // Host (o subdominio, ej. articulo.mercadolibre.com.co) → { sitio,
+  // moneda, locale }, o null si no es un sitio conocido.
+  function sitioDeHost(host) {
+    if (typeof host !== "string" || !host) return null;
+    const h = host.toLowerCase();
+    for (const dominio of Object.keys(SITIOS_POR_DOMINIO)) {
+      if (h === dominio || h.endsWith("." + dominio)) return SITIOS_POR_DOMINIO[dominio];
+    }
+    return null;
+  }
+
+  // Moneda ISO (ej. "COP") → locale del país que la usa, o null.
+  function localeDeMoneda(moneda) {
+    if (typeof moneda !== "string") return null;
+    const sitio = Object.values(SITIOS_POR_DOMINIO).find((s) => s.moneda === moneda);
+    return sitio ? sitio.locale : null;
+  }
+
   const api = {
+    sitioDeHost,
+    localeDeMoneda,
     primerElemento,
     textoDe,
     atributoDe,
