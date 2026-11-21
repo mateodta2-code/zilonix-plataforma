@@ -138,6 +138,23 @@ describe("generarImagenDesdeFoto", () => {
     expect(cuerpo.contents[0].parts).toHaveLength(3);
   });
 
+  it("OpenAI 400/403: dice el motivo real (filtro, verificación, foto, saldo) sin mostrar el texto crudo", async () => {
+    const respuesta = (status: number, error: Record<string, string>) =>
+      (globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error }), { status })) as unknown as typeof fetch);
+    respuesta(400, { code: "moderation_blocked", type: "image_generation_user_error", message: "Your request was rejected by the safety system. prompt secreto" });
+    await expect(generarImagenDesdeFoto(conexion("openai"), [base], "p")).rejects.toThrow(/filtro de contenido/);
+    respuesta(403, { code: "", type: "invalid_request_error", message: "Your organization must be verified to use the model gpt-image-1." });
+    await expect(generarImagenDesdeFoto(conexion("openai"), [base], "p")).rejects.toThrow(/verificar la organización/);
+    respuesta(400, { code: "invalid_image_format", type: "invalid_request_error", message: "Invalid image file" });
+    await expect(generarImagenDesdeFoto(conexion("openai"), [base], "p")).rejects.toThrow(/no pudo leer la foto base/);
+    respuesta(429, { code: "insufficient_quota", type: "insufficient_quota", message: "You exceeded your current quota" });
+    await expect(generarImagenDesdeFoto(conexion("openai"), [base], "p")).rejects.toThrow(/saldo/);
+    respuesta(400, { code: "otro_codigo", type: "invalid_request_error", message: "algo con prompt secreto" });
+    const error = await generarImagenDesdeFoto(conexion("openai"), [base], "p").catch((e: Error) => e);
+    expect(String(error)).toMatch(/código: otro_codigo/);
+    expect(String(error)).not.toMatch(/secreto/);
+  });
+
   it("errores legibles: clave rechazada, sin imagen, proveedor que no genera, respuesta que no es imagen", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 401 })) as unknown as typeof fetch;
     await expect(generarImagenDesdeFoto(conexion("openai"), [base], "p")).rejects.toThrow(/rechazó la clave/);
