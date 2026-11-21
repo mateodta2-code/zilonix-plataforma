@@ -8,6 +8,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { marcarPublicacionesColgadas } from "@/lib/ml/publicar";
 import { linkHttpSeguro } from "@/lib/ml/listadoCliente";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
@@ -64,6 +65,10 @@ export default async function PublicarPage({
   }
 
   const cuentas = (await listarCuentasConectadas(empresa.id)).filter((c) => !c.desconectadaTs);
+
+  // Filas «Publicando…» de hace más de 10 min nunca van a terminar: se
+  // cierran como con_errores ANTES de leer el historial.
+  await marcarPublicacionesColgadas(empresa.id).catch((error) => console.error("No se pudieron cerrar las publicaciones colgadas:", error instanceof Error ? error.message : error));
 
   const filasHistorial = await dbComoEmpresa(empresa.id, (tx) =>
     tx.select().from(productosMl).where(eq(productosMl.empresaId, empresa.id)).orderBy(desc(productosMl.creadoTs)).limit(50)

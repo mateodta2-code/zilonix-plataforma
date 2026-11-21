@@ -65,10 +65,13 @@ async function llamarCompatibleOpenAI(
 }
 
 async function llamarGoogle(conexion: ConexionIAConClave, prompt: string, maxTokens: number): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(conexion.modelo)}:generateContent?key=${encodeURIComponent(conexion.apiKey)}`;
+  // La llave va en la cabecera x-goog-api-key (contrato público de la API
+  // de Gemini), nunca en la URL: una URL con ?key= puede quedar en logs de
+  // proxies o del proveedor. Mismo criterio que lib/ia/imagen.ts.
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(conexion.modelo)}:generateContent`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-goog-api-key": conexion.apiKey },
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens } }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   }).catch(() => {
@@ -185,11 +188,14 @@ async function llamarCompatibleOpenAIConImagenes(
 }
 
 async function llamarGoogleConImagenes(conexion: ConexionIAConClave, prompt: string, imagenes: ImagenIA[], maxTokens: number): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(conexion.modelo)}:generateContent?key=${encodeURIComponent(conexion.apiKey)}`;
+  // La llave va en la cabecera x-goog-api-key (contrato público de la API
+  // de Gemini), nunca en la URL: una URL con ?key= puede quedar en logs de
+  // proxies o del proveedor. Mismo criterio que lib/ia/imagen.ts.
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(conexion.modelo)}:generateContent`;
   const parts = [{ text: prompt }, ...imagenes.map((i) => ({ inline_data: { mime_type: i.mediaType, data: i.base64 } }))];
   const res = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-goog-api-key": conexion.apiKey },
     body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   }).catch(() => {

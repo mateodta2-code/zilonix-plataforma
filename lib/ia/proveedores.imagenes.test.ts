@@ -50,9 +50,14 @@ describe("llamarIAConImagenes", () => {
   it("google — inline_data", async () => {
     const f = vi.fn(async (_u: string, _i?: RequestInit) => res({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }));
     vi.stubGlobal("fetch", f);
-    expect(await llamarIAConImagenes(conexion({ proveedor: "google" }), "p", img)).toBe("ok");
+    expect(await llamarIAConImagenes(conexion({ proveedor: "google", apiKey: "llave-google-secreta" }), "p", img)).toBe("ok");
     const body = JSON.parse(f.mock.calls[0]![1]!.body as string);
     expect(body.contents[0].parts[1]).toEqual({ inline_data: { mime_type: "image/jpeg", data: "QUJD" } });
+    // La llave en la cabecera, nunca en la URL.
+    const url = String(f.mock.calls[0]![0]);
+    expect(url).not.toContain("key=");
+    expect(url).not.toContain("llave-google-secreta");
+    expect((f.mock.calls[0]![1]!.headers as Record<string, string>)["x-goog-api-key"]).toBe("llave-google-secreta");
   });
 
   it.each(["anthropic", "openai", "xai", "google"] as const)("%s — 400 = la IA no lee imágenes", async (proveedor) => {
