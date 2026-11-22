@@ -238,7 +238,7 @@ function SeccionMeta({ meta, mes, puedeFijarMeta, avisoMeta }: Pick<Props, "meta
       )}
 
       {puedeFijarMeta && (
-        <form action={fijarMetaAction} className={styles.metaForm}>
+        <form action={fijarMetaAction} className={`${styles.metaForm} zx-fila-controles`}>
           <Campo etiqueta={meta.meta === null ? "Meta de utilidad del mes (COP)" : "Cambiar la meta del mes (COP)"}>
             <input
               name="meta"
@@ -282,7 +282,7 @@ export function InicioFinanzas(props: Props) {
               ({periodo.tramo.desde} a {periodo.tramo.hasta} · {plural(periodo.tramo.dias, "día", "días")})
             </span>
           </h2>
-          <form method="get" action="/panel" className={styles.filtro}>
+          <form method="get" action="/panel" className={`${styles.filtro} zx-fila-controles`}>
             <Campo etiqueta="Desde">
               <input type="date" name="desde" defaultValue={filtro.desde} className="zx-control" />
             </Campo>

@@ -744,6 +744,81 @@ select.zx-control {
   max-width: 100%;
 }
 
+/* Date/hora a prueba de Safari: su ancho intrínseco mínimo es mayor que
+   el del label y se salía de la tarjeta (celular) o se metía en el gap
+   (escritorio). Solo ancho y caja; color, borde y sombra no cambian. */
+input[type="date"].zx-control,
+input[type="datetime-local"].zx-control,
+input[type="month"].zx-control,
+input[type="time"].zx-control {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Solo iOS/WebKit táctil: quitar la apariencia nativa para que respete
+   el ancho. En Chrome de escritorio no aplica, así que conserva el
+   ícono del calendario. */
+@supports (-webkit-touch-callout: none) {
+  input[type="date"].zx-control,
+  input[type="datetime-local"].zx-control,
+  input[type="month"].zx-control,
+  input[type="time"].zx-control {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  input[type="date"].zx-control::-webkit-date-and-time-value,
+  input[type="datetime-local"].zx-control::-webkit-date-and-time-value,
+  input[type="month"].zx-control::-webkit-date-and-time-value,
+  input[type="time"].zx-control::-webkit-date-and-time-value {
+    text-align: left;
+  }
+}
+
+/* Fila de campos y botón compartida. Los hijos tipo label (Campo) llevan
+   base fija para que el input al 100 % no desborde su label. */
+.zx-fila-controles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  --alinear-boton: flex-end; /* los botones hijos directos bajan al nivel de los campos (ver Boton.module.css) */
+}
+
+.zx-fila-controles > * > * {
+  --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
+}
+
+.zx-fila-controles > * {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.zx-fila-controles > label {
+  flex: 0 1 180px;
+}
+
+/* Celular: columna, todo al 100 % del ancho. */
+@media (max-width: 640px) {
+  .zx-fila-controles {
+    flex-direction: column;
+    align-items: stretch;
+    --alinear-boton: stretch;
+  }
+
+  .zx-fila-controles > *,
+  .zx-fila-controles > label {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+    margin-left: 0;
+  }
+}
+
 /* app/globals.css es CSS plano (no .module.css) — `composes` solo
    funciona DESDE un CSS module HACIA una clase global, nunca al
    revés. Acá, en el mismo archivo que define .zx-brillo-marca, se
