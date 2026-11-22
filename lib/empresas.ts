@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { dbComoEmpresa, dbComoUsuario } from "@/db/empresa-context";
-import { empresas, membresias, permisosRol, roles } from "@/db/schema";
+import { categoriasGasto, empresas, membresias, permisosRol, roles } from "@/db/schema";
+import { CATEGORIAS_GASTO_BASE } from "@/lib/finanzas/gastos-categorias";
 import { permisosDeDueno } from "@/lib/roles";
 import { registrarAuditoria } from "@/lib/auditoria";
 
@@ -40,6 +41,9 @@ export async function crearEmpresaConDueno(usuarioId: string, nombre: string, ni
       .insert(permisosRol)
       .values(permisosDeDueno().map((p) => ({ id: randomUUID(), rolId: rolDuenoId, ...p })));
     await tx.insert(membresias).values({ id: randomUUID(), usuarioId, empresaId, rolId: rolDuenoId });
+    // Issue #422 — categorías base de gastos externos (las empresas que ya
+    // existían las recibieron en la migración 0038).
+    await tx.insert(categoriasGasto).values(CATEGORIAS_GASTO_BASE.map((nombre) => ({ empresaId, nombre })));
     await registrarAuditoria(tx, {
       empresaId,
       usuarioId,

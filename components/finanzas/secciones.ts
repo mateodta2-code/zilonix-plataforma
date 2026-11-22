@@ -16,6 +16,7 @@ export const SECCIONES_FINANZAS: SeccionFinanzas[] = [
   { etiqueta: "Resumen", href: "/panel/finanzas", accion: "consultar" },
   { etiqueta: "Ventas y utilidad", href: "/panel/finanzas/ventas", accion: "consultar" },
   { etiqueta: "Por cobrar", href: "/panel/finanzas/por-cobrar", accion: "consultar" },
+  { etiqueta: "Gastos", href: "/panel/finanzas/gastos", accion: "consultar" },
   { etiqueta: "Inventario", href: "/panel/finanzas/inventario", accion: "consultar" },
   { etiqueta: "Conciliación Falabella", href: "/panel/finanzas/falabella", accion: "consultar" },
   { etiqueta: "Tabla maestra de SKU", href: "/panel/finanzas/maestra-sku", accion: "consultar" },
