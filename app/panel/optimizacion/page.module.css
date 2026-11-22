@@ -423,3 +423,18 @@
   align-items: center;
   gap: 6px;
 }
+
+/* Diagnóstico de solo lectura (solo administradores). */
+.diagnostico {
+  margin: 0;
+  padding: 12px;
+  max-height: 360px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+}

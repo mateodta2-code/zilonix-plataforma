@@ -47,6 +47,7 @@ import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
 import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/lib/optimizacion/competencia";
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
+import { diagnosticarPublicacion } from "@/lib/optimizacion/diagnostico";
 import { leerDiasMetricas } from "@/lib/optimizacion/textos";
 import { cambioEsDeLaPublicacion, crearNotaBitacora, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
 import { leerFechaNota, leerResultadoRevision, limpiarTextoBitacora } from "@/lib/optimizacion/bitacoraResultado";
@@ -84,6 +85,38 @@ async function cuentaDeLaEmpresa(empresaId: string, cuentaMlId: string) {
       .where(and(eq(cuentasMl.id, cuentaMlId), eq(cuentasMl.empresaId, empresaId), isNull(cuentasMl.desconectadaTs)))
   );
   return cuenta ?? null;
+}
+
+// Diagnóstico de solo lectura (detalle de Optimización). Solo
+// administradores: quien puede autorizar en Configuración (Dueño y
+// Gerente de fábrica). Muestra datos crudos de Mercado Libre, nunca el
+// token ni ids de la cuenta (lib/optimizacion/diagnostico.ts).
+export type ResultadoDiagnostico = { ok: true; lineas: string[] } | { ok: false; aviso: string };
+
+export async function diagnosticoPublicacionAction(entrada: { cuentaMlId: string; itemId: string }): Promise<ResultadoDiagnostico> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene acceso a Optimización." };
+  try {
+    await requierePermiso(ctx.usuarioId, ctx.empresaId, "configuracion", "autorizar");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
+    return { ok: false, aviso: "El diagnóstico es solo para administradores de la empresa." };
+  }
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId)) return { ok: false, aviso: "No se reconoce la publicación." };
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
+  if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  let token: string;
+  try {
+    token = await obtenerAccessTokenVigente(ctx.empresaId, cuenta.id);
+  } catch (error) {
+    return { ok: false, aviso: motivoCuentaSinRevisar(error) };
+  }
+  try {
+    return { ok: true, lineas: await diagnosticarPublicacion(entrada.itemId, token) };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] diagnóstico ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: "No se pudo consultar Mercado Libre. Intenta de nuevo." };
+  }
 }
 
 export type MetricasPublicacion = {
