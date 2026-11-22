@@ -61,3 +61,27 @@ export function simularPrecio(precio: string, base: BaseSimulacion): Simulacion 
     competencia,
   };
 }
+
+// Frase del simulador bajo el campo de precio. `plata` formatea según el
+// sitio (sitios.ts); `vendidas` es el total histórico de la publicación.
+export function textoSimulacion(
+  precio: string | null,
+  sim: Simulacion | null,
+  vendidas: number,
+  plata: (v: string) => string,
+  idioma: string,
+): string {
+  if (!precio || !sim) return "Escribe un precio para simular.";
+  const conPrecio = plata(precio);
+  const estado = sim.competencia === "ganando" ? "Ganando" : "Compitiendo";
+  if (sim.ganancia === null || sim.margen === null) {
+    const motivo =
+      vendidas === 0
+        ? `Con ${conPrecio}: esta publicación todavía no tiene ventas, así que no hay costos para estimar la ganancia. Se calculará cuando venda.`
+        : `Con ${conPrecio}: no hay ventas con costos completos en este período para estimar la ganancia.`;
+    return sim.competencia ? `${motivo} Con ese precio quedarías ${estado} en el catálogo.` : motivo;
+  }
+  const margen = Number(sim.margen).toLocaleString(idioma, { maximumFractionDigits: 1 });
+  const base = `Si lo dejas en ${conPrecio}, ganas ${plata(sim.ganancia)} por unidad (${margen} %)`;
+  return sim.competencia ? `${base} y quedas ${estado} en el catálogo.` : `${base}.`;
+}
