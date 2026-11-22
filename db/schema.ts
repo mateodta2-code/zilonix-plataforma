@@ -2345,3 +2345,63 @@ export const optimizacionRevisiones = pgTable(
     porItem: index("optimizacion_revisiones_empresa_item_idx").on(t.empresaId, t.itemId),
   })
 );
+
+// Issue #422 (fase 6 de Finanzas, migración aprobada por Mateo) —
+// Disponible: «¿cuánta plata tengo hoy y dónde?». Cada cuenta es un
+// lugar donde la empresa tiene plata (banco, billetera o efectivo) y
+// cada saldo es una foto a una fecha de corte, registrada a mano. El
+// saldo vigente de una cuenta es el de la fecha de corte más reciente
+// (lib/finanzas/disponible.ts); los anteriores quedan como historial y
+// nunca se editan ni se borran.
+export const tipoCuentaDisponibleEnum = pgEnum("tipo_cuenta_disponible", ["banco", "billetera", "efectivo"]);
+
+export const cuentasDisponible = pgTable(
+  "cuentas_disponible",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    nombre: text("nombre").notNull(),
+    tipo: tipoCuentaDisponibleEnum("tipo").notNull(),
+    // Bancolombia, Nequi… Vacío para el efectivo (la caja no tiene entidad).
+    entidad: text("entidad"),
+    ultimos4: text("ultimos_4"),
+    // ISO 4217 sin default: nunca se asume COP (las monedas válidas en
+    // la aplicación salen de lib/ml/sitios.ts).
+    moneda: text("moneda").notNull(),
+    activa: boolean("activa").notNull().default(true),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    // Destino de la FK compuesta de saldos_disponible: un saldo nunca
+    // puede apuntar a la cuenta de otra empresa.
+    empresaIdUnica: unique("cuentas_disponible_empresa_id_unica").on(t.empresaId, t.id),
+    nombreUnico: unique("cuentas_disponible_empresa_nombre_unico").on(t.empresaId, t.nombre),
+    nombreNoVacio: check("cuentas_disponible_nombre_no_vacio", sql`btrim(${t.nombre}) <> ''`),
+    ultimos4Validos: check("cuentas_disponible_ultimos_4_validos", sql`${t.ultimos4} IS NULL OR ${t.ultimos4} ~ '^[0-9]{4}$'`),
+    monedaIso: check("cuentas_disponible_moneda_iso", sql`${t.moneda} ~ '^[A-Z]{3}$'`),
+  })
+);
+
+export const saldosDisponible = pgTable(
+  "saldos_disponible",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaId: uuid("cuenta_id").notNull(),
+    // Puede ser negativo: un sobregiro también es un saldo real.
+    saldo: numeric("saldo", { precision: 16, scale: 2 }).notNull(),
+    fechaCorte: date("fecha_corte").notNull(),
+    nota: text("nota"),
+    registradoPor: uuid("registrado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    cuentaDeLaEmpresa: foreignKey({
+      name: "saldos_disponible_cuenta_de_la_empresa",
+      columns: [t.empresaId, t.cuentaId],
+      foreignColumns: [cuentasDisponible.empresaId, cuentasDisponible.id],
+    }).onDelete("cascade"),
+    porCuentaFecha: index("saldos_disponible_cuenta_fecha_idx").on(t.empresaId, t.cuentaId, t.fechaCorte),
+  })
+);

@@ -260,6 +260,13 @@
       "when": 1795289884765,
       "tag": "0036_wise_cerise",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795390312276,
+      "tag": "0037_familiar_shockwave",
+      "breakpoints": true
     }
   ]
 }

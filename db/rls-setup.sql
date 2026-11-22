@@ -39,6 +39,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
 -- fila de la tabla maestra se corrige, ninguno se borra. Son tablas
 -- nuevas, así que no hay un DELETE viejo que revocar.
 GRANT SELECT, INSERT, UPDATE ON terceros, costos_sku TO app_user;
+-- Issue #422 (fase 6, Disponible) — sin DELETE: una cuenta solo se
+-- desactiva (UPDATE de activa, nada más) y un saldo nunca se edita ni
+-- se borra; corregir es registrar otro con su fecha de corte.
+GRANT SELECT, INSERT ON cuentas_disponible, saldos_disponible TO app_user;
+GRANT UPDATE (activa) ON cuentas_disponible TO app_user;
 -- Issue #129 (Z-FIN-07) — ventas: sin DELETE. La cabecera y las
 -- líneas solo se borran en cascada con su pedido. Una corrección no se
 -- edita ni se borra: el único UPDATE permitido es anularla
@@ -231,6 +236,11 @@ ALTER TABLE terceros ENABLE ROW LEVEL SECURITY;
 ALTER TABLE terceros FORCE ROW LEVEL SECURITY;
 ALTER TABLE costos_sku ENABLE ROW LEVEL SECURITY;
 ALTER TABLE costos_sku FORCE ROW LEVEL SECURITY;
+-- Issue #422 (fase 6, Disponible).
+ALTER TABLE cuentas_disponible ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cuentas_disponible FORCE ROW LEVEL SECURITY;
+ALTER TABLE saldos_disponible ENABLE ROW LEVEL SECURITY;
+ALTER TABLE saldos_disponible FORCE ROW LEVEL SECURITY;
 -- Issue #129.
 ALTER TABLE pedidos_finanzas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedidos_finanzas FORCE ROW LEVEL SECURITY;
@@ -452,6 +462,16 @@ CREATE POLICY aislamiento_terceros ON terceros
 
 DROP POLICY IF EXISTS aislamiento_costos_sku ON costos_sku;
 CREATE POLICY aislamiento_costos_sku ON costos_sku
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #422 (fase 6) — mismo patrón: una empresa nunca ve ni toca las
+-- cuentas ni los saldos de otra.
+DROP POLICY IF EXISTS aislamiento_cuentas_disponible ON cuentas_disponible;
+CREATE POLICY aislamiento_cuentas_disponible ON cuentas_disponible
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_saldos_disponible ON saldos_disponible;
+CREATE POLICY aislamiento_saldos_disponible ON saldos_disponible
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- Issue #129 — mismo patrón para la cabecera y las líneas de venta.
