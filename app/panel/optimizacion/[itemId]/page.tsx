@@ -33,6 +33,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import styles from "../page.module.css";
 import { BitacoraCambios } from "./BitacoraCambios";
 import { EditarPublicacion, type DatosEdicion } from "./EditarPublicacion";
+import { DiagnosticoPublicacion } from "./DiagnosticoPublicacion";
 
 // Optimización, Fase 2 — detalle de una publicación. Ver pide
 // inventario/consultar; los costos, la ganancia y el precio mínimo,
@@ -82,6 +83,8 @@ export default async function DetalleOptimizacionPage({
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
   const conFinanzas = miMembresia ? tienePermiso(miMembresia.permisos, "finanzas", "consultar") : false;
   const puedeEditar = miMembresia ? tienePermiso(miMembresia.permisos, "inventario", "modificar") : false;
+  // Diagnóstico de solo lectura: solo administradores (Dueño y Gerente de fábrica).
+  const esAdmin = miMembresia ? tienePermiso(miMembresia.permisos, "configuracion", "autorizar") : false;
   const volver = <BotonLink href={`/panel/optimizacion${UUID.test(cuentaId) ? `?cuenta=${cuentaId}` : ""}`} variante="fantasma">← Volver a la lista</BotonLink>;
 
   const cuenta =
@@ -284,6 +287,13 @@ export default async function DetalleOptimizacionPage({
         <Tarjeta className={styles.tarjeta}>
           <p className={styles.seccion}>Editar en Mercado Libre</p>
           <EditarPublicacion datos={edicion} />
+        </Tarjeta>
+      ) : null}
+
+      {esAdmin ? (
+        <Tarjeta className={styles.tarjeta}>
+          <p className={styles.seccion}>Diagnóstico (solo administradores)</p>
+          <DiagnosticoPublicacion cuentaMlId={cuenta.id} itemId={datos.item.id} />
         </Tarjeta>
       ) : null}
 

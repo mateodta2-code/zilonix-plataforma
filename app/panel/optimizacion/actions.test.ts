@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Optimización, Fase 1 — acciones. Sin base ni Mercado Libre: se simulan
 // la sesión, el permiso, la cuenta, el token y las llamadas.
 
-const estado = vi.hoisted(() => ({ conPermiso: true, cuentaExiste: true, permisosPedidos: [] as string[] }));
+const estado = vi.hoisted(() => ({ conPermiso: true, cuentaExiste: true, permisosPedidos: [] as string[], denegados: [] as string[] }));
 const ml = vi.hoisted(() => ({
   visitas: vi.fn(),
   calidad: vi.fn(),
@@ -35,7 +35,7 @@ vi.mock("@/lib/permisos", () => {
     SinPermisoError,
     requierePermiso: async (_u: string, _e: string, modulo: string, accion: string) => {
       estado.permisosPedidos.push(`${modulo}.${accion}`);
-      if (!estado.conPermiso) throw new SinPermisoError("sin permiso");
+      if (!estado.conPermiso || estado.denegados.includes(`${modulo}.${accion}`)) throw new SinPermisoError("sin permiso");
     },
   };
 });
@@ -96,6 +96,7 @@ const CUENTA = "11111111-1111-1111-1111-111111111111";
 import {
   cambiarEstadoPublicacionAction,
   competenciaPublicacionAction,
+  diagnosticoPublicacionAction,
   editarFotosAction,
   editarPrecioAction,
   editarTituloAction,
@@ -494,5 +495,67 @@ describe("bitácora: notas a mano y revisión", () => {
     expect((await guardarNotaBitacoraAction({ cuentaMlId: CUENTA, itemId: "MCO1342632705", fecha: "2026-11-10", texto: "x" })).ok).toBe(false);
     expect(bitacora.guardarRevision).not.toHaveBeenCalled();
     expect(bitacora.crearNota).not.toHaveBeenCalled();
+  });
+});
+
+describe("diagnóstico de solo lectura (solo administradores)", () => {
+  const ITEM = "MCO4656053860";
+  const respuestas = new Map<string, { ok: boolean; status: number; data?: unknown }>();
+  const llamadas: { url: string; metodo: string; auth: string }[] = [];
+
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    estado.denegados = [];
+    llamadas.length = 0;
+    respuestas.clear();
+    respuestas.set(`/items/${ITEM}`, {
+      ok: true,
+      status: 200,
+      data: { id: ITEM, title: "Faja reductora negra", family_name: "Faja reductora", user_product_id: "MCOU123456", family_id: 987, price: 50000, seller_id: 123456, variations: [] },
+    });
+    respuestas.set(`/items/${ITEM}/prices`, { ok: true, status: 200, data: { prices: [{ type: "standard", amount: 50000 }] } });
+    respuestas.set("/user-products/MCOU123456", { ok: true, status: 200, data: { id: "MCOU123456", family_id: 987, name: "Faja reductora negra", user_id: 123456 } });
+    ml.automatizacion.mockReset().mockResolvedValue(false);
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      const ruta = new URL(url).pathname;
+      const auth = new Headers(init?.headers).get("Authorization") ?? "";
+      llamadas.push({ url, metodo: init?.method ?? "GET", auth });
+      const r = respuestas.get(ruta) ?? { ok: false, status: 404 };
+      return new Response(JSON.stringify(r.data ?? {}), { status: r.status, headers: { "content-type": "application/json" } });
+    });
+  });
+
+  it("sin permiso de administrador no consulta Mercado Libre", async () => {
+    estado.denegados = ["configuracion.autorizar"];
+    const r = await diagnosticoPublicacionAction({ cuentaMlId: CUENTA, itemId: ITEM });
+    expect(r).toEqual({ ok: false, aviso: "El diagnóstico es solo para administradores de la empresa." });
+    expect(estado.permisosPedidos).toContain("configuracion.autorizar");
+    expect(llamadas).toHaveLength(0);
+  });
+
+  it("solo hace GET y no muestra el token ni ids de la cuenta", async () => {
+    const r = await diagnosticoPublicacionAction({ cuentaMlId: CUENTA, itemId: ITEM });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(llamadas.length).toBeGreaterThan(0);
+    expect(llamadas.every((l) => l.metodo === "GET")).toBe(true);
+    const texto = r.lineas.join("\n");
+    expect(texto).toContain('user_product_id: "MCOU123456"');
+    expect(texto).toContain("family_id: 987");
+    expect(texto).toContain('family_name: "Faja reductora"');
+    expect(texto).toContain("el título empieza con family_name: sí");
+    expect(texto).toContain("automatización de precios activa: no");
+    expect(texto).not.toContain("token");
+    expect(texto).not.toContain("seller_id");
+    expect(texto).not.toContain("user_id");
+    expect(texto).not.toContain("123456,");
+  });
+
+  it("rechaza un id de publicación inválido sin llamar a Mercado Libre", async () => {
+    const r = await diagnosticoPublicacionAction({ cuentaMlId: CUENTA, itemId: "../users/me" });
+    expect(r.ok).toBe(false);
+    expect(llamadas).toHaveLength(0);
   });
 });
