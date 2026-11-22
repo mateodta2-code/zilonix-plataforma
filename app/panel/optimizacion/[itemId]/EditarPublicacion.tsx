@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { formatearMoneda } from "@/lib/ml/sitios";
-import { leerPrecioEscrito, simularPrecio, type BaseSimulacion } from "@/lib/optimizacion/simulador";
+import { leerPrecioEscrito, simularPrecio, textoSimulacion, type BaseSimulacion } from "@/lib/optimizacion/simulador";
 import { GaleriaFotos } from "../../publicar/GaleriaFotos";
 import { CrearImagenIA, type EstadoIAImagen } from "./CrearImagenIA";
 import { editarFotosAction, editarPrecioAction, editarTituloAction } from "../actions";
@@ -97,13 +97,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
         )}
         {!precioBloqueado ? (
           <p className={styles.simulacion}>
-            {!precio
-              ? "Escribe un precio para simular."
-              : sim?.ganancia === null || sim?.ganancia === undefined
-                ? `Con ${plata(precio)}: no hay ventas con costos completos en este período para estimar la ganancia.`
-                : `Si lo dejas en ${plata(precio)}, ganas ${plata(sim.ganancia)} por unidad (${Number(sim.margen).toLocaleString(datos.idioma, { maximumFractionDigits: 1 })} %)`}
-            {precio && sim?.competencia ? ` y quedas ${sim.competencia === "ganando" ? "Ganando" : "Compitiendo"} en el catálogo` : ""}
-            {precio ? "." : ""}
+            {textoSimulacion(precio, sim, datos.vendidas, (v) => plata(v), datos.idioma)}
           </p>
         ) : null}
         <p className={styles.notaNeutra}>
