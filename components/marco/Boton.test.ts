@@ -50,12 +50,17 @@ describe("Boton", () => {
   });
 
   it("las filas de Inicio bajan sus botones al nivel de los campos", () => {
-    const inicio = readFileSync(join(__dirname, "../finanzas/inicio.module.css"), "utf8");
-    for (const c of [".filtro", ".metaForm"]) {
-      const m = inicio.match(new RegExp(`\\n\\${c} \\{([^}]*)\\}`))?.[1] ?? "";
-      expect(m).toContain("align-items: flex-end");
-      expect(m).toContain("--alinear-boton: flex-end");
-      expect(inicio).toMatch(new RegExp(`\\${c} > \\* > \\* \\{[^}]*--alinear-boton: flex-start`));
+    // La regla vive en la clase global compartida (la del media query va indentada, no choca).
+    const globales = readFileSync(join(__dirname, "../../app/globals.css"), "utf8");
+    const fila = globales.match(/\n\.zx-fila-controles \{([^}]*)\}/)?.[1] ?? "";
+    expect(fila).toContain("align-items: flex-end");
+    expect(fila).toContain("--alinear-boton: flex-end");
+    expect(globales).toMatch(/\n\.zx-fila-controles > \* > \* \{[^}]*--alinear-boton: flex-start/);
+
+    // Y los dos forms de Inicio la usan.
+    const tsx = readFileSync(join(__dirname, "../finanzas/InicioFinanzas.tsx"), "utf8");
+    for (const c of ["styles.filtro", "styles.metaForm"]) {
+      expect(tsx).toMatch(new RegExp(`\\$\\{${c.replace(".", "\\.")}\\} zx-fila-controles`));
     }
   });
 });

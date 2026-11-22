@@ -29,7 +29,8 @@
 
 .ayuda {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--texto-suave);
 }
 
@@ -255,11 +256,7 @@
 }
 
 .filtro {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  --alinear-boton: flex-end; /* los botones hijos directos bajan al nivel de los campos (ver Boton.module.css) */
-  gap: 12px;
+  /* Layout en la clase global .zx-fila-controles */
   margin-top: 8px;
 }
 
@@ -354,11 +351,7 @@
 }
 
 .metaForm {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  --alinear-boton: flex-end; /* los botones hijos directos bajan al nivel de los campos (ver Boton.module.css) */
-  gap: 12px;
+  /* Layout en la clase global .zx-fila-controles */
   margin-top: 16px;
 }
 
@@ -368,39 +361,3 @@
   }
 }
 
-.filtro > * > * {
-  --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
-}
-
-.metaForm > * > * {
-  --alinear-boton: flex-start; /* columnas internas: el botón no se estira */
-}
-
-/* Celular: la fila pasa a columna; campos y botón al 100 % del ancho, sin encimarse (#544). */
-@media (max-width: 640px) {
-  .filtro {
-    flex-direction: column;
-    align-items: stretch;
-    --alinear-boton: stretch;
-  }
-
-  .filtro > * {
-    width: 100%;
-    min-width: 0;
-    flex: 0 0 auto;
-    margin-left: 0;
-  }
-
-  .metaForm {
-    flex-direction: column;
-    align-items: stretch;
-    --alinear-boton: stretch;
-  }
-
-  .metaForm > * {
-    width: 100%;
-    min-width: 0;
-    flex: 0 0 auto;
-    margin-left: 0;
-  }
-}
