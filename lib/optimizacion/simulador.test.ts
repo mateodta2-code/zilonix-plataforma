@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { leerItemEdicion } from "@/lib/ml/cliente";
-import { leerPrecioEscrito, simularPrecio } from "@/lib/optimizacion/simulador";
+import { leerPrecioEscrito, simularPrecio, textoSimulacion } from "@/lib/optimizacion/simulador";
 
 describe("precio escrito a mano", () => {
   it("en sitios sin decimales, el punto y la coma son miles", () => {
@@ -75,5 +75,35 @@ describe("publicación para editar (forma confirmada en staging, #464)", () => {
       ],
     });
     expect(leerItemEdicion({ id: "MCO1", variations: [{ id: 1 }] })?.tieneVariantes).toBe(true);
+  });
+});
+
+describe("frase del simulador", () => {
+  const plata = (v: string) => `$${v}`;
+  const conGanancia = { ganancia: "300.00", margen: "30", competencia: null } as const;
+  const sinGanancia = { ganancia: null, margen: null, competencia: null } as const;
+
+  it("pide precio cuando no hay", () => {
+    expect(textoSimulacion(null, null, 0, plata, "es-CO")).toBe("Escribe un precio para simular.");
+  });
+
+  it("explica que la publicación aún no vende, sin punto doble", () => {
+    const t = textoSimulacion("1000.00", sinGanancia, 0, plata, "es-CO");
+    expect(t).toContain("todavía no tiene ventas");
+    expect(t).not.toContain("..");
+  });
+
+  it("con ventas pero sin costos completos, sin punto doble aunque haya competencia", () => {
+    const t = textoSimulacion("1000.00", { ...sinGanancia, competencia: "ganando" }, 5, plata, "es-CO");
+    expect(t).toContain("costos completos");
+    expect(t).toContain("quedarías Ganando");
+    expect(t).not.toContain("..");
+  });
+
+  it("con ganancia termina en un solo punto", () => {
+    expect(textoSimulacion("1000.00", conGanancia, 5, plata, "es-CO")).toBe("Si lo dejas en $1000.00, ganas $300.00 por unidad (30 %).");
+    expect(textoSimulacion("1000.00", { ...conGanancia, competencia: "compitiendo" }, 5, plata, "es-CO")).toBe(
+      "Si lo dejas en $1000.00, ganas $300.00 por unidad (30 %) y quedas Compitiendo en el catálogo.",
+    );
   });
 });

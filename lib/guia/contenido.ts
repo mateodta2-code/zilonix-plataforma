@@ -184,6 +184,7 @@ export const GUIA: GrupoGuia[] = [
         consejos: [
           "Cada imagen la cobra la cuenta de IA de tu empresa (unos centavos de dólar). Optimización usa la IA asignada a su módulo en Administración → Conectar IA; si no le asignas ninguna, usa la principal.",
           "El resumen de la tienda cuenta las ventas que Seller ya sincronizó (si una venta todavía no está en Finanzas, sus unidades no suman) y las visitas que da Mercado Libre; los días son de Colombia, así que puede variar un poco frente a Métricas de Mercado Libre.",
+          "Al escribir un precio nuevo, Zilonix estima cuánto ganarías por unidad con los costos del período. Si la publicación todavía no tiene ventas (o le faltan costos), no puede estimar la ganancia y te lo dice; igual puedes guardar el precio.",
           "Si un cambio de título o precio no se aplica, un administrador (Dueño o Gerente) puede abrir «Diagnóstico» en el detalle, pulsar «Ver diagnóstico» y «Copiar», y enviárselo a soporte. Es solo lectura: no cambia nada en Mercado Libre.",
           "Si debajo de las fotos solo ves el aviso «Para crear imágenes con IA, conecta OpenAI o Google…», la empresa todavía no tiene IA conectada: sigue «Cómo conectar la IA».",
           "Revisa cada imagen creada: si no se entiende, se ve genérica o el texto salió con errores, descártala y crea otra.",
