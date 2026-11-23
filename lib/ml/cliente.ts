@@ -953,6 +953,19 @@ export async function actualizarItemMl(itemId: string, token: string, cambios: R
   return escribir<Record<string, unknown>>(`${BASE_URL}/items/${encodeURIComponent(itemId)}`, token, "PUT", cambios, TIMEOUT_ESCRITURA_MS);
 }
 
+// PUT /user-products-families/{family_id} { family_name } — título de una
+// publicación «User Products» (documentado en «Precio por variación» y
+// «User Products»). En staging (22-nov, MCO4656053860) PUT /items rechazó
+// title y family_name («The field family name is invalid»). ML aplica el
+// cambio a las publicaciones de la familia de forma asíncrona: el 200
+// solo confirma que lo recibió.
+export const PATRON_ID_FAMILIA = /^\d{1,25}$/;
+
+export async function actualizarNombreFamiliaMl(familyId: string, token: string, familyName: string): Promise<RespuestaEscrituraMl> {
+  exigirId(familyId, PATRON_ID_FAMILIA, "familyId");
+  return escribir<Record<string, unknown>>(`${BASE_URL}/user-products-families/${encodeURIComponent(familyId)}`, token, "PUT", { family_name: familyName }, TIMEOUT_ESCRITURA_MS);
+}
+
 // POST /items/{id}/description — endpoint SEPARADO del body de /items
 // (confirmado: la descripción nunca va en el POST de creación).
 export async function agregarDescripcionItemMl(itemId: string, token: string, texto: string): Promise<{ ok: boolean; status: number }> {
@@ -2115,6 +2128,8 @@ export type ItemEdicionMl = {
   // family_name y ML lo recalcula (confirmado en staging, 22-nov,
   // MCO4656053860; https://developers.mercadolibre.com.ar/es_ar/user-products).
   userProduct: boolean;
+  // family_id de la publicación «User Products» (número, como texto); null si no vino.
+  familyId: string | null;
   fotos: FotoItemEdicion[];
 };
 
@@ -2135,13 +2150,14 @@ export function leerItemEdicion(data: unknown): ItemEdicionMl | null {
     estado: typeof d.status === "string" ? d.status : null,
     sellerId: d.seller_id != null && PATRON_ID_VENDEDOR.test(String(d.seller_id)) ? String(d.seller_id) : null,
     userProduct: (typeof d.user_product_id === "string" && d.user_product_id.length > 0) || (Array.isArray(d.tags) && d.tags.includes("user_product_listing")),
+    familyId: (typeof d.family_id === "number" && Number.isSafeInteger(d.family_id)) || typeof d.family_id === "string" ? (/^\d{1,25}$/.test(String(d.family_id)) ? String(d.family_id) : null) : null,
     fotos,
   };
 }
 
 export async function leerItemEdicionMl(itemId: string, token: string): Promise<ItemEdicionMl | null> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
-  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}`, token, { query: "?attributes=id,status,price,sold_quantity,title,variations,pictures,seller_id,user_product_id,tags" });
+  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}`, token, { query: "?attributes=id,status,price,sold_quantity,title,variations,pictures,seller_id,user_product_id,tags,family_id" });
   if (!resp.ok) return null;
   return leerItemEdicion(resp.data);
 }

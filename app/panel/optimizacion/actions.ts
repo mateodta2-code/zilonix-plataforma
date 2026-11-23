@@ -9,6 +9,7 @@ import { registrarAuditoria } from "@/lib/auditoria";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import {
   actualizarItemMl,
+  actualizarNombreFamiliaMl,
   calidadItemMl,
   competenciaItemMl,
   fichasPublicacionesMl,
@@ -336,17 +337,19 @@ async function escribirYAuditar(
   prep: Preparada,
   cambios: Record<string, unknown>,
   auditoria: { accion: string; detalle: string; valorAnterior?: string; valorNuevo?: string },
-  avisoOk: string
+  avisoOk: string,
+  // Por defecto PUT /items/{id}; el título de «User Products» va a la familia.
+  escribirMl: () => ReturnType<typeof actualizarItemMl> = () => actualizarItemMl(prep.item.id, prep.token, cambios)
 ): Promise<ResultadoEdicion> {
   let respuesta;
   try {
-    respuesta = await actualizarItemMl(prep.item.id, prep.token, cambios);
+    respuesta = await escribirMl();
   } catch (error) {
     if (error instanceof LimiteMercadoLibreError) return { ok: false, aviso: "Mercado Libre pidió esperar un momento. Intenta de nuevo." };
     throw error;
   }
   if (!respuesta.ok) {
-    console.warn(`[app/panel/optimizacion] PUT /items (${auditoria.accion}) respondió ${respuesta.status}`);
+    console.warn(`[app/panel/optimizacion] PUT de ${auditoria.accion} respondió ${respuesta.status}`);
     if (itemNoModificablePorRevision(respuesta.textoCrudo)) {
       return { ok: false, aviso: "Mercado Libre todavía está revisando esta publicación y no deja cambiarla. Intenta en un rato." };
     }
@@ -416,10 +419,13 @@ export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: 
   if (!titulo) return { ok: false, aviso: "Escribe un título." };
   if (titulo.length > LARGO_MAXIMO_TITULO) return { ok: false, aviso: `El título es muy largo (máximo ${LARGO_MAXIMO_TITULO} caracteres).` };
   if (prep.item.vendidas > 0) return { ok: false, aviso: "Mercado Libre solo deja cambiar el título de publicaciones sin ventas." };
-  // «User Products»: Mercado Libre rechaza title (BODY_INVALID_FIELDS);
-  // se cambia family_name y ML recalcula el título, de forma asíncrona y
-  // para todas las publicaciones del mismo producto.
+  // «User Products»: PUT /items rechaza title y family_name
+  // (BODY_INVALID_FIELDS, staging 22-nov). El nombre se cambia en la
+  // familia (PUT /user-products-families/{family_id}) y ML recalcula el
+  // título de sus publicaciones, de forma asíncrona.
   const userProduct = prep.item.userProduct;
+  const familyId = prep.item.familyId;
+  if (userProduct && !familyId) return { ok: false, aviso: "Mercado Libre no devolvió la familia de esta publicación. Cambia el título en Mercado Libre." };
   return escribirYAuditar(
     prep,
     userProduct ? { family_name: titulo } : { title: titulo },
@@ -431,7 +437,8 @@ export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: 
     },
     userProduct
       ? "Título enviado a Mercado Libre. Puede tardar unos minutos en verse y se aplica a todas las publicaciones de este producto."
-      : "Título actualizado en Mercado Libre."
+      : "Título actualizado en Mercado Libre.",
+    userProduct && familyId ? () => actualizarNombreFamiliaMl(familyId, prep.token, titulo) : undefined
   );
 }
 

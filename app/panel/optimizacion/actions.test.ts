@@ -9,6 +9,7 @@ const ml = vi.hoisted(() => ({
   calidad: vi.fn(),
   competencia: vi.fn(),
   actualizar: vi.fn(),
+  familia: vi.fn(),
   itemEdicion: vi.fn(),
   automatizacion: vi.fn(),
   promocion: vi.fn(),
@@ -81,6 +82,7 @@ vi.mock("@/lib/ml/cliente", async () => {
     calidadItemMl: ml.calidad,
     competenciaItemMl: ml.competencia,
     actualizarItemMl: ml.actualizar,
+    actualizarNombreFamiliaMl: ml.familia,
     leerItemEdicionMl: ml.itemEdicion,
     tieneAutomatizacionPrecioMl: ml.automatizacion,
     promocionActivaMl: ml.promocion,
@@ -223,13 +225,14 @@ describe("cambiarEstadoPublicacionAction (escribe en Mercado Libre)", () => {
 });
 
 describe("Fase 3: editar precio, título y fotos", () => {
-  const item = { id: "MCO1", titulo: "Faja", precio: 100000, vendidas: 0, tieneVariantes: false, estado: "active", userProduct: false, fotos: [{ id: "f1", url: "https://a" }, { id: "f2", url: "https://b" }] };
+  const item = { id: "MCO1", titulo: "Faja", precio: 100000, vendidas: 0, tieneVariantes: false, estado: "active", userProduct: false, familyId: null, fotos: [{ id: "f1", url: "https://a" }, { id: "f2", url: "https://b" }] };
 
   beforeEach(() => {
     estado.conPermiso = true;
     estado.cuentaExiste = true;
     estado.permisosPedidos = [];
     ml.actualizar.mockReset().mockResolvedValue({ ok: true, status: 200, data: {}, textoCrudo: "" });
+    ml.familia.mockReset().mockResolvedValue({ ok: true, status: 200, data: {}, textoCrudo: "" });
     ml.itemEdicion.mockReset().mockResolvedValue(item);
     ml.automatizacion.mockReset().mockResolvedValue(false);
     ml.promocion.mockReset().mockResolvedValue(null);
@@ -246,12 +249,22 @@ describe("Fase 3: editar precio, título y fotos", () => {
     expect(r.aviso).toContain("79.900");
   });
 
-  it("título de una publicación «User Products»: manda family_name, nunca title", async () => {
-    ml.itemEdicion.mockResolvedValue({ ...item, userProduct: true });
+  it("título de una publicación «User Products»: cambia el nombre de la familia, nunca PUT /items", async () => {
+    ml.itemEdicion.mockResolvedValue({ ...item, userProduct: true, familyId: "6267009945680719" });
     const r = await editarTituloAction({ cuentaMlId: CUENTA, itemId: "MCO1", titulo: "Compresa de hielo para rodilla" });
     expect(r.ok).toBe(true);
-    expect(ml.actualizar).toHaveBeenCalledWith("MCO1", "token", { family_name: "Compresa de hielo para rodilla" });
+    expect(ml.familia).toHaveBeenCalledWith("6267009945680719", "token", "Compresa de hielo para rodilla");
+    expect(ml.actualizar).not.toHaveBeenCalled();
     expect(r.aviso).toContain("todas las publicaciones de este producto");
+    expect(auditorias[0]).toMatchObject({ accion: "cambiar_titulo_publicacion", valorNuevo: "Compresa de hielo para rodilla" });
+  });
+
+  it("«User Products» sin family_id: no escribe y lo explica", async () => {
+    ml.itemEdicion.mockResolvedValue({ ...item, userProduct: true, familyId: null });
+    const r = await editarTituloAction({ cuentaMlId: CUENTA, itemId: "MCO1", titulo: "Compresa" });
+    expect(r.ok).toBe(false);
+    expect(ml.familia).not.toHaveBeenCalled();
+    expect(ml.actualizar).not.toHaveBeenCalled();
   });
 
   it("precio: lee el texto según el sitio, pide modificar y audita antes/después", async () => {
