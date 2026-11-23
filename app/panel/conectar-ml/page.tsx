@@ -6,7 +6,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
-import { describirErrorImportacion, obtenerUltimaImportacion } from "@/lib/ml/importacion";
+import { DIAS_HACIA_ATRAS, describirErrorImportacion, obtenerUltimaImportacion } from "@/lib/ml/importacion";
 import { datosSitioMl } from "@/lib/ml/sitios";
 import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
 import { contarPedidosPorCuenta as contarPedidosFalabella, TOPE_ORDENES as TOPE_ORDENES_FALABELLA } from "@/lib/falabella/pedidos";
@@ -195,11 +195,11 @@ export default async function ConectarMlPage({
                     {importacion.completadoTs ? (
                       <span>
                         Importación lista: {importacion.pedidosImportados} pedidos, {importacion.publicacionesImportadas} publicaciones
-                        (últimos 60 días).
+                        (últimos {DIAS_HACIA_ATRAS} días).
                       </span>
                     ) : (
                       <span>
-                        Importando pedidos y publicaciones de los últimos 60 días… {importacion.pedidosImportados}
+                        Importando pedidos y publicaciones de los últimos {DIAS_HACIA_ATRAS} días… {importacion.pedidosImportados}
                         {importacion.pedidosEncontrados ? `/${importacion.pedidosEncontrados}` : ""} pedidos.
                       </span>
                     )}

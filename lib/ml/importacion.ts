@@ -7,8 +7,18 @@ import { sincronizarDespacho } from "@/lib/ml/despachos";
 import { guardarOrdenMl } from "@/lib/ml/ventas-finanzas";
 import type { OrdenMl } from "@/lib/finanzas/venta-ml";
 
-const DIAS_HACIA_ATRAS = 60;
+// Historial que se importa al conectar una cuenta (decisión de Mateo,
+// issue #567: 1 año). Una sola fuente: la pantalla /panel/conectar-ml
+// arma sus textos desde esta constante.
+export const DIAS_HACIA_ATRAS = 365;
+// Ventanas de fechas para /orders/search: ML limita el offset de una
+// búsqueda, así que en vez de un offset enorme se pagina por ventanas
+// cortas y dentro de cada una por offset.
+export const DIAS_POR_VENTANA = 30;
+const MS_DIA = 24 * 60 * 60 * 1000;
 const TAMAÑO_PAGINA = 50;
+const REINTENTOS_429 = 4;
+const ESPERA_MAX_429_MS = 30_000;
 
 // Tarea 2.5 — formato de petición confirmado contra el código real ya
 // en producción del Zilonix OS actual (zilonix-os-web/lib/
@@ -40,20 +50,55 @@ async function traerEnvioReal(accessToken: string, shipmentId: number | string):
   return res.json();
 }
 
-async function traerPedidosReales(accessToken: string, cuentaIdExterna: string, desdeIso: string): Promise<PedidoMl[]> {
-  const resultado: PedidoMl[] = [];
-  let offset = 0;
-  while (true) {
-    const url = `https://api.mercadolibre.com/orders/search?seller=${cuentaIdExterna}&order.date_created.from=${encodeURIComponent(desdeIso)}&sort=date_desc&limit=${TAMAÑO_PAGINA}&offset=${offset}`;
+const esperar = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// 429 de ML: se espera (Retry-After si viene, si no backoff 1s, 2s, 4s…)
+// y se reintenta; agotados los reintentos devuelve el último 429.
+async function fetchConReintento429(url: string, accessToken: string): Promise<Response> {
+  for (let intento = 0; ; intento++) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) throw await errorDeRespuesta(res, "al traer pedidos");
-    const data = await res.json();
-    const pagina: PedidoMl[] = data.results ?? [];
-    resultado.push(...pagina);
-    if (pagina.length < TAMAÑO_PAGINA) break;
-    offset += TAMAÑO_PAGINA;
+    if (res.status !== 429 || intento >= REINTENTOS_429) return res;
+    const retryAfter = Number(res.headers?.get?.("retry-after"));
+    const espera = Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter * 1000 : 1000 * 2 ** intento;
+    await esperar(Math.min(espera, ESPERA_MAX_429_MS));
   }
-  return resultado;
+}
+
+// Ventanas [desde, hasta] de la más reciente a la más vieja.
+export function ventanasDeFechas(ahora: number, dias = DIAS_HACIA_ATRAS, diasPorVentana = DIAS_POR_VENTANA): { desde: string; hasta: string }[] {
+  const ventanas: { desde: string; hasta: string }[] = [];
+  const limite = ahora - dias * MS_DIA;
+  for (let hasta = ahora; hasta > limite; hasta -= diasPorVentana * MS_DIA) {
+    ventanas.push({ desde: new Date(Math.max(limite, hasta - diasPorVentana * MS_DIA)).toISOString(), hasta: new Date(hasta).toISOString() });
+  }
+  return ventanas;
+}
+
+export async function traerPedidosReales(accessToken: string, cuentaIdExterna: string, ahora = Date.now()): Promise<PedidoMl[]> {
+  const porId = new Map<string, PedidoMl>();
+  const ventanas = ventanasDeFechas(ahora);
+  for (const [i, ventana] of ventanas.entries()) {
+    let offset = 0;
+    while (true) {
+      const url =
+        `https://api.mercadolibre.com/orders/search?seller=${cuentaIdExterna}` +
+        `&order.date_created.from=${encodeURIComponent(ventana.desde)}&order.date_created.to=${encodeURIComponent(ventana.hasta)}` +
+        `&sort=date_desc&limit=${TAMAÑO_PAGINA}&offset=${offset}`;
+      const res = await fetchConReintento429(url, accessToken);
+      if (!res.ok) {
+        // Una ventana vieja que ML rechaza por rango (400/404/422) se
+        // omite y se sigue; la más reciente, 401/403/429/5xx sí cortan.
+        if (i > 0 && [400, 404, 422].includes(res.status)) break;
+        throw await errorDeRespuesta(res, "al traer pedidos");
+      }
+      const data = await res.json();
+      const pagina: PedidoMl[] = data.results ?? [];
+      for (const p of pagina) porId.set(String(p.id), p);
+      if (pagina.length < TAMAÑO_PAGINA) break;
+      offset += TAMAÑO_PAGINA;
+    }
+  }
+  return [...porId.values()];
 }
 
 
@@ -189,9 +234,8 @@ export async function ejecutarImportacionInicial(empresaId: string, cuentaId: st
 
   try {
     const accessToken = await obtenerAccessTokenVigente(empresaId, cuentaId);
-    const desdeIso = new Date(Date.now() - DIAS_HACIA_ATRAS * 24 * 60 * 60 * 1000).toISOString();
 
-    const pedidosReales = await traerPedidosReales(accessToken, cuentaIdExterna, desdeIso);
+    const pedidosReales = await traerPedidosReales(accessToken, cuentaIdExterna);
     await dbComoEmpresa(empresaId, (tx) =>
       tx.update(importacionesMl).set({ pedidosEncontrados: pedidosReales.length }).where(eq(importacionesMl.id, importacion.id))
     );
