@@ -81,3 +81,27 @@ describe("superaMaximoConfigurado", () => {
     expect(superaMaximoConfigurado(100000, null, 15)).toBe(false);
   });
 });
+
+import { claveMarcaPromocion, motivoNoMarcable, planAplicarPromociones, type PromocionMarcable } from "./calculosPublicaciones";
+
+function promoMarcable(extra: Partial<PromocionMarcable>): PromocionMarcable {
+  return { tipoPromocion: "DEAL", promotionIdMl: "P1", estadoMl: "candidate", puedeSalirApi: true, cumpleReglas: true, motivoRevisarManual: null, precioSugerido: 90, precioMinimo: 80, ...extra };
+}
+
+describe("selección por producto (Promo-C)", () => {
+  const a = promoMarcable({ promotionIdMl: "A" });
+  const b = promoMarcable({ promotionIdMl: "B", estadoMl: "started" });
+  const c = promoMarcable({ promotionIdMl: "C", tipoPromocion: "DOD", estadoMl: "started", puedeSalirApi: false });
+  const d = promoMarcable({ promotionIdMl: "D", cumpleReglas: false, motivoRevisarManual: "Bajo el piso" });
+
+  it("solo incluye las marcadas, con su acción", () => {
+    const plan = planAplicarPromociones([a, b, c, d], new Set([claveMarcaPromocion(a), claveMarcaPromocion(b)]));
+    expect(plan.map((x) => [x.promocion.promotionIdMl, x.accion])).toEqual([["A", "participar"], ["B", "salir"]]);
+  });
+
+  it("ignora marcadas no permitidas (salir sin API, no cumple reglas)", () => {
+    expect(planAplicarPromociones([c, d], new Set([claveMarcaPromocion(c), claveMarcaPromocion(d)]))).toEqual([]);
+    expect(motivoNoMarcable(c)).toContain("Mercado Libre");
+    expect(motivoNoMarcable(d)).toBe("Bajo el piso");
+  });
+});
