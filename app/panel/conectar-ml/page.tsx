@@ -6,7 +6,7 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
-import { obtenerUltimaImportacion } from "@/lib/ml/importacion";
+import { describirErrorImportacion, obtenerUltimaImportacion } from "@/lib/ml/importacion";
 import { datosSitioMl } from "@/lib/ml/sitios";
 import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
 import { contarPedidosPorCuenta as contarPedidosFalabella, TOPE_ORDENES as TOPE_ORDENES_FALABELLA } from "@/lib/falabella/pedidos";
@@ -190,7 +190,7 @@ export default async function ConectarMlPage({
                 <div className={styles.detalleSitio}>
                   {sitio.nombre} · {cuenta.moneda} · {cuenta.idioma}
                 </div>
-                {importacion && !importacion.error && (
+                {importacion && (!importacion.error || importacion.error.startsWith("AVISO: ")) && (
                   <div className={styles.detalleImportacion}>
                     {importacion.completadoTs ? (
                       <span>
@@ -205,7 +205,17 @@ export default async function ConectarMlPage({
                     )}
                   </div>
                 )}
-                {importacion?.error && <div className={styles.errorImportacion}>No se pudo completar la importación: {importacion.error}</div>}
+                {importacion?.error &&
+                  (() => {
+                    const d = describirErrorImportacion(importacion.error);
+                    return (
+                      <div className={d.esAviso ? styles.avisoImportacion : styles.errorImportacion}>
+                        {d.esAviso ? "Importación completa con aviso: " : "No se pudo completar la importación: "}
+                        {d.mensaje}
+                        {d.pista && <div>{d.pista}</div>}
+                      </div>
+                    );
+                  })()}
               </FilaLista>
             );
           })}
