@@ -20,6 +20,7 @@ import {
   leerItemEdicionMl,
   LimiteMercadoLibreError,
   motivoErrorEscrituraMl,
+  detalleErrorEscrituraMl,
   PATRON_ID_PRODUCTO_O_ITEM,
   promocionActivaMl,
   tieneAutomatizacionPrecioMl,
@@ -114,7 +115,7 @@ export async function diagnosticoPublicacionAction(entrada: { cuentaMlId: string
     return { ok: false, aviso: motivoCuentaSinRevisar(error) };
   }
   try {
-    return { ok: true, lineas: await diagnosticarPublicacion(entrada.itemId, token) };
+    return { ok: true, lineas: await diagnosticarPublicacion(entrada.itemId, token, cuenta.cuentaIdExterna) };
   } catch (error) {
     console.warn(`[app/panel/optimizacion] diagnóstico ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
     return { ok: false, aviso: "No se pudo consultar Mercado Libre. Intenta de nuevo." };
@@ -352,7 +353,11 @@ async function escribirYAuditar(
     if (respuesta.status === 0) return { ok: false, aviso: "Mercado Libre no respondió a tiempo. Revisa en Mercado Libre si el cambio se aplicó antes de reintentar." };
     if (respuesta.status === 401 || respuesta.status === 403) return { ok: false, aviso: "Mercado Libre no dejó cambiar esta publicación con esta cuenta." };
     const motivo = motivoErrorEscrituraMl(respuesta.textoCrudo);
-    return { ok: false, aviso: motivo ? `Mercado Libre no aceptó el cambio: ${motivo}` : "Mercado Libre no aceptó el cambio." };
+    const base = motivo ? `Mercado Libre no aceptó el cambio: ${motivo}` : "Mercado Libre no aceptó el cambio.";
+    // El detalle completo (código, causas y campos) solo si agrega algo:
+    // con «BODY_INVALID_FIELDS» solo no se sabe qué campo rechazó.
+    const detalle = detalleErrorEscrituraMl(respuesta.textoCrudo);
+    return { ok: false, aviso: detalle && detalle !== `error: ${motivo}` && detalle !== `mensaje: ${motivo}` ? `${base} (detalle para soporte: ${detalle})` : base };
   }
   await dbComoEmpresa(prep.ctx.empresaId, (tx) =>
     registrarAuditoria(tx, {
