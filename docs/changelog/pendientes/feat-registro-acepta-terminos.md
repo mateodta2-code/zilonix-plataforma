@@ -1,0 +1,1 @@
+- `/crear-empresa`: casilla obligatoria para aceptar los Términos y la Política de privacidad. El servidor la valida y guarda la versión y la fecha en la `privateMetadata` de Clerk (sin migración). Refs #559.

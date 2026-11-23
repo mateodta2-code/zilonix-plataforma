@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import styles from "../page.module.css";
-import { crearEmpresaAction } from "./actions";
+import { crearEmpresaConTerminosAction } from "./acciones-terminos";
 
 // Tarea 1.6 — "crear empresa al registrarse". No es solo al registrarse
 // en Clerk: también sirve para crear una empresa adicional más
@@ -38,7 +38,7 @@ export default async function CrearEmpresaPage() {
         Zilonix, esta queda completamente aparte — nunca comparten datos.
       </p>
 
-      <form action={crearEmpresaAction} style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
+      <form action={crearEmpresaConTerminosAction} style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
         <label style={{ fontSize: 13 }}>
           Nombre de la empresa
           <input
@@ -54,6 +54,19 @@ export default async function CrearEmpresaPage() {
             required
             style={{ display: "block", width: "100%", padding: 8, marginTop: 4, boxSizing: "border-box" }}
           />
+        </label>
+        <label style={{ fontSize: 13, display: "flex", alignItems: "flex-start", gap: 8 }}>
+          <input type="checkbox" name="acepta_terminos" value="si" required style={{ marginTop: 2 }} />
+          <span>
+            Acepto los{" "}
+            <a href="/terminos" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline" }}>
+              Términos
+            </a>{" "}
+            y la{" "}
+            <a href="/privacidad" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline" }}>
+              Política de privacidad
+            </a>
+          </span>
         </label>
         <Boton type="submit" style={{ marginTop: 8 }}>
           Crear empresa

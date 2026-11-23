@@ -299,6 +299,7 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/panel/actions.ts": "cambiar la empresa activa ya se revalida contra las membresías reales del usuario, no es un permiso por módulo",
   "app/crear-empresa/page.tsx": "cualquier usuario con cuenta puede crear su propia empresa — no hay membresía previa que comprobar",
   "app/crear-empresa/actions.ts": "idem",
+  "app/crear-empresa/acciones-terminos.ts": "idem — solo envuelve crearEmpresaAction exigiendo la casilla de Términos",
   "app/panel/invitar/listo/page.tsx": "solo muestra un token que crearInvitacionAction ya generó, no vuelve a tocar la base",
   "app/invitacion/[token]/page.tsx": "el token en la URL es el permiso real (db/empresa-context.ts) — todavía no hay membresía que comprobar",
   "app/invitacion/[token]/actions.ts": "idem",
