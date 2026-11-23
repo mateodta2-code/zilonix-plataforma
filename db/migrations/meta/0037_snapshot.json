@@ -1,5 +1,5 @@
 {
-  "id": "d461f307-1b68-4927-9b82-8d5722f572d2",
+  "id": "f2f8c2f6-3b74-41ec-b6c1-89cf0b67e7de",
   "prevId": "5df28443-e9ec-406f-8804-73715476d59d",
   "version": "7",
   "dialect": "postgresql",
@@ -749,6 +749,114 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.categorias_gasto": {
+      "name": "categorias_gasto",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "empresa_id": {
+          "name": "empresa_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "activa": {
+          "name": "activa",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "creado_ts": {
+          "name": "creado_ts",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actualizado_ts": {
+          "name": "actualizado_ts",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actualizado_por": {
+          "name": "actualizado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "categorias_gasto_empresa_id_empresas_id_fk": {
+          "name": "categorias_gasto_empresa_id_empresas_id_fk",
+          "tableFrom": "categorias_gasto",
+          "tableTo": "empresas",
+          "columnsFrom": [
+            "empresa_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "categorias_gasto_actualizado_por_usuarios_id_fk": {
+          "name": "categorias_gasto_actualizado_por_usuarios_id_fk",
+          "tableFrom": "categorias_gasto",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "actualizado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "categorias_gasto_empresa_id_unica": {
+          "name": "categorias_gasto_empresa_id_unica",
+          "nullsNotDistinct": false,
+          "columns": [
+            "empresa_id",
+            "id"
+          ]
+        },
+        "categorias_gasto_empresa_nombre_unico": {
+          "name": "categorias_gasto_empresa_nombre_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "empresa_id",
+            "nombre"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "categorias_gasto_nombre_valido": {
+          "name": "categorias_gasto_nombre_valido",
+          "value": "\"categorias_gasto\".\"nombre\" = btrim(\"categorias_gasto\".\"nombre\") AND char_length(\"categorias_gasto\".\"nombre\") between 1 and 60"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.configuracion_finanzas": {
       "name": "configuracion_finanzas",
       "schema": "",
@@ -1196,140 +1304,6 @@
         "costos_sku_precio_minimo_combo_x3_positivo": {
           "name": "costos_sku_precio_minimo_combo_x3_positivo",
           "value": "\"costos_sku\".\"precio_minimo_combo_x3\" > 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.cuentas_disponible": {
-      "name": "cuentas_disponible",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "empresa_id": {
-          "name": "empresa_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "nombre": {
-          "name": "nombre",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tipo": {
-          "name": "tipo",
-          "type": "tipo_cuenta_disponible",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "entidad": {
-          "name": "entidad",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ultimos_4": {
-          "name": "ultimos_4",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "moneda": {
-          "name": "moneda",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "activa": {
-          "name": "activa",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "creado_ts": {
-          "name": "creado_ts",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "creado_por": {
-          "name": "creado_por",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "cuentas_disponible_empresa_id_empresas_id_fk": {
-          "name": "cuentas_disponible_empresa_id_empresas_id_fk",
-          "tableFrom": "cuentas_disponible",
-          "tableTo": "empresas",
-          "columnsFrom": [
-            "empresa_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "cuentas_disponible_creado_por_usuarios_id_fk": {
-          "name": "cuentas_disponible_creado_por_usuarios_id_fk",
-          "tableFrom": "cuentas_disponible",
-          "tableTo": "usuarios",
-          "columnsFrom": [
-            "creado_por"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "cuentas_disponible_empresa_id_unica": {
-          "name": "cuentas_disponible_empresa_id_unica",
-          "nullsNotDistinct": false,
-          "columns": [
-            "empresa_id",
-            "id"
-          ]
-        },
-        "cuentas_disponible_empresa_nombre_unico": {
-          "name": "cuentas_disponible_empresa_nombre_unico",
-          "nullsNotDistinct": false,
-          "columns": [
-            "empresa_id",
-            "nombre"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "cuentas_disponible_nombre_no_vacio": {
-          "name": "cuentas_disponible_nombre_no_vacio",
-          "value": "btrim(\"cuentas_disponible\".\"nombre\") <> ''"
-        },
-        "cuentas_disponible_ultimos_4_validos": {
-          "name": "cuentas_disponible_ultimos_4_validos",
-          "value": "\"cuentas_disponible\".\"ultimos_4\" IS NULL OR \"cuentas_disponible\".\"ultimos_4\" ~ '^[0-9]{4}$'"
-        },
-        "cuentas_disponible_moneda_iso": {
-          "name": "cuentas_disponible_moneda_iso",
-          "value": "\"cuentas_disponible\".\"moneda\" ~ '^[A-Z]{3}$'"
         }
       },
       "isRLSEnabled": false
@@ -2096,6 +2070,318 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.gastos": {
+      "name": "gastos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "empresa_id": {
+          "name": "empresa_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cuenta_ml_id": {
+          "name": "cuenta_ml_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cuenta_falabella_id": {
+          "name": "cuenta_falabella_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "categoria_id": {
+          "name": "categoria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tercero_id": {
+          "name": "tercero_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "beneficiario": {
+          "name": "beneficiario",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "descripcion": {
+          "name": "descripcion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "monto": {
+          "name": "monto",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "moneda": {
+          "name": "moneda",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fecha_gasto": {
+          "name": "fecha_gasto",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fecha_vencimiento": {
+          "name": "fecha_vencimiento",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estado": {
+          "name": "estado",
+          "type": "estado_gasto",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendiente'"
+        },
+        "fecha_pago": {
+          "name": "fecha_pago",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "medio_pago": {
+          "name": "medio_pago",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "soporte": {
+          "name": "soporte",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "creado_ts": {
+          "name": "creado_ts",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "creado_por": {
+          "name": "creado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actualizado_ts": {
+          "name": "actualizado_ts",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actualizado_por": {
+          "name": "actualizado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "gastos_empresa_fecha_idx": {
+          "name": "gastos_empresa_fecha_idx",
+          "columns": [
+            {
+              "expression": "empresa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "fecha_gasto",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "gastos_empresa_estado_idx": {
+          "name": "gastos_empresa_estado_idx",
+          "columns": [
+            {
+              "expression": "empresa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "estado",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "fecha_vencimiento",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "gastos_empresa_id_empresas_id_fk": {
+          "name": "gastos_empresa_id_empresas_id_fk",
+          "tableFrom": "gastos",
+          "tableTo": "empresas",
+          "columnsFrom": [
+            "empresa_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "gastos_creado_por_usuarios_id_fk": {
+          "name": "gastos_creado_por_usuarios_id_fk",
+          "tableFrom": "gastos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "creado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "gastos_actualizado_por_usuarios_id_fk": {
+          "name": "gastos_actualizado_por_usuarios_id_fk",
+          "tableFrom": "gastos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "actualizado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "gastos_categoria_misma_empresa_fk": {
+          "name": "gastos_categoria_misma_empresa_fk",
+          "tableFrom": "gastos",
+          "tableTo": "categorias_gasto",
+          "columnsFrom": [
+            "empresa_id",
+            "categoria_id"
+          ],
+          "columnsTo": [
+            "empresa_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "gastos_tercero_misma_empresa_fk": {
+          "name": "gastos_tercero_misma_empresa_fk",
+          "tableFrom": "gastos",
+          "tableTo": "terceros",
+          "columnsFrom": [
+            "empresa_id",
+            "tercero_id"
+          ],
+          "columnsTo": [
+            "empresa_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "gastos_cuenta_ml_misma_empresa_fk": {
+          "name": "gastos_cuenta_ml_misma_empresa_fk",
+          "tableFrom": "gastos",
+          "tableTo": "cuentas_ml",
+          "columnsFrom": [
+            "empresa_id",
+            "cuenta_ml_id"
+          ],
+          "columnsTo": [
+            "empresa_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "gastos_cuenta_falabella_misma_empresa_fk": {
+          "name": "gastos_cuenta_falabella_misma_empresa_fk",
+          "tableFrom": "gastos",
+          "tableTo": "cuentas_falabella",
+          "columnsFrom": [
+            "empresa_id",
+            "cuenta_falabella_id"
+          ],
+          "columnsTo": [
+            "empresa_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "gastos_una_tienda": {
+          "name": "gastos_una_tienda",
+          "value": "\"gastos\".\"cuenta_ml_id\" is null or \"gastos\".\"cuenta_falabella_id\" is null"
+        },
+        "gastos_tercero_o_beneficiario": {
+          "name": "gastos_tercero_o_beneficiario",
+          "value": "\"gastos\".\"tercero_id\" is not null or char_length(btrim(coalesce(\"gastos\".\"beneficiario\", ''))) > 0"
+        },
+        "gastos_descripcion_valida": {
+          "name": "gastos_descripcion_valida",
+          "value": "char_length(btrim(\"gastos\".\"descripcion\")) between 1 and 300"
+        },
+        "gastos_monto_positivo": {
+          "name": "gastos_monto_positivo",
+          "value": "\"gastos\".\"monto\" > 0"
+        },
+        "gastos_moneda_iso": {
+          "name": "gastos_moneda_iso",
+          "value": "\"gastos\".\"moneda\" ~ '^[A-Z]{3}$'"
+        },
+        "gastos_pago_coherente": {
+          "name": "gastos_pago_coherente",
+          "value": "(\"gastos\".\"estado\" = 'pagado') = (\"gastos\".\"fecha_pago\" is not null)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.ia_conexion_modulos": {
@@ -7910,139 +8196,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.saldos_disponible": {
-      "name": "saldos_disponible",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "empresa_id": {
-          "name": "empresa_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "cuenta_id": {
-          "name": "cuenta_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "saldo": {
-          "name": "saldo",
-          "type": "numeric(16, 2)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fecha_corte": {
-          "name": "fecha_corte",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "nota": {
-          "name": "nota",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "registrado_por": {
-          "name": "registrado_por",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "creado_ts": {
-          "name": "creado_ts",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saldos_disponible_cuenta_fecha_idx": {
-          "name": "saldos_disponible_cuenta_fecha_idx",
-          "columns": [
-            {
-              "expression": "empresa_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "cuenta_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "fecha_corte",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saldos_disponible_empresa_id_empresas_id_fk": {
-          "name": "saldos_disponible_empresa_id_empresas_id_fk",
-          "tableFrom": "saldos_disponible",
-          "tableTo": "empresas",
-          "columnsFrom": [
-            "empresa_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "saldos_disponible_registrado_por_usuarios_id_fk": {
-          "name": "saldos_disponible_registrado_por_usuarios_id_fk",
-          "tableFrom": "saldos_disponible",
-          "tableTo": "usuarios",
-          "columnsFrom": [
-            "registrado_por"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saldos_disponible_cuenta_de_la_empresa": {
-          "name": "saldos_disponible_cuenta_de_la_empresa",
-          "tableFrom": "saldos_disponible",
-          "tableTo": "cuentas_disponible",
-          "columnsFrom": [
-            "empresa_id",
-            "cuenta_id"
-          ],
-          "columnsTo": [
-            "empresa_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.seguimiento_alertas": {
       "name": "seguimiento_alertas",
       "schema": "",
@@ -9448,6 +9601,14 @@
         "sin_costo"
       ]
     },
+    "public.estado_gasto": {
+      "name": "estado_gasto",
+      "schema": "public",
+      "values": [
+        "pendiente",
+        "pagado"
+      ]
+    },
     "public.estado_orden_compra": {
       "name": "estado_orden_compra",
       "schema": "public",
@@ -9640,15 +9801,6 @@
         "propia",
         "fulfillment_ml",
         "tercero"
-      ]
-    },
-    "public.tipo_cuenta_disponible": {
-      "name": "tipo_cuenta_disponible",
-      "schema": "public",
-      "values": [
-        "banco",
-        "billetera",
-        "efectivo"
       ]
     },
     "public.tipo_movimiento": {

@@ -264,8 +264,22 @@
     {
       "idx": 37,
       "version": "7",
-      "when": 1795390312276,
-      "tag": "0037_familiar_shockwave",
+      "when": 1795390145233,
+      "tag": "0037_gastos_externos",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795390164291,
+      "tag": "0038_sembrar_categorias_gasto",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1795396759245,
+      "tag": "0039_last_marvel_apes",
       "breakpoints": true
     }
   ]

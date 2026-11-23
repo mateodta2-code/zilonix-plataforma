@@ -39,6 +39,13 @@ const RUTAS_PROTEGIDAS = new Set([
   // lib/finanzas/disponible-consulta.ts).
   "app/panel/finanzas/disponible/page.tsx",
   "app/panel/finanzas/disponible/actions.ts",
+  // Issue #422 (fase 4) — gastos externos: ver pide finanzas.consultar;
+  // crear, editar, marcar pagado y las categorías, finanzas.modificar
+  // (en cada acción y otra vez en lib/finanzas/gastos-db.ts).
+  "app/panel/finanzas/gastos/page.tsx",
+  "app/panel/finanzas/gastos/actions.ts",
+  "app/panel/finanzas/gastos/[id]/page.tsx",
+  "app/panel/finanzas/gastos/categorias/page.tsx",
   "app/panel/finanzas/inventario/page.tsx",
   "app/panel/finanzas/maestra-sku/actions.ts",
   "app/panel/finanzas/maestra-sku/editar/page.tsx",

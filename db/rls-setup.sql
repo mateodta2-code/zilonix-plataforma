@@ -90,6 +90,10 @@ GRANT SELECT, INSERT, UPDATE ON publicaciones_ia_imagenes TO app_user;
 -- mano y revisión de cada cambio. Sin DELETE: es un historial.
 GRANT SELECT, INSERT, UPDATE ON optimizacion_notas TO app_user;
 GRANT SELECT, INSERT, UPDATE ON optimizacion_revisiones TO app_user;
+-- Issue #422 (fase 4 de Finanzas, migraciones 0037-0038) — gastos
+-- externos y sus categorías. Sin DELETE: una categoría se desactiva y un
+-- gasto se corrige editándolo (cada cambio queda en auditoria).
+GRANT SELECT, INSERT, UPDATE ON categorias_gasto, gastos TO app_user;
 -- Tarea "Publicar — conectar Canva" — a diferencia de ia_conexiones,
 -- desconectar Canva NUNCA borra la fila (decisión explícita de
 -- Pablo/Mateo: queda desconectada_ts como histórico, los tokens se
@@ -288,6 +292,10 @@ ALTER TABLE optimizacion_notas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE optimizacion_notas FORCE ROW LEVEL SECURITY;
 ALTER TABLE optimizacion_revisiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE optimizacion_revisiones FORCE ROW LEVEL SECURITY;
+ALTER TABLE categorias_gasto ENABLE ROW LEVEL SECURITY;
+ALTER TABLE categorias_gasto FORCE ROW LEVEL SECURITY;
+ALTER TABLE gastos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gastos FORCE ROW LEVEL SECURITY;
 ALTER TABLE canva_conexiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE canva_conexiones FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
@@ -565,6 +573,16 @@ CREATE POLICY aislamiento_optimizacion_notas ON optimizacion_notas
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 DROP POLICY IF EXISTS aislamiento_optimizacion_revisiones ON optimizacion_revisiones;
 CREATE POLICY aislamiento_optimizacion_revisiones ON optimizacion_revisiones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Issue #422 — gastos externos: una empresa nunca ve ni toca los gastos
+-- ni las categorías de otra.
+DROP POLICY IF EXISTS aislamiento_categorias_gasto ON categorias_gasto;
+CREATE POLICY aislamiento_categorias_gasto ON categorias_gasto
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_gastos ON gastos;
+CREATE POLICY aislamiento_gastos ON gastos
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- Tarea "Publicar — conectar Canva" — a diferencia de TODAS las demás
