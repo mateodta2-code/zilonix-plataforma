@@ -162,10 +162,24 @@ describe("API Conectar IA", () => {
   });
 
   it("módulos: inválido -> 400; válido (incluye generacion_imagenes y publicaciones) -> ok", async () => {
+    ia.lista.mockResolvedValue([{ ...fila, id: ID, proveedor: "openai" }]);
     expect((await PUT_MODULOS(req("PUT", { modulos: ["inventado"] }), params)).status).toBe(400);
     const res = await PUT_MODULOS(req("PUT", { modulos: ["generacion_imagenes", "publicaciones"] }), params);
     expect(res.status).toBe(200);
     expect(ia.modulos).toHaveBeenCalledWith(expect.any(String), ID, ["generacion_imagenes", "publicaciones"]);
+  });
+
+  it("módulos: imágenes en un proveedor que no las genera -> 400 fijo; Google -> 200", async () => {
+    for (const proveedor of ["anthropic", "xai", "otro_compatible_openai"]) {
+      ia.modulos.mockClear();
+      ia.lista.mockResolvedValue([{ ...fila, id: ID, proveedor }]);
+      const res = await PUT_MODULOS(req("PUT", { modulos: ["generacion_imagenes"] }), params);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("Esta IA no genera imágenes. Usa una de OpenAI o Google.");
+      expect(ia.modulos).not.toHaveBeenCalled();
+    }
+    ia.lista.mockResolvedValue([{ ...fila, id: ID, proveedor: "google" }]);
+    expect((await PUT_MODULOS(req("PUT", { modulos: ["generacion_imagenes"] }), params)).status).toBe(200);
   });
 
   it("probar: ok, y error del proveedor -> mensaje fijo sin texto crudo ni key", async () => {

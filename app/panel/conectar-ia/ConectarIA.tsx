@@ -6,7 +6,7 @@ import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { MAX_CONEXIONES_IA, MODULOS_IA, type ModuloIA } from "@/lib/ia/modulos";
+import { MAX_CONEXIONES_IA, MENSAJE_IA_SIN_IMAGENES, MODULOS_IA, moduloAdmiteProveedor, type ModuloIA } from "@/lib/ia/modulos";
 import styles from "./conectarIa.module.css";
 
 import { AYUDA_PROVEEDOR, NOTA_IMAGENES_OPENAI, NOTA_SUSCRIPCION, type ProveedorIA } from "./ayudaProveedor";
@@ -111,7 +111,7 @@ export function ConectarIA({ conexiones, puedeModificar }: { conexiones: Conexio
               )}
               {puedeModificar && (
                 <>
-                  <Modulos conexion={c} onCambio={() => router.refresh()} />
+                  <Modulos conexion={c} todas={conexiones} onCambio={() => router.refresh()} />
                   <div className={styles.acciones}>
                     <Boton type="button" variante="primario" disabled={ocupado} onClick={() => setEditando(c.id)}>
                       Editar
@@ -155,7 +155,7 @@ export function ConectarIA({ conexiones, puedeModificar }: { conexiones: Conexio
   );
 }
 
-function Modulos({ conexion, onCambio }: { conexion: ConexionIAVista; onCambio: () => void }) {
+function Modulos({ conexion, todas, onCambio }: { conexion: ConexionIAVista; todas: ConexionIAVista[]; onCambio: () => void }) {
   const [marcados, setMarcados] = useState<ModuloIA[]>(conexion.modulos);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
@@ -173,25 +173,32 @@ function Modulos({ conexion, onCambio }: { conexion: ConexionIAVista; onCambio: 
     if (res.ok) onCambio();
     else {
       setMarcados(conexion.modulos);
-      setError("No se pudieron guardar los módulos.");
+      const datos = (await res.json().catch(() => ({}))) as { error?: unknown };
+      setError(typeof datos.error === "string" ? datos.error : "No se pudieron guardar los módulos.");
     }
   }
 
   return (
     <div className={styles.modulos}>
       <span className="zx-etiqueta">MÓDULOS QUE USAN ESTA IA</span>
-      {MODULOS_IA.map((m) => (
-        <label key={m.id}>
-          <input
-            type="checkbox"
-            checked={marcados.includes(m.id)}
-            disabled={guardando}
-            onChange={(e) => guardar(e.target.checked ? [...marcados, m.id] : marcados.filter((x) => x !== m.id))}
-          />
-          {m.etiqueta}
-          {(m as { proximamente?: boolean }).proximamente === true && <span className={styles.nota}> — Próximamente: aún no genera imágenes; solo dejas elegida la IA</span>}
-        </label>
-      ))}
+      {MODULOS_IA.map((m) => {
+        const admite = moduloAdmiteProveedor(m.id, conexion.proveedor);
+        const otra = todas.find((x) => x.id !== conexion.id && x.modulos.includes(m.id));
+        return (
+          <label key={m.id}>
+            <input
+              type="checkbox"
+              checked={marcados.includes(m.id)}
+              disabled={guardando || !admite}
+              onChange={(e) => guardar(e.target.checked ? [...marcados, m.id] : marcados.filter((x) => x !== m.id))}
+            />
+            {m.etiqueta}
+            {(m as { proximamente?: boolean }).proximamente === true && <span className={styles.nota}> — Próximamente: aún no se usa; solo dejas elegida la IA</span>}
+            {!admite && <span className={styles.nota}> — {MENSAJE_IA_SIN_IMAGENES}</span>}
+            {otra && !marcados.includes(m.id) && <span className={styles.nota}> (hoy usa: {otra.nombre})</span>}
+          </label>
+        );
+      })}
       <span className={styles.nota}>
         Por ejemplo: Grok en Investigación y ChatGPT en Promociones. Lo que no marques usa la IA principal. Un módulo solo puede usar una IA a la vez.
       </span>

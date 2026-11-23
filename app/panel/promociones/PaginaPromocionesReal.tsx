@@ -755,9 +755,13 @@ export function PaginaPromocionesReal({
         ) : (
           filas.map((fila) => {
             const expandida = expandidaId === fila.itemId;
+            // «pending» = programada en ML, todavía no empieza: no se muestra como aplicada.
+            const hayAplicada = fila.promociones.some((p) => p.estadoMl === "started");
             const chipEstado: { texto: string; estado: EstadoChip } =
               fila.estado === "en_promocion"
-                ? { texto: "En promoción aplicada", estado: "exito" }
+                ? hayAplicada
+                  ? { texto: "En promoción aplicada", estado: "exito" }
+                  : { texto: "Promoción programada", estado: "aviso" }
                 : fila.estado === "error"
                   ? { texto: "Error", estado: "peligro" }
                   : { texto: "Sin promoción", estado: "neutro" };
@@ -803,6 +807,9 @@ export function PaginaPromocionesReal({
                             <div className={styles.encabezadoPromocion}>
                               <span className={styles.nombrePromocion}>{nombrePromocion(promocion.tipoPromocion)}</span>
                               <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>({promocion.tipoPromocion})</span>
+                              {activa && (
+                                <Chip estado={promocion.estadoMl === "started" ? "exito" : "aviso"}>{promocion.estadoMl === "started" ? "Aplicada" : "Programada"}</Chip>
+                              )}
                               {promocion.esCompartida && <Chip estado="neutro">Compartida con Mercado Libre (+Meli)</Chip>}
                               {superaMaximoRegla && <Chip estado="aviso">Supera el máximo configurado</Chip>}
                               {regla === "tabla-maestra" && promocion.reglaAdicionalMotivo && <Chip estado="aviso">{promocion.reglaAdicionalMotivo}</Chip>}

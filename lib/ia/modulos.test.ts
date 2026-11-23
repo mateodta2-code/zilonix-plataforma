@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { esModuloIA, IDS_MODULOS_IA, validarModulosIA } from "./modulos";
+import { proveedorGeneraImagenes } from "./imagen";
+import type { ProveedorIA } from "./tipos";
+import { moduloAdmiteProveedor, MODULOS_IA, esModuloIA, IDS_MODULOS_IA, validarModulosIA } from "./modulos";
 
 describe("MODULOS_IA", () => {
   it("incluye los 6 módulos, con generacion_imagenes", () => {
@@ -15,5 +17,19 @@ describe("MODULOS_IA", () => {
     expect(validarModulosIA([])).toEqual([]);
     expect(validarModulosIA(["x"])).toBeNull();
     expect(validarModulosIA("promociones")).toBeNull();
+  });
+});
+
+describe("moduloAdmiteProveedor", () => {
+  const todos: ProveedorIA[] = ["anthropic", "openai", "google", "xai", "otro_compatible_openai"];
+  it("imágenes solo con los proveedores que las generan (igual que imagen.ts)", () => {
+    for (const p of todos) expect(moduloAdmiteProveedor("generacion_imagenes", p)).toBe(proveedorGeneraImagenes(p));
+    expect(moduloAdmiteProveedor("generacion_imagenes", "anthropic")).toBe(false);
+  });
+  it("los demás módulos admiten cualquier proveedor", () => {
+    for (const p of todos) expect(moduloAdmiteProveedor("promociones", p)).toBe(true);
+  });
+  it("publicidad es próximamente", () => {
+    expect((MODULOS_IA.find((m) => m.id === "publicidad") as { proximamente?: boolean }).proximamente).toBe(true);
   });
 });

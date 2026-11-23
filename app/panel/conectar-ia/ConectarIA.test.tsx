@@ -25,6 +25,24 @@ describe("ConectarIA (pantalla)", () => {
     expect(screen.queryByText(/Próximamente: aún no genera imágenes/)).toBeNull();
     expect(container.querySelector('input[type="password"]')).toBeNull();
   });
+  it("imágenes deshabilitado con nota si el proveedor no genera imágenes; con OpenAI no", () => {
+    render(<ConectarIA conexiones={[c(0, { proveedor: "anthropic" })]} puedeModificar />);
+    const caja = screen.getByLabelText(/Generación de imágenes/) as HTMLInputElement;
+    expect(caja.disabled).toBe(true);
+    expect(screen.getByText(/Esta IA no genera imágenes\. Usa una de OpenAI o Google\./)).toBeTruthy();
+    cleanup();
+    render(<ConectarIA conexiones={[c(0)]} puedeModificar />);
+    expect((screen.getByLabelText(/Generación de imágenes/) as HTMLInputElement).disabled).toBe(false);
+  });
+  it("Publicidad muestra Próximamente y se puede marcar", () => {
+    render(<ConectarIA conexiones={[c(0)]} puedeModificar />);
+    expect(screen.getByText(/Próximamente/)).toBeTruthy();
+    expect((screen.getByLabelText(/Publicidad/) as HTMLInputElement).disabled).toBe(false);
+  });
+  it("un módulo de otra IA muestra «(hoy usa: Nombre)»", () => {
+    render(<ConectarIA conexiones={[c(0, { modulos: ["promociones"] }), c(1)]} puedeModificar />);
+    expect(screen.getAllByText(/\(hoy usa: IA 0\)/).length).toBe(1);
+  });
   it("«Agregar IA» se deshabilita en 5 y avisa", () => {
     render(<ConectarIA conexiones={[0, 1, 2, 3, 4].map((n) => c(n))} puedeModificar />);
     expect((screen.getByText("Agregar IA") as HTMLButtonElement).disabled).toBe(true);

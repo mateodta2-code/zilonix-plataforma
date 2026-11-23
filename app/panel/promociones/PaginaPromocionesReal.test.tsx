@@ -243,3 +243,54 @@ describe("PaginaPromocionesReal — «Reglas adicionales» (PR 2)", () => {
     expect((screen.getByLabelText(ETIQUETA) as HTMLTextAreaElement).disabled).toBe(true);
   });
 });
+
+describe("PaginaPromocionesReal — «Aplicada» vs «Programada»", () => {
+  function promo(tipoPromocion: string, estadoMl: string) {
+    return {
+      tipoPromocion, promotionIdMl: `${tipoPromocion}-1`, estadoMl, esCompartida: false, soloEnMl: false, puedeSalirApi: true,
+      precioOriginal: 100, precioActual: 90, precioMinimo: null, precioSugerido: null, maxDiscountedPrice: null, gananciaEstimada: null,
+      cumpleReglas: true, accionSugerida: null, motivoRevisarManual: null, reglaAdicionalMotivo: null,
+    };
+  }
+  function fila(itemId: string, promociones: ReturnType<typeof promo>[]) {
+    return {
+      itemId, cuentaMlId: CUENTAS[0].id, nicknameCuenta: "Mi Tienda", siteId: "MLM", tituloProducto: `Prod ${itemId}`, thumbnail: null, skuCodigo: null,
+      precioOriginal: 100, stock: 1, tieneVariantes: false, estado: "en_promocion", promociones, motivoError: null,
+    };
+  }
+  function simular(filas: unknown[]) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).startsWith("/api/ml/promociones/publicaciones?")) {
+          return { ok: true, json: async () => ({ filas, conteosLote: { todas: filas.length, enPromocion: filas.length, sinPromocion: 0, conError: 0 }, cursorSiguiente: null }) };
+        }
+        return { ok: false, json: async () => ({}) };
+      })
+    );
+  }
+
+  it("fila con solo «pending»: «Promoción programada», no «En promoción aplicada»", async () => {
+    simular([fila("MLM1", [promo("DEAL", "pending")])]);
+    montar();
+    await waitFor(() => expect(screen.getByText("Promoción programada")).toBeTruthy());
+    expect(screen.queryByText("En promoción aplicada")).toBeNull();
+  });
+
+  it("fila con «started» y «pending»: «En promoción aplicada»", async () => {
+    simular([fila("MLM1", [promo("DEAL", "pending"), promo("PRICE_DISCOUNT", "started")])]);
+    montar();
+    await waitFor(() => expect(screen.getByText("En promoción aplicada")).toBeTruthy());
+    expect(screen.queryByText("Promoción programada")).toBeNull();
+  });
+
+  it("en el detalle cada promoción dice «Aplicada» o «Programada»", async () => {
+    simular([fila("MLM1", [promo("DEAL", "pending"), promo("PRICE_DISCOUNT", "started")])]);
+    montar();
+    await waitFor(() => screen.getByText("En promoción aplicada"));
+    fireEvent.click(screen.getByText("Prod MLM1"));
+    expect(screen.getByText("Aplicada")).toBeTruthy();
+    expect(screen.getByText("Programada")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Dejar de participar" })).toHaveLength(2);
+  });
+});
