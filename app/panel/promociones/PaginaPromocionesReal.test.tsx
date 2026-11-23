@@ -365,3 +365,16 @@ describe("PaginaPromocionesReal — «Aplicada» vs «Programada»", () => {
     expect(screen.getAllByRole("button", { name: "Dejar de participar" })).toHaveLength(2);
   });
 });
+
+describe("PaginaPromocionesReal — pestaña Bitácora (Promo-B)", () => {
+  it("muestra la pestaña Bitácora y al abrirla pide el historial, sin perder la lista", async () => {
+    montar();
+    await screen.findByText("Producto MLM1");
+    const pedidos = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    expect(pedidos().some((u) => u.startsWith("/api/ml/promociones/historial"))).toBe(false);
+    fireEvent.click(screen.getByRole("tab", { name: "Bitácora" }));
+    await waitFor(() => expect(pedidos().some((u) => u.startsWith("/api/ml/promociones/historial"))).toBe(true));
+    fireEvent.click(screen.getByRole("tab", { name: "Publicaciones" }));
+    expect(screen.getByText("Producto MLM1")).toBeTruthy();
+  });
+});

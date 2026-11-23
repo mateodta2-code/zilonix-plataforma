@@ -12,6 +12,7 @@ import type { ResumenSalirTodas, VistaPreviaSalirTodas } from "@/lib/ml/promocio
 import { LARGO_MAXIMO_REGLAS_TEXTO } from "@/lib/ml/promocionesReglasTexto";
 import { TOPE_ITEMS_SELECCION, type ItemSeleccionado } from "@/lib/ml/promocionesSeleccion";
 import { accionDePromocion, calcularDesdePorcentaje, calcularDesdePrecioFinal, claveMarcaPromocion, formatoEnteroInput, motivoNoMarcable, motivoSinPrecioParaParticipar, parsearNumeroLocal, planAplicarPromociones, quedaBajoPrecioMinimo, superaMaximoConfigurado } from "./calculosPublicaciones";
+import { BitacoraPromociones } from "./BitacoraPromociones";
 import styles from "./promocionesReal.module.css";
 
 type Cuenta = { id: string; nickname: string; siteId: string };
@@ -109,6 +110,9 @@ export function PaginaPromocionesReal({
     return datosSitioMl(cuentaPorId.get(cuentaMlId)?.siteId ?? SITE_ID_DEFECTO).idioma;
   }
 
+  // Promo-B: pestañas. La vista de publicaciones solo se oculta (no se desmonta) para conservar lista, filtros y selección de Promo-A.
+  const [pestana, setPestana] = useState<"publicaciones" | "bitacora">("publicaciones");
+  const [bitacoraAbierta, setBitacoraAbierta] = useState(false);
   const [cuentaSeleccionada, setCuentaSeleccionada] = useState<string>("todas");
   const [filtro, setFiltro] = useState<FiltroPublicaciones>("todas");
   const [buscarTexto, setBuscarTexto] = useState("");
@@ -640,6 +644,37 @@ export function PaginaPromocionesReal({
     <>
       <Toast items={toasts} onCerrar={(id) => setToasts((actual) => actual.filter((t) => t.id !== id))} />
 
+      <div className={styles.pestanas} role="tablist">
+        <Boton
+          type="button"
+          role="tab"
+          aria-selected={pestana === "publicaciones"}
+          variante={pestana === "publicaciones" ? "primario" : "secundario"}
+          onClick={() => setPestana("publicaciones")}
+        >
+          Publicaciones
+        </Boton>
+        <Boton
+          type="button"
+          role="tab"
+          aria-selected={pestana === "bitacora"}
+          variante={pestana === "bitacora" ? "primario" : "secundario"}
+          onClick={() => {
+            setBitacoraAbierta(true);
+            setPestana("bitacora");
+          }}
+        >
+          Bitácora
+        </Boton>
+      </div>
+
+      {bitacoraAbierta && (
+        <div hidden={pestana !== "bitacora"}>
+          <BitacoraPromociones cuentas={cuentas} />
+        </div>
+      )}
+
+      <div hidden={pestana !== "publicaciones"}>
       <Tarjeta className={styles.seccion}>
         <Campo etiqueta="Tienda">
           <select className="zx-control" value={cuentaSeleccionada} onChange={(e) => setCuentaSeleccionada(e.target.value)}>
@@ -1246,6 +1281,7 @@ export function PaginaPromocionesReal({
           )}
         </Tarjeta>
       </dialog>
+      </div>
     </>
   );
 }

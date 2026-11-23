@@ -459,3 +459,9 @@
     margin-left: 0;
   }
 }
+
+.pestanas {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
