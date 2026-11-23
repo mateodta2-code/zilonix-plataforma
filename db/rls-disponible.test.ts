@@ -137,6 +137,15 @@ describe("Disponible (RLS, issue #422)", () => {
     await expect(cambiarActivaCuentaDisponible({ ...b, cuentaId: cuentaAId, activa: false })).rejects.toBeInstanceOf(DisponibleInvalidoError);
   });
 
+  it("un cuentaId que no es UUID da «Elige una cuenta.», no el 22P02 de Postgres", async () => {
+    for (const cuentaId of ["", "abc", "1; DROP TABLE x", `${cuentaAId}x`]) {
+      await expect(registrarSaldoDisponible({ ...a, cuentaId, saldo: "1", fechaCorte: HOY, nota: "", hoy: HOY })).rejects.toThrow(
+        new DisponibleInvalidoError("Elige una cuenta.")
+      );
+      await expect(cambiarActivaCuentaDisponible({ ...a, cuentaId, activa: false })).rejects.toThrow(new DisponibleInvalidoError("Elige una cuenta."));
+    }
+  });
+
   it("el mismo nombre se repite entre empresas pero no dentro de una", async () => {
     await expect(
       crearCuentaDisponible({ ...a, nombre: "Ahorros A", tipo: "billetera", entidad: "Nequi", ultimos4: "", moneda: "COP" })

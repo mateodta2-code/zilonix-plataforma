@@ -192,6 +192,9 @@ export default async function DisponiblePage({ searchParams }: { searchParams: R
                   <Campo etiqueta="Nota (opcional)">
                     <input name="nota" maxLength={200} className="zx-control" />
                   </Campo>
+                  <p className={styles.suave}>
+                    Si la fecha de corte es anterior a la del saldo vigente, este saldo solo queda en el historial: el vigente no cambia.
+                  </p>
                   <Boton type="submit" variante="primario">
                     Registrar saldo
                   </Boton>

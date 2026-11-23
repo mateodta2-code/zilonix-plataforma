@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasDisponible, cuentasMl, saldosDisponible, usuarios } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { esUuid } from "@/lib/inventario/calculos";
 import { SITE_ID_DEFECTO, SITIOS_ML } from "@/lib/ml/sitios";
 import { requierePermiso } from "@/lib/permisos";
 import {
@@ -19,6 +20,14 @@ import {
 // app/: ver = finanzas.consultar; crear y registrar = finanzas.modificar.
 
 export class CuentaDisponibleRepetidaError extends Error {}
+
+// El cuentaId llega del formulario: un texto que no es UUID hacía que
+// Postgres respondiera 22P02 (invalid_text_representation) y la página
+// diera 500. Se corta antes de consultar, con el mismo mensaje que una
+// cuenta que no existe.
+function validarCuentaId(cuentaId: string): void {
+  if (!esUuid(cuentaId)) throw new DisponibleInvalidoError("Elige una cuenta.");
+}
 
 export async function leerDisponible(
   empresaId: string,
@@ -118,6 +127,7 @@ export async function registrarSaldoDisponible(entrada: {
 }): Promise<{ id: string }> {
   await requierePermiso(entrada.usuarioId, entrada.empresaId, "finanzas", "modificar");
   const datos = validarSaldo(entrada, entrada.hoy);
+  validarCuentaId(entrada.cuentaId);
   return dbComoEmpresa(entrada.empresaId, async (tx) => {
     // RLS ya esconde la cuenta de otra empresa; esto da un mensaje claro
     // en vez del error de la FK compuesta.
@@ -153,6 +163,7 @@ export async function cambiarActivaCuentaDisponible(entrada: {
   activa: boolean;
 }): Promise<void> {
   await requierePermiso(entrada.usuarioId, entrada.empresaId, "finanzas", "modificar");
+  validarCuentaId(entrada.cuentaId);
   await dbComoEmpresa(entrada.empresaId, async (tx) => {
     const filas = await tx
       .update(cuentasDisponible)
