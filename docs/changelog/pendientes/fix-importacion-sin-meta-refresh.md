@@ -1,0 +1,1 @@
+- Importación de Mercado Libre: ya no devuelve a /panel/conectar-ml al navegar a otro módulo (se quitó el meta refresh; ahora un intervalo que se limpia al salir). Una importación sin terminar de más de 6 horas deja de contar como en curso (Refs #569).

@@ -18,6 +18,8 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
+import { ActualizarMientrasImporta } from "./ActualizarMientrasImporta";
+import { estaEnCurso } from "./importacionEnCurso";
 import styles from "./page.module.css";
 
 // Bug real: antes esta pantalla mostraba `searchParams.error` tal
@@ -115,16 +117,16 @@ export default async function ConectarMlPage({
   const urlConectar = "/api/ml/conectar";
 
   // Tarea 2.5 — importación inicial corriendo en segundo plano, una
-  // por cada cuenta conectada (sin cliente de JS aparte: un refresco
-  // automático de la página alcanza mientras haya alguna sin terminar).
+  // por cada cuenta conectada (ActualizarMientrasImporta refresca solo mientras
+  // esta pantalla está montada y haya alguna sin terminar).
   const importaciones = await Promise.all(
     cuentas.filter((c) => !c.desconectadaTs).map(async (c) => ({ cuenta: c, importacion: await obtenerUltimaImportacion(empresa.id, c.id) }))
   );
-  const hayImportacionEnCurso = importaciones.some((i) => i.importacion && !i.importacion.completadoTs);
+  const hayImportacionEnCurso = importaciones.some((i) => estaEnCurso(i.importacion));
 
   return (
     <>
-      {hayImportacionEnCurso && <meta httpEquiv="refresh" content="5" />}
+      {hayImportacionEnCurso && <ActualizarMientrasImporta />}
       <EncabezadoPagina titulo="Conectar marketplaces" />
 
       {searchParams.conectado && <div className={styles.avisoExito}>Cuenta conectada.</div>}
