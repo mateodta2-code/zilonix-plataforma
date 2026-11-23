@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leerItemEdicion } from "@/lib/ml/cliente";
+import { leerItemEdicion, leerPromocionActiva } from "@/lib/ml/cliente";
 import { leerPrecioEscrito, simularPrecio, textoSimulacion } from "@/lib/optimizacion/simulador";
 
 describe("precio escrito a mano", () => {
@@ -69,12 +69,40 @@ describe("publicación para editar (forma confirmada en staging, #464)", () => {
       tieneVariantes: false,
       estado: "active",
       sellerId: "123456",
+      userProduct: false,
       fotos: [
         { id: "123-MCO1_1", url: "https://http2.mlstatic.com/a.jpg" },
         { id: "123-MCO1_2", url: "https://http2.mlstatic.com/b.jpg" },
       ],
     });
     expect(leerItemEdicion({ id: "MCO1", variations: [{ id: 1 }] })?.tieneVariantes).toBe(true);
+  });
+
+  it("«User Products» por user_product_id o por la etiqueta (forma vista en staging, 22-nov)", () => {
+    expect(leerItemEdicion({ id: "MCO4656053860", user_product_id: "MCOU5978141360" })?.userProduct).toBe(true);
+    expect(leerItemEdicion({ id: "MCO4656053860", tags: ["good_quality_thumbnail", "user_product_listing"] })?.userProduct).toBe(true);
+    expect(leerItemEdicion({ id: "MCO1", tags: ["immediate_payment"] })?.userProduct).toBe(false);
+  });
+});
+
+describe("promoción vigente (GET /items/{id}/prices, forma vista en staging, 22-nov)", () => {
+  const precios = {
+    id: "MCO4656053860",
+    prices: [
+      { id: "3", type: "standard", amount: 129000, regular_amount: null, conditions: { start_time: null, end_time: null } },
+      { id: "2", type: "promotion", amount: 79900, regular_amount: 119900, conditions: { start_time: "2026-11-15T05:00:00Z", end_time: "2026-11-30T05:00:00Z" } },
+    ],
+  };
+
+  it("devuelve la promoción mientras está vigente", () => {
+    expect(leerPromocionActiva(precios, new Date("2026-11-22T12:00:00Z"))).toEqual({ precio: 79900, precioRegular: 119900, hasta: "2026-11-30T05:00:00.000Z" });
+  });
+
+  it("antes de empezar, después de terminar o sin promoción: null", () => {
+    expect(leerPromocionActiva(precios, new Date("2026-11-10T12:00:00Z"))).toBeNull();
+    expect(leerPromocionActiva(precios, new Date("2026-12-01T12:00:00Z"))).toBeNull();
+    expect(leerPromocionActiva({ prices: [precios.prices[0]] }, new Date("2026-11-22T12:00:00Z"))).toBeNull();
+    expect(leerPromocionActiva(null, new Date())).toBeNull();
   });
 });
 

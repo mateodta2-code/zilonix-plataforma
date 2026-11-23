@@ -15,7 +15,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerConexionIA } from "@/lib/ia/conexion";
 import { proveedorGeneraImagenes } from "@/lib/ia/imagen";
 import { obtenerMiMembresia } from "@/lib/membresias";
-import { competenciaItemMl, leerItemEdicionMl, PATRON_ID_PRODUCTO_O_ITEM, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
+import { competenciaItemMl, leerItemEdicionMl, PATRON_ID_PRODUCTO_O_ITEM, promocionActivaMl, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { linkPublicacion } from "@/lib/ml/permalink";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
@@ -160,11 +160,12 @@ export default async function DetalleOptimizacionPage({
   if (puedeEditar) {
     try {
       const token = await obtenerAccessTokenVigente(empresa.id, cuenta.id);
-      const [itemEdicion, automatizada, competencia, conexionIA] = await Promise.all([
+      const [itemEdicion, automatizada, competencia, conexionIA, promocion] = await Promise.all([
         leerItemEdicionMl(datos.item.id, token),
         tieneAutomatizacionPrecioMl(datos.item.id, token),
         datos.item.catalogo ? competenciaItemMl(datos.item.id, token, siteId).catch(() => null) : Promise.resolve(null),
         obtenerConexionIA(empresa.id, "optimizacion").catch(() => null),
+        promocionActivaMl(datos.item.id, token),
       ]);
       // Sin permiso de Finanzas el simulador no muestra ganancia.
       const c = conFinanzas ? actual.costos : null;
@@ -179,6 +180,8 @@ export default async function DetalleOptimizacionPage({
           vendidas: itemEdicion.vendidas,
           tieneVariantes: itemEdicion.tieneVariantes,
           automatizada,
+          userProduct: itemEdicion.userProduct,
+          promocion,
           fotos: itemEdicion.fotos,
           cloudinaryConfigurado: cloudinaryConfigurado(),
           iaImagen: !conexionIA ? "sin_conexion" : proveedorGeneraImagenes(conexionIA.proveedor) ? "lista" : "sin_imagenes",

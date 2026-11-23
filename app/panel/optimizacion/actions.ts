@@ -21,6 +21,7 @@ import {
   LimiteMercadoLibreError,
   motivoErrorEscrituraMl,
   PATRON_ID_PRODUCTO_O_ITEM,
+  promocionActivaMl,
   tieneAutomatizacionPrecioMl,
   visitasItemMl,
   type CalidadItemMl,
@@ -28,6 +29,7 @@ import {
   type ItemEdicionMl,
 } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { formatearMoneda } from "@/lib/ml/sitios";
 import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary } from "@/lib/cloudinary";
 import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { proponerContenido } from "@/lib/ia/contenido";
@@ -380,7 +382,7 @@ export async function editarPrecioAction(entrada: { cuentaMlId: string; itemId: 
   if (automatizada === true) {
     return { ok: false, aviso: "Esta publicación tiene la automatización de precios de Mercado Libre activa: Mercado Libre no deja cambiar el precio a mano." };
   }
-  return escribirYAuditar(
+  const resultado = await escribirYAuditar(
     prep,
     { price: Number(precio) },
     {
@@ -391,6 +393,15 @@ export async function editarPrecioAction(entrada: { cuentaMlId: string; itemId: 
     },
     "Precio actualizado en Mercado Libre."
   );
+  // Con una promoción vigente el comprador sigue viendo el precio de la
+  // promoción: se avisa para que no parezca que el cambio no se aplicó.
+  if (!resultado.ok) return resultado;
+  const promocion = await promocionActivaMl(prep.item.id, prep.token);
+  if (!promocion) return resultado;
+  return {
+    ok: true,
+    aviso: `Precio normal actualizado. Hay una promoción activa: el comprador ve ${formatearMoneda(promocion.precio, prep.cuenta.siteId)} hasta que termine; después verá el precio nuevo.`,
+  };
 }
 
 export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: string; titulo: string }): Promise<ResultadoEdicion> {
@@ -400,16 +411,22 @@ export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: 
   if (!titulo) return { ok: false, aviso: "Escribe un título." };
   if (titulo.length > LARGO_MAXIMO_TITULO) return { ok: false, aviso: `El título es muy largo (máximo ${LARGO_MAXIMO_TITULO} caracteres).` };
   if (prep.item.vendidas > 0) return { ok: false, aviso: "Mercado Libre solo deja cambiar el título de publicaciones sin ventas." };
+  // «User Products»: Mercado Libre rechaza title (BODY_INVALID_FIELDS);
+  // se cambia family_name y ML recalcula el título, de forma asíncrona y
+  // para todas las publicaciones del mismo producto.
+  const userProduct = prep.item.userProduct;
   return escribirYAuditar(
     prep,
-    { title: titulo },
+    userProduct ? { family_name: titulo } : { title: titulo },
     {
       accion: "cambiar_titulo_publicacion",
       detalle: `Cambió el título de ${prep.item.id} (${prep.cuenta.nickname}).`,
       valorAnterior: prep.item.titulo ?? undefined,
       valorNuevo: titulo,
     },
-    "Título actualizado en Mercado Libre."
+    userProduct
+      ? "Título enviado a Mercado Libre. Puede tardar unos minutos en verse y se aplica a todas las publicaciones de este producto."
+      : "Título actualizado en Mercado Libre."
   );
 }
 
