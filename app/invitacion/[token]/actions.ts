@@ -14,6 +14,6 @@ export async function aceptarInvitacionAction(formData: FormData) {
 
   const { empresaId } = await aceptarInvitacion(token, usuario.id);
 
-  cookies().set("empresa_actual", empresaId, { httpOnly: true, sameSite: "lax", path: "/" });
+  cookies().set("empresa_actual", empresaId, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/" });
   redirect("/panel");
 }
