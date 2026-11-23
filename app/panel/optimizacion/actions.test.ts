@@ -11,6 +11,7 @@ const ml = vi.hoisted(() => ({
   actualizar: vi.fn(),
   itemEdicion: vi.fn(),
   automatizacion: vi.fn(),
+  promocion: vi.fn(),
   producto: vi.fn(),
   ofertas: vi.fn(),
   fichas: vi.fn(),
@@ -82,6 +83,7 @@ vi.mock("@/lib/ml/cliente", async () => {
     actualizarItemMl: ml.actualizar,
     leerItemEdicionMl: ml.itemEdicion,
     tieneAutomatizacionPrecioMl: ml.automatizacion,
+    promocionActivaMl: ml.promocion,
     productoCatalogoDeItemMl: ml.producto,
     ofertasProductoCompetenciaMl: ml.ofertas,
     fichasPublicacionesMl: ml.fichas,
@@ -221,7 +223,7 @@ describe("cambiarEstadoPublicacionAction (escribe en Mercado Libre)", () => {
 });
 
 describe("Fase 3: editar precio, título y fotos", () => {
-  const item = { id: "MCO1", titulo: "Faja", precio: 100000, vendidas: 0, tieneVariantes: false, estado: "active", fotos: [{ id: "f1", url: "https://a" }, { id: "f2", url: "https://b" }] };
+  const item = { id: "MCO1", titulo: "Faja", precio: 100000, vendidas: 0, tieneVariantes: false, estado: "active", userProduct: false, fotos: [{ id: "f1", url: "https://a" }, { id: "f2", url: "https://b" }] };
 
   beforeEach(() => {
     estado.conPermiso = true;
@@ -230,8 +232,26 @@ describe("Fase 3: editar precio, título y fotos", () => {
     ml.actualizar.mockReset().mockResolvedValue({ ok: true, status: 200, data: {}, textoCrudo: "" });
     ml.itemEdicion.mockReset().mockResolvedValue(item);
     ml.automatizacion.mockReset().mockResolvedValue(false);
+    ml.promocion.mockReset().mockResolvedValue(null);
     auditorias.length = 0;
     vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("precio con promoción activa: guarda el normal y avisa qué precio ve el comprador", async () => {
+    ml.promocion.mockResolvedValue({ precio: 79900, precioRegular: 119900, hasta: "2026-11-30T05:00:00.000Z" });
+    const r = await editarPrecioAction({ cuentaMlId: CUENTA, itemId: "MCO1", precio: "129000" });
+    expect(ml.actualizar).toHaveBeenCalledWith("MCO1", "token", { price: 129000 });
+    expect(r.ok).toBe(true);
+    expect(r.aviso).toContain("promoción activa");
+    expect(r.aviso).toContain("79.900");
+  });
+
+  it("título de una publicación «User Products»: manda family_name, nunca title", async () => {
+    ml.itemEdicion.mockResolvedValue({ ...item, userProduct: true });
+    const r = await editarTituloAction({ cuentaMlId: CUENTA, itemId: "MCO1", titulo: "Compresa de hielo para rodilla" });
+    expect(r.ok).toBe(true);
+    expect(ml.actualizar).toHaveBeenCalledWith("MCO1", "token", { family_name: "Compresa de hielo para rodilla" });
+    expect(r.aviso).toContain("todas las publicaciones de este producto");
   });
 
   it("precio: lee el texto según el sitio, pide modificar y audita antes/después", async () => {
