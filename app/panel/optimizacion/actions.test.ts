@@ -295,6 +295,20 @@ describe("Fase 3: editar precio, título y fotos", () => {
     expect(ml.actualizar).not.toHaveBeenCalled();
   });
 
+  it("con «BODY_INVALID_FIELDS» muestra el detalle de ML (código, causas y campos) para soporte", async () => {
+    ml.actualizar.mockResolvedValue({
+      ok: false,
+      status: 400,
+      data: null,
+      textoCrudo: JSON.stringify({ message: "BODY_INVALID_FIELDS", error: "body.invalid_fields", status: 400, cause: [{ code: "field.not_modifiable", message: "family_name is not modifiable", references: ["family_name"] }] }),
+    });
+    const r = await editarTituloAction({ cuentaMlId: CUENTA, itemId: "MCO1", titulo: "Faja reductora" });
+    expect(r.ok).toBe(false);
+    expect(r.aviso).toContain("detalle para soporte");
+    expect(r.aviso).toContain("error: body.invalid_fields");
+    expect(r.aviso).toContain("field.not_modifiable · family_name is not modifiable · campos: family_name");
+  });
+
   it("si Mercado Libre rechaza, muestra su motivo y no audita; sin permiso no toca nada", async () => {
     ml.actualizar.mockResolvedValue({ ok: false, status: 400, data: null, textoCrudo: JSON.stringify({ message: "price is invalid" }) });
     expect((await editarPrecioAction({ cuentaMlId: CUENTA, itemId: "MCO1", precio: "95000" })).aviso).toBe("Mercado Libre no aceptó el cambio: price is invalid");
@@ -537,6 +551,15 @@ describe("diagnóstico de solo lectura (solo administradores)", () => {
     });
     respuestas.set(`/items/${ITEM}/prices`, { ok: true, status: 200, data: { prices: [{ type: "standard", amount: 50000 }] } });
     respuestas.set("/user-products/MCOU123456", { ok: true, status: 200, data: { id: "MCOU123456", family_id: 987, name: "Faja reductora negra", user_id: 123456 } });
+    respuestas.set("/users/123456/items/search", { ok: true, status: 200, data: { results: [ITEM, "MCO999"] } });
+    respuestas.set("/items", {
+      ok: true,
+      status: 200,
+      data: [
+        { code: 200, body: { id: ITEM, status: "active", listing_type_id: "gold_pro", sold_quantity: 0 } },
+        { code: 200, body: { id: "MCO999", status: "active", listing_type_id: "gold_special", sold_quantity: 7 } },
+      ],
+    });
     ml.automatizacion.mockReset().mockResolvedValue(false);
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       const ruta = new URL(url).pathname;
@@ -567,6 +590,9 @@ describe("diagnóstico de solo lectura (solo administradores)", () => {
     expect(texto).toContain('family_name: "Faja reductora"');
     expect(texto).toContain("el título empieza con family_name: sí");
     expect(texto).toContain("automatización de precios activa: no");
+    expect(texto).toContain("publicaciones del mismo producto: 2 (ventas en total: 7)");
+    expect(texto).toContain('"MCO999" · estado "active" · tipo "gold_special" · ventas 7');
+    expect(texto).not.toContain("/users/");
     expect(texto).not.toContain("token");
     expect(texto).not.toContain("seller_id");
     expect(texto).not.toContain("user_id");

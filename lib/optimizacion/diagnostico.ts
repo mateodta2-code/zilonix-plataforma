@@ -1,4 +1,4 @@
-import { pedirLecturaMl, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
+import { PATRON_ID_PRODUCTO_O_ITEM, PATRON_ID_VENDEDOR, pedirLecturaMl, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
 
 // SOLO servidor. Diagnóstico de solo lectura de una publicación (botón en
 // el detalle de Optimización, solo administradores; condiciones de Pablo
@@ -9,6 +9,10 @@ import { pedirLecturaMl, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
 // 2. GET /items/{id}/prices.
 // 3. GET /user-products/{user_product_id}, si lo trae.
 // 4. Si tiene la automatización de precios activa.
+// 5. Las publicaciones de la cuenta con el mismo user_product_id
+//    (GET /users/{id}/items/search?user_product_id=) y sus ventas
+//    (GET /items?ids=): ML solo deja cambiar family_name si ninguna
+//    publicación del mismo producto tiene ventas (22-nov).
 // Nada se guarda ni se escribe. Nunca se pide seller_id ni se muestra el
 // token: los textos se muestran solo si su clave está en la lista blanca
 // (ids de la publicación, estados, tipos, etiquetas) o si son el título
@@ -93,6 +97,8 @@ export type EntradaDiagnostico = {
   precios: RespuestaDiagnostico | null;
   userProduct: RespuestaDiagnostico | null;
   automatizada: boolean | null;
+  // null = no aplica (sin user_product_id) o no se consultó.
+  hermanas?: RespuestaDiagnostico | null;
 };
 
 function textoLibre(v: unknown): string {
@@ -127,6 +133,18 @@ export function lineasDiagnostico(e: EntradaDiagnostico): string[] {
     }
   }
   lineas.push(`automatización de precios activa: ${e.automatizada === null ? "no se supo" : e.automatizada ? "sí" : "no"}`);
+  if (userProductId && e.hermanas) {
+    if (!e.hermanas.ok) {
+      lineas.push(`publicaciones del mismo producto: HTTP ${e.hermanas.status}`);
+    } else {
+      const filas = (Array.isArray(e.hermanas.data) ? e.hermanas.data : []) as Record<string, unknown>[];
+      const vendidas = filas.reduce((t, f) => t + (typeof f.sold_quantity === "number" ? f.sold_quantity : 0), 0);
+      lineas.push(`publicaciones del mismo producto: ${filas.length} (ventas en total: ${vendidas})`);
+      for (const f of filas.slice(0, 20)) {
+        lineas.push(`  ${forma(f.id, 0, "id")} · estado ${forma(f.status, 0, "status")} · tipo ${forma(f.listing_type_id, 0, "listing_type_id")} · ventas ${forma(f.sold_quantity ?? null)}`);
+      }
+    }
+  }
   return lineas;
 }
 
@@ -135,16 +153,37 @@ async function leer(ruta: string, token: string, query?: string): Promise<Respue
   return r.ok ? { ok: true, data: r.data } : { ok: false, status: r.status };
 }
 
-// Solo GET. itemId ya validado por quien llama (PATRON_ID_PRODUCTO_O_ITEM).
-export async function diagnosticarPublicacion(itemId: string, token: string): Promise<string[]> {
+// Publicaciones de la cuenta con el mismo User Product, con sus ventas.
+// Devuelve la lista de cuerpos de /items?ids= (solo id, estado, tipo y
+// ventas). Máximo 20.
+async function publicacionesDelProducto(sellerId: string, userProductId: string, token: string): Promise<RespuestaDiagnostico> {
+  const busqueda = await leer(`/users/${sellerId}/items/search`, token, `?user_product_id=${encodeURIComponent(userProductId)}&limit=20`);
+  if (!busqueda.ok) return busqueda;
+  const resultados = (busqueda.data as { results?: unknown })?.results;
+  const ids = (Array.isArray(resultados) ? resultados : []).filter((id): id is string => typeof id === "string" && PATRON_ID_PRODUCTO_O_ITEM.test(id)).slice(0, 20);
+  if (ids.length === 0) return { ok: true, data: [] };
+  const detalle = await leer("/items", token, `?ids=${ids.join(",")}&attributes=id,status,listing_type_id,sold_quantity`);
+  if (!detalle.ok) return detalle;
+  const cuerpos = (Array.isArray(detalle.data) ? detalle.data : []).flatMap((r) => {
+    const x = r as { code?: unknown; body?: unknown };
+    return x?.code === 200 && x.body && typeof x.body === "object" ? [x.body] : [];
+  });
+  return { ok: true, data: cuerpos };
+}
+
+// Solo GET. itemId ya validado por quien llama (PATRON_ID_PRODUCTO_O_ITEM);
+// sellerId es la cuenta conectada (solo se usa en la ruta, nunca se muestra).
+export async function diagnosticarPublicacion(itemId: string, token: string, sellerId: string | null = null): Promise<string[]> {
   const item = await leer(`/items/${itemId}`, token, `?attributes=${CAMPOS_ITEM}`);
   if (!item.ok) return lineasDiagnostico({ itemId, item, precios: null, userProduct: null, automatizada: null });
   const d = (item.data && typeof item.data === "object" ? item.data : {}) as Record<string, unknown>;
   const userProductId = typeof d.user_product_id === "string" && ID_USER_PRODUCT.test(d.user_product_id) ? d.user_product_id : null;
-  const [precios, userProduct, automatizada] = await Promise.all([
+  const vendedor = sellerId && PATRON_ID_VENDEDOR.test(sellerId) ? sellerId : null;
+  const [precios, userProduct, automatizada, hermanas] = await Promise.all([
     leer(`/items/${itemId}/prices`, token),
     userProductId ? leer(`/user-products/${userProductId}`, token) : Promise.resolve(null),
     tieneAutomatizacionPrecioMl(itemId, token),
+    userProductId && vendedor ? publicacionesDelProducto(vendedor, userProductId, token) : Promise.resolve(null),
   ]);
-  return lineasDiagnostico({ itemId, item, precios, userProduct, automatizada });
+  return lineasDiagnostico({ itemId, item, precios, userProduct, automatizada, hermanas });
 }

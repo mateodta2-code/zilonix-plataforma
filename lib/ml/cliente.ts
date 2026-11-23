@@ -1503,6 +1503,36 @@ export function motivoErrorEscrituraMl(textoCrudo: string): string | null {
   }
 }
 
+// Detalle técnico de un rechazo de escritura, para soporte: código del
+// error, estado y cada causa (código, mensaje y campos referidos). Sirve
+// cuando ML solo dice «BODY_INVALID_FIELDS» (Optimización, 22-nov). Es
+// texto de la respuesta de ML (nunca lleva el token), recortado.
+export function detalleErrorEscrituraMl(textoCrudo: string): string | null {
+  if (!textoCrudo) return null;
+  let json: { message?: unknown; error?: unknown; status?: unknown; cause?: unknown };
+  try {
+    json = JSON.parse(textoCrudo) as typeof json;
+  } catch {
+    return null;
+  }
+  if (!json || typeof json !== "object") return null;
+  const partes: string[] = [];
+  if (typeof json.error === "string" && json.error) partes.push(`error: ${json.error}`);
+  if (typeof json.message === "string" && json.message && json.message !== json.error) partes.push(`mensaje: ${json.message}`);
+  if (Array.isArray(json.cause)) {
+    const causas = json.cause.slice(0, 5).flatMap((c) => {
+      if (typeof c === "string") return [c];
+      if (!c || typeof c !== "object") return [];
+      const x = c as { code?: unknown; cause_id?: unknown; message?: unknown; references?: unknown };
+      const trozos = [x.code, x.cause_id, x.message].filter((v) => (typeof v === "string" && v) || typeof v === "number").map(String);
+      if (Array.isArray(x.references) && x.references.length) trozos.push(`campos: ${x.references.filter((r) => typeof r === "string").slice(0, 5).join(", ")}`);
+      return trozos.length ? [trozos.join(" · ")] : [];
+    });
+    partes.push(causas.length ? `causas: ${causas.join(" / ")}` : "sin causas");
+  }
+  return partes.length ? partes.join("; ").replace(/\s+/g, " ").slice(0, 500) : null;
+}
+
 // "participar" (unirse por primera vez) — POST, confirmado real en
 // zilonix-os-web (una promoción pasó a "started"). `top_deal_price`
 // nunca se manda (bug real ya corregido ahí: se creía obligatorio,
