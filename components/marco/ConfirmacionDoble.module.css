@@ -17,9 +17,9 @@
   max-width: 440px;
   padding: 20px;
   border-radius: 14px;
-  border: 1px solid var(--borde, rgba(160, 180, 220, 0.35));
-  background: var(--fondo-tarjeta, #0f1424);
-  color: inherit;
+  border: 1px solid var(--borde);
+  background: var(--superficie);
+  color: var(--texto);
 }
 
 .titulo {
