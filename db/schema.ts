@@ -1672,11 +1672,18 @@ export const ordenesCompra = pgTable(
     bodegaDestinoId: uuid("bodega_destino_id").notNull(),
     estado: estadoOrdenCompraEnum("estado").notNull().default("abierta"),
     nota: text("nota"),
+    // Issue #422 (fase 5, Cuentas por pagar) — el pago al proveedor.
+    // Vacío = todavía se le debe. Es independiente del estado de
+    // recepción: una orden se puede pagar antes de que llegue.
+    fechaPago: date("fecha_pago", { mode: "string" }),
+    medioPago: text("medio_pago"),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
     creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    // Un medio de pago sin fecha de pago no dice nada: o las dos o ninguna.
+    medioConFecha: check("ordenes_compra_medio_con_fecha", sql`${t.medioPago} is null or ${t.fechaPago} is not null`),
     empresaIdUnica: unique("ordenes_compra_empresa_id_unica").on(t.empresaId, t.id),
     numeroUnico: unique("ordenes_compra_empresa_numero_unico").on(t.empresaId, t.numero),
     delTercero: foreignKey({
