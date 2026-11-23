@@ -1,11 +1,12 @@
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { promocionesAcciones } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
-import { leerItemParaPromocionMl, leerPromocionesItemMl, listarItemsActivosMl, motivoErrorEscrituraMl, type PromocionCrudaMl } from "@/lib/ml/cliente";
+import { leerItemParaPromocionMl, leerPromocionesItemMl, motivoErrorEscrituraMl, type PromocionCrudaMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { puedeSalirPorApi } from "@/lib/ml/promociones";
 import { conReintento429Lectura, listarCuentasParaPublicaciones, TAMANO_LOTE_ML, TOPE_CONCURRENCIA_APLICAR_REGLA } from "@/lib/ml/promocionesPublicaciones";
 import { salirDePromocionConReintento } from "@/lib/ml/promocionesSalir";
+import { agruparPorCuenta, type ItemSeleccionado } from "@/lib/ml/promocionesSeleccion";
 
 // Regla «Dejar de participar en todas las promociones» (Mateo) — sin
 // migración: nada se guarda como "modo". Dos pasos, ambos en vivo:
@@ -41,17 +42,18 @@ export type VistaPreviaSalirTodas = {
   porTipo: Record<string, number>;
 };
 
-// Recorre el catálogo activo de las cuentas pedidas, página por página
-// (nunca todo de una vez), y le entrega a `porItem` cada publicación
+// Recorre SOLO las publicaciones elegidas (Promo-A, Refs #571; nunca el
+// catálogo) en tandas de TAMANO_LOTE_ML, y le entrega a `porItem` cada una
 // junto con sus promociones activas. Lo comparten la vista previa y la
 // ejecución — la misma lectura, así lo que se cuenta es lo que se hace.
 async function recorrerPublicacionesConPromos(
   empresaId: string,
-  cuentaId: string | "todas",
+  seleccion: ItemSeleccionado[],
   porItem: (ctx: { cuenta: { id: string; nickname: string }; token: string; itemId: string; activas: PromocionCrudaMl[] }) => Promise<void>,
   alLeer: (resultado: "leida" | "error") => void
 ): Promise<void> {
-  const cuentas = await listarCuentasParaPublicaciones(empresaId, cuentaId);
+  const grupos = agruparPorCuenta(seleccion);
+  const cuentas = (await listarCuentasParaPublicaciones(empresaId, "todas")).filter((c) => grupos.has(c.id));
   for (const cuenta of cuentas) {
     let token: string;
     try {
@@ -59,12 +61,11 @@ async function recorrerPublicacionesConPromos(
     } catch {
       continue; // una cuenta sin token válido nunca frena a las demás
     }
-    let offset = 0;
-    while (true) {
-      const pagina = await conReintento429Lectura(() => listarItemsActivosMl(cuenta.cuentaIdExterna, token, offset, TAMANO_LOTE_ML));
-      if (pagina.ids.length === 0) break;
+    const ids = grupos.get(cuenta.id) ?? [];
+    for (let desde = 0; desde < ids.length; desde += TAMANO_LOTE_ML) {
+      const lote = ids.slice(desde, desde + TAMANO_LOTE_ML);
 
-      await conConcurrenciaLimitada(pagina.ids, TOPE_CONCURRENCIA_APLICAR_REGLA, async (itemId) => {
+      await conConcurrenciaLimitada(lote, TOPE_CONCURRENCIA_APLICAR_REGLA, async (itemId) => {
         let activas: PromocionCrudaMl[];
         try {
           const lectura = await conReintento429Lectura(() => leerPromocionesItemMl(itemId, token));
@@ -81,18 +82,15 @@ async function recorrerPublicacionesConPromos(
         if (activas.length === 0) return;
         await porItem({ cuenta, token, itemId, activas });
       });
-
-      offset += pagina.ids.length;
-      if (pagina.ids.length < TAMANO_LOTE_ML || offset >= pagina.totalCatalogo) break;
     }
   }
 }
 
-export async function vistaPreviaSalirTodas(empresaId: string, cuentaId: string | "todas"): Promise<VistaPreviaSalirTodas> {
+export async function vistaPreviaSalirTodas(empresaId: string, seleccion: ItemSeleccionado[]): Promise<VistaPreviaSalirTodas> {
   const vista: VistaPreviaSalirTodas = { revisadas: 0, publicaciones: 0, promociones: 0, salibles: 0, noPermitidas: 0, lecturasConError: 0, porTipo: {} };
   await recorrerPublicacionesConPromos(
     empresaId,
-    cuentaId,
+    seleccion,
     async ({ activas }) => {
       vista.publicaciones += 1;
       for (const promo of activas) {
@@ -124,12 +122,12 @@ export type FilaSalirTodas = {
 
 export type ResumenSalirTodas = { revisadas: number; salieron: number; errores: number; noPermitidas: number; filas: FilaSalirTodas[] };
 
-export async function salirDeTodasLasPromociones(empresaId: string, usuarioId: string, cuentaId: string | "todas"): Promise<ResumenSalirTodas> {
+export async function salirDeTodasLasPromociones(empresaId: string, usuarioId: string, seleccion: ItemSeleccionado[]): Promise<ResumenSalirTodas> {
   const resumen: ResumenSalirTodas = { revisadas: 0, salieron: 0, errores: 0, noPermitidas: 0, filas: [] };
 
   await recorrerPublicacionesConPromos(
     empresaId,
-    cuentaId,
+    seleccion,
     async ({ cuenta, token, itemId, activas }) => {
       let titulo: string | null = null;
       try {

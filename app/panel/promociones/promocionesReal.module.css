@@ -78,11 +78,47 @@
   padding: 14px 16px;
 }
 
-.filaResumen {
+.filaConCheck {
   display: flex;
   align-items: center;
   gap: 12px;
-  width: 100%;
+}
+
+.checkFila {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.controlSeleccion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.filaCheck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.notaSeleccion {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.filaResumen {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   background: none;
   border: none;
   padding: 0;

@@ -14,6 +14,7 @@ import {
   type ItemConPromociones,
   type ReglasCuentaPromocion,
 } from "@/lib/ml/promociones";
+import { agruparPorCuenta, type ItemSeleccionado } from "@/lib/ml/promocionesSeleccion";
 import { type AccionEscribible, escribirPromocionMl, validarCalculado } from "@/lib/ml/promocionesEjecucion";
 import { evaluarCandidatoConReglas, leerReglasAdicionalesCuentas, type CacheNombresPromocion } from "@/lib/ml/promocionesReglasAdicionales";
 import type { ReglasAdicionales } from "@/lib/ml/promocionesReglasTexto";
@@ -465,9 +466,23 @@ function cumpleRegla(c: CandidatoCalculado, regla: ReglaAplicable): boolean {
   return pct == null || pct <= regla.maximoPct;
 }
 
-export async function aplicarReglaALote(empresaId: string, usuarioId: string, cuentaId: string | "todas", regla: ReglaAplicable): Promise<ResumenAplicarRegla> {
-  const cuentas = await listarCuentasParaPublicaciones(empresaId, cuentaId);
+// Solo se procesan los itemId de `seleccion` (Promo-A, Refs #571): nunca
+// se lista el catálogo de ML. Una cuenta que no es de la empresa (o está
+// desconectada) no aparece en listarCuentasParaPublicaciones (RLS + filtro)
+// y sus publicaciones quedan «omitidas», jamás se tocan.
+export async function aplicarReglaALote(empresaId: string, usuarioId: string, seleccion: ItemSeleccionado[], regla: ReglaAplicable): Promise<ResumenAplicarRegla> {
+  const cuentasEmpresa = await listarCuentasParaPublicaciones(empresaId, "todas");
+  const gruposPorCuenta = agruparPorCuenta(seleccion);
+  const cuentas = cuentasEmpresa.filter((c) => gruposPorCuenta.has(c.id));
   const resumen: ResumenAplicarRegla = { revisadas: 0, participadas: 0, fallidas: 0, omitidas: 0, filas: [] };
+  for (const [cuentaIdSel, ids] of gruposPorCuenta) {
+    if (cuentasEmpresa.some((c) => c.id === cuentaIdSel)) continue;
+    for (const itemId of ids) {
+      resumen.revisadas += 1;
+      resumen.omitidas += 1;
+      resumen.filas.push({ itemId, tituloProducto: null, tipoPromocion: "", estado: "omitida", error: "La cuenta de esta publicación no está disponible." });
+    }
+  }
   const aplicarPiso = regla.tipo !== "todas";
   // Las «reglas adicionales» (texto libre) SOLO aplican a «tabla-maestra»:
   // nunca a «todas» (sin piso, decisión de Mateo), «maximo» ni «salir-todas».
@@ -478,23 +493,40 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, cu
     try {
       token = await obtenerAccessTokenVigente(empresaId, cuenta.id);
     } catch {
+      for (const itemId of gruposPorCuenta.get(cuenta.id) ?? []) {
+        resumen.revisadas += 1;
+        resumen.omitidas += 1;
+        resumen.filas.push({ itemId, tituloProducto: null, tipoPromocion: "", estado: "omitida", error: "No se pudo usar la cuenta de Mercado Libre (reconectarla)." });
+      }
       continue;
     }
     const reglasCuenta = await leerReglasFrescasCuenta(empresaId, cuenta.id);
     const reglasAdicionales = usaReglasAdicionales ? (await leerReglasAdicionalesCuentas(empresaId, [cuenta.id])).get(cuenta.id) ?? null : null;
     const cacheNombres: CacheNombresPromocion = new Map();
 
-    let offset = 0;
-    while (true) {
-      const pagina = await conReintento429Lectura(() => listarItemsActivosMl(cuenta.cuentaIdExterna, token, offset, TAMANO_LOTE_ML));
-      if (pagina.ids.length === 0) break;
+    const idsCuenta = gruposPorCuenta.get(cuenta.id) ?? [];
+    for (let desde = 0; desde < idsCuenta.length; desde += TAMANO_LOTE_ML) {
+      const pagina = { ids: idsCuenta.slice(desde, desde + TAMANO_LOTE_ML) };
 
       const candidatosPorItem = await conConcurrenciaLimitada(pagina.ids, TOPE_CONCURRENCIA_APLICAR_REGLA, async (itemId) => {
         const [detalle, resultadoPromos] = await Promise.all([
           conReintento429Lectura(() => leerItemParaPromocionMl(itemId, token)),
           conReintento429Lectura(() => leerPromocionesItemMl(itemId, token)),
         ]);
-        if (!detalle || resultadoPromos.estado !== "ok" || resultadoPromos.promociones.length === 0) return [];
+        // Una publicación elegida a mano nunca desaparece en silencio: si no se
+        // pudo leer o no tiene promociones, queda en el resumen con el motivo.
+        if (!detalle || resultadoPromos.estado !== "ok" || resultadoPromos.promociones.length === 0) {
+          resumen.revisadas += 1;
+          resumen.omitidas += 1;
+          resumen.filas.push({
+            itemId,
+            tituloProducto: detalle?.title ?? null,
+            tipoPromocion: "",
+            estado: "omitida",
+            error: !detalle || resultadoPromos.estado !== "ok" ? "No se pudo leer la publicación en Mercado Libre." : "No tiene promociones disponibles.",
+          });
+          return [];
+        }
         // «todas»: no se lee ni se exige el piso (costos_sku).
         const { precioMinimo, costo } = aplicarPiso ? await leerPisoYCostoFresco(empresaId, detalle.skuCodigo) : { precioMinimo: null, costo: null };
         const item: ItemConPromociones = {
@@ -586,8 +618,6 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, cu
         resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: resultado.estado, error: resultado.error });
       });
 
-      offset += pagina.ids.length;
-      if (pagina.ids.length < TAMANO_LOTE_ML || offset >= pagina.totalCatalogo) break;
     }
   }
 
