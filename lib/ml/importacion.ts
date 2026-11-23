@@ -7,8 +7,21 @@ import { sincronizarDespacho } from "@/lib/ml/despachos";
 import { guardarOrdenMl } from "@/lib/ml/ventas-finanzas";
 import type { OrdenMl } from "@/lib/finanzas/venta-ml";
 
-const DIAS_HACIA_ATRAS = 60;
+// Issue #567 — historial que se importa al conectar (1 año). La pantalla
+// /panel/conectar-ml arma sus textos a partir de esta constante.
+export const DIAS_HACIA_ATRAS = 365;
 const TAMAÑO_PAGINA = 50;
+// Ventanas de fechas: /orders/search limita el offset, así que nunca se
+// pagina un año entero con un solo offset; se pide por ventanas cortas y se
+// pagina dentro de cada una.
+const DIAS_POR_VENTANA = 30;
+const MAX_REINTENTOS_429 = 5;
+const ESPERA_BASE_429_MS = 1000;
+const DIA_MS = 24 * 60 * 60 * 1000;
+
+export function textoHistorialImportacion(): string {
+  return DIAS_HACIA_ATRAS === 365 ? "el último año" : `los últimos ${DIAS_HACIA_ATRAS} días`;
+}
 
 // Tarea 2.5 — formato de petición confirmado contra el código real ya
 // en producción del Zilonix OS actual (zilonix-os-web/lib/
@@ -40,18 +53,50 @@ async function traerEnvioReal(accessToken: string, shipmentId: number | string):
   return res.json();
 }
 
-async function traerPedidosReales(accessToken: string, cuentaIdExterna: string, desdeIso: string): Promise<PedidoMl[]> {
-  const resultado: PedidoMl[] = [];
-  let offset = 0;
-  while (true) {
-    const url = `https://api.mercadolibre.com/orders/search?seller=${cuentaIdExterna}&order.date_created.from=${encodeURIComponent(desdeIso)}&sort=date_desc&limit=${TAMAÑO_PAGINA}&offset=${offset}`;
+const esperarMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// 429: reintento con espera creciente (respeta Retry-After si viene).
+async function fetchConReintento429(url: string, accessToken: string, esperar: (ms: number) => Promise<void>): Promise<Response> {
+  for (let intento = 0; ; intento++) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) throw await errorDeRespuesta(res, "al traer pedidos");
-    const data = await res.json();
-    const pagina: PedidoMl[] = data.results ?? [];
-    resultado.push(...pagina);
-    if (pagina.length < TAMAÑO_PAGINA) break;
-    offset += TAMAÑO_PAGINA;
+    if (res.status !== 429 || intento >= MAX_REINTENTOS_429) return res;
+    const retryAfter = Number(res.headers?.get?.("retry-after"));
+    await esperar(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : ESPERA_BASE_429_MS * 2 ** intento);
+  }
+}
+
+export async function traerPedidosReales(
+  accessToken: string,
+  cuentaIdExterna: string,
+  desdeIso: string,
+  opciones: { esperar?: (ms: number) => Promise<void>; hastaMs?: number } = {}
+): Promise<PedidoMl[]> {
+  const esperar = opciones.esperar ?? esperarMs;
+  const hasta = opciones.hastaMs ?? Date.now();
+  const vistos = new Set<string>();
+  const resultado: PedidoMl[] = [];
+  for (let ini = new Date(desdeIso).getTime(); ini < hasta; ini += DIAS_POR_VENTANA * DIA_MS) {
+    const fin = Math.min(ini + DIAS_POR_VENTANA * DIA_MS, hasta);
+    const from = encodeURIComponent(new Date(ini).toISOString());
+    const to = encodeURIComponent(new Date(fin).toISOString());
+    let offset = 0;
+    while (true) {
+      const url = `https://api.mercadolibre.com/orders/search?seller=${cuentaIdExterna}&order.date_created.from=${from}&order.date_created.to=${to}&sort=date_desc&limit=${TAMAÑO_PAGINA}&offset=${offset}`;
+      const res = await fetchConReintento429(url, accessToken, esperar);
+      // 400/404 en una ventana (fecha fuera de lo que ML permite): se omite y se sigue.
+      if (res.status === 400 || res.status === 404) break;
+      if (!res.ok) throw await errorDeRespuesta(res, "al traer pedidos");
+      const data = await res.json();
+      const pagina: PedidoMl[] = data.results ?? [];
+      for (const p of pagina) {
+        const id = String(p.id);
+        if (vistos.has(id)) continue; // un pedido en el borde de dos ventanas
+        vistos.add(id);
+        resultado.push(p);
+      }
+      if (pagina.length < TAMAÑO_PAGINA) break;
+      offset += TAMAÑO_PAGINA;
+    }
   }
   return resultado;
 }
