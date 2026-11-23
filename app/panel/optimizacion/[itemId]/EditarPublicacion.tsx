@@ -21,6 +21,10 @@ export type DatosEdicion = {
   tieneVariantes: boolean;
   // true = automatización de precios de ML activa; null = no se supo.
   automatizada: boolean | null;
+  // Publicación «User Products»: el título se cambia por family_name.
+  userProduct: boolean;
+  // Promoción vigente (GET /items/{id}/prices): el comprador ve ese precio.
+  promocion: { precio: number; precioRegular: number | null; hasta: string | null } | null;
   fotos: { id: string; url: string }[];
   // Sin Cloudinary, la galería vuelve a pedir enlaces (no hay dónde subir).
   cloudinaryConfigurado: boolean;
@@ -75,6 +79,17 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
     <div className={styles.edicion}>
       <section className={styles.bloqueEdicion} aria-label="Precio">
         <p className={styles.seccion}>Precio</p>
+        {datos.promocion && !precioBloqueado ? (
+          <p className={styles.nota}>
+            {`Esta publicación tiene una promoción activa: el comprador ve ${plata(datos.promocion.precio)}${
+              datos.promocion.precioRegular !== null ? ` (antes ${plata(datos.promocion.precioRegular)})` : ""
+            }${
+              datos.promocion.hasta
+                ? ` hasta el ${new Date(datos.promocion.hasta).toLocaleDateString(datos.idioma, { day: "numeric", month: "long" })}`
+                : ""
+            }. El precio que guardes aquí es el normal y se verá cuando termine la promoción.`}
+          </p>
+        ) : null}
         {precioBloqueado ? (
           <p className={styles.nota}>
             {datos.tieneVariantes
@@ -112,18 +127,26 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
         {datos.vendidas > 0 ? (
           <p className={styles.nota}>{`Mercado Libre solo deja cambiar el título de publicaciones sin ventas (esta lleva ${datos.vendidas}).`}</p>
         ) : (
-          <form
-            className={styles.buscador}
-            onSubmit={(e) => {
-              e.preventDefault();
-              guardar(() => editarTituloAction({ cuentaMlId: datos.cuentaMlId, itemId: datos.itemId, titulo }), setAvisoTitulo);
-            }}
-          >
-            <input className="zx-control" value={titulo} maxLength={100} onChange={(e) => setTitulo(e.target.value)} aria-label="Título nuevo" />
-            <Boton type="submit" disabled={enviando || !titulo.trim()}>
-              Guardar título
-            </Boton>
-          </form>
+          <>
+            {datos.userProduct ? (
+              <p className={styles.nota}>
+                En esta publicación Mercado Libre cambia el título a través del nombre del producto: puede tardar unos minutos en verse y se aplica a todas las
+                publicaciones de este mismo producto.
+              </p>
+            ) : null}
+            <form
+              className={styles.buscador}
+              onSubmit={(e) => {
+                e.preventDefault();
+                guardar(() => editarTituloAction({ cuentaMlId: datos.cuentaMlId, itemId: datos.itemId, titulo }), setAvisoTitulo);
+              }}
+            >
+              <input className="zx-control" value={titulo} maxLength={100} onChange={(e) => setTitulo(e.target.value)} aria-label="Título nuevo" />
+              <Boton type="submit" disabled={enviando || !titulo.trim()}>
+                Guardar título
+              </Boton>
+            </form>
+          </>
         )}
         <AvisoLinea aviso={avisoTitulo} />
       </section>

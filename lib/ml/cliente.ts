@@ -2080,6 +2080,11 @@ export type ItemEdicionMl = {
   estado: string | null;
   // Dueño de la publicación (UserID de Mercado Libre); null si no vino.
   sellerId: string | null;
+  // Publicación «User Products» (trae user_product_id o la etiqueta
+  // user_product_listing): el título no se cambia directo, se cambia
+  // family_name y ML lo recalcula (confirmado en staging, 22-nov,
+  // MCO4656053860; https://developers.mercadolibre.com.ar/es_ar/user-products).
+  userProduct: boolean;
   fotos: FotoItemEdicion[];
 };
 
@@ -2099,15 +2104,52 @@ export function leerItemEdicion(data: unknown): ItemEdicionMl | null {
     tieneVariantes: Array.isArray(d.variations) && d.variations.length > 0,
     estado: typeof d.status === "string" ? d.status : null,
     sellerId: d.seller_id != null && PATRON_ID_VENDEDOR.test(String(d.seller_id)) ? String(d.seller_id) : null,
+    userProduct: (typeof d.user_product_id === "string" && d.user_product_id.length > 0) || (Array.isArray(d.tags) && d.tags.includes("user_product_listing")),
     fotos,
   };
 }
 
 export async function leerItemEdicionMl(itemId: string, token: string): Promise<ItemEdicionMl | null> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
-  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}`, token, { query: "?attributes=id,status,price,sold_quantity,title,variations,pictures,seller_id" });
+  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}`, token, { query: "?attributes=id,status,price,sold_quantity,title,variations,pictures,seller_id,user_product_id,tags" });
   if (!resp.ok) return null;
   return leerItemEdicion(resp.data);
+}
+
+// Promoción vigente de una publicación según GET /items/{id}/prices
+// (documentado; forma confirmada en staging, 22-nov): un precio
+// type=promotion con amount, regular_amount y conditions.start_time /
+// end_time. Mientras está vigente el comprador ve ese precio, no el
+// normal que se cambia con PUT /items {price}.
+export type PromocionActivaMl = { precio: number; precioRegular: number | null; hasta: string | null };
+
+export function leerPromocionActiva(data: unknown, ahora: Date): PromocionActivaMl | null {
+  const precios = (data as { prices?: unknown })?.prices;
+  if (!Array.isArray(precios)) return null;
+  const ms = ahora.getTime();
+  for (const p of precios) {
+    const x = p as { type?: unknown; amount?: unknown; regular_amount?: unknown; conditions?: { start_time?: unknown; end_time?: unknown } };
+    if (x?.type !== "promotion") continue;
+    const precio = numeroONull(x.amount);
+    if (precio === null || precio <= 0) continue;
+    const desde = typeof x.conditions?.start_time === "string" ? Date.parse(x.conditions.start_time) : NaN;
+    const hasta = typeof x.conditions?.end_time === "string" ? Date.parse(x.conditions.end_time) : NaN;
+    if (!Number.isNaN(desde) && desde > ms) continue;
+    if (!Number.isNaN(hasta) && hasta <= ms) continue;
+    return { precio, precioRegular: numeroONull(x.regular_amount), hasta: Number.isNaN(hasta) ? null : new Date(hasta).toISOString() };
+  }
+  return null;
+}
+
+// null = sin promoción vigente o no se pudo saber (solo informa, nunca bloquea).
+export async function promocionActivaMl(itemId: string, token: string): Promise<PromocionActivaMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  try {
+    const resp = await pedirLecturaMl<unknown>(`/items/${itemId}/prices`, token);
+    return resp.ok ? leerPromocionActiva(resp.data, new Date()) : null;
+  } catch {
+    return null;
+  }
 }
 
 // true = tiene automatización de precios (ML no deja cambiar el precio a
