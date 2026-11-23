@@ -28,6 +28,6 @@ export async function crearEmpresaAction(formData: FormData) {
     throw error;
   }
 
-  cookies().set("empresa_actual", empresaId, { httpOnly: true, sameSite: "lax", path: "/" });
+  cookies().set("empresa_actual", empresaId, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/" });
   redirect("/panel");
 }

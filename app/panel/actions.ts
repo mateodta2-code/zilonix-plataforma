@@ -22,6 +22,6 @@ export async function cambiarEmpresaActiva(formData: FormData) {
     throw new Error("No tienes membresía en esa empresa.");
   }
 
-  cookies().set("empresa_actual", empresaId, { httpOnly: true, sameSite: "lax", path: "/" });
+  cookies().set("empresa_actual", empresaId, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/" });
   revalidatePath("/panel");
 }
