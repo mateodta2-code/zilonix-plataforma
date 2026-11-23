@@ -34,6 +34,16 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/finanzas/maestra-sku/page.tsx",
   // Issue #422 — cuentas por cobrar: finanzas.consultar (página y consulta).
   "app/panel/finanzas/por-cobrar/page.tsx",
+  // Issue #422 (fase 5) — cuentas por pagar: ver pide finanzas.consultar;
+  // marcar pagado, finanzas.modificar (en la acción y otra vez en
+  // lib/finanzas/gastos-db.ts / por-pagar-db.ts).
+  "app/panel/finanzas/por-pagar/page.tsx",
+  "app/panel/finanzas/por-pagar/actions.ts",
+  // Issue #422 (fase 6, Disponible) — ver pide finanzas.consultar; crear
+  // cuentas, registrar saldos y desactivar, finanzas.modificar (acá y en
+  // lib/finanzas/disponible-consulta.ts).
+  "app/panel/finanzas/disponible/page.tsx",
+  "app/panel/finanzas/disponible/actions.ts",
   // Issue #422 (fase 4) — gastos externos: ver pide finanzas.consultar;
   // crear, editar, marcar pagado y las categorías, finanzas.modificar
   // (en cada acción y otra vez en lib/finanzas/gastos-db.ts).

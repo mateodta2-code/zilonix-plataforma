@@ -1672,11 +1672,18 @@ export const ordenesCompra = pgTable(
     bodegaDestinoId: uuid("bodega_destino_id").notNull(),
     estado: estadoOrdenCompraEnum("estado").notNull().default("abierta"),
     nota: text("nota"),
+    // Issue #422 (fase 5, Cuentas por pagar) — el pago al proveedor.
+    // Vacío = todavía se le debe. Es independiente del estado de
+    // recepción: una orden se puede pagar antes de que llegue.
+    fechaPago: date("fecha_pago", { mode: "string" }),
+    medioPago: text("medio_pago"),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
     creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    // Un medio de pago sin fecha de pago no dice nada: o las dos o ninguna.
+    medioConFecha: check("ordenes_compra_medio_con_fecha", sql`${t.medioPago} is null or ${t.fechaPago} is not null`),
     empresaIdUnica: unique("ordenes_compra_empresa_id_unica").on(t.empresaId, t.id),
     numeroUnico: unique("ordenes_compra_empresa_numero_unico").on(t.empresaId, t.numero),
     delTercero: foreignKey({
@@ -2442,5 +2449,65 @@ export const gastos = pgTable(
     pagoCoherente: check("gastos_pago_coherente", sql`(${t.estado} = 'pagado') = (${t.fechaPago} is not null)`),
     porFecha: index("gastos_empresa_fecha_idx").on(t.empresaId, t.fechaGasto),
     porEstado: index("gastos_empresa_estado_idx").on(t.empresaId, t.estado, t.fechaVencimiento),
+  })
+);
+
+// Issue #422 (fase 6 de Finanzas, migración aprobada por Mateo) —
+// Disponible: «¿cuánta plata tengo hoy y dónde?». Cada cuenta es un
+// lugar donde la empresa tiene plata (banco, billetera o efectivo) y
+// cada saldo es una foto a una fecha de corte, registrada a mano. El
+// saldo vigente de una cuenta es el de la fecha de corte más reciente
+// (lib/finanzas/disponible.ts); los anteriores quedan como historial y
+// nunca se editan ni se borran.
+export const tipoCuentaDisponibleEnum = pgEnum("tipo_cuenta_disponible", ["banco", "billetera", "efectivo"]);
+
+export const cuentasDisponible = pgTable(
+  "cuentas_disponible",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    nombre: text("nombre").notNull(),
+    tipo: tipoCuentaDisponibleEnum("tipo").notNull(),
+    // Bancolombia, Nequi… Vacío para el efectivo (la caja no tiene entidad).
+    entidad: text("entidad"),
+    ultimos4: text("ultimos_4"),
+    // ISO 4217 sin default: nunca se asume COP (las monedas válidas en
+    // la aplicación salen de lib/ml/sitios.ts).
+    moneda: text("moneda").notNull(),
+    activa: boolean("activa").notNull().default(true),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    // Destino de la FK compuesta de saldos_disponible: un saldo nunca
+    // puede apuntar a la cuenta de otra empresa.
+    empresaIdUnica: unique("cuentas_disponible_empresa_id_unica").on(t.empresaId, t.id),
+    nombreUnico: unique("cuentas_disponible_empresa_nombre_unico").on(t.empresaId, t.nombre),
+    nombreNoVacio: check("cuentas_disponible_nombre_no_vacio", sql`btrim(${t.nombre}) <> ''`),
+    ultimos4Validos: check("cuentas_disponible_ultimos_4_validos", sql`${t.ultimos4} IS NULL OR ${t.ultimos4} ~ '^[0-9]{4}$'`),
+    monedaIso: check("cuentas_disponible_moneda_iso", sql`${t.moneda} ~ '^[A-Z]{3}$'`),
+  })
+);
+
+export const saldosDisponible = pgTable(
+  "saldos_disponible",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaId: uuid("cuenta_id").notNull(),
+    // Puede ser negativo: un sobregiro también es un saldo real.
+    saldo: numeric("saldo", { precision: 16, scale: 2 }).notNull(),
+    fechaCorte: date("fecha_corte").notNull(),
+    nota: text("nota"),
+    registradoPor: uuid("registrado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    cuentaDeLaEmpresa: foreignKey({
+      name: "saldos_disponible_cuenta_de_la_empresa",
+      columns: [t.empresaId, t.cuentaId],
+      foreignColumns: [cuentasDisponible.empresaId, cuentasDisponible.id],
+    }).onDelete("cascade"),
+    porCuentaFecha: index("saldos_disponible_cuenta_fecha_idx").on(t.empresaId, t.cuentaId, t.fechaCorte),
   })
 );
