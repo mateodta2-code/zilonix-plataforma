@@ -27,13 +27,13 @@ import {
 import { debeMostrarResumenBusquedaVacia, lineasResumenBusquedaVacia } from "./resumenBusquedaVacia";
 import { datosSitioMl, formatearMoneda, SITE_ID_DEFECTO } from "@/lib/ml/sitios";
 import type {
-  AccionHistorialCliente,
   CandidatoClienteCliente,
   ConteosCandidatosCliente,
   FilaParticipandoCliente,
   ReglasCuentaCliente,
   TrabajoBusquedaCliente,
 } from "./tipos-cliente";
+import { BitacoraPromociones } from "./BitacoraPromociones";
 import styles from "./promociones.module.css";
 
 // Issue #315 — siteId/moneda/idioma reales de la cuenta (lib/ml/sitios.ts,
@@ -153,7 +153,6 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   const [decisionDirectaId, setDecisionDirectaId] = useState<string | null>(null);
   const [errorDecisionDirecta, setErrorDecisionDirecta] = useState<string | null>(null);
 
-  const [historial, setHistorial] = useState<AccionHistorialCliente[]>([]);
   const [reglas, setReglas] = useState<ReglasCuentaCliente[]>([]);
 
   // Rama fix-promociones-aprobadas-participando, punto 3 — pestaña
@@ -274,13 +273,6 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consultar se recrea cada render; solo nos importa reaccionar a jobId
   }, [jobId]);
 
-  async function cargarHistorial() {
-    const params = new URLSearchParams();
-    if (cuentaSeleccionada !== "todas") params.set("cuentaId", cuentaSeleccionada);
-    const res = await fetch(`/api/ml/promociones/historial?${params.toString()}`);
-    if (res.ok) setHistorial((await res.json()).filas);
-  }
-
   async function cargarReglas() {
     const res = await fetch("/api/ml/promociones/reglas");
     if (res.ok) setReglas((await res.json()).filas);
@@ -296,7 +288,6 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
   }
 
   useEffect(() => {
-    if (pestana === "historial") void cargarHistorial();
     if (pestana === "reglas") void cargarReglas();
     if (pestana === "participando") void cargarParticipando();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo nos importa reaccionar al cambio de pestaña (y a la cuenta, para participando)
@@ -662,7 +653,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
       <div className={styles.pestanas}>
         {(["buscar", "participando", "historial", "reglas"] as Pestana[]).map((p) => (
           <Boton key={p} type="button" variante={pestana === p ? "primario" : "secundario"} onClick={() => setPestana(p)}>
-            {p === "buscar" ? "Buscar / Resultados" : p === "participando" ? "Participando" : p === "historial" ? "Historial" : "Reglas"}
+            {p === "buscar" ? "Buscar / Resultados" : p === "participando" ? "Participando" : p === "historial" ? "Bitácora" : "Reglas"}
           </Boton>
         ))}
       </div>
@@ -1133,34 +1124,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
         </Tarjeta>
       )}
 
-      {pestana === "historial" && (
-        <Tarjeta className={styles.seccion}>
-          <p className="zx-etiqueta">HISTORIAL</p>
-          {historial.length === 0 ? (
-            <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 10 }}>Todavía no hay ninguna acción registrada.</p>
-          ) : (
-            <div style={{ marginTop: 10 }}>
-              <Tabla encabezados={["Cuenta", "Producto", "Acción", "Antes", "Después", "Estado", "Cuándo"]}>
-                {historial.map((h) => (
-                  <FilaTabla key={h.id}>
-                    <CeldaTabla>{h.nicknameCuenta}</CeldaTabla>
-                    <CeldaTabla>{h.tituloProducto ?? h.itemId}</CeldaTabla>
-                    <CeldaTabla>{h.accion}</CeldaTabla>
-                    <CeldaTabla>{formatoPesos(numero(h.precioAntes), siteIdDeCuenta(h.cuentaMlId))}</CeldaTabla>
-                    <CeldaTabla>{formatoPesos(numero(h.precioDespues), siteIdDeCuenta(h.cuentaMlId))}</CeldaTabla>
-                    <CeldaTabla>
-                      <Chip estado={h.estado === "ejecutada" ? "exito" : h.estado === "fallida" || h.estado === "rechazada" ? "peligro" : "aviso"} title={h.error ?? undefined}>
-                        {h.modoSimulacion ? "Simulado" : h.estado}
-                      </Chip>
-                    </CeldaTabla>
-                    <CeldaTabla>{new Date(h.creadoTs).toLocaleString(idiomaDeCuenta(h.cuentaMlId))}</CeldaTabla>
-                  </FilaTabla>
-                ))}
-              </Tabla>
-            </div>
-          )}
-        </Tarjeta>
-      )}
+      {pestana === "historial" && <BitacoraPromociones cuentas={cuentas} />}
 
       {pestana === "reglas" && <PestanaReglas reglas={reglas} puedeAprobar={puedeAprobar} onGuardado={cargarReglas} />}
 

@@ -111,14 +111,25 @@ export type AccionHistorialCliente = {
   itemId: string;
   tituloProducto: string | null;
   tipoPromocion: string;
+  promotionIdMl: string | null;
   accion: "participar" | "modificar" | "salir";
   precioAntes: string | null;
   precioDespues: string | null;
   estado: "pendiente" | "aceptada" | "rechazada" | "ejecutada" | "fallida";
   aprobadoPor: string | null;
   aprobadoTs: string | null;
+  ejecutadoPor: string | null;
+  ejecutadoPorNombre: string | null;
   ejecutadoTs: string | null;
   modoSimulacion: boolean;
+  // Solo campos conocidos y recortados — el servidor nunca manda el JSON crudo de ML.
+  detalle: {
+    regla: "todas" | "maximo" | "tabla-maestra" | "salir" | "manual" | null;
+    origen: string | null;
+    ok: boolean | null;
+    status: number | null;
+    respuesta: string | null;
+  };
   error: string | null;
   creadoTs: string;
 };

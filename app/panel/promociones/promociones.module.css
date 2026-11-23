@@ -77,3 +77,26 @@
     margin-left: 0;
   }
 }
+
+.filtrosBitacora {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+/* Acción simulada: borde punteado + fondo tenue, nunca se confunde con una real. */
+.filaSimulada {
+  opacity: 0.75;
+  background: color-mix(in srgb, var(--accent, #7aa2ff) 8%, transparent);
+  outline: 1px dashed var(--border, currentColor);
+  outline-offset: -1px;
+}
+
+.paginacionBitacora {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}

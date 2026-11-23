@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { conReglaYOrigen } from "./promocionesBitacora";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { promocionesAcciones, promocionesCandidatos } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
@@ -393,7 +394,7 @@ async function marcarResultado(empresaId: string, filaId: string, usuarioId: str
   await dbComoEmpresa(empresaId, (tx) =>
     tx
       .update(promocionesAcciones)
-      .set({ estado: resultado.estado, ejecutadoPor: usuarioId, ejecutadoTs: new Date(), resultadoMl: resultado.resultadoMl, error: resultado.error })
+      .set({ estado: resultado.estado, ejecutadoPor: usuarioId, ejecutadoTs: new Date(), resultadoMl: resultado.resultadoMl == null ? null : conReglaYOrigen(resultado.resultadoMl, "manual", "aprobacion"), error: resultado.error })
       .where(eq(promocionesAcciones.id, filaId))
   );
 }

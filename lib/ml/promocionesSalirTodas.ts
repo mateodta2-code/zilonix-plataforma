@@ -1,4 +1,5 @@
 import { dbComoEmpresa } from "@/db/empresa-context";
+import { conReglaYOrigen } from "./promocionesBitacora";
 import { promocionesAcciones } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import { leerItemParaPromocionMl, leerPromocionesItemMl, motivoErrorEscrituraMl, type PromocionCrudaMl } from "@/lib/ml/cliente";
@@ -193,7 +194,7 @@ export async function salirDeTodasLasPromociones(empresaId: string, usuarioId: s
             ejecutadoPor: usuarioId,
             ejecutadoTs: new Date(),
             modoSimulacion: false,
-            resultadoMl: { ok: respuesta.ok, status: respuesta.status, masivo: true },
+            resultadoMl: conReglaYOrigen({ ok: respuesta.ok, status: respuesta.status, masivo: true }, "salir", "salir-todas"),
             error: motivo,
           })
         );

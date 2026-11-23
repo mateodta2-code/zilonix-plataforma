@@ -1,4 +1,5 @@
 import { and, eq, isNull } from "drizzle-orm";
+import { conReglaYOrigen } from "./promocionesBitacora";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { costosSku, cuentasMl, promocionesAcciones } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
@@ -425,7 +426,7 @@ export async function participarEnPublicacionDirecto(
         ejecutadoPor: usuarioId,
         ejecutadoTs: new Date(),
         modoSimulacion: false,
-        resultadoMl: resultado.resultadoMl,
+        resultadoMl: conReglaYOrigen(resultado.resultadoMl, "manual", "individual"),
         error: resultado.error,
       })
       .returning({ id: promocionesAcciones.id })
@@ -609,7 +610,7 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
             ejecutadoPor: usuarioId,
             ejecutadoTs: new Date(),
             modoSimulacion: false,
-            resultadoMl: resultado.resultadoMl,
+            resultadoMl: conReglaYOrigen(resultado.resultadoMl, regla.tipo, "lote"),
             error: resultado.error,
           })
         );
