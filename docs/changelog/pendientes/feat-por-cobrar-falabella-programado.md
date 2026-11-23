@@ -1,0 +1,1 @@
+- Cuentas por cobrar: los cortes de Falabella con estado «Programado para AAAA-MM-DD» ya cuentan como por cobrar y usan esa fecha como fecha esperada (entran en «Esta semana», «Próximo mes» y «Próxima fecha»). Refs #422

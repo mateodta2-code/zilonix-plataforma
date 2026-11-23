@@ -1,7 +1,7 @@
 // Issue #422 (cuentas por cobrar) — cálculo puro de lo que las
 // plataformas le deben a la empresa: Mercado Libre (ventas con la plata
-// sin liberar) y Falabella (cortes Abierto, Procesando cierre o Pago
-// programado). Sin base ni red: la consulta vive en por-cobrar-consulta.ts.
+// sin liberar) y Falabella (cortes Abierto, Procesando cierre, Pago
+// programado o Programado para AAAA-MM-DD). Sin base ni red: la consulta vive en por-cobrar-consulta.ts.
 //
 // Nunca se suman monedas distintas: cada total va por moneda (la de cada
 // cuenta). Montos en texto y BigInt, nunca Number: Falabella guarda 4
@@ -19,6 +19,37 @@ export const ETIQUETA_MARKETPLACE: Record<MarketplacePorCobrar, string> = {
 // en la cuenta. «Pagado» ya entró; «No pagado» no se espera.
 export const ESTADOS_FALABELLA_POR_COBRAR = ["Abierto", "Procesando cierre", "Pago programado"] as const;
 
+// El reporte real trae «Programado para AAAA-MM-DD» (p. ej. «Programado para
+// 2026-11-26»), no solo «Pago programado»: buscar el texto exacto dejaba
+// esos cortes por fuera de lo por cobrar.
+const PREFIJO_PROGRAMADO = "programado para ";
+const ESTADOS_EXACTOS = new Set(ESTADOS_FALABELLA_POR_COBRAR.map((e) => e.toLowerCase()));
+
+export function esEstadoFalabellaPorCobrar(estado: string | null): boolean {
+  const e = (estado ?? "").trim().toLowerCase();
+  if (!e) return false;
+  return ESTADOS_EXACTOS.has(e) || e.startsWith(PREFIJO_PROGRAMADO);
+}
+
+const PATRON_PROGRAMADO = /^programado para (\d{4})-(\d{2})-(\d{2})$/i;
+
+// Fecha de pago que Falabella anuncia en el corte. Solo fechas calendario
+// reales (2026-02-30 se descarta, no se corrige). Si el corte trae varias,
+// la más próxima: es la primera plata que entra.
+export function extraerFechaProgramadaFalabella(estados: (string | null)[]): string | null {
+  let mejor: string | null = null;
+  for (const estado of estados) {
+    const m = PATRON_PROGRAMADO.exec((estado ?? "").trim());
+    if (!m) continue;
+    const [a, mes, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const f = new Date(Date.UTC(a, mes - 1, d));
+    if (f.getUTCFullYear() !== a || f.getUTCMonth() !== mes - 1 || f.getUTCDate() !== d) continue;
+    const texto = `${m[1]}-${m[2]}-${m[3]}`;
+    if (mejor === null || texto < mejor) mejor = texto;
+  }
+  return mejor;
+}
+
 export type PartidaPorCobrar = {
   marketplace: MarketplacePorCobrar;
   cuentaId: string;
@@ -29,7 +60,7 @@ export type PartidaPorCobrar = {
   // Estado tal cual lo da la plataforma (pending, Pago programado…).
   estado: string | null;
   // Día de Bogotá (AAAA-MM-DD) en que se espera la plata; null = sin fecha
-  // (Falabella no la trae en el reporte).
+  // (cortes de Falabella abiertos o sin «Programado para AAAA-MM-DD»).
   fechaEsperada: string | null;
   // null = pendiente sin neto (ML no lo mandó): se muestra igual, pero no
   // suma a los totales — el monto no se adivina.

@@ -3,7 +3,9 @@ import {
   agruparPorCuenta,
   aDiezmilesimas,
   aTextoMonto,
+  esEstadoFalabellaPorCobrar,
   estaVencida,
+  extraerFechaProgramadaFalabella,
   filtrarPartidas,
   leerFiltrosPorCobrar,
   ordenarPartidas,
@@ -117,5 +119,39 @@ describe("filtros", () => {
     expect(filtrarPartidas(lista, { marketplace: "falabella", cuentaId: null })).toHaveLength(1);
     expect(filtrarPartidas(lista, { marketplace: null, cuentaId: CUENTA_ML })).toHaveLength(1);
     expect(filtrarPartidas(lista, { marketplace: null, cuentaId: null })).toHaveLength(2);
+  });
+});
+
+describe("estados de Falabella", () => {
+  it("acepta los estados por cobrar, también «Programado para AAAA-MM-DD»", () => {
+    for (const e of ["Abierto", "Procesando cierre", "Pago programado", "Programado para 2026-11-26", "  programado PARA 2026-11-26 ", "ABIERTO"]) {
+      expect(esEstadoFalabellaPorCobrar(e)).toBe(true);
+    }
+  });
+
+  it("rechaza lo pagado, lo no pagado y lo vacío", () => {
+    for (const e of ["Pagado", "No pagado", "", "   ", null]) {
+      expect(esEstadoFalabellaPorCobrar(e)).toBe(false);
+    }
+  });
+
+  it("extrae la fecha programada válida", () => {
+    expect(extraerFechaProgramadaFalabella(["Programado para 2026-11-26"])).toBe("2026-11-26");
+  });
+
+  it("descarta fechas calendario inválidas", () => {
+    expect(extraerFechaProgramadaFalabella(["Programado para 2026-02-30"])).toBeNull();
+    expect(extraerFechaProgramadaFalabella(["Programado para 2026-13-01"])).toBeNull();
+  });
+
+  it("sin fecha programada devuelve null", () => {
+    expect(extraerFechaProgramadaFalabella(["Abierto", "Procesando cierre", null])).toBeNull();
+    expect(extraerFechaProgramadaFalabella([])).toBeNull();
+  });
+
+  it("con varias fechas devuelve la más próxima", () => {
+    expect(
+      extraerFechaProgramadaFalabella(["Programado para 2026-12-10", "Abierto", "Programado para 2026-11-26", "Programado para 2026-02-30"])
+    ).toBe("2026-11-26");
   });
 });
