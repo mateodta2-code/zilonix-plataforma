@@ -1,0 +1,4 @@
+### Agregado
+- **Finanzas → Gastos externos** (`/panel/finanzas/gastos`, fase 4 de la propuesta de Finanzas, Refs #422): registrar lo que la empresa paga por fuera de las plataformas (arriendo, nómina, empaques, contador, transportadoras…), con tarjetas de total del mes, pendiente por pagar y vencido (una cifra por moneda), filtros de fecha, tienda, categoría y estado, formulario rápido, edición y «Marcar pagado». Enlace nuevo en el desplegable de Finanzas.
+- **Categorías de gastos por empresa** (`/panel/finanzas/gastos/categorias`): cada empresa nace con 10 categorías base y puede crear, renombrar o desactivar las suyas.
+- Migraciones `0037_gastos_externos` (tablas `gastos` y `categorias_gasto`, RLS por empresa, sin DELETE) y `0038_sembrar_categorias_gasto` (categorías base para las empresas que ya existían). Ver pide `finanzas.consultar`; crear, editar y pagar, `finanzas.modificar`.

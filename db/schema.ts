@@ -2345,3 +2345,102 @@ export const optimizacionRevisiones = pgTable(
     porItem: index("optimizacion_revisiones_empresa_item_idx").on(t.empresaId, t.itemId),
   })
 );
+
+// Issue #422 (fase 4 de Finanzas) — gastos externos: lo que la empresa
+// paga por fuera de las plataformas (arriendo, nómina, empaques,
+// contador…). Cada empresa tiene sus propias categorías: nacen con las
+// base (lib/finanzas/gastos-categorias.ts, sembradas para las empresas
+// que ya existían en la migración y al crear una empresa nueva) y se
+// pueden crear, renombrar o desactivar. Sin DELETE para app_user
+// (db/rls-setup.sql): una categoría se desactiva para no dejar gastos
+// huérfanos.
+export const categoriasGasto = pgTable(
+  "categorias_gasto",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    nombre: text("nombre").notNull(),
+    activa: boolean("activa").notNull().default(true),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    // Destino de la FK compuesta de gastos.
+    empresaIdUnica: unique("categorias_gasto_empresa_id_unica").on(t.empresaId, t.id),
+    nombreUnico: unique("categorias_gasto_empresa_nombre_unico").on(t.empresaId, t.nombre),
+    nombreValido: check("categorias_gasto_nombre_valido", sql`${t.nombre} = btrim(${t.nombre}) AND char_length(${t.nombre}) between 1 and 60`),
+  })
+);
+
+export const estadoGastoEnum = pgEnum("estado_gasto", ["pendiente", "pagado"]);
+
+// La moneda nunca llega del formulario: sale de la tienda elegida o, sin
+// tienda, de las cuentas de la empresa (monedaDeEmpresa). Sin DELETE para
+// app_user: un gasto se corrige editándolo, y cada cambio queda en
+// `auditoria`.
+export const gastos = pgTable(
+  "gastos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // Tienda opcional: una cuenta de Mercado Libre o una de Falabella,
+    // nunca las dos. Vacías = gasto de toda la empresa.
+    cuentaMlId: uuid("cuenta_ml_id"),
+    cuentaFalabellaId: uuid("cuenta_falabella_id"),
+    categoriaId: uuid("categoria_id").notNull(),
+    // A quién se le paga: un tercero de Proveedores o un nombre libre
+    // (el arrendador, el contador…). Al menos uno de los dos.
+    terceroId: uuid("tercero_id"),
+    beneficiario: text("beneficiario"),
+    descripcion: text("descripcion").notNull(),
+    monto: numeric("monto", { precision: 14, scale: 2 }).notNull(),
+    moneda: text("moneda").notNull(),
+    fechaGasto: date("fecha_gasto", { mode: "string" }).notNull(),
+    fechaVencimiento: date("fecha_vencimiento", { mode: "string" }),
+    estado: estadoGastoEnum("estado").notNull().default("pendiente"),
+    fechaPago: date("fecha_pago", { mode: "string" }),
+    medioPago: text("medio_pago"),
+    // Referencia al soporte (número de factura o enlace). Subir el
+    // archivo queda para un PR aparte.
+    soporte: text("soporte"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    // FKs compuestas: un gasto de la empresa A nunca apunta a una
+    // categoría, tercero o tienda de la empresa B.
+    categoriaDeLaEmpresa: foreignKey({
+      name: "gastos_categoria_misma_empresa_fk",
+      columns: [t.empresaId, t.categoriaId],
+      foreignColumns: [categoriasGasto.empresaId, categoriasGasto.id],
+    }).onDelete("restrict"),
+    terceroDeLaEmpresa: foreignKey({
+      name: "gastos_tercero_misma_empresa_fk",
+      columns: [t.empresaId, t.terceroId],
+      foreignColumns: [terceros.empresaId, terceros.id],
+    }).onDelete("restrict"),
+    cuentaMlDeLaEmpresa: foreignKey({
+      name: "gastos_cuenta_ml_misma_empresa_fk",
+      columns: [t.empresaId, t.cuentaMlId],
+      foreignColumns: [cuentasMl.empresaId, cuentasMl.id],
+    }).onDelete("restrict"),
+    cuentaFalabellaDeLaEmpresa: foreignKey({
+      name: "gastos_cuenta_falabella_misma_empresa_fk",
+      columns: [t.empresaId, t.cuentaFalabellaId],
+      foreignColumns: [cuentasFalabella.empresaId, cuentasFalabella.id],
+    }).onDelete("restrict"),
+    unaTienda: check("gastos_una_tienda", sql`${t.cuentaMlId} is null or ${t.cuentaFalabellaId} is null`),
+    aQuien: check("gastos_tercero_o_beneficiario", sql`${t.terceroId} is not null or char_length(btrim(coalesce(${t.beneficiario}, ''))) > 0`),
+    descripcionValida: check("gastos_descripcion_valida", sql`char_length(btrim(${t.descripcion})) between 1 and 300`),
+    montoPositivo: check("gastos_monto_positivo", sql`${t.monto} > 0`),
+    monedaIso: check("gastos_moneda_iso", sql`${t.moneda} ~ '^[A-Z]{3}$'`),
+    // Pagado ⇔ tiene fecha de pago: la tarjeta de pendiente nunca cuenta
+    // un gasto pagado ni al revés.
+    pagoCoherente: check("gastos_pago_coherente", sql`(${t.estado} = 'pagado') = (${t.fechaPago} is not null)`),
+    porFecha: index("gastos_empresa_fecha_idx").on(t.empresaId, t.fechaGasto),
+    porEstado: index("gastos_empresa_estado_idx").on(t.empresaId, t.estado, t.fechaVencimiento),
+  })
+);
