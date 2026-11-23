@@ -95,6 +95,12 @@
   color: var(--peligro);
 }
 
+.avisoImportacion {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
 /* Conector Falabella (15/11) — pantalla unificada "Conectar marketplace"
    (pedido de Sharel/Pablo, PR #415): una sección por canal, mismos
    tokens/clases de arriba para las que ya existían. */
