@@ -3,7 +3,8 @@ import { requierePermiso } from "@/lib/permisos";
 import { aplicarReglaALote, type ReglaAplicable } from "@/lib/ml/promocionesPublicaciones";
 import { salirDeTodasLasPromociones, vistaPreviaSalirTodas } from "@/lib/ml/promocionesSalirTodas";
 import { urlPublicaBase } from "@/lib/url-publica";
-import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../../_ayudantes";
+import { validarSeleccion } from "@/lib/ml/promocionesSeleccion";
+import { respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../../_ayudantes";
 
 // Tarea "Promociones real" (Refs #295) — "Aplicar regla a las
 // publicaciones": las 3 reglas de la maqueta aprobada (a. todas, b.
@@ -13,7 +14,7 @@ import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolver
 // solo "tabla-maestra" y "maximo" respetan el piso de costos_sku — ver
 // lib/ml/promocionesPublicaciones.ts (cumpleRegla). Escribe de verdad
 // contra Mercado Libre — permiso "ejecutar".
-type Cuerpo = { cuentaId?: unknown; regla?: unknown; maximoPct?: unknown; vistaPrevia?: unknown; confirmado?: unknown };
+type Cuerpo = { seleccion?: unknown; regla?: unknown; maximoPct?: unknown; vistaPrevia?: unknown; confirmado?: unknown };
 
 export async function POST(request: Request) {
   const base = urlPublicaBase();
@@ -38,9 +39,12 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
   }
-  const { cuentaId, regla, maximoPct, vistaPrevia, confirmado } = cuerpo;
-  if (cuentaId !== "todas" && (typeof cuentaId !== "string" || !PATRON_UUID.test(cuentaId))) {
-    return NextResponse.json({ error: "Cuenta inválida." }, { status: 400 });
+  const { seleccion, regla, maximoPct, vistaPrevia, confirmado } = cuerpo;
+  // Siempre por selección (Promo-A, Refs #571): lista vacía → 400; el
+  // servidor nunca recorre el catálogo ni todas las cuentas por su cuenta.
+  const validada = validarSeleccion(seleccion);
+  if (!validada.ok) {
+    return NextResponse.json({ error: validada.error }, { status: 400 });
   }
   if (regla !== "todas" && regla !== "maximo" && regla !== "tabla-maestra" && regla !== "salir-todas") {
     return NextResponse.json({ error: "Regla inválida." }, { status: 400 });
@@ -53,12 +57,12 @@ export async function POST(request: Request) {
   // confirmación con el conteo.
   if (regla === "salir-todas") {
     if (vistaPrevia === true) {
-      return NextResponse.json(await vistaPreviaSalirTodas(empresa.id, cuentaId as string));
+      return NextResponse.json(await vistaPreviaSalirTodas(empresa.id, validada.seleccion));
     }
     if (confirmado !== true) {
       return NextResponse.json({ error: "Falta la confirmación para dejar de participar en todas las promociones." }, { status: 400 });
     }
-    return NextResponse.json(await salirDeTodasLasPromociones(empresa.id, usuario.id, cuentaId as string));
+    return NextResponse.json(await salirDeTodasLasPromociones(empresa.id, usuario.id, validada.seleccion));
   }
 
   let reglaAplicable: ReglaAplicable;
@@ -71,6 +75,6 @@ export async function POST(request: Request) {
     reglaAplicable = { tipo: regla };
   }
 
-  const resumen = await aplicarReglaALote(empresa.id, usuario.id, cuentaId as string, reglaAplicable);
+  const resumen = await aplicarReglaALote(empresa.id, usuario.id, validada.seleccion, reglaAplicable);
   return NextResponse.json(resumen);
 }

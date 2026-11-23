@@ -16,6 +16,14 @@ const CON_MAESTRA = { total: 12, actualizadoTs: null };
 type LlamadaRegla = Record<string, unknown>;
 let llamadasRegla: LlamadaRegla[];
 let llamadasTexto: { url: string; metodo: string; cuerpo: LlamadaRegla }[];
+function filaLista(itemId: string) {
+  return {
+    itemId, cuentaMlId: CUENTAS[0].id, nicknameCuenta: "Mi Tienda", siteId: "MLM", tituloProducto: `Producto ${itemId}`, thumbnail: null, skuCodigo: null,
+    precioOriginal: 100, stock: 1, tieneVariantes: false, estado: "sin_promocion", promociones: [], motivoError: null,
+  };
+}
+const FILAS_LISTA = [filaLista("MLM1"), filaLista("MLM2")];
+
 let respuestaInterpretar: { status: number; body: unknown };
 
 beforeEach(() => {
@@ -37,7 +45,7 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (url: string, init?: { body?: string }) => {
       if (String(url).startsWith("/api/ml/promociones/publicaciones?")) {
-        return { ok: true, json: async () => ({ filas: [], conteosLote: { todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 }, cursorSiguiente: null }) };
+        return { ok: true, json: async () => ({ filas: FILAS_LISTA, conteosLote: { todas: 2, enPromocion: 0, sinPromocion: 2, conError: 0 }, cursorSiguiente: null }) };
       }
       if (url === "/api/ml/promociones/publicaciones/reglas-aplicar") {
         const cuerpo = JSON.parse(init?.body ?? "{}") as LlamadaRegla;
@@ -77,6 +85,12 @@ function montar(maestra = CON_MAESTRA, puedeAprobar = true) {
   return render(<PaginaPromocionesReal cuentas={CUENTAS} puedeEjecutar puedeAprobar={puedeAprobar} resumenMaestraSku={maestra} />);
 }
 
+// Espera a que cargue la lista y marca «Seleccionar todas» (Promo-A: sin selección no se aplica nada).
+async function marcarTodas() {
+  const caja = (await screen.findByLabelText(/Seleccionar todas/)) as HTMLInputElement;
+  fireEvent.click(caja);
+}
+
 function botonAplicar(nombre = "Aplicar regla a las publicaciones") {
   return screen.getByRole("button", { name: nombre }) as HTMLButtonElement;
 }
@@ -95,8 +109,9 @@ describe("PaginaPromocionesReal — reglas (todas sin piso)", () => {
     expect(screen.getByLabelText("Dejar de participar en todas las promociones")).toBeTruthy();
   });
 
-  it("tabla maestra vacía: con «todas» el botón NO se bloquea; con «tabla maestra» o «máximo» sí", () => {
+  it("tabla maestra vacía: con «todas» el botón NO se bloquea; con «tabla maestra» o «máximo» sí", async () => {
     montar(SIN_MAESTRA);
+    await marcarTodas();
     expect(botonAplicar().disabled).toBe(false);
     fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
     expect(botonAplicar().disabled).toBe(true);
@@ -106,8 +121,9 @@ describe("PaginaPromocionesReal — reglas (todas sin piso)", () => {
     expect(botonAplicar().disabled).toBe(false);
   });
 
-  it("diálogo «Aplicar regla»: «todas» dice sin precio mínimo; «tabla maestra» y «máximo» dicen que el mínimo nunca se salta", () => {
+  it("diálogo «Aplicar regla»: «todas» dice sin precio mínimo; «tabla maestra» y «máximo» dicen que el mínimo nunca se salta", async () => {
     montar();
+    await marcarTodas();
     fireEvent.click(botonAplicar());
     expect(screen.getByText("Sin precio mínimo: se entra a todas aunque quede bajo el costo.")).toBeTruthy();
     expect(screen.queryByText(/sin importar la regla/)).toBeNull();
@@ -122,9 +138,61 @@ describe("PaginaPromocionesReal — reglas (todas sin piso)", () => {
   });
 });
 
+describe("PaginaPromocionesReal — aplicar regla solo a lo seleccionado (Promo-A)", () => {
+  it("cada fila tiene un checkbox accesible con el título, y ya no dice «Se aplica sobre todas las cuentas»", async () => {
+    montar();
+    expect(await screen.findByLabelText("Seleccionar Producto MLM1")).toBeTruthy();
+    expect(screen.getByLabelText("Seleccionar Producto MLM2")).toBeTruthy();
+    expect(screen.queryByText(/sobre todas las cuentas/)).toBeNull();
+  });
+
+  it("sin selección: botón deshabilitado, «Se aplica a 0 publicaciones» y NO llama al endpoint", async () => {
+    montar();
+    await screen.findByLabelText(/Seleccionar todas/);
+    expect(botonAplicar().disabled).toBe(true);
+    expect(screen.getByText(/Se aplica a 0 publicaciones seleccionadas/)).toBeTruthy();
+    fireEvent.click(botonAplicar());
+    expect(llamadasRegla).toHaveLength(0);
+  });
+
+  it("«Seleccionar todas» marca las cargadas y se puede deseleccionar", async () => {
+    montar();
+    const todas = (await screen.findByLabelText(/Seleccionar todas/)) as HTMLInputElement;
+    fireEvent.click(todas);
+    expect(screen.getByText(/Se aplica a 2 publicaciones seleccionadas/)).toBeTruthy();
+    expect(botonAplicar().disabled).toBe(false);
+    fireEvent.click(todas);
+    expect(screen.getByText(/Se aplica a 0 publicaciones seleccionadas/)).toBeTruthy();
+    expect(botonAplicar().disabled).toBe(true);
+  });
+
+  it("con 1 de 2 marcada: el body lleva SOLO esa (con su cuenta), la regla elegida, y la selección se limpia al aplicar", async () => {
+    montar();
+    fireEvent.click(await screen.findByLabelText("Seleccionar Producto MLM2"));
+    expect(screen.getByText(/Se aplica a 1 publicaciones seleccionadas/)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/Participar solo hasta un máximo de/));
+    fireEvent.click(botonAplicar());
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar" }));
+    await waitFor(() => expect(llamadasRegla).toHaveLength(1));
+    expect(llamadasRegla[0]).toMatchObject({ regla: "maximo", maximoPct: 15, seleccion: [{ cuentaId: CUENTAS[0].id, itemId: "MLM2" }] });
+    expect(llamadasRegla[0].cuentaId).toBeUndefined();
+    await waitFor(() => expect(screen.getByText(/Se aplica a 0 publicaciones seleccionadas/)).toBeTruthy());
+  });
+
+  it("con 2 marcadas manda las 2", async () => {
+    montar();
+    await marcarTodas();
+    fireEvent.click(botonAplicar());
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar" }));
+    await waitFor(() => expect(llamadasRegla).toHaveLength(1));
+    expect(llamadasRegla[0].seleccion).toHaveLength(2);
+  });
+});
+
 describe("PaginaPromocionesReal — «Dejar de participar en todas»", () => {
   it("no escribe nada al elegirla: primero una vista previa con el conteo, y recién ahí el botón rojo", async () => {
     montar();
+    await marcarTodas();
     fireEvent.click(screen.getByLabelText("Dejar de participar en todas las promociones"));
     fireEvent.click(botonAplicar("Revisar y dejar de participar…"));
 
@@ -134,18 +202,20 @@ describe("PaginaPromocionesReal — «Dejar de participar en todas»", () => {
     expect(resumen).toContain("2");
     expect(resumen).toContain("3");
     expect(screen.getByText(/no se pueden dejar por la API/).textContent).toContain("1");
-    expect(screen.getByText("Esto quita todas tus publicaciones activas de las promociones. No se puede deshacer desde Seller.")).toBeTruthy();
+    expect(screen.getByText("Esto quita las publicaciones seleccionadas de sus promociones activas. No se puede deshacer desde Seller.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sí, dejar de participar" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Cancelar" }).length).toBeGreaterThan(0);
 
     // Solo se pidió la vista previa — ninguna llamada de ejecución todavía.
     expect(llamadasRegla).toHaveLength(1);
     expect(llamadasRegla[0]).toMatchObject({ regla: "salir-todas", vistaPrevia: true });
+    expect(llamadasRegla[0].seleccion).toHaveLength(2); // solo las seleccionadas
     expect(llamadasRegla[0].confirmado).toBeUndefined();
   });
 
   it("al confirmar: manda confirmado:true y muestra el resumen y el resultado por publicación", async () => {
     montar();
+    await marcarTodas();
     fireEvent.click(screen.getByLabelText("Dejar de participar en todas las promociones"));
     fireEvent.click(botonAplicar("Revisar y dejar de participar…"));
     await waitFor(() => screen.getByRole("button", { name: "Sí, dejar de participar" }));
@@ -161,6 +231,7 @@ describe("PaginaPromocionesReal — «Dejar de participar en todas»", () => {
 
   it("«Cancelar» en la confirmación no manda ninguna ejecución", async () => {
     montar();
+    await marcarTodas();
     fireEvent.click(screen.getByLabelText("Dejar de participar en todas las promociones"));
     fireEvent.click(botonAplicar("Revisar y dejar de participar…"));
     await waitFor(() => screen.getByRole("button", { name: "Sí, dejar de participar" }));

@@ -27,9 +27,14 @@ vi.mock("@/lib/ml/promocionesSalirTodas", () => ({ vistaPreviaSalirTodas: vistaP
 
 import { cookies } from "next/headers";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { TOPE_ITEMS_SELECCION } from "@/lib/ml/promocionesSeleccion";
 import { POST } from "./route";
 
 const CUENTA_ID = "11111111-1111-1111-1111-111111111111";
+const SELECCION = [
+  { cuentaId: CUENTA_ID, itemId: "MCO111111" },
+  { cuentaId: CUENTA_ID, itemId: "MCO222222" },
+];
 
 function mockearCookies() {
   vi.mocked(cookies).mockReturnValue({ get: () => undefined } as unknown as ReturnType<typeof cookies>);
@@ -52,87 +57,110 @@ describe("POST /api/ml/promociones/publicaciones/reglas-aplicar — Tarea Promoc
   afterEach(() => vi.clearAllMocks());
 
   it("regla 'todas': delega al módulo real", async () => {
-    const res = await POST(peticion({ cuentaId: "todas", regla: "todas" }));
+    const res = await POST(peticion({ seleccion: SELECCION, regla: "todas" }));
     expect(res.status).toBe(200);
-    expect(aplicarReglaALoteMock).toHaveBeenCalledWith("empresa-1", "usuario-1", "todas", { tipo: "todas" });
+    expect(aplicarReglaALoteMock).toHaveBeenCalledWith("empresa-1", "usuario-1", SELECCION, { tipo: "todas" });
   });
 
   it("regla 'maximo' con maximoPct válido: lo pasa tal cual", async () => {
-    await POST(peticion({ cuentaId: CUENTA_ID, regla: "maximo", maximoPct: 15 }));
-    expect(aplicarReglaALoteMock).toHaveBeenCalledWith("empresa-1", "usuario-1", CUENTA_ID, { tipo: "maximo", maximoPct: 15 });
+    await POST(peticion({ seleccion: SELECCION, regla: "maximo", maximoPct: 15 }));
+    expect(aplicarReglaALoteMock).toHaveBeenCalledWith("empresa-1", "usuario-1", SELECCION, { tipo: "maximo", maximoPct: 15 });
   });
 
   it("regla 'maximo' sin maximoPct (o fuera de rango): 400, nunca llega al módulo", async () => {
-    const res1 = await POST(peticion({ cuentaId: "todas", regla: "maximo" }));
+    const res1 = await POST(peticion({ seleccion: SELECCION, regla: "maximo" }));
     expect(res1.status).toBe(400);
-    const res2 = await POST(peticion({ cuentaId: "todas", regla: "maximo", maximoPct: 150 }));
+    const res2 = await POST(peticion({ seleccion: SELECCION, regla: "maximo", maximoPct: 150 }));
     expect(res2.status).toBe(400);
     expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
   });
 
   it("regla 'tabla-maestra': delega igual, sin maximoPct", async () => {
-    await POST(peticion({ cuentaId: "todas", regla: "tabla-maestra" }));
-    expect(aplicarReglaALoteMock).toHaveBeenCalledWith("empresa-1", "usuario-1", "todas", { tipo: "tabla-maestra" });
+    await POST(peticion({ seleccion: SELECCION, regla: "tabla-maestra" }));
+    expect(aplicarReglaALoteMock).toHaveBeenCalledWith("empresa-1", "usuario-1", SELECCION, { tipo: "tabla-maestra" });
   });
 
   it("regla inválida: 400", async () => {
-    const res = await POST(peticion({ cuentaId: "todas", regla: "lo-que-sea" }));
+    const res = await POST(peticion({ seleccion: SELECCION, regla: "lo-que-sea" }));
     expect(res.status).toBe(400);
   });
 
-  it("cuentaId inválido (ni 'todas' ni UUID): 400", async () => {
-    const res = await POST(peticion({ cuentaId: "no-es-un-uuid", regla: "todas" }));
+  it("Promo-A: lista vacía, ausente o 'todas' (el formato viejo): 400, nunca llega al módulo", async () => {
+    for (const cuerpo of [{ regla: "todas", seleccion: [] }, { regla: "todas" }, { regla: "todas", cuentaId: "todas" }, { regla: "todas", seleccion: "todas" }]) {
+      const res = await POST(peticion(cuerpo));
+      expect(res.status).toBe(400);
+    }
+    expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
+  });
+
+  it("Promo-A: elemento inválido (cuenta no UUID o itemId raro): 400", async () => {
+    const res1 = await POST(peticion({ regla: "todas", seleccion: [{ cuentaId: "no-es-un-uuid", itemId: "MCO111111" }] }));
+    const res2 = await POST(peticion({ regla: "todas", seleccion: [{ cuentaId: CUENTA_ID, itemId: "x'; DROP" }] }));
+    expect(res1.status).toBe(400);
+    expect(res2.status).toBe(400);
+    expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
+  });
+
+  it("Promo-A: más del tope de publicaciones: 400", async () => {
+    const demasiadas = Array.from({ length: TOPE_ITEMS_SELECCION + 1 }, (_, i) => ({ cuentaId: CUENTA_ID, itemId: `MCO${100000 + i}` }));
+    const res = await POST(peticion({ regla: "todas", seleccion: demasiadas }));
     expect(res.status).toBe(400);
+    expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
+  });
+
+  it("Promo-A: duplicados se descartan — nunca se escribe dos veces la misma publicación", async () => {
+    await POST(peticion({ regla: "todas", seleccion: [SELECCION[0], SELECCION[0], SELECCION[1]] }));
+    expect(aplicarReglaALoteMock).toHaveBeenCalledWith("empresa-1", "usuario-1", SELECCION, { tipo: "todas" });
   });
 
   it("origen inválido: 403, nunca llega a tocar nada", async () => {
-    const res = await POST(peticion({ cuentaId: "todas", regla: "todas" }, "https://otro-sitio.test"));
+    const res = await POST(peticion({ seleccion: SELECCION, regla: "todas" }, "https://otro-sitio.test"));
     expect(res.status).toBe(403);
     expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
   });
 
   it("sin permiso de 'ejecutar': 403", async () => {
     vi.mocked(requierePermiso).mockRejectedValueOnce(new SinPermisoError("promociones", "ejecutar"));
-    const res = await POST(peticion({ cuentaId: "todas", regla: "todas" }));
+    const res = await POST(peticion({ seleccion: SELECCION, regla: "todas" }));
     expect(res.status).toBe(403);
     expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
   });
 
   describe("regla 'salir-todas' (dejar de participar en todas)", () => {
     it("vistaPrevia:true: solo cuenta (delega a la vista previa), NUNCA ejecuta ni escribe", async () => {
-      const res = await POST(peticion({ cuentaId: CUENTA_ID, regla: "salir-todas", vistaPrevia: true }));
+      const res = await POST(peticion({ seleccion: SELECCION, regla: "salir-todas", vistaPrevia: true }));
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ publicaciones: 2, promociones: 3 });
-      expect(vistaPreviaSalirTodasMock).toHaveBeenCalledWith("empresa-1", CUENTA_ID);
+      expect(vistaPreviaSalirTodasMock).toHaveBeenCalledWith("empresa-1", SELECCION);
       expect(salirDeTodasLasPromocionesMock).not.toHaveBeenCalled();
       expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
     });
 
     it("confirmado:true: ejecuta la salida masiva con el usuario real", async () => {
-      const res = await POST(peticion({ cuentaId: "todas", regla: "salir-todas", confirmado: true }));
+      const res = await POST(peticion({ seleccion: SELECCION, regla: "salir-todas", confirmado: true }));
       expect(res.status).toBe(200);
-      expect(salirDeTodasLasPromocionesMock).toHaveBeenCalledWith("empresa-1", "usuario-1", "todas");
+      expect(salirDeTodasLasPromocionesMock).toHaveBeenCalledWith("empresa-1", "usuario-1", SELECCION);
       expect(aplicarReglaALoteMock).not.toHaveBeenCalled();
     });
 
     it("sin confirmado (ni vistaPrevia): 400, nunca sale de nada sin el paso de confirmación", async () => {
-      const res = await POST(peticion({ cuentaId: "todas", regla: "salir-todas" }));
+      const res = await POST(peticion({ seleccion: SELECCION, regla: "salir-todas" }));
       expect(res.status).toBe(400);
-      const res2 = await POST(peticion({ cuentaId: "todas", regla: "salir-todas", confirmado: "si" }));
+      const res2 = await POST(peticion({ seleccion: SELECCION, regla: "salir-todas", confirmado: "si" }));
       expect(res2.status).toBe(400);
       expect(salirDeTodasLasPromocionesMock).not.toHaveBeenCalled();
     });
 
     it("exige el mismo permiso 'ejecutar' que 'Aplicar regla' — también para la vista previa", async () => {
       vi.mocked(requierePermiso).mockRejectedValueOnce(new SinPermisoError("promociones", "ejecutar"));
-      const res = await POST(peticion({ cuentaId: "todas", regla: "salir-todas", vistaPrevia: true }));
+      const res = await POST(peticion({ seleccion: SELECCION, regla: "salir-todas", vistaPrevia: true }));
       expect(res.status).toBe(403);
       expect(vi.mocked(requierePermiso)).toHaveBeenCalledWith("usuario-1", "empresa-1", "promociones", "ejecutar");
       expect(vistaPreviaSalirTodasMock).not.toHaveBeenCalled();
     });
 
-    it("cuentaId inválido: 400 antes de tocar nada", async () => {
-      const res = await POST(peticion({ cuentaId: "no-es-un-uuid", regla: "salir-todas", confirmado: true }));
+    it("selección vacía: 400 antes de tocar nada", async () => {
+      const res = await POST(peticion({ seleccion: [], regla: "salir-todas", confirmado: true }));
       expect(res.status).toBe(400);
       expect(salirDeTodasLasPromocionesMock).not.toHaveBeenCalled();
     });

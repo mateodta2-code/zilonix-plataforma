@@ -10,6 +10,7 @@ import { datosSitioMl, formatearMoneda, formatearNumero, SITE_ID_DEFECTO } from 
 import type { ConteosPublicaciones, FiltroPublicaciones, PromocionParaUi, PublicacionConEstado, ResumenAplicarRegla } from "@/lib/ml/promocionesPublicaciones";
 import type { ResumenSalirTodas, VistaPreviaSalirTodas } from "@/lib/ml/promocionesSalirTodas";
 import { LARGO_MAXIMO_REGLAS_TEXTO } from "@/lib/ml/promocionesReglasTexto";
+import { TOPE_ITEMS_SELECCION, type ItemSeleccionado } from "@/lib/ml/promocionesSeleccion";
 import { calcularDesdePorcentaje, calcularDesdePrecioFinal, formatoEnteroInput, parsearNumeroLocal, superaMaximoConfigurado } from "./calculosPublicaciones";
 import styles from "./promocionesReal.module.css";
 
@@ -55,6 +56,10 @@ function nombrePromocion(tipoPromocion: string): string {
 
 function sumarConteos(a: ConteosPublicaciones, b: ConteosPublicaciones): ConteosPublicaciones {
   return { todas: a.todas + b.todas, enPromocion: a.enPromocion + b.enPromocion, sinPromocion: a.sinPromocion + b.sinPromocion, conError: a.conError + b.conError };
+}
+
+function claveSeleccion(cuentaMlId: string, itemId: string): string {
+  return `${cuentaMlId}:${itemId}`;
 }
 
 function bloquearScroll(bloquear: boolean) {
@@ -115,6 +120,8 @@ export function PaginaPromocionesReal({
   const [cargandoAuto, setCargandoAuto] = useState(false);
   const [topeAlcanzado, setTopeAlcanzado] = useState(false);
   const [expandidaId, setExpandidaId] = useState<string | null>(null);
+  // Promo-A (Refs #571): la regla se aplica SOLO a lo que se marca acá.
+  const [seleccionadas, setSeleccionadas] = useState<Set<string>>(new Set());
 
   const [toasts, setToasts] = useState<ItemToast[]>([]);
   function mostrarToast(texto: string, estado: EstadoChip) {
@@ -178,6 +185,9 @@ export function PaginaPromocionesReal({
       setConteos({ todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 });
       setCursor(null);
       setExpandidaId(null);
+      // Una lista nueva (otra cuenta/filtro/búsqueda, o recarga tras aplicar)
+      // nunca arrastra marcas de filas que ya no se ven.
+      setSeleccionadas(new Set());
     }
     setTopeAlcanzado(false);
     setCargandoAuto(true);
@@ -353,6 +363,31 @@ export function PaginaPromocionesReal({
     }
   }
 
+  // ---------- Selección de publicaciones ----------
+  // Solo cuentan las marcadas que siguen en la lista cargada.
+  const seleccionActual: ItemSeleccionado[] = filas.filter((f) => seleccionadas.has(claveSeleccion(f.cuentaMlId, f.itemId))).map((f) => ({ cuentaId: f.cuentaMlId, itemId: f.itemId }));
+  const cantidadSeleccionada = seleccionActual.length;
+  const todasMarcadas = filas.length > 0 && cantidadSeleccionada === Math.min(filas.length, TOPE_ITEMS_SELECCION);
+
+  function alternarSeleccion(fila: PublicacionConEstado) {
+    const clave = claveSeleccion(fila.cuentaMlId, fila.itemId);
+    setSeleccionadas((actual) => {
+      const nuevo = new Set(actual);
+      if (nuevo.has(clave)) nuevo.delete(clave);
+      else if (nuevo.size < TOPE_ITEMS_SELECCION) nuevo.add(clave);
+      return nuevo;
+    });
+  }
+
+  function alternarTodas() {
+    if (todasMarcadas) {
+      setSeleccionadas(new Set());
+      return;
+    }
+    // Las cargadas del filtro/pestaña/búsqueda actual, hasta el tope por vez.
+    setSeleccionadas(new Set(filas.slice(0, TOPE_ITEMS_SELECCION).map((f) => claveSeleccion(f.cuentaMlId, f.itemId))));
+  }
+
   // ---------- Reglas (lote) ----------
   const [regla, setRegla] = useState<ReglaUi>("todas");
   const [maximoPct, setMaximoPct] = useState(15);
@@ -363,6 +398,7 @@ export function PaginaPromocionesReal({
   const [errorRegla, setErrorRegla] = useState<string | null>(null);
 
   function abrirAplicarRegla() {
+    if (cantidadSeleccionada === 0) return;
     setPasoRegla("confirmar");
     setResultadoRegla(null);
     setErrorRegla(null);
@@ -383,7 +419,7 @@ export function PaginaPromocionesReal({
       const res = await fetch("/api/ml/promociones/publicaciones/reglas-aplicar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cuentaId: cuentaSeleccionada, regla, maximoPct: regla === "maximo" ? maximoPct : undefined }),
+        body: JSON.stringify({ seleccion: seleccionActual, regla, maximoPct: regla === "maximo" ? maximoPct : undefined }),
       });
       body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error("error");
@@ -395,6 +431,7 @@ export function PaginaPromocionesReal({
     setAplicandoRegla(false);
     setResultadoRegla(body as ResumenAplicarRegla);
     setPasoRegla("resultado");
+    setSeleccionadas(new Set());
     void cargarTodoAutomatico(true);
   }
 
@@ -410,7 +447,7 @@ export function PaginaPromocionesReal({
       const res = await fetch("/api/ml/promociones/publicaciones/reglas-aplicar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cuentaId: cuentaSeleccionada, regla: "salir-todas", ...extra }),
+        body: JSON.stringify({ seleccion: seleccionActual, regla: "salir-todas", ...extra }),
       });
       return { ok: res.ok, body: await res.json().catch(() => ({})) };
     } catch {
@@ -419,6 +456,7 @@ export function PaginaPromocionesReal({
   }
 
   async function abrirSalirTodas() {
+    if (cantidadSeleccionada === 0) return;
     setPasoSalirTodas("cargando");
     setVistaPreviaSalir(null);
     setResultadoSalirTodas(null);
@@ -450,6 +488,7 @@ export function PaginaPromocionesReal({
     }
     setResultadoSalirTodas(body as ResumenSalirTodas);
     setPasoSalirTodas("resultado");
+    setSeleccionadas(new Set());
     void cargarTodoAutomatico(true);
   }
 
@@ -740,14 +779,31 @@ export function PaginaPromocionesReal({
               type="button"
               variante="primario"
               onClick={regla === "salir-todas" ? () => void abrirSalirTodas() : abrirAplicarRegla}
-              disabled={resumenMaestraSku.total === 0 && (regla === "tabla-maestra" || regla === "maximo")}
+              disabled={cantidadSeleccionada === 0 || (resumenMaestraSku.total === 0 && (regla === "tabla-maestra" || regla === "maximo"))}
             >
               {regla === "salir-todas" ? "Revisar y dejar de participar…" : "Aplicar regla a las publicaciones"}
             </Boton>
-            <span style={{ fontSize: 12, color: "var(--texto-suave)" }}>Se aplica sobre {nombreCuentaSeleccionada}.</span>
+            <span style={{ fontSize: 12, color: "var(--texto-suave)" }}>
+              Se aplica a {formatearNumero(cantidadSeleccionada, "es")} publicaciones seleccionadas
+              {cantidadSeleccionada === 0 ? " — marca las publicaciones de la lista para poder aplicar" : ""}.
+            </span>
           </div>
         )}
       </Tarjeta>
+
+      {filas.length > 0 && (
+        <div className={styles.controlSeleccion}>
+          <label className={styles.filaCheck}>
+            <input type="checkbox" checked={todasMarcadas} onChange={alternarTodas} />
+            Seleccionar todas ({formatearNumero(Math.min(filas.length, TOPE_ITEMS_SELECCION), "es")} cargadas en esta vista)
+          </label>
+          <span className={styles.notaSeleccion}>
+            {formatearNumero(cantidadSeleccionada, "es")} seleccionadas
+            {cursor ? " · todavía hay más publicaciones sin cargar: «Seleccionar todas» solo marca las que ya están en la lista" : ""}
+            {filas.length > TOPE_ITEMS_SELECCION ? ` · máximo ${formatearNumero(TOPE_ITEMS_SELECCION, "es")} por vez` : ""}
+          </span>
+        </div>
+      )}
 
       <div className={styles.listaPublicaciones}>
         {filas.length === 0 ? (
@@ -768,6 +824,15 @@ export function PaginaPromocionesReal({
             const idioma = idiomaDeCuenta(fila.cuentaMlId);
             return (
               <Tarjeta key={`${fila.cuentaMlId}-${fila.itemId}`} className={styles.tarjetaPublicacion}>
+                <div className={styles.filaConCheck}>
+                <input
+                  type="checkbox"
+                  className={styles.checkFila}
+                  checked={seleccionadas.has(claveSeleccion(fila.cuentaMlId, fila.itemId))}
+                  disabled={!seleccionadas.has(claveSeleccion(fila.cuentaMlId, fila.itemId)) && seleccionadas.size >= TOPE_ITEMS_SELECCION}
+                  onChange={() => alternarSeleccion(fila)}
+                  aria-label={`Seleccionar ${fila.tituloProducto ?? fila.itemId}`}
+                />
                 <button type="button" className={styles.filaResumen} onClick={() => setExpandidaId(expandida ? null : fila.itemId)} aria-expanded={expandida}>
                   {fila.thumbnail ? <img src={fila.thumbnail} alt="" className={styles.foto} width={44} height={44} /> : <FotoPlaceholder />}
                   <div className={styles.infoPublicacion}>
@@ -786,6 +851,7 @@ export function PaginaPromocionesReal({
                     ⌄
                   </span>
                 </button>
+                </div>
 
                 {fila.estado === "error" && fila.motivoError && <p className={styles.avisoError}>{fila.motivoError}</p>}
 
@@ -968,7 +1034,7 @@ export function PaginaPromocionesReal({
               <p className={styles.tituloModal}>Aplicar regla a las publicaciones</p>
               <div className={styles.resumenAplicar}>
                 <p>
-                  Se revisarán las publicaciones activas de <strong>{nombreCuentaSeleccionada}</strong> y se participará de una vez en las que cumplan la regla elegida (
+                  Se revisarán las <strong>{formatearNumero(cantidadSeleccionada, "es")}</strong> publicaciones seleccionadas y se participará de una vez en las que cumplan la regla elegida (
                   {regla === "todas" ? "todas las promociones disponibles" : regla === "maximo" ? `máximo ${maximoPct}% de descuento a cargo del vendedor` : "la tabla maestra de SKU"}
                   ), sin un paso de confirmación por producto.
                 </p>
@@ -1048,11 +1114,11 @@ export function PaginaPromocionesReal({
           ) : (
             <>
               <p className={styles.tituloModal}>Dejar de participar en todas las promociones</p>
-              {pasoSalirTodas === "cargando" && !errorSalirTodas && <p style={{ fontSize: 13.5 }}>Revisando las publicaciones activas de {nombreCuentaSeleccionada}… (no se cambia nada todavía)</p>}
+              {pasoSalirTodas === "cargando" && !errorSalirTodas && <p style={{ fontSize: 13.5 }}>Revisando las {formatearNumero(cantidadSeleccionada, "es")} publicaciones seleccionadas… (no se cambia nada todavía)</p>}
               {vistaPreviaSalir && (pasoSalirTodas === "confirmar" || pasoSalirTodas === "ejecutando") && (
                 <div className={styles.resumenAplicar}>
                   <p>
-                    Saldrán <strong>{formatearNumero(vistaPreviaSalir.publicaciones, "es")}</strong> publicaciones de <strong>{formatearNumero(vistaPreviaSalir.promociones, "es")}</strong> promociones en total ({nombreCuentaSeleccionada}).
+                    Saldrán <strong>{formatearNumero(vistaPreviaSalir.publicaciones, "es")}</strong> publicaciones de <strong>{formatearNumero(vistaPreviaSalir.promociones, "es")}</strong> promociones en total (entre las {formatearNumero(cantidadSeleccionada, "es")} seleccionadas).
                   </p>
                   {vistaPreviaSalir.noPermitidas > 0 && (
                     <p>
@@ -1060,7 +1126,7 @@ export function PaginaPromocionesReal({
                     </p>
                   )}
                   {vistaPreviaSalir.lecturasConError > 0 && <p>{formatearNumero(vistaPreviaSalir.lecturasConError, "es")} publicaciones no se pudieron leer y no están en este conteo.</p>}
-                  <p>Esto quita todas tus publicaciones activas de las promociones. No se puede deshacer desde Seller.</p>
+                  <p>Esto quita las publicaciones seleccionadas de sus promociones activas. No se puede deshacer desde Seller.</p>
                 </div>
               )}
               {errorSalirTodas && <p className={styles.errorModal}>{errorSalirTodas}</p>}

@@ -46,10 +46,12 @@ import { salirDeTodasLasPromociones, vistaPreviaSalirTodas } from "./promociones
 
 const CUENTA = { id: "cuenta-1", cuentaIdExterna: "123", nickname: "Mi Tienda", siteId: "MLM" };
 
+let seleccion: { cuentaId: string; itemId: string }[] = [];
+
 function prepararCatalogo(promocionesPorItem: Record<string, unknown[]>) {
   filasPorTabla.set(cuentasMl, [CUENTA]);
   const ids = Object.keys(promocionesPorItem);
-  listarItemsActivosMlMock.mockResolvedValue({ ids, totalCatalogo: ids.length });
+  seleccion = ids.map((itemId) => ({ cuentaId: CUENTA.id, itemId }));
   leerPromocionesItemMlMock.mockImplementation(async (itemId: string) => ({ estado: "ok", promociones: promocionesPorItem[itemId] ?? [] }));
   leerItemParaPromocionMlMock.mockImplementation(async (itemId: string) => ({ title: `Título ${itemId}` }));
 }
@@ -72,7 +74,7 @@ describe("vistaPreviaSalirTodas — solo lee y cuenta, nunca escribe", () => {
       A4: [],
     });
 
-    const vista = await vistaPreviaSalirTodas("empresa-1", "todas");
+    const vista = await vistaPreviaSalirTodas("empresa-1", seleccion);
 
     expect(vista).toMatchObject({ revisadas: 4, publicaciones: 2, promociones: 3, salibles: 2, noPermitidas: 1, lecturasConError: 0 });
     expect(vista.porTipo).toEqual({ DEAL: 1, PRICE_DISCOUNT: 1, LIGHTNING: 1 });
@@ -85,14 +87,14 @@ describe("vistaPreviaSalirTodas — solo lee y cuenta, nunca escribe", () => {
     leerPromocionesItemMlMock.mockImplementation(async (itemId: string) =>
       itemId === "A2" ? { estado: "otro_error" } : { estado: "ok", promociones: [{ type: "DEAL", status: "started", id: "p1" }] }
     );
-    const vista = await vistaPreviaSalirTodas("empresa-1", "todas");
+    const vista = await vistaPreviaSalirTodas("empresa-1", seleccion);
     expect(vista).toMatchObject({ revisadas: 1, publicaciones: 1, promociones: 1, lecturasConError: 1 });
   });
 
   it("una cuenta sin token válido se salta sin romper", async () => {
     prepararCatalogo({ A1: [{ type: "DEAL", status: "started", id: "p1" }] });
     obtenerAccessTokenVigenteMock.mockRejectedValueOnce(new Error("sin token"));
-    const vista = await vistaPreviaSalirTodas("empresa-1", "todas");
+    const vista = await vistaPreviaSalirTodas("empresa-1", seleccion);
     expect(vista.publicaciones).toBe(0);
   });
 });
@@ -109,7 +111,7 @@ describe("salirDeTodasLasPromociones", () => {
     });
     salirDePromocionMlMock.mockResolvedValue({ ok: true, status: 200, textoCrudo: "" });
 
-    const resumen = await salirDeTodasLasPromociones("empresa-1", "usuario-1", "todas");
+    const resumen = await salirDeTodasLasPromociones("empresa-1", "usuario-1", seleccion);
 
     expect(resumen).toMatchObject({ revisadas: 2, salieron: 1, errores: 0, noPermitidas: 3 });
     // Solo el DELETE de la DEAL — DOD, SELLER_CAMPAIGN (borraría la campaña entera) y el tipo desconocido NUNCA se llaman.
@@ -130,7 +132,7 @@ describe("salirDeTodasLasPromociones", () => {
       itemId === "A1" ? { ok: false, status: 400, textoCrudo: JSON.stringify({ message: "La oferta ya inició y no se puede borrar" }) } : { ok: true, status: 200, textoCrudo: "" }
     );
 
-    const resumen = await salirDeTodasLasPromociones("empresa-1", "usuario-1", "todas");
+    const resumen = await salirDeTodasLasPromociones("empresa-1", "usuario-1", seleccion);
 
     expect(resumen).toMatchObject({ salieron: 1, errores: 1, noPermitidas: 0 });
     const fallida = resumen.filas.find((f) => f.estado === "error");
@@ -145,7 +147,7 @@ describe("salirDeTodasLasPromociones", () => {
       const { LimiteMercadoLibreError } = await import("@/lib/ml/cliente");
       prepararCatalogo({ A1: [{ type: "DEAL", status: "started", id: "p1" }] });
       salirDePromocionMlMock.mockRejectedValue(new LimiteMercadoLibreError(null));
-      const promesa = salirDeTodasLasPromociones("empresa-1", "usuario-1", "todas");
+      const promesa = salirDeTodasLasPromociones("empresa-1", "usuario-1", seleccion);
       await vi.runAllTimersAsync();
       const resumen = await promesa;
       expect(resumen).toMatchObject({ salieron: 0, errores: 1 });
@@ -159,7 +161,7 @@ describe("salirDeTodasLasPromociones", () => {
 
   it("ignora las promociones 'candidate' (no se participa en ellas, no hay de qué salir)", async () => {
     prepararCatalogo({ A1: [{ type: "DEAL", status: "candidate", id: "p1" }] });
-    const resumen = await salirDeTodasLasPromociones("empresa-1", "usuario-1", "todas");
+    const resumen = await salirDeTodasLasPromociones("empresa-1", "usuario-1", seleccion);
     expect(resumen.filas).toHaveLength(0);
     expect(salirDePromocionMlMock).not.toHaveBeenCalled();
   });
