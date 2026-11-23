@@ -15,7 +15,7 @@ export async function aceptarInvitacionBodegaAction(formData: FormData) {
   let destino: string;
   try {
     const { bodegaId, rol } = await aceptarInvitacionBodega(token, usuario.id);
-    cookies().set(COOKIE_BODEGA_ACTUAL, bodegaId, { httpOnly: true, sameSite: "lax", path: "/" });
+    cookies().set(COOKIE_BODEGA_ACTUAL, bodegaId, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/" });
     destino = rol === "domiciliario" ? "/domiciliario" : "/bodega";
   } catch (error) {
     if (!(error instanceof InvitacionBodegaInvalidaError)) throw error;
