@@ -71,3 +71,51 @@ export function superaMaximoConfigurado(precioOriginal: number | null, precioSug
   const pct = ((precioOriginal - precioSugerido) / precioOriginal) * 100;
   return pct > maximoPct;
 }
+
+// Promo-C (Refs #573) — selección de promociones POR PRODUCTO. Todo lo de
+// abajo es solo para pantalla: el servidor vuelve a validar piso, reglas y
+// permisos con datos frescos en cada llamada (participar / salir).
+export type PromocionMarcable = {
+  tipoPromocion: string;
+  promotionIdMl: string | null;
+  estadoMl: string;
+  puedeSalirApi: boolean;
+  cumpleReglas: boolean;
+  motivoRevisarManual: string | null;
+  precioSugerido: number | null;
+  precioMinimo: number | null;
+};
+
+export function claveMarcaPromocion(p: Pick<PromocionMarcable, "tipoPromocion" | "promotionIdMl">): string {
+  return `${p.tipoPromocion}|${p.promotionIdMl ?? ""}`;
+}
+
+// «started» y «pending» ya están dentro: lo que se puede hacer es salir.
+export function accionDePromocion(p: Pick<PromocionMarcable, "estadoMl">): "salir" | "participar" {
+  return p.estadoMl === "started" || p.estadoMl === "pending" ? "salir" : "participar";
+}
+
+// null = se puede marcar. Si no, el motivo que se muestra deshabilitada.
+export function motivoNoMarcable(p: PromocionMarcable): string | null {
+  if (accionDePromocion(p) === "salir") {
+    return p.puedeSalirApi ? null : "Solo se puede dejar desde Mercado Libre.";
+  }
+  if (!p.cumpleReglas) return p.motivoRevisarManual ?? "No cumple las reglas para participar.";
+  return null;
+}
+
+// Participar sin un precio sugerido real no tiene qué mandar: no se inventa.
+export function motivoSinPrecioParaParticipar(p: PromocionMarcable): string | null {
+  return accionDePromocion(p) === "participar" && p.precioSugerido == null ? "Sin precio sugerido: se elige con «Participar» en esta promoción." : null;
+}
+
+export function quedaBajoPrecioMinimo(p: Pick<PromocionMarcable, "precioSugerido" | "precioMinimo">): boolean {
+  return p.precioSugerido != null && p.precioMinimo != null && p.precioSugerido < p.precioMinimo;
+}
+
+// SOLO las marcadas y marcables, en el orden de la lista.
+export function planAplicarPromociones<T extends PromocionMarcable>(promociones: T[], marcadas: ReadonlySet<string>): { promocion: T; accion: "salir" | "participar" }[] {
+  return promociones
+    .filter((p) => marcadas.has(claveMarcaPromocion(p)) && motivoNoMarcable(p) == null && motivoSinPrecioParaParticipar(p) == null)
+    .map((promocion) => ({ promocion, accion: accionDePromocion(promocion) }));
+}

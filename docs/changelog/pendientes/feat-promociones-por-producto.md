@@ -1,0 +1,1 @@
+- Promociones: en cada producto expandido se marcan las promociones en las que entrar o salir (precio original, descuento, quién paga) y «Aplicar a este producto» envía solo las marcadas, con resultado por promoción (Refs #573).

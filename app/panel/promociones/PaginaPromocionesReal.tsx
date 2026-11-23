@@ -11,7 +11,7 @@ import type { ConteosPublicaciones, FiltroPublicaciones, PromocionParaUi, Public
 import type { ResumenSalirTodas, VistaPreviaSalirTodas } from "@/lib/ml/promocionesSalirTodas";
 import { LARGO_MAXIMO_REGLAS_TEXTO } from "@/lib/ml/promocionesReglasTexto";
 import { TOPE_ITEMS_SELECCION, type ItemSeleccionado } from "@/lib/ml/promocionesSeleccion";
-import { calcularDesdePorcentaje, calcularDesdePrecioFinal, formatoEnteroInput, parsearNumeroLocal, superaMaximoConfigurado } from "./calculosPublicaciones";
+import { accionDePromocion, calcularDesdePorcentaje, calcularDesdePrecioFinal, claveMarcaPromocion, formatoEnteroInput, motivoNoMarcable, motivoSinPrecioParaParticipar, parsearNumeroLocal, planAplicarPromociones, quedaBajoPrecioMinimo, superaMaximoConfigurado } from "./calculosPublicaciones";
 import styles from "./promocionesReal.module.css";
 
 type Cuenta = { id: string; nickname: string; siteId: string };
@@ -361,6 +361,69 @@ export function PaginaPromocionesReal({
     } else {
       setErrorSalir(body.error ?? "No se pudo dejar de participar en esta promoción.");
     }
+  }
+
+  // ---------- Promo-C (Refs #573): aplicar solo las promociones marcadas de UN producto ----------
+  const [marcasPromo, setMarcasPromo] = useState<Record<string, Set<string>>>({});
+  const [resultadosPromo, setResultadosPromo] = useState<Record<string, { ok: boolean; texto: string }>>({});
+  const [aplicandoFila, setAplicandoFila] = useState<string | null>(null);
+
+  function alternarMarcaPromo(fila: PublicacionConEstado, promocion: PromocionParaUi) {
+    const claveFila = claveSeleccion(fila.cuentaMlId, fila.itemId);
+    setMarcasPromo((actual) => {
+      const nuevo = new Set(actual[claveFila] ?? []);
+      const clave = claveMarcaPromocion(promocion);
+      if (nuevo.has(clave)) nuevo.delete(clave);
+      else nuevo.add(clave);
+      return { ...actual, [claveFila]: nuevo };
+    });
+  }
+
+  // Una llamada por promoción marcada, en serie (rate limiting: el reintento
+  // 429 ya vive en el servidor). Cada llamada queda registrada en
+  // promociones_acciones por las rutas de siempre.
+  async function aplicarAEsteProducto(fila: PublicacionConEstado) {
+    const claveFila = claveSeleccion(fila.cuentaMlId, fila.itemId);
+    const plan = planAplicarPromociones(fila.promociones, marcasPromo[claveFila] ?? new Set());
+    if (plan.length === 0) return;
+    const salidas = plan.filter((x) => x.accion === "salir").length;
+    if (salidas > 0 && !window.confirm(`Vas a dejar de participar en ${salidas} promoción(es) de este producto. ¿Continuar?`)) return;
+    setAplicandoFila(claveFila);
+    for (const { promocion, accion } of plan) {
+      const claveResultado = `${claveFila}|${claveMarcaPromocion(promocion)}`;
+      let resultado: { ok: boolean; texto: string };
+      try {
+        const esSalir = accion === "salir";
+        const res = await fetch(esSalir ? "/api/ml/promociones/participando/salir" : "/api/ml/promociones/publicaciones/participar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cuentaId: fila.cuentaMlId,
+            itemId: fila.itemId,
+            promotionIdMl: promocion.promotionIdMl,
+            tipoPromocion: promocion.tipoPromocion,
+            ...(esSalir ? {} : { precioElegido: promocion.precioSugerido }),
+          }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string | null };
+        const exito = esSalir ? res.ok : body.ok === true;
+        resultado = exito ? { ok: true, texto: esSalir ? "Listo — se dejó de participar." : "Listo — se participa." } : { ok: false, texto: body.error ?? "No se pudo aplicar." };
+        if (exito) {
+          parcharPromo(
+            fila.itemId,
+            fila.cuentaMlId,
+            promocion.tipoPromocion,
+            promocion.promotionIdMl,
+            esSalir ? () => null : (p) => ({ ...p, estadoMl: "started", precioActual: promocion.precioSugerido, cumpleReglas: true, accionSugerida: null })
+          );
+        }
+      } catch {
+        resultado = { ok: false, texto: "No se pudo conectar con el servidor." };
+      }
+      setResultadosPromo((actual) => ({ ...actual, [claveResultado]: resultado }));
+    }
+    setMarcasPromo((actual) => ({ ...actual, [claveFila]: new Set() }));
+    setAplicandoFila(null);
   }
 
   // ---------- Selección de publicaciones ----------
@@ -871,6 +934,15 @@ export function PaginaPromocionesReal({
                         return (
                           <div key={`${promocion.tipoPromocion}-${promocion.promotionIdMl ?? "sin-id"}`} className={styles.filaPromocion}>
                             <div className={styles.encabezadoPromocion}>
+                              {puedeEjecutar && (
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${accionDePromocion(promocion) === "salir" ? "Salir de" : "Participar en"} ${nombrePromocion(promocion.tipoPromocion)}`}
+                                  checked={marcasPromo[claveSeleccion(fila.cuentaMlId, fila.itemId)]?.has(claveMarcaPromocion(promocion)) ?? false}
+                                  disabled={motivoNoMarcable(promocion) != null || motivoSinPrecioParaParticipar(promocion) != null || aplicandoFila != null}
+                                  onChange={() => alternarMarcaPromo(fila, promocion)}
+                                />
+                              )}
                               <span className={styles.nombrePromocion}>{nombrePromocion(promocion.tipoPromocion)}</span>
                               <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>({promocion.tipoPromocion})</span>
                               {activa && (
@@ -891,6 +963,18 @@ export function PaginaPromocionesReal({
                                   <span>Precio sugerido: {promocion.precioSugerido != null ? formatearMoneda(promocion.precioSugerido, fila.siteId) : "A elegir al participar"}</span>
                                   {promocion.precioMinimo != null && <span>Precio mínimo (Finanzas): {formatearMoneda(promocion.precioMinimo, fila.siteId)}</span>}
                                 </>
+                              )}
+                              <span>Precio original: {precioOriginal != null ? formatearMoneda(precioOriginal, fila.siteId) : "—"}</span>
+                              {!activa && promocion.precioSugerido != null && precioOriginal != null && (
+                                <span>Descuento sugerido: {formatearNumero(Math.round(calcularDesdePrecioFinal(precioOriginal, promocion.precioSugerido).descuentoVendedorPct * 10) / 10, idioma)}%</span>
+                              )}
+                              <span>Quién paga: {promocion.esCompartida ? "Compartida con Mercado Libre" : "Vendedor"}</span>
+                              {!activa && quedaBajoPrecioMinimo(promocion) && <span style={{ color: "var(--kpi-peligro-texto)" }}>El precio sugerido queda por debajo del mínimo (Finanzas).</span>}
+                              {puedeEjecutar && motivoNoMarcable(promocion) != null && <span style={{ color: "var(--texto-suave)" }}>{motivoNoMarcable(promocion)}</span>}
+                              {resultadosPromo[`${claveSeleccion(fila.cuentaMlId, fila.itemId)}|${claveMarcaPromocion(promocion)}`] && (
+                                <span role="status" style={{ color: resultadosPromo[`${claveSeleccion(fila.cuentaMlId, fila.itemId)}|${claveMarcaPromocion(promocion)}`].ok ? "var(--kpi-exito-texto, inherit)" : "var(--kpi-peligro-texto)" }}>
+                                  {resultadosPromo[`${claveSeleccion(fila.cuentaMlId, fila.itemId)}|${claveMarcaPromocion(promocion)}`].texto}
+                                </span>
                               )}
                               {!promocion.cumpleReglas && promocion.motivoRevisarManual && <span style={{ color: "var(--kpi-peligro-texto)" }}>{promocion.motivoRevisarManual}</span>}
                             </div>
@@ -915,6 +999,18 @@ export function PaginaPromocionesReal({
                           </div>
                         );
                       })
+                    )}
+                    {puedeEjecutar && fila.promociones.length > 0 && (
+                      <div className={styles.accionesPromocion}>
+                        <Boton
+                          type="button"
+                          variante="primario"
+                          disabled={aplicandoFila != null || planAplicarPromociones(fila.promociones, marcasPromo[claveSeleccion(fila.cuentaMlId, fila.itemId)] ?? new Set()).length === 0}
+                          onClick={() => void aplicarAEsteProducto(fila)}
+                        >
+                          {aplicandoFila === claveSeleccion(fila.cuentaMlId, fila.itemId) ? "Aplicando…" : "Aplicar a este producto"}
+                        </Boton>
+                      </div>
                     )}
                   </div>
                 )}
