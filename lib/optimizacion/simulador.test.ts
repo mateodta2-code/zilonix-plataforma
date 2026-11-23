@@ -70,6 +70,7 @@ describe("publicación para editar (forma confirmada en staging, #464)", () => {
       estado: "active",
       sellerId: "123456",
       userProduct: false,
+      familyId: null,
       fotos: [
         { id: "123-MCO1_1", url: "https://http2.mlstatic.com/a.jpg" },
         { id: "123-MCO1_2", url: "https://http2.mlstatic.com/b.jpg" },
@@ -82,6 +83,8 @@ describe("publicación para editar (forma confirmada en staging, #464)", () => {
     expect(leerItemEdicion({ id: "MCO4656053860", user_product_id: "MCOU5978141360" })?.userProduct).toBe(true);
     expect(leerItemEdicion({ id: "MCO4656053860", tags: ["good_quality_thumbnail", "user_product_listing"] })?.userProduct).toBe(true);
     expect(leerItemEdicion({ id: "MCO1", tags: ["immediate_payment"] })?.userProduct).toBe(false);
+    expect(leerItemEdicion({ id: "MCO4656053860", family_id: 6267009945680719 })?.familyId).toBe("6267009945680719");
+    expect(leerItemEdicion({ id: "MCO1", family_id: "../x" })?.familyId).toBeNull();
   });
 });
 

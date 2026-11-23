@@ -1314,3 +1314,30 @@ describe("salirDePromocionMl — rama feat-promociones (SIN CONFIRMAR contra Mer
     await expect(salirDePromocionMl("MCO111", "token", "p1", "DEAL")).resolves.toEqual({ ok: false, status: 0, textoCrudo: "" });
   });
 });
+
+describe("actualizarNombreFamiliaMl (título de «User Products», 22-nov)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("PUT /user-products-families/{family_id} con solo family_name", async () => {
+    const llamadas: { url: string; init?: RequestInit }[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      llamadas.push({ url, init });
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const { actualizarNombreFamiliaMl } = await import("./cliente");
+    const r = await actualizarNombreFamiliaMl("6267009945680719", "token", "Compresa de hielo para rodilla");
+    expect(r.ok).toBe(true);
+    expect(llamadas).toHaveLength(1);
+    expect(llamadas[0].url).toBe("https://api.mercadolibre.com/user-products-families/6267009945680719");
+    expect(llamadas[0].init?.method).toBe("PUT");
+    expect(JSON.parse(String(llamadas[0].init?.body))).toEqual({ family_name: "Compresa de hielo para rodilla" });
+  });
+
+  it("rechaza un family_id que no es número sin llamar a Mercado Libre", async () => {
+    const fetchFalso = vi.fn();
+    vi.stubGlobal("fetch", fetchFalso);
+    const { actualizarNombreFamiliaMl } = await import("./cliente");
+    await expect(actualizarNombreFamiliaMl("../items/MCO1", "token", "x")).rejects.toThrow();
+    expect(fetchFalso).not.toHaveBeenCalled();
+  });
+});
