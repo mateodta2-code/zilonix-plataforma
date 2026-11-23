@@ -46,7 +46,7 @@ async function traerPedidosReales(accessToken: string, cuentaIdExterna: string, 
   while (true) {
     const url = `https://api.mercadolibre.com/orders/search?seller=${cuentaIdExterna}&order.date_created.from=${encodeURIComponent(desdeIso)}&sort=date_desc&limit=${TAMAÑO_PAGINA}&offset=${offset}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) throw new Error(`Mercado Libre respondió ${res.status} al traer pedidos.`);
+    if (!res.ok) throw await errorDeRespuesta(res, "al traer pedidos");
     const data = await res.json();
     const pagina: PedidoMl[] = data.results ?? [];
     resultado.push(...pagina);
@@ -56,15 +56,72 @@ async function traerPedidosReales(accessToken: string, cuentaIdExterna: string, 
   return resultado;
 }
 
+
+// Issue #561 — antes solo se guardaba el número de estado y no se sabía
+// la causa de un 403. Se resume el cuerpo JSON de ML (status, code/error,
+// message, cause), recortado y sin credenciales: nunca se incluyen
+// cabeceras ni URLs, y se enmascara cualquier cosa con forma de token.
+export const PREFIJO_AVISO_IMPORTACION = "AVISO: ";
+const LARGO_MAX_CAMPO = 160;
+
+function limpiarTexto(valor: unknown): string {
+  const texto = typeof valor === "string" ? valor : valor == null ? "" : JSON.stringify(valor);
+  return texto
+    .replace(/Bearer\s+\S+/gi, "[oculto]")
+    .replace(/(APP_USR|TG)-[\w-]+/g, "[oculto]")
+    .replace(/(access_token|refresh_token|client_secret)=?[^\s&,;]*/gi, "[oculto]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, LARGO_MAX_CAMPO);
+}
+
+export function resumirCuerpoErrorMl(status: number, cuerpo: unknown): string {
+  const c = (cuerpo && typeof cuerpo === "object" ? cuerpo : {}) as Record<string, unknown>;
+  const partes = [`status=${status}`];
+  const codigo = limpiarTexto(c.code ?? c.error);
+  if (codigo) partes.push(`code=${codigo}`);
+  const mensaje = limpiarTexto(c.message);
+  if (mensaje) partes.push(`message=${mensaje}`);
+  const causa = limpiarTexto(c.cause);
+  if (causa) partes.push(`cause=${causa}`);
+  return partes.join(" ");
+}
+
+async function errorDeRespuesta(res: Response, accion: string): Promise<Error> {
+  let cuerpo: unknown = {};
+  try {
+    cuerpo = await res.json();
+  } catch {
+    // cuerpo vacío o no JSON: queda solo el status
+  }
+  return new Error(`Mercado Libre respondió ${res.status} ${accion}. [${resumirCuerpoErrorMl(res.status, cuerpo)}]`);
+}
+
+// Para /panel/conectar-ml: texto legible en español + pista de qué revisar.
+export function describirErrorImportacion(texto: string): { esAviso: boolean; mensaje: string; pista: string | null } {
+  const esAviso = texto.startsWith(PREFIJO_AVISO_IMPORTACION);
+  const limpio = esAviso ? texto.slice(PREFIJO_AVISO_IMPORTACION.length) : texto;
+  const negado = /respondió 40[13]\b|status=40[13]\b/.test(limpio);
+  const mensaje = negado ? limpio.replace(/Mercado Libre respondió (40[13])/, "Mercado Libre negó el acceso ($1)") : limpio;
+  const pista = negado
+    ? "Revisa los permisos de la app en el DevCenter de Mercado Libre, que la conexión sea con el usuario principal de la cuenta y que la cuenta no tenga restricciones."
+    : null;
+  return { esAviso, mensaje, pista };
+}
+
 type PublicacionMl = { id: string; title: string; price: number; available_quantity: number };
 
-async function traerPublicacionesReales(accessToken: string, cuentaIdExterna: string): Promise<PublicacionMl[]> {
+type ResultadoPublicaciones = { publicaciones: PublicacionMl[]; omitidas: number; motivos: string[] };
+
+const ATRIBUTOS_ITEM = "id,title,price,available_quantity";
+
+export async function traerPublicacionesReales(accessToken: string, cuentaIdExterna: string): Promise<ResultadoPublicaciones> {
   const ids: string[] = [];
   let offset = 0;
   while (true) {
     const url = `https://api.mercadolibre.com/users/${cuentaIdExterna}/items/search?status=active&limit=${TAMAÑO_PAGINA}&offset=${offset}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) throw new Error(`Mercado Libre respondió ${res.status} al listar publicaciones.`);
+    if (!res.ok) throw await errorDeRespuesta(res, "al listar publicaciones");
     const data = await res.json();
     const pagina: string[] = data.results ?? [];
     ids.push(...pagina);
@@ -73,17 +130,52 @@ async function traerPublicacionesReales(accessToken: string, cuentaIdExterna: st
   }
 
   const publicacionesReales: PublicacionMl[] = [];
+  let omitidas = 0;
+  const motivos = new Map<string, number>();
+  const omitir = (motivo: string) => {
+    omitidas += 1;
+    motivos.set(motivo, (motivos.get(motivo) ?? 0) + 1);
+  };
+
+  // Un lote que falla no tumba la importación: se reintenta ítem por ítem.
+  const leerPorItem = async (lote: string[]) => {
+    for (const id of lote) {
+      try {
+        const res = await fetch(`https://api.mercadolibre.com/items/${id}?attributes=${ATRIBUTOS_ITEM}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!res.ok) {
+          let cuerpo: unknown = {};
+          try {
+            cuerpo = await res.json();
+          } catch {}
+          omitir(resumirCuerpoErrorMl(res.status, cuerpo));
+          continue;
+        }
+        const body = (await res.json()) as PublicacionMl;
+        if (body?.id) publicacionesReales.push(body);
+        else omitir("status=200 sin datos");
+      } catch {
+        omitir("error de red");
+      }
+    }
+  };
+
   for (let i = 0; i < ids.length; i += 20) {
     const lote = ids.slice(i, i + 20);
-    const url = `https://api.mercadolibre.com/items?ids=${lote.join(",")}&attributes=id,title,price,available_quantity`;
+    const url = `https://api.mercadolibre.com/items?ids=${lote.join(",")}&attributes=${ATRIBUTOS_ITEM}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) throw new Error(`Mercado Libre respondió ${res.status} al traer el detalle de publicaciones.`);
+    if (!res.ok) {
+      await leerPorItem(lote);
+      continue;
+    }
     const data = await res.json();
-    for (const fila of data as Array<{ code: number; body: PublicacionMl }>) {
+    for (const fila of data as Array<{ code: number; body: (PublicacionMl & { message?: unknown; error?: unknown; cause?: unknown }) | null }>) {
       if (fila.code === 200 && fila.body) publicacionesReales.push(fila.body);
+      else omitir(resumirCuerpoErrorMl(fila.code, fila.body));
     }
   }
-  return publicacionesReales;
+  return { publicaciones: publicacionesReales, omitidas, motivos: [...motivos].map(([m, n]) => `${m} (x${n})`) };
 }
 
 // Tarea 2.5 — corre en segundo plano justo después de conectar (ver
@@ -161,7 +253,7 @@ export async function ejecutarImportacionInicial(empresaId: string, cuentaId: st
       );
     }
 
-    const publicacionesReales = await traerPublicacionesReales(accessToken, cuentaIdExterna);
+    const { publicaciones: publicacionesReales, omitidas, motivos } = await traerPublicacionesReales(accessToken, cuentaIdExterna);
     await dbComoEmpresa(empresaId, (tx) =>
       tx.update(importacionesMl).set({ publicacionesEncontradas: publicacionesReales.length }).where(eq(importacionesMl.id, importacion.id))
     );
@@ -187,7 +279,11 @@ export async function ejecutarImportacionInicial(empresaId: string, cuentaId: st
     }
 
     await dbComoEmpresa(empresaId, (tx) =>
-      tx.update(importacionesMl).set({ completadoTs: new Date() }).where(eq(importacionesMl.id, importacion.id))
+      tx.update(importacionesMl).set({
+        completadoTs: new Date(),
+        // Aviso (no error rojo): la importación terminó pero hubo publicaciones ilegibles.
+        error: omitidas > 0 ? `${PREFIJO_AVISO_IMPORTACION}${omitidas} publicaciones no se pudieron leer. Motivo: ${motivos.join("; ")}`.slice(0, 1000) : null,
+      }).where(eq(importacionesMl.id, importacion.id))
     );
   } catch (error) {
     const mensaje = error instanceof Error ? error.message : "Error desconocido.";
