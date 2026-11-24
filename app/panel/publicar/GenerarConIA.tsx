@@ -10,7 +10,6 @@ import { TIPOS_EXPERTO_ML } from "@/lib/ia/prompts/estiloExpertoML";
 import { NOTA_FOTO_UNO } from "@/lib/ia/prompts/fotoPrincipal";
 import { CHECKLIST_CONTENIDO, revisarCopySeguro, TIPOS_CONTENIDO_ZILONIX } from "@/lib/ia/prompts/zilonix-contenido";
 import type { Ficha } from "@/lib/publicaciones/ficha";
-import { TIPO_PORTADA } from "@/lib/publicaciones/imagenesIA";
 import type { Cuenta } from "./CuentasDestino";
 import { TIPO_ARRASTRE_FOTO_URL, urlDescarga } from "./formulario-logica";
 import { ajustarImagenAction, crearImagenAction, prepararImagenesAction, type PropuestaImagen } from "./ia/imagenes/actions";
@@ -33,6 +32,10 @@ const ESTILOS: { id: Estilo; nombre: string; ayuda: string }[] = [
 const NOMBRE_ESTILO: Record<Estilo, string> = { zilonix_portadas: "Portadas Zilonix", zilonix_contenido: "Contenido Zilonix", experto_ml: "Estilo experto ML" };
 const SIN_TARJETAS: Record<Estilo, Tarjeta[]> = { zilonix_portadas: [], zilonix_contenido: [], experto_ml: [] };
 const SIN_OMITIDAS: Record<Estilo, string[]> = { zilonix_portadas: [], zilonix_contenido: [], experto_ml: [] };
+// Mismo valor que TIPO_PORTADA de lib/publicaciones/imagenesIA.ts: ese
+// módulo arrastra código de servidor (dns/net) y rompe el build si se
+// importa desde aquí.
+const TIPO_PORTADA = "portada";
 const RUTA_CONECTAR_IA = "/panel/conectar-ia";
 const ESPERA_COLA_MS = 4_000;
 const MAXIMO_A_LA_VEZ = 2;
