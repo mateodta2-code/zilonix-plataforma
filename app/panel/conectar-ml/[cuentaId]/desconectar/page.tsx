@@ -6,7 +6,8 @@ import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { desconectarCuentaAction } from "./actions";
-import { Boton, BotonLink } from "@/components/marco/Boton";
+import { BotonLink } from "@/components/marco/Boton";
+import { ConfirmacionDoble } from "@/components/marco/ConfirmacionDoble";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "./page.module.css";
@@ -55,12 +56,19 @@ export default async function DesconectarMlPage({ params }: { params: { cuentaId
           </>
         }
       />
-      <form action={desconectar} className={styles.form}>
-        <Boton type="submit">Sí, desconectar</Boton>
+      <div className={styles.form}>
+        <ConfirmacionDoble
+          textoDisparador="Desconectar"
+          titulo={`¿Desconectar la cuenta ${cuenta.nickname}?`}
+          descripcion="Se dejarán de sincronizar pedidos, despachos y promociones. Lo ya importado no se borra."
+          nombreEsperado={cuenta.nickname}
+          textoConfirmar="Desconectar definitivamente"
+          onConfirmar={desconectar}
+        />
         <BotonLink href="/panel/conectar-ml" variante="secundario">
           Cancelar
         </BotonLink>
-      </form>
+      </div>
     </>
   );
 }

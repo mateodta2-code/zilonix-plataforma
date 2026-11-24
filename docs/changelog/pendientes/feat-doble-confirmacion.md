@@ -1,0 +1,1 @@
+- Eliminar una IA y desconectar cuentas (Mercado Libre y Falabella) ahora piden doble confirmación: un aviso de qué pasará y luego escribir el nombre exacto. (Refs #577)

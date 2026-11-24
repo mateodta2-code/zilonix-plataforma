@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
+import { ConfirmacionDoble } from "@/components/marco/ConfirmacionDoble";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { MAX_CONEXIONES_IA, MENSAJE_IA_SIN_IMAGENES, MODULOS_IA, moduloAdmiteProveedor, type ModuloIA } from "@/lib/ia/modulos";
 import styles from "./conectarIa.module.css";
@@ -54,7 +55,6 @@ export function ConectarIA({ conexiones, puedeModificar }: { conexiones: Conexio
   }
 
   async function eliminar(c: ConexionIAVista) {
-    if (!confirm(`¿Eliminar «${c.nombre}»? Los módulos que la usan pasarán a la IA principal.`)) return;
     const r = await llamar(`/api/configuracion/ia-conexion/${c.id}`, "DELETE");
     if (r.ok) router.refresh();
     else setError(typeof r.datos.error === "string" ? r.datos.error : "No se pudo eliminar.");
@@ -124,9 +124,15 @@ export function ConectarIA({ conexiones, puedeModificar }: { conexiones: Conexio
                         Hacer principal
                       </Boton>
                     )}
-                    <Boton type="button" variante="peligro" disabled={ocupado} onClick={() => eliminar(c)}>
-                      Eliminar
-                    </Boton>
+                    <ConfirmacionDoble
+                      textoDisparador="Eliminar"
+                      titulo={`¿Eliminar la IA ${c.nombre}?`}
+                      descripcion="Los módulos que la usan pasarán a la IA principal."
+                      nombreEsperado={c.nombre}
+                      textoConfirmar="Eliminar definitivamente"
+                      deshabilitado={ocupado}
+                      onConfirmar={() => eliminar(c)}
+                    />
                   </div>
                 </>
               )}
