@@ -109,19 +109,19 @@ describe("PaginaPromocionesReal — reglas (todas sin piso)", () => {
     expect(screen.getByLabelText("Dejar de participar en todas las promociones")).toBeTruthy();
   });
 
-  it("tabla maestra vacía: con «todas» el botón NO se bloquea; con «tabla maestra» o «máximo» sí", async () => {
+  it("tabla maestra vacía: con «todas» y «máximo» el botón NO se bloquea; solo con «tabla maestra» sí", async () => {
     montar(SIN_MAESTRA);
     await marcarTodas();
     expect(botonAplicar().disabled).toBe(false);
     fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
     expect(botonAplicar().disabled).toBe(true);
     fireEvent.click(screen.getByLabelText(/Participar solo hasta un máximo de/));
-    expect(botonAplicar().disabled).toBe(true);
+    expect(botonAplicar().disabled).toBe(false);
     fireEvent.click(screen.getByLabelText("Participar en todas las promociones disponibles"));
     expect(botonAplicar().disabled).toBe(false);
   });
 
-  it("diálogo «Aplicar regla»: «todas» dice sin precio mínimo; «tabla maestra» y «máximo» dicen que el mínimo nunca se salta", async () => {
+  it("diálogo «Aplicar regla»: «todas» dice sin precio mínimo; «tabla maestra» dice que el mínimo nunca se salta y «máximo» solo aplica el tope", async () => {
     montar();
     await marcarTodas();
     fireEvent.click(botonAplicar());
@@ -134,7 +134,8 @@ describe("PaginaPromocionesReal — reglas (todas sin piso)", () => {
     expect(screen.queryByText(/Sin precio mínimo: se entra a todas/)).toBeNull();
 
     fireEvent.click(screen.getByLabelText(/Participar solo hasta un máximo de/));
-    expect(screen.getByText("El precio mínimo de Finanzas nunca se salta.")).toBeTruthy();
+    expect(screen.queryByText("El precio mínimo de Finanzas nunca se salta.")).toBeNull();
+    expect(screen.getByText(/Solo manda el tope de porcentaje: no se usa el precio mínimo de Finanzas/)).toBeTruthy();
   });
 });
 
