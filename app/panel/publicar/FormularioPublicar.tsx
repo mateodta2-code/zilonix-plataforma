@@ -21,7 +21,6 @@ import { EditorVariantes, type VariantesEditadas } from "./EditorVariantes";
 import {
   esRellenoFalsoDimensiones,
   fotosDentroDelLimite,
-  ponerFotoEn,
   reemplazarOAgregarFoto,
   serializarCategoriaOverride,
   serializarClaveValor,
@@ -130,16 +129,30 @@ export function FormularioPublicar({
   // para que una imagen no pise a la otra.
   const imagenesRef = useRef(imagenes);
   imagenesRef.current = imagenes;
-  function ponerFotoGenerada(nueva: string, anterior: string | null, alInicio: boolean): boolean {
-    const actuales = imagenesRef.current.filter(Boolean);
-    // Una portada nueva va de foto 1; al regenerar, queda donde estaba la anterior.
-    const resultado =
-      alInicio && !(anterior && actuales.includes(anterior)) ? ponerFotoEn(actuales, nueva, 0, maxFotos) : reemplazarOAgregarFoto(actuales, nueva, anterior, maxFotos);
+  // Desde «Imágenes creadas» (24-nov): nada entra solo a la galería.
+  // «Agregar a la galería» la pone al final; false = galería llena.
+  function agregarGeneradaAGaleria(url: string): boolean {
+    const resultado = reemplazarOAgregarFoto(imagenesRef.current.filter(Boolean), url, null, maxFotos);
     if (!resultado) return false;
     imagenesRef.current = resultado;
     setImagenes(resultado);
-    setGeneradasIA((g) => (g.includes(nueva) ? g : [...g, nueva]));
+    setGeneradasIA((g) => (g.includes(url) ? g : [...g, url]));
     return true;
+  }
+
+  // Al regenerar una imagen creada: la nueva toma el lugar de la anterior
+  // en la galería y en la portada de las cuentas que la usaban.
+  function reemplazarGenerada(anterior: string, nueva: string) {
+    const actuales = imagenesRef.current.filter(Boolean);
+    if (actuales.includes(anterior)) {
+      const resultado = actuales.map((f) => (f === anterior ? nueva : f));
+      imagenesRef.current = resultado;
+      setImagenes(resultado);
+      setGeneradasIA((g) => (g.includes(nueva) ? g : [...g, nueva]));
+    }
+    setDatosPorCuenta((actual) =>
+      Object.fromEntries(Object.entries(actual).map(([id, d]) => [id, d.portadaUrl === anterior ? { ...d, portadaUrl: nueva } : d]))
+    );
   }
   const [variantes, setVariantes] = useState<VariantesEditadas | null>(inicial.variantes);
   const [portadasPorVariante, setPortadasPorVariante] = useState<Record<string, string>>(inicial.portadasPorVariante);
@@ -344,7 +357,7 @@ export function FormularioPublicar({
         el envío si nadie la completaba); la tarjeta "+" de
         GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
         agregar nada. */}
-        {/* Las imágenes creadas en «Generación de imágenes para Meli» → «4. Imágenes» entran a esta misma galería (se arrastran aquí). */}
+        {/* Las imágenes creadas en «Generación de imágenes para Meli» se agregan a esta galería desde «Imágenes creadas» (botón o arrastrándolas); las portadas van a cada cuenta, no aquí. */}
         <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} limiteFotos={maxFotos} />
         {maxFotos != null && (
           <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
@@ -384,7 +397,10 @@ export function FormularioPublicar({
               fotos={fotosParaIA}
               espacioLibre={maxFotos == null ? null : Math.max(0, maxFotos - imagenes.filter(Boolean).length)}
               galeria={imagenes}
-              onFotoGenerada={ponerFotoGenerada}
+              portadas={Object.fromEntries(cuentasMarcadas.map((c) => [c.id, datosPorCuenta[c.id]?.portadaUrl ?? ""]))}
+              onAgregarAGaleria={agregarGeneradaAGaleria}
+              onUsarPortada={(id, url) => actualizarCuenta(id, "portadaUrl", url)}
+              onReemplazar={reemplazarGenerada}
             />
           }
         />
