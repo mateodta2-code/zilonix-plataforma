@@ -339,6 +339,9 @@ export type ResultadoListaPublicaciones = {
   filas: PublicacionConEstado[];
   conteosLote: ConteosPublicaciones;
   cursorSiguiente: string | null;
+  // Total del listado según `paging.total` de ML (ya viene en la misma llamada, sin llamadas extra).
+  // Solo con UNA cuenta: con varias, el total de las que aún no se leen es desconocido y no se inventa.
+  totalEstimado?: number;
 };
 
 // Página por página, en vivo — ver el comentario grande al principio
@@ -351,6 +354,8 @@ export async function listarPublicacionesConEstado(
   const conteosLote: ConteosPublicaciones = { todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 };
   const filas: PublicacionConEstado[] = [];
   const posicion = decodificarCursor(opciones.cursor);
+  let totalEstimado: number | undefined;
+  const conTotal = <T extends object>(r: T): T & { totalEstimado?: number } => (totalEstimado === undefined ? r : { ...r, totalEstimado });
 
   for (let cuentaIndice = posicion.cuentaIndice; cuentaIndice < cuentas.length; cuentaIndice++) {
     const cuenta = cuentas[cuentaIndice];
@@ -370,6 +375,7 @@ export async function listarPublicacionesConEstado(
 
     while (true) {
       const pagina = await conReintento429Lectura(() => listarItemsActivosMl(cuenta.cuentaIdExterna, token, offset, TAMANO_LOTE_ML));
+      if (cuentas.length === 1 && Number.isFinite(pagina.totalCatalogo)) totalEstimado = pagina.totalCatalogo;
       if (pagina.ids.length === 0) break; // esta cuenta se terminó
 
       const procesadas = await conConcurrenciaLimitada(pagina.ids, TOPE_CONCURRENCIA_ML, (itemId) =>
@@ -389,13 +395,13 @@ export async function listarPublicacionesConEstado(
 
       if (filas.length >= opciones.tamanoPagina) {
         const hayMas = siguioEnEstaCuenta || cuentaIndice + 1 < cuentas.length;
-        return { filas, conteosLote, cursorSiguiente: hayMas ? codificarCursor({ cuentaIndice, offset }) : null };
+        return conTotal({ filas, conteosLote, cursorSiguiente: hayMas ? codificarCursor({ cuentaIndice, offset }) : null });
       }
       if (!siguioEnEstaCuenta) break; // pasa a la siguiente cuenta
     }
   }
 
-  return { filas, conteosLote, cursorSiguiente: null };
+  return conTotal({ filas, conteosLote, cursorSiguiente: null });
 }
 
 // Nombre legible de la promoción para la bitácora (Promo-E). Reusa el caché
