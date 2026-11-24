@@ -13,11 +13,12 @@ import type { Ficha } from "@/lib/publicaciones/ficha";
 import type { Cuenta } from "./CuentasDestino";
 import { TIPO_ARRASTRE_FOTO_URL, urlDescarga } from "./formulario-logica";
 import { ajustarImagenAction, crearImagenAction, prepararImagenesAction, type PropuestaImagen } from "./ia/imagenes/actions";
+import { CLAVES_BORRADOR_IA, useBorradorIA } from "./ia/borradorIA";
 import styles from "./publicar.module.css";
 
 type Estilo = "zilonix_portadas" | "zilonix_contenido" | "experto_ml";
 type EstadoTarjeta = "propuesta" | "en_cola" | "generando" | "lista" | "error";
-type Tarjeta = PropuestaImagen & { estado: EstadoTarjeta; url?: string; avisos?: string[]; mensaje?: string; titulo: string; copy: string; ajuste: string };
+export type Tarjeta = PropuestaImagen & { estado: EstadoTarjeta; url?: string; avisos?: string[]; mensaje?: string; titulo: string; copy: string; ajuste: string };
 
 const ESTILOS: { id: Estilo; nombre: string; ayuda: string }[] = [
   { id: "zilonix_portadas", nombre: "Portadas Zilonix", ayuda: "1 o 2 portadas distintas para elegir la mejor; entran a la galería como foto 1." },
@@ -28,6 +29,30 @@ const RUTA_CONECTAR_IA = "/panel/conectar-ia";
 const ESPERA_COLA_MS = 4_000;
 const MAXIMO_A_LA_VEZ = 2;
 const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Lo que se guarda 2 horas (ia/borradorIA.ts) para no perder las
+// propuestas ni las imágenes creadas al cambiar de sub pestaña o recargar.
+type BorradorImagenes = {
+  estilo: Estilo;
+  tiposContenido: string[];
+  tiposExperto: string[];
+  opiniones: string;
+  fotoBlanco: boolean;
+  cantidadPortadas: 1 | 2;
+  tarjetas: Tarjeta[];
+  omitidas: string[];
+  asignadas: Record<string, Asignacion>;
+};
+
+// Una imagen que se estaba creando cuando se recargó la página ya no
+// tiene quién espere su resultado: vuelve a «propuesta» con un aviso.
+export function tarjetasRestauradas(tarjetas: Tarjeta[]): Tarjeta[] {
+  return tarjetas.map((t) =>
+    t.estado === "generando" || t.estado === "en_cola"
+      ? { ...t, estado: "propuesta", mensaje: "Se interrumpió al recargar la página. Revisa la galería antes de pulsar «Crear» de nuevo." }
+      : t
+  );
+}
 
 // Publicar → «Generación de imágenes para Meli» → «4. Imágenes» (PR2). Con la ficha
 // confirmada de «Crear con IA», arma propuestas (sin costo), la persona
@@ -40,6 +65,7 @@ export function GenerarConIA({
   categoriaId,
   fotos,
   espacioLibre,
+  galeria,
   onFotoGenerada,
 }: {
   cuentas: Cuenta[];
@@ -47,6 +73,9 @@ export function GenerarConIA({
   categoriaId: string | null;
   fotos: string[];
   espacioLibre: number | null;
+  // Fotos que hoy están en la galería: tras recargar, una imagen ya creada
+  // puede no estar (la galería no se guarda) y se ofrece volver a ponerla.
+  galeria?: string[];
   // Cada imagen creada entra sola a la galería (las portadas al principio);
   // al regenerar reemplaza a la anterior. false = la galería está llena.
   onFotoGenerada: (nueva: string, anterior: string | null, alInicio: boolean) => boolean;
@@ -65,6 +94,22 @@ export function GenerarConIA({
   // Llave de la composición de una portada («portada-N»), para que
   // «Otra composición» no repita la de la otra portada.
   const clavePortada = (propuesta: unknown) => (propuesta as { cuentaMlId?: unknown } | null)?.cuentaMlId;
+
+  useBorradorIA<BorradorImagenes>(
+    CLAVES_BORRADOR_IA.imagenes,
+    { estilo, tiposContenido, tiposExperto, opiniones, fotoBlanco, cantidadPortadas, tarjetas, omitidas, asignadas: asignadas.current },
+    (b) => {
+      setEstilo(b.estilo);
+      setTiposContenido(b.tiposContenido);
+      setTiposExperto(b.tiposExperto);
+      setOpiniones(b.opiniones);
+      setFotoBlanco(b.fotoBlanco);
+      setCantidadPortadas(b.cantidadPortadas);
+      setTarjetas(tarjetasRestauradas(b.tarjetas));
+      setOmitidas(b.omitidas);
+      asignadas.current = b.asignadas ?? {};
+    }
+  );
 
   if (!ficha) {
     return (
@@ -326,7 +371,21 @@ export function GenerarConIA({
                   <span className={styles.accionesIA}>
                     {t.estado === "lista" ? (
                       <>
-                        <Chip estado="exito">{t.tipo === "portada" ? "En la galería (foto 1)" : "En la galería"}</Chip>
+                        {!galeria || (t.url && galeria.includes(t.url)) ? (
+                          <Chip estado="exito">{t.tipo === "portada" ? "En la galería (foto 1)" : "En la galería"}</Chip>
+                        ) : (
+                          <Boton
+                            type="button"
+                            variante="secundario"
+                            onClick={() => {
+                              if (t.url && !onFotoGenerada(t.url, null, t.tipo === "portada")) {
+                                cambiar(t.id, { mensaje: "No entró a la galería: ya está el máximo de fotos de la categoría. Quita una y arrástrala." });
+                              }
+                            }}
+                          >
+                            Poner en la galería
+                          </Boton>
+                        )}
                         <Boton type="button" variante="primario" onClick={() => (t.tipo === "portada" ? void ajustar({ ...t, estado: "propuesta" }).then(() => undefined) : void crear(t))}>
                           {t.tipo === "portada" ? "Otra composición" : "Regenerar"}
                         </Boton>
