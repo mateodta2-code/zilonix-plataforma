@@ -33,6 +33,11 @@ export function promptAnalisis(entrada: { idioma: string; pais: string; info: st
 
 export type ResultadoAnalisis = { ficha: Ficha; leyoFotos: boolean };
 
+// Cuánto se espera a la IA en Publicar (24-nov): con 30 s el análisis con
+// fotos salía seguido «no respondió a tiempo» (fotos + modelo que razona).
+export const ESPERA_ANALISIS_MS = 90_000;
+export const ESPERA_TEXTO_MS = 60_000;
+
 // Si el modelo no lee imágenes, se repite solo con el texto del vendedor
 // (y la pantalla lo avisa): nunca se cae el análisis por eso.
 export async function analizarProducto(
@@ -43,12 +48,12 @@ export async function analizarProducto(
   let leyoFotos = entrada.fotos.length > 0;
   try {
     respuesta = leyoFotos
-      ? await llamarIAConImagenes(conexion, promptAnalisis({ ...entrada, conFotos: true }), entrada.fotos, { maxTokens: 2_000 })
-      : await llamarIA(conexion, promptAnalisis({ ...entrada, conFotos: false }), { maxTokens: 2_000 });
+      ? await llamarIAConImagenes(conexion, promptAnalisis({ ...entrada, conFotos: true }), entrada.fotos, { maxTokens: 2_000, timeoutMs: ESPERA_ANALISIS_MS })
+      : await llamarIA(conexion, promptAnalisis({ ...entrada, conFotos: false }), { maxTokens: 2_000, timeoutMs: ESPERA_TEXTO_MS });
   } catch (error) {
     if (!(error instanceof ErrorIASinVision)) throw error;
     leyoFotos = false;
-    respuesta = await llamarIA(conexion, promptAnalisis({ ...entrada, conFotos: false }), { maxTokens: 2_000 });
+    respuesta = await llamarIA(conexion, promptAnalisis({ ...entrada, conFotos: false }), { maxTokens: 2_000, timeoutMs: ESPERA_TEXTO_MS });
   }
   const json = extraerJson(respuesta);
   if (!json) throw new ErrorAnalisisIA("La IA no devolvió una ficha que se pueda leer. Intenta de nuevo.");

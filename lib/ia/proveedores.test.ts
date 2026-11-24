@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("dns/promises", () => ({ lookup: vi.fn() }));
 
 import { lookup } from "dns/promises";
-import { ErrorProveedorIA, llamarIA, MARGEN_RAZONAMIENTO_TOKENS } from "./proveedores";
+import { ErrorProveedorIA, llamarIA, llamarIAConImagenes, MARGEN_RAZONAMIENTO_TOKENS, tiempoDeEspera } from "./proveedores";
 import type { ConexionIAConClave } from "./tipos";
 
 const lookupMock = lookup as unknown as ReturnType<typeof vi.fn>;
@@ -193,5 +193,29 @@ describe("llamarIA — dispatch por proveedor (rama feat-promociones)", () => {
   it("falla de red: ErrorProveedorIA, nunca una excepción cruda sin filtrar", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("red caída"); }));
     await expect(llamarIA(conexion(), "hola")).rejects.toBeInstanceOf(ErrorProveedorIA);
+  });
+});
+
+describe("tiempo de espera por llamada (24-nov)", () => {
+  it("tiempoDeEspera: 30 s por defecto, con piso de 5 s y tope de 120 s", () => {
+    expect(tiempoDeEspera(undefined)).toBe(30_000);
+    expect(tiempoDeEspera(90_000)).toBe(90_000);
+    expect(tiempoDeEspera(1)).toBe(5_000);
+    expect(tiempoDeEspera(999_999)).toBe(120_000);
+    expect(tiempoDeEspera(Number.NaN)).toBe(30_000);
+  });
+
+  it("llamarIA y llamarIAConImagenes usan el tiempo pedido; sin pedir, 30 s", async () => {
+    const espia = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 }));
+    const conexion = { proveedor: "openai", modelo: "gpt-5-mini", apiKey: "k", baseUrl: null } as never;
+    await llamarIA(conexion, "hola", { timeoutMs: 60_000 });
+    expect(espia).toHaveBeenLastCalledWith(60_000);
+    await llamarIA(conexion, "hola");
+    expect(espia).toHaveBeenLastCalledWith(30_000);
+    await llamarIAConImagenes(conexion, "hola", [{ base64: "AA==", tipo: "image/png" }] as never, { timeoutMs: 90_000 });
+    expect(espia).toHaveBeenLastCalledWith(90_000);
+    espia.mockRestore();
+    vi.unstubAllGlobals();
   });
 });

@@ -11,13 +11,21 @@ import type { ConexionIAConClave } from "./tipos";
 export class ErrorProveedorIA extends Error {}
 
 const TIMEOUT_MS = 30_000;
+// Cuánto se espera como máximo, por llamada. El análisis con fotos y los
+// modelos que razonan (gpt-5…, o3…) pasan seguido de 30 s («no respondió a
+// tiempo» en Publicar, 23-nov): quien llama puede pedir más, con tope.
+export const TIMEOUT_MAXIMO_MS = 120_000;
+export function tiempoDeEspera(timeoutMs: number | undefined): number {
+  if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs)) return TIMEOUT_MS;
+  return Math.min(Math.max(Math.round(timeoutMs), 5_000), TIMEOUT_MAXIMO_MS);
+}
 
-async function llamarAnthropic(conexion: ConexionIAConClave, prompt: string, maxTokens: number): Promise<string> {
+async function llamarAnthropic(conexion: ConexionIAConClave, prompt: string, maxTokens: number, timeoutMs = TIMEOUT_MS): Promise<string> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": conexion.apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({ model: conexion.modelo, max_tokens: maxTokens, thinking: { type: "disabled" }, messages: [{ role: "user", content: prompt }] }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   }).catch(() => {
     throw new ErrorProveedorIA("No se pudo conectar con Anthropic a tiempo.");
   });
@@ -50,13 +58,13 @@ async function llamarCompatibleOpenAI(
   conexion: ConexionIAConClave,
   prompt: string,
   maxTokens: number,
-  opciones: { redirectManual?: boolean; oficialOpenAI?: boolean } = {}
+  opciones: { redirectManual?: boolean; oficialOpenAI?: boolean; timeoutMs?: number } = {}
 ): Promise<string> {
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${conexion.apiKey}` },
     body: JSON.stringify({ model: conexion.modelo, ...topeTokensChat(opciones.oficialOpenAI === true, conexion.modelo, maxTokens), messages: [{ role: "user", content: prompt }] }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(opciones.timeoutMs ?? TIMEOUT_MS),
     ...(opciones.redirectManual ? { redirect: "manual" as const } : {}),
   }).catch(() => {
     throw new ErrorProveedorIA("No se pudo conectar con el proveedor de IA a tiempo.");
@@ -78,7 +86,7 @@ async function llamarCompatibleOpenAI(
   return (data.choices?.[0]?.message?.content ?? "").trim();
 }
 
-async function llamarGoogle(conexion: ConexionIAConClave, prompt: string, maxTokens: number): Promise<string> {
+async function llamarGoogle(conexion: ConexionIAConClave, prompt: string, maxTokens: number, timeoutMs = TIMEOUT_MS): Promise<string> {
   // La llave va en la cabecera x-goog-api-key (contrato público de la API
   // de Gemini), nunca en la URL: una URL con ?key= puede quedar en logs de
   // proxies o del proveedor. Mismo criterio que lib/ia/imagen.ts.
@@ -87,7 +95,7 @@ async function llamarGoogle(conexion: ConexionIAConClave, prompt: string, maxTok
     method: "POST",
     headers: { "content-type": "application/json", "x-goog-api-key": conexion.apiKey },
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens } }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   }).catch(() => {
     throw new ErrorProveedorIA("No se pudo conectar con Google a tiempo.");
   });
@@ -96,15 +104,16 @@ async function llamarGoogle(conexion: ConexionIAConClave, prompt: string, maxTok
   return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text || "").join("\n").trim();
 }
 
-export async function llamarIA(conexion: ConexionIAConClave, prompt: string, opciones: { maxTokens?: number } = {}): Promise<string> {
+export async function llamarIA(conexion: ConexionIAConClave, prompt: string, opciones: { maxTokens?: number; timeoutMs?: number } = {}): Promise<string> {
   const maxTokens = opciones.maxTokens ?? 1024;
+  const timeoutMs = tiempoDeEspera(opciones.timeoutMs);
   switch (conexion.proveedor) {
     case "anthropic":
-      return llamarAnthropic(conexion, prompt, maxTokens);
+      return llamarAnthropic(conexion, prompt, maxTokens, timeoutMs);
     case "openai":
-      return llamarCompatibleOpenAI("https://api.openai.com/v1", conexion, prompt, maxTokens, { oficialOpenAI: true });
+      return llamarCompatibleOpenAI("https://api.openai.com/v1", conexion, prompt, maxTokens, { oficialOpenAI: true, timeoutMs });
     case "xai":
-      return llamarCompatibleOpenAI("https://api.x.ai/v1", conexion, prompt, maxTokens);
+      return llamarCompatibleOpenAI("https://api.x.ai/v1", conexion, prompt, maxTokens, { timeoutMs });
     case "otro_compatible_openai": {
       if (!conexion.baseUrl) throw new ErrorProveedorIA("Falta la URL base del proveedor de IA compatible con OpenAI.");
       // Code review de Pablo — HIGH 3: la URL base ya se validó al
@@ -125,10 +134,10 @@ export async function llamarIA(conexion: ConexionIAConClave, prompt: string, opc
       // (ej. "https://x.test//chat/completions") y cualquier
       // diferencia entre lo que se validó y lo que de verdad se llama.
       const baseNormalizada = (urlSegura.origin + urlSegura.pathname).replace(/\/$/, "");
-      return llamarCompatibleOpenAI(baseNormalizada, conexion, prompt, maxTokens, { redirectManual: true });
+      return llamarCompatibleOpenAI(baseNormalizada, conexion, prompt, maxTokens, { redirectManual: true, timeoutMs });
     }
     case "google":
-      return llamarGoogle(conexion, prompt, maxTokens);
+      return llamarGoogle(conexion, prompt, maxTokens, timeoutMs);
   }
 }
 
@@ -153,7 +162,7 @@ function errorPorEstado(res: Response, nombre: string): ErrorProveedorIA {
   return new ErrorProveedorIA(`${nombre} respondió con error (${res.status}).`);
 }
 
-async function llamarAnthropicConImagenes(conexion: ConexionIAConClave, prompt: string, imagenes: ImagenIA[], maxTokens: number): Promise<string> {
+async function llamarAnthropicConImagenes(conexion: ConexionIAConClave, prompt: string, imagenes: ImagenIA[], maxTokens: number, timeoutMs = TIMEOUT_MS): Promise<string> {
   const content = [
     ...imagenes.map((i) => ({ type: "image", source: { type: "base64", media_type: i.mediaType, data: i.base64 } })),
     { type: "text", text: prompt },
@@ -162,7 +171,7 @@ async function llamarAnthropicConImagenes(conexion: ConexionIAConClave, prompt: 
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": conexion.apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({ model: conexion.modelo, max_tokens: maxTokens, thinking: { type: "disabled" }, messages: [{ role: "user", content }] }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   }).catch(() => {
     throw new ErrorProveedorIA("No se pudo conectar con Anthropic a tiempo.");
   });
@@ -177,7 +186,7 @@ async function llamarCompatibleOpenAIConImagenes(
   prompt: string,
   imagenes: ImagenIA[],
   maxTokens: number,
-  opciones: { redirectManual?: boolean; oficialOpenAI?: boolean } = {}
+  opciones: { redirectManual?: boolean; oficialOpenAI?: boolean; timeoutMs?: number } = {}
 ): Promise<string> {
   const content = [
     { type: "text", text: prompt },
@@ -187,7 +196,7 @@ async function llamarCompatibleOpenAIConImagenes(
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${conexion.apiKey}` },
     body: JSON.stringify({ model: conexion.modelo, ...topeTokensChat(opciones.oficialOpenAI === true, conexion.modelo, maxTokens), messages: [{ role: "user", content }] }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(opciones.timeoutMs ?? TIMEOUT_MS),
     ...(opciones.redirectManual ? { redirect: "manual" as const } : {}),
   }).catch(() => {
     throw new ErrorProveedorIA("No se pudo conectar con el proveedor de IA a tiempo.");
@@ -201,7 +210,7 @@ async function llamarCompatibleOpenAIConImagenes(
   return (data.choices?.[0]?.message?.content ?? "").trim();
 }
 
-async function llamarGoogleConImagenes(conexion: ConexionIAConClave, prompt: string, imagenes: ImagenIA[], maxTokens: number): Promise<string> {
+async function llamarGoogleConImagenes(conexion: ConexionIAConClave, prompt: string, imagenes: ImagenIA[], maxTokens: number, timeoutMs = TIMEOUT_MS): Promise<string> {
   // La llave va en la cabecera x-goog-api-key (contrato público de la API
   // de Gemini), nunca en la URL: una URL con ?key= puede quedar en logs de
   // proxies o del proveedor. Mismo criterio que lib/ia/imagen.ts.
@@ -211,7 +220,7 @@ async function llamarGoogleConImagenes(conexion: ConexionIAConClave, prompt: str
     method: "POST",
     headers: { "content-type": "application/json", "x-goog-api-key": conexion.apiKey },
     body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   }).catch(() => {
     throw new ErrorProveedorIA("No se pudo conectar con Google a tiempo.");
   });
@@ -224,16 +233,17 @@ export async function llamarIAConImagenes(
   conexion: ConexionIAConClave,
   prompt: string,
   imagenes: ImagenIA[],
-  opciones: { maxTokens?: number } = {}
+  opciones: { maxTokens?: number; timeoutMs?: number } = {}
 ): Promise<string> {
   const maxTokens = opciones.maxTokens ?? 1024;
+  const timeoutMs = tiempoDeEspera(opciones.timeoutMs);
   switch (conexion.proveedor) {
     case "anthropic":
-      return llamarAnthropicConImagenes(conexion, prompt, imagenes, maxTokens);
+      return llamarAnthropicConImagenes(conexion, prompt, imagenes, maxTokens, timeoutMs);
     case "openai":
-      return llamarCompatibleOpenAIConImagenes("https://api.openai.com/v1", conexion, prompt, imagenes, maxTokens, { oficialOpenAI: true });
+      return llamarCompatibleOpenAIConImagenes("https://api.openai.com/v1", conexion, prompt, imagenes, maxTokens, { oficialOpenAI: true, timeoutMs });
     case "xai":
-      return llamarCompatibleOpenAIConImagenes("https://api.x.ai/v1", conexion, prompt, imagenes, maxTokens);
+      return llamarCompatibleOpenAIConImagenes("https://api.x.ai/v1", conexion, prompt, imagenes, maxTokens, { timeoutMs });
     case "otro_compatible_openai": {
       if (!conexion.baseUrl) throw new ErrorProveedorIA("Falta la URL base del proveedor de IA compatible con OpenAI.");
       // Misma revalidación justo antes del fetch que llamarIA (DNS rebinding).
@@ -244,9 +254,9 @@ export async function llamarIAConImagenes(
         throw new ErrorProveedorIA("Esa URL base no se puede usar — no es https o no resuelve a una dirección pública.");
       }
       const baseNormalizada = (urlSegura.origin + urlSegura.pathname).replace(/\/$/, "");
-      return llamarCompatibleOpenAIConImagenes(baseNormalizada, conexion, prompt, imagenes, maxTokens, { redirectManual: true });
+      return llamarCompatibleOpenAIConImagenes(baseNormalizada, conexion, prompt, imagenes, maxTokens, { redirectManual: true, timeoutMs });
     }
     case "google":
-      return llamarGoogleConImagenes(conexion, prompt, imagenes, maxTokens);
+      return llamarGoogleConImagenes(conexion, prompt, imagenes, maxTokens, timeoutMs);
   }
 }
