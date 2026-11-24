@@ -1,10 +1,10 @@
-import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, ilike, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasFalabella, cuentasMl, movimientosMarketplace, pedidos, pedidosFinanzas } from "@/db/schema";
 import { obtenerSitioDeCuenta } from "@/lib/ml/cuentas";
 import { ESTADO_LIBERADO } from "@/lib/ml/liberacion";
 import { requierePermiso } from "@/lib/permisos";
-import { ESTADOS_FALABELLA_POR_COBRAR, type PartidaPorCobrar } from "./por-cobrar";
+import { ESTADOS_FALABELLA_POR_COBRAR, esEstadoFalabellaPorCobrar, extraerFechaProgramadaFalabella, type PartidaPorCobrar } from "./por-cobrar";
 
 // Issue #422 (cuentas por cobrar) — lee lo que las plataformas le deben
 // a la empresa de la sesión. Siempre dbComoEmpresa (RLS): nunca se ve una
@@ -20,7 +20,8 @@ import { ESTADOS_FALABELLA_POR_COBRAR, type PartidaPorCobrar } from "./por-cobra
 // joins): si un día la política se afloja por error, esto no mezcla
 // empresas igual.
 //
-// Falabella: líneas en Abierto / Procesando cierre / Pago programado,
+// Falabella: líneas en Abierto / Procesando cierre / Pago programado /
+// Programado para AAAA-MM-DD (esa fecha es la fecha esperada),
 // sumadas por corte (cuenta + Nº de estado de cuenta + moneda).
 
 export async function leerPartidasPorCobrar(empresaId: string, usuarioId: string): Promise<PartidaPorCobrar[]> {
@@ -63,7 +64,7 @@ export async function leerPartidasPorCobrar(empresaId: string, usuarioId: string
       })
       .from(m)
       .innerJoin(cuentasFalabella, and(eq(cuentasFalabella.id, m.cuentaFalabellaId), eq(cuentasFalabella.empresaId, empresaId)))
-      .where(and(eq(m.empresaId, empresaId), eq(m.marketplace, "falabella"), inArray(m.estadoPago, [...ESTADOS_FALABELLA_POR_COBRAR])))
+      .where(and(eq(m.empresaId, empresaId), eq(m.marketplace, "falabella"), or(inArray(m.estadoPago, [...ESTADOS_FALABELLA_POR_COBRAR]), ilike(m.estadoPago, "Programado para %"))))
       .groupBy(cuentasFalabella.id, cuentasFalabella.nickname, m.estadoCuenta, m.moneda)
       .having(sql`sum(${m.monto}) <> 0`);
 
@@ -93,10 +94,10 @@ export async function leerPartidasPorCobrar(empresaId: string, usuarioId: string
       cuenta: c.cuenta,
       moneda: c.moneda,
       referencia: c.estadoCuenta ?? "Sin estado de cuenta todavía",
-      estado: c.estados.filter(Boolean).sort().join(", ") || null,
-      // El reporte de transacciones no trae fecha de pago (decisión 19-nov:
-      // sin fecha por ahora, no se estima).
-      fechaEsperada: null,
+      estado: c.estados.filter(esEstadoFalabellaPorCobrar).sort().join(", ") || null,
+      // Solo «Programado para AAAA-MM-DD» trae fecha; los cortes abiertos
+      // siguen sin fecha (decisión 19-nov: no se estima).
+      fechaEsperada: extraerFechaProgramadaFalabella(c.estados),
       monto: c.monto,
     })),
   ];
