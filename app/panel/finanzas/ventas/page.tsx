@@ -94,7 +94,7 @@ export default async function VentasUtilidadPage({ searchParams }: { searchParam
       {verFalabella && (
         <section className={styles.seccionMarketplace}>
           {marketplace === "todos" && <h2 className={styles.tituloSeccion}>Falabella</h2>}
-          <UtilidadFalabella empresaId={empresa.id} usuarioId={usuario.id} searchParams={searchParams} ruta={ruta} extra={extra} />
+          <UtilidadFalabella empresaId={empresa.id} usuarioId={usuario.id} searchParams={searchParams} ruta={ruta} extra={extra} puedeModificar={puedeRecalcular} />
         </section>
       )}
 

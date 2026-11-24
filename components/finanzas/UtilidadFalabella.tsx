@@ -8,7 +8,9 @@ import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { DefectosCuentaFalabella } from "./DefectosCuentaFalabella";
 import { fechaHoraBogota, mostrarMontoIso, mostrarPorcentaje } from "./formato";
+import { LapizMontoFalabella } from "./LapizMontoFalabella";
 import estilos from "./ventasUtilidad.module.css";
 
 // Issue #422 — utilidad por orden de Falabella, con el mismo formulario,
@@ -55,9 +57,12 @@ type Props = {
   ruta: string;
   // Parámetros fijos de la ruta (el marketplace elegido).
   extra?: Record<string, string>;
+  // finanzas.modificar: muestra los lápices de Costo / Envío neto y los
+  // valores por defecto de cada cuenta. Las acciones lo vuelven a pedir.
+  puedeModificar?: boolean;
 };
 
-export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ruta, extra = {} }: Props) {
+export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ruta, extra = {}, puedeModificar = false }: Props) {
   const cuentas = await listarCuentasFalabellaParaSelector(empresaId);
   // Solo un id de la lista de ESTA empresa llega al filtro.
   const cuentaParam = normalizarParametro(searchParams[PARAM_CUENTA_FALABELLA]);
@@ -211,6 +216,8 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
         </p>
       )}
 
+      {puedeModificar && <DefectosCuentaFalabella cuentas={cuentas.map(({ id, nickname, comisionPct, flete }) => ({ id, nickname, comisionPct, flete }))} />}
+
       {skusSinCosto.length > 0 && (
         <p className={estilos.suave}>
           SKU sin costo en la maestra: {skusSinCosto.join(", ")}. Cárgales el costo en Finanzas → Maestra SKU.
@@ -248,6 +255,34 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                 // sí se conocen; los cobros todavía no.
                 const conVentasApi = o.estado === "sin_reporte" && o.cantidad > 0;
                 const montoOrden = (valor: string | null) => (sinReporte ? "—" : m(valor));
+                // El costo manual reemplaza el de la maestra en esta orden.
+                const costoVisible = (
+                  <>
+                    {montoOrden(o.costo)}
+                    {o.costoManual !== null && <div className={estilos.etiquetaManual}>Manual</div>}
+                  </>
+                );
+                // Con flete manual, la nota «envío propio» cambia por
+                // «Flete manual».
+                const envioVisible = (
+                  <>
+                    {montoOrden(o.envios)}
+                    {o.fleteManual !== null ? (
+                      <div className={estilos.etiquetaManual}>Flete manual</div>
+                    ) : (
+                      o.envioPropio && <div className={estilos.suave}>Domiciliario · envío propio</div>
+                    )}
+                  </>
+                );
+                // En «conflicto» no se aplica ningún ajuste: sin lápiz.
+                const lapiz = (campo: "costo" | "flete", contenido: React.ReactNode) =>
+                  puedeModificar && o.estado !== "conflicto" ? (
+                    <LapizMontoFalabella pedidoId={o.pedidoId} campo={campo} valorActual={campo === "costo" ? o.costoManual : o.fleteManual}>
+                      {contenido}
+                    </LapizMontoFalabella>
+                  ) : (
+                    contenido
+                  );
                 return (
                   <FilaTabla key={o.pedidoId}>
                     <CeldaTabla>
@@ -261,12 +296,9 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                     <CeldaTabla>{o.cuenta}</CeldaTabla>
                     <CeldaTabla>{sinReporte && !conVentasApi ? "—" : o.cantidad}</CeldaTabla>
                     <CeldaTabla numerica>{conVentasApi ? m(o.ventas) : montoOrden(o.ventas)}</CeldaTabla>
-                    <CeldaTabla numerica>{montoOrden(o.costo)}</CeldaTabla>
+                    <CeldaTabla numerica>{lapiz("costo", costoVisible)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.comisiones)}</CeldaTabla>
-                    <CeldaTabla numerica>
-                      {montoOrden(o.envios)}
-                      {o.envioPropio && <div className={estilos.suave}>Domiciliario · envío propio</div>}
-                    </CeldaTabla>
+                    <CeldaTabla numerica>{lapiz("flete", envioVisible)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.promociones)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.otros)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.utilidad)}</CeldaTabla>

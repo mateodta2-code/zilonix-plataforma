@@ -3,9 +3,10 @@ import { dbComoEmpresa } from "@/db/empresa-context";
 import { costosSku, cuentasFalabella, movimientosMarketplace, pedidosFalabella, terceros } from "@/db/schema";
 import { requierePermiso } from "@/lib/permisos";
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
-import { codigosParaMaestra, type MaestraSku } from "./combo-sku";
+import { codigosParaMaestra } from "./combo-sku";
 import {
   calcularUtilidadFalabella,
+  construirMaestraFalabella,
   construirReferenciasEstimacionFalabella,
   type ItemApiFalabella,
   type ResultadoUtilidadFalabella,
@@ -56,17 +57,31 @@ export function parsearItemsApiFalabella(items: unknown): ItemApiFalabella[] {
   return salida;
 }
 
-export type CuentaFalabellaSelector = { id: string; nickname: string; desconectada: boolean };
+export type CuentaFalabellaSelector = {
+  id: string;
+  nickname: string;
+  desconectada: boolean;
+  // Respaldo para estimar cuentas sin reportes (issue #422).
+  comisionPct: string | null;
+  flete: string | null;
+};
 
 // También las desconectadas: sus ventas viejas siguen siendo plata real.
 export async function listarCuentasFalabellaParaSelector(empresaId: string): Promise<CuentaFalabellaSelector[]> {
   const filas = await dbComoEmpresa(empresaId, (tx) =>
     tx
-      .select({ id: cuentasFalabella.id, nickname: cuentasFalabella.nickname, desconectadaTs: cuentasFalabella.desconectadaTs })
+      .select({
+        id: cuentasFalabella.id,
+        nickname: cuentasFalabella.nickname,
+        desconectadaTs: cuentasFalabella.desconectadaTs,
+        comisionPct: cuentasFalabella.comisionDefectoPct,
+        flete: cuentasFalabella.fleteDefecto,
+      })
       .from(cuentasFalabella)
+      .where(eq(cuentasFalabella.empresaId, empresaId))
       .orderBy(asc(cuentasFalabella.nickname))
   );
-  return filas.map((f) => ({ id: f.id, nickname: f.nickname, desconectada: f.desconectadaTs !== null }));
+  return filas.map((f) => ({ id: f.id, nickname: f.nickname, desconectada: f.desconectadaTs !== null, comisionPct: f.comisionPct, flete: f.flete }));
 }
 
 export type FiltroUtilidadFalabella = {
@@ -107,6 +122,8 @@ export async function listarUtilidadFalabella(
         fecha: p.fecha,
         moneda: p.moneda,
         items: p.items,
+        costoManual: p.costoManual,
+        fleteManual: p.fleteManual,
       })
       .from(p)
       .innerJoin(cuentasFalabella, eq(cuentasFalabella.id, p.cuentaFalabellaId))
@@ -220,6 +237,7 @@ export async function listarUtilidadFalabella(
         : await tx
             .select({
               sku: costosSku.skuCodigo,
+              skuFalabella: costosSku.skuFalabella,
               costo: costosSku.costo,
               empaque: costosSku.empaque,
               envioAgencia: costosSku.envioAgencia,
@@ -227,10 +245,27 @@ export async function listarUtilidadFalabella(
             })
             .from(costosSku)
             .leftJoin(terceros, and(eq(terceros.id, costosSku.terceroId), eq(terceros.empresaId, costosSku.empresaId)))
-            .where(and(eq(costosSku.empresaId, empresaId), inArray(costosSku.skuCodigo, codigos)));
-    const maestra = new Map<string, MaestraSku>(
-      filasMaestra.map((f) => [f.sku, { costo: f.costo, empaque: f.empaque, envioAgencia: f.envioAgencia, empaqueProveedor: f.empaqueProveedor }])
-    );
+            .where(
+              and(
+                eq(costosSku.empresaId, empresaId),
+                // Por el código de la maestra o por su alias de Falabella
+                // (ambos ya normalizados en la base).
+                or(inArray(costosSku.skuCodigo, codigos), inArray(costosSku.skuFalabella, codigos))
+              )
+            );
+    // Coincidencia exacta en sku_codigo primero; el alias, de respaldo.
+    const maestra = construirMaestraFalabella(filasMaestra);
+
+    // Respaldo por cuenta para estimar cuentas nuevas sin reportes.
+    const cuentasIds = [...new Set(pedidos.map((x) => x.cuentaId))];
+    const filasDefectos =
+      cuentasIds.length === 0
+        ? []
+        : await tx
+            .select({ id: cuentasFalabella.id, comisionPct: cuentasFalabella.comisionDefectoPct, flete: cuentasFalabella.fleteDefecto })
+            .from(cuentasFalabella)
+            .where(and(eq(cuentasFalabella.empresaId, empresaId), inArray(cuentasFalabella.id, cuentasIds)));
+    const defectosCuenta = new Map(filasDefectos.map((f) => [f.id, { comisionPct: f.comisionPct, flete: f.flete }]));
 
     const resultado = calcularUtilidadFalabella({
       pedidos: pedidos.map((x) => ({
@@ -245,6 +280,8 @@ export async function listarUtilidadFalabella(
         fecha: x.fecha,
         moneda: x.moneda,
         itemsApi: itemsPorPedido.get(x.id) ?? [],
+        costoManual: x.costoManual,
+        fleteManual: x.fleteManual,
       })),
       movimientos: movimientos
         .filter((mov): mov is typeof mov & { cuentaId: string } => mov.cuentaId !== null)
@@ -258,6 +295,7 @@ export async function listarUtilidadFalabella(
         })),
       maestra,
       referenciasEstimacion,
+      defectosCuenta,
     });
     return { ok: true, moneda: monedaFinal, resultado, recortado };
   });

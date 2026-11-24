@@ -426,6 +426,11 @@ export const costosSku = pgTable(
     // Proveedor del producto. Vacío no bloquea la utilidad: solo queda
     // sin cuenta por pagar asociada (#140).
     terceroId: uuid("tercero_id"),
+    // Issue #422 — alias del SKU en Falabella (ej. «FULKIT6027FULFY» para
+    // el mismo producto de la maestra). La utilidad de Falabella costea
+    // por sku_codigo y, si no hay coincidencia exacta, por este alias.
+    // Normalizado igual que sku_codigo (upper(btrim)).
+    skuFalabella: text("sku_falabella"),
     fuente: fuenteCostoEnum("fuente").notNull().default("manual"),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadoPor: uuid("actualizado_por").references(() => usuarios.id, { onDelete: "set null" }),
@@ -436,6 +441,15 @@ export const costosSku = pgTable(
     // nunca quedan como dos filas.
     skuNormalizado: check("costos_sku_sku_normalizado", sql`${t.skuCodigo} = upper(btrim(${t.skuCodigo})) AND ${t.skuCodigo} <> ''`),
     costoNoNegativo: check("costos_sku_costo_no_negativo", sql`${t.costo} >= 0`),
+    skuFalabellaNormalizado: check(
+      "costos_sku_sku_falabella_normalizado",
+      sql`${t.skuFalabella} IS NULL OR (${t.skuFalabella} = upper(btrim(${t.skuFalabella})) AND ${t.skuFalabella} <> '')`
+    ),
+    // Dos SKU de la misma empresa no pueden reclamar el mismo alias: no se
+    // sabría con cuál costear la orden.
+    skuFalabellaUnico: uniqueIndex("costos_sku_empresa_sku_falabella_unico")
+      .on(t.empresaId, t.skuFalabella)
+      .where(sql`sku_falabella IS NOT NULL`),
     empaqueNoNegativo: check("costos_sku_empaque_no_negativo", sql`${t.empaque} >= 0`),
     envioNoNegativo: check("costos_sku_envio_agencia_no_negativo", sql`${t.envioAgencia} >= 0`),
     precioVentaNoNegativo: check("costos_sku_precio_venta_no_negativo", sql`${t.precioVenta} >= 0`),
@@ -614,9 +628,19 @@ export const cuentasFalabella = pgTable(
     sellerId: text("seller_id").notNull(),
     nickname: text("nickname").notNull(),
     desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
+    // Issue #422 — respaldo para estimar la utilidad de una cuenta nueva
+    // que todavía no tiene ningún reporte de transacciones: % de comisión
+    // (15.50 = 15,50 %) y flete por unidad. Vacío = no estimar.
+    comisionDefectoPct: numeric("comision_defecto_pct", { precision: 5, scale: 2 }),
+    fleteDefecto: numeric("flete_defecto", { precision: 14, scale: 2 }),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    comisionDefectoRango: check(
+      "cuentas_falabella_comision_defecto_pct_rango",
+      sql`${t.comisionDefectoPct} >= 0 AND ${t.comisionDefectoPct} <= 100`
+    ),
+    fleteDefectoNoNegativo: check("cuentas_falabella_flete_defecto_no_negativo", sql`${t.fleteDefecto} >= 0`),
     // Mismo criterio que cuentas_ml_cuenta_externa_unica: una cuenta real
     // de Falabella (un mismo UserID) no puede estar conectada a dos
     // empresas de Zilonix a la vez.
@@ -652,9 +676,17 @@ export const pedidosFalabella = pgTable(
     // por fecha y hora con el corte de noviembre. GetOrderItems no lo trae.
     // Nulo en filas viejas hasta que la próxima sincronización lo llene.
     numeroOrden: text("numero_orden"),
+    // Issue #422 — ajustes a mano desde Finanzas → Ventas y utilidad. Los
+    // escribe SOLO la persona (nunca la sincronización ni el reporte):
+    // costo_manual reemplaza el costo de la maestra para esta orden y
+    // flete_manual es un flete adicional que resta. Vacío = sin ajuste.
+    costoManual: numeric("costo_manual", { precision: 14, scale: 2 }),
+    fleteManual: numeric("flete_manual", { precision: 14, scale: 2 }),
     importadoTs: timestamp("importado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    costoManualNoNegativo: check("pedidos_falabella_costo_manual_no_negativo", sql`${t.costoManual} >= 0`),
+    fleteManualNoNegativo: check("pedidos_falabella_flete_manual_no_negativo", sql`${t.fleteManual} >= 0`),
     pedidoUnico: uniqueIndex("pedidos_falabella_empresa_pedido_externo_unico").on(t.empresaId, t.pedidoIdExterno),
     // La conciliación busca por (cuenta, OrderNumber).
     porCuentaNumeroOrden: index("pedidos_falabella_cuenta_numero_orden_idx").on(t.cuentaFalabellaId, t.numeroOrden),
