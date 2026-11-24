@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa } from "./empresa-context";
 import { cuentasFalabella, pedidosFalabella } from "./schema";
@@ -110,4 +111,32 @@ describe("cuentas_falabella / pedidos_falabella (RLS)", () => {
     expect(desdeB.pedidos.find((p) => p.pedidoIdExterno === dentro)).toBeUndefined();
     expect(desdeB.pedidos.some((p) => p.cuenta === "Tienda A")).toBe(false);
   });
+
+  // Issue #422 — el cron de pedidos solo ve id, empresa_id y
+  // desconectada_ts. Nunca la API Key ni el correo, y no puede escribir.
+  it.skipIf(!process.env.DATABASE_URL_FALABELLA)(
+    "falabella_trabajador_user lista la cuenta, y no puede leer credenciales ni escribir",
+    async () => {
+      const { dbTrabajadorFalabella } = await import("./trabajador-falabella-context");
+
+      const vistas = await dbTrabajadorFalabella
+        .select({ id: cuentasFalabella.id, empresaId: cuentasFalabella.empresaId, desconectadaTs: cuentasFalabella.desconectadaTs })
+        .from(cuentasFalabella)
+        .where(eq(cuentasFalabella.id, cuentaAId));
+      expect(vistas).toEqual([{ id: cuentaAId, empresaId: contexto.empresaAId, desconectadaTs: null }]);
+
+      await expect(
+        dbTrabajadorFalabella.select({ clave: cuentasFalabella.apiKeyCifrada }).from(cuentasFalabella).limit(1)
+      ).rejects.toThrow(/permission denied/i);
+      await expect(dbTrabajadorFalabella.select({ correo: cuentasFalabella.userId }).from(cuentasFalabella).limit(1)).rejects.toThrow(
+        /permission denied/i
+      );
+      await expect(
+        dbTrabajadorFalabella.update(cuentasFalabella).set({ desconectadaTs: new Date() }).where(eq(cuentasFalabella.id, cuentaAId))
+      ).rejects.toThrow(/permission denied/i);
+      await expect(dbTrabajadorFalabella.select({ id: pedidosFalabella.id }).from(pedidosFalabella).limit(1)).rejects.toThrow(
+        /permission denied/i
+      );
+    }
+  );
 });

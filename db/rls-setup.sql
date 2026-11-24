@@ -211,6 +211,27 @@ GRANT USAGE ON SCHEMA public TO publicidad_trabajador_user;
 GRANT SELECT (id, empresa_id, desconectada_ts, creado_ts) ON cuentas_ml TO publicidad_trabajador_user;
 GRANT SELECT ON publicidad_sincronizaciones TO publicidad_trabajador_user;
 
+-- 1f) Issue #422 — sexto usuario de base: falabella_trabajador_user.
+-- Lo crea Mateo a mano al correr este script contra el Postgres del
+-- ambiente (el deploy no lo crea). CAMBIAR_EN_RAILWAY es un marcador,
+-- nunca una contraseña: se reemplaza al correrlo y el valor real no
+-- queda en el repo. Después se carga DATABASE_URL_FALABELLA en Railway.
+-- El cron de pedidos Falabella solo enumera las cuentas conectadas de
+-- CUALQUIER empresa: id, empresa_id y desconectada_ts. Nada de
+-- user_id, api_key_cifrada ni escrituras. Credenciales, pedidos y
+-- auditoría pasan por dbComoEmpresa()/app_user cuando ya se sabe la
+-- empresa. Sumar una columna al SELECT de
+-- lib/trabajos/sincronizarFalabella.ts sin sumarla acá da permission denied.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'falabella_trabajador_user') THEN
+    CREATE ROLE falabella_trabajador_user WITH LOGIN PASSWORD 'CAMBIAR_EN_RAILWAY';
+  END IF;
+END $$;
+GRANT CONNECT ON DATABASE railway TO falabella_trabajador_user;
+GRANT USAGE ON SCHEMA public TO falabella_trabajador_user;
+GRANT SELECT (id, empresa_id, desconectada_ts) ON cuentas_falabella TO falabella_trabajador_user;
+
 -- 2) Seguridad por fila — se activa por tabla, y se FUERZA también para
 -- el dueño de la tabla (sin el FORCE, el dueño de la tabla se salta la
 -- política igual que un superusuario, que es justo el agujero que
@@ -755,6 +776,12 @@ DROP POLICY IF EXISTS publicidad_trabajador_lee_cuentas_ml ON cuentas_ml;
 CREATE POLICY publicidad_trabajador_lee_cuentas_ml ON cuentas_ml FOR SELECT TO publicidad_trabajador_user USING (true);
 DROP POLICY IF EXISTS publicidad_trabajador_lee_sincronizaciones ON publicidad_sincronizaciones;
 CREATE POLICY publicidad_trabajador_lee_sincronizaciones ON publicidad_sincronizaciones FOR SELECT TO publicidad_trabajador_user USING (true);
+
+-- Issue #422 — el cron de pedidos Falabella lista las cuentas de
+-- cualquier empresa (solo las columnas del GRANT de 1f). El TO limita
+-- la política a falabella_trabajador_user; app_user sigue aislado.
+DROP POLICY IF EXISTS falabella_trabajador_lee_cuentas ON cuentas_falabella;
+CREATE POLICY falabella_trabajador_lee_cuentas ON cuentas_falabella FOR SELECT TO falabella_trabajador_user USING (true);
 
 -- Tarea 2.4 — política APARTE, con TO trabajador_user: el trabajador de
 -- cola ve y marca procesado cualquier aviso pendiente, de cualquier

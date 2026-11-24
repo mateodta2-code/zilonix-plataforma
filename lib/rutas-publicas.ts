@@ -130,6 +130,13 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // comparado con `crypto.timingSafeEqual` en
   // app/api/trabajos/publicidad/route.ts).
   "/api/trabajos/publicidad",
+
+  // Issue #422 — importación de pedidos Falabella cada 30 min, llamada
+  // por .github/workflows/sincronizar-falabella.yml, sin sesión. Mismo
+  // patrón: secreto compartido (`x-falabella-trabajador-secret`,
+  // comparado con `crypto.timingSafeEqual` en
+  // app/api/trabajos/falabella/route.ts).
+  "/api/trabajos/falabella",
 ];
 
 export const esRutaPublica = createRouteMatcher(PATRONES_RUTAS_PUBLICAS);
