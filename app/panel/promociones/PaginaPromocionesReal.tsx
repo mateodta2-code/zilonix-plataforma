@@ -152,7 +152,15 @@ export function PaginaPromocionesReal({
   // Promo-D: la regla elegida viaja al cargar la lista y al participar por producto («todas» no aplica piso ni tope nuestro).
   const [regla, setRegla] = useState<ReglaUi>("todas");
   // Promo-F: «máximo X %» = solo el tope de % (sin piso de Finanzas); el X viaja al listar y al participar.
+  // Promo-G: el input se actualiza al instante (`maximoPctInput`); el valor que dispara la recarga
+  // y viaja al servidor (`maximoPct`) espera ~600 ms a que se deje de escribir (escribir «12» = UNA recarga).
+  const [maximoPctInput, setMaximoPctInput] = useState(15);
   const [maximoPct, setMaximoPct] = useState(15);
+  useEffect(() => {
+    if (maximoPctInput === maximoPct) return;
+    const id = setTimeout(() => setMaximoPct(maximoPctInput), 600);
+    return () => clearTimeout(id);
+  }, [maximoPctInput, maximoPct]);
   const maximoPctValido = Number.isFinite(maximoPct) && maximoPct >= 1 && maximoPct <= 80;
   const modoCarga = regla === "todas" ? "todas" : regla === "maximo" && maximoPctValido ? `maximo-${maximoPct}` : "tabla-maestra";
   const reglaParaServidor = (): { regla?: string; maximoPct?: number } => (regla === "todas" ? { regla: "todas" } : regla === "maximo" && maximoPctValido ? { regla: "maximo", maximoPct } : {});
@@ -161,6 +169,9 @@ export function PaginaPromocionesReal({
   const [cursor, setCursor] = useState<string | null>(null);
   const [cargandoAuto, setCargandoAuto] = useState(false);
   const [topeAlcanzado, setTopeAlcanzado] = useState(false);
+  // Promo-G: total del listado (solo si ML lo dio) y estado del cartel «Carga completa» / «Carga detenida».
+  const [totalEstimado, setTotalEstimado] = useState<number | null>(null);
+  const [cierreCarga, setCierreCarga] = useState<"completa" | "detenida" | null>(null);
   const [expandidaId, setExpandidaId] = useState<string | null>(null);
   // Promo-A (Refs #571): la regla se aplica SOLO a lo que se marca acá.
   const [seleccionadas, setSeleccionadas] = useState<Set<string>>(new Set());
@@ -199,7 +210,7 @@ export function PaginaPromocionesReal({
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async function pedirPagina(cursorParaUsar: string | null): Promise<{ filas: PublicacionConEstado[]; conteosLote: ConteosPublicaciones; cursorSiguiente: string | null } | null> {
+  async function pedirPagina(cursorParaUsar: string | null): Promise<{ filas: PublicacionConEstado[]; conteosLote: ConteosPublicaciones; cursorSiguiente: string | null; totalEstimado?: number } | null> {
     // «todas» y «máximo» relajan el piso en el servidor; las otras dos piden lo mismo (con piso).
     const params = new URLSearchParams({ filtro, buscar: buscarAplicado, regla: regla === "todas" ? "todas" : regla === "maximo" && maximoPctValido ? "maximo" : "tabla-maestra" });
     if (regla === "maximo" && maximoPctValido) params.set("maximoPct", String(maximoPct));
@@ -236,6 +247,8 @@ export function PaginaPromocionesReal({
       setSeleccionadas(new Set());
     }
     setTopeAlcanzado(false);
+    setCierreCarga(null);
+    if (reiniciar) setTotalEstimado(null);
     setCargandoAuto(true);
 
     let cursorActual: string | null = reiniciar ? null : cursor;
@@ -253,6 +266,7 @@ export function PaginaPromocionesReal({
       setFilas((actual) => (reemplaza ? resultado.filas : [...actual, ...resultado.filas]));
       setConteos((actual) => (reemplaza ? resultado.conteosLote : sumarConteos(actual, resultado.conteosLote)));
       totalRevisado += resultado.conteosLote.todas;
+      if (typeof resultado.totalEstimado === "number" && resultado.totalEstimado > 0) setTotalEstimado(resultado.totalEstimado);
       cursorActual = resultado.cursorSiguiente;
       setCursor(cursorActual);
 
@@ -263,8 +277,18 @@ export function PaginaPromocionesReal({
       }
       await esperar(PAUSA_ENTRE_PAGINAS_MS);
     }
-    if (idCargaRef.current === miId) setCargandoAuto(false);
+    if (idCargaRef.current === miId) {
+      setCargandoAuto(false);
+      setCierreCarga(detenerRef.current || cursorActual ? "detenida" : "completa");
+    }
   }
+
+  // «Carga completa» se muestra unos segundos y desaparece; «Carga detenida» se queda (junto a «Seguir cargando»).
+  useEffect(() => {
+    if (cierreCarga !== "completa") return;
+    const id = setTimeout(() => setCierreCarga(null), 4000);
+    return () => clearTimeout(id);
+  }, [cierreCarga]);
 
   // Promo-D: cambiar entre «todas» (sin piso) y cualquier otra regla recalcula
   // las filas en el servidor; la selección de Promo-A se conserva (mismos productos).
@@ -536,7 +560,7 @@ export function PaginaPromocionesReal({
       const res = await fetch("/api/ml/promociones/publicaciones/reglas-aplicar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seleccion: seleccionActual, regla, maximoPct: regla === "maximo" ? maximoPct : undefined }),
+        body: JSON.stringify({ seleccion: seleccionActual, regla, maximoPct: regla === "maximo" ? maximoPctInput : undefined }),
       });
       body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error("error");
@@ -754,25 +778,50 @@ export function PaginaPromocionesReal({
         </div>
         <p style={{ fontSize: 11.5, color: "var(--texto-suave)", marginTop: 6 }}>Los contadores son de las publicaciones ya revisadas en esta pantalla, no del catálogo completo.</p>
 
-        <div className={styles.progresoCarga}>
-          {cargandoAuto ? (
-            <>
-              <span>Cargando publicaciones… {formatearNumero(conteos.todas, "es")} revisadas hasta ahora.</span>
-              <Boton
-                type="button"
-                variante="secundario"
-                onClick={() => {
-                  detenerRef.current = true;
-                }}
-              >
-                Detener carga
-              </Boton>
-            </>
+        <div className={styles.progresoCarga} role="status" aria-live="polite">
+          {cargandoAuto || cierreCarga === "completa" ? (
+            <div className={styles.bandaCarga}>
+              <div className={styles.bandaCargaFila}>
+                <span className={styles.bandaCargaTitulo}>
+                  {cargandoAuto ? `Cargando publicaciones… ${formatearNumero(conteos.todas, "es")} revisadas` : "Carga completa"}
+                </span>
+                {cargandoAuto && (
+                  <Boton
+                    type="button"
+                    variante="secundario"
+                    onClick={() => {
+                      detenerRef.current = true;
+                    }}
+                  >
+                    Detener carga
+                  </Boton>
+                )}
+              </div>
+              {(() => {
+                const conTotal = totalEstimado !== null && totalEstimado > 0;
+                const pct = !cargandoAuto ? 100 : conTotal ? Math.min(100, Math.round((conteos.todas / totalEstimado!) * 100)) : 0;
+                return (
+                  <>
+                    <div
+                      className={`${styles.barraCarga} ${cargandoAuto && !conTotal ? styles.barraCargaIndeterminada : ""}`}
+                      {...(conTotal || !cargandoAuto ? { role: "progressbar", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct, "aria-label": "Progreso de la carga de publicaciones" } : {})}
+                    >
+                      <div className={styles.barraCargaRelleno} style={cargandoAuto && !conTotal ? undefined : { width: `${pct}%` }} />
+                    </div>
+                    {cargandoAuto && conTotal && (
+                      <span className={styles.bandaCargaDetalle}>
+                        {formatearNumero(conteos.todas, "es")} de {formatearNumero(totalEstimado!, "es")} revisadas ({pct} %)
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           ) : cursor ? (
             <>
               <span>
-                {topeAlcanzado ? `Se llegó al tope de ${formatearNumero(TOPE_CARGA_AUTOMATICA, "es")} publicaciones revisadas por carga.` : "La carga se detuvo."}{" "}
-                {formatearNumero(conteos.todas, "es")} revisadas hasta ahora.
+                {topeAlcanzado ? `Se llegó al tope de ${formatearNumero(TOPE_CARGA_AUTOMATICA, "es")} publicaciones revisadas por carga.` : `Carga detenida · ${formatearNumero(conteos.todas, "es")} revisadas.`}
+                {topeAlcanzado ? ` ${formatearNumero(conteos.todas, "es")} revisadas hasta ahora.` : ""}
               </span>
               <Boton type="button" variante="primario" onClick={() => void cargarTodoAutomatico(false)}>
                 Seguir cargando
@@ -824,9 +873,9 @@ export function PaginaPromocionesReal({
               style={{ width: 70 }}
               min={1}
               max={100}
-              value={maximoPct}
+              value={maximoPctInput}
               disabled={regla !== "maximo"}
-              onChange={(e) => setMaximoPct(Number(e.target.value))}
+              onChange={(e) => setMaximoPctInput(Number(e.target.value))}
             />
             % de descuento a cargo del vendedor
           </label>
