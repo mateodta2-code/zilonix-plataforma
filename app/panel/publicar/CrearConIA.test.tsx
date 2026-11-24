@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 //
-// «Crear con IA» en un solo recuadro (aprobado por Mateo, 23-nov): el
-// orden es 1. Ficha, 2. Imágenes, 3. Títulos y 4. Descripción. Las
-// imágenes (GenerarConIA) llegan por la prop pasoImagenes y van justo
-// después de la ficha.
+// «Generación de imágenes para Meli» (antes «Crear con IA», 23-nov):
+// imágenes de referencia antes de «Información del producto», y el orden
+// 1. Ficha, 2. Títulos, 3. Descripción y 4. Imágenes (al final).
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
@@ -17,25 +16,35 @@ import { BotonesUsarEn, CrearConIA } from "./CrearConIA";
 
 afterEach(cleanup);
 
-describe("CrearConIA: un solo recuadro con las imágenes como paso 2", () => {
+describe("CrearConIA: referencias al principio e imágenes al final", () => {
   const cuentas = [{ id: "c1", nickname: "TIENDA", siteId: "MCO" }] as never[];
 
-  it("muestra «2. Imágenes» con lo que manda el formulario", () => {
-    render(
-      <CrearConIA cuentas={cuentas} fotos={[]} onUsarTitulo={() => {}} onUsarDescripcion={() => {}} pasoImagenes={<p>generador de imágenes</p>} />
+  it("antes de analizar: referencias, «1. Ficha» y «4. Imágenes» al final", () => {
+    const { container } = render(
+      <CrearConIA
+        cuentas={cuentas}
+        fotos={[]}
+        onUsarTitulo={() => {}}
+        onUsarDescripcion={() => {}}
+        referencias={<p>subir referencias</p>}
+        pasoImagenes={<p>generador de imágenes</p>}
+      />
     );
-    // El paso 1 se ve antes de analizar, y el 2 justo después.
     const pasos = screen.getAllByText(/^\d\. /).map((e) => e.textContent);
-    expect(pasos).toEqual(["1. Ficha del producto", "2. Imágenes"]);
-    expect(screen.getByText("generador de imágenes")).toBeTruthy();
+    expect(pasos).toEqual(["1. Ficha del producto", "4. Imágenes"]);
+    // Las referencias van antes de «Información del producto».
+    const texto = container.textContent ?? "";
+    expect(texto.indexOf("Imágenes de referencia")).toBeLessThan(texto.indexOf("Información del producto"));
+    expect(texto.indexOf("subir referencias")).toBeLessThan(texto.indexOf("Información del producto"));
     // Títulos y descripción esperan la ficha confirmada.
-    expect(screen.queryByText("3. Títulos")).toBeNull();
-    expect(screen.queryByText("4. Descripción")).toBeNull();
+    expect(screen.queryByText("2. Títulos")).toBeNull();
+    expect(screen.queryByText("3. Descripción")).toBeNull();
   });
 
-  it("sin pasoImagenes no deja un paso vacío", () => {
+  it("sin pasoImagenes ni referencias no deja pasos vacíos", () => {
     render(<CrearConIA cuentas={cuentas} fotos={[]} onUsarTitulo={() => {}} onUsarDescripcion={() => {}} />);
-    expect(screen.queryByText("2. Imágenes")).toBeNull();
+    expect(screen.queryByText("4. Imágenes")).toBeNull();
+    expect(screen.queryByText("Imágenes de referencia (1 o 2)")).toBeNull();
   });
 });
 

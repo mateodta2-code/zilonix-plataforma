@@ -102,13 +102,15 @@ export async function prepararImagenesAction(entrada: {
   opiniones?: string;
   incluirFotoBlanco?: boolean;
   previas?: Record<string, Asignacion>;
+  // Portadas Zilonix: cuántas crear en total (1 o 2) para elegir la mejor.
+  cantidadPortadas?: number;
 }): Promise<ResultadoPreparar> {
   const s = await sesion();
   if ("ok" in s) return s;
   if (!esEstiloImagen(entrada.estilo)) return { ok: false, aviso: "Elige un estilo de imagen." };
   const estilo: EstiloImagen = entrada.estilo;
   const ficha = leerFicha(entrada.ficha);
-  if (!fichaConfirmada(ficha)) return { ok: false, aviso: "Confirma la ficha del producto en «Crear con IA» antes de generar imágenes." };
+  if (!fichaConfirmada(ficha)) return { ok: false, aviso: "Confirma la ficha del producto en «Generación de imágenes para Meli» antes de crear imágenes." };
   const conectadas = (await listarCuentasConectadas(s.empresaId)).filter((c) => !c.desconectadaTs);
   const cuentas = (Array.isArray(entrada.cuentaMlIds) ? entrada.cuentaMlIds : [])
     .filter((id): id is string => typeof id === "string" && PATRON_UUID.test(id))
@@ -125,12 +127,14 @@ export async function prepararImagenesAction(entrada: {
   const propuestas: { tipo: string; nombre: string; cuentaMlId: string | null; propuesta: Record<string, unknown> }[] = [];
 
   if (estilo === "zilonix_portadas") {
-    const asignadas = asignarComposiciones(
-      cuentas.map((c) => c.id),
-      entrada.previas ?? {}
-    );
-    cuentas.forEach((c, i) =>
-      propuestas.push({ tipo: TIPO_PORTADA, nombre: `Portada · ${c.nickname}`, cuentaMlId: c.id, propuesta: { cuentaMlId: c.id, indice: i + 1, cantidad: cuentas.length, asignacion: asignadas[c.id] } })
+    // 1 o 2 portadas en total, todas distintas, que entran a la galería
+    // (23-nov). La clave «portada-N» va en propuesta.cuentaMlId: es la
+    // llave de la composición asignada, no una cuenta.
+    const cantidad = entrada.cantidadPortadas === 2 ? 2 : 1;
+    const claves = Array.from({ length: cantidad }, (_, i) => `portada-${i + 1}`);
+    const asignadas = asignarComposiciones(claves, entrada.previas ?? {});
+    claves.forEach((clave, i) =>
+      propuestas.push({ tipo: TIPO_PORTADA, nombre: cantidad > 1 ? `Portada ${i + 1}` : "Portada", cuentaMlId: null, propuesta: { cuentaMlId: clave, indice: i + 1, cantidad, asignacion: asignadas[clave] } })
     );
   } else {
     const conexionTexto = await obtenerConexionIAParaModulo(s.empresaId, "publicaciones");
