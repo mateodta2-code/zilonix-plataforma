@@ -1,5 +1,6 @@
 "use server";
 
+import { ESPERA_TEXTO_MS } from "@/lib/publicaciones/analisis";
 import { cookies } from "next/headers";
 import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary, TRANSFORMACION_500 } from "@/lib/cloudinary";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
@@ -151,7 +152,7 @@ export async function prepararImagenesAction(entrada: {
             continue;
           }
           const extra = t.id === "opiniones_reales" ? `\nOpiniones reales del vendedor:\n${opiniones.map((o) => `- ${o}`).join("\n")}` : "";
-          const respuesta = await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptPropuestaContenidoZilonix(t.id, datos, "") + extra, { maxTokens: 700 }));
+          const respuesta = await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptPropuestaContenidoZilonix(t.id, datos, "") + extra, { maxTokens: 700, timeoutMs: ESPERA_TEXTO_MS }));
           const p = leerPropuestaContenidoZilonix(t.id, respuesta);
           if (p) propuestas.push({ tipo: t.id, nombre: t.nombre, cuentaMlId: null, propuesta: { titulo: p.titulo, copy: t.id === "opiniones_reales" ? opiniones : p.copy, composicion: p.composicion } });
           else omitidas.push(`${t.nombre}: la IA no devolvió una propuesta usable.`);
@@ -164,7 +165,7 @@ export async function prepararImagenesAction(entrada: {
             omitidas.push(`${t.nombre}: ${disponible.motivo}`);
             continue;
           }
-          const p = leerTextosIA(await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptTextosExperto(t.id, datos, ""), { maxTokens: 400 })));
+          const p = leerTextosIA(await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptTextosExperto(t.id, datos, ""), { maxTokens: 400, timeoutMs: ESPERA_TEXTO_MS })));
           if (p) propuestas.push({ tipo: t.id, nombre: t.nombre, cuentaMlId: null, propuesta: { titulo: p.titulo, copy: p.copy } });
           else omitidas.push(`${t.nombre}: la IA no devolvió una propuesta usable.`);
         }
@@ -245,10 +246,10 @@ export async function ajustarImagenAction(entrada: { imagenId: string; ajuste?: 
           return { ok: false, aviso: "Pega opiniones reales de tus compradores para ajustar esta imagen. La IA no las escribe." };
         }
         const extra = tipo === "opiniones_reales" ? `\nOpiniones reales del vendedor:\n${opiniones.map((o) => `- ${o}`).join("\n")}` : "";
-        const c = leerPropuestaContenidoZilonix(tipo, await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptPropuestaContenidoZilonix(tipo, datos, ajuste) + extra, { maxTokens: 700 })));
+        const c = leerPropuestaContenidoZilonix(tipo, await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptPropuestaContenidoZilonix(tipo, datos, ajuste) + extra, { maxTokens: 700, timeoutMs: ESPERA_TEXTO_MS })));
         p = c ? { titulo: c.titulo, copy: tipo === "opiniones_reales" ? opiniones : c.copy, composicion: c.composicion } : null;
       } else {
-        p = leerTextosIA(await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptTextosExperto(imagen.tipo as TipoExpertoML, datos, ajuste), { maxTokens: 400 })));
+        p = leerTextosIA(await conCupoDeTexto(s.empresaId, () => llamarIA(conexionTexto, promptTextosExperto(imagen.tipo as TipoExpertoML, datos, ajuste), { maxTokens: 400, timeoutMs: ESPERA_TEXTO_MS })));
       }
       if (!p) return { ok: false, aviso: "La IA no devolvió una propuesta usable. Intenta de nuevo." };
       propuesta = { ...p };

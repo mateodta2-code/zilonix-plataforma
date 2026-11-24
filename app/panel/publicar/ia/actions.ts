@@ -10,7 +10,7 @@ import { tendenciasPorNivelMl, tituloPublicacionMl } from "@/lib/ml/cliente";
 import { idCompetenciaDesdeLink, limpiarTituloCompetencia } from "@/lib/publicaciones/competencia";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { resolverCategoria } from "@/lib/ml/publicar";
-import { analizarProducto, ErrorAnalisisIA } from "@/lib/publicaciones/analisis";
+import { analizarProducto, ErrorAnalisisIA, ESPERA_TEXTO_MS } from "@/lib/publicaciones/analisis";
 import { armarDescripcion, leerPartesDescripcion, limpiarPalabrasClave, promptDescripcion } from "@/lib/publicaciones/descripcion";
 import { mensajeErrorIA, MENSAJE_SIN_IA } from "@/lib/publicaciones/errores";
 import { fichaConfirmada, fichaEnTexto, idiomaDeSitio, leerFicha, limpiarInfoVendedor, LARGO_GARANTIA, MAXIMO_FOTOS_ANALISIS, type Ficha } from "@/lib/publicaciones/ficha";
@@ -157,7 +157,7 @@ export async function proponerTitulosAction(entrada: {
   const categoria = typeof entrada.categoriaNombre === "string" ? entrada.categoriaNombre.slice(0, 120) : null;
   try {
     const respuesta = await conCupoDeTexto(ctx.empresaId, () =>
-      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info, competencia: tituloCompetencia }), { maxTokens: 800 })
+      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info, competencia: tituloCompetencia }), { maxTokens: 800, timeoutMs: ESPERA_TEXTO_MS })
     );
     const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados, competencia: tituloCompetencia });
     if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
@@ -178,7 +178,7 @@ export async function escribirDescripcionAction(entrada: { cuentaMlId: string; f
   const ctx = await preparar(entrada.cuentaMlId);
   if ("ok" in ctx) return ctx;
   try {
-    const respuesta = await conCupoDeTexto(ctx.empresaId, () => llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais, palabrasClave: limpiarPalabrasClave(entrada.palabrasClave) }), { maxTokens: 1_500 }));
+    const respuesta = await conCupoDeTexto(ctx.empresaId, () => llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais, palabrasClave: limpiarPalabrasClave(entrada.palabrasClave) }), { maxTokens: 1_500, timeoutMs: ESPERA_TEXTO_MS }));
     const partes = leerPartesDescripcion(respuesta, fichaEnTexto(ficha));
     if (!partes) return { ok: false, aviso: "La IA no devolvió una descripción usable. Intenta de nuevo." };
     const descripcion = armarDescripcion(partes, { ficha, garantia: limpiarInfoVendedor(entrada.garantia, LARGO_GARANTIA), idioma: ctx.idioma });
