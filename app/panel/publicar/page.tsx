@@ -43,7 +43,6 @@ export default async function PublicarPage({
     importarCuentaId?: string;
     importarOrigen?: string;
     importarSkuNoEncontrado?: string;
-    importarLinkError?: string;
     canva?: string;
     codigo?: string;
   };
@@ -109,18 +108,15 @@ export default async function PublicarPage({
   };
 
   // Parte 3, punto A — importarItemId/importarCuentaId llegan de
-  // importadores/actions.ts (por SKU o por link, ver importarOrigen).
+  // importadores/actions.ts (por SKU, ver importarOrigen).
   // El lookup real (importarItemCompleto) sigue siendo SOLO del
   // servidor (token de la cuenta).
   // null = Mercado Libre no deja traer ese ítem por la API (403/404,
-  // típico de una publicación ajena) — la UI manda a usar el
-  // bookmarklet/extensión en su lugar, nunca se reintenta scrapeando.
+  // típico de una publicación ajena) — nunca se reintenta scrapeando.
   let itemImportado: ItemImportado | null = null;
-  let importarNoDisponible = false;
   const cuentaImportar = cuentas.find((c) => c.id === searchParams.importarCuentaId);
   if (cuentaImportar && searchParams.importarItemId) {
     itemImportado = await importarItemCompleto(empresa.id, cuentaImportar.id, searchParams.importarItemId);
-    importarNoDisponible = itemImportado === null;
   }
 
   return (
@@ -136,8 +132,6 @@ export default async function PublicarPage({
         itemImportado={itemImportado}
         importarOrigen={searchParams.importarOrigen ?? ""}
         importarSkuNoEncontrado={searchParams.importarSkuNoEncontrado ?? ""}
-        importarLinkError={searchParams.importarLinkError ?? ""}
-        importarNoDisponible={importarNoDisponible}
         cloudinaryConfigurado={cloudinaryConfigurado()}
         canva={searchParams.canva ?? ""}
         canvaCodigo={searchParams.codigo ?? ""}

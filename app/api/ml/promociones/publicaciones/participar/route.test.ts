@@ -55,7 +55,27 @@ describe("POST /api/ml/promociones/publicaciones/participar — Tarea Promocione
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ ok: true, estado: "ejecutada" });
-    expect(participarEnPublicacionDirectoMock).toHaveBeenCalledWith("empresa-1", "usuario-1", CUENTA_ID, "MCO1", "PROMO-1", "DEAL", 95000);
+    expect(participarEnPublicacionDirectoMock).toHaveBeenCalledWith("empresa-1", "usuario-1", CUENTA_ID, "MCO1", "PROMO-1", "DEAL", 95000, undefined, undefined);
+  });
+
+  it("Promo-D: solo regla \"todas\" se reenvía; cualquier otra cosa llega como ausente (con piso)", async () => {
+    await POST(peticion(cuerpoBase({ regla: "todas" })));
+    expect(participarEnPublicacionDirectoMock).toHaveBeenLastCalledWith("empresa-1", "usuario-1", CUENTA_ID, "MCO1", "PROMO-1", "DEAL", undefined, "todas", undefined);
+    for (const regla of ["tabla-maestra", "x", 5, null]) {
+      await POST(peticion(cuerpoBase({ regla })));
+      expect(participarEnPublicacionDirectoMock).toHaveBeenLastCalledWith("empresa-1", "usuario-1", CUENTA_ID, "MCO1", "PROMO-1", "DEAL", undefined, undefined, undefined);
+    }
+  });
+
+  it("Promo-F: regla maximo se reenvía con su maximoPct; maximoPct inválido o ausente = 400", async () => {
+    await POST(peticion(cuerpoBase({ regla: "maximo", maximoPct: 6 })));
+    expect(participarEnPublicacionDirectoMock).toHaveBeenLastCalledWith("empresa-1", "usuario-1", CUENTA_ID, "MCO1", "PROMO-1", "DEAL", undefined, "maximo", 6);
+    participarEnPublicacionDirectoMock.mockClear();
+    for (const maximoPct of [undefined, 0, 81, "6", null]) {
+      const res = await POST(peticion(cuerpoBase({ regla: "maximo", maximoPct })));
+      expect(res.status).toBe(400);
+    }
+    expect(participarEnPublicacionDirectoMock).not.toHaveBeenCalled();
   });
 
   it("un rechazo (validación o de Mercado Libre) sigue devolviendo 200, con el motivo real adentro — nunca se pierde detrás de un 4xx/5xx genérico", async () => {

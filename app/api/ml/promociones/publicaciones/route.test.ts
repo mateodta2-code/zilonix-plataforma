@@ -50,12 +50,34 @@ describe("GET /api/ml/promociones/publicaciones — Tarea Promociones real (Refs
       buscar: "camisa",
       cursor: "abc",
       tamanoPagina: 30,
+      aplicarPiso: true,
+      maximoPct: null,
     });
   });
 
   it("sin parámetros: usa los valores por defecto (todas/todas/sin buscar/tamaño 20)", async () => {
     await GET(peticion());
-    expect(listarPublicacionesConEstadoMock).toHaveBeenCalledWith("empresa-1", { cuentaId: "todas", filtro: "todas", buscar: "", cursor: null, tamanoPagina: 20 });
+    expect(listarPublicacionesConEstadoMock).toHaveBeenCalledWith("empresa-1", { cuentaId: "todas", filtro: "todas", buscar: "", cursor: null, tamanoPagina: 20, aplicarPiso: true, maximoPct: null });
+  });
+
+  it("Promo-D: solo regla=todas relaja el piso; tabla-maestra, maximo, desconocida o ausente = con piso", async () => {
+    await GET(peticion("?regla=todas"));
+    expect(listarPublicacionesConEstadoMock).toHaveBeenLastCalledWith("empresa-1", expect.objectContaining({ aplicarPiso: false }));
+    for (const regla of ["tabla-maestra", "salir-todas", "TODAS", "cualquiera", ""]) {
+      await GET(peticion(`?regla=${regla}`));
+      expect(listarPublicacionesConEstadoMock).toHaveBeenLastCalledWith("empresa-1", expect.objectContaining({ aplicarPiso: true }));
+    }
+  });
+
+  it("Promo-F: regla=maximo&maximoPct=6 relaja el piso y manda el tope; maximoPct inválido o ausente = 400", async () => {
+    await GET(peticion("?regla=maximo&maximoPct=6"));
+    expect(listarPublicacionesConEstadoMock).toHaveBeenLastCalledWith("empresa-1", expect.objectContaining({ aplicarPiso: false, maximoPct: 6 }));
+    listarPublicacionesConEstadoMock.mockClear();
+    for (const q of ["?regla=maximo", "?regla=maximo&maximoPct=0", "?regla=maximo&maximoPct=81", "?regla=maximo&maximoPct=abc"]) {
+      const res = await GET(peticion(q));
+      expect(res.status).toBe(400);
+    }
+    expect(listarPublicacionesConEstadoMock).not.toHaveBeenCalled();
   });
 
   it("cuentaId inválido (ni 'todas' ni un UUID): 400, nunca llega al módulo", async () => {

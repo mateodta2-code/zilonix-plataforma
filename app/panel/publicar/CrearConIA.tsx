@@ -79,6 +79,7 @@ export function CrearConIA({
     conTendencias: boolean;
     masBuscados: TendenciaConNivel[];
     rutaCategoria: string[];
+    tendenciasSinRelacion: boolean;
     competencia: { titulo: string | null; aviso: string | null };
   } | null>(null);
   // Competencia (opcional): link de Mercado Libre o su título pegado a mano.
@@ -162,7 +163,7 @@ export function CrearConIA({
           tituloCompetencia,
         }), (r) => {
       if (r.ok)
-        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria, competencia: r.competencia });
+        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria, tendenciasSinRelacion: r.tendenciasSinRelacion, competencia: r.competencia });
     });
   }
 
@@ -348,7 +349,14 @@ export function CrearConIA({
               <>
                 {titulos.competencia.aviso ? <p className={styles.avisoIA}>{titulos.competencia.aviso}</p> : null}
                 {titulos.competencia.titulo ? <p className={styles.ayudaIA}>Ideas tomadas de: «{titulos.competencia.titulo}»</p> : null}
-                {!titulos.conTendencias ? <p className={styles.ayudaIA}>Sin tendencias de la categoría: Mercado Libre no las devolvió (o no hay categoría).</p> : null}
+                {titulos.tendenciasSinRelacion ? (
+                  <p className={styles.ayudaIA}>
+                    Mercado Libre no tiene tendencias para esta categoría, y las de las categorías más generales no se relacionan con tu producto: los títulos
+                    salen de tu ficha.
+                  </p>
+                ) : !titulos.conTendencias ? (
+                  <p className={styles.ayudaIA}>Sin tendencias de la categoría: Mercado Libre no las devolvió (o no hay categoría).</p>
+                ) : null}
                 {titulos.masBuscados.length > 0 ? (
                   <div className={styles.masBuscadosIA}>
                     <p className="zx-etiqueta">{`Más buscados en la categoría (${titulos.masBuscados.length})`}</p>
@@ -416,7 +424,7 @@ export function CrearConIA({
             </Campo>
             <div>
               <Boton type="button" onClick={pedirDescripcion} disabled={ocupado !== null}>
-                {ocupado === "descripcion" ? "Escribiendo…" : descripcion ? "Regenerar" : "Escribir descripción"}
+                {ocupado === "descripcion" ? "Proponiendo…" : descripcion ? "Proponer otra" : "Proponer descripción"}
               </Boton>
             </div>
             {descripcion ? (

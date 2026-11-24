@@ -10,6 +10,7 @@ import { PATRON_UUID, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../_
 // qué no hay un snapshot completo en base — decisión explícita de
 // Mateo para no agregar una migración). Solo lectura — permiso
 // "consultar", igual que /candidatos.
+const maximoPctValido = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 1 && v <= 80;
 const FILTROS: FiltroPublicaciones[] = ["todas", "en-promocion", "sin-promocion", "con-error"];
 const TAMANO_PAGINA_DEFECTO = 20;
 const TAMANO_PAGINA_MAXIMO = 50;
@@ -41,12 +42,26 @@ export async function GET(request: Request) {
   const tamanoPaginaParam = Number(url.searchParams.get("tamanoPagina") ?? TAMANO_PAGINA_DEFECTO);
   const tamanoPagina = Number.isFinite(tamanoPaginaParam) && tamanoPaginaParam > 0 ? Math.min(Math.trunc(tamanoPaginaParam), TAMANO_PAGINA_MAXIMO) : TAMANO_PAGINA_DEFECTO;
 
+  // Promo-F: «maximo» exige maximoPct válido (1–80); inválido = 400.
+  const regla = url.searchParams.get("regla");
+  let maximoPct: number | null = null;
+  if (regla === "maximo") {
+    const valor = Number(url.searchParams.get("maximoPct"));
+    if (url.searchParams.get("maximoPct") === null || !maximoPctValido(valor)) {
+      return NextResponse.json({ error: "El máximo de descuento no es válido (entre 1 y 80 %)." }, { status: 400 });
+    }
+    maximoPct = valor;
+  }
+
   const resultado = await listarPublicacionesConEstado(empresa.id, {
     cuentaId: cuentaIdParam,
     filtro: filtroParam as FiltroPublicaciones,
     buscar,
     cursor,
     tamanoPagina,
+    // Promo-D/F: solo «todas» y «maximo» relajan el piso; ausente o desconocida = con piso.
+    aplicarPiso: regla !== "todas" && regla !== "maximo",
+    maximoPct,
   });
 
   return NextResponse.json(resultado);

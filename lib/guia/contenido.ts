@@ -202,7 +202,7 @@ export const GUIA: GrupoGuia[] = [
         paraQue: "Crear publicaciones en una o varias cuentas de Mercado Libre a la vez.",
         pasos: [
           "Elige las cuentas destino. Cada una lleva su propio título, descripción y portada; precio, stock, SKU y demás fotos son iguales.",
-          "Para no escribir todo desde cero, pega el link de una publicación y usa «Traer datos de ese link» (necesita la extensión).",
+          "Para no escribir todo desde cero, importa una publicación por SKU o con el botón del navegador (en «Importar desde otra publicación»).",
           "O usa «Generación de imágenes para Meli»: con 1 o 2 imágenes de referencia y lo que escribas del producto, la IA arma la ficha, propone títulos, escribe la descripción y, al final, crea imágenes de venta.",
           "Revisa y publica. La publicación sale como Premium con garantía del vendedor de 30 días.",
         ],
@@ -215,9 +215,9 @@ export const GUIA: GrupoGuia[] = [
               "Pulsa «Analizar producto». Cada dato de la ficha dice de dónde salió: «De la foto», «Del vendedor» o «Confirmar».",
               "Revisa lo marcado «Confirmar»: corrígelo, bórralo o marca «Es correcto». Después pulsa «Confirmar ficha».",
               "Todo va en un solo recuadro y en orden: 1. Ficha del producto, 2. Títulos, 3. Descripción y 4. Imágenes (ver «Generar imágenes con IA»).",
-              "En «2. Títulos» pide los títulos (máximo 60 caracteres). Arriba verás «Más buscados en la categoría»: las búsquedas en tendencia de la categoría general (Alta), la padre (Media) y la específica (Baja); cada palabra clave dice de dónde sale y su nivel. Luego elige un título y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»): el título se pone solo abajo, en «Título, descripción y portada por cuenta».",
+              "En «2. Títulos» pide los títulos (máximo 60 caracteres). Arriba verás «Más buscados en la categoría»: las búsquedas en tendencia de la categoría general (Alta), la padre (Media) y la específica (Baja). De la general y la padre solo salen las que nombran el tipo de producto de tu categoría (por ejemplo, «bebedero» o «comedero»); cada palabra clave dice de dónde sale y su nivel. Luego elige un título y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»): el título se pone solo abajo, en «Título, descripción y portada por cuenta».",
               "Opcional, antes de pedir los títulos: abre «Tomar ideas de una publicación de la competencia» y pega su link de Mercado Libre (o su título, si el link no se puede leer). La IA solo toma ideas de palabras: no copia el título ni toma datos que no estén en tu ficha; esas palabras salen como «De la competencia».",
-              "En «3. Descripción» (mejor después de pedir los títulos: usa sus palabras clave de forma natural, sin inventar datos), si das garantía, escríbela; después pulsa «Escribir descripción», revísala y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»).",
+              "En «3. Descripción» (mejor después de pedir los títulos: usa sus palabras clave de forma natural, sin inventar datos), si das garantía, escríbela; después pulsa «Proponer descripción» (o «Proponer otra» para cambiarla), revísala y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»).",
             ],
           },
           {

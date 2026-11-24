@@ -61,8 +61,6 @@ export function PaginaPublicar({
   itemImportado,
   importarOrigen,
   importarSkuNoEncontrado,
-  importarLinkError,
-  importarNoDisponible,
   cloudinaryConfigurado,
   canva,
   canvaCodigo,
@@ -73,8 +71,6 @@ export function PaginaPublicar({
   itemImportado: ItemImportado | null;
   importarOrigen: string;
   importarSkuNoEncontrado: string;
-  importarLinkError: string;
-  importarNoDisponible: boolean;
   cloudinaryConfigurado: boolean;
   canva: string;
   canvaCodigo: string;
@@ -159,8 +155,6 @@ export function PaginaPublicar({
           itemImportado={itemImportado}
           importarOrigen={importarOrigen}
           skuNoEncontrado={importarSkuNoEncontrado}
-          linkError={importarLinkError}
-          noDisponible={importarNoDisponible}
           onImportarBookmarklet={importarEnFormulario}
         />
       </Tarjeta>

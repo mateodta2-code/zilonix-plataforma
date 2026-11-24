@@ -109,19 +109,19 @@ describe("PaginaPromocionesReal — reglas (todas sin piso)", () => {
     expect(screen.getByLabelText("Dejar de participar en todas las promociones")).toBeTruthy();
   });
 
-  it("tabla maestra vacía: con «todas» el botón NO se bloquea; con «tabla maestra» o «máximo» sí", async () => {
+  it("tabla maestra vacía: con «todas» y «máximo» el botón NO se bloquea; solo con «tabla maestra» sí", async () => {
     montar(SIN_MAESTRA);
     await marcarTodas();
     expect(botonAplicar().disabled).toBe(false);
     fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
     expect(botonAplicar().disabled).toBe(true);
     fireEvent.click(screen.getByLabelText(/Participar solo hasta un máximo de/));
-    expect(botonAplicar().disabled).toBe(true);
+    expect(botonAplicar().disabled).toBe(false);
     fireEvent.click(screen.getByLabelText("Participar en todas las promociones disponibles"));
     expect(botonAplicar().disabled).toBe(false);
   });
 
-  it("diálogo «Aplicar regla»: «todas» dice sin precio mínimo; «tabla maestra» y «máximo» dicen que el mínimo nunca se salta", async () => {
+  it("diálogo «Aplicar regla»: «todas» dice sin precio mínimo; «tabla maestra» dice que el mínimo nunca se salta y «máximo» solo aplica el tope", async () => {
     montar();
     await marcarTodas();
     fireEvent.click(botonAplicar());
@@ -134,7 +134,8 @@ describe("PaginaPromocionesReal — reglas (todas sin piso)", () => {
     expect(screen.queryByText(/Sin precio mínimo: se entra a todas/)).toBeNull();
 
     fireEvent.click(screen.getByLabelText(/Participar solo hasta un máximo de/));
-    expect(screen.getByText("El precio mínimo de Finanzas nunca se salta.")).toBeTruthy();
+    expect(screen.queryByText("El precio mínimo de Finanzas nunca se salta.")).toBeNull();
+    expect(screen.getByText(/Solo manda el tope de porcentaje: no se usa el precio mínimo de Finanzas/)).toBeTruthy();
   });
 });
 
@@ -225,7 +226,7 @@ describe("PaginaPromocionesReal — «Dejar de participar en todas»", () => {
 
     expect(llamadasRegla[1]).toMatchObject({ regla: "salir-todas", confirmado: true });
     expect(screen.getByText(/MLM1 · Taza · Campaña tradicional — Salió/)).toBeTruthy();
-    expect(screen.getByText(/MLM2 · Plato · Descuento de precio — Error: ML dijo que no/)).toBeTruthy();
+    expect(screen.getByText(/MLM2 · Plato · Descuento por porcentaje — Error: ML dijo que no/)).toBeTruthy();
     expect(screen.getByText(/MLM3 · Vaso · Oferta del día — No se puede por API/)).toBeTruthy();
   });
 
@@ -321,6 +322,7 @@ describe("PaginaPromocionesReal — «Aplicada» vs «Programada»", () => {
       tipoPromocion, promotionIdMl: `${tipoPromocion}-1`, estadoMl, esCompartida: false, soloEnMl: false, puedeSalirApi: true,
       precioOriginal: 100, precioActual: 90, precioMinimo: null, precioSugerido: null, maxDiscountedPrice: null, gananciaEstimada: null,
       cumpleReglas: true, accionSugerida: null, motivoRevisarManual: null, reglaAdicionalMotivo: null,
+      nombreMl: null as string | null, fechaInicioMl: null as string | null, fechaFinMl: null as string | null,
     };
   }
   function fila(itemId: string, promociones: ReturnType<typeof promo>[]) {
@@ -360,9 +362,24 @@ describe("PaginaPromocionesReal — «Aplicada» vs «Programada»", () => {
     montar();
     await waitFor(() => screen.getByText("En promoción aplicada"));
     fireEvent.click(screen.getByText("Prod MLM1"));
-    expect(screen.getByText("Aplicada")).toBeTruthy();
+    expect(screen.getByText("Activa")).toBeTruthy();
     expect(screen.getByText("Programada")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Dejar de participar" })).toHaveLength(2);
+  });
+
+  it("muestra el nombre real de ML, las fechas del sitio y el estado en español", async () => {
+    const deal = { ...promo("DEAL", "started"), nombreMl: "11/11 Black Friday", fechaInicioMl: "2020-11-05T00:00:00.000-06:00", fechaFinMl: "2020-12-02T23:59:59.000-06:00" };
+    const pd = { ...promo("PRICE_DISCOUNT", "pending"), nombreMl: null, fechaInicioMl: null, fechaFinMl: null };
+    simular([fila("MLM1", [deal, pd])]);
+    montar();
+    await waitFor(() => screen.getByText("En promoción aplicada"));
+    fireEvent.click(screen.getByText("Prod MLM1"));
+    expect(screen.getByText("11/11 Black Friday")).toBeTruthy();
+    expect(screen.getByText("Campaña tradicional (DEAL)")).toBeTruthy();
+    expect(screen.getByText("Descuento por porcentaje")).toBeTruthy();
+    expect(screen.getByText("Activa")).toBeTruthy();
+    expect(screen.getByText("Programada")).toBeTruthy();
+    expect(screen.getByText(/5 nov 2020 – 2 dic 2020/)).toBeTruthy();
   });
 });
 
@@ -376,5 +393,44 @@ describe("PaginaPromocionesReal — pestaña Bitácora (Promo-B)", () => {
     await waitFor(() => expect(pedidos().some((u) => u.startsWith("/api/ml/promociones/historial"))).toBe(true));
     fireEvent.click(screen.getByRole("tab", { name: "Publicaciones" }));
     expect(screen.getByText("Producto MLM1")).toBeTruthy();
+  });
+});
+
+describe("PaginaPromocionesReal — Promo-D (regla en la fila por producto)", () => {
+  const urlsLista = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((l) => String(l[0])).filter((u) => u.startsWith("/api/ml/promociones/publicaciones?"));
+
+  it("pide la lista con regla=todas al inicio, y recarga con otra regla al cambiarla (y vuelve a todas)", async () => {
+    montar();
+    await screen.findByLabelText(/Seleccionar todas/);
+    expect(urlsLista()).toHaveLength(1);
+    expect(urlsLista()[0]).toContain("regla=todas");
+    fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
+    await waitFor(() => expect(urlsLista()).toHaveLength(2));
+    expect(urlsLista()[1]).toContain("regla=tabla-maestra");
+    fireEvent.click(screen.getByLabelText("Participar en todas las promociones disponibles"));
+    await waitFor(() => expect(urlsLista()).toHaveLength(3));
+    expect(urlsLista()[2]).toContain("regla=todas");
+  });
+
+  it("el motivo de una promoción no marcable aparece UNA sola vez", async () => {
+    const motivo = "El piso (54000) está por encima del máximo que permite esta promoción puntual (46550)";
+    const promo = {
+      tipoPromocion: "PRICE_DISCOUNT", promotionIdMl: "p1", estadoMl: "candidate", esCompartida: false, soloEnMl: false, puedeSalirApi: true,
+      precioOriginal: 49000, precioActual: null, precioMinimo: 54000, precioSugerido: 54000, maxDiscountedPrice: 46550, gananciaEstimada: null,
+      cumpleReglas: false, accionSugerida: null, motivoRevisarManual: motivo, reglaAdicionalMotivo: null,
+    };
+    const base = vi.mocked(fetch).getMockImplementation() as (u: string, i?: { body?: string }) => Promise<unknown>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: { body?: string }) =>
+        String(url).startsWith("/api/ml/promociones/publicaciones?")
+          ? { ok: true, json: async () => ({ filas: [{ ...filaLista("MLM1"), estado: "sin_promocion", promociones: [promo] }], conteosLote: { todas: 1, enPromocion: 0, sinPromocion: 1, conError: 0 }, cursorSiguiente: null }) }
+          : base(url, init)
+      )
+    );
+    montar();
+    fireEvent.click(await screen.findByText("Producto MLM1"));
+    await screen.findAllByText(new RegExp("El piso \\(54000\\)"));
+    expect(screen.getAllByText(new RegExp("El piso \\(54000\\)"))).toHaveLength(1);
   });
 });

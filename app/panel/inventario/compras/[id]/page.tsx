@@ -17,6 +17,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { AvisosUrl } from "@/components/inventario/Avisos";
 import { ESTADO_OC } from "@/components/inventario/estados";
 import styles from "../../inventario.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #280 — detalle de una OC y su recepción. Ver pide
 // inventario.consultar; recibir, inventario.crear; anular,
@@ -60,7 +61,7 @@ export default async function OrdenCompraPage({
             {orden.lineas.map((l, i) => (
               <FilaTabla key={l.id}>
                 <CeldaTabla>
-                  <strong>{l.codigo}</strong>
+                  <strong><SkuCopiable sku={l.codigo} /></strong>
                   <div className={styles.detalle}>{l.nombre}</div>
                 </CeldaTabla>
                 <CeldaTabla className={styles.numero}>{l.cantidadPedida}</CeldaTabla>
@@ -105,7 +106,7 @@ export default async function OrdenCompraPage({
           {orden.lineas.map((l) => (
             <FilaTabla key={l.id}>
               <CeldaTabla>
-                <strong>{l.codigo}</strong>
+                <strong><SkuCopiable sku={l.codigo} /></strong>
                 <div className={styles.detalle}>{l.nombre}</div>
               </CeldaTabla>
               <CeldaTabla className={styles.numero}>{l.cantidadPedida}</CeldaTabla>

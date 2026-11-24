@@ -11,6 +11,7 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import styles from "../inventario.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -104,7 +105,7 @@ export default async function KardexPage({ searchParams }: { searchParams: Recor
                   <div className={styles.detalle}>{ETIQUETA_ORIGEN[f.origen] ?? f.origen}</div>
                 </CeldaTabla>
                 <CeldaTabla>
-                  <strong>{f.skuCodigo}</strong>
+                  <strong><SkuCopiable sku={f.skuCodigo} /></strong>
                 </CeldaTabla>
                 <CeldaTabla>{f.bodegaNombre}</CeldaTabla>
                 <CeldaTabla className={styles.numero}>{f.deltaDisponible ? conSigno(f.deltaDisponible) : "—"}</CeldaTabla>

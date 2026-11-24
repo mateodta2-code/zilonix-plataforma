@@ -121,9 +121,15 @@ describe("salirDeTodasLasPromociones", () => {
     expect(resumen.filas.find((f) => f.estado === "no_permitida")?.error).toContain("Central de Promociones");
     // Resultado por ítem con título.
     expect(resumen.filas.find((f) => f.itemId === "A1")).toMatchObject({ estado: "salio", tituloProducto: "Título A1", tipoPromocion: "DEAL", error: null });
-    // Auditoría: mismo formato que la salida individual, solo para lo que se llamó a ML.
-    expect(insertsRegistrados).toHaveLength(1);
-    expect(insertsRegistrados[0]).toMatchObject({ accion: "salir", estado: "ejecutada", itemId: "A1", tipoPromocion: "DEAL", promotionIdMl: "p1", precioAntes: "80000", precioDespues: null, modoSimulacion: false, ejecutadoPor: "usuario-1" });
+    // Promo-E: 100 = 100 — las 3 no permitidas también quedan (estado «rechazada», sin llamar a ML), todas con el mismo lote.
+    expect(insertsRegistrados).toHaveLength(4);
+    const salida = insertsRegistrados.find((f) => f.itemId === "A1");
+    expect(salida).toMatchObject({ accion: "salir", estado: "ejecutada", itemId: "A1", tipoPromocion: "DEAL", promotionIdMl: "p1", precioAntes: "80000", precioDespues: null, modoSimulacion: false, ejecutadoPor: "usuario-1" });
+    const noApi = insertsRegistrados.filter((f) => f.estado === "rechazada");
+    expect(noApi).toHaveLength(3);
+    expect(noApi[0]).toMatchObject({ accion: "salir", resultadoMl: { regla: "salir", origen: "salir-todas", llamoAMercadoLibre: false, limite: "ml" } });
+    const lotes = new Set(insertsRegistrados.map((f) => (f.resultadoMl as { lote: string }).lote));
+    expect(lotes.size).toBe(1);
   });
 
   it("si ML rechaza la salida, muestra el motivo de ML y queda 'fallida' en la auditoría", async () => {
