@@ -145,16 +145,18 @@ describe("palabras de la competencia", () => {
 });
 
 describe("filtrarTendenciasRelacionadas (24-nov: «Mascotas» para un bebedero de colibrí)", () => {
-  const producto = "Pack de 2 comederos colibrí base roja plástico transparente Bebederos y Comederos";
+  const producto = "Pack de 2 comederos colibrí base roja plástico transparente para ventana";
+  const categoria = "Bebederos y Comederos";
 
-  it("de la general y la padre solo quedan las que comparten una palabra con el producto; la específica completa", () => {
+  it("de la general y la padre solo quedan las que nombran el tipo de producto de la categoría; la específica completa", () => {
     const r = filtrarTendenciasRelacionadas(
       [
         { nivel: "baja" as const, palabras: ["bebedero colibri", "alpiste"] },
         { nivel: "media" as const, palabras: ["jaula para aves", "comedero para pajaros"] },
         { nivel: "alta" as const, palabras: ["dispensador comida gato", "guacal para gatos", "cerdo minipig", "comederos automaticos perro"] },
       ],
-      producto
+      producto,
+      categoria
     );
     expect(r.niveles).toEqual([
       { nivel: "baja", palabras: ["bebedero colibri", "alpiste"] },
@@ -164,8 +166,26 @@ describe("filtrarTendenciasRelacionadas (24-nov: «Mascotas» para un bebedero d
     expect(r.descartadas).toBe(4);
   });
 
+  it("una palabra del material o del uso («transparente», «ventana») no basta (24-nov)", () => {
+    const r = filtrarTendenciasRelacionadas(
+      [
+        { nivel: "alta" as const, palabras: ["cama flotante asoleadora para gato ventana hamaca color aguamarina transparente"] },
+        { nivel: "media" as const, palabras: ["venta de aves agapornis", "desparasitante para aves", "bebederos para gallinas ponedoras"] },
+      ],
+      producto,
+      categoria
+    );
+    expect(r.niveles).toEqual([{ nivel: "media", palabras: ["bebederos para gallinas ponedoras"] }]);
+    expect(r.descartadas).toBe(3);
+  });
+
+  it("si la categoría no tiene palabras importantes, se compara con el producto", () => {
+    const r = filtrarTendenciasRelacionadas([{ nivel: "alta" as const, palabras: ["comedero colibri vidrio", "cerdo minipig"] }], producto, "Otros");
+    expect(r.niveles).toEqual([{ nivel: "alta", palabras: ["comedero colibri vidrio"] }]);
+  });
+
   it("palabras vacías («para», «color», «pack») no hacen coincidir nada", () => {
-    const r = filtrarTendenciasRelacionadas([{ nivel: "alta" as const, palabras: ["cama para gato color aguamarina", "pack de juguetes"] }], producto);
+    const r = filtrarTendenciasRelacionadas([{ nivel: "alta" as const, palabras: ["cama para gato color aguamarina", "pack de juguetes"] }], producto, categoria);
     expect(r.niveles).toEqual([]);
     expect(r.descartadas).toBe(2);
   });

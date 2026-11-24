@@ -24,7 +24,7 @@ export const MAXIMO_MAS_BUSCADOS = 30;
 export const MAXIMO_POR_NIVEL = 10;
 
 // Palabras que no dicen de qué producto se trata.
-const PALABRAS_VACIAS = new Set(["para", "como", "este", "esta", "esto", "pack", "tipo", "marca", "modelo", "unidad", "unidades", "color", "colores", "con", "sin", "por", "los", "las", "del", "una", "uno", "com", "pra", "sem", "kit", "set"]);
+const PALABRAS_VACIAS = new Set(["para", "como", "este", "esta", "esto", "pack", "tipo", "marca", "modelo", "unidad", "unidades", "color", "colores", "con", "sin", "por", "los", "las", "del", "una", "uno", "com", "pra", "sem", "kit", "set", "otro", "otros", "otra", "otras", "varios", "varias", "demas", "outros"]);
 
 // Palabras importantes de un texto: minúsculas, sin tildes, de 4 letras o
 // más, sin las vacías y sin la «s»/«es» del plural.
@@ -39,20 +39,26 @@ function raices(texto: string): Set<string> {
 
 // En las categorías padre y general sale de todo (en «Mascotas»: gatos,
 // perros, pollos… para un bebedero de colibrí, 24-nov). De esos niveles
-// solo quedan las búsquedas que comparten una palabra importante con el
-// producto; la específica se deja completa. Además, máximo por nivel.
+// solo quedan las búsquedas que nombran el TIPO de producto: comparten una
+// palabra importante con el nombre de la categoría específica («Bebederos y
+// Comederos»). Con todo el texto del producto se colaba «cama… gato…
+// transparente» por el material. Si el nombre de la categoría no tiene
+// palabras importantes, se usa el texto del producto. La específica se deja
+// completa. Además, máximo por nivel.
 export function filtrarTendenciasRelacionadas<T extends { nivel: NivelBusqueda; palabras: string[] }>(
   niveles: T[],
-  textoProducto: string
+  textoProducto: string,
+  nombreCategoria = ""
 ): { niveles: T[]; descartadas: number } {
-  const producto = raices(textoProducto);
+  const deCategoria = raices(nombreCategoria);
+  const referencia = deCategoria.size > 0 ? deCategoria : raices(textoProducto);
   let descartadas = 0;
   const filtrados = niveles.map((n) => {
     const palabras =
       n.nivel === "baja"
         ? n.palabras
         : n.palabras.filter((frase) => {
-            const ok = [...raices(frase)].some((w) => producto.has(w));
+            const ok = [...raices(frase)].some((w) => referencia.has(w));
             if (!ok) descartadas += 1;
             return ok;
           });

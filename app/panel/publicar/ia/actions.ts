@@ -135,8 +135,9 @@ export async function proponerTitulosAction(entrada: {
       // Solo los VALORES de la ficha (sin las etiquetas «Nombre del producto»,
       // «Color»…, que harían coincidir cualquier búsqueda).
       const valores = Object.values(ficha).map((c) => (Array.isArray(c.valor) ? c.valor.join(" ") : (c.valor ?? "")));
-      const textoProducto = `${valores.join(" ")} ${limpiarInfoVendedor(entrada.info)} ${entrada.categoriaNombre ?? ""}`;
-      const relacionadas = filtrarTendenciasRelacionadas(r.niveles, textoProducto);
+      const textoProducto = `${valores.join(" ")} ${limpiarInfoVendedor(entrada.info)}`;
+      const nombreCategoria = entrada.categoriaNombre ?? r.ruta[r.ruta.length - 1] ?? "";
+      const relacionadas = filtrarTendenciasRelacionadas(r.niveles, textoProducto, nombreCategoria);
       masBuscados = unirTendenciasPorNivel(relacionadas.niveles);
       tendenciasSinRelacion = masBuscados.length === 0 && relacionadas.descartadas > 0;
     } catch (error) {
