@@ -142,7 +142,10 @@ export async function leerPublicacionConEstado(
   // PR 2 — reglas adicionales ya guardadas de esta cuenta (o null). Solo
   // para mostrar el motivo por promoción; el piso sigue mandando.
   reglasAdicionales: ReglasAdicionales | null = null,
-  cacheNombres: CacheNombresPromocion = new Map()
+  cacheNombres: CacheNombresPromocion = new Map(),
+  // Promo-D: false SOLO con la regla «todas» (sin piso ni tope nuestro; el
+  // precio es el sugerido por Mercado Libre). Por defecto, el modo seguro.
+  aplicarPiso: boolean = true
 ): Promise<PublicacionConEstado> {
   const base = { itemId, cuentaMlId, nicknameCuenta, siteId };
   let detalle, resultadoPromos;
@@ -215,8 +218,9 @@ export async function leerPublicacionConEstado(
     skuVariantesDistintas: detalle.skuVariantesDistintas,
     promociones: resultadoPromos.promociones,
   };
-  const { precioMinimo, costo } = await leerPiso(detalle.skuCodigo);
-  const calculadas = calcularCandidatosItem(item, reglas, precioMinimo, costo);
+  // Sin piso («todas») no se lee costos_sku: no se exige ni se muestra el piso.
+  const { precioMinimo, costo } = aplicarPiso ? await leerPiso(detalle.skuCodigo) : { precioMinimo: null, costo: null };
+  const calculadas = calcularCandidatosItem(item, reglas, precioMinimo, costo, aplicarPiso);
   const estaParticipando = calculadas.some((c) => c.estadoMl === "started" || c.estadoMl === "pending");
 
   const promociones: PromocionParaUi[] = [];
@@ -298,7 +302,7 @@ export type ResultadoListaPublicaciones = {
 // del archivo. Nunca escanea el catálogo completo de una pasada.
 export async function listarPublicacionesConEstado(
   empresaId: string,
-  opciones: { cuentaId: string | "todas"; filtro: FiltroPublicaciones; buscar: string; cursor: string | null; tamanoPagina: number }
+  opciones: { cuentaId: string | "todas"; filtro: FiltroPublicaciones; buscar: string; cursor: string | null; tamanoPagina: number; aplicarPiso?: boolean }
 ): Promise<ResultadoListaPublicaciones> {
   const cuentas = await listarCuentasParaPublicaciones(empresaId, opciones.cuentaId);
   const conteosLote: ConteosPublicaciones = { todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 };
@@ -326,7 +330,7 @@ export async function listarPublicacionesConEstado(
       if (pagina.ids.length === 0) break; // esta cuenta se terminó
 
       const procesadas = await conConcurrenciaLimitada(pagina.ids, TOPE_CONCURRENCIA_ML, (itemId) =>
-        leerPublicacionConEstado(itemId, cuenta.id, cuenta.nickname, cuenta.siteId, token, reglas, (sku) => leerPisoYCostoFrescoDeEmpresa(empresaId, sku), reglasAdicionales, cacheNombres)
+        leerPublicacionConEstado(itemId, cuenta.id, cuenta.nickname, cuenta.siteId, token, reglas, (sku) => leerPisoYCostoFrescoDeEmpresa(empresaId, sku), reglasAdicionales, cacheNombres, opciones.aplicarPiso ?? true)
       );
 
       for (const fila of procesadas) {
@@ -369,8 +373,12 @@ export async function participarEnPublicacionDirecto(
   itemId: string,
   promotionIdMl: string | null,
   tipoPromocion: string,
-  precioElegido: number | undefined
+  precioElegido: number | undefined,
+  // Promo-D: solo «todas» relaja el piso; ausente o cualquier otro valor =
+  // con piso (el servidor nunca confía en la UI para relajar).
+  regla?: string
 ): Promise<ResultadoParticiparDirecto> {
+  const sinPiso = regla === "todas";
   const token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
 
   const [detalle, resultadoPromos] = await Promise.all([leerItemParaPromocionMl(itemId, token), leerPromocionesItemMl(itemId, token)]);
@@ -382,7 +390,10 @@ export async function participarEnPublicacionDirecto(
     return { ok: false, estado: "fallida", error: "Esta promoción ya no está disponible para esta publicación — volver a cargar la lista.", accionId: null };
   }
 
-  const [reglas, piso] = await Promise.all([leerReglasFrescasCuenta(empresaId, cuentaMlId), leerPisoYCostoFresco(empresaId, detalle.skuCodigo)]);
+  const [reglas, piso] = await Promise.all([
+    leerReglasFrescasCuenta(empresaId, cuentaMlId),
+    sinPiso ? Promise.resolve({ precioMinimo: null, costo: null }) : leerPisoYCostoFresco(empresaId, detalle.skuCodigo),
+  ]);
   const item: ItemConPromociones = {
     itemId,
     cuentaMlId,
@@ -394,13 +405,13 @@ export async function participarEnPublicacionDirecto(
     skuVariantesDistintas: detalle.skuVariantesDistintas,
     promociones: [promoReal],
   };
-  const [recalculado] = calcularCandidatosItem(item, reglas, piso.precioMinimo, piso.costo);
+  const [recalculado] = calcularCandidatosItem(item, reglas, piso.precioMinimo, piso.costo, !sinPiso);
   if (!recalculado) {
     return { ok: false, estado: "fallida", error: "No se pudo recalcular esta publicación — probar de nuevo.", accionId: null };
   }
 
   const accionSolicitada: AccionEscribible = recalculado.estadoMl === "candidate" ? "participar" : "modificar";
-  const validacion = validarCalculado(recalculado, piso.precioMinimo, reglas, accionSolicitada, precioElegido);
+  const validacion = validarCalculado(recalculado, piso.precioMinimo, reglas, accionSolicitada, precioElegido, !sinPiso);
   if (!validacion.ok) {
     return { ok: false, estado: "fallida", error: validacion.motivo, accionId: null };
   }
@@ -426,7 +437,7 @@ export async function participarEnPublicacionDirecto(
         ejecutadoPor: usuarioId,
         ejecutadoTs: new Date(),
         modoSimulacion: false,
-        resultadoMl: conReglaYOrigen(resultado.resultadoMl, "manual", "individual"),
+        resultadoMl: conReglaYOrigen(resultado.resultadoMl, sinPiso ? "todas" : "manual", "individual"),
         error: resultado.error,
       })
       .returning({ id: promocionesAcciones.id })

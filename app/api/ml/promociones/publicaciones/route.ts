@@ -47,6 +47,8 @@ export async function GET(request: Request) {
     buscar,
     cursor,
     tamanoPagina,
+    // Promo-D: solo «todas» relaja el piso; ausente o desconocida = con piso.
+    aplicarPiso: url.searchParams.get("regla") !== "todas",
   });
 
   return NextResponse.json(resultado);

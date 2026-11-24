@@ -378,3 +378,42 @@ describe("PaginaPromocionesReal — pestaña Bitácora (Promo-B)", () => {
     expect(screen.getByText("Producto MLM1")).toBeTruthy();
   });
 });
+
+describe("PaginaPromocionesReal — Promo-D (regla en la fila por producto)", () => {
+  const urlsLista = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((l) => String(l[0])).filter((u) => u.startsWith("/api/ml/promociones/publicaciones?"));
+
+  it("pide la lista con regla=todas al inicio, y recarga con otra regla al cambiarla (y vuelve a todas)", async () => {
+    montar();
+    await screen.findByLabelText(/Seleccionar todas/);
+    expect(urlsLista()).toHaveLength(1);
+    expect(urlsLista()[0]).toContain("regla=todas");
+    fireEvent.click(screen.getByLabelText("Respetar siempre la tabla maestra de SKU con precios mínimos"));
+    await waitFor(() => expect(urlsLista()).toHaveLength(2));
+    expect(urlsLista()[1]).toContain("regla=tabla-maestra");
+    fireEvent.click(screen.getByLabelText("Participar en todas las promociones disponibles"));
+    await waitFor(() => expect(urlsLista()).toHaveLength(3));
+    expect(urlsLista()[2]).toContain("regla=todas");
+  });
+
+  it("el motivo de una promoción no marcable aparece UNA sola vez", async () => {
+    const motivo = "El piso (54000) está por encima del máximo que permite esta promoción puntual (46550)";
+    const promo = {
+      tipoPromocion: "PRICE_DISCOUNT", promotionIdMl: "p1", estadoMl: "candidate", esCompartida: false, soloEnMl: false, puedeSalirApi: true,
+      precioOriginal: 49000, precioActual: null, precioMinimo: 54000, precioSugerido: 54000, maxDiscountedPrice: 46550, gananciaEstimada: null,
+      cumpleReglas: false, accionSugerida: null, motivoRevisarManual: motivo, reglaAdicionalMotivo: null,
+    };
+    const base = vi.mocked(fetch).getMockImplementation() as (u: string, i?: { body?: string }) => Promise<unknown>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: { body?: string }) =>
+        String(url).startsWith("/api/ml/promociones/publicaciones?")
+          ? { ok: true, json: async () => ({ filas: [{ ...filaLista("MLM1"), estado: "sin_promocion", promociones: [promo] }], conteosLote: { todas: 1, enPromocion: 0, sinPromocion: 1, conError: 0 }, cursorSiguiente: null }) }
+          : base(url, init)
+      )
+    );
+    montar();
+    fireEvent.click(await screen.findByText("Producto MLM1"));
+    await screen.findAllByText(new RegExp("El piso \\(54000\\)"));
+    expect(screen.getAllByText(new RegExp("El piso \\(54000\\)"))).toHaveLength(1);
+  });
+});
