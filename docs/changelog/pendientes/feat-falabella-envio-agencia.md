@@ -1,0 +1,6 @@
+- **2026-11-24** — Finanzas → Ventas y utilidad → Falabella: la utilidad resta el envío agencia y el empaque, igual que Mercado Libre (Refs #422). Sin tablas nuevas ni migraciones.
+
+  - **Una vez por orden, el mayor entre sus SKU**: `envio_agencia` y `empaque` de `costos_sku` (el empaque del proveedor si el SKU no tiene), con la misma regla de combos que ML. Aplica en «Calculada» y en «Estimada»; el flete manual sigue aparte, dentro de «Envío neto».
+  - **Tipo de envío por orden** (`clasificarEnvioFalabella`, `lib/finanzas/envio-falabella.ts`): envío propio (`ShipmentProvider`/`ShippingProviderType` «directo» o «Pago por envío directo» en el reporte) y fulfillment (`ShippingType` «Own Warehouse») no restan envío agencia; agencia (`ShippingType` «Dropshipping» o «Cross docking» en todos los ítems) sí. Sin `ShippingType` o con un valor desconocido → «Tipo de envío desconocido» y no se resta envío agencia. El empaque se resta en todas.
+  - **Sin inventar valores**: orden de agencia cuyo SKU no tiene envío agencia → aviso «Sin envío agencia» y se resta 0. SKU sin empaque → aviso «Sin empaque».
+  - **Pantalla**: columnas «Envío agencia» y «Empaque» en el detalle por orden, totales en la tarjeta «Utilidad del periodo» y un aviso con cuántas órdenes quedaron sin envío agencia o con tipo desconocido.
