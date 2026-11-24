@@ -180,6 +180,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
   return (
     <>
       {formulario}
+      {botonTraer}
       {recortado && <p className={estilos.avisoError}>Hay demasiadas órdenes en este rango: acorta las fechas para ver todas.</p>}
 
       <div className={estilos.gridKpi}>
