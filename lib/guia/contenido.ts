@@ -202,7 +202,7 @@ export const GUIA: GrupoGuia[] = [
         paraQue: "Crear publicaciones en una o varias cuentas de Mercado Libre a la vez.",
         pasos: [
           "Elige las cuentas destino. Cada una lleva su propio título, descripción y portada; precio, stock, SKU y demás fotos son iguales.",
-          "Para no escribir todo desde cero, pega el link de una publicación y usa «Traer datos de ese link» (necesita la extensión).",
+          "Para no escribir todo desde cero, importa una publicación por SKU o con el botón del navegador (en «Importar desde otra publicación»).",
           "O usa «Generación de imágenes para Meli»: con 1 o 2 imágenes de referencia y lo que escribas del producto, la IA arma la ficha, propone títulos, escribe la descripción y, al final, crea imágenes de venta.",
           "Revisa y publica. La publicación sale como Premium con garantía del vendedor de 30 días.",
         ],
