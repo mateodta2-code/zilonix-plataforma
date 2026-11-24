@@ -15,7 +15,7 @@ import { armarDescripcion, leerPartesDescripcion, limpiarPalabrasClave, promptDe
 import { mensajeErrorIA, MENSAJE_SIN_IA } from "@/lib/publicaciones/errores";
 import { fichaConfirmada, fichaEnTexto, idiomaDeSitio, leerFicha, limpiarInfoVendedor, LARGO_GARANTIA, MAXIMO_FOTOS_ANALISIS, type Ficha } from "@/lib/publicaciones/ficha";
 import { conCupoDeTexto } from "@/lib/publicaciones/freno";
-import { leerPropuestaTitulos, ORDEN_PARA_IA, promptTitulos, unirTendenciasPorNivel, type PalabraClave, type TendenciaConNivel } from "@/lib/publicaciones/titulos";
+import { filtrarTendenciasRelacionadas, leerPropuestaTitulos, ORDEN_PARA_IA, promptTitulos, unirTendenciasPorNivel, type PalabraClave, type TendenciaConNivel } from "@/lib/publicaciones/titulos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 
@@ -101,6 +101,9 @@ export type ResultadoTitulos =
       // la padre y la específica, con su nivel, y la ruta analizada.
       masBuscados: TendenciaConNivel[];
       rutaCategoria: string[];
+      // true = ML devolvió tendencias, pero ninguna se relaciona con el
+      // producto (solo había de la categoría general o la padre).
+      tendenciasSinRelacion: boolean;
       // Título de la competencia usado como idea (link o pegado a mano) y,
       // si el link no se pudo leer, el aviso para pegarlo a mano.
       competencia: { titulo: string | null; aviso: string | null };
@@ -123,12 +126,20 @@ export async function proponerTitulosAction(entrada: {
   if ("ok" in ctx) return ctx;
   let masBuscados: TendenciaConNivel[] = [];
   let rutaCategoria: string[] = [];
+  let tendenciasSinRelacion = false;
   if (typeof entrada.categoriaId === "string" && entrada.categoriaId) {
     try {
       const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
       const r = await tendenciasPorNivelMl(ctx.cuenta.siteId, entrada.categoriaId, token);
       rutaCategoria = r.ruta;
-      masBuscados = unirTendenciasPorNivel(r.niveles);
+      // Solo los VALORES de la ficha (sin las etiquetas «Nombre del producto»,
+      // «Color»…, que harían coincidir cualquier búsqueda).
+      const valores = Object.values(ficha).map((c) => (Array.isArray(c.valor) ? c.valor.join(" ") : (c.valor ?? "")));
+      const textoProducto = `${valores.join(" ")} ${limpiarInfoVendedor(entrada.info)}`;
+      const nombreCategoria = entrada.categoriaNombre ?? r.ruta[r.ruta.length - 1] ?? "";
+      const relacionadas = filtrarTendenciasRelacionadas(r.niveles, textoProducto, nombreCategoria);
+      masBuscados = unirTendenciasPorNivel(relacionadas.niveles);
+      tendenciasSinRelacion = masBuscados.length === 0 && relacionadas.descartadas > 0;
     } catch (error) {
       registrar("tendencias", error);
     }
@@ -161,7 +172,7 @@ export async function proponerTitulosAction(entrada: {
     );
     const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados, competencia: tituloCompetencia });
     if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
-    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria, competencia: { titulo: tituloCompetencia || null, aviso: avisoCompetencia } };
+    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria, tendenciasSinRelacion, competencia: { titulo: tituloCompetencia || null, aviso: avisoCompetencia } };
   } catch (error) {
     registrar("titulos", error);
     return { ok: false, aviso: mensajeErrorIA(error) };

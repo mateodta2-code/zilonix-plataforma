@@ -10,6 +10,7 @@ import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import styles from "../../finanzas.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 const CAMPOS_TEXTO: CampoMaestra[] = ["producto", "proveedor", "sku"];
 
@@ -145,7 +146,7 @@ export function ImportarMaestraClient() {
               <FilaTabla key={f.numeroFila}>
                 <CeldaTabla>{f.numeroFila}</CeldaTabla>
                 <CeldaTabla>
-                  <strong>{f.sku}</strong>
+                  <strong><SkuCopiable sku={f.sku} /></strong>
                 </CeldaTabla>
                 <CeldaTabla>{f.estado === "nueva" ? <Chip estado="exito">Nueva</Chip> : <Chip estado="aviso">Cambio</Chip>}</CeldaTabla>
                 <CeldaTabla>

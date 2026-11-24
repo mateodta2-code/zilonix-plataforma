@@ -13,6 +13,7 @@ import { DefectosCuentaFalabella } from "./DefectosCuentaFalabella";
 import { fechaHoraBogota, mostrarMontoIso, mostrarPorcentaje } from "./formato";
 import { LapizMontoFalabella } from "./LapizMontoFalabella";
 import estilos from "./ventasUtilidad.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #422 — utilidad por orden de Falabella, con el mismo formulario,
 // tarjetas KPI y tabla que la de Mercado Libre (DetalleDiaCuentaProducto).
@@ -46,7 +47,7 @@ function CeldaProducto({ productos }: { productos: OrdenUtilidadFalabella["produ
         {primero.nombre}
         {resto.length > 0 && <span className={estilos.suave}> + {resto.length} más</span>}
       </span>
-      {primero.sku && <span className={estilos.datoProducto}>{primero.sku}</span>}
+      {primero.sku && <span className={estilos.datoProducto}><SkuCopiable sku={primero.sku} /></span>}
     </div>
   );
 }

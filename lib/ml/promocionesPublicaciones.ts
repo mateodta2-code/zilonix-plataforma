@@ -1,5 +1,5 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { conReglaYOrigen } from "./promocionesBitacora";
+import { conReglaYOrigen, nuevoLoteBitacora, resultadoMlOmitida, type ExtraBitacora } from "./promocionesBitacora";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { costosSku, cuentasMl, promocionesAcciones } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
@@ -17,7 +17,7 @@ import {
 } from "@/lib/ml/promociones";
 import { agruparPorCuenta, type ItemSeleccionado } from "@/lib/ml/promocionesSeleccion";
 import { type AccionEscribible, escribirPromocionMl, validarCalculado } from "@/lib/ml/promocionesEjecucion";
-import { evaluarCandidatoConReglas, leerReglasAdicionalesCuentas, type CacheNombresPromocion } from "@/lib/ml/promocionesReglasAdicionales";
+import { evaluarCandidatoConReglas, leerReglasAdicionalesCuentas, nombreDePromocion, type CacheNombresPromocion } from "@/lib/ml/promocionesReglasAdicionales";
 import type { ReglasAdicionales } from "@/lib/ml/promocionesReglasTexto";
 import type { EvaluacionReglasAdicionales } from "@/lib/ml/promocionesReglasAplicar";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
@@ -59,6 +59,10 @@ export type PromocionParaUi = {
   // null = ninguna la afecta. La pantalla solo lo muestra con
   // «tabla-maestra» elegida.
   reglaAdicionalMotivo: string | null;
+  // Nombre real y fechas de Mercado Libre (null = no vino; nunca se inventa).
+  nombreMl: string | null;
+  fechaInicioMl: string | null;
+  fechaFinMl: string | null;
 };
 
 export type PublicacionConEstado = {
@@ -77,7 +81,7 @@ export type PublicacionConEstado = {
   motivoError: string | null;
 };
 
-function promocionParaUi(c: CandidatoCalculado, reglaAdicionalMotivo: string | null = null): PromocionParaUi {
+function promocionParaUi(c: CandidatoCalculado, reglaAdicionalMotivo: string | null = null, nombreRespaldo: string | null = null): PromocionParaUi {
   return {
     tipoPromocion: c.tipoPromocion,
     promotionIdMl: c.promotionIdMl,
@@ -95,6 +99,9 @@ function promocionParaUi(c: CandidatoCalculado, reglaAdicionalMotivo: string | n
     accionSugerida: c.accionSugerida,
     motivoRevisarManual: c.motivoRevisarManual,
     reglaAdicionalMotivo,
+    nombreMl: c.nombreMl ?? nombreRespaldo,
+    fechaInicioMl: c.fechaInicioMl,
+    fechaFinMl: c.fechaFinMl,
   };
 }
 
@@ -142,7 +149,12 @@ export async function leerPublicacionConEstado(
   // PR 2 — reglas adicionales ya guardadas de esta cuenta (o null). Solo
   // para mostrar el motivo por promoción; el piso sigue mandando.
   reglasAdicionales: ReglasAdicionales | null = null,
-  cacheNombres: CacheNombresPromocion = new Map()
+  cacheNombres: CacheNombresPromocion = new Map(),
+  // Promo-D: false SOLO con la regla «todas» (sin piso ni tope nuestro; el
+  // precio es el sugerido por Mercado Libre). Por defecto, el modo seguro.
+  aplicarPiso: boolean = true,
+  // Promo-F: «máximo X %» (sin piso) — tope de % a cargo del vendedor.
+  maximoPct: number | null = null
 ): Promise<PublicacionConEstado> {
   const base = { itemId, cuentaMlId, nicknameCuenta, siteId };
   let detalle, resultadoPromos;
@@ -215,8 +227,10 @@ export async function leerPublicacionConEstado(
     skuVariantesDistintas: detalle.skuVariantesDistintas,
     promociones: resultadoPromos.promociones,
   };
-  const { precioMinimo, costo } = await leerPiso(detalle.skuCodigo);
-  const calculadas = calcularCandidatosItem(item, reglas, precioMinimo, costo);
+  // Sin piso («todas») no se lee costos_sku: no se exige ni se muestra el piso.
+  const { precioMinimo, costo } = aplicarPiso ? await leerPiso(detalle.skuCodigo) : { precioMinimo: null, costo: null };
+  const calculadasMotor = calcularCandidatosItem(item, reglas, precioMinimo, costo, aplicarPiso);
+  const calculadas = !aplicarPiso && maximoPct != null ? calculadasMotor.map((c) => aplicarTopeMaximo(c, maximoPct)) : calculadasMotor;
   const estaParticipando = calculadas.some((c) => c.estadoMl === "started" || c.estadoMl === "pending");
 
   const promociones: PromocionParaUi[] = [];
@@ -224,9 +238,42 @@ export async function leerPublicacionConEstado(
     const c = calculadas[i];
     // Solo tiene sentido evaluar lo que el motor (con piso) dejaría hacer.
     const evaluacion = c.accionSugerida ? await evaluarCandidatoConReglas(c, resultadoPromos.promociones[i], reglasAdicionales, token, cacheNombres) : null;
-    promociones.push(promocionParaUi(c, evaluacion?.motivoVisible ?? null));
+    // Respaldo del nombre: una llamada por campaña distinta (caché del
+    // listado); PRICE_DISCOUNT nunca trae nombre y no se consulta. Un
+    // fallo (incluido el límite de ML) deja null — nunca se adivina.
+    let nombreRespaldo: string | null = null;
+    if (!c.nombreMl && c.promotionIdMl && c.tipoPromocion !== "PRICE_DISCOUNT") {
+      nombreRespaldo = await nombreSeguro(resultadoPromos.promociones[i], token, cacheNombres);
+    }
+    promociones.push(promocionParaUi(c, evaluacion?.motivoVisible ?? null, nombreRespaldo));
   }
   return { ...comun, estado: estaParticipando ? "en_promocion" : "sin_promocion", promociones, motivoError: null };
+}
+
+// Promo-F: regla «Máximo X %» = SOLO el tope de % a cargo del vendedor (sin
+// piso de Finanzas, sin tope de la cuenta). Se aplica sobre un candidato ya
+// calculado en modo sin piso. Si la promo pide más del X %: no participa
+// (motivo claro); si deja elegir el precio (PRICE_DISCOUNT) entra con el
+// precio que deja X % (redondeado hacia arriba al entero, así nunca pasa de
+// X %) siempre que respete max_discounted_price y el rango 5–80 % de ML.
+export function aplicarTopeMaximo(c: CandidatoCalculado, maximoPct: number): CandidatoCalculado {
+  if (!c.cumpleReglas || c.accionSugerida !== "participar") return c;
+  const pct = descuentoVendedorPct(c);
+  if (pct == null || pct <= maximoPct + 1e-9) return c;
+  const bloquear = (motivo: string): CandidatoCalculado => ({ ...c, cumpleReglas: false, accionSugerida: null, motivoRevisarManual: motivo });
+  const motivoSupera = `El descuento a cargo del vendedor (${pct.toFixed(1)} %) supera el máximo de ${maximoPct} %.`;
+  if (c.tipoPromocion !== "PRICE_DISCOUNT" || c.precioOriginal == null) return bloquear(motivoSupera);
+  const precio = Math.ceil(c.precioOriginal * (1 - maximoPct / 100));
+  if (c.maxDiscountedPrice != null && precio > c.maxDiscountedPrice) {
+    return bloquear(`${motivoSupera} Al máximo de ${maximoPct} % el precio (${precio}) superaría lo que permite esta promoción (${c.maxDiscountedPrice}).`);
+  }
+  const fueraDeRango = descuentoFueraDeRangoPriceDiscount(c.tipoPromocion, c.precioOriginal, precio, "sugerido-ml");
+  if (fueraDeRango) return bloquear(`${motivoSupera} Al máximo de ${maximoPct} %: ${fueraDeRango}`);
+  return { ...c, precioSugerido: precio };
+}
+
+export function maximoPctValido(valor: unknown): valor is number {
+  return typeof valor === "number" && Number.isFinite(valor) && valor >= 1 && valor <= 80;
 }
 
 export type FiltroPublicaciones = "todas" | "en-promocion" | "sin-promocion" | "con-error";
@@ -292,18 +339,23 @@ export type ResultadoListaPublicaciones = {
   filas: PublicacionConEstado[];
   conteosLote: ConteosPublicaciones;
   cursorSiguiente: string | null;
+  // Total del listado según `paging.total` de ML (ya viene en la misma llamada, sin llamadas extra).
+  // Solo con UNA cuenta: con varias, el total de las que aún no se leen es desconocido y no se inventa.
+  totalEstimado?: number;
 };
 
 // Página por página, en vivo — ver el comentario grande al principio
 // del archivo. Nunca escanea el catálogo completo de una pasada.
 export async function listarPublicacionesConEstado(
   empresaId: string,
-  opciones: { cuentaId: string | "todas"; filtro: FiltroPublicaciones; buscar: string; cursor: string | null; tamanoPagina: number }
+  opciones: { cuentaId: string | "todas"; filtro: FiltroPublicaciones; buscar: string; cursor: string | null; tamanoPagina: number; aplicarPiso?: boolean; maximoPct?: number | null }
 ): Promise<ResultadoListaPublicaciones> {
   const cuentas = await listarCuentasParaPublicaciones(empresaId, opciones.cuentaId);
   const conteosLote: ConteosPublicaciones = { todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 };
   const filas: PublicacionConEstado[] = [];
   const posicion = decodificarCursor(opciones.cursor);
+  let totalEstimado: number | undefined;
+  const conTotal = <T extends object>(r: T): T & { totalEstimado?: number } => (totalEstimado === undefined ? r : { ...r, totalEstimado });
 
   for (let cuentaIndice = posicion.cuentaIndice; cuentaIndice < cuentas.length; cuentaIndice++) {
     const cuenta = cuentas[cuentaIndice];
@@ -323,10 +375,11 @@ export async function listarPublicacionesConEstado(
 
     while (true) {
       const pagina = await conReintento429Lectura(() => listarItemsActivosMl(cuenta.cuentaIdExterna, token, offset, TAMANO_LOTE_ML));
+      if (cuentas.length === 1 && Number.isFinite(pagina.totalCatalogo)) totalEstimado = pagina.totalCatalogo;
       if (pagina.ids.length === 0) break; // esta cuenta se terminó
 
       const procesadas = await conConcurrenciaLimitada(pagina.ids, TOPE_CONCURRENCIA_ML, (itemId) =>
-        leerPublicacionConEstado(itemId, cuenta.id, cuenta.nickname, cuenta.siteId, token, reglas, (sku) => leerPisoYCostoFrescoDeEmpresa(empresaId, sku), reglasAdicionales, cacheNombres)
+        leerPublicacionConEstado(itemId, cuenta.id, cuenta.nickname, cuenta.siteId, token, reglas, (sku) => leerPisoYCostoFrescoDeEmpresa(empresaId, sku), reglasAdicionales, cacheNombres, opciones.aplicarPiso ?? true, opciones.maximoPct ?? null)
       );
 
       for (const fila of procesadas) {
@@ -342,13 +395,23 @@ export async function listarPublicacionesConEstado(
 
       if (filas.length >= opciones.tamanoPagina) {
         const hayMas = siguioEnEstaCuenta || cuentaIndice + 1 < cuentas.length;
-        return { filas, conteosLote, cursorSiguiente: hayMas ? codificarCursor({ cuentaIndice, offset }) : null };
+        return conTotal({ filas, conteosLote, cursorSiguiente: hayMas ? codificarCursor({ cuentaIndice, offset }) : null });
       }
       if (!siguioEnEstaCuenta) break; // pasa a la siguiente cuenta
     }
   }
 
-  return { filas, conteosLote, cursorSiguiente: null };
+  return conTotal({ filas, conteosLote, cursorSiguiente: null });
+}
+
+// Nombre legible de la promoción para la bitácora (Promo-E). Reusa el caché
+// de nombres; si Mercado Libre no lo da, nunca frena lo que ya se hizo.
+async function nombreSeguro(promo: Parameters<typeof nombreDePromocion>[0], token: string, cache: CacheNombresPromocion): Promise<string | null> {
+  try {
+    return await nombreDePromocion(promo, token, cache);
+  } catch {
+    return null;
+  }
 }
 
 // ---------- Participar / modificar directo (un click + confirmación) ----------
@@ -369,8 +432,18 @@ export async function participarEnPublicacionDirecto(
   itemId: string,
   promotionIdMl: string | null,
   tipoPromocion: string,
-  precioElegido: number | undefined
+  precioElegido: number | undefined,
+  // Promo-D/F: solo «todas» y «maximo» relajan el piso; ausente o cualquier
+  // otro valor = con piso (el servidor nunca confía en la UI para relajar).
+  regla?: string,
+  // Promo-F: obligatorio y válido (1–80) con «maximo»; si no, no participa.
+  maximoPct?: number
 ): Promise<ResultadoParticiparDirecto> {
+  const esMaximo = regla === "maximo";
+  if (esMaximo && !maximoPctValido(maximoPct)) {
+    return { ok: false, estado: "fallida", error: "El máximo de descuento no es válido (entre 1 y 80 %).", accionId: null };
+  }
+  const sinPiso = regla === "todas" || esMaximo;
   const token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
 
   const [detalle, resultadoPromos] = await Promise.all([leerItemParaPromocionMl(itemId, token), leerPromocionesItemMl(itemId, token)]);
@@ -382,7 +455,10 @@ export async function participarEnPublicacionDirecto(
     return { ok: false, estado: "fallida", error: "Esta promoción ya no está disponible para esta publicación — volver a cargar la lista.", accionId: null };
   }
 
-  const [reglas, piso] = await Promise.all([leerReglasFrescasCuenta(empresaId, cuentaMlId), leerPisoYCostoFresco(empresaId, detalle.skuCodigo)]);
+  const [reglas, piso] = await Promise.all([
+    leerReglasFrescasCuenta(empresaId, cuentaMlId),
+    sinPiso ? Promise.resolve({ precioMinimo: null, costo: null }) : leerPisoYCostoFresco(empresaId, detalle.skuCodigo),
+  ]);
   const item: ItemConPromociones = {
     itemId,
     cuentaMlId,
@@ -394,18 +470,28 @@ export async function participarEnPublicacionDirecto(
     skuVariantesDistintas: detalle.skuVariantesDistintas,
     promociones: [promoReal],
   };
-  const [recalculado] = calcularCandidatosItem(item, reglas, piso.precioMinimo, piso.costo);
-  if (!recalculado) {
+  const [recalculadoMotor] = calcularCandidatosItem(item, reglas, piso.precioMinimo, piso.costo, !sinPiso);
+  if (!recalculadoMotor) {
     return { ok: false, estado: "fallida", error: "No se pudo recalcular esta publicación — probar de nuevo.", accionId: null };
+  }
+  const recalculado = esMaximo ? aplicarTopeMaximo(recalculadoMotor, maximoPct as number) : recalculadoMotor;
+  // Con un precio elegido a mano el tope también manda (nunca solo en la UI).
+  if (esMaximo && precioElegido !== undefined && recalculado.precioOriginal != null && recalculado.precioOriginal > 0) {
+    const pctElegido = ((recalculado.precioOriginal - precioElegido) / recalculado.precioOriginal) * 100;
+    if (pctElegido > (maximoPct as number) + 1e-9) {
+      return { ok: false, estado: "fallida", error: `El descuento a cargo del vendedor (${pctElegido.toFixed(1)} %) supera el máximo de ${maximoPct} %.`, accionId: null };
+    }
   }
 
   const accionSolicitada: AccionEscribible = recalculado.estadoMl === "candidate" ? "participar" : "modificar";
-  const validacion = validarCalculado(recalculado, piso.precioMinimo, reglas, accionSolicitada, precioElegido);
+  const validacion = validarCalculado(recalculado, piso.precioMinimo, reglas, accionSolicitada, precioElegido, !sinPiso);
   if (!validacion.ok) {
     return { ok: false, estado: "fallida", error: validacion.motivo, accionId: null };
   }
 
   const resultado = await escribirPromocionMl(itemId, token, accionSolicitada, recalculado.promotionIdMl, recalculado.tipoPromocion, validacion.deal);
+  // Promo-E: una acción individual es una tanda de 1.
+  const nombrePromocion = await nombreSeguro(promoReal, token, new Map());
 
   const [fila] = await dbComoEmpresa(empresaId, (tx) =>
     tx
@@ -426,7 +512,13 @@ export async function participarEnPublicacionDirecto(
         ejecutadoPor: usuarioId,
         ejecutadoTs: new Date(),
         modoSimulacion: false,
-        resultadoMl: conReglaYOrigen(resultado.resultadoMl, "manual", "individual"),
+        resultadoMl: conReglaYOrigen(resultado.resultadoMl, esMaximo ? "maximo" : sinPiso ? "todas" : "manual", "individual", {
+          lote: nuevoLoteBitacora(),
+          maximoPct: esMaximo ? (maximoPct as number) : null,
+          limite: esMaximo ? "tope" : sinPiso ? "ninguno" : "piso",
+          sku: detalle.skuCodigo,
+          nombrePromocion,
+        }),
         error: resultado.error,
       })
       .returning({ id: promocionesAcciones.id })
@@ -457,14 +549,11 @@ function descuentoVendedorPct(c: CandidatoCalculado): number | null {
 // Decisión de Mateo: «todas» NO aplica ningún piso (es literalmente
 // todas) — usa el modo sin piso del motor (calcularCandidatosItem con
 // aplicarPiso=false) y el precio que Mercado Libre sugiere; PUEDE
-// vender bajo el costo. «tabla-maestra» y «maximo» SÍ siguen con el
-// piso de Finanzas (costos_sku); «maximo» además descarta lo que supere
-// su tope de % a cargo del vendedor.
-function cumpleRegla(c: CandidatoCalculado, regla: ReglaAplicable): boolean {
-  if (!c.cumpleReglas || !c.accionSugerida) return false;
-  if (regla.tipo !== "maximo") return true;
-  const pct = descuentoVendedorPct(c);
-  return pct == null || pct <= regla.maximoPct;
+// vender bajo el costo. «maximo» (Promo-F) tampoco usa el piso: solo el
+// tope de % a cargo del vendedor (aplicarTopeMaximo). Únicamente
+// «tabla-maestra» usa el piso de Finanzas (costos_sku).
+function cumpleRegla(c: CandidatoCalculado): boolean {
+  return c.cumpleReglas && !!c.accionSugerida;
 }
 
 // Solo se procesan los itemId de `seleccion` (Promo-A, Refs #571): nunca
@@ -484,7 +573,45 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
       resumen.filas.push({ itemId, tituloProducto: null, tipoPromocion: "", estado: "omitida", error: "La cuenta de esta publicación no está disponible." });
     }
   }
-  const aplicarPiso = regla.tipo !== "todas";
+  const aplicarPiso = regla.tipo === "tabla-maestra";
+  // Promo-E: todas las filas de esta ejecución comparten el mismo lote.
+  const lote = nuevoLoteBitacora();
+  const extraLote = (extra: ExtraBitacora = {}): ExtraBitacora => ({
+    lote,
+    maximoPct: regla.tipo === "maximo" ? regla.maximoPct : null,
+    limite: regla.tipo === "todas" ? "ninguno" : regla.tipo === "maximo" ? "tope" : "piso",
+    ...extra,
+  });
+  // Una publicación omitida también queda en la bitácora (estado «rechazada»,
+  // nunca se llamó a Mercado Libre) para que N elegidas = N filas. Si no hay
+  // cuenta válida de la empresa (FK) o falla el insert, solo queda en el resumen.
+  const registrarOmitida = async (cuentaMlId: string, f: { itemId: string; tituloProducto: string | null; tipoPromocion: string; motivo: string; promotionIdMl?: string | null; precioAntes?: number | null; sku?: string | null }) => {
+    try {
+      await dbComoEmpresa(empresaId, (tx) =>
+        tx.insert(promocionesAcciones).values({
+          empresaId,
+          cuentaMlId,
+          itemId: f.itemId,
+          tituloProducto: f.tituloProducto,
+          tipoPromocion: f.tipoPromocion,
+          promotionIdMl: f.promotionIdMl ?? null,
+          accion: "participar",
+          precioAntes: f.precioAntes != null ? String(f.precioAntes) : null,
+          precioDespues: null,
+          estado: "rechazada",
+          aprobadoPor: usuarioId,
+          aprobadoTs: new Date(),
+          ejecutadoPor: usuarioId,
+          ejecutadoTs: new Date(),
+          modoSimulacion: false,
+          resultadoMl: resultadoMlOmitida(regla.tipo, "lote", f.motivo, extraLote({ sku: f.sku ?? null })),
+          error: f.motivo.slice(0, 500),
+        })
+      );
+    } catch {
+      /* la bitácora nunca frena la regla */
+    }
+  };
   // Las «reglas adicionales» (texto libre) SOLO aplican a «tabla-maestra»:
   // nunca a «todas» (sin piso, decisión de Mateo), «maximo» ni «salir-todas».
   const usaReglasAdicionales = regla.tipo === "tabla-maestra";
@@ -497,7 +624,9 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
       for (const itemId of gruposPorCuenta.get(cuenta.id) ?? []) {
         resumen.revisadas += 1;
         resumen.omitidas += 1;
-        resumen.filas.push({ itemId, tituloProducto: null, tipoPromocion: "", estado: "omitida", error: "No se pudo usar la cuenta de Mercado Libre (reconectarla)." });
+        const motivo = "No se pudo usar la cuenta de Mercado Libre (reconectarla).";
+        resumen.filas.push({ itemId, tituloProducto: null, tipoPromocion: "", estado: "omitida", error: motivo });
+        await registrarOmitida(cuenta.id, { itemId, tituloProducto: null, tipoPromocion: "", motivo });
       }
       continue;
     }
@@ -519,13 +648,9 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
         if (!detalle || resultadoPromos.estado !== "ok" || resultadoPromos.promociones.length === 0) {
           resumen.revisadas += 1;
           resumen.omitidas += 1;
-          resumen.filas.push({
-            itemId,
-            tituloProducto: detalle?.title ?? null,
-            tipoPromocion: "",
-            estado: "omitida",
-            error: !detalle || resultadoPromos.estado !== "ok" ? "No se pudo leer la publicación en Mercado Libre." : "No tiene promociones disponibles.",
-          });
+          const motivo = !detalle || resultadoPromos.estado !== "ok" ? "No se pudo leer la publicación en Mercado Libre." : "No tiene promociones disponibles.";
+          resumen.filas.push({ itemId, tituloProducto: detalle?.title ?? null, tipoPromocion: "", estado: "omitida", error: motivo });
+          await registrarOmitida(cuenta.id, { itemId, tituloProducto: detalle?.title ?? null, tipoPromocion: "", motivo, sku: detalle?.skuCodigo ?? null });
           return [];
         }
         // «todas»: no se lee ni se exige el piso (costos_sku).
@@ -541,35 +666,48 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
           skuVariantesDistintas: detalle.skuVariantesDistintas,
           promociones: resultadoPromos.promociones,
         };
-        const calculados = calcularCandidatosItem(item, reglasCuenta, precioMinimo, costo, aplicarPiso);
-        const resultado: { c: CandidatoCalculado; precioMinimo: number | null; evaluacion: EvaluacionReglasAdicionales | null }[] = [];
+        const calculadosMotor = calcularCandidatosItem(item, reglasCuenta, precioMinimo, costo, aplicarPiso);
+        const calculados = regla.tipo === "maximo" ? calculadosMotor.map((c) => aplicarTopeMaximo(c, regla.maximoPct)) : calculadosMotor;
+        const resultado: { c: CandidatoCalculado; precioMinimo: number | null; evaluacion: EvaluacionReglasAdicionales | null; promo: (typeof resultadoPromos.promociones)[number] }[] = [];
         for (let i = 0; i < calculados.length; i++) {
           const c = calculados[i];
           const evaluacion = reglasAdicionales && c.cumpleReglas && c.accionSugerida ? await evaluarCandidatoConReglas(c, resultadoPromos.promociones[i], reglasAdicionales, token, cacheNombres) : null;
-          resultado.push({ c, precioMinimo, evaluacion });
+          resultado.push({ c, precioMinimo, evaluacion, promo: resultadoPromos.promociones[i] });
         }
         return resultado;
       });
 
-      const porAplicar = candidatosPorItem.flat().filter(({ c, evaluacion }) => {
+      const porAplicar: typeof candidatosPorItem[number] = [];
+      for (const entrada of candidatosPorItem.flat()) {
+        const { c, evaluacion } = entrada;
         resumen.revisadas += 1;
-        if (evaluacion?.excluida) {
+        const omitir = async (motivo: string) => {
           resumen.omitidas += 1;
-          resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: evaluacion.motivoVisible });
-          return false;
+          resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: motivo });
+          await registrarOmitida(cuenta.id, { itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, motivo, promotionIdMl: c.promotionIdMl, precioAntes: c.precioActual, sku: c.skuCodigo });
+        };
+        if (evaluacion?.excluida) {
+          await omitir(evaluacion.motivoVisible ?? "Excluida por una regla adicional.");
+          continue;
         }
         // Sin piso, una candidata que el motor frena (ej. ML no dio
         // precio sugerido, o es compartida sin habilitar) queda visible
         // en el resumen con su motivo, nunca omitida en silencio.
         if (!aplicarPiso && c.estadoMl === "candidate" && !c.tieneVariantes && !c.soloEnMl && !c.cumpleReglas && c.motivoRevisarManual) {
-          resumen.omitidas += 1;
-          resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: c.motivoRevisarManual });
-          return false;
+          await omitir(c.motivoRevisarManual);
+          continue;
         }
-        return cumpleRegla(c, regla);
-      });
+        if (cumpleRegla(c)) {
+          porAplicar.push(entrada);
+          continue;
+        }
+        // Promo-E: lo que la regla descarta también queda en la bitácora (100 = 100),
+        // sin tocar el resumen que ya ve la persona (omitir() sí lo suma).
+        const motivoRegla = c.motivoRevisarManual ?? "No cumple las reglas para participar automáticamente.";
+        await registrarOmitida(cuenta.id, { itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, motivo: motivoRegla, promotionIdMl: c.promotionIdMl, precioAntes: c.precioActual, sku: c.skuCodigo });
+      }
 
-      await conConcurrenciaLimitada(porAplicar, TOPE_CONCURRENCIA_APLICAR_REGLA, async ({ c: cMotor, precioMinimo, evaluacion }) => {
+      await conConcurrenciaLimitada(porAplicar, TOPE_CONCURRENCIA_APLICAR_REGLA, async ({ c: cMotor, precioMinimo, evaluacion, promo }) => {
         // Una regla adicional solo puede SUBIR el precio (menos descuento):
         // el precio final ya es max(regla, piso) — ver promocionesReglasAplicar.ts
         // — y validarCalculado vuelve a exigir deal >= piso antes de escribir.
@@ -578,8 +716,10 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
         if (c !== cMotor) {
           const fueraDeRango = descuentoFueraDeRangoPriceDiscount(c.tipoPromocion, c.precioOriginal, precioConRegla as number);
           if (fueraDeRango) {
+            const motivo = `${evaluacion?.motivoVisible ?? "Regla adicional"} — ${fueraDeRango}`;
             resumen.omitidas += 1;
-            resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: `${evaluacion?.motivoVisible ?? "Regla adicional"} — ${fueraDeRango}` });
+            resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: motivo });
+            await registrarOmitida(cuenta.id, { itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, motivo, promotionIdMl: c.promotionIdMl, precioAntes: c.precioActual, sku: c.skuCodigo });
             return;
           }
           // Ya participa a un precio igual o más alto que el que dejaría la regla: nada que modificar.
@@ -590,9 +730,12 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
         if (!validacion.ok) {
           resumen.omitidas += 1;
           resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: validacion.motivo });
+          await registrarOmitida(cuenta.id, { itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, motivo: validacion.motivo, promotionIdMl: c.promotionIdMl, precioAntes: c.precioActual, sku: c.skuCodigo });
           return;
         }
         const resultado = await escribirPromocionMl(c.itemId, token, accionSolicitada, c.promotionIdMl, c.tipoPromocion, validacion.deal);
+        // Sin reglas adicionales no se consulta ML por el nombre: solo el que ya vino en la promoción.
+        const nombrePromocion = usaReglasAdicionales ? await nombreSeguro(promo, token, cacheNombres) : typeof promo.name === "string" ? promo.name : null;
         await dbComoEmpresa(empresaId, (tx) =>
           tx.insert(promocionesAcciones).values({
             empresaId,
@@ -610,7 +753,7 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
             ejecutadoPor: usuarioId,
             ejecutadoTs: new Date(),
             modoSimulacion: false,
-            resultadoMl: conReglaYOrigen(resultado.resultadoMl, regla.tipo, "lote"),
+            resultadoMl: conReglaYOrigen(resultado.resultadoMl, regla.tipo, "lote", extraLote({ sku: c.skuCodigo, nombrePromocion })),
             error: resultado.error,
           })
         );

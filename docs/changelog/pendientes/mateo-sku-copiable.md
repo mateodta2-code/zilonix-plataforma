@@ -1,0 +1,1 @@
+- **SKU copiable en todos los módulos:** al hacer clic en un SKU (Despachos, Promociones, Pedidos, SKU, Inventario, Finanzas, Publicidad, Optimización, Publicar) se resalta ≈1,5 s y se copia al portapapeles con el aviso «✓ SKU copiado». También con Tab + Enter/Espacio. Si el SKU está dentro de un botón o enlace, no abre la fila ni navega. Sin migración. Refs #598

@@ -23,6 +23,7 @@ import { mitadDeMeta } from "@/lib/publicidad/meta-margen";
 import { hrefPublicidad, type HrefPublicidad } from "@/lib/publicidad/params";
 import styles from "./page.module.css";
 import { pintarMargen, plataVisible } from "./vista";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #256 — pestaña "Ganancia real por producto". Solo lectura: los
 // costos son de Finanzas y los precios y comisiones, la última foto que
@@ -188,7 +189,8 @@ function FilaGananciaProducto({ fila, meta, siteId }: { fila: FilaGanancia; meta
       <CeldaTabla>
         <span className={styles.productoTitulo}>{fila.titulo ?? fila.itemId}</span>
         <span className={styles.notaNeutra}>
-          {[fila.sku ?? "Sin SKU", fila.itemId, fila.full ? "Full" : null].filter(Boolean).join(" · ")}
+          {fila.sku ? <SkuCopiable sku={fila.sku} /> : "Sin SKU"}
+          {[fila.itemId, fila.full ? "Full" : null].filter(Boolean).map((t) => ` · ${t}`).join("")}
         </span>
       </CeldaTabla>
       <CeldaTabla numerica>

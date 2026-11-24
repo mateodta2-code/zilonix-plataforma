@@ -62,6 +62,17 @@ function item(overrides: Partial<ItemConPromociones> = {}): ItemConPromociones {
 // zilonix-os-web (docs/investigacion/promociones-mercado-libre.md,
 // §7 de ese documento), portados como casos de prueba acá para no
 // volver a pisarlos.
+describe("calcularCandidatosItem — nombre y fechas de ML", () => {
+  it("pasa name/start_date/finish_date solo si son texto no vacío; si no, null", () => {
+    const [deal, pd] = calcularCandidatosItem(
+      item({ promociones: [{ type: "DEAL", id: "C1", status: "started", price: 90, original_price: 100, name: "11/11 Black Friday", start_date: "2026-11-05T00:00:00", finish_date: "2026-12-02T23:59:59" }, { type: "PRICE_DISCOUNT", status: "pending", price: 90, original_price: 100, name: "  ", start_date: "", finish_date: 5 }] }),
+      REGLAS_DEFECTO, 50, 40
+    );
+    expect(deal).toMatchObject({ nombreMl: "11/11 Black Friday", fechaInicioMl: "2026-11-05T00:00:00", fechaFinMl: "2026-12-02T23:59:59" });
+    expect(pd).toMatchObject({ nombreMl: null, fechaInicioMl: null, fechaFinMl: null });
+  });
+});
+
 describe("calcularCandidatosItem — motor de reglas (rama feat-promociones)", () => {
   it("bug 1 — producto con variantes: SIEMPRE a mano, sin importar tipo/estado/piso", () => {
     const resultado = calcularCandidatosItem(
@@ -400,6 +411,38 @@ describe("leerReglasFrescasCuenta / leerPisosYCostosFrescos / leerPisoYCostoFres
     expect(mapa.has("SKU-3")).toBe(false); // sin costos_sku para ese SKU — nunca se inventa una fila
   });
 
+  const base = { skuCodigo: "VITALAIRI", precioMinimoUnidad: "79900", precioMinimoComboX2: "119850", precioMinimoComboX3: "159800", costo: "15260" };
+
+  it("SKU combo: VITALAIRIX3 usa el mínimo x3 y el costo × 3 de la base VITALAIRI", async () => {
+    filasPorTabla.set(costosSku, [base]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["VITALAIRIX3"]);
+    expect(mapa.get("VITALAIRIX3")).toEqual({ precioMinimo: 159800, costo: 45780 });
+  });
+
+  it("SKU combo en minúsculas se normaliza: vitalairix2 → 119850, y el mapa responde por el SKU original", async () => {
+    filasPorTabla.set(costosSku, [base]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["vitalairix2"]);
+    expect(mapa.get("vitalairix2")).toEqual({ precioMinimo: 119850, costo: 30520 });
+  });
+
+  it("la fila exacta gana sobre la base", async () => {
+    filasPorTabla.set(costosSku, [base, { skuCodigo: "VITALAIRIX3", precioMinimoUnidad: "150000", precioMinimoComboX2: null, precioMinimoComboX3: null, costo: "40000" }]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["VITALAIRIX3"]);
+    expect(mapa.get("VITALAIRIX3")).toEqual({ precioMinimo: 150000, costo: 40000 });
+  });
+
+  it("base sin mínimo combo: sin piso (no se inventa), pero el costo sí sale de la base", async () => {
+    filasPorTabla.set(costosSku, [{ ...base, precioMinimoComboX3: null }]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["VITALAIRIX3"]);
+    expect(mapa.get("VITALAIRIX3")).toEqual({ precioMinimo: null, costo: 45780 });
+  });
+
+  it("X1, X4 y SKU sin X no son combo: no usan la base", async () => {
+    filasPorTabla.set(costosSku, [base]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["VITALAIRIX1", "VITALAIRIX4", "VITALAIRI2"]);
+    expect(mapa.size).toBe(0);
+  });
+
   it("leerPisosYCostosFrescos — lista vacía: mapa vacío, nunca consulta la base", async () => {
     const mapa = await leerPisosYCostosFrescos("empresa-1", []);
     expect(mapa.size).toBe(0);
@@ -489,5 +532,24 @@ describe("calcularCandidatosItem — modo sin piso (regla «Participar en todas�
     expect(sinPiso.motivoRevisarManual).toContain("Falta precio mínimo");
     const [conPiso] = calcularCandidatosItem(candidata({ suggested_discounted_price: 70000 }), REGLAS_DEFECTO, 90000, 50000, true);
     expect(conPiso.precioSugerido).toBe(90000);
+  });
+});
+
+describe("Promo-D — caso del bug: piso (54000) por encima de max_discounted_price (46550), precio original 49000", () => {
+  const caso = () =>
+    item({ promociones: [{ type: "PRICE_DISCOUNT", status: "candidate", id: "p1", original_price: 49000, suggested_discounted_price: 46550, max_discounted_price: 46550 }] });
+
+  it("«todas» (sin piso): marcable, con el precio sugerido por Mercado Libre y sin motivo del piso", () => {
+    const [c] = calcularCandidatosItem(caso(), REGLAS_DEFECTO, 54000, 30000, false);
+    expect(c.cumpleReglas).toBe(true);
+    expect(c.accionSugerida).toBe("participar");
+    expect(c.precioSugerido).toBe(46550);
+    expect(c.motivoRevisarManual).toBeNull();
+  });
+
+  it("«tabla-maestra» (con piso): sigue bloqueado por el piso", () => {
+    const [c] = calcularCandidatosItem(caso(), REGLAS_DEFECTO, 54000, 30000, true);
+    expect(c.cumpleReglas).toBe(false);
+    expect(c.motivoRevisarManual).toContain("54000");
   });
 });

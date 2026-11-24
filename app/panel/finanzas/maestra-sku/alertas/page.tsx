@@ -8,6 +8,7 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "../../finanzas.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #128 (Z-FIN-06) — alerta en rojo de lo que deja ventas fuera de
 // la utilidad. No calcula ninguna utilidad. Un costo 0 puesto a
@@ -43,7 +44,7 @@ export default async function AlertasMaestraPage() {
             {alertas.sinCosto.skus.map((s) => (
               <FilaTabla key={s.skuCodigo}>
                 <CeldaTabla>
-                  <strong>{s.skuCodigo}</strong>
+                  <strong><SkuCopiable sku={s.skuCodigo} /></strong>
                 </CeldaTabla>
                 <CeldaTabla>{s.nombreProducto ?? "—"}</CeldaTabla>
                 <CeldaTabla>
@@ -66,7 +67,7 @@ export default async function AlertasMaestraPage() {
             {alertas.publicadosFueraDeMaestra.skus.map((s) => (
               <FilaTabla key={s.skuCodigo}>
                 <CeldaTabla>
-                  <strong>{s.skuCodigo}</strong>
+                  <strong><SkuCopiable sku={s.skuCodigo} /></strong>
                 </CeldaTabla>
                 <CeldaTabla>{s.publicaciones}</CeldaTabla>
                 <CeldaTabla>

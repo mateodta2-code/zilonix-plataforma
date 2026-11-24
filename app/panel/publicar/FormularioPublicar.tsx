@@ -11,6 +11,7 @@ import { mensajeErrorConectarCanva } from "./canva-mensajes-error";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
 import { CrearConIA } from "./CrearConIA";
 import { GenerarConIA } from "./GenerarConIA";
+import { borrarBorradoresIA, CLAVES_BORRADOR_IA, useBorradorIA } from "./ia/borradorIA";
 import type { Ficha } from "@/lib/publicaciones/ficha";
 import { GaleriaFotos } from "./GaleriaFotos";
 import { PortadaCuenta } from "./PortadaCuenta";
@@ -111,6 +112,16 @@ export function FormularioPublicar({
   // referencia para la IA, nunca se publican. Sin ellas, se usan las fotos
   // reales de la galería.
   const [referenciasIA, setReferenciasIA] = useState<string[]>([]);
+  // Se guardan 2 horas con el resto del generador (ia/borradorIA.ts).
+  useBorradorIA<string[]>(CLAVES_BORRADOR_IA.referencias, referenciasIA, setReferenciasIA);
+  // «Empezar de cero»: borra lo guardado y remonta el generador entero.
+  const [reinicioIA, setReinicioIA] = useState(0);
+  function empezarDeCeroIA() {
+    borrarBorradoresIA();
+    setReferenciasIA([]);
+    setFichaIA(null);
+    setReinicioIA((n) => n + 1);
+  }
   const fotosParaIA = referenciasIA.filter(Boolean).length > 0 ? referenciasIA.filter(Boolean) : fotosReales;
 
   // Una imagen creada entra sola a la galería (al regenerar, en el lugar
@@ -348,12 +359,14 @@ export function FormularioPublicar({
       </Tarjeta>
 
       {/* --- «Generación de imágenes para Meli» (antes «Crear con IA», 23-nov):
-          imágenes de referencia (solo para la IA), información, 1. ficha,
-          2. títulos, 3. descripción y 4. imágenes. «Usar en» llena la cuenta
+          imágenes de referencia (solo para la IA), información y 1. ficha
+          arriba; debajo, sub pestañas Generar imágenes / Títulos /
+          Descripción (24-nov), guardadas 2 horas en la pestaña. «Usar en» llena la cuenta
           de abajo y las imágenes entran a la galería de arriba. --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Generación de imágenes para Meli</p>
         <CrearConIA
+          key={reinicioIA}
           cuentas={cuentasMarcadas}
           fotos={fotosParaIA}
           referencias={
@@ -362,6 +375,7 @@ export function FormularioPublicar({
           onUsarTitulo={(id, titulo) => actualizarCuenta(id, "titulo", titulo)}
           onUsarDescripcion={(id, descripcion) => actualizarCuenta(id, "descripcion", descripcion)}
           onFicha={setFichaIA}
+          onEmpezarDeCero={empezarDeCeroIA}
           pasoImagenes={
             <GenerarConIA
               cuentas={cuentasMarcadas}
@@ -369,6 +383,7 @@ export function FormularioPublicar({
               categoriaId={categoriaElegida?.categoryId ?? fichaIA?.categoriaId ?? null}
               fotos={fotosParaIA}
               espacioLibre={maxFotos == null ? null : Math.max(0, maxFotos - imagenes.filter(Boolean).length)}
+              galeria={imagenes}
               onFotoGenerada={ponerFotoGenerada}
             />
           }

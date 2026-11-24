@@ -14,6 +14,7 @@ import { TOPE_ITEMS_SELECCION, type ItemSeleccionado } from "@/lib/ml/promocione
 import { accionDePromocion, calcularDesdePorcentaje, calcularDesdePrecioFinal, claveMarcaPromocion, formatoEnteroInput, motivoNoMarcable, motivoSinPrecioParaParticipar, parsearNumeroLocal, planAplicarPromociones, quedaBajoPrecioMinimo, superaMaximoConfigurado } from "./calculosPublicaciones";
 import { BitacoraPromociones } from "./BitacoraPromociones";
 import styles from "./promocionesReal.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 type Cuenta = { id: string; nickname: string; siteId: string };
 type ReglaUi = "todas" | "maximo" | "tabla-maestra" | "salir-todas";
@@ -40,7 +41,7 @@ const ETIQUETA_TIPO_PROMOCION: Record<string, string> = {
   DEAL: "Campaña tradicional",
   DOD: "Oferta del día",
   LIGHTNING: "Oferta relámpago",
-  PRICE_DISCOUNT: "Descuento de precio",
+  PRICE_DISCOUNT: "Descuento por porcentaje",
   SMART: "Precio inteligente",
   UNHEALTHY_STOCK: "Liquidación de stock",
   PRE_NEGOTIATED: "Descuento pre-negociado",
@@ -53,6 +54,36 @@ const ETIQUETA_TIPO_PROMOCION: Record<string, string> = {
 
 function nombrePromocion(tipoPromocion: string): string {
   return ETIQUETA_TIPO_PROMOCION[tipoPromocion] ?? tipoPromocion;
+}
+
+// Título de una promo: el nombre real de ML si vino; si no, el tipo legible.
+export function tituloPromocion(promocion: { tipoPromocion: string; nombreMl?: string | null }): string {
+  return promocion.nombreMl?.trim() ? promocion.nombreMl : nombrePromocion(promocion.tipoPromocion);
+}
+
+export function estadoPromocionEs(estadoMl: string): { texto: string; estado: "exito" | "aviso" | "neutro" } {
+  if (estadoMl === "started") return { texto: "Activa", estado: "exito" };
+  if (estadoMl === "pending") return { texto: "Programada", estado: "aviso" };
+  if (estadoMl === "candidate") return { texto: "Disponible", estado: "neutro" };
+  if (estadoMl === "finished") return { texto: "Finalizada", estado: "neutro" };
+  return { texto: estadoMl, estado: "neutro" };
+}
+
+// «5 nov – 2 dic»: toma el YYYY-MM-DD que manda ML (ya en la fecha local del
+// sitio) y lo formatea en UTC para que el navegador no lo corra un día.
+export function rangoFechasPromocion(inicio: string | null | undefined, fin: string | null | undefined, idioma: string): string | null {
+  const ymd = (v: string | null | undefined) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
+  const a = ymd(inicio);
+  const b = ymd(fin);
+  if (!a && !b) return null;
+  const anioActual = new Date().getFullYear();
+  const dar = (v: string) => {
+    const anio = Number(v.slice(0, 4));
+    const opciones: Intl.DateTimeFormatOptions = anio === anioActual ? { day: "numeric", month: "short", timeZone: "UTC" } : { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" };
+    return new Intl.DateTimeFormat(idioma, opciones).format(new Date(`${v}T00:00:00Z`));
+  };
+  if (a && b) return `${dar(a)} – ${dar(b)}`;
+  return dar((a ?? b) as string);
 }
 
 function sumarConteos(a: ConteosPublicaciones, b: ConteosPublicaciones): ConteosPublicaciones {
@@ -118,11 +149,29 @@ export function PaginaPromocionesReal({
   const [buscarTexto, setBuscarTexto] = useState("");
   const [buscarAplicado, setBuscarAplicado] = useState("");
 
+  // Promo-D: la regla elegida viaja al cargar la lista y al participar por producto («todas» no aplica piso ni tope nuestro).
+  const [regla, setRegla] = useState<ReglaUi>("todas");
+  // Promo-F: «máximo X %» = solo el tope de % (sin piso de Finanzas); el X viaja al listar y al participar.
+  // Promo-G: el input se actualiza al instante (`maximoPctInput`); el valor que dispara la recarga
+  // y viaja al servidor (`maximoPct`) espera ~600 ms a que se deje de escribir (escribir «12» = UNA recarga).
+  const [maximoPctInput, setMaximoPctInput] = useState(15);
+  const [maximoPct, setMaximoPct] = useState(15);
+  useEffect(() => {
+    if (maximoPctInput === maximoPct) return;
+    const id = setTimeout(() => setMaximoPct(maximoPctInput), 600);
+    return () => clearTimeout(id);
+  }, [maximoPctInput, maximoPct]);
+  const maximoPctValido = Number.isFinite(maximoPct) && maximoPct >= 1 && maximoPct <= 80;
+  const modoCarga = regla === "todas" ? "todas" : regla === "maximo" && maximoPctValido ? `maximo-${maximoPct}` : "tabla-maestra";
+  const reglaParaServidor = (): { regla?: string; maximoPct?: number } => (regla === "todas" ? { regla: "todas" } : regla === "maximo" && maximoPctValido ? { regla: "maximo", maximoPct } : {});
   const [filas, setFilas] = useState<PublicacionConEstado[]>([]);
   const [conteos, setConteos] = useState<ConteosPublicaciones>({ todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 });
   const [cursor, setCursor] = useState<string | null>(null);
   const [cargandoAuto, setCargandoAuto] = useState(false);
   const [topeAlcanzado, setTopeAlcanzado] = useState(false);
+  // Promo-G: total del listado (solo si ML lo dio) y estado del cartel «Carga completa» / «Carga detenida».
+  const [totalEstimado, setTotalEstimado] = useState<number | null>(null);
+  const [cierreCarga, setCierreCarga] = useState<"completa" | "detenida" | null>(null);
   const [expandidaId, setExpandidaId] = useState<string | null>(null);
   // Promo-A (Refs #571): la regla se aplica SOLO a lo que se marca acá.
   const [seleccionadas, setSeleccionadas] = useState<Set<string>>(new Set());
@@ -161,8 +210,10 @@ export function PaginaPromocionesReal({
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async function pedirPagina(cursorParaUsar: string | null): Promise<{ filas: PublicacionConEstado[]; conteosLote: ConteosPublicaciones; cursorSiguiente: string | null } | null> {
-    const params = new URLSearchParams({ filtro, buscar: buscarAplicado });
+  async function pedirPagina(cursorParaUsar: string | null): Promise<{ filas: PublicacionConEstado[]; conteosLote: ConteosPublicaciones; cursorSiguiente: string | null; totalEstimado?: number } | null> {
+    // «todas» y «máximo» relajan el piso en el servidor; las otras dos piden lo mismo (con piso).
+    const params = new URLSearchParams({ filtro, buscar: buscarAplicado, regla: regla === "todas" ? "todas" : regla === "maximo" && maximoPctValido ? "maximo" : "tabla-maestra" });
+    if (regla === "maximo" && maximoPctValido) params.set("maximoPct", String(maximoPct));
     if (cuentaSeleccionada !== "todas") params.set("cuentaId", cuentaSeleccionada);
     if (cursorParaUsar) params.set("cursor", cursorParaUsar);
     try {
@@ -181,10 +232,12 @@ export function PaginaPromocionesReal({
   // `reiniciar=true` limpia lo ya cargado y arranca de cero (cambio de
   // cuenta/filtro/búsqueda); `reiniciar=false` sigue desde el cursor
   // actual (botón "Seguir cargando", después del tope o de detener).
-  async function cargarTodoAutomatico(reiniciar: boolean) {
+  // `suave`: recarga por cambio de regla — la lista y la selección se quedan a la vista
+  // hasta que llega la primera página nueva (que las reemplaza), sin parpadeo ni perder marcas.
+  async function cargarTodoAutomatico(reiniciar: boolean, suave = false) {
     const miId = ++idCargaRef.current;
     detenerRef.current = false;
-    if (reiniciar) {
+    if (reiniciar && !suave) {
       setFilas([]);
       setConteos({ todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 });
       setCursor(null);
@@ -194,19 +247,26 @@ export function PaginaPromocionesReal({
       setSeleccionadas(new Set());
     }
     setTopeAlcanzado(false);
+    setCierreCarga(null);
+    if (reiniciar) setTotalEstimado(null);
     setCargandoAuto(true);
 
     let cursorActual: string | null = reiniciar ? null : cursor;
     let totalRevisado = reiniciar ? 0 : conteos.todas;
+    let primeraPagina = true;
 
     while (true) {
       const resultado = await pedirPagina(cursorActual);
       if (idCargaRef.current !== miId) return; // esta carga ya no es la vigente
       if (!resultado) break;
 
-      setFilas((actual) => [...actual, ...resultado.filas]);
-      setConteos((actual) => sumarConteos(actual, resultado.conteosLote));
+      const reemplaza = suave && primeraPagina;
+      primeraPagina = false;
+      if (reemplaza) setExpandidaId(null);
+      setFilas((actual) => (reemplaza ? resultado.filas : [...actual, ...resultado.filas]));
+      setConteos((actual) => (reemplaza ? resultado.conteosLote : sumarConteos(actual, resultado.conteosLote)));
       totalRevisado += resultado.conteosLote.todas;
+      if (typeof resultado.totalEstimado === "number" && resultado.totalEstimado > 0) setTotalEstimado(resultado.totalEstimado);
       cursorActual = resultado.cursorSiguiente;
       setCursor(cursorActual);
 
@@ -217,13 +277,28 @@ export function PaginaPromocionesReal({
       }
       await esperar(PAUSA_ENTRE_PAGINAS_MS);
     }
-    if (idCargaRef.current === miId) setCargandoAuto(false);
+    if (idCargaRef.current === miId) {
+      setCargandoAuto(false);
+      setCierreCarga(detenerRef.current || cursorActual ? "detenida" : "completa");
+    }
   }
 
+  // «Carga completa» se muestra unos segundos y desaparece; «Carga detenida» se queda (junto a «Seguir cargando»).
   useEffect(() => {
-    void cargarTodoAutomatico(true);
+    if (cierreCarga !== "completa") return;
+    const id = setTimeout(() => setCierreCarga(null), 4000);
+    return () => clearTimeout(id);
+  }, [cierreCarga]);
+
+  // Promo-D: cambiar entre «todas» (sin piso) y cualquier otra regla recalcula
+  // las filas en el servidor; la selección de Promo-A se conserva (mismos productos).
+  const sinPisoPrevioRef = useRef(modoCarga);
+  useEffect(() => {
+    const cambioModoPiso = sinPisoPrevioRef.current !== modoCarga;
+    sinPisoPrevioRef.current = modoCarga;
+    void cargarTodoAutomatico(true, cambioModoPiso);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cargarTodoAutomatico se recrea cada render; solo importa reaccionar a estos 3 (cancela la carga vieja por idCargaRef)
-  }, [cuentaSeleccionada, filtro, buscarAplicado]);
+  }, [cuentaSeleccionada, filtro, buscarAplicado, modoCarga]);
 
   function parcharPromo(itemId: string, cuentaMlId: string, tipoPromocion: string, promotionIdMl: string | null, mutar: (p: PromocionParaUi) => PromocionParaUi | null) {
     setFilas((actual) =>
@@ -295,6 +370,7 @@ export function PaginaPromocionesReal({
           promotionIdMl: promocion.promotionIdMl,
           tipoPromocion: promocion.tipoPromocion,
           precioElegido: calculoModal.precioFinal,
+          ...reglaParaServidor(),
         }),
       });
       body = await res.json().catch(() => ({}));
@@ -406,7 +482,7 @@ export function PaginaPromocionesReal({
             itemId: fila.itemId,
             promotionIdMl: promocion.promotionIdMl,
             tipoPromocion: promocion.tipoPromocion,
-            ...(esSalir ? {} : { precioElegido: promocion.precioSugerido }),
+            ...(esSalir ? {} : { precioElegido: promocion.precioSugerido, ...reglaParaServidor() }),
           }),
         });
         const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string | null };
@@ -456,8 +532,6 @@ export function PaginaPromocionesReal({
   }
 
   // ---------- Reglas (lote) ----------
-  const [regla, setRegla] = useState<ReglaUi>("todas");
-  const [maximoPct, setMaximoPct] = useState(15);
   const dialogReglaRef = useRef<HTMLDialogElement>(null);
   const [pasoRegla, setPasoRegla] = useState<"confirmar" | "resultado">("confirmar");
   const [aplicandoRegla, setAplicandoRegla] = useState(false);
@@ -486,7 +560,7 @@ export function PaginaPromocionesReal({
       const res = await fetch("/api/ml/promociones/publicaciones/reglas-aplicar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seleccion: seleccionActual, regla, maximoPct: regla === "maximo" ? maximoPct : undefined }),
+        body: JSON.stringify({ seleccion: seleccionActual, regla, maximoPct: regla === "maximo" ? maximoPctInput : undefined }),
       });
       body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error("error");
@@ -704,25 +778,50 @@ export function PaginaPromocionesReal({
         </div>
         <p style={{ fontSize: 11.5, color: "var(--texto-suave)", marginTop: 6 }}>Los contadores son de las publicaciones ya revisadas en esta pantalla, no del catálogo completo.</p>
 
-        <div className={styles.progresoCarga}>
-          {cargandoAuto ? (
-            <>
-              <span>Cargando publicaciones… {formatearNumero(conteos.todas, "es")} revisadas hasta ahora.</span>
-              <Boton
-                type="button"
-                variante="secundario"
-                onClick={() => {
-                  detenerRef.current = true;
-                }}
-              >
-                Detener carga
-              </Boton>
-            </>
+        <div className={styles.progresoCarga} role="status" aria-live="polite">
+          {cargandoAuto || cierreCarga === "completa" ? (
+            <div className={styles.bandaCarga}>
+              <div className={styles.bandaCargaFila}>
+                <span className={styles.bandaCargaTitulo}>
+                  {cargandoAuto ? `Cargando publicaciones… ${formatearNumero(conteos.todas, "es")} revisadas` : "Carga completa"}
+                </span>
+                {cargandoAuto && (
+                  <Boton
+                    type="button"
+                    variante="secundario"
+                    onClick={() => {
+                      detenerRef.current = true;
+                    }}
+                  >
+                    Detener carga
+                  </Boton>
+                )}
+              </div>
+              {(() => {
+                const conTotal = totalEstimado !== null && totalEstimado > 0;
+                const pct = !cargandoAuto ? 100 : conTotal ? Math.min(100, Math.round((conteos.todas / totalEstimado!) * 100)) : 0;
+                return (
+                  <>
+                    <div
+                      className={`${styles.barraCarga} ${cargandoAuto && !conTotal ? styles.barraCargaIndeterminada : ""}`}
+                      {...(conTotal || !cargandoAuto ? { role: "progressbar", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct, "aria-label": "Progreso de la carga de publicaciones" } : {})}
+                    >
+                      <div className={styles.barraCargaRelleno} style={cargandoAuto && !conTotal ? undefined : { width: `${pct}%` }} />
+                    </div>
+                    {cargandoAuto && conTotal && (
+                      <span className={styles.bandaCargaDetalle}>
+                        {formatearNumero(conteos.todas, "es")} de {formatearNumero(totalEstimado!, "es")} revisadas ({pct} %)
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           ) : cursor ? (
             <>
               <span>
-                {topeAlcanzado ? `Se llegó al tope de ${formatearNumero(TOPE_CARGA_AUTOMATICA, "es")} publicaciones revisadas por carga.` : "La carga se detuvo."}{" "}
-                {formatearNumero(conteos.todas, "es")} revisadas hasta ahora.
+                {topeAlcanzado ? `Se llegó al tope de ${formatearNumero(TOPE_CARGA_AUTOMATICA, "es")} publicaciones revisadas por carga.` : `Carga detenida · ${formatearNumero(conteos.todas, "es")} revisadas.`}
+                {topeAlcanzado ? ` ${formatearNumero(conteos.todas, "es")} revisadas hasta ahora.` : ""}
               </span>
               <Boton type="button" variante="primario" onClick={() => void cargarTodoAutomatico(false)}>
                 Seguir cargando
@@ -738,7 +837,7 @@ export function PaginaPromocionesReal({
         <p className="zx-etiqueta">Reglas de participación</p>
         {resumenMaestraSku.total === 0 ? (
           <div className={`${styles.bannerMaestra} ${styles.bannerMaestraFalta}`}>
-            <span>El módulo de SKU todavía no tiene ninguna tabla maestra de precios mínimos cargada — sin esto, las reglas «Respetar la tabla maestra» y «máximo» no pueden participar en ninguna publicación (la regla «Participar en todas» no la necesita).</span>
+            <span>El módulo de SKU todavía no tiene ninguna tabla maestra de precios mínimos cargada — sin esto, la regla «Respetar la tabla maestra» no puede participar en ninguna publicación («Participar en todas» y «máximo» no la necesitan).</span>
             <BotonLink href="/panel/finanzas/maestra-sku/importar" variante="primario">
               Subir un archivo
             </BotonLink>
@@ -774,9 +873,9 @@ export function PaginaPromocionesReal({
               style={{ width: 70 }}
               min={1}
               max={100}
-              value={maximoPct}
+              value={maximoPctInput}
               disabled={regla !== "maximo"}
-              onChange={(e) => setMaximoPct(Number(e.target.value))}
+              onChange={(e) => setMaximoPctInput(Number(e.target.value))}
             />
             % de descuento a cargo del vendedor
           </label>
@@ -867,7 +966,7 @@ export function PaginaPromocionesReal({
         </div>
         <p style={{ fontSize: 11.5, color: "var(--texto-suave)", marginTop: 4 }}>
           &quot;Participar en todas&quot; entra en todas las promociones disponibles SIN precio mínimo — puede dejar productos vendiéndose bajo su costo. Solo &quot;Respetar siempre la tabla
-          maestra&quot; aplica el precio mínimo de Finanzas (y &quot;máximo&quot; lo conserva, además de su tope de porcentaje). &quot;Dejar de participar en todas&quot; quita las publicaciones
+          maestra&quot; aplica el precio mínimo de Finanzas (&quot;máximo&quot; solo aplica su tope de porcentaje a cargo del vendedor, sin precio mínimo). &quot;Dejar de participar en todas&quot; quita las publicaciones
           activas de sus promociones, con confirmación previa.
         </p>
 
@@ -877,7 +976,7 @@ export function PaginaPromocionesReal({
               type="button"
               variante="primario"
               onClick={regla === "salir-todas" ? () => void abrirSalirTodas() : abrirAplicarRegla}
-              disabled={cantidadSeleccionada === 0 || (resumenMaestraSku.total === 0 && (regla === "tabla-maestra" || regla === "maximo"))}
+              disabled={cantidadSeleccionada === 0 || (resumenMaestraSku.total === 0 && regla === "tabla-maestra") || (regla === "maximo" && !maximoPctValido)}
             >
               {regla === "salir-todas" ? "Revisar y dejar de participar…" : "Aplicar regla a las publicaciones"}
             </Boton>
@@ -937,7 +1036,7 @@ export function PaginaPromocionesReal({
                     <span className={styles.titulo}>{fila.tituloProducto ?? fila.itemId}</span>
                     <span className={styles.subtitulo}>
                       {fila.nicknameCuenta}
-                      {fila.skuCodigo ? ` · SKU ${fila.skuCodigo}` : ""}
+                      {fila.skuCodigo ? <SkuCopiable sku={fila.skuCodigo} comoSpan prefijo=" · SKU " /> : ""}
                       {fila.precioOriginal != null ? ` · ${formatearMoneda(fila.precioOriginal, fila.siteId)}` : ""}
                       {fila.stock != null ? ` · Stock ${formatearNumero(fila.stock, idioma)}` : ""}
                     </span>
@@ -972,17 +1071,20 @@ export function PaginaPromocionesReal({
                               {puedeEjecutar && (
                                 <input
                                   type="checkbox"
-                                  aria-label={`${accionDePromocion(promocion) === "salir" ? "Salir de" : "Participar en"} ${nombrePromocion(promocion.tipoPromocion)}`}
+                                  aria-label={`${accionDePromocion(promocion) === "salir" ? "Salir de" : "Participar en"} ${tituloPromocion(promocion)}`}
                                   checked={marcasPromo[claveSeleccion(fila.cuentaMlId, fila.itemId)]?.has(claveMarcaPromocion(promocion)) ?? false}
                                   disabled={motivoNoMarcable(promocion) != null || motivoSinPrecioParaParticipar(promocion) != null || aplicandoFila != null}
                                   onChange={() => alternarMarcaPromo(fila, promocion)}
                                 />
                               )}
-                              <span className={styles.nombrePromocion}>{nombrePromocion(promocion.tipoPromocion)}</span>
-                              <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>({promocion.tipoPromocion})</span>
-                              {activa && (
-                                <Chip estado={promocion.estadoMl === "started" ? "exito" : "aviso"}>{promocion.estadoMl === "started" ? "Aplicada" : "Programada"}</Chip>
+                              <span className={styles.nombrePromocion}>{tituloPromocion(promocion)}</span>
+                              <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>
+                                {promocion.nombreMl ? `${nombrePromocion(promocion.tipoPromocion)} (${promocion.tipoPromocion})` : `(${promocion.tipoPromocion})`}
+                              </span>
+                              {rangoFechasPromocion(promocion.fechaInicioMl, promocion.fechaFinMl, idioma) && (
+                                <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>{rangoFechasPromocion(promocion.fechaInicioMl, promocion.fechaFinMl, idioma)}</span>
                               )}
+                              <Chip estado={estadoPromocionEs(promocion.estadoMl).estado}>{estadoPromocionEs(promocion.estadoMl).texto}</Chip>
                               {promocion.esCompartida && <Chip estado="neutro">Compartida con Mercado Libre (+Meli)</Chip>}
                               {superaMaximoRegla && <Chip estado="aviso">Supera el máximo configurado</Chip>}
                               {regla === "tabla-maestra" && promocion.reglaAdicionalMotivo && <Chip estado="aviso">{promocion.reglaAdicionalMotivo}</Chip>}
@@ -1011,7 +1113,7 @@ export function PaginaPromocionesReal({
                                   {resultadosPromo[`${claveSeleccion(fila.cuentaMlId, fila.itemId)}|${claveMarcaPromocion(promocion)}`].texto}
                                 </span>
                               )}
-                              {!promocion.cumpleReglas && promocion.motivoRevisarManual && <span style={{ color: "var(--kpi-peligro-texto)" }}>{promocion.motivoRevisarManual}</span>}
+                              {!promocion.cumpleReglas && promocion.motivoRevisarManual && !(puedeEjecutar && motivoNoMarcable(promocion) === promocion.motivoRevisarManual) && <span style={{ color: "var(--kpi-peligro-texto)" }}>{promocion.motivoRevisarManual}</span>}
                             </div>
                             <div className={styles.accionesPromocion}>
                               {activa ? (
@@ -1070,11 +1172,18 @@ export function PaginaPromocionesReal({
             <p className={styles.tituloModal}>Confirma los detalles de la promoción</p>
             <p className={styles.resumenProducto}>
               {seleccion.fila.tituloProducto ?? seleccion.fila.itemId}
-              {seleccion.fila.skuCodigo ? ` — SKU ${seleccion.fila.skuCodigo}` : ""}
+              {seleccion.fila.skuCodigo ? <SkuCopiable sku={seleccion.fila.skuCodigo} prefijo=" — SKU " /> : ""}
             </p>
             <p className={styles.filaDato}>
               <span>Promoción</span>
-              <span>{nombrePromocion(seleccion.promocion.tipoPromocion)}</span>
+              <span>{tituloPromocion(seleccion.promocion)}</span>
+            </p>
+            <p className={styles.filaDato}>
+              <span>Estado</span>
+              <span>
+                {estadoPromocionEs(seleccion.promocion.estadoMl).texto}
+                {rangoFechasPromocion(seleccion.promocion.fechaInicioMl, seleccion.promocion.fechaFinMl, idiomaDeCuenta(seleccion.fila.cuentaMlId)) ? ` · ${rangoFechasPromocion(seleccion.promocion.fechaInicioMl, seleccion.promocion.fechaFinMl, idiomaDeCuenta(seleccion.fila.cuentaMlId))}` : ""}
+              </span>
             </p>
             <p className={styles.filaDato}>
               <span>Precio original</span>
@@ -1141,7 +1250,7 @@ export function PaginaPromocionesReal({
           <Tarjeta className={styles.panelModal}>
             <p className={styles.tituloModal}>Dejar de participar</p>
             <p style={{ fontSize: 13.5 }}>
-              Se dejará de participar en &quot;{nombrePromocion(confirmandoSalir.promocion.tipoPromocion)}&quot; para &quot;{confirmandoSalir.fila.tituloProducto ?? confirmandoSalir.fila.itemId}
+              Se dejará de participar en &quot;{tituloPromocion(confirmandoSalir.promocion)}&quot; para &quot;{confirmandoSalir.fila.tituloProducto ?? confirmandoSalir.fila.itemId}
               &quot;. Esto se manda de una vez a Mercado Libre y no se puede deshacer desde esta pantalla. ¿Confirmas?
             </p>
             {errorSalir && <p className={styles.errorModal}>{errorSalir}</p>}
@@ -1170,7 +1279,11 @@ export function PaginaPromocionesReal({
                   ), sin un paso de confirmación por producto.
                 </p>
                 <p>
-                  {regla === "todas" ? "Sin precio mínimo: se entra a todas aunque quede bajo el costo." : "El precio mínimo de Finanzas nunca se salta."}
+                  {regla === "todas"
+                    ? "Sin precio mínimo: se entra a todas aunque quede bajo el costo."
+                    : regla === "maximo"
+                      ? "Solo manda el tope de porcentaje: no se usa el precio mínimo de Finanzas, así que puede quedar bajo el costo."
+                      : "El precio mínimo de Finanzas nunca se salta."}
                 </p>
                 {regla === "tabla-maestra" && textoGuardado && <p>Se aplicarán también tus reglas adicionales guardadas: «{textoGuardado}».</p>}
               </div>

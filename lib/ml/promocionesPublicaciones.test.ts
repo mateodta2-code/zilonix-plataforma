@@ -16,12 +16,12 @@ vi.mock("@/db/empresa-context", () => ({
         }),
       }),
       insert: () => ({
-        values: (valores: Record<string, unknown>) => ({
-          returning: async () => {
-            insertsRegistrados.push(valores);
-            return [{ id: `accion-${insertsRegistrados.length}` }];
-          },
-        }),
+        values: (valores: Record<string, unknown>) => {
+          insertsRegistrados.push(valores);
+          const id = `accion-${insertsRegistrados.length}`;
+          // Awaitable directo (lote) o con .returning() (individual).
+          return { returning: async () => [{ id }], then: (ok: (v: unknown) => unknown) => Promise.resolve(undefined).then(ok) };
+        },
       }),
     };
     return fn(tx);
@@ -41,7 +41,7 @@ const {
   modificarPromocionMlMock,
   leerNombrePromocionMlMock,
 } = vi.hoisted(() => ({
-  leerNombrePromocionMlMock: vi.fn(async (): Promise<string | null> => null),
+  leerNombrePromocionMlMock: vi.fn(async (_id: string, _tipo: string, _token: string): Promise<string | null> => null),
   leerItemParaPromocionMlMock: vi.fn(),
   leerPromocionesItemMlMock: vi.fn(),
   listarItemsActivosMlMock: vi.fn(),
@@ -64,6 +64,7 @@ vi.mock("@/lib/ml/cliente", async (importOriginal) => {
 import { costosSku, cuentasMl, promocionesReglas } from "@/db/schema";
 import {
   aplicarReglaALote,
+  aplicarTopeMaximo,
   codificarCursor,
   decodificarCursor,
   leerPublicacionConEstado,
@@ -170,6 +171,32 @@ describe("listarPublicacionesConEstado", () => {
     expect(resultado.cursorSiguiente).toBeNull();
   });
 
+  it("nombre real: usa el del ítem, respaldo con UNA llamada por campaña, ninguna para PRICE_DISCOUNT, fallo → null", async () => {
+    prepararCuenta();
+    listarItemsActivosMlMock.mockResolvedValueOnce({ ids: ["MCO1", "MCO2"], totalCatalogo: 2 });
+    leerItemParaPromocionMlMock.mockImplementation(async () => itemBasico());
+    leerPromocionesItemMlMock.mockImplementation(async () => ({
+      estado: "ok",
+      promociones: [
+        { type: "DEAL", status: "started", id: "C1", original_price: 100, price: 90, start_date: "2026-11-05T00:00:00", finish_date: "2026-12-02T23:59:59" },
+        { type: "DEAL", status: "candidate", id: "C2", original_price: 100, name: "Con nombre" },
+        { type: "SMART", status: "candidate", id: "C3", original_price: 100 },
+        { type: "PRICE_DISCOUNT", status: "pending", id: "P1", original_price: 100, price: 90 },
+      ],
+    }));
+    leerNombrePromocionMlMock.mockImplementation(async (id: string, _tipo: string, _token: string) => (id === "C1" ? "11/11 Black Friday" : null));
+
+    const r = await listarPublicacionesConEstado("empresa-1", { cuentaId: "todas", filtro: "todas", buscar: "", cursor: null, tamanoPagina: 20 });
+    const promos = r.filas[0].promociones;
+    expect(promos[0]).toMatchObject({ nombreMl: "11/11 Black Friday", fechaInicioMl: "2026-11-05T00:00:00", fechaFinMl: "2026-12-02T23:59:59" });
+    expect(promos[1].nombreMl).toBe("Con nombre");
+    expect(promos[2].nombreMl).toBeNull();
+    expect(promos[3].nombreMl).toBeNull();
+    // 2 ítems con las mismas campañas: C1 y C3 una vez cada una; C2 trae nombre; PRICE_DISCOUNT ninguna.
+    expect(leerNombrePromocionMlMock).toHaveBeenCalledTimes(2);
+    expect(leerNombrePromocionMlMock).not.toHaveBeenCalledWith("P1", expect.anything(), expect.anything());
+  });
+
   it("filtra por estado y por búsqueda de título/SKU", async () => {
     prepararCuenta();
     listarItemsActivosMlMock.mockResolvedValueOnce({ ids: ["MCO1", "MCO2"], totalCatalogo: 2 });
@@ -226,6 +253,9 @@ describe("participarEnPublicacionDirecto", () => {
     expect(participarPromocionMlMock).toHaveBeenCalledTimes(1);
     expect(insertsRegistrados).toHaveLength(1);
     expect(insertsRegistrados[0]).toMatchObject({ accion: "participar", estado: "ejecutada" });
+    // Promo-E: la acción individual es una tanda de 1, con su lote.
+    expect(insertsRegistrados[0].resultadoMl).toMatchObject({ regla: "manual", origen: "individual", limite: "piso" });
+    expect((insertsRegistrados[0].resultadoMl as { lote: string }).lote).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("promoción que ya no está disponible: falla sin llamar a Mercado Libre para escribir", async () => {
@@ -253,6 +283,43 @@ describe("participarEnPublicacionDirecto", () => {
   });
 });
 
+describe("participarEnPublicacionDirecto — Promo-F «maximo»", () => {
+  const promoDeal = (sugerido: number) => ({ estado: "ok" as const, promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, suggested_discounted_price: sugerido }] });
+
+  it("sin precio mínimo cargado: participa si el descuento ≤ X % y la bitácora dice maximo/tope", async () => {
+    leerItemParaPromocionMlMock.mockResolvedValueOnce(itemBasico({ skuCodigo: "SKU-SIN-PISO" }));
+    leerPromocionesItemMlMock.mockResolvedValueOnce(promoDeal(95000));
+
+    const r = await participarEnPublicacionDirecto("empresa-1", "usuario-1", "cuenta-1", "MCO1", "promo-1", "DEAL", undefined, "maximo", 6);
+
+    expect(r.ok).toBe(true);
+    expect(participarPromocionMlMock).toHaveBeenCalledWith("MCO1", "token-falso", expect.objectContaining({ deal_price: 95000 }));
+    expect(insertsRegistrados[0].resultadoMl).toMatchObject({ regla: "maximo", origen: "individual", limite: "tope", maximoPct: 6 });
+  });
+
+  it("el servidor aplica el tope: promo que pide más del X % no se escribe", async () => {
+    leerItemParaPromocionMlMock.mockResolvedValueOnce(itemBasico({ skuCodigo: "SKU-SIN-PISO" }));
+    leerPromocionesItemMlMock.mockResolvedValueOnce(promoDeal(80000));
+
+    const r = await participarEnPublicacionDirecto("empresa-1", "usuario-1", "cuenta-1", "MCO1", "promo-1", "DEAL", undefined, "maximo", 6);
+
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("supera el máximo de 6 %");
+    expect(participarPromocionMlMock).not.toHaveBeenCalled();
+  });
+
+  it("un precio elegido a mano que supera el tope tampoco se escribe; maximoPct inválido = rechazo", async () => {
+    leerItemParaPromocionMlMock.mockResolvedValue(itemBasico({ skuCodigo: "SKU-SIN-PISO" }));
+    leerPromocionesItemMlMock.mockResolvedValue(promoDeal(95000));
+
+    const r = await participarEnPublicacionDirecto("empresa-1", "usuario-1", "cuenta-1", "MCO1", "promo-1", "DEAL", 80000, "maximo", 6);
+    expect(r.ok).toBe(false);
+    const r2 = await participarEnPublicacionDirecto("empresa-1", "usuario-1", "cuenta-1", "MCO1", "promo-1", "DEAL", undefined, "maximo", undefined);
+    expect(r2.ok).toBe(false);
+    expect(participarPromocionMlMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("leerResumenMaestraSku", () => {
   it("sin ningún SKU cargado: total 0, actualizadoTs null", async () => {
     filasPorTabla.set(costosSku, []);
@@ -268,6 +335,13 @@ describe("leerResumenMaestraSku", () => {
 });
 
 const SELECCION_MCO1 = [{ cuentaId: "cuenta-1", itemId: "MCO1" }];
+
+describe("aplicarTopeMaximo", () => {
+  it("no toca lo que ya cumple el tope", () => {
+    const c = { cumpleReglas: true, accionSugerida: "participar", tipoPromocion: "DEAL", precioOriginal: 100000, precioSugerido: 95000, maxDiscountedPrice: null } as never;
+    expect(aplicarTopeMaximo(c, 6)).toBe(c);
+  });
+});
 
 describe("aplicarReglaALote", () => {
   function prepararCuenta() {
@@ -337,25 +411,56 @@ describe("aplicarReglaALote", () => {
     expect(participarPromocionMlMock).toHaveBeenCalledWith("MCO1", "token-falso", expect.objectContaining({ deal_price: 90000 }));
   });
 
-  it("regla 'maximo': también exige piso (sin fila en costos_sku no participa)", async () => {
+  it("Promo-F · regla 'maximo': NO exige piso — sin fila en costos_sku participa si el descuento a cargo del vendedor es ≤ X %", async () => {
     prepararCuenta();
     leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
-    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, suggested_discounted_price: 60000 }] });
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, suggested_discounted_price: 95000 }] });
 
-    await aplicarReglaALote("empresa-1", "usuario-1", SELECCION_MCO1, { tipo: "maximo", maximoPct: 50 });
-    expect(participarPromocionMlMock).not.toHaveBeenCalled();
+    const resumen = await aplicarReglaALote("empresa-1", "usuario-1", SELECCION_MCO1, { tipo: "maximo", maximoPct: 6 });
+
+    expect(resumen.participadas).toBe(1);
+    expect(participarPromocionMlMock).toHaveBeenCalledWith("MCO1", "token-falso", expect.objectContaining({ deal_price: 95000 }));
   });
 
-  it("regla 'maximo': descarta candidatos cuyo descuento supera el tope elegido, sin llamar a Mercado Libre para esos", async () => {
+  it("Promo-F · regla 'maximo': descarta (DEAL) lo que supera el tope, con el motivo, sin llamar a Mercado Libre", async () => {
     prepararCuenta();
-    // Piso 90.000 sobre un original de 100.000 = 10% de descuento real.
-    filasPorTabla.set(costosSku, [{ skuCodigo: "SKU-1", precioMinimoUnidad: "90000", costo: "50000" }]);
+    // Aunque haya piso de 50.000, 'maximo' no lo usa: solo el tope.
+    filasPorTabla.set(costosSku, [{ skuCodigo: "SKU-1", precioMinimoUnidad: "50000", costo: "30000" }]);
     leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
-    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000 }] });
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "DEAL", status: "candidate", id: "promo-1", original_price: 100000, suggested_discounted_price: 90000 }] });
 
     const resumen = await aplicarReglaALote("empresa-1", "usuario-1", SELECCION_MCO1, { tipo: "maximo", maximoPct: 5 });
 
     expect(resumen.participadas).toBe(0);
+    expect(resumen.filas[0].error).toBe("El descuento a cargo del vendedor (10.0 %) supera el máximo de 5 %.");
+    expect(participarPromocionMlMock).not.toHaveBeenCalled();
+    // Promo-E: la descartada por la regla queda en la bitácora, sin llamar a ML.
+    expect(insertsRegistrados).toHaveLength(1);
+    expect(insertsRegistrados[0]).toMatchObject({ estado: "rechazada", itemId: "MCO1", resultadoMl: { regla: "maximo", origen: "lote", maximoPct: 5, limite: "tope", llamoAMercadoLibre: false } });
+    expect((insertsRegistrados[0].resultadoMl as { lote: string }).lote).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("Promo-F · regla 'maximo': PRICE_DISCOUNT que pide más del X % entra con el precio a X % (redondeado hacia arriba)", async () => {
+    prepararCuenta();
+    leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "PRICE_DISCOUNT", status: "candidate", id: "promo-2", original_price: 100001, suggested_discounted_price: 70000 }] });
+
+    const resumen = await aplicarReglaALote("empresa-1", "usuario-1", SELECCION_MCO1, { tipo: "maximo", maximoPct: 6 });
+
+    expect(resumen.participadas).toBe(1);
+    // 100001 × 0,94 = 94000,94 → 94001 (descuento 5,99 % ≤ 6 %).
+    expect(participarPromocionMlMock).toHaveBeenCalledWith("MCO1", "token-falso", expect.objectContaining({ deal_price: 94001 }));
+  });
+
+  it("Promo-F · regla 'maximo': PRICE_DISCOUNT con X < 5 % no participa (rango de ML) y lo dice", async () => {
+    prepararCuenta();
+    leerItemParaPromocionMlMock.mockResolvedValue(itemBasico());
+    leerPromocionesItemMlMock.mockResolvedValue({ estado: "ok", promociones: [{ type: "PRICE_DISCOUNT", status: "candidate", id: "promo-2", original_price: 100000, suggested_discounted_price: 70000 }] });
+
+    const resumen = await aplicarReglaALote("empresa-1", "usuario-1", SELECCION_MCO1, { tipo: "maximo", maximoPct: 3 });
+
+    expect(resumen.participadas).toBe(0);
+    expect(resumen.filas[0].error).toContain("supera el máximo de 3 %");
     expect(participarPromocionMlMock).not.toHaveBeenCalled();
   });
 

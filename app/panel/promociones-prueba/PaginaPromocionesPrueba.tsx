@@ -15,6 +15,7 @@ import {
   type PublicacionPrueba,
 } from "./datosEjemplo";
 import styles from "./promociones-prueba.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 type Regla = "todas" | "maximo" | "tabla-maestra";
 type TipoAjuste = "porcentaje" | "valor";
@@ -170,7 +171,7 @@ export function PaginaPromocionesPrueba() {
                 <div className={styles.infoPublicacion}>
                   <span className={styles.titulo}>{publicacion.titulo}</span>
                   <span className={styles.subtitulo}>
-                    {cuenta.nickname} · SKU {publicacion.sku} · {formatearMoneda(publicacion.precio, cuenta.siteId)} · Stock {formatearNumero(publicacion.stock, datosSitioMl(cuenta.siteId).idioma)}
+                    {cuenta.nickname} · SKU <SkuCopiable sku={publicacion.sku} comoSpan /> · {formatearMoneda(publicacion.precio, cuenta.siteId)} · Stock {formatearNumero(publicacion.stock, datosSitioMl(cuenta.siteId).idioma)}
                   </span>
                 </div>
                 <Chip estado={etiquetaEstado.estado} title={estado === "error" ? motivosError[publicacion.id] : undefined}>
@@ -220,7 +221,7 @@ export function PaginaPromocionesPrueba() {
                             checked={!!varianteMarcada[variante.id]}
                             onChange={(e) => setVarianteMarcada((actual) => ({ ...actual, [variante.id]: e.target.checked }))}
                           />
-                          {variante.nombre} — SKU {variante.sku} — {formatearMoneda(variante.precio, cuenta.siteId)} — Stock {formatearNumero(variante.stock, datosSitioMl(cuenta.siteId).idioma)}
+                          {variante.nombre} — SKU <SkuCopiable sku={variante.sku} comoSpan /> — {formatearMoneda(variante.precio, cuenta.siteId)} — Stock {formatearNumero(variante.stock, datosSitioMl(cuenta.siteId).idioma)}
                         </label>
                       ))}
                       <p className={styles.avisoVariantes}>El comportamiento real con variantes se confirmará contra la API de Mercado Libre — acá es solo una maqueta.</p>
@@ -238,7 +239,7 @@ export function PaginaPromocionesPrueba() {
           <div className={styles.panelModal}>
             <p className={styles.tituloModal}>Confirma los detalles de la promoción</p>
             <p className={styles.resumenProducto}>
-              {seleccion.publicacion.titulo} — SKU {seleccion.publicacion.sku}
+              {seleccion.publicacion.titulo} — SKU <SkuCopiable sku={seleccion.publicacion.sku} />
             </p>
             <p className={styles.filaDato}>
               <span>Promoción</span>

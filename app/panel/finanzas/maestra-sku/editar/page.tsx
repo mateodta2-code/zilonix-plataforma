@@ -11,6 +11,7 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import styles from "../../finanzas.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #128 — editar (o crear) una fila de la tabla maestra. ?sku=
 // solo sirve para buscar la fila de ESTA empresa; un SKU que no está
@@ -42,7 +43,7 @@ export default async function EditarMaestraPage({ searchParams }: { searchParams
               {fila ? (
                 <>
                   <input type="hidden" name="sku" value={fila.skuCodigo} />
-                  <strong>{fila.skuCodigo}</strong>
+                  <strong><SkuCopiable sku={fila.skuCodigo} /></strong>
                 </>
               ) : (
                 <input name="sku" required maxLength={120} className="zx-control" />

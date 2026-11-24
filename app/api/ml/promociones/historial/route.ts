@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lt, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, lt, or, sql, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, promocionesAcciones, usuarios } from "@/db/schema";
@@ -40,8 +40,8 @@ export async function GET(request: Request) {
   if (searchParams.get("hasta") && !hasta) return NextResponse.json({ error: "hasta inválido (AAAA-MM-DD)." }, { status: 400 });
   const pagina = Math.max(1, Math.floor(Number(searchParams.get("pagina"))) || 1);
 
-  const filas = await dbComoEmpresa(empresa.id, (tx) => {
-    const condiciones: SQL[] = [eq(promocionesAcciones.empresaId, empresa.id)];
+  const condicionesFiltro = (empresaId: string): SQL[] => {
+    const condiciones: SQL[] = [eq(promocionesAcciones.empresaId, empresaId)];
     if (cuentaId) condiciones.push(eq(promocionesAcciones.cuentaMlId, cuentaId));
     if (estado) condiciones.push(eq(promocionesAcciones.estado, estado as (typeof ESTADOS)[number]));
     if (accion) condiciones.push(eq(promocionesAcciones.accion, accion as (typeof ACCIONES)[number]));
@@ -50,6 +50,51 @@ export async function GET(request: Request) {
     // Rango por día calendario de Colombia (UTC-5, sin horario de verano).
     if (desde) condiciones.push(gte(promocionesAcciones.creadoTs, new Date(`${desde}T00:00:00-05:00`)));
     if (hasta) condiciones.push(lt(promocionesAcciones.creadoTs, new Date(new Date(`${hasta}T00:00:00-05:00`).getTime() + 86_400_000)));
+    return condiciones;
+  };
+
+  // Promo-E — clave de tanda: el lote guardado en resultado_ml, o el id de la
+  // fila para lo anterior sin lote (cada una su propia tanda).
+  const claveTanda = sql<string>`coalesce(${promocionesAcciones.resultadoMl}->>'lote', ${promocionesAcciones.id}::text)`;
+  const fechaTanda = sql`min(coalesce(${promocionesAcciones.ejecutadoTs}, ${promocionesAcciones.creadoTs}))`;
+  const loteCrudo = searchParams.get("lote");
+  if (loteCrudo && !PATRON_UUID.test(loteCrudo)) return NextResponse.json({ error: "lote inválido." }, { status: 400 });
+
+  if (searchParams.get("vista") === "tandas" && !loteCrudo) {
+    const tandas = await dbComoEmpresa(empresa.id, (tx) =>
+      tx
+        .select({
+          clave: claveTanda,
+          total: sql<number>`count(*)`.mapWith(Number),
+          participo: sql<number>`count(*) filter (where ${promocionesAcciones.estado} = 'ejecutada' and ${promocionesAcciones.accion} = 'participar')`.mapWith(Number),
+          modifico: sql<number>`count(*) filter (where ${promocionesAcciones.estado} = 'ejecutada' and ${promocionesAcciones.accion} = 'modificar')`.mapWith(Number),
+          salio: sql<number>`count(*) filter (where ${promocionesAcciones.estado} = 'ejecutada' and ${promocionesAcciones.accion} = 'salir')`.mapWith(Number),
+          conError: sql<number>`count(*) filter (where ${promocionesAcciones.estado} = 'fallida')`.mapWith(Number),
+          noApi: sql<number>`count(*) filter (where ${promocionesAcciones.estado} = 'rechazada' and ${promocionesAcciones.resultadoMl}->>'regla' = 'salir')`.mapWith(Number),
+          omitidas: sql<number>`count(*) filter (where ${promocionesAcciones.estado} = 'rechazada' and coalesce(${promocionesAcciones.resultadoMl}->>'regla', '') <> 'salir')`.mapWith(Number),
+          simulada: sql<boolean>`bool_or(${promocionesAcciones.modoSimulacion})`,
+          regla: sql<string | null>`max(${promocionesAcciones.resultadoMl}->>'regla')`,
+          usuarioNombre: sql<string | null>`max(coalesce(${usuarios.nombre}, ${usuarios.email}))`,
+          cuentaMlId: sql<string>`min(${promocionesAcciones.cuentaMlId}::text)`,
+          nicknameCuenta: sql<string>`min(${cuentasMl.nickname})`,
+          fecha: sql<string>`${fechaTanda}`,
+        })
+        .from(promocionesAcciones)
+        .innerJoin(cuentasMl, eq(cuentasMl.id, promocionesAcciones.cuentaMlId))
+        .leftJoin(usuarios, eq(usuarios.id, promocionesAcciones.ejecutadoPor))
+        .where(and(...condicionesFiltro(empresa.id)))
+        .groupBy(claveTanda)
+        .orderBy(desc(fechaTanda))
+        .limit(TAMANO_PAGINA + 1)
+        .offset((pagina - 1) * TAMANO_PAGINA)
+    );
+    return NextResponse.json({ tandas: tandas.slice(0, TAMANO_PAGINA), pagina, tamanoPagina: TAMANO_PAGINA, hayMas: tandas.length > TAMANO_PAGINA });
+  }
+
+  const filas = await dbComoEmpresa(empresa.id, (tx) => {
+    const condiciones = condicionesFiltro(empresa.id);
+    // Las filas de UNA tanda (al desplegar): el lote, o la fila suelta sin lote.
+    if (loteCrudo) condiciones.push(or(sql`${promocionesAcciones.resultadoMl}->>'lote' = ${loteCrudo}`, sql`${promocionesAcciones.id}::text = ${loteCrudo}`) as SQL);
     return tx
       .select({
         id: promocionesAcciones.id,

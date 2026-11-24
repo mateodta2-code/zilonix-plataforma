@@ -11,7 +11,8 @@ import { respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolverSesionYEmpres
 // máximo % a cargo del vendedor, c. tabla maestra de SKU) + d. "salir-todas"
 // (dejar de participar en todas, con vista previa y confirmación).
 // Decisión de Mateo: "todas" NO aplica piso (puede vender bajo el costo);
-// solo "tabla-maestra" y "maximo" respetan el piso de costos_sku — ver
+// solo "tabla-maestra" respeta el piso de costos_sku (Promo-F: "maximo" solo
+// aplica su tope de %) — ver
 // lib/ml/promocionesPublicaciones.ts (cumpleRegla). Escribe de verdad
 // contra Mercado Libre — permiso "ejecutar".
 type Cuerpo = { seleccion?: unknown; regla?: unknown; maximoPct?: unknown; vistaPrevia?: unknown; confirmado?: unknown };
@@ -67,8 +68,8 @@ export async function POST(request: Request) {
 
   let reglaAplicable: ReglaAplicable;
   if (regla === "maximo") {
-    if (typeof maximoPct !== "number" || !Number.isFinite(maximoPct) || maximoPct <= 0 || maximoPct > 100) {
-      return NextResponse.json({ error: "El máximo de descuento tiene que ser un porcentaje entre 1 y 100." }, { status: 400 });
+    if (typeof maximoPct !== "number" || !Number.isFinite(maximoPct) || maximoPct < 1 || maximoPct > 80) {
+      return NextResponse.json({ error: "El máximo de descuento tiene que ser un porcentaje entre 1 y 80." }, { status: 400 });
     }
     reglaAplicable = { tipo: "maximo", maximoPct };
   } else {

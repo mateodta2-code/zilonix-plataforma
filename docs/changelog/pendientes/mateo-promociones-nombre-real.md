@@ -1,0 +1,1 @@
+- Promociones: cada promoción de la fila muestra el nombre real de Mercado Libre (ej. «11/11 Black Friday»), sus fechas («5 nov – 2 dic») y el estado en español (Activa, Programada, Disponible, Finalizada). Si ML no da nombre se muestra el tipo legible; «Descuento de precio» ahora se llama «Descuento por porcentaje». Solo lectura, sin migración.

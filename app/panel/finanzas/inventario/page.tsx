@@ -14,6 +14,7 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import styles from "../finanzas.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 const ETIQUETA_UBICACION: Record<Ubicacion, string> = Object.fromEntries(UBICACIONES.map((u) => [u.valor, u.etiqueta])) as Record<Ubicacion, string>;
 
@@ -162,7 +163,7 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
           {filas.map((l) => (
             <FilaTabla key={`${l.skuId}:${l.bodegaId}`}>
               <CeldaTabla>
-                <strong>{l.codigo}</strong>
+                <strong><SkuCopiable sku={l.codigo} /></strong>
               </CeldaTabla>
               <CeldaTabla>{l.nombre}</CeldaTabla>
               <CeldaTabla>
@@ -224,7 +225,7 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
             <FilaTabla key={`${l.ordenNumero}:${l.skuId}`}>
               <CeldaTabla>OC #{l.ordenNumero}</CeldaTabla>
               <CeldaTabla>
-                <strong>{l.codigo}</strong>
+                <strong><SkuCopiable sku={l.codigo} /></strong>
               </CeldaTabla>
               <CeldaTabla>{l.nombre}</CeldaTabla>
               <CeldaTabla>{l.unidades}</CeldaTabla>

@@ -12,6 +12,7 @@ import { SinAcceso } from "@/components/marco/SinAcceso";
 import { ETIQUETA_AVISO, ETIQUETA_CAMPO, ETIQUETA_FORMA, ETIQUETA_ORIGEN, fechaHoraBogota, mostrarPorcentaje } from "@/components/finanzas/formato";
 import estilos from "@/components/finanzas/ventasUtilidad.module.css";
 import styles from "../../finanzas.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 function Origen({ valor }: { valor: ValorConcepto }) {
   return (
@@ -152,7 +153,7 @@ export default async function DetalleVentaUtilidadPage({ params }: { params: { p
                     ) : null}
                   </CeldaTabla>
                   <CeldaTabla>
-                    {dato?.titulo ?? `Línea ${l.linea}`} <span className={styles.suave}>[{dato?.skuCodigo ?? "sin SKU"}]</span>
+                    {dato?.titulo ?? `Línea ${l.linea}`} <span className={styles.suave}>[{dato?.skuCodigo ? <SkuCopiable sku={dato.skuCodigo} /> : "sin SKU"}]</span>
                   </CeldaTabla>
                   <CeldaTabla className={estilos.numero}>{l.cantidad}</CeldaTabla>
                   <CeldaTabla className={estilos.numero}>{mostrarMonto(l.valor_venta)}</CeldaTabla>
