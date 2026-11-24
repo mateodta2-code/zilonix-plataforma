@@ -7,6 +7,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Chip } from "@/components/marco/Chip";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import type { Cuenta } from "./CuentasDestino";
+import { ErrorPublicacion } from "./ErrorPublicacion";
 import { borrarProductoAction } from "./actions";
 import {
   detalleCuentasProducto,
@@ -99,7 +100,7 @@ function DetalleCuentaFila({ fila }: { fila: FilaDetalleCuenta }) {
       <strong>{fila.nickname}</strong>
       {fila.subEtiqueta && <span style={{ opacity: 0.7 }}>({fila.subEtiqueta})</span>}
       {fila.error ? (
-        <span style={{ color: "var(--peligro-texto)" }}>{fila.error}</span>
+        <ErrorPublicacion error={fila.error} />
       ) : (
         <>
           <span>{etiquetaPublicacionCuenta(estadoReal.status)}</span>

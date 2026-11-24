@@ -49,6 +49,7 @@ import {
   type VariantesProducto,
 } from "@/lib/ml/publicar-tipos";
 import { datosSitioMl } from "@/lib/ml/sitios";
+import { textoErrorParaGuardar } from "@/lib/ml/publicar-errores-validacion";
 
 // Tarea 2.11 ("Publicar producto y clip") — orquestación real contra la
 // API de Mercado Libre. Cada paso numerado abajo corresponde 1:1 a la
@@ -541,7 +542,7 @@ async function publicarFamiliaUserProducts(
       const error =
         r.status === 0
           ? "Mercado Libre no respondió a tiempo; revisá en Mercado Libre si la publicación se creó antes de reintentar."
-          : r.textoCrudo.slice(0, 2000);
+          : textoErrorParaGuardar(r.textoCrudo);
       items.push({ valores: c.valores, sku: c.sku, ok: false, error });
       continue;
     }
@@ -715,7 +716,7 @@ export async function publicarProductoEnCuenta(
       ? "Faltan las dimensiones del paquete (peso, largo, ancho y/o alto) — Mercado Libre las exige para calcular el envío. Complétalas en el formulario y vuelve a intentar."
       : r.status === 0
         ? "Mercado Libre no respondió a tiempo; revisá en Mercado Libre si la publicación se creó antes de reintentar."
-        : r.textoCrudo.slice(0, 2000);
+        : textoErrorParaGuardar(r.textoCrudo);
     return { cuentaMlId: cuenta.id, ok: false, categoria: categoryName, error: errorFinal, bodyEnviado: body };
   }
 
