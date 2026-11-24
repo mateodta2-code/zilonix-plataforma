@@ -59,6 +59,10 @@ export type PromocionParaUi = {
   // null = ninguna la afecta. La pantalla solo lo muestra con
   // «tabla-maestra» elegida.
   reglaAdicionalMotivo: string | null;
+  // Nombre real y fechas de Mercado Libre (null = no vino; nunca se inventa).
+  nombreMl: string | null;
+  fechaInicioMl: string | null;
+  fechaFinMl: string | null;
 };
 
 export type PublicacionConEstado = {
@@ -77,7 +81,7 @@ export type PublicacionConEstado = {
   motivoError: string | null;
 };
 
-function promocionParaUi(c: CandidatoCalculado, reglaAdicionalMotivo: string | null = null): PromocionParaUi {
+function promocionParaUi(c: CandidatoCalculado, reglaAdicionalMotivo: string | null = null, nombreRespaldo: string | null = null): PromocionParaUi {
   return {
     tipoPromocion: c.tipoPromocion,
     promotionIdMl: c.promotionIdMl,
@@ -95,6 +99,9 @@ function promocionParaUi(c: CandidatoCalculado, reglaAdicionalMotivo: string | n
     accionSugerida: c.accionSugerida,
     motivoRevisarManual: c.motivoRevisarManual,
     reglaAdicionalMotivo,
+    nombreMl: c.nombreMl ?? nombreRespaldo,
+    fechaInicioMl: c.fechaInicioMl,
+    fechaFinMl: c.fechaFinMl,
   };
 }
 
@@ -228,7 +235,14 @@ export async function leerPublicacionConEstado(
     const c = calculadas[i];
     // Solo tiene sentido evaluar lo que el motor (con piso) dejaría hacer.
     const evaluacion = c.accionSugerida ? await evaluarCandidatoConReglas(c, resultadoPromos.promociones[i], reglasAdicionales, token, cacheNombres) : null;
-    promociones.push(promocionParaUi(c, evaluacion?.motivoVisible ?? null));
+    // Respaldo del nombre: una llamada por campaña distinta (caché del
+    // listado); PRICE_DISCOUNT nunca trae nombre y no se consulta. Un
+    // fallo (incluido el límite de ML) deja null — nunca se adivina.
+    let nombreRespaldo: string | null = null;
+    if (!c.nombreMl && c.promotionIdMl && c.tipoPromocion !== "PRICE_DISCOUNT") {
+      nombreRespaldo = await nombreSeguro(resultadoPromos.promociones[i], token, cacheNombres);
+    }
+    promociones.push(promocionParaUi(c, evaluacion?.motivoVisible ?? null, nombreRespaldo));
   }
   return { ...comun, estado: estaParticipando ? "en_promocion" : "sin_promocion", promociones, motivoError: null };
 }

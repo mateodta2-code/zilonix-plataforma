@@ -30,6 +30,9 @@ function candidato(overrides: Partial<CandidatoCalculado> = {}): CandidatoCalcul
     cumpleReglas: true,
     accionSugerida: "participar",
     motivoRevisarManual: null,
+    nombreMl: null,
+    fechaInicioMl: null,
+    fechaFinMl: null,
     ...overrides,
   };
 }

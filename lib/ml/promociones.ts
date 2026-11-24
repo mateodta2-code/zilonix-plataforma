@@ -201,7 +201,16 @@ export type CandidatoCalculado = {
   // bloqueado — ver motivoRevisarManual para el porqué).
   accionSugerida: "participar" | "modificar" | null;
   motivoRevisarManual: string | null;
+  // Nombre real y fechas tal como las manda Mercado Libre (null = no vino;
+  // nunca se inventa). PRICE_DISCOUNT no trae nombre.
+  nombreMl: string | null;
+  fechaInicioMl: string | null;
+  fechaFinMl: string | null;
 };
+
+function textoNoVacioOrNull(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v : null;
+}
 
 function precioFinal(promo: PromocionCrudaMl): number | null {
   if (Number(promo.price) > 0) return Number(promo.price);
@@ -379,6 +388,9 @@ export function calcularCandidatosItem(
       cumpleReglas: false,
       accionSugerida: null,
       motivoRevisarManual: null,
+      nombreMl: textoNoVacioOrNull(promo.name),
+      fechaInicioMl: textoNoVacioOrNull(promo.start_date),
+      fechaFinMl: textoNoVacioOrNull(promo.finish_date),
     };
 
     // 1) Variantes — SIEMPRE a mano, sin importar el tipo ni el estado
