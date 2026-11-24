@@ -4,6 +4,7 @@ import { costosSku, cuentasFalabella, movimientosMarketplace, pedidosFalabella, 
 import { requierePermiso } from "@/lib/permisos";
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import { codigosParaMaestra } from "./combo-sku";
+import { esProveedorDirecto } from "./envio-falabella";
 import {
   calcularUtilidadFalabella,
   construirMaestraFalabella,
@@ -46,12 +47,18 @@ export function parsearItemsApiFalabella(items: unknown): ItemApiFalabella[] {
     const item = crudo as Record<string, unknown>;
     const estado = (texto(item.Status) ?? "").toLowerCase();
     if (ESTADOS_QUE_NO_SON_VENTA.includes(estado)) continue;
-    const proveedor = `${texto(item.ShipmentProvider) ?? ""} ${texto(item.ShippingProviderType) ?? ""}`.toLowerCase();
+    // Campos de envío tal cual: la regla vive en clasificarEnvioFalabella.
+    const envio = {
+      tipoEnvio: texto(item.ShippingType),
+      proveedor: texto(item.ShipmentProvider),
+      tipoProveedor: texto(item.ShippingProviderType),
+    };
     salida.push({
       sku: texto(item.Sku),
       nombre: texto(item.Name),
       precio: texto(item.ItemPrice) ?? texto(item.PaidPrice) ?? "0.00",
-      envioPropio: proveedor.includes("ibisdirecto") || proveedor.includes("directo"),
+      ...envio,
+      envioPropio: esProveedorDirecto(envio),
     });
   }
   return salida;
