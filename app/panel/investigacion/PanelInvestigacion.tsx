@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Chip } from "@/components/marco/Chip";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { InsigniaExtension } from "@/components/marco/InsigniaExtension";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
@@ -206,6 +207,8 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
   const [cargado, setCargado] = useState(false);
 
   const [escaneoEnCurso, setEscaneoEnCurso] = useState(false);
+  // Para mostrar «completa» ~4 s cuando termina un escaneo (ML o secundaria).
+  const [escaneoTermino, setEscaneoTermino] = useState(false);
   const [queriesUsadas, setQueriesUsadas] = useState<string[]>([]);
   const [escaneoPlataformaEnCurso, setEscaneoPlataformaEnCurso] = useState<string | null>(null);
   const [captchaPlataforma, setCaptchaPlataforma] = useState<string | null>(null);
@@ -604,6 +607,16 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
     return lista;
   }, [bloques, yaTieneBloqueMl]);
 
+  const escaneoActivo = algoEnCurso;
+  const nombrePlataformaEnCurso = plataformasPendientes.find((x) => x.tipo === escaneoPlataformaEnCurso)?.nombre ?? escaneoPlataformaEnCurso ?? "";
+  // Al pasar de «en curso» a terminado, la barra muestra «completa» (se oculta sola en ~4 s).
+  const estabaActivo = useRef(false);
+  useEffect(() => {
+    if (estabaActivo.current && !escaneoActivo) setEscaneoTermino(true);
+    if (escaneoActivo) setEscaneoTermino(false);
+    estabaActivo.current = escaneoActivo;
+  }, [escaneoActivo]);
+
   function analizarSecundaria(tipo: PlataformaAnalizar) {
     if (tipo === "ml") {
       void escanearMercadoLibre(PAIS_ML_SECUNDARIO);
@@ -829,11 +842,16 @@ export function PanelInvestigacion({ termino, tab }: { termino: string; tab: "de
         </div>
       ))}
 
-      {escaneoEnCurso ? (
-        <div className={styles.insignia}>
-          <Chip estado="aviso">Escaneando Mercado Libre…</Chip>
-          <span className={styles.notaInsignia}>La extensión está abriendo y cerrando el listado real — no cierres esta pestaña, ya vuelve sola.</span>
-        </div>
+      <BarraCarga
+        estado={escaneoActivo ? "cargando" : escaneoTermino ? "completa" : "inactiva"}
+        titulo={escaneoPlataformaEnCurso ? `Analizando ${nombrePlataformaEnCurso}…` : "Escaneando Mercado Libre…"}
+        avance={null}
+        textoCompleta="Análisis completo"
+        ariaLabel="Progreso del escaneo"
+        sticky={false}
+      />
+      {escaneoActivo ? (
+        <p className={styles.notaInsignia}>La extensión está abriendo y cerrando el listado real — no cierres esta pestaña, ya vuelve sola.</p>
       ) : null}
 
       {queriesUsadas.length > 1 ? (

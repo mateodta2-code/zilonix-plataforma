@@ -1,0 +1,1 @@
+- Optimización, Investigación y Finanzas (Traer ventas del mes y Recálculo de costos) usan la barra azul de carga: avance real «N de M publicaciones» en Optimización y banda animada en el resto. Sin llamadas nuevas. Refs #619.
