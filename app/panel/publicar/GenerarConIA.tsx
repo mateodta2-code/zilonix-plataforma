@@ -28,7 +28,7 @@ const ESPERA_COLA_MS = 4_000;
 const MAXIMO_A_LA_VEZ = 2;
 const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Publicar → zona de fotos → «Generar con IA» (PR2). Con la ficha
+// Publicar → «Crear con IA» → «2. Imágenes» (PR2). Con la ficha
 // confirmada de «Crear con IA», arma propuestas (sin costo), la persona
 // las revisa y solo «Crear» gasta. Portadas: cada una va a la foto 1 de
 // su cuenta. Contenido y Experto: «Agregar a mis fotos» las suma a la
@@ -65,7 +65,7 @@ export function GenerarConIA({
   if (!ficha) {
     return (
       <p className={styles.ayudaIA}>
-        Primero arma y confirma la ficha del producto en «Crear con IA» (más abajo). Las imágenes usan solo los datos confirmados y tus fotos reales.
+        Primero arma y confirma la ficha del producto en los pasos de arriba («1. Ficha del producto»). Las imágenes usan solo los datos confirmados y tus fotos reales.
       </p>
     );
   }
