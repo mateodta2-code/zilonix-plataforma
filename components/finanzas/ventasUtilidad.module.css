@@ -266,6 +266,21 @@
   font-size: 10.5px;
 }
 
+/* Utilidad de Falabella: nombre del producto cortado con «…» (entero en
+   el title) y el SKU debajo, suave. */
+.productoFalabella {
+  display: flex;
+  flex-direction: column;
+  max-width: 220px;
+  min-width: 0;
+}
+
+.nombreProductoFalabella {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .lineaProducto {
   display: flex;
   flex-direction: column;

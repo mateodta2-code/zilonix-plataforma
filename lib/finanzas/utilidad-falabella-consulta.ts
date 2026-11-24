@@ -1,10 +1,15 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, notInArray, or, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { costosSku, cuentasFalabella, movimientosMarketplace, pedidosFalabella, terceros } from "@/db/schema";
 import { requierePermiso } from "@/lib/permisos";
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import { codigosParaMaestra, type MaestraSku } from "./combo-sku";
-import { calcularUtilidadFalabella, type ResultadoUtilidadFalabella } from "./utilidad-falabella";
+import {
+  calcularUtilidadFalabella,
+  construirReferenciasEstimacionFalabella,
+  type ItemApiFalabella,
+  type ResultadoUtilidadFalabella,
+} from "./utilidad-falabella";
 
 // Issue #422 — lecturas para la utilidad de Falabella (Finanzas → Ventas
 // y utilidad, marketplace Falabella). Sin tablas nuevas: pedidos_falabella
@@ -19,6 +24,37 @@ const ESTADOS_QUE_NO_SON_VENTA = ["canceled", "failed"];
 
 // Tope de órdenes por consulta: el rango ya es de máximo 31 días.
 export const TOPE_ORDENES_UTILIDAD = 3000;
+
+// Historial para estimar órdenes sin reporte: los últimos 120 días de
+// cobros con Nº de orden, con tope de filas para no cargar años enteros.
+const DIAS_HISTORIAL_ESTIMACION = 120;
+const TOPE_MOVIMIENTOS_ESTIMACION = 20000;
+
+const texto = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : typeof v === "number" ? String(v) : null);
+
+// `items` es el JSONB de GetOrderItems tal como lo guarda
+// lib/falabella/pedidos.ts (ItemPrice/PaidPrice ya normalizados a
+// "78000.00"). Se lee a la defensiva: un campo que falta nunca rompe la
+// pantalla. El precio es ItemPrice (el «Precio producto» del reporte) y,
+// si no viene, PaidPrice.
+export function parsearItemsApiFalabella(items: unknown): ItemApiFalabella[] {
+  const lista = Array.isArray(items) ? items : items && typeof items === "object" ? [items] : [];
+  const salida: ItemApiFalabella[] = [];
+  for (const crudo of lista) {
+    if (!crudo || typeof crudo !== "object") continue;
+    const item = crudo as Record<string, unknown>;
+    const estado = (texto(item.Status) ?? "").toLowerCase();
+    if (ESTADOS_QUE_NO_SON_VENTA.includes(estado)) continue;
+    const proveedor = `${texto(item.ShipmentProvider) ?? ""} ${texto(item.ShippingProviderType) ?? ""}`.toLowerCase();
+    salida.push({
+      sku: texto(item.Sku),
+      nombre: texto(item.Name),
+      precio: texto(item.ItemPrice) ?? texto(item.PaidPrice) ?? "0.00",
+      envioPropio: proveedor.includes("ibisdirecto") || proveedor.includes("directo"),
+    });
+  }
+  return salida;
+}
 
 export type CuentaFalabellaSelector = { id: string; nickname: string; desconectada: boolean };
 
@@ -70,6 +106,7 @@ export async function listarUtilidadFalabella(
         cuenta: cuentasFalabella.nickname,
         fecha: p.fecha,
         moneda: p.moneda,
+        items: p.items,
       })
       .from(p)
       .innerJoin(cuentasFalabella, eq(cuentasFalabella.id, p.cuentaFalabellaId))
@@ -94,10 +131,19 @@ export async function listarUtilidadFalabella(
 
     const numeros = [...new Set(pedidos.flatMap((x) => [x.pedidoIdExterno, x.numeroOrden].filter((n): n is string => !!n)))];
     const movimientos = await tx
-      .select({ cuentaId: m.cuentaFalabellaId, numeroOrden: m.numeroOrden, sku: m.sku, categoria: m.categoria, monto: m.monto, moneda: m.moneda })
+      .select({
+        cuentaId: m.cuentaFalabellaId,
+        numeroOrden: m.numeroOrden,
+        sku: m.sku,
+        categoria: m.categoria,
+        monto: m.monto,
+        moneda: m.moneda,
+        tipoTransaccion: m.tipoTransaccion,
+      })
       .from(m)
       .where(
         and(
+          eq(m.empresaId, empresaId),
           eq(m.marketplace, "falabella"),
           filtro.cuentaId ? eq(m.cuentaFalabellaId, filtro.cuentaId) : undefined,
           moneda ? eq(m.moneda, moneda) : undefined,
@@ -116,11 +162,53 @@ export async function listarUtilidadFalabella(
     }
     const monedaFinal = moneda ?? [...monedasMovimientos][0] ?? null;
 
+    const itemsPorPedido = new Map(pedidos.map((x) => [x.id, parsearItemsApiFalabella(x.items)]));
+
+    // Historial de la misma empresa (y cuenta, si se filtró) para estimar
+    // las órdenes que todavía no tienen reporte. Del más reciente al más
+    // viejo: construirReferenciasEstimacionFalabella toma el primero de
+    // cada SKU como su último reporte.
+    const desdeHistorial = new Date(filtro.finExclusivo.getTime() - DIAS_HISTORIAL_ESTIMACION * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const historial = await tx
+      .select({
+        cuentaId: m.cuentaFalabellaId,
+        numeroOrden: m.numeroOrden,
+        sku: m.sku,
+        categoria: m.categoria,
+        monto: m.monto,
+        tipoTransaccion: m.tipoTransaccion,
+      })
+      .from(m)
+      .where(
+        and(
+          eq(m.empresaId, empresaId),
+          eq(m.marketplace, "falabella"),
+          isNotNull(m.numeroOrden),
+          inArray(m.categoria, ["precio", "comision", "envio"]),
+          gte(m.fechaTransaccion, desdeHistorial),
+          filtro.cuentaId ? eq(m.cuentaFalabellaId, filtro.cuentaId) : undefined,
+          moneda ? eq(m.moneda, moneda) : undefined
+        )
+      )
+      .orderBy(desc(m.fechaTransaccion), desc(m.numeroOrden))
+      .limit(TOPE_MOVIMIENTOS_ESTIMACION);
+    const referenciasEstimacion = construirReferenciasEstimacionFalabella(
+      historial
+        .filter((mov): mov is typeof mov & { cuentaId: string } => mov.cuentaId !== null)
+        .map((mov) => ({ ...mov, cuentaId: mov.cuentaId }))
+    );
+
+    // SKU del reporte y de los ítems de la API (para costear las órdenes
+    // que todavía no tienen reporte).
     const skus = new Set<string>();
-    for (const mov of movimientos) {
-      if (mov.categoria !== "precio" || !mov.sku) continue;
+    const skusCrudos = [
+      ...movimientos.filter((mov) => mov.categoria === "precio").map((mov) => mov.sku),
+      ...[...itemsPorPedido.values()].flat().map((i) => i.sku),
+    ];
+    for (const sku of skusCrudos) {
+      if (!sku) continue;
       try {
-        skus.add(normalizarSkuCodigo(mov.sku));
+        skus.add(normalizarSkuCodigo(sku));
       } catch {
         // SKU vacío: queda como «Falta costo» en el motor.
       }
@@ -156,11 +244,20 @@ export async function listarUtilidadFalabella(
         cuenta: x.cuenta,
         fecha: x.fecha,
         moneda: x.moneda,
+        itemsApi: itemsPorPedido.get(x.id) ?? [],
       })),
       movimientos: movimientos
         .filter((mov): mov is typeof mov & { cuentaId: string } => mov.cuentaId !== null)
-        .map((mov) => ({ cuentaId: mov.cuentaId, numeroOrden: mov.numeroOrden, sku: mov.sku, categoria: mov.categoria, monto: mov.monto })),
+        .map((mov) => ({
+          cuentaId: mov.cuentaId,
+          numeroOrden: mov.numeroOrden,
+          sku: mov.sku,
+          categoria: mov.categoria,
+          monto: mov.monto,
+          tipoTransaccion: mov.tipoTransaccion,
+        })),
       maestra,
+      referenciasEstimacion,
     });
     return { ok: true, moneda: monedaFinal, resultado, recortado };
   });
