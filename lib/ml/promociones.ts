@@ -1,4 +1,6 @@
 import { inArray } from "drizzle-orm";
+import { codigosParaMaestra, parsearComboSku, resolverCostoSku, type MaestraSku } from "@/lib/finanzas/combo-sku";
+import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { costosSku, promocionesReglas } from "@/db/schema";
 import { leerItemParaPromocionMl, leerPromocionesItemMl, listarItemsActivosMl, type PromocionCrudaMl } from "@/lib/ml/cliente";
@@ -143,12 +145,39 @@ export type PisoYCostoFrescos = { precioMinimo: number | null; costo: number | n
 export async function leerPisosYCostosFrescos(empresaId: string, skuCodigos: string[]): Promise<Map<string, PisoYCostoFrescos>> {
   const mapa = new Map<string, PisoYCostoFrescos>();
   if (skuCodigos.length === 0) return mapa;
-  const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(costosSku).where(inArray(costosSku.skuCodigo, skuCodigos)));
-  for (const fila of filas) {
-    mapa.set(fila.skuCodigo, {
-      precioMinimo: fila.precioMinimoUnidad != null ? Number(fila.precioMinimoUnidad) : null,
-      costo: fila.costo != null ? Number(fila.costo) : null,
-    });
+  // Mismo criterio que Finanzas (trim + mayúsculas): el SKU de la publicación
+  // puede venir en minúsculas y la maestra siempre guarda la llave normalizada.
+  const normalizados = new Map<string, string>();
+  for (const original of skuCodigos) {
+    try {
+      normalizados.set(original, normalizarSkuCodigo(original));
+    } catch {
+      // SKU vacío: sin piso ni costo, igual que sin SKU.
+    }
+  }
+  if (normalizados.size === 0) return mapa;
+  // Cada SKU y, si es combo X2/X3, su base — una sola regla (combo-sku.ts).
+  const codigos = codigosParaMaestra([...normalizados.values()]);
+  const filas = await dbComoEmpresa(empresaId, (tx) => tx.select().from(costosSku).where(inArray(costosSku.skuCodigo, codigos)));
+  const porCodigo = new Map(filas.map((f) => [f.skuCodigo, f]));
+  const maestra = new Map<string, MaestraSku>(
+    filas.map((f) => [f.skuCodigo, { costo: f.costo ?? null, empaque: null, empaqueProveedor: null, envioAgencia: null }]),
+  );
+  for (const [original, sku] of normalizados) {
+    const exacta = porCodigo.get(sku);
+    const combo = parsearComboSku(sku);
+    const base = combo ? porCodigo.get(combo.base) : undefined;
+    if (!exacta && !base) continue; // sin fila en costos_sku: nunca se inventa una
+    // Piso: el de la fila exacta gana; si no, el mínimo combo de la base.
+    let precioMinimo: number | null = null;
+    if (exacta?.precioMinimoUnidad != null) {
+      precioMinimo = Number(exacta.precioMinimoUnidad);
+    } else if (combo && base) {
+      const minCombo = combo.multiplicador === 2 ? base.precioMinimoComboX2 : base.precioMinimoComboX3;
+      if (minCombo != null) precioMinimo = Number(minCombo);
+    }
+    const { costoUnitario } = resolverCostoSku(sku, maestra);
+    mapa.set(original, { precioMinimo, costo: costoUnitario != null ? Number(costoUnitario) : null });
   }
   return mapa;
 }
