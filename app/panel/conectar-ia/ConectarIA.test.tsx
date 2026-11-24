@@ -107,4 +107,15 @@ describe("ConectarIA (pantalla)", () => {
       expect(container.querySelector('input[placeholder^="ej."]')).toBeTruthy();
     });
   });
+  it("Eliminar no llama al servidor hasta escribir el nombre exacto", () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ConectarIA conexiones={[c(0), c(1)]} puedeModificar />);
+    fireEvent.click(screen.getAllByText("Eliminar")[1]);
+    fireEvent.click(screen.getByText("Continuar"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "IA 1" } });
+    fireEvent.click(screen.getByText("Eliminar definitivamente"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/configuracion/ia-conexion/id-1", expect.objectContaining({ method: "DELETE" }));
+  });
 });

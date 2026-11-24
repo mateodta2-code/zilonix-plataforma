@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
@@ -10,10 +9,12 @@ import { DIAS_HACIA_ATRAS, describirErrorImportacion, obtenerUltimaImportacion }
 import { datosSitioMl } from "@/lib/ml/sitios";
 import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
 import { contarPedidosPorCuenta as contarPedidosFalabella, TOPE_ORDENES as TOPE_ORDENES_FALABELLA } from "@/lib/falabella/pedidos";
+import { desconectarCuentaAction } from "./[cuentaId]/desconectar/actions";
 import { conectarCuentaFalabella, desconectarCuentaFalabella, sincronizarPedidosFalabella } from "./actions";
 import { BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
+import { ConfirmacionDoble } from "@/components/marco/ConfirmacionDoble";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
@@ -183,10 +184,15 @@ export default async function ConectarMlPage({
                     Conectado como <strong>{cuenta.nickname}</strong>
                     {cuenta.desconectadaTs && <Chip>Desconectada</Chip>}
                   </span>
-                  {!cuenta.desconectadaTs && (
-                    <Link href={`/panel/conectar-ml/${cuenta.id}/desconectar`} className={clasesBoton("peligro")}>
-                      Desconectar
-                    </Link>
+                  {!cuenta.desconectadaTs && puedeDesconectar && (
+                    <ConfirmacionDoble
+                      textoDisparador="Desconectar"
+                      titulo={`¿Desconectar la cuenta ${cuenta.nickname}?`}
+                      descripcion="Se dejarán de sincronizar pedidos, despachos y promociones. Lo ya importado no se borra."
+                      nombreEsperado={cuenta.nickname}
+                      textoConfirmar="Desconectar definitivamente"
+                      onConfirmar={desconectarCuentaAction.bind(null, cuenta.id)}
+                    />
                   )}
                 </div>
                 <div className={styles.detalleSitio}>
@@ -264,11 +270,14 @@ export default async function ConectarMlPage({
                     {cuenta.desconectadaTs && <Chip>Desconectada</Chip>}
                   </span>
                   {!cuenta.desconectadaTs && puedeDesconectar && (
-                    <form action={desconectarCuentaFalabella.bind(null, cuenta.id)}>
-                      <button type="submit" className={clasesBoton("peligro")}>
-                        Desconectar
-                      </button>
-                    </form>
+                    <ConfirmacionDoble
+                      textoDisparador="Desconectar"
+                      titulo={`¿Desconectar la cuenta ${cuenta.nickname}?`}
+                      descripcion="Se dejarán de sincronizar pedidos de Falabella. Lo ya importado no se borra."
+                      nombreEsperado={cuenta.nickname}
+                      textoConfirmar="Desconectar definitivamente"
+                      onConfirmar={desconectarCuentaFalabella.bind(null, cuenta.id)}
+                    />
                   )}
                 </div>
                 {!cuenta.desconectadaTs && puedeConectar && (
