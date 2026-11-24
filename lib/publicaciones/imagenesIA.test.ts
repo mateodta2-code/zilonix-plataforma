@@ -7,10 +7,10 @@ import { faltaParaCrearImagen, leerPropuestaPortada, leerPropuestaTextos, prompt
 const DATOS = datosProductoDesdeFicha(leerFicha({ nombre: { valor: "Termo 1 L", origen: "vendedor" }, incluye: { valor: ["Tapa"], origen: "foto" } }), "MLA");
 
 describe("de la propuesta guardada al prompt", () => {
-  it("portada: el texto de Mateo con la cuenta y la composición de esa cuenta", () => {
+  it("portada: el texto de Mateo con su número y su composición", () => {
     const p = promptDeImagen("zilonix_portadas", "portada", { cuentaMlId: "c1", indice: 1, cantidad: 2, asignacion: { composicion: 3, escena: 1 } }, DATOS);
     expect(p).toContain(TEXTO_ORIGINAL_PORTADAS);
-    expect(p).toContain("la de la cuenta 1 de 2");
+    expect(p).toContain("la número 1 de 2");
     expect(p).toContain("País: Argentina");
   });
 

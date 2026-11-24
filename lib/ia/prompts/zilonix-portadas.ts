@@ -15,7 +15,7 @@ export function promptZilonixPortada(datos: DatosProducto, cuenta: { indice: num
   const escena = ESCENAS_USO[cuenta.asignacion.escena % ESCENAS_USO.length];
   const ajustes = [
     "AJUSTES DE ZILONIX SELLER (tienen prioridad sobre lo anterior):",
-    `1. Genera UNA sola portada: la de la cuenta ${cuenta.indice} de ${cuenta.cantidad}; ignora la cantidad que diga el texto anterior.`,
+    `1. Genera UNA sola portada: la número ${cuenta.indice} de ${cuenta.cantidad}; ignora la cantidad que diga el texto anterior.`,
     `2. Composición de esta portada: ${composicion} Escena de uso: ${escena}.`,
     "3. Formato cuadrado 1:1. La salida final se lleva a 500 × 500 px.",
     `4. Idioma de cualquier elemento visual: ${datos.idioma}. País: ${datos.nombrePais}.`,

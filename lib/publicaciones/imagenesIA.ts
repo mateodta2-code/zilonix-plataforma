@@ -16,6 +16,8 @@ import { promptZilonixPortada } from "@/lib/ia/prompts/zilonix-portadas";
 export const TIPO_PORTADA = "portada";
 export const TIPO_FOTO_PRINCIPAL = "foto_principal";
 
+// cuentaMlId: llave de la composición asignada. Desde el 23-nov es
+// «portada-N» (1 o 2 portadas en total); antes era el id de la cuenta.
 export type PropuestaPortada = { cuentaMlId: string; indice: number; cantidad: number; asignacion: Asignacion };
 export type PropuestaTextos = { titulo: string; copy: string[]; composicion?: ComposicionContenido };
 

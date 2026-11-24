@@ -39,7 +39,7 @@ describe("textos de Mateo, tal cual", () => {
     const p = promptZilonixPortada(DATOS, { indice: 2, cantidad: 3, asignacion: { composicion: 1, escena: 0 } });
     expect(p).toContain(TEXTO_ORIGINAL_PORTADAS);
     expect(p.indexOf("AJUSTES DE ZILONIX SELLER")).toBeGreaterThan(p.indexOf(TEXTO_ORIGINAL_PORTADAS));
-    expect(p).toContain("la de la cuenta 2 de 3");
+    expect(p).toContain("la número 2 de 3");
     expect(p).toContain("500 × 500");
     expect(p).toContain("Idioma de cualquier elemento visual: es-MX. País: México.");
   });
