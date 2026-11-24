@@ -8,6 +8,7 @@ import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import styles from "./page.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 export function ImportarCsvSkusClient() {
   const [estado, setEstado] = useState<EstadoImportacion>({ paso: "inicial" });
@@ -90,7 +91,7 @@ export function ImportarCsvSkusClient() {
               {filas.map((fila) => (
                 <FilaTabla key={fila.sku}>
                   <CeldaTabla>
-                    <strong>{fila.sku}</strong>
+                    <strong><SkuCopiable sku={fila.sku} /></strong>
                   </CeldaTabla>
                   <CeldaTabla>{fila.nombre ?? <span className={styles.vacioCelda}>— (usa el código)</span>}</CeldaTabla>
                   <CeldaTabla>{fila.bodega ?? "—"}</CeldaTabla>

@@ -10,6 +10,7 @@ import { conversion, rotuloCompetencia, rotuloEstadoPublicacion, rotuloTipoPubli
 import { cambiarEstadoPublicacionAction, metricasPublicacionesAction, type MetricasPublicacion } from "./actions";
 import { DesgloseCompetencia } from "./DesgloseCompetencia";
 import styles from "./page.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 export type FilaTablaOptimizacion = {
   id: string;
@@ -153,7 +154,7 @@ export function TablaOptimizacion({
                       ) : (
                         <span>{fila.titulo ?? fila.id}</span>
                       )}
-                      <span className={styles.notaNeutra}>{[fila.id, fila.sku ? `SKU ${fila.sku}` : "Sin SKU"].join(" · ")}</span>
+                      <span className={styles.notaNeutra}>{fila.id} · {fila.sku ? <SkuCopiable sku={fila.sku} prefijo="SKU " /> : "Sin SKU"}</span>
                       <Link className={styles.verDetalle} href={`/panel/optimizacion/${fila.id}?cuenta=${cuentaMlId}`}>
                         Ver detalle →
                       </Link>

@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Boton } from "@/components/marco/Boton";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
-import { CopiarTexto } from "@/components/marco/CopiarTexto";
 import { FotoConZoom } from "@/components/marco/FotoConZoom";
 import { urlFotoGrandeMl } from "@/lib/ml/imagen-ml";
 import { linkPublicacion } from "@/lib/ml/permalink";
 import type { EstadoPlazo } from "@/lib/ml/despachos";
 import { deshacerDespachadoAction, marcarDespachadoAction } from "./actions";
 import styles from "./page.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 export type ItemTarjetaDespachoProps = {
   itemIdExterno: string;
@@ -191,7 +191,7 @@ export function TarjetaDespachoCliente(props: TarjetaDespachoProps) {
                     <p className={styles.lineaDatos}>
                       Cantidad: {item.cantidad} · SKU:{" "}
                       {item.skuCodigo ? (
-                        <CopiarTexto valor={item.skuCodigo} etiquetaAria={`Copiar SKU ${item.skuCodigo}`} mensajeCopiado="SKU copiado" />
+                        <SkuCopiable sku={item.skuCodigo} />
                       ) : (
                         "—"
                       )}{" "}

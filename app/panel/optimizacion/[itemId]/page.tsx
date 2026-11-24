@@ -34,6 +34,7 @@ import styles from "../page.module.css";
 import { BitacoraCambios } from "./BitacoraCambios";
 import { EditarPublicacion, type DatosEdicion } from "./EditarPublicacion";
 import { DiagnosticoPublicacion } from "./DiagnosticoPublicacion";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Optimización, Fase 2 — detalle de una publicación. Ver pide
 // inventario/consultar; los costos, la ganancia y el precio mínimo,
@@ -209,7 +210,11 @@ export default async function DetalleOptimizacionPage({
     <>
       <EncabezadoPagina
         titulo={datos.item.titulo ?? datos.item.id}
-        descripcion={[datos.item.id, datos.item.sku ? `SKU ${datos.item.sku}` : "Sin SKU", cuenta.nickname, rotuloTipoPublicacion(datos.item.tipoPublicacion)].join(" · ")}
+        descripcion={
+          <>
+            {datos.item.id} · {datos.item.sku ? <SkuCopiable sku={datos.item.sku} prefijo="SKU " /> : "Sin SKU"} · {cuenta.nickname} · {rotuloTipoPublicacion(datos.item.tipoPublicacion)}
+          </>
+        }
         accion={volver}
       />
 

@@ -20,6 +20,7 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { AvisosUrl } from "@/components/inventario/Avisos";
 import styles from "./inventario.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #280 — stock por SKU y bodega (WMS Fase 1). Seller es la fuente
 // de verdad: lo que se ve acá es lo que se publica en ML (menos el
@@ -64,7 +65,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
           {alertas.map((a) => (
             <div key={a.id} className={styles.alerta}>
               <span>
-                <strong>Última unidad · {a.codigo}</strong> ({a.nombre}): quedan {a.disponibleAlCrear} para publicar. {instruccionAlerta(a.regla)}
+                <strong>Última unidad · <SkuCopiable sku={a.codigo} /></strong> ({a.nombre}): quedan {a.disponibleAlCrear} para publicar. {instruccionAlerta(a.regla)}
               </span>
               {puedeMover && (
                 <form action={resolverAlertaAction} className={styles.accionesAlerta}>
@@ -167,7 +168,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
             {resultado.filas.map((f) => (
               <FilaTabla key={f.skuId}>
                 <CeldaTabla>
-                  <strong>{f.codigo}</strong> {f.esKit && <Chip>Kit</Chip>}
+                  <strong><SkuCopiable sku={f.codigo} /></strong> {f.esKit && <Chip>Kit</Chip>}
                   <div className={styles.detalle}>{f.nombre}</div>
                 </CeldaTabla>
                 {columnas.map((b) => {
