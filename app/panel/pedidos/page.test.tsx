@@ -86,7 +86,8 @@ describe("PedidosPage — lista informativa (#422)", () => {
     expect(html).toContain('data-marketplace="ml"');
     expect(html).toContain('data-marketplace="falabella"');
     expect(html).toContain("Gorra azul");
-    expect(html).toContain("SKU: GOR-1");
+    expect(html).toContain("SKU: ");
+    expect(html).toMatch(/aria-label="Copiar SKU GOR-1"[^>]*>GOR-1</);
     expect(html).toContain("Cantidad: 2");
     expect(html).toContain("Pedido #2000001");
     expect(html).toContain("Tienda TIENDA_ML");
