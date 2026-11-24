@@ -133,12 +133,13 @@ describe("títulos y descripción", () => {
     const r = await proponerTitulosAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, categoriaId: "MLB1234", categoriaNombre: "Garrafas térmicas" });
     expect(r).toMatchObject({ ok: true, titulos: ["Garrafa térmica 1 L"], conTendencias: true, rutaCategoria: ["Casa", "Cozinha", "Garrafas térmicas"] });
     expect(ml.tendencias).toHaveBeenCalledWith("MLB", "MLB1234", "token");
-    // Más buscados: sin repetir y ordenados de alta a baja.
+    // Más buscados: sin repetir, de alta a baja, y sin «panela» (de la
+    // categoría general, no se relaciona con la garrafa).
     expect(r.ok && r.masBuscados).toEqual([
       { palabra: "garrafa", nivel: "alta" },
-      { palabra: "panela", nivel: "alta" },
       { palabra: "garrafa termica", nivel: "baja" },
     ]);
+    expect(r.ok && r.tendenciasSinRelacion).toBe(false);
     // La palabra «garrafa» sale de una tendencia general: nivel alta.
     expect(r.ok && r.palabras.find((p) => p.palabra.toLowerCase() === "garrafa")).toMatchObject({ origen: "tendencia", nivel: "alta" });
   });
