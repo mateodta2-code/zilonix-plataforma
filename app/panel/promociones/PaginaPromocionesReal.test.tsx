@@ -434,3 +434,70 @@ describe("PaginaPromocionesReal — Promo-D (regla en la fila por producto)", ()
     expect(screen.getAllByText(new RegExp("El piso \\(54000\\)"))).toHaveLength(1);
   });
 });
+
+describe("Promo-G — banda de carga y debounce del X %", () => {
+  function respuestaPagina(extra: Record<string, unknown>) {
+    return { ok: true, json: async () => ({ filas: FILAS_LISTA, conteosLote: { todas: 2, enPromocion: 0, sinPromocion: 2, conError: 0 }, ...extra }) };
+  }
+  function cantidadListados() {
+    return (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter((c) => String(c[0]).startsWith("/api/ml/promociones/publicaciones?")).length;
+  }
+
+  it("con total conocido: status visible, progressbar con aria-valuenow y «Carga completa» al terminar", async () => {
+    let liberar: (v: unknown) => void = () => {};
+    const segunda = new Promise((r) => (liberar = r));
+    const base = fetch as unknown as ReturnType<typeof vi.fn>;
+    const original = base.getMockImplementation()!;
+    let n = 0;
+    base.mockImplementation(async (url: string, init?: { body?: string }) => {
+      if (String(url).startsWith("/api/ml/promociones/publicaciones?")) {
+        n += 1;
+        if (n === 1) return respuestaPagina({ cursorSiguiente: "c2", totalEstimado: 4 });
+        await segunda;
+        return respuestaPagina({ cursorSiguiente: null, totalEstimado: 4 });
+      }
+      return original(url, init);
+    });
+    montar();
+    const barra = await screen.findByRole("progressbar");
+    expect(barra.getAttribute("aria-valuenow")).toBe("50");
+    expect(screen.getByRole("status").textContent).toContain("Cargando publicaciones… 2 revisadas");
+    expect(screen.getByRole("status").textContent).toContain("2 de 4 revisadas (50 %)");
+    liberar(null);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Carga completa"));
+  });
+
+  it("sin total: barra indeterminada (sin progressbar con valor)", async () => {
+    const base = fetch as unknown as ReturnType<typeof vi.fn>;
+    const original = base.getMockImplementation()!;
+    base.mockImplementation(async (url: string, init?: { body?: string }) => {
+      if (String(url).startsWith("/api/ml/promociones/publicaciones?")) return new Promise(() => {});
+      return original(url, init);
+    });
+    montar();
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Cargando publicaciones…"));
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByRole("button", { name: "Detener carga" })).toBeTruthy();
+  });
+
+  it("escribir «12» en el % hace UNA sola recarga tras ~600 ms", async () => {
+    montar();
+    fireEvent.click(screen.getByLabelText(/Participar solo hasta un máximo de/));
+    await waitFor(() => expect(cantidadListados()).toBeGreaterThan(1));
+    await screen.findByText("Carga completa");
+    vi.useFakeTimers();
+    try {
+      const antes = cantidadListados();
+      const campo = screen.getByRole("spinbutton");
+      fireEvent.change(campo, { target: { value: "1" } });
+      fireEvent.change(campo, { target: { value: "12" } });
+      expect((campo as HTMLInputElement).value).toBe("12");
+      await vi.advanceTimersByTimeAsync(300);
+      expect(cantidadListados()).toBe(antes);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(cantidadListados()).toBe(antes + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
