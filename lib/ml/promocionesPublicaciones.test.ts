@@ -16,12 +16,12 @@ vi.mock("@/db/empresa-context", () => ({
         }),
       }),
       insert: () => ({
-        values: (valores: Record<string, unknown>) => ({
-          returning: async () => {
-            insertsRegistrados.push(valores);
-            return [{ id: `accion-${insertsRegistrados.length}` }];
-          },
-        }),
+        values: (valores: Record<string, unknown>) => {
+          insertsRegistrados.push(valores);
+          const id = `accion-${insertsRegistrados.length}`;
+          // Awaitable directo (lote) o con .returning() (individual).
+          return { returning: async () => [{ id }], then: (ok: (v: unknown) => unknown) => Promise.resolve(undefined).then(ok) };
+        },
       }),
     };
     return fn(tx);
@@ -226,6 +226,9 @@ describe("participarEnPublicacionDirecto", () => {
     expect(participarPromocionMlMock).toHaveBeenCalledTimes(1);
     expect(insertsRegistrados).toHaveLength(1);
     expect(insertsRegistrados[0]).toMatchObject({ accion: "participar", estado: "ejecutada" });
+    // Promo-E: la acción individual es una tanda de 1, con su lote.
+    expect(insertsRegistrados[0].resultadoMl).toMatchObject({ regla: "manual", origen: "individual", limite: "piso" });
+    expect((insertsRegistrados[0].resultadoMl as { lote: string }).lote).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("promoción que ya no está disponible: falla sin llamar a Mercado Libre para escribir", async () => {
@@ -357,6 +360,10 @@ describe("aplicarReglaALote", () => {
 
     expect(resumen.participadas).toBe(0);
     expect(participarPromocionMlMock).not.toHaveBeenCalled();
+    // Promo-E: la descartada por la regla queda en la bitácora, sin llamar a ML.
+    expect(insertsRegistrados).toHaveLength(1);
+    expect(insertsRegistrados[0]).toMatchObject({ estado: "rechazada", itemId: "MCO1", resultadoMl: { regla: "maximo", origen: "lote", maximoPct: 5, limite: "tope", llamoAMercadoLibre: false } });
+    expect((insertsRegistrados[0].resultadoMl as { lote: string }).lote).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("Promo-A: con 2 publicaciones seleccionadas solo procesa esas 2, nunca lista el catálogo", async () => {

@@ -27,47 +27,73 @@ function fila(extra: Record<string, unknown> = {}) {
     ejecutadoTs: "2026-01-02T15:00:00Z",
     creadoTs: "2026-01-02T15:00:00Z",
     modoSimulacion: false,
-    detalle: { regla: "maximo", origen: "lote", ok: true, status: 200, respuesta: null },
+    detalle: DETALLE,
     error: null,
     ...extra,
   };
 }
 
-function mockFetch(filas: unknown[]) {
-  const fn = vi.fn(async () => ({ ok: true, json: async () => ({ filas, hayMas: false }) }));
+const DETALLE = { regla: "maximo", origen: "lote", ok: true, status: 200, respuesta: null, lote: "11111111-1111-4111-8111-111111111111", maximoPct: 20, limite: "tope", sku: "SKU-1", nombrePromocion: "Campaña tradicional", motivo: null };
+
+function tanda(extra: Record<string, unknown> = {}) {
+  return { clave: "11111111-1111-4111-8111-111111111111", total: 3, participo: 1, modifico: 0, salio: 0, conError: 1, omitidas: 1, noApi: 0, simulada: false, regla: "maximo", usuarioNombre: "Ana", cuentaMlId: "c1", nicknameCuenta: "TIENDA1", fecha: "2026-01-02T15:00:00Z", ...extra };
+}
+
+function mockFetch(tandas: unknown[], filas: unknown[] = []) {
+  const fn = vi.fn(async (url: string) => ({ ok: true, json: async () => (String(url).includes("lote=") ? { filas, hayMas: false } : { tandas, hayMas: false }) }));
   vi.stubGlobal("fetch", fn);
   return fn;
 }
 
 describe("BitacoraPromociones", () => {
-  it("muestra quién, regla, acción y resultado de cada fila", async () => {
-    mockFetch([fila(), fila({ id: "a2", accion: "salir", estado: "fallida", error: "ML dijo no", detalle: { regla: "salir", origen: "participando", ok: false, status: 400, respuesta: null } })]);
+  it("muestra el encabezado de la tanda con usuario y conteos", async () => {
+    mockFetch([tanda()]);
     render(<BitacoraPromociones cuentas={CUENTAS} />);
-    await waitFor(() => expect(screen.getAllByText("Ana")).toHaveLength(2));
-    expect(screen.getByText("Máximo")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Ana", { exact: false })).toBeTruthy());
+    expect(screen.getByText(/3 acciones: 1 participó, 1 con error, 1 omitidas/)).toBeTruthy();
+  });
+
+  it("al desplegar carga las filas de la tanda con todas las columnas", async () => {
+    const fn = mockFetch(
+      [tanda()],
+      [
+        fila({ detalle: DETALLE }),
+        fila({ id: "a2", estado: "rechazada", precioDespues: null, error: null, detalle: { ...DETALLE, regla: "salir", limite: "ml", motivo: "No se puede salir por API" } }),
+        fila({ id: "a3", estado: "fallida", error: "ML dijo no", detalle: DETALLE }),
+      ]
+    );
+    render(<BitacoraPromociones cuentas={CUENTAS} />);
+    await waitFor(() => expect(screen.getByRole("button", { expanded: false })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await waitFor(() => expect(screen.getAllByText("Zapato", { exact: false })).toHaveLength(3));
+    expect(String((fn.mock.calls.at(-1) as unknown[])[0])).toContain("lote=11111111-1111-4111-8111-111111111111");
     const celdas = screen.getAllByRole("cell").map((c) => c.textContent);
-    expect(celdas).toContain("Entró");
-    expect(celdas).toContain("Salió");
-    expect(celdas.some((c) => c === "OK")).toBe(true);
-    expect(celdas.some((c) => c?.startsWith("Error"))).toBe(true);
+    expect(celdas).toContain("Participó");
+    expect(celdas).toContain("No se puede por API");
+    expect(celdas).toContain("Error");
+    expect(celdas).toContain("Máximo 20 %");
+    expect(celdas).toContain("Tope %");
+    expect(celdas.some((c) => c?.includes("SKU-1"))).toBe(true);
+    expect(celdas.some((c) => c?.startsWith("Campaña tradicional"))).toBe(true);
     expect(screen.getByText(/ML dijo no/)).toBeTruthy();
   });
 
-  it("distingue las acciones simuladas", async () => {
-    mockFetch([fila({ modoSimulacion: true })]);
+  it("distingue las tandas simuladas", async () => {
+    mockFetch([tanda({ simulada: true })]);
     render(<BitacoraPromociones cuentas={CUENTAS} />);
     await waitFor(() => expect(screen.getByText("Simulado")).toBeTruthy());
   });
 
   it("los filtros viajan como parámetros al endpoint y reinician la página", async () => {
-    const fn = mockFetch([fila()]);
+    const fn = mockFetch([tanda()]);
     render(<BitacoraPromociones cuentas={CUENTAS} />);
-    await waitFor(() => expect(screen.getByText("Zapato")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Ana", { exact: false })).toBeTruthy());
     fireEvent.change(screen.getByLabelText("Acción"), { target: { value: "salir" } });
     fireEvent.change(screen.getByLabelText("Resultado"), { target: { value: "error" } });
     fireEvent.change(screen.getByLabelText("Desde"), { target: { value: "2026-01-01" } });
     await waitFor(() => {
       const url = String((fn.mock.calls.at(-1) as unknown[])[0]);
+      expect(url).toContain("vista=tandas");
       expect(url).toContain("accion=salir");
       expect(url).toContain("resultado=error");
       expect(url).toContain("desde=2026-01-01");

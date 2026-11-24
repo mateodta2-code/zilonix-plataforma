@@ -129,7 +129,31 @@ export type AccionHistorialCliente = {
     ok: boolean | null;
     status: number | null;
     respuesta: string | null;
+    lote: string | null;
+    maximoPct: number | null;
+    limite: "piso" | "tope" | "ml" | "ninguno" | null;
+    sku: string | null;
+    nombrePromocion: string | null;
+    motivo: string | null;
   };
   error: string | null;
   creadoTs: string;
+};
+
+// Promo-E — encabezado de una tanda (una ejecución) de la bitácora.
+export type TandaBitacoraCliente = {
+  clave: string;
+  total: number;
+  participo: number;
+  modifico: number;
+  salio: number;
+  conError: number;
+  omitidas: number;
+  noApi: number;
+  simulada: boolean;
+  regla: string | null;
+  usuarioNombre: string | null;
+  cuentaMlId: string;
+  nicknameCuenta: string;
+  fecha: string;
 };

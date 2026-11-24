@@ -1,5 +1,5 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { conReglaYOrigen } from "./promocionesBitacora";
+import { conReglaYOrigen, nuevoLoteBitacora, resultadoMlOmitida, type ExtraBitacora } from "./promocionesBitacora";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { costosSku, cuentasMl, promocionesAcciones } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
@@ -17,7 +17,7 @@ import {
 } from "@/lib/ml/promociones";
 import { agruparPorCuenta, type ItemSeleccionado } from "@/lib/ml/promocionesSeleccion";
 import { type AccionEscribible, escribirPromocionMl, validarCalculado } from "@/lib/ml/promocionesEjecucion";
-import { evaluarCandidatoConReglas, leerReglasAdicionalesCuentas, type CacheNombresPromocion } from "@/lib/ml/promocionesReglasAdicionales";
+import { evaluarCandidatoConReglas, leerReglasAdicionalesCuentas, nombreDePromocion, type CacheNombresPromocion } from "@/lib/ml/promocionesReglasAdicionales";
 import type { ReglasAdicionales } from "@/lib/ml/promocionesReglasTexto";
 import type { EvaluacionReglasAdicionales } from "@/lib/ml/promocionesReglasAplicar";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
@@ -355,6 +355,16 @@ export async function listarPublicacionesConEstado(
   return { filas, conteosLote, cursorSiguiente: null };
 }
 
+// Nombre legible de la promoción para la bitácora (Promo-E). Reusa el caché
+// de nombres; si Mercado Libre no lo da, nunca frena lo que ya se hizo.
+async function nombreSeguro(promo: Parameters<typeof nombreDePromocion>[0], token: string, cache: CacheNombresPromocion): Promise<string | null> {
+  try {
+    return await nombreDePromocion(promo, token, cache);
+  } catch {
+    return null;
+  }
+}
+
 // ---------- Participar / modificar directo (un click + confirmación) ----------
 
 export type ResultadoParticiparDirecto = { ok: boolean; estado: "ejecutada" | "fallida"; error: string | null; accionId: string | null };
@@ -417,6 +427,8 @@ export async function participarEnPublicacionDirecto(
   }
 
   const resultado = await escribirPromocionMl(itemId, token, accionSolicitada, recalculado.promotionIdMl, recalculado.tipoPromocion, validacion.deal);
+  // Promo-E: una acción individual es una tanda de 1.
+  const nombrePromocion = await nombreSeguro(promoReal, token, new Map());
 
   const [fila] = await dbComoEmpresa(empresaId, (tx) =>
     tx
@@ -437,7 +449,12 @@ export async function participarEnPublicacionDirecto(
         ejecutadoPor: usuarioId,
         ejecutadoTs: new Date(),
         modoSimulacion: false,
-        resultadoMl: conReglaYOrigen(resultado.resultadoMl, sinPiso ? "todas" : "manual", "individual"),
+        resultadoMl: conReglaYOrigen(resultado.resultadoMl, sinPiso ? "todas" : "manual", "individual", {
+          lote: nuevoLoteBitacora(),
+          limite: sinPiso ? "ninguno" : "piso",
+          sku: detalle.skuCodigo,
+          nombrePromocion,
+        }),
         error: resultado.error,
       })
       .returning({ id: promocionesAcciones.id })
@@ -496,6 +513,44 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
     }
   }
   const aplicarPiso = regla.tipo !== "todas";
+  // Promo-E: todas las filas de esta ejecución comparten el mismo lote.
+  const lote = nuevoLoteBitacora();
+  const extraLote = (extra: ExtraBitacora = {}): ExtraBitacora => ({
+    lote,
+    maximoPct: regla.tipo === "maximo" ? regla.maximoPct : null,
+    limite: regla.tipo === "todas" ? "ninguno" : regla.tipo === "maximo" ? "tope" : "piso",
+    ...extra,
+  });
+  // Una publicación omitida también queda en la bitácora (estado «rechazada»,
+  // nunca se llamó a Mercado Libre) para que N elegidas = N filas. Si no hay
+  // cuenta válida de la empresa (FK) o falla el insert, solo queda en el resumen.
+  const registrarOmitida = async (cuentaMlId: string, f: { itemId: string; tituloProducto: string | null; tipoPromocion: string; motivo: string; promotionIdMl?: string | null; precioAntes?: number | null; sku?: string | null }) => {
+    try {
+      await dbComoEmpresa(empresaId, (tx) =>
+        tx.insert(promocionesAcciones).values({
+          empresaId,
+          cuentaMlId,
+          itemId: f.itemId,
+          tituloProducto: f.tituloProducto,
+          tipoPromocion: f.tipoPromocion,
+          promotionIdMl: f.promotionIdMl ?? null,
+          accion: "participar",
+          precioAntes: f.precioAntes != null ? String(f.precioAntes) : null,
+          precioDespues: null,
+          estado: "rechazada",
+          aprobadoPor: usuarioId,
+          aprobadoTs: new Date(),
+          ejecutadoPor: usuarioId,
+          ejecutadoTs: new Date(),
+          modoSimulacion: false,
+          resultadoMl: resultadoMlOmitida(regla.tipo, "lote", f.motivo, extraLote({ sku: f.sku ?? null })),
+          error: f.motivo.slice(0, 500),
+        })
+      );
+    } catch {
+      /* la bitácora nunca frena la regla */
+    }
+  };
   // Las «reglas adicionales» (texto libre) SOLO aplican a «tabla-maestra»:
   // nunca a «todas» (sin piso, decisión de Mateo), «maximo» ni «salir-todas».
   const usaReglasAdicionales = regla.tipo === "tabla-maestra";
@@ -508,7 +563,9 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
       for (const itemId of gruposPorCuenta.get(cuenta.id) ?? []) {
         resumen.revisadas += 1;
         resumen.omitidas += 1;
-        resumen.filas.push({ itemId, tituloProducto: null, tipoPromocion: "", estado: "omitida", error: "No se pudo usar la cuenta de Mercado Libre (reconectarla)." });
+        const motivo = "No se pudo usar la cuenta de Mercado Libre (reconectarla).";
+        resumen.filas.push({ itemId, tituloProducto: null, tipoPromocion: "", estado: "omitida", error: motivo });
+        await registrarOmitida(cuenta.id, { itemId, tituloProducto: null, tipoPromocion: "", motivo });
       }
       continue;
     }
@@ -530,13 +587,9 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
         if (!detalle || resultadoPromos.estado !== "ok" || resultadoPromos.promociones.length === 0) {
           resumen.revisadas += 1;
           resumen.omitidas += 1;
-          resumen.filas.push({
-            itemId,
-            tituloProducto: detalle?.title ?? null,
-            tipoPromocion: "",
-            estado: "omitida",
-            error: !detalle || resultadoPromos.estado !== "ok" ? "No se pudo leer la publicación en Mercado Libre." : "No tiene promociones disponibles.",
-          });
+          const motivo = !detalle || resultadoPromos.estado !== "ok" ? "No se pudo leer la publicación en Mercado Libre." : "No tiene promociones disponibles.";
+          resumen.filas.push({ itemId, tituloProducto: detalle?.title ?? null, tipoPromocion: "", estado: "omitida", error: motivo });
+          await registrarOmitida(cuenta.id, { itemId, tituloProducto: detalle?.title ?? null, tipoPromocion: "", motivo, sku: detalle?.skuCodigo ?? null });
           return [];
         }
         // «todas»: no se lee ni se exige el piso (costos_sku).
@@ -553,34 +606,50 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
           promociones: resultadoPromos.promociones,
         };
         const calculados = calcularCandidatosItem(item, reglasCuenta, precioMinimo, costo, aplicarPiso);
-        const resultado: { c: CandidatoCalculado; precioMinimo: number | null; evaluacion: EvaluacionReglasAdicionales | null }[] = [];
+        const resultado: { c: CandidatoCalculado; precioMinimo: number | null; evaluacion: EvaluacionReglasAdicionales | null; promo: (typeof resultadoPromos.promociones)[number] }[] = [];
         for (let i = 0; i < calculados.length; i++) {
           const c = calculados[i];
           const evaluacion = reglasAdicionales && c.cumpleReglas && c.accionSugerida ? await evaluarCandidatoConReglas(c, resultadoPromos.promociones[i], reglasAdicionales, token, cacheNombres) : null;
-          resultado.push({ c, precioMinimo, evaluacion });
+          resultado.push({ c, precioMinimo, evaluacion, promo: resultadoPromos.promociones[i] });
         }
         return resultado;
       });
 
-      const porAplicar = candidatosPorItem.flat().filter(({ c, evaluacion }) => {
+      const porAplicar: typeof candidatosPorItem[number] = [];
+      for (const entrada of candidatosPorItem.flat()) {
+        const { c, evaluacion } = entrada;
         resumen.revisadas += 1;
-        if (evaluacion?.excluida) {
+        const omitir = async (motivo: string) => {
           resumen.omitidas += 1;
-          resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: evaluacion.motivoVisible });
-          return false;
+          resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: motivo });
+          await registrarOmitida(cuenta.id, { itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, motivo, promotionIdMl: c.promotionIdMl, precioAntes: c.precioActual, sku: c.skuCodigo });
+        };
+        if (evaluacion?.excluida) {
+          await omitir(evaluacion.motivoVisible ?? "Excluida por una regla adicional.");
+          continue;
         }
         // Sin piso, una candidata que el motor frena (ej. ML no dio
         // precio sugerido, o es compartida sin habilitar) queda visible
         // en el resumen con su motivo, nunca omitida en silencio.
         if (!aplicarPiso && c.estadoMl === "candidate" && !c.tieneVariantes && !c.soloEnMl && !c.cumpleReglas && c.motivoRevisarManual) {
-          resumen.omitidas += 1;
-          resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: c.motivoRevisarManual });
-          return false;
+          await omitir(c.motivoRevisarManual);
+          continue;
         }
-        return cumpleRegla(c, regla);
-      });
+        if (cumpleRegla(c, regla)) {
+          porAplicar.push(entrada);
+          continue;
+        }
+        // Promo-E: lo que la regla descarta también queda en la bitácora (100 = 100),
+        // sin tocar el resumen que ya ve la persona (omitir() sí lo suma).
+        const pct = descuentoVendedorPct(c);
+        const motivoRegla =
+          regla.tipo === "maximo" && c.cumpleReglas && c.accionSugerida && pct != null
+            ? `El descuento a cargo del vendedor (${pct.toFixed(1)} %) supera el máximo de ${regla.maximoPct} %.`
+            : c.motivoRevisarManual ?? "No cumple las reglas para participar automáticamente.";
+        await registrarOmitida(cuenta.id, { itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, motivo: motivoRegla, promotionIdMl: c.promotionIdMl, precioAntes: c.precioActual, sku: c.skuCodigo });
+      }
 
-      await conConcurrenciaLimitada(porAplicar, TOPE_CONCURRENCIA_APLICAR_REGLA, async ({ c: cMotor, precioMinimo, evaluacion }) => {
+      await conConcurrenciaLimitada(porAplicar, TOPE_CONCURRENCIA_APLICAR_REGLA, async ({ c: cMotor, precioMinimo, evaluacion, promo }) => {
         // Una regla adicional solo puede SUBIR el precio (menos descuento):
         // el precio final ya es max(regla, piso) — ver promocionesReglasAplicar.ts
         // — y validarCalculado vuelve a exigir deal >= piso antes de escribir.
@@ -589,8 +658,10 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
         if (c !== cMotor) {
           const fueraDeRango = descuentoFueraDeRangoPriceDiscount(c.tipoPromocion, c.precioOriginal, precioConRegla as number);
           if (fueraDeRango) {
+            const motivo = `${evaluacion?.motivoVisible ?? "Regla adicional"} — ${fueraDeRango}`;
             resumen.omitidas += 1;
-            resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: `${evaluacion?.motivoVisible ?? "Regla adicional"} — ${fueraDeRango}` });
+            resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: motivo });
+            await registrarOmitida(cuenta.id, { itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, motivo, promotionIdMl: c.promotionIdMl, precioAntes: c.precioActual, sku: c.skuCodigo });
             return;
           }
           // Ya participa a un precio igual o más alto que el que dejaría la regla: nada que modificar.
@@ -601,9 +672,12 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
         if (!validacion.ok) {
           resumen.omitidas += 1;
           resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: validacion.motivo });
+          await registrarOmitida(cuenta.id, { itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, motivo: validacion.motivo, promotionIdMl: c.promotionIdMl, precioAntes: c.precioActual, sku: c.skuCodigo });
           return;
         }
         const resultado = await escribirPromocionMl(c.itemId, token, accionSolicitada, c.promotionIdMl, c.tipoPromocion, validacion.deal);
+        // Sin reglas adicionales no se consulta ML por el nombre: solo el que ya vino en la promoción.
+        const nombrePromocion = usaReglasAdicionales ? await nombreSeguro(promo, token, cacheNombres) : typeof promo.name === "string" ? promo.name : null;
         await dbComoEmpresa(empresaId, (tx) =>
           tx.insert(promocionesAcciones).values({
             empresaId,
@@ -621,7 +695,7 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
             ejecutadoPor: usuarioId,
             ejecutadoTs: new Date(),
             modoSimulacion: false,
-            resultadoMl: conReglaYOrigen(resultado.resultadoMl, regla.tipo, "lote"),
+            resultadoMl: conReglaYOrigen(resultado.resultadoMl, regla.tipo, "lote", extraLote({ sku: c.skuCodigo, nombrePromocion })),
             error: resultado.error,
           })
         );
