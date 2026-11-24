@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -45,13 +45,17 @@ export function CrearConIA({
   onUsarTitulo,
   onUsarDescripcion,
   onFicha,
+  pasoImagenes,
 }: {
   cuentas: Cuenta[];
   fotos: string[];
   onUsarTitulo: (cuentaId: string, titulo: string) => void;
   onUsarDescripcion: (cuentaId: string, descripcion: string) => void;
-  // La ficha confirmada (o null si se desconfirma): la usa «Generar con IA».
+  // La ficha confirmada (o null si se desconfirma): la usa «2. Imágenes».
   onFicha?: (dato: { ficha: Ficha; categoriaId: string | null } | null) => void;
+  // «2. Imágenes» (lo arma FormularioPublicar con GenerarConIA): va justo
+  // después de la ficha, antes de títulos y descripción.
+  pasoImagenes?: ReactNode;
 }) {
   const [cuentaId, setCuentaId] = useState(cuentas[0]?.id ?? "");
   const [info, setInfo] = useState("");
@@ -157,9 +161,12 @@ export function CrearConIA({
   return (
     <div className={styles.crearIA}>
       <p className={styles.ayudaIA}>
-        La IA de tu empresa (Administración → Conectar IA, módulo Publicaciones) lee hasta {MAXIMO_FOTOS_ANALISIS} fotos de arriba y lo que escribas, arma la
-        ficha del producto y, cuando la confirmas, propone títulos y la descripción. Lo cobra tu cuenta de IA. Nada se publica desde aquí.
+        La IA de tu empresa (Administración → Conectar IA) lee hasta {MAXIMO_FOTOS_ANALISIS} fotos de arriba y lo que escribas, arma la ficha del producto y,
+        cuando la confirmas, crea imágenes de venta, propone títulos y escribe la descripción. Lo cobra tu cuenta de IA. Nada se publica desde aquí.
       </p>
+
+      {/* El paso 1 se ve desde el principio: los datos de abajo y, después de «Analizar», la ficha. */}
+      <p className="zx-etiqueta">1. Ficha del producto</p>
 
       {cuentas.length > 1 ? (
         <Campo etiqueta="Cuenta de destino (define el país y el idioma)">
@@ -214,7 +221,6 @@ export function CrearConIA({
 
       {ficha ? (
         <div className={styles.bloqueIA}>
-          <p className="zx-etiqueta">1. Ficha del producto</p>
           {!leyoFotos && fotos.length > 0 ? <p className={styles.ayudaIA}>La IA conectada no lee imágenes: la ficha salió solo de tu texto.</p> : null}
           <p className={styles.ayudaIA}>
             Categoría de Mercado Libre: <strong>{categoria ? categoria.nombre : "no se pudo detectar (la eliges abajo)"}</strong>
@@ -262,10 +268,17 @@ export function CrearConIA({
         </div>
       ) : null}
 
+      {pasoImagenes ? (
+        <div className={styles.bloqueIA}>
+          <p className="zx-etiqueta">2. Imágenes</p>
+          {pasoImagenes}
+        </div>
+      ) : null}
+
       {ficha && confirmada ? (
         <>
           <div className={styles.bloqueIA}>
-            <p className="zx-etiqueta">2. Títulos</p>
+            <p className="zx-etiqueta">3. Títulos</p>
             <div>
               <Boton type="button" onClick={pedirTitulos} disabled={ocupado !== null}>
                 {ocupado === "titulos" ? "Proponiendo…" : titulos ? "Proponer otros" : "Proponer títulos"}
@@ -306,7 +319,7 @@ export function CrearConIA({
           </div>
 
           <div className={styles.bloqueIA}>
-            <p className="zx-etiqueta">3. Descripción</p>
+            <p className="zx-etiqueta">4. Descripción</p>
             <Campo etiqueta="Garantía (opcional; si la dejas vacía, la descripción no habla de garantía)">
               <input className="zx-control" maxLength={LARGO_GARANTIA} value={garantia} onChange={(e) => setGarantia(e.target.value)} placeholder="Ej.: Garantía del vendedor: 30 días por defectos de fábrica." />
             </Campo>

@@ -8,6 +8,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { ErrorPublicacion } from "../ErrorPublicacion";
 import type { ResultadoPublicacionCuenta } from "@/lib/ml/publicar-tipos";
 
 const ETIQUETA_ESTADO: Record<string, string> = {
@@ -31,7 +32,7 @@ function ResultadoCuenta({ resultado, nickname }: { resultado: ResultadoPublicac
                   publicado ({item.status})
                 </a>
               ) : (
-                `error: ${item.error}`
+                <ErrorPublicacion error={item.error ?? "Error desconocido"} />
               )}
             </li>
           ))}
@@ -67,7 +68,7 @@ function ResultadoCuenta({ resultado, nickname }: { resultado: ResultadoPublicac
   }
   return (
     <li style={{ padding: "10px 0", borderBottom: "1px solid var(--borde)", fontSize: 14 }}>
-      <strong>{nickname}</strong> — <span style={{ color: "var(--peligro-texto)" }}>{resultado.error}</span>
+      <strong>{nickname}</strong> — <ErrorPublicacion error={resultado.error} />
       {resultado.bodyEnviado !== undefined && (
         <details style={{ marginTop: 6, fontSize: 12 }}>
           <summary>Ver atributos enviados (diagnóstico)</summary>
