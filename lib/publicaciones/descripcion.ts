@@ -69,13 +69,40 @@ function lista(valor: unknown, permitido: string, maximo = 8): string[] {
     .slice(0, maximo);
 }
 
-export function promptDescripcion(entrada: { ficha: Ficha; idioma: string; pais: string }): string {
+// Palabras clave de los títulos (23-nov): la descripción las usa de forma
+// natural para ayudar en la búsqueda, sin agregar datos por usarlas.
+export const MAXIMO_PALABRAS_DESCRIPCION = 20;
+
+export function limpiarPalabrasClave(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const vistas = new Set<string>();
+  const palabras: string[] = [];
+  for (const p of v) {
+    if (typeof p !== "string") continue;
+    const limpia = p.replace(/[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+    const clave = limpia.toLowerCase();
+    if (limpia.length < 3 || vistas.has(clave)) continue;
+    vistas.add(clave);
+    palabras.push(limpia);
+    if (palabras.length >= MAXIMO_PALABRAS_DESCRIPCION) break;
+  }
+  return palabras;
+}
+
+export function promptDescripcion(entrada: { ficha: Ficha; idioma: string; pais: string; palabrasClave?: string[] }): string {
+  const palabras = entrada.palabrasClave ?? [];
   return [
     `Eres redactor de publicaciones de Mercado Libre ${entrada.pais}. Escribe las partes de la descripción de este producto.`,
     "",
     "Ficha confirmada por el vendedor (usa SOLO estos datos):",
     fichaEnTexto(entrada.ficha),
     "",
+    ...(palabras.length > 0
+      ? [
+          `Palabras que la gente busca (úsalas de forma natural en el texto SOLO si describen este producto según la ficha; nunca agregues un dato nuevo por usarlas ni las repitas en lista): ${palabras.join(", ")}`,
+          "",
+        ]
+      : []),
     "Reglas obligatorias:",
     `- En ${entrada.idioma}, con tildes y ortografía correctas. Frases cortas y claras.`,
     "- No inventes nada que no esté en la ficha: ni medidas, ni tiempos, ni cifras, ni materiales, ni usos.",

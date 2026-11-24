@@ -17,7 +17,7 @@ import {
   type Ficha,
   type Origen,
 } from "@/lib/publicaciones/ficha";
-import { LARGO_TITULO, LARGO_TITULO_CATALOGO, type PalabraClave } from "@/lib/publicaciones/titulos";
+import { LARGO_TITULO, LARGO_TITULO_CATALOGO, type NivelBusqueda, type PalabraClave, type TendenciaConNivel } from "@/lib/publicaciones/titulos";
 import type { Cuenta } from "./CuentasDestino";
 import { analizarProductoAction, escribirDescripcionAction, proponerTitulosAction } from "./ia/actions";
 import styles from "./publicar.module.css";
@@ -28,6 +28,10 @@ const ROTULO_ORIGEN: Record<Origen, { texto: string; estado: EstadoChip }> = {
   supuesto: { texto: "Confirmar", estado: "advertencia" },
 };
 const ROTULO_PALABRA: Record<PalabraClave["origen"], string> = { tendencia: "Tendencia", vendedor: "Del vendedor", ia: "Sugerida por la IA" };
+// Qué tan buscada es, según el nivel de categoría donde sale la tendencia.
+const ROTULO_NIVEL: Record<NivelBusqueda, string> = { alta: "Alta", media: "Media", baja: "Baja" };
+const LEYENDA_NIVEL: Record<NivelBusqueda, string> = { alta: "Alta (categoría general)", media: "Media (categoría padre)", baja: "Baja (categoría específica)" };
+const ESTADO_NIVEL: Record<NivelBusqueda, EstadoChip> = { alta: "exito", media: "advertencia", baja: "neutro" };
 
 type Aviso = { texto: string; conectarIA?: boolean } | null;
 
@@ -68,7 +72,14 @@ export function CrearConIA({
   const [confirmada, setConfirmada] = useState(false);
   const [categoria, setCategoria] = useState<{ id: string; nombre: string } | null>(null);
   const [leyoFotos, setLeyoFotos] = useState(true);
-  const [titulos, setTitulos] = useState<{ titulos: string[]; catalogo: string | null; palabras: PalabraClave[]; conTendencias: boolean } | null>(null);
+  const [titulos, setTitulos] = useState<{
+    titulos: string[];
+    catalogo: string | null;
+    palabras: PalabraClave[];
+    conTendencias: boolean;
+    masBuscados: TendenciaConNivel[];
+    rutaCategoria: string[];
+  } | null>(null);
   const [descripcion, setDescripcion] = useState("");
   const [ocupado, setOcupado] = useState<null | "analisis" | "titulos" | "descripcion">(null);
   const [aviso, setAviso] = useState<Aviso>(null);
@@ -138,13 +149,14 @@ export function CrearConIA({
   function pedirTitulos() {
     if (!ficha) return;
     void correr("titulos", () => proponerTitulosAction({ cuentaMlId: cuenta.id, ficha, categoriaId: categoria?.id ?? null, categoriaNombre: categoria?.nombre ?? null, info }), (r) => {
-      if (r.ok) setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias });
+      if (r.ok)
+        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria });
     });
   }
 
   function pedirDescripcion() {
     if (!ficha) return;
-    void correr("descripcion", () => escribirDescripcionAction({ cuentaMlId: cuenta.id, ficha, garantia }), (r) => {
+    void correr("descripcion", () => escribirDescripcionAction({ cuentaMlId: cuenta.id, ficha, garantia, palabrasClave: palabrasParaDescripcion }), (r) => {
       if (r.ok) {
         setDescripcion(r.descripcion);
         setCopiada(false);
@@ -156,6 +168,8 @@ export function CrearConIA({
   // la cuenta de destino (el texto se escribió en su idioma).
   const cuentasMismoPais = cuentas.filter((c) => c.siteId === cuenta.siteId);
   const hayOtroPais = cuentasMismoPais.length < cuentas.length;
+  // La descripción usa las palabras clave de los títulos (si ya se pidieron).
+  const palabrasParaDescripcion = titulos ? titulos.palabras.map((p) => p.palabra) : [];
 
   function nombres(ids: string[]): string {
     return cuentas
@@ -304,12 +318,37 @@ export function CrearConIA({
             {titulos ? (
               <>
                 {!titulos.conTendencias ? <p className={styles.ayudaIA}>Sin tendencias de la categoría: Mercado Libre no las devolvió (o no hay categoría).</p> : null}
+                {titulos.masBuscados.length > 0 ? (
+                  <div className={styles.masBuscadosIA}>
+                    <p className="zx-etiqueta">{`Más buscados en la categoría (${titulos.masBuscados.length})`}</p>
+                    <span className={styles.accionesIA}>
+                      {(["alta", "media", "baja"] as const)
+                        .filter((n) => titulos.masBuscados.some((t) => t.nivel === n))
+                        .map((n) => (
+                          <Chip key={n} estado={ESTADO_NIVEL[n]}>
+                            {LEYENDA_NIVEL[n]}
+                          </Chip>
+                        ))}
+                    </span>
+                    {titulos.rutaCategoria.length > 0 ? <p className={styles.ayudaIA}>Categorías analizadas: {titulos.rutaCategoria.join(" → ")}</p> : null}
+                    <span className={styles.accionesIA}>
+                      {titulos.masBuscados.map((t) => (
+                        <Chip key={t.palabra} estado={ESTADO_NIVEL[t.nivel]}>
+                          {t.palabra}
+                        </Chip>
+                      ))}
+                    </span>
+                  </div>
+                ) : null}
                 {[...titulos.titulos.map((t) => ({ t, max: LARGO_TITULO })), ...(titulos.catalogo ? [{ t: titulos.catalogo, max: LARGO_TITULO_CATALOGO }] : [])].map(({ t, max }) => (
                   <div key={t} className={styles.tituloIA}>
                     <span>
                       {max === LARGO_TITULO_CATALOGO ? <Chip>Catálogo</Chip> : null} <CopiarTexto valor={t} etiquetaAria={`Copiar título: ${t}`} />{" "}
                       <span className={styles.contadorIA}>
                         {t.length}/{max}
+                      </span>
+                      <span className={styles.barraTituloIA} aria-hidden="true">
+                        <span style={{ width: `${Math.min(100, Math.round((t.length / max) * 100))}%` }} />
                       </span>
                     </span>
                     <span className={styles.accionesIA}>
@@ -327,7 +366,10 @@ export function CrearConIA({
                     Palabras clave:{" "}
                     {titulos.palabras.map((p) => (
                       <span key={p.palabra} className={styles.palabraIA}>
-                        {p.palabra} <Chip estado={p.origen === "tendencia" ? "exito" : p.origen === "vendedor" ? "neutro" : "aviso"}>{ROTULO_PALABRA[p.origen]}</Chip>
+                        {p.palabra}{" "}
+                        <Chip estado={p.origen === "tendencia" ? "exito" : p.origen === "vendedor" ? "neutro" : "aviso"}>
+                          {p.nivel ? `${ROTULO_PALABRA[p.origen]} · ${ROTULO_NIVEL[p.nivel]}` : ROTULO_PALABRA[p.origen]}
+                        </Chip>
                       </span>
                     ))}
                   </p>

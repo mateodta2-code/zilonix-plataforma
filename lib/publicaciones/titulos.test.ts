@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { tendenciasCategoriaMl } from "@/lib/ml/cliente";
+import { categoriasPorNivel, tendenciasCategoriaMl } from "@/lib/ml/cliente";
 import { leerFicha } from "@/lib/publicaciones/ficha";
-import { leerPropuestaTitulos, limpiarTitulo, nombresPropios, origenPalabras, recortarPorPalabra, sinMayusculaCadaPalabra } from "@/lib/publicaciones/titulos";
+import { leerPropuestaTitulos, limpiarTitulo, nombresPropios, origenPalabras, recortarPorPalabra, sinMayusculaCadaPalabra, unirTendenciasPorNivel } from "@/lib/publicaciones/titulos";
 
 const fetchOriginal = globalThis.fetch;
 afterEach(() => {
@@ -92,5 +92,46 @@ describe("tendenciasCategoriaMl", () => {
     globalThis.fetch = vi.fn(async () => new Response("{}", { status: 403 })) as unknown as typeof fetch;
     expect(await tendenciasCategoriaMl("MLB", "MLB1234", "token")).toBeNull();
     expect(await tendenciasCategoriaMl("MLB", "MCO1234", "token")).toBeNull();
+  });
+});
+
+describe("tendencias por nivel de categoría (23-nov)", () => {
+  it("unirTendenciasPorNivel: sin repetir, queda el nivel más alto, ordena alta → baja", () => {
+    const r = unirTendenciasPorNivel([
+      { nivel: "baja", palabras: ["bebedero colibri", "comedero colibri"] },
+      { nivel: "media", palabras: ["comederos para pajaros"] },
+      { nivel: "alta", palabras: ["Bebedero Colibri", "bebedero para aves"] },
+    ]);
+    expect(r).toEqual([
+      { palabra: "Bebedero Colibri", nivel: "alta" },
+      { palabra: "bebedero para aves", nivel: "alta" },
+      { palabra: "comederos para pajaros", nivel: "media" },
+      { palabra: "comedero colibri", nivel: "baja" },
+    ]);
+  });
+
+  it("origenPalabras: las de tendencia llevan su nivel; las demás no", () => {
+    const p = origenPalabras(["Bebedero colibrí vidrio"], ["bebedero colibri"], "vidrio", [{ palabra: "bebedero colibri", nivel: "media" }]);
+    expect(p.find((x) => x.palabra === "Bebedero")).toMatchObject({ origen: "tendencia", nivel: "media" });
+    expect(p.find((x) => x.palabra === "vidrio")).toEqual({ palabra: "vidrio", origen: "vendedor" });
+  });
+});
+
+describe("categoriasPorNivel (ruta de /categories/{id})", () => {
+  it("específica, padre y general sin repetir", () => {
+    const ruta = [
+      { id: "MCO1071", name: "Animales y Mascotas" },
+      { id: "MCO1100", name: "Aves" },
+      { id: "MCO4321", name: "Bebederos y Comederos" },
+    ];
+    expect(categoriasPorNivel(ruta, "MCO4321")).toEqual([
+      { nivel: "baja", categoriaId: "MCO4321", nombre: "Bebederos y Comederos" },
+      { nivel: "media", categoriaId: "MCO1100", nombre: "Aves" },
+      { nivel: "alta", categoriaId: "MCO1071", nombre: "Animales y Mascotas" },
+    ]);
+    // Ruta de 2: no hay «general» aparte de la padre.
+    expect(categoriasPorNivel(ruta.slice(1), "MCO4321").map((c) => c.nivel)).toEqual(["baja", "media"]);
+    // Sin ruta: solo la específica.
+    expect(categoriasPorNivel([], "MCO4321")).toEqual([{ nivel: "baja", categoriaId: "MCO4321", nombre: "MCO4321" }]);
   });
 });

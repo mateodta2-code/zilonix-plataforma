@@ -36,7 +36,7 @@ vi.mock("@/lib/ia/proveedores", async () => {
   return { ...real, llamarIA: ia.texto, llamarIAConImagenes: ia.conImagenes };
 });
 vi.mock("@/lib/ml/publicar", () => ({ resolverCategoria: ml.categoria }));
-vi.mock("@/lib/ml/cliente", () => ({ tendenciasCategoriaMl: ml.tendencias }));
+vi.mock("@/lib/ml/cliente", () => ({ tendenciasPorNivelMl: ml.tendencias }));
 
 import { analizarProductoAction, escribirDescripcionAction, proponerTitulosAction } from "./actions";
 import { ErrorProveedorIA } from "@/lib/ia/proveedores";
@@ -53,7 +53,13 @@ beforeEach(() => {
   ia.conImagenes.mockReset();
   ia.descargar.mockReset().mockResolvedValue({ buffer: Buffer.from("x"), tipo: "image/jpeg" });
   ml.categoria.mockReset().mockResolvedValue({ categoryId: "MLB1234", categoryName: "Garrafas térmicas", domainName: null });
-  ml.tendencias.mockReset().mockResolvedValue(["garrafa termica"]);
+  ml.tendencias.mockReset().mockResolvedValue({
+    ruta: ["Casa", "Cozinha", "Garrafas térmicas"],
+    niveles: [
+      { nivel: "baja", categoriaId: "MLB1234", nombre: "Garrafas térmicas", palabras: ["garrafa termica"] },
+      { nivel: "alta", categoriaId: "MLB1", nombre: "Casa", palabras: ["garrafa", "panela"] },
+    ],
+  });
 });
 
 describe("análisis", () => {
@@ -125,8 +131,25 @@ describe("títulos y descripción", () => {
   it("títulos con las tendencias de la categoría de la cuenta", async () => {
     ia.texto.mockResolvedValue('{"titulos": ["Garrafa Térmica 1 L Promoção"], "catalogo": null}');
     const r = await proponerTitulosAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, categoriaId: "MLB1234", categoriaNombre: "Garrafas térmicas" });
-    expect(r).toMatchObject({ ok: true, titulos: ["Garrafa térmica 1 L"], conTendencias: true });
+    expect(r).toMatchObject({ ok: true, titulos: ["Garrafa térmica 1 L"], conTendencias: true, rutaCategoria: ["Casa", "Cozinha", "Garrafas térmicas"] });
     expect(ml.tendencias).toHaveBeenCalledWith("MLB", "MLB1234", "token");
+    // Más buscados: sin repetir y ordenados de alta a baja.
+    expect(r.ok && r.masBuscados).toEqual([
+      { palabra: "garrafa", nivel: "alta" },
+      { palabra: "panela", nivel: "alta" },
+      { palabra: "garrafa termica", nivel: "baja" },
+    ]);
+    // La palabra «garrafa» sale de una tendencia general: nivel alta.
+    expect(r.ok && r.palabras.find((p) => p.palabra.toLowerCase() === "garrafa")).toMatchObject({ origen: "tendencia", nivel: "alta" });
+  });
+
+  it("descripción: le pasa a la IA las palabras clave limpias (máximo 20, sin repetir)", async () => {
+    ia.texto.mockResolvedValue('{"queEs": "Garrafa térmica de 1 L."}');
+    await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, palabrasClave: ["garrafa", "Garrafa", "<script>", 5, "térmica"] });
+    const prompt = String(ia.texto.mock.calls.at(-1)?.[1]);
+    expect(prompt).toContain("Palabras que la gente busca");
+    expect(prompt).toContain("garrafa, script, térmica");
+    expect(prompt).not.toContain("<script>");
   });
 
   it("descripción: garantía solo la del vendedor", async () => {
