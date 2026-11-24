@@ -76,8 +76,10 @@ export function BarraCarga({
   const pct = estado === "completa" ? 100 : conTotal ? Math.min(100, Math.round((avance!.hechos / avance!.total) * 100)) : 0;
   const indeterminada = estado === "cargando" && !conTotal;
 
+  const hayContenido = mostrarBanda || estado === "detenida" || !!textoInactiva;
+
   return (
-    <div className={`${styles.contenedor} ${sticky ? styles.sticky : ""}`} role="status" aria-live="polite">
+    <div className={`${styles.contenedor} ${hayContenido ? styles.caja : ""} ${sticky ? styles.sticky : ""}`} role="status" aria-live="polite">
       {mostrarBanda ? (
         <div className={styles.banda}>
           <div className={styles.fila}>

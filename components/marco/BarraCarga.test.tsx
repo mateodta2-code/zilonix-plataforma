@@ -47,4 +47,16 @@ describe("BarraCarga", () => {
     expect(detener).toHaveBeenCalled();
     expect(screen.getByRole("status")).toBeTruthy();
   });
+
+  it("inactiva sin textoInactiva: status vacío y sin clase de caja", () => {
+    render(<BarraCarga estado="inactiva" titulo="x" />);
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("");
+    expect(status.className).not.toMatch(/caja/);
+  });
+
+  it("con textoInactiva sí lleva la caja", () => {
+    render(<BarraCarga estado="inactiva" titulo="x" textoInactiva="Listo" />);
+    expect(screen.getByRole("status").className).toMatch(/caja/);
+  });
 });
