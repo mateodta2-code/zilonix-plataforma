@@ -1,0 +1,4 @@
+- **Publicar → «Generación de imágenes para Meli»**: la ficha del producto queda fija arriba y, debajo, 3 sub pestañas: «Generar imágenes», «Títulos» y «Descripción». Cambiar de una a otra no borra nada (las 3 siguen montadas, solo se oculta la inactiva, así que una imagen que se está creando no se corta).
+- Lo trabajado (referencias, información, ficha, títulos, descripción, propuestas e imágenes creadas) se guarda **2 horas** en `sessionStorage` de esa pestaña (`app/panel/publicar/ia/borradorIA.ts`): sobrevive a recargar y a Cargar/Duplicar/importar; vence a las 2 horas sin cambios o al cerrar la pestaña. Solo URLs y textos. Botón «Empezar de cero» para borrarlo.
+- La galería de Fotos no se guarda: tras recargar, una imagen ya creada que no esté en la galería muestra «Poner en la galería». Una imagen que se estaba creando al recargar vuelve a «propuesta» con aviso.
+- Guía de Publicar actualizada.
