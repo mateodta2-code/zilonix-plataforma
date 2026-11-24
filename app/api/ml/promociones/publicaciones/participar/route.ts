@@ -10,7 +10,8 @@ import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolver
 // "aprobar → Lanzar aprobadas" del módulo viejo). Mismo permiso que
 // /participando/salir — esto SÍ escribe de verdad contra Mercado
 // Libre, nunca "aprobar".
-type Cuerpo = { cuentaId?: unknown; itemId?: unknown; promotionIdMl?: unknown; tipoPromocion?: unknown; precioElegido?: unknown; regla?: unknown };
+const maximoPctValido = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 1 && v <= 80;
+type Cuerpo = { cuentaId?: unknown; itemId?: unknown; promotionIdMl?: unknown; tipoPromocion?: unknown; precioElegido?: unknown; regla?: unknown; maximoPct?: unknown };
 
 export async function POST(request: Request) {
   const base = urlPublicaBase();
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
   }
-  const { cuentaId, itemId, promotionIdMl, tipoPromocion, precioElegido, regla } = cuerpo;
+  const { cuentaId, itemId, promotionIdMl, tipoPromocion, precioElegido, regla, maximoPct } = cuerpo;
   if (typeof cuentaId !== "string" || !PATRON_UUID.test(cuentaId)) return NextResponse.json({ error: "Falta la cuenta." }, { status: 400 });
   if (typeof itemId !== "string" || !itemId) return NextResponse.json({ error: "Falta el producto." }, { status: 400 });
   if (typeof tipoPromocion !== "string" || !tipoPromocion) return NextResponse.json({ error: "Falta el tipo de promoción." }, { status: 400 });
@@ -44,6 +45,9 @@ export async function POST(request: Request) {
   }
   if (precioElegido !== undefined && (typeof precioElegido !== "number" || !Number.isFinite(precioElegido))) {
     return NextResponse.json({ error: "El precio elegido no es válido." }, { status: 400 });
+  }
+  if (regla === "maximo" && !maximoPctValido(maximoPct)) {
+    return NextResponse.json({ error: "El máximo de descuento no es válido (entre 1 y 80 %)." }, { status: 400 });
   }
 
   const resultado = await participarEnPublicacionDirecto(
@@ -54,8 +58,9 @@ export async function POST(request: Request) {
     typeof promotionIdMl === "string" ? promotionIdMl : null,
     tipoPromocion,
     precioElegido as number | undefined,
-    // Promo-D: solo la cadena exacta «todas» relaja el piso; cualquier otra cosa = con piso.
-    regla === "todas" ? "todas" : undefined
+    // Promo-D/F: solo «todas» y «maximo» relajan el piso; cualquier otra cosa = con piso.
+    regla === "todas" || regla === "maximo" ? regla : undefined,
+    regla === "maximo" ? (maximoPct as number) : undefined
   );
 
   // Mismo criterio que /acciones (punto 4, PR #307) — un rechazo (de

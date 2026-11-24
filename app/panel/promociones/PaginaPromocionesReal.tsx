@@ -121,6 +121,11 @@ export function PaginaPromocionesReal({
 
   // Promo-D: la regla elegida viaja al cargar la lista y al participar por producto («todas» no aplica piso ni tope nuestro).
   const [regla, setRegla] = useState<ReglaUi>("todas");
+  // Promo-F: «máximo X %» = solo el tope de % (sin piso de Finanzas); el X viaja al listar y al participar.
+  const [maximoPct, setMaximoPct] = useState(15);
+  const maximoPctValido = Number.isFinite(maximoPct) && maximoPct >= 1 && maximoPct <= 80;
+  const modoCarga = regla === "todas" ? "todas" : regla === "maximo" && maximoPctValido ? `maximo-${maximoPct}` : "tabla-maestra";
+  const reglaParaServidor = (): { regla?: string; maximoPct?: number } => (regla === "todas" ? { regla: "todas" } : regla === "maximo" && maximoPctValido ? { regla: "maximo", maximoPct } : {});
   const [filas, setFilas] = useState<PublicacionConEstado[]>([]);
   const [conteos, setConteos] = useState<ConteosPublicaciones>({ todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 });
   const [cursor, setCursor] = useState<string | null>(null);
@@ -165,8 +170,9 @@ export function PaginaPromocionesReal({
   }
 
   async function pedirPagina(cursorParaUsar: string | null): Promise<{ filas: PublicacionConEstado[]; conteosLote: ConteosPublicaciones; cursorSiguiente: string | null } | null> {
-    // Solo «todas» relaja el piso en el servidor; las otras tres piden lo mismo.
-    const params = new URLSearchParams({ filtro, buscar: buscarAplicado, regla: regla === "todas" ? "todas" : "tabla-maestra" });
+    // «todas» y «máximo» relajan el piso en el servidor; las otras dos piden lo mismo (con piso).
+    const params = new URLSearchParams({ filtro, buscar: buscarAplicado, regla: regla === "todas" ? "todas" : regla === "maximo" && maximoPctValido ? "maximo" : "tabla-maestra" });
+    if (regla === "maximo" && maximoPctValido) params.set("maximoPct", String(maximoPct));
     if (cuentaSeleccionada !== "todas") params.set("cuentaId", cuentaSeleccionada);
     if (cursorParaUsar) params.set("cursor", cursorParaUsar);
     try {
@@ -232,13 +238,13 @@ export function PaginaPromocionesReal({
 
   // Promo-D: cambiar entre «todas» (sin piso) y cualquier otra regla recalcula
   // las filas en el servidor; la selección de Promo-A se conserva (mismos productos).
-  const sinPisoPrevioRef = useRef(regla === "todas");
+  const sinPisoPrevioRef = useRef(modoCarga);
   useEffect(() => {
-    const cambioModoPiso = sinPisoPrevioRef.current !== (regla === "todas");
-    sinPisoPrevioRef.current = regla === "todas";
+    const cambioModoPiso = sinPisoPrevioRef.current !== modoCarga;
+    sinPisoPrevioRef.current = modoCarga;
     void cargarTodoAutomatico(true, cambioModoPiso);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cargarTodoAutomatico se recrea cada render; solo importa reaccionar a estos 3 (cancela la carga vieja por idCargaRef)
-  }, [cuentaSeleccionada, filtro, buscarAplicado, regla === "todas"]);
+  }, [cuentaSeleccionada, filtro, buscarAplicado, modoCarga]);
 
   function parcharPromo(itemId: string, cuentaMlId: string, tipoPromocion: string, promotionIdMl: string | null, mutar: (p: PromocionParaUi) => PromocionParaUi | null) {
     setFilas((actual) =>
@@ -310,7 +316,7 @@ export function PaginaPromocionesReal({
           promotionIdMl: promocion.promotionIdMl,
           tipoPromocion: promocion.tipoPromocion,
           precioElegido: calculoModal.precioFinal,
-          regla: regla === "todas" ? "todas" : undefined,
+          ...reglaParaServidor(),
         }),
       });
       body = await res.json().catch(() => ({}));
@@ -422,7 +428,7 @@ export function PaginaPromocionesReal({
             itemId: fila.itemId,
             promotionIdMl: promocion.promotionIdMl,
             tipoPromocion: promocion.tipoPromocion,
-            ...(esSalir ? {} : { precioElegido: promocion.precioSugerido, regla: regla === "todas" ? "todas" : undefined }),
+            ...(esSalir ? {} : { precioElegido: promocion.precioSugerido, ...reglaParaServidor() }),
           }),
         });
         const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string | null };
@@ -472,7 +478,6 @@ export function PaginaPromocionesReal({
   }
 
   // ---------- Reglas (lote) ----------
-  const [maximoPct, setMaximoPct] = useState(15);
   const dialogReglaRef = useRef<HTMLDialogElement>(null);
   const [pasoRegla, setPasoRegla] = useState<"confirmar" | "resultado">("confirmar");
   const [aplicandoRegla, setAplicandoRegla] = useState(false);
@@ -753,7 +758,7 @@ export function PaginaPromocionesReal({
         <p className="zx-etiqueta">Reglas de participación</p>
         {resumenMaestraSku.total === 0 ? (
           <div className={`${styles.bannerMaestra} ${styles.bannerMaestraFalta}`}>
-            <span>El módulo de SKU todavía no tiene ninguna tabla maestra de precios mínimos cargada — sin esto, las reglas «Respetar la tabla maestra» y «máximo» no pueden participar en ninguna publicación (la regla «Participar en todas» no la necesita).</span>
+            <span>El módulo de SKU todavía no tiene ninguna tabla maestra de precios mínimos cargada — sin esto, la regla «Respetar la tabla maestra» no puede participar en ninguna publicación («Participar en todas» y «máximo» no la necesitan).</span>
             <BotonLink href="/panel/finanzas/maestra-sku/importar" variante="primario">
               Subir un archivo
             </BotonLink>
@@ -882,7 +887,7 @@ export function PaginaPromocionesReal({
         </div>
         <p style={{ fontSize: 11.5, color: "var(--texto-suave)", marginTop: 4 }}>
           &quot;Participar en todas&quot; entra en todas las promociones disponibles SIN precio mínimo — puede dejar productos vendiéndose bajo su costo. Solo &quot;Respetar siempre la tabla
-          maestra&quot; aplica el precio mínimo de Finanzas (y &quot;máximo&quot; lo conserva, además de su tope de porcentaje). &quot;Dejar de participar en todas&quot; quita las publicaciones
+          maestra&quot; aplica el precio mínimo de Finanzas (&quot;máximo&quot; solo aplica su tope de porcentaje a cargo del vendedor, sin precio mínimo). &quot;Dejar de participar en todas&quot; quita las publicaciones
           activas de sus promociones, con confirmación previa.
         </p>
 
@@ -892,7 +897,7 @@ export function PaginaPromocionesReal({
               type="button"
               variante="primario"
               onClick={regla === "salir-todas" ? () => void abrirSalirTodas() : abrirAplicarRegla}
-              disabled={cantidadSeleccionada === 0 || (resumenMaestraSku.total === 0 && (regla === "tabla-maestra" || regla === "maximo"))}
+              disabled={cantidadSeleccionada === 0 || (resumenMaestraSku.total === 0 && regla === "tabla-maestra") || (regla === "maximo" && !maximoPctValido)}
             >
               {regla === "salir-todas" ? "Revisar y dejar de participar…" : "Aplicar regla a las publicaciones"}
             </Boton>
@@ -1185,7 +1190,11 @@ export function PaginaPromocionesReal({
                   ), sin un paso de confirmación por producto.
                 </p>
                 <p>
-                  {regla === "todas" ? "Sin precio mínimo: se entra a todas aunque quede bajo el costo." : "El precio mínimo de Finanzas nunca se salta."}
+                  {regla === "todas"
+                    ? "Sin precio mínimo: se entra a todas aunque quede bajo el costo."
+                    : regla === "maximo"
+                      ? "Solo manda el tope de porcentaje: no se usa el precio mínimo de Finanzas, así que puede quedar bajo el costo."
+                      : "El precio mínimo de Finanzas nunca se salta."}
                 </p>
                 {regla === "tabla-maestra" && textoGuardado && <p>Se aplicarán también tus reglas adicionales guardadas: «{textoGuardado}».</p>}
               </div>

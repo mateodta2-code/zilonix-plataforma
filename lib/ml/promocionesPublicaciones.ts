@@ -145,7 +145,9 @@ export async function leerPublicacionConEstado(
   cacheNombres: CacheNombresPromocion = new Map(),
   // Promo-D: false SOLO con la regla «todas» (sin piso ni tope nuestro; el
   // precio es el sugerido por Mercado Libre). Por defecto, el modo seguro.
-  aplicarPiso: boolean = true
+  aplicarPiso: boolean = true,
+  // Promo-F: «máximo X %» (sin piso) — tope de % a cargo del vendedor.
+  maximoPct: number | null = null
 ): Promise<PublicacionConEstado> {
   const base = { itemId, cuentaMlId, nicknameCuenta, siteId };
   let detalle, resultadoPromos;
@@ -220,7 +222,8 @@ export async function leerPublicacionConEstado(
   };
   // Sin piso («todas») no se lee costos_sku: no se exige ni se muestra el piso.
   const { precioMinimo, costo } = aplicarPiso ? await leerPiso(detalle.skuCodigo) : { precioMinimo: null, costo: null };
-  const calculadas = calcularCandidatosItem(item, reglas, precioMinimo, costo, aplicarPiso);
+  const calculadasMotor = calcularCandidatosItem(item, reglas, precioMinimo, costo, aplicarPiso);
+  const calculadas = !aplicarPiso && maximoPct != null ? calculadasMotor.map((c) => aplicarTopeMaximo(c, maximoPct)) : calculadasMotor;
   const estaParticipando = calculadas.some((c) => c.estadoMl === "started" || c.estadoMl === "pending");
 
   const promociones: PromocionParaUi[] = [];
@@ -231,6 +234,32 @@ export async function leerPublicacionConEstado(
     promociones.push(promocionParaUi(c, evaluacion?.motivoVisible ?? null));
   }
   return { ...comun, estado: estaParticipando ? "en_promocion" : "sin_promocion", promociones, motivoError: null };
+}
+
+// Promo-F: regla «Máximo X %» = SOLO el tope de % a cargo del vendedor (sin
+// piso de Finanzas, sin tope de la cuenta). Se aplica sobre un candidato ya
+// calculado en modo sin piso. Si la promo pide más del X %: no participa
+// (motivo claro); si deja elegir el precio (PRICE_DISCOUNT) entra con el
+// precio que deja X % (redondeado hacia arriba al entero, así nunca pasa de
+// X %) siempre que respete max_discounted_price y el rango 5–80 % de ML.
+export function aplicarTopeMaximo(c: CandidatoCalculado, maximoPct: number): CandidatoCalculado {
+  if (!c.cumpleReglas || c.accionSugerida !== "participar") return c;
+  const pct = descuentoVendedorPct(c);
+  if (pct == null || pct <= maximoPct + 1e-9) return c;
+  const bloquear = (motivo: string): CandidatoCalculado => ({ ...c, cumpleReglas: false, accionSugerida: null, motivoRevisarManual: motivo });
+  const motivoSupera = `El descuento a cargo del vendedor (${pct.toFixed(1)} %) supera el máximo de ${maximoPct} %.`;
+  if (c.tipoPromocion !== "PRICE_DISCOUNT" || c.precioOriginal == null) return bloquear(motivoSupera);
+  const precio = Math.ceil(c.precioOriginal * (1 - maximoPct / 100));
+  if (c.maxDiscountedPrice != null && precio > c.maxDiscountedPrice) {
+    return bloquear(`${motivoSupera} Al máximo de ${maximoPct} % el precio (${precio}) superaría lo que permite esta promoción (${c.maxDiscountedPrice}).`);
+  }
+  const fueraDeRango = descuentoFueraDeRangoPriceDiscount(c.tipoPromocion, c.precioOriginal, precio, "sugerido-ml");
+  if (fueraDeRango) return bloquear(`${motivoSupera} Al máximo de ${maximoPct} %: ${fueraDeRango}`);
+  return { ...c, precioSugerido: precio };
+}
+
+export function maximoPctValido(valor: unknown): valor is number {
+  return typeof valor === "number" && Number.isFinite(valor) && valor >= 1 && valor <= 80;
 }
 
 export type FiltroPublicaciones = "todas" | "en-promocion" | "sin-promocion" | "con-error";
@@ -302,7 +331,7 @@ export type ResultadoListaPublicaciones = {
 // del archivo. Nunca escanea el catálogo completo de una pasada.
 export async function listarPublicacionesConEstado(
   empresaId: string,
-  opciones: { cuentaId: string | "todas"; filtro: FiltroPublicaciones; buscar: string; cursor: string | null; tamanoPagina: number; aplicarPiso?: boolean }
+  opciones: { cuentaId: string | "todas"; filtro: FiltroPublicaciones; buscar: string; cursor: string | null; tamanoPagina: number; aplicarPiso?: boolean; maximoPct?: number | null }
 ): Promise<ResultadoListaPublicaciones> {
   const cuentas = await listarCuentasParaPublicaciones(empresaId, opciones.cuentaId);
   const conteosLote: ConteosPublicaciones = { todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 };
@@ -330,7 +359,7 @@ export async function listarPublicacionesConEstado(
       if (pagina.ids.length === 0) break; // esta cuenta se terminó
 
       const procesadas = await conConcurrenciaLimitada(pagina.ids, TOPE_CONCURRENCIA_ML, (itemId) =>
-        leerPublicacionConEstado(itemId, cuenta.id, cuenta.nickname, cuenta.siteId, token, reglas, (sku) => leerPisoYCostoFrescoDeEmpresa(empresaId, sku), reglasAdicionales, cacheNombres, opciones.aplicarPiso ?? true)
+        leerPublicacionConEstado(itemId, cuenta.id, cuenta.nickname, cuenta.siteId, token, reglas, (sku) => leerPisoYCostoFrescoDeEmpresa(empresaId, sku), reglasAdicionales, cacheNombres, opciones.aplicarPiso ?? true, opciones.maximoPct ?? null)
       );
 
       for (const fila of procesadas) {
@@ -384,11 +413,17 @@ export async function participarEnPublicacionDirecto(
   promotionIdMl: string | null,
   tipoPromocion: string,
   precioElegido: number | undefined,
-  // Promo-D: solo «todas» relaja el piso; ausente o cualquier otro valor =
-  // con piso (el servidor nunca confía en la UI para relajar).
-  regla?: string
+  // Promo-D/F: solo «todas» y «maximo» relajan el piso; ausente o cualquier
+  // otro valor = con piso (el servidor nunca confía en la UI para relajar).
+  regla?: string,
+  // Promo-F: obligatorio y válido (1–80) con «maximo»; si no, no participa.
+  maximoPct?: number
 ): Promise<ResultadoParticiparDirecto> {
-  const sinPiso = regla === "todas";
+  const esMaximo = regla === "maximo";
+  if (esMaximo && !maximoPctValido(maximoPct)) {
+    return { ok: false, estado: "fallida", error: "El máximo de descuento no es válido (entre 1 y 80 %).", accionId: null };
+  }
+  const sinPiso = regla === "todas" || esMaximo;
   const token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
 
   const [detalle, resultadoPromos] = await Promise.all([leerItemParaPromocionMl(itemId, token), leerPromocionesItemMl(itemId, token)]);
@@ -415,9 +450,17 @@ export async function participarEnPublicacionDirecto(
     skuVariantesDistintas: detalle.skuVariantesDistintas,
     promociones: [promoReal],
   };
-  const [recalculado] = calcularCandidatosItem(item, reglas, piso.precioMinimo, piso.costo, !sinPiso);
-  if (!recalculado) {
+  const [recalculadoMotor] = calcularCandidatosItem(item, reglas, piso.precioMinimo, piso.costo, !sinPiso);
+  if (!recalculadoMotor) {
     return { ok: false, estado: "fallida", error: "No se pudo recalcular esta publicación — probar de nuevo.", accionId: null };
+  }
+  const recalculado = esMaximo ? aplicarTopeMaximo(recalculadoMotor, maximoPct as number) : recalculadoMotor;
+  // Con un precio elegido a mano el tope también manda (nunca solo en la UI).
+  if (esMaximo && precioElegido !== undefined && recalculado.precioOriginal != null && recalculado.precioOriginal > 0) {
+    const pctElegido = ((recalculado.precioOriginal - precioElegido) / recalculado.precioOriginal) * 100;
+    if (pctElegido > (maximoPct as number) + 1e-9) {
+      return { ok: false, estado: "fallida", error: `El descuento a cargo del vendedor (${pctElegido.toFixed(1)} %) supera el máximo de ${maximoPct} %.`, accionId: null };
+    }
   }
 
   const accionSolicitada: AccionEscribible = recalculado.estadoMl === "candidate" ? "participar" : "modificar";
@@ -449,9 +492,10 @@ export async function participarEnPublicacionDirecto(
         ejecutadoPor: usuarioId,
         ejecutadoTs: new Date(),
         modoSimulacion: false,
-        resultadoMl: conReglaYOrigen(resultado.resultadoMl, sinPiso ? "todas" : "manual", "individual", {
+        resultadoMl: conReglaYOrigen(resultado.resultadoMl, esMaximo ? "maximo" : sinPiso ? "todas" : "manual", "individual", {
           lote: nuevoLoteBitacora(),
-          limite: sinPiso ? "ninguno" : "piso",
+          maximoPct: esMaximo ? (maximoPct as number) : null,
+          limite: esMaximo ? "tope" : sinPiso ? "ninguno" : "piso",
           sku: detalle.skuCodigo,
           nombrePromocion,
         }),
@@ -485,14 +529,11 @@ function descuentoVendedorPct(c: CandidatoCalculado): number | null {
 // Decisión de Mateo: «todas» NO aplica ningún piso (es literalmente
 // todas) — usa el modo sin piso del motor (calcularCandidatosItem con
 // aplicarPiso=false) y el precio que Mercado Libre sugiere; PUEDE
-// vender bajo el costo. «tabla-maestra» y «maximo» SÍ siguen con el
-// piso de Finanzas (costos_sku); «maximo» además descarta lo que supere
-// su tope de % a cargo del vendedor.
-function cumpleRegla(c: CandidatoCalculado, regla: ReglaAplicable): boolean {
-  if (!c.cumpleReglas || !c.accionSugerida) return false;
-  if (regla.tipo !== "maximo") return true;
-  const pct = descuentoVendedorPct(c);
-  return pct == null || pct <= regla.maximoPct;
+// vender bajo el costo. «maximo» (Promo-F) tampoco usa el piso: solo el
+// tope de % a cargo del vendedor (aplicarTopeMaximo). Únicamente
+// «tabla-maestra» usa el piso de Finanzas (costos_sku).
+function cumpleRegla(c: CandidatoCalculado): boolean {
+  return c.cumpleReglas && !!c.accionSugerida;
 }
 
 // Solo se procesan los itemId de `seleccion` (Promo-A, Refs #571): nunca
@@ -512,7 +553,7 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
       resumen.filas.push({ itemId, tituloProducto: null, tipoPromocion: "", estado: "omitida", error: "La cuenta de esta publicación no está disponible." });
     }
   }
-  const aplicarPiso = regla.tipo !== "todas";
+  const aplicarPiso = regla.tipo === "tabla-maestra";
   // Promo-E: todas las filas de esta ejecución comparten el mismo lote.
   const lote = nuevoLoteBitacora();
   const extraLote = (extra: ExtraBitacora = {}): ExtraBitacora => ({
@@ -605,7 +646,8 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
           skuVariantesDistintas: detalle.skuVariantesDistintas,
           promociones: resultadoPromos.promociones,
         };
-        const calculados = calcularCandidatosItem(item, reglasCuenta, precioMinimo, costo, aplicarPiso);
+        const calculadosMotor = calcularCandidatosItem(item, reglasCuenta, precioMinimo, costo, aplicarPiso);
+        const calculados = regla.tipo === "maximo" ? calculadosMotor.map((c) => aplicarTopeMaximo(c, regla.maximoPct)) : calculadosMotor;
         const resultado: { c: CandidatoCalculado; precioMinimo: number | null; evaluacion: EvaluacionReglasAdicionales | null; promo: (typeof resultadoPromos.promociones)[number] }[] = [];
         for (let i = 0; i < calculados.length; i++) {
           const c = calculados[i];
@@ -635,17 +677,13 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
           await omitir(c.motivoRevisarManual);
           continue;
         }
-        if (cumpleRegla(c, regla)) {
+        if (cumpleRegla(c)) {
           porAplicar.push(entrada);
           continue;
         }
         // Promo-E: lo que la regla descarta también queda en la bitácora (100 = 100),
         // sin tocar el resumen que ya ve la persona (omitir() sí lo suma).
-        const pct = descuentoVendedorPct(c);
-        const motivoRegla =
-          regla.tipo === "maximo" && c.cumpleReglas && c.accionSugerida && pct != null
-            ? `El descuento a cargo del vendedor (${pct.toFixed(1)} %) supera el máximo de ${regla.maximoPct} %.`
-            : c.motivoRevisarManual ?? "No cumple las reglas para participar automáticamente.";
+        const motivoRegla = c.motivoRevisarManual ?? "No cumple las reglas para participar automáticamente.";
         await registrarOmitida(cuenta.id, { itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, motivo: motivoRegla, promotionIdMl: c.promotionIdMl, precioAntes: c.precioActual, sku: c.skuCodigo });
       }
 
