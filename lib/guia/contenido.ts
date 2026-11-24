@@ -215,8 +215,8 @@ export const GUIA: GrupoGuia[] = [
               "Pulsa «Analizar producto». Cada dato de la ficha dice de dónde salió: «De la foto», «Del vendedor» o «Confirmar».",
               "Revisa lo marcado «Confirmar»: corrígelo, bórralo o marca «Es correcto». Después pulsa «Confirmar ficha».",
               "Todo va en un solo recuadro y en orden: 1. Ficha del producto, 2. Imágenes (ver «Generar imágenes con IA»), 3. Títulos y 4. Descripción.",
-              "En «3. Títulos» pide los títulos (máximo 60 caracteres, con las búsquedas en tendencia de la categoría) y usa el que te guste con «Usar en la publicación».",
-              "En «4. Descripción», si das garantía, escríbela; después pulsa «Escribir descripción», revísala y úsala con «Usar en la publicación».",
+              "En «3. Títulos» pide los títulos (máximo 60 caracteres, con las búsquedas en tendencia de la categoría) y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»): el título se pone solo abajo, en «Título, descripción y portada por cuenta».",
+              "En «4. Descripción», si das garantía, escríbela; después pulsa «Escribir descripción», revísala y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»).",
             ],
           },
           {
@@ -234,7 +234,7 @@ export const GUIA: GrupoGuia[] = [
         consejos: [
           "Necesitas una IA conectada en Administración → Conectar IA, asignada a Publicaciones o como principal. Lo cobra la cuenta de IA de tu empresa.",
           "La IA no inventa: medidas, tiempos, garantía o lo que incluye solo salen si están en tus fotos o en lo que escribiste y los confirmaste.",
-          "Nada se publica desde «Crear con IA»: solo llena el título y la descripción de la cuenta elegida.",
+          "Nada se publica desde «Crear con IA»: solo llena el título y la descripción de las cuentas que elijas. Solo salen las cuentas del mismo país, porque el texto está escrito en su idioma.",
           "Para imágenes necesitas ChatGPT (OpenAI) o Gemini (Google) en el módulo Generación de imágenes de Conectar IA: Claude no genera imágenes.",
           "La imagen «Opiniones reales» usa solo opiniones verdaderas que pegues de tus compradores; si no tienes, se salta. La IA nunca escribe reseñas.",
           "Las imágenes salen en 500 × 500. Mercado Libre recomienda la primera foto sobre fondo blanco: el diagnóstico te avisa si la modera, pero no bloquea.",
