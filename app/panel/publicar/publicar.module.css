@@ -318,3 +318,16 @@
   font-size: 13px;
   color: var(--acento-fuerte);
 }
+
+/* «Tomar ideas de la competencia» (opcional, plegado). */
+.competenciaIA {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.competenciaIA summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--texto-suave);
+}

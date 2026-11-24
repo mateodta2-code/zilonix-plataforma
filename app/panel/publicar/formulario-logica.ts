@@ -265,6 +265,16 @@ export function reemplazarOAgregarFoto(fotos: string[], nueva: string, anterior:
   return ponerFotoEn(fotos, nueva, fotos.length, limite);
 }
 
+// «Descargar» de una imagen creada con IA (23-nov): en Cloudinary, la
+// transformación documentada fl_attachment hace que el navegador la
+// descargue en vez de abrirla (el atributo download no sirve entre
+// dominios). Cualquier otra URL queda igual.
+export function urlDescarga(url: string): string {
+  const m = url.match(/^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.*)$/);
+  if (!m || m[2].startsWith("fl_attachment")) return url;
+  return `${m[1]}fl_attachment/${m[2]}`;
+}
+
 // --- Parte 3 (importadores + permalink) ---
 
 // Revisión de seguridad (hallazgo MED) — un solo patrón de hostname

@@ -10,7 +10,7 @@ export const LARGO_TITULO = 60;
 export const LARGO_TITULO_CATALOGO = 120;
 export const CANTIDAD_TITULOS = 3;
 
-export type OrigenPalabra = "tendencia" | "vendedor" | "ia";
+export type OrigenPalabra = "tendencia" | "vendedor" | "competencia" | "ia";
 // nivel: solo en las de tendencia — qué tan buscada es según el nivel de
 // categoría donde aparece (alta = general, media = padre, baja = específica).
 export type NivelBusqueda = "alta" | "media" | "baja";
@@ -108,7 +108,8 @@ function normalizar(texto: string): string {
 // Origen de cada palabra importante de los títulos: tendencia de la
 // categoría (si aparece en alguna), del vendedor (si está en su ficha o
 // su texto) o sugerida por la IA.
-export function origenPalabras(titulos: string[], tendencias: string[], textoVendedor: string, niveles: TendenciaConNivel[] = []): PalabraClave[] {
+export function origenPalabras(titulos: string[], tendencias: string[], textoVendedor: string, niveles: TendenciaConNivel[] = [], textoCompetencia = ""): PalabraClave[] {
+  const competencia = normalizar(textoCompetencia);
   const tend = tendencias.map(normalizar);
   // El nivel más alto de las tendencias que contienen la palabra.
   const nivelDe = (n: string): NivelBusqueda | undefined =>
@@ -124,7 +125,7 @@ export function origenPalabras(titulos: string[], tendencias: string[], textoVen
       const n = normalizar(palabra).replace(/[^\p{L}\p{N}]/gu, "");
       if (n.length < 4 || vistas.has(n)) continue;
       vistas.add(n);
-      const origen: OrigenPalabra = tend.some((t) => t.split(/\s+/).includes(n)) ? "tendencia" : vendedor.includes(n) ? "vendedor" : "ia";
+      const origen: OrigenPalabra = tend.some((t) => t.split(/\s+/).includes(n)) ? "tendencia" : vendedor.includes(n) ? "vendedor" : competencia.includes(n) ? "competencia" : "ia";
       const nivel = origen === "tendencia" ? nivelDe(n) : undefined;
       palabras.push({ palabra: palabra.replace(/[^\p{L}\p{N}]/gu, ""), origen, ...(nivel ? { nivel } : {}) });
     }
@@ -132,7 +133,7 @@ export function origenPalabras(titulos: string[], tendencias: string[], textoVen
   return palabras;
 }
 
-export function promptTitulos(entrada: { ficha: Ficha; idioma: string; pais: string; categoria: string | null; tendencias: string[]; info: string }): string {
+export function promptTitulos(entrada: { ficha: Ficha; idioma: string; pais: string; categoria: string | null; tendencias: string[]; info: string; competencia?: string }): string {
   return [
     `Eres experto en SEO de Mercado Libre ${entrada.pais}. Propón títulos para esta publicación.`,
     "",
@@ -140,6 +141,9 @@ export function promptTitulos(entrada: { ficha: Ficha; idioma: string; pais: str
     fichaEnTexto(entrada.ficha),
     entrada.categoria ? `Categoría de Mercado Libre: ${entrada.categoria}` : "",
     entrada.tendencias.length > 0 ? `Búsquedas en tendencia de la categoría y sus categorías padre (úsalas solo si describen este producto): ${entrada.tendencias.slice(0, MAXIMO_MAS_BUSCADOS).join(", ")}` : "",
+    entrada.competencia
+      ? `Título de una publicación de la competencia (solo como idea de las palabras que usa el mercado; no lo copies y no tomes de él ningún dato que no esté en la ficha): ${entrada.competencia}`
+      : "",
     "",
     "Reglas obligatorias:",
     `- ${CANTIDAD_TITULOS} títulos distintos de máximo ${LARGO_TITULO} caracteres, y uno de catálogo más completo de máximo ${LARGO_TITULO_CATALOGO}.`,
@@ -164,7 +168,10 @@ export function nombresPropios(ficha: Ficha): string[] {
   return resto.length > 0 && conMayuscula.length === resto.length ? [] : conMayuscula;
 }
 
-export function leerPropuestaTitulos(respuesta: string, entrada: { ficha: Ficha; tendencias: string[]; info: string; niveles?: TendenciaConNivel[] }): PropuestaTitulos | null {
+export function leerPropuestaTitulos(
+  respuesta: string,
+  entrada: { ficha: Ficha; tendencias: string[]; info: string; niveles?: TendenciaConNivel[]; competencia?: string }
+): PropuestaTitulos | null {
   const json = extraerJson(respuesta);
   if (!json) return null;
   const propios = nombresPropios(entrada.ficha);
@@ -178,5 +185,5 @@ export function leerPropuestaTitulos(respuesta: string, entrada: { ficha: Ficha;
   if (titulos.length === 0) return null;
   const catalogoLimpio = limpiarTitulo(json.catalogo, LARGO_TITULO_CATALOGO, propios);
   const catalogo = confirmado(catalogoLimpio) ? catalogoLimpio : null;
-  return { titulos, catalogo, palabras: origenPalabras(catalogo ? [...titulos, catalogo] : titulos, entrada.tendencias, textoVendedor, entrada.niveles) };
+  return { titulos, catalogo, palabras: origenPalabras(catalogo ? [...titulos, catalogo] : titulos, entrada.tendencias, textoVendedor, entrada.niveles, entrada.competencia ?? "") };
 }
