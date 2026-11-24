@@ -1,0 +1,1 @@
+- **Publicar**: se quitó «Importar publicación desde un link» de «Importar desde otra publicación». Quedan «Importar publicación por SKU» e «Importar con el botón del navegador». La guía de Publicar se actualizó. La acción del servidor (`buscarImportacionPorLinkAction`) y el manejo de `importar-link` en la extensión no se tocaron; quedan sin botón que los llame.
