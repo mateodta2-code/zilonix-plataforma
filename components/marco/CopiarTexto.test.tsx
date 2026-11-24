@@ -66,4 +66,40 @@ describe("CopiarTexto", () => {
     expect(writeText).toHaveBeenCalledWith("SKU-7");
     expect(onClickAncestro).not.toHaveBeenCalled();
   });
+
+  it("resalta (.copiado) al copiar y el title por defecto es 'Clic para copiar'", async () => {
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    render(<CopiarTexto valor="SKU-3" />);
+    const boton = screen.getByRole("button", { name: "Copiar SKU-3" });
+    expect(boton.getAttribute("title")).toBe("Clic para copiar");
+    fireEvent.click(boton);
+    await screen.findByText("✓ Copiado");
+    expect(boton.className).toContain("copiado");
+  });
+
+  it("el click hace preventDefault (no navega dentro de un enlace)", () => {
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    render(<CopiarTexto valor="SKU-4" />);
+    const ok = fireEvent.click(screen.getByRole("button", { name: "Copiar SKU-4" }));
+    expect(ok).toBe(false);
+  });
+
+  it("comoSpan: span role=button, Enter y Espacio copian sin burbujear ni ejecutar el default", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const onKeyDownAncestro = vi.fn();
+    render(
+      <div onKeyDown={onKeyDownAncestro}>
+        <CopiarTexto valor="SKU-5" comoSpan />
+      </div>
+    );
+    const el = screen.getByRole("button", { name: "Copiar SKU-5" });
+    expect(el.tagName).toBe("SPAN");
+    expect(el.getAttribute("tabindex")).toBe("0");
+    expect(fireEvent.keyDown(el, { key: "Enter" })).toBe(false);
+    expect(fireEvent.keyDown(el, { key: " " })).toBe(false);
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(onKeyDownAncestro).not.toHaveBeenCalled();
+    expect(await screen.findByText("✓ Copiado")).not.toBeNull();
+  });
 });

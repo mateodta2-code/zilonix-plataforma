@@ -20,6 +20,7 @@ import { hayCuentasActivas, hrefPedidos, parsearFiltrosPedidos, PERIODOS, TAMANO
 import { listarPedidosUnificados, type PedidoListado } from "@/lib/pedidos/listado";
 import { formatearFechaPedido, formatearMontoEnMoneda, MARKETPLACES } from "@/lib/pedidos/marketplace";
 import styles from "./page.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #422 — Pedidos es una pantalla INFORMATIVA para todo el equipo,
 // al estilo de Despachos: una sola lista de Mercado Libre y Falabella, del
@@ -76,7 +77,7 @@ function TarjetaPedido({ pedido }: { pedido: PedidoListado }) {
                   <div className={styles.datosProducto}>
                     <span className={styles.nombreProducto}>{producto.nombre}</span>
                     <p className={styles.lineaDatos}>
-                      Cantidad: {producto.cantidad} · SKU: {producto.sku ?? "—"}
+                      Cantidad: {producto.cantidad} · SKU: {producto.sku ? <SkuCopiable sku={producto.sku} /> : "—"}
                     </p>
                   </div>
                 </li>

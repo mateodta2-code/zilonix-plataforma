@@ -16,6 +16,10 @@ export type CopiarTextoProps = {
   // pantalla que copie un número de pedido, una guía, etc. no debería
   // leer "SKU copiado" sin que de verdad sea un SKU.
   mensajeCopiado?: string;
+  // Para cuando el valor queda DENTRO de otro <button> o <a>: un <button>
+  // anidado es HTML inválido, así que se pinta un <span role="button">
+  // con Enter/Espacio manejados a mano.
+  comoSpan?: boolean;
 };
 
 // Issue "copiar SKU en despachos" — componente reutilizable (punto 5):
@@ -24,7 +28,7 @@ export type CopiarTextoProps = {
 // sin duplicar el manejo de navigator.clipboard/el aviso/el fallback.
 // Nunca cambia el tamaño/estilo del TEXTO (hereda font/color de donde
 // se use) — solo agrega el cursor, el subrayado punteado y el aviso.
-export function CopiarTexto({ valor, etiquetaAria, mensajeCopiado = "Copiado" }: CopiarTextoProps) {
+export function CopiarTexto({ valor, etiquetaAria, mensajeCopiado = "Copiado", comoSpan = false }: CopiarTextoProps) {
   const [estado, setEstado] = useState<"inactivo" | "copiado" | "error">("inactivo");
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -36,6 +40,9 @@ export function CopiarTexto({ valor, etiquetaAria, mensajeCopiado = "Copiado" }:
     // Punto 3: el click/Enter/Espacio de este botón NUNCA debe abrir el
     // zoom ni disparar otra acción de la tarjeta que lo contenga.
     evento.stopPropagation();
+    // preventDefault: dentro de un <Link>/<label> no navega ni marca el
+    // checkbox asociado.
+    evento.preventDefault();
     try {
       await navigator.clipboard.writeText(valor);
       setEstado("copiado");
@@ -49,11 +56,30 @@ export function CopiarTexto({ valor, etiquetaAria, mensajeCopiado = "Copiado" }:
     timeoutRef.current = setTimeout(() => setEstado("inactivo"), DURACION_AVISO_MS);
   }
 
+  const clases = estado === "copiado" ? `${styles.boton} ${styles.copiado}` : styles.boton;
+  const etiqueta = etiquetaAria ?? `Copiar ${valor}`;
+
   return (
     <span className={styles.contenedor}>
-      <button type="button" className={styles.boton} onClick={copiar} aria-label={etiquetaAria ?? `Copiar ${valor}`}>
-        {valor}
-      </button>
+      {comoSpan ? (
+        <span
+          role="button"
+          tabIndex={0}
+          className={clases}
+          title="Clic para copiar"
+          aria-label={etiqueta}
+          onClick={copiar}
+          onKeyDown={(evento) => {
+            if (evento.key === "Enter" || evento.key === " ") void copiar(evento);
+          }}
+        >
+          {valor}
+        </span>
+      ) : (
+        <button type="button" className={clases} title="Clic para copiar" onClick={copiar} aria-label={etiqueta}>
+          {valor}
+        </button>
+      )}
       {estado === "copiado" && (
         <span className={styles.aviso} role="status">
           ✓ {mensajeCopiado}
