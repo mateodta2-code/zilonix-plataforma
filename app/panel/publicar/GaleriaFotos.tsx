@@ -40,6 +40,7 @@ export function GaleriaFotos({
   cloudinaryConfigurado,
   limiteFotos,
   conCanva = true,
+  etiquetaPortada = true,
 }: {
   urls: string[];
   onChange: (urls: string[]) => void;
@@ -48,6 +49,8 @@ export function GaleriaFotos({
   // Optimización usa la misma galería sin el campo de Canva (allá no
   // está el botón "Conectar Canva" que ese campo necesita).
   conCanva?: boolean;
+  // Las «Imágenes de referencia» del generador no son la portada.
+  etiquetaPortada?: boolean;
 }) {
   const [agregandoUrlManual, setAgregandoUrlManual] = useState(false);
   const [urlNueva, setUrlNueva] = useState("");
@@ -237,7 +240,7 @@ export function GaleriaFotos({
               // eslint-disable-next-line @next/next/no-img-element -- URL externa puesta a mano, sin optimizar con next/image
               <img src={url} alt="" className={styles.miniaturaImg} onError={() => setFotoRota((actual) => ({ ...actual, [i]: true }))} />
             )}
-            {i === 0 && <span className={styles.etiquetaPortada}>portada</span>}
+            {i === 0 && etiquetaPortada && <span className={styles.etiquetaPortada}>portada</span>}
             <button type="button" onClick={() => quitar(i)} className={styles.botonQuitar} aria-label="Quitar foto">
               ×
             </button>

@@ -87,12 +87,20 @@ beforeEach(() => {
 });
 
 describe("preparar propuestas", () => {
-  it("portadas: una por cuenta destino, todas con composición distinta; nada se genera", async () => {
-    const r = await prepararImagenesAction({ estilo: "zilonix_portadas", cuentaMlIds: [C1, C2, C3], ficha: FICHA });
-    if (!r.ok) throw new Error(r.aviso);
-    expect(r.imagenes.map((i) => i.cuentaMlId)).toEqual([C1, C2, C3]);
-    const composiciones = r.imagenes.map((i) => (i.propuesta as { asignacion: { composicion: number } }).asignacion.composicion);
-    expect(new Set(composiciones).size).toBe(3);
+  it("portadas: 1 por defecto, o 2 distintas si se piden; no van a ninguna cuenta y nada se genera", async () => {
+    const una = await prepararImagenesAction({ estilo: "zilonix_portadas", cuentaMlIds: [C1, C2, C3], ficha: FICHA });
+    if (!una.ok) throw new Error(una.aviso);
+    expect(una.imagenes).toHaveLength(1);
+    expect(una.imagenes[0].cuentaMlId).toBeNull();
+    const dos = await prepararImagenesAction({ estilo: "zilonix_portadas", cuentaMlIds: [C1], ficha: FICHA, cantidadPortadas: 2 });
+    if (!dos.ok) throw new Error(dos.aviso);
+    expect(dos.imagenes.map((i) => i.nombre)).toEqual(["Portada 1", "Portada 2"]);
+    const composiciones = dos.imagenes.map((i) => (i.propuesta as { asignacion: { composicion: number } }).asignacion.composicion);
+    expect(new Set(composiciones).size).toBe(2);
+    // Un número raro no crea más de 2.
+    const raro = await prepararImagenesAction({ estilo: "zilonix_portadas", cuentaMlIds: [C1], ficha: FICHA, cantidadPortadas: 50 });
+    if (!raro.ok) throw new Error(raro.aviso);
+    expect(raro.imagenes).toHaveLength(1);
     expect(ia.conexion).toHaveBeenCalledWith("empresa-1", "generacion_imagenes");
     expect(ia.generar).not.toHaveBeenCalled();
   });

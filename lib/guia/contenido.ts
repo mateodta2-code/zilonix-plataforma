@@ -30,7 +30,7 @@ const CONECTAR_IA: ApartadoGuia = {
     "En Zilonix ve a Administración → Conectar IA (necesitas permiso para modificar la configuración).",
     "Pulsa «Agregar IA», elige el proveedor (OpenAI o Google), escribe un nombre y pega la API key. Zilonix busca los modelos de esa cuenta: elige el modelo de la lista (ya viene el recomendado) o pulsa «Escribir otro modelo».",
     "Guarda y usa «Probar conexión». La clave se guarda cifrada y no se vuelve a mostrar.",
-    "Márcala como principal o asígnala al módulo que la va a usar (Optimización para las imágenes de Optimización; en Publicar, Publicaciones para los textos de «Crear con IA» y Generación de imágenes para el paso «2. Imágenes» de «Crear con IA»). Lo que no asignes usa la principal.",
+    "Márcala como principal o asígnala al módulo que la va a usar (Optimización para las imágenes de Optimización; en Publicar, Publicaciones para los textos y Generación de imágenes para las imágenes de «Generación de imágenes para Meli»). Lo que no asignes usa la principal.",
     "Vuelve a Optimización → «Ver detalle →» de una publicación → debajo de las fotos aparece «Crear imagen con IA» (recarga la página si ya la tenías abierta).",
   ],
 };
@@ -203,30 +203,30 @@ export const GUIA: GrupoGuia[] = [
         pasos: [
           "Elige las cuentas destino. Cada una lleva su propio título, descripción y portada; precio, stock, SKU y demás fotos son iguales.",
           "Para no escribir todo desde cero, pega el link de una publicación y usa «Traer datos de ese link» (necesita la extensión).",
-          "O usa «Crear con IA»: con tus fotos y lo que escribas del producto, la IA arma la ficha, propone títulos, escribe la descripción y, al final, crea imágenes de venta.",
+          "O usa «Generación de imágenes para Meli»: con 1 o 2 imágenes de referencia y lo que escribas del producto, la IA arma la ficha, propone títulos, escribe la descripción y, al final, crea imágenes de venta.",
           "Revisa y publica. La publicación sale como Premium con garantía del vendedor de 30 días.",
         ],
         apartados: [
           {
-            titulo: "Crear con IA (títulos y descripción)",
+            titulo: "Generación de imágenes para Meli (ficha, títulos y descripción)",
             pasos: [
-              "Marca la cuenta destino y sube las fotos del producto en la galería (la IA mira hasta 5).",
-              "En «Crear con IA» escribe lo que sabes del producto: qué es, marca y modelo, material, medidas, qué incluye y cómo se usa.",
+              "Marca la cuenta destino. En «Generación de imágenes para Meli» sube 1 o 2 imágenes de referencia del producto: solo las usa la IA, no se publican (si no subes, usa las fotos reales de la galería).",
+              "En «Información del producto» escribe lo que sabes del producto: qué es, marca y modelo, material, medidas, qué incluye y cómo se usa.",
               "Pulsa «Analizar producto». Cada dato de la ficha dice de dónde salió: «De la foto», «Del vendedor» o «Confirmar».",
               "Revisa lo marcado «Confirmar»: corrígelo, bórralo o marca «Es correcto». Después pulsa «Confirmar ficha».",
-              "Todo va en un solo recuadro y en orden: 1. Ficha del producto, 2. Imágenes (ver «Generar imágenes con IA»), 3. Títulos y 4. Descripción.",
-              "En «3. Títulos» pide los títulos (máximo 60 caracteres, con las búsquedas en tendencia de la categoría) y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»): el título se pone solo abajo, en «Título, descripción y portada por cuenta».",
-              "En «4. Descripción», si das garantía, escríbela; después pulsa «Escribir descripción», revísala y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»).",
+              "Todo va en un solo recuadro y en orden: 1. Ficha del producto, 2. Títulos, 3. Descripción y 4. Imágenes (ver «Generar imágenes con IA»).",
+              "En «2. Títulos» pide los títulos (máximo 60 caracteres, con las búsquedas en tendencia de la categoría) y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»): el título se pone solo abajo, en «Título, descripción y portada por cuenta».",
+              "En «3. Descripción», si das garantía, escríbela; después pulsa «Escribir descripción», revísala y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»).",
             ],
           },
           {
             titulo: "Generar imágenes con IA",
             pasos: [
-              "Primero confirma la ficha en «Crear con IA» y sube al menos una foto real del producto.",
-              "Debajo de la ficha, en el paso «2. Imágenes» de «Crear con IA», elige el estilo: Portadas Zilonix (una portada distinta por cada cuenta marcada), Contenido Zilonix (las 10 imágenes de contenido) o Estilo experto ML.",
+              "Primero sube tus imágenes de referencia y confirma la ficha en «Generación de imágenes para Meli».",
+              "Al final, en «4. Imágenes» (después de la descripción), elige el estilo: Portadas Zilonix (elige 1 o 2 portadas distintas), Contenido Zilonix (las 10 imágenes de contenido) o Estilo experto ML.",
               "Pulsa «Preparar propuestas (sin costo)». Revisa en cada tarjeta el título, el copy y el prompt final; corrige lo que quieras o escribe qué cambiar y pulsa «Ajustar».",
               "Pulsa «Crear» en cada imagen o «Crear todas las aprobadas». Se crean de a 2 a la vez; las demás esperan su turno solas.",
-              "Cada portada queda como foto 1 de su cuenta. Las demás entran solas a la galería de Fotos apenas se crean, listas para publicar: quita con × las que no quieras y arrastra cualquiera (desde la galería o desde su tarjeta) para cambiar el orden o ponerla de portada.",
+              "Las imágenes entran solas a la galería de Fotos apenas se crean (las portadas como foto 1), listas para publicar: quita con × las que no quieras y arrastra cualquiera (desde la galería o desde su tarjeta) para cambiar el orden o ponerla de portada.",
               "Si una no te gusta, «Regenerar» (o «Otra composición» en las portadas) la rehace sin tocar las demás; la nueva queda en el mismo lugar de la galería.",
             ],
           },
@@ -234,7 +234,7 @@ export const GUIA: GrupoGuia[] = [
         consejos: [
           "Necesitas una IA conectada en Administración → Conectar IA, asignada a Publicaciones o como principal. Lo cobra la cuenta de IA de tu empresa.",
           "La IA no inventa: medidas, tiempos, garantía o lo que incluye solo salen si están en tus fotos o en lo que escribiste y los confirmaste.",
-          "Nada se publica desde «Crear con IA»: solo llena el título y la descripción de las cuentas que elijas. Solo salen las cuentas del mismo país, porque el texto está escrito en su idioma.",
+          "Nada se publica desde «Generación de imágenes para Meli»: solo llena el título y la descripción de las cuentas que elijas. Solo salen las cuentas del mismo país, porque el texto está escrito en su idioma.",
           "Para imágenes necesitas ChatGPT (OpenAI) o Gemini (Google) en el módulo Generación de imágenes de Conectar IA: Claude no genera imágenes.",
           "La imagen «Opiniones reales» usa solo opiniones verdaderas que pegues de tus compradores; si no tienes, se salta. La IA nunca escribe reseñas.",
           "Las imágenes salen en 500 × 500. Mercado Libre recomienda la primera foto sobre fondo blanco: el diagnóstico te avisa si la modera, pero no bloquea.",

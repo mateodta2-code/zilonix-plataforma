@@ -20,7 +20,7 @@ type EstadoTarjeta = "propuesta" | "en_cola" | "generando" | "lista" | "error";
 type Tarjeta = PropuestaImagen & { estado: EstadoTarjeta; url?: string; avisos?: string[]; mensaje?: string; titulo: string; copy: string; ajuste: string };
 
 const ESTILOS: { id: Estilo; nombre: string; ayuda: string }[] = [
-  { id: "zilonix_portadas", nombre: "Portadas Zilonix", ayuda: "Una portada distinta por cada cuenta destino; queda como foto 1 de esa cuenta." },
+  { id: "zilonix_portadas", nombre: "Portadas Zilonix", ayuda: "1 o 2 portadas distintas para elegir la mejor; entran a la galería como foto 1." },
   { id: "zilonix_contenido", nombre: "Contenido Zilonix", ayuda: "Las 10 imágenes de contenido; cada una se aprueba antes de crearla." },
   { id: "experto_ml", nombre: "Estilo experto ML", ayuda: "Imágenes de venta con titular y apoyos cortos." },
 ];
@@ -29,10 +29,10 @@ const ESPERA_COLA_MS = 4_000;
 const MAXIMO_A_LA_VEZ = 2;
 const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Publicar → «Crear con IA» → «2. Imágenes» (PR2). Con la ficha
+// Publicar → «Generación de imágenes para Meli» → «4. Imágenes» (PR2). Con la ficha
 // confirmada de «Crear con IA», arma propuestas (sin costo), la persona
-// las revisa y solo «Crear» gasta. Portadas: cada una va a la foto 1 de
-// su cuenta. Contenido y Experto: cada imagen creada entra sola a la
+// las revisa y solo «Crear» gasta. Portadas (1 o 2): entran a la galería
+// como foto 1. Contenido y Experto: cada imagen creada entra sola a la
 // misma galería. Máximo 2 generándose a la vez; las demás esperan.
 export function GenerarConIA({
   cuentas,
@@ -41,29 +41,30 @@ export function GenerarConIA({
   fotos,
   espacioLibre,
   onFotoGenerada,
-  onPortadaCuenta,
 }: {
   cuentas: Cuenta[];
   ficha: Ficha | null;
   categoriaId: string | null;
   fotos: string[];
   espacioLibre: number | null;
-  // Cada imagen creada (no portada) entra sola a la galería; al regenerar
-  // reemplaza a la anterior. false = la galería está llena.
-  onFotoGenerada: (nueva: string, anterior: string | null) => boolean;
-  onPortadaCuenta: (cuentaId: string, url: string) => void;
+  // Cada imagen creada entra sola a la galería (las portadas al principio);
+  // al regenerar reemplaza a la anterior. false = la galería está llena.
+  onFotoGenerada: (nueva: string, anterior: string | null, alInicio: boolean) => boolean;
 }) {
   const [estilo, setEstilo] = useState<Estilo>("zilonix_portadas");
   const [tiposContenido, setTiposContenido] = useState<string[]>(TIPOS_CONTENIDO_ZILONIX.filter((t) => t.porDefecto).map((t) => t.id));
   const [tiposExperto, setTiposExperto] = useState<string[]>(TIPOS_EXPERTO_ML.filter((t) => t.porDefecto).map((t) => t.id));
   const [opiniones, setOpiniones] = useState("");
   const [fotoBlanco, setFotoBlanco] = useState(false);
+  const [cantidadPortadas, setCantidadPortadas] = useState<1 | 2>(1);
   const [tarjetas, setTarjetas] = useState<Tarjeta[]>([]);
   const [preparando, setPreparando] = useState(false);
   const [aviso, setAviso] = useState<{ texto: string; conectarIA?: boolean } | null>(null);
   const [omitidas, setOmitidas] = useState<string[]>([]);
   const asignadas = useRef<Record<string, Asignacion>>({});
-  const nombreCuenta = (id: string | null) => cuentas.find((c) => c.id === id)?.nickname ?? "";
+  // Llave de la composición de una portada («portada-N»), para que
+  // «Otra composición» no repita la de la otra portada.
+  const clavePortada = (propuesta: unknown) => (propuesta as { cuentaMlId?: unknown } | null)?.cuentaMlId;
 
   if (!ficha) {
     return (
@@ -73,7 +74,7 @@ export function GenerarConIA({
     );
   }
   if (cuentas.length === 0) return <p className={styles.ayudaIA}>Marca al menos una cuenta destino.</p>;
-  if (fotos.length === 0) return <p className={styles.ayudaIA}>Sube primero al menos una foto real del producto en la galería de Fotos: la IA la usa como referencia.</p>;
+  if (fotos.length === 0) return <p className={styles.ayudaIA}>Sube primero 1 o 2 imágenes de referencia del producto (arriba, antes de «Información del producto»): la IA las usa como referencia.</p>;
 
   const cambiar = (id: string, cambios: Partial<Tarjeta>) => setTarjetas((ts) => ts.map((t) => (t.id === id ? { ...t, ...cambios } : t)));
 
@@ -90,13 +91,15 @@ export function GenerarConIA({
         opiniones,
         incluirFotoBlanco: fotoBlanco,
         previas: estilo === "zilonix_portadas" ? asignadas.current : undefined,
+        cantidadPortadas,
       });
       if (!r.ok) {
         setAviso({ texto: r.aviso, conectarIA: r.conectarIA });
       } else {
         for (const img of r.imagenes) {
           const a = (img.propuesta as { asignacion?: Asignacion }).asignacion;
-          if (img.cuentaMlId && a) asignadas.current[img.cuentaMlId] = a;
+          const clave = clavePortada(img.propuesta);
+          if (typeof clave === "string" && a) asignadas.current[clave] = a;
         }
         setOmitidas(r.omitidas);
         setTarjetas(
@@ -137,9 +140,7 @@ export function GenerarConIA({
       }
       if (r.estado === "lista") {
         const avisos = r.validada ? r.avisos : ["No se pudo validar la imagen con Mercado Libre."];
-        if (t.tipo === "portada") {
-          if (t.cuentaMlId) onPortadaCuenta(t.cuentaMlId, r.url);
-        } else if (!onFotoGenerada(r.url, t.url ?? null)) {
+        if (!onFotoGenerada(r.url, t.url ?? null, t.tipo === "portada")) {
           avisos.push("No entró a la galería: ya está el máximo de fotos de la categoría. Quita una y arrástrala.");
         }
         cambiar(t.id, { estado: "lista", url: r.url, avisos });
@@ -172,7 +173,8 @@ export function GenerarConIA({
         return;
       }
       const p = r.propuesta as { titulo?: string; copy?: string[]; asignacion?: Asignacion };
-      if (t.cuentaMlId && p.asignacion) asignadas.current[t.cuentaMlId] = p.asignacion;
+      const clave = clavePortada(r.propuesta);
+      if (typeof clave === "string" && p.asignacion) asignadas.current[clave] = p.asignacion;
       cambiar(t.id, { estado: "propuesta", propuesta: r.propuesta, prompt: r.prompt, titulo: p.titulo ?? t.titulo, copy: (p.copy ?? t.copy.split("\n")).join("\n"), ajuste: "" });
     } catch {
       cambiar(t.id, { estado: "propuesta", mensaje: "No se pudo ajustar. Intenta de nuevo." });
@@ -196,9 +198,18 @@ export function GenerarConIA({
       <p className={styles.ayudaIA}>{ESTILOS.find((e) => e.id === estilo)?.ayuda}</p>
 
       {estilo === "zilonix_portadas" ? (
-        <p className={styles.ayudaIA}>
-          Se crea una portada por cada cuenta marcada ({cuentas.map((c) => c.nickname).join(", ")}), todas distintas. {NOTA_FOTO_UNO}
-        </p>
+        <>
+          <span className={styles.filtroIA} role="radiogroup" aria-label="Cuántas portadas">
+            {([1, 2] as const).map((n) => (
+              <Boton key={n} type="button" variante={cantidadPortadas === n ? "primario" : "secundario"} onClick={() => setCantidadPortadas(n)} aria-checked={cantidadPortadas === n} role="radio" disabled={preparando}>
+                {n === 1 ? "1 portada" : "2 portadas"}
+              </Boton>
+            ))}
+          </span>
+          <p className={styles.ayudaIA}>
+            {cantidadPortadas === 2 ? "Se crean 2 portadas distintas: deja la que más te guste y quita la otra con × en la galería." : "Se crea 1 portada."} {NOTA_FOTO_UNO}
+          </p>
+        </>
       ) : (
         <div className={styles.tiposIA}>
           {tipos.map((t) => (
@@ -252,11 +263,11 @@ export function GenerarConIA({
                       height={180}
                       className={styles.miniaturaIA}
                       // Se puede arrastrar a un lugar de la galería (p. ej. de portada).
-                      draggable={t.tipo !== "portada"}
+                      draggable
                       onDragStart={(e) => {
                         if (t.url) e.dataTransfer.setData(TIPO_ARRASTRE_FOTO_URL, t.url);
                       }}
-                      title={t.tipo !== "portada" ? "Ya está en la galería. Arrástrala para ponerla en otro lugar." : undefined}
+                      title="Ya está en la galería. Arrástrala para ponerla en otro lugar."
                     />
                   ) : null}
                   {conTextos && t.estado !== "lista" ? (
@@ -269,7 +280,6 @@ export function GenerarConIA({
                       </Campo>
                     </>
                   ) : null}
-                  {t.tipo === "portada" ? <p className={styles.ayudaIA}>Para la cuenta {nombreCuenta(t.cuentaMlId)}.</p> : null}
                   {estilo === "zilonix_contenido" && conTextos ? (
                     <span className={styles.accionesIA}>
                       {CHECKLIST_CONTENIDO.map((c) => (
@@ -295,7 +305,7 @@ export function GenerarConIA({
                   <span className={styles.accionesIA}>
                     {t.estado === "lista" ? (
                       <>
-                        {t.tipo !== "portada" ? <Chip estado="exito">En la galería</Chip> : <Chip estado="exito">Puesta como foto 1</Chip>}
+                        <Chip estado="exito">{t.tipo === "portada" ? "En la galería (foto 1)" : "En la galería"}</Chip>
                         <Boton type="button" variante="primario" onClick={() => (t.tipo === "portada" ? void ajustar({ ...t, estado: "propuesta" }).then(() => undefined) : void crear(t))}>
                           {t.tipo === "portada" ? "Otra composición" : "Regenerar"}
                         </Boton>

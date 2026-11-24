@@ -20,6 +20,7 @@ import { EditorVariantes, type VariantesEditadas } from "./EditorVariantes";
 import {
   esRellenoFalsoDimensiones,
   fotosDentroDelLimite,
+  ponerFotoEn,
   reemplazarOAgregarFoto,
   serializarCategoriaOverride,
   serializarClaveValor,
@@ -106,6 +107,11 @@ export function FormularioPublicar({
   // «foto real» de referencia para analizar ni para crear otras.
   const [generadasIA, setGeneradasIA] = useState<string[]>([]);
   const fotosReales = imagenes.filter((u) => u && !generadasIA.includes(u));
+  // «Imágenes de referencia» (1 o 2) del generador: solo se usan como
+  // referencia para la IA, nunca se publican. Sin ellas, se usan las fotos
+  // reales de la galería.
+  const [referenciasIA, setReferenciasIA] = useState<string[]>([]);
+  const fotosParaIA = referenciasIA.filter(Boolean).length > 0 ? referenciasIA.filter(Boolean) : fotosReales;
 
   // Una imagen creada entra sola a la galería (al regenerar, en el lugar
   // de la anterior). false = galería llena según la categoría.
@@ -113,8 +119,11 @@ export function FormularioPublicar({
   // para que una imagen no pise a la otra.
   const imagenesRef = useRef(imagenes);
   imagenesRef.current = imagenes;
-  function ponerFotoGenerada(nueva: string, anterior: string | null): boolean {
-    const resultado = reemplazarOAgregarFoto(imagenesRef.current.filter(Boolean), nueva, anterior, maxFotos);
+  function ponerFotoGenerada(nueva: string, anterior: string | null, alInicio: boolean): boolean {
+    const actuales = imagenesRef.current.filter(Boolean);
+    // Una portada nueva va de foto 1; al regenerar, queda donde estaba la anterior.
+    const resultado =
+      alInicio && !(anterior && actuales.includes(anterior)) ? ponerFotoEn(actuales, nueva, 0, maxFotos) : reemplazarOAgregarFoto(actuales, nueva, anterior, maxFotos);
     if (!resultado) return false;
     imagenesRef.current = resultado;
     setImagenes(resultado);
@@ -324,7 +333,7 @@ export function FormularioPublicar({
         el envío si nadie la completaba); la tarjeta "+" de
         GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
         agregar nada. */}
-        {/* Las imágenes generadas en «Crear con IA» → «2. Imágenes» entran a esta misma galería. */}
+        {/* Las imágenes creadas en «Generación de imágenes para Meli» → «4. Imágenes» entran a esta misma galería (se arrastran aquí). */}
         <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} limiteFotos={maxFotos} />
         {maxFotos != null && (
           <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
@@ -338,15 +347,18 @@ export function FormularioPublicar({
         <textarea name="imagenes" value={fotosDentroDelLimite(imagenes.filter(Boolean), maxFotos).join("\n")} readOnly hidden />
       </Tarjeta>
 
-      {/* --- «Crear con IA»: 1. ficha, 2. imágenes (IA de imágenes),
-          3. títulos y 4. descripción (IA de texto), todo en un recuadro. «Usar en
-          la publicación» llena la cuenta de abajo y las imágenes entran a la
-          galería de arriba. --- */}
+      {/* --- «Generación de imágenes para Meli» (antes «Crear con IA», 23-nov):
+          imágenes de referencia (solo para la IA), información, 1. ficha,
+          2. títulos, 3. descripción y 4. imágenes. «Usar en» llena la cuenta
+          de abajo y las imágenes entran a la galería de arriba. --- */}
       <Tarjeta className={styles.seccion}>
-        <p className="zx-etiqueta">Crear con IA</p>
+        <p className="zx-etiqueta">Generación de imágenes para Meli</p>
         <CrearConIA
           cuentas={cuentasMarcadas}
-          fotos={fotosReales}
+          fotos={fotosParaIA}
+          referencias={
+            <GaleriaFotos urls={referenciasIA} onChange={setReferenciasIA} cloudinaryConfigurado={cloudinaryConfigurado} limiteFotos={2} conCanva={false} etiquetaPortada={false} />
+          }
           onUsarTitulo={(id, titulo) => actualizarCuenta(id, "titulo", titulo)}
           onUsarDescripcion={(id, descripcion) => actualizarCuenta(id, "descripcion", descripcion)}
           onFicha={setFichaIA}
@@ -355,10 +367,9 @@ export function FormularioPublicar({
               cuentas={cuentasMarcadas}
               ficha={fichaIA?.ficha ?? null}
               categoriaId={categoriaElegida?.categoryId ?? fichaIA?.categoriaId ?? null}
-              fotos={fotosReales}
+              fotos={fotosParaIA}
               espacioLibre={maxFotos == null ? null : Math.max(0, maxFotos - imagenes.filter(Boolean).length)}
               onFotoGenerada={ponerFotoGenerada}
-              onPortadaCuenta={(id, url) => actualizarCuenta(id, "portadaUrl", url)}
             />
           }
         />
