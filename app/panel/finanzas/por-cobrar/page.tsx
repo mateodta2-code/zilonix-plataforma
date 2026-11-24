@@ -83,7 +83,7 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
               : []),
             ...(sinNeto > 0 ? [`${sinNeto} ${sinNeto === 1 ? "venta pendiente llegó" : "ventas pendientes llegaron"} sin neto de Mercado Libre: no suman al total.`] : []),
             ...(sinFecha.length
-              ? [`Sin fecha esperada (Falabella no la trae en el reporte): ${sinFecha.map((t) => mostrarMontoIso(t.sinFecha, t.moneda)).join(" · ")}.`]
+              ? [`Sin fecha esperada (cortes abiertos sin fecha de pago): ${sinFecha.map((t) => mostrarMontoIso(t.sinFecha, t.moneda)).join(" · ")}.`]
               : []),
           ]}
         />

@@ -161,9 +161,12 @@ export function CrearConIA({
   return (
     <div className={styles.crearIA}>
       <p className={styles.ayudaIA}>
-        La IA de tu empresa (Administración → Conectar IA, módulo Publicaciones) lee hasta {MAXIMO_FOTOS_ANALISIS} fotos de arriba y lo que escribas, arma la
-        ficha del producto y, cuando la confirmas, propone títulos y la descripción. Lo cobra tu cuenta de IA. Nada se publica desde aquí.
+        La IA de tu empresa (Administración → Conectar IA) lee hasta {MAXIMO_FOTOS_ANALISIS} fotos de arriba y lo que escribas, arma la ficha del producto y,
+        cuando la confirmas, crea imágenes de venta, propone títulos y escribe la descripción. Lo cobra tu cuenta de IA. Nada se publica desde aquí.
       </p>
+
+      {/* El paso 1 se ve desde el principio: los datos de abajo y, después de «Analizar», la ficha. */}
+      <p className="zx-etiqueta">1. Ficha del producto</p>
 
       {cuentas.length > 1 ? (
         <Campo etiqueta="Cuenta de destino (define el país y el idioma)">
@@ -218,7 +221,6 @@ export function CrearConIA({
 
       {ficha ? (
         <div className={styles.bloqueIA}>
-          <p className="zx-etiqueta">1. Ficha del producto</p>
           {!leyoFotos && fotos.length > 0 ? <p className={styles.ayudaIA}>La IA conectada no lee imágenes: la ficha salió solo de tu texto.</p> : null}
           <p className={styles.ayudaIA}>
             Categoría de Mercado Libre: <strong>{categoria ? categoria.nombre : "no se pudo detectar (la eliges abajo)"}</strong>
