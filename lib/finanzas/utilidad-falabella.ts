@@ -40,10 +40,17 @@
 //   costo de la maestra de esa orden (aunque a un SKU le falte costo) y
 //   flete_manual es un flete adicional que resta en envíos y en utilidad.
 //   Valen con y sin reporte; ni el reporte ni la sincronización los pisan.
+// - Envío agencia y empaque (costos_sku, como en ML): se restan UNA vez por
+//   orden, con el mayor entre sus SKU (fila exacta o la base del combo).
+//   El envío agencia solo si la orden es de agencia (envio-falabella.ts);
+//   el empaque en todas. SKU sin envío agencia → aviso «Sin envío agencia»
+//   y se resta 0, nunca un valor inventado. Aplica en Calculada y en
+//   Estimada; flete_manual sigue aparte, dentro de «envíos».
 
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import type { CategoriaMovimiento } from "@/db/schema";
 import { resolverCostoSku, type MaestraSku } from "./combo-sku";
+import { clasificarEnvioFalabella, type ItemEnvioFalabella, type TipoEnvioFalabella } from "./envio-falabella";
 import { aCentavos, desdeCentavos, porcentaje } from "./utilidad-venta";
 
 const CERO = BigInt(0);
@@ -102,7 +109,7 @@ export interface DefectosCuentaFalabella {
   flete: string | null;
 }
 
-export interface ItemApiFalabella {
+export interface ItemApiFalabella extends ItemEnvioFalabella {
   sku: string | null;
   nombre: string | null;
   precio: string;
@@ -169,6 +176,14 @@ export interface OrdenUtilidadFalabella {
   productos: ProductoOrdenFalabella[];
   // Envío directo / domiciliario: el flete lo pone el vendedor.
   envioPropio: boolean;
+  tipoEnvio: TipoEnvioFalabella;
+  // Lo que se restó una vez por orden (mayor entre sus SKU). null con
+  // «falta_costo», «sin_reporte» o «conflicto».
+  envioAgencia: string | null;
+  empaque: string | null;
+  // De agencia pero ningún SKU tiene envío agencia: se restó 0.
+  envioAgenciaSinDato: boolean;
+  empaqueSinDato: boolean;
   // Los ajustes a mano guardados en la orden (aunque no se hayan podido
   // aplicar, p. ej. en «conflicto»), para precargar los lápices.
   costoManual: string | null;
@@ -195,6 +210,12 @@ export interface TotalesUtilidadFalabella {
   envios: string;
   promociones: string;
   otros: string;
+  // Solo órdenes calculadas (ya restados en utilidadOrdenes).
+  envioAgencia: string;
+  empaque: string;
+  // Calculadas y estimadas.
+  ordenesSinEnvioAgencia: number;
+  ordenesEnvioDesconocido: number;
   utilidadOrdenes: string;
   // Publicidad y servicios sin Nº de orden del periodo (con signo).
   cargosSinOrden: string;
@@ -274,6 +295,17 @@ const PATRON_PRECIO_ITEM = /^\d+(\.\d{1,2})?$/;
 // (nunca rompe la pantalla por un ítem raro).
 function precioItemCentavos(precio: string): bigint | null {
   return PATRON_PRECIO_ITEM.test(precio) ? aCentavos(precio) : null;
+}
+
+// El mayor de los montos con dato; null si ninguno tiene (regla de ML,
+// congelar.ts).
+function mayorCentavos(valores: (string | null)[]): bigint | null {
+  let resultado: bigint | null = null;
+  for (const valor of valores) {
+    const centavos = valor === null ? null : precioItemCentavos(valor);
+    if (centavos !== null && (resultado === null || centavos > resultado)) resultado = centavos;
+  }
+  return resultado;
 }
 
 export const claveReferenciaCuenta = (cuentaId: string) => `${cuentaId}|*`;
@@ -438,6 +470,10 @@ export function calcularUtilidadFalabella(entrada: {
     envios: CERO,
     promociones: CERO,
     otros: CERO,
+    envioAgencia: CERO,
+    empaque: CERO,
+    sinEnvioAgencia: 0,
+    envioDesconocido: 0,
     utilidad: CERO,
     ventasCalculadas: CERO,
     retenciones: aCentavosRedondeado(sinOrden.retencion),
@@ -505,7 +541,34 @@ export function calcularUtilidadFalabella(entrada: {
     utilidad: null,
     porcentajeUtilidad: null,
     skusSinCosto: [],
+    envioAgencia: null,
+    empaque: null,
+    envioAgenciaSinDato: false,
+    empaqueSinDato: false,
   };
+
+  // Envío agencia y empaque de UNA orden: el mayor entre sus SKU. Cuenta
+  // los avisos en los totales (solo se llama con órdenes que se calculan).
+  const cargosPaquete = (skus: readonly (string | null)[], tipo: TipoEnvioFalabella) => {
+    const filas = skus.map((s) => resolverCostoSku(normalizarOVacio(s), entrada.maestra).filaCargos);
+    // Empaque: el del SKU; si está vacío, el del proveedor (packingEfectivo).
+    const empaque = mayorCentavos(filas.map((f) => (f ? (f.empaque ?? f.empaqueProveedor) : null)));
+    const envio = tipo === "agencia" ? mayorCentavos(filas.map((f) => f?.envioAgencia ?? null)) : CERO;
+    if (envio === null) t.sinEnvioAgencia += 1;
+    if (tipo === "desconocido") t.envioDesconocido += 1;
+    return {
+      envioAgencia: envio ?? CERO,
+      empaque: empaque ?? CERO,
+      envioAgenciaSinDato: envio === null,
+      empaqueSinDato: empaque === null,
+    };
+  };
+  const textoCargos = (c: ReturnType<typeof cargosPaquete>) => ({
+    envioAgencia: desdeCentavos(c.envioAgencia),
+    empaque: desdeCentavos(c.empaque),
+    envioAgenciaSinDato: c.envioAgenciaSinDato,
+    empaqueSinDato: c.empaqueSinDato,
+  });
 
   // Orden sin líneas de precio en el reporte. Con ítems de la API se
   // muestran producto, cantidad y ventas; con costo y una referencia de la
@@ -515,6 +578,7 @@ export function calcularUtilidadFalabella(entrada: {
     base: Omit<OrdenUtilidadFalabella, keyof typeof vacia | "estado" | "numerosRepetidos">,
     itemsApi: readonly ItemApiFalabella[],
     envioPropio: boolean,
+    tipoEnvio: TipoEnvioFalabella,
     costoManual: bigint | null,
     fleteManual: bigint | null
   ): OrdenUtilidadFalabella => {
@@ -564,7 +628,11 @@ export function calcularUtilidadFalabella(entrada: {
       if (!envioPropio) envios += ref.envioNetoUnitarioCentavos;
     }
     if (fleteManual !== null) envios -= fleteManual;
-    const utilidad = ventas + comisiones + envios - costo;
+    const cargos = cargosPaquete(
+      activos.map((i) => i.sku),
+      tipoEnvio
+    );
+    const utilidad = ventas + comisiones + envios - costo - cargos.envioAgencia - cargos.empaque;
     t.estimadas += 1;
     t.ventasEstimadas += ventas;
     t.utilidadEstimadas += utilidad;
@@ -572,6 +640,7 @@ export function calcularUtilidadFalabella(entrada: {
       ...base,
       ...visibles,
       estado: "estimada",
+      ...textoCargos(cargos),
       comisiones: desdeCentavos(comisiones),
       envios: desdeCentavos(envios),
       costo: desdeCentavos(costo),
@@ -590,7 +659,10 @@ export function calcularUtilidadFalabella(entrada: {
       skusVendidos.push(...grupo.skusVendidos);
     }
     const itemsApi = p.itemsApi ?? [];
+    // `envioPropio` del ítem lo marca el parser con la misma regla; se
+    // respeta por si el ítem llega sin los campos crudos.
     const envioPropio = (grupo?.envioPropio ?? false) || itemsApi.some((i) => i.envioPropio === true);
+    const tipoEnvio = envioPropio ? "propio" : clasificarEnvioFalabella({ items: itemsApi });
     const costoManual = manual(p.costoManual);
     const fleteManual = manual(p.fleteManual);
     const base = {
@@ -603,6 +675,7 @@ export function calcularUtilidadFalabella(entrada: {
       moneda: p.moneda,
       productos: agruparProductos(itemsApi, skusVendidos),
       envioPropio,
+      tipoEnvio,
       costoManual: costoManual === null ? null : desdeCentavos(costoManual),
       fleteManual: fleteManual === null ? null : desdeCentavos(fleteManual),
     };
@@ -613,7 +686,7 @@ export function calcularUtilidadFalabella(entrada: {
       return { ...base, ...vacia, estado: "conflicto", numerosRepetidos: repetidas.map((k) => k.slice(k.indexOf("|") + 1)) };
     }
 
-    if (skusVendidos.length === 0) return estimarSinReporte(p, base, itemsApi, envioPropio, costoManual, fleteManual);
+    if (skusVendidos.length === 0) return estimarSinReporte(p, base, itemsApi, envioPropio, tipoEnvio, costoManual, fleteManual);
 
     const ventas = aCentavosRedondeado(suma.precio);
     const comisiones = aCentavosRedondeado(suma.comision);
@@ -635,7 +708,9 @@ export function calcularUtilidadFalabella(entrada: {
       }
     }
     const sinCosto = skusSinCosto.length > 0;
-    const utilidad = ventas + comisiones + envios + promociones + otros - costo;
+    const cargos = sinCosto ? null : cargosPaquete(skusVendidos, tipoEnvio);
+    const utilidad =
+      ventas + comisiones + envios + promociones + otros - costo - (cargos?.envioAgencia ?? CERO) - (cargos?.empaque ?? CERO);
 
     t.conReporte += 1;
     t.cantidad += skusVendidos.length;
@@ -652,6 +727,8 @@ export function calcularUtilidadFalabella(entrada: {
       t.envios += envios;
       t.promociones += promociones;
       t.otros += otros;
+      t.envioAgencia += cargos?.envioAgencia ?? CERO;
+      t.empaque += cargos?.empaque ?? CERO;
       t.utilidad += utilidad;
     }
 
@@ -670,6 +747,7 @@ export function calcularUtilidadFalabella(entrada: {
       porcentajeUtilidad: sinCosto ? null : porcentaje(utilidad, ventas),
       skusSinCosto: [...new Set(skusSinCosto)],
       numerosRepetidos: [],
+      ...(cargos ? textoCargos(cargos) : { envioAgencia: null, empaque: null, envioAgenciaSinDato: false, empaqueSinDato: false }),
     };
   });
 
@@ -709,6 +787,10 @@ export function calcularUtilidadFalabella(entrada: {
       envios: desdeCentavos(t.envios),
       promociones: desdeCentavos(t.promociones),
       otros: desdeCentavos(t.otros),
+      envioAgencia: desdeCentavos(t.envioAgencia),
+      empaque: desdeCentavos(t.empaque),
+      ordenesSinEnvioAgencia: t.sinEnvioAgencia,
+      ordenesEnvioDesconocido: t.envioDesconocido,
       utilidadOrdenes: desdeCentavos(t.utilidad),
       cargosSinOrden: desdeCentavos(cargosSinOrden),
       utilidadPeriodo: desdeCentavos(utilidadPeriodo),
