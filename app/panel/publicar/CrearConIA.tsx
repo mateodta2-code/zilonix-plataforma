@@ -37,8 +37,8 @@ const RUTA_CONECTAR_IA = "/panel/conectar-ia";
 // Publicar → «Crear con IA» (PR1, textos). La IA de la empresa analiza
 // las fotos del borrador y lo que escribe el vendedor (ficha con el
 // origen de cada dato), y con la ficha CONFIRMADA propone títulos y la
-// descripción. «Usar en la publicación» solo llena el borrador de la
-// cuenta elegida: nada se publica desde acá.
+// descripción. «Usar en <cuenta>» / «Usar en todas» solo llena el borrador de la
+// cuenta o las cuentas elegidas: nada se publica desde acá.
 export function CrearConIA({
   cuentas,
   fotos,
@@ -148,14 +148,26 @@ export function CrearConIA({
     });
   }
 
-  function usarTitulo(t: string) {
-    onUsarTitulo(cuenta.id, t);
-    setUsado(`Título puesto en la cuenta ${cuenta.nickname}. Revísalo abajo.`);
+  // Cuentas donde se puede usar el texto: las marcadas del MISMO país que
+  // la cuenta de destino (el texto se escribió en su idioma).
+  const cuentasMismoPais = cuentas.filter((c) => c.siteId === cuenta.siteId);
+  const hayOtroPais = cuentasMismoPais.length < cuentas.length;
+
+  function nombres(ids: string[]): string {
+    return cuentas
+      .filter((c) => ids.includes(c.id))
+      .map((c) => c.nickname)
+      .join(", ");
   }
 
-  function usarDescripcion() {
-    onUsarDescripcion(cuenta.id, descripcion);
-    setUsado(`Descripción puesta en la cuenta ${cuenta.nickname}. Revísala abajo.`);
+  function usarTitulo(t: string, ids: string[]) {
+    for (const id of ids) onUsarTitulo(id, t);
+    setUsado(`Título puesto en ${ids.length > 1 ? "las cuentas" : "la cuenta"} ${nombres(ids)}. Revísalo abajo.`);
+  }
+
+  function usarDescripcion(ids: string[]) {
+    for (const id of ids) onUsarDescripcion(id, descripcion);
+    setUsado(`Descripción puesta en ${ids.length > 1 ? "las cuentas" : "la cuenta"} ${nombres(ids)}. Revísala abajo.`);
   }
 
   return (
@@ -297,13 +309,14 @@ export function CrearConIA({
                     </span>
                     <span className={styles.accionesIA}>
                       {max === LARGO_TITULO ? (
-                        <Boton type="button" variante="primario" onClick={() => usarTitulo(t)}>
-                          Usar en la publicación
-                        </Boton>
+                        <BotonesUsarEn cuentas={cuentasMismoPais} que={`título «${t}»`} onUsar={(ids) => usarTitulo(t, ids)} />
                       ) : null}
                     </span>
                   </div>
                 ))}
+                {hayOtroPais ? (
+                  <p className={styles.ayudaIA}>{`Solo salen las cuentas de ${cuenta.siteId}: el texto está escrito para ese país. Para otro país, elige esa cuenta arriba y pide los títulos de nuevo.`}</p>
+                ) : null}
                 {titulos.palabras.length > 0 ? (
                   <p className={styles.ayudaIA}>
                     Palabras clave:{" "}
@@ -344,9 +357,7 @@ export function CrearConIA({
                   >
                     {copiada ? "Copiada ✓" : "Copiar"}
                   </Boton>
-                  <Boton type="button" variante="primario" onClick={usarDescripcion}>
-                    Usar en la publicación
-                  </Boton>
+                  <BotonesUsarEn cuentas={cuentasMismoPais} que="descripción" onUsar={usarDescripcion} />
                 </span>
               </>
             ) : null}
@@ -354,5 +365,25 @@ export function CrearConIA({
         </>
       ) : null}
     </div>
+  );
+}
+
+// Un botón por cuenta (del mismo país) y «Usar en todas» si hay varias.
+// El texto se pone abajo, en «Título, descripción y portada por cuenta».
+export function BotonesUsarEn({ cuentas, que, onUsar }: { cuentas: Cuenta[]; que: string; onUsar: (ids: string[]) => void }) {
+  if (cuentas.length === 0) return null;
+  return (
+    <>
+      {cuentas.map((c) => (
+        <Boton key={c.id} type="button" variante="primario" onClick={() => onUsar([c.id])} aria-label={`Usar ${que} en ${c.nickname}`}>
+          {`Usar en ${c.nickname}`}
+        </Boton>
+      ))}
+      {cuentas.length > 1 ? (
+        <Boton type="button" variante="secundario" onClick={() => onUsar(cuentas.map((c) => c.id))} aria-label={`Usar ${que} en todas las cuentas`}>
+          Usar en todas
+        </Boton>
+      ) : null}
+    </>
   );
 }

@@ -13,7 +13,7 @@ vi.mock("./ia/actions", () => ({
   proponerTitulosAction: vi.fn(),
 }));
 
-import { CrearConIA } from "./CrearConIA";
+import { BotonesUsarEn, CrearConIA } from "./CrearConIA";
 
 afterEach(cleanup);
 
@@ -36,5 +36,28 @@ describe("CrearConIA: un solo recuadro con las imágenes como paso 2", () => {
   it("sin pasoImagenes no deja un paso vacío", () => {
     render(<CrearConIA cuentas={cuentas} fotos={[]} onUsarTitulo={() => {}} onUsarDescripcion={() => {}} />);
     expect(screen.queryByText("2. Imágenes")).toBeNull();
+  });
+});
+
+describe("BotonesUsarEn: elegir la cuenta del título o la descripción", () => {
+  const dos = [
+    { id: "c1", nickname: "TIENDA_UNO", siteId: "MCO" },
+    { id: "c2", nickname: "TIENDA_DOS", siteId: "MCO" },
+  ] as never[];
+
+  it("un botón por cuenta y «Usar en todas»", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    const onUsar = vi.fn();
+    render(<BotonesUsarEn cuentas={dos} que="título" onUsar={onUsar} />);
+    fireEvent.click(screen.getByText("Usar en TIENDA_DOS"));
+    expect(onUsar).toHaveBeenLastCalledWith(["c2"]);
+    fireEvent.click(screen.getByText("Usar en todas"));
+    expect(onUsar).toHaveBeenLastCalledWith(["c1", "c2"]);
+  });
+
+  it("con una sola cuenta no muestra «Usar en todas»", () => {
+    render(<BotonesUsarEn cuentas={[dos[0]]} que="título" onUsar={() => {}} />);
+    expect(screen.getByText("Usar en TIENDA_UNO")).toBeTruthy();
+    expect(screen.queryByText("Usar en todas")).toBeNull();
   });
 });
