@@ -50,12 +50,22 @@ describe("GET /api/ml/promociones/publicaciones — Tarea Promociones real (Refs
       buscar: "camisa",
       cursor: "abc",
       tamanoPagina: 30,
+      aplicarPiso: true,
     });
   });
 
   it("sin parámetros: usa los valores por defecto (todas/todas/sin buscar/tamaño 20)", async () => {
     await GET(peticion());
-    expect(listarPublicacionesConEstadoMock).toHaveBeenCalledWith("empresa-1", { cuentaId: "todas", filtro: "todas", buscar: "", cursor: null, tamanoPagina: 20 });
+    expect(listarPublicacionesConEstadoMock).toHaveBeenCalledWith("empresa-1", { cuentaId: "todas", filtro: "todas", buscar: "", cursor: null, tamanoPagina: 20, aplicarPiso: true });
+  });
+
+  it("Promo-D: solo regla=todas relaja el piso; tabla-maestra, maximo, desconocida o ausente = con piso", async () => {
+    await GET(peticion("?regla=todas"));
+    expect(listarPublicacionesConEstadoMock).toHaveBeenLastCalledWith("empresa-1", expect.objectContaining({ aplicarPiso: false }));
+    for (const regla of ["tabla-maestra", "maximo", "salir-todas", "TODAS", "cualquiera", ""]) {
+      await GET(peticion(`?regla=${regla}`));
+      expect(listarPublicacionesConEstadoMock).toHaveBeenLastCalledWith("empresa-1", expect.objectContaining({ aplicarPiso: true }));
+    }
   });
 
   it("cuentaId inválido (ni 'todas' ni un UUID): 400, nunca llega al módulo", async () => {
