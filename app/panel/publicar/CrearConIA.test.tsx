@@ -24,7 +24,9 @@ describe("CrearConIA: un solo recuadro con las imágenes como paso 2", () => {
     render(
       <CrearConIA cuentas={cuentas} fotos={[]} onUsarTitulo={() => {}} onUsarDescripcion={() => {}} pasoImagenes={<p>generador de imágenes</p>} />
     );
-    expect(screen.getByText("2. Imágenes")).toBeTruthy();
+    // El paso 1 se ve antes de analizar, y el 2 justo después.
+    const pasos = screen.getAllByText(/^\d\. /).map((e) => e.textContent);
+    expect(pasos).toEqual(["1. Ficha del producto", "2. Imágenes"]);
     expect(screen.getByText("generador de imágenes")).toBeTruthy();
     // Títulos y descripción esperan la ficha confirmada.
     expect(screen.queryByText("3. Títulos")).toBeNull();
