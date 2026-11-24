@@ -41,7 +41,7 @@ describe("Aplicar a este producto", () => {
     render(<PaginaPromocionesReal cuentas={[{ id: CUENTA, nickname: "Mi Tienda", siteId: "MLM" }]} puedeEjecutar resumenMaestraSku={{ total: 0, actualizadoTs: null }} />);
     fireEvent.click(await screen.findByText("Producto 1"));
     expect(screen.getByText("Campaña tradicional")).toBeTruthy();
-    expect(screen.getByText("Descuento de precio")).toBeTruthy();
+    expect(screen.getByText("Descuento por porcentaje")).toBeTruthy();
     // la que ML no deja salir por API queda deshabilitada
     expect((screen.getByLabelText("Salir de Oferta del día") as HTMLInputElement).disabled).toBe(true);
 

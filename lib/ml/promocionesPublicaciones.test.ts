@@ -170,6 +170,32 @@ describe("listarPublicacionesConEstado", () => {
     expect(resultado.cursorSiguiente).toBeNull();
   });
 
+  it("nombre real: usa el del ítem, respaldo con UNA llamada por campaña, ninguna para PRICE_DISCOUNT, fallo → null", async () => {
+    prepararCuenta();
+    listarItemsActivosMlMock.mockResolvedValueOnce({ ids: ["MCO1", "MCO2"], totalCatalogo: 2 });
+    leerItemParaPromocionMlMock.mockImplementation(async () => itemBasico());
+    leerPromocionesItemMlMock.mockImplementation(async () => ({
+      estado: "ok",
+      promociones: [
+        { type: "DEAL", status: "started", id: "C1", original_price: 100, price: 90, start_date: "2026-11-05T00:00:00", finish_date: "2026-12-02T23:59:59" },
+        { type: "DEAL", status: "candidate", id: "C2", original_price: 100, name: "Con nombre" },
+        { type: "SMART", status: "candidate", id: "C3", original_price: 100 },
+        { type: "PRICE_DISCOUNT", status: "pending", id: "P1", original_price: 100, price: 90 },
+      ],
+    }));
+    leerNombrePromocionMlMock.mockImplementation(async (id: string) => (id === "C1" ? "11/11 Black Friday" : null));
+
+    const r = await listarPublicacionesConEstado("empresa-1", { cuentaId: "todas", filtro: "todas", buscar: "", cursor: null, tamanoPagina: 20 });
+    const promos = r.filas[0].promociones;
+    expect(promos[0]).toMatchObject({ nombreMl: "11/11 Black Friday", fechaInicioMl: "2026-11-05T00:00:00", fechaFinMl: "2026-12-02T23:59:59" });
+    expect(promos[1].nombreMl).toBe("Con nombre");
+    expect(promos[2].nombreMl).toBeNull();
+    expect(promos[3].nombreMl).toBeNull();
+    // 2 ítems con las mismas campañas: C1 y C3 una vez cada una; C2 trae nombre; PRICE_DISCOUNT ninguna.
+    expect(leerNombrePromocionMlMock).toHaveBeenCalledTimes(2);
+    expect(leerNombrePromocionMlMock).not.toHaveBeenCalledWith("P1", expect.anything(), expect.anything());
+  });
+
   it("filtra por estado y por búsqueda de título/SKU", async () => {
     prepararCuenta();
     listarItemsActivosMlMock.mockResolvedValueOnce({ ids: ["MCO1", "MCO2"], totalCatalogo: 2 });
