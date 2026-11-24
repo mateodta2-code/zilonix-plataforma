@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { conReglaYOrigen } from "./promocionesBitacora";
+import { conReglaYOrigen, nuevoLoteBitacora } from "./promocionesBitacora";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { promocionesAcciones, promocionesCandidatos } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
@@ -390,11 +390,11 @@ export async function escribirPromocionMl(
   }
 }
 
-async function marcarResultado(empresaId: string, filaId: string, usuarioId: string, resultado: ResultadoEjecucion): Promise<void> {
+async function marcarResultado(empresaId: string, filaId: string, usuarioId: string, resultado: ResultadoEjecucion, lote: string): Promise<void> {
   await dbComoEmpresa(empresaId, (tx) =>
     tx
       .update(promocionesAcciones)
-      .set({ estado: resultado.estado, ejecutadoPor: usuarioId, ejecutadoTs: new Date(), resultadoMl: resultado.resultadoMl == null ? null : conReglaYOrigen(resultado.resultadoMl, "manual", "aprobacion"), error: resultado.error })
+      .set({ estado: resultado.estado, ejecutadoPor: usuarioId, ejecutadoTs: new Date(), resultadoMl: conReglaYOrigen(resultado.resultadoMl, "manual", "aprobacion", { lote }), error: resultado.error })
       .where(eq(promocionesAcciones.id, filaId))
   );
 }
@@ -417,6 +417,8 @@ const TOPE_CONCURRENCIA_CUENTAS = 4;
 // cuenta) y corta esa cuenta puntual ante la primera falla, nunca el
 // resto del lote.
 export async function ejecutarLoteDeAcciones(empresaId: string, usuarioId: string, filas: AccionFila[]): Promise<void> {
+  // Promo-E: todo lo que se ejecuta en esta llamada es una misma tanda.
+  const lote = nuevoLoteBitacora();
   const porCuenta = new Map<string, AccionFila[]>();
   for (const fila of filas) {
     if (!porCuenta.has(fila.cuentaMlId)) porCuenta.set(fila.cuentaMlId, []);
@@ -429,13 +431,13 @@ export async function ejecutarLoteDeAcciones(empresaId: string, usuarioId: strin
       token = await obtenerAccessTokenVigente(empresaId, cuentaMlId);
     } catch (error) {
       const motivo = error instanceof Error ? error.message : "No se pudo obtener el token.";
-      await Promise.all(filasCuenta.map((f) => marcarResultado(empresaId, f.id, usuarioId, { estado: "fallida", error: motivo, resultadoMl: null })));
+      await Promise.all(filasCuenta.map((f) => marcarResultado(empresaId, f.id, usuarioId, { estado: "fallida", error: motivo, resultadoMl: null }, lote)));
       return;
     }
 
     for (const fila of filasCuenta) {
       const resultado = await resolverYEjecutar(empresaId, fila, token);
-      await marcarResultado(empresaId, fila.id, usuarioId, resultado);
+      await marcarResultado(empresaId, fila.id, usuarioId, resultado, lote);
       if (resultado.estado !== "ejecutada") break; // esta cuenta se detiene; el resto del lote sigue (hasta 4 cuentas a la vez)
     }
   });

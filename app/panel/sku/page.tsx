@@ -17,6 +17,7 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import styles from "./page.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 type FiltrosNormalizados = { q?: string; estado?: string; orden?: string };
 
@@ -167,7 +168,7 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
             {resultado.skus.map((sku) => (
               <FilaTabla key={sku.id}>
                 <CeldaTabla>
-                  <strong>{sku.codigo}</strong>
+                  <strong><SkuCopiable sku={sku.codigo} /></strong>
                 </CeldaTabla>
                 <CeldaTabla>
                   {sku.nombre}

@@ -10,7 +10,7 @@ import { PATRON_UUID, respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolver
 // "aprobar → Lanzar aprobadas" del módulo viejo). Mismo permiso que
 // /participando/salir — esto SÍ escribe de verdad contra Mercado
 // Libre, nunca "aprobar".
-type Cuerpo = { cuentaId?: unknown; itemId?: unknown; promotionIdMl?: unknown; tipoPromocion?: unknown; precioElegido?: unknown };
+type Cuerpo = { cuentaId?: unknown; itemId?: unknown; promotionIdMl?: unknown; tipoPromocion?: unknown; precioElegido?: unknown; regla?: unknown };
 
 export async function POST(request: Request) {
   const base = urlPublicaBase();
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Faltan datos." }, { status: 400 });
   }
-  const { cuentaId, itemId, promotionIdMl, tipoPromocion, precioElegido } = cuerpo;
+  const { cuentaId, itemId, promotionIdMl, tipoPromocion, precioElegido, regla } = cuerpo;
   if (typeof cuentaId !== "string" || !PATRON_UUID.test(cuentaId)) return NextResponse.json({ error: "Falta la cuenta." }, { status: 400 });
   if (typeof itemId !== "string" || !itemId) return NextResponse.json({ error: "Falta el producto." }, { status: 400 });
   if (typeof tipoPromocion !== "string" || !tipoPromocion) return NextResponse.json({ error: "Falta el tipo de promoción." }, { status: 400 });
@@ -53,7 +53,9 @@ export async function POST(request: Request) {
     itemId,
     typeof promotionIdMl === "string" ? promotionIdMl : null,
     tipoPromocion,
-    precioElegido as number | undefined
+    precioElegido as number | undefined,
+    // Promo-D: solo la cadena exacta «todas» relaja el piso; cualquier otra cosa = con piso.
+    regla === "todas" ? "todas" : undefined
   );
 
   // Mismo criterio que /acciones (punto 4, PR #307) — un rechazo (de

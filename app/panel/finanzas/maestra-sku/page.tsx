@@ -13,6 +13,7 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import styles from "../finanzas.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 type Filtros = { proveedor?: string; q?: string; sinCosto?: string };
 
@@ -132,7 +133,7 @@ export default async function MaestraSkuPage({ searchParams }: { searchParams: R
             {resultado.filas.map((f) => (
               <FilaTabla key={f.id}>
                 <CeldaTabla>
-                  <strong>{f.skuCodigo}</strong>
+                  <strong><SkuCopiable sku={f.skuCodigo} /></strong>
                 </CeldaTabla>
                 <CeldaTabla>{f.nombreProducto ?? "—"}</CeldaTabla>
                 <CeldaTabla>{f.proveedorNombre ?? <span className={styles.suave}>Sin proveedor</span>}</CeldaTabla>

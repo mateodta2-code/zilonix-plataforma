@@ -23,7 +23,7 @@ vi.mock("@/db/empresa-context", () => ({
   dbComoEmpresa: async (empresaId: string, fn: (tx: unknown) => unknown) => {
     empresasUsadas.push(empresaId);
     const cadena: Record<string, unknown> = {};
-    for (const m of ["select", "from", "innerJoin", "leftJoin", "where", "orderBy", "limit"]) cadena[m] = () => cadena;
+    for (const m of ["select", "from", "innerJoin", "leftJoin", "where", "orderBy", "limit", "groupBy"]) cadena[m] = () => cadena;
     cadena.offset = async (n: number) => {
       offsets.push(n);
       return filasDb.valor;
@@ -100,5 +100,32 @@ describe("GET /api/ml/promociones/historial", () => {
   it("acepta filtros válidos", async () => {
     const res = await pedir(`?cuentaId=${CUENTA}&accion=salir&resultado=error&desde=2026-01-01&hasta=2026-01-31`);
     expect(res.status).toBe(200);
+  });
+
+  it("vista=tandas devuelve encabezados agrupados y pagina por tanda", async () => {
+    filasDb.valor = Array.from({ length: 51 }, (_, i) => ({ clave: `t${i}`, total: 100, participo: 80, salio: 0, modifico: 0, conError: 0, omitidas: 20, noApi: 0, simulada: false, regla: "todas", usuarioNombre: "Ana", cuentaMlId: CUENTA, nicknameCuenta: "T", fecha: "2026-01-01" }));
+    const cuerpo = await (await pedir("?vista=tandas&pagina=2")).json();
+    expect(cuerpo.tandas).toHaveLength(50);
+    expect(cuerpo.hayMas).toBe(true);
+    expect(cuerpo.tandas[0]).toMatchObject({ total: 100, participo: 80, omitidas: 20 });
+    expect(offsets).toEqual([50]);
+    expect(empresasUsadas).toEqual(["empresa-1"]);
+  });
+
+  it("devuelve las filas de una tanda por lote y valida el formato", async () => {
+    expect((await pedir("?lote=nada")).status).toBe(400);
+    filasDb.valor = [fila({ resultadoMl: { regla: "salir", origen: "salir-todas", lote: "L", limite: "ml", motivo: "m".repeat(900), nombrePromocion: "Camp", sku: "S", token: "SECRETO" } })];
+    const cuerpo = await (await pedir(`?lote=${CUENTA}`)).json();
+    expect(cuerpo.filas[0].detalle).toMatchObject({ limite: "ml", nombrePromocion: "Camp", sku: "S", lote: "L" });
+    expect(cuerpo.filas[0].detalle.motivo).toHaveLength(500);
+    expect(JSON.stringify(cuerpo)).not.toContain("SECRETO");
+  });
+
+  it("sin permiso de consultar no consulta nada", async () => {
+    const { requierePermiso, SinPermisoError } = await import("@/lib/permisos");
+    vi.mocked(requierePermiso).mockRejectedValueOnce(new (SinPermisoError as unknown as new (m: string) => Error)("no"));
+    const res = await pedir("?vista=tandas");
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(empresasUsadas).toEqual([]);
   });
 });

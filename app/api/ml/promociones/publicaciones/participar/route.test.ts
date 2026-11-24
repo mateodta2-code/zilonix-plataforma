@@ -55,7 +55,16 @@ describe("POST /api/ml/promociones/publicaciones/participar — Tarea Promocione
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ ok: true, estado: "ejecutada" });
-    expect(participarEnPublicacionDirectoMock).toHaveBeenCalledWith("empresa-1", "usuario-1", CUENTA_ID, "MCO1", "PROMO-1", "DEAL", 95000);
+    expect(participarEnPublicacionDirectoMock).toHaveBeenCalledWith("empresa-1", "usuario-1", CUENTA_ID, "MCO1", "PROMO-1", "DEAL", 95000, undefined);
+  });
+
+  it("Promo-D: solo regla \"todas\" se reenvía; cualquier otra cosa llega como ausente (con piso)", async () => {
+    await POST(peticion(cuerpoBase({ regla: "todas" })));
+    expect(participarEnPublicacionDirectoMock).toHaveBeenLastCalledWith("empresa-1", "usuario-1", CUENTA_ID, "MCO1", "PROMO-1", "DEAL", undefined, "todas");
+    for (const regla of ["tabla-maestra", "maximo", "x", 5, null]) {
+      await POST(peticion(cuerpoBase({ regla })));
+      expect(participarEnPublicacionDirectoMock).toHaveBeenLastCalledWith("empresa-1", "usuario-1", CUENTA_ID, "MCO1", "PROMO-1", "DEAL", undefined, undefined);
+    }
   });
 
   it("un rechazo (validación o de Mercado Libre) sigue devolviendo 200, con el motivo real adentro — nunca se pierde detrás de un 4xx/5xx genérico", async () => {

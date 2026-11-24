@@ -17,6 +17,7 @@ import { mostrarMonto } from "@/lib/finanzas/montos";
 import type { CambioCosto, OmitidoRecalculo } from "@/lib/finanzas/recalcular-costos";
 import { MENSAJE_FILTRO_VACIO, type EntradaFiltroRecalculo } from "@/lib/finanzas/recalculo-pantalla";
 import estilos from "./ventasUtilidad.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #131 (Parte C) — recalcular el costo congelado de ventas ya
 // guardadas con el costo actual de la tabla maestra. Primero «Ver
@@ -167,7 +168,7 @@ export function PanelRecalculoCostos() {
                       </Link>
                     </CeldaTabla>
                     <CeldaTabla className={estilos.numero}>{c.linea}</CeldaTabla>
-                    <CeldaTabla>{c.skuCodigo}</CeldaTabla>
+                    <CeldaTabla><SkuCopiable sku={c.skuCodigo} /></CeldaTabla>
                     <CeldaTabla className={estilos.numero}>{c.antes === null ? "Sin costo" : mostrarMonto(c.antes)}</CeldaTabla>
                     <CeldaTabla className={estilos.numero}>{mostrarMonto(c.despues)}</CeldaTabla>
                     <CeldaTabla>{textoOrigen(c)}</CeldaTabla>
@@ -185,7 +186,7 @@ export function PanelRecalculoCostos() {
               <ul className={estilos.listaSimple}>
                 {vista.omitidos.map((o) => (
                   <li key={`${o.pedidoId}-${o.linea}`}>
-                    {ETIQUETA_OMITIDO[o.motivo]} · {o.skuCodigo ?? "sin SKU"} · línea {o.linea} ·{" "}
+                    {ETIQUETA_OMITIDO[o.motivo]} · {o.skuCodigo ? <SkuCopiable sku={o.skuCodigo} /> : "sin SKU"} · línea {o.linea} ·{" "}
                     <Link href={`/panel/finanzas/ventas/${o.pedidoId}`} className={estilos.enlace}>
                       ver venta
                     </Link>

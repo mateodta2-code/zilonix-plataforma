@@ -9,6 +9,7 @@ import { CeldaTabla, Tabla } from "@/components/marco/Tabla";
 import { CeldasMontos } from "./CeldasMontos";
 import { ETIQUETA_FORMA } from "./formato";
 import estilos from "./ventasUtilidad.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #131 — «Detalle día a día · cuenta · producto» como acordeón,
 // igual que Zilonix OS: el día pliega sus cuentas y productos, la
@@ -124,7 +125,7 @@ export function TablaDetalleAcordeon({ encabezados, dias, pedidoIdExterno, conDe
                                 )}
                               </div>
                               <div className={estilos.filaDatosProducto}>
-                                <span className={estilos.datoProducto}>[{p.sku_codigo ?? "sin SKU"}]</span>
+                                <span className={estilos.datoProducto}>[{p.sku_codigo ? <SkuCopiable sku={p.sku_codigo} comoSpan /> : "sin SKU"}]</span>
                                 <span className={estilos.datoProducto}>#{pedidoIdExterno[p.pedido_id]}</span>
                               </div>
                             </div>

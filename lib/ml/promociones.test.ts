@@ -491,3 +491,22 @@ describe("calcularCandidatosItem — modo sin piso (regla «Participar en todas�
     expect(conPiso.precioSugerido).toBe(90000);
   });
 });
+
+describe("Promo-D — caso del bug: piso (54000) por encima de max_discounted_price (46550), precio original 49000", () => {
+  const caso = () =>
+    item({ promociones: [{ type: "PRICE_DISCOUNT", status: "candidate", id: "p1", original_price: 49000, suggested_discounted_price: 46550, max_discounted_price: 46550 }] });
+
+  it("«todas» (sin piso): marcable, con el precio sugerido por Mercado Libre y sin motivo del piso", () => {
+    const [c] = calcularCandidatosItem(caso(), REGLAS_DEFECTO, 54000, 30000, false);
+    expect(c.cumpleReglas).toBe(true);
+    expect(c.accionSugerida).toBe("participar");
+    expect(c.precioSugerido).toBe(46550);
+    expect(c.motivoRevisarManual).toBeNull();
+  });
+
+  it("«tabla-maestra» (con piso): sigue bloqueado por el piso", () => {
+    const [c] = calcularCandidatosItem(caso(), REGLAS_DEFECTO, 54000, 30000, true);
+    expect(c.cumpleReglas).toBe(false);
+    expect(c.motivoRevisarManual).toContain("54000");
+  });
+});

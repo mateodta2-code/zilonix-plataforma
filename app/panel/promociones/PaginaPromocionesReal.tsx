@@ -14,6 +14,7 @@ import { TOPE_ITEMS_SELECCION, type ItemSeleccionado } from "@/lib/ml/promocione
 import { accionDePromocion, calcularDesdePorcentaje, calcularDesdePrecioFinal, claveMarcaPromocion, formatoEnteroInput, motivoNoMarcable, motivoSinPrecioParaParticipar, parsearNumeroLocal, planAplicarPromociones, quedaBajoPrecioMinimo, superaMaximoConfigurado } from "./calculosPublicaciones";
 import { BitacoraPromociones } from "./BitacoraPromociones";
 import styles from "./promocionesReal.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 type Cuenta = { id: string; nickname: string; siteId: string };
 type ReglaUi = "todas" | "maximo" | "tabla-maestra" | "salir-todas";
@@ -118,6 +119,8 @@ export function PaginaPromocionesReal({
   const [buscarTexto, setBuscarTexto] = useState("");
   const [buscarAplicado, setBuscarAplicado] = useState("");
 
+  // Promo-D: la regla elegida viaja al cargar la lista y al participar por producto («todas» no aplica piso ni tope nuestro).
+  const [regla, setRegla] = useState<ReglaUi>("todas");
   const [filas, setFilas] = useState<PublicacionConEstado[]>([]);
   const [conteos, setConteos] = useState<ConteosPublicaciones>({ todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 });
   const [cursor, setCursor] = useState<string | null>(null);
@@ -162,7 +165,8 @@ export function PaginaPromocionesReal({
   }
 
   async function pedirPagina(cursorParaUsar: string | null): Promise<{ filas: PublicacionConEstado[]; conteosLote: ConteosPublicaciones; cursorSiguiente: string | null } | null> {
-    const params = new URLSearchParams({ filtro, buscar: buscarAplicado });
+    // Solo «todas» relaja el piso en el servidor; las otras tres piden lo mismo.
+    const params = new URLSearchParams({ filtro, buscar: buscarAplicado, regla: regla === "todas" ? "todas" : "tabla-maestra" });
     if (cuentaSeleccionada !== "todas") params.set("cuentaId", cuentaSeleccionada);
     if (cursorParaUsar) params.set("cursor", cursorParaUsar);
     try {
@@ -181,10 +185,12 @@ export function PaginaPromocionesReal({
   // `reiniciar=true` limpia lo ya cargado y arranca de cero (cambio de
   // cuenta/filtro/búsqueda); `reiniciar=false` sigue desde el cursor
   // actual (botón "Seguir cargando", después del tope o de detener).
-  async function cargarTodoAutomatico(reiniciar: boolean) {
+  // `suave`: recarga por cambio de regla — la lista y la selección se quedan a la vista
+  // hasta que llega la primera página nueva (que las reemplaza), sin parpadeo ni perder marcas.
+  async function cargarTodoAutomatico(reiniciar: boolean, suave = false) {
     const miId = ++idCargaRef.current;
     detenerRef.current = false;
-    if (reiniciar) {
+    if (reiniciar && !suave) {
       setFilas([]);
       setConteos({ todas: 0, enPromocion: 0, sinPromocion: 0, conError: 0 });
       setCursor(null);
@@ -198,14 +204,18 @@ export function PaginaPromocionesReal({
 
     let cursorActual: string | null = reiniciar ? null : cursor;
     let totalRevisado = reiniciar ? 0 : conteos.todas;
+    let primeraPagina = true;
 
     while (true) {
       const resultado = await pedirPagina(cursorActual);
       if (idCargaRef.current !== miId) return; // esta carga ya no es la vigente
       if (!resultado) break;
 
-      setFilas((actual) => [...actual, ...resultado.filas]);
-      setConteos((actual) => sumarConteos(actual, resultado.conteosLote));
+      const reemplaza = suave && primeraPagina;
+      primeraPagina = false;
+      if (reemplaza) setExpandidaId(null);
+      setFilas((actual) => (reemplaza ? resultado.filas : [...actual, ...resultado.filas]));
+      setConteos((actual) => (reemplaza ? resultado.conteosLote : sumarConteos(actual, resultado.conteosLote)));
       totalRevisado += resultado.conteosLote.todas;
       cursorActual = resultado.cursorSiguiente;
       setCursor(cursorActual);
@@ -220,10 +230,15 @@ export function PaginaPromocionesReal({
     if (idCargaRef.current === miId) setCargandoAuto(false);
   }
 
+  // Promo-D: cambiar entre «todas» (sin piso) y cualquier otra regla recalcula
+  // las filas en el servidor; la selección de Promo-A se conserva (mismos productos).
+  const sinPisoPrevioRef = useRef(regla === "todas");
   useEffect(() => {
-    void cargarTodoAutomatico(true);
+    const cambioModoPiso = sinPisoPrevioRef.current !== (regla === "todas");
+    sinPisoPrevioRef.current = regla === "todas";
+    void cargarTodoAutomatico(true, cambioModoPiso);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cargarTodoAutomatico se recrea cada render; solo importa reaccionar a estos 3 (cancela la carga vieja por idCargaRef)
-  }, [cuentaSeleccionada, filtro, buscarAplicado]);
+  }, [cuentaSeleccionada, filtro, buscarAplicado, regla === "todas"]);
 
   function parcharPromo(itemId: string, cuentaMlId: string, tipoPromocion: string, promotionIdMl: string | null, mutar: (p: PromocionParaUi) => PromocionParaUi | null) {
     setFilas((actual) =>
@@ -295,6 +310,7 @@ export function PaginaPromocionesReal({
           promotionIdMl: promocion.promotionIdMl,
           tipoPromocion: promocion.tipoPromocion,
           precioElegido: calculoModal.precioFinal,
+          regla: regla === "todas" ? "todas" : undefined,
         }),
       });
       body = await res.json().catch(() => ({}));
@@ -406,7 +422,7 @@ export function PaginaPromocionesReal({
             itemId: fila.itemId,
             promotionIdMl: promocion.promotionIdMl,
             tipoPromocion: promocion.tipoPromocion,
-            ...(esSalir ? {} : { precioElegido: promocion.precioSugerido }),
+            ...(esSalir ? {} : { precioElegido: promocion.precioSugerido, regla: regla === "todas" ? "todas" : undefined }),
           }),
         });
         const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string | null };
@@ -456,7 +472,6 @@ export function PaginaPromocionesReal({
   }
 
   // ---------- Reglas (lote) ----------
-  const [regla, setRegla] = useState<ReglaUi>("todas");
   const [maximoPct, setMaximoPct] = useState(15);
   const dialogReglaRef = useRef<HTMLDialogElement>(null);
   const [pasoRegla, setPasoRegla] = useState<"confirmar" | "resultado">("confirmar");
@@ -937,7 +952,7 @@ export function PaginaPromocionesReal({
                     <span className={styles.titulo}>{fila.tituloProducto ?? fila.itemId}</span>
                     <span className={styles.subtitulo}>
                       {fila.nicknameCuenta}
-                      {fila.skuCodigo ? ` · SKU ${fila.skuCodigo}` : ""}
+                      {fila.skuCodigo ? <SkuCopiable sku={fila.skuCodigo} comoSpan prefijo=" · SKU " /> : ""}
                       {fila.precioOriginal != null ? ` · ${formatearMoneda(fila.precioOriginal, fila.siteId)}` : ""}
                       {fila.stock != null ? ` · Stock ${formatearNumero(fila.stock, idioma)}` : ""}
                     </span>
@@ -1011,7 +1026,7 @@ export function PaginaPromocionesReal({
                                   {resultadosPromo[`${claveSeleccion(fila.cuentaMlId, fila.itemId)}|${claveMarcaPromocion(promocion)}`].texto}
                                 </span>
                               )}
-                              {!promocion.cumpleReglas && promocion.motivoRevisarManual && <span style={{ color: "var(--kpi-peligro-texto)" }}>{promocion.motivoRevisarManual}</span>}
+                              {!promocion.cumpleReglas && promocion.motivoRevisarManual && !(puedeEjecutar && motivoNoMarcable(promocion) === promocion.motivoRevisarManual) && <span style={{ color: "var(--kpi-peligro-texto)" }}>{promocion.motivoRevisarManual}</span>}
                             </div>
                             <div className={styles.accionesPromocion}>
                               {activa ? (
@@ -1070,7 +1085,7 @@ export function PaginaPromocionesReal({
             <p className={styles.tituloModal}>Confirma los detalles de la promoción</p>
             <p className={styles.resumenProducto}>
               {seleccion.fila.tituloProducto ?? seleccion.fila.itemId}
-              {seleccion.fila.skuCodigo ? ` — SKU ${seleccion.fila.skuCodigo}` : ""}
+              {seleccion.fila.skuCodigo ? <SkuCopiable sku={seleccion.fila.skuCodigo} prefijo=" — SKU " /> : ""}
             </p>
             <p className={styles.filaDato}>
               <span>Promoción</span>
