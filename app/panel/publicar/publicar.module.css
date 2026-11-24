@@ -167,6 +167,19 @@
   border-top: 1px solid var(--borde);
 }
 
+/* Sub pestañas «Generar imágenes / Títulos / Descripción» (24-nov). La
+   pestaña inactiva solo se oculta (sigue montada): el display de la clase
+   le ganaría al [hidden] del navegador, por eso va explícito. */
+.subPestanasIA {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crearIA[hidden] {
+  display: none;
+}
+
 .ayudaIA {
   margin: 0;
   font-size: 13px;

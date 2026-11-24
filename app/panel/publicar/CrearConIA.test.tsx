@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 //
 // «Generación de imágenes para Meli» (antes «Crear con IA», 23-nov):
-// imágenes de referencia antes de «Información del producto», y el orden
-// 1. Ficha, 2. Títulos, 3. Descripción y 4. Imágenes (al final).
+// imágenes de referencia antes de «Información del producto», la ficha
+// arriba y, debajo, las sub pestañas Generar imágenes / Títulos /
+// Descripción (24-nov), que se guardan 2 horas en la pestaña.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { CAMPOS_FICHA } from "@/lib/publicaciones/ficha";
 
 vi.mock("./ia/actions", () => ({
   analizarProductoAction: vi.fn(),
@@ -14,37 +16,59 @@ vi.mock("./ia/actions", () => ({
 
 import { BotonesUsarEn, CrearConIA } from "./CrearConIA";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  sessionStorage.clear();
+});
 
-describe("CrearConIA: referencias al principio e imágenes al final", () => {
+describe("CrearConIA: ficha arriba y sub pestañas debajo", () => {
   const cuentas = [{ id: "c1", nickname: "TIENDA", siteId: "MCO" }] as never[];
+  const base = { cuentas, fotos: [], onUsarTitulo: () => {}, onUsarDescripcion: () => {} };
 
-  it("antes de analizar: referencias, «1. Ficha» y «4. Imágenes» al final", () => {
-    const { container } = render(
-      <CrearConIA
-        cuentas={cuentas}
-        fotos={[]}
-        onUsarTitulo={() => {}}
-        onUsarDescripcion={() => {}}
-        referencias={<p>subir referencias</p>}
-        pasoImagenes={<p>generador de imágenes</p>}
-      />
-    );
-    const pasos = screen.getAllByText(/^\d\. /).map((e) => e.textContent);
-    expect(pasos).toEqual(["1. Ficha del producto", "4. Imágenes"]);
-    // Las referencias van antes de «Información del producto».
+  it("referencias antes de «Información del producto» y las 3 sub pestañas, con «Generar imágenes» abierta", () => {
+    const { container } = render(<CrearConIA {...base} referencias={<p>subir referencias</p>} pasoImagenes={<p>generador de imágenes</p>} />);
+    expect(screen.getAllByText(/^\d\. /).map((e) => e.textContent)).toEqual(["1. Ficha del producto"]);
     const texto = container.textContent ?? "";
     expect(texto.indexOf("Imágenes de referencia")).toBeLessThan(texto.indexOf("Información del producto"));
     expect(texto.indexOf("subir referencias")).toBeLessThan(texto.indexOf("Información del producto"));
-    // Títulos y descripción esperan la ficha confirmada.
-    expect(screen.queryByText("2. Títulos")).toBeNull();
-    expect(screen.queryByText("3. Descripción")).toBeNull();
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Generar imágenes", "Títulos", "Descripción"]);
+    expect(screen.getByRole("tab", { name: "Generar imágenes" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("generador de imágenes")).toBeTruthy();
   });
 
-  it("sin pasoImagenes ni referencias no deja pasos vacíos", () => {
-    render(<CrearConIA cuentas={cuentas} fotos={[]} onUsarTitulo={() => {}} onUsarDescripcion={() => {}} />);
-    expect(screen.queryByText("4. Imágenes")).toBeNull();
+  it("cambiar de sub pestaña solo oculta la otra: lo de «Generar imágenes» sigue montado", () => {
+    render(<CrearConIA {...base} pasoImagenes={<p>generador de imágenes</p>} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Títulos" }));
+    expect(screen.getByRole("tab", { name: "Títulos" }).getAttribute("aria-selected")).toBe("true");
+    const panelImagenes = screen.getByText("generador de imágenes").closest('[role="tabpanel"]') as HTMLElement;
+    expect(panelImagenes.hidden).toBe(true);
+    // Sin ficha confirmada, Títulos y Descripción lo avisan.
+    const panelTitulos = document.getElementById("panel-ia-titulos") as HTMLElement;
+    expect(panelTitulos.hidden).toBe(false);
+    expect(panelTitulos.textContent).toMatch(/Confirmar ficha/);
+  });
+
+  it("sin pasoImagenes no hay sub pestaña de imágenes ni referencias vacías", () => {
+    render(<CrearConIA {...base} />);
+    expect(screen.queryByRole("tab", { name: "Generar imágenes" })).toBeNull();
     expect(screen.queryByText("Imágenes de referencia (1 o 2)")).toBeNull();
+  });
+
+  it("restaura lo guardado (ficha confirmada, sub pestaña) y avisa la ficha a «Generar imágenes»", async () => {
+    const ficha = Object.fromEntries(CAMPOS_FICHA.map((c) => [c.clave, { valor: c.clave === "nombre" ? "Bebedero" : null, origen: "vendedor" }]));
+    sessionStorage.setItem(
+      "zilonix:publicar:ia:textos",
+      JSON.stringify({
+        ts: Date.now(),
+        datos: { cuentaId: "c1", info: "bebedero para gatos", garantia: "", ficha, confirmada: true, categoria: { id: "MCO1", nombre: "Bebederos" }, leyoFotos: true, titulos: null, linkCompetencia: "", tituloCompetencia: "", descripcion: "Texto guardado", pestana: "descripcion" },
+      })
+    );
+    const onFicha = vi.fn();
+    render(<CrearConIA {...base} onFicha={onFicha} pasoImagenes={<p>generador</p>} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Descripción" }).getAttribute("aria-selected")).toBe("true"));
+    expect((screen.getByLabelText("Descripción propuesta") as HTMLTextAreaElement).value).toBe("Texto guardado");
+    expect((screen.getByPlaceholderText(/Qué es, marca y modelo/) as HTMLTextAreaElement).value).toBe("bebedero para gatos");
+    expect(onFicha).toHaveBeenCalledWith({ ficha, categoriaId: "MCO1" });
   });
 });
 
@@ -55,7 +79,6 @@ describe("BotonesUsarEn: elegir la cuenta del título o la descripción", () => 
   ] as never[];
 
   it("un botón por cuenta y «Usar en todas»", async () => {
-    const { fireEvent } = await import("@testing-library/react");
     const onUsar = vi.fn();
     render(<BotonesUsarEn cuentas={dos} que="título" onUsar={onUsar} />);
     fireEvent.click(screen.getByText("Usar en TIENDA_DOS"));
