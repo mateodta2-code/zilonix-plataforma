@@ -110,4 +110,16 @@ describe("GaleriaFotos — subida en lote (ALTO 1, review PR #372)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(nombreDelArchivoSubido(fetchMock.mock.calls[0][1])).toBe("foto.jpg");
   });
+
+  it("una imagen creada con IA arrastrada desde su tarjeta se pone en ese lugar, sin subir nada", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const onChange = vi.fn();
+    const { container } = render(<GaleriaFotos urls={["https://a.jpg", "https://b.jpg"]} onChange={onChange} cloudinaryConfigurado limiteFotos={5} />);
+    const primera = container.querySelector('img[src="https://a.jpg"]')?.parentElement as HTMLElement;
+    const dataTransfer = { files: [], getData: (tipo: string) => (tipo === "application/x-zilonix-foto-url" ? "https://ia.jpg" : "") };
+    fireEvent.drop(primera, { dataTransfer });
+    expect(onChange).toHaveBeenLastCalledWith(["https://ia.jpg", "https://a.jpg", "https://b.jpg"]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

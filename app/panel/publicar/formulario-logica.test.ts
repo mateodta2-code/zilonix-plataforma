@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ResultadoPublicacionCuenta } from "@/lib/ml/publicar-tipos";
 import {
+  ponerFotoEn,
+  reemplazarOAgregarFoto,
   construirEstadoInicial,
   construirEstadoInicialDesdeImportacion,
   cuentasFallidas,
@@ -794,5 +796,21 @@ describe("tituloInicialPublicacion", () => {
   });
   it("sin títulos devuelve null", () => {
     expect(tituloInicialPublicacion({}, ["a"])).toBeNull();
+  });
+});
+
+describe("imágenes creadas con IA en la galería (23-nov)", () => {
+  it("ponerFotoEn: inserta en el lugar, mueve si ya estaba y respeta el límite", () => {
+    expect(ponerFotoEn(["a", "b"], "n", 0, null)).toEqual(["n", "a", "b"]);
+    expect(ponerFotoEn(["a", "b"], "n", 99, null)).toEqual(["a", "b", "n"]);
+    expect(ponerFotoEn(["a", "b", "n"], "n", 0, 3)).toEqual(["n", "a", "b"]);
+    expect(ponerFotoEn(["a", "b"], "n", 0, 2)).toBeNull();
+  });
+
+  it("reemplazarOAgregarFoto: al regenerar queda en el lugar de la anterior; si la quitaron, al final", () => {
+    expect(reemplazarOAgregarFoto(["a", "vieja", "b"], "nueva", "vieja", null)).toEqual(["a", "nueva", "b"]);
+    expect(reemplazarOAgregarFoto(["a", "b"], "nueva", "vieja", null)).toEqual(["a", "b", "nueva"]);
+    expect(reemplazarOAgregarFoto(["a", "b"], "nueva", null, 2)).toBeNull();
+    expect(reemplazarOAgregarFoto(["a", "nueva"], "nueva", null, 2)).toEqual(["a", "nueva"]);
   });
 });

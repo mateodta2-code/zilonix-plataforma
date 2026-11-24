@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -20,6 +20,7 @@ import { EditorVariantes, type VariantesEditadas } from "./EditorVariantes";
 import {
   esRellenoFalsoDimensiones,
   fotosDentroDelLimite,
+  reemplazarOAgregarFoto,
   serializarCategoriaOverride,
   serializarClaveValor,
   type EstadoInicialFormulario,
@@ -101,6 +102,25 @@ export function FormularioPublicar({
   const [maxFotos, setMaxFotos] = useState<number | null>(null);
   // Zona de fotos: «Subir mis fotos» (lo de siempre) o «Generar con IA» (PR2).
   const [fichaIA, setFichaIA] = useState<{ ficha: Ficha; categoriaId: string | null } | null>(null);
+  // Imágenes creadas con IA que ya están en la galería: no se usan como
+  // «foto real» de referencia para analizar ni para crear otras.
+  const [generadasIA, setGeneradasIA] = useState<string[]>([]);
+  const fotosReales = imagenes.filter((u) => u && !generadasIA.includes(u));
+
+  // Una imagen creada entra sola a la galería (al regenerar, en el lugar
+  // de la anterior). false = galería llena según la categoría.
+  // Se crean de a 2 a la vez: se trabaja sobre la lista más reciente (ref)
+  // para que una imagen no pise a la otra.
+  const imagenesRef = useRef(imagenes);
+  imagenesRef.current = imagenes;
+  function ponerFotoGenerada(nueva: string, anterior: string | null): boolean {
+    const resultado = reemplazarOAgregarFoto(imagenesRef.current.filter(Boolean), nueva, anterior, maxFotos);
+    if (!resultado) return false;
+    imagenesRef.current = resultado;
+    setImagenes(resultado);
+    setGeneradasIA((g) => (g.includes(nueva) ? g : [...g, nueva]));
+    return true;
+  }
   const [variantes, setVariantes] = useState<VariantesEditadas | null>(inicial.variantes);
   const [portadasPorVariante, setPortadasPorVariante] = useState<Record<string, string>>(inicial.portadasPorVariante);
   // Punto 7 del pedido — "ACTIVADO por defecto" en una publicación
@@ -326,7 +346,7 @@ export function FormularioPublicar({
         <p className="zx-etiqueta">Crear con IA</p>
         <CrearConIA
           cuentas={cuentasMarcadas}
-          fotos={imagenes.filter(Boolean)}
+          fotos={fotosReales}
           onUsarTitulo={(id, titulo) => actualizarCuenta(id, "titulo", titulo)}
           onUsarDescripcion={(id, descripcion) => actualizarCuenta(id, "descripcion", descripcion)}
           onFicha={setFichaIA}
@@ -335,9 +355,9 @@ export function FormularioPublicar({
               cuentas={cuentasMarcadas}
               ficha={fichaIA?.ficha ?? null}
               categoriaId={categoriaElegida?.categoryId ?? fichaIA?.categoriaId ?? null}
-              fotos={imagenes.filter(Boolean)}
+              fotos={fotosReales}
               espacioLibre={maxFotos == null ? null : Math.max(0, maxFotos - imagenes.filter(Boolean).length)}
-              onAgregarFotos={(urls) => setImagenes((actuales) => [...actuales.filter(Boolean), ...urls.filter((u) => !actuales.includes(u))])}
+              onFotoGenerada={ponerFotoGenerada}
               onPortadaCuenta={(id, url) => actualizarCuenta(id, "portadaUrl", url)}
             />
           }

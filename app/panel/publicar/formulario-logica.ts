@@ -239,6 +239,32 @@ export function moverFoto(fotos: string[], desde: number, hasta: number): string
   return copia;
 }
 
+// «Crear con IA» → imágenes generadas (23-nov): entran solas a la galería
+// y se pueden arrastrar a un lugar. MIME propio del arrastre desde una
+// tarjeta generada (no es un archivo: es una URL ya subida a Cloudinary).
+export const TIPO_ARRASTRE_FOTO_URL = "application/x-zilonix-foto-url";
+
+// Pone `url` en la posición `indice`: si ya está, la mueve; si no, la
+// inserta (indice fuera de rango = al final). Con `limite` lleno y una
+// URL nueva no cambia nada (devuelve null para que se avise).
+export function ponerFotoEn(fotos: string[], url: string, indice: number, limite: number | null): string[] | null {
+  const actual = fotos.indexOf(url);
+  if (actual >= 0) return moverFoto(fotos, actual, Math.min(Math.max(indice, 0), fotos.length - 1));
+  if (limite != null && fotos.length >= limite) return null;
+  const copia = [...fotos];
+  copia.splice(Math.min(Math.max(indice, 0), copia.length), 0, url);
+  return copia;
+}
+
+// Al regenerar una imagen: la nueva queda en el lugar de la anterior. Si
+// la anterior ya no está (la quitaron), la nueva va al final.
+export function reemplazarOAgregarFoto(fotos: string[], nueva: string, anterior: string | null, limite: number | null): string[] | null {
+  if (fotos.includes(nueva)) return fotos;
+  const i = anterior ? fotos.indexOf(anterior) : -1;
+  if (i >= 0) return fotos.map((f, idx) => (idx === i ? nueva : f));
+  return ponerFotoEn(fotos, nueva, fotos.length, limite);
+}
+
 // --- Parte 3 (importadores + permalink) ---
 
 // Revisión de seguridad (hallazgo MED) — un solo patrón de hostname

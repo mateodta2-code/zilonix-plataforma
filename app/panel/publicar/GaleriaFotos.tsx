@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
-import { moverFoto } from "./formulario-logica";
+import { moverFoto, ponerFotoEn, TIPO_ARRASTRE_FOTO_URL } from "./formulario-logica";
 import { usarSubidaFotoCloudinary } from "./usarSubidaFotoCloudinary";
 import { esLinkDeDisenoCanva } from "./canva-link";
 import styles from "./publicar.module.css";
@@ -181,8 +181,20 @@ export function GaleriaFotos({
   // archivo real desde el escritorio/explorador (dataTransfer.files
   // con contenido) — se mira `files` primero para no confundir una
   // cosa con la otra.
+  // Una imagen generada con IA arrastrada desde su tarjeta: ya está
+  // subida, solo se pone (o se mueve) en ese lugar.
+  function soltarUrlGenerada(e: React.DragEvent, indiceDestino: number): boolean {
+    const url = typeof e.dataTransfer?.getData === "function" ? e.dataTransfer.getData(TIPO_ARRASTRE_FOTO_URL) : "";
+    if (!url || !url.startsWith("https://")) return false;
+    const nuevas = ponerFotoEn(urls, url, indiceDestino, limiteFotos);
+    if (nuevas) onChange(nuevas);
+    else setAvisoLimite(`Esta categoría admite hasta ${limiteFotos} fotos: quita una para agregar esta.`);
+    return true;
+  }
+
   function alSoltar(e: React.DragEvent, indiceDestino: number) {
     e.preventDefault();
+    if (soltarUrlGenerada(e, indiceDestino)) return;
     const archivos = soloImagenes(Array.from(e.dataTransfer.files ?? []));
     if (archivos.length > 0) {
       subirRespetandoLimite(archivos);
@@ -195,6 +207,7 @@ export function GaleriaFotos({
 
   function alSoltarEnAgregar(e: React.DragEvent) {
     e.preventDefault();
+    if (soltarUrlGenerada(e, urls.length)) return;
     const archivos = soloImagenes(Array.from(e.dataTransfer.files ?? []));
     if (archivos.length > 0) subirRespetandoLimite(archivos);
   }
