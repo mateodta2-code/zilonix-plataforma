@@ -41,7 +41,7 @@ const {
   modificarPromocionMlMock,
   leerNombrePromocionMlMock,
 } = vi.hoisted(() => ({
-  leerNombrePromocionMlMock: vi.fn(async (): Promise<string | null> => null),
+  leerNombrePromocionMlMock: vi.fn(async (_id: string, _tipo: string, _token: string): Promise<string | null> => null),
   leerItemParaPromocionMlMock: vi.fn(),
   leerPromocionesItemMlMock: vi.fn(),
   listarItemsActivosMlMock: vi.fn(),
@@ -183,7 +183,7 @@ describe("listarPublicacionesConEstado", () => {
         { type: "PRICE_DISCOUNT", status: "pending", id: "P1", original_price: 100, price: 90 },
       ],
     }));
-    leerNombrePromocionMlMock.mockImplementation(async (id: string) => (id === "C1" ? "11/11 Black Friday" : null));
+    leerNombrePromocionMlMock.mockImplementation(async (id: string, _tipo: string, _token: string) => (id === "C1" ? "11/11 Black Friday" : null));
 
     const r = await listarPublicacionesConEstado("empresa-1", { cuentaId: "todas", filtro: "todas", buscar: "", cursor: null, tamanoPagina: 20 });
     const promos = r.filas[0].promociones;

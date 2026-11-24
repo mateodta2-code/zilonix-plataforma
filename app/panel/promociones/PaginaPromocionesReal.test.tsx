@@ -320,7 +320,8 @@ describe("PaginaPromocionesReal — «Aplicada» vs «Programada»", () => {
     return {
       tipoPromocion, promotionIdMl: `${tipoPromocion}-1`, estadoMl, esCompartida: false, soloEnMl: false, puedeSalirApi: true,
       precioOriginal: 100, precioActual: 90, precioMinimo: null, precioSugerido: null, maxDiscountedPrice: null, gananciaEstimada: null,
-      cumpleReglas: true, accionSugerida: null, motivoRevisarManual: null, reglaAdicionalMotivo: null, nombreMl: null, fechaInicioMl: null, fechaFinMl: null,
+      cumpleReglas: true, accionSugerida: null, motivoRevisarManual: null, reglaAdicionalMotivo: null,
+      nombreMl: null as string | null, fechaInicioMl: null as string | null, fechaFinMl: null as string | null,
     };
   }
   function fila(itemId: string, promociones: ReturnType<typeof promo>[]) {
