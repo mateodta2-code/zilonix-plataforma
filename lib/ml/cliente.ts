@@ -1981,6 +1981,44 @@ export async function tendenciasCategoriaMl(siteId: string, categoriaId: string,
   }
 }
 
+// Tendencias por NIVEL de categoría (23-nov, idea vista en otra
+// herramienta): la categoría general (raíz), la padre y la específica,
+// con la ruta de /categories/{id} (path_from_root, documentado) y
+// /trends de cada una. Nivel de búsqueda: alta = general, media = padre,
+// baja = específica. Si no se puede leer la ruta, solo la específica.
+export type NivelTendencia = "alta" | "media" | "baja";
+export type TendenciasNivelMl = { nivel: NivelTendencia; categoriaId: string; nombre: string; palabras: string[] };
+
+// Puro: qué categorías consultar según la ruta (sin repetir niveles).
+export function categoriasPorNivel(ruta: { id: string; name: string }[], categoriaId: string): { nivel: NivelTendencia; categoriaId: string; nombre: string }[] {
+  const especifica = ruta.length > 0 && ruta[ruta.length - 1].id === categoriaId ? ruta[ruta.length - 1] : { id: categoriaId, name: categoriaId };
+  const lista: { nivel: NivelTendencia; categoriaId: string; nombre: string }[] = [{ nivel: "baja", categoriaId: especifica.id, nombre: especifica.name }];
+  const padre = ruta.length >= 2 ? ruta[ruta.length - 2] : null;
+  if (padre) lista.push({ nivel: "media", categoriaId: padre.id, nombre: padre.name });
+  const general = ruta.length >= 3 ? ruta[0] : null;
+  if (general) lista.push({ nivel: "alta", categoriaId: general.id, nombre: general.name });
+  return lista;
+}
+
+export async function tendenciasPorNivelMl(
+  siteId: string,
+  categoriaId: string,
+  token: string
+): Promise<{ ruta: string[]; niveles: TendenciasNivelMl[] }> {
+  let ruta: { id: string; name: string }[] = [];
+  try {
+    ruta = (await leerCategoriaMl(categoriaId)).pathFromRoot;
+  } catch {
+    ruta = [];
+  }
+  const niveles: TendenciasNivelMl[] = [];
+  for (const c of categoriasPorNivel(ruta, categoriaId)) {
+    const palabras = await tendenciasCategoriaMl(siteId, c.categoriaId, token);
+    if (palabras && palabras.length > 0) niveles.push({ ...c, palabras });
+  }
+  return { ruta: ruta.map((c) => c.name), niveles };
+}
+
 // Diagnóstico de imágenes de Mercado Libre (Publicar → «Crear con IA»,
 // PR2). Documentado: https://developers.mercadolibre.com.ar/diagnostico-imagenes
 // POST /moderations/pictures/diagnostic con { picture_url, context:

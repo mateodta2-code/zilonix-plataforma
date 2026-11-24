@@ -214,6 +214,31 @@
   color: var(--texto-suave);
 }
 
+/* Barra de caracteres usados del título (60 o 120). */
+.barraTituloIA {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--borde);
+  overflow: hidden;
+}
+
+.barraTituloIA > span {
+  display: block;
+  height: 100%;
+  background: var(--acento, currentColor);
+}
+
+/* «Más buscados en la categoría». */
+.masBuscadosIA {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+}
+
 .accionesIA {
   display: inline-flex;
   flex-wrap: wrap;

@@ -215,8 +215,8 @@ export const GUIA: GrupoGuia[] = [
               "Pulsa «Analizar producto». Cada dato de la ficha dice de dónde salió: «De la foto», «Del vendedor» o «Confirmar».",
               "Revisa lo marcado «Confirmar»: corrígelo, bórralo o marca «Es correcto». Después pulsa «Confirmar ficha».",
               "Todo va en un solo recuadro y en orden: 1. Ficha del producto, 2. Títulos, 3. Descripción y 4. Imágenes (ver «Generar imágenes con IA»).",
-              "En «2. Títulos» pide los títulos (máximo 60 caracteres, con las búsquedas en tendencia de la categoría) y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»): el título se pone solo abajo, en «Título, descripción y portada por cuenta».",
-              "En «3. Descripción», si das garantía, escríbela; después pulsa «Escribir descripción», revísala y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»).",
+              "En «2. Títulos» pide los títulos (máximo 60 caracteres). Arriba verás «Más buscados en la categoría»: las búsquedas en tendencia de la categoría general (Alta), la padre (Media) y la específica (Baja); cada palabra clave dice de dónde sale y su nivel. Luego elige un título y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»): el título se pone solo abajo, en «Título, descripción y portada por cuenta».",
+              "En «3. Descripción» (mejor después de pedir los títulos: usa sus palabras clave de forma natural, sin inventar datos), si das garantía, escríbela; después pulsa «Escribir descripción», revísala y pulsa «Usar en» la cuenta que quieras (o «Usar en todas»).",
             ],
           },
           {

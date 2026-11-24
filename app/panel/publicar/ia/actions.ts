@@ -6,15 +6,15 @@ import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { descargarFotoBase } from "@/lib/ia/imagen";
 import { llamarIA, type ImagenIA } from "@/lib/ia/proveedores";
 import type { ConexionIAConClave } from "@/lib/ia/tipos";
-import { tendenciasCategoriaMl } from "@/lib/ml/cliente";
+import { tendenciasPorNivelMl } from "@/lib/ml/cliente";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { resolverCategoria } from "@/lib/ml/publicar";
 import { analizarProducto, ErrorAnalisisIA } from "@/lib/publicaciones/analisis";
-import { armarDescripcion, leerPartesDescripcion, promptDescripcion } from "@/lib/publicaciones/descripcion";
+import { armarDescripcion, leerPartesDescripcion, limpiarPalabrasClave, promptDescripcion } from "@/lib/publicaciones/descripcion";
 import { mensajeErrorIA, MENSAJE_SIN_IA } from "@/lib/publicaciones/errores";
 import { fichaConfirmada, fichaEnTexto, idiomaDeSitio, leerFicha, limpiarInfoVendedor, LARGO_GARANTIA, MAXIMO_FOTOS_ANALISIS, type Ficha } from "@/lib/publicaciones/ficha";
 import { conCupoDeTexto } from "@/lib/publicaciones/freno";
-import { leerPropuestaTitulos, promptTitulos, type PalabraClave } from "@/lib/publicaciones/titulos";
+import { leerPropuestaTitulos, ORDEN_PARA_IA, promptTitulos, unirTendenciasPorNivel, type PalabraClave, type TendenciaConNivel } from "@/lib/publicaciones/titulos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 
@@ -89,7 +89,19 @@ export async function analizarProductoAction(entrada: { cuentaMlId: string; foto
   }
 }
 
-export type ResultadoTitulos = { ok: true; titulos: string[]; catalogo: string | null; palabras: PalabraClave[]; conTendencias: boolean } | Fallo;
+export type ResultadoTitulos =
+  | {
+      ok: true;
+      titulos: string[];
+      catalogo: string | null;
+      palabras: PalabraClave[];
+      conTendencias: boolean;
+      // «Más buscados en la categoría»: tendencias de la categoría general,
+      // la padre y la específica, con su nivel, y la ruta analizada.
+      masBuscados: TendenciaConNivel[];
+      rutaCategoria: string[];
+    }
+  | Fallo;
 
 // Paso 2: títulos, solo con la ficha confirmada (se revisa otra vez acá).
 export async function proponerTitulosAction(entrada: {
@@ -103,24 +115,29 @@ export async function proponerTitulosAction(entrada: {
   if (!fichaConfirmada(ficha)) return { ok: false, aviso: "Confirma la ficha antes de pedir títulos." };
   const ctx = await preparar(entrada.cuentaMlId);
   if ("ok" in ctx) return ctx;
-  let tendencias: string[] = [];
+  let masBuscados: TendenciaConNivel[] = [];
+  let rutaCategoria: string[] = [];
   if (typeof entrada.categoriaId === "string" && entrada.categoriaId) {
     try {
       const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
-      tendencias = (await tendenciasCategoriaMl(ctx.cuenta.siteId, entrada.categoriaId, token)) ?? [];
+      const r = await tendenciasPorNivelMl(ctx.cuenta.siteId, entrada.categoriaId, token);
+      rutaCategoria = r.ruta;
+      masBuscados = unirTendenciasPorNivel(r.niveles);
     } catch (error) {
       registrar("tendencias", error);
     }
   }
+  // Para la IA, primero las de la categoría específica (las más cercanas al producto).
+  const tendencias = [...masBuscados].sort((a, b) => ORDEN_PARA_IA[a.nivel] - ORDEN_PARA_IA[b.nivel]).map((t) => t.palabra);
   const info = limpiarInfoVendedor(entrada.info);
   const categoria = typeof entrada.categoriaNombre === "string" ? entrada.categoriaNombre.slice(0, 120) : null;
   try {
     const respuesta = await conCupoDeTexto(ctx.empresaId, () =>
       llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info }), { maxTokens: 800 })
     );
-    const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info });
+    const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados });
     if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
-    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0 };
+    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria };
   } catch (error) {
     registrar("titulos", error);
     return { ok: false, aviso: mensajeErrorIA(error) };
@@ -131,13 +148,13 @@ export type ResultadoDescripcion = { ok: true; descripcion: string } | Fallo;
 
 // Paso 3: descripción, solo con la ficha confirmada. La garantía es la que
 // escribió el vendedor (si no escribió nada, no sale esa sección).
-export async function escribirDescripcionAction(entrada: { cuentaMlId: string; ficha: unknown; garantia?: string }): Promise<ResultadoDescripcion> {
+export async function escribirDescripcionAction(entrada: { cuentaMlId: string; ficha: unknown; garantia?: string; palabrasClave?: unknown }): Promise<ResultadoDescripcion> {
   const ficha = leerFicha(entrada.ficha);
   if (!fichaConfirmada(ficha)) return { ok: false, aviso: "Confirma la ficha antes de pedir la descripción." };
   const ctx = await preparar(entrada.cuentaMlId);
   if ("ok" in ctx) return ctx;
   try {
-    const respuesta = await conCupoDeTexto(ctx.empresaId, () => llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais }), { maxTokens: 1_500 }));
+    const respuesta = await conCupoDeTexto(ctx.empresaId, () => llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais, palabrasClave: limpiarPalabrasClave(entrada.palabrasClave) }), { maxTokens: 1_500 }));
     const partes = leerPartesDescripcion(respuesta, fichaEnTexto(ficha));
     if (!partes) return { ok: false, aviso: "La IA no devolvió una descripción usable. Intenta de nuevo." };
     const descripcion = armarDescripcion(partes, { ficha, garantia: limpiarInfoVendedor(entrada.garantia, LARGO_GARANTIA), idioma: ctx.idioma });
