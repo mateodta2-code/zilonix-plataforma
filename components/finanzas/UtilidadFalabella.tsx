@@ -1,6 +1,6 @@
 import { acotarPagina, normalizarParametro, parsearPagina } from "@/lib/filtros-listado";
 import { listarCuentasFalabellaParaSelector, listarUtilidadFalabella } from "@/lib/finanzas/utilidad-falabella-consulta";
-import type { EstadoUtilidadFalabella } from "@/lib/finanzas/utilidad-falabella";
+import type { EstadoUtilidadFalabella, OrdenUtilidadFalabella } from "@/lib/finanzas/utilidad-falabella";
 import { resolverRangoVentas } from "@/lib/finanzas/ventas-pantalla";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -23,12 +23,30 @@ const ORDENES_POR_PAGINA = 50;
 
 const ETIQUETA_ESTADO: Record<EstadoUtilidadFalabella, { texto: string; chip: EstadoChip }> = {
   calculada: { texto: "Calculada", chip: "exito" },
+  estimada: { texto: "Estimada", chip: "aviso" },
   falta_costo: { texto: "Falta costo", chip: "advertencia" },
   sin_reporte: { texto: "Sin reporte de Falabella", chip: "aviso" },
   conflicto: { texto: "Nº de orden repetido", chip: "peligro" },
 };
 
-const FILTROS_ESTADO = ["falta_costo", "sin_reporte", "conflicto"] as const;
+const FILTROS_ESTADO = ["estimada", "falta_costo", "sin_reporte", "conflicto"] as const;
+
+// Columna «Producto»: el primero y «+ N más» si hay otros; el detalle
+// completo (con cantidades) va en el title.
+function CeldaProducto({ productos }: { productos: OrdenUtilidadFalabella["productos"] }) {
+  if (productos.length === 0) return <span className={estilos.suave}>—</span>;
+  const [primero, ...resto] = productos;
+  const detalle = productos.map((p) => `${p.cantidad} × ${p.nombre}${p.sku ? ` (${p.sku})` : ""}`).join(" · ");
+  return (
+    <div className={estilos.productoFalabella} title={detalle}>
+      <span className={estilos.nombreProductoFalabella}>
+        {primero.nombre}
+        {resto.length > 0 && <span className={estilos.suave}> + {resto.length} más</span>}
+      </span>
+      {primero.sku && <span className={estilos.datoProducto}>{primero.sku}</span>}
+    </div>
+  );
+}
 
 type Props = {
   empresaId: string;
@@ -88,6 +106,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
       <Campo etiqueta="Órdenes">
         <select name="estado" defaultValue={estado ?? ""} className="zx-control">
           <option value="">Todas</option>
+          <option value="estimada">Solo «Estimada»</option>
           <option value="falta_costo">Solo con «Falta costo»</option>
           <option value="sin_reporte">Solo «Sin reporte de Falabella»</option>
           <option value="conflicto">Solo «Nº de orden repetido»</option>
@@ -152,13 +171,22 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
       {recortado && <p className={estilos.avisoError}>Hay demasiadas órdenes en este rango: acorta las fechas para ver todas.</p>}
 
       <div className={estilos.gridKpi}>
-        <TarjetaKpi titulo="Ventas" valor={m(t.ventas)} detalle={[`${t.ordenesCalculadas + t.ordenesFaltaCosto} órdenes con reporte · ${t.cantidad} unidades`]} />
+        <TarjetaKpi titulo="Ventas" valor={m(t.ventas)} detalle={[`${t.ordenesConReporte} órdenes con reporte · ${t.cantidad} unidades`]} />
         <TarjetaKpi
           titulo="Utilidad del periodo"
           valor={m(t.utilidadPeriodo)}
           detalle={[`Órdenes con costo ${m(t.utilidadOrdenes)}`, `Publicidad y servicios sin orden ${m(t.cargosSinOrden)}`]}
         />
         <TarjetaKpi titulo="% util" valor={mostrarPorcentaje(t.porcentajeUtilidad)} detalle={["Utilidad del periodo ÷ ventas de las órdenes con costo"]} />
+        <TarjetaKpi
+          titulo="Estimadas"
+          valor={`${t.ordenesEstimadas} ${t.ordenesEstimadas === 1 ? "orden" : "órdenes"} · ${m(t.utilidadEstimadas)}`}
+          detalle={
+            t.ordenesEstimadas > 0
+              ? [`Ventas ${m(t.ventasEstimadas)}`, "Con el último % de comisión y envío de cada SKU. No suman a la utilidad del periodo hasta llegar el reporte."]
+              : undefined
+          }
+        />
         <TarjetaKpi
           titulo="Retenciones"
           valor={m(t.retenciones)}
@@ -198,6 +226,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
             <Tabla
               encabezados={[
                 "Orden",
+                "Producto",
                 "Fecha",
                 "Cuenta",
                 "Cnt",
@@ -215,6 +244,9 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
             >
               {ordenesPagina.map((o) => {
                 const sinReporte = o.estado === "sin_reporte" || o.estado === "conflicto";
+                // Sin reporte pero con ítems de la API: cantidad y ventas
+                // sí se conocen; los cobros todavía no.
+                const conVentasApi = o.estado === "sin_reporte" && o.cantidad > 0;
                 const montoOrden = (valor: string | null) => (sinReporte ? "—" : m(valor));
                 return (
                   <FilaTabla key={o.pedidoId}>
@@ -222,13 +254,19 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                       #{o.numero}
                       {o.numeroInterno && <div className={estilos.suave}>ID {o.numeroInterno}</div>}
                     </CeldaTabla>
+                    <CeldaTabla>
+                      <CeldaProducto productos={o.productos} />
+                    </CeldaTabla>
                     <CeldaTabla>{fechaHoraBogota(o.fecha)}</CeldaTabla>
                     <CeldaTabla>{o.cuenta}</CeldaTabla>
-                    <CeldaTabla>{sinReporte ? "—" : o.cantidad}</CeldaTabla>
-                    <CeldaTabla numerica>{montoOrden(o.ventas)}</CeldaTabla>
+                    <CeldaTabla>{sinReporte && !conVentasApi ? "—" : o.cantidad}</CeldaTabla>
+                    <CeldaTabla numerica>{conVentasApi ? m(o.ventas) : montoOrden(o.ventas)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.costo)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.comisiones)}</CeldaTabla>
-                    <CeldaTabla numerica>{montoOrden(o.envios)}</CeldaTabla>
+                    <CeldaTabla numerica>
+                      {montoOrden(o.envios)}
+                      {o.envioPropio && <div className={estilos.suave}>Domiciliario · envío propio</div>}
+                    </CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.promociones)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.otros)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.utilidad)}</CeldaTabla>
@@ -240,7 +278,9 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                             ? `Repetido: ${o.numerosRepetidos.join(", ")}`
                             : o.skusSinCosto.length > 0
                               ? `Sin costo: ${o.skusSinCosto.join(", ")}`
-                              : undefined
+                              : o.estado === "estimada"
+                                ? "Con el último % de comisión y envío del SKU. Pasa a «Calculada» al cargar el reporte."
+                                : undefined
                         }>
                         {ETIQUETA_ESTADO[o.estado].texto}
                       </Chip>

@@ -27,6 +27,12 @@
 //   u OrderNumber, revisión de Pablo en #475) → «conflicto» en los dos:
 //   no se sabe de cuál son las líneas del reporte y sumarlas en ambos
 //   contaría la misma plata dos veces. Quedan fuera de los totales.
+// - Sin reporte TODAVÍA pero con ítems de la API (GetOrderItems) → utilidad
+//   «Estimada»: ventas = precio de los ítems, comisión con el último % real
+//   del mismo SKU (o la mediana de la cuenta si el SKU es nuevo) y envío
+//   neto con el último envío unitario real del SKU. En cuanto llega el
+//   reporte, la orden pasa sola a «Calculada» con los cobros reales. La
+//   utilidad estimada NUNCA se suma a la del periodo: va en su propio total.
 
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import type { CategoriaMovimiento } from "@/db/schema";
@@ -74,6 +80,16 @@ export interface PedidoFalabellaEntrada {
   cuenta: string;
   fecha: Date;
   moneda: string;
+  // Ítems activos de GetOrderItems (sin cancelados ni fallidos). `precio`
+  // en texto con 2 decimales; `envioPropio` = envío directo/domiciliario.
+  itemsApi?: ItemApiFalabella[];
+}
+
+export interface ItemApiFalabella {
+  sku: string | null;
+  nombre: string | null;
+  precio: string;
+  envioPropio?: boolean;
 }
 
 export interface MovimientoEntrada {
@@ -82,9 +98,27 @@ export interface MovimientoEntrada {
   sku: string | null;
   categoria: CategoriaMovimiento;
   monto: string;
+  // El «Tipo de transacción» del reporte, tal cual (para detectar el
+  // «Pago por envío directo»).
+  tipoTransaccion?: string | null;
 }
 
-export type EstadoUtilidadFalabella = "calculada" | "falta_costo" | "sin_reporte" | "conflicto";
+// Referencia para estimar una orden sin reporte. Clave `cuentaId|SKU`
+// (SKU normalizado) y respaldo de la cuenta `cuentaId|*`.
+export interface ReferenciaEstimacionFalabella {
+  // Comisión CON SIGNO ÷ precio, en diezmilésimas: -1554 = -15,54 %.
+  tasaComisionDiezmilesimas: bigint;
+  // Envío neto CON SIGNO por unidad, en centavos.
+  envioNetoUnitarioCentavos: bigint;
+}
+
+export type EstadoUtilidadFalabella = "calculada" | "estimada" | "falta_costo" | "sin_reporte" | "conflicto";
+
+export interface ProductoOrdenFalabella {
+  nombre: string;
+  sku: string | null;
+  cantidad: number;
+}
 
 export interface OrdenUtilidadFalabella {
   pedidoId: string;
@@ -114,17 +148,25 @@ export interface OrdenUtilidadFalabella {
   skusSinCosto: string[];
   // Con «conflicto»: los números que comparte con otro pedido.
   numerosRepetidos: string[];
+  // Agrupados por SKU y nombre (de la API; si no hay ítems, del reporte).
+  productos: ProductoOrdenFalabella[];
+  // Envío directo / domiciliario: el flete lo pone el vendedor.
+  envioPropio: boolean;
 }
 
 export interface TotalesUtilidadFalabella {
   ordenes: number;
   ordenesCalculadas: number;
+  // Calculadas + falta costo CON reporte (las de «Ventas»).
+  ordenesConReporte: number;
   ordenesFaltaCosto: number;
   ordenesSinReporte: number;
   ordenesConflicto: number;
   cantidad: number;
   // Ventas de las órdenes con reporte (con y sin costo).
   ventas: string;
+  // Incluye las órdenes sin reporte a las que les falta costo (ventas de
+  // la API).
   ventasFaltaCosto: string;
   // Solo órdenes calculadas.
   costo: string;
@@ -135,8 +177,12 @@ export interface TotalesUtilidadFalabella {
   utilidadOrdenes: string;
   // Publicidad y servicios sin Nº de orden del periodo (con signo).
   cargosSinOrden: string;
-  // utilidadOrdenes + cargosSinOrden.
+  // utilidadOrdenes + cargosSinOrden. Solo plata confirmada por el
+  // reporte: las estimadas van aparte.
   utilidadPeriodo: string;
+  ordenesEstimadas: number;
+  ventasEstimadas: string;
+  utilidadEstimadas: string;
   // Utilidad del periodo ÷ ventas de las órdenes calculadas.
   porcentajeUtilidad: string | null;
   // De las órdenes con reporte y de las líneas sin orden. No restan.
@@ -176,6 +222,130 @@ function normalizarOVacio(sku: string | null): string | null {
   }
 }
 
+const DOS = BigInt(2);
+
+// a ÷ b redondeando la mitad lejos de cero. b > 0.
+function dividirRedondeado(a: bigint, b: bigint): bigint {
+  const negativo = a < CERO;
+  const absoluto = negativo ? -a : a;
+  const q = (absoluto * DOS + b) / (DOS * b);
+  return negativo ? -q : q;
+}
+
+function mediana(valores: bigint[]): bigint | null {
+  if (valores.length === 0) return null;
+  const orden = [...valores].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const medio = Math.floor(orden.length / 2);
+  return orden.length % 2 === 1 ? orden[medio] : dividirRedondeado(orden[medio - 1] + orden[medio], DOS);
+}
+
+// «Pago por envío directo» (con o sin tilde, en cualquier caja): la orden
+// la despachó el vendedor con su propio flete.
+export function esEnvioDirecto(texto: string | null | undefined): boolean {
+  if (!texto) return false;
+  const plano = texto.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return plano.includes("envio directo");
+}
+
+const PATRON_PRECIO_ITEM = /^\d+(\.\d{1,2})?$/;
+
+// Precio de un ítem de la API en centavos; null si no es un monto válido
+// (nunca rompe la pantalla por un ítem raro).
+function precioItemCentavos(precio: string): bigint | null {
+  return PATRON_PRECIO_ITEM.test(precio) ? aCentavos(precio) : null;
+}
+
+export const claveReferenciaCuenta = (cuentaId: string) => `${cuentaId}|*`;
+
+// Referencias para estimar órdenes sin reporte, desde el historial de
+// movimientos_marketplace. Los movimientos llegan DEL MÁS RECIENTE AL MÁS
+// VIEJO (la consulta los ordena por fecha de transacción): el primero que
+// aparece de cada SKU es su último reporte.
+// - Tasa de comisión: la de la última orden con ese SKU.
+// - Envío neto unitario: el de la última orden con ese SKU que NO fue de
+//   envío directo (esas tienen flete propio y no sirven de referencia).
+// - Respaldo de la cuenta (`cuentaId|*`): la mediana de todas sus órdenes,
+//   para el SKU que todavía no tiene reportes.
+export function construirReferenciasEstimacionFalabella(
+  movimientos: readonly MovimientoEntrada[]
+): Map<string, ReferenciaEstimacionFalabella> {
+  type Grupo = { cuentaId: string; precio: bigint; comision: bigint; envio: bigint; unidades: number; skus: Set<string>; envioPropio: boolean };
+  const grupos = new Map<string, Grupo>();
+  for (const m of movimientos) {
+    if (!m.numeroOrden || !m.numeroOrden.trim()) continue;
+    let monto: bigint;
+    try {
+      monto = aDiezmilesimas(m.monto);
+    } catch {
+      continue;
+    }
+    const k = clave(m.cuentaId, m.numeroOrden);
+    let g = grupos.get(k);
+    if (!g) {
+      g = { cuentaId: m.cuentaId, precio: CERO, comision: CERO, envio: CERO, unidades: 0, skus: new Set(), envioPropio: false };
+      grupos.set(k, g);
+    }
+    if (esEnvioDirecto(m.tipoTransaccion)) g.envioPropio = true;
+    if (m.categoria === "precio") {
+      g.precio += monto;
+      if (monto > CERO) {
+        g.unidades += 1;
+        const sku = normalizarOVacio(m.sku);
+        if (sku) g.skus.add(sku);
+      }
+    } else if (m.categoria === "comision") g.comision += monto;
+    else if (m.categoria === "envio") g.envio += monto;
+  }
+
+  const porSku = new Map<string, { tasa: bigint; envio: bigint | null }>();
+  const tasasCuenta = new Map<string, bigint[]>();
+  const enviosCuenta = new Map<string, bigint[]>();
+  for (const g of grupos.values()) {
+    if (g.precio <= CERO || g.unidades === 0) continue;
+    const tasa = dividirRedondeado(g.comision * DIEZ_MIL, g.precio);
+    const envio = g.envioPropio ? null : aCentavosRedondeado(dividirRedondeado(g.envio, BigInt(g.unidades)));
+    tasasCuenta.set(g.cuentaId, [...(tasasCuenta.get(g.cuentaId) ?? []), tasa]);
+    if (envio !== null) enviosCuenta.set(g.cuentaId, [...(enviosCuenta.get(g.cuentaId) ?? []), envio]);
+    for (const sku of g.skus) {
+      const k = `${g.cuentaId}|${sku}`;
+      const ref = porSku.get(k);
+      if (!ref) porSku.set(k, { tasa, envio });
+      else if (ref.envio === null && envio !== null) ref.envio = envio;
+    }
+  }
+
+  const referencias = new Map<string, ReferenciaEstimacionFalabella>();
+  for (const [cuentaId, tasas] of tasasCuenta) {
+    referencias.set(claveReferenciaCuenta(cuentaId), {
+      tasaComisionDiezmilesimas: mediana(tasas) ?? CERO,
+      envioNetoUnitarioCentavos: mediana(enviosCuenta.get(cuentaId) ?? []) ?? CERO,
+    });
+  }
+  for (const [k, ref] of porSku) {
+    const cuentaId = k.slice(0, k.lastIndexOf("|"));
+    referencias.set(k, {
+      tasaComisionDiezmilesimas: ref.tasa,
+      envioNetoUnitarioCentavos: ref.envio ?? referencias.get(claveReferenciaCuenta(cuentaId))?.envioNetoUnitarioCentavos ?? CERO,
+    });
+  }
+  return referencias;
+}
+
+function agruparProductos(items: readonly ItemApiFalabella[], skusReporte: readonly (string | null)[]): ProductoOrdenFalabella[] {
+  const fuente =
+    items.length > 0
+      ? items.map((i) => ({ sku: i.sku?.trim() || null, nombre: i.nombre?.trim() || i.sku?.trim() || "(sin nombre)" }))
+      : skusReporte.map((s) => ({ sku: s?.trim() || null, nombre: s?.trim() || "(sin SKU)" }));
+  const grupos = new Map<string, ProductoOrdenFalabella>();
+  for (const f of fuente) {
+    const k = `${f.sku ?? ""}|${f.nombre}`;
+    const g = grupos.get(k);
+    if (g) g.cantidad += 1;
+    else grupos.set(k, { ...f, cantidad: 1 });
+  }
+  return [...grupos.values()];
+}
+
 export function calcularUtilidadFalabella(entrada: {
   pedidos: PedidoFalabellaEntrada[];
   // Las líneas de las órdenes (con Nº de orden) y las del periodo sin
@@ -183,8 +353,11 @@ export function calcularUtilidadFalabella(entrada: {
   // ignora: es de una orden fuera del filtro.
   movimientos: MovimientoEntrada[];
   maestra: ReadonlyMap<string, MaestraSku>;
+  // De construirReferenciasEstimacionFalabella. Sin esto, las órdenes sin
+  // reporte quedan «sin_reporte» como antes.
+  referenciasEstimacion?: ReadonlyMap<string, ReferenciaEstimacionFalabella>;
 }): ResultadoUtilidadFalabella {
-  const porOrden = new Map<string, { suma: Suma; skusVendidos: (string | null)[] }>();
+  const porOrden = new Map<string, { suma: Suma; skusVendidos: (string | null)[]; envioPropio: boolean }>();
   const sinOrden = sumaVacia();
   for (const m of entrada.movimientos) {
     const monto = aDiezmilesimas(m.monto);
@@ -195,15 +368,20 @@ export function calcularUtilidadFalabella(entrada: {
     const k = clave(m.cuentaId, m.numeroOrden);
     let grupo = porOrden.get(k);
     if (!grupo) {
-      grupo = { suma: sumaVacia(), skusVendidos: [] };
+      grupo = { suma: sumaVacia(), skusVendidos: [], envioPropio: false };
       porOrden.set(k, grupo);
     }
+    if (esEnvioDirecto(m.tipoTransaccion)) grupo.envioPropio = true;
     grupo.suma[m.categoria] += monto;
     if (m.categoria === "precio" && monto > CERO) grupo.skusVendidos.push(m.sku);
   }
 
   const t = {
     calculadas: 0,
+    conReporte: 0,
+    estimadas: 0,
+    ventasEstimadas: CERO,
+    utilidadEstimadas: CERO,
     faltaCosto: 0,
     sinReporte: 0,
     conflicto: 0,
@@ -267,6 +445,70 @@ export function calcularUtilidadFalabella(entrada: {
     skusSinCosto: [],
   };
 
+  // Orden sin líneas de precio en el reporte. Con ítems de la API se
+  // muestran producto, cantidad y ventas; con costo y una referencia de la
+  // cuenta, además una utilidad «Estimada».
+  const estimarSinReporte = (
+    p: PedidoFalabellaEntrada,
+    base: Omit<OrdenUtilidadFalabella, keyof typeof vacia | "estado" | "numerosRepetidos">,
+    itemsApi: readonly ItemApiFalabella[],
+    envioPropio: boolean
+  ): OrdenUtilidadFalabella => {
+    const activos = itemsApi.flatMap((i) => {
+      const precio = precioItemCentavos(i.precio);
+      return precio !== null && precio > CERO ? [{ ...i, precioCentavos: precio }] : [];
+    });
+    if (activos.length === 0) {
+      t.sinReporte += 1;
+      return { ...base, ...vacia, estado: "sin_reporte", numerosRepetidos: [] };
+    }
+    const ventas = activos.reduce((suma, i) => suma + i.precioCentavos, CERO);
+    const visibles = { ...vacia, cantidad: activos.length, ventas: desdeCentavos(ventas), numerosRepetidos: [] };
+
+    let costo = CERO;
+    const skusSinCosto: string[] = [];
+    for (const i of activos) {
+      const { costoUnitario } = resolverCostoSku(normalizarOVacio(i.sku), entrada.maestra);
+      if (costoUnitario === null) skusSinCosto.push(i.sku ?? "(sin SKU)");
+      else costo += aCentavos(costoUnitario);
+    }
+    if (skusSinCosto.length > 0) {
+      t.faltaCosto += 1;
+      t.ventasFaltaCosto += ventas;
+      return { ...base, ...visibles, estado: "falta_costo", skusSinCosto: [...new Set(skusSinCosto)] };
+    }
+
+    let comisiones = CERO;
+    let envios = CERO;
+    for (const i of activos) {
+      const sku = normalizarOVacio(i.sku);
+      const ref =
+        (sku ? entrada.referenciasEstimacion?.get(`${p.cuentaId}|${sku}`) : undefined) ??
+        entrada.referenciasEstimacion?.get(claveReferenciaCuenta(p.cuentaId));
+      // La cuenta nunca tuvo un reporte: no hay con qué estimar la comisión.
+      if (!ref) {
+        t.sinReporte += 1;
+        return { ...base, ...visibles, estado: "sin_reporte" };
+      }
+      comisiones += dividirRedondeado(i.precioCentavos * ref.tasaComisionDiezmilesimas, DIEZ_MIL);
+      if (!envioPropio) envios += ref.envioNetoUnitarioCentavos;
+    }
+    const utilidad = ventas + comisiones + envios - costo;
+    t.estimadas += 1;
+    t.ventasEstimadas += ventas;
+    t.utilidadEstimadas += utilidad;
+    return {
+      ...base,
+      ...visibles,
+      estado: "estimada",
+      comisiones: desdeCentavos(comisiones),
+      envios: desdeCentavos(envios),
+      costo: desdeCentavos(costo),
+      utilidad: desdeCentavos(utilidad),
+      porcentajeUtilidad: porcentaje(utilidad, ventas),
+    };
+  };
+
   const ordenes = entrada.pedidos.map((p): OrdenUtilidadFalabella => {
     const usada = usadas.get(p.pedidoId) ?? null;
     const suma = sumaVacia();
@@ -276,7 +518,19 @@ export function calcularUtilidadFalabella(entrada: {
       for (const c of Object.keys(suma) as CategoriaMovimiento[]) suma[c] += grupo.suma[c];
       skusVendidos.push(...grupo.skusVendidos);
     }
-    const base = { pedidoId: p.pedidoId, numero: p.numeroVisible, numeroInterno: p.numeroInterno ?? null, cuentaId: p.cuentaId, cuenta: p.cuenta, fecha: p.fecha, moneda: p.moneda };
+    const itemsApi = p.itemsApi ?? [];
+    const envioPropio = (grupo?.envioPropio ?? false) || itemsApi.some((i) => i.envioPropio === true);
+    const base = {
+      pedidoId: p.pedidoId,
+      numero: p.numeroVisible,
+      numeroInterno: p.numeroInterno ?? null,
+      cuentaId: p.cuentaId,
+      cuenta: p.cuenta,
+      fecha: p.fecha,
+      moneda: p.moneda,
+      productos: agruparProductos(itemsApi, skusVendidos),
+      envioPropio,
+    };
 
     const repetidas = usada && (pedidosPorClave.get(usada)?.size ?? 0) > 1 ? [usada] : [];
     if (repetidas.length > 0) {
@@ -284,10 +538,7 @@ export function calcularUtilidadFalabella(entrada: {
       return { ...base, ...vacia, estado: "conflicto", numerosRepetidos: repetidas.map((k) => k.slice(k.indexOf("|") + 1)) };
     }
 
-    if (skusVendidos.length === 0) {
-      t.sinReporte += 1;
-      return { ...base, ...vacia, estado: "sin_reporte", numerosRepetidos: [] };
-    }
+    if (skusVendidos.length === 0) return estimarSinReporte(p, base, itemsApi, envioPropio);
 
     const ventas = aCentavosRedondeado(suma.precio);
     const comisiones = aCentavosRedondeado(suma.comision);
@@ -306,6 +557,7 @@ export function calcularUtilidadFalabella(entrada: {
     const sinCosto = skusSinCosto.length > 0;
     const utilidad = ventas + comisiones + envios + promociones + otros - costo;
 
+    t.conReporte += 1;
     t.cantidad += skusVendidos.length;
     t.ventas += ventas;
     t.retenciones += retenciones;
@@ -362,6 +614,10 @@ export function calcularUtilidadFalabella(entrada: {
     totales: {
       ordenes: ordenes.length,
       ordenesCalculadas: t.calculadas,
+      ordenesConReporte: t.conReporte,
+      ordenesEstimadas: t.estimadas,
+      ventasEstimadas: desdeCentavos(t.ventasEstimadas),
+      utilidadEstimadas: desdeCentavos(t.utilidadEstimadas),
       ordenesFaltaCosto: t.faltaCosto,
       ordenesSinReporte: t.sinReporte,
       ordenesConflicto: t.conflicto,
