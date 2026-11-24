@@ -416,7 +416,7 @@ export function CrearConIA({
             </Campo>
             <div>
               <Boton type="button" onClick={pedirDescripcion} disabled={ocupado !== null}>
-                {ocupado === "descripcion" ? "Escribiendo…" : descripcion ? "Regenerar" : "Escribir descripción"}
+                {ocupado === "descripcion" ? "Proponiendo…" : descripcion ? "Proponer otra" : "Proponer descripción"}
               </Boton>
             </div>
             {descripcion ? (
