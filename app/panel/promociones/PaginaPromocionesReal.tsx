@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Boton, BotonLink } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { Tarjeta } from "@/components/marco/Tarjeta";
@@ -282,13 +283,6 @@ export function PaginaPromocionesReal({
       setCierreCarga(detenerRef.current || cursorActual ? "detenida" : "completa");
     }
   }
-
-  // «Carga completa» se muestra unos segundos y desaparece; «Carga detenida» se queda (junto a «Seguir cargando»).
-  useEffect(() => {
-    if (cierreCarga !== "completa") return;
-    const id = setTimeout(() => setCierreCarga(null), 4000);
-    return () => clearTimeout(id);
-  }, [cierreCarga]);
 
   // Promo-D: cambiar entre «todas» (sin piso) y cualquier otra regla recalcula
   // las filas en el servidor; la selección de Promo-A se conserva (mismos productos).
@@ -778,59 +772,26 @@ export function PaginaPromocionesReal({
         </div>
         <p style={{ fontSize: 11.5, color: "var(--texto-suave)", marginTop: 6 }}>Los contadores son de las publicaciones ya revisadas en esta pantalla, no del catálogo completo.</p>
 
-        <div className={styles.progresoCarga} role="status" aria-live="polite">
-          {cargandoAuto || cierreCarga === "completa" ? (
-            <div className={styles.bandaCarga}>
-              <div className={styles.bandaCargaFila}>
-                <span className={styles.bandaCargaTitulo}>
-                  {cargandoAuto ? `Cargando publicaciones… ${formatearNumero(conteos.todas, "es")} revisadas` : "Carga completa"}
-                </span>
-                {cargandoAuto && (
-                  <Boton
-                    type="button"
-                    variante="secundario"
-                    onClick={() => {
-                      detenerRef.current = true;
-                    }}
-                  >
-                    Detener carga
-                  </Boton>
-                )}
-              </div>
-              {(() => {
-                const conTotal = totalEstimado !== null && totalEstimado > 0;
-                const pct = !cargandoAuto ? 100 : conTotal ? Math.min(100, Math.round((conteos.todas / totalEstimado!) * 100)) : 0;
-                return (
-                  <>
-                    <div
-                      className={`${styles.barraCarga} ${cargandoAuto && !conTotal ? styles.barraCargaIndeterminada : ""}`}
-                      {...(conTotal || !cargandoAuto ? { role: "progressbar", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct, "aria-label": "Progreso de la carga de publicaciones" } : {})}
-                    >
-                      <div className={styles.barraCargaRelleno} style={cargandoAuto && !conTotal ? undefined : { width: `${pct}%` }} />
-                    </div>
-                    {cargandoAuto && conTotal && (
-                      <span className={styles.bandaCargaDetalle}>
-                        {formatearNumero(conteos.todas, "es")} de {formatearNumero(totalEstimado!, "es")} revisadas ({pct} %)
-                      </span>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-          ) : cursor ? (
-            <>
-              <span>
-                {topeAlcanzado ? `Se llegó al tope de ${formatearNumero(TOPE_CARGA_AUTOMATICA, "es")} publicaciones revisadas por carga.` : `Carga detenida · ${formatearNumero(conteos.todas, "es")} revisadas.`}
-                {topeAlcanzado ? ` ${formatearNumero(conteos.todas, "es")} revisadas hasta ahora.` : ""}
-              </span>
-              <Boton type="button" variante="primario" onClick={() => void cargarTodoAutomatico(false)}>
-                Seguir cargando
-              </Boton>
-            </>
-          ) : (
-            <span>Listo — {formatearNumero(conteos.todas, "es")} publicaciones revisadas.</span>
-          )}
-        </div>
+        <BarraCarga
+          estado={cargandoAuto ? "cargando" : cierreCarga === "completa" ? "completa" : cursor ? "detenida" : "inactiva"}
+          titulo={`Cargando publicaciones… ${formatearNumero(conteos.todas, "es")} revisadas`}
+          avance={totalEstimado !== null && totalEstimado > 0 ? { hechos: conteos.todas, total: totalEstimado } : null}
+          unidad="revisadas"
+          ariaLabel="Progreso de la carga de publicaciones"
+          accion={{
+            texto: "Detener carga",
+            onClick: () => {
+              detenerRef.current = true;
+            },
+          }}
+          textoDetenida={
+            topeAlcanzado
+              ? `Se llegó al tope de ${formatearNumero(TOPE_CARGA_AUTOMATICA, "es")} publicaciones revisadas por carga. ${formatearNumero(conteos.todas, "es")} revisadas hasta ahora.`
+              : `Carga detenida · ${formatearNumero(conteos.todas, "es")} revisadas.`
+          }
+          alSeguir={() => void cargarTodoAutomatico(false)}
+          textoInactiva={`Listo — ${formatearNumero(conteos.todas, "es")} publicaciones revisadas.`}
+        />
       </Tarjeta>
 
       <Tarjeta className={styles.seccion}>
