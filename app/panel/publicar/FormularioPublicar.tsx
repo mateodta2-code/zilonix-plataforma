@@ -100,7 +100,6 @@ export function FormularioPublicar({
   const [caracteristicas, setCaracteristicas] = useState<{ principales: CaracteristicaCategoria[]; secundarias: CaracteristicaCategoria[] } | null>(null);
   const [maxFotos, setMaxFotos] = useState<number | null>(null);
   // Zona de fotos: «Subir mis fotos» (lo de siempre) o «Generar con IA» (PR2).
-  const [zonaFotos, setZonaFotos] = useState<"subir" | "ia">("subir");
   const [fichaIA, setFichaIA] = useState<{ ficha: Ficha; categoriaId: string | null } | null>(null);
   const [variantes, setVariantes] = useState<VariantesEditadas | null>(inicial.variantes);
   const [portadasPorVariante, setPortadasPorVariante] = useState<Record<string, string>>(inicial.portadasPorVariante);
@@ -305,27 +304,8 @@ export function FormularioPublicar({
         el envío si nadie la completaba); la tarjeta "+" de
         GaleriaFotos.tsx ya cubre lo mismo, pidiendo la URL antes de
         agregar nada. */}
-        <span className={styles.filtroIA} role="tablist" aria-label="Cómo agregar fotos">
-          <Boton type="button" variante={zonaFotos === "subir" ? "primario" : "secundario"} onClick={() => setZonaFotos("subir")} aria-selected={zonaFotos === "subir"}>
-            Subir mis fotos
-          </Boton>
-          <Boton type="button" variante={zonaFotos === "ia" ? "primario" : "secundario"} onClick={() => setZonaFotos("ia")} aria-selected={zonaFotos === "ia"}>
-            Generar con IA
-          </Boton>
-        </span>
-        {/* La galería se ve siempre: las imágenes generadas que elijas entran a esta misma lista. */}
+        {/* Las imágenes generadas en «Crear con IA» → «2. Imágenes» entran a esta misma galería. */}
         <GaleriaFotos urls={imagenes} onChange={setImagenes} cloudinaryConfigurado={cloudinaryConfigurado} limiteFotos={maxFotos} />
-        {zonaFotos === "ia" ? (
-          <GenerarConIA
-            cuentas={cuentasMarcadas}
-            ficha={fichaIA?.ficha ?? null}
-            categoriaId={categoriaElegida?.categoryId ?? fichaIA?.categoriaId ?? null}
-            fotos={imagenes.filter(Boolean)}
-            espacioLibre={maxFotos == null ? null : Math.max(0, maxFotos - imagenes.filter(Boolean).length)}
-            onAgregarFotos={(urls) => setImagenes((actuales) => [...actuales.filter(Boolean), ...urls.filter((u) => !actuales.includes(u))])}
-            onPortadaCuenta={(id, url) => actualizarCuenta(id, "portadaUrl", url)}
-          />
-        ) : null}
         {maxFotos != null && (
           <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
             Esta categoría admite hasta {maxFotos} fotos en Mercado Libre
@@ -338,8 +318,10 @@ export function FormularioPublicar({
         <textarea name="imagenes" value={fotosDentroDelLimite(imagenes.filter(Boolean), maxFotos).join("\n")} readOnly hidden />
       </Tarjeta>
 
-      {/* --- «Crear con IA» (PR1, textos): ficha, títulos y descripción con
-          la IA de la empresa; «Usar en la publicación» llena la cuenta de abajo. --- */}
+      {/* --- «Crear con IA»: 1. ficha, 2. imágenes (IA de imágenes),
+          3. títulos y 4. descripción (IA de texto), todo en un recuadro. «Usar en
+          la publicación» llena la cuenta de abajo y las imágenes entran a la
+          galería de arriba. --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Crear con IA</p>
         <CrearConIA
@@ -348,6 +330,17 @@ export function FormularioPublicar({
           onUsarTitulo={(id, titulo) => actualizarCuenta(id, "titulo", titulo)}
           onUsarDescripcion={(id, descripcion) => actualizarCuenta(id, "descripcion", descripcion)}
           onFicha={setFichaIA}
+          pasoImagenes={
+            <GenerarConIA
+              cuentas={cuentasMarcadas}
+              ficha={fichaIA?.ficha ?? null}
+              categoriaId={categoriaElegida?.categoryId ?? fichaIA?.categoriaId ?? null}
+              fotos={imagenes.filter(Boolean)}
+              espacioLibre={maxFotos == null ? null : Math.max(0, maxFotos - imagenes.filter(Boolean).length)}
+              onAgregarFotos={(urls) => setImagenes((actuales) => [...actuales.filter(Boolean), ...urls.filter((u) => !actuales.includes(u))])}
+              onPortadaCuenta={(id, url) => actualizarCuenta(id, "portadaUrl", url)}
+            />
+          }
         />
       </Tarjeta>
 

@@ -30,7 +30,7 @@ const CONECTAR_IA: ApartadoGuia = {
     "En Zilonix ve a Administración → Conectar IA (necesitas permiso para modificar la configuración).",
     "Pulsa «Agregar IA», elige el proveedor (OpenAI o Google), escribe un nombre y pega la API key. Zilonix busca los modelos de esa cuenta: elige el modelo de la lista (ya viene el recomendado) o pulsa «Escribir otro modelo».",
     "Guarda y usa «Probar conexión». La clave se guarda cifrada y no se vuelve a mostrar.",
-    "Márcala como principal o asígnala al módulo que la va a usar (Optimización para las imágenes de Optimización; en Publicar, Publicaciones para los textos de «Crear con IA» y Generación de imágenes para «Generar con IA»). Lo que no asignes usa la principal.",
+    "Márcala como principal o asígnala al módulo que la va a usar (Optimización para las imágenes de Optimización; en Publicar, Publicaciones para los textos de «Crear con IA» y Generación de imágenes para el paso «2. Imágenes» de «Crear con IA»). Lo que no asignes usa la principal.",
     "Vuelve a Optimización → «Ver detalle →» de una publicación → debajo de las fotos aparece «Crear imagen con IA» (recarga la página si ya la tenías abierta).",
   ],
 };
@@ -203,7 +203,7 @@ export const GUIA: GrupoGuia[] = [
         pasos: [
           "Elige las cuentas destino. Cada una lleva su propio título, descripción y portada; precio, stock, SKU y demás fotos son iguales.",
           "Para no escribir todo desde cero, pega el link de una publicación y usa «Traer datos de ese link» (necesita la extensión).",
-          "O usa «Crear con IA»: con tus fotos y lo que escribas del producto, la IA arma la ficha, propone títulos y escribe la descripción.",
+          "O usa «Crear con IA»: con tus fotos y lo que escribas del producto, la IA arma la ficha, propone títulos, escribe la descripción y, al final, crea imágenes de venta.",
           "Revisa y publica. La publicación sale como Premium con garantía del vendedor de 30 días.",
         ],
         apartados: [
@@ -214,15 +214,16 @@ export const GUIA: GrupoGuia[] = [
               "En «Crear con IA» escribe lo que sabes del producto: qué es, marca y modelo, material, medidas, qué incluye y cómo se usa.",
               "Pulsa «Analizar producto». Cada dato de la ficha dice de dónde salió: «De la foto», «Del vendedor» o «Confirmar».",
               "Revisa lo marcado «Confirmar»: corrígelo, bórralo o marca «Es correcto». Después pulsa «Confirmar ficha».",
-              "Pide los títulos (máximo 60 caracteres, con las búsquedas en tendencia de la categoría) y usa el que te guste con «Usar en la publicación».",
-              "Si das garantía, escríbela; después pulsa «Escribir descripción», revísala y úsala con «Usar en la publicación».",
+              "Todo va en un solo recuadro y en orden: 1. Ficha del producto, 2. Imágenes (ver «Generar imágenes con IA»), 3. Títulos y 4. Descripción.",
+              "En «3. Títulos» pide los títulos (máximo 60 caracteres, con las búsquedas en tendencia de la categoría) y usa el que te guste con «Usar en la publicación».",
+              "En «4. Descripción», si das garantía, escríbela; después pulsa «Escribir descripción», revísala y úsala con «Usar en la publicación».",
             ],
           },
           {
             titulo: "Generar imágenes con IA",
             pasos: [
               "Primero confirma la ficha en «Crear con IA» y sube al menos una foto real del producto.",
-              "En la zona de fotos pulsa «Generar con IA» y elige el estilo: Portadas Zilonix (una portada distinta por cada cuenta marcada), Contenido Zilonix (las 10 imágenes de contenido) o Estilo experto ML.",
+              "Debajo de la ficha, en el paso «2. Imágenes» de «Crear con IA», elige el estilo: Portadas Zilonix (una portada distinta por cada cuenta marcada), Contenido Zilonix (las 10 imágenes de contenido) o Estilo experto ML.",
               "Pulsa «Preparar propuestas (sin costo)». Revisa en cada tarjeta el título, el copy y el prompt final; corrige lo que quieras o escribe qué cambiar y pulsa «Ajustar».",
               "Pulsa «Crear» en cada imagen o «Crear todas las aprobadas». Se crean de a 2 a la vez; las demás esperan su turno solas.",
               "Cada portada queda como foto 1 de su cuenta. Las de contenido márcalas y pulsa «Agregar a mis fotos»: entran a la misma galería y las ordenas como siempre.",
