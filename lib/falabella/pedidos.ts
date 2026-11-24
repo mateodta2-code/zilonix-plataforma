@@ -179,6 +179,8 @@ export async function importarPedidos(
             // las órdenes importadas antes de existir la columna. Con
             // coalesce (revisión de Pablo en #482): si una sync posterior
             // no trae OrderNumber, se conserva el que ya estaba.
+            // costo_manual y flete_manual NUNCA van acá: los escribe solo
+            // la persona desde Finanzas y resincronizar no puede borrarlos.
             set: { estado, total, items, numeroOrden: sql`coalesce(excluded.numero_orden, ${pedidosFalabella.numeroOrden})` },
           });
       } catch (error) {

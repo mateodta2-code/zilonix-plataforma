@@ -5,6 +5,7 @@ import type { MaestraSku } from "./combo-sku";
 import {
   aDiezmilesimas,
   calcularUtilidadFalabella,
+  construirMaestraFalabella,
   construirReferenciasEstimacionFalabella,
   type MovimientoEntrada,
   type PedidoFalabellaEntrada,
@@ -355,5 +356,171 @@ describe("calcularUtilidadFalabella — utilidad estimada sin reporte", () => {
       ventas: "100000.00",
       ventasEstimadas: "100000.00",
     });
+  });
+});
+
+describe("calcularUtilidadFalabella — alias, ajustes manuales y defectos de cuenta", () => {
+  const mov = (numeroOrden: string, sku: string | null, categoria: MovimientoEntrada["categoria"], monto: string, tipoTransaccion = "x"): MovimientoEntrada => ({
+    cuentaId: CUENTA,
+    numeroOrden,
+    sku,
+    categoria,
+    monto,
+    tipoTransaccion,
+  });
+  // Orden 7001 con reporte: SKU de Falabella «FULKit6027fulfy», precio
+  // 100000, comisión -15000, envío -8000.
+  const reporte7001 = [
+    mov("7001", "FULKit6027fulfy", "precio", "100000.0000"),
+    mov("7001", null, "comision", "-15000.0000"),
+    mov("7001", null, "envio", "-8000.0000"),
+  ];
+  // Orden 7002 con envío directo (el vendedor pone el flete).
+  const reporte7002 = [
+    mov("7002", "KIT-6027", "precio", "100000.0000"),
+    mov("7002", null, "comision", "-15000.0000"),
+    mov("7002", null, "envio", "0.0000", "Pago por envío directo"),
+  ];
+  const filaAlias = (sku: string, skuFalabella: string | null, costo: string | null) => ({ sku, skuFalabella, ...fila(costo) });
+  const item = (sku: string, precio: string, envioPropio = false) => ({ sku, nombre: sku, precio, envioPropio });
+
+  it("alias: costea por sku_falabella cuando no hay coincidencia exacta", () => {
+    const maestra = construirMaestraFalabella([filaAlias("KIT-6027", "fulkit6027FULFY ", "30000.00")]);
+    const { ordenes } = calcularUtilidadFalabella({ pedidos: [pedido("7001")], movimientos: reporte7001, maestra });
+    // 100000 − 30000 − 15000 − 8000.
+    expect(ordenes[0]).toMatchObject({ estado: "calculada", costo: "30000.00", utilidad: "47000.00", costoManual: null });
+  });
+
+  it("alias: la coincidencia exacta en sku_codigo gana al alias de otro SKU", () => {
+    const maestra = construirMaestraFalabella([
+      filaAlias("KIT-6027", "FULKIT6027FULFY", "30000.00"),
+      filaAlias("FULKIT6027FULFY", null, "25000.00"),
+    ]);
+    expect(maestra.get("FULKIT6027FULFY")?.costo).toBe("25000.00");
+    expect(maestra.get("KIT-6027")?.costo).toBe("30000.00");
+  });
+
+  it("costo_manual reemplaza la maestra y saca la orden de «Falta costo»", () => {
+    const sinMaestra = calcularUtilidadFalabella({ pedidos: [pedido("7001")], movimientos: reporte7001, maestra: new Map() });
+    expect(sinMaestra.ordenes[0].estado).toBe("falta_costo");
+
+    const { ordenes, totales } = calcularUtilidadFalabella({
+      pedidos: [pedido("7001", { costoManual: "12000.00" })],
+      movimientos: reporte7001,
+      maestra: new Map(),
+    });
+    expect(ordenes[0]).toMatchObject({ estado: "calculada", costo: "12000.00", utilidad: "65000.00", costoManual: "12000.00", skusSinCosto: [] });
+    expect(totales).toMatchObject({ ordenesCalculadas: 1, ordenesFaltaCosto: 0, costo: "12000.00" });
+  });
+
+  it("costo_manual también gana sobre una maestra con costo", () => {
+    const maestra = construirMaestraFalabella([filaAlias("KIT-6027", "FULKIT6027FULFY", "30000.00")]);
+    const { ordenes } = calcularUtilidadFalabella({ pedidos: [pedido("7001", { costoManual: "0.00" })], movimientos: reporte7001, maestra });
+    expect(ordenes[0]).toMatchObject({ costo: "0.00", utilidad: "77000.00" });
+  });
+
+  it("costo_manual en una orden sin reporte: «Estimada» en vez de «Falta costo»", () => {
+    const referencias = construirReferenciasEstimacionFalabella(reporte7001);
+    const { ordenes } = calcularUtilidadFalabella({
+      pedidos: [pedido("7100", { itemsApi: [item("SIN-MAESTRA", "50000.00")], costoManual: "10000.00" })],
+      movimientos: [],
+      maestra: new Map(),
+      referenciasEstimacion: referencias,
+    });
+    // Comisión 15 % de la cuenta, envío -8000: 50000 − 10000 − 7500 − 8000.
+    expect(ordenes[0]).toMatchObject({ estado: "estimada", costo: "10000.00", utilidad: "24500.00" });
+  });
+
+  it("flete_manual resta encima del envío del reporte (que se conserva)", () => {
+    const maestra = construirMaestraFalabella([filaAlias("KIT-6027", "FULKIT6027FULFY", "30000.00")]);
+    const { ordenes, totales } = calcularUtilidadFalabella({
+      pedidos: [pedido("7001", { fleteManual: "5000.00" })],
+      movimientos: reporte7001,
+      maestra,
+    });
+    // Envío -8000 del reporte − 5000 manual; 100000 − 30000 − 15000 − 13000.
+    expect(ordenes[0]).toMatchObject({ estado: "calculada", envios: "-13000.00", utilidad: "42000.00", fleteManual: "5000.00" });
+    expect(totales).toMatchObject({ envios: "-13000.00", utilidadPeriodo: "42000.00" });
+  });
+
+  it("flete_manual en envío propio con reporte", () => {
+    const maestra = construirMaestraFalabella([filaAlias("KIT-6027", null, "30000.00")]);
+    const { ordenes } = calcularUtilidadFalabella({
+      pedidos: [pedido("7002", { fleteManual: "9500.00" })],
+      movimientos: reporte7002,
+      maestra,
+    });
+    expect(ordenes[0]).toMatchObject({ estado: "calculada", envioPropio: true, envios: "-9500.00", utilidad: "45500.00", fleteManual: "9500.00" });
+  });
+
+  it("flete_manual en envío propio sin reporte (estimada)", () => {
+    const referencias = construirReferenciasEstimacionFalabella(reporte7001);
+    const maestra = construirMaestraFalabella([filaAlias("KIT-6027", null, "30000.00")]);
+    const { ordenes } = calcularUtilidadFalabella({
+      pedidos: [pedido("7200", { itemsApi: [item("KIT-6027", "100000.00", true)], fleteManual: "7000.00" })],
+      movimientos: [],
+      maestra,
+      referenciasEstimacion: referencias,
+    });
+    // El envío estimado de un envío propio es 0; solo resta el manual.
+    expect(ordenes[0]).toMatchObject({ estado: "estimada", envioPropio: true, envios: "-7000.00", utilidad: "48000.00" });
+  });
+
+  it("los ajustes manuales no se aplican en «conflicto», pero se conservan para el lápiz", () => {
+    const { ordenes } = calcularUtilidadFalabella({
+      pedidos: [pedido("7001", { pedidoId: "a", costoManual: "1.00" }), pedido("7001", { pedidoId: "b" })],
+      movimientos: reporte7001,
+      maestra: new Map(),
+    });
+    expect(ordenes[0]).toMatchObject({ estado: "conflicto", costo: null, costoManual: "1.00" });
+  });
+
+  it("cuenta nueva sin reportes: estima con la comisión y el flete por defecto", () => {
+    const maestra = construirMaestraFalabella([filaAlias("KIT-6027", null, "30000.00")]);
+    const { ordenes, totales } = calcularUtilidadFalabella({
+      pedidos: [pedido("7300", { itemsApi: [item("KIT-6027", "100000.00"), item("KIT-6027", "100000.00")] })],
+      movimientos: [],
+      maestra,
+      referenciasEstimacion: new Map(),
+      defectosCuenta: new Map([[CUENTA, { comisionPct: "15.50", flete: "6000.00" }]]),
+    });
+    // 200000 − 60000 − 31000 (15,5 %) − 12000 (2 × 6000).
+    expect(ordenes[0]).toMatchObject({ estado: "estimada", comisiones: "-31000.00", envios: "-12000.00", utilidad: "97000.00" });
+    expect(totales).toMatchObject({ ordenesEstimadas: 1, ordenesSinReporte: 0, utilidadPeriodo: "0.00" });
+  });
+
+  it("defectos: flete vacío cuenta como 0; sin comisión sigue «Sin reporte»", () => {
+    const maestra = construirMaestraFalabella([filaAlias("KIT-6027", null, "30000.00")]);
+    const pedidos = [pedido("7400", { itemsApi: [item("KIT-6027", "100000.00")] })];
+    const soloComision = calcularUtilidadFalabella({
+      pedidos,
+      movimientos: [],
+      maestra,
+      referenciasEstimacion: new Map(),
+      defectosCuenta: new Map([[CUENTA, { comisionPct: "10", flete: null }]]),
+    });
+    expect(soloComision.ordenes[0]).toMatchObject({ estado: "estimada", comisiones: "-10000.00", envios: "0.00", utilidad: "60000.00" });
+
+    const sinComision = calcularUtilidadFalabella({
+      pedidos,
+      movimientos: [],
+      maestra,
+      referenciasEstimacion: new Map(),
+      defectosCuenta: new Map([[CUENTA, { comisionPct: null, flete: "6000.00" }]]),
+    });
+    expect(sinComision.ordenes[0].estado).toBe("sin_reporte");
+  });
+
+  it("defectos: el historial de la cuenta gana a los valores por defecto", () => {
+    const referencias = construirReferenciasEstimacionFalabella(reporte7001);
+    const maestra = construirMaestraFalabella([filaAlias("KIT-6027", null, "30000.00")]);
+    const { ordenes } = calcularUtilidadFalabella({
+      pedidos: [pedido("7500", { itemsApi: [item("KIT-6027", "100000.00")] })],
+      movimientos: [],
+      maestra,
+      referenciasEstimacion: referencias,
+      defectosCuenta: new Map([[CUENTA, { comisionPct: "50.00", flete: "99999.00" }]]),
+    });
+    expect(ordenes[0]).toMatchObject({ estado: "estimada", comisiones: "-15000.00", envios: "-8000.00" });
   });
 });

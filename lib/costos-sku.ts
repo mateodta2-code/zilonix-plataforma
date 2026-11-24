@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { costosSku, terceros } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
@@ -35,7 +35,28 @@ export type DatosCostoSku = {
   precioMinimoComboX3?: Monto;
   precioVenta?: Monto;
   terceroId?: string | null;
+  // Issue #422 — alias del SKU en Falabella. Vacío = sin alias.
+  skuFalabella?: string | null;
 };
+
+// Issue #422 — otro SKU de la misma empresa ya usa ese alias de Falabella.
+export class AliasFalabellaRepetidoError extends Error {
+  constructor(public alias: string, public skuDueño: string | null) {
+    super(
+      skuDueño
+        ? `El SKU Falabella ${alias} ya es el alias de ${skuDueño}. Quítalo de ese SKU primero.`
+        : `El SKU Falabella ${alias} ya es el alias de otro SKU. Quítalo de ese SKU primero.`
+    );
+    this.name = "AliasFalabellaRepetidoError";
+  }
+}
+
+// Vacío → null; si viene, normalizado igual que sku_codigo (la base lo
+// exige con un CHECK).
+function aliasFalabella(valor: string | null | undefined): string | null | undefined {
+  if (valor === undefined) return undefined;
+  return valor === null || !valor.trim() ? null : normalizarSkuCodigo(valor);
+}
 
 function precioMinimo(valor: Monto | undefined, campo: string): string | null | undefined {
   if (valor === undefined) return undefined;
@@ -59,6 +80,7 @@ function normalizarDatos(datos: DatosCostoSku) {
     precioMinimoComboX3: precioMinimo(datos.precioMinimoComboX3, "Precio mínimo combo x3"),
     precioVenta: monto(datos.precioVenta, "Precio de venta"),
     terceroId: datos.terceroId,
+    skuFalabella: aliasFalabella(datos.skuFalabella),
   };
   return Object.fromEntries(Object.entries(salida).filter(([, v]) => v !== undefined)) as Partial<
     Record<keyof typeof salida, string | null>
@@ -73,7 +95,8 @@ type CamposAuditados =
   | "precioMinimoComboX2"
   | "precioMinimoComboX3"
   | "precioVenta"
-  | "terceroId";
+  | "terceroId"
+  | "skuFalabella";
 
 function textoAuditoria(fila: Partial<Record<CamposAuditados, string | null>>): string {
   return [
@@ -85,12 +108,20 @@ function textoAuditoria(fila: Partial<Record<CamposAuditados, string | null>>): 
     `min3=${fila.precioMinimoComboX3 ?? ""}`,
     `precio_venta=${fila.precioVenta ?? ""}`,
     `tercero=${fila.terceroId ?? ""}`,
+    `sku_falabella=${fila.skuFalabella ?? ""}`,
   ].join(" ");
 }
 
 function esFkViolada(e: unknown): boolean {
   const error = e as { code?: string; cause?: { code?: string } };
   return error.code === "23503" || error.cause?.code === "23503";
+}
+
+function esAliasRepetido(e: unknown): boolean {
+  const error = e as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } };
+  const codigo = error.code ?? error.cause?.code;
+  const restriccion = error.constraint ?? error.cause?.constraint;
+  return codigo === "23505" && restriccion === "costos_sku_empresa_sku_falabella_unico";
 }
 
 // Crea la fila del SKU o actualiza la que ya existe. No exige que el
@@ -112,6 +143,22 @@ export async function guardarCostoSku(entrada: {
         .select()
         .from(costosSku)
         .where(and(eq(costosSku.empresaId, entrada.empresaId), eq(costosSku.skuCodigo, skuCodigo)));
+
+      if (datos.skuFalabella) {
+        // Aviso claro antes que el error crudo del índice único (que igual
+        // se atrapa abajo por si dos personas guardan a la vez).
+        const [dueño] = await tx
+          .select({ sku: costosSku.skuCodigo })
+          .from(costosSku)
+          .where(
+            and(
+              eq(costosSku.empresaId, entrada.empresaId),
+              eq(costosSku.skuFalabella, datos.skuFalabella),
+              ne(costosSku.skuCodigo, skuCodigo)
+            )
+          );
+        if (dueño) throw new AliasFalabellaRepetidoError(datos.skuFalabella, dueño.sku);
+      }
 
       let id: string;
       if (!previa) {
@@ -145,6 +192,7 @@ export async function guardarCostoSku(entrada: {
     // La FK compuesta (empresa_id, tercero_id) rechaza un tercero de
     // otra empresa aunque el id exista.
     if (esFkViolada(e)) throw new TerceroNoEncontradoError();
+    if (esAliasRepetido(e)) throw new AliasFalabellaRepetidoError(String(entrada.datos.skuFalabella ?? "").trim().toUpperCase(), null);
     throw e;
   }
 }

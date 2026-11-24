@@ -513,3 +513,65 @@
     margin-left: 0;
   }
 }
+
+/* Issue #422 — lápices en línea de la utilidad de Falabella. */
+.celdaLapiz {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.lapiz {
+  border: none;
+  background: transparent;
+  color: var(--texto-suave);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px;
+  border-radius: var(--radio-boton);
+}
+
+.lapiz:hover,
+.lapiz:focus-visible {
+  color: var(--acento-fuerte);
+}
+
+.editorLapiz {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 140px;
+}
+
+.inputLapiz {
+  width: 120px;
+  text-align: right;
+}
+
+.errorLapiz {
+  color: var(--peligro-texto, var(--peligro, #c0392b));
+  font-size: 12px;
+}
+
+.etiquetaManual {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--texto-suave);
+  border: 1px solid color-mix(in srgb, var(--acento-fuerte) 35%, transparent);
+}
+
+.defectosCuenta {
+  margin: 12px 0;
+}
+
+.defectosCuenta > summary {
+  cursor: pointer;
+  color: var(--texto-suave);
+  font-size: 13px;
+}

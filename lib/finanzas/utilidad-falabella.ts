@@ -33,6 +33,13 @@
 //   neto con el último envío unitario real del SKU. En cuanto llega el
 //   reporte, la orden pasa sola a «Calculada» con los cobros reales. La
 //   utilidad estimada NUNCA se suma a la del periodo: va en su propio total.
+// - Cuenta nueva sin ningún reporte: si tiene configurado el % de comisión
+//   por defecto (y opcionalmente el flete por defecto por unidad), se
+//   estima con eso en vez de dejarla «Sin reporte».
+// - Ajustes a mano por orden (pedidos_falabella): costo_manual REEMPLAZA el
+//   costo de la maestra de esa orden (aunque a un SKU le falte costo) y
+//   flete_manual es un flete adicional que resta en envíos y en utilidad.
+//   Valen con y sin reporte; ni el reporte ni la sincronización los pisan.
 
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import type { CategoriaMovimiento } from "@/db/schema";
@@ -83,6 +90,16 @@ export interface PedidoFalabellaEntrada {
   // Ítems activos de GetOrderItems (sin cancelados ni fallidos). `precio`
   // en texto con 2 decimales; `envioPropio` = envío directo/domiciliario.
   itemsApi?: ItemApiFalabella[];
+  // Ajustes a mano ("12345.00", >= 0); null = sin ajuste.
+  costoManual?: string | null;
+  fleteManual?: string | null;
+}
+
+// Respaldo de la cuenta para estimar sin historial (cuentas_falabella).
+// comisionPct "15.50" = 15,50 %; flete por unidad. null = no configurado.
+export interface DefectosCuentaFalabella {
+  comisionPct: string | null;
+  flete: string | null;
 }
 
 export interface ItemApiFalabella {
@@ -152,6 +169,10 @@ export interface OrdenUtilidadFalabella {
   productos: ProductoOrdenFalabella[];
   // Envío directo / domiciliario: el flete lo pone el vendedor.
   envioPropio: boolean;
+  // Los ajustes a mano guardados en la orden (aunque no se hayan podido
+  // aplicar, p. ej. en «conflicto»), para precargar los lápices.
+  costoManual: string | null;
+  fleteManual: string | null;
 }
 
 export interface TotalesUtilidadFalabella {
@@ -331,6 +352,28 @@ export function construirReferenciasEstimacionFalabella(
   return referencias;
 }
 
+// Issue #422 — la maestra para costear Falabella: cada fila por su
+// sku_codigo y, de respaldo, por su alias sku_falabella. La coincidencia
+// exacta en sku_codigo SIEMPRE gana: un alias nunca tapa el código real de
+// otro SKU. Las claves van normalizadas (mayúsculas, sin espacios).
+export function construirMaestraFalabella(
+  filas: readonly (MaestraSku & { sku: string; skuFalabella: string | null })[]
+): Map<string, MaestraSku> {
+  const maestra = new Map<string, MaestraSku>();
+  const datos = (f: (typeof filas)[number]): MaestraSku => ({
+    costo: f.costo,
+    empaque: f.empaque,
+    envioAgencia: f.envioAgencia,
+    empaqueProveedor: f.empaqueProveedor,
+  });
+  for (const f of filas) maestra.set(f.sku, datos(f));
+  for (const f of filas) {
+    const alias = normalizarOVacio(f.skuFalabella);
+    if (alias && !maestra.has(alias)) maestra.set(alias, datos(f));
+  }
+  return maestra;
+}
+
 function agruparProductos(items: readonly ItemApiFalabella[], skusReporte: readonly (string | null)[]): ProductoOrdenFalabella[] {
   const fuente =
     items.length > 0
@@ -356,6 +399,8 @@ export function calcularUtilidadFalabella(entrada: {
   // De construirReferenciasEstimacionFalabella. Sin esto, las órdenes sin
   // reporte quedan «sin_reporte» como antes.
   referenciasEstimacion?: ReadonlyMap<string, ReferenciaEstimacionFalabella>;
+  // Clave: cuentaId. Respaldo para cuentas sin ningún reporte.
+  defectosCuenta?: ReadonlyMap<string, DefectosCuentaFalabella>;
 }): ResultadoUtilidadFalabella {
   const porOrden = new Map<string, { suma: Suma; skusVendidos: (string | null)[]; envioPropio: boolean }>();
   const sinOrden = sumaVacia();
@@ -431,6 +476,23 @@ export function calcularUtilidadFalabella(entrada: {
     pedidosPorClave.set(k, dueños);
   }
 
+  // Montos manuales en centavos; un valor raro se ignora (nunca rompe la
+  // pantalla) y la base ya exige >= 0.
+  const manual = (valor: string | null | undefined): bigint | null => {
+    if (valor === null || valor === undefined) return null;
+    return precioItemCentavos(valor);
+  };
+
+  // Referencia armada con los valores por defecto de la cuenta; null si
+  // no tiene comisión configurada (el flete vacío cuenta como 0).
+  const referenciaDefecto = (cuentaId: string): ReferenciaEstimacionFalabella | null => {
+    const d = entrada.defectosCuenta?.get(cuentaId);
+    const pct = manual(d?.comisionPct);
+    if (!d || pct === null) return null;
+    // 15.50 % = 1550 centavos = 0,1550 = 1550 diezmilésimas: mismo número.
+    return { tasaComisionDiezmilesimas: -pct, envioNetoUnitarioCentavos: -(manual(d.flete) ?? CERO) };
+  };
+
   const vacia = {
     cantidad: 0,
     ventas: "0.00",
@@ -452,7 +514,9 @@ export function calcularUtilidadFalabella(entrada: {
     p: PedidoFalabellaEntrada,
     base: Omit<OrdenUtilidadFalabella, keyof typeof vacia | "estado" | "numerosRepetidos">,
     itemsApi: readonly ItemApiFalabella[],
-    envioPropio: boolean
+    envioPropio: boolean,
+    costoManual: bigint | null,
+    fleteManual: bigint | null
   ): OrdenUtilidadFalabella => {
     const activos = itemsApi.flatMap((i) => {
       const precio = precioItemCentavos(i.precio);
@@ -467,10 +531,13 @@ export function calcularUtilidadFalabella(entrada: {
 
     let costo = CERO;
     const skusSinCosto: string[] = [];
-    for (const i of activos) {
-      const { costoUnitario } = resolverCostoSku(normalizarOVacio(i.sku), entrada.maestra);
-      if (costoUnitario === null) skusSinCosto.push(i.sku ?? "(sin SKU)");
-      else costo += aCentavos(costoUnitario);
+    if (costoManual !== null) costo = costoManual;
+    else {
+      for (const i of activos) {
+        const { costoUnitario } = resolverCostoSku(normalizarOVacio(i.sku), entrada.maestra);
+        if (costoUnitario === null) skusSinCosto.push(i.sku ?? "(sin SKU)");
+        else costo += aCentavos(costoUnitario);
+      }
     }
     if (skusSinCosto.length > 0) {
       t.faltaCosto += 1;
@@ -480,12 +547,15 @@ export function calcularUtilidadFalabella(entrada: {
 
     let comisiones = CERO;
     let envios = CERO;
+    const defecto = referenciaDefecto(p.cuentaId);
     for (const i of activos) {
       const sku = normalizarOVacio(i.sku);
       const ref =
         (sku ? entrada.referenciasEstimacion?.get(`${p.cuentaId}|${sku}`) : undefined) ??
-        entrada.referenciasEstimacion?.get(claveReferenciaCuenta(p.cuentaId));
-      // La cuenta nunca tuvo un reporte: no hay con qué estimar la comisión.
+        entrada.referenciasEstimacion?.get(claveReferenciaCuenta(p.cuentaId)) ??
+        // Cuenta nueva sin historial: lo configurado a mano para la cuenta.
+        defecto;
+      // Ni historial ni comisión por defecto: no hay con qué estimar.
       if (!ref) {
         t.sinReporte += 1;
         return { ...base, ...visibles, estado: "sin_reporte" };
@@ -493,6 +563,7 @@ export function calcularUtilidadFalabella(entrada: {
       comisiones += dividirRedondeado(i.precioCentavos * ref.tasaComisionDiezmilesimas, DIEZ_MIL);
       if (!envioPropio) envios += ref.envioNetoUnitarioCentavos;
     }
+    if (fleteManual !== null) envios -= fleteManual;
     const utilidad = ventas + comisiones + envios - costo;
     t.estimadas += 1;
     t.ventasEstimadas += ventas;
@@ -520,6 +591,8 @@ export function calcularUtilidadFalabella(entrada: {
     }
     const itemsApi = p.itemsApi ?? [];
     const envioPropio = (grupo?.envioPropio ?? false) || itemsApi.some((i) => i.envioPropio === true);
+    const costoManual = manual(p.costoManual);
+    const fleteManual = manual(p.fleteManual);
     const base = {
       pedidoId: p.pedidoId,
       numero: p.numeroVisible,
@@ -530,6 +603,8 @@ export function calcularUtilidadFalabella(entrada: {
       moneda: p.moneda,
       productos: agruparProductos(itemsApi, skusVendidos),
       envioPropio,
+      costoManual: costoManual === null ? null : desdeCentavos(costoManual),
+      fleteManual: fleteManual === null ? null : desdeCentavos(fleteManual),
     };
 
     const repetidas = usada && (pedidosPorClave.get(usada)?.size ?? 0) > 1 ? [usada] : [];
@@ -538,21 +613,26 @@ export function calcularUtilidadFalabella(entrada: {
       return { ...base, ...vacia, estado: "conflicto", numerosRepetidos: repetidas.map((k) => k.slice(k.indexOf("|") + 1)) };
     }
 
-    if (skusVendidos.length === 0) return estimarSinReporte(p, base, itemsApi, envioPropio);
+    if (skusVendidos.length === 0) return estimarSinReporte(p, base, itemsApi, envioPropio, costoManual, fleteManual);
 
     const ventas = aCentavosRedondeado(suma.precio);
     const comisiones = aCentavosRedondeado(suma.comision);
-    const envios = aCentavosRedondeado(suma.envio);
+    // El flete manual es un costo adicional del vendedor: resta encima del
+    // envío neto del reporte, que se conserva tal cual.
+    const envios = aCentavosRedondeado(suma.envio) - (fleteManual ?? CERO);
     const promociones = aCentavosRedondeado(suma.promocion);
     const otros = aCentavosRedondeado(suma.devolucion + suma.fulfillment + suma.ajuste + suma.otro + suma.publicidad);
     const retenciones = aCentavosRedondeado(suma.retencion);
 
     let costo = CERO;
     const skusSinCosto: string[] = [];
-    for (const sku of skusVendidos) {
-      const { costoUnitario } = resolverCostoSku(normalizarOVacio(sku), entrada.maestra);
-      if (costoUnitario === null) skusSinCosto.push(sku ?? "(sin SKU)");
-      else costo += aCentavos(costoUnitario);
+    if (costoManual !== null) costo = costoManual;
+    else {
+      for (const sku of skusVendidos) {
+        const { costoUnitario } = resolverCostoSku(normalizarOVacio(sku), entrada.maestra);
+        if (costoUnitario === null) skusSinCosto.push(sku ?? "(sin SKU)");
+        else costo += aCentavos(costoUnitario);
+      }
     }
     const sinCosto = skusSinCosto.length > 0;
     const utilidad = ventas + comisiones + envios + promociones + otros - costo;

@@ -15,6 +15,12 @@ import {
   type VistaRecalculo,
 } from "@/lib/finanzas/recalcular-costos";
 import { parsearFiltroRecalculo, type EntradaFiltroRecalculo, type FiltroRecalculoNormalizado } from "@/lib/finanzas/recalculo-pantalla";
+import { and, eq } from "drizzle-orm";
+import { dbComoEmpresa } from "@/db/empresa-context";
+import { cuentasFalabella, pedidosFalabella } from "@/db/schema";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { leerMonto } from "@/lib/importar-archivo";
+import { aCentavos } from "@/lib/finanzas/utilidad-venta";
 
 export type EstadoTraerVentas = { ok: boolean; lineas: string[] };
 
@@ -106,4 +112,114 @@ export async function confirmarRecalculoAction(entrada: EntradaFiltroRecalculo &
     if (error instanceof FiltroRecalculoInvalidoError) return { ok: false, lineas: [error.message] };
     throw error;
   }
+}
+
+// Issue #422 — lápices de la utilidad de Falabella
+// (components/finanzas/LapizMontoFalabella.tsx y DefectosCuentaFalabella.tsx).
+// finanzas.modificar se pide acá aunque la pantalla ya esconda los
+// lápices; cada escritura va con RLS (dbComoEmpresa) y además filtra por
+// empresa_id explícito, y deja rastro en `auditoria`. Solo tocan
+// pedidos_falabella.costo_manual / flete_manual y los defectos de
+// cuentas_falabella: NUNCA costos_sku.
+export type EstadoAjusteFalabella = { ok: true } | { ok: false; mensaje: string };
+
+const SIN_PERMISO_AJUSTE = "Tu rol no puede modificar la utilidad de Falabella.";
+
+// Texto de la persona → monto "1234.56" (>= 0), null si vino vacío.
+function montoOVacio(valor: string, etiqueta: string): { ok: true; valor: string | null } | { ok: false; mensaje: string } {
+  const leido = leerMonto({ tipo: "texto", valor: String(valor ?? "").slice(0, 40) });
+  if (leido.tipo === "error") return { ok: false, mensaje: `${etiqueta}: ${leido.mensaje}` };
+  return { ok: true, valor: leido.tipo === "monto" ? leido.valor : null };
+}
+
+export async function guardarAjusteOrdenFalabellaAction(entrada: {
+  pedidoId: string;
+  campo: "costo" | "flete";
+  valor: string;
+}): Promise<EstadoAjusteFalabella> {
+  const contexto = await contextoRecalculo();
+  if (!contexto) return { ok: false, mensaje: SIN_PERMISO_AJUSTE };
+  if (entrada.campo !== "costo" && entrada.campo !== "flete") return { ok: false, mensaje: "Campo inválido." };
+  const etiqueta = entrada.campo === "costo" ? "Costo" : "Flete";
+  const monto = montoOVacio(entrada.valor, etiqueta);
+  if (!monto.ok) return monto;
+  const pedidoId = String(entrada.pedidoId ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(pedidoId)) return { ok: false, mensaje: "Orden inválida." };
+
+  const { empresaId, usuarioId } = contexto;
+  const columna = entrada.campo === "costo" ? { costoManual: monto.valor } : { fleteManual: monto.valor };
+  const actualizado = await dbComoEmpresa(empresaId, async (tx) => {
+    const [previa] = await tx
+      .select({ numero: pedidosFalabella.numeroOrden, externo: pedidosFalabella.pedidoIdExterno, costo: pedidosFalabella.costoManual, flete: pedidosFalabella.fleteManual })
+      .from(pedidosFalabella)
+      .where(and(eq(pedidosFalabella.id, pedidoId), eq(pedidosFalabella.empresaId, empresaId)));
+    if (!previa) return false;
+    await tx
+      .update(pedidosFalabella)
+      .set(columna)
+      .where(and(eq(pedidosFalabella.id, pedidoId), eq(pedidosFalabella.empresaId, empresaId)));
+    const anterior = entrada.campo === "costo" ? previa.costo : previa.flete;
+    await registrarAuditoria(tx, {
+      empresaId,
+      usuarioId,
+      actorTipo: "persona",
+      accion: "modificar",
+      entidad: "pedido_falabella",
+      entidadId: pedidoId,
+      detalle: `${monto.valor === null ? "Quitó" : "Cambió"} el ${entrada.campo === "costo" ? "costo manual" : "flete manual"} de la orden ${previa.numero ?? previa.externo} de Falabella.`,
+      valorAnterior: `${entrada.campo}_manual=${anterior ?? ""}`,
+      valorNuevo: `${entrada.campo}_manual=${monto.valor ?? ""}`,
+    });
+    return true;
+  });
+  if (!actualizado) return { ok: false, mensaje: "No se encontró la orden." };
+  revalidatePath("/panel/finanzas/ventas");
+  return { ok: true };
+}
+
+export async function guardarDefectosCuentaFalabellaAction(entrada: {
+  cuentaId: string;
+  comisionPct: string;
+  flete: string;
+}): Promise<EstadoAjusteFalabella> {
+  const contexto = await contextoRecalculo();
+  if (!contexto) return { ok: false, mensaje: SIN_PERMISO_AJUSTE };
+  const comision = montoOVacio(entrada.comisionPct, "% comisión");
+  if (!comision.ok) return comision;
+  // En centavos con BigInt (nada de flotantes): 100 % = 10000.
+  if (comision.valor !== null && aCentavos(comision.valor) > BigInt(10000)) {
+    return { ok: false, mensaje: "% comisión: tiene que estar entre 0 y 100." };
+  }
+  const flete = montoOVacio(entrada.flete, "Flete por defecto");
+  if (!flete.ok) return flete;
+  const cuentaId = String(entrada.cuentaId ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(cuentaId)) return { ok: false, mensaje: "Cuenta inválida." };
+
+  const { empresaId, usuarioId } = contexto;
+  const actualizado = await dbComoEmpresa(empresaId, async (tx) => {
+    const [previa] = await tx
+      .select({ nickname: cuentasFalabella.nickname, comision: cuentasFalabella.comisionDefectoPct, flete: cuentasFalabella.fleteDefecto })
+      .from(cuentasFalabella)
+      .where(and(eq(cuentasFalabella.id, cuentaId), eq(cuentasFalabella.empresaId, empresaId)));
+    if (!previa) return false;
+    await tx
+      .update(cuentasFalabella)
+      .set({ comisionDefectoPct: comision.valor, fleteDefecto: flete.valor })
+      .where(and(eq(cuentasFalabella.id, cuentaId), eq(cuentasFalabella.empresaId, empresaId)));
+    await registrarAuditoria(tx, {
+      empresaId,
+      usuarioId,
+      actorTipo: "persona",
+      accion: "modificar",
+      entidad: "cuenta_falabella",
+      entidadId: cuentaId,
+      detalle: `Cambió la comisión y el flete por defecto de la cuenta ${previa.nickname} de Falabella.`,
+      valorAnterior: `comision_pct=${previa.comision ?? ""} flete=${previa.flete ?? ""}`,
+      valorNuevo: `comision_pct=${comision.valor ?? ""} flete=${flete.valor ?? ""}`,
+    });
+    return true;
+  });
+  if (!actualizado) return { ok: false, mensaje: "No se encontró la cuenta." };
+  revalidatePath("/panel/finanzas/ventas");
+  return { ok: true };
 }

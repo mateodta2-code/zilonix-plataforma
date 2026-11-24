@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { guardarCostoSku, leerCostoSku, normalizarSkuCodigo, SkuCodigoInvalidoError } from "@/lib/costos-sku";
+import { AliasFalabellaRepetidoError, guardarCostoSku, leerCostoSku, normalizarSkuCodigo, SkuCodigoInvalidoError } from "@/lib/costos-sku";
 import { conMensaje, usuarioYEmpresaActiva } from "@/lib/finanzas/contexto-accion";
 import { MontoInvalidoError } from "@/lib/finanzas/montos";
 import { leerMonto } from "@/lib/importar-archivo";
@@ -47,11 +47,18 @@ export async function guardarFilaMaestraAction(formData: FormData) {
     }
     const nombreProducto = String(formData.get("nombreProducto") ?? "").trim().slice(0, 300) || null;
     const terceroId = String(formData.get("terceroId") ?? "") || null;
+    // Vacío limpia el alias (lib/costos-sku.ts lo normaliza).
+    const skuFalabella = String(formData.get("skuFalabella") ?? "").slice(0, 120);
 
-    await guardarCostoSku({ empresaId, usuarioId, skuCodigo: sku, datos: { ...datos, nombreProducto, terceroId }, fuente: "manual" });
+    await guardarCostoSku({ empresaId, usuarioId, skuCodigo: sku, datos: { ...datos, nombreProducto, terceroId, skuFalabella }, fuente: "manual" });
     destino = conMensaje("/panel/finanzas/maestra-sku", "ok", `SKU ${sku} guardado.`);
   } catch (error) {
-    if (error instanceof MontoInvalidoError || error instanceof SkuCodigoInvalidoError || error instanceof TerceroNoEncontradoError) {
+    if (
+      error instanceof MontoInvalidoError ||
+      error instanceof SkuCodigoInvalidoError ||
+      error instanceof TerceroNoEncontradoError ||
+      error instanceof AliasFalabellaRepetidoError
+    ) {
       destino = conMensaje(volverAlFormulario, "error", error.message);
     } else {
       throw error;

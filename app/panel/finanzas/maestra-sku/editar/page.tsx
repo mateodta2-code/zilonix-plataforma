@@ -51,6 +51,9 @@ export default async function EditarMaestraPage({ searchParams }: { searchParams
             <Campo etiqueta="Producto">
               <input name="nombreProducto" maxLength={300} defaultValue={fila?.nombreProducto ?? ""} className="zx-control" />
             </Campo>
+            <Campo etiqueta="SKU Falabella (alias, opcional — vacío = sin alias)">
+              <input name="skuFalabella" maxLength={120} defaultValue={fila?.skuFalabella ?? ""} placeholder="Ej. FULKit6027fulfy" className="zx-control" />
+            </Campo>
             <Campo etiqueta="Proveedor">
               <select name="terceroId" defaultValue={fila?.terceroId ?? ""} className="zx-control">
                 <option value="">Sin proveedor</option>
