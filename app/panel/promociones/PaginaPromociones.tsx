@@ -35,6 +35,7 @@ import type {
 } from "./tipos-cliente";
 import { BitacoraPromociones } from "./BitacoraPromociones";
 import styles from "./promociones.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 // Issue #315 — siteId/moneda/idioma reales de la cuenta (lib/ml/sitios.ts,
 // listarCuentasConectadas), para formatear precios/fechas de cada fila
@@ -857,7 +858,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                         {c.thumbnail && <img src={c.thumbnail} alt="" width={28} height={28} style={{ objectFit: "cover", borderRadius: 4, marginRight: 6, verticalAlign: "middle" }} />}
                         {c.tituloProducto ?? c.itemId}
                       </CeldaTabla>
-                      <CeldaTabla>{c.skuCodigo ?? "—"}</CeldaTabla>
+                      <CeldaTabla>{c.skuCodigo ? <SkuCopiable sku={c.skuCodigo} /> : "—"}</CeldaTabla>
                       <CeldaTabla>{precioHoy == null ? "ML no envió precio" : formatoPesos(precioHoy, siteIdFila)}</CeldaTabla>
                       <CeldaTabla>
                         {editable ? (
@@ -1081,7 +1082,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
                         {f.thumbnail && <img src={f.thumbnail} alt="" width={28} height={28} style={{ objectFit: "cover", borderRadius: 4, marginRight: 6, verticalAlign: "middle" }} />}
                         {f.tituloProducto ?? f.itemId}
                       </CeldaTabla>
-                      <CeldaTabla>{f.skuCodigo ?? "—"}</CeldaTabla>
+                      <CeldaTabla>{f.skuCodigo ? <SkuCopiable sku={f.skuCodigo} /> : "—"}</CeldaTabla>
                       <CeldaTabla>{f.tipoPromocion}</CeldaTabla>
                       <CeldaTabla>{formatoPesos(f.precioActual, siteIdFila)}</CeldaTabla>
                       <CeldaTabla>{formatoPorcentaje(descuento)}</CeldaTabla>

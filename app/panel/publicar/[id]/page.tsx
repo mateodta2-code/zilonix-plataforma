@@ -10,6 +10,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { ErrorPublicacion } from "../ErrorPublicacion";
 import type { ResultadoPublicacionCuenta } from "@/lib/ml/publicar-tipos";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 const ETIQUETA_ESTADO: Record<string, string> = {
   borrador: "Borrador",
@@ -26,7 +27,7 @@ function ResultadoCuenta({ resultado, nickname }: { resultado: ResultadoPublicac
         <ul style={{ marginTop: 6 }}>
           {resultado.familia.items.map((item, i) => (
             <li key={i} style={{ fontSize: 13, opacity: item.ok ? 1 : 0.8, color: item.ok ? undefined : "var(--peligro-texto)" }}>
-              {JSON.stringify(item.valores)} {item.sku ? `(SKU ${item.sku})` : ""} —{" "}
+              {JSON.stringify(item.valores)} {item.sku ? <SkuCopiable sku={item.sku} prefijo="(SKU " /> : ""}{item.sku ? ")" : ""} —{" "}
               {item.ok ? (
                 <a href={item.permalink} target="_blank" rel="noreferrer">
                   publicado ({item.status})

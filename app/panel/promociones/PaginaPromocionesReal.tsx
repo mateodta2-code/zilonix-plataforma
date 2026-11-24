@@ -14,6 +14,7 @@ import { TOPE_ITEMS_SELECCION, type ItemSeleccionado } from "@/lib/ml/promocione
 import { accionDePromocion, calcularDesdePorcentaje, calcularDesdePrecioFinal, claveMarcaPromocion, formatoEnteroInput, motivoNoMarcable, motivoSinPrecioParaParticipar, parsearNumeroLocal, planAplicarPromociones, quedaBajoPrecioMinimo, superaMaximoConfigurado } from "./calculosPublicaciones";
 import { BitacoraPromociones } from "./BitacoraPromociones";
 import styles from "./promocionesReal.module.css";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 type Cuenta = { id: string; nickname: string; siteId: string };
 type ReglaUi = "todas" | "maximo" | "tabla-maestra" | "salir-todas";
@@ -951,7 +952,7 @@ export function PaginaPromocionesReal({
                     <span className={styles.titulo}>{fila.tituloProducto ?? fila.itemId}</span>
                     <span className={styles.subtitulo}>
                       {fila.nicknameCuenta}
-                      {fila.skuCodigo ? ` · SKU ${fila.skuCodigo}` : ""}
+                      {fila.skuCodigo ? <SkuCopiable sku={fila.skuCodigo} comoSpan prefijo=" · SKU " /> : ""}
                       {fila.precioOriginal != null ? ` · ${formatearMoneda(fila.precioOriginal, fila.siteId)}` : ""}
                       {fila.stock != null ? ` · Stock ${formatearNumero(fila.stock, idioma)}` : ""}
                     </span>
@@ -1084,7 +1085,7 @@ export function PaginaPromocionesReal({
             <p className={styles.tituloModal}>Confirma los detalles de la promoción</p>
             <p className={styles.resumenProducto}>
               {seleccion.fila.tituloProducto ?? seleccion.fila.itemId}
-              {seleccion.fila.skuCodigo ? ` — SKU ${seleccion.fila.skuCodigo}` : ""}
+              {seleccion.fila.skuCodigo ? <SkuCopiable sku={seleccion.fila.skuCodigo} prefijo=" — SKU " /> : ""}
             </p>
             <p className={styles.filaDato}>
               <span>Promoción</span>
