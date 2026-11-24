@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasMlParaSelector, resolverCuentaMl } from "@/lib/ml/selector-cuenta";
-import { textoResultadoCuenta, traerVentasDelMes } from "@/lib/finanzas/traer-ventas-mes";
+import { inicioMesBogota, textoResultadoCuenta, traerVentasDelMes } from "@/lib/finanzas/traer-ventas-mes";
+import { importarPedidos } from "@/lib/falabella/pedidos";
 import {
   confirmarRecalculoCostos,
   FiltroRecalculoInvalidoError,
@@ -15,7 +16,7 @@ import {
   type VistaRecalculo,
 } from "@/lib/finanzas/recalcular-costos";
 import { parsearFiltroRecalculo, type EntradaFiltroRecalculo, type FiltroRecalculoNormalizado } from "@/lib/finanzas/recalculo-pantalla";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasFalabella, pedidosFalabella } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
@@ -222,4 +223,82 @@ export async function guardarDefectosCuentaFalabellaAction(entrada: {
   if (!actualizado) return { ok: false, mensaje: "No se encontró la cuenta." };
   revalidatePath("/panel/finanzas/ventas");
   return { ok: true };
+}
+
+// Issue #422 — «Traer ventas de Falabella» en Finanzas → Ventas y
+// utilidad (components/finanzas/BotonTraerVentasFalabella.tsx), para que
+// las órdenes nuevas entren sin pasar por Conectar marketplaces (allá
+// sincronizarPedidosFalabella pide configuracion.crear y trae 60 días).
+// Acá: finanzas.modificar (escribe pedidos_falabella) y solo desde el
+// día 1 del mes en curso en Bogotá. importarPedidos es idempotente (ON
+// CONFLICT), así que apretarlo dos veces no duplica nada. Si una cuenta
+// falla (credenciales, Falabella caído, un monto raro), se anota y se
+// sigue con la siguiente. importarPedidos abre su propia transacción por
+// cuenta, por eso la auditoría va en una aparte, al final, con el
+// resultado real (incluido lo que falló).
+export type EstadoTraerVentasFalabella = {
+  ok: boolean;
+  importados: number;
+  cuentasFallidas: string[];
+  mensaje: string;
+};
+
+export async function traerVentasFalabellaAction(): Promise<EstadoTraerVentasFalabella> {
+  const { usuario, activa: empresa } = await obtenerContextoPanel();
+  try {
+    await requierePermiso(usuario.id, empresa.id, "finanzas", "modificar");
+  } catch (error) {
+    if (error instanceof SinPermisoError) {
+      return { ok: false, importados: 0, cuentasFallidas: [], mensaje: "Tu rol no puede traer ventas de Falabella." };
+    }
+    throw error;
+  }
+
+  const empresaId = empresa.id;
+  const desde = inicioMesBogota(new Date());
+  const cuentas = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({ id: cuentasFalabella.id, nickname: cuentasFalabella.nickname })
+      .from(cuentasFalabella)
+      .where(and(eq(cuentasFalabella.empresaId, empresaId), isNull(cuentasFalabella.desconectadaTs)))
+  );
+  if (cuentas.length === 0) {
+    return { ok: false, importados: 0, cuentasFallidas: [], mensaje: "No hay cuentas de Falabella conectadas para traer ventas." };
+  }
+
+  let importados = 0;
+  const cuentasFallidas: string[] = [];
+  const cuentasTopadas: string[] = [];
+  for (const cuenta of cuentas) {
+    try {
+      const resultado = await importarPedidos(empresaId, cuenta.id, desde);
+      importados += resultado.importados;
+      if (resultado.truncado) cuentasTopadas.push(cuenta.nickname);
+    } catch (error) {
+      // Solo el mensaje al log (nunca datos del comprador ni credenciales).
+      console.warn(`[finanzas/falabella] la cuenta ${cuenta.id} no se pudo traer:`, error instanceof Error ? error.message : "error desconocido");
+      cuentasFallidas.push(cuenta.nickname);
+    }
+  }
+
+  await dbComoEmpresa(empresaId, (tx) =>
+    registrarAuditoria(tx, {
+      empresaId,
+      usuarioId: usuario.id,
+      actorTipo: "persona",
+      accion: "sincronizar",
+      entidad: "pedido_falabella",
+      detalle:
+        `Trajo ${importados} ${importados === 1 ? "pedido" : "pedidos"} de Falabella desde el ${desde.toISOString().slice(0, 10)} ` +
+        `(${cuentas.length - cuentasFallidas.length} de ${cuentas.length} cuentas)` +
+        (cuentasFallidas.length > 0 ? `. Fallaron: ${cuentasFallidas.join(", ")}.` : "."),
+    })
+  );
+  revalidatePath("/panel/finanzas/ventas");
+  revalidatePath("/panel/pedidos");
+
+  let mensaje = `${importados} ${importados === 1 ? "pedido traído" : "pedidos traídos"} de Falabella este mes.`;
+  if (cuentasFallidas.length > 0) mensaje += ` No se pudo leer: ${cuentasFallidas.join(", ")}. Revisa la conexión de esas cuentas.`;
+  if (cuentasTopadas.length > 0) mensaje += ` ${cuentasTopadas.join(", ")} llegó al tope de órdenes que se leen de una vez: puede faltar alguna del mes.`;
+  return { ok: cuentasFallidas.length === 0, importados, cuentasFallidas, mensaje };
 }

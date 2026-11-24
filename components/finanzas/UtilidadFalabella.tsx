@@ -8,6 +8,7 @@ import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { BotonTraerVentasFalabella } from "./BotonTraerVentasFalabella";
 import { DefectosCuentaFalabella } from "./DefectosCuentaFalabella";
 import { fechaHoraBogota, mostrarMontoIso, mostrarPorcentaje } from "./formato";
 import { LapizMontoFalabella } from "./LapizMontoFalabella";
@@ -128,6 +129,10 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
     </form>
   );
 
+  // Issue #422 — traer las órdenes del mes sin ir a Conectar marketplaces.
+  // Mismo permiso que los lápices (finanzas.modificar); la acción lo pide otra vez.
+  const botonTraer = puedeModificar ? <BotonTraerVentasFalabella /> : null;
+
   if (cuentas.length === 0) {
     return (
       <>
@@ -140,6 +145,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
     return (
       <>
         {formulario}
+        {botonTraer}
         <p className={estilos.avisoError}>{rango.error}</p>
       </>
     );
@@ -156,6 +162,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
     return (
       <>
         {formulario}
+        {botonTraer}
         <p className={estilos.avisoError}>{consulta.error}</p>
       </>
     );
