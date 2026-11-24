@@ -225,7 +225,7 @@ describe("PaginaPromocionesReal — «Dejar de participar en todas»", () => {
 
     expect(llamadasRegla[1]).toMatchObject({ regla: "salir-todas", confirmado: true });
     expect(screen.getByText(/MLM1 · Taza · Campaña tradicional — Salió/)).toBeTruthy();
-    expect(screen.getByText(/MLM2 · Plato · Descuento de precio — Error: ML dijo que no/)).toBeTruthy();
+    expect(screen.getByText(/MLM2 · Plato · Descuento por porcentaje — Error: ML dijo que no/)).toBeTruthy();
     expect(screen.getByText(/MLM3 · Vaso · Oferta del día — No se puede por API/)).toBeTruthy();
   });
 
@@ -321,6 +321,7 @@ describe("PaginaPromocionesReal — «Aplicada» vs «Programada»", () => {
       tipoPromocion, promotionIdMl: `${tipoPromocion}-1`, estadoMl, esCompartida: false, soloEnMl: false, puedeSalirApi: true,
       precioOriginal: 100, precioActual: 90, precioMinimo: null, precioSugerido: null, maxDiscountedPrice: null, gananciaEstimada: null,
       cumpleReglas: true, accionSugerida: null, motivoRevisarManual: null, reglaAdicionalMotivo: null,
+      nombreMl: null as string | null, fechaInicioMl: null as string | null, fechaFinMl: null as string | null,
     };
   }
   function fila(itemId: string, promociones: ReturnType<typeof promo>[]) {
@@ -360,9 +361,24 @@ describe("PaginaPromocionesReal — «Aplicada» vs «Programada»", () => {
     montar();
     await waitFor(() => screen.getByText("En promoción aplicada"));
     fireEvent.click(screen.getByText("Prod MLM1"));
-    expect(screen.getByText("Aplicada")).toBeTruthy();
+    expect(screen.getByText("Activa")).toBeTruthy();
     expect(screen.getByText("Programada")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Dejar de participar" })).toHaveLength(2);
+  });
+
+  it("muestra el nombre real de ML, las fechas del sitio y el estado en español", async () => {
+    const deal = { ...promo("DEAL", "started"), nombreMl: "11/11 Black Friday", fechaInicioMl: "2020-11-05T00:00:00.000-06:00", fechaFinMl: "2020-12-02T23:59:59.000-06:00" };
+    const pd = { ...promo("PRICE_DISCOUNT", "pending"), nombreMl: null, fechaInicioMl: null, fechaFinMl: null };
+    simular([fila("MLM1", [deal, pd])]);
+    montar();
+    await waitFor(() => screen.getByText("En promoción aplicada"));
+    fireEvent.click(screen.getByText("Prod MLM1"));
+    expect(screen.getByText("11/11 Black Friday")).toBeTruthy();
+    expect(screen.getByText("Campaña tradicional (DEAL)")).toBeTruthy();
+    expect(screen.getByText("Descuento por porcentaje")).toBeTruthy();
+    expect(screen.getByText("Activa")).toBeTruthy();
+    expect(screen.getByText("Programada")).toBeTruthy();
+    expect(screen.getByText(/5 nov 2020 – 2 dic 2020/)).toBeTruthy();
   });
 });
 

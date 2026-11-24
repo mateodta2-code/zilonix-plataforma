@@ -41,7 +41,7 @@ const ETIQUETA_TIPO_PROMOCION: Record<string, string> = {
   DEAL: "Campaña tradicional",
   DOD: "Oferta del día",
   LIGHTNING: "Oferta relámpago",
-  PRICE_DISCOUNT: "Descuento de precio",
+  PRICE_DISCOUNT: "Descuento por porcentaje",
   SMART: "Precio inteligente",
   UNHEALTHY_STOCK: "Liquidación de stock",
   PRE_NEGOTIATED: "Descuento pre-negociado",
@@ -54,6 +54,36 @@ const ETIQUETA_TIPO_PROMOCION: Record<string, string> = {
 
 function nombrePromocion(tipoPromocion: string): string {
   return ETIQUETA_TIPO_PROMOCION[tipoPromocion] ?? tipoPromocion;
+}
+
+// Título de una promo: el nombre real de ML si vino; si no, el tipo legible.
+export function tituloPromocion(promocion: { tipoPromocion: string; nombreMl?: string | null }): string {
+  return promocion.nombreMl?.trim() ? promocion.nombreMl : nombrePromocion(promocion.tipoPromocion);
+}
+
+export function estadoPromocionEs(estadoMl: string): { texto: string; estado: "exito" | "aviso" | "neutro" } {
+  if (estadoMl === "started") return { texto: "Activa", estado: "exito" };
+  if (estadoMl === "pending") return { texto: "Programada", estado: "aviso" };
+  if (estadoMl === "candidate") return { texto: "Disponible", estado: "neutro" };
+  if (estadoMl === "finished") return { texto: "Finalizada", estado: "neutro" };
+  return { texto: estadoMl, estado: "neutro" };
+}
+
+// «5 nov – 2 dic»: toma el YYYY-MM-DD que manda ML (ya en la fecha local del
+// sitio) y lo formatea en UTC para que el navegador no lo corra un día.
+export function rangoFechasPromocion(inicio: string | null | undefined, fin: string | null | undefined, idioma: string): string | null {
+  const ymd = (v: string | null | undefined) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
+  const a = ymd(inicio);
+  const b = ymd(fin);
+  if (!a && !b) return null;
+  const anioActual = new Date().getFullYear();
+  const dar = (v: string) => {
+    const anio = Number(v.slice(0, 4));
+    const opciones: Intl.DateTimeFormatOptions = anio === anioActual ? { day: "numeric", month: "short", timeZone: "UTC" } : { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" };
+    return new Intl.DateTimeFormat(idioma, opciones).format(new Date(`${v}T00:00:00Z`));
+  };
+  if (a && b) return `${dar(a)} – ${dar(b)}`;
+  return dar((a ?? b) as string);
 }
 
 function sumarConteos(a: ConteosPublicaciones, b: ConteosPublicaciones): ConteosPublicaciones {
@@ -987,17 +1017,20 @@ export function PaginaPromocionesReal({
                               {puedeEjecutar && (
                                 <input
                                   type="checkbox"
-                                  aria-label={`${accionDePromocion(promocion) === "salir" ? "Salir de" : "Participar en"} ${nombrePromocion(promocion.tipoPromocion)}`}
+                                  aria-label={`${accionDePromocion(promocion) === "salir" ? "Salir de" : "Participar en"} ${tituloPromocion(promocion)}`}
                                   checked={marcasPromo[claveSeleccion(fila.cuentaMlId, fila.itemId)]?.has(claveMarcaPromocion(promocion)) ?? false}
                                   disabled={motivoNoMarcable(promocion) != null || motivoSinPrecioParaParticipar(promocion) != null || aplicandoFila != null}
                                   onChange={() => alternarMarcaPromo(fila, promocion)}
                                 />
                               )}
-                              <span className={styles.nombrePromocion}>{nombrePromocion(promocion.tipoPromocion)}</span>
-                              <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>({promocion.tipoPromocion})</span>
-                              {activa && (
-                                <Chip estado={promocion.estadoMl === "started" ? "exito" : "aviso"}>{promocion.estadoMl === "started" ? "Aplicada" : "Programada"}</Chip>
+                              <span className={styles.nombrePromocion}>{tituloPromocion(promocion)}</span>
+                              <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>
+                                {promocion.nombreMl ? `${nombrePromocion(promocion.tipoPromocion)} (${promocion.tipoPromocion})` : `(${promocion.tipoPromocion})`}
+                              </span>
+                              {rangoFechasPromocion(promocion.fechaInicioMl, promocion.fechaFinMl, idioma) && (
+                                <span style={{ fontSize: 11, color: "var(--texto-suave)", fontWeight: 400 }}>{rangoFechasPromocion(promocion.fechaInicioMl, promocion.fechaFinMl, idioma)}</span>
                               )}
+                              <Chip estado={estadoPromocionEs(promocion.estadoMl).estado}>{estadoPromocionEs(promocion.estadoMl).texto}</Chip>
                               {promocion.esCompartida && <Chip estado="neutro">Compartida con Mercado Libre (+Meli)</Chip>}
                               {superaMaximoRegla && <Chip estado="aviso">Supera el máximo configurado</Chip>}
                               {regla === "tabla-maestra" && promocion.reglaAdicionalMotivo && <Chip estado="aviso">{promocion.reglaAdicionalMotivo}</Chip>}
@@ -1089,7 +1122,14 @@ export function PaginaPromocionesReal({
             </p>
             <p className={styles.filaDato}>
               <span>Promoción</span>
-              <span>{nombrePromocion(seleccion.promocion.tipoPromocion)}</span>
+              <span>{tituloPromocion(seleccion.promocion)}</span>
+            </p>
+            <p className={styles.filaDato}>
+              <span>Estado</span>
+              <span>
+                {estadoPromocionEs(seleccion.promocion.estadoMl).texto}
+                {rangoFechasPromocion(seleccion.promocion.fechaInicioMl, seleccion.promocion.fechaFinMl, idiomaDeCuenta(seleccion.fila.cuentaMlId)) ? ` · ${rangoFechasPromocion(seleccion.promocion.fechaInicioMl, seleccion.promocion.fechaFinMl, idiomaDeCuenta(seleccion.fila.cuentaMlId))}` : ""}
+              </span>
             </p>
             <p className={styles.filaDato}>
               <span>Precio original</span>
@@ -1156,7 +1196,7 @@ export function PaginaPromocionesReal({
           <Tarjeta className={styles.panelModal}>
             <p className={styles.tituloModal}>Dejar de participar</p>
             <p style={{ fontSize: 13.5 }}>
-              Se dejará de participar en &quot;{nombrePromocion(confirmandoSalir.promocion.tipoPromocion)}&quot; para &quot;{confirmandoSalir.fila.tituloProducto ?? confirmandoSalir.fila.itemId}
+              Se dejará de participar en &quot;{tituloPromocion(confirmandoSalir.promocion)}&quot; para &quot;{confirmandoSalir.fila.tituloProducto ?? confirmandoSalir.fila.itemId}
               &quot;. Esto se manda de una vez a Mercado Libre y no se puede deshacer desde esta pantalla. ¿Confirmas?
             </p>
             {errorSalir && <p className={styles.errorModal}>{errorSalir}</p>}

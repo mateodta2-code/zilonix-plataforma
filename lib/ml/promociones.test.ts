@@ -62,6 +62,17 @@ function item(overrides: Partial<ItemConPromociones> = {}): ItemConPromociones {
 // zilonix-os-web (docs/investigacion/promociones-mercado-libre.md,
 // §7 de ese documento), portados como casos de prueba acá para no
 // volver a pisarlos.
+describe("calcularCandidatosItem — nombre y fechas de ML", () => {
+  it("pasa name/start_date/finish_date solo si son texto no vacío; si no, null", () => {
+    const [deal, pd] = calcularCandidatosItem(
+      item({ promociones: [{ type: "DEAL", id: "C1", status: "started", price: 90, original_price: 100, name: "11/11 Black Friday", start_date: "2026-11-05T00:00:00", finish_date: "2026-12-02T23:59:59" }, { type: "PRICE_DISCOUNT", status: "pending", price: 90, original_price: 100, name: "  ", start_date: "", finish_date: 5 }] }),
+      REGLAS_DEFECTO, 50, 40
+    );
+    expect(deal).toMatchObject({ nombreMl: "11/11 Black Friday", fechaInicioMl: "2026-11-05T00:00:00", fechaFinMl: "2026-12-02T23:59:59" });
+    expect(pd).toMatchObject({ nombreMl: null, fechaInicioMl: null, fechaFinMl: null });
+  });
+});
+
 describe("calcularCandidatosItem — motor de reglas (rama feat-promociones)", () => {
   it("bug 1 — producto con variantes: SIEMPRE a mano, sin importar tipo/estado/piso", () => {
     const resultado = calcularCandidatosItem(
