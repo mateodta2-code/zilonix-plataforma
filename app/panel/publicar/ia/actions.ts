@@ -6,7 +6,8 @@ import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { descargarFotoBase } from "@/lib/ia/imagen";
 import { llamarIA, type ImagenIA } from "@/lib/ia/proveedores";
 import type { ConexionIAConClave } from "@/lib/ia/tipos";
-import { tendenciasPorNivelMl } from "@/lib/ml/cliente";
+import { tendenciasPorNivelMl, tituloPublicacionMl } from "@/lib/ml/cliente";
+import { idCompetenciaDesdeLink, limpiarTituloCompetencia } from "@/lib/publicaciones/competencia";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { resolverCategoria } from "@/lib/ml/publicar";
 import { analizarProducto, ErrorAnalisisIA } from "@/lib/publicaciones/analisis";
@@ -100,6 +101,9 @@ export type ResultadoTitulos =
       // la padre y la específica, con su nivel, y la ruta analizada.
       masBuscados: TendenciaConNivel[];
       rutaCategoria: string[];
+      // Título de la competencia usado como idea (link o pegado a mano) y,
+      // si el link no se pudo leer, el aviso para pegarlo a mano.
+      competencia: { titulo: string | null; aviso: string | null };
     }
   | Fallo;
 
@@ -110,6 +114,8 @@ export async function proponerTitulosAction(entrada: {
   categoriaId?: string | null;
   categoriaNombre?: string | null;
   info?: string;
+  linkCompetencia?: string;
+  tituloCompetencia?: string;
 }): Promise<ResultadoTitulos> {
   const ficha = leerFicha(entrada.ficha);
   if (!fichaConfirmada(ficha)) return { ok: false, aviso: "Confirma la ficha antes de pedir títulos." };
@@ -127,17 +133,35 @@ export async function proponerTitulosAction(entrada: {
       registrar("tendencias", error);
     }
   }
+  // Competencia: lo pegado a mano manda; si no, el título del link por la API oficial.
+  let tituloCompetencia = limpiarTituloCompetencia(entrada.tituloCompetencia);
+  let avisoCompetencia: string | null = null;
+  const link = typeof entrada.linkCompetencia === "string" ? entrada.linkCompetencia.trim().slice(0, 500) : "";
+  if (!tituloCompetencia && link) {
+    const id = idCompetenciaDesdeLink(link, ctx.cuenta.siteId);
+    if (!id) {
+      avisoCompetencia = `Ese link no es de una publicación de Mercado Libre de ${ctx.cuenta.siteId}. Pega su título a mano.`;
+    } else {
+      try {
+        const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
+        tituloCompetencia = limpiarTituloCompetencia(await tituloPublicacionMl(id.tipo, id.id, token));
+      } catch (error) {
+        registrar("competencia", error);
+      }
+      if (!tituloCompetencia) avisoCompetencia = "Mercado Libre no dejó leer esa publicación. Pega su título a mano.";
+    }
+  }
   // Para la IA, primero las de la categoría específica (las más cercanas al producto).
   const tendencias = [...masBuscados].sort((a, b) => ORDEN_PARA_IA[a.nivel] - ORDEN_PARA_IA[b.nivel]).map((t) => t.palabra);
   const info = limpiarInfoVendedor(entrada.info);
   const categoria = typeof entrada.categoriaNombre === "string" ? entrada.categoriaNombre.slice(0, 120) : null;
   try {
     const respuesta = await conCupoDeTexto(ctx.empresaId, () =>
-      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info }), { maxTokens: 800 })
+      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info, competencia: tituloCompetencia }), { maxTokens: 800 })
     );
-    const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados });
+    const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados, competencia: tituloCompetencia });
     if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
-    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria };
+    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria, competencia: { titulo: tituloCompetencia || null, aviso: avisoCompetencia } };
   } catch (error) {
     registrar("titulos", error);
     return { ok: false, aviso: mensajeErrorIA(error) };

@@ -27,7 +27,7 @@ const ROTULO_ORIGEN: Record<Origen, { texto: string; estado: EstadoChip }> = {
   vendedor: { texto: "Del vendedor", estado: "neutro" },
   supuesto: { texto: "Confirmar", estado: "advertencia" },
 };
-const ROTULO_PALABRA: Record<PalabraClave["origen"], string> = { tendencia: "Tendencia", vendedor: "Del vendedor", ia: "Sugerida por la IA" };
+const ROTULO_PALABRA: Record<PalabraClave["origen"], string> = { tendencia: "Tendencia", vendedor: "Del vendedor", competencia: "De la competencia", ia: "Sugerida por la IA" };
 // Qué tan buscada es, según el nivel de categoría donde sale la tendencia.
 const ROTULO_NIVEL: Record<NivelBusqueda, string> = { alta: "Alta", media: "Media", baja: "Baja" };
 const LEYENDA_NIVEL: Record<NivelBusqueda, string> = { alta: "Alta (categoría general)", media: "Media (categoría padre)", baja: "Baja (categoría específica)" };
@@ -79,7 +79,11 @@ export function CrearConIA({
     conTendencias: boolean;
     masBuscados: TendenciaConNivel[];
     rutaCategoria: string[];
+    competencia: { titulo: string | null; aviso: string | null };
   } | null>(null);
+  // Competencia (opcional): link de Mercado Libre o su título pegado a mano.
+  const [linkCompetencia, setLinkCompetencia] = useState("");
+  const [tituloCompetencia, setTituloCompetencia] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [ocupado, setOcupado] = useState<null | "analisis" | "titulos" | "descripcion">(null);
   const [aviso, setAviso] = useState<Aviso>(null);
@@ -148,9 +152,17 @@ export function CrearConIA({
 
   function pedirTitulos() {
     if (!ficha) return;
-    void correr("titulos", () => proponerTitulosAction({ cuentaMlId: cuenta.id, ficha, categoriaId: categoria?.id ?? null, categoriaNombre: categoria?.nombre ?? null, info }), (r) => {
+    void correr("titulos", () => proponerTitulosAction({
+          cuentaMlId: cuenta.id,
+          ficha,
+          categoriaId: categoria?.id ?? null,
+          categoriaNombre: categoria?.nombre ?? null,
+          info,
+          linkCompetencia,
+          tituloCompetencia,
+        }), (r) => {
       if (r.ok)
-        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria });
+        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria, competencia: r.competencia });
     });
   }
 
@@ -311,12 +323,31 @@ export function CrearConIA({
           <div className={styles.bloqueIA}>
             <p className="zx-etiqueta">2. Títulos</p>
             <div>
+              <details className={styles.competenciaIA}>
+                <summary>Tomar ideas de una publicación de la competencia (opcional)</summary>
+                <Campo etiqueta="Link de la publicación en Mercado Libre">
+                  <input
+                    className="zx-control"
+                    type="url"
+                    value={linkCompetencia}
+                    onChange={(e) => setLinkCompetencia(e.target.value)}
+                    placeholder="https://…mercadolibre…/…"
+                    disabled={ocupado !== null}
+                  />
+                </Campo>
+                <Campo etiqueta="O pega su título (si el link no se puede leer)">
+                  <input className="zx-control" maxLength={200} value={tituloCompetencia} onChange={(e) => setTituloCompetencia(e.target.value)} disabled={ocupado !== null} />
+                </Campo>
+                <p className={styles.ayudaIA}>Solo se usan sus palabras como idea: la IA no copia el título ni toma datos que no estén en tu ficha.</p>
+              </details>
               <Boton type="button" onClick={pedirTitulos} disabled={ocupado !== null}>
                 {ocupado === "titulos" ? "Proponiendo…" : titulos ? "Proponer otros" : "Proponer títulos"}
               </Boton>
             </div>
             {titulos ? (
               <>
+                {titulos.competencia.aviso ? <p className={styles.avisoIA}>{titulos.competencia.aviso}</p> : null}
+                {titulos.competencia.titulo ? <p className={styles.ayudaIA}>Ideas tomadas de: «{titulos.competencia.titulo}»</p> : null}
                 {!titulos.conTendencias ? <p className={styles.ayudaIA}>Sin tendencias de la categoría: Mercado Libre no las devolvió (o no hay categoría).</p> : null}
                 {titulos.masBuscados.length > 0 ? (
                   <div className={styles.masBuscadosIA}>

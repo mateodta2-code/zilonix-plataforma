@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ResultadoPublicacionCuenta } from "@/lib/ml/publicar-tipos";
 import {
+  urlDescarga,
   ponerFotoEn,
   reemplazarOAgregarFoto,
   construirEstadoInicial,
@@ -812,5 +813,14 @@ describe("imágenes creadas con IA en la galería (23-nov)", () => {
     expect(reemplazarOAgregarFoto(["a", "b"], "nueva", "vieja", null)).toEqual(["a", "b", "nueva"]);
     expect(reemplazarOAgregarFoto(["a", "b"], "nueva", null, 2)).toBeNull();
     expect(reemplazarOAgregarFoto(["a", "nueva"], "nueva", null, 2)).toEqual(["a", "nueva"]);
+  });
+});
+
+describe("urlDescarga (Cloudinary fl_attachment)", () => {
+  it("agrega fl_attachment solo a URLs de Cloudinary y una sola vez", () => {
+    const u = "https://res.cloudinary.com/demo/image/upload/c_pad,w_500/v1/zilonix-publicaciones-ia/a.png";
+    expect(urlDescarga(u)).toBe("https://res.cloudinary.com/demo/image/upload/fl_attachment/c_pad,w_500/v1/zilonix-publicaciones-ia/a.png");
+    expect(urlDescarga(urlDescarga(u))).toBe(urlDescarga(u));
+    expect(urlDescarga("https://http2.mlstatic.com/a.jpg")).toBe("https://http2.mlstatic.com/a.jpg");
   });
 });

@@ -11,7 +11,7 @@ import { NOTA_FOTO_UNO } from "@/lib/ia/prompts/fotoPrincipal";
 import { CHECKLIST_CONTENIDO, revisarCopySeguro, TIPOS_CONTENIDO_ZILONIX } from "@/lib/ia/prompts/zilonix-contenido";
 import type { Ficha } from "@/lib/publicaciones/ficha";
 import type { Cuenta } from "./CuentasDestino";
-import { TIPO_ARRASTRE_FOTO_URL } from "./formulario-logica";
+import { TIPO_ARRASTRE_FOTO_URL, urlDescarga } from "./formulario-logica";
 import { ajustarImagenAction, crearImagenAction, prepararImagenesAction, type PropuestaImagen } from "./ia/imagenes/actions";
 import styles from "./publicar.module.css";
 
@@ -182,6 +182,22 @@ export function GenerarConIA({
   }
 
 
+  // «Descargar todas»: una tras otra (sin ZIP: no hay librería para eso).
+  // El navegador puede preguntar si permite varias descargas.
+  const listas = tarjetas.filter((t) => t.estado === "lista" && t.url);
+  async function descargarTodas() {
+    for (const t of listas) {
+      const a = document.createElement("a");
+      a.href = urlDescarga(t.url as string);
+      a.rel = "noopener";
+      a.download = "";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      await esperar(400);
+    }
+  }
+
   const tipos = estilo === "zilonix_contenido" ? TIPOS_CONTENIDO_ZILONIX : estilo === "experto_ml" ? TIPOS_EXPERTO_ML : [];
   const marcados = estilo === "zilonix_contenido" ? tiposContenido : tiposExperto;
   const alternarTipo = (id: string) => (estilo === "zilonix_contenido" ? setTiposContenido : setTiposExperto)((ts) => (ts.includes(id) ? ts.filter((x) => x !== id) : [...ts, id]));
@@ -245,6 +261,11 @@ export function GenerarConIA({
             <Boton type="button" onClick={crearTodas} disabled={tarjetas.some((t) => t.estado === "generando" || t.estado === "en_cola")}>
               Crear todas las aprobadas
             </Boton>
+            {listas.length > 1 ? (
+              <Boton type="button" variante="secundario" onClick={() => void descargarTodas()}>
+                {`Descargar todas (${listas.length})`}
+              </Boton>
+            ) : null}
             {espacioLibre !== null ? <span className={styles.ayudaIA}>Espacio en la galería: {espacioLibre} foto(s).</span> : null}
           </div>
           <div className={styles.tarjetasIA}>
@@ -309,7 +330,7 @@ export function GenerarConIA({
                         <Boton type="button" variante="primario" onClick={() => (t.tipo === "portada" ? void ajustar({ ...t, estado: "propuesta" }).then(() => undefined) : void crear(t))}>
                           {t.tipo === "portada" ? "Otra composición" : "Regenerar"}
                         </Boton>
-                        <a href={t.url} target="_blank" rel="noopener noreferrer" download className={styles.enlaceIA}>
+                        <a href={t.url ? urlDescarga(t.url) : undefined} target="_blank" rel="noopener noreferrer" download className={styles.enlaceIA}>
                           Descargar
                         </a>
                       </>

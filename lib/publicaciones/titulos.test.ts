@@ -135,3 +135,11 @@ describe("categoriasPorNivel (ruta de /categories/{id})", () => {
     expect(categoriasPorNivel([], "MCO4321")).toEqual([{ nivel: "baja", categoriaId: "MCO4321", nombre: "MCO4321" }]);
   });
 });
+
+describe("palabras de la competencia", () => {
+  it("una palabra que solo está en el título de la competencia queda como «competencia»", () => {
+    const p = origenPalabras(["Bebedero colibrí picaflor"], [], "bebedero colibrí", [], "Bebedero Colibri Picaflor X2");
+    expect(p.find((x) => x.palabra === "picaflor")).toEqual({ palabra: "picaflor", origen: "competencia" });
+    expect(p.find((x) => x.palabra === "Bebedero")).toMatchObject({ origen: "vendedor" });
+  });
+});
