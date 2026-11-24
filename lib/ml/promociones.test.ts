@@ -411,6 +411,38 @@ describe("leerReglasFrescasCuenta / leerPisosYCostosFrescos / leerPisoYCostoFres
     expect(mapa.has("SKU-3")).toBe(false); // sin costos_sku para ese SKU — nunca se inventa una fila
   });
 
+  const base = { skuCodigo: "VITALAIRI", precioMinimoUnidad: "79900", precioMinimoComboX2: "119850", precioMinimoComboX3: "159800", costo: "15260" };
+
+  it("SKU combo: VITALAIRIX3 usa el mínimo x3 y el costo × 3 de la base VITALAIRI", async () => {
+    filasPorTabla.set(costosSku, [base]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["VITALAIRIX3"]);
+    expect(mapa.get("VITALAIRIX3")).toEqual({ precioMinimo: 159800, costo: 45780 });
+  });
+
+  it("SKU combo en minúsculas se normaliza: vitalairix2 → 119850, y el mapa responde por el SKU original", async () => {
+    filasPorTabla.set(costosSku, [base]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["vitalairix2"]);
+    expect(mapa.get("vitalairix2")).toEqual({ precioMinimo: 119850, costo: 30520 });
+  });
+
+  it("la fila exacta gana sobre la base", async () => {
+    filasPorTabla.set(costosSku, [base, { skuCodigo: "VITALAIRIX3", precioMinimoUnidad: "150000", precioMinimoComboX2: null, precioMinimoComboX3: null, costo: "40000" }]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["VITALAIRIX3"]);
+    expect(mapa.get("VITALAIRIX3")).toEqual({ precioMinimo: 150000, costo: 40000 });
+  });
+
+  it("base sin mínimo combo: sin piso (no se inventa), pero el costo sí sale de la base", async () => {
+    filasPorTabla.set(costosSku, [{ ...base, precioMinimoComboX3: null }]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["VITALAIRIX3"]);
+    expect(mapa.get("VITALAIRIX3")).toEqual({ precioMinimo: null, costo: 45780 });
+  });
+
+  it("X1, X4 y SKU sin X no son combo: no usan la base", async () => {
+    filasPorTabla.set(costosSku, [base]);
+    const mapa = await leerPisosYCostosFrescos("empresa-1", ["VITALAIRIX1", "VITALAIRIX4", "VITALAIRI2"]);
+    expect(mapa.size).toBe(0);
+  });
+
   it("leerPisosYCostosFrescos — lista vacía: mapa vacío, nunca consulta la base", async () => {
     const mapa = await leerPisosYCostosFrescos("empresa-1", []);
     expect(mapa.size).toBe(0);
