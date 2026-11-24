@@ -20,6 +20,46 @@ const ORDEN_NIVEL: Record<NivelBusqueda, number> = { alta: 0, media: 1, baja: 2 
 // Para el prompt de la IA: primero las de la categoría específica.
 export const ORDEN_PARA_IA: Record<NivelBusqueda, number> = { baja: 0, media: 1, alta: 2 };
 export const MAXIMO_MAS_BUSCADOS = 30;
+// Máximo por nivel, para que la categoría general no llene la lista.
+export const MAXIMO_POR_NIVEL = 10;
+
+// Palabras que no dicen de qué producto se trata.
+const PALABRAS_VACIAS = new Set(["para", "como", "este", "esta", "esto", "pack", "tipo", "marca", "modelo", "unidad", "unidades", "color", "colores", "con", "sin", "por", "los", "las", "del", "una", "uno", "com", "pra", "sem", "kit", "set"]);
+
+// Palabras importantes de un texto: minúsculas, sin tildes, de 4 letras o
+// más, sin las vacías y sin la «s»/«es» del plural.
+function raices(texto: string): Set<string> {
+  const r = new Set<string>();
+  for (const w of normalizar(texto).split(/[^\p{L}\p{N}]+/u)) {
+    if (w.length < 4 || PALABRAS_VACIAS.has(w)) continue;
+    r.add(w.length > 5 && w.endsWith("es") ? w.slice(0, -2) : w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w);
+  }
+  return r;
+}
+
+// En las categorías padre y general sale de todo (en «Mascotas»: gatos,
+// perros, pollos… para un bebedero de colibrí, 24-nov). De esos niveles
+// solo quedan las búsquedas que comparten una palabra importante con el
+// producto; la específica se deja completa. Además, máximo por nivel.
+export function filtrarTendenciasRelacionadas<T extends { nivel: NivelBusqueda; palabras: string[] }>(
+  niveles: T[],
+  textoProducto: string
+): { niveles: T[]; descartadas: number } {
+  const producto = raices(textoProducto);
+  let descartadas = 0;
+  const filtrados = niveles.map((n) => {
+    const palabras =
+      n.nivel === "baja"
+        ? n.palabras
+        : n.palabras.filter((frase) => {
+            const ok = [...raices(frase)].some((w) => producto.has(w));
+            if (!ok) descartadas += 1;
+            return ok;
+          });
+    return { ...n, palabras: palabras.slice(0, MAXIMO_POR_NIVEL) };
+  });
+  return { niveles: filtrados.filter((n) => n.palabras.length > 0), descartadas };
+}
 
 // Une las tendencias de los 3 niveles sin repetir (una búsqueda que sale
 // en varios niveles queda con el más alto), ordenadas alta → baja.

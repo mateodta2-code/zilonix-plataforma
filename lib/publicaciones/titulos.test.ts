@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { categoriasPorNivel, tendenciasCategoriaMl } from "@/lib/ml/cliente";
 import { leerFicha } from "@/lib/publicaciones/ficha";
-import { leerPropuestaTitulos, limpiarTitulo, nombresPropios, origenPalabras, recortarPorPalabra, sinMayusculaCadaPalabra, unirTendenciasPorNivel } from "@/lib/publicaciones/titulos";
+import { leerPropuestaTitulos, limpiarTitulo, nombresPropios, origenPalabras, recortarPorPalabra, sinMayusculaCadaPalabra, unirTendenciasPorNivel, filtrarTendenciasRelacionadas } from "@/lib/publicaciones/titulos";
 
 const fetchOriginal = globalThis.fetch;
 afterEach(() => {
@@ -141,5 +141,38 @@ describe("palabras de la competencia", () => {
     const p = origenPalabras(["Bebedero colibrí picaflor"], [], "bebedero colibrí", [], "Bebedero Colibri Picaflor X2");
     expect(p.find((x) => x.palabra === "picaflor")).toEqual({ palabra: "picaflor", origen: "competencia" });
     expect(p.find((x) => x.palabra === "Bebedero")).toMatchObject({ origen: "vendedor" });
+  });
+});
+
+describe("filtrarTendenciasRelacionadas (24-nov: «Mascotas» para un bebedero de colibrí)", () => {
+  const producto = "Pack de 2 comederos colibrí base roja plástico transparente Bebederos y Comederos";
+
+  it("de la general y la padre solo quedan las que comparten una palabra con el producto; la específica completa", () => {
+    const r = filtrarTendenciasRelacionadas(
+      [
+        { nivel: "baja" as const, palabras: ["bebedero colibri", "alpiste"] },
+        { nivel: "media" as const, palabras: ["jaula para aves", "comedero para pajaros"] },
+        { nivel: "alta" as const, palabras: ["dispensador comida gato", "guacal para gatos", "cerdo minipig", "comederos automaticos perro"] },
+      ],
+      producto
+    );
+    expect(r.niveles).toEqual([
+      { nivel: "baja", palabras: ["bebedero colibri", "alpiste"] },
+      { nivel: "media", palabras: ["comedero para pajaros"] },
+      { nivel: "alta", palabras: ["comederos automaticos perro"] },
+    ]);
+    expect(r.descartadas).toBe(4);
+  });
+
+  it("palabras vacías («para», «color», «pack») no hacen coincidir nada", () => {
+    const r = filtrarTendenciasRelacionadas([{ nivel: "alta" as const, palabras: ["cama para gato color aguamarina", "pack de juguetes"] }], producto);
+    expect(r.niveles).toEqual([]);
+    expect(r.descartadas).toBe(2);
+  });
+
+  it("máximo 10 por nivel", () => {
+    const muchas = Array.from({ length: 25 }, (_, i) => `bebedero colibri ${i}`);
+    const r = filtrarTendenciasRelacionadas([{ nivel: "baja" as const, palabras: muchas }], producto);
+    expect(r.niveles[0].palabras).toHaveLength(10);
   });
 });
