@@ -1,5 +1,5 @@
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { conReglaYOrigen } from "./promocionesBitacora";
+import { conReglaYOrigen, nuevoLoteBitacora, resultadoMlOmitida } from "./promocionesBitacora";
 import { promocionesAcciones } from "@/db/schema";
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import { leerItemParaPromocionMl, leerPromocionesItemMl, motivoErrorEscrituraMl, type PromocionCrudaMl } from "@/lib/ml/cliente";
@@ -125,6 +125,8 @@ export type ResumenSalirTodas = { revisadas: number; salieron: number; errores: 
 
 export async function salirDeTodasLasPromociones(empresaId: string, usuarioId: string, seleccion: ItemSeleccionado[]): Promise<ResumenSalirTodas> {
   const resumen: ResumenSalirTodas = { revisadas: 0, salieron: 0, errores: 0, noPermitidas: 0, filas: [] };
+  // Promo-E: todas las filas de esta ejecución comparten el mismo lote.
+  const lote = nuevoLoteBitacora();
 
   await recorrerPublicacionesConPromos(
     empresaId,
@@ -145,8 +147,35 @@ export async function salirDeTodasLasPromociones(empresaId: string, usuarioId: s
         const base = { itemId, cuentaMlId: cuenta.id, tituloProducto: titulo, tipoPromocion: tipo };
 
         if (!puedeSalirPorApi(tipo)) {
+          const motivoNoApi = "No se puede salir por API, hay que hacerlo en la Central de Promociones de Mercado Libre.";
           resumen.noPermitidas += 1;
-          resumen.filas.push({ ...base, estado: "no_permitida", error: "No se puede salir por API, hay que hacerlo en la Central de Promociones de Mercado Libre." });
+          resumen.filas.push({ ...base, estado: "no_permitida", error: motivoNoApi });
+          // Nunca se llama a Mercado Libre: queda «rechazada» con el motivo (100 = 100).
+          try {
+            await dbComoEmpresa(empresaId, (tx) =>
+              tx.insert(promocionesAcciones).values({
+                empresaId,
+                cuentaMlId: cuenta.id,
+                itemId,
+                tituloProducto: titulo,
+                tipoPromocion: tipo,
+                promotionIdMl: typeof promo.id === "string" ? promo.id : null,
+                accion: "salir",
+                precioAntes: typeof promo.price === "number" ? String(promo.price) : null,
+                precioDespues: null,
+                estado: "rechazada",
+                aprobadoPor: usuarioId,
+                aprobadoTs: new Date(),
+                ejecutadoPor: usuarioId,
+                ejecutadoTs: new Date(),
+                modoSimulacion: false,
+                resultadoMl: resultadoMlOmitida("salir", "salir-todas", motivoNoApi, { lote, limite: "ml", nombrePromocion: typeof promo.name === "string" ? promo.name : null }),
+                error: motivoNoApi,
+              })
+            );
+          } catch {
+            /* la bitácora nunca frena la salida */
+          }
           continue;
         }
 
@@ -194,7 +223,7 @@ export async function salirDeTodasLasPromociones(empresaId: string, usuarioId: s
             ejecutadoPor: usuarioId,
             ejecutadoTs: new Date(),
             modoSimulacion: false,
-            resultadoMl: conReglaYOrigen({ ok: respuesta.ok, status: respuesta.status, masivo: true }, "salir", "salir-todas"),
+            resultadoMl: conReglaYOrigen({ ok: respuesta.ok, status: respuesta.status, masivo: true }, "salir", "salir-todas", { lote, limite: "ninguno", nombrePromocion: typeof promo.name === "string" ? promo.name : null }),
             error: motivo,
           })
         );

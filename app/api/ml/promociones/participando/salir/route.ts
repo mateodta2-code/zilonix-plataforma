@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { conReglaYOrigen } from "@/lib/ml/promocionesBitacora";
+import { conReglaYOrigen, nuevoLoteBitacora } from "@/lib/ml/promocionesBitacora";
 import { NextResponse } from "next/server";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, promocionesAcciones } from "@/db/schema";
@@ -117,7 +117,7 @@ export async function POST(request: Request) {
           ejecutadoPor: usuario.id,
           ejecutadoTs: new Date(),
           modoSimulacion: false,
-          resultadoMl: conReglaYOrigen({ ok: true, yaNoParticipaba: true, llamoAMercadoLibre: false }, "salir", "participando"),
+          resultadoMl: conReglaYOrigen({ ok: true, yaNoParticipaba: true, llamoAMercadoLibre: false }, "salir", "participando", { lote: nuevoLoteBitacora(), limite: "ninguno" }),
           error: null,
         })
         .returning()
@@ -163,7 +163,7 @@ export async function POST(request: Request) {
         ejecutadoPor: usuario.id,
         ejecutadoTs: new Date(),
         modoSimulacion: false,
-        resultadoMl: conReglaYOrigen({ ok: respuestaMl.ok, status: respuestaMl.status }, "salir", "participando"),
+        resultadoMl: conReglaYOrigen({ ok: respuestaMl.ok, status: respuestaMl.status }, "salir", "participando", { lote: nuevoLoteBitacora(), limite: "ninguno" }),
         error: errorClaro,
       })
       .returning()
