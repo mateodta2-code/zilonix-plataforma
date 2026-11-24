@@ -11,12 +11,13 @@ import { NOTA_FOTO_UNO } from "@/lib/ia/prompts/fotoPrincipal";
 import { CHECKLIST_CONTENIDO, revisarCopySeguro, TIPOS_CONTENIDO_ZILONIX } from "@/lib/ia/prompts/zilonix-contenido";
 import type { Ficha } from "@/lib/publicaciones/ficha";
 import type { Cuenta } from "./CuentasDestino";
+import { TIPO_ARRASTRE_FOTO_URL } from "./formulario-logica";
 import { ajustarImagenAction, crearImagenAction, prepararImagenesAction, type PropuestaImagen } from "./ia/imagenes/actions";
 import styles from "./publicar.module.css";
 
 type Estilo = "zilonix_portadas" | "zilonix_contenido" | "experto_ml";
 type EstadoTarjeta = "propuesta" | "en_cola" | "generando" | "lista" | "error";
-type Tarjeta = PropuestaImagen & { estado: EstadoTarjeta; url?: string; avisos?: string[]; mensaje?: string; titulo: string; copy: string; ajuste: string; elegida: boolean };
+type Tarjeta = PropuestaImagen & { estado: EstadoTarjeta; url?: string; avisos?: string[]; mensaje?: string; titulo: string; copy: string; ajuste: string };
 
 const ESTILOS: { id: Estilo; nombre: string; ayuda: string }[] = [
   { id: "zilonix_portadas", nombre: "Portadas Zilonix", ayuda: "Una portada distinta por cada cuenta destino; queda como foto 1 de esa cuenta." },
@@ -31,7 +32,7 @@ const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Publicar → «Crear con IA» → «2. Imágenes» (PR2). Con la ficha
 // confirmada de «Crear con IA», arma propuestas (sin costo), la persona
 // las revisa y solo «Crear» gasta. Portadas: cada una va a la foto 1 de
-// su cuenta. Contenido y Experto: «Agregar a mis fotos» las suma a la
+// su cuenta. Contenido y Experto: cada imagen creada entra sola a la
 // misma galería. Máximo 2 generándose a la vez; las demás esperan.
 export function GenerarConIA({
   cuentas,
@@ -39,7 +40,7 @@ export function GenerarConIA({
   categoriaId,
   fotos,
   espacioLibre,
-  onAgregarFotos,
+  onFotoGenerada,
   onPortadaCuenta,
 }: {
   cuentas: Cuenta[];
@@ -47,7 +48,9 @@ export function GenerarConIA({
   categoriaId: string | null;
   fotos: string[];
   espacioLibre: number | null;
-  onAgregarFotos: (urls: string[]) => void;
+  // Cada imagen creada (no portada) entra sola a la galería; al regenerar
+  // reemplaza a la anterior. false = la galería está llena.
+  onFotoGenerada: (nueva: string, anterior: string | null) => boolean;
   onPortadaCuenta: (cuentaId: string, url: string) => void;
 }) {
   const [estilo, setEstilo] = useState<Estilo>("zilonix_portadas");
@@ -70,7 +73,7 @@ export function GenerarConIA({
     );
   }
   if (cuentas.length === 0) return <p className={styles.ayudaIA}>Marca al menos una cuenta destino.</p>;
-  if (fotos.length === 0) return <p className={styles.ayudaIA}>Sube primero al menos una foto real del producto en «Subir mis fotos»: la IA la usa como referencia.</p>;
+  if (fotos.length === 0) return <p className={styles.ayudaIA}>Sube primero al menos una foto real del producto en la galería de Fotos: la IA la usa como referencia.</p>;
 
   const cambiar = (id: string, cambios: Partial<Tarjeta>) => setTarjetas((ts) => ts.map((t) => (t.id === id ? { ...t, ...cambios } : t)));
 
@@ -99,7 +102,7 @@ export function GenerarConIA({
         setTarjetas(
           r.imagenes.map((img) => {
             const p = img.propuesta as { titulo?: string; copy?: string[] };
-            return { ...img, estado: "propuesta", titulo: p.titulo ?? "", copy: (p.copy ?? []).join("\n"), ajuste: "", elegida: true };
+            return { ...img, estado: "propuesta", titulo: p.titulo ?? "", copy: (p.copy ?? []).join("\n"), ajuste: "" };
           })
         );
       }
@@ -133,8 +136,13 @@ export function GenerarConIA({
         return;
       }
       if (r.estado === "lista") {
-        cambiar(t.id, { estado: "lista", url: r.url, avisos: r.validada ? r.avisos : ["No se pudo validar la imagen con Mercado Libre."] });
-        if (t.tipo === "portada" && t.cuentaMlId) onPortadaCuenta(t.cuentaMlId, r.url);
+        const avisos = r.validada ? r.avisos : ["No se pudo validar la imagen con Mercado Libre."];
+        if (t.tipo === "portada") {
+          if (t.cuentaMlId) onPortadaCuenta(t.cuentaMlId, r.url);
+        } else if (!onFotoGenerada(r.url, t.url ?? null)) {
+          avisos.push("No entró a la galería: ya está el máximo de fotos de la categoría. Quita una y arrástrala.");
+        }
+        cambiar(t.id, { estado: "lista", url: r.url, avisos });
         return;
       }
       cambiar(t.id, { estado: "en_cola" });
@@ -171,12 +179,7 @@ export function GenerarConIA({
     }
   }
 
-  function agregarElegidas() {
-    const urls = tarjetas.filter((t) => t.estado === "lista" && t.elegida && t.tipo !== "portada" && t.url).map((t) => t.url as string);
-    onAgregarFotos(espacioLibre === null ? urls : urls.slice(0, Math.max(0, espacioLibre)));
-  }
 
-  const listasParaAgregar = tarjetas.filter((t) => t.estado === "lista" && t.tipo !== "portada").length;
   const tipos = estilo === "zilonix_contenido" ? TIPOS_CONTENIDO_ZILONIX : estilo === "experto_ml" ? TIPOS_EXPERTO_ML : [];
   const marcados = estilo === "zilonix_contenido" ? tiposContenido : tiposExperto;
   const alternarTipo = (id: string) => (estilo === "zilonix_contenido" ? setTiposContenido : setTiposExperto)((ts) => (ts.includes(id) ? ts.filter((x) => x !== id) : [...ts, id]));
@@ -231,11 +234,6 @@ export function GenerarConIA({
             <Boton type="button" onClick={crearTodas} disabled={tarjetas.some((t) => t.estado === "generando" || t.estado === "en_cola")}>
               Crear todas las aprobadas
             </Boton>
-            {listasParaAgregar > 0 ? (
-              <Boton type="button" variante="primario" onClick={agregarElegidas}>
-                Agregar a mis fotos
-              </Boton>
-            ) : null}
             {espacioLibre !== null ? <span className={styles.ayudaIA}>Espacio en la galería: {espacioLibre} foto(s).</span> : null}
           </div>
           <div className={styles.tarjetasIA}>
@@ -246,7 +244,21 @@ export function GenerarConIA({
               return (
                 <div key={t.id} className={styles.tarjetaIA}>
                   <p className="zx-etiqueta">{t.nombre}</p>
-                  {t.url ? <img src={t.url} alt={`Imagen creada: ${t.nombre}`} width={180} height={180} className={styles.miniaturaIA} /> : null}
+                  {t.url ? (
+                    <img
+                      src={t.url}
+                      alt={`Imagen creada: ${t.nombre}`}
+                      width={180}
+                      height={180}
+                      className={styles.miniaturaIA}
+                      // Se puede arrastrar a un lugar de la galería (p. ej. de portada).
+                      draggable={t.tipo !== "portada"}
+                      onDragStart={(e) => {
+                        if (t.url) e.dataTransfer.setData(TIPO_ARRASTRE_FOTO_URL, t.url);
+                      }}
+                      title={t.tipo !== "portada" ? "Ya está en la galería. Arrástrala para ponerla en otro lugar." : undefined}
+                    />
+                  ) : null}
                   {conTextos && t.estado !== "lista" ? (
                     <>
                       <Campo etiqueta="Título">
@@ -283,13 +295,7 @@ export function GenerarConIA({
                   <span className={styles.accionesIA}>
                     {t.estado === "lista" ? (
                       <>
-                        {t.tipo !== "portada" ? (
-                          <label className={styles.tipoIA}>
-                            <input type="checkbox" checked={t.elegida} onChange={(e) => cambiar(t.id, { elegida: e.target.checked })} /> Agregar
-                          </label>
-                        ) : (
-                          <Chip estado="exito">Puesta como foto 1</Chip>
-                        )}
+                        {t.tipo !== "portada" ? <Chip estado="exito">En la galería</Chip> : <Chip estado="exito">Puesta como foto 1</Chip>}
                         <Boton type="button" variante="primario" onClick={() => (t.tipo === "portada" ? void ajustar({ ...t, estado: "propuesta" }).then(() => undefined) : void crear(t))}>
                           {t.tipo === "portada" ? "Otra composición" : "Regenerar"}
                         </Boton>
