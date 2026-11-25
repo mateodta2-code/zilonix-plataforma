@@ -323,6 +323,13 @@
       "when": 1795573083401,
       "tag": "0045_entregas_domiciliario",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1795574382380,
+      "tag": "0046_despachos_bodega_3pl",
+      "breakpoints": true
     }
   ]
 }
