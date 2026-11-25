@@ -95,6 +95,8 @@ export type ResultadoTitulos =
       titulos: string[];
       catalogo: string | null;
       palabras: PalabraClave[];
+      keywordsPrincipales: string[];
+      keywordsNoUtilizadas: string[];
       conTendencias: boolean;
       // «Más buscados en la categoría»: tendencias de la categoría general,
       // la padre y la específica, con su nivel, y la ruta analizada.

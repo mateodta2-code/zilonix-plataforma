@@ -41,6 +41,8 @@ const propuesta = (puedeGuardar: boolean, vendidas: number) => ({
   ok: true,
   titulos: ["Termo de acero azul 1 L", "Termo azul acero inoxidable"],
   catalogo: null,
+  keywordsPrincipales: [],
+  keywordsNoUtilizadas: [],
   largoMaximo: 60,
   largoMaximoCatalogo: 120,
   puedeGuardar,
@@ -107,5 +109,20 @@ describe("Título en EditarPublicacion", () => {
     fireEvent.click(screen.getByText("Mejorar título"));
     expect(await screen.findByText(/Conecta una IA/)).toBeTruthy();
     expect(screen.getByText("Ir a Conectar IA").getAttribute("href")).toBe("/panel/conectar-ia");
+  });
+
+  it("con 10 sugerencias muestra las 10 filas y las dos listas de keywords", async () => {
+    acciones.mejorar.mockResolvedValue({
+      ...propuesta(false, 4),
+      titulos: Array.from({ length: 10 }, (_, i) => `Termo de acero modelo ${String.fromCharCode(97 + i)}`),
+      keywordsPrincipales: ["termo acero"],
+      keywordsNoUtilizadas: ["botilito"],
+    });
+    render(<EditarPublicacion datos={datos(4)} />);
+    fireEvent.click(screen.getByText("Mejorar título"));
+    expect(await screen.findAllByText("Copiar")).toHaveLength(10);
+    expect(screen.getAllByLabelText(/de 60 caracteres/)).toHaveLength(10);
+    expect(screen.getByLabelText("Keywords principales").textContent).toContain("termo acero");
+    expect(screen.getByLabelText("Keywords no utilizadas (para la descripción)").textContent).toContain("botilito");
   });
 });

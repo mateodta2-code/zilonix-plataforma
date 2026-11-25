@@ -76,3 +76,29 @@ describe("CrearConIA: banda de carga", () => {
     await waitFor(() => expect(screen.queryByText("Proponiendo descripción…")).toBeNull());
   });
 });
+
+describe("CrearConIA: 10 títulos y keywords", () => {
+  it("muestra 10 sugerencias numeradas con su largo y las dos listas de keywords", async () => {
+    guardarFichaConfirmada();
+    const titulos = Array.from({ length: 10 }, (_, i) => `Bebedero para gatos modelo ${String.fromCharCode(97 + i)}`);
+    vi.mocked(proponerTitulosAction).mockResolvedValue({
+      ok: true,
+      titulos,
+      catalogo: null,
+      palabras: [],
+      keywordsPrincipales: ["bebedero gatos"],
+      keywordsNoUtilizadas: ["fuente agua"],
+      conTendencias: false,
+      masBuscados: [],
+      rutaCategoria: [],
+      tendenciasSinRelacion: false,
+    } as never);
+    render(<CrearConIA {...base} />);
+    fireEvent.click(await screen.findByText("Proponer títulos"));
+    const lista = await screen.findByLabelText("Títulos sugeridos");
+    expect(lista.querySelectorAll("li")).toHaveLength(10);
+    expect(screen.getAllByLabelText(/de 60 caracteres/)).toHaveLength(10);
+    expect(screen.getByLabelText("Keywords principales").textContent).toContain("bebedero gatos");
+    expect(screen.getByLabelText("Keywords no utilizadas (para la descripción)").textContent).toContain("fuente agua");
+  });
+});

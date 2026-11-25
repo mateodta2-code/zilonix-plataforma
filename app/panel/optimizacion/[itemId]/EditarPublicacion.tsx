@@ -108,7 +108,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
     return (
       <li key={`${rotulo ?? "t"}-${texto}`} className={styles.nota}>
         {rotulo ? <strong>{`${rotulo}: `}</strong> : null}
-        {texto} <span className={styles.notaNeutra}>{`(${texto.length}/${maximo} caracteres)`}</span>{" "}
+        {texto} <span className={styles.notaNeutra} aria-label={`${texto.length} de ${maximo} caracteres`}>{`(${texto.length}/${maximo} caracteres)`}</span>{" "}
         {propuesta?.puedeGuardar ? (
           <Boton type="button" variante="fantasma" chico disabled={enviando} onClick={() => setTitulo(texto)}>
             Usar este título
@@ -216,10 +216,27 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
         ) : null}
         {propuesta ? (
           <>
-            <ul className={styles.listaTitulos} aria-label="Títulos sugeridos">
+            <ul className={`${styles.listaTitulos} ${styles.listaTitulosScroll}`} aria-label="Títulos sugeridos">
               {propuesta.titulos.map((t) => filaSugerencia(t, propuesta.largoMaximo || LARGO_TITULO_ML))}
               {propuesta.catalogo ? filaSugerencia(propuesta.catalogo, propuesta.largoMaximoCatalogo || LARGO_TITULO_CATALOGO_ML, "Catálogo") : null}
             </ul>
+            {[
+              { titulo: "Keywords principales", lista: propuesta.keywordsPrincipales ?? [] },
+              { titulo: "Keywords no utilizadas (para la descripción)", lista: propuesta.keywordsNoUtilizadas ?? [] },
+            ].map(({ titulo, lista }) =>
+              lista.length > 0 ? (
+                <div key={titulo}>
+                  <p className={styles.nota}>
+                    <strong>{`${titulo}:`}</strong>
+                  </p>
+                  <ul className={styles.listaKeywords} aria-label={titulo}>
+                    {lista.map((k) => (
+                      <li key={k}>{k}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null
+            )}
             {!propuesta.puedeGuardar ? (
               <p className={styles.nota}>
                 {`Mercado Libre no deja cambiar el título de publicaciones con ventas (esta lleva ${propuesta.vendidas}). Copia la sugerencia si la quieres usar en otra publicación.`}

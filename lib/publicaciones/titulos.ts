@@ -4,11 +4,13 @@
 // símbolos, con tildes. Cada palabra clave dice de dónde sale, calculado
 // en código (nunca lo que la IA diga de sí misma).
 
+import { PROMPT_TITULOS_RECOMENDADO } from "./prompt-titulos-recomendado";
 import { extraerJson, fichaEnTexto, soloCifrasConfirmadas, type Ficha } from "./ficha";
 
 export const LARGO_TITULO = 60;
 export const LARGO_TITULO_CATALOGO = 120;
-export const CANTIDAD_TITULOS = 3;
+export const CANTIDAD_TITULOS = 10;
+export const MAXIMO_KEYWORDS = 20;
 
 export type OrigenPalabra = "tendencia" | "vendedor" | "ia";
 // nivel: solo en las de tendencia — qué tan buscada es según el nivel de
@@ -81,7 +83,7 @@ export function unirTendenciasPorNivel(niveles: { nivel: NivelBusqueda; palabras
   }
   return [...porClave.values()].sort((a, b) => ORDEN_NIVEL[a.nivel] - ORDEN_NIVEL[b.nivel]).slice(0, MAXIMO_MAS_BUSCADOS);
 }
-export type PropuestaTitulos = { titulos: string[]; catalogo: string | null; palabras: PalabraClave[] };
+export type PropuestaTitulos = { titulos: string[]; catalogo: string | null; palabras: PalabraClave[]; keywordsPrincipales: string[]; keywordsNoUtilizadas: string[] };
 
 // Promoción y relleno que Mercado Libre no quiere en el título.
 const PROMOCION = [
@@ -178,26 +180,55 @@ export function origenPalabras(titulos: string[], tendencias: string[], textoVen
   return palabras;
 }
 
-export function promptTitulos(entrada: { ficha: Ficha; idioma: string; pais: string; categoria: string | null; tendencias: string[]; info: string }): string {
+// Bloque técnico fijo: va SIEMPRE después del prompt recomendado, para que
+// mande sobre su sección FORMATO. Lleva los datos del producto y las reglas
+// duras que el código además hace cumplir.
+export function bloqueTecnicoTitulos(entrada: { ficha: Ficha; idioma: string; pais: string; categoria: string | null; tendencias: string[] }): string {
   return [
-    `Eres experto en SEO de Mercado Libre ${entrada.pais}. Propón títulos para esta publicación.`,
+    `Contexto técnico (Mercado Libre ${entrada.pais}):`,
     "",
     "Ficha confirmada por el vendedor (no agregues nada que no esté aquí):",
     fichaEnTexto(entrada.ficha),
     entrada.categoria ? `Categoría de Mercado Libre: ${entrada.categoria}` : "",
     entrada.tendencias.length > 0 ? `Búsquedas en tendencia de la categoría y sus categorías padre (úsalas solo si describen este producto): ${entrada.tendencias.slice(0, MAXIMO_MAS_BUSCADOS).join(", ")}` : "",
     "",
-    "Reglas obligatorias:",
+    "Reglas obligatorias (mandan sobre lo anterior):",
     `- ${CANTIDAD_TITULOS} títulos distintos de máximo ${LARGO_TITULO} caracteres, y uno de catálogo más completo de máximo ${LARGO_TITULO_CATALOGO}.`,
     `- En ${entrada.idioma}, con tildes y ortografía correctas.`,
-    "- Estructura: producto + marca/modelo (si se conoce) + característica clave + material/capacidad (si se conoce).",
     "- Solo la primera palabra con mayúscula (y nombres propios o siglas). Nunca Mayúscula En Cada Palabra.",
     "- Sin símbolos, emojis, precios, «envío gratis», «oferta», «promoción» ni palabras de relleno.",
     "",
-    'Responde SOLO un JSON: {"titulos": ["…", "…", "…"], "catalogo": "…"}',
+    `Formato de respuesta (reemplaza la sección FORMATO de arriba): responde SOLO un JSON: {"titulos": [${CANTIDAD_TITULOS} títulos], "catalogo": "…", "keywordsPrincipales": ["…"], "keywordsNoUtilizadas": ["…"]}. No escribas el número de caracteres: lo cuenta el sistema.`,
   ]
     .filter((linea) => linea !== "")
     .join("\n");
+}
+
+export function promptTitulos(entrada: { ficha: Ficha; idioma: string; pais: string; categoria: string | null; tendencias: string[]; info: string }): string {
+  return `${PROMPT_TITULOS_RECOMENDADO}\n\n---\n\n${bloqueTecnicoTitulos(entrada)}`;
+}
+
+// Keywords de la IA: solo texto, sin símbolos ni promoción, de 2 a 40
+// caracteres, sin repetidos (sin tildes ni mayúsculas) y sin cifras que no
+// estén en la ficha ni en el texto del vendedor.
+export function limpiarKeywords(valor: unknown, maximo = MAXIMO_KEYWORDS, textoVendedor?: string): string[] {
+  if (!Array.isArray(valor)) return [];
+  const vistas = new Set<string>();
+  const salida: string[] = [];
+  for (const k of valor) {
+    if (typeof k !== "string") continue;
+    let t = k;
+    for (const patron of PROMOCION) t = t.replace(patron, " ");
+    t = t.replace(SIMBOLOS, " ").replace(/\s+/g, " ").trim();
+    if (t.length < 2 || t.length > 40) continue;
+    if (textoVendedor !== undefined && !soloCifrasConfirmadas(t, textoVendedor)) continue;
+    const clave = normalizar(t);
+    if (vistas.has(clave)) continue;
+    vistas.add(clave);
+    salida.push(t);
+    if (salida.length >= maximo) break;
+  }
+  return salida;
 }
 
 // Nombres propios que se respetan al bajar mayúsculas: las palabras con
@@ -227,5 +258,11 @@ export function leerPropuestaTitulos(
   if (titulos.length === 0) return null;
   const catalogoLimpio = limpiarTitulo(json.catalogo, LARGO_TITULO_CATALOGO, propios);
   const catalogo = confirmado(catalogoLimpio) ? catalogoLimpio : null;
-  return { titulos, catalogo, palabras: origenPalabras(catalogo ? [...titulos, catalogo] : titulos, entrada.tendencias, textoVendedor, entrada.niveles) };
+  return {
+    titulos,
+    catalogo,
+    palabras: origenPalabras(catalogo ? [...titulos, catalogo] : titulos, entrada.tendencias, textoVendedor, entrada.niveles),
+    keywordsPrincipales: limpiarKeywords(json.keywordsPrincipales, MAXIMO_KEYWORDS, textoVendedor),
+    keywordsNoUtilizadas: limpiarKeywords(json.keywordsNoUtilizadas, MAXIMO_KEYWORDS, textoVendedor),
+  };
 }

@@ -15,6 +15,8 @@ export type TitulosGenerados = {
   titulos: string[];
   catalogo: string | null;
   palabras: PalabraClave[];
+  keywordsPrincipales: string[];
+  keywordsNoUtilizadas: string[];
   conTendencias: boolean;
   // «Más buscados en la categoría»: tendencias de la categoría general,
   // la padre y la específica, con su nivel, y la ruta analizada.
@@ -70,7 +72,7 @@ export async function generarTitulosSeo(entrada: EntradaTitulosSeo): Promise<Tit
   const info = limpiarInfoVendedor(entrada.info);
   const categoria = typeof entrada.categoriaNombre === "string" ? entrada.categoriaNombre.slice(0, 120) : null;
   const respuesta = await conCupoDeTexto(entrada.empresaId, () =>
-    llamarIA(entrada.conexion, promptTitulos({ ficha, idioma, pais, categoria, tendencias, info }), { maxTokens: 800, timeoutMs: ESPERA_TEXTO_MS })
+    llamarIA(entrada.conexion, promptTitulos({ ficha, idioma, pais, categoria, tendencias, info }), { maxTokens: 2000, timeoutMs: ESPERA_TEXTO_MS })
   );
   const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados });
   if (!propuesta) return null;
