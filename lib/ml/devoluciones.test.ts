@@ -3,22 +3,24 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/ml/cuentas", () => ({ listarCuentasConectadas: vi.fn(), obtenerAccessTokenVigente: vi.fn() }));
 vi.mock("@/lib/ml/preguntas", () => ({ motivoCuentaSinRevisar: () => "x" }));
 
-const { leerReclamosConDevolucionMl, leerDevolucionMl, leerRevisionesMl, leerCostoEnvioMl, estadoSimpleDevolucion, ROTULOS_ESTADO_DEVOLUCION, rotuloEnvioDevolucion } =
+const { armarQueryBusquedaReclamos, leerReclamosConDevolucionMl, leerDevolucionMl, leerRevisionesMl, leerCostoEnvioMl, estadoSimpleDevolucion, ROTULOS_ESTADO_DEVOLUCION, rotuloEnvioDevolucion } =
   await import("@/lib/ml/devoluciones");
 
 describe("leerReclamosConDevolucionMl", () => {
-  it("se queda solo con los reclamos que traen return", () => {
+  it("sin related_entities no descarta; con lista sin return sí; type returns siempre queda", () => {
     const r = leerReclamosConDevolucionMl({
-      paging: { total: 3 },
+      paging: { total: 5 },
       data: [
         { id: 1, related_entities: ["return"], resource: "order", resource_id: 99, status: "opened" },
         { id: 2, related_entities: ["reviews"] },
         { id: 3 },
+        { id: 4, related_entities: [] },
+        { id: 5, type: "returns", related_entities: [] },
       ],
     });
-    expect(r.total).toBe(3);
-    expect(r.leidos).toBe(3);
-    expect(r.reclamos.map((c) => c.id)).toEqual(["1"]);
+    expect(r.total).toBe(5);
+    expect(r.leidos).toBe(5);
+    expect(r.reclamos.map((c) => c.id)).toEqual(["1", "3", "5"]);
   });
   it("respuesta inesperada no rompe", () => {
     expect(leerReclamosConDevolucionMl(null).reclamos).toEqual([]);
@@ -66,5 +68,16 @@ describe("estadoSimpleDevolucion", () => {
   it("rotula el envío y deja pasar un código desconocido", () => {
     expect(rotuloEnvioDevolucion("shipped")).toBe("En camino");
     expect(rotuloEnvioDevolucion("raro")).toBe("raro");
+  });
+});
+
+describe("armarQueryBusquedaReclamos", () => {
+  it("query acotado, con milisegundos, orden desc y sin status", () => {
+    const q = armarQueryBusquedaReclamos("123", Date.UTC(2026, 9, 25), 50);
+    expect(q).toBe("?players.role=respondent&players.user_id=123&range=date_created:after:2026-10-25T00:00:00.000-00:00&sort=date_created:desc&limit=50&offset=50");
+    expect(q).not.toContain("status");
+  });
+  it("rechaza un vendedor no numérico", () => {
+    expect(() => armarQueryBusquedaReclamos("1&x=2", 0, 0)).toThrow();
   });
 });
