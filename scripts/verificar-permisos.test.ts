@@ -139,6 +139,9 @@ const RUTAS_PROTEGIDAS = new Set([
   // la cuenta sea de la empresa actual.
   "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/page.tsx",
   "app/api/ml/reclamos/[cuentaId]/[reclamoId]/adjuntos/[archivo]/route.ts",
+  // Posventa-0 (Refs #647): marco y lista de reclamos, solo lectura —
+  // piden ventas.consultar (layout y página) y validan la cuenta por empresa.
+  "app/panel/posventa/page.tsx",
   // Optimización (Fase 1): ver pide inventario.consultar; pausar o
   // activar, inventario.modificar.
   "app/panel/optimizacion/page.tsx",
