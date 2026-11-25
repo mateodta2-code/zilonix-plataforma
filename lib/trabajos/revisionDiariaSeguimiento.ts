@@ -3,7 +3,7 @@ import { dbTrabajadorSeguimiento } from "@/db/trabajador-seguimiento-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl, seguimientoAlertas, seguimientoFotos, seguimientosMl } from "@/db/schema";
 import { fechaDiaBogota, rangoDiaBogota } from "@/lib/filtros-listado";
-import { obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
+import { EmpresaSuspendidaError, obtenerAccessTokenVigente, obtenerCuentaMlActiva } from "@/lib/ml/cuentas";
 import {
   confirmarRecursoProductoMl,
   LimiteMercadoLibreError,
@@ -72,6 +72,8 @@ export type ResultadoRevisionDiaria = {
   // saltado: se detecta antes de llamar a ML y se actualiza/completa
   // esa fila, así que cuenta como "procesados".
   saltados: number;
+  // Seguimientos de una empresa suspendida: no se llama a Mercado Libre.
+  suspendidos: number;
   fallidos: number;
   alertasCreadas: number;
 };
@@ -161,6 +163,7 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
   let procesados = 0;
   let saltados = 0;
   let fallidos = 0;
+  let suspendidos = 0;
   let alertasCreadas = 0;
 
   for (let i = 0; i < activos.length; i++) {
@@ -173,6 +176,13 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
       alertasCreadas += resultado.alertasCreadas;
       await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id));
     } catch (error) {
+      // Empresa suspendida: no es un error, no se llama a Mercado Libre.
+      // Igual se marca ultima_revision_ts (no se queda al frente del lote).
+      if (error instanceof EmpresaSuspendidaError) {
+        suspendidos += 1;
+        await dbTrabajadorSeguimiento.update(seguimientosMl).set({ ultimaRevisionTs: new Date() }).where(eq(seguimientosMl.id, seguimiento.id));
+        continue;
+      }
       // Un seguimiento que falla (cuenta sin token vigente, Mercado
       // Libre caído, etc.) no debe tumbar el lote entero — mismo
       // criterio que procesarAvisosPendientes (lib/ml/trabajador.ts).
@@ -208,10 +218,10 @@ export async function revisarSeguimientosDelDia(): Promise<ResultadoRevisionDiar
   // en producción) que el lote corrió y qué tan ocupado estaba, sin
   // tener que sumar a mano las líneas de error de arriba.
   console.log(
-    `[lib/trabajos/revisionDiariaSeguimiento] lote del día: ${activos.length} activos, ${procesados} procesados, ${saltados} saltados, ${fallidos} con error, ${alertasCreadas} alertas creadas.`
+    `[lib/trabajos/revisionDiariaSeguimiento] lote del día: ${activos.length} activos, ${procesados} procesados, ${saltados} saltados, ${fallidos} con error, ${suspendidos} de empresas suspendidas, ${alertasCreadas} alertas creadas.`
   );
 
-  return { activos: activos.length, procesados, saltados, fallidos, alertasCreadas };
+  return { activos: activos.length, procesados, saltados, fallidos, suspendidos, alertasCreadas };
 }
 
 // Exportada para poder probar el reintento con espera en 429 sola,

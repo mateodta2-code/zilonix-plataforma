@@ -2,7 +2,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { dbTrabajador } from "@/db/trabajador-context";
 import { avisosMl, cuentasMl } from "@/db/schema";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { EmpresaSuspendidaError, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { LimiteMercadoLibreError, pedirLecturaMl } from "@/lib/ml/cliente";
 import { sincronizarDespacho } from "@/lib/ml/despachos";
 import { guardarOrdenMl, type Esperar } from "@/lib/ml/ventas-finanzas";
@@ -43,6 +43,10 @@ export type ResultadoTrabajador = {
   recibidosPendientes: number;
   procesados: number;
   fallidos: number;
+  // Avisos de una empresa suspendida: se marcan procesados sin tocar
+  // Mercado Libre (si no, se reintentarían cada minuto para siempre y
+  // ocuparían el lote de las demás empresas).
+  omitidosSuspendida: number;
 };
 
 export type ResultadoProcesoInline = "procesado" | "pendiente" | "omitido";
@@ -66,11 +70,22 @@ export async function procesarAvisosPendientes(esperar: Esperar = esperarDeVerda
 
   let procesados = 0;
   let fallidos = 0;
+  let omitidosSuspendida = 0;
 
   for (let i = 0; i < pendientes.length; i++) {
     const aviso = pendientes[i];
     try {
-      await procesarUnAviso(aviso, esperar);
+      try {
+        await procesarUnAviso(aviso, esperar);
+      } catch (error) {
+        if (!(error instanceof EmpresaSuspendidaError)) throw error;
+        await dbTrabajador
+          .update(avisosMl)
+          .set({ procesadoTs: new Date() })
+          .where(and(eq(avisosMl.id, aviso.id), isNull(avisosMl.procesadoTs)));
+        omitidosSuspendida += 1;
+        continue;
+      }
       await dbTrabajador
         .update(avisosMl)
         .set({ procesadoTs: new Date() })
@@ -89,7 +104,8 @@ export async function procesarAvisosPendientes(esperar: Esperar = esperarDeVerda
     if (i < pendientes.length - 1) await esperar(PAUSA_ENTRE_AVISOS_MS);
   }
 
-  return { recibidosPendientes: pendientes.length, procesados, fallidos };
+  if (omitidosSuspendida > 0) console.warn(`[lib/ml/trabajador] ${omitidosSuspendida} aviso(s) omitidos: empresa suspendida.`);
+  return { recibidosPendientes: pendientes.length, procesados, fallidos, omitidosSuspendida };
 }
 
 async function resolverCuentaYToken(aviso: typeof avisosMl.$inferSelect): Promise<{ cuentaId: string; accessToken: string }> {
@@ -198,6 +214,9 @@ export async function intentarProcesarAvisoAhora(avisoId: string, timeoutMs: num
     resultado = await Promise.race([trabajo.then((): "listo" => "listo"), tiempoAgotado]);
   } catch (error) {
     clearTimeout(timer);
+    // Empresa suspendida: el aviso se queda reclamado (procesado_ts ya
+    // puesto por reclamarAviso) y no se reintenta.
+    if (error instanceof EmpresaSuspendidaError) return "omitido";
     // El trabajo falló de verdad ANTES del tope — nunca hace falta
     // esperar el resto del timeout para liberar el aviso.
     await liberarAviso(avisoId);

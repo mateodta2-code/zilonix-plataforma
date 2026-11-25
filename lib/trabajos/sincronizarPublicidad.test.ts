@@ -8,6 +8,8 @@ vi.mock("@/db/empresa-context", () => ({
 }));
 vi.mock("@/lib/ml/cuentas", () => ({
   obtenerAccessTokenVigente: vi.fn(),
+  // Por defecto, empresa activa (25-nov: las suspendidas se saltan).
+  empresaEstaSuspendida: vi.fn(async () => false),
 }));
 vi.mock("@/lib/ml/costos-item", () => ({
   costosDeItem: vi.fn(),
@@ -56,7 +58,7 @@ vi.mock("@/lib/ml/publicidad", async () => {
 
 import { dbTrabajadorPublicidad } from "@/db/trabajador-publicidad-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { empresaEstaSuspendida, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { costosDeItem } from "@/lib/ml/costos-item";
 import {
   adGroupsDeCampana,
@@ -324,6 +326,21 @@ describe("corte real de sincronizarCuenta (issue #254)", () => {
     expect(resultado.pendientes).toBe(0);
     expect(resultado.sigue).toBe(true);
     expect(resultado.saltadas).toBe(0);
+  });
+
+  it("una cuenta de una empresa suspendida se salta sin abrir sincronización ni llamar a Mercado Libre", async () => {
+    vi.mocked(dbTrabajadorPublicidad.select).mockImplementation(() => cadena([
+      { id: CUENTA, empresaId: EMPRESA, creadoTs: new Date(1), ultimaSyncTs: null },
+    ]) as never);
+    vi.mocked(empresaEstaSuspendida).mockResolvedValueOnce(true);
+
+    const resultado = await sincronizarPublicidadProgramada(AHORA);
+
+    expect(resultado).toMatchObject({ procesadas: 0, saltadas: 1, fallidas: 0 });
+    expect(empresaEstaSuspendida).toHaveBeenCalledWith(EMPRESA);
+    expect(historialSync).not.toHaveBeenCalled();
+    expect(abrirSincronizacion).not.toHaveBeenCalled();
+    expect(obtenerAnunciante).not.toHaveBeenCalled();
   });
 
   it("una cuenta ok hace menos de 20 h no llama a Mercado Libre", async () => {
