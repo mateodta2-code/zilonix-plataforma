@@ -18,6 +18,8 @@ const ml = vi.hoisted(() => ({
   fichas: vi.fn(),
   descripcion: vi.fn(),
   leerDescripcion: vi.fn(),
+  atributos: vi.fn(),
+  tendencias: vi.fn(),
   reputacion: vi.fn(),
 }));
 const auditorias = vi.hoisted(() => [] as unknown[]);
@@ -92,6 +94,8 @@ vi.mock("@/lib/ml/cliente", async () => {
     fichasPublicacionesMl: ml.fichas,
     tieneDescripcionMl: ml.descripcion,
     leerDescripcionItemMl: ml.leerDescripcion,
+    leerAtributosItemMl: ml.atributos,
+    tendenciasPorNivelMl: ml.tendencias,
     reputacionVendedorMl: ml.reputacion,
   };
 });
@@ -107,6 +111,7 @@ import {
   editarTituloAction,
   generarImagenIAAction,
   guardarNotaBitacoraAction,
+  mejorarTituloIAAction,
   metricasPublicacionesAction,
   revisarCambioAction,
   proponerContenidoIAAction,
@@ -633,5 +638,82 @@ describe("diagnóstico de solo lectura (solo administradores)", () => {
     const r = await diagnosticoPublicacionAction({ cuentaMlId: CUENTA, itemId: "../users/me" });
     expect(r.ok).toBe(false);
     expect(llamadas).toHaveLength(0);
+  });
+});
+
+describe("mejorarTituloIAAction (solo lectura en Mercado Libre)", () => {
+  const ENTRADA = { cuentaMlId: CUENTA, itemId: "MCO1" };
+  const RESPUESTA = '{"titulos":["Termo acero azul 1 L","Termo azul de acero","Termo de acero inoxidable"],"catalogo":"Termo de acero azul de 1 L para bebidas"}';
+
+  function prepararCaso(vendidas: number) {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.itemEdicion.mockReset().mockResolvedValue({ id: "MCO1", titulo: "Termo acero azul 1 L", precio: 1, vendidas, tieneVariantes: false, userProduct: false, familyId: null, fotos: [] });
+    ml.atributos.mockReset().mockResolvedValue({ categoriaId: "MCO1234", atributos: [{ id: "COLOR", nombre: "Color", valor: "Azul" }] });
+    ml.tendencias.mockReset().mockResolvedValue({ ruta: ["Hogar", "Termos"], niveles: [{ nivel: "alta", palabras: ["termo acero"] }] });
+    ml.leerDescripcion.mockReset().mockResolvedValue("Termo para bebidas calientes");
+    ml.actualizar.mockReset();
+    ml.familia.mockReset();
+    ia.conexion.mockReset().mockResolvedValue({ id: "c", proveedor: "openai", baseUrl: null, modelo: "x", actualizadoTs: new Date(), apiKey: "k" });
+    ia.texto.mockReset().mockResolvedValue(RESPUESTA);
+  }
+
+  it("sin IA conectada: el mismo aviso que Publicar, con enlace a Conectar IA", async () => {
+    prepararCaso(0);
+    ia.conexion.mockResolvedValue(null);
+    const r = await mejorarTituloIAAction(ENTRADA);
+    expect(r).toMatchObject({ ok: false, conectarIA: true });
+    expect(ia.texto).not.toHaveBeenCalled();
+    expect(ia.conexion).toHaveBeenCalledWith("empresa-1", "optimizacion");
+  });
+
+  it("sin ventas: devuelve títulos, límites y puedeGuardar; no escribe nada", async () => {
+    prepararCaso(0);
+    const r = await mejorarTituloIAAction(ENTRADA);
+    expect(r).toMatchObject({ ok: true, largoMaximo: 60, largoMaximoCatalogo: 120, puedeGuardar: true, vendidas: 0 });
+    expect(r.ok && r.titulos).toHaveLength(3);
+    expect(r.ok && r.catalogo).not.toBeNull();
+    expect(estado.permisosPedidos).toEqual(["inventario.modificar"]);
+    const pedido = ia.texto.mock.calls[0][1] as string;
+    expect(pedido).toContain("Termo acero azul 1 L");
+    expect(pedido).toContain("termo acero");
+    expect(ml.actualizar).not.toHaveBeenCalled();
+    expect(ml.familia).not.toHaveBeenCalled();
+  });
+
+  it("con ventas: puedeGuardar es false", async () => {
+    prepararCaso(4);
+    const r = await mejorarTituloIAAction(ENTRADA);
+    expect(r).toMatchObject({ ok: true, puedeGuardar: false, vendidas: 4 });
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("si ML no devuelve atributos ni tendencias, igual propone con el título", async () => {
+    prepararCaso(0);
+    ml.atributos.mockRejectedValue(new Error("x"));
+    ml.leerDescripcion.mockRejectedValue(new Error("x"));
+    const r = await mejorarTituloIAAction(ENTRADA);
+    expect(r.ok).toBe(true);
+    expect(ml.tendencias).not.toHaveBeenCalled();
+  });
+
+  it("errores claros: ML no devuelve la publicación, IA sin títulos, IA falla", async () => {
+    prepararCaso(0);
+    ml.itemEdicion.mockResolvedValue(null);
+    expect(await mejorarTituloIAAction(ENTRADA)).toMatchObject({ ok: false, aviso: expect.stringContaining("Mercado Libre no devolvió") });
+    prepararCaso(0);
+    ia.texto.mockResolvedValue("no es json");
+    expect(await mejorarTituloIAAction(ENTRADA)).toMatchObject({ ok: false, aviso: expect.stringContaining("no devolvió títulos usables") });
+    prepararCaso(0);
+    ia.texto.mockRejectedValue(new Error("boom"));
+    expect(await mejorarTituloIAAction(ENTRADA)).toMatchObject({ ok: false });
+  });
+
+  it("sin permiso de editar no hace nada", async () => {
+    prepararCaso(0);
+    estado.conPermiso = false;
+    expect(await mejorarTituloIAAction(ENTRADA)).toMatchObject({ ok: false });
+    expect(ia.texto).not.toHaveBeenCalled();
   });
 });
