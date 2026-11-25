@@ -107,6 +107,14 @@
   overflow-wrap: anywhere;
 }
 
+.listaTitulos {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .seccion {
   margin: 0;
   font-size: 12px;
