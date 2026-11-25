@@ -162,6 +162,21 @@ describe("títulos y descripción", () => {
     expect(pegado.ok && pegado.competencia.titulo).toBe("Garrafa pegada");
   });
 
+  it("descripción por cuenta: cada versión pide un enfoque distinto; sin variante (o rara) no", async () => {
+    ia.texto.mockResolvedValue('{"queEs": "Garrafa térmica de 1 L."}');
+    await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, variante: { numero: 1, total: 2 } });
+    const uno = String(ia.texto.mock.calls.at(-1)?.[1]);
+    await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, variante: { numero: 2, total: 2 } });
+    const dos = String(ia.texto.mock.calls.at(-1)?.[1]);
+    expect(uno).toContain("versión 1 de 2");
+    expect(dos).toContain("versión 2 de 2");
+    expect(uno).not.toEqual(dos);
+    await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK });
+    expect(String(ia.texto.mock.calls.at(-1)?.[1])).not.toContain("versión");
+    await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, variante: { numero: 5, total: 2 } });
+    expect(String(ia.texto.mock.calls.at(-1)?.[1])).not.toContain("versión");
+  });
+
   it("descripción: le pasa a la IA las palabras clave limpias (máximo 20, sin repetir)", async () => {
     ia.texto.mockResolvedValue('{"queEs": "Garrafa térmica de 1 L."}');
     await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, palabrasClave: ["garrafa", "Garrafa", "<script>", 5, "térmica"] });

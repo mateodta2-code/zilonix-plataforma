@@ -14,6 +14,14 @@ import { promptFinalContenido, revisarCopySeguro, TIPOS_CONTENIDO_ZILONIX, type 
 import { promptZilonixPortada } from "@/lib/ia/prompts/zilonix-portadas";
 
 export const TIPO_PORTADA = "portada";
+
+// Cuántas portadas preparar (24-nov): un entero entre 1 y una por cuenta
+// marcada (con una sola cuenta, hasta 2 para elegir la mejor). Lo raro cae a 1.
+export function cantidadDePortadas(pedida: unknown, cuentas: number): number {
+  const maximo = Math.max(2, cuentas);
+  const n = typeof pedida === "number" && Number.isInteger(pedida) ? pedida : 1;
+  return Math.min(Math.max(n, 1), maximo);
+}
 export const TIPO_FOTO_PRINCIPAL = "foto_principal";
 
 // cuentaMlId: llave de la composición asignada. Desde el 23-nov es

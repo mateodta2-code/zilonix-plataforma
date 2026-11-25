@@ -89,8 +89,29 @@ export function limpiarPalabrasClave(v: unknown): string[] {
   return palabras;
 }
 
-export function promptDescripcion(entrada: { ficha: Ficha; idioma: string; pais: string; palabrasClave?: string[] }): string {
+// Con varias cuentas marcadas se pide una descripción por cuenta (24-nov):
+// mismos datos y misma estructura (las secciones las arma armarDescripcion),
+// pero cada una con su propio enfoque para que el texto sea distinto.
+export const ENFOQUES_DESCRIPCION: readonly string[] = [
+  "directo y práctico: frases cortas que van al grano",
+  "cercano y cálido: le habla al comprador de tú, como un vendedor amable",
+  "detallado: explica cada característica con un poco más de contexto",
+  "centrado en el uso: describe primero para qué sirve y en qué momentos se usa",
+  "centrado en los beneficios: empieza por lo que gana el comprador",
+  "ordenado y sobrio: tono neutro, preciso y profesional",
+  "entusiasta pero sin exagerar: destaca lo mejor del producto",
+  "comparativo: resalta lo que lo diferencia, sin nombrar otras marcas",
+  "pensado para regalar: muestra por qué es una buena elección",
+  "explicativo para quien compra por primera vez: claro y sin tecnicismos",
+];
+
+export function enfoqueDescripcion(numero: number): string {
+  return ENFOQUES_DESCRIPCION[(Math.max(1, Math.floor(numero)) - 1) % ENFOQUES_DESCRIPCION.length];
+}
+
+export function promptDescripcion(entrada: { ficha: Ficha; idioma: string; pais: string; palabrasClave?: string[]; variante?: { numero: number; total: number } }): string {
   const palabras = entrada.palabrasClave ?? [];
+  const variante = entrada.variante && entrada.variante.total > 1 ? entrada.variante : null;
   return [
     `Eres redactor de publicaciones de Mercado Libre ${entrada.pais}. Escribe las partes de la descripción de este producto.`,
     "",
@@ -100,6 +121,12 @@ export function promptDescripcion(entrada: { ficha: Ficha; idioma: string; pais:
     ...(palabras.length > 0
       ? [
           `Palabras que la gente busca (úsalas de forma natural en el texto SOLO si describen este producto según la ficha; nunca agregues un dato nuevo por usarlas ni las repitas en lista): ${palabras.join(", ")}`,
+          "",
+        ]
+      : []),
+    ...(variante
+      ? [
+          `Esta es la versión ${variante.numero} de ${variante.total}: cada versión va a una cuenta distinta de la misma tienda y NO deben parecerse. Escribe con un enfoque ${enfoqueDescripcion(variante.numero)}. Usa otras palabras, otro orden dentro de cada lista y otras frases; los datos son los mismos.`,
           "",
         ]
       : []),

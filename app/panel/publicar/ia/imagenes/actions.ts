@@ -45,6 +45,7 @@ import {
   TIPO_FOTO_PRINCIPAL,
   TIPO_PORTADA,
   type PropuestaTextos,
+  cantidadDePortadas,
 } from "@/lib/publicaciones/imagenesIA";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
@@ -103,7 +104,8 @@ export async function prepararImagenesAction(entrada: {
   opiniones?: string;
   incluirFotoBlanco?: boolean;
   previas?: Record<string, Asignacion>;
-  // Portadas Zilonix: cuántas crear en total (1 o 2) para elegir la mejor.
+  // Portadas Zilonix: cuántas crear (24-nov): hasta una por cuenta marcada
+  // (mínimo 2 para poder elegir la mejor con una sola cuenta).
   cantidadPortadas?: number;
 }): Promise<ResultadoPreparar> {
   const s = await sesion();
@@ -128,10 +130,11 @@ export async function prepararImagenesAction(entrada: {
   const propuestas: { tipo: string; nombre: string; cuentaMlId: string | null; propuesta: Record<string, unknown> }[] = [];
 
   if (estilo === "zilonix_portadas") {
-    // 1 o 2 portadas en total, todas distintas, que entran a la galería
-    // (23-nov). La clave «portada-N» va en propuesta.cuentaMlId: es la
-    // llave de la composición asignada, no una cuenta.
-    const cantidad = entrada.cantidadPortadas === 2 ? 2 : 1;
+    // Portadas distintas, de 1 hasta una por cuenta marcada (24-nov); cada
+    // una se asigna después a la cuenta que la persona elija. La clave
+    // «portada-N» va en propuesta.cuentaMlId: es la llave de la
+    // composición asignada, no una cuenta.
+    const cantidad = cantidadDePortadas(entrada.cantidadPortadas, cuentas.length);
     const claves = Array.from({ length: cantidad }, (_, i) => `portada-${i + 1}`);
     const asignadas = asignarComposiciones(claves, entrada.previas ?? {});
     claves.forEach((clave, i) =>

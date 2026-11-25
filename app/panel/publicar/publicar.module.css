@@ -339,6 +339,18 @@
   margin-bottom: 8px;
 }
 
+/* Ficha confirmada: plegada en una línea, se despliega para revisarla. */
+.fichaPlegadaIA {
+  display: grid;
+  gap: 12px;
+}
+
+.fichaPlegadaIA summary {
+  cursor: pointer;
+  font-size: 14px;
+  padding: 8px 0;
+}
+
 .competenciaIA summary {
   cursor: pointer;
   font-size: 13px;
