@@ -8,6 +8,7 @@ import { seccionesFinanzas } from "@/components/finanzas/secciones";
 import { GuiaModulo } from "@/components/guia/GuiaModulo";
 import { BandaAnuncios } from "@/components/anuncios/BandaAnuncios";
 import { anunciosVigentes } from "@/lib/anuncios";
+import { registrarIngresoEmpresa } from "@/lib/ingresos";
 
 // Marco visual (issue de las subpáginas) — mueve acá la carga que
 // antes hacía SOLO app/panel/page.tsx para pintar el marco (usuario
@@ -122,7 +123,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const grupos: GrupoNav[] =
     administracion.length > 0 ? [grupoPrincipal, { etiqueta: "Administración", items: administracion }] : [grupoPrincipal];
 
-  const anuncios = await anunciosVigentes();
+  // El layout se pinta al entrar o recargar el panel (no en cada clic del
+  // menú): basta para saber cuándo fue el último ingreso de la empresa.
+  const [anuncios] = await Promise.all([anunciosVigentes(), registrarIngresoEmpresa(activa.id)]);
 
   return (
     <MarcoApp

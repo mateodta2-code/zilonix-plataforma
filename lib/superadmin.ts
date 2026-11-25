@@ -59,6 +59,7 @@ export type EmpresaConConteo = {
   cuentasMl: number;
   cuentasFalabella: number;
   ultimaActividad: Date | null;
+  ultimoIngresoTs: Date | null;
 };
 
 // Lo único que el superadmin ve SIEMPRE, sin pedir nada a nadie: las
@@ -93,6 +94,7 @@ export async function listarEmpresasConConteo(): Promise<EmpresaConConteo[]> {
         cuentasMl: Number(r?.cuentas_ml ?? 0),
         cuentasFalabella: Number(r?.cuentas_falabella ?? 0),
         ultimaActividad: r?.ultima_actividad ? new Date(r.ultima_actividad) : null,
+        ultimoIngresoTs: e.ultimoIngresoTs,
       };
     })
     .sort((a, b) => b.creadoTs.getTime() - a.creadoTs.getTime());

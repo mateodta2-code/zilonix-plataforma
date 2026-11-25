@@ -108,6 +108,12 @@ export const empresas = pgTable("empresas", {
   suspendidaMotivo: text("suspendida_motivo"),
   suspendidaTs: timestamp("suspendida_ts", { withTimezone: true }),
   notasInternas: text("notas_internas"),
+  // Empresas inactivas (25-nov, superadmin): la última vez que ALGUIEN de la
+  // empresa abrió /panel. Se escribe como mucho una vez por hora, solo con
+  // registrar_ingreso_empresa() (db/rls-setup.sql); app_user no tiene UPDATE
+  // sobre esta columna. null = nadie ha entrado desde que se empezó a
+  // registrar (no es lo mismo que «nunca»).
+  ultimoIngresoTs: timestamp("ultimo_ingreso_ts", { withTimezone: true }),
 }, (t) => ({
   planValido: check("empresas_plan_valido", sql`${t.plan} in ('prueba', 'basico', 'pro', 'empresarial')`),
   estadoValido: check("empresas_estado_valido", sql`${t.estado} in ('activa', 'suspendida')`),

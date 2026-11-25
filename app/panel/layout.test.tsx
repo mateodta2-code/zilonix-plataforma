@@ -8,6 +8,7 @@ vi.hoisted(() => {
 });
 
 vi.mock("@/lib/anuncios", () => ({ anunciosVigentes: vi.fn(async () => []) }));
+vi.mock("@/lib/ingresos", () => ({ registrarIngresoEmpresa: vi.fn(async () => {}) }));
 vi.mock("@/lib/panel-contexto", () => ({
   obtenerContextoPanel: async () => ({
     usuario: { nombre: "U" },
