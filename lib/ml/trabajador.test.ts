@@ -545,3 +545,56 @@ describe("trabajador: empresa suspendida", () => {
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/items/999000111"))).toBe(false);
   });
 });
+
+// 25-nov: la cola de staging tenía 31.110 avisos atrasados porque el cron
+// de GitHub corre cada 5-10 h. Cada llamada ahora procesa varios lotes
+// (con presupuesto de tiempo), omite de una vez los avisos viejos que no
+// son de venta y da por resueltos los 400 de promociones vencidas.
+describe("trabajador: más avisos por llamada", () => {
+  vi.setConfig({ testTimeout: 30_000 });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("omite los avisos viejos que no son de venta sin llamar a ML; los de venta viejos no", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa avisos viejos");
+    const fetchMock = vi.fn().mockResolvedValue(respuestaOk({ id: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const PREFIJO = `viejo-${randomUUID()}`;
+    const haceDosDias = new Date(Date.now() - 48 * 3600_000);
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values([
+        { empresaId, cuentaIdExterna: cuentaExterna, topic: "items", resource: `/items/${PREFIJO}`, enviadoTs: haceDosDias, recibidoTs: haceDosDias },
+        { empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${PREFIJO}`, enviadoTs: haceDosDias, recibidoTs: haceDosDias },
+      ])
+    );
+
+    // Sin presupuesto: solo corre la limpieza de viejos, ningún lote.
+    const r = await procesarAvisosPendientes(sinEspera, 0);
+    expect(r.omitidosViejos).toBeGreaterThanOrEqual(1);
+    expect(r.lotes).toBe(0);
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes(PREFIJO))).toBe(false);
+
+    const filas = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select({ topic: avisosMl.topic, procesadoTs: avisosMl.procesadoTs }).from(avisosMl).where(like(avisosMl.resource, `%${PREFIJO}`))
+    );
+    expect(filas.find((f) => f.topic === "items")?.procesadoTs).not.toBeNull();
+    expect(filas.find((f) => f.topic === "orders_v2")?.procesadoTs).toBeNull(); // la venta sigue en la cola
+  });
+
+  it("un 400 de ML en un aviso que no es de venta (promoción vencida) se da por resuelto", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa promo vencida");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({}), text: async () => "{}" }));
+    const recurso = `/seller-promotions/offers/OFFER-${randomUUID()}`;
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "public_offers", resource: recurso, enviadoTs: new Date() })
+    );
+
+    await procesarAvisosPendientes(sinEspera);
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select({ procesadoTs: avisosMl.procesadoTs }).from(avisosMl).where(eq(avisosMl.resource, recurso)));
+    expect(fila.procesadoTs).not.toBeNull();
+  });
+});
+
