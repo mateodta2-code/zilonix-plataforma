@@ -48,6 +48,25 @@ describe("CrearConIA: ficha arriba y sub pestañas debajo", () => {
     expect(panelTitulos.textContent).toMatch(/Confirmar ficha/);
   });
 
+  it("el selector de país solo sale con cuentas de países distintos", () => {
+    const mismoPais = [
+      { id: "c1", nickname: "UNO", siteId: "MCO" },
+      { id: "c2", nickname: "DOS", siteId: "MCO" },
+    ] as never[];
+    const { unmount } = render(<CrearConIA {...base} cuentas={mismoPais} />);
+    expect(screen.queryByLabelText("País para la categoría y los títulos")).toBeNull();
+    expect(screen.queryByText(/Cuenta de destino/)).toBeNull();
+    unmount();
+    const dosPaises = [
+      { id: "c1", nickname: "UNO", siteId: "MCO" },
+      { id: "c2", nickname: "DOS", siteId: "MCO" },
+      { id: "c3", nickname: "TRES", siteId: "MLM" },
+    ] as never[];
+    render(<CrearConIA {...base} cuentas={dosPaises} />);
+    const lista = screen.getByLabelText("País para la categoría y los títulos") as HTMLSelectElement;
+    expect([...lista.options].map((o) => o.textContent)).toEqual(["Colombia (MCO)", "México (MLM)"]);
+  });
+
   it("sin pasoImagenes no hay sub pestaña de imágenes ni referencias vacías", () => {
     render(<CrearConIA {...base} />);
     expect(screen.queryByRole("tab", { name: "Generar imágenes" })).toBeNull();

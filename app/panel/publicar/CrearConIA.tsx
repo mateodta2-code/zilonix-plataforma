@@ -19,6 +19,7 @@ import {
   type Origen,
 } from "@/lib/publicaciones/ficha";
 import { LARGO_TITULO, LARGO_TITULO_CATALOGO, type NivelBusqueda, type PalabraClave, type TendenciaConNivel } from "@/lib/publicaciones/titulos";
+import { datosSitioMl } from "@/lib/ml/sitios";
 import type { Cuenta } from "./CuentasDestino";
 import { analizarProductoAction, escribirDescripcionAction, proponerTitulosAction } from "./ia/actions";
 import { CLAVES_BORRADOR_IA, useBorradorIA } from "./ia/borradorIA";
@@ -164,6 +165,8 @@ export function CrearConIA({
     return <p className={styles.ayudaIA}>Marca arriba al menos una cuenta destino para crear los textos con IA en su idioma.</p>;
   }
   const pendientes = ficha ? camposPorConfirmar(ficha) : [];
+  // Una cuenta por país (la primera marcada de cada uno).
+  const paises = cuentas.filter((c, i) => cuentas.findIndex((x) => x.siteId === c.siteId) === i);
 
   async function correr<T extends { ok: boolean }>(paso: "analisis" | "titulos" | "descripcion", llamada: () => Promise<T>, alTerminar: (r: T) => void) {
     setOcupado(paso);
@@ -389,21 +392,20 @@ export function CrearConIA({
       {/* El paso 1 se ve desde el principio: los datos de abajo y, después de «Analizar», la ficha. */}
       <p className="zx-etiqueta">1. Ficha del producto</p>
 
-      {cuentas.length > 1 ? (
-        <Campo etiqueta="Cuenta de destino (define el país y el idioma)">
-          <select className="zx-control" value={cuenta.id} onChange={(e) => setCuentaId(e.target.value)} disabled={ocupado !== null}>
-            {cuentas.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nickname} · {c.siteId}
+      {/* Solo si las cuentas marcadas son de países distintos (25-nov): el
+          país define la categoría y el idioma y las tendencias de los títulos.
+          Con un solo país no hay nada que elegir. */}
+      {paises.length > 1 ? (
+        <Campo etiqueta="País para la categoría y los títulos">
+          <select className="zx-control" value={paises.find((p) => p.siteId === cuenta.siteId)?.id ?? cuenta.id} onChange={(e) => setCuentaId(e.target.value)} disabled={ocupado !== null}>
+            {paises.map((p) => (
+              <option key={p.id} value={p.id}>
+                {datosSitioMl(p.siteId).nombre} ({p.siteId})
               </option>
             ))}
           </select>
         </Campo>
-      ) : (
-        <p className={styles.ayudaIA}>
-          Cuenta de destino: <strong>{cuenta.nickname}</strong> · {cuenta.siteId}
-        </p>
-      )}
+      ) : null}
 
       {referencias ? (
         <div>
@@ -557,7 +559,7 @@ export function CrearConIA({
                       </div>
                     ))}
                     {hayOtroPais ? (
-                      <p className={styles.ayudaIA}>{`Solo salen las cuentas de ${cuenta.siteId}: el texto está escrito para ese país. Para otro país, elige esa cuenta arriba y pide los títulos de nuevo.`}</p>
+                      <p className={styles.ayudaIA}>{`Solo salen las cuentas de ${cuenta.siteId}: el texto está escrito para ese país. Para otro país, elígelo arriba en «País para la categoría y los títulos» y pide los títulos de nuevo.`}</p>
                     ) : null}
                     {titulos.palabras.length > 0 ? (
                       <p className={styles.ayudaIA}>
