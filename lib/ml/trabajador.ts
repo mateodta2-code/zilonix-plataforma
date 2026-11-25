@@ -1,8 +1,8 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { dbTrabajador } from "@/db/trabajador-context";
 import { avisosMl, cuentasMl } from "@/db/schema";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { EmpresaSuspendidaError, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { CuentaDesconectadaError, CuentaMlNoEncontradaError, EmpresaSuspendidaError, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { LimiteMercadoLibreError, pedirLecturaMl } from "@/lib/ml/cliente";
 import { sincronizarDespacho } from "@/lib/ml/despachos";
 import { guardarOrdenMl, type Esperar } from "@/lib/ml/ventas-finanzas";
@@ -47,7 +47,32 @@ export type ResultadoTrabajador = {
   // Mercado Libre (si no, se reintentarían cada minuto para siempre y
   // ocuparían el lote de las demás empresas).
   omitidosSuspendida: number;
+  // Avisos de una cuenta que ya no está conectada a la empresa (se
+  // desconectó, se borró o pasó a otra empresa): nunca se van a poder
+  // procesar, así que se marcan procesados en vez de reintentarse.
+  omitidosSinCuenta: number;
 };
+
+// La cuenta del aviso ya no está conectada a su empresa — fallo permanente.
+export class CuentaDelAvisoNoConectadaError extends Error {
+  constructor() {
+    super("La cuenta de Mercado Libre ya no está conectada a esta empresa.");
+    this.name = "CuentaDelAvisoNoConectadaError";
+  }
+}
+
+// Bug real (25-nov, logs de staging): la cola quedó trabada con 31.110
+// avisos atrasados. El lote (TAMAÑO_LOTE, sin orden) tomaba en cada
+// vuelta los MISMOS 50 avisos de cuentas ya desconectadas, que fallaban
+// siempre y se dejaban pendientes: nunca llegaba a los demás. Estos
+// fallos son permanentes: el aviso se marca procesado (omitido) y se
+// cuenta aparte. Las ventas quedan cubiertas por la sincronización de
+// respaldo cuando la cuenta se vuelva a conectar.
+function motivoOmision(error: unknown): "suspendida" | "sin_cuenta" | null {
+  if (error instanceof EmpresaSuspendidaError) return "suspendida";
+  if (error instanceof CuentaDelAvisoNoConectadaError || error instanceof CuentaDesconectadaError || error instanceof CuentaMlNoEncontradaError) return "sin_cuenta";
+  return null;
+}
 
 export type ResultadoProcesoInline = "procesado" | "pendiente" | "omitido";
 
@@ -66,11 +91,19 @@ export async function procesarAvisosPendientes(esperar: Esperar = esperarDeVerda
     .select()
     .from(avisosMl)
     .where(isNull(avisosMl.procesadoTs))
+    // Orden aleatorio (25-nov): sin orden, Postgres devolvía siempre las
+    // mismas filas y 50 que fallaban tapaban toda la cola. Tampoco sirve
+    // «el más viejo primero»: los que fallan por un motivo pasajero (p.
+    // ej. 403 de ML, visto en staging) se quedarían siempre al frente.
+    // Al azar, ningún grupo que falla puede trabar a los demás. El orden
+    // no cambia el resultado: cada aviso le pide a ML el dato actual.
+    .orderBy(sql`random()`)
     .limit(TAMAÑO_LOTE);
 
   let procesados = 0;
   let fallidos = 0;
   let omitidosSuspendida = 0;
+  let omitidosSinCuenta = 0;
 
   for (let i = 0; i < pendientes.length; i++) {
     const aviso = pendientes[i];
@@ -78,12 +111,14 @@ export async function procesarAvisosPendientes(esperar: Esperar = esperarDeVerda
       try {
         await procesarUnAviso(aviso, esperar);
       } catch (error) {
-        if (!(error instanceof EmpresaSuspendidaError)) throw error;
+        const motivo = motivoOmision(error);
+        if (!motivo) throw error;
         await dbTrabajador
           .update(avisosMl)
           .set({ procesadoTs: new Date() })
           .where(and(eq(avisosMl.id, aviso.id), isNull(avisosMl.procesadoTs)));
-        omitidosSuspendida += 1;
+        if (motivo === "suspendida") omitidosSuspendida += 1;
+        else omitidosSinCuenta += 1;
         continue;
       }
       await dbTrabajador
@@ -105,7 +140,8 @@ export async function procesarAvisosPendientes(esperar: Esperar = esperarDeVerda
   }
 
   if (omitidosSuspendida > 0) console.warn(`[lib/ml/trabajador] ${omitidosSuspendida} aviso(s) omitidos: empresa suspendida.`);
-  return { recibidosPendientes: pendientes.length, procesados, fallidos, omitidosSuspendida };
+  if (omitidosSinCuenta > 0) console.warn(`[lib/ml/trabajador] ${omitidosSinCuenta} aviso(s) omitidos: la cuenta ya no está conectada.`);
+  return { recibidosPendientes: pendientes.length, procesados, fallidos, omitidosSuspendida, omitidosSinCuenta };
 }
 
 async function resolverCuentaYToken(aviso: typeof avisosMl.$inferSelect): Promise<{ cuentaId: string; accessToken: string }> {
@@ -113,7 +149,7 @@ async function resolverCuentaYToken(aviso: typeof avisosMl.$inferSelect): Promis
     const [cuenta] = await tx.select({ id: cuentasMl.id }).from(cuentasMl).where(eq(cuentasMl.cuentaIdExterna, aviso.cuentaIdExterna));
     return cuenta?.id ?? null;
   });
-  if (!cuentaId) throw new Error("La cuenta de Mercado Libre ya no está conectada a esta empresa.");
+  if (!cuentaId) throw new CuentaDelAvisoNoConectadaError();
 
   const accessToken = await obtenerAccessTokenVigente(aviso.empresaId, cuentaId);
   return { cuentaId, accessToken };
@@ -214,9 +250,9 @@ export async function intentarProcesarAvisoAhora(avisoId: string, timeoutMs: num
     resultado = await Promise.race([trabajo.then((): "listo" => "listo"), tiempoAgotado]);
   } catch (error) {
     clearTimeout(timer);
-    // Empresa suspendida: el aviso se queda reclamado (procesado_ts ya
-    // puesto por reclamarAviso) y no se reintenta.
-    if (error instanceof EmpresaSuspendidaError) return "omitido";
+    // Empresa suspendida o cuenta ya no conectada: el aviso se queda
+    // reclamado (procesado_ts ya puesto por reclamarAviso) y no se reintenta.
+    if (motivoOmision(error)) return "omitido";
     // El trabajo falló de verdad ANTES del tope — nunca hace falta
     // esperar el resto del timeout para liberar el aviso.
     await liberarAviso(avisoId);
