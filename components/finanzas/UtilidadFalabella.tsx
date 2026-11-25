@@ -192,7 +192,11 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
       {recortado && <p className={estilos.avisoError}>Hay demasiadas órdenes en este rango: acorta las fechas para ver todas.</p>}
 
       <div className={estilos.gridKpi}>
-        <TarjetaKpi titulo="Ventas" valor={m(t.ventas)} detalle={[`${t.ordenesConReporte} órdenes con reporte · ${t.cantidad} unidades`]} />
+        <TarjetaKpi titulo="Ventas" valor={m(t.ventas)} detalle={[
+            `${t.ordenesConReporte} órdenes con reporte · ${t.cantidad} unidades`,
+            ...(t.ventasSinIva !== null ? [`Ventas sin IVA ${m(t.ventasSinIva)} (cuentas con % de IVA configurado)`] : []),
+          ]}
+        />
         <TarjetaKpi
           titulo="Utilidad del periodo"
           valor={m(t.utilidadPeriodo)}
@@ -236,7 +240,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
         </p>
       )}
 
-      {puedeModificar && <DefectosCuentaFalabella cuentas={cuentas.map(({ id, nickname, comisionPct, flete }) => ({ id, nickname, comisionPct, flete }))} />}
+      {puedeModificar && <DefectosCuentaFalabella cuentas={cuentas.map(({ id, nickname, comisionPct, flete, ivaVentasPct }) => ({ id, nickname, comisionPct, flete, ivaVentasPct }))} />}
 
       {(t.ordenesSinEnvioAgencia > 0 || t.ordenesEnvioDesconocido > 0) && (
         <p className={estilos.suave}>
@@ -348,7 +352,10 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                     <CeldaTabla>{fechaHoraBogota(o.fecha)}</CeldaTabla>
                     <CeldaTabla>{o.cuenta}</CeldaTabla>
                     <CeldaTabla>{sinReporte && !conVentasApi ? "—" : o.cantidad}</CeldaTabla>
-                    <CeldaTabla numerica>{conVentasApi ? m(o.ventas) : montoOrden(o.ventas)}</CeldaTabla>
+                    <CeldaTabla numerica>
+                      {conVentasApi ? m(o.ventas) : montoOrden(o.ventas)}
+                      {o.ventasSinIva !== null && <div className={estilos.suave}>Sin IVA {m(o.ventasSinIva)}</div>}
+                    </CeldaTabla>
                     <CeldaTabla numerica>{lapiz("costo", costoVisible)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.comisiones)}</CeldaTabla>
                     <CeldaTabla numerica>{lapiz("flete", envioVisible)}</CeldaTabla>

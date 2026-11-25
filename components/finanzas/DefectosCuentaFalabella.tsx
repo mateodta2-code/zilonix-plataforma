@@ -12,6 +12,7 @@ export type DefectosCuentaVista = {
   nickname: string;
   comisionPct: string | null;
   flete: string | null;
+  ivaVentasPct: string | null;
 };
 
 // Issue #422 — respaldo por cuenta para estimar órdenes de una cuenta nueva
@@ -20,10 +21,11 @@ export type DefectosCuentaVista = {
 export function DefectosCuentaFalabella({ cuentas }: { cuentas: DefectosCuentaVista[] }) {
   return (
     <details className={estilos.defectosCuenta}>
-      <summary>Comisión y flete por defecto (cuentas sin reportes)</summary>
+      <summary>Comisión, flete e IVA de ventas por cuenta</summary>
       <p className={estilos.suave}>
         Solo se usan para estimar órdenes de un SKU sin historial en una cuenta que todavía no tiene ningún reporte de transacciones. Sin %
-        de comisión, esas órdenes quedan «Sin reporte de Falabella».
+        de comisión, esas órdenes quedan «Sin reporte de Falabella». El % de IVA de ventas es informativo: muestra «Ventas sin IVA» y no
+        cambia la utilidad.
       </p>
       {cuentas.map((c) => (
         <FormularioCuenta key={c.id} cuenta={c} />
@@ -36,6 +38,7 @@ function FormularioCuenta({ cuenta }: { cuenta: DefectosCuentaVista }) {
   const router = useRouter();
   const [comision, setComision] = useState(cuenta.comisionPct ?? "");
   const [flete, setFlete] = useState(cuenta.flete ?? "");
+  const [iva, setIva] = useState(cuenta.ivaVentasPct ?? "");
   const [mensaje, setMensaje] = useState<{ ok: boolean; texto: string } | null>(null);
   const [pendiente, iniciar] = useTransition();
 
@@ -47,7 +50,7 @@ function FormularioCuenta({ cuenta }: { cuenta: DefectosCuentaVista }) {
         setMensaje(null);
         iniciar(async () => {
           try {
-            const r = await guardarDefectosCuentaFalabellaAction({ cuentaId: cuenta.id, comisionPct: comision, flete });
+            const r = await guardarDefectosCuentaFalabellaAction({ cuentaId: cuenta.id, comisionPct: comision, flete, ivaVentasPct: iva });
             setMensaje(r.ok ? { ok: true, texto: "Guardado." } : { ok: false, texto: r.mensaje });
             if (r.ok) router.refresh();
           } catch {
@@ -61,6 +64,9 @@ function FormularioCuenta({ cuenta }: { cuenta: DefectosCuentaVista }) {
       </Campo>
       <Campo etiqueta="Flete por defecto (por unidad)">
         <input inputMode="decimal" value={flete} onChange={(e) => setFlete(e.target.value)} placeholder="Vacío = 0" className="zx-control" />
+      </Campo>
+      <Campo etiqueta="% IVA de ventas">
+        <input inputMode="decimal" value={iva} onChange={(e) => setIva(e.target.value)} placeholder="Vacío = sin configurar" className="zx-control" />
       </Campo>
       <div className={estilos.accionesFiltro}>
         <Boton type="submit" chico disabled={pendiente}>
