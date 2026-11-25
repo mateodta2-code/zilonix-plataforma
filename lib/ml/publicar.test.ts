@@ -323,6 +323,57 @@ describe("publicarProductoEnCuentas (tarea 2.11) — camino clásico", () => {
     expect(rastro.some((a) => a.entidad === "Mercado Libre")).toBe(true);
   });
 
+  // Barra-A: el historial lee el largo de `resultado` para su barra de avance.
+  it("guarda el resultado parcial tras cada cuenta, con el estado aún en 'publicando'", async () => {
+    const { empresaId, cuentaId } = await crearEmpresaYCuenta(randomUUID().slice(0, 8));
+    const [cuenta2] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(cuentasMl)
+        .values({
+          empresaId,
+          cuentaIdExterna: cuentaIdExternaDePrueba(),
+          nickname: "VENDEDOR_PARCIAL_2",
+          accessTokenCifrado: cifrarToken("access"),
+          refreshTokenCifrado: cifrarToken("refresh"),
+          tokenExpiraTs: new Date(Date.now() + 3600_000),
+        })
+        .returning({ id: cuentasMl.id })
+    );
+    const producto = await crearProducto(empresaId, cuentaId, {
+      estado: "publicando",
+      cuentasSeleccionadas: [cuentaId, cuenta2.id],
+      porCuenta: {
+        [cuentaId]: { titulo: "Producto de prueba", descripcion: "Descripción de prueba" },
+        [cuenta2.id]: { titulo: "Producto de prueba", descripcion: "Descripción de prueba" },
+      },
+    });
+    let lecturaAlEmpezarSegunda: Promise<{ estado: string; resultado: unknown }[]> | null = null;
+    let llamadas = 0;
+    vi.stubGlobal(
+      "fetch",
+      enrutarFetch(
+        reglasBase({
+          onCrearItem: () => {
+            llamadas += 1;
+            if (llamadas === 2) {
+              lecturaAlEmpezarSegunda = dbComoEmpresa(empresaId, (tx) =>
+                tx.select({ estado: productosMl.estado, resultado: productosMl.resultado }).from(productosMl).where(eq(productosMl.id, producto.id))
+              );
+            }
+            return null;
+          },
+        })
+      )
+    );
+    await publicarProductoEnCuentas(empresaId, producto.id);
+    const [parcial] = await lecturaAlEmpezarSegunda!;
+    expect(parcial.estado).toBe("publicando");
+    expect(parcial.resultado).toHaveLength(1);
+    const [final] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(productosMl).where(eq(productosMl.id, producto.id)));
+    expect(final.resultado).toHaveLength(2);
+    expect(final.estado).not.toBe("publicando");
+  });
+
   // Tarea 2.11, punto 4 — reemplaza la prueba anterior (solo SELECT)
   // por la plantilla real de aislamiento (issue #39,
   // db/test-utils/aislamiento.ts): confirma que empresa B nunca VE,

@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
 import type { Asignacion } from "@/lib/ia/prompts/composiciones";
@@ -87,6 +88,8 @@ export function GenerarConIA({
   const [fotoBlanco, setFotoBlanco] = useState(false);
   const [cantidadPortadas, setCantidadPortadas] = useState<1 | 2>(1);
   const [tarjetas, setTarjetas] = useState<Tarjeta[]>([]);
+  // Barra-A: ids del lote de «Crear todas» en curso (avance = listas + con error sobre el total del lote; sin llamadas al servidor).
+  const [lote, setLote] = useState<string[] | null>(null);
   const [preparando, setPreparando] = useState(false);
   const [aviso, setAviso] = useState<{ texto: string; conectarIA?: boolean } | null>(null);
   const [omitidas, setOmitidas] = useState<string[]>([]);
@@ -200,7 +203,12 @@ export function GenerarConIA({
 
   // «Crear todas»: de a 2 a la vez (la cola del servidor también lo cuida).
   async function crearTodas() {
-    const pendientes = tarjetas.filter((t) => t.estado === "propuesta" || t.estado === "error");
+    // Mismo filtro que corta `crear` al inicio: lo que no se va a crear no cuenta en el lote.
+    const pendientes = tarjetas
+      .filter((t) => t.estado === "propuesta" || t.estado === "error")
+      .filter((t) => !(prohibidasDe(t).length > 0 || (t.tipo !== "portada" && t.tipo !== "foto_principal" && !t.titulo.trim())));
+    if (pendientes.length === 0) return;
+    setLote(pendientes.map((t) => t.id));
     let i = 0;
     await Promise.all(
       Array.from({ length: MAXIMO_A_LA_VEZ }, async () => {
@@ -229,6 +237,7 @@ export function GenerarConIA({
 
   // «Descargar todas»: una tras otra (sin ZIP: no hay librería para eso).
   // El navegador puede preguntar si permite varias descargas.
+  const hechosLote = lote ? tarjetas.filter((t) => lote.includes(t.id) && (t.estado === "lista" || t.estado === "error")).length : 0;
   const listas = tarjetas.filter((t) => t.estado === "lista" && t.url);
   async function descargarTodas() {
     for (const t of listas) {
@@ -302,6 +311,17 @@ export function GenerarConIA({
 
       {tarjetas.length > 0 ? (
         <>
+          {lote ? (
+            <BarraCarga
+              estado={hechosLote >= lote.length ? "completa" : "cargando"}
+              sticky={false}
+              titulo="Creando imágenes…"
+              avance={{ hechos: hechosLote, total: lote.length }}
+              unidad="imágenes"
+              textoCompleta="Imágenes listas"
+              ariaLabel="Avance de la creación de imágenes"
+            />
+          ) : null}
           <div className={styles.accionesIA}>
             <Boton type="button" onClick={crearTodas} disabled={tarjetas.some((t) => t.estado === "generando" || t.estado === "en_cola")}>
               Crear todas las aprobadas
