@@ -134,6 +134,11 @@ const RUTAS_PROTEGIDAS = new Set([
   // ventas.modificar.
   "app/panel/preguntas/page.tsx",
   "app/panel/preguntas/actions.ts",
+  // Reclamos-A (Refs #644): detalle de un reclamo y proxy de sus
+  // adjuntos, ambos solo lectura — piden ventas.consultar y validan que
+  // la cuenta sea de la empresa actual.
+  "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/page.tsx",
+  "app/api/ml/reclamos/[cuentaId]/[reclamoId]/adjuntos/[archivo]/route.ts",
   // Optimización (Fase 1): ver pide inventario.consultar; pausar o
   // activar, inventario.modificar.
   "app/panel/optimizacion/page.tsx",
