@@ -664,7 +664,7 @@ export function PaginaPromocionesReal({
       const res = await fetch("/api/ml/promociones/reglas-adicionales/interpretar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto: textoReglas }),
+        body: JSON.stringify({ texto: textoReglas, cuentaId: cuentaSeleccionada === "todas" ? cuentas[0]?.id : cuentaSeleccionada }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; codigo?: string; entendido?: string[]; noEntendido?: string[]; json?: unknown };
       if (!res.ok) {

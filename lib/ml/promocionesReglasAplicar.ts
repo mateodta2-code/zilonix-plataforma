@@ -1,4 +1,6 @@
+import { formatearMoneda } from "@/lib/ml/sitios";
 import {
+  aplicaToleranciaCompartida,
   describirExclusion,
   describirMaximoGlobal,
   describirMaximoSku,
@@ -18,6 +20,13 @@ import {
 // max(precio por regla, piso); además validarCalculado
 // (lib/ml/promocionesEjecucion.ts) vuelve a exigir deal >= piso antes de
 // escribir en Mercado Libre.
+//
+// ÚNICA excepción (decisión de Mateo): la tolerancia en promociones
+// compartidas (toleranciaCompartidaBajoPiso). Solo si la promoción es
+// compartida, el piso supera a max_discounted_price por <= monto y el
+// precio es exactamente ese máximo (aplicaToleranciaCompartida). Acá solo
+// se respeta (no se vuelve a subir al piso) y se explica; quien decide el
+// precio es el motor y quien lo autoriza es validarCalculado.
 
 export type PromocionParaReglas = {
   skuCodigo: string | null;
@@ -32,6 +41,8 @@ export type PromocionParaReglas = {
   precioSugerido: number | null;
   precioMinimo: number | null;
   maxDiscountedPrice: number | null;
+  // Sitio de la cuenta, solo para mostrar montos con su moneda.
+  siteId?: string;
 };
 
 export type EvaluacionReglasAdicionales = {
@@ -51,8 +62,17 @@ function recortarFecha(fecha: string | null): string | null {
 }
 
 export function evaluarReglasAdicionales(reglas: ReglasAdicionales | null, promo: PromocionParaReglas): EvaluacionReglasAdicionales {
-  const sinCambios: EvaluacionReglasAdicionales = { excluida: false, maxPctEfectivo: null, precioFinal: promo.precioSugerido, motivos: [], motivoVisible: null };
-  if (!reglas) return sinCambios;
+  if (!reglas) return { excluida: false, maxPctEfectivo: null, precioFinal: promo.precioSugerido, motivos: [], motivoVisible: null };
+
+  // ¿El motor entró bajo el piso por la tolerancia? (compartida, regla
+  // guardada, diferencia <= monto y precio = max_discounted_price.)
+  const monto = reglas.toleranciaCompartidaBajoPiso?.monto ?? null;
+  const usoTolerancia = promo.precioSugerido != null && promo.precioSugerido === promo.maxDiscountedPrice && aplicaToleranciaCompartida(promo, monto);
+  const motivoTolerancia =
+    usoTolerancia && monto != null && promo.precioMinimo != null && promo.precioSugerido != null
+      ? `Compartida: participa ${formatearMoneda(promo.precioMinimo - promo.precioSugerido, promo.siteId)} por debajo del piso (tolerancia ${formatearMoneda(monto, promo.siteId)}, ML aporta la diferencia)`
+      : null;
+  const sinCambios: EvaluacionReglasAdicionales = { excluida: false, maxPctEfectivo: null, precioFinal: promo.precioSugerido, motivos: motivoTolerancia ? [motivoTolerancia] : [], motivoVisible: motivoTolerancia };
 
   const excluidaPor = (motivo: string): EvaluacionReglasAdicionales => ({
     excluida: true,
@@ -112,7 +132,9 @@ export function evaluarReglasAdicionales(reglas: ReglasAdicionales | null, promo
   // Precio mínimo que respeta el tope de descuento (redondeo hacia arriba:
   // nunca queda más descuento del permitido).
   const precioPorRegla = Math.ceil(promo.precioOriginal * (1 - maxPct / 100));
-  const piso = promo.precioMinimo ?? 0;
+  // Con la tolerancia el "piso" efectivo es el máximo de la promoción (el
+  // precio al que ya entró el motor): nunca se vuelve a subir al piso real.
+  const piso = usoTolerancia && promo.maxDiscountedPrice != null ? promo.maxDiscountedPrice : promo.precioMinimo ?? 0;
   const precioFinal = Math.max(promo.precioSugerido, precioPorRegla, piso);
 
   if (promo.maxDiscountedPrice != null && precioFinal > promo.maxDiscountedPrice) {
@@ -120,7 +142,7 @@ export function evaluarReglasAdicionales(reglas: ReglasAdicionales | null, promo
   }
   if (precioFinal > promo.precioSugerido) {
     const motivo = `Limitada a ${maxPct}% por: ${razonMax}`;
-    return { excluida: false, maxPctEfectivo: maxPct, precioFinal, motivos: [motivo], motivoVisible: motivo };
+    return { excluida: false, maxPctEfectivo: maxPct, precioFinal, motivos: motivoTolerancia ? [motivo, motivoTolerancia] : [motivo], motivoVisible: motivo };
   }
   return { ...sinCambios, maxPctEfectivo: maxPct, precioFinal };
 }

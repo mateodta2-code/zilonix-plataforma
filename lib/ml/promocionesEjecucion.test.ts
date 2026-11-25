@@ -586,3 +586,81 @@ describe("validarCalculado — modo sin piso (fix-promociones-todas-sin-piso)", 
     expect(validarCalculado(base, null, reglas, "participar", 96000, false).ok).toBe(false);
   });
 });
+
+describe("tolerancia en compartidas bajo el piso (Promo-Tolerancia) — única excepción al piso", () => {
+  const reglas: ReglasCuentaPromocion = { descuentoMaximoPct: 40, participarCompartidas: true, igualarAlPiso: true };
+  // Piso 87.000, techo (max_discounted_price) 83.932, compartida.
+  const calcular = (tolerancia: number | null, promo: Record<string, unknown> = {}, reglasCuenta = reglas) =>
+    calcularCandidatosItem(
+      { itemId: "MCO1", cuentaMlId: "c1", nickname: "", tituloProducto: "P", thumbnail: null, skuCodigo: "SKU-1", tieneVariantes: false, skuVariantesDistintas: false, promociones: [{ type: "DEAL", status: "candidate", id: "p1", original_price: 120000, meli_percentage: 5, max_discounted_price: 83932, ...promo }] },
+      reglasCuenta,
+      87000,
+      50000,
+      true,
+      tolerancia
+    )[0];
+
+  it("(a) compartida, piso 87.000, techo 83.932, tolerancia 5.000: participa a 83.932 y validarCalculado lo acepta", () => {
+    const c = calcular(5000);
+    expect(c).toMatchObject({ cumpleReglas: true, accionSugerida: "participar", precioSugerido: 83932 });
+    expect(validarCalculado(c, 87000, reglas, "participar", undefined, true, 5000)).toEqual({ ok: true, deal: 83932 });
+    // También con el precio ya aprobado a mano (revalidación antes de escribir).
+    expect(validarCalculado(c, 87000, reglas, "participar", 83932, true, 5000)).toEqual({ ok: true, deal: 83932 });
+  });
+
+  it("(b) tolerancia 3.000: no participa, mismo motivo de hoy", () => {
+    const c = calcular(3000);
+    expect(c.cumpleReglas).toBe(false);
+    expect(c.motivoRevisarManual).toContain("está por encima del máximo que permite esta promoción puntual");
+    expect(validarCalculado(c, 87000, reglas, "participar", undefined, true, 3000).ok).toBe(false);
+  });
+
+  it("(c) no compartida, aunque esté dentro de la tolerancia: no participa", () => {
+    const c = calcular(5000, { meli_percentage: 0 });
+    expect(c.cumpleReglas).toBe(false);
+    expect(validarCalculado(c, 87000, reglas, "participar", undefined, true, 5000).ok).toBe(false);
+  });
+
+  it("(d) sin regla: igual que hoy", () => {
+    const c = calcular(null);
+    expect(c.cumpleReglas).toBe(false);
+    expect(c.motivoRevisarManual).toContain("no hay forma de participar sin quedar por debajo del piso");
+  });
+
+  it("con participarCompartidas apagado la tolerancia no hace nada", () => {
+    const apagadas = { ...reglas, participarCompartidas: false };
+    expect(calcular(5000, {}, apagadas).cumpleReglas).toBe(false);
+  });
+
+  it("(e) validarCalculado rechaza un precio bajo el piso que no cumple todas las condiciones", () => {
+    const c = calcular(5000);
+    // Otro precio bajo el piso (no es el techo), aunque dentro de la tolerancia.
+    expect(validarCalculado({ ...c, precioSugerido: 84500 }, 87000, reglas, "participar", undefined, true, 5000).ok).toBe(false);
+    expect(validarCalculado(c, 87000, reglas, "participar", 84500, true, 5000).ok).toBe(false);
+    // Sin tolerancia guardada.
+    expect(validarCalculado(c, 87000, reglas, "participar", undefined, true, null).ok).toBe(false);
+    expect(validarCalculado(c, 87000, reglas, "participar", 83932, true, null).ok).toBe(false);
+    // Tolerancia menor que la diferencia.
+    expect(validarCalculado(c, 87000, reglas, "participar", undefined, true, 3000).ok).toBe(false);
+    // No compartida.
+    expect(validarCalculado({ ...c, esCompartida: false }, 87000, reglas, "participar", undefined, true, 5000).ok).toBe(false);
+    // Cuenta sin participarCompartidas.
+    expect(validarCalculado(c, 87000, { ...reglas, participarCompartidas: false }, "participar", undefined, true, 5000).ok).toBe(false);
+  });
+
+  it("validarCandidatoParaEscritura lee la tolerancia FRESCA de la cuenta (nunca del navegador) y la acepta", async () => {
+    limpiar();
+    filasPorTabla.set(promocionesReglas, [
+      {
+        cuentaMlId: "cuenta-1",
+        descuentoMaximoPct: 40,
+        participarCompartidas: true,
+        igualarAlPiso: true,
+        reglasAdicionalesJson: { version: 1, exclusiones: [], maximoDescuentoPct: null, maximoPorSku: [], ventanasFecha: [], toleranciaCompartidaBajoPiso: { monto: 5000 }, noEntendido: [] },
+      },
+    ]);
+    filasPorTabla.set(costosSku, costoFila({ precioMinimoUnidad: "87000" }));
+    const r = await validarCandidatoParaEscritura("empresa-1", candidato({ cuentaMlId: "cuenta-1", esCompartida: true, precioOriginal: "120000", precioActual: "120000", maxDiscountedPrice: "83932", estadoMl: "candidate" } as never), "participar");
+    expect(r).toEqual({ ok: true, deal: 83932 });
+  });
+});

@@ -40,6 +40,7 @@ Responde SOLO con un objeto JSON puro (sin explicación, sin \`\`\`), exactament
   "maximoDescuentoPct": número entre 1 y 100, o null,
   "maximoPorSku": [ { "sku": "código exacto del SKU", "maximoPct": número entre 1 y 100 } ],
   "ventanasFecha": [ { "desde": "AAAA-MM-DD", "hasta": "AAAA-MM-DD", "accion": "no_entrar" } ],
+  "toleranciaCompartidaBajoPiso": { "monto": entero mayor que 0 y hasta 1000000 } o null,
   "noEntendido": [ "fragmento del texto que no pudiste convertir en una de estas reglas" ]
 }
 
@@ -47,6 +48,7 @@ Reglas del esquema:
 - "nombre_promocion": no entrar en promociones cuyo NOMBRE contenga "valor" (ej. "black friday"). "tipo_promocion": "valor" es un código de tipo de Mercado Libre (deal, dod, lightning, price_discount, smart, unhealthy_stock, pre_negotiated, price_matching, volume, marketplace_campaign, seller_coupon_campaign, seller_campaign). "compartida" (promociones compartidas con Mercado Libre, +Meli) NO lleva "valor".
 - "maximoDescuentoPct": tope de descuento para todos los productos. "maximoPorSku": tope solo para un SKU.
 - "ventanasFecha" SOLO cuando el vendedor da fechas explícitas. NUNCA deduzcas fechas a partir del nombre de un evento (Black Friday, Cyber Monday…): en ese caso usa "nombre_promocion". Fechas siempre sin zona horaria ni hora.
+- "toleranciaCompartidaBajoPiso": SOLO cuando el vendedor dice que en promociones compartidas con Mercado Libre (donde Mercado Libre pone parte del descuento) se participa aunque el máximo que permite la promoción quede hasta un monto fijo POR DEBAJO del precio mínimo (piso). "monto" es ese valor como entero, sin símbolo de moneda ni separadores. Ejemplo: "Cuando el máximo que permite una promoción compartida queda hasta $5.000 por debajo del piso, se participa igual" => "toleranciaCompartidaBajoPiso": { "monto": 5000 }. Si el monto no es claro, o no habla de promociones compartidas, va a "noEntendido". No la uses para bajar el piso en ningún otro caso.
 - NUNCA adivines. Lo que no puedas convertir con certeza va a "noEntendido", copiado casi tal cual. Si no hay nada que entender: listas vacías y "maximoDescuentoPct": null.
 - No agregues ningún otro campo.
 
@@ -55,7 +57,9 @@ ${texto}
 </texto_del_vendedor>`;
 }
 
-export async function interpretarReglasTexto(empresaId: string, textoCrudo: string, deps: DependenciasInterpretacion = DEPENDENCIAS_REALES): Promise<ResultadoInterpretacion> {
+// `siteId` (opcional) = sitio de la cuenta, solo para mostrar los montos con
+// su moneda en «Entendí esto»; sin él se usa el sitio por defecto.
+export async function interpretarReglasTexto(empresaId: string, textoCrudo: string, deps: DependenciasInterpretacion = DEPENDENCIAS_REALES, siteId?: string): Promise<ResultadoInterpretacion> {
   const texto = textoCrudo.trim();
   if (!texto) return { estado: "invalido", mensaje: "Escribe al menos una regla." };
   if (texto.length > LARGO_MAXIMO_REGLAS_TEXTO) return { estado: "invalido", mensaje: `El texto no puede pasar de ${LARGO_MAXIMO_REGLAS_TEXTO} caracteres.` };
@@ -77,7 +81,7 @@ export async function interpretarReglasTexto(empresaId: string, textoCrudo: stri
     if (json === null) continue;
     const validado = validarReglasAdicionales(json);
     if (!validado.ok) continue;
-    return { estado: "ok", reglas: validado.reglas, entendido: describirReglas(validado.reglas), noEntendido: validado.reglas.noEntendido };
+    return { estado: "ok", reglas: validado.reglas, entendido: describirReglas(validado.reglas, siteId), noEntendido: validado.reglas.noEntendido };
   }
   return { estado: "error_ia", mensaje: "No pude interpretar ese texto de forma confiable. Reescríbelo más simple (una regla por línea) e intenta de nuevo." };
 }

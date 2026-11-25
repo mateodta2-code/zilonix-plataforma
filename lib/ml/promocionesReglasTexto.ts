@@ -13,12 +13,17 @@
 // aprobado. El esquema es estricto igual que lo sería con zod
 // (.strict()): llaves de más, rangos y fechas inválidas se rechazan.
 
+import { formatearMoneda } from "@/lib/ml/sitios";
+
 export const VERSION_REGLAS_ADICIONALES = 1;
 export const LARGO_MAXIMO_REGLAS_TEXTO = 1000;
 
 const MAX_ITEMS_POR_LISTA = 20;
 const MAX_LARGO_VALOR = 80;
 const MAX_LARGO_NO_ENTENDIDO = 200;
+// Tope razonable de la tolerancia, en la moneda del sitio de la cuenta:
+// un monto mayor casi seguro es un error de tipeo o una cifra inventada.
+export const MONTO_MAXIMO_TOLERANCIA_COMPARTIDA = 1_000_000;
 
 export const TIPOS_EXCLUSION = ["nombre_promocion", "tipo_promocion", "compartida"] as const;
 export type TipoExclusion = (typeof TIPOS_EXCLUSION)[number];
@@ -31,12 +36,21 @@ export type MaximoPorSku = { sku: string; maximoPct: number };
 // así nunca se fija una zona.
 export type VentanaFecha = { desde: string; hasta: string; accion: "no_entrar" };
 
+// ÚNICA excepción al piso de Finanzas (decisión de Mateo): en una promoción
+// compartida con Mercado Libre, si el máximo que permite la promoción
+// (max_discounted_price) queda hasta `monto` por debajo del piso, se
+// participa igual al máximo — Mercado Libre aporta esa diferencia. `monto`
+// es un entero en la moneda del sitio de la cuenta.
+export type ToleranciaCompartidaBajoPiso = { monto: number };
+
 export type ReglasAdicionales = {
   version: 1;
   exclusiones: ExclusionRegla[];
   maximoDescuentoPct: number | null;
   maximoPorSku: MaximoPorSku[];
   ventanasFecha: VentanaFecha[];
+  // Opcional: lo guardado antes de este campo sigue validando igual.
+  toleranciaCompartidaBajoPiso?: ToleranciaCompartidaBajoPiso | null;
   noEntendido: string[];
 };
 
@@ -98,7 +112,7 @@ function textoCorto(valor: unknown, max: number): string | null {
 
 export function validarReglasAdicionales(entrada: unknown): ResultadoValidacionReglas {
   if (!esObjetoPlano(entrada)) return { ok: false, error: "La respuesta no es un objeto JSON." };
-  const extraTop = llavesDeMas(entrada, ["version", "exclusiones", "maximoDescuentoPct", "maximoPorSku", "ventanasFecha", "noEntendido"]);
+  const extraTop = llavesDeMas(entrada, ["version", "exclusiones", "maximoDescuentoPct", "maximoPorSku", "ventanasFecha", "toleranciaCompartidaBajoPiso", "noEntendido"]);
   if (extraTop) return { ok: false, error: `Campo no permitido: "${extraTop}".` };
   if (entrada.version !== VERSION_REGLAS_ADICIONALES) return { ok: false, error: "Versión del esquema no soportada." };
 
@@ -157,6 +171,19 @@ export function validarReglasAdicionales(entrada: unknown): ResultadoValidacionR
     ventanasFecha.push({ desde, hasta, accion: "no_entrar" });
   }
 
+  // Solo se agrega la llave cuando hay tolerancia: así lo guardado sin el
+  // campo se valida y se compara exactamente igual que antes.
+  let tolerancia: ToleranciaCompartidaBajoPiso | null = null;
+  const toleranciaCruda = entrada.toleranciaCompartidaBajoPiso;
+  if (toleranciaCruda !== undefined && toleranciaCruda !== null) {
+    if (!esObjetoPlano(toleranciaCruda) || llavesDeMas(toleranciaCruda, ["monto"])) return { ok: false, error: "La tolerancia en promociones compartidas tiene un formato no permitido." };
+    const monto = toleranciaCruda.monto;
+    if (typeof monto !== "number" || !Number.isInteger(monto) || monto <= 0 || monto > MONTO_MAXIMO_TOLERANCIA_COMPARTIDA) {
+      return { ok: false, error: `El monto de la tolerancia tiene que ser un entero entre 1 y ${MONTO_MAXIMO_TOLERANCIA_COMPARTIDA}.` };
+    }
+    tolerancia = { monto };
+  }
+
   const noEntendido: string[] = [];
   for (const n of noEntendidoCrudo) {
     const t = textoCorto(n, MAX_LARGO_NO_ENTENDIDO);
@@ -164,11 +191,37 @@ export function validarReglasAdicionales(entrada: unknown): ResultadoValidacionR
     noEntendido.push(t);
   }
 
-  return { ok: true, reglas: { version: 1, exclusiones, maximoDescuentoPct, maximoPorSku, ventanasFecha, noEntendido } };
+  return {
+    ok: true,
+    reglas: { version: 1, exclusiones, maximoDescuentoPct, maximoPorSku, ventanasFecha, ...(tolerancia ? { toleranciaCompartidaBajoPiso: tolerancia } : {}), noEntendido },
+  };
 }
 
 export function tieneReglasAplicables(reglas: ReglasAdicionales): boolean {
-  return reglas.exclusiones.length > 0 || reglas.maximoDescuentoPct !== null || reglas.maximoPorSku.length > 0 || reglas.ventanasFecha.length > 0;
+  return reglas.exclusiones.length > 0 || reglas.maximoDescuentoPct !== null || reglas.maximoPorSku.length > 0 || reglas.ventanasFecha.length > 0 || reglas.toleranciaCompartidaBajoPiso != null;
+}
+
+// Núcleo ACOTADO de la excepción al piso — una sola definición que usan el
+// motor (calcularCandidatosItem), el aplicador y validarCalculado, para que
+// nunca se desincronicen. Solo es verdadero si TODO se cumple: la promoción
+// es compartida (meli_percentage > 0), hay tolerancia guardada, el máximo
+// de la promoción existe y queda POR DEBAJO del piso, y la diferencia
+// piso - máximo es <= monto. Cualquier otro caso: el piso sigue mandando.
+// (Quien lo usa debe además exigir participarCompartidas y que el precio
+// sea exactamente max_discounted_price.)
+export function aplicaToleranciaCompartida(
+  datos: { esCompartida: boolean; precioMinimo: number | null; maxDiscountedPrice: number | null },
+  monto: number | null | undefined
+): boolean {
+  if (!datos.esCompartida || monto == null || !Number.isFinite(monto) || monto <= 0) return false;
+  const { precioMinimo, maxDiscountedPrice } = datos;
+  if (precioMinimo == null || maxDiscountedPrice == null || maxDiscountedPrice <= 0) return false;
+  const diferencia = precioMinimo - maxDiscountedPrice;
+  return diferencia > 0 && diferencia <= monto;
+}
+
+export function describirToleranciaCompartida(monto: number, siteId?: unknown): string {
+  return `en promociones compartidas con Mercado Libre, participar aunque el máximo quede hasta ${formatearMoneda(monto, siteId)} por debajo del piso`;
 }
 
 export function describirExclusion(e: ExclusionRegla): string {
@@ -190,12 +243,13 @@ export function describirVentana(v: VentanaFecha): string {
 }
 
 // Lista legible para «Entendí esto: …» (nunca el JSON crudo).
-export function describirReglas(reglas: ReglasAdicionales): string[] {
+export function describirReglas(reglas: ReglasAdicionales, siteId?: unknown): string[] {
   return [
     ...reglas.exclusiones.map(describirExclusion),
     ...(reglas.maximoDescuentoPct !== null ? [describirMaximoGlobal(reglas.maximoDescuentoPct)] : []),
     ...reglas.maximoPorSku.map(describirMaximoSku),
     ...reglas.ventanasFecha.map(describirVentana),
+    ...(reglas.toleranciaCompartidaBajoPiso ? [describirToleranciaCompartida(reglas.toleranciaCompartidaBajoPiso.monto, siteId)] : []),
   ];
 }
 

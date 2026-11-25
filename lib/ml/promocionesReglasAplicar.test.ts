@@ -121,3 +121,27 @@ describe("evaluarReglasAdicionales — máximos y piso", () => {
     expect(e.precioFinal).toBe(Math.ceil(99999 * 0.67));
   });
 });
+
+describe("evaluarReglasAdicionales — tolerancia en compartidas (Promo-Tolerancia)", () => {
+  const COMPARTIDA: PromocionParaReglas = { ...PROMO, esCompartida: true, precioOriginal: 120000, precioMinimo: 87000, precioSugerido: 83932, maxDiscountedPrice: 83932, siteId: "MCO" };
+
+  it("usó la tolerancia: motivo claro con la moneda del sitio y el precio no vuelve al piso", () => {
+    const e = evaluarReglasAdicionales(reglas({ toleranciaCompartidaBajoPiso: { monto: 5000 } }), COMPARTIDA);
+    expect(e).toMatchObject({ excluida: false, precioFinal: 83932 });
+    expect(e.motivoVisible).toContain("Compartida: participa");
+    expect(e.motivoVisible).toContain("3.068");
+    expect(e.motivoVisible).toContain("tolerancia");
+    expect(e.motivoVisible).toContain("5.000");
+  });
+
+  it("un máximo de % que exigiría subir sobre el máximo de la promoción la excluye (nunca se sube al piso)", () => {
+    const e = evaluarReglasAdicionales(reglas({ toleranciaCompartidaBajoPiso: { monto: 5000 }, maximoDescuentoPct: 10 }), COMPARTIDA);
+    expect(e.excluida).toBe(true);
+  });
+
+  it("no compartida, o diferencia mayor que el monto: sin motivo de tolerancia", () => {
+    expect(evaluarReglasAdicionales(reglas({ toleranciaCompartidaBajoPiso: { monto: 5000 } }), { ...COMPARTIDA, esCompartida: false }).motivoVisible).toBeNull();
+    expect(evaluarReglasAdicionales(reglas({ toleranciaCompartidaBajoPiso: { monto: 3000 } }), COMPARTIDA).motivoVisible).toBeNull();
+    expect(evaluarReglasAdicionales(reglas({ exclusiones: [] }), COMPARTIDA).motivoVisible).toBeNull();
+  });
+});
