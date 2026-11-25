@@ -3,6 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
 import type { Asignacion } from "@/lib/ia/prompts/composiciones";
@@ -119,6 +120,8 @@ export function GenerarConIA({
   const [omitidasPorEstilo, setOmitidasPorEstilo] = useState<Record<Estilo, string[]>>(SIN_OMITIDAS);
   const [creadas, setCreadas] = useState<Creada[]>([]);
   const [avisoCreadas, setAvisoCreadas] = useState<string | null>(null);
+  // Barra-A: ids del lote de «Crear todas» en curso (avance = listas + con error sobre el total del lote; sin llamadas al servidor).
+  const [lote, setLote] = useState<string[] | null>(null);
   const [preparando, setPreparando] = useState(false);
   const [aviso, setAviso] = useState<{ texto: string; conectarIA?: boolean } | null>(null);
   const asignadas = useRef<Record<string, Asignacion>>({});
@@ -388,7 +391,12 @@ export function GenerarConIA({
   // «Crear todas»: de a 2 a la vez (la cola del servidor también lo cuida).
   async function crearTodas() {
     const deEsteEstilo = estilo;
-    const pendientes = tarjetas.filter((t) => t.estado === "propuesta" || t.estado === "error");
+    // Mismo filtro que corta `crear` al inicio: lo que no se va a crear no cuenta en el lote.
+    const pendientes = tarjetas
+      .filter((t) => t.estado === "propuesta" || t.estado === "error")
+      .filter((t) => !(prohibidasDe(t).length > 0 || (t.tipo !== "portada" && t.tipo !== "foto_principal" && !t.titulo.trim())));
+    if (pendientes.length === 0) return;
+    setLote(pendientes.map((t) => t.id));
     let i = 0;
     await Promise.all(
       Array.from({ length: MAXIMO_A_LA_VEZ }, async () => {
@@ -414,6 +422,8 @@ export function GenerarConIA({
     }
   }
 
+  // Barra-A: avance del lote (listas + con error sobre el total), mirando todos los estilos por si se cambia de pestaña.
+  const hechosLote = lote ? Object.values(porEstilo).flat().filter((t) => lote.includes(t.id) && (t.estado === "lista" || t.estado === "error")).length : 0;
   const tipos = estilo === "zilonix_contenido" ? TIPOS_CONTENIDO_ZILONIX : estilo === "experto_ml" ? TIPOS_EXPERTO_ML : [];
   const marcados = estilo === "zilonix_contenido" ? tiposContenido : tiposExperto;
   const alternarTipo = (id: string) => (estilo === "zilonix_contenido" ? setTiposContenido : setTiposExperto)((ts) => (ts.includes(id) ? ts.filter((x) => x !== id) : [...ts, id]));
@@ -475,6 +485,17 @@ export function GenerarConIA({
 
       {tarjetas.length > 0 ? (
         <>
+          {lote ? (
+            <BarraCarga
+              estado={hechosLote >= lote.length ? "completa" : "cargando"}
+              sticky={false}
+              titulo="Creando imágenes…"
+              avance={{ hechos: hechosLote, total: lote.length }}
+              unidad="imágenes"
+              textoCompleta="Imágenes listas"
+              ariaLabel="Avance de la creación de imágenes"
+            />
+          ) : null}
           <div className={styles.accionesIA}>
             <Boton type="button" onClick={crearTodas} disabled={tarjetas.some((t) => t.estado === "generando" || t.estado === "en_cola")}>
               Crear todas las aprobadas

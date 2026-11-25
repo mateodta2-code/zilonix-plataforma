@@ -1,6 +1,8 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Boton } from "@/components/marco/Boton";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
@@ -29,6 +31,138 @@ export type ProductoHistorial = FilaProductoParaCargar & {
   creadoTs: string;
 };
 
+// Barra-A — intervalo del sondeo de avance y tope de seguridad: pasado el
+// tope se deja de consultar (la fila colgada la limpia
+// marcarPublicacionesColgadas, no este sondeo).
+export const INTERVALO_SONDEO_MS = 4500;
+export const TOPE_SONDEO_MS = 10 * 60_000;
+
+type Avance = { hechos: number; total: number };
+type Terminada = { id: string; titulo: string; hechos: number; total: number };
+
+// Barra azul con el avance real "N de M cuentas" de cada publicación en
+// curso. Escala (>1000 usuarios): NO hay ninguna petición si no hay
+// publicaciones en "publicando" ni con la pestaña oculta; cada consulta
+// pide solo { estado, hechos, total } de UNA publicación.
+function BandasPublicando({ productos }: { productos: ProductoHistorial[] }) {
+  const router = useRouter();
+  // Ref: el efecto del sondeo no debe reiniciarse si cambia la identidad del router.
+  const routerRef = useRef(router);
+  routerRef.current = router;
+  const enCurso = productos.filter((p) => p.estado === "publicando");
+  const clave = enCurso.map((p) => p.id).join(",");
+  const [avances, setAvances] = useState<Record<string, Avance>>({});
+  const [terminadas, setTerminadas] = useState<Terminada[]>([]);
+  const inicioRef = useRef<number | null>(null);
+  const titulosRef = useRef<Record<string, string>>({});
+  titulosRef.current = Object.fromEntries(productos.map((p) => [p.id, p.titulo || "(sin título)"]));
+
+  const consultar = useCallback(async (ids: string[]) => {
+    const terminadasAhora: Terminada[] = [];
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const resp = await fetch(`/api/ml/publicar/estado-publicacion?id=${encodeURIComponent(id)}`);
+          if (!resp.ok) return;
+          const d = (await resp.json()) as { estado?: string; hechos?: number; total?: number };
+          if (typeof d.hechos !== "number" || typeof d.total !== "number") return;
+          if (d.estado && d.estado !== "publicando") {
+            terminadasAhora.push({ id, titulo: titulosRef.current[id] ?? "(sin título)", hechos: d.hechos, total: d.total });
+          } else {
+            setAvances((a) => ({ ...a, [id]: { hechos: d.hechos as number, total: d.total as number } }));
+          }
+        } catch {
+          // Error de red: se reintenta en el próximo ciclo.
+        }
+      })
+    );
+    if (terminadasAhora.length > 0) {
+      const ids = new Set(terminadasAhora.map((t) => t.id));
+      setTerminadas((t) => [...t.filter((x) => !ids.has(x.id)), ...terminadasAhora]);
+      setAvances((a) => Object.fromEntries(Object.entries(a).filter(([id]) => !ids.has(id))));
+      routerRef.current.refresh(); // una sola vez por tanda: trae la fila final.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!clave) {
+      inicioRef.current = null;
+      return;
+    }
+    const ids = clave.split(",");
+    if (inicioRef.current === null) inicioRef.current = Date.now();
+    let intervalo: ReturnType<typeof setInterval> | null = null;
+    let enVuelo = false;
+
+    const ciclo = async () => {
+      if (enVuelo) return;
+      if (Date.now() - (inicioRef.current ?? Date.now()) > TOPE_SONDEO_MS) {
+        detener();
+        return;
+      }
+      enVuelo = true;
+      try {
+        await consultar(ids);
+      } finally {
+        enVuelo = false;
+      }
+    };
+    const detener = () => {
+      if (intervalo) clearInterval(intervalo);
+      intervalo = null;
+    };
+    const arrancar = () => {
+      if (intervalo || document.visibilityState === "hidden") return;
+      void ciclo();
+      intervalo = setInterval(() => void ciclo(), INTERVALO_SONDEO_MS);
+    };
+    const alCambiarVisibilidad = () => (document.visibilityState === "hidden" ? detener() : arrancar());
+
+    arrancar();
+    document.addEventListener("visibilitychange", alCambiarVisibilidad);
+    return () => {
+      detener();
+      document.removeEventListener("visibilitychange", alCambiarVisibilidad);
+    };
+  }, [clave, consultar]);
+
+  if (enCurso.length === 0 && terminadas.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+      {enCurso.map((p) => {
+        const a = avances[p.id] ?? { hechos: p.resultado?.length ?? 0, total: p.cuentasSeleccionadas.length };
+        return (
+          <BarraCarga
+            key={p.id}
+            estado="cargando"
+            sticky={false}
+            titulo={`Publicando «${p.titulo || "(sin título)"}»…`}
+            avance={a.total > 0 ? a : null}
+            unidad="cuentas"
+            ariaLabel={`Avance de la publicación de ${p.titulo || "(sin título)"}`}
+          />
+        );
+      })}
+      {terminadas.map((t) => {
+        const fila = productos.find((p) => p.id === t.id);
+        const resumen = fila && fila.estado !== "publicando" ? resumenEstadoProducto(fila.resultado) : null;
+        const exitosas = resumen ? resumen.ok : t.hechos;
+        return (
+          <BarraCarga
+            key={`fin-${t.id}`}
+            estado="completa"
+            sticky={false}
+            titulo={t.titulo}
+            textoCompleta={`Publicación terminada · ${exitosas} de ${t.total} cuentas exitosas`}
+            duracionCompletaMs={4000}
+            ariaLabel={`Publicación de ${t.titulo} terminada`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 const ETIQUETA_ESTADO: Record<string, string> = {
   borrador: "Borrador",
   publicando: "Publicando…",
@@ -47,7 +181,9 @@ function siteIdDeFila(cuentasSeleccionadas: string[], cuentas: Cuenta[]): string
 }
 
 function EstadoCelda({ producto }: { producto: ProductoHistorial }) {
-  const resumen = resumenEstadoProducto(producto.resultado);
+  // Con el resultado parcial por cuenta (Barra-A), mientras se publica el
+  // chip no puede mostrar un ✅ N/M a medias: el avance va en la barra.
+  const resumen = producto.estado === "publicando" ? null : resumenEstadoProducto(producto.resultado);
   if (!resumen) return <Chip>{ETIQUETA_ESTADO[producto.estado] ?? producto.estado}</Chip>;
   const estadoChip = resumen.icono === "✅" ? "exito" : resumen.icono === "❌" ? "peligro" : "aviso";
   return (
@@ -156,6 +292,7 @@ export function HistorialPublicaciones({
       <div id="historial">
         <p className="zx-etiqueta">Historial</p>
         <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>Productos publicados recientemente</h2>
+        <BandasPublicando productos={productos} />
         {productos.length === 0 ? (
           <EstadoVacio>Todavía no se publicó ningún producto.</EstadoVacio>
         ) : (
