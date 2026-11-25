@@ -139,6 +139,15 @@ const RUTAS_PROTEGIDAS = new Set([
   // la cuenta sea de la empresa actual.
   "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/page.tsx",
   "app/api/ml/reclamos/[cuentaId]/[reclamoId]/adjuntos/[archivo]/route.ts",
+  // Posventa-Mensajes (Refs #645): lista y chat piden ventas.consultar (solo
+  // lectura, siempre con mark_as_read=false); responder y pedir sugerencias
+  // de IA piden ventas.modificar (resolverContextoPosventa), incluido el
+  // mensaje dentro de un reclamo. Todas validan la cuenta de la empresa.
+  "app/panel/posventa/mensajes/page.tsx",
+  "app/panel/posventa/mensajes/[cuentaId]/[packId]/page.tsx",
+  "app/panel/posventa/mensajes/acciones.ts",
+  "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/accionesMensaje.ts",
+  "app/api/ml/mensajes/[cuentaId]/adjuntos/[archivo]/route.ts",
   // Optimización (Fase 1): ver pide inventario.consultar; pausar o
   // activar, inventario.modificar.
   "app/panel/optimizacion/page.tsx",
