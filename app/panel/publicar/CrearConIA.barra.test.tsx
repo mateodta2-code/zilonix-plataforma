@@ -35,7 +35,7 @@ function guardarFichaConfirmada() {
     "zilonix:publicar:ia:textos",
     JSON.stringify({
       ts: Date.now(),
-      datos: { cuentaId: "c1", info: "bebedero", garantia: "", ficha, confirmada: true, categoria: { id: "MCO1", nombre: "Bebederos" }, leyoFotos: true, titulos: null, linkCompetencia: "", tituloCompetencia: "", descripcion: "", pestana: "titulos" },
+      datos: { cuentaId: "c1", info: "bebedero", garantia: "", ficha, confirmada: true, categoria: { id: "MCO1", nombre: "Bebederos" }, leyoFotos: true, titulos: null, descripcion: "", pestana: "titulos" },
     })
   );
 }

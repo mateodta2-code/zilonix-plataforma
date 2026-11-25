@@ -6,8 +6,7 @@ import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { descargarFotoBase } from "@/lib/ia/imagen";
 import { llamarIA, type ImagenIA } from "@/lib/ia/proveedores";
 import type { ConexionIAConClave } from "@/lib/ia/tipos";
-import { tendenciasPorNivelMl, titulosMasVendidosMl, tituloPublicacionMl } from "@/lib/ml/cliente";
-import { esLinkCortoMl, idCompetenciaDesdeLink, limpiarTituloCompetencia } from "@/lib/publicaciones/competencia";
+import { tendenciasPorNivelMl } from "@/lib/ml/cliente";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { resolverCategoria } from "@/lib/ml/publicar";
 import { analizarProducto, ErrorAnalisisIA, ESPERA_TEXTO_MS } from "@/lib/publicaciones/analisis";
@@ -104,12 +103,6 @@ export type ResultadoTitulos =
       // true = ML devolvió tendencias, pero ninguna se relaciona con el
       // producto (solo había de la categoría general o la padre).
       tendenciasSinRelacion: boolean;
-      // Título de la competencia usado como idea (link o pegado a mano) y,
-      // si el link no se pudo leer, el aviso para pegarlo a mano.
-      competencia: { titulo: string | null; aviso: string | null };
-      // Títulos de los más vendidos de la categoría (o de la padre, si la
-      // específica no tiene), dados a la IA como idea de palabras (25-nov).
-      masVendidos: { titulos: string[]; dePadre: boolean };
     }
   | Fallo;
 
@@ -120,8 +113,6 @@ export async function proponerTitulosAction(entrada: {
   categoriaId?: string | null;
   categoriaNombre?: string | null;
   info?: string;
-  linkCompetencia?: string;
-  tituloCompetencia?: string;
 }): Promise<ResultadoTitulos> {
   const ficha = leerFicha(entrada.ficha);
   if (!fichaConfirmada(ficha)) return { ok: false, aviso: "Confirma la ficha antes de pedir títulos." };
@@ -130,16 +121,7 @@ export async function proponerTitulosAction(entrada: {
   let masBuscados: TendenciaConNivel[] = [];
   let rutaCategoria: string[] = [];
   let tendenciasSinRelacion = false;
-  let masVendidos: { titulos: string[]; dePadre: boolean } = { titulos: [], dePadre: false };
   if (typeof entrada.categoriaId === "string" && entrada.categoriaId) {
-    // Más vendidos: automático, no necesita que la persona pegue nada.
-    try {
-      const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
-      const r = await titulosMasVendidosMl(ctx.cuenta.siteId, entrada.categoriaId, token);
-      masVendidos = { titulos: r.titulos.map(limpiarTituloCompetencia).filter(Boolean), dePadre: r.categoriaId !== null && r.categoriaId !== entrada.categoriaId };
-    } catch (error) {
-      registrar("mas_vendidos", error);
-    }
     try {
       const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
       const r = await tendenciasPorNivelMl(ctx.cuenta.siteId, entrada.categoriaId, token);
@@ -156,37 +138,17 @@ export async function proponerTitulosAction(entrada: {
       registrar("tendencias", error);
     }
   }
-  // Competencia: lo pegado a mano manda; si no, el título del link por la API oficial.
-  let tituloCompetencia = limpiarTituloCompetencia(entrada.tituloCompetencia);
-  let avisoCompetencia: string | null = null;
-  const link = typeof entrada.linkCompetencia === "string" ? entrada.linkCompetencia.trim().slice(0, 500) : "";
-  if (!tituloCompetencia && link) {
-    const id = idCompetenciaDesdeLink(link, ctx.cuenta.siteId);
-    if (!id) {
-      avisoCompetencia = esLinkCortoMl(link)
-        ? "Los links cortos meli.la (los de «Compartir» en la app) no se pueden leer. Ábrelo en el navegador y copia la dirección completa, o pega su título a mano."
-        : `Ese link no es de una publicación de Mercado Libre de ${ctx.cuenta.siteId}. Pega su título a mano.`;
-    } else {
-      try {
-        const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
-        tituloCompetencia = limpiarTituloCompetencia(await tituloPublicacionMl(id.tipo, id.id, token));
-      } catch (error) {
-        registrar("competencia", error);
-      }
-      if (!tituloCompetencia) avisoCompetencia = "Mercado Libre no dejó leer esa publicación. Pega su título a mano.";
-    }
-  }
   // Para la IA, primero las de la categoría específica (las más cercanas al producto).
   const tendencias = [...masBuscados].sort((a, b) => ORDEN_PARA_IA[a.nivel] - ORDEN_PARA_IA[b.nivel]).map((t) => t.palabra);
   const info = limpiarInfoVendedor(entrada.info);
   const categoria = typeof entrada.categoriaNombre === "string" ? entrada.categoriaNombre.slice(0, 120) : null;
   try {
     const respuesta = await conCupoDeTexto(ctx.empresaId, () =>
-      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info, competencia: tituloCompetencia, masVendidos: masVendidos.titulos }), { maxTokens: 800, timeoutMs: ESPERA_TEXTO_MS })
+      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info }), { maxTokens: 800, timeoutMs: ESPERA_TEXTO_MS })
     );
-    const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados, competencia: tituloCompetencia, masVendidos: masVendidos.titulos });
+    const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados });
     if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
-    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria, tendenciasSinRelacion, competencia: { titulo: tituloCompetencia || null, aviso: avisoCompetencia }, masVendidos };
+    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria, tendenciasSinRelacion };
   } catch (error) {
     registrar("titulos", error);
     return { ok: false, aviso: mensajeErrorIA(error) };

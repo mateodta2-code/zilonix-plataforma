@@ -79,7 +79,7 @@ describe("CrearConIA: ficha arriba y sub pestañas debajo", () => {
       "zilonix:publicar:ia:textos",
       JSON.stringify({
         ts: Date.now(),
-        datos: { cuentaId: "c1", info: "bebedero para gatos", garantia: "", ficha, confirmada: true, categoria: { id: "MCO1", nombre: "Bebederos" }, leyoFotos: true, titulos: null, linkCompetencia: "", tituloCompetencia: "", descripciones: { c1: "Texto guardado" }, pestana: "descripcion" },
+        datos: { cuentaId: "c1", info: "bebedero para gatos", garantia: "", ficha, confirmada: true, categoria: { id: "MCO1", nombre: "Bebederos" }, leyoFotos: true, titulos: null, descripciones: { c1: "Texto guardado" }, pestana: "descripcion" },
       })
     );
     const onFicha = vi.fn();
@@ -106,7 +106,7 @@ describe("CrearConIA: ficha arriba y sub pestañas debajo", () => {
     const ficha = Object.fromEntries(CAMPOS_FICHA.map((c) => [c.clave, { valor: c.clave === "nombre" ? "Bebedero" : null, origen: "vendedor" }]));
     sessionStorage.setItem(
       "zilonix:publicar:ia:textos",
-      JSON.stringify({ ts: Date.now(), datos: { cuentaId: "c1", info: "", garantia: "", ficha, confirmada: true, categoria: null, leyoFotos: true, titulos: null, linkCompetencia: "", tituloCompetencia: "", descripciones: {}, pestana: "descripcion" } })
+      JSON.stringify({ ts: Date.now(), datos: { cuentaId: "c1", info: "", garantia: "", ficha, confirmada: true, categoria: null, leyoFotos: true, titulos: null, descripciones: {}, pestana: "descripcion" } })
     );
     const onUsarDescripcion = vi.fn();
     render(<CrearConIA cuentas={dos} fotos={[]} onUsarTitulo={() => {}} onUsarDescripcion={onUsarDescripcion} />);
