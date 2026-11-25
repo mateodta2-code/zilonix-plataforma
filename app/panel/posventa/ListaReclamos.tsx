@@ -70,7 +70,7 @@ export function ListaReclamos({ reclamos, ahoraMs }: { reclamos: ReclamoAbierto[
                 </p>
                 {/* El enlace del botón se estira sobre toda la tarjeta (::after): clicable completa sin anidar <a>. */}
                 <Link href={`/panel/posventa/reclamos/${reclamo.cuentaMlId}/${reclamo.id}`} className={styles.ver}>
-                  Ver reclamo →
+                  Ver reclamo
                 </Link>
               </div>
             </li>

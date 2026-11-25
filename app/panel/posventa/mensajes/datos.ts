@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, inArray } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { pedidoItems, pedidos } from "@/db/schema";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { estadoDeConversacion, leerConversacionMl, leerPendientesMl } from "@/lib/ml/mensajesPosventa";
 import { etiquetaEstadoPedido } from "@/lib/ml/pedidos";
 import type { FilaVenta } from "./filtros";
@@ -18,17 +19,20 @@ const PARALELO = 5;
 
 type Cuenta = { id: string; cuentaIdExterna: string; nickname: string; siteId: string | null; desconectadaTs: Date | null };
 
+export type CuentaSinRevisar = { nickname: string; motivo: string };
+
 async function enLotes<T, R>(lista: T[], tarea: (x: T) => Promise<R>): Promise<R[]> {
   const salida: R[] = [];
   for (let i = 0; i < lista.length; i += PARALELO) salida.push(...(await Promise.all(lista.slice(i, i + PARALELO).map(tarea))));
   return salida;
 }
 
-export async function cargarVentasConMensajes(empresaId: string, cuentas: Cuenta[]): Promise<{ filas: FilaVenta[]; cuentasConFalla: number }> {
+export async function cargarVentasConMensajes(empresaId: string, cuentas: Cuenta[]): Promise<{ filas: FilaVenta[]; cuentasSinRevisar: CuentaSinRevisar[] }> {
   const activas = cuentas.filter((c) => !c.desconectadaTs);
   const desde = new Date(Date.now() - DIAS_VENTANA * 24 * 3600 * 1000);
   const filas: FilaVenta[] = [];
-  let cuentasConFalla = cuentas.length - activas.length;
+  // Las desconectadas no son una falla de lectura: simplemente no se revisan.
+  const cuentasSinRevisar: CuentaSinRevisar[] = [];
 
   for (const cuenta of activas) {
     try {
@@ -80,10 +84,10 @@ export async function cargarVentasConMensajes(empresaId: string, cuentas: Cuenta
         });
       });
     } catch (error) {
-      cuentasConFalla++;
+      cuentasSinRevisar.push({ nickname: cuenta.nickname, motivo: motivoCuentaSinRevisar(error) });
       console.warn(`[panel/posventa/mensajes] cuenta ${cuenta.id}: ${error instanceof Error ? error.name : "error"}`);
     }
   }
   filas.sort((a, b) => Date.parse(b.fecha) - Date.parse(a.fecha));
-  return { filas, cuentasConFalla };
+  return { filas, cuentasSinRevisar };
 }

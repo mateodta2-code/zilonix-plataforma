@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { Boton, BotonLink } from "@/components/marco/Boton";
+import type { ReactNode } from "react";
+import { BotonLink } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { FotoConZoom } from "@/components/marco/FotoConZoom";
-import { Tarjeta } from "@/components/marco/Tarjeta";
 import { formatearFechaPedido } from "@/lib/pedidos/marketplace";
 import { formatearMonedaIso, formatearNumero, datosSitioMl } from "@/lib/ml/sitios";
 import { paginar, type EstadoFiltro, type FilaVenta, type Filtros } from "./filtros";
@@ -16,8 +16,8 @@ const TEXTO_ESTADO: Record<FilaVenta["estadoMensaje"], string> = {
   sin_mensajes: "Sin mensajes",
 };
 
-function enlace(f: Filtros, cambios: Partial<{ estado: string | null; q: string | null; desde: string | null; pagina: number | null }>): string {
-  const base = { estado: f.estado, q: f.q || null, desde: f.desde, pagina: f.pagina > 1 ? f.pagina : null, ...cambios };
+function enlace(f: Filtros, cuenta: string | null, cambios: Partial<{ estado: string | null; q: string | null; desde: string | null; pagina: number | null }>): string {
+  const base = { estado: f.estado, cuenta, q: f.q || null, desde: f.desde, pagina: f.pagina > 1 ? f.pagina : null, ...cambios };
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(base)) if (v !== null && v !== undefined && v !== "") p.set(k, String(v));
   const s = p.toString();
@@ -26,50 +26,40 @@ function enlace(f: Filtros, cambios: Partial<{ estado: string | null; q: string 
 
 // Lista tipo «Mensajes» de la Central de vendedores. Todo el contenido
 // viene de ML en vivo; nada del comprador se guarda.
-export function ListaMensajes({ todas, filtradas, conteos, filtros }: { todas: FilaVenta[]; filtradas: FilaVenta[]; conteos: Record<EstadoFiltro, number>; filtros: Filtros }) {
+// `barra` es la barra de filtros única de Posventa (la arma la página, que
+// valida la cuenta del query); `cuentaId` se conserva en los enlaces.
+export function ListaMensajes({ todas, filtradas, conteos, filtros, cuentaId, barra }: { todas: FilaVenta[]; filtradas: FilaVenta[]; conteos: Record<EstadoFiltro, number>; filtros: Filtros; cuentaId: string | null; barra: ReactNode }) {
   const pag = paginar(filtradas, filtros.pagina);
+  const ir = (cambios: Parameters<typeof enlace>[2]) => enlace(filtros, cuentaId, cambios);
   return (
     <>
       <div className={styles.tarjetasEstado}>
         {(Object.keys(ROTULOS) as EstadoFiltro[]).map((e) => (
-          <Link key={e} href={enlace(filtros, { estado: filtros.estado === e ? null : e, pagina: null })} className={`${styles.estadoTarjeta} ${filtros.estado === e ? styles.estadoActiva : ""}`} aria-current={filtros.estado === e}>
+          <Link key={e} href={ir({ estado: filtros.estado === e ? null : e, pagina: null })} className={`${styles.estadoTarjeta} ${filtros.estado === e ? styles.estadoActiva : ""}`} aria-current={filtros.estado === e}>
             <span className={styles.estadoNumero}>{conteos[e]}</span>
             <span className={styles.estadoRotulo}>{ROTULOS[e]}</span>
           </Link>
         ))}
       </div>
 
-      <form method="get" action="/panel/posventa/mensajes" className={styles.herramientas}>
-        {filtros.estado && <input type="hidden" name="estado" value={filtros.estado} />}
-        <label>
-          Buscar
-          <input type="search" name="q" defaultValue={filtros.q} placeholder="N.º de venta o producto" />
-        </label>
-        <label>
-          Filtrar por fecha (desde)
-          <input type="date" name="desde" defaultValue={filtros.desde ?? ""} />
-        </label>
-        <Boton type="submit" variante="secundario">
-          Aplicar
-        </Boton>
-      </form>
+      {barra}
 
       <div className={styles.chips}>
         <span className={styles.contador}>
           {filtradas.length} {filtradas.length === 1 ? "venta" : "ventas"}
         </span>
         {filtros.estado && (
-          <Link href={enlace(filtros, { estado: null, pagina: null })}>
+          <Link href={ir({ estado: null, pagina: null })}>
             <Chip estado="aviso">{ROTULOS[filtros.estado]} ✕</Chip>
           </Link>
         )}
         {filtros.q && (
-          <Link href={enlace(filtros, { q: null, pagina: null })}>
+          <Link href={ir({ q: null, pagina: null })}>
             <Chip estado="aviso">«{filtros.q}» ✕</Chip>
           </Link>
         )}
         {filtros.desde && (
-          <Link href={enlace(filtros, { desde: null, pagina: null })}>
+          <Link href={ir({ desde: null, pagina: null })}>
             <Chip estado="aviso">Desde {filtros.desde} ✕</Chip>
           </Link>
         )}
@@ -112,11 +102,11 @@ export function ListaMensajes({ todas, filtradas, conteos, filtros }: { todas: F
 
       {pag.paginas > 1 && (
         <nav className={styles.paginacion} aria-label="Paginación">
-          {pag.pagina > 1 && <Link href={enlace(filtros, { pagina: pag.pagina - 1 })}>‹ Anterior</Link>}
+          {pag.pagina > 1 && <Link href={ir({ pagina: pag.pagina - 1 })}>‹ Anterior</Link>}
           <span className={styles.contador}>
             Página {pag.pagina} de {pag.paginas}
           </span>
-          {pag.pagina < pag.paginas && <Link href={enlace(filtros, { pagina: pag.pagina + 1 })}>Siguiente ›</Link>}
+          {pag.pagina < pag.paginas && <Link href={ir({ pagina: pag.pagina + 1 })}>Siguiente ›</Link>}
         </nav>
       )}
     </>
