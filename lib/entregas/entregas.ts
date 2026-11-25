@@ -31,7 +31,7 @@ export async function listarDomiciliariosAsignables(empresaId: string): Promise<
   );
 }
 
-export type EntregaDePedido = { id: string; pedidoReferencia: string; estado: string; miembroDomiciliarioId: string; domiciliarioNombre: string } & DatosEntrega;
+export type EntregaDePedido = { id: string; pedidoReferencia: string; estado: string; motivo: string | null; miembroDomiciliarioId: string; domiciliarioNombre: string } & DatosEntrega;
 
 // Entregas ya asignadas a estos pedidos (para pintar «Asignado a …» y
 // precargar el formulario al reasignar). La empresa conserva sus datos.
@@ -43,6 +43,7 @@ export async function listarEntregasDePedidos(empresaId: string, marketplace: st
         id: entregasDomiciliario.id,
         pedidoReferencia: entregasDomiciliario.pedidoReferencia,
         estado: entregasDomiciliario.estado,
+        motivo: entregasDomiciliario.motivo,
         miembroDomiciliarioId: entregasDomiciliario.miembroDomiciliarioId,
         domiciliarioNombre: usuarios.nombre,
         receptorNombre: entregasDomiciliarioContacto.receptorNombre,
@@ -192,10 +193,29 @@ export async function cambiarEstadoMiEntrega(bodegaId: string, usuarioId: string
     async (tx) => {
       // Se lee antes (la política solo deja ver las suyas). La política de
       // UPDATE solo deja cerrar las abiertas: una cerrada afecta 0 filas.
-      const [propia] = await tx.select({ id: entregasDomiciliario.id, estado: entregasDomiciliario.estado }).from(entregasDomiciliario).where(eq(entregasDomiciliario.id, entregaId));
+      const [propia] = await tx.select({ id: entregasDomiciliario.id, estado: entregasDomiciliario.estado, empresaId: entregasDomiciliario.empresaId }).from(entregasDomiciliario).where(eq(entregasDomiciliario.id, entregaId));
       if (!propia || propia.estado === "entregada" || propia.estado === "no_entregada") throw new EntregaInvalidaError("Esa entrega no está disponible.");
-      await tx.update(entregasDomiciliario).set({ estado: nuevo, motivo: motivoLimpio, actualizadaTs: new Date() }).where(eq(entregasDomiciliario.id, entregaId));
-      await registrarAuditoriaBodega(tx, { bodegaId, usuarioId, accion: `entrega_${nuevo}`, entidad: "entrega_domiciliario", entidadId: entregaId });
+      if (nuevo === "en_camino" && propia.estado !== "asignada") throw new EntregaInvalidaError("Esa entrega ya salió.");
+      // .returning(): un UPDATE filtrado por RLS no falla, afecta 0 filas.
+      const filas = await tx
+        .update(entregasDomiciliario)
+        .set({ estado: nuevo, motivo: nuevo === "no_entregada" ? motivoLimpio : null, actualizadaTs: new Date() })
+        .where(eq(entregasDomiciliario.id, entregaId))
+        .returning({ id: entregasDomiciliario.id });
+      if (filas.length === 0) throw new EntregaInvalidaError("Esa entrega no está disponible.");
+      // empresaId para que el vendedor vea el rastro en su auditoría. Sin
+      // datos del comprador: solo el estado y, si aplica, el motivo.
+      await registrarAuditoriaBodega(tx, {
+        bodegaId,
+        empresaId: propia.empresaId,
+        usuarioId,
+        accion: `entrega_${nuevo}`,
+        entidad: "entrega_domiciliario",
+        entidadId: entregaId,
+        valorAnterior: propia.estado,
+        valorNuevo: nuevo,
+        detalle: nuevo === "no_entregada" ? `No entregada: ${motivoLimpio}` : undefined,
+      });
     },
     "domiciliario",
     usuarioId
