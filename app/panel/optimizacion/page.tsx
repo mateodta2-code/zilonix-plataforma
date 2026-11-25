@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { SelectorCuentaMl } from "@/components/SelectorCuentaMl";
@@ -127,6 +128,13 @@ export default async function OptimizacionPage({
       <EncabezadoPagina
         titulo="Optimización"
         descripcion={`Tus publicaciones como las muestra Mercado Libre, con visitas, ventas y conversión de los últimos ${dias} días, su calidad y cómo vas en la competencia del catálogo.`}
+      />
+
+      <Pestanas
+        pestanas={[
+          { etiqueta: "Publicaciones", href: `/panel/optimizacion${cuentaId ? `?cuenta=${cuentaId}` : ""}`, activa: true },
+          { etiqueta: "Bitácora", href: `/panel/optimizacion/bitacora${cuentaId ? `?cuenta=${cuentaId}` : ""}`, activa: false },
+        ]}
       />
 
       <div className={styles.panelDatos}>

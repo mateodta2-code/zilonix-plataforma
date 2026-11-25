@@ -177,6 +177,7 @@ export const GUIA: GrupoGuia[] = [
           "Revisa una vez por semana: en la lista, las publicaciones con «Revisar cambio» tienen un cambio que ya cumplió 7 días. En su bitácora pulsa «Revisar» y marca si sirvió, no sirvió o no cambió nada, con un comentario; el aviso se quita al revisarlo.",
           "También puedes dejar solo un comentario, aunque el cambio siga en medición (por ejemplo, por qué lo hiciste): pulsa «Revisar», escríbelo y «Guardar comentario». El aviso «Revisar cambio» sigue hasta que alguien elija Sirvió, No sirvió o Sin cambio.",
           "Si cambias algo fuera de Zilonix (directo en Mercado Libre, la publicidad, el stock…), anótalo con «Anotar un cambio» y la fecha en que lo hiciste: también se mide a los 7 días.",
+          "La pestaña «Bitácora» de Optimización junta los cambios de todas tus publicaciones (últimos 90 días) con filtros por cuenta, tipo, quién, fechas y estado. Pulsa «Ver resultado» en un cambio para comparar, al día 8, los 7 días antes contra los 7 días después.",
           "En el detalle, debajo de las fotos, está «Crear imagen con IA». Ahí eliges la foto base, escribes la ficha técnica del producto y creas portadas de venta (1, 4 o 10, cada una distinta).",
           "Para una imagen informativa, elige cuál de las 10 quieres (modo de uso, características, beneficios, qué incluye, comparación, preguntas frecuentes…), pide la propuesta, revisa y corrige el título y el copy, y solo entonces aprieta «CREAR imagen».",
         ],
