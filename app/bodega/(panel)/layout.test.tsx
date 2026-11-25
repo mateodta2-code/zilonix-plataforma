@@ -86,14 +86,17 @@ describe("marco de bodega y domiciliario (mismo MarcoApp del vendedor)", () => {
 });
 
 describe("menús", () => {
-  it("todo apunta a /bodega o /domiciliario y los 'Próximamente' están deshabilitados", () => {
+  it("todo apunta a /bodega o /domiciliario y ningún ítem queda en «Próximamente»", () => {
     const items = [...gruposBodega("admin_bodega"), ...gruposDomiciliario()].flatMap((g) => g.items);
     for (const i of items) expect(/^\/(bodega|domiciliario)(\/|$)/.test(i.href), i.href).toBe(true);
-    for (const e of ["Mis entregas"]) {
-      const i = items.find((x) => x.etiqueta === e);
-      expect(i?.deshabilitada, e).toBe(true);
-      expect(i?.titulo).toBe("Próximamente");
-    }
+    // Ningún ítem queda en «Próximamente»: Mis entregas (Domi-2) y Despachos (Bodega-3) ya están habilitados.
+    const misEntregas = items.find((x) => x.etiqueta === "Mis entregas");
+    expect(misEntregas?.deshabilitada).toBeFalsy();
+    expect(misEntregas?.href).toBe("/domiciliario/entregas");
+    const despachos = items.find((x) => x.etiqueta === "Despachos");
+    expect(despachos?.deshabilitada).toBeFalsy();
+    expect(despachos?.href).toBe("/bodega/despachos");
+    expect(items.filter((x) => x.deshabilitada)).toHaveLength(0);
   });
 
   it("Recepción e Inventario quedan habilitadas para la bodega y no están en el menú del domiciliario", () => {
