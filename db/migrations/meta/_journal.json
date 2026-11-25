@@ -337,6 +337,13 @@
       "when": 1795638041398,
       "tag": "0047_square_johnny_blaze",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1795642987770,
+      "tag": "0048_ordinary_white_queen",
+      "breakpoints": true
     }
   ]
 }

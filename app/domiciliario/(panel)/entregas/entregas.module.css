@@ -14,3 +14,4 @@
 .etiquetaCampo { display: grid; gap: 4px; font-size: 14px; }
 .campo { min-height: 48px; width: 100%; font-size: 16px; padding: 0 12px; border-radius: 10px; }
 .error { margin: 4px 0 0; font-weight: 600; }
+.fotoPrevia { width: 100%; max-height: 50vh; object-fit: contain; border-radius: 12px; }

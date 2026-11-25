@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // vitest (Node) pueda cargar el módulo.
 vi.mock("server-only", () => ({}));
 
-import { cloudinaryConfigurado, CloudinaryNoConfiguradoError, CloudinaryRechazoError, subirACloudinary } from "./cloudinary";
+import crypto from "crypto";
+import { cloudinaryConfigurado, CloudinaryNoConfiguradoError, CloudinaryRechazoError, descargarFotoPrivada, subirACloudinary, subirFotoPrivada } from "./cloudinary";
 
 function respuestaJson(data: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => data } as Response;
@@ -88,5 +89,66 @@ describe("subirACloudinary", () => {
       vi.fn(async () => ({ ok: false, status: 500, json: async () => { throw new Error("no json"); } }) as unknown as Response)
     );
     await expect(subirACloudinary(Buffer.from("x"), "foto.jpg", "image/jpeg")).rejects.toThrow(CloudinaryRechazoError);
+  });
+});
+
+// Domi-3 — foto de entrega PRIVADA.
+describe("fotos privadas (Domi-3)", () => {
+  const firma = (p: Record<string, string>) =>
+    crypto.createHash("sha1").update(Object.keys(p).sort().map((k) => `${k}=${p[k]}`).join("&") + "secreto").digest("hex");
+
+  beforeEach(() => {
+    process.env.CLOUDINARY_CLOUD_NAME = "demo";
+    process.env.CLOUDINARY_API_KEY = "123";
+    process.env.CLOUDINARY_API_SECRET = "secreto";
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.CLOUDINARY_CLOUD_NAME;
+    delete process.env.CLOUDINARY_API_KEY;
+    delete process.env.CLOUDINARY_API_SECRET;
+  });
+
+  it("sube con type=authenticated, firmado, y el api_secret nunca viaja", async () => {
+    let form: FormData | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+      form = init?.body as FormData;
+      return respuestaJson({ public_id: "zilonix-entregas/e1/abc", type: "authenticated" });
+    }));
+    await expect(subirFotoPrivada(Buffer.from([0xff, 0xd8, 0xff]), "zilonix-entregas/e1", "abc")).resolves.toEqual({ publicId: "zilonix-entregas/e1/abc" });
+    const f = form as unknown as FormData;
+    expect(f.get("type")).toBe("authenticated");
+    expect(f.get("public_id")).toBe("abc");
+    expect(f.get("folder")).toBe("zilonix-entregas/e1");
+    const firmados = Object.fromEntries(["folder", "overwrite", "public_id", "timestamp", "type"].map((k) => [k, String(f.get(k))]));
+    expect(f.get("signature")).toBe(firma(firmados));
+    expect([...f.values()].some((v) => v === "secreto")).toBe(false);
+  });
+
+  it("si Cloudinary la deja pública, falla en vez de guardarla", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuestaJson({ public_id: "x", type: "upload" })));
+    await expect(subirFotoPrivada(Buffer.from("x"), "c", "x")).rejects.toThrow(CloudinaryRechazoError);
+  });
+
+  it("descarga con una petición firmada que vence en 60 s, sin el api_secret en la URL", async () => {
+    let pedida = "";
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown) => {
+      pedida = String(url);
+      return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(4), headers: new Headers({ "content-type": "image/jpeg" }) } as unknown as Response;
+    }));
+    const r = await descargarFotoPrivada("zilonix-entregas/e1/abc");
+    expect(r.contentType).toBe("image/jpeg");
+    const u = new URL(pedida);
+    expect(u.pathname).toBe("/v1_1/demo/image/download");
+    expect(u.searchParams.get("type")).toBe("authenticated");
+    expect(Number(u.searchParams.get("expires_at")) - Number(u.searchParams.get("timestamp"))).toBe(60);
+    const firmados = Object.fromEntries(["expires_at", "format", "public_id", "timestamp", "type"].map((k) => [k, u.searchParams.get(k)!]));
+    expect(u.searchParams.get("signature")).toBe(firma(firmados));
+    expect(pedida).not.toContain("secreto");
+  });
+
+  it("si Cloudinary no la entrega, lanza CloudinaryRechazoError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404 }) as Response));
+    await expect(descargarFotoPrivada("x")).rejects.toThrow(CloudinaryRechazoError);
   });
 });

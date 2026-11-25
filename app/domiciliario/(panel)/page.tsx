@@ -14,7 +14,7 @@ export default async function DomiciliarioInicioPage() {
   const entregas = await listarMisEntregas(decision.membresia.bodegaId, usuario.id);
   return (
     <>
-      <EncabezadoPagina titulo={`Hola, ${usuario.nombre}`} descripcion={`Bodega: ${decision.membresia.bodegaNombre}`} />
+      <EncabezadoPagina titulo={`Hola, ${usuario.nombre}`} descripcion={`Bodega: ${decision.membresia.bodegaNombre}. Para marcar «Entregado» toma una foto del paquete entregado o de quien lo recibe.`} />
       <ListaMisEntregas entregas={entregas} ahora={Date.now()} />
     </>
   );
