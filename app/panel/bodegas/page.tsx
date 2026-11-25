@@ -2,6 +2,9 @@ import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { listarBodegas, TIPOS_BODEGA } from "@/lib/inventario/bodegas";
 import { listarBodegasQueAtiendenEmpresa } from "@/lib/bodega/empresas";
+import { listarStockDeEmpresa } from "@/lib/bodega/inventario";
+import { formatearNumero } from "@/lib/ml/sitios";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 import { tienePermiso } from "@/lib/roles";
 import { actualizarBodegaAction, crearBodegaAction } from "./actions";
 import { Boton } from "@/components/marco/Boton";
@@ -30,6 +33,7 @@ export default async function BodegasPage({ searchParams }: { searchParams: Reco
   const puedeEditar = tienePermiso(permisos, "inventario", "modificar");
   const lista = await listarBodegas(activa.id);
   const logisticas = await listarBodegasQueAtiendenEmpresa(activa.id);
+  const stockLogistico = logisticas.length > 0 ? await listarStockDeEmpresa(activa.id) : [];
   const etiquetaTipo = new Map(TIPOS_BODEGA.map((t) => [t.valor, t.etiqueta]));
 
   return (
@@ -48,6 +52,18 @@ export default async function BodegasPage({ searchParams }: { searchParams: Reco
               <strong>{l.nombre}</strong> <Chip estado={l.estado === "activa" ? "exito" : "neutro"}>{l.estado === "activa" ? "Activa" : "Pausada"}</Chip>
             </p>
           ))}
+          {stockLogistico.length > 0 && (
+            <Tabla encabezados={["SKU", "Cantidad en la bodega"]}>
+              {stockLogistico.map((f) => (
+                <FilaTabla key={`${f.bodegaId}-${f.sku}`}>
+                  <CeldaTabla>
+                    <SkuCopiable sku={f.sku} />
+                  </CeldaTabla>
+                  <CeldaTabla numerica>{formatearNumero(f.cantidad, undefined)}</CeldaTabla>
+                </FilaTabla>
+              ))}
+            </Tabla>
+          )}
         </Tarjeta>
       )}
 

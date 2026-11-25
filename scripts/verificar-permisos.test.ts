@@ -294,6 +294,9 @@ const RUTAS_SUPERADMIN = new Set([
 const RUTAS_BODEGA = new Set([
   "app/bodega/(panel)/page.tsx",
   "app/bodega/(panel)/domiciliarios/page.tsx",
+  "app/bodega/(panel)/recepcion/page.tsx",
+  "app/bodega/(panel)/recepcion/actions.ts",
+  "app/bodega/(panel)/inventario/page.tsx",
   "app/bodega/(panel)/invitar/page.tsx",
   "app/bodega/(panel)/invitar/actions.ts",
   "app/bodega/(panel)/invitar/listo/page.tsx",

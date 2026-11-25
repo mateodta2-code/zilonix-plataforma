@@ -75,16 +75,32 @@ describe("marco de bodega y domiciliario (mismo MarcoApp del vendedor)", () => {
     expect(html).toContain("Mi cuenta");
     expect(html).not.toContain("Administración");
   });
+
+  it("Recepción e Inventario quedan habilitadas para la bodega y no están en el menú del domiciliario", () => {
+    const bodega = gruposBodega("operario").flatMap((g) => g.items);
+    for (const e of ["Recepción", "Inventario"]) expect(bodega.find((x) => x.etiqueta === e)?.deshabilitada, e).toBeFalsy();
+    const dom = gruposDomiciliario().flatMap((g) => g.items.map((i) => i.etiqueta));
+    expect(dom).not.toContain("Recepción");
+    expect(dom).not.toContain("Inventario");
+  });
 });
 
 describe("menús", () => {
   it("todo apunta a /bodega o /domiciliario y los 'Próximamente' están deshabilitados", () => {
     const items = [...gruposBodega("admin_bodega"), ...gruposDomiciliario()].flatMap((g) => g.items);
     for (const i of items) expect(/^\/(bodega|domiciliario)(\/|$)/.test(i.href), i.href).toBe(true);
-    for (const e of ["Recepción", "Inventario", "Despachos", "Mis entregas"]) {
+    for (const e of ["Despachos", "Mis entregas"]) {
       const i = items.find((x) => x.etiqueta === e);
       expect(i?.deshabilitada, e).toBe(true);
       expect(i?.titulo).toBe("Próximamente");
     }
+  });
+
+  it("Recepción e Inventario quedan habilitadas para la bodega y no están en el menú del domiciliario", () => {
+    const bodega = gruposBodega("operario").flatMap((g) => g.items);
+    for (const e of ["Recepción", "Inventario"]) expect(bodega.find((x) => x.etiqueta === e)?.deshabilitada, e).toBeFalsy();
+    const dom = gruposDomiciliario().flatMap((g) => g.items.map((i) => i.etiqueta));
+    expect(dom).not.toContain("Recepción");
+    expect(dom).not.toContain("Inventario");
   });
 });
