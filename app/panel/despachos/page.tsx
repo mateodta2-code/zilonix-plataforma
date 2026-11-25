@@ -34,6 +34,8 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
+import { listarDomiciliariosAsignables, listarEntregasDePedidos } from "@/lib/entregas/entregas";
+import { AsignarDomiciliario } from "./AsignarDomiciliario";
 import { AutoRefrescoDespachos } from "./AutoRefrescoDespachos";
 import { ImpresionMasivaForm } from "./ImpresionMasivaForm";
 import { SincronizarAhoraCliente } from "./SincronizarAhoraCliente";
@@ -138,6 +140,12 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
     puedeConsultarConfiguracion(usuario.id, empresa.id),
   ]);
   const ahora = new Date();
+  // Issue #627 — solo Flex (entrega local) en Pendientes puede ir a un domiciliario.
+  const refsLocales = pestañaFiltro === "pendientes" ? tarjetas.filter((t) => esFlex(t.logisticType)).map((t) => t.pedidoIdExterno) : [];
+  const [domiciliarios, entregasAsignadas] = refsLocales.length > 0
+    ? await Promise.all([listarDomiciliariosAsignables(empresa.id), listarEntregasDePedidos(empresa.id, "mercadolibre", refsLocales)])
+    : [[], []];
+  const entregaPorPedido = new Map(entregasAsignadas.map((e) => [e.pedidoReferencia, e]));
   // Despachados agrupa por la fecha REAL del despacho (fechaDespachoDe:
   // despachado_ts si una persona lo marcó, si no actualizado_ts), no
   // por fecha de venta — un pedido vendido hace 10 días pero
@@ -249,6 +257,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                 <h2 className={styles.tituloGrupo}>{grupo.etiqueta}</h2>
                 <div className={styles.listaAncha}>
                   {grupo.despachos.map((d) => (
+                    <div key={d.id}>
                     <TarjetaDespachoCliente
                       key={d.id}
                       id={d.id}
@@ -273,6 +282,14 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                       puedeModificar={puedeModificar}
                       ventanaDeshacerMs={VENTANA_DESHACER_MS}
                     />
+                    {puedeModificar && pestañaFiltro === "pendientes" && esFlex(d.logisticType) && (
+                      <AsignarDomiciliario
+                        pedidoReferencia={d.pedidoIdExterno}
+                        domiciliarios={domiciliarios}
+                        entrega={entregaPorPedido.get(d.pedidoIdExterno) ?? null}
+                      />
+                    )}
+                    </div>
                   ))}
                 </div>
               </section>

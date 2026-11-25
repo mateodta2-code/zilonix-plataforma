@@ -2386,6 +2386,50 @@ export const stockBodega3pl = pgTable(
   })
 );
 
+// Issue #627 (Domi-1, migración 0045) — entregas locales que el vendedor
+// asigna a un domiciliario de su bodega 3PL ligada. Los datos de quien
+// recibe se COPIAN al asignar (la empresa los conserva siempre); el
+// domiciliario solo ve la fila mientras esté abierta (asignada|en_camino):
+// la política de SELECT del domiciliario filtra por estado en la base, así
+// que al cerrarse esos datos dejan de ser legibles para él.
+export const estadoEntregaDomiciliarioEnum = pgEnum("estado_entrega_domiciliario", ["asignada", "en_camino", "entregada", "no_entregada"]);
+
+export const entregasDomiciliario = pgTable(
+  "entregas_domiciliario",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    miembroDomiciliarioId: uuid("miembro_domiciliario_id").notNull().references(() => miembrosBodega3pl.id, { onDelete: "cascade" }),
+    marketplace: text("marketplace").notNull().default("mercadolibre"),
+    pedidoReferencia: text("pedido_referencia").notNull(),
+    estado: estadoEntregaDomiciliarioEnum("estado").notNull().default("asignada"),
+    motivo: text("motivo"),
+    asignadaTs: timestamp("asignada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    unicaPorPedido: uniqueIndex("entregas_domiciliario_pedido_unica").on(t.empresaId, t.marketplace, t.pedidoReferencia),
+    domiciliarioIdx: index("entregas_domiciliario_miembro_idx").on(t.miembroDomiciliarioId, t.estado),
+    bodegaIdx: index("entregas_domiciliario_bodega_idx").on(t.bodegaId, t.estado),
+  })
+);
+
+// Datos de quien recibe, en tabla aparte: el domiciliario necesita ver SU
+// cabecera en cualquier estado (para cerrarla y tener historial), pero estos
+// datos solo mientras la entrega esté abierta. Esa regla vive en la política
+// de SELECT de esta tabla (EXISTS sobre la cabecera). La empresa los conserva.
+export const entregasDomiciliarioContacto = pgTable("entregas_domiciliario_contacto", {
+  entregaId: uuid("entrega_id").primaryKey().references(() => entregasDomiciliario.id, { onDelete: "cascade" }),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  receptorNombre: text("receptor_nombre").notNull(),
+  direccion: text("direccion").notNull(),
+  barrio: text("barrio"),
+  ciudad: text("ciudad").notNull(),
+  telefono: text("telefono").notNull(),
+  nota: text("nota"),
+});
+
 // Publicar → «Crear con IA» (PR2, imágenes) — historial por empresa de
 // los trabajos de imágenes y de cada imagen, y cola de concurrencia
 // (máximo 2 imágenes «generando» a la vez por empresa: la tercera queda

@@ -6,6 +6,8 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { textoResultadoCuenta, traerVentasDelMes } from "@/lib/finanzas/traer-ventas-mes";
+import { asignarEntrega, EntregaInvalidaError, quitarEntrega } from "@/lib/entregas/entregas";
+import { DatosEntregaInvalidosError } from "@/lib/entregas/datos";
 import { deshacerDespachado, DespachoNoEncontradoError, GuiaNoVistaError, marcarDespachado, VentanaDeshacerVencidaError } from "@/lib/ml/despachos";
 
 type ResultadoAccion = { ok: true } | { ok: false; error: string };
@@ -83,4 +85,50 @@ export async function sincronizarAhoraAction(): Promise<ResultadoSincronizarAhor
     const mensaje = error instanceof Error ? error.message : "No se pudo sincronizar con Mercado Libre.";
     return { ok: false, error: mensaje };
   }
+}
+
+// Issue #627 (Domi-1) — solo lo del VENDEDOR: asignar, reasignar y quitar
+// el domiciliario de una entrega local. Lo que ve y hace el domiciliario
+// va en /domiciliario (Domi-2). Mismo permiso que marcar despachado
+// (ventas.modificar). Sin llamadas a Mercado Libre.
+export async function asignarDomiciliarioAction(entrada: {
+  miembroId: string;
+  pedidoReferencia: string;
+  receptorNombre: string;
+  direccion: string;
+  barrio: string;
+  ciudad: string;
+  telefono: string;
+  nota: string;
+}): Promise<ResultadoAccion> {
+  const sesion = await usuarioYEmpresaActiva();
+  if (!sesion) return { ok: false, error: "Sin sesión." };
+  try {
+    await requierePermiso(sesion.usuarioId, sesion.empresaId, "ventas", "modificar");
+    await asignarEntrega(sesion.empresaId, sesion.usuarioId, {
+      miembroId: entrada.miembroId,
+      marketplace: "mercadolibre",
+      pedidoReferencia: entrada.pedidoReferencia,
+      datos: entrada,
+    });
+  } catch (error) {
+    if (error instanceof SinPermisoError || error instanceof EntregaInvalidaError || error instanceof DatosEntregaInvalidosError) return { ok: false, error: error.message };
+    return { ok: false, error: "No se pudo asignar el domiciliario." };
+  }
+  revalidatePath("/panel/despachos");
+  return { ok: true };
+}
+
+export async function quitarDomiciliarioAction(pedidoReferencia: string): Promise<ResultadoAccion> {
+  const sesion = await usuarioYEmpresaActiva();
+  if (!sesion) return { ok: false, error: "Sin sesión." };
+  try {
+    await requierePermiso(sesion.usuarioId, sesion.empresaId, "ventas", "modificar");
+    await quitarEntrega(sesion.empresaId, sesion.usuarioId, "mercadolibre", pedidoReferencia);
+  } catch (error) {
+    if (error instanceof SinPermisoError || error instanceof EntregaInvalidaError) return { ok: false, error: error.message };
+    return { ok: false, error: "No se pudo quitar el domiciliario." };
+  }
+  revalidatePath("/panel/despachos");
+  return { ok: true };
 }
