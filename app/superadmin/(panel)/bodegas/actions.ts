@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requiereSesionSuperadmin } from "@/lib/superadmin";
-import { BodegaInvalidaError, crearBodega, invitarAdminBodega, reactivarBodega, suspenderBodega } from "@/lib/superadmin-bodegas";
+import { BodegaInvalidaError, cambiarEstadoVinculo, crearBodega, invitarAdminBodega, ligarEmpresaABodega, reactivarBodega, suspenderBodega } from "@/lib/superadmin-bodegas";
 
 // Toda acción pide sesión de superadmin propia y deja su renglón en
 // auditoria (lib/superadmin-bodegas.ts). Un error esperado vuelve a la
@@ -59,5 +59,30 @@ export async function reactivarBodegaAction(formData: FormData) {
     conError(`/superadmin/bodegas/${bodegaId}`, error);
   }
   revalidatePath("/superadmin/bodegas");
+  redirect(`/superadmin/bodegas/${bodegaId}`);
+}
+
+export async function ligarEmpresaBodegaAction(formData: FormData) {
+  const { usuarioId } = await requiereSesionSuperadmin();
+  const bodegaId = String(formData.get("bodegaId") ?? "");
+  try {
+    await ligarEmpresaABodega(usuarioId, bodegaId, String(formData.get("empresaId") ?? ""));
+  } catch (error) {
+    conError(`/superadmin/bodegas/${bodegaId}`, error);
+  }
+  revalidatePath(`/superadmin/bodegas/${bodegaId}`);
+  redirect(`/superadmin/bodegas/${bodegaId}`);
+}
+
+export async function cambiarEstadoVinculoBodegaAction(formData: FormData) {
+  const { usuarioId } = await requiereSesionSuperadmin();
+  const bodegaId = String(formData.get("bodegaId") ?? "");
+  const estado = formData.get("estado") === "pausada" ? "pausada" : "activa";
+  try {
+    await cambiarEstadoVinculo(usuarioId, bodegaId, String(formData.get("empresaId") ?? ""), estado);
+  } catch (error) {
+    conError(`/superadmin/bodegas/${bodegaId}`, error);
+  }
+  revalidatePath(`/superadmin/bodegas/${bodegaId}`);
   redirect(`/superadmin/bodegas/${bodegaId}`);
 }

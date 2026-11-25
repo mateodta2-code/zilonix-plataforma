@@ -309,6 +309,13 @@
       "when": 1795566916104,
       "tag": "0043_soporte_tickets",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795567836217,
+      "tag": "0044_bodega_empresas",
+      "breakpoints": true
     }
   ]
 }

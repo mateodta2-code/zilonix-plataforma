@@ -2321,6 +2321,71 @@ export const invitacionesBodega3pl = pgTable("invitaciones_bodega_3pl", {
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Issue #625 (Bodega-1, migración 0044) — a qué empresas atiende cada
+// bodega 3PL, y las tablas que usará Bodega-2 (recepción e inventario).
+// Solo el superadmin liga y pausa; la bodega y la empresa leen lo suyo.
+export const estadoVinculoBodega3plEnum = pgEnum("estado_vinculo_bodega_3pl", ["activa", "pausada"]);
+
+export const bodegas3plEmpresas = pgTable(
+  "bodegas_3pl_empresas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    estado: estadoVinculoBodega3plEnum("estado").notNull().default("activa"),
+    creadoPor: uuid("creado_por").notNull().references(() => usuarios.id),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    unica: uniqueIndex("bodegas_3pl_empresas_bodega_empresa_unica").on(t.bodegaId, t.empresaId),
+  })
+);
+
+export const recepcionesBodega3pl = pgTable(
+  "recepciones_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+    nota: text("nota"),
+    creadoPor: uuid("creado_por").notNull().references(() => usuarios.id),
+  },
+  (t) => ({
+    bodegaIdx: index("recepciones_bodega_3pl_bodega_idx").on(t.bodegaId, t.fecha),
+    empresaIdx: index("recepciones_bodega_3pl_empresa_idx").on(t.empresaId, t.fecha),
+  })
+);
+
+export const recepcionItemsBodega3pl = pgTable(
+  "recepcion_items_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    recepcionId: uuid("recepcion_id").notNull().references(() => recepcionesBodega3pl.id, { onDelete: "cascade" }),
+    sku: text("sku").notNull(),
+    cantidad: integer("cantidad").notNull(),
+  },
+  (t) => ({
+    recepcionIdx: index("recepcion_items_bodega_3pl_recepcion_idx").on(t.recepcionId),
+    cantidadPositiva: check("recepcion_items_bodega_3pl_cantidad_positiva", sql`${t.cantidad} > 0`),
+  })
+);
+
+export const stockBodega3pl = pgTable(
+  "stock_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    sku: text("sku").notNull(),
+    cantidad: integer("cantidad").notNull().default(0),
+  },
+  (t) => ({
+    unica: uniqueIndex("stock_bodega_3pl_bodega_empresa_sku_unica").on(t.bodegaId, t.empresaId, t.sku),
+    cantidadNoNegativa: check("stock_bodega_3pl_cantidad_no_negativa", sql`${t.cantidad} >= 0`),
+  })
+);
+
 // Publicar → «Crear con IA» (PR2, imágenes) — historial por empresa de
 // los trabajos de imágenes y de cada imagen, y cola de concurrencia
 // (máximo 2 imágenes «generando» a la vez por empresa: la tercera queda
