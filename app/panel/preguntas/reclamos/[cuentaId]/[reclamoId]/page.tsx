@@ -8,6 +8,7 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
+import { obtenerConexionIA } from "@/lib/ia/conexion";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
@@ -75,6 +76,16 @@ export default async function DetalleReclamoPage({ params }: { params: { cuentaI
     }
   }
   if (noEncontrado) notFound();
+
+  // Escribir pide ventas modificar; la IA, una conexión principal.
+  const puedeEscribir = await requierePermiso(usuario.id, empresa.id, "ventas", "modificar").then(
+    () => true,
+    (error) => {
+      if (error instanceof SinPermisoError) return false;
+      throw error;
+    }
+  );
+  const iaConectada = (await obtenerConexionIA(empresa.id)) !== null;
 
   const ahora = new Date();
   const migas = (
@@ -152,7 +163,7 @@ export default async function DetalleReclamoPage({ params }: { params: { cuentaI
             </p>
           )}
           <AccionesReclamo {...propsAcciones} />
-          <ComposerReclamo {...propsAcciones} />
+          <ComposerReclamo {...propsAcciones} iaConectada={iaConectada} sinPermiso={!puedeEscribir} />
         </div>
         <Tarjeta>
           <FichaVentaReclamo detalle={detalle} siteId={siteId} pedidoZilonixId={pedidoZilonixId} ahora={ahora} />
