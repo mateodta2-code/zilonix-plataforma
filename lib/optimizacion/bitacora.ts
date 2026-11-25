@@ -14,9 +14,9 @@ import { registrarAuditoria } from "@/lib/auditoria";
 import type { db } from "@/db";
 import { auditoria, cuentasMl, optimizacionNotas, optimizacionRevisiones, usuarios } from "@/db/schema";
 import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
-import { ACCIONES_BITACORA, DIAS_AVISO_REVISION, DIAS_MEDICION, listoParaRevisar, type ResultadoRevision } from "./bitacoraResultado";
+import { ACCIONES_BITACORA, compactarFotos, DIAS_AVISO_REVISION, DIAS_MEDICION, LARGO_MAXIMO_VALOR_FOTOS, leerFotosCompactas, listoParaRevisar, MARCA_FOTO_IA_ROTULO as MARCA_FOTO_IA, type ResultadoRevision } from "./bitacoraResultado";
 
-export { ACCIONES_BITACORA, DIAS_AVISO_REVISION, DIAS_MEDICION };
+export { ACCIONES_BITACORA, DIAS_AVISO_REVISION, DIAS_MEDICION, compactarFotos, leerFotosCompactas, LARGO_MAXIMO_VALOR_FOTOS, MARCA_FOTO_IA };
 
 const ACCIONES = Object.keys(ACCIONES_BITACORA);
 
@@ -38,26 +38,6 @@ export function leerCuentaDeDetalle(detalle: string | null | undefined): string 
 
 export function quitarCuentaDeDetalle(detalle: string | null | undefined): string {
   return typeof detalle === "string" ? detalle.replace(PATRON_MARCADOR_CUENTA, "") : "";
-}
-
-// Marca de «foto creada con IA» dentro del detalle de fotos.
-export const MARCA_FOTO_IA = "con IA";
-export const LARGO_MAXIMO_VALOR_FOTOS = 1500;
-
-// Lista compacta de fotos para valor_anterior / valor_nuevo: una por
-// línea, ids de ML tal cual y enlaces https de las nuevas. Con tope de largo.
-export function compactarFotos(fotos: string[], tope = LARGO_MAXIMO_VALOR_FOTOS): string {
-  let salida = "";
-  for (const f of fotos) {
-    const siguiente = salida ? `${salida}\n${f}` : f;
-    if (siguiente.length > tope) break;
-    salida = siguiente;
-  }
-  return salida;
-}
-
-export function leerFotosCompactas(valor: string | null | undefined): string[] {
-  return typeof valor === "string" ? valor.split("\n").map((l) => l.trim()).filter(Boolean) : [];
 }
 
 export type EntradaCambioOptimizacion = {
@@ -103,6 +83,8 @@ export type CambioBitacora = {
   valorAnterior: string | null;
   valorNuevo: string | null;
   detalle: string | null;
+  // Cuenta guardada en el marcador del detalle (null en filas viejas y notas).
+  cuentaMlId?: string | null;
   revision: RevisionCambio | null;
 };
 
@@ -148,6 +130,8 @@ export async function leerCambiosPublicacion(empresaId: string, itemId: string, 
   const cambios: CambioBitacora[] = [
     ...desdeZilonix.map((f) => ({
       ...f,
+      detalle: f.detalle === null ? null : quitarCuentaDeDetalle(f.detalle),
+      cuentaMlId: leerCuentaDeDetalle(f.detalle),
       ref: `auditoria:${f.id}`,
       origen: "zilonix" as const,
       rotulo: ACCIONES_BITACORA[f.accion] ?? f.accion,
@@ -235,6 +219,20 @@ export async function cambioEsDeLaPublicacion(empresaId: string, ref: string, it
         : Promise.resolve([])
   );
   return filas.length > 0;
+}
+
+// Día (Bogotá) de un cambio ya verificado con cambioEsDeLaPublicacion.
+export async function diaDelCambio(empresaId: string, ref: string): Promise<string | null> {
+  const [tipo, id] = ref.split(":");
+  if (!id || !/^[0-9a-f-]{36}$/.test(id)) return null;
+  const filas = await dbComoEmpresa(empresaId, (tx) =>
+    tipo === "auditoria"
+      ? tx.select({ ts: auditoria.ts }).from(auditoria).where(and(eq(auditoria.empresaId, empresaId), eq(auditoria.id, id)))
+      : tipo === "nota"
+        ? tx.select({ ts: optimizacionNotas.fechaCambio }).from(optimizacionNotas).where(and(eq(optimizacionNotas.empresaId, empresaId), eq(optimizacionNotas.id, id)))
+        : Promise.resolve([])
+  );
+  return filas[0] ? hoyBogota(filas[0].ts) : null;
 }
 
 export async function crearNotaBitacora(

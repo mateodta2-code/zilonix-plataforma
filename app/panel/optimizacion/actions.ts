@@ -52,10 +52,16 @@ import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { diagnosticarPublicacion } from "@/lib/optimizacion/diagnostico";
 import { leerDiasMetricas } from "@/lib/optimizacion/textos";
-import { cambioEsDeLaPublicacion, compactarFotos, crearNotaBitacora, MARCA_FOTO_IA, registrarCambioOptimizacion, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
+import { cambioEsDeLaPublicacion, compactarFotos, diaDelCambio, crearNotaBitacora, MARCA_FOTO_IA, registrarCambioOptimizacion, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
 import { leerFechaNota, leerResultadoRevision, limpiarTextoBitacora } from "@/lib/optimizacion/bitacoraResultado";
 import { hoyBogota } from "@/lib/publicidad/plan";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { obtenerMiMembresia } from "@/lib/membresias";
+import { tienePermiso } from "@/lib/roles-plantillas";
+import { leerDatosDetalle } from "@/lib/optimizacion/detalle";
+import { resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
+import { resultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
+import type { ResumenPeriodo } from "@/lib/optimizacion/calculos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -617,4 +623,55 @@ export async function revisarCambioAction(entrada: { cuentaMlId: string; itemId:
   if (typeof entrada.ref !== "string" || !(await cambioEsDeLaPublicacion(ctx.empresaId, entrada.ref, entrada.itemId))) return { ok: false, aviso: "No se encontró ese cambio." };
   await guardarRevisionCambio(ctx.empresaId, { usuarioId: ctx.usuarioId, ref: entrada.ref, itemId: entrada.itemId, resultado, comentario });
   return { ok: true, aviso: resultado ? "Revisión guardada." : "Comentario guardado. Elige un resultado para dar el cambio por revisado." };
+}
+
+// ---------- Bitácora general: resultado al día 8, bajo demanda ----------
+
+export type FilaResultadoGeneral = { visitas: number | null; ventas: number; conversion: string | null; utilidad: string | null };
+export type ResultadoBitacoraGeneral =
+  | { ok: false; aviso: string }
+  | { ok: true; estado: "midiendo"; faltanDias: number }
+  | { ok: true; estado: "listo"; desde: string; hasta: string; conFinanzas: boolean; antes: FilaResultadoGeneral; despues: FilaResultadoGeneral };
+
+function filaResultado(r: ResumenPeriodo, siteId: string, conFinanzas: boolean): FilaResultadoGeneral {
+  return {
+    visitas: r.visitas,
+    ventas: r.pedidos,
+    conversion: r.conversion,
+    utilidad: conFinanzas && r.ganancia !== null ? formatearMoneda(Number(r.ganancia), siteId) : null,
+  };
+}
+
+// Calcula el resultado (7 días antes vs. 7 días después) de UNA fila de la
+// bitácora general. Es la única llamada a Mercado Libre de esa vista:
+// solo al pulsar «Ver resultado». Verifica que el cambio sea de la
+// publicación (nunca se confía en la referencia del navegador).
+export async function bitacoraGeneralResultadoAction(entrada: { cuentaMlId: string; itemId: string; ref: string }): Promise<ResultadoBitacoraGeneral> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para ver Optimización." };
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId) || typeof entrada.ref !== "string") {
+    return { ok: false, aviso: "No se reconoce el cambio. Actualiza la página." };
+  }
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
+  if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  if (!(await cambioEsDeLaPublicacion(ctx.empresaId, entrada.ref, entrada.itemId))) return { ok: false, aviso: "No se encontró ese cambio. Actualiza la página." };
+  // El día del cambio sale de la auditoría o de la nota, no del navegador.
+  const dia = await diaDelCambio(ctx.empresaId, entrada.ref);
+  if (!dia) return { ok: false, aviso: "No se encontró ese cambio. Actualiza la página." };
+  const ahora = new Date();
+  const hoy = hoyBogota(ahora);
+  const adelanto = resultadoCambio(dia, hoy, { lineas: [], publicidad: [], visitasPorDia: null, visitasDesde: hoy, conFinanzas: false });
+  if (adelanto.estado === "midiendo") return { ok: true, estado: "midiendo", faltanDias: adelanto.faltanDias };
+  const membresia = await obtenerMiMembresia(ctx.usuarioId, ctx.empresaId);
+  const conFinanzas = membresia ? tienePermiso(membresia.permisos, "finanzas", "consultar") : false;
+  try {
+    const datos = await leerDatosDetalle(ctx.empresaId, cuenta, entrada.itemId, resolverPeriodoDetalle(undefined, ahora), { conFinanzas, ahora });
+    if (!datos) return { ok: false, aviso: "Mercado Libre no devolvió la publicación. Intenta de nuevo." };
+    const r = resultadoCambio(dia, hoy, { lineas: datos.lineas, publicidad: datos.publicidad, visitasPorDia: datos.visitasPorDia, visitasDesde: datos.visitasDesde, conFinanzas });
+    if (r.estado === "midiendo") return { ok: true, estado: "midiendo", faltanDias: r.faltanDias };
+    return { ok: true, estado: "listo", desde: r.desde, hasta: r.hasta, conFinanzas, antes: filaResultado(r.antes, cuenta.siteId, conFinanzas), despues: filaResultado(r.despues, cuenta.siteId, conFinanzas) };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] resultado de bitácora ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: motivoCuentaSinRevisar(error) };
+  }
 }

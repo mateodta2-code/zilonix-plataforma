@@ -16,6 +16,9 @@ export const ACCIONES_BITACORA: Record<string, string> = {
   activar_publicacion: "Activó la publicación",
 };
 
+// Texto que deja editarFotosAction en el detalle cuando entró una foto de IA.
+export const MARCA_FOTO_IA_ROTULO = "con IA";
+
 export type ResultadoCambio =
   | { estado: "midiendo"; faltanDias: number }
   | { estado: "listo"; antes: ResumenPeriodo; despues: ResumenPeriodo; desde: string; hasta: string };
@@ -80,3 +83,23 @@ export function leerFechaNota(valor: unknown, hoy: string): Date | null {
   if (valor > hoy || valor < restarDiasIso(hoy, 149)) return null;
   return fecha;
 }
+
+// ---------- Fotos en la bitácora ----------
+export const LARGO_MAXIMO_VALOR_FOTOS = 1500;
+
+// Lista compacta de fotos para valor_anterior / valor_nuevo: una por
+// línea, ids de ML tal cual y enlaces https de las nuevas. Con tope de largo.
+export function compactarFotos(fotos: string[], tope = LARGO_MAXIMO_VALOR_FOTOS): string {
+  let salida = "";
+  for (const f of fotos) {
+    const siguiente = salida ? `${salida}\n${f}` : f;
+    if (siguiente.length > tope) break;
+    salida = siguiente;
+  }
+  return salida;
+}
+
+export function leerFotosCompactas(valor: string | null | undefined): string[] {
+  return typeof valor === "string" ? valor.split("\n").map((l) => l.trim()).filter(Boolean) : [];
+}
+

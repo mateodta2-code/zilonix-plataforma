@@ -163,6 +163,8 @@ const RUTAS_PROTEGIDAS = new Set([
   // Optimización (Fase 2): detalle de una publicación. Ver pide
   // inventario.consultar; costos y ganancia, además finanzas.consultar.
   "app/panel/optimizacion/[itemId]/page.tsx",
+  // Bitácora general de Optimización (refs #681): ver pide inventario.consultar.
+  "app/panel/optimizacion/bitacora/page.tsx",
   "app/api/ml/despachos/etiqueta/route.ts",
   "app/panel/investigacion/page.tsx",
   "app/panel/investigacion/actions.ts",
