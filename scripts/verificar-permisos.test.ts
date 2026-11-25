@@ -323,6 +323,8 @@ const RUTAS_BODEGA = new Set([
   "app/bodega/(panel)/configuracion/page.tsx",
   "app/bodega/(panel)/configuracion/actions.ts",
   "app/domiciliario/(panel)/page.tsx",
+  "app/domiciliario/(panel)/entregas/page.tsx",
+  "app/domiciliario/(panel)/entregas/actions.ts",
 ]);
 
 // Rutas exentas, cada una con el motivo real por el que no necesita

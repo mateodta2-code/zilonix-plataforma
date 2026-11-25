@@ -9,7 +9,7 @@ import { crearDosEmpresas } from "./test-utils/aislamiento";
 import { aceptarInvitacionBodega, crearInvitacionBodega } from "../lib/bodega/invitaciones";
 import { listarMiembros, cambiarActivoDeMiembro } from "../lib/bodega/miembros";
 import { cambiarEstadoVinculo, crearBodega, invitarAdminBodega, ligarEmpresaABodega } from "../lib/superadmin-bodegas";
-import { asignarEntrega, cambiarEstadoMiEntrega, EntregaInvalidaError, listarDomiciliariosAsignables, listarMisEntregas, quitarEntrega } from "../lib/entregas/entregas";
+import { asignarEntrega, cambiarEstadoMiEntrega, EntregaInvalidaError, listarDomiciliariosAsignables, listarEntregasDePedidos, listarMisEntregas, quitarEntrega } from "../lib/entregas/entregas";
 
 // Issue #627 (Domi-1) — contra Postgres real. Pruebas A/B propias (no
 // afirmarAislamiento: app_user no tiene todos los UPDATE/DELETE). Un UPDATE
@@ -177,6 +177,39 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     const propia = (await listarMisEntregas(bodegaA, dom2)).find((e) => e.id === cerrada.id)!;
     expect(propia.estado).toBe("entregada");
     expect(propia.direccion).toBeNull();
+  });
+
+  it("Domi-2: el domiciliario no cambia la entrega de otro, el motivo es obligatorio y cada cambio queda en auditoria con empresa_id", async () => {
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("8"), datos });
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro2, marketplace: "mercadolibre", pedidoReferencia: pedido("9"), datos });
+    const propia = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.pedidoReferencia === pedido("8"))!;
+    const ajena = (await listarMisEntregas(bodegaA, dom2)).find((e) => e.pedidoReferencia === pedido("9"))!;
+
+    // UPDATE directo sobre la ajena: RLS filtra, 0 filas (no hay error).
+    const filas = await dbComoBodega(bodegaA, (tx) => tx.update(entregasDomiciliario).set({ estado: "entregada" }).where(eq(entregasDomiciliario.id, ajena.id)).returning({ id: entregasDomiciliario.id }), "domiciliario", dom1);
+    expect(filas).toHaveLength(0);
+    // Y por la función: no la ve, falla sin cambiar nada.
+    await expect(cambiarEstadoMiEntrega(bodegaA, dom1, ajena.id, "entregada")).rejects.toBeInstanceOf(EntregaInvalidaError);
+    expect((await listarMisEntregas(bodegaA, dom2)).find((e) => e.id === ajena.id)!.estado).toBe("asignada");
+
+    // Sin motivo (o en blanco) no se guarda.
+    await expect(cambiarEstadoMiEntrega(bodegaA, dom1, propia.id, "no_entregada")).rejects.toBeInstanceOf(EntregaInvalidaError);
+    await expect(cambiarEstadoMiEntrega(bodegaA, dom1, propia.id, "no_entregada", "   ")).rejects.toBeInstanceOf(EntregaInvalidaError);
+    expect((await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === propia.id)!.estado).toBe("asignada");
+
+    await cambiarEstadoMiEntrega(bodegaA, dom1, propia.id, "en_camino");
+    await cambiarEstadoMiEntrega(bodegaA, dom1, propia.id, "no_entregada", "No estaba");
+    const cerrada = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === propia.id)!;
+    expect(cerrada).toMatchObject({ estado: "no_entregada", motivo: "No estaba", direccion: null, telefono: null });
+
+    // La empresa ve el rastro (empresa_id lleno) y el motivo, sin datos del comprador.
+    const rastro = await dbComoEmpresa(empresaA, (tx) => tx.select().from(auditoria).where(eq(auditoria.entidadId, propia.id)));
+    expect(rastro.map((a) => a.accion).sort()).toEqual(["entrega_en_camino", "entrega_no_entregada"]);
+    expect(rastro.every((a) => a.empresaId === empresaA && a.bodegaId === bodegaA)).toBe(true);
+    expect(rastro.find((a) => a.accion === "entrega_no_entregada")!.detalle).toContain("No estaba");
+    expect(JSON.stringify(rastro)).not.toContain(datos.direccion);
+    const [paraVendedor] = await listarEntregasDePedidos(empresaA, "mercadolibre", [pedido("8")]);
+    expect(paraVendedor).toMatchObject({ estado: "no_entregada", motivo: "No estaba" });
   });
 
   it("una sesión de bodega sin rol no ve ninguna entrega", async () => {

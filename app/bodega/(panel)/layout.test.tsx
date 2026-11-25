@@ -89,11 +89,13 @@ describe("menús", () => {
   it("todo apunta a /bodega o /domiciliario y los 'Próximamente' están deshabilitados", () => {
     const items = [...gruposBodega("admin_bodega"), ...gruposDomiciliario()].flatMap((g) => g.items);
     for (const i of items) expect(/^\/(bodega|domiciliario)(\/|$)/.test(i.href), i.href).toBe(true);
-    for (const e of ["Despachos", "Mis entregas"]) {
-      const i = items.find((x) => x.etiqueta === e);
-      expect(i?.deshabilitada, e).toBe(true);
-      expect(i?.titulo).toBe("Próximamente");
-    }
+    const despachos = items.find((x) => x.etiqueta === "Despachos");
+    expect(despachos?.deshabilitada).toBe(true);
+    expect(despachos?.titulo).toBe("Próximamente");
+    // Domi-2 (#629): «Mis entregas» ya está habilitada.
+    const misEntregas = items.find((x) => x.etiqueta === "Mis entregas");
+    expect(misEntregas?.deshabilitada).toBeFalsy();
+    expect(misEntregas?.href).toBe("/domiciliario/entregas");
   });
 
   it("Recepción e Inventario quedan habilitadas para la bodega y no están en el menú del domiciliario", () => {
