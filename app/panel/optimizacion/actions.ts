@@ -5,7 +5,6 @@ import { cookies } from "next/headers";
 import { and, eq, isNull } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl } from "@/db/schema";
-import { registrarAuditoria } from "@/lib/auditoria";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import {
   actualizarItemMl,
@@ -53,7 +52,7 @@ import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { diagnosticarPublicacion } from "@/lib/optimizacion/diagnostico";
 import { leerDiasMetricas } from "@/lib/optimizacion/textos";
-import { cambioEsDeLaPublicacion, crearNotaBitacora, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
+import { cambioEsDeLaPublicacion, compactarFotos, crearNotaBitacora, MARCA_FOTO_IA, registrarCambioOptimizacion, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
 import { leerFechaNota, leerResultadoRevision, limpiarTextoBitacora } from "@/lib/optimizacion/bitacoraResultado";
 import { hoyBogota } from "@/lib/publicidad/plan";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
@@ -284,13 +283,13 @@ export async function cambiarEstadoPublicacionAction(entrada: { cuentaMlId: stri
   }
 
   await dbComoEmpresa(ctx.empresaId, (tx) =>
-    registrarAuditoria(tx, {
+    registrarCambioOptimizacion(tx, {
       empresaId: ctx.empresaId,
       usuarioId: ctx.usuarioId,
-      actorTipo: "persona",
+      cuentaMlId: cuenta.id,
+      cuentaNickname: cuenta.nickname,
       accion: activar ? "activar_publicacion" : "pausar_publicacion",
-      entidad: "publicacion_ml",
-      entidadId: entrada.itemId,
+      itemId: entrada.itemId,
       detalle: `${activar ? "Activó" : "Pausó"} la publicación ${entrada.itemId} de ${cuenta.nickname}.`,
     })
   ).catch((error: unknown) => {
@@ -311,7 +310,7 @@ export type ResultadoEdicion = { ok: boolean; aviso: string };
 
 type Preparada = {
   ctx: { empresaId: string; usuarioId: string };
-  cuenta: { nickname: string; siteId: string; cuentaIdExterna: string };
+  cuenta: { id: string; nickname: string; siteId: string; cuentaIdExterna: string };
   token: string;
   item: ItemEdicionMl;
 };
@@ -363,13 +362,13 @@ async function escribirYAuditar(
     return { ok: false, aviso: detalle && detalle !== `error: ${motivo}` && detalle !== `mensaje: ${motivo}` ? `${base} (detalle para soporte: ${detalle})` : base };
   }
   await dbComoEmpresa(prep.ctx.empresaId, (tx) =>
-    registrarAuditoria(tx, {
+    registrarCambioOptimizacion(tx, {
       empresaId: prep.ctx.empresaId,
       usuarioId: prep.ctx.usuarioId,
-      actorTipo: "persona",
+      cuentaMlId: prep.cuenta.id,
+      cuentaNickname: prep.cuenta.nickname,
       accion: auditoria.accion,
-      entidad: "publicacion_ml",
-      entidadId: prep.item.id,
+      itemId: prep.item.id,
       detalle: auditoria.detalle,
       valorAnterior: auditoria.valorAnterior,
       valorNuevo: auditoria.valorNuevo,
@@ -452,6 +451,10 @@ export async function editarFotosAction(entrada: {
   cuentaMlId: string;
   itemId: string;
   fotos: ({ id: string } | { url: string })[];
+  // Enlaces de la galería que salieron de «Crear imagen con IA». Solo se
+  // cuentan los que de verdad van entre las fotos nuevas: nunca se confía
+  // en lo que diga el navegador.
+  fotosIA?: string[];
 }): Promise<ResultadoEdicion> {
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
@@ -472,12 +475,19 @@ export async function editarFotosAction(entrada: {
   }
   if (pictures.length === 0) return { ok: false, aviso: "La publicación necesita al menos una foto." };
   const nuevas = pictures.filter((p) => "source" in p).length;
+  const enlacesNuevos = new Set(pictures.flatMap((p) => ("source" in p ? [p.source] : [])));
+  const conIA = new Set((Array.isArray(entrada.fotosIA) ? entrada.fotosIA : []).filter((u): u is string => typeof u === "string" && enlacesNuevos.has(u.trim())).map((u) => u.trim())).size;
+  const antes = prep.item.fotos.map((f) => f.id);
+  const despues = pictures.map((p) => ("id" in p ? p.id : p.source));
+  const portadaCambio = antes[0] !== despues[0];
   return escribirYAuditar(
     prep,
     { pictures },
     {
       accion: "cambiar_fotos_publicacion",
-      detalle: `Cambió las fotos de ${prep.item.id} (${prep.cuenta.nickname}): ${pictures.length - nuevas} existentes, ${nuevas} nuevas.`,
+      detalle: `Cambió las fotos de ${prep.item.id} (${prep.cuenta.nickname}): ${pictures.length - nuevas} existentes, ${nuevas} nuevas${conIA > 0 ? ` (${conIA} ${MARCA_FOTO_IA})` : ""}; ${portadaCambio ? "cambió la portada" : "misma portada"}.`,
+      valorAnterior: compactarFotos(antes) || undefined,
+      valorNuevo: compactarFotos(despues),
     },
     "Fotos actualizadas en Mercado Libre. Pueden tardar unos minutos en verse."
   );
