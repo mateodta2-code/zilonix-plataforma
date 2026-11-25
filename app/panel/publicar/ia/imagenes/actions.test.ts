@@ -65,6 +65,7 @@ vi.mock("@/lib/publicaciones/cola", () => ({
 }));
 
 import { ajustarImagenAction, crearImagenAction, prepararImagenesAction } from "./actions";
+import { cantidadDePortadas } from "@/lib/publicaciones/imagenesIA";
 
 const FICHA = { nombre: { valor: "Termo 1 L", origen: "vendedor" }, incluye: { valor: ["Tapa"], origen: "foto" } };
 const OPENAI = { id: "c", proveedor: "openai", baseUrl: null, modelo: "m", apiKey: LLAVE };
@@ -86,8 +87,20 @@ beforeEach(() => {
   cola.terminar.mockReset();
 });
 
+describe("cantidadDePortadas", () => {
+  it("de 1 hasta una por cuenta marcada (mínimo 2 con una sola cuenta)", () => {
+    expect(cantidadDePortadas(undefined, 5)).toBe(1);
+    expect(cantidadDePortadas(10, 10)).toBe(10);
+    expect(cantidadDePortadas(10, 3)).toBe(3);
+    expect(cantidadDePortadas(2, 1)).toBe(2);
+    expect(cantidadDePortadas(0, 4)).toBe(1);
+    expect(cantidadDePortadas(2.5, 4)).toBe(1);
+    expect(cantidadDePortadas("7", 10)).toBe(1);
+  });
+});
+
 describe("preparar propuestas", () => {
-  it("portadas: 1 por defecto, o 2 distintas si se piden; no van a ninguna cuenta y nada se genera", async () => {
+  it("portadas: 1 por defecto, o varias distintas si se piden; no van a ninguna cuenta y nada se genera", async () => {
     const una = await prepararImagenesAction({ estilo: "zilonix_portadas", cuentaMlIds: [C1, C2, C3], ficha: FICHA });
     if (!una.ok) throw new Error(una.aviso);
     expect(una.imagenes).toHaveLength(1);
@@ -97,10 +110,16 @@ describe("preparar propuestas", () => {
     expect(dos.imagenes.map((i) => i.nombre)).toEqual(["Portada 1", "Portada 2"]);
     const composiciones = dos.imagenes.map((i) => (i.propuesta as { asignacion: { composicion: number } }).asignacion.composicion);
     expect(new Set(composiciones).size).toBe(2);
-    // Un número raro no crea más de 2.
+    // Con una sola cuenta, nunca más de 2.
     const raro = await prepararImagenesAction({ estilo: "zilonix_portadas", cuentaMlIds: [C1], ficha: FICHA, cantidadPortadas: 50 });
     if (!raro.ok) throw new Error(raro.aviso);
-    expect(raro.imagenes).toHaveLength(1);
+    expect(raro.imagenes).toHaveLength(2);
+    // Con 3 cuentas marcadas, hasta 3 portadas distintas (una por cuenta).
+    const tres = await prepararImagenesAction({ estilo: "zilonix_portadas", cuentaMlIds: [C1, C2, C3], ficha: FICHA, cantidadPortadas: 3 });
+    if (!tres.ok) throw new Error(tres.aviso);
+    expect(tres.imagenes.map((i) => i.nombre)).toEqual(["Portada 1", "Portada 2", "Portada 3"]);
+    const pares = tres.imagenes.map((i) => JSON.stringify((i.propuesta as { asignacion: unknown }).asignacion));
+    expect(new Set(pares).size).toBe(3);
     expect(ia.conexion).toHaveBeenCalledWith("empresa-1", "generacion_imagenes");
     expect(ia.generar).not.toHaveBeenCalled();
   });

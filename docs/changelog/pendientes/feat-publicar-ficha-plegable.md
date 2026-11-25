@@ -1,0 +1,5 @@
+- **Publicar → «Generación de imágenes para Meli»**:
+  - Al pulsar «Confirmar ficha», la ficha se pliega en una línea («Ficha confirmada ✓ · <nombre> — ver o editar») y se despliega para revisarla. Analizar de nuevo la vuelve a abrir.
+  - **Descripción por cuenta**: con varias cuentas marcadas, «Proponer N descripciones (una por cuenta)» pide una por cuenta, cada una en el idioma de su país y con un enfoque de redacción distinto («versión N de M», `ENFOQUES_DESCRIPCION` en `lib/publicaciones/descripcion.ts`). Las secciones siguen fijas (`armarDescripcion`), así que la estructura es la misma. «Usar cada una en su cuenta» y «Proponer otra para esta cuenta». El servidor solo acepta `variante` con enteros válidos.
+  - **Portadas**: de 1 hasta una por cuenta marcada (con una sola cuenta, hasta 2); por defecto, una por cuenta (`cantidadDePortadas` en `lib/publicaciones/imagenesIA.ts`). Con más de 4 opciones se elige en una lista. En «Imágenes creadas», con más de 3 cuentas cada portada usa una lista «Usar como portada de»; botón «Una portada para cada cuenta» las reparte en orden.
+- Guía de Publicar actualizada.

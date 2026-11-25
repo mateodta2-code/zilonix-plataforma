@@ -26,7 +26,7 @@ export type Tarjeta = PropuestaImagen & { estado: EstadoTarjeta; url?: string; a
 export type Creada = { id: string; url: string; nombre: string; tipo: string; estilo: Estilo };
 
 const ESTILOS: { id: Estilo; nombre: string; ayuda: string }[] = [
-  { id: "zilonix_portadas", nombre: "Portadas Zilonix", ayuda: "1 o 2 portadas distintas; abajo eliges cuál es la portada de cada cuenta." },
+  { id: "zilonix_portadas", nombre: "Portadas Zilonix", ayuda: "Portadas distintas, hasta una por cuenta marcada; abajo eliges cuál es la portada de cada cuenta." },
   { id: "zilonix_contenido", nombre: "Contenido Zilonix", ayuda: "Las 10 imágenes de contenido; cada una se aprueba antes de crearla." },
   { id: "experto_ml", nombre: "Estilo experto ML", ayuda: "Imágenes de venta con titular y apoyos cortos." },
 ];
@@ -51,7 +51,8 @@ type BorradorImagenes = {
   tiposExperto: string[];
   opiniones: string;
   fotoBlanco: boolean;
-  cantidadPortadas: 1 | 2;
+  // null = una por cuenta marcada (lo normal).
+  cantidadPortadas: number | null;
   porEstilo: Record<Estilo, Tarjeta[]>;
   omitidasPorEstilo: Record<Estilo, string[]>;
   creadas: Creada[];
@@ -115,7 +116,11 @@ export function GenerarConIA({
   const [tiposExperto, setTiposExperto] = useState<string[]>(TIPOS_EXPERTO_ML.filter((t) => t.porDefecto).map((t) => t.id));
   const [opiniones, setOpiniones] = useState("");
   const [fotoBlanco, setFotoBlanco] = useState(false);
-  const [cantidadPortadas, setCantidadPortadas] = useState<1 | 2>(1);
+  // null = una por cuenta marcada (24-nov). Con una sola cuenta se pueden
+  // pedir 2 para elegir la mejor (mismo tope que el servidor).
+  const [cantidadPortadas, setCantidadPortadas] = useState<number | null>(null);
+  const maxPortadas = Math.max(2, cuentas.length);
+  const portadasPedidas = Math.min(cantidadPortadas ?? Math.max(1, cuentas.length), maxPortadas);
   const [porEstilo, setPorEstilo] = useState<Record<Estilo, Tarjeta[]>>(SIN_TARJETAS);
   const [omitidasPorEstilo, setOmitidasPorEstilo] = useState<Record<Estilo, string[]>>(SIN_OMITIDAS);
   const [creadas, setCreadas] = useState<Creada[]>([]);
@@ -167,6 +172,14 @@ export function GenerarConIA({
   const enGaleria = (url: string) => galeria.includes(url);
   const pendientesGaleria = creadas.filter((c) => c.tipo !== TIPO_PORTADA && !enGaleria(c.url));
 
+  // «Una portada para cada cuenta»: la Portada 1 a la primera cuenta, la
+  // 2 a la segunda… (si hay menos portadas que cuentas, se reparten de nuevo
+  // desde la primera). Después se puede cambiar cualquiera a mano.
+  const portadasCreadas = creadas.filter((c) => c.tipo === TIPO_PORTADA);
+  function unaPortadaPorCuenta() {
+    cuentas.forEach((cu, i) => onUsarPortada(cu.id, portadasCreadas[i % portadasCreadas.length].url));
+  }
+
   function agregarAGaleria(c: Creada) {
     setAvisoCreadas(onAgregarAGaleria(c.url) ? null : MENSAJE_GALERIA_LLENA);
   }
@@ -205,6 +218,11 @@ export function GenerarConIA({
           el botón o arrástralas a un lugar de la galería de Fotos.
         </p>
         <div className={styles.accionesIA}>
+          {portadasCreadas.length > 1 && cuentas.length > 1 ? (
+            <Boton type="button" variante="secundario" onClick={unaPortadaPorCuenta}>
+              Una portada para cada cuenta
+            </Boton>
+          ) : null}
           {pendientesGaleria.length > 1 ? (
             <Boton type="button" variante="primario" onClick={agregarTodasAGaleria}>
               {`Agregar todas a la galería (${pendientesGaleria.length})`}
@@ -249,7 +267,32 @@ export function GenerarConIA({
                   <Chip>{NOMBRE_ESTILO[c.estilo]}</Chip>
                 </span>
                 <span className={styles.accionesIA}>
-                  {esPortada ? (
+                  {esPortada && cuentas.length > 3 ? (
+                    <>
+                      <Campo etiqueta="Usar como portada de">
+                        <select
+                          className="zx-control"
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) onUsarPortada(e.target.value, c.url);
+                          }}
+                          aria-label={`Usar ${c.nombre} como portada de…`}
+                        >
+                          <option value="">Elige una cuenta…</option>
+                          {cuentas.map((cu) => (
+                            <option key={cu.id} value={cu.id}>
+                              {portadas[cu.id] === c.url ? `✓ ${cu.nickname}` : cu.nickname}
+                            </option>
+                          ))}
+                        </select>
+                      </Campo>
+                      {cuentas
+                        .filter((cu) => portadas[cu.id] === c.url)
+                        .map((cu) => (
+                          <Chip key={cu.id} estado="exito">{`Portada de ${cu.nickname}`}</Chip>
+                        ))}
+                    </>
+                  ) : esPortada ? (
                     cuentas.map((cu) => {
                       const usada = portadas[cu.id] === c.url;
                       return (
@@ -324,7 +367,7 @@ export function GenerarConIA({
         opiniones,
         incluirFotoBlanco: fotoBlanco,
         previas: pedido === "zilonix_portadas" ? asignadas.current : undefined,
-        cantidadPortadas,
+        cantidadPortadas: portadasPedidas,
       });
       if (!r.ok) {
         setAviso({ texto: r.aviso, conectarIA: r.conectarIA });
@@ -442,15 +485,31 @@ export function GenerarConIA({
 
       {estilo === "zilonix_portadas" ? (
         <>
-          <span className={styles.filtroIA} role="radiogroup" aria-label="Cuántas portadas">
-            {([1, 2] as const).map((n) => (
-              <Boton key={n} type="button" variante={cantidadPortadas === n ? "primario" : "secundario"} onClick={() => setCantidadPortadas(n)} aria-checked={cantidadPortadas === n} role="radio" disabled={preparando}>
-                {n === 1 ? "1 portada" : "2 portadas"}
-              </Boton>
-            ))}
-          </span>
+          {maxPortadas <= 4 ? (
+            <span className={styles.filtroIA} role="radiogroup" aria-label="Cuántas portadas">
+              {Array.from({ length: maxPortadas }, (_, k) => k + 1).map((n) => (
+                <Boton key={n} type="button" variante={portadasPedidas === n ? "primario" : "secundario"} onClick={() => setCantidadPortadas(n)} aria-checked={portadasPedidas === n} role="radio" disabled={preparando}>
+                  {n === 1 ? "1 portada" : `${n} portadas`}
+                </Boton>
+              ))}
+            </span>
+          ) : (
+            <Campo etiqueta="Cuántas portadas">
+              <select className="zx-control" value={portadasPedidas} onChange={(e) => setCantidadPortadas(Number(e.target.value))} disabled={preparando}>
+                {Array.from({ length: maxPortadas }, (_, k) => k + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {n === 1 ? "1 portada" : `${n} portadas`}
+                    {n === cuentas.length ? " (una por cuenta)" : ""}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+          )}
           <p className={styles.ayudaIA}>
-            {cantidadPortadas === 2 ? "Se crean 2 portadas distintas: abajo, en «Imágenes creadas», eliges cuál es la portada de cada cuenta." : "Se crea 1 portada."} {NOTA_FOTO_UNO}
+            {portadasPedidas > 1
+              ? `Se crean ${portadasPedidas} portadas distintas: abajo, en «Imágenes creadas», eliges cuál es la portada de cada cuenta.`
+              : "Se crea 1 portada."}{" "}
+            {NOTA_FOTO_UNO}
           </p>
         </>
       ) : (
