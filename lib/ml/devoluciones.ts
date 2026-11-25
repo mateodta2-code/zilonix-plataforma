@@ -8,12 +8,13 @@
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import { idTexto, pedirLecturaMl, textoODefecto } from "@/lib/ml/cliente";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { PERIODOS_DIAS } from "@/lib/posventa/metricasDevoluciones";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { leerFotoItemMl, leerOrdenMl, leerReclamoMl, obtenerMotivoReclamoMl, type ProductoVenta, type ReclamoBaseMl } from "@/lib/ml/reclamos";
 
 // Topes por carga: con muchas cuentas y usuarios, nunca una lectura sin límite.
 export const TAMANO_PAGINA_BUSQUEDA = 50;
-export const TOPE_PAGINAS_POR_ESTADO = 3;
+export const TOPE_PAGINAS_BUSQUEDA = 4;
 export const TOPE_LECTURAS_DEVOLUCION = 60;
 export const CONCURRENCIA_LECTURAS = 4;
 
@@ -49,7 +50,19 @@ export function tieneDevolucion(relacionadas: string[]): boolean {
   return relacionadas.includes("return");
 }
 
-// Una página de claims/search → solo los reclamos que traen devolución.
+// Una página de claims/search → reclamos CANDIDATOS a tener devolución.
+// La búsqueda de ML NO trae `related_entities` (solo GET claims/{id}), así
+// que si el campo no viene NO se descarta: la devolución real se confirma
+// después con v2 claims/{id}/returns. Regla: se descarta solo si el campo
+// SÍ viene como lista (aunque vacía), no incluye "return" y el tipo no es
+// "returns". No se descarta por otros tipos: una mediación puede tener
+// devolución y no se adivina.
+export function esCandidatoDevolucion(base: ReclamoBaseMl, crudo: unknown): boolean {
+  if (base.tipo === "returns") return true;
+  if (!Array.isArray(crudo)) return true;
+  return tieneDevolucion(crudo.filter((r): r is string => typeof r === "string"));
+}
+
 export function leerReclamosConDevolucionMl(data: unknown): { total: number; leidos: number; reclamos: ReclamoConDevolucion[] } {
   const cuerpo = (data && typeof data === "object" ? data : {}) as { data?: unknown; paging?: { total?: unknown } };
   const lista = Array.isArray(cuerpo.data) ? cuerpo.data : [];
@@ -57,8 +70,9 @@ export function leerReclamosConDevolucionMl(data: unknown): { total: number; lei
     const base = leerReclamoMl(c);
     if (!base) return [];
     const crudo = (c as Record<string, unknown>).related_entities;
+    if (!esCandidatoDevolucion(base, crudo)) return [];
     const relacionadas = Array.isArray(crudo) ? crudo.filter((r): r is string => typeof r === "string") : [];
-    return tieneDevolucion(relacionadas) ? [{ ...base, relacionadas }] : [];
+    return [{ ...base, relacionadas }];
   });
   const total = typeof cuerpo.paging?.total === "number" ? cuerpo.paging.total : lista.length;
   return { total, leidos: lista.length, reclamos };
@@ -207,33 +221,34 @@ export async function obtenerCostoEnvioDevolucionMl(reclamoId: string, token: st
   return opcional(async () => leerCostoEnvioMl(await leerJson(`/post-purchase/v1/claims/${reclamoId}/charges/return-cost`, token)));
 }
 
-// Reclamos de la cuenta con devolución, abiertos y cerrados. Una página a
-// la vez, con tope de páginas por estado. `truncado` = ML tiene más de los
-// que se leyeron.
-export async function buscarReclamosConDevolucionMl(token: string): Promise<{ reclamos: ReclamoConDevolucion[]; truncado: boolean }> {
+// Query documentado de claims/search: acotado por rol, vendedor y fecha,
+// ordenado de más nuevo a más viejo y SIN `status` (entran abiertos y
+// cerrados). ISO con milisegundos y offset «-00:00», como en la doc de ML.
+export function armarQueryBusquedaReclamos(sellerId: string, desdeMs: number, offset: number): string {
+  exigirNumerico(sellerId);
+  const desde = new Date(desdeMs).toISOString().replace("Z", "-00:00");
+  return `?players.role=respondent&players.user_id=${sellerId}&range=date_created:after:${desde}&sort=date_created:desc&limit=${TAMANO_PAGINA_BUSQUEDA}&offset=${offset}`;
+}
+
+// Reclamos del vendedor en el periodo (candidatos; la devolución se confirma
+// aparte). Máx. TOPE_PAGINAS_BUSQUEDA llamadas. `truncado` = ML tiene más de
+// los que se leyeron. Si una página falla, lanza: la cuenta queda «sin revisar».
+export async function buscarReclamosConDevolucionMl(token: string, sellerId: string, desdeMs: number | null): Promise<{ reclamos: ReclamoConDevolucion[]; truncado: boolean }> {
+  exigirNumerico(sellerId);
+  const desde = desdeMs ?? Date.now() - Math.max(...PERIODOS_DIAS) * 24 * 60 * 60 * 1000;
   const reclamos: ReclamoConDevolucion[] = [];
-  let truncado = false;
-  for (const estado of ["opened", "closed"] as const) {
-    let leidosEstado = 0;
-    for (let pagina = 0; pagina < TOPE_PAGINAS_POR_ESTADO; pagina++) {
-      const offset = pagina * TAMANO_PAGINA_BUSQUEDA;
-      const resp = await pedirLecturaMl<unknown>("/post-purchase/v1/claims/search", token, {
-        query: `?status=${estado}&limit=${TAMANO_PAGINA_BUSQUEDA}&offset=${offset}`,
-      });
-      if (!resp.ok) {
-        // Los abiertos son lo principal: si fallan, falla la cuenta. Los cerrados son un extra.
-        if (estado === "opened") throw new Error(`Mercado Libre respondió ${resp.status} al listar los reclamos.`);
-        break;
-      }
-      const lectura = leerReclamosConDevolucionMl(resp.data);
-      reclamos.push(...lectura.reclamos);
-      leidosEstado += lectura.leidos;
-      if (lectura.leidos < TAMANO_PAGINA_BUSQUEDA) break;
-      if (leidosEstado >= lectura.total) break;
-      if (pagina === TOPE_PAGINAS_POR_ESTADO - 1) truncado = true;
-    }
+  let leidos = 0;
+  for (let pagina = 0; pagina < TOPE_PAGINAS_BUSQUEDA; pagina++) {
+    const resp = await pedirLecturaMl<unknown>("/post-purchase/v1/claims/search", token, {
+      query: armarQueryBusquedaReclamos(sellerId, desde, pagina * TAMANO_PAGINA_BUSQUEDA),
+    });
+    if (!resp.ok) throw new Error(`Mercado Libre respondió ${resp.status} al listar los reclamos.`);
+    const lectura = leerReclamosConDevolucionMl(resp.data);
+    reclamos.push(...lectura.reclamos);
+    leidos += lectura.leidos;
+    if (lectura.leidos < TAMANO_PAGINA_BUSQUEDA || leidos >= lectura.total) return { reclamos, truncado: false };
   }
-  return { reclamos, truncado };
+  return { reclamos, truncado: true };
 }
 
 // ---------- Orquestación por empresa (lista y métricas) ----------
@@ -250,7 +265,7 @@ export type FilaDevolucion = {
 
 export type CargaDevoluciones = {
   filas: FilaDevolucion[];
-  // Reclamos con devolución del periodo, aunque no todos se hayan leído a fondo.
+  // Reclamos candidatos del periodo que no se alcanzaron a leer (pueden o no tener devolución).
   sinLeerDetalle: number;
   truncado: boolean;
   cuentasSinRevisar: { nickname: string; motivo: string }[];
@@ -273,7 +288,7 @@ export async function cargarDevolucionesEmpresa(empresaId: string, opciones: { c
   for (const cuenta of cuentas) {
     try {
       const token = await obtenerAccessTokenVigente(empresaId, cuenta.id);
-      const busqueda = await buscarReclamosConDevolucionMl(token);
+      const busqueda = await buscarReclamosConDevolucionMl(token, cuenta.cuentaIdExterna, opciones.desdeMs);
       truncado = truncado || busqueda.truncado;
       for (const reclamo of busqueda.reclamos) {
         if (opciones.desdeMs !== null && fechaMs(reclamo.fecha) < opciones.desdeMs) continue;
@@ -288,7 +303,7 @@ export async function cargarDevolucionesEmpresa(empresaId: string, opciones: { c
 
   candidatos.sort((a, b) => fechaMs(b.reclamo.fecha) - fechaMs(a.reclamo.fecha));
   const aLeer = candidatos.slice(0, TOPE_LECTURAS_DEVOLUCION);
-  const filas = await conConcurrenciaLimitada(aLeer, CONCURRENCIA_LECTURAS, async ({ cuenta, token, reclamo }): Promise<FilaDevolucion> => {
+  const todas = await conConcurrenciaLimitada(aLeer, CONCURRENCIA_LECTURAS, async ({ cuenta, token, reclamo }): Promise<FilaDevolucion> => {
     const devolucion = await obtenerDevolucionMl(reclamo.id, token);
     const cerrada = devolucion?.estado === "closed" || devolucion?.estado === "expired" || Boolean(devolucion?.cerrada);
     const llego = devolucion?.envios.some((e) => e.estado === "delivered") ?? false;
@@ -305,7 +320,9 @@ export async function cargarDevolucionesEmpresa(empresaId: string, opciones: { c
     };
   });
 
-  return { filas, sinLeerDetalle: candidatos.length - aLeer.length, truncado: truncado || candidatos.length > aLeer.length, cuentasSinRevisar };
+  // Solo quedan los que de verdad tienen devolución (v2 returns no es 404).
+  const conDevolucion = todas.filter((f) => f.devolucion !== null);
+  return { filas: conDevolucion, sinLeerDetalle: candidatos.length - aLeer.length, truncado: truncado || candidatos.length > aLeer.length, cuentasSinRevisar };
 }
 
 // Producto principal de la venta de un reclamo (solo order): título,
