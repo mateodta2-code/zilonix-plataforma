@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // completo: esta ruta solo valida el secreto y las variables de
 // entorno, nunca corre el trabajo real contra Postgres en esta prueba
 // (eso ya lo prueba lib/trabajos/revisionDiariaSeguimiento.test.ts).
+vi.mock("@/lib/trabajos/registroEjecuciones", () => ({ ejecutarConRegistro: (_proceso: string, trabajo: () => Promise<unknown>) => trabajo() }));
 vi.mock("@/lib/trabajos/revisionDiariaSeguimiento", () => ({
   revisarSeguimientosDelDia: vi.fn(),
 }));

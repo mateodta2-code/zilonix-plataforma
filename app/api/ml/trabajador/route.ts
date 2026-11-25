@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { procesarAvisosPendientes } from "@/lib/ml/trabajador";
+import { ejecutarConRegistro } from "@/lib/trabajos/registroEjecuciones";
 
 // Tarea 2.4 — sin sesión de usuario (lo llama un cron, no una persona),
 // protegida con un secreto compartido elegido por una persona (nunca
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
-  const resultado = await procesarAvisosPendientes();
+  // Estado de los procesos (25-nov): cada corrida queda anotada para /superadmin/procesos.
+  const resultado = await ejecutarConRegistro("avisos_ml", () => procesarAvisosPendientes());
   return NextResponse.json({ ok: true, ...resultado });
 }

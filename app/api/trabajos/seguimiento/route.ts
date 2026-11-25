@@ -41,7 +41,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const { revisarSeguimientosDelDia } = await import("@/lib/trabajos/revisionDiariaSeguimiento");
-    const resultado = await revisarSeguimientosDelDia();
+    const { ejecutarConRegistro } = await import("@/lib/trabajos/registroEjecuciones");
+    const resultado = await ejecutarConRegistro("seguimiento", () => revisarSeguimientosDelDia());
     return NextResponse.json({ ok: true, ...resultado });
   } catch (error) {
     // Nunca el detalle crudo del error (podría incluir datos de

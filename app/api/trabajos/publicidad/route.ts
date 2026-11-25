@@ -34,7 +34,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const { sincronizarPublicidadProgramada } = await import("@/lib/trabajos/sincronizarPublicidad");
-    const resultado = await sincronizarPublicidadProgramada();
+    const { ejecutarConRegistro } = await import("@/lib/trabajos/registroEjecuciones");
+    const resultado = await ejecutarConRegistro("publicidad", () => sincronizarPublicidadProgramada());
     return NextResponse.json({ ok: true, ...resultado });
   } catch (error) {
     console.error("[app/api/trabajos/publicidad] la sincronización no se pudo correr:", textoErrorCorto(error));
