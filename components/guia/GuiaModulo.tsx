@@ -2,14 +2,17 @@
 
 import { usePathname } from "next/navigation";
 import { seccionDeRuta } from "@/lib/guia/contenido";
+import { seccionSuperadminDeRuta } from "@/lib/guia/superadmin";
 import styles from "./GuiaModulo.module.css";
 
 // «Guía de este módulo», desplegable arriba de cada pantalla del panel
 // que tiene guía (lib/guia/contenido.ts). Cerrada por defecto para no
 // tapar el trabajo. El layout es de servidor y no conoce la ruta: se
-// calcula acá, como ItemNavLink.
-export function GuiaModulo() {
-  const seccion = seccionDeRuta(usePathname() ?? "");
+// calcula acá, como ItemNavLink. panel="superadmin" usa la guía del panel
+// superadmin (lib/guia/superadmin.ts, 25-nov).
+export function GuiaModulo({ panel = "vendedor" }: { panel?: "vendedor" | "superadmin" }) {
+  const ruta = usePathname() ?? "";
+  const seccion = panel === "superadmin" ? seccionSuperadminDeRuta(ruta) : seccionDeRuta(ruta);
   if (!seccion) return null;
   return (
     <details key={seccion.id} className={styles.guia}>
