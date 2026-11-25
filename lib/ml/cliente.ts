@@ -338,6 +338,11 @@ async function escribir<T>(
   return { ok: res.ok, status: res.status, data, textoCrudo };
 }
 
+// Reclamos-A: nombre público del ayudante de escritura, para que
+// lib/ml/reclamos-escritura (Reclamos-B y C) no tenga que tocar este
+// archivo. Mismo comportamiento que escribir().
+export const escribirMl = escribir;
+
 function fotoDe(pictures: unknown): string | null {
   const primera = Array.isArray(pictures) ? pictures[0] : null;
   if (typeof primera === "string") return primera;
@@ -1662,7 +1667,7 @@ export async function obtenerSlaEnvioMl(shipmentIdExterno: string, token: string
   }
 }
 
-export type RespuestaBinarioMl = { ok: true; data: ArrayBuffer } | { ok: false; status: number; textoCrudo: string };
+export type RespuestaBinarioMl = { ok: true; data: ArrayBuffer; tipo?: string | null } | { ok: false; status: number; textoCrudo: string };
 
 // Hermano de pedirLecturaMl, para una respuesta que NUNCA es JSON (el
 // PDF real de la guía) — mismo chequeo de ruta/429/timeout, pero
@@ -1695,7 +1700,7 @@ export async function pedirBinarioMl(ruta: string, token: string, query?: string
     const textoCrudo = await res.text().catch(() => "");
     return { ok: false, status: res.status, textoCrudo };
   }
-  return { ok: true, data: await res.arrayBuffer() };
+  return { ok: true, data: await res.arrayBuffer(), tipo: res.headers?.get?.("content-type") ?? null };
 }
 
 // GET /shipment_labels?shipment_ids=X,Y,Z&response_type=pdf — confirmado
@@ -1740,13 +1745,35 @@ export type ReclamoMl = {
   motivo: string | null;
   fecha: string | null;
   actualizado: string | null;
+  // players[] del reclamo: sirve para mostrar el plazo en la lista sin
+  // pedir nada más a Mercado Libre.
+  jugadores: JugadorReclamoMl[];
 };
 
-function textoODefecto(valor: unknown): string | null {
+export type AccionJugadorMl = { accion: string; vence: string | null; obligatoria: boolean };
+export type JugadorReclamoMl = { rol: string | null; tipo: string | null; userId: string | null; acciones: AccionJugadorMl[] };
+
+export function leerJugadoresReclamoMl(valor: unknown): JugadorReclamoMl[] {
+  if (!Array.isArray(valor)) return [];
+  return valor.flatMap((j): JugadorReclamoMl[] => {
+    if (!j || typeof j !== "object") return [];
+    const fila = j as { role?: unknown; type?: unknown; user_id?: unknown; available_actions?: unknown };
+    const acciones = Array.isArray(fila.available_actions)
+      ? fila.available_actions.flatMap((a): AccionJugadorMl[] => {
+          const accion = a as { action?: unknown; due_date?: unknown; mandatory?: unknown };
+          if (typeof accion?.action !== "string" || !accion.action) return [];
+          return [{ accion: accion.action, vence: textoODefecto(accion.due_date), obligatoria: accion.mandatory === true }];
+        })
+      : [];
+    return [{ rol: textoODefecto(fila.role), tipo: textoODefecto(fila.type), userId: idTexto(fila.user_id), acciones }];
+  });
+}
+
+export function textoODefecto(valor: unknown): string | null {
   return typeof valor === "string" && valor.trim() ? valor : null;
 }
 
-function idTexto(valor: unknown): string | null {
+export function idTexto(valor: unknown): string | null {
   if (typeof valor === "number" && Number.isFinite(valor)) return String(valor);
   if (typeof valor === "string" && /^\d+$/.test(valor)) return valor;
   return null;
@@ -1782,6 +1809,7 @@ export function leerReclamosMl(data: unknown): { total: number; reclamos: Reclam
         motivo: textoODefecto(fila.reason_id),
         fecha: textoODefecto(fila.date_created),
         actualizado: textoODefecto(fila.last_updated),
+        jugadores: leerJugadoresReclamoMl(fila.players),
       },
     ];
   });

@@ -1,0 +1,4 @@
+- Reclamos-A (Refs #644): detalle de un reclamo en `/panel/preguntas/reclamos/[cuentaId]/[reclamoId]`, solo lectura y en vivo desde Mercado Libre (conversación con adjuntos, plazo, reputación, motivo y ficha de la venta con foto, variación, precio y ciudad). Los datos del comprador no se guardan.
+- La pestaña Reclamos pasa de tabla a filas clicables, con motivo legible, plazo («vence en 2 días») y «Ver reclamo →», ordenadas por el plazo más cercano.
+- Nueva ruta de solo lectura `/api/ml/reclamos/[cuentaId]/[reclamoId]/adjuntos/[archivo]` (proxy de los adjuntos del comprador, con sesión, permiso ventas consultar y cuenta de la empresa).
+- `lib/ml/cliente.ts` exporta `escribirMl` (para Reclamos-B y C). Sin migración.
