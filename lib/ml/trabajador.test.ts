@@ -421,7 +421,7 @@ describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solo
     expect(fetchMock.mock.calls.length).toBeGreaterThan(llamadasAntesDelCron);
   });
 
-  it("si la cuenta ya no está conectada a la empresa, nunca llama a Mercado Libre y deja el aviso pendiente", async () => {
+  it("si la cuenta ya no está conectada a la empresa, nunca llama a Mercado Libre y el aviso queda omitido (no se reintenta)", async () => {
     const { empresaId } = await empresaConCuenta("Empresa cuenta desconectada (webhook)");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -435,11 +435,42 @@ describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solo
     );
 
     const resultado = await intentarProcesarAvisoAhora(avisoId);
-    expect(resultado).toBe("pendiente");
+    // 25-nov: fallo permanente — antes quedaba pendiente y el cron lo
+    // reintentaba para siempre (la cola de staging se trabó así).
+    expect(resultado).toBe("omitido");
     expect(fetchMock).not.toHaveBeenCalled(); // nunca confía en el aviso, y sin cuenta no hay con qué pedirle nada a ML
 
     const [filaAviso] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
-    expect(filaAviso.procesadoTs).toBeNull();
+    expect(filaAviso.procesadoTs).not.toBeNull();
+  });
+
+  it("cola: 60 avisos de una cuenta que ya no está conectada se omiten y no tapan a los demás (bug real de staging, 25-nov)", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa cola trabada");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuestaOk({ id: 1, status: "active" })));
+    const PREFIJO = `trabada-${randomUUID()}-`;
+    const ajena = `ml-user-desconectada-${randomUUID()}`;
+    // Más que un lote entero (50) de avisos que nunca se pueden procesar.
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values(
+        Array.from({ length: 60 }, (_, i) => ({ empresaId, cuentaIdExterna: ajena, topic: "items", resource: `/items/${PREFIJO}x${i}`, enviadoTs: new Date(Date.now() - i) }))
+      )
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "items", resource: `/items/${PREFIJO}bueno`, enviadoTs: new Date() })
+    );
+
+    let omitidos = 0;
+    for (let pasada = 0; pasada < 30; pasada++) {
+      const r = await procesarAvisosPendientes(sinEspera);
+      omitidos += r.omitidosSinCuenta;
+      if (r.recibidosPendientes === 0) break;
+    }
+
+    const pendientes = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select({ id: avisosMl.id }).from(avisosMl).where(and(isNull(avisosMl.procesadoTs), like(avisosMl.resource, `/items/${PREFIJO}%`)))
+    );
+    expect(pendientes).toHaveLength(0); // ni los 60 ni el bueno quedan pendientes
+    expect(omitidos).toBeGreaterThanOrEqual(60);
   });
 
   it("si el aviso ya fue reclamado (ej. el cron llegó primero), el webhook nunca lo vuelve a procesar", async () => {
