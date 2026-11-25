@@ -1604,3 +1604,22 @@ CREATE POLICY anuncio_superadmin_retirar ON anuncios_plataforma FOR UPDATE TO su
 DROP POLICY IF EXISTS anuncio_vendedor_ver_vigentes ON anuncios_plataforma;
 CREATE POLICY anuncio_vendedor_ver_vigentes ON anuncios_plataforma FOR SELECT TO app_user
   USING (retirado_ts IS NULL AND inicio_ts <= now() AND (fin_ts IS NULL OR fin_ts > now()));
+
+-- ---------------------------------------------------------------------
+-- Empresas inactivas (25-nov, migración 0051) — último ingreso al panel.
+-- app_user NO tiene UPDATE sobre empresas.ultimo_ingreso_ts: lo escribe esta
+-- función, y solo en la empresa de la sesión (app.empresa_actual, que fija
+-- dbComoEmpresa después de comprobar la membresía). Como mucho una vez por
+-- hora: el resto de llamadas no escribe nada. superadmin_user ya lee
+-- empresas (GRANT SELECT de arriba).
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION registrar_ingreso_empresa()
+RETURNS void
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  UPDATE empresas SET ultimo_ingreso_ts = now()
+  WHERE id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND (ultimo_ingreso_ts IS NULL OR ultimo_ingreso_ts < now() - interval '1 hour')
+$fn$;
+REVOKE ALL ON FUNCTION registrar_ingreso_empresa() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION registrar_ingreso_empresa() TO app_user;

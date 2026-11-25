@@ -30,6 +30,7 @@ export const GUIA_SUPERADMIN: GrupoGuia[] = [
         paraQue: "Buscar una empresa, ver sus cifras y cambiar su plan, suspenderla o reactivarla.",
         pasos: [
           "Busca por nombre o filtra por estado y plan, y pulsa «Filtrar».",
+          "Empresas inactivas: en «Sin ingresar hace» elige 7, 15 o 30 días y pulsa «Filtrar». Salen las empresas activas donde nadie ha abierto el panel en ese tiempo, la que lleva más tiempo primero. Contáctalas antes de que se vayan.",
           "Pulsa «Ver» en la empresa para abrir su detalle.",
           "Cambiar el plan: elige el plan y pulsa «Cambiar plan» (te pide confirmar).",
           "Suspender: escribe el motivo (obligatorio) y pulsa «Suspender». Sus miembros ven «Tu cuenta está suspendida» y no pueden usar ningún módulo, y sus procesos automáticos con Mercado Libre (avisos de ventas, publicidad, seguimiento) se detienen.",
@@ -48,6 +49,7 @@ export const GUIA_SUPERADMIN: GrupoGuia[] = [
         ],
         consejos: [
           "Por ahora el plan es solo una etiqueta: todavía no limita módulos ni cuentas.",
+          "«Último ingreso» es la última vez que alguien de la empresa abrió el panel (se anota como mucho una vez por hora). «Sin registro»: nadie ha entrado desde que se empezó a anotar, el 25-nov-2026. «Última actividad» es otra cosa: la última acción que quedó en la auditoría de la empresa.",
           "Cada cambio de plan, suspensión, reactivación y nota queda en Auditoría.",
           SOLO_CIFRAS,
         ],
