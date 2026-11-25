@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { traerVentasDelMesAction, type EstadoTraerVentas } from "@/app/panel/finanzas/ventas/actions";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import estilos from "./ventasUtilidad.module.css";
 
 // Issue #131 — trae de Mercado Libre las ventas del mes en curso de la
@@ -38,6 +39,13 @@ export function BotonTraerVentasMes({ cuentaId }: { cuentaId: string | null }) {
             : `Lee de Mercado Libre las ventas del mes en curso de ${cuentaId ? "la cuenta elegida" : "todas las cuentas conectadas"}.`}
         </span>
       </div>
+      <BarraCarga
+        estado={pendiente ? "cargando" : "inactiva"}
+        titulo="Trayendo ventas del mes de Mercado Libre…"
+        avance={null}
+        ariaLabel="Progreso de la carga de ventas"
+        sticky={false}
+      />
       {estado && (
         <div className={estado.ok ? estilos.avisoExito : estilos.avisoError} role="status">
           <ul className={estilos.listaSimple}>

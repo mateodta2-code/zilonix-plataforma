@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Fragment, useEffect, useState, useTransition } from "react";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { formatearMoneda, formatearNumero } from "@/lib/ml/sitios";
@@ -66,6 +67,7 @@ export function TablaOptimizacion({
 }) {
   const [metricas, setMetricas] = useState<Record<string, MetricasPublicacion>>({});
   const [cargando, setCargando] = useState(true);
+  const [procesadas, setProcesadas] = useState(0);
   const [avisoMetricas, setAvisoMetricas] = useState<string | null>(null);
   const [abierta, setAbierta] = useState<string | null>(null);
   const [estados, setEstados] = useState<Record<string, string>>({});
@@ -79,6 +81,7 @@ export function TablaOptimizacion({
     let cancelado = false;
     setMetricas({});
     setCargando(true);
+    setProcesadas(0);
     setAvisoMetricas(null);
     (async () => {
       for (let i = 0; i < filas.length; i += LOTE) {
@@ -92,6 +95,7 @@ export function TablaOptimizacion({
             break;
           }
           setMetricas((previas) => ({ ...previas, ...r.metricas }));
+          setProcesadas(Math.min(i + LOTE, filas.length));
         } catch {
           if (!cancelado) setAvisoMetricas("No se pudieron traer visitas, calidad y competencia. Actualiza la página para reintentar.");
           break;
@@ -118,8 +122,17 @@ export function TablaOptimizacion({
 
   return (
     <>
-      {avisoMetricas ? <p className={styles.avisoError}>{avisoMetricas}</p> : null}
-      {cargando ? <p className={styles.nota}>Trayendo visitas, calidad y competencia de Mercado Libre…</p> : null}
+      {/* Avance real por tandas; si se corta, queda «detenida» con el aviso y sin «Seguir» (no hay forma de reanudar sin recargar). */}
+      <BarraCarga
+        estado={cargando ? "cargando" : avisoMetricas ? "detenida" : "completa"}
+        titulo="Trayendo visitas, calidad y competencia…"
+        avance={{ hechos: procesadas, total: filas.length }}
+        unidad="publicaciones"
+        textoCompleta="Datos completos"
+        textoDetenida={avisoMetricas ?? undefined}
+        ariaLabel="Progreso de visitas, calidad y competencia"
+        sticky={false}
+      />
       <Tabla encabezados={encabezados(dias)} scroll>
         {filas.map((fila) => {
           const m = metricas[fila.id];
