@@ -14,6 +14,9 @@ vi.mock("@/lib/permisos", () => {
 });
 vi.mock("@/lib/url-publica", () => ({ urlPublicaBase: () => "https://staging.test" }));
 
+const { obtenerSitioMock } = vi.hoisted(() => ({ obtenerSitioMock: vi.fn(async () => ({ siteId: "MLM" })) }));
+vi.mock("@/lib/ml/cuentas", () => ({ obtenerSitioDeCuenta: obtenerSitioMock }));
+
 const { interpretarMock } = vi.hoisted(() => ({ interpretarMock: vi.fn() }));
 vi.mock("@/lib/ml/promocionesReglasTextoIA", () => ({ interpretarReglasTexto: interpretarMock }));
 
@@ -42,7 +45,13 @@ describe("POST /api/ml/promociones/reglas-adicionales/interpretar", () => {
     const res = await POST(peticion({ texto: "no entrar en Black Friday" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ entendido: ["a"], noEntendido: ["b"], json: { version: 1 } });
-    expect(interpretarMock).toHaveBeenCalledWith("empresa-1", "no entrar en Black Friday");
+    expect(interpretarMock).toHaveBeenCalledWith("empresa-1", "no entrar en Black Friday", undefined, undefined);
+  });
+
+  it("con cuentaId válida pasa el sitio de la cuenta (moneda de «Entendí esto»)", async () => {
+    interpretarMock.mockResolvedValueOnce({ estado: "ok", reglas: { version: 1 }, entendido: [], noEntendido: [] });
+    await POST(peticion({ texto: "x", cuentaId: "123e4567-e89b-12d3-a456-426614174000" }));
+    expect(interpretarMock).toHaveBeenCalledWith("empresa-1", "x", undefined, "MLM");
   });
 
   it("sin permiso: 403, nunca llama a la IA", async () => {

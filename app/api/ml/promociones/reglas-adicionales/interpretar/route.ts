@@ -3,6 +3,7 @@ import { creaContador, superaLimite } from "@/lib/limite-peticiones";
 import { requierePermiso } from "@/lib/permisos";
 import { interpretarReglasTexto } from "@/lib/ml/promocionesReglasTextoIA";
 import { LARGO_MAXIMO_REGLAS_TEXTO } from "@/lib/ml/promocionesReglasTexto";
+import { obtenerSitioDeCuenta } from "@/lib/ml/cuentas";
 import { urlPublicaBase } from "@/lib/url-publica";
 import { respuestaSiOrigenInvalido, respuestaSiSinPermiso, resolverSesionYEmpresa } from "../../_ayudantes";
 
@@ -18,7 +19,9 @@ const LIMITE_POR_MINUTO = 6;
 const VENTANA_MS = 60_000;
 const contador = creaContador();
 
-type Cuerpo = { texto?: unknown };
+type Cuerpo = { texto?: unknown; cuentaId?: unknown };
+
+const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: Request) {
   const base = urlPublicaBase();
@@ -52,7 +55,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Demasiadas interpretaciones seguidas — espera un minuto e intenta de nuevo." }, { status: 429 });
   }
 
-  const resultado = await interpretarReglasTexto(empresa.id, cuerpo.texto);
+  // Solo para mostrar los montos con la moneda del sitio de la cuenta
+  // («Entendí esto»); si falta o no se encuentra, se usa el sitio por defecto.
+  let siteId: string | undefined;
+  if (typeof cuerpo.cuentaId === "string" && PATRON_UUID.test(cuerpo.cuentaId)) {
+    try {
+      siteId = (await obtenerSitioDeCuenta(empresa.id, cuerpo.cuentaId)).siteId;
+    } catch {
+      siteId = undefined;
+    }
+  }
+
+  const resultado = await interpretarReglasTexto(empresa.id, cuerpo.texto, undefined, siteId);
   if (resultado.estado === "sin_ia") return NextResponse.json({ error: resultado.mensaje, codigo: "sin_ia" }, { status: 409 });
   if (resultado.estado === "invalido") return NextResponse.json({ error: resultado.mensaje }, { status: 400 });
   if (resultado.estado === "error_ia") return NextResponse.json({ error: resultado.mensaje, codigo: "error_ia" }, { status: 502 });

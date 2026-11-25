@@ -17,7 +17,7 @@ import {
 } from "@/lib/ml/promociones";
 import { agruparPorCuenta, type ItemSeleccionado } from "@/lib/ml/promocionesSeleccion";
 import { type AccionEscribible, escribirPromocionMl, validarCalculado } from "@/lib/ml/promocionesEjecucion";
-import { evaluarCandidatoConReglas, leerReglasAdicionalesCuentas, nombreDePromocion, type CacheNombresPromocion } from "@/lib/ml/promocionesReglasAdicionales";
+import { evaluarCandidatoConReglas, leerReglasAdicionalesCuentas, nombreDePromocion, toleranciaDeReglas, type CacheNombresPromocion } from "@/lib/ml/promocionesReglasAdicionales";
 import type { ReglasAdicionales } from "@/lib/ml/promocionesReglasTexto";
 import type { EvaluacionReglasAdicionales } from "@/lib/ml/promocionesReglasAplicar";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
@@ -229,7 +229,7 @@ export async function leerPublicacionConEstado(
   };
   // Sin piso («todas») no se lee costos_sku: no se exige ni se muestra el piso.
   const { precioMinimo, costo } = aplicarPiso ? await leerPiso(detalle.skuCodigo) : { precioMinimo: null, costo: null };
-  const calculadasMotor = calcularCandidatosItem(item, reglas, precioMinimo, costo, aplicarPiso);
+  const calculadasMotor = calcularCandidatosItem(item, reglas, precioMinimo, costo, aplicarPiso, toleranciaDeReglas(reglasAdicionales));
   const calculadas = !aplicarPiso && maximoPct != null ? calculadasMotor.map((c) => aplicarTopeMaximo(c, maximoPct)) : calculadasMotor;
   const estaParticipando = calculadas.some((c) => c.estadoMl === "started" || c.estadoMl === "pending");
 
@@ -237,7 +237,7 @@ export async function leerPublicacionConEstado(
   for (let i = 0; i < calculadas.length; i++) {
     const c = calculadas[i];
     // Solo tiene sentido evaluar lo que el motor (con piso) dejaría hacer.
-    const evaluacion = c.accionSugerida ? await evaluarCandidatoConReglas(c, resultadoPromos.promociones[i], reglasAdicionales, token, cacheNombres) : null;
+    const evaluacion = c.accionSugerida ? await evaluarCandidatoConReglas(c, resultadoPromos.promociones[i], reglasAdicionales, token, cacheNombres, siteId) : null;
     // Respaldo del nombre: una llamada por campaña distinta (caché del
     // listado); PRICE_DISCOUNT nunca trae nombre y no se consulta. Un
     // fallo (incluido el límite de ML) deja null — nunca se adivina.
@@ -455,10 +455,14 @@ export async function participarEnPublicacionDirecto(
     return { ok: false, estado: "fallida", error: "Esta promoción ya no está disponible para esta publicación — volver a cargar la lista.", accionId: null };
   }
 
-  const [reglas, piso] = await Promise.all([
+  const [reglas, piso, reglasAdicionalesCuenta] = await Promise.all([
     leerReglasFrescasCuenta(empresaId, cuentaMlId),
     sinPiso ? Promise.resolve({ precioMinimo: null, costo: null }) : leerPisoYCostoFresco(empresaId, detalle.skuCodigo),
+    sinPiso ? Promise.resolve(new Map<string, ReglasAdicionales>()) : leerReglasAdicionalesCuentas(empresaId, [cuentaMlId]),
   ]);
+  // Tolerancia en compartidas (única excepción al piso): leída fresca de la
+  // cuenta, solo con piso; nunca viene de la petición.
+  const tolerancia = toleranciaDeReglas(reglasAdicionalesCuenta.get(cuentaMlId));
   const item: ItemConPromociones = {
     itemId,
     cuentaMlId,
@@ -470,7 +474,7 @@ export async function participarEnPublicacionDirecto(
     skuVariantesDistintas: detalle.skuVariantesDistintas,
     promociones: [promoReal],
   };
-  const [recalculadoMotor] = calcularCandidatosItem(item, reglas, piso.precioMinimo, piso.costo, !sinPiso);
+  const [recalculadoMotor] = calcularCandidatosItem(item, reglas, piso.precioMinimo, piso.costo, !sinPiso, tolerancia);
   if (!recalculadoMotor) {
     return { ok: false, estado: "fallida", error: "No se pudo recalcular esta publicación — probar de nuevo.", accionId: null };
   }
@@ -484,7 +488,7 @@ export async function participarEnPublicacionDirecto(
   }
 
   const accionSolicitada: AccionEscribible = recalculado.estadoMl === "candidate" ? "participar" : "modificar";
-  const validacion = validarCalculado(recalculado, piso.precioMinimo, reglas, accionSolicitada, precioElegido, !sinPiso);
+  const validacion = validarCalculado(recalculado, piso.precioMinimo, reglas, accionSolicitada, precioElegido, !sinPiso, tolerancia);
   if (!validacion.ok) {
     return { ok: false, estado: "fallida", error: validacion.motivo, accionId: null };
   }
@@ -666,12 +670,12 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
           skuVariantesDistintas: detalle.skuVariantesDistintas,
           promociones: resultadoPromos.promociones,
         };
-        const calculadosMotor = calcularCandidatosItem(item, reglasCuenta, precioMinimo, costo, aplicarPiso);
+        const calculadosMotor = calcularCandidatosItem(item, reglasCuenta, precioMinimo, costo, aplicarPiso, toleranciaDeReglas(reglasAdicionales));
         const calculados = regla.tipo === "maximo" ? calculadosMotor.map((c) => aplicarTopeMaximo(c, regla.maximoPct)) : calculadosMotor;
         const resultado: { c: CandidatoCalculado; precioMinimo: number | null; evaluacion: EvaluacionReglasAdicionales | null; promo: (typeof resultadoPromos.promociones)[number] }[] = [];
         for (let i = 0; i < calculados.length; i++) {
           const c = calculados[i];
-          const evaluacion = reglasAdicionales && c.cumpleReglas && c.accionSugerida ? await evaluarCandidatoConReglas(c, resultadoPromos.promociones[i], reglasAdicionales, token, cacheNombres) : null;
+          const evaluacion = reglasAdicionales && c.cumpleReglas && c.accionSugerida ? await evaluarCandidatoConReglas(c, resultadoPromos.promociones[i], reglasAdicionales, token, cacheNombres, cuenta.siteId) : null;
           resultado.push({ c, precioMinimo, evaluacion, promo: resultadoPromos.promociones[i] });
         }
         return resultado;
@@ -726,7 +730,7 @@ export async function aplicarReglaALote(empresaId: string, usuarioId: string, se
           if (cMotor.accionSugerida === "modificar" && c.precioActual != null && (precioConRegla as number) >= c.precioActual) return;
         }
         const accionSolicitada: AccionEscribible = c.accionSugerida === "modificar" ? "modificar" : "participar";
-        const validacion = validarCalculado(c, precioMinimo, reglasCuenta, accionSolicitada, undefined, aplicarPiso);
+        const validacion = validarCalculado(c, precioMinimo, reglasCuenta, accionSolicitada, undefined, aplicarPiso, toleranciaDeReglas(reglasAdicionales));
         if (!validacion.ok) {
           resumen.omitidas += 1;
           resumen.filas.push({ itemId: c.itemId, tituloProducto: c.tituloProducto, tipoPromocion: c.tipoPromocion, estado: "omitida", error: validacion.motivo });
