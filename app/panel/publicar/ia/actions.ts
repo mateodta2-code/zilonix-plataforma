@@ -183,13 +183,24 @@ export type ResultadoDescripcion = { ok: true; descripcion: string } | Fallo;
 
 // Paso 3: descripción, solo con la ficha confirmada. La garantía es la que
 // escribió el vendedor (si no escribió nada, no sale esa sección).
-export async function escribirDescripcionAction(entrada: { cuentaMlId: string; ficha: unknown; garantia?: string; palabrasClave?: unknown }): Promise<ResultadoDescripcion> {
+// «Versión N de M» de la descripción (una por cuenta). Viene del
+// navegador: solo enteros entre 1 y 20, si no, se ignora.
+function leerVariante(v: unknown): { numero: number; total: number } | undefined {
+  const o = v !== null && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  const numero = o.numero;
+  const total = o.total;
+  if (typeof numero !== "number" || typeof total !== "number" || !Number.isInteger(numero) || !Number.isInteger(total)) return undefined;
+  if (total < 1 || total > 20 || numero < 1 || numero > total) return undefined;
+  return { numero, total };
+}
+
+export async function escribirDescripcionAction(entrada: { cuentaMlId: string; ficha: unknown; garantia?: string; palabrasClave?: unknown; variante?: unknown }): Promise<ResultadoDescripcion> {
   const ficha = leerFicha(entrada.ficha);
   if (!fichaConfirmada(ficha)) return { ok: false, aviso: "Confirma la ficha antes de pedir la descripción." };
   const ctx = await preparar(entrada.cuentaMlId);
   if ("ok" in ctx) return ctx;
   try {
-    const respuesta = await conCupoDeTexto(ctx.empresaId, () => llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais, palabrasClave: limpiarPalabrasClave(entrada.palabrasClave) }), { maxTokens: 1_500, timeoutMs: ESPERA_TEXTO_MS }));
+    const respuesta = await conCupoDeTexto(ctx.empresaId, () => llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais, palabrasClave: limpiarPalabrasClave(entrada.palabrasClave), variante: leerVariante(entrada.variante) }), { maxTokens: 1_500, timeoutMs: ESPERA_TEXTO_MS }));
     const partes = leerPartesDescripcion(respuesta, fichaEnTexto(ficha));
     if (!partes) return { ok: false, aviso: "La IA no devolvió una descripción usable. Intenta de nuevo." };
     const descripcion = armarDescripcion(partes, { ficha, garantia: limpiarInfoVendedor(entrada.garantia, LARGO_GARANTIA), idioma: ctx.idioma });

@@ -60,15 +60,46 @@ describe("CrearConIA: ficha arriba y sub pestañas debajo", () => {
       "zilonix:publicar:ia:textos",
       JSON.stringify({
         ts: Date.now(),
-        datos: { cuentaId: "c1", info: "bebedero para gatos", garantia: "", ficha, confirmada: true, categoria: { id: "MCO1", nombre: "Bebederos" }, leyoFotos: true, titulos: null, linkCompetencia: "", tituloCompetencia: "", descripcion: "Texto guardado", pestana: "descripcion" },
+        datos: { cuentaId: "c1", info: "bebedero para gatos", garantia: "", ficha, confirmada: true, categoria: { id: "MCO1", nombre: "Bebederos" }, leyoFotos: true, titulos: null, linkCompetencia: "", tituloCompetencia: "", descripciones: { c1: "Texto guardado" }, pestana: "descripcion" },
       })
     );
     const onFicha = vi.fn();
     render(<CrearConIA {...base} onFicha={onFicha} pasoImagenes={<p>generador</p>} />);
     await waitFor(() => expect(screen.getByRole("tab", { name: "Descripción" }).getAttribute("aria-selected")).toBe("true"));
-    expect((screen.getByLabelText("Descripción propuesta") as HTMLTextAreaElement).value).toBe("Texto guardado");
+    expect((screen.getByLabelText("Descripción propuesta para TIENDA") as HTMLTextAreaElement).value).toBe("Texto guardado");
     expect((screen.getByPlaceholderText(/Qué es, marca y modelo/) as HTMLTextAreaElement).value).toBe("bebedero para gatos");
     expect(onFicha).toHaveBeenCalledWith({ ficha, categoriaId: "MCO1" });
+    // Confirmada: la ficha queda plegada, con la opción de desplegarla.
+    const plegable = screen.getAllByText("Ficha confirmada ✓")[0].closest("details") as HTMLDetailsElement;
+    expect(plegable.open).toBe(false);
+    expect(plegable.textContent).toContain("Bebedero");
+    expect(plegable.textContent).toContain("ver o editar");
+  });
+
+  it("con 2 cuentas pide 2 descripciones distintas (versión 1 y 2) y cada una se usa en su cuenta", async () => {
+    const { escribirDescripcionAction } = await import("./ia/actions");
+    const pedir = vi.mocked(escribirDescripcionAction);
+    pedir.mockImplementation(async (e) => ({ ok: true, descripcion: `Texto para ${e.cuentaMlId}` }));
+    const dos = [
+      { id: "c1", nickname: "UNO", siteId: "MCO" },
+      { id: "c2", nickname: "DOS", siteId: "MEC" },
+    ] as never[];
+    const ficha = Object.fromEntries(CAMPOS_FICHA.map((c) => [c.clave, { valor: c.clave === "nombre" ? "Bebedero" : null, origen: "vendedor" }]));
+    sessionStorage.setItem(
+      "zilonix:publicar:ia:textos",
+      JSON.stringify({ ts: Date.now(), datos: { cuentaId: "c1", info: "", garantia: "", ficha, confirmada: true, categoria: null, leyoFotos: true, titulos: null, linkCompetencia: "", tituloCompetencia: "", descripciones: {}, pestana: "descripcion" } })
+    );
+    const onUsarDescripcion = vi.fn();
+    render(<CrearConIA cuentas={dos} fotos={[]} onUsarTitulo={() => {}} onUsarDescripcion={onUsarDescripcion} />);
+    fireEvent.click(await screen.findByText("Proponer 2 descripciones (una por cuenta)"));
+    await screen.findByLabelText("Descripción propuesta para DOS");
+    expect(pedir.mock.calls.map((c) => [c[0].cuentaMlId, c[0].variante])).toEqual([
+      ["c1", { numero: 1, total: 2 }],
+      ["c2", { numero: 2, total: 2 }],
+    ]);
+    fireEvent.click(screen.getByText("Usar cada una en su cuenta"));
+    expect(onUsarDescripcion).toHaveBeenCalledWith("c1", "Texto para c1");
+    expect(onUsarDescripcion).toHaveBeenCalledWith("c2", "Texto para c2");
   });
 });
 

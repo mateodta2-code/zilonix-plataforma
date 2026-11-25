@@ -121,4 +121,36 @@ describe("GenerarConIA: «Imágenes creadas»", () => {
     renderizar({ ficha: null });
     await waitFor(() => expect(screen.getByText("Imágenes creadas (1)")).toBeTruthy());
   });
+
+  it("«Una portada para cada cuenta» reparte las portadas en orden", async () => {
+    guardar({
+      creadas: [
+        { id: "p1", url: "https://img/p1.png", nombre: "Portada 1", tipo: "portada", estilo: "zilonix_portadas" },
+        { id: "p2", url: "https://img/p2.png", nombre: "Portada 2", tipo: "portada", estilo: "zilonix_portadas" },
+      ],
+    });
+    const props = renderizar();
+    fireEvent.click(await screen.findByText("Una portada para cada cuenta"));
+    expect(props.onUsarPortada).toHaveBeenCalledWith("c1", "https://img/p1.png");
+    expect(props.onUsarPortada).toHaveBeenCalledWith("c2", "https://img/p2.png");
+  });
+});
+
+describe("GenerarConIA: cuántas portadas", () => {
+  it("con 2 cuentas: 1 o 2 portadas, y por defecto una por cuenta", () => {
+    renderizar();
+    const opciones = screen.getAllByRole("radio").filter((r) => /portada/.test(r.textContent ?? ""));
+    expect(opciones.map((o) => o.textContent)).toEqual(["1 portada", "2 portadas"]);
+    expect(screen.getByRole("radio", { name: "2 portadas" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("con 10 cuentas: lista de 1 a 10, por defecto 10 (una por cuenta)", () => {
+    const diez = Array.from({ length: 10 }, (_, i) => ({ id: `c${i}`, nickname: `T${i}`, siteId: "MCO" })) as never[];
+    renderizar({ cuentas: diez });
+    const lista = screen.getByLabelText("Cuántas portadas") as HTMLSelectElement;
+    expect(lista.options).toHaveLength(10);
+    expect(lista.value).toBe("10");
+    fireEvent.change(lista, { target: { value: "2" } });
+    expect(lista.value).toBe("2");
+  });
 });
