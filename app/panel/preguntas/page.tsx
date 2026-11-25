@@ -1,16 +1,17 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
-import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
+import { Chip } from "@/components/marco/Chip";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
 import { leerBandejaPreguntas } from "@/lib/ml/preguntas";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { minutosDesde, rotuloEtapaReclamo, rotuloTipoReclamo, textoEspera } from "@/lib/preguntas/tiempo";
+import { minutosDesde, minutosHasta, rotuloEtapaReclamo, rotuloTipoReclamo, textoEspera, textoPlazo, tonoPlazo } from "@/lib/preguntas/tiempo";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { AutoRefrescoDespachos } from "../despachos/AutoRefrescoDespachos";
@@ -54,7 +55,7 @@ export default async function PreguntasPage({ searchParams }: { searchParams?: {
     <>
       <EncabezadoPagina
         titulo="Preguntas y reclamos"
-        descripcion="Preguntas sin responder de todas tus cuentas, la más vieja primero. Mercado Libre califica qué tan rápido respondes."
+        descripcion="Preguntas sin responder y reclamos abiertos de todas tus cuentas. Mercado Libre califica qué tan rápido respondes."
       />
 
       {/* Vuelve a consultar cada minuto mientras la pestaña está visible. */}
@@ -99,20 +100,28 @@ export default async function PreguntasPage({ searchParams }: { searchParams?: {
         <EstadoVacio>No hay reclamos abiertos.</EstadoVacio>
       ) : (
         <Tarjeta>
-          <p className={styles.nota}>Los reclamos se resuelven en Mercado Libre (Ventas → Reclamos). Acá ves cuáles están abiertos y desde cuándo.</p>
-          <Tabla encabezados={["Cuenta", "Tipo", "Etapa", "Motivo", "Venta", "Abierto", "Último cambio"]}>
-            {bandeja.reclamos.map((reclamo) => (
-              <FilaTabla key={`${reclamo.cuentaMlId}-${reclamo.id}`}>
-                <CeldaTabla>{reclamo.nickname}</CeldaTabla>
-                <CeldaTabla>{rotuloTipoReclamo(reclamo.tipo)}</CeldaTabla>
-                <CeldaTabla>{rotuloEtapaReclamo(reclamo.etapa)}</CeldaTabla>
-                <CeldaTabla>{reclamo.motivo ?? "—"}</CeldaTabla>
-                <CeldaTabla>{reclamo.recursoId ?? "—"}</CeldaTabla>
-                <CeldaTabla>{textoEspera(minutosDesde(reclamo.fecha, ahora))}</CeldaTabla>
-                <CeldaTabla>{textoEspera(minutosDesde(reclamo.actualizado, ahora))}</CeldaTabla>
-              </FilaTabla>
-            ))}
-          </Tabla>
+          <ul className={styles.lista}>
+            {bandeja.reclamos.map((reclamo) => {
+              const minutos = minutosHasta(reclamo.plazo, ahora);
+              return (
+                <li key={`${reclamo.cuentaMlId}-${reclamo.id}`} className={styles.reclamo}>
+                  <Link href={`/panel/preguntas/reclamos/${reclamo.cuentaMlId}/${reclamo.id}`} className={styles.reclamoEnlace}>
+                    <div className={styles.cabeceraPregunta}>
+                      <span className={styles.cuenta}>{reclamo.nickname}</span>
+                      <Chip estado="neutro">{rotuloTipoReclamo(reclamo.tipo)}</Chip>
+                      <Chip estado="aviso">{rotuloEtapaReclamo(reclamo.etapa)}</Chip>
+                      <Chip estado={tonoPlazo(minutos)}>{textoPlazo(minutos)}</Chip>
+                    </div>
+                    <p className={styles.producto}>{reclamo.motivoTexto ?? reclamo.motivo ?? "Motivo sin detalle"}</p>
+                    <p className={styles.producto}>
+                      Venta {reclamo.recursoId ?? "—"} · abierto {textoEspera(minutosDesde(reclamo.fecha, ahora))} · último cambio {textoEspera(minutosDesde(reclamo.actualizado, ahora))}
+                    </p>
+                    <span className={styles.verReclamo}>Ver reclamo →</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
         </Tarjeta>
       )}
     </>

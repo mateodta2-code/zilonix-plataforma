@@ -16,6 +16,8 @@ import {
   type PreguntaMl,
   type ReclamoMl,
 } from "@/lib/ml/cliente";
+import { obtenerMotivoReclamoMl, plazoDeJugadores } from "@/lib/ml/reclamos";
+import { compararPlazo } from "@/lib/preguntas/tiempo";
 import {
   CuentaDesconectadaError,
   listarCuentasConectadas,
@@ -33,7 +35,15 @@ export type PreguntaPendiente = PreguntaMl & {
   stock: number | null;
 };
 
-export type ReclamoAbierto = ReclamoMl & { cuentaMlId: string; nickname: string };
+export type ReclamoAbierto = ReclamoMl & {
+  cuentaMlId: string;
+  nickname: string;
+  siteId: string | null;
+  // Motivo legible (reasons/{id}); null si ML no lo dio — se muestra el código.
+  motivoTexto: string | null;
+  // Menor due_date de las acciones del vendedor, ya leído del listado.
+  plazo: string | null;
+};
 
 export type CuentaSinRevisar = { nickname: string; motivo: string };
 
@@ -80,7 +90,22 @@ export async function leerBandejaPreguntas(empresaId: string): Promise<BandejaPr
         preguntas.push({ ...pregunta, cuentaMlId: cuenta.id, nickname: cuenta.nickname, siteId: cuenta.siteId, titulo: null, precio: null, stock: null });
       }
       const abiertos = await buscarReclamosAbiertosMl(token);
-      for (const reclamo of abiertos.reclamos) reclamos.push({ ...reclamo, cuentaMlId: cuenta.id, nickname: cuenta.nickname });
+      // Un motivo por código distinto, no por reclamo.
+      const motivos = new Map<string, string | null>();
+      for (const reclamo of abiertos.reclamos) {
+        if (reclamo.motivo && !motivos.has(reclamo.motivo)) {
+          const m = await obtenerMotivoReclamoMl(reclamo.motivo, token);
+          motivos.set(reclamo.motivo, m?.detalle ?? m?.nombre ?? null);
+        }
+        reclamos.push({
+          ...reclamo,
+          cuentaMlId: cuenta.id,
+          nickname: cuenta.nickname,
+          siteId: cuenta.siteId,
+          motivoTexto: reclamo.motivo ? (motivos.get(reclamo.motivo) ?? null) : null,
+          plazo: plazoDeJugadores(reclamo.jugadores),
+        });
+      }
     } catch (error) {
       // Solo el nombre del error: nunca el token ni el cuerpo de ML.
       console.warn(`[lib/ml/preguntas] cuenta ${cuenta.id}: ${error instanceof Error ? error.name : "error"}`);
@@ -116,6 +141,7 @@ export async function leerBandejaPreguntas(empresaId: string): Promise<BandejaPr
   }
 
   preguntas.sort(porFecha);
-  reclamos.sort(porFecha);
+  // El plazo más cercano primero; sin plazo, por antigüedad.
+  reclamos.sort((a, b) => compararPlazo(a.plazo, b.plazo) || porFecha(a, b));
   return { preguntas, hayMas, reclamos, cuentasSinRevisar };
 }
