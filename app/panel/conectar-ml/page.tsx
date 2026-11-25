@@ -20,6 +20,8 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { FilaLista, ListaFilas } from "@/components/marco/ListaFilas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { ActualizarMientrasImporta } from "./ActualizarMientrasImporta";
+import { BarraImportacion } from "./BarraImportacion";
+import { FormularioSincronizarFalabella } from "./FormularioSincronizarFalabella";
 import { estaEnCurso } from "./importacionEnCurso";
 import styles from "./page.module.css";
 
@@ -206,10 +208,12 @@ export default async function ConectarMlPage({
                         (últimos {DIAS_HACIA_ATRAS} días).
                       </span>
                     ) : (
-                      <span>
-                        Importando pedidos y publicaciones de los últimos {DIAS_HACIA_ATRAS} días… {importacion.pedidosImportados}
-                        {importacion.pedidosEncontrados ? `/${importacion.pedidosEncontrados}` : ""} pedidos.
-                      </span>
+                      <BarraImportacion
+                        dias={DIAS_HACIA_ATRAS}
+                        pedidosImportados={importacion.pedidosImportados}
+                        pedidosEncontrados={importacion.pedidosEncontrados ?? null}
+                        sticky={importaciones.filter((i) => estaEnCurso(i.importacion)).length <= 1}
+                      />
                     )}
                   </div>
                 )}
@@ -281,11 +285,7 @@ export default async function ConectarMlPage({
                   )}
                 </div>
                 {!cuenta.desconectadaTs && puedeConectar && (
-                  <form action={sincronizarPedidosFalabella.bind(null, cuenta.id)} className={styles.formSincronizar}>
-                    <button type="submit" className={clasesBoton("primario")}>
-                      Sincronizar pedidos (últimos 60 días)
-                    </button>
-                  </form>
+                  <FormularioSincronizarFalabella accion={sincronizarPedidosFalabella.bind(null, cuenta.id)} />
                 )}
                 <div className={styles.detalleImportacion}>{pedidosDeLaCuenta} pedido(s) importado(s).</div>
               </FilaLista>

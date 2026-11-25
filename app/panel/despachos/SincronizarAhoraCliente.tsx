@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Boton } from "@/components/marco/Boton";
 import { sincronizarAhoraAction } from "./actions";
 import styles from "./page.module.css";
@@ -35,7 +36,18 @@ export function SincronizarAhoraCliente() {
       <Boton variante="primario" type="button" onClick={sincronizar} disabled={enCurso}>
         {enCurso ? "Sincronizando…" : "Sincronizar ahora"}
       </Boton>
-      {mensaje && <p className={esError ? styles.errorTarjeta : styles.notaDespachado}>{mensaje}</p>}
+      {/* Barra azul (Barra-B): animada mientras corre; al terminar bien queda
+          «completa» ~4 s y luego deja el resumen. El error sigue como antes. */}
+      <BarraCarga
+        estado={enCurso ? "cargando" : mensaje && !esError ? "completa" : "inactiva"}
+        titulo="Sincronizando ventas de Mercado Libre…"
+        avance={null}
+        textoCompleta={mensaje ?? undefined}
+        textoInactiva={mensaje && !esError ? mensaje : undefined}
+        sticky={false}
+        ariaLabel="Sincronizando ventas de Mercado Libre"
+      />
+      {mensaje && esError && <p className={styles.errorTarjeta}>{mensaje}</p>}
     </div>
   );
 }
