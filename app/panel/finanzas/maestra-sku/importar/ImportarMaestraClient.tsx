@@ -4,6 +4,7 @@ import { useState } from "react";
 import { confirmarMaestraAction, previsualizarMaestraAction, type EstadoImportacionMaestra } from "./actions";
 import { CAMPOS_MAESTRA, ETIQUETAS_CAMPO, type CampoMaestra, type MapeoColumnas } from "@/lib/finanzas/maestra-campos";
 import { mostrarMonto } from "@/lib/finanzas/montos";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
@@ -28,6 +29,8 @@ export function ImportarMaestraClient() {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [mapeo, setMapeo] = useState<MapeoColumnas | null>(null);
   const [cargando, setCargando] = useState(false);
+  // Qué se está haciendo, para el título de la banda azul de carga.
+  const [guardando, setGuardando] = useState(false);
 
   function datosConArchivo(mapeoManual: MapeoColumnas | null): FormData | null {
     if (!archivo) return null;
@@ -40,6 +43,7 @@ export function ImportarMaestraClient() {
   async function ejecutar(accion: (f: FormData) => Promise<EstadoImportacionMaestra>, mapeoManual: MapeoColumnas | null) {
     const formData = datosConArchivo(mapeoManual);
     if (!formData) return;
+    setGuardando(accion === confirmarMaestraAction);
     setCargando(true);
     try {
       const nuevo = await accion(formData);
@@ -170,6 +174,12 @@ export function ImportarMaestraClient() {
         )}
         {conCambios.length === 0 && errores.length === 0 && <EstadoVacio>El archivo no cambia nada de la tabla maestra.</EstadoVacio>}
 
+        <BarraCarga
+        estado={cargando ? "cargando" : "inactiva"}
+        titulo={guardando ? "Guardando la maestra…" : "Revisando el archivo…"}
+        avance={null}
+        sticky={false}
+      />
         <div className={styles.acciones}>
           <Boton type="button" onClick={() => ejecutar(confirmarMaestraAction, mapeo)} disabled={cargando || !puedeConfirmar}>
             {cargando ? "Guardando…" : `Confirmar (${resumen.nuevas + resumen.cambios})`}
@@ -208,6 +218,12 @@ export function ImportarMaestraClient() {
         Celda vacía no cambia lo guardado; 0 sí. Costo vacío = sin costo; costo 0 = costo real. Precio mínimo 0 = no aplica. El proveedor
         tiene que existir en Proveedores. Montos con punto de miles y coma decimal (2.000 o 1.234,56).
       </p>
+      <BarraCarga
+        estado={cargando ? "cargando" : "inactiva"}
+        titulo={guardando ? "Guardando la maestra…" : "Revisando el archivo…"}
+        avance={null}
+        sticky={false}
+      />
       <div className={styles.acciones}>
         <Boton type="submit" disabled={cargando || !archivo}>
           {cargando ? "Revisando…" : "Ver vista previa"}
