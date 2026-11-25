@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoBodega } from "./bodega-context";
 import { dbComoEmpresa } from "./empresa-context";
 import { db } from "./index";
-import { auditoria, entregasDomiciliario, usuarios } from "./schema";
+import { auditoria, entregasDomiciliario, entregasDomiciliarioContacto, usuarios } from "./schema";
 import { crearDosEmpresas } from "./test-utils/aislamiento";
 import { aceptarInvitacionBodega, crearInvitacionBodega } from "../lib/bodega/invitaciones";
 import { listarMiembros, cambiarActivoDeMiembro } from "../lib/bodega/miembros";
@@ -70,7 +70,7 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     // Aun saltándose la lib, el WITH CHECK de la base lo rechaza.
     await expect(
       dbComoEmpresa(empresaA, (tx) =>
-        tx.insert(entregasDomiciliario).values({ empresaId: empresaA, bodegaId: bodegaB, miembroDomiciliarioId: miembroB, pedidoReferencia: pedido("y"), ...datos })
+        tx.insert(entregasDomiciliario).values({ empresaId: empresaA, bodegaId: bodegaB, miembroDomiciliarioId: miembroB, pedidoReferencia: pedido("y") })
       )
     ).rejects.toThrow();
   });
@@ -93,13 +93,16 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
   it("otra empresa no ve, edita ni borra las entregas", async () => {
     const vistas = await dbComoEmpresa(empresaB, (tx) => tx.select().from(entregasDomiciliario));
     expect(vistas).toHaveLength(0);
-    const editadas = await dbComoEmpresa(empresaB, (tx) => tx.update(entregasDomiciliario).set({ nota: "hack" }).returning({ id: entregasDomiciliario.id }));
+    const editadas = await dbComoEmpresa(empresaB, (tx) => tx.update(entregasDomiciliario).set({ motivo: "hack" }).returning({ id: entregasDomiciliario.id }));
     expect(editadas).toHaveLength(0);
+    expect(await dbComoEmpresa(empresaB, (tx) => tx.select().from(entregasDomiciliarioContacto))).toHaveLength(0);
+    const contactoEditado = await dbComoEmpresa(empresaB, (tx) => tx.update(entregasDomiciliarioContacto).set({ nota: "hack" }).returning({ id: entregasDomiciliarioContacto.entregaId }));
+    expect(contactoEditado).toHaveLength(0);
     const borradas = await dbComoEmpresa(empresaB, (tx) => tx.delete(entregasDomiciliario).returning({ id: entregasDomiciliario.id }));
     expect(borradas).toHaveLength(0);
     // Y B no puede insertar una entrega a nombre de A.
     await expect(
-      dbComoEmpresa(empresaB, (tx) => tx.insert(entregasDomiciliario).values({ empresaId: empresaA, bodegaId: bodegaA, miembroDomiciliarioId: miembro1, pedidoReferencia: pedido("z"), ...datos }))
+      dbComoEmpresa(empresaB, (tx) => tx.insert(entregasDomiciliario).values({ empresaId: empresaA, bodegaId: bodegaA, miembroDomiciliarioId: miembro1, pedidoReferencia: pedido("z") }))
     ).rejects.toThrow();
   });
 
@@ -111,7 +114,7 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     expect(deDom2.map((e) => e.pedidoReferencia)).toEqual([pedido("1")]);
     expect(await listarMisEntregas(bodegaB, domB)).toHaveLength(0);
     // dom2 no puede tomar la de dom1 ni usando la bodega correcta.
-    const tocadas = await dbComoBodega(bodegaA, (tx) => tx.update(entregasDomiciliario).set({ nota: "x" }).where(eq(entregasDomiciliario.pedidoReferencia, pedido("3"))).returning({ id: entregasDomiciliario.id }), "domiciliario", dom2);
+    const tocadas = await dbComoBodega(bodegaA, (tx) => tx.update(entregasDomiciliario).set({ motivo: "x" }).where(eq(entregasDomiciliario.pedidoReferencia, pedido("3"))).returning({ id: entregasDomiciliario.id }), "domiciliario", dom2);
     expect(tocadas).toHaveLength(0);
     // Sin usuario en la sesión, ni siquiera un domiciliario ve algo.
     expect(await dbComoBodega(bodegaA, (tx) => tx.select().from(entregasDomiciliario), "domiciliario")).toHaveLength(0);
@@ -120,40 +123,60 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     expect(await dbComoBodega(bodegaB, (tx) => tx.select().from(entregasDomiciliario), "admin_bodega", adminBId)).toHaveLength(0);
   });
 
-  it("el domiciliario no ve los datos del comprador cuando la entrega está cerrada; la empresa los conserva", async () => {
+  it("el domiciliario cierra su entrega, conserva la cabecera y deja de ver los datos del comprador; la empresa los conserva", async () => {
     await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("4"), datos });
     const abierta = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.pedidoReferencia === pedido("4"))!;
     expect(abierta.direccion).toBe(datos.direccion);
+    expect(abierta.telefono).toBe(datos.telefono);
 
     await cambiarEstadoMiEntrega(bodegaA, dom1, abierta.id, "en_camino");
-    expect((await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === abierta.id)?.estado).toBe("en_camino");
+    const enCamino = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === abierta.id)!;
+    expect(enCamino.estado).toBe("en_camino");
+    expect(enCamino.direccion).toBe(datos.direccion);
     await cambiarEstadoMiEntrega(bodegaA, dom1, abierta.id, "entregada");
 
-    expect((await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === abierta.id)).toBeUndefined();
-    const directo = await dbComoBodega(bodegaA, (tx) => tx.select({ direccion: entregasDomiciliario.direccion, telefono: entregasDomiciliario.telefono }).from(entregasDomiciliario).where(eq(entregasDomiciliario.id, abierta.id)), "domiciliario", dom1);
+    // La cabecera sigue (historial), los datos del comprador ya no.
+    const cerrada = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === abierta.id)!;
+    expect(cerrada.estado).toBe("entregada");
+    expect(cerrada).toMatchObject({ receptorNombre: null, direccion: null, barrio: null, ciudad: null, telefono: null, nota: null });
+    const directo = await dbComoBodega(bodegaA, (tx) => tx.select().from(entregasDomiciliarioContacto).where(eq(entregasDomiciliarioContacto.entregaId, abierta.id)), "domiciliario", dom1);
     expect(directo).toHaveLength(0);
     // Ya cerrada no se puede volver a tocar ni reasignar.
     await expect(cambiarEstadoMiEntrega(bodegaA, dom1, abierta.id, "no_entregada", "x")).rejects.toBeInstanceOf(EntregaInvalidaError);
     await expect(asignarEntrega(empresaA, usuarioA, { miembroId: miembro2, marketplace: "mercadolibre", pedidoReferencia: pedido("4"), datos })).rejects.toBeInstanceOf(EntregaInvalidaError);
     // La empresa sigue viendo todos los datos.
-    const [conservada] = await dbComoEmpresa(empresaA, (tx) => tx.select().from(entregasDomiciliario).where(eq(entregasDomiciliario.id, abierta.id)));
-    expect(conservada).toMatchObject({ estado: "entregada", direccion: datos.direccion, telefono: datos.telefono, receptorNombre: datos.receptorNombre });
+    const [conservada] = await dbComoEmpresa(empresaA, (tx) =>
+      tx.select().from(entregasDomiciliario).innerJoin(entregasDomiciliarioContacto, eq(entregasDomiciliarioContacto.entregaId, entregasDomiciliario.id)).where(eq(entregasDomiciliario.id, abierta.id))
+    );
+    expect(conservada.entregas_domiciliario.estado).toBe("entregada");
+    expect(conservada.entregas_domiciliario_contacto).toMatchObject({ direccion: datos.direccion, telefono: datos.telefono, receptorNombre: datos.receptorNombre });
   });
 
-  it("un domiciliario no ve las entregas de otro de su bodega ni las propias ya cerradas", async () => {
+  it("el domiciliario no puede escribir en el contacto, ni siquiera el de su entrega abierta", async () => {
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("7"), datos });
+    const propia = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.pedidoReferencia === pedido("7"))!;
+    const tocar = <T>(fn: (tx: typeof db) => Promise<T>) => dbComoBodega(bodegaA, fn, "domiciliario", dom1);
+    // UPDATE y DELETE sin política para el domiciliario: RLS los filtra (0 filas).
+    expect(await tocar((tx) => tx.update(entregasDomiciliarioContacto).set({ direccion: "otra" }).where(eq(entregasDomiciliarioContacto.entregaId, propia.id)).returning({ id: entregasDomiciliarioContacto.entregaId }))).toHaveLength(0);
+    expect(await tocar((tx) => tx.delete(entregasDomiciliarioContacto).where(eq(entregasDomiciliarioContacto.entregaId, propia.id)).returning({ id: entregasDomiciliarioContacto.entregaId }))).toHaveLength(0);
+    await expect(tocar((tx) => tx.insert(entregasDomiciliarioContacto).values({ entregaId: randomUUID(), empresaId: empresaA, ...datos }))).rejects.toThrow();
+    const [intacto] = await dbComoEmpresa(empresaA, (tx) => tx.select().from(entregasDomiciliarioContacto).where(eq(entregasDomiciliarioContacto.entregaId, propia.id)));
+    expect(intacto.direccion).toBe(datos.direccion);
+  });
+
+  it("un domiciliario no ve las entregas de otro de su bodega, y las propias cerradas quedan sin datos del comprador", async () => {
     await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("5"), datos });
     await asignarEntrega(empresaA, usuarioA, { miembroId: miembro2, marketplace: "mercadolibre", pedidoReferencia: pedido("6"), datos });
     const todas = (tx: typeof db) => tx.select({ ref: entregasDomiciliario.pedidoReferencia, estado: entregasDomiciliario.estado }).from(entregasDomiciliario);
     const vistas1 = await dbComoBodega(bodegaA, todas, "domiciliario", dom1);
     expect(vistas1.map((e) => e.ref)).toContain(pedido("5"));
     expect(vistas1.map((e) => e.ref)).not.toContain(pedido("6"));
-    // Ninguna fila cerrada (ni la suya ni la de otro) es visible para el domiciliario.
-    expect(vistas1.every((e) => e.estado === "asignada" || e.estado === "en_camino")).toBe(true);
     const cerrada = (await listarMisEntregas(bodegaA, dom2)).find((e) => e.pedidoReferencia === pedido("6"))!;
     await cambiarEstadoMiEntrega(bodegaA, dom2, cerrada.id, "entregada");
-    const vistas2 = await dbComoBodega(bodegaA, todas, "domiciliario", dom2);
-    expect(vistas2.map((e) => e.ref)).not.toContain(pedido("6"));
-    expect(vistas2.every((e) => e.estado === "asignada" || e.estado === "en_camino")).toBe(true);
+    expect((await dbComoBodega(bodegaA, todas, "domiciliario", dom1)).map((e) => e.ref)).not.toContain(pedido("6"));
+    const propia = (await listarMisEntregas(bodegaA, dom2)).find((e) => e.id === cerrada.id)!;
+    expect(propia.estado).toBe("entregada");
+    expect(propia.direccion).toBeNull();
   });
 
   it("una sesión de bodega sin rol no ve ninguna entrega", async () => {

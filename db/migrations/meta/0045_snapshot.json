@@ -1,5 +1,5 @@
 {
-  "id": "98591b99-7ead-4e13-a254-2de5f96de181",
+  "id": "d863d847-4b6e-4bdb-a769-b0842b90650c",
   "prevId": "3115509b-4434-42bd-a90e-17da7fa52653",
   "version": "7",
   "dialect": "postgresql",
@@ -2210,42 +2210,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "receptor_nombre": {
-          "name": "receptor_nombre",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "direccion": {
-          "name": "direccion",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "barrio": {
-          "name": "barrio",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ciudad": {
-          "name": "ciudad",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "telefono": {
-          "name": "telefono",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "nota": {
-          "name": "nota",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "asignada_ts": {
           "name": "asignada_ts",
           "type": "timestamp with time zone",
@@ -2365,6 +2329,94 @@
           "tableTo": "miembros_bodega_3pl",
           "columnsFrom": [
             "miembro_domiciliario_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.entregas_domiciliario_contacto": {
+      "name": "entregas_domiciliario_contacto",
+      "schema": "",
+      "columns": {
+        "entrega_id": {
+          "name": "entrega_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "empresa_id": {
+          "name": "empresa_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "receptor_nombre": {
+          "name": "receptor_nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "direccion": {
+          "name": "direccion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "barrio": {
+          "name": "barrio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ciudad": {
+          "name": "ciudad",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "telefono": {
+          "name": "telefono",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nota": {
+          "name": "nota",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "entregas_domiciliario_contacto_entrega_id_entregas_domiciliario_id_fk": {
+          "name": "entregas_domiciliario_contacto_entrega_id_entregas_domiciliario_id_fk",
+          "tableFrom": "entregas_domiciliario_contacto",
+          "tableTo": "entregas_domiciliario",
+          "columnsFrom": [
+            "entrega_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "entregas_domiciliario_contacto_empresa_id_empresas_id_fk": {
+          "name": "entregas_domiciliario_contacto_empresa_id_empresas_id_fk",
+          "tableFrom": "entregas_domiciliario_contacto",
+          "tableTo": "empresas",
+          "columnsFrom": [
+            "empresa_id"
           ],
           "columnsTo": [
             "id"

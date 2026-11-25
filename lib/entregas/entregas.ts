@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { dbComoBodega } from "@/db/bodega-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { bodegas3pl, entregasDomiciliario, miembrosBodega3pl, usuarios } from "@/db/schema";
+import { bodegas3pl, entregasDomiciliario, entregasDomiciliarioContacto, miembrosBodega3pl, usuarios } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { registrarAuditoriaBodega } from "@/lib/bodega/auditoria";
 import { normalizarDatosEntrega, type DatosEntrega } from "./datos";
@@ -45,14 +45,15 @@ export async function listarEntregasDePedidos(empresaId: string, marketplace: st
         estado: entregasDomiciliario.estado,
         miembroDomiciliarioId: entregasDomiciliario.miembroDomiciliarioId,
         domiciliarioNombre: usuarios.nombre,
-        receptorNombre: entregasDomiciliario.receptorNombre,
-        direccion: entregasDomiciliario.direccion,
-        barrio: entregasDomiciliario.barrio,
-        ciudad: entregasDomiciliario.ciudad,
-        telefono: entregasDomiciliario.telefono,
-        nota: entregasDomiciliario.nota,
+        receptorNombre: entregasDomiciliarioContacto.receptorNombre,
+        direccion: entregasDomiciliarioContacto.direccion,
+        barrio: entregasDomiciliarioContacto.barrio,
+        ciudad: entregasDomiciliarioContacto.ciudad,
+        telefono: entregasDomiciliarioContacto.telefono,
+        nota: entregasDomiciliarioContacto.nota,
       })
       .from(entregasDomiciliario)
+      .innerJoin(entregasDomiciliarioContacto, eq(entregasDomiciliarioContacto.entregaId, entregasDomiciliario.id))
       .innerJoin(miembrosBodega3pl, eq(miembrosBodega3pl.id, entregasDomiciliario.miembroDomiciliarioId))
       .innerJoin(usuarios, eq(usuarios.id, miembrosBodega3pl.usuarioId))
       .where(and(eq(entregasDomiciliario.empresaId, empresaId), eq(entregasDomiciliario.marketplace, marketplace), inArray(entregasDomiciliario.pedidoReferencia, referencias)))
@@ -86,6 +87,7 @@ export async function asignarEntrega(
     if (actual && actual.estado !== "asignada") throw new EntregaInvalidaError("La entrega ya salió con el domiciliario; no se puede reasignar.");
 
     let accion: "asignada" | "reasignada" = "asignada";
+    let entregaId = actual?.id ?? randomUUID();
     if (actual) {
       accion = "reasignada";
       if (actual.bodegaId !== miembro.bodegaId) {
@@ -94,22 +96,25 @@ export async function asignarEntrega(
       } else {
         const filas = await tx
           .update(entregasDomiciliario)
-          .set({ miembroDomiciliarioId: miembro.id, ...datos, actualizadaTs: new Date() })
+          .set({ miembroDomiciliarioId: miembro.id, actualizadaTs: new Date() })
           .where(eq(entregasDomiciliario.id, actual.id))
           .returning({ id: entregasDomiciliario.id });
         if (filas.length === 0) throw new EntregaInvalidaError("No se pudo reasignar la entrega.");
+        // Cabecera y contacto, en la misma transacción.
+        await tx.update(entregasDomiciliarioContacto).set(datos).where(eq(entregasDomiciliarioContacto.entregaId, actual.id));
       }
     }
     if (!actual || actual.bodegaId !== miembro.bodegaId) {
+      entregaId = randomUUID();
       await tx.insert(entregasDomiciliario).values({
-        id: randomUUID(),
+        id: entregaId,
         empresaId,
         bodegaId: miembro.bodegaId,
         miembroDomiciliarioId: miembro.id,
         marketplace: entrada.marketplace,
         pedidoReferencia: referencia,
-        ...datos,
       });
+      await tx.insert(entregasDomiciliarioContacto).values({ entregaId, empresaId, ...datos });
     }
     // Detalle sin datos del comprador: solo la referencia del pedido.
     await registrarAuditoria(tx, {
@@ -145,12 +150,33 @@ export async function quitarEntrega(empresaId: string, usuarioId: string, market
 }
 
 // ── Para Domi-2 (#629), desde /domiciliario con accesoBodega("domiciliario") ──
-// La base (política entrega_domiciliario_ver) ya devuelve solo las filas
-// ABIERTAS y SUYAS: no hay filtro de estado que olvidar acá.
+// La base devuelve solo las filas SUYAS (cualquier estado) y los datos del
+// comprador solo si la entrega sigue abierta (política del contacto).
 export async function listarMisEntregas(bodegaId: string, usuarioId: string) {
   return dbComoBodega(
     bodegaId,
-    (tx) => tx.select().from(entregasDomiciliario).orderBy(asc(entregasDomiciliario.asignadaTs)),
+    // LEFT JOIN: con la entrega cerrada la política del contacto no devuelve
+    // la fila y esos campos llegan en null (el historial queda, sin datos).
+    (tx) =>
+      tx
+        .select({
+          id: entregasDomiciliario.id,
+          pedidoReferencia: entregasDomiciliario.pedidoReferencia,
+          marketplace: entregasDomiciliario.marketplace,
+          estado: entregasDomiciliario.estado,
+          motivo: entregasDomiciliario.motivo,
+          asignadaTs: entregasDomiciliario.asignadaTs,
+          actualizadaTs: entregasDomiciliario.actualizadaTs,
+          receptorNombre: entregasDomiciliarioContacto.receptorNombre,
+          direccion: entregasDomiciliarioContacto.direccion,
+          barrio: entregasDomiciliarioContacto.barrio,
+          ciudad: entregasDomiciliarioContacto.ciudad,
+          telefono: entregasDomiciliarioContacto.telefono,
+          nota: entregasDomiciliarioContacto.nota,
+        })
+        .from(entregasDomiciliario)
+        .leftJoin(entregasDomiciliarioContacto, eq(entregasDomiciliarioContacto.entregaId, entregasDomiciliario.id))
+        .orderBy(asc(entregasDomiciliario.asignadaTs)),
     "domiciliario",
     usuarioId
   );
@@ -164,11 +190,10 @@ export async function cambiarEstadoMiEntrega(bodegaId: string, usuarioId: string
   await dbComoBodega(
     bodegaId,
     async (tx) => {
-      // Se lee antes (la política solo deja ver las abiertas y suyas) y el
-      // UPDATE va sin RETURNING: la fila ya cerrada no pasa la política de
-      // SELECT del domiciliario, y es lo esperado (no ve sus datos).
-      const [propia] = await tx.select({ id: entregasDomiciliario.id }).from(entregasDomiciliario).where(eq(entregasDomiciliario.id, entregaId));
-      if (!propia) throw new EntregaInvalidaError("Esa entrega no está disponible.");
+      // Se lee antes (la política solo deja ver las suyas). La política de
+      // UPDATE solo deja cerrar las abiertas: una cerrada afecta 0 filas.
+      const [propia] = await tx.select({ id: entregasDomiciliario.id, estado: entregasDomiciliario.estado }).from(entregasDomiciliario).where(eq(entregasDomiciliario.id, entregaId));
+      if (!propia || propia.estado === "entregada" || propia.estado === "no_entregada") throw new EntregaInvalidaError("Esa entrega no está disponible.");
       await tx.update(entregasDomiciliario).set({ estado: nuevo, motivo: motivoLimpio, actualizadaTs: new Date() }).where(eq(entregasDomiciliario.id, entregaId));
       await registrarAuditoriaBodega(tx, { bodegaId, usuarioId, accion: `entrega_${nuevo}`, entidad: "entrega_domiciliario", entidadId: entregaId });
     },

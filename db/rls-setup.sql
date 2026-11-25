@@ -1142,17 +1142,19 @@ CREATE POLICY stock3pl_bodega_editar ON stock_bodega_3pl FOR UPDATE TO app_user
 --   cambia o quita el domiciliario solo mientras esté 'asignada'.
 -- · La bodega ve las de su bodega_id.
 -- · El domiciliario (app.bodega_usuario_id, fijado por dbComoBodega con
---   usuarioId) ve y cierra SOLO las suyas Y SOLO mientras estén abiertas
---   (asignada|en_camino): por eso, al pasar a entregada/no_entregada, los
---   datos de quien recibe dejan de ser legibles para él EN LA BASE. La
---   empresa los conserva.
+--   usuarioId) ve SOLO las suyas (cualquier estado: un UPDATE exige que la
+--   fila nueva también pase el SELECT, y así tiene historial) y las cierra
+--   mientras estén abiertas.
+-- · Los datos de quien recibe viven en entregas_domiciliario_contacto: el
+--   domiciliario solo los lee mientras la entrega esté abierta
+--   (asignada|en_camino) y nunca los escribe. La empresa los conserva.
 -- ---------------------------------------------------------------------
 ALTER TABLE entregas_domiciliario ENABLE ROW LEVEL SECURITY;
 ALTER TABLE entregas_domiciliario FORCE ROW LEVEL SECURITY;
 
 GRANT SELECT, INSERT, DELETE ON entregas_domiciliario TO app_user;
 REVOKE UPDATE ON entregas_domiciliario FROM app_user;
-GRANT UPDATE (miembro_domiciliario_id, estado, motivo, receptor_nombre, direccion, barrio, ciudad, telefono, nota, actualizada_ts) ON entregas_domiciliario TO app_user;
+GRANT UPDATE (miembro_domiciliario_id, estado, motivo, actualizada_ts) ON entregas_domiciliario TO app_user;
 
 -- El vendedor necesita ver a los domiciliarios ACTIVOS de la bodega que lo
 -- atiende (solo vínculo activo). Solo filas de rol domiciliario. NO consulta
@@ -1235,8 +1237,7 @@ CREATE POLICY entrega_bodega_ver ON entregas_domiciliario FOR SELECT TO app_user
 DROP POLICY IF EXISTS entrega_domiciliario_ver ON entregas_domiciliario;
 CREATE POLICY entrega_domiciliario_ver ON entregas_domiciliario FOR SELECT TO app_user
   USING (
-    estado IN ('asignada', 'en_camino')
-    AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
     AND current_setting('app.bodega_rol', true) = 'domiciliario'
     AND miembro_domiciliario_id IN (
       SELECT m.id FROM miembros_bodega_3pl m
@@ -1263,5 +1264,58 @@ CREATE POLICY entrega_domiciliario_cerrar ON entregas_domiciliario FOR UPDATE TO
       SELECT m.id FROM miembros_bodega_3pl m
       WHERE m.usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
         AND m.bodega_id = entregas_domiciliario.bodega_id AND m.rol = 'domiciliario' AND m.activo
+    )
+  );
+
+-- Contacto de la entrega (datos del comprador). Solo la empresa escribe.
+ALTER TABLE entregas_domiciliario_contacto ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entregas_domiciliario_contacto FORCE ROW LEVEL SECURITY;
+
+GRANT SELECT, INSERT, DELETE ON entregas_domiciliario_contacto TO app_user;
+REVOKE UPDATE ON entregas_domiciliario_contacto FROM app_user;
+GRANT UPDATE (receptor_nombre, direccion, barrio, ciudad, telefono, nota) ON entregas_domiciliario_contacto TO app_user;
+
+DROP POLICY IF EXISTS contacto_empresa_ver ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_empresa_ver ON entregas_domiciliario_contacto FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+
+DROP POLICY IF EXISTS contacto_empresa_crear ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_empresa_crear ON entregas_domiciliario_contacto FOR INSERT TO app_user
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND EXISTS (SELECT 1 FROM entregas_domiciliario e WHERE e.id = entregas_domiciliario_contacto.entrega_id)
+  );
+
+DROP POLICY IF EXISTS contacto_empresa_editar ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_empresa_editar ON entregas_domiciliario_contacto FOR UPDATE TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid)
+  WITH CHECK (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+
+DROP POLICY IF EXISTS contacto_empresa_borrar ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_empresa_borrar ON entregas_domiciliario_contacto FOR DELETE TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+
+-- Bodega (admin_bodega u operario): solo si la entrega es de su bodega.
+DROP POLICY IF EXISTS contacto_bodega_ver ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_bodega_ver ON entregas_domiciliario_contacto FOR SELECT TO app_user
+  USING (
+    current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+    AND EXISTS (
+      SELECT 1 FROM entregas_domiciliario e
+      WHERE e.id = entregas_domiciliario_contacto.entrega_id
+        AND e.bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    )
+  );
+
+-- Domiciliario: solo si la entrega es SUYA y sigue ABIERTA. El EXISTS pasa
+-- por entrega_domiciliario_ver (la cabecera), que ya exige miembro activo.
+DROP POLICY IF EXISTS contacto_domiciliario_ver ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_domiciliario_ver ON entregas_domiciliario_contacto FOR SELECT TO app_user
+  USING (
+    current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND EXISTS (
+      SELECT 1 FROM entregas_domiciliario e
+      WHERE e.id = entregas_domiciliario_contacto.entrega_id
+        AND e.estado IN ('asignada', 'en_camino')
     )
   );

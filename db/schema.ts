@@ -2405,12 +2405,6 @@ export const entregasDomiciliario = pgTable(
     pedidoReferencia: text("pedido_referencia").notNull(),
     estado: estadoEntregaDomiciliarioEnum("estado").notNull().default("asignada"),
     motivo: text("motivo"),
-    receptorNombre: text("receptor_nombre").notNull(),
-    direccion: text("direccion").notNull(),
-    barrio: text("barrio"),
-    ciudad: text("ciudad").notNull(),
-    telefono: text("telefono").notNull(),
-    nota: text("nota"),
     asignadaTs: timestamp("asignada_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2420,6 +2414,21 @@ export const entregasDomiciliario = pgTable(
     bodegaIdx: index("entregas_domiciliario_bodega_idx").on(t.bodegaId, t.estado),
   })
 );
+
+// Datos de quien recibe, en tabla aparte: el domiciliario necesita ver SU
+// cabecera en cualquier estado (para cerrarla y tener historial), pero estos
+// datos solo mientras la entrega esté abierta. Esa regla vive en la política
+// de SELECT de esta tabla (EXISTS sobre la cabecera). La empresa los conserva.
+export const entregasDomiciliarioContacto = pgTable("entregas_domiciliario_contacto", {
+  entregaId: uuid("entrega_id").primaryKey().references(() => entregasDomiciliario.id, { onDelete: "cascade" }),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  receptorNombre: text("receptor_nombre").notNull(),
+  direccion: text("direccion").notNull(),
+  barrio: text("barrio"),
+  ciudad: text("ciudad").notNull(),
+  telefono: text("telefono").notNull(),
+  nota: text("nota"),
+});
 
 // Publicar → «Crear con IA» (PR2, imágenes) — historial por empresa de
 // los trabajos de imágenes y de cada imagen, y cola de concurrencia
