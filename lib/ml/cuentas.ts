@@ -162,6 +162,30 @@ export class RenovacionTokenFallidaError extends Error {
   }
 }
 
+// Superadmin (25-nov): una empresa suspendida no debe seguir trabajando
+// por detrás (avisos de ML, publicidad, seguimiento). Sus miembros ya no
+// entran (requierePermiso, lib/membresias.ts); esto corta también los
+// procesos automáticos, que no pasan por ahí. Se corta en el token
+// porque TODA llamada a Mercado Libre de una empresa lo necesita — así
+// cubre también los procesos que se agreguen después.
+export class EmpresaSuspendidaError extends Error {
+  constructor() {
+    super("La empresa está suspendida: no se procesa nada de Mercado Libre por ella.");
+    this.name = "EmpresaSuspendidaError";
+  }
+}
+
+// Para que un proceso automático pueda saltar una empresa suspendida
+// ANTES de abrir trabajo (p. ej. la fila de sincronización de
+// publicidad). Con solo empresa_actual la política de empresas deja
+// leer esa fila (db/rls-setup.sql, aislamiento_empresas).
+export async function empresaEstaSuspendida(empresaId: string): Promise<boolean> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [empresa] = await tx.select({ estado: empresas.estado }).from(empresas).where(eq(empresas.id, empresaId));
+    return empresa?.estado === "suspendida";
+  });
+}
+
 // Devuelve un access_token vigente, renovando primero si ya venció o
 // está por vencer. Candado contra renovaciones dobles (tarea 2.3: el
 // refresh_token de Mercado Libre sirve una sola vez, dos renovaciones a
@@ -171,6 +195,8 @@ export class RenovacionTokenFallidaError extends Error {
 // separados que dejarían una ventana para que dos procesos pasen juntos.
 export async function obtenerAccessTokenVigente(empresaId: string, cuentaId: string): Promise<string> {
   return dbComoEmpresa(empresaId, async (tx) => {
+    const [empresa] = await tx.select({ estado: empresas.estado }).from(empresas).where(eq(empresas.id, empresaId));
+    if (empresa?.estado === "suspendida") throw new EmpresaSuspendidaError();
     const [cuenta] = await tx.select().from(cuentasMl).where(eq(cuentasMl.id, cuentaId));
     if (!cuenta) throw new CuentaMlNoEncontradaError();
     if (cuenta.desconectadaTs) throw new CuentaDesconectadaError();

@@ -6,6 +6,7 @@ import { listarEmpresasConConteo } from "../lib/superadmin";
 import { cambiarPlanEmpresa, EntradaInvalidaError, reactivarEmpresa, suspenderEmpresa } from "../lib/superadmin-empresas";
 import { obtenerMiMembresia } from "../lib/membresias";
 import { requierePermiso, SinPermisoError } from "../lib/permisos";
+import { empresaEstaSuspendida, EmpresaSuspendidaError, obtenerAccessTokenVigente } from "../lib/ml/cuentas";
 import { dbComoEmpresa } from "./empresa-context";
 import { dbSuperadmin } from "./superadmin-context";
 import { db } from "./index";
@@ -110,5 +111,21 @@ describe("empresas y planes (PR B)", () => {
     await requierePermiso(duenoId, empresaId, "ventas", "consultar");
     const [r] = await dbSuperadmin.select().from(empresas).where(eq(empresas.id, empresaId));
     expect([r.estado, r.suspendidaMotivo, r.suspendidaTs]).toEqual(["activa", null, null]);
+  });
+
+  // 25-nov: una empresa suspendida tampoco trabaja por detrás. El token
+  // de Mercado Libre (lo necesita todo proceso automático) se niega.
+  it("suspendida: no entrega el token de Mercado Libre; reactivada, sí", async () => {
+    const [cuenta] = await dbComoEmpresa(empresaId, (tx) => tx.select({ id: cuentasMl.id }).from(cuentasMl).where(eq(cuentasMl.empresaId, empresaId)));
+    expect(await empresaEstaSuspendida(empresaId)).toBe(false);
+    expect(await obtenerAccessTokenVigente(empresaId, cuenta.id)).toBe("a");
+
+    await suspenderEmpresa(superadminId, empresaId, "Prueba de procesos");
+    expect(await empresaEstaSuspendida(empresaId)).toBe(true);
+    await expect(obtenerAccessTokenVigente(empresaId, cuenta.id)).rejects.toBeInstanceOf(EmpresaSuspendidaError);
+
+    await reactivarEmpresa(superadminId, empresaId);
+    expect(await empresaEstaSuspendida(empresaId)).toBe(false);
+    expect(await obtenerAccessTokenVigente(empresaId, cuenta.id)).toBe("a");
   });
 });

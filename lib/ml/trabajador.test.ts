@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { and, eq, isNull, like } from "drizzle-orm";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
+import { dbSuperadmin } from "@/db/superadmin-context";
 import { avisosMl, cuentasMl, despachosMl, empresas, pedidos } from "@/db/schema";
 import { crearCuentaMlDePrueba } from "@/db/test-utils/venta";
 import { cifrarToken } from "@/lib/cifrado";
@@ -464,5 +465,52 @@ describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solo
 
     const [filaPedido] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(pedidos).where(eq(pedidos.pedidoIdExterno, String(orderId))));
     expect(filaPedido).toBeUndefined(); // el webhook no creó nada por su cuenta
+  });
+});
+
+// 25-nov (superadmin): los avisos de una empresa suspendida no se
+// procesan — se marcan procesados sin llamar a Mercado Libre, para que no
+// se reintenten cada minuto ni ocupen el lote de las demás empresas.
+describe("trabajador: empresa suspendida", () => {
+  const empresaId = randomUUID();
+  const cuentaExterna = `ml-user-suspendida-${randomUUID()}`;
+  vi.setConfig({ testTimeout: 15_000 });
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(empresas).values({ id: empresaId, nombre: "Empresa suspendida (prueba)", nit: `TEST-SUSP-${empresaId.slice(0, 8)}` })
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId,
+        cuentaIdExterna: cuentaExterna,
+        nickname: "VENDEDOR_SUSPENDIDO",
+        accessTokenCifrado: cifrarToken("access-vigente"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
+    await dbSuperadmin.update(empresas).set({ estado: "suspendida", suspendidaMotivo: "Prueba", suspendidaTs: new Date() }).where(eq(empresas.id, empresaId));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("marca el aviso como procesado y nunca llama a Mercado Libre por él", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respuestaOk({ id: 999, status: "paid" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "items", resource: "/items/999000111", enviadoTs: new Date() })
+    );
+
+    const resultado = await procesarAvisosPendientes(sinEspera);
+    expect(resultado.omitidosSuspendida).toBeGreaterThanOrEqual(1);
+
+    const [aviso] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select({ procesadoTs: avisosMl.procesadoTs }).from(avisosMl).where(and(eq(avisosMl.empresaId, empresaId), eq(avisosMl.resource, "/items/999000111")))
+    );
+    expect(aviso.procesadoTs).not.toBeNull();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/items/999000111"))).toBe(false);
   });
 });
