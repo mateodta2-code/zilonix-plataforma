@@ -56,7 +56,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
             { etiqueta: "Despachos", href: "/panel/despachos", icono: "despachos" as const },
             // Preguntas y reclamos (Refs #51): mismo permiso que Pedidos
             // para ver; responder pide ventas/modificar en la acción.
-            { etiqueta: "Preguntas y reclamos", href: "/panel/preguntas", icono: "preguntas" as const },
+            { etiqueta: "Preguntas", href: "/panel/preguntas", icono: "preguntas" as const },
+            // Posventa-0 (Refs #647): reclamos, mensajes y devoluciones.
+            { etiqueta: "Posventa", href: "/panel/posventa", icono: "preguntas" as const },
           ]
         : []),
       // Productos — un solo módulo para SKU, inventario, bodegas,
