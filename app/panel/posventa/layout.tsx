@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
@@ -36,14 +36,20 @@ export default async function PosventaLayout({ children }: { children: ReactNode
     );
   }
 
-  // Si la lectura falla, las pestañas salen sin número; nunca rompe la página.
-  const conteos = await leerConteosPosventa(empresa.id).catch(() => ({ reclamos: null, mensajes: null }));
-
   return (
     <>
       <EncabezadoPagina titulo="Posventa" descripcion="Reclamos y mediaciones, mensajes y devoluciones de todas tus cuentas." />
-      <PestanasPosventa conteos={{ reclamos: conteos.reclamos, mensajes: conteos.mensajes }} />
+      {/* Los conteos leen de ML: en Suspense para que las pestañas salgan de una vez (sin número) y el loading.tsx de cada pestaña muestre la barra. */}
+      <Suspense fallback={<PestanasPosventa conteos={{ reclamos: null, mensajes: null }} />}>
+        <PestanasConConteos empresaId={empresa.id} />
+      </Suspense>
       {children}
     </>
   );
+}
+
+// Si la lectura falla, las pestañas salen sin número; nunca rompe la página.
+async function PestanasConConteos({ empresaId }: { empresaId: string }) {
+  const conteos = await leerConteosPosventa(empresaId).catch(() => ({ reclamos: null, mensajes: null }));
+  return <PestanasPosventa conteos={{ reclamos: conteos.reclamos, mensajes: conteos.mensajes }} />;
 }

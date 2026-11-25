@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { SinAcceso } from "@/components/marco/SinAcceso";
-import { Boton } from "@/components/marco/Boton";
-import { SelectorCuentaMl } from "@/components/SelectorCuentaMl";
+import { BarraFiltrosPosventa } from "@/components/posventa/BarraFiltrosPosventa";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
+import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { leerBandejaPreguntas } from "@/lib/ml/preguntas";
-import { leerCuentaMlDeQuery, PARAM_CUENTA } from "@/lib/ml/selector-cuenta";
+import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { AutoRefrescoDespachos } from "../despachos/AutoRefrescoDespachos";
@@ -40,6 +40,7 @@ export default async function PosventaReclamosPage({ searchParams }: { searchPar
   const orden = leerOrdenReclamos(searchParams?.orden);
   // La cuenta del query solo vale si es de ESTA empresa (RLS); si no, Todas.
   const { cuentaId } = await leerCuentaMlDeQuery(empresa.id, searchParams?.cuenta);
+  const cuentas = (await listarCuentasConectadas(empresa.id)).filter((c) => !c.desconectadaTs).map((c) => ({ id: c.id, apodo: c.nickname }));
   const bandeja = await leerBandejaPreguntas(empresa.id);
   const reclamos = filtrarYOrdenarReclamos(bandeja.reclamos, { cuentaId, busqueda, orden });
 
@@ -60,24 +61,13 @@ export default async function PosventaReclamosPage({ searchParams }: { searchPar
         </div>
       )}
 
-      <div className={styles.herramientas}>
-        <SelectorCuentaMl empresaId={empresa.id} cuenta={searchParams?.cuenta} parametros={{ q: busqueda, orden }} />
-        <form method="get" className={styles.buscador}>
-          {cuentaId ? <input type="hidden" name={PARAM_CUENTA} value={cuentaId} /> : null}
-          <input type="search" name="q" defaultValue={busqueda} placeholder="Buscar por # de venta o motivo" maxLength={80} className="zx-control" />
-          <label htmlFor="orden-reclamos" className={styles.texto}>
-            Filtrar y ordenar
-          </label>
-          <select id="orden-reclamos" name="orden" defaultValue={orden} className="zx-control">
-            {ORDENES_RECLAMOS.map((o) => (
-              <option key={o.valor} value={o.valor}>
-                {o.etiqueta}
-              </option>
-            ))}
-          </select>
-          <Boton type="submit">Buscar</Boton>
-        </form>
-      </div>
+      <BarraFiltrosPosventa
+        busqueda={busqueda}
+        placeholder="Buscar por # de venta o motivo"
+        cuentas={cuentas}
+        cuentaId={cuentaId}
+        extra={{ tipo: "select", nombre: "orden", etiqueta: "Ordenar por", valor: orden, opciones: ORDENES_RECLAMOS.map((o) => ({ valor: o.valor, etiqueta: o.etiqueta })) }}
+      />
 
       <p className={styles.contador}>
         {reclamos.length} {reclamos.length === 1 ? "reclamo" : "reclamos"}
