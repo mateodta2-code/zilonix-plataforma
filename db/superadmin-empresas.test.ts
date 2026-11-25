@@ -78,7 +78,7 @@ describe("empresas y planes (PR B)", () => {
     expect(fila.cuentasFalabella).toBe(0);
     expect(JSON.stringify(fila)).not.toContain("CUENTA_SECRETA");
     expect(Object.keys(fila).sort()).toEqual(
-      ["creadoTs", "cuentasFalabella", "cuentasMl", "estado", "id", "miembros", "nit", "nombre", "notasInternas", "plan", "suspendidaMotivo", "suspendidaTs", "ultimaActividad"].sort()
+      ["creadoTs", "cuentasFalabella", "cuentasMl", "estado", "id", "miembros", "nit", "nombre", "notasInternas", "plan", "suspendidaMotivo", "suspendidaTs", "ultimaActividad", "ultimoIngresoTs"].sort()
     );
     // y la base misma le niega las tablas de negocio
     for (const tabla of ["cuentas_ml", "cuentas_falabella", "pedidos", "publicaciones", "skus", "auditoria"]) {
