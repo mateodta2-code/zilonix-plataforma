@@ -1,0 +1,1 @@
+- Falabella: cada cuenta guarda su % de IVA de ventas (lápiz de defectos por cuenta, 0 a 100, con auditoría). Con el % configurado, Utilidad muestra «Ventas sin IVA» por orden y en el total, como dato informativo: la fórmula de utilidad no cambia. Migración 0042. Refs #622.

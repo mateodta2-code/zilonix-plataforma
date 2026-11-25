@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoEmpresa } from "./empresa-context";
 import { cuentasFalabella, pedidosFalabella } from "./schema";
@@ -69,6 +70,23 @@ describe("cuentas_falabella / pedidos_falabella (RLS)", () => {
         nickname: "Tienda B",
       })
     ).rejects.toThrow(CuentaFalabellaDeOtraEmpresaError);
+  });
+
+  it("iva_ventas_pct: acepta 0 a 100 y nulo, rechaza fuera de rango (CHECK)", async () => {
+    const poner = (valor: string | null) =>
+      dbComoEmpresa(contexto.empresaAId, (tx) =>
+        tx.update(cuentasFalabella).set({ ivaVentasPct: valor }).where(eq(cuentasFalabella.id, cuentaAId)).returning({ id: cuentasFalabella.id })
+      );
+    for (const valido of ["0", "19.00", "100", null]) expect(await poner(valido)).toHaveLength(1);
+    await expect(poner("100.01")).rejects.toThrow();
+    await expect(poner("-1")).rejects.toThrow();
+  });
+
+  it("iva_ventas_pct: la empresa B no puede cambiar el de la cuenta de A", async () => {
+    const filas = await dbComoEmpresa(contexto.empresaBId, (tx) =>
+      tx.update(cuentasFalabella).set({ ivaVentasPct: "19.00" }).where(eq(cuentasFalabella.id, cuentaAId)).returning({ id: cuentasFalabella.id })
+    );
+    expect(filas).toHaveLength(0);
   });
 
   it("empresa B no puede insertar un pedido con el empresa_id de A", async () => {

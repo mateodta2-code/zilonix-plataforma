@@ -107,6 +107,9 @@ export interface PedidoFalabellaEntrada {
 export interface DefectosCuentaFalabella {
   comisionPct: string | null;
   flete: string | null;
+  // % de IVA de las ventas de la cuenta ("19.00" = 19 %). Solo informativo:
+  // alimenta «Ventas sin IVA», no cambia la utilidad. null = sin configurar.
+  ivaVentasPct?: string | null;
 }
 
 export interface ItemApiFalabella extends ItemEnvioFalabella {
@@ -157,6 +160,9 @@ export interface OrdenUtilidadFalabella {
   // Montos en texto con 2 decimales. Con «sin_reporte» o «conflicto»
   // todos van en 0.00.
   ventas: string;
+  // Dato informativo: ventas ÷ (1 + IVA/100) con el % de la cuenta. null si
+  // la cuenta no lo tiene configurado o la orden no tiene ventas visibles.
+  ventasSinIva: string | null;
   comisiones: string;
   envios: string;
   promociones: string;
@@ -204,6 +210,9 @@ export interface TotalesUtilidadFalabella {
   // Incluye las órdenes sin reporte a las que les falta costo (ventas de
   // la API).
   ventasFaltaCosto: string;
+  // Informativo: suma de «Ventas sin IVA» de las órdenes con reporte cuya
+  // cuenta tiene el % configurado. null si ninguna lo tiene.
+  ventasSinIva: string | null;
   // Solo órdenes calculadas.
   costo: string;
   comisiones: string;
@@ -265,6 +274,13 @@ function normalizarOVacio(sku: string | null): string | null {
 }
 
 const DOS = BigInt(2);
+
+// Ventas sin IVA en centavos: ventas ÷ (1 + pct/100), con el % en
+// centésimas de punto (19.00 → 1900) y todo en BigInt. Se redondea la
+// mitad lejos de cero.
+export function ventasSinIvaCentavos(ventasCentavos: bigint, ivaPctCentesimas: bigint): bigint {
+  return dividirRedondeado(ventasCentavos * DIEZ_MIL, DIEZ_MIL + ivaPctCentesimas);
+}
 
 // a ÷ b redondeando la mitad lejos de cero. b > 0.
 function dividirRedondeado(a: bigint, b: bigint): bigint {
@@ -464,6 +480,7 @@ export function calcularUtilidadFalabella(entrada: {
     conflicto: 0,
     cantidad: 0,
     ventas: CERO,
+    ventasSinIva: null as bigint | null,
     ventasFaltaCosto: CERO,
     costo: CERO,
     comisiones: CERO,
@@ -529,9 +546,21 @@ export function calcularUtilidadFalabella(entrada: {
     return { tasaComisionDiezmilesimas: -pct, envioNetoUnitarioCentavos: -(manual(d.flete) ?? CERO) };
   };
 
+  // IVA de ventas de la cuenta en centésimas (1900 = 19 %); null si no está
+  // configurado o no es válido (nunca rompe la pantalla).
+  const ivaDe = (cuentaId: string): bigint | null => {
+    const pct = manual(entrada.defectosCuenta?.get(cuentaId)?.ivaVentasPct);
+    return pct !== null && pct <= DIEZ_MIL ? pct : null;
+  };
+  const sinIvaTexto = (cuentaId: string, ventas: bigint): string | null => {
+    const iva = ivaDe(cuentaId);
+    return iva === null ? null : desdeCentavos(ventasSinIvaCentavos(ventas, iva));
+  };
+
   const vacia = {
     cantidad: 0,
     ventas: "0.00",
+    ventasSinIva: null,
     comisiones: "0.00",
     envios: "0.00",
     promociones: "0.00",
@@ -591,7 +620,7 @@ export function calcularUtilidadFalabella(entrada: {
       return { ...base, ...vacia, estado: "sin_reporte", numerosRepetidos: [] };
     }
     const ventas = activos.reduce((suma, i) => suma + i.precioCentavos, CERO);
-    const visibles = { ...vacia, cantidad: activos.length, ventas: desdeCentavos(ventas), numerosRepetidos: [] };
+    const visibles = { ...vacia, cantidad: activos.length, ventas: desdeCentavos(ventas), ventasSinIva: sinIvaTexto(p.cuentaId, ventas), numerosRepetidos: [] };
 
     let costo = CERO;
     const skusSinCosto: string[] = [];
@@ -715,6 +744,8 @@ export function calcularUtilidadFalabella(entrada: {
     t.conReporte += 1;
     t.cantidad += skusVendidos.length;
     t.ventas += ventas;
+    const iva = ivaDe(p.cuentaId);
+    if (iva !== null) t.ventasSinIva = (t.ventasSinIva ?? CERO) + ventasSinIvaCentavos(ventas, iva);
     t.retenciones += retenciones;
     if (sinCosto) {
       t.faltaCosto += 1;
@@ -737,6 +768,7 @@ export function calcularUtilidadFalabella(entrada: {
       estado: sinCosto ? "falta_costo" : "calculada",
       cantidad: skusVendidos.length,
       ventas: desdeCentavos(ventas),
+      ventasSinIva: sinIvaTexto(p.cuentaId, ventas),
       comisiones: desdeCentavos(comisiones),
       envios: desdeCentavos(envios),
       promociones: desdeCentavos(promociones),
@@ -782,6 +814,7 @@ export function calcularUtilidadFalabella(entrada: {
       cantidad: t.cantidad,
       ventas: desdeCentavos(t.ventas),
       ventasFaltaCosto: desdeCentavos(t.ventasFaltaCosto),
+      ventasSinIva: t.ventasSinIva === null ? null : desdeCentavos(t.ventasSinIva),
       costo: desdeCentavos(t.costo),
       comisiones: desdeCentavos(t.comisiones),
       envios: desdeCentavos(t.envios),

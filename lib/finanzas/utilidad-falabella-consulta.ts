@@ -71,6 +71,7 @@ export type CuentaFalabellaSelector = {
   // Respaldo para estimar cuentas sin reportes (issue #422).
   comisionPct: string | null;
   flete: string | null;
+  ivaVentasPct: string | null;
 };
 
 // También las desconectadas: sus ventas viejas siguen siendo plata real.
@@ -83,12 +84,13 @@ export async function listarCuentasFalabellaParaSelector(empresaId: string): Pro
         desconectadaTs: cuentasFalabella.desconectadaTs,
         comisionPct: cuentasFalabella.comisionDefectoPct,
         flete: cuentasFalabella.fleteDefecto,
+        ivaVentasPct: cuentasFalabella.ivaVentasPct,
       })
       .from(cuentasFalabella)
       .where(eq(cuentasFalabella.empresaId, empresaId))
       .orderBy(asc(cuentasFalabella.nickname))
   );
-  return filas.map((f) => ({ id: f.id, nickname: f.nickname, desconectada: f.desconectadaTs !== null, comisionPct: f.comisionPct, flete: f.flete }));
+  return filas.map((f) => ({ id: f.id, nickname: f.nickname, desconectada: f.desconectadaTs !== null, comisionPct: f.comisionPct, flete: f.flete, ivaVentasPct: f.ivaVentasPct }));
 }
 
 export type FiltroUtilidadFalabella = {
@@ -269,10 +271,10 @@ export async function listarUtilidadFalabella(
       cuentasIds.length === 0
         ? []
         : await tx
-            .select({ id: cuentasFalabella.id, comisionPct: cuentasFalabella.comisionDefectoPct, flete: cuentasFalabella.fleteDefecto })
+            .select({ id: cuentasFalabella.id, comisionPct: cuentasFalabella.comisionDefectoPct, flete: cuentasFalabella.fleteDefecto, ivaVentasPct: cuentasFalabella.ivaVentasPct })
             .from(cuentasFalabella)
             .where(and(eq(cuentasFalabella.empresaId, empresaId), inArray(cuentasFalabella.id, cuentasIds)));
-    const defectosCuenta = new Map(filasDefectos.map((f) => [f.id, { comisionPct: f.comisionPct, flete: f.flete }]));
+    const defectosCuenta = new Map(filasDefectos.map((f) => [f.id, { comisionPct: f.comisionPct, flete: f.flete, ivaVentasPct: f.ivaVentasPct }]));
 
     const resultado = calcularUtilidadFalabella({
       pedidos: pedidos.map((x) => ({
