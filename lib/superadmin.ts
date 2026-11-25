@@ -12,6 +12,7 @@ import {
 import { db } from "@/db";
 import { dbSuperadmin } from "@/db/superadmin-context";
 import { accesosTemporales, auditoria, empresas, membresias, roles, usuarios } from "@/db/schema";
+import type { SaludEmpresa } from "@/lib/superadmin-salud";
 
 export class NoEsSuperadminError extends Error {
   constructor() {
@@ -93,6 +94,38 @@ export async function listarEmpresasConConteo(): Promise<EmpresaConConteo[]> {
       };
     })
     .sort((a, b) => b.creadoTs.getTime() - a.creadoTs.getTime());
+}
+
+// Salud de conexiones (25-nov, /superadmin/conexiones): solo conteos por
+// empresa vía superadmin_salud_conexiones() (db/rls-setup.sql, SECURITY
+// DEFINER) — superadmin_user no tiene SELECT sobre cuentas_ml, avisos_ml
+// ni publicidad_sincronizaciones, y no se le da.
+export async function listarSaludConexiones(): Promise<SaludEmpresa[]> {
+  const lista = await dbSuperadmin.select({ id: empresas.id, nombre: empresas.nombre, estado: empresas.estado }).from(empresas);
+  const conteos = (await dbSuperadmin.execute(sql`select * from superadmin_salud_conexiones()`)) as unknown as {
+    empresa_id: string;
+    ml_conectadas: string | number;
+    ml_desconectadas: string | number;
+    ml_sin_renovar: string | number;
+    avisos_atrasados: string | number;
+    publicidad_con_error: string | number;
+    falabella_desconectadas: string | number;
+  }[];
+  const porEmpresa = new Map(conteos.map((c) => [c.empresa_id, c]));
+  return lista.map((e) => {
+    const c = porEmpresa.get(e.id);
+    return {
+      empresaId: e.id,
+      nombre: e.nombre,
+      estado: e.estado,
+      mlConectadas: Number(c?.ml_conectadas ?? 0),
+      mlDesconectadas: Number(c?.ml_desconectadas ?? 0),
+      mlSinRenovar: Number(c?.ml_sin_renovar ?? 0),
+      avisosAtrasados: Number(c?.avisos_atrasados ?? 0),
+      publicidadConError: Number(c?.publicidad_con_error ?? 0),
+      falabellaDesconectadas: Number(c?.falabella_desconectadas ?? 0),
+    };
+  });
 }
 
 export type AccionSuperadmin = { ts: Date; accion: string; entidad: string; empresaNombre: string | null; detalle: string | null };
