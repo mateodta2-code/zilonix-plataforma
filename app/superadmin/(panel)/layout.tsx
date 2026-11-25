@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { currentUser } from "@clerk/nextjs/server";
 import { MarcoApp } from "@/components/marco/MarcoApp";
 import { BotonCerrarSesionAccion } from "@/components/marco/BotonCerrarSesionAccion";
+import { GuiaModulo } from "@/components/guia/GuiaModulo";
 import { gruposSuperadmin } from "@/components/marco/menuSuperadmin";
 import { requiereSesionSuperadmin } from "@/lib/superadmin";
 import { cerrarSesionSuperadminAction } from "../actions";
@@ -24,6 +25,8 @@ export default async function SuperadminPanelLayout({ children }: { children: Re
       mostrarMisDatos={false}
       cerrarSesion={<BotonCerrarSesionAccion accion={cerrarSesionSuperadminAction} />}
     >
+      {/* Guía de cada módulo del superadmin (25-nov), arriba de su pantalla. */}
+      <GuiaModulo panel="superadmin" />
       {children}
     </MarcoApp>
   );
