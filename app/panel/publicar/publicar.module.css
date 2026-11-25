@@ -332,13 +332,6 @@
   color: var(--acento-fuerte);
 }
 
-/* «Tomar ideas de la competencia» (opcional, plegado). */
-.competenciaIA {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
 /* Ficha confirmada: plegada en una línea, se despliega para revisarla. */
 .fichaPlegadaIA {
   display: grid;
@@ -351,8 +344,3 @@
   padding: 8px 0;
 }
 
-.competenciaIA summary {
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--texto-suave);
-}

@@ -2009,26 +2009,6 @@ export async function tendenciasCategoriaMl(siteId: string, categoriaId: string,
   }
 }
 
-// Título de una publicación (item) o de un producto de catálogo, para
-// tomar ideas de palabras de la competencia (23-nov). Documentados:
-// GET /items/{id}?attributes=title y GET /products/{id} (name). Con
-// publicaciones ajenas ML a veces responde 403: null, sin lanzar.
-export async function tituloPublicacionMl(tipo: "item" | "producto", id: string, token: string): Promise<string | null> {
-  exigirId(id, PATRON_ID_PRODUCTO_O_ITEM, "id");
-  try {
-    const resp =
-      tipo === "item"
-        ? await pedirLecturaMl<{ title?: unknown }>(`/items/${id}`, token, { query: "?attributes=title" })
-        : await pedirLecturaMl<{ name?: unknown }>(`/products/${id}`, token);
-    if (!resp.ok) return null;
-    const d = resp.data as { title?: unknown; name?: unknown };
-    const titulo = tipo === "item" ? d.title : d.name;
-    return typeof titulo === "string" && titulo.trim() ? titulo.trim() : null;
-  } catch {
-    return null;
-  }
-}
-
 // Tendencias por NIVEL de categoría (23-nov, idea vista en otra
 // herramienta): la categoría general (raíz), la padre y la específica,
 // con la ruta de /categories/{id} (path_from_root, documentado) y

@@ -136,14 +136,6 @@ describe("categoriasPorNivel (ruta de /categories/{id})", () => {
   });
 });
 
-describe("palabras de la competencia", () => {
-  it("una palabra que solo está en el título de la competencia queda como «competencia»", () => {
-    const p = origenPalabras(["Bebedero colibrí picaflor"], [], "bebedero colibrí", [], "Bebedero Colibri Picaflor X2");
-    expect(p.find((x) => x.palabra === "picaflor")).toEqual({ palabra: "picaflor", origen: "competencia" });
-    expect(p.find((x) => x.palabra === "Bebedero")).toMatchObject({ origen: "vendedor" });
-  });
-});
-
 describe("filtrarTendenciasRelacionadas (24-nov: «Mascotas» para un bebedero de colibrí)", () => {
   const producto = "Pack de 2 comederos colibrí base roja plástico transparente para ventana";
   const categoria = "Bebederos y Comederos";
