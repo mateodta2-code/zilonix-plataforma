@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const revisar = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
-vi.mock("@/app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/accionesResolucion", () => ({
+vi.mock("@/app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/accionesResolucion", () => ({
   revisarDevolucionAction: revisar,
   leerMotivosFallaDevolucionAction: async () => ({ ok: true, motivos: [] }),
 }));
