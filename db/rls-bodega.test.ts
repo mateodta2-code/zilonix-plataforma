@@ -5,11 +5,12 @@ import { dbComoBodega, dbComoInvitacionBodega, dbComoUsuarioBodega } from "./bod
 import { dbComoEmpresa, dbComoUsuario } from "./empresa-context";
 import { db } from "./index";
 import { dbSuperadmin } from "./superadmin-context";
-import { auditoria, bodegas3pl, empresas, invitacionesBodega3pl, miembrosBodega3pl, usuarios } from "./schema";
+import { auditoria, bodegas3pl, bodegas3plEmpresas, empresas, invitacionesBodega3pl, miembrosBodega3pl, recepcionesBodega3pl, recepcionItemsBodega3pl, stockBodega3pl, usuarios } from "./schema";
 import { crearDosEmpresas } from "./test-utils/aislamiento";
 import { aceptarInvitacionBodega, crearInvitacionBodega, InvitacionBodegaInvalidaError, obtenerInvitacionBodegaPorToken } from "../lib/bodega/invitaciones";
 import { CambioBodegaInvalidoError, actualizarDatosBodega, cambiarActivoDeMiembro, cambiarRolDeMiembro, listarMembresiasDeUsuario, listarMiembros } from "../lib/bodega/miembros";
-import { crearBodega, invitarAdminBodega, listarBodegas, reactivarBodega, suspenderBodega } from "../lib/superadmin-bodegas";
+import { BodegaInvalidaError, cambiarEstadoVinculo, crearBodega, invitarAdminBodega, ligarEmpresaABodega, listarBodegas, reactivarBodega, suspenderBodega } from "../lib/superadmin-bodegas";
+import { listarBodegasQueAtiendenEmpresa, listarEmpresasQueAtiende } from "../lib/bodega/empresas";
 import { listarAccionesSuperadmin } from "../lib/superadmin";
 
 // PR login-bodega-domiciliario — contra Postgres real: el ciclo completo
@@ -197,5 +198,119 @@ describe("bodegas 3PL (RLS + lib, PR login-bodega-domiciliario)", () => {
         dbSuperadmin.insert(invitacionesBodega3pl).values({ bodegaId: bodegaA, email: "x@zilonix.test", rol: "operario", bodegaNombre: "x", token: `t-${randomUUID()}`, invitadoPor: superadminId, expiraTs: new Date(Date.now() + 1000) })
       ).rejects.toThrow();
     });
+  });
+});
+
+// Issue #625 (Bodega-1, migración 0044) — vínculo bodega↔empresa y tablas
+// de recepción/stock, contra Postgres real. No usa afirmarAislamiento:
+// app_user no tiene UPDATE/DELETE sobre estas tablas (daría "permission
+// denied", ver #636), así que cada negación se afirma a mano.
+describe("bodegas 3PL ligadas a empresas (RLS, issue #625)", () => {
+  const sufijo = randomUUID().slice(0, 8);
+  const superadminId = randomUUID();
+  let bodegaA: string;
+  let bodegaB: string;
+  let empresaA: string;
+  let empresaB: string;
+  let empresaC: string;
+  let recepcionId: string;
+
+  beforeAll(async () => {
+    await db.insert(usuarios).values({ id: superadminId, email: `vinculo-${sufijo}@zilonix.test`, nombre: "Superadmin vínculo", esSuperadmin: true });
+    const ctx = await crearDosEmpresas();
+    empresaA = ctx.empresaAId;
+    empresaB = ctx.empresaBId;
+    empresaC = randomUUID();
+    await dbComoEmpresa(empresaC, (tx) => tx.insert(empresas).values({ id: empresaC, nombre: `Empresa C ${sufijo}`, nit: `TEST-VINC-C-${sufijo}` }));
+    bodegaA = (await crearBodega(superadminId, { nombre: `Bodega vínculo A ${sufijo}`, nit: "" })).id;
+    bodegaB = (await crearBodega(superadminId, { nombre: `Bodega vínculo B ${sufijo}`, nit: "" })).id;
+    await ligarEmpresaABodega(superadminId, bodegaA, empresaA);
+    await ligarEmpresaABodega(superadminId, bodegaB, empresaB);
+  });
+
+  it("ligar es único por bodega y empresa, queda en auditoría y pausar/reactivar también", async () => {
+    await expect(ligarEmpresaABodega(superadminId, bodegaA, empresaA)).rejects.toBeInstanceOf(BodegaInvalidaError);
+    await expect(ligarEmpresaABodega(superadminId, bodegaA, randomUUID())).rejects.toBeInstanceOf(BodegaInvalidaError);
+    await cambiarEstadoVinculo(superadminId, bodegaA, empresaA, "pausada");
+    expect((await listarEmpresasQueAtiende(bodegaA))[0].estado).toBe("pausada");
+    await cambiarEstadoVinculo(superadminId, bodegaA, empresaA, "activa");
+    await expect(cambiarEstadoVinculo(superadminId, bodegaA, empresaC, "pausada")).rejects.toBeInstanceOf(BodegaInvalidaError);
+    const acciones = (await dbComoBodega(bodegaA, (tx) => tx.select().from(auditoria).where(eq(auditoria.bodegaId, bodegaA)))).map((a) => a.accion);
+    for (const esperada of ["ligar_empresa_bodega", "pausar_empresa_bodega", "reactivar_empresa_bodega"]) expect(acciones, esperada).toContain(esperada);
+  });
+
+  it("la bodega ve solo sus empresas ligadas (solo nombre) y no las de otra bodega", async () => {
+    const deA = await listarEmpresasQueAtiende(bodegaA);
+    expect(deA.map((e) => e.empresaId)).toEqual([empresaA]);
+    expect(Object.keys(deA[0]).sort()).toEqual(["empresaId", "estado", "nombre"]);
+    expect((await listarEmpresasQueAtiende(bodegaB)).map((e) => e.empresaId)).toEqual([empresaB]);
+    // Empresa C no está ligada a nadie: ninguna bodega la ve.
+    for (const b of [bodegaA, bodegaB]) {
+      expect((await dbComoBodega(b, (tx) => tx.select({ id: empresas.id }).from(empresas))).map((e) => e.id)).not.toContain(empresaC);
+    }
+    expect((await dbComoBodega(bodegaA, (tx) => tx.select().from(bodegas3plEmpresas))).map((v) => v.bodegaId)).toEqual([bodegaA]);
+  });
+
+  it("el vendedor ve su bodega (solo nombre y estado) y no los vínculos de otra empresa", async () => {
+    expect((await listarBodegasQueAtiendenEmpresa(empresaA)).map((b) => b.bodegaId)).toEqual([bodegaA]);
+    expect(await listarBodegasQueAtiendenEmpresa(empresaC)).toHaveLength(0);
+    expect((await dbComoEmpresa(empresaA, (tx) => tx.select().from(bodegas3plEmpresas))).map((v) => v.empresaId)).toEqual([empresaA]);
+    expect((await dbComoEmpresa(empresaA, (tx) => tx.select({ id: bodegas3pl.id }).from(bodegas3pl))).map((b) => b.id)).toEqual([bodegaA]);
+  });
+
+  it("ni la bodega ni la empresa pueden ligar, pausar ni borrar vínculos", async () => {
+    await expect(dbComoBodega(bodegaA, (tx) => tx.insert(bodegas3plEmpresas).values({ bodegaId: bodegaA, empresaId: empresaC, creadoPor: superadminId }))).rejects.toThrow();
+    await expect(dbComoBodega(bodegaA, (tx) => tx.update(bodegas3plEmpresas).set({ estado: "pausada" }))).rejects.toThrow();
+    await expect(dbComoBodega(bodegaA, (tx) => tx.delete(bodegas3plEmpresas))).rejects.toThrow();
+    await expect(dbComoEmpresa(empresaA, (tx) => tx.insert(bodegas3plEmpresas).values({ bodegaId: bodegaB, empresaId: empresaA, creadoPor: superadminId }))).rejects.toThrow();
+    await expect(dbComoEmpresa(empresaA, (tx) => tx.update(bodegas3plEmpresas).set({ estado: "pausada" }))).rejects.toThrow();
+  });
+
+  it("recepciones e ítems: la bodega crea con empresa ligada activa; la empresa solo lee lo suyo", async () => {
+    recepcionId = randomUUID();
+    await dbComoBodega(bodegaA, async (tx) => {
+      await tx.insert(recepcionesBodega3pl).values({ id: recepcionId, bodegaId: bodegaA, empresaId: empresaA, creadoPor: superadminId });
+      await tx.insert(recepcionItemsBodega3pl).values({ recepcionId, sku: "SKU-1", cantidad: 5 });
+    });
+    // Empresa no ligada a esa bodega, o bodega ajena: la base lo rechaza.
+    await expect(dbComoBodega(bodegaA, (tx) => tx.insert(recepcionesBodega3pl).values({ bodegaId: bodegaA, empresaId: empresaB, creadoPor: superadminId }))).rejects.toThrow();
+    await expect(dbComoBodega(bodegaA, (tx) => tx.insert(recepcionesBodega3pl).values({ bodegaId: bodegaB, empresaId: empresaB, creadoPor: superadminId }))).rejects.toThrow();
+    // Cantidad > 0.
+    await expect(dbComoBodega(bodegaA, (tx) => tx.insert(recepcionItemsBodega3pl).values({ recepcionId, sku: "SKU-2", cantidad: 0 }))).rejects.toThrow();
+    // Un ítem no se agrega a la recepción de otra bodega.
+    await expect(dbComoBodega(bodegaB, (tx) => tx.insert(recepcionItemsBodega3pl).values({ recepcionId, sku: "SKU-3", cantidad: 1 }))).rejects.toThrow();
+
+    expect(await dbComoBodega(bodegaA, (tx) => tx.select().from(recepcionesBodega3pl))).toHaveLength(1);
+    expect(await dbComoBodega(bodegaB, (tx) => tx.select().from(recepcionesBodega3pl))).toHaveLength(0);
+    expect(await dbComoBodega(bodegaB, (tx) => tx.select().from(recepcionItemsBodega3pl))).toHaveLength(0);
+    expect(await dbComoEmpresa(empresaA, (tx) => tx.select().from(recepcionItemsBodega3pl))).toHaveLength(1);
+    expect(await dbComoEmpresa(empresaB, (tx) => tx.select().from(recepcionesBodega3pl))).toHaveLength(0);
+    expect(await dbComoEmpresa(empresaB, (tx) => tx.select().from(recepcionItemsBodega3pl))).toHaveLength(0);
+    // La empresa no crea recepciones ni ítems.
+    await expect(dbComoEmpresa(empresaA, (tx) => tx.insert(recepcionesBodega3pl).values({ bodegaId: bodegaA, empresaId: empresaA, creadoPor: superadminId }))).rejects.toThrow();
+    await expect(dbComoEmpresa(empresaA, (tx) => tx.insert(recepcionItemsBodega3pl).values({ recepcionId, sku: "SKU-4", cantidad: 1 }))).rejects.toThrow();
+  });
+
+  it("stock: único por bodega, empresa y sku, nunca negativo; la empresa solo lee", async () => {
+    await dbComoBodega(bodegaA, (tx) => tx.insert(stockBodega3pl).values({ bodegaId: bodegaA, empresaId: empresaA, sku: "SKU-1", cantidad: 5 }));
+    await expect(dbComoBodega(bodegaA, (tx) => tx.insert(stockBodega3pl).values({ bodegaId: bodegaA, empresaId: empresaA, sku: "SKU-1", cantidad: 1 }))).rejects.toThrow();
+    await expect(dbComoBodega(bodegaA, (tx) => tx.insert(stockBodega3pl).values({ bodegaId: bodegaA, empresaId: empresaA, sku: "SKU-N", cantidad: -1 }))).rejects.toThrow();
+    await expect(dbComoBodega(bodegaA, (tx) => tx.insert(stockBodega3pl).values({ bodegaId: bodegaA, empresaId: empresaB, sku: "SKU-1", cantidad: 1 }))).rejects.toThrow();
+
+    const editada = await dbComoBodega(bodegaA, (tx) => tx.update(stockBodega3pl).set({ cantidad: 7 }).where(eq(stockBodega3pl.sku, "SKU-1")).returning({ id: stockBodega3pl.id }));
+    expect(editada).toHaveLength(1);
+    // Otra bodega no edita ese stock (0 filas) ni lo ve.
+    expect(await dbComoBodega(bodegaB, (tx) => tx.update(stockBodega3pl).set({ cantidad: 99 }).where(eq(stockBodega3pl.sku, "SKU-1")).returning({ id: stockBodega3pl.id }))).toHaveLength(0);
+    expect(await dbComoBodega(bodegaB, (tx) => tx.select().from(stockBodega3pl))).toHaveLength(0);
+
+    expect((await dbComoEmpresa(empresaA, (tx) => tx.select().from(stockBodega3pl))).map((s) => s.cantidad)).toEqual([7]);
+    expect(await dbComoEmpresa(empresaB, (tx) => tx.select().from(stockBodega3pl))).toHaveLength(0);
+    await expect(dbComoEmpresa(empresaA, (tx) => tx.update(stockBodega3pl).set({ cantidad: 1 }))).rejects.toThrow();
+  });
+
+  it("el superadmin ve los vínculos pero no recepciones ni stock", async () => {
+    expect((await dbSuperadmin.select().from(bodegas3plEmpresas)).length).toBeGreaterThanOrEqual(2);
+    await expect(dbSuperadmin.select().from(recepcionesBodega3pl)).rejects.toThrow();
+    await expect(dbSuperadmin.select().from(stockBodega3pl)).rejects.toThrow();
   });
 });

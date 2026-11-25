@@ -1031,3 +1031,106 @@ DROP POLICY IF EXISTS sa_inv_bodega_ver ON invitaciones_bodega_3pl;
 CREATE POLICY sa_inv_bodega_ver ON invitaciones_bodega_3pl FOR SELECT TO superadmin_user USING (true);
 DROP POLICY IF EXISTS sa_inv_bodega_crear_admin ON invitaciones_bodega_3pl;
 CREATE POLICY sa_inv_bodega_crear_admin ON invitaciones_bodega_3pl FOR INSERT TO superadmin_user WITH CHECK (rol = 'admin_bodega');
+
+-- ---------------------------------------------------------------------
+-- Issue #625 (Bodega-1, migración 0044) — bodegas 3PL ligadas a las
+-- empresas que atienden, y las tablas de Bodega-2 (recepción e
+-- inventario). La bodega ve solo filas con su app.bodega_id; la empresa,
+-- solo filas con su app.empresa_actual (NULLIF: sin variable no hay
+-- filas, nunca un error de cast). Ligar y pausar solo lo hace el
+-- superadmin: app_user no tiene INSERT/UPDATE/DELETE sobre el vínculo.
+-- ---------------------------------------------------------------------
+ALTER TABLE bodegas_3pl_empresas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bodegas_3pl_empresas FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepciones_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepciones_bodega_3pl FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items_bodega_3pl FORCE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega_3pl FORCE ROW LEVEL SECURITY;
+
+GRANT SELECT ON bodegas_3pl_empresas TO app_user;
+REVOKE INSERT, UPDATE, DELETE ON bodegas_3pl_empresas FROM app_user;
+GRANT SELECT, INSERT ON recepciones_bodega_3pl, recepcion_items_bodega_3pl TO app_user;
+REVOKE UPDATE, DELETE ON recepciones_bodega_3pl, recepcion_items_bodega_3pl FROM app_user;
+GRANT SELECT, INSERT ON stock_bodega_3pl TO app_user;
+GRANT UPDATE (cantidad) ON stock_bodega_3pl TO app_user;
+REVOKE DELETE ON stock_bodega_3pl FROM app_user;
+GRANT SELECT, INSERT ON bodegas_3pl_empresas TO superadmin_user;
+GRANT UPDATE (estado) ON bodegas_3pl_empresas TO superadmin_user;
+
+DROP POLICY IF EXISTS vinculo3pl_bodega_ver ON bodegas_3pl_empresas;
+CREATE POLICY vinculo3pl_bodega_ver ON bodegas_3pl_empresas FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS vinculo3pl_empresa_ver ON bodegas_3pl_empresas;
+CREATE POLICY vinculo3pl_empresa_ver ON bodegas_3pl_empresas FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+DROP POLICY IF EXISTS sa_vinculo3pl_ver ON bodegas_3pl_empresas;
+CREATE POLICY sa_vinculo3pl_ver ON bodegas_3pl_empresas FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS sa_vinculo3pl_ligar ON bodegas_3pl_empresas;
+CREATE POLICY sa_vinculo3pl_ligar ON bodegas_3pl_empresas FOR INSERT TO superadmin_user WITH CHECK (true);
+DROP POLICY IF EXISTS sa_vinculo3pl_pausar ON bodegas_3pl_empresas;
+CREATE POLICY sa_vinculo3pl_pausar ON bodegas_3pl_empresas FOR UPDATE TO superadmin_user USING (true) WITH CHECK (true);
+
+-- El vendedor ve el nombre de la bodega que lo atiende (solo la ligada) y
+-- la bodega ve el nombre de las empresas que atiende (solo las ligadas).
+-- Los subselects pasan por las políticas del vínculo, de arriba. La
+-- aplicación (lib/bodega/empresas.ts) lee únicamente id y nombre.
+DROP POLICY IF EXISTS bodega3pl_ver_empresa_ligada ON bodegas_3pl;
+CREATE POLICY bodega3pl_ver_empresa_ligada ON bodegas_3pl FOR SELECT TO app_user
+  USING (id IN (SELECT bodega_id FROM bodegas_3pl_empresas WHERE empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid));
+DROP POLICY IF EXISTS empresas_ver_por_bodega_ligada ON empresas;
+CREATE POLICY empresas_ver_por_bodega_ligada ON empresas FOR SELECT TO app_user
+  USING (id IN (SELECT empresa_id FROM bodegas_3pl_empresas WHERE bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid));
+
+-- Recepciones y stock: la bodega las crea y ve solo con su bodega_id y
+-- una empresa ligada ACTIVA; la empresa solo las lee.
+DROP POLICY IF EXISTS recepcion3pl_bodega_ver ON recepciones_bodega_3pl;
+CREATE POLICY recepcion3pl_bodega_ver ON recepciones_bodega_3pl FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS recepcion3pl_empresa_ver ON recepciones_bodega_3pl;
+CREATE POLICY recepcion3pl_empresa_ver ON recepciones_bodega_3pl FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+DROP POLICY IF EXISTS recepcion3pl_bodega_crear ON recepciones_bodega_3pl;
+CREATE POLICY recepcion3pl_bodega_crear ON recepciones_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v
+      WHERE v.bodega_id = recepciones_bodega_3pl.bodega_id
+        AND v.empresa_id = recepciones_bodega_3pl.empresa_id
+        AND v.estado = 'activa'
+    )
+  );
+
+-- Sin bodega_id propio: el ítem se ve si su recepción se ve, y solo se
+-- agrega a una recepción de la bodega activa.
+DROP POLICY IF EXISTS recepcion_item3pl_ver ON recepcion_items_bodega_3pl;
+CREATE POLICY recepcion_item3pl_ver ON recepcion_items_bodega_3pl FOR SELECT TO app_user
+  USING (EXISTS (SELECT 1 FROM recepciones_bodega_3pl r WHERE r.id = recepcion_id));
+DROP POLICY IF EXISTS recepcion_item3pl_crear ON recepcion_items_bodega_3pl;
+CREATE POLICY recepcion_item3pl_crear ON recepcion_items_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM recepciones_bodega_3pl r
+    WHERE r.id = recepcion_id AND r.bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+  ));
+
+DROP POLICY IF EXISTS stock3pl_bodega_ver ON stock_bodega_3pl;
+CREATE POLICY stock3pl_bodega_ver ON stock_bodega_3pl FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS stock3pl_empresa_ver ON stock_bodega_3pl;
+CREATE POLICY stock3pl_empresa_ver ON stock_bodega_3pl FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+DROP POLICY IF EXISTS stock3pl_bodega_crear ON stock_bodega_3pl;
+CREATE POLICY stock3pl_bodega_crear ON stock_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v
+      WHERE v.bodega_id = stock_bodega_3pl.bodega_id AND v.empresa_id = stock_bodega_3pl.empresa_id AND v.estado = 'activa'
+    )
+  );
+DROP POLICY IF EXISTS stock3pl_bodega_editar ON stock_bodega_3pl;
+CREATE POLICY stock3pl_bodega_editar ON stock_bodega_3pl FOR UPDATE TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid)
+  WITH CHECK (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
