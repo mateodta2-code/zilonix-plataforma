@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
@@ -34,6 +35,8 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
+import { listarDomiciliariosAsignables, listarEntregasAbiertasPorPedido } from "@/lib/entregas/entregas";
+import { AsignarDomiciliario } from "./AsignarDomiciliario";
 import { AutoRefrescoDespachos } from "./AutoRefrescoDespachos";
 import { ImpresionMasivaForm } from "./ImpresionMasivaForm";
 import { SincronizarAhoraCliente } from "./SincronizarAhoraCliente";
@@ -138,6 +141,13 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
     puedeConsultarConfiguracion(usuario.id, empresa.id),
   ]);
   const ahora = new Date();
+  // Issue #627 — domiciliarios asignables y entregas abiertas, solo si esta
+  // persona puede modificar y hay pedidos Flex en pantalla.
+  const refsFlex = tarjetas.filter((t) => esFlex(t.logisticType)).map((t) => t.pedidoIdExterno);
+  const [domiciliarios, entregasAbiertas] =
+    puedeModificar && refsFlex.length > 0
+      ? await Promise.all([listarDomiciliariosAsignables(empresa.id), listarEntregasAbiertasPorPedido(empresa.id, "mercadolibre", refsFlex)])
+      : [[], new Map()];
   // Despachados agrupa por la fecha REAL del despacho (fechaDespachoDe:
   // despachado_ts si una persona lo marcó, si no actualizado_ts), no
   // por fecha de venta — un pedido vendido hace 10 días pero
@@ -249,8 +259,8 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                 <h2 className={styles.tituloGrupo}>{grupo.etiqueta}</h2>
                 <div className={styles.listaAncha}>
                   {grupo.despachos.map((d) => (
+                    <Fragment key={d.id}>
                     <TarjetaDespachoCliente
-                      key={d.id}
                       id={d.id}
                       logisticType={d.logisticType}
                       status={d.status}
@@ -273,6 +283,17 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                       puedeModificar={puedeModificar}
                       ventanaDeshacerMs={VENTANA_DESHACER_MS}
                     />
+                    {puedeModificar && esFlex(d.logisticType) && !d.despachadoTs && (
+                      <AsignarDomiciliario
+                        pedidoRef={d.pedidoIdExterno}
+                        domiciliarios={domiciliarios}
+                        actual={(() => {
+                          const e = entregasAbiertas.get(d.pedidoIdExterno);
+                          return e ? { entregaId: e.entregaId, miembroId: e.miembroDomiciliarioId, nombre: e.domiciliarioNombre, estado: e.estado } : null;
+                        })()}
+                      />
+                    )}
+                    </Fragment>
                   ))}
                 </div>
               </section>

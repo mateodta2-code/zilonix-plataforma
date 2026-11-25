@@ -2386,6 +2386,46 @@ export const stockBodega3pl = pgTable(
   })
 );
 
+// Issue #627 (Domi-1, migración 0045) — entregas a domicilio que el
+// vendedor asigna a un domiciliario de su bodega 3PL ligada. Los datos
+// del comprador (receptor_*, direccion, barrio, ciudad, telefono, nota)
+// se copian SOLO al asignar (no hay llamadas nuevas a Mercado Libre). La
+// regla «el domiciliario los ve solo mientras la entrega está abierta»
+// vive en la política de SELECT (db/rls-setup.sql): una entrega cerrada
+// es invisible para el domiciliario; la empresa conserva todo.
+export const estadoEntregaEnum = pgEnum("estado_entrega_domiciliario", ["asignada", "en_camino", "entregada", "no_entregada"]);
+
+export const entregasDomiciliario = pgTable(
+  "entregas_domiciliario",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    miembroDomiciliarioId: uuid("miembro_domiciliario_id").notNull().references(() => miembrosBodega3pl.id, { onDelete: "restrict" }),
+    pedidoRef: text("pedido_ref").notNull(),
+    marketplace: text("marketplace").notNull().default("mercadolibre"),
+    estado: estadoEntregaEnum("estado").notNull().default("asignada"),
+    motivo: text("motivo"),
+    receptorNombre: text("receptor_nombre").notNull(),
+    direccion: text("direccion").notNull(),
+    barrio: text("barrio"),
+    ciudad: text("ciudad").notNull(),
+    telefono: text("telefono").notNull(),
+    nota: text("nota"),
+    asignadaTs: timestamp("asignada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Un pedido tiene a lo sumo UNA entrega abierta: reasignar cambia el
+    // domiciliario de esa fila, no crea otra.
+    abiertaUnica: uniqueIndex("entregas_domiciliario_abierta_unica")
+      .on(t.empresaId, t.marketplace, t.pedidoRef)
+      .where(sql`${t.estado} in ('asignada', 'en_camino')`),
+    porDomiciliario: index("entregas_domiciliario_miembro_idx").on(t.miembroDomiciliarioId, t.estado),
+    porEmpresa: index("entregas_domiciliario_empresa_idx").on(t.empresaId, t.asignadaTs),
+  })
+);
+
 // Publicar → «Crear con IA» (PR2, imágenes) — historial por empresa de
 // los trabajos de imágenes y de cada imagen, y cola de concurrencia
 // (máximo 2 imágenes «generando» a la vez por empresa: la tercera queda

@@ -6,6 +6,8 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { textoResultadoCuenta, traerVentasDelMes } from "@/lib/finanzas/traer-ventas-mes";
+import type { DatosEntrega } from "@/lib/entregas/validar";
+import { asignarEntrega, EntregaInvalidaError, quitarEntrega } from "@/lib/entregas/entregas";
 import { deshacerDespachado, DespachoNoEncontradoError, GuiaNoVistaError, marcarDespachado, VentanaDeshacerVencidaError } from "@/lib/ml/despachos";
 
 type ResultadoAccion = { ok: true } | { ok: false; error: string };
@@ -52,6 +54,37 @@ export async function deshacerDespachadoAction(despachoId: string): Promise<Resu
     if (error instanceof DespachoNoEncontradoError) return { ok: false, error: error.message };
     const mensaje = error instanceof Error ? error.message : "No se pudo deshacer.";
     return { ok: false, error: mensaje };
+  }
+  revalidatePath("/panel/despachos");
+  return { ok: true };
+}
+
+// Issue #627 (Domi-1) — asignar, reasignar y quitar. Mismo permiso que
+// marcar despachado; la RLS valida que el domiciliario sea de una bodega
+// ligada y activa. Nunca llaman a Mercado Libre.
+export async function asignarDomiciliarioAction(entrada: { pedidoRef: string; miembroDomiciliarioId: string; datos: DatosEntrega }): Promise<ResultadoAccion> {
+  const sesion = await usuarioYEmpresaActiva();
+  if (!sesion) return { ok: false, error: "Sin sesión." };
+  try {
+    await requierePermiso(sesion.usuarioId, sesion.empresaId, "ventas", "modificar");
+    await asignarEntrega(sesion.empresaId, sesion.usuarioId, entrada);
+  } catch (error) {
+    if (error instanceof EntregaInvalidaError || error instanceof SinPermisoError) return { ok: false, error: error.message };
+    return { ok: false, error: "No se pudo asignar el domiciliario." };
+  }
+  revalidatePath("/panel/despachos");
+  return { ok: true };
+}
+
+export async function quitarDomiciliarioAction(entregaId: string): Promise<ResultadoAccion> {
+  const sesion = await usuarioYEmpresaActiva();
+  if (!sesion) return { ok: false, error: "Sin sesión." };
+  try {
+    await requierePermiso(sesion.usuarioId, sesion.empresaId, "ventas", "modificar");
+    await quitarEntrega(sesion.empresaId, sesion.usuarioId, entregaId);
+  } catch (error) {
+    if (error instanceof EntregaInvalidaError || error instanceof SinPermisoError) return { ok: false, error: error.message };
+    return { ok: false, error: "No se pudo quitar la asignación." };
   }
   revalidatePath("/panel/despachos");
   return { ok: true };

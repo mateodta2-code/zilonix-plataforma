@@ -1134,3 +1134,104 @@ DROP POLICY IF EXISTS stock3pl_bodega_editar ON stock_bodega_3pl;
 CREATE POLICY stock3pl_bodega_editar ON stock_bodega_3pl FOR UPDATE TO app_user
   USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid)
   WITH CHECK (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+
+-- ---------------------------------------------------------------------
+-- Issue #627 (Domi-1, migración 0045) — entregas a domicilio.
+-- Tres miradas, todas con NULLIF (sin variable no hay filas, nunca un
+-- error de cast):
+--   * empresa: sus entregas (app.empresa_actual);
+--   * bodega: las de su bodega_id, SOLO si la sesión declara
+--     app.bodega_rol admin_bodega u operario (un domiciliario también
+--     lleva app.bodega_id y NO debe ver las de sus compañeros);
+--   * domiciliario: solo las suyas (app.bodega_miembro_id, miembro
+--     activo con rol domiciliario) y SOLO mientras estén abiertas. Los
+--     datos del comprador no se pueden ocultar por columna (app_user es
+--     uno solo), así que la fila entera deja de verse al cerrarse.
+-- app_user no tiene UPDATE de estado/motivo todavía (lo agrega Domi-2).
+-- ---------------------------------------------------------------------
+ALTER TABLE entregas_domiciliario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entregas_domiciliario FORCE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, DELETE ON entregas_domiciliario TO app_user;
+REVOKE UPDATE ON entregas_domiciliario FROM app_user;
+GRANT UPDATE (bodega_id, miembro_domiciliario_id, receptor_nombre, direccion, barrio, ciudad, telefono, nota, actualizada_ts) ON entregas_domiciliario TO app_user;
+
+-- La empresa lista (y valida en WITH CHECK) los domiciliarios ACTIVOS de
+-- las bodegas ligadas y activas con ella. Solo filas rol=domiciliario.
+DROP POLICY IF EXISTS miembro3pl_ver_por_empresa ON miembros_bodega_3pl;
+CREATE POLICY miembro3pl_ver_por_empresa ON miembros_bodega_3pl FOR SELECT TO app_user
+  USING (
+    rol = 'domiciliario' AND activo
+    AND bodega_id IN (
+      SELECT v.bodega_id FROM bodegas_3pl_empresas v
+      WHERE v.empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid AND v.estado = 'activa'
+    )
+  );
+
+DROP POLICY IF EXISTS entrega_empresa_ver ON entregas_domiciliario;
+CREATE POLICY entrega_empresa_ver ON entregas_domiciliario FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+DROP POLICY IF EXISTS entrega_bodega_ver ON entregas_domiciliario;
+CREATE POLICY entrega_bodega_ver ON entregas_domiciliario FOR SELECT TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+  );
+DROP POLICY IF EXISTS entrega_domiciliario_ver ON entregas_domiciliario;
+CREATE POLICY entrega_domiciliario_ver ON entregas_domiciliario FOR SELECT TO app_user
+  USING (
+    estado IN ('asignada', 'en_camino')
+    AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND miembro_domiciliario_id = NULLIF(current_setting('app.bodega_miembro_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND EXISTS (
+      SELECT 1 FROM miembros_bodega_3pl m
+      WHERE m.id = entregas_domiciliario.miembro_domiciliario_id
+        AND m.bodega_id = entregas_domiciliario.bodega_id AND m.rol = 'domiciliario' AND m.activo
+    )
+  );
+
+-- Asignar y reasignar: el domiciliario debe ser un miembro activo de esa
+-- bodega, y la bodega estar activa y ligada (activa) con la empresa.
+DROP POLICY IF EXISTS entrega_empresa_asignar ON entregas_domiciliario;
+CREATE POLICY entrega_empresa_asignar ON entregas_domiciliario FOR INSERT TO app_user
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado = 'asignada'
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v JOIN bodegas_3pl b ON b.id = v.bodega_id
+      WHERE v.bodega_id = entregas_domiciliario.bodega_id AND v.empresa_id = entregas_domiciliario.empresa_id
+        AND v.estado = 'activa' AND b.estado = 'activa'
+    )
+    AND EXISTS (
+      SELECT 1 FROM miembros_bodega_3pl m
+      WHERE m.id = entregas_domiciliario.miembro_domiciliario_id
+        AND m.bodega_id = entregas_domiciliario.bodega_id AND m.rol = 'domiciliario' AND m.activo
+    )
+  );
+DROP POLICY IF EXISTS entrega_empresa_reasignar ON entregas_domiciliario;
+CREATE POLICY entrega_empresa_reasignar ON entregas_domiciliario FOR UPDATE TO app_user
+  USING (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado IN ('asignada', 'en_camino')
+  )
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado IN ('asignada', 'en_camino')
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v JOIN bodegas_3pl b ON b.id = v.bodega_id
+      WHERE v.bodega_id = entregas_domiciliario.bodega_id AND v.empresa_id = entregas_domiciliario.empresa_id
+        AND v.estado = 'activa' AND b.estado = 'activa'
+    )
+    AND EXISTS (
+      SELECT 1 FROM miembros_bodega_3pl m
+      WHERE m.id = entregas_domiciliario.miembro_domiciliario_id
+        AND m.bodega_id = entregas_domiciliario.bodega_id AND m.rol = 'domiciliario' AND m.activo
+    )
+  );
+-- Quitar: solo una entrega que todavía no salió.
+DROP POLICY IF EXISTS entrega_empresa_quitar ON entregas_domiciliario;
+CREATE POLICY entrega_empresa_quitar ON entregas_domiciliario FOR DELETE TO app_user
+  USING (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado = 'asignada'
+  );

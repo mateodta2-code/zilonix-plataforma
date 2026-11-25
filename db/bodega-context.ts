@@ -18,12 +18,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // app.bodega_rol (opcional) es el rol del miembro en la sesión: las políticas
 // de UPDATE de bodegas_3pl y miembros_bodega_3pl exigen 'admin_bodega'. Sin
 // rol vale cadena vacía y NO da permiso de edición (solo lectura).
-export async function dbComoBodega<T>(bodegaId: string, fn: (tx: typeof db) => Promise<T>, rol?: string): Promise<T> {
+//
+// app.bodega_miembro_id (opcional, Domi-1): el miembro_bodega_3pl de quien
+// consulta. El domiciliario lo necesita para ver SOLO sus entregas; sin él
+// vale cadena vacía y ninguna política de "lo mío" devuelve filas.
+export async function dbComoBodega<T>(bodegaId: string, fn: (tx: typeof db) => Promise<T>, rol?: string, miembroId?: string): Promise<T> {
   if (!UUID_RE.test(bodegaId)) throw new Error(`bodegaId inválido: "${bodegaId}" no es un UUID.`);
+  if (miembroId && !UUID_RE.test(miembroId)) throw new Error(`miembroId inválido: "${miembroId}" no es un UUID.`);
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.empresa_actual', ${EMPRESA_SENTINEL}, true)`);
     await tx.execute(sql`SELECT set_config('app.bodega_id', ${bodegaId}, true)`);
     await tx.execute(sql`SELECT set_config('app.bodega_rol', ${rol ?? ""}, true)`);
+    await tx.execute(sql`SELECT set_config('app.bodega_miembro_id', ${miembroId ?? ""}, true)`);
     return fn(tx as unknown as typeof db);
   });
 }
