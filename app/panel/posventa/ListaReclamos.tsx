@@ -57,7 +57,7 @@ export function ListaReclamos({ reclamos, ahoraMs }: { reclamos: ReclamoAbierto[
           const minutos = minutosHasta(reclamo.plazo, ahora);
           return (
             <li key={`${reclamo.cuentaMlId}-${reclamo.id}`} className={styles.fila}>
-              <Link href={`/panel/preguntas/reclamos/${reclamo.cuentaMlId}/${reclamo.id}`} className={styles.filaEnlace}>
+              <div className={styles.filaEnlace}>
                 <div className={styles.cabecera}>
                   <span className={styles.cuenta}>{reclamo.nickname}</span>
                   <Chip estado="neutro">{rotuloTipoReclamo(reclamo.tipo)}</Chip>
@@ -68,8 +68,11 @@ export function ListaReclamos({ reclamos, ahoraMs }: { reclamos: ReclamoAbierto[
                 <p className={styles.texto}>
                   Venta {reclamo.recursoId ?? "—"} · abierto {textoEspera(minutosDesde(reclamo.fecha, ahora))} · último cambio {textoEspera(minutosDesde(reclamo.actualizado, ahora))}
                 </p>
-                <span className={styles.ver}>Ver reclamo →</span>
-              </Link>
+                {/* El enlace del botón se estira sobre toda la tarjeta (::after): clicable completa sin anidar <a>. */}
+                <Link href={`/panel/posventa/reclamos/${reclamo.cuentaMlId}/${reclamo.id}`} className={styles.ver}>
+                  Ver reclamo →
+                </Link>
+              </div>
             </li>
           );
         })}

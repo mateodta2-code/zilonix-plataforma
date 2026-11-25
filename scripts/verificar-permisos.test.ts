@@ -137,8 +137,8 @@ const RUTAS_PROTEGIDAS = new Set([
   // Reclamos-A (Refs #644): detalle de un reclamo y proxy de sus
   // adjuntos, ambos solo lectura — piden ventas.consultar y validan que
   // la cuenta sea de la empresa actual.
-  "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/page.tsx",
-  "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/accionesResolucion.ts",
+  "app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/page.tsx",
+  "app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/accionesResolucion.ts",
   "app/api/ml/reclamos/[cuentaId]/[reclamoId]/adjuntos/[archivo]/route.ts",
   // Posventa-Mensajes (Refs #645): lista y chat piden ventas.consultar (solo
   // lectura, siempre con mark_as_read=false); responder y pedir sugerencias
@@ -147,7 +147,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/posventa/mensajes/page.tsx",
   "app/panel/posventa/mensajes/[cuentaId]/[packId]/page.tsx",
   "app/panel/posventa/mensajes/acciones.ts",
-  "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/accionesMensaje.ts",
+  "app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/accionesMensaje.ts",
   "app/api/ml/mensajes/[cuentaId]/adjuntos/[archivo]/route.ts",
   // Posventa-0 (Refs #647): marco y lista de reclamos, solo lectura —
   // piden ventas.consultar (layout y página) y validan la cuenta por empresa.
@@ -328,6 +328,7 @@ const RUTAS_BODEGA = new Set([
 // Rutas exentas, cada una con el motivo real por el que no necesita
 // preguntar "¿puede [acción] en [módulo]?".
 const RUTAS_EXENTAS: Record<string, string> = {
+  "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/page.tsx": "solo redirige los enlaces viejos a /panel/posventa/reclamos/... (que sí exige sesión y ventas.consultar); no lee ningún dato",
   "app/page.tsx": "solo lista las empresas propias del usuario para decidir a dónde mandarlo, no lee datos de negocio de ninguna empresa",
   "app/panel/actions.ts": "cambiar la empresa activa ya se revalida contra las membresías reales del usuario, no es un permiso por módulo",
   "app/crear-empresa/page.tsx": "cualquier usuario con cuenta puede crear su propia empresa — no hay membresía previa que comprobar",
