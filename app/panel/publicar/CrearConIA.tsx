@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
@@ -75,6 +76,12 @@ type BorradorTextos = {
 
 // Misma ruta que lib/publicaciones/errores.ts (ese módulo es de servidor).
 const RUTA_CONECTAR_IA = "/panel/conectar-ia";
+
+const TITULO_CARGA_IA = {
+  analisis: "Analizando el producto con IA…",
+  titulos: "Proponiendo títulos…",
+  descripcion: "Proponiendo descripción…",
+} as const;
 
 // Publicar → «Crear con IA» (PR1, textos). La IA de la empresa analiza
 // las fotos del borrador y lo que escribe el vendedor (ficha con el
@@ -394,6 +401,13 @@ export function CrearConIA({
           </div>
         </div>
       ) : null}
+
+      <BarraCarga
+        estado={ocupado !== null ? "cargando" : "inactiva"}
+        titulo={ocupado !== null ? TITULO_CARGA_IA[ocupado] : ""}
+        avance={null}
+        sticky={false}
+      />
 
       <div className={styles.bloqueIA}>
         <div className={styles.subPestanasIA} role="tablist" aria-label="Qué crear con la IA">
