@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { idCompetenciaDesdeLink, limpiarTituloCompetencia } from "@/lib/publicaciones/competencia";
+import { esLinkCortoMl, idCompetenciaDesdeLink, limpiarTituloCompetencia } from "@/lib/publicaciones/competencia";
 
 describe("link de la competencia → id (solo el texto del link)", () => {
   it("publicación, catálogo y ?wid=, del país de la cuenta", () => {
@@ -22,5 +22,14 @@ describe("link de la competencia → id (solo el texto del link)", () => {
     expect(limpiarTituloCompetencia("  Bebedero <b>colibrí</b>\n x2 ")).toBe("Bebedero b colibrí /b x2");
     expect(limpiarTituloCompetencia(5)).toBe("");
     expect(limpiarTituloCompetencia("a".repeat(500))).toHaveLength(200);
+  });
+});
+
+describe("esLinkCortoMl — links de «Compartir» de la app", () => {
+  it("reconoce meli.la y nada más", () => {
+    expect(esLinkCortoMl("https://meli.la/2AbCdEf")).toBe(true);
+    expect(esLinkCortoMl("https://articulo.mercadolibre.com.co/MCO-123")).toBe(false);
+    expect(esLinkCortoMl("https://meli.la.evil.com/x")).toBe(false);
+    expect(esLinkCortoMl("no es un link")).toBe(false);
   });
 });

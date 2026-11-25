@@ -39,6 +39,7 @@ import {
   PATRON_ID_PRODUCTO_O_ITEM,
   resolverCategoria,
   salirDePromocionMl,
+  titulosMasVendidosMl,
 } from "./cliente";
 
 function respuestaJson(data: unknown, status = 200) {
@@ -1339,5 +1340,50 @@ describe("actualizarNombreFamiliaMl (título de «User Products», 22-nov)", () 
     const { actualizarNombreFamiliaMl } = await import("./cliente");
     await expect(actualizarNombreFamiliaMl("../items/MCO1", "token", "x")).rejects.toThrow();
     expect(fetchFalso).not.toHaveBeenCalled();
+  });
+});
+
+describe("titulosMasVendidosMl — Publicar: títulos de los más vendidos como idea para la IA", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Responde según la URL pedida (highlights, products, items, categories).
+  function mlFalso(rutas: Record<string, { data: unknown; status?: number }>) {
+    const fetchMock = vi.fn(async (url: string) => {
+      const clave = Object.keys(rutas).find((r) => String(url).includes(r));
+      const r = clave ? rutas[clave] : { data: {}, status: 404 };
+      return respuestaJson(r.data, r.status ?? 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("PRODUCT → nombre del catálogo, ITEM → título; USER_PRODUCT se ignora; sin repetir y máximo 5", async () => {
+    mlFalso({
+      "/highlights/MCO/category/MCO1234": {
+        data: { content: [{ id: "MCO1", type: "PRODUCT" }, { id: "MCO2", type: "ITEM" }, { id: "MCOU3", type: "USER_PRODUCT" }, { id: "MCO4", type: "ITEM" }] },
+      },
+      "/products/MCO1": { data: { name: "Colores Profesionales X72" } },
+      "/items/MCO2": { data: { title: "Lápices Artísticos 48 Colores" } },
+      "/items/MCO4": { data: { title: "Colores Profesionales X72" } },
+    });
+    const r = await titulosMasVendidosMl("MCO", "MCO1234", "token");
+    expect(r).toEqual({ titulos: ["Colores Profesionales X72", "Lápices Artísticos 48 Colores"], categoriaId: "MCO1234" });
+  });
+
+  it("sin más vendidos en la específica, prueba con la categoría padre", async () => {
+    const fetchMock = mlFalso({
+      "/highlights/MCO/category/MCO1234": { data: { content: [] } },
+      "/categories/MCO1234": { data: { id: "MCO1234", name: "Lápices", path_from_root: [{ id: "MCO1", name: "Arte" }, { id: "MCO99", name: "Dibujo" }, { id: "MCO1234", name: "Lápices" }] } },
+      "/highlights/MCO/category/MCO99": { data: { content: [{ id: "MCO7", type: "ITEM" }] } },
+      "/items/MCO7": { data: { title: "Set De Dibujo Profesional" } },
+    });
+    const r = await titulosMasVendidosMl("MCO", "MCO1234", "token");
+    expect(r).toEqual({ titulos: ["Set De Dibujo Profesional"], categoriaId: "MCO99" });
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/highlights/MCO/category/MCO1"))).toBe(true);
+  });
+
+  it("si Mercado Libre no deja (403), devuelve vacío sin romper", async () => {
+    mlFalso({ "/highlights/": { data: {}, status: 403 }, "/categories/": { data: {}, status: 403 } });
+    await expect(titulosMasVendidosMl("MCO", "MCO1234", "token")).resolves.toEqual({ titulos: [], categoriaId: null });
   });
 });
