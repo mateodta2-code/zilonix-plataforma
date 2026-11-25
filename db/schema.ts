@@ -575,6 +575,31 @@ export const avisosMl = pgTable(
   })
 );
 
+// Anuncios de la plataforma (25-nov, superadmin): un aviso que el equipo de
+// Zilonix publica para TODAS las empresas (ej. «Mercado Libre tiene fallas»),
+// visible arriba en /panel entre inicio_ts y fin_ts (sin fin = hasta que se
+// retire). Sin empresa_id: es de la plataforma. Solo el superadmin crea y
+// retira; los vendedores solo leen los vigentes (db/rls-setup.sql). Nunca
+// se borra: «retirar» deja retirado_ts (historial).
+export const anunciosPlataforma = pgTable(
+  "anuncios_plataforma",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    mensaje: text("mensaje").notNull(),
+    tipo: text("tipo").notNull().default("info"),
+    inicioTs: timestamp("inicio_ts", { withTimezone: true }).notNull().defaultNow(),
+    finTs: timestamp("fin_ts", { withTimezone: true }),
+    retiradoTs: timestamp("retirado_ts", { withTimezone: true }),
+    creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tipoValido: check("anuncios_plataforma_tipo_valido", sql`${t.tipo} in ('info', 'advertencia', 'peligro')`),
+    mensajeValido: check("anuncios_plataforma_mensaje_valido", sql`length(trim(${t.mensaje})) between 1 and 300`),
+    finDespuesDeInicio: check("anuncios_plataforma_fin_despues", sql`${t.finTs} is null or ${t.finTs} > ${t.inicioTs}`),
+  })
+);
+
 // Estado de los procesos (25-nov, superadmin): una fila por corrida de
 // cada proceso automático (avisos de ML, publicidad, seguimiento). Antes
 // el resultado solo quedaba en los logs de Railway y no había forma de

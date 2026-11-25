@@ -6,6 +6,8 @@ import { itemsAdministracion } from "@/components/marco/menuAdministracion";
 import { SECCIONES_PRODUCTOS } from "@/components/productos/secciones";
 import { seccionesFinanzas } from "@/components/finanzas/secciones";
 import { GuiaModulo } from "@/components/guia/GuiaModulo";
+import { BandaAnuncios } from "@/components/anuncios/BandaAnuncios";
+import { anunciosVigentes } from "@/lib/anuncios";
 
 // Marco visual (issue de las subpáginas) — mueve acá la carga que
 // antes hacía SOLO app/panel/page.tsx para pintar el marco (usuario
@@ -120,6 +122,8 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const grupos: GrupoNav[] =
     administracion.length > 0 ? [grupoPrincipal, { etiqueta: "Administración", items: administracion }] : [grupoPrincipal];
 
+  const anuncios = await anunciosVigentes();
+
   return (
     <MarcoApp
       empresa={{ nombre: activa.nombre, nit: activa.nit }}
@@ -130,6 +134,8 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       usuario={{ nombre: usuario.nombre, imagenUrl: clerkUser?.imageUrl ?? null }}
       mostrarCampana={esDueno}
     >
+      {/* Anuncios de la plataforma (25-nov): los vigentes que publicó el superadmin. */}
+      <BandaAnuncios anuncios={anuncios} />
       {/* Guía de cada módulo (19-nov), arriba de su pantalla. */}
       <GuiaModulo />
       {children}

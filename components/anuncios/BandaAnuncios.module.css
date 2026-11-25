@@ -1,0 +1,9 @@
+/* Anuncios de la plataforma — banda arriba del panel. Solo tokens existentes
+   (mismos colores por estado que Chip), en tema claro y oscuro. */
+.lista { display: grid; gap: 8px; margin-bottom: 12px; }
+.anuncio { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; border: 1px solid var(--borde); border-radius: var(--radio-tarjeta); }
+.anuncio[data-tipo="info"] { border-color: var(--acento); color: var(--acento-fuerte); }
+.anuncio[data-tipo="advertencia"] { border-color: var(--advertencia); color: var(--advertencia-fuerte); }
+.anuncio[data-tipo="peligro"] { border-color: var(--peligro-texto); color: var(--peligro-texto); }
+.texto { flex: 1; margin: 0; overflow-wrap: anywhere; }
+.cerrar { background: none; border: 0; color: inherit; cursor: pointer; font-size: 18px; line-height: 1; min-width: 32px; min-height: 32px; }

@@ -1577,3 +1577,30 @@ CREATE POLICY novedad_domiciliario_crear ON entregas_novedades FOR INSERT TO app
         AND e.estado IN ('asignada', 'en_camino')
     )
   );
+
+-- ---------------------------------------------------------------------
+-- Anuncios de la plataforma (25-nov, migración 0050).
+-- · superadmin_user: ve todos, crea, y solo puede escribir retirado_ts
+--   (retirar). Nunca borra ni edita el texto: historial.
+-- · app_user (panel del vendedor): solo LEE los vigentes — ya empezaron,
+--   no vencieron y no se retiraron. No escribe nada.
+-- ---------------------------------------------------------------------
+ALTER TABLE anuncios_plataforma ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anuncios_plataforma FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON anuncios_plataforma FROM PUBLIC;
+GRANT SELECT, INSERT ON anuncios_plataforma TO superadmin_user;
+GRANT UPDATE (retirado_ts) ON anuncios_plataforma TO superadmin_user;
+GRANT SELECT ON anuncios_plataforma TO app_user;
+
+DROP POLICY IF EXISTS anuncio_superadmin_ver ON anuncios_plataforma;
+CREATE POLICY anuncio_superadmin_ver ON anuncios_plataforma FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS anuncio_superadmin_crear ON anuncios_plataforma;
+CREATE POLICY anuncio_superadmin_crear ON anuncios_plataforma FOR INSERT TO superadmin_user WITH CHECK (retirado_ts IS NULL);
+-- Retirar una sola vez: una fila ya retirada no se vuelve a tocar.
+DROP POLICY IF EXISTS anuncio_superadmin_retirar ON anuncios_plataforma;
+CREATE POLICY anuncio_superadmin_retirar ON anuncios_plataforma FOR UPDATE TO superadmin_user
+  USING (retirado_ts IS NULL) WITH CHECK (retirado_ts IS NOT NULL);
+
+DROP POLICY IF EXISTS anuncio_vendedor_ver_vigentes ON anuncios_plataforma;
+CREATE POLICY anuncio_vendedor_ver_vigentes ON anuncios_plataforma FOR SELECT TO app_user
+  USING (retirado_ts IS NULL AND inicio_ts <= now() AND (fin_ts IS NULL OR fin_ts > now()));
