@@ -138,6 +138,7 @@ const RUTAS_PROTEGIDAS = new Set([
   // adjuntos, ambos solo lectura — piden ventas.consultar y validan que
   // la cuenta sea de la empresa actual.
   "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/page.tsx",
+  "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/accionesResolucion.ts",
   "app/api/ml/reclamos/[cuentaId]/[reclamoId]/adjuntos/[archivo]/route.ts",
   // Optimización (Fase 1): ver pide inventario.consultar; pausar o
   // activar, inventario.modificar.
