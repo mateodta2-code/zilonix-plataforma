@@ -19,6 +19,7 @@ import {
   tieneDescripcionMl,
   leerDescripcionItemMl,
   leerItemEdicionMl,
+  leerDatosFichaItemMl,
   LimiteMercadoLibreError,
   motivoErrorEscrituraMl,
   detalleErrorEscrituraMl,
@@ -47,6 +48,11 @@ import {
   MAXIMO_FOTOS_REFERENCIA,
   promptImagenIA,
 } from "@/lib/ia/imagen";
+import { MENSAJE_SIN_IA } from "@/lib/publicaciones/errores";
+import { fichaConfirmada, idiomaDeSitio } from "@/lib/publicaciones/ficha";
+import { fichaDesdeItem } from "@/lib/publicaciones/ficha-item";
+import { LARGO_TITULO, LARGO_TITULO_CATALOGO } from "@/lib/publicaciones/titulos";
+import { generarTitulosSeo } from "@/lib/publicaciones/titulos-ia";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
 import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/lib/optimizacion/competencia";
@@ -440,6 +446,48 @@ export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: 
       : "Título actualizado en Mercado Libre.",
     userProduct && familyId ? () => actualizarNombreFamiliaMl(familyId, prep.token, titulo) : undefined
   );
+}
+
+// «Mejorar título»: la IA de TEXTO de la empresa propone títulos con la
+// MISMA lógica y el mismo prompt que Publicar (generarTitulosSeo). La ficha
+// sale solo de lo que el vendedor ya publicó en el ítem. Solo lectura en
+// Mercado Libre: no escribe nada; guardar sigue siendo editarTituloAction.
+export type ResultadoMejorarTitulo =
+  | { ok: true; titulos: string[]; catalogo: string | null; largoMaximo: number; largoMaximoCatalogo: number; puedeGuardar: boolean; vendidas: number }
+  | { ok: false; aviso: string; conectarIA?: boolean };
+
+export async function mejorarTituloIAAction(entrada: { cuentaMlId: string; itemId: string }): Promise<ResultadoMejorarTitulo> {
+  const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
+  if ("error" in prep) return { ok: false, aviso: prep.error };
+  const conexion = await obtenerConexionIAParaModulo(prep.ctx.empresaId, "optimizacion");
+  if (!conexion) return { ok: false, aviso: MENSAJE_SIN_IA, conectarIA: true };
+  const datos = await leerDatosFichaItemMl(prep.item.id, prep.token).catch(() => null);
+  if (!datos) return { ok: false, aviso: "Mercado Libre no devolvió los datos de la publicación. Intenta de nuevo." };
+  const descripcion = await leerDescripcionItemMl(prep.item.id, prep.token).catch(() => null);
+  const armada = fichaDesdeItem({ titulo: datos.titulo ?? prep.item.titulo, atributos: datos.atributos, descripcion });
+  if (!armada || !fichaConfirmada(armada.ficha)) return { ok: false, aviso: "La publicación no tiene título para trabajar." };
+  const { idioma, pais } = idiomaDeSitio(prep.cuenta.siteId);
+  const r = await generarTitulosSeo({
+    empresaId: prep.ctx.empresaId,
+    conexion,
+    cuenta: { id: entrada.cuentaMlId, siteId: prep.cuenta.siteId },
+    token: prep.token,
+    ficha: armada.ficha,
+    categoriaId: datos.categoriaId,
+    info: armada.info,
+    idioma,
+    pais,
+  });
+  if (!r.ok) return r;
+  return {
+    ok: true,
+    titulos: r.titulos,
+    catalogo: r.catalogo,
+    largoMaximo: LARGO_TITULO,
+    largoMaximoCatalogo: LARGO_TITULO_CATALOGO,
+    puedeGuardar: prep.item.vendidas === 0,
+    vendidas: prep.item.vendidas,
+  };
 }
 
 // Fotos: el orden de las que ya tiene (por id) y fotos nuevas por enlace

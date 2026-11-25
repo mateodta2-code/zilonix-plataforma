@@ -2228,6 +2228,35 @@ export async function leerItemEdicionMl(itemId: string, token: string): Promise<
   return leerItemEdicion(resp.data);
 }
 
+// Datos que el vendedor ya publicó en el ítem, para «Mejorar título» de
+// Optimización: GET /items/{id}?attributes=id,title,category_id,attributes
+// (documentado: https://developers.mercadolibre.com.ar/es_ar/producto-sincroniza-modifica-publicaciones).
+// Solo lectura. null si Mercado Libre no devuelve el ítem.
+export type AtributoItemMl = { id: string; nombre: string; valor: string };
+export type DatosFichaItemMl = { titulo: string | null; categoriaId: string | null; atributos: AtributoItemMl[] };
+
+export function leerDatosFichaItem(data: unknown): DatosFichaItemMl | null {
+  const d = data as Record<string, unknown> | null;
+  if (!d || typeof d !== "object") return null;
+  const atributos = (Array.isArray(d.attributes) ? d.attributes : []).flatMap((a): AtributoItemMl[] => {
+    const x = a as { id?: unknown; name?: unknown; value_name?: unknown };
+    if (typeof x?.id !== "string" || typeof x.value_name !== "string" || !x.value_name.trim()) return [];
+    return [{ id: x.id, nombre: typeof x.name === "string" ? x.name : x.id, valor: x.value_name.trim() }];
+  });
+  return {
+    titulo: typeof d.title === "string" ? d.title : null,
+    categoriaId: typeof d.category_id === "string" && d.category_id ? d.category_id : null,
+    atributos,
+  };
+}
+
+export async function leerDatosFichaItemMl(itemId: string, token: string): Promise<DatosFichaItemMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}`, token, { query: "?attributes=id,title,category_id,attributes" });
+  if (!resp.ok) return null;
+  return leerDatosFichaItem(resp.data);
+}
+
 // Promoción vigente de una publicación según GET /items/{id}/prices
 // (documentado; forma confirmada en staging, 22-nov): un precio
 // type=promotion con amount, regular_amount y conditions.start_time /

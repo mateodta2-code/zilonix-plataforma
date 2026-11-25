@@ -19,6 +19,8 @@ const ml = vi.hoisted(() => ({
   descripcion: vi.fn(),
   leerDescripcion: vi.fn(),
   reputacion: vi.fn(),
+  fichaItem: vi.fn(),
+  tendencias: vi.fn(),
 }));
 const auditorias = vi.hoisted(() => [] as unknown[]);
 const ia = vi.hoisted(() => ({ conexion: vi.fn(), descargar: vi.fn(), generar: vi.fn(), subir: vi.fn(), texto: vi.fn(), cloudinary: { configurado: true } }));
@@ -92,6 +94,8 @@ vi.mock("@/lib/ml/cliente", async () => {
     tieneDescripcionMl: ml.descripcion,
     leerDescripcionItemMl: ml.leerDescripcion,
     reputacionVendedorMl: ml.reputacion,
+    leerDatosFichaItemMl: ml.fichaItem,
+    tendenciasPorNivelMl: ml.tendencias,
   };
 });
 
@@ -109,6 +113,7 @@ import {
   metricasPublicacionesAction,
   revisarCambioAction,
   proponerContenidoIAAction,
+  mejorarTituloIAAction,
 } from "./actions";
 import { ErrorImagenIA } from "@/lib/ia/imagen";
 
@@ -616,5 +621,71 @@ describe("diagnóstico de solo lectura (solo administradores)", () => {
     const r = await diagnosticoPublicacionAction({ cuentaMlId: CUENTA, itemId: "../users/me" });
     expect(r.ok).toBe(false);
     expect(llamadas).toHaveLength(0);
+  });
+});
+
+describe("mejorarTituloIAAction (solo lectura)", () => {
+  const TITULOS = '{"titulos":["Crema Hidratante 50 g Piel Seca","Crema Facial 50 g Uso Diario","Crema Corporal 50 g"],"catalogo":"Crema Hidratante Facial 50 g Piel Seca Uso Diario"}';
+
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.itemEdicion.mockReset().mockResolvedValue({ id: "MCO1", titulo: "Crema 50 g", precio: 1, vendidas: 0, tieneVariantes: false, fotos: [] });
+    ml.fichaItem.mockReset().mockResolvedValue({ titulo: "Crema 50 g", categoriaId: "MCO1234", atributos: [{ id: "COLOR", nombre: "Color", valor: "Blanco" }] });
+    ml.tendencias.mockReset().mockResolvedValue({ ruta: ["Belleza"], niveles: [] });
+    ml.leerDescripcion.mockReset().mockResolvedValue("Crema para uso diario");
+    ml.actualizar.mockReset();
+    ia.conexion.mockReset().mockResolvedValue({ id: "c", proveedor: "openai", baseUrl: null, modelo: "x", actualizadoTs: new Date(), apiKey: "k" });
+    ia.texto.mockReset().mockResolvedValue(TITULOS);
+  });
+
+  it("sin ventas: devuelve títulos, límites y puede guardar; no escribe en ML", async () => {
+    const r = await mejorarTituloIAAction({ cuentaMlId: CUENTA, itemId: "MCO1" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.titulos).toHaveLength(3);
+    expect(r.largoMaximo).toBe(60);
+    expect(r.puedeGuardar).toBe(true);
+    expect(estado.permisosPedidos).toEqual(["inventario.modificar"]);
+    expect(ia.conexion).toHaveBeenCalledWith("empresa-1", "optimizacion");
+    expect(ia.texto.mock.calls[0][1] as string).toContain("Crema 50 g");
+    expect(ml.actualizar).not.toHaveBeenCalled();
+    expect(auditorias).toHaveLength(0);
+  });
+
+  it("con ventas: igual propone, pero no se puede guardar", async () => {
+    ml.itemEdicion.mockResolvedValue({ id: "MCO1", titulo: "Crema 50 g", precio: 1, vendidas: 4, tieneVariantes: false, fotos: [] });
+    const r = await mejorarTituloIAAction({ cuentaMlId: CUENTA, itemId: "MCO1" });
+    expect(r.ok && r.puedeGuardar).toBe(false);
+    expect(r.ok && r.vendidas).toBe(4);
+  });
+
+  it("sin IA conectada: el aviso de Publicar con enlace a Conectar IA", async () => {
+    ia.conexion.mockResolvedValue(null);
+    const r = await mejorarTituloIAAction({ cuentaMlId: CUENTA, itemId: "MCO1" });
+    expect(r).toEqual({ ok: false, aviso: expect.stringContaining("Conectar IA"), conectarIA: true });
+    expect(ia.texto).not.toHaveBeenCalled();
+  });
+
+  it("ML no devuelve los datos: aviso claro, sin llamar a la IA", async () => {
+    ml.fichaItem.mockResolvedValue(null);
+    const r = await mejorarTituloIAAction({ cuentaMlId: CUENTA, itemId: "MCO1" });
+    expect(r.ok).toBe(false);
+    expect(ia.texto).not.toHaveBeenCalled();
+  });
+
+  it("la IA devuelve basura: aviso de títulos no usables", async () => {
+    ia.texto.mockResolvedValue("nada útil");
+    const r = await mejorarTituloIAAction({ cuentaMlId: CUENTA, itemId: "MCO1" });
+    expect(r).toEqual({ ok: false, aviso: expect.stringContaining("no devolvió títulos") });
+  });
+
+  it("sin permiso o itemId inválido: no llega a la IA", async () => {
+    estado.conPermiso = false;
+    expect((await mejorarTituloIAAction({ cuentaMlId: CUENTA, itemId: "MCO1" })).ok).toBe(false);
+    estado.conPermiso = true;
+    expect((await mejorarTituloIAAction({ cuentaMlId: CUENTA, itemId: "../x" })).ok).toBe(false);
+    expect(ia.texto).not.toHaveBeenCalled();
   });
 });
