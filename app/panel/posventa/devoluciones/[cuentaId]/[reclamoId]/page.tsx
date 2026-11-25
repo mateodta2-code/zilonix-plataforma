@@ -26,7 +26,7 @@ import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { formatearFechaPedido } from "@/lib/pedidos/marketplace";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { esUuid } from "@/lib/validacion";
-import { FichaVentaReclamo } from "../../../../preguntas/reclamos/[cuentaId]/[reclamoId]/FichaVentaReclamo";
+import { FichaVentaReclamo } from "../../../reclamos/[cuentaId]/[reclamoId]/FichaVentaReclamo";
 import styles from "../../Devoluciones.module.css";
 
 // Posventa-Devoluciones (Refs #648) — detalle de una devolución, SOLO
@@ -175,7 +175,7 @@ export default async function DetalleDevolucionPage({ params }: { params: { cuen
                   devolucionId={devolucion?.id ?? ""}
                   motivoNoDisponible={motivoRevision}
                 />
-                <Link href={`/panel/preguntas/reclamos/${cuenta.id}/${detalle.reclamo.id}`} className={styles.enlace}>
+                <Link href={`/panel/posventa/reclamos/${cuenta.id}/${detalle.reclamo.id}`} className={styles.enlace}>
                   Ver el reclamo en Posventa →
                 </Link>
               </div>

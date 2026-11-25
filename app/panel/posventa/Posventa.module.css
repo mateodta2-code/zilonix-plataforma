@@ -73,6 +73,7 @@
 }
 
 .fila {
+  position: relative;
   border-bottom: 1px solid var(--borde);
 }
 
@@ -88,7 +89,7 @@
   text-decoration: none;
 }
 
-.filaEnlace:hover {
+.fila:hover {
   background: var(--fila-hover);
 }
 
@@ -114,9 +115,46 @@
 }
 
 .ver {
+  composes: zx-brillo-marca from global;
   justify-self: end;
-  font-size: 13px;
-  color: var(--acento-fuerte);
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-boton);
+  background: linear-gradient(var(--acento-boton), var(--acento-boton)) padding-box, var(--degradado-plata-borde) border-box;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: var(--transicion-color), var(--transicion-transform);
+}
+
+/* Estira el área clicable a toda la tarjeta (.fila es relative). */
+.ver::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.ver:hover {
+  border-color: transparent;
+  background: linear-gradient(var(--acento-boton-hover), var(--acento-boton-hover)) padding-box, var(--degradado-plata-borde) border-box;
+  box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
+}
+
+.ver:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+}
+
+@media (max-width: 639px) {
+  .ver {
+    justify-self: stretch;
+  }
 }
 
 .aviso {

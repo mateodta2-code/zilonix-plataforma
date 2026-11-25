@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
@@ -15,12 +14,16 @@ import { AutoRefrescoDespachos } from "../despachos/AutoRefrescoDespachos";
 import { FilaPregunta } from "./FilaPregunta";
 import styles from "./page.module.css";
 
-// Preguntas y reclamos (Refs #51) — para responder rápido: Mercado
+// Preguntas (Refs #51) — para responder rápido: Mercado
 // Libre mide el tiempo de respuesta en la reputación. Lee en vivo de
 // Mercado Libre (sin tablas propias); ver por consultar ventas,
 // responder con modificar ventas.
 
-export default async function PreguntasPage() {
+export default async function PreguntasPage({ searchParams }: { searchParams?: { tab?: string | string[] } }) {
+  // Enlaces viejos con ?tab=reclamos: los reclamos viven en Posventa.
+  if (searchParams?.tab === "reclamos") redirect("/panel/posventa");
+
+
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
 
@@ -69,13 +72,6 @@ export default async function PreguntasPage() {
           </ul>
         </div>
       )}
-
-      {/* Posventa-0 (Refs #647): reclamos y mensajes viven en Posventa. */}
-      <p className={styles.nota}>
-        <Link href="/panel/posventa" className={styles.enlace}>
-          Reclamos y mensajes están en Posventa →
-        </Link>
-      </p>
 
       {bandeja.preguntas.length === 0 ? (
         <EstadoVacio>No hay preguntas sin responder. ¡Al día!</EstadoVacio>

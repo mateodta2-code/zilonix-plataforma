@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmacionDoble } from "@/components/marco/ConfirmacionDoble";
-import { leerMotivosFallaDevolucionAction, revisarDevolucionAction } from "@/app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/accionesResolucion";
+import { leerMotivosFallaDevolucionAction, revisarDevolucionAction } from "@/app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/accionesResolucion";
 
 // Reclamos-Dinero (Refs #646) — «Revisar devolución». Aún NO está
 // conectado a ninguna pantalla: el detalle de devoluciones (#648) lo
