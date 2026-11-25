@@ -125,6 +125,9 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
   // Fotos: la misma galería de Publicar (portada marcada, subir desde el
   // equipo, arrastrar para ordenar). Trabaja con URLs; al guardar, las
   // que ya tenía la publicación vuelven a su id de Mercado Libre.
+  // Enlaces de la galería que salieron de «Crear imagen con IA» (el servidor
+  // solo cuenta los que de verdad van entre las fotos nuevas).
+  const [fotosIA, setFotosIA] = useState<string[]>([]);
   const [fotos, setFotos] = useState(() => datos.fotos.map((f) => f.url));
   const [avisoFotos, setAvisoFotos] = useState<Aviso>(null);
   const idPorUrl = new Map(datos.fotos.map((f) => [f.url, f.id]));
@@ -265,7 +268,10 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
             fotos={fotos}
             tituloProducto={datos.titulo}
             estado={datos.iaImagen}
-            onAgregar={(url, comoPortada) => setFotos((actuales) => (comoPortada ? [url, ...actuales] : [...actuales, url]))}
+            onAgregar={(url, comoPortada) => {
+              setFotosIA((a) => [...a, url]);
+              setFotos((actuales) => (comoPortada ? [url, ...actuales] : [...actuales, url]));
+            }}
           />
         ) : null}
         <Boton
@@ -278,6 +284,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
                 editarFotosAction({
                   cuentaMlId: datos.cuentaMlId,
                   itemId: datos.itemId,
+                  fotosIA,
                   fotos: fotos.map((url) => {
                     const id = idPorUrl.get(url);
                     return id ? { id } : { url };

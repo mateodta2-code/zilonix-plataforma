@@ -78,8 +78,10 @@ export class CuentaDelAvisoNoConectadaError extends Error {
 // vuelta los MISMOS 50 avisos de cuentas ya desconectadas, que fallaban
 // siempre y se dejaban pendientes: nunca llegaba a los demás. Estos
 // fallos son permanentes: el aviso se marca procesado (omitido) y se
-// cuenta aparte. Las ventas quedan cubiertas por la sincronización de
-// respaldo cuando la cuenta se vuelva a conectar.
+// cuenta aparte. OJO: NO hay sincronización automática de respaldo — las
+// ventas de esos avisos solo vuelven si alguien de la empresa pulsa
+// «Traer ventas de este mes» (lib/finanzas/traer-ventas-mes.ts, manual y
+// solo el mes en curso) después de reconectar o de que la reactiven.
 function motivoOmision(error: unknown): "suspendida" | "sin_cuenta" | null {
   if (error instanceof EmpresaSuspendidaError) return "suspendida";
   if (error instanceof CuentaDelAvisoNoConectadaError || error instanceof CuentaDesconectadaError || error instanceof CuentaMlNoEncontradaError) return "sin_cuenta";
@@ -169,9 +171,11 @@ export async function procesarAvisosPendientes(esperar: Esperar = esperarDeVerda
         // Un aviso que falla (cuenta sin token vigente, orden borrada en
         // ML, error de red) no debe tumbar el lote entero — se deja
         // pendiente (procesado_ts sigue null) para que la próxima llamada
-        // del trabajador lo reintente. La sincronización de cada hora
-        // (lib/finanzas/traer-ventas-mes.ts) queda como respaldo de
-        // todas formas, aunque esto se quedara pendiente para siempre.
+        // del trabajador lo reintente. Ojo (corregido 25-nov): no hay
+        // sincronización automática de respaldo; «Traer ventas de este
+        // mes» (lib/finanzas/traer-ventas-mes.ts) es un botón manual y
+        // solo trae el mes en curso. Por eso un aviso de VENTA nunca se
+        // omite por viejo: perderlo sería perder la venta.
         fallidos += 1;
         console.error(`Aviso ${aviso.id} (${aviso.topic}) no se pudo procesar:`, error instanceof Error ? error.message : error);
       }

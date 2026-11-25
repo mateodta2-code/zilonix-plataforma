@@ -1,6 +1,7 @@
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Chip } from "@/components/marco/Chip";
 import type { CambioBitacora } from "@/lib/optimizacion/bitacora";
+import { leerFotosCompactas, MARCA_FOTO_IA_ROTULO } from "@/lib/optimizacion/bitacoraResultado";
 import { RESULTADOS_REVISION, type ResultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
 import { NotaBitacora, RevisarCambio } from "./AccionesBitacora";
 import { variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
@@ -19,6 +20,7 @@ export function BitacoraCambios({
   idioma,
   conFinanzas,
   cuentaMlId,
+  cuentaNickname,
   itemId,
   hoy,
   puedeEditar,
@@ -31,12 +33,36 @@ export function BitacoraCambios({
   idioma: string;
   conFinanzas: boolean;
   cuentaMlId: string;
+  // Cuenta de la publicación (el detalle es de una sola cuenta).
+  cuentaNickname?: string;
   itemId: string;
   hoy: string;
   puedeEditar: boolean;
 }) {
   const fecha = (ts: Date) => ts.toLocaleDateString(idioma, { day: "numeric", month: "short", year: "numeric", timeZone: "America/Bogota" });
   const valor = (c: CambioBitacora, v: string | null) => (v === null ? "—" : c.accion === "cambiar_precio_publicacion" ? plata(v) : v.length > 60 ? `${v.slice(0, 57)}…` : v);
+  const esUrl = (v: string) => v.startsWith("https://");
+  // Fotos: cuántas antes → después y la portada de cada lado (miniatura
+  // si hay enlace; un id de Mercado Libre se muestra como texto corto).
+  const portada = (v: string | undefined) =>
+    !v ? "—" : esUrl(v) ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={v} alt="Portada" width={40} height={40} style={{ objectFit: "cover", verticalAlign: "middle" }} />
+    ) : (
+      v.slice(0, 12)
+    );
+  const fotos = (c: CambioBitacora) => {
+    const antes = leerFotosCompactas(c.valorAnterior);
+    const despues = leerFotosCompactas(c.valorNuevo);
+    if (antes.length === 0 && despues.length === 0) return null;
+    return (
+      <>
+        <strong>{c.detalle?.includes(MARCA_FOTO_IA_ROTULO) ? "Fotos (con IA)" : c.rotulo}</strong>
+        {`: ${antes.length} → ${despues.length} fotos. Portada: `}
+        {portada(antes[0])} → {portada(despues[0])}
+      </>
+    );
+  };
   const cambio = (c: CambioBitacora) => {
     if (c.origen === "nota") return `Nota: ${c.detalle ?? ""}`;
     if (c.valorAnterior !== null || c.valorNuevo !== null) return `${c.rotulo}: ${valor(c, c.valorAnterior)} → ${valor(c, c.valorNuevo)}`;
@@ -69,14 +95,17 @@ export function BitacoraCambios({
       {cambios.length === 0 ? (
         <p className={styles.nota}>Todavía no hay cambios en esta publicación. Cada cambio de precio, título, fotos o estado hecho desde Zilonix queda aquí; los que hagas fuera de Zilonix, anótalos con «Anotar un cambio». A los 7 días ves si funcionó.</p>
       ) : (
-        <Tabla encabezados={["Fecha", "Cambio", "Quién", "Resultado (7 días antes vs. 7 días después)", "Revisión"]}>
+        <Tabla encabezados={["Fecha", "Cambio", "Quién", "Resultado al día 8 (7 días antes vs. 7 días después)", "Revisión"]}>
           {cambios.map((c) => {
             const r = resultados.get(c.ref);
             const revision = c.revision ? RESULTADOS_REVISION.find((x) => x.id === c.revision?.resultado) : null;
             return (
               <FilaTabla key={c.id}>
                 <CeldaTabla>{fecha(c.ts)}</CeldaTabla>
-                <CeldaTabla>{cambio(c)}</CeldaTabla>
+                <CeldaTabla>
+                  {(c.accion === "cambiar_fotos_publicacion" ? fotos(c) : null) ?? cambio(c)}
+                  {cuentaNickname && c.origen === "zilonix" ? <div className={styles.notaNeutra}>{`Cuenta: ${cuentaNickname}`}</div> : null}
+                </CeldaTabla>
                 <CeldaTabla>{c.usuario ?? "—"}</CeldaTabla>
                 <CeldaTabla>
                   {!r ? (
