@@ -38,20 +38,26 @@ function precio(valor: string | null, siteId: string): string {
   return formatearMoneda(Number(valor), siteId);
 }
 
+// Auditar solo trae lo que hay que revisar: los conteos suman el total
+// (las «ejecutadas» que llegan son únicamente las que quedaron bajo el piso).
 function resumenTanda(t: TandaBitacoraCliente): string {
   const partes: string[] = [];
-  if (t.participo) partes.push(`${t.participo} participó`);
-  if (t.modifico) partes.push(`${t.modifico} modificó`);
-  if (t.salio) partes.push(`${t.salio} dejó de participar`);
-  partes.push(`${t.conError} con error`);
+  if (t.conError) partes.push(`${t.conError} con error`);
   if (t.omitidas) partes.push(`${t.omitidas} omitidas`);
   if (t.noApi) partes.push(`${t.noApi} no se pueden por API`);
-  return `${t.total} ${t.total === 1 ? "acción" : "acciones"}: ${partes.join(", ")}`;
+  if (t.bajoPiso) partes.push(`${t.bajoPiso} por debajo del piso`);
+  if (t.pendientes) partes.push(`${t.pendientes} sin aplicar`);
+  return `${t.total} por revisar${partes.length ? `: ${partes.join(", ")}` : ""}`;
 }
 
-// Bitácora de cambios aplicados (Promo-B / Promo-E). Agrupada por tanda
-// (una ejecución = un lote); al desplegar una tanda salen sus filas, una
-// por producto y promoción. Las simuladas se marcan aparte.
+function motivoBajoPiso(b: NonNullable<AccionHistorialCliente["bajoPiso"]>, siteId: string): string {
+  return `Quedó por debajo del piso actual (piso ${formatearMoneda(b.piso, siteId)}, precio ${formatearMoneda(b.precio, siteId)}, diferencia ${formatearMoneda(b.diferencia, siteId)})`;
+}
+
+// «Auditar» (antes «Bitácora»; Promo-B / Promo-E): solo lo que hay que revisar
+// a mano — no aplicadas, fallidas, omitidas y las que quedaron por debajo del
+// piso. Agrupada por tanda (una ejecución = un lote); al desplegar una tanda
+// salen sus filas, una por producto y promoción. Las simuladas se marcan aparte.
 export function BitacoraPromociones({ cuentas }: { cuentas: CuentaBitacora[] }) {
   const [tandas, setTandas] = useState<TandaBitacoraCliente[]>([]);
   const [cargando, setCargando] = useState(false);
@@ -78,7 +84,7 @@ export function BitacoraPromociones({ cuentas }: { cuentas: CuentaBitacora[] }) 
     setCargando(true);
     setError(null);
     const params = paramsFiltro();
-    params.set("vista", "tandas");
+    params.set("vista", "auditar");
     params.set("pagina", String(pagina));
     const res = await fetch(`/api/ml/promociones/historial?${params.toString()}`);
     if (res.ok) {
@@ -86,7 +92,7 @@ export function BitacoraPromociones({ cuentas }: { cuentas: CuentaBitacora[] }) 
       setTandas(cuerpo.tandas ?? []);
       setHayMas(Boolean(cuerpo.hayMas));
     } else {
-      setError("No se pudo cargar la bitácora.");
+      setError("No se pudo cargar la auditoría.");
     }
     setCargando(false);
   }, [pagina, paramsFiltro]);
@@ -105,7 +111,7 @@ export function BitacoraPromociones({ cuentas }: { cuentas: CuentaBitacora[] }) 
 
   return (
     <Tarjeta className={styles.seccion}>
-      <p className="zx-etiqueta">BITÁCORA</p>
+      <p className="zx-etiqueta">AUDITAR</p>
       <div className={styles.filtrosBitacora}>
         <Campo etiqueta="Tienda">
           <select className="zx-control" aria-label="Tienda" value={cuentaId} onChange={(e) => filtro(setCuentaId)(e.target.value)}>
@@ -128,8 +134,9 @@ export function BitacoraPromociones({ cuentas }: { cuentas: CuentaBitacora[] }) 
         <Campo etiqueta="Resultado">
           <select className="zx-control" aria-label="Resultado" value={resultado} onChange={(e) => filtro(setResultado)(e.target.value)}>
             <option value="todos">Todos</option>
-            <option value="ok">OK</option>
+            <option value="no-aplicada">No aplicada</option>
             <option value="error">Error</option>
+            <option value="bajo-piso">Por debajo del piso</option>
           </select>
         </Campo>
         <Campo etiqueta="Desde">
@@ -142,7 +149,7 @@ export function BitacoraPromociones({ cuentas }: { cuentas: CuentaBitacora[] }) 
 
       {error && <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 10 }}>{error}</p>}
       {!error && !cargando && tandas.length === 0 ? (
-        <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 10 }}>No hay acciones registradas con estos filtros.</p>
+        <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 10 }}>No hay nada que auditar con estos filtros: todo lo registrado se aplicó bien.</p>
       ) : (
         <div style={{ marginTop: 10 }}>
           {tandas.map((t) => (
@@ -178,6 +185,7 @@ function TandaFilas({ tanda, cuentas, paramsFiltro }: { tanda: TandaBitacoraClie
     setCargando(true);
     setError(null);
     const params = paramsFiltro();
+    params.set("vista", "auditar");
     params.set("lote", tanda.clave);
     params.set("pagina", String(pagina));
     const res = await fetch(`/api/ml/promociones/historial?${params.toString()}`);
@@ -219,7 +227,9 @@ function TandaFilas({ tanda, cuentas, paramsFiltro }: { tanda: TandaBitacoraClie
             {filas.map((h) => {
               const siteId = siteIdDe(h.cuentaMlId);
               const mensaje = h.error ?? h.detalle.motivo ?? h.detalle.respuesta;
-              const ok = h.estado === "ejecutada";
+              const bajoPiso = h.bajoPiso ?? null;
+              const ok = h.estado === "ejecutada" && !bajoPiso;
+              const mensajeFila = bajoPiso ? motivoBajoPiso(bajoPiso, siteId) : mensaje;
               return (
                 <FilaTabla key={h.id} className={h.modoSimulacion ? styles.filaSimulada : undefined}>
                   <CeldaTabla>{new Date(h.ejecutadoTs ?? h.creadoTs).toLocaleString(datosSitioMl(siteId).idioma, { timeZone: "America/Bogota" })}</CeldaTabla>
@@ -243,10 +253,10 @@ function TandaFilas({ tanda, cuentas, paramsFiltro }: { tanda: TandaBitacoraClie
                   <CeldaTabla>{precio(h.precioAntes, siteId)}</CeldaTabla>
                   <CeldaTabla>{precio(h.precioDespues, siteId)}</CeldaTabla>
                   <CeldaTabla>
-                    <Chip estado={ok ? "exito" : h.estado === "fallida" ? "peligro" : "aviso"} title={mensaje ?? undefined}>
-                      {ok ? "OK" : h.estado === "fallida" ? "Error" : h.estado === "rechazada" ? "No aplicada" : h.estado}
+                    <Chip estado={ok ? "exito" : h.estado === "fallida" ? "peligro" : "aviso"} title={mensajeFila ?? undefined}>
+                      {ok ? "OK" : bajoPiso ? "Por debajo del piso" : h.estado === "fallida" ? "Error" : h.estado === "rechazada" || h.estado === "pendiente" || h.estado === "aceptada" ? "No aplicada" : h.estado}
                     </Chip>
-                    {!ok && mensaje && <small> {mensaje}</small>}
+                    {!ok && mensajeFila && <small> {mensajeFila}</small>}
                   </CeldaTabla>
                 </FilaTabla>
               );

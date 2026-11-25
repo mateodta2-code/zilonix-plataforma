@@ -138,6 +138,8 @@ export type AccionHistorialCliente = {
   };
   error: string | null;
   creadoTs: string;
+  // Auditar: ejecutada que hoy queda por debajo del piso vigente (diferencia = precio − piso, negativa).
+  bajoPiso?: { piso: number; precio: number; diferencia: number } | null;
 };
 
 // Promo-E — encabezado de una tanda (una ejecución) de la bitácora.
@@ -150,6 +152,8 @@ export type TandaBitacoraCliente = {
   conError: number;
   omitidas: number;
   noApi: number;
+  bajoPiso?: number;
+  pendientes?: number;
   simulada: boolean;
   regla: string | null;
   usuarioNombre: string | null;

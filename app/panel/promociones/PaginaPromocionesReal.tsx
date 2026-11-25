@@ -732,7 +732,7 @@ export function PaginaPromocionesReal({
             setPestana("bitacora");
           }}
         >
-          Bitácora
+          Auditar
         </Boton>
       </div>
 
