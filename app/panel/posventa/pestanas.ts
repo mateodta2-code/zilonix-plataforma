@@ -15,7 +15,7 @@ export type PestanaPosventa = {
 export const PESTANAS_POSVENTA: PestanaPosventa[] = [
   { clave: "reclamos", etiqueta: "Reclamos y mediaciones", href: "/panel/posventa", lista: true },
   { clave: "mensajes", etiqueta: "Mensajes", href: "/panel/posventa/mensajes", lista: true },
-  { clave: "devoluciones", etiqueta: "Devoluciones", href: "/panel/posventa/devoluciones", lista: false },
+  { clave: "devoluciones", etiqueta: "Devoluciones", href: "/panel/posventa/devoluciones", lista: true },
 ];
 
 // Pura: qué pestaña corresponde a la ruta. /panel/posventa/mensajes/x
