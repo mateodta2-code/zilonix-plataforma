@@ -314,6 +314,8 @@ const RUTAS_BODEGA = new Set([
   "app/bodega/(panel)/recepcion/page.tsx",
   "app/bodega/(panel)/recepcion/actions.ts",
   "app/bodega/(panel)/inventario/page.tsx",
+  "app/bodega/(panel)/despachos/page.tsx",
+  "app/bodega/(panel)/despachos/actions.ts",
   "app/bodega/(panel)/invitar/page.tsx",
   "app/bodega/(panel)/invitar/actions.ts",
   "app/bodega/(panel)/invitar/listo/page.tsx",

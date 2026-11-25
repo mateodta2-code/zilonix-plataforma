@@ -78,7 +78,7 @@ describe("marco de bodega y domiciliario (mismo MarcoApp del vendedor)", () => {
 
   it("Recepción e Inventario quedan habilitadas para la bodega y no están en el menú del domiciliario", () => {
     const bodega = gruposBodega("operario").flatMap((g) => g.items);
-    for (const e of ["Recepción", "Inventario"]) expect(bodega.find((x) => x.etiqueta === e)?.deshabilitada, e).toBeFalsy();
+    for (const e of ["Recepción", "Inventario", "Despachos"]) expect(bodega.find((x) => x.etiqueta === e)?.deshabilitada, e).toBeFalsy();
     const dom = gruposDomiciliario().flatMap((g) => g.items.map((i) => i.etiqueta));
     expect(dom).not.toContain("Recepción");
     expect(dom).not.toContain("Inventario");
@@ -86,21 +86,22 @@ describe("marco de bodega y domiciliario (mismo MarcoApp del vendedor)", () => {
 });
 
 describe("menús", () => {
-  it("todo apunta a /bodega o /domiciliario y los 'Próximamente' están deshabilitados", () => {
+  it("todo apunta a /bodega o /domiciliario y ningún ítem queda en «Próximamente»", () => {
     const items = [...gruposBodega("admin_bodega"), ...gruposDomiciliario()].flatMap((g) => g.items);
     for (const i of items) expect(/^\/(bodega|domiciliario)(\/|$)/.test(i.href), i.href).toBe(true);
-    const despachos = items.find((x) => x.etiqueta === "Despachos");
-    expect(despachos?.deshabilitada).toBe(true);
-    expect(despachos?.titulo).toBe("Próximamente");
-    // Domi-2 (#629): «Mis entregas» ya está habilitada.
+    // Ningún ítem queda en «Próximamente»: Mis entregas (Domi-2) y Despachos (Bodega-3) ya están habilitados.
     const misEntregas = items.find((x) => x.etiqueta === "Mis entregas");
     expect(misEntregas?.deshabilitada).toBeFalsy();
     expect(misEntregas?.href).toBe("/domiciliario/entregas");
+    const despachos = items.find((x) => x.etiqueta === "Despachos");
+    expect(despachos?.deshabilitada).toBeFalsy();
+    expect(despachos?.href).toBe("/bodega/despachos");
+    expect(items.filter((x) => x.deshabilitada)).toHaveLength(0);
   });
 
   it("Recepción e Inventario quedan habilitadas para la bodega y no están en el menú del domiciliario", () => {
     const bodega = gruposBodega("operario").flatMap((g) => g.items);
-    for (const e of ["Recepción", "Inventario"]) expect(bodega.find((x) => x.etiqueta === e)?.deshabilitada, e).toBeFalsy();
+    for (const e of ["Recepción", "Inventario", "Despachos"]) expect(bodega.find((x) => x.etiqueta === e)?.deshabilitada, e).toBeFalsy();
     const dom = gruposDomiciliario().flatMap((g) => g.items.map((i) => i.etiqueta));
     expect(dom).not.toContain("Recepción");
     expect(dom).not.toContain("Inventario");

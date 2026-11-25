@@ -4,7 +4,7 @@ import { auditoria } from "@/db/schema";
 
 // Rastro de una acción de bodega: va en la MISMA transacción que la acción
 // (si falla una, no queda la otra). empresa_id queda vacío salvo que la acción
-// toque datos de una empresa concreta (entrega de domiciliario), y siempre se
+// toque datos de una empresa concreta (entregas del domiciliario, despachos), y siempre se
 // llena bodega_id; detalle es una frase corta para una persona, sin correos
 // completos de terceros ni secretos.
 export async function registrarAuditoriaBodega(

@@ -6,6 +6,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { textoResultadoCuenta, traerVentasDelMes } from "@/lib/finanzas/traer-ventas-mes";
+import { DespachoBodegaError, enviarPedidoABodega } from "@/lib/bodega/despachos";
 import { asignarEntrega, EntregaInvalidaError, quitarEntrega } from "@/lib/entregas/entregas";
 import { DatosEntregaInvalidosError } from "@/lib/entregas/datos";
 import { deshacerDespachado, DespachoNoEncontradoError, GuiaNoVistaError, marcarDespachado, VentanaDeshacerVencidaError } from "@/lib/ml/despachos";
@@ -128,6 +129,24 @@ export async function quitarDomiciliarioAction(pedidoReferencia: string): Promis
   } catch (error) {
     if (error instanceof SinPermisoError || error instanceof EntregaInvalidaError) return { ok: false, error: error.message };
     return { ok: false, error: "No se pudo quitar el domiciliario." };
+  }
+  revalidatePath("/panel/despachos");
+  return { ok: true };
+}
+
+// Issue #628 (Bodega-3) — copia el pedido (solo número, tipo de envío, SKU y
+// cantidad; nada del comprador) a la bodega 3PL ligada. Mismo permiso que
+// marcar despachado. Nunca llama a Mercado Libre.
+export async function enviarABodegaAction(pedidoIdExterno: string): Promise<ResultadoAccion> {
+  const sesion = await usuarioYEmpresaActiva();
+  if (!sesion) return { ok: false, error: "Sin sesión." };
+  try {
+    await requierePermiso(sesion.usuarioId, sesion.empresaId, "ventas", "modificar");
+    await enviarPedidoABodega(sesion.empresaId, sesion.usuarioId, pedidoIdExterno);
+  } catch (error) {
+    if (error instanceof DespachoBodegaError) return { ok: false, error: error.message };
+    if (error instanceof SinPermisoError) return { ok: false, error: "No tienes permiso para enviar pedidos a la bodega." };
+    throw error;
   }
   revalidatePath("/panel/despachos");
   return { ok: true };
