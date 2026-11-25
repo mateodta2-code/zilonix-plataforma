@@ -212,6 +212,7 @@ export const GUIA: GrupoGuia[] = [
             pasos: [
               "Marca la cuenta destino. En «Generación de imágenes para Meli» sube 1 o 2 imágenes de referencia del producto: solo las usa la IA, no se publican (si no subes, usa las fotos reales de la galería).",
               "En «Información del producto» escribe lo que sabes del producto: qué es, marca y modelo, material, medidas, qué incluye y cómo se usa.",
+              "Si marcaste cuentas de países distintos, elige en «País para la categoría y los títulos» para cuál país se busca la categoría y se escriben los títulos. Con cuentas de un solo país no aparece.",
               "Pulsa «Analizar producto». Cada dato de la ficha dice de dónde salió: «De la foto», «Del vendedor» o «Confirmar».",
               "Revisa lo marcado «Confirmar»: corrígelo, bórralo o marca «Es correcto». Después pulsa «Confirmar ficha». La ficha se pliega en una línea («Ficha confirmada ✓»); púlsala para verla o editarla otra vez.",
               "La ficha queda siempre arriba. Debajo hay 3 sub pestañas: «Generar imágenes» (ver «Generar imágenes con IA»), «Títulos» y «Descripción». Puedes pasar de una a otra sin perder nada.",
