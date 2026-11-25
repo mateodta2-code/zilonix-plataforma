@@ -103,6 +103,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       // Foro (14-nov) — comunidad de TODAS las empresas, no un módulo
       // de una: lo ve cualquiera que ya tenga empresa, sin permiso.
       { etiqueta: "Foro", href: "/panel/foro", icono: "foro" as const },
+      // Issue #623 — tickets de soporte: cualquier miembro de la empresa,
+      // sin permiso de módulo (app/panel/tickets).
+      { etiqueta: "Tickets de soporte", href: "/panel/tickets", icono: "soporte" as const },
     ],
   };
 

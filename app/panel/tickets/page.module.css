@@ -1,0 +1,81 @@
+.formulario {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.acciones {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.contador {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--peligro-texto);
+}
+
+.tituloSeccion {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.asunto {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--texto-suave);
+}
+
+.cuerpo {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mensaje {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.volver {
+  align-self: flex-start;
+}
+
+.aviso {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--texto-suave);
+}

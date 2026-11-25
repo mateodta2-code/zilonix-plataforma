@@ -847,6 +847,54 @@ CREATE POLICY superadmin_ve_accesos_temporales ON accesos_temporales FOR SELECT 
 DROP POLICY IF EXISTS superadmin_escribe_auditoria ON auditoria;
 CREATE POLICY superadmin_escribe_auditoria ON auditoria FOR INSERT TO superadmin_user WITH CHECK (true);
 
+-- Issue #623 (SA-Soporte, migración 0043) — tickets de soporte. La
+-- empresa solo ve y abre los suyos; nadie borra nada. app_user solo
+-- puede tocar actualizado_ts del ticket (al responder): el estado lo
+-- cambia únicamente superadmin_user, y solo estado/actualizado_ts. El
+-- superadmin lee el ticket y su conversación — lo que el vendedor
+-- escribió a propósito — y ninguna otra tabla de la empresa (D8).
+GRANT SELECT, INSERT ON tickets_soporte, mensajes_ticket_soporte TO app_user;
+GRANT UPDATE (actualizado_ts) ON tickets_soporte TO app_user;
+REVOKE DELETE ON tickets_soporte, mensajes_ticket_soporte FROM app_user;
+GRANT SELECT ON tickets_soporte, mensajes_ticket_soporte TO superadmin_user;
+GRANT INSERT ON mensajes_ticket_soporte TO superadmin_user;
+GRANT UPDATE (estado, actualizado_ts) ON tickets_soporte TO superadmin_user;
+
+ALTER TABLE tickets_soporte ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tickets_soporte FORCE ROW LEVEL SECURITY;
+ALTER TABLE mensajes_ticket_soporte ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mensajes_ticket_soporte FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS aislamiento_tickets_soporte ON tickets_soporte;
+CREATE POLICY aislamiento_tickets_soporte ON tickets_soporte
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Un ticket nuevo siempre nace abierto, lo mande quien lo mande.
+DROP POLICY IF EXISTS tickets_soporte_nace_abierto ON tickets_soporte;
+CREATE POLICY tickets_soporte_nace_abierto ON tickets_soporte AS RESTRICTIVE FOR INSERT TO app_user
+  WITH CHECK (estado = 'abierto');
+
+-- Sin empresa_id propio: el mensaje se ve si su ticket se ve (la
+-- subconsulta ya pasa por la política de tickets_soporte).
+DROP POLICY IF EXISTS aislamiento_mensajes_ticket_soporte ON mensajes_ticket_soporte;
+CREATE POLICY aislamiento_mensajes_ticket_soporte ON mensajes_ticket_soporte TO app_user
+  USING (EXISTS (SELECT 1 FROM tickets_soporte t WHERE t.id = ticket_id));
+
+-- Un mensaje de la empresa nunca se hace pasar por el del superadmin.
+DROP POLICY IF EXISTS mensajes_ticket_soporte_no_superadmin ON mensajes_ticket_soporte;
+CREATE POLICY mensajes_ticket_soporte_no_superadmin ON mensajes_ticket_soporte AS RESTRICTIVE FOR INSERT TO app_user
+  WITH CHECK (es_superadmin = false);
+
+DROP POLICY IF EXISTS sa_tickets_soporte_ver ON tickets_soporte;
+CREATE POLICY sa_tickets_soporte_ver ON tickets_soporte FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS sa_tickets_soporte_estado ON tickets_soporte;
+CREATE POLICY sa_tickets_soporte_estado ON tickets_soporte FOR UPDATE TO superadmin_user USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS sa_mensajes_ticket_soporte_ver ON mensajes_ticket_soporte;
+CREATE POLICY sa_mensajes_ticket_soporte_ver ON mensajes_ticket_soporte FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS sa_mensajes_ticket_soporte_responder ON mensajes_ticket_soporte;
+CREATE POLICY sa_mensajes_ticket_soporte_responder ON mensajes_ticket_soporte FOR INSERT TO superadmin_user
+  WITH CHECK (es_superadmin = true);
+
 -- ---------------------------------------------------------------------
 -- PR login-bodega-domiciliario — bodegas 3PL (operador logístico) y sus
 -- domiciliarios. Mundo APARTE de las empresas de vendedores: variables de
