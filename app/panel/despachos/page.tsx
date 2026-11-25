@@ -35,7 +35,10 @@ import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { listarDomiciliariosAsignables, listarEntregasDePedidos } from "@/lib/entregas/entregas";
+import { listarBodegasQueAtiendenEmpresa } from "@/lib/bodega/empresas";
+import { listarDespachosBodegaDePedidos } from "@/lib/bodega/despachos";
 import { AsignarDomiciliario } from "./AsignarDomiciliario";
+import { EnviarABodega } from "./EnviarABodega";
 import { AutoRefrescoDespachos } from "./AutoRefrescoDespachos";
 import { ImpresionMasivaForm } from "./ImpresionMasivaForm";
 import { SincronizarAhoraCliente } from "./SincronizarAhoraCliente";
@@ -146,6 +149,11 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
     ? await Promise.all([listarDomiciliariosAsignables(empresa.id), listarEntregasDePedidos(empresa.id, "mercadolibre", refsLocales)])
     : [[], []];
   const entregaPorPedido = new Map(entregasAsignadas.map((e) => [e.pedidoReferencia, e]));
+  // Issue #628 — pedidos de Pendientes que ya se enviaron a la bodega 3PL y si
+  // ya los preparó. Solo se consulta si la empresa tiene una bodega ligada y activa.
+  const tieneBodega = pestañaFiltro === "pendientes" && (await listarBodegasQueAtiendenEmpresa(empresa.id)).some((b) => b.estado === "activa");
+  const despachosBodega = tieneBodega ? await listarDespachosBodegaDePedidos(empresa.id, tarjetas.map((t) => t.pedidoIdExterno)) : [];
+  const bodegaPorPedido = new Map(despachosBodega.map((b) => [b.numeroPedido, b]));
   // Despachados agrupa por la fecha REAL del despacho (fechaDespachoDe:
   // despachado_ts si una persona lo marcó, si no actualizado_ts), no
   // por fecha de venta — un pedido vendido hace 10 días pero
@@ -282,6 +290,14 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                       puedeModificar={puedeModificar}
                       ventanaDeshacerMs={VENTANA_DESHACER_MS}
                     />
+                    {tieneBodega && pestañaFiltro === "pendientes" && (
+                      <EnviarABodega
+                        pedidoIdExterno={d.pedidoIdExterno}
+                        puedeModificar={puedeModificar}
+                        estado={bodegaPorPedido.get(d.pedidoIdExterno)?.estado ?? null}
+                        bodegaNombre={bodegaPorPedido.get(d.pedidoIdExterno)?.bodegaNombre ?? null}
+                      />
+                    )}
                     {puedeModificar && pestañaFiltro === "pendientes" && esFlex(d.logisticType) && (
                       <AsignarDomiciliario
                         pedidoReferencia={d.pedidoIdExterno}

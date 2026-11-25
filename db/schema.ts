@@ -2386,6 +2386,62 @@ export const stockBodega3pl = pgTable(
   })
 );
 
+// Issue #628 (Bodega-3, migración 0046) — pedidos que el vendedor envía a su
+// bodega 3PL para que los prepare. Es una copia MÍNIMA hecha al enviar:
+// número de pedido, tipo de envío y SKU con cantidad. Nunca nombre,
+// teléfono, dirección, documento ni precios del comprador: RLS filtra filas
+// y no columnas, así que la bodega no lee `pedidos`/`pedido_items`, solo esta
+// copia. «Preparado» descuenta stock_bodega_3pl en la misma transacción.
+export const estadoDespachoBodega3plEnum = pgEnum("estado_despacho_bodega_3pl", ["pendiente", "preparado"]);
+
+export const despachosBodega3pl = pgTable(
+  "despachos_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    pedidoId: uuid("pedido_id").notNull(),
+    numeroPedido: text("numero_pedido").notNull(),
+    tipoEnvio: text("tipo_envio"),
+    estado: estadoDespachoBodega3plEnum("estado").notNull().default("pendiente"),
+    preparadoTs: timestamp("preparado_ts", { withTimezone: true }),
+    preparadoPor: uuid("preparado_por").references(() => usuarios.id),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    creadoPor: uuid("creado_por").notNull().references(() => usuarios.id),
+  },
+  (t) => ({
+    // Un pedido no se envía dos veces a la bodega.
+    pedidoUnico: uniqueIndex("despachos_bodega_3pl_empresa_pedido_unico").on(t.empresaId, t.pedidoId),
+    empresaIdUnica: unique("despachos_bodega_3pl_empresa_id_unica").on(t.empresaId, t.id),
+    bodegaIdx: index("despachos_bodega_3pl_bodega_idx").on(t.bodegaId, t.estado, t.creadoTs),
+    pedidoDeLaEmpresa: foreignKey({
+      name: "despachos_bodega_3pl_pedido_misma_empresa_fk",
+      columns: [t.empresaId, t.pedidoId],
+      foreignColumns: [pedidos.empresaId, pedidos.id],
+    }).onDelete("cascade"),
+  })
+);
+
+export const despachoItemsBodega3pl = pgTable(
+  "despacho_items_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    despachoId: uuid("despacho_id").notNull().references(() => despachosBodega3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    sku: text("sku").notNull(),
+    cantidad: integer("cantidad").notNull(),
+  },
+  (t) => ({
+    despachoIdx: index("despacho_items_bodega_3pl_despacho_idx").on(t.despachoId),
+    cantidadPositiva: check("despacho_items_bodega_3pl_cantidad_positiva", sql`${t.cantidad} > 0`),
+    despachoDeLaEmpresa: foreignKey({
+      name: "despacho_items_bodega_3pl_despacho_misma_empresa_fk",
+      columns: [t.empresaId, t.despachoId],
+      foreignColumns: [despachosBodega3pl.empresaId, despachosBodega3pl.id],
+    }).onDelete("cascade"),
+  })
+);
+
 // Issue #627 (Domi-1, migración 0045) — entregas locales que el vendedor
 // asigna a un domiciliario de su bodega 3PL ligada. Los datos de quien
 // recibe se COPIAN al asignar (la empresa los conserva siempre); el
