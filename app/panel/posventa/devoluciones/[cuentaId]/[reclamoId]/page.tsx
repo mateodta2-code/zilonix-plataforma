@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { Boton } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
+import { RevisarDevolucion } from "@/components/posventa/RevisarDevolucion";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
@@ -18,6 +18,7 @@ import {
   rotuloEnvioDevolucion,
   rotuloSubtipoDevolucion,
 } from "@/lib/ml/devoluciones";
+import { motivoRevisionNoDisponible } from "@/lib/ml/devolucionesRevision";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { obtenerDetalleReclamoMl, PATRON_ID_RECLAMO, ReclamoNoEncontradoError, type DetalleReclamoMl } from "@/lib/ml/reclamos";
 import { datosSitioMl, formatearMonedaIso } from "@/lib/ml/sitios";
@@ -97,6 +98,13 @@ export default async function DetalleDevolucionPage({ params }: { params: { cuen
   const subtipo = rotuloSubtipoDevolucion(devolucion?.subtipo ?? null);
   const motivo = detalle.motivo?.detalle ?? detalle.motivo?.nombre ?? detalle.reclamo.motivoId;
 
+  // El componente tiene un solo motivo para sus dos botones: solo se
+  // deshabilitan si ML no habilita ninguna de las dos revisiones (el
+  // servidor vuelve a validar cada una al ejecutar).
+  const sinOk = motivoRevisionNoDisponible(detalle.reclamo, "ok");
+  const sinFalla = motivoRevisionNoDisponible(detalle.reclamo, "con_falla");
+  const motivoRevision = !devolucion?.id ? "No se pudo leer la devolución en Mercado Libre ahora." : sinOk && sinFalla ? sinOk : null;
+
   const pasos = [
     { titulo: "Devolución abierta", fecha: fecha(devolucion?.creada ?? null) },
     ...(devolucion?.envios ?? []).map((e) => ({ titulo: `Envío de vuelta: ${rotuloEnvioDevolucion(e.estado)}`, fecha: null })),
@@ -161,9 +169,12 @@ export default async function DetalleDevolucionPage({ params }: { params: { cuen
                 ))
               )}
               <div className={styles.barra}>
-                <Boton type="button" disabled title="Muy pronto">
-                  Revisar devolución · Muy pronto
-                </Boton>
+                <RevisarDevolucion
+                  cuentaId={cuenta.id}
+                  reclamoId={detalle.reclamo.id}
+                  devolucionId={devolucion?.id ?? ""}
+                  motivoNoDisponible={motivoRevision}
+                />
                 <Link href={`/panel/preguntas/reclamos/${cuenta.id}/${detalle.reclamo.id}`} className={styles.enlace}>
                   Ver el reclamo en Posventa →
                 </Link>
