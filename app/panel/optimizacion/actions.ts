@@ -454,7 +454,7 @@ export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: 
 }
 
 export type ResultadoMejorarTitulo =
-  | { ok: true; titulos: string[]; catalogo: string | null; largoMaximo: number; largoMaximoCatalogo: number; puedeGuardar: boolean; vendidas: number }
+  | { ok: true; titulos: string[]; catalogo: string | null; keywordsPrincipales: string[]; keywordsNoUtilizadas: string[]; largoMaximo: number; largoMaximoCatalogo: number; puedeGuardar: boolean; vendidas: number }
   | { ok: false; aviso: string; conectarIA?: boolean };
 
 // «Mejorar título» con la IA de TEXTO de la empresa (la de este módulo).
@@ -502,6 +502,8 @@ export async function mejorarTituloIAAction(entrada: { cuentaMlId: string; itemI
       ok: true,
       titulos: propuesta.titulos,
       catalogo: propuesta.catalogo,
+      keywordsPrincipales: propuesta.keywordsPrincipales,
+      keywordsNoUtilizadas: propuesta.keywordsNoUtilizadas,
       largoMaximo: LARGO_TITULO,
       largoMaximoCatalogo: LARGO_TITULO_CATALOGO,
       puedeGuardar: prep.item.vendidas === 0,

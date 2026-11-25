@@ -41,6 +41,9 @@ type Titulos = {
   titulos: string[];
   catalogo: string | null;
   palabras: PalabraClave[];
+  // Estados guardados viejos no las traen: por defecto [].
+  keywordsPrincipales?: string[];
+  keywordsNoUtilizadas?: string[];
   conTendencias: boolean;
   masBuscados: TendenciaConNivel[];
   rutaCategoria: string[];
@@ -143,7 +146,7 @@ export function CrearConIA({
       setConfirmada(b.confirmada);
       setCategoria(b.categoria);
       setLeyoFotos(b.leyoFotos);
-      setTitulos(b.titulos);
+      setTitulos(b.titulos ? { ...b.titulos, keywordsPrincipales: b.titulos.keywordsPrincipales ?? [], keywordsNoUtilizadas: b.titulos.keywordsNoUtilizadas ?? [] } : null);
       setDescripciones(b.descripciones ?? {});
       setPestana(b.pestana);
       setFichaAbierta(!b.confirmada);
@@ -226,7 +229,7 @@ export function CrearConIA({
           info,
         }), (r) => {
       if (r.ok)
-        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria, tendenciasSinRelacion: r.tendenciasSinRelacion });
+        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, keywordsPrincipales: r.keywordsPrincipales, keywordsNoUtilizadas: r.keywordsNoUtilizadas, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria, tendenciasSinRelacion: r.tendenciasSinRelacion });
     });
   }
 
@@ -268,7 +271,9 @@ export function CrearConIA({
   const cuentasMismoPais = cuentas.filter((c) => c.siteId === cuenta.siteId);
   const hayOtroPais = cuentasMismoPais.length < cuentas.length;
   // La descripción usa las palabras clave de los títulos (si ya se pidieron).
-  const palabrasParaDescripcion = titulos ? titulos.palabras.map((p) => p.palabra) : [];
+  const palabrasParaDescripcion = titulos
+    ? [...new Map([...titulos.palabras.map((p) => p.palabra), ...(titulos.keywordsNoUtilizadas ?? [])].map((p) => [p.toLowerCase(), p])).values()]
+    : [];
 
   function nombres(ids: string[]): string {
     return cuentas
@@ -511,24 +516,16 @@ export function CrearConIA({
                         </span>
                       </div>
                     ) : null}
-                    {[...titulos.titulos.map((t) => ({ t, max: LARGO_TITULO })), ...(titulos.catalogo ? [{ t: titulos.catalogo, max: LARGO_TITULO_CATALOGO }] : [])].map(({ t, max }) => (
-                      <div key={t} className={styles.tituloIA}>
-                        <span>
-                          {max === LARGO_TITULO_CATALOGO ? <Chip>Catálogo</Chip> : null} <CopiarTexto valor={t} etiquetaAria={`Copiar título: ${t}`} />{" "}
-                          <span className={styles.contadorIA}>
-                            {t.length}/{max}
-                          </span>
-                          <span className={styles.barraTituloIA} aria-hidden="true">
-                            <span style={{ width: `${Math.min(100, Math.round((t.length / max) * 100))}%` }} />
-                          </span>
-                        </span>
-                        <span className={styles.accionesIA}>
-                          {max === LARGO_TITULO ? (
-                            <BotonesUsarEn cuentas={cuentasMismoPais} que={`título «${t}»`} onUsar={(ids) => usarTitulo(t, ids)} />
-                          ) : null}
-                        </span>
-                      </div>
-                    ))}
+                    <ol className={styles.listaTitulosIA} aria-label="Títulos sugeridos">
+                      {titulos.titulos.map((t, i) => (
+                        <li key={t}>
+                          <FilaTituloIA t={t} max={LARGO_TITULO} numero={i + 1} acciones={<BotonesUsarEn cuentas={cuentasMismoPais} que={`título «${t}»`} onUsar={(ids) => usarTitulo(t, ids)} />} />
+                        </li>
+                      ))}
+                    </ol>
+                    {titulos.catalogo ? <FilaTituloIA t={titulos.catalogo} max={LARGO_TITULO_CATALOGO} catalogo /> : null}
+                    <ListaKeywordsIA titulo="Keywords principales" lista={titulos.keywordsPrincipales ?? []} />
+                    <ListaKeywordsIA titulo="Keywords no utilizadas (para la descripción)" lista={titulos.keywordsNoUtilizadas ?? []} />
                     {hayOtroPais ? (
                       <p className={styles.ayudaIA}>{`Solo salen las cuentas de ${cuenta.siteId}: el texto está escrito para ese país. Para otro país, elígelo arriba en «País para la categoría y los títulos» y pide los títulos de nuevo.`}</p>
                     ) : null}
@@ -645,5 +642,40 @@ export function BotonesUsarEn({ cuentas, que, onUsar }: { cuentas: Cuenta[]; que
         </Boton>
       ) : null}
     </>
+  );
+}
+
+// Una sugerencia de título con su largo, contado por el código (nunca por la IA).
+function FilaTituloIA({ t, max, numero, catalogo, acciones }: { t: string; max: number; numero?: number; catalogo?: boolean; acciones?: ReactNode }) {
+  return (
+    <div className={styles.tituloIA}>
+      <span>
+        {numero ? <span aria-hidden="true">{numero}. </span> : null}
+        {catalogo ? <Chip>Catálogo</Chip> : null} <CopiarTexto valor={t} etiquetaAria={`Copiar título: ${t}`} />{" "}
+        <span className={styles.contadorIA} aria-label={`${t.length} de ${max} caracteres`}>
+          {t.length}/{max}
+        </span>
+        <span className={styles.barraTituloIA} aria-hidden="true">
+          <span style={{ width: `${Math.min(100, Math.round((t.length / max) * 100))}%` }} />
+        </span>
+      </span>
+      <span className={styles.accionesIA}>{acciones}</span>
+    </div>
+  );
+}
+
+function ListaKeywordsIA({ titulo, lista }: { titulo: string; lista: string[] }) {
+  if (lista.length === 0) return null;
+  return (
+    <div className={styles.masBuscadosIA}>
+      <p className="zx-etiqueta">{`${titulo} (${lista.length})`}</p>
+      <ul className={styles.listaKeywordsIA} aria-label={titulo}>
+        {lista.map((k) => (
+          <li key={k}>
+            <Chip>{k}</Chip>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
