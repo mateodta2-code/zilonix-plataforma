@@ -17,6 +17,7 @@ import {
   productoCatalogoDeItemMl,
   reputacionVendedorMl,
   tieneDescripcionMl,
+  leerAtributosItemMl,
   leerDescripcionItemMl,
   leerItemEdicionMl,
   LimiteMercadoLibreError,
@@ -56,6 +57,11 @@ import { leerDiasMetricas } from "@/lib/optimizacion/textos";
 import { cambioEsDeLaPublicacion, crearNotaBitacora, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
 import { leerFechaNota, leerResultadoRevision, limpiarTextoBitacora } from "@/lib/optimizacion/bitacoraResultado";
 import { hoyBogota } from "@/lib/publicidad/plan";
+import { fichaDesdeItem, infoDeDescripcion } from "@/lib/optimizacion/fichaItem";
+import { mensajeErrorIA, MENSAJE_SIN_IA } from "@/lib/publicaciones/errores";
+import { idiomaDeSitio } from "@/lib/publicaciones/ficha";
+import { LARGO_TITULO, LARGO_TITULO_CATALOGO } from "@/lib/publicaciones/titulos";
+import { generarTitulosSeo } from "@/lib/publicaciones/titulos-ia";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 
@@ -440,6 +446,67 @@ export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: 
       : "Título actualizado en Mercado Libre.",
     userProduct && familyId ? () => actualizarNombreFamiliaMl(familyId, prep.token, titulo) : undefined
   );
+}
+
+export type ResultadoMejorarTitulo =
+  | { ok: true; titulos: string[]; catalogo: string | null; largoMaximo: number; largoMaximoCatalogo: number; puedeGuardar: boolean; vendidas: number }
+  | { ok: false; aviso: string; conectarIA?: boolean };
+
+// «Mejorar título» con la IA de TEXTO de la empresa (la de este módulo).
+// Misma lógica y mismo prompt que Publicar → «Crear con IA» (código
+// compartido en lib/publicaciones/titulos-ia.ts). Lecturas de ML:
+// GET /items/{id} (prepararEdicion y category_id+attributes) y
+// GET /items/{id}/description. NO escribe nada: guardar sigue siendo
+// editarTituloAction, y solo si la publicación no tiene ventas.
+export async function mejorarTituloIAAction(entrada: { cuentaMlId: string; itemId: string }): Promise<ResultadoMejorarTitulo> {
+  const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
+  if ("error" in prep) return { ok: false, aviso: prep.error };
+  const conexion = await obtenerConexionIAParaModulo(prep.ctx.empresaId, "optimizacion");
+  if (!conexion) return { ok: false, aviso: MENSAJE_SIN_IA, conectarIA: true };
+  const registrar = (paso: string, error: unknown) =>
+    console.warn(`[app/panel/optimizacion] mejorar título ${paso}: ${error instanceof Error ? error.name : "error"}`);
+  const [leidos, descripcion] = await Promise.all([
+    leerAtributosItemMl(prep.item.id, prep.token).catch((error) => {
+      registrar("atributos", error);
+      return null;
+    }),
+    leerDescripcionItemMl(prep.item.id, prep.token).catch((error) => {
+      registrar("descripcion", error);
+      return null;
+    }),
+  ]);
+  const ficha = fichaDesdeItem({ titulo: prep.item.titulo ?? "", atributos: leidos?.atributos ?? [] });
+  if (!ficha) return { ok: false, aviso: "Mercado Libre no devolvió el título de la publicación. Intenta de nuevo." };
+  const { idioma, pais } = idiomaDeSitio(prep.cuenta.siteId);
+  try {
+    const propuesta = await generarTitulosSeo({
+      empresaId: prep.ctx.empresaId,
+      conexion,
+      cuenta: { id: entrada.cuentaMlId, siteId: prep.cuenta.siteId },
+      token: () => Promise.resolve(prep.token),
+      ficha,
+      categoriaId: leidos?.categoriaId ?? null,
+      categoriaNombre: null,
+      info: infoDeDescripcion(descripcion),
+      idioma,
+      pais,
+      registrar,
+    });
+    if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
+    return {
+      ok: true,
+      titulos: propuesta.titulos,
+      catalogo: propuesta.catalogo,
+      largoMaximo: LARGO_TITULO,
+      largoMaximoCatalogo: LARGO_TITULO_CATALOGO,
+      puedeGuardar: prep.item.vendidas === 0,
+      vendidas: prep.item.vendidas,
+    };
+  } catch (error) {
+    if (error instanceof LimiteMercadoLibreError) return { ok: false, aviso: "Mercado Libre pidió esperar un momento. Intenta de nuevo." };
+    registrar("titulos", error);
+    return { ok: false, aviso: mensajeErrorIA(error) };
+  }
 }
 
 // Fotos: el orden de las que ya tiene (por id) y fotos nuevas por enlace

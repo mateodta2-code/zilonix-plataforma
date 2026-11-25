@@ -2228,6 +2228,28 @@ export async function leerItemEdicionMl(itemId: string, token: string): Promise<
   return leerItemEdicion(resp.data);
 }
 
+// Categoría y atributos que el vendedor YA publicó en el ítem (solo lectura):
+// GET /items/{id}?attributes=category_id,attributes (documentado). Los usa
+// Optimización → «Mejorar título» para armar la ficha sin inventar nada.
+export type AtributoItemMl = { id: string; nombre: string; valor: string };
+export type AtributosItemMl = { categoriaId: string | null; atributos: AtributoItemMl[] };
+
+export function leerAtributosItem(data: unknown): AtributosItemMl {
+  const d = (data !== null && typeof data === "object" ? data : {}) as { category_id?: unknown; attributes?: unknown };
+  const atributos = (Array.isArray(d.attributes) ? d.attributes : []).flatMap((a): AtributoItemMl[] => {
+    const x = a as { id?: unknown; name?: unknown; value_name?: unknown };
+    if (typeof x?.id !== "string" || typeof x.name !== "string" || typeof x.value_name !== "string" || !x.value_name.trim()) return [];
+    return [{ id: x.id, nombre: x.name, valor: x.value_name.trim() }];
+  });
+  return { categoriaId: typeof d.category_id === "string" && /^[A-Z]{3}\d+$/.test(d.category_id) ? d.category_id : null, atributos };
+}
+
+export async function leerAtributosItemMl(itemId: string, token: string): Promise<AtributosItemMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}`, token, { query: "?attributes=category_id,attributes" });
+  return resp.ok ? leerAtributosItem(resp.data) : null;
+}
+
 // Promoción vigente de una publicación según GET /items/{id}/prices
 // (documentado; forma confirmada en staging, 22-nov): un precio
 // type=promotion con amount, regular_amount y conditions.start_time /
