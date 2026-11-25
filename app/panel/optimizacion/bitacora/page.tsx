@@ -97,7 +97,8 @@ export default async function BitacoraGeneralPage({ searchParams }: { searchPara
     return {
       ref: c.ref,
       itemId: c.itemId,
-      cuentaMlId: c.cuentaMlId,
+      // Filas viejas sin marcador: se usa la cuenta elegida en el filtro como respaldo (la acción verifica con cambioEsDeLaPublicacion).
+      cuentaMlId: c.cuentaMlId ?? cuentaId ?? null,
       cuenta: cuenta?.nickname ?? c.cuentaNickname ?? "—",
       fecha: c.ts.toLocaleDateString(cuenta?.idioma ?? "es", { day: "numeric", month: "short", year: "numeric", timeZone: "America/Bogota" }),
       rotulo: conIA ? "Fotos (con IA)" : c.rotulo,
@@ -105,7 +106,7 @@ export default async function BitacoraGeneralPage({ searchParams }: { searchPara
       usuario: c.usuario ?? "—",
       estado: c.estado,
       faltanDias: Math.max(1, Math.round((Date.parse(`${restarDiasIso(c.dia, -(DIAS_MEDICION - 1))}T00:00:00Z`) - Date.parse(`${hoy}T00:00:00Z`)) / 86_400_000) + 1),
-      hrefDetalle: `/panel/optimizacion/${c.itemId}?cuenta=${c.cuentaMlId ?? ""}#bitacora`,
+      hrefDetalle: `/panel/optimizacion/${c.itemId}?cuenta=${c.cuentaMlId ?? cuentaId ?? ""}#bitacora`,
     };
   });
 
@@ -172,7 +173,7 @@ export default async function BitacoraGeneralPage({ searchParams }: { searchPara
           </label>
           <label>
             Publicación
-            <input className="zx-control" type="search" name="q" defaultValue={q} maxLength={40} placeholder="Ej.: MCO123" />
+            <input className="zx-control" type="search" name="q" defaultValue={q} maxLength={40} placeholder="Id de la publicación" />
           </label>
           <Boton type="submit">Filtrar</Boton>
         </form>
