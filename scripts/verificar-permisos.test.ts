@@ -174,6 +174,9 @@ const RUTAS_PROTEGIDAS = new Set([
   // solo LEE el status actual de un ítem ya publicado, nunca publica
   // ni cambia nada; mismo permiso que ver el historial en sí.
   "app/api/ml/publicar/estado-item/route.ts",
+  // Barra de avance del historial: solo LEE estado/hechos/total de UNA
+  // publicación; mismo permiso que ver el historial.
+  "app/api/ml/publicar/estado-publicacion/route.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
   // Tarea "Publicar — conectar Canva" — cada usuario conecta SU propia

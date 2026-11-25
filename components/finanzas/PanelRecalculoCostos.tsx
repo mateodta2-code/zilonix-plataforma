@@ -10,6 +10,7 @@ import {
   type EstadoVistaRecalculo,
 } from "@/app/panel/finanzas/ventas/actions";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Campo } from "@/components/marco/Campo";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { parsearComboSku } from "@/lib/finanzas/combo-sku";
@@ -140,6 +141,14 @@ export function PanelRecalculoCostos() {
           </Boton>
         </div>
       </form>
+
+      <BarraCarga
+        estado={pendiente && accion ? "cargando" : "inactiva"}
+        titulo={accion === "confirmar" ? "Aplicando recálculo…" : "Buscando cambios de costo…"}
+        avance={null}
+        ariaLabel="Progreso del recálculo de costos"
+        sticky={false}
+      />
 
       {aviso && (
         <div className={aviso.tipo === "exito" ? estilos.avisoExito : estilos.avisoError} role="status">

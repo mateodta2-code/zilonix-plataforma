@@ -893,6 +893,10 @@ export async function publicarProductoEnCuentas(empresaId: string, productoId: s
     } catch (e) {
       resultados.push({ cuentaMlId: cuenta.id, ok: false, error: e instanceof Error ? e.message : String(e) });
     }
+    // Resultado parcial: la barra de avance del historial lee el largo de
+    // `resultado` (sin migración). El estado sigue "publicando"; el final y
+    // la auditoría se escriben abajo. Si falla, no se tumba la publicación.
+    await dbComoEmpresa(empresaId, (tx) => tx.update(productosMl).set({ resultado: [...resultados] }).where(eq(productosMl.id, productoId))).catch(() => null);
   }
 
   const exitosos = resultados.filter((r) => r.ok).length;

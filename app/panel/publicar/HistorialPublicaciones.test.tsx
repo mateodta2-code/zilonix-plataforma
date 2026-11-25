@@ -5,12 +5,14 @@
 // + jsdom, fetch mockeado con vi.stubGlobal). Cubre: desplegar/ocultar
 // sin navegar, varias cuentas con estados mezclados, y que "ver
 // detalle" nunca es un <a>/<Link> real.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { HistorialPublicaciones, type ProductoHistorial } from "./HistorialPublicaciones";
+import { HistorialPublicaciones, INTERVALO_SONDEO_MS, TOPE_SONDEO_MS, type ProductoHistorial } from "./HistorialPublicaciones";
 import type { Cuenta } from "./CuentasDestino";
 
 vi.mock("./actions", () => ({ borrarProductoAction: vi.fn() }));
+const { refrescar } = vi.hoisted(() => ({ refrescar: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refrescar }) }));
 
 afterEach(() => {
   cleanup();
@@ -101,5 +103,84 @@ describe("HistorialPublicaciones — detalle in-place (nunca navega)", () => {
     fireEvent.click(screen.getByText("Ver estado real"));
     expect(await screen.findByText("Publicado y activo")).not.toBeNull();
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/ml/publicar/estado-item?cuentaId=c1&itemId=MCO1"));
+  });
+});
+
+// Barra-A — sondeo de avance con fake timers.
+describe("HistorialPublicaciones — barra de avance (Barra-A)", () => {
+  const ok = (cuerpo: unknown) => ({ ok: true, json: async () => cuerpo }) as Response;
+
+  function montar(productos: ProductoHistorial[]) {
+    return render(<HistorialPublicaciones productos={productos} cuentas={cuentas} onCargar={vi.fn()} onDuplicar={vi.fn()} />);
+  }
+  function visibilidad(valor: "visible" | "hidden") {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => valor });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    refrescar.mockClear();
+    visibilidad("visible");
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sin publicaciones en curso no hay ninguna petición periódica", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    montar([productoBase()]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("muestra 'N de M cuentas', avanza sola, y al terminar avisa, para el sondeo y refresca una vez", async () => {
+    const respuestas = [
+      { estado: "publicando", hechos: 1, total: 2 },
+      { estado: "publicado", hechos: 2, total: 2 },
+    ];
+    const fetchMock = vi.fn(async (_url: string) => ok(respuestas.shift() ?? { estado: "publicado", hechos: 2, total: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = montar([productoBase({ estado: "publicando" })]);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByText(/1 de 2 cuentas/)).toBeTruthy();
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/ml/publicar/estado-publicacion?id=p1");
+
+    await vi.advanceTimersByTimeAsync(INTERVALO_SONDEO_MS);
+    expect(screen.getByText(/Publicación terminada · 2 de 2 cuentas exitosas/)).toBeTruthy();
+    expect(refrescar).toHaveBeenCalledTimes(1);
+
+    // La fila llega ya terminada (router.refresh): no se consulta más.
+    rerender(<HistorialPublicaciones productos={[productoBase({ estado: "publicado" })]} cuentas={cuentas} onCargar={vi.fn()} onDuplicar={vi.fn()} />);
+    const llamadas = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock.mock.calls.length).toBe(llamadas);
+  });
+
+  it("con la pestaña oculta no consulta y al volver reanuda", async () => {
+    const fetchMock = vi.fn(async () => ok({ estado: "publicando", hechos: 0, total: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+    montar([productoBase({ estado: "publicando" })]);
+    await vi.advanceTimersByTimeAsync(0);
+    visibilidad("hidden");
+    const antes = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(fetchMock.mock.calls.length).toBe(antes);
+    visibilidad("visible");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock.mock.calls.length).toBe(antes + 1);
+  });
+
+  it("deja de consultar pasado el tope de seguridad y al desmontar", async () => {
+    const fetchMock = vi.fn(async () => ok({ estado: "publicando", hechos: 0, total: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = montar([productoBase({ estado: "publicando" })]);
+    await vi.advanceTimersByTimeAsync(TOPE_SONDEO_MS + 2 * INTERVALO_SONDEO_MS);
+    const llamadas = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock.mock.calls.length).toBe(llamadas);
+    unmount();
   });
 });
