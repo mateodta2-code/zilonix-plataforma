@@ -38,11 +38,19 @@ describe("menú del superadmin", () => {
       expect(etiquetas).not.toContain(prohibido);
     }
   });
-  it("Soporte y Métricas quedan deshabilitados como Próximamente", () => {
-    for (const e of ["Soporte", "Métricas"]) {
+  it("Soporte queda deshabilitados como Próximamente", () => {
+    for (const e of ["Soporte"]) {
       const i = items.find((x) => x.etiqueta === e);
       expect(i?.deshabilitada).toBe(true);
       expect(i?.titulo).toBe("Próximamente");
     }
+  });
+});
+
+describe("menú: Métricas", () => {
+  it("queda habilitada y apunta a /superadmin/metricas", () => {
+    const i = gruposSuperadmin().flatMap((g) => g.items).find((x) => x.etiqueta === "Métricas");
+    expect(i?.href).toBe("/superadmin/metricas");
+    expect(i?.deshabilitada).toBeFalsy();
   });
 });
