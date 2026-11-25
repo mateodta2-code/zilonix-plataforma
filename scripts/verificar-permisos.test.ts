@@ -275,6 +275,10 @@ const RUTAS_SUPERADMIN = new Set([
   "app/superadmin/(panel)/bodegas/page.tsx",
   "app/superadmin/(panel)/bodegas/actions.ts",
   "app/superadmin/(panel)/bodegas/[bodegaId]/page.tsx",
+  // Issue #623 parte 2 — soporte: el superadmin atiende tickets.
+  "app/superadmin/(panel)/soporte/page.tsx",
+  "app/superadmin/(panel)/soporte/actions.ts",
+  "app/superadmin/(panel)/soporte/[ticketId]/page.tsx",
 ]);
 
 // PR login-bodega-domiciliario — eje de autorización PROPIO de las
