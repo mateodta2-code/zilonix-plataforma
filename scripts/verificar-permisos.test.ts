@@ -138,6 +138,7 @@ const RUTAS_PROTEGIDAS = new Set([
   // adjuntos, ambos solo lectura — piden ventas.consultar y validan que
   // la cuenta sea de la empresa actual.
   "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/page.tsx",
+  "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/accionesResolucion.ts",
   "app/api/ml/reclamos/[cuentaId]/[reclamoId]/adjuntos/[archivo]/route.ts",
   // Posventa-0 (Refs #647): marco y lista de reclamos, solo lectura —
   // piden ventas.consultar (layout y página) y validan la cuenta por empresa.
