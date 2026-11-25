@@ -28,12 +28,13 @@ export const ROLES_DEL_PANEL: Record<Panel, readonly RolBodega[]> = {
   domiciliario: ["domiciliario"],
 };
 
-// Matriz de solo lectura de la pantalla Permisos. Solo identidad y
-// personas por ahora: recepción, inventario, despachos y entregas
+// Matriz de solo lectura de la pantalla Permisos. Despachos y entregas
 // llegan después y se agregan acá.
 export const PERMISOS_BODEGA: { capacidad: string; roles: readonly RolBodega[] }[] = [
   { capacidad: "Entrar al panel de la bodega", roles: ["admin_bodega", "operario"] },
   { capacidad: "Ver la lista de domiciliarios", roles: ["admin_bodega", "operario"] },
+  { capacidad: "Registrar recepciones de mercancía", roles: ["admin_bodega", "operario"] },
+  { capacidad: "Ver el inventario por empresa", roles: ["admin_bodega", "operario"] },
   { capacidad: "Entrar al panel del domiciliario", roles: ["domiciliario"] },
   { capacidad: "Invitar operarios y domiciliarios", roles: ["admin_bodega"] },
   { capacidad: "Ver, desactivar y reactivar personas", roles: ["admin_bodega"] },
