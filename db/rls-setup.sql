@@ -1136,6 +1136,75 @@ CREATE POLICY stock3pl_bodega_editar ON stock_bodega_3pl FOR UPDATE TO app_user
   WITH CHECK (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
 
 -- ---------------------------------------------------------------------
+-- Issue #628 (Bodega-3, migración 0046) — despachos de la bodega 3PL.
+-- La bodega NO lee pedidos ni despachos_ml (RLS filtra filas, no columnas, y
+-- ahí hay precios, comisiones, guía y SLA). Lee solo esta copia mínima que
+-- el vendedor llena al enviar el pedido a su bodega: número de pedido, tipo
+-- de envío, SKU y cantidad. Nada del comprador.
+-- · La empresa crea (hacia una bodega con vínculo ACTIVO, siempre 'pendiente')
+--   y lee los suyos.
+-- · La bodega lee los de su bodega_id y solo cambia estado/preparado_*:
+--   de 'pendiente' a 'preparado', una sola vez (USING exige 'pendiente').
+-- · Sin DELETE para nadie. Items: solo se agregan junto a una cabecera
+--   pendiente de la empresa.
+-- ---------------------------------------------------------------------
+ALTER TABLE despachos_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE despachos_bodega_3pl FORCE ROW LEVEL SECURITY;
+ALTER TABLE despacho_items_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE despacho_items_bodega_3pl FORCE ROW LEVEL SECURITY;
+
+GRANT SELECT, INSERT ON despachos_bodega_3pl, despacho_items_bodega_3pl TO app_user;
+REVOKE UPDATE, DELETE ON despachos_bodega_3pl, despacho_items_bodega_3pl FROM app_user;
+GRANT UPDATE (estado, preparado_ts, preparado_por) ON despachos_bodega_3pl TO app_user;
+
+DROP POLICY IF EXISTS despacho3pl_bodega_ver ON despachos_bodega_3pl;
+CREATE POLICY despacho3pl_bodega_ver ON despachos_bodega_3pl FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS despacho3pl_empresa_ver ON despachos_bodega_3pl;
+CREATE POLICY despacho3pl_empresa_ver ON despachos_bodega_3pl FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+DROP POLICY IF EXISTS despacho3pl_empresa_crear ON despachos_bodega_3pl;
+CREATE POLICY despacho3pl_empresa_crear ON despachos_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado = 'pendiente'
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v
+      WHERE v.bodega_id = despachos_bodega_3pl.bodega_id
+        AND v.empresa_id = despachos_bodega_3pl.empresa_id
+        AND v.estado = 'activa'
+    )
+  );
+DROP POLICY IF EXISTS despacho3pl_bodega_preparar ON despachos_bodega_3pl;
+CREATE POLICY despacho3pl_bodega_preparar ON despachos_bodega_3pl FOR UPDATE TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid AND estado = 'pendiente')
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND estado = 'preparado'
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v
+      WHERE v.bodega_id = despachos_bodega_3pl.bodega_id
+        AND v.empresa_id = despachos_bodega_3pl.empresa_id
+        AND v.estado = 'activa'
+    )
+  );
+
+-- Sin bodega_id propio: el ítem se ve si su cabecera se ve (por bodega o por
+-- empresa), y solo se agrega a una cabecera pendiente de la empresa activa.
+DROP POLICY IF EXISTS despacho_item3pl_ver ON despacho_items_bodega_3pl;
+CREATE POLICY despacho_item3pl_ver ON despacho_items_bodega_3pl FOR SELECT TO app_user
+  USING (EXISTS (SELECT 1 FROM despachos_bodega_3pl d WHERE d.id = despacho_id));
+DROP POLICY IF EXISTS despacho_item3pl_crear ON despacho_items_bodega_3pl;
+CREATE POLICY despacho_item3pl_crear ON despacho_items_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND EXISTS (
+      SELECT 1 FROM despachos_bodega_3pl d
+      WHERE d.id = despacho_id AND d.empresa_id = despacho_items_bodega_3pl.empresa_id AND d.estado = 'pendiente'
+    )
+  );
+
+-- ---------------------------------------------------------------------
 -- Issue #627 (Domi-1, migración 0045) — entregas del domiciliario.
 -- · La empresa ve y crea las suyas (solo hacia una bodega ligada ACTIVA y un
 --   domiciliario ACTIVO de esa bodega: se comprueba también en WITH CHECK),
