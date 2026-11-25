@@ -37,7 +37,7 @@ export function gruposDomiciliario(): GrupoNav[] {
     {
       items: [
         { etiqueta: "Inicio", href: "/domiciliario", icono: "inicio" },
-        { etiqueta: "Mis entregas", href: "/domiciliario/entregas", icono: "despachos", ...PROXIMAMENTE },
+        { etiqueta: "Mis entregas", href: "/domiciliario/entregas", icono: "despachos" },
       ],
     },
   ];

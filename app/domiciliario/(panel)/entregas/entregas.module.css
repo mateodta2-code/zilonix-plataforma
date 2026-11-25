@@ -1,0 +1,16 @@
+/* Celular primero (360 px): una columna, botones de 48 px mínimo, campos
+   a 16 px para que iOS no haga zoom al enfocar. Solo tokens existentes. */
+.lista { display: grid; gap: 16px; }
+.seccion { margin: 20px 0 8px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
+.cabecera { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.pedido { font-weight: 600; overflow-wrap: anywhere; }
+.dato { margin: 4px 0; overflow-wrap: anywhere; }
+.direccion { font-size: 18px; font-weight: 600; margin: 4px 0; overflow-wrap: anywhere; }
+.llamar { display: flex; align-items: center; justify-content: center; min-height: 48px; margin: 8px 0; border: 1px solid currentColor; border-radius: 12px; font-size: 18px; font-weight: 600; text-decoration: none; color: inherit; }
+.cerrada { margin: 4px 0; opacity: 0.8; }
+.botones { display: grid; gap: 10px; margin-top: 12px; }
+.botonGrande { min-height: 52px; width: 100%; font-size: 17px; }
+.motivo { display: grid; gap: 10px; }
+.etiquetaCampo { display: grid; gap: 4px; font-size: 14px; }
+.campo { min-height: 48px; width: 100%; font-size: 16px; padding: 0 12px; border-radius: 10px; }
+.error { margin: 4px 0 0; font-weight: 600; }
