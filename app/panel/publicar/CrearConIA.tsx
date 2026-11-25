@@ -30,7 +30,7 @@ const ROTULO_ORIGEN: Record<Origen, { texto: string; estado: EstadoChip }> = {
   vendedor: { texto: "Del vendedor", estado: "neutro" },
   supuesto: { texto: "Confirmar", estado: "advertencia" },
 };
-const ROTULO_PALABRA: Record<PalabraClave["origen"], string> = { tendencia: "Tendencia", vendedor: "Del vendedor", competencia: "De la competencia", mas_vendidos: "De los más vendidos", ia: "Sugerida por la IA" };
+const ROTULO_PALABRA: Record<PalabraClave["origen"], string> = { tendencia: "Tendencia", vendedor: "Del vendedor", competencia: "De la competencia", ia: "Sugerida por la IA" };
 // Qué tan buscada es, según el nivel de categoría donde sale la tendencia.
 const ROTULO_NIVEL: Record<NivelBusqueda, string> = { alta: "Alta", media: "Media", baja: "Baja" };
 const LEYENDA_NIVEL: Record<NivelBusqueda, string> = { alta: "Alta (categoría general)", media: "Media (categoría padre)", baja: "Baja (categoría específica)" };
@@ -46,8 +46,6 @@ type Titulos = {
   rutaCategoria: string[];
   tendenciasSinRelacion: boolean;
   competencia: { titulo: string | null; aviso: string | null };
-  // Opcional: un borrador guardado antes del 25-nov no lo trae.
-  masVendidos?: { titulos: string[]; dePadre: boolean };
 };
 
 // Sub pestañas debajo de la ficha (24-nov). Las 3 quedan montadas y solo
@@ -238,7 +236,7 @@ export function CrearConIA({
           tituloCompetencia,
         }), (r) => {
       if (r.ok)
-        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria, tendenciasSinRelacion: r.tendenciasSinRelacion, competencia: r.competencia, masVendidos: r.masVendidos });
+        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria, tendenciasSinRelacion: r.tendenciasSinRelacion, competencia: r.competencia });
     });
   }
 
@@ -488,7 +486,7 @@ export function CrearConIA({
             <>
                 <div>
                   <details className={styles.competenciaIA}>
-                    <summary>Sumar una publicación de la competencia (opcional; los más vendidos de la categoría ya se usan solos)</summary>
+                    <summary>Tomar ideas de una publicación de la competencia (opcional)</summary>
                     <Campo etiqueta="Link de la publicación en Mercado Libre">
                       <input
                         className="zx-control"
@@ -510,18 +508,6 @@ export function CrearConIA({
                 </div>
                 {titulos ? (
                   <>
-                    {titulos.masVendidos && titulos.masVendidos.titulos.length > 0 ? (
-                      <div className={styles.masBuscadosIA}>
-                        <p className="zx-etiqueta">{`Más vendidos de la ${titulos.masVendidos.dePadre ? "categoría padre" : "categoría"} (ideas para la IA)`}</p>
-                        <ol className={styles.ayudaIA}>
-                          {titulos.masVendidos.titulos.map((t) => (
-                            <li key={t}>{t}</li>
-                          ))}
-                        </ol>
-                      </div>
-                    ) : titulos.masVendidos ? (
-                      <p className={styles.ayudaIA}>Mercado Libre no devolvió los más vendidos de esta categoría: los títulos salen sin esa ayuda.</p>
-                    ) : null}
                     {titulos.competencia.aviso ? <p className={styles.avisoIA}>{titulos.competencia.aviso}</p> : null}
                     {titulos.competencia.titulo ? <p className={styles.ayudaIA}>Ideas tomadas de: «{titulos.competencia.titulo}»</p> : null}
                     {titulos.tendenciasSinRelacion ? (

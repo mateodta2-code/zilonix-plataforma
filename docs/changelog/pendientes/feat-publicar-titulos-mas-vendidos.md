@@ -1,5 +1,0 @@
-- **Publicar → «Títulos»: los más vendidos de la categoría, automáticos.** Al pedir títulos, Zilonix trae los títulos de los 5 más vendidos de la categoría (o de la categoría padre, si la específica no tiene) y se los da a la IA como idea de palabras (sin copiarlos ni tomar marcas, cifras o datos que no estén en la ficha). Se muestran en «Más vendidos de la categoría (ideas para la IA)» y las palabras que salen de ahí llevan la etiqueta «De los más vendidos».
-  - `titulosMasVendidosMl` en `lib/ml/cliente.ts` reutiliza lo ya probado en Investigación: highlights (`obtenerMejoresProductosCategoria`), PRODUCT → `obtenerProducto`, ITEM → `tituloPublicacionMl`; USER_PRODUCT se ignora. 403/5xx → menos títulos; si falla, los títulos salen igual.
-  - El campo de la competencia queda como extra opcional («Sumar una publicación de la competencia»). Un link corto `meli.la` da un aviso claro (abrirlo y copiar la dirección completa, o pegar el título): no se sigue su redirección desde el servidor porque no es la API oficial.
-- Guía de Publicar actualizada.
-- Falta confirmar en staging con una cuenta real que la categoría del producto devuelve más vendidos.

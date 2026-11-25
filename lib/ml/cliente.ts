@@ -2029,47 +2029,6 @@ export async function tituloPublicacionMl(tipo: "item" | "producto", id: string,
   }
 }
 
-// Publicar → títulos (25-nov): los títulos de los más vendidos de la
-// categoría, como idea de palabras para la IA. Reutiliza lo ya probado en
-// Investigación: highlights (obtenerMejoresProductosCategoria) → PRODUCT
-// con obtenerProducto (nombre del catálogo), ITEM con tituloPublicacionMl
-// (GET /items/{id}?attributes=title, que ML da también para publicaciones
-// ajenas — ver obtenerItemMl); USER_PRODUCT se ignora (sin mapeo
-// confirmado). Si la categoría no tiene más vendidos, prueba con la padre
-// (path_from_root). Todo es enriquecimiento: 403/5xx → menos títulos;
-// 401 propaga (la conexión ya no sirve).
-export const MAXIMO_TITULOS_MAS_VENDIDOS = 5;
-
-export async function titulosMasVendidosMl(
-  siteId: string,
-  categoriaId: string,
-  token: string,
-  maximo = MAXIMO_TITULOS_MAS_VENDIDOS
-): Promise<{ titulos: string[]; categoriaId: string | null }> {
-  const candidatas = [categoriaId];
-  for (const id of candidatas) {
-    const destacados = (await obtenerMejoresProductosCategoria(siteId, id, token)).filter((d) => d.tipo === "PRODUCT" || d.tipo === "ITEM").slice(0, maximo * 2);
-    if (destacados.length > 0) {
-      const leidos = await Promise.all(
-        destacados.map(async (d) => (d.tipo === "PRODUCT" ? ((await obtenerProducto(d.id, token))?.nombre ?? null) : await tituloPublicacionMl("item", d.id, token)))
-      );
-      const titulos = [...new Set(leidos.filter((t): t is string => typeof t === "string" && t.trim() !== "").map((t) => t.trim()))].slice(0, maximo);
-      if (titulos.length > 0) return { titulos, categoriaId: id };
-    }
-    // Sin más vendidos en la específica: una sola vez, la categoría padre.
-    if (candidatas.length === 1) {
-      try {
-        const ruta = (await leerCategoriaMl(categoriaId)).pathFromRoot;
-        const padre = ruta.length >= 2 && ruta[ruta.length - 1].id === categoriaId ? ruta[ruta.length - 2].id : null;
-        if (padre && PATRON_ID_CATEGORIA.test(padre)) candidatas.push(padre);
-      } catch {
-        // Sin ruta no hay padre: se queda sin más vendidos.
-      }
-    }
-  }
-  return { titulos: [], categoriaId: null };
-}
-
 // Tendencias por NIVEL de categoría (23-nov, idea vista en otra
 // herramienta): la categoría general (raíz), la padre y la específica,
 // con la ruta de /categories/{id} (path_from_root, documentado) y
