@@ -149,9 +149,6 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/posventa/mensajes/acciones.ts",
   "app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/accionesMensaje.ts",
   "app/api/ml/mensajes/[cuentaId]/adjuntos/[archivo]/route.ts",
-  // Domi-3: foto de entrega para el vendedor — ventas.consultar y la entrega
-  // se busca con RLS de la empresa activa.
-  "app/api/entregas/[entregaId]/foto/route.ts",
   // Posventa-0 (Refs #647): marco y lista de reclamos, solo lectura —
   // piden ventas.consultar (layout y página) y validan la cuenta por empresa.
   "app/panel/posventa/page.tsx",
