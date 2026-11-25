@@ -5,10 +5,10 @@ import { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { auditoria, invitaciones, membresias, permisosRol, roles, usuarios } from "@/db/schema";
 import { obtenerMiMembresia } from "@/lib/membresias";
-import { SinPermisoError } from "@/lib/permisos";
+import { SinPermisoError, SoloDuenoError } from "@/lib/permisos";
 import { asegurarRolDeEmpresa, PLANTILLAS, permisosDeDueno, type NombrePlantilla } from "@/lib/roles";
 import { crearEmpresaConPermisos } from "@/lib/test-utils/empresa-con-permiso";
-import { CambioRolInvalidoError, cambiarRolDeMiembro, clavePlantilla, claveRolExistente, listarPersonas, opcionesDeRol } from "./personas";
+import { CambioRolInvalidoError, cambiarRolDeMiembro, clavePlantilla, claveRolExistente, listarPersonas, opcionesDeRol, QuitarAccesoInvalidoError, quitarAccesoDeMiembro } from "./personas";
 
 // Issue #370 — Personas, contra Postgres real (RLS y permisos reales).
 
@@ -137,3 +137,51 @@ describe("Personas (issue #370)", () => {
     expect((await obtenerMiMembresia(deA.usuarioId, a.empresaId))?.rolNombre).toBe("Operador");
   });
 });
+
+// 25-nov — «Quitar acceso», solo el Dueño.
+describe("Personas: quitar acceso", () => {
+  const correoDe = async (usuarioId: string) => (await db.select({ email: usuarios.email }).from(usuarios).where(eq(usuarios.id, usuarioId)))[0].email;
+
+  it("el Dueño le quita el acceso a un Operador: sale de la empresa, se borran sus invitaciones sin aceptar y queda en la bitácora", async () => {
+    const e = await crearEmpresaConPermisos("Quitar acceso", PLANTILLAS.Gerente);
+    const dueno = await agregarMiembro(e.empresaId, "Dueño", "Dueña");
+    const op = await agregarMiembro(e.empresaId, "Operador", "Ana Operadora");
+    const correo = await correoDe(op.usuarioId);
+    await invitar(e.empresaId, dueno.usuarioId, correo, new Date(Date.now() + 86_400_000));
+    await invitar(e.empresaId, dueno.usuarioId, "otra@zilonix.test", new Date(Date.now() + 86_400_000));
+
+    expect(await quitarAccesoDeMiembro(e.empresaId, dueno.usuarioId, op.membresiaId)).toEqual({ email: correo, rolNombre: "Operador" });
+
+    expect(await obtenerMiMembresia(op.usuarioId, e.empresaId)).toBeNull();
+    const pendientes = await dbComoEmpresa(e.empresaId, (tx) => tx.select({ email: invitaciones.email }).from(invitaciones).where(eq(invitaciones.empresaId, e.empresaId)));
+    expect(pendientes.map((i) => i.email)).toEqual(["otra@zilonix.test"]); // solo se borran las de esa persona
+    const [registro] = await dbComoEmpresa(e.empresaId, (tx) =>
+      tx.select().from(auditoria).where(and(eq(auditoria.empresaId, e.empresaId), eq(auditoria.accion, "quitar_acceso")))
+    );
+    expect(registro).toMatchObject({ usuarioId: dueno.usuarioId, entidadId: op.membresiaId, valorAnterior: "Operador" });
+  });
+
+  it("solo el Dueño; nunca al Dueño ni a uno mismo", async () => {
+    const e = await crearEmpresaConPermisos("Quitar acceso reglas", PLANTILLAS.Gerente);
+    const dueno = await agregarMiembro(e.empresaId, "Dueño");
+    const otroDueno = await agregarMiembro(e.empresaId, "Dueño");
+    const op = await agregarMiembro(e.empresaId, "Operador");
+
+    // Un Gerente (con personas.modificar) no puede: es solo del Dueño.
+    await expect(quitarAccesoDeMiembro(e.empresaId, e.usuarioId, op.membresiaId)).rejects.toBeInstanceOf(SoloDuenoError);
+    await expect(quitarAccesoDeMiembro(e.empresaId, dueno.usuarioId, otroDueno.membresiaId)).rejects.toThrow(/Dueño no se le puede quitar/);
+    await expect(quitarAccesoDeMiembro(e.empresaId, dueno.usuarioId, dueno.membresiaId)).rejects.toBeInstanceOf(QuitarAccesoInvalidoError);
+    expect((await obtenerMiMembresia(op.usuarioId, e.empresaId))?.rolNombre).toBe("Operador");
+    expect((await obtenerMiMembresia(otroDueno.usuarioId, e.empresaId))?.rolNombre).toBe("Dueño");
+  });
+
+  it("A/B: el Dueño de B no puede quitar a alguien de A aunque tenga el id", async () => {
+    const a = await crearEmpresaConPermisos("Quitar A", PLANTILLAS.Gerente);
+    const b = await crearEmpresaConPermisos("Quitar B", PLANTILLAS.Gerente);
+    const duenoB = await agregarMiembro(b.empresaId, "Dueño");
+    const deA = await agregarMiembro(a.empresaId, "Operador");
+    await expect(quitarAccesoDeMiembro(b.empresaId, duenoB.usuarioId, deA.membresiaId)).rejects.toThrow(/no está en esta empresa/);
+    expect((await obtenerMiMembresia(deA.usuarioId, a.empresaId))?.rolNombre).toBe("Operador");
+  });
+});
+
