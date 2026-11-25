@@ -305,7 +305,9 @@ describe("bodegas 3PL ligadas a empresas (RLS, issue #625)", () => {
 
     expect((await dbComoEmpresa(empresaA, (tx) => tx.select().from(stockBodega3pl))).map((s) => s.cantidad)).toEqual([7]);
     expect(await dbComoEmpresa(empresaB, (tx) => tx.select().from(stockBodega3pl))).toHaveLength(0);
-    await expect(dbComoEmpresa(empresaA, (tx) => tx.update(stockBodega3pl).set({ cantidad: 1 }))).rejects.toThrow();
+    // La empresa tiene UPDATE (cantidad) pero la política solo deja pasar a la bodega: RLS filtra a 0 filas, sin error.
+    expect(await dbComoEmpresa(empresaA, (tx) => tx.update(stockBodega3pl).set({ cantidad: 1 }).returning({ id: stockBodega3pl.id }))).toHaveLength(0);
+    expect((await dbComoEmpresa(empresaA, (tx) => tx.select().from(stockBodega3pl))).map((s) => s.cantidad)).toEqual([7]);
   });
 
   it("el superadmin ve los vínculos pero no recepciones ni stock", async () => {
