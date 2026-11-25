@@ -33,7 +33,7 @@ export const GUIA_SUPERADMIN: GrupoGuia[] = [
           "Pulsa «Ver» en la empresa para abrir su detalle.",
           "Cambiar el plan: elige el plan y pulsa «Cambiar plan» (te pide confirmar).",
           "Suspender: escribe el motivo (obligatorio) y pulsa «Suspender». Sus miembros ven «Tu cuenta está suspendida» y no pueden usar ningún módulo, y sus procesos automáticos con Mercado Libre (avisos de ventas, publicidad, seguimiento) se detienen.",
-          "Reactivar: pulsa «Reactivar». Todo vuelve a funcionar solo.",
+          "Reactivar: pulsa «Reactivar». Los procesos vuelven solos, pero las ventas que llegaron mientras estuvo suspendida no: pídele al cliente que pulse «Traer ventas de este mes» en Pedidos o en Finanzas → Ventas (trae solo el mes en curso).",
           "Notas internas: escribe lo que el equipo de Zilonix deba saber de esa empresa y pulsa «Guardar notas». La empresa no las ve.",
         ],
         apartados: [
@@ -69,7 +69,7 @@ export const GUIA_SUPERADMIN: GrupoGuia[] = [
           {
             titulo: "Qué hacer en cada caso",
             pasos: [
-              "Desconectada o por revisar: avisa al cliente que entre a Administración → Conectar marketplaces y vuelva a conectar esa cuenta.",
+              "Desconectada o por revisar: avisa al cliente que entre a Administración → Conectar marketplaces y vuelva a conectar esa cuenta. Después, que pulse «Traer ventas de este mes» en Pedidos para recuperar las ventas que no entraron mientras estuvo caída (solo trae el mes en curso).",
               "Avisos atrasados que no bajan en un par de horas: avisa al equipo técnico para revisar los registros del servidor.",
               "Publicidad con error durante varios días: avisa al equipo técnico.",
             ],
