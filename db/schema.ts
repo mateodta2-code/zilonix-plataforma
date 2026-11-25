@@ -633,6 +633,9 @@ export const cuentasFalabella = pgTable(
     // (15.50 = 15,50 %) y flete por unidad. Vacío = no estimar.
     comisionDefectoPct: numeric("comision_defecto_pct", { precision: 5, scale: 2 }),
     fleteDefecto: numeric("flete_defecto", { precision: 14, scale: 2 }),
+    // Issue #622 — % de IVA de las ventas de la cuenta (19.00 = 19 %). Solo
+    // informativo («Ventas sin IVA»). Vacío = sin configurar.
+    ivaVentasPct: numeric("iva_ventas_pct", { precision: 5, scale: 2 }),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -640,6 +643,7 @@ export const cuentasFalabella = pgTable(
       "cuentas_falabella_comision_defecto_pct_rango",
       sql`${t.comisionDefectoPct} >= 0 AND ${t.comisionDefectoPct} <= 100`
     ),
+    ivaVentasRango: check("cuentas_falabella_iva_ventas_pct_rango", sql`${t.ivaVentasPct} >= 0 AND ${t.ivaVentasPct} <= 100`),
     fleteDefectoNoNegativo: check("cuentas_falabella_flete_defecto_no_negativo", sql`${t.fleteDefecto} >= 0`),
     // Mismo criterio que cuentas_ml_cuenta_externa_unica: una cuenta real
     // de Falabella (un mismo UserID) no puede estar conectada a dos

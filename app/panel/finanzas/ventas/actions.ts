@@ -182,6 +182,7 @@ export async function guardarDefectosCuentaFalabellaAction(entrada: {
   cuentaId: string;
   comisionPct: string;
   flete: string;
+  ivaVentasPct: string;
 }): Promise<EstadoAjusteFalabella> {
   const contexto = await contextoRecalculo();
   if (!contexto) return { ok: false, mensaje: SIN_PERMISO_AJUSTE };
@@ -193,19 +194,24 @@ export async function guardarDefectosCuentaFalabellaAction(entrada: {
   }
   const flete = montoOVacio(entrada.flete, "Flete por defecto");
   if (!flete.ok) return flete;
+  const iva = montoOVacio(entrada.ivaVentasPct, "% IVA de ventas");
+  if (!iva.ok) return iva;
+  if (iva.valor !== null && aCentavos(iva.valor) > BigInt(10000)) {
+    return { ok: false, mensaje: "% IVA de ventas: tiene que estar entre 0 y 100." };
+  }
   const cuentaId = String(entrada.cuentaId ?? "");
   if (!/^[0-9a-f-]{36}$/i.test(cuentaId)) return { ok: false, mensaje: "Cuenta inválida." };
 
   const { empresaId, usuarioId } = contexto;
   const actualizado = await dbComoEmpresa(empresaId, async (tx) => {
     const [previa] = await tx
-      .select({ nickname: cuentasFalabella.nickname, comision: cuentasFalabella.comisionDefectoPct, flete: cuentasFalabella.fleteDefecto })
+      .select({ nickname: cuentasFalabella.nickname, comision: cuentasFalabella.comisionDefectoPct, flete: cuentasFalabella.fleteDefecto, iva: cuentasFalabella.ivaVentasPct })
       .from(cuentasFalabella)
       .where(and(eq(cuentasFalabella.id, cuentaId), eq(cuentasFalabella.empresaId, empresaId)));
     if (!previa) return false;
     await tx
       .update(cuentasFalabella)
-      .set({ comisionDefectoPct: comision.valor, fleteDefecto: flete.valor })
+      .set({ comisionDefectoPct: comision.valor, fleteDefecto: flete.valor, ivaVentasPct: iva.valor })
       .where(and(eq(cuentasFalabella.id, cuentaId), eq(cuentasFalabella.empresaId, empresaId)));
     await registrarAuditoria(tx, {
       empresaId,
@@ -214,9 +220,9 @@ export async function guardarDefectosCuentaFalabellaAction(entrada: {
       accion: "modificar",
       entidad: "cuenta_falabella",
       entidadId: cuentaId,
-      detalle: `Cambió la comisión y el flete por defecto de la cuenta ${previa.nickname} de Falabella.`,
-      valorAnterior: `comision_pct=${previa.comision ?? ""} flete=${previa.flete ?? ""}`,
-      valorNuevo: `comision_pct=${comision.valor ?? ""} flete=${flete.valor ?? ""}`,
+      detalle: `Cambió la comisión, el flete por defecto y el % de IVA de ventas de la cuenta ${previa.nickname} de Falabella.`,
+      valorAnterior: `comision_pct=${previa.comision ?? ""} flete=${previa.flete ?? ""} iva_ventas_pct=${previa.iva ?? ""}`,
+      valorNuevo: `comision_pct=${comision.valor ?? ""} flete=${flete.valor ?? ""} iva_ventas_pct=${iva.valor ?? ""}`,
     });
     return true;
   });
