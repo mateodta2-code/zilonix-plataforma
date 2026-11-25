@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { Boton } from "@/components/marco/Boton";
 import { SinAcceso } from "@/components/marco/SinAcceso";
-import { SelectorCuentaMl } from "@/components/SelectorCuentaMl";
+import { BarraFiltrosPosventa } from "@/components/posventa/BarraFiltrosPosventa";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
+import { listarCuentasConectadas } from "@/lib/ml/cuentas";
 import { cargarDevolucionesEmpresa, leerProductosDeFilas, ROTULOS_ESTADO_DEVOLUCION } from "@/lib/ml/devoluciones";
 import { leerCuentaMlDeQuery, PARAM_CUENTA } from "@/lib/ml/selector-cuenta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
@@ -44,6 +44,7 @@ export default async function DevolucionesPage({ searchParams }: { searchParams?
   const paginaPedida = Number(typeof searchParams?.pagina === "string" ? searchParams.pagina : "1");
   // La cuenta del query solo vale si es de ESTA empresa (RLS); si no, Todas.
   const { cuentaId } = await leerCuentaMlDeQuery(empresa.id, searchParams?.cuenta);
+  const cuentas = (await listarCuentasConectadas(empresa.id)).filter((c) => !c.desconectadaTs).map((c) => ({ id: c.id, apodo: c.nickname }));
 
   const carga = await cargarDevolucionesEmpresa(empresa.id, { cuentaId, desdeMs: desdePeriodoMs(dias, Date.now()) });
   const conteos = contarPorEstado(carga.filas);
@@ -86,24 +87,15 @@ export default async function DevolucionesPage({ searchParams }: { searchParams?
         ))}
       </div>
 
+      <BarraFiltrosPosventa
+        busqueda={busqueda}
+        placeholder="Buscar por # de venta o motivo"
+        cuentas={cuentas}
+        cuentaId={cuentaId}
+        extra={{ tipo: "select", nombre: "dias", etiqueta: "Periodo", valor: String(dias), opciones: PERIODOS_DIAS.map((d) => ({ valor: String(d), etiqueta: `Últimos ${d} días` })) }}
+        ocultos={{ estado }}
+      />
       <div className={posventa.herramientas}>
-        <SelectorCuentaMl empresaId={empresa.id} cuenta={searchParams?.cuenta} parametros={{ q: busqueda, estado: estado ?? "", dias: String(dias) }} />
-        <form method="get" className={posventa.buscador}>
-          {cuentaId ? <input type="hidden" name={PARAM_CUENTA} value={cuentaId} /> : null}
-          {estado ? <input type="hidden" name="estado" value={estado} /> : null}
-          <input type="search" name="q" defaultValue={busqueda} placeholder="Buscar por # de venta o motivo" maxLength={80} className="zx-control" />
-          <label htmlFor="dias-devoluciones" className={posventa.texto}>
-            Filtrar por fecha
-          </label>
-          <select id="dias-devoluciones" name="dias" defaultValue={String(dias)} className="zx-control">
-            {PERIODOS_DIAS.map((d) => (
-              <option key={d} value={d}>
-                Últimos {d} días
-              </option>
-            ))}
-          </select>
-          <Boton type="submit">Buscar</Boton>
-        </form>
         <Link href={`/panel/posventa/devoluciones/metricas?dias=${dias}${cuentaId ? `&${PARAM_CUENTA}=${cuentaId}` : ""}`} className={styles.enlace}>
           Ver métricas →
         </Link>

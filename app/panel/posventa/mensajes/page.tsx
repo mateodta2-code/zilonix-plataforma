@@ -4,13 +4,16 @@ import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerMiMembresia } from "@/lib/membresias";
+import { BarraFiltrosPosventa } from "@/components/posventa/BarraFiltrosPosventa";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { cargarVentasConMensajes, DIAS_VENTANA, TOPE_VENTAS_REVISADAS } from "./datos";
 import { contarEstados, filtrarFilas, leerFiltros } from "./filtros";
 import { ListaMensajes } from "./ListaMensajes";
 import styles from "./Mensajes.module.css";
+import posventa from "../Posventa.module.css";
 
 // Posventa-Mensajes (Refs #645) — lista de conversaciones de las ventas
 // recientes. Ver pide ventas.consultar. Solo lectura y siempre con
@@ -38,15 +41,41 @@ export default async function MensajesPosventaPage({ searchParams }: { searchPar
 
   const filtros = leerFiltros(searchParams ?? {});
   const cuentas = await listarCuentasConectadas(empresa.id);
-  const { filas, cuentasConFalla } = await cargarVentasConMensajes(empresa.id, cuentas);
+  // La cuenta del query solo vale si es de ESTA empresa (RLS); si no, Todas.
+  const { cuentaId } = await leerCuentaMlDeQuery(empresa.id, searchParams?.cuenta);
+  // Filtrar por cuenta solo reduce las lecturas a ML, nunca agrega.
+  const { filas, cuentasSinRevisar } = await cargarVentasConMensajes(empresa.id, cuentaId ? cuentas.filter((c) => c.id === cuentaId) : cuentas);
   const filtradas = filtrarFilas(filas, filtros);
 
   return (
     <>
       <EncabezadoPagina titulo="Mensajes" descripcion={`Conversaciones de tus ventas de los últimos ${DIAS_VENTANA} días (se revisan las ${TOPE_VENTAS_REVISADAS} más recientes por cuenta). Se leen en vivo de Mercado Libre, sin marcarlas como leídas.`} />
       {cuentas.length === 0 && <div className={styles.aviso}>Conecta una cuenta de Mercado Libre para ver los mensajes.</div>}
-      {cuentasConFalla > 0 && <div className={styles.aviso}>No se pudo revisar {cuentasConFalla === 1 ? "una cuenta" : `${cuentasConFalla} cuentas`} ahora. Intenta de nuevo en un momento.</div>}
-      <ListaMensajes todas={filas} filtradas={filtradas} conteos={contarEstados(filas)} filtros={filtros} />
+      {cuentasSinRevisar.length > 0 && (
+        <div className={posventa.aviso}>
+          <p className={posventa.avisoTitulo}>No se pudieron revisar estas cuentas de Mercado Libre:</p>
+          <ul className={posventa.avisoLista}>
+            {cuentasSinRevisar.map((c) => (
+              <li key={c.nickname}>
+                <strong>{c.nickname}</strong> — {c.motivo}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <ListaMensajes todas={filas} filtradas={filtradas} conteos={contarEstados(filas)} filtros={filtros}
+        cuentaId={cuentaId}
+        barra={
+          <BarraFiltrosPosventa
+            busqueda={filtros.q}
+            placeholder="N.º de venta o producto"
+            cuentas={cuentas.filter((c) => !c.desconectadaTs).map((c) => ({ id: c.id, apodo: c.nickname }))}
+            cuentaId={cuentaId}
+            extra={{ tipo: "fecha", nombre: "desde", etiqueta: "Desde", valor: filtros.desde ?? "" }}
+            ocultos={{ estado: filtros.estado }}
+          />
+        }
+      />
     </>
   );
 }
