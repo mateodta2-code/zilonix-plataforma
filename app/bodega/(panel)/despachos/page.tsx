@@ -34,7 +34,7 @@ export default async function BodegaDespachosPage({ searchParams }: { searchPara
   const filtroCrudo = typeof searchParams.empresa === "string" ? searchParams.empresa : "";
   const empresaId = UUID_RE.test(filtroCrudo) && ligadas.some((e) => e.empresaId === filtroCrudo) ? filtroCrudo : undefined;
   const estado = searchParams.estado === "preparado" ? "preparado" : searchParams.estado === "todos" ? undefined : "pendiente";
-  const despachos = await listarDespachosBodega(bodegaId, { estado, empresaId });
+  const despachos = await listarDespachosBodega(bodegaId, decision.membresia.rol, { estado, empresaId });
 
   return (
     <>

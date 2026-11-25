@@ -1159,7 +1159,10 @@ GRANT UPDATE (estado, preparado_ts, preparado_por) ON despachos_bodega_3pl TO ap
 
 DROP POLICY IF EXISTS despacho3pl_bodega_ver ON despachos_bodega_3pl;
 CREATE POLICY despacho3pl_bodega_ver ON despachos_bodega_3pl FOR SELECT TO app_user
-  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+  );
 DROP POLICY IF EXISTS despacho3pl_empresa_ver ON despachos_bodega_3pl;
 CREATE POLICY despacho3pl_empresa_ver ON despachos_bodega_3pl FOR SELECT TO app_user
   USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
@@ -1177,9 +1180,14 @@ CREATE POLICY despacho3pl_empresa_crear ON despachos_bodega_3pl FOR INSERT TO ap
   );
 DROP POLICY IF EXISTS despacho3pl_bodega_preparar ON despachos_bodega_3pl;
 CREATE POLICY despacho3pl_bodega_preparar ON despachos_bodega_3pl FOR UPDATE TO app_user
-  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid AND estado = 'pendiente')
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+    AND estado = 'pendiente'
+  )
   WITH CHECK (
     bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
     AND estado = 'preparado'
     AND EXISTS (
       SELECT 1 FROM bodegas_3pl_empresas v
@@ -1190,7 +1198,8 @@ CREATE POLICY despacho3pl_bodega_preparar ON despachos_bodega_3pl FOR UPDATE TO 
   );
 
 -- Sin bodega_id propio: el ítem se ve si su cabecera se ve (por bodega o por
--- empresa), y solo se agrega a una cabecera pendiente de la empresa activa.
+-- empresa; el EXISTS pasa por la política de la cabecera, que ya exige rol
+-- admin_bodega/operario del lado de la bodega: un domiciliario no ve items), y solo se agrega a una cabecera pendiente de la empresa activa.
 DROP POLICY IF EXISTS despacho_item3pl_ver ON despacho_items_bodega_3pl;
 CREATE POLICY despacho_item3pl_ver ON despacho_items_bodega_3pl FOR SELECT TO app_user
   USING (EXISTS (SELECT 1 FROM despachos_bodega_3pl d WHERE d.id = despacho_id));

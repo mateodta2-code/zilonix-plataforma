@@ -74,10 +74,10 @@ describe("despachos_bodega_3pl (RLS + lib, Bodega-3)", () => {
   });
 
   it("A/B: la bodega ve solo lo suyo; la otra bodega y la otra empresa no ven nada", async () => {
-    const deA = await listarDespachosBodega(bodegaA);
+    const deA = await listarDespachosBodega(bodegaA, "admin_bodega");
     expect(deA.map((d) => d.numeroPedido)).toContain(numeroA);
     expect(deA.find((d) => d.id === despachoA)?.lineas).toHaveLength(2);
-    expect(await listarDespachosBodega(bodegaB)).toHaveLength(0);
+    expect(await listarDespachosBodega(bodegaB, "admin_bodega")).toHaveLength(0);
     expect(await dbComoEmpresa(empresaB, (tx) => tx.select().from(despachosBodega3pl))).toHaveLength(0);
     expect(await dbComoEmpresa(empresaB, (tx) => tx.select().from(despachoItemsBodega3pl))).toHaveLength(0);
     expect(await dbComoBodega(bodegaB, (tx) => tx.select().from(despachoItemsBodega3pl))).toHaveLength(0);
@@ -92,7 +92,7 @@ describe("despachos_bodega_3pl (RLS + lib, Bodega-3)", () => {
     const columnas = await db.execute(sql`SELECT column_name FROM information_schema.columns WHERE table_name IN ('despachos_bodega_3pl', 'despacho_items_bodega_3pl')`);
     const nombres = (columnas as unknown as { column_name: string }[]).map((c) => c.column_name).join(" ");
     expect(nombres).not.toMatch(/comprador|nombre|telefono|direccion|documento|precio|valor|total|email/);
-    const [fila] = (await listarDespachosBodega(bodegaA)).filter((d) => d.id === despachoA);
+    const [fila] = (await listarDespachosBodega(bodegaA, "admin_bodega")).filter((d) => d.id === despachoA);
     expect(Object.keys(fila).sort()).toEqual(["creadoTs", "empresaId", "empresaNombre", "estado", "id", "lineas", "numeroPedido", "preparadoTs", "tipoEnvio"]);
     expect(Object.keys(fila.lineas[0]).sort()).toEqual(["cantidad", "sku"]);
   });
@@ -100,7 +100,19 @@ describe("despachos_bodega_3pl (RLS + lib, Bodega-3)", () => {
   it("la bodega solo cambia estado/preparado_*; nadie borra", async () => {
     await expect(dbComoBodega(bodegaA, (tx) => tx.update(despachosBodega3pl).set({ numeroPedido: "otro" }), "admin_bodega")).rejects.toThrow();
     await expect(dbComoBodega(bodegaA, (tx) => tx.delete(despachosBodega3pl), "admin_bodega")).rejects.toThrow();
-    await expect(dbComoEmpresa(empresaA, (tx) => tx.update(despachosBodega3pl).set({ estado: "preparado" }))).rejects.toThrow();
+    // La empresa no tiene política de UPDATE: RLS filtra y afecta 0 filas (sin error).
+    const deEmpresa = await dbComoEmpresa(empresaA, (tx) => tx.update(despachosBodega3pl).set({ estado: "preparado" }).where(eq(despachosBodega3pl.id, despachoA)).returning({ id: despachosBodega3pl.id }));
+    expect(deEmpresa).toHaveLength(0);
+    const [fila] = await dbComoBodega(bodegaA, (tx) => tx.select({ estado: despachosBodega3pl.estado }).from(despachosBodega3pl).where(eq(despachosBodega3pl.id, despachoA)), "admin_bodega");
+    expect(fila.estado).toBe("pendiente");
+  });
+
+  it("un domiciliario de la misma bodega no ve ni prepara despachos", async () => {
+    expect(await listarDespachosBodega(bodegaA, "domiciliario")).toHaveLength(0);
+    expect(await dbComoBodega(bodegaA, (tx) => tx.select().from(despachoItemsBodega3pl), "domiciliario")).toHaveLength(0);
+    const tocados = await dbComoBodega(bodegaA, (tx) => tx.update(despachosBodega3pl).set({ estado: "preparado" }).where(eq(despachosBodega3pl.id, despachoA)).returning({ id: despachosBodega3pl.id }), "domiciliario");
+    expect(tocados).toHaveLength(0);
+    await expect(marcarPreparado(bodegaA, adminAId, despachoA, "domiciliario")).rejects.toBeInstanceOf(DespachoBodegaError);
   });
 
   it("stock insuficiente: avisa, no descuenta nada y el despacho sigue pendiente", async () => {
@@ -135,7 +147,7 @@ describe("despachos_bodega_3pl (RLS + lib, Bodega-3)", () => {
     expect(retocados).toHaveLength(0);
   });
 
-  it("una empresa con vínculo pausado no puede preparar (la base lo impide)", async () => {
+  it("una empresa con vínculo pausado no puede preparar (aviso claro de la lib)", async () => {
     const venta = await crearVentaDePrueba(empresaA, { lineas: 1 });
     const { despachoId } = await enviarPedidoABodega(empresaA, usuarioA, await numeroDe(empresaA, venta.pedidoId));
     await cambiarEstadoVinculo(superadminId, bodegaA, empresaA, "pausada");

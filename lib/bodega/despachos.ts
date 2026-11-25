@@ -90,7 +90,7 @@ export type DespachoBodegaListado = {
 
 // BODEGA: solo lo necesario para preparar. Las dos tablas no tienen
 // columnas del comprador; la lista de columnas es explícita a propósito.
-export async function listarDespachosBodega(bodegaId: string, filtro: { estado?: "pendiente" | "preparado"; empresaId?: string } = {}, limite = 200): Promise<DespachoBodegaListado[]> {
+export async function listarDespachosBodega(bodegaId: string, rol: string, filtro: { estado?: "pendiente" | "preparado"; empresaId?: string } = {}, limite = 200): Promise<DespachoBodegaListado[]> {
   return dbComoBodega(bodegaId, async (tx) => {
     const condiciones = [eq(despachosBodega3pl.bodegaId, bodegaId)];
     if (filtro.estado) condiciones.push(eq(despachosBodega3pl.estado, filtro.estado));
@@ -120,7 +120,7 @@ export async function listarDespachosBodega(bodegaId: string, filtro: { estado?:
     const porDespacho = new Map<string, LineaDespacho[]>();
     for (const i of items) porDespacho.set(i.despachoId, [...(porDespacho.get(i.despachoId) ?? []), { sku: i.sku, cantidad: i.cantidad }]);
     return cabeceras.map((c) => ({ ...c, lineas: porDespacho.get(c.id) ?? [] }));
-  });
+  }, rol);
 }
 
 // BODEGA: marca «preparado» y descuenta stock en UNA transacción. El paso
@@ -138,6 +138,13 @@ export async function marcarPreparado(bodegaId: string, usuarioId: string, despa
         .where(and(eq(despachosBodega3pl.id, despachoId), eq(despachosBodega3pl.bodegaId, bodegaId)));
       if (!cabecera) throw new DespachoBodegaError("No se encontró el despacho.");
       if (cabecera.estado === "preparado") throw new DespachoBodegaError("Ese despacho ya estaba preparado.");
+
+      // Aviso claro antes del UPDATE; la política de la base queda como segunda barrera.
+      const [vinculo] = await tx
+        .select({ estado: bodegas3plEmpresas.estado })
+        .from(bodegas3plEmpresas)
+        .where(and(eq(bodegas3plEmpresas.bodegaId, bodegaId), eq(bodegas3plEmpresas.empresaId, cabecera.empresaId)));
+      if (vinculo?.estado !== "activa") throw new DespachoBodegaError("La empresa está en pausa con esta bodega: no se puede preparar.");
 
       const marcado = await tx
         .update(despachosBodega3pl)
