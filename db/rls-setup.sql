@@ -1155,16 +1155,18 @@ REVOKE UPDATE ON entregas_domiciliario FROM app_user;
 GRANT UPDATE (miembro_domiciliario_id, estado, motivo, receptor_nombre, direccion, barrio, ciudad, telefono, nota, actualizada_ts) ON entregas_domiciliario TO app_user;
 
 -- El vendedor necesita ver a los domiciliarios ACTIVOS de la bodega que lo
--- atiende (solo vínculo activo y bodega activa). Solo filas de rol domiciliario.
+-- atiende (solo vínculo activo). Solo filas de rol domiciliario. NO consulta
+-- bodegas_3pl: sus políticas leen miembros_bodega_3pl y se formaría un ciclo
+-- ("infinite recursion detected in policy"). Que la bodega esté activa se
+-- comprueba en el WITH CHECK de entregas_domiciliario.
 DROP POLICY IF EXISTS miembro3pl_ver_domiciliarios_empresa ON miembros_bodega_3pl;
 CREATE POLICY miembro3pl_ver_domiciliarios_empresa ON miembros_bodega_3pl FOR SELECT TO app_user
   USING (
     rol = 'domiciliario' AND activo
     AND bodega_id IN (
       SELECT v.bodega_id FROM bodegas_3pl_empresas v
-      JOIN bodegas_3pl b ON b.id = v.bodega_id
       WHERE v.empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
-        AND v.estado = 'activa' AND b.estado = 'activa'
+        AND v.estado = 'activa'
     )
   );
 
