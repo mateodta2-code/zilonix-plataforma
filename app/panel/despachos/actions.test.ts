@@ -27,6 +27,13 @@ vi.mock("@/lib/ml/despachos", () => ({
   VentanaDeshacerVencidaError: class extends Error {},
 }));
 
+const asignarEntregaMock = vi.fn();
+vi.mock("@/lib/entregas/entregas", () => ({
+  asignarEntrega: (...args: unknown[]) => asignarEntregaMock(...args),
+  quitarEntrega: vi.fn(),
+  EntregaInvalidaError: class extends Error {},
+}));
+
 const traerVentasDelMesMock = vi.fn();
 vi.mock("@/lib/finanzas/traer-ventas-mes", () => ({
   traerVentasDelMes: (...args: unknown[]) => traerVentasDelMesMock(...args),
@@ -35,7 +42,7 @@ vi.mock("@/lib/finanzas/traer-ventas-mes", () => ({
 }));
 
 import { SinPermisoError } from "@/lib/permisos";
-import { sincronizarAhoraAction } from "./actions";
+import { asignarDomiciliarioAction, sincronizarAhoraAction } from "./actions";
 
 describe("sincronizarAhoraAction (issue 'pendientes no muestra venta nueva')", () => {
   afterEach(() => traerVentasDelMesMock.mockReset());
@@ -64,5 +71,23 @@ describe("sincronizarAhoraAction (issue 'pendientes no muestra venta nueva')", (
     traerVentasDelMesMock.mockRejectedValue(new SinPermisoError("finanzas", "modificar"));
     const resultado = await sincronizarAhoraAction();
     expect(resultado).toEqual({ ok: false, error: 'No tienes permiso para "modificar" en "finanzas".' });
+  });
+});
+
+describe("asignarDomiciliarioAction (Domi-1, #627)", () => {
+  const entrada = { miembroId: "m1", pedidoReferencia: "P1", receptorNombre: "Ana", direccion: "Calle 1", barrio: "", ciudad: "Medellín", telefono: "3001234567", nota: "" };
+
+  it("exige ventas.modificar y no llama a la base si no lo tiene", async () => {
+    const { requierePermiso } = await import("@/lib/permisos");
+    vi.mocked(requierePermiso).mockRejectedValueOnce(new SinPermisoError("ventas", "modificar"));
+    const r = await asignarDomiciliarioAction(entrada);
+    expect(r.ok).toBe(false);
+    expect(asignarEntregaMock).not.toHaveBeenCalled();
+  });
+
+  it("asigna con la empresa de la sesión, nunca una que mande el cliente", async () => {
+    const r = await asignarDomiciliarioAction(entrada);
+    expect(r).toEqual({ ok: true });
+    expect(asignarEntregaMock).toHaveBeenCalledWith("empresa-1", "usuario-1", expect.objectContaining({ miembroId: "m1", marketplace: "mercadolibre", pedidoReferencia: "P1" }));
   });
 });

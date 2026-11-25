@@ -1,0 +1,125 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Boton } from "@/components/marco/Boton";
+import { Campo } from "@/components/marco/Campo";
+import { Tarjeta } from "@/components/marco/Tarjeta";
+import { asignarDomiciliarioAction, quitarDomiciliarioAction } from "./actions";
+import styles from "./page.module.css";
+
+type Domiciliario = { miembroId: string; bodegaNombre: string; nombre: string };
+type EntregaAsignada = {
+  estado: string;
+  miembroDomiciliarioId: string;
+  domiciliarioNombre: string;
+  receptorNombre: string;
+  direccion: string;
+  barrio: string | null;
+  ciudad: string;
+  telefono: string;
+  nota: string | null;
+};
+
+// Issue #627 (Domi-1) — «Asignar domiciliario» de una entrega local (Flex).
+// Solo lo del vendedor, en /panel/despachos: el domiciliario ve sus
+// entregas en /domiciliario (Domi-2). Los datos de quien recibe se copian
+// al asignar; ninguna llamada a Mercado Libre.
+export function AsignarDomiciliario({ pedidoReferencia, domiciliarios, entrega }: { pedidoReferencia: string; domiciliarios: Domiciliario[]; entrega: EntregaAsignada | null }) {
+  const router = useRouter();
+  const [abierto, setAbierto] = useState(false);
+  const [enCurso, setEnCurso] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [miembroId, setMiembroId] = useState(entrega?.miembroDomiciliarioId ?? "");
+  const [receptorNombre, setReceptorNombre] = useState(entrega?.receptorNombre ?? "");
+  const [direccion, setDireccion] = useState(entrega?.direccion ?? "");
+  const [barrio, setBarrio] = useState(entrega?.barrio ?? "");
+  const [ciudad, setCiudad] = useState(entrega?.ciudad ?? "");
+  const [telefono, setTelefono] = useState(entrega?.telefono ?? "");
+  const [nota, setNota] = useState(entrega?.nota ?? "");
+
+  const modificable = !entrega || entrega.estado === "asignada";
+
+  async function guardar() {
+    setEnCurso(true);
+    setError(null);
+    const r = await asignarDomiciliarioAction({ miembroId, pedidoReferencia, receptorNombre, direccion, barrio, ciudad, telefono, nota });
+    setEnCurso(false);
+    if (!r.ok) return setError(r.error);
+    setAbierto(false);
+    router.refresh();
+  }
+
+  async function quitar() {
+    setEnCurso(true);
+    setError(null);
+    const r = await quitarDomiciliarioAction(pedidoReferencia);
+    setEnCurso(false);
+    if (!r.ok) return setError(r.error);
+    router.refresh();
+  }
+
+  return (
+    <Tarjeta>
+      <div className={styles.accionesFiltro}>
+        {entrega ? (
+          <p className={styles.notaDespachado}>
+            Domiciliario: <strong>{entrega.domiciliarioNombre}</strong> — {entrega.estado === "asignada" ? "asignada" : entrega.estado === "en_camino" ? "en camino" : entrega.estado === "entregada" ? "entregada" : "no entregada"}.
+          </p>
+        ) : (
+          <p className={styles.notaDespachado}>Entrega local sin domiciliario.</p>
+        )}
+        {modificable && (
+          <>
+            <Boton type="button" onClick={() => setAbierto((v) => !v)} disabled={enCurso || (domiciliarios.length === 0 && !entrega)} title={domiciliarios.length === 0 && !entrega ? "Tu empresa no tiene una bodega ligada con domiciliarios activos" : undefined}>
+              {entrega ? "Reasignar" : "Asignar domiciliario"}
+            </Boton>
+            {entrega && (
+              <Boton type="button" variante="peligro" onClick={quitar} disabled={enCurso}>
+                Quitar
+              </Boton>
+            )}
+          </>
+        )}
+      </div>
+      {abierto && modificable && (
+        <div className={styles.filtros}>
+          <Campo etiqueta="Domiciliario">
+            <select value={miembroId} onChange={(e) => setMiembroId(e.target.value)} className="zx-control">
+              <option value="">Elige uno…</option>
+              {domiciliarios.map((d) => (
+                <option key={d.miembroId} value={d.miembroId}>
+                  {d.nombre} — {d.bodegaNombre}
+                </option>
+              ))}
+            </select>
+          </Campo>
+          <Campo etiqueta="Quien recibe">
+            <input className="zx-control" value={receptorNombre} onChange={(e) => setReceptorNombre(e.target.value)} />
+          </Campo>
+          <Campo etiqueta="Dirección">
+            <input className="zx-control" value={direccion} onChange={(e) => setDireccion(e.target.value)} />
+          </Campo>
+          <Campo etiqueta="Barrio">
+            <input className="zx-control" value={barrio} onChange={(e) => setBarrio(e.target.value)} />
+          </Campo>
+          <Campo etiqueta="Ciudad">
+            <input className="zx-control" value={ciudad} onChange={(e) => setCiudad(e.target.value)} />
+          </Campo>
+          <Campo etiqueta="Teléfono">
+            <input className="zx-control" value={telefono} onChange={(e) => setTelefono(e.target.value)} inputMode="tel" />
+          </Campo>
+          <Campo etiqueta="Nota">
+            <input className="zx-control" value={nota} onChange={(e) => setNota(e.target.value)} />
+          </Campo>
+          <div className={styles.accionesFiltro}>
+            <Boton type="button" variante="primario" onClick={guardar} disabled={enCurso || !miembroId}>
+              {enCurso ? "Guardando…" : "Guardar"}
+            </Boton>
+          </div>
+        </div>
+      )}
+      {error && <p className={styles.errorTarjeta}>{error}</p>}
+    </Tarjeta>
+  );
+}
