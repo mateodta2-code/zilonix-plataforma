@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { dbComoBodega } from "@/db/bodega-context";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { bodegas3pl, entregasDomiciliario, entregasDomiciliarioContacto, miembrosBodega3pl, usuarios } from "@/db/schema";
@@ -31,7 +31,7 @@ export async function listarDomiciliariosAsignables(empresaId: string): Promise<
   );
 }
 
-export type EntregaDePedido = { id: string; pedidoReferencia: string; estado: string; motivo: string | null; miembroDomiciliarioId: string; domiciliarioNombre: string } & DatosEntrega;
+export type EntregaDePedido = { id: string; pedidoReferencia: string; estado: string; motivo: string | null; miembroDomiciliarioId: string; domiciliarioNombre: string; tieneFoto: boolean } & DatosEntrega;
 
 // Entregas ya asignadas a estos pedidos (para pintar «Asignado a …» y
 // precargar el formulario al reasignar). La empresa conserva sus datos.
@@ -46,6 +46,9 @@ export async function listarEntregasDePedidos(empresaId: string, marketplace: st
         motivo: entregasDomiciliario.motivo,
         miembroDomiciliarioId: entregasDomiciliario.miembroDomiciliarioId,
         domiciliarioNombre: usuarios.nombre,
+        // Domi-3: al vendedor solo le llega si hay foto; la foto misma se
+        // pide aparte a /api/entregas/[id]/foto.
+        tieneFoto: sql<boolean>`${entregasDomiciliario.fotoPublicId} is not null`,
         receptorNombre: entregasDomiciliarioContacto.receptorNombre,
         direccion: entregasDomiciliarioContacto.direccion,
         barrio: entregasDomiciliarioContacto.barrio,
@@ -150,6 +153,15 @@ export async function quitarEntrega(empresaId: string, usuarioId: string, market
   });
 }
 
+// Domi-3: la foto de una entrega, para el VENDEDOR (RLS: solo de su
+// empresa). null si no existe, es de otra empresa o no tiene foto.
+export async function fotoDeEntrega(empresaId: string, entregaId: string): Promise<string | null> {
+  const [fila] = await dbComoEmpresa(empresaId, (tx) =>
+    tx.select({ fotoPublicId: entregasDomiciliario.fotoPublicId }).from(entregasDomiciliario).where(and(eq(entregasDomiciliario.id, entregaId), eq(entregasDomiciliario.empresaId, empresaId)))
+  );
+  return fila?.fotoPublicId ?? null;
+}
+
 // ── Para Domi-2 (#629), desde /domiciliario con accesoBodega("domiciliario") ──
 // La base devuelve solo las filas SUYAS (cualquier estado) y los datos del
 // comprador solo si la entrega sigue abierta (política del contacto).
@@ -185,9 +197,28 @@ export async function listarMisEntregas(bodegaId: string, usuarioId: string) {
 
 export type EstadoNuevoEntrega = "en_camino" | "entregada" | "no_entregada";
 
-export async function cambiarEstadoMiEntrega(bodegaId: string, usuarioId: string, entregaId: string, nuevo: EstadoNuevoEntrega, motivo?: string): Promise<void> {
+// Domi-3: antes de subir la foto se confirma que la entrega es SUYA y sigue
+// abierta (RLS limita a sus filas). Devuelve la empresa, para la carpeta de
+// la foto. Así nadie sube fotos a Cloudinary con un id de entrega ajeno.
+export async function miEntregaAbierta(bodegaId: string, usuarioId: string, entregaId: string): Promise<{ empresaId: string }> {
+  return dbComoBodega(
+    bodegaId,
+    async (tx) => {
+      const [propia] = await tx.select({ estado: entregasDomiciliario.estado, empresaId: entregasDomiciliario.empresaId }).from(entregasDomiciliario).where(eq(entregasDomiciliario.id, entregaId));
+      if (!propia || propia.estado === "entregada" || propia.estado === "no_entregada") throw new EntregaInvalidaError("Esa entrega no está disponible.");
+      return { empresaId: propia.empresaId };
+    },
+    "domiciliario",
+    usuarioId
+  );
+}
+
+export async function cambiarEstadoMiEntrega(bodegaId: string, usuarioId: string, entregaId: string, nuevo: EstadoNuevoEntrega, motivo?: string, fotoPublicId?: string): Promise<void> {
   const motivoLimpio = motivo?.trim() || null;
   if (nuevo === "no_entregada" && !motivoLimpio) throw new EntregaInvalidaError("Indica el motivo de la no entrega.");
+  // Domi-3: «Entregado» exige la foto (también lo exige la base, política
+  // entrega_entregada_con_foto). En otro estado nunca se guarda una foto.
+  if (nuevo === "entregada" && !fotoPublicId) throw new EntregaInvalidaError("Toma la foto de la entrega para confirmarla.");
   await dbComoBodega(
     bodegaId,
     async (tx) => {
@@ -199,7 +230,12 @@ export async function cambiarEstadoMiEntrega(bodegaId: string, usuarioId: string
       // .returning(): un UPDATE filtrado por RLS no falla, afecta 0 filas.
       const filas = await tx
         .update(entregasDomiciliario)
-        .set({ estado: nuevo, motivo: nuevo === "no_entregada" ? motivoLimpio : null, actualizadaTs: new Date() })
+        .set({
+          estado: nuevo,
+          motivo: nuevo === "no_entregada" ? motivoLimpio : null,
+          actualizadaTs: new Date(),
+          ...(nuevo === "entregada" ? { fotoPublicId, fotoTs: new Date() } : {}),
+        })
         .where(eq(entregasDomiciliario.id, entregaId))
         .returning({ id: entregasDomiciliario.id });
       if (filas.length === 0) throw new EntregaInvalidaError("Esa entrega no está disponible.");

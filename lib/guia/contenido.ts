@@ -108,7 +108,21 @@ export const GUIA: GrupoGuia[] = [
           "En «Impresión masiva de guías» imprimes las guías de varias órdenes a la vez.",
           "Lo ya enviado queda en «Despachados».",
         ],
-        consejos: ["La lista se actualiza sola; si acabas de vender, usa «Sincronizar ahora»."],
+        apartados: [
+          {
+            titulo: "Entregas Flex con tu domiciliario",
+            pasos: [
+              "Necesitas una bodega ligada a tu empresa con domiciliarios activos (la liga el equipo de Zilonix).",
+              "En «Pendientes», en un pedido ⚡ Flex pulsa «Asignar domiciliario», elige a la persona y escribe nombre de quien recibe, dirección, barrio, ciudad, teléfono y una nota. Mientras no haya salido puedes «Reasignar» o quitarlo.",
+              "El domiciliario ve la entrega en su celular y la marca «En camino», «Entregado» o «No entregado» (con motivo). Tú ves el estado en el mismo pedido.",
+              "Al marcar «Entregado» el domiciliario tiene que tomar una foto. Cuando la entrega está entregada, pulsa «Ver foto de la entrega» para verla.",
+            ],
+          },
+        ],
+        consejos: [
+          "La lista se actualiza sola; si acabas de vender, usa «Sincronizar ahora».",
+          "La foto de entrega es privada: solo la ven las personas de tu empresa con acceso a ventas. El domiciliario deja de ver la dirección y la foto cuando cierra la entrega.",
+        ],
       },
       {
         id: "preguntas",

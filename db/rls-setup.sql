@@ -1349,6 +1349,18 @@ ALTER TABLE entregas_domiciliario FORCE ROW LEVEL SECURITY;
 GRANT SELECT, INSERT, DELETE ON entregas_domiciliario TO app_user;
 REVOKE UPDATE ON entregas_domiciliario FROM app_user;
 GRANT UPDATE (miembro_domiciliario_id, estado, motivo, actualizada_ts) ON entregas_domiciliario TO app_user;
+-- Domi-3 (migración 0048): la foto la escribe el domiciliario al cerrar.
+GRANT UPDATE (foto_public_id, foto_ts) ON entregas_domiciliario TO app_user;
+
+-- Domi-3: pasar a 'entregada' exige foto. RESTRICTIVE: se suma (AND) a
+-- cualquier otra política de UPDATE, así que vale para el domiciliario y
+-- para cualquier otro camino. Solo mira la fila NUEVA: las entregadas antes
+-- de Domi-3 no se actualizan nunca más (una cerrada no pasa el USING de
+-- entrega_domiciliario_cerrar).
+DROP POLICY IF EXISTS entrega_entregada_con_foto ON entregas_domiciliario;
+CREATE POLICY entrega_entregada_con_foto ON entregas_domiciliario AS RESTRICTIVE FOR UPDATE TO app_user
+  USING (true)
+  WITH CHECK (estado <> 'entregada' OR foto_public_id IS NOT NULL);
 
 -- El vendedor necesita ver a los domiciliarios ACTIVOS de la bodega que lo
 -- atiende (solo vínculo activo). Solo filas de rol domiciliario. NO consulta

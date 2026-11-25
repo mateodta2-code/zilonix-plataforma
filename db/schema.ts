@@ -2489,8 +2489,18 @@ export const entregasDomiciliario = pgTable(
     motivo: text("motivo"),
     asignadaTs: timestamp("asignada_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+    // Domi-3 (foto de entrega): id PRIVADO en Cloudinary (type=authenticated,
+    // nunca una URL pública). La foto se ve solo por /api/entregas/[id]/foto,
+    // que comprueba la empresa. Las entregadas antes de Domi-3 quedan en null.
+    fotoPublicId: text("foto_public_id"),
+    fotoTs: timestamp("foto_ts", { withTimezone: true }),
   },
   (t) => ({
+    // Una foto solo existe en una entrega entregada: el vendedor (que comparte
+    // el UPDATE de columnas con el domiciliario) nunca puede pegarle una
+    // foto a una entrega abierta. Que «entregada» exija foto lo pone una
+    // política RESTRICTIVE en db/rls-setup.sql (las viejas no se tocan).
+    fotoSoloEntregada: check("entregas_domiciliario_foto_solo_entregada", sql`${t.fotoPublicId} is null or ${t.estado} = 'entregada'`),
     unicaPorPedido: uniqueIndex("entregas_domiciliario_pedido_unica").on(t.empresaId, t.marketplace, t.pedidoReferencia),
     domiciliarioIdx: index("entregas_domiciliario_miembro_idx").on(t.miembroDomiciliarioId, t.estado),
     bodegaIdx: index("entregas_domiciliario_bodega_idx").on(t.bodegaId, t.estado),

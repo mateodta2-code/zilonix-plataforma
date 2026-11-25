@@ -98,3 +98,49 @@ export async function subirACloudinary(
   }
   return { url: data.secure_url };
 }
+
+// ── Domi-3: fotos PRIVADAS (foto de entrega del domiciliario) ──
+// Una foto de entrega muestra la puerta o a quien recibe: dato personal del
+// comprador. Se sube con type=authenticated, así Cloudinary no la sirve por
+// una URL pública; solo se descarga con una petición firmada con el
+// api_secret (descargarFotoPrivada), que hace el servidor después de
+// comprobar la empresa. Sin transformación entrante: el celular ya la
+// reduce antes de enviarla.
+export async function subirFotoPrivada(buffer: Buffer | ArrayBuffer, carpeta: string, publicId: string): Promise<{ publicId: string }> {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
+  if (!cloudName || !apiKey || !apiSecret) throw new CloudinaryNoConfiguradoError();
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const firmados = { folder: carpeta, overwrite: "true", public_id: publicId, timestamp, type: "authenticated" };
+  const form = new FormData();
+  form.append("file", new Blob([buffer], { type: "image/jpeg" }), "entrega.jpg");
+  for (const [k, v] of Object.entries(firmados)) form.append(k, String(v));
+  form.append("api_key", apiKey);
+  form.append("signature", firmarCloudinary(firmados, apiSecret));
+
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: "POST", body: form });
+  const data = (await res.json().catch(() => null)) as { public_id?: string; type?: string; error?: { message?: string } } | null;
+  if (!res.ok || !data?.public_id) throw new CloudinaryRechazoError(res.status, data?.error?.message ?? null);
+  // Si por algún motivo quedó pública, no se acepta en silencio.
+  if (data.type !== "authenticated") throw new CloudinaryRechazoError(res.status, "la foto no quedó privada");
+  return { publicId: data.public_id };
+}
+
+// Endpoint de descarga de un recurso privado («private download URL» de
+// Cloudinary): parámetros firmados igual que la subida, con vencimiento corto.
+// Lo usa solo el servidor; la URL nunca llega al navegador.
+export async function descargarFotoPrivada(publicId: string): Promise<{ bytes: ArrayBuffer; contentType: string }> {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
+  if (!cloudName || !apiKey || !apiSecret) throw new CloudinaryNoConfiguradoError();
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const firmados = { expires_at: timestamp + 60, format: "jpg", public_id: publicId, timestamp, type: "authenticated" };
+  const params = new URLSearchParams({ ...Object.fromEntries(Object.entries(firmados).map(([k, v]) => [k, String(v)])), api_key: apiKey, signature: firmarCloudinary(firmados, apiSecret) });
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/download?${params}`, { cache: "no-store" });
+  if (!res.ok) throw new CloudinaryRechazoError(res.status, null);
+  return { bytes: await res.arrayBuffer(), contentType: res.headers.get("content-type") ?? "image/jpeg" };
+}

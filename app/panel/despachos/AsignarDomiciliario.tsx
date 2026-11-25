@@ -10,6 +10,8 @@ import styles from "./page.module.css";
 
 type Domiciliario = { miembroId: string; bodegaNombre: string; nombre: string };
 type EntregaAsignada = {
+  id: string;
+  tieneFoto?: boolean;
   estado: string;
   motivo?: string | null;
   miembroDomiciliarioId: string;
@@ -66,6 +68,15 @@ export function AsignarDomiciliario({ pedidoReferencia, domiciliarios, entrega }
         {entrega ? (
           <p className={styles.notaDespachado}>
             Domiciliario: <strong>{entrega.domiciliarioNombre}</strong> — {entrega.estado === "asignada" ? "asignada" : entrega.estado === "en_camino" ? "en camino" : entrega.estado === "entregada" ? "entregada" : "no entregada"}.{entrega.estado === "no_entregada" && entrega.motivo ? ` Motivo: ${entrega.motivo}.` : ""}
+            {/* Domi-3: la foto es privada; la ruta comprueba la empresa antes de mostrarla. */}
+            {entrega.estado === "entregada" && entrega.tieneFoto && (
+              <>
+                {" "}
+                <a href={`/api/entregas/${entrega.id}/foto`} target="_blank" rel="noopener noreferrer">
+                  Ver foto de la entrega
+                </a>
+              </>
+            )}
           </p>
         ) : (
           <p className={styles.notaDespachado}>Entrega local sin domiciliario.</p>

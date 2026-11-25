@@ -9,7 +9,7 @@ import { crearDosEmpresas } from "./test-utils/aislamiento";
 import { aceptarInvitacionBodega, crearInvitacionBodega } from "../lib/bodega/invitaciones";
 import { listarMiembros, cambiarActivoDeMiembro } from "../lib/bodega/miembros";
 import { cambiarEstadoVinculo, crearBodega, invitarAdminBodega, ligarEmpresaABodega } from "../lib/superadmin-bodegas";
-import { asignarEntrega, cambiarEstadoMiEntrega, EntregaInvalidaError, listarDomiciliariosAsignables, listarEntregasDePedidos, listarMisEntregas, quitarEntrega } from "../lib/entregas/entregas";
+import { asignarEntrega, cambiarEstadoMiEntrega, EntregaInvalidaError, fotoDeEntrega, listarDomiciliariosAsignables, listarEntregasDePedidos, listarMisEntregas, miEntregaAbierta, quitarEntrega } from "../lib/entregas/entregas";
 
 // Issue #627 (Domi-1) — contra Postgres real. Pruebas A/B propias (no
 // afirmarAislamiento: app_user no tiene todos los UPDATE/DELETE). Un UPDATE
@@ -33,6 +33,9 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
 
   const datos = { receptorNombre: "Ana Prueba", direccion: "Calle 1 # 2-3", barrio: "Centro", ciudad: "Medellín", telefono: "3001234567", nota: "Timbre" };
   const pedido = (n: string) => `P-${sufijo}-${n}`;
+  // Domi-3: «entregada» exige foto. En la base solo se guarda el id privado de
+  // Cloudinary; acá no se sube nada.
+  const FOTO = `zilonix-entregas/prueba/${sufijo}`;
 
   async function usuario(id: string, extra: Partial<typeof usuarios.$inferInsert> = {}) {
     await db.insert(usuarios).values({ id, email: `entregas-${id.slice(0, 8)}@zilonix.test`, nombre: `Persona ${id.slice(0, 4)}`, ...extra });
@@ -133,7 +136,7 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     const enCamino = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === abierta.id)!;
     expect(enCamino.estado).toBe("en_camino");
     expect(enCamino.direccion).toBe(datos.direccion);
-    await cambiarEstadoMiEntrega(bodegaA, dom1, abierta.id, "entregada");
+    await cambiarEstadoMiEntrega(bodegaA, dom1, abierta.id, "entregada", undefined, FOTO);
 
     // La cabecera sigue (historial), los datos del comprador ya no.
     const cerrada = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === abierta.id)!;
@@ -172,7 +175,7 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     expect(vistas1.map((e) => e.ref)).toContain(pedido("5"));
     expect(vistas1.map((e) => e.ref)).not.toContain(pedido("6"));
     const cerrada = (await listarMisEntregas(bodegaA, dom2)).find((e) => e.pedidoReferencia === pedido("6"))!;
-    await cambiarEstadoMiEntrega(bodegaA, dom2, cerrada.id, "entregada");
+    await cambiarEstadoMiEntrega(bodegaA, dom2, cerrada.id, "entregada", undefined, FOTO);
     expect((await dbComoBodega(bodegaA, todas, "domiciliario", dom1)).map((e) => e.ref)).not.toContain(pedido("6"));
     const propia = (await listarMisEntregas(bodegaA, dom2)).find((e) => e.id === cerrada.id)!;
     expect(propia.estado).toBe("entregada");
@@ -189,7 +192,7 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     const filas = await dbComoBodega(bodegaA, (tx) => tx.update(entregasDomiciliario).set({ estado: "entregada" }).where(eq(entregasDomiciliario.id, ajena.id)).returning({ id: entregasDomiciliario.id }), "domiciliario", dom1);
     expect(filas).toHaveLength(0);
     // Y por la función: no la ve, falla sin cambiar nada.
-    await expect(cambiarEstadoMiEntrega(bodegaA, dom1, ajena.id, "entregada")).rejects.toBeInstanceOf(EntregaInvalidaError);
+    await expect(cambiarEstadoMiEntrega(bodegaA, dom1, ajena.id, "entregada", undefined, FOTO)).rejects.toBeInstanceOf(EntregaInvalidaError);
     expect((await listarMisEntregas(bodegaA, dom2)).find((e) => e.id === ajena.id)!.estado).toBe("asignada");
 
     // Sin motivo (o en blanco) no se guarda.
@@ -210,6 +213,52 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     expect(JSON.stringify(rastro)).not.toContain(datos.direccion);
     const [paraVendedor] = await listarEntregasDePedidos(empresaA, "mercadolibre", [pedido("8")]);
     expect(paraVendedor).toMatchObject({ estado: "no_entregada", motivo: "No estaba" });
+  });
+
+  it("Domi-3: «Entregado» exige foto en la lib y en la base, y la foto solo existe en una entregada", async () => {
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("F1"), datos });
+    const propia = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.pedidoReferencia === pedido("F1"))!;
+
+    // Sin foto, la lib no deja.
+    await expect(cambiarEstadoMiEntrega(bodegaA, dom1, propia.id, "entregada")).rejects.toBeInstanceOf(EntregaInvalidaError);
+    // Y aunque alguien se salte la lib, la base tampoco (política RESTRICTIVE).
+    await expect(
+      dbComoBodega(bodegaA, (tx) => tx.update(entregasDomiciliario).set({ estado: "entregada" }).where(eq(entregasDomiciliario.id, propia.id)), "domiciliario", dom1)
+    ).rejects.toThrow();
+    // Ni el domiciliario ni el vendedor pueden pegarle una foto a una entrega abierta (CHECK).
+    await expect(
+      dbComoBodega(bodegaA, (tx) => tx.update(entregasDomiciliario).set({ fotoPublicId: FOTO }).where(eq(entregasDomiciliario.id, propia.id)), "domiciliario", dom1)
+    ).rejects.toThrow();
+    await expect(
+      dbComoEmpresa(empresaA, (tx) => tx.update(entregasDomiciliario).set({ fotoPublicId: FOTO }).where(eq(entregasDomiciliario.id, propia.id)))
+    ).rejects.toThrow();
+    // Nada de lo anterior cambió la entrega.
+    expect((await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === propia.id)!.estado).toBe("asignada");
+  });
+
+  it("Domi-3: miEntregaAbierta solo responde por las propias y abiertas", async () => {
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("F2"), datos });
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro2, marketplace: "mercadolibre", pedidoReferencia: pedido("F3"), datos });
+    const propia = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.pedidoReferencia === pedido("F2"))!;
+    const ajena = (await listarMisEntregas(bodegaA, dom2)).find((e) => e.pedidoReferencia === pedido("F3"))!;
+    await expect(miEntregaAbierta(bodegaA, dom1, propia.id)).resolves.toEqual({ empresaId: empresaA });
+    await expect(miEntregaAbierta(bodegaA, dom1, ajena.id)).rejects.toBeInstanceOf(EntregaInvalidaError);
+    await cambiarEstadoMiEntrega(bodegaA, dom1, propia.id, "entregada", undefined, FOTO);
+    await expect(miEntregaAbierta(bodegaA, dom1, propia.id)).rejects.toBeInstanceOf(EntregaInvalidaError);
+  });
+
+  it("Domi-3: el vendedor ve que hay foto y su id; otra empresa no", async () => {
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("F4"), datos });
+    const propia = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.pedidoReferencia === pedido("F4"))!;
+    const [antes] = await listarEntregasDePedidos(empresaA, "mercadolibre", [pedido("F4")]);
+    expect(antes.tieneFoto).toBe(false);
+    await expect(fotoDeEntrega(empresaA, propia.id)).resolves.toBeNull();
+
+    await cambiarEstadoMiEntrega(bodegaA, dom1, propia.id, "entregada", undefined, FOTO);
+    const [despues] = await listarEntregasDePedidos(empresaA, "mercadolibre", [pedido("F4")]);
+    expect(despues.tieneFoto).toBe(true);
+    await expect(fotoDeEntrega(empresaA, propia.id)).resolves.toBe(FOTO);
+    await expect(fotoDeEntrega(empresaB, propia.id)).resolves.toBeNull();
   });
 
   it("una sesión de bodega sin rol no ve ninguna entrega", async () => {
