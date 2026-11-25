@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, notInArray, sql } from "drizzle-orm";
 import { dbTrabajador } from "@/db/trabajador-context";
 import { avisosMl, cuentasMl } from "@/db/schema";
 import { dbComoEmpresa } from "@/db/empresa-context";
@@ -10,6 +10,15 @@ import type { OrdenMl } from "@/lib/finanzas/venta-ml";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
 
 const TAMAÑO_LOTE = 50;
+// 25-nov: el cron de GitHub dice «cada minuto» pero en staging corre cada
+// 5-10 h (GitHub lo frena), y a 50 avisos por vuelta la cola nunca bajaba.
+// Cada llamada sigue tomando lotes hasta este presupuesto; el workflow
+// corta el curl a los 60 s, así que queda margen para responder.
+const PRESUPUESTO_LLAMADA_MS = 40_000;
+// Avisos que NO son de venta solo se «confirman» contra ML (no cambian
+// ningún dato, ver confirmarRecursoReal): pasado un día ya no aportan
+// nada y solo engordan la cola. Se omiten en bloque al empezar.
+const HORAS_AVISO_SIN_VENTA_VIEJO = 24;
 const REINTENTOS_429 = 4;
 const ESPERA_BASE_429_MS = 1_000;
 // Issue "ventas nuevas en segundos" (Refs #49) — rate limiting real:
@@ -51,6 +60,9 @@ export type ResultadoTrabajador = {
   // desconectó, se borró o pasó a otra empresa): nunca se van a poder
   // procesar, así que se marcan procesados en vez de reintentarse.
   omitidosSinCuenta: number;
+  // Avisos que no son de venta con más de HORAS_AVISO_SIN_VENTA_VIEJO h.
+  omitidosViejos: number;
+  lotes: number;
 };
 
 // La cuenta del aviso ya no está conectada a su empresa — fallo permanente.
@@ -86,62 +98,92 @@ export type ResultadoProcesoInline = "procesado" | "pendiente" | "omitido";
 // datos de negocio — solo en la RUTA que trae, para pedirle a Mercado
 // Libre el dato real; eso es justo lo que ya hacía esta función desde
 // la tarea 2.4, nunca cambió.
-export async function procesarAvisosPendientes(esperar: Esperar = esperarDeVerdad): Promise<ResultadoTrabajador> {
-  const pendientes = await dbTrabajador
-    .select()
-    .from(avisosMl)
-    .where(isNull(avisosMl.procesadoTs))
-    // Orden aleatorio (25-nov): sin orden, Postgres devolvía siempre las
-    // mismas filas y 50 que fallaban tapaban toda la cola. Tampoco sirve
-    // «el más viejo primero»: los que fallan por un motivo pasajero (p.
-    // ej. 403 de ML, visto en staging) se quedarían siempre al frente.
-    // Al azar, ningún grupo que falla puede trabar a los demás. El orden
-    // no cambia el resultado: cada aviso le pide a ML el dato actual.
-    .orderBy(sql`random()`)
-    .limit(TAMAÑO_LOTE);
+export async function procesarAvisosPendientes(esperar: Esperar = esperarDeVerdad, presupuestoMs: number = PRESUPUESTO_LLAMADA_MS): Promise<ResultadoTrabajador> {
+  const limite = Date.now() + presupuestoMs;
 
+  // 1) Los avisos viejos que no son de venta se omiten de una vez.
+  const viejos = await dbTrabajador
+    .update(avisosMl)
+    .set({ procesadoTs: new Date() })
+    .where(
+      and(
+        isNull(avisosMl.procesadoTs),
+        notInArray(avisosMl.topic, [...TOPICS_VENTA]),
+        lt(avisosMl.recibidoTs, new Date(Date.now() - HORAS_AVISO_SIN_VENTA_VIEJO * 3600_000))
+      )
+    )
+    .returning({ id: avisosMl.id });
+  const omitidosViejos = viejos.length;
+
+  let recibidosPendientes = 0;
   let procesados = 0;
   let fallidos = 0;
   let omitidosSuspendida = 0;
   let omitidosSinCuenta = 0;
+  let lotes = 0;
+  // Los que fallan en esta llamada no se vuelven a tomar en el lote siguiente.
+  const intentados: string[] = [];
 
-  for (let i = 0; i < pendientes.length; i++) {
-    const aviso = pendientes[i];
-    try {
+  // 2) Lotes hasta vaciar la cola o agotar el presupuesto de la llamada.
+  while (Date.now() < limite) {
+    const pendientes = await dbTrabajador
+      .select()
+      .from(avisosMl)
+      .where(intentados.length > 0 ? and(isNull(avisosMl.procesadoTs), notInArray(avisosMl.id, intentados)) : isNull(avisosMl.procesadoTs))
+      // Orden aleatorio (25-nov): sin orden, Postgres devolvía siempre las
+      // mismas filas y 50 que fallaban tapaban toda la cola. Tampoco sirve
+      // «el más viejo primero»: los que fallan por un motivo pasajero (p.
+      // ej. 403 de ML, visto en staging) se quedarían siempre al frente.
+      // Al azar, ningún grupo que falla puede trabar a los demás. El orden
+      // no cambia el resultado: cada aviso le pide a ML el dato actual.
+      .orderBy(sql`random()`)
+      .limit(TAMAÑO_LOTE);
+    if (pendientes.length === 0) break;
+    lotes += 1;
+    recibidosPendientes += pendientes.length;
+
+    for (let i = 0; i < pendientes.length; i++) {
+      if (Date.now() >= limite) break;
+      const aviso = pendientes[i];
+      intentados.push(aviso.id);
       try {
-        await procesarUnAviso(aviso, esperar);
-      } catch (error) {
-        const motivo = motivoOmision(error);
-        if (!motivo) throw error;
+        try {
+          await procesarUnAviso(aviso, esperar);
+        } catch (error) {
+          const motivo = motivoOmision(error);
+          if (!motivo) throw error;
+          await dbTrabajador
+            .update(avisosMl)
+            .set({ procesadoTs: new Date() })
+            .where(and(eq(avisosMl.id, aviso.id), isNull(avisosMl.procesadoTs)));
+          if (motivo === "suspendida") omitidosSuspendida += 1;
+          else omitidosSinCuenta += 1;
+          continue;
+        }
         await dbTrabajador
           .update(avisosMl)
           .set({ procesadoTs: new Date() })
           .where(and(eq(avisosMl.id, aviso.id), isNull(avisosMl.procesadoTs)));
-        if (motivo === "suspendida") omitidosSuspendida += 1;
-        else omitidosSinCuenta += 1;
-        continue;
+        procesados += 1;
+      } catch (error) {
+        // Un aviso que falla (cuenta sin token vigente, orden borrada en
+        // ML, error de red) no debe tumbar el lote entero — se deja
+        // pendiente (procesado_ts sigue null) para que la próxima llamada
+        // del trabajador lo reintente. La sincronización de cada hora
+        // (lib/finanzas/traer-ventas-mes.ts) queda como respaldo de
+        // todas formas, aunque esto se quedara pendiente para siempre.
+        fallidos += 1;
+        console.error(`Aviso ${aviso.id} (${aviso.topic}) no se pudo procesar:`, error instanceof Error ? error.message : error);
       }
-      await dbTrabajador
-        .update(avisosMl)
-        .set({ procesadoTs: new Date() })
-        .where(and(eq(avisosMl.id, aviso.id), isNull(avisosMl.procesadoTs)));
-      procesados += 1;
-    } catch (error) {
-      // Un aviso que falla (cuenta sin token vigente, orden borrada en
-      // ML, error de red) no debe tumbar el lote entero — se deja
-      // pendiente (procesado_ts sigue null) para que el próximo paso
-      // del trabajador lo reintente. La sincronización de cada hora
-      // (lib/finanzas/traer-ventas-mes.ts) queda como respaldo de
-      // todas formas, aunque esto se quedara pendiente para siempre.
-      fallidos += 1;
-      console.error(`Aviso ${aviso.id} (${aviso.topic}) no se pudo procesar:`, error instanceof Error ? error.message : error);
+      if (i < pendientes.length - 1) await esperar(PAUSA_ENTRE_AVISOS_MS);
     }
-    if (i < pendientes.length - 1) await esperar(PAUSA_ENTRE_AVISOS_MS);
   }
 
+  if (omitidosViejos > 0) console.warn(`[lib/ml/trabajador] ${omitidosViejos} aviso(s) omitidos: no son de venta y tienen más de ${HORAS_AVISO_SIN_VENTA_VIEJO} h.`);
   if (omitidosSuspendida > 0) console.warn(`[lib/ml/trabajador] ${omitidosSuspendida} aviso(s) omitidos: empresa suspendida.`);
   if (omitidosSinCuenta > 0) console.warn(`[lib/ml/trabajador] ${omitidosSinCuenta} aviso(s) omitidos: la cuenta ya no está conectada.`);
-  return { recibidosPendientes: pendientes.length, procesados, fallidos, omitidosSuspendida, omitidosSinCuenta };
+  console.log(`[lib/ml/trabajador] llamada: ${lotes} lote(s), ${procesados} procesados, ${fallidos} con error.`);
+  return { recibidosPendientes, procesados, fallidos, omitidosSuspendida, omitidosSinCuenta, omitidosViejos, lotes };
 }
 
 async function resolverCuentaYToken(aviso: typeof avisosMl.$inferSelect): Promise<{ cuentaId: string; accessToken: string }> {
@@ -281,7 +323,10 @@ export async function intentarProcesarAvisoAhora(avisoId: string, timeoutMs: num
 // ver el comentario junto a TOPICS_VENTA.
 async function confirmarRecursoReal(resource: string, accessToken: string): Promise<void> {
   const resp = await pedirLecturaMl<unknown>(resource, accessToken);
-  if (!resp.ok && resp.status !== 404) {
+  // 400 cuenta como 404 (25-nov, logs de staging): avisos de promociones
+  // (/seller-promotions/offers|candidates/…) vencidas responden 400 y se
+  // reintentaban para siempre. No es de venta: no hay dato que perder.
+  if (!resp.ok && resp.status !== 404 && resp.status !== 400) {
     throw new Error(`Mercado Libre respondió ${resp.status} al consultar ${resource}.`);
   }
 }
