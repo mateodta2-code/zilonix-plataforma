@@ -35,6 +35,7 @@ import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { listarDomiciliariosAsignables, listarEntregasDePedidos } from "@/lib/entregas/entregas";
+import { listarNovedadesDeEntregas } from "@/lib/entregas/novedades";
 import { listarBodegasQueAtiendenEmpresa } from "@/lib/bodega/empresas";
 import { listarDespachosBodegaDePedidos } from "@/lib/bodega/despachos";
 import { AsignarDomiciliario } from "./AsignarDomiciliario";
@@ -149,6 +150,8 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
     ? await Promise.all([listarDomiciliariosAsignables(empresa.id), listarEntregasDePedidos(empresa.id, "mercadolibre", refsLocales)])
     : [[], []];
   const entregaPorPedido = new Map(entregasAsignadas.map((e) => [e.pedidoReferencia, e]));
+  // Domi-4 — novedades que reportó el domiciliario en esas entregas.
+  const novedades = await listarNovedadesDeEntregas(empresa.id, entregasAsignadas.map((e) => e.id));
   // Issue #628 — pedidos de Pendientes que ya se enviaron a la bodega 3PL y si
   // ya los preparó. Solo se consulta si la empresa tiene una bodega ligada y activa.
   const tieneBodega = pestañaFiltro === "pendientes" && (await listarBodegasQueAtiendenEmpresa(empresa.id)).some((b) => b.estado === "activa");
@@ -303,6 +306,7 @@ export default async function DespachosPage({ searchParams }: { searchParams: Re
                         pedidoReferencia={d.pedidoIdExterno}
                         domiciliarios={domiciliarios}
                         entrega={entregaPorPedido.get(d.pedidoIdExterno) ?? null}
+                        novedades={novedades.filter((n) => n.entregaId === entregaPorPedido.get(d.pedidoIdExterno)?.id)}
                       />
                     )}
                     </div>

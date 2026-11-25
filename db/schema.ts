@@ -2507,6 +2507,34 @@ export const entregasDomiciliario = pgTable(
   })
 );
 
+// Domi-4 (migración 0049) — novedades que el domiciliario reporta SIN cerrar
+// la entrega (voy tarde, el cliente pide reprogramar, no contesta, paquete
+// dañado, otro). Solo se agregan: nadie las edita ni las borra (historial).
+// La foto es opcional y privada, igual que la de entrega (Domi-3). Quién
+// puede crearlas y verlas: db/rls-setup.sql.
+export const tipoNovedadEntregaEnum = pgEnum("tipo_novedad_entrega", ["voy_tarde", "reprogramar", "no_contesta", "paquete_danado", "otro"]);
+
+export const entregasNovedades = pgTable(
+  "entregas_novedades",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    entregaId: uuid("entrega_id").notNull().references(() => entregasDomiciliario.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    tipo: tipoNovedadEntregaEnum("tipo").notNull(),
+    detalle: text("detalle"),
+    fotoPublicId: text("foto_public_id"),
+    creadaTs: timestamp("creada_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    porEntrega: index("entregas_novedades_entrega_idx").on(t.entregaId, t.creadaTs),
+    porEmpresa: index("entregas_novedades_empresa_idx").on(t.empresaId),
+    // «Otro» exige explicar qué pasó; el detalle nunca pasa de 200.
+    detalleValido: check("entregas_novedades_detalle_valido", sql`(${t.tipo} <> 'otro' or length(trim(coalesce(${t.detalle}, ''))) > 0) and length(coalesce(${t.detalle}, '')) <= 200`),
+  })
+);
+
 // Datos de quien recibe, en tabla aparte: el domiciliario necesita ver SU
 // cabecera en cualquier estado (para cerrarla y tener historial), pero estos
 // datos solo mientras la entrega esté abierta. Esa regla vive en la política

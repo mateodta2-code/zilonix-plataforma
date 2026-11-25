@@ -149,9 +149,6 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/posventa/mensajes/acciones.ts",
   "app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/accionesMensaje.ts",
   "app/api/ml/mensajes/[cuentaId]/adjuntos/[archivo]/route.ts",
-  // Domi-3: foto de entrega para el vendedor — ventas.consultar y la entrega
-  // se busca con RLS de la empresa activa.
-  "app/api/entregas/[entregaId]/foto/route.ts",
   // Posventa-0 (Refs #647): marco y lista de reclamos, solo lectura —
   // piden ventas.consultar (layout y página) y validan la cuenta por empresa.
   "app/panel/posventa/page.tsx",
@@ -339,6 +336,10 @@ const RUTAS_BODEGA = new Set([
 // Rutas exentas, cada una con el motivo real por el que no necesita
 // preguntar "¿puede [acción] en [módulo]?".
 const RUTAS_EXENTAS: Record<string, string> = {
+  "app/api/entregas/[entregaId]/foto/route.ts":
+    "el permiso real (requierePermiso('ventas','consultar')) vive en responderFotoDeEmpresa (lib/entregas/responderFoto.ts), llamado ANTES de buscar la foto con RLS de la empresa (Domi-3)",
+  "app/api/entregas/novedades/[novedadId]/foto/route.ts":
+    "el permiso real (requierePermiso('ventas','consultar')) vive en responderFotoDeEmpresa (lib/entregas/responderFoto.ts), llamado ANTES de buscar la foto con RLS de la empresa (Domi-4)",
   "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/page.tsx": "solo redirige los enlaces viejos a /panel/posventa/reclamos/... (que sí exige sesión y ventas.consultar); no lee ningún dato",
   "app/page.tsx": "solo lista las empresas propias del usuario para decidir a dónde mandarlo, no lee datos de negocio de ninguna empresa",
   "app/panel/actions.ts": "cambiar la empresa activa ya se revalida contra las membresías reales del usuario, no es un permiso por módulo",
