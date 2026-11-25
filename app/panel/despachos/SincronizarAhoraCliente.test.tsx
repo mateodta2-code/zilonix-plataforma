@@ -36,4 +36,17 @@ describe("SincronizarAhoraCliente", () => {
     expect(await screen.findByText("No hay cuentas de Mercado Libre conectadas para sincronizar.")).not.toBeNull();
     expect(refresh).not.toHaveBeenCalled();
   });
+
+  it("mientras corre: banda animada (sin progressbar) y botón deshabilitado; al terminar, completa con el resumen", async () => {
+    let resolver!: (v: unknown) => void;
+    sincronizarAhoraActionMock.mockReturnValue(new Promise((r) => (resolver = r)));
+    render(<SincronizarAhoraCliente />);
+    fireEvent.click(screen.getByText("Sincronizar ahora"));
+    expect(await screen.findByText("Sincronizando ventas de Mercado Libre…")).not.toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect((screen.getByRole("button", { name: "Sincronizando…" }) as HTMLButtonElement).disabled).toBe(true);
+    resolver({ ok: true, resumen: "CUENTA: 2 de 2 ventas guardadas." });
+    expect(await screen.findByText("CUENTA: 2 de 2 ventas guardadas.")).not.toBeNull();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("100");
+  });
 });
