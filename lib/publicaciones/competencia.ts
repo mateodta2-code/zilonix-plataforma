@@ -34,6 +34,17 @@ export function idCompetenciaDesdeLink(urlCruda: string, siteId: string): IdComp
   return null;
 }
 
+// Link corto de «Compartir» de la app (meli.la): para leerlo habría que
+// seguir su redirección desde el servidor, y eso no es la API oficial
+// (regla del repo). Se reconoce para dar un aviso útil.
+export function esLinkCortoMl(urlCruda: string): boolean {
+  try {
+    return /(^|\.)meli\.la$/i.test(new URL(urlCruda.trim()).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export const LARGO_TITULO_COMPETENCIA = 200;
 
 export function limpiarTituloCompetencia(v: unknown): string {
