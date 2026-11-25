@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { leerPrecioEscrito, simularPrecio, textoSimulacion, type BaseSimulacion } from "@/lib/optimizacion/simulador";
 import { GaleriaFotos } from "../../publicar/GaleriaFotos";
@@ -47,6 +48,8 @@ function AvisoLinea({ aviso }: { aviso: Aviso }) {
 export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
   const router = useRouter();
   const [enviando, iniciar] = useTransition();
+  // Qué se está guardando, para el título de la barra.
+  const [guardando, setGuardando] = useState<"precio" | "título" | "fotos">("precio");
   const plata = (v: string | number | null) => (v === null ? "—" : formatearMoneda(Number(v), datos.siteId));
 
   // Precio + simulador.
@@ -67,7 +70,8 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
   const [avisoFotos, setAvisoFotos] = useState<Aviso>(null);
   const idPorUrl = new Map(datos.fotos.map((f) => [f.url, f.id]));
 
-  function guardar(accion: () => Promise<{ ok: boolean; aviso: string }>, setAviso: (a: Aviso) => void) {
+  function guardar(que: "precio" | "título" | "fotos", accion: () => Promise<{ ok: boolean; aviso: string }>, setAviso: (a: Aviso) => void) {
+    setGuardando(que);
     iniciar(async () => {
       const r = await accion();
       setAviso({ ok: r.ok, texto: r.aviso });
@@ -77,6 +81,14 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
 
   return (
     <div className={styles.edicion}>
+      <BarraCarga
+        sticky={false}
+        estado={enviando ? "cargando" : "inactiva"}
+        titulo={
+          guardando === "fotos" ? "Guardando fotos en Mercado Libre…" : guardando === "título" ? "Guardando el título en Mercado Libre…" : "Guardando el precio en Mercado Libre…"
+        }
+        ariaLabel="Progreso del guardado"
+      />
       <section className={styles.bloqueEdicion} aria-label="Precio">
         <p className={styles.seccion}>Precio</p>
         {datos.promocion && !precioBloqueado ? (
@@ -101,7 +113,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
             className={styles.buscador}
             onSubmit={(e) => {
               e.preventDefault();
-              guardar(() => editarPrecioAction({ cuentaMlId: datos.cuentaMlId, itemId: datos.itemId, precio: precioTexto }), setAvisoPrecio);
+              guardar("precio", () => editarPrecioAction({ cuentaMlId: datos.cuentaMlId, itemId: datos.itemId, precio: precioTexto }), setAvisoPrecio);
             }}
           >
             <input className="zx-control" inputMode="decimal" value={precioTexto} onChange={(e) => setPrecioTexto(e.target.value)} aria-label="Precio nuevo" />
@@ -138,7 +150,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
               className={styles.buscador}
               onSubmit={(e) => {
                 e.preventDefault();
-                guardar(() => editarTituloAction({ cuentaMlId: datos.cuentaMlId, itemId: datos.itemId, titulo }), setAvisoTitulo);
+                guardar("título", () => editarTituloAction({ cuentaMlId: datos.cuentaMlId, itemId: datos.itemId, titulo }), setAvisoTitulo);
               }}
             >
               <input className="zx-control" value={titulo} maxLength={100} onChange={(e) => setTitulo(e.target.value)} aria-label="Título nuevo" />
@@ -172,6 +184,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
           disabled={enviando || fotos.length === 0}
           onClick={() =>
             guardar(
+              "fotos",
               () =>
                 editarFotosAction({
                   cuentaMlId: datos.cuentaMlId,
