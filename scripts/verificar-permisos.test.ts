@@ -367,6 +367,13 @@ const RUTAS_EXENTAS: Record<string, string> = {
   // (lib/foro.ts) en cada escritura, siempre con el usuario de la sesión.
   "app/panel/foro/page.tsx": "foro compartido entre empresas, sin datos de negocio — el candado es obtenerContextoPanel() (exige tener una empresa)",
   "app/panel/foro/[preguntaId]/page.tsx": "idem",
+  // Issue #623 — tickets de soporte: los abre y lee cualquier miembro de
+  // la empresa activa (no hay módulo "tickets" en los roles). El candado
+  // es obtenerContextoPanel() + requiereMiembroActivo (lib/soporte/tickets.ts)
+  // y la RLS por empresa_id de tickets_soporte.
+  "app/panel/tickets/page.tsx": "tickets de la empresa activa para cualquier miembro — candado: obtenerContextoPanel() + RLS por empresa",
+  "app/panel/tickets/[ticketId]/page.tsx": "idem — un ticket de otra empresa da 404 por la RLS",
+  "app/panel/tickets/actions.ts": "idem — empresa y usuario salen de la sesión; lib/soporte/tickets.ts exige membresía en cada escritura",
   "app/panel/foro/actions.ts": "idem — cada escritura pasa por requiereMiembroDeAlgunaEmpresa (lib/foro.ts) con el usuario de la sesión",
   "app/api/foro/imagen/route.ts":
     "sube la imagen adjunta del foro (compartido entre empresas, sin datos de negocio) — el candado es requiereMiembroDeAlgunaEmpresa con el usuario de la sesión, más chequeo de origen y freno por usuario",

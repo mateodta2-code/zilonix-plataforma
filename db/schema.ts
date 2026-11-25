@@ -2226,6 +2226,54 @@ export const foroRespuestas = pgTable(
   })
 );
 
+// Issue #623 (SA-Soporte, migración 0043) — tickets de soporte: el
+// vendedor abre uno desde /panel/tickets y el superadmin lo atiende
+// (parte 2). La empresa solo ve sus tickets (RLS por empresa_id). El
+// superadmin ve el ticket y su conversación, nada más de la empresa
+// (D8): lo que ve es lo que el vendedor escribió a propósito.
+// app_user solo inserta y lee; el estado lo cambia únicamente
+// superadmin_user (db/rls-setup.sql).
+export const estadoTicketSoporteEnum = pgEnum("estado_ticket_soporte", ["abierto", "en_curso", "resuelto"]);
+
+export const ticketsSoporte = pgTable(
+  "tickets_soporte",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    creadoPor: uuid("creado_por").notNull().references(() => usuarios.id),
+    asunto: text("asunto").notNull(),
+    mensaje: text("mensaje").notNull(),
+    // Parte de Zilonix a la que se refiere (lista cerrada en
+    // lib/soporte/validacion.ts); texto y no enum para poder sumar
+    // módulos sin otra migración.
+    modulo: text("modulo").notNull(),
+    estado: estadoTicketSoporteEnum("estado").notNull().default("abierto"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    empresaIdx: index("tickets_soporte_empresa_idx").on(t.empresaId, t.actualizadoTs),
+    estadoIdx: index("tickets_soporte_estado_idx").on(t.estado, t.actualizadoTs),
+  })
+);
+
+// Sin empresa_id a propósito (columnas del issue): la RLS se apoya en
+// el ticket al que pertenece el mensaje.
+export const mensajesTicketSoporte = pgTable(
+  "mensajes_ticket_soporte",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ticketId: uuid("ticket_id").notNull().references(() => ticketsSoporte.id, { onDelete: "cascade" }),
+    autorUsuarioId: uuid("autor_usuario_id").notNull().references(() => usuarios.id),
+    esSuperadmin: boolean("es_superadmin").notNull().default(false),
+    mensaje: text("mensaje").notNull(),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    ticketIdx: index("mensajes_ticket_soporte_ticket_idx").on(t.ticketId, t.creadoTs),
+  })
+);
+
 // PR login-bodega-domiciliario — identidad y membresía de BODEGAS 3PL
 // (operador logístico) y sus domiciliarios. NO es `empresas` ni
 // `bodegas` (esa es la bodega propia de un vendedor dentro de Productos):
