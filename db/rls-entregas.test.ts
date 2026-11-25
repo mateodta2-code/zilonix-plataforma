@@ -4,11 +4,12 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoBodega } from "./bodega-context";
 import { dbComoEmpresa } from "./empresa-context";
 import { db } from "./index";
-import { auditoria, entregasDomiciliario, entregasDomiciliarioContacto, usuarios } from "./schema";
+import { auditoria, entregasDomiciliario, entregasDomiciliarioContacto, entregasNovedades, usuarios } from "./schema";
 import { crearDosEmpresas } from "./test-utils/aislamiento";
 import { aceptarInvitacionBodega, crearInvitacionBodega } from "../lib/bodega/invitaciones";
 import { listarMiembros, cambiarActivoDeMiembro } from "../lib/bodega/miembros";
 import { cambiarEstadoVinculo, crearBodega, invitarAdminBodega, ligarEmpresaABodega } from "../lib/superadmin-bodegas";
+import { fotoDeNovedad, listarMisNovedades, listarNovedadesDeEntregas, reportarNovedad } from "../lib/entregas/novedades";
 import { asignarEntrega, cambiarEstadoMiEntrega, EntregaInvalidaError, fotoDeEntrega, listarDomiciliariosAsignables, listarEntregasDePedidos, listarMisEntregas, miEntregaAbierta, quitarEntrega } from "../lib/entregas/entregas";
 
 // Issue #627 (Domi-1) — contra Postgres real. Pruebas A/B propias (no
@@ -259,6 +260,69 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     expect(despues.tieneFoto).toBe(true);
     await expect(fotoDeEntrega(empresaA, propia.id)).resolves.toBe(FOTO);
     await expect(fotoDeEntrega(empresaB, propia.id)).resolves.toBeNull();
+  });
+
+  it("Domi-4: el domiciliario reporta novedades de SU entrega abierta; la empresa y su bodega las ven, otra empresa no", async () => {
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("N1"), datos });
+    const propia = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.pedidoReferencia === pedido("N1"))!;
+    const novedadId = randomUUID();
+    await reportarNovedad(bodegaA, dom1, { novedadId, entregaId: propia.id, tipo: "voy_tarde", detalle: " 10 min ", fotoPublicId: FOTO });
+    await reportarNovedad(bodegaA, dom1, { novedadId: randomUUID(), entregaId: propia.id, tipo: "otro", detalle: "La moto se varó" });
+
+    const paraVendedor = await listarNovedadesDeEntregas(empresaA, [propia.id]);
+    expect(paraVendedor.map((n) => [n.tipo, n.detalle, n.tieneFoto])).toEqual([["voy_tarde", "10 min", true], ["otro", "La moto se varó", false]]);
+    await expect(listarNovedadesDeEntregas(empresaB, [propia.id])).resolves.toEqual([]);
+    await expect(fotoDeNovedad(empresaA, novedadId)).resolves.toBe(FOTO);
+    await expect(fotoDeNovedad(empresaB, novedadId)).resolves.toBeNull();
+    // La entrega sigue abierta.
+    expect((await listarMisEntregas(bodegaA, dom1)).find((e) => e.id === propia.id)!.estado).toBe("asignada");
+    // El domiciliario las ve; otro domiciliario de la misma bodega no.
+    expect((await listarMisNovedades(bodegaA, dom1)).filter((n) => n.entregaId === propia.id)).toHaveLength(2);
+    expect((await listarMisNovedades(bodegaA, dom2)).filter((n) => n.entregaId === propia.id)).toHaveLength(0);
+    // La bodega (admin) ve las de su bodega.
+    const deBodega = await dbComoBodega(bodegaA, (tx) => tx.select().from(entregasNovedades).where(eq(entregasNovedades.entregaId, propia.id)), "admin_bodega", adminAId);
+    expect(deBodega).toHaveLength(2);
+    // Queda en auditoría con la empresa.
+    const rastro = await dbComoEmpresa(empresaA, (tx) => tx.select().from(auditoria).where(eq(auditoria.entidadId, propia.id)));
+    expect(rastro.filter((a) => a.accion === "entrega_novedad")).toHaveLength(2);
+  });
+
+  it("Domi-4: nadie reporta en la entrega de otro ni en una cerrada, nadie las edita ni las borra", async () => {
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("N2"), datos });
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro2, marketplace: "mercadolibre", pedidoReferencia: pedido("N3"), datos });
+    const propia = (await listarMisEntregas(bodegaA, dom1)).find((e) => e.pedidoReferencia === pedido("N2"))!;
+    const ajena = (await listarMisEntregas(bodegaA, dom2)).find((e) => e.pedidoReferencia === pedido("N3"))!;
+
+    // Entrega de otro: ni por la lib ni con un INSERT directo.
+    await expect(reportarNovedad(bodegaA, dom1, { novedadId: randomUUID(), entregaId: ajena.id, tipo: "voy_tarde", detalle: "" })).rejects.toBeInstanceOf(EntregaInvalidaError);
+    await expect(
+      dbComoBodega(bodegaA, (tx) => tx.insert(entregasNovedades).values({ entregaId: ajena.id, empresaId: empresaA, bodegaId: bodegaA, usuarioId: dom1, tipo: "voy_tarde" }), "domiciliario", dom1)
+    ).rejects.toThrow();
+    // A nombre de otro usuario, tampoco.
+    await expect(
+      dbComoBodega(bodegaA, (tx) => tx.insert(entregasNovedades).values({ entregaId: propia.id, empresaId: empresaA, bodegaId: bodegaA, usuarioId: dom2, tipo: "voy_tarde" }), "domiciliario", dom1)
+    ).rejects.toThrow();
+    // El vendedor no crea novedades.
+    await expect(
+      dbComoEmpresa(empresaA, (tx) => tx.insert(entregasNovedades).values({ entregaId: propia.id, empresaId: empresaA, bodegaId: bodegaA, usuarioId: usuarioA, tipo: "voy_tarde" }))
+    ).rejects.toThrow();
+    // «Otro» sin detalle: la lib y el CHECK de la base lo rechazan.
+    await expect(reportarNovedad(bodegaA, dom1, { novedadId: randomUUID(), entregaId: propia.id, tipo: "otro", detalle: "  " })).rejects.toBeInstanceOf(EntregaInvalidaError);
+    await expect(
+      dbComoBodega(bodegaA, (tx) => tx.insert(entregasNovedades).values({ entregaId: propia.id, empresaId: empresaA, bodegaId: bodegaA, usuarioId: dom1, tipo: "otro" }), "domiciliario", dom1)
+    ).rejects.toThrow();
+
+    // Nadie edita ni borra.
+    await reportarNovedad(bodegaA, dom1, { novedadId: randomUUID(), entregaId: propia.id, tipo: "no_contesta", detalle: "" });
+    await expect(dbComoBodega(bodegaA, (tx) => tx.update(entregasNovedades).set({ detalle: "x" }).where(eq(entregasNovedades.entregaId, propia.id)), "domiciliario", dom1)).rejects.toThrow();
+    await expect(dbComoBodega(bodegaA, (tx) => tx.delete(entregasNovedades).where(eq(entregasNovedades.entregaId, propia.id)), "domiciliario", dom1)).rejects.toThrow();
+    await expect(dbComoEmpresa(empresaA, (tx) => tx.delete(entregasNovedades).where(eq(entregasNovedades.entregaId, propia.id)))).rejects.toThrow();
+
+    // Cerrada: no se reporta más y el domiciliario deja de verlas; la empresa las conserva.
+    await cambiarEstadoMiEntrega(bodegaA, dom1, propia.id, "no_entregada", "No estaba");
+    await expect(reportarNovedad(bodegaA, dom1, { novedadId: randomUUID(), entregaId: propia.id, tipo: "voy_tarde", detalle: "" })).rejects.toBeInstanceOf(EntregaInvalidaError);
+    expect((await listarMisNovedades(bodegaA, dom1)).filter((n) => n.entregaId === propia.id)).toHaveLength(0);
+    await expect(listarNovedadesDeEntregas(empresaA, [propia.id])).resolves.toHaveLength(1);
   });
 
   it("una sesión de bodega sin rol no ve ninguna entrega", async () => {

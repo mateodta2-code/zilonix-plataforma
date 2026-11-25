@@ -1525,3 +1525,55 @@ CREATE POLICY contacto_domiciliario_ver ON entregas_domiciliario_contacto FOR SE
         AND e.estado IN ('asignada', 'en_camino')
     )
   );
+
+-- ---------------------------------------------------------------------
+-- Domi-4 (migración 0049) — novedades de una entrega, sin cerrarla.
+-- · Solo se AGREGAN: app_user tiene SELECT e INSERT, nunca UPDATE ni
+--   DELETE (historial; se van solas si se borra la entrega).
+-- · Crea: solo el domiciliario dueño de la entrega, mientras siga ABIERTA,
+--   a su nombre y con la misma empresa y bodega de la entrega. El EXISTS
+--   pasa por entrega_domiciliario_ver, que ya exige que sea suya y activo.
+-- · Ven: la empresa (las suyas), la bodega (admin/operario, las de su
+--   bodega) y el domiciliario (las de sus entregas abiertas).
+-- ---------------------------------------------------------------------
+ALTER TABLE entregas_novedades ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entregas_novedades FORCE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT ON entregas_novedades TO app_user;
+REVOKE UPDATE, DELETE ON entregas_novedades FROM app_user;
+
+DROP POLICY IF EXISTS novedad_empresa_ver ON entregas_novedades;
+CREATE POLICY novedad_empresa_ver ON entregas_novedades FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+
+DROP POLICY IF EXISTS novedad_bodega_ver ON entregas_novedades;
+CREATE POLICY novedad_bodega_ver ON entregas_novedades FOR SELECT TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+  );
+
+DROP POLICY IF EXISTS novedad_domiciliario_ver ON entregas_novedades;
+CREATE POLICY novedad_domiciliario_ver ON entregas_novedades FOR SELECT TO app_user
+  USING (
+    current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND EXISTS (
+      SELECT 1 FROM entregas_domiciliario e
+      WHERE e.id = entregas_novedades.entrega_id
+        AND e.estado IN ('asignada', 'en_camino')
+    )
+  );
+
+DROP POLICY IF EXISTS novedad_domiciliario_crear ON entregas_novedades;
+CREATE POLICY novedad_domiciliario_crear ON entregas_novedades FOR INSERT TO app_user
+  WITH CHECK (
+    current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+    AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND EXISTS (
+      SELECT 1 FROM entregas_domiciliario e
+      WHERE e.id = entregas_novedades.entrega_id
+        AND e.empresa_id = entregas_novedades.empresa_id
+        AND e.bodega_id = entregas_novedades.bodega_id
+        AND e.estado IN ('asignada', 'en_camino')
+    )
+  );

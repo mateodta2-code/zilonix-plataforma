@@ -1,5 +1,6 @@
 "use client";
 
+import { TIPOS_NOVEDAD, type TipoNovedad } from "@/lib/entregas/tiposNovedad";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
@@ -28,7 +29,9 @@ type EntregaAsignada = {
 // Solo lo del vendedor, en /panel/despachos: el domiciliario ve sus
 // entregas en /domiciliario (Domi-2). Los datos de quien recibe se copian
 // al asignar; ninguna llamada a Mercado Libre.
-export function AsignarDomiciliario({ pedidoReferencia, domiciliarios, entrega }: { pedidoReferencia: string; domiciliarios: Domiciliario[]; entrega: EntregaAsignada | null }) {
+type Novedad = { id: string; tipo: TipoNovedad; detalle: string | null; tieneFoto: boolean; creadaTs: Date };
+
+export function AsignarDomiciliario({ pedidoReferencia, domiciliarios, entrega, novedades = [] }: { pedidoReferencia: string; domiciliarios: Domiciliario[]; entrega: EntregaAsignada | null; novedades?: Novedad[] }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState(false);
   const [enCurso, setEnCurso] = useState(false);
@@ -80,6 +83,25 @@ export function AsignarDomiciliario({ pedidoReferencia, domiciliarios, entrega }
           </p>
         ) : (
           <p className={styles.notaDespachado}>Entrega local sin domiciliario.</p>
+        )}
+        {/* Domi-4: novedades del domiciliario (la entrega sigue abierta). */}
+        {novedades.length > 0 && (
+          <ul className={styles.notaDespachado} aria-label="Novedades del domiciliario">
+            {novedades.map((n) => (
+              <li key={n.id}>
+                <strong>Novedad</strong> {n.creadaTs.toLocaleString("es-CO", { timeZone: "America/Bogota", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} · {TIPOS_NOVEDAD[n.tipo]}
+                {n.detalle ? `: ${n.detalle}` : ""}
+                {n.tieneFoto && (
+                  <>
+                    {" "}
+                    <a href={`/api/entregas/novedades/${n.id}/foto`} target="_blank" rel="noopener noreferrer">
+                      Ver foto
+                    </a>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
         {modificable && (
           <>

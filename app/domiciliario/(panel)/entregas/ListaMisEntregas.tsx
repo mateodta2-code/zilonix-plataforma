@@ -2,7 +2,10 @@ import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import type { listarMisEntregas } from "@/lib/entregas/entregas";
+import type { NovedadEntrega } from "@/lib/entregas/novedades";
+import { TIPOS_NOVEDAD } from "@/lib/entregas/tiposNovedad";
 import { BotonesEntrega } from "./BotonesEntrega";
+import { ReportarNovedad } from "./ReportarNovedad";
 import styles from "./entregas.module.css";
 
 type Entrega = Awaited<ReturnType<typeof listarMisEntregas>>[number];
@@ -22,7 +25,7 @@ function esAbierta(e: Entrega) {
 // Abiertas (de hoy y pendientes de antes) y, aparte, lo cerrado en las
 // últimas 24 h. Con la entrega cerrada la base devuelve el contacto en
 // null: se muestra «Entrega cerrada», sin enlace para llamar.
-export function ListaMisEntregas({ entregas, ahora }: { entregas: Entrega[]; ahora: number }) {
+export function ListaMisEntregas({ entregas, novedades = [], ahora }: { entregas: Entrega[]; novedades?: NovedadEntrega[]; ahora: number }) {
   const abiertas = entregas.filter(esAbierta);
   const cerradas = entregas.filter((e) => !esAbierta(e) && ahora - e.actualizadaTs.getTime() < DIA_MS).reverse();
   if (abiertas.length === 0 && cerradas.length === 0) {
@@ -40,19 +43,19 @@ export function ListaMisEntregas({ entregas, ahora }: { entregas: Entrega[]; aho
           <EstadoVacio>No tienes entregas pendientes.</EstadoVacio>
         </Tarjeta>
       ) : (
-        <div className={styles.lista}>{abiertas.map((e) => <TarjetaEntrega key={e.id} entrega={e} />)}</div>
+        <div className={styles.lista}>{abiertas.map((e) => <TarjetaEntrega key={e.id} entrega={e} novedades={novedades.filter((n) => n.entregaId === e.id)} />)}</div>
       )}
       {cerradas.length > 0 && (
         <>
           <h2 className={styles.seccion}>Cerradas hoy</h2>
-          <div className={styles.lista}>{cerradas.map((e) => <TarjetaEntrega key={e.id} entrega={e} />)}</div>
+          <div className={styles.lista}>{cerradas.map((e) => <TarjetaEntrega key={e.id} entrega={e} novedades={[]} />)}</div>
         </>
       )}
     </>
   );
 }
 
-function TarjetaEntrega({ entrega: e }: { entrega: Entrega }) {
+function TarjetaEntrega({ entrega: e, novedades }: { entrega: Entrega; novedades: NovedadEntrega[] }) {
   const et = ETIQUETA[e.estado] ?? { texto: e.estado, chip: "neutro" as EstadoChip };
   const abierta = esAbierta(e);
   return (
@@ -79,7 +82,20 @@ function TarjetaEntrega({ entrega: e }: { entrega: Entrega }) {
         <p className={styles.cerrada}>Entrega cerrada.</p>
       )}
       {e.estado === "no_entregada" && e.motivo && <p className={styles.dato}>Motivo: {e.motivo}</p>}
+      {/* Domi-4: lo que ya reportó en esta entrega (solo mientras siga abierta). */}
+      {novedades.length > 0 && (
+        <ul className={styles.novedades} aria-label="Novedades reportadas">
+          {novedades.map((n) => (
+            <li key={n.id} className={styles.dato}>
+              {n.creadaTs.toLocaleTimeString("es-CO", { timeZone: "America/Bogota", hour: "2-digit", minute: "2-digit" })} · {TIPOS_NOVEDAD[n.tipo]}
+              {n.detalle ? `: ${n.detalle}` : ""}
+              {n.tieneFoto ? " (con foto)" : ""}
+            </li>
+          ))}
+        </ul>
+      )}
       {abierta && <BotonesEntrega entregaId={e.id} estado={e.estado} />}
+      {abierta && <ReportarNovedad entregaId={e.id} />}
     </Tarjeta>
   );
 }
