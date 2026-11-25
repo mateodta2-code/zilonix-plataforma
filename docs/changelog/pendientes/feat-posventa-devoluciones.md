@@ -1,0 +1,2 @@
+- Posventa: la pestaña Devoluciones ya tiene lista (estado en palabras simples, buscador, filtro por fecha y cuenta, paginación), detalle (línea de tiempo, envío de vuelta, costo, revisiones, ficha de la venta) y métricas de 30 / 90 días (cantidad, % sobre ventas, motivos, costo de envíos de vuelta, ranking por producto y por cuenta). Solo lectura, en vivo desde Mercado Libre. Refs #648.
+- Las migas del detalle de un reclamo ahora apuntan a Posventa › Reclamos y mediaciones.

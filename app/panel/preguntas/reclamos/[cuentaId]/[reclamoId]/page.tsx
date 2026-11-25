@@ -79,7 +79,7 @@ export default async function DetalleReclamoPage({ params }: { params: { cuentaI
   const ahora = new Date();
   const migas = (
     <nav className={styles.migas} aria-label="Ruta">
-      <Link href="/panel/preguntas">Preguntas y reclamos</Link> › <Link href="/panel/preguntas?tab=reclamos">Reclamos</Link> › Reclamo n.º {params.reclamoId}
+      <Link href="/panel/posventa">Posventa</Link> › <Link href="/panel/posventa">Reclamos y mediaciones</Link> › Reclamo n.º {params.reclamoId}
     </nav>
   );
 
