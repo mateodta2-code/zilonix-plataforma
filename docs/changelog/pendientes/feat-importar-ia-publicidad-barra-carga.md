@@ -1,0 +1,1 @@
+- Importar maestra SKU, importar CSV de SKU, Crear con IA (Publicar) y «Actualizar ahora» de Publicidad muestran la barra azul de carga (indeterminada) mientras corre el proceso; textos de botones y avisos sin cambios. Solo CSS, sin llamadas nuevas. Refs #632.
