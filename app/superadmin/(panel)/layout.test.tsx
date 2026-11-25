@@ -38,12 +38,11 @@ describe("menú del superadmin", () => {
       expect(etiquetas).not.toContain(prohibido);
     }
   });
-  it("Soporte queda deshabilitados como Próximamente", () => {
-    for (const e of ["Soporte"]) {
-      const i = items.find((x) => x.etiqueta === e);
-      expect(i?.deshabilitada).toBe(true);
-      expect(i?.titulo).toBe("Próximamente");
-    }
+  it("Soporte queda habilitado y apunta a /superadmin/soporte", () => {
+    const i = items.find((x) => x.etiqueta === "Soporte");
+    expect(i?.href).toBe("/superadmin/soporte");
+    expect(i?.deshabilitada).toBeFalsy();
+    expect(i?.titulo).not.toBe("Próximamente");
   });
 });
 
