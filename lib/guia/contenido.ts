@@ -301,6 +301,7 @@ export const GUIA: GrupoGuia[] = [
         pasos: [
           "Invitar persona genera un link de un solo uso que vence en 7 días. Nunca se comparte una contraseña.",
           "En Personas ves quién está, con qué rol, y las invitaciones pendientes; desde ahí cambias el rol.",
+          "Si alguien se va o ya no debe entrar, el Dueño pulsa «Quitar acceso» en su fila y confirma. Pierde el acceso al instante y sus invitaciones sin aceptar se borran; si vuelve, hay que invitarlo de nuevo. Al Dueño nunca se le quita el acceso.",
           "En Ajustar roles decides qué puede ver y hacer cada rol en cada módulo.",
         ],
       },

@@ -11,7 +11,8 @@ import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { cambiarRolAction } from "./actions";
+import { FormConfirmar } from "@/components/superadmin/FormConfirmar";
+import { cambiarRolAction, quitarAccesoAction } from "./actions";
 import styles from "./page.module.css";
 
 // Issue #370 — Personas: quién está en la empresa activa y con qué rol,
@@ -19,7 +20,8 @@ import styles from "./page.module.css";
 // invitarlo. Ver pide personas.consultar; el selector de rol solo sale
 // con personas.modificar (y la acción lo vuelve a pedir). En el selector
 // solo salen los roles que quien mira puede dar (#124); el Dueño no se
-// cambia desde acá y nadie se cambia su propio rol.
+// cambia desde acá y nadie se cambia su propio rol. «Quitar acceso» (25-nov)
+// solo lo ve el Dueño, y nunca sobre el Dueño ni sobre sí mismo.
 export default async function PersonasPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const { usuario, activa: empresa, rolNombre, permisos } = await obtenerContextoPanel();
   try {
@@ -32,6 +34,7 @@ export default async function PersonasPage({ searchParams }: { searchParams: Rec
   const { miembros, invitaciones } = await listarPersonas(empresa.id, usuario.id, new Date());
   const puedeModificar = tienePermiso(permisos, "personas", "modificar");
   const puedeInvitar = tienePermiso(permisos, "personas", "crear");
+  const soyDueno = rolNombre === ROL_DUENO;
   const opciones = puedeModificar ? (await opcionesDeRol(empresa.id, permisos)).filter((o) => o.puedeDar) : [];
   const error = normalizarParametro(searchParams.error);
   const ok = normalizarParametro(searchParams.ok);
@@ -44,7 +47,7 @@ export default async function PersonasPage({ searchParams }: { searchParams: Rec
 
       <Tarjeta className={styles.seccion}>
         <h2 className={styles.titulo}>Miembros ({miembros.length})</h2>
-        <Tabla encabezados={["Persona", "Rol", "Desde", ...(puedeModificar ? ["Cambiar rol"] : [])]}>
+        <Tabla encabezados={["Persona", "Rol", "Desde", ...(puedeModificar ? ["Cambiar rol"] : []), ...(soyDueno ? ["Acceso"] : [])]}>
           {miembros.map((m) => {
             const esYo = m.usuarioId === usuario.id;
             const esDueno = m.rolNombre === ROL_DUENO;
@@ -89,6 +92,23 @@ export default async function PersonasPage({ searchParams }: { searchParams: Rec
                           Cambiar
                         </Boton>
                       </form>
+                    )}
+                  </CeldaTabla>
+                )}
+                {soyDueno && (
+                  <CeldaTabla>
+                    {esYo || esDueno ? (
+                      <span className={styles.suave}>—</span>
+                    ) : (
+                      <FormConfirmar
+                        action={quitarAccesoAction}
+                        mensaje={`¿Quitarle el acceso a ${m.nombre} (${m.email})? Ya no podrá entrar a ${empresa.nombre}. Si vuelve, hay que invitarla de nuevo.`}
+                      >
+                        <input type="hidden" name="membresiaId" value={m.membresiaId} />
+                        <Boton type="submit" variante="peligro">
+                          Quitar acceso
+                        </Boton>
+                      </FormConfirmar>
                     )}
                   </CeldaTabla>
                 )}

@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { conMensaje, usuarioYEmpresaActiva } from "@/lib/finanzas/contexto-accion";
-import { CambioRolInvalidoError, cambiarRolDeMiembro } from "@/lib/personas";
-import { requierePermiso } from "@/lib/permisos";
+import { CambioRolInvalidoError, cambiarRolDeMiembro, QuitarAccesoInvalidoError, quitarAccesoDeMiembro } from "@/lib/personas";
+import { requierePermiso, SoloDuenoError } from "@/lib/permisos";
 
 // Issue #370 — cambiar el rol de alguien de la empresa sin volver a
 // invitarlo. Pide personas.modificar acá y otra vez en
@@ -31,3 +31,22 @@ export async function cambiarRolAction(formData: FormData) {
   }
   redirect(destino);
 }
+
+// 25-nov — «Quitar acceso» (solo el Dueño; quitarAccesoDeMiembro lo vuelve
+// a exigir y protege al Dueño y a uno mismo).
+export async function quitarAccesoAction(formData: FormData) {
+  const { usuarioId, empresaId } = await usuarioYEmpresaActiva();
+  const membresiaId = String(formData.get("membresiaId") ?? "");
+
+  let destino: string;
+  try {
+    const { email } = await quitarAccesoDeMiembro(empresaId, usuarioId, membresiaId);
+    revalidatePath(RUTA);
+    destino = conMensaje(RUTA, "ok", `${email} ya no tiene acceso a la empresa.`);
+  } catch (error) {
+    if (!(error instanceof QuitarAccesoInvalidoError) && !(error instanceof SoloDuenoError)) throw error;
+    destino = conMensaje(RUTA, "error", error.message);
+  }
+  redirect(destino);
+}
+
