@@ -1,20 +1,26 @@
-import { urlReclamoEnMl, type PropsAccionesReclamo } from "./AccionesReclamo";
-import styles from "./DetalleReclamo.module.css";
+"use client";
 
-// Hueco de Reclamos-B: la caja está deshabilitada; no se envía nada.
-export function ComposerReclamo({ siteId, ordenId }: PropsAccionesReclamo) {
+import { ComposerPosventa } from "@/components/posventa/ComposerPosventa";
+import { REGLAS_ADJUNTO_RECLAMO } from "@/lib/posventa/adjuntos";
+import { puedeEscribirEnReclamo } from "@/lib/posventa/reclamoAcciones";
+import { urlReclamoEnMl, type PropsAccionesReclamo } from "./AccionesReclamo";
+import { enviarMensajeReclamoAction, sugerirRespuestaReclamoAction } from "./accionesMensaje";
+
+// Posventa-Mensajes (Refs #645): el hueco de Reclamos-A ahora escribe de
+// verdad, pero solo si ML le habilita al vendedor send_message_to_* (según
+// la etapa). Si no, la caja queda cerrada con el motivo y el link a ML.
+export function ComposerReclamo({ siteId, ordenId, reclamoId, cuentaId, etapa, accionesVendedor, iaConectada, sinPermiso }: PropsAccionesReclamo & { iaConectada: boolean; sinPermiso: boolean }) {
+  const habilitado = puedeEscribirEnReclamo(etapa, accionesVendedor);
+  const motivo = sinPermiso ? "Tu rol no permite responder reclamos." : habilitado ? null : "Mercado Libre no habilita escribir en este reclamo ahora.";
   return (
-    <div className={styles.composer}>
-      <label className={styles.composerTitulo} htmlFor="escribir-comprador">
-        Escríbele al comprador
-      </label>
-      <textarea id="escribir-comprador" className={styles.composerCaja} disabled rows={3} maxLength={350} placeholder="Muy pronto podrás responder desde aquí" />
-      <div className={styles.composerPie}>
-        <span className={styles.composerContador}>0/350</span>
-        <a href={urlReclamoEnMl(siteId, ordenId)} target="_blank" rel="noopener noreferrer" className={styles.enlace}>
-          Responder en Mercado Libre
-        </a>
-      </div>
-    </div>
+    <ComposerPosventa
+      reglas={REGLAS_ADJUNTO_RECLAMO}
+      enviar={enviarMensajeReclamoAction}
+      campos={{ cuentaId, reclamoId }}
+      sugerir={() => sugerirRespuestaReclamoAction({ cuentaId, reclamoId })}
+      iaConectada={iaConectada}
+      bloqueadoMotivo={motivo}
+      enlaceMl={urlReclamoEnMl(siteId, ordenId)}
+    />
   );
 }

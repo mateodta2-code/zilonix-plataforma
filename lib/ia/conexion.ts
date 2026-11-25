@@ -97,6 +97,14 @@ export async function obtenerConexionIAParaModulo(empresaId: string, modulo: Mod
   return { ...filaAConexion(fila), apiKey: descifrarToken(fila.apiKeyCifrada) };
 }
 
+// Posventa-Mensajes (Refs #645): la IA PRINCIPAL de la empresa, sin módulo
+// propio (no hace falta migrar el CHECK de módulos). null = sin IA conectada.
+export async function obtenerConexionIAPrincipal(empresaId: string): Promise<ConexionIAConClave | null> {
+  const fila = await resolverFila(empresaId, undefined);
+  if (!fila) return null;
+  return { ...filaAConexion(fila), apiKey: descifrarToken(fila.apiKeyCifrada) };
+}
+
 // Igual pero SIN key (para saber qué IA usaría un módulo y avisar en pantalla).
 export async function obtenerConexionIA(empresaId: string, modulo?: ModuloIA): Promise<ConexionIA | null> {
   const fila = await resolverFila(empresaId, modulo);

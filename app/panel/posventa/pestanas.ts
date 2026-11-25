@@ -14,7 +14,7 @@ export type PestanaPosventa = {
 
 export const PESTANAS_POSVENTA: PestanaPosventa[] = [
   { clave: "reclamos", etiqueta: "Reclamos y mediaciones", href: "/panel/posventa", lista: true },
-  { clave: "mensajes", etiqueta: "Mensajes", href: "/panel/posventa/mensajes", lista: false },
+  { clave: "mensajes", etiqueta: "Mensajes", href: "/panel/posventa/mensajes", lista: true },
   { clave: "devoluciones", etiqueta: "Devoluciones", href: "/panel/posventa/devoluciones", lista: false },
 ];
 
