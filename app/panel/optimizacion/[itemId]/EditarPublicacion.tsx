@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { BarraCarga } from "@/components/marco/BarraCarga";
@@ -8,7 +9,7 @@ import { formatearMoneda } from "@/lib/ml/sitios";
 import { leerPrecioEscrito, simularPrecio, textoSimulacion, type BaseSimulacion } from "@/lib/optimizacion/simulador";
 import { GaleriaFotos } from "../../publicar/GaleriaFotos";
 import { CrearImagenIA, type EstadoIAImagen } from "./CrearImagenIA";
-import { editarFotosAction, editarPrecioAction, editarTituloAction } from "../actions";
+import { editarFotosAction, editarPrecioAction, editarTituloAction, mejorarTituloIAAction, type ResultadoMejorarTitulo } from "../actions";
 import styles from "../page.module.css";
 
 export type DatosEdicion = {
@@ -36,6 +37,10 @@ export type DatosEdicion = {
 
 type Aviso = { ok: boolean; texto: string } | null;
 
+const RUTA_CONECTAR_IA = "/panel/conectar-ia";
+// Largo del título que Mercado Libre muestra completo (el mismo que usa Publicar).
+const LARGO_TITULO_ACTUAL = 60;
+
 function AvisoLinea({ aviso }: { aviso: Aviso }) {
   if (!aviso) return null;
   return (
@@ -62,6 +67,34 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
   // Título.
   const [titulo, setTitulo] = useState(datos.titulo ?? "");
   const [avisoTitulo, setAvisoTitulo] = useState<Aviso>(null);
+  // «Mejorar título» con la IA: estado aparte del guardado (su propia barra).
+  const [generando, setGenerando] = useState(false);
+  const [sugerencias, setSugerencias] = useState<Extract<ResultadoMejorarTitulo, { ok: true }> | null>(null);
+  const [avisoIA, setAvisoIA] = useState<{ texto: string; conectarIA?: boolean } | null>(null);
+
+  async function mejorarTitulo() {
+    setGenerando(true);
+    setAvisoIA(null);
+    setAvisoTitulo(null);
+    try {
+      const r = await mejorarTituloIAAction({ cuentaMlId: datos.cuentaMlId, itemId: datos.itemId });
+      if (r.ok) setSugerencias(r);
+      else setAvisoIA({ texto: r.aviso, conectarIA: r.conectarIA });
+    } catch {
+      setAvisoIA({ texto: "No se pudo generar los títulos. Intenta de nuevo." });
+    } finally {
+      setGenerando(false);
+    }
+  }
+
+  async function copiar(texto: string) {
+    try {
+      await navigator.clipboard.writeText(texto);
+      setAvisoTitulo({ ok: true, texto: "Copiado" });
+    } catch {
+      setAvisoTitulo({ ok: false, texto: "No se pudo copiar. Selecciona el texto y cópialo a mano." });
+    }
+  }
 
   // Fotos: la misma galería de Publicar (portada marcada, subir desde el
   // equipo, arrastrar para ordenar). Trabaja con URLs; al guardar, las
@@ -136,8 +169,58 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
 
       <section className={styles.bloqueEdicion} aria-label="Título">
         <p className={styles.seccion}>Título</p>
+        <p className={styles.nota}>
+          {"Título actual: "}
+          <strong>{datos.titulo ?? "—"}</strong>
+        </p>
+        <span className={styles.notaNeutra}>{`${(datos.titulo ?? "").length}/${LARGO_TITULO_ACTUAL} caracteres`}</span>
+        <div>
+          <Boton type="button" variante="secundario" disabled={generando || enviando} onClick={mejorarTitulo}>
+            Mejorar título
+          </Boton>
+        </div>
+        <BarraCarga sticky={false} estado={generando ? "cargando" : "inactiva"} titulo="Generando títulos con IA…" ariaLabel="Progreso de la IA" />
+        {avisoIA ? (
+          <p className={styles.avisoError} role="alert">
+            {avisoIA.texto}
+            {avisoIA.conectarIA ? (
+              <>
+                {" "}
+                <Link href={RUTA_CONECTAR_IA}>Ir a Conectar IA</Link>
+              </>
+            ) : null}
+          </p>
+        ) : null}
+        {sugerencias ? (
+          <>
+            <ul className={styles.sugerenciasTitulo} aria-label="Títulos sugeridos">
+              {[...sugerencias.titulos.map((t) => ({ t, max: sugerencias.largoMaximo, etiqueta: null as string | null })), ...(sugerencias.catalogo ? [{ t: sugerencias.catalogo, max: sugerencias.largoMaximoCatalogo, etiqueta: "Para catálogo" }] : [])].map(
+                ({ t, max, etiqueta }) => (
+                  <li key={t} className={styles.sugerenciaTitulo}>
+                    <span className={styles.sugerenciaTexto}>
+                      {etiqueta ? <span className={styles.sugerenciaLargo}>{etiqueta}</span> : null}
+                      <span>{t}</span>
+                      <span className={styles.sugerenciaLargo}>{`${t.length}/${max} caracteres`}</span>
+                    </span>
+                    {sugerencias.puedeGuardar ? (
+                      <Boton type="button" variante="secundario" chico onClick={() => setTitulo(t)}>
+                        Usar este título
+                      </Boton>
+                    ) : (
+                      <Boton type="button" variante="secundario" chico onClick={() => copiar(t)}>
+                        Copiar
+                      </Boton>
+                    )}
+                  </li>
+                )
+              )}
+            </ul>
+          </>
+        ) : null}
         {datos.vendidas > 0 ? (
-          <p className={styles.nota}>{`Mercado Libre solo deja cambiar el título de publicaciones sin ventas (esta lleva ${datos.vendidas}).`}</p>
+          <p className={styles.nota}>
+            {`Mercado Libre no deja cambiar el título de publicaciones con ventas (esta lleva ${datos.vendidas}). Copia la sugerencia si la quieres usar en otra publicación.`}
+          </p>
         ) : (
           <>
             {datos.userProduct ? (
@@ -150,6 +233,7 @@ export function EditarPublicacion({ datos }: { datos: DatosEdicion }) {
               className={styles.buscador}
               onSubmit={(e) => {
                 e.preventDefault();
+                if (!window.confirm(`¿Cambiar el título en Mercado Libre por: ${titulo.trim()}?`)) return;
                 guardar("título", () => editarTituloAction({ cuentaMlId: datos.cuentaMlId, itemId: datos.itemId, titulo }), setAvisoTitulo);
               }}
             >

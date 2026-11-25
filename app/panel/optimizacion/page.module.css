@@ -438,3 +438,39 @@
   border: 1px solid var(--borde);
   border-radius: 8px;
 }
+
+/* Mejorar título: cada sugerencia de la IA, con su largo y su botón. */
+.sugerenciasTitulo {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sugerenciaTitulo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  color: var(--texto);
+}
+
+.sugerenciaTexto {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sugerenciaLargo {
+  font-size: 11px;
+  color: var(--texto-suave);
+}
