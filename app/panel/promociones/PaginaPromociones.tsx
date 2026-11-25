@@ -654,7 +654,7 @@ export function PaginaPromociones({ cuentas, puedeAprobar, puedeEjecutar }: { cu
       <div className={styles.pestanas}>
         {(["buscar", "participando", "historial", "reglas"] as Pestana[]).map((p) => (
           <Boton key={p} type="button" variante={pestana === p ? "primario" : "secundario"} onClick={() => setPestana(p)}>
-            {p === "buscar" ? "Buscar / Resultados" : p === "participando" ? "Participando" : p === "historial" ? "Bitácora" : "Reglas"}
+            {p === "buscar" ? "Buscar / Resultados" : p === "participando" ? "Participando" : p === "historial" ? "Auditar" : "Reglas"}
           </Boton>
         ))}
       </div>

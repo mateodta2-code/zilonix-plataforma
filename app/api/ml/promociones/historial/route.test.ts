@@ -11,10 +11,17 @@ vi.mock("@/lib/permisos", () => {
   class SinPermisoError extends Error {}
   return { requierePermiso: vi.fn(async () => ({})), SinPermisoError };
 });
+const { pisos } = vi.hoisted(() => ({ pisos: { valor: new Map<string, { precioMinimo: number | null; costo: number | null }>(), pedidos: [] as string[][] } }));
+vi.mock("@/lib/ml/promociones", () => ({
+  leerPisosYCostosFrescos: vi.fn(async (_empresa: string, skus: string[]) => {
+    pisos.pedidos.push(skus);
+    return pisos.valor;
+  }),
+}));
 vi.mock("@/lib/url-publica", () => ({ urlPublicaBase: () => "https://staging.test" }));
 
 const { filasDb, empresasUsadas, offsets } = vi.hoisted(() => ({
-  filasDb: { valor: [] as Record<string, unknown>[] },
+  filasDb: { valor: [] as Record<string, unknown>[], candidatas: [] as Record<string, unknown>[] },
   empresasUsadas: [] as string[],
   offsets: [] as number[],
 }));
@@ -24,6 +31,8 @@ vi.mock("@/db/empresa-context", () => ({
     empresasUsadas.push(empresaId);
     const cadena: Record<string, unknown> = {};
     for (const m of ["select", "from", "innerJoin", "leftJoin", "where", "orderBy", "limit", "groupBy"]) cadena[m] = () => cadena;
+    // Consultas sin offset (candidatas a «bajo el piso»): se esperan directo.
+    cadena.then = (resolver: (v: unknown) => unknown) => resolver(filasDb.candidatas);
     cadena.offset = async (n: number) => {
       offsets.push(n);
       return filasDb.valor;
@@ -65,6 +74,9 @@ describe("GET /api/ml/promociones/historial", () => {
   beforeEach(() => {
     vi.mocked(cookies).mockReturnValue({ get: () => undefined } as unknown as ReturnType<typeof cookies>);
     filasDb.valor = [fila()];
+    filasDb.candidatas = [];
+    pisos.valor = new Map();
+    pisos.pedidos.length = 0;
     empresasUsadas.length = 0;
     offsets.length = 0;
   });
@@ -127,5 +139,60 @@ describe("GET /api/ml/promociones/historial", () => {
     const res = await pedir("?vista=tandas");
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(empresasUsadas).toEqual([]);
+  });
+
+  describe("vista=auditar (Auditar)", () => {
+    const cand = (extra: Record<string, unknown> = {}) => ({ id: "a1", sku: "SKU-1", precioDespues: "99900", ...extra });
+
+    it("pide las tandas como en tandas y valida resultado nuevo", async () => {
+      filasDb.valor = [{ clave: "t1", total: 2, bajoPiso: 1, pendientes: 0, conError: 1, omitidas: 0, noApi: 0 }];
+      const cuerpo = await (await pedir("?vista=auditar&resultado=no-aplicada")).json();
+      expect(cuerpo.tandas[0]).toMatchObject({ total: 2, bajoPiso: 1, conError: 1 });
+      expect(empresasUsadas.every((e) => e === "empresa-1")).toBe(true);
+    });
+
+    it("una ejecutada con piso vigente por encima del precio entra, con piso, precio y diferencia", async () => {
+      filasDb.candidatas = [cand()];
+      pisos.valor = new Map([["SKU-1", { precioMinimo: 111000, costo: null }]]);
+      filasDb.valor = [fila({ id: "a1", resultadoMl: { regla: "todas", limite: "ninguno", sku: "SKU-1" } })];
+      const cuerpo = await (await pedir("?vista=auditar&lote=" + CUENTA)).json();
+      expect(cuerpo.filas[0].bajoPiso).toEqual({ piso: 111000, precio: 99900, diferencia: -11100 });
+      expect(pisos.pedidos).toEqual([["SKU-1"]]); // una sola lectura de pisos
+    });
+
+    it("sin piso para el SKU no entra", async () => {
+      filasDb.candidatas = [cand()];
+      pisos.valor = new Map([["SKU-1", { precioMinimo: null, costo: 5 }]]);
+      filasDb.valor = [];
+      const cuerpo = await (await pedir("?vista=auditar&lote=" + CUENTA)).json();
+      expect(cuerpo.filas).toEqual([]);
+    });
+
+    it("precio igual o por encima del piso no entra (ni SKU desconocido)", async () => {
+      filasDb.candidatas = [cand({ id: "a1", precioDespues: "111000" }), cand({ id: "a2", sku: "OTRO", precioDespues: "1" })];
+      pisos.valor = new Map([["SKU-1", { precioMinimo: 111000, costo: null }]]);
+      filasDb.valor = [fila({ id: "a1" })];
+      const cuerpo = await (await pedir("?vista=auditar&lote=" + CUENTA)).json();
+      expect(cuerpo.filas[0].bajoPiso).toBeNull();
+    });
+
+    it("las filas con limite «piso» no son candidatas: la consulta de candidatas ya las excluye y sin candidatas no se leen pisos", async () => {
+      filasDb.candidatas = [];
+      await pedir("?vista=auditar&lote=" + CUENTA);
+      expect(pisos.pedidos).toEqual([]);
+    });
+
+    it("resultado=error o no-aplicada no calcula el piso", async () => {
+      filasDb.candidatas = [cand()];
+      await pedir("?vista=auditar&resultado=error");
+      await pedir("?vista=auditar&resultado=no-aplicada");
+      expect(pisos.pedidos).toEqual([]);
+    });
+
+    it("sin vista=auditar nunca calcula el piso", async () => {
+      filasDb.candidatas = [cand()];
+      await pedir();
+      expect(pisos.pedidos).toEqual([]);
+    });
   });
 });

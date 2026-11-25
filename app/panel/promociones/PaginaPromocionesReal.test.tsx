@@ -383,13 +383,14 @@ describe("PaginaPromocionesReal — «Aplicada» vs «Programada»", () => {
   });
 });
 
-describe("PaginaPromocionesReal — pestaña Bitácora (Promo-B)", () => {
-  it("muestra la pestaña Bitácora y al abrirla pide el historial, sin perder la lista", async () => {
+describe("PaginaPromocionesReal — pestaña Auditar (Promo-B)", () => {
+  it("muestra la pestaña Auditar (sin «Bitácora») y al abrirla pide el historial, sin perder la lista", async () => {
     montar();
     await screen.findByText("Producto MLM1");
     const pedidos = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
     expect(pedidos().some((u) => u.startsWith("/api/ml/promociones/historial"))).toBe(false);
-    fireEvent.click(screen.getByRole("tab", { name: "Bitácora" }));
+    expect(screen.queryByRole("tab", { name: "Bitácora" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Auditar" }));
     await waitFor(() => expect(pedidos().some((u) => u.startsWith("/api/ml/promociones/historial"))).toBe(true));
     fireEvent.click(screen.getByRole("tab", { name: "Publicaciones" }));
     expect(screen.getByText("Producto MLM1")).toBeTruthy();
@@ -499,5 +500,19 @@ describe("Promo-G — banda de carga y debounce del X %", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("PaginaPromocionesReal — «Seleccionar todas» visible", () => {
+  it("la casilla y la línea de selección usan clases grandes de marca (≥ 15 px / ≥ 20 px)", async () => {
+    montar();
+    const casilla = await screen.findByLabelText(/Seleccionar todas/);
+    expect(casilla.closest("label")?.className).toContain("filaCheck");
+    const css = (await import("node:fs")).readFileSync("app/panel/promociones/promocionesReal.module.css", "utf8");
+    const bloque = (sel: string) => css.slice(css.indexOf(sel), css.indexOf("}", css.indexOf(sel)));
+    expect(Number(/font-size:\s*(\d+)px/.exec(bloque(".filaCheck {"))?.[1])).toBeGreaterThanOrEqual(15);
+    expect(Number(/width:\s*(\d+)px/.exec(bloque('.filaCheck input[type="checkbox"]'))?.[1])).toBeGreaterThanOrEqual(20);
+    expect(Number(/height:\s*(\d+)px/.exec(bloque('.filaCheck input[type="checkbox"]'))?.[1])).toBeGreaterThanOrEqual(20);
+    expect(css).toContain("accent-color: var(--azul-metal-3)");
   });
 });
