@@ -285,6 +285,7 @@ export default async function DetalleOptimizacionPage({
           idioma={idioma}
           conFinanzas={conFinanzas}
           cuentaMlId={cuenta.id}
+          cuentaNickname={cuenta.nickname}
           itemId={datos.item.id}
           hoy={hoy}
           puedeEditar={puedeEditar}

@@ -5,7 +5,6 @@ import { cookies } from "next/headers";
 import { and, eq, isNull } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl } from "@/db/schema";
-import { registrarAuditoria } from "@/lib/auditoria";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import {
   actualizarItemMl,
@@ -53,10 +52,16 @@ import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { diagnosticarPublicacion } from "@/lib/optimizacion/diagnostico";
 import { leerDiasMetricas } from "@/lib/optimizacion/textos";
-import { cambioEsDeLaPublicacion, crearNotaBitacora, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
+import { cambioEsDeLaPublicacion, compactarFotos, diaDelCambio, crearNotaBitacora, MARCA_FOTO_IA, registrarCambioOptimizacion, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
 import { leerFechaNota, leerResultadoRevision, limpiarTextoBitacora } from "@/lib/optimizacion/bitacoraResultado";
 import { hoyBogota } from "@/lib/publicidad/plan";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { obtenerMiMembresia } from "@/lib/membresias";
+import { tienePermiso } from "@/lib/roles-plantillas";
+import { leerDatosDetalle } from "@/lib/optimizacion/detalle";
+import { resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
+import { resultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
+import type { ResumenPeriodo } from "@/lib/optimizacion/calculos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -284,13 +289,13 @@ export async function cambiarEstadoPublicacionAction(entrada: { cuentaMlId: stri
   }
 
   await dbComoEmpresa(ctx.empresaId, (tx) =>
-    registrarAuditoria(tx, {
+    registrarCambioOptimizacion(tx, {
       empresaId: ctx.empresaId,
       usuarioId: ctx.usuarioId,
-      actorTipo: "persona",
+      cuentaMlId: cuenta.id,
+      cuentaNickname: cuenta.nickname,
       accion: activar ? "activar_publicacion" : "pausar_publicacion",
-      entidad: "publicacion_ml",
-      entidadId: entrada.itemId,
+      itemId: entrada.itemId,
       detalle: `${activar ? "Activó" : "Pausó"} la publicación ${entrada.itemId} de ${cuenta.nickname}.`,
     })
   ).catch((error: unknown) => {
@@ -311,7 +316,7 @@ export type ResultadoEdicion = { ok: boolean; aviso: string };
 
 type Preparada = {
   ctx: { empresaId: string; usuarioId: string };
-  cuenta: { nickname: string; siteId: string; cuentaIdExterna: string };
+  cuenta: { id: string; nickname: string; siteId: string; cuentaIdExterna: string };
   token: string;
   item: ItemEdicionMl;
 };
@@ -363,13 +368,13 @@ async function escribirYAuditar(
     return { ok: false, aviso: detalle && detalle !== `error: ${motivo}` && detalle !== `mensaje: ${motivo}` ? `${base} (detalle para soporte: ${detalle})` : base };
   }
   await dbComoEmpresa(prep.ctx.empresaId, (tx) =>
-    registrarAuditoria(tx, {
+    registrarCambioOptimizacion(tx, {
       empresaId: prep.ctx.empresaId,
       usuarioId: prep.ctx.usuarioId,
-      actorTipo: "persona",
+      cuentaMlId: prep.cuenta.id,
+      cuentaNickname: prep.cuenta.nickname,
       accion: auditoria.accion,
-      entidad: "publicacion_ml",
-      entidadId: prep.item.id,
+      itemId: prep.item.id,
       detalle: auditoria.detalle,
       valorAnterior: auditoria.valorAnterior,
       valorNuevo: auditoria.valorNuevo,
@@ -452,6 +457,10 @@ export async function editarFotosAction(entrada: {
   cuentaMlId: string;
   itemId: string;
   fotos: ({ id: string } | { url: string })[];
+  // Enlaces de la galería que salieron de «Crear imagen con IA». Solo se
+  // cuentan los que de verdad van entre las fotos nuevas: nunca se confía
+  // en lo que diga el navegador.
+  fotosIA?: string[];
 }): Promise<ResultadoEdicion> {
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
@@ -472,12 +481,19 @@ export async function editarFotosAction(entrada: {
   }
   if (pictures.length === 0) return { ok: false, aviso: "La publicación necesita al menos una foto." };
   const nuevas = pictures.filter((p) => "source" in p).length;
+  const enlacesNuevos = new Set(pictures.flatMap((p) => ("source" in p ? [p.source] : [])));
+  const conIA = new Set((Array.isArray(entrada.fotosIA) ? entrada.fotosIA : []).filter((u): u is string => typeof u === "string" && enlacesNuevos.has(u.trim())).map((u) => u.trim())).size;
+  const antes = prep.item.fotos.map((f) => f.id);
+  const despues = pictures.map((p) => ("id" in p ? p.id : p.source));
+  const portadaCambio = antes[0] !== despues[0];
   return escribirYAuditar(
     prep,
     { pictures },
     {
       accion: "cambiar_fotos_publicacion",
-      detalle: `Cambió las fotos de ${prep.item.id} (${prep.cuenta.nickname}): ${pictures.length - nuevas} existentes, ${nuevas} nuevas.`,
+      detalle: `Cambió las fotos de ${prep.item.id} (${prep.cuenta.nickname}): ${pictures.length - nuevas} existentes, ${nuevas} nuevas${conIA > 0 ? ` (${conIA} ${MARCA_FOTO_IA})` : ""}; ${portadaCambio ? "cambió la portada" : "misma portada"}.`,
+      valorAnterior: compactarFotos(antes) || undefined,
+      valorNuevo: compactarFotos(despues),
     },
     "Fotos actualizadas en Mercado Libre. Pueden tardar unos minutos en verse."
   );
@@ -607,4 +623,55 @@ export async function revisarCambioAction(entrada: { cuentaMlId: string; itemId:
   if (typeof entrada.ref !== "string" || !(await cambioEsDeLaPublicacion(ctx.empresaId, entrada.ref, entrada.itemId))) return { ok: false, aviso: "No se encontró ese cambio." };
   await guardarRevisionCambio(ctx.empresaId, { usuarioId: ctx.usuarioId, ref: entrada.ref, itemId: entrada.itemId, resultado, comentario });
   return { ok: true, aviso: resultado ? "Revisión guardada." : "Comentario guardado. Elige un resultado para dar el cambio por revisado." };
+}
+
+// ---------- Bitácora general: resultado al día 8, bajo demanda ----------
+
+export type FilaResultadoGeneral = { visitas: number | null; ventas: number; conversion: string | null; utilidad: string | null };
+export type ResultadoBitacoraGeneral =
+  | { ok: false; aviso: string }
+  | { ok: true; estado: "midiendo"; faltanDias: number }
+  | { ok: true; estado: "listo"; desde: string; hasta: string; conFinanzas: boolean; antes: FilaResultadoGeneral; despues: FilaResultadoGeneral };
+
+function filaResultado(r: ResumenPeriodo, siteId: string, conFinanzas: boolean): FilaResultadoGeneral {
+  return {
+    visitas: r.visitas,
+    ventas: r.pedidos,
+    conversion: r.conversion,
+    utilidad: conFinanzas && r.ganancia !== null ? formatearMoneda(Number(r.ganancia), siteId) : null,
+  };
+}
+
+// Calcula el resultado (7 días antes vs. 7 días después) de UNA fila de la
+// bitácora general. Es la única llamada a Mercado Libre de esa vista:
+// solo al pulsar «Ver resultado». Verifica que el cambio sea de la
+// publicación (nunca se confía en la referencia del navegador).
+export async function bitacoraGeneralResultadoAction(entrada: { cuentaMlId: string; itemId: string; ref: string }): Promise<ResultadoBitacoraGeneral> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para ver Optimización." };
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId) || typeof entrada.ref !== "string") {
+    return { ok: false, aviso: "No se reconoce el cambio. Actualiza la página." };
+  }
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
+  if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  if (!(await cambioEsDeLaPublicacion(ctx.empresaId, entrada.ref, entrada.itemId))) return { ok: false, aviso: "No se encontró ese cambio. Actualiza la página." };
+  // El día del cambio sale de la auditoría o de la nota, no del navegador.
+  const dia = await diaDelCambio(ctx.empresaId, entrada.ref);
+  if (!dia) return { ok: false, aviso: "No se encontró ese cambio. Actualiza la página." };
+  const ahora = new Date();
+  const hoy = hoyBogota(ahora);
+  const adelanto = resultadoCambio(dia, hoy, { lineas: [], publicidad: [], visitasPorDia: null, visitasDesde: hoy, conFinanzas: false });
+  if (adelanto.estado === "midiendo") return { ok: true, estado: "midiendo", faltanDias: adelanto.faltanDias };
+  const membresia = await obtenerMiMembresia(ctx.usuarioId, ctx.empresaId);
+  const conFinanzas = membresia ? tienePermiso(membresia.permisos, "finanzas", "consultar") : false;
+  try {
+    const datos = await leerDatosDetalle(ctx.empresaId, cuenta, entrada.itemId, resolverPeriodoDetalle(undefined, ahora), { conFinanzas, ahora });
+    if (!datos) return { ok: false, aviso: "Mercado Libre no devolvió la publicación. Intenta de nuevo." };
+    const r = resultadoCambio(dia, hoy, { lineas: datos.lineas, publicidad: datos.publicidad, visitasPorDia: datos.visitasPorDia, visitasDesde: datos.visitasDesde, conFinanzas });
+    if (r.estado === "midiendo") return { ok: true, estado: "midiendo", faltanDias: r.faltanDias };
+    return { ok: true, estado: "listo", desde: r.desde, hasta: r.hasta, conFinanzas, antes: filaResultado(r.antes, cuenta.siteId, conFinanzas), despues: filaResultado(r.despues, cuenta.siteId, conFinanzas) };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] resultado de bitácora ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: motivoCuentaSinRevisar(error) };
+  }
 }

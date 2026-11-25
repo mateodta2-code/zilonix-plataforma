@@ -69,7 +69,8 @@ vi.mock("@/lib/ia/proveedores", async () => {
 });
 vi.mock("@/lib/ml/preguntas", () => ({ motivoCuentaSinRevisar: () => "Token vencido — hay que reconectar la cuenta." }));
 const bitacora = vi.hoisted(() => ({ crearNota: vi.fn(), guardarRevision: vi.fn(), esDeLaPublicacion: vi.fn() }));
-vi.mock("@/lib/optimizacion/bitacora", () => ({
+vi.mock("@/lib/optimizacion/bitacora", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/optimizacion/bitacora")>()),
   crearNotaBitacora: bitacora.crearNota,
   guardarRevisionCambio: bitacora.guardarRevision,
   cambioEsDeLaPublicacion: bitacora.esDeLaPublicacion,
@@ -306,6 +307,22 @@ describe("Fase 3: editar precio, título y fotos", () => {
     ml.actualizar.mockClear();
     expect((await editarFotosAction({ cuentaMlId: CUENTA, itemId: "MCO1", fotos: [] })).ok).toBe(false);
     expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("fotos: guarda antes → después y cuenta solo las fotos de IA que de verdad van", async () => {
+    auditorias.length = 0;
+    await editarFotosAction({
+      cuentaMlId: CUENTA,
+      itemId: "MCO1",
+      fotos: [{ url: "https://ia.jpg" }, { id: "f1" }],
+      fotosIA: ["https://ia.jpg", "https://no-enviada.jpg"],
+    });
+    const a = auditorias[0] as { valorAnterior: string; valorNuevo: string; detalle: string };
+    expect(a.valorAnterior).toBe("f1\nf2");
+    expect(a.valorNuevo).toBe("https://ia.jpg\nf1");
+    expect(a.detalle).toContain("1 nuevas (1 con IA)");
+    expect(a.detalle).toContain("cambió la portada");
+    expect(a.detalle).toContain(`[cuenta:${CUENTA}]`);
   });
 
   it("con «BODY_INVALID_FIELDS» muestra el detalle de ML (código, causas y campos) para soporte", async () => {
