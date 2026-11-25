@@ -108,8 +108,20 @@ export default async function DetalleReclamoPage({ params }: { params: { cuentaI
     pedidoZilonixId = fila?.id ?? null;
   }
 
+  // Reclamos-Dinero: las acciones de dinero piden ventas/modificar.
+  let puedeModificar = true;
+  try {
+    await requierePermiso(usuario.id, empresa.id, "ventas", "modificar");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
+    puedeModificar = false;
+  }
+
   const siteId = cuenta.siteId;
   const propsAcciones = {
+    estado: detalle.reclamo.estado,
+    motivoId: detalle.reclamo.motivoId,
+    puedeModificar,
     reclamoId: detalle.reclamo.id,
     cuentaId: cuenta.id,
     etapa: detalle.reclamo.etapa,
