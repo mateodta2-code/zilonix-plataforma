@@ -6,7 +6,7 @@ import { dbComoEmpresa } from "./empresa-context";
 import { db } from "./index";
 import { dbSuperadmin } from "./superadmin-context";
 import { auditoria, empresas, mensajesTicketSoporte, roles, membresias, ticketsSoporte, usuarios } from "./schema";
-import { afirmarAislamiento, crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
+import { crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 
 // Issue #623 (SA-Soporte, migración 0043) — contra Postgres real: la
 // empresa solo ve sus tickets, el superadmin los ve todos pero solo
@@ -32,13 +32,26 @@ describe("tickets_soporte (RLS, issue #623)", () => {
     }
     await db.insert(usuarios).values({ id: superadminId, email: `sa-soporte-${superadminId.slice(0, 8)}@zilonix.test`, nombre: "SA Soporte", esSuperadmin: true });
 
-    const fila = await afirmarAislamiento(c, ticketsSoporte, (tx, empresaId) =>
+    // No se usa afirmarAislamiento: asume UPDATE/DELETE concedidos y
+    // aquí app_user no los tiene a propósito (solo actualizado_ts), así
+    // que Postgres responde "permission denied" en vez de 0 filas.
+    const [fila] = await dbComoEmpresa(c.empresaAId, (tx) =>
       tx
         .insert(ticketsSoporte)
-        .values({ empresaId, creadoPor: c.usuarioAId, asunto: "Ticket de A", mensaje: "Mensaje de A", modulo: "Pedidos" })
+        .values({ empresaId: c.empresaAId, creadoPor: c.usuarioAId, asunto: "Ticket de A", mensaje: "Mensaje de A", modulo: "Pedidos" })
         .returning({ id: ticketsSoporte.id })
     );
     ticketAId = fila.id;
+
+    const veB = await dbComoEmpresa(c.empresaBId, (tx) => tx.select({ id: ticketsSoporte.id }).from(ticketsSoporte).where(eq(ticketsSoporte.id, ticketAId)));
+    expect(veB, "B no debería ver el ticket de A (SELECT)").toHaveLength(0);
+    const tocadas = await dbComoEmpresa(c.empresaBId, (tx) =>
+      tx.update(ticketsSoporte).set({ actualizadoTs: new Date() }).where(eq(ticketsSoporte.id, ticketAId)).returning({ id: ticketsSoporte.id })
+    );
+    expect(tocadas, "B no debería poder tocar actualizado_ts del ticket de A").toHaveLength(0);
+    await expect(dbComoEmpresa(c.empresaBId, (tx) => tx.delete(ticketsSoporte).where(eq(ticketsSoporte.id, ticketAId)))).rejects.toThrow();
+    const veA = await dbComoEmpresa(c.empresaAId, (tx) => tx.select({ id: ticketsSoporte.id }).from(ticketsSoporte).where(eq(ticketsSoporte.id, ticketAId)));
+    expect(veA, "A sí debería seguir viendo su ticket").toHaveLength(1);
   });
 
   it("el ticket nace abierto y B no lo ve ni en la lista ni por id", async () => {
