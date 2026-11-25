@@ -1,0 +1,1 @@
+- Optimización: la barra azul de carga ahora sale en toda la espera del módulo (lista y detalle al navegar, crear imagen con IA con «1 de 4», guardar precio, título y fotos, diagnóstico y competidores). Solo interfaz. Refs #677.

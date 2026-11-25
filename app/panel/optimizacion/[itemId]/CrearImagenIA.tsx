@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import {
   COMPOSICIONES,
   faltaParaCrear,
@@ -69,6 +70,8 @@ export function CrearImagenIA({
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
   const [progreso, setProgreso] = useState<{ hecho: number; total: number } | null>(null);
   const [copiado, setCopiado] = useState(false);
+  // Cómo terminó la última tanda (para la barra): completa o detenida a mano.
+  const [cierre, setCierre] = useState<{ tipo: "completa" | "detenida"; hechas: number } | null>(null);
   const detener = useRef(false);
   // La siguiente composición: «crear 4» dos veces da 8 distintas.
   const siguiente = useRef(0);
@@ -99,6 +102,8 @@ export function CrearImagenIA({
     if (!base || ocupado) return;
     detener.current = false;
     setAviso(null);
+    setCierre(null);
+    let hechas = 0;
     let fallidas = 0;
     let ultimoError = "";
     for (let i = 0; i < cantidad; i++) {
@@ -120,8 +125,11 @@ export function CrearImagenIA({
         fallidas += 1;
         ultimoError = "No se pudo crear la imagen. Intenta de nuevo.";
       }
+      hechas += 1;
     }
     setProgreso(null);
+    if (detener.current) setCierre({ tipo: "detenida", hechas });
+    else if (fallidas === 0) setCierre({ tipo: "completa", hechas });
     if (fallidas === 0) {
       setAviso({ ok: true, texto: "Listo. Revisa cada imagen: si una no se entiende o se ve genérica, descártala y crea otra." });
     } else {
@@ -155,11 +163,13 @@ export function CrearImagenIA({
   async function crearInformativa() {
     if (!base || ocupado || !contenido || falta) return;
     setAviso(null);
+    setCierre(null);
     setProgreso({ hecho: 0, total: 1 });
     try {
       const r = await generarImagenIAAction({ cuentaMlId, itemId, fotoUrl: base, referencias, tipo: "informativa", contenido });
       if (r.ok) {
         setCreadas((previas) => [...previas, { url: r.url, rotulo: infoTipo?.nombre ?? "Informativa" }]);
+        setCierre({ tipo: "completa", hechas: 1 });
         setAviso({ ok: true, texto: "Imagen creada. Revísala: si el texto salió con errores, ajusta y créala otra vez." });
       } else {
         setAviso({ ok: false, texto: r.aviso });
@@ -247,11 +257,8 @@ export function CrearImagenIA({
             ))}
           </span>
           <div className={styles.iaAcciones}>
-            {progreso ? (
-              <Boton type="button" variante="secundario" onClick={() => (detener.current = true)}>
-                Detener después de esta
-              </Boton>
-            ) : (
+            {/* «Detener después de esta» vive en la barra de abajo (sin duplicarlo). */}
+            {progreso ? null : (
               <Boton type="button" onClick={crearPortadas} disabled={!base || ocupado}>
                 {cantidad === 1 ? "Crear portada" : `Crear ${cantidad} portadas`}
               </Boton>
@@ -354,11 +361,17 @@ export function CrearImagenIA({
         </>
       )}
 
-      {progreso && tipo === "portada" ? (
-        <p className={styles.notaNeutra} role="status">
-          Creando imagen {progreso.hecho + 1} de {progreso.total}…
-        </p>
-      ) : null}
+      <BarraCarga
+        sticky={false}
+        estado={ocupado ? "cargando" : (cierre?.tipo ?? "inactiva")}
+        titulo={progreso ? `Creando imagen ${progreso.hecho + 1} de ${progreso.total}…` : "Proponiendo el contenido…"}
+        avance={progreso ? { hechos: progreso.hecho, total: progreso.total } : null}
+        unidad="imágenes"
+        accion={progreso && tipo === "portada" ? { texto: "Detener después de esta", onClick: () => (detener.current = true) } : undefined}
+        textoCompleta="Imágenes creadas"
+        textoDetenida={`Se detuvo después de ${cierre?.hechas ?? 0} imágenes`}
+        ariaLabel="Progreso de la creación de imágenes"
+      />
       {aviso ? (
         <p className={aviso.ok ? styles.avisoOk : styles.avisoError} role="status">
           {aviso.texto}
