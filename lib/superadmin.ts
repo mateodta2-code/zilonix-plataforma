@@ -13,6 +13,8 @@ import { db } from "@/db";
 import { dbSuperadmin } from "@/db/superadmin-context";
 import { accesosTemporales, auditoria, empresas, membresias, roles, usuarios } from "@/db/schema";
 import type { SaludEmpresa } from "@/lib/superadmin-salud";
+import type { EstadoProceso } from "@/lib/superadmin-procesos";
+import type { Proceso } from "@/lib/trabajos/registroEjecuciones";
 
 export class NoEsSuperadminError extends Error {
   constructor() {
@@ -126,6 +128,38 @@ export async function listarSaludConexiones(): Promise<SaludEmpresa[]> {
       falabellaDesconectadas: Number(c?.falabella_desconectadas ?? 0),
     };
   });
+}
+
+// Estado de los procesos (25-nov): última corrida de cada proceso
+// automático y la cola de avisos, vía funciones SECURITY DEFINER
+// (superadmin_user no lee ejecuciones_procesos ni avisos_ml directo).
+export async function listarEstadoProcesos(): Promise<EstadoProceso[]> {
+  const filas = (await dbSuperadmin.execute(sql`select * from superadmin_estado_procesos()`)) as unknown as {
+    proceso: Proceso;
+    ultima_ts: string | Date | null;
+    ultima_ok: boolean | null;
+    ultimo_resumen: Record<string, number> | null;
+    ultimo_error: string | null;
+    ultima_exitosa_ts: string | Date | null;
+    corridas_24h: string | number;
+    fallidas_24h: string | number;
+  }[];
+  const fecha = (v: string | Date | null) => (v ? new Date(v) : null);
+  return filas.map((f) => ({
+    proceso: f.proceso,
+    ultimaTs: fecha(f.ultima_ts),
+    ultimaOk: f.ultima_ok,
+    ultimoResumen: f.ultimo_resumen ?? {},
+    ultimoError: f.ultimo_error,
+    ultimaExitosaTs: fecha(f.ultima_exitosa_ts),
+    corridas24h: Number(f.corridas_24h),
+    fallidas24h: Number(f.fallidas_24h),
+  }));
+}
+
+export async function avisosEnCola(): Promise<{ pendientes: number; atrasados: number }> {
+  const [f] = (await dbSuperadmin.execute(sql`select * from superadmin_avisos_en_cola()`)) as unknown as { pendientes: string | number; atrasados: string | number }[];
+  return { pendientes: Number(f?.pendientes ?? 0), atrasados: Number(f?.atrasados ?? 0) };
 }
 
 export type AccionSuperadmin = { ts: Date; accion: string; entidad: string; empresaNombre: string | null; detalle: string | null };

@@ -78,6 +78,31 @@ export const GUIA_SUPERADMIN: GrupoGuia[] = [
         consejos: ["Las empresas suspendidas no cuentan como problema: sus procesos están parados a propósito.", SOLO_CIFRAS],
       },
       {
+        id: "procesos",
+        titulo: "Procesos",
+        ruta: "/superadmin/procesos",
+        paraQue: "Saber si los procesos automáticos de la plataforma siguen corriendo, sin tener que revisar los registros del servidor.",
+        pasos: [
+          "Arriba: cuántos procesos tienen problema y cuántos avisos de Mercado Libre esperan en la cola (y cuántos llevan más de 1 hora).",
+          "Abajo, una fila por proceso: «Avisos de Mercado Libre» (cada 5 minutos), «Publicidad» (cada hora) y «Seguimiento» (varias veces al día).",
+          "«Al día»: corrió hace poco y sin error. «Atrasado»: lleva más tiempo del normal sin correr (avisos: 15 minutos; publicidad: 3 horas; seguimiento: 26 horas). «Falló»: la última corrida terminó con error. «Sin datos»: todavía no ha corrido desde que existe esta pantalla.",
+          "Pasa el mouse sobre «hace X min» para ver la hora exacta (hora de Colombia).",
+          "«Resultado de la última»: cuánto hizo esa corrida (por ejemplo, avisos procesados y con error), o el error si falló.",
+        ],
+        apartados: [
+          {
+            titulo: "Qué hacer en cada caso",
+            pasos: [
+              "Avisos «Atrasado»: el despertador de Railway dejó de llamar al proceso. Avisa al equipo técnico para que revise ese servicio en Railway.",
+              "Cualquier proceso «Falló» varias veces seguidas: avisa al equipo técnico con el texto del error.",
+              "Muchos avisos «Con error» en cada corrida: casi siempre son cuentas caídas; revisa Conexiones («ML por revisar»).",
+              "Publicidad «Atrasado» de vez en cuando es normal: la programa GitHub, que a veces la retrasa varias horas.",
+            ],
+          },
+        ],
+        consejos: ["Se guardan las corridas de los últimos 14 días.", SOLO_CIFRAS],
+      },
+      {
         id: "bodegas",
         titulo: "Bodegas",
         ruta: "/superadmin/bodegas",

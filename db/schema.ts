@@ -575,6 +575,32 @@ export const avisosMl = pgTable(
   })
 );
 
+// Estado de los procesos (25-nov, superadmin): una fila por corrida de
+// cada proceso automático (avisos de ML, publicidad, seguimiento). Antes
+// el resultado solo quedaba en los logs de Railway y no había forma de
+// saber desde el panel si el despertador seguía vivo. Sin empresa_id: es
+// de la plataforma, no de un cliente, y `resumen` guarda SOLO conteos
+// (lib/trabajos/registroEjecuciones.ts descarta todo lo que no sea un
+// número — decisión D8). Nadie la toca directo: se escribe con
+// registrar_ejecucion_proceso() y se lee con superadmin_estado_procesos()
+// (db/rls-setup.sql).
+export const ejecucionesProcesos = pgTable(
+  "ejecuciones_procesos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    proceso: text("proceso").notNull(),
+    inicioTs: timestamp("inicio_ts", { withTimezone: true }).notNull(),
+    finTs: timestamp("fin_ts", { withTimezone: true }).notNull().defaultNow(),
+    ok: boolean("ok").notNull(),
+    resumen: jsonb("resumen").$type<Record<string, number>>().notNull().default({}),
+    error: text("error"),
+  },
+  (t) => ({
+    porProceso: index("ejecuciones_procesos_proceso_inicio").on(t.proceso, t.inicioTs),
+    procesoValido: check("ejecuciones_procesos_proceso_valido", sql`${t.proceso} in ('avisos_ml', 'publicidad', 'seguimiento')`),
+  })
+);
+
 // Tarea 2.5 — importación inicial. Guarda solo lo mínimo real para
 // cumplir el criterio de "listo" (ver el primer pedido en menos de 10
 // minutos) — el detalle completo (línea de tiempo de 8 pasos, enlace

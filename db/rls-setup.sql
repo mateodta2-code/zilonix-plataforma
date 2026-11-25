@@ -859,6 +859,88 @@ $fn$;
 REVOKE ALL ON FUNCTION superadmin_acciones_recientes(integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION superadmin_acciones_recientes(integer) TO superadmin_user;
 
+-- Estado de los procesos (25-nov, migración 0047). ejecuciones_procesos no
+-- tiene GRANT para ningún usuario de la app: cada proceso escribe SOLO su
+-- propia fila con registrar_ejecucion_proceso() (el usuario de base que
+-- llama decide qué proceso puede anotar — trabajador_user nunca puede
+-- anotar una corrida de publicidad, ni al revés), y el superadmin la lee
+-- con superadmin_estado_procesos(). RLS forzado y sin políticas: aunque un
+-- GRANT se colara por error, ninguna fila sería visible.
+ALTER TABLE ejecuciones_procesos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ejecuciones_procesos FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON ejecuciones_procesos FROM PUBLIC;
+
+-- Guarda 14 días por proceso (avisos corre cada 5 min ≈ 4.000 filas) y
+-- borra lo más viejo en la misma llamada, sin cron aparte. session_user
+-- (no current_user, que dentro de SECURITY DEFINER es el dueño de la
+-- función) es el usuario con el que se conectó el proceso.
+CREATE OR REPLACE FUNCTION registrar_ejecucion_proceso(p_proceso text, p_inicio timestamptz, p_ok boolean, p_resumen jsonb, p_error text)
+RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  permitido text := CASE session_user
+    WHEN 'trabajador_user' THEN 'avisos_ml'
+    WHEN 'publicidad_trabajador_user' THEN 'publicidad'
+    WHEN 'seguimiento_trabajador_user' THEN 'seguimiento'
+  END;
+BEGIN
+  IF permitido IS NULL OR permitido IS DISTINCT FROM p_proceso THEN
+    RAISE EXCEPTION 'El usuario % no puede registrar corridas de %', session_user, p_proceso;
+  END IF;
+  INSERT INTO ejecuciones_procesos (proceso, inicio_ts, ok, resumen, error)
+  VALUES (
+    p_proceso,
+    p_inicio,
+    p_ok,
+    CASE WHEN jsonb_typeof(p_resumen) = 'object' THEN p_resumen ELSE '{}'::jsonb END,
+    left(p_error, 300)
+  );
+  DELETE FROM ejecuciones_procesos WHERE proceso = p_proceso AND inicio_ts < now() - interval '14 days';
+END
+$fn$;
+REVOKE ALL ON FUNCTION registrar_ejecucion_proceso(text, timestamptz, boolean, jsonb, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION registrar_ejecucion_proceso(text, timestamptz, boolean, jsonb, text)
+  TO trabajador_user, publicidad_trabajador_user, seguimiento_trabajador_user;
+
+-- Una fila por proceso, aunque nunca haya corrido (ultima_ts NULL).
+CREATE OR REPLACE FUNCTION superadmin_estado_procesos()
+RETURNS TABLE (
+  proceso text,
+  ultima_ts timestamptz,
+  ultima_ok boolean,
+  ultimo_resumen jsonb,
+  ultimo_error text,
+  ultima_exitosa_ts timestamptz,
+  corridas_24h bigint,
+  fallidas_24h bigint
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT p.proceso, u.inicio_ts, u.ok, u.resumen, u.error,
+    (SELECT max(e.inicio_ts) FROM ejecuciones_procesos e WHERE e.proceso = p.proceso AND e.ok),
+    (SELECT count(*) FROM ejecuciones_procesos e WHERE e.proceso = p.proceso AND e.inicio_ts > now() - interval '24 hours'),
+    (SELECT count(*) FROM ejecuciones_procesos e WHERE e.proceso = p.proceso AND e.inicio_ts > now() - interval '24 hours' AND NOT e.ok)
+  FROM (VALUES ('avisos_ml'), ('publicidad'), ('seguimiento')) AS p(proceso)
+  LEFT JOIN LATERAL (
+    SELECT e.inicio_ts, e.ok, e.resumen, e.error FROM ejecuciones_procesos e
+    WHERE e.proceso = p.proceso ORDER BY e.inicio_ts DESC LIMIT 1
+  ) u ON true
+$fn$;
+REVOKE ALL ON FUNCTION superadmin_estado_procesos() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION superadmin_estado_procesos() TO superadmin_user;
+
+-- Cola de avisos de toda la plataforma: solo dos números.
+CREATE OR REPLACE FUNCTION superadmin_avisos_en_cola()
+RETURNS TABLE (pendientes bigint, atrasados bigint)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT count(*), count(*) FILTER (WHERE recibido_ts < now() - interval '1 hour')
+  FROM avisos_ml WHERE procesado_ts IS NULL
+$fn$;
+REVOKE ALL ON FUNCTION superadmin_avisos_en_cola() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION superadmin_avisos_en_cola() TO superadmin_user;
+
 DROP POLICY IF EXISTS superadmin_ve_membresias ON membresias;
 CREATE POLICY superadmin_ve_membresias ON membresias FOR SELECT TO superadmin_user USING (true);
 

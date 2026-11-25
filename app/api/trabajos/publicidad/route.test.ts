@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/trabajos/registroEjecuciones", () => ({ ejecutarConRegistro: (_proceso: string, trabajo: () => Promise<unknown>) => trabajo() }));
 vi.mock("@/lib/trabajos/sincronizarPublicidad", () => ({
   sincronizarPublicidadProgramada: vi.fn(),
 }));
