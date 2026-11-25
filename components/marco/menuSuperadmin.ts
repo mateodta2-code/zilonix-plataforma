@@ -10,6 +10,7 @@ export function gruposSuperadmin(): GrupoNav[] {
         { etiqueta: "Empresas", href: "/superadmin/empresas", icono: "empresas" },
         { etiqueta: "Conexiones", href: "/superadmin/conexiones", icono: "conectarMl" },
         { etiqueta: "Procesos", href: "/superadmin/procesos", icono: "actividad" },
+        { etiqueta: "Anuncios", href: "/superadmin/anuncios", icono: "avisosMl" },
         { etiqueta: "Bodegas", href: "/superadmin/bodegas", icono: "bodegas" },
         { etiqueta: "Moderar foro", href: "/superadmin/foro", icono: "foro" },
         { etiqueta: "Soporte", href: "/superadmin/soporte", icono: "soporte" },

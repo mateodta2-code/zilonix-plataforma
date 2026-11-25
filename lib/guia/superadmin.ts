@@ -103,6 +103,24 @@ export const GUIA_SUPERADMIN: GrupoGuia[] = [
         consejos: ["Se guardan las corridas de los últimos 14 días.", SOLO_CIFRAS],
       },
       {
+        id: "anuncios",
+        titulo: "Anuncios",
+        ruta: "/superadmin/anuncios",
+        paraQue: "Avisarle algo a TODAS las empresas a la vez (una falla de Mercado Libre, un mantenimiento, una novedad importante) sin escribirle a cada una.",
+        pasos: [
+          "Escribe el mensaje (máximo 300 caracteres) y elige el tipo: «Información», «Advertencia» o «Problema» (cambia el color del aviso).",
+          "«Desde»: cuándo empieza a verse; vacío es ahora mismo. «Hasta»: cuándo deja de verse; vacío es hasta que lo retires. Hora de Colombia.",
+          "Pulsa «Publicar anuncio». Mientras esté vigente sale arriba en el panel de todas las empresas.",
+          "Para quitarlo antes de tiempo, pulsa «Retirar» en la lista (te pide confirmar).",
+          "Estados: «Programado» (todavía no empieza), «Activo», «Vencido» (pasó su «Hasta») y «Retirado».",
+        ],
+        consejos: [
+          "Cada persona puede cerrar el aviso con la ✕; solo se le oculta a ella, en ese navegador.",
+          "Un anuncio no se edita ni se borra: si te equivocaste, retíralo y publica otro. Crear y retirar quedan en Auditoría.",
+          "Solo sale en el panel de los vendedores, no en el de bodegas ni domiciliarios.",
+        ],
+      },
+      {
         id: "bodegas",
         titulo: "Bodegas",
         ruta: "/superadmin/bodegas",

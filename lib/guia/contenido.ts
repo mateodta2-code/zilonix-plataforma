@@ -54,6 +54,7 @@ export const GUIA: GrupoGuia[] = [
         ],
         consejos: [
           "Cada módulo tiene su propia guía arriba, en «Guía de este módulo».",
+          "Si arriba de la pantalla ves un aviso de Zilonix (por ejemplo, una falla de Mercado Libre o un mantenimiento), léelo: es para todas las empresas. Ciérralo con la ✕ cuando ya lo leíste.",
           "Si no ves un módulo en el menú, tu rol no tiene permiso para verlo: pídeselo al dueño de la empresa.",
           "Si tienes más de una empresa, cámbiala desde el selector de empresa en la barra de arriba.",
         ],
