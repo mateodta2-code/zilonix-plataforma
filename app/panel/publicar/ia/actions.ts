@@ -6,8 +6,8 @@ import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { descargarFotoBase } from "@/lib/ia/imagen";
 import { llamarIA, type ImagenIA } from "@/lib/ia/proveedores";
 import type { ConexionIAConClave } from "@/lib/ia/tipos";
-import { tendenciasPorNivelMl, tituloPublicacionMl } from "@/lib/ml/cliente";
-import { idCompetenciaDesdeLink, limpiarTituloCompetencia } from "@/lib/publicaciones/competencia";
+import { tendenciasPorNivelMl, titulosMasVendidosMl, tituloPublicacionMl } from "@/lib/ml/cliente";
+import { esLinkCortoMl, idCompetenciaDesdeLink, limpiarTituloCompetencia } from "@/lib/publicaciones/competencia";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { resolverCategoria } from "@/lib/ml/publicar";
 import { analizarProducto, ErrorAnalisisIA, ESPERA_TEXTO_MS } from "@/lib/publicaciones/analisis";
@@ -107,6 +107,9 @@ export type ResultadoTitulos =
       // Título de la competencia usado como idea (link o pegado a mano) y,
       // si el link no se pudo leer, el aviso para pegarlo a mano.
       competencia: { titulo: string | null; aviso: string | null };
+      // Títulos de los más vendidos de la categoría (o de la padre, si la
+      // específica no tiene), dados a la IA como idea de palabras (25-nov).
+      masVendidos: { titulos: string[]; dePadre: boolean };
     }
   | Fallo;
 
@@ -127,7 +130,16 @@ export async function proponerTitulosAction(entrada: {
   let masBuscados: TendenciaConNivel[] = [];
   let rutaCategoria: string[] = [];
   let tendenciasSinRelacion = false;
+  let masVendidos: { titulos: string[]; dePadre: boolean } = { titulos: [], dePadre: false };
   if (typeof entrada.categoriaId === "string" && entrada.categoriaId) {
+    // Más vendidos: automático, no necesita que la persona pegue nada.
+    try {
+      const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
+      const r = await titulosMasVendidosMl(ctx.cuenta.siteId, entrada.categoriaId, token);
+      masVendidos = { titulos: r.titulos.map(limpiarTituloCompetencia).filter(Boolean), dePadre: r.categoriaId !== null && r.categoriaId !== entrada.categoriaId };
+    } catch (error) {
+      registrar("mas_vendidos", error);
+    }
     try {
       const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
       const r = await tendenciasPorNivelMl(ctx.cuenta.siteId, entrada.categoriaId, token);
@@ -151,7 +163,9 @@ export async function proponerTitulosAction(entrada: {
   if (!tituloCompetencia && link) {
     const id = idCompetenciaDesdeLink(link, ctx.cuenta.siteId);
     if (!id) {
-      avisoCompetencia = `Ese link no es de una publicación de Mercado Libre de ${ctx.cuenta.siteId}. Pega su título a mano.`;
+      avisoCompetencia = esLinkCortoMl(link)
+        ? "Los links cortos meli.la (los de «Compartir» en la app) no se pueden leer. Ábrelo en el navegador y copia la dirección completa, o pega su título a mano."
+        : `Ese link no es de una publicación de Mercado Libre de ${ctx.cuenta.siteId}. Pega su título a mano.`;
     } else {
       try {
         const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
@@ -168,11 +182,11 @@ export async function proponerTitulosAction(entrada: {
   const categoria = typeof entrada.categoriaNombre === "string" ? entrada.categoriaNombre.slice(0, 120) : null;
   try {
     const respuesta = await conCupoDeTexto(ctx.empresaId, () =>
-      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info, competencia: tituloCompetencia }), { maxTokens: 800, timeoutMs: ESPERA_TEXTO_MS })
+      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info, competencia: tituloCompetencia, masVendidos: masVendidos.titulos }), { maxTokens: 800, timeoutMs: ESPERA_TEXTO_MS })
     );
-    const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados, competencia: tituloCompetencia });
+    const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados, competencia: tituloCompetencia, masVendidos: masVendidos.titulos });
     if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
-    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria, tendenciasSinRelacion, competencia: { titulo: tituloCompetencia || null, aviso: avisoCompetencia } };
+    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria, tendenciasSinRelacion, competencia: { titulo: tituloCompetencia || null, aviso: avisoCompetencia }, masVendidos };
   } catch (error) {
     registrar("titulos", error);
     return { ok: false, aviso: mensajeErrorIA(error) };

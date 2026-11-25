@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { categoriasPorNivel, tendenciasCategoriaMl } from "@/lib/ml/cliente";
 import { leerFicha } from "@/lib/publicaciones/ficha";
-import { leerPropuestaTitulos, limpiarTitulo, nombresPropios, origenPalabras, recortarPorPalabra, sinMayusculaCadaPalabra, unirTendenciasPorNivel, filtrarTendenciasRelacionadas } from "@/lib/publicaciones/titulos";
+import { leerPropuestaTitulos, limpiarTitulo, nombresPropios, origenPalabras, promptTitulos, recortarPorPalabra, sinMayusculaCadaPalabra, unirTendenciasPorNivel, filtrarTendenciasRelacionadas } from "@/lib/publicaciones/titulos";
 
 const fetchOriginal = globalThis.fetch;
 afterEach(() => {
@@ -194,5 +194,23 @@ describe("filtrarTendenciasRelacionadas (24-nov: «Mascotas» para un bebedero d
     const muchas = Array.from({ length: 25 }, (_, i) => `bebedero colibri ${i}`);
     const r = filtrarTendenciasRelacionadas([{ nivel: "baja" as const, palabras: muchas }], producto);
     expect(r.niveles[0].palabras).toHaveLength(10);
+  });
+});
+
+describe("más vendidos de la categoría como idea de palabras (25-nov)", () => {
+  it("una palabra que solo está en los más vendidos sale «De los más vendidos»; la competencia manda si está en los dos", () => {
+    const p = origenPalabras(["Lápices de colores profesionales artísticos"], [], "lápices de colores", [], "Colores artísticos", "Colores Profesionales X72 Lápices Artísticos");
+    expect(p.find((x) => x.palabra === "profesionales")).toEqual({ palabra: "profesionales", origen: "mas_vendidos" });
+    expect(p.find((x) => x.palabra === "artísticos")).toEqual({ palabra: "artísticos", origen: "competencia" });
+  });
+
+  it("el prompt los lista como idea, sin copiarlos; sin más vendidos no aparece esa parte", () => {
+    const ficha = leerFicha({ nombre: { valor: "Lápices de colores", origen: "vendedor" } });
+    const con = promptTitulos({ ficha, idioma: "español", pais: "Colombia", categoria: "Lápices", tendencias: [], info: "", masVendidos: ["Colores Profesionales X72", "Set 48 Lápices"] });
+    expect(con).toContain("Títulos de los más vendidos de la categoría");
+    expect(con).toContain("- Colores Profesionales X72\n- Set 48 Lápices");
+    expect(con).toContain("no los copies");
+    const sin = promptTitulos({ ficha, idioma: "español", pais: "Colombia", categoria: "Lápices", tendencias: [], info: "" });
+    expect(sin).not.toContain("más vendidos");
   });
 });
