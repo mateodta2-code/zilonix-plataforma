@@ -1221,7 +1221,12 @@ CREATE POLICY entrega_empresa_quitar ON entregas_domiciliario FOR DELETE TO app_
 
 DROP POLICY IF EXISTS entrega_bodega_ver ON entregas_domiciliario;
 CREATE POLICY entrega_bodega_ver ON entregas_domiciliario FOR SELECT TO app_user
-  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    -- dbComoBodega fija app.bodega_id también para el domiciliario: sin esta
+    -- condición vería todas las entregas de su bodega (OR de políticas).
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+  );
 
 -- Domiciliario: miembro ACTIVO y rol domiciliario de la bodega activa, que
 -- además es la persona de la sesión (app.bodega_usuario_id).
@@ -1230,6 +1235,7 @@ CREATE POLICY entrega_domiciliario_ver ON entregas_domiciliario FOR SELECT TO ap
   USING (
     estado IN ('asignada', 'en_camino')
     AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'domiciliario'
     AND miembro_domiciliario_id IN (
       SELECT m.id FROM miembros_bodega_3pl m
       WHERE m.usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
@@ -1241,6 +1247,7 @@ CREATE POLICY entrega_domiciliario_cerrar ON entregas_domiciliario FOR UPDATE TO
   USING (
     estado IN ('asignada', 'en_camino')
     AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'domiciliario'
     AND miembro_domiciliario_id IN (
       SELECT m.id FROM miembros_bodega_3pl m
       WHERE m.usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
@@ -1249,6 +1256,7 @@ CREATE POLICY entrega_domiciliario_cerrar ON entregas_domiciliario FOR UPDATE TO
   )
   WITH CHECK (
     bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'domiciliario'
     AND miembro_domiciliario_id IN (
       SELECT m.id FROM miembros_bodega_3pl m
       WHERE m.usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid

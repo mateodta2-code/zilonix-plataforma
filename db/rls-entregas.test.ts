@@ -140,6 +140,27 @@ describe("entregas_domiciliario (RLS + lib, Domi-1)", () => {
     expect(conservada).toMatchObject({ estado: "entregada", direccion: datos.direccion, telefono: datos.telefono, receptorNombre: datos.receptorNombre });
   });
 
+  it("un domiciliario no ve las entregas de otro de su bodega ni las propias ya cerradas", async () => {
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro1, marketplace: "mercadolibre", pedidoReferencia: pedido("5"), datos });
+    await asignarEntrega(empresaA, usuarioA, { miembroId: miembro2, marketplace: "mercadolibre", pedidoReferencia: pedido("6"), datos });
+    const todas = (tx: typeof db) => tx.select({ ref: entregasDomiciliario.pedidoReferencia, estado: entregasDomiciliario.estado }).from(entregasDomiciliario);
+    const vistas1 = await dbComoBodega(bodegaA, todas, "domiciliario", dom1);
+    expect(vistas1.map((e) => e.ref)).toContain(pedido("5"));
+    expect(vistas1.map((e) => e.ref)).not.toContain(pedido("6"));
+    // Ninguna fila cerrada (ni la suya ni la de otro) es visible para el domiciliario.
+    expect(vistas1.every((e) => e.estado === "asignada" || e.estado === "en_camino")).toBe(true);
+    const cerrada = (await listarMisEntregas(bodegaA, dom2)).find((e) => e.pedidoReferencia === pedido("6"))!;
+    await cambiarEstadoMiEntrega(bodegaA, dom2, cerrada.id, "entregada");
+    const vistas2 = await dbComoBodega(bodegaA, todas, "domiciliario", dom2);
+    expect(vistas2.map((e) => e.ref)).not.toContain(pedido("6"));
+    expect(vistas2.every((e) => e.estado === "asignada" || e.estado === "en_camino")).toBe(true);
+  });
+
+  it("una sesión de bodega sin rol no ve ninguna entrega", async () => {
+    expect(await dbComoBodega(bodegaA, (tx) => tx.select().from(entregasDomiciliario))).toHaveLength(0);
+    expect(await dbComoBodega(bodegaA, (tx) => tx.select().from(entregasDomiciliario), undefined, adminAId)).toHaveLength(0);
+  });
+
   it("no se puede asignar a un domiciliario desactivado ni con el vínculo pausado", async () => {
     await cambiarActivoDeMiembro(bodegaA, adminAId, miembro2, false, "admin_bodega");
     await expect(asignarEntrega(empresaA, usuarioA, { miembroId: miembro2, marketplace: "mercadolibre", pedidoReferencia: pedido("5"), datos })).rejects.toBeInstanceOf(EntregaInvalidaError);
