@@ -152,6 +152,10 @@ const RUTAS_PROTEGIDAS = new Set([
   // Posventa-0 (Refs #647): marco y lista de reclamos, solo lectura —
   // piden ventas.consultar (layout y página) y validan la cuenta por empresa.
   "app/panel/posventa/page.tsx",
+  // Posventa-Devoluciones (#648) — solo lectura, ventas.consultar; la cuenta del URL se valida contra las de la empresa.
+  "app/panel/posventa/devoluciones/page.tsx",
+  "app/panel/posventa/devoluciones/metricas/page.tsx",
+  "app/panel/posventa/devoluciones/[cuentaId]/[reclamoId]/page.tsx",
   // Optimización (Fase 1): ver pide inventario.consultar; pausar o
   // activar, inventario.modificar.
   "app/panel/optimizacion/page.tsx",

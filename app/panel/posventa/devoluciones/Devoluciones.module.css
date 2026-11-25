@@ -1,0 +1,40 @@
+/* Posventa-Devoluciones — solo tokens de globals.css, sin paleta nueva. */
+.tarjetas { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.tarjetaEstado {
+  display: grid; gap: 2px; min-width: 130px; padding: 10px 14px;
+  border: 1px solid var(--borde); border-radius: var(--radio-tarjeta);
+  background: var(--superficie); color: var(--texto-superficie); text-decoration: none;
+}
+.tarjetaEstado:hover { border-color: var(--acento); }
+.tarjetaEstado[data-activa="true"] { background: var(--gradiente-azul-metal); border-color: var(--acento); color: var(--texto-superficie-2); }
+.tarjetaNumero { font-size: 20px; font-weight: 700; }
+.tarjetaTexto { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--plata-etiqueta); }
+
+.fila { display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, 220px); gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--borde); }
+.fila:last-child { border-bottom: none; }
+@media (max-width: 700px) { .fila { grid-template-columns: minmax(0, 1fr); } }
+.producto { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.foto { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; background: var(--fondo-foto); flex: none; }
+.titulo { margin: 0 0 4px; font-weight: 600; color: var(--texto); overflow-wrap: anywhere; }
+.texto { margin: 0; font-size: 13px; color: var(--texto-suave); }
+.estadoCaja { display: grid; gap: 6px; justify-items: start; padding: 10px 12px; border: 1px solid var(--borde); border-radius: var(--radio-tarjeta); background: var(--superficie-2); color: var(--texto-superficie-2); }
+.enlace { color: var(--acento-fuerte); font-size: 13px; text-decoration: none; }
+
+.paginacion { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; font-size: 13px; color: var(--texto-suave); }
+.migas { font-size: 13px; color: var(--texto-suave); }
+.migas a { color: var(--acento-fuerte); text-decoration: none; }
+.barra { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+
+.lineaTiempo { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.paso { display: grid; gap: 2px; padding-left: 14px; border-left: 2px solid var(--borde); }
+.pasoActual { border-left-color: var(--acento); }
+.pasoTitulo { margin: 0; font-weight: 600; color: var(--texto); }
+.seccion { display: grid; gap: 10px; }
+.seccionTitulo { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--plata-etiqueta); }
+.rejilla { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .rejilla { grid-template-columns: minmax(0, 1fr); } }
+.columna { display: grid; gap: 16px; }
+.aviso { padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--acento); border-radius: var(--radio-tarjeta); background: var(--superficie-2); color: var(--texto-superficie-2); }
+.ranking { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13.5px; color: var(--texto); }
+.rankingFila { display: flex; justify-content: space-between; gap: 12px; }
+.dosColumnas { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
