@@ -806,6 +806,40 @@ $fn$;
 REVOKE ALL ON FUNCTION superadmin_resumen_empresas() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION superadmin_resumen_empresas() TO superadmin_user;
 
+-- Salud de conexiones (25-nov) para /superadmin/conexiones: mismo patrón
+-- que superadmin_resumen_empresas — SOLO conteos por empresa, nunca una
+-- fila de cuenta, aviso ni sincronización (decisión D8). Umbrales:
+--   ml_sin_renovar: cuenta conectada cuyo token venció hace más de 24 h.
+--     Los procesos lo renuevan solos al usarlo (publicidad, avisos), así
+--     que si sigue vencido es señal de que la renovación está fallando.
+--   avisos_atrasados: avisos de ML sin procesar con más de 1 h.
+--   publicidad_con_error: cuentas conectadas cuya ÚLTIMA sincronización
+--     de publicidad terminó en 'error'.
+CREATE OR REPLACE FUNCTION superadmin_salud_conexiones()
+RETURNS TABLE (
+  empresa_id uuid,
+  ml_conectadas bigint,
+  ml_desconectadas bigint,
+  ml_sin_renovar bigint,
+  avisos_atrasados bigint,
+  publicidad_con_error bigint,
+  falabella_desconectadas bigint
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT e.id,
+    (SELECT count(*) FROM cuentas_ml c WHERE c.empresa_id = e.id AND c.desconectada_ts IS NULL),
+    (SELECT count(*) FROM cuentas_ml c WHERE c.empresa_id = e.id AND c.desconectada_ts IS NOT NULL),
+    (SELECT count(*) FROM cuentas_ml c WHERE c.empresa_id = e.id AND c.desconectada_ts IS NULL AND c.token_expira_ts < now() - interval '24 hours'),
+    (SELECT count(*) FROM avisos_ml a WHERE a.empresa_id = e.id AND a.procesado_ts IS NULL AND a.recibido_ts < now() - interval '1 hour'),
+    (SELECT count(*) FROM cuentas_ml c WHERE c.empresa_id = e.id AND c.desconectada_ts IS NULL
+       AND (SELECT s.estado FROM publicidad_sincronizaciones s WHERE s.cuenta_ml_id = c.id ORDER BY s.iniciada_ts DESC LIMIT 1) = 'error'),
+    (SELECT count(*) FROM cuentas_falabella f WHERE f.empresa_id = e.id AND f.desconectada_ts IS NOT NULL)
+  FROM empresas e
+$fn$;
+REVOKE ALL ON FUNCTION superadmin_salud_conexiones() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION superadmin_salud_conexiones() TO superadmin_user;
+
 -- Auditoría del superadmin (solo lectura en /superadmin/auditoria). superadmin_user
 -- no tiene SELECT sobre auditoria: esta función SECURITY DEFINER devuelve solo las
 -- filas cuyo autor es una cuenta superadmin, y solo ts/accion/entidad/nombre de
