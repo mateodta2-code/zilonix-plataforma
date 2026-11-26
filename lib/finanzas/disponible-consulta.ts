@@ -11,7 +11,7 @@ import {
   obtenerAccessTokenMpVigente,
   RenovacionTokenMpFallidaError,
 } from "@/lib/mp/cuentas";
-import { consultarSaldoMp } from "@/lib/mp/saldo";
+import { verificarEndpointsMp, type EstadoEndpointMp } from "@/lib/mp/saldo";
 import { requierePermiso } from "@/lib/permisos";
 import {
   DisponibleInvalidoError,
@@ -19,7 +19,7 @@ import {
   validarSaldo,
   type CuentaDisponible,
   type SaldoDisponible,
-  type SaldoMpCuenta,
+  type VerificacionMpCuenta,
 } from "./disponible";
 
 // Issue #422 (fase 6, Disponible) — lectura y escritura de cuentas y
@@ -82,35 +82,40 @@ export async function leerDisponible(
   });
 }
 
-// Bloque 2 — saldo en vivo de cada cuenta de Mercado Pago activa. La
-// lista de cuentas sale de una transacción corta; el token y la consulta
-// a Mercado Pago van fuera de dbComoEmpresa y en paralelo: una cuenta
-// caída no tumba la página ni a las demás. Nunca se logea el token ni el
-// body de Mercado Pago: solo el nombre del error, el código y el status.
-export async function leerSaldosMp(empresaId: string, usuarioId: string): Promise<SaldoMpCuenta[]> {
+// Bloque 2 (diagnóstico) — qué responden los endpoints oficiales de
+// Mercado Pago con el token OAuth de cada cuenta activa. La lista de
+// cuentas sale de una transacción corta; el token y las consultas a
+// Mercado Pago van fuera de dbComoEmpresa y en paralelo: una cuenta caída
+// no tumba la página ni a las demás. Nunca se logea el token ni el body de
+// Mercado Pago: solo el nombre del error, el código y el status.
+export async function leerVerificacionMp(empresaId: string, usuarioId: string): Promise<VerificacionMpCuenta[]> {
   await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
   const cuentas = await listarCuentasMpActivas(empresaId);
   if (cuentas.length === 0) return [];
 
   const resultados = await Promise.allSettled(
-    cuentas.map(async (c) => consultarSaldoMp(await obtenerAccessTokenMpVigente(empresaId, c.id), c.cuentaIdExterna))
+    cuentas.map(async (c) => verificarEndpointsMp(await obtenerAccessTokenMpVigente(empresaId, c.id)))
   );
 
-  return cuentas.flatMap((c, i): SaldoMpCuenta[] => {
+  return cuentas.flatMap((c, i): VerificacionMpCuenta[] => {
     const base = { cuentaId: c.id, cuentaIdExterna: c.cuentaIdExterna, nickname: c.nickname };
     const r = resultados[i];
     if (r.status === "fulfilled") {
-      if (r.value.estado === "error") {
-        console.warn(`[lib/finanzas/disponible-consulta] saldo de Mercado Pago no disponible (cuenta ${c.id}):`, r.value.codigo, r.value.status ?? "");
-      }
-      return [{ ...base, ...r.value }];
+      const avisar = (endpoint: string, e: EstadoEndpointMp) => {
+        if (!e.ok) {
+          console.warn(`[lib/finanzas/disponible-consulta] Mercado Pago ${endpoint} no disponible (cuenta ${c.id}):`, e.codigo, e.status ?? "", e.codigoMp ?? "");
+        }
+      };
+      avisar("release_report/list", r.value.liberaciones);
+      avisar("payments/search", r.value.pagos);
+      return [{ ...base, estado: "ok", verificacion: r.value }];
     }
     const error = r.reason;
     // Se desconectó entre la lista y el token: simplemente no se muestra.
     if (error instanceof CuentaMpDesconectadaError) return [];
     if (error instanceof CandadoRenovacionMpError) return [{ ...base, estado: "error", codigo: "mp_renovando" }];
     if (error instanceof RenovacionTokenMpFallidaError) return [{ ...base, estado: "error", codigo: "mp_reconectar" }];
-    console.warn(`[lib/finanzas/disponible-consulta] error leyendo el saldo de Mercado Pago (cuenta ${c.id}):`, error instanceof Error ? error.name : "desconocido");
+    console.warn(`[lib/finanzas/disponible-consulta] error verificando Mercado Pago (cuenta ${c.id}):`, error instanceof Error ? error.name : "desconocido");
     return [{ ...base, estado: "error", codigo: "mp_error" }];
   });
 }

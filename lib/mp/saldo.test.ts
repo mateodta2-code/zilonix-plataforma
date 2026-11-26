@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { consultarSaldoMp, montoMpATexto } from "./saldo";
+import { URL_PAYMENTS_SEARCH, URL_RELEASE_REPORT_LIST, verificarEndpointsMp } from "./saldo";
 
-// Issue #422 (Bloque 2) — saldo de Mercado Pago con fetch simulado.
+// Issue #422 (Bloque 2, diagnóstico) — endpoints oficiales de Mercado Pago
+// con fetch simulado.
 
 function respuesta(status: number, body: unknown): Response {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), {
@@ -10,8 +11,9 @@ function respuesta(status: number, body: unknown): Response {
   });
 }
 
-function simularFetch(impl: () => Promise<Response>) {
-  const espia = vi.fn(impl);
+// Responde según la URL: liberaciones (release_report/list) o pagos.
+function simularFetch(liberaciones: () => Promise<Response>, pagos: () => Promise<Response>) {
+  const espia = vi.fn(async (url: string) => (url === URL_RELEASE_REPORT_LIST ? liberaciones() : pagos()));
   vi.stubGlobal("fetch", espia);
   return espia;
 }
@@ -20,83 +22,105 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("consultarSaldoMp", () => {
-  it("200 con disponible y por liberar", async () => {
-    const espia = simularFetch(async () => respuesta(200, { available_balance: 1500.5, unavailable_balance: 200, currency_id: "COP", total_amount: 1700.5 }));
-    const r = await consultarSaldoMp("TOKEN-SECRETO", "123 456");
-    expect(r).toEqual({ estado: "ok", disponible: "1500.50", porLiberar: "200.00", moneda: "COP" });
-
-    const [url, init] = espia.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://api.mercadopago.com/users/123%20456/mercadopago_account/balance");
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer TOKEN-SECRETO");
-    expect(init.cache).toBe("no-store");
-    expect(init.signal).toBeInstanceOf(AbortSignal);
-  });
-
-  it("200 con decimales largos redondea a 2 decimales", async () => {
-    simularFetch(async () => respuesta(200, { available_balance: 1234.5678, unavailable_balance: 0.005, currency_id: "ARS" }));
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "ok", disponible: "1234.57", porLiberar: "0.01", moneda: "ARS" });
-  });
-
-  it("200 sin unavailable_balance deja porLiberar en null", async () => {
-    simularFetch(async () => respuesta(200, { available_balance: 0, currency_id: "MXN" }));
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "ok", disponible: "0.00", porLiberar: null, moneda: "MXN" });
-  });
-
-  it("200 sin available_balance o sin moneda válida es respuesta inválida", async () => {
-    simularFetch(async () => respuesta(200, { unavailable_balance: 10, currency_id: "COP" }));
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "error", codigo: "mp_respuesta_invalida", status: 200 });
-    simularFetch(async () => respuesta(200, { available_balance: 10, currency_id: "pesos colombianos" }));
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "error", codigo: "mp_respuesta_invalida", status: 200 });
-  });
-
-  it("403 expone status y un código corto de Mercado Pago", async () => {
-    simularFetch(async () => respuesta(403, { error: "forbidden", message: "texto largo con datos que no se expone" }));
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "error", codigo: "mp_403", status: 403, codigoMp: "forbidden" });
-  });
-
-  it("401 sin body JSON", async () => {
-    simularFetch(async () => respuesta(401, "no autorizado"));
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "error", codigo: "mp_401", status: 401 });
-  });
-
-  it("500 descarta un código que no pasa la lista blanca", async () => {
-    simularFetch(async () => respuesta(500, { code: "esto tiene espacios y <html>" }));
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "error", codigo: "mp_http", status: 500 });
-  });
-
-  it("error de red o timeout", async () => {
-    simularFetch(async () => {
-      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+describe("verificarEndpointsMp", () => {
+  it("200/200 con cantidades, headers y URLs oficiales", async () => {
+    const espia = simularFetch(
+      async () => respuesta(200, [{ file_name: "a.csv" }, { file_name: "b.csv" }]),
+      async () => respuesta(200, { paging: { total: 50 }, results: [{ id: 1 }] })
+    );
+    const r = await verificarEndpointsMp("TOKEN-SECRETO");
+    expect(r).toEqual({
+      liberaciones: { ok: true, status: 200, cantidad: 2 },
+      pagos: { ok: true, status: 200, cantidad: 1 },
     });
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "error", codigo: "mp_red" });
-    simularFetch(async () => {
-      throw new TypeError("fetch failed");
+
+    expect(espia).toHaveBeenCalledTimes(2);
+    const urls = espia.mock.calls.map((c) => c[0]).sort();
+    expect(urls).toEqual([URL_RELEASE_REPORT_LIST, URL_PAYMENTS_SEARCH].sort());
+    expect(URL_RELEASE_REPORT_LIST).toBe("https://api.mercadopago.com/v1/account/release_report/list");
+    expect(URL_PAYMENTS_SEARCH).toBe("https://api.mercadopago.com/v1/payments/search?limit=1");
+    for (const llamada of espia.mock.calls) {
+      const init = (llamada as unknown as [string, RequestInit])[1];
+      expect((init.headers as Record<string, string>).Authorization).toBe("Bearer TOKEN-SECRETO");
+      expect(init.cache).toBe("no-store");
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+
+  it("403 en liberaciones y 200 en pagos", async () => {
+    simularFetch(
+      async () => respuesta(403, { error: "forbidden", message: "texto largo con datos que no se expone" }),
+      async () => respuesta(200, { results: [] })
+    );
+    expect(await verificarEndpointsMp("t")).toEqual({
+      liberaciones: { ok: false, status: 403, codigo: "mp_403", codigoMp: "forbidden" },
+      pagos: { ok: true, status: 200, cantidad: 0 },
     });
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "error", codigo: "mp_red" });
   });
 
-  it("JSON inválido en un 200", async () => {
-    simularFetch(async () => respuesta(200, "{no es json"));
-    expect(await consultarSaldoMp("t", "1")).toEqual({ estado: "error", codigo: "mp_respuesta_invalida", status: 200 });
+  it("200 en liberaciones y 403 en pagos", async () => {
+    simularFetch(
+      async () => respuesta(200, []),
+      async () => respuesta(403, { code: "PA_UNAUTHORIZED_RESULT_FROM_POLICIES", message: "no" })
+    );
+    expect(await verificarEndpointsMp("t")).toEqual({
+      liberaciones: { ok: true, status: 200, cantidad: 0 },
+      pagos: { ok: false, status: 403, codigo: "mp_403", codigoMp: "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" },
+    });
   });
 
-  it("nunca devuelve el token en el resultado", async () => {
-    simularFetch(async () => respuesta(403, { error: "TOKEN-SECRETO" }));
-    const r = await consultarSaldoMp("TOKEN-SECRETO-LARGO", "1");
-    expect(JSON.stringify(r)).not.toContain("TOKEN-SECRETO-LARGO");
+  it("401 sin body JSON y 500 con un código que no pasa la lista blanca", async () => {
+    simularFetch(
+      async () => respuesta(401, "no autorizado"),
+      async () => respuesta(500, { code: "esto tiene espacios y <html>" })
+    );
+    expect(await verificarEndpointsMp("t")).toEqual({
+      liberaciones: { ok: false, status: 401, codigo: "mp_401" },
+      pagos: { ok: false, status: 500, codigo: "mp_http" },
+    });
   });
-});
 
-describe("montoMpATexto", () => {
-  it("formatea compatible con aCentavos", () => {
-    expect(montoMpATexto(10)).toBe("10.00");
-    expect(montoMpATexto(-3.456)).toBe("-3.46");
-    expect(montoMpATexto(-0.001)).toBe("0.00");
-    expect(montoMpATexto("99.9")).toBe("99.90");
-    expect(montoMpATexto(Number.NaN)).toBeNull();
-    expect(montoMpATexto(Infinity)).toBeNull();
-    expect(montoMpATexto(null)).toBeNull();
-    expect(montoMpATexto("")).toBeNull();
+  it("timeout o error de red", async () => {
+    simularFetch(
+      async () => {
+        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      },
+      async () => {
+        throw new TypeError("fetch failed");
+      }
+    );
+    expect(await verificarEndpointsMp("t")).toEqual({
+      liberaciones: { ok: false, codigo: "mp_red" },
+      pagos: { ok: false, codigo: "mp_red" },
+    });
+  });
+
+  it("JSON inesperado en un 200: ok sin cantidad", async () => {
+    simularFetch(
+      async () => respuesta(200, { no: "es un array" }),
+      async () => respuesta(200, "{no es json")
+    );
+    expect(await verificarEndpointsMp("t")).toEqual({
+      liberaciones: { ok: true, status: 200 },
+      pagos: { ok: true, status: 200 },
+    });
+    simularFetch(
+      async () => respuesta(200, "null"),
+      async () => respuesta(200, { results: "no es array" })
+    );
+    expect(await verificarEndpointsMp("t")).toEqual({
+      liberaciones: { ok: true, status: 200 },
+      pagos: { ok: true, status: 200 },
+    });
+  });
+
+  it("nunca devuelve el token ni el body en el resultado", async () => {
+    simularFetch(
+      async () => respuesta(403, { error: "forbidden", message: "TOKEN-SECRETO-LARGO" }),
+      async () => respuesta(200, { results: [{ payer: { email: "alguien@example.com" } }] })
+    );
+    const texto = JSON.stringify(await verificarEndpointsMp("TOKEN-SECRETO-LARGO"));
+    expect(texto).not.toContain("TOKEN-SECRETO-LARGO");
+    expect(texto).not.toContain("alguien@example.com");
   });
 });

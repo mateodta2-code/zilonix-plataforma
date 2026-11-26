@@ -3,7 +3,6 @@ import {
   armarFilas,
   DisponibleInvalidoError,
   esDesactualizado,
-  filasDesdeSaldosMp,
   historialDeCuenta,
   MONEDAS_DISPONIBLE,
   saldoVigente,
@@ -14,7 +13,6 @@ import {
   validarSaldo,
   type CuentaDisponible,
   type SaldoDisponible,
-  type SaldoMpCuenta,
 } from "./disponible";
 import { SITIOS_ML } from "@/lib/ml/sitios";
 
@@ -154,45 +152,5 @@ describe("validación", () => {
     expect(() => validarSaldo({ saldo: "abc", fechaCorte: HOY, nota: "" }, HOY)).toThrow(DisponibleInvalidoError);
     expect(() => validarSaldo({ saldo: "10", fechaCorte: "2026-11-23", nota: "" }, HOY)).toThrow(/futura/);
     expect(() => validarSaldo({ saldo: "10", fechaCorte: "2026-02-30", nota: "" }, HOY)).toThrow(DisponibleInvalidoError);
-  });
-});
-
-describe("filasDesdeSaldosMp", () => {
-  const ok: SaldoMpCuenta = { cuentaId: "u1", cuentaIdExterna: "998877", nickname: "TIENDA", estado: "ok", disponible: "1500.50", porLiberar: "200.00", moneda: "COP" };
-  const sinNick: SaldoMpCuenta = { cuentaId: "u2", cuentaIdExterna: "554433", nickname: null, estado: "ok", disponible: "10.00", porLiberar: null, moneda: "ARS" };
-  const conError: SaldoMpCuenta = { cuentaId: "u3", cuentaIdExterna: "112233", nickname: "OTRA", estado: "error", codigo: "mp_403", status: 403 };
-
-  it("convierte solo los resultados ok, con id mp: y la fecha de hoy", () => {
-    expect(filasDesdeSaldosMp([ok, conError, sinNick], HOY)).toEqual([
-      { id: "mp:u1", nombre: "TIENDA", tipo: "billetera", entidad: "Mercado Pago", ultimos4: null, moneda: "COP", activa: true, saldo: "1500.50", fechaCorte: HOY, desactualizado: false },
-      { id: "mp:u2", nombre: "554433", tipo: "billetera", entidad: "Mercado Pago", ultimos4: null, moneda: "ARS", activa: true, saldo: "10.00", fechaCorte: HOY, desactualizado: false },
-    ]);
-  });
-
-  it("suma el disponible (no el por liberar) al total y a Billeteras, por moneda", () => {
-    const manuales = armarFilas(
-      [cuenta("banco"), cuenta("nequi", { tipo: "billetera", entidad: "Nequi" })],
-      [saldo("banco", "1000.00", HOY), saldo("nequi", "99.50", HOY)],
-      HOY
-    );
-    const filas = [...manuales, ...filasDesdeSaldosMp([ok, conError, sinNick], HOY)];
-
-    const totales = totalesPorMoneda(filas);
-    expect(totales.map((t) => [t.moneda, t.total, t.cuentas])).toEqual([
-      ["ARS", "10.00", 1],
-      ["COP", "2600.00", 3],
-    ]);
-
-    const billeteras = totalesPorTipo(filas).find((t) => t.tipo === "billetera")!.totales;
-    expect(billeteras.map((t) => [t.moneda, t.total, t.cuentas])).toEqual([
-      ["ARS", "10.00", 1],
-      ["COP", "1600.00", 2],
-    ]);
-    const bancos = totalesPorTipo(filas).find((t) => t.tipo === "banco")!.totales;
-    expect(bancos.map((t) => t.total)).toEqual(["1000.00"]);
-  });
-
-  it("sin resultados ok no agrega filas", () => {
-    expect(filasDesdeSaldosMp([conError], HOY)).toEqual([]);
   });
 });

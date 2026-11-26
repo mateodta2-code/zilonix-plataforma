@@ -4,16 +4,16 @@ import {
   armarFilas,
   DIAS_PARA_DESACTUALIZADO,
   ETIQUETA_TIPO_CUENTA,
-  filasDesdeSaldosMp,
   historialDeCuenta,
   MONEDAS_DISPONIBLE,
   TIPOS_CUENTA_DISPONIBLE,
   totalesPorMoneda,
   totalesPorTipo,
-  type SaldoMpCuenta,
+  type VerificacionMpCuenta,
   type TotalDisponible,
 } from "@/lib/finanzas/disponible";
-import { leerDisponible, leerSaldosMp } from "@/lib/finanzas/disponible-consulta";
+import { leerDisponible, leerVerificacionMp } from "@/lib/finanzas/disponible-consulta";
+import type { EstadoEndpointMp } from "@/lib/mp/saldo";
 import { diaBogota } from "@/lib/finanzas/utilidad-venta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles";
@@ -33,21 +33,38 @@ import styles from "../finanzas.module.css";
 // Issue #422 (fase 6 de Finanzas) — Disponible: «¿cuánta plata tengo hoy
 // y dónde?». Ver exige finanzas.consultar; crear cuentas, registrar
 // saldos y desactivar, finanzas.modificar (también en actions.ts y en
-// lib/finanzas/disponible-consulta.ts). Los saldos se registran a mano,
-// salvo Mercado Pago: cada cuenta conectada en /panel/conectar-ml se
-// consulta en vivo (Bloque 2) y su disponible suma a los totales. Subir
-// el extracto bancario queda para otro PR.
+// lib/finanzas/disponible-consulta.ts). Los saldos se registran a mano.
+// Mercado Pago (Bloque 2, diagnóstico): cada cuenta conectada en
+// /panel/conectar-ml muestra qué responden los endpoints oficiales
+// (liberaciones y pagos) con su token OAuth; todavía no suma a los
+// totales. Subir el extracto bancario queda para otro PR.
 
 const ETIQUETA_TIPO_SINGULAR = { banco: "Banco", billetera: "Billetera", efectivo: "Efectivo" } as const;
 
-const MENSAJE_ERROR_MP: Partial<Record<Extract<SaldoMpCuenta, { estado: "error" }>["codigo"], string>> = {
+type ErrorTokenMp = Extract<VerificacionMpCuenta, { estado: "error" }>;
+
+const MENSAJE_ERROR_TOKEN_MP: Record<ErrorTokenMp["codigo"], string> = {
   mp_renovando: "Renovando la conexión, recarga en unos segundos",
   mp_reconectar: "Hay que reconectar la cuenta",
+  mp_error: "No se pudo leer la conexión",
 };
 
-function textoErrorMp(r: Extract<SaldoMpCuenta, { estado: "error" }>): string {
-  const detalle = [r.codigo, r.status, r.codigoMp].filter((x) => x !== undefined && x !== "").join(" · ");
-  return `${MENSAJE_ERROR_MP[r.codigo] ?? "No disponible"} (${detalle})`;
+// «Liberaciones: OK (200 · 3 reportes)» / «Pagos: 403 (forbidden)».
+function ChipEndpointMp({ etiqueta, estado, unidad }: { etiqueta: string; estado: EstadoEndpointMp; unidad?: (n: number) => string }) {
+  if (estado.ok) {
+    const cantidad = estado.cantidad === undefined ? "" : ` · ${unidad ? unidad(estado.cantidad) : estado.cantidad}`;
+    return (
+      <Chip estado="exito" title="Respuesta de Mercado Pago al abrir la página">
+        {etiqueta}: OK ({estado.status}
+        {cantidad})
+      </Chip>
+    );
+  }
+  return (
+    <Chip estado="advertencia" title="Respuesta de Mercado Pago al abrir la página">
+      {etiqueta}: {estado.status ?? "sin respuesta"} ({estado.codigoMp ?? estado.codigo})
+    </Chip>
+  );
 }
 
 function porMoneda(totales: TotalDisponible[]): string | undefined {
@@ -74,11 +91,11 @@ export default async function DisponiblePage({ searchParams }: { searchParams: R
   const { usuario, activa: empresa, rolNombre } = await obtenerContextoPanel();
   let puedeModificar = false;
   let datos;
-  let saldosMp: SaldoMpCuenta[];
+  let verificacionMp: VerificacionMpCuenta[];
   try {
     const miMembresia = await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
     puedeModificar = tienePermiso(miMembresia.permisos, "finanzas", "modificar");
-    [datos, saldosMp] = await Promise.all([leerDisponible(empresa.id, usuario.id), leerSaldosMp(empresa.id, usuario.id)]);
+    [datos, verificacionMp] = await Promise.all([leerDisponible(empresa.id, usuario.id), leerVerificacionMp(empresa.id, usuario.id)]);
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     return <SinAcceso mensaje={`Tu rol (${rolNombre}) no tiene acceso a Finanzas.`} />;
@@ -86,12 +103,11 @@ export default async function DisponiblePage({ searchParams }: { searchParams: R
 
   const hoy = diaBogota(new Date());
   // `filas` = solo cuentas manuales (select de «Registrar saldo»,
-  // desactivar e historial esperan un UUID). Los totales suman además el
-  // disponible en vivo de Mercado Pago.
+  // desactivar e historial esperan un UUID). Mercado Pago todavía no suma
+  // a los totales: solo se muestra el diagnóstico de sus endpoints.
   const filas = armarFilas(datos.cuentas, datos.saldos, hoy);
-  const filasTotales = [...filas, ...filasDesdeSaldosMp(saldosMp, hoy)];
-  const totales = totalesPorMoneda(filasTotales);
-  const porTipo = totalesPorTipo(filasTotales);
+  const totales = totalesPorMoneda(filas);
+  const porTipo = totalesPorTipo(filas);
   const activas = filas.filter((f) => f.activa);
   const error = normalizarParametro(searchParams.error);
   const ok = normalizarParametro(searchParams.ok);
@@ -160,7 +176,7 @@ export default async function DisponiblePage({ searchParams }: { searchParams: R
               )}
             </FilaTabla>
           ))}
-          {saldosMp.length === 0 ? (
+          {verificacionMp.length === 0 ? (
             // Sin cuentas de Mercado Pago conectadas: la fila de siempre.
             <FilaTabla>
               <CeldaTabla>
@@ -178,49 +194,44 @@ export default async function DisponiblePage({ searchParams }: { searchParams: R
               {puedeModificar && <CeldaTabla>{""}</CeldaTabla>}
             </FilaTabla>
           ) : (
-            saldosMp.map((r) => (
+            verificacionMp.map((r) => (
               <FilaTabla key={`mp:${r.cuentaId}`}>
                 <CeldaTabla>
-                  <strong>{r.nickname || r.cuentaIdExterna}</strong>
+                  <strong>{r.nickname ?? r.cuentaIdExterna}</strong>
                 </CeldaTabla>
                 <CeldaTabla>Billetera</CeldaTabla>
                 <CeldaTabla>Mercado Pago</CeldaTabla>
                 <CeldaTabla numerica>
+                  <span className={styles.suave}>—</span>
+                </CeldaTabla>
+                <CeldaTabla>—</CeldaTabla>
+                <CeldaTabla>
                   {r.estado === "ok" ? (
                     <>
-                      {mostrarMontoIso(r.disponible, r.moneda)}
-                      {r.porLiberar !== null && Number(r.porLiberar) > 0 && (
+                      <ChipEndpointMp
+                        etiqueta="Liberaciones"
+                        estado={r.verificacion.liberaciones}
+                        unidad={(n) => `${n} ${n === 1 ? "reporte" : "reportes"}`}
+                      />{" "}
+                      <ChipEndpointMp etiqueta="Pagos" estado={r.verificacion.pagos} />
+                    </>
+                  ) : (
+                    <>
+                      <Chip estado="advertencia">
+                        {MENSAJE_ERROR_TOKEN_MP[r.codigo]} ({r.codigo})
+                      </Chip>
+                      {r.codigo === "mp_reconectar" && (
                         <>
-                          <br />
-                          <span className={styles.suave}>+ {mostrarMontoIso(r.porLiberar, r.moneda)} por liberar</span>
+                          {" "}
+                          <BotonLink href="/panel/conectar-ml" variante="fantasma">
+                            Reconectar
+                          </BotonLink>
                         </>
                       )}
                     </>
-                  ) : (
-                    <span className={styles.suave}>—</span>
                   )}
                 </CeldaTabla>
-                <CeldaTabla>{r.estado === "ok" ? hoy : "—"}</CeldaTabla>
-                <CeldaTabla>
-                  {r.estado === "ok" ? (
-                    <Chip estado="exito" title="Saldo consultado a Mercado Pago al abrir la página">
-                      En vivo
-                    </Chip>
-                  ) : (
-                    <Chip estado="advertencia">{textoErrorMp(r)}</Chip>
-                  )}
-                </CeldaTabla>
-                {puedeModificar && (
-                  <CeldaTabla>
-                    {r.estado === "error" && r.codigo === "mp_reconectar" ? (
-                      <BotonLink href="/panel/conectar-ml" variante="fantasma">
-                        Reconectar
-                      </BotonLink>
-                    ) : (
-                      ""
-                    )}
-                  </CeldaTabla>
-                )}
+                {puedeModificar && <CeldaTabla>{""}</CeldaTabla>}
               </FilaTabla>
             ))
           )}
