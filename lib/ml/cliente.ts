@@ -1864,7 +1864,7 @@ export async function responderPreguntaMl(preguntaId: string, texto: string, tok
 //   buckets[].variables[] con status y title). /items/{id}/health da 404.
 // - Competencia: /items/{id}/price_to_win?siteId=&version=v2 (status).
 
-export type EstadoListadoMl = "active" | "paused";
+export type EstadoListadoMl = "active" | "paused" | "under_review" | "pending";
 
 export async function listarItemsVendedorMl(
   vendedorId: string,
@@ -2424,4 +2424,133 @@ export async function productoCatalogoDeItemMl(itemId: string, token: string): P
   if (!resp.ok) return null;
   const id = resp.data.catalog_product_id;
   return typeof id === "string" && PATRON_ID_PRODUCTO_O_ITEM.test(id) ? id : null;
+}
+
+// ---------- Optimización — alertas (solo lectura) ----------
+// Tarjetas de alerta como las de Mercado Libre (Central de vendedores →
+// Publicaciones). Todo GET documentado; si Mercado Libre falla devuelven
+// null y la página sigue (nunca tumban la lista).
+// - Moderaciones: https://developers.mercadolibre.com.co/gestionar-moderaciones
+// - Estados de ítems: https://developers.mercadolibre.com.co/es_co/items-y-busquedas
+// - Referencias de precios: https://developers.mercadolibre.com.co/es_co/referencias-de-precios
+
+export type EstadoModeracionMl = "under_review" | "pending";
+const ESTADOS_MODERACION: readonly string[] = ["under_review", "pending"];
+
+export async function contarItemsVendedorPorEstadoMl(vendedorId: string, token: string, estado: EstadoModeracionMl): Promise<number | null> {
+  exigirId(vendedorId, PATRON_ID_VENDEDOR, "vendedorId");
+  if (!ESTADOS_MODERACION.includes(estado)) throw new Error("Estado de publicación no permitido — no se llamó a la API.");
+  try {
+    const resp = await pedirLecturaMl<{ paging?: { total?: unknown } }>(`/users/${vendedorId}/items/search`, token, { query: `?status=${estado}&limit=1` });
+    return resp.ok ? numeroONull(resp.data?.paging?.total) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Una página de ids por estado de moderación (máx. 50). Reusa
+// listarItemsVendedorMl; si Mercado Libre falla, null.
+export async function idsItemsVendedorPorEstadoMl(
+  vendedorId: string,
+  token: string,
+  estado: EstadoModeracionMl,
+  offset: number,
+  limite: number
+): Promise<{ ids: string[]; total: number } | null> {
+  if (!ESTADOS_MODERACION.includes(estado)) throw new Error("Estado de publicación no permitido — no se llamó a la API.");
+  try {
+    return await listarItemsVendedorMl(vendedorId, token, { estado, offset, limite });
+  } catch (error) {
+    if (error instanceof MlRespuestaInesperadaError || error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) return null;
+    throw error;
+  }
+}
+
+export type ModeracionItemMl = { motivo: string | null; solucion: string | null; fecha: string | null };
+
+// /moderations/last_moderation/{id}-ITM → { moderations: [{ date_created,
+// wordings: [{ type: REASON | REMEDY, value }] }] }. Toma la primera.
+export function leerModeracionItem(data: unknown): ModeracionItemMl | null {
+  const d = data as { moderations?: unknown; wordings?: unknown; date_created?: unknown } | null;
+  const lista = Array.isArray(d?.moderations) ? d.moderations : null;
+  const mod = (lista ? lista[0] : d) as { wordings?: unknown; date_created?: unknown } | undefined;
+  if (!mod || typeof mod !== "object") return null;
+  let motivo: string | null = null;
+  let solucion: string | null = null;
+  for (const w of Array.isArray(mod.wordings) ? mod.wordings : []) {
+    const { type, value } = (w ?? {}) as { type?: unknown; value?: unknown };
+    if (typeof value !== "string" || !value.trim()) continue;
+    if (type === "REASON" && motivo === null) motivo = value.trim();
+    if (type === "REMEDY" && solucion === null) solucion = value.trim();
+  }
+  const fecha = typeof mod.date_created === "string" ? mod.date_created : null;
+  if (motivo === null && solucion === null && fecha === null) return null;
+  return { motivo, solucion, fecha };
+}
+
+export async function ultimaModeracionItemMl(itemId: string, token: string): Promise<ModeracionItemMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  try {
+    // El sufijo -ITM lo arma el código, nunca la persona.
+    const resp = await pedirLecturaMl<unknown>(`/moderations/last_moderation/${itemId}-ITM`, token);
+    return resp.ok ? leerModeracionItem(resp.data) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function leerItemsConReferenciaPrecio(data: unknown): { total: number; ids: string[] } | null {
+  const d = data as { total?: unknown; items?: unknown } | null;
+  if (!d || !Array.isArray(d.items)) return null;
+  const ids = d.items.filter((i): i is string => typeof i === "string" && PATRON_ID_PRODUCTO_O_ITEM.test(i));
+  const total = numeroONull(d.total);
+  return { total: total !== null && total >= ids.length ? total : ids.length, ids };
+}
+
+export async function itemsConReferenciaPrecioMl(vendedorId: string, token: string): Promise<{ total: number; ids: string[] } | null> {
+  exigirId(vendedorId, PATRON_ID_VENDEDOR, "vendedorId");
+  try {
+    const resp = await pedirLecturaMl<unknown>(`/suggestions/user/${vendedorId}/items`, token);
+    return resp.ok ? leerItemsConReferenciaPrecio(resp.data) : null;
+  } catch {
+    return null;
+  }
+}
+
+export type ReferenciaPrecioItemMl = {
+  estado: string | null;
+  precioActual: number | null;
+  precioSugerido: number | null;
+  diferenciaPorcentaje: number | null;
+  moneda: string | null;
+};
+
+export function leerReferenciaPrecioItem(data: unknown): ReferenciaPrecioItemMl | null {
+  const d = data as {
+    status?: unknown;
+    current_price?: { amount?: unknown; currency_id?: unknown };
+    suggested_price?: { amount?: unknown; currency_id?: unknown };
+    percent_difference?: unknown;
+    currency_id?: unknown;
+  } | null;
+  if (!d || typeof d !== "object") return null;
+  const moneda = [d.currency_id, d.current_price?.currency_id, d.suggested_price?.currency_id].find((m): m is string => typeof m === "string" && /^[A-Z]{3}$/.test(m)) ?? null;
+  return {
+    estado: typeof d.status === "string" ? d.status : null,
+    precioActual: numeroONull(d.current_price?.amount),
+    precioSugerido: numeroONull(d.suggested_price?.amount),
+    diferenciaPorcentaje: numeroONull(d.percent_difference),
+    moneda,
+  };
+}
+
+// 404 = sin referencia para esa publicación (no es un error).
+export async function referenciaPrecioItemMl(itemId: string, token: string): Promise<ReferenciaPrecioItemMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  try {
+    const resp = await pedirLecturaMl<unknown>(`/suggestions/items/${itemId}/details`, token);
+    return resp.ok ? leerReferenciaPrecioItem(resp.data) : null;
+  } catch {
+    return null;
+  }
 }
