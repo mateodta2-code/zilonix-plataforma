@@ -8,8 +8,10 @@
 import { and, eq, ilike, or } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { publicaciones } from "@/db/schema";
-import { buscarItemsPorSkuMl, leerItemsOptimizacionMl, listarItemsVendedorMl, PATRON_ID_PRODUCTO_O_ITEM, type ItemOptimizacionMl } from "@/lib/ml/cliente";
+import { buscarItemsPorSkuMl, leerItemsOptimizacionMl, listarItemsVendedorMl, PATRON_ID_PRODUCTO_O_ITEM, type ItemOptimizacionMl, type ReferenciaPrecioItemMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import type { ClaveAlerta } from "@/lib/optimizacion/alertas";
+import { alertaCompetencia, alertaPrecioAlto } from "@/lib/optimizacion/alertasDatos";
 import { TAMANO_PAGINA, type DiasMetricas, type FiltroEstado } from "@/lib/optimizacion/textos";
 import { ventasRecientesPorItem, type VentasItem } from "@/lib/optimizacion/ventas";
 
@@ -26,6 +28,8 @@ export type PaginaOptimizacion = {
   // Publicaciones de la página que Mercado Libre no devolvió en el
   // detalle (un lote que falló): se avisan, no se esconden en silencio.
   omitidas: number;
+  // Solo con ?alerta=: lo que la alerta sabe de cada publicación.
+  alerta?: { clave: ClaveAlerta; referencias?: Record<string, ReferenciaPrecioItemMl>; estados?: Record<string, string> };
 };
 
 export const MAXIMO_RESULTADOS_BUSQUEDA = 200;
@@ -59,18 +63,63 @@ async function idsDeBusqueda(empresaId: string, cuentaMlId: string, vendedorId: 
   return [...new Set([...porSku, ...locales.map((f) => f.itemId)])].filter((id) => PATRON_ID_PRODUCTO_O_ITEM.test(id)).slice(0, MAXIMO_RESULTADOS_BUSQUEDA);
 }
 
+// «Inactivas por incumplir políticas»: under_review y luego pending, como
+// una sola lista paginada (los ids salen de items/search, en vivo).
+async function idsModeradas(vendedorId: string, token: string, pagina: number): Promise<{ ids: string[]; total: number }> {
+  const offset = (pagina - 1) * TAMANO_PAGINA;
+  const enRevision = await listarItemsVendedorMl(vendedorId, token, { estado: "under_review", offset, limite: TAMANO_PAGINA });
+  const ids = [...enRevision.ids];
+  let total = enRevision.total;
+  const pendientesOffset = Math.max(offset - enRevision.total, 0);
+  if (ids.length < TAMANO_PAGINA) {
+    const pendientes = await listarItemsVendedorMl(vendedorId, token, { estado: "pending", offset: pendientesOffset, limite: TAMANO_PAGINA - ids.length });
+    ids.push(...pendientes.ids);
+    total += pendientes.total;
+  } else {
+    // Página llena de under_review: solo falta el total de pending.
+    total += (await listarItemsVendedorMl(vendedorId, token, { estado: "pending", offset: 0, limite: 1 })).total;
+  }
+  return { ids, total };
+}
+
 export async function leerPaginaOptimizacion(
   empresaId: string,
-  cuenta: { id: string; cuentaIdExterna: string },
-  filtros: { estado: FiltroEstado; texto: string; pagina: number; dias: DiasMetricas },
+  cuenta: { id: string; cuentaIdExterna: string; siteId: string },
+  filtros: { estado: FiltroEstado; texto: string; pagina: number; dias: DiasMetricas; alerta?: ClaveAlerta | null },
   ahora: Date
 ): Promise<PaginaOptimizacion> {
   const token = await obtenerAccessTokenVigente(empresaId, cuenta.id);
   let items: ItemOptimizacionMl[];
   let total: number;
   let omitidas = 0;
+  let extraAlerta: PaginaOptimizacion["alerta"];
 
-  if (filtros.texto) {
+  // Con ?alerta= se ignoran el estado y la búsqueda.
+  if (filtros.alerta) {
+    let ids: string[];
+    if (filtros.alerta === "moderadas") {
+      const p = await idsModeradas(cuenta.cuentaIdExterna, token, filtros.pagina);
+      ids = p.ids;
+      total = p.total;
+      extraAlerta = { clave: "moderadas" };
+    } else if (filtros.alerta === "precio_alto") {
+      const r = await alertaPrecioAlto(cuenta.cuentaIdExterna, token);
+      ids = r.ids;
+      total = r.ids.length;
+      extraAlerta = { clave: "precio_alto", referencias: r.referencias };
+    } else {
+      const r = await alertaCompetencia(cuenta.cuentaIdExterna, cuenta.siteId, token);
+      ids = r.ids;
+      total = r.ids.length;
+      extraAlerta = { clave: "competencia", estados: r.estados };
+    }
+    const porId = new Map((await leerItemsOptimizacionMl(ids, token)).map((i) => [i.id, i]));
+    items = ids.flatMap((id) => {
+      const item = porId.get(id);
+      return item ? [item] : [];
+    });
+    omitidas = ids.length - items.length;
+  } else if (filtros.texto) {
     // Búsqueda: se traen todos los candidatos, se filtran por estado y
     // se pagina acá.
     const ids = await idsDeBusqueda(empresaId, cuenta.id, cuenta.cuentaIdExterna, token, filtros.texto);
@@ -110,5 +159,6 @@ export async function leerPaginaOptimizacion(
     paginas: Math.max(1, Math.ceil(total / TAMANO_PAGINA)),
     busquedaLocal: Boolean(filtros.texto),
     omitidas,
+    ...(extraAlerta ? { alerta: extraAlerta } : {}),
   };
 }

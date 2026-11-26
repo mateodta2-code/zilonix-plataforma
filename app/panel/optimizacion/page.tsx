@@ -20,6 +20,9 @@ import { DIAS_METRICAS, leerBusqueda, leerDiasMetricas, leerFiltroEstado, leerPa
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
+import { leerFiltroAlerta, tituloAlerta } from "@/lib/optimizacion/alertas";
+import { AlertasPublicaciones } from "./AlertasPublicaciones";
+import { DetalleAlerta } from "./DetalleAlerta";
 import { ResumenTienda } from "./ResumenTienda";
 import { TablaOptimizacion } from "./TablaOptimizacion";
 import styles from "./page.module.css";
@@ -55,7 +58,7 @@ function hrefOptimizacion(params: { cuenta: string | null; estado: FiltroEstado;
 export default async function OptimizacionPage({
   searchParams,
 }: {
-  searchParams?: { cuenta?: ParametroUrl; estado?: ParametroUrl; q?: ParametroUrl; pagina?: ParametroUrl; dias?: ParametroUrl };
+  searchParams?: { cuenta?: ParametroUrl; estado?: ParametroUrl; q?: ParametroUrl; pagina?: ParametroUrl; dias?: ParametroUrl; alerta?: ParametroUrl };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -83,6 +86,7 @@ export default async function OptimizacionPage({
   const texto = leerBusqueda(primero(searchParams?.q));
   const pagina = leerPagina(primero(searchParams?.pagina));
   const dias = leerDiasMetricas(primero(searchParams?.dias));
+  const alerta = leerFiltroAlerta(primero(searchParams?.alerta));
   const { cuentas, cuentaId } = await leerCuentaMlDeQuery(empresa.id, cuentaParam);
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
   const puedeModificar = miMembresia ? tienePermiso(miMembresia.permisos, "inventario", "modificar") : false;
@@ -98,7 +102,7 @@ export default async function OptimizacionPage({
     const ahora = new Date();
     // El resumen de la tienda nunca tumba la lista: si falla, no se muestra.
     const [lista, resumenLeido] = await Promise.all([
-      leerPaginaOptimizacion(empresa.id, conectada, { estado, texto, pagina, dias }, ahora).then(
+      leerPaginaOptimizacion(empresa.id, conectada, { estado, texto, pagina, dias, alerta }, ahora).then(
         (d) => ({ ok: true as const, datos: d }),
         (error: unknown) => ({ ok: false as const, error })
       ),
@@ -122,6 +126,8 @@ export default async function OptimizacionPage({
     }
   }
   const base = { cuenta: cuentaId, estado, q: texto, pagina: 1, dias };
+  const hrefSinAlerta = cuentaId ? `/panel/optimizacion?cuenta=${cuentaId}` : "/panel/optimizacion";
+  const hrefPagina = (n: number) => (alerta ? `${hrefSinAlerta}&alerta=${alerta}${n > 1 ? `&pagina=${n}` : ""}` : hrefOptimizacion({ ...base, pagina: n }));
 
   return (
     <>
@@ -140,6 +146,8 @@ export default async function OptimizacionPage({
       <div className={styles.panelDatos}>
         <SelectorCuentaMl empresaId={empresa.id} cuenta={cuentaParam} parametros={{ ...(estado !== "activas" ? { estado } : {}), ...(texto ? { q: texto } : {}), ...(dias !== DIAS_METRICAS ? { dias: String(dias) } : {}) }} />
       </div>
+
+      {conectada && !aviso ? <AlertasPublicaciones cuentaMlId={conectada.id} idioma={conectada.idioma} activa={alerta} /> : null}
 
       {conectada && resumen && !aviso ? (
         <Tarjeta className={styles.tarjeta}>
@@ -198,6 +206,14 @@ export default async function OptimizacionPage({
               ))}
             </span>
           </div>
+          {alerta ? (
+            <p className={styles.nota}>
+              {`Mostrando: ${tituloAlerta(alerta)} · `}
+              <Link scroll={false} href={hrefSinAlerta}>
+                Quitar filtro
+              </Link>
+            </p>
+          ) : null}
           <p className={styles.nota}>
             {`${datos.total} ${datos.total === 1 ? "publicación" : "publicaciones"}.`}
             {datos.busquedaLocal
@@ -210,8 +226,19 @@ export default async function OptimizacionPage({
               {`Mercado Libre no entregó el detalle de ${datos.omitidas} ${datos.omitidas === 1 ? "publicación" : "publicaciones"} de esta página. Actualiza para reintentar.`}
             </p>
           ) : null}
+          {datos.alerta ? (
+            <DetalleAlerta
+              clave={datos.alerta.clave}
+              cuentaMlId={conectada.id}
+              siteId={conectada.siteId}
+              idioma={conectada.idioma}
+              filas={datos.filas.map((f) => ({ id: f.id, titulo: f.titulo }))}
+              referencias={datos.alerta.referencias}
+              estados={datos.alerta.estados}
+            />
+          ) : null}
           {datos.filas.length === 0 ? (
-            <EstadoVacio>{texto ? "Ninguna publicación coincide con la búsqueda." : "No hay publicaciones con este filtro."}</EstadoVacio>
+            <EstadoVacio>{alerta ? "Ninguna publicación entra en esta alerta." : texto ? "Ninguna publicación coincide con la búsqueda." : "No hay publicaciones con este filtro."}</EstadoVacio>
           ) : (
             <TablaOptimizacion
               filas={datos.filas}
@@ -226,7 +253,7 @@ export default async function OptimizacionPage({
           {datos.paginas > 1 ? (
             <nav className={styles.paginas} aria-label="Páginas">
               {datos.pagina > 1 ? (
-                <Link scroll={false} href={hrefOptimizacion({ ...base, pagina: datos.pagina - 1 })}>
+                <Link scroll={false} href={hrefPagina(datos.pagina - 1)}>
                   ← Anterior
                 </Link>
               ) : (
@@ -234,7 +261,7 @@ export default async function OptimizacionPage({
               )}
               <span className={styles.nota}>{`Página ${datos.pagina} de ${datos.paginas}`}</span>
               {datos.pagina < datos.paginas ? (
-                <Link scroll={false} href={hrefOptimizacion({ ...base, pagina: datos.pagina + 1 })}>
+                <Link scroll={false} href={hrefPagina(datos.pagina + 1)}>
                   Siguiente →
                 </Link>
               ) : (

@@ -461,3 +461,83 @@
   padding: 0;
   list-style: none;
 }
+
+/* Alertas de publicaciones (como Mercado Libre): fila desplazable. */
+.alertasMarco {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.alertasFila {
+  display: flex;
+  flex: 1;
+  gap: 12px;
+  min-width: 0;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+}
+
+.alertaTarjeta {
+  display: grid;
+  flex: 0 0 min(280px, 80%);
+  gap: 4px;
+  align-content: start;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  color: var(--texto-superficie-2);
+  text-decoration: none;
+  scroll-snap-align: start;
+}
+
+.alertaTarjeta:hover,
+.alertaTarjeta[aria-current="page"] {
+  border-color: var(--acento);
+}
+
+.alertaNumero {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--acento-fuerte);
+}
+
+.alertaTitulo {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.alertaTexto {
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.alertaChica {
+  font-size: 11px;
+  color: var(--texto-suave);
+}
+
+.alertasFlecha {
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--acento);
+  border-radius: 50%;
+  background: var(--superficie-2);
+  color: var(--acento-fuerte);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.alertaFilaDetalle {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
