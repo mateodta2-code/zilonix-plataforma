@@ -1,0 +1,5 @@
+- **Soporte: el superadmin también adjunta imágenes al responder.** En `/superadmin/soporte/[ticketId]`, «Adjuntar imágenes» (hasta 3) junto a «Respuesta para la empresa». La empresa las ve en su ticket, debajo del mensaje de «Soporte Zilonix», como las suyas.
+  - Se suben privadas a la carpeta de la empresa DEL TICKET (`zilonix-soporte/<empresa>/<ticket>-<uuid>`), así que las sirven las mismas dos rutas con su candado. `responderComoSuperadmin` rechaza ids de otra carpeta. Texto, imágenes y que el ticket exista se validan antes de subir nada.
+  - `lib/soporte/leerImagenes.ts` compartido entre las acciones del vendedor y del superadmin. Sin migración.
+  - Guías: Soporte del superadmin y Tickets de soporte del vendedor. Pruebas contra Postgres real en `db/soporte-imagenes.test.ts`.
+- **Soporte: las capturas se amplían en la misma pestaña.** Antes abrían otra pestaña del navegador; ahora, para el vendedor y el superadmin, tocar una captura la muestra grande sobre la página (`FotoConZoom`, el mismo de Despachos y Foro: se cierra con ✕, Esc o tocando fuera). Guía de Tickets de soporte actualizada.

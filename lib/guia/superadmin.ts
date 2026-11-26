@@ -156,7 +156,7 @@ export const GUIA_SUPERADMIN: GrupoGuia[] = [
         pasos: [
           "Filtra por estado (Abierto, En curso, Resuelto) con los botones de arriba.",
           "Abre un ticket para ver su conversación, la empresa, el módulo y quién lo escribió. Si el vendedor adjuntó capturas, salen debajo de su mensaje: tócalas para verlas en grande.",
-          "Escribe en «Respuesta para la empresa» y pulsa «Responder».",
+          "Escribe en «Respuesta para la empresa» y pulsa «Responder». Si ayuda, pulsa «Adjuntar imágenes» y agrega hasta 3 (por ejemplo, una captura de dónde está un botón): la empresa las ve en su ticket.",
           "Cambia el estado con los botones: «En curso» mientras lo trabajas y «Resuelto» cuando termines.",
         ],
         consejos: [

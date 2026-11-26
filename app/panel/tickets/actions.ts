@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { randomUUID } from "crypto";
 import { CloudinaryNoConfiguradoError } from "@/lib/cloudinary";
-import { validarImagenesTicket } from "@/lib/soporte/imagenes";
+import { leerImagenesTicket } from "@/lib/soporte/leerImagenes";
 import { subirImagenesTicket } from "@/lib/soporte/subirImagenes";
 import { crearTicket, obtenerMiTicket, requiereMiembroActivo, responderMiTicket, SoporteError } from "@/lib/soporte/tickets";
 import { validarMensajeTicket, validarTicket } from "@/lib/soporte/validacion";
@@ -33,13 +33,7 @@ async function ejecutar(fn: (usuarioId: string, empresaId: string) => Promise<Es
 // Capturas (25-nov): FormData con campos «imagen» (ya reducidas a JPEG en el
 // navegador). Orden: se valida el texto, la membresía y las imágenes, y
 // recién ahí se suben (privadas) con el id del ticket ya generado.
-async function leerImagenes(datos: FormData | undefined): Promise<Uint8Array[]> {
-  const archivos = (datos?.getAll?.("imagen") ?? []).filter((v): v is File => v instanceof File && v.size > 0);
-  const bytes = await Promise.all(archivos.map(async (a) => new Uint8Array(await a.arrayBuffer())));
-  const problema = validarImagenesTicket(bytes);
-  if (problema) throw new SoporteError(problema);
-  return bytes;
-}
+const leerImagenes = leerImagenesTicket;
 
 export async function abrirTicketAction(asunto: string, mensaje: string, modulo: string, imagenes?: FormData): Promise<EstadoTicketAccion> {
   return ejecutar(async (usuarioId, empresaId) => {

@@ -9,7 +9,7 @@ import styles from "./Capturas.module.css";
 // Tickets de soporte (25-nov): adjuntar hasta 3 capturas por mensaje. Se
 // reducen en el navegador a JPEG antes de enviarlas; el formulario las
 // manda en un FormData (campo «imagen»). Se pueden quitar antes de enviar.
-export function AdjuntarCapturas({ imagenes, onChange, deshabilitado }: { imagenes: Blob[]; onChange: (imagenes: Blob[]) => void; deshabilitado?: boolean }) {
+export function AdjuntarCapturas({ imagenes, onChange, deshabilitado, nota }: { imagenes: Blob[]; onChange: (imagenes: Blob[]) => void; deshabilitado?: boolean; nota?: string }) {
   const input = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [procesando, setProcesando] = useState(false);
@@ -53,7 +53,7 @@ export function AdjuntarCapturas({ imagenes, onChange, deshabilitado }: { imagen
           </Boton>
         )}
       </div>
-      <p className={styles.nota}>Opcional: hasta {MAX_IMAGENES_TICKET} capturas que muestren el problema. Solo las ve tu empresa y el equipo de soporte de Zilonix.</p>
+      <p className={styles.nota}>{nota ?? `Opcional: hasta ${MAX_IMAGENES_TICKET} capturas que muestren el problema. Solo las ve tu empresa y el equipo de soporte de Zilonix.`}</p>
       {error && <p role="alert" className={styles.error}>{error}</p>}
     </div>
   );

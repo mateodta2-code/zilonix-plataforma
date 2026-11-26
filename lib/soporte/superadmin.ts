@@ -4,7 +4,7 @@ import { dbSuperadmin } from "@/db/superadmin-context";
 import { auditoria, empresas, mensajesTicketSoporte, ticketsSoporte, usuarios } from "@/db/schema";
 import { requiereSuperadmin } from "@/lib/superadmin";
 import { ESTADOS_TICKET, esUuid, SoporteError, validarMensajeTicket, type EstadoTicket } from "@/lib/soporte/validacion";
-import { esArchivoValido, publicIdDe } from "@/lib/soporte/imagenes";
+import { archivoDe, esArchivoValido, MAX_IMAGENES_TICKET, publicIdDe } from "@/lib/soporte/imagenes";
 import { archivosDe } from "@/lib/soporte/tickets";
 
 // Issue #623, parte 2 — el superadmin atiende los tickets. Siempre con
@@ -104,7 +104,9 @@ export async function imagenDeTicketSuperadmin(superadminUsuarioId: string, tick
 
 // Responde y, si el ticket seguía abierto, lo pasa a «en curso».
 // Todo en una transacción con su fila de auditoría.
-export async function responderComoSuperadmin(superadminUsuarioId: string, ticketId: string, mensaje: unknown): Promise<void> {
+// imagenesSubidas (25-nov): ids privados que la acción ya subió a la carpeta
+// de la empresa del ticket; el vendedor los ve en su ticket como los suyos.
+export async function responderComoSuperadmin(superadminUsuarioId: string, ticketId: string, mensaje: unknown, imagenesSubidas: string[] = []): Promise<void> {
   await requiereSuperadmin(superadminUsuarioId);
   const texto = validarMensajeTicket(mensaje);
   if (!esUuid(ticketId)) throw new SoporteError("Ese ticket ya no está disponible.");
@@ -114,7 +116,10 @@ export async function responderComoSuperadmin(superadminUsuarioId: string, ticke
       .from(ticketsSoporte)
       .where(eq(ticketsSoporte.id, ticketId));
     if (!ticket) throw new SoporteError("Ese ticket ya no está disponible.");
-    await tx.insert(mensajesTicketSoporte).values({ ticketId, autorUsuarioId: superadminUsuarioId, esSuperadmin: true, mensaje: texto });
+    if (imagenesSubidas.length > MAX_IMAGENES_TICKET || imagenesSubidas.some((id) => !archivoDe(id, ticket.empresaId, ticketId))) {
+      throw new SoporteError("No se pudieron guardar las imágenes.");
+    }
+    await tx.insert(mensajesTicketSoporte).values({ ticketId, autorUsuarioId: superadminUsuarioId, esSuperadmin: true, mensaje: texto, imagenes: imagenesSubidas });
     await tx
       .update(ticketsSoporte)
       .set({ actualizadoTs: new Date(), ...(ticket.estado === "abierto" ? { estado: "en_curso" as const } : {}) })
