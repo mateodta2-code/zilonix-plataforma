@@ -108,6 +108,14 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // nunca sin sesión real ni sin permiso dentro de su propio handler.
   "/api/canva/callback",
 
+  // Issue #422 (Bloque 1) — mismo motivo exacto que /api/ml/callback: la
+  // abre el navegador al volver del OAuth de Mercado Pago. Valida por su
+  // cuenta sesión real de Clerk, empresa, requierePermiso("configuracion",
+  // "crear") y el `state` (lib/mp/state-cookie.ts, timingSafeEqual) antes
+  // de canjear el code. Sigue en RUTAS_PROTEGIDAS en
+  // scripts/verificar-permisos.test.ts.
+  "/api/mp/callback",
+
   // Z-MT-10 (issue #45) — sonda de salud para el monitor externo y
   // scripts/humo.sh, llamada sin sesión cada minuto. Pública a
   // propósito: solo devuelve números (select 1, edad del último

@@ -714,6 +714,38 @@ export const cuentasFalabella = pgTable(
   })
 );
 
+// Issue #422 (Bloque 1) — una cuenta de Mercado Pago conectada a una
+// empresa por OAuth. Mismo molde que cuentasMl: tokens cifrados con
+// lib/cifrado.ts (misma clave ML_TOKEN_KEY_Vn que Canva, para no pedir
+// otra variable en Railway), candado `renovandoTs` contra renovaciones
+// dobles y desconectar solo marca `desconectadaTs`, nunca borra la fila.
+export const cuentasMp = pgTable(
+  "cuentas_mp",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // user_id de Mercado Pago (el que devuelve /oauth/token).
+    cuentaIdExterna: text("cuenta_id_externa").notNull(),
+    // Opcional: /users/me es best-effort (nickname o email) — si no
+    // respondió al conectar, la pantalla muestra el user_id.
+    nickname: text("nickname"),
+    accessTokenCifrado: jsonb("access_token_cifrado").$type<TokenCifrado>().notNull(),
+    refreshTokenCifrado: jsonb("refresh_token_cifrado").$type<TokenCifrado>().notNull(),
+    tokenExpiraTs: timestamp("token_expira_ts", { withTimezone: true }).notNull(),
+    renovandoTs: timestamp("renovando_ts", { withTimezone: true }),
+    desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Una cuenta real de Mercado Pago no puede estar conectada a dos
+    // empresas de Zilonix a la vez (mismo criterio que cuentas_ml).
+    cuentaUnica: uniqueIndex("cuentas_mp_cuenta_externa_unica").on(t.cuentaIdExterna),
+    // Para futuras FK compuestas (empresa_id, cuenta_mp_id), igual que
+    // cuentas_falabella_empresa_id_unica.
+    empresaIdUnica: unique("cuentas_mp_empresa_id_unica").on(t.empresaId, t.id),
+  })
+);
+
 export const pedidosFalabella = pgTable(
   "pedidos_falabella",
   {
