@@ -2396,11 +2396,35 @@ export const mensajesTicketSoporte = pgTable(
 export const estadoBodega3plEnum = pgEnum("estado_bodega_3pl", ["activa", "suspendida"]);
 export const rolBodega3plEnum = pgEnum("rol_bodega_3pl", ["admin_bodega", "operario", "domiciliario"]);
 
-export const bodegas3pl = pgTable("bodegas_3pl", {
+// Autorregistro (Registro-0): quién creó la bodega. `superadmin` es el flujo
+// de siempre; `autorregistro` es la bodega que una persona crea sola.
+export const origenBodega3plEnum = pgEnum("origen_bodega_3pl", ["superadmin", "autorregistro"]);
+
+export const bodegas3pl = pgTable(
+  "bodegas_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    nombre: text("nombre").notNull(),
+    nit: text("nit"),
+    estado: estadoBodega3plEnum("estado").notNull().default("activa"),
+    origen: origenBodega3plEnum("origen").notNull().default("superadmin"),
+    creadoPor: uuid("creado_por").references(() => usuarios.id),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Una sola bodega autorregistrada por persona (frena el spam).
+    autorregistroUnica: uniqueIndex("bodegas_3pl_autorregistro_unica").on(t.creadoPor).where(sql`${t.origen} = 'autorregistro'`),
+  })
+);
+
+// Domiciliario que se registró solo y todavía no está en ninguna bodega.
+// Cuando una bodega lo invita, entra a miembros_bodega_3pl como siempre.
+export const perfilesDomiciliario = pgTable("perfiles_domiciliario", {
   id: uuid("id").primaryKey().defaultRandom(),
+  usuarioId: uuid("usuario_id").notNull().unique().references(() => usuarios.id, { onDelete: "cascade" }),
   nombre: text("nombre").notNull(),
-  nit: text("nit"),
-  estado: estadoBodega3plEnum("estado").notNull().default("activa"),
+  telefono: text("telefono"),
+  ciudad: text("ciudad"),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
 });
 
