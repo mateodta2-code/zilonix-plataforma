@@ -92,6 +92,8 @@ GRANT SELECT, INSERT, UPDATE ON publicaciones_ia_imagenes TO app_user;
 -- mano y revisión de cada cambio. Sin DELETE: es un historial.
 GRANT SELECT, INSERT, UPDATE ON optimizacion_notas TO app_user;
 GRANT SELECT, INSERT, UPDATE ON optimizacion_revisiones TO app_user;
+-- Competidores leídos con la extensión (migración 0055). Sin DELETE: cada lectura reemplaza la anterior.
+GRANT SELECT, INSERT, UPDATE ON optimizacion_competidores_ext TO app_user;
 -- Issue #422 (fase 4 de Finanzas, migraciones 0037-0038) — gastos
 -- externos y sus categorías. Sin DELETE: una categoría se desactiva y un
 -- gasto se corrige editándolo (cada cambio queda en auditoria).
@@ -315,6 +317,8 @@ ALTER TABLE optimizacion_notas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE optimizacion_notas FORCE ROW LEVEL SECURITY;
 ALTER TABLE optimizacion_revisiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE optimizacion_revisiones FORCE ROW LEVEL SECURITY;
+ALTER TABLE optimizacion_competidores_ext ENABLE ROW LEVEL SECURITY;
+ALTER TABLE optimizacion_competidores_ext FORCE ROW LEVEL SECURITY;
 ALTER TABLE categorias_gasto ENABLE ROW LEVEL SECURITY;
 ALTER TABLE categorias_gasto FORCE ROW LEVEL SECURITY;
 ALTER TABLE gastos ENABLE ROW LEVEL SECURITY;
@@ -600,6 +604,9 @@ CREATE POLICY aislamiento_optimizacion_notas ON optimizacion_notas
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 DROP POLICY IF EXISTS aislamiento_optimizacion_revisiones ON optimizacion_revisiones;
 CREATE POLICY aislamiento_optimizacion_revisiones ON optimizacion_revisiones
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_optimizacion_competidores_ext ON optimizacion_competidores_ext;
+CREATE POLICY aislamiento_optimizacion_competidores_ext ON optimizacion_competidores_ext
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- Issue #422 — gastos externos: una empresa nunca ve ni toca los gastos

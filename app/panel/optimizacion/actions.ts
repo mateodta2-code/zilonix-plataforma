@@ -37,6 +37,8 @@ import {
   type ModeracionItemMl,
 } from "@/lib/ml/cliente";
 import { leerAlertasPublicaciones, type DatosAlertas } from "@/lib/optimizacion/alertasDatos";
+import { validarCompetidores } from "@/lib/optimizacion/competidoresExtension";
+import { guardarCompetidores, leerCompetidoresGuardados, type CompetidoresGuardados } from "@/lib/optimizacion/competidoresGuardados";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary } from "@/lib/cloudinary";
@@ -283,6 +285,34 @@ export async function competenciaPublicacionAction(entrada: { cuentaMlId: string
     if (error instanceof MlSinPermisoAppError) return { ok: true, catalogo: false, sinPermisoMl: true };
     console.warn(`[app/panel/optimizacion] competencia ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
     return { ok: false, aviso: motivoCuentaSinRevisar(error) };
+  }
+}
+
+// Competidores leídos con la extensión: quedan guardados por publicación para
+// no perderlos al cerrar el navegador y darles seguimiento (la última lectura).
+export type ResultadoCompetidoresGuardados = { ok: true; guardado: CompetidoresGuardados | null } | { ok: false; aviso: string };
+
+export async function competidoresGuardadosAction(entrada: { cuentaMlId: string; itemId: string }): Promise<ResultadoCompetidoresGuardados> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene acceso a Optimización." };
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId)) return { ok: false, aviso: "No se reconoce la publicación." };
+  if (!(await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId))) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  return { ok: true, guardado: await leerCompetidoresGuardados(ctx.empresaId, entrada.itemId) };
+}
+
+export async function guardarCompetidoresAction(entrada: { cuentaMlId: string; itemId: string; termino: string; candidatos: number; competidores: unknown }): Promise<{ ok: true; leidoTs: string } | { ok: false; aviso: string }> {
+  const ctx = await contexto("modificar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para guardar competidores." };
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId)) return { ok: false, aviso: "No se reconoce la publicación." };
+  if (!(await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId))) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  const valido = validarCompetidores({ itemId: entrada.itemId, termino: entrada.termino, candidatos: entrada.candidatos, competidores: entrada.competidores });
+  if (!valido) return { ok: false, aviso: "La lectura no trae competidores válidos." };
+  try {
+    const leidoTs = await guardarCompetidores(ctx.empresaId, { usuarioId: ctx.usuarioId, cuentaMlId: entrada.cuentaMlId, itemId: entrada.itemId, ...valido });
+    return { ok: true, leidoTs };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] guardar competidores ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: "No se pudieron guardar los competidores. Intenta de nuevo." };
   }
 }
 

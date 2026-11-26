@@ -1,0 +1,5 @@
+- **feat-optimizacion-competidores-guardados** (migración **0055**) — **Competencia con la extensión, guardada:** cuando Mercado Libre le niega a la app leer la competencia por API (el aviso «no dio permiso para leer estos datos de la cuenta»), «Competencia del mismo producto» ya no se queda en el error: ofrece buscar competidores con la extensión de Zilonix (hasta 10).
+  - Los competidores leídos **quedan guardados** por publicación (tabla `optimizacion_competidores_ext`, una fila por publicación, con RLS por empresa y sin DELETE), con la fecha de la última lectura. Ya no dependen del navegador ni vencen a la hora: cualquiera del equipo los ve al abrir la fila. «Buscar de nuevo» reemplaza la lectura.
+  - Guardar pide el permiso de editar (`inventario/modificar`); ver, el de consultar. Lo que llega del navegador se vuelve a validar en el servidor.
+  - **Pendiente (siguiente fase):** botón «Actualizar» por competidor (requiere una versión nueva de la extensión) y actualización automática diaria (decidido: manual por ahora).
+  - **Staging:** la migración se aplica sola al desplegar. **Producción:** Mateo aplica a mano la 0055 y después `db/rls-setup.sql`.
