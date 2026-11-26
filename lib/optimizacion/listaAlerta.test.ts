@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Lista filtrada por alerta: moderadas se pagina sobre under_review y luego pending.
-const ml = vi.hoisted(() => ({ listar: vi.fn(), leer: vi.fn(), precio: vi.fn(), comp: vi.fn() }));
+const ml = vi.hoisted(() => ({ listar: vi.fn(), leer: vi.fn(), precio: vi.fn(), comp: vi.fn(), cal: vi.fn() }));
 vi.mock("@/db/empresa-context", () => ({ dbComoEmpresa: async () => [] }));
 vi.mock("@/db/schema", () => ({ publicaciones: {} }));
 vi.mock("@/lib/ml/cuentas", () => ({ obtenerAccessTokenVigente: async () => "t" }));
@@ -12,7 +12,7 @@ vi.mock("@/lib/ml/cliente", () => ({
   PATRON_ID_PRODUCTO_O_ITEM: /^[A-Z]{3}\d+$/,
 }));
 vi.mock("@/lib/optimizacion/ventas", () => ({ ventasRecientesPorItem: async () => new Map() }));
-vi.mock("@/lib/optimizacion/alertasDatos", () => ({ alertaPrecioAlto: ml.precio, alertaCompetencia: ml.comp }));
+vi.mock("@/lib/optimizacion/alertasDatos", () => ({ alertaPrecioAlto: ml.precio, alertaCompetencia: ml.comp, alertaCalidad: ml.cal }));
 
 import { leerPaginaOptimizacion } from "./lista";
 import { leerPeriodoLista } from "./periodoLista";
@@ -42,6 +42,19 @@ describe("leerPaginaOptimizacion con ?alerta=", () => {
     expect(r.filas.map((f) => f.id)).toEqual(["MCO7"]);
     expect(r.alerta?.referencias).toHaveProperty("MCO7");
     expect(ml.listar).not.toHaveBeenCalled();
+  });
+  it("sin stock: pagina las pausadas por out_of_stock", async () => {
+    ml.listar.mockResolvedValueOnce({ ids: ids(2), total: 8 });
+    const r = await leerPaginaOptimizacion("e", cuenta, { ...filtros, alerta: "sin_stock" }, new Date());
+    expect(ml.listar.mock.calls[0][2]).toMatchObject({ estado: "paused", subEstado: "out_of_stock", offset: 0 });
+    expect(r.total).toBe(8);
+    expect(r.alerta?.clave).toBe("sin_stock");
+  });
+  it("calidad: entrega los objetivos pendientes de cada publicación", async () => {
+    ml.cal.mockResolvedValue({ cantidad: 1, ids: ["MCO9"], pendientes: { MCO9: ["Agrega una foto"] } });
+    const r = await leerPaginaOptimizacion("e", cuenta, { ...filtros, alerta: "calidad" }, new Date());
+    expect(r.filas.map((f) => f.id)).toEqual(["MCO9"]);
+    expect(r.alerta?.pendientes).toEqual({ MCO9: ["Agrega una foto"] });
   });
   it("competencia: estados de la alerta", async () => {
     ml.comp.mockResolvedValue({ cantidad: 1, ids: ["MCO8"], estados: { MCO8: "listed" } });

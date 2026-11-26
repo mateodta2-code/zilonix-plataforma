@@ -10,6 +10,7 @@ const ml = vi.hoisted(() => ({
   listar: vi.fn(),
   leerItems: vi.fn(),
   competencia: vi.fn(),
+  calidad: vi.fn(),
 }));
 vi.mock("@/lib/ml/cliente", () => ({
   contarItemsVendedorPorEstadoMl: ml.contar,
@@ -18,9 +19,10 @@ vi.mock("@/lib/ml/cliente", () => ({
   listarItemsVendedorMl: ml.listar,
   leerItemsOptimizacionMl: ml.leerItems,
   competenciaItemMl: ml.competencia,
+  calidadItemMl: ml.calidad,
 }));
 
-import { alertaCompetencia, alertaModeradas, alertaPrecioAlto, leerAlertasPublicaciones } from "./alertasDatos";
+import { alertaCalidad, alertaCompetencia, alertaModeradas, alertaSinStock, alertaPrecioAlto, leerAlertasPublicaciones } from "./alertasDatos";
 
 const ids = (n: number, desde = 0) => Array.from({ length: n }, (_, i) => `MCO${desde + i + 1}`);
 
@@ -98,6 +100,45 @@ describe("alertaCompetencia", () => {
   });
 });
 
+describe("alertaSinStock", () => {
+  it("pide pausadas por out_of_stock y usa el total de Mercado Libre", async () => {
+    ml.listar.mockResolvedValueOnce({ ids: ids(2), total: 8 });
+    const r = await alertaSinStock("1", "t");
+    expect(ml.listar.mock.calls[0][2]).toMatchObject({ estado: "paused", subEstado: "out_of_stock", offset: 0 });
+    expect(r.cantidad).toBe(8);
+    expect(r.ids).toEqual(ids(2));
+  });
+  it("si Mercado Libre falla, null (no 0)", async () => {
+    ml.listar.mockRejectedValueOnce(new Error("boom"));
+    expect((await alertaSinStock("1", "t")).cantidad).toBeNull();
+  });
+});
+
+describe("alertaCalidad", () => {
+  it("cuenta las activas con objetivos pendientes y guarda cuáles", async () => {
+    ml.listar.mockResolvedValueOnce({ ids: ids(3), total: 3 });
+    ml.calidad.mockImplementation(async (id: string) => ({ puntaje: 70, nivel: null, pendientes: id === "MCO2" ? [] : ["Agrega una foto"] }));
+    const r = await alertaCalidad("1", "t");
+    expect(r.cantidad).toBe(2);
+    expect(r.ids).toEqual(["MCO1", "MCO3"]);
+    expect(r.pendientes.MCO1).toEqual(["Agrega una foto"]);
+    expect(r.revisadas).toEqual({ hechas: 3, total: 3 });
+  });
+  it("revisa máximo 50 y avisa cuántas quedaron sin revisar", async () => {
+    ml.listar.mockResolvedValueOnce({ ids: ids(50), total: 120 });
+    ml.calidad.mockResolvedValue({ puntaje: 100, nivel: null, pendientes: [] });
+    const r = await alertaCalidad("1", "t");
+    expect(ml.calidad).toHaveBeenCalledTimes(50);
+    expect(r.cantidad).toBe(0);
+    expect(r.revisadas).toEqual({ hechas: 50, total: 120 });
+  });
+  it("si todas las lecturas fallan, null", async () => {
+    ml.listar.mockResolvedValueOnce({ ids: ids(2), total: 2 });
+    ml.calidad.mockResolvedValue(null);
+    expect((await alertaCalidad("1", "t")).cantidad).toBeNull();
+  });
+});
+
 describe("leerAlertasPublicaciones", () => {
   it("una alerta que falla queda en null y las demás siguen", async () => {
     ml.contar.mockRejectedValue(new Error("boom"));
@@ -106,7 +147,7 @@ describe("leerAlertasPublicaciones", () => {
     ml.listar.mockRejectedValue(new Error("boom"));
     const r = await leerAlertasPublicaciones({ cuentaIdExterna: "1", siteId: "MCO" }, "t");
     const por = Object.fromEntries(r.alertas.map((a) => [a.clave, a.cantidad]));
-    expect(por).toEqual({ moderadas: null, competencia: null, precio_alto: 1 });
+    expect(por).toEqual({ sin_stock: null, calidad: null, moderadas: null, competencia: null, precio_alto: 1 });
     expect(r.ids.precio_alto).toEqual(["MCO1"]);
   });
 });
