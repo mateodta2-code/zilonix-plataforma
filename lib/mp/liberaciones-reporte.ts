@@ -23,7 +23,15 @@ export const COLUMNAS_MINIMAS_LIBERACIONES = [
 ] as const;
 export const PREFIJO_REPORTE_LIBERACIONES = "zilonix-release";
 
-export type CodigoErrorLiberacionesMp = "mp_401" | "mp_403" | "mp_404" | "mp_http" | "mp_red" | "mp_sin_config" | "mp_sin_datos";
+export type CodigoErrorLiberacionesMp =
+  | "mp_401"
+  | "mp_403"
+  | "mp_404"
+  | "mp_http"
+  | "mp_red"
+  | "mp_sin_config"
+  | "mp_sin_datos"
+  | "mp_reporte_no_creado";
 
 export class ErrorLiberacionesMp extends Error {
   constructor(readonly codigo: CodigoErrorLiberacionesMp, readonly status?: number) {
@@ -66,9 +74,14 @@ async function jsonSeguro(res: Response): Promise<unknown> {
 
 // ---------- Configuración ----------
 
+export type ResultadoConfigLiberaciones = "existente" | "creada" | { estado: "omitida"; status: number };
+
 // GET /config: 200 = ya existe y se respeta tal cual. Solo con 404 se
-// crea una con las columnas mínimas.
-export async function asegurarConfigReporteLiberaciones(accessToken: string): Promise<"existente" | "creada"> {
+// crea una con las columnas mínimas. Si el POST responde 409, la
+// configuración ya existía. Con 400/403 (visto en staging: el GET da 404
+// pero el POST se rechaza) no se bloquea el reporte: se devuelve
+// "omitida" y Mercado Pago lo genera con sus columnas por defecto.
+export async function asegurarConfigReporteLiberaciones(accessToken: string): Promise<ResultadoConfigLiberaciones> {
   const res = await llamar(accessToken, "/config");
   if (res.ok) return "existente";
   if (res.status !== 404) throw new ErrorLiberacionesMp(codigoPorStatus(res.status), res.status);
@@ -83,8 +96,10 @@ export async function asegurarConfigReporteLiberaciones(accessToken: string): Pr
       frequency: { hour: 0, type: "monthly", value: 1 },
     },
   });
-  if (!creada.ok) throw new ErrorLiberacionesMp("mp_sin_config", creada.status);
-  return "creada";
+  if (creada.ok) return "creada";
+  if (creada.status === 409) return "existente";
+  if (creada.status === 400 || creada.status === 403) return { estado: "omitida", status: creada.status };
+  throw new ErrorLiberacionesMp("mp_sin_config", creada.status);
 }
 
 // ---------- Solicitar, listar y descargar ----------
@@ -110,6 +125,9 @@ export async function solicitarReporteLiberaciones(
 ): Promise<SolicitudReporteLiberaciones> {
   const res = await llamar(accessToken, "", { method: "POST", body: { begin_date: beginDateIso, end_date: endDateIso } });
   if (!res.ok) throw new ErrorLiberacionesMp(codigoPorStatus(res.status), res.status);
+  // Según la doc de Mercado Pago, 203 = el reporte NO se creó: hay que
+  // reintentar más tarde.
+  if (res.status === 203) throw new ErrorLiberacionesMp("mp_reporte_no_creado", 203);
   const cuerpo = (await jsonSeguro(res)) as { file_name?: unknown; id?: unknown; task_id?: unknown } | null;
   if (cuerpo && typeof cuerpo.file_name === "string" && cuerpo.file_name) return { fileName: cuerpo.file_name };
   const id = cuerpo?.task_id ?? cuerpo?.id;
@@ -118,14 +136,26 @@ export async function solicitarReporteLiberaciones(
   return { taskId: "solicitado" };
 }
 
+// GET /task/{id}: estado de un reporte pedido ("pending", "processing",
+// "processed", "failed", "deleted") y, cuando está listo, su file_name.
+export type TareaReporteLiberaciones = { status: string; fileName: string | null };
+
+export async function consultarTareaReporteLiberaciones(accessToken: string, taskId: string): Promise<TareaReporteLiberaciones> {
+  const res = await llamar(accessToken, `/task/${encodeURIComponent(taskId)}`);
+  if (!res.ok) throw new ErrorLiberacionesMp(codigoPorStatus(res.status), res.status);
+  const cuerpo = (await jsonSeguro(res)) as { status?: unknown; file_name?: unknown } | null;
+  return {
+    status: typeof cuerpo?.status === "string" ? cuerpo.status.toLowerCase() : "",
+    fileName: typeof cuerpo?.file_name === "string" && cuerpo.file_name ? cuerpo.file_name : null,
+  };
+}
+
 export type ReporteLiberacionesListado = {
   id: string | null;
   fileName: string;
   creadoTs: Date | null;
   listo: boolean;
 };
-
-const ESTADOS_NO_LISTOS = /pending|processing|in_progress|waiting|error|fail/i;
 
 export async function listarReportesLiberaciones(accessToken: string): Promise<ReporteLiberacionesListado[]> {
   const res = await llamar(accessToken, "/list");
@@ -143,13 +173,22 @@ export async function listarReportesLiberaciones(accessToken: string): Promise<R
         id: typeof r.id === "string" || typeof r.id === "number" ? String(r.id) : null,
         fileName: r.file_name,
         creadoTs: creado && !Number.isNaN(creado.getTime()) ? creado : null,
-        listo: !(typeof r.status === "string" && ESTADOS_NO_LISTOS.test(r.status)),
+        // Con status, solo "processed" está listo (pending, processing,
+        // failed y deleted no). Sin status, se asume listo.
+        listo: typeof r.status === "string" ? r.status.toLowerCase() === "processed" : true,
       },
     ];
   });
 }
 
+// file_name viene de Mercado Pago, pero igual se valida antes de armar la
+// URL: sin "/", "..", ni caracteres raros (evita path traversal).
+export function esNombreReporteValido(fileName: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(fileName) && fileName !== "." && fileName !== "..";
+}
+
 export async function descargarReporteLiberaciones(accessToken: string, fileName: string): Promise<string> {
+  if (!esNombreReporteValido(fileName)) throw new ErrorLiberacionesMp("mp_sin_datos");
   const res = await llamar(accessToken, `/${encodeURIComponent(fileName)}`);
   if (!res.ok) throw new ErrorLiberacionesMp(codigoPorStatus(res.status), res.status);
   return res.text();

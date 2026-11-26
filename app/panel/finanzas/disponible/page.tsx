@@ -57,10 +57,16 @@ const ERROR_CORTO_SALDO_MP: Record<string, string> = {
   mp_red: "Sin respuesta de Mercado Pago",
   mp_sin_config: "Sin configuración de reporte",
   mp_sin_datos: "Reporte sin saldo",
+  mp_reporte_no_creado: "Reporte no creado",
   mp_renovando: "Renovando conexión",
   mp_reconectar: "Hay que reconectar",
   mp_error: "Error al actualizar",
 };
+
+// ultimo_error_saldo puede traer el status HTTP: "mp_http:400" → "mp_http".
+function prefijoErrorSaldoMp(valor: string): string {
+  return valor.split(":", 1)[0];
+}
 
 function EstadoCuentaMp({ cuenta, hoy }: { cuenta: CuentaMpDisponible; hoy: string }) {
   const chips = [];
@@ -74,7 +80,7 @@ function EstadoCuentaMp({ cuenta, hoy }: { cuenta: CuentaMpDisponible; hoy: stri
   if (cuenta.ultimoErrorSaldo) {
     chips.push(
       <Chip key="error" estado="advertencia" title={`Último intento: ${cuenta.ultimoErrorSaldo}`}>
-        {ERROR_CORTO_SALDO_MP[cuenta.ultimoErrorSaldo] ?? "Error al actualizar"} ({cuenta.ultimoErrorSaldo})
+        {ERROR_CORTO_SALDO_MP[prefijoErrorSaldoMp(cuenta.ultimoErrorSaldo)] ?? "Error al actualizar"} ({cuenta.ultimoErrorSaldo})
       </Chip>
     );
   }
@@ -250,7 +256,7 @@ export default async function DisponiblePage({ searchParams }: { searchParams: R
                 <CeldaTabla>{c.ultimoCorteFecha ?? "—"}</CeldaTabla>
                 <CeldaTabla>
                   <EstadoCuentaMp cuenta={c} hoy={hoy} />
-                  {(c.ultimoErrorSaldo === "mp_reconectar" || c.ultimoErrorSaldo === "mp_401") && (
+                  {c.ultimoErrorSaldo && ["mp_reconectar", "mp_401"].includes(prefijoErrorSaldoMp(c.ultimoErrorSaldo)) && (
                     <>
                       {" "}
                       <BotonLink href="/panel/conectar-ml" variante="fantasma">

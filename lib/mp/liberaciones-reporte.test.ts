@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   asegurarConfigReporteLiberaciones,
   COLUMNAS_MINIMAS_LIBERACIONES,
+  consultarTareaReporteLiberaciones,
+  descargarReporteLiberaciones,
   ErrorLiberacionesMp,
+  esNombreReporteValido,
   extraerSaldoDeCsvLiberaciones,
   listarReportesLiberaciones,
   montoADosDecimales,
@@ -116,9 +119,21 @@ describe("llamadas a Mercado Pago", () => {
     expect(body.columns.map((c: { key: string }) => c.key)).toEqual([...COLUMNAS_MINIMAS_LIBERACIONES]);
   });
 
-  it("config 404 y POST rechazado: mp_sin_config; 403 en el GET: mp_403 sin POST", async () => {
+  it("config 404 y POST 409: la configuración ya existía", async () => {
+    respuestas(new Response("{}", { status: 404 }), new Response("{}", { status: 409 }));
+    await expect(asegurarConfigReporteLiberaciones("tok")).resolves.toBe("existente");
+  });
+
+  it("config 404 y POST 400/403: omitida con su status, sin lanzar", async () => {
     respuestas(new Response("{}", { status: 404 }), new Response("{}", { status: 400 }));
-    await expect(asegurarConfigReporteLiberaciones("tok")).rejects.toMatchObject({ codigo: "mp_sin_config" });
+    await expect(asegurarConfigReporteLiberaciones("tok")).resolves.toEqual({ estado: "omitida", status: 400 });
+    respuestas(new Response("{}", { status: 404 }), new Response("{}", { status: 403 }));
+    await expect(asegurarConfigReporteLiberaciones("tok")).resolves.toEqual({ estado: "omitida", status: 403 });
+  });
+
+  it("config 404 y POST 500: mp_sin_config con status; 403 en el GET: mp_403 sin POST", async () => {
+    respuestas(new Response("{}", { status: 404 }), new Response("{}", { status: 500 }));
+    await expect(asegurarConfigReporteLiberaciones("tok")).rejects.toMatchObject({ codigo: "mp_sin_config", status: 500 });
     const fetchMock = respuestas(new Response("{}", { status: 403 }));
     await expect(asegurarConfigReporteLiberaciones("tok")).rejects.toMatchObject({ codigo: "mp_403" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -139,21 +154,65 @@ describe("llamadas a Mercado Pago", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ begin_date: "a", end_date: "b" });
   });
 
-  it("listar: solo reportes con file_name; status pendiente = no listo", async () => {
+  it("solicitar: 203 = reporte no creado (error con status); 400 lleva su status", async () => {
+    respuestas(new Response("{}", { status: 203 }), new Response("{}", { status: 400 }));
+    await expect(solicitarReporteLiberaciones("tok", "a", "b")).rejects.toMatchObject({ codigo: "mp_reporte_no_creado", status: 203 });
+    await expect(solicitarReporteLiberaciones("tok", "a", "b")).rejects.toMatchObject({ codigo: "mp_http", status: 400 });
+  });
+
+  it("consultar tarea: processed con file_name, pending y failed", async () => {
+    const fetchMock = respuestas(
+      new Response(JSON.stringify({ id: 987, status: "processed", file_name: "zilonix-release-1.csv" }), { status: 200 }),
+      new Response(JSON.stringify({ id: 987, status: "pending" }), { status: 200 }),
+      new Response(JSON.stringify({ id: 987, status: "failed" }), { status: 200 })
+    );
+    await expect(consultarTareaReporteLiberaciones("tok", "987")).resolves.toEqual({ status: "processed", fileName: "zilonix-release-1.csv" });
+    await expect(consultarTareaReporteLiberaciones("tok", "987")).resolves.toEqual({ status: "pending", fileName: null });
+    await expect(consultarTareaReporteLiberaciones("tok", "987")).resolves.toEqual({ status: "failed", fileName: null });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${URL_REPORTE_LIBERACIONES}/task/987`);
+    expect(init).toMatchObject({ method: "GET", cache: "no-store" });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("consultar tarea: error HTTP con status", async () => {
+    respuestas(new Response("{}", { status: 404 }));
+    await expect(consultarTareaReporteLiberaciones("tok", "987")).rejects.toMatchObject({ codigo: "mp_404", status: 404 });
+  });
+
+  it("descargar: rechaza file_name '.', '..' y con '/' sin llamar a Mercado Pago", async () => {
+    const fetchMock = respuestas();
+    for (const malo of [".", "..", "../config", "a/b.csv", ""]) {
+      await expect(descargarReporteLiberaciones("tok", malo)).rejects.toBeInstanceOf(ErrorLiberacionesMp);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(esNombreReporteValido("zilonix-release-2026_11.csv")).toBe(true);
+  });
+
+  it("listar: solo reportes con file_name; con status, solo processed está listo", async () => {
     respuestas(
       new Response(
         JSON.stringify([
           { id: 1, file_name: "a.csv", date_created: "2026-11-26T10:00:00Z" },
           { id: 2, file_name: "b.csv", status: "pending" },
           { id: 3 },
+          { id: 4, file_name: "c.csv", status: "processed" },
+          { id: 5, file_name: "d.csv", status: "processing" },
+          { id: 6, file_name: "e.csv", status: "failed" },
+          { id: 7, file_name: "f.csv", status: "deleted" },
         ]),
         { status: 200 }
       )
     );
     const lista = await listarReportesLiberaciones("tok");
-    expect(lista).toEqual([
-      { id: "1", fileName: "a.csv", creadoTs: new Date("2026-11-26T10:00:00Z"), listo: true },
-      { id: "2", fileName: "b.csv", creadoTs: null, listo: false },
+    expect(lista.map((r) => [r.fileName, r.listo])).toEqual([
+      ["a.csv", true],
+      ["b.csv", false],
+      ["c.csv", true],
+      ["d.csv", false],
+      ["e.csv", false],
+      ["f.csv", false],
     ]);
+    expect(lista[0]).toEqual({ id: "1", fileName: "a.csv", creadoTs: new Date("2026-11-26T10:00:00Z"), listo: true });
   });
 });
