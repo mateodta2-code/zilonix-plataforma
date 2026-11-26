@@ -87,8 +87,12 @@ const CLOUDINARY_HOST = "https://res.cloudinary.com";
 // navegador bloqueaba la foto antes de pedirla, igual que el bug
 // original de #236 mismo. Se suma *.aliexpress-media.com — se deja
 // *.alicdn.com sin tocar (Alibaba sigue ahí, confirmado aparte).
+// blob: (25-nov) — vista previa de una foto o captura ANTES de enviarla
+// (foto de entrega y novedades del domiciliario, capturas de tickets): el
+// navegador la muestra desde URL.createObjectURL, que es blob:. Sin esto,
+// la miniatura salía rota. Solo imágenes locales del propio navegador.
 const IMG_SRC_CSP =
-  `img-src 'self' data: https://img.clerk.com https://*.mlstatic.com https://*.media-amazon.com https://*.kwcdn.com https://*.alicdn.com https://*.aliexpress-media.com https://*.ltwebstatic.com ${CLOUDINARY_HOST}`;
+  `img-src 'self' data: blob: https://img.clerk.com https://*.mlstatic.com https://*.media-amazon.com https://*.kwcdn.com https://*.alicdn.com https://*.aliexpress-media.com https://*.ltwebstatic.com ${CLOUDINARY_HOST}`;
 
 const csp = [
   "default-src 'self'",

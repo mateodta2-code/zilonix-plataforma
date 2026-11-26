@@ -1,6 +1,6 @@
 // Muestra las capturas de un mensaje de ticket. `base` es la ruta que las
 // entrega con su propio candado: /api/soporte/imagen (vendedor) o
-// /api/superadmin/soporte/imagen (superadmin). Cada una abre en grande en
+// /superadmin/soporte-imagen (superadmin). Cada una abre en grande en
 // otra pestaña.
 import styles from "./Capturas.module.css";
 
