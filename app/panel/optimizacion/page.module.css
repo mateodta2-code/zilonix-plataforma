@@ -513,6 +513,24 @@
   overflow-x: auto;
   scroll-behavior: smooth;
   scroll-snap-type: x proximity;
+  padding-bottom: 10px;
+  /* Barra de desplazamiento visible y a tono con el tema. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--acento) var(--superficie-2);
+}
+
+.alertasFila::-webkit-scrollbar {
+  height: 8px;
+}
+
+.alertasFila::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: var(--superficie-2);
+}
+
+.alertasFila::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--acento);
 }
 
 .alertaTarjeta {

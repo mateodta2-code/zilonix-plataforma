@@ -1869,12 +1869,12 @@ export type EstadoListadoMl = "active" | "paused" | "under_review" | "pending";
 export async function listarItemsVendedorMl(
   vendedorId: string,
   token: string,
-  opciones: { estado: EstadoListadoMl | null; offset: number; limite: number }
+  opciones: { estado: EstadoListadoMl | null; offset: number; limite: number; subEstado?: "out_of_stock" }
 ): Promise<{ ids: string[]; total: number }> {
   exigirId(vendedorId, PATRON_ID_VENDEDOR, "vendedorId");
   const limite = Math.min(Math.max(opciones.limite, 1), 50);
   const offset = Math.max(opciones.offset, 0);
-  const estado = opciones.estado ? `status=${opciones.estado}&` : "";
+  const estado = (opciones.estado ? `status=${opciones.estado}&` : "") + (opciones.subEstado === "out_of_stock" ? "sub_status=out_of_stock&" : "");
   const resp = await pedirLecturaMl<{ results?: unknown; paging?: { total?: unknown } }>(`/users/${vendedorId}/items/search`, token, {
     query: `?${estado}limit=${limite}&offset=${offset}`,
   });

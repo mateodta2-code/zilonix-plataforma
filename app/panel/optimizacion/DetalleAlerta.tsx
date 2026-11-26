@@ -25,6 +25,7 @@ type Props = {
   filas: { id: string; titulo: string | null }[];
   referencias?: Record<string, ReferenciaPrecioFila>;
   estados?: Record<string, string>;
+  pendientes?: Record<string, string[]>;
 };
 
 function Moderacion({ cuentaMlId, itemId }: { cuentaMlId: string; itemId: string }) {
@@ -71,7 +72,7 @@ function Moderacion({ cuentaMlId, itemId }: { cuentaMlId: string; itemId: string
   );
 }
 
-export function DetalleAlerta({ clave, cuentaMlId, siteId, idioma, filas, referencias, estados }: Props) {
+export function DetalleAlerta({ clave, cuentaMlId, siteId, idioma, filas, referencias, estados, pendientes }: Props) {
   if (filas.length === 0) return null;
   return (
     <ul className={styles.listaTitulos} aria-label="Detalle de la alerta">
@@ -87,6 +88,7 @@ export function DetalleAlerta({ clave, cuentaMlId, siteId, idioma, filas, refere
               </Chip>
             ) : null}
             {clave === "competencia" && estado ? <Chip estado={rotuloCompetencia(estado).tono === "exito" ? "exito" : "advertencia"}>{rotuloCompetencia(estado).rotulo}</Chip> : null}
+            {clave === "calidad" && pendientes?.[f.id]?.length ? <span className={styles.nota}>{`Por lograr: ${pendientes[f.id].slice(0, 3).join(" · ")}${pendientes[f.id].length > 3 ? ` y ${pendientes[f.id].length - 3} más` : ""}`}</span> : null}
             {clave === "moderadas" ? <Moderacion cuentaMlId={cuentaMlId} itemId={f.id} /> : null}
           </li>
         );

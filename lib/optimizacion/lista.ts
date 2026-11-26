@@ -12,7 +12,7 @@ import { buscarItemsPorSkuMl, leerItemsOptimizacionMl, listarItemsVendedorMl, PA
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { limitesDiaBogota } from "@/lib/filtros-listado";
 import type { ClaveAlerta } from "@/lib/optimizacion/alertas";
-import { alertaCompetencia, alertaPrecioAlto } from "@/lib/optimizacion/alertasDatos";
+import { alertaCalidad, alertaCompetencia, alertaPrecioAlto } from "@/lib/optimizacion/alertasDatos";
 import type { PeriodoLista } from "@/lib/optimizacion/periodoLista";
 import { TAMANO_PAGINA, type FiltroEstado } from "@/lib/optimizacion/textos";
 import { ventasRecientesPorItem, type VentasItem } from "@/lib/optimizacion/ventas";
@@ -31,7 +31,7 @@ export type PaginaOptimizacion = {
   // detalle (un lote que falló): se avisan, no se esconden en silencio.
   omitidas: number;
   // Solo con ?alerta=: lo que la alerta sabe de cada publicación.
-  alerta?: { clave: ClaveAlerta; referencias?: Record<string, ReferenciaPrecioItemMl>; estados?: Record<string, string> };
+  alerta?: { clave: ClaveAlerta; referencias?: Record<string, ReferenciaPrecioItemMl>; estados?: Record<string, string>; pendientes?: Record<string, string[]> };
 };
 
 export const MAXIMO_RESULTADOS_BUSQUEDA = 200;
@@ -99,7 +99,22 @@ export async function leerPaginaOptimizacion(
   // Con ?alerta= se ignoran el estado y la búsqueda.
   if (filtros.alerta) {
     let ids: string[];
-    if (filtros.alerta === "moderadas") {
+    if (filtros.alerta === "sin_stock") {
+      const p = await listarItemsVendedorMl(cuenta.cuentaIdExterna, token, {
+        estado: "paused",
+        subEstado: "out_of_stock",
+        offset: (filtros.pagina - 1) * TAMANO_PAGINA,
+        limite: TAMANO_PAGINA,
+      });
+      ids = p.ids;
+      total = p.total;
+      extraAlerta = { clave: "sin_stock" };
+    } else if (filtros.alerta === "calidad") {
+      const r = await alertaCalidad(cuenta.cuentaIdExterna, token);
+      ids = r.ids;
+      total = r.ids.length;
+      extraAlerta = { clave: "calidad", pendientes: r.pendientes };
+    } else if (filtros.alerta === "moderadas") {
       const p = await idsModeradas(cuenta.cuentaIdExterna, token, filtros.pagina);
       ids = p.ids;
       total = p.total;
