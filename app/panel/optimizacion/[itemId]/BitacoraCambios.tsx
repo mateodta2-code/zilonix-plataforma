@@ -2,7 +2,7 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Chip } from "@/components/marco/Chip";
 import type { CambioBitacora } from "@/lib/optimizacion/bitacora";
 import { leerFotosCompactas, MARCA_FOTO_IA_ROTULO } from "@/lib/optimizacion/bitacoraResultado";
-import { RESULTADOS_REVISION, type ResultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
+import { diasMedicionDe, esNotaAccionable, RESULTADOS_REVISION, type ResultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
 import { NotaBitacora, RevisarCambio } from "./AccionesBitacora";
 import { variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
 import styles from "../page.module.css";
@@ -64,7 +64,7 @@ export function BitacoraCambios({
     );
   };
   const cambio = (c: CambioBitacora) => {
-    if (c.origen === "nota") return `Nota: ${c.detalle ?? ""}`;
+    if (c.origen === "nota") return esNotaAccionable(c.detalle) ? c.detalle ?? "" : `Nota: ${c.detalle ?? ""}`;
     if (c.valorAnterior !== null || c.valorNuevo !== null) return `${c.rotulo}: ${valor(c, c.valorAnterior)} → ${valor(c, c.valorNuevo)}`;
     return c.accion === "cambiar_fotos_publicacion" && c.detalle ? c.detalle : c.rotulo;
   };
@@ -103,6 +103,7 @@ export function BitacoraCambios({
               <FilaTabla key={c.id}>
                 <CeldaTabla>{fecha(c.ts)}</CeldaTabla>
                 <CeldaTabla>
+                  {c.origen === "nota" && esNotaAccionable(c.detalle) ? <Chip estado="neutro">Accionable</Chip> : null}
                   {(c.accion === "cambiar_fotos_publicacion" ? fotos(c) : null) ?? cambio(c)}
                   {cuentaNickname && c.origen === "zilonix" ? <div className={styles.notaNeutra}>{`Cuenta: ${cuentaNickname}`}</div> : null}
                 </CeldaTabla>
@@ -116,6 +117,7 @@ export function BitacoraCambios({
                     <span className={styles.resultadoCambio}>
                       <Chip estado={juicio(r.antes, r.despues)}>{juicio(r.antes, r.despues) === "exito" ? "Mejoró" : juicio(r.antes, r.despues) === "peligro" ? "Empeoró" : "Igual"}</Chip>
                       <span>{resumen(r.antes, r.despues)}</span>
+                      {diasMedicionDe(c.origen === "nota" ? c.detalle : null) !== 7 ? <span className={styles.notaNeutra}>Resultado a 14 días</span> : null}
                     </span>
                   )}
                 </CeldaTabla>

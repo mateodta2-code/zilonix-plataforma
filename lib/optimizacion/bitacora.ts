@@ -14,7 +14,7 @@ import { registrarAuditoria } from "@/lib/auditoria";
 import type { db } from "@/db";
 import { auditoria, cuentasMl, optimizacionNotas, optimizacionRevisiones, usuarios } from "@/db/schema";
 import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
-import { ACCIONES_BITACORA, compactarFotos, DIAS_AVISO_REVISION, DIAS_MEDICION, LARGO_MAXIMO_VALOR_FOTOS, leerFotosCompactas, listoParaRevisar, MARCA_FOTO_IA_ROTULO as MARCA_FOTO_IA, type ResultadoRevision } from "./bitacoraResultado";
+import { ACCIONES_BITACORA, compactarFotos, DIAS_AVISO_REVISION, DIAS_AVISO_REVISION_ACCIONABLE, diasAvisoDe, diasMedicionDe, DIAS_MEDICION, LARGO_MAXIMO_VALOR_FOTOS, leerFotosCompactas, listoParaRevisar, MARCA_FOTO_IA_ROTULO as MARCA_FOTO_IA, type ResultadoRevision } from "./bitacoraResultado";
 
 export { ACCIONES_BITACORA, DIAS_AVISO_REVISION, DIAS_MEDICION, compactarFotos, leerFotosCompactas, LARGO_MAXIMO_VALOR_FOTOS, MARCA_FOTO_IA };
 
@@ -165,7 +165,7 @@ export async function publicacionesParaRevisar(empresaId: string, itemIds: strin
   if (itemIds.length === 0) return [];
   const hoy = hoyBogota(ahora);
   // Un margen de 2 días para cubrir el corte de Bogotá; el filtro fino es por día.
-  const desde = new Date(ahora.getTime() - (DIAS_AVISO_REVISION + 2) * 86_400_000);
+  const desde = new Date(ahora.getTime() - (DIAS_AVISO_REVISION_ACCIONABLE + 2) * 86_400_000);
   const [desdeZilonix, notas, revisadas] = await dbComoEmpresa(empresaId, (tx) =>
     Promise.all([
       tx
@@ -181,7 +181,7 @@ export async function publicacionesParaRevisar(empresaId: string, itemIds: strin
           )
         ),
       tx
-        .select({ id: optimizacionNotas.id, itemId: optimizacionNotas.itemId, ts: optimizacionNotas.fechaCambio })
+        .select({ id: optimizacionNotas.id, itemId: optimizacionNotas.itemId, ts: optimizacionNotas.fechaCambio, texto: optimizacionNotas.texto })
         .from(optimizacionNotas)
         .where(and(eq(optimizacionNotas.empresaId, empresaId), inArray(optimizacionNotas.itemId, itemIds), gte(optimizacionNotas.fechaCambio, desde))),
       tx
@@ -192,11 +192,11 @@ export async function publicacionesParaRevisar(empresaId: string, itemIds: strin
   );
   const yaRevisadas = new Set(revisadas.map((r) => r.ref));
   const pendientes = new Set<string>();
-  const revisar = (ref: string, itemId: string | null, ts: Date) => {
-    if (itemId && !yaRevisadas.has(ref) && listoParaRevisar(hoyBogota(ts), hoy)) pendientes.add(itemId);
+  const revisar = (ref: string, itemId: string | null, ts: Date, texto?: string) => {
+    if (itemId && !yaRevisadas.has(ref) && listoParaRevisar(hoyBogota(ts), hoy, diasMedicionDe(texto), diasAvisoDe(texto))) pendientes.add(itemId);
   };
   for (const c of desdeZilonix) revisar(`auditoria:${c.id}`, c.itemId, c.ts);
-  for (const n of notas) revisar(`nota:${n.id}`, n.itemId, n.ts);
+  for (const n of notas) revisar(`nota:${n.id}`, n.itemId, n.ts, n.texto);
   return [...pendientes];
 }
 
@@ -233,6 +233,17 @@ export async function diaDelCambio(empresaId: string, ref: string): Promise<stri
         : Promise.resolve([])
   );
   return filas[0] ? hoyBogota(filas[0].ts) : null;
+}
+
+// Días de medición del cambio (14 si es una nota de accionable, 7 si no).
+// Sale de la base, nunca del navegador.
+export async function diasMedicionDelCambio(empresaId: string, ref: string): Promise<number> {
+  const [tipo, id] = ref.split(":");
+  if (tipo !== "nota" || !id || !/^[0-9a-f-]{36}$/.test(id)) return diasMedicionDe(null);
+  const filas = await dbComoEmpresa(empresaId, (tx) =>
+    tx.select({ texto: optimizacionNotas.texto }).from(optimizacionNotas).where(and(eq(optimizacionNotas.empresaId, empresaId), eq(optimizacionNotas.id, id)))
+  );
+  return diasMedicionDe(filas[0]?.texto);
 }
 
 export async function crearNotaBitacora(
@@ -298,10 +309,12 @@ export type PaginaBitacoraGeneral = { filas: CambioGeneral[]; total: number; pag
 // Estado de un cambio: «revisado» si tiene resultado; si no, «midiendo»
 // hasta terminar los 7 días, y después «listo» para revisar (o, pasados
 // los 14 días del aviso, solo «sin revisar»).
-export function estadoDeCambio(dia: string, hoy: string, revision: RevisionCambio | null): EstadoBitacora {
+// Las notas de accionable miden a 14 días y avisan hasta los 21.
+export function estadoDeCambio(dia: string, hoy: string, revision: RevisionCambio | null, texto?: string | null): EstadoBitacora {
   if (revision?.resultado) return "revisado";
-  if (restarDiasIso(dia, -(DIAS_MEDICION - 1)) >= hoy) return "midiendo";
-  return listoParaRevisar(dia, hoy) ? "listo" : "sin_revisar";
+  const dias = diasMedicionDe(texto);
+  if (restarDiasIso(dia, -(dias - 1)) >= hoy) return "midiendo";
+  return listoParaRevisar(dia, hoy, dias, diasAvisoDe(texto)) ? "listo" : "sin_revisar";
 }
 
 function coincideEstado(filtro: EstadoBitacora, estado: EstadoBitacora): boolean {

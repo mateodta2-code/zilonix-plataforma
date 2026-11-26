@@ -60,7 +60,7 @@ import { armarRecomendaciones } from "@/lib/optimizacion/recomendaciones";
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { diagnosticarPublicacion } from "@/lib/optimizacion/diagnostico";
 import { hastaExclusivoIso, leerPeriodoLista } from "@/lib/optimizacion/periodoLista";
-import { cambioEsDeLaPublicacion, compactarFotos, diaDelCambio, crearNotaBitacora, MARCA_FOTO_IA, registrarCambioOptimizacion, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
+import { cambioEsDeLaPublicacion, compactarFotos, diaDelCambio, diasMedicionDelCambio, crearNotaBitacora, MARCA_FOTO_IA, registrarCambioOptimizacion, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
 import { leerFechaNota, leerResultadoRevision, limpiarTextoBitacora } from "@/lib/optimizacion/bitacoraResultado";
 import { hoyBogota } from "@/lib/publicidad/plan";
 import { fichaDesdeItem, infoDeDescripcion } from "@/lib/optimizacion/fichaItem";
@@ -722,7 +722,7 @@ export type FilaResultadoGeneral = { visitas: number | null; ventas: number; con
 export type ResultadoBitacoraGeneral =
   | { ok: false; aviso: string }
   | { ok: true; estado: "midiendo"; faltanDias: number }
-  | { ok: true; estado: "listo"; desde: string; hasta: string; conFinanzas: boolean; antes: FilaResultadoGeneral; despues: FilaResultadoGeneral };
+  | { ok: true; estado: "listo"; dias: number; desde: string; hasta: string; conFinanzas: boolean; antes: FilaResultadoGeneral; despues: FilaResultadoGeneral };
 
 function filaResultado(r: ResumenPeriodo, siteId: string, conFinanzas: boolean): FilaResultadoGeneral {
   return {
@@ -751,16 +751,17 @@ export async function bitacoraGeneralResultadoAction(entrada: { cuentaMlId: stri
   if (!dia) return { ok: false, aviso: "No se encontró ese cambio. Actualiza la página." };
   const ahora = new Date();
   const hoy = hoyBogota(ahora);
-  const adelanto = resultadoCambio(dia, hoy, { lineas: [], publicidad: [], visitasPorDia: null, visitasDesde: hoy, conFinanzas: false });
+  const dias = await diasMedicionDelCambio(ctx.empresaId, entrada.ref);
+  const adelanto = resultadoCambio(dia, hoy, { lineas: [], publicidad: [], visitasPorDia: null, visitasDesde: hoy, conFinanzas: false }, dias);
   if (adelanto.estado === "midiendo") return { ok: true, estado: "midiendo", faltanDias: adelanto.faltanDias };
   const membresia = await obtenerMiMembresia(ctx.usuarioId, ctx.empresaId);
   const conFinanzas = membresia ? tienePermiso(membresia.permisos, "finanzas", "consultar") : false;
   try {
     const datos = await leerDatosDetalle(ctx.empresaId, cuenta, entrada.itemId, resolverPeriodoDetalle(undefined, ahora), { conFinanzas, ahora });
     if (!datos) return { ok: false, aviso: "Mercado Libre no devolvió la publicación. Intenta de nuevo." };
-    const r = resultadoCambio(dia, hoy, { lineas: datos.lineas, publicidad: datos.publicidad, visitasPorDia: datos.visitasPorDia, visitasDesde: datos.visitasDesde, conFinanzas });
+    const r = resultadoCambio(dia, hoy, { lineas: datos.lineas, publicidad: datos.publicidad, visitasPorDia: datos.visitasPorDia, visitasDesde: datos.visitasDesde, conFinanzas }, dias);
     if (r.estado === "midiendo") return { ok: true, estado: "midiendo", faltanDias: r.faltanDias };
-    return { ok: true, estado: "listo", desde: r.desde, hasta: r.hasta, conFinanzas, antes: filaResultado(r.antes, cuenta.siteId, conFinanzas), despues: filaResultado(r.despues, cuenta.siteId, conFinanzas) };
+    return { ok: true, estado: "listo", dias, desde: r.desde, hasta: r.hasta, conFinanzas, antes: filaResultado(r.antes, cuenta.siteId, conFinanzas), despues: filaResultado(r.despues, cuenta.siteId, conFinanzas) };
   } catch (error) {
     console.warn(`[app/panel/optimizacion] resultado de bitácora ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
     return { ok: false, aviso: motivoCuentaSinRevisar(error) };
