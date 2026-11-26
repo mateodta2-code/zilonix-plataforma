@@ -1,0 +1,11 @@
+/* Capturas de tickets de soporte. Solo tokens existentes; claro y oscuro. */
+.adjuntar { display: grid; gap: 8px; }
+.fila { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.miniatura { position: relative; width: 96px; height: 72px; border: 1px solid var(--borde); border-radius: var(--radio-tarjeta); overflow: hidden; }
+.miniatura img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.quitar { position: absolute; top: 2px; right: 2px; min-width: 24px; min-height: 24px; border: 0; border-radius: 999px; cursor: pointer; background: var(--fondo, #000); color: inherit; opacity: 0.85; }
+.nota { margin: 0; font-size: 13px; opacity: 0.8; }
+.error { margin: 0; font-weight: 600; }
+.galeria { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.enlace { display: block; width: 120px; height: 90px; border: 1px solid var(--borde); border-radius: var(--radio-tarjeta); overflow: hidden; }
+.enlace img { width: 100%; height: 100%; object-fit: cover; display: block; }

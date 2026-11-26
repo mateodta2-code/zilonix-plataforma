@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { CapturasTicket } from "@/components/soporte/CapturasTicket";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { obtenerMiTicket } from "@/lib/soporte/tickets";
 import { ETIQUETA_ESTADO_TICKET } from "@/lib/soporte/validacion";
@@ -27,6 +28,7 @@ export default async function TicketPage({ params }: { params: { ticketId: strin
 
       <Tarjeta>
         <p className={styles.cuerpo}>{ticket.mensaje}</p>
+        <CapturasTicket base="/api/soporte/imagen" ticketId={ticket.id} archivos={ticket.imagenes} />
       </Tarjeta>
 
       {ticket.mensajes.length > 0 && (
@@ -40,6 +42,7 @@ export default async function TicketPage({ params }: { params: { ticketId: strin
                     {m.esSuperadmin ? "Soporte Zilonix" : m.autorNombre} · {formatoFechaTicket(m.creadoTs)}
                   </span>
                   <p className={styles.cuerpo}>{m.mensaje}</p>
+                  <CapturasTicket base="/api/soporte/imagen" ticketId={ticket.id} archivos={m.imagenes} />
                 </div>
               </FilaLista>
             ))}

@@ -290,6 +290,7 @@ const RUTAS_SUPERADMIN = new Set([
   "app/superadmin/(panel)/procesos/page.tsx",
   "app/superadmin/(panel)/anuncios/page.tsx",
   "app/superadmin/(panel)/anuncios/actions.ts",
+  "app/api/superadmin/soporte/imagen/[ticketId]/[archivo]/route.ts",
   "app/superadmin/(panel)/empresas/page.tsx",
   "app/superadmin/(panel)/equipo/page.tsx",
   "app/superadmin/(panel)/auditoria/page.tsx",
@@ -418,6 +419,7 @@ const RUTAS_EXENTAS: Record<string, string> = {
   "app/panel/tickets/page.tsx": "tickets de la empresa activa para cualquier miembro — candado: obtenerContextoPanel() + RLS por empresa",
   "app/panel/tickets/[ticketId]/page.tsx": "idem — un ticket de otra empresa da 404 por la RLS",
   "app/panel/tickets/actions.ts": "idem — empresa y usuario salen de la sesión; lib/soporte/tickets.ts exige membresía en cada escritura",
+  "app/api/soporte/imagen/[ticketId]/[archivo]/route.ts": "capturas de tickets para cualquier miembro (mismo permiso que los tickets) — candado: requiereMiembroActivo + imagenDeMiTicket (RLS por empresa y la captura tiene que estar en ese ticket, con el prefijo de esa empresa y ese ticket)",
   "app/panel/foro/actions.ts": "idem — cada escritura pasa por requiereMiembroDeAlgunaEmpresa (lib/foro.ts) con el usuario de la sesión",
   "app/api/foro/imagen/route.ts":
     "sube la imagen adjunta del foro (compartido entre empresas, sin datos de negocio) — el candado es requiereMiembroDeAlgunaEmpresa con el usuario de la sesión, más chequeo de origen y freno por usuario",

@@ -2304,11 +2304,17 @@ export const ticketsSoporte = pgTable(
     // lib/soporte/validacion.ts); texto y no enum para poder sumar
     // módulos sin otra migración.
     modulo: text("modulo").notNull(),
+    // Capturas que adjunta el vendedor (25-nov): ids PRIVADOS de Cloudinary
+    // (type=authenticated), hasta 3. Se ven solo por las rutas
+    // /api/soporte/imagen/... y /api/superadmin/soporte/imagen/..., que
+    // comprueban empresa o sesión de superadmin. Nunca una URL pública.
+    imagenes: text("imagenes").array().notNull().default(sql`'{}'::text[]`),
     estado: estadoTicketSoporteEnum("estado").notNull().default("abierto"),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    maxImagenes: check("tickets_soporte_max_imagenes", sql`cardinality(${t.imagenes}) <= 3`),
     empresaIdx: index("tickets_soporte_empresa_idx").on(t.empresaId, t.actualizadoTs),
     estadoIdx: index("tickets_soporte_estado_idx").on(t.estado, t.actualizadoTs),
   })
@@ -2324,9 +2330,12 @@ export const mensajesTicketSoporte = pgTable(
     autorUsuarioId: uuid("autor_usuario_id").notNull().references(() => usuarios.id),
     esSuperadmin: boolean("es_superadmin").notNull().default(false),
     mensaje: text("mensaje").notNull(),
+    // Igual que tickets_soporte.imagenes: hasta 3 capturas privadas.
+    imagenes: text("imagenes").array().notNull().default(sql`'{}'::text[]`),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    maxImagenes: check("mensajes_ticket_soporte_max_imagenes", sql`cardinality(${t.imagenes}) <= 3`),
     ticketIdx: index("mensajes_ticket_soporte_ticket_idx").on(t.ticketId, t.creadoTs),
   })
 );

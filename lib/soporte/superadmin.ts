@@ -4,6 +4,8 @@ import { dbSuperadmin } from "@/db/superadmin-context";
 import { auditoria, empresas, mensajesTicketSoporte, ticketsSoporte, usuarios } from "@/db/schema";
 import { requiereSuperadmin } from "@/lib/superadmin";
 import { ESTADOS_TICKET, esUuid, SoporteError, validarMensajeTicket, type EstadoTicket } from "@/lib/soporte/validacion";
+import { esArchivoValido, publicIdDe } from "@/lib/soporte/imagenes";
+import { archivosDe } from "@/lib/soporte/tickets";
 
 // Issue #623, parte 2 — el superadmin atiende los tickets. Siempre con
 // dbSuperadmin. D8: solo se lee el ticket, su conversación, el nombre de
@@ -45,7 +47,7 @@ export async function listarTodosLosTickets(superadminUsuarioId: string, estado?
 }
 
 export type MensajeParaAtender = { id: string; mensaje: string; esSuperadmin: boolean; autorNombre: string; creadoTs: Date };
-export type TicketDetalleSuperadmin = TicketParaAtender & { mensaje: string; autorNombre: string; mensajes: MensajeParaAtender[] };
+export type TicketDetalleSuperadmin = TicketParaAtender & { mensaje: string; autorNombre: string; imagenes: string[]; mensajes: (MensajeParaAtender & { imagenes: string[] })[] };
 
 export async function obtenerTicketParaAtender(superadminUsuarioId: string, ticketId: string): Promise<TicketDetalleSuperadmin | null> {
   await requiereSuperadmin(superadminUsuarioId);
@@ -62,6 +64,7 @@ export async function obtenerTicketParaAtender(superadminUsuarioId: string, tick
       actualizadoTs: ticketsSoporte.actualizadoTs,
       mensaje: ticketsSoporte.mensaje,
       autorNombre: usuarios.nombre,
+      imagenes: ticketsSoporte.imagenes,
     })
     .from(ticketsSoporte)
     .innerJoin(empresas, eq(empresas.id, ticketsSoporte.empresaId))
@@ -75,12 +78,28 @@ export async function obtenerTicketParaAtender(superadminUsuarioId: string, tick
       esSuperadmin: mensajesTicketSoporte.esSuperadmin,
       autorNombre: usuarios.nombre,
       creadoTs: mensajesTicketSoporte.creadoTs,
+      imagenes: mensajesTicketSoporte.imagenes,
     })
     .from(mensajesTicketSoporte)
     .innerJoin(usuarios, eq(usuarios.id, mensajesTicketSoporte.autorUsuarioId))
     .where(eq(mensajesTicketSoporte.ticketId, ticketId))
     .orderBy(asc(mensajesTicketSoporte.creadoTs));
-  return { ...ticket, mensajes };
+  // Capturas (25-nov): lo que el vendedor adjuntó a propósito en su ticket,
+  // como el texto. Solo los archivos de la carpeta de esa empresa y ese ticket.
+  return {
+    ...ticket,
+    imagenes: archivosDe(ticket.imagenes, ticket.empresaId, ticketId),
+    mensajes: mensajes.map((m) => ({ ...m, imagenes: archivosDe(m.imagenes, ticket.empresaId, ticketId) })),
+  };
+}
+
+// El id privado de una captura para el SUPERADMIN: solo si está en ese ticket.
+export async function imagenDeTicketSuperadmin(superadminUsuarioId: string, ticketId: string, archivo: string): Promise<string | null> {
+  if (!esArchivoValido(archivo)) return null;
+  const ticket = await obtenerTicketParaAtender(superadminUsuarioId, ticketId);
+  if (!ticket) return null;
+  const todas = [...ticket.imagenes, ...ticket.mensajes.flatMap((m) => m.imagenes)];
+  return todas.includes(archivo) ? publicIdDe(ticket.empresaId, ticketId, archivo) : null;
 }
 
 // Responde y, si el ticket seguía abierto, lo pasa a «en curso».

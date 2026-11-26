@@ -155,7 +155,7 @@ export const GUIA_SUPERADMIN: GrupoGuia[] = [
         paraQue: "Atender los tickets de soporte de todas las empresas.",
         pasos: [
           "Filtra por estado (Abierto, En curso, Resuelto) con los botones de arriba.",
-          "Abre un ticket para ver su conversación, la empresa, el módulo y quién lo escribió.",
+          "Abre un ticket para ver su conversación, la empresa, el módulo y quién lo escribió. Si el vendedor adjuntó capturas, salen debajo de su mensaje: tócalas para verlas en grande.",
           "Escribe en «Respuesta para la empresa» y pulsa «Responder».",
           "Cambia el estado con los botones: «En curso» mientras lo trabajas y «Resuelto» cuando termines.",
         ],
