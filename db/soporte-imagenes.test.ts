@@ -67,7 +67,8 @@ describe("tickets_soporte: imágenes", () => {
 
   it("no acepta ids de otra carpeta (otra empresa, otro ticket o una foto de entrega)", async () => {
     const otro = randomUUID();
-    for (const ajeno of [id(c.empresaBId, otro, randomUUID()), id(c.empresaAId, randomUUID(), randomUUID()), `zilonix-entregas/${c.empresaBId}/${randomUUID()}`]) {
+    // Otra empresa (mismo ticket), otro ticket (misma empresa) y una foto de entrega.
+    for (const ajeno of [id(c.empresaAId, otro, randomUUID()), id(c.empresaBId, randomUUID(), randomUUID()), `zilonix-entregas/${c.empresaBId}/${randomUUID()}`]) {
       await expect(crearTicket(c.usuarioBId, c.empresaBId, "Asunto de prueba", "Mensaje de prueba largo", "Otro", { ticketId: otro, imagenes: [ajeno] })).rejects.toBeInstanceOf(SoporteError);
     }
   });
