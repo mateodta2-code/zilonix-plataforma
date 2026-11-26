@@ -246,7 +246,7 @@ export default async function DetalleOptimizacionPage({
             Ver publicación en Mercado Libre ↗
           </a>
         ) : null}
-        <span className={styles.filtro} aria-label="Período">
+        <span className={styles.filtro} role="group" aria-label="Período">
           {opcionesPeriodo(ahora)
             .filter((o) => o.clave !== CLAVE_PERSONALIZADO)
             .map((o) => (
@@ -254,9 +254,8 @@ export default async function DetalleOptimizacionPage({
               {o.rotulo}
             </Link>
           ))}
-        </span>
-        <details open={periodo.clave === CLAVE_PERSONALIZADO}>
-          <summary className={styles.nota}>Personalizado</summary>
+          <details className={styles.personalizado} open={periodo.clave === CLAVE_PERSONALIZADO}>
+          <summary aria-current={periodo.clave === CLAVE_PERSONALIZADO ? "page" : undefined}>Personalizado</summary>
           <form method="get" className={recomendacionesStyles.rango}>
             <input type="hidden" name="cuenta" value={cuenta.id} />
             <input type="hidden" name="periodo" value={CLAVE_PERSONALIZADO} />
@@ -271,7 +270,8 @@ export default async function DetalleOptimizacionPage({
               Aplicar
             </Boton>
           </form>
-        </details>
+          </details>
+        </span>
         <p className={styles.nota}>{`Del ${periodo.desde} al ${periodo.hasta}, comparado con el ${periodo.anteriorDesde} al ${periodo.anteriorHasta}.`}</p>
       </div>
 
