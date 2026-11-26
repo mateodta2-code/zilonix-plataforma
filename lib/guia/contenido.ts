@@ -369,7 +369,7 @@ export const GUIA: GrupoGuia[] = [
           "Escribe un asunto corto, elige el módulo donde pasa el problema y cuenta qué intentabas hacer y qué ocurrió.",
           "Si ayuda, pulsa «Adjuntar imágenes» y agrega hasta 3 capturas de pantalla que muestren el problema. Puedes quitarlas con la ✕ antes de enviar.",
           "Pulsa «Abrir ticket». En la lista ves el estado: Abierto, En curso o Resuelto.",
-          "Abre el ticket para ver las respuestas de soporte y escribir otro mensaje (también con imágenes). Toca una imagen para verla en grande.",
+          "Abre el ticket para ver las respuestas de soporte (a veces con imágenes que te muestran qué hacer) y escribir otro mensaje, también con imágenes. Toca una imagen para verla en grande.",
         ],
         consejos: [
           "Las imágenes son privadas: solo las ven las personas de tu empresa y el equipo de soporte de Zilonix.",

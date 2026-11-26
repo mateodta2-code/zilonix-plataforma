@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { crearTicket, imagenDeMiTicket, obtenerMiTicket, responderMiTicket, SoporteError } from "../lib/soporte/tickets";
-import { imagenDeTicketSuperadmin, obtenerTicketParaAtender } from "../lib/soporte/superadmin";
+import { imagenDeTicketSuperadmin, obtenerTicketParaAtender, responderComoSuperadmin } from "../lib/soporte/superadmin";
 import { carpetaSoporte } from "../lib/soporte/imagenes";
 import { dbComoEmpresa } from "./empresa-context";
 import { db } from "./index";
@@ -92,5 +92,22 @@ describe("tickets_soporte: imágenes", () => {
     ).rejects.toThrow();
     await expect(dbComoEmpresa(c.empresaAId, (tx) => tx.update(ticketsSoporte).set({ imagenes: [] }).where(eq(ticketsSoporte.id, ticketId)))).rejects.toThrow();
     await expect(dbComoEmpresa(c.empresaAId, (tx) => tx.update(mensajesTicketSoporte).set({ imagenes: [] }).where(eq(mensajesTicketSoporte.ticketId, ticketId)))).rejects.toThrow();
+  });
+
+  it("el superadmin responde con capturas y la empresa las ve en su ticket", async () => {
+    const s1 = randomUUID();
+    await responderComoSuperadmin(superadminId, ticketId, "Mira esta captura", [id(c.empresaAId, ticketId, s1)]);
+    const t = await obtenerMiTicket(c.empresaAId, ticketId);
+    const deSoporte = t?.mensajes.find((m) => m.esSuperadmin);
+    expect(deSoporte?.imagenes).toEqual([s1]);
+    await expect(imagenDeMiTicket(c.empresaAId, ticketId, s1)).resolves.toBe(id(c.empresaAId, ticketId, s1));
+    await expect(imagenDeTicketSuperadmin(superadminId, ticketId, s1)).resolves.toBe(id(c.empresaAId, ticketId, s1));
+    // Otra empresa, no.
+    await expect(imagenDeMiTicket(c.empresaBId, ticketId, s1)).resolves.toBeNull();
+  });
+
+  it("el superadmin tampoco puede adjuntar ids de otra carpeta", async () => {
+    await expect(responderComoSuperadmin(superadminId, ticketId, "Captura ajena", [id(c.empresaBId, ticketId, randomUUID())])).rejects.toBeInstanceOf(SoporteError);
+    await expect(responderComoSuperadmin(superadminId, ticketId, "Foto de entrega", [`zilonix-entregas/${c.empresaAId}/${randomUUID()}`])).rejects.toBeInstanceOf(SoporteError);
   });
 });
