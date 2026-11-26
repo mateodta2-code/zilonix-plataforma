@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
-import { dbComoAutorregistroBodega, dbComoBodega, dbComoUsuarioBodega } from "./bodega-context";
+import { dbComoAutorregistroBodega, dbComoBodega, dbComoInvitacionBodega, dbComoUsuarioBodega } from "./bodega-context";
 import { dbComoEmpresa } from "./empresa-context";
 import { db } from "./index";
-import { auditoria, bodegas3pl, roles, membresias, miembrosBodega3pl, perfilesDomiciliario, sedesBodega, usuarios } from "./schema";
+import { auditoria, bodegas3pl, invitacionesBodega3pl, roles, membresias, miembrosBodega3pl, perfilesDomiciliario, sedesBodega, usuarios } from "./schema";
 import { crearDosEmpresas } from "./test-utils/aislamiento";
 
 // Registro-0 — contra Postgres real: una persona crea SU bodega y se vuelve
@@ -122,7 +122,11 @@ describe("autorregistro de bodegas y domiciliarios (RLS, Registro-0)", () => {
     const operario = randomUUID();
     const bodegaB = randomUUID();
     await db.insert(usuarios).values({ id: operario, email: `autorregistro-${operario.slice(0, 8)}@zilonix.test`, nombre: "Operario A" });
-    await db.insert(miembrosBodega3pl).values({ bodegaId: bodegaA, usuarioId: operario, rol: "operario" });
+    // El operario entra como en producción: el admin de A lo invita y él acepta con el token
+    // (miembros_bodega_3pl no admite inserts directos, ni siquiera del dueño de la conexión).
+    const token = `t-${randomUUID()}`;
+    await dbComoBodega(bodegaA, (tx) => tx.insert(invitacionesBodega3pl).values({ bodegaId: bodegaA, email: `op-${operario.slice(0, 8)}@zilonix.test`, rol: "operario", bodegaNombre: "x", token, invitadoPor: usuarioA, expiraTs: new Date(Date.now() + 60_000) }), "admin_bodega", usuarioA);
+    await dbComoInvitacionBodega(token, operario, (tx) => tx.insert(miembrosBodega3pl).values({ bodegaId: bodegaA, usuarioId: operario, rol: "operario" }));
     await dbComoAutorregistroBodega(usuarioB, bodegaB, async (tx) => {
       await tx.insert(bodegas3pl).values({ id: bodegaB, nombre: `Bodega B ${sufijo}`, origen: "autorregistro", creadoPor: usuarioB });
       await tx.insert(miembrosBodega3pl).values({ bodegaId: bodegaB, usuarioId: usuarioB, rol: "admin_bodega" });
