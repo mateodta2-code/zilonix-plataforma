@@ -25,11 +25,14 @@ import {
   PATRON_ID_PRODUCTO_O_ITEM,
   promocionActivaMl,
   tieneAutomatizacionPrecioMl,
+  ultimaModeracionItemMl,
   visitasItemMl,
   type CalidadItemMl,
   type CompetenciaItemMl,
   type ItemEdicionMl,
+  type ModeracionItemMl,
 } from "@/lib/ml/cliente";
+import { leerAlertasPublicaciones, type DatosAlertas } from "@/lib/optimizacion/alertasDatos";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary } from "@/lib/cloudinary";
@@ -748,5 +751,49 @@ export async function bitacoraGeneralResultadoAction(entrada: { cuentaMlId: stri
   } catch (error) {
     console.warn(`[app/panel/optimizacion] resultado de bitácora ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
     return { ok: false, aviso: motivoCuentaSinRevisar(error) };
+  }
+}
+
+// ---------- Alertas de publicaciones (solo lectura) ----------
+// Las tarjetas «Inactivas por incumplir políticas», «Para ganar la
+// competencia» y «Con precio alto». La página las pide después de pintar
+// la lista. Solo GET a Mercado Libre (lib/optimizacion/alertasDatos.ts).
+export type ResultadoAlertasPublicaciones = ({ ok: true } & DatosAlertas) | { ok: false; aviso: string };
+
+export async function alertasPublicacionesAction(entrada: { cuentaMlId: string }): Promise<ResultadoAlertasPublicaciones> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para ver Optimización." };
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
+  if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  let token: string;
+  try {
+    token = await obtenerAccessTokenVigente(ctx.empresaId, cuenta.id);
+  } catch (error) {
+    return { ok: false, aviso: motivoCuentaSinRevisar(error) };
+  }
+  try {
+    return { ok: true, ...(await leerAlertasPublicaciones(cuenta, token)) };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] alertas ${cuenta.id}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: "No se pudo consultar Mercado Libre. Intenta de nuevo." };
+  }
+}
+
+export type ResultadoModeracionPublicacion = { ok: true; moderacion: ModeracionItemMl | null } | { ok: false; aviso: string };
+
+// «Conoce qué pasó»: motivo y qué hacer, tal cual los escribe Mercado
+// Libre. Una llamada, solo al abrir.
+export async function moderacionPublicacionAction(entrada: { cuentaMlId: string; itemId: string }): Promise<ResultadoModeracionPublicacion> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para ver Optimización." };
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId)) return { ok: false, aviso: "No se reconoce la publicación." };
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
+  if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  try {
+    const token = await obtenerAccessTokenVigente(ctx.empresaId, cuenta.id);
+    return { ok: true, moderacion: await ultimaModeracionItemMl(entrada.itemId, token) };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] moderación ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: "No se pudo consultar Mercado Libre. Intenta de nuevo." };
   }
 }
