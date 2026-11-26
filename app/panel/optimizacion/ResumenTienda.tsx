@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { RejillaKpi } from "@/components/marco/RejillaKpi";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { variacion } from "@/lib/optimizacion/calculos";
-import { textoContraAnterior, tituloResumenTienda, type PeriodoLista } from "@/lib/optimizacion/periodoLista";
+import { parametrosPeriodoLista, textoContraAnterior, tituloResumenTienda, type PeriodoLista } from "@/lib/optimizacion/periodoLista";
 import type { DatosResumenTienda } from "@/lib/optimizacion/resumenTiendaDatos";
 import styles from "./page.module.css";
 
@@ -48,6 +49,15 @@ export function ResumenTienda({
     };
   };
 
+  // Conserva la cuenta y el período en los enlaces.
+  const enlace = (ruta: string) => {
+    const q = new URLSearchParams();
+    q.set("cuenta", datos.cuentaId);
+    for (const [clave, valor] of Object.entries(parametrosPeriodoLista(periodo))) q.set(clave, valor);
+    const texto = q.toString();
+    return `/panel/optimizacion/${ruta}${texto ? `?${texto}` : ""}`;
+  };
+
   return (
     <section className={styles.resumenTienda} aria-label="Resumen de la tienda">
       <div className={styles.barra}>
@@ -82,6 +92,10 @@ export function ResumenTienda({
           detalle={verMontos ? [`${plata(actual.valorDevueltas)} reembolsados`] : undefined}
         />
       </RejillaKpi>
+      <nav className={styles.notaNeutra} aria-label="Más análisis de la tienda" style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px" }}>
+        <Link href={enlace("analisis")}>Ver por qué cambiaron tus ingresos →</Link>
+        <Link href={enlace("rendimiento")}>Ver rendimiento por publicación →</Link>
+      </nav>
     </section>
   );
 }

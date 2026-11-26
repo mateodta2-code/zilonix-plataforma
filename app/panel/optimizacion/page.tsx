@@ -16,6 +16,7 @@ import { leerCuentaMlDeQuery } from "@/lib/ml/selector-cuenta";
 import { leerPaginaOptimizacion, MAXIMO_RESULTADOS_BUSQUEDA, type PaginaOptimizacion } from "@/lib/optimizacion/lista";
 import { leerResumenTienda, type DatosResumenTienda } from "@/lib/optimizacion/resumenTiendaDatos";
 import { publicacionesParaRevisar } from "@/lib/optimizacion/bitacora";
+import { sufijoPestanas } from "@/lib/optimizacion/pestanas";
 import { descripcionPeriodo, leerPeriodoLista, MAXIMO_DIAS_RANGO, parametrosPeriodoLista } from "@/lib/optimizacion/periodoLista";
 import { leerBusqueda, leerFiltroEstado, leerPagina, OPCIONES_DIAS_METRICAS, type FiltroEstado } from "@/lib/optimizacion/textos";
 import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
@@ -157,6 +158,8 @@ export default async function OptimizacionPage({
       <Pestanas
         pestanas={[
           { etiqueta: "Publicaciones", href: `/panel/optimizacion${cuentaId ? `?cuenta=${cuentaId}` : ""}`, activa: true },
+          { etiqueta: "Análisis", href: `/panel/optimizacion/analisis${sufijoPestanas(cuentaId, periodoParams)}`, activa: false },
+          { etiqueta: "Rendimiento", href: `/panel/optimizacion/rendimiento${sufijoPestanas(cuentaId, periodoParams)}`, activa: false },
           { etiqueta: "Bitácora", href: `/panel/optimizacion/bitacora${cuentaId ? `?cuenta=${cuentaId}` : ""}`, activa: false },
         ]}
       />
@@ -294,6 +297,7 @@ export default async function OptimizacionPage({
               puedeModificar={puedeModificar}
               periodo={periodo}
               paraRevisar={paraRevisar}
+              periodoParams={periodoParams}
             />
           )}
           {datos.paginas > 1 ? (

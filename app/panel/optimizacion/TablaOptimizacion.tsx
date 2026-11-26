@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Fragment, useEffect, useState, useTransition } from "react";
 import { Boton } from "@/components/marco/Boton";
 import { BarraCarga } from "@/components/marco/BarraCarga";
-import { Chip } from "@/components/marco/Chip";
+import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { formatearMoneda, formatearNumero } from "@/lib/ml/sitios";
 import { rotuloCortoPeriodo, type PeriodoLista } from "@/lib/optimizacion/periodoLista";
@@ -31,6 +31,16 @@ export type FilaTablaOptimizacion = {
 };
 
 const LOTE = 10;
+const MAXIMO_CHIPS = 2;
+
+// Color del nivel de experiencia tal cual lo da Mercado Libre.
+function tonoExperiencia(color: string | null): EstadoChip {
+  const c = (color ?? "").toLowerCase();
+  if (c === "green") return "exito";
+  if (c === "red") return "peligro";
+  if (c === "orange" || c === "yellow") return "advertencia";
+  return "neutro";
+}
 
 function encabezados(periodo: PeriodoLista) {
   const corto = rotuloCortoPeriodo(periodo);
@@ -45,7 +55,9 @@ function encabezados(periodo: PeriodoLista) {
     { clave: "conversion", contenido: "Conversión", numerica: true },
     "Calidad",
     "Competencia",
+    "Experiencia",
     "Estado",
+    "Recomendaciones",
   ];
 }
 
@@ -57,6 +69,7 @@ export function TablaOptimizacion({
   puedeModificar,
   periodo,
   paraRevisar = [],
+  periodoParams = {},
 }: {
   filas: FilaTablaOptimizacion[];
   cuentaMlId: string;
@@ -66,6 +79,8 @@ export function TablaOptimizacion({
   periodo: PeriodoLista;
   // Publicaciones con un cambio que ya cumplió 7 días (bitácora).
   paraRevisar?: string[];
+  // Parámetros de URL del período, para mantenerlos en el enlace al detalle.
+  periodoParams?: Record<string, string>;
 }) {
   const [metricas, setMetricas] = useState<Record<string, MetricasPublicacion>>({});
   const [cargando, setCargando] = useState(true);
@@ -115,6 +130,7 @@ export function TablaOptimizacion({
     };
   }, [filas, cuentaMlId, periodo.clave, periodo.desde, periodo.hasta, periodo.dias]);
 
+  const sufijoDetalle = `?${new URLSearchParams({ cuenta: cuentaMlId, ...periodoParams }).toString()}`;
   const plata = (valor: number | null) => (valor === null ? "—" : formatearMoneda(valor, siteId));
 
   function cambiarEstado(fila: FilaTablaOptimizacion, activar: boolean) {
@@ -175,7 +191,7 @@ export function TablaOptimizacion({
                         <span>{fila.titulo ?? fila.id}</span>
                       )}
                       <span className={styles.notaNeutra}>{fila.id} · {fila.sku ? <SkuCopiable sku={fila.sku} prefijo="SKU " /> : "Sin SKU"}</span>
-                      <Link className={styles.verDetalle} href={`/panel/optimizacion/${fila.id}?cuenta=${cuentaMlId}`}>
+                      <Link className={styles.verDetalle} href={`/panel/optimizacion/${fila.id}${sufijoDetalle}`}>
                         Ver detalle →
                       </Link>
                       {paraRevisar.includes(fila.id) ? (
@@ -215,7 +231,9 @@ export function TablaOptimizacion({
                         {m.calidad.puntaje}
                       </Chip>
                       <span className={styles.notaNeutra}>
-                        {m.calidad.pendientes.length === 0 ? "Sin objetivos" : `${m.calidad.pendientes.length} ${m.calidad.pendientes.length === 1 ? "objetivo" : "objetivos"}`}
+                        {m.calidad.pendientes.length === 0
+                          ? "Sin objetivos"
+                          : `${m.calidad.pendientes.length} ${m.calidad.pendientes.length === 1 ? "objetivo pendiente" : "objetivos pendientes"}`}
                       </span>
                     </span>
                   ) : (
@@ -229,6 +247,15 @@ export function TablaOptimizacion({
                     pendiente("—")
                   ) : (
                     <Chip estado={competencia.tono}>{competencia.rotulo}</Chip>
+                  )}
+                </CeldaTabla>
+                <CeldaTabla>
+                  {m === undefined ? (
+                    pendiente("—")
+                  ) : m.experiencia && (m.experiencia.texto || m.experiencia.color) ? (
+                    <Chip estado={tonoExperiencia(m.experiencia.color)}>{m.experiencia.texto ?? "—"}</Chip>
+                  ) : (
+                    "—"
                   )}
                 </CeldaTabla>
                 <CeldaTabla>
@@ -250,6 +277,26 @@ export function TablaOptimizacion({
                       {avisos[fila.id].texto}
                     </span>
                   ) : null}
+                </CeldaTabla>
+                <CeldaTabla>
+                  {m === undefined ? (
+                    pendiente("—")
+                  ) : m.recomendaciones.length === 0 ? (
+                    <span className={styles.notaNeutra}>Sin acciones</span>
+                  ) : (
+                    <span className={styles.chips}>
+                      {m.recomendaciones.slice(0, MAXIMO_CHIPS).map((r) => (
+                        <Chip key={r.clave} estado="aviso">
+                          {r.texto}
+                        </Chip>
+                      ))}
+                      {m.recomendaciones.length > MAXIMO_CHIPS ? (
+                        <Link className={styles.verDetalle} href={`/panel/optimizacion/${fila.id}${sufijoDetalle}`}>
+                          {`+${m.recomendaciones.length - MAXIMO_CHIPS}`}
+                        </Link>
+                      ) : null}
+                    </span>
+                  )}
                 </CeldaTabla>
               </FilaTabla>
               {abiertaEsta ? (

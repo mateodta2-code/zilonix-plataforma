@@ -85,3 +85,25 @@ describe("TablaOptimizacion · período", () => {
     expect(metricasMock.mock.calls.length).toBeGreaterThan(antes);
   });
 });
+
+describe("TablaOptimizacion · Experiencia y Recomendaciones", () => {
+  const base = { visitas: 1, calidad: { puntaje: 70, nivel: "Estándar", pendientes: ["a", "b"] }, competencia: null };
+  it("muestra experiencia, hasta 2 chips con «+N» al detalle con cuenta y período, y «N objetivos pendientes»", async () => {
+    metricasMock.mockResolvedValue({
+      ok: true,
+      metricas: {
+        MCO0: { ...base, experiencia: { color: "green", texto: "Buena" }, recomendaciones: [{ clave: "1", texto: "Uno" }, { clave: "2", texto: "Dos" }, { clave: "3", texto: "Tres" }] },
+        MCO1: { ...base, experiencia: null, recomendaciones: [] },
+      },
+    });
+    render(<TablaOptimizacion filas={filas.slice(0, 2)} {...props} periodoParams={{ dias: "30" }} />);
+    await act(async () => {});
+    expect(screen.getByText("Buena")).toBeTruthy();
+    expect(screen.getByText("Uno")).toBeTruthy();
+    expect(screen.getByText("Dos")).toBeTruthy();
+    expect(screen.queryByText("Tres")).toBeNull();
+    expect(screen.getByText("+1").closest("a")?.getAttribute("href")).toBe("/panel/optimizacion/MCO0?cuenta=c1&dias=30");
+    expect(screen.getByText("Sin acciones")).toBeTruthy();
+    expect(screen.getAllByText("2 objetivos pendientes").length).toBe(2);
+  });
+});

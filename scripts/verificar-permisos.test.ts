@@ -165,6 +165,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/optimizacion/[itemId]/page.tsx",
   // Bitácora general de Optimización (refs #681): ver pide inventario.consultar.
   "app/panel/optimizacion/bitacora/page.tsx",
+  // Análisis de ingresos de Optimización (refs #702): ver pide inventario.consultar,
+  // montos ventas.consultar; la acción valida la cuenta contra la empresa.
+  "app/panel/optimizacion/analisis/page.tsx",
+  "app/panel/optimizacion/analisis/actions.ts",
   // Rendimiento de Optimización (refs #703): solo lectura, inventario.consultar; los montos, además ventas.consultar.
   "app/panel/optimizacion/rendimiento/page.tsx",
   "app/panel/optimizacion/rendimiento/actions.ts",

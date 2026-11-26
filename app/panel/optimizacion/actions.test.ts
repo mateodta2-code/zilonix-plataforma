@@ -8,6 +8,7 @@ const ml = vi.hoisted(() => ({
   visitas: vi.fn(),
   calidad: vi.fn(),
   competencia: vi.fn(),
+  experiencia: vi.fn(),
   actualizar: vi.fn(),
   familia: vi.fn(),
   itemEdicion: vi.fn(),
@@ -86,6 +87,7 @@ vi.mock("@/lib/ml/cliente", async () => {
     visitasItemMl: ml.visitas,
     calidadItemMl: ml.calidad,
     competenciaItemMl: ml.competencia,
+    experienciaCompraItemMl: ml.experiencia,
     actualizarItemMl: ml.actualizar,
     actualizarNombreFamiliaMl: ml.familia,
     leerItemEdicionMl: ml.itemEdicion,
@@ -132,6 +134,19 @@ describe("metricasPublicacionesAction (solo lectura)", () => {
     ml.visitas.mockReset().mockResolvedValue(40);
     ml.calidad.mockReset().mockResolvedValue({ puntaje: 78, nivel: "Profesional", pendientes: ["Agrega fotos"] });
     ml.competencia.mockReset().mockResolvedValue({ estado: "winning", precioParaGanar: 1000 });
+    ml.experiencia.mockReset().mockResolvedValue({ color: "green", texto: "Buena", valor: 1, titulo: null, subtitulos: [], problemas: [{ cantidad: 1, etiqueta: "a", motivo: null, detalle: null, solucion: "Mejora el empaque" }], congelada: null });
+  });
+
+  it("experiencia: pide el locale del sitio y arma recomendaciones; 429 o error → null", async () => {
+    const r = await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }] });
+    expect(ml.experiencia).toHaveBeenCalledWith("MCO1", "token", "es_CO");
+    if (!r.ok) throw new Error("debía ser ok");
+    expect(r.metricas.MCO1.experiencia).toEqual({ color: "green", texto: "Buena" });
+    expect(r.metricas.MCO1.recomendaciones.map((x) => x.texto)).toEqual(["Agrega fotos", "Mejora el empaque"]);
+    ml.experiencia.mockReset().mockRejectedValue(new Error("429"));
+    const r2 = await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }] });
+    if (!r2.ok) throw new Error("debía ser ok");
+    expect(r2.metricas.MCO1.experiencia).toBeNull();
   });
 
   it("pide consultar inventario y trae visitas, calidad y, solo en catálogo, competencia", async () => {

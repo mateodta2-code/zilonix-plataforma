@@ -11,6 +11,7 @@ import {
   actualizarNombreFamiliaMl,
   calidadItemMl,
   competenciaItemMl,
+  experienciaCompraItemMl,
   fichasPublicacionesMl,
   ofertasProductoCompetenciaMl,
   productoCatalogoDeItemMl,
@@ -20,6 +21,7 @@ import {
   leerDescripcionItemMl,
   leerItemEdicionMl,
   LimiteMercadoLibreError,
+  localeExperienciaCompra,
   motivoErrorEscrituraMl,
   detalleErrorEscrituraMl,
   PATRON_ID_PRODUCTO_O_ITEM,
@@ -29,6 +31,7 @@ import {
   visitasItemMl,
   type CalidadItemMl,
   type CompetenciaItemMl,
+  type ExperienciaCompraMl,
   type ItemEdicionMl,
   type ModeracionItemMl,
 } from "@/lib/ml/cliente";
@@ -53,6 +56,7 @@ import {
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
 import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/lib/optimizacion/competencia";
+import { armarRecomendaciones } from "@/lib/optimizacion/recomendaciones";
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { diagnosticarPublicacion } from "@/lib/optimizacion/diagnostico";
 import { hastaExclusivoIso, leerPeriodoLista } from "@/lib/optimizacion/periodoLista";
@@ -142,12 +146,17 @@ export type MetricasPublicacion = {
   calidad: CalidadItemMl | null;
   // null si no es de catálogo o Mercado Libre no respondió.
   competencia: CompetenciaItemMl | null;
+  // Solo color y texto del nivel (purchase_experience/integrators); null si
+  // el sitio no tiene locale, ML no respondió o dio 429.
+  experiencia: { color: string | null; texto: string | null } | null;
+  // Textos de armarRecomendaciones (sin stock: la lista no lo trae).
+  recomendaciones: { clave: string; texto: string }[];
 };
 
 export type ResultadoMetricas = { ok: true; metricas: Record<string, MetricasPublicacion> } | { ok: false; aviso: string };
 
 // Visitas del período (7, 14, 30 o 90 días; «hoy»; o un rango desde–hasta),
-// calidad y competencia de hasta 10 publicaciones. Solo lectura. El período
+// calidad, competencia y experiencia de compra de hasta 10 publicaciones. Solo lectura. El período
 // se vuelve a validar acá (leerPeriodoLista): un valor raro cae a 7 días,
 // nunca se confía en el cliente. Una publicación que falla queda con sus
 // datos en null.
@@ -176,13 +185,17 @@ export async function metricasPublicacionesAction(entrada: {
     return { ok: false, aviso: motivoCuentaSinRevisar(error) };
   }
 
+  const locale = localeExperienciaCompra(idiomaDeSitio(cuenta.siteId).idioma);
   const metricas: Record<string, MetricasPublicacion> = {};
   async function una(item: { id: string; catalogo: boolean }) {
     const seguro = <T,>(p: Promise<T | null>) => p.catch(() => null);
     const visitas = await seguro(visitasItemMl(item.id, token, periodo.dias, ending));
     const calidad = await seguro(calidadItemMl(item.id, token));
     const competencia = item.catalogo ? await seguro(competenciaItemMl(item.id, token, cuenta!.siteId)) : null;
-    metricas[item.id] = { visitas, calidad, competencia };
+    const experienciaCompleta: ExperienciaCompraMl | null = locale ? await seguro(experienciaCompraItemMl(item.id, token, locale)) : null;
+    const recomendaciones = armarRecomendaciones({ competencia, calidad, experiencia: experienciaCompleta, item: { stock: null, estado: null } }).map((r) => ({ clave: r.clave, texto: r.texto }));
+    const experiencia = experienciaCompleta ? { color: experienciaCompleta.color, texto: experienciaCompleta.texto } : null;
+    metricas[item.id] = { visitas, calidad, competencia, experiencia, recomendaciones };
   }
   // De a pocas a la vez: con muchas en paralelo se pisa el límite de ML.
   for (let i = 0; i < items.length; i += EN_PARALELO) {
