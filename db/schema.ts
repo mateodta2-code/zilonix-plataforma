@@ -2428,6 +2428,24 @@ export const perfilesDomiciliario = pgTable("perfiles_domiciliario", {
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Varias sedes por bodega. Las bodegas que ya existían no reciben sede
+// automática: el admin la crea desde su panel.
+export const sedesBodega = pgTable(
+  "sedes_bodega",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    nombre: text("nombre").notNull(),
+    direccion: text("direccion"),
+    ciudad: text("ciudad"),
+    activa: boolean("activa").notNull().default(true),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    bodegaNombreUnico: uniqueIndex("sedes_bodega_bodega_nombre_unico").on(t.bodegaId, t.nombre),
+  })
+);
+
 export const miembrosBodega3pl = pgTable(
   "miembros_bodega_3pl",
   {

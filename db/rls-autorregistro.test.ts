@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { dbComoAutorregistroBodega, dbComoBodega, dbComoUsuarioBodega } from "./bodega-context";
 import { dbComoEmpresa } from "./empresa-context";
 import { db } from "./index";
-import { auditoria, bodegas3pl, miembrosBodega3pl, perfilesDomiciliario, usuarios } from "./schema";
+import { auditoria, bodegas3pl, roles, membresias, miembrosBodega3pl, perfilesDomiciliario, sedesBodega, usuarios } from "./schema";
 import { crearDosEmpresas } from "./test-utils/aislamiento";
 
 // Registro-0 — contra Postgres real: una persona crea SU bodega y se vuelve
@@ -98,6 +98,58 @@ describe("autorregistro de bodegas y domiciliarios (RLS, Registro-0)", () => {
   it("un vendedor no lee perfiles_domiciliario ni bodegas_3pl", async () => {
     expect(await dbComoEmpresa(empresaId, (tx) => tx.select().from(perfilesDomiciliario))).toHaveLength(0);
     expect(await dbComoEmpresa(empresaId, (tx) => tx.select().from(bodegas3pl))).toHaveLength(0);
+  });
+
+  it("un usuario con empresa de vendedor también crea su bodega y su perfil de domiciliario", async () => {
+    const usuarioC = randomUUID();
+    const bodegaC = randomUUID();
+    await db.insert(usuarios).values({ id: usuarioC, email: `autorregistro-${usuarioC.slice(0, 8)}@zilonix.test`, nombre: "Persona C" });
+    const rolId = randomUUID();
+    await dbComoEmpresa(empresaId, async (tx) => {
+      await tx.insert(roles).values({ id: rolId, nombre: "Dueño", empresaId });
+      await tx.insert(membresias).values({ usuarioId: usuarioC, empresaId, rolId });
+    });
+    await dbComoAutorregistroBodega(usuarioC, bodegaC, async (tx) => {
+      await tx.insert(bodegas3pl).values({ id: bodegaC, nombre: `Bodega C ${sufijo}`, origen: "autorregistro", creadoPor: usuarioC });
+      await tx.insert(miembrosBodega3pl).values({ bodegaId: bodegaC, usuarioId: usuarioC, rol: "admin_bodega" });
+      await tx.insert(sedesBodega).values({ bodegaId: bodegaC, nombre: "Principal" });
+    });
+    await dbComoUsuarioBodega(usuarioC, (tx) => tx.insert(perfilesDomiciliario).values({ usuarioId: usuarioC, nombre: "Carlos" }));
+    expect(await dbComoUsuarioBodega(usuarioC, (tx) => tx.select().from(perfilesDomiciliario))).toHaveLength(1);
+  });
+
+  it("sedes: el admin de A crea y edita; el operario solo lee; B y el vendedor no ven; nadie borra", async () => {
+    const operario = randomUUID();
+    const bodegaB = randomUUID();
+    await db.insert(usuarios).values({ id: operario, email: `autorregistro-${operario.slice(0, 8)}@zilonix.test`, nombre: "Operario A" });
+    await db.insert(miembrosBodega3pl).values({ bodegaId: bodegaA, usuarioId: operario, rol: "operario" });
+    await dbComoAutorregistroBodega(usuarioB, bodegaB, async (tx) => {
+      await tx.insert(bodegas3pl).values({ id: bodegaB, nombre: `Bodega B ${sufijo}`, origen: "autorregistro", creadoPor: usuarioB });
+      await tx.insert(miembrosBodega3pl).values({ bodegaId: bodegaB, usuarioId: usuarioB, rol: "admin_bodega" });
+    });
+
+    await dbComoBodega(bodegaA, (tx) => tx.insert(sedesBodega).values([{ bodegaId: bodegaA, nombre: "Norte" }, { bodegaId: bodegaA, nombre: "Sur", ciudad: "Cali" }]), "admin_bodega", usuarioA);
+    await dbComoBodega(bodegaA, (tx) => tx.update(sedesBodega).set({ direccion: "Calle 1", activa: false }).where(eq(sedesBodega.nombre, "Norte")), "admin_bodega", usuarioA);
+    const deA = await dbComoBodega(bodegaA, (tx) => tx.select().from(sedesBodega).where(eq(sedesBodega.nombre, "Norte")), "admin_bodega", usuarioA);
+    expect(deA[0]).toMatchObject({ direccion: "Calle 1", activa: false });
+    // Nombre repetido en la misma bodega.
+    await expect(dbComoBodega(bodegaA, (tx) => tx.insert(sedesBodega).values({ bodegaId: bodegaA, nombre: "Sur" }), "admin_bodega", usuarioA)).rejects.toThrow();
+
+    // Operario: lee, no crea ni edita.
+    expect((await dbComoBodega(bodegaA, (tx) => tx.select().from(sedesBodega), "operario", operario)).length).toBeGreaterThanOrEqual(2);
+    await expect(dbComoBodega(bodegaA, (tx) => tx.insert(sedesBodega).values({ bodegaId: bodegaA, nombre: "Op" }), "operario", operario)).rejects.toThrow();
+    await dbComoBodega(bodegaA, (tx) => tx.update(sedesBodega).set({ nombre: "Hack" }).where(eq(sedesBodega.nombre, "Sur")), "operario", operario);
+    expect(await dbComoBodega(bodegaA, (tx) => tx.select().from(sedesBodega).where(eq(sedesBodega.nombre, "Hack")), "admin_bodega", usuarioA)).toHaveLength(0);
+
+    // Bodega B: no ve ni cambia las de A, ni crea en A.
+    expect(await dbComoBodega(bodegaB, (tx) => tx.select().from(sedesBodega).where(eq(sedesBodega.bodegaId, bodegaA)), "admin_bodega", usuarioB)).toHaveLength(0);
+    await dbComoBodega(bodegaB, (tx) => tx.update(sedesBodega).set({ nombre: "Hack" }).where(eq(sedesBodega.bodegaId, bodegaA)), "admin_bodega", usuarioB);
+    expect(await dbComoBodega(bodegaA, (tx) => tx.select().from(sedesBodega).where(eq(sedesBodega.nombre, "Hack")), "admin_bodega", usuarioA)).toHaveLength(0);
+    await expect(dbComoBodega(bodegaB, (tx) => tx.insert(sedesBodega).values({ bodegaId: bodegaA, nombre: "Intruso" }), "admin_bodega", usuarioB)).rejects.toThrow();
+
+    // Vendedor: nada. Nadie borra.
+    expect(await dbComoEmpresa(empresaId, (tx) => tx.select().from(sedesBodega))).toHaveLength(0);
+    await expect(dbComoBodega(bodegaA, (tx) => tx.delete(sedesBodega).where(eq(sedesBodega.bodegaId, bodegaA)), "admin_bodega", usuarioA)).rejects.toThrow();
   });
 
   it("los ids inválidos se rechazan antes de tocar la base", async () => {

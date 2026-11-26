@@ -1222,6 +1222,37 @@ CREATE POLICY perfil_domiciliario_editar ON perfiles_domiciliario FOR UPDATE TO 
 DROP POLICY IF EXISTS sa_perfil_domiciliario_ver ON perfiles_domiciliario;
 CREATE POLICY sa_perfil_domiciliario_ver ON perfiles_domiciliario FOR SELECT TO superadmin_user USING (true);
 
+-- sedes_bodega: varias sedes por bodega. Todos los miembros de la bodega las
+-- leen; solo el admin_bodega crea y edita (nombre, dirección, ciudad, activa);
+-- nada se borra. El superadmin solo cuenta (SELECT).
+ALTER TABLE sedes_bodega ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sedes_bodega FORCE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT ON sedes_bodega TO app_user;
+REVOKE UPDATE, DELETE ON sedes_bodega FROM app_user;
+GRANT UPDATE (nombre, direccion, ciudad, activa) ON sedes_bodega TO app_user;
+GRANT SELECT ON sedes_bodega TO superadmin_user;
+DROP POLICY IF EXISTS sede_bodega_ver ON sedes_bodega;
+CREATE POLICY sede_bodega_ver ON sedes_bodega FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS sede_bodega_crear ON sedes_bodega;
+CREATE POLICY sede_bodega_crear ON sedes_bodega FOR INSERT TO app_user
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  );
+DROP POLICY IF EXISTS sede_bodega_editar ON sedes_bodega;
+CREATE POLICY sede_bodega_editar ON sedes_bodega FOR UPDATE TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  )
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  );
+DROP POLICY IF EXISTS sa_sede_bodega_ver ON sedes_bodega;
+CREATE POLICY sa_sede_bodega_ver ON sedes_bodega FOR SELECT TO superadmin_user USING (true);
+
 -- auditoria del perfil de domiciliario: aún no pertenece a ninguna bodega ni
 -- empresa; solo se escribe la propia acción de la persona.
 DROP POLICY IF EXISTS auditoria_perfil_domiciliario_escribir ON auditoria;

@@ -1,5 +1,5 @@
 {
-  "id": "be7a1c52-d6e0-40d2-bf01-edd414db0ef0",
+  "id": "b155d830-42ce-4074-b837-80e1ef657247",
   "prevId": "6db653d2-6a27-4f19-bef5-3174cf64ace7",
   "version": "7",
   "dialect": "postgresql",
@@ -10219,6 +10219,100 @@
           ],
           "columnsTo": [
             "empresa_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sedes_bodega": {
+      "name": "sedes_bodega",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "bodega_id": {
+          "name": "bodega_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "direccion": {
+          "name": "direccion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ciudad": {
+          "name": "ciudad",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "activa": {
+          "name": "activa",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "creado_ts": {
+          "name": "creado_ts",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "sedes_bodega_bodega_nombre_unico": {
+          "name": "sedes_bodega_bodega_nombre_unico",
+          "columns": [
+            {
+              "expression": "bodega_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "nombre",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sedes_bodega_bodega_id_bodegas_3pl_id_fk": {
+          "name": "sedes_bodega_bodega_id_bodegas_3pl_id_fk",
+          "tableFrom": "sedes_bodega",
+          "tableTo": "bodegas_3pl",
+          "columnsFrom": [
+            "bodega_id"
+          ],
+          "columnsTo": [
             "id"
           ],
           "onDelete": "cascade",
