@@ -735,6 +735,22 @@ export const cuentasMp = pgTable(
     renovandoTs: timestamp("renovando_ts", { withTimezone: true }),
     desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    // Issue #422 — último saldo disponible leído del Reporte de
+    // Liberaciones (lib/mp/liberaciones-reporte.ts), guardado acá para que
+    // /panel/finanzas/disponible no llame a Mercado Pago en cada visita.
+    // Mismo tipo que saldos_disponible.saldo.
+    ultimoSaldoDisponible: numeric("ultimo_saldo_disponible", { precision: 16, scale: 2 }),
+    ultimaMoneda: text("ultima_moneda"),
+    // AAAA-MM-DD, día de Bogotá.
+    ultimoCorteFecha: text("ultimo_corte_fecha"),
+    ultimoSaldoTs: timestamp("ultimo_saldo_ts", { withTimezone: true }),
+    // file_name (o id de tarea) del reporte pedido mientras Mercado Pago
+    // lo prepara.
+    reportePendienteFile: text("reporte_pendiente_file"),
+    reportePendienteTs: timestamp("reporte_pendiente_ts", { withTimezone: true }),
+    // Código corto seguro (mp_sin_config, mp_403, mp_sin_datos...), nunca
+    // el body de Mercado Pago.
+    ultimoErrorSaldo: text("ultimo_error_saldo"),
   },
   (t) => ({
     // Una cuenta real de Mercado Pago no puede estar conectada a dos

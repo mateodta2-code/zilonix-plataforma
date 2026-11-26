@@ -3,6 +3,7 @@ import {
   armarFilas,
   DisponibleInvalidoError,
   esDesactualizado,
+  filasDesdeCuentasMp,
   historialDeCuenta,
   MONEDAS_DISPONIBLE,
   saldoVigente,
@@ -12,6 +13,7 @@ import {
   validarCuenta,
   validarSaldo,
   type CuentaDisponible,
+  type CuentaMpDisponible,
   type SaldoDisponible,
 } from "./disponible";
 import { SITIOS_ML } from "@/lib/ml/sitios";
@@ -121,6 +123,65 @@ describe("totales", () => {
     expect(sumarSaldos(["0.10", "0.20"])).toBe("0.30");
     expect(sumarSaldos(["-0.50", "0.20"])).toBe("-0.30");
     expect(sumarSaldos([])).toBe("0.00");
+  });
+});
+
+describe("filasDesdeCuentasMp", () => {
+  function cuentaMp(id: string, extra: Partial<CuentaMpDisponible> = {}): CuentaMpDisponible {
+    return {
+      id,
+      cuentaIdExterna: `ext-${id}`,
+      nickname: null,
+      ultimoSaldoDisponible: null,
+      ultimaMoneda: null,
+      ultimoCorteFecha: null,
+      ultimoSaldoTs: null,
+      reportePendienteFile: null,
+      reportePendienteTs: null,
+      ultimoErrorSaldo: null,
+      ...extra,
+    };
+  }
+
+  const cuentasMp = [
+    cuentaMp("mp1", { nickname: "TIENDA", ultimoSaldoDisponible: "1500.50", ultimaMoneda: "COP", ultimoCorteFecha: "2026-11-21" }),
+    cuentaMp("mp2", { ultimoSaldoDisponible: "-0.50", ultimaMoneda: "COP", ultimoCorteFecha: "2026-11-01" }),
+    cuentaMp("mp3", { ultimoSaldoDisponible: "10.00", ultimaMoneda: "MXN", ultimoCorteFecha: "2026-11-22" }),
+    // Sin sincronizar: no suma.
+    cuentaMp("mp4", { reportePendienteFile: "zilonix-release-1.csv" }),
+  ];
+
+  it("solo cuentas sincronizadas, como billeteras de Mercado Pago con id mp:", () => {
+    const filas = filasDesdeCuentasMp(cuentasMp, HOY);
+    expect(filas.map((f) => f.id)).toEqual(["mp:mp1", "mp:mp2", "mp:mp3"]);
+    expect(filas[0]).toEqual({
+      id: "mp:mp1",
+      nombre: "TIENDA",
+      tipo: "billetera",
+      entidad: "Mercado Pago",
+      ultimos4: null,
+      moneda: "COP",
+      activa: true,
+      saldo: "1500.50",
+      fechaCorte: "2026-11-21",
+      desactualizado: false,
+    });
+    expect(filas[1]).toMatchObject({ nombre: "ext-mp2", desactualizado: true });
+  });
+
+  it("suman a totalesPorMoneda y a Billeteras en totalesPorTipo", () => {
+    const manuales = armarFilas([cuenta("banco1"), cuenta("nequi", { tipo: "billetera" })], [saldo("banco1", "100.00", "2026-11-22"), saldo("nequi", "0.20", "2026-11-22")], HOY);
+    const todas = [...manuales, ...filasDesdeCuentasMp(cuentasMp, HOY)];
+    expect(totalesPorMoneda(todas)).toEqual([
+      { moneda: "COP", total: "1600.20", cuentas: 4, corteMasAntiguo: "2026-11-01", corteMasReciente: "2026-11-22", desactualizadas: 1 },
+      { moneda: "MXN", total: "10.00", cuentas: 1, corteMasAntiguo: "2026-11-22", corteMasReciente: "2026-11-22", desactualizadas: 0 },
+    ]);
+    const porTipo = totalesPorTipo(todas);
+    expect(porTipo[0].totales.map((t) => [t.moneda, t.total])).toEqual([["COP", "100.00"]]);
+    expect(porTipo[1].totales.map((t) => [t.moneda, t.total])).toEqual([
+      ["COP", "1500.20"],
+      ["MXN", "10.00"],
+    ]);
   });
 });
 
