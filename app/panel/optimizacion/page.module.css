@@ -72,27 +72,61 @@
   flex: 0 0 auto;
 }
 
+/* Control segmentado: cada opción es una pastilla dentro de una caja; la activa se
+   llena de azul. Sirve al período (Hoy…Personalizado) y al estado (Activas…Todas). */
 .filtro {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 10px;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--borde);
+  border-radius: calc(var(--radio-boton) + 4px);
+  background: var(--superficie-2);
 }
 
 .filtro a,
+.personalizado summary,
 .paginas a {
   color: var(--texto-suave);
   text-decoration: none;
 }
 
-.filtro a[aria-current="page"],
-.personalizado summary[aria-current="page"] {
-  color: var(--acento-fuerte);
-  font-weight: 600;
+.filtro a,
+.personalizado summary {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: var(--radio-boton);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.paginas a:hover,
-.filtro a:hover {
+.filtro a[aria-current="page"],
+.personalizado summary[aria-current="page"] {
+  background: var(--acento-suave);
   color: var(--acento-fuerte);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--acento);
+}
+
+.filtro a:hover:not([aria-current="page"]),
+.personalizado summary:hover:not([aria-current="page"]) {
+  background: var(--acento-suave);
+  color: var(--texto);
+}
+
+.paginas a:hover {
+  color: var(--acento-fuerte);
+}
+
+.filtro a:focus-visible,
+.personalizado summary:focus-visible {
+  outline: 2px solid var(--acento-fuerte);
+  outline-offset: 1px;
 }
 
 .nota {
@@ -543,14 +577,19 @@
   justify-items: start;
 }
 
-/* Período personalizado: <details> sin JS con el formulario GET desde–hasta. */
+/* Período personalizado: <details> sin JS con el formulario GET desde–hasta.
+   Abierto, ocupa su propia fila dentro de la caja para que el formulario no desarme el control. */
 .personalizado summary {
   cursor: pointer;
-  color: var(--texto-suave);
+  list-style: none;
 }
 
-.personalizado summary:hover {
-  color: var(--acento-fuerte);
+.personalizado summary::-webkit-details-marker {
+  display: none;
+}
+
+.personalizado[open] {
+  flex-basis: 100%;
 }
 
 .rangoFechas {
@@ -558,7 +597,7 @@
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 10px;
-  margin-top: 8px;
+  margin: 8px 4px 4px;
 }
 
 .rangoFechas label {
