@@ -8,6 +8,7 @@ const ml = vi.hoisted(() => ({
   visitas: vi.fn(),
   calidad: vi.fn(),
   competencia: vi.fn(),
+  experiencia: vi.fn(),
   actualizar: vi.fn(),
   familia: vi.fn(),
   itemEdicion: vi.fn(),
@@ -18,7 +19,11 @@ const ml = vi.hoisted(() => ({
   fichas: vi.fn(),
   descripcion: vi.fn(),
   leerDescripcion: vi.fn(),
+  atributos: vi.fn(),
+  tendencias: vi.fn(),
   reputacion: vi.fn(),
+  moderacion: vi.fn(),
+  alertas: vi.fn(),
 }));
 const auditorias = vi.hoisted(() => [] as unknown[]);
 const ia = vi.hoisted(() => ({ conexion: vi.fn(), descargar: vi.fn(), generar: vi.fn(), subir: vi.fn(), texto: vi.fn(), cloudinary: { configurado: true } }));
@@ -69,7 +74,8 @@ vi.mock("@/lib/ia/proveedores", async () => {
 });
 vi.mock("@/lib/ml/preguntas", () => ({ motivoCuentaSinRevisar: () => "Token vencido — hay que reconectar la cuenta." }));
 const bitacora = vi.hoisted(() => ({ crearNota: vi.fn(), guardarRevision: vi.fn(), esDeLaPublicacion: vi.fn() }));
-vi.mock("@/lib/optimizacion/bitacora", () => ({
+vi.mock("@/lib/optimizacion/bitacora", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/optimizacion/bitacora")>()),
   crearNotaBitacora: bitacora.crearNota,
   guardarRevisionCambio: bitacora.guardarRevision,
   cambioEsDeLaPublicacion: bitacora.esDeLaPublicacion,
@@ -81,6 +87,7 @@ vi.mock("@/lib/ml/cliente", async () => {
     visitasItemMl: ml.visitas,
     calidadItemMl: ml.calidad,
     competenciaItemMl: ml.competencia,
+    experienciaCompraItemMl: ml.experiencia,
     actualizarItemMl: ml.actualizar,
     actualizarNombreFamiliaMl: ml.familia,
     leerItemEdicionMl: ml.itemEdicion,
@@ -91,9 +98,13 @@ vi.mock("@/lib/ml/cliente", async () => {
     fichasPublicacionesMl: ml.fichas,
     tieneDescripcionMl: ml.descripcion,
     leerDescripcionItemMl: ml.leerDescripcion,
+    leerAtributosItemMl: ml.atributos,
+    tendenciasPorNivelMl: ml.tendencias,
     reputacionVendedorMl: ml.reputacion,
+    ultimaModeracionItemMl: ml.moderacion,
   };
 });
+vi.mock("@/lib/optimizacion/alertasDatos", () => ({ leerAlertasPublicaciones: ml.alertas }));
 
 const CUENTA = "11111111-1111-1111-1111-111111111111";
 
@@ -106,6 +117,9 @@ import {
   editarTituloAction,
   generarImagenIAAction,
   guardarNotaBitacoraAction,
+  mejorarTituloIAAction,
+  alertasPublicacionesAction,
+  moderacionPublicacionAction,
   metricasPublicacionesAction,
   revisarCambioAction,
   proponerContenidoIAAction,
@@ -120,6 +134,19 @@ describe("metricasPublicacionesAction (solo lectura)", () => {
     ml.visitas.mockReset().mockResolvedValue(40);
     ml.calidad.mockReset().mockResolvedValue({ puntaje: 78, nivel: "Profesional", pendientes: ["Agrega fotos"] });
     ml.competencia.mockReset().mockResolvedValue({ estado: "winning", precioParaGanar: 1000 });
+    ml.experiencia.mockReset().mockResolvedValue({ color: "green", texto: "Buena", valor: 1, titulo: null, subtitulos: [], problemas: [{ cantidad: 1, etiqueta: "a", motivo: null, detalle: null, solucion: "Mejora el empaque" }], congelada: null });
+  });
+
+  it("experiencia: pide el locale del sitio y arma recomendaciones; 429 o error → null", async () => {
+    const r = await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }] });
+    expect(ml.experiencia).toHaveBeenCalledWith("MCO1", "token", "es_CO");
+    if (!r.ok) throw new Error("debía ser ok");
+    expect(r.metricas.MCO1.experiencia).toEqual({ color: "green", texto: "Buena" });
+    expect(r.metricas.MCO1.recomendaciones.map((x) => x.texto)).toEqual(["Agrega fotos", "Mejora el empaque"]);
+    ml.experiencia.mockReset().mockRejectedValue(new Error("429"));
+    const r2 = await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }] });
+    if (!r2.ok) throw new Error("debía ser ok");
+    expect(r2.metricas.MCO1.experiencia).toBeNull();
   });
 
   it("pide consultar inventario y trae visitas, calidad y, solo en catálogo, competencia", async () => {
@@ -141,11 +168,33 @@ describe("metricasPublicacionesAction (solo lectura)", () => {
 
   it("pide las visitas del período elegido; uno fuera de la lista cae a 7", async () => {
     await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }], dias: 90 });
-    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 90);
+    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 90, undefined);
     await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }], dias: 500 });
-    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7);
+    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7, undefined);
     await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }] });
-    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7);
+    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7, undefined);
+  });
+
+  it("revalida el período en el servidor: rango y «hoy» piden last + ending exclusivo; uno inválido cae a 7", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T17:00:00Z"));
+    try {
+      const items = [{ id: "MCO1", catalogo: false }];
+      await metricasPublicacionesAction({ cuentaMlId: CUENTA, items, periodo: { desde: "2026-11-01", hasta: "2026-11-15" } });
+      expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 15, "2026-11-16");
+      await metricasPublicacionesAction({ cuentaMlId: CUENTA, items, periodo: { desde: "2026-11-25", hasta: "2026-11-25" } });
+      expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 1, "2026-11-26");
+      // Invertido: se endereza.
+      await metricasPublicacionesAction({ cuentaMlId: CUENTA, items, periodo: { desde: "2026-11-15", hasta: "2026-11-01" } });
+      expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 15, "2026-11-16");
+      // Futuro, muy viejo o basura: el período por defecto, sin ending.
+      for (const periodo of [{ desde: "2026-11-20", hasta: "2026-12-30" }, { desde: "2025-01-01", hasta: "2025-01-10" }, { desde: "x&y=1", hasta: "2026-11-10" }]) {
+        await metricasPublicacionesAction({ cuentaMlId: CUENTA, items, periodo });
+        expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7, undefined);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("como máximo 10 publicaciones por pedido y descarta ids mal formados", async () => {
@@ -306,6 +355,22 @@ describe("Fase 3: editar precio, título y fotos", () => {
     ml.actualizar.mockClear();
     expect((await editarFotosAction({ cuentaMlId: CUENTA, itemId: "MCO1", fotos: [] })).ok).toBe(false);
     expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("fotos: guarda antes → después y cuenta solo las fotos de IA que de verdad van", async () => {
+    auditorias.length = 0;
+    await editarFotosAction({
+      cuentaMlId: CUENTA,
+      itemId: "MCO1",
+      fotos: [{ url: "https://ia.jpg" }, { id: "f1" }],
+      fotosIA: ["https://ia.jpg", "https://no-enviada.jpg"],
+    });
+    const a = auditorias[0] as { valorAnterior: string; valorNuevo: string; detalle: string };
+    expect(a.valorAnterior).toBe("f1\nf2");
+    expect(a.valorNuevo).toBe("https://ia.jpg\nf1");
+    expect(a.detalle).toContain("1 nuevas (1 con IA)");
+    expect(a.detalle).toContain("cambió la portada");
+    expect(a.detalle).toContain(`[cuenta:${CUENTA}]`);
   });
 
   it("con «BODY_INVALID_FIELDS» muestra el detalle de ML (código, causas y campos) para soporte", async () => {
@@ -616,5 +681,123 @@ describe("diagnóstico de solo lectura (solo administradores)", () => {
     const r = await diagnosticoPublicacionAction({ cuentaMlId: CUENTA, itemId: "../users/me" });
     expect(r.ok).toBe(false);
     expect(llamadas).toHaveLength(0);
+  });
+});
+
+describe("mejorarTituloIAAction (solo lectura en Mercado Libre)", () => {
+  const ENTRADA = { cuentaMlId: CUENTA, itemId: "MCO1" };
+  const RESPUESTA = '{"titulos":["Termo acero azul 1 L","Termo azul de acero","Termo de acero inoxidable"],"catalogo":"Termo de acero azul de 1 L para bebidas"}';
+
+  function prepararCaso(vendidas: number) {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.itemEdicion.mockReset().mockResolvedValue({ id: "MCO1", titulo: "Termo acero azul 1 L", precio: 1, vendidas, tieneVariantes: false, userProduct: false, familyId: null, fotos: [] });
+    ml.atributos.mockReset().mockResolvedValue({ categoriaId: "MCO1234", atributos: [{ id: "COLOR", nombre: "Color", valor: "Azul" }] });
+    ml.tendencias.mockReset().mockResolvedValue({ ruta: ["Hogar", "Termos"], niveles: [{ nivel: "alta", palabras: ["termo acero"] }] });
+    ml.leerDescripcion.mockReset().mockResolvedValue("Termo para bebidas calientes");
+    ml.actualizar.mockReset();
+    ml.familia.mockReset();
+    ia.conexion.mockReset().mockResolvedValue({ id: "c", proveedor: "openai", baseUrl: null, modelo: "x", actualizadoTs: new Date(), apiKey: "k" });
+    ia.texto.mockReset().mockResolvedValue(RESPUESTA);
+  }
+
+  it("sin IA conectada: el mismo aviso que Publicar, con enlace a Conectar IA", async () => {
+    prepararCaso(0);
+    ia.conexion.mockResolvedValue(null);
+    const r = await mejorarTituloIAAction(ENTRADA);
+    expect(r).toMatchObject({ ok: false, conectarIA: true });
+    expect(ia.texto).not.toHaveBeenCalled();
+    expect(ia.conexion).toHaveBeenCalledWith("empresa-1", "optimizacion");
+  });
+
+  it("sin ventas: devuelve títulos, límites y puedeGuardar; no escribe nada", async () => {
+    prepararCaso(0);
+    const r = await mejorarTituloIAAction(ENTRADA);
+    expect(r).toMatchObject({ ok: true, largoMaximo: 60, largoMaximoCatalogo: 120, puedeGuardar: true, vendidas: 0 });
+    expect(r.ok && r.titulos).toHaveLength(3);
+    expect(r.ok && r.catalogo).not.toBeNull();
+    expect(estado.permisosPedidos).toEqual(["inventario.modificar"]);
+    const pedido = ia.texto.mock.calls[0][1] as string;
+    expect(pedido).toContain("Termo acero azul 1 L");
+    expect(pedido).toContain("termo acero");
+    expect(ml.actualizar).not.toHaveBeenCalled();
+    expect(ml.familia).not.toHaveBeenCalled();
+  });
+
+  it("con ventas: puedeGuardar es false", async () => {
+    prepararCaso(4);
+    const r = await mejorarTituloIAAction(ENTRADA);
+    expect(r).toMatchObject({ ok: true, puedeGuardar: false, vendidas: 4 });
+    expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("si ML no devuelve atributos ni tendencias, igual propone con el título", async () => {
+    prepararCaso(0);
+    ml.atributos.mockRejectedValue(new Error("x"));
+    ml.leerDescripcion.mockRejectedValue(new Error("x"));
+    const r = await mejorarTituloIAAction(ENTRADA);
+    expect(r.ok).toBe(true);
+    expect(ml.tendencias).not.toHaveBeenCalled();
+  });
+
+  it("errores claros: ML no devuelve la publicación, IA sin títulos, IA falla", async () => {
+    prepararCaso(0);
+    ml.itemEdicion.mockResolvedValue(null);
+    expect(await mejorarTituloIAAction(ENTRADA)).toMatchObject({ ok: false, aviso: expect.stringContaining("Mercado Libre no devolvió") });
+    prepararCaso(0);
+    ia.texto.mockResolvedValue("no es json");
+    expect(await mejorarTituloIAAction(ENTRADA)).toMatchObject({ ok: false, aviso: expect.stringContaining("no devolvió títulos usables") });
+    prepararCaso(0);
+    ia.texto.mockRejectedValue(new Error("boom"));
+    expect(await mejorarTituloIAAction(ENTRADA)).toMatchObject({ ok: false });
+  });
+
+  it("sin permiso de editar no hace nada", async () => {
+    prepararCaso(0);
+    estado.conPermiso = false;
+    expect(await mejorarTituloIAAction(ENTRADA)).toMatchObject({ ok: false });
+    expect(ia.texto).not.toHaveBeenCalled();
+  });
+});
+
+describe("alertas de publicaciones (solo lectura)", () => {
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.alertas.mockReset().mockResolvedValue({ alertas: [], ids: { moderadas: [], competencia: [], precio_alto: ["MCO1"] } });
+    ml.moderacion.mockReset().mockResolvedValue({ motivo: "Motivo", solucion: "Solución", fecha: null });
+  });
+
+  it("pide consultar inventario y devuelve alertas con la cuenta de la empresa", async () => {
+    const r = await alertasPublicacionesAction({ cuentaMlId: CUENTA });
+    expect(r.ok).toBe(true);
+    expect(estado.permisosPedidos).toContain("inventario.consultar");
+    expect(ml.alertas).toHaveBeenCalledWith(expect.objectContaining({ cuentaIdExterna: "123456", siteId: "MCO" }), "token");
+  });
+  it("sin permiso, cuenta ajena o id inválido: no llama a Mercado Libre", async () => {
+    estado.conPermiso = false;
+    expect((await alertasPublicacionesAction({ cuentaMlId: CUENTA })).ok).toBe(false);
+    estado.conPermiso = true;
+    estado.cuentaExiste = false;
+    expect((await alertasPublicacionesAction({ cuentaMlId: CUENTA })).ok).toBe(false);
+    estado.cuentaExiste = true;
+    expect((await alertasPublicacionesAction({ cuentaMlId: "x" })).ok).toBe(false);
+    expect(ml.alertas).not.toHaveBeenCalled();
+  });
+  it("si falla la lectura devuelve un aviso, no una excepción", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    ml.alertas.mockRejectedValue(new Error("boom"));
+    expect((await alertasPublicacionesAction({ cuentaMlId: CUENTA })).ok).toBe(false);
+  });
+  it("moderación: una llamada, valida el id y los permisos", async () => {
+    const r = await moderacionPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO123" });
+    expect(r).toEqual({ ok: true, moderacion: { motivo: "Motivo", solucion: "Solución", fecha: null } });
+    expect(ml.moderacion).toHaveBeenCalledTimes(1);
+    expect((await moderacionPublicacionAction({ cuentaMlId: CUENTA, itemId: "../x" })).ok).toBe(false);
+    estado.conPermiso = false;
+    expect((await moderacionPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO123" })).ok).toBe(false);
+    expect(ml.moderacion).toHaveBeenCalledTimes(1);
   });
 });

@@ -26,6 +26,13 @@ export async function leerReglasAdicionalesCuentas(empresaId: string, cuentaIds:
   return mapa;
 }
 
+// Monto de la tolerancia en promociones compartidas guardada para la cuenta
+// (o null). Siempre sale de las reglas leídas frescas de la base, nunca del
+// navegador.
+export function toleranciaDeReglas(reglas: ReglasAdicionales | null | undefined): number | null {
+  return reglas?.toleranciaCompartidaBajoPiso?.monto ?? null;
+}
+
 export type CacheNombresPromocion = Map<string, Promise<string | null>>;
 
 function necesitaNombre(reglas: ReglasAdicionales): boolean {
@@ -57,7 +64,8 @@ export async function evaluarCandidatoConReglas(
   promoCruda: PromocionCrudaMl | undefined,
   reglas: ReglasAdicionales | null | undefined,
   token: string,
-  cache: CacheNombresPromocion
+  cache: CacheNombresPromocion,
+  siteId?: string
 ): Promise<EvaluacionReglasAdicionales | null> {
   if (!reglas) return null;
   const nombre = promoCruda && necesitaNombre(reglas) ? await nombreDePromocion(promoCruda, token, cache) : promoCruda && typeof promoCruda.name === "string" ? promoCruda.name : null;
@@ -72,5 +80,6 @@ export async function evaluarCandidatoConReglas(
     precioSugerido: c.precioSugerido,
     precioMinimo: c.precioMinimo,
     maxDiscountedPrice: c.maxDiscountedPrice,
+    siteId,
   });
 }

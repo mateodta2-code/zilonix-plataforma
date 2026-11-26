@@ -10,17 +10,23 @@ import { limitesDiaBogota } from "@/lib/filtros-listado";
 import { visitasCuentaMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
-import { periodoTienda, resumirTienda, type PeriodoTienda, type ResumenTienda, type VentaTienda } from "./resumenTienda";
+import type { PeriodoLista } from "./periodoLista";
+import { resumirTienda, type PeriodoTienda, type ResumenTienda, type VentaTienda } from "./resumenTienda";
 
-export type DatosResumenTienda = { periodo: PeriodoTienda; actual: ResumenTienda; anterior: ResumenTienda };
+// `cuentaId`: para que los enlaces del resumen (Análisis, Rendimiento) conserven la cuenta.
+export type DatosResumenTienda = { cuentaId: string; periodo: PeriodoTienda; actual: ResumenTienda; anterior: ResumenTienda };
 
 export async function leerResumenTienda(
   empresaId: string,
   cuenta: { id: string; cuentaIdExterna: string },
-  dias: number,
-  ahora: Date
+  periodoLista: PeriodoLista
 ): Promise<DatosResumenTienda | null> {
-  const periodo = periodoTienda(dias, hoyBogota(ahora));
+  const periodo: PeriodoTienda = {
+    desde: periodoLista.desde,
+    hasta: periodoLista.hasta,
+    anteriorDesde: periodoLista.anteriorDesde,
+    anteriorHasta: periodoLista.anteriorHasta,
+  };
   const inicio = limitesDiaBogota(periodo.anteriorDesde)?.inicio;
   const fin = limitesDiaBogota(periodo.hasta)?.finExclusivo;
   if (!inicio || !fin) return null;
@@ -57,6 +63,7 @@ export async function leerResumenTienda(
     unidades: f.unidades,
   }));
   return {
+    cuentaId: cuenta.id,
     periodo,
     actual: resumirTienda(ventas, periodo.desde, periodo.hasta, visitasActual),
     anterior: resumirTienda(ventas, periodo.anteriorDesde, periodo.anteriorHasta, visitasAnterior),

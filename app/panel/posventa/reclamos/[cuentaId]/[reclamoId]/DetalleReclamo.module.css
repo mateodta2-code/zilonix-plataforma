@@ -1,0 +1,57 @@
+/* Reclamos-A — solo tokens de globals.css, sin paleta nueva. */
+.migas { font-size: 13px; color: var(--texto-suave); }
+.migas a { color: var(--acento-fuerte); text-decoration: none; }
+.barra { display: flex; justify-content: flex-end; }
+.aviso {
+  padding: 14px 16px;
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie-2);
+  color: var(--texto-superficie-2);
+}
+.rejilla { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .rejilla { grid-template-columns: minmax(0, 1fr); } }
+.columnaIzquierda { display: grid; gap: 16px; }
+
+.conversacion { display: grid; gap: 14px; }
+.comprador { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--borde); }
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--gradiente-azul-metal); color: var(--plata-brillo); font-weight: 600; font-size: 14px;
+}
+.compradorNombre { font-weight: 600; color: var(--texto); }
+.mediacion { margin: 0; padding: 8px 12px; border: 1px solid var(--acento); border-radius: var(--radio-tarjeta); background: var(--acento-suave); color: var(--acento-fuerte); font-size: 13px; }
+.franja { padding: 10px 14px; border-radius: var(--radio-tarjeta); background: var(--acento-suave); border: 1px solid var(--acento); color: var(--acento-fuerte); font-size: 13.5px; font-weight: 600; }
+.franjaMotivo { margin: 6px 0 0; font-weight: 400; color: var(--texto); }
+.vacio { margin: 0; font-size: 13px; color: var(--texto-suave); }
+.mensajes { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.mensajeFila { display: grid; gap: 8px; }
+.separadorDia { margin: 4px 0; text-align: center; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--plata-etiqueta); }
+.burbuja { display: grid; gap: 6px; max-width: 80%; padding: 10px 12px; border: 1px solid var(--borde); border-radius: var(--radio-tarjeta); background: var(--superficie-2); color: var(--texto-superficie-2); }
+.burbujaComprador { justify-self: start; }
+.burbujaVendedor { justify-self: end; border-color: var(--azul-metal-2); }
+.burbujaMediador { justify-self: center; max-width: 90%; border-color: var(--acento); background: var(--acento-suave); }
+.rolMediador { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--acento-fuerte); }
+.textoMensaje { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hora { justify-self: end; font-size: 11px; color: var(--texto-suave-superficie-2); }
+.miniatura { max-width: 160px; max-height: 160px; border-radius: 6px; object-fit: cover; }
+.enlace { color: var(--acento-fuerte); font-size: 13px; }
+
+.textoPlazo { margin: 0; font-size: 13.5px; color: var(--texto-suave); }
+.acciones { display: flex; flex-wrap: wrap; gap: 10px; }
+.composer { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--borde); border-radius: var(--radio-tarjeta); background: var(--superficie); }
+.composerTitulo { font-weight: 600; color: var(--texto); }
+.composerCaja { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--borde); border-radius: var(--radio-tarjeta); background: var(--superficie-2); color: var(--texto-suave-superficie-2); font: inherit; resize: none; }
+.composerPie { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.composerContador { font-size: 12px; color: var(--texto-suave); }
+
+.ficha { display: grid; gap: 12px; }
+.fichaTitulo { margin: 0; font-size: 16px; color: var(--texto); }
+.fichaFecha { margin: 0; font-size: 13px; color: var(--texto-suave); }
+.alertaPlazo { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--acento); border-radius: var(--radio-tarjeta); background: var(--acento-suave); font-size: 13px; color: var(--texto); }
+.alertaPeligro { border-color: var(--peligro); color: var(--peligro-texto); }
+.producto { display: flex; gap: 12px; align-items: flex-start; }
+.fotoProducto { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; background: var(--fondo-foto); }
+.productoTitulo { margin: 0 0 4px; font-weight: 600; color: var(--texto); }
+.productoDetalle { margin: 0; font-size: 13px; color: var(--texto-suave); }

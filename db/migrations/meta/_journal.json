@@ -295,6 +295,83 @@
       "when": 1795481651180,
       "tag": "0041_ordinary_cobalt_man",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795566027560,
+      "tag": "0042_chubby_grandmaster",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795566916104,
+      "tag": "0043_soporte_tickets",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795567836217,
+      "tag": "0044_bodega_empresas",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1795573083401,
+      "tag": "0045_entregas_domiciliario",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1795574382380,
+      "tag": "0046_despachos_bodega_3pl",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1795638041398,
+      "tag": "0047_square_johnny_blaze",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1795642987770,
+      "tag": "0048_ordinary_white_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795645276636,
+      "tag": "0049_wise_longshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795647297953,
+      "tag": "0050_curly_molecule_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1795649318671,
+      "tag": "0051_adorable_hannibal_king",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795653198575,
+      "tag": "0052_cooing_vanisher",
+      "breakpoints": true
     }
   ]
 }

@@ -8,15 +8,65 @@
 //   comentario (resultado null): ese cambio sigue «sin revisar».
 // El resultado a los 7 días se calcula en bitacoraResultado.ts.
 
-import { and, desc, eq, gte, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNotNull, like, lte } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { auditoria, optimizacionNotas, optimizacionRevisiones, usuarios } from "@/db/schema";
-import { hoyBogota } from "@/lib/publicidad/plan";
-import { ACCIONES_BITACORA, DIAS_AVISO_REVISION, DIAS_MEDICION, listoParaRevisar, type ResultadoRevision } from "./bitacoraResultado";
+import { registrarAuditoria } from "@/lib/auditoria";
+import type { db } from "@/db";
+import { auditoria, cuentasMl, optimizacionNotas, optimizacionRevisiones, usuarios } from "@/db/schema";
+import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
+import { ACCIONES_BITACORA, compactarFotos, DIAS_AVISO_REVISION, DIAS_AVISO_REVISION_ACCIONABLE, diasAvisoDe, diasMedicionDe, DIAS_MEDICION, LARGO_MAXIMO_VALOR_FOTOS, leerFotosCompactas, listoParaRevisar, MARCA_FOTO_IA_ROTULO as MARCA_FOTO_IA, type ResultadoRevision } from "./bitacoraResultado";
 
-export { ACCIONES_BITACORA, DIAS_AVISO_REVISION, DIAS_MEDICION };
+export { ACCIONES_BITACORA, DIAS_AVISO_REVISION, DIAS_MEDICION, compactarFotos, leerFotosCompactas, LARGO_MAXIMO_VALOR_FOTOS, MARCA_FOTO_IA };
 
 const ACCIONES = Object.keys(ACCIONES_BITACORA);
+
+// ---------- Registro de cada cambio (sin migración) ----------
+// La cuenta de Mercado Libre se guarda en la columna `detalle` de
+// auditoría, al final, con un marcador fijo: « [cuenta:<uuid>]». La vista
+// lo quita al mostrar. Las filas viejas no lo tienen y siguen sirviendo.
+const PATRON_MARCADOR_CUENTA = / \[cuenta:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]\s*$/i;
+
+export function armarDetalleCambio(detalle: string, cuentaMlId: string | null | undefined): string {
+  const limpio = quitarCuentaDeDetalle(detalle);
+  return cuentaMlId && /^[0-9a-f-]{36}$/i.test(cuentaMlId) ? `${limpio} [cuenta:${cuentaMlId}]` : limpio;
+}
+
+export function leerCuentaDeDetalle(detalle: string | null | undefined): string | null {
+  const m = typeof detalle === "string" ? PATRON_MARCADOR_CUENTA.exec(detalle) : null;
+  return m ? m[1].toLowerCase() : null;
+}
+
+export function quitarCuentaDeDetalle(detalle: string | null | undefined): string {
+  return typeof detalle === "string" ? detalle.replace(PATRON_MARCADOR_CUENTA, "") : "";
+}
+
+export type EntradaCambioOptimizacion = {
+  empresaId: string;
+  usuarioId: string;
+  cuentaMlId: string;
+  cuentaNickname: string;
+  itemId: string;
+  accion: string;
+  valorAnterior?: string;
+  valorNuevo?: string;
+  detalle: string;
+};
+
+// Todo guardado de Optimización se registra por acá, dentro de la misma
+// transacción (dbComoEmpresa) de quien llama.
+export async function registrarCambioOptimizacion(tx: typeof db, e: EntradaCambioOptimizacion): Promise<void> {
+  await registrarAuditoria(tx, {
+    empresaId: e.empresaId,
+    usuarioId: e.usuarioId,
+    actorTipo: "persona",
+    accion: e.accion,
+    entidad: "publicacion_ml",
+    entidadId: e.itemId,
+    detalle: armarDetalleCambio(e.detalle, e.cuentaMlId),
+    valorAnterior: e.valorAnterior,
+    valorNuevo: e.valorNuevo,
+  });
+}
 
 export type RevisionCambio = { resultado: ResultadoRevision | null; comentario: string | null; usuario: string | null; ts: Date };
 
@@ -33,6 +83,8 @@ export type CambioBitacora = {
   valorAnterior: string | null;
   valorNuevo: string | null;
   detalle: string | null;
+  // Cuenta guardada en el marcador del detalle (null en filas viejas y notas).
+  cuentaMlId?: string | null;
   revision: RevisionCambio | null;
 };
 
@@ -78,6 +130,8 @@ export async function leerCambiosPublicacion(empresaId: string, itemId: string, 
   const cambios: CambioBitacora[] = [
     ...desdeZilonix.map((f) => ({
       ...f,
+      detalle: f.detalle === null ? null : quitarCuentaDeDetalle(f.detalle),
+      cuentaMlId: leerCuentaDeDetalle(f.detalle),
       ref: `auditoria:${f.id}`,
       origen: "zilonix" as const,
       rotulo: ACCIONES_BITACORA[f.accion] ?? f.accion,
@@ -111,7 +165,7 @@ export async function publicacionesParaRevisar(empresaId: string, itemIds: strin
   if (itemIds.length === 0) return [];
   const hoy = hoyBogota(ahora);
   // Un margen de 2 días para cubrir el corte de Bogotá; el filtro fino es por día.
-  const desde = new Date(ahora.getTime() - (DIAS_AVISO_REVISION + 2) * 86_400_000);
+  const desde = new Date(ahora.getTime() - (DIAS_AVISO_REVISION_ACCIONABLE + 2) * 86_400_000);
   const [desdeZilonix, notas, revisadas] = await dbComoEmpresa(empresaId, (tx) =>
     Promise.all([
       tx
@@ -127,7 +181,7 @@ export async function publicacionesParaRevisar(empresaId: string, itemIds: strin
           )
         ),
       tx
-        .select({ id: optimizacionNotas.id, itemId: optimizacionNotas.itemId, ts: optimizacionNotas.fechaCambio })
+        .select({ id: optimizacionNotas.id, itemId: optimizacionNotas.itemId, ts: optimizacionNotas.fechaCambio, texto: optimizacionNotas.texto })
         .from(optimizacionNotas)
         .where(and(eq(optimizacionNotas.empresaId, empresaId), inArray(optimizacionNotas.itemId, itemIds), gte(optimizacionNotas.fechaCambio, desde))),
       tx
@@ -138,11 +192,11 @@ export async function publicacionesParaRevisar(empresaId: string, itemIds: strin
   );
   const yaRevisadas = new Set(revisadas.map((r) => r.ref));
   const pendientes = new Set<string>();
-  const revisar = (ref: string, itemId: string | null, ts: Date) => {
-    if (itemId && !yaRevisadas.has(ref) && listoParaRevisar(hoyBogota(ts), hoy)) pendientes.add(itemId);
+  const revisar = (ref: string, itemId: string | null, ts: Date, texto?: string) => {
+    if (itemId && !yaRevisadas.has(ref) && listoParaRevisar(hoyBogota(ts), hoy, diasMedicionDe(texto), diasAvisoDe(texto))) pendientes.add(itemId);
   };
   for (const c of desdeZilonix) revisar(`auditoria:${c.id}`, c.itemId, c.ts);
-  for (const n of notas) revisar(`nota:${n.id}`, n.itemId, n.ts);
+  for (const n of notas) revisar(`nota:${n.id}`, n.itemId, n.ts, n.texto);
   return [...pendientes];
 }
 
@@ -165,6 +219,31 @@ export async function cambioEsDeLaPublicacion(empresaId: string, ref: string, it
         : Promise.resolve([])
   );
   return filas.length > 0;
+}
+
+// Día (Bogotá) de un cambio ya verificado con cambioEsDeLaPublicacion.
+export async function diaDelCambio(empresaId: string, ref: string): Promise<string | null> {
+  const [tipo, id] = ref.split(":");
+  if (!id || !/^[0-9a-f-]{36}$/.test(id)) return null;
+  const filas = await dbComoEmpresa(empresaId, (tx) =>
+    tipo === "auditoria"
+      ? tx.select({ ts: auditoria.ts }).from(auditoria).where(and(eq(auditoria.empresaId, empresaId), eq(auditoria.id, id)))
+      : tipo === "nota"
+        ? tx.select({ ts: optimizacionNotas.fechaCambio }).from(optimizacionNotas).where(and(eq(optimizacionNotas.empresaId, empresaId), eq(optimizacionNotas.id, id)))
+        : Promise.resolve([])
+  );
+  return filas[0] ? hoyBogota(filas[0].ts) : null;
+}
+
+// Días de medición del cambio (14 si es una nota de accionable, 7 si no).
+// Sale de la base, nunca del navegador.
+export async function diasMedicionDelCambio(empresaId: string, ref: string): Promise<number> {
+  const [tipo, id] = ref.split(":");
+  if (tipo !== "nota" || !id || !/^[0-9a-f-]{36}$/.test(id)) return diasMedicionDe(null);
+  const filas = await dbComoEmpresa(empresaId, (tx) =>
+    tx.select({ texto: optimizacionNotas.texto }).from(optimizacionNotas).where(and(eq(optimizacionNotas.empresaId, empresaId), eq(optimizacionNotas.id, id)))
+  );
+  return diasMedicionDe(filas[0]?.texto);
 }
 
 export async function crearNotaBitacora(
@@ -196,4 +275,140 @@ export async function guardarRevisionCambio(
         set: { resultado: datos.resultado, comentario: datos.comentario, usuarioId: datos.usuarioId, revisadoTs: ahora },
       })
   );
+}
+
+// ---------- Bitácora general (todas las publicaciones) ----------
+
+export const POR_PAGINA_BITACORA = 25;
+export const DIAS_MAXIMOS_BITACORA = 90;
+export const ESTADOS_BITACORA = ["midiendo", "listo", "revisado", "sin_revisar"] as const;
+export type EstadoBitacora = (typeof ESTADOS_BITACORA)[number];
+
+export type FiltrosBitacoraGeneral = {
+  cuentaMlId?: string;
+  accion?: string;
+  usuarioId?: string;
+  desde?: string; // YYYY-MM-DD de Bogotá
+  hasta?: string;
+  estado?: EstadoBitacora;
+  itemId?: string;
+  pagina?: number;
+};
+
+export type CambioGeneral = Omit<CambioBitacora, "origen" | "detalle"> & {
+  origen: "zilonix";
+  itemId: string;
+  cuentaMlId: string | null;
+  cuentaNickname: string | null;
+  detalle: string; // sin el marcador de cuenta
+  estado: EstadoBitacora;
+};
+
+export type PaginaBitacoraGeneral = { filas: CambioGeneral[]; total: number; pagina: number; paginas: number };
+
+// Estado de un cambio: «revisado» si tiene resultado; si no, «midiendo»
+// hasta terminar los 7 días, y después «listo» para revisar (o, pasados
+// los 14 días del aviso, solo «sin revisar»).
+// Las notas de accionable miden a 14 días y avisan hasta los 21.
+export function estadoDeCambio(dia: string, hoy: string, revision: RevisionCambio | null, texto?: string | null): EstadoBitacora {
+  if (revision?.resultado) return "revisado";
+  const dias = diasMedicionDe(texto);
+  if (restarDiasIso(dia, -(dias - 1)) >= hoy) return "midiendo";
+  return listoParaRevisar(dia, hoy, dias, diasAvisoDe(texto)) ? "listo" : "sin_revisar";
+}
+
+function coincideEstado(filtro: EstadoBitacora, estado: EstadoBitacora): boolean {
+  // «sin revisar» incluye todo lo que aún no tiene resultado.
+  return filtro === "sin_revisar" ? estado !== "revisado" : filtro === estado;
+}
+
+const UUID_FILTRO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ITEM_FILTRO = /^[A-Za-z0-9_-]{3,40}$/;
+
+// Todos los cambios hechos desde Optimización, últimos 90 días, 25 por
+// página. Filtros por cuenta (marcador en `detalle`), tipo, quién, días de
+// Bogotá, estado e id de publicación; todos van como parámetros. El
+// estado depende de las revisiones, así que se filtra y pagina en memoria
+// sobre las filas ya acotadas por la base (tope 2000).
+export async function leerCambiosGenerales(empresaId: string, filtros: FiltrosBitacoraGeneral, ahora: Date = new Date()): Promise<PaginaBitacoraGeneral> {
+  const hoy = hoyBogota(ahora);
+  const piso = restarDiasIso(hoy, DIAS_MAXIMOS_BITACORA - 1);
+  const desde = filtros.desde && filtros.desde > piso ? filtros.desde : piso;
+  const condiciones = [
+    eq(auditoria.empresaId, empresaId),
+    eq(auditoria.entidad, "publicacion_ml"),
+    inArray(auditoria.accion, filtros.accion && ACCIONES.includes(filtros.accion) ? [filtros.accion] : ACCIONES),
+    // Un margen de un día para el corte de Bogotá; el filtro fino es por día.
+    gte(auditoria.ts, new Date(`${restarDiasIso(desde, 1)}T00:00:00Z`)),
+  ];
+  if (filtros.hasta) condiciones.push(lte(auditoria.ts, new Date(`${restarDiasIso(filtros.hasta, -2)}T00:00:00Z`)));
+  if (filtros.cuentaMlId && UUID_FILTRO.test(filtros.cuentaMlId)) condiciones.push(like(auditoria.detalle, `%[cuenta:${filtros.cuentaMlId.toLowerCase()}]`));
+  if (filtros.usuarioId && UUID_FILTRO.test(filtros.usuarioId)) condiciones.push(eq(auditoria.usuarioId, filtros.usuarioId));
+  if (filtros.itemId && ITEM_FILTRO.test(filtros.itemId)) condiciones.push(ilike(auditoria.entidadId, `%${filtros.itemId.replace(/[%_\\]/g, "")}%`));
+
+  const [filasBase, revisiones, cuentas] = await dbComoEmpresa(empresaId, (tx) =>
+    Promise.all([
+      tx
+        .select({
+          id: auditoria.id,
+          itemId: auditoria.entidadId,
+          accion: auditoria.accion,
+          ts: auditoria.ts,
+          usuario: usuarios.nombre,
+          valorAnterior: auditoria.valorAnterior,
+          valorNuevo: auditoria.valorNuevo,
+          detalle: auditoria.detalle,
+        })
+        .from(auditoria)
+        .leftJoin(usuarios, eq(usuarios.id, auditoria.usuarioId))
+        .where(and(...condiciones))
+        .orderBy(desc(auditoria.ts))
+        .limit(2000),
+      tx
+        .select({
+          ref: optimizacionRevisiones.cambioRef,
+          resultado: optimizacionRevisiones.resultado,
+          comentario: optimizacionRevisiones.comentario,
+          usuario: usuarios.nombre,
+          ts: optimizacionRevisiones.revisadoTs,
+        })
+        .from(optimizacionRevisiones)
+        .leftJoin(usuarios, eq(usuarios.id, optimizacionRevisiones.usuarioId))
+        .where(eq(optimizacionRevisiones.empresaId, empresaId)),
+      tx.select({ id: cuentasMl.id, nickname: cuentasMl.nickname }).from(cuentasMl).where(eq(cuentasMl.empresaId, empresaId)),
+    ])
+  );
+  const porRef = new Map(revisiones.map((r) => [r.ref, { resultado: r.resultado as ResultadoRevision | null, comentario: r.comentario, usuario: r.usuario, ts: r.ts }]));
+  const nicknames = new Map(cuentas.map((c) => [c.id, c.nickname]));
+
+  const todas: CambioGeneral[] = [];
+  for (const f of filasBase) {
+    if (!f.itemId) continue;
+    const dia = hoyBogota(f.ts);
+    if (dia < desde || (filtros.hasta && dia > filtros.hasta)) continue;
+    const cuentaMlId = leerCuentaDeDetalle(f.detalle);
+    const revision = porRef.get(`auditoria:${f.id}`) ?? null;
+    todas.push({
+      id: f.id,
+      ref: `auditoria:${f.id}`,
+      origen: "zilonix",
+      itemId: f.itemId,
+      accion: f.accion,
+      rotulo: ACCIONES_BITACORA[f.accion] ?? f.accion,
+      ts: f.ts,
+      dia,
+      usuario: f.usuario,
+      valorAnterior: f.valorAnterior,
+      valorNuevo: f.valorNuevo,
+      detalle: quitarCuentaDeDetalle(f.detalle),
+      cuentaMlId,
+      cuentaNickname: cuentaMlId ? (nicknames.get(cuentaMlId) ?? null) : null,
+      revision,
+      estado: estadoDeCambio(dia, hoy, revision),
+    });
+  }
+  const filtradas = filtros.estado && ESTADOS_BITACORA.includes(filtros.estado) ? todas.filter((c) => coincideEstado(filtros.estado!, c.estado)) : todas;
+  const paginas = Math.max(1, Math.ceil(filtradas.length / POR_PAGINA_BITACORA));
+  const pagina = Math.min(Math.max(1, Math.floor(filtros.pagina ?? 1) || 1), paginas);
+  return { filas: filtradas.slice((pagina - 1) * POR_PAGINA_BITACORA, pagina * POR_PAGINA_BITACORA), total: filtradas.length, pagina, paginas };
 }

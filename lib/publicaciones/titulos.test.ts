@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { categoriasPorNivel, tendenciasCategoriaMl } from "@/lib/ml/cliente";
 import { leerFicha } from "@/lib/publicaciones/ficha";
-import { leerPropuestaTitulos, limpiarTitulo, nombresPropios, origenPalabras, recortarPorPalabra, sinMayusculaCadaPalabra, unirTendenciasPorNivel, filtrarTendenciasRelacionadas } from "@/lib/publicaciones/titulos";
+import { createHash } from "node:crypto";
+import { PROMPT_TITULOS_RECOMENDADO } from "@/lib/publicaciones/prompt-titulos-recomendado";
+import { CANTIDAD_TITULOS, leerPropuestaTitulos, limpiarKeywords, promptTitulos, limpiarTitulo, nombresPropios, origenPalabras, recortarPorPalabra, sinMayusculaCadaPalabra, unirTendenciasPorNivel, filtrarTendenciasRelacionadas } from "@/lib/publicaciones/titulos";
 
 const fetchOriginal = globalThis.fetch;
 afterEach(() => {
@@ -136,14 +138,6 @@ describe("categoriasPorNivel (ruta de /categories/{id})", () => {
   });
 });
 
-describe("palabras de la competencia", () => {
-  it("una palabra que solo está en el título de la competencia queda como «competencia»", () => {
-    const p = origenPalabras(["Bebedero colibrí picaflor"], [], "bebedero colibrí", [], "Bebedero Colibri Picaflor X2");
-    expect(p.find((x) => x.palabra === "picaflor")).toEqual({ palabra: "picaflor", origen: "competencia" });
-    expect(p.find((x) => x.palabra === "Bebedero")).toMatchObject({ origen: "vendedor" });
-  });
-});
-
 describe("filtrarTendenciasRelacionadas (24-nov: «Mascotas» para un bebedero de colibrí)", () => {
   const producto = "Pack de 2 comederos colibrí base roja plástico transparente para ventana";
   const categoria = "Bebederos y Comederos";
@@ -194,5 +188,50 @@ describe("filtrarTendenciasRelacionadas (24-nov: «Mascotas» para un bebedero d
     const muchas = Array.from({ length: 25 }, (_, i) => `bebedero colibri ${i}`);
     const r = filtrarTendenciasRelacionadas([{ nivel: "baja" as const, palabras: muchas }], producto);
     expect(r.niveles[0].palabras).toHaveLength(10);
+  });
+});
+
+const ficha = leerFicha({ nombre: { valor: "Termo de acero", origen: "vendedor" }, material: { valor: "Acero inoxidable", origen: "foto" } });
+
+describe("prompt recomendado de títulos", () => {
+  it("es el texto de Mateo sin cambios", () => {
+    expect(createHash("sha256").update(PROMPT_TITULOS_RECOMENDADO).digest("hex")).toBe("e9ace074f9753b455d855c5e09fd743beef1cf6dc8d2151c6155c5f8115048ea");
+    expect(PROMPT_TITULOS_RECOMENDADO.startsWith("# 1. INVESTIGACIÓN ESTRATÉGICA DEL PRODUCTO")).toBe(true);
+    expect(PROMPT_TITULOS_RECOMENDADO.endsWith("podrán aprovecharse posteriormente en la descripción.")).toBe(true);
+  });
+
+  it("promptTitulos empieza con el recomendado y termina con el bloque JSON", () => {
+    const p = promptTitulos({ ficha, idioma: "español", pais: "Colombia", categoria: "Termos", tendencias: ["termo"], info: "" });
+    expect(p.startsWith(PROMPT_TITULOS_RECOMENDADO)).toBe(true);
+    expect(p).toContain("Categoría de Mercado Libre: Termos");
+    expect(p.endsWith("No escribas el número de caracteres: lo cuenta el sistema.")).toBe(true);
+    expect(p).toContain('"keywordsNoUtilizadas"');
+  });
+});
+
+describe("limpiarKeywords", () => {
+  it("deja solo strings limpios, sin repetidos, símbolos, promoción ni cifras inventadas", () => {
+    const r = limpiarKeywords(["Termo", "termo", "TÉRMO ", 5, "x", "termo ★ acero", "oferta", "botella 12 horas", "botella 1 L", "a".repeat(41)], 20, "Capacidad 1 L");
+    expect(r).toEqual(["Termo", "termo acero", "botella 1 L"]);
+    expect(limpiarKeywords("nada")).toEqual([]);
+    expect(limpiarKeywords(Array.from({ length: 30 }, (_, i) => `palabra${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`))).toHaveLength(20);
+  });
+});
+
+describe("leerPropuestaTitulos con 10 títulos y keywords", () => {
+  const titulos = Array.from({ length: 12 }, (_, i) => `Termo de acero inoxidable modelo ${String.fromCharCode(97 + i)}`);
+  it("tope de 10, keywords limpias y vacías si la IA no las manda", () => {
+    const r = leerPropuestaTitulos(JSON.stringify({ titulos, keywordsPrincipales: ["termo", "Termo", "termo 99 L"], keywordsNoUtilizadas: ["botilito"] }), { ficha, tendencias: [], info: "" });
+    expect(CANTIDAD_TITULOS).toBe(10);
+    expect(r?.titulos).toHaveLength(10);
+    expect(r?.keywordsPrincipales).toEqual(["termo"]);
+    expect(r?.keywordsNoUtilizadas).toEqual(["botilito"]);
+    const sin = leerPropuestaTitulos(JSON.stringify({ titulos }), { ficha, tendencias: [], info: "" });
+    expect(sin?.keywordsPrincipales).toEqual([]);
+    expect(sin?.keywordsNoUtilizadas).toEqual([]);
+  });
+  it("un título de más de 60 se corta por palabra", () => {
+    const r = leerPropuestaTitulos(JSON.stringify({ titulos: ["Termo de acero inoxidable para bebidas frías y calientes con tapa rosca"] }), { ficha, tendencias: [], info: "" });
+    expect(r?.titulos[0].length).toBeLessThanOrEqual(60);
   });
 });

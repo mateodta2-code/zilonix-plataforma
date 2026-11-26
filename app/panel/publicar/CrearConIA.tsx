@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
@@ -18,6 +19,7 @@ import {
   type Origen,
 } from "@/lib/publicaciones/ficha";
 import { LARGO_TITULO, LARGO_TITULO_CATALOGO, type NivelBusqueda, type PalabraClave, type TendenciaConNivel } from "@/lib/publicaciones/titulos";
+import { datosSitioMl } from "@/lib/ml/sitios";
 import type { Cuenta } from "./CuentasDestino";
 import { analizarProductoAction, escribirDescripcionAction, proponerTitulosAction } from "./ia/actions";
 import { CLAVES_BORRADOR_IA, useBorradorIA } from "./ia/borradorIA";
@@ -28,7 +30,7 @@ const ROTULO_ORIGEN: Record<Origen, { texto: string; estado: EstadoChip }> = {
   vendedor: { texto: "Del vendedor", estado: "neutro" },
   supuesto: { texto: "Confirmar", estado: "advertencia" },
 };
-const ROTULO_PALABRA: Record<PalabraClave["origen"], string> = { tendencia: "Tendencia", vendedor: "Del vendedor", competencia: "De la competencia", ia: "Sugerida por la IA" };
+const ROTULO_PALABRA: Record<PalabraClave["origen"], string> = { tendencia: "Tendencia", vendedor: "Del vendedor", ia: "Sugerida por la IA" };
 // Qué tan buscada es, según el nivel de categoría donde sale la tendencia.
 const ROTULO_NIVEL: Record<NivelBusqueda, string> = { alta: "Alta", media: "Media", baja: "Baja" };
 const LEYENDA_NIVEL: Record<NivelBusqueda, string> = { alta: "Alta (categoría general)", media: "Media (categoría padre)", baja: "Baja (categoría específica)" };
@@ -39,11 +41,13 @@ type Titulos = {
   titulos: string[];
   catalogo: string | null;
   palabras: PalabraClave[];
+  // Estados guardados viejos no las traen: por defecto [].
+  keywordsPrincipales?: string[];
+  keywordsNoUtilizadas?: string[];
   conTendencias: boolean;
   masBuscados: TendenciaConNivel[];
   rutaCategoria: string[];
   tendenciasSinRelacion: boolean;
-  competencia: { titulo: string | null; aviso: string | null };
 };
 
 // Sub pestañas debajo de la ficha (24-nov). Las 3 quedan montadas y solo
@@ -67,14 +71,19 @@ type BorradorTextos = {
   categoria: { id: string; nombre: string } | null;
   leyoFotos: boolean;
   titulos: Titulos | null;
-  linkCompetencia: string;
-  tituloCompetencia: string;
-  descripcion: string;
+  // Una descripción por cuenta marcada (id de la cuenta → texto).
+  descripciones: Record<string, string>;
   pestana: SubPestana;
 };
 
 // Misma ruta que lib/publicaciones/errores.ts (ese módulo es de servidor).
 const RUTA_CONECTAR_IA = "/panel/conectar-ia";
+
+const TITULO_CARGA_IA = {
+  analisis: "Analizando el producto con IA…",
+  titulos: "Proponiendo títulos…",
+  descripcion: "Proponiendo descripción…",
+} as const;
 
 // Publicar → «Crear con IA» (PR1, textos). La IA de la empresa analiza
 // las fotos del borrador y lo que escribe el vendedor (ficha con el
@@ -116,19 +125,19 @@ export function CrearConIA({
   const [categoria, setCategoria] = useState<{ id: string; nombre: string } | null>(null);
   const [leyoFotos, setLeyoFotos] = useState(true);
   const [titulos, setTitulos] = useState<Titulos | null>(null);
-  // Competencia (opcional): link de Mercado Libre o su título pegado a mano.
-  const [linkCompetencia, setLinkCompetencia] = useState("");
-  const [tituloCompetencia, setTituloCompetencia] = useState("");
-  const [descripcion, setDescripcion] = useState("");
+  // Una por cuenta marcada (24-nov): mismos datos y secciones, otra redacción.
+  const [descripciones, setDescripciones] = useState<Record<string, string>>({});
   const [ocupado, setOcupado] = useState<null | "analisis" | "titulos" | "descripcion">(null);
   const [aviso, setAviso] = useState<Aviso>(null);
   const [usado, setUsado] = useState<string | null>(null);
-  const [copiada, setCopiada] = useState(false);
+  const [copiada, setCopiada] = useState<string | null>(null);
   const [pestana, setPestana] = useState<SubPestana>("imagenes");
+  // Al confirmar, la ficha se pliega en una línea; se despliega para revisarla.
+  const [fichaAbierta, setFichaAbierta] = useState(true);
 
   useBorradorIA<BorradorTextos>(
     CLAVES_BORRADOR_IA.textos,
-    { cuentaId, info, garantia, ficha, confirmada, categoria, leyoFotos, titulos, linkCompetencia, tituloCompetencia, descripcion, pestana },
+    { cuentaId, info, garantia, ficha, confirmada, categoria, leyoFotos, titulos, descripciones, pestana },
     (b) => {
       if (cuentas.some((c) => c.id === b.cuentaId)) setCuentaId(b.cuentaId);
       setInfo(b.info);
@@ -137,11 +146,10 @@ export function CrearConIA({
       setConfirmada(b.confirmada);
       setCategoria(b.categoria);
       setLeyoFotos(b.leyoFotos);
-      setTitulos(b.titulos);
-      setLinkCompetencia(b.linkCompetencia);
-      setTituloCompetencia(b.tituloCompetencia);
-      setDescripcion(b.descripcion);
+      setTitulos(b.titulos ? { ...b.titulos, keywordsPrincipales: b.titulos.keywordsPrincipales ?? [], keywordsNoUtilizadas: b.titulos.keywordsNoUtilizadas ?? [] } : null);
+      setDescripciones(b.descripciones ?? {});
       setPestana(b.pestana);
+      setFichaAbierta(!b.confirmada);
       // «Generar imágenes» necesita la ficha confirmada otra vez.
       if (b.ficha && b.confirmada) onFicha?.({ ficha: b.ficha, categoriaId: b.categoria?.id ?? null });
     }
@@ -152,6 +160,8 @@ export function CrearConIA({
     return <p className={styles.ayudaIA}>Marca arriba al menos una cuenta destino para crear los textos con IA en su idioma.</p>;
   }
   const pendientes = ficha ? camposPorConfirmar(ficha) : [];
+  // Una cuenta por país (la primera marcada de cada uno).
+  const paises = cuentas.filter((c, i) => cuentas.findIndex((x) => x.siteId === c.siteId) === i);
 
   async function correr<T extends { ok: boolean }>(paso: "analisis" | "titulos" | "descripcion", llamada: () => Promise<T>, alTerminar: (r: T) => void) {
     setOcupado(paso);
@@ -171,12 +181,13 @@ export function CrearConIA({
     void correr("analisis", () => analizarProductoAction({ cuentaMlId: cuenta.id, fotos: fotos.slice(0, MAXIMO_FOTOS_ANALISIS), info }), (r) => {
       if (!r.ok) return;
       setFicha(r.ficha);
+      setFichaAbierta(true);
       setCategoria(r.categoria);
       onFicha?.(null);
       setLeyoFotos(r.leyoFotos);
       setConfirmada(false);
       setTitulos(null);
-      setDescripcion("");
+      setDescripciones({});
     });
   }
 
@@ -204,6 +215,7 @@ export function CrearConIA({
     }
     setFicha(limpia as Ficha);
     setConfirmada(true);
+    setFichaAbierta(false);
     onFicha?.({ ficha: limpia as Ficha, categoriaId: categoria?.id ?? null });
   }
 
@@ -215,30 +227,53 @@ export function CrearConIA({
           categoriaId: categoria?.id ?? null,
           categoriaNombre: categoria?.nombre ?? null,
           info,
-          linkCompetencia,
-          tituloCompetencia,
         }), (r) => {
       if (r.ok)
-        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria, tendenciasSinRelacion: r.tendenciasSinRelacion, competencia: r.competencia });
+        setTitulos({ titulos: r.titulos, catalogo: r.catalogo, palabras: r.palabras, keywordsPrincipales: r.keywordsPrincipales, keywordsNoUtilizadas: r.keywordsNoUtilizadas, conTendencias: r.conTendencias, masBuscados: r.masBuscados, rutaCategoria: r.rutaCategoria, tendenciasSinRelacion: r.tendenciasSinRelacion });
     });
   }
 
-  function pedirDescripcion() {
+  // Una descripción por cuenta, todas a la vez (la cola de la empresa
+  // deja máximo 4 llamadas de texto simultáneas). Cada cuenta recibe la
+  // «versión N de M» con su propio enfoque y en el idioma de su país.
+  // `soloId`: «Proponer otra» para una sola cuenta.
+  async function pedirDescripciones(soloId?: string) {
     if (!ficha) return;
-    void correr("descripcion", () => escribirDescripcionAction({ cuentaMlId: cuenta.id, ficha, garantia, palabrasClave: palabrasParaDescripcion }), (r) => {
-      if (r.ok) {
-        setDescripcion(r.descripcion);
-        setCopiada(false);
-      }
-    });
+    const destino = soloId ? cuentas.filter((c) => c.id === soloId) : cuentas;
+    setOcupado("descripcion");
+    setAviso(null);
+    setUsado(null);
+    const resultados = await Promise.all(
+      destino.map(async (c) => {
+        const variante = { numero: cuentas.findIndex((x) => x.id === c.id) + 1, total: cuentas.length };
+        try {
+          return { id: c.id, r: await escribirDescripcionAction({ cuentaMlId: c.id, ficha, garantia, palabrasClave: palabrasParaDescripcion, variante }) };
+        } catch {
+          return { id: c.id, r: { ok: false as const, aviso: "No se pudo completar. Intenta de nuevo." } };
+        }
+      })
+    );
+    const nuevas: Record<string, string> = {};
+    for (const { id, r } of resultados) if (r.ok) nuevas[id] = r.descripcion;
+    setDescripciones((d) => ({ ...d, ...nuevas }));
+    const fallo = resultados.find((x) => !x.r.ok)?.r as { aviso?: string; conectarIA?: boolean } | undefined;
+    if (fallo) {
+      const nombre = cuentas.find((c) => c.id === resultados.find((x) => !x.r.ok)?.id)?.nickname;
+      setAviso({ texto: `${nombre ? `${nombre}: ` : ""}${fallo.aviso ?? "No se pudo completar. Intenta de nuevo."}`, conectarIA: fallo.conectarIA });
+    }
+    setCopiada(null);
+    setOcupado(null);
   }
+
 
   // Cuentas donde se puede usar el texto: las marcadas del MISMO país que
   // la cuenta de destino (el texto se escribió en su idioma).
   const cuentasMismoPais = cuentas.filter((c) => c.siteId === cuenta.siteId);
   const hayOtroPais = cuentasMismoPais.length < cuentas.length;
   // La descripción usa las palabras clave de los títulos (si ya se pidieron).
-  const palabrasParaDescripcion = titulos ? titulos.palabras.map((p) => p.palabra) : [];
+  const palabrasParaDescripcion = titulos
+    ? [...new Map([...titulos.palabras.map((p) => p.palabra), ...(titulos.keywordsNoUtilizadas ?? [])].map((p) => [p.toLowerCase(), p])).values()]
+    : [];
 
   function nombres(ids: string[]): string {
     return cuentas
@@ -252,8 +287,9 @@ export function CrearConIA({
     setUsado(`Título puesto en ${ids.length > 1 ? "las cuentas" : "la cuenta"} ${nombres(ids)}. Revísalo abajo.`);
   }
 
+  // Cada cuenta recibe SU descripción.
   function usarDescripcion(ids: string[]) {
-    for (const id of ids) onUsarDescripcion(id, descripcion);
+    for (const id of ids) if (descripciones[id]) onUsarDescripcion(id, descripciones[id]);
     setUsado(`Descripción puesta en ${ids.length > 1 ? "las cuentas" : "la cuenta"} ${nombres(ids)}. Revísala abajo.`);
   }
 
@@ -279,6 +315,55 @@ export function CrearConIA({
       ) : null}
     </>
   );
+  // Al confirmar se muestra plegada (ver arriba en el return).
+  const bloqueFicha = ficha ? (
+    <div className={styles.bloqueIA}>
+      {!leyoFotos && fotos.length > 0 ? <p className={styles.ayudaIA}>La IA conectada no lee imágenes: la ficha salió solo de tu texto.</p> : null}
+      <p className={styles.ayudaIA}>
+        Categoría de Mercado Libre: <strong>{categoria ? categoria.nombre : "no se pudo detectar (la eliges abajo)"}</strong>
+      </p>
+      <div className={styles.fichaIA}>
+        {CAMPOS_FICHA.map((c) => {
+          const campo = ficha[c.clave];
+          const esLista = Array.isArray(campo.valor);
+          const texto = Array.isArray(campo.valor) ? campo.valor.join("\n") : (campo.valor ?? "");
+          const rotulo = ROTULO_ORIGEN[campo.origen];
+          return (
+            <Campo
+              key={c.clave}
+              etiqueta={
+                <span className={styles.etiquetaFichaIA}>
+                  {c.etiqueta}
+                  {texto ? <Chip estado={rotulo.estado}>{rotulo.texto}</Chip> : null}
+                  {campo.origen === "supuesto" && texto ? (
+                    <Boton type="button" variante="fantasma" onClick={() => aceptar(c.clave)}>
+                      Es correcto
+                    </Boton>
+                  ) : null}
+                </span>
+              }
+            >
+              {esLista ? (
+                <textarea className="zx-control" rows={Math.max(2, Math.min(6, texto.split("\n").length))} value={texto} onChange={(e) => editar(c.clave, e.target.value, true)} />
+              ) : (
+                <input className="zx-control" value={texto} onChange={(e) => editar(c.clave, e.target.value, false)} />
+              )}
+            </Campo>
+          );
+        })}
+      </div>
+      {pendientes.length > 0 ? (
+        <p className={styles.avisoIA}>
+          Revisa lo marcado «Confirmar» ({pendientes.length}): corrígelo, bórralo o marca «Es correcto». Lo que la IA supuso no se usa sin tu visto bueno.
+        </p>
+      ) : null}
+      <div>
+        <Boton type="button" variante={confirmada ? "secundario" : "primario"} onClick={confirmar} disabled={ocupado !== null || pendientes.length > 0 || !ficha.nombre.valor}>
+          {confirmada ? "Ficha confirmada ✓" : "Confirmar ficha"}
+        </Boton>
+      </div>
+    </div>
+  ) : null;
   const sinFicha = <p className={styles.ayudaIA}>Primero analiza el producto y pulsa «Confirmar ficha» (arriba).</p>;
 
   return (
@@ -302,21 +387,20 @@ export function CrearConIA({
       {/* El paso 1 se ve desde el principio: los datos de abajo y, después de «Analizar», la ficha. */}
       <p className="zx-etiqueta">1. Ficha del producto</p>
 
-      {cuentas.length > 1 ? (
-        <Campo etiqueta="Cuenta de destino (define el país y el idioma)">
-          <select className="zx-control" value={cuenta.id} onChange={(e) => setCuentaId(e.target.value)} disabled={ocupado !== null}>
-            {cuentas.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nickname} · {c.siteId}
+      {/* Solo si las cuentas marcadas son de países distintos (25-nov): el
+          país define la categoría y el idioma y las tendencias de los títulos.
+          Con un solo país no hay nada que elegir. */}
+      {paises.length > 1 ? (
+        <Campo etiqueta="País para la categoría y los títulos">
+          <select className="zx-control" value={paises.find((p) => p.siteId === cuenta.siteId)?.id ?? cuenta.id} onChange={(e) => setCuentaId(e.target.value)} disabled={ocupado !== null}>
+            {paises.map((p) => (
+              <option key={p.id} value={p.id}>
+                {datosSitioMl(p.siteId).nombre} ({p.siteId})
               </option>
             ))}
           </select>
         </Campo>
-      ) : (
-        <p className={styles.ayudaIA}>
-          Cuenta de destino: <strong>{cuenta.nickname}</strong> · {cuenta.siteId}
-        </p>
-      )}
+      ) : null}
 
       {referencias ? (
         <div>
@@ -346,54 +430,25 @@ export function CrearConIA({
 
       {!ficha ? mensajes : null}
 
-      {ficha ? (
-        <div className={styles.bloqueIA}>
-          {!leyoFotos && fotos.length > 0 ? <p className={styles.ayudaIA}>La IA conectada no lee imágenes: la ficha salió solo de tu texto.</p> : null}
-          <p className={styles.ayudaIA}>
-            Categoría de Mercado Libre: <strong>{categoria ? categoria.nombre : "no se pudo detectar (la eliges abajo)"}</strong>
-          </p>
-          <div className={styles.fichaIA}>
-            {CAMPOS_FICHA.map((c) => {
-              const campo = ficha[c.clave];
-              const esLista = Array.isArray(campo.valor);
-              const texto = Array.isArray(campo.valor) ? campo.valor.join("\n") : (campo.valor ?? "");
-              const rotulo = ROTULO_ORIGEN[campo.origen];
-              return (
-                <Campo
-                  key={c.clave}
-                  etiqueta={
-                    <span className={styles.etiquetaFichaIA}>
-                      {c.etiqueta}
-                      {texto ? <Chip estado={rotulo.estado}>{rotulo.texto}</Chip> : null}
-                      {campo.origen === "supuesto" && texto ? (
-                        <Boton type="button" variante="fantasma" onClick={() => aceptar(c.clave)}>
-                          Es correcto
-                        </Boton>
-                      ) : null}
-                    </span>
-                  }
-                >
-                  {esLista ? (
-                    <textarea className="zx-control" rows={Math.max(2, Math.min(6, texto.split("\n").length))} value={texto} onChange={(e) => editar(c.clave, e.target.value, true)} />
-                  ) : (
-                    <input className="zx-control" value={texto} onChange={(e) => editar(c.clave, e.target.value, false)} />
-                  )}
-                </Campo>
-              );
-            })}
-          </div>
-          {pendientes.length > 0 ? (
-            <p className={styles.avisoIA}>
-              Revisa lo marcado «Confirmar» ({pendientes.length}): corrígelo, bórralo o marca «Es correcto». Lo que la IA supuso no se usa sin tu visto bueno.
-            </p>
-          ) : null}
-          <div>
-            <Boton type="button" variante={confirmada ? "secundario" : "primario"} onClick={confirmar} disabled={ocupado !== null || pendientes.length > 0 || !ficha.nombre.valor}>
-              {confirmada ? "Ficha confirmada ✓" : "Confirmar ficha"}
-            </Boton>
-          </div>
-        </div>
-      ) : null}
+      {ficha && confirmada ? (
+        <details className={styles.fichaPlegadaIA} open={fichaAbierta} onToggle={(e) => setFichaAbierta(e.currentTarget.open)}>
+          <summary>
+            <span className={styles.okIA}>Ficha confirmada ✓</span>
+            {ficha.nombre.valor ? <span> · {Array.isArray(ficha.nombre.valor) ? ficha.nombre.valor.join(" ") : ficha.nombre.valor}</span> : null}
+            <span className={styles.ayudaIA}> — {fichaAbierta ? "ocultar" : "ver o editar"}</span>
+          </summary>
+          {bloqueFicha}
+        </details>
+      ) : (
+        bloqueFicha
+      )}
+
+      <BarraCarga
+        estado={ocupado !== null ? "cargando" : "inactiva"}
+        titulo={ocupado !== null ? TITULO_CARGA_IA[ocupado] : ""}
+        avance={null}
+        sticky={false}
+      />
 
       <div className={styles.bloqueIA}>
         <div className={styles.subPestanasIA} role="tablist" aria-label="Qué crear con la IA">
@@ -425,31 +480,12 @@ export function CrearConIA({
           {ficha && confirmada ? (
             <>
                 <div>
-                  <details className={styles.competenciaIA}>
-                    <summary>Tomar ideas de una publicación de la competencia (opcional)</summary>
-                    <Campo etiqueta="Link de la publicación en Mercado Libre">
-                      <input
-                        className="zx-control"
-                        type="url"
-                        value={linkCompetencia}
-                        onChange={(e) => setLinkCompetencia(e.target.value)}
-                        placeholder="https://…mercadolibre…/…"
-                        disabled={ocupado !== null}
-                      />
-                    </Campo>
-                    <Campo etiqueta="O pega su título (si el link no se puede leer)">
-                      <input className="zx-control" maxLength={200} value={tituloCompetencia} onChange={(e) => setTituloCompetencia(e.target.value)} disabled={ocupado !== null} />
-                    </Campo>
-                    <p className={styles.ayudaIA}>Solo se usan sus palabras como idea: la IA no copia el título ni toma datos que no estén en tu ficha.</p>
-                  </details>
                   <Boton type="button" onClick={pedirTitulos} disabled={ocupado !== null}>
                     {ocupado === "titulos" ? "Proponiendo…" : titulos ? "Proponer otros" : "Proponer títulos"}
                   </Boton>
                 </div>
                 {titulos ? (
                   <>
-                    {titulos.competencia.aviso ? <p className={styles.avisoIA}>{titulos.competencia.aviso}</p> : null}
-                    {titulos.competencia.titulo ? <p className={styles.ayudaIA}>Ideas tomadas de: «{titulos.competencia.titulo}»</p> : null}
                     {titulos.tendenciasSinRelacion ? (
                       <p className={styles.ayudaIA}>
                         Mercado Libre no tiene tendencias para esta categoría, y las de las categorías más generales no se relacionan con tu producto: los títulos
@@ -480,26 +516,18 @@ export function CrearConIA({
                         </span>
                       </div>
                     ) : null}
-                    {[...titulos.titulos.map((t) => ({ t, max: LARGO_TITULO })), ...(titulos.catalogo ? [{ t: titulos.catalogo, max: LARGO_TITULO_CATALOGO }] : [])].map(({ t, max }) => (
-                      <div key={t} className={styles.tituloIA}>
-                        <span>
-                          {max === LARGO_TITULO_CATALOGO ? <Chip>Catálogo</Chip> : null} <CopiarTexto valor={t} etiquetaAria={`Copiar título: ${t}`} />{" "}
-                          <span className={styles.contadorIA}>
-                            {t.length}/{max}
-                          </span>
-                          <span className={styles.barraTituloIA} aria-hidden="true">
-                            <span style={{ width: `${Math.min(100, Math.round((t.length / max) * 100))}%` }} />
-                          </span>
-                        </span>
-                        <span className={styles.accionesIA}>
-                          {max === LARGO_TITULO ? (
-                            <BotonesUsarEn cuentas={cuentasMismoPais} que={`título «${t}»`} onUsar={(ids) => usarTitulo(t, ids)} />
-                          ) : null}
-                        </span>
-                      </div>
-                    ))}
+                    <ol className={styles.listaTitulosIA} aria-label="Títulos sugeridos">
+                      {titulos.titulos.map((t, i) => (
+                        <li key={t}>
+                          <FilaTituloIA t={t} max={LARGO_TITULO} numero={i + 1} acciones={<BotonesUsarEn cuentas={cuentasMismoPais} que={`título «${t}»`} onUsar={(ids) => usarTitulo(t, ids)} />} />
+                        </li>
+                      ))}
+                    </ol>
+                    {titulos.catalogo ? <FilaTituloIA t={titulos.catalogo} max={LARGO_TITULO_CATALOGO} catalogo /> : null}
+                    <ListaKeywordsIA titulo="Keywords principales" lista={titulos.keywordsPrincipales ?? []} />
+                    <ListaKeywordsIA titulo="Keywords no utilizadas (para la descripción)" lista={titulos.keywordsNoUtilizadas ?? []} />
                     {hayOtroPais ? (
-                      <p className={styles.ayudaIA}>{`Solo salen las cuentas de ${cuenta.siteId}: el texto está escrito para ese país. Para otro país, elige esa cuenta arriba y pide los títulos de nuevo.`}</p>
+                      <p className={styles.ayudaIA}>{`Solo salen las cuentas de ${cuenta.siteId}: el texto está escrito para ese país. Para otro país, elígelo arriba en «País para la categoría y los títulos» y pide los títulos de nuevo.`}</p>
                     ) : null}
                     {titulos.palabras.length > 0 ? (
                       <p className={styles.ayudaIA}>
@@ -529,30 +557,64 @@ export function CrearConIA({
                   <input className="zx-control" maxLength={LARGO_GARANTIA} value={garantia} onChange={(e) => setGarantia(e.target.value)} placeholder="Ej.: Garantía del vendedor: 30 días por defectos de fábrica." />
                 </Campo>
                 <div>
-                  <Boton type="button" onClick={pedirDescripcion} disabled={ocupado !== null}>
-                    {ocupado === "descripcion" ? "Proponiendo…" : descripcion ? "Proponer otra" : "Proponer descripción"}
+                  <Boton type="button" onClick={() => void pedirDescripciones()} disabled={ocupado !== null}>
+                    {ocupado === "descripcion"
+                      ? "Proponiendo…"
+                      : cuentas.length > 1
+                        ? Object.keys(descripciones).length > 0
+                          ? `Proponer otras ${cuentas.length}`
+                          : `Proponer ${cuentas.length} descripciones (una por cuenta)`
+                        : Object.keys(descripciones).length > 0
+                          ? "Proponer otra"
+                          : "Proponer descripción"}
                   </Boton>
                 </div>
-                {descripcion ? (
-                  <>
-                    <textarea className="zx-control" rows={14} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} aria-label="Descripción propuesta" />
-                    <span className={styles.accionesIA}>
-                      <Boton
-                        type="button"
-                        variante="fantasma"
-                        onClick={() => {
-                          void navigator.clipboard.writeText(descripcion).then(
-                            () => setCopiada(true),
-                            () => setCopiada(false)
-                          );
-                        }}
-                      >
-                        {copiada ? "Copiada ✓" : "Copiar"}
-                      </Boton>
-                      <BotonesUsarEn cuentas={cuentasMismoPais} que="descripción" onUsar={usarDescripcion} />
-                    </span>
-                  </>
+                {cuentas.length > 1 ? (
+                  <p className={styles.ayudaIA}>Cada cuenta recibe una descripción distinta, con las mismas secciones y los mismos datos, en el idioma de su país.</p>
                 ) : null}
+                {cuentas.filter((c) => descripciones[c.id] !== undefined).length > 1 ? (
+                  <div>
+                    <Boton type="button" variante="secundario" onClick={() => usarDescripcion(cuentas.filter((c) => descripciones[c.id]).map((c) => c.id))} disabled={ocupado !== null}>
+                      Usar cada una en su cuenta
+                    </Boton>
+                  </div>
+                ) : null}
+                {cuentas
+                  .filter((c) => descripciones[c.id] !== undefined)
+                  .map((c) => (
+                    <div key={c.id} className={styles.crearIA}>
+                      <p className="zx-etiqueta">{`Descripción para ${c.nickname} · ${c.siteId}`}</p>
+                      <textarea
+                        className="zx-control"
+                        rows={14}
+                        value={descripciones[c.id]}
+                        onChange={(e) => setDescripciones((d) => ({ ...d, [c.id]: e.target.value }))}
+                        aria-label={`Descripción propuesta para ${c.nickname}`}
+                      />
+                      <span className={styles.accionesIA}>
+                        <Boton
+                          type="button"
+                          variante="fantasma"
+                          onClick={() => {
+                            void navigator.clipboard.writeText(descripciones[c.id]).then(
+                              () => setCopiada(c.id),
+                              () => setCopiada(null)
+                            );
+                          }}
+                        >
+                          {copiada === c.id ? "Copiada ✓" : "Copiar"}
+                        </Boton>
+                        <Boton type="button" variante="primario" onClick={() => usarDescripcion([c.id])} aria-label={`Usar descripción en ${c.nickname}`}>
+                          {`Usar en ${c.nickname}`}
+                        </Boton>
+                        {cuentas.length > 1 ? (
+                          <Boton type="button" variante="fantasma" onClick={() => void pedirDescripciones(c.id)} disabled={ocupado !== null}>
+                            Proponer otra para esta cuenta
+                          </Boton>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))}
             </>
           ) : (
             sinFicha
@@ -580,5 +642,40 @@ export function BotonesUsarEn({ cuentas, que, onUsar }: { cuentas: Cuenta[]; que
         </Boton>
       ) : null}
     </>
+  );
+}
+
+// Una sugerencia de título con su largo, contado por el código (nunca por la IA).
+function FilaTituloIA({ t, max, numero, catalogo, acciones }: { t: string; max: number; numero?: number; catalogo?: boolean; acciones?: ReactNode }) {
+  return (
+    <div className={styles.tituloIA}>
+      <span>
+        {numero ? <span aria-hidden="true">{numero}. </span> : null}
+        {catalogo ? <Chip>Catálogo</Chip> : null} <CopiarTexto valor={t} etiquetaAria={`Copiar título: ${t}`} />{" "}
+        <span className={styles.contadorIA} aria-label={`${t.length} de ${max} caracteres`}>
+          {t.length}/{max}
+        </span>
+        <span className={styles.barraTituloIA} aria-hidden="true">
+          <span style={{ width: `${Math.min(100, Math.round((t.length / max) * 100))}%` }} />
+        </span>
+      </span>
+      <span className={styles.accionesIA}>{acciones}</span>
+    </div>
+  );
+}
+
+function ListaKeywordsIA({ titulo, lista }: { titulo: string; lista: string[] }) {
+  if (lista.length === 0) return null;
+  return (
+    <div className={styles.masBuscadosIA}>
+      <p className="zx-etiqueta">{`${titulo} (${lista.length})`}</p>
+      <ul className={styles.listaKeywordsIA} aria-label={titulo}>
+        {lista.map((k) => (
+          <li key={k}>
+            <Chip>{k}</Chip>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

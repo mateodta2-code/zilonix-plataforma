@@ -12,6 +12,9 @@ import {
 import { db } from "@/db";
 import { dbSuperadmin } from "@/db/superadmin-context";
 import { accesosTemporales, auditoria, empresas, membresias, roles, usuarios } from "@/db/schema";
+import type { SaludEmpresa } from "@/lib/superadmin-salud";
+import type { EstadoProceso } from "@/lib/superadmin-procesos";
+import type { Proceso } from "@/lib/trabajos/registroEjecuciones";
 
 export class NoEsSuperadminError extends Error {
   constructor() {
@@ -56,6 +59,7 @@ export type EmpresaConConteo = {
   cuentasMl: number;
   cuentasFalabella: number;
   ultimaActividad: Date | null;
+  ultimoIngresoTs: Date | null;
 };
 
 // Lo único que el superadmin ve SIEMPRE, sin pedir nada a nadie: las
@@ -90,9 +94,74 @@ export async function listarEmpresasConConteo(): Promise<EmpresaConConteo[]> {
         cuentasMl: Number(r?.cuentas_ml ?? 0),
         cuentasFalabella: Number(r?.cuentas_falabella ?? 0),
         ultimaActividad: r?.ultima_actividad ? new Date(r.ultima_actividad) : null,
+        ultimoIngresoTs: e.ultimoIngresoTs,
       };
     })
     .sort((a, b) => b.creadoTs.getTime() - a.creadoTs.getTime());
+}
+
+// Salud de conexiones (25-nov, /superadmin/conexiones): solo conteos por
+// empresa vía superadmin_salud_conexiones() (db/rls-setup.sql, SECURITY
+// DEFINER) — superadmin_user no tiene SELECT sobre cuentas_ml, avisos_ml
+// ni publicidad_sincronizaciones, y no se le da.
+export async function listarSaludConexiones(): Promise<SaludEmpresa[]> {
+  const lista = await dbSuperadmin.select({ id: empresas.id, nombre: empresas.nombre, estado: empresas.estado }).from(empresas);
+  const conteos = (await dbSuperadmin.execute(sql`select * from superadmin_salud_conexiones()`)) as unknown as {
+    empresa_id: string;
+    ml_conectadas: string | number;
+    ml_desconectadas: string | number;
+    ml_sin_renovar: string | number;
+    avisos_atrasados: string | number;
+    publicidad_con_error: string | number;
+    falabella_desconectadas: string | number;
+  }[];
+  const porEmpresa = new Map(conteos.map((c) => [c.empresa_id, c]));
+  return lista.map((e) => {
+    const c = porEmpresa.get(e.id);
+    return {
+      empresaId: e.id,
+      nombre: e.nombre,
+      estado: e.estado,
+      mlConectadas: Number(c?.ml_conectadas ?? 0),
+      mlDesconectadas: Number(c?.ml_desconectadas ?? 0),
+      mlSinRenovar: Number(c?.ml_sin_renovar ?? 0),
+      avisosAtrasados: Number(c?.avisos_atrasados ?? 0),
+      publicidadConError: Number(c?.publicidad_con_error ?? 0),
+      falabellaDesconectadas: Number(c?.falabella_desconectadas ?? 0),
+    };
+  });
+}
+
+// Estado de los procesos (25-nov): última corrida de cada proceso
+// automático y la cola de avisos, vía funciones SECURITY DEFINER
+// (superadmin_user no lee ejecuciones_procesos ni avisos_ml directo).
+export async function listarEstadoProcesos(): Promise<EstadoProceso[]> {
+  const filas = (await dbSuperadmin.execute(sql`select * from superadmin_estado_procesos()`)) as unknown as {
+    proceso: Proceso;
+    ultima_ts: string | Date | null;
+    ultima_ok: boolean | null;
+    ultimo_resumen: Record<string, number> | null;
+    ultimo_error: string | null;
+    ultima_exitosa_ts: string | Date | null;
+    corridas_24h: string | number;
+    fallidas_24h: string | number;
+  }[];
+  const fecha = (v: string | Date | null) => (v ? new Date(v) : null);
+  return filas.map((f) => ({
+    proceso: f.proceso,
+    ultimaTs: fecha(f.ultima_ts),
+    ultimaOk: f.ultima_ok,
+    ultimoResumen: f.ultimo_resumen ?? {},
+    ultimoError: f.ultimo_error,
+    ultimaExitosaTs: fecha(f.ultima_exitosa_ts),
+    corridas24h: Number(f.corridas_24h),
+    fallidas24h: Number(f.fallidas_24h),
+  }));
+}
+
+export async function avisosEnCola(): Promise<{ pendientes: number; atrasados: number }> {
+  const [f] = (await dbSuperadmin.execute(sql`select * from superadmin_avisos_en_cola()`)) as unknown as { pendientes: string | number; atrasados: string | number }[];
+  return { pendientes: Number(f?.pendientes ?? 0), atrasados: Number(f?.atrasados ?? 0) };
 }
 
 export type AccionSuperadmin = { ts: Date; accion: string; entidad: string; empresaNombre: string | null; detalle: string | null };

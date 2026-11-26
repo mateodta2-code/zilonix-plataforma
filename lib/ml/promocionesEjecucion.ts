@@ -6,6 +6,8 @@ import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import type { PromocionCrudaMl } from "@/lib/ml/cliente";
 import { LimiteMercadoLibreError, modificarPromocionMl, motivoErrorEscrituraMl, participarPromocionMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { leerReglasAdicionalesCuentas, toleranciaDeReglas } from "@/lib/ml/promocionesReglasAdicionales";
+import { aplicaToleranciaCompartida } from "@/lib/ml/promocionesReglasTexto";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
 import {
   calcularCandidatosItem,
@@ -97,8 +99,23 @@ export function validarCalculado(
   // variantes, tipos sin escritura, techo de la promoción
   // (max_discounted_price), rango 5–80 % de PRICE_DISCOUNT, gate de
   // «compartida» y la acción vigente.
-  aplicarPiso: boolean = true
+  aplicarPiso: boolean = true,
+  // ÚNICA excepción al piso (decisión de Mateo): tolerancia guardada en la
+  // cuenta para promociones compartidas, leída fresca (nunca del navegador).
+  toleranciaCompartidaBajoPiso: number | null = null
 ): ResultadoValidacion {
+  // Un precio por debajo del piso SOLO se acepta si se cumple TODO: se
+  // aplica piso, la cuenta participa en compartidas, la promoción es
+  // compartida (meli_percentage > 0), hay regla de tolerancia guardada, la
+  // diferencia piso - máximo es <= monto y el precio es EXACTAMENTE
+  // max_discounted_price. Cualquier otro precio bajo el piso se rechaza.
+  const esExcepcionBajoPiso = (precio: number): boolean =>
+    aplicarPiso &&
+    reglas.participarCompartidas &&
+    recalculado.maxDiscountedPrice != null &&
+    precio === recalculado.maxDiscountedPrice &&
+    aplicaToleranciaCompartida({ esCompartida: recalculado.esCompartida, precioMinimo: piso, maxDiscountedPrice: recalculado.maxDiscountedPrice }, toleranciaCompartidaBajoPiso);
+
   if (recalculado.tieneVariantes) {
     return { ok: false, motivo: "Este producto tiene variantes — se revisa a mano, nunca por esta vía." };
   }
@@ -133,7 +150,7 @@ export function validarCalculado(
     // (`precioDesdeDescuento`, calculosFila.ts) — un decimal cargado a
     // mano (ej. "90000.5") se rechaza explícito, nunca se trunca ni se
     // redondea en silencio antes de mandarlo a Mercado Libre.
-    if (!Number.isFinite(precioElegido) || !Number.isInteger(precioElegido) || precioElegido <= 0 || (aplicarPiso && piso != null && precioElegido < piso)) {
+    if (!Number.isFinite(precioElegido) || !Number.isInteger(precioElegido) || precioElegido <= 0 || (aplicarPiso && piso != null && precioElegido < piso && !esExcepcionBajoPiso(precioElegido))) {
       return { ok: false, motivo: "El precio elegido tiene que ser un número en pesos enteros, mayor que cero y nunca por debajo del piso de Finanzas." };
     }
     // Review de Pablo (PR #307) — mismo criterio que la UI (rangoEdicion,
@@ -185,7 +202,7 @@ export function validarCalculado(
       motivo: aplicarPiso ? "El precio calculado no es válido o quedó por debajo del piso — no se escribe en Mercado Libre." : "El precio sugerido por Mercado Libre no es válido — no se escribe.",
     };
   }
-  if (aplicarPiso && (piso == null || deal < piso)) {
+  if (aplicarPiso && (piso == null || (deal < piso && !esExcepcionBajoPiso(deal)))) {
     return { ok: false, motivo: "El precio calculado no es válido o quedó por debajo del piso — no se escribe en Mercado Libre." };
   }
 
@@ -203,17 +220,19 @@ export async function validarCandidatoParaEscritura(
   accionSolicitada: AccionEscribible,
   precioElegido?: number
 ): Promise<ResultadoValidacion> {
-  const [reglas, pisoYCosto] = await Promise.all([
+  const [reglas, pisoYCosto, reglasAdicionales] = await Promise.all([
     leerReglasFrescasCuenta(empresaId, candidato.cuentaMlId),
     leerPisoYCostoFresco(empresaId, candidato.skuCodigo),
+    leerReglasAdicionalesCuentas(empresaId, [candidato.cuentaMlId]),
   ]);
+  const tolerancia = toleranciaDeReglas(reglasAdicionales.get(candidato.cuentaMlId));
 
-  const [recalculado] = calcularCandidatosItem(candidatoComoItem(candidato), reglas, pisoYCosto.precioMinimo, pisoYCosto.costo);
+  const [recalculado] = calcularCandidatosItem(candidatoComoItem(candidato), reglas, pisoYCosto.precioMinimo, pisoYCosto.costo, true, tolerancia);
   if (!recalculado) {
     return { ok: false, motivo: "No se pudo recalcular este producto — hace falta una búsqueda nueva." };
   }
 
-  return validarCalculado(recalculado, pisoYCosto.precioMinimo, reglas, accionSolicitada, precioElegido);
+  return validarCalculado(recalculado, pisoYCosto.precioMinimo, reglas, accionSolicitada, precioElegido, true, tolerancia);
 }
 
 // MED 6 — "no escribas si el precio actual cambió mucho frente al

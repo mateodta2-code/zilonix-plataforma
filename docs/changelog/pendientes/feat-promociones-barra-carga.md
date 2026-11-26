@@ -1,0 +1,1 @@
+- Promociones: la carga de publicaciones ahora muestra una banda azul destacada con barra de progreso (real si Mercado Libre informa el total, animada si no), «Carga completa» al terminar y «Carga detenida» al parar. El campo «máximo X %» espera ~600 ms a que se deje de escribir antes de recargar la lista. Refs #610

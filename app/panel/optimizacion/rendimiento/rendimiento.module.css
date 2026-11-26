@@ -1,0 +1,294 @@
+/* Optimización · Rendimiento — tokens existentes de globals.css, sin paleta
+   nueva. Funciona en tema claro y oscuro (las tarjetas son zona oscura). */
+
+.panelDatos {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+:global(:root[data-tema="claro"]) .panelDatos {
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(var(--superficie), var(--superficie)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  box-shadow: var(--sombra-tarjeta), var(--filete-marca-arriba-abajo);
+  color: var(--texto);
+}
+
+.aviso {
+  padding: 14px 16px;
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie-2);
+  color: var(--texto-superficie-2);
+}
+
+.avisoTitulo {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+}
+
+.avisoTexto {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.tarjeta {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.grupos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.grupo {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-tarjeta);
+  color: var(--texto);
+  text-decoration: none;
+}
+
+.grupo:hover,
+.grupo:focus-visible {
+  border-color: var(--borde-hover);
+}
+
+.grupo[aria-current="true"] {
+  border-color: var(--acento);
+  background: var(--acento-suave);
+}
+
+.grupoTitulo {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--plata-etiqueta);
+}
+
+.grupoValor {
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.grupoNota {
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+.barra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.filtro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.filtro a,
+.paginas a,
+.paginas button {
+  color: var(--texto-suave);
+  text-decoration: none;
+}
+
+.filtro a[aria-current="page"],
+.personalizado summary[aria-current="page"] {
+  color: var(--acento-fuerte);
+  font-weight: 600;
+}
+
+.filtro a:hover,
+.paginas a:hover {
+  color: var(--acento-fuerte);
+}
+
+.personalizado summary {
+  cursor: pointer;
+  color: var(--texto-suave);
+}
+
+.personalizado summary:hover {
+  color: var(--acento-fuerte);
+}
+
+.rangoFechas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.rangoFechas label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.nota {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.notaNeutra {
+  display: block;
+  font-size: 11px;
+  color: var(--texto-suave);
+  overflow-wrap: anywhere;
+}
+
+.avisoError {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--peligro-texto);
+}
+
+.publicacion {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 260px;
+}
+
+.foto {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: var(--radio-boton);
+  object-fit: cover;
+  background: var(--superficie-2);
+}
+
+.enlace {
+  color: var(--texto);
+  text-decoration: none;
+}
+
+.enlace:hover {
+  color: var(--acento-fuerte);
+  text-decoration: underline;
+}
+
+.celdaSemaforo {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.ordenar {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ordenar:hover,
+.ordenar:focus-visible {
+  color: var(--acento-fuerte);
+}
+
+.paginas {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.paginas button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.paginas button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------- Qué hacer primero ---------- */
+
+.accionables {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.accionablesTitulo {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--texto-suave, var(--texto-superficie-2));
+}
+
+.accionablesLista {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.accionable {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  color: var(--texto-superficie-2);
+}
+
+.accionableCabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.accionableMonto {
+  margin-left: auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.accionablePorQue {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.accionableAcciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

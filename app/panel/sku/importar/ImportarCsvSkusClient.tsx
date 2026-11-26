@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { confirmarImportacionAction, previsualizarImportacionAction, type EstadoImportacion } from "./actions";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
@@ -13,10 +14,12 @@ import { SkuCopiable } from "@/components/marco/SkuCopiable";
 export function ImportarCsvSkusClient() {
   const [estado, setEstado] = useState<EstadoImportacion>({ paso: "inicial" });
   const [cargando, setCargando] = useState(false);
+  const [importando, setImportando] = useState(false);
 
   async function alSubirArchivo(evento: React.FormEvent<HTMLFormElement>) {
     evento.preventDefault();
     const formData = new FormData(evento.currentTarget);
+    setImportando(false);
     setCargando(true);
     try {
       setEstado(await previsualizarImportacionAction(formData));
@@ -29,6 +32,7 @@ export function ImportarCsvSkusClient() {
     if (estado.paso !== "revisar") return;
     const formData = new FormData();
     formData.set("csvTexto", estado.csvTexto);
+    setImportando(true);
     setCargando(true);
     try {
       setEstado(await confirmarImportacionAction(formData));
@@ -120,6 +124,12 @@ export function ImportarCsvSkusClient() {
           </>
         )}
 
+        <BarraCarga
+        estado={cargando ? "cargando" : "inactiva"}
+        titulo={importando ? "Importando SKUs…" : "Revisando el archivo…"}
+        avance={null}
+        sticky={false}
+      />
         {filas.length === 0 ? (
           <EstadoVacio>El archivo no tiene ninguna fila válida para importar.</EstadoVacio>
         ) : (
@@ -147,6 +157,12 @@ export function ImportarCsvSkusClient() {
         Columnas: <code>sku</code> y <code>cantidad_inicial</code> (obligatorias), <code>nombre</code> y <code>bodega</code> (opcionales). Hasta
         5 MB y 20.000 filas.
       </p>
+      <BarraCarga
+        estado={cargando ? "cargando" : "inactiva"}
+        titulo={importando ? "Importando SKUs…" : "Revisando el archivo…"}
+        avance={null}
+        sticky={false}
+      />
       <Boton type="submit" disabled={cargando}>
         {cargando ? "Revisando…" : "Ver vista previa"}
       </Boton>

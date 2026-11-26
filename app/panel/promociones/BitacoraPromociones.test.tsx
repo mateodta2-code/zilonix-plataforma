@@ -50,7 +50,7 @@ describe("BitacoraPromociones", () => {
     mockFetch([tanda()]);
     render(<BitacoraPromociones cuentas={CUENTAS} />);
     await waitFor(() => expect(screen.getByText("Ana", { exact: false })).toBeTruthy());
-    expect(screen.getByText(/3 acciones: 1 participó, 1 con error, 1 omitidas/)).toBeTruthy();
+    expect(screen.getByText(/3 por revisar: 1 con error, 1 omitidas/)).toBeTruthy();
   });
 
   it("al desplegar carga las filas de la tanda con todas las columnas", async () => {
@@ -78,6 +78,29 @@ describe("BitacoraPromociones", () => {
     expect(screen.getByText(/ML dijo no/)).toBeTruthy();
   });
 
+  it("muestra piso, precio real y diferencia en las filas que quedaron por debajo del piso", async () => {
+    mockFetch([tanda({ total: 1, conError: 0, omitidas: 0, bajoPiso: 1 })], [fila({ precioDespues: "99900", bajoPiso: { piso: 111000, precio: 99900, diferencia: -11100 } })]);
+    render(<BitacoraPromociones cuentas={CUENTAS} />);
+    await waitFor(() => expect(screen.getByText(/1 por revisar: 1 por debajo del piso/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await waitFor(() => expect(screen.getByText("Por debajo del piso", { selector: "span,div,small,td" })).toBeTruthy());
+    expect(screen.getByText(/Quedó por debajo del piso actual \(piso .*111.*000.*precio .*99.*900.*diferencia .*11.*100/)).toBeTruthy();
+  });
+
+  it("sin nada que auditar muestra un mensaje claro", async () => {
+    mockFetch([]);
+    render(<BitacoraPromociones cuentas={CUENTAS} />);
+    await waitFor(() => expect(screen.getByText(/No hay nada que auditar/)).toBeTruthy());
+  });
+
+  it("el filtro Resultado solo ofrece los estados que aplican", async () => {
+    mockFetch([tanda()]);
+    render(<BitacoraPromociones cuentas={CUENTAS} />);
+    await waitFor(() => expect(screen.getByText("Ana", { exact: false })).toBeTruthy());
+    const opciones = Array.from((screen.getByLabelText("Resultado") as HTMLSelectElement).options).map((o) => o.textContent);
+    expect(opciones).toEqual(["Todos", "No aplicada", "Error", "Por debajo del piso"]);
+  });
+
   it("distingue las tandas simuladas", async () => {
     mockFetch([tanda({ simulada: true })]);
     render(<BitacoraPromociones cuentas={CUENTAS} />);
@@ -93,7 +116,7 @@ describe("BitacoraPromociones", () => {
     fireEvent.change(screen.getByLabelText("Desde"), { target: { value: "2026-01-01" } });
     await waitFor(() => {
       const url = String((fn.mock.calls.at(-1) as unknown[])[0]);
-      expect(url).toContain("vista=tandas");
+      expect(url).toContain("vista=auditar");
       expect(url).toContain("accion=salir");
       expect(url).toContain("resultado=error");
       expect(url).toContain("desde=2026-01-01");

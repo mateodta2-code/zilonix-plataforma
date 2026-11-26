@@ -5,31 +5,37 @@ import { cookies } from "next/headers";
 import { and, eq, isNull } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMl } from "@/db/schema";
-import { registrarAuditoria } from "@/lib/auditoria";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import {
   actualizarItemMl,
   actualizarNombreFamiliaMl,
   calidadItemMl,
   competenciaItemMl,
+  experienciaCompraItemMl,
   fichasPublicacionesMl,
   ofertasProductoCompetenciaMl,
   productoCatalogoDeItemMl,
   reputacionVendedorMl,
   tieneDescripcionMl,
+  leerAtributosItemMl,
   leerDescripcionItemMl,
   leerItemEdicionMl,
   LimiteMercadoLibreError,
+  localeExperienciaCompra,
   motivoErrorEscrituraMl,
   detalleErrorEscrituraMl,
   PATRON_ID_PRODUCTO_O_ITEM,
   promocionActivaMl,
   tieneAutomatizacionPrecioMl,
+  ultimaModeracionItemMl,
   visitasItemMl,
   type CalidadItemMl,
   type CompetenciaItemMl,
+  type ExperienciaCompraMl,
   type ItemEdicionMl,
+  type ModeracionItemMl,
 } from "@/lib/ml/cliente";
+import { leerAlertasPublicaciones, type DatosAlertas } from "@/lib/optimizacion/alertasDatos";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { CloudinaryNoConfiguradoError, cloudinaryConfigurado, subirACloudinary } from "@/lib/cloudinary";
@@ -50,13 +56,25 @@ import {
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
 import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/lib/optimizacion/competencia";
+import { armarRecomendaciones } from "@/lib/optimizacion/recomendaciones";
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { diagnosticarPublicacion } from "@/lib/optimizacion/diagnostico";
-import { leerDiasMetricas } from "@/lib/optimizacion/textos";
-import { cambioEsDeLaPublicacion, crearNotaBitacora, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
+import { hastaExclusivoIso, leerPeriodoLista } from "@/lib/optimizacion/periodoLista";
+import { cambioEsDeLaPublicacion, compactarFotos, diaDelCambio, diasMedicionDelCambio, crearNotaBitacora, MARCA_FOTO_IA, registrarCambioOptimizacion, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
 import { leerFechaNota, leerResultadoRevision, limpiarTextoBitacora } from "@/lib/optimizacion/bitacoraResultado";
 import { hoyBogota } from "@/lib/publicidad/plan";
+import { fichaDesdeItem, infoDeDescripcion } from "@/lib/optimizacion/fichaItem";
+import { mensajeErrorIA, MENSAJE_SIN_IA } from "@/lib/publicaciones/errores";
+import { idiomaDeSitio } from "@/lib/publicaciones/ficha";
+import { LARGO_TITULO, LARGO_TITULO_CATALOGO } from "@/lib/publicaciones/titulos";
+import { generarTitulosSeo } from "@/lib/publicaciones/titulos-ia";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
+import { obtenerMiMembresia } from "@/lib/membresias";
+import { tienePermiso } from "@/lib/roles-plantillas";
+import { leerDatosDetalle } from "@/lib/optimizacion/detalle";
+import { resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
+import { resultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
+import type { ResumenPeriodo } from "@/lib/optimizacion/calculos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -128,19 +146,30 @@ export type MetricasPublicacion = {
   calidad: CalidadItemMl | null;
   // null si no es de catálogo o Mercado Libre no respondió.
   competencia: CompetenciaItemMl | null;
+  // Solo color y texto del nivel (purchase_experience/integrators); null si
+  // el sitio no tiene locale, ML no respondió o dio 429.
+  experiencia: { color: string | null; texto: string | null } | null;
+  // Textos de armarRecomendaciones (sin stock: la lista no lo trae).
+  recomendaciones: { clave: string; texto: string }[];
 };
 
 export type ResultadoMetricas = { ok: true; metricas: Record<string, MetricasPublicacion> } | { ok: false; aviso: string };
 
-// Visitas de los últimos N días (7, 14, 30 o 90; cualquier otro valor
-// cae a 7), calidad y competencia de hasta 10 publicaciones. Solo
-// lectura. Una publicación que falla queda con sus datos en null.
+// Visitas del período (7, 14, 30 o 90 días; «hoy»; o un rango desde–hasta),
+// calidad, competencia y experiencia de compra de hasta 10 publicaciones. Solo lectura. El período
+// se vuelve a validar acá (leerPeriodoLista): un valor raro cae a 7 días,
+// nunca se confía en el cliente. Una publicación que falla queda con sus
+// datos en null.
 export async function metricasPublicacionesAction(entrada: {
   cuentaMlId: string;
   items: { id: string; catalogo: boolean }[];
   dias?: number;
+  periodo?: { desde?: string; hasta?: string };
 }): Promise<ResultadoMetricas> {
-  const dias = leerDiasMetricas(entrada.dias);
+  const periodo = leerPeriodoLista({ dias: entrada.dias, desde: entrada.periodo?.desde, hasta: entrada.periodo?.hasta }, new Date());
+  // Los 7/14/30/90 de siempre piden igual que antes (sin ending); «hoy» y
+  // el rango terminan el día siguiente al «hasta» (ending es exclusivo).
+  const ending = periodo.clave === "hoy" || periodo.clave === "rango" ? hastaExclusivoIso(periodo) : undefined;
   const ctx = await contexto("consultar");
   if (!ctx) return { ok: false, aviso: "Tu rol no tiene acceso a Optimización." };
   const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
@@ -156,13 +185,17 @@ export async function metricasPublicacionesAction(entrada: {
     return { ok: false, aviso: motivoCuentaSinRevisar(error) };
   }
 
+  const locale = localeExperienciaCompra(idiomaDeSitio(cuenta.siteId).idioma);
   const metricas: Record<string, MetricasPublicacion> = {};
   async function una(item: { id: string; catalogo: boolean }) {
     const seguro = <T,>(p: Promise<T | null>) => p.catch(() => null);
-    const visitas = await seguro(visitasItemMl(item.id, token, dias));
+    const visitas = await seguro(visitasItemMl(item.id, token, periodo.dias, ending));
     const calidad = await seguro(calidadItemMl(item.id, token));
     const competencia = item.catalogo ? await seguro(competenciaItemMl(item.id, token, cuenta!.siteId)) : null;
-    metricas[item.id] = { visitas, calidad, competencia };
+    const experienciaCompleta: ExperienciaCompraMl | null = locale ? await seguro(experienciaCompraItemMl(item.id, token, locale)) : null;
+    const recomendaciones = armarRecomendaciones({ competencia, calidad, experiencia: experienciaCompleta, item: { stock: null, estado: null } }).map((r) => ({ clave: r.clave, texto: r.texto }));
+    const experiencia = experienciaCompleta ? { color: experienciaCompleta.color, texto: experienciaCompleta.texto } : null;
+    metricas[item.id] = { visitas, calidad, competencia, experiencia, recomendaciones };
   }
   // De a pocas a la vez: con muchas en paralelo se pisa el límite de ML.
   for (let i = 0; i < items.length; i += EN_PARALELO) {
@@ -284,13 +317,13 @@ export async function cambiarEstadoPublicacionAction(entrada: { cuentaMlId: stri
   }
 
   await dbComoEmpresa(ctx.empresaId, (tx) =>
-    registrarAuditoria(tx, {
+    registrarCambioOptimizacion(tx, {
       empresaId: ctx.empresaId,
       usuarioId: ctx.usuarioId,
-      actorTipo: "persona",
+      cuentaMlId: cuenta.id,
+      cuentaNickname: cuenta.nickname,
       accion: activar ? "activar_publicacion" : "pausar_publicacion",
-      entidad: "publicacion_ml",
-      entidadId: entrada.itemId,
+      itemId: entrada.itemId,
       detalle: `${activar ? "Activó" : "Pausó"} la publicación ${entrada.itemId} de ${cuenta.nickname}.`,
     })
   ).catch((error: unknown) => {
@@ -311,7 +344,7 @@ export type ResultadoEdicion = { ok: boolean; aviso: string };
 
 type Preparada = {
   ctx: { empresaId: string; usuarioId: string };
-  cuenta: { nickname: string; siteId: string; cuentaIdExterna: string };
+  cuenta: { id: string; nickname: string; siteId: string; cuentaIdExterna: string };
   token: string;
   item: ItemEdicionMl;
 };
@@ -363,13 +396,13 @@ async function escribirYAuditar(
     return { ok: false, aviso: detalle && detalle !== `error: ${motivo}` && detalle !== `mensaje: ${motivo}` ? `${base} (detalle para soporte: ${detalle})` : base };
   }
   await dbComoEmpresa(prep.ctx.empresaId, (tx) =>
-    registrarAuditoria(tx, {
+    registrarCambioOptimizacion(tx, {
       empresaId: prep.ctx.empresaId,
       usuarioId: prep.ctx.usuarioId,
-      actorTipo: "persona",
+      cuentaMlId: prep.cuenta.id,
+      cuentaNickname: prep.cuenta.nickname,
       accion: auditoria.accion,
-      entidad: "publicacion_ml",
-      entidadId: prep.item.id,
+      itemId: prep.item.id,
       detalle: auditoria.detalle,
       valorAnterior: auditoria.valorAnterior,
       valorNuevo: auditoria.valorNuevo,
@@ -442,6 +475,69 @@ export async function editarTituloAction(entrada: { cuentaMlId: string; itemId: 
   );
 }
 
+export type ResultadoMejorarTitulo =
+  | { ok: true; titulos: string[]; catalogo: string | null; keywordsPrincipales: string[]; keywordsNoUtilizadas: string[]; largoMaximo: number; largoMaximoCatalogo: number; puedeGuardar: boolean; vendidas: number }
+  | { ok: false; aviso: string; conectarIA?: boolean };
+
+// «Mejorar título» con la IA de TEXTO de la empresa (la de este módulo).
+// Misma lógica y mismo prompt que Publicar → «Crear con IA» (código
+// compartido en lib/publicaciones/titulos-ia.ts). Lecturas de ML:
+// GET /items/{id} (prepararEdicion y category_id+attributes) y
+// GET /items/{id}/description. NO escribe nada: guardar sigue siendo
+// editarTituloAction, y solo si la publicación no tiene ventas.
+export async function mejorarTituloIAAction(entrada: { cuentaMlId: string; itemId: string }): Promise<ResultadoMejorarTitulo> {
+  const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
+  if ("error" in prep) return { ok: false, aviso: prep.error };
+  const conexion = await obtenerConexionIAParaModulo(prep.ctx.empresaId, "optimizacion");
+  if (!conexion) return { ok: false, aviso: MENSAJE_SIN_IA, conectarIA: true };
+  const registrar = (paso: string, error: unknown) =>
+    console.warn(`[app/panel/optimizacion] mejorar título ${paso}: ${error instanceof Error ? error.name : "error"}`);
+  const [leidos, descripcion] = await Promise.all([
+    leerAtributosItemMl(prep.item.id, prep.token).catch((error) => {
+      registrar("atributos", error);
+      return null;
+    }),
+    leerDescripcionItemMl(prep.item.id, prep.token).catch((error) => {
+      registrar("descripcion", error);
+      return null;
+    }),
+  ]);
+  const ficha = fichaDesdeItem({ titulo: prep.item.titulo ?? "", atributos: leidos?.atributos ?? [] });
+  if (!ficha) return { ok: false, aviso: "Mercado Libre no devolvió el título de la publicación. Intenta de nuevo." };
+  const { idioma, pais } = idiomaDeSitio(prep.cuenta.siteId);
+  try {
+    const propuesta = await generarTitulosSeo({
+      empresaId: prep.ctx.empresaId,
+      conexion,
+      cuenta: { id: entrada.cuentaMlId, siteId: prep.cuenta.siteId },
+      token: () => Promise.resolve(prep.token),
+      ficha,
+      categoriaId: leidos?.categoriaId ?? null,
+      categoriaNombre: null,
+      info: infoDeDescripcion(descripcion),
+      idioma,
+      pais,
+      registrar,
+    });
+    if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
+    return {
+      ok: true,
+      titulos: propuesta.titulos,
+      catalogo: propuesta.catalogo,
+      keywordsPrincipales: propuesta.keywordsPrincipales,
+      keywordsNoUtilizadas: propuesta.keywordsNoUtilizadas,
+      largoMaximo: LARGO_TITULO,
+      largoMaximoCatalogo: LARGO_TITULO_CATALOGO,
+      puedeGuardar: prep.item.vendidas === 0,
+      vendidas: prep.item.vendidas,
+    };
+  } catch (error) {
+    if (error instanceof LimiteMercadoLibreError) return { ok: false, aviso: "Mercado Libre pidió esperar un momento. Intenta de nuevo." };
+    registrar("titulos", error);
+    return { ok: false, aviso: mensajeErrorIA(error) };
+  }
+}
+
 // Fotos: el orden de las que ya tiene (por id) y fotos nuevas por enlace
 // https. La primera es la portada.
 // El orden completo, la primera es la portada: las actuales por su id
@@ -452,6 +548,10 @@ export async function editarFotosAction(entrada: {
   cuentaMlId: string;
   itemId: string;
   fotos: ({ id: string } | { url: string })[];
+  // Enlaces de la galería que salieron de «Crear imagen con IA». Solo se
+  // cuentan los que de verdad van entre las fotos nuevas: nunca se confía
+  // en lo que diga el navegador.
+  fotosIA?: string[];
 }): Promise<ResultadoEdicion> {
   const prep = await prepararEdicion(entrada.cuentaMlId, entrada.itemId);
   if ("error" in prep) return { ok: false, aviso: prep.error };
@@ -472,12 +572,19 @@ export async function editarFotosAction(entrada: {
   }
   if (pictures.length === 0) return { ok: false, aviso: "La publicación necesita al menos una foto." };
   const nuevas = pictures.filter((p) => "source" in p).length;
+  const enlacesNuevos = new Set(pictures.flatMap((p) => ("source" in p ? [p.source] : [])));
+  const conIA = new Set((Array.isArray(entrada.fotosIA) ? entrada.fotosIA : []).filter((u): u is string => typeof u === "string" && enlacesNuevos.has(u.trim())).map((u) => u.trim())).size;
+  const antes = prep.item.fotos.map((f) => f.id);
+  const despues = pictures.map((p) => ("id" in p ? p.id : p.source));
+  const portadaCambio = antes[0] !== despues[0];
   return escribirYAuditar(
     prep,
     { pictures },
     {
       accion: "cambiar_fotos_publicacion",
-      detalle: `Cambió las fotos de ${prep.item.id} (${prep.cuenta.nickname}): ${pictures.length - nuevas} existentes, ${nuevas} nuevas.`,
+      detalle: `Cambió las fotos de ${prep.item.id} (${prep.cuenta.nickname}): ${pictures.length - nuevas} existentes, ${nuevas} nuevas${conIA > 0 ? ` (${conIA} ${MARCA_FOTO_IA})` : ""}; ${portadaCambio ? "cambió la portada" : "misma portada"}.`,
+      valorAnterior: compactarFotos(antes) || undefined,
+      valorNuevo: compactarFotos(despues),
     },
     "Fotos actualizadas en Mercado Libre. Pueden tardar unos minutos en verse."
   );
@@ -607,4 +714,100 @@ export async function revisarCambioAction(entrada: { cuentaMlId: string; itemId:
   if (typeof entrada.ref !== "string" || !(await cambioEsDeLaPublicacion(ctx.empresaId, entrada.ref, entrada.itemId))) return { ok: false, aviso: "No se encontró ese cambio." };
   await guardarRevisionCambio(ctx.empresaId, { usuarioId: ctx.usuarioId, ref: entrada.ref, itemId: entrada.itemId, resultado, comentario });
   return { ok: true, aviso: resultado ? "Revisión guardada." : "Comentario guardado. Elige un resultado para dar el cambio por revisado." };
+}
+
+// ---------- Bitácora general: resultado al día 8, bajo demanda ----------
+
+export type FilaResultadoGeneral = { visitas: number | null; ventas: number; conversion: string | null; utilidad: string | null };
+export type ResultadoBitacoraGeneral =
+  | { ok: false; aviso: string }
+  | { ok: true; estado: "midiendo"; faltanDias: number }
+  | { ok: true; estado: "listo"; dias: number; desde: string; hasta: string; conFinanzas: boolean; antes: FilaResultadoGeneral; despues: FilaResultadoGeneral };
+
+function filaResultado(r: ResumenPeriodo, siteId: string, conFinanzas: boolean): FilaResultadoGeneral {
+  return {
+    visitas: r.visitas,
+    ventas: r.pedidos,
+    conversion: r.conversion,
+    utilidad: conFinanzas && r.ganancia !== null ? formatearMoneda(Number(r.ganancia), siteId) : null,
+  };
+}
+
+// Calcula el resultado (7 días antes vs. 7 días después) de UNA fila de la
+// bitácora general. Es la única llamada a Mercado Libre de esa vista:
+// solo al pulsar «Ver resultado». Verifica que el cambio sea de la
+// publicación (nunca se confía en la referencia del navegador).
+export async function bitacoraGeneralResultadoAction(entrada: { cuentaMlId: string; itemId: string; ref: string }): Promise<ResultadoBitacoraGeneral> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para ver Optimización." };
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId) || typeof entrada.ref !== "string") {
+    return { ok: false, aviso: "No se reconoce el cambio. Actualiza la página." };
+  }
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
+  if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  if (!(await cambioEsDeLaPublicacion(ctx.empresaId, entrada.ref, entrada.itemId))) return { ok: false, aviso: "No se encontró ese cambio. Actualiza la página." };
+  // El día del cambio sale de la auditoría o de la nota, no del navegador.
+  const dia = await diaDelCambio(ctx.empresaId, entrada.ref);
+  if (!dia) return { ok: false, aviso: "No se encontró ese cambio. Actualiza la página." };
+  const ahora = new Date();
+  const hoy = hoyBogota(ahora);
+  const dias = await diasMedicionDelCambio(ctx.empresaId, entrada.ref);
+  const adelanto = resultadoCambio(dia, hoy, { lineas: [], publicidad: [], visitasPorDia: null, visitasDesde: hoy, conFinanzas: false }, dias);
+  if (adelanto.estado === "midiendo") return { ok: true, estado: "midiendo", faltanDias: adelanto.faltanDias };
+  const membresia = await obtenerMiMembresia(ctx.usuarioId, ctx.empresaId);
+  const conFinanzas = membresia ? tienePermiso(membresia.permisos, "finanzas", "consultar") : false;
+  try {
+    const datos = await leerDatosDetalle(ctx.empresaId, cuenta, entrada.itemId, resolverPeriodoDetalle(undefined, ahora), { conFinanzas, ahora });
+    if (!datos) return { ok: false, aviso: "Mercado Libre no devolvió la publicación. Intenta de nuevo." };
+    const r = resultadoCambio(dia, hoy, { lineas: datos.lineas, publicidad: datos.publicidad, visitasPorDia: datos.visitasPorDia, visitasDesde: datos.visitasDesde, conFinanzas }, dias);
+    if (r.estado === "midiendo") return { ok: true, estado: "midiendo", faltanDias: r.faltanDias };
+    return { ok: true, estado: "listo", dias, desde: r.desde, hasta: r.hasta, conFinanzas, antes: filaResultado(r.antes, cuenta.siteId, conFinanzas), despues: filaResultado(r.despues, cuenta.siteId, conFinanzas) };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] resultado de bitácora ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: motivoCuentaSinRevisar(error) };
+  }
+}
+
+// ---------- Alertas de publicaciones (solo lectura) ----------
+// Las tarjetas «Inactivas por incumplir políticas», «Para ganar la
+// competencia» y «Con precio alto». La página las pide después de pintar
+// la lista. Solo GET a Mercado Libre (lib/optimizacion/alertasDatos.ts).
+export type ResultadoAlertasPublicaciones = ({ ok: true } & DatosAlertas) | { ok: false; aviso: string };
+
+export async function alertasPublicacionesAction(entrada: { cuentaMlId: string }): Promise<ResultadoAlertasPublicaciones> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para ver Optimización." };
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
+  if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  let token: string;
+  try {
+    token = await obtenerAccessTokenVigente(ctx.empresaId, cuenta.id);
+  } catch (error) {
+    return { ok: false, aviso: motivoCuentaSinRevisar(error) };
+  }
+  try {
+    return { ok: true, ...(await leerAlertasPublicaciones(cuenta, token)) };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] alertas ${cuenta.id}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: "No se pudo consultar Mercado Libre. Intenta de nuevo." };
+  }
+}
+
+export type ResultadoModeracionPublicacion = { ok: true; moderacion: ModeracionItemMl | null } | { ok: false; aviso: string };
+
+// «Conoce qué pasó»: motivo y qué hacer, tal cual los escribe Mercado
+// Libre. Una llamada, solo al abrir.
+export async function moderacionPublicacionAction(entrada: { cuentaMlId: string; itemId: string }): Promise<ResultadoModeracionPublicacion> {
+  const ctx = await contexto("consultar");
+  if (!ctx) return { ok: false, aviso: "Tu rol no tiene permiso para ver Optimización." };
+  if (typeof entrada.itemId !== "string" || !PATRON_ID_PRODUCTO_O_ITEM.test(entrada.itemId)) return { ok: false, aviso: "No se reconoce la publicación." };
+  const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
+  if (!cuenta) return { ok: false, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
+  try {
+    const token = await obtenerAccessTokenVigente(ctx.empresaId, cuenta.id);
+    return { ok: true, moderacion: await ultimaModeracionItemMl(entrada.itemId, token) };
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] moderación ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
+    return { ok: false, aviso: "No se pudo consultar Mercado Libre. Intenta de nuevo." };
+  }
 }

@@ -10,9 +10,9 @@ export function gruposBodega(rol: RolBodega): GrupoNav[] {
     {
       items: [
         { etiqueta: "Inicio", href: "/bodega", icono: "inicio" },
-        { etiqueta: "Recepción", href: "/bodega/recepcion", icono: "pedidos", ...PROXIMAMENTE },
-        { etiqueta: "Inventario", href: "/bodega/inventario", icono: "inventario", ...PROXIMAMENTE },
-        { etiqueta: "Despachos", href: "/bodega/despachos", icono: "despachos", ...PROXIMAMENTE },
+        { etiqueta: "Recepción", href: "/bodega/recepcion", icono: "pedidos" },
+        { etiqueta: "Inventario", href: "/bodega/inventario", icono: "inventario" },
+        { etiqueta: "Despachos", href: "/bodega/despachos", icono: "despachos" },
         { etiqueta: "Domiciliarios", href: "/bodega/domiciliarios", icono: "personas" },
       ],
     },
@@ -37,7 +37,7 @@ export function gruposDomiciliario(): GrupoNav[] {
     {
       items: [
         { etiqueta: "Inicio", href: "/domiciliario", icono: "inicio" },
-        { etiqueta: "Mis entregas", href: "/domiciliario/entregas", icono: "despachos", ...PROXIMAMENTE },
+        { etiqueta: "Mis entregas", href: "/domiciliario/entregas", icono: "despachos" },
       ],
     },
   ];

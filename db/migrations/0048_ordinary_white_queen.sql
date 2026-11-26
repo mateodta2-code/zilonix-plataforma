@@ -1,0 +1,3 @@
+ALTER TABLE "entregas_domiciliario" ADD COLUMN "foto_public_id" text;--> statement-breakpoint
+ALTER TABLE "entregas_domiciliario" ADD COLUMN "foto_ts" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "entregas_domiciliario" ADD CONSTRAINT "entregas_domiciliario_foto_solo_entregada" CHECK ("entregas_domiciliario"."foto_public_id" is null or "entregas_domiciliario"."estado" = 'entregada');

@@ -1,0 +1,1 @@
+- Posventa-Rutas (Refs #647): el detalle de reclamo pasó a `/panel/posventa/reclamos/[cuentaId]/[reclamoId]` (los enlaces viejos de Preguntas redirigen), Preguntas ya no menciona reclamos y «Ver reclamo →» es un botón azul de marca en cada tarjeta.

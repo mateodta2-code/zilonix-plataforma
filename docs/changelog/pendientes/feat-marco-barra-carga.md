@@ -1,0 +1,1 @@
+- Marco: la barra azul de carga de Promociones ahora es un componente reutilizable (`components/marco/BarraCarga`), sin cambios visuales ni de comportamiento. Refs #613.

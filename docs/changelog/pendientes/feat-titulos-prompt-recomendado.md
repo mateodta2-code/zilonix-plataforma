@@ -1,0 +1,1 @@
+- **Títulos SEO con el prompt recomendado de Zilonix (Mateo):** Publicar → «Crear con IA» → Títulos y Optimización → «Mejorar título» proponen hasta 10 títulos (largo contado por el sistema) y muestran «Keywords principales» y «Keywords no utilizadas»; las no utilizadas se suman a las palabras para la descripción. Sin migración. Refs #685

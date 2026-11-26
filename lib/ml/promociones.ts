@@ -3,6 +3,7 @@ import { codigosParaMaestra, parsearComboSku, resolverCostoSku, type MaestraSku 
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { costosSku, promocionesReglas } from "@/db/schema";
+import { aplicaToleranciaCompartida } from "@/lib/ml/promocionesReglasTexto";
 import { leerItemParaPromocionMl, leerPromocionesItemMl, listarItemsActivosMl, type PromocionCrudaMl } from "@/lib/ml/cliente";
 
 // Rama feat-promociones — motor de reglas puro, portado de
@@ -383,7 +384,14 @@ export function calcularCandidatosItem(
   // false = modo «sin piso» (solo la regla «todas», ver el comentario
   // de arriba): no se exige SKU ni precio mínimo, no se aplica el tope
   // de % de la cuenta, y el precio es el que Mercado Libre sugiere.
-  aplicarPiso: boolean = true
+  aplicarPiso: boolean = true,
+  // ÚNICA excepción al piso (decisión de Mateo): monto de la «tolerancia en
+  // promociones compartidas» guardada en la cuenta (reglas adicionales), o
+  // null. Solo se usa con piso, con participarCompartidas prendido y en
+  // promociones compartidas (meli_percentage > 0) cuyo max_discounted_price
+  // queda por debajo del piso por <= monto: entonces el precio es ese
+  // máximo. En cualquier otro caso el piso sigue mandando.
+  toleranciaCompartidaBajoPiso: number | null = null
 ): CandidatoCalculado[] {
   const original = numeroOrNull(item.promociones.find((p) => numeroOrNull(p.original_price))?.original_price);
 
@@ -456,7 +464,10 @@ export function calcularCandidatosItem(
       return { ...base, motivoRevisarManual: "Falta precio mínimo para este SKU en Finanzas — no se puede participar ni ajustar hasta que se cargue." };
     }
 
-    const gananciaEstimada = costo != null ? precioMinimo - costo : null;
+    const entraBajoPiso = reglas.participarCompartidas && aplicaToleranciaCompartida({ esCompartida, precioMinimo, maxDiscountedPrice }, toleranciaCompartidaBajoPiso);
+    // Precio con el que se entra: el piso, salvo la excepción de arriba.
+    const precioDeEntrada = entraBajoPiso && maxDiscountedPrice != null ? maxDiscountedPrice : precioMinimo;
+    const gananciaEstimada = costo != null ? precioDeEntrada - costo : null;
 
     // 4) Ya confirmada (started/pending) — igualar al piso si está por
     // encima, solo si la cuenta tiene esa regla prendida.
@@ -464,8 +475,8 @@ export function calcularCandidatosItem(
       if (!reglas.igualarAlPiso) {
         return { ...base, cumpleReglas: true, precioSugerido: precioActual, gananciaEstimada: costo != null && precioActual != null ? precioActual - costo : null };
       }
-      if (precioActual != null && precioActual > precioMinimo) {
-        if (maxDiscountedPrice != null && precioMinimo > maxDiscountedPrice) {
+      if (precioActual != null && precioActual > precioDeEntrada) {
+        if (maxDiscountedPrice != null && precioMinimo > maxDiscountedPrice && !entraBajoPiso) {
           return {
             ...base,
             precioSugerido: precioMinimo,
@@ -473,11 +484,11 @@ export function calcularCandidatosItem(
             motivoRevisarManual: `El piso (${precioMinimo}) está por encima del máximo que permite esta promoción puntual (${maxDiscountedPrice}) — no se puede ajustar sin quedar por encima de lo que Mercado Libre deja.`,
           };
         }
-        const motivoFueraDeRango = descuentoFueraDeRangoPriceDiscount(tipoPromocion, original, precioMinimo);
+        const motivoFueraDeRango = descuentoFueraDeRangoPriceDiscount(tipoPromocion, original, precioDeEntrada);
         if (motivoFueraDeRango) {
-          return { ...base, precioSugerido: precioMinimo, gananciaEstimada, motivoRevisarManual: motivoFueraDeRango };
+          return { ...base, precioSugerido: precioDeEntrada, gananciaEstimada, motivoRevisarManual: motivoFueraDeRango };
         }
-        return { ...base, cumpleReglas: true, accionSugerida: "modificar", precioSugerido: precioMinimo, gananciaEstimada };
+        return { ...base, cumpleReglas: true, accionSugerida: "modificar", precioSugerido: precioDeEntrada, gananciaEstimada };
       }
       return { ...base, cumpleReglas: true, precioSugerido: precioActual, gananciaEstimada: costo != null && precioActual != null ? precioActual - costo : null };
     }
@@ -487,7 +498,7 @@ export function calcularCandidatosItem(
       if (esCompartida && !reglas.participarCompartidas) {
         return { ...base, motivoRevisarManual: "Promoción compartida con Mercado Libre (+Meli) — esta cuenta no tiene habilitado participar en estas. Se revisa a mano." };
       }
-      if (maxDiscountedPrice != null && precioMinimo > maxDiscountedPrice) {
+      if (maxDiscountedPrice != null && precioMinimo > maxDiscountedPrice && !entraBajoPiso) {
         return {
           ...base,
           precioSugerido: precioMinimo,
@@ -496,21 +507,21 @@ export function calcularCandidatosItem(
         };
       }
       if (original != null && original > 0) {
-        const descuentoPct = ((original - precioMinimo) / original) * 100;
+        const descuentoPct = ((original - precioDeEntrada) / original) * 100;
         if (descuentoPct > reglas.descuentoMaximoPct) {
           return {
             ...base,
-            precioSugerido: precioMinimo,
+            precioSugerido: precioDeEntrada,
             gananciaEstimada,
             motivoRevisarManual: `Igualar al piso implica ${Math.round(descuentoPct * 10) / 10}% de descuento, por encima del tope configurado para esta cuenta (${reglas.descuentoMaximoPct}%) — se revisa a mano.`,
           };
         }
       }
-      const motivoFueraDeRango = descuentoFueraDeRangoPriceDiscount(tipoPromocion, original, precioMinimo);
+      const motivoFueraDeRango = descuentoFueraDeRangoPriceDiscount(tipoPromocion, original, precioDeEntrada);
       if (motivoFueraDeRango) {
-        return { ...base, precioSugerido: precioMinimo, gananciaEstimada, motivoRevisarManual: motivoFueraDeRango };
+        return { ...base, precioSugerido: precioDeEntrada, gananciaEstimada, motivoRevisarManual: motivoFueraDeRango };
       }
-      return { ...base, cumpleReglas: true, accionSugerida: "participar", precioSugerido: precioMinimo, gananciaEstimada };
+      return { ...base, cumpleReglas: true, accionSugerida: "participar", precioSugerido: precioDeEntrada, gananciaEstimada };
     }
 
     return { ...base, motivoRevisarManual: `Estado de Mercado Libre no reconocido ("${estadoMl}") — se revisa a mano.` };

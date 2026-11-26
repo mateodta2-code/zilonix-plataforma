@@ -833,6 +833,40 @@ $fn$;
 REVOKE ALL ON FUNCTION superadmin_resumen_empresas() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION superadmin_resumen_empresas() TO superadmin_user;
 
+-- Salud de conexiones (25-nov) para /superadmin/conexiones: mismo patrón
+-- que superadmin_resumen_empresas — SOLO conteos por empresa, nunca una
+-- fila de cuenta, aviso ni sincronización (decisión D8). Umbrales:
+--   ml_sin_renovar: cuenta conectada cuyo token venció hace más de 24 h.
+--     Los procesos lo renuevan solos al usarlo (publicidad, avisos), así
+--     que si sigue vencido es señal de que la renovación está fallando.
+--   avisos_atrasados: avisos de ML sin procesar con más de 1 h.
+--   publicidad_con_error: cuentas conectadas cuya ÚLTIMA sincronización
+--     de publicidad terminó en 'error'.
+CREATE OR REPLACE FUNCTION superadmin_salud_conexiones()
+RETURNS TABLE (
+  empresa_id uuid,
+  ml_conectadas bigint,
+  ml_desconectadas bigint,
+  ml_sin_renovar bigint,
+  avisos_atrasados bigint,
+  publicidad_con_error bigint,
+  falabella_desconectadas bigint
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT e.id,
+    (SELECT count(*) FROM cuentas_ml c WHERE c.empresa_id = e.id AND c.desconectada_ts IS NULL),
+    (SELECT count(*) FROM cuentas_ml c WHERE c.empresa_id = e.id AND c.desconectada_ts IS NOT NULL),
+    (SELECT count(*) FROM cuentas_ml c WHERE c.empresa_id = e.id AND c.desconectada_ts IS NULL AND c.token_expira_ts < now() - interval '24 hours'),
+    (SELECT count(*) FROM avisos_ml a WHERE a.empresa_id = e.id AND a.procesado_ts IS NULL AND a.recibido_ts < now() - interval '1 hour'),
+    (SELECT count(*) FROM cuentas_ml c WHERE c.empresa_id = e.id AND c.desconectada_ts IS NULL
+       AND (SELECT s.estado FROM publicidad_sincronizaciones s WHERE s.cuenta_ml_id = c.id ORDER BY s.iniciada_ts DESC LIMIT 1) = 'error'),
+    (SELECT count(*) FROM cuentas_falabella f WHERE f.empresa_id = e.id AND f.desconectada_ts IS NOT NULL)
+  FROM empresas e
+$fn$;
+REVOKE ALL ON FUNCTION superadmin_salud_conexiones() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION superadmin_salud_conexiones() TO superadmin_user;
+
 -- Auditoría del superadmin (solo lectura en /superadmin/auditoria). superadmin_user
 -- no tiene SELECT sobre auditoria: esta función SECURITY DEFINER devuelve solo las
 -- filas cuyo autor es una cuenta superadmin, y solo ts/accion/entidad/nombre de
@@ -851,6 +885,88 @@ AS $fn$
 $fn$;
 REVOKE ALL ON FUNCTION superadmin_acciones_recientes(integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION superadmin_acciones_recientes(integer) TO superadmin_user;
+
+-- Estado de los procesos (25-nov, migración 0047). ejecuciones_procesos no
+-- tiene GRANT para ningún usuario de la app: cada proceso escribe SOLO su
+-- propia fila con registrar_ejecucion_proceso() (el usuario de base que
+-- llama decide qué proceso puede anotar — trabajador_user nunca puede
+-- anotar una corrida de publicidad, ni al revés), y el superadmin la lee
+-- con superadmin_estado_procesos(). RLS forzado y sin políticas: aunque un
+-- GRANT se colara por error, ninguna fila sería visible.
+ALTER TABLE ejecuciones_procesos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ejecuciones_procesos FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON ejecuciones_procesos FROM PUBLIC;
+
+-- Guarda 14 días por proceso (avisos corre cada 5 min ≈ 4.000 filas) y
+-- borra lo más viejo en la misma llamada, sin cron aparte. session_user
+-- (no current_user, que dentro de SECURITY DEFINER es el dueño de la
+-- función) es el usuario con el que se conectó el proceso.
+CREATE OR REPLACE FUNCTION registrar_ejecucion_proceso(p_proceso text, p_inicio timestamptz, p_ok boolean, p_resumen jsonb, p_error text)
+RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  permitido text := CASE session_user
+    WHEN 'trabajador_user' THEN 'avisos_ml'
+    WHEN 'publicidad_trabajador_user' THEN 'publicidad'
+    WHEN 'seguimiento_trabajador_user' THEN 'seguimiento'
+  END;
+BEGIN
+  IF permitido IS NULL OR permitido IS DISTINCT FROM p_proceso THEN
+    RAISE EXCEPTION 'El usuario % no puede registrar corridas de %', session_user, p_proceso;
+  END IF;
+  INSERT INTO ejecuciones_procesos (proceso, inicio_ts, ok, resumen, error)
+  VALUES (
+    p_proceso,
+    p_inicio,
+    p_ok,
+    CASE WHEN jsonb_typeof(p_resumen) = 'object' THEN p_resumen ELSE '{}'::jsonb END,
+    left(p_error, 300)
+  );
+  DELETE FROM ejecuciones_procesos WHERE proceso = p_proceso AND inicio_ts < now() - interval '14 days';
+END
+$fn$;
+REVOKE ALL ON FUNCTION registrar_ejecucion_proceso(text, timestamptz, boolean, jsonb, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION registrar_ejecucion_proceso(text, timestamptz, boolean, jsonb, text)
+  TO trabajador_user, publicidad_trabajador_user, seguimiento_trabajador_user;
+
+-- Una fila por proceso, aunque nunca haya corrido (ultima_ts NULL).
+CREATE OR REPLACE FUNCTION superadmin_estado_procesos()
+RETURNS TABLE (
+  proceso text,
+  ultima_ts timestamptz,
+  ultima_ok boolean,
+  ultimo_resumen jsonb,
+  ultimo_error text,
+  ultima_exitosa_ts timestamptz,
+  corridas_24h bigint,
+  fallidas_24h bigint
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT p.proceso, u.inicio_ts, u.ok, u.resumen, u.error,
+    (SELECT max(e.inicio_ts) FROM ejecuciones_procesos e WHERE e.proceso = p.proceso AND e.ok),
+    (SELECT count(*) FROM ejecuciones_procesos e WHERE e.proceso = p.proceso AND e.inicio_ts > now() - interval '24 hours'),
+    (SELECT count(*) FROM ejecuciones_procesos e WHERE e.proceso = p.proceso AND e.inicio_ts > now() - interval '24 hours' AND NOT e.ok)
+  FROM (VALUES ('avisos_ml'), ('publicidad'), ('seguimiento')) AS p(proceso)
+  LEFT JOIN LATERAL (
+    SELECT e.inicio_ts, e.ok, e.resumen, e.error FROM ejecuciones_procesos e
+    WHERE e.proceso = p.proceso ORDER BY e.inicio_ts DESC LIMIT 1
+  ) u ON true
+$fn$;
+REVOKE ALL ON FUNCTION superadmin_estado_procesos() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION superadmin_estado_procesos() TO superadmin_user;
+
+-- Cola de avisos de toda la plataforma: solo dos números.
+CREATE OR REPLACE FUNCTION superadmin_avisos_en_cola()
+RETURNS TABLE (pendientes bigint, atrasados bigint)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT count(*), count(*) FILTER (WHERE recibido_ts < now() - interval '1 hour')
+  FROM avisos_ml WHERE procesado_ts IS NULL
+$fn$;
+REVOKE ALL ON FUNCTION superadmin_avisos_en_cola() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION superadmin_avisos_en_cola() TO superadmin_user;
 
 DROP POLICY IF EXISTS superadmin_ve_membresias ON membresias;
 CREATE POLICY superadmin_ve_membresias ON membresias FOR SELECT TO superadmin_user USING (true);
@@ -873,6 +989,54 @@ CREATE POLICY superadmin_ve_accesos_temporales ON accesos_temporales FOR SELECT 
 -- ni borrarla después.
 DROP POLICY IF EXISTS superadmin_escribe_auditoria ON auditoria;
 CREATE POLICY superadmin_escribe_auditoria ON auditoria FOR INSERT TO superadmin_user WITH CHECK (true);
+
+-- Issue #623 (SA-Soporte, migración 0043) — tickets de soporte. La
+-- empresa solo ve y abre los suyos; nadie borra nada. app_user solo
+-- puede tocar actualizado_ts del ticket (al responder): el estado lo
+-- cambia únicamente superadmin_user, y solo estado/actualizado_ts. El
+-- superadmin lee el ticket y su conversación — lo que el vendedor
+-- escribió a propósito — y ninguna otra tabla de la empresa (D8).
+GRANT SELECT, INSERT ON tickets_soporte, mensajes_ticket_soporte TO app_user;
+GRANT UPDATE (actualizado_ts) ON tickets_soporte TO app_user;
+REVOKE DELETE ON tickets_soporte, mensajes_ticket_soporte FROM app_user;
+GRANT SELECT ON tickets_soporte, mensajes_ticket_soporte TO superadmin_user;
+GRANT INSERT ON mensajes_ticket_soporte TO superadmin_user;
+GRANT UPDATE (estado, actualizado_ts) ON tickets_soporte TO superadmin_user;
+
+ALTER TABLE tickets_soporte ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tickets_soporte FORCE ROW LEVEL SECURITY;
+ALTER TABLE mensajes_ticket_soporte ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mensajes_ticket_soporte FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS aislamiento_tickets_soporte ON tickets_soporte;
+CREATE POLICY aislamiento_tickets_soporte ON tickets_soporte
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Un ticket nuevo siempre nace abierto, lo mande quien lo mande.
+DROP POLICY IF EXISTS tickets_soporte_nace_abierto ON tickets_soporte;
+CREATE POLICY tickets_soporte_nace_abierto ON tickets_soporte AS RESTRICTIVE FOR INSERT TO app_user
+  WITH CHECK (estado = 'abierto');
+
+-- Sin empresa_id propio: el mensaje se ve si su ticket se ve (la
+-- subconsulta ya pasa por la política de tickets_soporte).
+DROP POLICY IF EXISTS aislamiento_mensajes_ticket_soporte ON mensajes_ticket_soporte;
+CREATE POLICY aislamiento_mensajes_ticket_soporte ON mensajes_ticket_soporte TO app_user
+  USING (EXISTS (SELECT 1 FROM tickets_soporte t WHERE t.id = ticket_id));
+
+-- Un mensaje de la empresa nunca se hace pasar por el del superadmin.
+DROP POLICY IF EXISTS mensajes_ticket_soporte_no_superadmin ON mensajes_ticket_soporte;
+CREATE POLICY mensajes_ticket_soporte_no_superadmin ON mensajes_ticket_soporte AS RESTRICTIVE FOR INSERT TO app_user
+  WITH CHECK (es_superadmin = false);
+
+DROP POLICY IF EXISTS sa_tickets_soporte_ver ON tickets_soporte;
+CREATE POLICY sa_tickets_soporte_ver ON tickets_soporte FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS sa_tickets_soporte_estado ON tickets_soporte;
+CREATE POLICY sa_tickets_soporte_estado ON tickets_soporte FOR UPDATE TO superadmin_user USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS sa_mensajes_ticket_soporte_ver ON mensajes_ticket_soporte;
+CREATE POLICY sa_mensajes_ticket_soporte_ver ON mensajes_ticket_soporte FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS sa_mensajes_ticket_soporte_responder ON mensajes_ticket_soporte;
+CREATE POLICY sa_mensajes_ticket_soporte_responder ON mensajes_ticket_soporte FOR INSERT TO superadmin_user
+  WITH CHECK (es_superadmin = true);
 
 -- ---------------------------------------------------------------------
 -- PR login-bodega-domiciliario — bodegas 3PL (operador logístico) y sus
@@ -1010,3 +1174,479 @@ DROP POLICY IF EXISTS sa_inv_bodega_ver ON invitaciones_bodega_3pl;
 CREATE POLICY sa_inv_bodega_ver ON invitaciones_bodega_3pl FOR SELECT TO superadmin_user USING (true);
 DROP POLICY IF EXISTS sa_inv_bodega_crear_admin ON invitaciones_bodega_3pl;
 CREATE POLICY sa_inv_bodega_crear_admin ON invitaciones_bodega_3pl FOR INSERT TO superadmin_user WITH CHECK (rol = 'admin_bodega');
+
+-- ---------------------------------------------------------------------
+-- Issue #625 (Bodega-1, migración 0044) — bodegas 3PL ligadas a las
+-- empresas que atienden, y las tablas de Bodega-2 (recepción e
+-- inventario). La bodega ve solo filas con su app.bodega_id; la empresa,
+-- solo filas con su app.empresa_actual (NULLIF: sin variable no hay
+-- filas, nunca un error de cast). Ligar y pausar solo lo hace el
+-- superadmin: app_user no tiene INSERT/UPDATE/DELETE sobre el vínculo.
+-- ---------------------------------------------------------------------
+ALTER TABLE bodegas_3pl_empresas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bodegas_3pl_empresas FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepciones_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepciones_bodega_3pl FORCE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recepcion_items_bodega_3pl FORCE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_bodega_3pl FORCE ROW LEVEL SECURITY;
+
+GRANT SELECT ON bodegas_3pl_empresas TO app_user;
+REVOKE INSERT, UPDATE, DELETE ON bodegas_3pl_empresas FROM app_user;
+GRANT SELECT, INSERT ON recepciones_bodega_3pl, recepcion_items_bodega_3pl TO app_user;
+REVOKE UPDATE, DELETE ON recepciones_bodega_3pl, recepcion_items_bodega_3pl FROM app_user;
+GRANT SELECT, INSERT ON stock_bodega_3pl TO app_user;
+GRANT UPDATE (cantidad) ON stock_bodega_3pl TO app_user;
+REVOKE DELETE ON stock_bodega_3pl FROM app_user;
+GRANT SELECT, INSERT ON bodegas_3pl_empresas TO superadmin_user;
+GRANT UPDATE (estado) ON bodegas_3pl_empresas TO superadmin_user;
+
+DROP POLICY IF EXISTS vinculo3pl_bodega_ver ON bodegas_3pl_empresas;
+CREATE POLICY vinculo3pl_bodega_ver ON bodegas_3pl_empresas FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS vinculo3pl_empresa_ver ON bodegas_3pl_empresas;
+CREATE POLICY vinculo3pl_empresa_ver ON bodegas_3pl_empresas FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+DROP POLICY IF EXISTS sa_vinculo3pl_ver ON bodegas_3pl_empresas;
+CREATE POLICY sa_vinculo3pl_ver ON bodegas_3pl_empresas FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS sa_vinculo3pl_ligar ON bodegas_3pl_empresas;
+CREATE POLICY sa_vinculo3pl_ligar ON bodegas_3pl_empresas FOR INSERT TO superadmin_user WITH CHECK (true);
+DROP POLICY IF EXISTS sa_vinculo3pl_pausar ON bodegas_3pl_empresas;
+CREATE POLICY sa_vinculo3pl_pausar ON bodegas_3pl_empresas FOR UPDATE TO superadmin_user USING (true) WITH CHECK (true);
+
+-- El vendedor ve el nombre de la bodega que lo atiende (solo la ligada) y
+-- la bodega ve el nombre de las empresas que atiende (solo las ligadas).
+-- Los subselects pasan por las políticas del vínculo, de arriba. La
+-- aplicación (lib/bodega/empresas.ts) lee únicamente id y nombre.
+DROP POLICY IF EXISTS bodega3pl_ver_empresa_ligada ON bodegas_3pl;
+CREATE POLICY bodega3pl_ver_empresa_ligada ON bodegas_3pl FOR SELECT TO app_user
+  USING (id IN (SELECT bodega_id FROM bodegas_3pl_empresas WHERE empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid));
+DROP POLICY IF EXISTS empresas_ver_por_bodega_ligada ON empresas;
+CREATE POLICY empresas_ver_por_bodega_ligada ON empresas FOR SELECT TO app_user
+  USING (id IN (SELECT empresa_id FROM bodegas_3pl_empresas WHERE bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid));
+
+-- Recepciones y stock: la bodega las crea y ve solo con su bodega_id y
+-- una empresa ligada ACTIVA; la empresa solo las lee.
+DROP POLICY IF EXISTS recepcion3pl_bodega_ver ON recepciones_bodega_3pl;
+CREATE POLICY recepcion3pl_bodega_ver ON recepciones_bodega_3pl FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS recepcion3pl_empresa_ver ON recepciones_bodega_3pl;
+CREATE POLICY recepcion3pl_empresa_ver ON recepciones_bodega_3pl FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+DROP POLICY IF EXISTS recepcion3pl_bodega_crear ON recepciones_bodega_3pl;
+CREATE POLICY recepcion3pl_bodega_crear ON recepciones_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v
+      WHERE v.bodega_id = recepciones_bodega_3pl.bodega_id
+        AND v.empresa_id = recepciones_bodega_3pl.empresa_id
+        AND v.estado = 'activa'
+    )
+  );
+
+-- Sin bodega_id propio: el ítem se ve si su recepción se ve, y solo se
+-- agrega a una recepción de la bodega activa.
+DROP POLICY IF EXISTS recepcion_item3pl_ver ON recepcion_items_bodega_3pl;
+CREATE POLICY recepcion_item3pl_ver ON recepcion_items_bodega_3pl FOR SELECT TO app_user
+  USING (EXISTS (SELECT 1 FROM recepciones_bodega_3pl r WHERE r.id = recepcion_id));
+DROP POLICY IF EXISTS recepcion_item3pl_crear ON recepcion_items_bodega_3pl;
+CREATE POLICY recepcion_item3pl_crear ON recepcion_items_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM recepciones_bodega_3pl r
+    WHERE r.id = recepcion_id AND r.bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+  ));
+
+DROP POLICY IF EXISTS stock3pl_bodega_ver ON stock_bodega_3pl;
+CREATE POLICY stock3pl_bodega_ver ON stock_bodega_3pl FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS stock3pl_empresa_ver ON stock_bodega_3pl;
+CREATE POLICY stock3pl_empresa_ver ON stock_bodega_3pl FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+DROP POLICY IF EXISTS stock3pl_bodega_crear ON stock_bodega_3pl;
+CREATE POLICY stock3pl_bodega_crear ON stock_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v
+      WHERE v.bodega_id = stock_bodega_3pl.bodega_id AND v.empresa_id = stock_bodega_3pl.empresa_id AND v.estado = 'activa'
+    )
+  );
+DROP POLICY IF EXISTS stock3pl_bodega_editar ON stock_bodega_3pl;
+CREATE POLICY stock3pl_bodega_editar ON stock_bodega_3pl FOR UPDATE TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid)
+  WITH CHECK (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+
+-- ---------------------------------------------------------------------
+-- Issue #628 (Bodega-3, migración 0046) — despachos de la bodega 3PL.
+-- La bodega NO lee pedidos ni despachos_ml (RLS filtra filas, no columnas, y
+-- ahí hay precios, comisiones, guía y SLA). Lee solo esta copia mínima que
+-- el vendedor llena al enviar el pedido a su bodega: número de pedido, tipo
+-- de envío, SKU y cantidad. Nada del comprador.
+-- · La empresa crea (hacia una bodega con vínculo ACTIVO, siempre 'pendiente')
+--   y lee los suyos.
+-- · La bodega lee los de su bodega_id y solo cambia estado/preparado_*:
+--   de 'pendiente' a 'preparado', una sola vez (USING exige 'pendiente').
+-- · Sin DELETE para nadie. Items: solo se agregan junto a una cabecera
+--   pendiente de la empresa.
+-- ---------------------------------------------------------------------
+ALTER TABLE despachos_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE despachos_bodega_3pl FORCE ROW LEVEL SECURITY;
+ALTER TABLE despacho_items_bodega_3pl ENABLE ROW LEVEL SECURITY;
+ALTER TABLE despacho_items_bodega_3pl FORCE ROW LEVEL SECURITY;
+
+GRANT SELECT, INSERT ON despachos_bodega_3pl, despacho_items_bodega_3pl TO app_user;
+REVOKE UPDATE, DELETE ON despachos_bodega_3pl, despacho_items_bodega_3pl FROM app_user;
+GRANT UPDATE (estado, preparado_ts, preparado_por) ON despachos_bodega_3pl TO app_user;
+
+DROP POLICY IF EXISTS despacho3pl_bodega_ver ON despachos_bodega_3pl;
+CREATE POLICY despacho3pl_bodega_ver ON despachos_bodega_3pl FOR SELECT TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+  );
+DROP POLICY IF EXISTS despacho3pl_empresa_ver ON despachos_bodega_3pl;
+CREATE POLICY despacho3pl_empresa_ver ON despachos_bodega_3pl FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+DROP POLICY IF EXISTS despacho3pl_empresa_crear ON despachos_bodega_3pl;
+CREATE POLICY despacho3pl_empresa_crear ON despachos_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado = 'pendiente'
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v
+      WHERE v.bodega_id = despachos_bodega_3pl.bodega_id
+        AND v.empresa_id = despachos_bodega_3pl.empresa_id
+        AND v.estado = 'activa'
+    )
+  );
+DROP POLICY IF EXISTS despacho3pl_bodega_preparar ON despachos_bodega_3pl;
+CREATE POLICY despacho3pl_bodega_preparar ON despachos_bodega_3pl FOR UPDATE TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+    AND estado = 'pendiente'
+  )
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+    AND estado = 'preparado'
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v
+      WHERE v.bodega_id = despachos_bodega_3pl.bodega_id
+        AND v.empresa_id = despachos_bodega_3pl.empresa_id
+        AND v.estado = 'activa'
+    )
+  );
+
+-- Sin bodega_id propio: el ítem se ve si su cabecera se ve (por bodega o por
+-- empresa; el EXISTS pasa por la política de la cabecera, que ya exige rol
+-- admin_bodega/operario del lado de la bodega: un domiciliario no ve items), y solo se agrega a una cabecera pendiente de la empresa activa.
+DROP POLICY IF EXISTS despacho_item3pl_ver ON despacho_items_bodega_3pl;
+CREATE POLICY despacho_item3pl_ver ON despacho_items_bodega_3pl FOR SELECT TO app_user
+  USING (EXISTS (SELECT 1 FROM despachos_bodega_3pl d WHERE d.id = despacho_id));
+DROP POLICY IF EXISTS despacho_item3pl_crear ON despacho_items_bodega_3pl;
+CREATE POLICY despacho_item3pl_crear ON despacho_items_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND EXISTS (
+      SELECT 1 FROM despachos_bodega_3pl d
+      WHERE d.id = despacho_id AND d.empresa_id = despacho_items_bodega_3pl.empresa_id AND d.estado = 'pendiente'
+    )
+  );
+
+-- ---------------------------------------------------------------------
+-- Issue #627 (Domi-1, migración 0045) — entregas del domiciliario.
+-- · La empresa ve y crea las suyas (solo hacia una bodega ligada ACTIVA y un
+--   domiciliario ACTIVO de esa bodega: se comprueba también en WITH CHECK),
+--   cambia o quita el domiciliario solo mientras esté 'asignada'.
+-- · La bodega ve las de su bodega_id.
+-- · El domiciliario (app.bodega_usuario_id, fijado por dbComoBodega con
+--   usuarioId) ve SOLO las suyas (cualquier estado: un UPDATE exige que la
+--   fila nueva también pase el SELECT, y así tiene historial) y las cierra
+--   mientras estén abiertas.
+-- · Los datos de quien recibe viven en entregas_domiciliario_contacto: el
+--   domiciliario solo los lee mientras la entrega esté abierta
+--   (asignada|en_camino) y nunca los escribe. La empresa los conserva.
+-- ---------------------------------------------------------------------
+ALTER TABLE entregas_domiciliario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entregas_domiciliario FORCE ROW LEVEL SECURITY;
+
+GRANT SELECT, INSERT, DELETE ON entregas_domiciliario TO app_user;
+REVOKE UPDATE ON entregas_domiciliario FROM app_user;
+GRANT UPDATE (miembro_domiciliario_id, estado, motivo, actualizada_ts) ON entregas_domiciliario TO app_user;
+-- Domi-3 (migración 0048): la foto la escribe el domiciliario al cerrar.
+GRANT UPDATE (foto_public_id, foto_ts) ON entregas_domiciliario TO app_user;
+
+-- Domi-3: pasar a 'entregada' exige foto. RESTRICTIVE: se suma (AND) a
+-- cualquier otra política de UPDATE, así que vale para el domiciliario y
+-- para cualquier otro camino. Solo mira la fila NUEVA: las entregadas antes
+-- de Domi-3 no se actualizan nunca más (una cerrada no pasa el USING de
+-- entrega_domiciliario_cerrar).
+DROP POLICY IF EXISTS entrega_entregada_con_foto ON entregas_domiciliario;
+CREATE POLICY entrega_entregada_con_foto ON entregas_domiciliario AS RESTRICTIVE FOR UPDATE TO app_user
+  USING (true)
+  WITH CHECK (estado <> 'entregada' OR foto_public_id IS NOT NULL);
+
+-- El vendedor necesita ver a los domiciliarios ACTIVOS de la bodega que lo
+-- atiende (solo vínculo activo). Solo filas de rol domiciliario. NO consulta
+-- bodegas_3pl: sus políticas leen miembros_bodega_3pl y se formaría un ciclo
+-- ("infinite recursion detected in policy"). Que la bodega esté activa se
+-- comprueba en el WITH CHECK de entregas_domiciliario.
+DROP POLICY IF EXISTS miembro3pl_ver_domiciliarios_empresa ON miembros_bodega_3pl;
+CREATE POLICY miembro3pl_ver_domiciliarios_empresa ON miembros_bodega_3pl FOR SELECT TO app_user
+  USING (
+    rol = 'domiciliario' AND activo
+    AND bodega_id IN (
+      SELECT v.bodega_id FROM bodegas_3pl_empresas v
+      WHERE v.empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+        AND v.estado = 'activa'
+    )
+  );
+
+DROP POLICY IF EXISTS entrega_empresa_ver ON entregas_domiciliario;
+CREATE POLICY entrega_empresa_ver ON entregas_domiciliario FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+
+DROP POLICY IF EXISTS entrega_empresa_crear ON entregas_domiciliario;
+CREATE POLICY entrega_empresa_crear ON entregas_domiciliario FOR INSERT TO app_user
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado = 'asignada'
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v JOIN bodegas_3pl b ON b.id = v.bodega_id
+      WHERE v.bodega_id = entregas_domiciliario.bodega_id AND v.empresa_id = entregas_domiciliario.empresa_id
+        AND v.estado = 'activa' AND b.estado = 'activa'
+    )
+    AND EXISTS (
+      SELECT 1 FROM miembros_bodega_3pl m
+      WHERE m.id = entregas_domiciliario.miembro_domiciliario_id
+        AND m.bodega_id = entregas_domiciliario.bodega_id AND m.rol = 'domiciliario' AND m.activo
+    )
+  );
+
+-- Reasignar: solo mientras esté 'asignada' (si ya va en camino, no se le
+-- quita al domiciliario), y el nuevo domiciliario cumple lo mismo que al crear.
+DROP POLICY IF EXISTS entrega_empresa_reasignar ON entregas_domiciliario;
+CREATE POLICY entrega_empresa_reasignar ON entregas_domiciliario FOR UPDATE TO app_user
+  USING (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado = 'asignada'
+  )
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado = 'asignada'
+    AND EXISTS (
+      SELECT 1 FROM bodegas_3pl_empresas v JOIN bodegas_3pl b ON b.id = v.bodega_id
+      WHERE v.bodega_id = entregas_domiciliario.bodega_id AND v.empresa_id = entregas_domiciliario.empresa_id
+        AND v.estado = 'activa' AND b.estado = 'activa'
+    )
+    AND EXISTS (
+      SELECT 1 FROM miembros_bodega_3pl m
+      WHERE m.id = entregas_domiciliario.miembro_domiciliario_id
+        AND m.bodega_id = entregas_domiciliario.bodega_id AND m.rol = 'domiciliario' AND m.activo
+    )
+  );
+
+DROP POLICY IF EXISTS entrega_empresa_quitar ON entregas_domiciliario;
+CREATE POLICY entrega_empresa_quitar ON entregas_domiciliario FOR DELETE TO app_user
+  USING (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND estado = 'asignada'
+  );
+
+DROP POLICY IF EXISTS entrega_bodega_ver ON entregas_domiciliario;
+CREATE POLICY entrega_bodega_ver ON entregas_domiciliario FOR SELECT TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    -- dbComoBodega fija app.bodega_id también para el domiciliario: sin esta
+    -- condición vería todas las entregas de su bodega (OR de políticas).
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+  );
+
+-- Domiciliario: miembro ACTIVO y rol domiciliario de la bodega activa, que
+-- además es la persona de la sesión (app.bodega_usuario_id).
+DROP POLICY IF EXISTS entrega_domiciliario_ver ON entregas_domiciliario;
+CREATE POLICY entrega_domiciliario_ver ON entregas_domiciliario FOR SELECT TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND miembro_domiciliario_id IN (
+      SELECT m.id FROM miembros_bodega_3pl m
+      WHERE m.usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+        AND m.bodega_id = entregas_domiciliario.bodega_id AND m.rol = 'domiciliario' AND m.activo
+    )
+  );
+DROP POLICY IF EXISTS entrega_domiciliario_cerrar ON entregas_domiciliario;
+CREATE POLICY entrega_domiciliario_cerrar ON entregas_domiciliario FOR UPDATE TO app_user
+  USING (
+    estado IN ('asignada', 'en_camino')
+    AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND miembro_domiciliario_id IN (
+      SELECT m.id FROM miembros_bodega_3pl m
+      WHERE m.usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+        AND m.bodega_id = entregas_domiciliario.bodega_id AND m.rol = 'domiciliario' AND m.activo
+    )
+  )
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND miembro_domiciliario_id IN (
+      SELECT m.id FROM miembros_bodega_3pl m
+      WHERE m.usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+        AND m.bodega_id = entregas_domiciliario.bodega_id AND m.rol = 'domiciliario' AND m.activo
+    )
+  );
+
+-- Contacto de la entrega (datos del comprador). Solo la empresa escribe.
+ALTER TABLE entregas_domiciliario_contacto ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entregas_domiciliario_contacto FORCE ROW LEVEL SECURITY;
+
+GRANT SELECT, INSERT, DELETE ON entregas_domiciliario_contacto TO app_user;
+REVOKE UPDATE ON entregas_domiciliario_contacto FROM app_user;
+GRANT UPDATE (receptor_nombre, direccion, barrio, ciudad, telefono, nota) ON entregas_domiciliario_contacto TO app_user;
+
+DROP POLICY IF EXISTS contacto_empresa_ver ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_empresa_ver ON entregas_domiciliario_contacto FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+
+DROP POLICY IF EXISTS contacto_empresa_crear ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_empresa_crear ON entregas_domiciliario_contacto FOR INSERT TO app_user
+  WITH CHECK (
+    empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND EXISTS (SELECT 1 FROM entregas_domiciliario e WHERE e.id = entregas_domiciliario_contacto.entrega_id)
+  );
+
+DROP POLICY IF EXISTS contacto_empresa_editar ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_empresa_editar ON entregas_domiciliario_contacto FOR UPDATE TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid)
+  WITH CHECK (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+
+DROP POLICY IF EXISTS contacto_empresa_borrar ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_empresa_borrar ON entregas_domiciliario_contacto FOR DELETE TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+
+-- Bodega (admin_bodega u operario): solo si la entrega es de su bodega.
+DROP POLICY IF EXISTS contacto_bodega_ver ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_bodega_ver ON entregas_domiciliario_contacto FOR SELECT TO app_user
+  USING (
+    current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+    AND EXISTS (
+      SELECT 1 FROM entregas_domiciliario e
+      WHERE e.id = entregas_domiciliario_contacto.entrega_id
+        AND e.bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    )
+  );
+
+-- Domiciliario: solo si la entrega es SUYA y sigue ABIERTA. El EXISTS pasa
+-- por entrega_domiciliario_ver (la cabecera), que ya exige miembro activo.
+DROP POLICY IF EXISTS contacto_domiciliario_ver ON entregas_domiciliario_contacto;
+CREATE POLICY contacto_domiciliario_ver ON entregas_domiciliario_contacto FOR SELECT TO app_user
+  USING (
+    current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND EXISTS (
+      SELECT 1 FROM entregas_domiciliario e
+      WHERE e.id = entregas_domiciliario_contacto.entrega_id
+        AND e.estado IN ('asignada', 'en_camino')
+    )
+  );
+
+-- ---------------------------------------------------------------------
+-- Domi-4 (migración 0049) — novedades de una entrega, sin cerrarla.
+-- · Solo se AGREGAN: app_user tiene SELECT e INSERT, nunca UPDATE ni
+--   DELETE (historial; se van solas si se borra la entrega).
+-- · Crea: solo el domiciliario dueño de la entrega, mientras siga ABIERTA,
+--   a su nombre y con la misma empresa y bodega de la entrega. El EXISTS
+--   pasa por entrega_domiciliario_ver, que ya exige que sea suya y activo.
+-- · Ven: la empresa (las suyas), la bodega (admin/operario, las de su
+--   bodega) y el domiciliario (las de sus entregas abiertas).
+-- ---------------------------------------------------------------------
+ALTER TABLE entregas_novedades ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entregas_novedades FORCE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT ON entregas_novedades TO app_user;
+REVOKE UPDATE, DELETE ON entregas_novedades FROM app_user;
+
+DROP POLICY IF EXISTS novedad_empresa_ver ON entregas_novedades;
+CREATE POLICY novedad_empresa_ver ON entregas_novedades FOR SELECT TO app_user
+  USING (empresa_id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid);
+
+DROP POLICY IF EXISTS novedad_bodega_ver ON entregas_novedades;
+CREATE POLICY novedad_bodega_ver ON entregas_novedades FOR SELECT TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) IN ('admin_bodega', 'operario')
+  );
+
+DROP POLICY IF EXISTS novedad_domiciliario_ver ON entregas_novedades;
+CREATE POLICY novedad_domiciliario_ver ON entregas_novedades FOR SELECT TO app_user
+  USING (
+    current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND EXISTS (
+      SELECT 1 FROM entregas_domiciliario e
+      WHERE e.id = entregas_novedades.entrega_id
+        AND e.estado IN ('asignada', 'en_camino')
+    )
+  );
+
+DROP POLICY IF EXISTS novedad_domiciliario_crear ON entregas_novedades;
+CREATE POLICY novedad_domiciliario_crear ON entregas_novedades FOR INSERT TO app_user
+  WITH CHECK (
+    current_setting('app.bodega_rol', true) = 'domiciliario'
+    AND usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+    AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND EXISTS (
+      SELECT 1 FROM entregas_domiciliario e
+      WHERE e.id = entregas_novedades.entrega_id
+        AND e.empresa_id = entregas_novedades.empresa_id
+        AND e.bodega_id = entregas_novedades.bodega_id
+        AND e.estado IN ('asignada', 'en_camino')
+    )
+  );
+
+-- ---------------------------------------------------------------------
+-- Anuncios de la plataforma (25-nov, migración 0050).
+-- · superadmin_user: ve todos, crea, y solo puede escribir retirado_ts
+--   (retirar). Nunca borra ni edita el texto: historial.
+-- · app_user (panel del vendedor): solo LEE los vigentes — ya empezaron,
+--   no vencieron y no se retiraron. No escribe nada.
+-- ---------------------------------------------------------------------
+ALTER TABLE anuncios_plataforma ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anuncios_plataforma FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON anuncios_plataforma FROM PUBLIC;
+GRANT SELECT, INSERT ON anuncios_plataforma TO superadmin_user;
+GRANT UPDATE (retirado_ts) ON anuncios_plataforma TO superadmin_user;
+GRANT SELECT ON anuncios_plataforma TO app_user;
+
+DROP POLICY IF EXISTS anuncio_superadmin_ver ON anuncios_plataforma;
+CREATE POLICY anuncio_superadmin_ver ON anuncios_plataforma FOR SELECT TO superadmin_user USING (true);
+DROP POLICY IF EXISTS anuncio_superadmin_crear ON anuncios_plataforma;
+CREATE POLICY anuncio_superadmin_crear ON anuncios_plataforma FOR INSERT TO superadmin_user WITH CHECK (retirado_ts IS NULL);
+-- Retirar una sola vez: una fila ya retirada no se vuelve a tocar.
+DROP POLICY IF EXISTS anuncio_superadmin_retirar ON anuncios_plataforma;
+CREATE POLICY anuncio_superadmin_retirar ON anuncios_plataforma FOR UPDATE TO superadmin_user
+  USING (retirado_ts IS NULL) WITH CHECK (retirado_ts IS NOT NULL);
+
+DROP POLICY IF EXISTS anuncio_vendedor_ver_vigentes ON anuncios_plataforma;
+CREATE POLICY anuncio_vendedor_ver_vigentes ON anuncios_plataforma FOR SELECT TO app_user
+  USING (retirado_ts IS NULL AND inicio_ts <= now() AND (fin_ts IS NULL OR fin_ts > now()));
+
+-- ---------------------------------------------------------------------
+-- Empresas inactivas (25-nov, migración 0051) — último ingreso al panel.
+-- app_user NO tiene UPDATE sobre empresas.ultimo_ingreso_ts: lo escribe esta
+-- función, y solo en la empresa de la sesión (app.empresa_actual, que fija
+-- dbComoEmpresa después de comprobar la membresía). Como mucho una vez por
+-- hora: el resto de llamadas no escribe nada. superadmin_user ya lee
+-- empresas (GRANT SELECT de arriba).
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION registrar_ingreso_empresa()
+RETURNS void
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  UPDATE empresas SET ultimo_ingreso_ts = now()
+  WHERE id = NULLIF(current_setting('app.empresa_actual', true), '')::uuid
+    AND (ultimo_ingreso_ts IS NULL OR ultimo_ingreso_ts < now() - interval '1 hour')
+$fn$;
+REVOKE ALL ON FUNCTION registrar_ingreso_empresa() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION registrar_ingreso_empresa() TO app_user;

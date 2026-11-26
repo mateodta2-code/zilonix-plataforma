@@ -22,7 +22,7 @@ import { cuentasMl, publicidadSincronizaciones } from "@/db/schema";
 import { LimiteMercadoLibreError } from "@/lib/ml/cliente";
 import { costosDeItem } from "@/lib/ml/costos-item";
 import { msDeReintento429 } from "@/lib/ml/reintento-429";
-import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
+import { empresaEstaSuspendida, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import {
   adGroupsDeCampana,
   anunciosDeAdGroup,
@@ -598,6 +598,11 @@ export async function sincronizarPublicidadProgramada(ahora = new Date()): Promi
       break;
     }
     const cuenta = ordenadas[i];
+    // Empresa suspendida: se salta antes de abrir la fila de sincronización.
+    if (await empresaEstaSuspendida(cuenta.empresaId)) {
+      resultado.saltadas += 1;
+      continue;
+    }
     const historial = await historialSync(cuenta.empresaId, cuenta.id);
     const ultima: UltimaSync | null = historial.ultima
       ? {

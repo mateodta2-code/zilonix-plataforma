@@ -4,6 +4,7 @@ import { costosSku, cuentasFalabella, movimientosMarketplace, pedidosFalabella, 
 import { requierePermiso } from "@/lib/permisos";
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import { codigosParaMaestra } from "./combo-sku";
+import { esProveedorDirecto } from "./envio-falabella";
 import {
   calcularUtilidadFalabella,
   construirMaestraFalabella,
@@ -46,12 +47,18 @@ export function parsearItemsApiFalabella(items: unknown): ItemApiFalabella[] {
     const item = crudo as Record<string, unknown>;
     const estado = (texto(item.Status) ?? "").toLowerCase();
     if (ESTADOS_QUE_NO_SON_VENTA.includes(estado)) continue;
-    const proveedor = `${texto(item.ShipmentProvider) ?? ""} ${texto(item.ShippingProviderType) ?? ""}`.toLowerCase();
+    // Campos de envío tal cual: la regla vive en clasificarEnvioFalabella.
+    const envio = {
+      tipoEnvio: texto(item.ShippingType),
+      proveedor: texto(item.ShipmentProvider),
+      tipoProveedor: texto(item.ShippingProviderType),
+    };
     salida.push({
       sku: texto(item.Sku),
       nombre: texto(item.Name),
       precio: texto(item.ItemPrice) ?? texto(item.PaidPrice) ?? "0.00",
-      envioPropio: proveedor.includes("ibisdirecto") || proveedor.includes("directo"),
+      ...envio,
+      envioPropio: esProveedorDirecto(envio),
     });
   }
   return salida;
@@ -64,6 +71,7 @@ export type CuentaFalabellaSelector = {
   // Respaldo para estimar cuentas sin reportes (issue #422).
   comisionPct: string | null;
   flete: string | null;
+  ivaVentasPct: string | null;
 };
 
 // También las desconectadas: sus ventas viejas siguen siendo plata real.
@@ -76,12 +84,13 @@ export async function listarCuentasFalabellaParaSelector(empresaId: string): Pro
         desconectadaTs: cuentasFalabella.desconectadaTs,
         comisionPct: cuentasFalabella.comisionDefectoPct,
         flete: cuentasFalabella.fleteDefecto,
+        ivaVentasPct: cuentasFalabella.ivaVentasPct,
       })
       .from(cuentasFalabella)
       .where(eq(cuentasFalabella.empresaId, empresaId))
       .orderBy(asc(cuentasFalabella.nickname))
   );
-  return filas.map((f) => ({ id: f.id, nickname: f.nickname, desconectada: f.desconectadaTs !== null, comisionPct: f.comisionPct, flete: f.flete }));
+  return filas.map((f) => ({ id: f.id, nickname: f.nickname, desconectada: f.desconectadaTs !== null, comisionPct: f.comisionPct, flete: f.flete, ivaVentasPct: f.ivaVentasPct }));
 }
 
 export type FiltroUtilidadFalabella = {
@@ -262,10 +271,10 @@ export async function listarUtilidadFalabella(
       cuentasIds.length === 0
         ? []
         : await tx
-            .select({ id: cuentasFalabella.id, comisionPct: cuentasFalabella.comisionDefectoPct, flete: cuentasFalabella.fleteDefecto })
+            .select({ id: cuentasFalabella.id, comisionPct: cuentasFalabella.comisionDefectoPct, flete: cuentasFalabella.fleteDefecto, ivaVentasPct: cuentasFalabella.ivaVentasPct })
             .from(cuentasFalabella)
             .where(and(eq(cuentasFalabella.empresaId, empresaId), inArray(cuentasFalabella.id, cuentasIds)));
-    const defectosCuenta = new Map(filasDefectos.map((f) => [f.id, { comisionPct: f.comisionPct, flete: f.flete }]));
+    const defectosCuenta = new Map(filasDefectos.map((f) => [f.id, { comisionPct: f.comisionPct, flete: f.flete, ivaVentasPct: f.ivaVentasPct }]));
 
     const resultado = calcularUtilidadFalabella({
       pedidos: pedidos.map((x) => ({

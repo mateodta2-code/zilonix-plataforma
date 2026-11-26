@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { formatearMoneda, formatearNumero } from "@/lib/ml/sitios";
 import {
@@ -181,7 +182,8 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
         </Boton>
       </form>
       {aviso ? <p className={styles.avisoError}>{aviso}</p> : null}
-      {buscando ? <p className={styles.nota}>Leyendo el listado y las fichas en Mercado Libre… no cierres la pestaña que se abrió.</p> : null}
+      <BarraCarga sticky={false} estado={buscando ? "cargando" : "inactiva"} titulo="Leyendo el listado y las fichas en Mercado Libre…" ariaLabel="Progreso de la búsqueda de competidores" />
+      {buscando ? <p className={styles.nota}>No cierres la pestaña que se abrió.</p> : null}
 
       {resultado ? (
         competidores.length === 0 ? (

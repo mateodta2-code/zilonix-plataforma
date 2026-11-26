@@ -8,6 +8,7 @@ import { POST } from "./route";
 // le queda, así que estas pruebas son las que de verdad prueban que
 // sigue cerrada. crypto.timingSafeEqual exige comparar longitudes
 // primero (lanza si difieren) — por eso hay un caso de cada longitud.
+vi.mock("@/lib/trabajos/registroEjecuciones", () => ({ ejecutarConRegistro: (_proceso: string, trabajo: () => Promise<unknown>) => trabajo() }));
 vi.mock("@/lib/ml/trabajador", () => ({ procesarAvisosPendientes: vi.fn(async () => ({ procesados: 3 })) }));
 
 const SECRETO_REAL = "trabajador-secret-fake-ci-0123456789";

@@ -9,6 +9,7 @@ import {
   construirReferenciasEstimacionFalabella,
   type MovimientoEntrada,
   type PedidoFalabellaEntrada,
+  ventasSinIvaCentavos,
 } from "./utilidad-falabella";
 
 // Issue #422 — utilidad por orden de Falabella con el corte del 11 de
@@ -522,5 +523,128 @@ describe("calcularUtilidadFalabella — alias, ajustes manuales y defectos de cu
       defectosCuenta: new Map([[CUENTA, { comisionPct: "50.00", flete: "99999.00" }]]),
     });
     expect(ordenes[0]).toMatchObject({ estado: "estimada", comisiones: "-15000.00", envios: "-8000.00" });
+  });
+});
+
+describe("calcularUtilidadFalabella — envío agencia y empaque", () => {
+  const cargos = (costo: string, empaque: string | null, envioAgencia: string | null): MaestraSku => ({ ...fila(costo), empaque, envioAgencia });
+  const maestra = new Map([
+    ["SKU-X", cargos("40000.00", "800.00", "2000.00")],
+    ["SKU-Y", cargos("20000.00", "500.00", "3500.00")],
+    ["SKU-Z", cargos("40000.00", "600.00", null)],
+  ]);
+  const item = (sku: string, precio: string, tipoEnvio: string | null = "Dropshipping") => ({ sku, nombre: sku, precio, tipoEnvio, proveedor: "Servientrega" });
+  const reporte = (numero: string, sku: string, tipoEnvio?: string): MovimientoEntrada[] => [
+    { cuentaId: CUENTA, numeroOrden: numero, sku, categoria: "precio", monto: "100000.00" },
+    { cuentaId: CUENTA, numeroOrden: numero, sku, categoria: "comision", monto: "-10000.00" },
+    { cuentaId: CUENTA, numeroOrden: numero, sku, categoria: "envio", monto: "-5000.00", tipoTransaccion: tipoEnvio },
+  ];
+
+  it("orden de agencia: resta envío agencia y empaque una vez; flete manual sigue aparte", () => {
+    const { ordenes, totales } = calcularUtilidadFalabella({
+      pedidos: [pedido("7001", { itemsApi: [item("SKU-X", "100000.00")], fleteManual: "3000.00" })],
+      movimientos: reporte("7001", "SKU-X"),
+      maestra,
+    });
+    expect(ordenes[0]).toMatchObject({
+      estado: "calculada",
+      tipoEnvio: "agencia",
+      envios: "-8000.00",
+      envioAgencia: "2000.00",
+      empaque: "800.00",
+      envioAgenciaSinDato: false,
+      // 100000 − 10000 − 8000 − 40000 − 2000 − 800
+      utilidad: "39200.00",
+    });
+    expect(totales).toMatchObject({ envioAgencia: "2000.00", empaque: "800.00", utilidadPeriodo: "39200.00" });
+  });
+
+  it("orden de envío propio: no resta envío agencia, sí empaque", () => {
+    const { ordenes, totales } = calcularUtilidadFalabella({
+      pedidos: [pedido("7002", { itemsApi: [item("SKU-X", "100000.00")] })],
+      movimientos: reporte("7002", "SKU-X", "Pago por envío directo"),
+      maestra,
+    });
+    expect(ordenes[0]).toMatchObject({ tipoEnvio: "propio", envioPropio: true, envioAgencia: "0.00", empaque: "800.00", utilidad: "44200.00" });
+    expect(totales.envioAgencia).toBe("0.00");
+  });
+
+  it("varios SKU (estimada): toma el mayor envío agencia y el mayor empaque, una sola vez", () => {
+    const { ordenes } = calcularUtilidadFalabella({
+      pedidos: [pedido("7003", { itemsApi: [item("SKU-X", "100000.00"), item("SKU-Y", "50000.00")] })],
+      movimientos: [],
+      maestra,
+      defectosCuenta: new Map([[CUENTA, { comisionPct: "10.00", flete: null }]]),
+    });
+    expect(ordenes[0]).toMatchObject({
+      estado: "estimada",
+      tipoEnvio: "agencia",
+      envioAgencia: "3500.00",
+      empaque: "800.00",
+      // 150000 − 15000 − 60000 − 3500 − 800
+      utilidad: "70700.00",
+    });
+  });
+
+  it("SKU sin envío agencia: aviso, resta 0; tipo desconocido no resta envío agencia", () => {
+    const { ordenes, totales } = calcularUtilidadFalabella({
+      pedidos: [
+        pedido("7004", { itemsApi: [item("SKU-Z", "100000.00")] }),
+        pedido("7005", { itemsApi: [item("SKU-X", "100000.00", null)] }),
+      ],
+      movimientos: [...reporte("7004", "SKU-Z"), ...reporte("7005", "SKU-X")],
+      maestra,
+    });
+    expect(ordenes[0]).toMatchObject({ tipoEnvio: "agencia", envioAgencia: "0.00", envioAgenciaSinDato: true, empaque: "600.00", utilidad: "44400.00" });
+    expect(ordenes[1]).toMatchObject({ tipoEnvio: "desconocido", envioAgencia: "0.00", envioAgenciaSinDato: false, utilidad: "44200.00" });
+    expect(totales).toMatchObject({ ordenesSinEnvioAgencia: 1, ordenesEnvioDesconocido: 1 });
+  });
+});
+
+describe("calcularUtilidadFalabella — ventas sin IVA (informativo)", () => {
+  const filaAlias = (sku: string, skuFalabella: string | null, costo: string | null) => ({ sku, skuFalabella, ...fila(costo) });
+  const item = (sku: string, precio: string) => ({ sku, nombre: sku, precio, envioPropio: false });
+
+  it("ventas sin IVA: en centavos con BigInt, redondeando la mitad lejos de cero", () => {
+    // 119000 ÷ 1,19 = 100000.
+    expect(ventasSinIvaCentavos(BigInt(11900000), BigInt(1900))).toBe(BigInt(10000000));
+    // 0,01 ÷ 1,19 = 0,0084 → 0,01; 0,50 ÷ 2 (100 %) = 0,25.
+    expect(ventasSinIvaCentavos(BigInt(1), BigInt(1900))).toBe(BigInt(1));
+    expect(ventasSinIvaCentavos(BigInt(50), BigInt(10000))).toBe(BigInt(25));
+    expect(ventasSinIvaCentavos(BigInt(11900000), BigInt(0))).toBe(BigInt(11900000));
+  });
+
+  it("ventas sin IVA: solo con el % configurado, y la utilidad no cambia", () => {
+    const maestra = construirMaestraFalabella([filaAlias("KIT-6027", null, "30000.00")]);
+    const entrada = {
+      pedidos: [pedido("7500", { itemsApi: [item("KIT-6027", "119000.00")] })],
+      movimientos: [],
+      maestra,
+      referenciasEstimacion: new Map(),
+    };
+    const sin = calcularUtilidadFalabella({
+      ...entrada,
+      defectosCuenta: new Map([[CUENTA, { comisionPct: "10", flete: null }]]),
+    });
+    const con = calcularUtilidadFalabella({
+      ...entrada,
+      defectosCuenta: new Map([[CUENTA, { comisionPct: "10", flete: null, ivaVentasPct: "19.00" }]]),
+    });
+    expect(sin.ordenes[0].ventasSinIva).toBeNull();
+    expect(sin.totales.ventasSinIva).toBeNull();
+    expect(con.ordenes[0]).toMatchObject({ ventas: "119000.00", ventasSinIva: "100000.00" });
+    expect(con.ordenes[0].utilidad).toBe(sin.ordenes[0].utilidad);
+    expect(con.totales.utilidadEstimadas).toBe(sin.totales.utilidadEstimadas);
+  });
+
+  it("ventas sin IVA en el total: suma las órdenes con reporte de cuentas con % configurado", () => {
+    const { ordenes, totales } = calcularUtilidadFalabella({
+      pedidos: [pedido(ORDENES[0])],
+      movimientos: movimientosDelCorte(),
+      maestra: new Map(),
+      defectosCuenta: new Map([[CUENTA, { comisionPct: null, flete: null, ivaVentasPct: "19" }]]),
+    });
+    expect(ordenes[0].ventasSinIva).not.toBeNull();
+    expect(totales.ventasSinIva).toBe(ordenes[0].ventasSinIva);
   });
 });

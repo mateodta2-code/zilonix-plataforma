@@ -1,0 +1,6 @@
+- **Publicar → «Generar imágenes»**: las imágenes creadas ya no entran solas a la galería. Quedan en una barra nueva, «Imágenes creadas», debajo del generador, con lo de todos los estilos.
+  - **Portadas**: nunca van a la galería. Cada una tiene un botón «Portada de <cuenta>» por cuenta marcada y queda como portada propia de esa cuenta (`portadaUrl`). Antes, con 2 portadas, las dos entraban como foto 1 y todas las cuentas terminaban con la misma.
+  - **Contenido / Experto ML / foto sobre blanco**: «Agregar a la galería», «Agregar todas a la galería» o arrastrarlas a un lugar de la galería.
+  - Cada estilo guarda sus propias tarjetas: cambiar de Portadas a Contenido o Experto (o «Preparar de nuevo») ya no borra las otras ni lo creado.
+  - Al regenerar, la nueva reemplaza a la anterior en la barra, en la galería y en la portada de las cuentas que la usaban.
+- Guía de Publicar actualizada.

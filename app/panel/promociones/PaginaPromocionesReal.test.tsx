@@ -383,13 +383,14 @@ describe("PaginaPromocionesReal — «Aplicada» vs «Programada»", () => {
   });
 });
 
-describe("PaginaPromocionesReal — pestaña Bitácora (Promo-B)", () => {
-  it("muestra la pestaña Bitácora y al abrirla pide el historial, sin perder la lista", async () => {
+describe("PaginaPromocionesReal — pestaña Auditar (Promo-B)", () => {
+  it("muestra la pestaña Auditar (sin «Bitácora») y al abrirla pide el historial, sin perder la lista", async () => {
     montar();
     await screen.findByText("Producto MLM1");
     const pedidos = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
     expect(pedidos().some((u) => u.startsWith("/api/ml/promociones/historial"))).toBe(false);
-    fireEvent.click(screen.getByRole("tab", { name: "Bitácora" }));
+    expect(screen.queryByRole("tab", { name: "Bitácora" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Auditar" }));
     await waitFor(() => expect(pedidos().some((u) => u.startsWith("/api/ml/promociones/historial"))).toBe(true));
     fireEvent.click(screen.getByRole("tab", { name: "Publicaciones" }));
     expect(screen.getByText("Producto MLM1")).toBeTruthy();
@@ -432,5 +433,86 @@ describe("PaginaPromocionesReal — Promo-D (regla en la fila por producto)", ()
     fireEvent.click(await screen.findByText("Producto MLM1"));
     await screen.findAllByText(new RegExp("El piso \\(54000\\)"));
     expect(screen.getAllByText(new RegExp("El piso \\(54000\\)"))).toHaveLength(1);
+  });
+});
+
+describe("Promo-G — banda de carga y debounce del X %", () => {
+  function respuestaPagina(extra: Record<string, unknown>) {
+    return { ok: true, json: async () => ({ filas: FILAS_LISTA, conteosLote: { todas: 2, enPromocion: 0, sinPromocion: 2, conError: 0 }, ...extra }) };
+  }
+  function cantidadListados() {
+    return (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter((c) => String(c[0]).startsWith("/api/ml/promociones/publicaciones?")).length;
+  }
+
+  it("con total conocido: status visible, progressbar con aria-valuenow y «Carga completa» al terminar", async () => {
+    let liberar: (v: unknown) => void = () => {};
+    const segunda = new Promise((r) => (liberar = r));
+    const base = fetch as unknown as ReturnType<typeof vi.fn>;
+    const original = base.getMockImplementation()!;
+    let n = 0;
+    base.mockImplementation(async (url: string, init?: { body?: string }) => {
+      if (String(url).startsWith("/api/ml/promociones/publicaciones?")) {
+        n += 1;
+        if (n === 1) return respuestaPagina({ cursorSiguiente: "c2", totalEstimado: 4 });
+        await segunda;
+        return respuestaPagina({ cursorSiguiente: null, totalEstimado: 4 });
+      }
+      return original(url, init);
+    });
+    montar();
+    const barra = await screen.findByRole("progressbar");
+    expect(barra.getAttribute("aria-valuenow")).toBe("50");
+    expect(screen.getByRole("status").textContent).toContain("Cargando publicaciones… 2 revisadas");
+    expect(screen.getByRole("status").textContent).toContain("2 de 4 revisadas (50 %)");
+    liberar(null);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Carga completa"));
+  });
+
+  it("sin total: barra indeterminada (sin progressbar con valor)", async () => {
+    const base = fetch as unknown as ReturnType<typeof vi.fn>;
+    const original = base.getMockImplementation()!;
+    base.mockImplementation(async (url: string, init?: { body?: string }) => {
+      if (String(url).startsWith("/api/ml/promociones/publicaciones?")) return new Promise(() => {});
+      return original(url, init);
+    });
+    montar();
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Cargando publicaciones…"));
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByRole("button", { name: "Detener carga" })).toBeTruthy();
+  });
+
+  it("escribir «12» en el % hace UNA sola recarga tras ~600 ms", async () => {
+    montar();
+    fireEvent.click(screen.getByLabelText(/Participar solo hasta un máximo de/));
+    await waitFor(() => expect(cantidadListados()).toBeGreaterThan(1));
+    await screen.findByText("Carga completa");
+    vi.useFakeTimers();
+    try {
+      const antes = cantidadListados();
+      const campo = screen.getByRole("spinbutton");
+      fireEvent.change(campo, { target: { value: "1" } });
+      fireEvent.change(campo, { target: { value: "12" } });
+      expect((campo as HTMLInputElement).value).toBe("12");
+      await vi.advanceTimersByTimeAsync(300);
+      expect(cantidadListados()).toBe(antes);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(cantidadListados()).toBe(antes + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("PaginaPromocionesReal — «Seleccionar todas» visible", () => {
+  it("la casilla y la línea de selección usan clases grandes de marca (≥ 15 px / ≥ 20 px)", async () => {
+    montar();
+    const casilla = await screen.findByLabelText(/Seleccionar todas/);
+    expect(casilla.closest("label")?.className).toContain("filaCheck");
+    const css = (await import("node:fs")).readFileSync("app/panel/promociones/promocionesReal.module.css", "utf8");
+    const bloque = (sel: string) => css.slice(css.indexOf(sel), css.indexOf("}", css.indexOf(sel)));
+    expect(Number(/font-size:\s*(\d+)px/.exec(bloque(".filaCheck {"))?.[1])).toBeGreaterThanOrEqual(15);
+    expect(Number(/width:\s*(\d+)px/.exec(bloque('.filaCheck input[type="checkbox"]'))?.[1])).toBeGreaterThanOrEqual(20);
+    expect(Number(/height:\s*(\d+)px/.exec(bloque('.filaCheck input[type="checkbox"]'))?.[1])).toBeGreaterThanOrEqual(20);
+    expect(css).toContain("accent-color: var(--azul-metal-3)");
   });
 });

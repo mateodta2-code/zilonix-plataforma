@@ -10,7 +10,7 @@ const LLAVE = "sk-llave-secreta-de-la-empresa";
 
 const estado = vi.hoisted(() => ({ conPermiso: true, permisosPedidos: [] as string[] }));
 const ia = vi.hoisted(() => ({ conexion: vi.fn(), texto: vi.fn(), conImagenes: vi.fn(), descargar: vi.fn() }));
-const ml = vi.hoisted(() => ({ categoria: vi.fn(), tendencias: vi.fn(), tituloCompetencia: vi.fn() }));
+const ml = vi.hoisted(() => ({ categoria: vi.fn(), tendencias: vi.fn() }));
 
 vi.mock("@/lib/usuarios", () => ({ obtenerOCrearUsuarioActual: async () => ({ id: "usuario-1" }) }));
 vi.mock("@/lib/empresas", () => ({ listarEmpresasDeUsuario: async () => [{ id: "empresa-1" }] }));
@@ -36,7 +36,7 @@ vi.mock("@/lib/ia/proveedores", async () => {
   return { ...real, llamarIA: ia.texto, llamarIAConImagenes: ia.conImagenes };
 });
 vi.mock("@/lib/ml/publicar", () => ({ resolverCategoria: ml.categoria }));
-vi.mock("@/lib/ml/cliente", () => ({ tendenciasPorNivelMl: ml.tendencias, tituloPublicacionMl: ml.tituloCompetencia }));
+vi.mock("@/lib/ml/cliente", () => ({ tendenciasPorNivelMl: ml.tendencias }));
 
 import { analizarProductoAction, escribirDescripcionAction, proponerTitulosAction } from "./actions";
 import { ErrorProveedorIA } from "@/lib/ia/proveedores";
@@ -144,22 +144,19 @@ describe("títulos y descripción", () => {
     expect(r.ok && r.palabras.find((p) => p.palabra.toLowerCase() === "garrafa")).toMatchObject({ origen: "tendencia", nivel: "alta" });
   });
 
-  it("competencia: el título del link entra al prompt; si ML no deja leerlo, pide pegarlo; lo pegado manda", async () => {
-    ia.texto.mockResolvedValue('{"titulos": ["Garrafa térmica 1 L"], "catalogo": null}');
-    ml.tituloCompetencia.mockReset().mockResolvedValue("Garrafa Termica Inox 1 Litro Café");
-    const r = await proponerTitulosAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, linkCompetencia: "https://produto.mercadolivre.com.br/MLB-123456789-garrafa" });
-    expect(ml.tituloCompetencia).toHaveBeenCalledWith("item", "MLB123456789", "token");
-    expect(String(ia.texto.mock.calls.at(-1)?.[1])).toContain("Garrafa Termica Inox 1 Litro Café");
-    expect(r.ok && r.competencia).toEqual({ titulo: "Garrafa Termica Inox 1 Litro Café", aviso: null });
-
-    ml.tituloCompetencia.mockResolvedValue(null);
-    const sin = await proponerTitulosAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, linkCompetencia: "https://produto.mercadolivre.com.br/MLB-123456789-garrafa" });
-    expect(sin.ok && sin.competencia.aviso).toMatch(/Pega su título/);
-
-    ml.tituloCompetencia.mockClear();
-    const pegado = await proponerTitulosAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, linkCompetencia: "https://x", tituloCompetencia: "Garrafa pegada" });
-    expect(ml.tituloCompetencia).not.toHaveBeenCalled();
-    expect(pegado.ok && pegado.competencia.titulo).toBe("Garrafa pegada");
+  it("descripción por cuenta: cada versión pide un enfoque distinto; sin variante (o rara) no", async () => {
+    ia.texto.mockResolvedValue('{"queEs": "Garrafa térmica de 1 L."}');
+    await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, variante: { numero: 1, total: 2 } });
+    const uno = String(ia.texto.mock.calls.at(-1)?.[1]);
+    await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, variante: { numero: 2, total: 2 } });
+    const dos = String(ia.texto.mock.calls.at(-1)?.[1]);
+    expect(uno).toContain("versión 1 de 2");
+    expect(dos).toContain("versión 2 de 2");
+    expect(uno).not.toEqual(dos);
+    await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK });
+    expect(String(ia.texto.mock.calls.at(-1)?.[1])).not.toContain("versión");
+    await escribirDescripcionAction({ cuentaMlId: CUENTA, ficha: FICHA_OK, variante: { numero: 5, total: 2 } });
+    expect(String(ia.texto.mock.calls.at(-1)?.[1])).not.toContain("versión");
   });
 
   it("descripción: le pasa a la IA las palabras clave limpias (máximo 20, sin repetir)", async () => {

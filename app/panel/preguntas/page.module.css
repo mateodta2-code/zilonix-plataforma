@@ -144,3 +144,30 @@
     flex: 0 0 auto;
   }
 }
+
+/* Reclamos-A — filas clicables de la pestaña Reclamos. */
+.reclamo {
+  border-bottom: 1px solid var(--borde);
+}
+
+.reclamo:last-child {
+  border-bottom: none;
+}
+
+.reclamoEnlace {
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.reclamoEnlace:hover {
+  background: var(--fila-hover);
+}
+
+.verReclamo {
+  justify-self: end;
+  font-size: 13px;
+  color: var(--acento-fuerte);
+}

@@ -1,0 +1,1 @@
+- **Domiciliario (1/2): entregas locales asignadas.** En Despachos, las entregas Flex ahora tienen «Asignar domiciliario» (también reasignar y quitar) con los domiciliarios activos de la bodega ligada a tu empresa. Los datos de quien recibe se copian al asignar y el domiciliario solo los ve mientras la entrega esté abierta. Migración 0045. Refs #627.

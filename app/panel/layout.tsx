@@ -6,6 +6,9 @@ import { itemsAdministracion } from "@/components/marco/menuAdministracion";
 import { SECCIONES_PRODUCTOS } from "@/components/productos/secciones";
 import { seccionesFinanzas } from "@/components/finanzas/secciones";
 import { GuiaModulo } from "@/components/guia/GuiaModulo";
+import { BandaAnuncios } from "@/components/anuncios/BandaAnuncios";
+import { anunciosVigentes } from "@/lib/anuncios";
+import { registrarIngresoEmpresa } from "@/lib/ingresos";
 
 // Marco visual (issue de las subpáginas) — mueve acá la carga que
 // antes hacía SOLO app/panel/page.tsx para pintar el marco (usuario
@@ -56,7 +59,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
             { etiqueta: "Despachos", href: "/panel/despachos", icono: "despachos" as const },
             // Preguntas y reclamos (Refs #51): mismo permiso que Pedidos
             // para ver; responder pide ventas/modificar en la acción.
-            { etiqueta: "Preguntas y reclamos", href: "/panel/preguntas", icono: "preguntas" as const },
+            { etiqueta: "Preguntas", href: "/panel/preguntas", icono: "preguntas" as const },
+            // Posventa-0 (Refs #647): reclamos, mensajes y devoluciones.
+            { etiqueta: "Posventa", href: "/panel/posventa", icono: "preguntas" as const },
           ]
         : []),
       // Productos — un solo módulo para SKU, inventario, bodegas,
@@ -103,6 +108,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       // Foro (14-nov) — comunidad de TODAS las empresas, no un módulo
       // de una: lo ve cualquiera que ya tenga empresa, sin permiso.
       { etiqueta: "Foro", href: "/panel/foro", icono: "foro" as const },
+      // Issue #623 — tickets de soporte: cualquier miembro de la empresa,
+      // sin permiso de módulo (app/panel/tickets).
+      { etiqueta: "Tickets de soporte", href: "/panel/tickets", icono: "soporte" as const },
     ],
   };
 
@@ -115,6 +123,10 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const grupos: GrupoNav[] =
     administracion.length > 0 ? [grupoPrincipal, { etiqueta: "Administración", items: administracion }] : [grupoPrincipal];
 
+  // El layout se pinta al entrar o recargar el panel (no en cada clic del
+  // menú): basta para saber cuándo fue el último ingreso de la empresa.
+  const [anuncios] = await Promise.all([anunciosVigentes(), registrarIngresoEmpresa(activa.id)]);
+
   return (
     <MarcoApp
       empresa={{ nombre: activa.nombre, nit: activa.nit }}
@@ -125,6 +137,8 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       usuario={{ nombre: usuario.nombre, imagenUrl: clerkUser?.imageUrl ?? null }}
       mostrarCampana={esDueno}
     >
+      {/* Anuncios de la plataforma (25-nov): los vigentes que publicó el superadmin. */}
+      <BandaAnuncios anuncios={anuncios} />
       {/* Guía de cada módulo (19-nov), arriba de su pantalla. */}
       <GuiaModulo />
       {children}

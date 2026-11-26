@@ -1,0 +1,1 @@
+- Optimización · Publicaciones: columnas **Experiencia** y **Recomendaciones** (hasta 2 chips + «+N» al detalle) y «N objetivos pendientes» en Calidad; pestañas Análisis y Rendimiento en Publicaciones y Bitácora.

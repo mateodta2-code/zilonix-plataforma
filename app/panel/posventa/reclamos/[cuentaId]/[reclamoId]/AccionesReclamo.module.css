@@ -1,0 +1,55 @@
+.contenedor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.fila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem;
+  border: 1px solid var(--borde);
+  border-radius: 0.75rem;
+  background: var(--superficie-2);
+}
+.titulo {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--plata);
+}
+.ofertas {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.oferta {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.motivo,
+.nota {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--plata);
+}
+.enlace {
+  color: var(--acento);
+  text-decoration: underline;
+}
+.exito {
+  margin: 0;
+  color: var(--acento);
+}
+.error {
+  margin: 0;
+  color: var(--peligro-texto);
+}

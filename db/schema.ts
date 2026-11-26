@@ -108,6 +108,12 @@ export const empresas = pgTable("empresas", {
   suspendidaMotivo: text("suspendida_motivo"),
   suspendidaTs: timestamp("suspendida_ts", { withTimezone: true }),
   notasInternas: text("notas_internas"),
+  // Empresas inactivas (25-nov, superadmin): la última vez que ALGUIEN de la
+  // empresa abrió /panel. Se escribe como mucho una vez por hora, solo con
+  // registrar_ingreso_empresa() (db/rls-setup.sql); app_user no tiene UPDATE
+  // sobre esta columna. null = nadie ha entrado desde que se empezó a
+  // registrar (no es lo mismo que «nunca»).
+  ultimoIngresoTs: timestamp("ultimo_ingreso_ts", { withTimezone: true }),
 }, (t) => ({
   planValido: check("empresas_plan_valido", sql`${t.plan} in ('prueba', 'basico', 'pro', 'empresarial')`),
   estadoValido: check("empresas_estado_valido", sql`${t.estado} in ('activa', 'suspendida')`),
@@ -575,6 +581,57 @@ export const avisosMl = pgTable(
   })
 );
 
+// Anuncios de la plataforma (25-nov, superadmin): un aviso que el equipo de
+// Zilonix publica para TODAS las empresas (ej. «Mercado Libre tiene fallas»),
+// visible arriba en /panel entre inicio_ts y fin_ts (sin fin = hasta que se
+// retire). Sin empresa_id: es de la plataforma. Solo el superadmin crea y
+// retira; los vendedores solo leen los vigentes (db/rls-setup.sql). Nunca
+// se borra: «retirar» deja retirado_ts (historial).
+export const anunciosPlataforma = pgTable(
+  "anuncios_plataforma",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    mensaje: text("mensaje").notNull(),
+    tipo: text("tipo").notNull().default("info"),
+    inicioTs: timestamp("inicio_ts", { withTimezone: true }).notNull().defaultNow(),
+    finTs: timestamp("fin_ts", { withTimezone: true }),
+    retiradoTs: timestamp("retirado_ts", { withTimezone: true }),
+    creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tipoValido: check("anuncios_plataforma_tipo_valido", sql`${t.tipo} in ('info', 'advertencia', 'peligro')`),
+    mensajeValido: check("anuncios_plataforma_mensaje_valido", sql`length(trim(${t.mensaje})) between 1 and 300`),
+    finDespuesDeInicio: check("anuncios_plataforma_fin_despues", sql`${t.finTs} is null or ${t.finTs} > ${t.inicioTs}`),
+  })
+);
+
+// Estado de los procesos (25-nov, superadmin): una fila por corrida de
+// cada proceso automático (avisos de ML, publicidad, seguimiento). Antes
+// el resultado solo quedaba en los logs de Railway y no había forma de
+// saber desde el panel si el despertador seguía vivo. Sin empresa_id: es
+// de la plataforma, no de un cliente, y `resumen` guarda SOLO conteos
+// (lib/trabajos/registroEjecuciones.ts descarta todo lo que no sea un
+// número — decisión D8). Nadie la toca directo: se escribe con
+// registrar_ejecucion_proceso() y se lee con superadmin_estado_procesos()
+// (db/rls-setup.sql).
+export const ejecucionesProcesos = pgTable(
+  "ejecuciones_procesos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    proceso: text("proceso").notNull(),
+    inicioTs: timestamp("inicio_ts", { withTimezone: true }).notNull(),
+    finTs: timestamp("fin_ts", { withTimezone: true }).notNull().defaultNow(),
+    ok: boolean("ok").notNull(),
+    resumen: jsonb("resumen").$type<Record<string, number>>().notNull().default({}),
+    error: text("error"),
+  },
+  (t) => ({
+    porProceso: index("ejecuciones_procesos_proceso_inicio").on(t.proceso, t.inicioTs),
+    procesoValido: check("ejecuciones_procesos_proceso_valido", sql`${t.proceso} in ('avisos_ml', 'publicidad', 'seguimiento')`),
+  })
+);
+
 // Tarea 2.5 — importación inicial. Guarda solo lo mínimo real para
 // cumplir el criterio de "listo" (ver el primer pedido en menos de 10
 // minutos) — el detalle completo (línea de tiempo de 8 pasos, enlace
@@ -633,6 +690,9 @@ export const cuentasFalabella = pgTable(
     // (15.50 = 15,50 %) y flete por unidad. Vacío = no estimar.
     comisionDefectoPct: numeric("comision_defecto_pct", { precision: 5, scale: 2 }),
     fleteDefecto: numeric("flete_defecto", { precision: 14, scale: 2 }),
+    // Issue #622 — % de IVA de las ventas de la cuenta (19.00 = 19 %). Solo
+    // informativo («Ventas sin IVA»). Vacío = sin configurar.
+    ivaVentasPct: numeric("iva_ventas_pct", { precision: 5, scale: 2 }),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -640,6 +700,7 @@ export const cuentasFalabella = pgTable(
       "cuentas_falabella_comision_defecto_pct_rango",
       sql`${t.comisionDefectoPct} >= 0 AND ${t.comisionDefectoPct} <= 100`
     ),
+    ivaVentasRango: check("cuentas_falabella_iva_ventas_pct_rango", sql`${t.ivaVentasPct} >= 0 AND ${t.ivaVentasPct} <= 100`),
     fleteDefectoNoNegativo: check("cuentas_falabella_flete_defecto_no_negativo", sql`${t.fleteDefecto} >= 0`),
     // Mismo criterio que cuentas_ml_cuenta_externa_unica: una cuenta real
     // de Falabella (un mismo UserID) no puede estar conectada a dos
@@ -2222,6 +2283,63 @@ export const foroRespuestas = pgTable(
   })
 );
 
+// Issue #623 (SA-Soporte, migración 0043) — tickets de soporte: el
+// vendedor abre uno desde /panel/tickets y el superadmin lo atiende
+// (parte 2). La empresa solo ve sus tickets (RLS por empresa_id). El
+// superadmin ve el ticket y su conversación, nada más de la empresa
+// (D8): lo que ve es lo que el vendedor escribió a propósito.
+// app_user solo inserta y lee; el estado lo cambia únicamente
+// superadmin_user (db/rls-setup.sql).
+export const estadoTicketSoporteEnum = pgEnum("estado_ticket_soporte", ["abierto", "en_curso", "resuelto"]);
+
+export const ticketsSoporte = pgTable(
+  "tickets_soporte",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    creadoPor: uuid("creado_por").notNull().references(() => usuarios.id),
+    asunto: text("asunto").notNull(),
+    mensaje: text("mensaje").notNull(),
+    // Parte de Zilonix a la que se refiere (lista cerrada en
+    // lib/soporte/validacion.ts); texto y no enum para poder sumar
+    // módulos sin otra migración.
+    modulo: text("modulo").notNull(),
+    // Capturas que adjunta el vendedor (25-nov): ids PRIVADOS de Cloudinary
+    // (type=authenticated), hasta 3. Se ven solo por las rutas
+    // /api/soporte/imagen/... y /api/superadmin/soporte/imagen/..., que
+    // comprueban empresa o sesión de superadmin. Nunca una URL pública.
+    imagenes: text("imagenes").array().notNull().default(sql`'{}'::text[]`),
+    estado: estadoTicketSoporteEnum("estado").notNull().default("abierto"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    maxImagenes: check("tickets_soporte_max_imagenes", sql`cardinality(${t.imagenes}) <= 3`),
+    empresaIdx: index("tickets_soporte_empresa_idx").on(t.empresaId, t.actualizadoTs),
+    estadoIdx: index("tickets_soporte_estado_idx").on(t.estado, t.actualizadoTs),
+  })
+);
+
+// Sin empresa_id a propósito (columnas del issue): la RLS se apoya en
+// el ticket al que pertenece el mensaje.
+export const mensajesTicketSoporte = pgTable(
+  "mensajes_ticket_soporte",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ticketId: uuid("ticket_id").notNull().references(() => ticketsSoporte.id, { onDelete: "cascade" }),
+    autorUsuarioId: uuid("autor_usuario_id").notNull().references(() => usuarios.id),
+    esSuperadmin: boolean("es_superadmin").notNull().default(false),
+    mensaje: text("mensaje").notNull(),
+    // Igual que tickets_soporte.imagenes: hasta 3 capturas privadas.
+    imagenes: text("imagenes").array().notNull().default(sql`'{}'::text[]`),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    maxImagenes: check("mensajes_ticket_soporte_max_imagenes", sql`cardinality(${t.imagenes}) <= 3`),
+    ticketIdx: index("mensajes_ticket_soporte_ticket_idx").on(t.ticketId, t.creadoTs),
+  })
+);
+
 // PR login-bodega-domiciliario — identidad y membresía de BODEGAS 3PL
 // (operador logístico) y sus domiciliarios. NO es `empresas` ni
 // `bodegas` (esa es la bodega propia de un vendedor dentro de Productos):
@@ -2267,6 +2385,209 @@ export const invitacionesBodega3pl = pgTable("invitaciones_bodega_3pl", {
   expiraTs: timestamp("expira_ts", { withTimezone: true }).notNull(),
   aceptadaTs: timestamp("aceptada_ts", { withTimezone: true }),
   creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Issue #625 (Bodega-1, migración 0044) — a qué empresas atiende cada
+// bodega 3PL, y las tablas que usará Bodega-2 (recepción e inventario).
+// Solo el superadmin liga y pausa; la bodega y la empresa leen lo suyo.
+export const estadoVinculoBodega3plEnum = pgEnum("estado_vinculo_bodega_3pl", ["activa", "pausada"]);
+
+export const bodegas3plEmpresas = pgTable(
+  "bodegas_3pl_empresas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    estado: estadoVinculoBodega3plEnum("estado").notNull().default("activa"),
+    creadoPor: uuid("creado_por").notNull().references(() => usuarios.id),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    unica: uniqueIndex("bodegas_3pl_empresas_bodega_empresa_unica").on(t.bodegaId, t.empresaId),
+  })
+);
+
+export const recepcionesBodega3pl = pgTable(
+  "recepciones_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+    nota: text("nota"),
+    creadoPor: uuid("creado_por").notNull().references(() => usuarios.id),
+  },
+  (t) => ({
+    bodegaIdx: index("recepciones_bodega_3pl_bodega_idx").on(t.bodegaId, t.fecha),
+    empresaIdx: index("recepciones_bodega_3pl_empresa_idx").on(t.empresaId, t.fecha),
+  })
+);
+
+export const recepcionItemsBodega3pl = pgTable(
+  "recepcion_items_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    recepcionId: uuid("recepcion_id").notNull().references(() => recepcionesBodega3pl.id, { onDelete: "cascade" }),
+    sku: text("sku").notNull(),
+    cantidad: integer("cantidad").notNull(),
+  },
+  (t) => ({
+    recepcionIdx: index("recepcion_items_bodega_3pl_recepcion_idx").on(t.recepcionId),
+    cantidadPositiva: check("recepcion_items_bodega_3pl_cantidad_positiva", sql`${t.cantidad} > 0`),
+  })
+);
+
+export const stockBodega3pl = pgTable(
+  "stock_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    sku: text("sku").notNull(),
+    cantidad: integer("cantidad").notNull().default(0),
+  },
+  (t) => ({
+    unica: uniqueIndex("stock_bodega_3pl_bodega_empresa_sku_unica").on(t.bodegaId, t.empresaId, t.sku),
+    cantidadNoNegativa: check("stock_bodega_3pl_cantidad_no_negativa", sql`${t.cantidad} >= 0`),
+  })
+);
+
+// Issue #628 (Bodega-3, migración 0046) — pedidos que el vendedor envía a su
+// bodega 3PL para que los prepare. Es una copia MÍNIMA hecha al enviar:
+// número de pedido, tipo de envío y SKU con cantidad. Nunca nombre,
+// teléfono, dirección, documento ni precios del comprador: RLS filtra filas
+// y no columnas, así que la bodega no lee `pedidos`/`pedido_items`, solo esta
+// copia. «Preparado» descuenta stock_bodega_3pl en la misma transacción.
+export const estadoDespachoBodega3plEnum = pgEnum("estado_despacho_bodega_3pl", ["pendiente", "preparado"]);
+
+export const despachosBodega3pl = pgTable(
+  "despachos_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    pedidoId: uuid("pedido_id").notNull(),
+    numeroPedido: text("numero_pedido").notNull(),
+    tipoEnvio: text("tipo_envio"),
+    estado: estadoDespachoBodega3plEnum("estado").notNull().default("pendiente"),
+    preparadoTs: timestamp("preparado_ts", { withTimezone: true }),
+    preparadoPor: uuid("preparado_por").references(() => usuarios.id),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    creadoPor: uuid("creado_por").notNull().references(() => usuarios.id),
+  },
+  (t) => ({
+    // Un pedido no se envía dos veces a la bodega.
+    pedidoUnico: uniqueIndex("despachos_bodega_3pl_empresa_pedido_unico").on(t.empresaId, t.pedidoId),
+    empresaIdUnica: unique("despachos_bodega_3pl_empresa_id_unica").on(t.empresaId, t.id),
+    bodegaIdx: index("despachos_bodega_3pl_bodega_idx").on(t.bodegaId, t.estado, t.creadoTs),
+    pedidoDeLaEmpresa: foreignKey({
+      name: "despachos_bodega_3pl_pedido_misma_empresa_fk",
+      columns: [t.empresaId, t.pedidoId],
+      foreignColumns: [pedidos.empresaId, pedidos.id],
+    }).onDelete("cascade"),
+  })
+);
+
+export const despachoItemsBodega3pl = pgTable(
+  "despacho_items_bodega_3pl",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    despachoId: uuid("despacho_id").notNull().references(() => despachosBodega3pl.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    sku: text("sku").notNull(),
+    cantidad: integer("cantidad").notNull(),
+  },
+  (t) => ({
+    despachoIdx: index("despacho_items_bodega_3pl_despacho_idx").on(t.despachoId),
+    cantidadPositiva: check("despacho_items_bodega_3pl_cantidad_positiva", sql`${t.cantidad} > 0`),
+    despachoDeLaEmpresa: foreignKey({
+      name: "despacho_items_bodega_3pl_despacho_misma_empresa_fk",
+      columns: [t.empresaId, t.despachoId],
+      foreignColumns: [despachosBodega3pl.empresaId, despachosBodega3pl.id],
+    }).onDelete("cascade"),
+  })
+);
+
+// Issue #627 (Domi-1, migración 0045) — entregas locales que el vendedor
+// asigna a un domiciliario de su bodega 3PL ligada. Los datos de quien
+// recibe se COPIAN al asignar (la empresa los conserva siempre); el
+// domiciliario solo ve la fila mientras esté abierta (asignada|en_camino):
+// la política de SELECT del domiciliario filtra por estado en la base, así
+// que al cerrarse esos datos dejan de ser legibles para él.
+export const estadoEntregaDomiciliarioEnum = pgEnum("estado_entrega_domiciliario", ["asignada", "en_camino", "entregada", "no_entregada"]);
+
+export const entregasDomiciliario = pgTable(
+  "entregas_domiciliario",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    miembroDomiciliarioId: uuid("miembro_domiciliario_id").notNull().references(() => miembrosBodega3pl.id, { onDelete: "cascade" }),
+    marketplace: text("marketplace").notNull().default("mercadolibre"),
+    pedidoReferencia: text("pedido_referencia").notNull(),
+    estado: estadoEntregaDomiciliarioEnum("estado").notNull().default("asignada"),
+    motivo: text("motivo"),
+    asignadaTs: timestamp("asignada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+    // Domi-3 (foto de entrega): id PRIVADO en Cloudinary (type=authenticated,
+    // nunca una URL pública). La foto se ve solo por /api/entregas/[id]/foto,
+    // que comprueba la empresa. Las entregadas antes de Domi-3 quedan en null.
+    fotoPublicId: text("foto_public_id"),
+    fotoTs: timestamp("foto_ts", { withTimezone: true }),
+  },
+  (t) => ({
+    // Una foto solo existe en una entrega entregada: el vendedor (que comparte
+    // el UPDATE de columnas con el domiciliario) nunca puede pegarle una
+    // foto a una entrega abierta. Que «entregada» exija foto lo pone una
+    // política RESTRICTIVE en db/rls-setup.sql (las viejas no se tocan).
+    fotoSoloEntregada: check("entregas_domiciliario_foto_solo_entregada", sql`${t.fotoPublicId} is null or ${t.estado} = 'entregada'`),
+    unicaPorPedido: uniqueIndex("entregas_domiciliario_pedido_unica").on(t.empresaId, t.marketplace, t.pedidoReferencia),
+    domiciliarioIdx: index("entregas_domiciliario_miembro_idx").on(t.miembroDomiciliarioId, t.estado),
+    bodegaIdx: index("entregas_domiciliario_bodega_idx").on(t.bodegaId, t.estado),
+  })
+);
+
+// Domi-4 (migración 0049) — novedades que el domiciliario reporta SIN cerrar
+// la entrega (voy tarde, el cliente pide reprogramar, no contesta, paquete
+// dañado, otro). Solo se agregan: nadie las edita ni las borra (historial).
+// La foto es opcional y privada, igual que la de entrega (Domi-3). Quién
+// puede crearlas y verlas: db/rls-setup.sql.
+export const tipoNovedadEntregaEnum = pgEnum("tipo_novedad_entrega", ["voy_tarde", "reprogramar", "no_contesta", "paquete_danado", "otro"]);
+
+export const entregasNovedades = pgTable(
+  "entregas_novedades",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    entregaId: uuid("entrega_id").notNull().references(() => entregasDomiciliario.id, { onDelete: "cascade" }),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    bodegaId: uuid("bodega_id").notNull().references(() => bodegas3pl.id, { onDelete: "cascade" }),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    tipo: tipoNovedadEntregaEnum("tipo").notNull(),
+    detalle: text("detalle"),
+    fotoPublicId: text("foto_public_id"),
+    creadaTs: timestamp("creada_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    porEntrega: index("entregas_novedades_entrega_idx").on(t.entregaId, t.creadaTs),
+    porEmpresa: index("entregas_novedades_empresa_idx").on(t.empresaId),
+    // «Otro» exige explicar qué pasó; el detalle nunca pasa de 200.
+    detalleValido: check("entregas_novedades_detalle_valido", sql`(${t.tipo} <> 'otro' or length(trim(coalesce(${t.detalle}, ''))) > 0) and length(coalesce(${t.detalle}, '')) <= 200`),
+  })
+);
+
+// Datos de quien recibe, en tabla aparte: el domiciliario necesita ver SU
+// cabecera en cualquier estado (para cerrarla y tener historial), pero estos
+// datos solo mientras la entrega esté abierta. Esa regla vive en la política
+// de SELECT de esta tabla (EXISTS sobre la cabecera). La empresa los conserva.
+export const entregasDomiciliarioContacto = pgTable("entregas_domiciliario_contacto", {
+  entregaId: uuid("entrega_id").primaryKey().references(() => entregasDomiciliario.id, { onDelete: "cascade" }),
+  empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+  receptorNombre: text("receptor_nombre").notNull(),
+  direccion: text("direccion").notNull(),
+  barrio: text("barrio"),
+  ciudad: text("ciudad").notNull(),
+  telefono: text("telefono").notNull(),
+  nota: text("nota"),
 });
 
 // Publicar → «Crear con IA» (PR2, imágenes) — historial por empresa de

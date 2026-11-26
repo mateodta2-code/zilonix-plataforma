@@ -3,7 +3,7 @@ import type { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { invitaciones, membresias, roles, usuarios } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
-import { requierePermiso } from "@/lib/permisos";
+import { requierePermiso, requiereDueno } from "@/lib/permisos";
 import {
   asegurarRolDeEmpresa,
   listarRolesDeEmpresa,
@@ -178,3 +178,48 @@ export async function cambiarRolDeMiembro(
     return { antes: actual.rolNombre, despues: destino.nombre };
   });
 }
+
+// 25-nov — «Quitar acceso»: hasta ahora nadie (ni el Dueño) podía sacar a
+// una persona de la empresa; si un empleado se iba o hacía mal uso,
+// seguía entrando. Solo el Dueño puede hacerlo. Se borra la membresía
+// (sin migración: app_user ya tiene DELETE sobre membresias con RLS de la
+// empresa, y ninguna tabla depende de esa fila) y las invitaciones sin
+// aceptar a su correo, para que no vuelva a entrar con un link viejo.
+// Al Dueño nunca se le quita el acceso (una tienda siempre tiene el mismo
+// dueño) y nadie se lo quita a sí mismo. Queda en Actividad.
+export class QuitarAccesoInvalidoError extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = "QuitarAccesoInvalidoError";
+  }
+}
+
+export async function quitarAccesoDeMiembro(empresaId: string, usuarioId: string, membresiaId: string): Promise<{ email: string; rolNombre: string }> {
+  await requiereDueno(usuarioId, empresaId);
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const [actual] = await tx
+      .select({ id: membresias.id, usuarioId: membresias.usuarioId, rolNombre: roles.nombre, email: usuarios.email })
+      .from(membresias)
+      .innerJoin(roles, eq(roles.id, membresias.rolId))
+      .innerJoin(usuarios, eq(usuarios.id, membresias.usuarioId))
+      .where(and(eq(membresias.id, membresiaId), eq(membresias.empresaId, empresaId)));
+    if (!actual) throw new QuitarAccesoInvalidoError("Esa persona no está en esta empresa.");
+    if (actual.usuarioId === usuarioId) throw new QuitarAccesoInvalidoError("No puedes quitarte el acceso a ti mismo.");
+    if (actual.rolNombre === ROL_DUENO) throw new QuitarAccesoInvalidoError("Al Dueño no se le puede quitar el acceso.");
+
+    await tx.delete(membresias).where(and(eq(membresias.id, membresiaId), eq(membresias.empresaId, empresaId)));
+    await tx.delete(invitaciones).where(and(eq(invitaciones.empresaId, empresaId), eq(invitaciones.email, actual.email), isNull(invitaciones.aceptadaTs)));
+    await registrarAuditoria(tx, {
+      empresaId,
+      usuarioId,
+      actorTipo: "persona",
+      accion: "quitar_acceso",
+      entidad: "membresia",
+      entidadId: membresiaId,
+      valorAnterior: actual.rolNombre,
+      detalle: `Quitó el acceso a ${actual.email} (tenía el rol ${actual.rolNombre}).`,
+    });
+    return { email: actual.email, rolNombre: actual.rolNombre };
+  });
+}
+

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Boton } from "@/components/marco/Boton";
 import { actualizarPublicidadAction } from "./actions";
 import styles from "./page.module.css";
@@ -52,11 +53,13 @@ export function FormActualizar({ cuentaMlId }: { cuentaMlId: string }) {
       <Boton type="submit" disabled={actualizando}>
         {actualizando ? "Actualizando…" : "Actualizar ahora"}
       </Boton>
-      {actualizando ? (
-        <span className={styles.notaActualizando} role="status">
-          Puede tardar unos minutos. No cierres esta página.
-        </span>
-      ) : aviso ? (
+      <BarraCarga
+        estado={actualizando ? "cargando" : "inactiva"}
+        titulo="Actualizando publicidad de Mercado Libre… Puede tardar unos minutos. No cierres esta página."
+        avance={null}
+        sticky={false}
+      />
+      {!actualizando && aviso ? (
         <span className={CLASE_AVISO[aviso.tono]} role="status">
           {aviso.texto}
         </span>

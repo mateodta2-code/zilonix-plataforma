@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Boton } from "@/components/marco/Boton";
+import { BarraCarga } from "@/components/marco/BarraCarga";
 import { diagnosticoPublicacionAction } from "../actions";
 import styles from "../page.module.css";
 
@@ -52,6 +53,7 @@ export function DiagnosticoPublicacion({ cuentaMlId, itemId }: { cuentaMlId: str
           </Boton>
         ) : null}
       </div>
+      <BarraCarga sticky={false} estado={enviando ? "cargando" : "inactiva"} titulo="Consultando diagnóstico…" ariaLabel="Progreso del diagnóstico" />
       {aviso ? (
         <p className={styles.avisoError} role="status">
           {aviso}

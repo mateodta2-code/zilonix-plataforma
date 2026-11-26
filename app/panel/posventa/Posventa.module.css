@@ -1,0 +1,179 @@
+/* Posventa-0 — marco del módulo. Solo tokens de globals.css. */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  background: var(--superficie);
+  color: var(--texto-superficie);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.chip:hover {
+  border-color: var(--acento);
+}
+
+.chip[data-activa="true"] {
+  background: var(--gradiente-azul-metal);
+  border-color: var(--acento);
+  color: var(--texto-superficie-2);
+}
+
+.chip[data-deshabilitada="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pronto {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--plata-etiqueta);
+}
+
+.herramientas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.buscador {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.contador {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.fila {
+  position: relative;
+  border-bottom: 1px solid var(--borde);
+}
+
+.fila:last-child {
+  border-bottom: none;
+}
+
+.filaEnlace {
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.fila:hover {
+  background: var(--fila-hover);
+}
+
+.cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.cuenta {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--plata-etiqueta);
+}
+
+.texto {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.ver {
+  composes: zx-brillo-marca from global;
+  justify-self: end;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-boton);
+  background: linear-gradient(var(--acento-boton), var(--acento-boton)) padding-box, var(--degradado-plata-borde) border-box;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: var(--transicion-color), var(--transicion-transform);
+}
+
+/* Estira el área clicable a toda la tarjeta (.fila es relative). */
+.ver::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.ver:hover {
+  border-color: transparent;
+  background: linear-gradient(var(--acento-boton-hover), var(--acento-boton-hover)) padding-box, var(--degradado-plata-borde) border-box;
+  box-shadow: var(--sombra-boton), var(--sombra-marca-hover);
+}
+
+.ver:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  box-shadow: var(--sombra-foco);
+}
+
+@media (max-width: 639px) {
+  .ver {
+    justify-self: stretch;
+  }
+}
+
+.aviso {
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--acento);
+  border-radius: var(--radio-tarjeta);
+  background: var(--superficie-2);
+  color: var(--texto-superficie-2);
+}
+
+.avisoTitulo {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+}
+
+.avisoLista {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+}

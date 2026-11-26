@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describirReglas, extraerJson, normalizarFechaSinZona, validarReglasAdicionales } from "./promocionesReglasTexto";
+import { aplicaToleranciaCompartida, describirReglas, extraerJson, normalizarFechaSinZona, tieneReglasAplicables, validarReglasAdicionales } from "./promocionesReglasTexto";
 
 const base = { version: 1, exclusiones: [], maximoDescuentoPct: null, maximoPorSku: [], ventanasFecha: [], noEntendido: [] };
 
@@ -94,5 +94,47 @@ describe("normalizarFechaSinZona / extraerJson / describirReglas", () => {
       "máximo 25% de descuento",
       "máximo 20% de descuento en el SKU X",
     ]);
+  });
+});
+
+describe("toleranciaCompartidaBajoPiso (Promo-Tolerancia)", () => {
+  const base = { version: 1, exclusiones: [], maximoDescuentoPct: null, maximoPorSku: [], ventanasFecha: [], noEntendido: [] };
+
+  it("lo guardado sin el campo sigue validando igual (sin llave nueva)", () => {
+    const r = validarReglasAdicionales(base);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect("toleranciaCompartidaBajoPiso" in r.reglas).toBe(false);
+  });
+
+  it("acepta un monto entero positivo y lo describe con la moneda del sitio", () => {
+    const r = validarReglasAdicionales({ ...base, toleranciaCompartidaBajoPiso: { monto: 5000 } });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.reglas.toleranciaCompartidaBajoPiso).toEqual({ monto: 5000 });
+    expect(tieneReglasAplicables(r.reglas)).toBe(true);
+    const mco = describirReglas(r.reglas, "MCO")[0];
+    const mlm = describirReglas(r.reglas, "MLM")[0];
+    expect(mco).toContain("promociones compartidas con Mercado Libre");
+    expect(mco).toContain("5.000");
+    expect(mco).not.toBe(mlm);
+  });
+
+  it("acepta null y rechaza montos inválidos o llaves de más", () => {
+    expect(validarReglasAdicionales({ ...base, toleranciaCompartidaBajoPiso: null }).ok).toBe(true);
+    for (const monto of [0, -1, 1.5, 1_000_001, "5000", Number.NaN, null]) {
+      expect(validarReglasAdicionales({ ...base, toleranciaCompartidaBajoPiso: { monto } }).ok).toBe(false);
+    }
+    expect(validarReglasAdicionales({ ...base, toleranciaCompartidaBajoPiso: { monto: 5000, extra: 1 } }).ok).toBe(false);
+    expect(validarReglasAdicionales({ ...base, toleranciaCompartidaBajoPiso: 5000 }).ok).toBe(false);
+  });
+
+  it("aplicaToleranciaCompartida: solo compartida, con max bajo el piso y diferencia <= monto", () => {
+    const d = { esCompartida: true, precioMinimo: 87000, maxDiscountedPrice: 83932 };
+    expect(aplicaToleranciaCompartida(d, 5000)).toBe(true);
+    expect(aplicaToleranciaCompartida(d, 3000)).toBe(false);
+    expect(aplicaToleranciaCompartida({ ...d, esCompartida: false }, 5000)).toBe(false);
+    expect(aplicaToleranciaCompartida(d, null)).toBe(false);
+    expect(aplicaToleranciaCompartida({ ...d, maxDiscountedPrice: 90000 }, 5000)).toBe(false);
+    expect(aplicaToleranciaCompartida({ ...d, maxDiscountedPrice: null }, 5000)).toBe(false);
   });
 });

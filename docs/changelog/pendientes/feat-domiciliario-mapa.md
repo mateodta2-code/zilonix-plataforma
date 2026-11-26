@@ -1,0 +1,3 @@
+- **Domiciliario: abrir la dirección en Google Maps o Waze.** En cada entrega abierta de `/domiciliario`, debajo de la dirección, dos botones grandes: «Google Maps» (ruta hacia la dirección) y «Waze» (busca la dirección; el domiciliario toca «Ir»). En el celular abren la app si está instalada y, si no, la web. Usan la dirección, el barrio y la ciudad que escribe el vendedor; en una entrega cerrada no salen (la base ya no devuelve la dirección).
+  - Links universales documentados (`google.com/maps/dir/?api=1&destination=…` y `waze.com/ul?q=…`), en `lib/entregas/mapas.ts`. Nada pasa por el servidor. Sin migración.
+  - Guía de Despachos: el domiciliario abre la dirección en el mapa, y consejo de escribirla completa.

@@ -6,8 +6,6 @@ import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { descargarFotoBase } from "@/lib/ia/imagen";
 import { llamarIA, type ImagenIA } from "@/lib/ia/proveedores";
 import type { ConexionIAConClave } from "@/lib/ia/tipos";
-import { tendenciasPorNivelMl, tituloPublicacionMl } from "@/lib/ml/cliente";
-import { idCompetenciaDesdeLink, limpiarTituloCompetencia } from "@/lib/publicaciones/competencia";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { resolverCategoria } from "@/lib/ml/publicar";
 import { analizarProducto, ErrorAnalisisIA, ESPERA_TEXTO_MS } from "@/lib/publicaciones/analisis";
@@ -15,7 +13,8 @@ import { armarDescripcion, leerPartesDescripcion, limpiarPalabrasClave, promptDe
 import { mensajeErrorIA, MENSAJE_SIN_IA } from "@/lib/publicaciones/errores";
 import { fichaConfirmada, fichaEnTexto, idiomaDeSitio, leerFicha, limpiarInfoVendedor, LARGO_GARANTIA, MAXIMO_FOTOS_ANALISIS, type Ficha } from "@/lib/publicaciones/ficha";
 import { conCupoDeTexto } from "@/lib/publicaciones/freno";
-import { filtrarTendenciasRelacionadas, leerPropuestaTitulos, ORDEN_PARA_IA, promptTitulos, unirTendenciasPorNivel, type PalabraClave, type TendenciaConNivel } from "@/lib/publicaciones/titulos";
+import type { PalabraClave, TendenciaConNivel } from "@/lib/publicaciones/titulos";
+import { generarTitulosSeo } from "@/lib/publicaciones/titulos-ia";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 
@@ -96,6 +95,8 @@ export type ResultadoTitulos =
       titulos: string[];
       catalogo: string | null;
       palabras: PalabraClave[];
+      keywordsPrincipales: string[];
+      keywordsNoUtilizadas: string[];
       conTendencias: boolean;
       // «Más buscados en la categoría»: tendencias de la categoría general,
       // la padre y la específica, con su nivel, y la ruta analizada.
@@ -104,9 +105,6 @@ export type ResultadoTitulos =
       // true = ML devolvió tendencias, pero ninguna se relaciona con el
       // producto (solo había de la categoría general o la padre).
       tendenciasSinRelacion: boolean;
-      // Título de la competencia usado como idea (link o pegado a mano) y,
-      // si el link no se pudo leer, el aviso para pegarlo a mano.
-      competencia: { titulo: string | null; aviso: string | null };
     }
   | Fallo;
 
@@ -117,62 +115,27 @@ export async function proponerTitulosAction(entrada: {
   categoriaId?: string | null;
   categoriaNombre?: string | null;
   info?: string;
-  linkCompetencia?: string;
-  tituloCompetencia?: string;
 }): Promise<ResultadoTitulos> {
   const ficha = leerFicha(entrada.ficha);
   if (!fichaConfirmada(ficha)) return { ok: false, aviso: "Confirma la ficha antes de pedir títulos." };
   const ctx = await preparar(entrada.cuentaMlId);
   if ("ok" in ctx) return ctx;
-  let masBuscados: TendenciaConNivel[] = [];
-  let rutaCategoria: string[] = [];
-  let tendenciasSinRelacion = false;
-  if (typeof entrada.categoriaId === "string" && entrada.categoriaId) {
-    try {
-      const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
-      const r = await tendenciasPorNivelMl(ctx.cuenta.siteId, entrada.categoriaId, token);
-      rutaCategoria = r.ruta;
-      // Solo los VALORES de la ficha (sin las etiquetas «Nombre del producto»,
-      // «Color»…, que harían coincidir cualquier búsqueda).
-      const valores = Object.values(ficha).map((c) => (Array.isArray(c.valor) ? c.valor.join(" ") : (c.valor ?? "")));
-      const textoProducto = `${valores.join(" ")} ${limpiarInfoVendedor(entrada.info)}`;
-      const nombreCategoria = entrada.categoriaNombre ?? r.ruta[r.ruta.length - 1] ?? "";
-      const relacionadas = filtrarTendenciasRelacionadas(r.niveles, textoProducto, nombreCategoria);
-      masBuscados = unirTendenciasPorNivel(relacionadas.niveles);
-      tendenciasSinRelacion = masBuscados.length === 0 && relacionadas.descartadas > 0;
-    } catch (error) {
-      registrar("tendencias", error);
-    }
-  }
-  // Competencia: lo pegado a mano manda; si no, el título del link por la API oficial.
-  let tituloCompetencia = limpiarTituloCompetencia(entrada.tituloCompetencia);
-  let avisoCompetencia: string | null = null;
-  const link = typeof entrada.linkCompetencia === "string" ? entrada.linkCompetencia.trim().slice(0, 500) : "";
-  if (!tituloCompetencia && link) {
-    const id = idCompetenciaDesdeLink(link, ctx.cuenta.siteId);
-    if (!id) {
-      avisoCompetencia = `Ese link no es de una publicación de Mercado Libre de ${ctx.cuenta.siteId}. Pega su título a mano.`;
-    } else {
-      try {
-        const token = await obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id);
-        tituloCompetencia = limpiarTituloCompetencia(await tituloPublicacionMl(id.tipo, id.id, token));
-      } catch (error) {
-        registrar("competencia", error);
-      }
-      if (!tituloCompetencia) avisoCompetencia = "Mercado Libre no dejó leer esa publicación. Pega su título a mano.";
-    }
-  }
-  // Para la IA, primero las de la categoría específica (las más cercanas al producto).
-  const tendencias = [...masBuscados].sort((a, b) => ORDEN_PARA_IA[a.nivel] - ORDEN_PARA_IA[b.nivel]).map((t) => t.palabra);
-  const info = limpiarInfoVendedor(entrada.info);
-  const categoria = typeof entrada.categoriaNombre === "string" ? entrada.categoriaNombre.slice(0, 120) : null;
   try {
-    const respuesta = await conCupoDeTexto(ctx.empresaId, () =>
-      llamarIA(ctx.conexion, promptTitulos({ ficha, idioma: ctx.idioma, pais: ctx.pais, categoria, tendencias, info, competencia: tituloCompetencia }), { maxTokens: 800, timeoutMs: ESPERA_TEXTO_MS })
-    );
-    const propuesta = leerPropuestaTitulos(respuesta, { ficha, tendencias, info, niveles: masBuscados, competencia: tituloCompetencia });
+    const propuesta = await generarTitulosSeo({
+      empresaId: ctx.empresaId,
+      conexion: ctx.conexion,
+      cuenta: ctx.cuenta,
+      token: typeof entrada.categoriaId === "string" && entrada.categoriaId ? () => obtenerAccessTokenVigente(ctx.empresaId, ctx.cuenta.id) : null,
+      ficha,
+      categoriaId: entrada.categoriaId,
+      categoriaNombre: entrada.categoriaNombre,
+      info: entrada.info,
+      idioma: ctx.idioma,
+      pais: ctx.pais,
+      registrar,
+    });
     if (!propuesta) return { ok: false, aviso: "La IA no devolvió títulos usables. Intenta de nuevo." };
-    return { ok: true, ...propuesta, conTendencias: tendencias.length > 0, masBuscados, rutaCategoria, tendenciasSinRelacion, competencia: { titulo: tituloCompetencia || null, aviso: avisoCompetencia } };
+    return { ok: true, ...propuesta };
   } catch (error) {
     registrar("titulos", error);
     return { ok: false, aviso: mensajeErrorIA(error) };
@@ -183,13 +146,24 @@ export type ResultadoDescripcion = { ok: true; descripcion: string } | Fallo;
 
 // Paso 3: descripción, solo con la ficha confirmada. La garantía es la que
 // escribió el vendedor (si no escribió nada, no sale esa sección).
-export async function escribirDescripcionAction(entrada: { cuentaMlId: string; ficha: unknown; garantia?: string; palabrasClave?: unknown }): Promise<ResultadoDescripcion> {
+// «Versión N de M» de la descripción (una por cuenta). Viene del
+// navegador: solo enteros entre 1 y 20, si no, se ignora.
+function leerVariante(v: unknown): { numero: number; total: number } | undefined {
+  const o = v !== null && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  const numero = o.numero;
+  const total = o.total;
+  if (typeof numero !== "number" || typeof total !== "number" || !Number.isInteger(numero) || !Number.isInteger(total)) return undefined;
+  if (total < 1 || total > 20 || numero < 1 || numero > total) return undefined;
+  return { numero, total };
+}
+
+export async function escribirDescripcionAction(entrada: { cuentaMlId: string; ficha: unknown; garantia?: string; palabrasClave?: unknown; variante?: unknown }): Promise<ResultadoDescripcion> {
   const ficha = leerFicha(entrada.ficha);
   if (!fichaConfirmada(ficha)) return { ok: false, aviso: "Confirma la ficha antes de pedir la descripción." };
   const ctx = await preparar(entrada.cuentaMlId);
   if ("ok" in ctx) return ctx;
   try {
-    const respuesta = await conCupoDeTexto(ctx.empresaId, () => llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais, palabrasClave: limpiarPalabrasClave(entrada.palabrasClave) }), { maxTokens: 1_500, timeoutMs: ESPERA_TEXTO_MS }));
+    const respuesta = await conCupoDeTexto(ctx.empresaId, () => llamarIA(ctx.conexion, promptDescripcion({ ficha, idioma: ctx.idioma, pais: ctx.pais, palabrasClave: limpiarPalabrasClave(entrada.palabrasClave), variante: leerVariante(entrada.variante) }), { maxTokens: 1_500, timeoutMs: ESPERA_TEXTO_MS }));
     const partes = leerPartesDescripcion(respuesta, fichaEnTexto(ficha));
     if (!partes) return { ok: false, aviso: "La IA no devolvió una descripción usable. Intenta de nuevo." };
     const descripcion = armarDescripcion(partes, { ficha, garantia: limpiarInfoVendedor(entrada.garantia, LARGO_GARANTIA), idioma: ctx.idioma });

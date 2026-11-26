@@ -134,6 +134,28 @@ const RUTAS_PROTEGIDAS = new Set([
   // ventas.modificar.
   "app/panel/preguntas/page.tsx",
   "app/panel/preguntas/actions.ts",
+  // Reclamos-A (Refs #644): detalle de un reclamo y proxy de sus
+  // adjuntos, ambos solo lectura — piden ventas.consultar y validan que
+  // la cuenta sea de la empresa actual.
+  "app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/page.tsx",
+  "app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/accionesResolucion.ts",
+  "app/api/ml/reclamos/[cuentaId]/[reclamoId]/adjuntos/[archivo]/route.ts",
+  // Posventa-Mensajes (Refs #645): lista y chat piden ventas.consultar (solo
+  // lectura, siempre con mark_as_read=false); responder y pedir sugerencias
+  // de IA piden ventas.modificar (resolverContextoPosventa), incluido el
+  // mensaje dentro de un reclamo. Todas validan la cuenta de la empresa.
+  "app/panel/posventa/mensajes/page.tsx",
+  "app/panel/posventa/mensajes/[cuentaId]/[packId]/page.tsx",
+  "app/panel/posventa/mensajes/acciones.ts",
+  "app/panel/posventa/reclamos/[cuentaId]/[reclamoId]/accionesMensaje.ts",
+  "app/api/ml/mensajes/[cuentaId]/adjuntos/[archivo]/route.ts",
+  // Posventa-0 (Refs #647): marco y lista de reclamos, solo lectura —
+  // piden ventas.consultar (layout y página) y validan la cuenta por empresa.
+  "app/panel/posventa/page.tsx",
+  // Posventa-Devoluciones (#648) — solo lectura, ventas.consultar; la cuenta del URL se valida contra las de la empresa.
+  "app/panel/posventa/devoluciones/page.tsx",
+  "app/panel/posventa/devoluciones/metricas/page.tsx",
+  "app/panel/posventa/devoluciones/[cuentaId]/[reclamoId]/page.tsx",
   // Optimización (Fase 1): ver pide inventario.consultar; pausar o
   // activar, inventario.modificar.
   "app/panel/optimizacion/page.tsx",
@@ -141,6 +163,15 @@ const RUTAS_PROTEGIDAS = new Set([
   // Optimización (Fase 2): detalle de una publicación. Ver pide
   // inventario.consultar; costos y ganancia, además finanzas.consultar.
   "app/panel/optimizacion/[itemId]/page.tsx",
+  // Bitácora general de Optimización (refs #681): ver pide inventario.consultar.
+  "app/panel/optimizacion/bitacora/page.tsx",
+  // Análisis de ingresos de Optimización (refs #702): ver pide inventario.consultar,
+  // montos ventas.consultar; la acción valida la cuenta contra la empresa.
+  "app/panel/optimizacion/analisis/page.tsx",
+  "app/panel/optimizacion/analisis/actions.ts",
+  // Rendimiento de Optimización (refs #703): solo lectura, inventario.consultar; los montos, además ventas.consultar.
+  "app/panel/optimizacion/rendimiento/page.tsx",
+  "app/panel/optimizacion/rendimiento/actions.ts",
   "app/api/ml/despachos/etiqueta/route.ts",
   "app/panel/investigacion/page.tsx",
   "app/panel/investigacion/actions.ts",
@@ -174,6 +205,9 @@ const RUTAS_PROTEGIDAS = new Set([
   // solo LEE el status actual de un ítem ya publicado, nunca publica
   // ni cambia nada; mismo permiso que ver el historial en sí.
   "app/api/ml/publicar/estado-item/route.ts",
+  // Barra de avance del historial: solo LEE estado/hechos/total de UNA
+  // publicación; mismo permiso que ver el historial.
+  "app/api/ml/publicar/estado-publicacion/route.ts",
   "app/api/ml/callback/route.ts",
   "app/api/ml/conectar/route.ts",
   // Tarea "Publicar — conectar Canva" — cada usuario conecta SU propia
@@ -258,6 +292,12 @@ const RUTAS_PROTEGIDAS = new Set([
 // requierePermiso() — son preguntas distintas.
 const RUTAS_SUPERADMIN = new Set([
   "app/superadmin/(panel)/page.tsx",
+  "app/superadmin/(panel)/metricas/page.tsx",
+  "app/superadmin/(panel)/conexiones/page.tsx",
+  "app/superadmin/(panel)/procesos/page.tsx",
+  "app/superadmin/(panel)/anuncios/page.tsx",
+  "app/superadmin/(panel)/anuncios/actions.ts",
+  "app/superadmin/soporte-imagen/[ticketId]/[archivo]/route.ts",
   "app/superadmin/(panel)/empresas/page.tsx",
   "app/superadmin/(panel)/equipo/page.tsx",
   "app/superadmin/(panel)/auditoria/page.tsx",
@@ -271,6 +311,10 @@ const RUTAS_SUPERADMIN = new Set([
   "app/superadmin/(panel)/bodegas/page.tsx",
   "app/superadmin/(panel)/bodegas/actions.ts",
   "app/superadmin/(panel)/bodegas/[bodegaId]/page.tsx",
+  // Issue #623 parte 2 — soporte: el superadmin atiende tickets.
+  "app/superadmin/(panel)/soporte/page.tsx",
+  "app/superadmin/(panel)/soporte/actions.ts",
+  "app/superadmin/(panel)/soporte/[ticketId]/page.tsx",
 ]);
 
 // PR login-bodega-domiciliario — eje de autorización PROPIO de las
@@ -281,6 +325,11 @@ const RUTAS_SUPERADMIN = new Set([
 const RUTAS_BODEGA = new Set([
   "app/bodega/(panel)/page.tsx",
   "app/bodega/(panel)/domiciliarios/page.tsx",
+  "app/bodega/(panel)/recepcion/page.tsx",
+  "app/bodega/(panel)/recepcion/actions.ts",
+  "app/bodega/(panel)/inventario/page.tsx",
+  "app/bodega/(panel)/despachos/page.tsx",
+  "app/bodega/(panel)/despachos/actions.ts",
   "app/bodega/(panel)/invitar/page.tsx",
   "app/bodega/(panel)/invitar/actions.ts",
   "app/bodega/(panel)/invitar/listo/page.tsx",
@@ -290,11 +339,18 @@ const RUTAS_BODEGA = new Set([
   "app/bodega/(panel)/configuracion/page.tsx",
   "app/bodega/(panel)/configuracion/actions.ts",
   "app/domiciliario/(panel)/page.tsx",
+  "app/domiciliario/(panel)/entregas/page.tsx",
+  "app/domiciliario/(panel)/entregas/actions.ts",
 ]);
 
 // Rutas exentas, cada una con el motivo real por el que no necesita
 // preguntar "¿puede [acción] en [módulo]?".
 const RUTAS_EXENTAS: Record<string, string> = {
+  "app/api/entregas/[entregaId]/foto/route.ts":
+    "el permiso real (requierePermiso('ventas','consultar')) vive en responderFotoDeEmpresa (lib/entregas/responderFoto.ts), llamado ANTES de buscar la foto con RLS de la empresa (Domi-3)",
+  "app/api/entregas/novedades/[novedadId]/foto/route.ts":
+    "el permiso real (requierePermiso('ventas','consultar')) vive en responderFotoDeEmpresa (lib/entregas/responderFoto.ts), llamado ANTES de buscar la foto con RLS de la empresa (Domi-4)",
+  "app/panel/preguntas/reclamos/[cuentaId]/[reclamoId]/page.tsx": "solo redirige los enlaces viejos a /panel/posventa/reclamos/... (que sí exige sesión y ventas.consultar); no lee ningún dato",
   "app/page.tsx": "solo lista las empresas propias del usuario para decidir a dónde mandarlo, no lee datos de negocio de ninguna empresa",
   "app/panel/actions.ts": "cambiar la empresa activa ya se revalida contra las membresías reales del usuario, no es un permiso por módulo",
   "app/crear-empresa/page.tsx": "cualquier usuario con cuenta puede crear su propia empresa — no hay membresía previa que comprobar",
@@ -365,6 +421,14 @@ const RUTAS_EXENTAS: Record<string, string> = {
   // (lib/foro.ts) en cada escritura, siempre con el usuario de la sesión.
   "app/panel/foro/page.tsx": "foro compartido entre empresas, sin datos de negocio — el candado es obtenerContextoPanel() (exige tener una empresa)",
   "app/panel/foro/[preguntaId]/page.tsx": "idem",
+  // Issue #623 — tickets de soporte: los abre y lee cualquier miembro de
+  // la empresa activa (no hay módulo "tickets" en los roles). El candado
+  // es obtenerContextoPanel() + requiereMiembroActivo (lib/soporte/tickets.ts)
+  // y la RLS por empresa_id de tickets_soporte.
+  "app/panel/tickets/page.tsx": "tickets de la empresa activa para cualquier miembro — candado: obtenerContextoPanel() + RLS por empresa",
+  "app/panel/tickets/[ticketId]/page.tsx": "idem — un ticket de otra empresa da 404 por la RLS",
+  "app/panel/tickets/actions.ts": "idem — empresa y usuario salen de la sesión; lib/soporte/tickets.ts exige membresía en cada escritura",
+  "app/api/soporte/imagen/[ticketId]/[archivo]/route.ts": "capturas de tickets para cualquier miembro (mismo permiso que los tickets) — candado: requiereMiembroActivo + imagenDeMiTicket (RLS por empresa y la captura tiene que estar en ese ticket, con el prefijo de esa empresa y ese ticket)",
   "app/panel/foro/actions.ts": "idem — cada escritura pasa por requiereMiembroDeAlgunaEmpresa (lib/foro.ts) con el usuario de la sesión",
   "app/api/foro/imagen/route.ts":
     "sube la imagen adjunta del foro (compartido entre empresas, sin datos de negocio) — el candado es requiereMiembroDeAlgunaEmpresa con el usuario de la sesión, más chequeo de origen y freno por usuario",

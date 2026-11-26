@@ -7,6 +7,8 @@ vi.hoisted(() => {
   process.env.DATABASE_URL_APP ||= "postgres://x:x@localhost:5432/x";
 });
 
+vi.mock("@/lib/anuncios", () => ({ anunciosVigentes: vi.fn(async () => []) }));
+vi.mock("@/lib/ingresos", () => ({ registrarIngresoEmpresa: vi.fn(async () => {}) }));
 vi.mock("@/lib/panel-contexto", () => ({
   obtenerContextoPanel: async () => ({
     usuario: { nombre: "U" },

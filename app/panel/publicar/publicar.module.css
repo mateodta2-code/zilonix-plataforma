@@ -332,15 +332,30 @@
   color: var(--acento-fuerte);
 }
 
-/* «Tomar ideas de la competencia» (opcional, plegado). */
-.competenciaIA {
+/* Ficha confirmada: plegada en una línea, se despliega para revisarla. */
+.fichaPlegadaIA {
   display: grid;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 12px;
 }
 
-.competenciaIA summary {
+.fichaPlegadaIA summary {
   cursor: pointer;
-  font-size: 13px;
-  color: var(--texto-suave);
+  font-size: 14px;
+  padding: 8px 0;
+}
+
+
+.listaTitulosIA {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listaKeywordsIA {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }

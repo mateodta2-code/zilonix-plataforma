@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { dbSuperadmin } from "@/db/superadmin-context";
-import { auditoria, bodegas3pl, invitacionesBodega3pl, miembrosBodega3pl } from "@/db/schema";
+import { auditoria, bodegas3pl, bodegas3plEmpresas, empresas, invitacionesBodega3pl, miembrosBodega3pl } from "@/db/schema";
 import { nuevoTokenInvitacion } from "@/lib/bodega/invitaciones";
 
 export class BodegaInvalidaError extends Error {
@@ -129,3 +129,79 @@ export async function invitarAdminBodega(superadminUsuarioId: string, bodegaId: 
   return { token };
 }
 
+
+export type EmpresaLigada = { vinculoId: string; empresaId: string; nombre: string; estado: "activa" | "pausada" };
+
+// Issue #625 — empresas que atiende la bodega (con su estado) y las que
+// aún se pueden ligar. Solo nombre: el superadmin no ve datos de negocio.
+export async function listarEmpresasLigadas(bodegaId: string): Promise<EmpresaLigada[]> {
+  exigirUuid(bodegaId);
+  return dbSuperadmin
+    .select({ vinculoId: bodegas3plEmpresas.id, empresaId: empresas.id, nombre: empresas.nombre, estado: bodegas3plEmpresas.estado })
+    .from(bodegas3plEmpresas)
+    .innerJoin(empresas, eq(empresas.id, bodegas3plEmpresas.empresaId))
+    .where(eq(bodegas3plEmpresas.bodegaId, bodegaId))
+    .orderBy(asc(empresas.nombre));
+}
+
+export async function listarEmpresasLigables(bodegaId: string): Promise<{ id: string; nombre: string }[]> {
+  const ligadas = new Set((await listarEmpresasLigadas(bodegaId)).map((e) => e.empresaId));
+  const todas = await dbSuperadmin.select({ id: empresas.id, nombre: empresas.nombre }).from(empresas).orderBy(asc(empresas.nombre));
+  return todas.filter((e) => !ligadas.has(e.id));
+}
+
+export async function ligarEmpresaABodega(superadminUsuarioId: string, bodegaId: string, empresaId: string): Promise<void> {
+  exigirUuid(bodegaId);
+  if (!UUID_RE.test(empresaId)) throw new BodegaInvalidaError("La empresa no existe.");
+  await dbSuperadmin.transaction(async (tx) => {
+    const [bodega] = await tx.select().from(bodegas3pl).where(eq(bodegas3pl.id, bodegaId));
+    if (!bodega) throw new BodegaInvalidaError("La bodega no existe.");
+    const [empresa] = await tx.select({ id: empresas.id, nombre: empresas.nombre }).from(empresas).where(eq(empresas.id, empresaId));
+    if (!empresa) throw new BodegaInvalidaError("La empresa no existe.");
+    const [ya] = await tx
+      .select({ id: bodegas3plEmpresas.id })
+      .from(bodegas3plEmpresas)
+      .where(and(eq(bodegas3plEmpresas.bodegaId, bodegaId), eq(bodegas3plEmpresas.empresaId, empresaId)));
+    if (ya) throw new BodegaInvalidaError("Esa empresa ya está ligada a la bodega.");
+    const id = randomUUID();
+    await tx.insert(bodegas3plEmpresas).values({ id, bodegaId, empresaId, creadoPor: superadminUsuarioId });
+    await tx.insert(auditoria).values({
+      id: randomUUID(),
+      bodegaId,
+      empresaId,
+      usuarioId: superadminUsuarioId,
+      actorTipo: "persona",
+      accion: "ligar_empresa_bodega",
+      entidad: "bodega_empresa",
+      entidadId: id,
+      valorNuevo: "activa",
+      detalle: `Ligó la empresa "${empresa.nombre}" a la bodega "${bodega.nombre}".`,
+    });
+  });
+}
+
+export async function cambiarEstadoVinculo(superadminUsuarioId: string, bodegaId: string, empresaId: string, estado: "activa" | "pausada"): Promise<void> {
+  exigirUuid(bodegaId);
+  if (!UUID_RE.test(empresaId)) throw new BodegaInvalidaError("La empresa no existe.");
+  await dbSuperadmin.transaction(async (tx) => {
+    const [vinculo] = await tx
+      .select()
+      .from(bodegas3plEmpresas)
+      .where(and(eq(bodegas3plEmpresas.bodegaId, bodegaId), eq(bodegas3plEmpresas.empresaId, empresaId)));
+    if (!vinculo) throw new BodegaInvalidaError("Esa empresa no está ligada a la bodega.");
+    await tx.update(bodegas3plEmpresas).set({ estado }).where(eq(bodegas3plEmpresas.id, vinculo.id));
+    await tx.insert(auditoria).values({
+      id: randomUUID(),
+      bodegaId,
+      empresaId,
+      usuarioId: superadminUsuarioId,
+      actorTipo: "persona",
+      accion: estado === "pausada" ? "pausar_empresa_bodega" : "reactivar_empresa_bodega",
+      entidad: "bodega_empresa",
+      entidadId: vinculo.id,
+      valorAnterior: vinculo.estado,
+      valorNuevo: estado,
+      detalle: estado === "pausada" ? "Pausó la atención de la empresa." : "Reactivó la atención de la empresa.",
+    });
+  });
+}

@@ -1,0 +1,1 @@
+- Posventa (marco, Refs #647): nueva entrada «Posventa» en el menú con pestañas «Reclamos y mediaciones», «Mensajes» y «Devoluciones» (contadores; sin número si Mercado Libre falla). La lista de reclamos pasa de Preguntas a `/panel/posventa` con selector de cuenta, buscador y orden. «Preguntas y reclamos» ahora es «Preguntas». Solo lectura, sin migración.

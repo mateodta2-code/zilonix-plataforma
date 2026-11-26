@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { and, eq, isNull, like } from "drizzle-orm";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
+import { dbSuperadmin } from "@/db/superadmin-context";
 import { avisosMl, cuentasMl, despachosMl, empresas, pedidos } from "@/db/schema";
 import { crearCuentaMlDePrueba } from "@/db/test-utils/venta";
 import { cifrarToken } from "@/lib/cifrado";
@@ -420,7 +421,7 @@ describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solo
     expect(fetchMock.mock.calls.length).toBeGreaterThan(llamadasAntesDelCron);
   });
 
-  it("si la cuenta ya no está conectada a la empresa, nunca llama a Mercado Libre y deja el aviso pendiente", async () => {
+  it("si la cuenta ya no está conectada a la empresa, nunca llama a Mercado Libre y el aviso queda omitido (no se reintenta)", async () => {
     const { empresaId } = await empresaConCuenta("Empresa cuenta desconectada (webhook)");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -434,11 +435,42 @@ describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solo
     );
 
     const resultado = await intentarProcesarAvisoAhora(avisoId);
-    expect(resultado).toBe("pendiente");
+    // 25-nov: fallo permanente — antes quedaba pendiente y el cron lo
+    // reintentaba para siempre (la cola de staging se trabó así).
+    expect(resultado).toBe("omitido");
     expect(fetchMock).not.toHaveBeenCalled(); // nunca confía en el aviso, y sin cuenta no hay con qué pedirle nada a ML
 
     const [filaAviso] = await dbComoEmpresa(empresaId, (tx) => tx.select().from(avisosMl).where(eq(avisosMl.id, avisoId)));
-    expect(filaAviso.procesadoTs).toBeNull();
+    expect(filaAviso.procesadoTs).not.toBeNull();
+  });
+
+  it("cola: 60 avisos de una cuenta que ya no está conectada se omiten y no tapan a los demás (bug real de staging, 25-nov)", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa cola trabada");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuestaOk({ id: 1, status: "active" })));
+    const PREFIJO = `trabada-${randomUUID()}-`;
+    const ajena = `ml-user-desconectada-${randomUUID()}`;
+    // Más que un lote entero (50) de avisos que nunca se pueden procesar.
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values(
+        Array.from({ length: 60 }, (_, i) => ({ empresaId, cuentaIdExterna: ajena, topic: "items", resource: `/items/${PREFIJO}x${i}`, enviadoTs: new Date(Date.now() - i) }))
+      )
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "items", resource: `/items/${PREFIJO}bueno`, enviadoTs: new Date() })
+    );
+
+    let omitidos = 0;
+    for (let pasada = 0; pasada < 30; pasada++) {
+      const r = await procesarAvisosPendientes(sinEspera);
+      omitidos += r.omitidosSinCuenta;
+      if (r.recibidosPendientes === 0) break;
+    }
+
+    const pendientes = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select({ id: avisosMl.id }).from(avisosMl).where(and(isNull(avisosMl.procesadoTs), like(avisosMl.resource, `/items/${PREFIJO}%`)))
+    );
+    expect(pendientes).toHaveLength(0); // ni los 60 ni el bueno quedan pendientes
+    expect(omitidos).toBeGreaterThanOrEqual(60);
   });
 
   it("si el aviso ya fue reclamado (ej. el cron llegó primero), el webhook nunca lo vuelve a procesar", async () => {
@@ -466,3 +498,103 @@ describe("intentarProcesarAvisoAhora (webhook, issue 'despachos no aparecen solo
     expect(filaPedido).toBeUndefined(); // el webhook no creó nada por su cuenta
   });
 });
+
+// 25-nov (superadmin): los avisos de una empresa suspendida no se
+// procesan — se marcan procesados sin llamar a Mercado Libre, para que no
+// se reintenten cada minuto ni ocupen el lote de las demás empresas.
+describe("trabajador: empresa suspendida", () => {
+  const empresaId = randomUUID();
+  const cuentaExterna = `ml-user-suspendida-${randomUUID()}`;
+  vi.setConfig({ testTimeout: 15_000 });
+
+  beforeAll(async () => {
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(empresas).values({ id: empresaId, nombre: "Empresa suspendida (prueba)", nit: `TEST-SUSP-${empresaId.slice(0, 8)}` })
+    );
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(cuentasMl).values({
+        empresaId,
+        cuentaIdExterna: cuentaExterna,
+        nickname: "VENDEDOR_SUSPENDIDO",
+        accessTokenCifrado: cifrarToken("access-vigente"),
+        refreshTokenCifrado: cifrarToken("refresh"),
+        tokenExpiraTs: new Date(Date.now() + 3600_000),
+      })
+    );
+    await dbSuperadmin.update(empresas).set({ estado: "suspendida", suspendidaMotivo: "Prueba", suspendidaTs: new Date() }).where(eq(empresas.id, empresaId));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("marca el aviso como procesado y nunca llama a Mercado Libre por él", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respuestaOk({ id: 999, status: "paid" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "items", resource: "/items/999000111", enviadoTs: new Date() })
+    );
+
+    const resultado = await procesarAvisosPendientes(sinEspera);
+    expect(resultado.omitidosSuspendida).toBeGreaterThanOrEqual(1);
+
+    const [aviso] = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select({ procesadoTs: avisosMl.procesadoTs }).from(avisosMl).where(and(eq(avisosMl.empresaId, empresaId), eq(avisosMl.resource, "/items/999000111")))
+    );
+    expect(aviso.procesadoTs).not.toBeNull();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/items/999000111"))).toBe(false);
+  });
+});
+
+// 25-nov: la cola de staging tenía 31.110 avisos atrasados porque el cron
+// de GitHub corre cada 5-10 h. Cada llamada ahora procesa varios lotes
+// (con presupuesto de tiempo), omite de una vez los avisos viejos que no
+// son de venta y da por resueltos los 400 de promociones vencidas.
+describe("trabajador: más avisos por llamada", () => {
+  vi.setConfig({ testTimeout: 30_000 });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("omite los avisos viejos que no son de venta sin llamar a ML; los de venta viejos no", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa avisos viejos");
+    const fetchMock = vi.fn().mockResolvedValue(respuestaOk({ id: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const PREFIJO = `viejo-${randomUUID()}`;
+    const haceDosDias = new Date(Date.now() - 48 * 3600_000);
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values([
+        { empresaId, cuentaIdExterna: cuentaExterna, topic: "items", resource: `/items/${PREFIJO}`, enviadoTs: haceDosDias, recibidoTs: haceDosDias },
+        { empresaId, cuentaIdExterna: cuentaExterna, topic: "orders_v2", resource: `/orders/${PREFIJO}`, enviadoTs: haceDosDias, recibidoTs: haceDosDias },
+      ])
+    );
+
+    // Sin presupuesto: solo corre la limpieza de viejos, ningún lote.
+    const r = await procesarAvisosPendientes(sinEspera, 0);
+    expect(r.omitidosViejos).toBeGreaterThanOrEqual(1);
+    expect(r.lotes).toBe(0);
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes(PREFIJO))).toBe(false);
+
+    const filas = await dbComoEmpresa(empresaId, (tx) =>
+      tx.select({ topic: avisosMl.topic, procesadoTs: avisosMl.procesadoTs }).from(avisosMl).where(like(avisosMl.resource, `%${PREFIJO}`))
+    );
+    expect(filas.find((f) => f.topic === "items")?.procesadoTs).not.toBeNull();
+    expect(filas.find((f) => f.topic === "orders_v2")?.procesadoTs).toBeNull(); // la venta sigue en la cola
+  });
+
+  it("un 400 de ML en un aviso que no es de venta (promoción vencida) se da por resuelto", async () => {
+    const { empresaId, cuentaExterna } = await empresaConCuenta("Empresa promo vencida");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({}), text: async () => "{}" }));
+    const recurso = `/seller-promotions/offers/OFFER-${randomUUID()}`;
+    await dbComoEmpresa(empresaId, (tx) =>
+      tx.insert(avisosMl).values({ empresaId, cuentaIdExterna: cuentaExterna, topic: "public_offers", resource: recurso, enviadoTs: new Date() })
+    );
+
+    await procesarAvisosPendientes(sinEspera);
+
+    const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.select({ procesadoTs: avisosMl.procesadoTs }).from(avisosMl).where(eq(avisosMl.resource, recurso)));
+    expect(fila.procesadoTs).not.toBeNull();
+  });
+});
+

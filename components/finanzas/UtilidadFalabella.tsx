@@ -8,6 +8,7 @@ import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
+import { BotonTraerVentasFalabella } from "./BotonTraerVentasFalabella";
 import { DefectosCuentaFalabella } from "./DefectosCuentaFalabella";
 import { fechaHoraBogota, mostrarMontoIso, mostrarPorcentaje } from "./formato";
 import { LapizMontoFalabella } from "./LapizMontoFalabella";
@@ -30,6 +31,13 @@ const ETIQUETA_ESTADO: Record<EstadoUtilidadFalabella, { texto: string; chip: Es
   falta_costo: { texto: "Falta costo", chip: "advertencia" },
   sin_reporte: { texto: "Sin reporte de Falabella", chip: "aviso" },
   conflicto: { texto: "Nº de orden repetido", chip: "peligro" },
+};
+
+// Por qué una orden no lleva envío agencia (columna «Envío agencia»).
+const NOTA_SIN_AGENCIA: Record<Exclude<OrdenUtilidadFalabella["tipoEnvio"], "agencia">, string> = {
+  propio: "Envío propio",
+  fulfillment: "Fulfillment",
+  desconocido: "Tipo de envío desconocido",
 };
 
 const FILTROS_ESTADO = ["estimada", "falta_costo", "sin_reporte", "conflicto"] as const;
@@ -129,6 +137,10 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
     </form>
   );
 
+  // Issue #422 — traer las órdenes del mes sin ir a Conectar marketplaces.
+  // Mismo permiso que los lápices (finanzas.modificar); la acción lo pide otra vez.
+  const botonTraer = puedeModificar ? <BotonTraerVentasFalabella /> : null;
+
   if (cuentas.length === 0) {
     return (
       <>
@@ -141,6 +153,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
     return (
       <>
         {formulario}
+        {botonTraer}
         <p className={estilos.avisoError}>{rango.error}</p>
       </>
     );
@@ -157,6 +170,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
     return (
       <>
         {formulario}
+        {botonTraer}
         <p className={estilos.avisoError}>{consulta.error}</p>
       </>
     );
@@ -174,14 +188,23 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
   return (
     <>
       {formulario}
+      {botonTraer}
       {recortado && <p className={estilos.avisoError}>Hay demasiadas órdenes en este rango: acorta las fechas para ver todas.</p>}
 
       <div className={estilos.gridKpi}>
-        <TarjetaKpi titulo="Ventas" valor={m(t.ventas)} detalle={[`${t.ordenesConReporte} órdenes con reporte · ${t.cantidad} unidades`]} />
+        <TarjetaKpi titulo="Ventas" valor={m(t.ventas)} detalle={[
+            `${t.ordenesConReporte} órdenes con reporte · ${t.cantidad} unidades`,
+            ...(t.ventasSinIva !== null ? [`Ventas sin IVA ${m(t.ventasSinIva)} (cuentas con % de IVA configurado)`] : []),
+          ]}
+        />
         <TarjetaKpi
           titulo="Utilidad del periodo"
           valor={m(t.utilidadPeriodo)}
-          detalle={[`Órdenes con costo ${m(t.utilidadOrdenes)}`, `Publicidad y servicios sin orden ${m(t.cargosSinOrden)}`]}
+          detalle={[
+            `Órdenes con costo ${m(t.utilidadOrdenes)}`,
+            `Envío agencia ${m(t.envioAgencia)} · Empaque ${m(t.empaque)}`,
+            `Publicidad y servicios sin orden ${m(t.cargosSinOrden)}`,
+          ]}
         />
         <TarjetaKpi titulo="% util" valor={mostrarPorcentaje(t.porcentajeUtilidad)} detalle={["Utilidad del periodo ÷ ventas de las órdenes con costo"]} />
         <TarjetaKpi
@@ -217,7 +240,16 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
         </p>
       )}
 
-      {puedeModificar && <DefectosCuentaFalabella cuentas={cuentas.map(({ id, nickname, comisionPct, flete }) => ({ id, nickname, comisionPct, flete }))} />}
+      {puedeModificar && <DefectosCuentaFalabella cuentas={cuentas.map(({ id, nickname, comisionPct, flete, ivaVentasPct }) => ({ id, nickname, comisionPct, flete, ivaVentasPct }))} />}
+
+      {(t.ordenesSinEnvioAgencia > 0 || t.ordenesEnvioDesconocido > 0) && (
+        <p className={estilos.suave}>
+          {t.ordenesSinEnvioAgencia > 0 &&
+            `${t.ordenesSinEnvioAgencia} ${t.ordenesSinEnvioAgencia === 1 ? "orden" : "órdenes"} de agencia sin envío agencia en la maestra (se restó 0). `}
+          {t.ordenesEnvioDesconocido > 0 &&
+            `${t.ordenesEnvioDesconocido} ${t.ordenesEnvioDesconocido === 1 ? "orden" : "órdenes"} con tipo de envío desconocido: no se les restó envío agencia.`}
+        </p>
+      )}
 
       {skusSinCosto.length > 0 && (
         <p className={estilos.suave}>
@@ -242,6 +274,8 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                 { clave: "costo", contenido: "Costo", numerica: true },
                 { clave: "comision", contenido: "Comisión", numerica: true },
                 { clave: "envio", contenido: "Envío neto", numerica: true },
+                { clave: "agencia", contenido: "Envío agencia", numerica: true },
+                { clave: "empaque", contenido: "Empaque", numerica: true },
                 { clave: "promo", contenido: "Promos", numerica: true },
                 { clave: "otros", contenido: "Otros", numerica: true },
                 { clave: "utilidad", contenido: "Utilidad", numerica: true },
@@ -275,6 +309,28 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                     )}
                   </>
                 );
+                // Una vez por orden, el mayor entre sus SKU. Solo agencia
+                // lo resta; las demás dicen por qué no.
+                const agenciaVisible =
+                  o.envioAgencia === null ? (
+                    "—"
+                  ) : o.tipoEnvio === "agencia" ? (
+                    <>
+                      {m(o.envioAgencia)}
+                      {o.envioAgenciaSinDato && <div className={estilos.etiquetaManual}>Sin envío agencia</div>}
+                    </>
+                  ) : (
+                    <>
+                      —
+                      <div className={o.tipoEnvio === "desconocido" ? estilos.etiquetaManual : estilos.suave}>{NOTA_SIN_AGENCIA[o.tipoEnvio]}</div>
+                    </>
+                  );
+                const empaqueVisible = (
+                  <>
+                    {o.empaque === null ? "—" : m(o.empaque)}
+                    {o.empaqueSinDato && <div className={estilos.etiquetaManual}>Sin empaque</div>}
+                  </>
+                );
                 // En «conflicto» no se aplica ningún ajuste: sin lápiz.
                 const lapiz = (campo: "costo" | "flete", contenido: React.ReactNode) =>
                   puedeModificar && o.estado !== "conflicto" ? (
@@ -296,10 +352,15 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                     <CeldaTabla>{fechaHoraBogota(o.fecha)}</CeldaTabla>
                     <CeldaTabla>{o.cuenta}</CeldaTabla>
                     <CeldaTabla>{sinReporte && !conVentasApi ? "—" : o.cantidad}</CeldaTabla>
-                    <CeldaTabla numerica>{conVentasApi ? m(o.ventas) : montoOrden(o.ventas)}</CeldaTabla>
+                    <CeldaTabla numerica>
+                      {conVentasApi ? m(o.ventas) : montoOrden(o.ventas)}
+                      {o.ventasSinIva !== null && <div className={estilos.suave}>Sin IVA {m(o.ventasSinIva)}</div>}
+                    </CeldaTabla>
                     <CeldaTabla numerica>{lapiz("costo", costoVisible)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.comisiones)}</CeldaTabla>
                     <CeldaTabla numerica>{lapiz("flete", envioVisible)}</CeldaTabla>
+                    <CeldaTabla numerica>{agenciaVisible}</CeldaTabla>
+                    <CeldaTabla numerica>{empaqueVisible}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.promociones)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.otros)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.utilidad)}</CeldaTabla>

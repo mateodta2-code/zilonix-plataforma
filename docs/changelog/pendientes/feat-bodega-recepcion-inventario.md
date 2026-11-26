@@ -1,0 +1,1 @@
+- Bodega 3PL (2/3): la bodega registra recepciones por empresa ligada (fecha, nota y líneas SKU + cantidad, también pegando varias) y el stock se suma en la misma transacción, con auditoría. Nueva pantalla de Inventario por empresa y SKU con buscador, y el vendedor ve en `/panel/bodegas` su stock en la bodega logística (solo lectura). Sin migración. Refs #626.

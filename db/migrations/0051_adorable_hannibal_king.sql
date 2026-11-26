@@ -1,0 +1,1 @@
+ALTER TABLE "empresas" ADD COLUMN "ultimo_ingreso_ts" timestamp with time zone;

@@ -75,6 +75,7 @@ describe("lectura de las respuestas de Mercado Libre (forma confirmada en stagin
     expect(r.total).toBe(1);
     expect(r.reclamos[0]).toEqual({
       id: "5000000001",
+      jugadores: [],
       recursoId: "2000000001",
       recurso: "order",
       tipo: "mediations",
@@ -89,5 +90,28 @@ describe("lectura de las respuestas de Mercado Libre (forma confirmada en stagin
   it("una respuesta rara no rompe la pantalla", () => {
     expect(leerPreguntasMl(null)).toEqual({ total: 0, preguntas: [] });
     expect(leerReclamosMl({ data: "x" })).toEqual({ total: 0, reclamos: [] });
+  });
+});
+
+import { compararPlazo, minutosHasta, textoPlazo, tonoPlazo } from "@/lib/preguntas/tiempo";
+
+describe("plazo de un reclamo (Reclamos-A)", () => {
+  const ahora = new Date("2026-11-25T12:00:00Z");
+  it("minutos hasta la fecha, negativo si ya pasó", () => {
+    expect(minutosHasta("2026-11-27T12:00:00Z", ahora)).toBe(2 * 24 * 60);
+    expect(minutosHasta("2026-11-25T11:00:00Z", ahora)).toBe(-60);
+    expect(minutosHasta(null, ahora)).toBeNull();
+  });
+  it("texto y tono según urgencia", () => {
+    expect(textoPlazo(2 * 24 * 60)).toBe("vence en 2 días");
+    expect(textoPlazo(5 * 60)).toBe("vence en 5 h");
+    expect(textoPlazo(-1)).toBe("plazo vencido");
+    expect(tonoPlazo(23 * 60)).toBe("peligro");
+    expect(tonoPlazo(2 * 24 * 60)).toBe("advertencia");
+    expect(tonoPlazo(5 * 24 * 60)).toBe("exito");
+  });
+  it("ordena por plazo más cercano, sin plazo al final", () => {
+    const orden = ["2026-12-01T00:00:00Z", null, "2026-11-26T00:00:00Z"].sort(compararPlazo);
+    expect(orden).toEqual(["2026-11-26T00:00:00Z", "2026-12-01T00:00:00Z", null]);
   });
 });
