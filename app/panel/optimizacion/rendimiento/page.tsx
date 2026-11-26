@@ -21,10 +21,12 @@ import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
-import { TablaRendimiento, type FilaRendimiento } from "./TablaRendimiento";
+import { RendimientoConAccionables } from "./Accionables";
+import type { FilaRendimiento } from "./TablaRendimiento";
 import styles from "./rendimiento.module.css";
 
-// Optimización · Rendimiento — Pareto de ingresos (Killer / Potencial /
+// Optimización · Rendimiento — «Qué hacer primero» (accionables por plata en
+// juego) arriba de la tabla; Pareto de ingresos (Killer / Potencial /
 // Cola larga), tráfico orgánico vs Ads y CTR/conversión comparados con la
 // mediana de la cuenta por categoría. Sigue el período de la lista (?dias=,
 // ?periodo=hoy, ?desde=&hasta=). Ver pide inventario.consultar; los montos,
@@ -218,7 +220,7 @@ export default async function RendimientoPage({
             {filas.length === 0 ? (
               <EstadoVacio>No hay ventas ni Ads en este período.</EstadoVacio>
             ) : (
-              <TablaRendimiento filas={filas} grupo={grupo} cuentaMlId={conectada.id} siteId={conectada.siteId} idioma={conectada.idioma} periodo={periodo} />
+              <RendimientoConAccionables filas={filas} grupo={grupo} cuentaMlId={conectada.id} siteId={conectada.siteId} idioma={conectada.idioma} periodo={periodo} verMontos={verMontos} consultaPeriodo={new URLSearchParams(periodoParams).toString()} />
             )}
           </Tarjeta>
         </>
