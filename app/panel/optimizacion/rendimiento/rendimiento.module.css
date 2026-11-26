@@ -230,3 +230,65 @@
   opacity: 0.4;
   cursor: default;
 }
+
+/* ---------- Qué hacer primero ---------- */
+
+.accionables {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.accionablesTitulo {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--texto-suave, var(--texto-superficie-2));
+}
+
+.accionablesLista {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.accionable {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    linear-gradient(var(--superficie-2), var(--superficie-2)) padding-box,
+    var(--degradado-plata-borde) border-box;
+  color: var(--texto-superficie-2);
+}
+
+.accionableCabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.accionableMonto {
+  margin-left: auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.accionablePorQue {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.accionableAcciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
