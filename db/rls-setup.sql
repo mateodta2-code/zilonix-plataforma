@@ -29,6 +29,8 @@ GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   empresas, usuarios, roles, membresias, permisos_rol, invitaciones, accesos_temporales, cuentas_ml, avisos_ml,
   cuentas_falabella, pedidos_falabella,
+  -- Issue #422 (Bloque 1) — conector OAuth de Mercado Pago.
+  cuentas_mp,
   pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml, productos_ml,
   seguimientos_ml, seguimiento_fotos, seguimiento_alertas,
   titulares, configuracion_finanzas, metas_mensuales,
@@ -330,6 +332,10 @@ ALTER TABLE cuentas_falabella ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_falabella FORCE ROW LEVEL SECURITY;
 ALTER TABLE pedidos_falabella ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedidos_falabella FORCE ROW LEVEL SECURITY;
+-- Issue #422 (Bloque 1) — conector OAuth de Mercado Pago, mismo criterio
+-- simple que cuentas_falabella.
+ALTER TABLE cuentas_mp ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cuentas_mp FORCE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_marketplace ENABLE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_marketplace FORCE ROW LEVEL SECURITY;
 ALTER TABLE avisos_ml ENABLE ROW LEVEL SECURITY;
@@ -677,6 +683,10 @@ CREATE POLICY aislamiento_pedidos ON pedidos
 
 DROP POLICY IF EXISTS aislamiento_cuentas_falabella ON cuentas_falabella;
 CREATE POLICY aislamiento_cuentas_falabella ON cuentas_falabella
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_cuentas_mp ON cuentas_mp;
+CREATE POLICY aislamiento_cuentas_mp ON cuentas_mp
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 DROP POLICY IF EXISTS aislamiento_pedidos_falabella ON pedidos_falabella;

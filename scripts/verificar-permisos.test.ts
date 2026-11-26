@@ -221,6 +221,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/canva/desconectar/route.ts",
   "app/api/canva/estado/route.ts",
   "app/api/canva/exportar-diseno/route.ts",
+  // Issue #422 (Bloque 1) — conector OAuth de Mercado Pago, mismo permiso
+  // que conectar Mercado Libre ("configuracion","crear").
+  "app/api/mp/conectar/route.ts",
+  "app/api/mp/callback/route.ts",
   "app/panel/publicidad/page.tsx",
   "app/panel/publicidad/actions.ts",
   // Rama feat-promociones — módulo nuevo "promociones"
@@ -570,6 +574,8 @@ const PUBLICAS_CON_AUTENTICACION_PROPIA: Record<string, string> = {
     'pública en el middleware (la abre el navegador al volver del OAuth de Mercado Libre, con o sin las cabeceras que dispararían el bug del rewrite) pero sigue protegida de verdad dentro de su propio handler: state+PKCE (lib/ml/pkce-cookie.ts) contra CSRF, sesión real de Clerk (redirige a /sign-in si falta) y requierePermiso("configuracion","crear") antes de guardar nada — por eso además sigue en RUTAS_PROTEGIDAS, no en RUTAS_EXENTAS.',
   "app/api/canva/callback/route.ts":
     'mismo motivo exacto que app/api/ml/callback/route.ts, mismo mecanismo (lib/canva/pkce-cookie.ts) — la abre el navegador al volver del OAuth de Canva; sigue protegida dentro de su propio handler: state+PKCE, sesión real de Clerk y requierePermiso("inventario","crear") antes de guardar nada.',
+  "app/api/mp/callback/route.ts":
+    'mismo motivo que app/api/ml/callback/route.ts — la abre el navegador al volver del OAuth de Mercado Pago; sigue protegida dentro de su propio handler: state de un solo uso (lib/mp/state-cookie.ts, comparado con timingSafeEqual) contra CSRF, sesión real de Clerk y requierePermiso("configuracion","crear") antes de guardar nada.',
 };
 
 describe("fix middleware (2026-10-21) — coherencia entre RUTAS_EXENTAS, RUTAS_DE_MAQUINA y lib/rutas-publicas.ts", () => {

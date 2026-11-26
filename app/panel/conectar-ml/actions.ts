@@ -11,6 +11,7 @@ import { CuentaFalabellaDeOtraEmpresaError } from "@/lib/falabella/cuentas";
 import { ClaveCifradoError } from "@/lib/cifrado";
 import * as cuentasFalabella from "@/lib/falabella/cuentas";
 import * as pedidosFalabella from "@/lib/falabella/pedidos";
+import { desconectarCuentaMp } from "@/lib/mp/cuentas";
 import { MontoFalabellaInvalidoError } from "@/lib/falabella/montos";
 import { FalabellaApiError, FalabellaNoDisponibleError, SELLER_ID_VALIDO } from "@/lib/falabella/cliente";
 
@@ -138,5 +139,16 @@ export async function desconectarCuentaFalabella(cuentaId: string) {
   const { usuario, empresa } = await empresaActualOFalla();
   await requierePermiso(usuario.id, empresa.id, "configuracion", "modificar");
   await cuentasFalabella.desconectarCuenta(empresa.id, cuentaId);
+  revalidatePath("/panel/conectar-ml");
+}
+
+// Issue #422 (Bloque 1) — Mercado Pago. Mismo permiso que desconectar ML
+// o Falabella en esta pantalla ("configuracion","modificar"; el catálogo
+// de acciones no tiene "eliminar"). Solo marca desconectada_ts y deja
+// rastro en la auditoría (lib/mp/cuentas.ts), nunca borra la fila.
+export async function desconectarCuentaMercadoPago(cuentaId: string) {
+  const { usuario, empresa } = await empresaActualOFalla();
+  await requierePermiso(usuario.id, empresa.id, "configuracion", "modificar");
+  await desconectarCuentaMp(empresa.id, cuentaId, usuario.id);
   revalidatePath("/panel/conectar-ml");
 }
