@@ -8,6 +8,7 @@
 //  - siempre de a 3 en paralelo (EN_PARALELO) y las alertas una tras otra.
 
 import {
+  calidadItemMl,
   competenciaItemMl,
   contarItemsVendedorPorEstadoMl,
   itemsConReferenciaPrecioMl,
@@ -21,6 +22,7 @@ import { armarAlertas, esPrecioAlto, pierdeCompetencia, type AlertaPublicaciones
 export const MAXIMO_REFERENCIAS = 50;
 export const MAXIMO_ACTIVAS = 100;
 export const MAXIMO_CATALOGO = 50;
+export const MAXIMO_CALIDAD = 50;
 export const EN_PARALELO = 3;
 const POR_PAGINA = 50;
 
@@ -64,6 +66,35 @@ export async function alertaPrecioAlto(vendedorId: string, token: string): Promi
   return { cantidad: ids.length, revisadas: { hechas: revisar.length, total: Math.max(lista.total, revisar.length) }, ids: ids.slice(0, POR_PAGINA), referencias };
 }
 
+// Pausadas por falta de unidades (status=paused + sub_status=out_of_stock).
+// Una sola llamada: el total sale de paging.total.
+export async function alertaSinStock(vendedorId: string, token: string): Promise<ResultadoAlerta> {
+  try {
+    const r = await listarItemsVendedorMl(vendedorId, token, { estado: "paused", subEstado: "out_of_stock", offset: 0, limite: POR_PAGINA });
+    return { cantidad: r.total, ids: r.ids };
+  } catch {
+    return { cantidad: null, ids: [] };
+  }
+}
+
+// Activas con algún objetivo de calidad sin completar (/item/{id}/performance).
+// Tope: las primeras MAXIMO_CALIDAD activas, de a 3 en paralelo.
+export async function alertaCalidad(vendedorId: string, token: string): Promise<ResultadoAlerta<{ pendientes: Record<string, string[]> }>> {
+  const primera = await listarItemsVendedorMl(vendedorId, token, { estado: "active", offset: 0, limite: POR_PAGINA });
+  const revisar = primera.ids.slice(0, MAXIMO_CALIDAD);
+  const calidades = await enLotes(revisar, (id) => calidadItemMl(id, token).catch(() => null));
+  if (revisar.length > 0 && calidades.every((c) => c === null)) return { cantidad: null, ids: [], pendientes: {} };
+  const ids: string[] = [];
+  const pendientes: Record<string, string[]> = {};
+  calidades.forEach((c, i) => {
+    if (c && c.pendientes.length > 0) {
+      ids.push(revisar[i]);
+      pendientes[revisar[i]] = c.pendientes;
+    }
+  });
+  return { cantidad: ids.length, revisadas: { hechas: revisar.length, total: Math.max(primera.total, revisar.length) }, ids, pendientes };
+}
+
 export async function alertaCompetencia(vendedorId: string, siteId: string, token: string): Promise<ResultadoAlerta<{ estados: Record<string, string> }>> {
   const primera = await listarItemsVendedorMl(vendedorId, token, { estado: "active", offset: 0, limite: POR_PAGINA });
   let idsActivas = primera.ids;
@@ -100,12 +131,14 @@ async function tolerante<T>(fn: () => Promise<T>): Promise<T | null> {
 }
 
 export async function leerAlertasPublicaciones(cuenta: { cuentaIdExterna: string; siteId: string }, token: string): Promise<DatosAlertas> {
+  const sinStock = await tolerante(() => alertaSinStock(cuenta.cuentaIdExterna, token));
+  const calidad = await tolerante(() => alertaCalidad(cuenta.cuentaIdExterna, token));
   const moderadas = await tolerante(() => alertaModeradas(cuenta.cuentaIdExterna, token));
   const precio = await tolerante(() => alertaPrecioAlto(cuenta.cuentaIdExterna, token));
   const competencia = await tolerante(() => alertaCompetencia(cuenta.cuentaIdExterna, cuenta.siteId, token));
   const aEntrada = (r: ResultadoAlerta | null) => ({ cantidad: r?.cantidad ?? null, revisadas: r?.revisadas });
   return {
-    alertas: armarAlertas({ moderadas: aEntrada(moderadas), competencia: aEntrada(competencia), precio_alto: aEntrada(precio) }),
-    ids: { moderadas: moderadas?.ids ?? [], competencia: competencia?.ids ?? [], precio_alto: precio?.ids ?? [] },
+    alertas: armarAlertas({ sin_stock: aEntrada(sinStock), calidad: aEntrada(calidad), moderadas: aEntrada(moderadas), competencia: aEntrada(competencia), precio_alto: aEntrada(precio) }),
+    ids: { sin_stock: sinStock?.ids ?? [], calidad: calidad?.ids ?? [], moderadas: moderadas?.ids ?? [], competencia: competencia?.ids ?? [], precio_alto: precio?.ids ?? [] },
   };
 }
