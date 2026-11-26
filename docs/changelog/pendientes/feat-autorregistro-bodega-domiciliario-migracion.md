@@ -1,0 +1,1 @@
+- Autorregistro (1/4), base de datos: las bodegas 3PL y los domiciliarios podrán registrarse solos. Se agregan `origen` y `creado_por` en `bodegas_3pl` (una sola bodega autorregistrada por persona), la tabla `perfiles_domiciliario`, sus políticas RLS y el helper `dbComoAutorregistroBodega`. Sin pantallas todavía. Refs #721.
